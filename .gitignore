@@ -7,3 +7,4 @@ desktop.ini
 *.tmp
 .claude/*.local.md
 .claude/*.local.json
+.superpowers/
