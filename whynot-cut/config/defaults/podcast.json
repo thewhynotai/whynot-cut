@@ -1,0 +1,12 @@
+{
+  "note": "Podcast mode (episode -> reels plan -> reels). A client profile may override any value.",
+  "reel_duration_s": {"min": 30, "max": 90, "hard_min": 15, "hard_max": 180},
+  "candidates_per_hour": {"min": 8, "max": 15},
+  "snap": {"lead_in_ms": 120, "tail_ms": 250, "search_ms": 1500, "evidence_tol_ms": 3000, "gap_ms": 300},
+  "max_overlap_ratio": 0.5,
+  "chunk_minutes": 10,
+  "episode_vad": true,
+  "speaker_min_hold_ms": 1500,
+  "shots": {"scene_threshold": 0.3, "samples_per_shot": 3, "min_shot_ms": 400, "face_min_ratio": 0.3, "group_fit": 0.8},
+  "raw_episode_hint_min": 10
+}

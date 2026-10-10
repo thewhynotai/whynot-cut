@@ -40,6 +40,11 @@ def classify(p: Path, rel: str) -> dict:
     if kind == "document" and any(k in low for k in ("broll", "b-roll", "b_roll", "stock")):
         role = "broll_license"      # SOURCES.md / licence next to the B-roll clips (not an editing reference)
     top = rel.split("/")[0]
+    parts = rel.split("/")
+    if top == "data" and len(parts) > 2 and parts[1].lower() == "episodes" and kind in ("video", "document"):
+        # finished podcast episodes are cut into reels (podcast mode); never treated as a clip to edit whole
+        return {"path": str(p), "rel": rel, "kind": kind, "ext": ext,
+                "role": "episode" if kind == "video" else "episode_sheet", "size_bytes": p.stat().st_size}
     if kind == "video" and top == "data":
         role = "editing_reference_video" if role == "editing_reference" else (role or "source_footage")
     if kind == "document" and top == "data" and role != "broll_license":
@@ -201,7 +206,7 @@ def discover(paths: Paths, read_docs: bool = True) -> dict:
     for f in files:
         by_role.setdefault(f["role"], []).append(f["rel"])
     warnings = []
-    if not by_role.get("source_footage"):
+    if not by_role.get("source_footage") and not by_role.get("episode"):
         warnings.append("No source footage found in data/.")
     if not by_role.get("editing_reference_doc") and not by_role.get("editing_reference_video"):
         warnings.append("No editing reference (Markdown or video) found in data/.")

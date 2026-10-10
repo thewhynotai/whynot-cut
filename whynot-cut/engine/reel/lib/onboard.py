@@ -108,6 +108,8 @@ FOLDERS = {
     "assets/Photos": "approved photos of the speaker (JPG/PNG; camera RAW works on macOS)",
     "assets/Brand": "brief / about / bio, and a colours file with HEX codes (e.g. colors.txt: #20ACAF)",
     "data/Raw": "the raw talking-head clips to edit (MP4/MOV/MXF), one file per video",
+    "data/Episodes": "finished podcast episodes (16:9) to cut into reels, plus an optional <name>.md episode sheet "
+                     "(guest, links, sponsor, topics to avoid)",
     "data/References": "reference edits you want to look like (videos) and any written style notes",
     "data/Broll": "licensed stock / B-roll videos you may use (optional), with a SOURCES.md or licence file",
     "data/Music": "licensed music only (optional)",
@@ -132,6 +134,8 @@ a watchable preview MP4, and a QC report. Results appear in `output/` (WhyNot Cu
 ## بالعربي
 ضع ملفات الهوية في `assets/` (الشعار، الخطوط، الصور، ملف الألوان والتعريف) والفيديوهات الخام في `data/Raw/`
 وأمثلة المونتاج المرجعية في `data/References/`، ثم قل لـ Claude: **"عدّل الفيديوهات الجديدة"**.
+حلقات البودكاست الكاملة (16:9) في `data/Episodes/` (ومعاها اختياري ملف `<اسم الحلقة>.md` فيه الضيف واللينكات)، ثم قل:
+**"طلّع ريلز من الحلقة"**، فتوصلك خطة ريلز بالتايم كود ونوع المحتوى، وتختار منها اللي يتعمل.
 النتائج تظهر في مجلد `output/` ولا يتم تعديل الملفات الأصلية أبداً.
 
 Created {now_iso()}.
@@ -192,7 +196,22 @@ def inbox(root: Path, refresh: bool = True) -> dict:
         need.append("a brief and/or a colours file (HEX codes) in assets/Brand")
     if not (by.get("editing_reference_video") or by.get("editing_reference_doc")):
         need.append("optional: 1-3 reference edits in data/References (gives the style to copy)")
+    from .episode import list_episodes, podcast_cfg
+    episodes = list_episodes(p.root)
+    hints = []
+    long_min = podcast_cfg().get("raw_episode_hint_min", 10)
+    for c in clips:   # a whole episode dropped into Raw would be edited as ONE clip: point to data/Episodes
+        try:
+            from .media import probe
+            pr = probe(p.root / c["file"])
+            v = pr.get("video") or {}
+            if (pr.get("duration_s") or 0) >= long_min * 60 and v.get("display_width", 0) > v.get("display_height", 0):
+                hints.append(f"{c['file']} is {pr['duration_s'] / 60:.0f} min and 16:9: if it is a podcast episode to cut "
+                             f"into reels, move it to data/Episodes/ (the editor moves it; data/ is read-only for WhyNot Cut)")
+        except Exception:  # noqa: BLE001  (a hint only)
+            pass
     return {"root": str(p.root), "profile": read_json(p.output / "client_database/reel-profile/profile.json", {}).get("id"),
+            "episodes": episodes, "episode_hints": hints,
             "clips": clips, "new": [c["video_id"] for c in clips if c["state"] == "new"],
             "in_progress": [c["video_id"] for c in clips if c["state"] == "in progress"],
             "done": [c["video_id"] for c in clips if c["state"] == "done"],
