@@ -124,5 +124,88 @@ class TestEpisodeIntake(unittest.TestCase):
         self.assertEqual([c["video_id"] for c in r["clips"]], ["CLIP1"])
 
 
+class TestChunkedTranscription(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root = make_episode_client(cls.tmp, with_clip=False)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_plan_chunks_cuts_in_silence(self):
+        from lib.episode import plan_chunks
+        hop = 50
+        db = [-20.0] * (1_500_000 // hop)
+        for i in range(590_000 // hop, 592_000 // hop):
+            db[i] = -80.0
+        db[1_210_000 // hop] = -80.0
+        ch = plan_chunks(db, hop, 1_500_000, 600_000)
+        self.assertEqual(len(ch), 3)
+        self.assertLessEqual(abs(ch[0][1] - 591_000), 1000)
+        self.assertLessEqual(abs(ch[1][1] - 1_210_000), 1000)
+        self.assertEqual(ch[0][0], 0)
+        self.assertEqual(ch[-1][1], 1_500_000)
+        for a, b in zip(ch, ch[1:]):
+            self.assertEqual(a[1], b[0])
+
+    def test_plan_chunks_short_audio(self):
+        from lib.episode import plan_chunks
+        self.assertEqual(plan_chunks([-20.0] * 6000, 50, 300_000, 600_000), [(0, 300_000)])
+
+    def test_stitch_renumbers(self):
+        from lib.episode import stitch
+        def chunk(a, words):
+            ws = [{"id": i + 1, "segment_id": 1, "word": w, "start_ms": a + i * 500, "end_ms": a + i * 500 + 400,
+                   "probability": 0.9} for i, w in enumerate(words)]
+            return {"start_ms": a, "end_ms": a + 2000, "language": "ar",
+                    "segments": [{"id": 1, "start_ms": a, "end_ms": a + 900, "text": " ".join(words), "avg_logprob": -0.2,
+                                  "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [1, 2]}], "words": ws}
+        segs, words = stitch([chunk(0, ["أهلا", "بيك"]), chunk(2000, ["في", "الحلقة"])])
+        self.assertEqual([w["id"] for w in words], [1, 2, 3, 4])
+        self.assertEqual([s["id"] for s in segs], [1, 2])
+        self.assertEqual([w["segment_id"] for w in words], [1, 1, 2, 2])
+        self.assertEqual(segs[1]["words"], [3, 4])
+        self.assertEqual(words[2]["start_ms"], 2000)
+
+    def test_resume_skips_done_chunks(self):
+        from lib.episode import EpisodePaths, transcribe_episode
+        calls = []
+
+        def fake(audio, start_ms, language, prompt):
+            calls.append({"start_ms": start_ms, "language": language, "samples": len(audio)})
+            return {"language": "ar", "language_probability": 0.97,
+                    "segments": [{"id": 1, "start_ms": 100, "end_ms": 900, "text": "كلام تجربة", "avg_logprob": -0.2,
+                                  "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [1, 2]}],
+                    "words": [{"id": 1, "segment_id": 1, "word": "كلام", "start_ms": 100, "end_ms": 500, "probability": 0.9},
+                              {"id": 2, "segment_id": 1, "word": "تجربة", "start_ms": 600, "end_ms": 900, "probability": 0.9}]}
+        ep = EpisodePaths(self.root, "EP12")
+        r = transcribe_episode(ep, "small", run_chunk=fake, chunk_ms=8000)
+        self.assertEqual(len(calls), 3)
+        self.assertIsNone(calls[0]["language"])
+        self.assertEqual(calls[1]["language"], "ar")                    # detected once, reused
+        tj = read_json(ep.p("02_transcription/transcript.json"))
+        self.assertEqual(tj["meta"]["chunks"], 3)
+        self.assertTrue(tj["meta"]["vad"])
+        self.assertEqual(len(tj["segments"]), 3)
+        self.assertEqual(tj["segments"][1]["start_ms"], calls[1]["start_ms"] + 100)   # times made absolute
+        self.assertTrue(ep.p("02_transcription/words.machine.json").exists())
+        self.assertEqual(r["chunks_run"], 3)
+        ep.p("02_transcription/chunks/chunk_001.json").unlink()
+        calls.clear()
+        r = transcribe_episode(ep, "small", run_chunk=fake, chunk_ms=8000)
+        self.assertEqual([c["start_ms"] for c in calls], [read_json(ep.p("02_transcription/chunks/chunk_001.json"))["start_ms"]])
+        self.assertEqual(r["chunks_run"], 1)
+        calls.clear()
+        transcribe_episode(ep, "small", run_chunk=fake, chunk_ms=8000, force=True)
+        self.assertEqual(len(calls), 3)
+        # the clip transcript commands work on the episode project with --episode
+        r = subprocess.run([sys.executable, "-B", str(SK / "engine/reel/cli.py"), "--root", str(self.root), "--episode",
+                            "EP12", "transcript-verify", "--by", "editor"], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr[-600:])
+        self.assertTrue(read_json(ep.p("02_transcription/verification.json"))["verified"])
+
+
 if __name__ == "__main__":
     unittest.main()

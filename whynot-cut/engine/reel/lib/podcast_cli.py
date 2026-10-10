@@ -10,6 +10,11 @@ from pathlib import Path
 ARGS: dict = {
     "episodes": [],
     "episode-prep": [],
+    "episode-transcribe": [
+        (("--model",), {"default": None, "help": "default: preferences whisper_model, else large-v3"}),
+        (("--language",), {"default": None, "help": "e.g. ar; default: detected on the first chunk"}),
+        (("--force",), {"action": "store_true", "help": "discard the chunk checkpoints and transcribe again"}),
+    ],
 }
 
 
@@ -48,6 +53,26 @@ def cmd_episodes(a):
 def cmd_episode_prep(a):
     from .episode import prep
     out(prep(EP(a)))
+
+
+def cmd_episode_transcribe(a):
+    from .episode import transcribe_episode
+    from . import settings as S
+    ep = EP(a)
+    if ep.p("02_transcription/transcript.json").exists() and not a.force and not _chunks_missing(ep):
+        out({"skipped": "episode transcript exists (use --force to redo)", "transcript": str(ep.p("02_transcription/transcript.txt"))})
+        return
+    model = a.model or S.load(ep.root).get("whisper_model") or "large-v3"
+    r = transcribe_episode(ep, model, language=a.language, force=a.force)
+    r["next"] = ("transcript-editor reviews 02_transcription/subtitle-review.md (`reel transcript-correct --episode "
+                 f"{ep.episode_id}`), then episode-analyst authors topics/speakers/reels-plan")
+    out(r)
+
+
+def _chunks_missing(ep) -> bool:
+    from .common import read_json
+    plan = read_json(ep.p("02_transcription/chunks/plan.json"), {}) or {}
+    return any(not ep.p(f"02_transcription/chunks/chunk_{i:03d}.json").exists() for i in range(len(plan.get("chunks", []))))
 
 
 def dispatch(a) -> bool:

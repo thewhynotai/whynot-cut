@@ -230,3 +230,176 @@ def prep(ep: EpisodePaths) -> dict:
             "sheet": hit.get("sheet"), "intake_sheet": info["intake_sheet"], "estimate_minutes": est,
             "warnings": warnings,
             "next": "intake-inspector views the intake sheet (burned subtitles/logo, layout) ∥ `reel episode-transcribe`"}
+
+
+# --------------------------------------------------------------------------- chunked transcription
+def plan_chunks(db: list, hop_ms: int, total_ms: int, chunk_ms: int, search_ms: int = 20000) -> list[tuple[int, int]]:
+    """Contiguous chunks of about chunk_ms covering [0, total_ms]. Each boundary sits in the middle of the quietest run
+    of windows within ±search_ms of its target, so a chunk never starts or ends inside a word. A short tail
+    (< 30 % of a chunk) is merged into the last chunk."""
+    if total_ms <= chunk_ms * 1.3 or not db:
+        return [(0, total_ms)]
+    search_ms = min(search_ms, chunk_ms // 4)        # a boundary never wanders more than a quarter chunk
+    bounds, last = [], 0
+    while total_ms - (last + chunk_ms) >= 0.3 * chunk_ms:
+        target = last + chunk_ms
+        lo, hi = max(0, (target - search_ms) // hop_ms), min(len(db) - 1, (target + search_ms) // hop_ms)
+        k = min(range(lo, hi + 1), key=lambda i: db[i])
+        floor = db[k] + 0.5
+        a = b = k
+        while a - 1 >= lo and db[a - 1] <= floor:
+            a -= 1
+        while b + 1 <= hi and db[b + 1] <= floor:
+            b += 1
+        cut = ((a + b + 1) * hop_ms) // 2
+        if cut <= last:
+            cut = target
+        bounds.append(cut)
+        last = cut
+    edges = [0] + bounds + [total_ms]
+    return list(zip(edges, edges[1:]))
+
+
+def stitch(chunks: list[dict]) -> tuple[list, list]:
+    """Chunk results (absolute times) -> one transcript with fresh word and segment ids."""
+    segs, words = [], []
+    for ch in sorted(chunks, key=lambda c: c["start_ms"]):
+        by_id = {w["id"]: w for w in ch["words"]}
+        for s in ch["segments"]:
+            sid = len(segs) + 1
+            ids = []
+            for wid in s.get("words", []):
+                w = by_id.get(wid)
+                if w is None:
+                    continue
+                nw = dict(w, id=len(words) + 1, segment_id=sid)
+                words.append(nw)
+                ids.append(nw["id"])
+            segs.append(dict(s, id=sid, words=ids))
+    return segs, words
+
+
+def _energy_db(audio, sr: int = 16000, hop_ms: int = 50) -> list:
+    import numpy as np
+    hop = sr * hop_ms // 1000
+    n = len(audio) // hop
+    if n == 0:
+        return []
+    x = audio[:n * hop].reshape(n, hop)
+    return (20 * np.log10(np.sqrt((x ** 2).mean(axis=1)) + 1e-9)).round(2).tolist()
+
+
+def _decode(model, audio, language, prompt, vad: bool) -> dict:
+    segments, info = model.transcribe(audio, language=language, task="transcribe", beam_size=5, word_timestamps=True,
+                                      vad_filter=vad, condition_on_previous_text=False, initial_prompt=prompt,
+                                      temperature=[0.0, 0.2, 0.4])
+    segs, words = [], []
+    for s in segments:
+        seg = {"id": len(segs) + 1, "start_ms": int(round(s.start * 1000)), "end_ms": int(round(s.end * 1000)),
+               "text": s.text.strip(), "avg_logprob": round(s.avg_logprob, 3), "no_speech_prob": round(s.no_speech_prob, 3),
+               "compression_ratio": round(s.compression_ratio, 3), "words": []}
+        for w in (s.words or []):
+            wd = {"id": len(words) + 1, "segment_id": seg["id"], "word": w.word.strip(),
+                  "start_ms": int(round(w.start * 1000)), "end_ms": int(round(w.end * 1000)),
+                  "probability": round(w.probability, 3)}
+            words.append(wd)
+            seg["words"].append(wd["id"])
+        segs.append(seg)
+    return {"segments": segs, "words": words, "language": info.language,
+            "language_probability": round(info.language_probability, 3)}
+
+
+def whisper_runner(model_size: str, vad: bool, ep: EpisodePaths | None = None):
+    """run(audio, start_ms, language, prompt) -> {segments, words, language, language_probability} (chunk-relative
+    times). The model loads once, on the GPU when usable; a GPU failure at the first inference retries on the CPU."""
+    from .common import ENV_DIR, log
+    from .transcribe import whisper_model
+    state: dict = {}
+
+    def run(audio, start_ms, language, prompt):
+        if "model" not in state:
+            state["model"], state["device"], state["compute_type"] = whisper_model(model_size)
+            log(ep, f"Whisper {model_size} on {state['device']} ({state['compute_type']}), VAD {'on' if vad else 'off'}")
+        try:
+            return _decode(state["model"], audio, language, prompt, vad)
+        except Exception as e:  # noqa: BLE001  (GPU libraries can fail only at the first inference)
+            if state["device"] != "cuda":
+                raise
+            log(ep, f"GPU transcription failed ({type(e).__name__}: {e}); retrying on CPU")
+            from faster_whisper import WhisperModel
+            state["model"] = WhisperModel(model_size, device="cpu", compute_type="int8", download_root=str(ENV_DIR / "models"))
+            state["device"], state["compute_type"] = "cpu", "int8"
+            return _decode(state["model"], audio, language, prompt, vad)
+    run.state = state
+    return run
+
+
+def transcribe_episode(ep: EpisodePaths, model_size: str = "large-v3", language: str | None = None, force: bool = False,
+                       run_chunk=None, chunk_ms: int | None = None) -> dict:
+    """Whole-episode transcript in resumable chunks (02_transcription/chunks/chunk_NNN.json). Same output files as a
+    clip transcript. The language is detected on the first chunk and reused, so a code-switching guest does not flip
+    the decoder language mid-episode."""
+    import time
+    from .common import log
+    from .transcribe import extract_audio, finalize, whisper_audio
+    src = episode_file(ep)
+    ep.ensure_project()
+    out, cdir = ep.p("02_transcription"), ep.p("02_transcription/chunks")
+    cdir.mkdir(parents=True, exist_ok=True)
+    wav = out / "dialogue_16k_mono.wav"
+    if force:
+        for f in cdir.glob("chunk_*.json"):
+            f.unlink()
+        (cdir / "plan.json").unlink(missing_ok=True)
+    fp = sha1_head(src)
+    plan = read_json(cdir / "plan.json")
+    if force or not wav.exists() or not plan or plan.get("fingerprint") != fp:
+        extract_audio(src, wav)
+    audio = whisper_audio(wav)
+    total_ms = int(len(audio) * 1000 / 16000)
+    cfg = podcast_cfg()
+    chunk_ms = int(chunk_ms or cfg.get("chunk_minutes", 10) * 60000)
+    if not plan or plan.get("fingerprint") != fp or plan.get("chunk_ms") != chunk_ms or plan.get("total_ms") != total_ms:
+        for f in cdir.glob("chunk_*.json"):
+            f.unlink()
+        plan = {"fingerprint": fp, "chunk_ms": chunk_ms, "total_ms": total_ms,
+                "chunks": plan_chunks(_energy_db(audio), 50, total_ms, chunk_ms), "created": now_iso()}
+        write_json(cdir / "plan.json", plan)
+    vad = bool(cfg.get("episode_vad", True))
+    prompt = load_config("transcription.json").get("initial_prompt")
+    runner = run_chunk or whisper_runner(model_size, vad, ep)
+    lang, prob, results, ran, t0 = language, None, [], 0, time.time()
+    for i, (a, b) in enumerate(plan["chunks"]):
+        f = cdir / f"chunk_{i:03d}.json"
+        rec = read_json(f)
+        if rec and rec.get("start_ms") == a and rec.get("end_ms") == b:
+            results.append(rec)
+            lang = lang or rec.get("language")
+            prob = prob if prob is not None else rec.get("language_probability")
+            continue
+        r = runner(audio[a * 16:b * 16], a, lang, prompt)
+        lang = lang or r.get("language")
+        prob = prob if prob is not None else r.get("language_probability")
+        rec = {"index": i, "start_ms": a, "end_ms": b, "language": r.get("language"),
+               "language_probability": r.get("language_probability"),
+               "segments": [dict(s, start_ms=s["start_ms"] + a, end_ms=s["end_ms"] + a) for s in r["segments"]],
+               "words": [dict(w, start_ms=w["start_ms"] + a, end_ms=w["end_ms"] + a) for w in r["words"]]}
+        write_json(f, rec)
+        results.append(rec)
+        ran += 1
+        done = sum(1 for _ in results)
+        el = time.time() - t0
+        log(ep, f"episode {ep.episode_id}: chunk {i + 1}/{len(plan['chunks'])} ({fmt_ts(a, '.')}–{fmt_ts(b, '.')}) "
+                f"{len(rec['words'])} words; elapsed {el:.0f}s"
+                + (f", ETA {el / ran * (len(plan['chunks']) - done):.0f}s" if ran else ""))
+    segs, words = stitch(results)
+    st = getattr(runner, "state", {}) or {}
+    meta = {"source_video": str(src), "audio": str(wav), "backend": "faster-whisper" if run_chunk is None else "injected",
+            "model": model_size, "compute_type": st.get("compute_type"), "device": st.get("device"),
+            "language": lang, "language_probability": prob if prob is not None else 1.0, "duration_ms": total_ms,
+            "initial_prompt": prompt, "elapsed_s": round(time.time() - t0, 1), "translated": False,
+            "chunks": len(plan["chunks"]), "vad": vad, "episode_id": ep.episode_id}
+    res = finalize(ep, meta, segs, words)
+    for name in ("transcript", "words"):   # a NEW machine transcript replaces the old machine originals
+        (out / f"{name}.machine.json").write_bytes((out / f"{name}.json").read_bytes())
+    return dict(res, chunks=len(plan["chunks"]), chunks_run=ran)
