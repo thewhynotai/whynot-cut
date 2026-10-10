@@ -1,0 +1,7 @@
+{
+  "note": "Review triggers only (flags words for human verification). Each client profile supplies its own domain terms; not a source of claims.",
+  "terms": {
+    "english": [],
+    "arabic": []
+  }
+}

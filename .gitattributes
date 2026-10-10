@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.sh text eol=lf
+whynot-cut/bin/reel text eol=lf
+*.png binary
+*.jpg binary
+*.otf binary
+*.ttf binary
+*.zip binary

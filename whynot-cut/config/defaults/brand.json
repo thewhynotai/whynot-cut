@@ -1,0 +1,13 @@
+{
+  "note": "Used only when the client database has no measured value. Real values come from output/client_database/branding/ (extracted from the client's own documents).",
+  "fallback_colors": {
+    "primary": "#3A7BD5",
+    "neutral_light": "#FFFFFF",
+    "paper_tint": "#E6EEF8",
+    "ink": "#1E2A3B"
+  },
+  "font_roles_fallback": {
+    "postscript": {},
+    "weights": {}
+  }
+}

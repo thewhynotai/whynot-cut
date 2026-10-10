@@ -1,0 +1,26 @@
+{
+  "fallback_colors": {
+    "primary": "#20ACAF",
+    "neutral_light": "#FFFFFF",
+    "paper_tint": "#B1E2E3",
+    "ink": "#0D4546"
+  },
+  "font_roles_fallback": {
+    "postscript": {
+      "caption": "thmanyahserifdisplay-Bold",
+      "headline": "thmanyahserifdisplay-Black",
+      "body": "thmanyahserifdisplay-Medium",
+      "term": "thmanyahserifdisplay-Bold",
+      "small": "thmanyahserifdisplay-Regular"
+    },
+    "weights": {
+      "caption": "bold",
+      "headline": "black",
+      "body": "medium",
+      "term": "bold",
+      "small": "regular"
+    }
+  },
+  "fonts_source": "assets/Font/*.otf (Thmanyah Serif Display) — install before building",
+  "_note": "Fallbacks only, used when output/client_database/branding/brand-tokens.json is missing. Official colours (assets/Color Palate/Colors.rtf): #20ACAF, #FFFFFF. paper_tint/ink are derived tints (official:false), matched to the values client-db measures."
+}

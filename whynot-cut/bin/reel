@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# WhyNot Cut engine wrapper (macOS, Linux, and Git Bash on Windows). The plugin's bin/ is on PATH while it is enabled.
+# Machine state lives in the engine home (default ~/.whynot-cut), never inside the plugin folder.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOME_DIR="${WHYNOT_HOME:-${CLAUDE_PLUGIN_OPTION_ENGINE_HOME:-${REEL_HOME:-${CLAUDE_PLUGIN_OPTION_REEL_HOME:-}}}}"
+if [ -z "$HOME_DIR" ]; then
+  HOME_DIR="$HOME/.whynot-cut"
+  if [ ! -d "$HOME_DIR" ]; then
+    for old in .reel-editor .dr-nahla-editor; do
+      if [ -d "$HOME/$old/venv" ]; then HOME_DIR="$HOME/$old"; break; fi
+    done
+  fi
+fi
+export WHYNOT_HOME="$HOME_DIR"
+PY="$HOME_DIR/venv/bin/python"
+[ -x "$PY" ] || PY="$HOME_DIR/venv/Scripts/python.exe"
+if [ ! -x "$PY" ]; then
+  if [ "${1:-}" = "setup" ]; then
+    echo "WhyNot Cut: no engine yet — creating it in $HOME_DIR (a few minutes, ~400 MB)…" >&2
+    for sys_py in python3 python py; do
+      if command -v "$sys_py" >/dev/null 2>&1 && "$sys_py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' </dev/null >/dev/null 2>&1; then
+        "$sys_py" "$HERE/setup/setup_env.py" --home "$HOME_DIR" >&2 || true
+        break
+      fi
+    done
+    PY="$HOME_DIR/venv/bin/python"
+    [ -x "$PY" ] || PY="$HOME_DIR/venv/Scripts/python.exe"
+    if [ ! -x "$PY" ]; then
+      echo '{"blocked": "no Python 3.9+ found to build the engine", "how": "macOS: xcode-select --install (or python.org). Windows: winget install Python.Python.3.12  — then run: reel setup"}'
+      exit 2
+    fi
+  else
+    echo '{"blocked": "WhyNot Cut engine not installed", "how": "run: reel setup   (or /whynot-cut:start)"}'
+    exit 2
+  fi
+fi
+export PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 PYTHONIOENCODING=utf-8   # no __pycache__ in the plugin; UTF-8 on Windows
+exec "$PY" "$HERE/engine/reel/cli.py" "$@"

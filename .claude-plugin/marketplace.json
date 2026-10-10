@@ -1,0 +1,19 @@
+{
+  "name": "thewhynot-ai",
+  "owner": { "name": "The Why Not AI", "email": "info@thewhynot.ai", "url": "https://thewhynot.ai/" },
+  "metadata": {
+    "description": "Claude Code plugins by The Why Not AI",
+    "version": "2.0.0"
+  },
+  "plugins": [
+    {
+      "name": "whynot-cut",
+      "source": "./whynot-cut",
+      "description": "Raw footage in, Premiere project out. Why not? AI reel editing for Adobe Premiere Pro on macOS and Windows.",
+      "version": "2.0.0",
+      "author": { "name": "The Why Not AI", "email": "info@thewhynot.ai" },
+      "category": "productivity",
+      "keywords": ["video-editing", "premiere-pro", "reels", "arabic"]
+    }
+  ]
+}

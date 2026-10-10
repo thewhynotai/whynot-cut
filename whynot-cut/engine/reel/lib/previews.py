@@ -1,0 +1,468 @@
+"""Static PNG previews of every planned graphic (1080x1920, transparent where overlay).
+
+Purpose: (1) instant visual QC of the plan, (2) fallback media for the Premiere XML when
+After Effects renders are unavailable. Final animated/editable versions are the AE comps.
+Text engines, best first: macOS CoreText (installed brand font), HarfBuzz + FreeType (the client's font FILE; every
+OS), then the arabic_reshaper + python-bidi fallback (breaks fonts with few presentation forms; last resort only).
+Stored text always stays in logical order.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+
+from .common import still_category, Paths, brand_fallback, font_role_fallback, load_config, read_json, write_json, now_iso, ms_to_frame
+
+W, H = 1080, 1920
+
+
+def _shape(s: str) -> str:
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        import re as _re
+        rtl = bool(_re.search('[\u0600-\u06FF]', s))
+        return get_display(arabic_reshaper.reshape(s), base_dir='R' if rtl else None)
+    except Exception:
+        return s
+
+
+class Brand:
+    def __init__(self, db: Path):
+        tok = read_json(db / "branding/brand-tokens.json", {})
+        roles, der = tok.get("roles", {}), tok.get("derived", {})
+        hx = lambda h: tuple(int(h.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+        self.teal = hx(roles.get("primary", {}).get("hex", brand_fallback("primary")))
+        self.white = hx(roles.get("neutral_light", {}).get("hex", brand_fallback("neutral_light")))
+        self.paper = hx(der.get("paper_tint", {}).get("hex", brand_fallback("paper_tint")))
+        self.ink = hx(der.get("ink", {}).get("hex", brand_fallback("ink")))
+        typ = read_json(db / "branding/typography.json", {})
+        self.files, self.ps_names = {}, {}
+        for fam in typ.get("families", {}).values():
+            for wgt in fam["weights"]:
+                self.files[wgt["style"].lower()] = wgt["file"]
+                self.ps_names[wgt["style"].lower()] = wgt["postscript_name"]
+        self.engines = set()
+        self.role_style = dict({"caption": "bold", "headline": "black", "body": "medium", "term": "bold", "small": "regular"},
+                               **font_role_fallback().get("weights", {}))
+
+    def font(self, role: str, size: int):
+        """Shaping text engine for this role. The chosen engine is recorded in self.engines (QC shows it)."""
+        from . import ct_text, hb_text
+        style = self.role_style.get(role, "regular")
+        if ct_text.AVAILABLE:
+            ps = self.ps_names.get(style)
+            if ps:
+                spec = ct_text.CTFontSpec(ps, size)
+                if spec.is_exact:  # font installed -> exact brand font, full shaping (verified on macOS)
+                    self.engines.add("coretext")
+                    return spec
+        f = self.files.get(style) or next(iter(self.files.values()), None)
+        if f and hb_text.AVAILABLE:
+            try:
+                spec = hb_text.HBFontSpec(f, size)
+                self.engines.add("harfbuzz")
+                return spec
+            except Exception:  # unreadable font file -> fallback below
+                pass
+        self.engines.add("pillow-fallback")
+        return ImageFont.truetype(f, size) if f else ImageFont.load_default()
+
+
+def _text_block(d: ImageDraw.ImageDraw, text: str, font, cx: int, cy: int, fill, line_gap=1.3, max_chars=24,
+                shadow=True):
+    from .ae_builder import wrap_lines
+    lines = wrap_lines(text, max_chars).split("\r")
+    if getattr(font, "engine", None) in ("coretext", "harfbuzz"):
+        im = d._image
+        asc, desc = font.getmetrics()
+        lh = int((asc + desc) * line_gap)
+        y = cy - lh * len(lines) // 2
+        boxes = []
+        col = tuple(fill) + ((255,) if len(fill) == 3 else ())
+        for l in lines:
+            img, base, w = font.render(l, col)
+            x = int(cx - w / 2) - 4
+            if shadow:
+                sh, _, _ = font.render(l, (0, 0, 0, 110))
+                im.alpha_composite(sh, (max(0, x + 3), max(0, y + 4))) if im.size[0] > 1 else None
+            if im.size[0] > 1:
+                im.alpha_composite(img, (max(0, x), max(0, y)))
+            boxes.append((x + 4, y + 4, x + 4 + w, y + 4 + asc + desc))
+            y += lh
+        return boxes
+    shaped = [_shape(l) for l in lines]
+    asc, desc = font.getmetrics()
+    lh = int((asc + desc) * line_gap)
+    total = lh * len(lines)
+    y = cy - total // 2
+    boxes = []
+    for s in shaped:
+        w = d.textlength(s, font=font)
+        x = cx - w / 2
+        if shadow:
+            d.text((x + 3, y + 4), s, font=font, fill=(0, 0, 0, 110))
+        d.text((x, y), s, font=font, fill=fill)
+        boxes.append((x, y, x + w, y + asc + desc))
+        y += lh
+    return boxes
+
+
+def _round_rect(im, box, r, fill=None, outline=None, width=2):
+    lay = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    ImageDraw.Draw(lay).rounded_rectangle(box, r, fill=fill, outline=outline, width=width)
+    im.alpha_composite(lay)
+
+
+def _face_center(im: Image.Image):
+    """Centre of the detected faces (0..1, top-left origin): macOS Vision, else OpenCV (Windows/Linux); None if
+    unavailable or no face (the crop then sits slightly above centre)."""
+    return _face_center_vision(im) or _face_center_opencv(im)
+
+
+def _face_center_vision(im: Image.Image):
+    try:
+        import io
+        import Vision
+        from Foundation import NSData
+        buf = io.BytesIO()
+        im.convert("RGB").save(buf, "PNG")
+        data = NSData.dataWithBytes_length_(buf.getvalue(), len(buf.getvalue()))
+        req = Vision.VNDetectFaceRectanglesRequest.alloc().init()
+        h = Vision.VNImageRequestHandler.alloc().initWithData_options_(data, None)
+        if not h.performRequests_error_([req], None)[0]:
+            return None
+        faces = [o.boundingBox() for o in (req.results() or [])]
+        if not faces:
+            return None
+        x0 = min(f.origin.x for f in faces); x1 = max(f.origin.x + f.size.width for f in faces)
+        y0 = min(f.origin.y for f in faces); y1 = max(f.origin.y + f.size.height for f in faces)
+        return (x0 + x1) / 2, 1 - (y0 + y1) / 2          # Vision's origin is bottom-left
+    except Exception:
+        return None
+
+
+def _face_center_opencv(im: Image.Image):
+    try:
+        import cv2
+        import numpy as np
+        g = np.array(im.convert("L"))
+        sc = min(1.0, 1200 / max(g.shape))               # detector works on a ~1200 px copy
+        if sc < 1:
+            g = cv2.resize(g, (int(g.shape[1] * sc), int(g.shape[0] * sc)))
+        mins = (int(0.06 * g.shape[1]),) * 2
+        det = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        faces = list(det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=6, minSize=mins))
+        if not faces:   # speaker turned sideways: profile detector, both directions (it only knows one)
+            prof = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+            faces = list(prof.detectMultiScale(g, scaleFactor=1.1, minNeighbors=5, minSize=mins))
+            flipped = prof.detectMultiScale(cv2.flip(g, 1), scaleFactor=1.1, minNeighbors=5, minSize=mins)
+            faces += [(g.shape[1] - x - w, y, w, h) for (x, y, w, h) in flipped]
+        if not faces:
+            return None
+        big = max(f[2] * f[3] for f in faces)            # ignore tiny background faces
+        faces = [f for f in faces if f[2] * f[3] >= 0.25 * big]
+        x0 = min(f[0] for f in faces); x1 = max(f[0] + f[2] for f in faces)
+        y0 = min(f[1] for f in faces); y1 = max(f[1] + f[3] for f in faces)
+        return (x0 + x1) / 2 / g.shape[1], (y0 + y1) / 2 / g.shape[0]
+    except Exception:
+        return None
+
+
+def _fit_image(path: str, w: int, h: int, radius: int, centering=None) -> Image.Image:
+    """Cover-crop to w x h. An explicit `centering` (params.crop_center, 0..1) wins; otherwise the crop is centred on
+    the detected faces so eyes are never cut; otherwise slightly above centre."""
+    im = ImageOps.exif_transpose(Image.open(path)).convert("RGBA")
+    c = centering
+    if c is None:
+        fc = _face_center(im)
+        if fc:   # convert "face centre" into Pillow's crop offset so the face lands at the centre of the crop
+            sw, sh = im.size
+            cw_, ch_ = (sw, sw * h / w) if sw / sh < w / h else (sh * w / h, sh)
+            c = ((fc[0] * sw - cw_ / 2) / (sw - cw_) if sw > cw_ + 1 else 0.5,
+                 (fc[1] * sh - ch_ / 2) / (sh - ch_) if sh > ch_ + 1 else 0.5)
+    c = c or (0.5, 0.35)
+    im = ImageOps.fit(im, (w, h), centering=(min(max(c[0], 0.0), 1.0), min(max(c[1], 0.0), 1.0)))
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius, fill=255)
+    im.putalpha(mask)
+    return im
+
+
+BAR_TEMPLATES = {"hook_title", "term_callout", "statement_highlight", "highlight_caption"}
+
+
+def _role_color(b: "Brand", role: str) -> tuple:
+    """Brand colour by role name (templates choose box_role / text_role): primary | neutral_light | paper | ink."""
+    return {"primary": b.teal, "neutral_light": b.white, "paper": b.paper, "ink": b.ink}.get(role, b.teal)
+
+
+def save_still(im: Image.Image, out: Path) -> Path:
+    """Write a still only when its pixels changed. Unchanged stills are never rewritten: on Windows Premiere keeps the
+    stills it imported locked (even after the project closes, until Premiere quits), and a rebuild must not fail on them."""
+    import io
+    out.parent.mkdir(parents=True, exist_ok=True)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    data = buf.getvalue()
+    try:
+        if out.exists() and out.read_bytes() == data:
+            return out
+    except OSError:
+        pass
+    try:
+        out.write_bytes(data)
+    except PermissionError as e:
+        raise RuntimeError(f"{out.name} changed but is locked by another program. On Windows Premiere locks stills it "
+                           f"imported until it quits: quit Premiere (File > Exit), reopen it, then run this again.") from e
+    return out
+
+
+def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, out: Path, frame_bg=None,
+                 layer: str = "all") -> Path:
+    """layer: 'all' | 'bars' (teal bars/boxes only) | 'fg' (everything except bars) -> separate stills so
+    Premiere can animate bars (RTL crop sweep) and text (pop) independently."""
+    BARS, FG = layer in ("all", "bars"), layer in ("all", "fg")
+    tp, p = ev["template"], ev["params"]
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    if layer == "bars" and tp not in BAR_TEMPLATES:   # nothing to sweep for this template
+        return save_still(im, out)
+    if tp in ("hook_title", "term_callout", "statement_highlight", "highlight_caption"):
+        box_c, txt_c = _role_color(b, t.get("box_role", "primary")), _role_color(b, t.get("text_role", "neutral_light"))
+        role = {"hook_title": "headline", "term_callout": "term", "statement_highlight": "body", "highlight_caption": "caption"}[tp]
+        f = b.font(role, p.get("size", t["size"]))
+        mc = p.get("max_chars", t.get("max_chars", 22 if tp != "highlight_caption" else 30))
+        gap = t.get("line_gap", 1.3)
+        y = p.get("y", t["y"])
+        boxes = _text_block(ImageDraw.Draw(Image.new("RGBA", (1, 1))), p["text"], f, W // 2, y, b.white,
+                            line_gap=gap, max_chars=mc, shadow=False)
+        if BARS and (tp != "highlight_caption" or p.get("highlight")):
+            for (x0, y0, x1, y1) in boxes:
+                if tp == "hook_title" and t.get("bar_style", "underline") == "box":   # same teal box as statements
+                    px, py = t.get("pad_x", 22), t.get("pad_y", 8)
+                    _round_rect(im, (x0 - px, y0 - py, x1 + px, y1 + py - 4), 8, fill=box_c + (255,))
+                elif tp == "hook_title":
+                    hh = (y1 - y0) * 0.42
+                    _round_rect(im, (x0 - 24, y1 - hh - 6, x1 + 24, y1), 4, fill=box_c + (255,))
+                elif tp == "term_callout":
+                    _round_rect(im, (x0 - 10, y1 + 6, x1 + 10, y1 + 14), 4, fill=box_c + (255,))
+                else:  # full box behind each line
+                    px, py = t.get("pad_x", 22), t.get("pad_y", 8)
+                    _round_rect(im, (x0 - px, y0 - py, x1 + px, y1 + py - 4), 8, fill=box_c + (255,))
+        if FG:
+            _text_block(ImageDraw.Draw(im), p["text"], f, W // 2, y, txt_c, line_gap=gap, max_chars=mc,
+                        shadow=((tp == "hook_title" and t.get("bar_style", "underline") != "box") or tp == "term_callout"
+                                or (tp in ("statement_highlight", "highlight_caption") and not p.get("highlight"))))
+    elif tp == "glass_card":
+        f = b.font("body", p.get("size", t["size"]))
+        probe = _text_block(ImageDraw.Draw(Image.new("RGBA", (1, 1))), p["text"], f, W // 2, p.get("y", t["y"]), b.white, line_gap=1.35, max_chars=26, shadow=False)
+        y0, y1 = min(bx[1] for bx in probe) - 45, max(bx[3] for bx in probe) + 45
+        w = p.get("w", t["w"])
+        if frame_bg is not None:  # simulate frosted backdrop on preview only
+            crop = frame_bg.crop((W // 2 - w // 2, int(y0), W // 2 + w // 2, int(y1))).filter(ImageFilter.GaussianBlur(28))
+            m = Image.new("L", crop.size, 0)
+            ImageDraw.Draw(m).rounded_rectangle((0, 0, crop.size[0] - 1, crop.size[1] - 1), t["radius"], fill=255)
+            im.paste(crop.convert("RGBA"), (W // 2 - w // 2, int(y0)), m)
+        _round_rect(im, (W // 2 - w // 2, y0, W // 2 + w // 2, y1), t["radius"],
+                    fill=b.white + (int(255 * t["fill_opacity"]),), outline=b.white + (int(255 * t["stroke_opacity"]),), width=3)
+        ix, iy = W // 2 + w // 2 - 30, int(y0) + 14
+        _round_rect(im, (ix - 14, iy - 30, ix + 30, iy + 14), 8, outline=b.white + (200,), width=3)
+        _round_rect(im, (ix - 24, iy - 20, ix + 20, iy + 24), 8, fill=b.white + (70,), outline=b.white + (255,), width=3)
+        _text_block(ImageDraw.Draw(im), p["text"], f, W // 2, p.get("y", t["y"]), b.white, line_gap=1.35, max_chars=26, shadow=False)
+    elif tp == "checklist":
+        items = p.get("items", [])
+        gap = p.get("line_gap", t["line_gap"])
+        n_rows = p.get("_row_count", len(items))     # rows reserved for the FULL list (stable layout per item still)
+        off = p.get("_row_offset", 0)
+        top = p.get("y", t["y"]) - (n_rows - 1) * gap // 2
+        if p.get("title") and not p.get("_no_title"):
+            _text_block(d, p["title"], b.font("body", t["title_size"]), W // 2, int(top - gap * 1.1), b.white)
+        f = b.font("body", t["size"])
+        for i, it in enumerate(items):
+            y = top + (i + off) * gap
+            bx = _text_block(d, it["text"], f, W // 2 - 20, y, b.white, max_chars=40)
+            x1 = bx[0][2]
+            d.ellipse((x1 + 18, y - 13, x1 + 44, y + 13), outline=b.white, width=3)
+    elif tp == "broll_card":
+        im = Image.new("RGBA", (W, H), b.paper + (255,))
+        d = ImageDraw.Draw(im)
+        _text_block(d, p.get("headline") or p.get("text", ""), b.font("body", p.get("size", t["size"])), W // 2, t["headline_y"], b.ink, shadow=False)
+        cw, ch, cy = t["card_w"], t["card_h"], t["card_y"]
+        src = p.get("image_path")
+        if src:
+            card = _fit_image(src, cw, ch, 40, p.get("crop_center"))
+            sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(sh).rounded_rectangle((W // 2 - cw // 2 + 10, cy - ch // 2 + 18, W // 2 + cw // 2 + 10, cy + ch // 2 + 18), 40, fill=(0, 0, 0, 90))
+            im.alpha_composite(sh.filter(ImageFilter.GaussianBlur(22)))
+            im.alpha_composite(card, (W // 2 - cw // 2, cy - ch // 2))
+        else:
+            _round_rect(im, (W // 2 - cw // 2, cy - ch // 2, W // 2 + cw // 2, cy + ch // 2), 40, fill=b.white + (140,), outline=b.teal + (255,), width=4)
+            _text_block(ImageDraw.Draw(im), "IMAGE PLACEHOLDER — needs approved visual", b.font("small", 30), W // 2, cy, b.ink, shadow=False, max_chars=40)
+    elif tp == "photo_card":
+        cw, ch, cy = t["card_w"], t["card_h"], t["card_y"]
+        if p.get("image_path"):
+            im.alpha_composite(_fit_image(p["image_path"], cw, ch, 36, p.get("crop_center")), (W // 2 - cw // 2, cy - ch // 2))
+            _round_rect(im, (W // 2 - cw // 2, cy - ch // 2, W // 2 + cw // 2, cy + ch // 2), 36, outline=b.white + (255,), width=4)
+        if logo:
+            lg = Image.open(logo).convert("RGBA")
+            lg.thumbnail((180, 180))
+            im.alpha_composite(lg, (W // 2 - lg.width // 2, cy - ch // 2 - 70 - lg.height // 2))
+        if p.get("text"):
+            _text_block(ImageDraw.Draw(im), p["text"], b.font("body", t["size"]), W // 2, cy + ch // 2 + 90, b.white)
+    elif tp == "name_card":
+        y, w = p.get("y", t["y"]), p.get("w", t["w"])
+        lines = p.get("lines", [])
+        h = 170 + 50 * len(lines)
+        _round_rect(im, (W // 2 - w // 2, y - 120, W // 2 + w // 2, y - 120 + h), 26, fill=b.white + (30,), outline=b.white + (216,), width=3)
+        d = ImageDraw.Draw(im)
+        _text_block(d, p["name"], b.font("headline", t["name_size"]), W // 2, y - 70, b.white)
+        d.line((W // 2 - (w - 160) // 2, y - 25, W // 2 + (w - 160) // 2, y - 25), fill=b.white + (204,), width=2)
+        for i, l in enumerate(lines):
+            _text_block(d, l, b.font("small", t["line_size"]), W // 2, y + 22 + i * 50, b.white, max_chars=60)
+    elif tp == "cta":
+        f = b.font("headline", p.get("size", t["size"]))
+        boxes = _text_block(ImageDraw.Draw(Image.new("RGBA", (1, 1))), p["text"], f, W // 2, p.get("y", t["y"]), b.white, shadow=False)
+        x0, y0 = min(bx[0] for bx in boxes), min(bx[1] for bx in boxes)
+        x1, y1 = max(bx[2] for bx in boxes), max(bx[3] for bx in boxes)
+        _round_rect(im, (x0 - 45, y0 - 22, x1 + 45, y1 + 22), int((y1 - y0 + 44) / 2),
+                    fill=_role_color(b, t.get("box_role", "primary")) + (255,))
+        _text_block(ImageDraw.Draw(im), p["text"], f, W // 2, p.get("y", t["y"]),
+                    _role_color(b, t.get("text_role", "neutral_light")), shadow=False)
+    elif tp == "logo_outro":
+        im = Image.new("RGBA", (W, H), b.white + (255,))
+        if logo:
+            lg = Image.open(logo).convert("RGBA")
+            lg.thumbnail((780, 780))
+            im.alpha_composite(lg, (W // 2 - lg.width // 2, H // 2 - lg.height // 2))
+    elif tp == "broll_video":   # QC/contact-sheet still only; Premiere gets the real clip from the XML
+        fr = grab_frame(Path(p["video_path"]), int(float(p.get("in", 0) or 0) * 1000) + 500) if p.get("video_path") else None
+        im = fr if fr is not None else Image.new("RGBA", (W, H), (40, 40, 40, 255))
+    elif tp == "flash_transition":
+        im = Image.new("RGBA", (W, H), (255, 255, 255, int(255 * t.get("peak_opacity", 0.9))))
+    return save_still(im, out)
+
+
+def grab_frame(video: Path, ms: int) -> Image.Image | None:
+    from .common import ffmpeg_exe, run
+    import tempfile
+    tmp = Path(tempfile.mkstemp(suffix=".png")[1])
+    run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{ms / 1000:.3f}", "-i", str(video), "-frames:v", "1",
+         "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}", str(tmp)], check=False)
+    if tmp.exists() and tmp.stat().st_size:
+        return Image.open(tmp).convert("RGBA")
+    return None
+
+
+def render_all(paths: Paths, composite_preview: bool = True) -> dict:
+    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    tpls = load_config("graphics-templates.json")["templates"]
+    b = Brand(paths.client_db)
+    man = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
+    assets = {a["rel"]: a for a in man["assets"]}
+    logo = next((a["display_derivative"] for a in man["assets"] if a["category"] == "logo"), None)
+    main = Path(spec["main_footage"])
+    main = main if main.is_absolute() else paths.root / main
+    outs, comps = [], []
+    for ev in spec["events"]:
+        p = ev["params"]
+        if p.get("image"):
+            a = assets.get(p["image"])
+            p["image_path"] = a["display_derivative"] if a else str(paths.root / p["image"])
+        if p.get("video"):
+            p["video_path"] = str(paths.root / p["video"])
+        cat = still_category(ev["template"])
+        out = paths.p(f"03_broll/{cat}/{ev['event_id']}.png")
+        mid = (ev["start_ms"] + ev["end_ms"]) // 2
+        # PRODUCTION still: clean transparent overlay (never bake footage into it; the speaker moves)
+        render_event(ev, tpls[ev["template"]], b, assets, logo, out, frame_bg=None)
+        outs.append(str(out))
+        if ev["template"] in BAR_TEMPLATES:   # separate layers: text (pop) + bars (RTL sweep)
+            fg = paths.p(f"03_broll/{cat}/{ev['event_id']}_fg.png")
+            bars = paths.p(f"03_broll/{cat}/{ev['event_id']}_bar.png")
+            render_event(ev, tpls[ev["template"]], b, assets, logo, fg, layer="fg")
+            render_event(ev, tpls[ev["template"]], b, assets, logo, bars, layer="bars")
+            outs += [str(fg), str(bars)]
+        if ev["template"] == "checklist":
+            # title still + one still per item in its final row -> items slide in one by one in Premiere
+            items = ev["params"].get("items", [])
+            ttl = dict(ev, params=dict(ev["params"], items=[], _row_count=len(items)))
+            tp_ = paths.p(f"03_broll/{cat}/{ev['event_id']}_title.png")
+            render_event(ttl, tpls["checklist"], b, assets, logo, tp_)
+            outs.append(str(tp_))
+            for k, it in enumerate(items):
+                one = dict(ev, params=dict(ev["params"], items=[it], _row_count=len(items), _row_offset=k, _no_title=True))
+                ip = paths.p(f"03_broll/{cat}/{ev['event_id']}_i{k + 1}.png")
+                render_event(one, tpls["checklist"], b, assets, logo, ip)
+                outs.append(str(ip))
+        bg = grab_frame(main, mid) if composite_preview else None
+        if bg is not None:  # QC composite only: graphic over the actual frame (frosted look simulated)
+            import tempfile
+            fd, tmp = tempfile.mkstemp(suffix=".png")
+            os.close(fd)
+            tmp = Path(tmp)
+            render_event(ev, tpls[ev["template"]], b, assets, logo, tmp, frame_bg=bg)
+            comp = bg.copy()
+            with Image.open(tmp) as im:
+                comp.alpha_composite(im.convert("RGBA"))
+            tmp.unlink(missing_ok=True)
+            cp = paths.p(f"08_quality_control/previews/{ev['event_id']}_{ev['template']}.jpg")
+            cp.parent.mkdir(parents=True, exist_ok=True)
+            comp.convert("RGB").resize((540, 960)).save(cp, quality=85)
+            comps.append(str(cp))
+    # contact sheet of composites
+    if comps:
+        cols = 6
+        rows = (len(comps) + cols - 1) // cols
+        sheet = Image.new("RGB", (cols * 270, rows * 480), "black")
+        for i, cpath in enumerate(comps):
+            im = Image.open(cpath).resize((270, 480))
+            sheet.paste(im, ((i % cols) * 270, (i // cols) * 480))
+        sheet.save(paths.p("08_quality_control/previews/_contact_sheet.jpg"), quality=85)
+    return {"previews": outs, "composites": comps}
+
+
+def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) -> list[dict]:
+    """Animated caption stills on the SEQUENCE clock: text (pop) + teal box (RTL sweep) on keyword cues.
+    Cues under a graphic that already shows the words are trimmed/dropped (reference behaviour)."""
+    from . import srt as srtlib
+    from .plan import norm
+    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
+    t = load_config("graphics-templates.json")["templates"]["highlight_caption"]
+    b = Brand(paths.client_db)
+    style = ed.get("global", {}).get("caption_style", "keywords")
+    hl = [norm(h["text"]) for h in spec.get("caption_highlights", [])]
+    out_dir = paths.p("03_broll/captions")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    res = []
+    for i, c in enumerate(srtlib.read_srt(paths.p(spec["caption_source"]))):
+        s, e = c["start_ms"], c["end_ms"]
+        for a, z in hidden_ms:
+            if a <= s < z:
+                s = z
+            elif s < a < e:
+                e = a
+        if e - s < 250:
+            continue
+        is_hl = style == "highlight_all" or any(h and h in norm(c["text"]) for h in hl)
+        ev = {"template": "highlight_caption", "params": {"text": c["text"].replace("\n", " "), "highlight": is_hl}}
+        # a card (name card, glass card, CTA) is on screen at the same time: lift the caption above its top edge
+        tops = [top for a, z, top in (avoid or []) if s < z and a < e]
+        if tops:
+            from .ae_builder import wrap_lines
+            n = len(wrap_lines(ev["params"]["text"], t.get("max_chars", 30)).split("\r"))
+            half = n * t["size"] * t.get("line_gap", 1.3) / 2 + t.get("bar_pad_y", 8)
+            ev["params"]["y"] = int(min(t["y"], min(tops) - half - 24))
+        fg = out_dir / f"CAP_{i + 1:03d}_fg.png"
+        render_event(ev, t, b, {}, None, fg, layer="fg")
+        item = {"id": f"CAP_{i + 1:03d}", "fg": str(fg), "start_ms": s, "end_ms": e, "highlight": is_hl, "text": c["text"]}
+        if is_hl:
+            bar = out_dir / f"CAP_{i + 1:03d}_bar.png"
+            render_event(ev, t, b, {}, None, bar, layer="bars")
+            item["bar"] = str(bar)
+        res.append(item)
+    write_json(out_dir / "captions-manifest.json", {"generated": now_iso(), "captions": res})
+    return res

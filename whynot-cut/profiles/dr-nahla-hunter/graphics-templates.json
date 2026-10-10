@@ -1,0 +1,10 @@
+{
+  "note": "Nahla overrides of config/defaults/graphics-templates.json (deep-merged). From the reference edits (data/Ref): hooks use the same white-text-on-teal boxes as statements (QC 2026-10-10: the underline style let glyphs spill onto her face).",
+  "templates": {
+    "hook_title": {
+      "bar_style": "box",
+      "pad_x": 22,
+      "pad_y": 8
+    }
+  }
+}

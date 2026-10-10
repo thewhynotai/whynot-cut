@@ -1,0 +1,670 @@
+#!/usr/bin/env python3
+"""WhyNot Cut pipeline CLI (Claude Code plugin engine, by The Why Not AI). macOS and Windows.
+
+Run via the plugin wrapper:  reel <command> --root <CLIENT_FOLDER> [--video-id ID] [--profile ID]
+(the wrapper uses the venv in ~/.whynot-cut; `reel setup` creates it)
+
+Getting started                               doctor / setup / scaffold / inbox / settings
+
+Deterministic stages (scripts)                Semantic stages (Claude authors files)
+  discover        inputs + environment           01_analysis/editing-style*.{md,json}
+  client-db       brand tokens/fonts/assets      client_database/profile/*
+  preflight       media inspection               01_analysis/main-topic.md, narrative-segments.json,
+  transcribe      Whisper -> SRT/words              transcript-semantic-analysis.json,
+  ref-analyze     reference video metrics           medical-content-review.md, edit-decisions.json
+  plan            validate + compile decisions
+  previews        PNG previews + QC composites
+  sfx             synthesize needed SFX
+  ppro-status / ppro-build / ppro-frames   native Premiere build via the bridge (default)
+  premiere        FCP7 XML interchange (fallback)
+  ae-* / ps-* / mogrt-build   OPTIONAL extras, need --extras and an explicit editor request
+  setup / client-init / profile
+  preview-video   watchable MP4 of the planned edit (no Premiere needed)
+  qc / handoff / status / next
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.common import (Paths, load_status, log, read_json, set_status, write_json, slug, now_iso,  # noqa: E402
+                        set_context, active_profile, profile_dirs, project_prefix, ENV_DIR, PROFILES_DIR, CLIENT_PROFILE_REL,
+                        clients_root, client_folders, resolve_root)
+
+SEMANTIC_FILES = ["01_analysis/editing-style.json", "01_analysis/main-topic.md",
+                  "01_analysis/narrative-segments.json", "01_analysis/transcript-semantic-analysis.json",
+                  "01_analysis/medical-content-review.md", "01_analysis/edit-decisions.json"]
+
+
+def P(a) -> Paths:
+    return Paths(a.root, a.video_id)
+
+
+def out(obj):
+    print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+
+
+def main_footage(paths: Paths, explicit: str | None) -> list[Path]:
+    if explicit:
+        return [Path(explicit) if Path(explicit).is_absolute() else paths.root / explicit]
+    inv = read_json(paths.output / "discovery/input-inventory.json")
+    if not inv:
+        raise SystemExit("run `discover` first")
+    return [Path(f["path"]) for f in inv["files"] if f["role"] == "source_footage"]
+
+
+def cmd_discover(a):
+    from lib.discover import run_discovery
+    p = P(a)
+    if p.video_id:
+        p.ensure_project()
+    r = run_discovery(p)
+    if p.video_id:
+        set_status(p, "INPUTS_DISCOVERED", f"{r['inventory']['file_count']} files", "discover",
+                   [p.output / "discovery/discovery-report.md"])
+    out({"files": r["inventory"]["file_count"], "by_role": {k: len(v) for k, v in r["inventory"]["by_role"].items()},
+         "warnings": r["inventory"]["warnings"], "report": str(p.output / "discovery/discovery-report.md")})
+
+
+def cmd_client_db(a):
+    from lib.client_db import build
+    p = P(a)
+    inv = read_json(p.output / "discovery/input-inventory.json")
+    if not inv:
+        raise SystemExit("run `discover` first")
+    st = build(p, inv)
+    if p.video_id and st["ready"]:
+        set_status(p, "CLIENT_DATABASE_READY", "; ".join(st["issues"]), "client_db", [p.client_db])
+    out(st)
+
+
+def cmd_preflight(a):
+    from lib.media import preflight
+    p = P(a)
+    p.ensure_project()
+    rep = preflight(p, main_footage(p, a.footage))
+    set_status(p, "INPUTS_VALIDATED" if rep["ok"] else "BLOCKED",
+               f"{len(rep['valid'])} valid, {len(rep['issues'])} notes", "preflight",
+               [p.p("00_inputs/preflight-report.md")],
+               blockers=[i["msg"] for i in rep["issues"] if i["severity"] == "error"])
+    out({"ok": rep["ok"], "issues": rep["issues"], "conversions": rep["conversions"]})
+
+
+def cmd_transcribe(a):
+    from lib.transcribe import transcribe, verify_existing_srt
+    from lib.media import probe
+    p = P(a)
+    p.ensure_project()
+    src = main_footage(p, a.footage)[0]
+    st = load_status(p)
+    if p.p("02_transcription/transcript.json").exists() and not a.force:
+        out({"skipped": "transcript exists (use --force to redo)"})
+        return
+    inv = read_json(p.output / "discovery/input-inventory.json", {"files": []})
+    existing = [f for f in inv["files"] if f["role"] == "existing_transcript"]
+    if existing and not a.force:
+        dur = int(probe(src)["duration_s"] * 1000)
+        checks = {f["rel"]: verify_existing_srt(Path(f["path"]), dur) for f in existing}
+        write_json(p.p("02_transcription/existing-srt-check.json"), checks)
+        log(p, f"Existing SRT check: {checks} — Whisper still runs; compare before reuse")
+    if not a.model:
+        from lib import settings as S
+        a.model = S.load(p.root).get("whisper_model") or "large-v3"
+    r = transcribe(p, src, model_size=a.model, language=a.language)
+    set_status(p, "TRANSCRIBED", f"{r['segments']} segs, lang {r['meta']['language']}", "transcribe",
+               [p.p("02_transcription/subtitles.srt")])
+    out(r)
+
+
+def cmd_transcript_correct(a):
+    from lib.transcribe import apply_corrections
+    out(apply_corrections(P(a)))
+
+
+def cmd_transcript_verify(a):
+    from lib.transcribe import words_fingerprint
+    p = P(a)
+    write_json(p.p("02_transcription/verification.json"), {"verified": True, "by": a.by or "editor", "at": now_iso(),
+                                                            "note": a.note or "", "words_sha1": words_fingerprint(p)})
+    out({"verified": True})
+
+
+def cmd_transcript_relisten(a):
+    from lib.transcribe import relisten
+    ids = [int(x) for x in a.words.split(",") if x.strip()] if a.words else None
+    from lib import settings as S
+    p = P(a)
+    out(relisten(p, ids, model_size=a.model or S.load(p.root).get("whisper_model") or "large-v3"))
+
+
+def cmd_ref_analyze(a):
+    from lib.ref_analysis import analyze_all
+    from lib.media import probe
+    p = P(a)
+    inv = read_json(p.output / "discovery/input-inventory.json")
+    refs = [Path(f["path"]) for f in inv["files"] if f["role"] == "editing_reference_video"]
+    docs = [f["rel"] for f in inv["files"] if f["role"] == "editing_reference_doc"]
+    res = analyze_all(p, refs, {str(r): probe(r)["duration_s"] for r in refs}) if refs else {}
+    out({"reference_docs": docs, "reference_videos": len(refs), "measurements": res.get("aggregate"),
+         "contact_sheets": [s for r in res.get("references", []) for s in r["contact_sheets"]],
+         "next": "View the contact sheets, then author 01_analysis/editing-style-analysis.md + editing-style.json + editing-rules.json"})
+
+
+def cmd_plan(a):
+    from lib.plan import compile_plan
+    p = P(a)
+    missing = [f for f in SEMANTIC_FILES if not p.p(f).exists()]
+    if missing:
+        set_status(p, load_status(p)["status"], f"semantic files missing: {missing}")
+        out({"ok": False, "missing_semantic_files": missing})
+        return
+    set_status(p, "ANALYZED", "semantic analysis files present", "analysis")
+    r = compile_plan(p)
+    if r["ok"]:
+        spec = read_json(p.p("01_analysis/timeline-spec.json"))
+        pend = [e["event_id"] for e in spec["events"] if e["approval_required"]]
+        set_status(p, "EDIT_PLAN_READY", f"{r['events']} events, {r['cues']} cues", "plan",
+                   [p.p("01_analysis/timeline-spec.json")])
+        if pend:
+            set_status(p, "AWAITING_APPROVAL", f"pending approval: {pend} (generation continues as drafts)")
+    out(r)
+
+
+def cmd_previews(a):
+    from lib.previews import render_all
+    p = P(a)
+    r = render_all(p, composite_preview=not a.no_composite)
+    out({"previews": len(r["previews"]), "contact_sheet": str(p.p("08_quality_control/previews/_contact_sheet.jpg"))})
+
+
+def cmd_sfx(a):
+    from lib.sfx import synth_needed
+    p = P(a)
+    cues = read_json(p.p("06_audio/audio-cue-sheet.json"), {"cues": []})["cues"]
+    kinds = {c["kind"] for c in cues}
+    inv = read_json(p.output / "discovery/input-inventory.json", {"files": []})
+    if [f for f in inv["files"] if f["role"] == "sfx"]:
+        log(p, "Client SFX library present — map kinds to library files in 06_audio/sfx-map.json (procedural used for unmapped kinds)")
+    r = synth_needed(kinds, p.p("06_audio/sfx"))
+    write_json(p.p("06_audio/sfx/sfx-library.json"), r)
+    out({"kinds": sorted(kinds), "files": len(r)})
+
+
+def require_plan_approval(p: Paths):
+    """Hard gate before slow Adobe builds: the CURRENT plan must be approved (by the editor, or
+    explicitly delegated by them). A re-plan after approval invalidates it."""
+    from lib.plan import plan_fingerprint
+    appr = read_json(p.p("01_analysis/plan-approval.json"))
+    if not appr or appr.get("stale") or appr.get("plan_fingerprint") != plan_fingerprint(p):
+        out({"blocked": "edit plan not approved (or changed since approval)",
+             "how": "Show the editor 01_analysis/edit-plan.md (playback in chat); after they approve run "
+                    "`reel approve-plan --by editor`. If they told you to proceed without review: "
+                    "`reel approve-plan --by delegated --note \"<their words>\"`."})
+        raise SystemExit(2)
+
+
+def cmd_approve_plan(a):
+    from lib.plan import plan_fingerprint
+    p = P(a)
+    if not p.p("01_analysis/timeline-spec.json").exists():
+        raise SystemExit("compile the plan first (`plan`)")
+    rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": plan_fingerprint(p)}
+    write_json(p.p("01_analysis/plan-approval.json"), rec)
+    set_status(p, "EDIT_PLAN_READY", f"plan approved by {a.by}", "plan_approval")
+    out(rec)
+
+
+def cmd_verify(a):
+    from lib import verify
+    p = P(a)
+    if a.record:
+        out(verify.record(p, a.verdict, a.notes or "", a.by or "claude", a.sheet))
+    else:
+        r = verify.build(p)
+        r["next"] = "VIEW the sheet image and check every tile against the checklist, then record a verdict."
+        out(r)
+
+
+def cmd_ppro_install(a):
+    from lib.ppro_bridge import install
+    out(install())
+
+
+def cmd_ppro_status(a):
+    from lib.ppro_bridge import status, submit
+    st = status()
+    if st["alive"]:
+        st["ping"] = submit("ping", timeout=30)
+    out(st)
+
+
+def cmd_ppro_probe(a):
+    from lib.ppro_bridge import submit
+    out(submit("probe", timeout=120))
+
+
+def cmd_ppro_build(a):
+    from lib.ppro_build import build
+    p = P(a)
+    require_plan_approval(p)
+    r = build(p, overwrite=a.force, replace_edited=a.replace_edited)
+    if r.get("status") == "PRPROJ_BUILT":
+        set_status(p, "PROJECT_ASSEMBLED", "native .prproj built in Premiere via WhyNot Cut Bridge", "premiere_native", [r["project"]])
+    out(r)
+
+
+def cmd_ppro_frames(a):
+    from lib.ppro_build import export_frames
+    out(export_frames(P(a)))
+
+
+def cmd_audio_clean(a):
+    from lib.audio_clean import clean, detect_pauses, verify_cuts
+    p = P(a)
+    src = main_footage(p, None)[0]
+    hum = "auto" if a.hum == "auto" else () if a.hum == "off" else tuple(range(int(a.hum) * 2, 501, int(a.hum)))
+    r = clean(p, src, nr_db=a.nr, expander=a.expander, hum_notches_hz=hum)
+    q = detect_pauses(p, min_pause_ms=a.min_pause, pad_ms=a.pad)
+    v = verify_cuts(p) if not a.no_verify else {"skipped": True}
+    out({"decisions": r.get("decisions"), "loudness": r.get("loudness"), "metrics": r["metrics"],
+         "regions_ms": r["regions_ms"], "pauses": len(q["pauses_ms"]),
+         "removed_ms": q["removed_ms"], "new_duration_ms": q["new_duration_ms"],
+         "cut_verification": {k: v.get(k) for k in ("ok", "verdict", "coverage", "orig_words", "tight_words", "missing")}})
+
+
+def cmd_mogrt_build(a):
+    from lib.mogrt_builder import build
+    out(build(P(a)))
+
+
+def cmd_ae_script(a):
+    from lib.ae_builder import generate
+    out(generate(P(a)))
+
+
+def cmd_ae_build(a):
+    from lib.ae_builder import generate, execute
+    p = P(a)
+    require_plan_approval(p)
+    g = generate(p)
+    r = execute(p, Path(g["jsx"]))
+    out({"generate": g, "execute": r})
+
+
+def cmd_ae_render(a):
+    from lib.ae_builder import render
+    out(render(P(a)))
+
+
+def cmd_ps_script(a):
+    from lib.ps_builder import generate
+    out(generate(P(a)))
+
+
+def cmd_ps_build(a):
+    from lib.ps_builder import generate, execute
+    p = P(a)
+    require_plan_approval(p)
+    g = generate(p)
+    out({"generate": g, "execute": execute(p, Path(g["jsx"])) if g["jobs"] else "no jobs"})
+
+
+def cmd_premiere(a):
+    from lib.premiere_xml import build_xml
+    p = P(a)
+    tm = build_xml(p, prefer_ae_renders=False)   # Premiere-only: brand stills, never stale AE renders
+    gen = [x for x in tm["media"]]
+    set_status(p, "ASSETS_GENERATED", f"{len(gen)} media referenced", "assets")
+    set_status(p, "PROJECT_ASSEMBLED", "FCP7 XML interchange built", "premiere", [tm["xml"]])
+    out(tm)
+
+
+def cmd_qc(a):
+    from lib.qc import run_qc
+    p = P(a)
+    r = run_qc(p)
+    set_status(p, "QC_PASSED" if r["ok"] else "BLOCKED", f"{len(r['failed'])} mandatory failures", "qc",
+               [p.p("08_quality_control/validation-report.md")],
+               blockers=[f"{f['check']}: {f['detail']}" for f in r["failed"]])
+    out({"ok": r["ok"], "failed": r["failed"],
+         "warnings": [c for c in r["checks"] if c["result"] in ("WARN", "MANUAL")]})
+
+
+def cmd_handoff(a):
+    from lib.handoff import build
+    p = P(a)
+    r = build(p)
+    st = load_status(p)
+    if st["status"] == "QC_PASSED":
+        set_status(p, "READY_FOR_HUMAN_EDITOR", "handoff package written", "handoff", list(r.values()))
+    out(r)
+
+
+def cmd_status(a):
+    out(load_status(P(a)))
+
+
+def _has_reference_videos(p: Paths) -> bool:
+    inv = read_json(p.output / "discovery/input-inventory.json", {"files": []})
+    return any(f["role"] == "editing_reference_video" for f in inv["files"])
+
+
+def _want_preview(p: Paths) -> bool:
+    from lib import settings as S
+    return bool(S.load(p.root).get("preview_video", True))
+
+
+def cmd_next(a):
+    """Tell Claude/the user what the next step is (resumable workflow)."""
+    p = P(a)
+    chk = [
+        ("discover", p.output / "discovery/input-inventory.json"),
+        ("client-db", p.client_db / "branding/brand-tokens.json"),
+        ("preflight", p.p("00_inputs/preflight.json")),
+        ("transcribe", p.p("02_transcription/transcript.json")),
+    ] + ([("ref-analyze", p.p("01_analysis/reference_analysis/reference-measurements.json"))]
+         if _has_reference_videos(p) else []) + [("AUTHOR " + f, p.p(f)) for f in SEMANTIC_FILES] + [
+        ("plan", p.p("01_analysis/timeline-spec.json")),
+        ("previews", p.p("08_quality_control/previews/_contact_sheet.jpg")),
+    ] + ([("preview-video (the editor watches the edit)", p.p(f"08_quality_control/preview/{p.video_id}_preview.mp4"))]
+         if _want_preview(p) else []) + [
+        ("PLAYBACK edit-plan.md to editor, then approve-plan", p.p("01_analysis/plan-approval.json")),
+        ("sfx", p.p("06_audio/sfx/sfx-library.json")),
+        ("ppro-build (needs Premiere + bridge; fallback: premiere)", p.p(f"07_premiere/project/{p.video_id}_{project_prefix()}_EDIT.prproj")),
+        ("ppro-frames, LOOK at every frame, verify --record", p.p("08_quality_control/visual-verification.json")),
+        ("qc", p.p("08_quality_control/qc-results.json")),
+        ("handoff", p.p("09_handoff/README.md")),
+    ]
+    todo = [name for name, f in chk if not Path(f).exists()]
+    # a step is STALE when something it depends on changed after it ran (e.g. audio re-cleaned after the plan)
+    from lib.verify import prproj_build_time
+    prj = p.p(f"07_premiere/project/{p.video_id}_{project_prefix()}_EDIT.prproj")
+
+    def t(f):
+        f = Path(f)
+        if f == prj and f.exists():
+            return prproj_build_time(p, f) or f.stat().st_mtime
+        return f.stat().st_mtime if f.exists() else None
+    audio, ed = p.p("06_audio/dialogue/pauses.json"), p.p("01_analysis/edit-decisions.json")
+    spec, prev = p.p("01_analysis/timeline-spec.json"), p.p("08_quality_control/previews/_contact_sheet.jpg")
+    vv, qcr, ho = p.p("08_quality_control/visual-verification.json"), p.p("08_quality_control/qc-results.json"), \
+        p.p("09_handoff/README.md")
+    pv = p.p(f"08_quality_control/preview/{p.video_id}_preview.mp4")
+    deps = [("plan", spec, [audio, ed]), ("previews", prev, [spec]),
+            ("preview-video (the editor watches the edit)", pv, [spec, prev]), ("ppro-build --force", prj, [spec, prev]),
+            ("ppro-frames, LOOK at every frame, verify --record", vv, [prj]), ("qc", qcr, [vv, prj]),
+            ("handoff", ho, [qcr])]
+    stale = []
+    for name, f, ups in deps:
+        tf = t(f)
+        if tf is None or name in todo:
+            continue
+        newer = [u.name for u in ups if t(u) and t(u) > tf + 1]
+        if newer or any(s_.split(" (")[0] in [n for n, f2, _ in deps if f2 in ups] for s_ in stale):
+            stale.append(f"{name} (older than {', '.join(newer) or 'a stale upstream step'})")
+    todo = [s_ for s_ in stale] + [n for n in todo if n not in [s_.split(" (")[0] for s_ in stale]]
+    status = load_status(p)["status"]
+    if stale and status in ("QC_PASSED", "DELIVERED"):
+        status = f"{status} (STALE: inputs changed since)"
+    out({"status": status, "profile": active_profile(p.root), "next": todo[0] if todo else "done",
+         "remaining": todo, "stale": stale})
+
+
+EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
+NO_ROOT = {"setup", "doctor", "model-download", "gpu-enable", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings"}
+NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox"}
+
+
+def cmd_setup(a):
+    """Idempotent machine setup: packages, ffmpeg, Premiere bridge, then the doctor report (never changes Adobe prefs)."""
+    from lib.onboard import doctor
+    from lib.ppro_bridge import install
+    from lib import plat
+    rep = {}
+    if not a.no_bridge and plat.newest_app("premiere"):
+        rep["bridge_install"] = install()
+    elif not a.no_bridge:
+        rep["bridge_install"] = "skipped: Premiere Pro not found on this computer"
+    rep["doctor"] = doctor()
+    rep["next"] = [f["fix"] for f in rep["doctor"]["fixes"]] or ["all set: run /whynot-cut:start or reel inbox"]
+    out(rep)
+
+
+def cmd_model_download(a):
+    """Download a Whisper model into the engine home once (ask the editor first: large-v3 is about 3 GB)."""
+    import time
+    from faster_whisper.utils import download_model
+    from lib.onboard import whisper_model_state
+    t0 = time.time()
+    path = download_model(a.model, cache_dir=str(ENV_DIR / "models"))
+    out({"model": a.model, "path": path, "elapsed_s": round(time.time() - t0, 1), "state": whisper_model_state()})
+
+
+def cmd_gpu_enable(a):
+    """Install NVIDIA's cuBLAS 12 (pip wheel, ~550 MB) into the engine so Whisper runs on an NVIDIA GPU.
+    Ask the editor first. macOS has no CUDA: Whisper stays on the CPU there."""
+    import subprocess
+    from lib import plat
+    before = plat.gpu_info()
+    if plat.IS_MAC or not before.get("cuda_devices"):
+        out({"gpu": before, "installed": [], "note": "no NVIDIA GPU visible to CTranslate2: nothing to install"})
+        return
+    pkgs = plat.CUDA_PIP["windows" if plat.IS_WIN else "linux"]
+    if before.get("cuda_libs_missing"):
+        r = subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *pkgs])
+        if r.returncode:
+            raise SystemExit(f"pip install {' '.join(pkgs)} failed (exit {r.returncode}); Whisper keeps using the CPU")
+    after = plat.gpu_info()
+    out({"gpu_before": before, "gpu": after, "installed": pkgs if before.get("cuda_libs_missing") else [],
+         "whisper_device": after.get("whisper_device")})
+
+
+def cmd_doctor(a):
+    from lib.onboard import doctor
+    out(doctor())
+
+
+def cmd_scaffold(a):
+    from lib.onboard import scaffold
+    if not a.root:
+        raise SystemExit("--root required: the new client folder to create, e.g. --root \"D:/Clients/Dr Sherif\"")
+    out(scaffold(Path(a.root), a.name))
+
+
+def cmd_inbox(a):
+    from lib.onboard import inbox
+    out(inbox(Path(a.root), refresh=not a.no_refresh))
+
+
+def cmd_preview_video(a):
+    from lib.preview_video import render
+    out(render(P(a), width=a.width, label=not a.no_label))
+
+
+def cmd_settings(a):
+    from lib import settings as S
+    from lib.plat import native_path
+    st = S.load(Path(a.root) if a.root else None)
+    if a.init:
+        folder = Path(native_path(a.init)).expanduser().resolve()
+        target = folder / ".claude" / S.FILE
+        if target.exists() and not a.force:
+            raise SystemExit(f"{target} exists (use --force to rewrite it; your values are kept unless overridden)")
+        base = S.load(folder) if target.exists() else dict(S.DEFAULTS)   # never copy another folder's values
+        vals = {k: v for k, v in base.items() if not k.startswith("_")}
+        st = base
+        for kv in a.set or []:
+            k, _, v = kv.partition("=")
+            k, val = k.strip(), S._parse_scalar(v)
+            if k not in S.DEFAULTS:
+                raise SystemExit(f"unknown preference {k!r}; known: {', '.join(S.DEFAULTS)}")
+            if k in S.CHOICES and str(val) not in S.CHOICES[k]:
+                raise SystemExit(f"{k}={val!r} is not one of {sorted(S.CHOICES[k])}")
+            if isinstance(S.DEFAULTS[k], bool) and not isinstance(val, bool):
+                raise SystemExit(f"{k} must be true or false")
+            vals[k] = val
+        S.save(target, vals, st.get("_notes", ""))
+        st = S.load(folder)
+    out(st)
+
+
+def cmd_profile(a):
+    """Show which client profile applies and where its values come from."""
+    from lib.common import shipped_profiles
+    root = Path(a.root).expanduser().resolve() if a.root else None
+    out({"active": active_profile(root) if root else None,
+         "layers": ["config/defaults"] + [str(d) for d in profile_dirs(root)] if root else ["config/defaults"],
+         "shipped_profiles": shipped_profiles(), "prefix": project_prefix()})
+
+
+def cmd_client_init(a):
+    """Create <client>/output/client_database/reel-profile/ from a shipped profile or the blank template."""
+    import shutil
+    p = Path(a.root).expanduser().resolve()
+    dst = p / CLIENT_PROFILE_REL
+    if dst.exists() and any(dst.iterdir()) and not a.force:
+        raise SystemExit(f"{dst} already exists (use --force to refresh from the template; existing files are kept as *.bak)")
+    src = PROFILES_DIR / (a.from_profile or "_template")
+    if not src.is_dir():
+        raise SystemExit(f"unknown profile {a.from_profile!r}; shipped: {[d.name for d in PROFILES_DIR.iterdir() if d.is_dir()]}")
+    dst.mkdir(parents=True, exist_ok=True)
+    written = []
+    for f in src.iterdir():
+        if f.name.startswith(".") or not f.is_file():
+            continue
+        t = dst / f.name
+        if t.exists():
+            t.rename(t.with_suffix(t.suffix + ".bak"))
+        shutil.copy2(f, t)
+        written.append(str(t))
+    pj = read_json(dst / "profile.json", {})
+    pj["id"] = a.id
+    if a.prefix:
+        pj["prefix"] = a.prefix
+    write_json(dst / "profile.json", pj)
+    out({"profile_dir": str(dst), "id": a.id, "from": src.name, "files": written,
+         "next": "Fill brand.json / transcription.json / glossary / notes.md from the client's own documents (never invent)."})
+
+
+def _utf8_stdio():
+    """Arabic in JSON output must not crash on Windows, where pipes default to the ANSI code page."""
+    for st in (sys.stdout, sys.stderr):
+        try:
+            st.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+def main():
+    _utf8_stdio()
+    import os
+    # Hugging Face "Xet" transfers died on a Windows test machine (WinError 10038) and left 3 MB partial model caches;
+    # plain HTTPS downloads work everywhere. WHYNOT_HF_XET=1 turns Xet back on.
+    if os.environ.get("WHYNOT_HF_XET") != "1":
+        os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--root", help="client folder containing assets/ and data/ (default: current folder if it has both)")
+    ap.add_argument("--video-id", help="stable project id (default: footage file stem)")
+    ap.add_argument("--profile", help="client profile id (default: client's reel-profile, else folder-name match)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name in ["discover", "client-db", "preflight", "transcribe", "transcript-correct", "transcript-verify", "transcript-relisten", "ref-analyze", "plan",
+                 "previews", "sfx", "approve-plan", "verify", "ppro-install", "ppro-status", "ppro-probe", "ppro-build", "ppro-frames", "mogrt-build", "audio-clean", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "premiere",
+                 "qc", "handoff", "status", "next", "setup", "profile", "client-init",
+                 "doctor", "scaffold", "inbox", "preview-video", "settings", "model-download", "gpu-enable"]:
+        sp = sub.add_parser(name)
+        # global options are accepted after the command too (`reel next --root X`), as the skills write them
+        sp.add_argument("--root", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        sp.add_argument("--video-id", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        sp.add_argument("--profile", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        if name in ("preflight", "transcribe"):
+            sp.add_argument("--footage")
+        if name == "transcribe":
+            sp.add_argument("--model", default=None, help="default: preferences whisper_model, else large-v3")
+            sp.add_argument("--language", default=None)
+            sp.add_argument("--force", action="store_true")
+        if name == "transcript-relisten":
+            sp.add_argument("--words", help="word ids, e.g. 79,80 (default: every flagged word)")
+            sp.add_argument("--model", default=None)
+        if name == "transcript-verify":
+            sp.add_argument("--by")
+            sp.add_argument("--note")
+        if name == "audio-clean":
+            sp.add_argument("--min-pause", type=int, default=250)
+            sp.add_argument("--pad", type=int, default=80)
+            sp.add_argument("--no-verify", action="store_true")
+            sp.add_argument("--nr", type=float, default=None,
+                            help="denoise strength in dB (default: 24, or none when the source is already clean; gentler: 16)")
+            sp.add_argument("--hum", default="auto", choices=["auto", "off", "50", "60"],
+                            help="mains-hum notches: measured (auto), none, or every harmonic of 50/60 Hz up to 500 Hz")
+            sp.add_argument("--expander", action="store_true", help="gentle downward expander between words (more noise reduction, can sound choppy)")
+        if name == "ppro-build":
+            sp.add_argument("--force", action="store_true")
+            sp.add_argument("--replace-edited", action="store_true",
+                            help="rebuild even though the editor saved changes in Premiere (only with their OK)")
+        if name == "approve-plan":
+            sp.add_argument("--by", required=True, choices=["editor", "delegated"])
+            sp.add_argument("--note")
+        if name == "verify":
+            sp.add_argument("--record", action="store_true")
+            sp.add_argument("--verdict", choices=["pass", "fail"])
+            sp.add_argument("--notes")
+            sp.add_argument("--by")
+            sp.add_argument("--sheet", help="evidence image to record against (e.g. Premiere frame sheet)")
+        if name in EXTRAS:
+            sp.add_argument("--extras", action="store_true", help="confirm the editor explicitly asked for After Effects/Photoshop")
+        if name == "setup":
+            sp.add_argument("--no-bridge", action="store_true")
+        if name == "client-init":
+            sp.add_argument("--id", required=True, help="profile id, kebab-case, e.g. dr-sherif")
+            sp.add_argument("--from-profile", help="copy a shipped profile instead of the blank template")
+            sp.add_argument("--prefix", help="file-name tag, e.g. SH -> C0001_SH_EDIT.prproj")
+            sp.add_argument("--force", action="store_true")
+        if name == "previews":
+            sp.add_argument("--no-composite", action="store_true")
+        if name == "model-download":
+            sp.add_argument("--model", default="large-v3", choices=["large-v3", "large-v3-turbo", "medium", "small"])
+        if name == "scaffold":
+            sp.add_argument("--name", help="client display name for START_HERE.md")
+        if name == "inbox":
+            sp.add_argument("--no-refresh", action="store_true", help="use the last discovery instead of rescanning")
+        if name == "preview-video":
+            sp.add_argument("--width", type=int, default=540)
+            sp.add_argument("--no-label", action="store_true")
+        if name == "settings":
+            sp.add_argument("--init", metavar="FOLDER", help="write FOLDER/.claude/whynot-cut.local.md")
+            sp.add_argument("--set", action="append", metavar="KEY=VALUE")
+            sp.add_argument("--force", action="store_true")
+    a = ap.parse_args()
+    if a.cmd in EXTRAS and not a.extras:
+        out({"blocked": f"`{a.cmd}` is an optional After Effects/Photoshop extra. The default pipeline is Premiere only.",
+             "how": "Only if the editor explicitly asked for AE/PS in this conversation, re-run with --extras."})
+        raise SystemExit(2)
+    a.root = resolve_root(a.root)
+    if a.cmd == "scaffold":
+        globals()["cmd_scaffold"](a)
+        return
+    if not a.root and a.cmd not in NO_ROOT:
+        cwd = Path.cwd()
+        if (cwd / "assets").is_dir() and (cwd / "data").is_dir():
+            a.root = str(cwd)
+        else:
+            known = [p.name for p in client_folders(clients_root())]
+            raise SystemExit("--root required (client folder containing assets/ and data/)"
+                             + (f"; client folders in {clients_root()}: {', '.join(known)}" if known else ""))
+    set_context(a.root, a.profile)
+    if not a.video_id and a.cmd not in NO_ID:
+        inv = read_json(Path(a.root).expanduser() / "output/discovery/input-inventory.json")
+        src = [f for f in (inv or {}).get("files", []) if f["role"] == "source_footage"]
+        if len(src) == 1:
+            a.video_id = slug(Path(src[0]["path"]).stem)
+        else:
+            raise SystemExit("--video-id required (found %d source files; `reel inbox` lists them)" % len(src))
+    globals()["cmd_" + a.cmd.replace("-", "_")](a)
+
+
+if __name__ == "__main__":
+    main()

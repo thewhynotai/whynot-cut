@@ -1,0 +1,15 @@
+{
+  "id": null,
+  "display_name": null,
+  "prefix": "RE",
+  "languages": [
+    "ar",
+    "en"
+  ],
+  "rtl": true,
+  "speciality": null,
+  "match": {
+    "folder_contains": []
+  },
+  "domain": null
+}

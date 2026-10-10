@@ -1,0 +1,13 @@
+{
+  "note": "No house style yet. Derive it from the client's reference videos (ref-analyze) and the editor's feedback, then record it in the client's reel-profile/style.json.",
+  "remove_pauses": null,
+  "native_caption_track": false,
+  "captions_hidden_during": [
+    "broll_card",
+    "logo_outro",
+    "hook_title",
+    "statement_highlight",
+    "term_callout",
+    "checklist"
+  ]
+}

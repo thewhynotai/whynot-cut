@@ -1,0 +1,16 @@
+{
+  "max_chars_per_line": 32,
+  "max_lines": 2,
+  "max_cue_ms": 5500,
+  "min_cue_ms": 700,
+  "short_max_chars": 18,
+  "short_max_words": 4,
+  "safe_area": {"left": 90, "right": 90, "top": 250, "bottom": 420, "note": "1080x1920 px; bottom keeps clear of platform UI"},
+  "caption_y_center": 1310,
+  "rtl_rules": [
+    "Store text in logical (spoken) order; never pre-reverse strings in SRT/JSON.",
+    "In After Effects/Premiere use the Middle Eastern / South Asian text engine with RTL paragraph direction.",
+    "Latin terms inside Arabic lines stay LTR runs; do not split a Latin term across lines.",
+    "Never break a line between a number and its unit, or inside a Latin medical term."
+  ]
+}

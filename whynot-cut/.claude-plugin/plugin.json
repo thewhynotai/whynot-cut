@@ -1,0 +1,24 @@
+{
+  "name": "whynot-cut",
+  "displayName": "WhyNot Cut",
+  "version": "2.0.0",
+  "description": "Raw footage in, Premiere project out. Why not? AI post-production for vertical talking-head reels (Arabic/English) on macOS and Windows: guided setup, drop-in client folders, Whisper transcript, dialogue cleanup and pause removal, story-driven brand graphics and animated captions, a watchable preview video, a native Adobe Premiere Pro build through a bridge panel, and evidence-based QC. A lead-editor skill coordinates 14 specialist agents; hooks keep client sources read-only.",
+  "author": { "name": "The Why Not AI", "email": "info@thewhynot.ai", "url": "https://thewhynot.ai/" },
+  "homepage": "https://thewhynot.ai/",
+  "license": "UNLICENSED",
+  "keywords": ["video-editing", "premiere-pro", "adobe", "reels", "arabic", "rtl", "captions", "whisper", "post-production", "windows", "macos"],
+  "userConfig": {
+    "clients_root": {
+      "type": "directory",
+      "title": "Client folders location",
+      "description": "Folder that contains your client folders (each with assets/ and data/), e.g. D:\\WhyNot Clients or ~/Documents/WhyNot Clients. /whynot-cut:start can set this up for you.",
+      "required": false
+    },
+    "engine_home": {
+      "type": "directory",
+      "title": "Engine data folder",
+      "description": "Where the Python environment, Whisper models (~3 GB) and the Premiere job queue live. Leave empty for ~/.whynot-cut (an existing ~/.reel-editor install is reused).",
+      "required": false
+    }
+  }
+}

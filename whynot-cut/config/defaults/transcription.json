@@ -1,0 +1,13 @@
+{
+  "backend": "faster-whisper",
+  "default_model": "large-v3",
+  "fallback_models": [
+    "large-v3-turbo",
+    "medium"
+  ],
+  "compute_type": "int8",
+  "language": null,
+  "low_confidence_threshold": 0.5,
+  "initial_prompt": null,
+  "initial_prompt_note": "Vocabulary hint set per client profile (name + specialty from the client's own brief). It biases spelling only; never used to insert content. null = disabled."
+}

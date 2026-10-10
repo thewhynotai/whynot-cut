@@ -1,0 +1,36 @@
+---
+name: status
+description: "This skill should be used when the editor asks where a video stands — \"is it done?\", \"what's left before I send it?\", \"status of C0238\", \"can I render now?\". Gives an evidence-backed Verified / Not verified / Needs you answer without changing anything."
+argument-hint: "[clip id] [client folder]"
+allowed-tools: Bash(reel *), PowerShell(reel *)
+---
+
+# Status check (read-only)
+
+1. Run, in this message, so the evidence is fresh:
+   ```bash
+   reel next --root "<CLIENT_FOLDER>" --video-id <ID>
+   reel qc   --root "<CLIENT_FOLDER>" --video-id <ID>
+   ```
+   `next` lists `stale` steps: anything whose inputs changed after it ran (e.g. audio re-cleaned after the plan).
+   A stale step means the earlier "done" no longer holds.
+2. Read these and compare their timestamps (a verdict older than the latest build is stale):
+   - `08_quality_control/qc-results.json` and `validation-report.md`
+   - `08_quality_control/visual-verification.json` (verdict and date)
+   - `07_premiere/ppro-build-result.json` (read-back checks)
+   - `01_analysis/plan-approval.json` (still matches the current plan?)
+   - `02_transcription/subtitle-review.md` (unconfirmed words)
+   - `01_analysis/medical-content-review.md` (approvals pending)
+   - `06_audio/dialogue/dialogue-clean-report.json` and `cut-verification.json`
+   - `08_quality_control/preview/preview-result.json` (a preview newer than the plan, for the editor to watch)
+3. Answer in the report format:
+   - **Verified**: only what the commands you just ran or the files you just read prove. Name the evidence.
+   - **Not verified**: anything stale or unchecked, and why.
+   - **Needs you**:
+     - words to confirm by ear
+     - medical approvals
+     - music
+     - final mix and render
+
+Say "ready to send" only if `qc` passed just now **and** nothing in "Needs you" blocks it. Don't fix anything here. If something is
+broken, say what and offer `/whynot-cut:revise` or `/whynot-cut:edit`.

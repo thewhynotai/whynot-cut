@@ -1,0 +1,36 @@
+{
+  "source": "User-supplied Premiere Pro sequence settings (master prompt Part 11). Do not change automatically.",
+  "general": {
+    "editing_mode": "Custom",
+    "timebase": 24,
+    "ntsc": false,
+    "frame_width": 1080,
+    "frame_height": 1920,
+    "aspect_ratio": "9:16",
+    "pixel_aspect_ratio": "Square Pixels (1.0)",
+    "fields": "No Fields (Progressive Scan)",
+    "display_format": "24 fps Timecode",
+    "scale_motion_effects_proportionally": true
+  },
+  "audio": {
+    "channel_format": "Stereo",
+    "channels": 2,
+    "sample_rate": 48000,
+    "display_format": "Audio Samples"
+  },
+  "video_previews": {
+    "preview_file_format": "QuickTime",
+    "codec": "Apple ProRes 422 LT",
+    "width": 1080,
+    "height": 1920,
+    "maximum_bit_depth": false,
+    "maximum_render_quality": false,
+    "composite_in_linear_color": true
+  },
+  "after_effects_comp": {"width": 1080, "height": 1920, "fps": 24, "pixel_aspect": 1.0},
+  "interchange_coverage": {
+    "set_by_fcp7_xml": ["timebase", "frame_width", "frame_height", "pixel_aspect_ratio", "fields", "audio sample_rate", "audio channels/stereo", "track layout", "clip positions", "basic motion scale/position"],
+    "manual_in_premiere": ["editing_mode=Custom (Premiere may label imported XML sequences 'Custom' automatically; verify)", "display formats (video/audio)", "preview file format + ProRes 422 LT codec", "maximum bit depth / render quality", "composite in linear color", "scale motion effects proportionally"],
+    "manual_steps": "Sequence > Sequence Settings… then set the 'manual_in_premiere' items to the values above. See references/premiere-assembly.md."
+  }
+}
