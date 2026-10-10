@@ -16,10 +16,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-from .common import SEQ_FPS, Paths, ffmpeg_exe, log, now_iso, read_json, write_json
+from .common import fps_arg, seq_fps, Paths, ffmpeg_exe, log, now_iso, read_json, write_json
 
 SR = 48000
-F = 1 / SEQ_FPS
+F = 1 / 24   # animation time unit (the Premiere JSX presets use the same 1/24 s), not the sequence rate
 
 
 # --------------------------------------------------------------------------- animation (same presets as nh_ppro_lib.jsx)
@@ -111,16 +111,17 @@ def build_audio(paths: Paths, spec: dict, out: Path, src_video: Path) -> Path:
         dia = _mono(clean)
     else:   # no cleanup yet: the camera's own audio
         raw = out.with_name("_camera_audio.wav")
-        subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(src_video), "-map", "0:a:0", "-ac", "1",
+        off = ["-ss", f"{(spec.get('source_in_ms') or 0) / 1000:.3f}"] if spec.get("source_in_ms") else []
+        subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", *off, "-i", str(src_video), "-map", "0:a:0", "-ac", "1",
                         "-ar", str(SR), "-c:a", "pcm_s16le", str(raw)], check=True)
         dia = _mono(raw)
-    n = round(spec["duration_frames"] * SR / SEQ_FPS)
+    n = round(spec["duration_frames"] * SR / seq_fps())
     mix = np.zeros(n, dtype=np.float32)
     fade = int(0.005 * SR)
     for seg in spec["main_segments"]:
-        a = round(seg["start_frame"] * SR / SEQ_FPS)
-        ln = round((seg["end_frame"] - seg["start_frame"]) * SR / SEQ_FPS)
-        s0 = round(seg.get("src_in_ms", seg["start_frame"] * 1000 / SEQ_FPS) * SR / 1000)
+        a = round(seg["start_frame"] * SR / seq_fps())
+        ln = round((seg["end_frame"] - seg["start_frame"]) * SR / seq_fps())
+        s0 = round(seg.get("src_in_ms", seg["start_frame"] * 1000 / seq_fps()) * SR / 1000)
         piece = dia[s0:s0 + ln].copy()
         if len(piece) > 2 * fade:
             piece[:fade] *= np.linspace(0, 1, fade)
@@ -131,7 +132,7 @@ def build_audio(paths: Paths, spec: dict, out: Path, src_video: Path) -> Path:
         if not f.exists():
             continue
         x = _mono(f) * (10 ** (c.get("gain_db", -14) / 20))
-        a = round(c["start_frame"] * SR / SEQ_FPS)
+        a = round(c["start_frame"] * SR / seq_fps())
         if a < n:
             mix[a:a + len(x)] += x[:n - a]
     peak = float(np.max(np.abs(mix))) if len(mix) else 0
@@ -174,10 +175,11 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
     s = (spec.get("base_scale_percent") or min(1080 / dw, 1920 / dh) * 100) / 100 * k
     cw_, ch_ = max(2, round(dw * s / 2) * 2), max(2, round(dh * s / 2) * 2)
     box, boy = spec.get("base_offset_x", 0.0), spec.get("base_offset_y", 0.0)
-    dec = subprocess.Popen([ff, "-loglevel", "error", "-i", str(src), "-an", "-vf", f"fps={SEQ_FPS},scale={cw_}:{ch_}",
+    off = ["-ss", f"{(spec.get('source_in_ms') or 0) / 1000:.3f}"] if spec.get("source_in_ms") else []
+    dec = subprocess.Popen([ff, "-loglevel", "error", *off, "-i", str(src), "-an", "-vf", f"fps={fps_arg()},scale={cw_}:{ch_}",
                             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
     enc = subprocess.Popen([ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-                            "-r", str(SEQ_FPS), "-i", "-", "-i", str(wav), "-c:v", "libx264", "-preset", "veryfast",
+                            "-r", fps_arg(), "-i", "-", "-i", str(wav), "-c:v", "libx264", "-preset", "veryfast",
                             "-crf", "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-shortest",
                             "-movflags", "+faststart", str(mp4)], stdin=subprocess.PIPE)
     fsize = cw_ * ch_ * 3
@@ -197,7 +199,7 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
             cx, cy = (pp.get("crop_center") or [0.5, 0.5])[:2]
             bdec[eid] = subprocess.Popen(
                 [ff, "-loglevel", "error", "-ss", str(float(pp.get("in", 0) or 0)), "-i", str(paths.root / pp["video"]), "-an",
-                 "-vf", f"fps={SEQ_FPS},scale={W}:{H}:force_original_aspect_ratio=increase,"
+                 "-vf", f"fps={fps_arg()},scale={W}:{H}:force_original_aspect_ratio=increase,"
                         f"crop={W}:{H}:x='(iw-{W})*{float(cx)}':y='(ih-{H})*{float(cy)}'",
                  "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
         buf = bdec[eid].stdout.read(W * H * 3)
@@ -214,8 +216,8 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
             while si < len(segs) - 1 and f >= segs[si]["end_frame"]:
                 si += 1
             seg = segs[si]
-            src_ms = seg.get("src_in_ms", seg["start_frame"] * 1000 / SEQ_FPS) + (f - seg["start_frame"]) * 1000 / SEQ_FPS
-            want = int(round(src_ms * SEQ_FPS / 1000))
+            src_ms = seg.get("src_in_ms", seg["start_frame"] * 1000 / seq_fps()) + (f - seg["start_frame"]) * 1000 / seq_fps()
+            want = int(round(src_ms * seq_fps() / 1000))
             while src_idx < want:
                 buf = dec.stdout.read(fsize)
                 if len(buf) < fsize:
@@ -244,7 +246,7 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
                     if bf is not None:
                         frame = bf
             frame = frame.convert("RGBA")
-            t = f / SEQ_FPS
+            t = f / seq_fps()
             for g in layers:
                 if g["start_s"] <= t < g["end_s"]:
                     im = _apply(stills.get(g["png"]), anim_state(g, t - g["start_s"]), k)
@@ -264,7 +266,7 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
         wav.unlink(missing_ok=True)
         (out_dir / "_camera_audio.wav").unlink(missing_ok=True)
     ok = enc.returncode == 0 and mp4.exists() and mp4.stat().st_size > 1000
-    res = {"ok": ok, "video": str(mp4), "size": f"{W}x{H}", "frames": total, "seconds": round(total / SEQ_FPS, 2),
+    res = {"ok": ok, "video": str(mp4), "size": f"{W}x{H}", "frames": total, "seconds": round(total / seq_fps(), 2),
            "layers": len(layers), "elapsed_s": round(time.time() - t0, 1), "at": now_iso(),
            "dialogue": "cleaned" if paths.p("06_audio/dialogue/dialogue_clean.wav").exists() else "camera (not cleaned yet)",
            "note": "Proxy preview for review only. The deliverable is the Premiere project; the editor renders the final."}

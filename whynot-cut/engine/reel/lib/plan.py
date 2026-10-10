@@ -11,7 +11,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from .common import (still_category, SEQ_FPS, Paths, fmt_ts, frame_to_tc, load_config, ms_to_frame, now_iso,
+from .common import (still_category, seq_fps, Paths, fmt_ts, frame_to_tc, load_config, ms_to_frame, now_iso,
                      parse_ts, read_json, write_json)
 
 SFX_TRACK = {"whoosh": "A04", "whoosh_soft": "A04", "riser_soft": "A04", "flash": "A04",
@@ -48,6 +48,52 @@ def onscreen_strings(params) -> list:
     return out
 
 
+def subtract_ranges(keep: list, cuts: list) -> list:
+    """keep ranges minus cut ranges (all [a, b) in ms), in order, dropping slivers under 40 ms."""
+    out = []
+    for a, b in keep:
+        segs = [(a, b)]
+        for c0, c1 in sorted(cuts):
+            nxt = []
+            for s, e in segs:
+                if c1 <= s or c0 >= e:
+                    nxt.append((s, e))
+                    continue
+                if c0 > s:
+                    nxt.append((s, c0))
+                if c1 < e:
+                    nxt.append((c1, e))
+            segs = nxt
+        out += [(int(s), int(e)) for s, e in segs if e - s >= 40]
+    return out
+
+
+def word_cut_ranges(words: list, cut_words: list, dur_ms: int, pad_ms: int = 30) -> tuple[list, list, list]:
+    """global.cut_words -> ([a, b] ms ranges, cut word records, errors). Each word is cut from just before it starts to
+    just after it ends, never into its neighbours, so the words around it stay whole.
+    Entries: a word id, or {"word_ids": [..], "reason": "..."}."""
+    by_id = {w["id"]: w for w in words}
+    order = sorted(by_id)
+    pos = {wid: i for i, wid in enumerate(order)}
+    ranges, cut, errors = [], [], []
+    for c in cut_words:
+        ids = c.get("word_ids", []) if isinstance(c, dict) else [c]
+        reason = c.get("reason", "") if isinstance(c, dict) else ""
+        for wid in ids:
+            w = by_id.get(wid)
+            if not w:
+                errors.append(f"cut_words: word {wid} not in words.json")
+                continue
+            i = pos[wid]
+            prev = by_id[order[i - 1]] if i > 0 else None
+            nxt = by_id[order[i + 1]] if i + 1 < len(order) else None
+            a = max(w["start_ms"] - pad_ms, prev["end_ms"] if prev else 0)
+            b = min(w["end_ms"] + pad_ms, nxt["start_ms"] if nxt else dur_ms)
+            ranges.append((a, max(a, b)))
+            cut.append({"word_id": wid, "word": w["word"], "start_ms": w["start_ms"], "reason": reason})
+    return ranges, cut, errors
+
+
 def to_ms(v) -> int:
     if isinstance(v, int):
         return v
@@ -74,6 +120,7 @@ def _transcript_text(paths: Paths) -> tuple[str, int]:
 
 
 def compile_plan(paths: Paths) -> dict:
+    FPS_ = seq_fps()   # the client's sequence rate (24, 25, 29.97 ...)
     ed = read_json(paths.p("01_analysis/edit-decisions.json"))
     if not ed:
         raise FileNotFoundError("01_analysis/edit-decisions.json missing — author it (see references/edit-decision-engine.md)")
@@ -187,7 +234,7 @@ def compile_plan(paths: Paths) -> dict:
                              "gain_db": g.get("sfx_gain_db", -14)})
                 for it in g.get("items", [])[1:] if t == "checklist" else []:
                     cues.append({"cue_id": f"SFX_{gid}_{it['frame']}", "kind": "tick",
-                                 "at_ms": round(it["frame"] * 1000 / SEQ_FPS), "related_visual": gid,
+                                 "at_ms": round(it["frame"] * 1000 / FPS_), "related_visual": gid,
                                  "decision_id": did, "segment_id": d.get("segment_id"), "auto": True, "gain_db": -18})
 
         for s in d.get("sound", []):
@@ -265,59 +312,72 @@ def compile_plan(paths: Paths) -> dict:
 
     # explicit source ranges on every V01 piece (identity mapping when pauses are kept)
     for s_ in merged:
-        s_["src_in_ms"] = s_["start_frame"] * 1000 / SEQ_FPS
-        s_["src_out_ms"] = s_["end_frame"] * 1000 / SEQ_FPS
+        s_["src_in_ms"] = s_["start_frame"] * 1000 / FPS_
+        s_["src_out_ms"] = s_["end_frame"] * 1000 / FPS_
     tmap, time_map_info = None, None
     rp = base.get("remove_pauses")
+    words_all = read_json(paths.p("02_transcription/words.json"), {"words": []})["words"]
+    wcut_ranges, words_cut, wcut_err = word_cut_ranges(words_all, base.get("cut_words") or [], dur_ms)
+    errors += wcut_err
+    pz = None
     if rp:
         pz = read_json(paths.p("06_audio/dialogue/pauses.json"))
         if not pz:
             errors.append("global.remove_pauses is set but 06_audio/dialogue/pauses.json is missing — run `reel audio-clean`")
-        else:
-            from .timemap import TimeMap
-            tmap = TimeMap(pz["keep_ms"], camera, tuple(rp.get("mask_scales", [1.0, 1.06])))
-            merged = tmap.pieces
-            time_map_info = {"keep_ms": pz["keep_ms"], "removed_ms": pz["removed_ms"], "cuts": len(pz["cuts_ms"]),
-                             "source_duration_ms": dur_ms, "sequence_frames": tmap.total_frames,
-                             "mask_scales": list(rp.get("mask_scales", [1.0, 1.06]))}
-            kept = []
-            for e in events:
-                e["src_start_ms"], e["src_end_ms"] = e["start_ms"], e["end_ms"]
-                if tmap.removed(e["start_ms"], e["end_ms"]):
-                    warnings.append(f"{e['event_id']} falls entirely inside removed pauses -> dropped")
-                    continue
-                e["start_ms"], e["end_ms"] = round(tmap.ms(e["src_start_ms"])), round(tmap.ms(e["src_end_ms"]))
-                e["start_frame"], e["end_frame"] = tmap.frame(e["src_start_ms"]), tmap.frame(e["src_end_ms"])
-                e["start_tc"], e["end_tc"] = frame_to_tc(e["start_frame"]), frame_to_tc(e["end_frame"])
-                for it in e["params"].get("items", []):
-                    it["src_frame"] = it["frame"]
-                    it["frame"] = tmap.frame(it["frame"] * 1000 / SEQ_FPS)
-                    it["rel_frame"] = it["frame"] - e["start_frame"]
-                kept.append(e)
-            events = kept
-            ev_by_id = {e["event_id"]: e for e in events}
-            broll_all = list(broll)
-            broll = [dict(b, sequence_start_frame=ev_by_id[b["asset_id"]]["start_frame"],
-                          duration_frames=ev_by_id[b["asset_id"]]["end_frame"] - ev_by_id[b["asset_id"]]["start_frame"])
-                     for b in broll if b["asset_id"] in ev_by_id]
-            for c in cues:
-                c["src_at_ms"] = c["at_ms"]
-                c["at_ms"] = round(tmap.ms(c["at_ms"]))
-            dropped = {b["asset_id"] for b in broll_all} - set(ev_by_id)
-            cues = [c for c in cues if c.get("related_visual") not in dropped]
-            # captions on the sequence clock
-            from . import srt as _srt
-            for name in ("subtitles", "captions-short"):
-                src_p = paths.p(f"02_transcription/{name}.srt")
-                if src_p.exists():
-                    out = []
-                    for q in _srt.read_srt(src_p):
-                        if tmap.removed(q["start_ms"], q["end_ms"]):
-                            continue
-                        out.append({"start_ms": round(tmap.ms(q["start_ms"])), "end_ms": round(tmap.ms(q["end_ms"])), "text": q["text"]})
-                    _srt.write_srt(paths.p(f"02_transcription/{name}-seq.srt"), out)
-            dur_f = tmap.total_frames
-            dur_ms = round(dur_f * 1000 / SEQ_FPS)
+    if (rp and pz) or wcut_ranges:
+        from .timemap import TimeMap
+        keep0 = pz["keep_ms"] if (rp and pz) else [[0, dur_ms]]
+        keep = subtract_ranges(keep0, wcut_ranges) if wcut_ranges else keep0
+        ms_ = tuple((rp or {}).get("mask_scales", [1.0, 1.06])) if isinstance(rp, dict) else (1.0, 1.06)
+        tmap = TimeMap(keep, camera, ms_)
+        merged = tmap.pieces
+        removed = dur_ms - sum(b - a for a, b in keep)
+        time_map_info = {"keep_ms": [list(k) for k in keep], "removed_ms": removed,
+                         "cuts": len(keep) - 1, "pause_cuts": len(pz["cuts_ms"]) if (rp and pz) else 0,
+                         "words_cut": words_cut, "source_duration_ms": dur_ms, "sequence_frames": tmap.total_frames,
+                         "mask_scales": list(ms_)}
+        kept = []
+        for e in events:
+            e["src_start_ms"], e["src_end_ms"] = e["start_ms"], e["end_ms"]
+            if tmap.removed(e["start_ms"], e["end_ms"]):
+                warnings.append(f"{e['event_id']} falls entirely inside removed pauses -> dropped")
+                continue
+            e["start_ms"], e["end_ms"] = round(tmap.ms(e["src_start_ms"])), round(tmap.ms(e["src_end_ms"]))
+            e["start_frame"], e["end_frame"] = tmap.frame(e["src_start_ms"]), tmap.frame(e["src_end_ms"])
+            e["start_tc"], e["end_tc"] = frame_to_tc(e["start_frame"]), frame_to_tc(e["end_frame"])
+            for it in e["params"].get("items", []):
+                it["src_frame"] = it["frame"]
+                it["frame"] = tmap.frame(it["frame"] * 1000 / FPS_)
+                it["rel_frame"] = it["frame"] - e["start_frame"]
+            kept.append(e)
+        events = kept
+        ev_by_id = {e["event_id"]: e for e in events}
+        broll_all = list(broll)
+        broll = [dict(b, sequence_start_frame=ev_by_id[b["asset_id"]]["start_frame"],
+                      duration_frames=ev_by_id[b["asset_id"]]["end_frame"] - ev_by_id[b["asset_id"]]["start_frame"])
+                 for b in broll if b["asset_id"] in ev_by_id]
+        for c in cues:
+            c["src_at_ms"] = c["at_ms"]
+            c["at_ms"] = round(tmap.ms(c["at_ms"]))
+        dropped = {b["asset_id"] for b in broll_all} - set(ev_by_id)
+        cues = [c for c in cues if c.get("related_visual") not in dropped]
+        # captions on the sequence clock (rebuilt without the cut words, so they never show on screen)
+        from . import srt as _srt
+        from .transcribe import caption_cues
+        gone = {c["word_id"] for c in words_cut}
+        rebuilt = dict(zip(("subtitles", "captions-short"), caption_cues([w for w in words_all if w["id"] not in gone]))) \
+            if gone else {}
+        for name in ("subtitles", "captions-short"):
+            src_p = paths.p(f"02_transcription/{name}.srt")
+            if src_p.exists() or name in rebuilt:
+                out = []
+                for q in (rebuilt[name] if name in rebuilt else _srt.read_srt(src_p)):
+                    if tmap.removed(q["start_ms"], q["end_ms"]):
+                        continue
+                    out.append({"start_ms": round(tmap.ms(q["start_ms"])), "end_ms": round(tmap.ms(q["end_ms"])), "text": q["text"]})
+                _srt.write_srt(paths.p(f"02_transcription/{name}-seq.srt"), out)
+        dur_f = tmap.total_frames
+        dur_ms = round(dur_f * 1000 / FPS_)
 
     for c in cues:
         c["start_frame"] = ms_to_frame(c["at_ms"])
@@ -328,7 +388,7 @@ def compile_plan(paths: Paths) -> dict:
     music = dict(ed.get("music", {"status": "NO_MUSIC_SUPPLIED"}))
     cps = []
     for cp in music.get("cue_points", []):
-        src_ms = to_ms(cp["at"]) if cp.get("at") is not None else int(cp.get("frame", 0)) * 1000 / SEQ_FPS
+        src_ms = to_ms(cp["at"]) if cp.get("at") is not None else int(cp.get("frame", 0)) * 1000 / FPS_
         f = tmap.frame(src_ms) if tmap else ms_to_frame(src_ms)
         if f >= dur_f:
             warnings.append(f"music cue '{cp.get('label', '')}' at source {src_ms / 1000:.2f}s falls after the end; placed on the last frame")
@@ -338,10 +398,16 @@ def compile_plan(paths: Paths) -> dict:
     caption_hl = [{"text": h["text"], "at_ms": to_ms(h["at"]) if h.get("at") else None}
                   for h in ed.get("caption_highlights", [])]
 
-    spec = {"generated": now_iso(), "video_id": paths.video_id, "fps": SEQ_FPS,
+    from .common import source_range
+    rng = source_range(paths)
+    if rng and base.get("main_footage") and Path(base["main_footage"]).name != Path(rng["footage"]).name:
+        errors.append(f"global.main_footage {base['main_footage']} is not this video's range file {rng['footage']} "
+                      "(`reel range`)")
+    spec = {"generated": now_iso(), "video_id": paths.video_id, "fps": FPS_,
+            "source_in_ms": int(rng.get("in_ms", 0)), "source_range": rng or None,
             "duration_ms": dur_ms, "duration_frames": dur_f,
-            "rounding_policy": "frame = round_half_up(ms*24/1000) from absolute time (no accumulation)",
-            "main_footage": base.get("main_footage"), "base_scale_percent": bsp,
+            "rounding_policy": f"frame = round_half_up(ms*{FPS_:.5g}/1000) from absolute time (no accumulation)",
+            "main_footage": base.get("main_footage") or rng.get("footage"), "base_scale_percent": bsp,
             "base_offset_x": float(box or 0.0), "base_offset_y": float(boy or 0.0), "framing": framing,
             "main_segments": merged, "events": sorted(events, key=lambda e: (e["start_frame"], e["track"])),
             "caption_source": "02_transcription/captions-short-seq.srt" if tmap else "02_transcription/captions-short.srt",
@@ -369,7 +435,7 @@ def compile_plan(paths: Paths) -> dict:
         write_json(paths.p("03_broll/broll-manifest.json"), {"generated": now_iso(), "assets": broll})
         sfx_dir = "06_audio/sfx"
         write_json(paths.p("06_audio/audio-cue-sheet.json"), {
-            "generated": now_iso(), "fps": SEQ_FPS, "cues": [dict(c, **{
+            "generated": now_iso(), "fps": FPS_, "cues": [dict(c, **{
                 "duration_frames": None, "audio_type": "sfx", "source_file": f"{sfx_dir}/{c['kind']}.wav",
                 "fade": "baked into generated file (short attack, exponential tail)",
                 "gain_instructions": f"clip gain {c['gain_db']} dB; keep dialogue peaks dominant (-6 dBFS dialogue / SFX ≤ -14 dBFS)"})
@@ -399,7 +465,8 @@ def write_edit_plan(paths: Paths) -> Path:
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     cues = read_json(paths.p("06_audio/audio-cue-sheet.json"), {"cues": []})["cues"]
     dur = spec["duration_frames"] or 1
-    cover = sum(e["end_frame"] - e["start_frame"] for e in spec["events"] if e["template"] in ("broll_card", "logo_outro"))
+    cover = sum(e["end_frame"] - e["start_frame"] for e in spec["events"]
+                if e["template"] in ("broll_card", "broll_video", "logo_outro"))
     pend = [e for e in spec["events"] if e["approval_required"]]
     L = [f"# Edit Plan — {paths.video_id} (for editor approval)", "",
          f"Runtime {frame_to_tc(dur)} · {len(spec['events'])} graphics · "
@@ -414,6 +481,11 @@ def write_edit_plan(paths: Paths) -> Path:
         L.append(f"| {d['decision_id']} | {frame_to_tc(ms_to_frame(d['_start_ms'] if '_start_ms' in d else to_ms(d['start'])))} | "
                  f"{cam}{', '.join(g['template'] for g in gfx) or 'camera only'} | {text[:90]} | "
                  f"{d.get('evidence', '')[:70]} | {'YES' if any(g['approval_required'] for g in gfx) or d.get('approval_required') else ''} |")
+    wc = (spec.get("time_map") or {}).get("words_cut") or []
+    if wc:
+        L += ["", f"## Words cut ({len(wc)}): picture, sound and captions", ""]
+        L += [f"- {fmt_ts(w['start_ms'], '.')} «{w['word']}» (word {w['word_id']}){' — ' + w['reason'] if w.get('reason') else ''}"
+              for w in wc]
     L += ["", "## Not included (and why)", ""]
     sem = read_json(paths.p("01_analysis/transcript-semantic-analysis.json"), {})
     L += [f"- {o.get('concept')}: {o.get('reason')}" for o in sem.get("broll_opportunities", [])

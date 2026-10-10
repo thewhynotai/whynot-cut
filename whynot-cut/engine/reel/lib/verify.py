@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import still_category, Paths, ffmpeg_exe, frame_to_tc, now_iso, read_json, run, write_json, write_text
+from .common import seq_fps, still_category, Paths, ffmpeg_exe, frame_to_tc, now_iso, read_json, run, write_json, write_text
 
 SAFE = {"x0": 60, "x1": 1020, "y0": 150, "y1": 1720}
 FULLSCREEN = {"broll_card", "broll_video", "logo_outro", "flash_transition"}
@@ -94,8 +94,8 @@ def build(paths: Paths) -> dict:
         if e["template"] == "flash_transition":
             continue
         n = e["end_frame"] - e["start_frame"]
-        rel = round(n * 0.7) / 24
-        t = e["start_ms"] / 1000 + rel
+        rel = round(n * 0.7) / seq_fps()
+        t = e["start_ms"] / 1000 + rel + (spec.get("source_in_ms") or 0) / 1000
         mov = paths.p(f"04_after_effects/compositions/{e['event_id']}.mov")
         out = vdir / f"{e['event_id']}.jpg"
         source = "AE render"
@@ -137,10 +137,11 @@ def build(paths: Paths) -> dict:
         for c in picks:
             t = (c["start_ms"] + c["end_ms"]) / 2000
             out = vdir / f"CAP_{int(t * 1000):06d}.jpg"
-            run([ff, "-y", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(src), "-ss", f"{t:.3f}", "-i", str(cap),
+            ts = t + (spec.get("source_in_ms") or 0) / 1000
+            run([ff, "-y", "-loglevel", "error", "-ss", f"{ts:.3f}", "-i", str(src), "-ss", f"{t:.3f}", "-i", str(cap),
                  "-filter_complex", f"[0]scale={W}:{H}[b];[b][1]overlay,scale=360:640", "-frames:v", "1", str(out)], check=False)
             rows.append({"tile": len(tiles) + 1, "event": "CAPTIONS", "template": "highlight_caption",
-                         "tc": frame_to_tc(round(t * 24)), "source": "AE render",
+                         "tc": frame_to_tc(round(t * seq_fps())), "source": "AE render",
                          "expected_text": c["text"].replace("\n", " ") + "  (may be hidden if a graphic carries the words)"})
             tile(out, f"{len(tiles) + 1} CAP")
     for psd_prev in sorted(paths.p("05_photoshop/layered-assets").glob("*_preview.png")):

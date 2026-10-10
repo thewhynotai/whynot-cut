@@ -397,7 +397,7 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
                 ip = paths.p(f"03_broll/{cat}/{ev['event_id']}_i{k + 1}.png")
                 render_event(one, tpls["checklist"], b, assets, logo, ip)
                 outs.append(str(ip))
-        bg = grab_frame(main, mid) if composite_preview else None
+        bg = grab_frame(main, mid + int(spec.get("source_in_ms") or 0)) if composite_preview else None
         if bg is not None:  # QC composite only: graphic over the actual frame (frosted look simulated)
             import tempfile
             fd, tmp = tempfile.mkstemp(suffix=".png")

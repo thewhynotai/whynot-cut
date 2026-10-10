@@ -17,12 +17,13 @@ ARABIC = re.compile(r"[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]")
 LATIN = re.compile(r"[A-Za-z]")
 
 
-def extract_audio(src: Path, dst: Path) -> Path:
+def extract_audio(src: Path, dst: Path, rng: dict | None = None) -> Path:
+    from .common import range_input_args
     ff = ffmpeg_exe()
     if not ff:
         raise RuntimeError("ffmpeg not available (run `reel setup`)")
     dst.parent.mkdir(parents=True, exist_ok=True)
-    run([ff, "-y", "-hide_banner", "-loglevel", "error", "-i", str(src),
+    run([ff, "-y", "-hide_banner", "-loglevel", "error", *range_input_args(rng or {}), "-i", str(src),
          "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(dst)])
     return dst
 
@@ -85,8 +86,10 @@ def _glossary_terms() -> list[str]:
 def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
                language: str | None = None, initial_prompt: str | None = None,
                compute_type: str = "int8") -> dict:
+    from .common import source_range
     out = paths.p("02_transcription")
-    wav = extract_audio(source_video, out / "dialogue_16k_mono.wav")
+    rng = source_range(paths)
+    wav = extract_audio(source_video, out / "dialogue_16k_mono.wav", rng)
     if initial_prompt is None:
         initial_prompt = load_config("transcription.json").get("initial_prompt")
 
@@ -109,7 +112,7 @@ def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
     log(paths, f"Transcribed {len(segs)} segments / {len(words)} words in {elapsed}s; "
                f"lang={info.language} p={info.language_probability:.2f}")
 
-    meta = {"source_video": str(source_video), "audio": str(wav), "backend": "faster-whisper",
+    meta = {"source_video": str(source_video), "source_range": rng or None, "audio": str(wav), "backend": "faster-whisper",
             "model": model_size, "compute_type": compute_type, "device": device,
             "language": info.language, "language_probability": round(info.language_probability, 3),
             "duration_ms": int(round(info.duration * 1000)), "initial_prompt": initial_prompt,
@@ -146,6 +149,19 @@ def _run_whisper(model, wav: Path, language, initial_prompt):
     return segs, words, info
 
 
+def caption_cues(words: list) -> tuple[list, list]:
+    """(subtitles, short captions) built from word timing with the client's subtitle style."""
+    cfg = load_config("subtitle-style.json")
+    cues = srtlib.build_cues_from_words(words, max_chars=cfg.get("max_chars_per_line", 32),
+                                        max_lines=cfg.get("max_lines", 2),
+                                        max_dur_ms=cfg.get("max_cue_ms", 4000),
+                                        min_dur_ms=cfg.get("min_cue_ms", 700))
+    short = srtlib.build_cues_from_words(words, max_chars=cfg.get("short_max_chars", 18),
+                                         max_lines=1, max_dur_ms=1800, min_dur_ms=300,
+                                         max_words=cfg.get("short_max_words", 4))
+    return cues, short
+
+
 def finalize(paths: Paths, meta: dict, segs: list, words: list) -> dict:
     out = paths.p("02_transcription")
     cfg = load_config("subtitle-style.json")
@@ -155,18 +171,14 @@ def finalize(paths: Paths, meta: dict, segs: list, words: list) -> dict:
     write_text(out / "transcript.txt", "\n".join(
         f"[{fmt_ts(s['start_ms'], '.')} --> {fmt_ts(s['end_ms'], '.')}] {s['text']}" for s in segs) + "\n")
 
-    # 1) Standard subtitles: readable 1-2 line cues built from word timing.
-    cues = srtlib.build_cues_from_words(words, max_chars=cfg.get("max_chars_per_line", 32),
-                                        max_lines=cfg.get("max_lines", 2),
-                                        max_dur_ms=cfg.get("max_cue_ms", 4000),
-                                        min_dur_ms=cfg.get("min_cue_ms", 700))
-    srtlib.write_srt(out / "subtitles.srt", cues)
-    # 2) Short "social" captions (1-4 words) for animated caption graphics.
-    short = srtlib.build_cues_from_words(words, max_chars=cfg.get("short_max_chars", 18),
-                                         max_lines=1, max_dur_ms=1800, min_dur_ms=300,
-                                         max_words=cfg.get("short_max_words", 4))
-    srtlib.write_srt(out / "captions-short.srt", short)
-    review = subtitle_review(meta, segs, words)
+    cues, short = caption_cues(words)
+    srtlib.write_srt(out / "subtitles.srt", cues)          # 1) readable 1-2 line subtitles
+    srtlib.write_srt(out / "captions-short.srt", short)    # 2) short social captions (1-4 words)
+    try:
+        quotes = document_quotes(paths, words)
+    except Exception as e:  # noqa: BLE001  (a cross-check aid; never blocks the transcript)
+        quotes = [{"error": f"{type(e).__name__}: {e}"}]
+    review = subtitle_review(meta, segs, words, quotes)
     write_text(out / "subtitle-review.md", review)
     return {"meta": meta, "segments": len(segs), "words": len(words), "cues": len(cues),
             "short_cues": len(short)}
@@ -245,7 +257,53 @@ def vocabulary_misses(words: list, prompt: str | None, min_ratio: float = 0.65) 
     return sorted(out, key=lambda m: -m["similarity"])
 
 
-def subtitle_review(meta: dict, segs: list, words: list) -> str:
+QUOTE_RE = re.compile(r'«([^»]{6,200})»|"([^"\n]{6,200})"|“([^”]{6,200})”')
+
+
+def document_quotes(paths: Paths, words: list, min_ratio: float = 0.6) -> list:
+    """Speaker quotes in the client's documents (a reels plan, a brief: «...», "...", “...”) located in this transcript.
+    A person wrote those lines down after listening, so where they differ from Whisper they are strong evidence for a
+    correction (e.g. plan «شوف هي الفكرة في إيمانهم», Whisper «شوف هي الفكرة في آمانه»). Exact matches confirm."""
+    import difflib
+    from .discover import read_document
+    from .plan import norm
+    inv = read_json(paths.output / "discovery/input-inventory.json", {"files": []})
+    docs = [f for f in inv["files"] if f["role"] in ("editing_reference_doc", "client_brief")]
+    toks = [(norm(w["word"]), w) for w in words]
+    toks = [(t, w) for t, w in toks if t]
+    seq = [t for t, _ in toks]
+    out, seen = [], set()
+    for d in docs:
+        try:
+            text = read_document(Path(d["path"]))
+        except Exception:  # noqa: BLE001
+            continue
+        for m in QUOTE_RE.finditer(text):
+            q = next(g for g in m.groups() if g)
+            qt = norm(q).split()
+            if len(qt) < 3 or q in seen or not ARABIC.search(q) and not LATIN.search(q):
+                continue
+            seen.add(q)
+            best = (0.0, 0, 0)
+            for n in {len(qt) - 1, len(qt), len(qt) + 1}:
+                if n < 2:
+                    continue
+                for i in range(0, max(0, len(seq) - n) + 1):
+                    r = difflib.SequenceMatcher(None, qt, seq[i:i + n]).ratio()
+                    r_ = r - (0.1 if n != len(qt) else 0)   # prefer the quote's own length: show the differing word
+                    if r_ > best[0]:
+                        best = (r_, i, n, r)
+            _, i, n, r = best if len(best) == 4 else (0, 0, 0, 0.0)
+            if r < min_ratio:
+                continue
+            ws = [w for _, w in toks[i:i + n]]
+            out.append({"doc": d["rel"], "quote": q, "transcript": " ".join(w["word"] for w in ws),
+                        "word_ids": [ws[0]["id"], ws[-1]["id"]], "start_ms": ws[0]["start_ms"],
+                        "match": round(r, 2), "exact": r >= 0.999})
+    return sorted(out, key=lambda x: x["start_ms"])
+
+
+def subtitle_review(meta: dict, segs: list, words: list, quotes: list | None = None) -> str:
     from .common import content_domain
     thr = load_config("transcription.json").get("low_confidence_threshold", 0.5)
     domain = content_domain()
@@ -269,6 +327,14 @@ def subtitle_review(meta: dict, segs: list, words: list) -> str:
           "on these, so check each by ear; correct only if the speaker said the expected word.", ""]
     L += [f"- `{fmt_ts(m['start_ms'], '.')}` expected **{m['expected']}**, heard **{m['heard']}** "
           f"(word {m['word_id']}, similarity {m['similarity']})" for m in misses] or ["- none"]
+    quotes = [q for q in (quotes or []) if "error" not in q]
+    diff_q = [q for q in quotes if not q["exact"]]
+    L += ["", f"## Quotes in the client's documents — {len(quotes)} found, {len(diff_q)} differ", "",
+          "Lines a person wrote down from this talk (reels plan, brief). Where one differs from Whisper it is evidence "
+          "for a correction: check the words that differ (and by ear when it matters).", ""]
+    L += [f"- `{fmt_ts(q['start_ms'], '.')}` {'✓' if q['exact'] else '≠'} {q['doc']}: «{q['quote']}»"
+          + ("" if q["exact"] else f" — transcript «{q['transcript']}» (words {q['word_ids'][0]}-{q['word_ids'][1]}, "
+                                   f"match {q['match']})") for q in quotes] or ["- none"]
     L += ["", f"## Latin-script / English terms inside speech — {len(latin)}", "",
           "Check spelling and that mixed-direction rendering is correct in captions.", ""]
     L += [f"- `{fmt_ts(w['start_ms'], '.')}` {w['word']} (p={w['probability']})" for w in latin] or ["- none"]
@@ -323,15 +389,28 @@ def apply_corrections(paths: Paths) -> dict:
     tj = read_json(out / "transcript.machine.json")
     wj = read_json(out / "words.machine.json")
     words = {w["id"]: dict(w) for w in wj["words"]}
-    applied, problems = [], []
+    applied, problems, reanchored = [], [], []
+
+    def anchor(item, key="from"):
+        """The correction's word: by id when it still says `from`; after a re-transcription (new range, new model) the
+        ids shift, so re-anchor to the word with the same text nearest to the old id (within 12 words)."""
+        wid, txt = item.get("word_id"), item.get(key)
+        w = words.get(wid)
+        if w is None or (txt and w["word"] != txt):
+            near = sorted((abs(k - (wid or 0)), k) for k, x in words.items() if txt and x["word"] == txt)
+            if near and near[0][0] <= 12:
+                reanchored.append(f"{wid}->{near[0][1]} '{txt}'")
+                item["word_id"] = near[0][1]
+                return words[near[0][1]]
+        return w
     for f in corr.get("flags", []):   # uncertain words: the editor confirms them by ear; never on a graphic until then
-        w = words.get(f.get("word_id"))
+        w = anchor(f, "heard")
         if not w:
             problems.append(f"flag: word_id {f.get('word_id')} not found")
             continue
         w["flagged"] = {"note": f.get("note") or f.get("reason") or "uncertain", "suggest": f.get("suggest")}
     for c in corr.get("corrections", []):
-        w = words.get(c["word_id"])
+        w = anchor(c)
         if not w:
             problems.append(f"word_id {c['word_id']} not found")
             continue
@@ -374,7 +453,15 @@ def apply_corrections(paths: Paths) -> dict:
           + (f" (maybe: {w['flagged']['suggest']})" if w["flagged"].get("suggest") else "") for w in fl] or ["- none"]
     L += [f"- PROBLEM: {p}" for p in problems]
     rv.write_text(rv.read_text(encoding="utf-8") + "\n".join(L) + "\n", encoding="utf-8")
-    return dict(res, applied=len(applied), flagged=len(fl), problems=problems)
+    if reanchored:
+        rv.write_text(rv.read_text(encoding="utf-8") + "
+## Re-anchored after re-transcription
+
+"
+                      + "
+".join(f"- {r}" for r in reanchored) + "
+", encoding="utf-8")
+    return dict(res, applied=len(applied), flagged=len(fl), reanchored=reanchored, problems=problems)
 
 
 def words_fingerprint(paths: Paths) -> str:

@@ -1,11 +1,16 @@
 # Sound Design
 
 - **Dialogue (A1/A2): cleaned** by `reel audio-clean` → `06_audio/dialogue/dialogue_clean.wav`, linked to V1, same clock as the camera file.
-  Chain (measured on C0238): best mic per transcript segment (multi-mic shoots) → 2× high-pass 90 Hz → narrow notches at
-  100/200/300/400/500 Hz (mains hum was 89 % of residual noise) → afftdn nr 24 / nf −32 → gentle compression → two-pass loudnorm −14 LUFS.
-  Evidence (C0238, delivered file): speech-to-noise 16.6 → 22.8 dB at −14.6 LUFS, spectrograms in `08_quality_control/audio/`. Original camera audio stays on A7/A8 **disabled** for A/B.
+  The chain follows a measurement of the source: best mic per transcript segment (multi-mic shoots; one channel when both
+  carry the same signal) → 2× high-pass 90 Hz → narrow notches only on mains-hum harmonics that stand out in the pauses
+  (C0238: 100–500 Hz, hum was 89 % of residual noise) → afftdn nr 24 / nf −32 unless the source is already clean → gain +
+  true-peak limiter to −14 LUFS.
+  Evidence (C0238, camera mics): speech-to-noise 16.6 → 22.8 dB at −14.6 LUFS. EP02_R02 (a mastered episode, dual mono,
+  55 dB S/N): one channel, one 100 Hz notch, no denoise, 56.9 → 58.9 dB at −14.3 LUFS. Spectrograms in
+  `08_quality_control/audio/`. Original camera audio stays on A7/A8 **disabled** for A/B.
 - **Pause removal:** `audio-clean` detects pauses on the CLEANED audio (noise hid them before), keeps 80 ms breath each side,
-  then re-transcribes the tightened audio and diffs it (`cut-verification.json`); any missing word = bad cut. Enable with
+  then re-transcribes the tightened audio in ≤ 20 s chunks and diffs it (`cut-verification.json`); any missing word = bad
+  cut, and too few matched words = inconclusive (listen). Enable with
   `global.remove_pauses` in edit-decisions; the planner remaps all graphics/captions/SFX and alternates a 6 % zoom at cuts.
 - **SFX:** if `data/` contains an approved SFX library (role `sfx`), map kinds → files in `06_audio/sfx-map.json`.
   Otherwise `reel sfx` synthesizes **original** procedural cues (ffmpeg; no third-party audio):

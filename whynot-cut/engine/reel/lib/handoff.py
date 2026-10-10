@@ -3,11 +3,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import Paths, project_prefix, frame_to_tc, load_config, now_iso, read_json, write_text
+from .common import Paths, project_prefix, frame_to_tc, load_config, now_iso, read_json, seq_fps, write_text
 
 
 def build(paths: Paths) -> dict:
     tm = read_json(paths.p("07_premiere/timeline-manifest.json"), {})
+    _fps = seq_fps()
+    _fps_num = f"{_fps:.2f}"
+    _fps_label = f"{_fps:.2f} fps Non-Drop-Frame" if abs(_fps - round(_fps)) > 0.001 else f"{round(_fps)} fps"
     qc = read_json(paths.p("08_quality_control/qc-results.json"), {})
     spec = read_json(paths.p("01_analysis/timeline-spec.json"), {})
     ae = read_json(paths.p("04_after_effects/ae-build-result.json"), {})
@@ -48,10 +51,10 @@ Generated {now_iso()} by the `whynot-cut` plugin (by The Why Not AI). QC: **{'PA
 1. Premiere Pro → open/create your project → **File › Import…** → `{rel(tm.get('xml'))}`.
    Premiere creates a bin with the sequence **{tm.get('sequence_name')}** and all linked media.
 2. Open the sequence → **Sequence › Sequence Settings…** and confirm/set the values the XML cannot carry:
-   - Editing Mode **Custom**, Display Format **24 fps Timecode**, Audio Display Format **Audio Samples**
+   - Editing Mode **Custom**, Display Format **{_fps_label} Timecode**, Audio Display Format **Audio Samples**
    - Preview File Format **QuickTime**, Codec **Apple ProRes 422 LT**, Preview **1080 × 1920**
    - Maximum Bit Depth **off**, Maximum Render Quality **off**, **Composite in Linear Color on**
-   - (Verify XML-set values: 1080×1920, 24.00 fps, Square Pixels, No Fields, 48000 Hz stereo.)
+   - (Verify XML-set values: 1080×1920, {_fps_num} fps, Square Pixels, No Fields, 48000 Hz stereo.)
 3. Burned-in animated captions are **already on the C02 track** (AE render). Optionally **File › Import…** `02_transcription/subtitles.srt` → drag onto the sequence to get an editable caption track (C01) for closed captions/sidecar export — **turn its visibility off** so captions don't appear twice. If you correct caption text, fix it in AE (CAPTIONS comp) or re-run the pipeline after editing the SRT.
 4. Rename tracks (Premiere does not read track names from XML):
 

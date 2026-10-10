@@ -41,6 +41,9 @@ SEMANTIC_FILES = ["01_analysis/editing-style.json", "01_analysis/main-topic.md",
 
 
 def P(a) -> Paths:
+    if getattr(a, "episode", None) and not a.video_id:   # podcast episode project (output/episodes/<EP>/)
+        from lib.episode import EpisodePaths
+        return EpisodePaths(a.root, a.episode)
     return Paths(a.root, a.video_id)
 
 
@@ -49,12 +52,26 @@ def out(obj):
 
 
 def main_footage(paths: Paths, explicit: str | None) -> list[Path]:
+    """The raw file of THIS video: --footage, else the project's range (`reel range`), else the raw clip whose name
+    is the video id (C0002 -> data/Raw/C0002.MP4), else the only raw clip. Never silently another clip."""
+    from lib.common import source_range
     if explicit:
         return [Path(explicit) if Path(explicit).is_absolute() else paths.root / explicit]
+    rng = source_range(paths)
+    if rng:
+        f = Path(rng["footage"])
+        return [f if f.is_absolute() else paths.root / f]
     inv = read_json(paths.output / "discovery/input-inventory.json")
     if not inv:
         raise SystemExit("run `discover` first")
-    return [Path(f["path"]) for f in inv["files"] if f["role"] == "source_footage"]
+    files = [Path(f["path"]) for f in inv["files"] if f["role"] == "source_footage"]
+    if not paths.video_id or len(files) <= 1:
+        return files
+    match = [f for f in files if f.stem.lower() == paths.video_id.lower()]
+    if match:
+        return match[:1]
+    raise SystemExit(f"no raw clip named '{paths.video_id}' among {[f.name for f in files]}: use the clip's file name as "
+                     f"--video-id, pass --footage, or cut this video from a longer file with `reel range`")
 
 
 def cmd_discover(a):
@@ -87,11 +104,60 @@ def cmd_preflight(a):
     p = P(a)
     p.ensure_project()
     rep = preflight(p, main_footage(p, a.footage))
-    set_status(p, "INPUTS_VALIDATED" if rep["ok"] else "BLOCKED",
+    from lib.common import STATUSES
+    cur = load_status(p).get("status")
+    keep = rep["ok"] and cur in STATUSES and cur != "BLOCKED" and STATUSES.index(cur) > STATUSES.index("INPUTS_VALIDATED")
+    set_status(p, cur if keep else ("INPUTS_VALIDATED" if rep["ok"] else "BLOCKED"),   # a re-run never moves a clip back
                f"{len(rep['valid'])} valid, {len(rep['issues'])} notes", "preflight",
                [p.p("00_inputs/preflight-report.md")],
                blockers=[i["msg"] for i in rep["issues"] if i["severity"] == "error"])
     out({"ok": rep["ok"], "issues": rep["issues"], "conversions": rep["conversions"]})
+
+
+def _parse_time_ms(v: str) -> int:
+    v = str(v).strip()
+    if v.replace(".", "", 1).isdigit():
+        return int(round(float(v) * 1000))
+    parts = [float(x) for x in v.split(":")]
+    while len(parts) < 3:
+        parts.insert(0, 0.0)
+    return int(round((parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000))
+
+
+def cmd_range(a):
+    """This video = part of a longer raw file (a reel cut from a full episode). Without --footage: show the range."""
+    from lib.media import probe
+    p = P(a)
+    f_src = p.p("00_inputs/source.json")
+    if not a.footage:
+        out(read_json(f_src, {}) or {"range": None, "note": "whole raw file (no range set)"})
+        return
+    f = Path(a.footage)
+    f = f if f.is_absolute() else p.root / f
+    if not f.exists():
+        raise SystemExit(f"{f} not found")
+    dur_ms = int((probe(f).get("duration_s") or 0) * 1000)
+    i, o = _parse_time_ms(a.start), (_parse_time_ms(a.end) if a.end else dur_ms)
+    if not (0 <= i < o <= dur_ms + 40):
+        raise SystemExit(f"range {i / 1000:.3f}-{o / 1000:.3f}s outside the file (0-{dur_ms / 1000:.3f}s) or empty")
+    from lib.media import snap_range_points
+    snap = snap_range_points(f, i, o if a.end else None)
+    if a.snap:
+        i = snap["in"]["suggested_ms"]
+        o = snap["out"]["suggested_ms"] if "out" in snap else o
+    p.ensure_project()
+    old = read_json(f_src, {}) or {}
+    rel = str(f.relative_to(p.root)).replace("\\", "/") if f.is_relative_to(p.root) else str(f)
+    rec = {"footage": rel, "in_ms": i, "out_ms": min(o, dur_ms), "duration_ms": min(o, dur_ms) - i,
+           "label": a.label or "", "set_at": now_iso()}
+    write_json(f_src, rec)
+    changed = bool(old) and (old.get("footage"), old.get("in_ms"), old.get("out_ms")) != (rec["footage"], i, rec["out_ms"])
+    stale = [x for x in ("02_transcription/transcript.json", "06_audio/dialogue/dialogue_clean.wav")
+             if changed and p.p(x).exists()]
+    moved = {k: v for k, v in snap.items() if v["moved_ms"]}
+    out(dict(rec, stale=stale, snap=snap, applied_snap=bool(a.snap),
+             next=("re-run with --snap to start/end in the pause (speech at the requested point)" if moved and not a.snap else
+                   "reel preflight, then reel transcribe" + (" --force (the range changed)" if stale else ""))))
 
 
 def cmd_transcribe(a):
@@ -570,22 +636,32 @@ def main():
     ap.add_argument("--root", help="client folder containing assets/ and data/ (default: current folder if it has both)")
     ap.add_argument("--video-id", help="stable project id (default: footage file stem)")
     ap.add_argument("--profile", help="client profile id (default: client's reel-profile, else folder-name match)")
+    ap.add_argument("--episode", help="podcast episode id (`reel episodes` lists them)")
+    from lib import podcast_cli
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ["discover", "client-db", "preflight", "transcribe", "transcript-correct", "transcript-verify", "transcript-relisten", "ref-analyze", "plan",
+    for name in ["discover", "client-db", "preflight", "transcribe", "transcript-correct", "transcript-verify", "transcript-relisten", "range", "ref-analyze", "plan",
                  "previews", "sfx", "approve-plan", "verify", "ppro-install", "ppro-status", "ppro-probe", "ppro-build", "ppro-frames", "mogrt-build", "audio-clean", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "premiere",
                  "qc", "handoff", "status", "next", "setup", "profile", "client-init",
-                 "doctor", "scaffold", "inbox", "preview-video", "settings", "model-download", "gpu-enable"]:
+                 "doctor", "scaffold", "inbox", "preview-video", "settings", "model-download", "gpu-enable"] + list(podcast_cli.ARGS):
         sp = sub.add_parser(name)
         # global options are accepted after the command too (`reel next --root X`), as the skills write them
         sp.add_argument("--root", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         sp.add_argument("--video-id", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         sp.add_argument("--profile", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        sp.add_argument("--episode", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        podcast_cli.add_args(name, sp)
         if name in ("preflight", "transcribe"):
             sp.add_argument("--footage")
         if name == "transcribe":
             sp.add_argument("--model", default=None, help="default: preferences whisper_model, else large-v3")
             sp.add_argument("--language", default=None)
             sp.add_argument("--force", action="store_true")
+        if name == "range":
+            sp.add_argument("--footage", help="the longer raw file, e.g. data/Raw/EP02.mp4 (omit to show the range)")
+            sp.add_argument("--in", dest="start", default="0", help="in-point: 02:04, 00:02:04.500 or seconds")
+            sp.add_argument("--out", dest="end", default=None, help="out-point (default: end of file)")
+            sp.add_argument("--label", help="e.g. the reel's name in the client's plan")
+            sp.add_argument("--snap", action="store_true", help="move in/out to the nearest pause (never mid-word)")
         if name == "transcript-relisten":
             sp.add_argument("--words", help="word ids, e.g. 79,80 (default: every flagged word)")
             sp.add_argument("--model", default=None)
@@ -656,7 +732,10 @@ def main():
             raise SystemExit("--root required (client folder containing assets/ and data/)"
                              + (f"; client folders in {clients_root()}: {', '.join(known)}" if known else ""))
     set_context(a.root, a.profile)
-    if not a.video_id and a.cmd not in NO_ID:
+    if a.cmd in podcast_cli.ARGS:
+        podcast_cli.dispatch(a)
+        return
+    if not a.video_id and a.cmd not in NO_ID and not a.episode:
         inv = read_json(Path(a.root).expanduser() / "output/discovery/input-inventory.json")
         src = [f for f in (inv or {}).get("files", []) if f["role"] == "source_footage"]
         if len(src) == 1:

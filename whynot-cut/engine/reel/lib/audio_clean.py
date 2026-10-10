@@ -142,7 +142,9 @@ def clean(paths: Paths, src: Path, nr_db: float | None = None, target_lufs: floa
     out_dir = paths.p("06_audio/dialogue")
     out_dir.mkdir(parents=True, exist_ok=True)
     raw = out_dir / "dialogue_raw_48k.wav"
-    run([ff, "-y", "-loglevel", "error", "-i", str(src), "-map", "0:a:0", "-ar", str(SR), "-c:a", "pcm_s16le", str(raw)])
+    from .common import range_input_args, source_range
+    run([ff, "-y", "-loglevel", "error", *range_input_args(source_range(paths)), "-i", str(src), "-map", "0:a:0",
+         "-ar", str(SR), "-c:a", "pcm_s16le", str(raw)])
     x = _read_stereo(raw)
     dur_ms = int(len(x) * 1000 / SR)
     src_info = assess_source(x)

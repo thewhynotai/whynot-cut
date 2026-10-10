@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import quote
 from xml.sax.saxutils import escape
 
-from .common import still_category, SEQ_FPS, Paths, project_prefix, load_config, now_iso, read_json, write_json, write_text, frame_to_tc
+from .common import still_category, seq_fps, ticks_per_frame, Paths, project_prefix, load_config, now_iso, read_json, write_json, write_text, frame_to_tc
 
 TPS = 254016000000  # Premiere ticks per second
 
@@ -41,8 +41,11 @@ def path_from_url(url: str) -> Path:
     return Path(s)
 
 
-def rate(tb: int) -> str:
-    return f"<rate><timebase>{tb}</timebase><ntsc>FALSE</ntsc></rate>"
+def rate(fps: float) -> str:
+    """FCP7 rate: 29.97 -> timebase 30 + NTSC TRUE (a fractional timebase is invalid XML), 25 -> 25 + FALSE."""
+    tb = round(fps)
+    ntsc = abs(fps - tb) > 0.001
+    return f"<rate><timebase>{tb}</timebase><ntsc>{'TRUE' if ntsc else 'FALSE'}</ntsc></rate>"
 
 
 class XB:
@@ -117,7 +120,7 @@ def broll_clipitem(xb: "XB", ev: dict, paths: Paths, W: int, H: int, fps: int) -
     v = pr.get("video")
     if not v:
         return None
-    sfps = round(v["fps"]) if v.get("fps") and abs(v["fps"] - round(v["fps"])) < 0.01 else (v.get("fps") or fps)
+    sfps = v.get("fps") or fps
     s, e = ev["start_frame"], ev["end_frame"]
     n = e - s
     in_s = float(p.get("in", 0) or 0)
@@ -132,7 +135,7 @@ def broll_clipitem(xb: "XB", ev: dict, paths: Paths, W: int, H: int, fps: int) -
     fe = xb.file_el(vid, "video", round((pr.get("duration_s") or 0) * sfps), sfps, dw, dh)
     return (f'<clipitem id="{xb.clip_id()}"><name>{escape(ev["event_id"] + " · B-roll · " + vid.name)}</name>'
             f"<enabled>TRUE</enabled><duration>{src_frames}</duration>{rate(fps)}<start>{s}</start><end>{e}</end>"
-            f"<in>{fin}</in><out>{fin + n}</out><pproTicksIn>{tin}</pproTicksIn><pproTicksOut>{tin + n * (TPS // fps)}"
+            f"<in>{fin}</in><out>{fin + n}</out><pproTicksIn>{tin}</pproTicksIn><pproTicksOut>{tin + n * ticks_per_frame(fps)}"
             f"</pproTicksOut><alphatype>none</alphatype>{fe}{motion_filter(cover * 100, ox / W, oy / H)}</clipitem>")
 
 
@@ -147,8 +150,8 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
     tpl = load_config("graphics-templates.json")
     pre = read_json(paths.p("00_inputs/preflight.json"))
     W, H = seq_cfg["general"]["frame_width"], seq_cfg["general"]["frame_height"]
-    fps = seq_cfg["general"]["timebase"]
-    assert fps == SEQ_FPS
+    fps = seq_fps()          # 24, 25, 29.97 ... (frames below count real frames at this rate)
+    TPF = ticks_per_frame(fps)
     main = Path(spec["main_footage"])
     if not main.is_absolute():
         main = paths.root / main
@@ -156,7 +159,7 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
     if mp is None:
         raise FileNotFoundError(f"{main} not in preflight — run `reel preflight` for it")
     v = mp["video"]
-    src_fps = round(v["fps"]) if abs(v["fps"] - round(v["fps"])) < 0.01 else v["fps"]
+    src_fps = v["fps"]
     src_dur_s = mp["duration_s"]
     base_scale = spec.get("base_scale_percent") or min(W / v["display_width"], H / v["display_height"]) * 100
     dur = spec["duration_frames"]
@@ -169,15 +172,19 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
     src_frames_seq = math.floor(src_dur_s * fps + 1e-6)
     clean = paths.p("06_audio/dialogue/dialogue_clean.wav")
     use_clean = clean.exists() and spec.get("use_clean_dialogue", True)
+    off_ms = float(spec.get("source_in_ms") or 0)   # a reel cut from a longer file: camera clips point into the original
     for i, seg in enumerate(spec["main_segments"]):
         s, e = seg["start_frame"], seg["end_frame"]
         if e <= s:
             continue
         sin_ms = seg.get("src_in_ms", s * 1000 / fps)
-        tin = round(sin_ms * TPS / 1000)
-        tout = tin + (e - s) * (TPS // fps)
-        fin = round(sin_ms * fps / 1000)
+        tin = round((sin_ms + off_ms) * TPS / 1000)
+        tout = tin + (e - s) * TPF
+        fin = round((sin_ms + off_ms) * fps / 1000)
         fout = fin + (e - s)
+        # the cleaned dialogue was extracted from the range: its clock starts at the in-point
+        dtin, dfin = (round(sin_ms * TPS / 1000), round(sin_ms * fps / 1000)) if use_clean else (tin, fin)
+        dtout, dfout = dtin + (e - s) * TPF, dfin + (e - s)
         vid, aidL, aidR = xb.clip_id(), xb.clip_id(), xb.clip_id()
         scale = base_scale * seg["scale_factor"]
         cx = (seg["offset_x"] + spec.get("base_offset_x", 0.0)) / W
@@ -209,7 +216,7 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
         for aid, ch, lst, fel in ((aidL, 1, a1, dfe), (aidR, 2, a2, f'<file id="{xb.files[str(dfile)]}"/>')):
             lst.append(f'<clipitem id="{aid}" premiereChannelType="mono"><name>{escape(dfile.name)}</name><enabled>TRUE</enabled>'
                        f"<duration>{src_frames_seq}</duration>{rate(fps)}<start>{s}</start><end>{e}</end>"
-                       f"<in>{fin}</in><out>{fout}</out><pproTicksIn>{tin}</pproTicksIn><pproTicksOut>{tout}</pproTicksOut>"
+                       f"<in>{dfin}</in><out>{dfout}</out><pproTicksIn>{dtin}</pproTicksIn><pproTicksOut>{dtout}</pproTicksOut>"
                        f"{fel}<sourcetrack><mediatype>audio</mediatype><trackindex>{ch}</trackindex></sourcetrack>"
                        f"{links}</clipitem>")
         if use_clean:  # original camera audio kept, DISABLED, for A/B (A7/A8)

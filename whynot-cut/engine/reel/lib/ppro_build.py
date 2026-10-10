@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import still_category, caption_hide_default, Paths, SEQ_FPS, project_prefix, load_config, ms_to_frame, now_iso, read_json, write_json
+from .common import still_category, caption_hide_default, Paths, seq_fps, project_prefix, load_config, ms_to_frame, now_iso, read_json, write_json
 from . import srt as srtlib
 from .plan import norm, to_ms
 
@@ -59,7 +59,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
     spec = read_json(paths.p("01_analysis/timeline-spec.json"))
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     tpl = load_config("graphics-templates.json")["templates"]
-    F = 1 / SEQ_FPS
+    F = 1 / seq_fps()
     n_items = max([len(e["params"].get("items", [])) for e in spec["events"] if e["template"] == "checklist"] or [0])
     lanes = ["broll", "gfx_bar", "card", "gfx_text"] + [f"item{k + 1}" for k in range(n_items)] + ["cap_bar", "cap_text", "fx"]
     base = build_xml(paths, native_graphics=True, lanes=lanes)
@@ -207,7 +207,7 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
         "prproj_saved_this_run": saved_now,
         "preview_codec_prores_422_lt": sa.get("previewCodec") == "apcs",
         "frame_1080x1920": (sa.get("videoFrameWidth"), sa.get("videoFrameHeight")) == (1080, 1920),
-        "fps_24": abs((sa.get("videoFrameRate") or {}).get("seconds", 0) - 1 / 24) < 1e-6,
+        f"fps_{seq_fps():.4g}": abs((sa.get("videoFrameRate") or {}).get("seconds", 0) - 1 / seq_fps()) < 1e-6,
         "linear_color_on": sa.get("compositeLinearColor") is True,
         "max_bit_depth_off": sa.get("maximumBitDepth") is False,
         "max_render_quality_off": sa.get("maximumRenderQuality") is False,
@@ -236,9 +236,9 @@ def export_frames(paths: Paths, times: list[float] | None = None) -> dict:
         for e in spec["events"]:
             if e["template"] == "flash_transition":
                 continue
-            t = round((e["start_frame"] + (e["end_frame"] - e["start_frame"]) * 0.7) / SEQ_FPS, 3)
+            t = round((e["start_frame"] + (e["end_frame"] - e["start_frame"]) * 0.7) / seq_fps(), 3)
             labels.setdefault(t, f"{e['event_id']} {e['template']}")
-        end = spec["duration_frames"] / SEQ_FPS
+        end = spec["duration_frames"] / seq_fps()
         times = sorted(t for t in set(labels) | {2.5, end * 0.15, end * 0.5, end - 0.5} if 0 <= t < end)
         times = sorted({round(t, 3) for t in times})
     od = paths.p(f"08_quality_control/premiere_frames/run-{_t.strftime('%Y%m%d-%H%M%S')}")
@@ -258,7 +258,7 @@ def export_frames(paths: Paths, times: list[float] | None = None) -> dict:
             im.paste(Image.open(f).convert("RGB").resize((w, h)), (x, y + 18))
             ms = next((int(tok) for tok in f.stem.split("_") if tok.isdigit()), None)
             t = ms / 1000 if ms is not None else None
-            tc = frame_to_tc(round(t * SEQ_FPS)) if t is not None else ""
+            tc = frame_to_tc(round(t * seq_fps())) if t is not None else ""
             lab = labels.get(round(t, 3), "") if t is not None else ""
             d.text((x + 4, y + 3), f"{tc} {lab}"[:44], fill="yellow")
         sheet = od / "_sheet.jpg"

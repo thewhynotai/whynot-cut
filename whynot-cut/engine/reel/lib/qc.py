@@ -27,7 +27,9 @@ FULL_SCREEN = {"broll_card", "broll_video", "logo_outro", "flash_transition", "p
 def run_qc(paths: Paths) -> dict:
     r = Report()
     seq = load_config("sequence-settings.json")
-    W, H, FPS = seq["general"]["frame_width"], seq["general"]["frame_height"], seq["general"]["timebase"]
+    from .common import seq_fps, seq_rate
+    W, H = seq["general"]["frame_width"], seq["general"]["frame_height"]
+    FPS, (TB, NTSC) = seq_fps(), seq_rate()
     spec = read_json(paths.p("01_analysis/timeline-spec.json"))
     tm = read_json(paths.p("07_premiere/timeline-manifest.json"))
     missing_assets = []
@@ -41,8 +43,9 @@ def run_qc(paths: Paths) -> dict:
             r.add("technical", f"Sequence resolution {W}x{H}",
                   sc.findtext("width") == str(W) and sc.findtext("height") == str(H),
                   f"{sc.findtext('width')}x{sc.findtext('height')}")
-            r.add("technical", f"Sequence timebase {FPS} fps (non-NTSC)",
-                  root.findtext("./sequence/rate/timebase") == str(FPS) and root.findtext("./sequence/rate/ntsc") == "FALSE")
+            r.add("technical", f"Sequence rate {FPS:.5g} fps (timebase {TB}, NTSC {'on' if NTSC else 'off'})",
+                  root.findtext("./sequence/rate/timebase") == str(TB)
+                  and root.findtext("./sequence/rate/ntsc") == ("TRUE" if NTSC else "FALSE"))
             r.add("technical", "Pixel aspect square / progressive",
                   sc.findtext("pixelaspectratio") == "square" and sc.findtext("fielddominance") == "none")
             r.add("technical", "Audio 48 kHz stereo",
@@ -149,11 +152,11 @@ def run_qc(paths: Paths) -> dict:
             for mov in sorted(m for m in paths.p("04_after_effects/compositions").glob("*.mov") if not m.name.startswith("._")):
                 pr = probe(mov)
                 v = pr.get("video") or {}
-                if (v.get("display_width"), v.get("display_height")) != (W, H) or round(v.get("fps") or 0) != FPS:
+                if (v.get("display_width"), v.get("display_height")) != (W, H) or abs((v.get("fps") or 0) - FPS) > 0.01:
                     badr.append(f"{mov.name}: {v.get('display_width')}x{v.get('display_height')}@{v.get('fps')}")
                 elif v.get("pix_fmt") and not any(k in v["pix_fmt"] for k in ("a", "rgba", "argb", "yuva")):
                     badr.append(f"{mov.name}: no alpha ({v.get('pix_fmt')})")
-            r.add("technical", "AE renders are 1080x1920 @24 fps with alpha", not badr, "; ".join(badr[:5]))
+            r.add("technical", f"AE renders are {W}x{H} @{FPS:.5g} fps with alpha", not badr, "; ".join(badr[:5]))
         except Exception as e:
             r.add("technical", "AE render probe", False, str(e), mandatory=False)
         cues = read_json(paths.p("06_audio/audio-cue-sheet.json"), {"cues": []})["cues"]
@@ -168,7 +171,7 @@ def run_qc(paths: Paths) -> dict:
         r.add("creative", "Speaker visible ≥ 75% of runtime", full / dur <= 0.25, f"full-screen cover {full / dur:.0%}", mandatory=False)
         ov = sum(e["end_frame"] - e["start_frame"] for e in spec["events"] if e["template"] not in ("flash_transition",))
         r.add("creative", "Overlay density reasonable (≤ 70% of runtime)", ov / dur <= 0.7, f"{ov / dur:.0%}", mandatory=False)
-        cpm = len(cues) / (dur / 24 / 60)
+        cpm = len(cues) / (dur / FPS / 60)
         r.add("creative", "SFX density restrained (≤ 18 cues/min)", cpm <= 18, f"{cpm:.1f}/min", mandatory=False)
         pend = [e["event_id"] for e in spec["events"] if e.get("approval_required")]
         r.add("creative", "No graphics awaiting approval", not pend, f"pending: {', '.join(pend)}", mandatory=False)

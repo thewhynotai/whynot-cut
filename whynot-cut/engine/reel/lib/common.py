@@ -65,7 +65,40 @@ def resolve_root(root: str | None) -> str | None:
         return str(base / p)
     return root
 
-SEQ_FPS = 24
+SEQ_FPS = 24   # default only: the client's sequence-settings.json decides -> seq_fps()
+TPS = 254016000000   # Premiere ticks per second
+_RATE_CACHE: dict = {}
+
+
+def seq_rate() -> tuple[int, bool]:
+    """(timebase, ntsc) of the client's sequence: profile sequence-settings.json general.timebase / general.ntsc.
+    29.97 fps = (30, True), 23.976 = (24, True), 25 = (25, False)."""
+    key = (str(_CTX.get("root")), _CTX.get("profile"))
+    if key not in _RATE_CACHE:
+        g = load_config("sequence-settings.json").get("general", {})
+        _RATE_CACHE[key] = (int(g.get("timebase") or SEQ_FPS), bool(g.get("ntsc", False)))
+    return _RATE_CACHE[key]
+
+
+def seq_fps() -> float:
+    """The sequence frame rate as a number (29.97002997... for NTSC 30)."""
+    tb, ntsc = seq_rate()
+    return tb * 1000 / 1001 if ntsc else float(tb)
+
+
+def fps_fraction(fps: float | Fraction) -> Fraction:
+    return Fraction(fps).limit_denominator(1001000)
+
+
+def fps_arg(fps: float | None = None) -> str:
+    """ffmpeg rate string: 30000/1001, 25 ..."""
+    fr = fps_fraction(seq_fps() if fps is None else fps)
+    return f"{fr.numerator}/{fr.denominator}" if fr.denominator != 1 else str(fr.numerator)
+
+
+def ticks_per_frame(fps: float | None = None) -> int:
+    """Premiere ticks of one frame (exact for 23.976 / 24 / 25 / 29.97 / 30 / 50 / 59.94 / 60)."""
+    return round(Fraction(TPS) / fps_fraction(seq_fps() if fps is None else fps))
 
 STATUSES = [
     "NOT_STARTED", "INPUTS_DISCOVERED", "INPUTS_VALIDATED", "CLIENT_DATABASE_READY",
@@ -100,12 +133,12 @@ def round_half_up(fr: Fraction) -> int:
     return int((fr + Fraction(1, 2)).__floor__())
 
 
-def ms_to_frame(ms: int, fps: float | Fraction = SEQ_FPS) -> int:
-    return round_half_up(Fraction(int(ms)) * Fraction(fps).limit_denominator(1001000) / 1000)
+def ms_to_frame(ms: int, fps: float | Fraction | None = None) -> int:
+    return round_half_up(Fraction(int(ms)) * fps_fraction(seq_fps() if fps is None else fps) / 1000)
 
 
-def frame_to_ms(frame: int, fps: float | Fraction = SEQ_FPS) -> int:
-    return round_half_up(Fraction(int(frame)) * 1000 / Fraction(fps).limit_denominator(1001000))
+def frame_to_ms(frame: int, fps: float | Fraction | None = None) -> int:
+    return round_half_up(Fraction(int(frame)) * 1000 / fps_fraction(seq_fps() if fps is None else fps))
 
 
 _TS = re.compile(r"(\d+):(\d{2}):(\d{2})[,.](\d{1,3})")
@@ -128,8 +161,9 @@ def fmt_ts(ms: int, sep: str = ",") -> str:
     return f"{h:02d}:{m:02d}:{s:02d}{sep}{rem:03d}"
 
 
-def frame_to_tc(frame: int, fps: int = SEQ_FPS) -> str:
-    s, f = divmod(int(frame), fps)
+def frame_to_tc(frame: int, fps: float | None = None) -> str:
+    """Non-drop-frame timecode at the nominal rate (29.97 counts 30 frames per timecode second)."""
+    s, f = divmod(int(frame), round(seq_fps() if fps is None else fps))
     m, s = divmod(s, 60)
     h, m = divmod(m, 60)
     return f"{h:02d}:{m:02d}:{s:02d}:{f:02d}"
@@ -285,6 +319,7 @@ def set_context(root: Path | None = None, profile: str | None = None):
     """Called once by the CLI so every load_config() sees the right client."""
     _CTX["root"] = Path(root).expanduser().resolve() if root else None
     _CTX["profile"] = profile
+    _RATE_CACHE.clear()
 
 
 def deep_merge(base, over):
@@ -344,6 +379,33 @@ def load_config(name: str) -> dict:
 def project_prefix() -> str:
     """File-name tag, e.g. C0238_NH_EDIT.prproj. From profile.json 'prefix' (default RE)."""
     return load_config("profile.json").get("prefix") or "RE"
+
+
+def source_range(paths) -> dict:
+    """A video cut from a longer raw file, e.g. reel R02 = 02:04-02:59 of a full episode: 00_inputs/source.json
+    {"footage": "data/Raw/EP02.mp4", "in_ms": 124000, "out_ms": 179000} (written by `reel range`).
+    Every stage works on the transcript's clock (0 = the in-point); only reads of the raw file add `in_ms`, and the
+    Premiere clips point into the original file (handles stay available to the editor). {} = the whole file."""
+    if not getattr(paths, "video_id", None):
+        return {}
+    r = read_json(paths.p("00_inputs/source.json"), {}) or {}
+    # also reads the podcast-mode schema (kind "episode_reel": rel/path + in_ms or offset_ms, out_ms or duration_ms)
+    foot = r.get("footage") or r.get("rel") or r.get("path")
+    if not foot:
+        return {}
+    i = int(r.get("in_ms", r.get("offset_ms", 0)) or 0)
+    o = r.get("out_ms") or (i + int(r["duration_ms"]) if r.get("duration_ms") else None)
+    return dict(r, footage=foot, in_ms=i, out_ms=int(o) if o else None)
+
+
+def range_input_args(rng: dict) -> list:
+    """ffmpeg input options (placed before -i) that read only the range; [] for the whole file."""
+    if not rng:
+        return []
+    a = ["-ss", f"{rng.get('in_ms', 0) / 1000:.3f}"]
+    if rng.get("out_ms"):
+        a += ["-t", f"{(rng['out_ms'] - rng.get('in_ms', 0)) / 1000:.3f}"]
+    return a
 
 
 def content_domain() -> str:

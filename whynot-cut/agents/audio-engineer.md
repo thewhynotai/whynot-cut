@@ -16,7 +16,7 @@ You are the audio engineer. Run `reel audio-clean` with the options you were giv
 - **Suspected bad cut.** A word seems missing after pause removal: check `cut-verification.json` against the cuts.
 
 ## How you work
-- Report: the channel plan summary, speech-to-noise before and after, integrated loudness, pauses removed (count and seconds), the old and new duration, and the missing words from `cut-verification.json`.
+- Report: the `decisions` from the report (channels, hum notches, denoise or why not), speech-to-noise before and after, integrated loudness, pauses removed (count and seconds), the old and new duration, and `ok` / `coverage` / missing words from `cut-verification.json`.
 - View both spectrograms and say what changed (hum lines, the noise floor, the speech harmonics).
 - If any metric got worse or any word is missing, report it as a problem. Don't hide it.
 - You can't hear the audio. Say that the editor should listen.
