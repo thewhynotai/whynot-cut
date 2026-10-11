@@ -6,6 +6,7 @@ import type {
   CompoundAction,
   PointF,
   Project,
+  ProjectItem,
   Sequence,
   VideoClipTrackItem,
   VideoComponentChain,
@@ -17,7 +18,14 @@ import { cleanPath, isUnder, normPath, scratchPathProblem } from "./safety.ts";
 import { jsonSafe, type ProbeDef, type ProbeOutcome } from "./runner.ts";
 import type { UxpFs, UxpModule, UxpOs } from "./uxp-types.ts";
 
+/** The product's undo label. In the spike ONLY undo_transaction uses it (see txLabel). */
 export const UNDO_LABEL = "WhyNot Cut build";
+
+let currentOp = "spike";
+/** Every other spike transaction is labelled with its probe, so Ctrl+Z after a run undoes undo_transaction, not a later probe. */
+function txLabel(): string {
+  return `WNC spike: ${currentOp}`;
+}
 
 /** Set by the UI: "Run (keep project open)" skips save_close_open so Edit > Undo can be inspected afterwards. */
 export const skipSaveCloseOpen = { value: false };
@@ -56,7 +64,7 @@ export interface Ctx {
   timing?: { shortPollMs?: number; longPollMs?: number };
   exportFrameTo?: (t: number, base: string) => Promise<{ path: string; found: boolean; bytes: number | null; returned: unknown }>;
   /** what later probes expect to find again after save/close/open */
-  expect: { videoTrackName?: string; markerCount?: number; sequenceName?: string };
+  expect: { videoTrackName?: string; renamedVideoTrackName?: string; markerCount?: number; sequenceName?: string };
   notes: string[];
 }
 
@@ -108,7 +116,7 @@ function tickSeconds(ctx: Ctx, s: number) {
 }
 
 /** One undoable step: every mutation goes through lockedAccess -> executeTransaction, labelled "WhyNot Cut build". */
-function tx(project: Project, build: (ca: CompoundAction) => void, label: string = UNDO_LABEL): boolean {
+function tx(project: Project, build: (ca: CompoundAction) => void, label: string = txLabel()): boolean {
   let result = false;
   project.lockedAccess(() => {
     result = project.executeTransaction((ca) => build(ca), label);
@@ -234,6 +242,39 @@ async function numericKeyframes(
   return { param: param.displayName, set: [a, b], read_back_times_s: times, value_at_a: atA, value_at_b: atB, value_at_mid: mid, timeVarying: param.isTimeVarying() };
 }
 
+/** The project item of config.still_png: found in the root bin, imported first when it is not there yet. */
+async function stillItemFor(ctx: Ctx, project: Project): Promise<ProjectItem> {
+  const { ppro } = ctx;
+  const stillPath = ctx.config?.still_png;
+  expect(stillPath, "config.json has no still_png");
+  const norm = (x: string) => toForwardSlashes(x).toLowerCase();
+  const wantBase = baseName(stillPath).toLowerCase();
+  const findStill = async () => {
+    const root = await project.getRootItem();
+    const items = await root.getItems();
+    for (const item of items) {
+      try {
+        const media = await ppro.ClipProjectItem.cast(item).getMediaFilePath();
+        if (norm(media) === norm(stillPath)) return item;
+      } catch {
+        // bins and sequences have no media path
+      }
+    }
+    return items.find((i) => i.name.toLowerCase() === wantBase || i.name.toLowerCase() === wantBase.replace(/\.[^.]+$/, "")) ?? null;
+  };
+  let item = await findStill();
+  if (!item) {
+    const imported = await project.importFiles([toForwardSlashes(stillPath)], true);
+    expect(imported, "importFiles(still) returned false");
+    for (let i = 0; i < 20 && !item; i++) {
+      item = await findStill();
+      if (!item) await sleep(500);
+    }
+  }
+  expect(item, `still not found in the project after import: ${stillPath}`);
+  return item;
+}
+
 /**
  * The clip the effect/keyframe probes work on: a placed still (config.still_png) or, failing that, a clip of the
  * scratch sequence created by import_fcp7_xml (getSequence never returns anything else).
@@ -248,31 +289,7 @@ async function ensureTarget(ctx: Ctx): Promise<TargetClip> {
   const stillPath = ctx.config?.still_png;
   if (stillPath) {
     try {
-      const norm = (s: string) => toForwardSlashes(s).toLowerCase();
-      const wantBase = baseName(stillPath).toLowerCase();
-      const findStill = async () => {
-        const root = await project.getRootItem();
-        const items = await root.getItems();
-        for (const item of items) {
-          try {
-            const media = await ppro.ClipProjectItem.cast(item).getMediaFilePath();
-            if (norm(media) === norm(stillPath)) return item;
-          } catch {
-            // bins and sequences have no media path
-          }
-        }
-        return items.find((i) => i.name.toLowerCase() === wantBase || i.name.toLowerCase() === wantBase.replace(/\.[^.]+$/, "")) ?? null;
-      };
-      let item = await findStill();
-      if (!item) {
-        const imported = await project.importFiles([toForwardSlashes(stillPath)], true);
-        expect(imported, "importFiles(still) returned false");
-        for (let i = 0; i < 20 && !item; i++) {
-          item = await findStill();
-          if (!item) await sleep(500);
-        }
-      }
-      expect(item, `still not found in the project after import: ${stillPath}`);
+      const item = await stillItemFor(ctx, project);
       const editor = ppro.SequenceEditor.getEditor(seq);
       const endT = await seq.getEndTime();
       const trackIndex = vCount - 1;
@@ -777,11 +794,15 @@ interface ExportAttempt {
   longPoll: boolean;
 }
 
-/** Every filename / filepath spelling worth trying for one target folder `dir` (forward slashes, no trailing slash). */
+/**
+ * Every filename / filepath spelling worth trying for one target folder `dir` (forward slashes, no trailing slash).
+ * For the plugin temp folder only the two forms that name the full path and end the folder with a separator are used:
+ * a bare name joined to a folder without a separator would put the file next to the folder, outside it.
+ */
 function exportForms(kind: string, dir: string, ext: string): ExportAttempt[] {
   const back = dir.replace(/\//g, "\\");
   const mk = (id: string, filename: (n: string) => string, filepath: string, longPoll = false): ExportAttempt => ({ id: `${kind}:${id}:${ext}`, ext, filename, filepath, dir, longPoll });
-  return [
+  const all = [
     mk("name + dir/", (n) => n, `${dir}/`),
     mk("full path + dir/ (d.ts example form)", (n) => `${dir}/${n}`, `${dir}/`, true),
     mk("full path + dir (no trailing slash)", (n) => `${dir}/${n}`, dir),
@@ -790,6 +811,20 @@ function exportForms(kind: string, dir: string, ext: string): ExportAttempt[] {
     mk("full path\\ + dir (backslashes, no trailing)", (n) => `${back}\\${n}`, back),
     mk("name + dir (no trailing slash)", (n) => n, dir),
   ];
+  return kind === "temp" ? all.filter((a) => /^temp:full path/.test(a.id) && !/no trailing/.test(a.id)) : all;
+}
+
+/** Poll several candidate paths; returns the first that appears (non-empty). */
+async function pollAny(fs: UxpFs, paths: string[], maxMs: number, everyMs = 250): Promise<{ found: boolean; path: string | null; bytes: number | null; after_ms: number }> {
+  const t0 = Date.now();
+  for (;;) {
+    for (const p of paths) {
+      const st = await statOf(fs, p);
+      if (st.exists && (st.bytes ?? 0) > 0) return { found: true, path: p, bytes: st.bytes, after_ms: Date.now() - t0 };
+    }
+    if (Date.now() - t0 >= maxMs) return { found: false, path: null, bytes: null, after_ms: Date.now() - t0 };
+    await sleep(everyMs);
+  }
 }
 
 const exportFrame: ProbeDef<Ctx> = {
@@ -854,6 +889,7 @@ const exportFrame: ProbeDef<Ctx> = {
     });
     if (tmp) dirs.push({ kind: "temp", dir: tmp.dir });
 
+    const findings: string[] = [];
     const run = async (a: ExportAttempt, t: number, tag: string, movePlayhead: boolean) => {
       const name = `exp_${ctx.stamp}_${tag}.${a.ext}`;
       const expected = `${a.dir}/${name}`;
@@ -872,11 +908,22 @@ const exportFrame: ProbeDef<Ctx> = {
         rec.error = errDetail(e);
       }
       rec.call_ms = Date.now() - t0;
-      const poll = await pollFile(ctx.fs, expected, a.longPoll || rec.returned === true ? (ctx.timing?.longPollMs ?? 10_000) : (ctx.timing?.shortPollMs ?? 1_500), 50);
+      // also look where a separator-less join of folder and name would put the file (next to the folder, not in it)
+      const slash = a.dir.lastIndexOf("/");
+      const joined = `${a.dir}${name}`;
+      const parentJoined = `${a.dir.slice(0, slash)}/${a.dir.slice(slash + 1)}${name}`;
+      const candidates = [...new Set([expected, joined, parentJoined])];
+      const poll = await pollAny(ctx.fs, candidates, a.longPoll || rec.returned === true ? (ctx.timing?.longPollMs ?? 10_000) : (ctx.timing?.shortPollMs ?? 1_500), 50);
       rec.expected_path = expected;
+      rec.polled_paths = candidates;
       rec.found = poll.found;
+      rec.found_at = poll.path;
       rec.bytes = poll.bytes;
       rec.found_after_ms = poll.after_ms;
+      if (poll.found && poll.path !== expected) {
+        rec.separator_less_join = true;
+        findings.push(`FINDING: form "${a.id}" wrote the file at ${poll.path} instead of ${expected}: the folder and the file name were joined WITHOUT a separator (file ended up outside ${a.dir}/)`);
+      }
       return rec;
     };
 
@@ -896,7 +943,7 @@ const exportFrame: ProbeDef<Ctx> = {
           break;
         }
       }
-      const info = { width, height, winner: winner?.id ?? null, attempts };
+      const info = { width, height, winner: winner?.id ?? null, findings, attempts };
       if (!winner) failWith(`no export form produced a file (${attempts.length} attempts, returned values: ${[...new Set(attempts.map((r) => String(r.returned)))].join(", ")})`, info);
       return info;
     });
@@ -915,10 +962,10 @@ const exportFrame: ProbeDef<Ctx> = {
       /** Used by the time-basis probe to render frames at known sequence times. */
       ctx.exportFrameTo = async (t: number, base: string) => {
         const rec = await run(w, t, base.replace(/[^A-Za-z0-9_-]/g, "_"), false);
-        return { path: String(rec.expected_path), found: rec.found === true, bytes: (rec.bytes as number | null) ?? null, returned: rec.returned };
+        return { path: String(rec.found_at ?? rec.expected_path), found: rec.found === true, bytes: (rec.bytes as number | null) ?? null, returned: rec.returned };
       };
     }
-    return steps.outcome({ out_dir: workDir, winner: winner?.id ?? null });
+    return steps.outcome({ out_dir: workDir, winner: winner?.id ?? null, findings });
   },
 };
 
@@ -1117,7 +1164,7 @@ async function stillKeyframes(ctx: Ctx, project: Project, steps: Steps, target: 
  * times (decode them offline: a fade to black shows only in the basis Premiere really uses). Keys are removed between
  * bases. The values from getValueAtTime at the three candidate times are logged too.
  */
-async function basisScenarios(ctx: Ctx, project: Project, steps: Steps, label: string, clip: VideoClipTrackItem, w: ClipWindow): Promise<void> {
+async function basisScenarios(ctx: Ctx, project: Project, steps: Steps, label: string, used: string, clip: VideoClipTrackItem, w: ClipWindow): Promise<void> {
   const chain = await steps.run(`${label}: get component chain`, async () => await clip.getComponentChain());
   if (!chain) return;
   const opacity = await findComponent(chain, /ADBE Opacity/i);
@@ -1134,7 +1181,7 @@ async function basisScenarios(ctx: Ctx, project: Project, steps: Steps, label: s
     for (const f of fractions) out.push({ sequence_time_s: w.start_s + f, local_fraction_s: f, ...(await ctx.exportFrameTo(w.start_s + f, `tb_${label}_${tag}_${f}`)) });
     return out;
   };
-  await steps.run(`${label}: baseline frames (no keys)`, async () => ({ clip: w, disjoint_windows: windowsDisjoint(w), frames: await frames("baseline") }));
+  await steps.run(`${label}: baseline frames (no keys)`, async () => ({ clip_used: used, clip: w, disjoint_windows: windowsDisjoint(w), keys_on_opacity: param.getKeyframeListAsTickTimes().length, frames: await frames("baseline") }));
   const bases: Array<[string, string, number]> = [
     ["A", "zero-relative (clip-local)", 0],
     ["B", "in-point-relative (media time)", w.in_s],
@@ -1167,9 +1214,48 @@ async function basisScenarios(ctx: Ctx, project: Project, steps: Steps, label: s
         for (const t of times) add(ca, param.createRemoveKeyframeAction(tickSeconds(ctx, t)));
       });
       const left = param.getKeyframeListAsTickTimes().length;
-      return { clip: w, requested_times_s: [t0, t0 + 1], read_back_times_s: times, ...classifyTimes(times, w), disjoint_windows: windowsDisjoint(w), values, frames: rendered, cleared: clear, keys_left_after_clear: left };
+      return { clip_used: used, clip: w, requested_times_s: [t0, t0 + 1], read_back_times_s: times, ...classifyTimes(times, w), disjoint_windows: windowsDisjoint(w), values, frames: rendered, cleared: clear, keys_left_after_clear: left };
     });
   }
+}
+
+/** Place a FRESH copy of the still (own track if the API creates one, else a free time on the top track), keys-free. */
+async function placeFreshStill(ctx: Ctx, project: Project, seq: Sequence): Promise<{ clip: VideoClipTrackItem; info: Record<string, unknown> }> {
+  const { ppro } = ctx;
+  const item = await stillItemFor(ctx, project);
+  const editor = ppro.SequenceEditor.getEditor(seq);
+  const vBefore = await seq.getVideoTrackCount();
+  const endT = (await seq.getEndTime()).seconds;
+  const atS = endT + 1;
+  const attempts: Array<Record<string, unknown>> = [];
+  for (const [how, index] of [
+    ["own new track (index = track count)", vBefore],
+    ["top existing track at a free time", vBefore - 1],
+  ] as const) {
+    const rec: Record<string, unknown> = { how, track_index: index };
+    attempts.push(rec);
+    try {
+      rec.transaction_returned = tx(project, (ca) => add(ca, editor.createOverwriteItemAction(item, tickSeconds(ctx, atS), index, 0)));
+      const count = await seq.getVideoTrackCount();
+      rec.video_tracks_after = count;
+      if (index >= count) continue;
+      const track = await seq.getVideoTrack(index);
+      let best: VideoClipTrackItem | null = null;
+      let bestStart = -1;
+      for (const c of track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false)) {
+        const st = (await c.getStartTime()).seconds;
+        if (st >= atS - 0.05 && st > bestStart) {
+          best = c;
+          bestStart = st;
+        }
+      }
+      if (!best) continue;
+      return { clip: best, info: { still_item: item.name, placed_at_s: atS, own_track: index >= vBefore, track_index: index, how, attempts } };
+    } catch (e) {
+      rec.error = errText(e);
+    }
+  }
+  return failWith("could not place a fresh copy of the still", { attempts });
 }
 
 const keyframeTimeBasis: ProbeDef<Ctx> = {
@@ -1179,44 +1265,58 @@ const keyframeTimeBasis: ProbeDef<Ctx> = {
     const project = await getProject(ctx);
     const seq = await getSequence(ctx);
     const steps = new Steps();
-    const holder: { clip?: VideoClipTrackItem; w?: ClipWindow } = {};
-    await steps.run("xml clip: pick one with in-point > 0 and move it so the three windows are disjoint", async () => {
+    const holder: { clip?: VideoClipTrackItem; w?: ClipWindow; used?: string } = {};
+    await steps.run("xml clip: pick one with in-point > duration and move it so the three windows are disjoint", async () => {
       const vCount = await seq.getVideoTrackCount();
+      // never the clip other probes already keyed or edited (the placed still, or the existing clip the keyframes probe fell back to)
+      const otherUse = ctx.target ? { track: ctx.target.trackIndex, w: await windowOf(ctx.target.clip) } : null;
+      const near = (a: number, b: number) => Math.abs(a - b) < 1e-3;
+      const candidates: Array<{ ti: number; clip: VideoClipTrackItem; w: ClipWindow }> = [];
       for (let ti = 0; ti < vCount; ti++) {
         const track = await seq.getVideoTrack(ti);
-        const clips = track.getTrackItems(ctx.ppro.Constants.TrackItemType.CLIP, false);
-        for (const c of clips) {
-          const w = await windowOf(c);
-          if (!(w.in_s > 0.1 && w.duration_s >= 2)) continue;
-          const seqEnd = (await seq.getEndTime()).seconds;
-          const wanted = Math.max(seqEnd, w.in_s + w.duration_s) + 1;
-          const before = w;
-          let moved: boolean | null = null;
-          if (!windowsDisjoint(w) || w.start_s < seqEnd) {
-            const delta = wanted - w.start_s;
-            moved = tx(project, (ca) => add(ca, c.createMoveAction(tickSeconds(ctx, delta))));
-          }
-          const after = await windowOf(c);
-          holder.clip = c;
-          holder.w = after;
-          const info = { track_index: ti, before, move_returned: moved, after, disjoint_windows: windowsDisjoint(after) };
-          if (!windowsDisjoint(after)) failWith("windows still overlap after the move", info);
-          return info;
+        for (const clip of track.getTrackItems(ctx.ppro.Constants.TrackItemType.CLIP, false)) {
+          const w = await windowOf(clip);
+          if (!(w.in_s > w.duration_s + EPS && w.duration_s >= 2)) continue;
+          if (otherUse && otherUse.track === ti && near(otherUse.w.start_s, w.start_s) && near(otherUse.w.in_s, w.in_s)) continue;
+          candidates.push({ ti, clip, w });
         }
       }
-      return failWith("no clip with in-point > 0.1 s and duration >= 2 s in the imported scratch sequence", {});
+      const attempts: Array<Record<string, unknown>> = [];
+      for (const c of candidates) {
+        const seqEnd = (await seq.getEndTime()).seconds;
+        const wanted = Math.max(seqEnd, c.w.in_s + c.w.duration_s) + 1;
+        const rec: Record<string, unknown> = { track_index: c.ti, before: c.w };
+        attempts.push(rec);
+        try {
+          rec.move_returned = tx(project, (ca) => add(ca, c.clip.createMoveAction(tickSeconds(ctx, wanted - c.w.start_s))));
+          const after = await windowOf(c.clip);
+          rec.after = after;
+          rec.disjoint_windows = windowsDisjoint(after);
+          if (windowsDisjoint(after)) {
+            holder.clip = c.clip;
+            holder.w = after;
+            holder.used = `xml clip, video track index ${c.ti}, moved (original start ${c.w.start_s.toFixed(3)} s, in ${c.w.in_s.toFixed(3)} s)`;
+            return { track_index: c.ti, before: c.w, after, disjoint_windows: true, attempts };
+          }
+        } catch (e) {
+          rec.error = errText(e);
+        }
+      }
+      return failWith("no clip with in-point > duration and duration >= 2 s could be moved into disjoint windows in the imported scratch sequence", { candidates: candidates.length, attempts });
     });
-    if (holder.clip && holder.w) await basisScenarios(ctx, project, steps, "xml_clip", holder.clip, holder.w);
+    if (holder.clip && holder.w && holder.used) await basisScenarios(ctx, project, steps, "xml_clip", holder.used, holder.clip, holder.w);
 
-    await steps.run("placed still: window", async () => {
-      const t = await ensureTarget(ctx);
-      const w = await windowOf(t.clip);
-      holder.clip = t.clip;
+    holder.clip = undefined;
+    const fresh = await steps.run("fresh still: place a new copy for this probe only (no keys, no effects)", async () => {
+      const placed = await placeFreshStill(ctx, project, seq);
+      const w = await windowOf(placed.clip);
+      holder.clip = placed.clip;
       holder.w = w;
-      expect(t.source === "placed still", "the still was not placed, so the in-point 3600 s case is not measured");
-      return { ...w, disjoint_windows: windowsDisjoint(w) };
+      holder.used = `fresh copy of the still, video track index ${placed.info.track_index} (${placed.info.own_track ? "own new track" : "top existing track"}), start ${w.start_s.toFixed(3)} s`;
+      const chain = await placed.clip.getComponentChain();
+      return { ...placed.info, ...w, disjoint_windows: windowsDisjoint(w), components_in_chain: chain.getComponentCount(), is_target_clip_of_other_probes: ctx.target ? (await windowOf(ctx.target.clip)).start_s === w.start_s : false };
     });
-    if (ctx.target?.source === "placed still" && holder.clip && holder.w) await basisScenarios(ctx, project, steps, "placed_still", holder.clip, holder.w);
+    if (fresh && holder.clip && holder.w && holder.used) await basisScenarios(ctx, project, steps, "fresh_still", holder.used, holder.clip, holder.w);
     return steps.outcome();
   },
 };
@@ -1478,29 +1578,31 @@ const scratchDisk: ProbeDef<Ctx> = {
   },
 };
 
+/** Renames V2 and A2 only: V1 / A1 belong to undo_transaction, whose Ctrl+Z check must stay unambiguous. */
 const trackRename: ProbeDef<Ctx> = {
   op: "track_rename",
   run: async (ctx) => {
     const project = await getProject(ctx);
     const seq = await getSequence(ctx);
     const steps = new Steps();
-    await steps.run("video_track_0", async () => {
-      const track = await seq.getVideoTrack(0);
+    await steps.run("video_track_1 (V2)", async () => {
+      expect((await seq.getVideoTrackCount()) > 1, "sequence has no second video track");
+      const track = await seq.getVideoTrack(1);
       const before = track.name;
-      const wanted = "WNC Spike V1";
+      const wanted = "WNC Spike V2";
       expect(tx(project, (ca) => add(ca, track.createSetNameAction(wanted))), "rename transaction returned false");
-      const after = (await seq.getVideoTrack(0)).name;
+      const after = (await seq.getVideoTrack(1)).name;
       expect(after === wanted, `video track read back "${after}", wanted "${wanted}" (was "${before}")`);
-      ctx.expect.videoTrackName = after;
+      ctx.expect.renamedVideoTrackName = after;
       return { before, after };
     });
-    await steps.run("audio_track_0", async () => {
-      expect((await seq.getAudioTrackCount()) > 0, "sequence has no audio tracks");
-      const track = await seq.getAudioTrack(0);
+    await steps.run("audio_track_1 (A2)", async () => {
+      expect((await seq.getAudioTrackCount()) > 1, "sequence has no second audio track");
+      const track = await seq.getAudioTrack(1);
       const before = track.name;
-      const wanted = "WNC Spike A1";
+      const wanted = "WNC Spike A2";
       expect(tx(project, (ca) => add(ca, track.createSetNameAction(wanted))), "rename transaction returned false");
-      const after = (await seq.getAudioTrack(0)).name;
+      const after = (await seq.getAudioTrack(1)).name;
       expect(after === wanted, `audio track read back "${after}", wanted "${wanted}" (was "${before}")`);
       return { before, after };
     });
@@ -1591,7 +1693,7 @@ const undoTransaction: ProbeDef<Ctx> = {
         executeTransaction_returned: returned,
         state_before: before,
         state_after: after,
-        manual_check: `Window > History must show '${UNDO_LABEL}' as ONE entry (the Edit menu only says "Undo"). Press Ctrl+Z once and check that ALL THREE revert: V1 name back to "${before.v1}", A1 name back to "${before.a1}", and the marker "WNC undo marker" gone (it must not be in ${JSON.stringify(before.markers)} + itself). Then Ctrl+Shift+Z to redo.`,
+        manual_check: `Window \u25b8 History: the last entry is '${UNDO_LABEL}'; press Ctrl+Z once; V1 name back to "${before.v1}", A1 back to "${before.a1}", marker 'WNC undo marker' gone (before: ${JSON.stringify(before.markers)}). Then Ctrl+Shift+Z to redo.`,
       };
     });
     return steps.outcome();
@@ -1660,8 +1762,10 @@ const saveCloseOpen: ProbeDef<Ctx> = {
         const v1 = (await seq.getVideoTrack(0)).name;
         const markerCount = (await ppro.Markers.getMarkers(seq)).getMarkers().length;
         expect(ctx.expect.videoTrackName === undefined || v1 === ctx.expect.videoTrackName, `V1 name after reopen "${v1}", expected "${ctx.expect.videoTrackName}"`);
+        const v2 = (await seq.getVideoTrack(1)).name;
+        expect(ctx.expect.renamedVideoTrackName === undefined || v2 === ctx.expect.renamedVideoTrackName, `V2 name after reopen "${v2}", expected "${ctx.expect.renamedVideoTrackName}"`);
         expect(ctx.expect.markerCount === undefined || markerCount === ctx.expect.markerCount, `markers after reopen ${markerCount}, expected ${ctx.expect.markerCount}`);
-        return { sequences: seqs.length, sequence: seq.name, v1_name: v1, markers: markerCount };
+        return { sequences: seqs.length, sequence: seq.name, v1_name: v1, v2_name: v2, markers: markerCount };
       });
     }
     return steps.outcome();
@@ -1691,21 +1795,28 @@ const saveAs: ProbeDef<Ctx> = {
   },
 };
 
-/** adobe.md names ProjectUtils.getProjectViewIds as the only way to activate another open project. */
+/**
+ * adobe.md names ProjectUtils.getProjectViewIds as the only way to activate another open project. Other open projects
+ * belong to the editor: their names and paths are NOT written to the results, only whether each view is the scratch one.
+ */
 const projectViews: ProbeDef<Ctx> = {
   op: "project_views",
   run: async (ctx) => {
     const { ppro } = ctx;
+    const cfg = needConfig(ctx);
     const steps = new Steps();
     await steps.run("ProjectUtils.getProjectViewIds + getProjectFromViewId", async () => {
       const ids = await ppro.ProjectUtils.getProjectViewIds();
-      const projects: Array<Record<string, unknown>> = [];
+      const views: Array<{ name_is_scratch: boolean }> = [];
+      let scratch: { name: string; path_json: string } | null = null;
       for (const id of ids) {
         const p = await ppro.ProjectUtils.getProjectFromViewId(id);
-        projects.push({ view_id: id.toString(), name: p.name, path_json: JSON.stringify(p.path) });
+        const isScratch = isUnder(p.path, cfg.work_dir);
+        views.push({ name_is_scratch: isScratch });
+        if (isScratch) scratch = { name: p.name, path_json: JSON.stringify(p.path) };
       }
       expect(ids.length > 0, "no project views");
-      return { count: ids.length, projects };
+      return { count: ids.length, views, scratch_project: scratch };
     });
     return steps.outcome();
   },
@@ -1740,14 +1851,22 @@ const encoderExport: ProbeDef<Ctx> = {
 /** Read-only probes: safe without a validated config. Every other probe changes a project, so it needs one. */
 const READ_ONLY_OPS = new Set(["host_info", "ws_loopback"]);
 
-export function buildProbes(): ProbeDef<Ctx>[] {
-  // undo_transaction runs right after the import so the History panel stays short; scratch_disk right after create_project
-  const all = [hostInfo, wsLoopback, createProject, scratchDisk, importXml, undoTransaction, sequenceSettings, exportFrame, keyframes, keyframeTimeBasis, effects, clipEdits, trackRename, markers, projectViews, saveCloseOpen, saveAs, encoderExport];
-  return all.map((def) =>
-    READ_ONLY_OPS.has(def.op)
-      ? def
-      : { ...def, run: async (ctx: Ctx): Promise<ProbeOutcome> => (ctx.config ? def.run(ctx) : { ok: null, detail: `no config (${ctx.configError ?? "config.json not loaded"})` }) },
-  );
+/**
+ * scratch_disk runs right after create_project. undo_transaction is the LAST mutating probe (just before save_close_open),
+ * so that after the run Window > History ends with "WhyNot Cut build" and one Ctrl+Z undoes exactly that transaction.
+ * With keepOpen the run stops right after it (nothing closes the project or adds history).
+ */
+export function buildProbes(opts: { keepOpen?: boolean } = {}): ProbeDef<Ctx>[] {
+  const all = [hostInfo, wsLoopback, createProject, scratchDisk, importXml, sequenceSettings, exportFrame, keyframes, keyframeTimeBasis, effects, clipEdits, trackRename, markers, projectViews, undoTransaction, saveCloseOpen, saveAs, encoderExport];
+  const list = opts.keepOpen ? all.slice(0, all.indexOf(undoTransaction) + 1) : all;
+  return list.map((def) => ({
+    ...def,
+    run: async (ctx: Ctx): Promise<ProbeOutcome> => {
+      currentOp = def.op;
+      if (!READ_ONLY_OPS.has(def.op) && !ctx.config) return { ok: null, detail: `no config (${ctx.configError ?? "config.json not loaded"})` };
+      return def.run(ctx);
+    },
+  }));
 }
 
 // ---------------------------------------------------------------------------------------------- context

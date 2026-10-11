@@ -100,3 +100,18 @@ test("jsonSafe makes cyclic / exotic details serialisable", () => {
   assert.doesNotThrow(() => JSON.stringify(out));
   assert.equal((out as { big: string }).big, "10");
 });
+
+test("jsonSafe keeps a shared (non-circular) reference intact and marks only a real cycle", () => {
+  const shared = { a: 1, nested: { b: 2 } };
+  const out = jsonSafe({ first: shared, second: shared, list: [shared, shared] }) as Record<string, unknown>;
+  assert.deepEqual(out.first, shared);
+  assert.deepEqual(out.second, shared);
+  assert.deepEqual(out.list, [shared, shared]);
+  const cyc: Record<string, unknown> = { name: "loop" };
+  cyc.self = cyc;
+  cyc.child = { back: cyc };
+  assert.deepEqual(jsonSafe(cyc), { name: "loop", self: "[circular]", child: { back: "[circular]" } });
+  assert.deepEqual(jsonSafe({ d: new Date(0), n: Number.NaN, u: undefined, arr: [undefined, 1] }), { d: "1970-01-01T00:00:00.000Z", n: null, arr: [null, 1] });
+  assert.equal(jsonSafe(undefined), null);
+  assert.equal((jsonSafe(new Error("boom")) as { message: string }).message, "boom");
+});

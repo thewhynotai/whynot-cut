@@ -100,12 +100,13 @@ test("a later mutating probe passes the guard with the long-path project (and st
       },
       createSetNameAction: (n: string) => ({ apply: () => void (names.v = n) }),
     }),
+    getVideoTrackCount: async () => 2,
     getAudioTrackCount: async () => 0,
   };
   const ctx = ctxWith({}, { project: project as unknown as Ctx["project"], sequence: seq as unknown as Ctx["sequence"] });
   const r = await runProbe(probe("track_rename"), ctx);
   assert.doesNotMatch(r.error ?? "", /refusing/);
-  assert.equal(names.v, "WNC Spike V1");
+  assert.equal(names.v, "WNC Spike V2");
   const foreign = ctxWith({}, { project: { path: "\\\\?\\C:/Users/yunus/Documents/x.prproj" } as unknown as Ctx["project"] });
   assert.match((await runProbe(probe("track_rename"), foreign)).error ?? "", /refusing to touch a project outside work_dir/);
 });

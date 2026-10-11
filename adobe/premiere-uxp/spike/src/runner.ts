@@ -26,19 +26,47 @@ export const DEFAULT_TIMEOUT_MS = 90_000;
 
 /** JSON-serialisable copy of anything a probe returns (cycles, bigint, functions, undefined, Errors). */
 export function jsonSafe(value: unknown): unknown {
-  const seen = new WeakSet<object>();
-  const text = JSON.stringify(value, (_key, v: unknown) => {
+  // Only an object that is its OWN ancestor is "[circular]". The same object referenced twice (a shared, non-circular
+  // reference) is serialised both times: the 0.1.2 live results must not lose data to a WeakSet "seen" check.
+  const ancestors: object[] = [];
+  const walk = (input: unknown): unknown => {
+    const v = input;
     if (typeof v === "bigint") return v.toString();
     if (typeof v === "function") return `[function ${v.name || "anonymous"}]`;
     if (typeof v === "symbol") return v.toString();
-    if (v instanceof Error) return { name: v.name, message: v.message, stack: v.stack };
-    if (v !== null && typeof v === "object") {
-      if (seen.has(v)) return "[circular]";
-      seen.add(v);
+    if (v === undefined) return undefined;
+    if (v === null || typeof v !== "object") return typeof v === "number" && !Number.isFinite(v) ? null : v;
+    const obj: object = v instanceof Error ? { name: v.name, message: v.message, stack: v.stack } : v;
+    const withToJson = obj as { toJSON?: unknown };
+    if (typeof withToJson.toJSON === "function") {
+      try {
+        return walk((withToJson.toJSON as () => unknown).call(obj));
+      } catch {
+        return String(obj);
+      }
     }
-    return v;
-  });
-  return text === undefined ? null : JSON.parse(text);
+    if (ancestors.includes(obj)) return "[circular]";
+    ancestors.push(obj);
+    try {
+      if (Array.isArray(obj)) return obj.map((item: unknown) => walk(item) ?? null);
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(obj)) {
+        let child: unknown;
+        try {
+          child = (obj as Record<string, unknown>)[key];
+        } catch {
+          child = "[unreadable]";
+        }
+        const w = walk(child);
+        if (w !== undefined) out[key] = w;
+      }
+      return out;
+    } finally {
+      ancestors.pop();
+    }
+  };
+  const result = walk(value);
+  return result === undefined ? null : result;
 }
 
 function describe(err: unknown): { message: string; stack?: string } {

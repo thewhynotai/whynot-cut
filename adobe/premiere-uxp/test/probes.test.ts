@@ -25,7 +25,6 @@ const OPS = [
   "create_project",
   "scratch_disk",
   "import_fcp7_xml",
-  "undo_transaction",
   "sequence_settings",
   "export_frame",
   "keyframes_motion_opacity_crop",
@@ -35,6 +34,7 @@ const OPS = [
   "track_rename",
   "markers",
   "project_views",
+  "undo_transaction",
   "save_close_open",
   "save_as",
   "encoder_export",
@@ -62,7 +62,7 @@ interface FakeAction {
 function fakePremiere() {
   const labels: string[] = [];
   const marks: Array<{ name: string; start: number; dur: number; comments: string; color: number }> = [];
-  const trackNames = { v: ["V1 original"], a: ["A1 original"] };
+  const trackNames = { v: ["V1 original", "V2 original"], a: ["A1 original", "A2 original"] };
   const track = (kind: "v" | "a", i: number) => ({
     get name() {
       return trackNames[kind][i] as string;
@@ -88,7 +88,8 @@ function fakePremiere() {
     name: "SEQ",
     getVideoTrack: async (i: number) => track("v", i),
     getAudioTrack: async (i: number) => track("a", i),
-    getAudioTrackCount: async () => 1,
+    getVideoTrackCount: async () => 2,
+    getAudioTrackCount: async () => 2,
   };
   const project = {
     path: `${WHYNOT_TEST}/_uxp-spike/spike-1.prproj`,
@@ -130,14 +131,15 @@ function probe(op: string) {
   return p;
 }
 
-test("track_rename renames V1 and A1 inside labelled transactions and reads the names back", async () => {
+test("track_rename renames V2 and A2 only (V1/A1 belong to undo_transaction) inside transactions labelled with the probe", async () => {
   const f = fakePremiere();
   const ctx = scratchCtx(f);
   const r = await runProbe(probe("track_rename"), ctx);
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.deepEqual(f.trackNames, { v: ["WNC Spike V1"], a: ["WNC Spike A1"] });
-  assert.deepEqual(f.labels, [UNDO_LABEL, UNDO_LABEL]);
-  assert.equal(ctx.expect.videoTrackName, "WNC Spike V1");
+  assert.deepEqual(f.trackNames, { v: ["V1 original", "WNC Spike V2"], a: ["A1 original", "WNC Spike A2"] });
+  assert.deepEqual(f.labels, ["WNC spike: track_rename", "WNC spike: track_rename"]);
+  assert.equal(ctx.expect.renamedVideoTrackName, "WNC Spike V2");
+  assert.equal(ctx.expect.videoTrackName, undefined, "V1's expected name is set only by undo_transaction");
 });
 
 test("markers adds two markers and recolours one", async () => {
@@ -148,6 +150,8 @@ test("markers adds two markers and recolours one", async () => {
   assert.equal(f.marks.length, 2);
   assert.equal(f.marks[1]?.color, 1);
   assert.equal(ctx.expect.markerCount, 2);
+  assert.ok(f.marks.every((m) => m.name !== "WNC undo marker"), "markers never uses the undo probe's marker");
+  assert.ok(f.labels.every((l) => l === "WNC spike: markers"));
 });
 
 test("undo_transaction does three changes in ONE transaction labelled 'WhyNot Cut build'", async () => {

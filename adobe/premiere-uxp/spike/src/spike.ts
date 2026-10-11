@@ -108,7 +108,7 @@ async function runSpike(keepOpen: boolean): Promise<void> {
     const { config, error } = await loadConfig(fs, dir);
     const ts = stamp();
     const ctx: Ctx = { ppro, fs, uxp, os, home, homeVia: via, stamp: ts, config, configError: error, expect: {}, notes: [] };
-    const probes = buildProbes();
+    const probes = buildProbes({ keepOpen });
     status.textContent = config ? `Running ${probes.length} probes (config: ${dir}/config.json)` : `Running without config - ${error}`;
     let premiere = "unknown";
     try {

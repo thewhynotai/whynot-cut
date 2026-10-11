@@ -226,7 +226,7 @@ test("preview codec: the round trip of the API's own value proves the setter, th
   assert.ok(info.attempts.every((a) => "setter_returned" in a || "error" in a), "every attempt keeps the setter return value");
   assert.equal(info.discovery.orig_codec, "Animation");
   assert.equal(f.state.codec, "Animation", "the original codec is restored after the winner was found");
-  assert.ok(labels.every((l) => l === "WhyNot Cut build"));
+  assert.ok(labels.length > 0 && labels.every((l) => l === "WNC spike: sequence_settings"), JSON.stringify(labels));
   assert.ok(!f.returned.some((x) => x.value === "apcs"), "the FourCC is not tried before the display names");
 });
 
@@ -323,7 +323,12 @@ test("export_frame: when no form works the step fails with every attempt and ret
   assert.equal(f1.ok, false);
   assert.match(f1.error ?? "", /no export form produced a file/);
   const attempts = (f1.info as { attempts: Array<{ form: string; returned: boolean; filename: string; filepath: string }> }).attempts;
-  assert.ok(attempts.length >= 17, `expected the full matrix, got ${attempts.length}`);
+  assert.ok(attempts.length >= 14, `expected the full matrix, got ${attempts.length}`);
+  const tempForms = attempts.filter((a) => a.form.startsWith("temp:")).map((a) => a.form);
+  assert.equal(tempForms.length, 2, tempForms.join(" | "));
+  assert.ok(tempForms.every((f) => f.includes("full path") && !f.includes("no trailing")), "temp folder: only full-path forms with a trailing separator");
+  assert.ok(!attempts.some((a) => a.form.startsWith("temp:name")), "no bare-name form in the temp folder");
+  assert.ok(attempts.every((a) => (a as unknown as { polled_paths: string[] }).polled_paths.length >= 2), "every attempt also polls the separator-less join");
   assert.ok(attempts.every((a) => a.returned === false));
   const forms = attempts.map((a) => a.form).join(" ");
   for (const needle of ["work:", "temp:", ":jpg", ":tif", "backslashes", "d.ts example form"]) assert.ok(forms.includes(needle), needle);
@@ -417,71 +422,181 @@ test("windowsDisjoint / classifyTimes", () => {
   assert.deepEqual(classifyTimes([0, 24, 37], { start_s: 36.1, in_s: 23.83, end_s: 39.85, duration_s: 3.75 }).inside_media_window, [false, true, false]);
 });
 
-function basisRig() {
-  const xmlChain = fakeChain([fakeComp("AE.ADBE Opacity", [fakeParam("Opacity")])]);
-  const stillChain = fakeChain([fakeComp("AE.ADBE Opacity", [fakeParam("Opacity")])]);
-  const xml = fakeClip({ start: 0.1667, inP: 23.8333, end: 3.9167 }, xmlChain);
-  const still = fakeClip({ start: 30.0833, inP: 3599.9583, end: 35.0833 }, stillChain);
-  const { project } = fakeProject();
-  const ppro = { TickTime: T, Constants: { TrackItemType: { CLIP: 1 } } };
+function basisRig(opts: { xmlClips?: Array<{ start: number; inP: number; end: number }>; newTracks?: boolean; existingTarget?: boolean } = {}) {
+  const newTracks = opts.newTracks ?? true;
+  const params: FakeParam[] = [];
+  const mkChain = () => {
+    const p = fakeParam("Opacity");
+    params.push(p);
+    return fakeChain([fakeComp("AE.ADBE Opacity", [p])]);
+  };
+  const xmlClips = (opts.xmlClips ?? [{ start: 0.1667, inP: 23.8333, end: 3.9167 }]).map((w) => fakeClip(w, mkChain()));
+  // the keyframes probe's still: it carries keys, which must NOT leak into the time-basis scenarios
+  const keyedStillChain = mkChain();
+  const keyedStillParam = params[params.length - 1] as FakeParam;
+  keyedStillParam.kfs.push({ value: { value: 100 }, position: { seconds: 0 } }, { value: { value: 0 }, position: { seconds: 1 } });
+  const keyedStill = fakeClip({ start: 30.0833, inP: 3599.9583, end: 35.0833 }, keyedStillChain);
+  const tracks: Array<Array<ReturnType<typeof fakeClip>>> = [[...xmlClips], [], [], [], [], [], [], [], [keyedStill]];
+  const freshClips: Array<ReturnType<typeof fakeClip>> = [];
+  const overwrites: Array<{ index: number; t: number }> = [];
+  const { project, labels } = fakeProject({ getRootItem: async () => ({ getItems: async () => [{ name: "s.png" }] }) });
+  const ppro = {
+    TickTime: T,
+    Constants: { TrackItemType: { CLIP: 1 } },
+    ClipProjectItem: { cast: () => ({ getMediaFilePath: async () => CONFIG.still_png }) },
+    SequenceEditor: {
+      getEditor: () => ({
+        createOverwriteItemAction: (_item: unknown, t: { seconds: number }, index: number): Act => ({
+          apply: () => {
+            overwrites.push({ index, t: t.seconds });
+            if (index >= tracks.length && !newTracks) return;
+            while (tracks.length <= index) tracks.push([]);
+            const fresh = fakeClip({ start: t.seconds, inP: 3599.9583, end: t.seconds + 5 }, mkChain());
+            freshClips.push(fresh);
+            tracks[index]?.push(fresh);
+          },
+        }),
+      }),
+    },
+  };
   const ctx = baseCtx(ppro, { project: project as never });
+  const seqEnd = () => Math.max(35.0833, ...tracks.flat().map((c) => c.st.end));
   ctx.sequence = {
-    getVideoTrackCount: async () => 1,
-    getVideoTrack: async () => ({ getTrackItems: () => [xml] }),
-    getEndTime: async () => ({ seconds: 35.0833 }),
+    getVideoTrackCount: async () => tracks.length,
+    getVideoTrack: async (i: number) => ({ getTrackItems: () => tracks[i] ?? [] }),
+    getEndTime: async () => ({ seconds: seqEnd() }),
   } as never;
-  ctx.target = { clip: still as never, trackIndex: 8, source: "placed still" } satisfies TargetClip;
+  ctx.target = opts.existingTarget
+    ? { clip: xmlClips[0] as never, trackIndex: 0, source: "existing clip" }
+    : ({ clip: keyedStill as never, trackIndex: 8, source: "placed still" } satisfies TargetClip);
   const exported: Array<{ t: number; base: string }> = [];
   ctx.exportFrameTo = async (t, base) => {
     exported.push({ t, base });
     return { path: `${WORK}/frames/${base}.png`, found: true, bytes: 100, returned: true };
   };
-  return { ctx, xml, still, exported };
+  return { ctx, xmlClips, keyedStill, keyedStillParam, freshClips, overwrites, exported, tracks, labels };
 }
 
-test("time basis: the XML clip is moved so clip-local, media and sequence windows are disjoint; each basis is keyed alone and frames are exported", async () => {
-  const { ctx, xml, exported } = basisRig();
+type BasisInfo = {
+  clip_used: string;
+  requested_times_s: number[];
+  read_back_times_s: number[];
+  inside_local_window: boolean[];
+  inside_media_window: boolean[];
+  inside_sequence_window: boolean[];
+  keys_left_after_clear: number;
+  frames: unknown[];
+  disjoint_windows: boolean;
+};
+
+test("time basis: XML clip moved to disjoint windows, then a FRESH still copy (own track) with a key-free baseline; each basis alone; frames at known times", async () => {
+  const { ctx, xmlClips, keyedStill, keyedStillParam, freshClips, overwrites, exported, labels } = basisRig();
   const r = await runProbe(probe("keyframe_time_basis"), ctx);
   assert.equal(r.ok, true, JSON.stringify(stepsOf(r).filter((s) => !s.ok)));
   const pick = stepNamed(r, "xml clip: pick one");
-  const pi = pick.info as { before: { start_s: number }; after: { start_s: number; end_s: number; in_s: number }; disjoint_windows: boolean };
+  const pi = pick.info as { before: { start_s: number }; after: { start_s: number }; disjoint_windows: boolean };
   assert.ok(pi.before.start_s < 1);
   assert.ok(pi.after.start_s >= 36, `moved beyond the sequence end, start ${pi.after.start_s}`);
   assert.equal(pi.disjoint_windows, true);
-  assert.ok(xml.st.start > 36);
-  for (const label of ["xml_clip", "placed_still"]) {
+  assert.ok((xmlClips[0]?.st.start ?? 0) > 36);
+
+  // the fresh still: a new overwrite on its OWN new track (index = track count 9), not the keyed still of the keyframes probe
+  const fresh = stepNamed(r, "fresh still: place a new copy");
+  const fi = fresh.info as { own_track: boolean; track_index: number; components_in_chain: number; is_target_clip_of_other_probes: boolean; start_s: number; disjoint_windows: boolean };
+  assert.equal(fi.own_track, true);
+  assert.equal(fi.track_index, 9);
+  assert.equal(overwrites.length, 1);
+  assert.equal(freshClips.length, 1);
+  assert.equal(fi.is_target_clip_of_other_probes, false);
+  assert.equal(fi.disjoint_windows, true);
+  assert.ok(fi.start_s > 36, "placed after everything else so no other clip shows through");
+  assert.equal(keyedStillParam.kfs.length, 2, "the keyframes probe's still keeps its keys and is not used by this probe");
+  assert.equal(keyedStill.st.start, 30.0833);
+
+  for (const label of ["xml_clip", "fresh_still"]) {
+    const baseline = stepNamed(r, `${label}: baseline frames`);
+    assert.equal((baseline.info as { keys_on_opacity: number }).keys_on_opacity, 0, `${label}: baseline is truly key-free`);
     const bases = stepsOf(r).filter((s) => s.step.startsWith(`${label}: basis`));
     assert.equal(bases.length, 3, label);
     assert.ok(bases.every((s) => s.ok));
-    const [a, b, c] = bases.map((s) => s.info as { requested_times_s: number[]; read_back_times_s: number[]; inside_local_window: boolean[]; inside_media_window: boolean[]; inside_sequence_window: boolean[]; keys_left_after_clear: number; frames: unknown[]; disjoint_windows: boolean });
+    const [a, b, c] = bases.map((s) => s.info as BasisInfo);
     assert.equal(a?.disjoint_windows, true);
     assert.deepEqual(a?.inside_local_window, [true, true]);
-    assert.deepEqual(a?.inside_local_window.concat(a?.inside_media_window ?? []).slice(2), [false, false]);
+    assert.deepEqual(a?.inside_media_window, [false, false]);
     assert.deepEqual(b?.inside_media_window, [true, true]);
     assert.deepEqual(c?.inside_sequence_window, [true, true]);
     for (const x of [a, b, c]) {
       assert.equal(x?.keys_left_after_clear, 0, "keys are removed between bases");
       assert.equal(x?.frames.length, 3);
+      assert.match(x?.clip_used ?? "", label === "xml_clip" ? /^xml clip, video track index 0, moved/ : /^fresh copy of the still, video track index 9 \(own new track\)/);
     }
   }
-  // baseline + A + B + C, 3 frames each, for both clips; frames at known sequence times (start + 0.25/0.5/0.75)
   assert.equal(exported.length, 24);
-  assert.ok(exported.every((e) => /^tb_(xml_clip|placed_still)_(baseline|A|B|C)_0\.(25|5|75)$/.test(e.base)));
-  assert.ok(Math.abs((exported[0]?.t ?? 0) - (xml.st.start + 0.25)) < 1e-9);
+  assert.ok(exported.every((e) => /^tb_(xml_clip|fresh_still)_(baseline|A|B|C)_0\.(25|5|75)$/.test(e.base)));
+  assert.ok(labels.length > 0 && labels.every((l) => l === "WNC spike: keyframe_time_basis"));
 });
 
-test("time basis: without a working export form the read-back still runs and says frames are unavailable; no suitable clip fails clearly", async () => {
+test("time basis: if the API does not create a new track the fresh still goes on the top existing track at a free time and says so", async () => {
+  const { ctx, freshClips, tracks } = basisRig({ newTracks: false });
+  const r = await runProbe(probe("keyframe_time_basis"), ctx);
+  const fresh = stepNamed(r, "fresh still: place a new copy");
+  assert.equal(fresh.ok, true, JSON.stringify(fresh));
+  const fi = fresh.info as { own_track: boolean; track_index: number; attempts: Array<{ how: string; video_tracks_after?: number }> };
+  assert.equal(fi.own_track, false);
+  assert.equal(fi.track_index, 8);
+  assert.equal(fi.attempts.length, 2);
+  assert.match(String(stepNamed(r, "fresh_still: basis A").info?.clip_used), /top existing track/);
+  assert.equal(freshClips.length, 1);
+  assert.equal(tracks[8]?.length, 2);
+});
+
+test("time basis: without a working export form the read-back still runs and says frames are unavailable", async () => {
   const { ctx } = basisRig();
   ctx.exportFrameTo = undefined;
   const r = await runProbe(probe("keyframe_time_basis"), ctx);
   const a = stepNamed(r, "xml_clip: basis A");
   assert.match(String((a.info as { frames: unknown }).frames), /export unavailable/);
-  const { ctx: ctx2 } = basisRig();
-  ctx2.sequence = { getVideoTrackCount: async () => 1, getVideoTrack: async () => ({ getTrackItems: () => [] }), getEndTime: async () => ({ seconds: 10 }) } as never;
-  const r2 = await runProbe(probe("keyframe_time_basis"), ctx2);
-  const pick = stepNamed(r2, "xml clip: pick one");
-  assert.equal(pick.ok, false);
-  assert.match(pick.error ?? "", /no clip with in-point/);
+});
+
+test("time basis clip pick: skips clips whose in-point is not beyond the duration, skips the clip other probes used, tries the next candidate", async () => {
+  // candidate 1: in 2 < dur 3.75 (windows cannot be disjoint) ; candidate 2: the existing-clip target of the keyframes probe ; candidate 3: good
+  const { ctx, xmlClips } = basisRig({
+    xmlClips: [
+      { start: 0.5, inP: 2, end: 4.25 },
+      { start: 5, inP: 24, end: 8.75 },
+      { start: 9, inP: 40, end: 12.75 },
+    ],
+    existingTarget: true,
+  });
+  ctx.target = { clip: xmlClips[1] as never, trackIndex: 0, source: "existing clip" };
+  const r = await runProbe(probe("keyframe_time_basis"), ctx);
+  const pick = stepNamed(r, "xml clip: pick one");
+  assert.equal(pick.ok, true, JSON.stringify(pick));
+  const attempts = (pick.info as { attempts: Array<{ before: { in_s: number } }> }).attempts;
+  assert.equal(attempts.length, 1, "only the third clip was a candidate");
+  assert.equal(attempts[0]?.before.in_s, 40, JSON.stringify(pick.info));
+  assert.ok((xmlClips[0]?.st.start ?? 0) === 0.5 && (xmlClips[1]?.st.start ?? 0) === 5, "the skipped clips were not moved");
+});
+
+test("time basis clip pick: when a move leaves the windows overlapping it tries the next candidate, and fails with every attempt listed", async () => {
+  const { ctx, xmlClips } = basisRig({
+    xmlClips: [
+      { start: 0.5, inP: 24, end: 4.25 },
+      { start: 5, inP: 40, end: 8.75 },
+    ],
+  });
+  // the first clip refuses to move (createMoveAction does nothing): its windows stay overlapping
+  (xmlClips[0] as unknown as Record<string, unknown>).createMoveAction = (): Act => ({ apply: () => {} });
+  const r = await runProbe(probe("keyframe_time_basis"), ctx);
+  const pick = stepNamed(r, "xml clip: pick one");
+  assert.equal(pick.ok, true, "the second candidate worked");
+  const attempts = (pick.info as { attempts: Array<{ disjoint_windows: boolean }> }).attempts;
+  assert.deepEqual(attempts.map((a) => a.disjoint_windows), [false, true]);
+  const r2 = await runProbe(probe("keyframe_time_basis"), basisRig({ xmlClips: [{ start: 0.5, inP: 2, end: 4.25 }] }).ctx);
+  const fail = stepNamed(r2, "xml clip: pick one");
+  assert.equal(fail.ok, false);
+  assert.match(fail.error ?? "", /no clip with in-point > duration/);
+  assert.equal((fail.info as { candidates: number }).candidates, 0);
 });
 
 // ---- effects ---------------------------------------------------------------------------------------------------
@@ -572,7 +687,7 @@ test("scratch_disk: reads the project's scratch settings, sets every folder type
   assert.equal(r.ok, true, JSON.stringify(r).slice(0, 500));
   const set = stepNamed(r, "set every type");
   assert.equal(((set.info as { paths_after: Record<string, string> }).paths_after).CAPTURE, "Same as project");
-  assert.deepEqual(labels, ["WhyNot Cut build"]);
+  assert.deepEqual(labels, ["WNC spike: scratch_disk"]);
   assert.ok(stepsOf(r).every((s) => typeof s.at === "string" && typeof s.ms === "number"));
 });
 
@@ -679,7 +794,7 @@ test("save_as: n/a without an open scratch project, and refuses when the copy wo
 
 // ---- undo, clip edits, project views, encoder ------------------------------------------------------------------
 
-test("undo_transaction: History-panel instructions, before/after state, history API discovery; it runs right after the import", async () => {
+test("undo_transaction: History instructions with the before-values, state before/after, and it is the LAST mutating probe", async () => {
   const names = { v: "Video 1", a: "Audio 1" };
   const marks: string[] = ["GFX_001"];
   const { project, labels } = fakeProject();
@@ -703,15 +818,35 @@ test("undo_transaction: History-panel instructions, before/after state, history 
   const disc = stepNamed(r, "history API discovery");
   assert.equal((disc.info as { history_step_count: string }).history_step_count, "not exposed by the API");
   const t = stepNamed(r, "one_transaction_three_actions");
-  const info = t.info as { manual_check: string; state_before: { v1: string; markers: string[] }; state_after: { v1: string; a1: string; markers: string[] } };
-  assert.match(info.manual_check, /Window > History/);
-  assert.doesNotMatch(info.manual_check, /Edit menu must/);
-  assert.match(info.manual_check, /ALL THREE/);
+  const info = t.info as { manual_check: string; state_before: { v1: string; a1: string; markers: string[] }; state_after: { v1: string; a1: string; markers: string[] } };
+  assert.equal(
+    info.manual_check,
+    `Window \u25b8 History: the last entry is 'WhyNot Cut build'; press Ctrl+Z once; V1 name back to "Video 1", A1 back to "Audio 1", marker 'WNC undo marker' gone (before: ["GFX_001"]). Then Ctrl+Shift+Z to redo.`,
+  );
   assert.equal(info.state_before.v1, "Video 1");
   assert.deepEqual([info.state_after.v1, info.state_after.a1], ["WNC Undo Test", "WNC Undo Test A1"]);
+
+  // order: scratch_disk right after create_project; undo_transaction is the last mutating probe, right before save_close_open
   const order = buildProbes().map((p) => p.op);
-  assert.equal(order.indexOf("undo_transaction"), order.indexOf("import_fcp7_xml") + 1);
   assert.equal(order.indexOf("scratch_disk"), order.indexOf("create_project") + 1);
+  assert.equal(order.indexOf("undo_transaction") + 1, order.indexOf("save_close_open"));
+  for (const later of ["save_close_open", "save_as", "encoder_export"]) assert.ok(order.indexOf(later) > order.indexOf("undo_transaction"));
+  for (const earlier of ["sequence_settings", "export_frame", "keyframes_motion_opacity_crop", "keyframe_time_basis", "effects_by_match_name", "clip_edits_transitions_tracks", "track_rename", "markers", "project_views"]) {
+    assert.ok(order.indexOf(earlier) < order.indexOf("undo_transaction"), earlier);
+  }
+  // keep-open mode: the run stops right after undo_transaction
+  const keep = buildProbes({ keepOpen: true }).map((p) => p.op);
+  assert.equal(keep[keep.length - 1], "undo_transaction");
+  assert.ok(!keep.includes("save_close_open") && !keep.includes("save_as") && !keep.includes("encoder_export"));
+});
+
+test("only undo_transaction uses the 'WhyNot Cut build' label; every other transaction is labelled with its probe", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../spike/src/probes.ts", import.meta.url), "utf8");
+  assert.match(src, /label: string = txLabel\(\)/, "tx defaults to the per-probe label");
+  const undoRegion = src.slice(src.indexOf("const undoTransaction"), src.indexOf("const OPEN_NOTE"));
+  const outside = src.replace(undoRegion, "");
+  assert.equal([...outside.matchAll(/UNDO_LABEL/g)].length, 1, "outside the undo probe UNDO_LABEL appears only in its declaration");
 });
 
 test("clip_edits: refuses to edit anything but the placed still, and edits/transitions/new track/remove run on the still", async () => {
@@ -786,17 +921,57 @@ test("clip_edits: refuses to edit anything but the placed still, and edits/trans
   assert.equal((tr.info as { transition_items_after: number }).transition_items_after, 1);
 });
 
-test("project_views lists views read-only; encoder_export is off unless config asks for it", async () => {
+test("project_views records only whether each view is the scratch project (never other projects' names or paths); encoder_export is off by default", async () => {
+  const views = [
+    { name: "Client Reel.prproj", path: "C:/Users/yunus/Documents/Client Reel.prproj" },
+    { name: "spike.prproj", path: `\\\\?\\${WORK}/spike.prproj` },
+  ];
   const ppro = {
     ProjectUtils: {
-      getProjectViewIds: async () => [{ toString: () => "guid-1" }],
-      getProjectFromViewId: async () => ({ name: "spike.prproj", path: `\\\\?\\${WORK}/spike.prproj` }),
+      getProjectViewIds: async () => views.map((_, i) => ({ toString: () => `guid-${i}` })),
+      getProjectFromViewId: async (id: { toString: () => string }) => views[Number(id.toString().slice(5))],
     },
   };
   const r = await runProbe(probe("project_views"), baseCtx(ppro));
   assert.equal(r.ok, true);
-  assert.equal(((stepsOf(r)[0]?.info as { projects: Array<{ name: string }> }).projects[0])?.name, "spike.prproj");
+  const info = stepsOf(r)[0]?.info as { count: number; views: Array<{ name_is_scratch: boolean }>; scratch_project: { name: string; path_json: string } | null };
+  assert.equal(info.count, 2);
+  assert.deepEqual(info.views, [{ name_is_scratch: false }, { name_is_scratch: true }]);
+  assert.equal(info.scratch_project?.name, "spike.prproj");
+  const text = JSON.stringify(r);
+  assert.ok(!text.includes("Client Reel") && !text.includes("yunus") && !text.includes("guid-"), "the editor's other projects are not in the results");
   const e = await runProbe(probe("encoder_export"), baseCtx({}));
   assert.equal(e.ok, null);
   assert.match(String(e.detail), /encoder_export/);
+});
+
+test("export_frame: a folder and a file name joined WITHOUT a separator is detected and logged as a finding (file written next to the folder)", async () => {
+  const calls: string[] = [];
+  const { ctx } = exportRig(() => false);
+  const vfs = fakeFs();
+  ctx.fs = vfs.fs as never;
+  (ctx.ppro as unknown as { Exporter: { exportSequenceFrame: unknown } }).Exporter.exportSequenceFrame = async (_s: unknown, _t: unknown, filename: string, filepath: string) => {
+    calls.push(`${filename} | ${filepath}`);
+    // the buggy behaviour: bare name + folder without trailing slash -> plain concatenation
+    if (!/[\/]/.test(filename) && !/[\/]$/.test(filepath) && !filepath.includes("\\")) {
+      vfs.write(`${filepath}${filename}`);
+      return true;
+    }
+    return false;
+  };
+  const r = await runProbe(probe("export_frame"), ctx);
+  const f1 = stepNamed(r, "frame 1");
+  assert.equal(f1.ok, true, JSON.stringify(f1).slice(0, 400));
+  const info = f1.info as { findings: string[]; attempts: Array<{ form: string; found: boolean; found_at: string | null; expected_path: string; separator_less_join?: boolean }> };
+  const hit = info.attempts.find((a) => a.found);
+  assert.ok(hit?.form.startsWith("work:name + dir (no trailing slash)"), String(hit?.form));
+  assert.equal(hit?.separator_less_join, true);
+  assert.notEqual(hit?.found_at, hit?.expected_path);
+  assert.ok(hit?.found_at?.includes("/frames" + "exp_"), "the file name is glued onto the folder name");
+  assert.equal(info.findings.length >= 1, true);
+  assert.match(info.findings[0] ?? "", /WITHOUT a separator/);
+  assert.ok(calls.length > 0);
+  // the temp folder never gets a bare-name call (only runs if the work folder did not already win, so just check the calls made)
+  assert.ok(calls.filter((c) => c.toLowerCase().includes("temp")).every((c) => /[\\/]/.test(c.split(" | ")[0] ?? "")), "temp folder: only full-path filenames");
+  assert.ok((r.detail as { findings: string[] }).findings.length >= 1, "findings are also on the probe detail");
 });
