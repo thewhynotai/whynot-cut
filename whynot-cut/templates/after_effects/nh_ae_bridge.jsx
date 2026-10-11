@@ -161,3 +161,45 @@ NHAE.actions.build_motion = function (d) {
     rep.ok = rep.failed.length === 0;
     return rep;
 };
+
+/* read-back of the project AE just built (spec §4.8): what AE actually holds, to compare with the plan */
+NHAE.actions.readback = function (d) {
+    var job = d.job, plan = job.plan, out = {scenes: [], missing_or_substituted: [], main: null}, main = null, i;
+    for (i = 1; i <= app.project.numItems; i++) {
+        var it = app.project.item(i);
+        if (it instanceof CompItem && it.name === "MAIN_" + plan.reel_id) { main = it; }
+    }
+    if (!main) { return {ok: false, reason: "MAIN_" + plan.reel_id + " not found in the open project"}; }
+    out.main = {name: main.name, layers: main.numLayers, duration_frames: Math.round(main.duration / main.frameDuration)};
+    for (var s = 0; s < plan.scenes.length; s++) {
+        var sc = plan.scenes[s], cname = sc.id + "_" + sc.type, comp = NH.findComp(cname);
+        if (!comp) { continue; }
+        var rec = {id: sc.id, comp: cname, layers: [], in_frame: null, out_frame: null};
+        var ml = main.layer(cname);
+        if (ml) {
+            rec.in_frame = Math.round(ml.inPoint / main.frameDuration);
+            rec.out_frame = Math.round(ml.outPoint / main.frameDuration);
+        }
+        var t = (sc.hero_frame - sc.start_frame) * comp.frameDuration;
+        for (var k = 1; k <= comp.numLayers; k++) {
+            var ly = comp.layer(k);
+            var r = {name: ly.name, kind: (ly instanceof TextLayer) ? "text" : ((ly instanceof ShapeLayer) ? "shape" : "other"),
+                     "in": Math.round(ly.inPoint / comp.frameDuration), out: Math.round(ly.outPoint / comp.frameDuration),
+                     comment: ly.comment};
+            if (ly instanceof TextLayer) {
+                var rt = NHM.readText(ly);
+                r.text = rt.text; r.font_ps = rt.font_ps; r.substitute = rt.substitute; r.composer = rt.composer;
+                r.direction = rt.direction;
+                try { r.direction_pr = NHM.dirName(ly.property("ADBE Text Properties").property("ADBE Text Document").value.paragraphRange(0).direction); } catch (e1) {}
+                try { r.rect = NHM.compRect(ly, t); } catch (e2) { r.rect_error = String(e2); }
+            }
+            rec.layers.push(r);
+        }
+        out.scenes.push(rec);
+    }
+    try {
+        var ms = app.fonts.missingOrSubstitutedFonts || [];
+        for (i = 0; i < ms.length; i++) { out.missing_or_substituted.push(ms[i].postScriptName); }
+    } catch (e3) {}
+    return out;
+};

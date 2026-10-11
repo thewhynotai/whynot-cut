@@ -1190,5 +1190,177 @@ class TestMotionScenesJSX(unittest.TestCase):
         assert_js_syntax(self, AE_TPL / "nh_motion_lib.jsx")
 
 
+# --------------------------------------------------------------------------- build, read-back, protection
+def rb_from_plan(job: dict) -> dict:
+    """A read-back exactly as AE would report a faithful build of this job."""
+    plan = job["plan"]
+    scenes = []
+    for sc in plan["scenes"]:
+        layers = []
+        for el in sc["elements"]:
+            if el.get("kind") in ("text", "counter"):
+                layers.append({"name": el["name"], "kind": "text", "text": el.get("text", "") if el["kind"] == "text" else "0",
+                               "font_ps": el["font_ps"], "substitute": False, "composer": "UNIVERSAL",
+                               "direction": "RTL" if el.get("rtl") else "LTR", "direction_pr": "RTL" if el.get("rtl") else "LTR",
+                               "rect": [el["x"] - 20, el["y"] - 20, 40, 40], "comment": el.get("cue_hash") or ""})
+        scenes.append({"id": sc["id"], "comp": f"{sc['id']}_{sc['type']}", "in_frame": sc["start_frame"],
+                       "out_frame": sc["layer_out_frame"], "layers": layers})
+    return {"main": {"name": "MAIN_" + plan["reel_id"]}, "scenes": scenes, "missing_or_substituted": []}
+
+
+class FakeAE:
+    def __init__(self, dirty=False, project_path=None, fonts_ok=True, version="26.0", readback=None):
+        self.dirty, self.project_path, self.fonts_ok, self.version = dirty, project_path, fonts_ok, version
+        self.readback, self.jobs = readback, []
+
+    @staticmethod
+    def ok(result):
+        return {"ok": result.get("ok", True) is not False, "response": {"ok": result.get("ok", True) is not False,
+                                                                        "result": result}}
+
+    def status(self, max_age_s=5.0):
+        return {"alive": True, "busy": False, "host": "AEFT", "detail": "ok"}
+
+    def submit(self, action, data=None, timeout=900):
+        if action == "ping":
+            return self.ok({"ae_version": self.version, "dirty": self.dirty, "project_path": self.project_path})
+        if action == "fonts":
+            return self.ok({"fonts": {n: {"found": self.fonts_ok, "substitute": False} for n in data["postscript_names"]},
+                            "missing_or_substituted": []})
+        if action == "build_motion":
+            self.jobs.append(data["job"])
+            if self.dirty:
+                return self.ok({"ok": False, "reason": "dirty", "project": "theirs.aep"})
+            Path(data["job"]["aep_path"]).write_bytes(b"AEP built " + str(len(self.jobs)).encode())
+            return self.ok({"made": [s["id"] for s in data["job"]["plan"]["scenes"]], "failed": [], "warnings": [],
+                            "saved": data["job"]["aep_path"]})
+        if action == "readback":
+            return self.ok(self.readback(data["job"]) if self.readback else rb_from_plan(data["job"]))
+        return {"ok": False, "error": f"unexpected {action}"}
+
+
+class TestMotionBuild(CompiledMotion):
+    def setUp(self):
+        super().setUp()
+        from lib import ae_bridge, ae_probe, motion_build, plat
+        self.mods = (ae_bridge, ae_probe, plat)
+        self.saved = (ae_bridge.submit, ae_bridge.status, ae_probe.verdict_ok, plat.newest_app)
+        self.ae = FakeAE()
+        ae_bridge.submit, ae_bridge.status = self.ae.submit, self.ae.status
+        ae_probe.verdict_ok = lambda v: v == "26.0"
+        plat.newest_app = lambda key: {"name": "Adobe After Effects 2026", "exe": "AfterFX.exe"}
+        self.mb = motion_build
+        for f in (motion_build.aep_path(self.reel), self.reel.p("04_after_effects/motion-build-result.json")):
+            f.unlink(missing_ok=True)
+        shutil.rmtree(self.reel.p("04_after_effects/project/backups"), ignore_errors=True)
+        common.set_status(self.reel, "ANALYZED", "test reset")
+        self.approve()
+
+    def tearDown(self):
+        (ae_bridge, ae_probe, plat) = self.mods
+        ae_bridge.submit, ae_bridge.status, ae_probe.verdict_ok, plat.newest_app = self.saved
+
+    def approve(self):
+        from lib.motion_plan import fingerprint
+        write_json(self.reel.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor",
+                                                                   "plan_fingerprint": fingerprint(self.reel)})
+
+    def test_build_ok(self):
+        r = self.mb.build(self.reel)
+        self.assertEqual(r["status"], "PROJECT_ASSEMBLED", r)
+        self.assertTrue(r["comparison"]["ok"])
+        self.assertEqual(r["aep_sha1"], hashlib.sha1(self.mb.aep_path(self.reel).read_bytes()).hexdigest())
+        self.assertEqual(common.load_status(self.reel)["status"], "PROJECT_ASSEMBLED")
+        self.assertEqual(read_json(self.reel.p("04_after_effects/motion-build-result.json"))["status"], "PROJECT_ASSEMBLED")
+
+    def test_refusals(self):
+        self.reel.p("01_analysis/plan-approval.json").unlink()
+        r = self.mb.build(self.reel)
+        self.assertEqual(r["status"], "REFUSED")
+        self.assertTrue(any("approv" in x for x in r["reasons"]), r["reasons"])
+        self.approve()
+        from lib import ae_probe
+        ae_probe.verdict_ok = lambda v: False
+        r = self.mb.build(self.reel)
+        self.assertTrue(any("probe" in x for x in r["reasons"]), r["reasons"])
+        ae_probe.verdict_ok = lambda v: True
+        self.ae.fonts_ok = False
+        r = self.mb.build(self.reel)
+        self.assertEqual(r["status"], "REFUSED")
+        self.assertTrue(any("font" in x for x in r["reasons"]), r["reasons"])
+        r = self.mb.build(self.reel, allow_fallback_font=True)
+        self.assertEqual(r["status"], "PROJECT_ASSEMBLED", r)
+        self.assertTrue(r["fallback_font"])
+        self.assertTrue(all(e["font_ps"] == r["fallback_font"] for s in self.ae.jobs[-1]["plan"]["scenes"]
+                            for e in s["elements"] if e.get("font_ps")))
+
+    def test_stale_approval(self):
+        sp = self.reel.p("01_analysis/motion-script.json")
+        keep = sp.read_bytes()
+        s = read_json(sp)
+        try:
+            s["notes"] = "edited after approval"
+            write_json(self.reel.p("01_analysis/motion-script.json"), s)
+            r = self.mb.build(self.reel)
+            self.assertEqual(r["status"], "REFUSED")
+            self.assertTrue(any("stale" in x for x in r["reasons"]), r["reasons"])
+        finally:
+            sp.write_bytes(keep)
+
+    def test_dirty_session(self):
+        self.ae.dirty, self.ae.project_path = True, "D:/their/work.aep"
+        r = self.mb.build(self.reel)
+        self.assertEqual(r["status"], "REFUSED")
+        self.assertTrue(any("save or close" in x for x in r["reasons"]), r["reasons"])
+        self.assertEqual(self.ae.jobs, [])
+        self.ae.dirty = False
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+
+    def test_rebuild_protection(self):
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+        aep = self.mb.aep_path(self.reel)
+        aep.write_bytes(b"EDITED IN AE")
+        self.assertTrue(self.mb.editor_changed(self.reel))
+        r = self.mb.build(self.reel)
+        self.assertEqual(r["status"], "REFUSED")
+        self.assertTrue(any("changed" in x for x in r["reasons"]), r["reasons"])
+        r = self.mb.build(self.reel, replace_edited=True)
+        self.assertEqual(r["status"], "PROJECT_ASSEMBLED")
+        backups = list(self.reel.p("04_after_effects/project/backups").glob("*.aep"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), b"EDITED IN AE")
+
+    def test_compare(self):
+        from lib.motion_config import format_spec
+        from lib.motion_readback import compare
+        job = self.mb.job_data(self.reel)
+        plan, fmt, caps = job["plan"], format_spec(job["plan"]["format"]), job["caps"]
+        self.assertTrue(compare(plan, rb_from_plan(job), fmt, caps)["ok"])
+
+        def mutate(fn):
+            rb = rb_from_plan(job)
+            fn(rb)
+            return compare(plan, rb, fmt, caps)
+        first_text = lambda rb: rb["scenes"][0]["layers"][0]
+        cases = {
+            "substitute": lambda rb: first_text(rb).update(substitute=True),
+            "string": lambda rb: first_text(rb).update(text="شيء تاني"),
+            "box": lambda rb: first_text(rb).update(rect=[400, fmt["safe"]["top"] - 80, 40, 40]),
+            "missing scene": lambda rb: rb["scenes"].pop(1),
+            "cue hash": lambda rb: first_text(rb).update(comment="0" * 12),
+            "missing fonts": lambda rb: rb.update(missing_or_substituted=["ArialMT"]),
+        }
+        for name, fn in cases.items():
+            r = mutate(fn)
+            self.assertFalse(r["ok"], name)
+            self.assertTrue(r["failures"], name)
+
+    def test_script_only(self):
+        r = self.mb.script_only(self.reel)
+        self.assertEqual(r["status"], "SCRIPT_ONLY")
+        assert_js_syntax(self, Path(r["jsx"]))
+        self.assertNotEqual(common.load_status(self.reel)["status"], "PROJECT_ASSEMBLED")
+
+
 if __name__ == "__main__":
     unittest.main()

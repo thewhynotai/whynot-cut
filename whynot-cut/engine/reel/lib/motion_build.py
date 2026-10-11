@@ -92,3 +92,154 @@ def write_fallback_script(paths, **kw) -> Path:
     out = paths.p(f"04_after_effects/scripts/build_{paths.video_id}_motion.jsx")
     write_text(out, js)
     return out
+
+
+# --------------------------------------------------------------------------- build through the bridge
+RESULT = "04_after_effects/motion-build-result.json"
+
+
+def _sha1(p: Path) -> str:
+    import hashlib
+    return hashlib.sha1(p.read_bytes()).hexdigest() if p.exists() else ""
+
+
+def _inner(r: dict) -> dict:
+    return ((r or {}).get("response") or {}).get("result") or {}
+
+
+def editor_changed(paths) -> bool:
+    """The .aep differs from the one this pipeline last saved (the editor worked in it)."""
+    prior = read_json(paths.p(RESULT), {}) or {}
+    aep = aep_path(paths)
+    return bool(aep.exists() and prior.get("aep_sha1") and _sha1(aep) != prior["aep_sha1"])
+
+
+def _plan_fonts(plan: dict) -> list[str]:
+    names = {e.get("font_ps") for s in plan["scenes"] for e in s["elements"] if e.get("font_ps")}
+    for key in ("captions", "speaker_badge"):
+        f = ((plan.get("persistent") or {}).get(key) or {}).get("font_ps")
+        if f:
+            names.add(f)
+    return sorted(n for n in names if n)
+
+
+def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], dict]:
+    from . import ae_bridge, ae_probe, plat
+    from .motion_plan import fingerprint
+    probs, ctx = [], {"missing_fonts": []}
+    if not plat.newest_app("after_effects"):
+        return ["After Effects is not installed: deliver the script with `reel motion-build --script-only`"], ctx
+    val = read_json(paths.p("01_analysis/motion-validation.json"), {}) or {}
+    fp = fingerprint(paths)
+    if not paths.p("01_analysis/motion-plan.json").exists() or not val:
+        probs.append("no compiled motion plan: run `reel motion-plan`")
+    elif not val.get("ok"):
+        probs.append("the motion plan has errors: fix them (01_analysis/motion-plan.md)")
+    elif val.get("fingerprint") != fp:
+        probs.append("the motion plan is stale (script, words, audio or brand changed): run `reel motion-plan` again")
+    appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
+    if not appr.get("approved"):
+        probs.append("no Gate 1 approval: the editor approves motion-plan.md and the animatic (`reel approve-plan`)")
+    elif appr.get("plan_fingerprint") != fp:
+        probs.append("the Gate 1 approval is stale (the plan changed after approval): show the editor again")
+    st = ae_bridge.status()
+    if not st.get("alive"):
+        probs.append(f"the WhyNot Cut Bridge is not running in After Effects: {st.get('detail')} (`reel ae-status`)")
+        return probs, ctx
+    if st.get("busy"):
+        probs.append("After Effects is busy with another bridge job: try again when it finishes")
+    ping = _inner(ae_bridge.submit("ping", {}, timeout=60))
+    ctx["ping"] = ping
+    ver = ping.get("ae_version")
+    if not ae_probe.verdict_ok(ver):
+        probs.append(f"no ok Arabic probe verdict for After Effects {ver}: run `reel ae-probe`, view the frames, record it")
+    target = str(aep_path(paths))
+    if ping.get("dirty") is True:
+        same = bool(ping.get("project_path")) and Path(ping["project_path"]).resolve() == Path(target).resolve()
+        where = " in this reel's project" if same else f" in {ping.get('project_path') or 'an untitled project'}"
+        probs.append("After Effects has unsaved changes" + where + ": save or close it in After Effects first")
+    plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
+    if plan:
+        fonts = _inner(ae_bridge.submit("fonts", {"postscript_names": _plan_fonts(plan)}, timeout=60)).get("fonts") or {}
+        miss = [n for n, f in fonts.items() if not f.get("found") or f.get("substitute")]
+        ctx["missing_fonts"] = miss
+        if miss and not allow_fallback_font:
+            from .plat import font_install_hint
+            probs.append(f"font(s) not installed for After Effects: {', '.join(miss)} - install them from assets/Fonts "
+                         f"({font_install_hint()}), restart After Effects; or, only with the editor's OK, --allow-fallback-font")
+    return probs, ctx
+
+
+def _record(paths, res: dict) -> dict:
+    write_json(paths.p(RESULT), dict(res, at=now_iso()))
+    return res
+
+
+def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False, timeout: int = 900) -> dict:
+    import platform as _pf
+    import shutil
+    import time
+    from . import ae_bridge
+    from .common import set_status
+    from .motion_config import format_spec, motion_cfg
+    from .motion_readback import compare
+    aep = aep_path(paths)
+    base = {"status": "REFUSED", "reasons": [], "aep": str(aep), "fallback_font": None}
+    if editor_changed(paths):
+        if not replace_edited:
+            return dict(base, reasons=["the editor changed the .aep since the last build: rebuilding would discard that "
+                                       "work - `--replace-edited` keeps a backup copy first"])
+        bdir = aep.parent / "backups"
+        bdir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(aep, bdir / f"{aep.stem}.edited-{time.strftime('%Y%m%d-%H%M%S')}{aep.suffix}")
+    probs, ctx = preconditions(paths, allow_fallback_font)
+    if probs:
+        return dict(base, reasons=probs)
+    fb = None
+    if ctx.get("missing_fonts") and allow_fallback_font:
+        fbs = motion_cfg().get("fallback_fonts") or {}
+        fb = fbs.get("mac" if _pf.system() == "Darwin" else "windows")
+    job_p = write_job(paths, fallback_font=fb)
+    job = json.loads(job_p.read_text(encoding="ascii"))
+    t0 = time.time()
+    r = ae_bridge.submit("build_motion", {"job": job}, timeout=timeout)
+    rep = _inner(r)
+    if rep.get("reason") in ("dirty", "dirty_target"):
+        return dict(base, reasons=[f"After Effects has unsaved changes in {rep.get('project') or 'a project'}: save or "
+                                   "close it in After Effects first"])
+    fresh = aep.exists() and aep.stat().st_mtime >= t0 - 1
+    if not r.get("ok") or not fresh:
+        return _record(paths, dict(base, status="FAILED", reasons=[r.get("error") or "build failed or the .aep was not saved"],
+                                   report=rep, fallback_font=fb))
+    rb = _inner(ae_bridge.submit("readback", {"job": job}, timeout=300))
+    cmp_ = compare(job["plan"], rb, format_spec(job["plan"]["format"]), job["caps"])
+    ok = cmp_["ok"] and not rep.get("failed")
+    fails = cmp_["failures"] + [f"{f.get('scene')}: {f.get('error')}" for f in rep.get("failed") or []]
+    res = dict(base, status="PROJECT_ASSEMBLED" if ok else "FAILED", reasons=[] if ok else fails, report=rep,
+               readback=rb, comparison=cmp_, aep_sha1=_sha1(aep), fallback_font=fb, caps_source=job.get("caps_source"),
+               plan_fingerprint=job["plan"].get("fingerprint"))
+    _record(paths, res)
+    if ok:
+        set_status(paths, "PROJECT_ASSEMBLED", "AE motion project built and read back", "motion_build", [str(aep)])
+    return res
+
+
+def script_only(paths) -> dict:
+    jsx = write_fallback_script(paths)
+    return {"status": "SCRIPT_ONLY", "jsx": str(jsx), "aep": str(aep_path(paths)),
+            "next": "run it in After Effects (File > Scripts > Run Script File...); it is not verified: no read-back"}
+
+
+def run_script(paths, timeout: int = 900) -> dict:
+    import time
+    from .adobe_run import run_after_effects
+    jsx = write_fallback_script(paths)
+    aep = aep_path(paths)
+    t0 = time.time()
+    r = run_after_effects(jsx, timeout, done=lambda: aep.exists() and aep.stat().st_mtime >= t0 - 1)
+    if r.get("status") == "UNSUPPORTED":
+        return dict(r, jsx=str(jsx))
+    fresh = aep.exists() and aep.stat().st_mtime >= t0 - 1
+    res = {"status": "BUILT_UNVERIFIED" if fresh else "FAILED", "jsx": str(jsx), "aep": str(aep), "readback": None,
+           "aep_sha1": _sha1(aep) if fresh else "", "reasons": ["no read-back: the bridge was not used, so QC cannot pass"]}
+    return _record(paths, res)

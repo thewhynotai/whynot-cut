@@ -24,6 +24,14 @@ ARGS: dict = {
     "motion-library": [],
     "motion-plan": [],
     "motion-animatic": [(("--width",), {"type": int, "default": 540})],
+    "motion-build": [
+        (("--replace-edited",), {"action": "store_true", "help": "the editor changed the .aep: keep a backup, then rebuild"}),
+        (("--allow-fallback-font",), {"action": "store_true",
+                                      "help": "only with the editor's OK: a system Arabic font where a brand font is missing"}),
+        (("--script-only",), {"action": "store_true", "help": "write the self-contained JSX (no After Effects needed)"}),
+        (("--run-script",), {"action": "store_true", "help": "no bridge: hand the JSX to AE (no read-back; QC cannot pass)"}),
+        (("--timeout",), {"type": int, "default": 900}),
+    ],
 }
 NO_ID = {"ae-status", "ae-probe", "motion-icons", "motion-library"}
 
@@ -112,6 +120,22 @@ def cmd_motion_animatic(a):
     r = render(P(a), width=a.width)
     r["next"] = ("VIEW the storyboard and watch the animatic, then show the editor motion-plan.md + the animatic "
                  "(Gate 1: `reel approve-plan --by editor` only with their words)")
+    out(r)
+
+
+def cmd_motion_build(a):
+    from . import motion_build as mb
+    p = P(a)
+    if a.script_only:
+        out(mb.script_only(p))
+        return
+    if a.run_script:
+        out(mb.run_script(p, timeout=a.timeout))
+        return
+    r = mb.build(p, replace_edited=a.replace_edited, allow_fallback_font=a.allow_fallback_font, timeout=a.timeout)
+    r = {k: v for k, v in r.items() if k != "readback"}
+    r["next"] = ("reel motion-render" if r["status"] == "PROJECT_ASSEMBLED" else
+                 "fix the reasons above (Needs you items go to the editor), then motion-build again")
     out(r)
 
 
