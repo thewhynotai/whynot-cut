@@ -15,6 +15,7 @@ ARGS: dict = {
         (("--language",), {"default": None, "help": "e.g. ar; default: detected on the first chunk"}),
         (("--force",), {"action": "store_true", "help": "discard the chunk checkpoints and transcribe again"}),
     ],
+    "reels-plan": [],
 }
 
 
@@ -67,6 +68,17 @@ def cmd_episode_transcribe(a):
     r["next"] = ("transcript-editor reviews 02_transcription/subtitle-review.md (`reel transcript-correct --episode "
                  f"{ep.episode_id}`), then episode-analyst authors topics/speakers/reels-plan")
     out(r)
+
+
+def cmd_reels_plan(a):
+    from .reels import compile_reels_plan
+    ep = EP(a)
+    r = compile_reels_plan(ep)
+    out({"ok": r["ok"], "errors": r["errors"], "warnings": r["warnings"], "candidates": len(r["candidates"]),
+         "top": [{k: c.get(k) for k in ("id", "total", "type", "in_ms", "out_ms", "title")} for c in r["candidates"][:5]],
+         "plan": str(ep.p("01_analysis/reels-plan.md")) if r["ok"] else None,
+         "next": (f"reel reels-preview --episode {ep.episode_id}, then show reels-plan.md to the editor (Gate 0)"
+                  if r["ok"] else "fix the errors in 01_analysis/reels-plan.json and run reels-plan again")})
 
 
 def _chunks_missing(ep) -> bool:

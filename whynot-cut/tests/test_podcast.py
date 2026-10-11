@@ -207,5 +207,139 @@ class TestChunkedTranscription(unittest.TestCase):
         self.assertTrue(read_json(ep.p("02_transcription/verification.json"))["verified"])
 
 
+def synthetic_episode_transcript(ep, n=300, gap_at=39, total_ms=121000):
+    """Words every 400 ms (360 ms long); +600 ms gap before word index gap_at; word gap_at-1 ends with '؟';
+    segments: [0, gap_at-1], [gap_at, 149], [150, n-1]. A known phrase at 50-53 and 'السياسة' at 80."""
+    from lib.transcribe import finalize
+    special = {50: "انا", 51: "قلت", 52: "ان", 53: "الشركه", 80: "السياسة"}
+    words = []
+    for i in range(n):
+        s = i * 400 + (600 if i >= gap_at else 0)
+        w = special.get(i, f"كلمه{i}") + ("؟" if i == gap_at - 1 else "")
+        words.append({"id": i + 1, "segment_id": 1 if i < gap_at else (2 if i < 150 else 3), "word": w,
+                      "start_ms": s, "end_ms": s + 360, "probability": 0.95})
+    segs = []
+    for sid, (a, b) in enumerate(((0, gap_at - 1), (gap_at, 149), (150, n - 1)), 1):
+        ws = words[a:b + 1]
+        segs.append({"id": sid, "start_ms": ws[0]["start_ms"], "end_ms": ws[-1]["end_ms"],
+                     "text": " ".join(w["word"] for w in ws), "avg_logprob": -0.2, "no_speech_prob": 0.0,
+                     "compression_ratio": 1.2, "words": [w["id"] for w in ws]})
+    ep.ensure_project()
+    finalize(ep, {"source_video": "x.mp4", "backend": "test", "model": "none", "language": "ar",
+                  "language_probability": 1.0, "duration_ms": total_ms}, segs, words)
+    return words
+
+
+def cand(words, i0, i1, cid="R01", **kw):
+    from lib.common import fmt_ts
+    c = {"id": cid, "start": fmt_ts(words[i0]["start_ms"] - 50, "."), "end": fmt_ts(words[i1]["end_ms"] + 40, "."),
+         "type": "success_story", "title": "t", "hook_quote": words[i0]["word"], "hook_text": "h",
+         "evidence": " ".join(w["word"] for w in words[i0:i0 + 3]),
+         "end_evidence": " ".join(w["word"] for w in words[i1 - 2:i1 + 1]),
+         "why": "w", "score": {"hook": 8, "standalone": 7, "payoff": 9, "ending": 8},
+         "needs_context": False, "context_line": "", "speakers": [], "risks": []}
+    c.update(kw)
+    return c
+
+
+class TestReelsPlan(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from lib.episode import EpisodePaths
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root = cls.tmp / "C"
+        (cls.root / "assets").mkdir(parents=True)
+        (cls.root / "data").mkdir()
+        cls.ep = EpisodePaths(cls.root, "EP12")
+        cls.words = synthetic_episode_transcript(cls.ep)
+        write_json(cls.ep.p("00_inputs/episode.json"), {"episode_id": "EP12", "duration_ms": 121000,
+                                                         "sheet": {"avoid": ["السياسه"]}})
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def run_plan(self, cands):
+        from lib.reels import compile_reels_plan
+        write_json(self.ep.p("01_analysis/reels-plan.json"), {"episode_id": "EP12", "candidates": cands})
+        return compile_reels_plan(self.ep)
+
+    def test_valid_candidate_snaps_to_sentence(self):
+        w = self.words
+        c = cand(w, 39, 149, start=None, end=None)
+        from lib.common import fmt_ts
+        c["start"] = fmt_ts(w[39]["start_ms"] - 1100, ".")            # 1.1 s early, inside the previous sentence
+        c["end"] = fmt_ts(w[149]["end_ms"] + 140, ".")
+        r = self.run_plan([c])
+        self.assertTrue(r["ok"], r["errors"])
+        got = r["candidates"][0]
+        self.assertEqual(got["in_ms"], w[39]["start_ms"] - 120)
+        self.assertEqual(got["out_ms"], min(w[149]["end_ms"] + 250, w[150]["start_ms"] - 20))
+        self.assertEqual(got["duration_ms"], got["out_ms"] - got["in_ms"])
+        self.assertTrue(self.ep.p("01_analysis/reels-plan-validated.json").exists())
+
+    def test_evidence_variants_match(self):
+        from lib.reels import find_evidence
+        self.assertTrue(find_evidence(self.words, "أنا قلت إن الشركة", self.words[50]["start_ms"], 3000))
+        self.assertFalse(find_evidence(self.words, "أنا قلت إن الشركة", self.words[50]["start_ms"] + 20000, 3000))
+
+    def test_evidence_missing_is_error(self):
+        r = self.run_plan([cand(self.words, 39, 149, evidence="كلام مش موجود خالص")])
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("evidence" in e for e in r["errors"]))
+
+    def test_edges_clamped(self):
+        w = self.words
+        c = cand(w, 0, 299, start="00:00:00.000")
+        c["end"] = "00:02:00.900"
+        r = self.run_plan([c])
+        self.assertTrue(r["ok"], r["errors"])
+        got = r["candidates"][0]
+        self.assertEqual(got["in_ms"], 0)
+        self.assertLessEqual(got["out_ms"], 121000)
+        self.assertLess(got["in_ms"], got["out_ms"])
+
+    def test_duration_limits(self):
+        r = self.run_plan([cand(self.words, 39, 88)])                    # ~20 s
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertTrue(any("R01" in x and "duration" in x for x in r["warnings"]))
+        r = self.run_plan([cand(self.words, 39, 62)])                    # ~10 s
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("duration" in e for e in r["errors"]))
+
+    def test_unknown_type_error(self):
+        r = self.run_plan([cand(self.words, 39, 149, type="documentary")])
+        self.assertTrue(any("type" in e for e in r["errors"]))
+
+    def test_overlap_warning(self):
+        r = self.run_plan([cand(self.words, 39, 149), cand(self.words, 45, 149, cid="R02")])
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertTrue(any("overlap" in x and "R01" in x and "R02" in x for x in r["warnings"]))
+
+    def test_avoid_hit_flagged(self):
+        r = self.run_plan([cand(self.words, 39, 149)])
+        self.assertEqual(r["candidates"][0]["avoid_hits"], ["السياسه"])
+
+    def test_total_and_sort(self):
+        lo = cand(self.words, 150, 260, cid="R02", score={"hook": 5, "standalone": 5, "payoff": 6, "ending": 6})
+        r = self.run_plan([lo, cand(self.words, 39, 149)])
+        self.assertEqual([c["id"] for c in r["candidates"]], ["R01", "R02"])
+        self.assertEqual(r["candidates"][0]["total"], 8.0)
+        md = self.ep.p("01_analysis/reels-plan.md").read_text(encoding="utf-8")
+        self.assertLess(md.index("| R01 |"), md.index("| R02 |"))
+
+    def test_fingerprint_changes_with_words(self):
+        from lib.reels import reels_plan_fingerprint
+        self.run_plan([cand(self.words, 39, 149)])
+        a = reels_plan_fingerprint(self.ep)
+        wj = self.ep.p("02_transcription/words.json")
+        original = wj.read_bytes()
+        try:
+            wj.write_bytes(original + b"\n")
+            self.assertNotEqual(a, reels_plan_fingerprint(self.ep))
+        finally:
+            wj.write_bytes(original)
+
+
 if __name__ == "__main__":
     unittest.main()

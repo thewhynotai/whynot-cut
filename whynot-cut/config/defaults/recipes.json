@@ -1,0 +1,75 @@
+{
+  "note": "Content-type recipes for reels cut from podcast episodes. The episode-analyst assigns a type per candidate; the reel then follows its recipe (pacing and limits are applied by the engine, the rest guides story-editor and publish-writer). A client profile may override any value (recipes.json in the profile). SFX kinds must be ones the engine can synthesise: whoosh, whoosh_soft, riser_soft, flash, pop, click, tick, hit_soft, shimmer.",
+  "types": {
+    "storytelling": {
+      "label": {"en": "Storytelling", "ar": "حكاية"},
+      "pacing": {"min_pause_ms": 350, "pad_ms": 100},
+      "camera": {"max_scale": 1.15, "punch_ins_per_30s": 1, "style": "slow push at the turning point of the story"},
+      "captions": {"style": "standard", "highlights_per_30s": 2},
+      "graphics": {"prefer": ["context_card", "hook_title"], "avoid": [], "max_per_30s": 2},
+      "sfx": {"palette": ["whoosh_soft", "riser_soft"], "density": "low"},
+      "music": {"mood": ["warm", "curious"], "level_db": -24},
+      "copy": {"tone": "curious, narrative; leave the ending open", "hook_style": "question: what happened next?", "emoji": false}
+    },
+    "drama": {
+      "label": {"en": "Drama / confrontation", "ar": "دراما / مواجهة"},
+      "pacing": {"min_pause_ms": 600, "pad_ms": 160},
+      "camera": {"max_scale": 1.2, "punch_ins_per_30s": 1, "style": "one punch-in on the peak line; keep dramatic pauses"},
+      "captions": {"style": "minimal", "highlights_per_30s": 1},
+      "graphics": {"prefer": ["statement_highlight"], "avoid": ["checklist", "broll_card"], "max_per_30s": 1},
+      "sfx": {"palette": ["hit_soft", "riser_soft"], "density": "low"},
+      "music": {"mood": ["tense", "dark", "cinematic"], "level_db": -26},
+      "copy": {"tone": "suspense, restrained, no clickbait wording", "hook_style": "the conflict in one line", "emoji": false}
+    },
+    "success_story": {
+      "label": {"en": "Success story", "ar": "قصة نجاح"},
+      "pacing": {"min_pause_ms": 300, "pad_ms": 90},
+      "camera": {"max_scale": 1.15, "punch_ins_per_30s": 2, "style": "punch-in at each milestone"},
+      "captions": {"style": "standard", "highlights_per_30s": 3},
+      "graphics": {"prefer": ["stat_card", "hook_title"], "avoid": [], "max_per_30s": 3},
+      "sfx": {"palette": ["riser_soft", "shimmer"], "density": "medium"},
+      "music": {"mood": ["uplifting", "inspiring"], "level_db": -22},
+      "copy": {"tone": "inspirational, concrete numbers and dates from the speaker", "hook_style": "the number or result first", "emoji": false}
+    },
+    "advice": {
+      "label": {"en": "Advice / insight", "ar": "نصيحة / معلومة"},
+      "pacing": {"min_pause_ms": 250, "pad_ms": 80},
+      "camera": {"max_scale": 1.12, "punch_ins_per_30s": 2, "style": "jump-cut masks, punch-in on each point"},
+      "captions": {"style": "keywords", "highlights_per_30s": 3},
+      "graphics": {"prefer": ["checklist", "term_callout"], "avoid": [], "max_per_30s": 3},
+      "sfx": {"palette": ["pop", "click", "tick"], "density": "medium"},
+      "music": {"mood": ["light", "upbeat"], "level_db": -24},
+      "copy": {"tone": "direct and useful", "hook_style": "N things / the one mistake", "emoji": false}
+    },
+    "bold_opinion": {
+      "label": {"en": "Bold opinion", "ar": "رأي جريء"},
+      "pacing": {"min_pause_ms": 250, "pad_ms": 80},
+      "camera": {"max_scale": 1.18, "punch_ins_per_30s": 2, "style": "punch-in on the claim"},
+      "captions": {"style": "bold", "highlights_per_30s": 2},
+      "graphics": {"prefer": ["hook_title", "statement_highlight"], "avoid": ["checklist"], "max_per_30s": 2},
+      "sfx": {"palette": ["hit_soft"], "density": "low"},
+      "music": {"mood": ["minimal"], "level_db": -28},
+      "copy": {"tone": "confident; invite disagreement in the comments; never sharpen the speaker's claim", "hook_style": "the opinion as said", "emoji": false}
+    },
+    "emotional": {
+      "label": {"en": "Human / emotional moment", "ar": "لحظة إنسانية"},
+      "pacing": {"min_pause_ms": 800, "pad_ms": 200},
+      "camera": {"max_scale": 1.1, "punch_ins_per_30s": 1, "style": "slow push only"},
+      "captions": {"style": "soft", "highlights_per_30s": 1},
+      "graphics": {"prefer": [], "avoid": ["checklist", "broll_card", "stat_card", "term_callout"], "max_per_30s": 1},
+      "sfx": {"palette": [], "density": "none"},
+      "music": {"mood": ["soft", "piano"], "level_db": -26},
+      "copy": {"tone": "gentle, respectful, no clickbait", "hook_style": "a quiet line from the speaker", "emoji": false}
+    },
+    "comedy": {
+      "label": {"en": "Comedy", "ar": "كوميدي"},
+      "pacing": {"min_pause_ms": 220, "pad_ms": 70},
+      "camera": {"max_scale": 1.25, "punch_ins_per_30s": 2, "style": "comedic zoom on the punchline; keep the beat before it"},
+      "captions": {"style": "playful", "highlights_per_30s": 2},
+      "graphics": {"prefer": ["hook_title"], "avoid": ["checklist"], "max_per_30s": 2},
+      "sfx": {"palette": ["pop"], "density": "low"},
+      "music": {"mood": ["playful"], "level_db": -24},
+      "copy": {"tone": "light, playful", "hook_style": "the setup line", "emoji": true}
+    }
+  }
+}
