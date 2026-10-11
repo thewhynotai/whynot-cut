@@ -27,6 +27,10 @@ Then run `reel plan` and fix **every** error it reports (evidence not verbatim, 
   template to use, glass only on the closing card, when captions hide. Copy those choices; don't re-decide them per video.
 - Choose by **communication value**, not a quota. One primary graphic at a time, no graphic on every sentence, no SFX on every word.
 - On-screen wording is the speaker's words with filler removed, or exact client-approved strings. Keep hedges ("يمكن", "ممكن") and warnings.
+- Honorifics and gendered words about a person (name card, context card, hook) come from the profile `people[]`
+  (`gender`, `honorific_ar`, `honorific_en`): «الدكتور» for a man, «الدكتورة» for a woman, never guessed from the name.
+  `gender: unknown` → «د.» or the name alone until the editor says. `reel plan` errors on «الدكتورة <name>» for a man
+  (and الأستاذ/ة, الشيخ/ة, المهندس/ة), and warns on a gendered honorific for an `unknown` person.
 - Any claim the profile's `domain` makes sensitive gets `approval_required: true`: a medical claim; for a religious
   client a verse, hadith, ruling, or the speaker's words that echo a verse. `reel plan` refuses words flagged as
   uncertain on any graphic.

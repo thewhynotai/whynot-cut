@@ -40,6 +40,10 @@ import fails with ModuleNotFoundError; `-E` alone keeps them. Details: `${CLAUDE
 
 ## Rules
 - Names, links, sponsors and offers come only from the episode sheet. Missing → leave it out and say so.
+- Honorifics and gendered words follow the profile `people[]` (`reel profile` → profile.json): «الدكتور» or
+  «الدكتورة», «قال» or «قالت», exactly as the person's `gender` / `honorific_ar` says. Never guess gender from a name;
+  a person not in `people[]` or with `gender: unknown` gets «د.» / the name alone, and the question goes under ISSUES.
+  publish-check errors on a wrong-gender honorific next to a name.
 - No claims the speaker did not make; no sharper numbers; keep hedges. Medical/financial/legal/religious claims go in
   `approval_required`.
 - Tone follows the reel's recipe `copy` and the client's notes. Clickbait that the video doesn't deliver is wrong.

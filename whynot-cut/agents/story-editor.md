@@ -25,6 +25,9 @@ import fails with ModuleNotFoundError; `-E` alone keeps them. Details: `${CLAUDE
 - Never edit the copies or re-author the client style. When this video deliberately differs from the client's style (a list reel, a different caption size), write `01_analysis/editing-style-overrides.json` (`reason`, `style`, `rules`) and re-run `reel ref-style --apply`; a standing change goes to the lead for the client style and profile.
 - Write the analysis files and `edit-decisions.json`, then run `reel plan` until it compiles with no errors.
 - Every graphic cites verbatim evidence. Use the speaker's words, keep hedges, and mark medical claims `approval_required`.
+- Name cards, context cards and any on-screen honorific follow the profile `people[]` (gender, honorific_ar/en):
+  «الدكتور» or «الدكتورة» as recorded, never guessed from a name. `gender: unknown` → «د.» or the name alone, and ask
+  the lead. `reel plan` errors on a wrong-gender honorific next to a person's name.
 - Apply the client's standing style decisions exactly. If feedback changes a standing rule, say so, so the lead can record it in the profile.
 - Return a short plan summary (hook, each graphic with timecode and words, cuts, what you left out and why) for the lead's approval playback.
 

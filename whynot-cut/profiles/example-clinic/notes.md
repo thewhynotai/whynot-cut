@@ -18,6 +18,13 @@ Always re-read the client database (`output/client_database/`). These notes are 
 - Name-card wording comes from approved reference material, e.g. "Dr. Sample Example, Consultant Dermatologist,
   Example Clinic". Use the client's approved wording exactly; never paraphrase it.
 
+## People (see `profile.json` → `people`)
+- Dr. Sample Example (د. سامبل إكزامبل): male, «الدكتور» / "Dr.", he/him (fictional; a real profile cites the source,
+  e.g. the approved name card).
+- The off-camera interviewer, Nour Placeholder (نور بليسهولدر): gender `unknown` (the brief doesn't say, and "Nour"
+  is used for men and women) — ask the editor before writing a gendered word about them.
+- Never infer gender from a name. `reel plan` and `reel publish-check` flag a wrong-gender honorific next to a name.
+
 ## Editor's standing style (see `style.json`)
 - **Pauses removed.** Cuts are hidden by alternating 100/106 % zoom. min pause 250 ms, 80 ms breath pad. Re-transcribe to prove no words were lost.
 - **Captions:** keyword captions animated as graphics. White text pops in, and on keyword cues a blue box sweeps in right-to-left.

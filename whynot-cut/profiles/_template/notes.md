@@ -8,6 +8,16 @@ Fill this from the client's own documents and the editor's feedback only. Never 
 - Logo:
 - Approved name-card wording (exact):
 
+## People (`profile.json` → `people`)
+- One entry per person who appears or is named in the videos (the client, a co-host, a regular guest):
+  `{"name", "role", "gender": "male" | "female" | "unknown", "honorific_ar", "honorific_en", "pronouns"}`.
+  Put the Arabic and Latin spellings in `name` (e.g. "Dr. Name / د. الاسم").
+- Fill gender and honorifics **only from the client's own material** (brief, name card, bio, the editor's words).
+  Never infer gender from a name: «الدكتور» vs «الدكتورة» is a fact to look up, not a guess. Not stated → `unknown`,
+  and ask the editor.
+- `reel plan` and `reel publish-check` flag an honorific of the wrong gender next to the person's name (error) and a
+  gendered honorific for someone whose gender is `unknown` (warning).
+
 ## Editor's standing style
 - Pauses: removed? min pause / pad?
 - Captions: style, when hidden

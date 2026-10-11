@@ -8,5 +8,23 @@
   ],
   "rtl": true,
   "speciality": "Dermatology and laser (fictional example)",
-  "domain": "medical"
+  "domain": "medical",
+  "people": [
+    {
+      "name": "Dr. Sample Example / د. سامبل إكزامبل",
+      "role": "client: the doctor on camera",
+      "gender": "male",
+      "honorific_ar": "الدكتور",
+      "honorific_en": "Dr.",
+      "pronouns": "he/him"
+    },
+    {
+      "name": "Nour Placeholder / نور بليسهولدر",
+      "role": "off-camera interviewer (reads the questions)",
+      "gender": "unknown",
+      "honorific_ar": "",
+      "honorific_en": "",
+      "pronouns": ""
+    }
+  ]
 }

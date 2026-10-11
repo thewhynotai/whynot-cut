@@ -11,6 +11,16 @@
   `~/.claude/plugins/data/whynot-cut*/` younger than 24 h) with a fix ("install Git for Windows" on Windows), and
   `client_markers` (present / missing / written) for `--root`, the current client folder and every folder in
   `clients_root`.
+- People, gender and honorifics (T1.7): profile.json gets `people[]` (`name`, `role`, `gender`: male | female |
+  unknown, `honorific_ar`, `honorific_en`, `pronouns`); `_template` ships an empty list with a note, `example-clinic`
+  a filled one. The client-researcher fills it only from the client's material and never infers gender from a name
+  (`unknown` = ask the editor); the story-editor and publish-writer take every honorific from it. New `lib/people.py`
+  (deterministic: tashkeel/tatweel stripped, alef forms, ة/ه, ى/ي unified, «ال» and و/ف/ب/ل/ك clitics, «د.»/«د/»
+  treated as ungendered): `reel plan` (on-screen text) and `reel publish-check` (titles, description, chapters, tags,
+  captions, Shorts, thumbnail text) give an **error** for الدكتور/الدكتورة, الأستاذ/الأستاذة, الشيخ/الشيخة or
+  المهندس/المهندسة of the wrong gender before a person's name, a **warning** for a gendered honorific with a person
+  whose gender is `unknown`, and a warning for a past-tense verb of the other gender (قال/قالت ...) next to the
+  mention. A real run had written «الدكتورة» for a male client from his first name.
 
 ### Changed
 - No real client ships in the product: the real client's profile folder was removed from `profiles/`. The plugin now

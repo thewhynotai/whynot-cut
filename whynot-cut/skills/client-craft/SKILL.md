@@ -34,7 +34,13 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
   - No reference edits at all: write the three files from the profile's `style.json`/`notes.md` and the editor's own
     words, marked "no reference edits", and record them.
 - **Client reel-profile** (`output/client_database/reel-profile/`, created by `reel client-init`):
-  - `profile.json`: id, display name, prefix, languages, specialty
+  - `profile.json`: id, display name, prefix, languages, specialty, and `people[]`:
+    `{"name": "Dr. Name / د. الاسم", "role": "client", "gender": "male" | "female" | "unknown",
+    "honorific_ar": "الدكتور", "honorific_en": "Dr.", "pronouns": "he/him"}` per person who appears or is named
+    (client, co-host, regular guest). Gender and honorifics come only from the client's material (brief, name card,
+    bio, a reference edit's title, the editor's words), cited in `notes.md`. Never infer gender from a name; not stated
+    → `unknown` and ask the editor. `reel plan` / `reel publish-check` then flag «الدكتورة <name>» for a man (error)
+    and any gendered honorific for an `unknown` person (warning).
   - `transcription.json`: `initial_prompt` with the name and specialty exactly as spelled in the brief
   - `medical-glossary.json`: domain terms that trigger review
   - `style.json` + `notes.md`: standing style seen in the references or stated by the editor

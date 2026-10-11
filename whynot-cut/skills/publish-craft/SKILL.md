@@ -50,7 +50,15 @@ Then `reel publish-check --root "<CLIENT>" --episode <EP>` → it writes `youtub
   Pick frames from `publish/thumbnail/_candidates.jpg`: clear face, expressive, eyes open.
 - Dialect and emoji: follow the profile `notes.md`; the recipe says if emoji fit (comedy yes, emotional no).
 
+## People and gender
+The profile's `people[]` (profile.json: name, role, gender, honorific_ar, honorific_en, pronouns) decides every
+honorific and gendered word: «الدكتور كريم» / «الدكتورة منى», «قال» / «قالت», he / she. `gender: unknown` or not listed
+→ «د.» or the name alone, and ask the editor. publish-check reads it: a wrong-gender honorific with the person's name is
+an error (titles, description, chapters, tags, captions, Shorts, thumbnail text); a gendered honorific for an `unknown`
+person and a verb that disagrees are warnings.
+
 ## Never
+- A gender guessed from a name. Look it up in `people[]`.
 - A link, name, title, sponsor or offer that isn't in the episode sheet.
 - A quote that isn't verbatim, a number the speaker didn't say, a stronger claim than the speaker made.
 - Medical/financial/legal/religious claims without an `approval_required` entry.

@@ -7,6 +7,7 @@ the files the editor copies from. Nothing is uploaded anywhere.
   * every URL must appear in the episode sheet (names and links are never invented)
   * every quoted line («…» or “…”) must be the speaker's words (found in the transcript); straight "…" marks emphasis
     or a term in copy, so it is not checked
+  * an honorific next to a person's name agrees with that person's gender in the profile's people[] (lib/people.py)
 """
 from __future__ import annotations
 
@@ -396,8 +397,17 @@ def check(ep) -> dict:
     lang = pub.get("language") or (info.get("sheet") or {}).get("language") or "ar"
     errors, warnings, approvals = [], [], list(pub.get("approval_required") or [])
     bad = set(yl.get("forbidden_chars", "<>"))
+    from .people import check_text, load_people
+    ppl, p_issues = load_people()
+    warnings += p_issues
+
+    def gender(where: str, text: str):
+        e, w = check_text(where, text, ppl)          # «الدكتورة <name>» for a man in people[] -> error
+        errors.extend(e)
+        warnings.extend(w)
 
     def facts(where: str, text: str):
+        gender(where, text)
         for m in QUOTE.finditer(text or ""):
             q = next(g for g in m.groups() if g)
             if norm(q) and norm(q) not in spoken:
@@ -420,6 +430,8 @@ def check(ep) -> dict:
         facts(f"title {k}", t)
     chs = chapters(ep, pub)
     errors += [f"chapters: {e}" for e in validate_chapters(chs, total, yl)]
+    for k, (_a, t) in enumerate(chs, 1):
+        gender(f"chapter {k}", t)
     desc = assemble_description(pub, chs, lang)
     if len(desc) > yl["description_max"]:
         errors.append(f"description: {len(desc)} characters (YouTube allows {yl['description_max']})")
@@ -443,6 +455,10 @@ def check(ep) -> dict:
     ytags = yt.get("tags") or []
     if count_tags_chars(ytags) > yl["tags_total_max"]:
         errors.append(f"tags: {count_tags_chars(ytags)} characters (YouTube allows {yl['tags_total_max']})")
+    for t in list(ytags) + list(tags_):
+        gender(f"tag {t}", str(t))
+    for k, dsg in enumerate((pub.get("thumbnail") or {}).get("designs") or [], 1):
+        gender(f"thumbnail {k}", str(dsg.get("text") or ""))
 
     reels = []
     for f in sorted(ep.p("publish/reels").glob("*.json")):
@@ -463,7 +479,8 @@ def check(ep) -> dict:
             errors.append(f"{rid} shorts title: {len(st)} characters (1-{sl['title_max']})")
         if bad & set(st + str(sh.get("description") or "")):
             errors.append(f"{rid} shorts: contains < or > (YouTube rejects them)")
-        for where, text in (("instagram", cap), ("tiktok", tcap), ("shorts", st + "\n" + str(sh.get("description") or ""))):
+        ig_all = cap + "\n" + " ".join(map(str, ig.get("hashtags") or []))
+        for where, text in (("instagram", ig_all), ("tiktok", tcap), ("shorts", st + "\n" + str(sh.get("description") or ""))):
             facts(f"{rid} {where}", text)
         approvals += [f"{rid}: {a}" for a in r.get("approval_required") or []]
         if str(rid).endswith("_MO"):           # motion video (2.2): CC-BY art must be credited where it is posted

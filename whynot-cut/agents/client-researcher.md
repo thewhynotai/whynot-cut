@@ -32,6 +32,11 @@ import fails with ModuleNotFoundError; `-E` alone keeps them. Details: `${CLAUDE
 - View images and contact sheets before classifying or describing them.
 - Every brand or style statement cites its source file. If something isn't in the files, write "unavailable". Never fill gaps from general knowledge.
 - Fonts that aren't installed, missing HEX codes and missing name-card wording are issues for the editor, not things to guess.
+- **People.** Fill `profile.json` `people[]` (name in Arabic and Latin, role, gender, honorific_ar, honorific_en,
+  pronouns) for the client and anyone who recurs, only from the client's material (brief, name card, bio, a reference
+  edit's on-screen title, the editor's words) and cite where each gender came from. Never infer gender from a name:
+  a run once wrote «الدكتورة» for a male doctor because of his first name. Not stated → `"gender": "unknown"` and
+  ask the editor under ISSUES. Use the same care in your own messages and tables: «الدكتور/الدكتورة» only from the profile.
 
 ## Report format (return exactly this; keep it short; point to files, do not paste them)
 ```
