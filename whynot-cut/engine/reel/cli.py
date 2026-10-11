@@ -582,7 +582,7 @@ def cmd_next(a):
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
 NO_ROOT = {"setup", "doctor", "model-download", "gpu-enable", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
-           "ae-status", "ae-probe"}
+           "ae-status", "ae-probe", "motion-icons", "motion-library"}
 NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
 

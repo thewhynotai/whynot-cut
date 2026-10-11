@@ -470,5 +470,92 @@ class TestMotionGate0(unittest.TestCase):
         self.assertIn("--type", opts)
 
 
+# --------------------------------------------------------------------------- icons
+def svg(body: str) -> str:
+    return f'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor">{body}</svg>'
+
+
+class TestIcons(unittest.TestCase):
+    def assertPts(self, got, want, places=6):
+        self.assertEqual(len(got), len(want))
+        for g, w in zip(got, want):
+            self.assertAlmostEqual(g[0], w[0], places=places)
+            self.assertAlmostEqual(g[1], w[1], places=places)
+
+    def test_lines_and_relative(self):
+        from lib.motion_icons import svg_to_shapes
+        for d in ("M2 2 L22 2 L22 22 Z", "m2 2 l20 0 v20 z", "M2 2 H22 V22 Z"):
+            sh = svg_to_shapes(svg(f'<path d="{d}"/>'), 24)
+            self.assertEqual(len(sh), 1, d)
+            self.assertTrue(sh[0]["closed"], d)
+            self.assertPts(sh[0]["vertices"], [[-10, -10], [10, -10], [10, 10]])
+            self.assertPts(sh[0]["inTangents"], [[0, 0]] * 3)
+            self.assertPts(sh[0]["outTangents"], [[0, 0]] * 3)
+
+    def test_cubic_and_smooth(self):
+        from lib.motion_icons import svg_to_shapes
+        s = svg_to_shapes(svg('<path d="M0 12 C0 0 24 0 24 12 S24 24 12 24"/>'), 24)[0]
+        self.assertFalse(s["closed"])
+        self.assertEqual(len(s["vertices"]), 3)
+        self.assertPts([s["outTangents"][0]], [[0, -12]])
+        self.assertPts([s["inTangents"][1], s["outTangents"][1]], [[0, -12], [0, 12]])
+        self.assertPts([s["inTangents"][2]], [[12, 0]])
+
+    def test_arc(self):
+        from lib.motion_icons import flatten, svg_to_shapes
+        s = svg_to_shapes(svg('<path d="M2 12 A10 10 0 0 1 22 12"/>'), 24)
+        self.assertPts([s[0]["vertices"][0], s[0]["vertices"][-1]], [[-10, 0], [10, 0]])
+        for poly in flatten(s, 0.2):
+            for x, y in poly:
+                self.assertAlmostEqual((x * x + y * y) ** 0.5, 10, delta=0.2)
+        compact = svg_to_shapes(svg('<path d="M2 12a10 10 0 0120 0"/>'), 24)      # flags written without spaces
+        self.assertPts([compact[0]["vertices"][-1]], [[10, 0]])
+
+    def test_elements(self):
+        from lib.motion_icons import svg_to_shapes
+        c = svg_to_shapes(svg('<circle cx="12" cy="12" r="10"/>'), 24)[0]
+        self.assertTrue(c["closed"])
+        self.assertEqual(len(c["vertices"]), 4)
+        for x, y in c["vertices"]:
+            self.assertAlmostEqual((x * x + y * y) ** 0.5, 10, places=6)
+        r = svg_to_shapes(svg('<rect x="3" y="3" width="18" height="18" rx="2"/>'), 24)[0]
+        self.assertTrue(r["closed"])
+        self.assertEqual(len(r["vertices"]), 8)
+        ln = svg_to_shapes(svg('<line x1="5" y1="12" x2="19" y2="12"/>'), 24)[0]
+        self.assertFalse(ln["closed"])
+        self.assertPts(ln["vertices"], [[-7, 0], [7, 0]])
+        pl = svg_to_shapes(svg('<polyline points="2 2 12 12 22 2"/>'), 24)[0]
+        pg = svg_to_shapes(svg('<polygon points="2,2 12,12 22,2"/>'), 24)[0]
+        self.assertFalse(pl["closed"])
+        self.assertTrue(pg["closed"])
+        self.assertEqual(len(pg["vertices"]), 3)
+        big = svg_to_shapes(svg('<line x1="0" y1="12" x2="24" y2="12"/>'), 240)[0]   # scaled by size / viewBox
+        self.assertPts(big["vertices"], [[-120, 0], [120, 0]])
+
+    def test_vendored_index(self):
+        from lib.motion_icons import ICON_DIR, load_index, svg_to_shapes
+        idx = load_index()
+        self.assertGreaterEqual(len(idx), 1000)
+        self.assertIn("trending-up", idx)
+        self.assertIn("check", idx)
+        self.assertIn("ISC", (ICON_DIR / "LICENSE").read_text(encoding="utf-8"))
+        for name in idx:
+            shapes = svg_to_shapes((ICON_DIR / f"{name}.svg").read_text(encoding="utf-8"), 24)
+            self.assertTrue(shapes, name)
+
+    def test_search_closest_mirror(self):
+        from lib.motion_icons import closest, icon_shapes, search, should_mirror
+        self.assertEqual(search("trending up")[0]["name"], "trending-up")
+        self.assertIn("trending-up", closest("trendingup"))
+        self.assertTrue(should_mirror("arrow-right", "rtl"))
+        self.assertFalse(should_mirror("arrow-right", "ltr"))
+        self.assertFalse(should_mirror("heart", "rtl"))
+        a, b = icon_shapes("arrow-right", 24), icon_shapes("arrow-right", 24, mirror=True)
+        for sa, sb in zip(a, b):
+            for va, vb in zip(sa["vertices"], sb["vertices"]):
+                self.assertAlmostEqual(va[0], -vb[0])
+                self.assertAlmostEqual(va[1], vb[1])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,8 +17,12 @@ ARGS: dict = {
         (("--notes",), {"default": "", "help": "what the frames showed"}),
         (("--timeout",), {"type": int, "default": 600}),
     ],
+    "motion-icons": [
+        (("--search",), {"required": True, "help": "concept words in English, e.g. \"money, growth\""}),
+        (("--limit",), {"type": int, "default": 12}),
+    ],
 }
-NO_ID = {"ae-status", "ae-probe"}
+NO_ID = {"ae-status", "ae-probe", "motion-icons"}
 
 
 def add_args(name: str, sp) -> None:
@@ -69,6 +73,15 @@ def cmd_ae_probe(a):
         fonts = {"headline": fonts_map(Paths(a.root).client_db).get("headline")}
     r = ae_probe.run_probe(fonts, timeout=a.timeout)
     out({k: v for k, v in r.items() if k != "readback"})
+
+
+def cmd_motion_icons(a):
+    from .motion_icons import load_index, search
+    hits = []
+    for part in [x for x in a.search.split(",") if x.strip()] or [a.search]:
+        hits += [dict(h, query=part.strip()) for h in search(part, a.limit)]
+    out({"set": "lucide (ISC)", "icons": len(load_index()), "hits": hits,
+         "how": "use the name in motion-script.json (\"icon\": \"<name>\"); arrows/chevrons are mirrored in RTL"})
 
 
 def dispatch(a) -> bool:
