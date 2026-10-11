@@ -20,6 +20,23 @@
 Set `WHYNOT_HOME` (or the plugin option `engine_home`) to move the engine home, e.g. to a bigger drive. The bridge
 finds a moved home through `bridge-config.json`, which `reel setup` writes into the panel folder.
 
+## Running your own Python against the engine
+
+Scripts that import the engine's packages (PIL, av, numpy, cv2) or `lib.*` run with the engine venv's python
+(`~/.whynot-cut/venv/bin/python`; Windows `%USERPROFILE%\.whynot-cut\venv\Scripts\python.exe`, in Git Bash
+`"$HOME/.whynot-cut/venv/Scripts/python.exe"`), without `-I`.
+
+- `-I` implies `-s`, which switches the USER site-packages off. A venv built with `reel setup --system-site-packages`
+  reuses the packages already installed for the base Python, and on Windows pip puts those in
+  `%APPDATA%\Python\Python3xx\site-packages` (the user site). Under `-I` they vanish: `import PIL`, `av` or `numpy`
+  fail with `ModuleNotFoundError` although `reel` works. `-E -s` is no better (checked on Windows 11 with a Python 3.13
+  venv: `-I`, `-s` and `-E -s` all fail; no flag and `-E` alone work).
+- Need isolation (a script that reads untrusted files)? Use `-E` alone (it ignores `PYTHON*` variables) and keep the
+  script outside the folder it reads: the script's folder and the working directory are on `sys.path`. Python 3.11+
+  also has `-P` for that.
+- Check: `<venv python> -c "import PIL, av, numpy"` prints nothing when the environment is fine; `reel doctor` lists
+  the modules.
+
 ## Symptom → cause → fix
 
 | Symptom | Cause | Fix |
@@ -28,6 +45,7 @@ finds a moved home through `bridge-config.json`, which `reel setup` writes into 
 | `no Python 3.9+ found` | Fresh machine | Windows: `winget install Python.Python.3.12`; macOS: `xcode-select --install` |
 | Windows: `python3` opens the Microsoft Store | Store alias stub on PATH | The wrappers skip it; install real Python (above) or disable the alias in Settings › Apps › App execution aliases |
 | pip fails building `numpy`/`av` | Python too new for the pinned wheels | Use Python 3.10–3.12 and run `reel setup` again |
+| `ModuleNotFoundError: No module named 'PIL'` (or `av`, `numpy`) in your own script while `reel` works (Windows) | The script ran under `-I` / `-s` / `-E -s`, which turns the user site-packages off; a `--system-site-packages` venv finds them there | Run it with the venv python without `-I` (`-E` alone for isolation), see above |
 | Bridge missing in Window › Extensions | Premiere was open during install, or PlayerDebugMode off | Editor sets PlayerDebugMode, quits and reopens Premiere |
 | `ppro-status` alive false with a stale heartbeat | Panel closed or Premiere busy with a dialog | Bring Premiere to the front, dismiss dialogs; reopen Window › Extensions › WhyNot Cut Bridge |
 | Transcription very slow on Windows | CPU only | NVIDIA GPU with CUDA 12 runtime makes it automatic; else set preferences `whisper_model: large-v3-turbo` |

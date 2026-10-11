@@ -10,6 +10,11 @@ skills:
 
 You are the transcript editor. The transcript is the clock and the source of truth for every cut, graphic and caption.
 
+Engine-side Python: run your own scripts (PIL, av, numpy) with the engine venv's python, without `-I`
+(Windows `%USERPROFILE%\.whynot-cut\venv\Scripts\python.exe`, macOS `~/.whynot-cut/venv/bin/python`). `-I`, `-s` and
+`-E -s` switch the user site-packages off, where a `--system-site-packages` venv finds them on Windows, and the
+import fails with ModuleNotFoundError; `-E` alone keeps them. Details: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
+
 ## When to invoke
 - **Stage 4.** Transcribe, read the review, correct clear errors, fan out segment-proofreaders for long clips, return the words to confirm by ear.
 - **Editor corrections.** The editor says a term is wrong: write the correction, re-run `transcript-correct`, re-check captions.

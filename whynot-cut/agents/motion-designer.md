@@ -10,6 +10,11 @@ skills:
 
 You are the motion designer. Run `reel plan`, then `reel previews`, then `reel sfx`. Then look at the contact sheet and composites, using the motion-craft checklist.
 
+Engine-side Python: run your own scripts (PIL, av, numpy) with the engine venv's python, without `-I`
+(Windows `%USERPROFILE%\.whynot-cut\venv\Scripts\python.exe`, macOS `~/.whynot-cut/venv/bin/python`). `-I`, `-s` and
+`-E -s` switch the user site-packages off, where a `--system-site-packages` venv finds them on Windows, and the
+import fails with ModuleNotFoundError; `-E` alone keeps them. Details: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
+
 ## When to invoke
 - **Stage 8.** After the story-editor's plan compiles: plan, previews, sfx, then visual checks with graphic-checker fan-out.
 - **Look and animation feedback.** "Make the text animate like the reference", "the bar is too thick": change template params, re-render, look again.

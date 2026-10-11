@@ -270,5 +270,57 @@ class TestEvidenceDidYouMean(unittest.TestCase):
             self.assertIn("did you mean", (SK / rel).read_text(encoding="utf-8"), rel)
 
 
+def _agent_tools(f: Path) -> list:
+    head = f.read_text(encoding="utf-8").split("---")[1]
+    line = next((ln for ln in head.splitlines() if ln.startswith("tools:")), "tools:")
+    return [t.strip() for t in line.split(":", 1)[1].split(",")]
+
+
+class TestEngineVenvPython(unittest.TestCase):
+    """G67: `python -I` with the engine venv loses site-packages on Windows (PIL/av/numpy not found). The docs and every
+    agent that can run Bash say: engine-side scripts run with the venv python WITHOUT -I."""
+
+    MARK = "without `-I`"
+
+    def user_site(self, *flags) -> str:
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONNOUSERSITE", "PYTHONHOME", "PYTHONPATH")}
+        r = subprocess.run([sys.executable, *flags, "-c", "import site; print(bool(site.ENABLE_USER_SITE))"],
+                           capture_output=True, text=True, env=env)
+        return r.stdout.strip()
+
+    def test_isolation_flags_behave_as_the_docs_claim(self):
+        plain = self.user_site()
+        self.assertEqual(self.user_site("-E"), plain)                  # -E alone keeps the user site-packages
+        self.assertEqual(self.user_site("-I"), "False")                # -I switches it off
+        self.assertEqual(self.user_site("-E", "-s"), "False")          # so does -E -s (it is the -s)
+
+    def test_platform_setup_explains_it(self):
+        t = (SK / "skills/setup/references/platform-setup.md").read_text(encoding="utf-8")
+        self.assertIn(self.MARK, t)
+        for must in ("ModuleNotFoundError", "site-packages", "-E -s", "-E` alone", "--system-site-packages",
+                     "venv\\Scripts\\python.exe"):
+            self.assertIn(must, t)
+
+    def test_troubleshooting_catalog_has_the_symptom(self):
+        t = (SK / "skills/edit/references/troubleshooting.md").read_text(encoding="utf-8")
+        row = next((ln for ln in t.splitlines() if "ModuleNotFoundError" in ln and "-I" in ln), "")
+        self.assertIn(self.MARK, row)
+        self.assertIn("PIL", row)
+
+    def test_every_agent_with_bash_says_it(self):
+        agents = [f for f in sorted((SK / "agents").glob("*.md")) if "Bash" in _agent_tools(f)]
+        self.assertGreaterEqual(len(agents), 12)
+        for f in agents:
+            t = f.read_text(encoding="utf-8")
+            self.assertIn(self.MARK, t, f.name)
+            self.assertIn("platform-setup.md", t, f.name)
+            self.assertLess(t.index(self.MARK), t.index("## When to invoke"), f.name)   # near the top, not buried
+
+    def test_no_doc_tells_agents_to_use_dash_I_with_the_engine_python(self):
+        bad = re.compile(r"venv[\\/](?:bin|Scripts)[\\/]python(?:\.exe)?[\"']?\s+-I\b")
+        for f in list((SK / "skills").rglob("*.md")) + list((SK / "agents").glob("*.md")):
+            self.assertIsNone(bad.search(f.read_text(encoding="utf-8")), f.name)
+
+
 if __name__ == "__main__":
     unittest.main()
