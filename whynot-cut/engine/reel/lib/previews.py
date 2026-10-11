@@ -14,6 +14,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from .common import still_category, Paths, brand_fallback, font_role_fallback, load_config, read_json, write_json, now_iso, ms_to_frame
+from .font_roles import DEFAULT_ROLE_STYLE, resolve
 
 W, H = 1080, 1920
 
@@ -45,21 +46,28 @@ class Brand:
                 self.files[wgt["style"].lower()] = wgt["file"]
                 self.ps_names[wgt["style"].lower()] = wgt["postscript_name"]
         self.engines = set()
-        self.role_style = dict({"caption": "bold", "headline": "black", "body": "medium", "term": "bold", "small": "regular"},
-                               **font_role_fallback().get("weights", {}))
+        self.typography, self._faces = typ, {}
+        # the weight each role wants (typography.json roles, then brand.json, then the house default)
+        self.role_style = {r: self.face(r)["wanted"] for r in DEFAULT_ROLE_STYLE}
+
+    def face(self, role: str) -> dict:
+        """The font face this role draws with: {file, ps, style, wanted, source, exact} (see font_roles.resolve)."""
+        if role not in self._faces:
+            self._faces[role] = resolve(self.typography, role, font_role_fallback().get("weights", {}))
+        return self._faces[role]
 
     def font(self, role: str, size: int):
         """Shaping text engine for this role. The chosen engine is recorded in self.engines (QC shows it)."""
         from . import ct_text, hb_text
-        style = self.role_style.get(role, "regular")
+        face = self.face(role)
         if ct_text.AVAILABLE:
-            ps = self.ps_names.get(style)
+            ps = face["ps"]
             if ps:
                 spec = ct_text.CTFontSpec(ps, size)
                 if spec.is_exact:  # font installed -> exact brand font, full shaping (verified on macOS)
                     self.engines.add("coretext")
                     return spec
-        f = self.files.get(style) or next(iter(self.files.values()), None)
+        f = face["file"]
         if f and hb_text.AVAILABLE:
             try:
                 spec = hb_text.HBFontSpec(f, size)

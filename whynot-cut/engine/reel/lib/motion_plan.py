@@ -25,10 +25,6 @@ ROLE_FONT = {"title": "headline", "quote": "headline", "stat": "headline", "body
              "caption": "caption"}
 NUM_IN = re.compile(r"[0-9٠-٩][0-9٠-٩.,٬٫]*")
 SYSTEM_FONTS = ("arial.ttf", "segoeui.ttf", "tahoma.ttf", "dejavusans.ttf", "notosansarabic-regular.ttf")
-NEAREST = {"headline": ["black", "heavy", "extrabold", "bold", "semibold", "medium", "regular"],
-           "caption": ["bold", "semibold", "extrabold", "black", "medium", "regular"],
-           "body": ["medium", "regular", "book", "semibold", "light", "bold"],
-           "small": ["regular", "book", "medium", "light", "semibold"]}
 
 
 def _f01(rgb) -> list:
@@ -104,12 +100,11 @@ class _Compiler:
         fm = fonts_map(self.paths.client_db)
         out, fallback = {}, None
         for role, brole in ROLE_FONT.items():
-            style = self.brand.role_style.get(brole, "regular")
-            # the wanted weight, else the nearest one the brand has: file and PostScript name always from the SAME weight
-            order = [style] + NEAREST.get(brole, NEAREST["body"])
-            pick = next((w for w in order if w in self.brand.files), next(iter(self.brand.files), None))
-            f = self.brand.files.get(pick) if pick else None
-            ps = (self.brand.ps_names.get(pick) if pick else None) or fm.get(brole) or ""
+            # the role's weight (typography.json roles, brand.json, default), else the nearest one the brand has: file and
+            # PostScript name always from the SAME face
+            face = self.brand.face(brole)
+            f = face["file"]
+            ps = face["ps"] or fm.get(brole) or ""
             if not ps:
                 raise SystemExit(f"no PostScript font name for the {brole} role: run `reel client-db` (typography.json)")
             if not f or not Path(f).exists():

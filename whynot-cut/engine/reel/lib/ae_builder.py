@@ -89,9 +89,14 @@ def fonts_map(db: Path) -> dict:
     roles = typ.get("roles", {})
     d = {"caption": "", "headline": "", "body": "", "term": "", "small": ""}
     d.update(font_role_fallback().get("postscript", {}))
+    from .font_roles import resolve
     for k in d:
-        if roles.get(k, {}).get("postscript_name"):
-            d[k] = roles[k]["postscript_name"]
+        spec = roles.get(k)
+        face = resolve(typ, k, font_role_fallback().get("weights"))
+        if isinstance(spec, dict) and spec.get("postscript_name"):
+            d[k] = spec["postscript_name"]
+        elif not d[k] or face["source"] == "typography.json roles":
+            d[k] = face["ps"] or d[k]     # a role given only as a style, or not named at all: the shared resolver's face
     return d
 
 
