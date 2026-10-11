@@ -1082,5 +1082,80 @@ class TestClientPlanRules(unittest.TestCase):
         self.assertIn("NHPP.actions.clip_components", jsx)
 
 
+class TestMainFootageFraming(unittest.TestCase):
+    """Framing is sized from THIS reel's footage (global.main_footage, or the range footage in source.json), never
+    from whichever file preflight.json lists first."""
+
+    def _wide_project(self, t):
+        sys.path.insert(0, str(SK / "tests"))
+        import test_pipeline as T
+        from lib.common import ffmpeg_exe
+        from lib.discover import run_discovery
+        root, p, _ = T.make_project(Path(t))
+        clip = root / "data/Raw/CLIP1.mov"            # a 16:9 source (a finished episode)
+        subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=384x216:r=25:d=12",
+                        "-f", "lavfi", "-i", "sine=f=440:r=48000:d=12", "-ac", "2", "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", str(clip)], check=True)
+        run_discovery(p)
+        tc = T.TestPlanToXML()
+        tc.p = p
+        tc._semantic_stub()
+        return root, p, clip, tc
+
+    def test_range_reel_without_main_footage_gets_the_reframe_and_card_bands(self):
+        from lib.common import write_json, read_json
+        from lib.media import preflight
+        from lib.plan import compile_plan
+        from lib.ppro_build import cutaway_bands
+        with tempfile.TemporaryDirectory() as t:
+            root, p, clip, tc = self._wide_project(t)
+            write_json(p.p("00_inputs/source.json"), {"footage": "data/Raw/CLIP1.mov", "in_ms": 0, "out_ms": 12000})
+            preflight(p, [clip])
+            pre = read_json(p.p("00_inputs/preflight.json"))
+            next(iter(pre["reframe"].values()))["cutaways_ms"] = [[6000, 8000]]
+            # a stale entry from an earlier --footage run, listed FIRST (a vertical phone clip)
+            pre["files"].insert(0, {"path": str(root / "data/Raw/OLD.mov"),
+                                    "video": {"display_width": 1080, "display_height": 1920}})
+            write_json(p.p("00_inputs/preflight.json"), pre)
+            ed = tc.decisions()
+            ed["global"].pop("main_footage", None)     # a range reel names its footage in source.json only
+            ed["global"]["base_scale_percent"] = "auto"
+            write_json(p.p("01_analysis/edit-decisions.json"), ed)
+            res = compile_plan(p)
+            self.assertTrue(res["ok"], res["errors"])
+            spec = read_json(p.p("01_analysis/timeline-spec.json"))
+            self.assertTrue(spec["framing"].startswith("auto-reframe"), spec["framing"])
+            self.assertTrue(any(s["decision_id"] == "AUTO_CUTAWAY" for s in spec["main_segments"]))
+            bands = cutaway_bands(p, spec)
+            fit = min(1080 / 384, 1920 / 216)                 # the card is shown whole: 216 px tall at the fit scale
+            self.assertEqual(len(bands), 1, bands)
+            self.assertAlmostEqual(bands[0][3] - bands[0][2], 216 * fit, delta=2)
+
+    def test_four_by_five_on_a_vertical_clip_is_windowed(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import test_pipeline as T
+        from lib.common import write_json, read_json
+        from lib.media import preflight
+        from lib.plan import compile_plan
+        from lib.premiere_xml import build_xml
+        with tempfile.TemporaryDirectory() as t:
+            root, p, _ = T.make_project(Path(t))      # CLIP1 is 216x384: already 9:16, so preflight has no reframe
+            preflight(p, [root / "data/Raw/CLIP1.mov"])
+            tc = T.TestPlanToXML()
+            tc.p = p
+            tc._semantic_stub()
+            ed = tc.decisions()
+            ed["global"].update({"base_scale_percent": "auto", "framing": "4:5"})
+            write_json(p.p("01_analysis/edit-decisions.json"), ed)
+            res = compile_plan(p)
+            self.assertTrue(res["ok"], res["errors"])
+            spec = read_json(p.p("01_analysis/timeline-spec.json"))
+            self.assertIn("4:5 window", spec["framing"])           # not silently built as 9:16
+            self.assertAlmostEqual(spec["base_scale_percent"], 500.0, places=2)
+            segs = spec["main_segments"]
+            self.assertTrue(segs and all(s.get("window") for s in segs), segs)
+            self.assertIn("<effectid>crop</effectid>", Path(build_xml(p)["xml"]).read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

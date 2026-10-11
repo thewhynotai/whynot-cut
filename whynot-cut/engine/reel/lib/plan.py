@@ -322,14 +322,19 @@ def compile_plan(paths: Paths) -> dict:
 
     # camera timeline -> V01 segments (cuts at camera change points)
     base = ed.get("global", {})
+    # THIS video's footage (global.main_footage, or a range reel's footage in 00_inputs/source.json) and its preflight
+    # entry: every framing step below is sized from this file, never from whichever file preflight lists first
+    from .common import source_range
+    pre_all = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
+    main_file = base.get("main_footage") or source_range(paths).get("footage")
+    main_v = main_video(pre_all, main_file)
     # framing: an explicit global.base_scale_percent wins; "auto"/absent uses preflight's face-centred reframe (wider
     # sources such as 16:9 episodes); otherwise the source is fitted as before
     rf = None
     bsp, box, boy, framing = base.get("base_scale_percent"), base.get("base_offset_x"), base.get("base_offset_y"), "explicit"
     if bsp in (None, "auto"):
-        pre = read_json(paths.p("00_inputs/preflight.json"), {})
-        mf = base.get("main_footage")
-        rf = next((r for k, r in (pre.get("reframe") or {}).items()
+        mf = main_file
+        rf = next((r for k, r in (pre_all.get("reframe") or {}).items()
                    if mf and (Path(k).name == Path(mf).name or Path(k) == paths.root / mf)), None)
         if rf:
             bsp, framing = rf["base_scale_percent"], f"auto-reframe (face x {rf.get('face_x')}, {rf.get('faces')} faces)"
@@ -341,8 +346,7 @@ def compile_plan(paths: Paths) -> dict:
     # "reframe" camera move back to fit, layered over the speaker reframe (story-editor camera moves inside them lose)
     cutaways = (rf or {}).get("cutaways_ms") or []
     if cutaways and bsp:
-        pre_v = next((f["video"] for f in read_json(paths.p("00_inputs/preflight.json"), {"files": []})["files"]
-                      if f.get("video") and Path(f["path"]).name == Path(base.get("main_footage") or "").name), None)
+        pre_v = main_v
         if pre_v:
             seq_cfg = load_config("sequence-settings.json")["general"]
             fit = min(seq_cfg["frame_width"] / pre_v["display_width"], seq_cfg["frame_height"] / pre_v["display_height"]) * 100
@@ -354,11 +358,7 @@ def compile_plan(paths: Paths) -> dict:
                             ", ".join(f"{a / 1000:.1f}-{b / 1000:.1f}s" for a, b in cutaways))
     # podcast reels: per-shot framing (preflight "shots", see shots.py) replaces the single auto-reframe; story camera
     # moves are composed over the shot layer. Anything without a shot analysis keeps the path above.
-    pre_all = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
     shots_rep = pre_all.get("shots") or {}
-    from .common import source_range
-    main_file = base.get("main_footage") or source_range(paths).get("footage")
-    main_v = main_video(pre_all, main_file)
     if shots_rep.get("shots") and base.get("base_scale_percent") in (None, "auto"):
         pv = main_v
         if pv:
@@ -398,6 +398,10 @@ def compile_plan(paths: Paths) -> dict:
     elif main_file and pre_all.get("files") and main_v is None:
         warnings.append(f"{Path(main_file).name} is not in 00_inputs/preflight.json: per-shot framing is skipped (the "
                         "picture is fitted) — run `reel preflight` for this video")
+    if win and main_v and not bsp:   # a source already in the sequence's shape (a phone clip) has no reframe: its fit
+        seq_g = load_config("sequence-settings.json")["general"]   # scale is the base the window zooms from
+        bsp = round(min(seq_g["frame_width"] / main_v["display_width"],
+                        seq_g["frame_height"] / main_v["display_height"]) * 100, 3)
     if win and bsp:
         pv_ = main_v
         if pv_:
@@ -547,7 +551,6 @@ def compile_plan(paths: Paths) -> dict:
     caption_hl = [{"text": h["text"], "at_ms": to_ms(h["at"]) if h.get("at") else None}
                   for h in ed.get("caption_highlights", [])]
 
-    from .common import source_range
     rng = source_range(paths)
     if rng and base.get("main_footage") and Path(base["main_footage"]).name != Path(rng["footage"]).name:
         errors.append(f"global.main_footage {base['main_footage']} is not this video's range file {rng['footage']} "

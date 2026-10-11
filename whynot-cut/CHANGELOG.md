@@ -22,6 +22,9 @@ The minor findings of the 2.1.0 review, each reproduced by a failing test first.
 - The per-shot reframe and the 4:5 window are sized from the reel's own footage, not from the first file in
   preflight.json. When that footage is missing from preflight, a 4:5 (any non-9:16) framing is a `plan` error instead of
   a reel silently built as 9:16; a 9:16 reel gets a warning (per-shot framing skipped, picture fitted).
+- Range reels without `global.main_footage` get the face-centred reframe and card handling (keyed on the source.json
+  footage); caption bands over shown-whole cards are sized from the reel's own footage; a vertical clip with 4:5
+  framing is windowed (fit scale as base) instead of silently built as 9:16.
 - `episode-next` flags reels picked before the reels plan was re-validated until the editor confirms them again.
 - `reel inbox` caches each Raw clip's probe by path, modification time and size (`output/discovery/raw-probe-cache.json`)
   instead of probing every clip on every call; a broken cache file is rebuilt.

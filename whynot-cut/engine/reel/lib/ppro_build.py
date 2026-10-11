@@ -56,8 +56,9 @@ def cutaway_bands(paths: Paths, spec: dict) -> list:
     """(start_ms, end_ms, top_px, bottom_px) of every source card shown whole (AUTO_CUTAWAY: fit over a blurred fill),
     on the sequence clock, so captions move off the card like they move off a graphic card."""
     from .common import seq_fps
+    from .plan import main_video
     pre = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
-    v = next((f["video"] for f in pre.get("files", []) if f.get("video")), None)
+    v = main_video(pre, spec.get("main_footage"))     # this reel's footage, not the first file preflight lists
     if not v:
         return []
     H = load_config("sequence-settings.json")["general"]["frame_height"]
