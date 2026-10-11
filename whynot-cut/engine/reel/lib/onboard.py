@@ -83,7 +83,8 @@ def own_marker_roots(root: str | None) -> list[Path]:
     of clients_root: those need `--all-clients --yes`."""
     from .client_marker import has_layout
     cwd = Path.cwd()
-    cands = [Path(root).expanduser()] if root else         [cwd] if (cwd / "output").is_dir() or (cwd / "START_HERE.md").is_file() else []
+    cands = [Path(root).expanduser()] if root else \
+        [cwd] if (cwd / "output").is_dir() or (cwd / "START_HERE.md").is_file() else []
     return [c.resolve() for c in cands if has_layout(c.resolve())]
 
 

@@ -212,17 +212,26 @@
   `rm -rf data` on the line after `# they're stale` is checked; PowerShell skips `# …` to the end of the line and `<# … #>`
   blocks, and reads `@'…'@` / `@"…"@` here-strings as one string, so an apostrophe in a comment or here-string no
   longer opens a quote that swallows the following lines. The role gates (approve-plan, qc-reviewer, AE/PS extras)
-  are covered the same way.
+  are covered the same way. Round 2: each physical line loses its comment before a trailing `\` joins the next line
+  (bash does not continue a comment, so `# see C:\temp\` followed by `rm -rf data` runs the rm); `$'…'` quoting is
+  tracked; `<<EOF` inside quotes opens no heredoc. In `find`, `,` splits branches like `-o`, parentheses are parsed,
+  and when the expression has an action only the branches with an action must be narrowed
+  (`find . -path ./data -prune -o -name '*.tmp' -delete` is allowed). A deleting consumer of a listing of the client
+  folder is blocked also with `-File` (`gci -File | Remove-Item` would delete `.whynot-client`) unless a name filter,
+  a grep/Where-Object stage or an `-Exclude` matching the marker spares it; other root files (START_HERE.md) are not
+  protected by this rule.
 - The SessionStart warning checks the guard's own heartbeat (`guard-ok`), not the runner's `hooks-ok`, which
-  `run_python.sh` touches right before the hook runs and so was always fresh (gate G1). A plugin data folder first seen
-  less than an hour ago (`context-first-run`) is a new install and gets no "missing" warning.
+  `run_python.sh` touches right before the hook runs and so was always fresh (gate G1). It warns only when `guard-ok` is
+  missing or older than the previous SessionStart (recorded in `last-session-start`): sessions ran but the guard did
+  not. A first session (nothing recorded) and days without sessions give no warning.
 - Phase 1 gate fixes (engine). `reel doctor` takes no writer lease (G2): its only write is the idempotent
   `.whynot-client` at a client root, so `doctor --fix --root X` works while another session holds X. `write_json`
   writes through a unique temp name per call and retries the replace (and `read_json` the open) for a few ms on a
   Windows PermissionError, so parallel subagents writing `clip-ids.json` no longer collide or read a half-replaced
   file (G3). Shipped tests no longer name a real field-test client (G4; `REAL_CLIENT_TOKENS` also checks tests/). A
-  writing `reel` command on a 2.x client folder (assets/ + data/ + output/, no marker) writes `.whynot-client` and
-  logs it, so old clients are protected from their first use under 3.0 (G5). `reel inbox` lists project folders that
+  writing `reel` command on a 2.x client folder (assets/ + data/ + output/ with a WhyNot Cut sign: output/discovery,
+  output/projects, output/client_database, output/logs/pipeline.log or START_HERE.md; no marker) writes
+  `.whynot-client` and logs it, so old clients are protected from their first use under 3.0 (G5). `reel inbox` lists project folders that
   match no clip, reel or motion id as `orphan_projects` with an `orphan_hint` (G6).
 - `reel doctor --fix` writes the `.whynot-client` marker only for `--root` or the current client folder (G70: it wrote
   the marker into every client under `clients_root`, real client folders included). `reel doctor --fix --all-clients`
@@ -257,7 +266,7 @@
   lie under `clients_root`; they are recognised automatically. Any other existing client folder (only `assets/` and
   `data/`) is no longer protected until it gets the marker: run `reel doctor --fix --root "<client folder>"` (or
   `reel doctor --fix` inside it); `reel doctor` lists such folders under `client_markers.unprotected`. A folder that
-  already has `output/` gets the marker by itself on its first writing `reel` command.
+  already has WhyNot Cut's `output/` gets the marker by itself on its first writing `reel` command.
 - Existing client profiles have no `people[]`, so the gender/honorific checks in `reel plan` and `reel publish-check`
   are off for them until it is filled: `reel next` and `reel episode-next` show the notice "fill people[] in
   reel-profile/profile.json …". Add each person (name, role, gender, honorific_ar, honorific_en, pronouns) to

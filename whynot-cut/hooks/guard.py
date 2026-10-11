@@ -409,48 +409,82 @@ def filter_spares_sources(opt: str, pattern: str, start: str, at: Path) -> bool:
     return True
 
 
-def find_narrowed(argv: list[str], at: Path | None) -> bool:
-    """A `find` whose expression keeps it away from the client's files: every -o branch has a FIND_NARROW predicate
-    that is not negated (`!`, `-not`, inside `! ( ... )`), sits in a branch without -prune, and spares the sources."""
-    starts = find_starts(argv) or ["."]
-    branches, cur, i = [], [], 1
-    while i < len(argv):
-        a = argv[i]
-        if a in ("-o", "-or"):
+FIND_ACTIONS = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-print", "-print0", "-printf", "-fprint", "-fprint0",
+                "-fprintf", "-ls", "-fls"}
+FIND_OR = {"-o", "-or", ","}                # `,` also runs both sides
+
+
+def _find_expr(toks: list[str], j: int = 0) -> tuple[list[list], int]:
+    """Parse a find expression into branches (split at -o / -or / `,` on this level); a branch is a list of items:
+    a word, or ("group", branches) for `( ... )`. Returns (branches, index after the closing paren)."""
+    branches, cur = [], []
+    while j < len(toks):
+        t = toks[j]
+        if t in ("(", "\\("):
+            sub, j = _find_expr(toks, j + 1)
+            cur.append(("group", sub))
+            continue
+        if t in (")", "\\)"):
+            branches.append(cur)
+            return branches, j + 1
+        if t.lower() in FIND_OR:
             branches.append(cur)
             cur = []
         else:
-            cur.append(a)
-        i += 1
+            cur.append(t)
+        j += 1
     branches.append(cur)
+    return branches, j
 
-    def branch_ok(toks: list[str]) -> bool:
-        if "-prune" in toks:
+
+def _has_action(branch: list) -> bool:
+    return any(it[1] and any(_has_action(b) for b in it[1]) if isinstance(it, tuple) else it.lower() in FIND_ACTIONS
+               for it in branch)
+
+
+def find_narrowed(argv: list[str], at: Path | None) -> bool:
+    """A `find` whose expression keeps it away from the client's files. Branches split at -o / -or / `,` (and inside
+    parentheses). When the expression has an action (-delete, -exec, -print ...), every branch WITH an action must be
+    narrowed (a branch that only prunes, `-path ./data -prune`, needs nothing); without one (a listing), every branch.
+    A branch is narrowed by a FIND_NARROW predicate that is not after `!`/`-not`, sits in a branch without -prune and
+    spares the client's files, or by a group whose branches are all narrowed."""
+    starts = find_starts(argv) or ["."]
+    k = 1
+    while k < len(argv) and not (argv[k].startswith(("-", "(", "!", "\\(")) and argv[k] not in ("-H", "-L", "-P")):
+        k += 1
+    while k < len(argv) and argv[k] in ("-H", "-L", "-P"):
+        k += 1
+    expr, _ = _find_expr(argv[k:])
+
+    def narrowed(branch: list) -> bool:
+        if any(not isinstance(it, tuple) and it.lower() == "-prune" for it in branch):
             return False
-        neg, depth, j = False, 0, 0
-        while j < len(toks):
-            t = toks[j].lower()
-            if t in ("!", "-not"):
-                neg = True
-            elif t in ("(", "\\("):
-                depth += 1 if neg or depth else 0       # a negated group: nothing inside it counts
-                neg = False
-            elif t in (")", "\\)"):
-                depth = max(0, depth - 1)
-            elif t in FIND_FILTERS and t != "-empty" and j + 1 < len(toks):
-                if t in FIND_NARROW and not neg and not depth and \
-                        (at is None or all(filter_spares_sources(t, toks[j + 1], s, at) for s in starts)):
+        neg, j = False, 0
+        while j < len(branch):
+            it = branch[j]
+            if isinstance(it, tuple):
+                if not neg and all(narrowed(b) for b in it[1]):
                     return True
                 neg = False
-                j += 1
             else:
-                neg = False
+                t = it.lower()
+                if t in ("!", "-not"):
+                    neg = True
+                elif t in FIND_FILTERS and t != "-empty" and j + 1 < len(branch):
+                    if t in FIND_NARROW and not neg and not isinstance(branch[j + 1], tuple) and \
+                            (at is None or all(filter_spares_sources(t, branch[j + 1], s, at) for s in starts)):
+                        return True
+                    neg = False
+                    j += 1
+                else:
+                    neg = False
             j += 1
         return False
-    return all(branch_ok(b) for b in branches)
+    acting = [b for b in expr if _has_action(b)]
+    return all(narrowed(b) for b in (acting or expr))
 
 
-def stage_paths(argv: list[str], at: Path | None = None) -> tuple[list[str], bool]:
+def stage_paths(argv: list[str], at: Path | None = None, file_narrows: bool = True) -> tuple[list[str], bool]:
     """(the words of a pipeline stage that name paths, narrowed?) -- filter values (-Filter *data*, find -name
     'assets*', grep patterns, Where-Object expressions) are not paths; only a narrowing stage or predicate narrows
     the list (see FIND_NARROW; `at` = the stage's working folder, to compare the filters with the client's files)."""
@@ -481,7 +515,14 @@ def stage_paths(argv: list[str], at: Path | None = None) -> tuple[list[str], boo
     starts = [a for a in out if not a.startswith("-") and a.lower() not in PS_PATH_PARAMS] or ["."]
     spare = bool(preds) and any(at is None or all(filter_spares_sources(o, v, s, at) for s in starts)
                                 for o, v in preds)
-    return out, (files_only and not lists_tree(argv)) or spare
+    return out, (files_only and file_narrows and not lists_tree(argv)) or spare
+
+
+def excludes_marker(argv: list[str]) -> bool:
+    """A Get-ChildItem -Exclude pattern that matches .whynot-client."""
+    return any(len(a) > 3 and "-exclude".startswith(a.lower()) and
+               any(fnmatch.fnmatchcase(client_marker.MARKER, v.strip("'\" ").lower()) for v in argv[i + 1].split(","))
+               for i, a in enumerate(argv[:-1]))
 
 
 def lists_tree(argv: list[str]) -> bool:
@@ -499,7 +540,7 @@ def lists_tree(argv: list[str]) -> bool:
 
 
 def pipe_source(stages: list[tuple[list[str], Path]], cwd: Path, recursive: bool = False,
-                marker: bool = False) -> tuple[str, str] | None:
+                marker: bool = False, deleting: bool = False) -> tuple[str, str] | None:
     """A client source named by an earlier stage of the pipeline (a read), or a working directory that is one.
     recursive=True (the consumer deletes/moves whole trees): also a listed folder that holds a client's sources
     (`Get-ChildItem | Remove-Item -Recurse`, `ls | xargs rm -rf` in the client folder). marker=True (the consumer
@@ -508,9 +549,12 @@ def pipe_source(stages: list[tuple[list[str], Path]], cwd: Path, recursive: bool
     views = [(argv, at) + stage_paths(argv, at) for argv, at in stages]
     narrowed = any(v[3] for v in views)                          # `find . -name '*.tmp' | xargs rm -rf` is fine
     recursive = (recursive or any(lists_tree(argv) for argv, _ in stages)) and not narrowed
-    if marker and not narrowed:
+    # a deleting consumer: -File still lists .whynot-client, so only a name/path filter or a grep stage spares it
+    # (an -Exclude that matches the marker too; other root files such as START_HERE.md may go, by design)
+    if marker and (not narrowed or deleting and not any(stage_paths(a_, t_, file_narrows=False)[1]
+                                                        for a_, t_ in stages)):
         for argv, at, args, _ in views:
-            if norm_exe(argv[0]) not in LISTERS:
+            if norm_exe(argv[0]) not in LISTERS or excludes_marker(argv):
                 continue
             for t in [a for a in args if not a.startswith("-") and a.lower() not in PS_PATH_PARAMS] or ["."]:
                 for lp in paths_of(t, at):
@@ -585,53 +629,67 @@ def split_commands(cmd: str, escapes: bool = True) -> list[tuple[list[str], bool
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
-def strip_sh_comment(line: str, q: str | None = None) -> tuple[str, str | None]:
-    """(the line without its `# comment`, the quote still open at its end). `#` starts a comment only at the start of
-    a word outside quotes (not in `a#b`, `${#x}`, `$#`, '#...' or "#..."); `q` is the quote a previous line left
-    open (a multi-line string)."""
-    i, n = 0, len(line)
+def scan_sh_line(line: str, q: str | None = None) -> tuple[str, str | None, list[int], bool]:
+    """One physical line -> (the line without its `# comment`, the quote still open at its end, where `<<` stands
+    outside quotes, whether a comment was cut). `#` starts a comment only at the start of a word outside quotes (not
+    in `a#b`, `${#x}`, `$#`, '#...', "#..." or $'#...'); `q` is the quote a previous line left open (a multi-line
+    string): "'", '"' or "$'" (ANSI-C quoting, where \\' does not close it)."""
+    i, n, heredocs = 0, len(line), []
     while i < n:
         c = line[i]
         if q == "'":
             if c == "'":
                 q = None
-        elif q == '"':
+        elif q in ('"', "$'"):
             if c == "\\":
                 i += 1
-            elif c == '"':
+            elif c == q[-1]:
                 q = None
         elif c == "\\":
             i += 1
+        elif c == "'" and i and line[i - 1] == "$":
+            q = "$'"
         elif c in "'\"":
             q = c
         elif c == "#" and (i == 0 or line[i - 1] in " \t;&|()<>"):
-            return line[:i], None
+            return line[:i], None, heredocs, True
+        elif line.startswith("<<", i) and not line.startswith("<<<", i):
+            heredocs.append(i)
+            i += 1
         i += 1
-    return line, q
+    return line, q, heredocs, False
 
 
 def shell_lines(cmd: str) -> tuple[str, list[tuple[str, str]]]:
     """Drop heredoc BODIES (they are data such as a script's text, not shell commands) and make each line its own
     command (newlines separate commands in a shell; shlex would otherwise glue lines together). Returns the command
-    text and [(line that opened the heredoc, body)] so a body fed to a shell can be checked as commands."""
-    out, delim, docs, body, opener, q = [], None, [], [], "", None
-    for line in cmd.replace("\\\n", " ").split("\n"):
+    text and [(line that opened the heredoc, body)] so a body fed to a shell can be checked as commands.
+    Each physical line loses its comment first (C1); only then does a trailing backslash join the next line, so a
+    comment that ends in `\\` never continues (bash runs the next line). `<<` inside quotes opens no heredoc."""
+    out, delim, docs, body, opener, q, join = [], None, [], [], "", None, False
+    for raw in cmd.split("\n"):
         if delim is not None:
-            if line.strip() == delim:
+            if raw.strip() == delim:
                 docs.append((opener, "\n".join(body)))
                 delim, body = None, []
             else:
-                body.append(line)
+                body.append(raw)
             continue
         inside = q is not None                   # this line continues a quoted string: keep its newline
-        line, q = strip_sh_comment(line, q)      # C1: a comment ends at its line, never swallows the next ones
-        m = _HEREDOC.search(line)
-        if m:
-            delim, opener = m.group(2), line
-        if inside and out:
-            out[-1] += "\n" + line
+        code, q, heredocs, commented = scan_sh_line(raw.rstrip("\r"), q)
+        cont = not commented and q not in ("'",) and (len(code) - len(code.rstrip("\\"))) % 2 == 1
+        if cont:
+            code = code[:-1]                     # `\` + newline: the next line continues this one
+        for k in heredocs:
+            m = _HEREDOC.match(code, k)
+            if m:
+                delim, opener = m.group(2), code
+                break
+        if (join or inside) and out:
+            out[-1] += ("" if join else "\n") + code
         else:
-            out.append(line)
+            out.append(code)
+        join = cont
     if delim is not None:
         docs.append((opener, "\n".join(body)))
     return " ; ".join(out), docs
@@ -904,7 +962,8 @@ def run_bash(stmts: list[tuple[list[str], bool]], cwd: Path, agent: str | None):
             sub = strip_prefixes(xargs_parse(argv)[0])
             tree = bool(sub) and (norm_exe(sub[0]) == "mv" or norm_exe(sub[0]) == "rm" and
                                   any(a.startswith("-") and "r" in a.lower() for a in sub[1:]))
-            src = pipe_source(stages, cwd, recursive=tree, marker=True)
+            src = pipe_source(stages, cwd, recursive=tree, marker=True,
+                              deleting=bool(sub) and norm_exe(sub[0]) in ("rm", "unlink", "shred", "srm", "mv"))
             if src:
                 check_xargs_stage(argv, src, cwd, agent)
         stages.append((argv, cwd))
@@ -1234,6 +1293,7 @@ PS_MUTATE_ANY = {  # every path argument of these is written, moved or deleted
     "set-itemproperty", "sp", "set-acl", "compress-archive", "remove-itemproperty", "rp", "new-itemproperty"}
 PS_TREE = {"remove-item", "rm", "del", "erase", "rd", "rmdir", "ri", "rename-item", "ren", "rni", "move-item", "mv",
            "move", "mi"}                                         # whole folders go with them
+PS_DELETE = {"remove-item", "rm", "del", "erase", "rd", "rmdir", "ri", "move-item", "mv", "move", "mi"}
 PS_CONTENT_WRITERS = {"set-content", "sc", "add-content", "ac", "out-file", "tee-object", "tee", "export-csv"}
 PS_PIPE_MUTATE = {  # take the paths they act on from the pipeline (Get-ChildItem data | Remove-Item)
     "remove-item", "rm", "del", "erase", "rd", "rmdir", "ri", "rename-item", "ren", "rni", "move-item", "mv", "move",
@@ -1412,7 +1472,7 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
         if piped and ps_mutates_inputs(argv):
             tree = argv[0].lower() in PS_TREE - {"remove-item", "rm", "del", "erase", "rd", "rmdir", "ri"} or any(
                 len(a) > 1 and "-recurse".startswith(a.lower()) for a in argv[1:])
-            src = pipe_source(stages, cwd, recursive=tree, marker=True)
+            src = pipe_source(stages, cwd, recursive=tree, marker=True, deleting=argv[0].lower() in PS_DELETE)
             if src:
                 block(f"`{argv[0]}` would change items piped from the client's source folder ({src[0]}). "
                       f"assets/ and data/ are read-only.")

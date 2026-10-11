@@ -25,6 +25,7 @@ from test_motion import good_script, motion_plan_fixture, test_font  # noqa: E40
 from test_podcast import ff  # noqa: E402
 
 BROWN = "#7F6040"                       # a brown primary like the one measured in field test round 4
+BROWN_RGB = tuple(int(BROWN[i:i + 2], 16) for i in (1, 3, 5))
 
 
 def brand_db(root: Path, weights: dict, roles: dict | None = None, primary: str | None = None, same_file: bool = False):
@@ -233,7 +234,7 @@ class TestLegibility(unittest.TestCase):
 
     def test_brown_on_a_warm_region_falls_back_to_white(self):
         from lib.legibility import legible
-        r = legible((129, 97, 61), [(143, 107, 69)], 104, [self.PAPER, self.WHITE])
+        r = legible(BROWN_RGB, [(143, 107, 69)], 104, [self.PAPER, self.WHITE])
         self.assertTrue(r["fallback"])
         self.assertEqual(r["rgb"], (255, 255, 255))                      # the better of white / paper
         self.assertLess(r["original_ratio"], 1.6)                        # the field test measured 1.1-1.5
@@ -278,7 +279,7 @@ class TestLegibility(unittest.TestCase):
 class TestPreviewHighlightContrast(RoleFontCase):
     """G68: preview stills. A colour that reaches the footage directly (text without a box) is checked against the frame
     behind it; the default white text and the boxed texts are never touched."""
-    WARM, DARK = (129, 97, 61, 255), (10, 10, 10, 255)
+    WARM, DARK = (*BROWN_RGB, 255), (10, 10, 10, 255)
 
     def render(self, probe_colour, text_role="primary", notes=None, probe_callable=False, layer="fg", size=86):
         from PIL import Image
@@ -304,7 +305,7 @@ class TestPreviewHighlightContrast(RoleFontCase):
         notes = []
         png = self.render(self.WARM, notes=notes)
         self.assertGreater(self.glyphs(png, (255, 255, 255)), 300)
-        self.assertEqual(self.glyphs(png, (129, 97, 61)), 0)
+        self.assertEqual(self.glyphs(png, BROWN_RGB), 0)
         self.assertEqual(len(notes), 1, notes)
         self.assertIn("GFX_001", notes[0])
         self.assertIn("contrast", notes[0])
@@ -312,18 +313,18 @@ class TestPreviewHighlightContrast(RoleFontCase):
     def test_brown_text_on_a_dark_frame_is_kept(self):
         notes = []
         png = self.render(self.DARK, notes=notes)
-        self.assertGreater(self.glyphs(png, (129, 97, 61)), 300)
+        self.assertGreater(self.glyphs(png, BROWN_RGB), 300)
         self.assertEqual(notes, [])
 
     def test_lazy_probe_is_used_too(self):
         notes = []
         png = self.render(self.WARM, notes=notes, probe_callable=True)
-        self.assertEqual(self.glyphs(png, (129, 97, 61)), 0)
+        self.assertEqual(self.glyphs(png, BROWN_RGB), 0)
         self.assertEqual(len(notes), 1)
 
     def test_nothing_changes_without_a_frame_or_with_the_default_white(self):
         png = self.render(None)                                          # production still: no frame, colour as configured
-        self.assertGreater(self.glyphs(png, (129, 97, 61)), 300)
+        self.assertGreater(self.glyphs(png, BROWN_RGB), 300)
         notes = []
         png = self.render(self.WARM, text_role="neutral_light", notes=notes)    # the default style: white text
         self.assertGreater(self.glyphs(png, (255, 255, 255)), 300)
@@ -364,7 +365,7 @@ class TestPreviewHighlightContrast(RoleFontCase):
             self.assertTrue(any("GFX_001" in w and "contrast" in w for w in r["warnings"]), (composite, r.get("warnings")))
             png = p.p("03_broll/typography/GFX_001_fg.png")
             self.assertGreater(self.glyphs(png, (255, 255, 255)), 300)
-            self.assertEqual(self.glyphs(png, (129, 97, 61)), 0)
+            self.assertEqual(self.glyphs(png, BROWN_RGB), 0)
 
 
 class TestThumbnailHighlightContrast(unittest.TestCase):
@@ -416,7 +417,7 @@ class TestThumbnailHighlightContrast(unittest.TestCase):
 
     def test_brown_highlight_on_the_warm_set_falls_back(self):
         r, fills = self.render(5000, BROWN)
-        brown = (129, 97, 61)
+        brown = BROWN_RGB
         self.assertNotIn(brown, fills)                                   # the word is never drawn in brown
         ws = [w for w in r["warnings"] if "highlight" in w and "contrast" in w]
         self.assertEqual(len(ws), 1, r["warnings"])

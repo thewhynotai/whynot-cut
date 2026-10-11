@@ -519,15 +519,18 @@ class TestHeartbeat(ClientFixture):
         data = Path(self.tmp.name) / "pdata"
         data.mkdir()
         old = time.time() - 3 * 86400
-        self.assertNotIn("protection may be OFF", self.ctx(data))        # brand-new data folder: not yet
-        (data / "context-first-run").write_text(str(int(old)), encoding="utf-8")
+        start = data / "last-session-start"
+        self.assertNotIn("protection may be OFF", self.ctx(data))        # no earlier session: a new install
+        self.assertTrue(start.is_file())
         (data / "hooks-ok").write_text("1", encoding="utf-8")            # the runner ran, the guard never did
-        self.assertIn("protection may be OFF", self.ctx(data))           # missing
+        self.assertIn("protection may be OFF", self.ctx(data))           # missing after a session
         hb = data / "guard-ok"
         hb.write_text("1", encoding="utf-8")
-        self.assertNotIn("protection may be OFF", self.ctx(data))        # fresh
+        self.assertNotIn("protection may be OFF", self.ctx(data))        # the guard ran in the last session
         os.utime(hb, (old, old))
-        self.assertIn("protection may be OFF", self.ctx(data))           # stale
+        start.write_text(str(old - 3600), encoding="utf-8")              # a weekend off: no session since
+        self.assertNotIn("protection may be OFF", self.ctx(data))        # (N4: no false alarm after idle days)
+        self.assertIn("protection may be OFF", self.ctx(data))           # a session ran since, the guard did not
 
     def test_heartbeat_warning_through_the_hook_runner(self):
         """G1 end to end: run_python.sh touches hooks-ok right before session_context runs; the warning still fires."""
@@ -538,7 +541,7 @@ class TestHeartbeat(ClientFixture):
             self.skipTest("needs bash and the engine venv")
         data = Path(self.tmp.name) / "pdata2"
         data.mkdir()
-        (data / "context-first-run").write_text(str(int(time.time() - 86400)), encoding="utf-8")
+        (data / "last-session-start").write_text(str(time.time() - 86400), encoding="utf-8")
 
         def ctx():
             env = isolated_env({"CLAUDE_PLUGIN_DATA": str(data), "CLAUDE_PLUGIN_ROOT": str(SK),
@@ -902,7 +905,7 @@ class TestGuardPhase1Minors(ClientFixture):
                               "find . -path '*/tmp/*' | xargs rm -f", "find . -regex '.*\\.tmp' | xargs rm",
                               "ls | grep '\\.srt$' | xargs rm",
                               "find output -type d -empty | xargs rm -rf", "find output -maxdepth 1 | xargs rm -rf"])
-        self.allowed("PowerShell", ["gci -File | Remove-Item", "gci -Filter *.tmp | Remove-Item -Recurse",
+        self.allowed("PowerShell", ["gci -File -Filter *.tmp | Remove-Item", "gci -Filter *.tmp | Remove-Item -Recurse",
                                     "gci -Include *.srt -Recurse | Remove-Item",
                                     "Get-ChildItem | ? { $_.Name -like '*.tmp' } | Remove-Item -Recurse",
                                     "Get-ChildItem output -Directory | Remove-Item -Recurse -Force",
@@ -946,6 +949,32 @@ class TestGuardPhase1Minors(ClientFixture):
                               "# rm -rf data\nls output", "git log --format='%h #%s' -3"])
         self.allowed("PowerShell", ["Get-ChildItem output # Remove-Item data", "Write-Host '#5'; Get-ChildItem output",
                                     "<# Remove-Item data #> Get-ChildItem output", "$x = @'\nRemove-Item data\n'@"])
+
+    def test_c1_round2_backslash_comments_ansi_quotes_quoted_heredoc_markers(self):
+        """Gate fix round 2: a comment ending in a backslash does not continue onto the next line (N1); $'...' quoting
+        (N6); `<<EOF` inside quotes opens no heredoc (N6); find's `,` splits branches (N3); a -prune branch that only
+        prunes needs no narrowing (N5)."""
+        self.blocked("Bash", ["# backups are in C:\\temp\\\nrm -rf data", "ls output # trailing \\\nrm -rf data",
+                              "echo $'it\\'s' # x\nrm -rf data", "echo \"<<EOF\"\nrm -rf data\nEOF",
+                              "find . -name '*.tmp' , -delete", "find . -name '*.tmp' , -exec rm -rf {} +",
+                              "find . \\( -type f -o -name '*.tmp' \\) -delete",
+                              "find . -name '*.tmp' -prune -o -type f -delete", "ls \\\n -la; rm -rf data",
+                              "echo a \\\n# c\nrm -rf data"])
+        self.allowed("Bash", ["find . -path ./data -prune -o -name '*.tmp' -delete",
+                              "find . \\( -name '*.tmp' -o -name '*.log' \\) -delete", "ls \\\n output",
+                              "echo \"<<EOF\"; ls output", "cat <<'EOF'\n# rm -rf data\nEOF"])
+        def sub(cmd):
+            return hook(GUARD, {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(self.root),
+                                "agent_type": "whynot-cut:story-editor"})[0]
+        self.assertEqual(sub("# approve, see C:\\notes\\\nreel approve-plan --root . --video-id C0001 --by delegated"), 2)
+
+    def test_m3_round2_file_listing_never_deletes_the_marker(self):
+        self.blocked("PowerShell", ["gci -File | Remove-Item", "gci -Force -File | Remove-Item",
+                                    "Get-ChildItem -File | ForEach-Object { $_ } | Remove-Item"])
+        self.blocked("Bash", ["ls -a | xargs rm -f", "find . -maxdepth 1 -name '.*' | xargs rm"])
+        self.allowed("PowerShell", ["gci -File -Exclude .whynot-client | Remove-Item",
+                                    "Get-ChildItem -File | Rename-Item -NewName { $_.Name.ToLower() }",
+                                    "gci output -File | Remove-Item"])
 
     def test_c1_comments_never_hide_role_gates(self):
         def run(cmd, agent):

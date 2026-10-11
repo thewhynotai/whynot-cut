@@ -437,6 +437,11 @@ class TestGateFixes(LockFixture):
         """Gate G5: a 2.x client (assets/ + data/ + output/, no marker) gets `.whynot-client` on its first writing
         command, with a log line; a reader never writes it."""
         (self.root / ".whynot-client").unlink()
+        prefs = Path(self.tmp.name) / "prefs"
+        self.reel("settings", "--init", str(prefs))                     # a writer, but output/ has no WhyNot sign yet
+        self.assertFalse((self.root / ".whynot-client").exists())
+        (self.root / "output/logs").mkdir(parents=True)
+        (self.root / "output/logs/pipeline.log").write_text("[2.x] discover\n", encoding="utf-8")
         self.assertEqual(self.reel("next", "--video-id", "C0001").returncode, 0)
         self.assertFalse((self.root / ".whynot-client").exists())
         r = self.reel("discover")

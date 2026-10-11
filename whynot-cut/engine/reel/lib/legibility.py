@@ -2,7 +2,7 @@
 
 Used wherever the engine draws a brand colour straight over footage (publish thumbnails, preview stills): the profile may
 say "highlight in brand gold" while the measured primary is a brown that disappears on a warm set (field test round 4:
-brown #81613D on the warm set read 1.1-1.5:1). The thresholds are the engine's own (motion.json min_contrast 4.5,
+brown primary on the warm set read 1.1-1.5:1). The thresholds are the engine's own (motion.json min_contrast 4.5,
 min_contrast_large 3.0 from large_px). When the colour is too faint the caller falls back to white / paper and warns.
 """
 from __future__ import annotations

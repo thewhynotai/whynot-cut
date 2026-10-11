@@ -8,7 +8,7 @@ Speaks up when the session opens
   * in the clients folder (setting `clients_root`, or a folder whose preferences file says so): which clients it holds;
   * in a folder that has a WhyNot Cut preferences file but no clients yet: point to /whynot-cut:start.
 Whenever it speaks, it first warns loudly if the guard heartbeat (${CLAUDE_PLUGIN_DATA}/guard-ok, written by
-guard.py) is missing or older than 24 h: the read-only guard may not be running.
+guard.py) is missing or older than the previous SessionStart: sessions ran but the read-only guard did not.
 Stdlib only; never fails the session (any error -> silent exit 0).
 """
 import json
@@ -23,8 +23,6 @@ sys.path.insert(0, str(PLUGIN / "engine" / "reel" / "lib"))
 plat = settings = client_marker = None    # imported in main(), inside the never-fail guard
 
 VIDEO = {".mp4", ".mov", ".mxf", ".m4v", ".avi", ".mkv"}
-HEARTBEAT_MAX_AGE_S = 24 * 3600
-NEW_INSTALL_S = 3600
 
 
 def is_client(p: Path, base=None) -> bool:
@@ -35,41 +33,49 @@ def client_root(start: Path):
     return next((p for p in [start, *start.parents] if is_client(p)), None)
 
 
-def heartbeat_warning() -> str:
-    """Loud first sentence when ${CLAUDE_PLUGIN_DATA}/guard-ok (written by guard.py itself on every tool call it
-    inspects) is missing or stale. Not hooks-ok: run_python.sh touches that right before running this hook, so it was
-    always fresh here (Phase 1 gate G1). A data folder this hook first saw less than an hour ago is a new install whose
-    guard has not been called yet: a missing guard-ok is not reported then. No CLAUDE_PLUGIN_DATA: silent."""
+PREV_START: list = []                 # [time of the previous SessionStart or None], filled once by main()
+
+
+def note_session_start():
+    """Record this SessionStart in ${CLAUDE_PLUGIN_DATA}/last-session-start and return the previous one (None: no
+    session recorded yet, i.e. a new install)."""
     d = os.environ.get("CLAUDE_PLUGIN_DATA")
     if not d:
+        return None
+    f = Path(d) / "last-session-start"
+    try:
+        prev = float(f.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        prev = None
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        pass
+    return prev
+
+
+def heartbeat_warning() -> str:
+    """Loud first sentence when the guard did not run since the previous session started: ${CLAUDE_PLUGIN_DATA}/
+    guard-ok (written by guard.py on every tool call it inspects) is missing or older than that session's start.
+    Not hooks-ok: run_python.sh touches that right before running this hook (gate G1). Not a fixed age either: a
+    weekend without sessions is no alarm (fix round 2, N4). No previous session recorded, or no CLAUDE_PLUGIN_DATA:
+    silent."""
+    d = os.environ.get("CLAUDE_PLUGIN_DATA")
+    prev = PREV_START[0] if PREV_START else None
+    if not d or prev is None:
         return ""
     f = Path(d) / "guard-ok"
     try:
-        age = time.time() - f.stat().st_mtime
+        beat = f.stat().st_mtime
     except OSError:
-        age = None
-    if age is not None and age < HEARTBEAT_MAX_AGE_S:
+        beat = None
+    if beat is not None and beat >= prev:
         return ""
-    if age is None and time.time() - first_seen(Path(d)) < NEW_INSTALL_S:
-        return ""
-    state = "is missing" if age is None else f"is {age / 3600:.0f} h old"
+    state = "is missing" if beat is None else (f"was last written {(time.time() - beat) / 3600:.0f} h ago, before "
+                                                f"the previous session started")
     return (f"WARNING: WhyNot Cut protection may be OFF: the guard heartbeat {state} ({f}), so the guard that keeps "
             f"assets/ and data/ read-only may not be running. Run `reel doctor` and tell the editor before editing. ")
-
-
-def first_seen(data: Path) -> float:
-    """When this hook first saw the plugin data folder (${CLAUDE_PLUGIN_DATA}/context-first-run, written once)."""
-    f = data / "context-first-run"
-    try:
-        return float(f.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
-        now = time.time()
-        try:
-            data.mkdir(parents=True, exist_ok=True)
-            f.write_text(str(int(now)), encoding="utf-8")
-        except OSError:
-            pass
-        return now
 
 
 def emit(ctx: str):
@@ -211,6 +217,7 @@ def main():
     import settings as _settings
     import client_marker as _client_marker
     plat, settings, client_marker = _plat, _settings, _client_marker
+    PREV_START.append(note_session_start())
     try:
         export_options()
     except OSError:

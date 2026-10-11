@@ -690,10 +690,15 @@ def writes(a) -> bool:
 
 
 def mark_legacy_client(root: Path):
-    """A 2.x client folder (assets/ + data/ + output/, no `.whynot-client`) gets its marker on the first writing
-    command, so the guard protects it from then on (gate G5). Idempotent; logged in output/logs/pipeline.log."""
+    """A 2.x client folder (assets/ + data/ + output/ with a WhyNot Cut sign, no `.whynot-client`) gets its marker on
+    the first writing command, so the guard protects it from then on (gate G5). Idempotent; logged in
+    output/logs/pipeline.log."""
     from lib.client_marker import MARKER, write_marker
     if (root / MARKER).exists() or not (root / "output").is_dir():
+        return
+    signs = ("output/discovery", "output/projects", "output/client_database", "output/logs/pipeline.log",
+             "START_HERE.md")                     # WhyNot Cut worked here before (fix round 2): not just any output/
+    if not any((root / s_).exists() for s_ in signs):
         return
     try:
         if write_marker(root):
