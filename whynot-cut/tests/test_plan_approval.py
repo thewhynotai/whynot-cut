@@ -1,0 +1,125 @@
+"""3.0 T1.4 (engine IM-3): the Gate 1 approval fingerprint covers the whole timeline spec, not just the bytes after
+"events". A camera move, the framing or the duration changed after approval blocks `ppro-build`; a re-compile that only
+changes `generated` stays approved.
+Run:  <engine venv python> -m unittest discover -s <plugin>/tests -v
+"""
+import sys as _sys
+_sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
+import copy
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+SK = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SK / "engine" / "reel"))
+
+from lib.common import Paths, read_json, write_json  # noqa: E402
+from lib.plan import plan_fingerprint  # noqa: E402
+
+CLI = SK / "engine/reel/cli.py"
+
+
+def base_spec() -> dict:
+    return {
+        "generated": "2026-10-11T10:00:00", "video_id": "CLIP1", "fps": 24, "source_in_ms": 0, "source_range": None,
+        "duration_ms": 12000, "duration_frames": 288, "main_footage": "data/Raw/CLIP1.mp4",
+        "base_scale_percent": 100.0, "base_offset_x": 0.0, "base_offset_y": 0.0,
+        "framing": {"aspect": "9:16", "mode": "center"},
+        "main_segments": [
+            {"decision_id": "EDIT_001", "start_frame": 0, "end_frame": 144, "src_in_ms": 0, "scale": 100, "move": None},
+            {"decision_id": "EDIT_002", "start_frame": 144, "end_frame": 288, "src_in_ms": 6000, "scale": 100, "move": None}],
+        "events": [{"event_id": "GFX_001", "template": "statement_bar", "track": 3, "start_frame": 10, "end_frame": 80,
+                    "params": {"text": "x"}}],
+        "caption_source": "02_transcription/captions-short.srt", "caption_highlights": [], "time_map": None,
+        "music": None, "recipe": None}
+
+
+def cli(root: Path, *args):
+    return subprocess.run([sys.executable, "-B", str(CLI), "--root", str(root), "--video-id", "CLIP1", *args],
+                          capture_output=True, text=True)
+
+
+class TestPlanApprovalFingerprint(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name) / "CLIENT"
+        (self.root / "assets").mkdir(parents=True)
+        (self.root / "data/Raw").mkdir(parents=True)
+        (self.root / "data/Raw/CLIP1.mp4").write_bytes(b"x")
+        self.p = Paths(self.root, "CLIP1")
+        self.p.ensure_project()
+        self.spec = base_spec()
+        self.save(self.spec)
+
+    def save(self, spec: dict):
+        write_json(self.p.p("01_analysis/timeline-spec.json"), spec)
+
+    def approve(self):
+        r = cli(self.root, "approve-plan", "--by", "editor")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def assert_blocked(self):
+        r = cli(self.root, "ppro-build")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("not approved", r.stdout)
+
+    def mutated(self, fn) -> dict:
+        s = copy.deepcopy(self.spec)
+        fn(s)
+        return s
+
+    def test_camera_move_after_approval_blocks_build(self):
+        self.approve()
+        self.save(self.mutated(lambda s: s["main_segments"][1].update(scale=125, move="push_in")))
+        self.assert_blocked()
+
+    def test_framing_after_approval_blocks_build(self):
+        self.approve()
+        self.save(self.mutated(lambda s: s.update(framing={"aspect": "4:5", "mode": "center"}, base_scale_percent=112.0)))
+        self.assert_blocked()
+
+    def test_duration_after_approval_blocks_build(self):
+        self.approve()
+        self.save(self.mutated(lambda s: s.update(duration_ms=11000, duration_frames=264)))
+        self.assert_blocked()
+
+    def test_main_footage_after_approval_blocks_build(self):
+        self.approve()
+        self.save(self.mutated(lambda s: s.update(main_footage="data/Raw/OTHER.mp4")))
+        self.assert_blocked()
+
+    def test_unchanged_recompile_stays_approved(self):
+        self.approve()
+        fp = plan_fingerprint(self.p)
+        self.save(self.mutated(lambda s: s.update(generated="2026-10-12T09:30:00")))     # only the timestamp differs
+        self.assertEqual(plan_fingerprint(self.p), fp)
+        appr = read_json(self.p.p("01_analysis/plan-approval.json"))
+        self.assertEqual(appr["plan_fingerprint"], fp)
+        self.assertFalse(appr.get("stale"))
+        # the approval gate passes: the build gets past "not approved" (it may then fail on the missing bridge)
+        r = cli(self.root, "ppro-build")
+        self.assertNotIn("not approved", r.stdout + r.stderr)
+
+    def test_events_change_still_changes_fingerprint(self):
+        fp = plan_fingerprint(self.p)
+        self.save(self.mutated(lambda s: s["events"][0]["params"].update(text="y")))
+        self.assertNotEqual(plan_fingerprint(self.p), fp)
+
+    def test_fingerprint_format_is_16_hex(self):
+        fp = plan_fingerprint(self.p)
+        self.assertRegex(fp, r"^[0-9a-f]{16}$")
+
+    def test_key_order_and_formatting_do_not_matter(self):
+        fp = plan_fingerprint(self.p)
+        reordered = dict(reversed(list(self.spec.items())))
+        self.p.p("01_analysis/timeline-spec.json").write_text(json.dumps(reordered, indent=4, ensure_ascii=True),
+                                                              encoding="utf-8")
+        self.assertEqual(plan_fingerprint(self.p), fp)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -606,8 +606,15 @@ def compile_plan(paths: Paths) -> dict:
 
 
 def plan_fingerprint(paths: Paths) -> str:
+    """Gate 1 fingerprint: the whole compiled timeline spec (camera, framing, scale, duration, main footage, events,
+    captions, music) except the `generated` timestamp, so a re-compile that changes nothing stays approved and
+    anything that changes what gets built does not (3.0 T1.4, engine IM-3). Sorted keys: the hash does not depend on
+    key order or file formatting."""
     import hashlib
-    return hashlib.sha1(paths.p("01_analysis/timeline-spec.json").read_bytes().split(b'"events"', 1)[-1]).hexdigest()[:16]
+    import json
+    spec = json.loads(paths.p("01_analysis/timeline-spec.json").read_text(encoding="utf-8"))
+    body = json.dumps({k: v for k, v in spec.items() if k != "generated"}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
 
 
 def speaker_covered_frames(spec: dict) -> int:

@@ -28,12 +28,20 @@
   `main_footage` accepts the id (any case), the raw stem or the 2.x slug; `inbox`, the single-clip `--video-id`
   auto-fill and the SessionStart "new clips" line use the same ids. A lone Arabic clip whose 2.x project is
   `output/projects/VIDEO` keeps that project.
+- The Gate 1 plan approval covers the whole plan (engine IM-3). `plan_fingerprint` hashed only the bytes after `"events"`
+  in `01_analysis/timeline-spec.json`, so a camera move, the framing (9:16 / 4:5), the base scale, `main_footage` or the
+  duration could change after approval and `ppro-build`, `ae-build`, `ps-build` and QC still saw the plan as approved.
+  It now hashes every field of the spec except `generated` (sorted keys, 16 hex characters, as before), so a re-compile
+  that changes nothing stays approved and anything that changes what gets built needs a new approval.
 
 ### Migration
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the
   zip). A client folder that relied on the folder-name match must now have its own profile: copy that private profile
   into `<client>/output/client_database/reel-profile/`, or run `reel client-init --from-profile example-clinic` and fill
   it from the client's own documents. Existing client `reel-profile/` folders keep working unchanged.
+- Existing plan approvals are invalidated once: the approval fingerprint has a new definition, so every project with a
+  `plan-approval.json` written by 2.x is treated as changed. Re-approve the plan (`reel approve-plan --by editor`) before
+  the next build or QC; the plan itself does not need recompiling.
 
 ## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names, field-test round 4
 The minor findings of the 2.2.0 review, two bugs found by a live run from a client folder named in Arabic, and the gaps
