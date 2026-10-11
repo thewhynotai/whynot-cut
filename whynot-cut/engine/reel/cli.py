@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib.common import (Paths, load_status, log, read_json, set_status, write_json, slug, now_iso,  # noqa: E402
+from lib.common import (Paths, load_status, log, read_json, set_status, write_json, now_iso,  # noqa: E402
                         set_context, active_profile, profile_dirs, project_prefix, ENV_DIR, PROFILES_DIR, CLIENT_PROFILE_REL,
                         clients_root, client_folders, resolve_root)
 
@@ -56,8 +56,9 @@ def out(obj):
 
 
 def main_footage(paths: Paths, explicit: str | None) -> list[Path]:
-    """The raw file of THIS video: --footage, else the project's range (`reel range`), else the raw clip whose name
-    is the video id (C0002 -> data/Raw/C0002.MP4), else the only raw clip. Never silently another clip."""
+    """The raw file of THIS video: --footage, else the project's range (`reel range`), else the raw clip the video id
+    names (its id from `reel inbox`, its file stem or its 2.x slug: lib/clip_ids.py), else the only raw clip. Never
+    silently another clip."""
     from lib.common import source_range
     if explicit:
         return [Path(explicit) if Path(explicit).is_absolute() else paths.root / explicit]
@@ -71,10 +72,12 @@ def main_footage(paths: Paths, explicit: str | None) -> list[Path]:
     files = [Path(f["path"]) for f in inv["files"] if f["role"] == "source_footage"]
     if not paths.video_id or len(files) <= 1:
         return files
-    match = [f for f in files if f.stem.lower() == paths.video_id.lower()]
-    if match:
-        return match[:1]
-    raise SystemExit(f"no raw clip named '{paths.video_id}' among {[f.name for f in files]}: use the clip's file name as "
+    from lib.clip_ids import clip_ids, resolve
+    f = resolve(paths.root, paths.video_id, inv)
+    if f:
+        return [f]
+    ids = "; ".join(f"{k} = {v}" for k, v in clip_ids(paths.root, inv).items())
+    raise SystemExit(f"no raw clip with id '{paths.video_id}'. Clip ids (`reel inbox` lists them): {ids}. Use one as "
                      f"--video-id, pass --footage, or cut this video from a longer file with `reel range`")
 
 
@@ -920,7 +923,8 @@ def main():
         inv = read_json(Path(a.root).expanduser() / "output/discovery/input-inventory.json")
         src = [f for f in (inv or {}).get("files", []) if f["role"] == "source_footage"]
         if len(src) == 1:
-            a.video_id = slug(Path(src[0]["path"]).stem)
+            from lib.clip_ids import clip_ids, id_of
+            a.video_id = id_of(clip_ids(a.root, inv), src[0]["rel"])
         else:
             if a.cmd not in OPTIONAL_ID:
                 raise SystemExit("--video-id required (found %d source files; `reel inbox` lists them)" % len(src))

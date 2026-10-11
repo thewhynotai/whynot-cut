@@ -19,6 +19,15 @@
 - Executable bits are set in git's index (`100755`) for `bin/reel`, `hooks/run_python.sh`, `hooks/*.py`,
   `setup/setup_env.sh`, `setup/setup_env.py`, `examples/make_demo.py` and `tools/test.sh`. Windows checkouts had them as
   `100644`. Tests pin the index modes and the `package.py` zip exec set to the same list.
+- Clip ids work for every file name (engine CR-1). `reel inbox` handed out `slug(stem)` while the per-clip commands
+  matched the raw stem, so `Dr Sherif intro.mp4` (id `DR_SHERIF_INTRO`) was rejected, and Arabic names all collapsed to
+  `VIDEO` and shared one project folder. New `lib/clip_ids.py`: ASCII names keep their slug (existing projects keep
+  their ids); Arabic or letter-less names get `CLIP_<hash>` (the episode rule, now shared as `common.stable_id`); the
+  same stem with another extension gets `_<EXT>` (`C0239.mov` -> `C0239_MOV`), other collisions a name or path hash.
+  Ids are stored in `output/discovery/clip-ids.json` (`{id: relative path}`) and never change or get reused.
+  `main_footage` accepts the id (any case), the raw stem or the 2.x slug; `inbox`, the single-clip `--video-id`
+  auto-fill and the SessionStart "new clips" line use the same ids. A lone Arabic clip whose 2.x project is
+  `output/projects/VIDEO` keeps that project.
 
 ### Migration
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the

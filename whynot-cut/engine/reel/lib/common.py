@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from fractions import Fraction
 from pathlib import Path
 
@@ -222,6 +223,23 @@ def is_junk(p: Path) -> bool:
 def slug(s: str) -> str:
     s = re.sub(r"[^A-Za-z0-9]+", "_", s).strip("_")
     return s.upper() or "VIDEO"
+
+
+def short_hash(text: str, n: int = 6) -> str:
+    """Upper-case hex prefix of the SHA-1 of the NFC text (macOS NFD names hash like Windows NFC ones)."""
+    return hashlib.sha1(unicodedata.normalize("NFC", text).encode("utf-8")).hexdigest()[:n].upper()
+
+
+def stable_id(name: str, prefix: str) -> str:
+    """Project id from a file stem (episodes: prefix EP, raw clips: CLIP). ASCII names keep slug() (EP12 -> EP12,
+    "Dr Sherif intro" -> DR_SHERIF_INTRO); names with other letters (Arabic) or none get a short hash, because slug()
+    drops those letters and two such names would collide: <prefix>_<slug>_<hash>, or <prefix>_<hash>."""
+    stem = unicodedata.normalize("NFC", name)
+    s = slug(stem)
+    if s != "VIDEO" and not re.search(r"[^\x00-\x7F]", stem):
+        return s
+    h = short_hash(stem)
+    return f"{prefix}_{s}_{h}" if s not in ("", "VIDEO") else f"{prefix}_{h}"
 
 
 # --------------------------------------------------------------------------- tools

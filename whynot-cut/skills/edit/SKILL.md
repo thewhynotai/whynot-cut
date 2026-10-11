@@ -21,7 +21,8 @@ reel settings --root "<CLIENT_FOLDER>"                  # preferences in effect 
 - Speak the editor's `language` from preferences. Address them by `editor_name` if set.
 - Unsure what's in the folder, or the user just dropped new files? Spawn `whynot-cut:intake-inspector` first; it returns
   the clips, the missing brand material and footage problems without changing anything.
-- `<ID>` is the footage file stem (e.g. `C0238`). Outputs go to `<root>/output/`. **`assets/` and `data/` are read-only** (a hook enforces this).
+- `<ID>` is the clip id `reel inbox` lists: the file stem for plain names (`C0238`), a short hash for Arabic names
+  (`CLIP_1A2B3C`); the map is `output/discovery/clip-ids.json`. Outputs go to `<root>/output/`. **`assets/` and `data/` are read-only** (a hook enforces this).
 - **A reel cut from a longer file** (a finished episode, a long interview, a client's reels plan with timecodes): give
   it its own id and a range, never a re-encoded copy:
   `reel range --root "<CLIENT>" --video-id R02 --footage data/Raw/EP02.mp4 --in 02:04 --out 02:59 --snap`.

@@ -6,12 +6,10 @@ picked reel becomes an ordinary clip project whose source is a window of the epi
 """
 from __future__ import annotations
 
-import hashlib
 import re
-import unicodedata
 from pathlib import Path
 
-from .common import Paths, ffmpeg_exe, fmt_ts, load_config, now_iso, read_json, run, sha1_head, slug, write_json
+from .common import Paths, ffmpeg_exe, fmt_ts, load_config, now_iso, read_json, run, sha1_head, stable_id, write_json
 
 EPISODE_SUBDIRS = ["00_inputs/intake", "01_analysis", "02_transcription/chunks", "03_candidates", "publish/reels",
                    "publish/thumbnail/candidates", "08_quality_control", "logs"]
@@ -88,14 +86,8 @@ def parse_sheet(text: str) -> dict:
 # --------------------------------------------------------------------------- ids, listing
 def episode_id_for(path: Path) -> str:
     """Stable project id from the file name. ASCII names keep the clip rule (EP12.mp4 -> EP12); names with other
-    letters (Arabic) get a short hash so two Arabic names never collide (slug drops them)."""
-    stem = unicodedata.normalize("NFC", Path(path).stem)
-    s = slug(stem)
-    if s != "VIDEO" and not re.search(r"[^\x00-\x7F]", stem):
-        return s
-    # letters slug() drops (Arabic) or no letters at all ("###"): a short hash keeps two such names apart
-    h = hashlib.sha1(stem.encode("utf-8")).hexdigest()[:6].upper()
-    return f"EP_{s}_{h}" if s not in ("", "VIDEO") else f"EP_{h}"
+    letters (Arabic) get a short hash so two Arabic names never collide (slug drops them). Shared with clip ids."""
+    return stable_id(Path(path).stem, "EP")
 
 
 def _inventory(root: Path, refresh: bool = False) -> dict:

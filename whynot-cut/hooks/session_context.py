@@ -43,15 +43,22 @@ def bridge_state(home: Path) -> str:
 
 
 def new_clips(root: Path) -> list:
-    out = []
+    rels = []
     for f in sorted((root / "data").rglob("*")):
-        rel = f.relative_to(root).as_posix().lower()
-        if f.suffix.lower() in VIDEO and not f.name.startswith(".") and "ref" not in rel \
-                and not rel.startswith("data/episodes/"):           # episodes are cut into reels (podcast mode)
-            vid = "".join(ch if ch.isalnum() else "_" for ch in f.stem).strip("_").upper()
-            if not (root / "output/projects" / vid / "02_transcription/transcript.json").exists():
-                out.append(vid)
-    return out[:12]
+        rel = f.relative_to(root).as_posix()
+        low = rel.lower()
+        if f.suffix.lower() in VIDEO and not f.name.startswith(".") and "ref" not in low \
+                and not low.startswith("data/episodes/"):           # episodes are cut into reels (podcast mode)
+            rels.append(rel)
+    try:      # the ids `reel inbox` hands out (output/discovery/clip-ids.json); read-only here, nothing is written
+        sys.path.insert(0, str(PLUGIN / "engine" / "reel"))
+        from lib import clip_ids
+        ids = clip_ids.assign(root, rels, clip_ids.load(root))
+        vids = [clip_ids.id_of(ids, r) for r in rels]
+    except Exception:
+        vids = ["".join(ch if ch.isascii() and ch.isalnum() else "_" for ch in Path(r).stem).strip("_").upper() or "VIDEO"
+                for r in rels]
+    return [v for v in vids if not (root / "output/projects" / v / "02_transcription/transcript.json").exists()][:12]
 
 
 def episodes(root: Path) -> list:

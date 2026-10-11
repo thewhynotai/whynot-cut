@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from . import plat
-from .common import ENV_DIR, Paths, ffmpeg_exe, load_status, now_iso, read_json, slug, venv_python, write_json, write_text
+from .common import ENV_DIR, Paths, ffmpeg_exe, load_status, now_iso, read_json, venv_python, write_json, write_text
 
 MODULES = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "fontTools", "arabic_reshaper", "bidi",
            "uharfbuzz", "freetype", "pypdf"]
@@ -181,10 +181,12 @@ def inbox(root: Path, refresh: bool = True) -> dict:
     inv = read_json(p.output / "discovery/input-inventory.json", {"files": [], "warnings": []})
     by = inv.get("by_role", {})
     clips = []
+    from .clip_ids import clip_ids, id_of
+    ids = clip_ids(p.root, inv)
     for f in inv["files"]:
         if f["role"] != "source_footage":
             continue
-        vid = slug(Path(f["path"]).stem)
+        vid = id_of(ids, f["rel"])
         pp = Paths(root, vid)
         # discovery/preflight alone don't start an edit; the transcript does
         started = pp.project.exists() and pp.p("02_transcription/transcript.json").exists()
