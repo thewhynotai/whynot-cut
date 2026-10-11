@@ -581,7 +581,8 @@ def cmd_next(a):
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
-NO_ROOT = {"setup", "doctor", "model-download", "gpu-enable", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings"}
+NO_ROOT = {"setup", "doctor", "model-download", "gpu-enable", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
+           "ae-status", "ae-probe"}
 NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
 
@@ -749,12 +750,12 @@ def main():
     ap.add_argument("--video-id", help="stable project id (default: footage file stem)")
     ap.add_argument("--profile", help="client profile id (default: client's reel-profile, else folder-name match)")
     ap.add_argument("--episode", help="podcast episode id (`reel episodes` lists them)")
-    from lib import podcast_cli
+    from lib import motion_cli, podcast_cli
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ["discover", "client-db", "preflight", "transcribe", "transcript-correct", "transcript-verify", "transcript-relisten", "range", "ref-analyze", "ref-style", "plan",
                  "previews", "sfx", "approve-plan", "verify", "ppro-install", "ppro-status", "ppro-probe", "ppro-build", "ppro-frames", "mogrt-build", "audio-clean", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "premiere",
                  "qc", "handoff", "status", "next", "setup", "profile", "client-init",
-                 "doctor", "scaffold", "inbox", "preview-video", "settings", "model-download", "gpu-enable"] + list(podcast_cli.ARGS):
+                 "doctor", "scaffold", "inbox", "preview-video", "settings", "model-download", "gpu-enable"] + list(podcast_cli.ARGS) + list(motion_cli.ARGS):
         sp = sub.add_parser(name)
         # global options are accepted after the command too (`reel next --root X`), as the skills write them
         sp.add_argument("--root", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
@@ -762,6 +763,7 @@ def main():
         sp.add_argument("--profile", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         sp.add_argument("--episode", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         podcast_cli.add_args(name, sp)
+        motion_cli.add_args(name, sp)
         if name in ("preflight", "transcribe"):
             sp.add_argument("--footage")
         if name == "transcribe":
@@ -853,6 +855,9 @@ def main():
     set_context(a.root, a.profile)
     if a.cmd in podcast_cli.ARGS:
         podcast_cli.dispatch(a)
+        return
+    if a.cmd in motion_cli.ARGS:
+        motion_cli.dispatch(a)
         return
     if not a.video_id and a.cmd not in NO_ID and not a.episode:
         inv = read_json(Path(a.root).expanduser() / "output/discovery/input-inventory.json")

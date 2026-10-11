@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="7.0" ExtensionBundleId="ai.thewhynot.cut.bridge" ExtensionBundleVersion="3.0.0"
+<ExtensionManifest Version="7.0" ExtensionBundleId="ai.thewhynot.cut.bridge" ExtensionBundleVersion="3.1.0"
                    ExtensionBundleName="WhyNot Cut Bridge" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
     <Extension Id="ai.thewhynot.cut.bridge.panel" Version="1.0.0"/>
     <Extension Id="ai.thewhynot.cut.bridge.daemon" Version="1.0.0"/>
   </ExtensionList>
   <ExecutionEnvironment>
-    <HostList><Host Name="PPRO" Version="[22.0,99.9]"/></HostList>
+    <HostList>
+      <Host Name="PPRO" Version="[22.0,99.9]"/>
+      <Host Name="AEFT" Version="[24.0,99.9]"/>
+    </HostList>
     <LocaleList><Locale Code="All"/></LocaleList>
     <RequiredRuntimeList><RequiredRuntime Name="CSXS" Version="11.0"/></RequiredRuntimeList>
   </ExecutionEnvironment>

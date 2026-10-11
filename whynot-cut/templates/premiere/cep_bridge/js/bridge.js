@@ -1,13 +1,23 @@
-/* WhyNot Cut Bridge (by The Why Not AI): lets the whynot-cut plugin run ITS OWN Premiere scripts, on macOS and Windows.
-   Polls <engine home>/ppro-queue for *.job.json, evaluates a whitelisted JSX (only files inside <engine home>/ppro-scripts,
-   which `reel setup` syncs from the plugin) with a data file, writes *.result.json. A fixed folder is used because the
+/* WhyNot Cut Bridge (by The Why Not AI): lets the whynot-cut plugin run ITS OWN Premiere and After Effects scripts, on
+   macOS and Windows. One bundle, host-aware: in Premiere it polls <engine home>/ppro-queue and evaluates only files in
+   <engine home>/ppro-scripts (entry NHPP); in After Effects it uses ae-queue / ae-scripts (entry NHAE). For each
+   *.job.json it evaluates the whitelisted JSX with a data file and writes *.result.json. A fixed folder is used because the
    plugin's own install path changes on every update. Writes a heartbeat so the pipeline knows the bridge is running.
    <engine home> comes from bridge-config.json (written at install), else ~/.whynot-cut, else a legacy home. */
 (function () {
   var req = (window.cep_node && window.cep_node.require) || window.require;
   var fs = req('fs'), path = req('path'), os = req('os');
   var HOME = os.homedir();
-  var VERSION = '3.0.0';
+  var VERSION = '3.1.0';
+  var HOSTS = {
+    PPRO: { queue: 'ppro-queue', scripts: 'ppro-scripts', entry: 'NHPP' },
+    AEFT: { queue: 'ae-queue', scripts: 'ae-scripts', entry: 'NHAE' }
+  };
+  function hostId() {
+    try { return JSON.parse(window.__adobe_cep__.getHostEnvironment()).appName || 'PPRO'; } catch (e) { return 'PPRO'; }
+  }
+  var HOST = HOSTS[hostId()] ? hostId() : 'PPRO';
+  var CFG = HOSTS[HOST];
   function extensionDir() {
     try {
       var p = decodeURI(window.__adobe_cep__.getSystemPath('extension')).replace(/^file:\/+/, '');
@@ -32,8 +42,8 @@
   var BASE = engineHome();
   if (!fs.existsSync(BASE)) { fs.mkdirSync(BASE, { recursive: true }); }
   BASE = fs.realpathSync(BASE);
-  var QUEUE = path.join(BASE, 'ppro-queue');
-  var ALLOWED = path.join(BASE, 'ppro-scripts') + path.sep;
+  var QUEUE = path.join(BASE, CFG.queue);
+  var ALLOWED = path.join(BASE, CFG.scripts) + path.sep;
   var busy = false;
   // the running job; a lost evalScript callback must not block the queue forever (callers give up after <= 15 min)
   var current = null, currentFile = null, startedAt = 0;
@@ -51,7 +61,7 @@
   function heartbeat() {
     try {
       fs.writeFileSync(path.join(QUEUE, 'bridge.heartbeat'),
-        JSON.stringify({ at: Date.now(), busy: busy, version: VERSION, who: (document.getElementById('state') ? 'ui' : 'bg') }));
+        JSON.stringify({ at: Date.now(), busy: busy, version: VERSION, host: HOST, who: (document.getElementById('state') ? 'ui' : 'bg') }));
     } catch (e) {}
   }
   function finish(job, file, payload) {
@@ -72,13 +82,13 @@
       return finish(job, running, { ok: false, error: 'script not found: ' + e.message, script: job.script, at: Date.now() });
     }
     if (script.indexOf(ALLOWED) !== 0) {
-      log('REJECTED script outside ppro-scripts: ' + script);
+      log('REJECTED script outside ' + CFG.scripts + ': ' + script);
       return finish(job, running, { ok: false, error: 'script not in whitelisted folder', script: script, at: Date.now() });
     }
     busy = true; current = job.id; currentFile = running; startedAt = Date.now();
     stateEl.textContent = 'running ' + job.id + ' (' + (job.action || '') + ')';
     log('run ' + job.id + ' ' + (job.action || ''));
-    var code = '$.evalFile(new File(' + JSON.stringify(script) + ')); NHPP.run(' + JSON.stringify(job.data_file) + ');';
+    var code = '$.evalFile(new File(' + JSON.stringify(script) + ')); ' + CFG.entry + '.run(' + JSON.stringify(job.data_file) + ');';
     window.__adobe_cep__.evalScript(code, function (res) {
       if (current !== job.id) { log('late result ignored ' + job.id); return; }   // already timed out
       var ok = res !== 'EvalScript error.';
@@ -90,9 +100,9 @@
   function tick() {
     heartbeat();
     if (busy && Date.now() - startedAt > JOB_TIMEOUT_MS) {
-      log('TIMEOUT ' + current + ' — no reply from Premiere; queue released');
+      log('TIMEOUT ' + current + ' — no reply from ' + HOST + '; queue released');
       stateEl.textContent = 'idle — watching queue';
-      finish({ id: current }, currentFile, { ok: false, error: 'no reply from Premiere within ' + (JOB_TIMEOUT_MS / 60000) + ' min', at: Date.now() });
+      finish({ id: current }, currentFile, { ok: false, error: 'no reply from ' + HOST + ' within ' + (JOB_TIMEOUT_MS / 60000) + ' min', at: Date.now() });
     }
     if (busy) { return; }
     var jobs;
@@ -102,7 +112,7 @@
   try {
     ensureQueue();
     stateEl.textContent = 'idle — watching queue';
-    log('WhyNot Cut Bridge ' + VERSION + ' started; queue ' + QUEUE);
+    log('WhyNot Cut Bridge ' + VERSION + ' (' + HOST + ') started; queue ' + QUEUE);
     setInterval(tick, 1000);
   } catch (e) {
     stateEl.textContent = 'FAILED to start: ' + e;

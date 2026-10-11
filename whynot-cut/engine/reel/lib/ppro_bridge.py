@@ -1,4 +1,4 @@
-"""Python side of the WhyNot Cut Bridge (Premiere CEP panel): install, status, submit jobs, wait for results.
+"""Python side of the WhyNot Cut Bridge (one CEP bundle for Premiere and After Effects; this module is the Premiere side): install, status, submit jobs, wait for results.
 
 Premiere has no scripting entry point from outside (macOS AppleScript exposes only capture/editoriginal; Windows has
 no COM API), so scripts can't be sent to Premiere directly. The bridge panel (templates/premiere/cep_bridge) runs
@@ -10,17 +10,15 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import time
-import uuid
 from pathlib import Path
 
-from .common import ENV_DIR, TEMPLATES_DIR, now_iso
+from .common import ENV_DIR, TEMPLATES_DIR
 from . import plat
 
 EXT_ID = "ai.thewhynot.cut.bridge"
 LEGACY_EXT_IDS = ("com.nh.bridge",)          # reel-editor 1.x bridge; replaced on install
 EXT_DIR = plat.cep_extensions_dir() / EXT_ID
-BRIDGE_VERSION = "3.0.0"
+BRIDGE_VERSION = "3.1.0"
 QUEUE = ENV_DIR / "ppro-queue"
 SCRIPTS = ENV_DIR / "ppro-scripts"
 LIB_SRC = TEMPLATES_DIR / "premiere/nh_ppro_lib.jsx"
@@ -73,55 +71,22 @@ def install() -> dict:
     return {"installed": str(EXT_DIR), "queue": str(QUEUE), "scripts": sync, "legacy_bridges_removed": removed,
             "PlayerDebugMode": dbg, "debug_mode_ok": ok,
             "editor_must_run": [] if ok else plat.debug_mode_commands(),
-            "next": ("Restart Premiere if it was running during install (the bridge starts by itself; "
-                     "the visible panel is Window > Extensions > WhyNot Cut Bridge).") if ok else
+            "next": ("Restart Premiere and After Effects if they were running during install (the bridge starts by itself "
+                     "in both; the visible panel is Window > Extensions > WhyNot Cut Bridge).") if ok else
                     ("PlayerDebugMode is off, so Premiere will not load the bridge. The editor runs the commands in "
                      "'editor_must_run' themselves (an Adobe preference; WhyNot Cut never changes it), then restarts Premiere.")}
 
 
 def status(max_age_s: float = 5.0) -> dict:
-    hb = QUEUE / "bridge.heartbeat"
-    if not hb.exists():
-        return {"alive": False, "detail": "no heartbeat: start Premiere (bridge auto-starts) or open Window > Extensions > WhyNot Cut Bridge"}
-    try:
-        d = json.loads(hb.read_text(encoding="utf-8"))
-    except Exception:
-        return {"alive": False, "detail": "unreadable heartbeat"}
-    age = time.time() - d["at"] / 1000
-    return {"alive": age < max_age_s, "age_s": round(age, 1), "busy": d.get("busy"), "bridge_version": d.get("version"),
-            "detail": "ok" if age < max_age_s else f"heartbeat {age:.0f}s old: panel closed or Premiere busy/quit"}
+    from . import cep_queue
+    return cep_queue.status(QUEUE, max_age_s, app="Premiere")
 
 
 def submit(action: str, data: dict | None = None, timeout: float = 600, script: Path = LIB) -> dict:
-    st = status()
+    from . import cep_queue
+    st = status()          # through this module, so callers/tests that patch ppro_bridge.status keep working
     if not st["alive"]:
         return {"ok": False, "error": "bridge not running", "status": st}
-    QUEUE.mkdir(parents=True, exist_ok=True)
     if script == LIB:
         sync_scripts()
-    jid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
-    payload = dict(data or {}, action=action, job_id=jid, submitted=now_iso())
-    data_file = QUEUE / f"{jid}.data.json"
-    data_file.write_text(json.dumps(payload, ensure_ascii=True), encoding="ascii")
-    job = {"id": jid, "action": action, "script": str(script), "data_file": str(data_file)}
-    tmp = QUEUE / f"{jid}.tmp"
-    tmp.write_text(json.dumps(job), encoding="utf-8")
-    tmp.rename(QUEUE / f"{jid}.job.json")      # atomic: the panel never sees a half-written job
-    res_p = QUEUE / f"{jid}.result.json"
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        if res_p.exists():
-            try:
-                r = json.loads(res_p.read_text(encoding="utf-8"))
-            except ValueError:          # the panel is still writing it
-                time.sleep(0.2)
-                continue
-            inner = r.get("result")
-            try:
-                inner = json.loads(inner) if isinstance(inner, str) else inner
-            except Exception:
-                pass
-            return {"ok": bool(r.get("ok")) and isinstance(inner, dict) and inner.get("ok", False),
-                    "bridge_ok": r.get("ok"), "response": inner, "elapsed_s": round(time.time() - t0, 1), "job": jid}
-        time.sleep(0.5)
-    return {"ok": False, "error": f"timeout after {timeout}s (Premiere may show a dialog)", "job": jid}
+    return cep_queue.submit(QUEUE, script, action, data, timeout, st=st, app="Premiere")
