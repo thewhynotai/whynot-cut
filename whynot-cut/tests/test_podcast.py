@@ -1455,5 +1455,109 @@ class TestPluginLayer(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class TestReviewFixes(unittest.TestCase):
+    """Findings of the whole-branch review (each reproduced first)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_qc_in_point_with_leading_pause_removed(self):
+        from lib.plan import compile_plan
+        from lib.premiere_xml import build_xml
+        from lib.qc import run_qc
+        _root, reel, _src = reel_fixture(self.tmp, "comedy", music=False)
+        write_json(reel.p("06_audio/dialogue/pauses.json"), {"keep_ms": [[300, 10000]], "removed_ms": 300,
+                                                             "cuts_ms": [[0, 300]], "pauses_ms": [[0, 380]]})
+        write_json(reel.p("01_analysis/edit-decisions.json"), {"global": {"remove_pauses": True}, "decisions": [
+            decision("EDIT_001", "00:00:00.500", "00:00:04.000", "كلمه1 كلمه2")]})
+        self.assertTrue(compile_plan(reel)["ok"])
+        build_xml(reel, prefer_ae_renders=False)
+        chk = {c["check"]: c for c in run_qc(reel)["checks"]}["Reel starts at its episode in-point"]
+        self.assertEqual(chk["result"], "PASS", chk)
+
+    def test_scalar_avoid_still_checked(self):
+        from lib.episode import EpisodePaths
+        from lib.reels import compile_reels_plan
+        root = self.tmp / "C"
+        (root / "assets").mkdir(parents=True)
+        (root / "data").mkdir()
+        ep = EpisodePaths(root, "EP12")
+        words = synthetic_episode_transcript(ep)
+        write_json(ep.p("00_inputs/episode.json"), {"episode_id": "EP12", "duration_ms": 121000, "sheet": {"avoid": "السياسه"}})
+        write_json(ep.p("01_analysis/reels-plan.json"), {"episode_id": "EP12", "candidates": [cand(words, 39, 149)]})
+        self.assertEqual(compile_reels_plan(ep)["candidates"][0]["avoid_hits"], ["السياسه"])
+
+    def test_symbol_only_names_and_duplicates(self):
+        from lib.episode import episode_id_for, list_episodes
+        a, b = episode_id_for(Path("###.mp4")), episode_id_for(Path("_.mp4"))
+        self.assertNotEqual(a, b)
+        self.assertNotIn("VIDEO", (a, b))
+        root = make_episode_client(self.tmp, dur_s=3, with_clip=False)
+        shutil.copy(root / "data/Episodes/EP12.mp4", root / "data/Episodes/EP12.mov")
+        eps = list_episodes(root, refresh=True)
+        self.assertTrue(any("duplicate" in (e.get("warning") or "") for e in eps), eps)
+
+    def test_overlapping_turns_never_overlap_framing(self):
+        from lib.shots import frame_shots
+        sp = {"people": SPEAKERS["people"], "turns": [{"start_ms": 0, "end_ms": 5000, "speaker": "host"},
+                                                      {"start_ms": 3000, "end_ms": 9000, "speaker": "guest"}]}
+        e = frame_shots([shot(0, 9000, 0.25, 0.75)], sp, 1920, 1080)
+        for x, y in zip(e, e[1:]):
+            self.assertLessEqual(x["until_ms"], y["at_ms"], e)
+        self.assertEqual((e[0]["at_ms"], e[-1]["until_ms"]), (0, 9000))
+
+    def test_guard_catches_python_cli_form(self):
+        cmd = 'python -B "whynot-cut/engine/reel/cli.py" --root X --episode EP12 reels-select --pick R01 --by editor'
+        self.assertEqual(run_guard(cmd, "whynot-cut:episode-analyst"), 2)
+        self.assertEqual(run_guard(cmd), 0)
+
+    def test_language_change_invalidates_chunks(self):
+        from lib.episode import EpisodePaths, transcribe_episode
+        root = make_episode_client(self.tmp, dur_s=6, with_clip=False)
+        common.set_context(root)
+        calls = []
+
+        def fake(audio, start_ms, language, prompt):
+            calls.append(language)
+            return {"language": language or "ar", "language_probability": 0.9, "segments": [], "words": []}
+        ep = EpisodePaths(root, "EP12")
+        transcribe_episode(ep, "small", run_chunk=fake)
+        calls.clear()
+        transcribe_episode(ep, "small", language="en", run_chunk=fake)
+        self.assertEqual(calls, ["en"])                                   # re-decoded, not reused from the 'ar' run
+
+    def test_transcribe_refuses_on_episode_reel(self):
+        from lib.episode import EpisodePaths, prep
+        from lib.reels import select
+        from lib.transcribe import finalize
+        root = make_episode_client(self.tmp, dur_s=12, with_clip=False)
+        write_json(root / common.CLIENT_PROFILE_REL / "podcast.json", {"reel_duration_s": {"min": 1, "hard_min": 1}})
+        common.set_context(root)
+        ep = EpisodePaths(root, "EP12")
+        prep(ep)
+        ws = [{"id": i + 1, "segment_id": 1, "word": f"كلمه{i}", "start_ms": i * 500, "end_ms": i * 500 + 400,
+               "probability": 0.9} for i in range(22)]
+        finalize(ep, {"source_video": "x", "backend": "test", "model": "none", "language": "ar",
+                      "language_probability": 1.0, "duration_ms": 12000},
+                 [{"id": 1, "start_ms": 0, "end_ms": ws[-1]["end_ms"], "text": " ".join(w["word"] for w in ws),
+                   "avg_logprob": -0.2, "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in ws]}], ws)
+        validated_plan(ep, [{"id": "R01", "in_ms": 1000, "out_ms": 8000, "duration_ms": 7000, "type": "advice",
+                             "total": 7, "score": {}, "avoid_hits": []}])
+        select(ep, ["R01"], [], "editor")
+        cli = [sys.executable, "-B", str(SK / "engine/reel/cli.py"), "--root", str(root), "--video-id", "EP12_R01", "transcribe"]
+        r = subprocess.run(cli + ["--force"], capture_output=True, text=True, encoding="utf-8")
+        self.assertIn("reels-select", r.stdout + r.stderr)
+        self.assertIn("episode_word_id", Paths(root, "EP12_R01").p("02_transcription/words.json").read_text(encoding="utf-8"))
+        Paths(root, "EP12_R01").p("02_transcription/transcript.json").unlink()
+        r = subprocess.run(cli, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr[-500:])
+        w = read_json(Paths(root, "EP12_R01").p("02_transcription/words.json"))["words"]
+        self.assertTrue(w and "episode_word_id" in w[0])                   # re-sliced from the episode, not re-decoded
+
+
 if __name__ == "__main__":
     unittest.main()

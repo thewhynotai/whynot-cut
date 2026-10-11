@@ -157,9 +157,10 @@ def compile_reels_plan(ep) -> dict:
     dur_cfg, tol = cfg["reel_duration_s"], cfg["snap"].get("evidence_tol_ms", 3000)
     types = content_types()
     info = read_json(ep.p("00_inputs/episode.json"), {}) or {}
-    avoid = [a for a in (info.get("sheet", {}) or {}).get("avoid") or [] if str(a).strip()]
-    if isinstance(avoid, str):
-        avoid = [avoid]
+    raw_avoid = (info.get("sheet", {}) or {}).get("avoid") or []
+    if isinstance(raw_avoid, str):              # `avoid: السياسة` (one topic) is a scalar in the sheet
+        raw_avoid = [raw_avoid]
+    avoid = [a for a in raw_avoid if str(a).strip()]
     people = (read_json(ep.p("01_analysis/speakers.json"), {}) or {}).get("people") or {}
     errors, warnings, out, seen = [], [], [], set()
     for c in plan.get("candidates", []):

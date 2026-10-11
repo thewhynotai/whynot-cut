@@ -89,11 +89,16 @@ def run_qc(paths: Paths) -> dict:
             rng = source_range(paths)
             if rng and vk:
                 first = min(v1.iter("clipitem"), key=lambda c: int(c.findtext("start")))
-                want = round(int(rng.get("in_ms", 0)) * 254016000000 / 1000)
+                # the first kept piece may start after the in-point (a leading pause removed): the check proves the
+                # offset, so the expected source time is in-point + that piece's own source start
+                lead_ms = float(((spec or {}).get("main_segments") or [{}])[0].get("src_in_ms") or 0)
+                want_ms = int(rng.get("in_ms", 0)) + lead_ms
+                want = round(want_ms * 254016000000 / 1000)
                 got = int(first.findtext("pproTicksIn"))
                 tol = round(254016000000 / FPS) // 2      # half a frame (a lead-in snapped to a frame boundary)
                 r.add("technical", "Reel starts at its episode in-point", abs(got - want) <= tol,
-                      f"first V1 source time {got / 254016000000:.3f}s vs in-point {int(rng.get('in_ms', 0)) / 1000:.3f}s")
+                      f"first V1 source time {got / 254016000000:.3f}s vs in-point {int(rng.get('in_ms', 0)) / 1000:.3f}s"
+                      + (f" + {lead_ms / 1000:.3f}s removed at the start" if lead_ms else ""))
                 pre = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
                 fdur = next((f.get("duration_s") for f in pre.get("files", []) if Path(f["path"]).name ==
                              Path(rng["footage"]).name), None)

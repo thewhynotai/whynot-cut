@@ -175,6 +175,22 @@ def cmd_transcribe(a):
     from lib.media import probe
     p = P(a)
     p.ensure_project()
+    from lib.common import source_range
+    rng = source_range(p)
+    if rng.get("kind") == "episode_reel":
+        # a podcast reel's transcript is sliced from the episode's (corrections, flags and verification included):
+        # never re-decode it here. Missing -> re-slice; present -> say how to refresh it.
+        if p.p("02_transcription/transcript.json").exists():
+            out({"refused": "this reel's transcript is sliced from episode " + str(rng.get("episode_id")) + ": correct the "
+                            "EPISODE transcript (`reel transcript-correct --episode " + str(rng.get("episode_id")) + "`), then "
+                            "`reel reels-select --episode " + str(rng.get("episode_id")) + " --resync`"})
+            raise SystemExit(2)
+        from lib.episode import EpisodePaths
+        from lib.reels import slice_transcript
+        r = slice_transcript(EpisodePaths(p.root, rng["episode_id"]), p, int(rng["in_ms"]), int(rng["out_ms"]))
+        set_status(p, "TRANSCRIBED", f"re-sliced from episode {rng['episode_id']}", "transcribe")
+        out(dict(r, resliced_from=rng["episode_id"]))
+        return
     src = main_footage(p, a.footage)[0]
     st = load_status(p)
     if p.p("02_transcription/transcript.json").exists() and not a.force:

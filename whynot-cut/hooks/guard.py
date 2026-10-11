@@ -252,8 +252,9 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
 
 
 def check_reel(exe: str, argv: list[str], agent: str | None):
-    is_reel = exe == "reel" or (exe.startswith("python") and any(a.replace("\\", "/").endswith("engine/reel/cli.py")
-                                                                 for a in argv[1:2]))
+    # `python -B .../engine/reel/cli.py ...` (interpreter flags before the script) is the same as `reel`
+    is_reel = exe == "reel" or (exe.startswith("python") and any(a.strip("'\"").replace("\\", "/").endswith("engine/reel/cli.py")
+                                                                 for a in argv[1:4]))
     if is_reel:
         sub = next((a for a in argv[1:] if not a.startswith("-") and not a.endswith("cli.py")
                     and argv[argv.index(a) - 1] not in GLOBAL_VALUE_OPTS), None)

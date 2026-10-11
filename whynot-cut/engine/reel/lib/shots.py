@@ -237,7 +237,8 @@ def frame_shots(shots: list, speakers: dict | None, src_w: int, src_h: int, seq_
                     "center": min(faces, key=lambda f: abs(f[0] - 0.5))[0]}
         pieces, t = [], a
         for tr in turns:                                   # who speaks when, inside this shot
-            ta, tb = max(a, tr["start_ms"]), min(b, tr["end_ms"])
+            # overlapping turns (crosstalk): the later one starts where the earlier ends, so pieces never overlap
+            ta, tb = max(a, tr["start_ms"], t), min(b, tr["end_ms"])
             if tb <= ta:
                 continue
             if ta > t:

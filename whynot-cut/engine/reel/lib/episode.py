@@ -76,6 +76,9 @@ def parse_sheet(text: str) -> dict:
         for k, v in list(out.items()):
             if v == []:
                 out[k] = ""
+        for k in ("avoid", "links"):            # always lists, whether written as `key: x`, `[a, b]` or `- item`
+            if k in out and not isinstance(out[k], list):
+                out[k] = [out[k]] if str(out[k]).strip() else []
         body = m.group(2)
     out["_notes"] = body.strip()
     out["_text"] = text
@@ -88,8 +91,9 @@ def episode_id_for(path: Path) -> str:
     letters (Arabic) get a short hash so two Arabic names never collide (slug drops them)."""
     stem = unicodedata.normalize("NFC", Path(path).stem)
     s = slug(stem)
-    if not re.search(r"[^\x00-\x7F]", stem):
+    if s != "VIDEO" and not re.search(r"[^\x00-\x7F]", stem):
         return s
+    # letters slug() drops (Arabic) or no letters at all ("###"): a short hash keeps two such names apart
     h = hashlib.sha1(stem.encode("utf-8")).hexdigest()[:6].upper()
     return f"EP_{s}_{h}" if s not in ("", "VIDEO") else f"EP_{h}"
 
@@ -130,7 +134,14 @@ def list_episodes(root: Path, refresh: bool = False) -> list[dict]:
         out.append({"episode_id": eid, "file": f["path"], "rel": f["rel"], "size_mb": round(f["size_bytes"] / 1e6, 1),
                     "sheet": sheets.get((str(Path(f["rel"]).parent), Path(f["rel"]).stem.lower())),
                     "state": _episode_state(ep), "project": str(ep.project)})
-    return sorted(out, key=lambda e: e["rel"])
+    out.sort(key=lambda e: e["rel"])
+    ids = [e["episode_id"] for e in out]
+    for e in out:                 # EP12.mp4 + EP12.mov share one id: the first file wins, say so (rename one)
+        if ids.count(e["episode_id"]) > 1:
+            same = [x["rel"] for x in out if x["episode_id"] == e["episode_id"]]
+            e["warning"] = (f"duplicate episode id {e['episode_id']}: {', '.join(same)} — rename one; until then "
+                            f"--episode {e['episode_id']} means {same[0]}")
+    return out
 
 
 def find_episode(root: Path, episode_id: str) -> dict:
@@ -410,10 +421,11 @@ def transcribe_episode(ep: EpisodePaths, model_size: str = "large-v3", language:
     total_ms = int(len(audio) * 1000 / 16000)
     cfg = podcast_cfg()
     chunk_ms = int(chunk_ms or cfg.get("chunk_minutes", 10) * 60000)
-    if not plan or plan.get("fingerprint") != fp or plan.get("chunk_ms") != chunk_ms or plan.get("total_ms") != total_ms:
+    if not plan or plan.get("fingerprint") != fp or plan.get("chunk_ms") != chunk_ms or plan.get("total_ms") != total_ms \
+            or (language and plan.get("language") != language):   # an explicit new language re-decodes everything
         for f in cdir.glob("chunk_*.json"):
             f.unlink()
-        plan = {"fingerprint": fp, "chunk_ms": chunk_ms, "total_ms": total_ms,
+        plan = {"fingerprint": fp, "chunk_ms": chunk_ms, "total_ms": total_ms, "language": language,
                 "chunks": plan_chunks(_energy_db(audio), 50, total_ms, chunk_ms), "created": now_iso()}
         write_json(cdir / "plan.json", plan)
     vad = bool(cfg.get("episode_vad", True))
