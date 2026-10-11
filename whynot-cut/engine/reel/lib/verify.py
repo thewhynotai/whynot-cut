@@ -13,6 +13,7 @@ QC requires a PASS verdict newer than the newest AE render / PSD.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .common import seq_fps, still_category, Paths, ffmpeg_exe, frame_to_tc, now_iso, read_json, run, write_json, write_text
@@ -55,16 +56,44 @@ def newest_render_mtime(paths: Paths) -> float:
     return max([_media_time(paths, m) for m in _rendered_media(paths)] or [0.0])
 
 
+# What Premiere rewrites on any save, edit or not (measured on 26.5 by saving an untouched project): the save stamp, ID
+# counters, empty ID nodes and the playhead. A signature without them changes only when the timeline does.
+_VOLATILE = [r"<MZ\.BuildVersion\.Modified>[^<]*</MZ\.BuildVersion\.Modified>", r"<NextID>\d+</NextID>",
+             r"<MasterClipChangeVersion>\d+</MasterClipChangeVersion>", r"<MZ\.EditLine>-?\d+</MZ\.EditLine>",
+             r"<Node Version=\"1\">\s*<ID>\d+</ID>\s*</Node>"]
+
+
+def prproj_signature(path: Path) -> str | None:
+    """sha1 of the project's XML without Premiere's save-time bookkeeping (None if unreadable)."""
+    import gzip
+    import hashlib
+    try:
+        with gzip.open(path) as f:
+            xml = f.read().decode("utf-8", "replace")
+    except (OSError, EOFError):
+        return None
+    for pat in _VOLATILE:
+        xml = re.sub(pat, "", xml)
+    return hashlib.sha1(re.sub(r"\s+", " ", xml).encode("utf-8")).hexdigest()
+
+
 def editor_modified(paths: Paths) -> dict | None:
-    """The .prproj was saved after the pipeline built it -> the editor has been working in it."""
+    """The .prproj was saved after the pipeline built it AND its content differs from what the pipeline saved -> the
+    editor has been working in it. A save with no change (Premiere saving an open project when another one is built,
+    or its auto-save) only moves the file time: seen live, it blocked a rebuild as "editor changes"."""
     import datetime as _dt
+    rec = read_json(paths.p("07_premiere/ppro-build-result.json"), {}) or {}
     for m in paths.p("07_premiere/project").glob("*.prproj"):
         if m.name.startswith("._") or "_prev_" in m.name:
             continue
         bt = prproj_build_time(paths, m)
         if bt is not None and m.stat().st_mtime > bt + 120:
+            sig = rec.get("content_signature")
+            if sig and prproj_signature(m) == sig:
+                continue   # saved, not edited
             f = lambda t: _dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
-            return {"project": str(m), "built_at": f(bt), "edited_at": f(m.stat().st_mtime)}
+            return {"project": str(m), "built_at": f(bt), "edited_at": f(m.stat().st_mtime),
+                    "content": "changed" if sig else "unknown (built before content signatures)"}
     return None
 
 

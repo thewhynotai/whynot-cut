@@ -330,10 +330,26 @@ NHPP.actions.clip_components = function (d) {
     return {clip: clip.name, components: comps};
 };
 
+NHPP.activateProject = function (path) {
+    // several projects can be open (one per reel): make the one at `path` the active project (opening it if needed)
+    var want = String(path).replace(/\//g, "\\").toLowerCase();
+    if (app.project && String(app.project.path).replace(/\//g, "\\").toLowerCase() === want) { return true; }
+    for (var i = 0; i < app.projects.numProjects; i++) {
+        var pp = String(app.projects[i].path);
+        if (pp.replace(/\//g, "\\").toLowerCase() === want) { return app.openDocument(pp); }
+    }
+    return app.openDocument(String(path));
+};
+
 NHPP.actions.export_frames = function (d) {
     // Premiere renders frames of ITS OWN timeline -> visual evidence of the real result
+    if (d.project_path) { NHPP.activateProject(d.project_path); }
     app.enableQE();
     var seq = NHPP.findSeq(d.sequence_name);
+    if (!seq) {
+        throw new Error("sequence " + d.sequence_name + " not found in the active project " +
+                        (app.project ? app.project.path : "(none)"));
+    }
     app.project.openSequence(seq.sequenceID);
     var qs = qe.project.getActiveSequence();
     var out = [];

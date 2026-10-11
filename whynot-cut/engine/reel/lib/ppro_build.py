@@ -226,6 +226,8 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
             if rec:
                 rec["prproj_mtime"] = prproj.stat().st_mtime
                 rec["closed_by_pipeline_at"] = now_iso()
+                from .verify import prproj_signature
+                rec["content_signature"] = prproj_signature(prproj)
                 write_json(paths.p("07_premiere/ppro-build-result.json"), rec)
     data = job_data(paths, overwrite, stage_media=True)
     if data["_missing"]:
@@ -260,6 +262,10 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
            "premiere_error": resp.get("error"), "previous_version_backup": str(backup) if backup else None,
            "closed_previous": (closed or {}).get("response"),
            "result": res, "at": now_iso(), "prproj_mtime": prproj.stat().st_mtime if prproj.exists() else None}
+    from .verify import prproj_signature
+    # what the pipeline saved: a later save that only moves the file time (Premiere saving open projects, auto-save)
+    # is not an editor change (verify.editor_modified)
+    out["content_signature"] = prproj_signature(prproj) if prproj.exists() else None
     write_json(paths.p("07_premiere/ppro-build-result.json"), out)
     return out
 
@@ -289,7 +295,9 @@ def export_frames(paths: Paths, times: list[float] | None = None) -> dict:
     od = paths.p(f"08_quality_control/premiere_frames/run-{_t.strftime('%Y%m%d-%H%M%S')}")
     od.mkdir(parents=True, exist_ok=True)
     t0 = _t.time()
-    r = submit("export_frames", {"sequence_name": f"{paths.video_id}_{project_prefix()}_EDIT", "times": times, "out_dir": str(od)}, timeout=600)
+    prj = paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")
+    r = submit("export_frames", {"sequence_name": f"{paths.video_id}_{project_prefix()}_EDIT", "times": times, "out_dir": str(od),
+                                 "project_path": str(prj) if prj.exists() else None}, timeout=600)
     frames = sorted(f for f in od.glob("*.png") if not f.name.startswith("._") and f.stat().st_mtime >= t0 - 1)
     sheet = None
     if frames:

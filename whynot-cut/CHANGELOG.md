@@ -63,6 +63,15 @@ plus the episode's publishing package. One plugin: after Gate 0 a reel is an ord
   deterministic Whisper readings (temperature 0) of the uncut and the cut audio, per chunk, instead of the corrected
   transcript. Coverage on a clean joke went from an "inconclusive" 0.82 to 1.0; on R02 0.90 → 0.945.
 - *Speed.* G58 Reference edits are analysed once per client (cache), reused by every reel (5 s → 0.5 s).
+- *Premiere with several reels open.*
+  - G59 Captions over a card's bright blurred fill get the translucent box even for plain-caption clients; together
+    with the podcast session's card bands, they now sit above the card instead of on its text.
+  - G60 Building one reel made Premiere save another open reel's project, and that reel's next rebuild was refused as
+    "editor changes". Premiere's auto-save does the same. Editor changes are now judged by a content signature (the
+    project XML without Premiere's save stamp, ID counters and playhead, measured on an untouched re-save), not by
+    the file time.
+  - G61 `ppro-frames` looked for the sequence only in the active project; it now activates the reel's own project
+    first.
 - R05 (52 s, 9:16, punch-ins on the speeds, the joke's pauses kept, wide shot whole) and R02 rebuilt: QC ok,
   READY_FOR_HUMAN_EDITOR. 186 tests.
 

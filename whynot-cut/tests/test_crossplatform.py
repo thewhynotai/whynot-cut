@@ -1048,6 +1048,34 @@ class TestClientPlanRules(unittest.TestCase):
         self.assertTrue(over and all(c.get("bar") for c in over), over)      # boxed over the bright blur
         self.assertTrue(away and not any(c.get("bar") for c in away), away)  # the client's plain style elsewhere
 
+    def test_untouched_save_is_not_an_editor_change(self):
+        import gzip
+        import time as _time
+        from lib.common import Paths, write_json
+        from lib.verify import editor_modified, prproj_signature
+        xml = ('<Project><MZ.BuildVersion.Modified>26.5 - {t}</MZ.BuildVersion.Modified><NextID>{n}</NextID>'
+               '<MasterClipChangeVersion>{v}</MasterClipChangeVersion>{nodes}<MZ.EditLine>{e}</MZ.EditLine>'
+               '<ClipItem start="{s}"/></Project>')
+        with tempfile.TemporaryDirectory() as t:
+            p = Paths(Path(t), "R05")
+            p.ensure_project()
+            prj = p.p("07_premiere/project/R05_RE_EDIT.prproj")
+            prj.parent.mkdir(parents=True, exist_ok=True)
+            write = lambda **k: prj.write_bytes(gzip.compress(xml.format(**k).encode("utf-8")))
+            write(t="4:06", n=1000001, v=2144, nodes="", e=0, s=0)
+            built = prj.stat().st_mtime
+            write_json(p.p("07_premiere/ppro-build-result.json"), {"project": str(prj), "prproj_mtime": built,
+                                                                   "content_signature": prproj_signature(prj)})
+            # Premiere re-saves it (another reel was built, or auto-save): stamp, ids, empty nodes, playhead change
+            write(t="4:09", n=1000004, v=2145, nodes='<Node Version="1">\n<ID>1000003</ID>\n</Node>', e=12018513024000, s=0)
+            os.utime(prj, (built + 300, built + 300))
+            self.assertIsNone(editor_modified(p))
+            write(t="4:12", n=1000006, v=2146, nodes="", e=5, s=48)          # the editor moved a clip
+            os.utime(prj, (built + 600, built + 600))
+            em = editor_modified(p)
+            self.assertIsNotNone(em)
+            self.assertEqual(em["content"], "changed")
+
     def test_bridge_sets_grain_by_intensity_or_amount(self):
         jsx = (SK / "templates/premiere/nh_ppro_lib.jsx").read_text(encoding="utf-8")
         self.assertIn('NHPP.prop(nc, "Intensity") || NHPP.prop(nc, "Amount of Noise")', jsx)   # Premiere 26 default is 50
