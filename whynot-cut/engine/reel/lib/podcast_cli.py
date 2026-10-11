@@ -28,6 +28,7 @@ ARGS: dict = {
         (("--resync",), {"action": "store_true", "help": "re-slice selected reels' transcripts after episode corrections"}),
     ],
     "music": [(("--list",), {"action": "store_true", "help": "list the licensed tracks in data/Music with mood tags"})],
+    "publish-check": [],
 }
 NO_EPISODE = {"episodes", "music"}
 
@@ -121,6 +122,15 @@ def cmd_music(a):
          "how": "pick a track whose moods fit the reel's recipe and set edit-decisions music.file (licensed tracks only; "
                 "no track fits -> leave music for the editor)" if lib else
                 "no licensed music in data/Music: the music track stays for the editor (Needs you: music)"})
+
+
+def cmd_publish_check(a):
+    from .publish import check
+    ep = EP(a)
+    r = check(ep)
+    r["next"] = (f"show the editor {ep.p('publish/youtube.md')} and publish/reels/*.md (they post it themselves)"
+                 if r["ok"] else "fix publish/publish.json or publish/reels/*.json and run publish-check again")
+    out(r)
 
 
 def _chunks_missing(ep) -> bool:

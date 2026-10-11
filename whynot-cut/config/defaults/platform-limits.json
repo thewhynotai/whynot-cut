@@ -1,0 +1,18 @@
+{
+  "note": "Publishing limits checked by `reel publish-check`. Platforms change their rules: update the numbers here (or in a client profile) without touching code.",
+  "youtube": {
+    "titles_min": 3,
+    "title_max": 100,
+    "title_warn": 70,
+    "description_max": 5000,
+    "tags_total_max": 500,
+    "hashtags_max": 15,
+    "chapters_min": 3,
+    "chapter_min_s": 10,
+    "forbidden_chars": "<>"
+  },
+  "instagram": {"caption_max": 2200, "hashtags_max": 30},
+  "tiktok": {"caption_max": 2200},
+  "shorts": {"title_max": 100},
+  "thumbnail": {"width": 1280, "height": 720, "max_bytes": 2000000, "text_words_warn": 5}
+}

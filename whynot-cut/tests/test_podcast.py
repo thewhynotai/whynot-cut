@@ -1134,5 +1134,143 @@ class TestNewTemplates(unittest.TestCase):
         self.assertTrue(any("flagged" in e for e in r["errors"]), r["errors"])
 
 
+PUB_SHEET = SHEET.replace("https://www.instagram.com/sara.ceo/", "https://www.x.com/a.")
+
+
+def good_pub():
+    return {"episode_id": "EP12", "language": "ar",
+            "youtube": {"titles": ["قصة سارة مع أول شركة", "ازاي خسرت كل حاجة وبدأت تاني", "سارة: الفشل علمني"],
+                        "description": {"hook": "سارة بتحكي إزاي خسرت أول شركة.", "summary": "حلقة عن الفشل والبداية من جديد.",
+                                        "guest": "ضيفة الحلقة: Sara — CEO", "links": [{"label": "Sara", "url": "https://www.x.com/a"}],
+                                        "sponsor": "", "cta": "اشترك في القناة", "hashtags": ["#بودكاست", "#قصة_نجاح"]},
+                        "tags": ["بودكاست", "ريادة أعمال", "قصة نجاح"]},
+            "thumbnail": {"designs": []}, "approval_required": []}
+
+
+def good_reel():
+    return {"reel_id": "EP12_R01", "instagram": {"caption": "«انا قلت ان الشركه» — سارة عن أول خسارة", "hashtags": ["#بودكاست"]},
+            "tiktok": {"caption": "سارة عن أول خسارة", "hashtags": ["#بودكاست"]},
+            "shorts": {"title": "سارة عن أول خسارة", "description": "من الحلقة 12"}, "approval_required": []}
+
+
+class TestPublish(unittest.TestCase):
+    def setUp(self):
+        from lib.episode import EpisodePaths
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root = self.tmp / "C"
+        (self.root / "assets").mkdir(parents=True)
+        (self.root / "data").mkdir()
+        common.set_context(self.root)
+        self.ep = EpisodePaths(self.root, "EP12")
+        synthetic_episode_transcript(self.ep)
+        from lib.episode import parse_sheet
+        write_json(self.ep.p("00_inputs/episode.json"), {"episode_id": "EP12", "duration_ms": 121000, "sheet_text": PUB_SHEET,
+                                                         "sheet": {k: v for k, v in parse_sheet(PUB_SHEET).items() if k != "_text"}})
+        write_json(self.ep.p("01_analysis/topics.json"), {"topics": [
+            {"id": "T01", "start": "00:00:00.000", "end": "00:00:40.000", "title": "البداية"},
+            {"id": "T02", "start": "00:00:40.000", "end": "00:01:20.000", "title": "أول خسارة"},
+            {"id": "T03", "start": "00:01:20.000", "end": "00:02:01.000", "title": "البداية من جديد"}]})
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def run_check(self, pub=None, reel=None):
+        from lib.publish import check
+        write_json(self.ep.p("publish/publish.json"), pub or good_pub())
+        write_json(self.ep.p("publish/reels/EP12_R01.json"), reel or good_reel())
+        return check(self.ep)
+
+    def test_valid_package_renders_files(self):
+        r = self.run_check()
+        self.assertTrue(r["ok"], r["errors"])
+        ch = self.ep.p("publish/chapters.txt").read_text(encoding="utf-8").splitlines()
+        self.assertTrue(ch[0].startswith("00:00 "), ch)
+        self.assertEqual(ch[1], "00:40 أول خسارة")
+        md = self.ep.p("publish/youtube.md").read_text(encoding="utf-8")
+        for t in good_pub()["youtube"]["titles"]:
+            self.assertIn(t, md)
+        self.assertIn("https://www.x.com/a", md)
+        self.assertIn("بودكاست", self.ep.p("publish/tags.txt").read_text(encoding="utf-8"))
+        self.assertTrue(self.ep.p("publish/EP12.srt").exists())
+        self.assertTrue(self.ep.p("publish/reels/EP12_R01.md").exists())
+        self.assertTrue(read_json(self.ep.p("publish/publish-validation.json"))["ok"])
+
+    def test_title_limits(self):
+        p = good_pub()
+        p["youtube"]["titles"][0] = "ا" * 101
+        self.assertTrue(any("title" in e and "100" in e for e in self.run_check(p)["errors"]))
+        p = good_pub()
+        p["youtube"]["titles"] = p["youtube"]["titles"][:2]
+        self.assertTrue(any("titles" in e for e in self.run_check(p)["errors"]))
+        p = good_pub()
+        p["youtube"]["titles"][0] = "ا" * 80
+        r = self.run_check(p)
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertTrue(any("70" in w for w in r["warnings"]))
+
+    def test_angle_brackets_rejected(self):
+        p = good_pub()
+        p["youtube"]["description"]["summary"] = "حلقة <مهمة>"
+        self.assertTrue(any("<" in e for e in self.run_check(p)["errors"]))
+
+    def test_description_5000(self):
+        p = good_pub()
+        p["youtube"]["description"]["summary"] = "كلام " * 1100
+        self.assertTrue(any("5000" in e for e in self.run_check(p)["errors"]))
+
+    def test_tags_500(self):
+        from lib.publish import count_tags_chars
+        self.assertEqual(count_tags_chars(["ab", "c d"]), 2 + 1 + (3 + 2))     # comma + quotes around a spaced tag
+        p = good_pub()
+        p["youtube"]["tags"] = ["وسم طويل جدا"] * 40
+        self.assertTrue(any("500" in e for e in self.run_check(p)["errors"]))
+
+    def test_hashtags_15(self):
+        p = good_pub()
+        p["youtube"]["description"]["hashtags"] = [f"#وسم{i}" for i in range(16)]
+        self.assertTrue(any("hashtag" in e for e in self.run_check(p)["errors"]))
+        p = good_pub()
+        p["youtube"]["description"]["hashtags"] = ["#قصة نجاح"]
+        self.assertTrue(any("hashtag" in e for e in self.run_check(p)["errors"]))
+
+    def test_chapter_rules(self):
+        p = good_pub()
+        p["youtube"]["chapters"] = [{"at": "00:05", "title": "a"}, {"at": "00:40", "title": "b"}, {"at": "01:20", "title": "c"}]
+        self.assertTrue(any("00:00" in e for e in self.run_check(p)["errors"]))
+        p["youtube"]["chapters"] = [{"at": "00:00", "title": "a"}, {"at": "00:40", "title": "b"}]
+        self.assertTrue(any("3 chapters" in e for e in self.run_check(p)["errors"]))
+        p["youtube"]["chapters"] = [{"at": "00:00", "title": "a"}, {"at": "00:05", "title": "b"}, {"at": "01:20", "title": "c"}]
+        self.assertTrue(any("10 s" in e for e in self.run_check(p)["errors"]))
+
+    def test_invented_link_rejected(self):
+        p = good_pub()
+        p["youtube"]["description"]["links"].append({"label": "x", "url": "https://instagram.com/invented"})
+        self.assertTrue(any("instagram.com/invented" in e for e in self.run_check(p)["errors"]))
+
+    def test_link_normalisation(self):
+        from lib.publish import norm_url
+        self.assertEqual(norm_url("https://www.X.com/a."), norm_url("x.com/a/"))
+        p = good_pub()
+        p["youtube"]["description"]["links"] = [{"label": "Sara", "url": "x.com/a/"}]
+        r = self.run_check(p)
+        self.assertTrue(r["ok"], r["errors"])
+
+    def test_quote_must_exist(self):
+        p = good_pub()
+        p["youtube"]["titles"][0] = "«أنا قلت إن الشركة» — سارة"
+        self.assertTrue(self.run_check(p)["ok"])
+        p["youtube"]["titles"][0] = "«الفلوس مش كل حاجة» — سارة"
+        self.assertTrue(any("quote" in e for e in self.run_check(p)["errors"]))
+
+    def test_reel_caption_limits(self):
+        reel = good_reel()
+        reel["instagram"]["caption"] = "ا" * 2300
+        self.assertTrue(any("instagram" in e and "2200" in e for e in self.run_check(reel=reel)["errors"]))
+        reel = good_reel()
+        reel["instagram"]["hashtags"] = [f"#و{i}" for i in range(31)]
+        self.assertTrue(any("instagram" in e and "hashtag" in e for e in self.run_check(reel=reel)["errors"]))
+
+
 if __name__ == "__main__":
     unittest.main()
