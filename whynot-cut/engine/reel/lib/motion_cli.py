@@ -9,8 +9,16 @@ import json
 
 ARGS: dict = {
     "ae-status": [],
+    "ae-probe": [
+        (("--record",), {"choices": ["ok", "fail"], "default": None,
+                         "help": "record YOUR verdict after viewing every probe frame"}),
+        (("--word-order",), {"choices": ["logical", "visual"], "default": None,
+                             "help": "what word_reveal_20 showed: logical = only the first spoken word (rightmost in RTL)"}),
+        (("--notes",), {"default": "", "help": "what the frames showed"}),
+        (("--timeout",), {"type": int, "default": 600}),
+    ],
 }
-NO_ID = {"ae-status"}
+NO_ID = {"ae-status", "ae-probe"}
 
 
 def add_args(name: str, sp) -> None:
@@ -45,6 +53,22 @@ def cmd_ae_status(a):
         nxt = ("start After Effects (the bridge starts by itself). Installed while AE was open? Quit and reopen it. "
                "Not installed yet: `reel ppro-install` (one bundle for Premiere and After Effects)")
     out({"bridge": st, "debug_mode_ok": ok, "next": nxt})
+
+
+def cmd_ae_probe(a):
+    from . import ae_probe
+    if a.record:
+        if not a.word_order:
+            raise SystemExit("--record needs --word-order logical|visual (what the word_reveal frames showed)")
+        out(ae_probe.record(a.record, a.notes, a.word_order))
+        return
+    fonts = None
+    if getattr(a, "root", None):                 # probe with the client's brand fonts when a client is given
+        from .ae_builder import fonts_map
+        from .common import Paths
+        fonts = {"headline": fonts_map(Paths(a.root).client_db).get("headline")}
+    r = ae_probe.run_probe(fonts, timeout=a.timeout)
+    out({k: v for k, v in r.items() if k != "readback"})
 
 
 def dispatch(a) -> bool:

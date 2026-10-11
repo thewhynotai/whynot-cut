@@ -94,3 +94,56 @@ NHAE.run = function (dataPath) {
     }
     return out;
 };
+
+/* Arabic capability probe (spec §4.6): comps laid end to end in PROBE_ALL for one aerender run */
+NHAE.actions.probe_text = function (d) {
+    var job = d.job, info = NHAE.projectInfo();
+    if (info.dirty === true) { return {ok: false, reason: "dirty", project: info.project}; }
+    app.newProject();
+    var fps = job.fps, n = job.frames, out = {ae_version: app.version, comps: [], om_templates: []};
+    var all = app.project.items.addComp("PROBE_ALL", job.w, job.h, 1, n * job.comps.length / fps, fps);
+    for (var i = 0; i < job.comps.length; i++) {
+        var s = job.comps[i], r = {name: s.name, ok: true};
+        var c = app.project.items.addComp(s.name, job.w, job.h, 1, n / fps, fps);
+        try {
+            c.layers.addSolid([0.08, 0.1, 0.12], "BG", job.w, job.h, 1);
+            if (s.shapes) {
+                var sh = NHM.shapeLayer(c, "icon", s.shapes, {stroke: s.stroke, color: [1, 1, 1]});
+                sh.layer.property("ADBE Transform Group").property("ADBE Position").setValue([job.w / 2, job.h / 2]);
+                sh.layer.property("ADBE Transform Group").property("ADBE Scale").setValue([300, 300]);
+                var te = sh.trim.property("ADBE Vector Trim End");
+                te.setValueAtTime(0, 0);
+                te.setValueAtTime(30 * c.frameDuration, 100);
+                r.layers = c.numLayers;
+            } else {
+                var L = c.layers.addText(s.text);
+                L.name = "text";
+                var dr = NHM.styleText(L, {text: s.text, font: s.font, size: s.size, rtl: true, justify: "center"});
+                L.property("ADBE Transform Group").property("ADBE Position").setValue([job.w / 2, job.h / 2]);
+                if (s.cues) {
+                    var secs = [];
+                    for (var k = 0; k < s.cues.length; k++) { secs.push(s.cues[k] * c.frameDuration); }
+                    NHM.revealWords(L, secs, 3, 0.18);
+                }
+                if (s.emphasis) { NHM.emphasisWords(L, s.emphasis, [1, 0.15, 0.1]); }
+                var rt = NHM.readText(L);
+                r.text = rt.text; r.composer = rt.composer; r.font_ps = rt.font_ps; r.requested_ps = s.font;
+                r.substitute = rt.substitute; r.direction_textdocument = dr.direction_textdocument;
+                r.direction_paragraph_range = dr.direction_paragraph_range;
+                if (dr.paragraph_error) { r.paragraph_error = dr.paragraph_error; }
+                r.rect = NHM.compRect(L, (n - 1) * c.frameDuration);
+            }
+        } catch (e) { r.ok = false; r.error = String(e); r.line = e.line; }
+        var lay = all.layers.add(c);
+        lay.startTime = i * n * c.frameDuration;
+        out.comps.push(r);
+    }
+    try {
+        var rq = app.project.renderQueue.items.add(all);
+        out.om_templates = rq.outputModule(1).templates;
+        rq.remove();
+    } catch (e2) { out.om_error = String(e2); }
+    app.project.save(new File(job.aep_path));
+    out.saved = job.aep_path;
+    return out;
+};

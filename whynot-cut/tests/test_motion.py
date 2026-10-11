@@ -167,5 +167,83 @@ class TestBridge(unittest.TestCase):
             assert_js_syntax(self, AE_TPL / name)
 
 
+class TestProbe(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_probe_job_shape(self):
+        from lib import ae_probe
+        job = ae_probe.probe_job({"headline": "ArialMT"})
+        names = [c["name"] for c in job["comps"]]
+        self.assertEqual(names, ["arabic_rtl", "word_reveal", "emphasis", "mixed", "brand_font", "icon"])
+        wr = next(c for c in job["comps"] if c["name"] == "word_reveal")
+        self.assertEqual(wr["cues"], [15, 30, 45, 60])
+        self.assertTrue(wr["text"].startswith("واحد"))          # logical order, never pre-reversed
+        self.assertEqual((job["w"], job["h"], job["fps"], job["frames"]), (1080, 1920, 30, 90))
+        self.assertEqual(json.loads(json.dumps(job, ensure_ascii=True)), job)
+
+    def test_capabilities_from_readback(self):
+        from lib import ae_probe
+
+        def rb(td, pr, composer="UNIVERSAL", templates=("Lossless", "High Quality", "Apple ProRes 422 HQ")):
+            return {"ae_version": "26.0", "om_templates": list(templates), "comps": [
+                {"name": "arabic_rtl", "ok": True, "composer": composer, "direction_textdocument": td,
+                 "direction_paragraph_range": pr, "font_ps": "ArialMT", "substitute": False},
+                {"name": "emphasis", "ok": True}, {"name": "brand_font", "ok": True, "font_ps": "ArialMT",
+                                                    "requested_ps": "ArialMT", "substitute": False}]}
+        self.assertEqual(ae_probe.capabilities_from(rb("RTL", "RTL"), "High Quality")["rtl_direction"], "textdocument")
+        self.assertEqual(ae_probe.capabilities_from(rb("LTR", "RTL"), "High Quality")["rtl_direction"], "paragraph_range")
+        self.assertIs(ae_probe.capabilities_from(rb("LTR", "LTR"), "High Quality")["rtl_direction"], False)
+        caps = ae_probe.capabilities_from(rb("RTL", "RTL"), "High Quality")
+        self.assertTrue(caps["composer_universal"])
+        self.assertTrue(caps["fontobject"])
+        self.assertTrue(caps["emphasis_animator"])
+        self.assertEqual(caps["om_template"], "High Quality")
+        self.assertFalse(ae_probe.capabilities_from(rb("RTL", "RTL", composer="LATIN"), "x")["composer_universal"])
+        self.assertEqual(ae_probe.capabilities_from(rb("RTL", "RTL", templates=("Lossless", "Apple ProRes 422 HQ")),
+                                                    "High Quality")["om_template"], "Apple ProRes 422 HQ")
+
+    def test_record_and_verdict(self):
+        from lib import ae_probe
+        old = ae_probe.CAPS
+        ae_probe.CAPS = self.tmp / "ae-capabilities.json"
+        try:
+            with self.assertRaises(SystemExit):
+                ae_probe.record("ok", "n", "logical")             # nothing probed yet
+            write_json(ae_probe.CAPS, {"ae_version": "26.0.1", "measured": {}, "verdict": None})
+            r = ae_probe.record("ok", "joined, RTL", "logical")
+            self.assertTrue(r["word_index_logical"])
+            self.assertTrue(ae_probe.verdict_ok("26.0.1"))
+            self.assertFalse(ae_probe.verdict_ok("99.0"))
+            ae_probe.record("fail", "disconnected", "visual")
+            self.assertFalse(ae_probe.verdict_ok("26.0.1"))
+            with self.assertRaises(ValueError):
+                ae_probe.record("maybe", "", "logical")
+        finally:
+            ae_probe.CAPS = old
+
+    def test_aerender_cmd_paths(self):
+        from lib import ae_render
+        aep = Path("D:/0 Work/عميل/x y.aep")
+        cmd = ae_render.aerender_cmd("aerender.exe", aep, "MAIN_X", self.tmp / "o u.mov", "Best Settings",
+                                     "High Quality", 10, 20)
+        self.assertIn(str(aep), cmd)
+        for a, b in (("-project", str(aep)), ("-comp", "MAIN_X"), ("-s", "10"), ("-e", "20"),
+                     ("-RStemplate", "Best Settings"), ("-OMtemplate", "High Quality"), ("-output", str(self.tmp / "o u.mov"))):
+            self.assertEqual(cmd[cmd.index(a) + 1], b)
+        self.assertNotIn("-s", ae_render.aerender_cmd("aerender.exe", aep, "C", self.tmp / "o.mov", "r", "o"))
+
+    def test_extract_frames(self):
+        from lib import ae_render
+        v = self.tmp / "v.mp4"
+        ff("-f", "lavfi", "-i", "testsrc2=s=320x240:r=30:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(v))
+        outs = ae_render.extract_frames(v, [0, 30, 59], 30, self.tmp / "fr")
+        self.assertEqual(len(outs), 3)
+        self.assertTrue(all(p.exists() and p.suffix == ".png" for p in outs))
+
+
 if __name__ == "__main__":
     unittest.main()
