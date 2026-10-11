@@ -528,3 +528,88 @@ NHM.build = function (job) {
     NHM.report.ae_version = app.version;
     return NHM.report;
 };
+
+/* ---------------------------------------------------------------- the other scene types
+   The engine already placed every element (direction included); these add each type's own decoration. */
+NHM.firstText = function (comp, prefix) {
+    for (var i = 1; i <= comp.numLayers; i++) {
+        var L = comp.layer(i);
+        if (L instanceof TextLayer && L.name.substr(0, prefix.length) === prefix) { return L; }
+    }
+    return null;
+};
+
+/* rounded card that follows a text layer's box (sourceRectAtTime), placed under it */
+NHM.cardBehind = function (comp, textLayer, name, rgb, opacity, pad) {
+    if (!textLayer) { return null; }
+    var tn = textLayer.name.replace(/"/g, "");
+    var card = NH.rect(comp, name, [600, 200], [comp.width / 2, comp.height / 2], {radius: 28, fill: rgb,
+        fillOpacity: opacity, sizeExpr: 'var r=thisComp.layer("' + tn + '").sourceRectAtTime(time,false);[r.width+' + (2 * pad) + ', r.height+' + (2 * pad) + ']'});
+    NHM.tg(card, "ADBE Position").expression = 'var L=thisComp.layer("' + tn + '");var r=L.sourceRectAtTime(time,false);L.toComp([r.left+r.width/2,r.top+r.height/2])';
+    NHM.tg(card, "ADBE Opacity").expression = 'thisComp.layer("' + tn + '").transform.opacity';
+    card.moveAfter(textLayer);
+    return card;
+};
+
+NHM.S.stat_counter = function (comp, scene) { return NHM.sceneBody(comp, scene); };
+NHM.S.icon_point = function (comp, scene) { return NHM.sceneBody(comp, scene); };
+NHM.S.list_steps = function (comp, scene) { return NHM.sceneBody(comp, scene); };
+NHM.S.illustration_scene = function (comp, scene) { return NHM.sceneBody(comp, scene); };
+NHM.S.outro = function (comp, scene) { return NHM.sceneBody(comp, scene); };
+
+NHM.S.comparison = function (comp, scene) {
+    var made = NHM.sceneBody(comp, scene);
+    var top = NHM.plan.safe.top + 120, bottom = comp.height - NHM.plan.safe.bottom - 220;
+    var r = NHM.shapeLayer(comp, scene.id + "_divider", [{vertices: [[comp.width / 2, top], [comp.width / 2, bottom]],
+        inTangents: [[0, 0], [0, 0]], outTangents: [[0, 0], [0, 0]], closed: false}],
+        {stroke: 3, color: NHM.plan.theme.text, colorExpr: NHM.colorExpr(NHM.plan.theme.text)});
+    NHM.keys(r.trim.property("ADBE Vector Trim End"), comp, [2, 14], [0, 100]);
+    NHM.tg(r.layer, "ADBE Opacity").setValue(40);
+    r.layer.moveToEnd();
+    return made;
+};
+
+NHM.S.timeline = function (comp, scene) {
+    var made = NHM.sceneBody(comp, scene), dots = [], i, el;
+    for (i = 0; i < scene.elements.length; i++) {
+        el = scene.elements[i];
+        if (el.kind === "dot") { dots.push(el); }
+    }
+    if (dots.length < 2) { return made; }
+    /* a traveller ring rides the line from point to point at their cues, entering from the reading start */
+    var start = scene.start_frame, tr = NH.ellipse(comp, scene.id + "_traveller", 54, [dots[0].x, dots[0].y], "Brand White", 4);
+    var pos = NHM.tg(tr, "ADBE Position"), fr = [Math.max(0, dots[0].appear_frame - start - 6)],
+        val = [[dots[0].x - NHM.plan.dir * 80, dots[0].y]];
+    for (i = 0; i < dots.length; i++) { fr.push(dots[i].appear_frame - start); val.push([dots[i].x, dots[i].y]); }
+    NHM.keys(pos, comp, fr, val);
+    NHM.keys(NHM.tg(tr, "ADBE Opacity"), comp, [fr[0], fr[0] + 4], [0, 100]);
+    return made;
+};
+
+NHM.S.quote_card = function (comp, scene) {
+    var made = NHM.sceneBody(comp, scene);
+    NHM.cardBehind(comp, NHM.firstText(comp, scene.id + "_text"), scene.id + "_card", NHM.plan.theme.text, 0.08, 56);
+    return made;
+};
+
+NHM.S.context_card = function (comp, scene) {
+    var made = NHM.sceneBody(comp, scene), L = NHM.firstText(comp, scene.id + "_text");
+    var card = NHM.cardBehind(comp, L, scene.id + "_pill", NHM.plan.theme.accent, 1, 40);
+    if (card && L) {
+        var td = L.property("ADBE Text Properties").property("ADBE Text Document");
+        try { td.expression = "text.sourceText.style.setFillColor(" + (NHM.colorExpr(NHM.plan.theme.bg) || "[1,1,1,1]") + ")"; } catch (e) {}
+    }
+    return made;
+};
+
+NHM.S.person_card = function (comp, scene) {
+    var made = NHM.sceneBody(comp, scene);
+    for (var i = 0; i < scene.elements.length; i++) {
+        var el = scene.elements[i];
+        if (el.kind === "image") {
+            var ring = NH.ellipse(comp, scene.id + "_ring", el.w + 16, [el.x, el.y], "Brand Teal", 6);
+            NHM.appear(comp, ring, (el.appear_frame || scene.start_frame + 4) - scene.start_frame + 2, false);
+        }
+    }
+    return made;
+};

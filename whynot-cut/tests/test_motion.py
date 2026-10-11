@@ -1156,5 +1156,39 @@ class TestMotionJSX(CompiledMotion):
         self.assertIn('reason: "dirty"', bridge)
 
 
+def jsx_fn(src: str, name: str) -> str:
+    """Body of `name = function` in the JSX source (up to the next top-level `NHM.` assignment)."""
+    a = src.index(name + " = function")
+    b = src.find("\nNHM.", a + 1)
+    return src[a:b if b > 0 else len(src)]
+
+
+class TestMotionScenesJSX(unittest.TestCase):
+    def test_every_scene_type_defined(self):
+        from lib.motion_script import SCENE_TYPES
+        src = nhm_code()
+        for t in SCENE_TYPES:
+            self.assertTrue(f"NHM.S.{t} = function" in src, t)
+
+    def test_icons_draw_on_and_round_caps(self):
+        src = nhm_code()
+        self.assertTrue("ADBE Vector Filter - Trim" in src)
+        self.assertTrue("ADBE Vector Stroke Line Cap" in src)
+        self.assertTrue("ADBE Vector Trim End" in jsx_fn(src, "NHM.iconEl"))
+
+    def test_counter_expression(self):
+        body = jsx_fn(nhm_code(), "NHM.counterEl")
+        self.assertTrue('"ADBE Text Document").expression' in body)
+        self.assertTrue("linear(time" in body)
+
+    def test_direction_from_plan(self):
+        src = nhm_code()
+        for fn in ("NHM.appear", "NHM.transition", "NHM.S.timeline"):
+            self.assertTrue("NHM.plan.dir" in jsx_fn(src, fn), fn)
+
+    def test_syntax(self):
+        assert_js_syntax(self, AE_TPL / "nh_motion_lib.jsx")
+
+
 if __name__ == "__main__":
     unittest.main()
