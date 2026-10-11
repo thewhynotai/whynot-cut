@@ -74,7 +74,7 @@ test('paths, commands and timecodes sit inside <bdi dir="ltr">', () => {
   inBdi(s.context.project_path as string);
   inBdi(s.approval!.flagged[0]!.tc);
   inBdi(s.qc[0]!.tc);
-  inBdi("reel doctor");
+  inBdi("reel doctor"); // also wrapped in a .cmd chip (own test below)
   inBdi(s.log[0]!.text);
 });
 
@@ -243,4 +243,73 @@ test("the showcase mock includes a 4:5 tile next to 9:16 ones", () => {
   assert.ok(s.qc.some((q) => !q.w && !q.h));
   const css = readFileSync(new URL("../styles/panel.css", import.meta.url), "utf8");
   assert.ok(css.includes(".qc-frame"));
+});
+
+// ---- narrow docks (live render in Premiere 26.5.2 UXP at ~350 px) ----
+
+const panelCss = () => readFileSync(new URL("../styles/panel.css", import.meta.url), "utf8");
+/** The declarations of the first rule whose selector is exactly `selector` (whitespace-insensitive). */
+function rule(css: string, selector: string): string {
+  const flat = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  let from = 0;
+  for (;;) {
+    const at = flat.indexOf(selector, from);
+    assert.ok(at >= 0, `no rule for ${selector}`);
+    const before = flat.slice(0, at).trimEnd();
+    const open = flat.indexOf("{", at);
+    const between = flat.slice(at + selector.length, open).trim();
+    // exact selector: starts a rule (after a closing brace or the file start) and is followed straight by the brace
+    if ((before === "" || before.endsWith("}")) && between === "") {
+      return flat.slice(open + 1, flat.indexOf("}", open)).replace(/\s+/g, " ");
+    }
+    from = at + 1;
+  }
+}
+
+test("header is three stacked rows: brand / client-item / pills (pills never inside the brand row)", () => {
+  for (const lang of ["en", "ar"] as const) {
+    for (const scenario of ["showcase", "idle"] as const) {
+      const html = render(sampleState(lang, scenario), stringsFor(lang), initialUi());
+      const hdr = /<header class="hdr">([\s\S]*?)<\/header>/.exec(html)![1]!;
+      const order = [...hdr.matchAll(/<div class="(hdr-title|hairline|who|pills)"/g)].map((m) => m[1]);
+      assert.deepEqual(order, ["hdr-title", "hairline", "who", "pills"]);
+      const title = /<div class="hdr-title">([\s\S]*?)<\/div>/.exec(hdr)![1]!;
+      assert.ok(!title.includes("pill") && !title.includes("who"), "brand row holds only monogram + wordmark");
+      assert.equal((hdr.match(/data-pill="/g) ?? []).length, 3);
+    }
+  }
+  const s = sampleState("en", "idle");
+  s.client = "";
+  assert.ok(render(s, EN, initialUi()).includes(`<div class="who">${EN["status.noclient"]}</div>`));
+});
+
+test("CSS: brand line never wraps; header and pills are explicit flex; pills wrap and are never clipped or ellipsized", () => {
+  const css = panelCss();
+  assert.match(rule(css, ".wordmark"), /white-space: nowrap/);
+  assert.match(rule(css, ".wordmark"), /flex: 0 0 auto/);
+  assert.match(rule(css, ".hdr-title"), /flex-wrap: nowrap/);
+  assert.match(rule(css, ".hdr"), /display: flex/);
+  assert.match(rule(css, ".hdr"), /flex-direction: column/);
+  assert.match(rule(css, ".who"), /width: 100%/);
+  assert.match(rule(css, ".pills"), /display: flex/);
+  assert.match(rule(css, ".pills"), /flex-wrap: wrap/);
+  assert.match(rule(css, ".pills"), /width: 100%/);
+  assert.match(rule(css, ".pill"), /flex: 0 0 auto/);
+  assert.match(rule(css, ".pill"), /max-width: 100%/);
+  assert.ok(!/text-overflow|overflow: hidden/.test(rule(css, ".pill")), "pill must not clip");
+  assert.ok(!/text-overflow\s*:\s*ellipsis/.test(css), "no ellipsis anywhere");
+  assert.match(rule(css, ".twn-rtl .pill"), /margin: 0 0 4px 6px/);
+});
+
+test("offline banner: reel doctor is a command chip with the bdi inside", () => {
+  const s = sampleState("ar", "idle");
+  s.connection.engine = "offline";
+  for (const [lang, t] of [["ar", AR], ["en", EN]] as const) {
+    s.language = lang;
+    const html = render(s, t, initialUi());
+    assert.ok(html.includes('<span class="cmd"><bdi dir="ltr">reel doctor</bdi></span>'));
+  }
+  const css = panelCss();
+  assert.match(rule(css, ".cmd"), /white-space: nowrap/);
+  assert.match(rule(css, ".cmd"), /font-family: Consolas/);
 });

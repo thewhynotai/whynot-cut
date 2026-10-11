@@ -79,7 +79,7 @@ function header(s: PanelState, t: Strings): string {
 function banners(s: PanelState, t: Strings, ui: UiState): string {
   let out = "";
   if (s.connection.engine === "offline") {
-    out += `<div class="banner banner-error" role="alert"><span class="banner-text"><strong>${esc(t["offline.title"])}</strong> ${esc(t["offline.hint"])} ${ltr("reel doctor")}</span></div>`;
+    out += `<div class="banner banner-error" role="alert"><span class="banner-text"><strong>${esc(t["offline.title"])}</strong> ${esc(t["offline.hint"])} <span class="cmd">${ltr("reel doctor")}</span></span></div>`;
   }
   if (ui.notice) {
     const n = ui.notice;

@@ -204,6 +204,7 @@ export class MockSource implements PanelDataSource {
   private subs = new Set<(s: PanelState) => void>();
   private lang: Language;
   private scenario: Scenario;
+  private engine: "connected" | "offline" = "connected";
 
   constructor(opts: MockOptions = {}) {
     this.lang = opts.language ?? "en";
@@ -227,17 +228,18 @@ export class MockSource implements PanelDataSource {
   /** Re-derives the current scenario in the other language (dev only: progress made by actions is reset). */
   setLanguage(lang: Language): void {
     this.lang = lang;
-    this.state = sampleState(lang, this.scenario);
+    this.state = this.fresh();
     this.emit();
   }
 
   setScenario(scenario: Scenario): void {
     this.scenario = scenario;
-    this.state = sampleState(this.lang, scenario);
+    this.state = this.fresh();
     this.emit();
   }
 
   setEngine(engine: "connected" | "offline"): void {
+    this.engine = engine;
     this.state = { ...this.state, connection: { ...this.state.connection, engine } };
     this.emit();
   }
@@ -350,6 +352,12 @@ export class MockSource implements PanelDataSource {
   }
 
   // ---- internals ----
+
+  /** The current scenario in the current language, keeping the engine toggle the dev page set. */
+  private fresh(): PanelState {
+    const s = sampleState(this.lang, this.scenario);
+    return { ...s, connection: { ...s.connection, engine: this.engine } };
+  }
 
   private line(level: LogLine["level"], text: string): LogLine {
     return { ts: new Date().toISOString().slice(11, 19), level, text };

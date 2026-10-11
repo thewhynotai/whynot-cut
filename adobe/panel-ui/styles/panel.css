@@ -25,33 +25,40 @@
 p { margin: 0 0 8px 0; }
 .sep { margin: 0 3px; color: var(--twn-text-muted); }
 
-/* ---- header ---- */
-.hdr { padding: 10px 12px 8px 12px; }
-.hdr-title { display: flex; flex-direction: row; align-items: center; }
-.mono { width: 24px; height: 24px; display: block; }
+/* ---- header ----
+   Three stacked rows, each one explicit flex: (1) monogram + wordmark, never wraps; (2) client . item; (3) pills.
+   UXP does not stack unknown elements like a browser does, so nothing here relies on default display values, and
+   nothing depends on the width of the display font (Syne falls back to a system face in UXP). */
+.hdr { display: flex; flex-direction: column; align-items: stretch; width: 100%; padding: 10px 12px 8px 12px; }
+.hdr-title { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; width: 100%; }
+.mono { flex: 0 0 24px; width: 24px; height: 24px; display: block; }
 .wordmark {
+  flex: 0 0 auto;
   margin: 0 8px;
+  white-space: nowrap;
   font-family: var(--twn-font-display);
   font-weight: 600;
   font-size: 14px;
   letter-spacing: .01em;
 }
-.hairline { height: 2px; margin: 8px 0; background: var(--twn-gradient); border-radius: 1px; }
-.who { color: var(--twn-text-muted); font-size: 12px; margin-bottom: 6px; word-break: break-word; }
-.pills { display: flex; flex-direction: row; flex-wrap: wrap; }
+.hairline { display: block; width: 100%; height: 2px; margin: 8px 0; background: var(--twn-gradient); border-radius: 1px; }
+.who { display: block; width: 100%; color: var(--twn-text-muted); font-size: 12px; margin-bottom: 6px; word-wrap: break-word; }
+.pills { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; width: 100%; }
 .pill {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
+  max-width: 100%;
   margin: 0 6px 4px 0;
   padding: 1px 9px;
   border: 1px solid var(--twn-border);
   border-radius: 999px;
   font-size: 10.5px;
-  white-space: nowrap;
 }
 .twn-rtl .pill { margin: 0 0 4px 6px; }
-.pill-k { color: var(--twn-text-muted); margin: 0 5px; }
+.pill-k { white-space: nowrap; color: var(--twn-text-muted); margin: 0 5px; }
 .pill-v { font-weight: 600; margin: 0 2px; }
 .pill-ok { border-color: var(--twn-ok); }
 .pill-ok .pill-v { color: var(--twn-ok); }
@@ -60,6 +67,19 @@ p { margin: 0 0 8px 0; }
 .pill-warn { border-color: var(--twn-warn); }
 .pill-warn .pill-v { color: var(--twn-warn); }
 .pill-idle .pill-v, .pill-unknown .pill-v { color: var(--twn-text-muted); }
+
+/* a command the editor can copy: monospace chip, never split across lines */
+.cmd {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 1px 7px;
+  background: var(--twn-surface-2);
+  border: 1px solid var(--twn-border);
+  border-radius: 5px;
+  white-space: nowrap;
+  font-family: Consolas, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+}
 
 /* ---- sections ---- */
 .sec { padding: 10px 12px 12px 12px; border-top: 1px solid var(--twn-border); }
