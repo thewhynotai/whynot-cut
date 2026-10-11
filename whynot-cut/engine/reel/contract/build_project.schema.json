@@ -1,0 +1,502 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/build_project.schema.json",
+  "title": "build_project",
+  "description": "The full Premiere-only build (ppro_build.job_data / build): a new .prproj, the base XML imported, sequence settings applied and read back, brand stills placed with keyframes, optional blur/sharpen/native captions, track names, markers, saved. A failure is an ok:false result (the legacy CEP shape returned ok:true with a lone {error}; v4 does not).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "project_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the .prproj to create"
+        },
+        "overwrite_existing": {
+          "type": "boolean",
+          "description": "false: the host refuses when the file exists"
+        },
+        "xml_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "base FCP XML (footage, punch-ins, dialogue, SFX, empty graphic tracks) imported inside Premiere"
+        },
+        "sequence_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "name of the sequence the XML creates"
+        },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "previewCodec": {
+              "type": "string",
+              "description": "'apcs' = Apple ProRes 422 LT"
+            },
+            "previewFrameWidth": {
+              "type": "integer"
+            },
+            "previewFrameHeight": {
+              "type": "integer"
+            },
+            "maximumBitDepth": {
+              "type": "boolean"
+            },
+            "maximumRenderQuality": {
+              "type": "boolean"
+            },
+            "compositeLinearColor": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Sequence settings to set (ppro_build.SETTINGS); read back in readback.settings_after."
+        },
+        "graphics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/graphic"
+          },
+          "description": "Brand stills to place, one per layer image (bars, text, cards, caption bars and captions)."
+        },
+        "srt_path": {
+          "type": "string",
+          "description": "captions SRT imported for the native caption track (used when native_caption_track)"
+        },
+        "native_caption_track": {
+          "type": "boolean",
+          "description": "create a native, editable caption track from srt_path"
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "t": {
+                "type": "number",
+                "description": "seconds on the sequence"
+              },
+              "name": {
+                "type": "string"
+              },
+              "comment": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "t",
+              "name",
+              "comment"
+            ],
+            "additionalProperties": false
+          },
+          "description": "One sequence marker per edit decision (evidence)."
+        },
+        "track_names": {
+          "type": "object",
+          "properties": {
+            "video": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "V1.. names in order"
+            },
+            "audio": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "A1.. names in order"
+            }
+          },
+          "required": [
+            "video",
+            "audio"
+          ],
+          "additionalProperties": false
+        },
+        "blur_v1_clips": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "V1 clip indexes that get a Gaussian Blur (cover copies under whole source cutaways)"
+        },
+        "sharpen_v1": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "amount": {
+                  "type": "number",
+                  "description": "Sharpen Amount"
+                },
+                "grain": {
+                  "type": "number",
+                  "description": "Noise intensity, 0 = none"
+                }
+              },
+              "required": [
+                "amount",
+                "grain"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Sharpen (+ optional grain) on the speaker clips of V1; null = leave untouched"
+        },
+        "duration_s": {
+          "type": "number",
+          "description": "planned sequence duration in seconds"
+        }
+      },
+      "required": [
+        "project_path",
+        "xml_path",
+        "sequence_name",
+        "settings",
+        "graphics",
+        "markers",
+        "track_names"
+      ],
+      "additionalProperties": false,
+      "description": "Build job (ppro_build.job_data without its private _-prefixed keys; the engine sends every field). Fields the host treats as optional: overwrite_existing (default false), srt_path / native_caption_track (default: no native caption track), blur_v1_clips (default none), sharpen_v1 (default untouched), duration_s (informational)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "path of the project Premiere created"
+        },
+        "saved": {
+          "type": "boolean",
+          "description": "app.project.save() result"
+        },
+        "newProject": {
+          "type": "boolean"
+        },
+        "importXML": {
+          "type": "boolean"
+        },
+        "setSettings": {
+          "type": "boolean"
+        },
+        "importGraphics": {
+          "type": "boolean"
+        },
+        "settings_after": {
+          "$ref": "#/$defs/settings_after",
+          "description": "read by ppro_build.build checks preview_codec_prores_422_lt, frame_1080x1920, fps_<n>, linear_color_on, max_bit_depth_off, max_render_quality_off"
+        },
+        "placed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "track": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "1-based video track"
+              },
+              "start": {
+                "type": "number",
+                "description": "seconds"
+              },
+              "end": {
+                "type": "number",
+                "description": "seconds"
+              },
+              "anim": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "track",
+              "start",
+              "end",
+              "anim"
+            ]
+          },
+          "description": "One entry per graphic placed; ppro_build.build check all_graphics_placed compares the count with the request."
+        },
+        "blurred": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "clip": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "blurriness": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Blurriness as read back, null when unreadable"
+              }
+            },
+            "required": [
+              "clip",
+              "blurriness"
+            ]
+          },
+          "description": "V1 clips that got a Gaussian Blur."
+        },
+        "sharpened": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "clip": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "ok": {
+                "type": "boolean",
+                "description": "Sharpen (and grain when asked) was set"
+              },
+              "amount": {
+                "type": "number"
+              },
+              "grain": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "clip",
+              "ok"
+            ]
+          },
+          "description": "One entry per V1 speaker clip, [] when sharpening is off; ppro_build.build check v1_sharpened needs every entry ok."
+        },
+        "captionTrack": {
+          "description": "Result of Sequence.createCaptionTrack; read by ppro_build.build check caption_track_ok only when native_caption_track was requested (truthy = ok)."
+        },
+        "renamed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "track names as Premiere reports them after renaming"
+        },
+        "tracks": {
+          "$ref": "#/$defs/tracks",
+          "description": "read by ppro_build.build check dialogue_on_A1_A2"
+        },
+        "log": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "non-fatal notes (effect not found, property missing ...)"
+        }
+      },
+      "required": [
+        "project",
+        "saved",
+        "settings_after",
+        "placed",
+        "sharpened",
+        "tracks"
+      ],
+      "description": "What Premiere reports after the build (NHPP.actions.build_project). Open at the top: the host may add evidence."
+    },
+    "graphic": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "png": {
+          "type": "string",
+          "minLength": 1,
+          "description": "still to import (a copy staged under 07_premiere/media)"
+        },
+        "track_index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0-based video track; 0 = V1 main footage"
+        },
+        "anim": {
+          "type": "string",
+          "enum": [
+            "flash",
+            "text_pop",
+            "bar_sweep",
+            "slide",
+            "push",
+            "card",
+            "fade"
+          ],
+          "description": "keyframe recipe (NHPP.placeStill); 'fade' and any other value use the default fade-in"
+        },
+        "start_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "end_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fade_in_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "card fade in"
+        },
+        "fade_out_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "fade out (all but flash/bar_sweep captions)"
+        },
+        "peak": {
+          "type": "number",
+          "description": "flash peak opacity %"
+        },
+        "delay_f": {
+          "type": "number",
+          "description": "bar_sweep: frames before the sweep starts"
+        },
+        "sweep_f": {
+          "type": "number",
+          "description": "bar_sweep: sweep length in frames"
+        }
+      },
+      "required": [
+        "id",
+        "png",
+        "track_index",
+        "anim",
+        "start_s",
+        "end_s"
+      ],
+      "additionalProperties": false,
+      "description": "One still on one track with its animation (ppro_build.job_data add())."
+    },
+    "settings_dump": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Open dump of Sequence.getSettings() (NHPP.settingsDump): every key Premiere reports, so new Premiere versions may add keys. Tick-like values are {seconds, ticks}."
+    },
+    "settings_after": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Sequence settings read back from Premiere after setSettings (NHPP.settingsDump). Open: any other getSettings() key may appear. The required keys are the ones ppro_build.build checks.",
+      "required": [
+        "previewCodec",
+        "videoFrameWidth",
+        "videoFrameHeight",
+        "videoFrameRate",
+        "compositeLinearColor",
+        "maximumBitDepth",
+        "maximumRenderQuality"
+      ],
+      "properties": {
+        "previewCodec": {
+          "type": "string",
+          "description": "FourCC of the preview codec; ppro_build.build check preview_codec_prores_422_lt wants 'apcs'"
+        },
+        "previewFrameWidth": {
+          "type": "integer"
+        },
+        "previewFrameHeight": {
+          "type": "integer"
+        },
+        "videoFrameWidth": {
+          "type": "integer",
+          "description": "ppro_build.build check frame_1080x1920"
+        },
+        "videoFrameHeight": {
+          "type": "integer",
+          "description": "ppro_build.build check frame_1080x1920"
+        },
+        "videoFrameRate": {
+          "type": "object",
+          "properties": {
+            "seconds": {
+              "type": "number",
+              "description": "seconds per frame, e.g. 0.0333667 for 29.97 fps"
+            },
+            "ticks": {
+              "type": "string",
+              "description": "Premiere ticks per frame as a decimal STRING (254016000000 ticks per second)"
+            }
+          },
+          "required": [
+            "seconds",
+            "ticks"
+          ],
+          "description": "ppro_build.build check fps_<n>: abs(seconds - 1/fps) < 1e-6"
+        },
+        "compositeLinearColor": {
+          "type": "boolean",
+          "description": "check linear_color_on (True)"
+        },
+        "maximumBitDepth": {
+          "type": "boolean",
+          "description": "check max_bit_depth_off (False)"
+        },
+        "maximumRenderQuality": {
+          "type": "boolean",
+          "description": "check max_render_quality_off (False)"
+        }
+      }
+    },
+    "track": {
+      "type": "object",
+      "properties": {
+        "i": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based track number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "clips": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "i",
+        "name",
+        "clips"
+      ],
+      "additionalProperties": false,
+      "description": "One track of a sequence (NHPP.tracksDump)."
+    },
+    "tracks": {
+      "type": "object",
+      "properties": {
+        "video": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        },
+        "audio": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        }
+      },
+      "required": [
+        "video",
+        "audio"
+      ],
+      "description": "Track layout of a sequence: V1.. and A1.. with their clip counts. Read by ppro_build.build check dialogue_on_A1_A2 (the first two audio tracks must hold clips)."
+    }
+  }
+}

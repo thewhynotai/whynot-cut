@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/ping.schema.json",
+  "title": "ping",
+  "description": "Liveness and identity of the host. Premiere answers {version, build, project, projects_open}; After Effects answers its project state (read by motion_build.preconditions: ae_version, dirty, project_path, num_items).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "description": "No data."
+    },
+    "readback": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/premiere"
+        },
+        {
+          "$ref": "#/$defs/aftereffects"
+        }
+      ],
+      "description": "The host's answer: the Premiere form or the After Effects form."
+    },
+    "premiere": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "app.version"
+        },
+        "build": {
+          "type": "string",
+          "description": "app.build"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "path of the active project, '' when none"
+        },
+        "projects_open": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "number of open projects"
+        }
+      },
+      "required": [
+        "version",
+        "build",
+        "project",
+        "projects_open"
+      ],
+      "description": "Premiere ping (NHPP.actions.ping)."
+    },
+    "aftereffects": {
+      "type": "object",
+      "properties": {
+        "ae_version": {
+          "type": "string",
+          "description": "app.version, e.g. '26.5x89'; compared with the Arabic probe verdict (ae_probe.verdict_ok)"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "file name of the open project, null when untitled"
+        },
+        "project_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "full path of the open project, null when untitled"
+        },
+        "dirty": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "unsaved changes: true/false, null when AE cannot say (never treat null as clean; motion_build.preconditions)"
+        },
+        "num_items": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "project item count; with dirty null and no path, 0 means an empty untitled project (motion_build.preconditions)"
+        },
+        "fonts_api": {
+          "type": "boolean"
+        },
+        "libs_loaded": {
+          "type": "boolean"
+        },
+        "scripts_dir": {
+          "type": "string",
+          "description": "the bridge's whitelisted script folder"
+        }
+      },
+      "required": [
+        "ae_version",
+        "project",
+        "project_path",
+        "dirty",
+        "num_items",
+        "fonts_api",
+        "libs_loaded",
+        "scripts_dir"
+      ],
+      "description": "After Effects ping (NHAE.actions.ping)."
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/progress.schema.json",
+  "title": "progress",
+  "description": "A progress event a host emits while a long command runs (before its result).",
+  "type": "object",
+  "properties": {
+    "event": {
+      "type": "string",
+      "const": "progress"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "description": "the request id"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "ping",
+        "status",
+        "probe",
+        "build_project",
+        "export_frames",
+        "close_project_path",
+        "clip_components",
+        "open_project",
+        "set_player_position",
+        "render_review",
+        "ae_build_motion",
+        "ae_readback",
+        "ae_render",
+        "ae_fonts",
+        "ae_probe_text"
+      ]
+    },
+    "step": {
+      "type": "string",
+      "description": "what is happening, one short phrase"
+    },
+    "n": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "steps done"
+    },
+    "of": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "steps in all"
+    },
+    "elapsed_s": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "event",
+    "id",
+    "action",
+    "step"
+  ],
+  "additionalProperties": false
+}

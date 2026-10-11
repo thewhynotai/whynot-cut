@@ -1,0 +1,81 @@
+{
+  "protocol": 4,
+  "description": "Contract v4: every action with the host that runs it, the legacy CEP action it replaces (null: none) and whether the UXP plugin implements it. host 'engine' = runs in the Python engine, 'any' = both hosts answer it.",
+  "actions": {
+    "ping": {
+      "host": "any",
+      "cep": "ping",
+      "uxp": true
+    },
+    "status": {
+      "host": "any",
+      "cep": null,
+      "uxp": true
+    },
+    "probe": {
+      "host": "premiere",
+      "cep": "probe",
+      "uxp": true
+    },
+    "build_project": {
+      "host": "premiere",
+      "cep": "build_project",
+      "uxp": true
+    },
+    "export_frames": {
+      "host": "premiere",
+      "cep": "export_frames",
+      "uxp": true
+    },
+    "close_project_path": {
+      "host": "premiere",
+      "cep": "close_project_path",
+      "uxp": true
+    },
+    "clip_components": {
+      "host": "premiere",
+      "cep": "clip_components",
+      "uxp": true
+    },
+    "open_project": {
+      "host": "premiere",
+      "cep": null,
+      "uxp": true
+    },
+    "set_player_position": {
+      "host": "premiere",
+      "cep": null,
+      "uxp": true
+    },
+    "render_review": {
+      "host": "premiere",
+      "cep": null,
+      "uxp": true
+    },
+    "ae_build_motion": {
+      "host": "aftereffects",
+      "cep": "build_motion",
+      "uxp": false
+    },
+    "ae_readback": {
+      "host": "aftereffects",
+      "cep": "readback",
+      "uxp": false
+    },
+    "ae_render": {
+      "host": "engine",
+      "cep": null,
+      "uxp": false
+    },
+    "ae_fonts": {
+      "host": "aftereffects",
+      "cep": "fonts",
+      "uxp": false
+    },
+    "ae_probe_text": {
+      "host": "aftereffects",
+      "cep": "probe_text",
+      "uxp": false
+    }
+  }
+}

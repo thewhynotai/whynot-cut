@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/close_project_path.schema.json",
+  "title": "close_project_path",
+  "description": "Save and close the project at a path if it is open (ppro_build.build closes a project before rebuilding it).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the .prproj to close"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false,
+      "description": "The project to close (ppro_build.build)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "closed": {
+          "type": "boolean",
+          "description": "closeDocument result; read by ppro_build.build"
+        },
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "description": "why nothing was closed, e.g. 'not open'"
+        }
+      },
+      "required": [
+        "closed"
+      ],
+      "description": "Whether the project was closed."
+    }
+  }
+}

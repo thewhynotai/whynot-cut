@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/render_review.schema.json",
+  "title": "render_review",
+  "description": "UXP-only. Start a review render of a sequence to a file through Premiere's encoder (a watchable MP4). The command returns when the render has started; progress events follow.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "sequence_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the sequence"
+        },
+        "out_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "file to write"
+        },
+        "preset_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "optional .epr encoder preset; omitted = the host default"
+        }
+      },
+      "required": [
+        "sequence_name",
+        "out_path"
+      ],
+      "additionalProperties": false,
+      "description": "What to render and where."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "started": {
+          "type": "boolean"
+        },
+        "out_path": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "started",
+        "out_path",
+        "mode"
+      ],
+      "description": "started: the render was queued; out_path: where it writes; mode: how it runs (e.g. 'encoder' for Adobe Media Encoder, 'direct' for an in-app export)."
+    }
+  }
+}

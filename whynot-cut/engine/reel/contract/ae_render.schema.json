@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/ae_render.schema.json",
+  "title": "ae_render",
+  "description": "Render an After Effects comp with aerender (lib/ae_render.render). Runs in the ENGINE, never in the host: aerender opens the saved .aep in its own After Effects instance so the editor's open session is untouched. There is no CEP action; the schema exists so the daemon and the engine describe the same render request and result.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "aep_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the saved project to render"
+        },
+        "comp": {
+          "type": "string",
+          "minLength": 1,
+          "description": "comp name, e.g. MAIN_<id>"
+        },
+        "out_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "file to write"
+        },
+        "render_settings_template": {
+          "type": "string",
+          "minLength": 1,
+          "description": "aerender -RStemplate, e.g. 'Best Settings'"
+        },
+        "output_module_template": {
+          "type": "string",
+          "minLength": 1,
+          "description": "aerender -OMtemplate (ae_probe measures it), e.g. 'High Quality'"
+        },
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "aerender -s"
+        },
+        "end_frame": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "aerender -e"
+        },
+        "timeout_s": {
+          "type": "number",
+          "minimum": 1,
+          "description": "seconds before the render is abandoned (engine default 3600)"
+        },
+        "log_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "write aerender's stdout/stderr here"
+        }
+      },
+      "required": [
+        "aep_path",
+        "comp",
+        "out_path",
+        "render_settings_template",
+        "output_module_template"
+      ],
+      "additionalProperties": false,
+      "description": "aerender arguments (lib/ae_render.render: aep, comp, out, rs, om, start_frame, end_frame, timeout, log)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "RENDERED",
+            "FAILED",
+            "SKIPPED"
+          ],
+          "description": "RENDERED: the output exists, is non-empty and newer than the call. SKIPPED: aerender or the .aep missing. FAILED: anything else."
+        },
+        "returncode": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "aerender exit code, null when it did not run"
+        },
+        "output": {
+          "type": "string",
+          "description": "the file that was to be written"
+        },
+        "elapsed_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "log": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "log file written, or null"
+        },
+        "msg": {
+          "type": "string",
+          "description": "why it was skipped or failed"
+        },
+        "kept": {
+          "type": "string",
+          "description": "a finished render that could not replace the output stays here"
+        }
+      },
+      "required": [
+        "status",
+        "returncode",
+        "output",
+        "elapsed_s",
+        "log"
+      ],
+      "description": "ae_render.render's result dict."
+    }
+  }
+}

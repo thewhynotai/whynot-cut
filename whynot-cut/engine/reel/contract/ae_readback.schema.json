@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/ae_readback.schema.json",
+  "title": "ae_readback",
+  "description": "Read back the After Effects project that was just built, to compare with the plan (motion_readback.compare): every scene comp's layer span in MAIN and its layers' text, font, composer, direction and box.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "ae_build_motion.schema.json#/$defs/job",
+          "description": "the same job that was built; only job.plan is read"
+        }
+      },
+      "required": [
+        "job"
+      ],
+      "additionalProperties": false,
+      "description": "{job}: the job that was built (motion_build.build sends the same one to readback)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "main": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "layers": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "duration_frames": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "name",
+            "layers",
+            "duration_frames"
+          ]
+        },
+        "scenes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "scene id; matched with plan scenes"
+              },
+              "comp": {
+                "type": "string",
+                "description": "<id>_<type>"
+              },
+              "in_frame": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "scene layer in-point in MAIN (plan start_frame); null when the layer is missing"
+              },
+              "out_frame": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "scene layer out-point in MAIN (plan layer_out_frame); null when missing"
+              },
+              "layers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/layer"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "comp",
+              "in_frame",
+              "out_frame",
+              "layers"
+            ]
+          },
+          "description": "A scene whose comp does not exist is absent; motion_readback.compare reports it missing."
+        },
+        "missing_or_substituted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "PostScript names After Effects reports as missing or substituted (app.fonts.missingOrSubstitutedFonts)"
+        }
+      },
+      "required": [
+        "main",
+        "scenes",
+        "missing_or_substituted"
+      ],
+      "description": "What the open project holds. ok:false (MAIN comp not found) carries {reason} as readback_failure."
+    },
+    "readback_failure": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "e.g. 'MAIN_<id> not found in the open project'"
+        }
+      },
+      "description": "Failed read-back: the reason."
+    },
+    "layer": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "layer name; text layers are matched with the plan element name"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "text",
+            "shape",
+            "other"
+          ]
+        },
+        "in": {
+          "type": "integer",
+          "description": "first frame in the scene comp"
+        },
+        "out": {
+          "type": "integer",
+          "description": "last frame in the scene comp"
+        },
+        "comment": {
+          "type": "string",
+          "description": "layer comment; for text layers the plan's word-cue hash (motion_readback.compare cue_hash)"
+        },
+        "text": {
+          "type": "string",
+          "description": "TEXT layers only: the text as After Effects holds it"
+        },
+        "font_ps": {
+          "type": "string",
+          "description": "TEXT layers only: PostScript name actually used"
+        },
+        "substitute": {
+          "type": "boolean",
+          "description": "TEXT layers only: After Effects substituted the font (not installed)"
+        },
+        "composer": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "TEXT layers only: 'UNIVERSAL' (Middle Eastern composer, needed for Arabic) or 'LATIN'"
+        },
+        "direction": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "TEXT layers only: paragraph direction 'RTL' | 'LTR' from the TextDocument"
+        },
+        "direction_pr": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "TEXT layers only: direction from paragraphRange(0), when readable"
+        },
+        "rect": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4,
+          "description": "TEXT layers only: [left, top, width, height] in comp pixels at the hero frame"
+        },
+        "rect_error": {
+          "type": "string",
+          "description": "TEXT layers only: why rect could not be measured"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "in",
+        "out",
+        "comment"
+      ],
+      "description": "One layer of a scene comp. text/font_ps/substitute/composer/direction/direction_pr/rect exist only on text layers (motion_readback.compare reads them for every plan element of kind text or counter)."
+    }
+  }
+}

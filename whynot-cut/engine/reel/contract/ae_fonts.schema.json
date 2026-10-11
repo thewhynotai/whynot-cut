@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/ae_fonts.schema.json",
+  "title": "ae_fonts",
+  "description": "Ask After Effects whether PostScript font names are installed and real (motion_build.preconditions).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "postscript_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "PostScript names, e.g. IBMPlexSansArabic-Bold"
+        }
+      },
+      "required": [
+        "postscript_names"
+      ],
+      "additionalProperties": false,
+      "description": "PostScript font names to look up (motion_build._plan_fonts)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "fonts": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/font"
+          },
+          "description": "One entry per requested name, keyed by it."
+        },
+        "missing_or_substituted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "every font the open project uses that is missing or substituted"
+        }
+      },
+      "required": [
+        "fonts",
+        "missing_or_substituted"
+      ],
+      "description": "Per-font status."
+    },
+    "font": {
+      "type": "object",
+      "properties": {
+        "found": {
+          "type": "boolean"
+        },
+        "substitute": {
+          "type": "boolean"
+        },
+        "family": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "style": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "found",
+        "substitute",
+        "family",
+        "style"
+      ],
+      "description": "NHAE.fontInfo: found/substitute read by motion_build.preconditions (a font that is not found or is a substitute blocks the build)."
+    }
+  }
+}

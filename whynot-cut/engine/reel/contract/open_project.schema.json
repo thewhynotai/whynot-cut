@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/open_project.schema.json",
+  "title": "open_project",
+  "description": "UXP-only. Open (or activate) the project at a path. Replaces the CEP-era NHPP.activateProject that export_frames did implicitly.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the .prproj to open"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false,
+      "description": "The project to open."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "opened": {
+          "type": "boolean"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "opened",
+        "project"
+      ],
+      "description": "opened: the project is now open and active; project: its path as Premiere reports it (null when it could not be opened)."
+    }
+  }
+}

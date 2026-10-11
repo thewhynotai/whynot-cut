@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/clip_components.schema.json",
+  "title": "clip_components",
+  "description": "Read-only: the effects on one clip and their property names and values (discover Premiere's real names per version; `reel` diagnostics). Components are found by match name in UXP.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "sequence_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "sequence holding the clip"
+        },
+        "track": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0-based track, default 0"
+        },
+        "clip": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0-based clip index on the track, default 0"
+        },
+        "audio": {
+          "type": "boolean",
+          "description": "look on an audio track instead of a video track"
+        }
+      },
+      "required": [
+        "sequence_name"
+      ],
+      "additionalProperties": false,
+      "description": "Which clip to read (NHPP.actions.clip_components)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "clip": {
+          "type": "string",
+          "description": "clip name"
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "display name"
+              },
+              "match": {
+                "type": "string",
+                "description": "match name, e.g. AE.ADBE Opacity"
+              },
+              "props": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "description": "property value; objects are stringified, unreadable ones are '?'"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "name",
+              "match",
+              "props"
+            ]
+          }
+        }
+      },
+      "required": [
+        "clip",
+        "components"
+      ],
+      "description": "The clip's components."
+    }
+  }
+}

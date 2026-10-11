@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/ae_probe_text.schema.json",
+  "title": "ae_probe_text",
+  "description": "Arabic capability probe (ae_probe.run_probe): builds a small project of text/shape comps laid end to end in PROBE_ALL, reads back what After Effects kept and lists the output module templates. Refuses when After Effects holds unsaved changes.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "type": "object",
+          "properties": {
+            "aep_path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "probe project to save"
+            },
+            "w": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "comp width"
+            },
+            "h": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "comp height"
+            },
+            "fps": {
+              "type": "number",
+              "minimum": 0,
+              "description": "frame rate"
+            },
+            "frames": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "frames per probe comp"
+            },
+            "fonts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "{headline: PostScript name} the probe was asked to use"
+            },
+            "comps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/comp"
+              },
+              "description": "probe comps in the order they lie in PROBE_ALL"
+            }
+          },
+          "required": [
+            "aep_path",
+            "w",
+            "h",
+            "fps",
+            "frames",
+            "fonts",
+            "comps"
+          ],
+          "additionalProperties": false,
+          "description": "ae_probe.probe_job"
+        }
+      },
+      "required": [
+        "job"
+      ],
+      "additionalProperties": false,
+      "description": "{job}: the probe project (ae_probe.probe_job)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "ae_version": {
+          "type": "string"
+        },
+        "comps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/comp_readback"
+          }
+        },
+        "om_templates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "output module templates (ae_probe picks the one for aerender)"
+        },
+        "saved": {
+          "type": "string",
+          "description": "the probe .aep written"
+        },
+        "om_error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ae_version",
+        "comps",
+        "om_templates"
+      ],
+      "description": "Per-comp measurements."
+    },
+    "readback_failure": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "description": "Refused probe: reason 'dirty' with the open project."
+    },
+    "comp": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "comp name (also the probe frame label)"
+        },
+        "text": {
+          "type": "string",
+          "description": "the sample text"
+        },
+        "font": {
+          "type": "string",
+          "description": "PostScript name"
+        },
+        "size": {
+          "type": "number",
+          "description": "font size px"
+        },
+        "cues": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "frame numbers of the word-synced reveal"
+        },
+        "emphasis": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "1-based word indexes drawn in the accent colour"
+        },
+        "word_layers": {
+          "type": "boolean",
+          "description": "build with the motion library's one-layer-per-word reveal"
+        },
+        "shapes": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "path data for the icon sample"
+        },
+        "stroke": {
+          "type": "number",
+          "description": "icon stroke width"
+        },
+        "fill_expr": {
+          "type": "string",
+          "description": "diagnostic: expression selector on Fill (word index map)"
+        },
+        "opacity_expr": {
+          "type": "string",
+          "description": "diagnostic: expression selector on Opacity (reveal step)"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "description": "One probe comp (ae_probe.probe_job)."
+    },
+    "comp_readback": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean",
+          "description": "the comp built without an error"
+        },
+        "error": {
+          "type": "string"
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "composer": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "'UNIVERSAL' | 'LATIN'; ae_probe.capabilities_from composer_universal"
+        },
+        "font_ps": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "font actually used; capabilities_from fontobject"
+        },
+        "requested_ps": {
+          "type": "string"
+        },
+        "substitute": {
+          "type": "boolean",
+          "description": "capabilities_from fontobject"
+        },
+        "direction_textdocument": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "capabilities_from rtl_direction"
+        },
+        "direction_paragraph_range": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "capabilities_from rtl_direction"
+        },
+        "layers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rect": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "paragraph_error": {
+          "type": "string"
+        },
+        "based_on": {},
+        "based_on_error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "ok"
+      ],
+      "description": "What one probe comp measured; the comps ae_probe.capabilities_from reads are arabic_rtl, brand_font and emphasis."
+    }
+  }
+}

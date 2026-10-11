@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/status.schema.json",
+  "title": "status",
+  "description": "UXP-only. What the plugin reports about itself: host, versions, the bundle protocol, whether a command is running and which project is open. No CEP equivalent (the CEP bridge reports through its heartbeat file).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "description": "No data."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "enum": [
+            "premiere",
+            "aftereffects"
+          ]
+        },
+        "hostVersion": {
+          "type": "string"
+        },
+        "bundle": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "integer"
+        },
+        "busy": {
+          "type": "boolean"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "host",
+        "hostVersion",
+        "bundle",
+        "protocol",
+        "busy",
+        "project"
+      ],
+      "description": "UXP plugin status. host: 'premiere' or 'aftereffects'; hostVersion: the host app version; bundle: the plugin bundle version; protocol: the contract protocol the bundle speaks (the engine refuses a mismatch with its own PROTOCOL); busy: a command is running; project: active project path or null."
+    }
+  }
+}

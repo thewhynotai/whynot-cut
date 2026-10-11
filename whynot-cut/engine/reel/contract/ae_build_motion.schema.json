@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/ae_build_motion.schema.json",
+  "title": "ae_build_motion",
+  "description": "Build the native After Effects project of a motion video (motion_build.build): a new project, one comp per scene, persistent layers and audio in MAIN_<reel_id>, brand controls, saved. Refuses when After Effects holds unsaved changes.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "#/$defs/job"
+        }
+      },
+      "required": [
+        "job"
+      ],
+      "additionalProperties": false,
+      "description": "The motion job (motion_build.write_job): {job}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "ae_version": {
+          "type": "string"
+        },
+        "made": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "scene ids built"
+        },
+        "failed": {
+          "$ref": "#/$defs/failed_scenes"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "non-fatal notes (image missing, unknown element kind, render queue)"
+        },
+        "saved": {
+          "type": "string",
+          "description": "the .aep path written"
+        },
+        "main": {
+          "type": "string",
+          "description": "name of the main comp"
+        }
+      },
+      "required": [
+        "ae_version",
+        "made",
+        "failed",
+        "warnings",
+        "saved",
+        "main"
+      ],
+      "description": "NHM.report. failed is read by motion_build.build; ok:false results carry the partial readback_failure."
+    },
+    "readback_failure": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Partial readback of a FAILED command (ok false): the evidence the engine still reads. reason 'dirty' / 'dirty_target': After Effects holds unsaved changes (in project / project_path; dirty_target = in this reel's own .aep), read by motion_build.build; failed lists scenes that did not build.",
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failed": {
+          "$ref": "#/$defs/failed_scenes"
+        },
+        "made": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "saved": {
+          "type": "string"
+        },
+        "main": {
+          "type": "string"
+        },
+        "ae_version": {
+          "type": "string"
+        }
+      }
+    },
+    "job": {
+      "type": "object",
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/plan"
+        },
+        "caps": {
+          "$ref": "#/$defs/caps"
+        },
+        "caps_source": {
+          "type": "string",
+          "enum": [
+            "probe",
+            "default"
+          ],
+          "description": "'probe' = measured, 'default' = conservative defaults"
+        },
+        "aep_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the .aep to save"
+        },
+        "render_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "where the render queue item writes"
+        },
+        "fallback_font": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "PostScript name used instead of the brand fonts (only with the editor's OK), or null"
+        },
+        "generated": {
+          "type": "string",
+          "description": "ISO timestamp"
+        }
+      },
+      "required": [
+        "plan",
+        "caps",
+        "caps_source",
+        "aep_path",
+        "render_path",
+        "fallback_font",
+        "generated"
+      ],
+      "additionalProperties": false,
+      "description": "The motion job (motion_build.job_data). Closed: the envelope is the engine's; the plan inside is open."
+    },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "reel_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "project id; the main comp is MAIN_<reel_id>"
+        },
+        "w": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "comp width px"
+        },
+        "h": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "comp height px"
+        },
+        "fps": {
+          "type": "number",
+          "minimum": 0,
+          "description": "frame rate"
+        },
+        "duration_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "main comp length in frames"
+        },
+        "brand": {
+          "type": "object",
+          "description": "brand colours and fonts the library builds BRAND_CONTROLS from"
+        },
+        "scenes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scene"
+          },
+          "description": "One comp per scene, in time order."
+        },
+        "persistent": {
+          "type": "object",
+          "description": "captions, speaker badge, progress bar, voice pulse"
+        },
+        "word_reveal_s": {
+          "type": "number",
+          "description": "seconds of the per-word reveal"
+        }
+      },
+      "required": [
+        "reel_id",
+        "w",
+        "h",
+        "fps",
+        "duration_frames",
+        "brand",
+        "scenes"
+      ],
+      "description": "The compiled motion plan (01_analysis/motion-plan.json). Open: the engine owns it and passes it through; only what nh_motion_lib.jsx reads is required here."
+    },
+    "scene": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "scene id, e.g. S01"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "scene type; the comp is <id>_<type>"
+        },
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "layer_out_frame": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "frame the layer ends in MAIN (end_frame plus the next scene's transition); added by motion_build.job_data"
+        },
+        "hero_frame": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "frame whose layout the read-back measures"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "start_frame",
+        "end_frame",
+        "layer_out_frame",
+        "elements"
+      ]
+    },
+    "caps": {
+      "type": "object",
+      "properties": {
+        "composer_universal": {
+          "type": "boolean"
+        },
+        "rtl_direction": {
+          "type": [
+            "string",
+            "boolean"
+          ],
+          "description": "'textdocument' | 'paragraph_range' | false (the probe's measured Arabic direction support)"
+        },
+        "word_index_logical": {
+          "type": "boolean"
+        },
+        "fontobject": {
+          "type": "boolean"
+        },
+        "emphasis_animator": {
+          "type": "boolean"
+        },
+        "om_template": {
+          "type": "string",
+          "description": "aerender output module template"
+        }
+      },
+      "description": "Measured After Effects capabilities (motion_build.capabilities)."
+    },
+    "failed_scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "scene": {
+            "type": "string",
+            "description": "scene id, or CAPTIONS / SPEAKER_BADGE / PROGRESS / VOICE_PULSE / AUDIO"
+          },
+          "error": {
+            "type": "string"
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "ExtendScript line, null when unknown"
+          }
+        },
+        "required": [
+          "scene",
+          "error"
+        ]
+      },
+      "description": "Scenes or persistent layers that did not build; motion_build.build fails the build when any."
+    }
+  }
+}

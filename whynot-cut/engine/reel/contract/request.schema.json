@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/request.schema.json",
+  "title": "request",
+  "description": "A command for a host (engine -> UXP plugin / CEP bridge). `data` is checked against the action's $defs/data (contract.validate_request).",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "integer",
+      "const": 4,
+      "description": "contract protocol number"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "description": "correlation id, echoed in results and progress events"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "ping",
+        "status",
+        "probe",
+        "build_project",
+        "export_frames",
+        "close_project_path",
+        "clip_components",
+        "open_project",
+        "set_player_position",
+        "render_review",
+        "ae_build_motion",
+        "ae_readback",
+        "ae_render",
+        "ae_fonts",
+        "ae_probe_text"
+      ]
+    },
+    "data": {
+      "type": "object",
+      "description": "action input: the action schema's $defs/data"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 date-time with a time zone: the host must refuse the request after this instant"
+    }
+  },
+  "required": [
+    "protocol",
+    "id",
+    "action",
+    "data",
+    "expires_at"
+  ],
+  "additionalProperties": false
+}

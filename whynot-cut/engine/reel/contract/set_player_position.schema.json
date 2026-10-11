@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/set_player_position.schema.json",
+  "title": "set_player_position",
+  "description": "UXP-only. Move the playhead of a sequence (the CEP build did this inside export_frames).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "sequence_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the sequence"
+        },
+        "t_s": {
+          "type": "number",
+          "minimum": 0,
+          "description": "seconds on the sequence"
+        }
+      },
+      "required": [
+        "sequence_name",
+        "t_s"
+      ],
+      "additionalProperties": false,
+      "description": "Which sequence and where to put the playhead."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "position_s": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "position_s"
+      ],
+      "description": "position_s: the playhead position in seconds as Premiere reports it after the move."
+    }
+  }
+}

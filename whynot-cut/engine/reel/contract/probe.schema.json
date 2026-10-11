@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/probe.schema.json",
+  "title": "probe",
+  "description": "Read-only dump of every sequence's settings and tracks plus the caption constants (bridge diagnostics; `reel ppro-probe`). Needs an open project.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "description": "No data."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "project": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "active project path"
+        },
+        "sequences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "settings": {
+                "$ref": "build_project.schema.json#/$defs/settings_dump"
+              },
+              "tracks": {
+                "$ref": "build_project.schema.json#/$defs/tracks"
+              }
+            },
+            "required": [
+              "name",
+              "settings",
+              "tracks"
+            ]
+          }
+        },
+        "caption_constants": {
+          "type": "object",
+          "description": "Premiere's caption format constants, e.g. {SUBTITLE: 1}; {err: ...} when unavailable"
+        }
+      },
+      "required": [
+        "version",
+        "project",
+        "sequences"
+      ],
+      "description": "Premiere version, project and one entry per sequence (NHPP.actions.probe)."
+    }
+  }
+}

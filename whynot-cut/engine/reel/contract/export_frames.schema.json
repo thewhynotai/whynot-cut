@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/export_frames.schema.json",
+  "title": "export_frames",
+  "description": "Premiere renders PNG frames of its own timeline (ppro_build.export_frames): the visual evidence of the real result. Per-frame failures are reported inside an ok result; the engine turns 0 frames into an error.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "sequence_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "sequence to render"
+        },
+        "times": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minItems": 1,
+          "description": "seconds on the sequence"
+        },
+        "out_dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "folder for frame_<ms>.png (native separators)"
+        },
+        "project_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "make this project active first (several can be open); null or absent = the active one"
+        }
+      },
+      "required": [
+        "sequence_name",
+        "times",
+        "out_dir"
+      ],
+      "additionalProperties": false,
+      "description": "Frames to render (ppro_build.export_frames). project_path is optional for the host (null or absent = the active project); the engine always sends it."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "frames": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "t": {
+                    "type": "number",
+                    "description": "requested time in seconds"
+                  },
+                  "tc": {
+                    "type": "string",
+                    "description": "sequence timecode used for the export"
+                  },
+                  "file": {
+                    "type": "string",
+                    "description": "PNG written (Premiere appends .png)"
+                  },
+                  "called": {
+                    "type": "boolean",
+                    "description": "exportFramePNG returned without throwing"
+                  }
+                },
+                "required": [
+                  "t",
+                  "tc",
+                  "file",
+                  "called"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "t": {
+                    "type": "number"
+                  },
+                  "error": {
+                    "type": "string",
+                    "description": "why this frame failed; ppro_build.export_frames reports them"
+                  }
+                },
+                "required": [
+                  "t",
+                  "error"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "description": "One entry per requested time, in order (read by ppro_build.export_frames)."
+        }
+      },
+      "required": [
+        "frames"
+      ],
+      "description": "Per-frame outcome."
+    }
+  }
+}

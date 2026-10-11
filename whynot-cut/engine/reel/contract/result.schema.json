@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/result.schema.json",
+  "title": "result",
+  "description": "A host's answer. ok:true needs a readback object (what the host actually reports; checked against the action's $defs/readback by contract.validate_result). ok:false carries error and how; a partial readback may travel with it (checked against the action's $defs/readback_failure when it has one).",
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "ping",
+        "status",
+        "probe",
+        "build_project",
+        "export_frames",
+        "close_project_path",
+        "clip_components",
+        "open_project",
+        "set_player_position",
+        "render_review",
+        "ae_build_motion",
+        "ae_readback",
+        "ae_render",
+        "ae_fonts",
+        "ae_probe_text"
+      ]
+    },
+    "readback": {
+      "type": "object",
+      "description": "evidence read from the host"
+    },
+    "error": {
+      "type": "string",
+      "description": "what went wrong, one plain sentence"
+    },
+    "how": {
+      "type": "string",
+      "description": "what to do about it"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "description": "the request id this answers"
+    }
+  },
+  "required": [
+    "ok",
+    "action"
+  ],
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "properties": {
+        "ok": {
+          "const": false
+        }
+      }
+    },
+    {
+      "required": [
+        "readback"
+      ]
+    }
+  ]
+}
