@@ -369,7 +369,7 @@ class TestG66ReelNamesItself(unittest.TestCase):
     def test_version_flag_prints_plugin_name_and_version(self):
         r = self.cli("--version")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.strip(), TAG)
+        self.assertEqual(r.stdout.strip().splitlines()[0], TAG)      # line 2 is the plugin root (T1.10)
 
     def test_errors_start_with_the_plugin_name_and_version(self):
         with tempfile.TemporaryDirectory() as t:

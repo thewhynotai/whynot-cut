@@ -4,24 +4,11 @@
 Run via the plugin wrapper:  reel <command> --root <CLIENT_FOLDER> [--video-id ID] [--profile ID]
 (the wrapper uses the venv in ~/.whynot-cut; `reel setup` creates it)
 
-Getting started                               doctor / setup / scaffold / inbox / settings
-
-Deterministic stages (scripts)                Semantic stages (Claude authors files)
-  discover        inputs + environment           client_database/reference_style/* (ONCE per client:
-  client-db       brand tokens/fonts/assets         editing-style-analysis.md, editing-style.json, editing-rules.json)
-  preflight       media inspection               client_database/profile/*
-  transcribe      Whisper -> SRT/words           01_analysis/main-topic.md, narrative-segments.json,
-  ref-analyze     reference video metrics           transcript-semantic-analysis.json,
-  ref-style       record / reuse the client style   medical-content-review.md, edit-decisions.json
-  plan            validate + compile decisions
-  previews        PNG previews + QC composites
-  sfx             synthesize needed SFX
-  ppro-status / ppro-build / ppro-frames   native Premiere build via the bridge (default)
-  premiere        FCP7 XML interchange (fallback)
-  ae-* / ps-* / mogrt-build   OPTIONAL extras, need --extras and an explicit editor request
-  setup / client-init / profile
-  preview-video   watchable MP4 of the planned edit (no Premiere needed)
-  qc / handoff / status / next
+Deterministic stages are scripts; the semantic stages (client style, main topic, narrative segments, statement
+analysis, edit-decisions.json) are files Claude authors, then `reel plan` validates and compiles them.
+`reel --help` lists every command with its one line; it is generated from the command table (CORE_COMMANDS here,
+HELP in lib/podcast_cli.py and lib/motion_cli.py), so there is no list to keep in sync in this docstring.
+`reel <command> --help` shows that command's options.
 """
 from __future__ import annotations
 
@@ -820,6 +807,67 @@ def _utf8_stdio():
             pass
 
 
+# The command table: every core subcommand with the one line `reel --help` shows (podcast and motion commands carry
+# theirs in lib/podcast_cli.HELP and lib/motion_cli.HELP). Order = the order of the editing workflow.
+CORE_COMMANDS: dict[str, str] = {
+    "doctor": "machine report (engine, ffmpeg, Premiere bridge, PATH, guard, client markers); --fix writes missing markers",
+    "setup": "install or repair the engine, packages, ffmpeg and the Premiere bridge (idempotent)",
+    "scaffold": "create a client folder (assets/, data/, START_HERE.md, .whynot-client)",
+    "inbox": "list the new raw clips of a client folder and their video ids",
+    "settings": "show or change the editor's WhyNot Cut preferences",
+    "model-download": "download a Whisper model once (large-v3 is about 3 GB)",
+    "gpu-enable": "install NVIDIA cuBLAS so Whisper runs on an NVIDIA GPU",
+    "profile": "show which client profile applies and where its values come from",
+    "client-init": "create the client's reel-profile from a shipped profile or the blank template",
+    "discover": "inventory of the client folder: inputs, footage, brand files, environment",
+    "client-db": "client database: brand colours, fonts, photos and assets",
+    "ref-analyze": "measure the client's reference edits",
+    "ref-style": "show, record or apply the client's reference editing style",
+    "preflight": "inspect the raw footage (streams, frame rate, audio) before editing",
+    "range": "set or show the in/out range of a reel cut from a longer raw file",
+    "transcribe": "word-timed Whisper transcript (SRT and words) of the clip",
+    "transcript-correct": "apply proofread corrections to the transcript",
+    "transcript-verify": "record that the transcript was proofread",
+    "transcript-relisten": "re-transcribe flagged words from the audio",
+    "audio-clean": "clean the dialogue and remove pauses, with before/after measurements",
+    "plan": "validate and compile edit-decisions.json into the build plan",
+    "approve-plan": "record the approval of the compiled plan (editor or delegated)",
+    "previews": "render PNG previews of the graphics and captions, with QC composites",
+    "sfx": "synthesize the sound effects the plan needs",
+    "preview-video": "render a watchable MP4 of the planned edit (no Premiere needed)",
+    "ppro-install": "install the Premiere bridge (WhyNot Cut Bridge CEP panel)",
+    "ppro-status": "is Premiere running and the bridge answering",
+    "ppro-probe": "probe the Premiere bridge (what the host reports back)",
+    "ppro-build": "build the native Premiere project through the bridge",
+    "ppro-frames": "export frames from the built Premiere timeline for QC",
+    "premiere": "write the FCP7 XML interchange (fallback when the bridge cannot be used)",
+    "verify": "build the evidence sheet of the Premiere frames, or --record the verdict after viewing it",
+    "qc": "run the QC checks on the build and write the report",
+    "handoff": "write the editor handoff for a finished or paused edit",
+    "status": "show the project status record",
+    "next": "what the next step is (resumable workflow), with stale-input warnings",
+    "mogrt-build": "build MOGRT templates (extra: needs --extras and an explicit editor request)",
+    "ae-script": "write the After Effects script (extra: needs --extras)",
+    "ae-build": "build the After Effects project (extra: needs --extras)",
+    "ae-render": "render the After Effects project (extra: needs --extras)",
+    "ps-script": "write the Photoshop script (extra: needs --extras)",
+    "ps-build": "build the Photoshop file (extra: needs --extras)",
+}
+
+
+def command_table() -> dict[str, str]:
+    """Every registered subcommand (core, podcast, motion) -> its one-line help, in listing order."""
+    from lib import motion_cli, podcast_cli
+    return {**CORE_COMMANDS, **podcast_cli.HELP, **motion_cli.HELP}
+
+
+def registered_commands() -> list[str]:
+    """The subcommand names main() registers: the command table's keys (core in `CORE_COMMANDS`, plus the
+    podcast and motion ARGS keys)."""
+    from lib import motion_cli, podcast_cli
+    return [*CORE_COMMANDS, *podcast_cli.ARGS, *motion_cli.ARGS]
+
+
 def main():
     _utf8_stdio()
     import os
@@ -827,6 +875,7 @@ def main():
     # plain HTTPS downloads work everywhere. WHYNOT_HF_XET=1 turns Xet back on.
     if os.environ.get("WHYNOT_HF_XET") != "1":
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+    from lib.common import PLUGIN_DIR
     from lib.selfid import tag
 
     class NamedParser(argparse.ArgumentParser):      # usage errors say which plugin's `reel` this is (G66)
@@ -834,18 +883,17 @@ def main():
             self.print_usage(sys.stderr)
             self.exit(2, f"{tag()}: {self.prog}: error: {message}\n")
     ap = NamedParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--version", action="version", version=tag(), help="print the plugin name and version")
+    ap.add_argument("--version", action="version", version=f"{tag()}{chr(10)}plugin root: {PLUGIN_DIR}",
+                    help="print the plugin name and version, and the plugin folder")
     ap.add_argument("--root", help="client folder containing assets/ and data/ (default: current folder if it has both)")
     ap.add_argument("--video-id", help="stable project id (default: footage file stem)")
     ap.add_argument("--profile", help="shipped profile id to apply (default: the id in the client's own reel-profile; never matched by folder name)")
     ap.add_argument("--episode", help="podcast episode id (`reel episodes` lists them)")
     from lib import motion_cli, podcast_cli
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ["discover", "client-db", "preflight", "transcribe", "transcript-correct", "transcript-verify", "transcript-relisten", "range", "ref-analyze", "ref-style", "plan",
-                 "previews", "sfx", "approve-plan", "verify", "ppro-install", "ppro-status", "ppro-probe", "ppro-build", "ppro-frames", "mogrt-build", "audio-clean", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "premiere",
-                 "qc", "handoff", "status", "next", "setup", "profile", "client-init",
-                 "doctor", "scaffold", "inbox", "preview-video", "settings", "model-download", "gpu-enable"] + list(podcast_cli.ARGS) + list(motion_cli.ARGS):
-        sp = sub.add_parser(name)
+    table = command_table()
+    sub = ap.add_subparsers(dest="cmd", required=True, title="commands", metavar="<command>")
+    for name in registered_commands():
+        sp = sub.add_parser(name, help=table[name], description=table[name])
         # global options are accepted after the command too (`reel next --root X`), as the skills write them
         sp.add_argument("--root", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         sp.add_argument("--video-id", default=argparse.SUPPRESS, help=argparse.SUPPRESS)

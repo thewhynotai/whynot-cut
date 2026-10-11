@@ -43,6 +43,20 @@ ARGS: dict = {
 }
 NO_EPISODE = {"episodes", "music"}
 
+# one line per command for `reel --help` (cli.py builds the listing from the command table)
+HELP: dict = {
+    "episodes": "list the podcast episodes of the client",
+    "episode-prep": "episode folder, audio extraction and chunking before transcription",
+    "episode-transcribe": "word-timed transcript of the whole episode (resumable chunks)",
+    "reels-plan": "validate and compile the reels plan (candidates, timecodes, content types)",
+    "reels-preview": "render preview stills/clips of the reel candidates",
+    "reels-select": "record the editor's picks and create one project per picked reel",
+    "music": "list the client's music library and the recipes that use it",
+    "publish-check": "check the publishing copy (titles, chapters, captions, tags) against the plan",
+    "episode-next": "the next episode-level step and what blocks it",
+    "publish-thumbnail": "thumbnail candidate frames and 1280x720 thumbnail designs",
+}
+
 
 def add_args(name: str, sp) -> None:
     for flags, kw in ARGS.get(name, []):

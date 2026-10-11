@@ -48,6 +48,14 @@
 - Role rules for WhyNot Cut's own agents match the full `whynot-cut:<name>` agent type (structure 4.7): another
   plugin's `qc-reviewer` is no longer restricted. Gate rules (approve-plan, reels-select, verify --record, settings
   --init, ae-probe --record, transcript-verify --by editor) still bind every subagent.
+- Version hygiene (structure 1.1-1.4): plugin, marketplace (both fields) and the newest CHANGELOG heading are 3.0.0, and
+  `tests/test_release_hygiene.py` fails if any of them drifts; the Premiere bridge keeps its own version (3.1.0 until the
+  bridge changes) and the test checks its three places (`ppro_bridge.BRIDGE_VERSION`, CEP `CSXS/manifest.xml`
+  `ExtensionBundleVersion`, `bridge.js` `VERSION`) agree. `test_motion.py` no longer hard-codes the release number.
+- `reel --version` prints two lines: `WhyNot Cut <version>` and `plugin root: <folder>`.
+- `reel --help` is generated from the command table (`CORE_COMMANDS` in `cli.py`, `HELP` in `lib/podcast_cli.py` and
+  `lib/motion_cli.py`): every subcommand with its one line, replacing the stale list in the module docstring. A test
+  fails when a command handler or registered subcommand is missing from the table.
 
 ### Fixed
 - Executable bits are set in git's index (`100755`) for `bin/reel`, `hooks/run_python.sh`, `hooks/*.py`,

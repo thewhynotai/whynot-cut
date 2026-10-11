@@ -2137,9 +2137,9 @@ class TestMotionRelease(unittest.TestCase):
     def test_versions(self):
         pj = json.loads((SK / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         mj = json.loads((SK.parent / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
-        self.assertEqual(pj["version"], "2.2.1")
-        self.assertEqual(mj["metadata"]["version"], "2.2.1")
-        self.assertEqual(mj["plugins"][0]["version"], "2.2.1")
+        # the exact number is pinned once, in test_release_hygiene.py; here only that the three agree
+        self.assertEqual(mj["metadata"]["version"], pj["version"])
+        self.assertEqual(mj["plugins"][0]["version"], pj["version"])
         for k in ("motion", "after-effects", "animation"):
             self.assertIn(k, pj["keywords"])
         self.assertIn("After Effects", pj["description"])

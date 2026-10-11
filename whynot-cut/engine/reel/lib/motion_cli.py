@@ -40,6 +40,19 @@ ARGS: dict = {
 }
 NO_ID = {"ae-status", "ae-probe", "motion-icons", "motion-library"}
 
+# one line per command for `reel --help` (cli.py builds the listing from the command table)
+HELP: dict = {
+    "ae-status": "is After Effects and the WhyNot Cut bridge ready (extras)",
+    "ae-probe": "run or record the After Effects capability probe (extras)",
+    "motion-icons": "search the Lucide icon index by concept words",
+    "motion-library": "list the motion packs and the library folder",
+    "motion-plan": "validate and compile the motion plan of a motion project",
+    "motion-animatic": "render the animatic (storyboard video) of a motion plan",
+    "motion-build": "build the After Effects project of a motion plan",
+    "motion-render": "render the motion video (or only some scenes)",
+    "motion-frames": "export frames of the rendered motion video for checking",
+}
+
 
 def add_args(name: str, sp) -> None:
     for flags, kw in ARGS.get(name, []):
