@@ -108,7 +108,12 @@ def main(argv=None) -> int:
     log_path = Path(args.log) if args.log else (None if args.dry_run else
                                                paths.logs_dir / f"{args.command}-{base.stamp()}.log")
     log = base.Log(log_path, args.dry_run, console=not args.quiet)
-    state = base.State(paths, dry_run=args.dry_run).load()
+    try:
+        state = base.State(paths, dry_run=args.dry_run).load()
+    except OSError as e:  # locked / unreadable, not corrupt: never rename or overwrite it, stop instead
+        log.error(f"cannot read {paths.state_file}: {e}. Close any program using it (antivirus, editor) and run "
+                  "the installer again.")
+        return 2
     if state.set_aside:
         log.warn(f"state.json was unreadable; kept it as {state.set_aside.name} and started fresh")
     ctx = base.Ctx(paths=paths, log=log, components=components, state=state, plugin_root=plugin_root,

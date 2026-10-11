@@ -17,6 +17,7 @@ Run (repo root):
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import argparse
+import contextlib
 import hashlib
 import http.server
 import io
@@ -284,10 +285,20 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
+        if srv.truncate.get(self.path, 0) > 0:  # announce the whole body, send 5000 bytes, drop the connection
+            srv.truncate[self.path] -= 1
+            self.wfile.write(body[:5000])
+            self.close_connection = True
+            return
         self.wfile.write(body)
 
     def log_message(self, *a):
         pass
+
+
+def curl_or_urllib(use_curl: bool):
+    """The real curl, or no curl at all (so the urllib downloader is used)."""
+    return contextlib.nullcontext() if use_curl else mock.patch.object(base, "find_curl", return_value=None)
 
 
 class TestDownload(unittest.TestCase):
@@ -299,6 +310,10 @@ class TestDownload(unittest.TestCase):
         self.dl = self.tmp / ".whynot-cut" / "downloads"
         self.srv = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
         self.srv.hits, self.srv.files = [], {"/a/tool.zip": self.BODY, "/a/Syne%5Bwght%5D.ttf": b"font"}
+        self.srv.truncate = {}  # path -> how many more responses to cut short
+        no_wait = mock.patch.object(base, "_sleep")  # retry back-off without the wait
+        no_wait.start()
+        self.addCleanup(no_wait.stop)
         self.thread = threading.Thread(target=self.srv.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
         self.thread.start()
         self.url = f"http://127.0.0.1:{self.srv.server_address[1]}/a/tool.zip"
@@ -361,10 +376,62 @@ class TestDownload(unittest.TestCase):
         with self.assertRaises(base.DownloadError):
             base.download("ftp://127.0.0.1/x.zip", sha(b"x"), self.dl, self.log)
 
-    def test_http_error_is_a_download_error(self):
-        with self.assertRaises(base.DownloadError):
-            base.download(self.url.replace("tool.zip", "missing.zip"), sha(b"x"), self.dl, self.log, retries=1)
-        self.assertFalse((self.dl / "missing.zip.part").exists())
+    def test_http_4xx_fails_fast(self):
+        missing = self.url.replace("tool.zip", "missing.zip")
+        for curl in (True, False):  # curl alone, then urllib alone: one request each, no retries
+            with self.subTest(curl=curl), curl_or_urllib(curl):
+                self.srv.hits.clear()
+                with self.assertRaises(base.DownloadError) as cm:
+                    base.download(missing, sha(b"x"), self.dl, self.log, retries=3)
+                self.assertIn("404", str(cm.exception))
+                self.assertEqual(len(self.srv.hits), 1)
+                self.assertFalse((self.dl / "missing.zip.part").exists())
+
+    def _assert_nothing_left(self):
+        self.assertEqual([p.name for p in self.dl.iterdir()], [])
+
+    def test_interrupted_transfer_is_retried(self):
+        for curl in (True, False):
+            with self.subTest(curl=curl), curl_or_urllib(curl):
+                self.srv.hits.clear()
+                self.srv.truncate["/a/tool.zip"] = 1  # first response cut short, second complete
+                out = base.download(self.url, sha(self.BODY), self.dl, self.log, retries=3)
+                self.assertEqual(out.read_bytes(), self.BODY)
+                self.assertEqual(len(self.srv.hits), 2)
+                self.assertFalse((self.dl / "tool.zip.part").exists())
+                out.unlink()
+
+    def test_always_interrupted_is_a_transfer_error_not_a_bad_pin(self):
+        for curl in (True, False):
+            with self.subTest(curl=curl), curl_or_urllib(curl):
+                self.srv.hits.clear()
+                self.srv.truncate["/a/tool.zip"] = 99
+                with self.assertRaises(base.DownloadError) as cm:
+                    base.download(self.url, sha(self.BODY), self.dl, self.log, retries=3)
+                msg = str(cm.exception)
+                self.assertIn("transfer failed after 3 tries", msg)
+                self.assertNotIn("sha256 mismatch", msg)
+                self.assertEqual(len(self.srv.hits), 3)  # one request per try, no same-try double request
+                self._assert_nothing_left()
+
+    def test_cached_hit_removes_a_stale_part(self):
+        base.download(self.url, sha(self.BODY), self.dl, self.log)
+        (self.dl / "tool.zip.part").write_bytes(b"left over")
+        base.download(self.url, sha(self.BODY), self.dl, self.log)
+        self.assertEqual([p.name for p in self.dl.iterdir()], ["tool.zip"])
+        self.assertEqual(len(self.srv.hits), 1)
+
+    def test_loopback_never_goes_through_a_proxy(self):
+        dead = "http://127.0.0.1:9"  # nothing listens there: going through it would fail
+        env = {k: dead for k in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY")}
+        with mock.patch.dict(os.environ, env):
+            for k in ("no_proxy", "NO_PROXY"):
+                os.environ.pop(k, None)
+            for curl in (True, False):
+                with self.subTest(curl=curl), curl_or_urllib(curl):
+                    out = base.download(self.url, sha(self.BODY), self.dl, self.log, retries=1)
+                    self.assertEqual(out.read_bytes(), self.BODY)
+                    out.unlink()
 
     def test_file_url_works(self):
         src = self.tmp / "src dir" / "ffmpeg.zip"
@@ -502,6 +569,19 @@ class TestState(unittest.TestCase):
         self.assertRegex(kept[0], r"^state\.json\.corrupt-\d{8}-\d{6}")
         st.record("preflight", "ok")
         self.assertTrue(self.paths.state_file.exists())
+
+    def test_unreadable_state_is_not_renamed(self):
+        # a read error (antivirus lock, permissions; here a folder in its place) is not corruption
+        self.paths.state_file.mkdir(parents=True)
+        with self.assertRaises(OSError):
+            base.State(self.paths).load()
+        self.assertTrue(self.paths.state_file.is_dir())
+        self.assertEqual([p.name for p in self.paths.whynot.iterdir()], ["state.json"])
+        with mock.patch.object(cli, "STEPS", []):
+            rc = cli.main(["install", "--home", str(self.paths.home), "--quiet"])
+        self.assertEqual(rc, 2)
+        self.assertTrue(self.paths.state_file.is_dir())
+        self.assertFalse([p for p in self.paths.whynot.iterdir() if "corrupt" in p.name])
 
     def test_dry_run_state_writes_nothing(self):
         st = base.State(self.paths, dry_run=True)

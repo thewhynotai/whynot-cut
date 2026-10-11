@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import platform as _platform
@@ -273,13 +274,17 @@ class State:
     def load(self) -> "State":
         f = self.paths.state_file
         try:
-            d = json.loads(f.read_text(encoding="utf-8-sig"))
-            if not isinstance(d, dict) or not isinstance(d.get("steps", {}), dict):
-                raise ValueError("not a state object")
+            raw = f.read_bytes()
         except FileNotFoundError:
             self.data = _empty_state()
             return self
-        except (OSError, ValueError):
+        # any other OSError (antivirus lock, permissions, a folder in its place) propagates: the file may be fine,
+        # so it is never renamed or overwritten after a read error
+        try:
+            d = json.loads(raw.decode("utf-8-sig"))
+            if not isinstance(d, dict) or not isinstance(d.get("steps", {}), dict):
+                raise ValueError("not a state object")
+        except ValueError:  # JSON / UTF-8 decode error, or not a state object: the file is corrupt
             self.data = _empty_state()
             if not self.dry_run:
                 dest = f.with_name(f"{f.name}.corrupt-{stamp()}")
@@ -317,6 +322,24 @@ class State:
 
 
 # --------------------------------------------------------------------------------------------- download
+class _Fatal(Exception):
+    """A request another try cannot fix (HTTP 4xx): fail at once."""
+
+
+class _CurlUnusable(OSError):
+    """curl cannot do this request here (missing, TLS / certificate / revocation trouble, old build): use urllib."""
+
+
+# curl exit codes meaning "this curl cannot do it" rather than "the transfer broke": switch to urllib for good.
+# 1 protocol, 2 init, 4 feature not built in; 35 51 53 54 58 59 60 66 77 80 82 83 90 91 TLS and certificates.
+_CURL_UNUSABLE = {1, 2, 4, 35, 51, 53, 54, 58, 59, 60, 66, 77, 80, 82, 83, 90, 91}
+_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def _sleep(seconds: float) -> None:  # the retry back-off, in one place (tests patch it)
+    time.sleep(seconds)
+
+
 def find_curl() -> Optional[str]:
     """The OS curl first (Windows 10+ System32, macOS /usr/bin: they use the system certificate store)."""
     if os.name == "nt":
@@ -328,34 +351,65 @@ def find_curl() -> Optional[str]:
     return shutil.which("curl")
 
 
-def _fetch_curl(curl: str, url: str, part: Path) -> None:
-    # curl writes to stdout and Python owns the file: no non-ASCII path ever reaches curl's argv
-    with open(part, "wb") as fh:
-        r = subprocess.run([curl, "--fail", "--location", "--silent", "--show-error", "--proto", "=http,https",
-                            "--connect-timeout", "30", "--speed-limit", "1024", "--speed-time", "60", url],
-                           stdout=fh, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
-    if r.returncode != 0:
-        msg = r.stderr.decode("utf-8", "replace").strip().splitlines()
-        raise OSError(f"curl exit {r.returncode}: {msg[-1] if msg else ''}")
-
-
-def _fetch_urllib(url: str, part: Path) -> None:
-    req = urllib.request.Request(url, headers={"User-Agent": "whynot-cut-installer"})
+def _fetch_curl(curl: str, url: str, part: Path, loopback: bool) -> None:
+    """curl writes to stdout into a file Python opened, so no non-ASCII path reaches curl's argv. A body shorter than
+    its Content-Length is curl exit 18 (OSError: retried); HTTP 4xx is _Fatal; a TLS-type failure is _CurlUnusable."""
+    cmd = [curl, "--fail", "--location", "--silent", "--show-error", "--proto", "=http,https",
+           "--connect-timeout", "30", "--speed-limit", "1024", "--speed-time", "60"]
+    if loopback:
+        cmd += ["--noproxy", "*"]  # a proxy in the environment must never sit between us and 127.0.0.1
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp, open(part, "wb") as fh:
-            shutil.copyfileobj(resp, fh, 1 << 20)
+        with open(part, "wb") as fh:
+            r = subprocess.run(cmd + [url], stdout=fh, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
+    except FileNotFoundError as e:
+        raise _CurlUnusable(f"curl cannot start: {e}") from None
+    if r.returncode == 0:
+        return
+    lines = r.stderr.decode("utf-8", "replace").strip().splitlines()
+    last = lines[-1] if lines else ""
+    msg = f"curl exit {r.returncode}: {last}"
+    if r.returncode == 22:
+        m = re.search(r"error:? (\d{3})", last)
+        if m and 400 <= int(m.group(1)) < 500:
+            raise _Fatal(f"HTTP {m.group(1)}")
+    if r.returncode in _CURL_UNUSABLE:
+        raise _CurlUnusable(msg)
+    raise OSError(msg)
+
+
+def _fetch_urllib(url: str, part: Path, loopback: bool) -> None:
+    """Python's downloader, self-checking: a body shorter than its Content-Length raises OSError (retried)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "whynot-cut-installer"})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if loopback else None
+    try:
+        resp = opener.open(req, timeout=60) if opener else urllib.request.urlopen(req, timeout=60)
+        with resp, open(part, "wb") as fh:
+            expected = resp.headers.get("Content-Length")
+            written = 0
+            for chunk in iter(lambda: resp.read(1 << 20), b""):
+                fh.write(chunk)
+                written += len(chunk)
+            if expected is not None and expected.strip().isdigit() and written != int(expected):
+                raise OSError(f"transfer interrupted: got {written} of {expected.strip()} bytes")
     except urllib.error.HTTPError as e:
         e.close()  # it holds the response body: an unclosed one is a ResourceWarning
+        if 400 <= e.code < 500:
+            raise _Fatal(f"HTTP {e.code} {e.reason}") from None
         raise OSError(f"HTTP {e.code} {e.reason}") from None
+    except http.client.HTTPException as e:  # IncompleteRead, RemoteDisconnected ... are not OSError
+        raise OSError(f"transfer interrupted: {type(e).__name__}: {e}") from None
 
 
 def download(url, sha256, dest_dir, log: Log, *, name: Optional[str] = None, retries: int = 3) -> Path:
     """Fetch a pinned artefact into dest_dir (normally ~/.whynot-cut/downloads) and return its path.
 
-    A cached file with the right sha256 is reused; a wrong one is replaced. The transfer goes to `<name>.part`
-    (a stale one from an interrupted run is discarded), is verified, then renamed. A sha256 mismatch deletes the file
-    and raises DownloadError (not retried: the pin or the server is wrong). Network errors are retried; each try uses
-    curl and falls back to urllib. Placeholder pins are refused before any request. http(s):// and file:// only."""
+    A cached file with the right sha256 is reused (a stale `.part` beside it is removed); a wrong one is replaced.
+    The transfer goes to `<name>.part` (a stale one from an interrupted run is discarded), is checked for
+    completeness, verified, then renamed. Transfer errors (connection drop, short body, timeout, 5xx) are retried up to
+    `retries` tries and the final failure says it was the transfer; HTTP 4xx fails at once. A complete file whose
+    sha256 does not match is deleted and raises DownloadError (not retried: the pin or the server is wrong). curl goes
+    first; urllib takes over when curl is missing or cannot do the request (TLS, certificates). Placeholder pins are
+    refused before any request. http(s):// and file:// only."""
     if is_placeholder(url) or is_placeholder(sha256):
         raise DownloadError(f"not available in this build (placeholder pin): {url!r} sha256={sha256!r}")
     if not isinstance(sha256, str) or not _HEX64.match(sha256):
@@ -371,6 +425,8 @@ def download(url, sha256, dest_dir, log: Log, *, name: Optional[str] = None, ret
     part = dest_dir / (name + ".part")
     if dest.is_file():
         if file_sha256(dest) == sha256:
+            if part.exists():
+                part.unlink()
             log.info(f"cached {dest.name} (sha256 ok)")
             return dest
         log.warn(f"cached {dest.name} has the wrong sha256; fetching it again")
@@ -379,35 +435,42 @@ def download(url, sha256, dest_dir, log: Log, *, name: Optional[str] = None, ret
     if part.exists():
         part.unlink()
     log.info(f"download {url}")
+    loopback = (parsed.hostname or "").lower() in _LOOPBACK
+    curl = None if parsed.scheme == "file" else find_curl()
+    tries = max(1, retries)
     last: Optional[Exception] = None
-    for attempt in range(max(1, retries)):
+    for attempt in range(tries):
         try:
             if parsed.scheme == "file":
                 src = Path(urllib.request.url2pathname(parsed.path))
                 if parsed.netloc and parsed.netloc != "localhost":
                     src = Path(f"//{parsed.netloc}{src}")
                 shutil.copyfile(src, part)
-            else:
-                curl = find_curl()
+            elif curl:
                 try:
-                    if not curl:
-                        raise OSError("curl not found")
-                    _fetch_curl(curl, url, part)
-                except OSError as e:
-                    if curl:
-                        log.warn(f"curl failed ({e}); trying Python's downloader")
-                    _fetch_urllib(url, part)
+                    _fetch_curl(curl, url, part, loopback)
+                except _CurlUnusable as e:
+                    log.warn(f"curl cannot do this here ({e}); using Python's downloader from now on")
+                    curl = None
+                    _fetch_urllib(url, part, loopback)
+            else:
+                _fetch_urllib(url, part, loopback)
             last = None
             break
-        except (OSError, urllib.error.URLError, ValueError) as e:
+        except _Fatal as e:
+            if part.exists():
+                part.unlink()
+            raise DownloadError(f"could not download {url}: {e}") from None
+        except (OSError, ValueError) as e:  # URLError is an OSError
             last = e
             if part.exists():
                 part.unlink()
-            if attempt < max(1, retries) - 1:
-                log.warn(f"download failed ({e}); retrying")
-                time.sleep(min(2 ** attempt, 5))
+            if attempt < tries - 1:
+                log.warn(f"download interrupted ({e}); retrying ({attempt + 2}/{tries})")
+                _sleep(min(2 ** attempt, 5))
     if last is not None:
-        raise DownloadError(f"could not download {url}: {last}")
+        raise DownloadError(f"could not download {url}: transfer failed after {tries} tries ({last}); "
+                            "nothing was kept, run the installer again")
     got = file_sha256(part)
     if got != sha256:
         part.unlink()
