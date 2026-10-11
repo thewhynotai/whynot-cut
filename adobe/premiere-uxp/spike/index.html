@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="index.css" />
+  </head>
+  <body>
+    <header class="head">
+      <img class="mark" src="icons/dark/icon-46.png" width="23" height="23" alt="" />
+      <span class="title">WhyNot Cut Spike</span>
+      <span class="ver" id="version"></span>
+    </header>
+    <div class="hairline"></div>
+
+    <p class="hint">
+      Measures which Premiere UXP APIs work on this machine. Reads <bdi dir="ltr">~/.whynot-cut/uxp-spike/config.json</bdi>, works in a scratch
+      project, writes <bdi dir="ltr">results-&lt;time&gt;.json</bdi> next to it.
+    </p>
+
+    <div class="buttons">
+      <button id="run" type="button">Run spike</button>
+      <button id="run-keep" type="button">Run, keep project open</button>
+      <button id="copy" type="button">Copy results</button>
+    </div>
+
+    <p id="status" class="status">Ready.</p>
+    <p id="progress" class="progress"></p>
+    <div id="ops" class="ops"></div>
+
+    <textarea id="out" class="out" readonly="readonly" rows="10" spellcheck="false"></textarea>
+
+    <footer class="foot">Powered by Claude</footer>
+    <script src="index.js"></script>
+  </body>
+</html>

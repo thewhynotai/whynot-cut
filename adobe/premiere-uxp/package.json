@@ -1,0 +1,22 @@
+{
+  "name": "@whynot-cut/premiere-uxp",
+  "private": true,
+  "version": "0.0.0",
+  "description": "WhyNot Cut for Premiere Pro (UXP): the spike plugin and, in 4b, the panel plugin.",
+  "type": "module",
+  "scripts": {
+    "build:spike": "node scripts/build.mjs spike",
+    "package:spike": "node scripts/package-ccx.mjs spike",
+    "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "node --test \"test/*.test.ts\""
+  },
+  "dependencies": {
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "@adobe/premierepro": "26.5.0",
+    "@types/node": "26.6.5",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}
