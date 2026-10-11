@@ -35,18 +35,9 @@ NHAE.read = function (p) {
     return eval('(' + t + ')');  // trusted: written by the pipeline itself (ASCII JSON)
 };
 
-NHAE.projectInfo = function () {
-    var p = app.project, dirty = null, n = null;
-    try { dirty = p.dirty; } catch (e) { dirty = null; }       // undocumented, present since AE 17.5
-    try { n = p.numItems; } catch (e2) { n = null; }
-    return {project: p && p.file ? p.file.name : null, project_path: p && p.file ? p.file.fsName : null, dirty: dirty,
-            num_items: n};
-};
-
-/* app.newProject() discards the open project: only when AE reports it clean, or it is an empty untitled project */
-NHAE.mayDiscard = function (info) {
-    return info.dirty === false || (info.dirty === null && !info.project_path && info.num_items === 0);
-};
+/* the open-project rule lives in nh_motion_lib.jsx: the fallback script (no bridge) applies the same one */
+NHAE.projectInfo = function () { return NHM.projectInfo(); };
+NHAE.mayDiscard = function (info) { return NHM.mayDiscard(info); };
 
 NHAE.fontInfo = function (ps) {
     var out = {found: false, substitute: false, family: null, style: null};

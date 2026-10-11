@@ -1224,6 +1224,24 @@ class TestMotionJSX(CompiledMotion):
         self.assertIn("NHAE.actions.build_motion = function", bridge)
         self.assertIn('reason: "dirty"', bridge)
 
+    def test_fallback_refuses_unsaved_project(self):
+        """Final review: the --script-only/--run-script fallback called app.newProject() with no dirty check. It must
+        refuse exactly like the bridge (NHAE.mayDiscard): unsaved or unknown state in a saved/non-empty project."""
+        from lib.motion_build import write_fallback_script
+        script = write_fallback_script(self.reel).read_text(encoding="utf-8")
+        saved = {"name": "work.aep", "fsName": "D:/their/work.aep"}
+        for project, want in (({"dirty": True, "numItems": 3, "file": saved}, ["alert"]),
+                              ({"dirty": None, "numItems": 3, "file": saved}, ["alert"]),
+                              ({"dirty": False, "numItems": 3, "file": saved}, ["newProject"]),
+                              ({"dirty": None, "numItems": 0, "file": None}, ["newProject"])):
+            js = ("var calls = [];\nfunction alert(m) { calls.push('alert'); }\n"
+                  "var app = {project: " + json.dumps(project) + ", beginUndoGroup: function () {}, "
+                  "endUndoGroup: function () {},\n"
+                  "  newProject: function () { calls.push('newProject'); throw new Error('STOP'); }};\n"
+                  "try { (function () {\n" + script + "\n})(); } catch (e) { if (e.message !== 'STOP') { "
+                  "calls.push('error: ' + e); } }\nconsole.log(JSON.stringify(calls));\n")
+            self.assertEqual(json.loads(node_run(self, js)), want, project)
+
 
 def jsx_fn(src: str, name: str) -> str:
     """Body of `name = function` in the JSX source (up to the next top-level `NHM.` assignment)."""
@@ -1432,6 +1450,17 @@ class TestMotionBuild(CompiledMotion):
         backups = list(self.reel.p("04_after_effects/project/backups").glob("*.aep"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), b"EDITED IN AE")
+
+    def test_refused_replace_edited_keeps_no_backup(self):
+        """Final review: --replace-edited copied the editor's .aep to backups/ before the preconditions, so a build
+        refused for another reason (here: no Gate 1 approval) still left a backup behind."""
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+        self.mb.aep_path(self.reel).write_bytes(b"EDITED IN AE")
+        self.reel.p("01_analysis/plan-approval.json").unlink()
+        r = self.mb.build(self.reel, replace_edited=True)
+        self.assertEqual(r["status"], "REFUSED", r)
+        self.assertEqual(list(self.reel.p("04_after_effects/project/backups").glob("*.aep")), [])
+        self.assertEqual(self.mb.aep_path(self.reel).read_bytes(), b"EDITED IN AE")
 
     def test_compare(self):
         from lib.motion_config import format_spec
@@ -2195,6 +2224,33 @@ class TestLockedAudio(CompiledMotion):
         src = (SK / "engine/reel/lib/motion_qc.py").read_text(encoding="utf-8")
         self.assertNotIn('"06_audio/dialogue/dialogue_motion_seq.wav"', src)
 
+    def test_unreferenced_dialogue_pruned(self):
+        """Final review: content-addressed dialogue_motion_seq_*.wav files piled up. Files neither the plan nor the
+        last build job names are removed; one that After Effects (or a player) holds open is left for a later run."""
+        from lib.motion_audio import sequence_dialogue
+        from lib.timemap import TimeMap
+        d = self.reel.p("06_audio/dialogue")
+        in_plan = Path(self.plan["audio"]["dialogue"])
+        in_job, stale, held = (d / f"dialogue_motion_seq_{h}.wav" for h in ("10b10b10", "0badf00d", "0ffe1d00"))
+        for f in (in_job, stale, held):
+            f.write_bytes(b"RIFF")
+            self.addCleanup(f.unlink, missing_ok=True)
+        job = self.reel.p("04_after_effects/data/motion-job.json")
+        job.parent.mkdir(parents=True, exist_ok=True)
+        job.write_text(json.dumps({"plan": {"audio": {"dialogue": str(in_job)}}}), encoding="ascii")
+        self.addCleanup(job.unlink, missing_ok=True)
+        lock = open(held, "rb") if sys.platform == "win32" else None
+        try:
+            new = sequence_dialogue(self.reel, TimeMap([[0, 4000], [5000, 12000]]))
+        finally:
+            if lock:
+                lock.close()
+        self.assertFalse(stale.exists())
+        for f in (new, in_plan, in_job):
+            self.assertTrue(f.exists(), f.name)
+        if lock:
+            self.assertTrue(held.exists())
+
 
 class TestDialogue24Bit(CompiledMotion):
     """Live run: audio-clean writes dialogue_clean.wav as 24-bit PCM; sequence_dialogue decoded it as 16-bit and
@@ -2219,6 +2275,13 @@ class TestDialogue24Bit(CompiledMotion):
 
 
 # --------------------------------------------------------------------------- final-review minors (2.2.0)
+def node_run(tc, js: str) -> str:
+    """Runs JavaScript in node: After Effects / CEP code driven through a fake host object. Returns stdout."""
+    if not shutil.which("node"):
+        tc.skipTest("needs node")
+    r = subprocess.run(["node", "-"], input=js, capture_output=True, text=True, encoding="utf-8", timeout=120)
+    tc.assertEqual(r.returncode, 0, r.stderr[-1500:])
+    return r.stdout
 
 
 class TestReviewMinorsPlan(unittest.TestCase):

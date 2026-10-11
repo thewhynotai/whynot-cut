@@ -89,7 +89,13 @@ def write_fallback_script(paths, **kw) -> Path:
           "// Fallback (no bridge): File > Scripts > Run Script File... in After Effects, or `reel motion-build --run-script`.\n"
           "var NH_JOB = " + json.dumps(job, ensure_ascii=True) + ";\n"
           "var NH_DATA = {brand: NH_JOB.plan.brand};\n" + lib + "\n" + mlib + "\n"
-          "app.beginUndoGroup(\"whynot-cut motion\");\napp.newProject();\nNHM.build(NH_JOB);\napp.endUndoGroup();\n")
+          "var NH_INFO = NHM.projectInfo();\n"
+          "if (!NHM.mayDiscard(NH_INFO)) {      // the bridge's rule: never discard the editor's unsaved work\n"
+          "    alert('WhyNot Cut: After Effects has unsaved changes in ' + (NH_INFO.project || 'an untitled project') +\n"
+          "          ' (or cannot tell). Save or close it, then run this script again.');\n"
+          "} else {\n"
+          "    app.beginUndoGroup(\"whynot-cut motion\");\n    app.newProject();\n    NHM.build(NH_JOB);\n"
+          "    app.endUndoGroup();\n}\n")
     out = paths.p(f"04_after_effects/scripts/build_{paths.video_id}_motion.jsx")
     write_text(out, js)
     return out
@@ -188,16 +194,17 @@ def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False
     from .motion_readback import compare
     aep = aep_path(paths)
     base = {"status": "REFUSED", "reasons": [], "aep": str(aep), "fallback_font": None}
-    if editor_changed(paths):
-        if not replace_edited:
-            return dict(base, reasons=["the editor changed the .aep since the last build: rebuilding would discard that "
-                                       "work - `--replace-edited` keeps a backup copy first"])
-        bdir = aep.parent / "backups"
-        bdir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(aep, bdir / f"{aep.stem}.edited-{time.strftime('%Y%m%d-%H%M%S')}{aep.suffix}")
+    edited = editor_changed(paths)
+    if edited and not replace_edited:
+        return dict(base, reasons=["the editor changed the .aep since the last build: rebuilding would discard that "
+                                   "work - `--replace-edited` keeps a backup copy first"])
     probs, ctx = preconditions(paths, allow_fallback_font)
     if probs:
         return dict(base, reasons=probs)
+    if edited:                  # only once the build will run: a refused build leaves no backup behind
+        bdir = aep.parent / "backups"
+        bdir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(aep, bdir / f"{aep.stem}.edited-{time.strftime('%Y%m%d-%H%M%S')}{aep.suffix}")
     fb, fb_plan, brand = None, None, []
     if ctx.get("missing_fonts") and allow_fallback_font:
         from .motion_layout import find_font_file

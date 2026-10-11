@@ -44,12 +44,28 @@ def sequence_dialogue(paths, tmap) -> Path:
     import hashlib
     pcm = (np.clip(out, -1, 1) * 32767).astype(np.int16)
     dst = paths.p(f"06_audio/dialogue/dialogue_motion_seq_{hashlib.sha1(pcm.tobytes()).hexdigest()[:8]}.wav")
-    if dst.exists():
-        return dst
-    tmp = dst.with_suffix(".tmp")
-    _write(tmp, out)
-    tmp.replace(dst)
+    if not dst.exists():
+        tmp = dst.with_suffix(".tmp")
+        _write(tmp, out)
+        tmp.replace(dst)
+    _prune_dialogue(paths, keep=dst)
     return dst
+
+
+def _prune_dialogue(paths, keep: Path) -> None:
+    """Removes older sequence dialogues that neither the plan nor the last build job names. One that After Effects
+    (or a player) still holds open stays until a later run (Windows refuses to delete it)."""
+    from .common import read_json
+    plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
+    job = (read_json(paths.p("04_after_effects/data/motion-job.json"), {}) or {}).get("plan") or {}
+    named = {keep.resolve()} | {Path(p["audio"]["dialogue"]).resolve() for p in (plan, job)
+                                if (p.get("audio") or {}).get("dialogue")}
+    for f in keep.parent.glob("dialogue_motion_seq_*.wav"):
+        if f.resolve() not in named:
+            try:
+                f.unlink()
+            except PermissionError:
+                pass
 
 
 def envelope(wav: Path, fps: float, n_frames: int) -> list[float]:

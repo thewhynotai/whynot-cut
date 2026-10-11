@@ -40,4 +40,5 @@ the platform UI zones, readable contrast, brand colours.
 
 ## Without the bridge
 `reel motion-build --script-only` writes a self-contained JSX (File › Scripts › Run Script File…);
-`--run-script` hands it to AE with `AfterFX -r`. Both are unverified (no read-back): QC cannot pass.
+`--run-script` hands it to AE with `AfterFX -r`. Both are unverified (no read-back): QC cannot pass. Like the bridge,
+the script refuses (an alert in AE) while the open project has unsaved changes: the editor saves or closes it first.
