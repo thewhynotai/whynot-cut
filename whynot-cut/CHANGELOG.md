@@ -32,6 +32,13 @@ reproduced by a failing test first.
 - Handoff README: several missing brand fonts read as plural ("… are not installed: install them"). Guard: a shell
   write to an After Effects preference file gets the preferences message, not "the client's source folder".
 - Code: removed the unused `motion_qc.plan_fonts` / `motion_qc.sha1`; the CEP bridge reads the host environment once.
+- `motion-build --run-script` stops at once when After Effects has unsaved changes, naming the project (Windows: its
+  window title ends with " *"; macOS: the script's own refusal, as osascript prints it), instead of waiting the whole
+  `--timeout` for an .aep the script refused to build. A run that still times out says why the .aep may be missing,
+  not only "no read-back". (The fallback script cannot write a marker file: After Effects' "Allow Scripts to Write
+  Files" is off by default, and WhyNot Cut never changes it.)
+- `audio_sync`'s near-miss note is a small function tested with fixed correlations; the ffmpeg-mixed test now checks
+  only that the result agrees with the value it measured (a different ffmpeg build cannot break it).
 
 **Verified live (Windows 11, After Effects 26.5x89)**
 - From a copy of the test client in a folder named in Arabic (`whynot-test/بودكاست-تجربة`, reel EP02TEST_R02_MO):
@@ -39,11 +46,13 @@ reproduced by a failing test first.
   escaper), motion-render through the ASCII stage (1080x1920, 24 fps, 32.3 s, −14.3 LUFS), 24 After Effects frames
   viewed (identical to the earlier run), `qc` 10/10, handoff READY_FOR_HUMAN_EDITOR. This closes 2.2.0's "project
   folder with an Arabic name" gap.
+- `motion-build --run-script` with an unsaved change in the open project: After Effects' title read live ("… .aep *"),
+  REFUSED within a second naming the project, nothing launched, the last build record untouched.
 
 **Not verified live**
-- The LTR progress bar (off in every recipe default; checked in node against a fake After Effects) and the fallback
-  script's refusal of an unsaved project (checked the same way); still from 2.2.0: a Premiere `ppro-build` on bundle
-  3.1.0, macOS, a build in the client's brand font.
+- The LTR progress bar (off in every recipe default; checked in node against a fake After Effects), the in-script
+  refusal and its result through osascript (macOS); still from 2.2.0: a Premiere `ppro-build` on bundle 3.1.0, macOS,
+  a build in the client's brand font.
 
 ## 2.2.0 — 2026-10-11 · Motion mode and client-level reference style
 
