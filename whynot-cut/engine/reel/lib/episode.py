@@ -232,6 +232,57 @@ def prep(ep: EpisodePaths) -> dict:
             "next": "intake-inspector views the intake sheet (burned subtitles/logo, layout) ∥ `reel episode-transcribe`"}
 
 
+# --------------------------------------------------------------------------- resumable status
+def episode_next(ep: EpisodePaths) -> dict:
+    """What the episode needs next (resumable, like `reel next` for a clip), stale steps, and its reels' status."""
+    from .common import Paths, load_status
+
+    def t(rel):
+        f = ep.p(rel)
+        return f.stat().st_mtime if f.exists() else None
+    steps = [
+        ("episode-prep", "00_inputs/episode.json"),
+        ("episode-transcribe", "02_transcription/transcript.json"),
+        ("AUTHOR 01_analysis/topics.json", "01_analysis/topics.json"),
+        ("AUTHOR 01_analysis/speakers.json", "01_analysis/speakers.json"),
+        ("AUTHOR 01_analysis/reels-plan.json", "01_analysis/reels-plan.json"),
+        ("reels-plan", "01_analysis/reels-plan-validated.json"),
+        ("reels-preview", "03_candidates/_sheet.jpg"),
+        ("SELECT reels (Gate 0: the editor picks; reels-select --by editor)", "01_analysis/selection.json"),
+        ("AUTHOR publish/publish.json", "publish/publish.json"),
+        ("publish-check", "publish/publish-validation.json"),
+        ("publish-thumbnail --candidates", "publish/thumbnail/candidates.json"),
+    ]
+    todo = [name for name, rel in steps if t(rel) is None]
+    stale = []
+    deps = [("reels-plan", "01_analysis/reels-plan-validated.json",
+             ["01_analysis/reels-plan.json", "02_transcription/words.json"]),
+            ("reels-preview", "03_candidates/_sheet.jpg", ["01_analysis/reels-plan-validated.json"]),
+            ("publish-check", "publish/publish-validation.json", ["publish/publish.json"])]
+    for name, rel, ups in deps:
+        tf = t(rel)
+        if tf is None:
+            continue
+        newer = [Path(u).name for u in ups if t(u) and t(u) > tf + 1]
+        if name == "publish-check":
+            newer += [f.name for f in ep.p("publish/reels").glob("*.json") if f.stat().st_mtime > tf + 1]
+        if newer:
+            stale.append(f"{name} (older than {', '.join(newer)})")
+    pv = read_json(ep.p("publish/publish-validation.json"), {}) or {}
+    if pv and not pv.get("ok") and "publish-check" not in todo:
+        stale.append("publish-check (last run had errors)")
+    sel = read_json(ep.p("01_analysis/selection.json"), {}) or {}
+    reels = {}
+    for rid in sorted({r for h in sel.get("history", []) for r in h.get("picked", [])}):
+        rp = Paths(ep.root, f"{ep.episode_id}_{rid}")
+        reels[rp.video_id] = load_status(rp).get("status") if rp.project.exists() else "not created"
+    names = [s.split(" (")[0] for s in stale]
+    remaining = stale + [n for n in todo if n not in names]
+    return {"episode_id": ep.episode_id, "state": _episode_state(ep), "next": remaining[0] if remaining else "done",
+            "remaining": remaining, "stale": stale, "reels": reels,
+            "reels_hint": "each reel resumes with `reel next --video-id <reel id>`" if reels else None}
+
+
 # --------------------------------------------------------------------------- chunked transcription
 def plan_chunks(db: list, hop_ms: int, total_ms: int, chunk_ms: int, search_ms: int = 20000) -> list[tuple[int, int]]:
     """Contiguous chunks of about chunk_ms covering [0, total_ms]. Each boundary sits in the middle of the quietest run

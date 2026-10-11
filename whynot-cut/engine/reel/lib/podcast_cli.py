@@ -29,6 +29,7 @@ ARGS: dict = {
     ],
     "music": [(("--list",), {"action": "store_true", "help": "list the licensed tracks in data/Music with mood tags"})],
     "publish-check": [],
+    "episode-next": [],
     "publish-thumbnail": [
         (("--candidates",), {"action": "store_true", "help": "pick frames worth a thumbnail (faces, sharp, contrast)"}),
         (("--render",), {"action": "store_true", "help": "render publish.json thumbnail.designs as 1280x720 images"}),
@@ -151,6 +152,11 @@ def cmd_publish_thumbnail(a):
         res["render"] = render_thumbnails(ep)
         res["next"] = "VIEW each thumb_*.png (text readable, face clear, logo not over the face) before showing the editor"
     out(res)
+
+
+def cmd_episode_next(a):
+    from .episode import episode_next
+    out(episode_next(EP(a)))
 
 
 def _chunks_missing(ep) -> bool:

@@ -1325,5 +1325,36 @@ class TestThumbnails(unittest.TestCase):
         self.assertTrue(any("words" in w for w in r["warnings"]))
 
 
+class TestEpisodeNext(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root = make_episode_client(self.tmp, dur_s=6, with_clip=False)
+        common.set_context(self.root)
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_next_progression(self):
+        import os
+        import time
+        from lib.episode import EpisodePaths, episode_next, prep
+        ep = EpisodePaths(self.root, "EP12")
+        self.assertEqual(episode_next(ep)["next"], "episode-prep")
+        prep(ep)
+        self.assertEqual(episode_next(ep)["next"], "episode-transcribe")
+        synthetic_episode_transcript(ep)
+        self.assertEqual(episode_next(ep)["next"], "AUTHOR 01_analysis/topics.json")
+        write_json(ep.p("01_analysis/topics.json"), {"topics": []})
+        write_json(ep.p("01_analysis/speakers.json"), {"people": {}, "turns": []})
+        validated_plan(ep, [{"id": "R01", "in_ms": 0, "out_ms": 5000, "duration_ms": 5000, "type": "advice", "total": 7,
+                             "score": {}}])
+        nx = episode_next(ep)
+        self.assertEqual(nx["next"], "reels-preview")
+        later = time.time() + 5
+        os.utime(ep.p("01_analysis/reels-plan.json"), (later, later))           # edited after validation
+        self.assertTrue(any(s.startswith("reels-plan") for s in episode_next(ep)["stale"]))
+
+
 if __name__ == "__main__":
     unittest.main()
