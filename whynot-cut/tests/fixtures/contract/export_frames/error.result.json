@@ -1,0 +1,6 @@
+{
+  "ok": false,
+  "action": "export_frames",
+  "id": "20261011-042154-1ad092",
+  "error": "TypeError: null is not an object (script line 337)"
+}

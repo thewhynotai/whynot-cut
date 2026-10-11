@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "action": "ae_fonts",
+  "id": "20261011-150358-3922ff",
+  "readback": {
+    "fonts": {
+      "IBMPlexSansArabic-Bold": {
+        "found": false,
+        "substitute": false,
+        "family": null,
+        "style": null
+      },
+      "IBMPlexSansArabic-Medium": {
+        "found": false,
+        "substitute": false,
+        "family": null,
+        "style": null
+      }
+    },
+    "missing_or_substituted": []
+  }
+}

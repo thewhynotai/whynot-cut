@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "action": "ping",
+  "id": "20261011-150357-8eb492",
+  "readback": {
+    "project": "EP02TEST_R02_MO_RE_MOTION.aep",
+    "project_path": "D:\\whynot-test\\بودكاست-تجربة\\output\\projects\\EP02TEST_R02_MO\\04_after_effects\\project\\EP02TEST_R02_MO_RE_MOTION.aep",
+    "dirty": false,
+    "num_items": 19,
+    "ae_version": "26.5x89",
+    "fonts_api": true,
+    "libs_loaded": true,
+    "scripts_dir": "C:\\Users\\editor\\.whynot-cut\\ae-scripts"
+  }
+}

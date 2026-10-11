@@ -1,0 +1,18 @@
+{
+  "protocol": 4,
+  "id": "20261011-154807-745b53",
+  "action": "export_frames",
+  "data": {
+    "sequence_name": "EP02TEST_R02_RE_EDIT",
+    "times": [
+      1.188,
+      2.042,
+      2.5,
+      4.512,
+      4.854
+    ],
+    "out_dir": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\08_quality_control\\premiere_frames\\run-20261011-154807",
+    "project_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\project\\EP02TEST_R02_RE_EDIT.prproj"
+  },
+  "expires_at": "2026-10-11T13:03:07Z"
+}

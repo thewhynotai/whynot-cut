@@ -1,0 +1,103 @@
+{
+  "ok": true,
+  "action": "ae_probe_text",
+  "id": "20261011-122047-eba06c",
+  "readback": {
+    "ae_version": "26.5x89",
+    "comps": [
+      {
+        "name": "arabic_rtl",
+        "ok": true,
+        "text": "مرحبا بكم في البودكاست",
+        "composer": "UNIVERSAL",
+        "font_ps": "ArialMT",
+        "requested_ps": "ArialMT",
+        "substitute": false,
+        "direction_textdocument": "RTL",
+        "direction_paragraph_range": "RTL",
+        "rect": [
+          164.6953125,
+          912.6328125,
+          750.609375,
+          94.734375
+        ]
+      },
+      {
+        "name": "word_reveal",
+        "ok": true,
+        "text": "واحد اتنين تلاتة اربعة",
+        "composer": "UNIVERSAL",
+        "font_ps": "ArialMT",
+        "requested_ps": "ArialMT",
+        "substitute": false,
+        "direction_textdocument": "RTL",
+        "direction_paragraph_range": "RTL",
+        "rect": [
+          204.84375,
+          918.7734375,
+          670.3125,
+          82.453125
+        ]
+      },
+      {
+        "name": "emphasis",
+        "ok": true,
+        "text": "دي اهم نقطة في الكلام",
+        "composer": "UNIVERSAL",
+        "font_ps": "ArialMT",
+        "requested_ps": "ArialMT",
+        "substitute": false,
+        "direction_textdocument": "RTL",
+        "direction_paragraph_range": "RTL",
+        "rect": [
+          197.71875,
+          911.7421875,
+          684.5625,
+          96.515625
+        ]
+      },
+      {
+        "name": "mixed",
+        "ok": true,
+        "text": "الـ Isotretinoin ٣ مرات 25%",
+        "composer": "UNIVERSAL",
+        "font_ps": "ArialMT",
+        "requested_ps": "ArialMT",
+        "substitute": false,
+        "direction_textdocument": "RTL",
+        "direction_paragraph_range": "RTL",
+        "rect": [
+          18.984375,
+          918.4453125,
+          1042.03125,
+          83.109375
+        ]
+      },
+      {
+        "name": "brand_font",
+        "ok": true,
+        "text": "خط البراند",
+        "composer": "UNIVERSAL",
+        "font_ps": "ArialMT",
+        "requested_ps": "ArialMT",
+        "substitute": false,
+        "direction_textdocument": "RTL",
+        "direction_paragraph_range": "RTL",
+        "rect": [
+          382.640625,
+          917.5546875,
+          314.71875,
+          84.890625
+        ]
+      }
+    ],
+    "om_templates": [
+      "AIFF 48kHz",
+      "Alpha Only",
+      "H.264 - Match Render Settings -  5 Mbps",
+      "H.264 - Match Render Settings - 15 Mbps",
+      "H.264 - Match Render Settings - 40 Mbps"
+    ],
+    "saved": "C:\\Users\\editor\\.whynot-cut\\ae-probe\\probe.aep"
+  }
+}

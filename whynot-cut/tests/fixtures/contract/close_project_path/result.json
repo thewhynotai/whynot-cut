@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "action": "close_project_path",
+  "id": "20261011-040957-058605",
+  "readback": {
+    "closed": true,
+    "path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\project\\EP02TEST_R02_RE_EDIT.prproj"
+  }
+}

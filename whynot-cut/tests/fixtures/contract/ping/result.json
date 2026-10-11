@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "action": "ping",
+  "id": "20261011-154756-042575",
+  "readback": {
+    "version": "26.5.2",
+    "build": "5",
+    "project": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\project\\EP02TEST_R02_RE_EDIT.prproj",
+    "projects_open": 2
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "result": "{\"ok\":false,\"action\":\"build_motion\",\"result\":{\"ok\":false,\"reason\":\"dirty\",\"project\":\"EP02TEST_R02_MO_RE_MOTION.aep\",\"project_path\":\"D:\\\\whynot-test\\\\PODCAST-TEST\\\\output\\\\projects\\\\EP02TEST_R02_MO\\\\04_after_effects\\\\project\\\\EP02TEST_R02_MO_RE_MOTION.aep\"}}",
+  "at": 1791722900000
+}

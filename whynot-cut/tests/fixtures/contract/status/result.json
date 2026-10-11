@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "action": "status",
+  "id": "fixture-status-0001",
+  "readback": {
+    "host": "premiere",
+    "hostVersion": "26.5.2",
+    "bundle": "3.1.0",
+    "protocol": 4,
+    "busy": false,
+    "project": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\project\\EP02TEST_R02_RE_EDIT.prproj"
+  }
+}

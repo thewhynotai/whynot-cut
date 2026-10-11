@@ -912,5 +912,789 @@ class EcmaParityTests(unittest.TestCase):
         self.assertEqual(V.validate({}, {"$ref": "ping.schema.json#/$defs/data"}), [])
 
 
+
+# ================================================================================================ golden fixtures (T6.1)
+# Real Premiere 26.5.2 / After Effects 26.5 answers (PODCAST-TEST recordings) pin the contract; cep.py is the pure adapter
+# between the CEP queue's parsed response and a v4 result.
+import ast  # noqa: E402
+import contextlib  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+from unittest import mock  # noqa: E402
+
+from contract import cep  # noqa: E402
+
+FIXTURES = SK / "tests" / "fixtures" / "contract"
+CEP_ENVELOPE = ("action", "job_id", "submitted")
+
+
+def fixture_json(action, name):
+    return json.loads((FIXTURES / action / name).read_text(encoding="utf-8"))
+
+
+def fixture_name(variant, base):
+    """The main pair is request.json / result.json / cep-data.json / cep-result.json; a variant is <variant>.<base>."""
+    return f"{variant}.{base}" if variant else base
+
+
+def fixture_variants(action):
+    """"" (the main pair) and one name per <variant>.request.json next to it."""
+    return [""] + sorted(p.name[:-len(".request.json")] for p in (FIXTURES / action).glob("*.request.json"))
+
+
+def every_fixture():
+    """(action, variant) for every golden pair."""
+    return [(a, v) for a in V4_ACTIONS for v in fixture_variants(a)]
+
+
+def parse_cep_result(outer):
+    """What cep_queue.submit does with the panel's `<id>.result.json`: {ok, result: <JSON string or object>, at}."""
+    inner = outer.get("result")
+    return json.loads(inner) if isinstance(inner, str) else inner
+
+
+def real_client_tokens():
+    """test_plugin's own list of real-client words, read from its source (this file must not spell them out)."""
+    tree = ast.parse((SK / "tests" / "test_plugin.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "REAL_CLIENT_TOKENS" for t in node.targets):
+            return [t.lower() for t in ast.literal_eval(node.value)]
+    raise AssertionError("REAL_CLIENT_TOKENS not found in test_plugin.py")
+
+
+def strings_in(obj):
+    """Every string in a JSON value, looking inside strings that hold JSON (the CEP queue's `result`)."""
+    if isinstance(obj, str):
+        yield obj
+        if obj[:1] in "{[":
+            try:
+                yield from strings_in(json.loads(obj))
+            except ValueError:
+                pass
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from strings_in(k)
+            yield from strings_in(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from strings_in(v)
+
+
+def wrong_kind(v):
+    """A JSON value of a different kind than v (what a host bug would send)."""
+    if isinstance(v, bool):
+        return "yes"
+    if isinstance(v, (int, float)):
+        return "n/a"
+    if isinstance(v, str):
+        return 7
+    if isinstance(v, list):
+        return "nope"
+    if isinstance(v, dict):
+        return [1]
+    return 7
+
+
+def edited(obj, path, new=None, drop=False):
+    """A deep copy of obj with the value at path replaced (or the key removed)."""
+    out = copy.deepcopy(obj)
+    node = out
+    for step in path[:-1]:
+        node = node[step]
+    if drop:
+        del node[path[-1]]
+    else:
+        node[path[-1]] = new
+    return out
+
+
+def readback_required(action, readback):
+    """The required keys of the readback schema (for ping: of the host form the readback matches)."""
+    d = V.load(action)["$defs"]["readback"]
+    if "required" in d:
+        return d["required"]
+    for alt in d.get("anyOf", []):
+        sub = V.load(action)["$defs"][alt["$ref"].rsplit("/", 1)[-1]]
+        if not V.validate(readback, sub):
+            return sub.get("required", [])
+    return []
+
+
+# ------------------------------------------------------------------------------------------------ the fixture folder
+class GoldenFixtureFilesTests(unittest.TestCase):
+    def test_every_action_has_a_folder_and_nothing_else_is_there(self):
+        self.assertTrue(FIXTURES.is_dir(), FIXTURES)
+        self.assertEqual(sorted(p.name for p in FIXTURES.iterdir() if p.is_dir()), sorted(V4_ACTIONS))
+        for a in V4_ACTIONS:
+            for base in ("request.json", "result.json"):
+                self.assertTrue((FIXTURES / a / base).is_file(), f"{a}/{base}")
+
+    def test_index_says_what_was_recorded(self):
+        index = json.loads((FIXTURES / "index.json").read_text(encoding="utf-8"))
+        self.assertEqual(sorted(index), sorted(V4_ACTIONS))
+        for a, e in index.items():
+            self.assertIs(type(e["recorded"]), bool, a)
+            self.assertTrue(isinstance(e["source"], str) and e["source"], a)
+            self.assertIsInstance(e["host_version"], str, a)
+            self.assertTrue(e["recorded"] is False or e["host_version"], f"{a}: a recording names its host version")
+            self.assertTrue(set(e) <= {"recorded", "source", "host_version", "variants"}, a)
+        # the actions that were never run against a live host (T6.9 records them)
+        for a in ("status", "probe", "open_project", "set_player_position", "render_review", "ae_render"):
+            self.assertIs(index[a]["recorded"], False, a)
+        for a in ("ping", "build_project", "export_frames", "close_project_path", "clip_components", "ae_build_motion",
+                  "ae_readback", "ae_fonts", "ae_probe_text"):
+            self.assertIs(index[a]["recorded"], True, a)
+
+    def test_a_recording_keeps_its_raw_cep_pair(self):
+        index = json.loads((FIXTURES / "index.json").read_text(encoding="utf-8"))
+        for a in V4_ACTIONS:
+            have = (FIXTURES / a / "cep-result.json").is_file()
+            self.assertEqual(have, index[a]["recorded"], a)
+            if have:
+                self.assertTrue((FIXTURES / a / "cep-data.json").is_file(), a)
+        for a in V4_ACTIONS:
+            for v in index[a].get("variants", {}):
+                self.assertIn(v, fixture_variants(a), f"{a}: index names variant {v!r} that has no fixture")
+        for a, v in every_fixture():
+            if v:
+                self.assertIn(v, index[a].get("variants", {}), f"{a}: variant {v!r} is not described in index.json")
+
+    def test_readme_names_every_action_and_variant(self):
+        text = (FIXTURES / "README.md").read_text(encoding="utf-8")
+        for a, v in every_fixture():
+            self.assertIn(a, text)
+            if v:
+                self.assertIn(v, text, f"{a}/{v}")
+        for word in ("_trimmed_from", "PODCAST-TEST", "recorded"):
+            self.assertIn(word, text)
+
+    def test_no_real_client_name_and_no_machine_user_in_any_fixture(self):
+        tokens = real_client_tokens()
+        self.assertGreaterEqual(len(tokens), 4)
+        files = [p for p in FIXTURES.rglob("*") if p.is_file()]
+        self.assertGreater(len(files), 30)
+        for p in files:
+            raw = p.read_text(encoding="utf-8")
+            texts = [raw]
+            if p.suffix == ".json":
+                texts = list(strings_in(json.loads(raw)))
+            for t in texts:
+                low = t.lower()
+                self.assertEqual([k for k in tokens if k in low], [], p.name)
+                for evil in ("loq", "pegasus"):
+                    self.assertNotIn(evil, low, f"{p.relative_to(FIXTURES)} names the machine owner")
+
+
+# ------------------------------------------------------------------------------------------------ golden pairs validate
+class GoldenFixtureValidationTests(unittest.TestCase):
+    def test_every_request_validates(self):
+        for a, v in every_fixture():
+            req = fixture_json(a, fixture_name(v, "request.json"))
+            self.assertEqual(V.validate_request(req), [], (a, v))
+            self.assertEqual((req["protocol"], req["action"]), (4, a), (a, v))
+
+    def test_every_result_validates(self):
+        for a, v in every_fixture():
+            res = fixture_json(a, fixture_name(v, "result.json"))
+            self.assertEqual(V.validate_result(res), [], (a, v))
+            self.assertEqual(res["action"], a, (a, v))
+
+    def test_a_result_echoes_its_request_id(self):
+        for a, v in every_fixture():
+            req = fixture_json(a, fixture_name(v, "request.json"))
+            res = fixture_json(a, fixture_name(v, "result.json"))
+            self.assertEqual(res.get("id"), req["id"], (a, v))
+
+    def test_ok_results_carry_a_readback_failures_carry_error(self):
+        seen = set()
+        for a, v in every_fixture():
+            res = fixture_json(a, fixture_name(v, "result.json"))
+            seen.add(res["ok"])
+            if res["ok"]:
+                self.assertTrue(res["readback"], (a, v))
+                self.assertNotIn("error", res, (a, v))
+            else:
+                self.assertTrue(isinstance(res.get("error"), str) and res["error"].strip(), (a, v))
+        self.assertEqual(seen, {True, False})
+
+    def test_failure_variants_of_the_recorded_runs(self):
+        """What the host really said when it failed: a script error, a refusal, a half-built project, a project that exists."""
+        shapes = {("build_project", "exists"), ("export_frames", "error"), ("ae_build_motion", "failed_scenes"),
+                  ("ae_build_motion", "dirty"), ("close_project_path", "not_open"), ("ping", "aftereffects")}
+        self.assertTrue(shapes <= set(every_fixture()), shapes - set(every_fixture()))
+        for a, v in shapes - {("close_project_path", "not_open"), ("ping", "aftereffects")}:
+            self.assertIs(fixture_json(a, fixture_name(v, "result.json"))["ok"], False, (a, v))
+
+    def test_the_dirty_refusal_keeps_what_motion_build_decides_on(self):
+        res = fixture_json("ae_build_motion", "dirty.result.json")
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["readback"]["reason"], "dirty")
+        self.assertTrue(res["readback"]["project"])
+        self.assertNotIn("ok", res["readback"])
+        self.assertEqual(V.validate_result(res), [])
+        self.assertTrue(V.validate_result(edited(res, ("readback", "reason"), 5)))     # readback_failure checks the types
+
+    def test_build_project_that_exists_is_a_failure_not_an_ok_with_a_lone_error(self):
+        raw = parse_cep_result(fixture_json("build_project", "exists.cep-result.json"))
+        self.assertEqual(raw["ok"], True)                                        # what Premiere's CEP bridge really answered
+        self.assertEqual(raw["result"], {"error": "project exists (set overwrite_existing)"})
+        res = fixture_json("build_project", "exists.result.json")
+        self.assertIs(res["ok"], False)
+        self.assertIn("project exists", res["error"])
+        self.assertTrue(res["how"])
+        self.assertNotIn("readback", res)
+
+
+# ------------------------------------------------------------------------------------------------ cep.py against the recordings
+class CepAdapterFixtureTests(unittest.TestCase):
+    def test_every_raw_cep_result_converts_to_its_golden_result(self):
+        n = 0
+        for a, v in every_fixture():
+            p = FIXTURES / a / fixture_name(v, "cep-result.json")
+            if not p.is_file():
+                continue
+            n += 1
+            inner = parse_cep_result(json.loads(p.read_text(encoding="utf-8")))
+            req = fixture_json(a, fixture_name(v, "request.json"))
+            want = fixture_json(a, fixture_name(v, "result.json"))
+            got = cep.from_cep(a, inner, id=req["id"])
+            self.assertEqual(got, want, (a, v))
+            self.assertEqual(V.validate_result(got), [], (a, v))
+        self.assertGreaterEqual(n, 13)
+
+    def test_every_raw_cep_request_converts_to_its_golden_request(self):
+        n = 0
+        for a, v in every_fixture():
+            p = FIXTURES / a / fixture_name(v, "cep-data.json")
+            if not p.is_file():
+                continue
+            n += 1
+            data = json.loads(p.read_text(encoding="utf-8"))
+            req = fixture_json(a, fixture_name(v, "request.json"))
+            self.assertEqual(data["action"], cep.CEP_NAME[a], (a, v))
+            self.assertTrue(set(CEP_ENVELOPE) <= set(data), (a, v))
+            got = cep.to_request(a, cep.data_from_cep(data), id=req["id"], expires_at=req["expires_at"])
+            self.assertEqual(got, req, (a, v))
+            self.assertEqual(V.validate_request(got), [], (a, v))
+        self.assertGreaterEqual(n, 10)
+
+    def test_the_raw_pairs_have_the_queue_shape(self):
+        for a, v in every_fixture():
+            p = FIXTURES / a / fixture_name(v, "cep-result.json")
+            if not p.is_file():
+                continue
+            outer = json.loads(p.read_text(encoding="utf-8"))
+            self.assertEqual(set(outer), {"ok", "result", "at"}, (a, v))
+            self.assertIsInstance(outer["result"], str, (a, v))                  # as the panel writes it
+            inner = parse_cep_result(outer)
+            self.assertEqual(inner["action"], cep.CEP_NAME[a], (a, v))
+            self.assertIn("ok", inner)
+
+
+# ------------------------------------------------------------------------------------------------ cep.py, by itself
+class CepAdapterTests(unittest.TestCase):
+    EXPIRES = "2026-10-11T12:15:00Z"
+
+    def test_cep_names_come_from_protocol_json(self):
+        proto = V.load("protocol")["actions"]
+        self.assertEqual(cep.CEP_NAME, {a: e["cep"] for a, e in proto.items() if e["cep"]})
+        self.assertEqual(cep.CEP_NAME["ae_build_motion"], "build_motion")
+        self.assertEqual(cep.CEP_NAME["ae_readback"], "readback")
+        self.assertEqual(cep.CEP_NAME["ae_fonts"], "fonts")
+        self.assertEqual(cep.CEP_NAME["ae_probe_text"], "probe_text")
+        for a in ("status", "open_project", "set_player_position", "render_review", "ae_render"):
+            self.assertNotIn(a, cep.CEP_NAME)
+        self.assertEqual({cep.V4_NAME[c]: c for c in cep.V4_NAME}, {a: c for c, a in cep.V4_NAME.items()})
+        self.assertEqual(cep.V4_NAME["probe_text"], "ae_probe_text")
+        self.assertNotIn("probe_frame_paths", cep.V4_NAME)
+
+    def test_to_request_builds_the_envelope_and_copies_the_data(self):
+        data = {"sequence_name": "EP02TEST_R02_RE_EDIT", "times": [1.5, 2.5], "out_dir": "D:/p/frames"}
+        req = cep.to_request("export_frames", data, id="job-1", expires_at=self.EXPIRES)
+        self.assertEqual(req, {"protocol": 4, "id": "job-1", "action": "export_frames", "data": data,
+                               "expires_at": self.EXPIRES})
+        self.assertEqual(V.validate_request(req), [])
+        data["times"].append(3.5)
+        data["out_dir"] = "changed"
+        self.assertEqual(req["data"], {"sequence_name": "EP02TEST_R02_RE_EDIT", "times": [1.5, 2.5], "out_dir": "D:/p/frames"})  # not shared
+        self.assertEqual(cep.to_request("ping", None, id="j", expires_at=self.EXPIRES)["data"], {})
+
+    def test_to_request_refuses_an_unknown_action_and_needs_id_and_expiry(self):
+        with self.assertRaises(ValueError):
+            cep.to_request("nope", {}, id="j", expires_at=self.EXPIRES)
+        with self.assertRaises(TypeError):
+            cep.to_request("ping", {})
+        with self.assertRaises(TypeError):
+            cep.to_request("ping", {}, "j", self.EXPIRES)                  # keyword-only
+        for a in V4_ACTIONS:
+            self.assertEqual(cep.to_request(a, {}, id="j", expires_at=self.EXPIRES)["action"], a)
+
+    def test_data_from_cep_drops_only_the_queue_bookkeeping(self):
+        raw = {"path": "D:/p.prproj", "action": "close_project_path", "job_id": "j", "submitted": "2026-10-11T01:00:00+03:00"}
+        self.assertEqual(cep.data_from_cep(raw), {"path": "D:/p.prproj"})
+        self.assertIn("job_id", raw)                                         # the input is untouched
+
+    def test_ok_answer_becomes_ok_with_the_readback(self):
+        inner = {"ok": True, "action": "ping", "result": {"version": "26.5.2", "build": "5", "project": "", "projects_open": 1}}
+        res = cep.from_cep("ping", inner)
+        self.assertEqual(res, {"ok": True, "action": "ping", "readback": inner["result"]})
+        self.assertEqual(V.validate_result(res), [])
+        self.assertEqual(cep.from_cep("ping", inner, id="req-9")["id"], "req-9")
+        self.assertNotIn("id", res)
+        self.assertEqual(inner["result"], {"version": "26.5.2", "build": "5", "project": "", "projects_open": 1})   # not consumed
+        self.assertIsNot(res["readback"], inner["result"])                                  # not shared either
+
+    def test_the_hosts_own_ok_flag_is_the_envelopes_not_the_readbacks(self):
+        inner = {"ok": True, "action": "build_motion", "result": {"made": ["S01"], "failed": [], "warnings": [], "saved": "a.aep",
+                                                               "main": "MAIN_x", "ae_version": "26.5x89", "ok": True}}
+        self.assertNotIn("ok", cep.from_cep("ae_build_motion", inner)["readback"])
+
+    def test_a_lone_error_inside_an_ok_answer_is_a_failure(self):
+        """Premiere's CEP build_project said ok:true with {error: "project exists (set overwrite_existing)"}."""
+        inner = {"ok": True, "action": "build_project", "result": {"error": "project exists (set overwrite_existing)"}}
+        res = cep.from_cep("build_project", inner, id="b-1")
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["error"], "project exists (set overwrite_existing)")
+        self.assertIn("overwrite_existing", res["how"])
+        self.assertNotIn("readback", res)
+        self.assertEqual(res["id"], "b-1")
+        self.assertEqual(V.validate_result(res), [])
+        other = cep.from_cep("build_project", {"ok": True, "action": "build_project", "result": {"error": "something new"}})
+        self.assertEqual((other["ok"], other["error"]), (False, "something new"))
+        self.assertEqual(V.validate_result(other), [])
+
+    def test_a_result_that_only_looks_like_an_error_is_still_ok_when_it_holds_more(self):
+        res = cep.from_cep("probe", {"ok": True, "action": "probe", "result": {"version": "26.5.2", "project": "", "sequences": [],
+                                                                               "error": "kept"}})
+        self.assertIs(res["ok"], True)
+        self.assertEqual(res["readback"]["error"], "kept")
+
+    def test_a_script_error_becomes_a_failure_with_the_line(self):
+        inner = {"ok": False, "action": "export_frames", "error": "TypeError: null is not an object", "line": 337}
+        res = cep.from_cep("export_frames", inner, id="e-1")
+        self.assertEqual(res, {"ok": False, "action": "export_frames", "id": "e-1",
+                               "error": "TypeError: null is not an object (script line 337)"})
+        self.assertEqual(V.validate_result(res), [])
+        self.assertEqual(cep.from_cep("export_frames", {"ok": False, "action": "export_frames", "error": "boom"})["error"], "boom")
+
+    def test_refusals_keep_their_reason_in_the_readback(self):
+        """motion_build.build tells REFUSED from FAILED by readback.reason ("dirty" / "dirty_target")."""
+        for reason in ("dirty", "dirty_target"):
+            inner = {"ok": False, "action": "build_motion",
+                     "result": {"ok": False, "reason": reason, "project": "x.aep", "project_path": "D:/p/x.aep"}}
+            res = cep.from_cep("ae_build_motion", inner)
+            self.assertIs(res["ok"], False)
+            self.assertEqual(res["readback"], {"reason": reason, "project": "x.aep", "project_path": "D:/p/x.aep"})
+            self.assertIn("unsaved changes", res["error"])
+            self.assertIn("x.aep", res["error"])
+            self.assertTrue(res["how"])
+            self.assertEqual(V.validate_result(res), [])
+        untitled = cep.from_cep("ae_probe_text", {"ok": False, "action": "probe_text",
+                                                  "result": {"ok": False, "reason": "dirty", "project": None}})
+        self.assertIn("an untitled project", untitled["error"])
+        self.assertEqual(V.validate_result(untitled), [])
+
+    def test_an_unknown_reason_is_passed_through_as_the_error(self):
+        inner = {"ok": False, "action": "readback", "result": {"ok": False, "reason": "MAIN_EP01_R01_MO not found in the open project"}}
+        res = cep.from_cep("ae_readback", inner)
+        self.assertEqual(res["error"], "MAIN_EP01_R01_MO not found in the open project")
+        self.assertEqual(res["readback"], {"reason": "MAIN_EP01_R01_MO not found in the open project"})
+        self.assertEqual(V.validate_result(res), [])
+
+    def test_scenes_that_did_not_build_are_a_failure_with_the_partial_readback(self):
+        inner = {"ok": False, "action": "build_motion",
+                 "result": {"made": ["S04"], "failed": [{"scene": "S01", "error": "Error: font", "line": 23},
+                                                        {"scene": "S02", "error": "Error: font", "line": 23}],
+                            "warnings": [], "saved": "a.aep", "main": "MAIN_x", "ae_version": "26.5x89", "ok": False}}
+        res = cep.from_cep("ae_build_motion", inner)
+        self.assertIs(res["ok"], False)
+        self.assertEqual(res["readback"]["made"], ["S04"])
+        self.assertEqual(len(res["readback"]["failed"]), 2)
+        self.assertNotIn("ok", res["readback"])
+        self.assertIn("2 scenes", res["error"])
+        self.assertIn("S01", res["error"])
+        self.assertEqual(V.validate_result(res), [])
+
+    def test_when_the_bridge_never_answered(self):
+        """cep_queue.submit's own failures: no bridge, a timeout (the response is not an {ok, action, result} at all)."""
+        down = cep.from_cep("ping", {"ok": False, "error": "bridge not running",
+                                     "status": {"alive": False, "host": None, "detail": "no heartbeat: start Premiere"}})
+        self.assertEqual((down["ok"], down["error"], down["how"]), (False, "bridge not running", "no heartbeat: start Premiere"))
+        late = cep.from_cep("build_project", {"ok": False, "error": "timeout after 900s (Premiere may show a dialog)", "job": "j"})
+        self.assertIs(late["ok"], False)
+        self.assertIn("timeout", late["error"])
+        self.assertTrue(late["how"])
+        for bad in (None, "", [], 7, "nonsense"):
+            res = cep.from_cep("ping", bad)
+            self.assertIs(res["ok"], False, bad)
+            self.assertTrue(res["error"] and res["how"], bad)
+            self.assertEqual(V.validate_result(res), [], bad)
+        for res in (down, late):
+            self.assertEqual(V.validate_result(res), [])
+
+    def test_an_answer_to_a_different_action_is_not_taken_for_this_one(self):
+        res = cep.from_cep("export_frames", {"ok": True, "action": "probe", "result": {"version": "1", "project": "", "sequences": []}})
+        self.assertIs(res["ok"], False)
+        self.assertIn("probe", res["error"])
+        self.assertIn("export_frames", res["error"])
+        self.assertEqual(V.validate_result(res), [])
+        self.assertIs(cep.from_cep("ping", {"ok": True, "result": {"version": "1", "build": "1", "project": "", "projects_open": 0}})["ok"],
+                      True)                                              # an answer that names no action is accepted
+
+    def test_ok_without_a_result_object_is_a_failure(self):
+        for inner in ({"ok": True, "action": "ping"}, {"ok": True, "action": "ping", "result": "text"},
+                      {"ok": True, "action": "ping", "result": None}, {"ok": True, "action": "ping", "result": [1]}):
+            res = cep.from_cep("ping", inner)
+            self.assertIs(res["ok"], False, inner)
+            self.assertEqual(V.validate_result(res), [], inner)
+
+    def test_only_actions_with_a_cep_name_can_be_converted(self):
+        for a in ("status", "open_project", "set_player_position", "render_review", "ae_render"):
+            with self.assertRaises(ValueError, msg=a):
+                cep.from_cep(a, {"ok": True, "action": a, "result": {}})
+        with self.assertRaises(ValueError):
+            cep.from_cep("nope", {"ok": True})
+
+    def test_adapter_is_pure(self):
+        src = (SK / "engine" / "reel" / "contract" / "cep.py").read_text(encoding="utf-8")
+        for evil in ("open(", "subprocess", "socket", "os.environ", "Path(", "write_text", "read_text", "time.sleep"):
+            self.assertNotIn(evil, src, evil)
+
+
+# ------------------------------------------------------------------------------------------------ mutations of the goldens
+class GoldenNegativeTests(unittest.TestCase):
+    """Dropping or mistyping what the engine reads must be rejected, on the real recorded shapes."""
+
+    # (action, path into the readback): read by ppro_build.build, motion_build.build, motion_readback.compare, ae_probe
+    ENGINE_READS = [
+        ("build_project", ("settings_after", "previewCodec")), ("build_project", ("settings_after", "videoFrameWidth")),
+        ("build_project", ("settings_after", "videoFrameHeight")), ("build_project", ("settings_after", "videoFrameRate")),
+        ("build_project", ("settings_after", "videoFrameRate", "seconds")),
+        ("build_project", ("settings_after", "compositeLinearColor")), ("build_project", ("settings_after", "maximumBitDepth")),
+        ("build_project", ("settings_after", "maximumRenderQuality")),
+        ("build_project", ("placed",)), ("build_project", ("placed", 0, "id")), ("build_project", ("sharpened", 0, "ok")),
+        ("build_project", ("tracks", "audio")), ("build_project", ("tracks", "audio", 0, "clips")),
+        ("build_project", ("tracks", "video", 0, "name")),
+        ("export_frames", ("frames",)), ("export_frames", ("frames", 0, "t")), ("export_frames", ("frames", 0, "file")),
+        ("close_project_path", ("closed",)),
+        ("ae_build_motion", ("failed",)), ("ae_build_motion", ("saved",)), ("ae_build_motion", ("main",)),
+        ("ae_build_motion", ("made",)), ("ae_build_motion", ("ae_version",)),
+        ("ae_readback", ("scenes",)), ("ae_readback", ("scenes", 0, "layers")), ("ae_readback", ("scenes", 0, "in_frame")),
+        ("ae_readback", ("scenes", 0, "out_frame")), ("ae_readback", ("scenes", 0, "id")),
+        ("ae_readback", ("scenes", 0, "layers", 0, "text")), ("ae_readback", ("scenes", 0, "layers", 0, "font_ps")),
+        ("ae_readback", ("scenes", 0, "layers", 0, "substitute")), ("ae_readback", ("scenes", 0, "layers", 0, "composer")),
+        ("ae_readback", ("scenes", 0, "layers", 0, "direction")), ("ae_readback", ("missing_or_substituted",)),
+        ("ae_readback", ("main", "name")),
+        ("ae_fonts", ("fonts",)), ("ae_fonts", ("missing_or_substituted",)),
+        ("ae_probe_text", ("ae_version",)), ("ae_probe_text", ("comps",)), ("ae_probe_text", ("om_templates",)),
+        ("ping", ("version",)), ("ping", ("project",)),
+    ]
+
+    def test_dropping_a_required_readback_key_is_rejected(self):
+        n = 0
+        for a, v in every_fixture():
+            res = fixture_json(a, fixture_name(v, "result.json"))
+            if not res["ok"] or not res.get("readback"):
+                continue
+            for k in readback_required(a, res["readback"]):
+                n += 1
+                bad = edited(res, ("readback", k), drop=True)
+                errs = V.validate_result(bad)
+                self.assertTrue(errs, f"{a}/{v or 'main'}: readback without {k} was accepted")
+        self.assertGreater(n, 40)
+
+    def test_a_required_readback_key_of_the_wrong_type_is_rejected(self):
+        for a, v in every_fixture():
+            res = fixture_json(a, fixture_name(v, "result.json"))
+            if not res["ok"] or not res.get("readback"):
+                continue
+            for k in readback_required(a, res["readback"]):
+                bad = edited(res, ("readback", k), wrong_kind(res["readback"][k]))
+                self.assertTrue(V.validate_result(bad), f"{a}/{v or 'main'}: readback.{k} = {bad['readback'][k]!r} was accepted")
+
+    def test_what_the_engine_reads_is_checked_in_the_recorded_readbacks(self):
+        for a, path in self.ENGINE_READS:
+            res = fixture_json(a, "result.json")
+            node = res["readback"]
+            for step in path:
+                node = node[step]                                  # the golden has it (KeyError/IndexError: fixture too small)
+            errs = V.validate_result(edited(res, ("readback",) + path, drop=True)) if isinstance(path[-1], str) else None
+            if errs is not None:
+                self.assertTrue(errs, f"{a}: dropping readback.{'.'.join(map(str, path))} was accepted")
+            errs = V.validate_result(edited(res, ("readback",) + path, wrong_kind(node)))
+            self.assertTrue(errs, f"{a}: readback.{'.'.join(map(str, path))} = {wrong_kind(node)!r} was accepted")
+
+    def test_a_readback_that_is_not_an_object_is_rejected(self):
+        for a in V4_ACTIONS:
+            res = fixture_json(a, "result.json")
+            if res["ok"]:
+                for junk in ("done", [res["readback"]], 3, None):
+                    self.assertTrue(V.validate_result(dict(res, readback=junk)), (a, junk))
+
+    def test_the_failure_readbacks_are_typed(self):
+        for a in ("ae_build_motion", "ae_probe_text", "ae_readback"):
+            res = {"ok": False, "action": a, "error": "x", "readback": {"reason": "dirty"}}
+            self.assertEqual(V.validate_result(res), [], a)
+            self.assertTrue(V.validate_result(dict(res, readback={"reason": 3})), a)
+        for a in ("ae_build_motion", "ae_probe_text"):
+            res = {"ok": False, "action": a, "error": "x", "readback": {"reason": "dirty", "project": None}}
+            self.assertEqual(V.validate_result(res), [], a)
+            self.assertTrue(V.validate_result(dict(res, readback={"reason": "dirty", "project": 3})), a)
+        bm = fixture_json("ae_build_motion", "failed_scenes.result.json")
+        self.assertEqual(V.validate_result(bm), [])
+        self.assertTrue(V.validate_result(edited(bm, ("readback", "failed", 0, "scene"), 5)))
+        self.assertTrue(V.validate_result(edited(bm, ("readback", "failed"), "S01")))
+
+    def test_a_request_without_a_required_data_key_is_rejected(self):
+        n = 0
+        for a, v in every_fixture():
+            req = fixture_json(a, fixture_name(v, "request.json"))
+            for k in V.load(a)["$defs"]["data"].get("required", []):
+                n += 1
+                self.assertTrue(V.validate_request(edited(req, ("data", k), drop=True)), f"{a}/{v or 'main'}: data without {k}")
+        self.assertGreater(n, 15)
+
+    def test_a_request_with_a_mistyped_or_unknown_data_key_is_rejected(self):
+        for a, v in every_fixture():
+            req = fixture_json(a, fixture_name(v, "request.json"))
+            sch = V.load(a)["$defs"]["data"]
+            if sch.get("additionalProperties") is False:
+                self.assertTrue(V.validate_request(edited(req, ("data", "mystery_key"), 1)), (a, v))
+            for k, val in req["data"].items():
+                if "type" in (sch.get("properties", {}).get(k) or {}) or "$ref" in (sch.get("properties", {}).get(k) or {}):
+                    bad = edited(req, ("data", k), wrong_kind(val))
+                    self.assertTrue(V.validate_request(bad), f"{a}/{v or 'main'}: data.{k} = {bad['data'][k]!r} was accepted")
+
+    def test_the_envelope_is_checked_around_a_golden_request(self):
+        req = fixture_json("build_project", "request.json")
+        for bad in (dict(req, protocol=3), dict(req, action="build"), dict(req, id=""), dict(req, expires_at="soon"),
+                    dict(req, extra=1), {k: v for k, v in req.items() if k != "data"}):
+            self.assertTrue(V.validate_request(bad), bad.keys())
+
+
+# ------------------------------------------------------------------------------------------------ engine requests validate
+def cep_call_to_request(cep_action, data):
+    """The engine's CEP call (action name + data) as the v4 request it would become."""
+    return cep.to_request(cep.V4_NAME[cep_action], data, id="engine-test", expires_at=NOW)
+
+
+class RecordingAE:
+    """motion_build.build's bridge, mocked: answers like After Effects and remembers every (action, data) it was sent."""
+    def __init__(self, build_answer=None):
+        self.calls = []
+        self.build_answer = build_answer
+        self.project_path = None
+
+    @staticmethod
+    def answer(result):
+        ok = result.get("ok", True) is not False
+        return {"ok": ok, "response": {"ok": ok, "result": result}}
+
+    def status(self, max_age_s=5.0):
+        return {"alive": True, "busy": False, "host": "AEFT", "detail": "ok"}
+
+    def submit(self, action, data=None, timeout=900):
+        self.calls.append((action, copy.deepcopy(data if data is not None else {})))
+        if action == "ping":
+            return self.answer({"ae_version": "26.5x89", "dirty": False, "project_path": self.project_path, "num_items": 0})
+        if action == "fonts":
+            return self.answer({"fonts": {n: {"found": True, "substitute": False} for n in data["postscript_names"]},
+                                "missing_or_substituted": []})
+        if action == "build_motion":
+            if self.build_answer is not None:
+                return self.build_answer(data)
+            Path(data["job"]["aep_path"]).write_bytes(b"AEP")
+            return self.answer({"made": [s["id"] for s in data["job"]["plan"]["scenes"]], "failed": [], "warnings": [],
+                                "saved": data["job"]["aep_path"], "main": "MAIN_" + data["job"]["plan"]["reel_id"],
+                                "ae_version": "26.5x89"})
+        if action == "readback":
+            from test_motion import rb_from_plan
+            return self.answer(rb_from_plan(data["job"]))
+        return {"ok": False, "error": f"unexpected {action}"}
+
+
+class EngineMotionRequestTests(unittest.TestCase):
+    """motion_build.build, ae_probe.run_probe: every command they queue is a valid v4 request."""
+
+    @classmethod
+    def setUpClass(cls):
+        from test_motion import good_script, motion_plan_fixture, test_font
+        if test_font() is None:
+            raise unittest.SkipTest("no test font for HarfBuzz fitting")
+        from lib import common
+        from lib.common import write_json
+        from lib.motion_plan import compile_motion
+        cls.common = common
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root, cls.ep, cls.reel = motion_plan_fixture(cls.tmp)
+        write_json(cls.reel.p("01_analysis/motion-script.json"), good_script())
+        r = compile_motion(cls.reel)
+        assert r["ok"], r["errors"]
+        cls.write_json = staticmethod(write_json)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.common.set_context(None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def build(self, ae, replace_edited=False):
+        from lib import ae_bridge, ae_probe, motion_build, plat
+        from lib.motion_plan import fingerprint
+        self.write_json(self.reel.p("01_analysis/plan-approval.json"),
+                        {"approved": True, "by": "editor", "plan_fingerprint": fingerprint(self.reel)})
+        for f in (motion_build.aep_path(self.reel), self.reel.p("04_after_effects/motion-build-result.json")):
+            f.unlink(missing_ok=True)
+        with contextlib.ExitStack() as st:
+            st.enter_context(mock.patch.object(ae_bridge, "submit", ae.submit))
+            st.enter_context(mock.patch.object(ae_bridge, "status", ae.status))
+            st.enter_context(mock.patch.object(ae_probe, "verdict_ok", lambda v: True))
+            st.enter_context(mock.patch.object(plat, "newest_app", lambda key: {"name": "After Effects", "exe": "AfterFX.exe"}))
+            st.enter_context(self.common.use_context(self.common.Context(self.root, home=self.tmp / "home")))
+            return motion_build.build(self.reel, replace_edited=replace_edited)
+
+    def test_the_build_sends_valid_ping_fonts_build_motion_and_readback_requests(self):
+        ae = RecordingAE()
+        r = self.build(ae)
+        self.assertEqual(r["status"], "PROJECT_ASSEMBLED", r)
+        sent = [a for a, _ in ae.calls]
+        self.assertEqual(sent, ["ping", "fonts", "build_motion", "readback"])
+        for a, data in ae.calls:
+            req = cep_call_to_request(a, data)
+            self.assertEqual(V.validate_request(req), [], a)
+            json.dumps(req["data"], ensure_ascii=True).encode("ascii")                   # what the queue writes
+        build_job = dict(ae.calls[2][1]["job"])
+        self.assertEqual(V.validate(build_job["plan"], "ae_build_motion#/$defs/plan"), [])
+        self.assertEqual(ae.calls[2][1]["job"], ae.calls[3][1]["job"])                   # the read-back checks the same job
+
+    def test_a_refusal_from_after_effects_reaches_motion_build_through_the_v4_readback(self):
+        """AE answers {ok:false, reason:"dirty"}; v4 carries it as readback.reason; handing that back gives REFUSED, not FAILED."""
+        raw = parse_cep_result(fixture_json("ae_build_motion", "dirty.cep-result.json"))
+        v4 = cep.from_cep("ae_build_motion", raw)
+        self.assertEqual(V.validate_result(v4), [])
+        legacy = lambda data: {"ok": v4["ok"], "response": {"ok": v4["ok"], "result": v4["readback"]}}   # noqa: E731
+        ae = RecordingAE(build_answer=legacy)
+        r = self.build(ae)
+        self.assertEqual(r["status"], "REFUSED", r)
+        self.assertTrue(any("unsaved changes" in x for x in r["reasons"]), r["reasons"])
+        self.assertEqual([a for a, _ in ae.calls], ["ping", "fonts", "build_motion"])
+
+    def test_a_half_built_project_reaches_motion_build_as_failed(self):
+        raw = parse_cep_result(fixture_json("ae_build_motion", "failed_scenes.cep-result.json"))
+        v4 = cep.from_cep("ae_build_motion", raw)
+        self.assertEqual(V.validate_result(v4), [])
+
+        def answer(data):
+            Path(data["job"]["aep_path"]).write_bytes(b"AEP")                              # saved, but scenes failed
+            return {"ok": v4["ok"], "response": {"ok": v4["ok"], "result": v4["readback"]}}
+        r = self.build(RecordingAE(build_answer=answer))
+        self.assertEqual(r["status"], "FAILED", r)
+        self.assertNotEqual(r["status"], "REFUSED")
+
+    def test_the_arabic_probe_sends_a_valid_probe_text_request(self):
+        from lib import ae_bridge, ae_probe
+        sent = []
+
+        def submit(action, data=None, timeout=900):
+            sent.append((action, copy.deepcopy(data)))
+            return {"ok": False}                                     # the probe stops at the first answer
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"WHYNOT_HOME": home}),                 mock.patch.object(ae_bridge, "submit", submit):
+            r = ae_probe.run_probe()
+        self.assertIs(r["ok"], False)
+        self.assertEqual([a for a, _ in sent], ["probe_text"])
+        req = cep_call_to_request("probe_text", sent[0][1])
+        self.assertEqual(V.validate_request(req), [])
+        self.assertEqual(req["action"], "ae_probe_text")
+
+
+class EnginePremiereRequestTests(unittest.TestCase):
+    """ppro_build.build / export_frames and the CLI's ping / probe, with the Premiere bridge mocked: valid v4 requests."""
+
+    @classmethod
+    def setUpClass(cls):
+        from test_podcast import decision, reel_fixture, shot
+        from lib import common
+        from lib.common import read_json, write_json
+        from lib.plan import compile_plan
+        cls.common = common
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root, cls.reel, _ = reel_fixture(cls.tmp, "storytelling", music=False)
+        pre = read_json(cls.reel.p("00_inputs/preflight.json"))
+        pre["shots"] = {"window": {"offset_ms": 1000, "duration_ms": 10000}, "method": "test",
+                        "shots": [shot(0, 3000, 0.5), shot(3000, 8000), shot(8000, 10000, 0.5)]}
+        write_json(cls.reel.p("00_inputs/preflight.json"), pre)
+        write_json(cls.reel.p("01_analysis/edit-decisions.json"), {"global": {}, "decisions": [
+            decision("EDIT_001", "00:00:04.000", "00:00:06.000", "كلمه8 كلمه9",
+                     graphics=[{"id": "GFX_001", "template": "statement_highlight", "start": "00:00:04.500",
+                                "end": "00:00:05.500", "text": "كلمه9"}])]})
+        assert compile_plan(cls.reel)["ok"]
+        from lib.previews import render_all
+        render_all(cls.reel, composite_preview=False)
+        cls.prj = cls.reel.p(f"07_premiere/project/{cls.reel.video_id}_{common.project_prefix()}_EDIT.prproj")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.common.set_context(None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def setUp(self):
+        self.calls = []
+        self.prj.unlink(missing_ok=True)
+
+    def bridge(self, action, data=None, timeout=60, **kw):
+        self.calls.append((action, copy.deepcopy(data if data is not None else {})))
+        return {"ok": True, "response": {"ok": True, "result": {}}}
+
+    def run_engine(self, fn):
+        with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), \
+                mock.patch("lib.ppro_bridge.submit", self.bridge), \
+                self.common.use_context(self.common.Context(self.root, home=self.tmp / "home")):
+            return fn()
+
+    def check_calls(self, wanted):
+        self.assertEqual([a for a, _ in self.calls], wanted)
+        for a, data in self.calls:
+            req = cep_call_to_request(a, data)
+            self.assertEqual(V.validate_request(req), [], a)
+            json.dumps(req["data"], ensure_ascii=True).encode("ascii")
+
+    def test_build_sends_a_valid_build_project_request(self):
+        from lib import ppro_build
+        self.run_engine(lambda: ppro_build.build(self.reel))
+        self.check_calls(["build_project"])
+        data = self.calls[0][1]
+        self.assertTrue(data["graphics"] and data["markers"] and data["track_names"]["video"])
+        self.assertNotIn("_missing", data)                                      # the engine's private keys never travel
+
+    def test_a_rebuild_closes_the_old_project_first_with_a_valid_request(self):
+        from lib import ppro_build
+        self.prj.parent.mkdir(parents=True, exist_ok=True)
+        self.prj.write_text("built", encoding="utf-8")
+        self.run_engine(lambda: ppro_build.build(self.reel, overwrite=True))
+        self.check_calls(["close_project_path", "build_project"])
+        self.assertTrue(self.calls[1][1]["overwrite_existing"])
+
+    def test_export_frames_sends_valid_requests_with_and_without_a_project_file(self):
+        from lib import ppro_build
+        self.run_engine(lambda: ppro_build.export_frames(self.reel, times=None, retries=0, wait_s=0))
+        self.assertIsNone(self.calls[0][1]["project_path"])                      # no .prproj yet: null, which the schema allows
+        self.prj.parent.mkdir(parents=True, exist_ok=True)
+        self.prj.write_text("built", encoding="utf-8")
+        self.run_engine(lambda: ppro_build.export_frames(self.reel, times=[1.5, 2.5], retries=0, wait_s=0))
+        self.check_calls(["export_frames", "export_frames"])
+        self.assertEqual(self.calls[1][1]["project_path"], str(self.prj))
+        self.assertEqual(self.calls[1][1]["times"], [1.5, 2.5])
+
+    def test_the_cli_ping_and_probe_send_empty_data(self):
+        import io
+        import cli
+        with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), mock.patch("lib.ppro_bridge.submit", self.bridge), \
+                contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_ppro_status(None)
+            cli.cmd_ppro_probe(None)
+        self.check_calls(["ping", "probe"])
+        self.assertEqual([d for _, d in self.calls], [{}, {}])
+
+
 if __name__ == "__main__":
     unittest.main()

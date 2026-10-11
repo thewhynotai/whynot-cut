@@ -1,0 +1,39 @@
+{
+  "ok": true,
+  "action": "export_frames",
+  "id": "20261011-154807-745b53",
+  "readback": {
+    "frames": [
+      {
+        "t": 1.188,
+        "tc": "00:00:01:04",
+        "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\08_quality_control\\premiere_frames\\run-20261011-154807\\frame_001188.png",
+        "called": true
+      },
+      {
+        "t": 2.042,
+        "tc": "00:00:02:01",
+        "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\08_quality_control\\premiere_frames\\run-20261011-154807\\frame_002042.png",
+        "called": true
+      },
+      {
+        "t": 2.5,
+        "tc": "00:00:02:12",
+        "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\08_quality_control\\premiere_frames\\run-20261011-154807\\frame_002500.png",
+        "called": true
+      },
+      {
+        "t": 4.512,
+        "tc": "00:00:04:12",
+        "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\08_quality_control\\premiere_frames\\run-20261011-154807\\frame_004512.png",
+        "called": true
+      },
+      {
+        "t": 4.854,
+        "tc": "00:00:04:20",
+        "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\08_quality_control\\premiere_frames\\run-20261011-154807\\frame_004854.png",
+        "called": true
+      }
+    ]
+  }
+}

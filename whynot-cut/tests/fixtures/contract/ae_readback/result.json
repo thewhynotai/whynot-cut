@@ -1,0 +1,518 @@
+{
+  "ok": true,
+  "action": "ae_readback",
+  "id": "20261011-150407-1494a1",
+  "readback": {
+    "scenes": [
+      {
+        "id": "S01",
+        "comp": "S01_kinetic_quote",
+        "layers": [
+          {
+            "name": "S01_text_1",
+            "kind": "text",
+            "in": 0,
+            "out": 100,
+            "comment": "1f7fb70ab63b",
+            "text": "عبد الشيء\rزي رصفه عبد\rالطريق يعني رصف",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              163.7109375,
+              643.328125,
+              752.578125,
+              338.34375
+            ]
+          },
+          {
+            "name": "S01_text_1_w8",
+            "kind": "text",
+            "in": 0,
+            "out": 100,
+            "comment": "",
+            "text": "رصف",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              164.4065625,
+              883.5203125,
+              227.50875,
+              97.959375
+            ]
+          },
+          {
+            "name": "S01_text_1_w7",
+            "kind": "text",
+            "in": 0,
+            "out": 100,
+            "comment": "",
+            "text": "يعني",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              420.7153125,
+              889.1640625,
+              191.34375,
+              86.671875
+            ]
+          },
+          {
+            "name": "S01_text_1_w6",
+            "kind": "text",
+            "in": 0,
+            "out": 100,
+            "comment": "",
+            "text": "الطريق",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              640.8590625,
+              884.6875,
+              274.734375,
+              95.625
+            ]
+          },
+          {
+            "name": "S01_text_1_w5",
+            "kind": "text",
+            "in": 0,
+            "out": 100,
+            "comment": "",
+            "text": "عبد",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              296.3015625,
+              779.265625,
+              129.28125,
+              66.46875
+            ]
+          }
+        ],
+        "in_frame": 0,
+        "out_frame": 100
+      },
+      {
+        "id": "S02",
+        "comp": "S02_kinetic_quote",
+        "layers": [
+          {
+            "name": "S02_text_1",
+            "kind": "text",
+            "in": 0,
+            "out": 76,
+            "comment": "9a65e0e4d58f",
+            "text": "أنت جاي تسفلت\rروحك على مراده",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              224.25,
+              692.7578125,
+              631.5,
+              239.484375
+            ]
+          },
+          {
+            "name": "S02_text_1_w6",
+            "kind": "text",
+            "in": 0,
+            "out": 76,
+            "comment": "",
+            "text": "مراده",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              226.344375,
+              824.6875,
+              193.6875,
+              95.625
+            ]
+          },
+          {
+            "name": "S02_text_1_w5",
+            "kind": "text",
+            "in": 0,
+            "out": 76,
+            "comment": "",
+            "text": "على",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              448.831875,
+              830.5234375,
+              157.171875,
+              83.953125
+            ]
+          },
+          {
+            "name": "S02_text_1_w4",
+            "kind": "text",
+            "in": 0,
+            "out": 76,
+            "comment": "",
+            "text": "روحك",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              634.80375,
+              820.8625,
+              218.851875,
+              103.275
+            ]
+          },
+          {
+            "name": "S02_text_1_w3",
+            "kind": "text",
+            "in": 0,
+            "out": 76,
+            "comment": "",
+            "text": "تسفلت",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              233.79375,
+              716.1953125,
+              275.34375,
+              72.609375
+            ]
+          }
+        ],
+        "in_frame": 90,
+        "out_frame": 166
+      },
+      {
+        "id": "S03",
+        "comp": "S03_kinetic_quote",
+        "layers": [
+          {
+            "name": "S03_text_1",
+            "kind": "text",
+            "in": 0,
+            "out": 97,
+            "comment": "124d6e3f3611",
+            "text": "وتبقى مفعول به وقع\rعليه فعله الفاعل",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              132.6328125,
+              708.2734375,
+              814.734375,
+              208.453125
+            ]
+          },
+          {
+            "name": "S03_text_1_w7",
+            "kind": "text",
+            "in": 0,
+            "out": 97,
+            "comment": "",
+            "text": "الفاعل",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              230.5125,
+              828.7421875,
+              234.515625,
+              87.515625
+            ]
+          },
+          {
+            "name": "S03_text_1_w6",
+            "kind": "text",
+            "in": 0,
+            "out": 97,
+            "comment": "",
+            "text": "فعله",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              493.828125,
+              836.3828125,
+              170.015625,
+              72.234375
+            ]
+          },
+          {
+            "name": "S03_text_1_w5",
+            "kind": "text",
+            "in": 0,
+            "out": 97,
+            "comment": "",
+            "text": "عليه",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              692.64375,
+              828.2734375,
+              156.84375,
+              88.453125
+            ]
+          },
+          {
+            "name": "S03_text_1_w4",
+            "kind": "text",
+            "in": 0,
+            "out": 97,
+            "comment": "",
+            "text": "وقع",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              150.3703125,
+              707.1484375,
+              142.078125,
+              90.703125
+            ]
+          }
+        ],
+        "in_frame": 156,
+        "out_frame": 253
+      },
+      {
+        "id": "S04",
+        "comp": "S04_icon_point",
+        "layers": [
+          {
+            "name": "S04_text_1",
+            "kind": "text",
+            "in": 0,
+            "out": 96,
+            "comment": "f37eebe351aa",
+            "text": "انا جبت مضرب تينيس وانا\rنادال ولا ديوكوفيتش",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              210.109375,
+              953.125,
+              659.78125,
+              143.75
+            ]
+          },
+          {
+            "name": "S04_icon_1",
+            "kind": "shape",
+            "in": 0,
+            "out": 96,
+            "comment": ""
+          },
+          {
+            "name": "S04_text_1_w8",
+            "kind": "text",
+            "in": 0,
+            "out": 96,
+            "comment": "",
+            "text": "ديوكوفيتش",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              285.128125,
+              1031.015625,
+              289.90625,
+              67.96875
+            ]
+          },
+          {
+            "name": "S04_text_1_w7",
+            "kind": "text",
+            "in": 0,
+            "out": 96,
+            "comment": "",
+            "text": "ولا",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              594.234375,
+              1033.125,
+              62.15625,
+              63.75
+            ]
+          },
+          {
+            "name": "S04_text_1_w6",
+            "kind": "text",
+            "in": 0,
+            "out": 96,
+            "comment": "",
+            "text": "نادال",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              675.590625,
+              1035.828125,
+              119.28125,
+              58.34375
+            ]
+          }
+        ],
+        "in_frame": 243,
+        "out_frame": 339
+      },
+      {
+        "id": "S05",
+        "comp": "S05_list_steps",
+        "layers": [
+          {
+            "name": "S05_item_3",
+            "kind": "text",
+            "in": 0,
+            "out": 101,
+            "comment": "13140fe51266",
+            "text": "المضرب نزل جاب الكورة",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              219.71875,
+              812.415649414062,
+              620.28125,
+              67.96875
+            ]
+          },
+          {
+            "name": "S05_number_3",
+            "kind": "text",
+            "in": 0,
+            "out": 101,
+            "comment": "",
+            "text": "3",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "LTR",
+            "direction_pr": null,
+            "rect": [
+              915.71875,
+              823.228149414062,
+              28.5625,
+              46.34375
+            ]
+          },
+          {
+            "name": "S05_item_2",
+            "kind": "text",
+            "in": 0,
+            "out": 101,
+            "comment": "22600a676258",
+            "text": "وعملت السيرف",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              446.75,
+              691.325012207031,
+              393.25,
+              63.75
+            ]
+          },
+          {
+            "name": "S05_number_2",
+            "kind": "text",
+            "in": 0,
+            "out": 101,
+            "comment": "",
+            "text": "2",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "LTR",
+            "direction_pr": null,
+            "rect": [
+              915.0625,
+              700.418762207031,
+              29.875,
+              45.5625
+            ]
+          },
+          {
+            "name": "S05_item_1",
+            "kind": "text",
+            "in": 0,
+            "out": 101,
+            "comment": "f67bd73dcebb",
+            "text": "مسكت المضرب",
+            "font_ps": "SegoeUI-Bold",
+            "substitute": false,
+            "composer": "UNIVERSAL",
+            "direction": "RTL",
+            "direction_pr": null,
+            "rect": [
+              430.75,
+              566.015625,
+              409.25,
+              67.96875
+            ]
+          }
+        ],
+        "in_frame": 329,
+        "out_frame": 430
+      }
+    ],
+    "missing_or_substituted": [],
+    "main": {
+      "name": "MAIN_EP02TEST_R02_MO",
+      "layers": 19,
+      "duration_frames": 776
+    }
+  }
+}

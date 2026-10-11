@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "result": "{\"ok\":false,\"action\":\"build_motion\",\"result\":{\"made\":[\"S04\",\"S05\"],\"failed\":[{\"scene\":\"S01\",\"error\":\"Error: After Effects error: Unable to set \\u201cfont\\u201d. Length must be between 1 and 63 inclusive.\",\"line\":23},{\"scene\":\"S02\",\"error\":\"Error: After Effects error: Unable to set \\u201cfont\\u201d. Length must be between 1 and 63 inclusive.\",\"line\":23},{\"scene\":\"S03\",\"error\":\"Error: After Effects error: Unable to set \\u201cfont\\u201d. Length must be between 1 and 63 inclusive.\",\"line\":23},{\"scene\":\"S06\",\"error\":\"Error: After Effects error: Unable to set \\u201cfont\\u201d. Length must be between 1 and 63 inclusive.\",\"line\":23},{\"scene\":\"S07\",\"error\":\"Error: After Effects error: Unable to set \\u201cfont\\u201d. Length must be between 1 and 63 inclusive.\",\"line\":23}],\"warnings\":[],\"saved\":\"D:\\\\whynot-test\\\\PODCAST-TEST\\\\output\\\\projects\\\\EP02TEST_R02_MO\\\\04_after_effects\\\\project\\\\EP02TEST_R02_MO_RE_MOTION.aep\",\"main\":\"MAIN_EP02TEST_R02_MO\",\"ae_version\":\"26.5x89\",\"ok\":false}}",
+  "at": 1791712590630
+}

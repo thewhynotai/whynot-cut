@@ -1,0 +1,13 @@
+{
+  "protocol": 4,
+  "id": "fixture-ae-render-0001",
+  "action": "ae_render",
+  "data": {
+    "aep_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\04_after_effects\\project\\EP02TEST_R02_MO_RE_MOTION.aep",
+    "comp": "MAIN_EP02TEST_R02_MO",
+    "out_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\04_after_effects\\render\\EP02TEST_R02_MO_MAIN.mov",
+    "render_settings_template": "Best Settings",
+    "output_module_template": "High Quality"
+  },
+  "expires_at": "2026-10-11T12:15:00Z"
+}

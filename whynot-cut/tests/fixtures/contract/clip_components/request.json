@@ -1,0 +1,11 @@
+{
+  "protocol": 4,
+  "id": "20261011-033011-762051",
+  "action": "clip_components",
+  "data": {
+    "sequence_name": "EP02TEST_R02_RE_EDIT",
+    "track": 0,
+    "clip": 0
+  },
+  "expires_at": "2026-10-11T00:45:11Z"
+}

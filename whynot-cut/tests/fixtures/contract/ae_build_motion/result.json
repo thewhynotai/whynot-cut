@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "action": "ae_build_motion",
+  "id": "20261011-150400-cf8541",
+  "readback": {
+    "made": [
+      "S01",
+      "S02",
+      "S03",
+      "S04",
+      "S05"
+    ],
+    "failed": [],
+    "warnings": [],
+    "saved": "D:\\whynot-test\\بودكاست-تجربة\\output\\projects\\EP02TEST_R02_MO\\04_after_effects\\project\\EP02TEST_R02_MO_RE_MOTION.aep",
+    "main": "MAIN_EP02TEST_R02_MO",
+    "ae_version": "26.5x89"
+  }
+}

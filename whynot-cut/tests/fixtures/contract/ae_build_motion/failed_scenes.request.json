@@ -1,0 +1,1355 @@
+{
+  "protocol": 4,
+  "id": "20261011-125627-089425",
+  "action": "ae_build_motion",
+  "data": {
+    "job": {
+      "plan": {
+        "reel_id": "EP02TEST_R02_MO",
+        "format": "9x16",
+        "w": 1080,
+        "h": 1920,
+        "safe": {
+          "top": 250,
+          "bottom": 420,
+          "side": 90
+        },
+        "fps": 24.0,
+        "dir": -1,
+        "direction": "rtl",
+        "duration_frames": 776,
+        "content_type": "storytelling",
+        "recipe_motion": {
+          "beats": [
+            "hook",
+            "setup",
+            "turn",
+            "payoff"
+          ],
+          "scene_s": {
+            "min": 2.5,
+            "target": 5,
+            "max": 9
+          },
+          "prefer": [
+            "title_card",
+            "kinetic_quote",
+            "timeline",
+            "icon_point",
+            "context_card"
+          ],
+          "avoid": [],
+          "reveal": "word",
+          "ease": "smooth",
+          "transition": "push",
+          "theme": "light",
+          "captions": "subtitles",
+          "speaker_badge": true,
+          "progress": false,
+          "voice_pulse": false,
+          "max_words_on_screen": 12,
+          "emphasis_per_scene": 2,
+          "sfx_on_transition": "whoosh_soft",
+          "sfx_rules": []
+        },
+        "theme": {
+          "name": "light",
+          "bg": [
+            0.902,
+            0.9333,
+            0.9725
+          ],
+          "text": [
+            0.1176,
+            0.1647,
+            0.2314
+          ],
+          "accent": [
+            0.2275,
+            0.4824,
+            0.8353
+          ]
+        },
+        "fonts": {
+          "title": {
+            "ps": "",
+            "file": "D:\\whynot-test\\PODCAST-TEST\\assets\\Fonts\\IBMPlexSansArabic-Medium.ttf"
+          },
+          "quote": {
+            "ps": "",
+            "file": "D:\\whynot-test\\PODCAST-TEST\\assets\\Fonts\\IBMPlexSansArabic-Medium.ttf"
+          },
+          "stat": {
+            "ps": "",
+            "file": "D:\\whynot-test\\PODCAST-TEST\\assets\\Fonts\\IBMPlexSansArabic-Medium.ttf"
+          },
+          "body": {
+            "ps": "IBMPlexSansArabic-Medium",
+            "file": "D:\\whynot-test\\PODCAST-TEST\\assets\\Fonts\\IBMPlexSansArabic-Medium.ttf"
+          },
+          "label": {
+            "ps": "IBMPlexSansArabic-Medium",
+            "file": "D:\\whynot-test\\PODCAST-TEST\\assets\\Fonts\\IBMPlexSansArabic-Medium.ttf"
+          },
+          "caption": {
+            "ps": "IBMPlexSansArabic-Bold",
+            "file": "D:\\whynot-test\\PODCAST-TEST\\assets\\Fonts\\IBMPlexSansArabic-Bold.ttf"
+          }
+        },
+        "scenes": [
+          {
+            "id": "S01",
+            "type": "kinetic_quote",
+            "beat": "B1",
+            "beat_role": "hook",
+            "start_frame": 0,
+            "end_frame": 90,
+            "hero_frame": 89,
+            "transition_in": {
+              "type": "cut",
+              "frames": 0
+            },
+            "theme": "light",
+            "bg": [
+              0.902,
+              0.9333,
+              0.9725
+            ],
+            "elements": [
+              {
+                "kind": "text",
+                "name": "S01_text_1",
+                "role": "quote",
+                "lines": [
+                  "عبد الشيء زي رصفه",
+                  "عبد الطريق يعني رصف"
+                ],
+                "text": "عبد الشيء زي رصفه\rعبد الطريق يعني رصف",
+                "size": 96,
+                "font_ps": "",
+                "color": [
+                  0.1176,
+                  0.1647,
+                  0.2314
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 540.0,
+                "y": 812.5,
+                "rtl": true,
+                "anchor": "center",
+                "reveal": "word",
+                "tokens": [
+                  {
+                    "text": "عبد",
+                    "cue_frame": 0,
+                    "word_id": 1
+                  },
+                  {
+                    "text": "الشيء",
+                    "cue_frame": 16,
+                    "word_id": 2
+                  },
+                  {
+                    "text": "زي",
+                    "cue_frame": 30,
+                    "word_id": 3
+                  },
+                  {
+                    "text": "رصفه",
+                    "cue_frame": 43,
+                    "word_id": 4
+                  },
+                  {
+                    "text": "عبد",
+                    "cue_frame": 53,
+                    "word_id": 5
+                  },
+                  {
+                    "text": "الطريق",
+                    "cue_frame": 65,
+                    "word_id": 6
+                  },
+                  {
+                    "text": "يعني",
+                    "cue_frame": 79,
+                    "word_id": 7
+                  },
+                  {
+                    "text": "رصف",
+                    "cue_frame": 85,
+                    "word_id": 8
+                  }
+                ],
+                "emphasis": [
+                  8
+                ],
+                "appear_frame": 4,
+                "cue_hash": "1f7fb70ab63b",
+                "line_cues": [
+                  0,
+                  53
+                ]
+              }
+            ],
+            "recipe_note": "",
+            "sfx": [],
+            "outro": false,
+            "layer_out_frame": 100
+          },
+          {
+            "id": "S02",
+            "type": "kinetic_quote",
+            "beat": "B2",
+            "beat_role": "setup",
+            "start_frame": 90,
+            "end_frame": 156,
+            "hero_frame": 155,
+            "transition_in": {
+              "type": "push",
+              "frames": 10
+            },
+            "theme": "light",
+            "bg": [
+              0.902,
+              0.9333,
+              0.9725
+            ],
+            "elements": [
+              {
+                "kind": "text",
+                "name": "S02_text_1",
+                "role": "quote",
+                "lines": [
+                  "أنت جاي تسفلت",
+                  "روحك على مراده"
+                ],
+                "text": "أنت جاي تسفلت\rروحك على مراده",
+                "size": 96,
+                "font_ps": "",
+                "color": [
+                  0.1176,
+                  0.1647,
+                  0.2314
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 540.0,
+                "y": 812.5,
+                "rtl": true,
+                "anchor": "center",
+                "reveal": "word",
+                "tokens": [
+                  {
+                    "text": "أنت",
+                    "cue_frame": 94,
+                    "word_id": 9
+                  },
+                  {
+                    "text": "جاي",
+                    "cue_frame": 105,
+                    "word_id": 10
+                  },
+                  {
+                    "text": "تسفلت",
+                    "cue_frame": 110,
+                    "word_id": 11
+                  },
+                  {
+                    "text": "روحك",
+                    "cue_frame": 121,
+                    "word_id": 12
+                  },
+                  {
+                    "text": "على",
+                    "cue_frame": 131,
+                    "word_id": 13
+                  },
+                  {
+                    "text": "مراده",
+                    "cue_frame": 144,
+                    "word_id": 14
+                  }
+                ],
+                "emphasis": [
+                  4
+                ],
+                "appear_frame": 94,
+                "cue_hash": "9a65e0e4d58f",
+                "line_cues": [
+                  94,
+                  121
+                ]
+              }
+            ],
+            "recipe_note": "",
+            "sfx": [],
+            "outro": false,
+            "layer_out_frame": 166
+          },
+          {
+            "id": "S03",
+            "type": "kinetic_quote",
+            "beat": "B2",
+            "beat_role": "setup",
+            "start_frame": 156,
+            "end_frame": 243,
+            "hero_frame": 242,
+            "transition_in": {
+              "type": "push",
+              "frames": 10
+            },
+            "theme": "light",
+            "bg": [
+              0.902,
+              0.9333,
+              0.9725
+            ],
+            "elements": [
+              {
+                "kind": "text",
+                "name": "S03_text_1",
+                "role": "quote",
+                "lines": [
+                  "وتبقى مفعول به وقع",
+                  "عليه فعله الفاعل"
+                ],
+                "text": "وتبقى مفعول به وقع\rعليه فعله الفاعل",
+                "size": 96,
+                "font_ps": "",
+                "color": [
+                  0.1176,
+                  0.1647,
+                  0.2314
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 540.0,
+                "y": 812.5,
+                "rtl": true,
+                "anchor": "center",
+                "reveal": "word",
+                "tokens": [
+                  {
+                    "text": "وتبقى",
+                    "cue_frame": 159,
+                    "word_id": 15
+                  },
+                  {
+                    "text": "مفعول",
+                    "cue_frame": 178,
+                    "word_id": 16
+                  },
+                  {
+                    "text": "به",
+                    "cue_frame": 193,
+                    "word_id": 17
+                  },
+                  {
+                    "text": "وقع",
+                    "cue_frame": 198,
+                    "word_id": 18
+                  },
+                  {
+                    "text": "عليه",
+                    "cue_frame": 214,
+                    "word_id": 19
+                  },
+                  {
+                    "text": "فعله",
+                    "cue_frame": 221,
+                    "word_id": 20
+                  },
+                  {
+                    "text": "الفاعل",
+                    "cue_frame": 232,
+                    "word_id": 21
+                  }
+                ],
+                "emphasis": [],
+                "appear_frame": 160,
+                "cue_hash": "124d6e3f3611",
+                "line_cues": [
+                  159,
+                  214
+                ]
+              }
+            ],
+            "recipe_note": "",
+            "sfx": [],
+            "outro": false,
+            "layer_out_frame": 253
+          },
+          {
+            "id": "S04",
+            "type": "icon_point",
+            "beat": "B3",
+            "beat_role": "turn",
+            "start_frame": 243,
+            "end_frame": 329,
+            "hero_frame": 254,
+            "transition_in": {
+              "type": "push",
+              "frames": 10
+            },
+            "theme": "light",
+            "bg": [
+              0.902,
+              0.9333,
+              0.9725
+            ],
+            "elements": [
+              {
+                "kind": "icon",
+                "name": "S04_icon_1",
+                "icon": "trophy",
+                "shapes": [
+                  {
+                    "vertices": [
+                      [
+                        -19.75,
+                        26.267500000000002
+                      ],
+                      [
+                        -19.75,
+                        49.375
+                      ],
+                      [
+                        -29.625,
+                        59.25
+                      ],
+                      [
+                        -49.375,
+                        79.0
+                      ],
+                      [
+                        -49.375,
+                        98.75
+                      ]
+                    ],
+                    "inTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        5.453811904579084,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        -10.907623809158167
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "outTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        5.453811904579084
+                      ],
+                      [
+                        -10.907623809158167,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "closed": false
+                  },
+                  {
+                    "vertices": [
+                      [
+                        19.75,
+                        26.267500000000002
+                      ],
+                      [
+                        19.75,
+                        49.375
+                      ],
+                      [
+                        29.625,
+                        59.25
+                      ],
+                      [
+                        49.375,
+                        79.0
+                      ],
+                      [
+                        49.375,
+                        98.75
+                      ]
+                    ],
+                    "inTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        -5.453811904579084,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        -10.907623809158167
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "outTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        5.453811904579084
+                      ],
+                      [
+                        10.907623809158167,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "closed": false
+                  },
+                  {
+                    "vertices": [
+                      [
+                        58.420500000000004,
+                        -19.75
+                      ],
+                      [
+                        74.0625,
+                        -19.75
+                      ],
+                      [
+                        98.75,
+                        -44.4375
+                      ],
+                      [
+                        98.75,
+                        -69.125
+                      ],
+                      [
+                        88.875,
+                        -79.0
+                      ],
+                      [
+                        59.25,
+                        -79.0
+                      ]
+                    ],
+                    "inTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        13.634529761447707
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        5.453811904579084,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "outTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        13.634529761447725,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        -5.453811904579084
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "closed": false
+                  },
+                  {
+                    "vertices": [
+                      [
+                        -79.0,
+                        98.75
+                      ],
+                      [
+                        79.0,
+                        98.75
+                      ]
+                    ],
+                    "inTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "outTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "closed": false
+                  },
+                  {
+                    "vertices": [
+                      [
+                        -59.25,
+                        -29.625
+                      ],
+                      [
+                        0.0,
+                        29.625
+                      ],
+                      [
+                        59.25,
+                        -29.625
+                      ],
+                      [
+                        59.25,
+                        -88.875
+                      ],
+                      [
+                        49.375,
+                        -98.75
+                      ],
+                      [
+                        -49.375,
+                        -98.75
+                      ],
+                      [
+                        -59.25,
+                        -88.875
+                      ]
+                    ],
+                    "inTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        -32.7228714274745,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        32.7228714274745
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        5.453811904579084,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        -5.453811904579084
+                      ]
+                    ],
+                    "outTangents": [
+                      [
+                        0.0,
+                        32.7228714274745
+                      ],
+                      [
+                        32.7228714274745,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        -5.453811904579084
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        -5.453811904579084,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "closed": true
+                  },
+                  {
+                    "vertices": [
+                      [
+                        -58.420500000000004,
+                        -19.75
+                      ],
+                      [
+                        -74.0625,
+                        -19.75
+                      ],
+                      [
+                        -98.75,
+                        -44.4375
+                      ],
+                      [
+                        -98.75,
+                        -69.125
+                      ],
+                      [
+                        -88.875,
+                        -79.0
+                      ],
+                      [
+                        -59.25,
+                        -79.0
+                      ]
+                    ],
+                    "inTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        13.634529761447707
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        -5.453811904579084,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "outTangents": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        -13.634529761447707,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        -5.453811904579084
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        0.0
+                      ]
+                    ],
+                    "closed": false
+                  }
+                ],
+                "size": 237,
+                "stroke": 19.8,
+                "x": 540.0,
+                "y": 625.0,
+                "mirror": false,
+                "color": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "draw_on_frame": 247,
+                "appear_frame": 247
+              },
+              {
+                "kind": "text",
+                "name": "S04_text_1",
+                "role": "body",
+                "lines": [
+                  "انا جبت مضرب تينيس وانا",
+                  "نادال ولا ديوكوفيتش"
+                ],
+                "text": "انا جبت مضرب تينيس وانا\rنادال ولا ديوكوفيتش",
+                "size": 64,
+                "font_ps": "SegoeUI-Bold",
+                "color": [
+                  0.1176,
+                  0.1647,
+                  0.2314
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 540.0,
+                "y": 1025.0,
+                "rtl": true,
+                "anchor": "center",
+                "reveal": "word",
+                "tokens": [
+                  {
+                    "text": "انا",
+                    "cue_frame": 247,
+                    "word_id": 23
+                  },
+                  {
+                    "text": "جبت",
+                    "cue_frame": 251,
+                    "word_id": 24
+                  },
+                  {
+                    "text": "مضرب",
+                    "cue_frame": 257,
+                    "word_id": 25
+                  },
+                  {
+                    "text": "تينيس",
+                    "cue_frame": 265,
+                    "word_id": 26
+                  },
+                  {
+                    "text": "وانا",
+                    "cue_frame": 274,
+                    "word_id": 27
+                  },
+                  {
+                    "text": "نادال",
+                    "cue_frame": 301,
+                    "word_id": 28
+                  },
+                  {
+                    "text": "ولا",
+                    "cue_frame": 311,
+                    "word_id": 29
+                  },
+                  {
+                    "text": "ديوكوفيتش",
+                    "cue_frame": 314,
+                    "word_id": 30
+                  }
+                ],
+                "emphasis": [],
+                "appear_frame": 251,
+                "cue_hash": "f37eebe351aa",
+                "line_cues": [
+                  247,
+                  301
+                ]
+              }
+            ],
+            "recipe_note": "",
+            "sfx": [],
+            "outro": false,
+            "layer_out_frame": 339
+          },
+          {
+            "id": "S05",
+            "type": "list_steps",
+            "beat": "B3",
+            "beat_role": "turn",
+            "start_frame": 329,
+            "end_frame": 420,
+            "hero_frame": 391,
+            "transition_in": {
+              "type": "push",
+              "frames": 10
+            },
+            "theme": "light",
+            "bg": [
+              0.902,
+              0.9333,
+              0.9725
+            ],
+            "elements": [
+              {
+                "kind": "text",
+                "name": "S05_number_1",
+                "role": "body",
+                "lines": [
+                  "1"
+                ],
+                "text": "1",
+                "size": 64,
+                "font_ps": "SegoeUI-Bold",
+                "color": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 930,
+                "y": 600.0,
+                "rtl": false,
+                "anchor": "center",
+                "reveal": "none",
+                "tokens": [],
+                "emphasis": [],
+                "appear_frame": 333,
+                "cue_hash": null
+              },
+              {
+                "kind": "text",
+                "name": "S05_item_1",
+                "role": "body",
+                "lines": [
+                  "مسكت المضرب"
+                ],
+                "text": "مسكت المضرب",
+                "size": 64,
+                "font_ps": "SegoeUI-Bold",
+                "color": [
+                  0.1176,
+                  0.1647,
+                  0.2314
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 840,
+                "y": 600.0,
+                "rtl": true,
+                "anchor": "start",
+                "reveal": "item",
+                "tokens": [
+                  {
+                    "text": "مسكت",
+                    "cue_frame": 333,
+                    "word_id": 31
+                  },
+                  {
+                    "text": "المضرب",
+                    "cue_frame": 347,
+                    "word_id": 32
+                  }
+                ],
+                "emphasis": [],
+                "appear_frame": 333,
+                "cue_hash": "f67bd73dcebb",
+                "line_cues": [
+                  333
+                ]
+              },
+              {
+                "kind": "text",
+                "name": "S05_number_2",
+                "role": "body",
+                "lines": [
+                  "2"
+                ],
+                "text": "2",
+                "size": 64,
+                "font_ps": "SegoeUI-Bold",
+                "color": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 930,
+                "y": 723.2,
+                "rtl": false,
+                "anchor": "center",
+                "reveal": "none",
+                "tokens": [],
+                "emphasis": [],
+                "appear_frame": 359,
+                "cue_hash": null
+              },
+              {
+                "kind": "text",
+                "name": "S05_item_2",
+                "role": "body",
+                "lines": [
+                  "وعملت السيرف"
+                ],
+                "text": "وعملت السيرف",
+                "size": 64,
+                "font_ps": "SegoeUI-Bold",
+                "color": [
+                  0.1176,
+                  0.1647,
+                  0.2314
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 840,
+                "y": 723.2,
+                "rtl": true,
+                "anchor": "start",
+                "reveal": "item",
+                "tokens": [
+                  {
+                    "text": "وعملت",
+                    "cue_frame": 359,
+                    "word_id": 33
+                  },
+                  {
+                    "text": "السيرف",
+                    "cue_frame": 370,
+                    "word_id": 34
+                  }
+                ],
+                "emphasis": [],
+                "appear_frame": 359,
+                "cue_hash": "22600a676258",
+                "line_cues": [
+                  359
+                ]
+              },
+              {
+                "kind": "text",
+                "name": "S05_number_3",
+                "role": "body",
+                "lines": [
+                  "3"
+                ],
+                "text": "3",
+                "size": 64,
+                "font_ps": "SegoeUI-Bold",
+                "color": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 930,
+                "y": 846.4,
+                "rtl": false,
+                "anchor": "center",
+                "reveal": "none",
+                "tokens": [],
+                "emphasis": [],
+                "appear_frame": 380,
+                "cue_hash": null
+              },
+              {
+                "kind": "text",
+                "name": "S05_item_3",
+                "role": "body",
+                "lines": [
+                  "المضرب نزل جاب الكورة"
+                ],
+                "text": "المضرب نزل جاب الكورة",
+                "size": 64,
+                "font_ps": "SegoeUI-Bold",
+                "color": [
+                  0.1176,
+                  0.1647,
+                  0.2314
+                ],
+                "accent": [
+                  0.2275,
+                  0.4824,
+                  0.8353
+                ],
+                "x": 840,
+                "y": 846.4,
+                "rtl": true,
+                "anchor": "start",
+                "reveal": "item",
+                "tokens": [
+                  {
+                    "text": "المضرب",
+                    "cue_frame": 380,
+                    "word_id": 35
+                  },
+                  {
+                    "text": "نزل",
+                    "cue_frame": 394,
+                    "word_id": 36
+                  },
+                  {
+                    "text": "جاب",
+                    "cue_frame": 411,
+                    "word_id": 37
+                  },
+                  {
+                    "text": "الكورة",
+                    "cue_frame": 415,
+                    "word_id": 38
+                  }
+                ],
+                "emphasis": [],
+                "appear_frame": 380,
+                "cue_hash": "13140fe51266",
+                "line_cues": [
+                  380
+                ]
+              }
+            ],
+            "recipe_note": "the speaker narrates the serve in three steps",
+            "sfx": [],
+            "outro": false,
+            "layer_out_frame": 430
+          }
+        ],
+        "persistent": {
+          "background": {
+            "theme": "light"
+          },
+          "captions": {
+            "cues": [],
+            "size": 54,
+            "font_ps": "SegoeUI-Bold",
+            "color": [
+              0.1176,
+              0.1647,
+              0.2314
+            ],
+            "y": 1470,
+            "x": 540.0,
+            "box_w": 900
+          },
+          "speaker_badge": null,
+          "progress": false,
+          "voice_pulse": null
+        },
+        "audio": {
+          "dialogue": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\06_audio\\dialogue\\dialogue_motion_seq.wav",
+          "music": null,
+          "sfx": [
+            {
+              "kind": "whoosh_soft",
+              "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\06_audio\\sfx\\whoosh_soft.wav",
+              "frame": 90
+            },
+            {
+              "kind": "whoosh_soft",
+              "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\06_audio\\sfx\\whoosh_soft.wav",
+              "frame": 156
+            },
+            {
+              "kind": "whoosh_soft",
+              "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\06_audio\\sfx\\whoosh_soft.wav",
+              "frame": 243
+            },
+            {
+              "kind": "whoosh_soft",
+              "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\06_audio\\sfx\\whoosh_soft.wav",
+              "frame": 329
+            },
+            {
+              "kind": "whoosh_soft",
+              "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\06_audio\\sfx\\whoosh_soft.wav",
+              "frame": 420
+            },
+            {
+              "kind": "whoosh_soft",
+              "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\06_audio\\sfx\\whoosh_soft.wav",
+              "frame": 580
+            },
+            {
+              "kind": "whoosh_soft",
+              "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\06_audio\\sfx\\whoosh_soft.wav",
+              "frame": 661
+            },
+            {
+              "kind": "whoosh_soft",
+              "file": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\06_audio\\sfx\\whoosh_soft.wav",
+              "frame": 716
+            }
+          ]
+        },
+        "assets": [
+          {
+            "ref": "lucide:trophy",
+            "license": "ISC",
+            "attribution": ""
+          }
+        ],
+        "editorial_lines": [
+          {
+            "scene": "S09",
+            "field": "cta",
+            "text": "تابع WhyNot Test Podcast"
+          }
+        ],
+        "approvals": [],
+        "generated": "2026-10-11T12:56:11+03:00",
+        "brand": {
+          "controls": [
+            {
+              "name": "Brand Teal",
+              "rgb": [
+                0.2275,
+                0.4824,
+                0.8353
+              ]
+            },
+            {
+              "name": "Brand White",
+              "rgb": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "name": "Brand Paper",
+              "rgb": [
+                0.902,
+                0.9333,
+                0.9725
+              ]
+            },
+            {
+              "name": "Brand Ink",
+              "rgb": [
+                0.1176,
+                0.1647,
+                0.2314
+              ]
+            }
+          ],
+          "official": ""
+        },
+        "fingerprint": "d50351a8ab36e491c362bbb6507c313b290d28ce",
+        "word_reveal_s": 0.18
+      },
+      "caps": {
+        "composer_universal": true,
+        "rtl_direction": "textdocument",
+        "word_index_logical": false,
+        "fontobject": true,
+        "emphasis_animator": true,
+        "om_template": "High Quality",
+        "templates": [
+          "AIFF 48kHz",
+          "Alpha Only",
+          "H.264 - Match Render Settings -  5 Mbps",
+          "H.264 - Match Render Settings - 15 Mbps",
+          "H.264 - Match Render Settings - 40 Mbps",
+          "High Quality",
+          "High Quality with Alpha",
+          "Lossless",
+          "Lossless with Alpha",
+          "Multi-Machine Sequence",
+          "Photoshop",
+          "TIFF Sequence with Alpha",
+          "_HIDDEN X-Factor 16",
+          "_HIDDEN X-Factor 16 Premul",
+          "_HIDDEN X-Factor 32",
+          "_HIDDEN X-Factor 32 Premul",
+          "_HIDDEN X-Factor 8",
+          "_HIDDEN X-Factor 8 Premul"
+        ]
+      },
+      "caps_source": "probe",
+      "aep_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\04_after_effects\\project\\EP02TEST_R02_MO_RE_MOTION.aep",
+      "render_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\04_after_effects\\render\\EP02TEST_R02_MO_MAIN.mov",
+      "fallback_font": "SegoeUI-Bold",
+      "generated": "2026-10-11T12:56:27+03:00"
+    }
+  },
+  "expires_at": "2026-10-11T10:11:27Z"
+}

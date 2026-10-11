@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "action": "render_review",
+  "id": "fixture-render-review-0001",
+  "readback": {
+    "started": true,
+    "out_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\08_quality_control\\review\\EP02TEST_R02_review.mp4",
+    "mode": "encoder"
+  }
+}

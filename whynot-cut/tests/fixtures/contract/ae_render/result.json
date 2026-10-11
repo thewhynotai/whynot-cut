@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "action": "ae_render",
+  "id": "fixture-ae-render-0001",
+  "readback": {
+    "status": "RENDERED",
+    "returncode": 0,
+    "output": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\04_after_effects\\render\\EP02TEST_R02_MO_MAIN.mov",
+    "elapsed_s": 41.2,
+    "log": null
+  }
+}

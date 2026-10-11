@@ -1,0 +1,117 @@
+{
+  "ping": {
+    "recorded": true,
+    "source": "ppro-queue/20261011-154756-042575 (PODCAST-TEST EP02TEST_R02, Premiere)",
+    "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)",
+    "variants": {
+      "aftereffects": {
+        "recorded": true,
+        "source": "ae-queue/20261011-150357-8eb492 (PODCAST-TEST EP02TEST_R02_MO, After Effects)",
+        "host_version": "After Effects 26.5 (26.5x89, bridge 3.1.0)"
+      }
+    }
+  },
+  "status": {
+    "recorded": false,
+    "source": "written from the contract (the UXP plugin's own answer; the CEP bridge has no status action)",
+    "host_version": ""
+  },
+  "probe": {
+    "recorded": false,
+    "source": "written from templates/premiere/nh_ppro_lib.jsx NHPP.actions.probe (settings and tracks taken from the recorded build_project)",
+    "host_version": ""
+  },
+  "build_project": {
+    "recorded": true,
+    "source": "ppro-queue/20261011-041726-a9ed96 (PODCAST-TEST EP02TEST_R02)",
+    "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)",
+    "variants": {
+      "exists": {
+        "recorded": true,
+        "source": "ppro-queue/20261011-160738-0f07a3 (the answer; its request carried only project_path, so the request is the build request of the main pair)",
+        "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)"
+      }
+    }
+  },
+  "export_frames": {
+    "recorded": true,
+    "source": "ppro-queue/20261011-154807-745b53 (PODCAST-TEST EP02TEST_R02)",
+    "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)",
+    "variants": {
+      "error": {
+        "recorded": true,
+        "source": "ppro-queue/20261011-042154-1ad092 (a client project, paths rewritten to the PODCAST-TEST layout)",
+        "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)"
+      }
+    }
+  },
+  "close_project_path": {
+    "recorded": true,
+    "source": "ppro-queue/20261011-040957-058605 (a client project, paths rewritten to the PODCAST-TEST layout)",
+    "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)",
+    "variants": {
+      "not_open": {
+        "recorded": true,
+        "source": "ppro-queue/20261011-015038-5fc567 (test project, paths rewritten to the PODCAST-TEST layout)",
+        "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)"
+      }
+    }
+  },
+  "clip_components": {
+    "recorded": true,
+    "source": "ppro-queue/20261011-033011-762051 (a client sequence; sequence and clip names rewritten to EP02TEST_R02_RE_EDIT / EP02TEST.mp4)",
+    "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)"
+  },
+  "open_project": {
+    "recorded": false,
+    "source": "written from the contract (UXP only; the CEP bridge cannot open a project)",
+    "host_version": ""
+  },
+  "set_player_position": {
+    "recorded": false,
+    "source": "written from the contract (UXP only)",
+    "host_version": ""
+  },
+  "render_review": {
+    "recorded": false,
+    "source": "written from the contract (UXP only)",
+    "host_version": ""
+  },
+  "ae_build_motion": {
+    "recorded": true,
+    "source": "ae-queue/20261011-150400-cf8541 (PODCAST-TEST EP02TEST_R02_MO)",
+    "host_version": "After Effects 26.5 (26.5x89, bridge 3.1.0)",
+    "variants": {
+      "failed_scenes": {
+        "recorded": true,
+        "source": "ae-queue/20261011-125627-089425 (PODCAST-TEST EP02TEST_R02_MO): scenes that failed on a font",
+        "host_version": "After Effects 26.5 (26.5x89, bridge 3.1.0)"
+      },
+      "dirty": {
+        "recorded": false,
+        "source": "written from templates/after_effects/nh_ae_bridge.jsx build_motion (the refusal when After Effects holds unsaved changes); request = the main request",
+        "host_version": ""
+      }
+    }
+  },
+  "ae_readback": {
+    "recorded": true,
+    "source": "ae-queue/20261011-150407-1494a1 (PODCAST-TEST EP02TEST_R02_MO)",
+    "host_version": "After Effects 26.5 (26.5x89, bridge 3.1.0)"
+  },
+  "ae_render": {
+    "recorded": false,
+    "source": "written from lib/ae_render.py's answer (an engine-side command: aerender runs in the engine, no CEP action)",
+    "host_version": ""
+  },
+  "ae_fonts": {
+    "recorded": true,
+    "source": "ae-queue/20261011-150358-3922ff (PODCAST-TEST brand fonts)",
+    "host_version": "After Effects 26.5 (26.5x89, bridge 3.1.0)"
+  },
+  "ae_probe_text": {
+    "recorded": true,
+    "source": "ae-queue/20261011-122047-eba06c (the Arabic capability probe)",
+    "host_version": "After Effects 26.5 (26.5x89, bridge 3.1.0)"
+  }
+}

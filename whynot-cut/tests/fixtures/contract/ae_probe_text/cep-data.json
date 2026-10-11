@@ -1,0 +1,56 @@
+{
+  "job": {
+    "aep_path": "C:\\Users\\editor\\.whynot-cut\\ae-probe\\probe.aep",
+    "w": 1080,
+    "h": 1920,
+    "fps": 30,
+    "frames": 90,
+    "fonts": {
+      "headline": "ArialMT"
+    },
+    "comps": [
+      {
+        "font": "ArialMT",
+        "size": 96,
+        "name": "arabic_rtl",
+        "text": "مرحبا بكم في البودكاست"
+      },
+      {
+        "font": "ArialMT",
+        "size": 96,
+        "name": "word_reveal",
+        "text": "واحد اتنين تلاتة اربعة",
+        "cues": [
+          15,
+          30,
+          45,
+          60
+        ]
+      },
+      {
+        "font": "ArialMT",
+        "size": 96,
+        "name": "emphasis",
+        "text": "دي اهم نقطة في الكلام",
+        "emphasis": [
+          3
+        ]
+      },
+      {
+        "font": "ArialMT",
+        "size": 96,
+        "name": "mixed",
+        "text": "الـ Isotretinoin ٣ مرات 25%"
+      },
+      {
+        "font": "ArialMT",
+        "size": 96,
+        "name": "brand_font",
+        "text": "خط البراند"
+      }
+    ]
+  },
+  "action": "probe_text",
+  "job_id": "20261011-122047-eba06c",
+  "submitted": "2026-10-11T12:20:47+03:00"
+}

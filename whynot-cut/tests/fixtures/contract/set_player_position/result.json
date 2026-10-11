@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "action": "set_player_position",
+  "id": "fixture-set-player-position-0001",
+  "readback": {
+    "position_s": 12.5
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "protocol": 4,
+  "id": "fixture-set-player-position-0001",
+  "action": "set_player_position",
+  "data": {
+    "sequence_name": "EP02TEST_R02_RE_EDIT",
+    "t_s": 12.5
+  },
+  "expires_at": "2026-10-11T12:15:00Z"
+}

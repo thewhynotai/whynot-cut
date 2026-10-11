@@ -1,0 +1,10 @@
+{
+  "protocol": 4,
+  "id": "fixture-render-review-0001",
+  "action": "render_review",
+  "data": {
+    "sequence_name": "EP02TEST_R02_RE_EDIT",
+    "out_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\08_quality_control\\review\\EP02TEST_R02_review.mp4"
+  },
+  "expires_at": "2026-10-11T12:15:00Z"
+}

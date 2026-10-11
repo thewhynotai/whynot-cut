@@ -1,0 +1,12 @@
+{
+  "ok": false,
+  "action": "ae_build_motion",
+  "id": "fixture-dirty-0001",
+  "readback": {
+    "reason": "dirty",
+    "project": "EP02TEST_R02_MO_RE_MOTION.aep",
+    "project_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02_MO\\04_after_effects\\project\\EP02TEST_R02_MO_RE_MOTION.aep"
+  },
+  "error": "After Effects has unsaved changes in EP02TEST_R02_MO_RE_MOTION.aep.",
+  "how": "Save or close the project in After Effects, then run the command again."
+}

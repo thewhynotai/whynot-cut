@@ -1,0 +1,113 @@
+{
+  "protocol": 4,
+  "id": "20261011-160738-0f07a3",
+  "action": "build_project",
+  "data": {
+    "project_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\project\\EP02TEST_R02_RE_EDIT.prproj",
+    "overwrite_existing": false,
+    "xml_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\interchange\\EP02TEST_R02_RE_EDIT_base.xml",
+    "sequence_name": "EP02TEST_R02_RE_EDIT",
+    "settings": {
+      "previewCodec": "apcs",
+      "previewFrameWidth": 1080,
+      "previewFrameHeight": 1920,
+      "maximumBitDepth": false,
+      "maximumRenderQuality": false,
+      "compositeLinearColor": true
+    },
+    "graphics": [
+      {
+        "id": "GFX_001",
+        "png": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\media\\stills-20261011-041726\\typography__GFX_001.png",
+        "track_index": 4,
+        "anim": "card",
+        "start_s": 0.1667,
+        "end_s": 1.625,
+        "fade_in_s": 0.25,
+        "fade_out_s": 0.20833333333333331
+      },
+      {
+        "id": "GFX_002_bar",
+        "png": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\media\\stills-20261011-041726\\typography__GFX_002_bar.png",
+        "track_index": 3,
+        "anim": "bar_sweep",
+        "start_s": 3.9583,
+        "end_s": 6.5417,
+        "fade_out_s": 0.16666666666666666
+      },
+      {
+        "id": "GFX_002_fg",
+        "png": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\media\\stills-20261011-041726\\typography__GFX_002_fg.png",
+        "track_index": 5,
+        "anim": "text_pop",
+        "start_s": 3.9583,
+        "end_s": 6.5417,
+        "fade_out_s": 0.16666666666666666
+      },
+      {
+        "id": "GFX_003_bar",
+        "png": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\media\\stills-20261011-041726\\typography__GFX_003_bar.png",
+        "track_index": 3,
+        "anim": "bar_sweep",
+        "start_s": 25.2083,
+        "end_s": 26.7917,
+        "fade_out_s": 0.16666666666666666
+      },
+      {
+        "id": "GFX_003_fg",
+        "png": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\media\\stills-20261011-041726\\typography__GFX_003_fg.png",
+        "track_index": 5,
+        "anim": "text_pop",
+        "start_s": 25.2083,
+        "end_s": 26.7917,
+        "fade_out_s": 0.16666666666666666
+      }
+    ],
+    "srt_path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\02_transcription\\subtitles-seq.srt",
+    "native_caption_track": false,
+    "markers": [
+      {
+        "t": 0.16666666666666666,
+        "name": "GFX_001",
+        "comment": "context_card | عبد الشيء زي رصفه"
+      },
+      {
+        "t": 3.958333333333333,
+        "name": "GFX_002",
+        "comment": "hook_title | أنت جاي تسفلت روحك على مراده"
+      },
+      {
+        "t": 25.208333333333332,
+        "name": "GFX_003",
+        "comment": "statement_highlight | فلازم تسلم لله"
+      }
+    ],
+    "track_names": {
+      "video": [
+        "V1 Main Footage (+ blurred fill under cutaways)",
+        "V2 Source cutaways (whole)",
+        "V3 B-roll (full screen)",
+        "V4 Graphic bars (sweep)",
+        "V5 Cards (closing glass)"
+      ],
+      "audio": [
+        "A1 Dialogue (clean) L",
+        "A2 Dialogue (clean) R",
+        "A3 Transition Sound Effects L",
+        "A4 Transition Sound Effects R",
+        "A5 Motion Graphics Sound Effects L"
+      ]
+    },
+    "blur_v1_clips": [
+      6,
+      7,
+      8
+    ],
+    "sharpen_v1": {
+      "amount": 15.0,
+      "grain": 0.0
+    },
+    "duration_s": 30.083333333333332
+  },
+  "expires_at": "2026-10-11T01:32:26Z"
+}

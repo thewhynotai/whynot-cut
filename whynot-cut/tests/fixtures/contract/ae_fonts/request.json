@@ -1,0 +1,12 @@
+{
+  "protocol": 4,
+  "id": "20261011-150358-3922ff",
+  "action": "ae_fonts",
+  "data": {
+    "postscript_names": [
+      "IBMPlexSansArabic-Bold",
+      "IBMPlexSansArabic-Medium"
+    ]
+  },
+  "expires_at": "2026-10-11T12:18:58Z"
+}

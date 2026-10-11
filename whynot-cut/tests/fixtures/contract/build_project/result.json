@@ -1,0 +1,230 @@
+{
+  "ok": true,
+  "action": "build_project",
+  "id": "20261011-041726-a9ed96",
+  "readback": {
+    "newProject": true,
+    "project": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\project\\EP02TEST_R02_RE_EDIT.prproj",
+    "importXML": true,
+    "setSettings": true,
+    "settings_after": {
+      "audioChannelCount": 2,
+      "audioChannelType": 1,
+      "audioDisplayFormat": 200,
+      "audioSampleRate": {
+        "seconds": 2.083333333e-05,
+        "ticks": "5292000"
+      },
+      "autoInputGamutCompressionEnabled": false,
+      "autoToneMapEnabled": false,
+      "compositeLinearColor": true,
+      "editingMode": "9678af98-a7b7-4bdb-b477-7ac9c8df4a4e",
+      "gamutMappingControls": null,
+      "maximumBitDepth": false,
+      "maximumRenderQuality": false,
+      "previewCodec": "apcs",
+      "previewFileFormat": "EncoderPresets\\SequencePreview\\9678af98-a7b7-4bdb-b477-7ac9c8df4a4e\\QuickTime.epr",
+      "previewFrameHeight": 1920,
+      "previewFrameWidth": 1080,
+      "videoDisplayFormat": 100,
+      "videoFieldType": 0,
+      "videoFrameHeight": 1920,
+      "videoFrameRate": {
+        "seconds": 0.04166666666667,
+        "ticks": "10584000000"
+      },
+      "videoFrameWidth": 1080,
+      "videoPixelAspectRatio": "1:1",
+      "vrHorzCapturedView": 0,
+      "vrLayout": 0,
+      "vrProjection": 0,
+      "vrVertCapturedView": 0,
+      "workingColorSpace": {
+        "empty": false,
+        "isSceneReferred": false,
+        "matrixEquation": 0,
+        "name": "Rec. 709",
+        "primaries": 1,
+        "transferCharacteristic": 1
+      },
+      "workingColorSpaceList": [
+        {
+          "empty": false,
+          "isSceneReferred": false,
+          "matrixEquation": 0,
+          "name": "Rec. 709",
+          "primaries": 1,
+          "transferCharacteristic": 1
+        },
+        {
+          "empty": false,
+          "isSceneReferred": false,
+          "matrixEquation": 0,
+          "name": "Rec. 2100 HLG",
+          "primaries": 9,
+          "transferCharacteristic": 18
+        },
+        {
+          "empty": false,
+          "isSceneReferred": false,
+          "matrixEquation": 0,
+          "name": "Rec. 2100 PQ",
+          "primaries": 9,
+          "transferCharacteristic": 16
+        },
+        {
+          "empty": false,
+          "isSceneReferred": true,
+          "matrixEquation": 0,
+          "name": "ACEScct",
+          "primaries": 1001,
+          "transferCharacteristic": 900
+        }
+      ]
+    },
+    "importGraphics": true,
+    "placed": [
+      {
+        "id": "GFX_001",
+        "track": 5,
+        "start": 0.16666666666667,
+        "end": 1.625,
+        "anim": "card"
+      },
+      {
+        "id": "GFX_002_bar",
+        "track": 4,
+        "start": 3.95833333333333,
+        "end": 6.5417,
+        "anim": "bar_sweep"
+      },
+      {
+        "id": "GFX_002_fg",
+        "track": 6,
+        "start": 3.95833333333333,
+        "end": 6.5417,
+        "anim": "text_pop"
+      },
+      {
+        "id": "GFX_003_bar",
+        "track": 4,
+        "start": 25.2083333333333,
+        "end": 26.7917,
+        "anim": "bar_sweep"
+      },
+      {
+        "id": "GFX_003_fg",
+        "track": 6,
+        "start": 25.2083333333333,
+        "end": 26.7917,
+        "anim": "text_pop"
+      }
+    ],
+    "blurred": [
+      {
+        "clip": 6,
+        "blurriness": null
+      },
+      {
+        "clip": 7,
+        "blurriness": null
+      },
+      {
+        "clip": 8,
+        "blurriness": null
+      }
+    ],
+    "sharpened": [
+      {
+        "clip": 0,
+        "ok": true,
+        "amount": 15
+      },
+      {
+        "clip": 1,
+        "ok": true,
+        "amount": 15
+      },
+      {
+        "clip": 2,
+        "ok": true,
+        "amount": 15
+      },
+      {
+        "clip": 3,
+        "ok": true,
+        "amount": 15
+      },
+      {
+        "clip": 4,
+        "ok": true,
+        "amount": 15
+      }
+    ],
+    "renamed": [
+      "V1 Main Footage (+ blurred fill under cutaways)",
+      "V2 Source cutaways (whole)",
+      "V3 B-roll (full screen)",
+      "V4 Graphic bars (sweep)",
+      "V5 Cards (closing glass)"
+    ],
+    "saved": true,
+    "tracks": {
+      "video": [
+        {
+          "i": 1,
+          "name": "V1 Main Footage (+ blurred fill under cutaways)",
+          "clips": 11
+        },
+        {
+          "i": 2,
+          "name": "V2 Source cutaways (whole)",
+          "clips": 3
+        },
+        {
+          "i": 3,
+          "name": "V3 B-roll (full screen)",
+          "clips": 0
+        },
+        {
+          "i": 4,
+          "name": "V4 Graphic bars (sweep)",
+          "clips": 2
+        },
+        {
+          "i": 5,
+          "name": "V5 Cards (closing glass)",
+          "clips": 1
+        }
+      ],
+      "audio": [
+        {
+          "i": 1,
+          "name": "A1 Dialogue (clean) L",
+          "clips": 11
+        },
+        {
+          "i": 2,
+          "name": "A2 Dialogue (clean) R",
+          "clips": 11
+        },
+        {
+          "i": 3,
+          "name": "A3 Transition Sound Effects L",
+          "clips": 1
+        },
+        {
+          "i": 4,
+          "name": "A4 Transition Sound Effects R",
+          "clips": 1
+        },
+        {
+          "i": 5,
+          "name": "A5 Motion Graphics Sound Effects L",
+          "clips": 1
+        }
+      ]
+    },
+    "log": []
+  }
+}

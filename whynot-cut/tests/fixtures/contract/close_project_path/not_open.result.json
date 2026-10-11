@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "action": "close_project_path",
+  "id": "20261011-015038-5fc567",
+  "readback": {
+    "closed": false,
+    "reason": "not open"
+  }
+}
