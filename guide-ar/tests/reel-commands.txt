@@ -1,10 +1,12 @@
 doctor
 setup
+py
 scaffold
 inbox
 settings
 model-download
 gpu-enable
+bench
 profile
 client-init
 discover

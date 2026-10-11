@@ -10,7 +10,7 @@
 <p class="lead-in">لكل فيديو خام تطلب مونتاجه، تحصل على:</p>
 <ul>
 <li><strong>مشروع Premiere Pro كامل</strong> بإعدادات التسلسل (sequence settings) الصحيحة، فيه الجرافيك المتحرك والكلام المكتوب على الشاشة بخطوط العميل وألوانه، مع تشكيل عربي سليم واتجاه صحيح من اليمين إلى اليسار.</li>
-<li><strong>تفريغ نصي (transcript)</strong> بتوقيت كل كلمة، يُنتَج بنموذج Whisper <bdi dir="ltr"><code>large-v3</code></bdi>. إذا كان في جهازك كارت شاشة NVIDIA فإنه يُستخدم تلقائيًا ويصبح التفريغ أسرع.</li>
+<li><strong>تفريغ نصي (transcript)</strong> بتوقيت كل كلمة، يُنتَج بنموذج <bdi dir="ltr">Whisper <code>large-v3</code></bdi>. وإذا كان في جهازك كارت شاشة NVIDIA، يصبح التفريغ أسرع بكثير بعد تثبيت مكتبة NVIDIA اللازمة بموافقتك (<a href="#ch02-what-happens">الفصل 2</a>).</li>
 <li><strong>صوت حوار منظَّف</strong> مع حذف السكتات، ومعه إثبات أنه لم تُحذف أي كلمة.</li>
 <li><strong>قرارات مونتاج مبنية على القصة</strong>: البداية الجاذبة (hook)، والعبارات المهمة على الشاشة، والقوائم، وبطاقات اللقطات المساعدة (B-roll)، والتقريب (<bdi dir="ltr">punch-in</bdi>)، والمؤثرات الصوتية (SFX).</li>
 <li><strong>فيديو معاينة (preview)</strong> بصيغة MP4 تشاهد فيه المونتاج المخطَّط قبل بناء أي شيء.</li>
@@ -51,28 +51,29 @@
 </table>
 
 <figure class="shot">
-<div class="shot-frame">لقطة شاشة: محادثة في تطبيق Claude يكتب فيها المونتير «عدّل الفيديوهات الجديدة» لفولدر «عيادة مثال»</div>
+<div class="shot-frame">لقطة شاشة: محادثة في تطبيق Claude يكتب فيها المونتير «عدّل الفيديوهات الجديدة» للعميل «عيادة مثال»</div>
 <figcaption>الطلب يُكتب بالكلام العادي، ولا يلزم حفظ أي أمر.</figcaption>
 </figure>
 
 <h2 id="ch01-requirements">متطلبات الإصدار <bdi dir="ltr">3.0</bdi></h2>
 
+<p class="lead-in">هذه متطلبات الإصدار <bdi dir="ltr">3.0</bdi> المستهدفة، لا متطلبات النسخة الحالية:</p>
 <table>
 <thead>
 <tr><th>البند</th><th>المطلوب</th></tr>
 </thead>
 <tbody>
-<tr><td>نظام التشغيل</td><td>Windows <bdi dir="ltr">10/11</bdi>، أو macOS <bdi dir="ltr">14</bdi> أو أحدث</td></tr>
-<tr><td>Premiere Pro</td><td>الإصدار <bdi dir="ltr">26.5</bdi> أو أحدث</td></tr>
+<tr><td>نظام التشغيل</td><td><bdi dir="ltr">Windows 10/11</bdi>، أو <bdi dir="ltr">macOS 14</bdi> أو أحدث</td></tr>
+<tr><td>Premiere Pro</td><td><bdi dir="ltr">26.5</bdi> أو أحدث للوحة الجديدة، والإصدارات الأقدم عبر WhyNot Cut Bridge</td></tr>
 <tr><td>After Effects</td><td>الإصدار <bdi dir="ltr">25</bdi> أو أحدث، لوضع الموشن ولمخرجات After Effects عند طلبها فقط</td></tr>
 <tr><td>Claude</td><td>تطبيق Claude على الجهاز، واشتراك Claude</td></tr>
 <tr><td>المساحة على القرص</td><td>نحو 4 GB للمحرك ونموذج التفريغ، ثم عدة GB لكل عميل</td></tr>
-<tr><td>كارت الشاشة</td><td>اختياري: كارت NVIDIA يجعل التفريغ النصي أسرع عدة مرات</td></tr>
+<tr><td>كارت الشاشة</td><td>اختياري: كارت NVIDIA، مع مكتبة NVIDIA التي تُثبَّت بموافقتك، يجعل التفريغ النصي أسرع عدة مرات</td></tr>
 </tbody>
 </table>
 
 <aside class="todo" data-phase="7">
-<p>هذه متطلبات الإصدار <bdi dir="ltr">3.0</bdi> المستهدفة، والقائمة النهائية تُعتمد مع برنامج التثبيت (installer). حتى ذلك الحين، تعمل النسخة الحالية مع Premiere Pro <bdi dir="ltr">2022</bdi> أو أحدث من خلال لوحة WhyNot Cut Bridge.</p>
+<p>القائمة النهائية تُعتمد مع برنامج التثبيت (installer). حتى ذلك الحين، تعمل النسخة الحالية مع <bdi dir="ltr">Premiere Pro 2022</bdi> أو أحدث من خلال لوحة WhyNot Cut Bridge.</p>
 </aside>
 
 <h2 id="ch01-reading">كيف تقرأ هذا الدليل</h2>

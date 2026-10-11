@@ -78,7 +78,7 @@
 
 <h2 id="ch02-doctor">التحقق بأمر <bdi dir="ltr"><code>reel doctor</code></bdi></h2>
 
-<p>الأمر <bdi dir="ltr"><code>reel doctor</code></bdi> فحص للقراءة فقط: لا يغيّر أي شيء في الجهاز. يشغّله Claude في بداية معالج البداية وكلما احتاج إليه، ويمكنك أن تطلب منه تشغيله في أي وقت. يشغّل Claude معه أمر رقم الإصدار:</p>
+<p>الأمر <bdi dir="ltr"><code>reel doctor</code></bdi> فحص للقراءة فقط (من دون <bdi dir="ltr"><code>--fix</code></bdi>): لا يغيّر أي شيء في الجهاز. يشغّله Claude في بداية معالج البداية وكلما احتاج إليه، ويمكنك أن تطلب منه تشغيله في أي وقت. يشغّل Claude معه أمر رقم الإصدار:</p>
 <div class="cmd"><bdi dir="ltr"><code>reel --version
 reel doctor</code></bdi></div>
 
@@ -93,6 +93,6 @@ reel doctor</code></bdi></div>
 <p>كل رسالة من WhyNot Cut تبدأ باسمه ورقم إصداره، مثل <bdi dir="ltr"><code>WhyNot Cut &lt;version&gt;</code></bdi>. إذا لم تبدأ هكذا، أو ظهر أن الأمر <bdi dir="ltr"><code>reel</code></bdi> غير معروف، فانظر الفصل 14.</p>
 
 <aside class="todo" data-phase="7">
-<p>في الإصدار <bdi dir="ltr">3.0</bdi> يعرض برنامج التثبيت نتيجة هذا الفحص كقائمة بألوان أخضر وأصفر وأحمر، ويُضاف الأمر <bdi dir="ltr"><code>reel doctor --fix</code></bdi> لإصلاح ما يمكن إصلاحه تلقائيًا (الفصل 14).</p>
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> يعرض برنامج التثبيت نتيجة هذا الفحص كقائمة بألوان أخضر وأصفر وأحمر، ويتوسّع الأمر <bdi dir="ltr"><code>reel doctor --fix</code></bdi>، الذي يكتفي اليوم بوضع ملف العلامة <bdi dir="ltr"><code>.whynot-client</code></bdi> في فولدر العميل، ليُصلح ما يمكن إصلاحه تلقائيًا (الفصل 14).</p>
 </aside>
 </section>
