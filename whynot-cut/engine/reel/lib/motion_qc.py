@@ -75,6 +75,26 @@ def audio_sync(render: Path, dialogue: Path, fps: float, max_lag: int = 6) -> di
     return {"corr": round(best[0], 3) if best[0] > -2 else None, "offset_frames": best[1]}
 
 
+def _planned_mix_check(paths, plan: dict, main: Path) -> str:
+    """Is it the bed or the voice? The render against the engine's own mix of the plan (same sequence clock)."""
+    import tempfile
+    from .motion_audio import mix
+    a = plan["audio"]
+    files = [a["dialogue"]] + ([a["music"]["file"]] if a.get("music") else []) + [c["file"] for c in a.get("sfx") or []]
+    gone = sorted({Path(f).name for f in files if not Path(f).exists()})
+    if gone:
+        return f"planned mix unavailable: {', '.join(gone)} missing (motion-plan again)"
+    with tempfile.TemporaryDirectory(prefix="whynot-qc-") as td:
+        m = audio_sync(main, mix(plan, paths.root, Path(td) / "planned_mix.wav"), float(plan["fps"]))
+    said = f"against the planned mix (dialogue + music + SFX): correlation {m['corr']}, offset {m['offset_frames']} frames"
+    if m["corr"] is not None and m["corr"] >= 0.9 and abs(m["offset_frames"]) <= 1:
+        return said + (" - the render matches the planned mix, so the voice is in sync and the bed lowers the dialogue "
+                       "correlation: lower music.level_db (or the SFX) in motion-script.json, then motion-plan and "
+                       "render again")
+    return said + (" - the render does not match the planned mix either: the voice or the bed level in After Effects "
+                   "differs from the plan (check the DIALOGUE and MUSIC layers in MAIN)")
+
+
 def run(paths) -> dict:
     from .motion_build import RESULT as BUILD, _sha1, aep_path
     from .motion_config import motion_cfg
@@ -120,15 +140,7 @@ def run(paths) -> dict:
                        "or SFX can cause this)")
         a = plan.get("audio") or {}
         if not ok and s["corr"] is not None and (a.get("music") or a.get("sfx")):
-            # is it the bed or the voice? the render against the engine's own mix of the plan (same sequence clock)
-            from .motion_audio import mix
-            m = audio_sync(main, mix(plan, paths.root, paths.p("08_quality_control/_planned_mix.wav")), float(plan["fps"]))
-            detail += (f"; against the planned mix (dialogue + music + SFX): correlation {m['corr']}, offset "
-                       f"{m['offset_frames']} frames")
-            if m["corr"] is not None and m["corr"] >= 0.9 and abs(m["offset_frames"]) <= 1:
-                detail += (" - the render matches the planned mix, so the voice is in sync and the bed lowers the "
-                           "dialogue correlation: lower music.level_db (or the SFX) in motion-script.json, then "
-                           "motion-plan and render again")
+            detail += "; " + _planned_mix_check(paths, plan, main)
         add("audio_sync", ok, detail)
     else:
         add("audio_sync", False, "render or sequence dialogue missing")

@@ -7,9 +7,10 @@ reproduced by a failing test first.
 **Fixed**
 - Client folders with Arabic (any non-ASCII) names: `motion-plan`, and every HarfBuzz text measurement, opened the
   brand font through FreeType's file open, which cannot take a non-ANSI path on Windows ("cannot open resource"); font
-  files are now read into memory. aerender (`motion-render`, `ae-probe`) reads its command line in the ANSI code page,
-  so such a path arrived as "???": the project is rendered from an ASCII temp copy and the file moved into place (a
-  non-ASCII TEMP folder is reported as the problem).
+  files are now read into memory. aerender (`motion-render`, `ae-probe`) on Windows reads its command line in the ANSI
+  code page, so such a path arrived as "???": there the project is rendered from an ASCII temp copy and the file moved
+  into place (a non-ASCII TEMP folder is reported as the problem; a render that cannot be moved into place is kept in
+  the temp folder and named, never deleted). macOS renders in place as before.
 - `motion-plan`: a typo in `transition_in`, `theme`, `captions` or `reveal` (in a scene or video-wide) is an error that
   names the scene and the allowed values, instead of a silent cut, dark theme, no captions or word reveal. A scene's
   own `captions` (`on` | `off`) overrides the video's (spec §3.4). A speech-source comparison `verdict` that is not
@@ -19,11 +20,13 @@ reproduced by a failing test first.
 - `qc`: a render without an audio stream fails the render check by name (it used to fail later as "no audio to
   compare"). `audio_sync` keeps its 0.9 rule but explains a near miss, and when the plan has music or SFX it also
   compares the render with the planned mix: when that matches, the voice is in sync and the bed is the cause (lower
-  `music.level_db`).
+  `music.level_db`); when it does not, the voice or the bed level in After Effects differs from the plan; a planned
+  file that is gone is named instead.
 - `motion-build`: the `--script-only` / `--run-script` fallback refuses (an alert in After Effects) while the open
   project has unsaved changes, by the bridge's own rule (one shared `NHM.mayDiscard`). `--replace-edited` takes its
-  backup only once the preconditions pass. Older `dialogue_motion_seq_*.wav` files that neither the plan nor the last
-  build job names are removed (one After Effects still holds open is kept for a later run).
+  backup only once the preconditions pass. Older `dialogue_motion_seq_*.wav` files that nothing names any more (not the
+  plan, not the last build job, not any project `.aep` or backup) are removed; one After Effects still holds open is
+  kept for a later run.
 - After Effects library: the progress bar fills from the reading-start edge in LTR too (it grew from the centre). The
   bridge's JSON escaper regex is pure ASCII (it held a raw U+FFFF character).
 - Handoff README: several missing brand fonts read as plural ("… are not installed: install them"). Guard: a shell

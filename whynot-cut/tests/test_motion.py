@@ -1808,6 +1808,36 @@ class TestMotionQC(CompiledMotion):
         self.assertRegex(detail, r"planned mix[^;]*correlation (0\.9\d*|1\.0), offset 0")
         self.assertIn("the render matches the planned mix", detail)
 
+    def test_audio_sync_bed_diagnostic_edges(self):
+        """Review: the planned-mix comparison must also say when the render does NOT match the plan, must not build a
+        silently different mix when a planned file is gone, and must not leave its scratch mix in the QC folder."""
+        from lib import motion_build
+        from lib.common import fps_arg
+        plan_p = self.reel.p("01_analysis/motion-plan.json")
+        keep = plan_p.read_bytes()
+        self.addCleanup(plan_p.write_bytes, keep)
+        plan = json.loads(keep.decode("utf-8"))
+        dia = Path(plan["audio"]["dialogue"])
+        planned_bed, other_bed = (bursty_wav(self.tmp / f"bed{s}.wav", self.dur, seed=s) for s in (99, 5))
+        rendered = self.tmp / "other_bed.mov"                     # AE rendered a different bed than the plan's
+        ff("-f", "lavfi", "-i", f"testsrc2=s=108x192:r={fps_arg()}:d={self.dur:.3f}", "-i", str(dia), "-i", str(other_bed),
+           "-filter_complex", "[2:a]volume=0.8[b];[1:a][b]amix=inputs=2:normalize=0[a]", "-map", "0:v", "-map", "[a]",
+           "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(rendered))
+        shutil.copyfile(rendered, motion_build.render_path(self.reel))
+
+        def detail_with(music_file):
+            write_json(plan_p, dict(plan, audio=dict(plan["audio"], music={"file": str(music_file), "level_db": -1.94,
+                                                                           "fade_out_frames": 0})))
+            r, c = self.checks()
+            self.assertEqual(c["audio_sync"], "FAIL")
+            return next(x["detail"] for x in r["checks"] if x["check"] == "audio_sync")
+        self.assertIn("does not match the planned mix", detail_with(planned_bed))
+        gone = self.tmp / "renamed_track.wav"
+        d = detail_with(gone)
+        self.assertIn("planned mix unavailable", d)
+        self.assertIn(gone.name, d)
+        self.assertEqual([f.name for f in self.reel.p("08_quality_control").glob("*.wav")], [])
+
     def test_each_check_fails(self):
         import time as _t
         from lib import motion_build
@@ -2301,6 +2331,36 @@ class TestLockedAudio(CompiledMotion):
         if lock:
             self.assertTrue(held.exists())
 
+    def test_dialogue_named_by_a_project_kept(self):
+        """Review: a build refused after write_job (or a --script-only/--run-script build, which writes no job) left
+        no record of the dialogue the existing .aep imports, so a later re-plan deleted it (missing footage in the
+        editor's project). A dialogue named in any project .aep (backups too) or by basename in the plan/job (paths
+        from another machine after a hand-over) is kept."""
+        from lib.motion_audio import sequence_dialogue
+        from lib.timemap import TimeMap
+        d = self.reel.p("06_audio/dialogue")
+        proj = self.reel.p("04_after_effects/project")
+        (proj / "backups").mkdir(parents=True, exist_ok=True)
+        in_aep, in_backup, moved, stale = (d / f"dialogue_motion_seq_{h}.wav"
+                                           for h in ("a1a1a1a1", "b2b2b2b2", "c3c3c3c3", "0dead0ff"))
+        for f in (in_aep, in_backup, moved, stale):
+            f.write_bytes(b"RIFF")
+            self.addCleanup(f.unlink, missing_ok=True)
+        aep, bak = proj / "EP12_R01_MO_RE_MOTION.aep", proj / "backups" / "EP12_R01_MO_RE_MOTION.edited-1.aep"
+        aep.write_bytes(b"RIFX\x00fnam" + str(in_aep).encode("utf-8") + b"\x00more")      # AE stores paths as UTF-8
+        bak.write_bytes(b"RIFX\x00" + in_backup.name.encode("utf-16-le") + b"\x00")
+        for f in (aep, bak):
+            self.addCleanup(f.unlink, missing_ok=True)
+        job = self.reel.p("04_after_effects/data/motion-job.json")
+        job.parent.mkdir(parents=True, exist_ok=True)
+        job.write_text(json.dumps({"plan": {"audio": {"dialogue": "E:/old pc/06_audio/dialogue/" + moved.name}}}),
+                       encoding="ascii")
+        self.addCleanup(job.unlink, missing_ok=True)
+        sequence_dialogue(self.reel, TimeMap([[0, 4500], [5500, 12000]]))
+        self.assertFalse(stale.exists())
+        for f in (in_aep, in_backup, moved):
+            self.assertTrue(f.exists(), f.name)
+
 
 class TestDialogue24Bit(CompiledMotion):
     """Live run: audio-clean writes dialogue_clean.wav as 24-bit PCM; sequence_dialogue decoded it as 16-bit and
@@ -2534,9 +2594,13 @@ class TestArabicPaths(unittest.TestCase):
             motion_layout._FONT_FILES.clear()
             motion_layout._FONT_FILES.update(saved[1])
 
-    def fake_aerender(self):
-        """aerender's process call replaced: records the command and what -project held, writes the -output file."""
-        from lib import ae_render
+    def fake_aerender(self, windows: bool = True):
+        """aerender's process call replaced: records the command and what -project held, writes the -output file.
+        windows: the platform the render believes it runs on (the ANSI command line is a Windows trait)."""
+        from lib import ae_render, plat
+        saved_win = plat.IS_WIN
+        plat.IS_WIN = windows
+        self.addCleanup(setattr, plat, "IS_WIN", saved_win)
         calls = []
 
         def run(cmd, check=True, timeout=None, **kw):
@@ -2577,6 +2641,34 @@ class TestArabicPaths(unittest.TestCase):
         self.assertEqual(ae_render.render(aep, "MAIN_EP02", out, "Best Settings", "High Quality")["status"], "RENDERED")
         cmd = calls[0]["cmd"]
         self.assertEqual((cmd[cmd.index("-project") + 1], cmd[cmd.index("-output") + 1]), (str(aep), str(out)))
+
+    def test_arabic_project_direct_on_macos(self):
+        """Review: the ANSI command line is Windows-only. On macOS (UTF-8 argv) an Arabic project renders in place,
+        with no temp copy of the .aep and no cross-volume move of the render."""
+        from lib import ae_render
+        calls = self.fake_aerender(windows=False)
+        aep, out = self.project("مشروع")
+        self.assertEqual(ae_render.render(aep, "MAIN_EP02", out, "Best Settings", "High Quality")["status"], "RENDERED")
+        cmd = calls[0]["cmd"]
+        self.assertEqual((cmd[cmd.index("-project") + 1], cmd[cmd.index("-output") + 1]), (str(aep), str(out)))
+
+    @unittest.skipUnless(sys.platform == "win32", "only Windows refuses to replace a file another program holds open")
+    def test_unmovable_render_kept(self):
+        """Review: when the finished render could not be moved into place (the old file open in a player, a full disk),
+        the stage was deleted with it. The render stays in the stage and the result says where it is."""
+        from lib import ae_render
+        self.fake_aerender()
+        aep, out = self.project("مشروع")
+        out.write_bytes(b"OLD")
+        with open(out, "rb"):
+            r = ae_render.render(aep, "MAIN_EP02", out, "Best Settings", "High Quality")
+        self.assertEqual(r["status"], "FAILED", r)
+        kept = Path(r.get("kept") or "")
+        self.assertTrue(kept.is_file(), r)
+        self.addCleanup(shutil.rmtree, kept.parent, True)
+        self.assertEqual(kept.read_bytes(), b"MOV AEP")
+        self.assertIn(str(kept), r["msg"])
+        self.assertIn("close", r["msg"])
 
     def test_non_ascii_temp_folder_is_named(self):
         import tempfile as tf

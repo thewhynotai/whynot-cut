@@ -10,6 +10,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from . import plat
 from .common import ffmpeg_exe, run, write_text
 
 
@@ -40,10 +41,10 @@ def render(aep: Path, comp: str, out: Path, rs: str, om: str, start_frame: int |
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     stage, r_aep, r_out = None, aep, out
-    if not (str(aep).isascii() and str(out).isascii()):
-        # aerender reads its command line in the ANSI code page: a non-ASCII path (an Arabic client folder) arrives as
-        # "???". Render an ASCII copy of the project into an ASCII file and move that into place; After Effects finds
-        # the footage itself through the project's own (Unicode) paths.
+    if plat.IS_WIN and not (str(aep).isascii() and str(out).isascii()):
+        # aerender on Windows reads its command line in the ANSI code page: a non-ASCII path (an Arabic client folder)
+        # arrives as "???". Render an ASCII copy of the project into an ASCII file and move that into place; After
+        # Effects finds the footage itself through the project's own (Unicode) paths. macOS passes UTF-8 as it is.
         if not tempfile.gettempdir().isascii():
             return {"status": "FAILED", "returncode": None, "output": str(out), "elapsed_s": 0, "log": None,
                     "msg": f"aerender needs ASCII paths, and the temp folder {tempfile.gettempdir()} is not one either: "
@@ -53,14 +54,23 @@ def render(aep: Path, comp: str, out: Path, rs: str, om: str, start_frame: int |
         shutil.copy2(aep, r_aep)
     try:
         p = run(aerender_cmd(exe, r_aep, comp, r_out, rs, om, start_frame, end_frame), check=False, timeout=timeout)
-        if stage is not None and r_out.exists() and r_out.stat().st_size > 0:
-            out.unlink(missing_ok=True)
-            shutil.move(str(r_out), str(out))
-    finally:
+    except BaseException:
         if stage is not None:
             shutil.rmtree(stage, ignore_errors=True)
+        raise
     if log:
         write_text(Path(log), (p.stdout or "") + "\n" + (p.stderr or ""))
+    if stage is not None:
+        if r_out.exists() and r_out.stat().st_size > 0:
+            try:
+                out.unlink(missing_ok=True)
+                shutil.move(str(r_out), str(out))
+            except OSError as e:        # never throw away a finished render: it stays in the stage
+                return {"status": "FAILED", "returncode": p.returncode, "output": str(out), "kept": str(r_out),
+                        "elapsed_s": round(time.time() - t0, 1), "log": str(log) if log else None,
+                        "msg": f"the render finished but could not replace {out} ({e.strerror or e}): it is kept at "
+                               f"{r_out} - close the file (or free disk space), then move it there or render again"}
+        shutil.rmtree(stage, ignore_errors=True)
     fresh = out.exists() and out.stat().st_mtime >= t0 - 1 and out.stat().st_size > 0
     return {"status": "RENDERED" if fresh else "FAILED", "returncode": p.returncode, "output": str(out),
             "elapsed_s": round(time.time() - t0, 1), "log": str(log) if log else None}

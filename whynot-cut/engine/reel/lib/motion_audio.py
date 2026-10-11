@@ -53,19 +53,28 @@ def sequence_dialogue(paths, tmap) -> Path:
 
 
 def _prune_dialogue(paths, keep: Path) -> None:
-    """Removes older sequence dialogues that neither the plan nor the last build job names. One that After Effects
-    (or a player) still holds open stays until a later run (Windows refuses to delete it)."""
+    """Removes older sequence dialogues that nothing names any more: not the plan, not the last build job, not any
+    project .aep (backups included; After Effects stores footage paths as text, a refused build or a fallback-script
+    build leaves no job naming them). Names, not paths: the content hash is the identity, and a project moved from
+    another computer keeps its old paths. One that After Effects (or a player) still holds open stays until a later
+    run (Windows refuses to delete it)."""
+    from pathlib import PureWindowsPath     # splits on / and \ alike
     from .common import read_json
     plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
     job = (read_json(paths.p("04_after_effects/data/motion-job.json"), {}) or {}).get("plan") or {}
-    named = {keep.resolve()} | {Path(p["audio"]["dialogue"]).resolve() for p in (plan, job)
-                                if (p.get("audio") or {}).get("dialogue")}
-    for f in keep.parent.glob("dialogue_motion_seq_*.wav"):
-        if f.resolve() not in named:
-            try:
-                f.unlink()
-            except PermissionError:
-                pass
+    named = {keep.name} | {PureWindowsPath(p["audio"]["dialogue"]).name for p in (plan, job)
+                           if (p.get("audio") or {}).get("dialogue")}
+    olds = [f for f in keep.parent.glob("dialogue_motion_seq_*.wav") if f.name not in named]
+    if not olds:
+        return
+    projects = [a.read_bytes() for a in paths.p("04_after_effects/project").rglob("*.aep")]
+    for f in olds:
+        if any(f.name.encode("utf-8") in b or f.name.encode("utf-16-le") in b for b in projects):
+            continue
+        try:
+            f.unlink()
+        except PermissionError:
+            pass
 
 
 def envelope(wav: Path, fps: float, n_frames: int) -> list[float]:
