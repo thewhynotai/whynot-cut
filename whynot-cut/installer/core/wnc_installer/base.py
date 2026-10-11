@@ -657,6 +657,59 @@ def safe_rmtree(path, allowed_roots: Iterable, protected: Iterable = ()) -> bool
     return True
 
 
+# --------------------------------------------------------------------------------------------- child processes
+def log_output(log: Log, text: str) -> None:
+    """A child's output goes to the log file only (indented), never to the console."""
+    if log.path and text.strip():
+        with open(log.path, "a", encoding="utf-8", newline="\n") as f:
+            f.write("".join(f"    | {line}\n" for line in text.rstrip().splitlines()))
+
+
+def run_cmd(ctx: "Ctx", cmd: list, timeout: int, cwd: Optional[Path] = None, *, split: bool = False) -> tuple:
+    """Run a child with the engine environment, no stdin, output captured into the log. (exit code, output);
+    124 = timed out, 127 = could not start. split=True returns stdout alone (stderr still goes to the log)."""
+    cmd = [str(c) for c in cmd]
+    ctx.log.info("run " + " ".join(f'"{c}"' if " " in c else c for c in cmd))
+    err = ""
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE if split else subprocess.STDOUT,
+                           env=ctx.paths.child_env(), cwd=str(cwd) if cwd else None, timeout=timeout)
+        out, rc = r.stdout.decode("utf-8", "replace"), r.returncode
+        err = (r.stderr or b"").decode("utf-8", "replace") if split else ""
+    except subprocess.TimeoutExpired as e:
+        out = (e.output or b"").decode("utf-8", "replace") + f"\n(timed out after {timeout} s)"
+        rc = 124
+    except OSError as e:
+        out, rc = f"cannot start {cmd[0]}: {e}", 127
+    log_output(ctx.log, out + ("\n" + err if err.strip() else ""))
+    return rc, out
+
+
+def tail(out: str) -> str:
+    lines = [x for x in out.strip().splitlines() if x.strip()]
+    return lines[-1].strip()[:300] if lines else ""
+
+
+def move_aside_and_replace(staged: Path, final: Path, root: Path) -> None:
+    """Rename `staged` to `final`; an existing `final` is moved aside first, put back if the rename fails, and deleted
+    (safe_rmtree inside `root`) once the new one is in place."""
+    old = None
+    if os.path.lexists(final):
+        old = final.with_name(f"{final.name}.old-{os.getpid()}")
+        if os.path.lexists(old) and not safe_rmtree(old, [root]):
+            raise OSError(f"cannot clear {old}")
+        _replace(final, old)
+    try:
+        _replace(staged, final)
+    except OSError:
+        if old is not None:
+            _replace(old, final)
+        raise
+    if old is not None and not safe_rmtree(old, [root]):
+        raise OSError(f"cannot remove the replaced {old}")
+
+
 # --------------------------------------------------------------------------------------------- steps
 @dataclass
 class StepResult:

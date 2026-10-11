@@ -24,8 +24,8 @@ UNINSTALL_STEPS: list = []  # uninstall steps, run in registration order
 def _register_step_modules() -> None:
     """Each step module has register(STEPS) (and, for uninstall, register_uninstall(UNINSTALL_STEPS)). Imported here,
     after the registries exist, so a step module never imports cli."""
-    from . import runtime
-    for mod in (runtime,):
+    from . import claude, runtime
+    for mod in (runtime, claude):
         mod.register(STEPS)
 
 

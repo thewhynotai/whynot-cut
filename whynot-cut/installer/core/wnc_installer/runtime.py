@@ -16,7 +16,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -38,58 +37,6 @@ def _check_rid(rid: str) -> str:
     if not isinstance(rid, str) or not _RID.match(rid) or ".." in rid:
         raise ValueError(f"not a runtime id: {rid!r}")
     return rid
-
-
-def _log_output(log: base.Log, text: str) -> None:
-    """A child's output goes to the log file only (indented), never to the console."""
-    if log.path and text.strip():
-        with open(log.path, "a", encoding="utf-8", newline="\n") as f:
-            f.write("".join(f"    | {line}\n" for line in text.rstrip().splitlines()))
-
-
-def run_cmd(ctx: base.Ctx, cmd: list, timeout: int, cwd: Optional[Path] = None, *, split: bool = False) -> tuple:
-    """Run a child with the engine environment, no stdin, output captured into the log. (exit code, output);
-    124 = timed out, 127 = could not start. split=True returns stdout alone (stderr still goes to the log)."""
-    cmd = [str(c) for c in cmd]
-    ctx.log.info("run " + " ".join(f'"{c}"' if " " in c else c for c in cmd))
-    err = ""
-    try:
-        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE if split else subprocess.STDOUT,
-                           env=ctx.paths.child_env(), cwd=str(cwd) if cwd else None, timeout=timeout)
-        out, rc = r.stdout.decode("utf-8", "replace"), r.returncode
-        err = (r.stderr or b"").decode("utf-8", "replace") if split else ""
-    except subprocess.TimeoutExpired as e:
-        out = (e.output or b"").decode("utf-8", "replace") + f"\n(timed out after {timeout} s)"
-        rc = 124
-    except OSError as e:
-        out, rc = f"cannot start {cmd[0]}: {e}", 127
-    _log_output(ctx.log, out + ("\n" + err if err.strip() else ""))
-    return rc, out
-
-
-def _tail(out: str) -> str:
-    lines = [x for x in out.strip().splitlines() if x.strip()]
-    return lines[-1].strip()[:300] if lines else ""
-
-
-def _move_aside_and_replace(staged: Path, final: Path, root: Path) -> None:
-    """(ffmpeg) Rename `staged` to `final`; an existing `final` is moved aside first, put back if the rename fails, and deleted
-    (safe_rmtree inside `root`) once the new one is in place."""
-    old = None
-    if os.path.lexists(final):
-        old = final.with_name(f"{final.name}.old-{os.getpid()}")
-        if os.path.lexists(old) and not base.safe_rmtree(old, [root]):
-            raise OSError(f"cannot clear {old}")
-        base._replace(final, old)
-    try:
-        base._replace(staged, final)
-    except OSError:
-        if old is not None:
-            base._replace(old, final)
-        raise
-    if old is not None and not base.safe_rmtree(old, [root]):
-        raise OSError(f"cannot remove the replaced {old}")
 
 
 # --------------------------------------------------------------------------------------------- runtime
@@ -141,7 +88,7 @@ def uv_command(ctx: base.Ctx) -> list:
 
 
 def _smoke(ctx: base.Ctx, py: Path, modules: list) -> tuple:
-    return run_cmd(ctx, [py, "-s", "-c", "import " + ", ".join(modules)], SMOKE_TIMEOUT)
+    return base.run_cmd(ctx, [py, "-s", "-c", "import " + ", ".join(modules)], SMOKE_TIMEOUT)
 
 
 class BuildLock:
@@ -192,12 +139,12 @@ def _base_python(ctx: base.Ctx, uv: list) -> tuple:
         return ctx.args.python, None
     ver = str(base.cget(ctx.components, "runtime.python") or "3.12")
     find = uv + ["python", "find", ver, "--python-preference", "only-managed"]
-    rc, out = run_cmd(ctx, find, 60, split=True)
+    rc, out = base.run_cmd(ctx, find, 60, split=True)
     if rc != 0:
-        rc, inst = run_cmd(ctx, uv + ["python", "install", ver, "--no-bin", "--no-registry"], 1800)
+        rc, inst = base.run_cmd(ctx, uv + ["python", "install", ver, "--no-bin", "--no-registry"], 1800)
         if rc != 0:
-            return None, f"uv could not install Python {ver}: {_tail(inst)}"
-        rc, out = run_cmd(ctx, find, 60, split=True)
+            return None, f"uv could not install Python {ver}: {base.tail(inst)}"
+        rc, out = base.run_cmd(ctx, find, 60, split=True)
     found = out.strip().splitlines()[-1].strip() if rc == 0 and out.strip() else ""
     if not found:
         return None, f"uv cannot find Python {ver} (exit {rc})"
@@ -238,7 +185,7 @@ def step_runtime(ctx: base.Ctx) -> base.StepResult:
             if current_runtime(paths) != rid and not ctx.args.dry_run:
                 base.atomic_write_text(paths.current_file, rid + "\n")
             return _runtime_ok(ctx, rid, py, lock_sha, f"runtime {rid} is installed")
-        ctx.log.warn(f"runtime {rid} no longer imports ({_tail(out)}); repairing it")
+        ctx.log.warn(f"runtime {rid} no longer imports ({base.tail(out)}); repairing it")
     if ctx.args.dry_run:
         return base.StepResult("runtime", "skipped", f"dry run: would build runtime {rid} from {rel}")
 
@@ -265,7 +212,7 @@ def _build_in_place(ctx: base.Ctx, rid: str, rdir: Path, rel: str, lock: Path, l
     if rdir.is_dir():
         _clear_stamps(rdir)
     py = runtime_python(paths, rid, plat)
-    repair = py.is_file() and run_cmd(ctx, [py, "-s", "-c", "pass"], SMOKE_TIMEOUT)[0] == 0
+    repair = py.is_file() and base.run_cmd(ctx, [py, "-s", "-c", "pass"], SMOKE_TIMEOUT)[0] == 0
     if repair:
         ctx.log.info(f"runtime {rid} has a working python: re-syncing it from the lock")
     else:
@@ -275,10 +222,10 @@ def _build_in_place(ctx: base.Ctx, rid: str, rdir: Path, rel: str, lock: Path, l
         base_py, err = _base_python(ctx, uv)
         if err:
             return fail(err)
-        rc, out = run_cmd(ctx, uv + ["venv", rdir, "--python", base_py, "--python-preference", "only-managed"],
+        rc, out = base.run_cmd(ctx, uv + ["venv", rdir, "--python", base_py, "--python-preference", "only-managed"],
                           UV_VENV_TIMEOUT, cwd=paths.runtimes_dir)
         if rc != 0:
-            return fail(f"uv venv failed (exit {rc}): {_tail(out)}")
+            return fail(f"uv venv failed (exit {rc}): {base.tail(out)}")
         py = runtime_python(paths, rid, plat)
         if not py.is_file():
             return fail(f"uv venv made no interpreter at {py}")
@@ -286,14 +233,14 @@ def _build_in_place(ctx: base.Ctx, rid: str, rdir: Path, rel: str, lock: Path, l
     index = base.cget(ctx.components, "runtime.index_url")
     if not base.is_placeholder(index):
         sync += ["--index-url", index]
-    rc, out = run_cmd(ctx, sync + [lock], PIP_SYNC_TIMEOUT, cwd=paths.runtimes_dir)
+    rc, out = base.run_cmd(ctx, sync + [lock], PIP_SYNC_TIMEOUT, cwd=paths.runtimes_dir)
     if rc != 0:
-        return fail(f"uv pip sync failed (exit {rc}): {_tail(out)}")
+        return fail(f"uv pip sync failed (exit {rc}): {base.tail(out)}")
     rc, out = _smoke(ctx, py, smoke)
     if rc != 0:
-        return fail(f"the runtime cannot import {', '.join(smoke)}: {_tail(out)}")
-    rc, ver = run_cmd(ctx, [py, "-s", "-c", "import platform; print(platform.python_version())"], SMOKE_TIMEOUT)
-    stamp_obj = {"id": rid, "platform": plat, "python": _tail(ver) if rc == 0 else "", "lock_file": rel,
+        return fail(f"the runtime cannot import {', '.join(smoke)}: {base.tail(out)}")
+    rc, ver = base.run_cmd(ctx, [py, "-s", "-c", "import platform; print(platform.python_version())"], SMOKE_TIMEOUT)
+    stamp_obj = {"id": rid, "platform": plat, "python": base.tail(ver) if rc == 0 else "", "lock_file": rel,
                  "lock_sha256": lock_sha, "created_at": base.now_iso(), "by": "installer"}
     base.atomic_write_json(rdir / STAMP, stamp_obj)
     base.atomic_write_text(rdir / LOCK_STAMP, lock_sha + "\n")
@@ -372,7 +319,7 @@ def step_ffmpeg(ctx: base.Ctx) -> base.StepResult:
         if os.name != "nt":
             for n in names:
                 os.chmod(staging / n, 0o755)
-        _move_aside_and_replace(staging, dest, paths.ffmpeg_dir)
+        base.move_aside_and_replace(staging, dest, paths.ffmpeg_dir)
     except (OSError, base.ExtractError) as e:
         try:
             base.safe_rmtree(staging, roots)
@@ -394,7 +341,7 @@ def _nvidia_present(ctx: base.Ctx) -> bool:
         smi = str(sys32)
     if not smi:
         return False
-    rc, _out = run_cmd(ctx, [smi, "-L"], 30)
+    rc, _out = base.run_cmd(ctx, [smi, "-L"], 30)
     return rc == 0
 
 
@@ -415,10 +362,10 @@ def step_gpu(ctx: base.Ctx) -> base.StepResult:
     if ctx.args.dry_run:
         return base.StepResult("gpu", "skipped", "dry run: would run reel gpu-enable")
     cli_py = ctx.plugin_root / "engine" / "reel" / "cli.py"
-    rc, out = run_cmd(ctx, [py, "-s", "-B", cli_py, "gpu-enable"], GPU_TIMEOUT,
+    rc, out = base.run_cmd(ctx, [py, "-s", "-B", cli_py, "gpu-enable"], GPU_TIMEOUT,
                       cwd=ctx.paths.whynot if ctx.paths.whynot.is_dir() else None)
     if rc != 0:
-        return base.StepResult("gpu", "amber", f"reel gpu-enable failed (exit {rc}: {_tail(out)}); "
+        return base.StepResult("gpu", "amber", f"reel gpu-enable failed (exit {rc}: {base.tail(out)}); "
                                                "Whisper keeps using the CPU")
     return base.StepResult("gpu", "ok", "NVIDIA GPU enabled for Whisper")
 

@@ -16,6 +16,12 @@
     an unstamped runtime is repaired with `pip sync` alone, a missing lock is skipped, a deleted runtime is
     rebuilt; ffmpeg from a local zip with the GPL text and SOURCE.txt, a bad sha256 installs nothing, a placeholder
     is skipped; gpu-enable only on win-x64 with an NVIDIA GPU (WNC_TEST_NVIDIA in the sandbox).
+  * claude.py (steps gitbash / claude): the CLI search matches tools/find_claude.py (a sandbox never looks at PATH),
+    the settings.json merge (BOM, key order, one exact backup only on change, invalid JSON byte-identical with the JSON
+    to paste, reel-editor@* switched off, env key by key) and its undo, the marketplace entry and the managed
+    marketplace folder, the claude step with tests/fixtures/installer/fake_claude.py (marketplace add -> plugin
+    install / update, a legacy marketplace removed first, an old CLI amber, no CLI = settings only), and the per-user
+    Git Bash (found / unpacked from a local zip / placeholder amber; the 7z SFX command checked without running one).
 Never touches the real ~/.whynot-cut or ~/.claude: every Paths is a sandbox home in a temp folder, and no real
 network is used (artefacts come from a 127.0.0.1 http.server started here, or file://).
 Run (repo root):
@@ -1097,7 +1103,7 @@ class TestRuntime(unittest.TestCase):
         with mock.patch.dict(os.environ, {"WNC_TEST_UV": str(FIXTURES / "fake_uv.cmd"),
                                           "FAKE_UV_PYTHON": sys.executable, "FAKE_UV_VERSION": "9.9.9"}):
             ctx = self.ctx()
-            rc, out = self.rt.run_cmd(ctx, self.rt.uv_command(ctx) + ["--version"], 60)
+            rc, out = base.run_cmd(ctx, self.rt.uv_command(ctx) + ["--version"], 60)
         self.assertEqual((rc, out.strip()), (0, "uv 9.9.9"))
 
 
@@ -1257,6 +1263,593 @@ class TestGpu(unittest.TestCase):
             r = self.rt.step_gpu(self.ctx())
         self.assertEqual(r.status, "amber")
         self.assertIn("Whisper keeps using the CPU", r.detail)
+
+
+# ------------------------------------------------------------------------------------------ T7.1/T7.3 claude, gitbash
+FAKE_CLAUDE = FIXTURES / "fake_claude.py"
+FIND_CLAUDE = SK.parent / "tools" / "find_claude.py"
+PID = "whynot-cut@thewhynot-ai"
+CLAUDE_COMP = {"schema": 1, "claude_code": {"min": "2.1.224"},
+               "marketplace": {"name": "thewhynot-ai", "plugin": "whynot-cut", "url": base.PLACEHOLDER}}
+
+
+def claude_module():
+    """Imported inside the tests so this file stays importable while a step module is being written."""
+    from wnc_installer import claude
+    return claude
+
+
+def touch(p: Path, data: bytes = b"") -> Path:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+    return p
+
+
+def norm(p) -> str:
+    return os.path.normcase(os.path.abspath(str(p)))
+
+
+class TestFindClaudeParity(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.empty = self.tmp / "empty path"
+        self.empty.mkdir()
+        self.cl = claude_module()
+
+    def bundles(self, home: Path, win: bool) -> list:
+        exe = "claude.exe" if win else "claude"
+        root = (home / "AppData" / "Roaming" if win else home / "Library" / "Application Support") / "Claude"
+        made = [touch(root / "claude-code" / v / "a1b2c3" / exe) for v in ("2.1.9", "2.1.300")]
+        touch(home / ".local" / "bin" / exe)
+        if win:
+            touch(home / "AppData" / "Local" / "Programs" / "claude" / exe)
+        return made
+
+    def test_same_order_as_tools_find_claude(self):
+        if not FIND_CLAUDE.is_file():
+            self.skipTest("tools/find_claude.py is not in this checkout")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("wnc_test_find_claude", FIND_CLAUDE)
+        fc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fc)
+        for plat in ("win32", "darwin"):
+            with self.subTest(platform=plat):
+                home = self.tmp / plat / ARABIC_HOME
+                old, new = self.bundles(home, plat == "win32")
+                env = {"PATH": str(self.empty)}  # no claude on PATH, no CLAUDE_CLI, AppData from the home
+                with mock.patch.dict(os.environ, {"PATH": str(self.empty)}):
+                    want = fc.candidates(env, home, plat)
+                    got = self.cl.claude_candidates(env, home, plat, False)
+                self.assertEqual(got, want)
+                self.assertGreaterEqual(len(got), 3)
+                self.assertLess(got.index(new), got.index(old))  # the newest bundle first
+
+    def test_sandbox_ignores_path_and_takes_the_env_cli(self):
+        home = self.tmp / ARABIC_HOME
+        old, new = self.bundles(home, True)
+        on_path = touch(self.tmp / "on path" / ("claude.exe" if IS_WIN else "claude"))
+        if not IS_WIN:
+            os.chmod(on_path, 0o755)
+        env = {"PATH": str(on_path.parent), "WNC_CLAUDE_CLI": str(FAKE_CLAUDE)}
+        with mock.patch.dict(os.environ, {"PATH": str(on_path.parent)}):
+            real = self.cl.claude_candidates(env, home, "win32", False)
+            sand = self.cl.claude_candidates(env, home, "win32", True)
+        self.assertIn(norm(on_path), [norm(p) for p in real])  # the test machine's PATH search does work
+        self.assertNotIn(str(FAKE_CLAUDE), [str(p) for p in real])  # WNC_CLAUDE_CLI is a sandbox-only switch
+        self.assertEqual(sand, [FAKE_CLAUDE, new, old])  # env CLI, then the bundles only: no PATH, no fixed paths
+        sand2 = self.cl.claude_candidates({"CLAUDE_CLI": str(FAKE_CLAUDE)}, home, "win-x64", True)
+        self.assertEqual(sand2[0], FAKE_CLAUDE)
+
+
+class TestSettingsMerge(unittest.TestCase):
+    MKT = {"thewhynot-ai": {"source": {"source": "directory", "path": "C:\\Users\\x\\.whynot-cut\\marketplace"}}}
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.f = Path(self._td.name) / ARABIC_HOME / ".claude" / "settings.json"
+        self.cl = claude_module()
+
+    def backups(self):
+        return sorted(self.f.parent.glob("settings.json.whynot-backup-*")) if self.f.parent.is_dir() else []
+
+    def read(self):
+        return json.loads(self.f.read_text(encoding="utf-8"))
+
+    def merge(self, **kw):
+        kw.setdefault("marketplace", self.MKT)
+        kw.setdefault("plugin_id", PID)
+        return self.cl.merge_claude_settings(self.f, **kw)
+
+    def test_absent_file_is_created_without_a_backup(self):
+        r = self.merge()
+        self.assertTrue(r["changed"])
+        self.assertIsNone(r["backup"])
+        self.assertEqual(self.read(), {"extraKnownMarketplaces": self.MKT, "enabledPlugins": {PID: True}})
+        raw = self.f.read_bytes()
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
+        self.assertTrue(raw.endswith(b"}\n"))
+        self.assertIn(b'\n  "extraKnownMarketplaces": {', raw)  # indent 2
+        self.assertEqual(self.backups(), [])
+
+    def test_bom_and_unusual_keys_kept_with_one_exact_backup(self):
+        orig = ("\ufeff" + '{"theme":"dark","enabledPlugins":{"x@y":true},"zeta":{"عربي":"نص"}}').encode("utf-8")
+        touch(self.f, orig)
+        r = self.merge(env={"A": "1"})
+        self.assertTrue(r["changed"])
+        self.assertEqual(self.backups(), [Path(r["backup"])])
+        self.assertEqual(Path(r["backup"]).read_bytes(), orig)
+        d = self.read()
+        self.assertEqual(list(d), ["theme", "enabledPlugins", "zeta", "extraKnownMarketplaces", "env"])
+        self.assertEqual(d["enabledPlugins"], {"x@y": True, PID: True})
+        self.assertEqual((d["theme"], d["zeta"], d["env"]), ("dark", {"عربي": "نص"}, {"A": "1"}))
+        self.assertIn("عربي".encode("utf-8"), self.f.read_bytes())  # ensure_ascii=False
+        before = self.f.read_bytes()
+        r2 = self.merge(env={"A": "1"})
+        self.assertEqual((r2["changed"], r2["backup"]), (False, None))
+        self.assertEqual(len(self.backups()), 1)
+        self.assertEqual(self.f.read_bytes(), before)
+
+    def test_invalid_json_is_left_byte_identical(self):
+        for orig in (b'{"a":1,}', b'[1, 2]', b'{"enabledPlugins": ["not", "an", "object"]}', b'\xff\xfe{'):
+            with self.subTest(orig=orig):
+                touch(self.f, orig)
+                with self.assertRaises(self.cl.SettingsUnreadable) as cm:
+                    self.merge(env={"CLAUDE_CODE_GIT_BASH_PATH": "C:\\g\\bin\\bash.exe"})
+                self.assertEqual(self.f.read_bytes(), orig)
+                self.assertEqual(self.backups(), [])
+                snip = json.loads(cm.exception.snippet)
+                self.assertEqual(snip, {"extraKnownMarketplaces": self.MKT, "enabledPlugins": {PID: True},
+                                        "env": {"CLAUDE_CODE_GIT_BASH_PATH": "C:\\g\\bin\\bash.exe"}})
+                self.assertTrue(cm.exception.reason)
+
+    def test_reel_editor_is_switched_off_only_when_present(self):
+        touch(self.f, json.dumps({"enabledPlugins": {"reel-editor@local-desktop-app-uploads": True,
+                                                     "other@m": True}}).encode())
+        r = self.merge(disable=["reel-editor@*"])
+        self.assertEqual(r["disabled"], ["reel-editor@local-desktop-app-uploads"])
+        self.assertEqual(self.read()["enabledPlugins"], {"reel-editor@local-desktop-app-uploads": False,
+                                                         "other@m": True, PID: True})
+        self.assertEqual(self.merge(disable=["reel-editor@*"])["disabled"], [])  # already off: nothing to do
+        self.f.unlink()
+        r = self.merge(disable=["reel-editor@*"])
+        self.assertEqual(r["disabled"], [])
+        self.assertEqual(self.read()["enabledPlugins"], {PID: True})  # never added when absent
+
+    def test_env_merged_key_by_key_and_our_marketplace_replaces_theirs(self):
+        other = {"source": {"source": "github", "repo": "someone/else"}}
+        touch(self.f, json.dumps({"env": {"KEEP": "1", "CLAUDE_CODE_GIT_BASH_PATH": "old"},
+                                  "extraKnownMarketplaces": {"thewhynot-ai": {"source": {"source": "github",
+                                                                                         "repo": "x/y"}},
+                                                             "other": other}}).encode())
+        self.merge(plugin_id=None, env={"CLAUDE_CODE_GIT_BASH_PATH": "new"})
+        d = self.read()
+        self.assertEqual(d["env"], {"KEEP": "1", "CLAUDE_CODE_GIT_BASH_PATH": "new"})
+        self.assertEqual(d["extraKnownMarketplaces"], {"thewhynot-ai": self.MKT["thewhynot-ai"], "other": other})
+        self.assertNotIn("enabledPlugins", d)
+
+    def test_dry_run_writes_nothing(self):
+        self.assertTrue(self.merge(dry_run=True)["changed"])
+        self.assertFalse(self.f.exists())
+
+
+class TestUnmerge(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        tmp = Path(self._td.name)
+        self.f = tmp / ARABIC_HOME / ".claude" / "settings.json"
+        self.git = tmp / ARABIC_HOME / "AppData" / "Local" / "WhyNotCut" / "git"
+        self.other = {"source": {"source": "github", "repo": "someone/else"}}
+        self.elsewhere = str(tmp / "Program Files" / "Git" / "bin" / "bash.exe")
+        touch(self.f, json.dumps({
+            "theme": "dark",
+            "extraKnownMarketplaces": {"thewhynot-ai": {"source": {"source": "directory", "path": "x"}},
+                                       "other": self.other},
+            "enabledPlugins": {PID: True, "x@y": True},
+            "env": {"CLAUDE_CODE_GIT_BASH_PATH": str(self.git / "bin" / "bash.exe"), "ELSEWHERE": self.elsewhere,
+                    "PLAIN": "1"}}, ensure_ascii=False).encode("utf-8"))
+        self.cl = claude_module()
+
+    def unmerge(self):
+        return self.cl.unmerge_claude_settings(self.f, marketplace_name="thewhynot-ai", plugin_id=PID,
+                                               env_keys_if_under={"CLAUDE_CODE_GIT_BASH_PATH": self.git,
+                                                                  "ELSEWHERE": self.git})
+
+    def test_removes_only_ours(self):
+        orig = self.f.read_bytes()
+        r = self.unmerge()
+        self.assertTrue(r["changed"])
+        self.assertEqual(Path(r["backup"]).read_bytes(), orig)
+        d = json.loads(self.f.read_text(encoding="utf-8"))
+        self.assertEqual(d, {"theme": "dark", "extraKnownMarketplaces": {"other": self.other},
+                             "enabledPlugins": {"x@y": True}, "env": {"ELSEWHERE": self.elsewhere, "PLAIN": "1"}})
+        r2 = self.unmerge()
+        self.assertEqual((r2["changed"], r2["backup"]), (False, None))
+
+    def test_absent_file_is_left_absent(self):
+        self.f.unlink()
+        self.assertEqual(self.unmerge()["changed"], False)
+        self.assertFalse(self.f.exists())
+
+
+class TestMarketplaceEntry(unittest.TestCase):
+    def test_placeholder_is_the_managed_directory_and_a_pin_is_the_url(self):
+        cl = claude_module()
+        paths = base.Paths.from_env(str(Path(tempfile.gettempdir()) / ARABIC_HOME), env={})
+        for url in (base.PLACEHOLDER, None):
+            comp = json.loads(json.dumps(CLAUDE_COMP))
+            comp["marketplace"]["url"] = url
+            self.assertEqual(cl.marketplace_entry(comp, paths),
+                             {"source": {"source": "directory", "path": str(paths.marketplace_dir)}})
+        comp = json.loads(json.dumps(CLAUDE_COMP))
+        comp["marketplace"]["url"] = "https://dl.example/claude/marketplace.json"
+        self.assertEqual(cl.marketplace_entry(comp, paths),
+                         {"source": {"source": "url", "url": "https://dl.example/claude/marketplace.json"},
+                          "autoUpdate": True})
+
+
+def make_marketplace_src(root: Path, version: bytes = b"v1") -> Path:
+    """A folder shaped like the installer zip / the repo: .claude-plugin/marketplace.json + whynot-cut/."""
+    touch(root / ".claude-plugin" / "marketplace.json", b'{"name": "thewhynot-ai", "plugins": []}')
+    touch(root / "whynot-cut" / ".claude-plugin" / "plugin.json", b'{"name": "whynot-cut"}')
+    touch(root / "whynot-cut" / "engine" / "x.py", version)
+    touch(root / "whynot-cut" / "engine" / "__pycache__" / "x.cpython-312.pyc", b"pyc")
+    touch(root / "whynot-cut" / "engine" / "y.pyc", b"pyc")
+    touch(root / "whynot-cut" / ".claude" / "whynot-cut.local.md", b"editor prefs")
+    touch(root / "whynot-cut" / ".git" / "HEAD", b"ref")
+    touch(root / "docs" / "notes.md", b"not part of the marketplace")
+    return root / "whynot-cut"
+
+
+class TestRefreshMarketplace(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        tmp = Path(self._td.name)
+        self.src = tmp / "zip root"
+        make_marketplace_src(self.src)
+        self.paths = base.Paths.from_env(str(tmp / ARABIC_HOME), env={})
+        self.cl = claude_module()
+
+    def test_copies_the_two_entries_and_keeps_one_prev(self):
+        m = self.paths.marketplace_dir
+        self.assertTrue(self.cl.refresh_marketplace_dir(self.src, self.paths))
+        self.assertEqual(sorted(p.name for p in m.iterdir()), [".claude-plugin", "whynot-cut"])
+        self.assertTrue((m / ".claude-plugin" / "marketplace.json").is_file())
+        self.assertEqual((m / "whynot-cut" / "engine" / "x.py").read_bytes(), b"v1")
+        for gone in ("engine/__pycache__", "engine/y.pyc", ".claude/whynot-cut.local.md", ".git"):
+            self.assertFalse((m / "whynot-cut" / gone).exists(), gone)
+        touch(self.src / "whynot-cut" / "engine" / "x.py", b"v2")
+        self.assertTrue(self.cl.refresh_marketplace_dir(self.src, self.paths))
+        self.assertEqual((m / "whynot-cut" / "engine" / "x.py").read_bytes(), b"v2")
+        prev = self.paths.whynot / "marketplace.prev"
+        self.assertEqual((prev / "whynot-cut" / "engine" / "x.py").read_bytes(), b"v1")
+        touch(self.src / "whynot-cut" / "engine" / "x.py", b"v3")
+        self.assertTrue(self.cl.refresh_marketplace_dir(self.src, self.paths))
+        self.assertEqual((prev / "whynot-cut" / "engine" / "x.py").read_bytes(), b"v2")
+        self.assertEqual(sorted(p.name for p in self.paths.whynot.iterdir()), ["marketplace", "marketplace.prev"])
+
+    def test_no_op_when_the_source_is_the_managed_dir(self):
+        self.assertTrue(self.cl.refresh_marketplace_dir(self.src, self.paths))
+        self.assertFalse(self.cl.refresh_marketplace_dir(self.paths.marketplace_dir, self.paths))
+        self.assertEqual(sorted(p.name for p in self.paths.whynot.iterdir()), ["marketplace"])
+
+
+class TestStepClaude(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.home = self.tmp / ARABIC_HOME
+        self.plugin = make_marketplace_src(self.tmp / "zip root")
+        self.comp = json.loads(json.dumps(CLAUDE_COMP))
+        self.log = self.tmp / "claude-calls.jsonl"
+        env = mock.patch.dict(os.environ, {"WNC_CLAUDE_CLI": str(FAKE_CLAUDE), "FAKE_CLAUDE_LOG": str(self.log)})
+        env.start()
+        self.addCleanup(env.stop)
+        for k in ("CLAUDE_CLI", "FAKE_CLAUDE_VERSION", "FAKE_CLAUDE_FAIL", "FAKE_CLAUDE_INSTALLED"):
+            os.environ.pop(k, None)
+        self.cl = claude_module()
+
+    def ctx(self, **args):
+        return make_ctx(self.home, self.comp, self.plugin, "win-x64", **args)
+
+    def records(self):
+        if not self.log.exists():
+            return []
+        return [json.loads(x) for x in self.log.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+    def calls(self):
+        """Every CLI call except `--version`."""
+        return [r["argv"] for r in self.records() if r["argv"] != ["--version"]]
+
+    def settings(self, ctx):
+        return json.loads(ctx.paths.settings_file.read_text(encoding="utf-8"))
+
+    def backups(self, ctx):
+        return sorted(ctx.paths.claude_dir.glob("settings.json.whynot-backup-*"))
+
+    def add(self, ctx):
+        return ["plugin", "marketplace", "add", str(ctx.paths.marketplace_dir)]
+
+    INSTALL = ["plugin", "install", PID, "--scope", "user"]
+
+    def test_fresh_install_with_the_cli_then_update_on_a_rerun(self):
+        ctx = self.ctx()
+        r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(self.calls(), [self.add(ctx), self.INSTALL])
+        self.assertTrue(all(x["CLAUDE_CONFIG_DIR"] == str(ctx.paths.claude_dir) for x in self.records()))
+        s = self.settings(ctx)
+        self.assertEqual(s["extraKnownMarketplaces"]["thewhynot-ai"],
+                         {"source": {"source": "directory", "path": str(ctx.paths.marketplace_dir)}})
+        self.assertEqual(s["enabledPlugins"], {PID: True})
+        self.assertTrue((ctx.paths.marketplace_dir / ".claude-plugin" / "marketplace.json").is_file())
+        rec = ctx.state.data["claude"]
+        self.assertEqual((rec["method"], rec["settings_backup"]), ("cli", None))
+        self.assertEqual(rec["marketplace"], s["extraKnownMarketplaces"]["thewhynot-ai"])
+        saved = json.loads(ctx.paths.state_file.read_text(encoding="utf-8"))
+        self.assertEqual(saved["claude"]["method"], "cli")
+        self.assertEqual(saved["steps"]["claude"]["status"], "ok")
+        # re-run: the plugin is listed in installed_plugins.json -> `plugin update`; settings unchanged, no backup
+        self.log.unlink()
+        ctx2 = self.ctx()
+        r2 = self.cl.step_claude(ctx2)
+        self.assertEqual(r2.status, "ok", r2.detail)
+        self.assertEqual(self.calls(), [self.add(ctx2), ["plugin", "update", PID]])
+        self.assertEqual(self.backups(ctx2), [])
+        self.assertIsNone(ctx2.state.data["claude"]["settings_backup"])
+
+    def test_already_installed_is_updated(self):
+        with mock.patch.dict(os.environ, {"FAKE_CLAUDE_INSTALLED": "1"}):
+            ctx = self.ctx()
+            r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(self.calls(), [self.add(ctx), ["plugin", "update", PID]])
+
+    def test_legacy_marketplace_is_removed_first_and_reel_editor_switched_off(self):
+        ctx = self.ctx()
+        old_dir = str(self.tmp / "old dev" / "WhyNotCut")
+        touch(ctx.paths.claude_dir / "plugins" / "known_marketplaces.json", json.dumps({"thewhynot-ai": {
+            "source": {"source": "directory", "path": old_dir}, "installLocation": old_dir,
+            "lastUpdated": "2026-01-01T00:00:00.000Z"}}).encode())
+        orig = json.dumps({"enabledPlugins": {"reel-editor@local-desktop-app-uploads": True, PID: True},
+                           "extraKnownMarketplaces": {"thewhynot-ai": {"source": {"source": "directory",
+                                                                                  "path": old_dir}}}}).encode()
+        touch(ctx.paths.settings_file, orig)
+        r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(self.calls(), [["plugin", "marketplace", "remove", "thewhynot-ai"], self.add(ctx),
+                                        self.INSTALL])
+        s = self.settings(ctx)
+        self.assertEqual(s["enabledPlugins"], {"reel-editor@local-desktop-app-uploads": False, PID: True})
+        self.assertEqual(s["extraKnownMarketplaces"]["thewhynot-ai"]["source"]["path"], str(ctx.paths.marketplace_dir))
+        [bk] = self.backups(ctx)
+        self.assertEqual(bk.read_bytes(), orig)
+        self.assertEqual(ctx.state.data["claude"]["settings_backup"], str(bk))
+        self.assertEqual(ctx.state.data["claude"]["disabled"], ["reel-editor@local-desktop-app-uploads"])
+
+    def test_legacy_without_a_cli_is_amber(self):
+        os.environ.pop("WNC_CLAUDE_CLI")
+        ctx = self.ctx()
+        touch(ctx.paths.claude_dir / "plugins" / "known_marketplaces.json", json.dumps({"thewhynot-ai": {
+            "source": {"source": "github", "repo": "someone/whynot"}}}).encode())
+        r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("marketplace remove thewhynot-ai", r.needs_you)
+        self.assertEqual(self.settings(ctx)["enabledPlugins"], {PID: True})  # (b) still ran
+
+    @unittest.skipUnless(IS_WIN, "paths compare case-insensitively on Windows only")
+    def test_same_directory_in_another_case_is_not_legacy(self):
+        ctx = self.ctx()
+        touch(ctx.paths.claude_dir / "plugins" / "known_marketplaces.json", json.dumps({"thewhynot-ai": {
+            "source": {"source": "directory", "path": str(ctx.paths.marketplace_dir).upper() + "\\"}}}).encode())
+        self.assertEqual(self.cl.step_claude(ctx).status, "ok")
+        self.assertEqual(self.calls(), [self.add(ctx), self.INSTALL])
+
+    def test_old_claude_is_amber_and_settings_still_merged(self):
+        with mock.patch.dict(os.environ, {"FAKE_CLAUDE_VERSION": "2.1.100"}):
+            ctx = self.ctx()
+            r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("update Claude", r.detail)
+        self.assertIn("2.1.224", r.needs_you)
+        self.assertEqual(self.calls(), [])  # no plugin command on a CLI older than claude_code.min
+        self.assertEqual(self.settings(ctx)["enabledPlugins"], {PID: True})
+
+    def test_no_cli_merges_the_settings_only(self):
+        os.environ.pop("WNC_CLAUDE_CLI")
+        ctx = self.ctx()
+        r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(self.records(), [])
+        self.assertEqual(self.settings(ctx)["enabledPlugins"], {PID: True})
+        self.assertEqual(ctx.state.data["claude"]["method"], "settings")
+        self.assertTrue((ctx.paths.marketplace_dir / ".claude-plugin" / "marketplace.json").is_file())
+
+    def test_cli_failure_is_amber_and_settings_still_merged(self):
+        with mock.patch.dict(os.environ, {"FAKE_CLAUDE_FAIL": "install"}):
+            ctx = self.ctx()
+            r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("install", r.detail)
+        self.assertEqual(self.settings(ctx)["enabledPlugins"], {PID: True})
+        self.assertEqual(ctx.state.data["claude"]["method"], "settings")
+
+    def test_unreadable_settings_is_amber_with_the_json_to_paste(self):
+        ctx = self.ctx()
+        touch(ctx.paths.settings_file, b'{"a":1,}')
+        r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("not valid JSON", r.detail)
+        snip = json.loads(r.needs_you)
+        self.assertEqual(snip["enabledPlugins"], {PID: True})
+        self.assertIn("thewhynot-ai", snip["extraKnownMarketplaces"])
+        self.assertEqual(ctx.paths.settings_file.read_bytes(), b'{"a":1,}')
+        self.assertEqual(self.backups(ctx), [])
+
+    def test_url_pin_adds_the_url_and_needs_no_marketplace_dir(self):
+        url = "https://dl.example/claude/marketplace.json"
+        self.comp["marketplace"]["url"] = url
+        ctx = self.ctx()
+        self.assertEqual(self.cl.step_claude(ctx).status, "ok")
+        self.assertEqual(self.calls(), [["plugin", "marketplace", "add", url], self.INSTALL])
+        self.assertEqual(self.settings(ctx)["extraKnownMarketplaces"]["thewhynot-ai"],
+                         {"source": {"source": "url", "url": url}, "autoUpdate": True})
+        self.assertFalse(ctx.paths.marketplace_dir.exists())
+
+    def test_dry_run_writes_and_runs_nothing(self):
+        ctx = self.ctx(dry_run=True)
+        r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "skipped", r.detail)
+        self.assertEqual(self.records(), [])
+        self.assertFalse(ctx.paths.claude_dir.exists())
+        self.assertFalse(ctx.paths.marketplace_dir.exists())
+        self.assertFalse(ctx.paths.state_file.exists())
+
+    @unittest.skipUnless(IS_WIN, "the .cmd wrapper is for Windows")
+    def test_cmd_wrapper_runs_fake_claude(self):
+        with mock.patch.dict(os.environ, {"WNC_CLAUDE_CLI": str(FIXTURES / "fake_claude.cmd"),
+                                          "FAKE_CLAUDE_PYTHON": sys.executable, "FAKE_CLAUDE_VERSION": "2.1.999"}):
+            ctx = self.ctx()
+            [cli_path] = self.cl.claude_candidates(os.environ, ctx.paths.home, "win-x64", True)
+            rc, out = base.run_cmd(ctx, self.cl.claude_command(cli_path) + ["--version"], 60)
+        self.assertEqual((rc, out.strip()), (0, "2.1.999 (Claude Code)"))
+
+    def test_registered_without_needs(self):
+        needs = {n: d for n, _f, d in cli.STEPS}
+        self.assertEqual((needs["gitbash"], needs["claude"]), ((), ()))
+
+
+class TestGitBash(unittest.TestCase):
+    ZIP = ffmpeg_zip({"bin/bash.exe": b"MZ bash", "cmd/git.exe": b"MZ git"})
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.home = self.tmp / ARABIC_HOME
+        self.srv = Served(self, {"/git/PortableGit.zip": self.ZIP})
+        self.comp = {"schema": 1, "git": {"version": "2.56.0.windows.2", "assets": {"win-x64": {
+            "url": self.srv.base + "/git/PortableGit.zip", "sha256": sha(self.ZIP), "archive": "zip"}}}}
+        self.cl = claude_module()
+
+    def ctx(self, plat="win-x64", **args):
+        return make_ctx(self.home, self.comp, SK, plat, **args)
+
+    def managed(self, ctx):
+        return ctx.paths.localappdata / "WhyNotCut" / "git" / "bin" / "bash.exe"
+
+    def env_of(self, ctx):
+        return json.loads(ctx.paths.settings_file.read_text(encoding="utf-8")).get("env", {})
+
+    def test_mac_is_skipped(self):
+        for plat in ("mac-arm64", "mac-x64"):
+            ctx = self.ctx(plat)
+            self.assertEqual(self.cl.step_gitbash(ctx).status, "skipped")
+            self.assertFalse(ctx.paths.settings_file.exists())
+        self.assertEqual(self.srv.srv.hits, [])
+
+    def test_managed_bash_already_present(self):
+        ctx = self.ctx()
+        touch(self.managed(ctx), b"MZ bash")
+        r = self.cl.step_gitbash(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(self.env_of(ctx), {"CLAUDE_CODE_GIT_BASH_PATH": str(self.managed(ctx))})
+        self.assertEqual(self.srv.srv.hits, [])
+
+    def test_missing_is_downloaded_extracted_and_set(self):
+        ctx = self.ctx()
+        r = self.cl.step_gitbash(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        bash = self.managed(ctx)
+        self.assertEqual(bash.read_bytes(), b"MZ bash")
+        self.assertEqual(self.env_of(ctx), {"CLAUDE_CODE_GIT_BASH_PATH": str(bash)})
+        self.assertEqual(sorted(p.name for p in bash.parents[2].iterdir()), ["git"])  # no staging left
+        self.assertEqual((ctx.state.data["gitbash"]["path"], ctx.state.data["gitbash"]["managed"]), (str(bash), True))
+        hits = len(self.srv.srv.hits)
+        ctx2 = self.ctx()
+        self.assertEqual(self.cl.step_gitbash(ctx2).status, "ok")
+        self.assertEqual(len(self.srv.srv.hits), hits)
+        self.assertEqual(ctx2.state.data["gitbash"], {"path": str(bash), "managed": True,
+                                                      "version": "2.56.0.windows.2"})
+        self.assertEqual(sorted(ctx2.paths.claude_dir.glob("settings.json.whynot-backup-*")), [])
+
+    def test_settings_value_elsewhere_is_kept(self):
+        ctx = self.ctx()
+        mine = touch(self.tmp / "Portable Git" / "bin" / "bash.exe", b"MZ")
+        orig = json.dumps({"env": {"CLAUDE_CODE_GIT_BASH_PATH": str(mine)}}).encode()
+        touch(ctx.paths.settings_file, orig)
+        r = self.cl.step_gitbash(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(ctx.paths.settings_file.read_bytes(), orig)
+        self.assertEqual(self.srv.srv.hits, [])
+        self.assertFalse(self.managed(ctx).exists())
+
+    def test_find_git_bash_in_the_sandbox(self):
+        ctx = self.ctx()
+        pf = touch(self.tmp / "Program Files" / "Git" / "bin" / "bash.exe")
+        with mock.patch.dict(os.environ, {"ProgramFiles": str(self.tmp / "Program Files")}):
+            self.assertEqual(self.cl.find_git_bash(ctx.paths, {}, True), (None, False))
+            user = touch(ctx.paths.localappdata / "Programs" / "Git" / "bin" / "bash.exe")
+            self.assertEqual(self.cl.find_git_bash(ctx.paths, {}, True), (user, False))
+            self.assertEqual(self.cl.find_git_bash(ctx.paths, {"CLAUDE_CODE_GIT_BASH_PATH": str(pf)}, True),
+                             (pf, True))
+            # a settings value that does not exist is ignored
+            self.assertEqual(self.cl.find_git_bash(ctx.paths, {"CLAUDE_CODE_GIT_BASH_PATH": str(self.tmp / "no")},
+                                                   True), (user, False))
+
+    def test_placeholder_pin_is_amber(self):
+        self.comp["git"]["assets"]["win-x64"]["url"] = base.PLACEHOLDER
+        ctx = self.ctx()
+        r = self.cl.step_gitbash(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("install Git for Windows", r.needs_you)
+        self.assertEqual(self.srv.srv.hits, [])
+        self.assertFalse(ctx.paths.settings_file.exists())
+
+    def test_wrong_sha_is_red_and_installs_nothing(self):
+        self.comp["git"]["assets"]["win-x64"]["sha256"] = "0" * 64
+        ctx = self.ctx()
+        r = self.cl.step_gitbash(ctx)
+        self.assertEqual(r.status, "red")
+        self.assertIn("sha256", r.detail)
+        self.assertFalse((ctx.paths.localappdata / "WhyNotCut").exists())
+        self.assertFalse(ctx.paths.settings_file.exists())
+
+    def test_7z_sfx_is_run_into_a_staging_folder(self):
+        """No real SFX ever runs in a test: run_cmd is replaced by a stand-in that 'extracts' bin/bash.exe."""
+        self.comp["git"]["assets"]["win-x64"]["archive"] = "7z-sfx"
+        seen = []
+
+        def fake_run(ctx, cmd, timeout, cwd=None, *, split=False):
+            seen.append(([str(c) for c in cmd], timeout))
+            out = Path(str(cmd[1])[2:])
+            touch(out / "bin" / "bash.exe", b"MZ sfx bash")
+            return 0, "Everything is Ok"
+
+        ctx = self.ctx()
+        with mock.patch.object(base, "run_cmd", side_effect=fake_run):
+            r = self.cl.step_gitbash(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        [(cmd, timeout)] = seen
+        self.assertEqual(timeout, 900)
+        self.assertEqual(Path(cmd[0]).parent, ctx.paths.downloads_dir)
+        self.assertTrue(cmd[1].startswith("-o"))
+        self.assertNotEqual(Path(cmd[1][2:]), self.managed(ctx).parents[1])  # staged, then renamed into place
+        self.assertEqual(cmd[2:], ["-y"])
+        self.assertEqual(self.managed(ctx).read_bytes(), b"MZ sfx bash")
+        self.assertEqual(self.env_of(ctx), {"CLAUDE_CODE_GIT_BASH_PATH": str(self.managed(ctx))})
+
+    def test_dry_run_writes_nothing(self):
+        ctx = self.ctx(dry_run=True)
+        self.assertEqual(self.cl.step_gitbash(ctx).status, "skipped")
+        self.assertFalse(ctx.paths.claude_dir.exists())
+        self.assertFalse((ctx.paths.localappdata / "WhyNotCut").exists())
+        self.assertEqual(self.srv.srv.hits, [])
 
 
 if __name__ == "__main__":
