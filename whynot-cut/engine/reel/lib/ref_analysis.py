@@ -4,8 +4,8 @@ Produces, per reference video:
   * cut list (scene-change detection) -> shot durations, cuts/min
   * contact sheets (1 frame / N s) and a frame at every detected cut, for visual review
   * audio loudness envelope (RMS per 100 ms) -> music/SFX density hints
-The *interpretation* (typography style, B-roll style, motion language) is written by
-Claude after viewing the sheets, into editing-style-analysis.md / editing-style.json.
+The *interpretation* (typography style, B-roll style, motion language) is written ONCE per client by the
+client-researcher after viewing the sheets, into output/client_database/reference_style/ (see ref_style.py).
 """
 from __future__ import annotations
 
@@ -109,10 +109,9 @@ def analyze_reference(video: Path, out_dir: Path, duration_s: float) -> dict:
 def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
     """Reference edits belong to the CLIENT: each one is analysed once into output/client_database/reference_analysis
     (cached by path, size and modification time) and every video's 01_analysis gets the summary. Ten reels from one
-    episode no longer re-analyse the same references ten times."""
+    episode no longer re-analyse the same references ten times. Without a video id (onboarding a client) only the
+    client cache is written."""
     import json
-    out_dir = paths.p("01_analysis/reference_analysis")
-    out_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = paths.output / "client_database" / "reference_analysis"
     cache_dir.mkdir(parents=True, exist_ok=True)
     idx_f = cache_dir / "cache.json"
@@ -144,5 +143,7 @@ def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
             "shot_mean_s": round(statistics.mean(agg_shots), 2) if agg_shots else None,
         },
     }
-    write_json(out_dir / "reference-measurements.json", summary)
+    if paths.video_id:
+        write_json(paths.p("01_analysis/reference_analysis") / "reference-measurements.json", summary)
+    write_json(cache_dir / "reference-measurements.json", summary)
     return summary

@@ -271,6 +271,8 @@ def check_reel(exe: str, argv: list[str], agent: str | None):
                 block("only the lead editor changes the editor's preferences (e.g. approval mode), when the editor asks.")
             if sub == "verify" and "--record" in argv:
                 block("subagents report a verdict; the lead editor records it after viewing the evidence itself.")
+            if agent == "qc-reviewer" and sub == "ref-style" and ("--record" in argv or "--apply" in argv):
+                block("qc-reviewer is independent and read-only: it may not record or apply the client reference style.")
             if agent == "qc-reviewer" and sub in QC_FORBIDDEN:
                 block(f"qc-reviewer is independent and read-only: it may not run `reel {sub}`. Report the issue instead.")
 

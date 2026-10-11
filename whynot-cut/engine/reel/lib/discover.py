@@ -48,7 +48,9 @@ def classify(p: Path, rel: str) -> dict:
     if kind == "video" and top == "data":
         role = "editing_reference_video" if role == "editing_reference" else (role or "source_footage")
     if kind == "document" and top == "data" and role != "broll_license":
-        role = "editing_reference_doc" if (role in (None, "editing_reference")) else role
+        # only a document whose path says it is a reference (data/References/...) is one; any other loose document in
+        # data/ (notes, a music.json, a stray export) stays unclassified instead of silently steering the edit style
+        role = "editing_reference_doc" if role == "editing_reference" else role
     if kind == "font":
         role = "brand_font"
     if kind == "subtitle":
@@ -215,6 +217,11 @@ def discover(paths: Paths, read_docs: bool = True) -> dict:
                         "from measured cuts + visual review of contact sheets.")
     if len(by_role.get("client_brief", [])) > 1:
         warnings.append("Multiple client brief documents — check for conflicts.")
+    loose = [f["rel"] for f in files if f["role"] == "unclassified" and f["kind"] == "document"
+             and f["rel"].startswith("data/") and not any(k in f["rel"].lower() for k, _ in ROLE_HINTS)]
+    if loose:
+        warnings.append(f"Documents in data/ not used as editing references (no 'ref' in the path): {', '.join(loose[:8])}"
+                        f" — if one is a reference edit or a reels plan, move it to data/References/.")
     if len(by_role.get("editing_reference_doc", [])) > 1:
         warnings.append("Multiple editing-reference docs — check for conflicts; later files do not silently override.")
     if by_role.get("broll_video"):

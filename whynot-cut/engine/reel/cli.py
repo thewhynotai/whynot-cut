@@ -7,11 +7,12 @@ Run via the plugin wrapper:  reel <command> --root <CLIENT_FOLDER> [--video-id I
 Getting started                               doctor / setup / scaffold / inbox / settings
 
 Deterministic stages (scripts)                Semantic stages (Claude authors files)
-  discover        inputs + environment           01_analysis/editing-style*.{md,json}
-  client-db       brand tokens/fonts/assets      client_database/profile/*
-  preflight       media inspection               01_analysis/main-topic.md, narrative-segments.json,
-  transcribe      Whisper -> SRT/words              transcript-semantic-analysis.json,
-  ref-analyze     reference video metrics           medical-content-review.md, edit-decisions.json
+  discover        inputs + environment           client_database/reference_style/* (ONCE per client:
+  client-db       brand tokens/fonts/assets         editing-style-analysis.md, editing-style.json, editing-rules.json)
+  preflight       media inspection               client_database/profile/*
+  transcribe      Whisper -> SRT/words           01_analysis/main-topic.md, narrative-segments.json,
+  ref-analyze     reference video metrics           transcript-semantic-analysis.json,
+  ref-style       record / reuse the client style   medical-content-review.md, edit-decisions.json
   plan            validate + compile decisions
   previews        PNG previews + QC composites
   sfx             synthesize needed SFX
@@ -35,9 +36,12 @@ from lib.common import (Paths, load_status, log, read_json, set_status, write_js
                         set_context, active_profile, profile_dirs, project_prefix, ENV_DIR, PROFILES_DIR, CLIENT_PROFILE_REL,
                         clients_root, client_folders, resolve_root)
 
+# 01_analysis/editing-style.json is the video's copy of the client reference style (`reel ref-style --apply`), not
+# authored per video; the other files are written by the story editor (+ medical reviewer) for each video
 SEMANTIC_FILES = ["01_analysis/editing-style.json", "01_analysis/main-topic.md",
                   "01_analysis/narrative-segments.json", "01_analysis/transcript-semantic-analysis.json",
                   "01_analysis/medical-content-review.md", "01_analysis/edit-decisions.json"]
+STYLE_COPY = SEMANTIC_FILES[0]
 
 
 def P(a) -> Paths:
@@ -83,8 +87,11 @@ def cmd_discover(a):
     if p.video_id:
         set_status(p, "INPUTS_DISCOVERED", f"{r['inventory']['file_count']} files", "discover",
                    [p.output / "discovery/discovery-report.md"])
+    from lib.ref_style import state
+    rs = state(p.root)
     out({"files": r["inventory"]["file_count"], "by_role": {k: len(v) for k, v in r["inventory"]["by_role"].items()},
-         "warnings": r["inventory"]["warnings"], "report": str(p.output / "discovery/discovery-report.md")})
+         "warnings": r["inventory"]["warnings"], "report": str(p.output / "discovery/discovery-report.md"),
+         "reference_style": {"state": rs["state"], "message": rs["message"]}})
 
 
 def cmd_client_db(a):
@@ -241,9 +248,49 @@ def cmd_ref_analyze(a):
     refs = [Path(f["path"]) for f in inv["files"] if f["role"] == "editing_reference_video"]
     docs = [f["rel"] for f in inv["files"] if f["role"] == "editing_reference_doc"]
     res = analyze_all(p, refs, {str(r): probe(r)["duration_s"] for r in refs}) if refs else {}
+    from lib import ref_style
+    cs = ref_style.state(p.root)
+    applied = None
+    if p.video_id and cs["state"] == "current":
+        vs = ref_style.video_state(p)
+        # reuse, never re-author: copy the client style when this video has none yet (or an outdated copy and no plan)
+        if vs["state"] == "missing" or (vs["state"] == "outdated" and not p.p("01_analysis/timeline-spec.json").exists()):
+            applied = ref_style.apply(p)
+    if cs["state"] == "current":
+        nxt = ("client reference style reused for this video (" + STYLE_COPY + "); put anything specific to this video "
+               "in " + ref_style.OVERRIDES + " and re-run `reel ref-style --apply`") if applied else cs["message"]
+    else:
+        nxt = (f"View the contact sheets, then {cs['message']}" if cs["state"] != "unrecorded" else cs["message"])
     out({"reference_docs": docs, "reference_videos": len(refs), "measurements": res.get("aggregate"),
          "contact_sheets": [s for r in res.get("references", []) for s in r["contact_sheets"]],
-         "next": "View the contact sheets, then author 01_analysis/editing-style-analysis.md + editing-style.json + editing-rules.json"})
+         "reference_style": {"state": cs["state"], "message": cs["message"], "added": cs["added"],
+                             "removed": cs["removed"], "changed": cs["changed"]},
+         "applied": applied, "next": nxt})
+
+
+def cmd_ref_style(a):
+    """Client reference style: show its state, --record it against the current references, or --apply it to a video."""
+    from lib import ref_style
+    p = P(a)
+    if a.record:
+        r = ref_style.record(p.root, by=a.by or "claude")
+        out(r)
+        if not r["ok"]:
+            raise SystemExit(2)
+        return
+    if a.apply:
+        if not p.video_id:
+            raise SystemExit("--video-id required for --apply (the video that reuses the client style)")
+        p.ensure_project()
+        r = ref_style.apply(p)
+        out(r)
+        if not r["ok"]:
+            raise SystemExit(2)
+        return
+    st = ref_style.state(p.root)
+    if p.video_id:
+        st["video"] = ref_style.video_state(p)
+    out(st)
 
 
 def cmd_plan(a):
@@ -251,12 +298,22 @@ def cmd_plan(a):
     p = P(a)
     refuse_stale_window(p)
     missing = [f for f in SEMANTIC_FILES if not p.p(f).exists()]
+    from lib import ref_style
+    rs = ref_style.next_step(p)
     if missing:
         set_status(p, load_status(p)["status"], f"semantic files missing: {missing}")
-        out({"ok": False, "missing_semantic_files": missing})
+        res = {"ok": False, "missing_semantic_files": missing}
+        if STYLE_COPY in missing:
+            res["how"] = (f"{STYLE_COPY}: `reel ref-style --apply` (copies the client reference style)"
+                          if rs["client"]["state"] == "current" else f"{STYLE_COPY}: {rs['client']['message']}, "
+                                                                       f"then `reel ref-style --apply`")
+        out(res)
         return
     set_status(p, "ANALYZED", "semantic analysis files present", "analysis")
     r = compile_plan(p)
+    if rs["step"] or rs["notices"]:
+        r["reference_style"] = {"state": rs["client"]["state"], "video": rs["video"]["state"],
+                                "note": rs["step"] or "; ".join(rs["notices"])}
     if r["ok"]:
         spec = read_json(p.p("01_analysis/timeline-spec.json"))
         pend = [e["event_id"] for e in spec["events"] if e["approval_required"]]
@@ -463,13 +520,18 @@ def _want_preview(p: Paths) -> bool:
 def cmd_next(a):
     """Tell Claude/the user what the next step is (resumable workflow)."""
     p = P(a)
+    from lib import ref_style
+    rs = ref_style.next_step(p)     # Stage 5 is client-level: author once, reuse, flag when the references change
+    # references are measured per client: a video that already holds its copy of the style needs no ref-analyze
+    need_ref = _has_reference_videos(p) and rs["video"]["state"] not in ("current", "legacy")
     chk = [
         ("discover", p.output / "discovery/input-inventory.json"),
         ("client-db", p.client_db / "branding/brand-tokens.json"),
         ("preflight", p.p("00_inputs/preflight.json")),
         ("transcribe", p.p("02_transcription/transcript.json")),
     ] + ([("ref-analyze", p.p("01_analysis/reference_analysis/reference-measurements.json"))]
-         if _has_reference_videos(p) else []) + [("AUTHOR " + f, p.p(f)) for f in SEMANTIC_FILES] + [
+         if need_ref else []) + ([(rs["step"], None)] if rs["step"] else []) + [
+        ("AUTHOR " + f, p.p(f)) for f in SEMANTIC_FILES if f != STYLE_COPY] + [
         ("plan", p.p("01_analysis/timeline-spec.json")),
         ("previews", p.p("08_quality_control/previews/_contact_sheet.jpg")),
     ] + ([("preview-video (the editor watches the edit)", p.p(f"08_quality_control/preview/{p.video_id}_preview.mp4"))]
@@ -481,7 +543,7 @@ def cmd_next(a):
         ("qc", p.p("08_quality_control/qc-results.json")),
         ("handoff", p.p("09_handoff/README.md")),
     ]
-    todo = [name for name, f in chk if not Path(f).exists()]
+    todo = [name for name, f in chk if f is None or not Path(f).exists()]
     # a step is STALE when something it depends on changed after it ran (e.g. audio re-cleaned after the plan)
     from lib.verify import prproj_build_time
     prj = p.p(f"07_premiere/project/{p.video_id}_{project_prefix()}_EDIT.prproj")
@@ -513,12 +575,15 @@ def cmd_next(a):
     if stale and status in ("QC_PASSED", "DELIVERED"):
         status = f"{status} (STALE: inputs changed since)"
     out({"status": status, "profile": active_profile(p.root), "next": todo[0] if todo else "done",
-         "remaining": todo, "stale": stale})
+         "remaining": todo, "stale": stale,
+         "reference_style": {"state": rs["client"]["state"], "video": rs["video"]["state"], "message": rs["client"]["message"]},
+         "notices": rs["notices"]})
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
 NO_ROOT = {"setup", "doctor", "model-download", "gpu-enable", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings"}
 NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox"}
+OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
 
 
 def cmd_setup(a):
@@ -686,7 +751,7 @@ def main():
     ap.add_argument("--episode", help="podcast episode id (`reel episodes` lists them)")
     from lib import podcast_cli
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ["discover", "client-db", "preflight", "transcribe", "transcript-correct", "transcript-verify", "transcript-relisten", "range", "ref-analyze", "plan",
+    for name in ["discover", "client-db", "preflight", "transcribe", "transcript-correct", "transcript-verify", "transcript-relisten", "range", "ref-analyze", "ref-style", "plan",
                  "previews", "sfx", "approve-plan", "verify", "ppro-install", "ppro-status", "ppro-probe", "ppro-build", "ppro-frames", "mogrt-build", "audio-clean", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "premiere",
                  "qc", "handoff", "status", "next", "setup", "profile", "client-init",
                  "doctor", "scaffold", "inbox", "preview-video", "settings", "model-download", "gpu-enable"] + list(podcast_cli.ARGS):
@@ -747,6 +812,12 @@ def main():
             sp.add_argument("--from-profile", help="copy a shipped profile instead of the blank template")
             sp.add_argument("--prefix", help="file-name tag, e.g. SH -> C0001_SH_EDIT.prproj")
             sp.add_argument("--force", action="store_true")
+        if name == "ref-style":
+            sp.add_argument("--record", action="store_true",
+                            help="record the client style files as written from the current reference edits")
+            sp.add_argument("--apply", action="store_true",
+                            help="copy the current client style (+ 01_analysis/editing-style-overrides.json) into the video")
+            sp.add_argument("--by", help="who wrote the client style (e.g. client-researcher)")
         if name == "previews":
             sp.add_argument("--no-composite", action="store_true")
         if name == "model-download":
@@ -789,7 +860,8 @@ def main():
         if len(src) == 1:
             a.video_id = slug(Path(src[0]["path"]).stem)
         else:
-            raise SystemExit("--video-id required (found %d source files; `reel inbox` lists them)" % len(src))
+            if a.cmd not in OPTIONAL_ID:
+                raise SystemExit("--video-id required (found %d source files; `reel inbox` lists them)" % len(src))
     globals()["cmd_" + a.cmd.replace("-", "_")](a)
 
 

@@ -61,6 +61,20 @@ def episodes(root: Path) -> list:
         if d.is_dir() else []
 
 
+def reference_style_line(root: Path, has_profile: bool) -> str:
+    """The client reference style is written once per client; say so when the reference edits changed since (stale),
+    or when references exist but no client style was recorded yet."""
+    try:
+        sys.path.insert(0, str(PLUGIN / "engine" / "reel"))
+        from lib import ref_style
+        st = ref_style.state(root)
+    except Exception:
+        return ""
+    if st["state"] == "stale" or (has_profile and st["references"] and st["state"] in ("missing", "unrecorded")):
+        return f"Reference style: {st['message']}. "
+    return ""
+
+
 def prefs_line(st: dict) -> str:
     if not st.get("_file"):
         return "Preferences: none yet (/whynot-cut:preferences)."
@@ -126,6 +140,7 @@ def main():
              f"New clips not started yet: {', '.join(clips) if clips else 'none'}. "
              + (f"Podcast episodes in data/Episodes: {', '.join(eps)} (reels plan + publish package: /whynot-cut:podcast; "
                 f"`reel episodes` shows their state). " if eps else "")
+             + reference_style_line(root, bool(prof))
              + f"{prefs_line(st)} "
              f"Use /whynot-cut:autopilot (edit every new clip), /whynot-cut:edit <clip>, /whynot-cut:revise, "
              f"/whynot-cut:status. assets/ and data/ are read-only.")

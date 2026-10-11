@@ -304,6 +304,8 @@ class TestPlanToXML(unittest.TestCase):
         verify.record(self.p, "pass", "unit test")
         q = run_qc(self.p)
         self.assertTrue(q["ok"], q["failed"])
+        rs = next(c for c in q["checks"] if c["check"].startswith("Client reference style current"))
+        self.assertEqual((rs["mandatory"], rs["result"]), (False, "WARN"))    # data/Ref/style.md, no client style yet
         self.assertTrue(self.p.p("01_analysis/edit-plan.md").exists())
         # re-plan with a change -> approval goes stale -> QC fails again
         ed = self.decisions()

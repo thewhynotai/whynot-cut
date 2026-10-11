@@ -215,6 +215,12 @@ def run_qc(paths: Paths) -> dict:
                 "01_analysis/transcript-semantic-analysis.json", "01_analysis/medical-content-review.md",
                 "01_analysis/editing-style.json", "01_analysis/edit-decisions.json", "01_analysis/plan-validation.json"):
         r.add("project", f"{rel} present", paths.p(rel).exists())
+    from .ref_style import state as ref_state, video_state
+    cs, vs = ref_state(paths.root), video_state(paths)
+    r.add("project", "Client reference style current (matches the reference edits in data/)", cs["state"] == "current",
+          cs["message"], mandatory=False)
+    r.add("project", "01_analysis/editing-style.json reused from the current client reference style",
+          vs["state"] == "current", vs["message"], mandatory=False)
     pv = read_json(paths.p("01_analysis/plan-validation.json"), {})
     r.add("project", "Edit decisions traceable to transcript (plan validation)", pv.get("ok", False), "; ".join(pv.get("errors", [])[:3]))
 

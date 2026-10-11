@@ -196,6 +196,8 @@ def inbox(root: Path, refresh: bool = True) -> dict:
         need.append("a brief and/or a colours file (HEX codes) in assets/Brand")
     if not (by.get("editing_reference_video") or by.get("editing_reference_doc")):
         need.append("optional: 1-3 reference edits in data/References (gives the style to copy)")
+    from .ref_style import state as ref_state
+    rs = ref_state(p.root)
     from .episode import list_episodes, podcast_cfg
     episodes = list_episodes(p.root)
     hints = []
@@ -232,4 +234,5 @@ def inbox(root: Path, refresh: bool = True) -> dict:
             "clips": clips, "new": [c["video_id"] for c in clips if c["state"] == "new"],
             "in_progress": [c["video_id"] for c in clips if c["state"] == "in progress"],
             "done": [c["video_id"] for c in clips if c["state"] == "done"],
-            "missing_material": need, "discovery_warnings": inv.get("warnings", [])}
+            "missing_material": need, "discovery_warnings": inv.get("warnings", []),
+            "reference_style": {"state": rs["state"], "message": rs["message"]}}
