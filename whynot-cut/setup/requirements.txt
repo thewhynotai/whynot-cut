@@ -1,6 +1,10 @@
-# WhyNot Cut engine. macOS lines are the versions verified in production (2026-10-10); the markers give Windows and
-# newer Pythons (3.10-3.13) wheels that exist for them.
+# WhyNot Cut engine: the human-edited ranges. What gets installed is the hash lock compiled from this file for each
+# platform (setup/locks/runtime-<platform>.lock, Python 3.12; 3.0 T2.1). After editing a line here, recompile the
+# three locks with the command written at the top of each lock, then run the suite on a runtime built from them.
+# macOS lines are the versions verified in production (2026-10-10).
 faster-whisper==1.2.1
+# faster-whisper's model download; 1.x is the verified major (2.x changed its HTTP stack, untested here)
+huggingface-hub>=0.21,<2
 ctranslate2>=4.6,<5
 av>=14,<21
 numpy==2.0.2 ; python_version < "3.10"
