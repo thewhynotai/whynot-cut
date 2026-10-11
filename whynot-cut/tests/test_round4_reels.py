@@ -169,5 +169,106 @@ class TestExplicitAdjustSnapsToWords(unittest.TestCase):
         self.assertIn("never", pod.split("nearest WORD", 1)[1][:400])
 
 
+class TestEvidenceDidYouMean(unittest.TestCase):
+    """G64: the analyst wrote evidence from the machine transcript, then `transcript-correct` changed words; the
+    reels-plan error must show the CURRENT words at that time so the fix is a copy-paste."""
+
+    @classmethod
+    def setUpClass(cls):
+        from lib.episode import EpisodePaths
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root = cls.tmp / "C"
+        (cls.root / "assets").mkdir(parents=True)
+        (cls.root / "data").mkdir()
+        cls.ep = EpisodePaths(cls.root, "EP12")
+        cls.words = synthetic_episode_transcript(cls.ep)           # the machine transcript (what the analyst read)
+        write_json(cls.ep.p("00_inputs/episode.json"), {"episode_id": "EP12", "duration_ms": 121000, "sheet": {}})
+        # the analyst's candidate: words 39..149; evidence/end_evidence copied from the machine transcript
+        cls.cand = cand(cls.words, 39, 149)
+        # then the transcript-editor corrects words (ids are index + 1): the 2nd evidence word, and the last-but-one
+        write_json(cls.ep.p("02_transcription/transcript-corrections.json"), {"corrections": [
+            {"word_id": 41, "from": "كلمه40", "to": "الشركة الكبرى", "reason": "misheard", "confidence": "high"},
+            {"word_id": 149, "from": "كلمه148", "to": "٣", "reason": "digit", "confidence": "high"}]})
+        from lib.transcribe import apply_corrections
+        apply_corrections(cls.ep)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def run_plan(self, **kw):
+        from lib.reels import compile_reels_plan
+        write_json(self.ep.p("01_analysis/reels-plan.json"), {"episode_id": "EP12", "candidates": [dict(self.cand, **kw)]})
+        return compile_reels_plan(self.ep)
+
+    def did_you_mean(self, errors, key):
+        e = next(x for x in errors if f": {key} not found" in x)
+        m = re.search(r"did you mean: «(.+?)»", e)
+        self.assertIsNotNone(m, e)
+        return e, m.group(1)
+
+    def test_the_fixture_really_corrected_the_words(self):
+        cur = read_json(self.ep.p("02_transcription/words.json"))["words"]
+        self.assertEqual(cur[40]["word"], "الشركة الكبرى")
+        self.assertEqual(self.words[40]["word"], "كلمه40")            # the analyst read the old one
+
+    def test_stale_start_evidence_shows_the_corrected_words(self):
+        r = self.run_plan()
+        self.assertFalse(r["ok"])
+        e, maybe = self.did_you_mean(r["errors"], "evidence")
+        self.assertIn("R01", e)
+        self.assertIn(self.words[39]["word"] + " الشركة الكبرى", maybe)    # the corrected 2nd word, in place
+        self.assertEqual(maybe.split()[0], self.words[39]["word"])         # starts where the candidate starts
+        self.assertEqual(len(maybe.split()), 4)                            # 3 quoted words, one became two
+
+    def test_stale_end_evidence_shows_the_corrected_words(self):
+        r = self.run_plan()
+        e, maybe = self.did_you_mean(r["errors"], "end_evidence")
+        self.assertTrue(maybe.endswith(self.words[149]["word"]), maybe)    # ends where the candidate ends
+        self.assertIn("٣", maybe)                                          # verbatim, not normalised
+
+    def test_the_suggestion_is_a_mechanical_fix(self):
+        r = self.run_plan()
+        _, start = self.did_you_mean(r["errors"], "evidence")
+        _, end = self.did_you_mean(r["errors"], "end_evidence")
+        r = self.run_plan(evidence=start, end_evidence=end)
+        self.assertTrue(r["ok"], r["errors"])
+
+    def test_the_quote_is_still_listed(self):
+        e, _ = self.did_you_mean(self.run_plan()["errors"], "evidence")
+        self.assertIn(self.cand["evidence"], e)
+        self.assertIn("not found verbatim", e)
+
+    def test_evidence_in_the_wrong_place_also_gets_the_current_words(self):
+        r = self.run_plan(evidence="كلام مش موجود خالص بالمرة")
+        e, maybe = self.did_you_mean(r["errors"], "evidence")
+        self.assertEqual(len(maybe.split()), 6)                            # 5 words like the quote; one became two
+        self.assertIn("الشركة الكبرى", maybe)
+        self.assertEqual(maybe.split()[0], self.words[39]["word"])
+
+    def test_matching_evidence_has_no_error_and_folding_still_applies(self):
+        good = "كلمه39 الشركه الكبري"                                      # corrected words, written with ta marbuta/ya
+        r = self.run_plan(evidence=good, end_evidence=" ".join(
+            w["word"] for w in read_json(self.ep.p("02_transcription/words.json"))["words"][147:150]).replace("٣", "3"))
+        self.assertTrue(r["ok"], r["errors"])
+
+    def test_no_words_gives_no_suggestion(self):
+        from lib.reels import current_words_at
+        self.assertEqual(current_words_at([], 1000, "start", 4), "")
+
+    def test_cli_reels_plan_prints_the_suggestion(self):
+        write_json(self.ep.p("01_analysis/reels-plan.json"), {"episode_id": "EP12", "candidates": [self.cand]})
+        r = subprocess.run([sys.executable, "-B", str(SK / "engine/reel/cli.py"), "--root", str(self.root), "reels-plan",
+                            "--episode", "EP12"], capture_output=True, text=True, encoding="utf-8",
+                           env=dict(os.environ, PYTHONUTF8="1"))
+        out = json.loads(r.stdout)
+        self.assertFalse(out["ok"])
+        self.assertTrue(any("did you mean: «" in e and "الشركة الكبرى" in e for e in out["errors"]), out["errors"])
+
+    def test_the_analyst_docs_say_to_copy_the_suggestion(self):
+        for rel in ("agents/episode-analyst.md", "skills/episode-craft/SKILL.md"):
+            self.assertIn("did you mean", (SK / rel).read_text(encoding="utf-8"), rel)
+
+
 if __name__ == "__main__":
     unittest.main()

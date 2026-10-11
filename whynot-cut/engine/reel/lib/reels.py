@@ -121,6 +121,17 @@ def find_evidence(words: list, text: str, near_ms: int, tol_ms: int, anchor: str
     return False
 
 
+def current_words_at(words: list, near_ms: int, anchor: str = "start", n: int = 4) -> str:
+    """The CURRENT (corrected) transcript words an evidence quote should say at near_ms, verbatim: n words from the word
+    starting nearest near_ms (anchor 'start'), or ending at the word ending nearest it ('end'). The same anchoring
+    find_evidence uses, so copying this text as the quote passes."""
+    if not words:
+        return ""
+    key = (lambda k: words[k]["start_ms"]) if anchor == "start" else (lambda k: words[k]["end_ms"])
+    i = _nearest(list(range(len(words))), key, near_ms)
+    return " ".join(w["word"] for w in (words[i:i + n] if anchor == "start" else words[max(0, i - n + 1):i + 1]))
+
+
 # --------------------------------------------------------------------------- validation
 def validate_topics(topics: list, total_ms: int, min_ms: int = 10000) -> list[str]:
     """Problems with a topic map (also the YouTube chapters): sorted, non-overlapping, >= 10 s each, first at the start."""
@@ -193,7 +204,10 @@ def compile_reels_plan(ep) -> dict:
             if not str(c.get(key) or "").strip():
                 errors.append(f"{cid}: {key} missing (copy the first/last words exactly from the transcript)")
             elif not find_evidence(words, c[key], at, tol, anchor):
-                errors.append(f"{cid}: {key} not found verbatim within ±{tol / 1000:.0f} s of {fmt_ts(at, '.')}: {c[key]!r}")
+                # the transcript may have been corrected since the quote was written: show what it says NOW
+                maybe = current_words_at(words, at, anchor, min(12, max(3, len(str(c[key]).split()))))
+                errors.append(f"{cid}: {key} not found verbatim within ±{tol / 1000:.0f} s of {fmt_ts(at, '.')}: {c[key]!r}"
+                              + (f" — did you mean: «{maybe}» (the current transcript there)" if maybe else ""))
         score = c.get("score") or {}
         bad = [k for k in SCORE_KEYS if not isinstance(score.get(k), int) or not 1 <= score[k] <= 10]
         if bad:

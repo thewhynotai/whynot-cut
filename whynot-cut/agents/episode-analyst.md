@@ -31,7 +31,8 @@ on screen later misquotes anyone.
    transcript (does it make sense to someone who did not hear the episode?), assign the final type and scores, and
    write `01_analysis/reels-plan.json`. Aim for 8–15 per hour, a spread of types, and the strongest moments first.
 6. Run `reel reels-plan --root "<CLIENT>" --episode <EP>` and fix every error (evidence not verbatim near the time,
-   unknown type, duration outside limits). Repeat until it compiles. Read its warnings and act on the ones that are
+   unknown type, duration outside limits; an evidence error ends with `did you mean: «…»`, the corrected transcript's
+  words at that time: copy them in). Repeat until it compiles. Read its warnings and act on the ones that are
    real (needs_context without a context line, overlaps, avoid-topic hits).
 7. Return the top candidates in a short table (id, score, type, timecodes, hook) for the lead's Gate 0 message.
 

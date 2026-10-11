@@ -38,6 +38,8 @@ changes; leave a gap rather than guess.
 Then `reel reels-plan --root "<CLIENT>" --episode <EP>` until it compiles. The engine snaps start/end to the nearest
 sentence-like boundary (lead-in 120 ms, tail 250 ms), checks evidence near those times (±3 s, Arabic-normalised),
 checks 30–90 s (15–180 hard), overlaps, the sheet's avoid list, and computes the total score.
+An evidence error ends with `did you mean: «…»`: those are the words the CURRENT transcript (after `transcript-correct`)
+says at that time. Copy them into `evidence` / `end_evidence`; do not re-guess from memory of the uncorrected text.
 
 ## Finding moments
 1. Map the episode first (topics), then walk it topic by topic.
