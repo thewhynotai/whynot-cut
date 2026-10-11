@@ -69,3 +69,36 @@ def sfx_files(kinds: set[str], out_dir: Path) -> dict[str, Path]:
     from .sfx import synth
     out_dir.mkdir(parents=True, exist_ok=True)
     return {k: synth(k, out_dir / f"{k}.wav") for k in sorted(kinds)}
+
+
+def _decode(path: Path) -> np.ndarray:
+    """Any audio file -> float32 (n, 2) at 48 kHz (ffmpeg; SFX are 24-bit, music may be mp3/m4a)."""
+    import subprocess
+    from .common import ffmpeg_exe
+    raw = subprocess.run([ffmpeg_exe(), "-loglevel", "error", "-i", str(path), "-ac", "2", "-ar", str(SR), "-f", "s16le",
+                          "-"], capture_output=True).stdout or b""
+    return (np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0).reshape(-1, 2)
+
+
+def mix(plan: dict, root: Path, out: Path) -> Path:
+    """Dialogue + music (recipe/decision level, fade-out) + each SFX at its frame, the plan's length, 48 kHz WAV."""
+    fps = float(plan["fps"])
+    n = int(round(plan["duration_frames"] / fps * SR))
+    buf = np.zeros((n, 2), dtype=np.float32)
+
+    def put(x: np.ndarray, at: int, gain: float = 1.0):
+        if at >= n or not len(x):
+            return
+        m = min(len(x), n - at)
+        buf[at:at + m] += x[:m] * gain
+    a = plan["audio"]
+    put(_decode(Path(a["dialogue"])), 0)
+    if a.get("music"):
+        mus = _decode(Path(a["music"]["file"]))[:n].copy()
+        f = int(a["music"].get("fade_out_frames", 0) / fps * SR)
+        if f and len(mus) >= n:
+            mus[n - f:n] *= np.linspace(1, 0, f, dtype=np.float32)[:, None]
+        put(mus, 0, 10 ** (float(a["music"].get("level_db", -24)) / 20))
+    for c in a.get("sfx") or []:
+        put(_decode(Path(c["file"])), int(round(c["frame"] / fps * SR)), 0.7)
+    return _write(Path(out), buf)

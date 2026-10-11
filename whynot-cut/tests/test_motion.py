@@ -1043,5 +1043,60 @@ class TestMotionPlan(unittest.TestCase):
         self.assertNotEqual(rec["plan_fingerprint"], fingerprint(self.reel))
 
 
+# --------------------------------------------------------------------------- animatic
+class CompiledMotion(unittest.TestCase):
+    """A compiled good_script() motion project, shared by the animatic, JSX, build, render and QC tests."""
+    @classmethod
+    def setUpClass(cls):
+        if test_font() is None:
+            raise unittest.SkipTest("no test font for HarfBuzz fitting")
+        from lib.motion_plan import compile_motion
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root, cls.ep, cls.reel = motion_plan_fixture(cls.tmp)
+        write_json(cls.reel.p("01_analysis/motion-script.json"), good_script())
+        r = compile_motion(cls.reel)
+        assert r["ok"], r["errors"]
+        cls.plan = read_json(cls.reel.p("01_analysis/motion-plan.json"))
+
+    @classmethod
+    def tearDownClass(cls):
+        common.set_context(None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def setUp(self):
+        common.set_context(self.root)
+
+
+class TestAnimatic(CompiledMotion):
+    def test_animatic(self):
+        from lib.media import probe
+        from lib.motion_animatic import render
+        r = render(self.reel)
+        d = self.reel.p("08_quality_control/animatic")
+        self.assertEqual(len(r["stills"]), len(self.plan["scenes"]))
+        self.assertTrue((d / "_storyboard.jpg").exists())
+        pr = probe(Path(r["mp4"]))
+        want = self.plan["duration_frames"] / self.plan["fps"]
+        self.assertAlmostEqual(pr["duration_s"], want, delta=1.5 / self.plan["fps"] + 0.05)
+        self.assertTrue(pr["audio"])
+
+    def test_kinetic_still_has_text(self):
+        import numpy as np
+        from PIL import Image
+        from lib.motion_animatic import render
+        r = render(self.reel)
+        im = np.asarray(Image.open(r["stills"][0]).convert("RGB")).astype(int)
+        bg = np.array([int(round(c * 255)) for c in self.plan["scenes"][0]["bg"]])
+        diff = np.abs(im - bg).sum(axis=2) > 60
+        self.assertGreater(diff.mean(), 0.01)
+
+    def test_mix(self):
+        from lib.media import probe
+        from lib.motion_audio import mix
+        out = mix(self.plan, self.root, self.tmp / "mix.wav")
+        pr = probe(out)
+        self.assertAlmostEqual(pr["duration_s"], self.plan["duration_frames"] / self.plan["fps"], delta=0.05)
+
+
 if __name__ == "__main__":
     unittest.main()

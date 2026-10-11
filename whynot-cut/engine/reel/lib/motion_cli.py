@@ -23,6 +23,7 @@ ARGS: dict = {
     ],
     "motion-library": [],
     "motion-plan": [],
+    "motion-animatic": [(("--width",), {"type": int, "default": 540})],
 }
 NO_ID = {"ae-status", "ae-probe", "motion-icons", "motion-library"}
 
@@ -104,6 +105,14 @@ def cmd_motion_plan(a):
          "editorial_lines": len(r["editorial_lines"]), "plan": r["plan"], "md": r["md"],
          "next": ("reel motion-animatic, VIEW the storyboard, then show the editor motion-plan.md + the animatic "
                   "(Gate 1)") if r["ok"] else "fix 01_analysis/motion-script.json and run motion-plan again"})
+
+
+def cmd_motion_animatic(a):
+    from .motion_animatic import render
+    r = render(P(a), width=a.width)
+    r["next"] = ("VIEW the storyboard and watch the animatic, then show the editor motion-plan.md + the animatic "
+                 "(Gate 1: `reel approve-plan --by editor` only with their words)")
+    out(r)
 
 
 def dispatch(a) -> bool:
