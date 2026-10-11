@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased · Client-level reference style
+The reference edits in `data/` belong to the client, so their interpretation is now written once per client and
+reused by every video, instead of being re-authored into each video's `01_analysis/`.
+
+- `output/client_database/reference_style/`: `editing-style-analysis.md`, `editing-style.json`, `editing-rules.json`
+  (client-researcher, once) + `reference-set.json` (`reel ref-style --record`: every reference file's path, size and
+  modification time, and their fingerprint).
+- `reel ref-style` shows missing | unrecorded | stale | current; `--apply --video-id <ID>` copies the current client
+  style into `01_analysis/editing-style.json` + `editing-rules.json`, merged with the video's own
+  `01_analysis/editing-style-overrides.json`. `ref-analyze --video-id` applies it automatically when current;
+  `ref-analyze` without a video id measures for the client only (onboarding). A stale style is never copied.
+- `reel next` lists "AUTHOR client reference style once …" for the first video, "ref-style --apply" for the next ones
+  (no re-authoring), and "reference style stale — refresh client style + reel-profile style.json/notes.md (added /
+  removed / edited: …)" when a reference changes. Videos authored before keep their own file (a notice, not a step).
+  `reel discover`, `reel inbox`, `qc` (advisory) and the session start report the state too; `plan` points to
+  `ref-style --apply` when the copy is missing. `--record` warns when the reel-profile `style.json`/`notes.md` or the
+  style files were left unchanged after the references changed.
+- Docs aligned with the engine (client-craft, editing-reference-analysis, edit, new-client, story-craft,
+  client-researcher, story-editor): the docs no longer promise per-video `editing-style-analysis.md`/`editing-rules.json`
+  that nothing checked.
+- Discovery: a document in `data/` is an editing reference only when its path says so (`data/References/…`, "ref");
+  other loose documents are `unclassified` with a warning (before, any notes file or `music.json` became a reference).
+- Guard: qc-reviewer may read `reel ref-style` but not `--record`/`--apply`.
+
 ## 2.1.1 — 2026-10-11 · Podcast mode polish
 The minor findings of the 2.1.0 review, each reproduced by a failing test first.
 

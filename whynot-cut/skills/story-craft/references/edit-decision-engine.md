@@ -1,6 +1,7 @@
 # Edit Decision Engine (Stage 7) — authoring `01_analysis/edit-decisions.json`
 
-Combine **SRT meaning + editing-style/rules + client brand**. One decision per meaningful segment that
+Combine **SRT meaning + editing-style/rules + client brand** (`01_analysis/editing-style.json` + `editing-rules.json` =
+the client reference style copied for this video, with its overrides). One decision per meaningful segment that
 needs treatment (talking-head-only segments need no decision unless a camera change happens).
 `reel plan` validates and compiles; fix all errors it reports. Times: `"HH:MM:SS.mmm"` (or seconds).
 Frames are computed by the compiler at the client's sequence rate (24 / 25 / 29.97 …, round-half-up from absolute ms —

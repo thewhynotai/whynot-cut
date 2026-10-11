@@ -57,7 +57,7 @@ Agents don't see this conversation, so give them what they need.
 |---|---|---|---|
 | 1–2 Discovery, client DB | `client-researcher` | discover, client-db, (client-init) | `client-database-status.json` ready, or issues listed |
 | 3 Preflight | (you) | preflight | `00_inputs/preflight.json` |
-| 4 Transcript ∥ 5 References | `transcript-editor` ∥ `client-researcher` | transcribe, transcript-correct ∥ ref-analyze | flagged-words list returned; editing-style files written |
+| 4 Transcript ∥ 5 References | `transcript-editor` ∥ (you, or `client-researcher` when the client style is missing/stale) | transcribe, transcript-correct ∥ ref-analyze, ref-style | flagged-words list returned; `reel ref-style` current and `01_analysis/editing-style.json` copied from it |
 | 3b Audio clean + pauses | `audio-engineer` (after 4: needs word times) | audio-clean | speech-to-noise improved, 0 missing words |
 | 6–7 Meaning + decisions | `story-editor` | plan (until no errors) | 6 analysis files + `edit-decisions.json` compile |
 | 7b Claims ∥ 8 Graphics | `medical-reviewer` ∥ `motion-designer` | ∥ previews, sfx | approval list; previews checked |
@@ -66,6 +66,13 @@ Agents don't see this conversation, so give them what they need.
 | 10 Build | `premiere-builder` | ppro-status, ppro-build (or `premiere` fallback) | PRPROJ_BUILT, all read-back checks true |
 | 12 Verify | `qc-reviewer` (independent, fresh context) | ppro-frames, qc | per-frame verdicts returned |
 | 13 Record + hand off | **you** | verify --record, qc, handoff | qc ok **in this message** |
+
+Stage 5 is **client-level**: the reference style is written once per client in `output/client_database/reference_style/`
+(`editing-style-analysis.md`, `editing-style.json`, `editing-rules.json`) and recorded with `reel ref-style --record`.
+- `reel next` says "AUTHOR client reference style…" (first video) or "reference style stale — refresh client style +
+  reel-profile style.json/notes.md…" (a reference edit was added, removed or edited): spawn `client-researcher` for it.
+- Client style current: no agent. `reel ref-analyze --video-id <ID>` (or `reel ref-style --apply --video-id <ID>`)
+  copies it into the video. Video-specific differences go in `01_analysis/editing-style-overrides.json`, then `--apply` again.
 
 On a machine whose `reel doctor` → `whisper_models` lacks the preferred model, ask before stage 4: the first
 transcription downloads it once (about 3 GB for large-v3).

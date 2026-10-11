@@ -15,7 +15,11 @@ Work from complete statements in context, never from isolated keywords.
 3. `01_analysis/transcript-semantic-analysis.json`, statement-level, including the B-roll options you rejected
 4. `01_analysis/edit-decisions.json`, see `references/edit-decision-engine.md` and the schema
 
-`editing-style.json` comes from client-researcher, and `medical-content-review.md` from you together with medical-reviewer.
+`01_analysis/editing-style.json` + `editing-rules.json` are this video's copy of the client reference style (written once per
+client by client-researcher in `output/client_database/reference_style/`, copied by `reel ref-style --apply`). Read them and
+the client's `editing-style-analysis.md`; never edit the copies. What only this video does differently goes in
+`01_analysis/editing-style-overrides.json` (`reason`, `style` deep-merged, `rules` appended), then `reel ref-style --apply`.
+`medical-content-review.md` comes from you together with medical-reviewer.
 Then run `reel plan` and fix **every** error it reports (evidence not verbatim, overlaps, unknown assets). Repeat until it compiles.
 
 **Rules:**

@@ -9,7 +9,9 @@ user-invocable: false
 ```bash
 reel discover    --root "<CLIENT>"                 # inventory + roles (assets/ = brand, data/ = footage + references)
 reel client-db   --root "<CLIENT>"                 # colours from documents, fonts (fontTools), images → client_database/
-reel ref-analyze --root "<CLIENT>" --video-id <ID> # reference cuts, contact sheets, loudness
+reel ref-analyze --root "<CLIENT>"                 # reference cuts, contact sheets, loudness (cached per client)
+reel ref-style   --root "<CLIENT>"                 # client reference style: missing | unrecorded | stale | current
+reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after writing reference_style/ (below)
 ```
 - **View** every image contact sheet and every reference contact sheet (Read the JPGs). Many facts are only visible this way.
 - Write the semantic layer listed in `references/client-intelligence.md`:
@@ -19,8 +21,18 @@ reel ref-analyze --root "<CLIENT>" --video-id <ID> # reference cuts, contact she
   - `typography-roles.json`
 
   Then run `client-db` again so the roles merge.
-- Reference style goes in `01_analysis/editing-style-analysis.md`, `editing-style.json` and `editing-rules.json`, with measured and
-  inferred items clearly marked (see `references/editing-reference-analysis.md`).
+- **Reference style is written once per client**, not per video: `output/client_database/reference_style/`
+  `editing-style-analysis.md`, `editing-style.json` and `editing-rules.json`, with measured and inferred items clearly
+  marked (see `references/editing-reference-analysis.md`). Then `reel ref-style --record`: it stores the fingerprint of
+  the reference set (every reference file's path, size and modification time).
+  - `reel ref-style` says **current**: don't re-author. Each video reuses it (`reel ref-style --apply --video-id <ID>`;
+    `ref-analyze` with a video id does it automatically). What only one video needs goes in that video's
+    `01_analysis/editing-style-overrides.json`.
+  - **stale** (a reference was added, removed or edited since the record; `reel next` and the session start say so):
+    refresh the three files from the changed references, refresh `reel-profile/style.json` and `notes.md` where the
+    standing style changed, then `--record` again. `--record` warns when the profile files were not touched.
+  - No reference edits at all: write the three files from the profile's `style.json`/`notes.md` and the editor's own
+    words, marked "no reference edits", and record them.
 - **Client reel-profile** (`output/client_database/reel-profile/`, created by `reel client-init`):
   - `profile.json`: id, display name, prefix, languages, specialty
   - `transcription.json`: `initial_prompt` with the name and specialty exactly as spelled in the brief

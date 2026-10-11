@@ -20,6 +20,9 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    - fill the reel-profile files from the client's own documents and references only: `transcription.json`
      initial prompt (name and specialty as spelled in the brief), the domain glossary, `style.json` (style seen in the
      references), and `notes.md`
+   - write the client reference style once (`output/client_database/reference_style/`: editing-style-analysis.md,
+     editing-style.json, editing-rules.json) and record it: `reel ref-style --record --by client-researcher`.
+     Every video of this client reuses it; `reel next` flags it when the reference edits change.
 5. Review what came back. Every brand or style statement must cite a file in `assets/` or `data/`.
    Missing information stays "unavailable". Fonts not installed are a blocker to report, never a silent substitution.
 6. Tell the editor what was found, what is missing (fonts to install, HEX codes, approved name-card wording), and that
