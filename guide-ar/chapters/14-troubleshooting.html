@@ -7,7 +7,7 @@
 
 <ol class="steps">
 <li>اطلب من Claude أن يفحص الجهاز. يشغّل الأمر <bdi dir="ltr"><code>reel doctor</code></bdi>، وهو فحص للقراءة فقط لا يغيّر شيئًا، ويعرض قائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت (الفصل 2).</li>
-<li>لإصلاح المحرك أو لوحة Premiere، استخدم الأمر التالي. يصلح كل ما يخص WhyNot Cut، ويمكن تكراره بأمان:
+<li>لإصلاح المحرك أو لوحة Premiere، استخدم الأمر التالي. يصلح كل ما يخص WhyNot Cut، ويمكن تكراره بأمان. أغلق Premiere قبل تشغيله:
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:setup</code></bdi></div></li>
 <li>نفّذ أنت الإصلاحات المكتوب أنها لك، مثل تثبيت الخطوط أو تغيير إعداد في Adobe، ثم اطلب الفحص مرة أخرى.</li>
 </ol>
@@ -23,19 +23,19 @@
 <tr><th>العرَض</th><th>السبب</th><th>الحل</th></tr>
 </thead>
 <tbody>
-<tr><td>الأمر <bdi dir="ltr"><code>reel</code></bdi> غير معروف على الجهاز.</td><td>الجلسة بدأت قبل تثبيت WhyNot Cut، فلا تعرف مكان الأمر بعد.</td><td>أغلق تطبيق Claude تمامًا وافتحه من جديد. حتى ذلك الحين يستخدم Claude المسار الكامل للأمر.</td></tr>
+<tr><td>الأمر <bdi dir="ltr"><code>reel</code></bdi> غير معروف على الجهاز.</td><td>الجلسة بدأت قبل تثبيت WhyNot Cut، فلا تعرف مكان الأمر بعد.</td><td>أغلق تطبيق Claude تمامًا وافتحه من جديد، وتأكد أن إضافة WhyNot Cut مفعّلة في تطبيق Claude. حتى ذلك الحين يستخدم Claude المسار الكامل للأمر.</td></tr>
 <tr><td>الرسائل لا تبدأ بـ <bdi dir="ltr"><code>WhyNot Cut &lt;version&gt;</code></bdi>، أو يظهر خطأ عن <bdi dir="ltr"><code>reel-editor</code></bdi>.</td><td>الجلسة بدأت قبل التثبيت أو التحديث، فما زالت تستخدم نسخة قديمة من الأمر.</td><td>أغلق تطبيق Claude تمامًا وافتحه من جديد.</td></tr>
 <tr><td>رسالة <bdi dir="ltr">engine not installed</bdi>.</td><td>المحرك لم يُثبَّت بعد.</td><td>شغّل <bdi dir="ltr"><code>/whynot-cut:start</code></bdi> أو <bdi dir="ltr"><code>/whynot-cut:setup</code></bdi>. يسألك Claude قبل تثبيت المحرك (نحو 400 MB).</td></tr>
 <tr><td>رسالة تقول إنه لا يوجد Python مناسب على الجهاز.</td><td>جهاز جديد ليس عليه Python.</td><td>ثبّته أنت، ثم أغلق تطبيق Claude وافتحه.<br>على Windows في PowerShell:<br><bdi dir="ltr"><code>winget install Python.Python.3.12</code></bdi><br>على macOS:<br><bdi dir="ltr"><code>xcode-select --install</code></bdi></td></tr>
-<tr><td>لوحة WhyNot Cut Bridge لا تظهر في <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>.</td><td>كان Premiere مفتوحًا أثناء التثبيت، أو إعداد PlayerDebugMode غير مفعّل.</td><td>فعّل PlayerDebugMode بنفسك بالأوامر التي يعطيك إياها Claude من الفحص (على Windows في PowerShell، لا في Git Bash)، ثم أغلق Premiere وافتحه.</td></tr>
-<tr><td>فعّلت PlayerDebugMode لكن اللوحة لا تعمل.</td><td>الأمر نُفّذ في حساب مستخدم آخر، أو في نافذة خاطئة.</td><td>نفّذ الأمر في حسابك أنت على الجهاز، واطلب من Claude أمر التحقق من القيمة، ثم أعد فتح Premiere.</td></tr>
-<tr><td>Claude يقول إن Premiere لا يستجيب.</td><td>اللوحة مغلقة، أو في Premiere نافذة حوار مفتوحة.</td><td>اعرض Premiere في المقدمة وأغلق أي نافذة حوار، ثم افتح <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions&nbsp;› WhyNot&nbsp;Cut&nbsp;Bridge</bdi>.</td></tr>
+<tr><td>لوحة WhyNot Cut Bridge لا تظهر في <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>.</td><td>كان Premiere مفتوحًا أثناء التثبيت، أو إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> غير مفعّل.</td><td>أغلق Premiere وافتحه. وإذا كان <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> غير مفعّل، ففعّله بنفسك بالأوامر التي يعطيك إياها Claude من الفحص (على Windows في PowerShell، لا في Git Bash)، ثم أعد فتح Premiere.</td></tr>
+<tr><td>فعّلت <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> لكن اللوحة لا تعمل.</td><td>الأمر نُفّذ في حساب مستخدم آخر، أو في نافذة خاطئة.</td><td>نفّذ الأمر في حسابك أنت على الجهاز، واطلب من Claude أمر التحقق من القيمة، ثم أعد فتح Premiere.</td></tr>
+<tr><td>Claude يقول إن Premiere لا يستجيب.</td><td>اللوحة مغلقة، أو في Premiere نافذة حوار مفتوحة.</td><td>اجعل نافذة Premiere في المقدمة وأغلق أي نافذة حوار، ثم افتح <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions&nbsp;› WhyNot&nbsp;Cut&nbsp;Bridge</bdi>.</td></tr>
 <tr><td>التفريغ النصي بطيء جدًا.</td><td>يعمل على المعالج (CPU) فقط.</td><td>مع كارت NVIDIA: وافق على تنزيل مكتبة التسريع حين يعرضها Claude (نحو 520 MB). بدونه: غيّر نموذج التفريغ إلى <bdi dir="ltr"><code>large-v3-turbo</code></bdi> (الفصل 13).</td></tr>
 <tr><td>توقف تنزيل نموذج Whisper في منتصفه.</td><td>انقطع الاتصال أو أُغلق الجهاز.</td><td>اطلب من Claude إكمال التنزيل؛ الفحص يُظهر التنزيل الناقص، والأمر نفسه يكمله.</td></tr>
 <tr><td>التفريغ يفشل لملفات في OneDrive أو iCloud أو Dropbox.</td><td>الملفات محفوظة على السحابة فقط، وليست على الجهاز.</td><td>انتظر حتى ينتهي تنزيل الملفات ونسخها، والأفضل أن يكون فولدر العملاء خارج الفولدرات المتزامنة.</td></tr>
 <tr><td>خطوط العميل لا تظهر في Premiere، أو تظهر رسالة <bdi dir="ltr">Fonts not installed</bdi>.</td><td>الخطوط موجودة في <bdi dir="ltr"><code>assets/Fonts</code></bdi> فقط، وليست مثبَّتة على الجهاز.</td><td>ثبّتها أنت: على Windows زر الماوس الأيمن ثم Install، وعلى macOS نقرتان ثم Install Font. فيديو المعاينة يستخدم ملفات الخطوط مباشرة، لكن Premiere يحتاج إليها مثبَّتة.</td></tr>
 <tr><td>الحروف العربية منفصلة في صور الجرافيك.</td><td>مكتبات تشكيل الحروف ناقصة في المحرك.</td><td>اطلب إصلاح المحرك بالأمر <bdi dir="ltr"><code>/whynot-cut:setup</code></bdi>.</td></tr>
-<tr><td>Premiere يطلب ربط الملفات (Link Media) عند فتح المشروع.</td><td>ملف يعتمد عليه المشروع نُقل أو حُذف.</td><td>اطلب من Claude فحص الجودة؛ يذكر الملفات الناقصة، ويعيد إنشاءها ثم يعيد البناء.</td></tr>
+<tr><td>Premiere يطلب ربط الملفات (Link Media) عند فتح المشروع.</td><td>ملف يعتمد عليه المشروع نُقل أو حُذف.</td><td>اطلب من Claude فحص الجودة (QC)؛ يذكر الملفات الناقصة، ويعيد إنشاءها ثم يعيد البناء.</td></tr>
 </tbody>
 </table>
 

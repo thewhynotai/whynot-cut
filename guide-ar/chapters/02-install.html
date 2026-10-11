@@ -19,7 +19,7 @@
 
 <figure class="shot">
 <div class="shot-frame"><span>لقطة شاشة: قائمة الفحص في نهاية التثبيت، وكل بنودها باللون الأخضر</span></div>
-<figcaption>نهاية التثبيت: الجهاز جاهز، ونموذج التفريغ يُنزَّل في الخلفية.</figcaption>
+<figcaption>في الإصدار <bdi dir="ltr">3.0</bdi>: نهاية التثبيت، ونموذج التفريغ يُنزَّل في الخلفية.</figcaption>
 </figure>
 
 <h2 id="ch02-what-happens">ما الذي يُثبَّت على جهازك</h2>
@@ -30,7 +30,7 @@
 </thead>
 <tbody>
 <tr><td>المحرك (engine)</td><td>بيئة Python خاصة بـ WhyNot Cut في الفولدر <bdi dir="ltr"><code>~/.whynot-cut</code></bdi> (على Windows: <bdi dir="ltr"><code>%USERPROFILE%\.whynot-cut</code></bdi>). حجمها نحو 400 MB، وتثبيتها يأخذ بضع دقائق، ولا يتغير شيء آخر في الجهاز. يسألك Claude قبل تثبيتها.</td></tr>
-<tr><td>نموذج التفريغ النصي Whisper</td><td>نحو 3 GB لنموذج <bdi dir="ltr"><code>large-v3</code></bdi>. يُنزَّل مرة واحدة فقط، بعد أن يسألك Claude. وإذا انقطع التنزيل، يكمل من حيث توقف.</td></tr>
+<tr><td>نموذج Whisper للتفريغ النصي (transcript)</td><td>نحو 3 GB لنموذج <bdi dir="ltr"><code>large-v3</code></bdi>. يُنزَّل مرة واحدة فقط، بعد أن يسألك Claude. وإذا انقطع التنزيل، يكمل من حيث توقف.</td></tr>
 <tr><td>لوحة WhyNot Cut Bridge</td><td>لوحة صغيرة في فولدر إضافات Adobe، يبني Claude من خلالها المشروع داخل Premiere Pro. أغلق Premiere قبل تثبيتها، ثم افتحه بعدها، لأن Premiere يبحث عن اللوحات عند فتحه فقط.</td></tr>
 <tr><td>تسريع كارت NVIDIA (اختياري)</td><td>إذا كان في جهازك كارت NVIDIA، يمكن بموافقتك تنزيل مكتبة من NVIDIA (نحو 520 MB) تجعل التفريغ أسرع بنحو 8 مرات. بدونها يعمل كل شيء على المعالج (CPU)، لكن أبطأ.</td></tr>
 </tbody>
@@ -39,11 +39,11 @@
 <p>المساحة المطلوبة نحو 4 GB للمحرك والنموذج، ثم عدة GB لكل عميل.</p>
 
 <aside class="warn">
-<p>في النسخة الحالية لا يفتح Premiere لوحة WhyNot Cut Bridge إلا إذا كان إعداد Adobe المسمّى PlayerDebugMode مفعّلًا، وهو إعداد يسمح بتحميل إضافات غير موقَّعة من Adobe. هذا الإعداد تغيّره أنت بنفسك، ولا يغيّره Claude أبدًا: يعطيك الأمر المناسب لنظامك من نتيجة فحص الجهاز، وعلى Windows تشغّله في PowerShell. ويمكنك أن تتخطاه وتستورد المشروع في Premiere يدويًا من ملف XML.</p>
+<p>في النسخة الحالية لا يفتح Premiere لوحة WhyNot Cut Bridge إلا إذا كان إعداد Adobe المسمّى <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> مفعّلًا، وهو إعداد يسمح بتحميل إضافات غير موقَّعة من Adobe. هذا الإعداد تغيّره أنت بنفسك، ولا يغيّره Claude أبدًا: يعطيك الأمر المناسب لنظامك من نتيجة فحص الجهاز، وعلى Windows تشغّله في PowerShell. ويمكنك أن تتخطاه وتستورد المشروع في Premiere يدويًا من ملف XML.</p>
 </aside>
 
 <aside class="todo" data-phase="6">
-<p>في الإصدار <bdi dir="ltr">3.0</bdi> تكون لوحات WhyNot Cut موقَّعة، فلا تحتاج إلى PlayerDebugMode. يُحذف التنبيه السابق بعد اكتمالها.</p>
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> تكون لوحات WhyNot Cut موقَّعة، فلا تحتاج إلى <bdi dir="ltr"><code>PlayerDebugMode</code></bdi>. يُحذف التنبيه السابق بعد اكتمالها.</p>
 </aside>
 
 <h2 id="ch02-first-run">أول تشغيل مع معالج البداية</h2>
