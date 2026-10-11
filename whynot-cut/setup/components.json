@@ -1,0 +1,170 @@
+{
+  "schema": 1,
+  "plugin": "3.0.0",
+  "channel": "stable",
+  "claude_code": {
+    "min": "2.1.224"
+  },
+  "marketplace": {
+    "name": "thewhynot-ai",
+    "plugin": "whynot-cut",
+    "url": "<release>"
+  },
+  "release": {
+    "index_url": "<release>"
+  },
+  "uv": {
+    "version": "0.13.0",
+    "assets": {
+      "win-x64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-pc-windows-msvc.zip",
+        "sha256": "088962f9e7b7bd9ea740c04c650b2a21c8928c345bd99ac24350dc924dba656c",
+        "bytes": 15722003,
+        "archive": "zip",
+        "member": "uv.exe"
+      },
+      "mac-arm64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-aarch64-apple-darwin.tar.gz",
+        "sha256": "a9c1b29002cf3c83f07fa9cd8a887a3be0107d90e23189721221e7257db8e3d6",
+        "bytes": 14692549,
+        "archive": "tar.gz",
+        "member": "uv-aarch64-apple-darwin/uv"
+      },
+      "mac-x64": {
+        "url": "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-apple-darwin.tar.gz",
+        "sha256": "5f44dcbde809b632f47c36fadb241cb4d6f9af71d0c8f172b5d2026d3dde742c",
+        "bytes": 18138509,
+        "archive": "tar.gz",
+        "member": "uv-x86_64-apple-darwin/uv"
+      }
+    }
+  },
+  "runtime": {
+    "python": "3.12.15",
+    "index_url": null,
+    "smoke": ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "uharfbuzz"],
+    "locks": {
+      "win-x64": {"file": "setup/locks/runtime-win-x64.lock", "id": "<release>"},
+      "mac-arm64": {"file": "setup/locks/runtime-mac-arm64.lock", "id": "<release>"},
+      "mac-x64": {"file": "setup/locks/runtime-mac-x64.lock", "id": "<release>"}
+    }
+  },
+  "ffmpeg": {
+    "version": "9.0.2",
+    "license": "GPL-3.0-or-later",
+    "source": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+    "assets": {
+      "win-x64": {
+        "files": [
+          {
+            "url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip",
+            "sha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+            "bytes": 114768076,
+            "archive": "zip",
+            "members": {
+              "ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe": "ffmpeg.exe",
+              "ffmpeg-9.0.2-essentials_build/bin/ffprobe.exe": "ffprobe.exe"
+            }
+          }
+        ]
+      },
+      "mac-arm64": {
+        "files": [
+          {
+            "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip",
+            "sha256": "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924",
+            "bytes": 28395699,
+            "archive": "zip",
+            "members": {"ffmpeg": "ffmpeg"}
+          },
+          {
+            "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip",
+            "sha256": "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6",
+            "bytes": 28317701,
+            "archive": "zip",
+            "members": {"ffprobe": "ffprobe"}
+          }
+        ]
+      },
+      "mac-x64": {
+        "files": [
+          {
+            "url": "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip",
+            "sha256": "7c6b4125b191cbf773832dc51f424cf2b6bb7da43007d1e066f95909e47cacd4",
+            "bytes": 33816391,
+            "archive": "zip",
+            "members": {"ffmpeg": "ffmpeg"}
+          },
+          {
+            "url": "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffprobe.zip",
+            "sha256": "2322438ed2f6319a691291b247d09c69dcaa3a982460d1f269a7e1af335cfdfd",
+            "bytes": 33719233,
+            "archive": "zip",
+            "members": {"ffprobe": "ffprobe"}
+          }
+        ]
+      }
+    }
+  },
+  "git": {
+    "version": "2.56.0.windows.2",
+    "assets": {
+      "win-x64": {
+        "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/PortableGit-2.56.0.2-64-bit.7z.exe",
+        "sha256": "075e158ef8e1f0ab80b347e245405d3eca735c2dc88fd8e032e137d0ca61f61b",
+        "bytes": 60027568,
+        "archive": "7z-sfx"
+      }
+    }
+  },
+  "bridge": {
+    "protocol": 4,
+    "min_protocol": 4,
+    "cep": {
+      "bundle": "<release>",
+      "zxp": "<release>",
+      "sha256": "<release>",
+      "hosts": {"PPRO": "[22.0,99.9]", "AEFT": "[24.0,99.9]"}
+    },
+    "uxp": {
+      "version": "<release>",
+      "ccx": "<release>",
+      "sha256": "<release>",
+      "min_host": "26.5.0",
+      "id": "<release>"
+    }
+  },
+  "models": {
+    "large-v3": {"backend": "ct2", "repo": "Systran/faster-whisper-large-v3", "revision": "<release>"},
+    "large-v3-turbo": {"backend": "ct2", "repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo", "revision": "<release>"},
+    "large-v3-mlx": {"backend": "mlx", "repo": "mlx-community/whisper-large-v3-mlx", "revision": "<release>"},
+    "by_hardware": {"nvidia": "large-v3", "apple_silicon": "large-v3", "cpu": "large-v3-turbo"}
+  },
+  "fonts": {
+    "version": "1",
+    "commit": "bd8f81ddb5c74d5c8897b36ad88b440266245103",
+    "files": [
+      {"family": "Syne", "file": "Syne[wght].ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/syne/Syne%5Bwght%5D.ttf", "sha256": "ce5ac77142a65cab2248a1a2ebb740b1d4d9c20b52488877d3ff664d1356104a", "bytes": 146980},
+      {"family": "Inter", "file": "Inter[opsz,wght].ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/inter/Inter%5Bopsz,wght%5D.ttf", "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031", "bytes": 876576},
+      {"family": "Inter", "file": "Inter-Italic[opsz,wght].ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/inter/Inter-Italic%5Bopsz,wght%5D.ttf", "sha256": "acd98e64795781b2058f07b18475e0ecee2a0fe2b42a49e2f9e37d0d6bf66ce6", "bytes": 906596},
+      {"family": "IBM Plex Sans Arabic", "file": "IBMPlexSansArabic-Thin.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexsansarabic/IBMPlexSansArabic-Thin.ttf", "sha256": "f8e1f556f815e3d29c531f79ff2bed276bec18d403fc6470b54900922cd91a79", "bytes": 242204},
+      {"family": "IBM Plex Sans Arabic", "file": "IBMPlexSansArabic-ExtraLight.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexsansarabic/IBMPlexSansArabic-ExtraLight.ttf", "sha256": "4d4137f37a1acd61f1b7eba47c08d0996789596b1e535f9220914ad5daf0a198", "bytes": 241652},
+      {"family": "IBM Plex Sans Arabic", "file": "IBMPlexSansArabic-Light.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexsansarabic/IBMPlexSansArabic-Light.ttf", "sha256": "0af9d1effbb36ff74d13c64f752c771ecb9162a451cf151c5425f4d00d4daa7c", "bytes": 238564},
+      {"family": "IBM Plex Sans Arabic", "file": "IBMPlexSansArabic-Regular.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf", "sha256": "6f611412270a132bbac838da9259d4c68569b4175f3b3b8fa3fa36a30b56dab9", "bytes": 235924},
+      {"family": "IBM Plex Sans Arabic", "file": "IBMPlexSansArabic-Medium.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexsansarabic/IBMPlexSansArabic-Medium.ttf", "sha256": "b8363ab9f733dfa4f8e96b8b2102c24b5cf4110fb96d1d3d9a9412f6fb49cf74", "bytes": 242100},
+      {"family": "IBM Plex Sans Arabic", "file": "IBMPlexSansArabic-SemiBold.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf", "sha256": "597bd5502e5997be4414e4c9c88834b30ff3784250c84f20bce2b20e53ebd467", "bytes": 244616},
+      {"family": "IBM Plex Sans Arabic", "file": "IBMPlexSansArabic-Bold.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexsansarabic/IBMPlexSansArabic-Bold.ttf", "sha256": "691e0c891a38637ae6bbdb69700f8042cb0724a137bee615068ffdb92244f61f", "bytes": 246992},
+      {"family": "IBM Plex Mono", "file": "IBMPlexMono-Regular.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexmono/IBMPlexMono-Regular.ttf", "sha256": "6a3412f058c7d8dfd9170c41e85ade48e5156ecb89356110ca57a0a27734af46", "bytes": 135580},
+      {"family": "IBM Plex Mono", "file": "IBMPlexMono-Italic.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexmono/IBMPlexMono-Italic.ttf", "sha256": "3362fc791b0652193328b862c1c5f23a789bc7288b1617fa63302f88689a2a34", "bytes": 143920},
+      {"family": "IBM Plex Mono", "file": "IBMPlexMono-Medium.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexmono/IBMPlexMono-Medium.ttf", "sha256": "a9b4c49bb299e05b5f6c481e7fb5e78943d2793249a0c8874ab574a2d1ea6755", "bytes": 136704},
+      {"family": "IBM Plex Mono", "file": "IBMPlexMono-SemiBold.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexmono/IBMPlexMono-SemiBold.ttf", "sha256": "d3c38e55c78f5b0f28009fddba4834ec503278936a5986032424c9bd2d23aa46", "bytes": 140216},
+      {"family": "IBM Plex Mono", "file": "IBMPlexMono-Bold.ttf", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexmono/IBMPlexMono-Bold.ttf", "sha256": "ac27abd6450a64dd94467580a02fe6235156d5b92f2926ebbc8e7489df64e0be", "bytes": 137784}
+    ],
+    "licenses": [
+      {"family": "Syne", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/syne/OFL.txt", "sha256": "cc43cdce6f91c57989af8459341c276655e34224e954fa69c2ad700831a742d8", "bytes": 4402},
+      {"family": "Inter", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/inter/OFL.txt", "sha256": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57", "bytes": 4377},
+      {"family": "IBM Plex Sans Arabic", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexsansarabic/OFL.txt", "sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da", "bytes": 4456},
+      {"family": "IBM Plex Mono", "url": "https://raw.githubusercontent.com/google/fonts/bd8f81ddb5c74d5c8897b36ad88b440266245103/ofl/ibmplexmono/OFL.txt", "sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da", "bytes": 4456}
+    ]
+  }
+}
