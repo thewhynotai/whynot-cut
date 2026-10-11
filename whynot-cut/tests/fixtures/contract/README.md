@@ -28,7 +28,7 @@ and `~/.whynot-cut/ae-queue` (After Effects); `index.json` names the job id of e
 | action | recorded | variants |
 | --- | --- | --- |
 | ping | yes (Premiere) | `aftereffects`: After Effects' ping, the form `motion_build.preconditions` reads |
-| build_project | yes | `exists`: Premiere answered ok:true with a lone `error` ("project exists"); v4 makes it ok:false |
+| build_project | yes | `exists`: Premiere answered ok:true with a lone `error` ("project exists"); v4 makes it ok:false. `no_sequence`: the other failure return, `{error, log}` (**not recorded**, written from `nh_ppro_lib.jsx`); ok:false, the `log` kept as readback |
 | export_frames | yes | `error`: a script error (`TypeError`, line 337); v4 ok:false with the line in the sentence |
 | close_project_path | yes | `not_open`: `{closed: false, reason: "not open"}` is still ok:true |
 | clip_components | yes | |

@@ -12,22 +12,29 @@ These functions convert between the two; they do no I/O and keep no state, so th
 
 What from_cep decides (the legacy bridge reported failures in several shapes; v4 has one):
 
-* `{ok: true, result: {error: "..."}}` (Premiere's CEP `build_project` said "project exists (set overwrite_existing)" this
-  way) is a failure: `ok: false` with that error and no readback.
+* `{ok: true, result: {error: "...", ...}}` is a failure, whatever else the result holds: Premiere's CEP `build_project`
+  said "project exists (set overwrite_existing)" this way, and "sequence not found after XML import" with a `log`. It is
+  `ok: false` with that error; the other keys travel as `readback` only when they validate as the action's
+  `readback_failure` (any object when the action defines none), otherwise they are left out.
 * `{ok: false, error, line?}` (a script exception, "bridge not running", a timeout) is `ok: false` with the error; the
   script line is folded into the sentence.
+* `"EvalScript error."` (the panel's `{ok: false, result: "EvalScript error."}` when the script fails inside the host;
+  cep_queue hands the bare string on) is `ok: false` quoting the string, with a `how` about the host script.
 * `{ok: false, result: {ok: false, reason, ...}}` (After Effects refusing to touch unsaved work, a failed read-back) is
   `ok: false` with the whole result as `readback`: motion_build.build tells REFUSED from FAILED by `readback.reason`.
 * `{ok: false, result: {failed: [...], ...}}` (scenes that did not build) is `ok: false` with the partial result as `readback`.
 * Anything else with ok true is `ok: true` and the result is the `readback`. The host's own top-level `ok` flag inside the
   result belongs to the envelope and is not copied.
+
+Every failure it builds validates with `contract.validate_result`; an ok answer validates when the host's readback does
+(the point of the golden fixtures).
 """
 from __future__ import annotations
 
 import copy
 
 from . import ACTIONS, PROTOCOL
-from .validator import load
+from .validator import load, validate
 
 CEP_NAME: dict[str, str] = {a: e["cep"] for a, e in load("protocol")["actions"].items() if e["cep"]}
 V4_NAME: dict[str, str] = {c: a for a, c in CEP_NAME.items()}
@@ -59,6 +66,16 @@ def _fail(action: str, id: str | None, error: str, how: str | None = None, readb
     return out
 
 
+def _failure_readback(action: str, rest: dict) -> dict | None:
+    """`rest` as the readback of a failed result: kept when it validates as the action's `readback_failure` (any object
+    when the action defines none), else left out, so the result always validates."""
+    if not rest:
+        return None
+    if "readback_failure" in load(action).get("$defs", {}) and validate(rest, f"{action}#/$defs/readback_failure"):
+        return None
+    return rest
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
@@ -81,12 +98,19 @@ def _refusal(result: dict) -> tuple[str, str | None]:
     return "The host reported a failure.", None
 
 
+def _script_failed(action: str, id: str | None, text: str) -> dict:
+    return _fail(action, id, f"The bridge script failed in the host ({text.strip()})",
+                 "Look at the script or the host, not the panel: restart the app, then run the command again.")
+
+
 def from_cep(action_v4: str, cep_response, *, id: str | None = None) -> dict:
     """The v4 result for the parsed queue response (the `{ok, action, result | error, line}` that cep_queue.submit
     hands back as `response`; its own failures `{ok: false, error, ...}` are understood too). `id` is the request's id."""
     if action_v4 not in CEP_NAME:
         raise ValueError(f"{action_v4!r} has no CEP equivalent" if action_v4 in ACTIONS else f"unknown action {action_v4!r}")
     name = CEP_NAME[action_v4]
+    if isinstance(cep_response, str) and cep_response.strip():       # the panel's {ok:false, result:"EvalScript error."}
+        return _script_failed(action_v4, id, cep_response)
     if not isinstance(cep_response, dict):
         return _fail(action_v4, id, "The bridge did not send an answer the engine can read.",
                      "Check that the WhyNot Cut Bridge panel is open in the app and run the command again.")
@@ -96,11 +120,18 @@ def from_cep(action_v4: str, cep_response, *, id: str | None = None) -> dict:
                      "Run the command again; if it repeats, restart the app and the bridge panel.")
     result = cep_response.get("result")
     ok = cep_response.get("ok") is True
-    if ok and isinstance(result, dict) and set(result) == {"error"} and isinstance(result["error"], str):
-        err = result["error"]                                # ok:true with a lone error: the legacy build_project shape
-        how = ("Set overwrite_existing to true to replace it (the old file is kept as a backup), or choose another "
-               "project_path." if "overwrite_existing" in err else None)
-        return _fail(action_v4, id, err, how)
+    if not ok and isinstance(result, str) and result.strip():          # the same string inside an {ok:false, result} dict
+        return _script_failed(action_v4, id, result)
+    named = result.get("error") if isinstance(result, dict) else None
+    named = named.strip() if isinstance(named, str) else ""
+    if isinstance(result, dict) and not (ok and not named):
+        rest = {k: copy.deepcopy(v) for k, v in result.items() if k not in ("ok", "error")}
+        if named:                                            # ok:true (or false) with an error: the legacy build_project shape
+            how = ("Set overwrite_existing to true to replace it (the old file is kept as a backup), or choose another "
+                   "project_path." if "overwrite_existing" in named else None)
+            return _fail(action_v4, id, result["error"], how, _failure_readback(action_v4, rest))
+        error, how = _refusal(result)                        # the action itself answered ok:false: keep its evidence
+        return _fail(action_v4, id, error, how, _failure_readback(action_v4, rest))
     if ok:
         if not isinstance(result, dict):
             return _fail(action_v4, id, "The host answered ok without a result.",
@@ -110,13 +141,6 @@ def from_cep(action_v4: str, cep_response, *, id: str | None = None) -> dict:
             out["id"] = id
         out["readback"] = {k: copy.deepcopy(v) for k, v in result.items() if k != "ok"}
         return out
-    if isinstance(result, dict):                             # the action itself answered ok:false: keep its evidence
-        readback = {k: copy.deepcopy(v) for k, v in result.items() if k != "ok"}
-        error = result["error"] if isinstance(result.get("error"), str) and result["error"] else None
-        if error:
-            return _fail(action_v4, id, error, readback=readback or None)
-        error, how = _refusal(result)
-        return _fail(action_v4, id, error, how, readback or None)
     err = cep_response.get("error")
     err = err if isinstance(err, str) and err else "The host reported a failure."
     line = cep_response.get("line")

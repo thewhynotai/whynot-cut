@@ -30,6 +30,11 @@
         "recorded": true,
         "source": "ppro-queue/20261011-160738-0f07a3 (the answer; its request carried only project_path, so the request is the build request of the main pair)",
         "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)"
+      },
+      "no_sequence": {
+        "recorded": false,
+        "source": "written from templates/premiere/nh_ppro_lib.jsx build_project (the second failure return: {error, log} when the XML import made no sequence); request = the main request",
+        "host_version": ""
       }
     }
   },

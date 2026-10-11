@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "action": "build_project",
+  "id": "fixture-no-sequence-0001",
+  "readback": {
+    "log": []
+  },
+  "error": "sequence not found after XML import"
+}

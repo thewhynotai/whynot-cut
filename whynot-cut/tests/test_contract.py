@@ -1264,11 +1264,76 @@ class CepAdapterTests(unittest.TestCase):
         self.assertEqual((other["ok"], other["error"]), (False, "something new"))
         self.assertEqual(V.validate_result(other), [])
 
-    def test_a_result_that_only_looks_like_an_error_is_still_ok_when_it_holds_more(self):
-        res = cep.from_cep("probe", {"ok": True, "action": "probe", "result": {"version": "26.5.2", "project": "", "sequences": [],
-                                                                               "error": "kept"}})
-        self.assertIs(res["ok"], True)
-        self.assertEqual(res["readback"]["error"], "kept")
+    def test_the_second_build_project_failure_return_is_a_failure_too(self):
+        """nh_ppro_lib.jsx build_project returns {error, log} when the XML import made no sequence (ok:true on the wire)."""
+        inner = {"ok": True, "action": "build_project", "result": {"error": "sequence not found after XML import", "log": ["a"]}}
+        res = cep.from_cep("build_project", inner, id="b-2")
+        self.assertEqual(res, {"ok": False, "action": "build_project", "id": "b-2", "error": "sequence not found after XML import",
+                               "readback": {"log": ["a"]}})
+        self.assertEqual(V.validate_result(res), [])
+        self.assertIs(cep.from_cep("build_project", dict(inner, result={"error": "x", "log": []}))["ok"], False)
+        self.assertNotIn("how", res)
+
+    def test_any_ok_answer_with_a_text_error_is_a_failure_and_the_readback_must_fit(self):
+        res = cep.from_cep("ae_build_motion", {"ok": True, "action": "build_motion",
+                                               "result": {"error": "boom", "made": ["S01"], "failed": []}})
+        self.assertEqual((res["ok"], res["error"], res["readback"]), (False, "boom", {"made": ["S01"], "failed": []}))
+        self.assertEqual(V.validate_result(res), [])
+        wrong = cep.from_cep("ae_build_motion", {"ok": True, "action": "build_motion", "result": {"error": "boom", "made": "S01"}})
+        self.assertEqual((wrong["ok"], wrong["error"]), (False, "boom"))
+        self.assertNotIn("readback", wrong)                                    # does not fit readback_failure: left out
+        self.assertEqual(V.validate_result(wrong), [])
+        for empty in ("", "   ", None, 5):                                     # not an error sentence: an ok result
+            self.assertIs(cep.from_cep("probe", {"ok": True, "action": "probe", "result": {"version": "1", "project": "",
+                                                                                          "sequences": [], "error": empty}})["ok"], True, empty)
+
+    def test_the_host_script_failing_is_quoted_and_points_at_the_host(self):
+        """The panel writes {ok:false, result:"EvalScript error."} when the script dies in the host; cep_queue passes the string on."""
+        for given in ("EvalScript error.", {"ok": False, "result": "EvalScript error."},
+                      {"ok": False, "action": "ping", "result": "EvalScript error."}):
+            res = cep.from_cep("ping", given, id="p-1")
+            self.assertEqual(res["error"], "The bridge script failed in the host (EvalScript error.)")
+            self.assertIs(res["ok"], False)
+            self.assertEqual(res["id"], "p-1")
+            self.assertIn("host", res["how"])
+            self.assertNotIn("panel is open", res["how"])
+            self.assertEqual(V.validate_result(res), [])
+        other = cep.from_cep("ae_fonts", "ReferenceError: x is not defined")
+        self.assertEqual(other["error"], "The bridge script failed in the host (ReferenceError: x is not defined)")
+
+    def test_every_failure_the_legacy_bridge_can_report_gives_a_valid_result(self):
+        """Property: each CEP shape known from the JSX, the panel and cep_queue, for every action that has a CEP name."""
+        shapes = [
+            {"ok": True, "action": "{n}", "result": {"error": "project exists (set overwrite_existing)"}},
+            {"ok": True, "action": "{n}", "result": {"error": "sequence not found after XML import", "log": []}},
+            {"ok": True, "action": "{n}", "result": {"error": "imported item not found", "log": ["a"], "made": "bad"}},
+            {"ok": False, "action": "{n}", "error": "ReferenceError: x", "line": 12},
+            {"ok": False, "error": "bad data file: SyntaxError"}, {"ok": False, "error": "unknown action x"},
+            {"ok": False, "error": "script not in whitelisted folder", "script": "C:/x.jsx", "at": 1},
+            {"ok": False, "error": "no reply from PPRO within 15 min", "at": 1},
+            {"ok": False, "error": "bridge not running", "status": {"alive": False, "host": None, "detail": "no heartbeat"}},
+            {"ok": False, "error": "timeout after 600s (Premiere may show a dialog)", "job": "j"},
+            {"ok": False, "action": "{n}", "result": {"ok": False, "reason": "dirty", "project": None, "project_path": None}},
+            {"ok": False, "action": "{n}", "result": {"ok": False, "reason": "dirty_target", "project": "a.aep", "project_path": "D:/a.aep"}},
+            {"ok": False, "action": "{n}", "result": {"ok": False, "reason": "MAIN_x not found in the open project"}},
+            {"ok": False, "action": "{n}", "result": {"ok": False, "reason": 5, "project": 7}},
+            {"ok": False, "action": "{n}", "result": {"ok": False, "failed": [{"scene": "S01", "error": "e", "line": 1}], "made": []}},
+            {"ok": False, "action": "{n}", "result": {"ok": False, "failed": "bad"}},
+            {"ok": False, "action": "{n}", "result": {"ok": False}}, {"ok": False, "action": "{n}", "result": {}},
+            {"ok": False, "action": "{n}", "result": "EvalScript error."}, "EvalScript error.", "",
+            {"ok": True, "action": "{n}"}, {"ok": True, "action": "{n}", "result": "text"}, {"ok": True, "action": "other"},
+            {"ok": False}, {}, None, 7, [],
+        ]
+        n = 0
+        for a, name in cep.CEP_NAME.items():
+            for shape in shapes:
+                given = json.loads(json.dumps(shape).replace("{n}", name))
+                res = cep.from_cep(a, given, id="prop-1")
+                n += 1
+                self.assertEqual(V.validate_result(res), [], (a, shape))
+                self.assertIs(res["ok"], False, (a, shape))
+                self.assertTrue(res["error"].strip(), (a, shape))
+        self.assertEqual(n, len(shapes) * len(cep.CEP_NAME))
 
     def test_a_script_error_becomes_a_failure_with_the_line(self):
         inner = {"ok": False, "action": "export_frames", "error": "TypeError: null is not an object", "line": 337}
@@ -1598,7 +1663,8 @@ class EngineMotionRequestTests(unittest.TestCase):
         def submit(action, data=None, timeout=900):
             sent.append((action, copy.deepcopy(data)))
             return {"ok": False}                                     # the probe stops at the first answer
-        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"WHYNOT_HOME": home}),                 mock.patch.object(ae_bridge, "submit", submit):
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"WHYNOT_HOME": home}), \
+                mock.patch.object(ae_bridge, "submit", submit):
             r = ae_probe.run_probe()
         self.assertIs(r["ok"], False)
         self.assertEqual([a for a, _ in sent], ["probe_text"])
