@@ -1434,6 +1434,30 @@ class TestSettingsMerge(unittest.TestCase):
         self.assertTrue(self.merge(dry_run=True)["changed"])
         self.assertFalse(self.f.exists())
 
+    def test_lone_surrogate_leaves_the_file_and_no_backup(self):
+        orig = b'{"x": "\\ud800"}'  # parses to a lone surrogate, which UTF-8 cannot encode
+        touch(self.f, orig)
+        with self.assertRaises(self.cl.SettingsUnreadable):
+            self.merge()
+        self.assertEqual(self.f.read_bytes(), orig)
+        self.assertEqual(self.backups(), [])
+        self.assertEqual(sorted(p.name for p in self.f.parent.iterdir()), ["settings.json"])  # no temp file either
+
+    def test_file_mode_is_kept_on_the_file_and_its_backup(self):
+        touch(self.f, b'{"theme": "dark"}')
+        if not IS_WIN:
+            os.chmod(self.f, 0o600)
+        want = os.stat(self.f).st_mode & 0o777
+        with mock.patch("os.chmod", wraps=os.chmod) as ch:
+            r = self.merge()
+        modes = {Path(c.args[0]).name.startswith((".settings.json", "settings.json.whynot-backup-")): c.args[1]
+                 for c in ch.call_args_list}
+        self.assertEqual(modes, {True: want})  # the temp file (before the replace) and the backup
+        self.assertEqual(len(ch.call_args_list), 2)
+        if not IS_WIN:
+            self.assertEqual(os.stat(self.f).st_mode & 0o777, 0o600)
+            self.assertEqual(os.stat(r["backup"]).st_mode & 0o777, 0o600)
+
 
 class TestUnmerge(unittest.TestCase):
     def setUp(self):
@@ -1679,17 +1703,74 @@ class TestStepClaude(unittest.TestCase):
         self.assertEqual(self.settings(ctx)["enabledPlugins"], {PID: True})
         self.assertEqual(ctx.state.data["claude"]["method"], "settings")
 
-    def test_unreadable_settings_is_amber_with_the_json_to_paste(self):
+    def test_unreadable_settings_is_amber_with_the_json_to_paste_and_no_cli_call(self):
+        # fake_claude REPLACES a settings.json it cannot parse on `plugin install` / `marketplace add`: the file
+        # staying byte-identical proves the CLI was never let near it
+        for orig in (b'{"a":1,}', b'{"x": "\\ud800"}'):  # invalid JSON; a lone surrogate (parses, cannot be written)
+            with self.subTest(orig=orig):
+                if self.log.exists():
+                    self.log.unlink()
+                ctx = self.ctx()
+                touch(ctx.paths.settings_file, orig)
+                r = self.cl.step_claude(ctx)
+                self.assertEqual(r.status, "amber", r.detail)
+                self.assertIn("not valid JSON", r.detail)
+                self.assertIn("CLI was not run", r.detail)
+                snip = json.loads(r.needs_you)
+                self.assertEqual(snip["enabledPlugins"], {PID: True})
+                self.assertIn("thewhynot-ai", snip["extraKnownMarketplaces"])
+                self.assertEqual(ctx.paths.settings_file.read_bytes(), orig)
+                self.assertEqual(self.backups(ctx), [])
+                self.assertEqual(self.records(), [])  # not even `--version`; above all no `plugin install`
+
+    def test_first_install_keeps_exactly_one_backup_of_the_original(self):
+        """The CLI writes settings.json too (fake_claude does, like the real one): the one backup must hold the
+        editor's bytes from before the step, not what the CLI left."""
         ctx = self.ctx()
-        touch(ctx.paths.settings_file, b'{"a":1,}')
+        orig = ("﻿" + '{"theme": "dark",\n "enabledPlugins": {"x@y": true}}').encode("utf-8")
+        touch(ctx.paths.settings_file, orig)
         r = self.cl.step_claude(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(self.calls(), [self.add(ctx), self.INSTALL])
+        [bk] = self.backups(ctx)
+        self.assertEqual(bk.read_bytes(), orig)
+        self.assertEqual(ctx.state.data["claude"]["settings_backup"], str(bk))
+        s = self.settings(ctx)
+        self.assertEqual((s["theme"], s["enabledPlugins"]), ("dark", {"x@y": True, PID: True}))
+        # a re-run that changes nothing leaves no backup behind
+        ctx2 = self.ctx()
+        self.assertEqual(self.cl.step_claude(ctx2).status, "ok")
+        self.assertEqual(self.backups(ctx2), [bk])
+        self.assertIsNone(ctx2.state.data["claude"]["settings_backup"])
+
+    def test_cli_that_cannot_start_is_not_used(self):
+        broken = touch(self.tmp / "broken cli" / ("claude.exe" if IS_WIN else "claude"), b"not a program")
+        with mock.patch.dict(os.environ, {"WNC_CLAUDE_CLI": str(broken)}):
+            ctx = self.ctx()
+            r = self.cl.step_claude(ctx)
         self.assertEqual(r.status, "amber", r.detail)
-        self.assertIn("not valid JSON", r.detail)
-        snip = json.loads(r.needs_you)
-        self.assertEqual(snip["enabledPlugins"], {PID: True})
-        self.assertIn("thewhynot-ai", snip["extraKnownMarketplaces"])
-        self.assertEqual(ctx.paths.settings_file.read_bytes(), b'{"a":1,}')
-        self.assertEqual(self.backups(ctx), [])
+        self.assertIn("did not answer (`--version` exit 127", r.detail)
+        self.assertEqual(self.settings(ctx)["enabledPlugins"], {PID: True})
+        self.assertEqual(ctx.state.data["claude"]["method"], "settings")
+
+    def test_cli_that_times_out_gets_no_further_call(self):
+        seen = []
+
+        def fake_run(ctx, cmd, timeout, cwd=None, *, split=False):
+            seen.append([str(c) for c in cmd][-1:])
+            return 124, "(timed out after 300 s)"
+
+        old_dir = str(self.tmp / "old dev")
+        ctx = self.ctx()
+        touch(ctx.paths.claude_dir / "plugins" / "known_marketplaces.json", json.dumps({"thewhynot-ai": {
+            "source": {"source": "directory", "path": old_dir}}}).encode())
+        with mock.patch.object(base, "run_cmd", side_effect=fake_run):
+            r = self.cl.step_claude(ctx)
+        self.assertEqual(seen, [["--version"]])  # no remove / add / install
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("exit 124", r.detail)
+        self.assertIn("marketplace remove thewhynot-ai", r.needs_you)
+        self.assertEqual(self.settings(ctx)["enabledPlugins"], {PID: True})
 
     def test_url_pin_adds_the_url_and_needs_no_marketplace_dir(self):
         url = "https://dl.example/claude/marketplace.json"
@@ -1843,6 +1924,29 @@ class TestGitBash(unittest.TestCase):
         self.assertEqual(cmd[2:], ["-y"])
         self.assertEqual(self.managed(ctx).read_bytes(), b"MZ sfx bash")
         self.assertEqual(self.env_of(ctx), {"CLAUDE_CODE_GIT_BASH_PATH": str(self.managed(ctx))})
+
+    def test_sfx_partial_extraction_is_amber_and_cleaned(self):
+        """The real PortableGit SFX exits 1 after a PARTIAL extraction under a long base path (MAX_PATH)."""
+        self.comp["git"]["assets"]["win-x64"]["archive"] = "7z-sfx"
+        staged = []
+
+        def fake_run(ctx, cmd, timeout, cwd=None, *, split=False):
+            out = Path(str(cmd[1])[2:])
+            staged.append(out)
+            touch(out / "usr" / "share" / "deep" / "partial.txt", b"partial")
+            return 1, "ERROR: Can not open output file : The filename or extension is too long."
+
+        ctx = self.ctx()
+        with mock.patch.object(base, "run_cmd", side_effect=fake_run):
+            r = self.cl.step_gitbash(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("Git for Windows could not be set up; install it from https://git-scm.com/download/win",
+                      r.detail)
+        self.assertIn("https://git-scm.com/download/win", r.needs_you)
+        [out] = staged
+        self.assertFalse(out.exists())  # the partial staging tree is removed
+        self.assertFalse(self.managed(ctx).parents[1].exists())
+        self.assertFalse(ctx.paths.settings_file.exists())  # no env merged
 
     def test_dry_run_writes_nothing(self):
         ctx = self.ctx(dry_run=True)

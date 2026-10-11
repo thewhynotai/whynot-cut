@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 from pathlib import Path
 from typing import Mapping, Optional
@@ -34,6 +35,7 @@ from . import base
 CLI_TIMEOUT = 300
 SFX_TIMEOUT = 900
 GIT_BASH_KEY = "CLAUDE_CODE_GIT_BASH_PATH"
+GIT_DOWNLOAD = "https://git-scm.com/download/win"
 LEGACY_PLUGINS = ("reel-editor@*",)  # ID-5: the 1.x product name
 _COPY_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "*.local.md", ".git")
 
@@ -142,36 +144,67 @@ def _read_settings(path: Path, snippet: str) -> tuple:
     for k in ("extraKnownMarketplaces", "enabledPlugins", "env"):
         if k in data and not isinstance(data[k], dict):
             raise SettingsUnreadable(snippet, f"not valid JSON for settings (`{k}` is not an object)")
+    try:
+        _encode(data)
+    except (UnicodeError, ValueError) as e:  # a lone UTF-16 surrogate parses but cannot be written back
+        raise SettingsUnreadable(snippet, "not valid JSON for settings (it cannot be written back as UTF-8: "
+                                          f"{type(e).__name__})") from None
     return data, raw
 
 
-def _write_settings(path: Path, raw_before: Optional[bytes], data: dict) -> Optional[str]:
-    """Backup of the exact original bytes (when there was a file), then the atomic write. A settings.json that is a
-    symlink (dotfiles) keeps being one: its target is written."""
-    backup = None
-    if raw_before is not None:
-        stem = f"{path.name}.whynot-backup-{base.stamp()}"
-        n = 0
-        while True:
-            cand = path.with_name(stem if n == 0 else f"{stem}-{n}")
-            try:
-                with open(cand, "xb") as f:
-                    f.write(raw_before)
-                break
-            except FileExistsError:
-                n += 1
-        backup = str(cand)
+def _encode(data: dict) -> bytes:
+    """The bytes we write: indent 2, UTF-8 (ensure_ascii=False), trailing newline. UnicodeError / ValueError when the
+    data cannot be written; called before anything is written, so a failure leaves no stray backup."""
+    return (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _file_mode(path: Path) -> Optional[int]:
+    try:
+        return stat.S_IMODE(os.stat(path).st_mode)
+    except OSError:
+        return None
+
+
+def write_backup(path: Path, raw: bytes, mode: Optional[int] = None) -> Path:
+    """`<settings.json>.whynot-backup-YYYYmmdd-HHMMSS` (`-N` when taken) holding exactly `raw`, with `mode` (the
+    original file's permission bits)."""
+    stem = f"{path.name}.whynot-backup-{base.stamp()}"
+    n = 0
+    while True:
+        cand = path.with_name(stem if n == 0 else f"{stem}-{n}")
+        try:
+            with open(cand, "xb") as f:
+                f.write(raw)
+            break
+        except FileExistsError:
+            n += 1
+    if mode is not None:
+        os.chmod(cand, mode)
+    return cand
+
+
+def _write_settings(path: Path, raw_before: Optional[bytes], data: dict, make_backup: bool = True) -> Optional[str]:
+    """Encode first (nothing is written when that fails), then a backup of the exact original bytes (when there was a
+    file and make_backup), then the atomic write; the original permission bits are kept on both. A settings.json that
+    is a symlink (dotfiles) keeps being one: its target is written."""
+    payload = _encode(data)
     target = Path(os.path.realpath(path)) if os.path.islink(path) else path
-    base.atomic_write_json(target, data)
+    mode = _file_mode(target)
+    backup = None
+    if raw_before is not None and make_backup:
+        backup = str(write_backup(path, raw_before, mode))
+    base.atomic_write_bytes(target, payload, mode)
     return backup
 
 
 def merge_claude_settings(path, *, marketplace: Optional[dict], plugin_id: Optional[str],
-                          env: Optional[dict] = None, disable=(), dry_run: bool = False) -> dict:
+                          env: Optional[dict] = None, disable=(), dry_run: bool = False,
+                          make_backup: bool = True) -> dict:
     """Merge into a Claude Code settings.json. `marketplace` = {name: entry}: extraKnownMarketplaces[name] is replaced
     by ours (in place, other marketplaces kept); enabledPlugins[plugin_id] = true; `env` merged key by key; plugins
     matching a `disable` pattern (fnmatch, e.g. "reel-editor@*") that are on are set to false, never added. Returns
-    {changed, backup, disabled}; nothing is written (and no backup made) when nothing changes or with dry_run."""
+    {changed, backup, disabled}; nothing is written (and no backup made) when nothing changes or with dry_run.
+    make_backup=False: the caller keeps its own backup of the original (step_claude, around the CLI calls)."""
     path = Path(path)
     data, raw = _read_settings(path, settings_snippet(marketplace, plugin_id, env))
     before = copy.deepcopy(data)
@@ -193,7 +226,7 @@ def merge_claude_settings(path, *, marketplace: Optional[dict], plugin_id: Optio
         for k, v in env.items():
             e[k] = v
     changed = data != before
-    backup = _write_settings(path, raw, data) if changed and not dry_run else None
+    backup = _write_settings(path, raw, data, make_backup) if changed and not dry_run else None
     return {"changed": changed, "backup": backup, "disabled": disabled}
 
 
@@ -381,7 +414,77 @@ def step_claude(ctx: base.Ctx) -> base.StepResult:
                                                       "is empty",
                                    needs_you="run the installer from the unpacked WhyNot Cut folder")
 
-    # (c) + (a): the CLI, when there is one and it is new enough
+    # settings.json is checked and its original bytes kept BEFORE the CLI runs: `plugin install` / `marketplace add`
+    # write into it too, so an unreadable file never reaches the CLI and the one backup holds the editor's original
+    sfile = paths.settings_file
+    snippet = settings_snippet({name: entry}, plugin_id)
+    try:
+        _data, original = _read_settings(sfile, snippet)
+    except SettingsUnreadable as e:
+        detail = (f"{sfile} is {e.reason}; it was left exactly as it is and the Claude Code CLI was not run (it "
+                  "writes there too). Repair it and merge in the JSON below by hand")
+        return _claude_done(ctx, "amber", "; ".join([detail] + problems), e.snippet, "settings", entry, None, [])
+    except OSError as e:
+        return _claude_done(ctx, "amber", "; ".join([f"cannot read {sfile}: {e}"] + problems), snippet, "settings",
+                            entry, None, [])
+    backup = None
+    if original is not None:
+        try:
+            backup = write_backup(sfile, original, _file_mode(sfile))
+        except OSError as e:
+            return _claude_done(ctx, "amber", "; ".join([f"cannot back up {sfile}: {e}; nothing was changed"]
+                                                        + problems), snippet, "settings", entry, None, [])
+    method, r, fail = "settings", None, None
+    try:
+        method = _cli_phase(ctx, name, plugin_id, source, problems, needs)
+        # (b) always: settings.json (no second backup: the one above holds the original)
+        try:
+            r = merge_claude_settings(sfile, marketplace={name: entry}, plugin_id=plugin_id, disable=LEGACY_PLUGINS,
+                                      make_backup=False)
+        except SettingsUnreadable as e:  # only when the CLI left it unreadable
+            fail = (f"{sfile} is {e.reason} after the Claude Code CLI wrote it; it was not changed further. Merge in "
+                    "the JSON below by hand", e.snippet)
+        except (OSError, UnicodeError, ValueError) as e:
+            fail = (f"could not write {sfile}: {type(e).__name__}: {e}", snippet)
+    finally:  # also on an unexpected error: the backup survives exactly when the file changed
+        backup = _keep_backup_if_changed(sfile, original, backup)
+    if fail is not None:
+        return _claude_done(ctx, "amber", "; ".join([fail[0]] + problems), fail[1], method, entry, backup, [])
+    if r["disabled"]:
+        log.info(f"switched off {', '.join(r['disabled'])} in Claude Code: the older product name puts a second "
+                 "`reel` on PATH (ID-5; the backup keeps the old value)")
+    if backup:
+        log.info(f"settings.json backed up to {backup}")
+    how = ("installed with the Claude Code CLI" if method == "cli"
+           else "set in settings.json; Claude Code installs it on its next start (/reload-plugins if it is open)")
+    if problems:
+        return _claude_done(ctx, "amber", "; ".join(problems) + f"; WhyNot Cut is {how}",
+                            "; ".join(needs) or None, method, entry, backup, r["disabled"])
+    return _claude_done(ctx, "ok", f"{plugin_id} {how}", None, method, entry, backup, r["disabled"])
+
+
+def _keep_backup_if_changed(sfile: Path, original: Optional[bytes], backup) -> Optional[str]:
+    """The backup made before the CLI is kept only when settings.json now differs from the original bytes (exactly
+    one backup, of the editor's original); otherwise it is removed. Returns the kept path or None."""
+    if backup is None:
+        return None
+    try:
+        now = sfile.read_bytes()
+    except OSError:
+        now = None
+    if now == original:
+        try:
+            Path(backup).unlink()
+            return None
+        except OSError:
+            pass
+    return str(backup)
+
+
+def _cli_phase(ctx: base.Ctx, name: str, plugin_id: str, source: dict, problems: list, needs: list) -> str:
+    """(c) + (a): the CLI, when there is one, it answers and it is new enough. Returns the method ("cli" when the
+    plugin was installed / updated through it, else "settings")."""
+    paths, c, log = ctx.paths, ctx.components, ctx.log
     legacy = _legacy_source(paths, name, source)
     cands = claude_candidates(os.environ, paths.home, ctx.platform, paths.sandbox)
     cli = cands[0] if cands else None
@@ -394,7 +497,10 @@ def step_claude(ctx: base.Ctx) -> base.StepResult:
         have = _version(out) if rc == 0 else None
         minimum = str(base.cget(c, "claude_code.min") or "")
         need = _version(minimum)
-        if have and need and have < need:
+        if rc in (124, 127):  # timed out / cannot start: no usable CLI
+            problems.append(f"the Claude Code CLI at {cli} did not answer (`--version` exit {rc}: {base.tail(out)}); "
+                            "it was not used")
+        elif have and need and have < need:
             shown = ".".join(map(str, have))
             problems.append(f"update Claude Code: this one is {shown}, WhyNot Cut needs {minimum} or newer")
             needs.append(f"update Claude Code to {minimum} or newer, then run the installer again")
@@ -408,30 +514,7 @@ def step_claude(ctx: base.Ctx) -> base.StepResult:
         problems.append(f"Claude Code still knows the {name} marketplace from {_describe(legacy)}")
         needs.append(f"run `claude plugin marketplace remove {name}` (or remove it in Claude Code under /plugin > "
                      "Marketplaces), then start Claude Code again")
-
-    # (b) always: settings.json
-    try:
-        r = merge_claude_settings(paths.settings_file, marketplace={name: entry}, plugin_id=plugin_id,
-                                  disable=LEGACY_PLUGINS)
-    except SettingsUnreadable as e:
-        detail = (f"{paths.settings_file} is {e.reason}; it was left exactly as it is. Repair it and merge in the "
-                  "JSON below by hand")
-        return _claude_done(ctx, "amber", "; ".join([detail] + problems), e.snippet, method, entry, None, [])
-    except OSError as e:
-        detail = f"could not write {paths.settings_file}: {e}"
-        return _claude_done(ctx, "amber", "; ".join([detail] + problems),
-                            settings_snippet({name: entry}, plugin_id), method, entry, None, [])
-    if r["disabled"]:
-        log.info(f"switched off {', '.join(r['disabled'])} in Claude Code: the older product name puts a second "
-                 "`reel` on PATH (ID-5; the backup keeps the old value)")
-    if r["backup"]:
-        log.info(f"settings.json backed up to {r['backup']}")
-    how = ("installed with the Claude Code CLI" if method == "cli"
-           else "set in settings.json; Claude Code installs it on its next start (/reload-plugins if it is open)")
-    if problems:
-        return _claude_done(ctx, "amber", "; ".join(problems) + f"; WhyNot Cut is {how}",
-                            "; ".join(needs) or None, method, entry, r["backup"], r["disabled"])
-    return _claude_done(ctx, "ok", f"{plugin_id} {how}", None, method, entry, r["backup"], r["disabled"])
+    return method
 
 
 def _claude_done(ctx: base.Ctx, status: str, detail: str, needs_you, method: str, entry: dict, backup,
@@ -516,7 +599,7 @@ def _unpack_git(ctx: base.Ctx, archive: Path, kind: str) -> Optional[str]:
             base.safe_rmtree(staging, [root])
         except OSError as e2:
             ctx.log.warn(f"could not remove {staging}: {e2}")
-        return f"Git for Windows could not be installed: {e}"
+        return str(e)
     return None
 
 
@@ -541,15 +624,18 @@ def step_gitbash(ctx: base.Ctx) -> base.StepResult:
         if base.is_placeholder(url) or base.is_placeholder(sha) or base.is_placeholder(kind):
             return base.StepResult("gitbash", "amber", "Git for Windows is not in this build (placeholder pin); "
                                                        "Claude Code falls back to PowerShell",
-                                   needs_you="install Git for Windows (https://git-scm.com/download/win), then run "
-                                             "the installer again")
+                                   needs_you=f"install Git for Windows from {GIT_DOWNLOAD}, then run the installer "
+                                             "again")
         try:
             archive = base.download(url, sha, paths.downloads_dir, ctx.log)
         except base.DownloadError as e:
             return base.StepResult("gitbash", "red", str(e))
         err = _unpack_git(ctx, archive, kind)
-        if err:
-            return base.StepResult("gitbash", "red", err)
+        if err:  # e.g. the real SFX exits 1 after a partial extraction under a long base path (MAX_PATH)
+            return base.StepResult("gitbash", "amber", f"Git for Windows could not be set up; install it from "
+                                                       f"{GIT_DOWNLOAD} ({err})",
+                                   needs_you=f"install Git for Windows from {GIT_DOWNLOAD}, then run the installer "
+                                             "again")
         found = managed_git_dir(paths) / "bin" / "bash.exe"
         ctx.log.info(f"Git for Windows {ver} unpacked into {found.parents[1]}")
     try:
@@ -559,9 +645,9 @@ def step_gitbash(ctx: base.Ctx) -> base.StepResult:
         return base.StepResult("gitbash", "amber", f"Git Bash is at {found}, but {paths.settings_file} is {e.reason}; "
                                                    "it was left exactly as it is. Merge in the JSON below by hand",
                                needs_you=e.snippet)
-    except OSError as e:
+    except (OSError, UnicodeError, ValueError) as e:
         return base.StepResult("gitbash", "amber", f"Git Bash is at {found}, but {paths.settings_file} could not be "
-                                                   f"written: {e}",
+                                                   f"written: {type(e).__name__}: {e}",
                                needs_you=settings_snippet(env={GIT_BASH_KEY: str(found)}))
     managed = _is_managed(paths, found)
     ctx.state.data["gitbash"] = {"path": str(found), "managed": managed, "version": ver if managed else None,

@@ -229,14 +229,22 @@ def _replace(src: Path, dst: Path, tries: int = 6) -> None:
 
 def atomic_write_text(path, text: str) -> None:
     """UTF-8, LF kept as written, no BOM; readers see the old or the new file, never half of one."""
+    atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def atomic_write_bytes(path, data: bytes, mode: Optional[int] = None) -> None:
+    """Readers see the old or the new file, never half of one. `mode` (permission bits) is set on the new file before
+    it replaces the old one (keeps e.g. a 0600 settings.json at 0600)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         with open(tmp, "wb") as f:
-            f.write(text.encode("utf-8"))
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
+        if mode is not None:
+            os.chmod(tmp, mode)
         _replace(tmp, path)
     finally:
         if tmp.exists():

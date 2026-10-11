@@ -9,9 +9,14 @@ Behaviour (it imitates the files the real CLI keeps, but only under $CLAUDE_CONF
 always sets; without it every call that would write fails, so the real ~/.claude is never touched):
   --version                              prints `<FAKE_CLAUDE_VERSION or 2.1.300> (Claude Code)`
   plugin marketplace add <source>        records {"source": {"source": "directory"|"url", ...}} under its name
-                                         (`thewhynot-ai`) in plugins/known_marketplaces.json
+                                         (`thewhynot-ai`) in plugins/known_marketplaces.json, and (like the real
+                                         CLI) in settings.json extraKnownMarketplaces
   plugin marketplace remove <name>       removes that entry (and the name's plugins from installed_plugins.json)
-  plugin install <id> [--scope user]     lists <id> in plugins/installed_plugins.json
+  plugin install <id> [--scope user]     lists <id> in plugins/installed_plugins.json and sets
+                                         settings.json enabledPlugins[<id>] = true
+                                         settings.json is rewritten only when its content changes; one it cannot parse
+                                         is REPLACED (the worst case a real CLI could do), so a test can prove the
+                                         installer never lets the CLI near an unreadable settings.json
   plugin update <id>                     exit 0 (exit 1 when <id> is not installed)
   FAKE_CLAUDE_INSTALLED=1                every call (even --version) first lists whynot-cut@thewhynot-ai in
                                          installed_plugins.json (an editor who already has the plugin)
@@ -57,6 +62,28 @@ def _install(pid):
     _save("installed_plugins.json", inst)
 
 
+def _settings(key, name, value):
+    """settings.json[key][name] = value, written only when that changes anything (or the file cannot be parsed)."""
+    path = os.path.join(os.path.dirname(_plugins_dir()), "settings.json")
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            data = {}
+    except FileNotFoundError:
+        data = {}
+    except ValueError:  # unparsable: replaced
+        data = {}
+    else:
+        if isinstance(data.get(key), dict) and data[key].get(name) == value:
+            return
+    if not isinstance(data.get(key), dict):
+        data[key] = {}
+    data[key][name] = value
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
 def main(argv):
     log = os.environ.get("FAKE_CLAUDE_LOG")
     if log:
@@ -78,6 +105,7 @@ def main(argv):
         known = _load("known_marketplaces.json")
         known[MARKETPLACE] = {"source": source, "installLocation": src, "lastUpdated": "2026-10-12T00:00:00.000Z"}
         _save("known_marketplaces.json", known)
+        _settings("extraKnownMarketplaces", MARKETPLACE, {"source": source})
         return 0
     if argv[:3] == ["plugin", "marketplace", "remove"] and len(argv) >= 4:
         known = _load("known_marketplaces.json")
@@ -90,6 +118,7 @@ def main(argv):
         return 0
     if argv[:2] == ["plugin", "install"] and len(argv) >= 3:
         _install(argv[2])
+        _settings("enabledPlugins", argv[2], True)
         return 0
     if argv[:2] == ["plugin", "update"] and len(argv) >= 3:
         return 0 if argv[2] in _load("installed_plugins.json").get("plugins", {}) else 1
