@@ -107,7 +107,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
     # captions never sit on a card (name card etc.): while one overlaps the caption band, the caption moves
     avoid = []
     for e in spec["events"]:
-        if e["template"] in ("name_card", "glass_card", "cta"):
+        if e["template"] in ("name_card", "glass_card", "cta", "stat_card", "context_card"):
             png = paths.p(f"03_broll/typography/{e['event_id']}.png")
             if png.exists():
                 from PIL import Image

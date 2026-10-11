@@ -127,6 +127,9 @@ def render_line(text: str, font: HBFontSpec, rgba=(255, 255, 255, 255)):
     base_y = pad + asc
     cov = np.zeros((H, W), dtype=np.float32)
     ft = font.ft
+    # the FreeType face is shared by every size of this font file: set THIS spec's size before rasterising (else a
+    # 150 px value drawn after a 52 px label of the same font comes out at 52 px, with 150 px spacing)
+    ft.set_char_size(int(round(font.size * 64)), 0, 72, 72)
     pen = float(pad)
     flags = freetype.FT_LOAD_DEFAULT | freetype.FT_LOAD_NO_HINTING
     for gid, adv, xo, yo in glyphs:

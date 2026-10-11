@@ -1062,5 +1062,77 @@ class TestRecipes(unittest.TestCase):
         self.assertEqual(tm["removed_ms"], 0)
 
 
+class TestNewTemplates(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root, self.reel, self.src = reel_fixture(self.tmp, "success_story", music=False)
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def plan(self, graphics):
+        from lib.plan import compile_plan
+        write_json(self.reel.p("01_analysis/edit-decisions.json"), {"global": {}, "decisions": [
+            decision("EDIT_001", "00:00:00.000", "00:00:06.000", "كلمه0 كلمه1", graphics=graphics)]})
+        return compile_plan(self.reel)
+
+    def test_stat_card_requires_value(self):
+        r = self.plan([{"id": "GFX_001", "template": "stat_card", "start": "00:00:01.000", "end": "00:00:04.000",
+                        "label": "سنين"}])
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("stat_card" in e and "value" in e for e in r["errors"]), r["errors"])
+
+    def test_render_new_templates(self):
+        from PIL import Image
+        from lib.previews import render_all
+        from lib.ppro_build import job_data
+        r = self.plan([{"id": "GFX_001", "template": "stat_card", "start": "00:00:01.000", "end": "00:00:03.000",
+                        "value": "+200%", "label": "نمو في سنة"},
+                       {"id": "GFX_002", "template": "context_card", "start": "00:00:03.500", "end": "00:00:05.500",
+                        "text": "بيحكي عن أول شركة خسرها"}])
+        self.assertTrue(r["ok"], r["errors"])
+        render_all(self.reel, composite_preview=False)
+        for gid, top_min in (("GFX_001", 250), ("GFX_002", 250)):
+            png = self.reel.p(f"03_broll/typography/{gid}.png")
+            bb = Image.open(png).getchannel("A").getbbox()
+            self.assertIsNotNone(bb, gid)
+            self.assertGreaterEqual(bb[0], 40)
+            self.assertLessEqual(bb[2], 1040)
+            self.assertGreaterEqual(bb[1], top_min)
+        ctx = Image.open(self.reel.p("03_broll/typography/GFX_002.png")).getchannel("A").getbbox()
+        self.assertLess(ctx[3], 700)                                         # a pill near the top, above the face
+        lanes = {g["id"]: g for g in job_data(self.reel)["graphics"]}
+        self.assertEqual(lanes["GFX_001"]["anim"], "card")
+        self.assertEqual(lanes["GFX_002"]["anim"], "card")
+
+    def test_hb_font_sizes_independent(self):
+        """Two sizes of the SAME font file in one still (stat value 150 px + label 52 px): each renders at its own size
+        (the FreeType face is shared per file; its size must be set at render time)."""
+        from lib import hb_text
+        from lib.plat import font_dirs
+        if not hb_text.AVAILABLE:
+            self.skipTest("uharfbuzz/freetype not installed")
+        font = next((f for d in font_dirs() if d.exists() for f in sorted(d.glob("*.ttf"))
+                     if f.name.lower() in ("arial.ttf", "dejavusans.ttf", "notosansarabic-regular.ttf",
+                                           "ibmplexsansarabic-medium.ttf")), None)
+        if font is None:
+            self.skipTest("no test font found")
+        big = hb_text.HBFontSpec(str(font), 150)
+        hb_text.HBFontSpec(str(font), 40)                     # created later: must not shrink `big`
+        im, _base, _w = big.render("سنين 3", (255, 255, 255, 255))
+        bb = im.getchannel("A").getbbox()
+        self.assertGreater(bb[3] - bb[1], 70)                 # glyph ink ~ 0.5-0.9 em at 150 px
+
+    def test_flagged_word_blocks_stat_value(self):
+        wj = read_json(self.reel.p("02_transcription/words.json"))
+        wj["words"][3]["flagged"] = {"note": "unclear"}
+        write_json(self.reel.p("02_transcription/words.json"), wj)
+        r = self.plan([{"id": "GFX_001", "template": "stat_card", "start": "00:00:01.000", "end": "00:00:03.000",
+                        "value": "كلمه3", "label": "x"}])
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("flagged" in e for e in r["errors"]), r["errors"])
+
+
 if __name__ == "__main__":
     unittest.main()

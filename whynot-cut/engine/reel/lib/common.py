@@ -425,7 +425,8 @@ def font_role_fallback() -> dict:
     return load_config("brand.json").get("font_roles_fallback", {})
 
 
-CAPTION_HIDE_SAFE = ["broll_card", "logo_outro", "hook_title", "statement_highlight", "term_callout", "checklist"]
+CAPTION_HIDE_SAFE = ["broll_card", "logo_outro", "hook_title", "statement_highlight", "term_callout", "checklist",
+                     "stat_card"]
 
 
 def caption_hide_default() -> list:

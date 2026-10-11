@@ -30,7 +30,8 @@ def norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-ONSCREEN_KEYS = ("text", "headline", "title", "subtitle", "name", "label", "lines", "items", "quote", "body", "caption")
+ONSCREEN_KEYS = ("text", "headline", "title", "subtitle", "name", "label", "lines", "items", "quote", "body", "caption",
+                 "value")
 
 
 def onscreen_strings(params) -> list:
@@ -210,8 +211,11 @@ def compile_plan(paths: Paths) -> dict:
                 elif not any(k in vid.lower() for k in ("broll", "b-roll", "b_roll", "stock")):
                     warnings.append(f"{gid}: {vid} is not in the licensed B-roll folder (data/Broll): confirm the licence")
                 imgs = [vid] if vid else []
-            if t in ("hook_title", "term_callout", "glass_card", "cta", "broll_card") and not (g.get("text") or g.get("headline")):
+            if t in ("hook_title", "term_callout", "glass_card", "cta", "broll_card", "context_card") and \
+                    not (g.get("text") or g.get("headline")):
                 errors.append(f"{gid}: template {t} needs text/headline")
+            if t == "stat_card" and not str(g.get("value") or "").strip():
+                errors.append(f"{gid}: template stat_card needs a value (the number or result the speaker said)")
             info = tpl[t]
             ev_ = {"event_id": gid, "decision_id": did, "segment_id": d.get("segment_id"),
                    "template": t, "track": info["track"], "track_name": info["track_name"],

@@ -337,6 +337,44 @@ def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, ou
                     fill=_role_color(b, t.get("box_role", "primary")) + (255,))
         _text_block(ImageDraw.Draw(im), p["text"], f, W // 2, p.get("y", t["y"]),
                     _role_color(b, t.get("text_role", "neutral_light")), shadow=False)
+    elif tp == "stat_card":
+        # big value (white, readable whatever the brand colour) on a dense ink card, a brand-primary accent bar under
+        # it, one label line below
+        y, w = p.get("y", t["y"]), p.get("w", t["w"])
+        fv, fl = b.font("headline", p.get("value_size", t["value_size"])), b.font("body", p.get("label_size", t["label_size"]))
+        vy, ly = y - 55, y + 95
+        probe_d = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+        vb = _text_block(probe_d, str(p["value"]), fv, W // 2, vy, b.white, max_chars=12, shadow=False)
+        lb = _text_block(probe_d, p.get("label", ""), fl, W // 2, ly, b.white, max_chars=28, shadow=False) \
+            if p.get("label") else []
+        y0 = min(bx[1] for bx in vb) - 45
+        y1 = max(bx[3] for bx in (lb or vb)) + 45
+        w = min(max(w, max(bx[2] - bx[0] for bx in vb + lb) + 120), W - 100)
+        if frame_bg is not None:  # frosted backdrop on the QC preview only
+            crop = frame_bg.crop((W // 2 - w // 2, int(y0), W // 2 + w // 2, int(y1))).filter(ImageFilter.GaussianBlur(28))
+            m = Image.new("L", crop.size, 0)
+            ImageDraw.Draw(m).rounded_rectangle((0, 0, crop.size[0] - 1, crop.size[1] - 1), t["radius"], fill=255)
+            im.paste(crop.convert("RGBA"), (W // 2 - w // 2, int(y0)), m)
+        _round_rect(im, (W // 2 - w // 2, y0, W // 2 + w // 2, y1), t["radius"],
+                    fill=b.ink + (int(255 * t["fill_opacity"]),), outline=b.white + (int(255 * t["stroke_opacity"]),), width=3)
+        bar_y = max(bx[3] for bx in vb) + 8
+        _round_rect(im, (W // 2 - 70, bar_y, W // 2 + 70, bar_y + 9), 4, fill=_role_color(b, t.get("accent_role", "primary")) + (255,))
+        d2 = ImageDraw.Draw(im)
+        _text_block(d2, str(p["value"]), fv, W // 2, vy, b.white, max_chars=12, shadow=True)
+        if p.get("label"):
+            _text_block(d2, p["label"], fl, W // 2, ly, b.white, max_chars=28, shadow=False)
+    elif tp == "context_card":
+        # one editorial line in a brand pill near the top: what came before this moment
+        f = b.font("body", p.get("size", t["size"]))
+        y, mc = p.get("y", t["y"]), p.get("max_chars", t["max_chars"])
+        boxes = _text_block(ImageDraw.Draw(Image.new("RGBA", (1, 1))), p["text"], f, W // 2, y, b.white, max_chars=mc,
+                            shadow=False)
+        px, py = t.get("pad_x", 34), t.get("pad_y", 18)
+        x0, y0 = max(40, min(bx[0] for bx in boxes) - px), min(bx[1] for bx in boxes) - py
+        x1, y1 = min(W - 40, max(bx[2] for bx in boxes) + px), max(bx[3] for bx in boxes) + py
+        _round_rect(im, (x0, y0, x1, y1), int(min(48, (y1 - y0) / 2)), fill=_role_color(b, t.get("box_role", "primary")) + (235,))
+        _text_block(ImageDraw.Draw(im), p["text"], f, W // 2, y, _role_color(b, t.get("text_role", "neutral_light")),
+                    max_chars=mc, shadow=False)
     elif tp == "logo_outro":
         im = Image.new("RGBA", (W, H), b.white + (255,))
         if logo:
