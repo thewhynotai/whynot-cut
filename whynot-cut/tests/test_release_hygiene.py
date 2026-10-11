@@ -3,16 +3,21 @@
   * the bridge has its own version, identical in its three places (ppro_bridge.py, CEP manifest, bridge.js)
   * `reel --version` names the plugin version and root; `reel --help` lists every subcommand, generated from the
     command table (core + podcast + motion), so a new command cannot be forgotten
+  * 3.0 T2.17 (engine MI-9): a ResourceWarning (unclosed file, pipe or process) anywhere in the suite fails the run
 Run:  ~/.whynot-cut/venv/Scripts/python.exe -B -m unittest discover -s whynot-cut/tests -p test_release_hygiene.py -v
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
+import atexit
+import gc
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
 import unittest
+import warnings
 from pathlib import Path
 
 SK = Path(__file__).resolve().parents[1]
@@ -20,6 +25,70 @@ sys.path.insert(0, str(SK / "engine" / "reel"))
 
 CLI = SK / "engine/reel/cli.py"
 SEMVER = r"\d+\.\d+\.\d+"
+
+
+# --------------------------------------------------------------------------- ResourceWarning = error, suite-wide
+# Installed when unittest discovery imports this module, i.e. before any test of any module runs. A leak is reported
+# two ways: tools/test.sh runs Python with -W error::ResourceWarning, so a leak in a destructor (an unclosed file,
+# pipe or Popen) reaches sys.unraisablehook; without -W (a plain `python -m unittest`) it reaches
+# warnings.showwarning. Either way it is recorded, and at exit the run fails with the list (exit status 1).
+LEAKS: list = []
+QUIET = [False]                    # True only while TestResourceWarningIsAnError leaks on purpose (output stays clean)
+
+
+def _hook(u, _prev=sys.unraisablehook):
+    if isinstance(u.exc_value, ResourceWarning):
+        LEAKS.append(f"{u.exc_value} (in {u.object!r})"[:400])
+        if QUIET[0]:
+            return
+    _prev(u)
+
+
+def _show(message, category, filename, lineno, file=None, line=None, _prev=warnings.showwarning):
+    if issubclass(category, ResourceWarning):
+        LEAKS.append(f"{message} ({filename}:{lineno})"[:400])
+        if QUIET[0]:
+            return
+    _prev(message, category, filename, lineno, file, line)
+
+
+def _fail_on_leaks():
+    gc.collect()
+    if LEAKS:
+        sys.stderr.write(f"\nFAILED (ResourceWarning x{len(LEAKS)}; every file, pipe and process must be closed — "
+                         "T2.17 / MI-9):\n" + "\n".join(f"  - {x}" for x in LEAKS) + "\n")
+        sys.stderr.flush()
+        os._exit(1)
+
+
+if not getattr(sys, "_whynot_leak_watch", False):
+    sys._whynot_leak_watch = True
+    sys.unraisablehook, warnings.showwarning = _hook, _show
+    atexit.register(_fail_on_leaks)
+
+
+class TestResourceWarningIsAnError(unittest.TestCase):
+    def test_watch_is_installed_and_catches_a_leak(self):
+        self.assertIs(sys.unraisablehook, _hook)
+        saved = list(LEAKS)
+        QUIET[0] = True
+        try:
+            # "error" (tools/test.sh: the leak reaches sys.unraisablehook) and "always" (a plain `python -m unittest`
+            # shows warnings: the leak reaches warnings.showwarning)
+            for action in ("error", "always"):
+                n = len(LEAKS)
+                with warnings.catch_warnings():
+                    warnings.simplefilter(action, ResourceWarning)
+                    f = open(__file__, "rb")                 # noqa: SIM115 — the leak under test
+                    del f
+                    gc.collect()
+                self.assertEqual(len(LEAKS), n + 1, f"an unclosed file must be recorded ({action})")
+        finally:
+            QUIET[0] = False
+            LEAKS[:] = saved                           # this deliberate leak does not fail the run
+
+    def test_test_runner_turns_resource_warnings_into_errors(self):
+        self.assertIn("-W error::ResourceWarning", (SK.parent / "tools/test.sh").read_text(encoding="utf-8"))
 
 
 def changelog_version() -> str:

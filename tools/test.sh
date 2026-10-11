@@ -11,4 +11,6 @@ for c in "$HOME_DIR/current/python/bin/python3" "$HOME_DIR/current/python/python
 done
 [ -n "$PY" ] || { echo "engine runtime not found under $HOME_DIR (run reel setup)" >&2; exit 2; }
 cd "$ROOT"
-PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 exec "$PY" -B -m unittest discover -s whynot-cut/tests "$@"
+# -W error::ResourceWarning: an unclosed file / pipe / process anywhere fails the run (T2.17, MI-9;
+# collected by tests/test_release_hygiene.py)
+PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 exec "$PY" -B -W error::ResourceWarning -m unittest discover -s whynot-cut/tests "$@"

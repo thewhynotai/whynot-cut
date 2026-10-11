@@ -427,14 +427,10 @@ def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, ou
 
 
 def grab_frame(video: Path, ms: int) -> Image.Image | None:
-    from .common import ffmpeg_exe, run
-    import tempfile
-    tmp = Path(tempfile.mkstemp(suffix=".png")[1])
-    run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{ms / 1000:.3f}", "-i", str(video), "-frames:v", "1",
-         "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}", str(tmp)], check=False)
-    if tmp.exists() and tmp.stat().st_size:
-        return Image.open(tmp).convert("RGBA")
-    return None
+    """The source frame at ms, cropped to fill the W x H sequence frame (RGBA), or None. Through a pipe: the old
+    version left a temp PNG and its descriptor behind on every call (MI-9)."""
+    from .media_util import grab_frame as _grab
+    return _grab(video, ms / 1000, W, H, fit="crop", mode="RGBA")
 
 
 def render_all(paths: Paths, composite_preview: bool = True) -> dict:
@@ -502,15 +498,11 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
             cp.parent.mkdir(parents=True, exist_ok=True)
             comp.convert("RGB").resize((540, 960)).save(cp, quality=85)
             comps.append(str(cp))
-    # contact sheet of composites
+    # contact sheet of composites: exactly one tile per composite (G73: it was half empty, 6 columns for 3 tiles)
     if comps:
-        cols = 6
-        rows = (len(comps) + cols - 1) // cols
-        sheet = Image.new("RGB", (cols * 270, rows * 480), "black")
-        for i, cpath in enumerate(comps):
-            im = Image.open(cpath).resize((270, 480))
-            sheet.paste(im, ((i % cols) * 270, (i // cols) * 480))
-        sheet.save(paths.p("08_quality_control/previews/_contact_sheet.jpg"), quality=85)
+        from .media_util import contact_sheet
+        contact_sheet([(c, "") for c in comps], paths.p("08_quality_control/previews/_contact_sheet.jpg"),
+                      cols=6, tile_w=270, tile_h=480)
     return {"previews": outs, "composites": comps, "warnings": warns}
 
 

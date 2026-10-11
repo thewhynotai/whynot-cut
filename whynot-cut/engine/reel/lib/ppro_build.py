@@ -132,8 +132,8 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
         if e["template"] in ("name_card", "glass_card", "cta", "stat_card", "context_card"):
             png = paths.p(f"03_broll/typography/{e['event_id']}.png")
             if png.exists():
-                from PIL import Image
-                bb = Image.open(png).getchannel("A").getbbox()
+                from .media_util import open_rgb
+                bb = open_rgb(png, "RGBA").getchannel("A").getbbox()
                 if bb:
                     avoid.append((e["start_ms"], e["end_ms"], bb[1], bb[3]))
     avoid += cutaway_bands(paths, spec)
@@ -337,23 +337,15 @@ def export_frames(paths: Paths, times: list[float] | None = None, *, retries: in
     all_frames = pngs()
     frames = [f for f in all_frames if f not in pending]            # a slate is not a frame of the edit
     media_pending = [{"t": by_ms.get(ms_of(f), (ms_of(f) or 0) / 1000), "file": str(f), "retries": attempts} for f in pending]
-    sheet = None
-    if frames:
-        from PIL import Image, ImageDraw
-        cols, w, h = 6, 270, 480
-        rows = (len(frames) + cols - 1) // cols
-        im = Image.new("RGB", (cols * w, rows * (h + 18)), "black")
-        d = ImageDraw.Draw(im)
-        for i, f in enumerate(frames):
-            x, y = (i % cols) * w, (i // cols) * (h + 18)
-            im.paste(Image.open(f).convert("RGB").resize((w, h)), (x, y + 18))
-            ms = next((int(tok) for tok in f.stem.split("_") if tok.isdigit()), None)
-            t = ms / 1000 if ms is not None else None
-            tc = frame_to_tc(round(t * seq_fps())) if t is not None else ""
-            lab = labels.get(round(t, 3), "") if t is not None else ""
-            d.text((x + 4, y + 3), f"{tc} {lab}"[:44], fill="yellow")
-        sheet = od / "_sheet.jpg"
-        im.save(sheet, quality=85)
+    def label(f):
+        ms = ms_of(f)
+        t = ms / 1000 if ms is not None else None
+        tc = frame_to_tc(round(t * seq_fps())) if t is not None else ""
+        lab = labels.get(round(t, 3), "") if t is not None else ""
+        return f"{tc} {lab}"[:44]
+    from .media_util import contact_sheet
+    sheet = contact_sheet([(f, label(f)) for f in frames], od / "_sheet.jpg", cols=6, tile_w=270, tile_h=480,
+                          label_h=18, label_xy=(4, 3))
     # Premiere reports failures per frame inside a successful job: surface them (0 frames must never look like success)
     per_frame = ((r.get("response") or {}).get("result") or {}).get("frames") or []
     frame_errors = sorted({f["error"] for f in per_frame if f.get("error")})

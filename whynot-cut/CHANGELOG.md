@@ -90,8 +90,21 @@
   ("animate this podcast part"), `adobe-extras` is After Effects / Photoshop output only on explicit request. The 19
   agent descriptions lose the sentence `See "When to invoke" in the agent body.`; the `plugin.json` description is 219
   characters. `TestListingBudget` guards all of it (total <= 4,000).
+- Engine ready for a long-lived process (T2.17, engine MI-6/7/8): the engine home, bridge queues and script folders
+  are resolved on every call (a `WHYNOT_HOME` set after import is honoured; `common.ENV_DIR`, `ppro_bridge.QUEUE` and
+  friends remain for 3.0 as live aliases); an explicit `Context` (client root, profile layers, engine home, the
+  request's caches) replaces the module-level context; installed-font caches follow the font folders.
+  `compile_plan` is a chain of pure steps (`validate_decisions`, `build_camera`, `apply_framing`, `apply_timemap`,
+  `build_audio`, `final_checks`) between one read and one write step, with byte-identical outputs. New
+  `lib/media_util.py`: one time parser, one frame grab and one contact-sheet builder replace four, four and seven
+  copies.
 
 ### Fixed
+- Contact sheets lay out exactly the tiles they are given (G73): the previews sheet had six columns for three
+  composites, half of it black. Sheets with fewer tiles than columns are now that many tiles wide.
+- Resource leaks (MI-9): every preview probe left a 2-4 MB temp PNG and an open descriptor in `%TEMP%` (the frame now
+  comes through a pipe); images, font files and the motion animatic's ffmpeg pipe are closed. `tools/test.sh` runs with
+  `-W error::ResourceWarning` and the suite fails on any unclosed file, pipe or process.
 - Executable bits are set in git's index (`100755`) for `bin/reel`, `hooks/run_python.sh`, `hooks/*.py`,
   `setup/setup_env.sh`, `setup/setup_env.py`, `examples/make_demo.py` and `tools/test.sh`. Windows checkouts had them as
   `100644`. Tests pin the index modes and the `package.py` zip exec set to the same list.

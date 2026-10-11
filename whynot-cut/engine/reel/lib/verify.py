@@ -98,13 +98,13 @@ def editor_modified(paths: Paths) -> dict | None:
 
 
 def _alpha_bbox(png: Path):
-    from PIL import Image
-    im = Image.open(png).convert("RGBA")
-    return im.getchannel("A").point(lambda a: 255 if a > 24 else 0).getbbox()
+    from .media_util import open_rgb
+    return open_rgb(png, "RGBA").getchannel("A").point(lambda a: 255 if a > 24 else 0).getbbox()
 
 
 def build(paths: Paths) -> dict:
-    from PIL import Image, ImageDraw
+    from PIL import Image
+    from .media_util import contact_sheet, open_rgb
     spec = read_json(paths.p("01_analysis/timeline-spec.json"))
     if not spec:
         raise FileNotFoundError("timeline-spec.json missing — run plan first")
@@ -142,7 +142,7 @@ def build(paths: Paths) -> dict:
             source = "PREVIEW ONLY (not AE)"
             bbox = _alpha_bbox(png) if png.exists() else None
             if comp.exists():
-                Image.open(comp).resize((360, 640)).save(out, quality=85)
+                open_rgb(comp).resize((360, 640)).save(out, quality=85)
         safe_ok = None
         if bbox and e["template"] not in FULLSCREEN:
             safe_ok = bbox[0] >= SAFE["x0"] and bbox[2] <= SAFE["x1"] and bbox[1] >= SAFE["y0"] and bbox[3] <= SAFE["y1"]
@@ -177,22 +177,14 @@ def build(paths: Paths) -> dict:
         if psd_prev.name.startswith("._"):
             continue
         out = vdir / (psd_prev.stem + ".jpg")
-        Image.open(psd_prev).convert("RGB").resize((360, 640)).save(out, quality=85)
+        open_rgb(psd_prev).resize((360, 640)).save(out, quality=85)
         rows.append({"tile": len(tiles) + 1, "event": psd_prev.stem.replace("_preview", ""), "template": "psd",
                      "source": "Photoshop", "expected_text": "see edit-decisions.global.photoshop_jobs"})
         tile(out, f"{len(tiles) + 1} PSD")
 
-    cols = 6
-    nrows = (len(tiles) + cols - 1) // cols or 1
-    sheet = Image.new("RGB", (cols * 360, nrows * 640), "black")
-    d = ImageDraw.Draw(sheet)
-    for i, (pth, label) in enumerate(tiles):
-        x, y = (i % cols) * 360, (i // cols) * 640
-        sheet.paste(Image.open(pth).convert("RGB").resize((360, 640)), (x, y))
-        d.rectangle([x, y, x + 150, y + 24], fill="black")
-        d.text((x + 6, y + 6), label, fill="yellow")
     sheet_p = vdir / "verify_sheet.jpg"
-    sheet.save(sheet_p, quality=85)
+    if not contact_sheet(tiles, sheet_p, cols=6, tile_w=360, tile_h=640, label_box=(150, 24)):
+        Image.new("RGB", (360, 640), "black").save(sheet_p, quality=85)      # nothing to verify: an empty sheet
 
     L = [f"# Visual Verification Checklist — {paths.video_id}", "", f"Sheet: `{sheet_p}` (generated {now_iso()})", "",
          "View the sheet and check EVERY tile. A tile passes only if all of these hold:", "",

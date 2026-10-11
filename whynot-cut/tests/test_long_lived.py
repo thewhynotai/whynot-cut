@@ -231,5 +231,127 @@ class TestCompilePlanSteps(TempDir):
         self.assertEqual(spec1, spec2)
 
 
+def no_resource_warnings(test: unittest.TestCase, fn):
+    """Run fn; fail on any ResourceWarning it causes (also those raised in __del__, which reach sys.unraisablehook)."""
+    import gc
+    import warnings
+    caught, prev = [], sys.unraisablehook
+    sys.unraisablehook = lambda u: caught.append(repr(u.exc_value))
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ResourceWarning)
+            out = fn()
+            gc.collect()
+    finally:
+        sys.unraisablehook = prev
+    test.assertEqual(caught, [])
+    return out
+
+
+def _video(path: Path, seconds: float = 2.0, size: str = "320x240") -> Path:
+    import subprocess
+    subprocess.run([common.ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    f"testsrc2=s={size}:r=25:d={seconds}", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)],
+                   check=True)
+    return path
+
+
+class TestParseTime(unittest.TestCase):
+    """MI-7: four time parsers (cli._parse_time_ms, plan.to_ms, publish.parse_time, common.parse_ts) -> one."""
+
+    def test_forms(self):
+        from lib.media_util import parse_time
+        for v, ms in [(40, 40000), (40.5, 40500), ("40", 40000), ("40.5", 40500), ("00:40", 40000),
+                      ("1:02:03", 3723000), ("00:00:40.500", 40500), ("00:01:02,345", 62345), ("1:30.25", 90250),
+                      ("0:00:01,5", 1500), (" 00:00:02.000 ", 2000), ("90:00", 5400000)]:
+            with self.subTest(v=v):
+                self.assertEqual(parse_time(v), ms)
+        self.assertEqual(parse_time(1500, int_is_ms=True), 1500)
+        self.assertEqual(parse_time(1.5, int_is_ms=True), 1500)          # a float is always seconds
+        for bad in ("abc", "1:2:3:4", "", "1:", "-5", None, True):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                parse_time(bad)
+
+    def test_old_names_agree(self):
+        import cli
+        from lib import common as c, plan, publish
+        self.assertEqual(plan.to_ms(1500), 1500)                        # decisions: an int is milliseconds
+        self.assertEqual(plan.to_ms("00:00:01,500"), 1500)
+        self.assertEqual(plan.to_ms(2.5), 2500)
+        self.assertEqual(publish.parse_time(40), 40000)                 # publishing copy: an int is seconds
+        self.assertEqual(publish.parse_time("1:02:03"), 3723000)
+        self.assertEqual(cli._parse_time_ms("90"), 90000)
+        self.assertEqual(cli._parse_time_ms("1:30.5"), 90500)
+        self.assertEqual(c.parse_ts("00:01:02,345"), 62345)
+        with self.assertRaises(ValueError):
+            c.parse_ts("01:02")                                         # SRT grammar stays strict
+
+
+class TestContactSheet(TempDir):
+    """G73: the previews sheet was half empty (3 tiles in a 6-column sheet) and its count disagreed with the stills.
+    The shared builder lays out exactly the tiles it is given."""
+
+    def tiles(self, n):
+        from PIL import Image
+        cols = [(200, 30, 30), (30, 200, 30), (30, 30, 200), (200, 200, 30), (30, 200, 200), (200, 30, 200),
+                (120, 120, 120), (250, 250, 250)]
+        out = []
+        for i in range(n):
+            f = self.tmp / f"t{i}.png"
+            Image.new("RGB", (54, 96), cols[i]).save(f)
+            out.append((f, f"T{i}"))
+        return out, cols
+
+    def test_lays_out_exactly_the_tiles_given(self):
+        from PIL import Image
+        from lib.media_util import contact_sheet
+        for n, size in [(1, (270, 480)), (3, (810, 480)), (6, (1620, 480)), (7, (1620, 960))]:
+            with self.subTest(n=n):
+                tiles, cols = self.tiles(n)
+                out = contact_sheet(tiles, self.tmp / f"s{n}.png", cols=6, tile_w=270, tile_h=480)
+                with Image.open(out) as im:
+                    self.assertEqual(im.size, size)
+                    for i in range(n):                                     # every tile is where it should be
+                        x, y = (i % min(6, n)) * 270 + 135, (i // min(6, n)) * 480 + 240
+                        self.assertEqual(im.getpixel((x, y)), cols[i])
+        self.assertIsNone(contact_sheet([], self.tmp / "none.jpg", cols=6, tile_w=10, tile_h=10))
+        self.assertFalse((self.tmp / "none.jpg").exists())
+
+    def test_labels_fits_and_closed_files(self):
+        from PIL import Image
+        from lib.media_util import contact_sheet
+        tiles, _ = self.tiles(3)
+        tiles[1] = (Image.new("RGB", (100, 50), "white"), [("line one", "yellow"), ("line two", "white")])
+        for fit in ("stretch", "contain", "bottom"):
+            out = no_resource_warnings(self, lambda: contact_sheet(tiles, self.tmp / f"{fit}.jpg", cols=2, tile_w=64,
+                                                                   tile_h=40, label_h=18, fit=fit, label_box=(30, 12)))
+            with Image.open(out) as im:
+                self.assertEqual(im.size, (128, 2 * 58))
+        for f, _ in (tiles[0], tiles[2]):
+            f.unlink()                                                     # nothing holds the files (Windows)
+
+
+class TestFrameGrab(TempDir):
+    def test_grab_frame_pipes_no_temp_file(self):
+        from lib import media_util
+        v = _video(self.tmp / "v.mp4")
+        with mock.patch("tempfile.mkstemp", side_effect=AssertionError("no temp files")):
+            im = no_resource_warnings(self, lambda: media_util.grab_frame(v, 1.0, 90, 160, fit="crop", mode="RGBA"))
+            self.assertEqual((im.size, im.mode), ((90, 160), "RGBA"))
+            self.assertEqual(media_util.grab_frame(v, 1.0, 160, 90).size, (160, 90))
+            self.assertIsNone(media_util.grab_frame(v, 50.0, 160, 90))      # past the end
+
+    def test_grab_frame_file_and_previews_grab(self):
+        from lib import media_util, previews
+        v = _video(self.tmp / "v.mp4")
+        out = media_util.grab_frame_file(v, 0.5, self.tmp / "f.jpg", vf="scale=64:-2", quality=3)
+        self.assertEqual(out, self.tmp / "f.jpg")
+        self.assertIsNone(media_util.grab_frame_file(v, 50.0, self.tmp / "none.jpg"))
+        # MI-9: previews.grab_frame left a mkstemp PNG (and its fd) behind on every call
+        with mock.patch("tempfile.mkstemp", side_effect=AssertionError("no temp files")):
+            im = no_resource_warnings(self, lambda: previews.grab_frame(v, 1000))
+        self.assertEqual((im.size, im.mode), ((previews.W, previews.H), "RGBA"))
+
+
 if __name__ == "__main__":
     unittest.main()

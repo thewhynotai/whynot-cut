@@ -335,9 +335,9 @@ def audio_card(ep, cand: dict, out: Path) -> Path:
 def render_candidates(ep, ids: list[str] | None = None) -> dict:
     """A quick 540x960 preview per candidate: the whole 16:9 frame letterboxed (not cropped: the reframe is decided
     per shot later), the episode audio for the range, and a Latin label. Plus a first-frame JPG and a sheet."""
-    from PIL import Image, ImageDraw
     from .common import ffmpeg_exe, run
     from .episode import episode_file
+    from .media_util import contact_sheet, grab_frame_file
     res = fresh_validated(ep)
     src = episode_file(ep)
     cands = [c for c in res["candidates"] if not ids or c["id"] in ids]
@@ -365,30 +365,16 @@ def render_candidates(ep, ids: list[str] | None = None) -> dict:
                  "[0:v]scale=540:-2,pad=540:960:0:(oh-ih)/2:color=0x111111[v];[v][1:v]overlay=0:0[o]",
                  "-map", "[o]", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
                  "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(mp4)], check=False)
-        run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{a + 0.2:.3f}", "-i", str(src), "-frames:v", "1",
-             "-vf", "scale=540:-2", "-q:v", "3", str(jpg)], check=False)
+        grab_frame_file(src, a + 0.2, jpg, vf="scale=540:-2", quality=3)
         lab.unlink(missing_ok=True)
         if r.returncode or not mp4.exists():
             failed.append({"id": c["id"], "error": (r.stderr or "")[-300:]})
             continue
         outs.append({"id": c["id"], "mp4": str(mp4), "jpg": str(jpg) if jpg.exists() else None})
-    sheet = None
-    tiles = [o for o in outs if o["jpg"]]
-    if tiles:
-        cols, w, h = 4, 360, 203
-        rows = (len(tiles) + cols - 1) // cols
-        im = Image.new("RGB", (cols * w, rows * (h + 24)), "black")
-        dr = ImageDraw.Draw(im)
-        byid = {c["id"]: c for c in cands}
-        for k, o in enumerate(tiles):
-            t = Image.open(o["jpg"]).convert("RGB")
-            t.thumbnail((w, h))
-            x, y = (k % cols) * w, (k // cols) * (h + 24)
-            im.paste(t, (x, y + 24))
-            c = byid[o["id"]]
-            dr.text((x + 6, y + 6), f"{o['id']}  {c.get('total')}  {c.get('type')}  {fmt_ts(c['in_ms'], '.')[:8]}", fill="yellow")
-        sheet = d / "_sheet.jpg"
-        im.save(sheet, quality=85)
+    byid = {c["id"]: c for c in cands}
+    sheet = contact_sheet([(o["jpg"], f"{o['id']}  {byid[o['id']].get('total')}  {byid[o['id']].get('type')}  "
+                                      f"{fmt_ts(byid[o['id']]['in_ms'], '.')[:8]}") for o in outs if o["jpg"]],
+                          d / "_sheet.jpg", cols=4, tile_w=360, tile_h=203, label_h=24, fit="contain")
     write_reels_plan_md(ep, res)
     return {"ok": not failed, "previews": outs, "failed": failed, "sheet": str(sheet) if sheet else None}
 

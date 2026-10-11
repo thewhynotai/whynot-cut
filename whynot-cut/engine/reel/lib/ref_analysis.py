@@ -44,16 +44,10 @@ def contact_sheet(video: Path, out: Path, every_s: float = 1.0, cols: int = 8, w
 
 
 def frames_at(video: Path, times: list[float], out_dir: Path, width: int = 360) -> list[Path]:
-    ff = ffmpeg_exe()
+    from .media_util import grab_frame_file
     out_dir.mkdir(parents=True, exist_ok=True)
-    res = []
-    for t in times:
-        o = out_dir / f"t{t:07.2f}.jpg"
-        run([ff, "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(video),
-             "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "4", str(o)], check=False)
-        if o.exists():
-            res.append(o)
-    return res
+    got = [grab_frame_file(video, t, out_dir / f"t{t:07.2f}.jpg", vf=f"scale={width}:-2", quality=4) for t in times]
+    return [o for o in got if o]
 
 
 def loudness_envelope(video: Path, hop_ms: int = 100) -> list[float]:

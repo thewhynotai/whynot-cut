@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from . import plat
-from .common import ffmpeg_exe, run, write_text
+from .common import run, write_text
 
 
 def aerender_cmd(aerender: str, aep: Path, comp: str, out: Path, rs: str, om: str,
@@ -80,14 +80,13 @@ def extract_frames(video: Path, frames: list[int], fps: float, out_dir: Path,
                    names: list[str] | None = None) -> list[Path]:
     """One PNG per frame number. Input seeking drops frames that start before the seek point, so seek a quarter frame
     BEFORE the frame's start: the first frame out is that frame, also when the file's timebase is 30000/1001."""
+    from .media_util import grab_frame_file
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     outs = []
     for i, f in enumerate(frames):
         name = names[i] if names else f"frame_{int(f):06d}.png"
-        o = out_dir / name
-        run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{max(0.0, (int(f) - 0.25) / float(fps)):.4f}", "-i", str(video),
-             "-frames:v", "1", str(o)], check=False)
-        if o.exists():
+        o = grab_frame_file(video, (int(f) - 0.25) / float(fps), out_dir / name, ss_digits=4)
+        if o:
             outs.append(o)
     return outs

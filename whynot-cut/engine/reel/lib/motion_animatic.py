@@ -80,7 +80,8 @@ def _shapes(im, e: dict, s: float, fill: bool):
 
 def _image(im, e: dict, s: float):
     try:
-        src = Image.open(e["path"]).convert("RGBA")
+        with Image.open(e["path"]) as f:
+            src = f.convert("RGBA")
     except Exception:  # noqa: BLE001 — a missing image is reported by the plan; the animatic just skips it
         return
     w, h = max(1, int(e["w"] * s)), max(1, int(e["h"] * s))
@@ -165,19 +166,11 @@ def render(paths, width: int = 540) -> dict:
         stills.append(str(p))
         imgs.append(im)
     # storyboard
+    from .media_util import contact_sheet
     tw = 270
-    th = int(round(imgs[0].height * tw / imgs[0].width))
-    cols = 4
-    rows = math.ceil(len(imgs) / cols)
-    sheet = Image.new("RGB", (cols * tw, rows * (th + 26)), "black")
-    dr = ImageDraw.Draw(sheet)
-    for k, (sc, im) in enumerate(zip(plan["scenes"], imgs)):
-        x, y = (k % cols) * tw, (k // cols) * (th + 26)
-        sheet.paste(im.convert("RGB").resize((tw, th)), (x, y + 26))
-        dr.text((x + 6, y + 6), f"{sc['id']} {sc['type']} {fmt_ts(int(sc['start_frame'] * 1000 / fps), '.')[3:10]}",
-                fill="yellow")
-    sheet_p = d / "_storyboard.jpg"
-    sheet.save(sheet_p, quality=88)
+    sheet_p = contact_sheet([(im, f"{sc['id']} {sc['type']} {fmt_ts(int(sc['start_frame'] * 1000 / fps), '.')[3:10]}")
+                             for sc, im in zip(plan["scenes"], imgs)], d / "_storyboard.jpg", cols=4, tile_w=tw,
+                            tile_h=int(round(imgs[0].height * tw / imgs[0].width)), label_h=26, quality=88)
     # MP4: 10 fps, 6-frame crossfades at scene starts, label strip, mixed audio
     dur = plan["duration_frames"] / fps
     wav = mix(plan, paths.root, d / "_animatic_mix.wav")
@@ -188,23 +181,25 @@ def render(paths, width: int = 540) -> dict:
            "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
            "-t", f"{dur:.3f}", "-movflags", "+faststart", str(mp4)]
     labeled = [_label(im, f"{sc['id']} {sc['type']} · {LABEL}").convert("RGB") for sc, im in zip(plan["scenes"], imgs)]
-    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     n = int(math.ceil(dur * ANIM_FPS)) + 1
     cache = {}
-    for k in range(n):
-        t = k / ANIM_FPS * fps
-        i = max((j for j, sc in enumerate(plan["scenes"]) if sc["start_frame"] <= t), default=0)
-        a = (t - plan["scenes"][i]["start_frame"]) / 6.0
-        if i > 0 and a < 1:
-            key = (i, round(a, 2))
-            if key not in cache:
-                cache[key] = Image.blend(labeled[i - 1], labeled[i], max(0.0, a)).tobytes()
-            p.stdin.write(cache[key])
-        else:
-            p.stdin.write(cache.setdefault((i, 1.0), labeled[i].tobytes()))
-    p.stdin.close()
-    err = p.stderr.read().decode("utf-8", "replace")
-    p.wait()
+    # stderr goes to a file, not a pipe: a pipe nobody reads while frames are written can fill and stall ffmpeg, and
+    # the old pipe was never closed (MI-9 ResourceWarning). The `with` closes stdin and reaps the process.
+    errf = d / "_animatic_ffmpeg.log"
+    with open(errf, "wb") as ef, subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=ef) as p:
+        for k in range(n):
+            t = k / ANIM_FPS * fps
+            i = max((j for j, sc in enumerate(plan["scenes"]) if sc["start_frame"] <= t), default=0)
+            a = (t - plan["scenes"][i]["start_frame"]) / 6.0
+            if i > 0 and a < 1:
+                key = (i, round(a, 2))
+                if key not in cache:
+                    cache[key] = Image.blend(labeled[i - 1], labeled[i], max(0.0, a)).tobytes()
+                p.stdin.write(cache[key])
+            else:
+                p.stdin.write(cache.setdefault((i, 1.0), labeled[i].tobytes()))
+    err = errf.read_bytes().decode("utf-8", "replace")
+    errf.unlink(missing_ok=True)
     if p.returncode or not mp4.exists():
         raise SystemExit(f"animatic encode failed: {err[-400:]}")
     return {"stills": stills, "sheet": str(sheet_p), "mp4": str(mp4), "duration_s": round(dur, 3)}

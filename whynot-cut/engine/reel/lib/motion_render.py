@@ -9,7 +9,6 @@ samples, each with what it should show.
 from __future__ import annotations
 
 import json
-import math
 import time
 from pathlib import Path
 
@@ -118,9 +117,9 @@ def render(paths, scenes: list[str] | None = None, timeout: int = 3600) -> dict:
     hero = plan["scenes"][0]["hero_frame"]
     cov = ae_render.extract_frames(main, [hero], fps, mp4.parent, [f"{paths.video_id}_cover.png"])
     if cov:
-        from PIL import Image
+        from .media_util import open_rgb
         jpg = mp4.parent / f"{paths.video_id}_cover.jpg"
-        Image.open(cov[0]).convert("RGB").save(jpg, quality=92)
+        open_rgb(cov[0]).save(jpg, quality=92)
         cov[0].unlink(missing_ok=True)
         res["cover"] = str(jpg)
     res["status"] = "RENDERED" if not res["reasons"] else "FAILED"
@@ -179,7 +178,7 @@ def frame_points(plan: dict) -> list[dict]:
 
 
 def frames(paths) -> dict:
-    from PIL import Image, ImageDraw
+    from PIL import Image
     from . import ae_render
     plan = read_json(paths.p("01_analysis/motion-plan.json"))
     res = read_json(paths.p(RESULT), {}) or {}
@@ -208,21 +207,17 @@ def frames(paths) -> dict:
                                     "missing": missing, "generated": now_iso()})
     sheet = None
     if recs:
+        from .media_util import contact_sheet
         tw = 270
-        im0 = Image.open(od / recs[0]["file"])
-        th = int(round(im0.height * tw / im0.width))
-        cols = 4
-        rows = math.ceil(len(recs) / cols)
-        sh = Image.new("RGB", (cols * tw, rows * (th + 30)), "black")
-        dr = ImageDraw.Draw(sh)
-        for i, rc in enumerate(recs):
-            x, y = (i % cols) * tw, (i // cols) * (th + 30)
-            sh.paste(Image.open(od / rc["file"]).convert("RGB").resize((tw, th)), (x, y + 30))
-            dr.text((x + 4, y + 4), f"{rc['file'][:4]} {rc['scene']} {rc['kind']} f{rc['frame']}", fill="yellow")
+        with Image.open(od / recs[0]["file"]) as im0:          # MI-9: was never closed
+            th = int(round(im0.height * tw / im0.width))
+
+        def label(rc):
+            lines = [(f"{rc['file'][:4]} {rc['scene']} {rc['kind']} f{rc['frame']}", "yellow")]
             if rc["kind"] == "reveal_mid":
-                dr.text((x + 4, y + 16), f"{rc['expect']['revealed_tokens'] or rc['expect']['revealed_items']} shown",
-                        fill="white")
-        sheet = od / "_sheet.jpg"
-        sh.save(sheet, quality=88)
+                lines.append((f"{rc['expect']['revealed_tokens'] or rc['expect']['revealed_items']} shown", "white"))
+            return lines
+        sheet = contact_sheet([(od / rc["file"], label(rc)) for rc in recs], od / "_sheet.jpg", cols=4, tile_w=tw,
+                              tile_h=th, label_h=30, label_xy=(4, 4), quality=88)
     return {"dir": str(od), "frames": len(recs), "expected": len(pts), "missing": missing,
             "sheet": str(sheet) if sheet else None}

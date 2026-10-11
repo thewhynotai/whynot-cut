@@ -151,13 +151,9 @@ def cmd_preflight(a):
 
 
 def _parse_time_ms(v: str) -> int:
-    v = str(v).strip()
-    if v.replace(".", "", 1).isdigit():
-        return int(round(float(v) * 1000))
-    parts = [float(x) for x in v.split(":")]
-    while len(parts) < 3:
-        parts.insert(0, 0.0)
-    return int(round((parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000))
+    """--start/--end: seconds ("90", "90.5") or a clock ("1:30", "00:01:30.5") -> ms."""
+    from lib.media_util import parse_time
+    return parse_time(v)
 
 
 def cmd_range(a):

@@ -131,9 +131,9 @@ def image_info(p: Path, deriv_dir: Path) -> dict:
         info["raw_derivative"] = str(jpg)
         info["raw_note"] = "Default camera-RAW render; re-develop in Camera Raw for final use."
         src = jpg
-    im = Image.open(src)
-    info["exif_orientation"] = (im.getexif() or {}).get(0x0112, 1)
-    im = ImageOps.exif_transpose(im)
+    with Image.open(src) as f:                       # closed at once (MI-9): exif_transpose returns a loaded copy
+        info["exif_orientation"] = (f.getexif() or {}).get(0x0112, 1)
+        im = ImageOps.exif_transpose(f)
     w, h = im.size
     info.update({"width": w, "height": h, "mode": im.mode,
                  "orientation": "portrait" if h > w else "landscape" if w > h else "square",

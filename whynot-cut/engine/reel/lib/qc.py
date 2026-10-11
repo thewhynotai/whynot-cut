@@ -170,7 +170,8 @@ def run_qc(paths: Paths) -> dict:
                 png = paths.p(f"03_broll/{cat}/{e['event_id']}.png")
                 if not png.exists():
                     continue
-                bb = Image.open(png).getchannel("A").point(lambda v: 255 if v > 24 else 0).getbbox()
+                with Image.open(png) as im_:
+                    bb = im_.getchannel("A").point(lambda v: 255 if v > 24 else 0).getbbox()
                 if bb and (bb[1] < sa.get("top", 0) or bb[3] > H - sa.get("bottom", 0)
                            or bb[0] < sa.get("left", 0) - 40 or bb[2] > W - sa.get("right", 0) + 40):
                     out_sa.append(f"{e['event_id']} {e['template']} y {bb[1]}–{bb[3]} x {bb[0]}–{bb[2]}")

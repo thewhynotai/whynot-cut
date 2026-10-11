@@ -12,7 +12,7 @@ import unicodedata
 from pathlib import Path
 
 from .common import (still_category, seq_fps, Paths, fmt_ts, frame_to_tc, load_config, ms_to_frame, now_iso,
-                     parse_ts, read_json, write_json)
+                     read_json, write_json)
 
 SFX_TRACK = {"whoosh": "A04", "whoosh_soft": "A04", "riser_soft": "A04", "flash": "A04",
              "pop": "A05", "click": "A05", "tick": "A05", "hit_soft": "A03", "shimmer": "A05"}
@@ -135,16 +135,10 @@ def main_video(pre: dict, main: str | None) -> dict | None:
 
 
 def to_ms(v) -> int:
-    if isinstance(v, int):
-        return v
-    if isinstance(v, float):
-        return int(round(v * 1000))
-    v = str(v).strip()
-    if re.fullmatch(r"\d+(\.\d+)?", v):
-        return int(round(float(v) * 1000))
-    if v.count(":") == 1:
-        v = "00:" + v
-    return parse_ts(v)
+    """A time in edit-decisions.json -> ms: an int is milliseconds, a float or numeric string seconds, else a clock
+    ("00:01:02.500", "01:02.5"). One parser for the engine: media_util.parse_time (T2.17, MI-7)."""
+    from .media_util import parse_time
+    return parse_time(v, int_is_ms=True)
 
 
 def _transcript_text(paths: Paths) -> tuple[str, int]:

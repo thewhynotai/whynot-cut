@@ -32,18 +32,9 @@ def limits() -> dict:
 
 # --------------------------------------------------------------------------- helpers
 def parse_time(v) -> int:
-    """'00:40', '1:02:03', '00:00:40.500', 40.5 -> ms."""
-    if isinstance(v, (int, float)):
-        return int(round(float(v) * 1000))
-    s = str(v).strip()
-    frac = 0
-    if re.search(r"[.,]\d{1,3}$", s) and s.count(":") >= 1:
-        s, f = re.split(r"[.,](?=\d{1,3}$)", s)
-        frac = int(f.ljust(3, "0"))
-    parts = [int(x) for x in s.split(":")]
-    while len(parts) < 3:
-        parts.insert(0, 0)
-    return ((parts[0] * 60 + parts[1]) * 60 + parts[2]) * 1000 + frac
+    """'00:40', '1:02:03', '00:00:40.500', 40.5 -> ms (a bare number is seconds): media_util.parse_time."""
+    from .media_util import parse_time as _pt
+    return _pt(v)
 
 
 def fmt_chapter(ms: int, first: bool = False) -> str:
@@ -148,17 +139,9 @@ def _sharpness(gray) -> float:
 
 
 def frame_at(src: Path, t_s: float, w: int, h: int):
-    """One frame at t_s seconds, letterboxed into w x h RGB, or None past the end. Input seeking: ffmpeg decodes only
-    from the keyframe before t_s, never the whole file."""
-    import subprocess
-    from PIL import Image
-    from .common import ffmpeg_exe
-    r = subprocess.run([ffmpeg_exe(), "-loglevel", "error", "-ss", f"{t_s:.3f}", "-i", str(src), "-an", "-frames:v", "1",
-                        "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2",
-                        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True)
-    if r.returncode or len(r.stdout) < w * h * 3:
-        return None
-    return Image.frombytes("RGB", (w, h), r.stdout[:w * h * 3])
+    """One frame at t_s seconds, letterboxed into w x h RGB, or None past the end (media_util.grab_frame)."""
+    from .media_util import grab_frame
+    return grab_frame(src, t_s, w, h, fit="pad")
 
 
 def thumbnail_candidates(ep, n: int = 12, faces_fn=None, every_s: float | None = None, min_gap_ms: int = 30000) -> dict:
@@ -167,9 +150,9 @@ def thumbnail_candidates(ep, n: int = 12, faces_fn=None, every_s: float | None =
     apart, extracted at full resolution and labelled on publish/thumbnail/_candidates.jpg for the publish-writer."""
     from concurrent.futures import ThreadPoolExecutor
     import numpy as np
-    from PIL import Image, ImageDraw
-    from .common import ffmpeg_exe, run
+    from PIL import Image
     from .episode import episode_file, load_episode
+    from .media_util import contact_sheet, grab_frame_file
     if faces_fn is None:
         from .shots import face_boxes as faces_fn
     info = load_episode(ep)
@@ -210,23 +193,14 @@ def thumbnail_candidates(ep, n: int = 12, faces_fn=None, every_s: float | None =
         old.unlink()
     for i, r in enumerate(picked, 1):
         f = d / f"T{i:02d}_{r['frame_ms']}.jpg"
-        run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{r['frame_ms'] / 1000:.3f}", "-i", str(src),
-             "-frames:v", "1", "-q:v", "2", str(f)], check=False)
+        grab_frame_file(src, r["frame_ms"] / 1000, f, quality=2)
         r.update(id=f"T{i:02d}", file=str(f))
     sheet = ep.p("publish/thumbnail/_candidates.jpg")
     if picked:
-        cols, w, h = 4, 400, 225
-        rws = (len(picked) + cols - 1) // cols
-        im = Image.new("RGB", (cols * w, rws * (h + 24)), "black")
-        dr = ImageDraw.Draw(im)
-        for i, r in enumerate(picked):
-            x, y = (i % cols) * w, (i // cols) * (h + 24)
-            if Path(r["file"]).exists():
-                t_ = Image.open(r["file"]).convert("RGB")
-                t_.thumbnail((w, h))
-                im.paste(t_, (x, y + 24))
-            dr.text((x + 6, y + 6), f"{r['id']}  {fmt_ts(r['frame_ms'], '.')[:8]}  score {r['score']}", fill="yellow")
-        im.save(sheet, quality=85)
+        blank = Image.new("RGB", (1, 1), "black")       # a frame ffmpeg could not write keeps its labelled cell
+        contact_sheet([(r["file"] if Path(r["file"]).exists() else blank,
+                        f"{r['id']}  {fmt_ts(r['frame_ms'], '.')[:8]}  score {r['score']}") for r in picked],
+                      sheet, cols=4, tile_w=400, tile_h=225, label_h=24, fit="contain")
     res = {"generated": now_iso(), "sampled_every_s": step, "with_face": len(rows),
            "candidates": [{k_: r[k_] for k_ in ("id", "frame_ms", "score", "faces", "file")} for r in picked],
            "sheet": str(sheet) if picked else None}
@@ -271,8 +245,8 @@ def render_thumbnails(ep) -> dict:
     (a brown primary on a warm set) the word is drawn in white/paper instead, with a warning and a `highlights` entry."""
     import io
     from PIL import Image, ImageDraw
-    from .common import ffmpeg_exe, run
     from .episode import episode_file, load_episode
+    from .media_util import grab_frame_file, open_rgb
     from .previews import Brand, _face_center, _text_block
     lim = limits()["thumbnail"]
     TW, TH = lim["width"], lim["height"]
@@ -299,13 +273,11 @@ def render_thumbnails(ep) -> dict:
             continue
         if len(text.split()) > lim.get("text_words_warn", 5):
             warnings.append(f"design {i}: {len(text.split())} words — thumbnail text reads best at 5 words or fewer")
-        tmp = out_dir / f"_frame_{i}.png"
-        run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{t_ms / 1000:.3f}", "-i", str(src), "-frames:v", "1",
-             str(tmp)], check=False)
-        if not tmp.exists():
+        tmp = grab_frame_file(src, t_ms / 1000, out_dir / f"_frame_{i}.png")
+        if not tmp:
             errors.append(f"design {i}: could not read the frame at {fmt_ts(t_ms, '.')}")
             continue
-        fr = Image.open(tmp).convert("RGB")
+        fr = open_rgb(tmp)                     # loaded and closed: the temp frame can be deleted at once (Windows)
         tmp.unlink(missing_ok=True)
         fc = _face_center(fr) or (0.5, 0.4)
         # zoom in a little (a 16:9 frame into a 16:9 thumbnail has no room to move the face otherwise)

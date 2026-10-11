@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .common import Paths, ffmpeg_exe, fmt_ts, load_config, now_iso, read_json, run, sha1_head, stable_id, write_json
+from .common import Paths, fmt_ts, load_config, now_iso, read_json, sha1_head, stable_id, write_json
 
 EPISODE_SUBDIRS = ["00_inputs/intake", "01_analysis", "02_transcription/chunks", "03_candidates", "publish/reels",
                    "publish/thumbnail/candidates", "08_quality_control", "logs"]
@@ -175,42 +175,31 @@ def _estimate(dur_min: float) -> dict:
 
 def intake_frames(ep: EpisodePaths, src: Path, duration_s: float, n: int = 6) -> Path:
     """n evenly spaced frames + a labelled 3x2 sheet for the intake-inspector (burned subtitles/logo, layout)."""
-    from PIL import Image, ImageDraw
+    from PIL import Image
+    from .media_util import contact_sheet
     d = ep.p("00_inputs/intake")
     d.mkdir(parents=True, exist_ok=True)
     tiles = []
     for k in range(n):
         t = duration_s * (k + 0.5) / n
-        out = d / f"frame_{k + 1:02d}.jpg"
-        run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(src), "-frames:v", "1",
-             "-vf", "scale=640:-2", "-q:v", "3", str(out)], check=False)
-        if out.exists():
-            tiles.append((out, t))
-    w, h = 640, 360
-    sheet = Image.new("RGB", (3 * w, 2 * (h + 22)), "black")
-    dr = ImageDraw.Draw(sheet)
-    for i, (f, t) in enumerate(tiles):
-        im = Image.open(f).convert("RGB")
-        im.thumbnail((w, h))
-        x, y = (i % 3) * w, (i // 3) * (h + 22)
-        sheet.paste(im, (x, y + 22))
-        dr.text((x + 6, y + 5), f"{i + 1}  {fmt_ts(int(t * 1000), '.')}", fill="yellow")
+        if _grab(src, t, d / f"frame_{k + 1:02d}.jpg"):
+            tiles.append((d / f"frame_{k + 1:02d}.jpg", f"{len(tiles) + 1}  {fmt_ts(int(t * 1000), '.')}"))
     out = d / "_intake_sheet.jpg"
-    sheet.save(out, quality=85)
+    if not contact_sheet(tiles, out, cols=3, tile_w=640, tile_h=360, label_h=22, label_xy=(6, 5), fit="contain"):
+        Image.new("RGB", (640, 382), "black").save(out, quality=85)   # no frame readable: the inspector sees that
     return out
 
 
 def _grab(src: Path, t: float, out: Path, width: int = 640) -> bool:
-    run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(src), "-frames:v", "1",
-         "-vf", f"scale={width}:-2", "-q:v", "3", str(out)], check=False)
-    return out.exists()
+    from .media_util import grab_frame_file
+    return grab_frame_file(src, t, out, vf=f"scale={width}:-2", quality=3) is not None
 
 
 def supers_sheets(ep: EpisodePaths, src: Path, duration_s: float, scan: dict) -> tuple[Path | None, Path | None]:
     """G65: the 6-frame overview misses name supers (3 s on screen). `_supers_sheet.jpg` = the lower half of every
     frame the overlay scan nominated (`super_NN.jpg` = the whole frame); `_head_sheet.jpg` = a frame every 10 s of the
     first 3 minutes, where name supers live."""
-    from PIL import Image, ImageDraw
+    from .media_util import contact_sheet, open_rgb
     from .overlay_scan import dense_times, tc
     d = ep.p("00_inputs/intake")
     d.mkdir(parents=True, exist_ok=True)
@@ -221,38 +210,17 @@ def supers_sheets(ep: EpisodePaths, src: Path, duration_s: float, scan: dict) ->
         f = d / f"super_{k:02d}.jpg"
         if _grab(src, e["t_s"], f):
             tiles.append((f, f"{k}  {tc(e['t_s'])}  score {e['score']:.2f}"))
-    supers = None
-    if tiles:
-        w, h, lab = 640, 180, 18
-        sheet = Image.new("RGB", (2 * w, ((len(tiles) + 1) // 2) * (h + lab)), "black")
-        dr = ImageDraw.Draw(sheet)
-        for i, (f, label) in enumerate(tiles):
-            im = Image.open(f).convert("RGB")
-            hh = round(im.height * w / im.width)
-            im = im.resize((w, hh)).crop((0, max(0, hh - h), w, hh))          # the lower half
-            x, y = (i % 2) * w, (i // 2) * (h + lab)
-            sheet.paste(im, (x, y + lab))
-            dr.text((x + 6, y + 4), label, fill="yellow")
-        supers = d / "_supers_sheet.jpg"
-        sheet.save(supers, quality=85)
+    # the lower half of each nominated frame (name supers live there)
+    supers = contact_sheet(tiles, d / "_supers_sheet.jpg", cols=2, tile_w=640, tile_h=180, label_h=18,
+                           label_xy=(6, 4), fit="bottom")
     heads = []
     for t in dense_times(duration_s):
         f = d / "_head_tmp.jpg"
         if _grab(src, t, f, width=320):
-            heads.append((Image.open(f).convert("RGB").copy(), t))
+            heads.append((open_rgb(f), tc(t)))
     (d / "_head_tmp.jpg").unlink(missing_ok=True)
-    head = None
-    if heads:
-        w, h, lab, cols = 320, 180, 16, 6
-        sheet = Image.new("RGB", (cols * w, ((len(heads) + cols - 1) // cols) * (h + lab)), "black")
-        dr = ImageDraw.Draw(sheet)
-        for i, (im, t) in enumerate(heads):
-            im.thumbnail((w, h))
-            x, y = (i % cols) * w, (i // cols) * (h + lab)
-            sheet.paste(im, (x, y + lab))
-            dr.text((x + 4, y + 3), tc(t), fill="yellow")
-        head = d / "_head_sheet.jpg"
-        sheet.save(head, quality=85)
+    head = contact_sheet(heads, d / "_head_sheet.jpg", cols=6, tile_w=320, tile_h=180, label_h=16, label_xy=(4, 3),
+                         fit="contain")
     return supers, head
 
 

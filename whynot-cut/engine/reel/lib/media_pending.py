@@ -34,8 +34,11 @@ SIGN_MIN = 0.85                  # share of the text pixels on the same side (li
 def pending_metrics(src) -> dict:
     """Numbers behind the decision for an image path or a PIL image."""
     from PIL import Image
-    im = src if hasattr(src, "convert") else Image.open(Path(src))
-    im = im.convert("RGB")
+    if hasattr(src, "convert"):
+        im = src.convert("RGB")
+    else:
+        with Image.open(Path(src)) as f:
+            im = f.convert("RGB")
     size = (SHORT, LONG) if im.height >= im.width else (LONG, SHORT)
     a = np.asarray(im.resize(size, Image.BOX), dtype=np.float32)
     h, w = a.shape[:2]

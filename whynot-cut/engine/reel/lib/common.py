@@ -154,12 +154,12 @@ _TS = re.compile(r"(\d+):(\d{2}):(\d{2})[,.](\d{1,3})")
 
 
 def parse_ts(ts: str) -> int:
-    """'00:01:02,345' or '00:01:02.345' -> ms."""
-    m = _TS.fullmatch(ts.strip())
-    if not m:
+    """'00:01:02,345' or '00:01:02.345' -> ms: the strict SRT grammar (HH:MM:SS plus a 1-3 digit fraction) is checked
+    here, the parsing is media_util.parse_time's (one parser: T2.17, MI-7)."""
+    if not _TS.fullmatch(ts.strip()):
         raise ValueError(f"Bad timestamp: {ts!r}")
-    h, mi, s, frac = m.groups()
-    return ((int(h) * 60 + int(mi)) * 60 + int(s)) * 1000 + int(frac.ljust(3, "0"))
+    from .media_util import parse_time
+    return parse_time(ts)
 
 
 def fmt_ts(ms: int, sep: str = ",") -> str:
