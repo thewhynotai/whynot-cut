@@ -40,22 +40,31 @@ def whisper_model_state() -> dict:
 HEARTBEAT_MAX_AGE_S = 24 * 3600
 
 
-def guard_heartbeat(now: float | None = None) -> dict:
-    """Is the PreToolUse guard running? hooks/run_python.sh touches <plugin data>/hooks-ok on every hook run that
-    found Python; no fresh file (< 24 h) means the hooks never ran: no Git Bash on Windows, no Python, or the plugin
-    is not enabled. Looks at ${CLAUDE_PLUGIN_DATA} and every <claude config>/plugins/data/whynot-cut*/."""
+def _newest_beat(name: str, now: float) -> tuple[str | None, float | None]:
     import os
-    cands = [Path(os.environ["CLAUDE_PLUGIN_DATA"]) / "hooks-ok"] if os.environ.get("CLAUDE_PLUGIN_DATA") else []
+    cands = [Path(os.environ["CLAUDE_PLUGIN_DATA"]) / name] if os.environ.get("CLAUDE_PLUGIN_DATA") else []
     cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
-    cands += sorted((cfg / "plugins" / "data").glob("whynot-cut*/hooks-ok"))
+    cands += sorted((cfg / "plugins" / "data").glob(f"whynot-cut*/{name}"))
     found = []
     for c in cands:
         try:
             found.append((c.stat().st_mtime, c))
         except OSError:
             continue
-    mtime, f = max(found) if found else (None, None)
-    age = (now or time.time()) - mtime if mtime else None
+    if not found:
+        return None, None
+    mtime, f = max(found)
+    return str(f), now - mtime
+
+
+def guard_heartbeat(now: float | None = None) -> dict:
+    """Is the PreToolUse guard running? guard.py touches <plugin data>/guard-ok on every tool call it inspects, and
+    hooks/run_python.sh touches hooks-ok whenever it found Python (the runner). No fresh guard-ok (< 24 h) means the
+    guard never ran: no Git Bash on Windows, no Python, or the plugin is not enabled. Looks at ${CLAUDE_PLUGIN_DATA}
+    and every <claude config>/plugins/data/whynot-cut*/."""
+    now = now or time.time()
+    f, age = _newest_beat("guard-ok", now)
+    rf, rage = _newest_beat("hooks-ok", now)
     active = age is not None and age < HEARTBEAT_MAX_AGE_S
     fix = None
     if not active:
@@ -64,8 +73,8 @@ def guard_heartbeat(now: float | None = None) -> dict:
                if plat.IS_WIN else
                "restart Claude Code and run /hooks to check WhyNot Cut's hooks are listed; make sure `python3 --version` "
                "works (macOS: xcode-select --install), then `reel doctor` again.")
-    return {"active": active, "file": str(f) if f else None, "age_h": round(age / 3600, 1) if age is not None else None,
-            "fix": fix}
+    return {"active": active, "file": f, "age_h": round(age / 3600, 1) if age is not None else None,
+            "runner_file": rf, "runner_age_h": round(rage / 3600, 1) if rage is not None else None, "fix": fix}
 
 
 def marker_roots(root: str | None) -> list[Path]:
@@ -170,7 +179,7 @@ def doctor() -> dict:
     if st["_problems"]:
         fixes.append({"item": "preferences file", "who": "claude", "fix": "; ".join(st["_problems"])})
     if not gh["active"]:
-        fixes.append({"item": "WhyNot Cut guard hooks not confirmed running (no hooks-ok heartbeat in the last 24 h): "
+        fixes.append({"item": "WhyNot Cut guard hooks not confirmed running (no guard-ok heartbeat in the last 24 h): "
                               "assets/ and data/ may not be protected", "who": "editor", "fix": gh["fix"]})
     rep["ready"] = {"engine": rep["venv_ok"] and all(v is True for v in mods.values()) and bool(rep["ffmpeg"]),
                     "premiere_build": bool(apps["premiere"]) and br["installed"] and br["debug_mode_ok"] and br["alive"],

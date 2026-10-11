@@ -176,6 +176,13 @@ def main():
              f"Use /whynot-cut:autopilot (edit every new clip), /whynot-cut:edit <clip>, /whynot-cut:revise, "
              f"/whynot-cut:status. assets/ and data/ are read-only.")
         return
+    legacy = next((p for p in [cwd, *cwd.parents] if client_marker.has_layout(p) and
+                   ((p / "output").is_dir() or (p / "START_HERE.md").is_file())), None)
+    if legacy:            # assets/ + data/ + output/ but no marker and not under clients_root: an unmarked 2.x client
+        emit(f"WhyNot Cut: {legacy} looks like a WhyNot Cut client without a marker (no .whynot-client), so its "
+             f"assets/ and data/ are NOT protected by the guard yet. Run `reel doctor --fix --root \"{legacy}\"` "
+             f"(it only writes the marker at the client root), then continue.")
+        return
     base = plat.clients_root_setting() or (Path(st["clients_root"]).expanduser() if st.get("clients_root") else None)
     try:
         at_base = bool(base) and cwd.resolve() == Path(plat.native_path(str(base))).resolve()

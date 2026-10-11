@@ -7,8 +7,9 @@
   (`{"whynot_client": 1, "created": ...}`) at the client root; `reel doctor --fix` writes it for an existing client that
   lacks it (only at the client root, never in `assets/` or `data/`). New `lib/client_marker.py` (stdlib only) is shared
   by the engine, the guard and the SessionStart hook.
-- `reel doctor` reports `guard_active` (a `hooks-ok` heartbeat under `${CLAUDE_PLUGIN_DATA}` or
-  `~/.claude/plugins/data/whynot-cut*/` younger than 24 h) with a fix ("install Git for Windows" on Windows), and
+- `reel doctor` reports `guard_active` (a `guard-ok` heartbeat, touched by guard.py itself on every tool call it
+  inspects, under `${CLAUDE_PLUGIN_DATA}` or `~/.claude/plugins/data/whynot-cut*/`, younger than 24 h; the runner's
+  `hooks-ok` is shown as `runner_file`) with a fix ("install Git for Windows" on Windows), and
   `client_markers` (present / missing / written) for `--root`, the current client folder and every folder in
   `clients_root`.
 - People, gender and honorifics (T1.7): profile.json gets `people[]` (`name`, `role`, `gender`: male | female |
@@ -81,6 +82,19 @@
   `reset --hard` in a client root; and commands run through `cmd /c`, `powershell|pwsh -Command|-EncodedCommand` and
   `bash|sh -c`, which now get the same checks, so `cmd /c reg add ...CSXS...` and
   `powershell -Command "Set-ItemProperty ...CSXS..."` no longer bypass the PlayerDebugMode rule.
+- Guard review round 1: `cmd //c` (the Git Bash form) and cmd's own `&`, `&&`, `||`, `|` and `^`; PowerShell script
+  blocks (`& { ... }`, `try { ... }`, `foreach (...) { ... }`, `if (...) { ... }`) and `$_` inside a block fed from a
+  client source; the client folder itself and folders holding one (`rm -rf .`, `rm -rf *`, `rm -rf <client>` from its
+  parent, `Remove-Item -Recurse`, `mv <client>`); globs matched against the folder (`rm -rf da*`); `$PWD`, `$(pwd)`,
+  `$HOME`, `$env:USERPROFILE`, `~`; variables set from a source in the same command (`for f in data/Raw/*`,
+  `f=data/...`, `$f = Get-ChildItem data`); `timeout`, `nice`, `nohup`, `env`, `time`, `eval`, `Invoke-Expression`;
+  `(Get-Item ...).Delete()` and `[IO.File]::` outside pipelines; heredocs and here-strings fed to a shell
+  (`bash <<'EOF'`, `bash <<< "..."`); `xargs` forms (`rm.exe`, `xargs.exe`, `xargs sh -c`, `-I{} cp /dev/null {}`);
+  command names in any case (`RM`) and not-yet-existing paths in any case (`DATA/new`); `git stash` in a client root;
+  `cd HKCU:\Software\Adobe; Set-ItemProperty CSXS.11 ...`; deleting or overwriting `<client>/.whynot-client`; role
+  rules through wrappers (`timeout 600 reel ...`, `bash .../bin/reel ...`, `py -3 .../cli.py ...`). `git rm --cached`
+  stays allowed. The SessionStart hook points to `reel doctor --fix` in a folder that looks like an unmarked client
+  (assets/, data/ and output/ or START_HERE.md).
 - Role holes (engine §10): subagents may not run `reel transcript-verify --by editor`; qc-reviewer may not run
   `ref-analyze` (it applies the client style, getting around the `ref-style --apply` block); setup-doctor may not run
   `reel setup`, `model-download`, `gpu-enable`, `ppro-install` or `doctor --fix`.

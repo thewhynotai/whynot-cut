@@ -500,8 +500,13 @@ class TestHeartbeat(ClientFixture):
             st = onboard.guard_heartbeat()
             self.assertFalse(st["active"])
             self.assertIn("Git for Windows" if os.name == "nt" else "restart Claude Code", st["fix"])
-            hb = cfg / "plugins/data/whynot-cut-thewhynot-ai/hooks-ok"
-            hb.parent.mkdir(parents=True)
+            runner = cfg / "plugins/data/whynot-cut-thewhynot-ai/hooks-ok"     # the runner alone is not the guard
+            runner.parent.mkdir(parents=True)
+            runner.write_text("1", encoding="utf-8")
+            st = onboard.guard_heartbeat()
+            self.assertFalse(st["active"])
+            self.assertEqual(Path(st["runner_file"]), runner)
+            hb = cfg / "plugins/data/whynot-cut-thewhynot-ai/guard-ok"
             hb.write_text("1", encoding="utf-8")
             st = onboard.guard_heartbeat()
             self.assertTrue(st["active"])
@@ -512,6 +517,139 @@ class TestHeartbeat(ClientFixture):
             rep = onboard.doctor()
         self.assertIs(rep["guard_active"], False)
         self.assertTrue(any("guard" in f["item"].lower() for f in rep["fixes"]), rep["fixes"])
+
+
+class TestGuardReviewRound1(ClientFixture):
+    """T1.5 review fix round 1: wrapper shells, script blocks, the client folder itself, globs and $PWD, prefixes,
+    heredoc/here-string shells, loop variables, marker protection, xargs forms, case, roles through wrappers."""
+
+    def run_tool(self, tool, cmd, agent=None, cwd=None, env=None):
+        p = {"tool_name": tool, "tool_input": {"command": cmd}, "cwd": str(cwd or self.root)}
+        if agent:
+            p["agent_type"] = agent
+        return hook(GUARD, p, env)[0]
+
+    def blocked(self, tool, cmds, cwd=None, agent=None):
+        for c in cmds:
+            self.assertEqual(self.run_tool(tool, c, agent, cwd), 2, c)
+
+    def allowed(self, tool, cmds, cwd=None, agent=None):
+        for c in cmds:
+            self.assertEqual(self.run_tool(tool, c, agent, cwd), 0, c)
+
+    def test_i1_cmd_double_slash(self):
+        self.blocked("Bash", ['cmd //c "del data\\Raw\\C0001.MP4"', 'cmd //c "rd /s /q data"',
+                              "cmd //c reg add 'HKCU\\Software\\Adobe\\CSXS.11' //v PlayerDebugMode //d 1 //f",
+                              'cmd //k "del data\\Raw\\C0001.MP4"', 'cmd /r del data/Raw/C0001.MP4'])
+        self.allowed("Bash", ['cmd //c "dir data"', "cmd //c reg query 'HKCU\\Software\\Adobe\\CSXS.11'"])
+
+    def test_i2_cmd_separators(self):
+        self.blocked("PowerShell", ['cmd /c "echo hi & del data\\Raw\\C0001.MP4"', 'cmd /c "cd data & del /q /s *"',
+                                    'cmd /c "dir && rd /s /q data"', 'cmd /c "dir || del data\\Raw\\C0001.MP4"',
+                                    'cmd /c "dir | del data\\Raw\\C0001.MP4"'])
+        self.blocked("Bash", ['cmd /c "cd data && del /q Raw\\*"'])
+        self.allowed("PowerShell", ['cmd /c "echo hi & dir data"', 'cmd /c "echo a ^& del data\\Raw\\C0001.MP4"'])
+
+    def test_i3_powershell_script_blocks(self):
+        self.blocked("Bash", ['''powershell -NoProfile -Command "& {Remove-Item -LiteralPath 'data\\Raw\\C0001.MP4'}"''',
+                              '''powershell -Command "& {Set-ItemProperty -Path 'HKCU:\\Software\\Adobe\\CSXS.11' -Name PlayerDebugMode -Value 1}"'''])
+        self.blocked("PowerShell", ["& { Remove-Item data/Raw/C0001.MP4 }", "try { Remove-Item data\\Raw\\C0001.MP4 } catch {}",
+                                    "foreach ($f in Get-ChildItem data/Raw) { Remove-Item $f.FullName }",
+                                    "if (Test-Path output) { Remove-Item -Recurse data }",
+                                    "Get-ChildItem data/Raw | ForEach-Object { [IO.File]::Delete($_.FullName) }"])
+        self.allowed("PowerShell", ["Get-ChildItem data/Raw | ForEach-Object { Add-Content output/log.txt $_.Name }",
+                                    'gci data/Raw | % { ffmpeg -i $_.FullName -y "output/$($_.BaseName).wav" }',
+                                    "gci data/Raw | % { Copy-Item $_.FullName output/ }",
+                                    "& { Get-ChildItem data/Raw }", "foreach ($f in Get-ChildItem output) { Remove-Item $f.FullName }"])
+
+    def test_i4_client_folder_globs_and_pwd(self):
+        parent = self.root.parent
+        self.blocked("Bash", ["rm -rf *", "rm -rf .", "rm -rf da*", "rm -rf d?ta", 'rm "$PWD/data/Raw/C0001.MP4"',
+                              'rm -rf "$(pwd)/data"', 'rm -rf "${PWD}/assets"', 'cd "$PWD/data" && rm -rf *',
+                              "mv . /tmp/elsewhere"])
+        self.blocked("PowerShell", ["Remove-Item * -Recurse -Force", 'Remove-Item "$PWD\\data\\Raw\\C0001.MP4"',
+                                    '[IO.File]::Delete("$PWD\\data\\Raw\\C0001.MP4")', "Remove-Item -Recurse -Force ."])
+        self.blocked("Bash", [f'rm -rf "{self.root.name}"', f'mv "{self.root.name}" /tmp/x', "rm -rf ."], cwd=parent)
+        self.blocked("PowerShell", [f'Remove-Item -Recurse -Force "{self.root.name}"'], cwd=parent)
+        self.allowed("Bash", ["rm -rf output/projects/C0001/tmp", "rm -f output/*.tmp", "mv output/a.mp4 .",
+                              'rm "$PWD/output/x.json"', "rm -rf o*/projects/C0001/cache"])
+        self.allowed("PowerShell", ["Remove-Item output/*.tmp", "Remove-Item -Recurse output/projects/C0001/cache"])
+
+    def test_i5_prefixes_eval_heredoc_loops(self):
+        self.blocked("Bash", ["timeout 60 rm data/Raw/C0001.MP4", "nice rm -rf data", "nice -n 5 rm -rf data",
+                              "nohup rm data/Raw/C0001.MP4", "env -i rm data/Raw/C0001.MP4", "time rm data/Raw/C0001.MP4",
+                              "eval rm data/Raw/C0001.MP4", "eval 'rm -rf data'",
+                              "bash <<'EOF'\nrm -rf data\nEOF", "cat <<EOF | sh\nrm data/Raw/C0001.MP4\nEOF",
+                              'bash <<< "rm -rf data"', "for f in data/Raw/*.MP4; do rm \"$f\"; done",
+                              "f=data/Raw/C0001.MP4; rm \"$f\""])
+        self.blocked("PowerShell", ['Invoke-Expression "Remove-Item data/Raw/C0001.MP4"', "iex 'Remove-Item -Recurse data'",
+                                    "$f = Get-ChildItem data/Raw; $f | Remove-Item", "(Get-Item data\\Raw\\C0001.MP4).Delete()",
+                                    "$x = Get-Item data/Raw/C0001.MP4; $x.MoveTo('output/a.mp4')"])
+        self.allowed("Bash", ["python - <<'EOF'\nimport os; os.remove('data/Raw/C0001.MP4')\nEOF",
+                              "cat <<EOF > output/notes.md\nrm -rf data\nEOF", "for f in data/Raw/*.MP4; do echo \"$f\"; done",
+                              "for f in output/*.tmp; do rm \"$f\"; done", "timeout 60 ls data/Raw"])
+        self.allowed("PowerShell", ["$f = Get-ChildItem output; $f | Remove-Item", "(Get-Item output\\a.mp4).Delete()"])
+
+    def test_m1_guard_writes_its_own_heartbeat(self):
+        data = Path(self.tmp.name) / "pdata"
+        data.mkdir()
+        code = self.run_tool("Bash", "ls", env={"CLAUDE_PLUGIN_DATA": str(data)})
+        self.assertEqual(code, 0)
+        self.assertTrue((data / "guard-ok").is_file())
+
+    def test_m2_marker_is_protected(self):
+        self.blocked("Bash", ["rm .whynot-client", "echo {} > .whynot-client", "mv .whynot-client output/"])
+        self.blocked("PowerShell", ["Remove-Item .whynot-client"])
+        code = hook(GUARD, {"tool_name": "Write", "cwd": "/",
+                            "tool_input": {"file_path": str(self.root / ".whynot-client"), "content": "x"}})[0]
+        self.assertEqual(code, 2)
+        self.allowed("Bash", ["cat .whynot-client"])
+
+    def test_m3_xargs_forms(self):
+        self.blocked("Bash", ["ls data/Raw/*.MP4 | xargs rm.exe", "ls data/Raw/*.MP4 | xargs.exe rm",
+                              "ls data/Raw/*.MP4 | xargs sh -c 'rm \"$@\"' _", "ls data/Raw/*.MP4 | xargs -I{} cp /dev/null {}",
+                              "ls data/Raw/*.MP4 | xargs -I % mv % output/"])
+        self.allowed("Bash", ["ls data/Raw | xargs -I{} rm output/{}.wav", "ls data/Raw | xargs -I{} cp data/Raw/{} output/",
+                              "ls data/Raw/*.MP4 | xargs sh -c 'ffprobe \"$@\"' _"])
+
+    def test_m4_case_insensitive(self):
+        self.blocked("Bash", ["RM data/Raw/C0001.MP4", "Rm -RF DATA", "mkdir -p DATA/new/deep", "touch Assets/x.txt"])
+        self.blocked("PowerShell", ["REMOVE-ITEM -Recurse -Force DATA"])
+        code = hook(GUARD, {"tool_name": "Write", "cwd": str(self.root),
+                            "tool_input": {"file_path": "DATA/new/deep/x.txt", "content": "x"}})[0]
+        self.assertEqual(code, 2)
+
+    def test_m6_roles_through_wrappers(self):
+        te, qc = "whynot-cut:transcript-editor", "whynot-cut:qc-reviewer"
+        self.blocked("Bash", ["timeout 600 reel transcript-verify --by editor",
+                              'bash "$CLAUDE_PLUGIN_ROOT/bin/reel" transcript-verify --by editor',
+                              'sh /x/whynot-cut/bin/reel transcript-verify --by=editor',
+                              "nohup reel transcript-verify --by editor"], agent=te)
+        self.blocked("Bash", ["py -3 engine/reel/cli.py ref-analyze", "timeout 60 reel ppro-build"], agent=qc)
+        self.blocked("PowerShell", ["& reel transcript-verify --by \"editor\""], agent=te)
+        self.allowed("Bash", ["timeout 600 reel transcript-verify --by editor"])
+
+    def test_m7_session_context_nudges_unmarked_client(self):
+        legacy = Path(self.tmp.name) / "Old Client"
+        for d in ("assets", "data/Raw", "output"):
+            (legacy / d).mkdir(parents=True)
+        code, out, _ = hook(CTX, {"cwd": str(legacy)})
+        ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("without a marker", ctx)
+        self.assertIn("reel doctor --fix", ctx)
+        hugo = Path(self.tmp.name) / "HugoSite"
+        for d in ("assets", "data"):
+            (hugo / d).mkdir(parents=True)
+        self.assertEqual(hook(CTX, {"cwd": str(hugo)})[1].strip(), "")      # no output/: not a WhyNot Cut folder
+
+    def test_review_false_positives_stay_allowed(self):
+        self.allowed("Bash", ["git rm -r --cached data", "git stash list", "ffmpeg -i data/Raw/C0001.MP4 -c copy output/x.mp4",
+                              "ls data/Raw | tee output/list.txt", "find output -name '*.tmp' -delete",
+                              "echo '$(rm data/Raw/C0001.MP4)'"])
+        self.blocked("Bash", ["git stash --include-untracked", "git stash"])
+        self.blocked("PowerShell", ["cd HKCU:\\Software\\Adobe; Set-ItemProperty CSXS.11 PlayerDebugMode 1"])
+        self.allowed("PowerShell", ["Get-Content data/Raw/x.srt | Set-Content output/list.txt",
+                                    "Get-ChildItem data/Raw | Select-Object Name | Out-File output/list.txt"])
 
 
 class TestProfiles(ClientFixture):
