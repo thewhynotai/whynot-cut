@@ -1,6 +1,46 @@
 # Changelog
 
-## Unreleased · Client-level reference style
+## 2.2.0 — 2026-10-11 · Motion mode and client-level reference style
+
+### Motion mode
+A window of a podcast episode's AUDIO becomes an animated motion-graphics video, built as a native After Effects
+project by Claude through the WhyNot Cut Bridge, read back, rendered and QC'd from After Effects' own frames.
+
+**New for users**
+- `/whynot-cut:motion` (lead playbook). Gate 0 picks a reel candidate or a topic `--as motion`
+  (`reels-select --pick R03 --as motion [--format 9x16|16x9]`, topics with `--type`); windows 15–180 s; projects
+  `<EP>_<ID>_MO`. Audio-only episodes (`.mp3 .wav .m4a .aac .flac` in `data/Episodes/`) are accepted (motion only;
+  their candidate previews are waveform cards).
+- `motion-director` writes `motion-script.json`: the recipe's beats → 12 scene types (kinetic quote word-synced to the
+  voice, title, stat counter, icon point, steps, comparison, timeline, quote card, context card, person card,
+  licensed illustration, outro) plus background, captions, speaker badge, progress and voice pulse.
+- `reel motion-plan` checks every on-screen word (the speaker's words in order, or editorial lines marked for Gate 1),
+  numbers (as said, else the editor confirms), names (from the sheet), icons and licenses, recipe pacing; lays out text
+  with HarfBuzz and WCAG colours; maps cues through pause removal without drift; writes `motion-plan.md`.
+- `reel motion-animatic`: storyboard + MP4 with the mixed audio for Gate 1 (`approve-plan` approves the motion plan).
+- After Effects: bridge 3.1.0 (one CEP bundle, Premiere + After Effects), `reel ae-status`, `reel ae-probe` (Arabic
+  capability probe per AE version; the lead views frames and records the verdict), `reel motion-build` (preconditions,
+  build, read-back of strings/fonts/composer/direction/boxes/cues, never overwrites unsaved or edited AE work;
+  `--script-only`/`--run-script` without the bridge), `reel motion-render` (aerender master, MP4, cover, `--scenes`),
+  `reel motion-frames` (frames with expectations), `qc`/`verify --record`/`next`/`handoff` for motion projects.
+- Icons: Lucide (ISC, vendored 1.47.0) as native shape layers with draw-on; `reel motion-icons --search`. Licensed
+  illustration packs with a license manifest: `reel motion-library`. CC-BY attributions are required in the captions.
+
+**Verified live (Windows 11, After Effects 26.5x89)**
+- The bridge loads in After Effects and Premiere (3.1.0); the probe renders joined Arabic, right-to-left order, the
+  Universal composer and RTL direction persist, brand font via `fontObject`, icons draw.
+- Found and fixed: libraries evaluated inside a function stayed local (`NHM is undefined`); a stale Trim Paths
+  reference ("Object is invalid"); an expression selector "Based On: Words" maps `textIndex` inconsistently for RTL
+  Arabic, so word reveals use one text layer per word (verified frame by frame).
+
+**Engine**
+- New: `cep_queue`, `ae_bridge`, `ae_probe`, `ae_render`, `motion_config`, `motion_icons`, `motion_library`,
+  `motion_script`, `motion_timing`, `motion_layout`, `motion_plan`, `motion_audio`, `motion_animatic`,
+  `motion_build`, `motion_readback`, `motion_render`, `motion_qc`, `motion_cli`; `templates/after_effects/
+  nh_ae_bridge.jsx`, `nh_motion_lib.jsx`; `config/defaults/motion.json`; recipe `motion` blocks.
+- `ppro_bridge` keeps its API (queue protocol moved to `cep_queue`).
+
+### Client-level reference style
 The reference edits in `data/` belong to the client, so their interpretation is now written once per client and
 reused by every video, instead of being re-authored into each video's `01_analysis/`.
 

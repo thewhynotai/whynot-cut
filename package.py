@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", "docs", ".superpowers"}
+SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", "docs", ".superpowers", "tools"}
 SKIP_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 EXEC = {"bin/reel", "setup/setup_env.sh", "setup/setup_env.py", "hooks/run_python.sh", "hooks/guard.py",
         "hooks/session_context.py", "examples/make_demo.py"}

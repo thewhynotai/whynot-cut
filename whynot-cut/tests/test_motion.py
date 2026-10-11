@@ -1771,5 +1771,37 @@ class TestMotionPluginLayer(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class TestMotionRelease(unittest.TestCase):
+    def test_versions(self):
+        pj = json.loads((SK / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+        mj = json.loads((SK.parent / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+        self.assertEqual(pj["version"], "2.2.0")
+        self.assertEqual(mj["metadata"]["version"], "2.2.0")
+        self.assertEqual(mj["plugins"][0]["version"], "2.2.0")
+        for k in ("motion", "after-effects", "animation"):
+            self.assertIn(k, pj["keywords"])
+        self.assertIn("After Effects", pj["description"])
+
+    def test_docs(self):
+        self.assertIn("## 2.2.0", (SK / "CHANGELOG.md").read_text(encoding="utf-8"))
+        readme = (SK / "README.md").read_text(encoding="utf-8")
+        for k in ("/whynot-cut:motion", "--as motion", "motion-build", "ae-probe"):
+            self.assertIn(k, readme)
+        notices = (SK / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+        self.assertIn("Lucide", notices)
+        self.assertIn("ISC", notices)
+
+    def test_package_rules(self):
+        sys.path.insert(0, str(SK.parent))
+        try:
+            import package
+        finally:
+            sys.path.remove(str(SK.parent))
+        self.assertFalse(package.wanted(SK.parent / "tools" / "vendor_lucide.py"))
+        self.assertTrue(package.wanted(SK / "templates/motion/icons/lucide/LICENSE"))
+        self.assertTrue(package.wanted(SK / "templates/motion/icons/lucide/icons.json"))
+        self.assertTrue(package.wanted(SK / "THIRD_PARTY_NOTICES.md"))
+
+
 if __name__ == "__main__":
     unittest.main()

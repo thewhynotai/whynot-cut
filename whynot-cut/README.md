@@ -15,6 +15,8 @@ Premiere Pro project**:
 - **podcast mode** (2.1): a finished 16:9 episode → a reels plan with timecodes, content type and score → you pick →
   each reel framed per shot for 9:16 and edited by its content-type recipe → plus the YouTube/Instagram/TikTok copy
   (titles, description, chapters, tags, captions, hashtags, SRT) and thumbnail designs, checked against platform limits
+- **motion mode** (2.2): a window of an episode's audio → an animated motion-graphics video (word-by-word Arabic
+  kinetic type, icons, counters, steps, timelines) built as a **native After Effects project**, read back and QC'd
 
 A human editor finishes, mixes and renders.
 
@@ -51,6 +53,7 @@ Then say **"edit the new videos"**. Or use the commands:
 | `/whynot-cut:autopilot` | edits every new clip (one combined approval) |
 | `/whynot-cut:edit C0239` | full edit of one clip |
 | `/whynot-cut:podcast EP12` | podcast episode → reels plan → you pick → reels in Premiere + publish package |
+| `/whynot-cut:motion EP12 R03` | an episode window's audio → animated motion video built in After Effects |
 | `/whynot-cut:preview` | watchable MP4 of the planned edit, no Premiere needed |
 | `/whynot-cut:revise "1- … 2- …"` | applies your comments, rebuilds, re-verifies, reports per comment |
 | `/whynot-cut:status` | "is it ready?", with fresh evidence: Verified / Not verified / Needs you |
@@ -101,6 +104,28 @@ Say **"make reels from this episode"** (`/whynot-cut:podcast`):
 Results: `output/episodes/EP12/` (transcript, `01_analysis/reels-plan.md`, `03_candidates/`, `publish/`) and one
 `output/projects/EP12_Rxx/` per reel.
 
+## Motion mode
+Pick a reel candidate (or a topic from the topic map) **as motion** at Gate 0 and get an animated video built from the
+audio only — no camera picture needed, so audio-only podcasts work too (`data/Episodes/*.m4a|mp3|wav`).
+1. `reel reels-select --episode EP12 --pick R03 --as motion --by editor` → project `EP12_R03_MO` (15–180 s).
+2. `audio-clean`, then the **motion-director** turns what is said into beats and scenes following the content-type
+   recipe (kinetic quote synced word by word, stat counter, steps, comparison, timeline, quote/context/person cards,
+   licensed illustrations, outro) → `reel motion-plan` checks every word, number and name → `reel motion-animatic`.
+3. **Gate 1**: you approve `motion-plan.md` + the animatic (editorial lines are marked as Claude's words).
+4. After Effects: `reel ae-status` (the same bridge; restart After Effects once after `reel ppro-install`),
+   `reel ae-probe` once per AE version, `reel motion-build` (native .aep, read back), `reel motion-render`,
+   `reel motion-frames`, `qc`, `handoff`. Brand fonts must be installed for After Effects.
+
+| Command | What it does |
+|---|---|
+| `reel motion-icons --search "money, growth"` · `motion-library` | icon names (Lucide, ISC) · licensed illustration packs |
+| `reel motion-plan` · `motion-animatic` | compile + check the motion script · storyboard + preview MP4 |
+| `reel ae-status` · `ae-probe [--record …]` | After Effects bridge · Arabic capability probe |
+| `reel motion-build [--script-only]` · `motion-render [--scenes S03]` · `motion-frames` | build + read back · render · QC frames |
+
+Results in `output/projects/EP12_R03_MO/`: `04_after_effects/project/*.aep`, `04_after_effects/render/*_motion.mp4`,
+`08_quality_control/ae_frames/`, `09_handoff/README.md`.
+
 ## Quick start بالعربي
 ١. ثبّت الإضافة من مجلد `whynot-cut-marketplace` ثم اكتب في Claude Code: **`/whynot-cut:start`**.
 ٢. سيتم تجهيز الجهاز وربط Premiere Pro وإنشاء مجلد للعميل خطوة بخطوة.
@@ -109,6 +134,9 @@ Results: `output/episodes/EP12/` (transcript, `01_analysis/reels-plan.md`, `03_c
 ٥. **البودكاست:** حط الحلقة الكاملة في `data/Episodes/` (ومعاها ملف `.md` بالضيف واللينكات) وقول **"طلّع ريلز من الحلقة"**:
 توصلك خطة ريلز بالتايم كود ونوع المحتوى (حكاية، دراما، قصة نجاح…) ومعاينة لكل ريل، تختار منها، وكل ريل يتعمل
 مشروع Premiere بإيقاع نوعه، ومعاه العناوين والديسكربشن والشابترز والتاجز والكابشن والثمبنيل.
+٦. **الموشن:** في Gate 0 قول «R03 موشن» (`--as motion`): بيتعمل فيديو موشن جرافيك من **صوت** الجزء ده بس (كلام
+بيظهر كلمة بكلمة، أرقام، خطوات، تايم لاين، أيقونات)، بتوافق على الخطة والـ animatic، وبعدها مشروع After Effects جاهز
+ومتراجع من فريمات After Effects نفسه.
 لا يتم تعديل ملفاتك الأصلية أبداً؛ كل النتائج في مجلد `output/`.
 
 ## How it works
@@ -121,6 +149,8 @@ client-researcher ── discover, client DB, reference style            (sub: �
 episode-analyst ──── podcast: topics, speakers, reels plan           (sub: moment-scout ×N)
         ▼  Gate 0 (podcast): you pick the reels
 publish-writer ───── podcast: YouTube/social copy, thumbnails, publish-check
+motion-director ──── motion: beats → scenes → motion-script.json, plan, animatic
+ae-builder ───────── motion: After Effects build through the bridge, read-back, render, frames
 transcript-editor ── Whisper, corrections, words to confirm           (sub: segment-proofreader ×N)
 audio-engineer ───── mic choice, hum/noise cleanup, pause removal + proof
 story-editor ─────── meaning → edit-decisions.json → plan
