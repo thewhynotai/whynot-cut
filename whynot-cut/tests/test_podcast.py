@@ -1008,6 +1008,26 @@ class TestRecipes(unittest.TestCase):
         self.assertAlmostEqual(float(lv.findtext("value")), 10 ** (-26 / 20), places=4)
         self.assertTrue(any(t["id"] == "A06" for t in tm["tracks"]["audio"]))
 
+    def test_preview_mixes_music(self):
+        import numpy as np
+        from lib.plan import compile_plan
+        from lib.preview_video import build_audio
+        from lib.audio_clean import _read_stereo
+        _root, reel, src = reel_fixture(self.tmp, "drama")
+        write_json(reel.p("01_analysis/edit-decisions.json"), {"global": {}, "music": {"file": "data/Music/warm_track.wav"},
+                   "decisions": [decision("EDIT_001", "00:00:00.000", "00:00:04.000", "كلمه0 كلمه1")]})
+        self.assertTrue(compile_plan(reel)["ok"])
+        spec = read_json(reel.p("01_analysis/timeline-spec.json"))
+
+        def energy_220(sp, name):
+            x = _read_stereo(build_audio(reel, sp, self.tmp / name, src))[:, 0]
+            seg = x[48000:48000 * 3]                         # 1-3 s: well before the fade-out
+            mag = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+            return mag[int(220 * len(seg) / 48000)]
+        with_music = energy_220(spec, "m.wav")
+        without = energy_220(dict(spec, music={"status": "NO_MUSIC_SUPPLIED"}), "n.wav")
+        self.assertGreater(with_music, 10 * max(without, 1e-6))
+
     def test_music_outside_library_rejected(self):
         from lib.plan import compile_plan
         _root, reel, src = reel_fixture(self.tmp, "drama")

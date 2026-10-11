@@ -135,6 +135,14 @@ def build_audio(paths: Paths, spec: dict, out: Path, src_video: Path) -> Path:
         a = round(c["start_frame"] * SR / seq_fps())
         if a < n:
             mix[a:a + len(x)] += x[:n - a]
+    mu = spec.get("music") or {}
+    if mu.get("status") == "PLACED" and mu.get("file") and (paths.root / mu["file"]).exists():
+        # the licensed bed under the dialogue, as placed on A06: from frame 0, recipe level, linear fade-out
+        x = _mono(paths.root / mu["file"])[:n] * (10 ** (float(mu.get("level_db", -24)) / 20))
+        fo = min(len(x), int(float(mu.get("fade_out_s", 2.0)) * SR))
+        if fo:
+            x[-fo:] *= np.linspace(1, 0, fo)
+        mix[:len(x)] += x
     peak = float(np.max(np.abs(mix))) if len(mix) else 0
     if peak > 0.99:
         mix *= 0.99 / peak
