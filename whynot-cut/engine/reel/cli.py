@@ -788,7 +788,14 @@ def main():
     # plain HTTPS downloads work everywhere. WHYNOT_HF_XET=1 turns Xet back on.
     if os.environ.get("WHYNOT_HF_XET") != "1":
         os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    from lib.selfid import tag
+
+    class NamedParser(argparse.ArgumentParser):      # usage errors say which plugin's `reel` this is (G66)
+        def error(self, message):
+            self.print_usage(sys.stderr)
+            self.exit(2, f"{tag()}: {self.prog}: error: {message}\n")
+    ap = NamedParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version", version=tag(), help="print the plugin name and version")
     ap.add_argument("--root", help="client folder containing assets/ and data/ (default: current folder if it has both)")
     ap.add_argument("--video-id", help="stable project id (default: footage file stem)")
     ap.add_argument("--profile", help="client profile id (default: client's reel-profile, else folder-name match)")
@@ -916,4 +923,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit as e:        # G66: every message says which plugin's `reel` it came from
+        if isinstance(e.code, str):
+            from lib.selfid import tag
+            sys.stderr.write(f"{tag()}: {e.code}\n")
+            sys.exit(1)
+        raise

@@ -52,13 +52,18 @@ def doctor() -> dict:
     br = bridge_info()
     st = S.load()
     cr = plat.clients_root_setting() or (Path(st["clients_root"]).expanduser() if st.get("clients_root") else None)
-    rep = {"generated": now_iso(), "system": plat.describe(), "engine_home": str(ENV_DIR),
+    from . import selfid
+    rc = selfid.scan_path()
+    rep = {"generated": now_iso(), "plugin": selfid.plugin_info(), "reel_command": rc,
+           "system": plat.describe(), "engine_home": str(ENV_DIR),
            "venv_python": str(venv_python()), "venv_ok": venv_python().exists(), "python_modules": mods,
            "ffmpeg": ffmpeg_exe(), "whisper_models": models,
            "whisper_partial_downloads": sorted(k for k, v in states.items() if v == "partial"), "gpu": plat.gpu_info(), "adobe_apps": apps,
            "premiere_bridge": br, "settings_file": st["_file"], "settings_problems": st["_problems"],
            "clients_root": str(cr) if cr else None}
     fixes = []
+    if not rc["ok"]:      # G66: a session started before the install keeps another plugin's `reel` first on PATH
+        fixes.append({"item": "wrong `reel` first on PATH: " + rc["message"], "who": "editor", "fix": rc["fix"]})
     if not all(v is True for v in mods.values()):
         fixes.append({"item": "engine packages", "who": "claude", "fix": "reel setup   (re-installs the pinned packages)"})
     if not rep["ffmpeg"]:
@@ -94,10 +99,12 @@ def doctor() -> dict:
         fixes.append({"item": "preferences file", "who": "claude", "fix": "; ".join(st["_problems"])})
     rep["ready"] = {"engine": rep["venv_ok"] and all(v is True for v in mods.values()) and bool(rep["ffmpeg"]),
                     "premiere_build": bool(apps["premiere"]) and br["installed"] and br["debug_mode_ok"] and br["alive"],
-                    "preview_and_xml": rep["venv_ok"] and bool(rep["ffmpeg"])}
+                    "preview_and_xml": rep["venv_ok"] and bool(rep["ffmpeg"]), "reel_command": rc["ok"]}
     rep["fixes"] = fixes
     rep["verdict"] = ("READY" if rep["ready"]["engine"] and rep["ready"]["premiere_build"] else
                       "READY (no live Premiere build yet)" if rep["ready"]["engine"] else "NEEDS SETUP")
+    if not rc["ok"]:
+        rep["verdict"] += " — but plain `reel` does not run WhyNot Cut in this session (see fixes)"
     return rep
 
 

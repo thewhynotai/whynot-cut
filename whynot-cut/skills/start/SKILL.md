@@ -18,11 +18,19 @@ folder and skip that question in Step 3.
 
 ## Step 1: Check the machine
 ```bash
+reel --version
 reel doctor
 ```
+`reel --version` must print `WhyNot Cut <version>`; every WhyNot Cut message starts with that name and version.
 - **`reel: command not found` / "not recognized":** the plugin's `bin/` is on PATH only in sessions started after the
   install. Ask the person to fully quit and reopen Claude Code, then retry. Until then call it by full path:
   `"${CLAUDE_PLUGIN_ROOT}/bin/reel" doctor`.
+- **`reel` answers, but not as WhyNot Cut** (`reel --version` fails or prints something else, or an error says
+  `reel-editor environment not installed`): a session started before the install keeps the OLD plugin's `bin/` first
+  on PATH, so `reel` is the old reel-editor (or a previous WhyNot Cut). Subagents inherit that PATH. Say so, ask the
+  person to restart Claude Code, and until then use the full path `"${CLAUDE_PLUGIN_ROOT}/bin/reel"` in every command
+  and in every subagent prompt. `"${CLAUDE_PLUGIN_ROOT}/bin/reel" doctor` lists every `reel` on PATH
+  (`reel_command`) and says which plugin each belongs to. Never run the old plugin's `reel setup`.
 - **Engine missing** (`blocked: engine not installed`): explain it is a private Python environment in `~/.whynot-cut`
   (about 400 MB, a few minutes, nothing else on the computer changes) and ask once. On yes, run `reel setup` in the
   background and ask the Step 3 questions while it runs; write preferences and re-run `reel doctor` after it finishes.

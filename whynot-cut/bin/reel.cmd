@@ -18,12 +18,16 @@ if not exist "%PY%" (
     where py >nul 2>nul && (py -3 "%HERE%\setup\setup_env.py" --home "%HOME_DIR%" 1>&2) || (python "%HERE%\setup\setup_env.py" --home "%HOME_DIR%" 1>&2)
   )
 )
-if not exist "%PY%" (
-  echo {"blocked": "WhyNot Cut engine not installed", "how": "install Python 3.10-3.12 (winget install Python.Python.3.12), then run: reel setup"}
-  exit /b 2
-)
+if not exist "%PY%" goto :blocked
 set PYTHONDONTWRITEBYTECODE=1
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 "%PY%" "%HERE%\engine\reel\cli.py" %*
 exit /b %ERRORLEVEL%
+
+:blocked
+rem every blocked message names this plugin and its version, so a wrong `reel` on PATH is recognisable
+set "TAG=WhyNot Cut"
+for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "(Get-Content -Raw -LiteralPath '%HERE%\.claude-plugin\plugin.json' | ConvertFrom-Json).version" 2^>nul`) do set "TAG=WhyNot Cut %%v"
+echo {"blocked": "%TAG%: engine not installed", "how": "install Python 3.10-3.12 (winget install Python.Python.3.12), then run: reel setup"}
+exit /b 2

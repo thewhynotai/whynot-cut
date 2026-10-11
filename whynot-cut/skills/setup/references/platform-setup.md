@@ -41,7 +41,8 @@ Scripts that import the engine's packages (PIL, av, numpy, cv2) or `lib.*` run w
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `"blocked": "WhyNot Cut engine not installed"` | No venv yet | `reel setup` (ask first: ~400 MB) |
+| `"blocked": "WhyNot Cut 2.x.y: engine not installed"` | No venv yet | `reel setup` (ask first: ~400 MB) |
+| `reel` says `reel-editor environment not installed` (or any message that does not start with `WhyNot Cut <version>`), `reel --version` is not `WhyNot Cut <version>` | The Claude Code session started before WhyNot Cut was installed or updated, so another plugin's `bin/` (the old reel-editor, or the previous WhyNot Cut) is first on PATH; subagents inherit it | Restart Claude Code. Until then call `"${CLAUDE_PLUGIN_ROOT}/bin/reel"` by its full path (and tell subagents to); `<that path> doctor` → `reel_command` lists every `reel` on PATH |
 | `no Python 3.9+ found` | Fresh machine | Windows: `winget install Python.Python.3.12`; macOS: `xcode-select --install` |
 | Windows: `python3` opens the Microsoft Store | Store alias stub on PATH | The wrappers skip it; install real Python (above) or disable the alias in Settings › Apps › App execution aliases |
 | pip fails building `numpy`/`av` | Python too new for the pinned wheels | Use Python 3.10–3.12 and run `reel setup` again |

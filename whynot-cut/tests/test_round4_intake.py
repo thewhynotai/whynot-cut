@@ -248,5 +248,174 @@ class TestG65EpisodePrep(unittest.TestCase):
         self.assertTrue(Path(info["head_sheet"]).exists())
 
 
+# ===================================================================================================== G66
+PLUGIN_JSON = json.loads((SK / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+VERSION = PLUGIN_JSON["version"]
+TAG = f"WhyNot Cut {VERSION}"
+
+
+def fake_plugin(root: Path, name: str, version: str) -> Path:
+    """A plugin folder with a bin/reel (and reel.cmd) and its manifest; returns its bin dir."""
+    (root / "bin").mkdir(parents=True)
+    (root / ".claude-plugin").mkdir()
+    (root / ".claude-plugin/plugin.json").write_text(json.dumps({"name": name, "version": version}), encoding="utf-8")
+    for n in ("reel", "reel.cmd"):
+        f = root / "bin" / n
+        f.write_text("#!/usr/bin/env bash\necho hi\n", encoding="utf-8")
+        f.chmod(0o755)
+    return root / "bin"
+
+
+class TestG66ReelIdentity(unittest.TestCase):
+    """A Claude session started before the install keeps the OLD plugin's bin/ on PATH: `reel` is the old reel-editor
+    ("environment not installed") and subagents inherit it. WhyNot Cut names itself and finds the impostor."""
+
+    def setUp(self):
+        import os
+        from lib import selfid
+        self.os, self.selfid = os, selfid
+        self.tmp = Path(tempfile.mkdtemp())
+        self.own = Path(selfid.own_bin())
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def path(self, *dirs):
+        return self.os.pathsep.join(str(d) for d in dirs)
+
+    def test_tag_names_plugin_and_version_from_plugin_json(self):
+        self.assertEqual(self.selfid.tag(), TAG)
+        info = self.selfid.plugin_info()
+        self.assertEqual((info["name"], info["version"]), ("whynot-cut", VERSION))
+
+    def test_own_reel_first_is_ok(self):
+        old = fake_plugin(self.tmp / "reel-editor", "reel-editor", "1.0.7")
+        r = self.selfid.scan_path(self.path(self.own, old))
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["state"], "ok")
+        self.assertTrue(r["hits"][0]["is_this"])
+        self.assertFalse(r["hits"][1]["is_this"])            # listed, but harmless behind ours
+
+    def test_old_reel_editor_first_is_reported_with_the_fix(self):
+        old = fake_plugin(self.tmp / "reel-editor" / "1.0.7", "reel-editor", "1.0.7")
+        r = self.selfid.scan_path(self.path(old, self.own))
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["state"], "foreign_first")
+        first = r["first"]
+        self.assertEqual((first["plugin"], first["version"]), ("reel-editor", "1.0.7"))
+        self.assertFalse(first["is_this"])
+        self.assertEqual(Path(first["path"]).parent.resolve(), old.resolve())
+        self.assertIn("restart Claude Code", r["fix"])
+        self.assertIn(str(self.own), r["fix"])                # the full path to call meanwhile
+        self.assertIn("reel-editor", r["message"])
+        self.assertIn("1.0.7", r["message"])
+
+    def test_another_copy_of_whynot_cut_first_is_also_wrong(self):
+        """A session opened before an UPDATE keeps the previous version's folder first."""
+        older = fake_plugin(self.tmp / "whynot-cut" / "2.1.1", "whynot-cut", "2.1.1")
+        r = self.selfid.scan_path(self.path(older, self.own))
+        self.assertEqual(r["state"], "foreign_first")
+        self.assertEqual((r["first"]["plugin"], r["first"]["version"]), ("whynot-cut", "2.1.1"))
+        self.assertIn("2.1.1", r["message"])
+
+    def test_unknown_reel_first_is_reported_without_a_manifest(self):
+        d = self.tmp / "tools"
+        d.mkdir()
+        for n in ("reel", "reel.cmd"):
+            (d / n).write_text("x", encoding="utf-8")
+            (d / n).chmod(0o755)
+        r = self.selfid.scan_path(self.path(d, self.own))
+        self.assertEqual(r["state"], "foreign_first")
+        self.assertIsNone(r["first"]["plugin"])
+
+    def test_no_reel_on_path_is_not_ok_either(self):
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        r = self.selfid.scan_path(self.path(empty))
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["state"], "not_on_path")
+        self.assertIn(str(self.own), r["fix"])
+
+    def test_doctor_reports_the_foreign_reel_and_the_fix(self):
+        from unittest import mock
+        from lib import onboard
+        old = fake_plugin(self.tmp / "reel-editor" / "1.0.7", "reel-editor", "1.0.7")
+        with mock.patch.dict(self.os.environ, {"PATH": self.path(old, self.own)}):
+            rep = onboard.doctor()
+        self.assertEqual(rep["plugin"]["version"], VERSION)
+        self.assertEqual(rep["reel_command"]["state"], "foreign_first")
+        fix = next(f for f in rep["fixes"] if "reel" in f["item"] and "PATH" in f["item"])
+        self.assertIn("reel-editor", fix["item"])
+        self.assertIn("restart Claude Code", fix["fix"])
+        self.assertFalse(rep["ready"]["reel_command"])
+
+    def test_doctor_is_quiet_when_reel_is_ours(self):
+        from unittest import mock
+        from lib import onboard
+        with mock.patch.dict(self.os.environ, {"PATH": self.path(self.own)}):
+            rep = onboard.doctor()
+        self.assertEqual(rep["reel_command"]["state"], "ok")
+        self.assertTrue(rep["ready"]["reel_command"])
+        self.assertFalse([f for f in rep["fixes"] if "PATH" in f["item"]])
+
+
+class TestG66ReelNamesItself(unittest.TestCase):
+    CLI = SK / "engine/reel/cli.py"
+
+    def cli(self, *args, cwd=None):
+        return subprocess.run([sys.executable, "-B", str(self.CLI), *args], capture_output=True, text=True,
+                              encoding="utf-8", cwd=cwd)
+
+    def test_version_flag_prints_plugin_name_and_version(self):
+        r = self.cli("--version")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), TAG)
+
+    def test_errors_start_with_the_plugin_name_and_version(self):
+        with tempfile.TemporaryDirectory() as t:
+            r = self.cli("next", cwd=t)                       # no --root, not inside a client folder
+        self.assertNotEqual(r.returncode, 0)
+        self.assertTrue(r.stderr.strip().startswith(f"{TAG}: "), r.stderr)
+        self.assertIn("--root required", r.stderr)
+
+    def test_usage_errors_name_it_too(self):
+        r = self.cli("no-such-command")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn(TAG, r.stderr)
+
+    def test_bash_wrapper_blocked_message_names_the_plugin(self):
+        import os
+        bash = next((b for b in (os.environ.get("GIT_BASH"), r"C:\Program Files\Git\bin\bash.exe", shutil.which("bash"))
+                     if b and Path(b).exists() and "system32" not in b.lower()), None)
+        if not bash:
+            self.skipTest("no bash")
+        with tempfile.TemporaryDirectory() as t:
+            r = subprocess.run([bash, str(SK / "bin/reel"), "doctor"], capture_output=True, text=True, encoding="utf-8",
+                               env={**os.environ, "WHYNOT_HOME": t})
+        self.assertEqual(r.returncode, 2, r.stderr)
+        blocked = json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertIn(TAG, blocked["blocked"])
+        self.assertIn("engine not installed", blocked["blocked"])
+
+    @unittest.skipUnless(sys.platform == "win32", "reel.cmd is the Windows wrapper")
+    def test_cmd_wrapper_blocked_message_names_the_plugin(self):
+        import os
+        with tempfile.TemporaryDirectory() as t:
+            r = subprocess.run(["cmd", "/c", str(SK / "bin/reel.cmd"), "doctor"], capture_output=True, text=True,
+                               encoding="utf-8", env={**os.environ, "WHYNOT_HOME": t})
+        self.assertEqual(r.returncode, 2, r.stderr)
+        blocked = json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertIn(TAG, blocked["blocked"])
+        self.assertIn("engine not installed", blocked["blocked"])
+
+
+class TestG66SkillsTellTheStory(unittest.TestCase):
+    def test_start_and_setup_skills_cover_the_wrong_reel(self):
+        for rel in ("skills/start/SKILL.md", "skills/setup/SKILL.md"):
+            text = (SK / rel).read_text(encoding="utf-8")
+            for needle in ("reel --version", "restart Claude Code", "full path", "reel-editor"):
+                self.assertIn(needle, text, f"{rel} lacks {needle!r}")
+
+
 if __name__ == "__main__":
     unittest.main()

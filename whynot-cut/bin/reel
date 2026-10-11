@@ -13,6 +13,10 @@ if [ -z "$HOME_DIR" ]; then
   fi
 fi
 export WHYNOT_HOME="$HOME_DIR"
+tag() {   # "WhyNot Cut 2.2.0": every blocked message names this plugin, so a wrong `reel` on PATH is recognisable
+  local v; v="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$HERE/.claude-plugin/plugin.json" 2>/dev/null | head -n 1 || true)"
+  echo "WhyNot Cut ${v:-?}"
+}
 PY="$HOME_DIR/venv/bin/python"
 [ -x "$PY" ] || PY="$HOME_DIR/venv/Scripts/python.exe"
 if [ ! -x "$PY" ]; then
@@ -27,11 +31,11 @@ if [ ! -x "$PY" ]; then
     PY="$HOME_DIR/venv/bin/python"
     [ -x "$PY" ] || PY="$HOME_DIR/venv/Scripts/python.exe"
     if [ ! -x "$PY" ]; then
-      echo '{"blocked": "no Python 3.9+ found to build the engine", "how": "macOS: xcode-select --install (or python.org). Windows: winget install Python.Python.3.12  — then run: reel setup"}'
+      echo "{\"blocked\": \"$(tag): no Python 3.9+ found to build the engine\", \"how\": \"macOS: xcode-select --install (or python.org). Windows: winget install Python.Python.3.12  — then run: reel setup\"}"
       exit 2
     fi
   else
-    echo '{"blocked": "WhyNot Cut engine not installed", "how": "run: reel setup   (or /whynot-cut:start)"}'
+    echo "{\"blocked\": \"$(tag): engine not installed\", \"how\": \"run: reel setup   (or /whynot-cut:start)\"}"
     exit 2
   fi
 fi

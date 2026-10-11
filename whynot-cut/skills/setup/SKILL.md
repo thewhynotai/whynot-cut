@@ -8,11 +8,17 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 
 1. **`reel: command not found` / "not recognized":** the plugin's `bin/` isn't on PATH. Check the plugin is enabled
    (`/plugin`), then fully restart Claude Code; meanwhile use `"${CLAUDE_PLUGIN_ROOT}/bin/reel"`.
+   **`reel` answers as something else** (`reel --version` is not `WhyNot Cut <version>`, or the error says
+   `reel-editor environment not installed`): the session started before the install and another plugin's `bin/` (the
+   old reel-editor, or the previous WhyNot Cut) is first on PATH; subagents inherit it. Restart Claude Code; until
+   then call `"${CLAUDE_PLUGIN_ROOT}/bin/reel"` by its full path everywhere, subagent prompts included.
 2. Check first, change second:
    ```bash
+   reel --version
    reel doctor
    ```
    It is read-only and returns `verdict`, `ready`, and a `fixes` list (each fix says who does it: claude / editor).
+   `reel_command` lists every `reel` on PATH; if the first is not this plugin's, a fix says so.
 3. `reel setup` repairs everything WhyNot Cut owns. It's idempotent:
    - engine venv in `~/.whynot-cut` (Windows: `%USERPROFILE%\.whynot-cut`), pinned packages, ffmpeg
    - the WhyNot Cut Bridge panel in Premiere's CEP folder (replacing the old "Reel Editor Bridge" if present)
