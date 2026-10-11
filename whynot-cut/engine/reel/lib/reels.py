@@ -652,6 +652,8 @@ def write_reels_plan_md(ep, res: dict) -> Path:
             flags.append("AVOID: " + ", ".join(c["avoid_hits"]))
         if c.get("risks"):
             flags.append("risks: " + "; ".join(map(str, c["risks"]))[:60])
+        if c.get("motion_fit"):
+            flags.append("motion" + (f": {str(c.get('motion_why'))[:40]}" if c.get("motion_why") else ""))
         prev = ep.p(f"03_candidates/{c['id']}.mp4")
         L.append(f"| {c['id']} | {c['total']} | {c.get('type')} ({c.get('type_label')}) | {fmt_ts(c['in_ms'], '.')} → "
                  f"{fmt_ts(c['out_ms'], '.')} | {c['duration_ms'] / 1000:.0f} s | {str(c.get('title', ''))[:50]} | "

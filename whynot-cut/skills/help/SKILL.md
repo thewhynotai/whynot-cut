@@ -31,3 +31,8 @@ Where things go: brand files in `assets/`, raw clips in `data/Raw/`, reference e
 in `09_handoff/`). WhyNot Cut never changes `assets/` or `data/`.
 
 Made by The Why Not AI · info@thewhynot.ai
+
+## Motion mode (2.2)
+`/whynot-cut:motion` — an episode window's audio → animated After Effects video: `reels-select --as motion`,
+`motion-plan`, `motion-animatic`, Gate 1, `ae-status`/`ae-probe`, `motion-build`, `motion-render`, `motion-frames`,
+`qc`. Icons: `motion-icons --search`; licensed illustration packs: `motion-library`.

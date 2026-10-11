@@ -55,3 +55,9 @@ EVIDENCE: <candidate count, types spread, warnings acted on>
 ISSUES / NEEDS EDITOR: <bullets, or "none">
 ```
 Never report a stage as done because a command exited 0. Report what the outputs show.
+
+## Motion mode (2.2)
+- Flag candidates that work as animation with `"motion_fit": true` and a short `"motion_why"` (numbers the speaker
+  says, steps or tips, an abstract idea, or no usable picture); `reels-plan.md` shows them so the editor can pick
+  `--as motion` at Gate 0. Audio-only episodes: every candidate is a motion candidate.
+- Topics may carry an optional `"type"` (a recipe type) so a topic can be picked as a motion video.

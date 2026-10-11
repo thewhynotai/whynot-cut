@@ -55,3 +55,7 @@ Then `reel publish-check --root "<CLIENT>" --episode <EP>` → it writes `youtub
 - A quote that isn't verbatim, a number the speaker didn't say, a stronger claim than the speaker made.
 - Medical/financial/legal/religious claims without an `approval_required` entry.
 - Posting anything. The editor posts.
+
+## Motion mode (2.2)
+Motion reels publish like other reels; CC-BY illustration attributions from the motion plan must appear in the
+captions (publish-check errors otherwise).

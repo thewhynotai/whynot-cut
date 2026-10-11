@@ -27,7 +27,8 @@ READ_ONLY_AGENTS = {"medical-reviewer", "claim-checker", "frame-inspector", "gra
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
 QC_FORBIDDEN = {"ppro-build", "approve-plan", "plan", "previews", "audio-clean", "transcribe",
                 "transcript-correct", "client-init", "client-db", "sfx", "premiere", "handoff",
-                "reels-select", "reels-plan", "episode-transcribe", "publish-check"}
+                "reels-select", "reels-plan", "episode-transcribe", "publish-check",
+                "motion-plan", "motion-animatic", "motion-build", "motion-render"}
 GLOBAL_VALUE_OPTS = ("--root", "--video-id", "--profile", "--episode")
 MUTATE_ALL = {"rm", "mv", "touch", "chmod", "chown", "truncate", "unlink", "rmdir", "shred", "dot_clean",
               "setfile", "srm"}
@@ -73,9 +74,19 @@ def client_root_of(p: Path) -> tuple[Path, str] | None:
     return None
 
 
+AE_PREFS = re.compile(r"(adobe[\\/]+after effects[\\/]+\d[\d.]*[\\/])|(adobe after effects [^\\/]*prefs[^\\/]*\.txt$)", re.I)
+
+
+def ae_pref_path(path_str: str) -> bool:
+    """After Effects preference files (scripting security, Type engine…): the editor's to change, never Claude's."""
+    return bool(path_str) and bool(AE_PREFS.search(path_str.replace("\\", "/")))
+
+
 def protected(path_str: str, cwd: Path) -> str | None:
     if not path_str or path_str.startswith("-"):
         return None
+    if ae_pref_path(path_str.strip("'\"")):
+        return "After Effects preferences"
     s = native(path_str.strip("'\""))
     if "=" in s and not s.startswith("/") and not re.match(r"^[A-Za-z]:[\\/]", s):   # dd of=..., key=value
         s = s.split("=", 1)[1]
@@ -273,6 +284,8 @@ def check_reel(exe: str, argv: list[str], agent: str | None):
                 block("subagents report a verdict; the lead editor records it after viewing the evidence itself.")
             if agent == "qc-reviewer" and sub == "ref-style" and ("--record" in argv or "--apply" in argv):
                 block("qc-reviewer is independent and read-only: it may not record or apply the client reference style.")
+            if sub == "ae-probe" and "--record" in argv:
+                block("only the lead editor records the After Effects probe verdict, after viewing the probe frames itself.")
             if agent == "qc-reviewer" and sub in QC_FORBIDDEN:
                 block(f"qc-reviewer is independent and read-only: it may not run `reel {sub}`. Report the issue instead.")
 
@@ -398,6 +411,9 @@ def main():
         fp = ti.get("file_path") or ti.get("notebook_path") or ""
         if agent in READ_ONLY_AGENTS:
             block(f"{agent} is a read-only reviewer; it reports findings instead of editing files.")
+        if ae_pref_path(fp):
+            block("After Effects preferences are the editor's to change (scripting security, Type engine). "
+                  "Give them the step to do themselves.")
         hit = protected(fp, cwd)
         if hit:
             block(f"the client's source folder ({hit}) is read-only. Write outputs under <client>/output/.")

@@ -47,3 +47,9 @@ Then a FIX LIST table:
 |---|---------|-----------------------|---------------------|-------------------------------------|
 
 Never report a stage as done because a command exited 0. Report what the outputs show.
+
+## Motion mode (2.2)
+After Effects bridge: `reel ae-status` (heartbeat in `ae-queue`, `host: AEFT`). No heartbeat → After Effects not
+restarted since `reel ppro-install`, or PlayerDebugMode off (the editor's command), or the panel missing in
+Window › Extensions; CEP logs `CEPHtmlEngine*-AEFT-*` in %TEMP% (Windows) / ~/Library/Logs/CSXS (macOS).
+`ping` reports `libs_loaded`; false means the scripts in `ae-scripts` failed to load.

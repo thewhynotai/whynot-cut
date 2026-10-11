@@ -105,3 +105,8 @@ a reel done unless its `qc` passed in this message.
 - Gate 0 and Gate 1 come only from the editor's messages (or a standing `approval: auto` for Gate 1, never for Gate 0).
 - `assets/` and `data/` are read-only; everything goes to `output/`. Ask before deleting anything.
 - Premiere is the deliverable; After Effects/Photoshop only when the editor asks (`/whynot-cut:adobe-extras`).
+
+## Motion mode (2.2)
+- Gate 0 can make a pick a motion video built from the window's audio: `reels-select --pick R03 --as motion --by editor`
+  (topics too: `--pick T02 --as motion --type advice`). Offer it for `motion_fit` candidates and audio-only episodes
+  (audio-only episodes cannot make video reels). Then follow `/whynot-cut:motion`.

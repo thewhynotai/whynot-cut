@@ -112,3 +112,7 @@ Finish with two lines from `/whynot-cut:help` and their next step: "drop more cl
 - `assets/` and `data/` belong to the client: scaffold only creates them for a new client, never edits them.
 
 Troubleshooting: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
+
+## Motion mode (2.2)
+For motion videos the same WhyNot Cut Bridge also loads in After Effects: after `reel ppro-install`, the editor
+restarts After Effects once; `reel ae-status` must show `host: AEFT`. Brand fonts must be installed for After Effects.

@@ -40,3 +40,11 @@ EVIDENCE: <numbers, check results, image paths you viewed>
 ISSUES / NEEDS EDITOR: <bullets, or "none">
 ```
 Never report a stage as done because a command exited 0. Report what the outputs show.
+
+## Motion mode (2.2)
+For a motion project (`<EP>_<ID>_MO`): read `04_after_effects/motion-build-result.json` (read-back comparison), the
+render result, and the newest `08_quality_control/ae_frames/run-*/frames.json`; split its frames across
+frame-inspectors with each frame's expectations. Check: joined Arabic, right-to-left order, mid-reveal frames show the
+first spoken words (rightmost in RTL) and not the last, emphasis on the expected words, no boxes or clipped text, the
+icon fits its idea, mirrored arrows point the reading way, nothing in the platform UI zones, readable contrast. You
+may not run `motion-plan`, `motion-build`, `motion-render` or `motion-animatic`.

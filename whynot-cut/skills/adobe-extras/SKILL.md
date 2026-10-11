@@ -21,3 +21,8 @@ The editor works in Premiere, so these tools are extras. The engine and a hook b
 - If AE or PS isn't installed, deliver the JSX (SCRIPT_ONLY) and say so.
 
 References: `references/adobe-automation.md`, `references/automation-matrix.md`.
+
+## Motion mode (2.2)
+Motion videos (`/whynot-cut:motion`, picked `--as motion` at Gate 0) are built in After Effects by design: their
+commands (`ae-status`, `ae-probe`, `motion-*`) are not extras and need no `--extras`. The `ae-*`/`ps-*`/`mogrt-build`
+graphics extras for clips keep their opt-in rule.

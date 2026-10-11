@@ -21,3 +21,9 @@ You get 6–8 PNG paths, each with an expectation row (event id, template, expec
 Return only: | frame | event | pass/fail/unsure | reason (what you saw) |. Don't guess; if a detail is unreadable, mark it unsure.
 
 Podcast reels: also report a face cut by the crop, the wrong person framed in a wide shot, and half-cut burned subtitles or logos from the episode.
+
+## Motion mode (2.2)
+Frames come from After Effects renders with `frames.json` expectations: `lines` (text that must be fully shown),
+`revealed_tokens`/`revealed_items` at reveal midpoints (that many words/items visible, starting from the reading
+start — the right in Arabic), `emphasis` words, `icon`. Fail a frame for disconnected Arabic letters, wrong word order,
+missing-glyph boxes, clipped text, or a reveal that shows later words before earlier ones.

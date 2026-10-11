@@ -37,3 +37,8 @@ Red flags and the claim → evidence table: `references/verification.md`.
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), do the batches in this agent one after another, with the same rows and format, and say "checked sequentially" in your report.
 
 Podcast reels: `qc` also checks that the first V1 clip starts at the reel's in-point in the episode and that the window lies inside the episode. In the frames, check each shot's face is in the picture and that wide shots frame the person speaking (`00_inputs/speakers.json`).
+
+## Motion mode (2.2)
+`reel qc` on a motion project checks: plan_valid, approval_current, aep_fresh, readback, render, audio_sync
+(correlation ≥ 0.9, offset ≤ 1 frame), cut_proof, visual_verified (pass on the newest AE frames sheet), licenses;
+approvals are a warning. Record the verdict with `reel verify --record` only after viewing the frames sheet yourself.

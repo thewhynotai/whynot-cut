@@ -58,3 +58,7 @@ Types and their signals: `references/content-types.md`. Scoring anchors and red 
 - Sensitive claims (medical, financial, legal, religious) → `risks: ["claim needs approval: …"]`.
 - Topics in the sheet's `avoid` list → still allowed in the plan only with a `risks` note; the editor decides.
 - You never pick the reels. Gate 0 is the editor's.
+
+## Motion mode (2.2)
+Mark `motion_fit`/`motion_why` on candidates that suit animation (numbers, steps, abstract ideas, no usable picture);
+topics may carry a recipe `type` so they can be animated. See `/whynot-cut:motion`.

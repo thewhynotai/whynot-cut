@@ -47,3 +47,8 @@ EVIDENCE: <publish-check result, thumbnails viewed>
 ISSUES / NEEDS EDITOR: <bullets, or "none">
 ```
 Never report a stage as done because a command exited 0. Report what the outputs show.
+
+## Motion mode (2.2)
+Motion reels (`<EP>_<ID>_MO`) get `publish/reels/<EP>_<ID>_MO.json` like any reel. If `01_analysis/motion-plan.json`
+lists CC-BY assets, put each attribution text in the captions (publish-check requires it). The cover is
+`04_after_effects/render/<id>_cover.jpg`.

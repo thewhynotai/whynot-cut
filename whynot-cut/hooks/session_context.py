@@ -57,8 +57,9 @@ def new_clips(root: Path) -> list:
 def episodes(root: Path) -> list:
     """Podcast episodes waiting in data/Episodes (file names)."""
     d = root / "data" / "Episodes"
-    return [f.stem for f in sorted(d.glob("*")) if f.suffix.lower() in VIDEO and not f.name.startswith(".")][:8] \
-        if d.is_dir() else []
+    audio = {".mp3", ".wav", ".m4a", ".aac", ".flac"}
+    return [f.stem + (" (audio)" if f.suffix.lower() in audio else "") for f in sorted(d.glob("*"))
+            if f.suffix.lower() in VIDEO | audio and not f.name.startswith(".")][:8] if d.is_dir() else []
 
 
 def reference_style_line(root: Path, has_profile: bool) -> str:
@@ -139,6 +140,7 @@ def main():
              f"Premiere bridge: {bridge_state(home)}. "
              f"New clips not started yet: {', '.join(clips) if clips else 'none'}. "
              + (f"Podcast episodes in data/Episodes: {', '.join(eps)} (reels plan + publish package: /whynot-cut:podcast; "
+                f"animated motion videos from a window's audio, built in After Effects: /whynot-cut:motion; "
                 f"`reel episodes` shows their state). " if eps else "")
              + reference_style_line(root, bool(prof))
              + f"{prefs_line(st)} "

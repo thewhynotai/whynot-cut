@@ -1696,5 +1696,80 @@ class TestMotionQC(CompiledMotion):
             plan_p.write_bytes(keep)
 
 
+# --------------------------------------------------------------------------- plugin layer
+GUARD_PY = SK / "hooks" / "guard.py"
+
+
+def guard_write(path: str, agent: str | None = None) -> int:
+    payload = {"tool_name": "Write", "tool_input": {"file_path": path, "content": "x"}, "cwd": "."}
+    if agent:
+        payload["agent_type"] = agent
+    return subprocess.run([sys.executable, "-B", str(GUARD_PY)], input=json.dumps(payload), capture_output=True,
+                          text=True, encoding="utf-8").returncode
+
+
+def front(p: Path) -> str:
+    return p.read_text(encoding="utf-8").split("---")[1]
+
+
+class TestMotionPluginLayer(unittest.TestCase):
+    def test_agents(self):
+        md = front(SK / "agents/motion-director.md")
+        for k in ("name: motion-director", "description:", "tools:", "model: opus"):
+            self.assertIn(k, md)
+        ab = front(SK / "agents/ae-builder.md")
+        for k in ("name: ae-builder", "description:", "tools:", "model:"):
+            self.assertIn(k, ab)
+        tools = next(ln for ln in ab.splitlines() if ln.startswith("tools:"))
+        self.assertNotIn("Write", tools)
+        self.assertNotIn("Edit", tools)
+
+    def test_motion_skill(self):
+        s = (SK / "skills/motion/SKILL.md").read_text(encoding="utf-8")
+        for k in ("--as motion", "Gate 1", "animatic", "ae-probe", "verify --record", "motion-build", "approve-plan"):
+            self.assertIn(k, s)
+        for ref in ("motion-scenes.md", "motion-beats.md", "ae-motion.md"):
+            self.assertTrue((SK / "skills/motion-craft/references" / ref).exists(), ref)
+
+    def test_guard(self):
+        self.assertEqual(run_guard("reel ae-probe --record ok --word-order logical", agent="ae-builder"), 2)
+        self.assertEqual(run_guard("reel motion-build --video-id X", agent="qc-reviewer"), 2)
+        self.assertEqual(run_guard("reel motion-build --video-id X"), 0)                 # not an extra
+        self.assertEqual(run_guard("reel ae-status"), 0)
+        self.assertEqual(guard_write("C:/Users/x/AppData/Roaming/Adobe/After Effects/26.0/Adobe After Effects 26.0 Prefs.txt"), 2)
+        self.assertEqual(guard_write("C:/Users/x/Library/Preferences/Adobe/After Effects/26.0/Adobe After Effects 26.0 Prefs-indep-general.txt"), 2)
+
+    def test_session_context_mentions_motion(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            root = tmp / "C"
+            for d in ("assets", "data/Episodes"):
+                (root / d).mkdir(parents=True)
+            (root / "data/Episodes/POD.m4a").write_bytes(b"x")
+            r = subprocess.run([sys.executable, "-B", str(SK / "hooks/session_context.py")], input=json.dumps({"cwd": str(root)}),
+                               capture_output=True, text=True, encoding="utf-8", cwd=str(root))
+            self.assertIn("motion", r.stdout)
+            self.assertIn("POD", r.stdout)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_reels_plan_md_motion_flag(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            from lib.episode import EpisodePaths
+            from lib.reels import write_reels_plan_md
+            root = tmp / "C"
+            (root / "assets").mkdir(parents=True)
+            (root / "data").mkdir(parents=True)
+            ep = EpisodePaths(root, "EP1")
+            ep.ensure_project()
+            md = write_reels_plan_md(ep, {"duration_ms": 60000, "candidates": [
+                {"id": "R01", "total": 7.0, "type": "advice", "type_label": "x", "in_ms": 0, "out_ms": 30000,
+                 "duration_ms": 30000, "title": "t", "motion_fit": True, "motion_why": "numbers and steps"}]})
+            self.assertIn("motion", md.read_text(encoding="utf-8"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
