@@ -15,6 +15,11 @@
 - `package.py` refuses to build (exit 1, with a `how:` hint) when `whynot-cut/profiles/` contains any folder other than
   `_template` and `example-*`.
 
+### Fixed
+- Executable bits are set in git's index (`100755`) for `bin/reel`, `hooks/run_python.sh`, `hooks/*.py`,
+  `setup/setup_env.sh`, `setup/setup_env.py`, `examples/make_demo.py` and `tools/test.sh`. Windows checkouts had them as
+  `100644`. Tests pin the index modes and the `package.py` zip exec set to the same list.
+
 ### Migration
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the
   zip). A client folder that relied on the folder-name match must now have its own profile: copy that private profile

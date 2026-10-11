@@ -455,5 +455,51 @@ class TestPackageProfileRule(unittest.TestCase):
         zf.assert_not_called()
 
 
+def _git_index_modes(root: Path) -> dict[str, str]:
+    """Repo-relative path -> git index mode for every tracked file. Skips when git or a git checkout is missing."""
+    import shutil
+    if shutil.which("git") is None:
+        raise unittest.SkipTest("git is not installed")
+    if not (root / ".git").exists():
+        raise unittest.SkipTest("not a git checkout (e.g. running from an unzipped release)")
+    r = subprocess.run(["git", "-C", str(root), "ls-files", "-s"], capture_output=True, text=True, encoding="utf-8")
+    if r.returncode != 0:
+        raise unittest.SkipTest(f"git ls-files failed: {r.stderr.strip()}")
+    modes = {}
+    for line in r.stdout.splitlines():
+        meta, _, path = line.partition("\t")
+        modes[path] = meta.split()[0]
+    return modes
+
+
+def _expected_exec_paths() -> set[str]:
+    """Repo-relative paths that must be 100755 in git: the plugin's executables, every hooks/*.py, and tools/test.sh."""
+    plugin = {"whynot-cut/bin/reel", "whynot-cut/hooks/run_python.sh", "whynot-cut/setup/setup_env.sh",
+              "whynot-cut/setup/setup_env.py", "whynot-cut/examples/make_demo.py"}
+    hooks = {f"whynot-cut/hooks/{p.name}" for p in (SK / "hooks").glob("*.py")}
+    return plugin | hooks | {"tools/test.sh"}
+
+
+class TestExecutableBits(unittest.TestCase):
+    """core.filemode is off on Windows, so the exec bit must be set in git's index; package.py's zip modes must match it."""
+    def setUp(self):
+        self.modes = _git_index_modes(SK.parent)
+
+    def test_index_mode_is_100755_for_exactly_the_executables(self):
+        want = _expected_exec_paths()
+        got = {p for p, m in self.modes.items() if m == "100755"}
+        self.assertEqual(sorted(got), sorted(want))
+        for p in sorted(want):
+            self.assertEqual(self.modes.get(p), "100755", p)
+
+    def test_zip_exec_set_matches_git_index(self):
+        pk = _load_package_module()
+        if pk is None:
+            self.skipTest("package.py is not part of this layout")
+        git_plugin = {p[len("whynot-cut/"):] for p, m in self.modes.items()
+                      if m == "100755" and p.startswith("whynot-cut/")}
+        self.assertEqual(sorted(pk.EXEC), sorted(git_plugin))
+
+
 if __name__ == "__main__":
     unittest.main()
