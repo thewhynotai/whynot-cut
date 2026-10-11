@@ -172,7 +172,7 @@ test("host_info steps are independent: failing getBackgroundColor, version and a
   assert.equal(r.ok, true, "core host info was readable, so host_info itself is ok");
   const steps = (r.detail as { steps: Array<{ step: string; ok: boolean; error?: string }> }).steps;
   const by = Object.fromEntries(steps.map((s) => [s.step, s]));
-  assert.equal(by.premiere_version?.ok, false);
+  assert.equal(by["premiere_version (informational)"]?.ok, true, "premiere_version is informational: it never fails the step list");
   assert.equal(by.background_color?.ok, false);
   assert.match(by.background_color?.error ?? "", /bg boom/);
   assert.equal(by["active_project (read-only)"]?.ok, false);
@@ -194,11 +194,11 @@ test("spike sources never read navigator.clipboard outside the Copy results hand
   assert.doesNotMatch(outside.replace(/\/\/.*$/gm, ""), /navigator|clipboard/);
 });
 
-test("spike manifest asks for clipboard readAndWrite and the version is bumped to 0.1.1 everywhere", () => {
+test("spike manifest asks for clipboard readAndWrite and the version is bumped to 0.1.2 everywhere", () => {
   const manifest = JSON.parse(readFileSync(join(root, "spike", "manifest.json"), "utf8"));
   assert.equal(manifest.requiredPermissions.clipboard, "readAndWrite");
   assert.equal(manifest.requiredPermissions.localFileSystem, "fullAccess");
-  assert.equal(manifest.version, "0.1.1");
+  assert.equal(manifest.version, "0.1.2");
   const spike = readFileSync(join(root, "spike", "src", "spike.ts"), "utf8");
-  assert.match(spike, /SPIKE_VERSION = "0\.1\.1"/);
+  assert.match(spike, /SPIKE_VERSION = "0\.1\.2"/);
 });

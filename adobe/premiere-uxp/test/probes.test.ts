@@ -23,15 +23,21 @@ const OPS = [
   "host_info",
   "ws_loopback",
   "create_project",
+  "scratch_disk",
   "import_fcp7_xml",
+  "undo_transaction",
   "sequence_settings",
   "export_frame",
   "keyframes_motion_opacity_crop",
+  "keyframe_time_basis",
   "effects_by_match_name",
+  "clip_edits_transitions_tracks",
   "track_rename",
   "markers",
-  "undo_transaction",
+  "project_views",
   "save_close_open",
+  "save_as",
+  "encoder_export",
 ];
 
 test("without a config only the read-only probes run; every other probe is skipped with ok:null 'no config'", async () => {

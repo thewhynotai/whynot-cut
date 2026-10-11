@@ -2,5 +2,6 @@
   "xml_path": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/PODCAST-TEST/output/projects/EP02TEST_R02/07_premiere/interchange/EP02TEST_R02_RE_EDIT_base.xml",
   "work_dir": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/_uxp-spike",
   "still_png": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/PODCAST-TEST/output/projects/EP02TEST_R02/03_broll/typography/GFX_002.png",
-  "ws_url": null
+  "ws_url": null,
+  "encoder_export": false
 }

@@ -27,6 +27,8 @@ export interface SpikeConfig {
   work_dir: string;
   ws_url?: string;
   still_png?: string;
+  /** opt-in: try EncoderManager.exportSequence (may start Media Encoder) */
+  encoder_export?: boolean;
 }
 
 export interface TargetClip {
@@ -49,6 +51,10 @@ export interface Ctx {
   projectPath?: string;
   sequence?: Sequence;
   target?: TargetClip;
+  /** set by export_frame when a form worked: exports one frame at a sequence time (used by keyframe_time_basis) */
+  /** test hook: shorter polling for export_frame (defaults 1.5 s after a `false` return, 10 s after `true` / the d.ts forms) */
+  timing?: { shortPollMs?: number; longPollMs?: number };
+  exportFrameTo?: (t: number, base: string) => Promise<{ path: string; found: boolean; bytes: number | null; returned: unknown }>;
   /** what later probes expect to find again after save/close/open */
   expect: { videoTrackName?: string; markerCount?: number; sequenceName?: string };
   notes: string[];
@@ -69,6 +75,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 interface StepRecord {
   step: string;
   ok: boolean;
+  /** ISO start time: lets a long step be matched to a modal dialog someone had to click */
+  at: string;
   ms: number;
   info?: unknown;
   error?: string;
@@ -81,10 +89,12 @@ class Steps {
     const t0 = Date.now();
     try {
       const info = await fn();
-      this.steps.push({ step, ok: true, ms: Date.now() - t0, ...(info === undefined ? {} : { info: jsonSafe(info) }) });
+      this.steps.push({ step, ok: true, at: new Date(t0).toISOString(), ms: Date.now() - t0, ...(info === undefined ? {} : { info: jsonSafe(info) }) });
       return info;
     } catch (e) {
-      this.steps.push({ step, ok: false, ms: Date.now() - t0, error: errText(e) });
+      // a step can keep what it measured even when it fails: throw Object.assign(new Error(msg), { info })
+      const kept = (e as { info?: unknown } | null)?.info;
+      this.steps.push({ step, ok: false, at: new Date(t0).toISOString(), ms: Date.now() - t0, error: errText(e), ...(kept === undefined ? {} : { info: jsonSafe(kept) }) });
       return undefined;
     }
   }
@@ -308,14 +318,36 @@ const hostInfo: ProbeDef<Ctx> = {
     const steps = new Steps();
     const host = ctx.uxp.host ?? {};
     const core = await steps.run("uxp_host", async () => {
-      const info = { name: host.name, version: host.version, uiLocale: host.uiLocale, uxp_versions: ctx.uxp.versions ?? null, host_keys: Object.getOwnPropertyNames(host) };
+      const versions = (ctx.uxp.versions ?? {}) as Record<string, unknown>;
+      // `uxp.versions` has non-enumerable properties (JSON gives {}): read the keys explicitly
+      const info = {
+        name: host.name,
+        version: host.version,
+        uiLocale: host.uiLocale,
+        uxp_version: versions.uxp,
+        plugin_version: versions.plugin,
+        uxp_versions_keys: Object.getOwnPropertyNames(versions),
+        host_keys: Object.getOwnPropertyNames(host),
+      };
       expect(info.name || info.version, "uxp.host has neither name nor version");
       return info;
     });
-    await steps.run("premiere_version", async () => {
-      const v = await ctx.ppro.Application.version;
-      expect(v, "Application.version is empty");
-      return { version: v };
+    // Informational only: on 26.5.2 Application.version resolves to an empty value, uxp.host.version is the source.
+    await steps.run("premiere_version (informational)", async () => {
+      const out: Record<string, unknown> = { host_version: host.version };
+      try {
+        const app = ctx.ppro.Application as unknown as Record<string, unknown>;
+        const raw = app.version;
+        out.raw = describeValue(raw);
+        const awaited = typeof raw === "function" ? await (raw as () => unknown).call(app) : await raw;
+        out.awaited = describeValue(awaited);
+        out.application_version = awaited;
+      } catch (e) {
+        out.error = errText(e);
+      }
+      out.value = (typeof out.application_version === "string" && out.application_version) || host.version || null;
+      out.source = typeof out.application_version === "string" && out.application_version ? "Application.version" : "uxp.host.version";
+      return out;
     });
     await steps.run("background_color", async () => {
       const fn = host.getBackgroundColor;
@@ -325,7 +357,8 @@ const hostInfo: ProbeDef<Ctx> = {
     await steps.run("theme", async () => ({
       prefers_dark: (globalThis as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? null,
     }));
-    await steps.run("os", async () => ({ platform: ctx.os?.platform?.(), release: ctx.os?.release?.(), arch: ctx.os?.arch?.() }));
+    // os.release() returns a compatibility string on UXP (6.2.9200 on Windows 11): not an OS build
+    await steps.run("os", async () => ({ platform: ctx.os?.platform?.(), release_compat_string: ctx.os?.release?.(), arch: ctx.os?.arch?.() }));
     await steps.run("home_and_config", async () => ({ home: ctx.home, home_via: ctx.homeVia, config_loaded: ctx.config !== null, config_error: ctx.configError }));
     await steps.run("fs_members", async () => Object.fromEntries(["readFile", "writeFile", "mkdir", "lstat", "readdir", "readFileSync", "writeFileSync", "mkdirSync", "lstatSync", "existsSync"].map((k) => [k, typeof ctx.fs[k]])));
     await steps.run("globals", async () => ({
@@ -498,6 +531,157 @@ const importXml: ProbeDef<Ctx> = {
   },
 };
 
+// ---------------------------------------------------------------------------------------------- 0.1.2 helpers
+
+/** Type / constructor / keys / value of anything, for logging values whose shape is the question. */
+function describeValue(v: unknown): Record<string, unknown> {
+  const t = typeof v;
+  if (v === null || v === undefined || (t !== "object" && t !== "function")) return { type: t, value: v === undefined ? "undefined" : v };
+  const o = v as Record<string, unknown>;
+  let json: unknown;
+  try {
+    json = jsonSafe(v);
+  } catch {
+    json = "[unserialisable]";
+  }
+  return { type: t, constructor: (v as { constructor?: { name?: string } }).constructor?.name, own_keys: Object.getOwnPropertyNames(v), x: o.x, y: o.y, json };
+}
+
+function pointOf(v: unknown): { x: number; y: number } | null {
+  const o = v as { x?: unknown; y?: unknown } | null | undefined;
+  return o && typeof o.x === "number" && typeof o.y === "number" ? { x: o.x, y: o.y } : null;
+}
+
+/** Fail a step but keep what was measured: Steps.run stores `info` of a thrown error. */
+function failWith(message: string, info: unknown): never {
+  throw Object.assign(new Error(message), { info });
+}
+
+function errDetail(e: unknown): Record<string, unknown> {
+  const o = (e ?? {}) as { message?: unknown; name?: unknown; code?: unknown; stack?: unknown };
+  return { message: errText(e), name: o.name, code: o.code, own_keys: e && typeof e === "object" ? Object.getOwnPropertyNames(e) : [], stack: typeof o.stack === "string" ? o.stack.split("\n").slice(0, 6).join("\n") : undefined };
+}
+
+async function pollFile(fs: UxpFs, path: string, maxMs: number, everyMs = 250): Promise<{ found: boolean; bytes: number | null; after_ms: number }> {
+  const t0 = Date.now();
+  for (;;) {
+    const st = await statOf(fs, path);
+    if (st.exists && (st.bytes ?? 0) > 0) return { found: true, bytes: st.bytes, after_ms: Date.now() - t0 };
+    if (Date.now() - t0 >= maxMs) return { found: false, bytes: st.bytes, after_ms: Date.now() - t0 };
+    await sleep(everyMs);
+  }
+}
+
+/** The plugin's own temp folder: a writable folder whose path has no spaces (the d.ts example uses `C:/temp/`). */
+async function tempDir(ctx: Ctx): Promise<string | null> {
+  try {
+    const lfs = ctx.uxp.storage?.localFileSystem as { getTemporaryFolder?: () => Promise<{ nativePath?: string }> } | undefined;
+    const folder = await lfs?.getTemporaryFolder?.();
+    return folder?.nativePath ? cleanPath(folder.nativePath) : null;
+  } catch {
+    return null;
+  }
+}
+
+interface ClipWindow {
+  start_s: number;
+  in_s: number;
+  end_s: number;
+  duration_s: number;
+}
+
+async function windowOf(clip: VideoClipTrackItem): Promise<ClipWindow> {
+  const start = (await clip.getStartTime()).seconds;
+  const inP = (await clip.getInPoint()).seconds;
+  const end = (await clip.getEndTime()).seconds;
+  return { start_s: start, in_s: inP, end_s: end, duration_s: end - start };
+}
+
+const EPS = 0.02;
+const within = (t: number, lo: number, hi: number) => t >= lo - EPS && t <= hi + EPS;
+
+/** Which time window each read-back keyframe time falls into: clip-local [0,dur], media [in,in+dur], sequence [start,end]. */
+export function classifyTimes(times: number[], w: ClipWindow) {
+  return {
+    inside_local_window: times.map((t) => within(t, 0, w.duration_s)),
+    inside_media_window: times.map((t) => within(t, w.in_s, w.in_s + w.duration_s)),
+    inside_sequence_window: times.map((t) => within(t, w.start_s, w.end_s)),
+  };
+}
+
+/** True when the three windows (clip-local, media, sequence) are pairwise disjoint, so any landing is decisive. */
+export function windowsDisjoint(w: ClipWindow): boolean {
+  const local: [number, number] = [0, w.duration_s];
+  const media: [number, number] = [w.in_s, w.in_s + w.duration_s];
+  const seq: [number, number] = [w.start_s, w.end_s];
+  const overlap = (a: [number, number], b: [number, number]) => a[0] < b[1] + EPS && b[0] < a[1] + EPS;
+  return !overlap(local, media) && !overlap(local, seq) && !overlap(media, seq);
+}
+
+type Settings = Awaited<ReturnType<Sequence["getSettings"]>>;
+
+// ---------------------------------------------------------------------------------------------- sequence_settings
+
+const CODEC_CANDIDATES = ["Apple ProRes 422 LT", "ProRes 422 LT", "Apple ProRes 422", "Apple ProRes 422 HQ", "Apple ProRes 422 Proxy", "GoPro CineForm", "Uncompressed YUV 10 bit 4:2:2", "apcs"];
+
+/**
+ * Preview codec. The d.ts has no codec list or enum; the only value the API hands out is what getPreviewCodec()
+ * returns ("Animation" on the imported sequence). So: discover what the runtime exposes, prove the setter works by
+ * round-tripping the value the API returned, then try display names. Setter return values are always kept.
+ */
+async function previewCodecProbe(ctx: Ctx, project: Project, seq: Sequence): Promise<Record<string, unknown>> {
+  const { ppro } = ctx;
+  const s0 = await seq.getSettings();
+  const orig = await s0.getPreviewCodec();
+  const origFormat = await s0.getPreviewFileFormat();
+  const names = (o: unknown, rx: RegExp) => (o && (typeof o === "object" || typeof o === "function") ? Object.getOwnPropertyNames(o).filter((n) => rx.test(n)) : []);
+  const discovery = {
+    orig_codec: orig,
+    orig_file_format: origFormat,
+    sequence_settings_static_members: names(ppro.SequenceSettings, /codec|format|preview/i),
+    settings_instance_members: names(Object.getPrototypeOf(s0), /codec|format|preview/i),
+    ppro_members_matching: names(ppro, /codec|preset|format/i),
+    constants_members_matching: names(ppro.Constants, /codec|preview|format/i),
+  };
+  const attempt = async (label: string, change: (s: Settings) => Promise<unknown>) => {
+    const rec: Record<string, unknown> = { label };
+    const t0 = Date.now();
+    try {
+      const s = await seq.getSettings();
+      rec.setter_returned = await change(s);
+      rec.transaction_returned = tx(project, (ca) => add(ca, seq.createSetSettingsAction(s)));
+      const after = await seq.getSettings();
+      rec.read_codec = await after.getPreviewCodec();
+      rec.read_file_format = await after.getPreviewFileFormat();
+    } catch (e) {
+      rec.error = errText(e);
+    }
+    rec.ms = Date.now() - t0;
+    return rec;
+  };
+  const attempts: Array<Record<string, unknown>> = [];
+  attempts.push(await attempt(`file format round trip "${origFormat}"`, (s) => s.setPreviewFileFormat(origFormat)));
+  const round = await attempt(`codec round trip "${orig}" (the value the API returned)`, (s) => s.setPreviewCodec(orig));
+  attempts.push(round);
+  let accepted: string | null = null;
+  for (const candidate of CODEC_CANDIDATES) {
+    if (candidate === orig) continue;
+    const rec = await attempt(`codec -> "${candidate}"`, (s) => s.setPreviewCodec(candidate));
+    rec.wanted = candidate;
+    rec.took = rec.read_codec === candidate;
+    attempts.push(rec);
+    if (rec.took) {
+      accepted = candidate;
+      attempts.push(await attempt(`restore "${orig}"`, (s) => s.setPreviewCodec(orig)));
+      break;
+    }
+  }
+  const info = { discovery, round_trip_works: round.read_codec === orig && !round.error, accepted_candidate: accepted, attempts };
+  if (!info.round_trip_works) failWith("setPreviewCodec(current value) did not read back: the setter does not work as called", info);
+  if (!accepted) failWith(`no candidate value took (read-back stayed "${orig}"); see attempts for each setter return value`, info);
+  return info;
+}
+
 const sequenceSettings: ProbeDef<Ctx> = {
   op: "sequence_settings",
   run: async (ctx) => {
@@ -527,27 +711,28 @@ const sequenceSettings: ProbeDef<Ctx> = {
       };
     });
 
-    // The engine's targets (ppro_build.py): ProRes 422 LT previews, linear colour on, 8-bit, no max render quality.
-    const apply = async (label: string, change: (s: Awaited<ReturnType<Sequence["getSettings"]>>) => Promise<unknown>, read: (s: Awaited<ReturnType<Sequence["getSettings"]>>) => Promise<unknown>, want: unknown) => {
+    await steps.run("preview_codec: discover, round trip, try display names", () => previewCodecProbe(ctx, project, seq));
+
+    // The engine's targets (ppro_build.py): linear colour on, 8-bit, no max render quality.
+    const apply = async (label: string, change: (s: Settings) => Promise<unknown>, read: (s: Settings) => Promise<unknown>, want: unknown) => {
       const before = await read(await seq.getSettings());
       const s = await seq.getSettings();
       const setterResult = await change(s);
       expect(tx(project, (ca) => add(ca, seq.createSetSettingsAction(s))), `${label}: createSetSettingsAction transaction returned false`);
       const after = await read(await seq.getSettings());
       const info = { before, wanted: want, after, setter_returned: setterResult };
-      expect(JSON.stringify(after) === JSON.stringify(want), `${label}: read back ${JSON.stringify(after)} but wanted ${JSON.stringify(want)} (before ${JSON.stringify(before)})`);
+      if (JSON.stringify(after) !== JSON.stringify(want)) failWith(`${label}: read back ${JSON.stringify(after)} but wanted ${JSON.stringify(want)} (before ${JSON.stringify(before)})`, info);
       return info;
     };
-    await steps.run("preview_codec=apcs (ProRes 422 LT)", () => apply("previewCodec", (s) => s.setPreviewCodec("apcs"), (s) => s.getPreviewCodec(), "apcs"));
     await steps.run("composite_in_linear_color=true", () => apply("compositeInLinearColor", (s) => s.setCompositeInLinearColor(true), (s) => s.getCompositeInLinearColor(), true));
     await steps.run("maximum_bit_depth=false", () => apply("maximumBitDepth", (s) => s.setMaximumBitDepth(false), (s) => s.getMaximumBitDepth(), false));
     await steps.run("max_render_quality=false", () => apply("maxRenderQuality", (s) => s.setMaxRenderQuality(false), (s) => s.getMaxRenderQuality(), false));
     await steps.run("toggle_each_bool_and_back", async () => {
       const out: Record<string, unknown> = {};
       for (const [name, get, set] of [
-        ["composite_in_linear_color", (s: Awaited<ReturnType<Sequence["getSettings"]>>) => s.getCompositeInLinearColor(), (s: Awaited<ReturnType<Sequence["getSettings"]>>, v: boolean) => s.setCompositeInLinearColor(v)],
-        ["maximum_bit_depth", (s: Awaited<ReturnType<Sequence["getSettings"]>>) => s.getMaximumBitDepth(), (s: Awaited<ReturnType<Sequence["getSettings"]>>, v: boolean) => s.setMaximumBitDepth(v)],
-        ["max_render_quality", (s: Awaited<ReturnType<Sequence["getSettings"]>>) => s.getMaxRenderQuality(), (s: Awaited<ReturnType<Sequence["getSettings"]>>, v: boolean) => s.setMaxRenderQuality(v)],
+        ["composite_in_linear_color", (s: Settings) => s.getCompositeInLinearColor(), (s: Settings, v: boolean) => s.setCompositeInLinearColor(v)],
+        ["maximum_bit_depth", (s: Settings) => s.getMaximumBitDepth(), (s: Settings, v: boolean) => s.setMaximumBitDepth(v)],
+        ["max_render_quality", (s: Settings) => s.getMaxRenderQuality(), (s: Settings, v: boolean) => s.setMaxRenderQuality(v)],
       ] as const) {
         const orig = await get(await seq.getSettings());
         const flipped = !orig;
@@ -580,53 +765,164 @@ const sequenceSettings: ProbeDef<Ctx> = {
   },
 };
 
+// ---------------------------------------------------------------------------------------------- export_frame
+
+interface ExportAttempt {
+  id: string;
+  ext: string;
+  filename: (name: string) => string;
+  filepath: string;
+  dir: string;
+  /** the d.ts example forms: always give them the full poll */
+  longPoll: boolean;
+}
+
+/** Every filename / filepath spelling worth trying for one target folder `dir` (forward slashes, no trailing slash). */
+function exportForms(kind: string, dir: string, ext: string): ExportAttempt[] {
+  const back = dir.replace(/\//g, "\\");
+  const mk = (id: string, filename: (n: string) => string, filepath: string, longPoll = false): ExportAttempt => ({ id: `${kind}:${id}:${ext}`, ext, filename, filepath, dir, longPoll });
+  return [
+    mk("name + dir/", (n) => n, `${dir}/`),
+    mk("full path + dir/ (d.ts example form)", (n) => `${dir}/${n}`, `${dir}/`, true),
+    mk("full path + dir (no trailing slash)", (n) => `${dir}/${n}`, dir),
+    mk("name + dir\\ (backslashes)", (n) => n, `${back}\\`),
+    mk("full path\\ + dir\\ (backslashes)", (n) => `${back}\\${n}`, `${back}\\`),
+    mk("full path\\ + dir (backslashes, no trailing)", (n) => `${back}\\${n}`, back),
+    mk("name + dir (no trailing slash)", (n) => n, dir),
+  ];
+}
+
 const exportFrame: ProbeDef<Ctx> = {
   op: "export_frame",
-  timeoutMs: 180_000,
+  timeoutMs: 300_000,
   run: async (ctx) => {
     const cfg = needConfig(ctx);
     const { ppro } = ctx;
+    const project = await getProject(ctx);
     const seq = await getSequence(ctx);
-    const frame = await seq.getFrameSize();
-    const endS = (await seq.getEndTime()).seconds;
-    const dir = `${toForwardSlashes(cfg.work_dir).replace(/\/+$/, "")}/frames`;
-    await ensureDir(ctx.fs, dir);
-    const times = [Math.min(1, endS / 4), endS / 2].map((t) => Math.max(0, Math.round(t * 1000) / 1000));
     const steps = new Steps();
-    let i = 0;
-    for (const t of times) {
-      i++;
-      await steps.run(`frame_${i}_at_${t}s`, async () => {
-        const name = `spike_frame_${ctx.stamp}_${i}.png`;
-        const t0 = Date.now();
-        // exportSequenceFrame(sequence, time, filename, filepath, w, h): the doc example shows filename as a full
-        // path but names the folder in `filepath`; try (name, dir/) first, then (full path, dir/).
-        const attempts: Array<{ form: string; filename: string; returned?: boolean; error?: string; exists: boolean; bytes: number | null }> = [];
-        let winner: (typeof attempts)[number] | undefined;
-        for (const [form, filename] of [["name + dir/", name], ["full path + dir/", `${dir}/${name.replace(".png", "_b.png")}`]] as const) {
-          const rec: (typeof attempts)[number] = { form, filename, exists: false, bytes: null };
+    const workDir = `${cleanPath(cfg.work_dir)}/frames`;
+    await ensureDir(ctx.fs, workDir);
+
+    const prep = await steps.run("prepare: activate sequence, size, media state", async () => {
+      const info: Record<string, unknown> = {};
+      for (const [k, fn] of [
+        ["openSequence", () => project.openSequence(seq)],
+        ["setActiveSequence", () => project.setActiveSequence(seq)],
+      ] as const) {
+        try {
+          info[k] = await fn();
+        } catch (e) {
+          info[`${k}_error`] = errText(e);
+        }
+      }
+      try {
+        info.done_analyzing_for_video_effects = await seq.isDoneAnalyzingForVideoEffects();
+      } catch (e) {
+        info.done_analyzing_error = errText(e);
+      }
+      const frame = await seq.getFrameSize();
+      const endS = (await seq.getEndTime()).seconds;
+      let firstStart = Infinity;
+      const track0 = await seq.getVideoTrack(0);
+      for (const c of track0.getTrackItems(ppro.Constants.TrackItemType.CLIP, false)) firstStart = Math.min(firstStart, (await c.getStartTime()).seconds);
+      const t1 = Math.min(endS - 0.1, (Number.isFinite(firstStart) ? firstStart : 0) + 0.5);
+      const t2 = Math.max(0, Math.min(endS - 0.1, endS * 0.4));
+      const offline: string[] = [];
+      try {
+        const items = await (await project.getRootItem()).getItems();
+        for (const item of items) {
           try {
-            rec.returned = await ppro.Exporter.exportSequenceFrame(seq, tickSeconds(ctx, t), filename, `${dir}/`, frame.width, frame.height);
-          } catch (e) {
-            rec.error = errText(e);
-          }
-          const target = form === "name + dir/" ? `${dir}/${name}` : filename;
-          const st = await statOf(ctx.fs, target);
-          rec.exists = st.exists;
-          rec.bytes = st.bytes;
-          attempts.push(rec);
-          if (st.exists && (st.bytes ?? 0) > 0) {
-            winner = rec;
-            break;
+            if (await ppro.ClipProjectItem.cast(item).isOffline()) offline.push(item.name);
+          } catch {
+            // bins and sequences have no offline state
           }
         }
-        expect(winner, `no PNG appeared in ${dir}: ${JSON.stringify(attempts)}`);
-        return { t_s: t, ms: Date.now() - t0, width: frame.width, height: frame.height, used: winner.form, path: winner.form === "name + dir/" ? `${dir}/${name}` : winner.filename, bytes: winner.bytes, attempts };
-      });
+      } catch (e) {
+        info.media_state_error = errText(e);
+      }
+      return { ...info, width: frame.width, height: frame.height, sequence_end_s: endS, first_v1_clip_start_s: Number.isFinite(firstStart) ? firstStart : null, t1, t2, offline_items: offline };
+    });
+    if (!prep) return steps.outcome();
+    const { width, height, t1, t2 } = prep;
+
+    const dirs: Array<{ kind: string; dir: string }> = [{ kind: "work", dir: workDir }];
+    const tmp = await steps.run("temp folder (no spaces in the path)", async () => {
+      const d = await tempDir(ctx);
+      expect(d, "uxp.storage.localFileSystem.getTemporaryFolder() gave no path");
+      return { dir: d, has_spaces: /\s/.test(d) };
+    });
+    if (tmp) dirs.push({ kind: "temp", dir: tmp.dir });
+
+    const run = async (a: ExportAttempt, t: number, tag: string, movePlayhead: boolean) => {
+      const name = `exp_${ctx.stamp}_${tag}.${a.ext}`;
+      const expected = `${a.dir}/${name}`;
+      const rec: Record<string, unknown> = { form: a.id, filename: a.filename(name), filepath: a.filepath, t_s: t, move_playhead: movePlayhead };
+      if (movePlayhead) {
+        try {
+          rec.setPlayerPosition = await seq.setPlayerPosition(tickSeconds(ctx, t));
+        } catch (e) {
+          rec.setPlayerPosition_error = errText(e);
+        }
+      }
+      const t0 = Date.now();
+      try {
+        rec.returned = await ppro.Exporter.exportSequenceFrame(seq, tickSeconds(ctx, t), a.filename(name), a.filepath, width, height);
+      } catch (e) {
+        rec.error = errDetail(e);
+      }
+      rec.call_ms = Date.now() - t0;
+      const poll = await pollFile(ctx.fs, expected, a.longPoll || rec.returned === true ? (ctx.timing?.longPollMs ?? 10_000) : (ctx.timing?.shortPollMs ?? 1_500), 50);
+      rec.expected_path = expected;
+      rec.found = poll.found;
+      rec.bytes = poll.bytes;
+      rec.found_after_ms = poll.after_ms;
+      return rec;
+    };
+
+    let winner: ExportAttempt | undefined;
+    await steps.run("frame 1: try every form until a file appears", async () => {
+      const list: Array<{ a: ExportAttempt; move: boolean }> = [];
+      for (const d of dirs) for (const a of exportForms(d.kind, d.dir, "png")) list.push({ a, move: false });
+      for (const ext of ["jpg", "tif", "bmp"]) list.push({ a: exportForms("work", workDir, ext)[1] as ExportAttempt, move: false });
+      for (const a of exportForms("work", workDir, "png").slice(0, 2)) list.push({ a, move: true });
+      const attempts: Array<Record<string, unknown>> = [];
+      let n = 0;
+      for (const { a, move } of list) {
+        const rec = await run(a, t1, `f1_${++n}`, move);
+        attempts.push(rec);
+        if (rec.found) {
+          winner = a;
+          break;
+        }
+      }
+      const info = { width, height, winner: winner?.id ?? null, attempts };
+      if (!winner) failWith(`no export form produced a file (${attempts.length} attempts, returned values: ${[...new Set(attempts.map((r) => String(r.returned)))].join(", ")})`, info);
+      return info;
+    });
+    await steps.run("frame 2: the winning form at a second time", async () => {
+      const forms = winner ? [winner] : exportForms("work", workDir, "png").slice(0, 2);
+      const attempts: Array<Record<string, unknown>> = [];
+      for (const a of forms) {
+        const rec = await run(a, t2, "f2", false);
+        attempts.push(rec);
+        if (rec.found) return { winner: a.id, attempts };
+      }
+      return failWith("second frame not produced", { attempts });
+    });
+    if (winner) {
+      const w = winner;
+      /** Used by the time-basis probe to render frames at known sequence times. */
+      ctx.exportFrameTo = async (t: number, base: string) => {
+        const rec = await run(w, t, base.replace(/[^A-Za-z0-9_-]/g, "_"), false);
+        return { path: String(rec.expected_path), found: rec.found === true, bytes: (rec.bytes as number | null) ?? null, returned: rec.returned };
+      };
     }
-    return steps.outcome({ sequence_end_s: endS, out_dir: dir });
+    return steps.outcome({ out_dir: workDir, winner: winner?.id ?? null });
   },
 };
+
+// ---------------------------------------------------------------------------------------------- keyframes
 
 const keyframes: ProbeDef<Ctx> = {
   op: "keyframes_motion_opacity_crop",
@@ -639,10 +935,141 @@ const keyframes: ProbeDef<Ctx> = {
       return { source: t.source, track_index: t.trackIndex, start_s: (await t.clip.getStartTime()).seconds, end_s: (await t.clip.getEndTime()).seconds, in_point_s: (await t.clip.getInPoint()).seconds, notes: ctx.notes.slice() };
     });
     if (target && ctx.target) await stillKeyframes(ctx, project, steps, ctx.target);
-    await timeBasis(ctx, project, steps);
     return steps.outcome();
   },
 };
+
+/** Motion Position: the failing call is isolated (inspect, createKeyframe per value form, time-varying, add). */
+async function positionKeyframes(ctx: Ctx, project: Project, steps: Steps, motion: Component): Promise<void> {
+  const { ppro } = ctx;
+  const found = findParam(motion, /^position$/i);
+  if (!found) {
+    await steps.run("position: find param", async () => failWith("no param matching /^position$/", { params: Array.from({ length: motion.getParamCount() }, (_, i) => motion.getParam(i).displayName) }));
+    return;
+  }
+  const { param } = found;
+  const seq = await getSequence(ctx);
+  const frame = await seq.getFrameSize();
+  const inspected = await steps.run("position: inspect start value and values at 0 s / 1 s", async () => {
+    const sv = await param.getStartValue();
+    const at0 = await param.getValueAtTime(tickSeconds(ctx, 0));
+    const at1 = await param.getValueAtTime(tickSeconds(ctx, 1));
+    const inner = (sv as unknown as { value?: { value?: unknown } } | undefined)?.value?.value;
+    const base = pointOf(inner) ?? pointOf(at0);
+    return {
+      keyframes_supported: await param.areKeyframesSupported(),
+      time_varying: param.isTimeVarying(),
+      start_value: describeValue(sv),
+      start_value_value: describeValue((sv as unknown as { value?: unknown } | undefined)?.value),
+      start_value_inner: describeValue(inner),
+      value_at_0s: describeValue(at0),
+      value_at_1s: describeValue(at1),
+      frame: { width: frame.width, height: frame.height },
+      base,
+      units: base ? (base.x <= 2 && base.y <= 2 ? "normalised 0-1" : "pixels") : "unknown",
+      inner,
+    };
+  });
+  const base = inspected?.base ?? { x: 0.5, y: 0.5 };
+  const normalised = base.x <= 2 && base.y <= 2;
+  const startObj = inspected?.inner;
+  const builders: Array<[string, (x: number, y: number) => unknown]> = [
+    ["new PointF(x, y)", (x, y) => new ppro.PointF(x, y)],
+    ["PointF(x, y) without new", (x, y) => (ppro.PointF as unknown as (a: number, b: number) => PointF)(x, y)],
+    [
+      "new PointF() then .x/.y",
+      (x, y) => {
+        const p = new ppro.PointF();
+        p.x = x;
+        p.y = y;
+        return p;
+      },
+    ],
+    ["plain {x, y}", (x, y) => ({ x, y })],
+    ["array [x, y]", (x, y) => [x, y]],
+    ["the start value object as returned", () => startObj],
+    ["new PointF in the other unit system", (x, y) => (normalised ? new ppro.PointF(x * frame.width, y * frame.height) : new ppro.PointF(x / frame.width, y / frame.height))],
+  ];
+  const good = await steps.run("position: createKeyframe with each value form", async () => {
+    const results: Array<Record<string, unknown>> = [];
+    const ok: string[] = [];
+    for (const [name, make] of builders) {
+      try {
+        const kf = param.createKeyframe(make(base.x, base.y) as PointF);
+        results.push({ form: name, ok: true, keyframe_value: describeValue((kf as unknown as { value?: unknown }).value) });
+        ok.push(name);
+      } catch (e) {
+        results.push({ form: name, ok: false, error: errText(e) });
+      }
+    }
+    if (ok.length === 0) failWith("createKeyframe rejected every value form", { results });
+    return { results, accepted_forms: ok };
+  });
+  if (!good) return;
+  await steps.run("position: createSetTimeVaryingAction(true)", async () => {
+    expect(tx(project, (ca) => add(ca, param.createSetTimeVaryingAction(true))), "setTimeVarying transaction returned false");
+    return { time_varying: param.isTimeVarying() };
+  });
+  const dx = normalised ? 0.05 : 50;
+  for (const name of good.accepted_forms) {
+    const make = builders.find((b) => b[0] === name)?.[1];
+    if (!make) continue;
+    const done = await steps.run(`position: addKeyframe x2 via "${name}"`, async () => {
+      const kA = param.createKeyframe(make(base.x, base.y) as PointF);
+      kA.position = tickSeconds(ctx, 0);
+      const kB = param.createKeyframe(make(base.x + dx, base.y) as PointF);
+      kB.position = tickSeconds(ctx, 1);
+      expect(
+        tx(project, (ca) => {
+          add(ca, param.createAddKeyframeAction(kA));
+          add(ca, param.createAddKeyframeAction(kB));
+        }),
+        "addKeyframe transaction returned false",
+      );
+      const times = param.getKeyframeListAsTickTimes().map((t) => t.seconds);
+      expect(times.length >= 2, `expected >= 2 position keyframes, read back ${times.length}`);
+      return { read_back_times_s: times, value_at_0s: describeValue(await param.getValueAtTime(tickSeconds(ctx, 0))), value_at_1s: describeValue(await param.getValueAtTime(tickSeconds(ctx, 1))), set: { from: base, to: { x: base.x + dx, y: base.y } } };
+    });
+    if (done) break;
+  }
+}
+
+/** Crop: Motion's built-in "Crop Left/Top/Right/Bottom" and the separate effect `AE.ADBE AECrop`. */
+async function cropKeyframes(ctx: Ctx, project: Project, steps: Steps, chain: VideoComponentChain, motion: { comp: Component } | null): Promise<void> {
+  const { ppro } = ctx;
+  if (motion) {
+    const m = motion.comp;
+    await steps.run("crop: Motion built-in Crop params", async () => {
+      const out: Array<Record<string, unknown>> = [];
+      for (const name of ["Crop Left", "Crop Top", "Crop Right", "Crop Bottom"]) {
+        const f = findParam(m, new RegExp(`^${name}$`, "i"));
+        if (!f) {
+          out.push({ name, found: false });
+          continue;
+        }
+        const sv = await f.param.getStartValue();
+        out.push({ name, found: true, index: f.index, keyframes_supported: await f.param.areKeyframesSupported(), start_value: describeValue((sv as unknown as { value?: { value?: unknown } } | undefined)?.value?.value) });
+      }
+      if (out.some((o) => o.found === false)) failWith("Motion lacks some Crop params", out);
+      return out;
+    });
+    await steps.run("crop: Motion Crop Left 0->100", () => numericKeyframes(ctx, project, m, /^crop left$/i, { t: 0, v: 0 }, { t: 1, v: 100 }));
+    await steps.run("crop: Motion Crop Right 0->10", () => numericKeyframes(ctx, project, m, /^crop right$/i, { t: 0, v: 0 }, { t: 1, v: 10 }));
+  }
+  await steps.run("crop effect AE.ADBE AECrop: create, append, Left 0->10", async () => {
+    const names = await ppro.VideoFilterFactory.getMatchNames();
+    const pick = names.find((n) => n === "AE.ADBE AECrop") ?? names.find((n) => /AECrop/i.test(n));
+    expect(pick, "no filter named AE.ADBE AECrop in VideoFilterFactory.getMatchNames()");
+    const before = chain.getComponentCount();
+    const comp = await ppro.VideoFilterFactory.createComponent(pick);
+    expect(tx(project, (ca) => add(ca, chain.createAppendComponentAction(comp))), "append transaction returned false");
+    const crop = await findComponent(chain, /AECrop/i);
+    expect(crop, `crop effect not found in the chain after append (chain ${before} -> ${chain.getComponentCount()})`);
+    const params = Array.from({ length: crop.comp.getParamCount() }, (_, i) => crop.comp.getParam(i).displayName);
+    const left = await numericKeyframes(ctx, project, crop.comp, /^left$/i, { t: 0, v: 0 }, { t: 1, v: 10 });
+    return { used: pick, chain_before: before, chain_after: chain.getComponentCount(), params, left };
+  });
+}
 
 /** Motion / Opacity / Crop keyframes on the target clip (the placed still, else a clip of the scratch sequence). */
 async function stillKeyframes(ctx: Ctx, project: Project, steps: Steps, target: TargetClip): Promise<void> {
@@ -660,27 +1087,7 @@ async function stillKeyframes(ctx: Ctx, project: Project, steps: Steps, target: 
   if (motion) {
     await steps.run("motion.scale 100->110", () => numericKeyframes(ctx, project, motion.comp, /^scale$/i, { t: 0, v: 100 }, { t: 1, v: 110 }));
     await steps.run("motion.rotation 0->5", () => numericKeyframes(ctx, project, motion.comp, /^rotation$/i, { t: 0, v: 0 }, { t: 1, v: 5 }));
-    await steps.run("motion.position (PointF)", async () => {
-      const found = findParam(motion.comp, /^position$/i);
-      expect(found, "no param matching /^position$/");
-      const { param } = found;
-      const start = (await param.getStartValue()).value.value as PointF;
-      const kA = param.createKeyframe(new ppro.PointF(start.x, start.y));
-      kA.position = tickSeconds(ctx, 0);
-      const kB = param.createKeyframe(new ppro.PointF(start.x + 0.05, start.y));
-      kB.position = tickSeconds(ctx, 1);
-      expect(tx(project, (ca) => add(ca, param.createSetTimeVaryingAction(true))), "setTimeVarying transaction returned false");
-      expect(
-        tx(project, (ca) => {
-          add(ca, param.createAddKeyframeAction(kA));
-          add(ca, param.createAddKeyframeAction(kB));
-        }),
-        "addKeyframe transaction returned false",
-      );
-      const times = param.getKeyframeListAsTickTimes().map((t) => t.seconds);
-      expect(times.length >= 2, `expected >= 2 position keyframes, read back ${times.length}`);
-      return { start: { x: start.x, y: start.y }, read_back_times_s: times, value_at_1s: await param.getValueAtTime(tickSeconds(ctx, 1)) };
-    });
+    await positionKeyframes(ctx, project, steps, motion.comp);
     await steps.run("motion.scale interpolation -> bezier at 1s", async () => {
       const found = findParam(motion.comp, /^scale$/i);
       expect(found, "no scale param");
@@ -698,106 +1105,178 @@ async function stillKeyframes(ctx: Ctx, project: Project, steps: Steps, target: 
   });
   if (opacity) await steps.run("opacity 100->0", () => numericKeyframes(ctx, project, opacity.comp, /^opacity$/i, { t: 0, v: 100 }, { t: 1, v: 0 }));
 
-  let crop = await findComponent(chain, /ADBE Crop/i);
-  if (!crop) {
-    await steps.run("crop: add via VideoFilterFactory", async () => {
-      const names = await ppro.VideoFilterFactory.getMatchNames();
-      const cands = names.filter((n) => /ADBE Crop/i.test(n));
-      expect(cands.length > 0, "no filter match name matching /ADBE Crop/ in VideoFilterFactory");
-      const pick = cands.find((n) => /^AE\.ADBE Crop$/i.test(n)) ?? cands[0] ?? "";
-      const comp = await ppro.VideoFilterFactory.createComponent(pick);
-      expect(tx(project, (ca) => add(ca, chain.createAppendComponentAction(comp))), "append crop transaction returned false");
-      crop = await findComponent(chain, /ADBE Crop/i);
-      expect(crop, "crop not in the chain after append");
-      return { candidates: cands, used: pick };
-    });
-  }
-  if (crop) {
-    const c = crop;
-    await steps.run("crop.left 0->10", () => numericKeyframes(ctx, project, c.comp, /^left$/i, { t: 0, v: 0 }, { t: 1, v: 10 }));
-    await steps.run("crop.top 0->5", () => numericKeyframes(ctx, project, c.comp, /^top$/i, { t: 0, v: 0 }, { t: 1, v: 5 }));
-  }
+  await cropKeyframes(ctx, project, steps, chain, motion);
 }
 
-interface ClipWindow {
-  start_s: number;
-  in_s: number;
-  end_s: number;
-  duration_s: number;
-}
-
-const EPS = 0.02;
-const within = (t: number, lo: number, hi: number) => t >= lo - EPS && t <= hi + EPS;
-
-/** Which time window each read-back keyframe time falls into: clip-local [0,dur], media [in,in+dur], sequence [start,end]. */
-export function classifyTimes(times: number[], w: ClipWindow) {
-  return {
-    inside_local_window: times.map((t) => within(t, 0, w.duration_s)),
-    inside_media_window: times.map((t) => within(t, w.in_s, w.in_s + w.duration_s)),
-    inside_sequence_window: times.map((t) => within(t, w.start_s, w.end_s)),
-  };
-}
+// ---------------------------------------------------------------------------------------------- keyframe_time_basis
 
 /**
- * Keyframe time basis. A still placed at the end has in-point 0, so it cannot tell 0-relative from in-relative.
- * Use a clip of the imported scratch sequence with a non-zero in-point AND a non-zero start, and key three
- * different params with the three candidate bases (0-relative, in-point-relative, start-relative). The read-back
- * times, the values at those times and which window they land in say which basis Premiere uses.
+ * Which time basis does Premiere apply to keyframe positions? UXP stores and returns whatever was given, so only a
+ * rendered frame can tell. On a clip whose clip-local [0,dur], media [in,in+dur] and sequence [start,end] windows are
+ * pairwise disjoint, ONE basis at a time keys opacity 100 -> 0 over 1 s, then frames are exported at known sequence
+ * times (decode them offline: a fade to black shows only in the basis Premiere really uses). Keys are removed between
+ * bases. The values from getValueAtTime at the three candidate times are logged too.
  */
-async function timeBasis(ctx: Ctx, project: Project, steps: Steps): Promise<void> {
-  const holder: { clip?: VideoClipTrackItem; w?: ClipWindow } = {};
-  await steps.run("time_basis: find clip with non-zero in-point and start", async () => {
-    const seq = await getSequence(ctx);
-    const vCount = await seq.getVideoTrackCount();
-    for (let ti = 0; ti < vCount; ti++) {
-      const track = await seq.getVideoTrack(ti);
-      for (const c of track.getTrackItems(ctx.ppro.Constants.TrackItemType.CLIP, false)) {
-        const start = (await c.getStartTime()).seconds;
-        const inP = (await c.getInPoint()).seconds;
-        const end = (await c.getEndTime()).seconds;
-        if (inP > 0.1 && start > 0.1 && end - start >= 2) {
-          holder.clip = c;
-          holder.w = { start_s: start, in_s: inP, end_s: end, duration_s: end - start };
-          return { track_index: ti, ...holder.w };
-        }
-      }
-    }
-    throw new Error("no clip with in-point > 0.1 s, start > 0.1 s and duration >= 2 s in the imported scratch sequence");
-  });
-  const { clip, w } = holder;
-  if (!clip || !w) return;
-  const chain = await steps.run("time_basis: get_component_chain", async () => await clip.getComponentChain());
+async function basisScenarios(ctx: Ctx, project: Project, steps: Steps, label: string, clip: VideoClipTrackItem, w: ClipWindow): Promise<void> {
+  const chain = await steps.run(`${label}: get component chain`, async () => await clip.getComponentChain());
   if (!chain) return;
-  const motion = await findComponent(chain, /ADBE Motion/i);
   const opacity = await findComponent(chain, /ADBE Opacity/i);
-  const bases: Array<{ name: string; comp: typeof motion; rx: RegExp; t0: number; a: number; b: number }> = [
-    { name: "A zero-relative (t=0, 1) on Scale", comp: motion, rx: /^scale$/i, t0: 0, a: 100, b: 110 },
-    { name: "B in-point-relative (t=in, in+1) on Rotation", comp: motion, rx: /^rotation$/i, t0: w.in_s, a: 0, b: 5 },
-    { name: "C start-relative (t=start, start+1) on Opacity", comp: opacity, rx: /^opacity$/i, t0: w.start_s, a: 100, b: 20 },
+  const found = opacity ? findParam(opacity.comp, /^opacity$/i) : null;
+  if (!found) {
+    await steps.run(`${label}: find Opacity param`, async () => failWith("no Opacity param", { has_component: opacity !== null }));
+    return;
+  }
+  const { param } = found;
+  const fractions = [0.25, 0.5, 0.75];
+  const frames = async (tag: string) => {
+    if (!ctx.exportFrameTo) return "export unavailable (export_frame found no working form): read-back only";
+    const out: Array<Record<string, unknown>> = [];
+    for (const f of fractions) out.push({ sequence_time_s: w.start_s + f, local_fraction_s: f, ...(await ctx.exportFrameTo(w.start_s + f, `tb_${label}_${tag}_${f}`)) });
+    return out;
+  };
+  await steps.run(`${label}: baseline frames (no keys)`, async () => ({ clip: w, disjoint_windows: windowsDisjoint(w), frames: await frames("baseline") }));
+  const bases: Array<[string, string, number]> = [
+    ["A", "zero-relative (clip-local)", 0],
+    ["B", "in-point-relative (media time)", w.in_s],
+    ["C", "start-relative (sequence time)", w.start_s],
   ];
-  for (const base of bases) {
-    await steps.run(`time_basis ${base.name}`, async () => {
-      expect(base.comp, `component for ${base.name} not in the chain`);
-      const r = await numericKeyframes(ctx, project, base.comp.comp, base.rx, { t: base.t0, v: base.a }, { t: base.t0 + 1, v: base.b });
-      const times = (r.read_back_times_s as number[]) ?? [];
-      const overlap = w.in_s < w.duration_s || w.start_s < w.duration_s;
-      return {
-        ...r,
-        clip: w,
-        requested_times_s: [base.t0, base.t0 + 1],
-        ...classifyTimes(times, w),
-        windows_overlap: overlap,
-        note: overlap ? "the local/media/sequence windows overlap for this clip, so inside_* is not conclusive: compare read_back_times_s with requested_times_s and value_at_a/value_at_b" : undefined,
-      };
+  for (const [key, name, t0] of bases) {
+    await steps.run(`${label}: basis ${key} ${name}, keys at ${t0.toFixed(3)} s and +1 s`, async () => {
+      expect(tx(project, (ca) => add(ca, param.createSetTimeVaryingAction(true))), "setTimeVarying transaction returned false");
+      const kA = param.createKeyframe(100);
+      kA.position = tickSeconds(ctx, t0);
+      const kB = param.createKeyframe(0);
+      kB.position = tickSeconds(ctx, t0 + 1);
+      expect(
+        tx(project, (ca) => {
+          add(ca, param.createAddKeyframeAction(kA));
+          add(ca, param.createAddKeyframeAction(kB));
+        }),
+        "addKeyframe transaction returned false",
+      );
+      const times = param.getKeyframeListAsTickTimes().map((t) => t.seconds);
+      const values: Record<string, unknown> = {};
+      for (const f of fractions) {
+        values[`at_sequence_time_start+${f}`] = await param.getValueAtTime(tickSeconds(ctx, w.start_s + f));
+        values[`at_local_time_${f}`] = await param.getValueAtTime(tickSeconds(ctx, f));
+        values[`at_media_time_in+${f}`] = await param.getValueAtTime(tickSeconds(ctx, w.in_s + f));
+      }
+      const rendered = await frames(`${key}`);
+      // clear the keys again so the next basis starts clean
+      const clear = tx(project, (ca) => {
+        for (const t of times) add(ca, param.createRemoveKeyframeAction(tickSeconds(ctx, t)));
+      });
+      const left = param.getKeyframeListAsTickTimes().length;
+      return { clip: w, requested_times_s: [t0, t0 + 1], read_back_times_s: times, ...classifyTimes(times, w), disjoint_windows: windowsDisjoint(w), values, frames: rendered, cleared: clear, keys_left_after_clear: left };
     });
   }
 }
 
-const FILTER_TARGETS: Array<{ key: string; display: RegExp; match: RegExp }> = [
-  { key: "gaussian_blur", display: /^gaussian blur$/i, match: /gaussian blur/i },
-  { key: "sharpen", display: /^sharpen$/i, match: /ADBE Sharpen/i },
-  { key: "noise", display: /^noise$/i, match: /ADBE Noise$/i },
+const keyframeTimeBasis: ProbeDef<Ctx> = {
+  op: "keyframe_time_basis",
+  timeoutMs: 300_000,
+  run: async (ctx) => {
+    const project = await getProject(ctx);
+    const seq = await getSequence(ctx);
+    const steps = new Steps();
+    const holder: { clip?: VideoClipTrackItem; w?: ClipWindow } = {};
+    await steps.run("xml clip: pick one with in-point > 0 and move it so the three windows are disjoint", async () => {
+      const vCount = await seq.getVideoTrackCount();
+      for (let ti = 0; ti < vCount; ti++) {
+        const track = await seq.getVideoTrack(ti);
+        const clips = track.getTrackItems(ctx.ppro.Constants.TrackItemType.CLIP, false);
+        for (const c of clips) {
+          const w = await windowOf(c);
+          if (!(w.in_s > 0.1 && w.duration_s >= 2)) continue;
+          const seqEnd = (await seq.getEndTime()).seconds;
+          const wanted = Math.max(seqEnd, w.in_s + w.duration_s) + 1;
+          const before = w;
+          let moved: boolean | null = null;
+          if (!windowsDisjoint(w) || w.start_s < seqEnd) {
+            const delta = wanted - w.start_s;
+            moved = tx(project, (ca) => add(ca, c.createMoveAction(tickSeconds(ctx, delta))));
+          }
+          const after = await windowOf(c);
+          holder.clip = c;
+          holder.w = after;
+          const info = { track_index: ti, before, move_returned: moved, after, disjoint_windows: windowsDisjoint(after) };
+          if (!windowsDisjoint(after)) failWith("windows still overlap after the move", info);
+          return info;
+        }
+      }
+      return failWith("no clip with in-point > 0.1 s and duration >= 2 s in the imported scratch sequence", {});
+    });
+    if (holder.clip && holder.w) await basisScenarios(ctx, project, steps, "xml_clip", holder.clip, holder.w);
+
+    await steps.run("placed still: window", async () => {
+      const t = await ensureTarget(ctx);
+      const w = await windowOf(t.clip);
+      holder.clip = t.clip;
+      holder.w = w;
+      expect(t.source === "placed still", "the still was not placed, so the in-point 3600 s case is not measured");
+      return { ...w, disjoint_windows: windowsDisjoint(w) };
+    });
+    if (ctx.target?.source === "placed still" && holder.clip && holder.w) await basisScenarios(ctx, project, steps, "placed_still", holder.clip, holder.w);
+    return steps.outcome();
+  },
+};
+
+// ---------------------------------------------------------------------------------------------- effects
+
+interface EffectSpec {
+  key: string;
+  match: string;
+  params: Array<{ rx: RegExp; value: number | boolean }>;
+}
+
+/** Exact match names, verified live (docs/adobe/uxp-parity.md "Measured facts" 4). */
+const EFFECT_SPECS: EffectSpec[] = [
+  { key: "gaussian_blur_legacy", match: "AE.ADBE Gaussian Blur 2", params: [{ rx: /^blurriness$/i, value: 90 }, { rx: /repeat edge pixels/i, value: true }] },
+  { key: "sharpen", match: "AE.ADBE Sharpen", params: [{ rx: /sharpen amount/i, value: 50 }] },
+  { key: "noise", match: "AE.ADBE_Noise_FX", params: [{ rx: /^intensity$/i, value: 30 }] },
+  { key: "lumetri", match: "AE.ADBE Lumetri", params: [] },
 ];
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) < 1e-6;
+  return a === b;
+}
+
+/** Create + append one effect by its exact match name, set each listed param statically, read each back. */
+async function addEffect(ctx: Ctx, project: Project, chain: VideoComponentChain, matchNames: string[], match: string, params: EffectSpec["params"]): Promise<Record<string, unknown>> {
+  const { ppro } = ctx;
+  expect(matchNames.includes(match), `"${match}" is not in VideoFilterFactory.getMatchNames()`);
+  const before = chain.getComponentCount();
+  const comp = await ppro.VideoFilterFactory.createComponent(match);
+  expect(tx(project, (ca) => add(ca, chain.createAppendComponentAction(comp))), "append transaction returned false");
+  const after = chain.getComponentCount();
+  expect(after === before + 1, `chain had ${before} components, ${after} after append`);
+  const added = chain.getComponentAtIndex(after - 1);
+  const paramNames = Array.from({ length: added.getParamCount() }, (_, j) => added.getParam(j).displayName);
+  const info: Record<string, unknown> = { used: match, chain_before: before, chain_after: after, added_match_name: await added.getMatchName(), added_display_name: await added.getDisplayName(), params: paramNames, set: [] as unknown[] };
+  let failed = 0;
+  for (const p of params) {
+    const rec: Record<string, unknown> = { param: String(p.rx), value: p.value };
+    try {
+      const f = findParam(added, p.rx);
+      expect(f, `no param matching ${p.rx} among ${paramNames.join(", ")}`);
+      const kf = f.param.createKeyframe(p.value);
+      rec.param_name = f.param.displayName;
+      rec.transaction_returned = tx(project, (ca) => add(ca, f.param.createSetValueAction(kf)));
+      rec.read_back = describeValue(await f.param.getValueAtTime(tickSeconds(ctx, 0)));
+      const start = await f.param.getStartValue();
+      rec.start_value = describeValue((start as unknown as { value?: { value?: unknown } } | undefined)?.value?.value);
+      rec.matches = sameValue((rec.read_back as { value?: unknown }).value, p.value) || sameValue((rec.start_value as { value?: unknown }).value, p.value);
+      if (!rec.matches) failed++;
+    } catch (e) {
+      rec.error = errText(e);
+      failed++;
+    }
+    (info.set as unknown[]).push(rec);
+  }
+  if (failed > 0) failWith(`${failed} static value(s) did not read back`, info);
+  return info;
+}
 
 const effects: ProbeDef<Ctx> = {
   op: "effects_by_match_name",
@@ -826,36 +1305,176 @@ const effects: ProbeDef<Ctx> = {
       return { source: t.source, track_index: t.trackIndex };
     });
     if (!lists || !target || !ctx.target) return steps.outcome();
-    const chain = await ctx.target.clip.getComponentChain();
-    for (const f of FILTER_TARGETS) {
-      await steps.run(`${f.key}: create + append + read back`, async () => {
-        const byMatch = holder.matchNames.filter((n) => f.match.test(n));
-        const byDisplayIdx = holder.displayNames.map((d, i) => (f.display.test(d) ? i : -1)).filter((i) => i >= 0);
-        const viaDisplay = lists.parallel_arrays ? byDisplayIdx.map((i) => holder.matchNames[i] ?? "") : [];
-        const candidates = [...new Set([...viaDisplay, ...byMatch])].filter(Boolean);
-        expect(candidates.length > 0, `no filter matching ${f.display} / ${f.match} (of ${lists.match_names} filters)`);
-        const pick = candidates[0] ?? "";
-        const before = chain.getComponentCount();
-        const comp = await ppro.VideoFilterFactory.createComponent(pick);
-        expect(tx(project, (ca) => add(ca, chain.createAppendComponentAction(comp))), "append transaction returned false");
-        const after = chain.getComponentCount();
-        expect(after === before + 1, `chain had ${before} components, ${after} after append`);
-        const added = chain.getComponentAtIndex(after - 1);
-        const info: Record<string, unknown> = { candidates, used: pick, chain_before: before, chain_after: after, added_match_name: await added.getMatchName(), added_display_name: await added.getDisplayName() };
-        const params: string[] = [];
-        for (let j = 0; j < added.getParamCount(); j++) params.push(added.getParam(j).displayName);
-        info.params = params;
-        if (f.key === "gaussian_blur") {
-          const blur = findParam(added, /blurriness/i);
-          expect(blur, `no Blurriness param among ${params.join(", ")}`);
-          const kf = blur.param.createKeyframe(25);
-          expect(tx(project, (ca) => add(ca, blur.param.createSetValueAction(kf))), "setValue transaction returned false");
-          info.blurriness_set_25_read_back = await blur.param.getValueAtTime(tickSeconds(ctx, 0));
-        }
-        return info;
-      });
+    const chain = await steps.run("get_component_chain", async () => await ctx.target!.clip.getComponentChain());
+    if (!chain) return steps.outcome();
+    for (const spec of EFFECT_SPECS) {
+      await steps.run(`${spec.key}: ${spec.match} create + append + static values`, () => addEffect(ctx, project, chain, holder.matchNames, spec.match, spec.params));
     }
+    // The NEW "Gaussian Blur" (display name) is AE.Impact_Blur_FX with other params: record them separately.
+    await steps.run("AE.Impact_Blur_FX (display 'Gaussian Blur'): params", async () => {
+      expect(holder.matchNames.includes("AE.Impact_Blur_FX"), "AE.Impact_Blur_FX is not in the filter list");
+      const before = chain.getComponentCount();
+      const comp = await ppro.VideoFilterFactory.createComponent("AE.Impact_Blur_FX");
+      expect(tx(project, (ca) => add(ca, chain.createAppendComponentAction(comp))), "append transaction returned false");
+      const added = chain.getComponentAtIndex(chain.getComponentCount() - 1);
+      const params: Array<Record<string, unknown>> = [];
+      for (let j = 0; j < added.getParamCount(); j++) {
+        const p = added.getParam(j);
+        params.push({ i: j, name: p.displayName, keyframes_supported: await p.areKeyframesSupported() });
+      }
+      return { chain_before: before, chain_after: chain.getComponentCount(), match: await added.getMatchName(), display: await added.getDisplayName(), params };
+    });
     return steps.outcome({ filters_total: lists.match_names, filters_file: lists.file });
+  },
+};
+
+// ---------------------------------------------------------------------------------------------- clip edits, transitions, tracks
+
+const clipEdits: ProbeDef<Ctx> = {
+  op: "clip_edits_transitions_tracks",
+  timeoutMs: 120_000,
+  run: async (ctx) => {
+    const { ppro } = ctx;
+    const project = await getProject(ctx);
+    const seq = await getSequence(ctx);
+    const steps = new Steps();
+    const target = await steps.run("target: the placed still", async () => {
+      const t = await ensureTarget(ctx);
+      expect(t.source === "placed still", "the still was not placed; this probe edits only the placed still, never an XML clip");
+      return { track_index: t.trackIndex, ...(await windowOf(t.clip)) };
+    });
+    if (!target || !ctx.target) return steps.outcome();
+    const clip = ctx.target.clip;
+    const trackIndex = ctx.target.trackIndex;
+    const readWindow = async () => ({ ...(await windowOf(clip)), out_s: (await clip.getOutPoint()).seconds });
+    const edit = (label: string, make: () => Parameters<CompoundAction["addAction"]>[0]) =>
+      steps.run(label, async () => {
+        const before = await readWindow();
+        const returned = tx(project, (ca) => add(ca, make()));
+        const after = await readWindow();
+        return { transaction_returned: returned, before, after };
+      });
+    await edit("createSetEndAction(end - 2 s)", () => clip.createSetEndAction(tickSeconds(ctx, target.end_s - 2)));
+    await edit("createSetStartAction(start + 0.5 s)", () => clip.createSetStartAction(tickSeconds(ctx, target.start_s + 0.5)));
+    await edit("createMoveAction(+1 s) (an offset: 'shifting it by a number of seconds')", () => clip.createMoveAction(tickSeconds(ctx, 1)));
+    await edit("createSetInPointAction(in + 0.5 s)", () => clip.createSetInPointAction(tickSeconds(ctx, target.in_s + 0.5)));
+    await steps.run("createSetOutPointAction(out - 0.5 s)", async () => {
+      const before = await readWindow();
+      const returned = tx(project, (ca) => add(ca, clip.createSetOutPointAction(tickSeconds(ctx, before.out_s - 0.5))));
+      return { transaction_returned: returned, before, after: await readWindow() };
+    });
+    await steps.run("rename clip + disable/enable", async () => {
+      const nameBefore = await clip.getName();
+      tx(project, (ca) => add(ca, clip.createSetNameAction("WNC placed still")));
+      const nameAfter = await clip.getName();
+      tx(project, (ca) => add(ca, clip.createSetDisabledAction(true)));
+      const disabled = await clip.isDisabled();
+      tx(project, (ca) => add(ca, clip.createSetDisabledAction(false)));
+      const enabled = !(await clip.isDisabled());
+      expect(nameAfter === "WNC placed still" && disabled && enabled, `name "${nameAfter}", disabled ${disabled}, re-enabled ${enabled}`);
+      return { nameBefore, nameAfter, disabled, enabled };
+    });
+    await steps.run("video transition: list, create, add to the still's start", async () => {
+      const names = await ppro.TransitionFactory.getVideoTransitionMatchNames();
+      const pick = names.find((n) => /cross dissolve/i.test(n)) ?? names.find((n) => /dissolve/i.test(n)) ?? names[0];
+      expect(pick, `no transitions listed (${names.length})`);
+      const track = await seq.getVideoTrack(trackIndex);
+      const count = () => track.getTrackItems(ppro.Constants.TrackItemType.TRANSITION, false).length;
+      const before = count();
+      const transition = ppro.TransitionFactory.createVideoTransition(pick);
+      const options = new ppro.AddTransitionOptions().setDuration(tickSeconds(ctx, 0.5)).setApplyToStart(true);
+      const returned = tx(project, (ca) => add(ca, clip.createAddVideoTransitionAction(transition, options)));
+      const after = count();
+      return { listed: names.length, first_names: names.slice(0, 12), used: pick, transition_items_before: before, transition_items_after: after, transaction_returned: returned };
+    });
+    await steps.run("add a video track by overwriting at index = track count (d.ts: 'a new track will be created')", async () => {
+      const item = await clip.getProjectItem();
+      const editor = ppro.SequenceEditor.getEditor(seq);
+      const vBefore = await seq.getVideoTrackCount();
+      const endT = await seq.getEndTime();
+      const returned = tx(project, (ca) => add(ca, editor.createOverwriteItemAction(item, tickSeconds(ctx, endT.seconds + 1), vBefore, 0)));
+      const vAfter = await seq.getVideoTrackCount();
+      return { video_tracks_before: vBefore, video_tracks_after: vAfter, transaction_returned: returned, track_added: vAfter === vBefore + 1 };
+    });
+    await steps.run("remove the clip placed on the new track (TrackItemSelection + createRemoveItemsAction)", async () => {
+      const editor = ppro.SequenceEditor.getEditor(seq);
+      const vCount = await seq.getVideoTrackCount();
+      const track = await seq.getVideoTrack(vCount - 1);
+      const items = track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false);
+      const victim = items[items.length - 1];
+      expect(victim, "no clip on the last video track to remove");
+      let removed: boolean | null = null;
+      ppro.TrackItemSelection.createEmptySelection((selection) => {
+        selection.addItem(victim);
+        removed = tx(project, (ca) => add(ca, editor.createRemoveItemsAction(selection, false, ppro.Constants.MediaType.VIDEO)));
+      });
+      const left = (await seq.getVideoTrack(vCount - 1)).getTrackItems(ppro.Constants.TrackItemType.CLIP, false).length;
+      return { clips_before: items.length, clips_after: left, transaction_returned: removed };
+    });
+    return steps.outcome();
+  },
+};
+
+// ---------------------------------------------------------------------------------------------- scratch disks
+
+const SCRATCH_FOLDER_TYPES = ["CAPTURE", "AUDIO_PREVIEW", "VIDEO_PREVIEW", "AUTO_SAVE", "CCL_LIBRARIES", "CAPSULE_MEDIA"] as const;
+
+/**
+ * Premiere shows "Scratch Disk Error" when a project's scratch disks are unavailable. Right after createProject: read the
+ * project's scratch settings, set every type to "same as project" and read back. Each step is timestamped (`at`, `ms`).
+ */
+const scratchDisk: ProbeDef<Ctx> = {
+  op: "scratch_disk",
+  timeoutMs: 120_000,
+  run: async (ctx) => {
+    const { ppro } = ctx;
+    const project = await getProject(ctx);
+    const steps = new Steps();
+    const enumFolderType = ppro.Constants.ScratchDiskFolderType as unknown as Record<string, number>;
+    const readAll = async (settings: { getScratchDiskPath: (t: never) => string }) => {
+      const out: Record<string, unknown> = {};
+      for (const name of SCRATCH_FOLDER_TYPES) {
+        const key = name as string;
+        try {
+          out[key] = settings.getScratchDiskPath(enumFolderType[key] as never);
+        } catch (e) {
+          out[key] = `error: ${errText(e)}`;
+        }
+      }
+      return out;
+    };
+    const before = await steps.run("getScratchDiskSettings + read each folder type", async () => {
+      const s = await ppro.ProjectSettings.getScratchDiskSettings(project);
+      return { enum_values: enumFolderType, paths: await readAll(s as never) };
+    });
+    void before;
+    await steps.run("set every type to SAME_AS_PROJECT + createSetScratchDiskSettingsAction", async () => {
+      const s = await ppro.ProjectSettings.getScratchDiskSettings(project);
+      const sameEnum = (ppro.Constants.ScratchDiskFolder as unknown as Record<string, number>).SAME_AS_PROJECT;
+      const sameStatic = (ppro.ScratchDiskSettings as unknown as Record<string, unknown>).FOLDER_SAME_AS_PROJECT;
+      const setters: Array<Record<string, unknown>> = [];
+      for (const name of SCRATCH_FOLDER_TYPES) {
+        const rec: Record<string, unknown> = { type: name };
+        try {
+          rec.returned_enum_value = s.setScratchDiskPath(enumFolderType[name as string] as never, sameEnum as never);
+        } catch (e) {
+          rec.error_enum_value = errText(e);
+          try {
+            rec.returned_static_value = s.setScratchDiskPath(enumFolderType[name as string] as never, sameStatic as never);
+          } catch (e2) {
+            rec.error_static_value = errText(e2);
+          }
+        }
+        setters.push(rec);
+      }
+      const returned = tx(project, (ca) => add(ca, ppro.ProjectSettings.createSetScratchDiskSettingsAction(project, s)));
+      const fresh = await ppro.ProjectSettings.getScratchDiskSettings(project);
+      const after = await readAll(fresh as never);
+      const info = { same_as_project_enum: sameEnum, same_as_project_static: sameStatic, setters, transaction_returned: returned, paths_after: after };
+      if (!returned) failWith("createSetScratchDiskSettingsAction transaction returned false", info);
+      return info;
+    });
+    return steps.outcome();
   },
 };
 
@@ -939,11 +1558,23 @@ const undoTransaction: ProbeDef<Ctx> = {
     const project = await getProject(ctx);
     const seq = await getSequence(ctx);
     const steps = new Steps();
+    // Is there any undo / history API at all? (the d.ts has none; check what the runtime really exposes)
+    await steps.run("history API discovery (undo step count)", async () => {
+      const names = (o: unknown) => (o && (typeof o === "object" || typeof o === "function") ? Object.getOwnPropertyNames(o) : []);
+      const rx = /undo|redo|history/i;
+      const found = {
+        ppro_members: names(ppro).filter((n) => rx.test(n)),
+        project_members: [...names(project), ...names(Object.getPrototypeOf(project))].filter((n) => rx.test(n)),
+        sequence_members: [...names(seq), ...names(Object.getPrototypeOf(seq))].filter((n) => rx.test(n)),
+      };
+      return { ...found, history_step_count: found.ppro_members.length + found.project_members.length + found.sequence_members.length === 0 ? "not exposed by the API" : "see members" };
+    });
     await steps.run("one_transaction_three_actions", async () => {
       const track = await seq.getVideoTrack(0);
       const aTrack = await seq.getAudioTrack(0);
       const markersObj = await ppro.Markers.getMarkers(seq);
-      const beforeCount = markersObj.getMarkers().length;
+      const stateOf = async () => ({ v1: (await seq.getVideoTrack(0)).name, a1: (await seq.getAudioTrack(0)).name, markers: (await ppro.Markers.getMarkers(seq)).getMarkers().map((m) => m.getName()) });
+      const before = await stateOf();
       const wanted = "WNC Undo Test";
       const returned = tx(project, (ca) => {
         add(ca, track.createSetNameAction(wanted));
@@ -951,38 +1582,44 @@ const undoTransaction: ProbeDef<Ctx> = {
         add(ca, aTrack.createSetNameAction("WNC Undo Test A1"));
       }, UNDO_LABEL);
       expect(returned, "executeTransaction returned false");
-      const after = (await seq.getVideoTrack(0)).name;
-      const afterMarkers = (await ppro.Markers.getMarkers(seq)).getMarkers().length;
-      expect(after === wanted && afterMarkers === beforeCount + 1, `track "${after}", markers ${beforeCount}->${afterMarkers}`);
-      ctx.expect.videoTrackName = after;
-      ctx.expect.markerCount = afterMarkers;
+      const after = await stateOf();
+      expect(after.v1 === wanted && after.markers.length === before.markers.length + 1, `track "${after.v1}", markers ${before.markers.length}->${after.markers.length}`);
+      ctx.expect.videoTrackName = after.v1;
+      ctx.expect.markerCount = after.markers.length;
       return {
         undo_label: UNDO_LABEL,
         executeTransaction_returned: returned,
-        manual_check: `Edit menu must now read "Undo ${UNDO_LABEL}" and ONE Ctrl+Z must revert the track name and the marker together`,
+        state_before: before,
+        state_after: after,
+        manual_check: `Window > History must show '${UNDO_LABEL}' as ONE entry (the Edit menu only says "Undo"). Press Ctrl+Z once and check that ALL THREE revert: V1 name back to "${before.v1}", A1 name back to "${before.a1}", and the marker "WNC undo marker" gone (it must not be in ${JSON.stringify(before.markers)} + itself). Then Ctrl+Shift+Z to redo.`,
       };
     });
     return steps.outcome();
   },
 };
 
+const OPEN_NOTE = "Project.open: a modal 'Scratch Disk Error' or 'Project Modified' dialog may block here; note which step shows it (see each step's `at` timestamp)";
+
 const saveCloseOpen: ProbeDef<Ctx> = {
   op: "save_close_open",
-  timeoutMs: 180_000,
+  timeoutMs: 300_000,
   run: async (ctx) => {
-    if (skipSaveCloseOpen.value) return { ok: null, detail: "skipped (Run, keep project open) so Edit > Undo can be inspected" };
+    if (skipSaveCloseOpen.value) return { ok: null, detail: "skipped (Run, keep project open) so Window > History can be inspected" };
     const { ppro } = ctx;
     const project = await getProject(ctx);
     const steps = new Steps();
     const rawPath = project.path;
     const path = cleanPath(rawPath);
-    await steps.run("save", async () => {
+    await steps.run("save (explicit)", async () => {
+      const before = await statOf(ctx.fs, path);
       const saved = await project.save();
       const st = await statOf(ctx.fs, path);
       expect(saved && st.exists && (st.bytes ?? 0) > 0, `save returned ${saved}; file ${JSON.stringify(st)}`);
-      return { path_raw_json: JSON.stringify(rawPath), path, bytes: st.bytes };
+      return { path_raw_json: JSON.stringify(rawPath), path, bytes_before: before.bytes, bytes_after: st.bytes, note: "each step carries `at` (ISO start) and `ms`: the dialog is attributed to the step whose ms is long" };
     });
-    await steps.run("close", async () => {
+    const isProject = await steps.run("Project.isProject(path) before closing", async () => ({ clean: ppro.Project.isProject(path), raw: ppro.Project.isProject(rawPath) }));
+    void isProject;
+    await steps.run("close (setPromptIfDirty(false) after the explicit save)", async () => {
       const closed = await project.close(new ppro.CloseProjectOptions().setPromptIfDirty(false).setSaveWorkspace(false).setShowCancelButton(false));
       expect(closed, "project.close returned false");
       ctx.project = undefined;
@@ -990,20 +1627,111 @@ const saveCloseOpen: ProbeDef<Ctx> = {
       ctx.target = undefined;
       return { closed };
     });
-    await steps.run("open + verify persisted", async () => {
-      const reopened = await ppro.Project.open(path, new ppro.OpenProjectOptions().setShowConvertProjectDialog(false).setShowLocateFileDialog(false).setShowWarningDialog(false).setAddToMRUList(false));
-      expect(reopened, "Project.open returned nothing");
-      ctx.project = reopened;
-      assertScratchProject(ctx, reopened);
-      const seqs = await reopened.getSequences();
-      const seq = seqs.find((s) => s.name === ctx.expect.sequenceName) ?? seqs[0];
-      expect(seq, "no sequences after reopen");
-      ctx.sequence = seq;
-      const v1 = (await seq.getVideoTrack(0)).name;
-      const markerCount = (await ppro.Markers.getMarkers(seq)).getMarkers().length;
-      expect(ctx.expect.videoTrackName === undefined || v1 === ctx.expect.videoTrackName, `V1 name after reopen "${v1}", expected "${ctx.expect.videoTrackName}"`);
-      expect(ctx.expect.markerCount === undefined || markerCount === ctx.expect.markerCount, `markers after reopen ${markerCount}, expected ${ctx.expect.markerCount}`);
-      return { sequences: seqs.length, sequence: seq.name, v1_name: v1, markers: markerCount };
+    const variants: Array<{ label: string; p: string; opts: boolean }> = [
+      { label: "cleaned forward-slash path, no options", p: path, opts: false },
+      { label: "raw \\\\?\\ path as Premiere reported it, no options", p: rawPath, opts: false },
+      { label: "cleaned path + all four dialog-suppression options (the 0.1.1 call)", p: path, opts: true },
+      { label: "backslash path, no options", p: path.replace(/\//g, "\\"), opts: false },
+    ];
+    let reopened: Project | undefined;
+    for (const [i, v] of variants.entries()) {
+      reopened = await steps.run(`open attempt ${i + 1}: ${v.label}`, async () => {
+        const diag: Record<string, unknown> = { path_used_json: JSON.stringify(v.p), note: OPEN_NOTE };
+        try {
+          const options = v.opts ? new ppro.OpenProjectOptions().setShowConvertProjectDialog(false).setShowLocateFileDialog(false).setShowWarningDialog(false).setAddToMRUList(false) : undefined;
+          const p = options ? await ppro.Project.open(v.p, options) : await ppro.Project.open(v.p);
+          expect(p, "Project.open returned nothing");
+          return p;
+        } catch (e) {
+          return failWith(`Project.open failed: ${errText(e)}`, { ...diag, error: errDetail(e) });
+        }
+      });
+      if (reopened) break;
+    }
+    if (reopened) {
+      const p = reopened;
+      await steps.run("verify persisted (track name, marker count)", async () => {
+        ctx.project = p;
+        assertScratchProject(ctx, p);
+        const seqs = await p.getSequences();
+        const seq = seqs.find((s) => s.name === ctx.expect.sequenceName) ?? seqs[0];
+        expect(seq, "no sequences after reopen");
+        ctx.sequence = seq;
+        const v1 = (await seq.getVideoTrack(0)).name;
+        const markerCount = (await ppro.Markers.getMarkers(seq)).getMarkers().length;
+        expect(ctx.expect.videoTrackName === undefined || v1 === ctx.expect.videoTrackName, `V1 name after reopen "${v1}", expected "${ctx.expect.videoTrackName}"`);
+        expect(ctx.expect.markerCount === undefined || markerCount === ctx.expect.markerCount, `markers after reopen ${markerCount}, expected ${ctx.expect.markerCount}`);
+        return { sequences: seqs.length, sequence: seq.name, v1_name: v1, markers: markerCount };
+      });
+    }
+    return steps.outcome();
+  },
+};
+
+const saveAs: ProbeDef<Ctx> = {
+  op: "save_as",
+  timeoutMs: 180_000,
+  run: async (ctx) => {
+    if (skipSaveCloseOpen.value) return { ok: null, detail: "skipped (Run, keep project open)" };
+    const cfg = needConfig(ctx);
+    if (!ctx.project) return { ok: null, detail: "no open scratch project (the reopen in save_close_open did not succeed)" };
+    const project = await getProject(ctx);
+    const steps = new Steps();
+    await steps.run("saveAs a copy under work_dir", async () => {
+      const target = `${cleanPath(cfg.work_dir)}/spike-${ctx.stamp}-copy.prproj`;
+      const before = project.path;
+      const returned = await project.saveAs(target);
+      const after = project.path;
+      assertScratchProject(ctx, project);
+      const st = await statOf(ctx.fs, cleanPath(after));
+      expect(returned && st.exists, `saveAs returned ${returned}; file ${JSON.stringify(st)}`);
+      return { target, path_before_json: JSON.stringify(before), path_after_json: JSON.stringify(after), project_object_now_points_to_copy: normPath(after) === normPath(target), bytes: st.bytes };
+    });
+    return steps.outcome();
+  },
+};
+
+/** adobe.md names ProjectUtils.getProjectViewIds as the only way to activate another open project. */
+const projectViews: ProbeDef<Ctx> = {
+  op: "project_views",
+  run: async (ctx) => {
+    const { ppro } = ctx;
+    const steps = new Steps();
+    await steps.run("ProjectUtils.getProjectViewIds + getProjectFromViewId", async () => {
+      const ids = await ppro.ProjectUtils.getProjectViewIds();
+      const projects: Array<Record<string, unknown>> = [];
+      for (const id of ids) {
+        const p = await ppro.ProjectUtils.getProjectFromViewId(id);
+        projects.push({ view_id: id.toString(), name: p.name, path_json: JSON.stringify(p.path) });
+      }
+      expect(ids.length > 0, "no project views");
+      return { count: ids.length, projects };
+    });
+    return steps.outcome();
+  },
+};
+
+/** X1: Premiere's encoder as the frame-export fallback. Off unless config.json has "encoder_export": true (may open AME). */
+const encoderExport: ProbeDef<Ctx> = {
+  op: "encoder_export",
+  timeoutMs: 240_000,
+  run: async (ctx) => {
+    const cfg = needConfig(ctx);
+    if (cfg.encoder_export !== true) return { ok: null, detail: 'off: set "encoder_export": true in config.json to try EncoderManager.exportSequence (may start Media Encoder)' };
+    const { ppro } = ctx;
+    await getProject(ctx);
+    const seq = await getSequence(ctx);
+    const steps = new Steps();
+    const dir = `${cleanPath(cfg.work_dir)}/encoder`;
+    await ensureDir(ctx.fs, dir);
+    await steps.run("EncoderManager.exportSequence(IMMEDIATELY) without a preset", async () => {
+      const mgr = ppro.EncoderManager.getManager();
+      const out = `${dir}/spike-${ctx.stamp}.mp4`;
+      const returned = await mgr.exportSequence(seq, ppro.Constants.ExportType.IMMEDIATELY, out, undefined, true);
+      const poll = await pollFile(ctx.fs, out, 60_000, 500);
+      const info = { is_ame_installed: mgr.isAMEInstalled, output: out, returned, ...poll };
+      if (!poll.found) failWith("no output file appeared", info);
+      return info;
     });
     return steps.outcome();
   },
@@ -1013,7 +1741,8 @@ const saveCloseOpen: ProbeDef<Ctx> = {
 const READ_ONLY_OPS = new Set(["host_info", "ws_loopback"]);
 
 export function buildProbes(): ProbeDef<Ctx>[] {
-  const all = [hostInfo, wsLoopback, createProject, importXml, sequenceSettings, exportFrame, keyframes, effects, trackRename, markers, undoTransaction, saveCloseOpen];
+  // undo_transaction runs right after the import so the History panel stays short; scratch_disk right after create_project
+  const all = [hostInfo, wsLoopback, createProject, scratchDisk, importXml, undoTransaction, sequenceSettings, exportFrame, keyframes, keyframeTimeBasis, effects, clipEdits, trackRename, markers, projectViews, saveCloseOpen, saveAs, encoderExport];
   return all.map((def) =>
     READ_ONLY_OPS.has(def.op)
       ? def

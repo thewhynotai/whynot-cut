@@ -9,7 +9,7 @@ import type { UxpFs, UxpModule, UxpOs } from "./uxp-types.ts";
 
 declare const require: (id: string) => unknown;
 
-const SPIKE_VERSION = "0.1.1";
+const SPIKE_VERSION = "0.1.2";
 
 function $(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -112,7 +112,8 @@ async function runSpike(keepOpen: boolean): Promise<void> {
     status.textContent = config ? `Running ${probes.length} probes (config: ${dir}/config.json)` : `Running without config - ${error}`;
     let premiere = "unknown";
     try {
-      premiere = (await ppro.Application.version) || uxp.host?.version || "unknown";
+      // Application.version resolves empty on 26.5.2; uxp.host.version is the reliable source
+      premiere = uxp.host?.version || (await ppro.Application.version) || "unknown";
     } catch {
       premiere = uxp.host?.version || "unknown";
     }
