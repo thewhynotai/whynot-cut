@@ -1098,5 +1098,63 @@ class TestAnimatic(CompiledMotion):
         self.assertAlmostEqual(pr["duration_s"], self.plan["duration_frames"] / self.plan["fps"], delta=0.05)
 
 
+# --------------------------------------------------------------------------- AE motion library + job
+def nhm_code() -> str:
+    src = (AE_TPL / "nh_motion_lib.jsx").read_text(encoding="utf-8")
+    return src
+
+
+class TestMotionJSX(CompiledMotion):
+    def test_lib_syntax(self):
+        for name in ("nh_motion_lib.jsx", "nh_ae_bridge.jsx"):
+            assert_js_syntax(self, AE_TPL / name)
+
+    def test_fallback_script(self):
+        from lib.motion_build import write_fallback_script
+        p = write_fallback_script(self.reel)
+        assert_js_syntax(self, p)
+        src = p.read_text(encoding="utf-8")
+        self.assertIn("NHM.build(", src)
+        self.assertTrue(all(ord(c) < 128 for c in src.split("var NH_JOB = ", 1)[1].split(";\n", 1)[0]))
+
+    def test_job_ascii_paths(self):
+        from lib import motion_build
+        plan_p = self.reel.p("01_analysis/motion-plan.json")
+        keep = plan_p.read_text(encoding="utf-8")
+        try:
+            plan = json.loads(keep)
+            plan["audio"]["dialogue"] = "D:/0 Work/عميل/حلقة 1.wav"
+            write_json(plan_p, plan)
+            j = motion_build.write_job(self.reel)
+            raw = j.read_bytes()
+            self.assertTrue(all(b < 128 for b in raw))
+            job = json.loads(raw.decode("ascii"))
+            self.assertEqual(job["plan"]["audio"]["dialogue"], "D:/0 Work/عميل/حلقة 1.wav")
+            self.assertEqual(job["aep_path"], str(motion_build.aep_path(self.reel)))
+            self.assertIn(job["caps_source"], ("probe", "default"))
+            self.assertTrue(all("layer_out_frame" in s for s in job["plan"]["scenes"]))
+            kq = next(e for e in job["plan"]["scenes"][0]["elements"] if e["kind"] == "text")
+            self.assertEqual(len(kq["line_cues"]), len(kq["lines"]))
+        finally:
+            plan_p.write_text(keep, encoding="utf-8")
+
+    def test_lib_uses_frame_duration(self):
+        src = nhm_code()
+        self.assertTrue("frameDuration" in src)
+        self.assertNotRegex(src, r"/\s*NH\.FPS")
+        self.assertNotIn(".indexOf(", src.split("/* expressions */")[0])   # ES3: no Array.indexOf in ExtendScript code
+
+    def test_lib_defines_core(self):
+        src = nhm_code()
+        for fn in ("NHM.build = function", "NHM.S.kinetic_quote = function", "NHM.S.title_card = function",
+                   "NHM.P.background = function", "NHM.P.captions = function", "NHM.P.speaker_badge = function",
+                   "NHM.P.progress = function", "NHM.P.voice_pulse = function", "NHM.transition = function",
+                   "NHM.textEl = function", "setValuesAtTimes"):
+            self.assertTrue(fn in src, fn)
+        bridge = (AE_TPL / "nh_ae_bridge.jsx").read_text(encoding="utf-8")
+        self.assertIn("NHAE.actions.build_motion = function", bridge)
+        self.assertIn('reason: "dirty"', bridge)
+
+
 if __name__ == "__main__":
     unittest.main()

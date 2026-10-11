@@ -147,3 +147,17 @@ NHAE.actions.probe_text = function (d) {
     out.saved = job.aep_path;
     return out;
 };
+
+/* motion build (spec §4.7): never discards the editor's work — refuses when AE holds unsaved changes */
+NHAE.actions.build_motion = function (d) {
+    var job = d.job, info = NHAE.projectInfo();
+    var target = new File(job.aep_path).fsName;
+    if (info.dirty === true) {
+        return {ok: false, reason: (info.project_path === target ? "dirty_target" : "dirty"), project: info.project,
+                project_path: info.project_path};
+    }
+    app.newProject();
+    var rep = NHM.build(job);
+    rep.ok = rep.failed.length === 0;
+    return rep;
+};

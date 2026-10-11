@@ -129,3 +129,402 @@ NHM.shapeLayer = function (comp, name, shapes, o) {
     } catch (e) {}
     return {layer: L, trim: tr, stroke: st};
 };
+
+/* ================================================================ motion build (plan -> AE project)
+   Every key time is frame * comp.frameDuration (29.97/23.976 never drift). Frames in the plan are absolute sequence
+   frames; inside a scene comp they are made relative to the scene start. */
+NHM.S = NHM.S || {};
+NHM.P = NHM.P || {};
+
+NHM.t = function (comp, frame) { return frame * comp.frameDuration; };
+
+/* JS string literal with every non-ASCII char as \uXXXX (safe inside expressions, whatever the file encoding) */
+NHM.jsq = function (s) {
+    var out = '"';
+    s = String(s);
+    for (var i = 0; i < s.length; i++) {
+        var c = s.charAt(i), code = s.charCodeAt(i);
+        if (c === '"' || c === "\\") { out += "\\" + c; }
+        else if (code < 32 || code > 126) { out += "\\u" + ("0000" + code.toString(16)).slice(-4); }
+        else { out += c; }
+    }
+    return out + '"';
+};
+
+/* expression linking a colour to BRAND_CONTROLS when it is exactly one of the brand colours (else null) */
+NHM.colorExpr = function (rgb) {
+    var cs = NHM.plan.brand.controls;
+    for (var i = 0; i < cs.length; i++) {
+        var c = cs[i].rgb;
+        if (Math.abs(c[0] - rgb[0]) < 0.003 && Math.abs(c[1] - rgb[1]) < 0.003 && Math.abs(c[2] - rgb[2]) < 0.003) {
+            return 'comp("BRAND_CONTROLS").layer("BRAND").effect("' + cs[i].name + '")("Color")';
+        }
+    }
+    return null;
+};
+
+NHM.EASE = {smooth: [75, 6], snappy: [90, 4], bouncy: [80, 5], gentle: [33, 12]};
+NHM.easeOf = function () { return NHM.EASE[NHM.plan.recipe_motion.ease] || NHM.EASE.smooth; };
+
+NHM.keys = function (prop, comp, frames, values) {
+    var inf = NHM.easeOf()[0];
+    for (var i = 0; i < frames.length; i++) { prop.setValueAtTime(NHM.t(comp, frames[i]), values[i]); }
+    for (var k = 1; k <= prop.numKeys; k++) {
+        var dims = 1;
+        try { var v = prop.keyValue(k); if (v instanceof Array) { dims = v.length; } } catch (e) {}
+        if (prop.propertyValueType === PropertyValueType.TwoD_SPATIAL || prop.propertyValueType === PropertyValueType.ThreeD_SPATIAL) { dims = 1; }
+        var e1 = [], e2 = [];
+        for (var d = 0; d < dims; d++) { e1.push(new KeyframeEase(0, inf)); e2.push(new KeyframeEase(0, inf)); }
+        try { prop.setTemporalEaseAtKey(k, e1, e2); } catch (err) {}
+    }
+};
+
+NHM.tg = function (L, name) { return L.property("ADBE Transform Group").property(name); };
+
+/* element appears at frame f (scene-relative): fade + pop (bouncy overshoots), or slide in the reading direction */
+NHM.appear = function (comp, L, f, slide) {
+    var len = NHM.easeOf()[1];
+    NHM.keys(NHM.tg(L, "ADBE Opacity"), comp, [f, f + len], [0, 100]);
+    if (slide) {
+        var p = NHM.tg(L, "ADBE Position").value;
+        NHM.keys(NHM.tg(L, "ADBE Position"), comp, [f, f + len], [[p[0] - NHM.plan.dir * 40, p[1]], [p[0], p[1]]]);
+    } else if (NHM.plan.recipe_motion.ease === "bouncy") {
+        NHM.keys(NHM.tg(L, "ADBE Scale"), comp, [f, f + len, f + len + 3], [[85, 85], [106, 106], [100, 100]]);
+    } else if (NHM.plan.recipe_motion.ease !== "gentle") {
+        NHM.keys(NHM.tg(L, "ADBE Scale"), comp, [f, f + len], [[92, 92], [100, 100]]);
+    }
+};
+
+NHM.solid = function (comp, name, rgb) {
+    var L = comp.layers.addSolid([1, 1, 1], name, comp.width, comp.height, 1);
+    var fill = L.property("ADBE Effect Parade").addProperty("ADBE Fill");
+    fill.property("ADBE Fill-0002").setValue(rgb);
+    var ex = NHM.colorExpr(rgb);
+    if (ex) { fill.property("ADBE Fill-0002").expression = ex; }
+    return L;
+};
+
+/* text element (plan.scenes[].elements kind text|counter) inside a scene comp starting at sceneStart */
+NHM.textEl = function (comp, el, sceneStart) {
+    var caps = NHM.caps, L = comp.layers.addText(el.text);
+    L.name = el.name;
+    var just = el.anchor === "start" ? (el.rtl ? "right" : "left") : "center";
+    NHM.styleText(L, {text: el.text, font: el.font_ps, size: el.size, color: el.color, rtl: el.rtl, justify: just,
+        leading: el.size * 1.25, caps: caps});
+    var cex = NHM.colorExpr(el.color);
+    if (cex) {
+        try { L.property("ADBE Text Properties").property("ADBE Text Document").expression = "text.sourceText.style.setFillColor(" + cex + ")"; } catch (e0) {}
+    }
+    if (el.anchor === "start") {
+        NHM.tg(L, "ADBE Anchor Point").expression = el.rtl ?
+            "var r=sourceRectAtTime(time,false);[r.left+r.width,r.top+r.height/2]" :
+            "var r=sourceRectAtTime(time,false);[r.left,r.top+r.height/2]";
+    }
+    NHM.tg(L, "ADBE Position").setValue([el.x, el.y]);
+    L.comment = el.cue_hash || "";
+    var reveal = el.reveal || "none", fd = comp.frameDuration, secs = [], k;
+    if (reveal === "word" && el.tokens && el.tokens.length) {
+        if (caps.word_index_logical === false && el.line_cues) {
+            for (k = 0; k < el.line_cues.length; k++) { secs.push((el.line_cues[k] - sceneStart) * fd); }
+            NHM.revealWords(L, secs, 4, 0.3);
+            NHM.report.warnings.push(el.name + ": word order not logical in this AE: revealed by line");
+        } else {
+            for (k = 0; k < el.tokens.length; k++) { secs.push((el.tokens[k].cue_frame - sceneStart) * fd); }
+            NHM.revealWords(L, secs, 3, NHM.plan.word_reveal_s || 0.18);
+        }
+    } else if (reveal === "line" && el.line_cues) {
+        for (k = 0; k < el.line_cues.length; k++) { secs.push((el.line_cues[k] - sceneStart) * fd); }
+        NHM.revealWords(L, secs, 4, 0.35);
+    } else if (reveal === "item") {
+        NHM.appear(comp, L, el.appear_frame - sceneStart, true);
+    } else if (el.appear_frame !== null && el.appear_frame !== undefined) {
+        NHM.appear(comp, L, el.appear_frame - sceneStart, false);
+    }
+    if (el.emphasis && el.emphasis.length && caps.emphasis_animator !== false && caps.word_index_logical !== false) {
+        NHM.emphasisWords(L, el.emphasis, el.accent, NHM.colorExpr(el.accent));
+        var an = L.property("ADBE Text Properties").property("ADBE Text Animators").property("Emphasis");
+        try { an.property("ADBE Text Animator Properties").addProperty("ADBE Text Scale 3D").setValue([108, 108, 100]); } catch (e1) {}
+    }
+    return L;
+};
+
+NHM.counterEl = function (comp, el, sceneStart) {
+    var L = NHM.textEl(comp, el, sceneStart), fd = comp.frameDuration;
+    var a = (el.from_frame - sceneStart) * fd, b = (el.to_frame - sceneStart) * fd;
+    var ex = "var v=linear(time," + a + "," + b + ",0," + el.target + ");var s=v.toFixed(" + (el.decimals || 0) + ");";
+    if (el.group) { ex += "s=s.replace(/\\B(?=(\\d{3})+(?!\\d))/g,',');"; }
+    if (el.digits === "arabic_indic") { ex += "var D=" + NHM.jsq("٠١٢٣٤٥٦٧٨٩") + ";s=s.replace(/[0-9]/g,function(d){return D.charAt(d);});"; }
+    ex += NHM.jsq(el.prefix || "") + "+s+" + NHM.jsq(el.suffix || "");
+    L.property("ADBE Text Properties").property("ADBE Text Document").expression = ex;
+    return L;
+};
+
+NHM.iconEl = function (comp, el, sceneStart) {
+    var r = NHM.shapeLayer(comp, el.name, el.shapes, {stroke: el.stroke, color: el.color, colorExpr: NHM.colorExpr(el.color)});
+    NHM.tg(r.layer, "ADBE Position").setValue([el.x, el.y]);
+    var f = (el.draw_on_frame === null || el.draw_on_frame === undefined ? sceneStart + 4 : el.draw_on_frame) - sceneStart;
+    NHM.keys(r.trim.property("ADBE Vector Trim End"), comp, [f, f + 14], [0, 100]);
+    return r.layer;
+};
+
+NHM.vectorEl = function (comp, el, sceneStart) {
+    var L = comp.layers.addShape();
+    L.name = el.name;
+    var g = L.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group"), v = g.property("ADBE Vectors Group");
+    for (var i = 0; i < el.shapes.length; i++) {
+        var s = new Shape();
+        s.vertices = el.shapes[i].vertices; s.inTangents = el.shapes[i].inTangents;
+        s.outTangents = el.shapes[i].outTangents; s.closed = el.shapes[i].closed;
+        v.addProperty("ADBE Vector Shape - Group").property("ADBE Vector Shape").setValue(s);
+    }
+    var fl = v.addProperty("ADBE Vector Graphic - Fill");
+    fl.property("ADBE Vector Fill Color").setValue(el.fill);
+    NHM.tg(L, "ADBE Position").setValue([el.x, el.y]);
+    NHM.appear(comp, L, (el.appear_frame || sceneStart + 4) - sceneStart, false);
+    return L;
+};
+
+NHM.imageEl = function (comp, el, sceneStart) {
+    var item = NH.footage(el.path);
+    if (!item) { NHM.report.warnings.push(el.name + ": image missing " + el.path); return null; }
+    var L = comp.layers.add(item);
+    L.name = el.name;
+    var s = (el.fit === "contain" ? Math.min(el.w / item.width, el.h / item.height) : Math.max(el.w / item.width, el.h / item.height)) * 100;
+    NHM.tg(L, "ADBE Scale").setValue([s, s]);
+    if (el.radius && el.fit !== "contain") { NH.roundMask(L, el.w / (s / 100), el.h / (s / 100), el.radius / (s / 100), 0.4); }
+    NHM.tg(L, "ADBE Position").setValue([el.x, el.y]);
+    NHM.appear(comp, L, (el.appear_frame || sceneStart + 4) - sceneStart, false);
+    return L;
+};
+
+NHM.dotEl = function (comp, el, sceneStart) {
+    var L = comp.layers.addShape();
+    L.name = el.name;
+    var g = L.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group"), v = g.property("ADBE Vectors Group");
+    v.addProperty("ADBE Vector Shape - Ellipse").property("ADBE Vector Ellipse Size").setValue([el.r * 2, el.r * 2]);
+    var fl = v.addProperty("ADBE Vector Graphic - Fill");
+    fl.property("ADBE Vector Fill Color").setValue(el.color);
+    var ex = NHM.colorExpr(el.color);
+    if (ex) { fl.property("ADBE Vector Fill Color").expression = ex; }
+    NHM.tg(L, "ADBE Position").setValue([el.x, el.y]);
+    NHM.appear(comp, L, el.appear_frame - sceneStart, false);
+    return L;
+};
+
+NHM.lineEl = function (comp, el, sceneStart) {
+    var r = NHM.shapeLayer(comp, el.name, [{vertices: [el.from, el.to], inTangents: [[0, 0], [0, 0]], outTangents: [[0, 0], [0, 0]], closed: false}],
+        {stroke: el.width, color: el.color, colorExpr: NHM.colorExpr(el.color)});
+    NHM.keys(r.trim.property("ADBE Vector Trim End"), comp, [el.draw_frames[0] - sceneStart, el.draw_frames[1] - sceneStart], [0, 100]);
+    return r.layer;
+};
+
+NHM.element = function (comp, el, sceneStart) {
+    var k = el.kind;
+    if (k === "text") { return NHM.textEl(comp, el, sceneStart); }
+    if (k === "counter") { return NHM.counterEl(comp, el, sceneStart); }
+    if (k === "icon") { return NHM.iconEl(comp, el, sceneStart); }
+    if (k === "vector") { return NHM.vectorEl(comp, el, sceneStart); }
+    if (k === "image") { return NHM.imageEl(comp, el, sceneStart); }
+    if (k === "dot") { return NHM.dotEl(comp, el, sceneStart); }
+    if (k === "line") { return NHM.lineEl(comp, el, sceneStart); }
+    NHM.report.warnings.push(el.name + ": unknown element kind " + k);
+    return null;
+};
+
+/* generic scene body: its background when its theme differs, then every element in plan order (drawn bottom-up) */
+NHM.sceneBody = function (comp, scene) {
+    if (scene.theme !== NHM.plan.theme.name) { NHM.solid(comp, scene.id + "_bg", scene.bg); }
+    var made = [];
+    for (var i = 0; i < scene.elements.length; i++) {
+        var L = NHM.element(comp, scene.elements[i], scene.start_frame);
+        if (L) { made.push(L); }
+    }
+    for (var j = 0; j < made.length; j++) { made[j].moveToBeginning(); }      // first element ends on top
+    return made;
+};
+
+NHM.S.kinetic_quote = function (comp, scene) { return NHM.sceneBody(comp, scene); };
+NHM.S.title_card = function (comp, scene) { return NHM.sceneBody(comp, scene); };
+
+/* transition_in on the scene's layer in MAIN (and the outgoing layer for push) */
+NHM.transition = function (main, layer, prev, scene) {
+    var tr = scene.transition_in, n = tr.frames, s = scene.start_frame, W = main.width, dir = NHM.plan.dir;
+    if (!n || tr.type === "cut") { return; }
+    if (tr.type === "push") {
+        NHM.keys(NHM.tg(layer, "ADBE Position"), main, [s, s + n], [[W / 2 + dir * W, main.height / 2], [W / 2, main.height / 2]]);
+        if (prev) { NHM.keys(NHM.tg(prev, "ADBE Position"), main, [s, s + n], [[W / 2, main.height / 2], [W / 2 - dir * W, main.height / 2]]); }
+    } else if (tr.type === "wipe") {
+        var lw = layer.property("ADBE Effect Parade").addProperty("ADBE Linear Wipe");
+        lw.property("ADBE Linear Wipe-0002").setValue(dir < 0 ? 90 : 270);
+        lw.property("ADBE Linear Wipe-0003").setValue(60);
+        NHM.keys(lw.property("ADBE Linear Wipe-0001"), main, [s, s + n], [100, 0]);
+    } else if (tr.type === "scale") {
+        NHM.keys(NHM.tg(layer, "ADBE Scale"), main, [s, s + n], [[118, 118], [100, 100]]);
+        NHM.keys(NHM.tg(layer, "ADBE Opacity"), main, [s, s + n], [0, 100]);
+    } else {
+        NHM.keys(NHM.tg(layer, "ADBE Opacity"), main, [s, s + n], [0, 100]);
+    }
+};
+
+/* ---------------------------------------------------------------- persistent layers */
+NHM.P.background = function (main, plan) {
+    var L = NHM.solid(main, "BACKGROUND", plan.theme.bg);
+    try {
+        var ramp = L.property("ADBE Effect Parade").addProperty("ADBE Ramp");
+        var c = plan.theme.bg, lift = [Math.min(1, c[0] + 0.06), Math.min(1, c[1] + 0.06), Math.min(1, c[2] + 0.06)];
+        ramp.property("ADBE Ramp-0002").setValue(lift);
+        ramp.property("ADBE Ramp-0004").setValue(c);
+        ramp.property("ADBE Ramp-0001").expression = "[thisComp.width*(0.3+0.2*Math.sin(time*0.25)), 0]";
+        ramp.property("ADBE Ramp-0003").expression = "[thisComp.width*(0.7-0.2*Math.sin(time*0.25)), thisComp.height]";
+        var nz = L.property("ADBE Effect Parade").addProperty("ADBE Noise");
+        nz.property("ADBE Noise-0001").setValue(2);
+    } catch (e) { NHM.report.warnings.push("background effects: " + e); }
+    return L;
+};
+
+NHM.persistentComp = function (name, plan) {
+    var c = app.project.items.addComp(name, plan.w, plan.h, 1, plan.duration_frames / plan.fps, plan.fps);
+    c.parentFolder = NH.folder("NH_PERSISTENT");
+    return c;
+};
+
+NHM.P.captions = function (main, plan) {
+    var cap = plan.persistent.captions;
+    if (!cap || !cap.cues.length) { return null; }
+    var c = NHM.persistentComp("CAPTIONS", plan);
+    for (var i = 0; i < cap.cues.length; i++) {
+        var q = cap.cues[i], L = c.layers.addText(q.text);
+        L.name = "CAP_" + (i + 1);
+        NHM.styleText(L, {text: q.text, font: cap.font_ps, size: cap.size, color: cap.color, rtl: true, justify: "center", caps: NHM.caps});
+        NHM.tg(L, "ADBE Position").setValue([cap.x, cap.y]);
+        NH.shadow(L, 0.45, 4, 14);
+        L.inPoint = NHM.t(c, q.start_frame);
+        L.outPoint = NHM.t(c, q.end_frame);
+        NHM.keys(NHM.tg(L, "ADBE Scale"), c, [q.start_frame, q.start_frame + 3], [[94, 94], [100, 100]]);
+    }
+    main.layers.add(c);
+    return c;
+};
+
+NHM.P.speaker_badge = function (main, plan) {
+    var b = plan.persistent.speaker_badge;
+    if (!b || !b.segments.length) { return null; }
+    var c = NHM.persistentComp("SPEAKER_BADGE", plan), rtl = plan.direction === "rtl";
+    for (var i = 0; i < b.segments.length; i++) {
+        var g = b.segments[i], L = c.layers.addText(g.name);
+        L.name = "BADGE_" + (i + 1);
+        NHM.styleText(L, {text: g.name, font: b.font_ps, size: b.size, color: b.accent, rtl: true, justify: rtl ? "right" : "left", caps: NHM.caps});
+        NHM.tg(L, "ADBE Anchor Point").expression = rtl ? "var r=sourceRectAtTime(time,false);[r.left+r.width,r.top+r.height/2]" :
+            "var r=sourceRectAtTime(time,false);[r.left,r.top+r.height/2]";
+        NHM.tg(L, "ADBE Position").setValue([b.x, b.y]);
+        L.inPoint = NHM.t(c, g.start_frame);
+        L.outPoint = NHM.t(c, g.end_frame);
+        NHM.keys(NHM.tg(L, "ADBE Opacity"), c, [g.start_frame, g.start_frame + 5], [0, 100]);
+    }
+    main.layers.add(c);
+    return c;
+};
+
+NHM.P.progress = function (main, plan) {
+    if (!plan.persistent.progress) { return null; }
+    var y = plan.safe.top - 30, L = NH.rect(main, "PROGRESS", [main.width, 8], [main.width / 2, y],
+        {fill: plan.theme.accent, rtlSweep: plan.direction === "rtl"});
+    var sc = L.property("ADBE Root Vectors Group").property(1).property("ADBE Vector Transform Group").property("ADBE Vector Scale");
+    sc.setValueAtTime(0, [0, 100]);
+    sc.setValueAtTime(NHM.t(main, plan.duration_frames), [100, 100]);
+    return L;
+};
+
+NHM.P.voice_pulse = function (main, plan) {
+    var vp = plan.persistent.voice_pulse;
+    if (!vp || !vp.values.length) { return null; }
+    var ctl = main.layers.addNull();
+    ctl.name = "VOICE_LEVEL";
+    var sl = ctl.property("ADBE Effect Parade").addProperty("ADBE Slider Control");
+    sl.name = "Level";
+    var times = [], vals = [];
+    for (var i = 0; i < vp.values.length; i++) { times.push(NHM.t(main, i)); vals.push(vp.values[i]); }
+    sl.property(1).setValuesAtTimes(times, vals);
+    var ring = NH.ellipse(main, "VOICE_PULSE", 160, [main.width / 2, main.height - plan.safe.bottom + 120], "Brand Teal", 6);
+    NHM.tg(ring, "ADBE Scale").expression = 'var l=thisComp.layer("VOICE_LEVEL").effect("Level")(1);[100+60*l,100+60*l]';
+    NHM.tg(ring, "ADBE Opacity").expression = 'var l=thisComp.layer("VOICE_LEVEL").effect("Level")(1);40+60*l';
+    return ring;
+};
+
+/* ---------------------------------------------------------------- audio */
+NHM.audio = function (main, plan) {
+    var a = plan.audio, L, item;
+    item = NH.footage(a.dialogue);
+    if (item) { L = main.layers.add(item); L.name = "DIALOGUE"; L.moveToEnd(); }
+    if (a.music) {
+        item = NH.footage(a.music.file);
+        if (item) {
+            L = main.layers.add(item);
+            L.name = "MUSIC";
+            L.outPoint = NHM.t(main, plan.duration_frames);
+            var lv = L.property("ADBE Audio Group").property("ADBE Audio Levels");
+            lv.setValue([a.music.level_db, a.music.level_db]);
+            var e = plan.duration_frames;
+            lv.setValueAtTime(NHM.t(main, e - a.music.fade_out_frames), [a.music.level_db, a.music.level_db]);
+            lv.setValueAtTime(NHM.t(main, e), [-48, -48]);
+            L.moveToEnd();
+        }
+    }
+    for (var i = 0; i < a.sfx.length; i++) {
+        item = NH.footage(a.sfx[i].file);
+        if (!item) { continue; }
+        L = main.layers.add(item);
+        L.name = "SFX_" + a.sfx[i].kind + "_" + (i + 1);
+        L.startTime = NHM.t(main, a.sfx[i].frame);
+        L.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([-3, -3]);
+        L.moveToEnd();
+    }
+};
+
+/* ---------------------------------------------------------------- build */
+NHM.build = function (job) {
+    var plan = job.plan;
+    NHM.plan = plan;
+    NHM.caps = job.caps || {};
+    NHM.report = {made: [], failed: [], warnings: []};
+    NH.W = plan.w; NH.H = plan.h; NH.FPS = plan.fps;
+    NH_DATA = {brand: plan.brand};
+    NH.buildBrand();
+    var main = app.project.items.addComp("MAIN_" + plan.reel_id, plan.w, plan.h, 1, plan.duration_frames / plan.fps, plan.fps);
+    NHM.P.background(main, plan);
+    var prev = null;
+    for (var i = 0; i < plan.scenes.length; i++) {
+        var sc = plan.scenes[i];
+        try {
+            var n = sc.layer_out_frame - sc.start_frame;
+            var c = app.project.items.addComp(sc.id + "_" + sc.type, plan.w, plan.h, 1, n / plan.fps, plan.fps);
+            c.parentFolder = NH.folder("NH_SCENES");
+            c.comment = sc.type + " | " + (sc.beat_role || "") + " | frames " + sc.start_frame + "-" + sc.end_frame;
+            (NHM.S[sc.type] || NHM.sceneBody)(c, sc);
+            var L = main.layers.add(c);
+            L.name = c.name;
+            L.startTime = NHM.t(main, sc.start_frame);
+            L.inPoint = NHM.t(main, sc.start_frame);
+            L.outPoint = NHM.t(main, sc.layer_out_frame);
+            NHM.transition(main, L, prev, sc);
+            prev = L;
+            NHM.report.made.push(sc.id);
+        } catch (err) {
+            NHM.report.failed.push({scene: sc.id, error: String(err), line: err.line});
+        }
+    }
+    try { NHM.P.captions(main, plan); } catch (e1) { NHM.report.failed.push({scene: "CAPTIONS", error: String(e1), line: e1.line}); }
+    try { NHM.P.speaker_badge(main, plan); } catch (e2) { NHM.report.failed.push({scene: "SPEAKER_BADGE", error: String(e2), line: e2.line}); }
+    try { NHM.P.progress(main, plan); } catch (e3) { NHM.report.failed.push({scene: "PROGRESS", error: String(e3), line: e3.line}); }
+    try { NHM.P.voice_pulse(main, plan); } catch (e4) { NHM.report.failed.push({scene: "VOICE_PULSE", error: String(e4), line: e4.line}); }
+    try { NHM.audio(main, plan); } catch (e5) { NHM.report.failed.push({scene: "AUDIO", error: String(e5), line: e5.line}); }
+    try {
+        var rq = app.project.renderQueue.items.add(main);
+        rq.outputModule(1).file = new File(job.render_path);
+    } catch (e6) { NHM.report.warnings.push("render queue: " + e6); }
+    app.project.save(new File(job.aep_path));
+    NHM.report.saved = job.aep_path;
+    NHM.report.main = main.name;
+    NHM.report.ae_version = app.version;
+    return NHM.report;
+};
