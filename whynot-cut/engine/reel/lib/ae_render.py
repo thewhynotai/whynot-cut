@@ -5,6 +5,8 @@ counts only when its output file exists and is newer than the call; frames are p
 """
 from __future__ import annotations
 
+import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -37,7 +39,26 @@ def render(aep: Path, comp: str, out: Path, rs: str, om: str, start_frame: int |
                 "log": None, "msg": f"aerender={exe} aep_exists={aep.exists()}"}
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    p = run(aerender_cmd(exe, aep, comp, out, rs, om, start_frame, end_frame), check=False, timeout=timeout)
+    stage, r_aep, r_out = None, aep, out
+    if not (str(aep).isascii() and str(out).isascii()):
+        # aerender reads its command line in the ANSI code page: a non-ASCII path (an Arabic client folder) arrives as
+        # "???". Render an ASCII copy of the project into an ASCII file and move that into place; After Effects finds
+        # the footage itself through the project's own (Unicode) paths.
+        if not tempfile.gettempdir().isascii():
+            return {"status": "FAILED", "returncode": None, "output": str(out), "elapsed_s": 0, "log": None,
+                    "msg": f"aerender needs ASCII paths, and the temp folder {tempfile.gettempdir()} is not one either: "
+                           "set TEMP to an ASCII folder, then render again"}
+        stage = Path(tempfile.mkdtemp(prefix="whynot-aerender-"))
+        r_aep, r_out = stage / "project.aep", stage / ("render" + out.suffix)
+        shutil.copy2(aep, r_aep)
+    try:
+        p = run(aerender_cmd(exe, r_aep, comp, r_out, rs, om, start_frame, end_frame), check=False, timeout=timeout)
+        if stage is not None and r_out.exists() and r_out.stat().st_size > 0:
+            out.unlink(missing_ok=True)
+            shutil.move(str(r_out), str(out))
+    finally:
+        if stage is not None:
+            shutil.rmtree(stage, ignore_errors=True)
     if log:
         write_text(Path(log), (p.stdout or "") + "\n" + (p.stderr or ""))
     fresh = out.exists() and out.stat().st_mtime >= t0 - 1 and out.stat().st_size > 0

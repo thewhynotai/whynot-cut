@@ -2490,5 +2490,109 @@ class TestMotionCodeHygiene(unittest.TestCase):
         self.assertEqual(bad, [])
 
 
+class TestArabicPaths(unittest.TestCase):
+    """Live run from a client folder named in Arabic (whynot-test/بودكاست-تجربة): FreeType could not open a font file
+    under it (Windows), and aerender received the project path as "???" (it reads its command line in the ANSI code
+    page)."""
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def font_copy(self) -> tuple[Path, Path]:
+        from lib import hb_text
+        font = test_font()
+        if font is None or not hb_text.AVAILABLE:
+            self.skipTest("no test font / HarfBuzz")
+        d = self.tmp / "خطوط"
+        d.mkdir()
+        return font, Path(shutil.copy2(font, d / font.name))
+
+    def test_font_in_arabic_folder_measures(self):
+        from lib import hb_text
+        from lib.motion_layout import fit
+        font, copy = self.font_copy()
+        a, b = hb_text.HBFontSpec(str(font), 48), hb_text.HBFontSpec(str(copy), 48)
+        self.assertEqual((b.resolved, b.getmetrics()), (a.resolved, a.getmetrics()))
+        text = "كلام اطول بكتير من الاول ومحتاج سطرين"
+        self.assertEqual(hb_text.measure(text, b), hb_text.measure(text, a))
+        self.assertEqual(fit(text, str(copy), 900, (120, 56), 3), fit(text, str(font), 900, (120, 56), 3))
+
+    def test_find_font_file_in_arabic_folder(self):
+        import freetype
+        from lib import motion_layout, plat
+        font, copy = self.font_copy()
+        ps = freetype.Face(str(font)).postscript_name.decode()
+        saved = (plat.font_dirs, dict(motion_layout._FONT_FILES))
+        plat.font_dirs = lambda: [copy.parent]
+        motion_layout._FONT_FILES.clear()
+        try:
+            self.assertEqual(motion_layout.find_font_file(ps), str(copy))
+        finally:
+            plat.font_dirs = saved[0]
+            motion_layout._FONT_FILES.clear()
+            motion_layout._FONT_FILES.update(saved[1])
+
+    def fake_aerender(self):
+        """aerender's process call replaced: records the command and what -project held, writes the -output file."""
+        from lib import ae_render
+        calls = []
+
+        def run(cmd, check=True, timeout=None, **kw):
+            proj, out = Path(cmd[cmd.index("-project") + 1]), Path(cmd[cmd.index("-output") + 1])
+            calls.append({"cmd": list(cmd), "project_bytes": proj.read_bytes() if proj.exists() else None})
+            out.write_bytes(b"MOV " + proj.read_bytes())
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        saved = (ae_render.run, ae_render.aerender_exe)
+        ae_render.run, ae_render.aerender_exe = run, lambda: sys.executable
+        self.addCleanup(lambda: setattr(ae_render, "run", saved[0]) or setattr(ae_render, "aerender_exe", saved[1]))
+        return calls
+
+    def project(self, folder: str) -> tuple[Path, Path]:
+        d = self.tmp / folder
+        (d / "render").mkdir(parents=True)
+        aep = d / "EP02_MOTION.aep"
+        aep.write_bytes(b"AEP")
+        return aep, d / "render" / "EP02_MAIN.mov"
+
+    def test_arabic_project_rendered_through_ascii_paths(self):
+        from lib import ae_render
+        calls = self.fake_aerender()
+        aep, out = self.project("مشروع")
+        r = ae_render.render(aep, "MAIN_EP02", out, "Best Settings", "High Quality", 0, 10)
+        self.assertEqual(r["status"], "RENDERED", r)
+        cmd = calls[0]["cmd"]
+        staged_aep, staged_out = cmd[cmd.index("-project") + 1], cmd[cmd.index("-output") + 1]
+        self.assertTrue(staged_aep.isascii() and staged_out.isascii(), cmd)
+        self.assertEqual(calls[0]["project_bytes"], b"AEP")             # a copy of the real project
+        self.assertEqual(out.read_bytes(), b"MOV AEP")                  # moved to the real output
+        self.assertFalse(Path(staged_aep).parent.exists())              # stage removed
+        self.assertEqual(r["output"], str(out))
+
+    def test_ascii_project_not_staged(self):
+        from lib import ae_render
+        calls = self.fake_aerender()
+        aep, out = self.project("project")
+        self.assertEqual(ae_render.render(aep, "MAIN_EP02", out, "Best Settings", "High Quality")["status"], "RENDERED")
+        cmd = calls[0]["cmd"]
+        self.assertEqual((cmd[cmd.index("-project") + 1], cmd[cmd.index("-output") + 1]), (str(aep), str(out)))
+
+    def test_non_ascii_temp_folder_is_named(self):
+        import tempfile as tf
+        from lib import ae_render
+        calls = self.fake_aerender()
+        aep, out = self.project("مشروع")
+        temp = self.tmp / "مؤقت"
+        temp.mkdir()
+        saved, tf.tempdir = tf.tempdir, str(temp)
+        try:
+            r = ae_render.render(aep, "MAIN_EP02", out, "Best Settings", "High Quality")
+        finally:
+            tf.tempdir = saved
+        self.assertEqual(r["status"], "FAILED", r)
+        self.assertIn("ASCII", r.get("msg", ""))
+        self.assertIn("TEMP", r.get("msg", ""))
+        self.assertEqual(calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

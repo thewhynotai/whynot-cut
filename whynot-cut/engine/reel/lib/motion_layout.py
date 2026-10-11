@@ -4,6 +4,7 @@ per-scene-type placement presets that read the reading direction instead of hard
 """
 from __future__ import annotations
 
+import io
 import re
 
 from .ae_builder import _balance, wrap_lines
@@ -156,8 +157,9 @@ def find_font_file(ps: str) -> str | None:
         for f in sorted(d.rglob("*")):
             if f.suffix.lower() not in (".ttf", ".otf"):
                 continue
-            try:
-                name = freetype.Face(str(f)).postscript_name
+            try:                # FreeType cannot open a non-ANSI path on Windows: read only those into memory
+                face = freetype.Face(str(f)) if str(f).isascii() else freetype.Face(io.BytesIO(f.read_bytes()))
+                name = face.postscript_name
             except Exception:  # noqa: BLE001 — unreadable font file
                 continue
             name = name.decode() if isinstance(name, bytes) else str(name)

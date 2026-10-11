@@ -24,8 +24,10 @@ _FACES: dict = {}
 
 def _face(path: str):
     if path not in _FACES:
-        blob = hb.Blob.from_file_path(path)
-        _FACES[path] = (hb.Face(blob, 0), freetype.Face(path))
+        import io
+        from pathlib import Path
+        data = Path(path).read_bytes()      # FreeType cannot open a non-ANSI path on Windows (an Arabic client folder)
+        _FACES[path] = (hb.Face(hb.Blob(data), 0), freetype.Face(io.BytesIO(data)))
     return _FACES[path]
 
 
