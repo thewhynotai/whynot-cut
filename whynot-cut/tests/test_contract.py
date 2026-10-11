@@ -38,7 +38,7 @@ SETTINGS_AFTER = {"previewCodec": "apcs", "previewFrameWidth": 1080, "previewFra
                   "compositeLinearColor": True, "maximumBitDepth": False, "maximumRenderQuality": False,
                   "audioSampleRate": {"seconds": 2.0833e-05, "ticks": "5292000"},
                   "workingColorSpace": {"name": "Rec. 709", "primaries": 1}, "gamutMappingControls": None}
-PLAN = {"reel_id": "EP01_R01_MO", "w": 1080, "h": 1920, "fps": 30, "duration_frames": 900, "brand": {"controls": []},
+PLAN = {"reel_id": "EP01_R01_MO", "format": "9x16", "w": 1080, "h": 1920, "fps": 30, "duration_frames": 900, "brand": {"controls": []},
         "scenes": [{"id": "S01", "type": "kinetic_quote", "start_frame": 0, "end_frame": 90, "layer_out_frame": 96,
                     "hero_frame": 45, "elements": []}],
         "persistent": {"captions": {"y": 1500, "size": 60}}, "word_reveal_s": 0.18}
@@ -656,9 +656,14 @@ class ActionShapeTests(unittest.TestCase):
         for k in ("previewCodec", "videoFrameWidth", "videoFrameHeight", "videoFrameRate", "compositeLinearColor",
                   "maximumBitDepth", "maximumRenderQuality"):
             self.assertIn(k, sa)
-        ae_layer = V.load("ae_readback")["$defs"]["layer"]["required"]
+        text = V.load("ae_readback")["$defs"]["text_layer"]["required"]
+        for k in ("name", "kind", "in", "out", "comment", "text", "font_ps", "substitute", "composer", "direction",
+                  "direction_pr"):                 # motion_readback.compare reads every one of these on a text layer
+            self.assertIn(k, text)
+        self.assertNotIn("rect", text)               # optional: rect_error stands in for it
         for k in ("name", "kind", "in", "out", "comment"):
-            self.assertIn(k, ae_layer)
+            self.assertIn(k, V.load("ae_readback")["$defs"]["other_layer"]["required"])
+        self.assertIn("format", V.load("ae_build_motion")["$defs"]["plan"]["required"])   # motion_build.build:239
 
     def test_ping_covers_both_hosts_and_rejects_neither(self):
         self.assertEqual(V.validate(SAMPLES["ping"]["readback"], "ping#/$defs/readback"), [])
@@ -824,6 +829,83 @@ class ActionShapeTests(unittest.TestCase):
         self.assertTrue(V.validate(dict(SAMPLES["ae_build_motion"]["readback"], failed=[{"scene": "S1"}]),
                                    "ae_build_motion#/$defs/readback"))
         self.assertTrue(V.validate(dict(SAMPLES["ae_build_motion"]["readback"], made="S01"), "ae_build_motion#/$defs/readback"))
+
+    def test_text_layer_needs_everything_the_comparison_reads(self):
+        rb = "ae_readback#/$defs/readback"
+        base = SAMPLES["ae_readback"]["readback"]
+
+        def with_layer(layer):
+            return dict(base, scenes=[{"id": "S01", "comp": "c", "in_frame": 0, "out_frame": 1, "layers": [layer]}])
+        self.assertEqual(V.validate(with_layer(LAYER_TEXT), rb), [])
+        for k in ("text", "font_ps", "substitute", "composer", "direction", "direction_pr"):
+            errs = V.validate(with_layer({x: v for x, v in LAYER_TEXT.items() if x != k}), rb)
+            self.assertTrue(errs and any("/scenes/0/layers/0" in e for e in errs), (k, errs))
+        self.assertTrue(V.validate(with_layer({"name": "S01_text_1", "kind": "text", "in": 0, "out": 9, "comment": ""}), rb))
+        for k, v in (("text", 5), ("font_ps", None), ("substitute", "no"), ("composer", 1), ("direction", 3),
+                     ("direction_pr", 3)):
+            self.assertTrue(V.validate(with_layer(dict(LAYER_TEXT, **{k: v})), rb), k)
+        # nullable direction fields, the measured box optional (rect_error stands in), shapes carry no text fields
+        self.assertEqual(V.validate(with_layer(dict(LAYER_TEXT, composer=None, direction=None, direction_pr="RTL")), rb), [])
+        self.assertEqual(V.validate(with_layer({x: v for x, v in dict(LAYER_TEXT, rect_error="x").items() if x != "rect"}), rb), [])
+        self.assertEqual(V.validate(with_layer(LAYER_SHAPE), rb), [])
+        self.assertEqual(V.validate(with_layer(dict(LAYER_SHAPE, kind="other")), rb), [])
+        self.assertTrue(V.validate(with_layer({k: v for k, v in LAYER_SHAPE.items() if k != "comment"}), rb))
+
+    def test_plan_needs_its_format(self):
+        d = "ae_build_motion#/$defs/data"
+        self.assertTrue(any("'format'" in e for e in V.validate({"job": dict(JOB, plan={k: v for k, v in PLAN.items() if k != "format"})}, d)))
+        self.assertTrue(V.validate({"job": dict(JOB, plan=dict(PLAN, format=""))}, d))
+        self.assertTrue(V.validate({"job": dict(JOB, plan=dict(PLAN, format=916))}, d))
+        self.assertTrue(any("'format'" in e for e in V.validate({"job": {k: v for k, v in JOB.items() if k != "plan"}
+                                                                  | {"plan": {k: v for k, v in PLAN.items() if k != "format"}}},
+                                                                 "ae_readback#/$defs/data")))
+
+
+class EcmaParityTests(unittest.TestCase):
+    """`$` and digits behave like ECMA-262 / ajv, not like Python: no match before a final newline, ASCII digits only."""
+
+    def test_date_time_rejects_a_trailing_newline_and_non_ascii_digits(self):
+        s = {"type": "string", "format": "date-time"}
+        self.assertEqual(V.validate("2026-10-11T12:00:00Z", s), [])
+        for evil in ("2026-10-11T12:00:00Z\n", "2026-10-11T12:00:00+03:00\n", "\n2026-10-11T12:00:00Z",
+                     "2026-10-11T12:00:00Z ", "\u0662\u0660\u0662\u0666-10-11T12:00:00Z"):
+            self.assertTrue(V.validate(evil, s), repr(evil))
+
+    def test_request_expires_at_and_id_reject_a_trailing_newline(self):
+        req = {"protocol": 4, "id": "abc", "action": "ping", "data": {}, "expires_at": NOW}
+        self.assertEqual(V.validate_request(req), [])
+        self.assertTrue(any(e.startswith("/id:") for e in V.validate_request(dict(req, id="abc\n"))))
+        self.assertTrue(any(e.startswith("/expires_at:") for e in V.validate_request(dict(req, expires_at=NOW + "\n"))))
+        res = {"ok": False, "action": "ping", "id": "abc\n"}
+        self.assertTrue(any(e.startswith("/id:") for e in V.validate_result(res)))
+        prog = {"event": "progress", "id": "abc\n", "action": "ping", "step": "x"}
+        self.assertTrue(any(e.startswith("/id:") for e in V.validate(prog, "progress")))
+
+    def test_pattern_dollar_means_end_of_input(self):
+        s = {"type": "string", "pattern": "^[a-z]+$"}
+        self.assertEqual(V.validate("abc", s), [])
+        self.assertTrue(V.validate("abc\n", s))
+        self.assertTrue(V.validate("abc\n\n", s))
+        self.assertEqual(V.validate("abc\n", {"pattern": "^abc"}), [])                  # no `$`: unaffected
+        self.assertEqual(V.validate("a$", {"pattern": r"^a\$$"}), [])                   # an escaped dollar is a literal
+        self.assertTrue(V.validate("a$\n", {"pattern": r"^a\$$"}))
+        self.assertEqual(V.validate("a$b", {"pattern": "^a[$]b$"}), [])                 # inside a class: a literal
+        self.assertEqual(V.validate("a\\", {"pattern": r"^a\\$"}), [])                  # escaped backslash, then `$`
+        self.assertTrue(V.validate("a\\\n", {"pattern": r"^a\\$"}))
+        self.assertEqual(V.validate("b", {"pattern": "^(a$|b$)"}), [])
+        self.assertTrue(V.validate("b\n", {"pattern": "^(a$|b$)"}))
+        self.assertEqual(V.check_schema({"pattern": "^[A-Za-z0-9._-]+$"}), [])
+        self.assertTrue(V.check_schema({"pattern": "[a-"}))
+
+    def test_names_and_refs_reject_a_trailing_newline(self):
+        for evil in ("ping\n", "ping.schema.json\n", "protocol\n", "\nping", "ping "):
+            with self.assertRaises(KeyError, msg=repr(evil)):
+                V.load(evil)
+        with self.assertRaises(KeyError):
+            V.validate({}, "ping\n#/$defs/data")
+        self.assertTrue(V.validate(1, {"$ref": "ping.schema.json\n#/$defs/data"}))
+        self.assertTrue(V.check_schema({"$ref": "ping.schema.json\n#/$defs/data"}))
+        self.assertEqual(V.validate({}, {"$ref": "ping.schema.json#/$defs/data"}), [])
 
 
 if __name__ == "__main__":

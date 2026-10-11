@@ -39,9 +39,12 @@ KEYWORDS = frozenset({"$ref", "$defs", "type", "properties", "required", "additi
 TYPES = ("null", "boolean", "object", "array", "string", "number", "integer")
 FORMATS = ("date-time",)
 MAX_DEPTH = 64                      # $ref chains / schema nesting: a loop is reported, never a RecursionError
-_NAME = re.compile(r"^[A-Za-z0-9_]+$")
-_REF_FILE = re.compile(r"^([A-Za-z0-9_]+)\.schema\.json$")
-_DATE_TIME = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))$")
+# `$` in Python also matches before a trailing newline (ECMA-262 and ajv do not), and the digit shorthand matches any Unicode digit:
+# the module's own patterns use fullmatch and [0-9]
+_NAME = re.compile(r"[A-Za-z0-9_]+")
+_REF_FILE = re.compile(r"([A-Za-z0-9_]+)\.schema\.json")
+_DATE_TIME = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]+)?"
+                        r"(?:[Zz]|[+-]([0-9]{2}):([0-9]{2}))")
 
 
 # ------------------------------------------------------------------------------------------------ loading
@@ -59,9 +62,9 @@ def _filename(name: str) -> str:
         raise KeyError(name)
     if name == "protocol" or name == "protocol.json":
         return "protocol.json"
-    m = _REF_FILE.match(name)
+    m = _REF_FILE.fullmatch(name)
     base = m.group(1) if m else name
-    if not _NAME.match(base):
+    if not _NAME.fullmatch(base):
         raise KeyError(name)
     return base + ".schema.json"
 
@@ -96,7 +99,7 @@ def _resolve(ref: str, root, fname):
     file_part, _, ptr = ref.partition("#")
     if file_part == "":
         return _pointer(root, ptr), root, fname
-    m = _REF_FILE.match(file_part)
+    m = _REF_FILE.fullmatch(file_part)
     if not m:                                   # URLs, paths, parent folders: nothing outside the contract folder
         raise KeyError(ref)
     other = load(file_part)
@@ -165,8 +168,33 @@ def _equal(a, b) -> bool:
     return a == b
 
 
+@lru_cache(maxsize=None)
+def _pattern(pat: str):
+    """Compile a JSON Schema `pattern` with ECMA-262 end-of-input semantics: an unescaped `$` outside a character class
+    means the very end of the string (Python's `$` would also match before a final newline). Other dialect differences
+    (the digit shorthand matching non-ASCII digits) are not translated: write [0-9] in contract patterns."""
+    out, i, in_class = [], 0, False
+    while i < len(pat):
+        c = pat[i]
+        if c == "\\" and i + 1 < len(pat):
+            out.append(pat[i:i + 2])
+            i += 2
+            continue
+        if in_class:
+            in_class = c != "]"
+        elif c == "[":
+            in_class = True
+        elif c == "$":
+            out.append(r"\Z")
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return re.compile("".join(out))
+
+
 def _date_time_ok(s: str) -> bool:
-    m = _DATE_TIME.match(s)
+    m = _DATE_TIME.fullmatch(s)
     if not m:
         return False
     y, mo, d, h, mi, sec = (int(m.group(i)) for i in range(1, 7))
@@ -228,7 +256,7 @@ def _check(inst, schema, path: str, root, fname, depth: int, out: list) -> None:
             out.append(f"{_where(path)}: string must have at least {schema['minLength']} characters, has {len(inst)}")
         if "maxLength" in schema and len(inst) > schema["maxLength"]:
             out.append(f"{_where(path)}: string must have at most {schema['maxLength']} characters, has {len(inst)}")
-        if "pattern" in schema and not re.search(schema["pattern"], inst):
+        if "pattern" in schema and not _pattern(schema["pattern"]).search(inst):
             out.append(f"{_where(path)}: {inst[:60]!r} does not match the pattern {schema['pattern']}")
         if schema.get("format") == "date-time" and not _date_time_ok(inst):
             out.append(f"{_where(path)}: {inst[:60]!r} is not an RFC 3339 date-time with a time zone (Z or +hh:mm)")
@@ -378,7 +406,7 @@ def _check_schema(schema, path: str, root, fname, depth: int, out: list) -> None
             bad("pattern", "must be a string")
         else:
             try:
-                re.compile(schema["pattern"])
+                _pattern(schema["pattern"])
             except re.error as e:
                 bad("pattern", f"is not a valid regular expression ({e})")
     if "format" in schema and schema["format"] not in FORMATS:

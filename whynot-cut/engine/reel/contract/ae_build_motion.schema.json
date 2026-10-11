@@ -164,6 +164,11 @@
           "minLength": 1,
           "description": "project id; the main comp is MAIN_<reel_id>"
         },
+        "format": {
+          "type": "string",
+          "minLength": 1,
+          "description": "format name, e.g. '9x16'; motion_build.build reads job['plan']['format'] for format_spec()"
+        },
         "w": {
           "type": "integer",
           "minimum": 1,
@@ -206,6 +211,7 @@
       },
       "required": [
         "reel_id",
+        "format",
         "w",
         "h",
         "fps",
