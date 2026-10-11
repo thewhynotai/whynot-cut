@@ -75,6 +75,17 @@ def audio_sync(render: Path, dialogue: Path, fps: float, max_lag: int = 6) -> di
     return {"corr": round(best[0], 3) if best[0] > -2 else None, "offset_frames": best[1]}
 
 
+def sync_detail(s: dict) -> str:
+    """audio_sync's measurement in words, with a note for a near miss (0.8 <= correlation < 0.9)."""
+    if s.get("corr") is None:
+        return s.get("detail") or "no correlation measured (silent or too short)"
+    d = f"correlation {s['corr']}, offset {s['offset_frames']} frames"
+    if 0.8 <= s["corr"] < 0.9:
+        d += (" (just under 0.9: the render's full mix is compared with the dry dialogue, so a loud music bed or SFX can "
+              "cause this)")
+    return d
+
+
 def _planned_mix_check(paths, plan: dict, main: Path) -> str:
     """Is it the bed or the voice? The render against the engine's own mix of the plan (same sequence clock)."""
     import tempfile
@@ -134,10 +145,7 @@ def run(paths) -> dict:
     if main and main.exists() and dia.exists() and plan:
         s = audio_sync(main, dia, float(plan["fps"]))
         ok = s["corr"] is not None and s["corr"] >= 0.9 and abs(s["offset_frames"]) <= 1
-        detail = f"correlation {s['corr']}, offset {s['offset_frames']} frames"
-        if s["corr"] is not None and 0.8 <= s["corr"] < 0.9:
-            detail += (" (just under 0.9: the render's full mix is compared with the dry dialogue, so a loud music bed "
-                       "or SFX can cause this)")
+        detail = sync_detail(s)
         a = plan.get("audio") or {}
         if not ok and s["corr"] is not None and (a.get("music") or a.get("sfx")):
             detail += "; " + _planned_mix_check(paths, plan, main)

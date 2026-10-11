@@ -1780,9 +1780,12 @@ class TestMotionQC(CompiledMotion):
            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(mixed))
         shutil.copyfile(mixed, motion_build.render_path(self.reel))
         res, detail = sync()
-        self.assertEqual(res, "FAIL", detail)
-        self.assertRegex(detail, r"correlation 0\.8\d")
-        self.assertIn("music", detail)
+        # loose on purpose (review Minor 8): the exact value depends on ffmpeg's amix/AAC; the band rules are pinned
+        # with fixed values in TestAudioSyncDetail
+        import re
+        corr = float(re.search(r"correlation (\d\.\d+)", detail).group(1))
+        self.assertEqual(res == "PASS", corr >= 0.9, detail)
+        self.assertEqual("just under 0.9" in detail, 0.8 <= corr < 0.9, detail)
 
     def test_audio_sync_bed_diagnostic(self):
         """Final review: when the plan's music/SFX bed pulls the dialogue correlation under 0.9, QC also compares the
@@ -2686,6 +2689,23 @@ class TestArabicPaths(unittest.TestCase):
         self.assertIn("ASCII", r.get("msg", ""))
         self.assertIn("TEMP", r.get("msg", ""))
         self.assertEqual(calls, [])
+
+
+class TestAudioSyncDetail(unittest.TestCase):
+    """Review (Minor 8): the near-miss note was tested only through an ffmpeg mix whose measured correlation (0.86) a
+    future ffmpeg could move out of the band. The band rules, with fixed values."""
+    def test_band(self):
+        from lib.motion_qc import sync_detail
+        for corr, note in ((0.79, False), (0.8, True), (0.85, True), (0.899, True), (0.9, False), (0.999, False)):
+            d = sync_detail({"corr": corr, "offset_frames": 0})
+            self.assertIn(f"correlation {corr}, offset 0 frames", d)
+            self.assertEqual("just under 0.9" in d, note, (corr, d))
+
+    def test_nothing_measured(self):
+        from lib.motion_qc import sync_detail
+        d = sync_detail({"corr": None, "offset_frames": None, "detail": "no audio to compare"})
+        self.assertIn("no audio to compare", d)
+        self.assertNotIn("just under", d)
 
 
 if __name__ == "__main__":
