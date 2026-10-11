@@ -214,8 +214,10 @@ tested one by one.
 - **Speech text:** tokens of a speech field must be an in-order subsequence of the words spoken inside the scene
   (± 1.5 s at its edges), with at most `max_drop_ratio` of those words left out and no token added. Each shown token
   keeps its word id and time.
-- **Editorial text:** allowed only in the fields the table marks editorial. It may not contain quotation marks, digits
-  absent from the window's words, or names absent from the sheet. Every editorial line goes to
+- **Editorial text:** allowed only in the fields the table marks editorial. It may not contain quotation marks or
+  digits absent from the window's words. People and the show are written as `{host}`, `{guest}` and `{show}`, which
+  the engine fills from the sheet (a placeholder the sheet cannot fill is an error); code cannot recognise other names
+  in free Arabic text, so the agent rule and Gate 1 cover them. Every editorial line goes to
   `motion-validation.json["editorial_lines"]` and the Gate 1 summary.
 - **Numbers:** `stat_counter.evidence` must be found inside the scene. The digit string of `value` (separators
   removed, Arabic-Indic digits mapped to Western) must appear in the evidence's digit string mapped the same way;
@@ -309,7 +311,7 @@ bridge with test comps, reads them back, renders frames with `aerender` and writ
 |---|---|---|
 | Arabic sentence, Universal composer | composer read back as UNIVERSAL | none: Needs you — AE Preferences › Type › Text Engine "South Asian and Middle Eastern", restart AE |
 | `TextDocument.direction = RTL` | read back after `setValue` | set it through `paragraphRange(0)` (AE 24.3+); else `rtl_direction: false` (right-justified, rely on the composer's bidi) + warning |
-| Word reveal, expression selector "Based On: Words" | which word is revealed first (frame + read-back of the selector value per index) | `word_index_logical: false` → per-line layers with line reveal; if lines also fail → one text layer per word, chained by `sourceRectAtTime` expressions (Arabic does not join across spaces) |
+| Word reveal, expression selector "Based On: Words" | which word is revealed first, judged from frames rendered at known cue times (AE scripting cannot report a selector's per-word value) | `word_index_logical: false` → per-line layers with line reveal; if lines also fail → one text layer per word, chained by `sourceRectAtTime` expressions (Arabic does not join across spaces) |
 | Per-word fill emphasis (animator + expression selector) | colour at the emphasised word in the frame | emphasis by scale only |
 | Mixed Arabic + Latin term + digits | frame view | none (a QC failure points to the term) |
 | Brand font via `fontObject` | `getFontsByPostScriptName`, not substituted | Needs you: install the font (`font_install_hint()`) |
@@ -317,7 +319,8 @@ bridge with test comps, reads them back, renders frames with `aerender` and writ
 | Output-module templates | names available in this AE | the first ProRes/lossless template |
 
 Claude views the probe frames (joined letters, word order, emphasis colour) and records the verdict with
-`reel ae-probe --record ok|fail --notes "…"`. `motion-build` refuses while there is no `ok` verdict for this AE version.
+`reel ae-probe --record ok|fail --word-order logical|visual --notes "…"` (the word order seen in the frames sets
+`word_index_logical`). `motion-build` refuses while there is no `ok` verdict for this AE version.
 
 ### 4.7 Build (`lib/motion_build.py`, `templates/after_effects/nh_motion_lib.jsx`, `reel motion-build`)
 - Preconditions: a fresh `motion-plan.json`, Gate 1 approval for its fingerprint, an `ok` probe verdict, all fonts
@@ -397,7 +400,7 @@ planned. The comparison goes into `motion-build-result.json`.
 
 ### 4.13 CLI
 New: `motion-icons` (`--search`), `motion-library`, `motion-plan`, `motion-animatic`, `ae-status`, `ae-probe`
-(`--record ok|fail --notes`), `motion-build` (`--script-only`, `--run-script`, `--replace-edited`,
+(`--record ok|fail --word-order logical|visual --notes`), `motion-build` (`--script-only`, `--run-script`, `--replace-edited`,
 `--allow-fallback-font`), `motion-render` (`--scenes`), `motion-frames`. Changed:
 `reels-select` (`--as`, `--format`, `--type`, `T` ids), `approve-plan`, `next`, `qc`, `verify --record` and `handoff`
 dispatch on `source.json["kind"] == "motion_reel"`. `ppro-install` installs the two-host bundle.
