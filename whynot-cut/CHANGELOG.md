@@ -1,8 +1,9 @@
 # Changelog
 
-## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names
-The minor findings of the 2.2.0 review and two bugs found by a live run from a client folder named in Arabic, each
-reproduced by a failing test first.
+## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names, field-test round 4
+The minor findings of the 2.2.0 review, two bugs found by a live run from a client folder named in Arabic, and the gaps
+G62–G69 found by the first real podcast run (installed 2.1.1, a 34-minute episode), each reproduced by a failing test
+first.
 
 **Fixed**
 - Client folders with Arabic (any non-ASCII) names: `motion-plan`, and every HarfBuzz text measurement, opened the
@@ -53,6 +54,37 @@ reproduced by a failing test first.
 - The LTR progress bar (off in every recipe default; checked in node against a fake After Effects), the in-script
   refusal and its result through osascript (macOS); still from 2.2.0: a Premiere `ppro-build` on bundle 3.1.0, macOS,
   a build in the client's brand font.
+
+### Field test round 4 (G62–G69)
+- G62 role fonts: preview and caption stills, thumbnails, the animatic, motion plans and the After Effects /
+  Photoshop / MOGRT font map take a role's font from typography.json `roles` (PostScript name, file, style or weight),
+  then the reel-profile's brand.json `font_roles_fallback.weights`, then the nearest weight the family has. They no
+  longer fall back to "the first file", which drew hook titles in Medium for a family without Black. One resolver:
+  `lib/font_roles.py`.
+- G68 highlight legibility: `publish-thumbnail` and preview stills measure a brand-coloured highlight against the frame
+  behind it (WCAG contrast, motion.json thresholds: 3.0 at 64 px and larger, 4.5 below). Below the threshold the
+  highlight is drawn in white/paper and the output warns: the field test's brown #81613D on a warm set measured 1.5:1.
+  Readable brand colours are kept. New output keys: `highlights` (thumbnails) and `warnings` (previews). Not checked
+  yet: unboxed caption stills and decorative bars.
+- G63 `reels-select --adjust Rxx:in=|out=`: an explicit editor time snaps to the nearest word start or end (with the
+  usual lead-in and tail). It never moves back onto a word the editor skipped. Automatic windows keep the
+  sentence-start preference.
+- G64 `reels-plan`: an evidence quote that no longer matches, for example after `transcript-correct`, ends with
+  "did you mean: «…»". That is the current transcript at that time, ready to paste.
+- G65 `episode-prep` scans the whole episode at 1 fps for name supers (lower thirds), including ones that start at a
+  cut. It writes `_supers_sheet.jpg` and `_head_sheet.jpg` (every 10 s of the first 3 minutes), and `episode.json`
+  gets `overlay_scan` and `lower_thirds_hint`. The intake inspector views every sheet before reporting none. Cost is
+  about 1.9 s per minute of video (about 2 min for a 60-minute episode). Budget is 300 s
+  (`WHYNOT_OVERLAY_SCAN_BUDGET_S`; 0 turns the scan off).
+- G66 `reel` names itself (`WhyNot Cut <version>`) in its errors and in `reel --version`. `reel doctor` lists every
+  `reel` on PATH and flags another plugin's (for example an old reel-editor) found first, with the fix: restart Claude
+  Code, or call this plugin's `reel` by its full path.
+- G67 docs: engine-side scripts run with the engine venv's python without `-I`. `-I`, `-s` and `-E -s` hide the user
+  site-packages that a `--system-site-packages` venv uses on Windows; use `-E` alone for isolation.
+- G69 `ppro-frames` detects Premiere's "Media pending" slate (media still loading right after a project opens) and
+  re-exports those frames (`--pending-retries` 3, `--pending-wait` 5 s, doubling). Frames still pending are listed
+  under `media_pending` with `ok: false` and are never shown as frames. QC docs: such a frame means re-export, never
+  pass or fail.
 
 ## 2.2.0 — 2026-10-11 · Motion mode and client-level reference style
 
