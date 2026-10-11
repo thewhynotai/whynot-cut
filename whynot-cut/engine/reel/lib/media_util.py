@@ -46,9 +46,11 @@ def _ffmpeg() -> str:
 def grab_frame_file(video: Path, t_s: float, out: Path, *, vf: str | None = None, quality: int | None = None,
                     ss_digits: int = 3) -> Path | None:
     """One frame at t_s seconds written to `out` (format from its extension), or None when nothing was written.
-    Input seeking: ffmpeg decodes only from the keyframe before t_s. vf: a filter chain (scale ...); quality: -q:v."""
+    Input seeking: ffmpeg decodes only from the keyframe before t_s. vf: a filter chain (scale ...); quality: -q:v.
+    A file already at `out` is removed first."""
     from .common import run
     out = Path(out)
+    out.unlink(missing_ok=True)            # an older file at `out` must never count as this grab's frame
     cmd = [_ffmpeg(), "-y", "-loglevel", "error", "-ss", f"{max(0.0, float(t_s)):.{ss_digits}f}", "-i", str(video),
            "-frames:v", "1"]
     cmd += ["-vf", vf] if vf else []

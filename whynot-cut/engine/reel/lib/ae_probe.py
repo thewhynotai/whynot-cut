@@ -21,6 +21,8 @@ def probe_dir() -> Path:
 
 def caps_file() -> Path:
     return engine_home() / "ae-capabilities.json"
+
+
 DEFAULT_FONTS = {"headline": "ArialMT"} if plat.IS_WIN else {"headline": "GeezaPro"}
 W, H, FPS, FRAMES = 1080, 1920, 30, 90
 CHECK_MARK = [{"vertices": [[-40, 0], [-12, 28], [44, -30]], "inTangents": [[0, 0], [0, 0], [0, 0]],

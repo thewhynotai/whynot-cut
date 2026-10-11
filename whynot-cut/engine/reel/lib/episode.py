@@ -186,7 +186,7 @@ def intake_frames(ep: EpisodePaths, src: Path, duration_s: float, n: int = 6) ->
             tiles.append((d / f"frame_{k + 1:02d}.jpg", f"{len(tiles) + 1}  {fmt_ts(int(t * 1000), '.')}"))
     out = d / "_intake_sheet.jpg"
     if not contact_sheet(tiles, out, cols=3, tile_w=640, tile_h=360, label_h=22, label_xy=(6, 5), fit="contain"):
-        Image.new("RGB", (640, 382), "black").save(out, quality=85)   # no frame readable: the inspector sees that
+        Image.new("RGB", (3 * 640, 2 * 382), "black").save(out, quality=85)   # no frame readable: the old empty 3x2
     return out
 
 

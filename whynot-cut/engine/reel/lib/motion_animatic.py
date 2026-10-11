@@ -186,20 +186,22 @@ def render(paths, width: int = 540) -> dict:
     # stderr goes to a file, not a pipe: a pipe nobody reads while frames are written can fill and stall ffmpeg, and
     # the old pipe was never closed (MI-9 ResourceWarning). The `with` closes stdin and reaps the process.
     errf = d / "_animatic_ffmpeg.log"
-    with open(errf, "wb") as ef, subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=ef) as p:
-        for k in range(n):
-            t = k / ANIM_FPS * fps
-            i = max((j for j, sc in enumerate(plan["scenes"]) if sc["start_frame"] <= t), default=0)
-            a = (t - plan["scenes"][i]["start_frame"]) / 6.0
-            if i > 0 and a < 1:
-                key = (i, round(a, 2))
-                if key not in cache:
-                    cache[key] = Image.blend(labeled[i - 1], labeled[i], max(0.0, a)).tobytes()
-                p.stdin.write(cache[key])
-            else:
-                p.stdin.write(cache.setdefault((i, 1.0), labeled[i].tobytes()))
-    err = errf.read_bytes().decode("utf-8", "replace")
-    errf.unlink(missing_ok=True)
+    try:
+        with open(errf, "wb") as ef, subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=ef) as p:
+            for k in range(n):
+                t = k / ANIM_FPS * fps
+                i = max((j for j, sc in enumerate(plan["scenes"]) if sc["start_frame"] <= t), default=0)
+                a = (t - plan["scenes"][i]["start_frame"]) / 6.0
+                if i > 0 and a < 1:
+                    key = (i, round(a, 2))
+                    if key not in cache:
+                        cache[key] = Image.blend(labeled[i - 1], labeled[i], max(0.0, a)).tobytes()
+                    p.stdin.write(cache[key])
+                else:
+                    p.stdin.write(cache.setdefault((i, 1.0), labeled[i].tobytes()))
+        err = errf.read_bytes().decode("utf-8", "replace")
+    finally:
+        errf.unlink(missing_ok=True)       # also when writing a frame failed (ffmpeg gone: BrokenPipeError)
     if p.returncode or not mp4.exists():
         raise SystemExit(f"animatic encode failed: {err[-400:]}")
     return {"stills": stills, "sheet": str(sheet_p), "mp4": str(mp4), "duration_s": round(dur, 3)}

@@ -41,13 +41,13 @@ def lib_path() -> Path:
     return scripts_dir() / LIB_SRC.name
 
 
-_LIVE = {"QUEUE": "queue_dir", "SCRIPTS": "scripts_dir", "EXT_DIR": "ext_dir", "LIB": "lib_path", "ENTRY": "entry_path"}
+_LIVE = {"QUEUE": "queue_dir", "SCRIPTS": "scripts_dir", "EXT_DIR": "ext_dir", "LIB": "lib_path"}
 
 
 def __getattr__(name: str):
     # Back-compat for one release (3.0): these were constants computed at import (engine MI-8). They now resolve per
     # call from the live engine home; new code calls the functions. Remove in 3.1.
-    if name in _LIVE and _LIVE[name] in globals():
+    if name in _LIVE:
         return globals()[_LIVE[name]]()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

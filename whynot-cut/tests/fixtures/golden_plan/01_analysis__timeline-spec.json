@@ -1,0 +1,248 @@
+{
+ "base_offset_x": 0.0,
+ "base_offset_y": 0.0,
+ "base_scale_percent": 500.0,
+ "caption_highlights": [
+  {
+   "at_ms": 8600,
+   "text": "التشخيص الصحيح"
+  }
+ ],
+ "caption_source": "02_transcription/captions-short-seq.srt",
+ "duration_frames": 267,
+ "duration_ms": 10680,
+ "events": [
+  {
+   "approval_required": false,
+   "decision_id": "EDIT_001",
+   "end_frame": 70,
+   "end_ms": 2780,
+   "end_tc": "00:00:02:20",
+   "event_id": "GFX_001",
+   "evidence": "هل في حاجات معينة",
+   "params": {
+    "text": "هل في حاجات معينة"
+   },
+   "segment_id": "SEG_001",
+   "src_end_ms": 3500,
+   "src_start_ms": 200,
+   "start_frame": 5,
+   "start_ms": 200,
+   "start_tc": "00:00:00:05",
+   "template": "hook_title",
+   "track": "V05",
+   "track_name": "Animated Typography"
+  },
+  {
+   "approval_required": false,
+   "decision_id": "EDIT_002",
+   "end_frame": 193,
+   "end_ms": 7700,
+   "end_tc": "00:00:07:18",
+   "event_id": "GFX_002",
+   "evidence": "أول حاجة التشخيص الصحيح",
+   "params": {
+    "items": [
+     {
+      "at": "00:00:06.000",
+      "frame": 118,
+      "rel_frame": 25,
+      "src_frame": 150,
+      "text": "التشخيص"
+     },
+     {
+      "at": "00:00:07.500",
+      "frame": 156,
+      "latin": true,
+      "rel_frame": 63,
+      "src_frame": 188,
+      "text": "Isotretinoin"
+     }
+    ],
+    "title": "خطوات"
+   },
+   "segment_id": "SEG_002",
+   "src_end_ms": 9000,
+   "src_start_ms": 5000,
+   "start_frame": 93,
+   "start_ms": 3700,
+   "start_tc": "00:00:03:18",
+   "template": "checklist",
+   "track": "V09",
+   "track_name": "Educational Diagrams"
+  },
+  {
+   "approval_required": false,
+   "decision_id": "EDIT_002",
+   "end_frame": 255,
+   "end_ms": 10200,
+   "end_tc": "00:00:10:05",
+   "event_id": "GFX_003",
+   "evidence": "أول حاجة التشخيص الصحيح",
+   "params": {
+    "lines": [
+     "كلية الطب"
+    ],
+    "name": "د/ نهلة"
+   },
+   "segment_id": "SEG_002",
+   "src_end_ms": 11500,
+   "src_start_ms": 9000,
+   "start_frame": 193,
+   "start_ms": 7700,
+   "start_tc": "00:00:07:18",
+   "template": "name_card",
+   "track": "V04",
+   "track_name": "Branded Graphic Overlays"
+  }
+ ],
+ "fps": 25.0,
+ "framing": "fit; 4:5 window 1080x1350 (y 285) over a blurred fill",
+ "main_footage": "data/Raw/CLIP1.mov",
+ "main_segments": [
+  {
+   "camera": "window",
+   "decision_id": "AUTO_WINDOW",
+   "end_frame": 25,
+   "keep_index": 0,
+   "masked": false,
+   "offset_x": 0.0,
+   "offset_y": 0.0,
+   "scale_factor": 1.0,
+   "src_in_ms": 0,
+   "src_out_ms": 1000.0,
+   "start_frame": 0,
+   "window": {
+    "h": 1350,
+    "mode": "4:5",
+    "w": 1080,
+    "y": 285
+   }
+  },
+  {
+   "camera": "punch_in",
+   "decision_id": "EDIT_001",
+   "end_frame": 39,
+   "keep_index": 0,
+   "masked": false,
+   "offset_x": 0.0,
+   "offset_y": 0.0,
+   "scale_factor": 1.1,
+   "src_in_ms": 1000,
+   "src_out_ms": 1560.0,
+   "start_frame": 25,
+   "window": {
+    "h": 1350,
+    "mode": "4:5",
+    "w": 1080,
+    "y": 285
+   }
+  },
+  {
+   "camera": "punch_in",
+   "decision_id": "EDIT_001",
+   "end_frame": 57,
+   "keep_index": 1,
+   "masked": true,
+   "offset_x": 0.0,
+   "offset_y": 0.0,
+   "scale_factor": 1.166,
+   "src_in_ms": 2290,
+   "src_out_ms": 3010.0,
+   "start_frame": 39,
+   "window": {
+    "h": 1350,
+    "mode": "4:5",
+    "w": 1080,
+    "y": 285
+   }
+  },
+  {
+   "camera": "window",
+   "decision_id": "AUTO_WINDOW",
+   "end_frame": 85,
+   "keep_index": 1,
+   "masked": false,
+   "offset_x": 0.0,
+   "offset_y": 0.0,
+   "scale_factor": 1.0,
+   "src_in_ms": 3000,
+   "src_out_ms": 4120.0,
+   "start_frame": 57,
+   "window": {
+    "h": 1350,
+    "mode": "4:5",
+    "w": 1080,
+    "y": 285
+   }
+  },
+  {
+   "camera": "jumpcut_mask",
+   "decision_id": "AUTO_WINDOW",
+   "end_frame": 267,
+   "keep_index": 2,
+   "masked": true,
+   "offset_x": 0.0,
+   "offset_y": 0.0,
+   "scale_factor": 1.06,
+   "src_in_ms": 4700,
+   "src_out_ms": 11980.0,
+   "start_frame": 85,
+   "window": {
+    "h": 1350,
+    "mode": "4:5",
+    "w": 1080,
+    "y": 285
+   }
+  }
+ ],
+ "music": {
+  "cue_points": [
+   {
+    "at": "00:00:06.000",
+    "frame": 118,
+    "label": "drop",
+    "source_ms": 6000
+   }
+  ],
+  "status": "NO_MUSIC_SUPPLIED"
+ },
+ "recipe": null,
+ "rounding_policy": "frame = round_half_up(ms*25/1000) from absolute time (no accumulation)",
+ "source_in_ms": 0,
+ "source_range": null,
+ "time_map": {
+  "cuts": 2,
+  "keep_ms": [
+   [
+    0,
+    1570
+   ],
+   [
+    2290,
+    4100
+   ],
+   [
+    4700,
+    12000
+   ]
+  ],
+  "mask_scales": [
+   1.0,
+   1.06
+  ],
+  "pause_cuts": 2,
+  "removed_ms": 1320,
+  "sequence_frames": 267,
+  "source_duration_ms": 12000,
+  "words_cut": [
+   {
+    "reason": "filler",
+    "start_ms": 1600,
+    "word": "حاجات",
+    "word_id": 3
+   }
+  ]
+ },
+ "video_id": "CLIP1"
+}

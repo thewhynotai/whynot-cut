@@ -138,7 +138,8 @@ def font_dirs_stamp(dirs: list[Path] | None = None) -> tuple:
     for d in (font_dirs() if dirs is None else dirs):
         try:
             out.append((str(d), d.stat().st_mtime_ns))
-            out += [(e.path, e.stat().st_mtime_ns) for e in os.scandir(d) if e.is_dir()]
+            with os.scandir(d) as it:          # closed also when a stat() raises
+                out += [(e.path, e.stat().st_mtime_ns) for e in it if e.is_dir()]
         except OSError:
             out.append((str(d), None))
     return tuple(out)

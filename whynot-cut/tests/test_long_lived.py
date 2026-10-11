@@ -352,6 +352,132 @@ class TestFrameGrab(TempDir):
             im = no_resource_warnings(self, lambda: previews.grab_frame(v, 1000))
         self.assertEqual((im.size, im.mode), ((previews.W, previews.H), "RGBA"))
 
+    def test_grab_frame_file_never_returns_a_stale_file(self):
+        from lib import media_util
+        v = _video(self.tmp / "v.mp4")
+        old = self.tmp / "old.jpg"
+        old.write_bytes(b"an earlier frame")
+        self.assertIsNone(media_util.grab_frame_file(v, 50.0, old))    # past the end: nothing new, so no frame
+        self.assertFalse(old.exists())
+
+
+# --------------------------------------------------------------------------- the plan steps and their Context
+def golden_project(tmp: Path):
+    """A 25 fps client (profile sequence-settings), a 12 s clip with preflight, removed pauses (one protected), a cut
+    word, a 4:5 window, a punch-in, three graphics, a sound and a music cue point: every compile step has work."""
+    from lib.media import preflight
+    from test_pipeline import make_project
+    root, p, _words = make_project(tmp)
+    prof = root / common.CLIENT_PROFILE_REL
+    prof.mkdir(parents=True, exist_ok=True)
+    common.write_json(prof / "sequence-settings.json", {"general": {"timebase": 25, "ntsc": False}})
+    common.set_context(root)
+    try:
+        preflight(p, [root / "data/Raw/CLIP1.mov"])
+    finally:
+        common.set_context(None)
+    common.write_json(p.p("06_audio/dialogue/pauses.json"), {"keep_ms": [[0, 4100], [4700, 8000], [8600, 12000]],
+                                                             "cuts_ms": [[4100, 4700], [8000, 8600]]})
+    common.write_json(p.p("01_analysis/edit-decisions.json"), {
+        "video_id": "CLIP1",
+        "global": {"main_footage": "data/Raw/CLIP1.mov", "framing": "4:5",
+                   "remove_pauses": {"protect": [["00:00:08.000", "00:00:08.600"]]},
+                   "cut_words": [{"word_ids": [3], "reason": "filler"}]},
+        "music": {"status": "NO_MUSIC_SUPPLIED", "cue_points": [{"label": "drop", "at": "00:00:06.000"}]},
+        "caption_highlights": [{"text": "التشخيص الصحيح", "at": "00:00:08.600"}],
+        "decisions": [
+            {"decision_id": "EDIT_001", "segment_id": "SEG_001", "evidence": "هل في حاجات معينة", "start": "00:00:00.200",
+             "end": "00:00:04.000", "semantic_intent": "hook", "visual_treatment": "hook", "confidence": "high",
+             "camera": {"type": "punch_in", "at": "00:00:01.000", "until": "00:00:03.000", "scale_factor": 1.1},
+             "graphics": [{"id": "GFX_001", "template": "hook_title", "start": "00:00:00.200", "end": "00:00:03.500",
+                           "text": "هل في حاجات معينة"}],
+             "sound": [{"type": "pop", "at": "00:00:02.000"}]},
+            {"decision_id": "EDIT_002", "segment_id": "SEG_002", "evidence": "أول حاجة التشخيص الصحيح",
+             "start": "00:00:05.000", "end": "00:00:10.000", "semantic_intent": "point", "visual_treatment": "list",
+             "confidence": "high",
+             "graphics": [{"id": "GFX_002", "template": "checklist", "start": "00:00:05.000", "end": "00:00:09.000",
+                           "title": "خطوات", "items": [{"text": "التشخيص", "at": "00:00:06.000"},
+                                                      {"text": "Isotretinoin", "at": "00:00:07.500", "latin": True}]},
+                          {"id": "GFX_003", "template": "name_card", "start": "00:00:09.000", "end": "00:00:11.500",
+                           "name": "د/ نهلة", "lines": ["كلية الطب"]}]}]})
+    return root, p
+
+
+class TestPlanStepsBindTheirContext(TempDir):
+    """Review I1: a step called on its own (no compile_plan around it) used whatever Context was bound for its frame
+    maths. A 25 fps client read with its Context, built under the default 24 fps process context, must still get 25 fps
+    frames (start 0.2 s = frame 5, 12 s = 300 frames before cuts), identical to compile_plan's."""
+
+    def test_unbound_build_plan_uses_the_inputs_rate(self):
+        from lib import plan
+        root, p = golden_project(self.tmp)
+        common.set_context(None)                                       # the default process context (24 fps)
+        self.addCleanup(common.set_context, None)
+        self.assertEqual(common.seq_fps(), 24.0)
+        ctx = common.Context(root)
+        inp = plan.read_inputs(p, ctx)
+        self.assertEqual(inp.fps, 25.0)
+        vd, _e, _w = plan.validate_decisions(inp)                      # one step alone
+        self.assertEqual(vd["events"][0]["start_frame"], 5)            # 0.2 s at 25 fps (24 fps would give 5 too)
+        self.assertEqual(vd["events"][1]["end_frame"], 225)            # 9.0 s at 25 fps (24 fps: 216)
+        fr, _e, _w = plan.apply_framing(inp, plan.build_camera(inp, vd["camera"], vd["events"])[0])
+        self.assertEqual(fr["merged"][-1]["end_frame"], 300)           # 12 s at 25 fps (24 fps: 288)
+        built = plan.build_plan(inp)
+        self.assertTrue(built["ok"], built["errors"])
+        self.assertEqual(common.seq_fps(), 24.0)                       # nothing leaked into the process context
+        plan.write_outputs(p, built)
+        unbound = common.read_json(p.p("01_analysis/timeline-spec.json"))
+        md_unbound = p.p("01_analysis/edit-plan.md").read_text(encoding="utf-8")
+        plan.compile_plan(p, ctx)
+        bound = common.read_json(p.p("01_analysis/timeline-spec.json"))
+        unbound.pop("generated"), bound.pop("generated")
+        self.assertEqual(unbound, bound)
+        self.assertEqual(md_unbound, p.p("01_analysis/edit-plan.md").read_text(encoding="utf-8"))
+        self.assertEqual(bound["fps"], 25.0)
+
+
+GOLDEN = SK / "tests/fixtures/golden_plan"
+GOLDEN_FILES = ("01_analysis/timeline-spec.json", "01_analysis/plan-validation.json", "01_analysis/edit-plan.md",
+                "03_broll/broll-manifest.json", "06_audio/audio-cue-sheet.json",
+                "02_transcription/subtitles-seq.srt", "02_transcription/captions-short-seq.srt")
+
+
+def _golden_text(rel: str, text: str, root: Path) -> str:
+    """Stable form of one compiled file: timestamps (`generated`, `engine_version`) dropped, the temp root replaced."""
+    for form in {str(root), str(root).replace("\\", "/"), json.dumps(str(root))[1:-1]}:
+        text = text.replace(form, "<ROOT>")
+    if rel.endswith(".json"):
+        def strip(o):
+            if isinstance(o, dict):
+                return {k: strip(v) for k, v in o.items() if k not in ("generated", "engine_version")}
+            return [strip(x) for x in o] if isinstance(o, list) else o
+        text = json.dumps(strip(json.loads(text)), ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+    return text
+
+
+class TestGoldenPlan(TempDir):
+    """Review M9: `reel plan` output locked byte for byte. The expected files in tests/fixtures/golden_plan/ were
+    written by the pre-refactor engine (fb56caa, the one-function compile_plan) with WHYNOT_REGEN_GOLDEN=1; any change
+    to what a plan compiles to fails here. Regenerate only for an intended output change, and say so in the commit."""
+
+    def test_compiled_outputs_match_the_golden_files(self):
+        from lib.plan import compile_plan
+        root, p = golden_project(self.tmp)
+        common.set_context(root)
+        self.addCleanup(common.set_context, None)
+        res = compile_plan(p)
+        self.assertTrue(res["ok"], res["errors"])
+        regen = os.environ.get("WHYNOT_REGEN_GOLDEN") == "1"
+        for rel in GOLDEN_FILES:
+            got = _golden_text(rel, p.p(rel).read_text(encoding="utf-8"), root)
+            exp = GOLDEN / rel.replace("/", "__")
+            if regen:
+                exp.parent.mkdir(parents=True, exist_ok=True)
+                exp.write_text(got, encoding="utf-8", newline="\n")
+                continue
+            with self.subTest(file=rel):
+                self.assertEqual(got, exp.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,112 @@
+{
+ "cues": [
+  {
+   "at_ms": 200,
+   "audio_type": "sfx",
+   "auto": true,
+   "cue_id": "SFX_GFX_001",
+   "decision_id": "EDIT_001",
+   "duration_frames": null,
+   "fade": "baked into generated file (short attack, exponential tail)",
+   "gain_db": -14,
+   "gain_instructions": "clip gain -14 dB; keep dialogue peaks dominant (-6 dBFS dialogue / SFX ≤ -14 dBFS)",
+   "kind": "pop",
+   "related_visual": "GFX_001",
+   "segment_id": "SEG_001",
+   "source_file": "06_audio/sfx/pop.wav",
+   "src_at_ms": 200,
+   "start_frame": 5,
+   "timeline_tc": "00:00:00:05",
+   "track": "A05"
+  },
+  {
+   "at_ms": 1560,
+   "audio_type": "sfx",
+   "auto": false,
+   "cue_id": "SFX_EDIT_001_2000",
+   "decision_id": "EDIT_001",
+   "duration_frames": null,
+   "fade": "baked into generated file (short attack, exponential tail)",
+   "gain_db": -14,
+   "gain_instructions": "clip gain -14 dB; keep dialogue peaks dominant (-6 dBFS dialogue / SFX ≤ -14 dBFS)",
+   "kind": "pop",
+   "note": "",
+   "related_visual": null,
+   "segment_id": "SEG_001",
+   "source_file": "06_audio/sfx/pop.wav",
+   "src_at_ms": 2000,
+   "start_frame": 39,
+   "timeline_tc": "00:00:01:14",
+   "track": "A05"
+  },
+  {
+   "at_ms": 3700,
+   "audio_type": "sfx",
+   "auto": true,
+   "cue_id": "SFX_GFX_002",
+   "decision_id": "EDIT_002",
+   "duration_frames": null,
+   "fade": "baked into generated file (short attack, exponential tail)",
+   "gain_db": -14,
+   "gain_instructions": "clip gain -14 dB; keep dialogue peaks dominant (-6 dBFS dialogue / SFX ≤ -14 dBFS)",
+   "kind": "tick",
+   "related_visual": "GFX_002",
+   "segment_id": "SEG_002",
+   "source_file": "06_audio/sfx/tick.wav",
+   "src_at_ms": 5000,
+   "start_frame": 93,
+   "timeline_tc": "00:00:03:18",
+   "track": "A05"
+  },
+  {
+   "at_ms": 6220,
+   "audio_type": "sfx",
+   "auto": true,
+   "cue_id": "SFX_GFX_002_188",
+   "decision_id": "EDIT_002",
+   "duration_frames": null,
+   "fade": "baked into generated file (short attack, exponential tail)",
+   "gain_db": -18,
+   "gain_instructions": "clip gain -18 dB; keep dialogue peaks dominant (-6 dBFS dialogue / SFX ≤ -14 dBFS)",
+   "kind": "tick",
+   "related_visual": "GFX_002",
+   "segment_id": "SEG_002",
+   "source_file": "06_audio/sfx/tick.wav",
+   "src_at_ms": 7520,
+   "start_frame": 156,
+   "timeline_tc": "00:00:06:06",
+   "track": "A05"
+  },
+  {
+   "at_ms": 7700,
+   "audio_type": "sfx",
+   "auto": true,
+   "cue_id": "SFX_GFX_003",
+   "decision_id": "EDIT_002",
+   "duration_frames": null,
+   "fade": "baked into generated file (short attack, exponential tail)",
+   "gain_db": -14,
+   "gain_instructions": "clip gain -14 dB; keep dialogue peaks dominant (-6 dBFS dialogue / SFX ≤ -14 dBFS)",
+   "kind": "whoosh_soft",
+   "related_visual": "GFX_003",
+   "segment_id": "SEG_002",
+   "source_file": "06_audio/sfx/whoosh_soft.wav",
+   "src_at_ms": 9000,
+   "start_frame": 193,
+   "timeline_tc": "00:00:07:18",
+   "track": "A04"
+  }
+ ],
+ "fps": 25.0,
+ "music": {
+  "cue_points": [
+   {
+    "at": "00:00:06.000",
+    "frame": 118,
+    "label": "drop",
+    "source_ms": 6000
+   }
+  ],
+  "status": "NO_MUSIC_SUPPLIED"
+ }
+}

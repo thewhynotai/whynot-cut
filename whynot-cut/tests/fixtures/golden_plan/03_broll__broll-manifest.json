@@ -1,0 +1,76 @@
+{
+ "assets": [
+  {
+   "approval_status": "AUTO_APPROVED_STYLE",
+   "asset_id": "GFX_001",
+   "asset_type": "typography",
+   "brand_refs": [
+    "client_database/branding/brand-tokens.json",
+    "client_database/branding/typography.json"
+   ],
+   "decision_id": "EDIT_001",
+   "duration_frames": 65,
+   "method": "after_effects_comp (editable) + pillow_preview_png (fallback)",
+   "output_paths": {
+    "ae_comp": "GFX_001",
+    "ae_render": "04_after_effects/compositions/GFX_001.mov",
+    "preview_png": "03_broll/typography/GFX_001.png"
+   },
+   "segment_id": "SEG_001",
+   "sequence_start_frame": 5,
+   "source_files": [],
+   "source_timestamp": "00:00:00.200",
+   "template": "hook_title",
+   "validation_status": "PLANNED",
+   "visual_concept": "hook"
+  },
+  {
+   "approval_status": "AUTO_APPROVED_STYLE",
+   "asset_id": "GFX_002",
+   "asset_type": "educational_graphic",
+   "brand_refs": [
+    "client_database/branding/brand-tokens.json",
+    "client_database/branding/typography.json"
+   ],
+   "decision_id": "EDIT_002",
+   "duration_frames": 100,
+   "method": "after_effects_comp (editable) + pillow_preview_png (fallback)",
+   "output_paths": {
+    "ae_comp": "GFX_002",
+    "ae_render": "04_after_effects/compositions/GFX_002.mov",
+    "preview_png": "03_broll/educational-graphics/GFX_002.png"
+   },
+   "segment_id": "SEG_002",
+   "sequence_start_frame": 93,
+   "source_files": [],
+   "source_timestamp": "00:00:05.000",
+   "template": "checklist",
+   "validation_status": "PLANNED",
+   "visual_concept": "list"
+  },
+  {
+   "approval_status": "AUTO_APPROVED_STYLE",
+   "asset_id": "GFX_003",
+   "asset_type": "lower_third",
+   "brand_refs": [
+    "client_database/branding/brand-tokens.json",
+    "client_database/branding/typography.json"
+   ],
+   "decision_id": "EDIT_002",
+   "duration_frames": 62,
+   "method": "after_effects_comp (editable) + pillow_preview_png (fallback)",
+   "output_paths": {
+    "ae_comp": "GFX_003",
+    "ae_render": "04_after_effects/compositions/GFX_003.mov",
+    "preview_png": "03_broll/typography/GFX_003.png"
+   },
+   "segment_id": "SEG_002",
+   "sequence_start_frame": 193,
+   "source_files": [],
+   "source_timestamp": "00:00:09.000",
+   "template": "name_card",
+   "validation_status": "PLANNED",
+   "visual_concept": "list"
+  }
+ ]
+}

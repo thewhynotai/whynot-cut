@@ -184,7 +184,7 @@ def build(paths: Paths) -> dict:
 
     sheet_p = vdir / "verify_sheet.jpg"
     if not contact_sheet(tiles, sheet_p, cols=6, tile_w=360, tile_h=640, label_box=(150, 24)):
-        Image.new("RGB", (360, 640), "black").save(sheet_p, quality=85)      # nothing to verify: an empty sheet
+        Image.new("RGB", (6 * 360, 640), "black").save(sheet_p, quality=85)  # nothing to verify: the old empty sheet
 
     L = [f"# Visual Verification Checklist — {paths.video_id}", "", f"Sheet: `{sheet_p}` (generated {now_iso()})", "",
          "View the sheet and check EVERY tile. A tile passes only if all of these hold:", "",

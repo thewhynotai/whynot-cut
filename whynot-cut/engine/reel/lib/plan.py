@@ -157,23 +157,44 @@ def _transcript_text(paths: Paths) -> tuple[str, int]:
 # 3.0 T2.17 (engine MI-6): one ~440-line function became a chain of steps. `read_inputs` does every read; each step
 # is pure (no file reads or writes, never mutates its inputs) and returns (data, errors, warnings);
 # `write_outputs` does every write. compile_plan concatenates errors/warnings in step order, so plan-validation.json
-# lists them exactly as before. Frame maths uses the bound Context's sequence rate (seq_fps), as before.
+# lists them exactly as before. Frame maths (ms_to_frame, TimeMap, shots) uses the sequence rate of the Context the
+# inputs were read with: PlanInputs keeps it (`inp.ctx`) and every public step binds it, so a step called on its own
+# (`build_plan(read_inputs(p, ctx))`, a long-lived process) never mixes the client's rate with another one.
 #   validate_decisions -> build_camera -> apply_framing -> apply_timemap -> build_audio -> final_checks -> write_outputs
 _CAPTION_SRTS = ("subtitles", "captions-short")
 
 
 class PlanInputs:
-    """Everything compile_plan reads, read once (files, profile config, the client folder's file checks)."""
+    """Everything compile_plan reads, read once (files, profile config, the client folder's file checks), and the
+    Context it was read with (`ctx`: its sequence rate drives every frame number)."""
 
     def __init__(self, **kw):
         self.__dict__.update(kw)
 
 
+def _in_context(step):
+    """Run a plan step with its inputs' Context bound (T2.17 review I1)."""
+    import functools
+    from .common import use_context
+
+    @functools.wraps(step)
+    def bound(inp, *a, **kw):
+        with use_context(inp.ctx):
+            return step(inp, *a, **kw)
+    return bound
+
+
 def read_inputs(paths: Paths, ctx=None) -> PlanInputs:
-    from .common import current_context, source_range
+    from .common import current_context, use_context
+    ctx = ctx or current_context()
+    with use_context(ctx):
+        return _read_inputs(paths, ctx)
+
+
+def _read_inputs(paths: Paths, ctx) -> PlanInputs:
+    from .common import source_range
     from .recipes import for_paths
     from .transcribe import transcript_flags
-    ctx = ctx or current_context()
     ed = read_json(paths.p("01_analysis/edit-decisions.json"))
     if not ed:
         raise FileNotFoundError("01_analysis/edit-decisions.json missing — author it (see references/edit-decision-engine.md)")
@@ -199,7 +220,7 @@ def read_inputs(paths: Paths, ctx=None) -> PlanInputs:
                     and main_video(pre_all, main_file))
     flagged = transcript_flags(paths)
     return PlanInputs(
-        paths=paths, root=paths.root, video_id=paths.video_id, ed=ed, base=base, tpl=tpl,
+        ctx=ctx, paths=paths, root=paths.root, video_id=paths.video_id, ed=ed, base=base, tpl=tpl,
         known_assets={a["rel"]: a for a in manifest["assets"]}, ttext=ttext, dur_ms=dur_ms, fps=seq_fps(ctx),
         recipe=for_paths(paths), pre_all=pre_all, rng=rng, main_file=main_file,
         seq_cfg=load_config("sequence-settings.json", ctx), style=load_config("style.json", ctx),
@@ -211,6 +232,7 @@ def read_inputs(paths: Paths, ctx=None) -> PlanInputs:
         exists=lambda rel: (paths.root / rel).exists(), is_file=lambda rel: (paths.root / rel).is_file())
 
 
+@_in_context
 def validate_decisions(inp: PlanInputs):
     """Decisions -> graphic events, B-roll entries, SFX cues and the story camera moves; overlap and recipe checks."""
     import copy
@@ -368,6 +390,7 @@ def validate_decisions(inp: PlanInputs):
         errors, warnings
 
 
+@_in_context
 def build_camera(inp: PlanInputs, camera: list, events: list):
     """The speaker framing: explicit base scale, preflight's auto-reframe, source cutaways shown whole, or per-shot
     framing (podcast reels); story camera moves are composed over it."""
@@ -438,6 +461,7 @@ def build_camera(inp: PlanInputs, camera: list, events: list):
     return {"camera": camera, "main_v": main_v, "bsp": bsp, "box": box, "boy": boy, "framing": framing}, [], warnings
 
 
+@_in_context
 def apply_framing(inp: PlanInputs, cam: dict):
     """The 4:5 window (when the framing asks for one) and the V01 pieces cut at every camera change point."""
     errors, warnings = [], []
@@ -507,6 +531,7 @@ def apply_framing(inp: PlanInputs, cam: dict):
     return {"camera": camera, "merged": merged, "bsp": bsp, "framing": framing}, errors, warnings
 
 
+@_in_context
 def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, broll: list, cues: list, box):
     """Pause removal and word cuts: the TimeMap of kept source ranges, everything moved onto the sequence clock, and
     the captions mapped (rebuilt without cut words). Identity (no TimeMap) when nothing is removed."""
@@ -593,6 +618,7 @@ def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, bro
     return out, errors, warnings
 
 
+@_in_context
 def build_audio(inp: PlanInputs, cues: list, tmap, dur_f: int):
     """SFX cues on their tracks and frames; the music bed and its cue points."""
     errors, warnings = [], []
@@ -624,6 +650,7 @@ def build_audio(inp: PlanInputs, cues: list, tmap, dur_f: int):
     return {"cues": cues, "music": music}, errors, warnings
 
 
+@_in_context
 def final_checks(inp: PlanInputs, events: list):
     """The range reel's footage, uncertain words on screen, and honorifics against the profile's people[]."""
     errors, warnings = [], []
@@ -654,6 +681,7 @@ def final_checks(inp: PlanInputs, events: list):
     return {}, errors, warnings
 
 
+@_in_context
 def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, recipe_info) -> dict:
     """The timeline spec (01_analysis/timeline-spec.json) from the steps' data."""
     FPS_, rng, base = inp.fps, inp.rng, inp.base
@@ -673,7 +701,15 @@ def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, reci
 
 def write_outputs(paths: Paths, plan: dict) -> dict:
     """Every write of `reel plan`: the sequence-clock captions, plan-validation.json and, when valid, the timeline
-    spec, B-roll manifest, audio cue sheet, edit-plan.md and the stale mark on an earlier approval."""
+    spec, B-roll manifest, audio cue sheet, edit-plan.md and the stale mark on an earlier approval (edit-plan.md's
+    timecodes use the plan's Context, bound here)."""
+    import contextlib
+    from .common import use_context
+    with use_context(plan["ctx"]) if plan.get("ctx") is not None else contextlib.nullcontext():
+        return _write_outputs(paths, plan)
+
+
+def _write_outputs(paths: Paths, plan: dict) -> dict:
     from . import srt as srtlib
     for name, cues_ in plan["seq_srts"].items():
         srtlib.write_srt(paths.p(f"02_transcription/{name}-seq.srt"), cues_)
@@ -705,6 +741,7 @@ def write_outputs(paths: Paths, plan: dict) -> dict:
     return res
 
 
+@_in_context
 def build_plan(inp: PlanInputs) -> dict:
     """The pure part of compile_plan: the steps in order, their errors and warnings concatenated in that order."""
     errors, warnings = [], []
@@ -723,17 +760,15 @@ def build_plan(inp: PlanInputs) -> dict:
     spec = assemble_spec(inp, cam, fr, tm, au, vd["recipe_info"])
     step(final_checks(inp, tm["events"]))
     return {"ok": not errors, "errors": errors, "warnings": warnings, "spec": spec, "broll": tm["broll"],
-            "cues": au["cues"], "seq_srts": tm["seq_srts"], "decisions": len(inp.ed.get("decisions", []))}
+            "cues": au["cues"], "seq_srts": tm["seq_srts"], "decisions": len(inp.ed.get("decisions", [])),
+            "ctx": inp.ctx}
 
 
 def compile_plan(paths: Paths, ctx=None) -> dict:
     """Validate 01_analysis/edit-decisions.json against the transcript and compile the timeline spec, B-roll manifest
     and audio cue sheet: read_inputs -> build_plan (pure steps) -> write_outputs. `ctx` (the CLI's Context) is bound
-    for the whole compile; without it the current Context applies."""
-    import contextlib
-    from .common import use_context
-    with use_context(ctx) if ctx is not None else contextlib.nullcontext():
-        return write_outputs(paths, build_plan(read_inputs(paths, ctx)))
+    by every step; without it the current Context applies."""
+    return write_outputs(paths, build_plan(read_inputs(paths, ctx)))
 
 
 def plan_fingerprint(paths: Paths) -> str:
