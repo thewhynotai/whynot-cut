@@ -1,6 +1,6 @@
 ---
 name: motion
-description: "Animated motion-graphics video from a podcast window's audio (motion mode): \"make a motion video from this part\", \"animate this reel\", «اعمل موشن من الجزء ده», «البودكاست صوت بس»."
+description: "Animated motion-graphics video from a podcast window's audio (motion mode): \"make a motion video from this part\", \"animate this podcast part\", «اعمل موشن من الجزء ده», «البودكاست صوت بس»."
 argument-hint: "[episode id] [R/T id] [client folder]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

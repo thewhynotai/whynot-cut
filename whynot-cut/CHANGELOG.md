@@ -80,6 +80,16 @@
 - `reel --help` is generated from the command table (`CORE_COMMANDS` in `cli.py`, `HELP` in `lib/podcast_cli.py` and
   `lib/motion_cli.py`): every subcommand with its one line, replacing the stale list in the module docstring. A test
   fails when a command handler or registered subcommand is missing from the table.
+- Skill listing budget (D11): Claude Code drops skill descriptions when the listing overflows, so `status`,
+  `handoff` and others stopped auto-triggering. All 25 skill descriptions are rewritten: 8,804 -> 3,241 characters in
+  total; a user-facing skill is at most 200 characters, key use first, with 2-3 English and 1-2 Arabic triggers
+  (`status` «جاهز؟», `revise` «ملاحظات على الفيديو», `handoff` «سلّم الشغل»); the 10 craft skills are the one line
+  "Reference for the <agent> agent (preloaded). Not for direct use." (no `disable-model-invocation`, so agents can still
+  preload them). Trigger overlaps are resolved: `fix-audio` is the audio-only request, `revise` is two or more comments
+  including a non-audio one, or any non-audio comment, `motion` is an animated video from a podcast window's audio
+  ("animate this podcast part"), `adobe-extras` is After Effects / Photoshop output only on explicit request. The 19
+  agent descriptions lose the sentence `See "When to invoke" in the agent body.`; the `plugin.json` description is 219
+  characters. `TestListingBudget` guards all of it (total <= 4,000).
 
 ### Fixed
 - Executable bits are set in git's index (`100755`) for `bin/reel`, `hooks/run_python.sh`, `hooks/*.py`,
@@ -152,15 +162,6 @@
 - The guard no longer fails silently (engine IM-17): with no Python at all, `run_python.sh` still exits 0 (fail-open)
   but the SessionStart hook gets "WhyNot Cut protection is OFF: no Python found — run reel doctor"; the SessionStart
   context starts with a loud warning when the `hooks-ok` heartbeat is missing or older than 24 h.
-- Skill listing budget (D11): Claude Code drops skill descriptions when the listing overflows, so `status`,
-  `handoff` and others stopped auto-triggering. All 25 skill descriptions are rewritten: 8,804 -> 3,223 characters in
-  total; a user-facing skill is at most 200 characters, key use first, with 2-3 English and 1-2 Arabic triggers
-  (`status` «جاهز؟», `revise` «ملاحظات على الفيديو», `handoff` «سلّم الشغل»); the 10 craft skills are the one line
-  "Reference for the <agent> agent (preloaded). Not for direct use." (no `disable-model-invocation`, so agents can still
-  preload them). Trigger overlaps are resolved: `fix-audio` is the audio-only request, `revise` is two or more comments
-  or any non-audio comment, `motion` is an animated video from a podcast window's audio, `adobe-extras` is After Effects
-  / Photoshop output only on explicit request. The 19 agent descriptions lose the sentence `See "When to invoke" in the
-  agent body.`; the `plugin.json` description is 220 characters. `TestListingBudget` guards all of it (total <= 4,000).
 - Plugin options reach `reel` on every shell (T1.9). The SessionStart hook wrote `export WHYNOT_HOME="…"` with
   `json.dumps`, so an Arabic `engine_home`/`clients_root` became a literal `\u0639…` path in bash; it now uses shell
   quoting. PowerShell commands never receive a path-valued variable from `CLAUDE_ENV_FILE`, so the hook also writes

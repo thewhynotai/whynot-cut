@@ -1,6 +1,6 @@
 ---
 name: revise
-description: "Editor feedback on an existing edit, two or more comments or any non-audio comment: \"make it punchier\", \"move the name card\", a numbered list, «ملاحظات على الفيديو». Rebuilds, re-verifies."
+description: "Editor feedback on an existing edit, two or more comments including a non-audio one, or any non-audio comment: \"make it punchier\", \"move the name card\", «ملاحظات على الفيديو». Rebuilds, re-verifies."
 argument-hint: "\"<editor feedback>\" [clip id]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---
@@ -37,3 +37,6 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    Also ask them to save before any rebuild, because `--force` closes the open project.
 6. `premiere-builder` runs `ppro-build --force`, then `qc-reviewer` checks the frames, then you record the verdict, run `qc` and update the handoff.
 7. Report **per comment**: what changed, the evidence (numbers, frames), and caveats. Use the report format from `/whynot-cut:edit`.
+
+- In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
+  `profile.json`). Until a person's gender is known write «د.» or the name.

@@ -10,6 +10,8 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 Read `${CLAUDE_PLUGIN_ROOT}/skills/edit/SKILL.md` first (the lead-editor playbook). Autopilot only decides **which**
 clips and **how approval works**; every rule of the playbook still applies (evidence gates, no invented facts,
 Premiere first).
+- In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
+  `profile.json`). Until a person's gender is known write «د.» or the name.
 
 ## 1. Find the work
 - One client folder (session opened inside it, or named by the user): `reel inbox --root "<CLIENT>"`.

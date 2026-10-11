@@ -36,6 +36,8 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 
 Say "ready to send" only if `qc` passed just now **and** nothing in "Needs you" blocks it. Don't fix anything here. If something is
 broken, say what and offer `/whynot-cut:revise` or `/whynot-cut:edit`.
+In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
+`profile.json`). Until a person's gender is known write «د.» or the name.
 
 ## Motion mode (2.2)
 For `<EP>_<ID>_MO` projects: `reel next` (motion steps and stale steps), the build result's read-back comparison, the

@@ -411,7 +411,7 @@ class TestReviewRound1(unittest.TestCase):
         self.assertEqual(motion_next(), [])
 
     def test_lead_skills_carry_the_gender_rule(self):
-        for s in ("new-client", "start", "edit", "podcast"):
+        for s in ("new-client", "start", "edit", "podcast", "revise", "autopilot", "handoff", "status"):
             body = (SK / "skills" / s / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
             self.assertIn("people[]", body, s)
             self.assertIn("«د.»", body, s)

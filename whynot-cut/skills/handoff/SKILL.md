@@ -16,3 +16,5 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    - the open items ("Needs you"), with evidence
    - known caveats
 3. Never describe something as done unless it's verified (see `/whynot-cut:status`). Keep "Not verified" honest.
+4. In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
+   `profile.json`). Until a person's gender is known write «د.» or the name.
