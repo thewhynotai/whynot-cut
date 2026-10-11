@@ -1953,6 +1953,18 @@ class TestMotionPluginLayer(unittest.TestCase):
         self.assertEqual(guard_write("C:/Users/x/AppData/Roaming/Adobe/After Effects/26.0/Adobe After Effects 26.0 Prefs.txt"), 2)
         self.assertEqual(guard_write("C:/Users/x/Library/Preferences/Adobe/After Effects/26.0/Adobe After Effects 26.0 Prefs-indep-general.txt"), 2)
 
+    def test_guard_ae_prefs_message_on_shell_paths(self):
+        """Final review: a shell write to an After Effects preference file was refused as «the client's source folder
+        (After Effects preferences) is read-only»; it gets the preferences wording, as the Write tool does."""
+        pref = "C:/Users/x/AppData/Roaming/Adobe/After Effects/26.0/Adobe After Effects 26.0 Prefs.txt"
+        for tool, cmd in (("Bash", f'cp new.txt "{pref}"'), ("Bash", f'echo x > "{pref}"'),
+                          ("PowerShell", f'Copy-Item new.txt "{pref}"')):
+            r = subprocess.run([sys.executable, "-B", str(GUARD_PY)], capture_output=True, text=True, encoding="utf-8",
+                               input=json.dumps({"tool_name": tool, "tool_input": {"command": cmd}, "cwd": "."}))
+            self.assertEqual(r.returncode, 2, (cmd, r.stderr))
+            self.assertIn("After Effects preferences are the editor's to change", r.stderr, cmd)
+            self.assertNotIn("source folder", r.stderr, cmd)
+
     def test_session_context_mentions_motion(self):
         tmp = Path(tempfile.mkdtemp())
         try:
@@ -2191,6 +2203,18 @@ class TestFallbackRefit(CompiledMotion):
         txt = motion_readme(self.reel).read_text(encoding="utf-8")
         needs = txt.split("## Needs you", 1)[1]
         self.assertTrue(ps in needs and "Brand-" in needs, needs)
+
+    def test_readme_fallback_fonts_plural(self):
+        """Final review: «…Bold, …Medium is not installed: install it» — several missing brand fonts read as plural."""
+        from lib.handoff import motion_readme
+        res = self.reel.p("04_after_effects/motion-build-result.json")
+        keep = res.read_bytes() if res.exists() else None
+        self.addCleanup(lambda: res.write_bytes(keep) if keep is not None else res.unlink(missing_ok=True))
+        for fonts, want in ((["Brand-Bold", "Brand-Medium"], "Brand-Bold, Brand-Medium are not installed: install them"),
+                            (["Brand-Bold"], "Brand-Bold is not installed: install it")):
+            write_json(res, {"status": "PROJECT_ASSEMBLED", "fallback_font": "SegoeUI-Bold", "brand_fonts": fonts})
+            needs = motion_readme(self.reel).read_text(encoding="utf-8").split("## Needs you", 1)[1]
+            self.assertIn(want, needs)
 
 
 class TestLockedAudio(CompiledMotion):

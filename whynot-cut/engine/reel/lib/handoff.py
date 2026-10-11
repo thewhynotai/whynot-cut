@@ -191,9 +191,11 @@ def motion_readme(paths: Paths) -> Path:
         L += ["", "## Build warnings (After Effects read-back)", ""] + [f"- {w}" for w in warns]
     needs = list(plan.get("approvals") or [])
     if br.get("fallback_font"):
-        needs.insert(0, f"fonts: this build used the fallback font {br['fallback_font']} because "
-                        f"{', '.join(br.get('brand_fonts') or ['the brand font'])} is not installed: install it from "
-                        "assets/Fonts, restart After Effects, then `reel motion-build` again")
+        brand = br.get("brand_fonts") or ["the brand font"]
+        are, them = ("are", "them") if len(brand) > 1 else ("is", "it")
+        needs.insert(0, f"fonts: this build used the fallback font {br['fallback_font']} because {', '.join(brand)} "
+                        f"{are} not installed: install {them} from assets/Fonts, restart After Effects, then "
+                        "`reel motion-build` again")
     if not music:
         needs.append("music: add a licensed track (the motion video has dialogue and SFX only)")
     needs += ["final look in After Effects, then render/export for posting",

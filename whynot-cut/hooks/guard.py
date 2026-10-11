@@ -75,6 +75,8 @@ def client_root_of(p: Path) -> tuple[Path, str] | None:
 
 
 AE_PREFS = re.compile(r"(adobe[\\/]+after effects[\\/]+\d[\d.]*[\\/])|(adobe after effects [^\\/]*prefs[^\\/]*\.txt$)", re.I)
+AE_PREFS_MSG = ("After Effects preferences are the editor's to change (scripting security, Type engine). "
+                "Give them the step to do themselves.")
 
 
 def ae_pref_path(path_str: str) -> bool:
@@ -86,7 +88,7 @@ def protected(path_str: str, cwd: Path) -> str | None:
     if not path_str or path_str.startswith("-"):
         return None
     if ae_pref_path(path_str.strip("'\"")):
-        return "After Effects preferences"
+        block(AE_PREFS_MSG)             # every caller is about to write there: not a client-folder message
     s = native(path_str.strip("'\""))
     if "=" in s and not s.startswith("/") and not re.match(r"^[A-Za-z]:[\\/]", s):   # dd of=..., key=value
         s = s.split("=", 1)[1]
@@ -412,8 +414,7 @@ def main():
         if agent in READ_ONLY_AGENTS:
             block(f"{agent} is a read-only reviewer; it reports findings instead of editing files.")
         if ae_pref_path(fp):
-            block("After Effects preferences are the editor's to change (scripting security, Type engine). "
-                  "Give them the step to do themselves.")
+            block(AE_PREFS_MSG)
         hit = protected(fp, cwd)
         if hit:
             block(f"the client's source folder ({hit}) is read-only. Write outputs under <client>/output/.")
