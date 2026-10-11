@@ -6,6 +6,7 @@ import type { PanelHost } from "../src/host.ts";
 import type { PanelDataSource, PanelState, Result } from "../src/source.ts";
 import { MockSource } from "../src/mock.ts";
 import type { ActionName } from "../src/contract.ts";
+import { AR, EN } from "../src/i18n.ts";
 
 // A tiny fake DOM: enough for event delegation, innerHTML and querySelector of data attributes.
 type Listener = (e: { target: PanelElement | null }) => void;
@@ -32,9 +33,9 @@ class FakeRoot implements MountRoot {
   querySelector(): null { return null; }
 }
 
-interface Calls { approve: unknown[]; requestChanges: unknown[]; run: { action: ActionName; data: object }[]; cancel: string[] }
+interface Calls { approve: unknown[]; requestChanges: unknown[]; run: { action: ActionName; data: object }[]; rebuild: { item: string; project_path: string; replace_edited: boolean }[]; cancel: string[] }
 class RecSource implements PanelDataSource {
-  calls: Calls = { approve: [], requestChanges: [], run: [], cancel: [] };
+  calls: Calls = { approve: [], requestChanges: [], run: [], rebuild: [], cancel: [] };
   cbs: ((s: PanelState) => void)[] = [];
   inner = new MockSource({ language: "en", scenario: "approval" });
   nextResult: Result = { ok: true };
@@ -43,6 +44,7 @@ class RecSource implements PanelDataSource {
   async approve(i: { item: string; editor_name: string; fingerprint: string }) { this.calls.approve.push(i); return this.nextResult; }
   async requestChanges(i: { item: string; editor_name: string; text: string }) { this.calls.requestChanges.push(i); return this.nextResult; }
   async run(action: ActionName, data: object) { this.calls.run.push({ action, data }); return this.nextResult; }
+  async rebuild(i: { item: string; project_path: string; replace_edited: boolean }) { this.calls.rebuild.push(i); return this.nextResult; }
   async cancel(id: string) { this.calls.cancel.push(id); }
 }
 function hostRec() {
@@ -153,21 +155,20 @@ test("a QC tile click moves the playhead; Re-export runs export_frames for that 
   assert.deepEqual((run.data as { times: number[] }).times, [12.5]);
 });
 
-test("Rebuild asks in-panel first; only the confirm runs build_project", async () => {
-  const { root, source } = await setup();
+test("Rebuild asks in-panel first; only the confirm calls source.rebuild (never run build_project)", async () => {
+  const { root, source, state } = await setup();
   root.click({ "data-action": "rebuild" });
   await tick();
-  assert.equal(source.calls.run.length, 0);
+  assert.equal(source.calls.rebuild.length, 0);
   assert.ok(root.innerHTML.includes('data-action="rebuild-confirm"'));
   root.click({ "data-action": "rebuild-cancel" });
   assert.ok(!root.innerHTML.includes('data-action="rebuild-confirm"'));
-  assert.equal(source.calls.run.length, 0);
+  assert.equal(source.calls.rebuild.length, 0);
   root.click({ "data-action": "rebuild" });
   root.click({ "data-action": "rebuild-confirm" });
   await tick();
-  assert.equal(source.calls.run.length, 1);
-  assert.equal(source.calls.run[0]!.action, "build_project");
-  assert.equal((source.calls.run[0]!.data as { overwrite_existing: boolean }).overwrite_existing, true);
+  assert.deepEqual(source.calls.rebuild, [{ item: state.item, project_path: state.context.project_path, replace_edited: true }]);
+  assert.equal(source.calls.run.length, 0, "the panel must not send a partial build_project");
   assert.ok(!root.innerHTML.includes('data-action="rebuild-confirm"'));
 });
 
@@ -226,4 +227,66 @@ test("unmount stops listening and unsubscribes", async () => {
   handle.unmount();
   assert.equal(source.cbs.length, 0);
   assert.equal((root.listeners["click"] ?? []).length, 0);
+});
+
+// ---- render errors are shown, never swallowed ----
+
+const sloppy = (s: PanelState): PanelState => ({ ...s, pipeline: null, context: undefined } as unknown as PanelState);
+
+test("a slightly-off snapshot (pipeline: null, no context) shows the error view instead of a blank panel", async () => {
+  const root = new FakeRoot();
+  const source = new RecSource();
+  const good = await source.snapshot();
+  source.snapshot = async () => sloppy(good);
+  const { host } = hostRec();
+  const h = mount(root, source, host);
+  await h.ready;
+  assert.ok(root.innerHTML.length > 0, "blank panel");
+  assert.ok(root.innerHTML.includes('class="banner banner-error"'));
+  assert.ok(root.innerHTML.includes(EN["error.render"]));
+  assert.match(root.innerHTML, /Cannot read|undefined|null/i, "the message is shown");
+  assert.ok(root.innerHTML.includes("Powered by Claude") || root.innerHTML.includes("WhyNot Cut"));
+});
+
+test("the error view follows the state's language when it is known (AR)", async () => {
+  const root = new FakeRoot();
+  const source = new RecSource();
+  const good = await source.snapshot();
+  source.snapshot = async () => ({ ...sloppy(good), language: "ar" } as PanelState);
+  const { host } = hostRec();
+  const h = mount(root, source, host);
+  await h.ready;
+  assert.ok(root.innerHTML.includes(AR["error.render"]));
+  assert.match(root.innerHTML, /dir="rtl" lang="ar"/);
+});
+
+test("a throwing render in the subscribe path does not reach the source's emit loop, and a good state recovers", async () => {
+  const { root, source, state } = await setup();
+  assert.doesNotThrow(() => { for (const cb of source.cbs) cb(sloppy(state)); });
+  assert.ok(root.innerHTML.includes(EN["error.render"]));
+  for (const cb of source.cbs) cb({ ...state, client: "Recovered Client" });
+  assert.ok(root.innerHTML.includes("Recovered Client"));
+  assert.ok(!root.innerHTML.includes(EN["error.render"]));
+});
+
+test("a click handler that throws becomes a notice, not an exception in the event loop", async () => {
+  const { root, source, state } = await setup();
+  // diagnostics reads state.log; make the next state sloppy only in a field the click path uses
+  for (const cb of source.cbs) cb({ ...state, log: null, pipeline: state.pipeline } as unknown as PanelState);
+  // render of that state throws -> error view; clicking must still not throw
+  assert.doesNotThrow(() => root.click({ "data-action": "copy-diagnostics" }));
+  await tick();
+});
+
+test("a snapshot that rejects shows an error view; a later pushed state replaces it", async () => {
+  const root = new FakeRoot();
+  const source = new RecSource();
+  const good = await source.snapshot();
+  source.snapshot = async () => { throw new Error("daemon unreachable"); };
+  const { host } = hostRec();
+  const h = mount(root, source, host);
+  await h.ready;
+  assert.ok(root.innerHTML.includes("daemon unreachable"));
+  for (const cb of source.cbs) cb(good);
+  assert.ok(root.innerHTML.includes(good.client));
 });

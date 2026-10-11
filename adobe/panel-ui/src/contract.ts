@@ -85,11 +85,62 @@ export interface RenderReviewReadback { started: boolean; out_path: string; mode
 export interface SetPlayerPositionData { sequence_name: string; t_s: number }
 export interface SetPlayerPositionReadback { position_s: number }
 
-// The panel sends only the fields it knows for a rebuild; the engine daemon adds the plan files
-// (xml_path, graphics, settings, ...) before it reaches the host.
+// build_project data, mirrored from build_project.schema.json $defs/data. The panel never builds one: it asks the
+// engine to rebuild (PanelDataSource.rebuild) and the engine sends this to the host. test/mock.test.ts checks the
+// property names and the required set against the schema.
+export interface BuildGraphic {
+  id: string;
+  png: string;
+  track_index: number;
+  anim: "flash" | "text_pop" | "bar_sweep" | "slide" | "push" | "card" | "fade";
+  start_s: number;
+  end_s: number;
+  fade_in_s?: number;
+  fade_out_s?: number;
+  peak?: number;
+  delay_f?: number;
+  sweep_f?: number;
+}
+export interface BuildMarker { t: number; name: string; comment: string }
+export interface BuildSettings {
+  previewCodec?: string;
+  previewFrameWidth?: number;
+  previewFrameHeight?: number;
+  maximumBitDepth?: boolean;
+  maximumRenderQuality?: boolean;
+  compositeLinearColor?: boolean;
+}
 export interface BuildProjectData {
   project_path: string;
   overwrite_existing?: boolean;
-  xml_path?: string;
-  sequence_name?: string;
+  xml_path: string;
+  sequence_name: string;
+  settings: BuildSettings;
+  graphics: BuildGraphic[];
+  srt_path?: string;
+  native_caption_track?: boolean;
+  markers: BuildMarker[];
+  track_names: { video: string[]; audio: string[] };
+  blur_v1_clips?: number[];
+  sharpen_v1?: { amount: number; grain: number } | null;
+  duration_s?: number;
+}
+export interface BuildTrack { i: number; name: string; clips: number }
+export interface BuildProjectReadback {
+  project: string;
+  saved: boolean;
+  settings_after: {
+    previewCodec: string;
+    videoFrameWidth: number;
+    videoFrameHeight: number;
+    videoFrameRate: { seconds: number; ticks: string };
+    compositeLinearColor: boolean;
+    maximumBitDepth: boolean;
+    maximumRenderQuality: boolean;
+    [key: string]: unknown;
+  };
+  placed: { id: string; track: number; start: number; end: number; anim: string }[];
+  sharpened: { clip: number; ok: boolean; amount?: number; grain?: number }[];
+  tracks: { video: BuildTrack[]; audio: BuildTrack[] };
+  [key: string]: unknown;
 }

@@ -1,7 +1,7 @@
 // Pure rendering: render(state, strings, ui) -> HTML string. Every dynamic value goes through esc().
 // Commands, paths and timecodes are wrapped in <bdi dir="ltr"> so they stay left-to-right inside Arabic text.
 // Markup is flexbox-friendly and uses only simple classes (UXP and CEP render the same CSS).
-import { exportFramesAction, openProjectAction, rebuildAction, renderReviewAction } from "./actions.ts";
+import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction } from "./actions.ts";
 import { fmt } from "./i18n.ts";
 import type { StringKey, Strings } from "./i18n.ts";
 import { MONOGRAM_DATA_URI } from "./monogram.ts";
@@ -164,6 +164,13 @@ function approvalSection(s: PanelState, t: Strings, ui: UiState): string {
   );
 }
 
+/** Height as a percentage of the width for the frame box. Default 9:16; invalid w/h fall back; clamped to 40..300. */
+function aspectPct(q: QcFrame): number {
+  const ok = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
+  const pct = ok(q.w) && ok(q.h) ? (q.h / q.w) * 100 : (1920 / 1080) * 100;
+  return Math.round(Math.max(40, Math.min(300, pct)) * 100) / 100;
+}
+
 function tile(q: QcFrame, t: Strings): string {
   const verdict = ["pass", "fail", "pending", "media_pending"].includes(q.verdict) ? q.verdict : "pending";
   const img =
@@ -176,7 +183,7 @@ function tile(q: QcFrame, t: Strings): string {
       : "";
   return (
     `<div class="qc-tile qc-${verdict}" data-t="${esc(q.t_s)}">` +
-    `<button class="qc-thumb" data-action="seek" data-t="${esc(q.t_s)}" title="${esc(q.tc)}">${img}</button>` +
+    `<button class="qc-thumb" data-action="seek" data-t="${esc(q.t_s)}" title="${esc(q.tc)}"><span class="qc-frame" style="padding-top:${aspectPct(q)}%">${img}</span></button>` +
     `<div class="qc-meta"><span class="qc-tc">${ltr(q.tc)}</span><span class="qc-verdict">${VERDICT_GLYPH[verdict]} ${esc(t[`qc.${verdict}` as StringKey])}</span></div>` +
     `<div class="qc-label">${auto(q.label)}</div>${reexport}</div>`
   );
@@ -205,7 +212,7 @@ function actionsSection(s: PanelState, t: Strings, ui: UiState): string {
     (s.context.project_path ? `<div class="path">${ltr(s.context.project_path)}</div>` : "") +
     `<div class="actions">` +
     btn("open-project", "actions.open", openProjectAction(s) !== null) +
-    btn("rebuild", "actions.rebuild", rebuildAction(s) !== null) +
+    btn("rebuild", "actions.rebuild", rebuildInput(s) !== null) +
     btn("export-frames", "actions.export", exportFramesAction(s) !== null) +
     btn("render-review", "actions.render", renderReviewAction(s) !== null) +
     btn("reveal", "actions.reveal", !!s.context.folder) +
@@ -247,10 +254,20 @@ export function render(state: PanelState, t: Strings, ui: UiState = initialUi())
   );
 }
 
-/** Shown before the first snapshot arrives (or when it could not be read). */
-export function renderLoading(t: Strings, rtl = false, error?: string): string {
-  return (
-    `<div class="twn-panel ${rtl ? "twn-rtl" : "twn-ltr"}" dir="${rtl ? "rtl" : "ltr"}" lang="${rtl ? "ar" : "en"}"><main class="body">` +
-    `<p class="muted">${esc(t["status.connecting"])}</p>${error ? `<div class="banner banner-error" role="alert"><span class="banner-text">${esc(error)}</span></div>` : ""}</main></div>`
+const shell = (t: Strings, rtl: boolean, inner: string) =>
+  `<div class="twn-panel ${rtl ? "twn-rtl" : "twn-ltr"}" dir="${rtl ? "rtl" : "ltr"}" lang="${rtl ? "ar" : "en"}"><main class="body">${inner}</main>` +
+  `<footer class="foot">${ltr(t["footer.powered"])}</footer></div>`;
+
+/** Shown before the first snapshot arrives. */
+export function renderLoading(t: Strings, rtl = false): string {
+  return shell(t, rtl, `<p class="muted">${esc(t["status.connecting"])}</p>`);
+}
+
+/** Shown when the panel cannot render or read its state: the message is visible, never a blank panel. */
+export function renderError(t: Strings, rtl: boolean, title: string, message: string): string {
+  return shell(
+    t,
+    rtl,
+    `<div class="banner banner-error" role="alert"><span class="banner-text"><strong>${esc(title)}</strong> ${ltr(message)}</span></div>`,
   );
 }

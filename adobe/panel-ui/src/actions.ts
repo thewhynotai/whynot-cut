@@ -1,6 +1,6 @@
 // Builds the host requests the panel's buttons send through PanelDataSource.run(). Pure functions so a test
 // can check every payload against the v4 action schemas. null = the context needed is not there yet.
-import type { ActionName, BuildProjectData, ExportFramesData, OpenProjectData, RenderReviewData } from "./contract.ts";
+import type { ActionName, ExportFramesData, OpenProjectData, RenderReviewData } from "./contract.ts";
 import type { PanelState } from "./source.ts";
 
 export interface BuiltAction<D = object> {
@@ -26,8 +26,17 @@ export function renderReviewAction(s: PanelState): BuiltAction<RenderReviewData>
   return sequence_name && review_mp4 ? { action: "render_review", data: { sequence_name, out_path: review_mp4 } } : null;
 }
 
-/** A rebuild overwrites the project (the engine keeps a backup and adds the plan files). Only sent after the in-panel confirm. */
-export function rebuildAction(s: PanelState): BuiltAction<BuildProjectData> | null {
+/**
+ * Rebuild is a panel intent, not a host request: the engine turns it into a full rebuild (what
+ * `reel ppro-build --force [--replace-edited]` does) and sends the host a complete build_project.
+ * replace_edited is true because this is only built after the editor confirmed the edited-project warning in the panel.
+ */
+export interface RebuildInput {
+  item: string;
+  project_path: string;
+  replace_edited: boolean;
+}
+export function rebuildInput(s: PanelState): RebuildInput | null {
   const project_path = s.context.project_path;
-  return project_path ? { action: "build_project", data: { project_path, overwrite_existing: true } } : null;
+  return project_path ? { item: s.item, project_path, replace_edited: true } : null;
 }

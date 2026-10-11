@@ -97,7 +97,7 @@ Open the dev harness over http (a `file://` page works too in most browsers):
 | `src/mock.ts` | `MockSource` + `sampleState()`: PODCAST-TEST (EN) and an Arabic client-name/path variant |
 | `src/render.ts` | `render(state, strings, ui)` -> HTML string; `esc()`; every dynamic value escaped; commands/paths/timecodes in `<bdi dir="ltr">` |
 | `src/mount.ts` | `mount(root, source, host)`: renders, subscribes, event delegation; the host-only things go through `src/host.ts` |
-| `src/actions.ts` | the host requests the buttons send (checked against the v4 action schemas in tests) |
+| `src/actions.ts` | the host requests the buttons send (checked against the v4 action schemas in tests) and the `rebuild` intent (`PanelDataSource.rebuild`: the daemon expands it into a full engine rebuild; the panel never sends `build_project`) |
 | `src/i18n.ts` | EN + AR tables (AR is typed against EN's keys) |
 | `src/monogram.ts` | header monogram = `premiere-uxp/icons/dark/icon-48.png` inlined as a data URI (a test fails on drift) |
 | `styles/tokens.css`, `styles/panel.css` | Appendix D tokens + `--twn-focus`; flexbox only, no web-font loading, RTL by `direction` on `.twn-rtl` |

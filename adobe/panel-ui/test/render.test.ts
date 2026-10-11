@@ -217,3 +217,30 @@ test("every selector class the renderer emits for QC verdicts and pills exists i
     assert.ok(css.includes(`.${c}`), `panel.css lacks .${c}`);
   }
 });
+
+test("QC tiles follow the frame's aspect: default 9:16, 4:5 from w/h, bad w/h fall back to 9:16", () => {
+  const s = sampleState("en", "qc");
+  const ratioOf = (q: Partial<PanelState["qc"][number]>) => {
+    const st = sampleState("en", "qc");
+    st.qc = [{ ...st.qc[0]!, ...q }];
+    const m = /class="qc-frame" style="padding-top:([\d.]+)%"/.exec(render(st, EN, initialUi()));
+    assert.ok(m, "no .qc-frame with an aspect");
+    return Number(m[1]);
+  };
+  assert.equal(ratioOf({}), 177.78);
+  assert.equal(ratioOf({ w: 1080, h: 1920 }), 177.78);
+  assert.equal(ratioOf({ w: 1080, h: 1350 }), 125);
+  for (const bad of [{ w: 0, h: 10 }, { w: -1, h: 5 }, { w: Number.NaN, h: 1 }, { w: 10 }, { h: 10 }, { w: "x", h: "y" }]) {
+    assert.equal(ratioOf(bad as never), 177.78, JSON.stringify(bad));
+  }
+  assert.equal(ratioOf({ w: 1, h: 100000 }), 300, "extreme ratios are clamped");
+  assert.ok(s.qc.length > 0);
+});
+
+test("the showcase mock includes a 4:5 tile next to 9:16 ones", () => {
+  const s = sampleState("en", "showcase");
+  assert.ok(s.qc.some((q) => q.w === 1080 && q.h === 1350));
+  assert.ok(s.qc.some((q) => !q.w && !q.h));
+  const css = readFileSync(new URL("../styles/panel.css", import.meta.url), "utf8");
+  assert.ok(css.includes(".qc-frame"));
+});

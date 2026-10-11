@@ -196,10 +196,10 @@ textarea.input { resize: vertical; min-height: 56px; }
 .twn-rtl .flag-tc { margin: 0 auto 0 0; }
 
 /* ---- QC grid ---- */
-.qc-grid { display: flex; flex-direction: row; flex-wrap: wrap; margin: 0 -4px; }
+.qc-grid { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; margin: 0 -4px; }
 .qc-tile {
-  flex: 1 1 104px;
-  min-width: 104px;
+  flex: 1 1 120px;
+  min-width: 120px;
   max-width: 168px;
   margin: 4px;
   padding: 4px;
@@ -212,11 +212,8 @@ textarea.input { resize: vertical; min-height: 56px; }
 .qc-pending { border-style: dashed; }
 .qc-media_pending { border-style: dashed; border-color: var(--twn-warn); }
 .qc-thumb {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   width: 100%;
-  height: 104px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -226,8 +223,10 @@ textarea.input { resize: vertical; min-height: 56px; }
   overflow: hidden;
   cursor: pointer;
 }
-.qc-img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.qc-noimg { padding: 4px; font-size: 10.5px; text-align: center; }
+/* the frame box follows the frame's aspect: padding-top is set inline as a percentage of the width (default 9:16) */
+.qc-frame { display: block; position: relative; width: 100%; height: 0; }
+.qc-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+.qc-noimg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 4px; font-size: 10.5px; text-align: center; }
 .qc-meta { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-top: 4px; font-size: 10.5px; }
 .qc-tc { color: var(--twn-text-muted); }
 .qc-verdict { font-weight: 600; }

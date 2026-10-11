@@ -1,7 +1,7 @@
 // MockSource: a believable engine for the dev harness and the tests. Content is the fictional PODCAST-TEST
 // client (EN) and an Arabic client-name / path variant. No real client appears here.
 import { PROTOCOL } from "./contract.ts";
-import type { ActionName } from "./contract.ts";
+import type { ActionName, BuildProjectReadback } from "./contract.ts";
 import { STEP_IDS } from "./source.ts";
 import type {
   Language, LogLine, PanelDataSource, PanelState, PipelineStep, QcFrame, Result, StepId, StepStatus,
@@ -99,14 +99,14 @@ function tcOf(t: number): string {
 }
 
 /** A small neutral frame as an SVG data URI so tiles look like tiles without any media on disk. */
-function thumbFor(i: number): string {
+function thumbFor(i: number, w = 108, h = 192): string {
   const hues = ["#2b2b3a", "#33283a", "#2a3340", "#3a2f2a"];
   const bg = hues[i % hues.length]!;
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="108" height="192" viewBox="0 0 108 192">` +
-    `<rect width="108" height="192" fill="${bg}"/><rect x="10" y="132" width="88" height="14" rx="3" fill="#5400FB" opacity=".85"/>` +
-    `<rect x="10" y="152" width="60" height="8" rx="3" fill="#ffffff" opacity=".6"/>` +
-    `<circle cx="54" cy="64" r="22" fill="#ffffff" opacity=".18"/></svg>`;
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+    `<rect width="${w}" height="${h}" fill="${bg}"/><rect x="10" y="${h - 60}" width="88" height="14" rx="3" fill="#5400FB" opacity=".85"/>` +
+    `<rect x="10" y="${h - 40}" width="60" height="8" rx="3" fill="#ffffff" opacity=".6"/>` +
+    `<circle cx="54" cy="${Math.round(h / 3)}" r="22" fill="#ffffff" opacity=".18"/></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
@@ -133,6 +133,9 @@ export function sampleState(language: Language, scenario: Scenario): PanelState 
     verdict: verdict as QcFrame["verdict"],
     thumb: verdict === "media_pending" ? null : thumbFor(i),
   }));
+  // One feed-format (4:5) frame among the 9:16 ones, so the harness shows tiles following their own aspect.
+  const four5 = qcAll[6];
+  if (four5) Object.assign(four5, { w: 1080, h: 1350, thumb: thumbFor(6, 108, 135) });
 
   const approval = {
     summary: f.summary,
@@ -308,12 +311,33 @@ export class MockSource implements PanelDataSource {
       case "render_review":
         return { ok: true, action, readback: { started: true, out_path: String(d["out_path"] ?? ""), mode: "encoder" } };
       case "build_project":
-        this.state = { ...this.state, pipeline: this.state.pipeline.map((p) => (p.id === "build" ? { ...p, state: "running", progress: { n: 0, of: BUILD_TOTAL, step: "starting" }, elapsed_s: 0, request_id: "req-build-2" } : p)) };
-        this.emit();
-        return { ok: true, action, readback: { accepted: true } };
+        // A complete build_project comes from the engine, never from the panel; the mock does not run one by hand.
+        return { ok: false, action, error: "The mock engine builds through rebuild(), not a hand-made build_project.", how: "Use the Rebuild button." };
       default:
         return { ok: false, action, error: `The mock engine does not run "${action}".`, how: "Use the real engine for this action." };
     }
+  }
+
+  async rebuild(input: { item: string; project_path: string; replace_edited: boolean }): Promise<Result> {
+    this.state = {
+      ...this.state,
+      pipeline: this.state.pipeline.map((p) => (p.id === "build" ? { ...p, state: "running", progress: { n: 0, of: BUILD_TOTAL, step: "starting" }, elapsed_s: 0, request_id: "req-build-2" } : p)),
+      log: [...this.state.log, this.line("info", `rebuild ${input.item}${input.replace_edited ? " (replace edited)" : ""}: ${input.project_path}`)],
+    };
+    this.emit();
+    // A schema-valid build_project readback (what the host reports when the rebuild finishes).
+    const readback: BuildProjectReadback = {
+      project: input.project_path,
+      saved: true,
+      settings_after: {
+        previewCodec: "apcs", previewFrameWidth: 1080, previewFrameHeight: 1920, videoFrameWidth: 1080, videoFrameHeight: 1920,
+        videoFrameRate: { seconds: 0.04, ticks: "10160640000" }, compositeLinearColor: true, maximumBitDepth: false, maximumRenderQuality: false,
+      },
+      placed: [],
+      sharpened: [],
+      tracks: { video: [{ i: 1, name: "V1", clips: 1 }], audio: [{ i: 1, name: "A1", clips: 1 }, { i: 2, name: "A2", clips: 1 }] },
+    };
+    return { ok: true, action: "build_project", readback };
   }
 
   async cancel(id: string): Promise<void> {

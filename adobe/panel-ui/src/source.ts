@@ -53,6 +53,9 @@ export interface QcFrame {
   file: string;
   label: string;
   verdict: QcVerdict;
+  /** frame size in pixels; the tile follows its aspect. Absent or invalid = 1080 x 1920 (9:16). Reels are 9:16, sometimes 4:5. */
+  w?: number;
+  h?: number;
   /** optional loadable image URL (data:, file:, plugin: or http(s):) for the tile; the shell fills it */
   thumb?: string | null;
 }
@@ -102,5 +105,11 @@ export interface PanelDataSource {
   approve(input: { item: string; editor_name: string; fingerprint: string }): Promise<Result>;
   requestChanges(input: { item: string; editor_name: string; text: string }): Promise<Result>;
   run(action: ActionName, data: object): Promise<Result>;
+  /**
+   * Rebuild the item's project. The daemon expands this into a full engine rebuild (`reel ppro-build --force`, plus
+   * `--replace-edited` when replace_edited is true: the editor confirmed the edited-project warning) and then the
+   * complete build_project request to the host. The panel never sends build_project itself.
+   */
+  rebuild(input: { item: string; project_path: string; replace_edited: boolean }): Promise<Result>;
   cancel(id: string): Promise<void>;
 }

@@ -1,12 +1,12 @@
 // mount(root, source, host): renders the panel into root, re-renders on every state change and wires the
 // buttons by event delegation (one click and one input listener on the root). The host adapter does the
 // things only the host app can do (playhead, Source Monitor, reveal, clipboard).
-import { exportFramesAction, openProjectAction, rebuildAction, renderReviewAction } from "./actions.ts";
+import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction } from "./actions.ts";
 import type { BuiltAction } from "./actions.ts";
 import { diagnosticsText } from "./diagnostics.ts";
 import type { PanelHost } from "./host.ts";
 import { stringsFor } from "./i18n.ts";
-import { initialUi, render, renderLoading } from "./render.ts";
+import { initialUi, render, renderError, renderLoading } from "./render.ts";
 import type { UiState } from "./render.ts";
 import type { PanelDataSource, PanelState, Result } from "./source.ts";
 
@@ -50,22 +50,40 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
   let off: (() => void) | null = null;
   let live = true;
 
-  const strings = () => stringsFor(state?.language ?? "en");
+  const strings = () => stringsFor(state?.language === "ar" ? "ar" : "en");
 
+  const isRtl = () => state?.language === "ar";
+
+  /** Shows an error view in place of the panel. Never throws. */
+  function showError(titleKey: "error.render" | "error.snapshot", e: unknown): void {
+    const message = e instanceof Error ? e.message : String(e);
+    try {
+      root.innerHTML = renderError(strings(), isRtl(), strings()[titleKey], message);
+    } catch {
+      root.innerHTML = `<p>${message.replace(/[<>&"]/g, "?")}</p>`;
+    }
+  }
+
+  /** Renders the state. A throw (a daemon payload that is slightly off) becomes a visible error view, never a blank panel
+   *  and never an exception into the source's emit loop or an unhandled rejection. The next good state repaints. */
   function paint(): void {
     if (!live || !state) return;
-    const doc = root.ownerDocument;
-    const active = doc?.activeElement ?? null;
-    const field = active?.getAttribute ? active.getAttribute("data-field") : null;
-    const selStart = active?.selectionStart ?? null;
-    const selEnd = active?.selectionEnd ?? null;
-    root.innerHTML = render(state, strings(), ui);
-    if (field && root.querySelector) {
-      const el = root.querySelector(`[data-field="${field}"]`);
-      if (el?.focus) {
-        el.focus();
-        if (selStart !== null && selEnd !== null && el.setSelectionRange) el.setSelectionRange(selStart, selEnd);
+    try {
+      const doc = root.ownerDocument;
+      const active = doc?.activeElement ?? null;
+      const field = active?.getAttribute ? active.getAttribute("data-field") : null;
+      const selStart = active?.selectionStart ?? null;
+      const selEnd = active?.selectionEnd ?? null;
+      root.innerHTML = render(state, strings(), ui);
+      if (field && root.querySelector) {
+        const el = root.querySelector(`[data-field="${field}"]`);
+        if (el?.focus) {
+          el.focus();
+          if (selStart !== null && selEnd !== null && el.setSelectionRange) el.setSelectionRange(selStart, selEnd);
+        }
       }
+    } catch (e) {
+      showError("error.render", e);
     }
   }
 
@@ -107,7 +125,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
     return perform(() => source.run(built.action, built.data), okText ?? strings()["notice.ok"]);
   }
 
-  function onClick(e: PanelEvent): void {
+  function handleClick(e: PanelEvent): void {
     const el = e.target?.closest("[data-action]") ?? null;
     if (!el || !state) return;
     const action = el.getAttribute("data-action");
@@ -165,7 +183,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
         void runBuilt(renderReviewAction(s));
         return;
       case "rebuild":
-        if (!rebuildAction(s)) return missing();
+        if (!rebuildInput(s)) return missing();
         ui.confirmRebuild = true;
         paint();
         return;
@@ -175,7 +193,9 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
         return;
       case "rebuild-confirm": {
         ui.confirmRebuild = false;
-        void runBuilt(rebuildAction(s));
+        const input = rebuildInput(s);
+        if (!input) return missing();
+        void perform(() => source.rebuild(input), t["notice.ok"]);
         return;
       }
       case "reveal": {
@@ -205,6 +225,16 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
     }
   }
 
+  /** A handler that throws (a state that is slightly off) becomes a notice, not an exception in the event loop. */
+  function onClick(e: PanelEvent): void {
+    try {
+      handleClick(e);
+    } catch (err) {
+      setNotice(null, undefined, err);
+      paint();
+    }
+  }
+
   function onInput(e: PanelEvent): void {
     const el = e.target?.closest("[data-field]") ?? null;
     if (!el) return;
@@ -227,6 +257,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
 
   // Subscribe first, then ask for the snapshot: a change that lands in between is not lost, and a pushed
   // state that arrives before the snapshot answers wins (it is newer).
+  root.innerHTML = renderLoading(stringsFor("en"));
   let pushed = false;
   off = source.subscribe((next) => {
     pushed = true;
@@ -241,7 +272,8 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       paint();
     })
     .catch((e: unknown) => {
-      if (live && !state) root.innerHTML = renderLoading(stringsFor("en"), false, e instanceof Error ? e.message : String(e));
+      // paint() cannot throw, so this is only a snapshot() that failed; a state pushed meanwhile stays on screen.
+      if (live && !pushed) showError("error.snapshot", e);
     });
 
   return {
