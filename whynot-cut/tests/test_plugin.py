@@ -746,6 +746,74 @@ class TestGuardReviewRound2(ClientFixture):
         self.assertEqual(hook(CTX, {"cwd": str(repo)})[1].strip(), "")
 
 
+class TestGuardReviewRound3(ClientFixture):
+    """T1.5 review round 3: words starting with $( that wrap a source variable, filtered listings feeding a recursive
+    delete, filter values that are not paths, joined .NET paths with an unknown base, rsync --remove-source-files,
+    Bash "$f.wav", cmd `for /r ROOT`."""
+
+    def run_tool(self, tool, cmd, cwd=None):
+        return hook(GUARD, {"tool_name": tool, "tool_input": {"command": cmd}, "cwd": str(cwd or self.root)})[0]
+
+    def blocked(self, tool, cmds, cwd=None):
+        for c in cmds:
+            self.assertEqual(self.run_tool(tool, c, cwd), 2, c)
+
+    def allowed(self, tool, cmds, cwd=None):
+        for c in cmds:
+            self.assertEqual(self.run_tool(tool, c, cwd), 0, c)
+
+    def test_subexpression_words_stay_tainted(self):
+        self.blocked("PowerShell", [
+            'Get-ChildItem data/Raw | ForEach-Object { Remove-Item "$($_.FullName)" }',
+            'Get-ChildItem data/Raw | ForEach-Object { Remove-Item -Path "$($_.FullName)" }',
+            'foreach ($f in Get-ChildItem data/Raw) { Remove-Item "$($f.FullName)" }',
+            'foreach ($f in Get-ChildItem data/Raw) { Move-Item "$($f.FullName)" output/ }',
+            'Get-ChildItem data/Raw | ForEach-Object { Rename-Item "$($_.FullName)" "$($_.BaseName)_old.mp4" }',
+            'Get-ChildItem data/Raw *.MP4 | ForEach-Object { ffmpeg -y -i $_.FullName "$($_.DirectoryName)/$($_.BaseName).wav" }',
+            'Get-ChildItem data/Raw | ForEach-Object { ffmpeg -y -i $_.FullName -c copy "$($_.FullName).fixed.mp4" }'])
+        self.blocked("Bash", [
+            'for f in data/Raw/*.MP4; do ffmpeg -y -i "$f" "$(dirname "$f")/$(basename "$f" .MP4).wav"; done',
+            'for f in data/Raw/*; do rm "./$f"; done', 'for f in data/Raw/*.MP4; do ffmpeg -y -i "$f" "$f.wav"; done',
+            'for f in data/Raw/*.MP4; do ffmpeg -y -i "$f" "${f%.MP4}.wav"; done'])
+        self.allowed("PowerShell", [
+            'Get-ChildItem data/Raw | ForEach-Object { ffmpeg -i "$($_.FullName)" "output/$($_.BaseName).wav" }',
+            'Get-ChildItem data/Raw | ForEach-Object { Copy-Item "$($_.FullName)" "output/$($_.Name)" }'])
+        self.allowed("Bash", [
+            'for f in data/Raw/*.MP4; do ffmpeg -i "$f" "output/$(basename "$f").wav"; done',
+            'for f in data/Raw/*.MP4; do b=${f##*/}; ffmpeg -i "$f" -y "output/${b%.*}.wav"; done',
+            'for f in data/Raw/*.MP4; do name=$(basename "$f" .MP4); ffmpeg -y -i "$f" "output/$name.wav"; done'])
+
+    def test_filtered_listings_are_not_whole_folder_deletes(self):
+        self.allowed("Bash", ["find . -name '*.tmp' | xargs rm -rf", "find . -type d -name '__pycache__' | xargs rm -rf",
+                              "ls | grep '\\.srt$' | xargs -I{} mv {} output/"])
+        self.allowed("PowerShell", ["Get-ChildItem . -Recurse -Filter *.tmp | Remove-Item -Recurse -Force",
+                                    "Get-ChildItem | Where-Object Extension -eq '.srt' | Move-Item -Destination output",
+                                    "Get-ChildItem -File | Rename-Item -NewName { $_.Name.ToLower() }"])
+        self.blocked("Bash", ["ls | xargs rm -rf", "find data -name '*.MP4' | xargs rm"])
+        self.blocked("PowerShell", ["Get-ChildItem | Remove-Item -Recurse -Force",
+                                    "Get-ChildItem -Path data -Recurse | Remove-Item -Force -Recurse"])
+
+    def test_filter_values_are_not_paths(self):
+        self.allowed("PowerShell", ["Get-ChildItem output -Filter *data* | Remove-Item",
+                                    "Get-ChildItem -Path output -Filter 'data*' | Remove-Item",
+                                    "Get-ChildItem output -Include *data* -Recurse | Remove-Item"])
+        self.allowed("Bash", ["find output -name '*data*' | xargs rm", "find output -name 'assets*' | xargs rm -f"])
+
+    def test_joined_dotnet_paths(self):
+        self.allowed("PowerShell", ["[IO.Directory]::CreateDirectory((Join-Path 'output' 'data'))",
+                                    "[IO.File]::WriteAllText([IO.Path]::Combine($out, 'data', 'x.json'), $json)",
+                                    "[IO.File]::WriteAllText((Join-Path $PWD 'output' 'data.json'), $json)"])
+        self.blocked("PowerShell", ["[IO.File]::Delete((Join-Path $PWD 'data/Raw/C0001.MP4'))",
+                                    "[IO.File]::Delete([IO.Path]::Combine('data','Raw','C0001.MP4'))",
+                                    "$f = Get-Item data/Raw; [IO.File]::Delete([IO.Path]::Combine($f, 'C0001.MP4'))"])
+
+    def test_cheap_blocks(self):
+        self.blocked("Bash", ["rsync -a --remove-source-files data/Raw/ output/"])
+        self.allowed("Bash", ["rsync -a data/ output/data_copy/", "rsync -a --remove-source-files output/tmp/ output/done/"])
+        self.blocked("PowerShell", ['cmd /c "for /r data %f in (*.MP4) do del %f"'])
+        self.allowed("PowerShell", ['cmd /c "for /r output %f in (*.tmp) do del %f"'])
+
+
 class TestProfiles(ClientFixture):
     def test_shipped_profile_only_by_name_and_merge(self):
         common.set_context(self.root)                                  # folder "example clinic": NOT matched by name

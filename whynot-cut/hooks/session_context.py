@@ -192,8 +192,8 @@ def main():
              f"Use /whynot-cut:autopilot (edit every new clip), /whynot-cut:edit <clip>, /whynot-cut:revise, "
              f"/whynot-cut:status. assets/ and data/ are read-only.")
         return
-    legacy = cwd if client_marker.has_layout(cwd) and (cwd / "output").is_dir() and (
-        (cwd / "START_HERE.md").is_file() or (cwd / "output/projects").is_dir() or (cwd / "output/discovery").is_dir())         else None
+    legacy = cwd if client_marker.has_layout(cwd) and (cwd / "output").is_dir() and any(
+        (cwd / x).exists() for x in ("START_HERE.md", "output/projects", "output/discovery")) else None
     if legacy:            # an unmarked 2.x client opened at its root (WhyNot Cut output there), not under clients_root
         emit(f"WhyNot Cut: {legacy} looks like a WhyNot Cut client without a marker (no .whynot-client), so its "
              f"assets/ and data/ are NOT protected by the guard yet. Run `reel doctor --fix --root \"{legacy}\"` "

@@ -87,6 +87,7 @@ IS_WIN = os.name == "nt"
 _MSYS = re.compile(r"^/([a-zA-Z])(/|$)")
 TAINT: dict[str, tuple[str, str]] = {}     # variable (lower-case) -> (hit label, a source token) for this command
 VALUES: dict[str, str] = {}                # PowerShell string variables of this command (for `iex $s`)
+SH_VARS: set[str] = set()                  # tainted variables set by Bash / cmd (no .Property access there)
 CMD_CWD: list[Path] = []                   # working folder of the cmd body being converted
 
 
@@ -196,12 +197,30 @@ def tainted(tok: str, any_prop: bool = False) -> tuple[str, str] | None:
     """The variable that STARTS tok, when it was set from a client source in this command: $f, "$f", ${f}, $f/x,
     ${F%/}, $f.FullName, %f (cmd). Not "output/${f##*/}.wav" or "output/$(basename "$f")" (the path is output's),
     not $f.Name / $f.BaseName (a bare name)."""
-    m = _VAR.match(tok.strip("'\"").lstrip("("))
+    t = tok.strip("'\"")
+    if t.startswith("./"):
+        t = t[2:]
+    if t.startswith("$("):                       # "$($_.FullName)", "$(dirname "$f")/x.wav" -> the inner value
+        depth, j = 1, 2
+        while j < len(t) and depth:
+            depth += {"(": 1, ")": -1}.get(t[j], 0)
+            j += 1
+        inner = t[2:j - 1].strip()
+        words = inner.split()
+        if words and words[0].lower() in ("dirname", "realpath", "readlink", "resolve-path", "split-path"):
+            return next((h for h in (tainted(w) for w in words[1:]) if h), None)
+        return tainted(inner, any_prop) if len(words) == 1 else None
+    m = _VAR.match(t.lstrip("("))
     if not m:
         return None
-    hit = TAINT.get((m.group(1) or m.group(2)).lower())
+    name = (m.group(1) or m.group(2)).lower()
+    hit = TAINT.get(name)
+    if not hit:
+        return None
+    if name in SH_VARS:                          # Bash: "$f.wav", "${f%.mp4}.wav" stay next to the source;
+        return None if re.match(r"^\$\{\w+##?\*?/", t) else hit       # "${f##*/}" is a bare name
     props = [x for x in (m.group(3) or "").lower().split(".") if x]
-    if hit and (any_prop or not props or props[-1] in PATH_PROPS):
+    if any_prop or not props or props[-1] in PATH_PROPS:
         return hit
     return None
 
@@ -285,12 +304,45 @@ def first_source(tokens: list[str], cwd: Path) -> tuple[str, str] | None:
     return None
 
 
+FIND_FILTERS = {"-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-lname",
+                "-ilname", "-type", "-newer", "-size", "-mtime", "-mmin", "-user", "-group", "-perm", "-maxdepth",
+                "-mindepth", "-empty"}
+PS_FILTERS = {"-filter", "-include", "-exclude", "-file", "-directory", "-attributes", "-hidden"}
+FILTER_STAGES = {"grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sls", "where-object", "where", "?",
+                 "awk", "sed", "head", "tail", "select-object", "select"}
+
+
+def stage_paths(argv: list[str]) -> tuple[list[str], bool]:
+    """(the words of a pipeline stage that name paths, narrowed?) -- filter values (-Filter *data*, find -name
+    'assets*', grep patterns, Where-Object expressions) are not paths; a filter stage or predicate narrows the list."""
+    e = norm_exe(argv[0])
+    args = argv[1:] if not argv[0].startswith("$") else argv
+    if e in FILTER_STAGES:
+        if e in ("grep", "egrep", "fgrep", "rg", "findstr"):
+            pos = [a for a in args if not a.startswith("-")]
+            return pos[1:], True                # the first word is the pattern
+        return [], True
+    opts = FIND_FILTERS if e in ("find", "fd") else PS_FILTERS if e in ("gci", "get-childitem", "dir", "ls") else set()
+    out, narrowed, skip = [], False, False
+    for a in args:
+        if skip:
+            skip = False
+            continue
+        if a.lower() in opts:
+            narrowed = True
+            skip = a.lower() not in ("-file", "-directory", "-hidden", "-empty")
+            continue
+        out.append(a)
+    return out, narrowed
+
+
 def pipe_source(stages: list[tuple[list[str], Path]], cwd: Path, recursive: bool = False) -> tuple[str, str] | None:
     """A client source named by an earlier stage of the pipeline (a read), or a working directory that is one.
     recursive=True (the consumer deletes/moves whole trees): also a listed folder that holds a client's sources
     (`Get-ChildItem | Remove-Item -Recurse`, `ls | xargs rm -rf` in the client folder)."""
-    for argv, at in stages:
-        args = argv[1:] if not argv[0].startswith("$") else argv
+    views = [(argv, at) + stage_paths(argv) for argv, at in stages]
+    recursive = recursive and not any(v[3] for v in views)       # `find . -name '*.tmp' | xargs rm -rf` is fine
+    for argv, at, args, _ in views:
         for a in args:
             hit = protected(a, at, writing=False, recursive=recursive)
             if hit:
@@ -470,12 +522,13 @@ def arg_paths(arg: str) -> list[str]:
     lits = [b for _, b in re.findall(r"(['\"])(.*?)\1", arg)]
     if len(lits) == 1 and re.fullmatch(r"(['\"]).*\1", arg):
         return lits
-    out = []
-    if lits and re.search(r"join-path|::combine", arg, re.I):
-        out.append("/".join(lits))
-    if lits and "+" in arg:
-        out.append("".join(lits))
-    out += lits
+    m = re.search(r"join-path\s+(\(get-location\)|\S+)|::combine\(\s*([^,]+?)\s*,", arg, re.I)
+    if m or (lits and "+" in arg):               # a joined path: judge the whole path, not its pieces
+        first = (m.group(1) or m.group(2) or "") if m else arg.lstrip("( ").split("+")[0].strip()
+        if first.startswith("$") and not re.match(r"^\$(pwd\b|\{pwd\}|\(\s*(pwd|get-location)\s*\))", first, re.I):
+            return [first]                       # an unknown base: only a tainted variable counts
+        return ["/".join(lits) if m else "".join(lits)]
+    out = list(lits)
     if arg.lstrip("(").startswith("$"):
         out.append(arg.lstrip("("))
     return out
@@ -609,6 +662,7 @@ def run_bash(stmts: list[tuple[list[str], bool]], cwd: Path, agent: str | None):
             src = first_source(argv[3:], cwd)
             if src:
                 TAINT[argv[1].lower()] = src
+                SH_VARS.add(argv[1].lower())
             continue
         decl = argv[0] in ("export", "declare", "readonly", "local", "typeset")
         words = [a for a in argv[1:] if not a.startswith("-")] if decl else argv
@@ -624,6 +678,7 @@ def run_bash(stmts: list[tuple[list[str], bool]], cwd: Path, agent: str | None):
             src = first_source(vals, cwd)
             if src:
                 TAINT[m.group(1).lower()] = src
+                SH_VARS.add(m.group(1).lower())
         if decl:
             continue
         argv = strip_prefixes(argv)
@@ -695,7 +750,7 @@ def shell_body(exe: str, argv: list[str]) -> tuple[str, str] | None:
 
 _CMD_IF = re.compile(r"^if\s+(?:/i\s+)?(?:not\s+)?(?:(?:exist|defined|errorlevel)\s+(?:\"[^\"]*\"|\S+)|"
                      r"\S+\s*==\s*\S+|\S+\s+(?:equ|neq|lss|leq|gtr|geq)\s+\S+)\s+(.*)$", re.I | re.S)
-_CMD_FOR = re.compile(r"^for\s+(?:/[dlrf]\s+(?:\"[^\"]*\"\s+|(?!%)\S+\s+)?)?%%?(\w)\s+in\s+\((.*?)\)\s+do\s+(.*)$",
+_CMD_FOR = re.compile(r"^for\s+(?:/[dlrf]\s+(?:\"([^\"]*)\"\s+|(?!%)(\S+)\s+)?)?%%?(\w)\s+in\s+\((.*?)\)\s+do\s+(.*)$",
                       re.I | re.S)
 
 
@@ -731,10 +786,13 @@ def cmd_to_ps(body: str) -> str:
                 continue
             m = _CMD_FOR.match(seg)
             if m:
-                found = first_source([t.strip('"') for t in m.group(2).split()], Path.cwd() if not CMD_CWD else CMD_CWD[-1])
+                root = m.group(1) or m.group(2)               # for /r ROOT %f in (SET): files under ROOT
+                items = [t.strip('"') for t in m.group(4).split()]
+                found = first_source(([root] if root else []) + items, Path.cwd() if not CMD_CWD else CMD_CWD[-1])
                 if found:
-                    TAINT[m.group(1).lower()] = found
-                seg = m.group(3).strip().strip("()").strip()
+                    TAINT[m.group(3).lower()] = found
+                    SH_VARS.add(m.group(3).lower())
+                seg = m.group(5).strip().strip("()").strip()
                 continue
             break
         if re.match(r"^call\s", seg, re.I):
@@ -825,6 +883,11 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
             hit = protected(a, cwd, recursive=tree and i != last)
             if hit:
                 block(f"`{exe}` on the client's source folder ({hit}) is not allowed — assets/ and data/ are read-only.")
+    if exe == "rsync" and any(a.startswith("--remove-source-files") for a in argv[1:]):
+        for a in [a for a in argv[1:] if not a.startswith("-")][:-1]:          # the sources are moved away
+            hit = protected(a, cwd, recursive=True)
+            if hit:
+                block(f"`rsync --remove-source-files` would move files out of the client's source folder ({hit}).")
     if exe in MUTATE_DEST:
         paths = [a for a in argv[1:] if not a.startswith("-") and a not in (">", ">>")]
         if exe == "tee" or exe == "mkdir":

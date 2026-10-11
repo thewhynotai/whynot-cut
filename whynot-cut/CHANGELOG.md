@@ -131,6 +131,14 @@
   `cd -- data`; `bash -e .../bin/reel`; `winpty`, `flock`, `watch`, `parallel CMD ::: ARGS`; deleting
   `output/client_database` of a client that has no `.whynot-client` (it is that client's only marker). The guard's
   docstring lists what is still not inspected.
+- Guard review round 3: a word starting with `$( ... )` keeps the taint of what it wraps when that is a path
+  (`"$($_.FullName)"`, `"$($_.DirectoryName)/x.wav"`, `"$(dirname "$f")/x.wav"`, `"./$f"`), while `$($_.BaseName)`,
+  `$(basename "$f")` and `${f##*/}` stay bare names; a Bash loop variable with a suffix (`"$f.wav"`, `"${f%.mp4}.wav"`)
+  still writes next to the source and is blocked. A listing narrowed by a filter (`find -name`, `-Filter`, `-Include`,
+  `-File`, `| grep`, `| Where-Object`) no longer counts as deleting the whole client folder, and filter values
+  (`-Filter *data*`, `find -name 'assets*'`, grep patterns) are not read as paths. Joined .NET paths are judged as a
+  whole (`(Join-Path 'output' 'data')` is fine; a base that is an unknown variable counts only when tainted). Also
+  blocked: `rsync --remove-source-files <source>` and cmd `for /r <source> %f in (...) do ...`.
 - Role holes (engine §10): subagents may not run `reel transcript-verify --by editor`; qc-reviewer may not run
   `ref-analyze` (it applies the client style, getting around the `ref-style --apply` block); setup-doctor may not run
   `reel setup`, `model-download`, `gpu-enable`, `ppro-install` or `doctor --fix`.
