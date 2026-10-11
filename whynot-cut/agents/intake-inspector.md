@@ -29,15 +29,24 @@ import fails with ModuleNotFoundError; `-E` alone keeps them. Details: `${CLAUDE
 
 ## Podcast episodes (data/Episodes)
 When the lead gives you an episode id (podcast mode, stage E2): read `output/episodes/<EP>/00_inputs/episode.json`
-(duration, fps, aspect, audio, sheet, warnings) and VIEW `00_inputs/intake/_intake_sheet.jpg` (6 frames across the
-episode). Report:
+(duration, fps, aspect, audio, sheet, warnings) and VIEW all three sheets in `00_inputs/intake/`:
+`_intake_sheet.jpg` (6 frames across the episode: layout, burned subtitles/logo), `_supers_sheet.jpg` (the lower half
+of every frame where a bar-shaped overlay appeared, found by a scan of the WHOLE episode at 1 frame per second; absent
+when it found none) and `_head_sheet.jpg` (a frame every 10 s of the first 3 minutes, where name supers live).
+Name supers are on screen for only about 3 s, so the 6-frame sheet alone misses them: never report
+`lower_thirds: false` without having looked at the other two sheets. `episode.json` → `overlay_scan` has the
+candidates (`tc`, `score`; a `complete: false` scan stopped early at `scanned_s`) and `lower_thirds_hint`. A candidate
+is only a candidate: say what the tile shows (a name super with its text, a subtitle line, a card transition, nothing).
+Report:
 - burned subtitles (text baked into the picture: a 9:16 crop cuts them in half) and where they sit;
-- a burned logo or watermark (position) and lower thirds;
+- a burned logo or watermark (position) and lower thirds / name supers: each one with its time and its text, in
+  `lower_thirds_at` (a super cut in half by the 9:16 crop is a problem for reels from that stretch);
 - the wide-shot layout: who sits left / right / centre (match the close-ups to the sheet's host and guest);
 - graphic cards or B-roll inside the episode; an audio-only episode (no face at all: reels are shown whole);
 - variable frame rate, a non-16:9 aspect, a missing episode sheet (no names or links can go in the publish package).
 End with the block the lead copies into `00_inputs/intake.json`:
-`{"burned_subtitles": false, "burned_logo": null, "lower_thirds": false, "layout": {"host": "left", "guest": "right"}, "notes": ""}`
+`{"burned_subtitles": false, "burned_logo": null, "lower_thirds": false, "lower_thirds_at": [], "layout": {"host": "left", "guest": "right"}, "notes": ""}`
+(`lower_thirds_at`: `["01:27 د/ عمرو فهمي", "16:55 Senior …"]` when `lower_thirds` is true.)
 
 ## Rules
 - Never move, rename or convert client files. Suggest the user do it.

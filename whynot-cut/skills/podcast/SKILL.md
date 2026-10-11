@@ -29,8 +29,8 @@ reel profile --root "<CLIENT>"                          # client profile (NONE -
 ## 1. Stages (agents in parallel where marked ∥)
 | Stage | Who | Commands | Done when |
 |---|---|---|---|
-| E1 Prep | you | `episode-prep` | `00_inputs/episode.json` + `00_inputs/intake/_intake_sheet.jpg`; tell the editor the time estimate |
-| E2 Intake ∥ transcript | `intake-inspector` ∥ `transcript-editor` | (views the intake sheet) ∥ `episode-transcribe`, `transcript-correct --episode` | intake report ∥ transcript + words to confirm |
+| E1 Prep | you | `episode-prep` | `00_inputs/episode.json` + `00_inputs/intake/` sheets (`_intake_sheet.jpg`, `_supers_sheet.jpg`, `_head_sheet.jpg`); tell the editor the time estimate. The prep also scans the whole episode for name supers (about 2 s per minute of 1080p video, capped at 5 min; `overlay_scan.complete` says if it was cut short) |
+| E2 Intake ∥ transcript | `intake-inspector` ∥ `transcript-editor` | (views the three intake sheets) ∥ `episode-transcribe`, `transcript-correct --episode` | intake report ∥ transcript + words to confirm |
 | E3 Record intake | you | write `00_inputs/intake.json` (below) | layout and burned-in elements recorded |
 | E4 Analysis | `episode-analyst` (fans out `moment-scout`) | `reels-plan` until no errors | topics, speakers, validated plan |
 | E5 Previews | you | `reels-preview`; VIEW `03_candidates/_sheet.jpg` | a preview MP4 per candidate |
@@ -45,9 +45,12 @@ NVIDIA GPU is much faster (`reel gpu-enable`, with the editor's OK).
 
 **00_inputs/intake.json** (from the intake-inspector's report; you write it):
 ```json
-{"burned_subtitles": false, "burned_logo": "top-right", "lower_thirds": false,
+{"burned_subtitles": false, "burned_logo": "top-right", "lower_thirds": false, "lower_thirds_at": [],
  "layout": {"host": "left", "guest": "right"}, "clean_export_requested": false, "notes": ""}
 ```
+`lower_thirds` comes from the inspector having viewed `_supers_sheet.jpg` and `_head_sheet.jpg`, not from the 6-frame
+overview alone (name supers last about 3 s: a field test reported `false` for an episode with two). `episode.json` →
+`lower_thirds_hint` is only a hint; each entry of `lower_thirds_at` is a time and the text on screen.
 Burned subtitles or logo: ask the editor for a clean export (no subtitles/logo) before the reels are built; otherwise
 note the warning (cropping cuts burned subtitles in half).
 

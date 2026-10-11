@@ -208,6 +208,71 @@ def intake_frames(ep: EpisodePaths, src: Path, duration_s: float, n: int = 6) ->
     return out
 
 
+def _grab(src: Path, t: float, out: Path, width: int = 640) -> bool:
+    run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(src), "-frames:v", "1",
+         "-vf", f"scale={width}:-2", "-q:v", "3", str(out)], check=False)
+    return out.exists()
+
+
+def supers_sheets(ep: EpisodePaths, src: Path, duration_s: float, scan: dict) -> tuple[Path | None, Path | None]:
+    """G65: the 6-frame overview misses name supers (3 s on screen). `_supers_sheet.jpg` = the lower half of every
+    frame the overlay scan nominated (`super_NN.jpg` = the whole frame); `_head_sheet.jpg` = a frame every 10 s of the
+    first 3 minutes, where name supers live."""
+    from PIL import Image, ImageDraw
+    from .overlay_scan import dense_times, tc
+    d = ep.p("00_inputs/intake")
+    d.mkdir(parents=True, exist_ok=True)
+    for old in [*d.glob("super_*.jpg"), d / "_supers_sheet.jpg", d / "_head_sheet.jpg"]:
+        old.unlink(missing_ok=True)
+    tiles = []
+    for k, e in enumerate(sorted(scan.get("events", []), key=lambda x: x["t_s"]), 1):
+        f = d / f"super_{k:02d}.jpg"
+        if _grab(src, e["t_s"], f):
+            tiles.append((f, f"{k}  {tc(e['t_s'])}  score {e['score']:.2f}"))
+    supers = None
+    if tiles:
+        w, h, lab = 640, 180, 18
+        sheet = Image.new("RGB", (2 * w, ((len(tiles) + 1) // 2) * (h + lab)), "black")
+        dr = ImageDraw.Draw(sheet)
+        for i, (f, label) in enumerate(tiles):
+            im = Image.open(f).convert("RGB")
+            hh = round(im.height * w / im.width)
+            im = im.resize((w, hh)).crop((0, max(0, hh - h), w, hh))          # the lower half
+            x, y = (i % 2) * w, (i // 2) * (h + lab)
+            sheet.paste(im, (x, y + lab))
+            dr.text((x + 6, y + 4), label, fill="yellow")
+        supers = d / "_supers_sheet.jpg"
+        sheet.save(supers, quality=85)
+    heads = []
+    for t in dense_times(duration_s):
+        f = d / "_head_tmp.jpg"
+        if _grab(src, t, f, width=320):
+            heads.append((Image.open(f).convert("RGB").copy(), t))
+    (d / "_head_tmp.jpg").unlink(missing_ok=True)
+    head = None
+    if heads:
+        w, h, lab, cols = 320, 180, 16, 6
+        sheet = Image.new("RGB", (cols * w, ((len(heads) + cols - 1) // cols) * (h + lab)), "black")
+        dr = ImageDraw.Draw(sheet)
+        for i, (im, t) in enumerate(heads):
+            im.thumbnail((w, h))
+            x, y = (i % cols) * w, (i // cols) * (h + lab)
+            sheet.paste(im, (x, y + lab))
+            dr.text((x + 4, y + 3), tc(t), fill="yellow")
+        head = d / "_head_sheet.jpg"
+        sheet.save(head, quality=85)
+    return supers, head
+
+
+def _scan_budget() -> float:
+    import os
+    try:
+        return float(os.environ.get("WHYNOT_OVERLAY_SCAN_BUDGET_S", ""))
+    except ValueError:
+        from .overlay_scan import BUDGET_S
+        return BUDGET_S
+
+
 def prep(ep: EpisodePaths) -> dict:
     from .media import probe
     hit = find_episode(ep.root, ep.episode_id)
@@ -234,18 +299,35 @@ def prep(ep: EpisodePaths) -> dict:
     if media == "audio":
         warnings.append("audio-only episode: reels from it are motion videos (`reels-select --as motion`)")
     sheet_img = intake_frames(ep, src, dur_s) if v and dur_s else None
+    scan, supers_img, head_img = None, None, None
+    if v and dur_s and _scan_budget() > 0:         # G65: name supers are 3 s long; scan the whole episode for them
+        from . import overlay_scan
+        scan = overlay_scan.scan_video(src, dur_s, budget_s=_scan_budget())
+        supers_img, head_img = supers_sheets(ep, src, dur_s, scan)
+        if scan["events"]:
+            warnings.append("possible name supers / lower thirds at " + ", ".join(
+                e["tc"] for e in sorted(scan["events"], key=lambda x: x["t_s"])) + ": VIEW 00_inputs/intake/_supers_sheet.jpg "
+                "(the bar-shaped overlays the scan found) and _head_sheet.jpg (first 3 minutes) before setting lower_thirds")
+        if not scan["complete"]:
+            warnings.append(f"overlay scan stopped at {overlay_scan.tc(scan['scanned_s'])} of "
+                            f"{overlay_scan.tc(scan['duration_s'])} (time budget {scan['budget_s']:.0f} s): later supers are "
+                            "not checked; look at the overview sheet and ask the editor")
     est = _estimate(dur_s / 60)
     info = {"episode_id": ep.episode_id, "file": str(src), "rel": hit["rel"], "media": media, "fingerprint": sha1_head(src),
             "duration_ms": int(round(dur_s * 1000)), "video": {k: v.get(k) for k in ("display_width", "display_height",
             "fps", "codec", "aspect")}, "audio": pr["audio"], "sheet_rel": hit.get("sheet"), "sheet": sheet,
             "sheet_text": sheet_text, "intake_sheet": str(sheet_img) if sheet_img else None,
+            "overlay_scan": scan, "lower_thirds_hint": bool(scan and scan["events"]),
+            "supers_sheet": str(supers_img) if supers_img else None, "head_sheet": str(head_img) if head_img else None,
             "estimate_minutes": est, "warnings": warnings, "created": now_iso()}
     write_json(ep.p("00_inputs/episode.json"), info)
     return {"episode_id": ep.episode_id, "duration_ms": info["duration_ms"], "video": info["video"], "media": media,
-            "sheet": hit.get("sheet"), "intake_sheet": info["intake_sheet"], "estimate_minutes": est,
+            "sheet": hit.get("sheet"), "intake_sheet": info["intake_sheet"], "supers_sheet": info["supers_sheet"],
+            "head_sheet": info["head_sheet"], "estimate_minutes": est,
             "warnings": warnings,
             "next": ("`reel episode-transcribe` (audio-only: no intake check)" if media == "audio" else
-                     "intake-inspector views the intake sheet (burned subtitles/logo, layout) ∥ `reel episode-transcribe`")}
+                     "intake-inspector views the intake sheet (burned subtitles/logo, layout), _supers_sheet.jpg and "
+                     "_head_sheet.jpg (name supers) ∥ `reel episode-transcribe`")}
 
 
 # --------------------------------------------------------------------------- resumable status
