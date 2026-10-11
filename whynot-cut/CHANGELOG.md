@@ -8,7 +8,7 @@
   `mlx` (mlx-whisper on Apple Silicon, word timestamps; not verified on a Mac yet), chosen by `transcription.json`
   `backend: auto | ct2 | mlx` (`faster-whisper` still means ct2) or `--backend`. On the CPU Whisper now uses one
   thread per physical core (`cpu_threads: "auto"`, faster-whisper's default was 4); on an NVIDIA GPU, VAD-split audio
-  (episodes, long clips) is decoded by `BatchedInferencePipeline` (`batch_size: 8`, `--batch-size`, 0 = the 2.x
+  (episodes, long clips) is decoded by `BatchedInferencePipeline` (`batch_size: 4`, `--batch-size`, 0 = the 2.x
   sequential path). A clip longer than `long_clip_minutes` (10) is transcribed by the episode chunk runner (chunks cut
   in silence, VAD, resumable checkpoints in `02_transcription/chunks/`) instead of one pass. Chunk checkpoints record
   the model, prompt and backend that made them, and a mismatch redoes the chunk (one transcript never mixes models).

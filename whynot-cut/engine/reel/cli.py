@@ -229,7 +229,8 @@ def cmd_transcribe(a):
     if not a.model:
         from lib import settings as S
         a.model = S.load(p.root).get("whisper_model") or "large-v3"
-    r = transcribe(p, src, model_size=a.model, language=a.language)
+    r = transcribe(p, src, model_size=a.model, language=a.language, backend=a.backend, batch_size=a.batch_size,
+                   force=a.force)
     set_status(p, "TRANSCRIBED", f"{r['segments']} segs, lang {r['meta']['language']}", "transcribe",
                [p.p("02_transcription/subtitles.srt")])
     out(r)
@@ -648,7 +649,7 @@ def cmd_next(a):
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
-NO_ROOT = {"setup", "doctor", "py", "model-download", "gpu-enable", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
+NO_ROOT = {"setup", "doctor", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
            "ae-status", "ae-probe", "motion-icons", "motion-library"}
 NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
@@ -667,7 +668,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
-CORE_READS = {"setup", "py", "model-download", "gpu-enable", "profile", "ppro-install", "ppro-status", "ppro-probe",
+CORE_READS = {"setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
               "status", "next", "lock", "doctor"}
 WRITES_IF = {
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
@@ -819,6 +820,13 @@ def cmd_model_download(a):
     t0 = time.time()
     path = download_model(a.model, cache_dir=str(models_dir()))
     out({"model": a.model, "path": path, "elapsed_s": round(time.time() - t0, 1), "state": whisper_model_state()})
+
+
+def cmd_bench(a):
+    """Whisper speed on this machine (3.0 T2.12): decode --seconds of --audio (default: the project's own audio with
+    --root and --video-id / --episode) once and cache the real-time factor for `reel doctor`."""
+    from lib.whisper_backends import cli_bench
+    out(cli_bench(a, P(a) if a.root and (a.video_id or a.episode) else None))
 
 
 def cmd_gpu_enable(a):
@@ -982,6 +990,7 @@ CORE_COMMANDS: dict[str, str] = {
     "settings": "show or change the editor's WhyNot Cut preferences",
     "model-download": "download a Whisper model once (large-v3 is about 3 GB)",
     "gpu-enable": "install NVIDIA cuBLAS so Whisper runs on an NVIDIA GPU",
+    "bench": "measure how fast Whisper runs on this computer (real-time factor, shown by doctor)",
     "profile": "show which client profile applies and where its values come from",
     "client-init": "create the client's reel-profile from a shipped profile or the blank template",
     "discover": "inventory of the client folder: inputs, footage, brand files, environment",
@@ -1075,6 +1084,9 @@ def main():
             sp.add_argument("--model", default=None, help="default: preferences whisper_model, else large-v3")
             sp.add_argument("--language", default=None)
             sp.add_argument("--force", action="store_true")
+        if name in ("transcribe", "bench"):
+            from lib.whisper_backends import add_cli_args
+            add_cli_args(name, sp)
         if name == "range":
             sp.add_argument("--footage", help="the longer raw file, e.g. data/Raw/EP02.mp4 (omit to show the range)")
             sp.add_argument("--in", dest="start", default="0", help="in-point: 02:04, 00:02:04.500 or seconds")

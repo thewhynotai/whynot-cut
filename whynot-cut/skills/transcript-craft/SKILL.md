@@ -21,6 +21,12 @@ Outputs in `02_transcription/`:
 
 The vocabulary hint (`initial_prompt`) and the glossary come from the client profile. The hint biases spelling only and never inserts content.
 
+A clip longer than 10 minutes (`long_clip_minutes` in transcription.json) is transcribed like an episode: chunks cut in
+silence, VAD, checkpoints in `02_transcription/chunks/` (run again to resume; `--force` restarts). A checkpoint is
+reused only if the same model, hint and backend made it. Backends: faster-whisper (NVIDIA GPU, batched on long audio;
+else the CPU on every physical core) or mlx-whisper on Apple Silicon (`backend` in transcription.json, `--backend`).
+`reel bench --audio <speech file>` measures the speed on this computer; `reel doctor` shows it.
+
 ## Correct
 Write `02_transcription/transcript-corrections.json`, then run `reel transcript-correct`. This step is idempotent: it always starts again from `*.machine.json`.
 ```json

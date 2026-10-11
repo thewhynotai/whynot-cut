@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .whisper_backends import RUN_ARGS
+
 ARGS: dict = {
     "episodes": [],
     "episode-prep": [],
@@ -14,6 +16,7 @@ ARGS: dict = {
         (("--model",), {"default": None, "help": "default: preferences whisper_model, else large-v3"}),
         (("--language",), {"default": None, "help": "e.g. ar; default: detected on the first chunk"}),
         (("--force",), {"action": "store_true", "help": "discard the chunk checkpoints and transcribe again"}),
+        *RUN_ARGS,
     ],
     "reels-plan": [],
     "reels-preview": [(("--ids",), {"default": None, "help": "e.g. R01,R03 (default: every candidate)"})],
@@ -109,7 +112,7 @@ def cmd_episode_transcribe(a):
         out({"skipped": "episode transcript exists (use --force to redo)", "transcript": str(ep.p("02_transcription/transcript.txt"))})
         return
     model = a.model or S.load(ep.root).get("whisper_model") or "large-v3"
-    r = transcribe_episode(ep, model, language=a.language, force=a.force)
+    r = transcribe_episode(ep, model, language=a.language, force=a.force, backend=a.backend, batch_size=a.batch_size)
     r["next"] = ("transcript-editor reviews 02_transcription/subtitle-review.md (`reel transcript-correct --episode "
                  f"{ep.episode_id}`), then episode-analyst authors topics/speakers/reels-plan")
     out(r)

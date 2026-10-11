@@ -409,91 +409,36 @@ def _energy_db(audio, sr: int = 16000, hop_ms: int = 50) -> list:
     return (20 * np.log10(np.sqrt((x ** 2).mean(axis=1)) + 1e-9)).round(2).tolist()
 
 
-def _decode(model, audio, language, prompt, vad: bool) -> dict:
-    segments, info = model.transcribe(audio, language=language, task="transcribe", beam_size=5, word_timestamps=True,
-                                      vad_filter=vad, condition_on_previous_text=False, initial_prompt=prompt,
-                                      temperature=[0.0, 0.2, 0.4])
-    segs, words = [], []
-    for s in segments:
-        seg = {"id": len(segs) + 1, "start_ms": int(round(s.start * 1000)), "end_ms": int(round(s.end * 1000)),
-               "text": s.text.strip(), "avg_logprob": round(s.avg_logprob, 3), "no_speech_prob": round(s.no_speech_prob, 3),
-               "compression_ratio": round(s.compression_ratio, 3), "words": []}
-        for w in (s.words or []):
-            wd = {"id": len(words) + 1, "segment_id": seg["id"], "word": w.word.strip(),
-                  "start_ms": int(round(w.start * 1000)), "end_ms": int(round(w.end * 1000)),
-                  "probability": round(w.probability, 3)}
-            words.append(wd)
-            seg["words"].append(wd["id"])
-        segs.append(seg)
-    return {"segments": segs, "words": words, "language": info.language,
-            "language_probability": round(info.language_probability, 3)}
-
-
-def whisper_runner(model_size: str, vad: bool, ep: EpisodePaths | None = None):
+def whisper_runner(model_size: str, vad: bool, ep: EpisodePaths | None = None, backend: str | None = None,
+                   batch_size: int | None = None):
     """run(audio, start_ms, language, prompt) -> {segments, words, language, language_probability} (chunk-relative
-    times). The model loads once, on the GPU when usable; a GPU failure at the first inference retries on the CPU."""
-    from .common import log, models_dir
-    from .transcribe import whisper_model
-    state: dict = {}
-
-    def run(audio, start_ms, language, prompt):
-        if "model" not in state:
-            state["model"], state["device"], state["compute_type"] = whisper_model(model_size)
-            log(ep, f"Whisper {model_size} on {state['device']} ({state['compute_type']}), VAD {'on' if vad else 'off'}")
-        try:
-            return _decode(state["model"], audio, language, prompt, vad)
-        except Exception as e:  # noqa: BLE001  (GPU libraries can fail only at the first inference)
-            if state["device"] != "cuda":
-                raise
-            log(ep, f"GPU transcription failed ({type(e).__name__}: {e}); retrying on CPU")
-            from faster_whisper import WhisperModel
-            state["model"] = WhisperModel(model_size, device="cpu", compute_type="int8", download_root=str(models_dir()))
-            state["device"], state["compute_type"] = "cpu", "int8"
-            return _decode(state["model"], audio, language, prompt, vad)
-    run.state = state
-    return run
+    times), from the configured backend (lib/whisper_backends.py: faster-whisper, batched on CUDA; mlx-whisper on
+    Apple Silicon). The model loads once, at the first chunk; a GPU failure at the first inference retries on the CPU."""
+    from . import whisper_backends as WB
+    return WB.make_runner(model_size, vad, ep, backend=backend, batch_size=batch_size)
 
 
-def transcribe_episode(ep: EpisodePaths, model_size: str = "large-v3", language: str | None = None, force: bool = False,
-                       run_chunk=None, chunk_ms: int | None = None) -> dict:
-    """Whole-episode transcript in resumable chunks (02_transcription/chunks/chunk_NNN.json). Same output files as a
-    clip transcript. The language is detected on the first chunk and reused, so a code-switching guest does not flip
-    the decoder language mid-episode."""
+def _decoder_matches(rec: dict, model: str, prompt, backend) -> bool:
+    """MI-12: a checkpoint is reused only when the same model, prompt and backend decoded it. A changed
+    whisper_model, vocabulary hint or backend (or a 2.x checkpoint that recorded none of them) redoes the chunk, so
+    one transcript never mixes two decoders."""
+    return rec.get("model") == model and rec.get("prompt") == prompt and rec.get("backend") == backend
+
+
+def run_chunks(paths, cdir: Path, audio, plan: dict, runner, *, model: str, prompt, language: str | None,
+               label: str) -> dict:
+    """The chunk runner shared by episodes and long clips: decode each planned chunk not already checkpointed in
+    cdir/chunk_NNN.json (absolute times), checkpoint it, log progress and an ETA. The language is detected on the
+    first chunk and reused, so a code-switching guest does not flip the decoder language mid-run."""
     import time
     from .common import log
-    from .transcribe import extract_audio, finalize, whisper_audio
-    src = episode_file(ep)
-    ep.ensure_project()
-    out, cdir = ep.p("02_transcription"), ep.p("02_transcription/chunks")
-    cdir.mkdir(parents=True, exist_ok=True)
-    wav = out / "dialogue_16k_mono.wav"
-    if force:
-        for f in cdir.glob("chunk_*.json"):
-            f.unlink()
-        (cdir / "plan.json").unlink(missing_ok=True)
-    fp = sha1_head(src)
-    plan = read_json(cdir / "plan.json")
-    if force or not wav.exists() or not plan or plan.get("fingerprint") != fp:
-        extract_audio(src, wav)
-    audio = whisper_audio(wav)
-    total_ms = int(len(audio) * 1000 / 16000)
-    cfg = podcast_cfg()
-    chunk_ms = int(chunk_ms or cfg.get("chunk_minutes", 10) * 60000)
-    if not plan or plan.get("fingerprint") != fp or plan.get("chunk_ms") != chunk_ms or plan.get("total_ms") != total_ms \
-            or (language and plan.get("language") != language):   # an explicit new language re-decodes everything
-        for f in cdir.glob("chunk_*.json"):
-            f.unlink()
-        plan = {"fingerprint": fp, "chunk_ms": chunk_ms, "total_ms": total_ms, "language": language,
-                "chunks": plan_chunks(_energy_db(audio), 50, total_ms, chunk_ms), "created": now_iso()}
-        write_json(cdir / "plan.json", plan)
-    vad = bool(cfg.get("episode_vad", True))
-    prompt = load_config("transcription.json").get("initial_prompt")
-    runner = run_chunk or whisper_runner(model_size, vad, ep)
+    backend = getattr(runner, "backend", None) or "injected"
     lang, prob, results, ran, t0 = language, None, [], 0, time.time()
+    n = len(plan["chunks"])
     for i, (a, b) in enumerate(plan["chunks"]):
         f = cdir / f"chunk_{i:03d}.json"
         rec = read_json(f)
-        if rec and rec.get("start_ms") == a and rec.get("end_ms") == b:
+        if rec and rec.get("start_ms") == a and rec.get("end_ms") == b and _decoder_matches(rec, model, prompt, backend):
             results.append(rec)
             lang = lang or rec.get("language")
             prob = prob if prob is not None else rec.get("language_probability")
@@ -502,25 +447,72 @@ def transcribe_episode(ep: EpisodePaths, model_size: str = "large-v3", language:
         lang = lang or r.get("language")
         prob = prob if prob is not None else r.get("language_probability")
         rec = {"index": i, "start_ms": a, "end_ms": b, "language": r.get("language"),
-               "language_probability": r.get("language_probability"),
+               "language_probability": r.get("language_probability"), "model": model, "prompt": prompt,
+               "backend": backend,
                "segments": [dict(s, start_ms=s["start_ms"] + a, end_ms=s["end_ms"] + a) for s in r["segments"]],
                "words": [dict(w, start_ms=w["start_ms"] + a, end_ms=w["end_ms"] + a) for w in r["words"]]}
         write_json(f, rec)
         results.append(rec)
         ran += 1
-        done = sum(1 for _ in results)
         el = time.time() - t0
-        log(ep, f"episode {ep.episode_id}: chunk {i + 1}/{len(plan['chunks'])} ({fmt_ts(a, '.')}–{fmt_ts(b, '.')}) "
-                f"{len(rec['words'])} words; elapsed {el:.0f}s"
-                + (f", ETA {el / ran * (len(plan['chunks']) - done):.0f}s" if ran else ""))
-    segs, words = stitch(results)
+        log(paths, f"{label}: chunk {i + 1}/{n} ({fmt_ts(a, '.')}–{fmt_ts(b, '.')}) {len(rec['words'])} words; "
+                   f"elapsed {el:.0f}s, ETA {el / ran * (n - len(results)):.0f}s")
+    return {"results": results, "ran": ran, "language": lang, "language_probability": prob,
+            "elapsed_s": round(time.time() - t0, 1)}
+
+
+def chunk_plan(cdir: Path, audio, fingerprint: str, chunk_ms: int, language: str | None, force: bool = False) -> dict:
+    """cdir/plan.json: chunk bounds in the quietest moments (plan_chunks). A new source, chunk size, length or an
+    explicit new language replans and drops every checkpoint; --force drops them too."""
+    cdir.mkdir(parents=True, exist_ok=True)
+    total_ms = int(len(audio) * 1000 / 16000)
+    plan = None if force else read_json(cdir / "plan.json")
+    if force or not plan or plan.get("fingerprint") != fingerprint or plan.get("chunk_ms") != chunk_ms \
+            or plan.get("total_ms") != total_ms or (language and plan.get("language") != language):
+        for f in cdir.glob("chunk_*.json"):
+            f.unlink()
+        plan = {"fingerprint": fingerprint, "chunk_ms": chunk_ms, "total_ms": total_ms, "language": language,
+                "chunks": plan_chunks(_energy_db(audio), 50, total_ms, chunk_ms), "created": now_iso()}
+        write_json(cdir / "plan.json", plan)
+    return plan
+
+
+def transcribe_episode(ep: EpisodePaths, model_size: str = "large-v3", language: str | None = None, force: bool = False,
+                       run_chunk=None, chunk_ms: int | None = None, backend: str | None = None,
+                       batch_size: int | None = None) -> dict:
+    """Whole-episode transcript in resumable chunks (02_transcription/chunks/chunk_NNN.json). Same output files as a
+    clip transcript. Each checkpoint records the model, prompt and backend that decoded it (MI-12)."""
+    from .transcribe import extract_audio, finalize, whisper_audio
+    from .whisper_backends import LABEL
+    src = episode_file(ep)
+    ep.ensure_project()
+    out, cdir = ep.p("02_transcription"), ep.p("02_transcription/chunks")
+    cdir.mkdir(parents=True, exist_ok=True)
+    wav = out / "dialogue_16k_mono.wav"
+    fp = sha1_head(src)
+    plan = read_json(cdir / "plan.json")
+    if force or not wav.exists() or not plan or plan.get("fingerprint") != fp:
+        extract_audio(src, wav)
+    audio = whisper_audio(wav)
+    cfg = podcast_cfg()
+    chunk_ms = int(chunk_ms or cfg.get("chunk_minutes", 10) * 60000)
+    plan = chunk_plan(cdir, audio, fp, chunk_ms, language, force)
+    vad = bool(cfg.get("episode_vad", True))
+    prompt = load_config("transcription.json").get("initial_prompt")
+    runner = run_chunk or whisper_runner(model_size, vad, ep, backend=backend, batch_size=batch_size)
+    done = run_chunks(ep, cdir, audio, plan, runner, model=model_size, prompt=prompt, language=language,
+                      label=f"episode {ep.episode_id}")
+    segs, words = stitch(done["results"])
     st = getattr(runner, "state", {}) or {}
-    meta = {"source_video": str(src), "audio": str(wav), "backend": "faster-whisper" if run_chunk is None else "injected",
+    prob = done["language_probability"]
+    meta = {"source_video": str(src), "audio": str(wav),
+            "backend": LABEL.get(getattr(runner, "backend", None), "injected"),
             "model": model_size, "compute_type": st.get("compute_type"), "device": st.get("device"),
-            "language": lang, "language_probability": prob if prob is not None else 1.0, "duration_ms": total_ms,
-            "initial_prompt": prompt, "elapsed_s": round(time.time() - t0, 1), "translated": False,
-            "chunks": len(plan["chunks"]), "vad": vad, "episode_id": ep.episode_id}
+            "batch_size": st.get("batch_size"), "cpu_threads": st.get("cpu_threads"),
+            "language": done["language"], "language_probability": prob if prob is not None else 1.0,
+            "duration_ms": plan["total_ms"], "initial_prompt": prompt, "elapsed_s": done["elapsed_s"],
+            "translated": False, "chunks": len(plan["chunks"]), "vad": st.get("vad", vad), "episode_id": ep.episode_id}
     res = finalize(ep, meta, segs, words)
     for name in ("transcript", "words"):   # a NEW machine transcript replaces the old machine originals
         (out / f"{name}.machine.json").write_bytes((out / f"{name}.json").read_bytes())
-    return dict(res, chunks=len(plan["chunks"]), chunks_run=ran)
+    return dict(res, chunks=len(plan["chunks"]), chunks_run=done["ran"])

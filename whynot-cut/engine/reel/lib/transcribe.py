@@ -52,30 +52,12 @@ def whisper_audio(path: Path):
 
 
 def whisper_model(model_size: str, compute_type: str = "int8"):
-    """Load faster-whisper on an NVIDIA GPU when one is usable (much faster on Windows/Linux), else on CPU.
-    `transcription.json` device: auto | cpu | cuda. Returns (model, device, compute_type)."""
-    from faster_whisper import WhisperModel
-    cfg = load_config("transcription.json")
-    want = (cfg.get("device") or "auto").lower()
-    tries = []
-    if want in ("auto", "cuda"):
-        try:
-            from . import plat
-            import ctranslate2
-            # skip the GPU when cuBLAS can't load: it only fails at the first inference, after loading 3 GB onto it
-            if ctranslate2.get_cuda_device_count() > 0 and not plat.cuda_libs_missing():
-                tries.append(("cuda", cfg.get("gpu_compute_type", "float16")))
-        except Exception:
-            pass
-    if want != "cuda" or not tries:
-        tries.append(("cpu", compute_type))
-    last = None
-    for dev, ct in tries:
-        try:
-            return WhisperModel(model_size, device=dev, compute_type=ct, download_root=str(models_dir())), dev, ct
-        except Exception as e:  # noqa: BLE001  (e.g. CUDA runtime libraries missing -> CPU)
-            last = e
-    raise last
+    """faster-whisper on an NVIDIA GPU when one is usable (much faster on Windows/Linux), else on the CPU with one
+    thread per physical core, loaded from the local snapshot when complete (lib/whisper_backends.load_ct2).
+    `transcription.json` device: auto | cpu | cuda. Returns (model, device, compute_type). Kept for relisten and
+    audio-clean's cut proof, which need faster-whisper's own transcribe()."""
+    from .whisper_backends import load_ct2
+    return load_ct2(model_size, compute_type)
 
 
 def _glossary_terms() -> list[str]:
@@ -85,71 +67,60 @@ def _glossary_terms() -> list[str]:
 
 def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
                language: str | None = None, initial_prompt: str | None = None,
-               compute_type: str = "int8") -> dict:
-    from .common import source_range
+               compute_type: str = "int8", *, backend: str | None = None, batch_size: int | None = None,
+               force: bool = False) -> dict:
+    """The clip's transcript. Up to `long_clip_minutes` (transcription.json, default 10): one pass without VAD, as in
+    2.x. A longer clip (IM-14) goes through the episode chunk runner: ~`chunk_minutes` chunks cut in silence, VAD,
+    resumable checkpoints in 02_transcription/chunks/ (`force` drops them), batched on an NVIDIA GPU."""
+    import json
+    from . import whisper_backends as WB
+    from .common import sha1_head, source_range
     out = paths.p("02_transcription")
     rng = source_range(paths)
     wav = extract_audio(source_video, out / "dialogue_16k_mono.wav", rng)
+    cfg = load_config("transcription.json")
     if initial_prompt is None:
-        initial_prompt = load_config("transcription.json").get("initial_prompt")
+        initial_prompt = cfg.get("initial_prompt")
         vv = video_vocabulary(paths)
         if vv:   # names / terms of THIS video (e.g. from the client's reels plan), after the client-wide hint
             initial_prompt = ((initial_prompt or "").rstrip(" .،,") + "، " + "، ".join(vv) + ".").lstrip("، ")
-
+    audio = whisper_audio(wav)
+    total_ms = int(len(audio) * 1000 / 16000)
+    long_ms = float(cfg.get("long_clip_minutes", 10) or 0) * 60000
+    chunked = bool(long_ms) and total_ms > long_ms
     log(paths, f"Loading Whisper model {model_size}")
     t0 = time.time()
-    model, device, compute_type = whisper_model(model_size, compute_type)
-    log(paths, f"Whisper running on {device} ({compute_type})")
-    try:
-        segs, words, info = _run_whisper(model, wav, language, initial_prompt)
-    except Exception as e:  # noqa: BLE001  (GPU libraries can fail only at the first inference)
-        if device != "cuda":
-            raise
-        log(paths, f"GPU transcription failed ({type(e).__name__}: {e}); retrying on CPU"
-                   + (" - run `reel gpu-enable` (with the editor's OK, ~550 MB) for GPU speed" if "cublas" in str(e).lower() else ""))
-        from faster_whisper import WhisperModel
-        model, device, compute_type = WhisperModel(model_size, device="cpu", compute_type="int8",
-                                                   download_root=str(models_dir())), "cpu", "int8"
-        segs, words, info = _run_whisper(model, wav, language, initial_prompt)
+    run = WB.make_runner(model_size, chunked, paths, backend=backend, batch_size=batch_size, compute_type=compute_type)
+    extra = {}
+    if chunked:
+        from .episode import chunk_plan, run_chunks, stitch
+        cdir = out / "chunks"
+        fp = sha1_head(source_video) + ":" + json.dumps(rng or {}, sort_keys=True, default=str)
+        plan = chunk_plan(cdir, audio, fp, int(float(cfg.get("chunk_minutes", 10)) * 60000), language, force)
+        done = run_chunks(paths, cdir, audio, plan, run, model=model_size, prompt=initial_prompt, language=language,
+                          label=f"{paths.video_id} (long clip)")
+        segs, words = stitch(done["results"])
+        lang, prob = done["language"], done["language_probability"]
+        extra = {"chunks": len(plan["chunks"]), "chunks_run": done["ran"]}
+    else:
+        r = run(audio, 0, language, initial_prompt)
+        segs, words, lang, prob = r["segments"], r["words"], r["language"], r["language_probability"]
+    st = getattr(run, "state", {}) or {}
     elapsed = round(time.time() - t0, 1)
-    log(paths, f"Transcribed {len(segs)} segments / {len(words)} words in {elapsed}s; "
-               f"lang={info.language} p={info.language_probability:.2f}")
+    log(paths, f"Transcribed {len(segs)} segments / {len(words)} words in {elapsed}s; lang={lang} p={prob}")
 
-    meta = {"source_video": str(source_video), "source_range": rng or None, "audio": str(wav), "backend": "faster-whisper",
-            "model": model_size, "compute_type": compute_type, "device": device,
-            "language": info.language, "language_probability": round(info.language_probability, 3),
-            "duration_ms": int(round(info.duration * 1000)), "initial_prompt": initial_prompt,
-            "elapsed_s": elapsed, "translated": False}
+    meta = {"source_video": str(source_video), "source_range": rng or None, "audio": str(wav),
+            "backend": WB.LABEL.get(getattr(run, "backend", None), "injected"),
+            "model": model_size, "compute_type": st.get("compute_type"), "device": st.get("device"),
+            "batch_size": st.get("batch_size"), "cpu_threads": st.get("cpu_threads"),
+            "language": lang, "language_probability": prob if prob is not None else 1.0,
+            "duration_ms": total_ms, "initial_prompt": initial_prompt, "elapsed_s": elapsed, "translated": False}
+    if chunked:
+        meta.update(chunks=extra["chunks"], vad=st.get("vad", True))
     res = finalize(paths, meta, segs, words)
-    out = paths.p("02_transcription")
     for name in ("transcript", "words"):   # a NEW machine transcript replaces the old machine originals
         (out / f"{name}.machine.json").write_bytes((out / f"{name}.json").read_bytes())
-    return res
-
-
-def _run_whisper(model, wav: Path, language, initial_prompt):
-    segments, info = model.transcribe(
-        whisper_audio(wav), language=language, task="transcribe", beam_size=5,
-        word_timestamps=True, vad_filter=False, condition_on_previous_text=False,
-        initial_prompt=initial_prompt, temperature=[0.0, 0.2, 0.4],
-    )
-    segs, words = [], []
-    for s in segments:
-        seg = {
-            "id": len(segs) + 1,
-            "start_ms": int(round(s.start * 1000)), "end_ms": int(round(s.end * 1000)),
-            "text": s.text.strip(),
-            "avg_logprob": round(s.avg_logprob, 3), "no_speech_prob": round(s.no_speech_prob, 3),
-            "compression_ratio": round(s.compression_ratio, 3), "words": [],
-        }
-        for w in (s.words or []):
-            wd = {"id": len(words) + 1, "segment_id": seg["id"], "word": w.word.strip(),
-                  "start_ms": int(round(w.start * 1000)), "end_ms": int(round(w.end * 1000)),
-                  "probability": round(w.probability, 3)}
-            words.append(wd)
-            seg["words"].append(wd["id"])
-        segs.append(seg)
-    return segs, words, info
+    return dict(res, **extra)
 
 
 def caption_cues(words: list, cfg: dict | None = None) -> tuple[list, list]:

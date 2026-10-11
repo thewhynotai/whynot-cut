@@ -1,11 +1,19 @@
 {
-  "backend": "faster-whisper",
+  "backend": "auto",
+  "backend_note": "auto = mlx-whisper on an Apple Silicon Mac when it is installed, else faster-whisper (CTranslate2); ct2 | mlx force one ('faster-whisper' = ct2, the 2.x name).",
   "default_model": "large-v3",
   "fallback_models": [
     "large-v3-turbo",
     "medium"
   ],
   "compute_type": "int8",
+  "cpu_threads": "auto",
+  "cpu_threads_note": "Whisper threads on the CPU: auto = the physical cores (faster-whisper's own default is 4), or a number.",
+  "batch_size": 4,
+  "batch_size_note": "NVIDIA GPU only, on audio that VAD splits (episodes, clips longer than long_clip_minutes): segments decoded together. 4 measured fastest with a vocabulary hint on an 8 GB RTX 4060 (8 was slower and erratic); 0 = one after another (the 2.x path).",
+  "long_clip_minutes": 10,
+  "chunk_minutes": 10,
+  "long_clip_note": "A clip longer than long_clip_minutes is transcribed like an episode: chunks of about chunk_minutes cut in silence, VAD, resumable checkpoints in 02_transcription/chunks/. 0 = always one pass.",
   "language": null,
   "low_confidence_threshold": 0.5,
   "initial_prompt": null,

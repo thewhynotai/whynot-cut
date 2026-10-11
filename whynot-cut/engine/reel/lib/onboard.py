@@ -38,6 +38,12 @@ def whisper_model_state() -> dict:
     return out
 
 
+def transcription_speed() -> dict:
+    """The cached `reel bench` result (3.0 T2.12): Whisper's real-time factor on this machine, or how to measure it."""
+    from .whisper_backends import read_bench
+    return read_bench()
+
+
 HEARTBEAT_MAX_AGE_S = 24 * 3600
 
 
@@ -171,6 +177,7 @@ def doctor() -> dict:
     rep["isolated"] = rt["isolated"]
     gh = guard_heartbeat()
     rep["guard_active"], rep["guard_heartbeat"] = gh["active"], gh
+    rep["transcription_speed"] = transcription_speed()
     fixes = []
     if not rc["ok"]:      # G66: a session started before the install keeps another plugin's `reel` first on PATH
         fixes.append({"item": "wrong `reel` first on PATH: " + rc["message"], "who": "editor", "fix": rc["fix"]})
