@@ -27,6 +27,18 @@
   الدكتور كريم») are each checked; `honorific_ar` that contradicts `gender` is reported; description link labels are
   checked; `reel plan` warns on a nameless «الدكتورة» when everyone in `people[]` is male (and the mirror case); the
   lead skills (start, new-client, edit, podcast) take «الدكتور/الدكتورة» and he/she only from `people[]`.
+- One writer per client folder (T1.8): two Claude sessions had worked on one client at the same time. Every `reel`
+  command that writes into a client folder now holds `output/.whynot-lock` (`{session_id, pid, host, started_at,
+  command}`, created with O_EXCL, touched every 10 min) while it runs; a writing command of another session gets
+  `{"blocked", "how"}` and exit 2. Each command is classified in the command table (`CORE_WRITES` / `CORE_READS` /
+  `WRITES_IF` in cli.py, `WRITES` / `READS` in podcast_cli and motion_cli; a test makes every new command choose):
+  `next`, `status`, `inbox --no-refresh` (with a discovery), `doctor` without `--fix`, `settings` without `--init`,
+  `ppro-status`, `ae-status`, `episode-next`, `music`, `lock` never take it. Commands of the same session are
+  re-entrant (session id: `WHYNOT_LOCK_SESSION` inherited from a parent reel, `CLAUDE_SESSION_ID`,
+  `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`, else the process id). A lock whose process is gone on this computer
+  (OpenProcess on Windows, kill 0 on macOS) or with no activity for 2 h is taken over with a line in
+  `output/logs/pipeline.log`. New `reel lock --status` / `reel lock --release` (the guard blocks `--release` for every
+  subagent); the SessionStart context warns "another session is working in this client (<command>, since <time>)".
 
 ### Changed
 - No real client ships in the product: the real client's profile folder was removed from `profiles/`. The plugin now

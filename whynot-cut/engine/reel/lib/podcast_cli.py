@@ -42,6 +42,12 @@ ARGS: dict = {
     ],
 }
 NO_EPISODE = {"episodes", "music"}
+# one writer per client folder (3.0 T1.8): every command is a writer (holds output/.whynot-lock while it runs) or a
+# reader. `episodes` rescans the client folder (rewrites the discovery files), so it writes; `reel inbox
+# --no-refresh` lists the episodes without writing.
+WRITES = {"episodes", "episode-prep", "episode-transcribe", "reels-plan", "reels-preview", "reels-select",
+          "publish-check", "publish-thumbnail"}
+READS = {"music", "episode-next"}
 
 # one line per command for `reel --help` (cli.py builds the listing from the command table)
 HELP: dict = {

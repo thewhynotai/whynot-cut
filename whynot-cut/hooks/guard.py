@@ -933,6 +933,9 @@ def check_reel(exe: str, argv: list[str], agent: str | None):
         if agent:                       # gate rules: every subagent, whatever plugin it comes from
             if sub == "approve-plan":
                 block("only the lead editor (main conversation) records plan approval, after the editor approves.")
+            if sub == "lock" and "--release" in argv:
+                block("only the lead editor releases the client's writer lock (`reel lock --release`), when the editor "
+                      "says the other session is finished. Report the lock instead.")
             if sub == "reels-select":
                 block("only the lead editor records which reels the editor picked (Gate 0), from the editor's own "
                       "message. Report the candidates instead.")

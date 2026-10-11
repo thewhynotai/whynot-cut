@@ -640,8 +640,62 @@ def cmd_next(a):
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
 NO_ROOT = {"setup", "doctor", "model-download", "gpu-enable", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
            "ae-status", "ae-probe", "motion-icons", "motion-library"}
-NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox"}
+NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
+
+# One writer per client folder (3.0 T1.8). Every command chooses (test_writer_lock checks each is in exactly one):
+#   CORE_WRITES  write into the client folder: hold output/.whynot-lock (lib/writer_lock.py) while they run
+#   CORE_READS   never write into the client folder (machine-level commands write only in the engine home); `lock`
+#                manages the lock itself and never takes it (`--release` is the escape hatch, lead only)
+#   WRITES_IF    write only with a flag. inbox: `--no-refresh` reads the last discovery (its clip-ids map and probe
+#                cache are deterministic caches) but runs discovery when there is none yet, so it writes then.
+# scaffold creates a new folder: there is nothing to lock yet (it runs before the lock is taken).
+CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze", "preflight", "transcribe",
+               "transcript-correct", "transcript-verify", "transcript-relisten", "audio-clean", "plan",
+               "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
+               "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build"}
+CORE_READS = {"setup", "model-download", "gpu-enable", "profile", "ppro-install", "ppro-status", "ppro-probe",
+              "status", "next", "lock"}
+WRITES_IF = {
+    "doctor": lambda a: bool(a.fix),
+    "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
+                                                / "output/discovery/input-inventory.json").exists(),
+    "settings": lambda a: bool(a.init),
+    "range": lambda a: bool(a.footage),
+    "ref-style": lambda a: bool(a.record or a.apply),
+}
+
+
+def writes(a) -> bool:
+    """Does this invocation write into the client folder (and so need the one-writer lock)?"""
+    from lib import motion_cli, podcast_cli
+    if a.cmd in WRITES_IF:
+        return WRITES_IF[a.cmd](a)
+    return a.cmd in CORE_WRITES or a.cmd in podcast_cli.WRITES or a.cmd in motion_cli.WRITES
+
+
+def take_writer_lock(a):
+    """The client's lock for a writing command (None for readers and commands without a client folder). Another
+    session's live lock -> `{"blocked", "how"}` and exit 2."""
+    if not a.root or not writes(a):
+        return None
+    root = Path(a.root).expanduser()
+    if not ((root / "assets").is_dir() and (root / "data").is_dir()):
+        return None                       # not a client folder: the command reports that itself
+    from lib import writer_lock
+    shown = ["reel", a.cmd] + [f"{o} {v}" for o, v in (("--video-id", a.video_id), ("--episode", a.episode)) if v]
+    try:
+        return writer_lock.acquire(root, " ".join(shown))
+    except writer_lock.Busy as e:
+        out(e.refusal())
+        raise SystemExit(2)
+
+
+def cmd_lock(a):
+    """One writer per client folder: show the lock (--status, the default) or remove it (--release, the lead only,
+    when the editor says the other session is finished or stuck)."""
+    from lib import writer_lock
+    out(writer_lock.release(a.root) if a.release else writer_lock.status(a.root))
 
 
 def cmd_setup(a):
@@ -847,6 +901,7 @@ CORE_COMMANDS: dict[str, str] = {
     "handoff": "write the editor handoff for a finished or paused edit",
     "status": "show the project status record",
     "next": "what the next step is (resumable workflow), with stale-input warnings",
+    "lock": "one writer per client folder: show (--status) or release (--release, lead only) output/.whynot-lock",
     "mogrt-build": "build MOGRT templates (extra: needs --extras and an explicit editor request)",
     "ae-script": "write the After Effects script (extra: needs --extras)",
     "ae-build": "build the After Effects project (extra: needs --extras)",
@@ -983,6 +1038,11 @@ def main():
             sp.add_argument("--init", metavar="FOLDER", help="write FOLDER/.claude/whynot-cut.local.md")
             sp.add_argument("--set", action="append", metavar="KEY=VALUE")
             sp.add_argument("--force", action="store_true")
+        if name == "lock":
+            g = sp.add_mutually_exclusive_group()
+            g.add_argument("--status", action="store_true", help="who holds the lock, since when, stale or not (default)")
+            g.add_argument("--release", action="store_true",
+                           help="remove the lock (lead only, when the editor says the other session is finished)")
     a = ap.parse_args()
     if a.cmd in EXTRAS and not a.extras:
         out({"blocked": f"`{a.cmd}` is an optional After Effects/Photoshop extra. The default pipeline is Premiere only.",
@@ -1001,6 +1061,17 @@ def main():
             raise SystemExit("--root required (client folder containing assets/ and data/)"
                              + (f"; client folders in {clients_root()}: {', '.join(known)}" if known else ""))
     set_context(a.root, a.profile)
+    lock = take_writer_lock(a)
+    try:
+        run(a)
+    finally:
+        if lock:
+            lock.release()
+
+
+def run(a):
+    """Dispatch the parsed command (inside the client's writer lock when it writes)."""
+    from lib import motion_cli, podcast_cli
     if a.cmd in podcast_cli.ARGS:
         podcast_cli.dispatch(a)
         return
