@@ -2025,15 +2025,17 @@ class TestMotionRelease(unittest.TestCase):
     def test_versions(self):
         pj = json.loads((SK / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         mj = json.loads((SK.parent / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
-        self.assertEqual(pj["version"], "2.2.0")
-        self.assertEqual(mj["metadata"]["version"], "2.2.0")
-        self.assertEqual(mj["plugins"][0]["version"], "2.2.0")
+        self.assertEqual(pj["version"], "2.2.1")
+        self.assertEqual(mj["metadata"]["version"], "2.2.1")
+        self.assertEqual(mj["plugins"][0]["version"], "2.2.1")
         for k in ("motion", "after-effects", "animation"):
             self.assertIn(k, pj["keywords"])
         self.assertIn("After Effects", pj["description"])
 
     def test_docs(self):
-        self.assertIn("## 2.2.0", (SK / "CHANGELOG.md").read_text(encoding="utf-8"))
+        log = (SK / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("## 2.2.0", log)
+        self.assertLess(log.index("## 2.2.1"), log.index("## 2.2.0"))      # the newest release on top
         readme = (SK / "README.md").read_text(encoding="utf-8")
         for k in ("/whynot-cut:motion", "--as motion", "motion-build", "ae-probe"):
             self.assertIn(k, readme)

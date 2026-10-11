@@ -1,5 +1,47 @@
 # Changelog
 
+## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names
+The minor findings of the 2.2.0 review and two bugs found by a live run from a client folder named in Arabic, each
+reproduced by a failing test first.
+
+**Fixed**
+- Client folders with Arabic (any non-ASCII) names: `motion-plan`, and every HarfBuzz text measurement, opened the
+  brand font through FreeType's file open, which cannot take a non-ANSI path on Windows ("cannot open resource"); font
+  files are now read into memory. aerender (`motion-render`, `ae-probe`) reads its command line in the ANSI code page,
+  so such a path arrived as "???": the project is rendered from an ASCII temp copy and the file moved into place (a
+  non-ASCII TEMP folder is reported as the problem).
+- `motion-plan`: a typo in `transition_in`, `theme`, `captions` or `reveal` (in a scene or video-wide) is an error that
+  names the scene and the allowed values, instead of a silent cut, dark theme, no captions or word reveal. A scene's
+  own `captions` (`on` | `off`) overrides the video's (spec §3.4). A speech-source comparison `verdict` that is not
+  said gives that one error, not also an editorial error and an editorial line.
+- `motion-render`: a previous MOV/MP4 held open by a player (Windows) stops the render with "close the file" before
+  aerender runs, instead of a raw PermissionError.
+- `qc`: a render without an audio stream fails the render check by name (it used to fail later as "no audio to
+  compare"). `audio_sync` keeps its 0.9 rule but explains a near miss, and when the plan has music or SFX it also
+  compares the render with the planned mix: when that matches, the voice is in sync and the bed is the cause (lower
+  `music.level_db`).
+- `motion-build`: the `--script-only` / `--run-script` fallback refuses (an alert in After Effects) while the open
+  project has unsaved changes, by the bridge's own rule (one shared `NHM.mayDiscard`). `--replace-edited` takes its
+  backup only once the preconditions pass. Older `dialogue_motion_seq_*.wav` files that neither the plan nor the last
+  build job names are removed (one After Effects still holds open is kept for a later run).
+- After Effects library: the progress bar fills from the reading-start edge in LTR too (it grew from the centre). The
+  bridge's JSON escaper regex is pure ASCII (it held a raw U+FFFF character).
+- Handoff README: several missing brand fonts read as plural ("… are not installed: install them"). Guard: a shell
+  write to an After Effects preference file gets the preferences message, not "the client's source folder".
+- Code: removed the unused `motion_qc.plan_fonts` / `motion_qc.sha1`; the CEP bridge reads the host environment once.
+
+**Verified live (Windows 11, After Effects 26.5x89)**
+- From a copy of the test client in a folder named in Arabic (`whynot-test/بودكاست-تجربة`, reel EP02TEST_R02_MO):
+  motion-plan, motion-build with the fallback font (read-back ok: 64 Arabic text layers through the ASCII-only
+  escaper), motion-render through the ASCII stage (1080x1920, 24 fps, 32.3 s, −14.3 LUFS), 24 After Effects frames
+  viewed (identical to the earlier run), `qc` 10/10, handoff READY_FOR_HUMAN_EDITOR. This closes 2.2.0's "project
+  folder with an Arabic name" gap.
+
+**Not verified live**
+- The LTR progress bar (off in every recipe default; checked in node against a fake After Effects) and the fallback
+  script's refusal of an unsaved project (checked the same way); still from 2.2.0: a Premiere `ppro-build` on bundle
+  3.1.0, macOS, a build in the client's brand font.
+
 ## 2.2.0 — 2026-10-11 · Motion mode and client-level reference style
 
 ### Motion mode
