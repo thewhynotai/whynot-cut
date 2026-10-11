@@ -287,8 +287,13 @@ def venv_python() -> Path:
 
 
 def ffmpeg_exe() -> str | None:
-    for cand in (os.environ.get("NH_FFMPEG"), shutil.which("ffmpeg"), str(engine_home() / "ffmpeg")):
-        if cand and Path(cand).exists():
+    """NH_FFMPEG > the pinned ffmpeg in the engine home (state.json / ffmpeg/<ver>/, 3.0 T2.1) > PATH > the 2.x
+    <home>/ffmpeg symlink > the imageio-ffmpeg wheel's binary."""
+    from .plat import engine_ffmpeg
+    pinned = engine_ffmpeg(engine_home())
+    for cand in (os.environ.get("NH_FFMPEG"), pinned and str(pinned), shutil.which("ffmpeg"),
+                 str(engine_home() / "ffmpeg")):
+        if cand and Path(cand).is_file():
             return cand
     try:
         import imageio_ffmpeg  # type: ignore

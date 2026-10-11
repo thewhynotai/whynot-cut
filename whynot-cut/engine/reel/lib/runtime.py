@@ -1,0 +1,337 @@
+"""The engine runtime (3.0 T2.1, review IM-1 / IM-2 / MI-21). Stdlib only: setup/setup_env.py imports it with any
+Python, before a runtime exists.
+
+Layout in the engine home (the installer track's runtime contract, R.1):
+
+    bin/uv(.exe)          pinned uv (components.json `uv`)
+    python/               UV_PYTHON_INSTALL_DIR: python-build-standalone (components.json `runtime.python`)
+    cache/uv/             UV_CACHE_DIR
+    runtimes/<id>/        a venv built from setup/locks/runtime-<platform>.lock (no system site, no user site)
+        WHYNOT_RUNTIME        JSON {id, platform, python, lock_file, lock_sha256, created_at, by}
+        .whynot-lock.sha256   hex sha256 of the lock file's bytes
+    current               one line: the runtime id in use (written atomically, only after the smoke import passes)
+
+Runtime id = components.json `runtime.locks.<platform>.id`, or while that is the placeholder "<release>",
+"r-" + sha256(lock bytes)[:12] — the installer derives it the same way, so both build and recognise one runtime.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import hashlib
+import json
+import os
+import platform as _platform
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+try:
+    from . import plat
+except ImportError:                       # setup/setup_env.py: lib/ is on sys.path, no package
+    import plat  # type: ignore[no-redef]
+
+PLUGIN_DIR = Path(__file__).resolve().parents[3]
+COMPONENTS_FILE = PLUGIN_DIR / "setup" / "components.json"
+PLACEHOLDER = "<release>"
+STAMP = "WHYNOT_RUNTIME"
+LOCK_STAMP = ".whynot-lock.sha256"
+DEFAULT_PYTHON = "3.12.15"
+DEFAULT_SMOKE = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "uharfbuzz"]
+
+# every module the engine imports from a package, and the distribution that provides it (doctor's isolation check)
+ENGINE_MODULES = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "fontTools", "arabic_reshaper", "bidi",
+                  "uharfbuzz", "freetype", "pypdf", "imageio_ffmpeg"]
+MAC_MODULES = ["CoreText", "Quartz", "Vision"]
+OTHER_MODULES = ["cv2"]
+MODULE_DIST = {"faster_whisper": "faster-whisper", "PIL": "pillow", "fontTools": "fonttools",
+               "arabic_reshaper": "arabic-reshaper", "bidi": "python-bidi", "freetype": "freetype-py",
+               "imageio_ffmpeg": "imageio-ffmpeg", "cv2": "opencv-python-headless", "CoreText": "pyobjc-framework-CoreText",
+               "Quartz": "pyobjc-framework-Quartz", "Vision": "pyobjc-framework-Vision"}
+
+
+def engine_modules() -> list[str]:
+    return ENGINE_MODULES + (MAC_MODULES if plat.IS_MAC else OTHER_MODULES)
+
+
+# --------------------------------------------------------------------------- platform, components, lock
+def platform_key(system: str | None = None, machine: str | None = None) -> str | None:
+    """win-x64 | mac-arm64 | mac-x64 (the lock names), linux-x64 / linux-arm64 (no lock shipped), else None."""
+    system = (system or _platform.system()).lower()
+    m = (machine or _platform.machine()).lower()
+    arch = "arm64" if m in ("arm64", "aarch64") else "x64" if m in ("x86_64", "amd64", "x64") else None
+    if not arch:
+        return None
+    if system.startswith("win"):
+        return f"win-{arch}"
+    if system == "darwin":
+        return f"mac-{arch}"
+    if system == "linux":
+        return f"linux-{arch}"
+    return None
+
+
+def components(path: Path | None = None) -> dict:
+    """setup/components.json (owned by the installer track; read only here). {} when missing or unreadable."""
+    try:
+        d = json.loads((path or COMPONENTS_FILE).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def lock_entry(key: str | None, comp: dict | None = None, plugin_dir: Path | None = None) -> dict:
+    """{file: Path, declared_id: str | None} for a platform: components.json runtime.locks.<key>, else the default
+    name setup/locks/runtime-<key>.lock."""
+    plugin_dir = plugin_dir or PLUGIN_DIR
+    comp = components() if comp is None else comp
+    e = (((comp.get("runtime") or {}).get("locks") or {}).get(key or "") or {})
+    rel = e.get("file") if isinstance(e.get("file"), str) else f"setup/locks/runtime-{key}.lock"
+    did = e.get("id") if isinstance(e.get("id"), str) else None
+    return {"file": plugin_dir / rel, "declared_id": did}
+
+
+def lock_sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def runtime_id(lock_bytes: bytes, declared: str | None = None) -> str:
+    """The declared id (components.json) unless it is empty or the "<release>" placeholder: then "r-" + the first 12
+    hex digits of the lock's sha256."""
+    if declared and declared.strip() and declared.strip() != PLACEHOLDER and not declared.startswith("<"):
+        return declared.strip()
+    return "r-" + lock_sha256(lock_bytes)[:12]
+
+
+def normalize(name: str) -> str:
+    """PEP 503 project name: lower case, runs of - _ . become one -."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+_REQ = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*==\s*([^\s;\\]+)\s*(?:;\s*([^\\]*?))?\s*$")
+
+
+def parse_lock(text: str) -> dict[str, dict]:
+    """A `uv pip compile --generate-hashes` (pip requirements) lock -> {normalized name: {name, version, hashes,
+    marker}}. Continuation lines (`\\`) are joined; comments, blank lines and option lines (--index-url ...) are
+    skipped. Every requirement must be pinned with `==` and carry at least one --hash (ValueError otherwise)."""
+    out: dict[str, dict] = {}
+    logical, buf = [], ""
+    for raw in text.splitlines():
+        line = raw.split(" #", 1)[0].rstrip() if not raw.lstrip().startswith("#") else ""
+        if line.endswith("\\"):
+            buf += line[:-1] + " "
+            continue
+        buf += line
+        if buf.strip():
+            logical.append(buf.strip())
+        buf = ""
+    if buf.strip():
+        logical.append(buf.strip())
+    for entry in logical:
+        if entry.startswith("-"):
+            continue
+        hashes = re.findall(r"--hash[= ]\s*(sha256:[0-9a-fA-F]{64})", entry)
+        spec = re.split(r"\s--hash", " " + entry, maxsplit=1)[0].strip()
+        m = _REQ.match(spec)
+        if not m:
+            raise ValueError(f"lock line is not a pinned requirement: {spec[:80]!r}")
+        if not hashes:
+            raise ValueError(f"lock line without --hash: {m.group(1)}")
+        out[normalize(m.group(1))] = {"name": m.group(1), "version": m.group(3), "hashes": hashes,
+                                     "marker": (m.group(4) or "").strip() or None}
+    return out
+
+
+# --------------------------------------------------------------------------- runtime folders and stamps
+def runtimes_dir(home: Path) -> Path:
+    return home / plat.RUNTIMES_DIR
+
+
+def runtime_dir(home: Path, rid: str) -> Path:
+    return runtimes_dir(home) / rid
+
+
+def read_stamp(rt_dir: Path) -> dict:
+    """{"runtime": WHYNOT_RUNTIME JSON or {}, "lock_sha256": .whynot-lock.sha256 or None}."""
+    try:
+        st = json.loads((rt_dir / STAMP).read_text(encoding="utf-8"))
+        st = st if isinstance(st, dict) else {}
+    except (OSError, ValueError):
+        st = {}
+    try:
+        sha = (rt_dir / LOCK_STAMP).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        sha = None
+    return {"runtime": st, "lock_sha256": sha}
+
+
+def _atomic_write(path: Path, text: str):
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8", newline="\n")
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def write_stamps(rt_dir: Path, *, rid: str, key: str | None, python: str, lock_file: str, lock_sha: str, by: str,
+                 now: str | None = None) -> dict:
+    stamp = {"id": rid, "platform": key, "python": python, "lock_file": lock_file, "lock_sha256": lock_sha,
+             "created_at": now or _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), "by": by}
+    _atomic_write(rt_dir / STAMP, json.dumps(stamp, indent=2) + "\n")
+    _atomic_write(rt_dir / LOCK_STAMP, lock_sha + "\n")
+    return stamp
+
+
+def write_current(home: Path, rid: str):
+    """Switch <home>/current to `rid` (tmp file + replace: a reader sees the old id or the new one, never half)."""
+    if not plat._RUNTIME_ID.match(rid) or ".." in rid:
+        raise ValueError(f"not a runtime id: {rid!r}")
+    _atomic_write(home / plat.CURRENT_FILE, rid + "\n")
+
+
+# --------------------------------------------------------------------------- repair decision
+_VERSIONS_CODE = ("import json, importlib.metadata as m\n"
+                  "print(json.dumps({d.metadata['Name']: d.version for d in m.distributions() if d.metadata['Name']}))")
+
+
+def installed_versions(py: Path, timeout: int = 120) -> dict[str, str] | None:
+    """{normalized name: version} of the distributions the interpreter sees with its user site off (-s), or None
+    when it cannot run."""
+    try:
+        r = subprocess.run([str(py), "-s", "-c", _VERSIONS_CODE], capture_output=True, text=True, timeout=timeout)
+        if r.returncode != 0:
+            return None
+        return {normalize(k): v for k, v in json.loads(r.stdout.strip().splitlines()[-1]).items()}
+    except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+        return None
+
+
+def repair_decision(lock: dict[str, dict], installed: dict[str, str] | None, *, exists: bool,
+                    stamp_sha: str | None, lock_sha: str) -> dict:
+    """What `reel setup` must do to a runtime: {"action": "none" | "create" | "sync", "reasons": [...]}.
+    create: no runtime (or no interpreter in it). sync (re-install from the lock): the lock's sha256 differs from the
+    one stamped in the runtime, the interpreter cannot list its packages, or a locked package is missing or at
+    another version. Locked lines with an environment marker are checked only when installed (the per-platform
+    locks have none)."""
+    if not exists:
+        return {"action": "create", "reasons": ["no runtime yet"]}
+    reasons = []
+    if stamp_sha != lock_sha:
+        reasons.append("the lock changed since the runtime was built" if stamp_sha else
+                       "the runtime has no lock stamp (unfinished build)")
+    if installed is None:
+        reasons.append("the runtime's python cannot list its packages")
+    else:
+        for name, e in sorted(lock.items()):
+            have = installed.get(name)
+            if have is None:
+                if not e.get("marker"):
+                    reasons.append(f"{e['name']} missing")
+            elif have != e["version"]:
+                reasons.append(f"{e['name']} {have} installed, the lock pins {e['version']}")
+    return {"action": "sync" if reasons else "none", "reasons": reasons}
+
+
+# --------------------------------------------------------------------------- isolation (reel doctor)
+def _inside(path: str | None, folder: Path) -> bool:
+    if not path:
+        return False
+    try:
+        Path(path).resolve().relative_to(folder.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _module_file(mod) -> str | None:
+    f = getattr(mod, "__file__", None)
+    if f:
+        return f
+    p = list(getattr(mod, "__path__", []) or [])
+    return p[0] if p else None
+
+
+def _dist_version(dist: str) -> str | None:
+    import importlib.metadata as md
+    try:
+        return md.version(dist)
+    except md.PackageNotFoundError:
+        return None
+
+
+def isolation(rt: dict, lock: dict[str, dict], modules: list[str] | None = None, *, importer=None,
+              dist_version=None, prefix: str | None = None, user_site: bool | None = None) -> dict:
+    """Is the engine running from an isolated runtime? `rt` = plat.engine_runtime(). True only when this process is
+    the runtime's interpreter, the runtime has no system site, no user site is active, and every engine module loads
+    from inside the runtime at the version the lock pins. {isolated, problems[], modules{m: {file, version, lock,
+    ok}}}."""
+    import importlib
+    importer = importer or importlib.import_module
+    dist_version = dist_version or _dist_version
+    modules = engine_modules() if modules is None else modules
+    problems = []
+    d = rt.get("dir")
+    if rt.get("kind") != "runtime" or not d:
+        problems.append("the engine runs from the legacy venv/, not an isolated runtime" if rt.get("kind") == "venv"
+                        else "no engine runtime")
+    else:
+        d = Path(d)
+        if not _inside(prefix or sys.prefix, d) or not _inside(str(d), Path(prefix or sys.prefix)):
+            problems.append(f"this process runs {prefix or sys.prefix}, not the runtime {d}")
+        try:
+            cfg = (d / "pyvenv.cfg").read_text(encoding="utf-8").lower()
+            if re.search(r"include-system-site-packages\s*=\s*true", cfg):
+                problems.append("the runtime includes the system site-packages")
+        except OSError:
+            problems.append("the runtime has no pyvenv.cfg")
+        if user_site is None:
+            import site
+            user_site = bool(site.ENABLE_USER_SITE) and any(_inside(p, Path(site.getusersitepackages()))
+                                                             for p in sys.path if p)
+        if user_site:
+            problems.append("the user site-packages is on sys.path (run the engine with python -s)")
+    mods = {}
+    for m in modules:
+        try:
+            mod = importer(m)
+        except Exception as e:  # noqa: BLE001
+            mods[m] = {"file": None, "version": None, "lock": None, "ok": False}
+            problems.append(f"{m} does not import ({type(e).__name__})")
+            continue
+        f = _module_file(mod)
+        dist = MODULE_DIST.get(m, m)
+        want = (lock.get(normalize(dist)) or {}).get("version")
+        have = dist_version(dist)
+        ok = True
+        if d and rt.get("kind") == "runtime" and not _inside(f, Path(d)):
+            ok = False
+            problems.append(f"{m} loads from {f}, outside the runtime")
+        if want and have != want:
+            ok = False
+            problems.append(f"{dist} {have} installed, the lock pins {want}")
+        mods[m] = {"file": f, "version": have, "lock": want, "ok": ok}
+    return {"isolated": not problems, "problems": problems, "modules": mods}
+
+
+def status(home: Path, key: str | None = None, comp: dict | None = None) -> dict:
+    """The runtime part of `reel doctor` without importing anything: which interpreter the wrappers pick, the id this
+    plugin's lock expects and whether the current runtime was built from it."""
+    key = key or platform_key()
+    rt = plat.engine_runtime(home)
+    ent = lock_entry(key, comp)
+    try:
+        data = ent["file"].read_bytes()
+    except OSError:
+        data = None
+    want_id = runtime_id(data, ent["declared_id"]) if data is not None else None
+    want_sha = lock_sha256(data) if data is not None else None
+    st = read_stamp(Path(rt["dir"])) if rt["kind"] == "runtime" else {"runtime": {}, "lock_sha256": None}
+    return {"kind": rt["kind"], "id": rt["id"], "dir": str(rt["dir"]) if rt["dir"] else None,
+            "python": str(rt["python"]) if rt["python"] else None, "platform": key,
+            "lock_file": str(ent["file"]) if data is not None else None, "expected_id": want_id,
+            "lock_sha256": want_sha, "stamp": st["runtime"], "stamp_lock_sha256": st["lock_sha256"],
+            "up_to_date": bool(rt["kind"] == "runtime" and want_sha and st["lock_sha256"] == want_sha
+                               and rt["id"] == want_id)}

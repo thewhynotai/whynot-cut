@@ -72,7 +72,7 @@ def _saved_path(v: str) -> Path:
 def engine_home() -> Path:
     """Machine state lives OUTSIDE the plugin (the plugin folder is replaced on every update).
     Order: explicit setting (env) > saved plugin option (pointer file, else ~/.claude/settings.json) > ~/.whynot-cut
-    with an engine > an existing legacy home (keeps the 3 GB of models; dropped in 4.0) > ~/.whynot-cut.
+    with an engine (a runtime `current` file or the legacy venv/) > an existing legacy home (keeps the 3 GB of models; dropped in 4.0) > ~/.whynot-cut.
     bin/reel and bin/reel.cmd resolve the same order."""
     for k in HOME_ENV:
         if os.environ.get(k):
@@ -82,7 +82,7 @@ def engine_home() -> Path:
         return _saved_path(saved)
     home = Path.home()
     new = home / HOME_NAME
-    if (new / "venv").exists():          # ~/.whynot-cut alone may only hold the pointer file
+    if (new / "venv").exists() or (new / CURRENT_FILE).is_file():   # ~/.whynot-cut alone may only hold the pointer
         return new
     for old in LEGACY_HOMES:
         if (home / old / "venv").exists():
@@ -99,9 +99,78 @@ def clients_root_setting() -> Path | None:
     return _saved_path(saved) if saved else None
 
 
+# --------------------------------------------------------------------------- engine runtime (3.0 T2.1)
+# <home>/runtimes/<id>/ is a venv built from the platform's hash lock (no system or user site); <home>/current is a
+# one-line text file naming the runtime in use (never a symlink: Windows-safe). The legacy <home>/venv/ is the fallback
+# when no runtime is current. bin/reel, bin/reel.cmd and tools/test.sh resolve the same order; lib/runtime.py builds
+# and checks runtimes.
+RUNTIMES_DIR = "runtimes"
+CURRENT_FILE = "current"
+_RUNTIME_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+
+
+def env_python(env_dir: Path) -> Path:
+    """The interpreter of a venv-style folder: Scripts/python.exe on Windows, bin/python elsewhere."""
+    return env_dir / "Scripts" / "python.exe" if IS_WIN else env_dir / "bin" / "python"
+
+
+def current_runtime_id(home: Path | None = None) -> str | None:
+    """The id in <home>/current (whitespace stripped), or None when the file is missing, empty or not a plain id."""
+    try:
+        rid = ((home or engine_home()) / CURRENT_FILE).read_text(encoding="utf-8-sig").strip()
+    except (OSError, ValueError):
+        return None
+    return rid if _RUNTIME_ID.match(rid) and ".." not in rid else None
+
+
+def engine_runtime(home: Path | None = None) -> dict:
+    """The engine interpreter, in the wrappers' order: the current runtime, else the legacy venv.
+    {kind: "runtime" | "venv" | None, id, dir, python} (python is None when neither exists)."""
+    home = home or engine_home()
+    rid = current_runtime_id(home)
+    if rid:
+        d = home / RUNTIMES_DIR / rid
+        if env_python(d).is_file():
+            return {"kind": "runtime", "id": rid, "dir": d, "python": env_python(d)}
+    d = home / "venv"
+    if env_python(d).is_file():
+        return {"kind": "venv", "id": None, "dir": d, "python": env_python(d)}
+    return {"kind": None, "id": None, "dir": None, "python": None}
+
+
 def venv_python(home: Path | None = None) -> Path:
-    v = (home or engine_home()) / "venv"
-    return v / "Scripts" / "python.exe" if IS_WIN else v / "bin" / "python"
+    """The engine interpreter: the current runtime's python when there is one, else the legacy venv's (which may not
+    exist: callers check). The name is kept for the hooks and older callers."""
+    home = home or engine_home()
+    rt = engine_runtime(home)
+    return rt["python"] if rt["kind"] == "runtime" else env_python(home / "venv")
+
+
+# --------------------------------------------------------------------------- ffmpeg (3.0 T2.1, installer contract)
+def _plugin_components() -> dict:
+    try:
+        return json.loads((Path(__file__).resolve().parents[3] / "setup" / "components.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def engine_ffmpeg(home: Path | None = None, tool: str = "ffmpeg") -> Path | None:
+    """The pinned ffmpeg (or ffprobe) the installer put in the engine home: state.json `ffmpeg.path` (the ffmpeg
+    binary or its folder), else <home>/ffmpeg/<components.json ffmpeg.version>/. None when neither is there."""
+    home = home or engine_home()
+    exe = tool + (".exe" if IS_WIN else "")
+    try:
+        p = (json.loads((home / "state.json").read_text(encoding="utf-8")).get("ffmpeg") or {}).get("path")
+    except (OSError, ValueError, AttributeError):
+        p = None
+    cands = []
+    if isinstance(p, str) and p:
+        p = Path(native_path(p)).expanduser()
+        cands.append(p / exe if p.is_dir() else p.with_name(exe))
+    ver = (_plugin_components().get("ffmpeg") or {}).get("version")
+    if isinstance(ver, str) and ver and "/" not in ver and "\\" not in ver:
+        cands.append(home / "ffmpeg" / ver / exe)
+    return next((c for c in cands if c.is_file()), None)
 
 
 # --------------------------------------------------------------------------- paths
