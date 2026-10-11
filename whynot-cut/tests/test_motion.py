@@ -688,5 +688,95 @@ class TestMotionTruth(unittest.TestCase):
         self.assertFalse(check_number("93", "سنة 2019 و 3 فروع"))                         # digit runs, not substrings
 
 
+# --------------------------------------------------------------------------- timing
+def words_every(n=60, step=400, dur=360):
+    return [{"id": i + 1, "word": f"كلمه{i}", "start_ms": i * step, "end_ms": i * step + dur} for i in range(n)]
+
+
+def fps_context(tmp: Path, timebase: int, ntsc: bool) -> Path:
+    root = tmp / f"FPS{timebase}{'n' if ntsc else ''}"
+    write_json(root / common.CLIENT_PROFILE_REL / "sequence-settings.json", {"general": {"timebase": timebase, "ntsc": ntsc}})
+    (root / "assets").mkdir(parents=True, exist_ok=True)
+    (root / "data").mkdir(parents=True, exist_ok=True)
+    common.set_context(root)
+    return root
+
+
+MCFG = {"scene_lead_ms": 150, "outro_ms": 2500, "word_reveal_ms": 180, "total_ms": 24000}
+
+
+class TestMotionTiming(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_anchors(self):
+        from lib.motion_timing import anchor_scenes
+        ws = words_every()
+        sc = [scene("S01", "kinetic_quote", "@start"), scene("S02", "kinetic_quote", "كلمه10 كلمه11"),
+              scene("S03", "kinetic_quote", "كلمه25 كلمه26"), scene("S04", "outro", "@end")]
+        a, errs = anchor_scenes(sc, ws, MCFG)
+        self.assertEqual(errs, [])
+        self.assertEqual([x["start_ms"] for x in a], [0, 3850, 9850, ws[-1]["end_ms"]])
+        self.assertEqual([x["end_ms"] for x in a], [3850, 9850, ws[-1]["end_ms"], ws[-1]["end_ms"] + 2500])
+        self.assertEqual([x["word_idx"] for x in a[:3]], [0, 10, 25])
+        self.assertTrue(a[3]["outro"])
+        no_outro, _ = anchor_scenes(sc[:3], ws, MCFG)
+        self.assertEqual(no_outro[-1]["end_ms"], 24000)                     # the window's end
+
+    def test_anchor_errors(self):
+        from lib.motion_timing import anchor_scenes
+        ws = words_every()
+        _, errs = anchor_scenes([scene("S01", "kinetic_quote", "@start"), scene("S02", "kinetic_quote", "ليس هنا")], ws, MCFG)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("S02", errs[0])
+        _, errs = anchor_scenes([scene("S01", "kinetic_quote", "@start"), scene("S02", "kinetic_quote", "كلمه25"),
+                                 scene("S03", "kinetic_quote", "كلمه10")], ws, MCFG)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("S03", errs[0])
+        self.assertIn("order", errs[0])
+
+    def test_cues_with_pauses(self):
+        from lib.common import seq_fps
+        from lib.motion_timing import cue_frames
+        from lib.timemap import TimeMap
+        ws = words_every(40, 500)
+        k = next(i for i, w in enumerate(ws) if w["start_ms"] == 6000)
+        for tb, ntsc in ((24, False), (25, False), (30, True), (30, False)):
+            fps_context(self.tmp, tb, ntsc)
+            tm = TimeMap([[0, 4000], [5000, 12000]])
+            self.assertEqual(cue_frames([k], ws, tm, seq_fps()), [round(5.0 * seq_fps())], (tb, ntsc))
+
+    def test_no_drift_long_window(self):
+        from lib.common import seq_fps
+        from lib.motion_timing import cue_frames
+        from lib.timemap import TimeMap
+        ws = [{"id": 1, "word": "x", "start_ms": 179600, "end_ms": 179900}]
+        for tb, ntsc in ((30, True), (24, True)):
+            fps_context(self.tmp, tb, ntsc)
+            want = round(179.6 * seq_fps())
+            self.assertEqual(cue_frames([0], ws, None, seq_fps()), [want], (tb, ntsc))
+            self.assertEqual(cue_frames([0], ws, TimeMap([[0, 180000]]), seq_fps()), [want], (tb, ntsc))
+
+    def test_hero_and_too_short(self):
+        from lib.motion_timing import frame_scenes, hero_frame
+        self.assertEqual(hero_frame(100, 160, 12, 30, 180), 112)            # ceil(5.4) = 6 reveal frames + 6
+        fps_context(self.tmp, 30, False)
+        ok, errs = frame_scenes([{"id": "S01", "start_ms": 0, "end_ms": 6000, "cues_ms": [3000]}], None, 30.0, MCFG, [0])
+        self.assertEqual(errs, [])
+        self.assertEqual((ok[0]["start_frame"], ok[0]["end_frame"], ok[0]["cue_frames"]), (0, 180, [90]))
+        self.assertEqual(ok[0]["hero_frame"], 90 + 6 + 6)
+        _, errs = frame_scenes([{"id": "S07", "start_ms": 0, "end_ms": 5170, "cues_ms": [5000]}], None, 30.0, MCFG, [0])
+        self.assertEqual(len(errs), 1)
+        self.assertIn("S07", errs[0])
+        self.assertIn("too short", errs[0])
+        out, _ = frame_scenes([{"id": "S09", "start_ms": 20000, "end_ms": 22500, "outro": True, "cues_ms": []}],
+                              None, 30.0, MCFG, [0])
+        self.assertEqual(out[0]["end_frame"] - out[0]["start_frame"], 75)   # the outro keeps its length past the audio
+
+
 if __name__ == "__main__":
     unittest.main()
