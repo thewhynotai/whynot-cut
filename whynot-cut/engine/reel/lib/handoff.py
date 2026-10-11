@@ -51,7 +51,8 @@ def build(paths: Paths) -> dict:
     pend = [e for e in spec.get("events", []) if e.get("approval_required")]
     from .verify import status as vstatus
     vs = vstatus(paths)
-    appr = read_json(paths.p("01_analysis/plan-approval.json"), {})
+    from .plan import approval_state
+    appr = approval_state(paths)        # a stale approval never reads "approved by X" (3.0 T11)
     vtr = "\n".join(f"| V{t['xml_index']} | {t['id']} — {t['name']} | {t['clips']} |" for t in tm.get("tracks", {}).get("video", []))
     atr = "\n".join(f"| A{t['xml_index']} | {t['id']} — {t['name']} | {t['clips']} |" for t in tm.get("tracks", {}).get("audio", []))
     R = f"""# Handoff — {paths.video_id}
@@ -65,7 +66,7 @@ Generated {now_iso()} by the `whynot-cut` plugin (by The Why Not AI). QC: **{'PA
 | Transcription (Whisper large-v3, word timing) | Automated — **needs your verification** (`02_transcription/subtitle-review.md`) |
 | Topic / narrative / statement analysis | Automated by Claude (`01_analysis/`) |
 | Edit plan → frame-accurate timeline spec | Automated (`01_analysis/timeline-spec.json`, readable: `edit-plan.md`) |
-| Edit plan approval | {('approved by ' + appr.get('by', '?') + (' (stale: plan changed)' if appr.get('stale') else '')) if appr else 'NOT approved'} |
+| Edit plan approval | {appr['message'] if appr['state'] != 'stale' else '**' + appr['message'] + '**'} |
 | Visual verification of renders/PSDs | {'PASS' if vs['ok'] else 'NOT PASSED'}: {vs['detail']} |
 | After Effects comps (.aep, editable) | {ae.get('status', 'SCRIPT ONLY — run the JSX')} |
 | AE renders (ProRes 4444 + alpha) | {aer.get('status', 'not rendered')} |

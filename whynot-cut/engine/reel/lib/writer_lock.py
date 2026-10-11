@@ -297,6 +297,28 @@ def _refresh(root, cur: dict, command: str):
             pass
 
 
+def _restore(aside: Path, path: Path):
+    """Put a lock we moved aside back, never over a lock another writer created meanwhile: a hard link (fails when
+    the path is taken), else (no hard links: FAT, some shares) an exclusive create with the aside content. When the
+    path is taken, the aside file is kept, so the record is not lost."""
+    try:
+        os.link(aside, path)
+    except FileExistsError:
+        return
+    except OSError:
+        try:
+            data = aside.read_bytes()
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except OSError:
+            return
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+    try:
+        aside.unlink()
+    except OSError:
+        pass
+
+
 def _remove_stale(path: Path, seen: dict, why: str, root) -> bool:
     """Move the stale lock aside and check it is the one we judged (not a fresh lock another writer just created)."""
     aside = path.with_name(f"{path.name}.stale-{os.getpid()}")
@@ -311,15 +333,7 @@ def _remove_stale(path: Path, seen: dict, why: str, root) -> bool:
     except (OSError, ValueError):
         got = {}
     if got != seen:                                    # we grabbed a newer lock: put it back, its writer holds it
-        try:
-            os.link(aside, path)                       # fails when the path is taken again: never overwrite
-            aside.unlink()
-        except OSError:
-            if not path.exists():
-                try:
-                    os.replace(aside, path)            # no hard links here (FAT, some shares): move it back
-                except OSError:
-                    pass                               # keep the aside file: the record is not lost
+        _restore(aside, path)
         return False
     try:
         aside.unlink()
@@ -362,11 +376,26 @@ def acquire(root, command: str, env=None) -> Lock:
     raise Busy(root, read(root) or {})
 
 
+def _minutes_since(iso) -> int | None:
+    try:
+        return max(0, round((datetime.now().astimezone() - datetime.fromisoformat(str(iso)).astimezone())
+                            .total_seconds() / 60))
+    except (TypeError, ValueError):
+        return None
+
+
 def status(root, env=None) -> dict:
+    """`reel lock --status`: the holder, age_min (since it started), idle_min (since its last writing command: the
+    file's mtime, the clock of the 2 h rule) and how the lease ends."""
     rec = read(root)
     sid = session_id(env)
+    idle = _age_s(root) if rec is not None else None
     return {"lock": str(lock_path(root)), "held": rec is not None, "holder": rec, "stale": stale_reason(root, rec),
-            "mine": bool(rec) and rec.get("session_id") == sid, "session_id": sid}
+            "mine": bool(rec) and rec.get("session_id") == sid, "session_id": sid,
+            "age_min": _minutes_since((rec or {}).get("started_at")) if rec else None,
+            "idle_min": round(idle / 60) if idle is not None else None,
+            "how": f"ends when the holding session closes or after {STALE_AFTER_S // 3600} h idle; the lead may run "
+                   "`reel lock --release` on the editor's word"}
 
 
 def release(root) -> dict:

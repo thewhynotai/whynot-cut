@@ -42,7 +42,7 @@ def cli(root: Path, *args):
                           capture_output=True, text=True)
 
 
-class TestPlanApprovalFingerprint(unittest.TestCase):
+class ApprovalFixture(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -72,6 +72,8 @@ class TestPlanApprovalFingerprint(unittest.TestCase):
         fn(s)
         return s
 
+
+class TestPlanApprovalFingerprint(ApprovalFixture):
     def test_camera_move_after_approval_blocks_build(self):
         self.approve()
         self.save(self.mutated(lambda s: s["main_segments"][1].update(scale=125, move="push_in")))
@@ -119,6 +121,58 @@ class TestPlanApprovalFingerprint(unittest.TestCase):
         self.p.p("01_analysis/timeline-spec.json").write_text(json.dumps(reordered, indent=4, ensure_ascii=True),
                                                               encoding="utf-8")
         self.assertEqual(plan_fingerprint(self.p), fp)
+
+
+class TestApprovalStaleness(ApprovalFixture):
+    """3.0 T11 (E1, E2): a `reel range` re-run that only refreshes its timestamp keeps the approval; `reel next` and the
+    handoff say when the approval no longer matches the plan."""
+
+    def ranged(self, **kw) -> dict:
+        rng = {"footage": "data/Raw/CLIP1.mp4", "in_ms": 1000, "out_ms": 13000, "duration_ms": 12000, "label": "",
+               "set_at": "2026-10-11T10:00:00"}
+        rng.update(kw)
+        return self.mutated(lambda s: s.update(source_range=rng, source_in_ms=rng["in_ms"]))
+
+    def next_out(self) -> dict:
+        r = cli(self.root, "next")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def handoff_readme(self) -> str:
+        from lib.handoff import build
+        build(self.p)
+        return self.p.p("09_handoff/README.md").read_text(encoding="utf-8")
+
+    def test_e1_range_timestamp_does_not_change_the_fingerprint(self):
+        self.save(self.ranged())
+        self.approve()
+        fp = plan_fingerprint(self.p)
+        self.save(self.ranged(set_at="2026-10-12T09:00:00", selected_at="2026-10-12T09:00:01"))
+        self.assertEqual(plan_fingerprint(self.p), fp)
+        self.assertNotIn("not approved", cli(self.root, "ppro-build").stdout)
+        self.save(self.ranged(in_ms=2000))                                  # a real range change still counts
+        self.assertNotEqual(plan_fingerprint(self.p), fp)
+
+    def test_e2_next_and_handoff_flag_a_stale_approval(self):
+        self.approve()
+        self.assertEqual(self.next_out()["stale"], [])
+        self.assertIn("approved by editor", self.handoff_readme())
+        self.save(self.mutated(lambda s: s.update(duration_ms=11000, duration_frames=264)))
+        nx = self.next_out()
+        self.assertIn("plan changed since approval — re-approve", " ".join(nx["stale"]))
+        self.assertNotIn("approval format changed", " ".join(nx["stale"]))
+        self.assertIn("approve-plan", nx["next"])
+        readme = self.handoff_readme()
+        self.assertNotIn("approved by editor", readme)
+        self.assertIn("plan changed since approval — re-approve", readme)
+
+    def test_e2_pre_3_0_approval_names_the_format_change(self):
+        write_json(self.p.p("01_analysis/plan-approval.json"),          # 2.x record: old fingerprint, no format
+                   {"approved": True, "by": "editor", "note": "", "at": "2026-09-01T10:00:00",
+                    "plan_fingerprint": "0123456789abcdef"})
+        stale = " ".join(self.next_out()["stale"])
+        self.assertIn("plan changed since approval — re-approve (approval format changed in 3.0)", stale)
+        self.assertNotIn("approved by editor", self.handoff_readme())
 
 
 if __name__ == "__main__":

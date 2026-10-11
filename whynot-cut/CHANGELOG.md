@@ -199,6 +199,15 @@
   file-tool branch to Write/Edit/MultiEdit/NotebookEdit only (a subagent may Read the lock), ignores `2>`, `2>&1` and
   `>&` redirects that do not point at the lock, counts `sc ac mi ni ri py sh` only as a command's first word, and also
   blocks `find … -name .whynot-lock -delete` and globs that match the lock (`rm output/.whynot-l*`).
+- Engine, Phase 1 review minors. The approval fingerprint ignores timestamp keys of `source_range` (`set_at`,
+  `selected_at`, any `*_at`), so re-running `reel range` with the same points and `reel plan` keeps the approval.
+  `reel next` lists a stale approval as "PLAYBACK edit-plan.md to editor, then approve-plan (plan changed since
+  approval — re-approve)", adding "(approval format changed in 3.0)" for a record written before 3.0, and the handoff
+  no longer prints "approved by X" for it; new approvals carry `"format": 3`. The gender check also strips U+061C,
+  U+2060, U+00AD and U+FEFF, reads one line break between an honorific and a name as a space, and gives one warning
+  for a chain of nameless honorifics; motion-mode `reel next` shows the people[] notice too. `reel lock --status` adds
+  `age_min`, `idle_min` (the 2 h clock) and a `how` line. A stale-lock takeover that has to put a newer lock back without
+  hard links now uses an exclusive create, so it can never overwrite a lock created in the meantime.
 
 ### Migration
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the
@@ -213,6 +222,8 @@
   (also `VIDEO` for a lone Arabic clip) or `output/projects/<raw file stem>`. For the same stem with two extensions the
   first in that order keeps the bare id (`C0239.MP4` before `C0239.mov`, so the `.mov` becomes `C0239_MOV`): if a 2.x
   project `C0239` was actually built from the `.mov`, edit `output/discovery/clip-ids.json` by hand before continuing.
+  When both `output/projects/<slug>` and `output/projects/<raw file stem>` exist for one clip, the raw-stem folder wins
+  (for ASCII and Arabic names alike); the other folder is left untouched, so move anything you still need from it.
 - Existing client folders keep their protection when they have `output/client_database/` (every onboarded client) or
   lie under `clients_root`; they are recognised automatically. Any other existing client folder (only `assets/` and
   `data/`) is no longer protected until it gets the marker: run `reel doctor --fix --root "<client folder>"` (or

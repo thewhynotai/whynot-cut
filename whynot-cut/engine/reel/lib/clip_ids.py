@@ -78,11 +78,12 @@ def assign(root, rels, ids: dict) -> dict:
     for rel in sorted(new.values()):                         # C0239.MP4 before C0239.mov, as in 3.0.0
         i = clip_id_for(rel, ids)
         # a 2.x project of this clip keeps its folder when it is unambiguous (no other clip slugs/is named the same way)
-        # and free: output/projects/<slug(stem)> (VIDEO for a lone Arabic clip, auto-filled by 2.x) or
-        # output/projects/<raw stem> (an agent passed the file name as --video-id)
+        # and free: output/projects/<raw stem> (an agent passed the file name as --video-id) or
+        # output/projects/<slug(stem)> (VIDEO for a lone Arabic clip, auto-filled by 2.x). When both exist the raw-stem
+        # folder wins, for ASCII and Arabic names alike (3.0 T11; CHANGELOG Migration): the other folder is left as it is
         stem = Path(rel).stem
         taken = {k.upper() for k in ids}
-        for old, ok in ((slug(stem), old_slugs.count(slug(stem)) == 1), (stem, stems.count(stem.casefold()) == 1)):
+        for old, ok in ((stem, stems.count(stem.casefold()) == 1), (slug(stem), old_slugs.count(slug(stem)) == 1)):
             if old.upper() != i.upper() and ok and old.upper() not in taken and (projects / old).is_dir():
                 i = old
                 break

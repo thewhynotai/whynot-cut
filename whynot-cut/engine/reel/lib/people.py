@@ -46,7 +46,8 @@ ABBR = "drabbr"                                   # «د.» «د/» "Dr." after 
 SOFT = set("/:-–—«“\"(")                          # after an honorific these don't end the clause («الدكتورة: كريم»)
 
 _DIAC = re.compile(r"[ؐ-ًؚ-ٰٟۖ-ۭـ]")   # tashkeel, Quranic marks, tatweel
-_INVISIBLE = re.compile(r"[‌‍‎‏‪-‮⁦-⁩]")  # ZWNJ/ZWJ, direction marks
+# ZWNJ/ZWJ, LRM/RLM, bidi embeddings and isolates, Arabic letter mark, word joiner, soft hyphen, BOM
+_INVISIBLE = re.compile("[\u200c\u200d\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c\u2060\u00ad\ufeff]")
 _FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي"})
 _ABBR_RE = re.compile(r"(?<!\w)(?:د|dr)\s*[./](?=\s*\w)", re.I)
 _TOKEN = re.compile(r"\w+|[^\w\s]+|\n")
@@ -65,13 +66,17 @@ def _norm(tok: str) -> str:
 
 
 def _clauses(text: str) -> list[list[tuple[str, str]]]:
-    """[[(display, normalised) token, ...] per clause]."""
+    """[[(display, normalised) token, ...] per clause]. One line break right after an honorific is a space («الدكتورة»
+    at the end of a caption line, the name on the next); a blank line ends the clause."""
     out, cur = [], []
-    for m in _TOKEN.finditer(_clean(text)):
+    s = _clean(text)
+    for m in _TOKEN.finditer(s):
         t = m.group()
         if t[0].isalnum() or t[0] == "_":
             cur.append(("د." if t.lower() == ABBR else t, _norm(t)))
         elif cur and t != "\n" and set(t) <= SOFT and honorific(cur[-1][1]):
+            continue
+        elif cur and t == "\n" and honorific(cur[-1][1]) and not s[m.end():].lstrip(" \t\r").startswith("\n"):
             continue
         elif cur:
             out.append(cur)
@@ -232,14 +237,20 @@ def check_nameless(where: str, text: str, people: list) -> list[str]:
     g = genders.pop()
     out = []
     for clause in _clauses(text):
-        for i, (disp, tok) in enumerate(clause):
-            h = honorific(tok)
-            if not h or not h["gender"] or h["gender"] == g:
+        i = 0
+        while i < len(clause):
+            if not honorific(clause[i][1]):
+                i += 1
                 continue
-            if _who(clause, _after_titles(clause, i), people)[1] is None:
+            end = _after_titles(clause, i)               # «الأستاذة الدكتورة»: one mention, one warning
+            hons = [(d, honorific(t)) for d, t in clause[i:end]]
+            wrong = [(d, h) for d, h in hons if h["gender"] and h["gender"] != g]
+            if wrong and _who(clause, end, people)[1] is None:
+                disp, h = wrong[0]
                 out.append(f"{where}: «{disp}» with no known name, but everyone in the client profile (people[]) is "
                            f"{g}: write «{_form(h['stem'], g, h['article'])}», or name the person and add them to "
                            "people[] if they are someone else")
+            i = end
     return out
 
 

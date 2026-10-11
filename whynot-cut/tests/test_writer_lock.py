@@ -381,6 +381,65 @@ class TestSessionLease(LockFixture):
         self.assertEqual(json.loads(self.lock.read_text(encoding="utf-8")), fresh)
         self.assertEqual([p.name for p in self.lock.parent.glob(".whynot-lock.stale-*")], [])
 
+    def test_restore_never_overwrites_a_lock_created_meanwhile(self):
+        """T11 (M3 fallback): without hard links the aside record goes back only through an exclusive create. Whenever
+        a third writer takes the path while the stale lock is put back, its lock stays and the aside file is kept;
+        otherwise the record is restored. Race windows: right after the failed link, and right after any look at
+        whether the path is free."""
+        from unittest import mock
+        third = {"session_id": "third", "pid": os.getpid(), "host": socket.gethostname()}
+        real_exists = Path.exists
+        for window in ("after_link", "after_exists_check"):
+            for f in self.lock.parent.glob(".whynot-lock*"):
+                f.unlink()
+            fresh = self.hold(session="fresh")
+            taken = []
+
+            def take():
+                self.lock.write_text(json.dumps(third), encoding="utf-8")
+                taken.append(True)
+
+            def no_link(src, dst):
+                if window == "after_link":
+                    take()
+                raise OSError("no hard links")
+
+            def exists_then_race(path):
+                free = not real_exists(path)
+                if window == "after_exists_check" and path == self.lock and free and not taken:
+                    take()                                   # free when looked at, taken right after
+                return not free
+            with mock.patch.object(writer_lock.os, "link", side_effect=no_link),                     mock.patch.object(writer_lock.Path, "exists", exists_then_race):
+                self.assertFalse(writer_lock._remove_stale(self.lock, {"session_id": "old"}, "test", self.root))
+            kept = list(self.lock.parent.glob(".whynot-lock.stale-*"))
+            if taken:
+                self.assertEqual(json.loads(self.lock.read_text(encoding="utf-8")), third, window)   # not overwritten
+                self.assertEqual(len(kept), 1, window)
+                self.assertEqual(json.loads(kept[0].read_text(encoding="utf-8")), fresh, window)   # not lost
+            else:
+                self.assertEqual(json.loads(self.lock.read_text(encoding="utf-8")), fresh, window)
+                self.assertEqual(kept, [], window)
+
+
+class TestLockStatusTimes(LockFixture):
+    def test_status_shows_age_idle_and_how(self):
+        self.hold(age_s=30 * 60)
+        st = json.loads(self.reel("lock", "--status").stdout)
+        self.assertIn("age_min", st)
+        self.assertGreaterEqual(st["idle_min"], 29)
+        self.assertLessEqual(st["idle_min"], 31)
+        self.assertIn("ends when the holding session closes or after 2 h idle", st["how"])
+        self.assertIn("reel lock --release", st["how"])
+        self.assertIn("editor's word", st["how"])
+        rec = json.loads(self.lock.read_text(encoding="utf-8"))
+        rec["started_at"] = writer_lock.now_iso()
+        self.lock.write_text(json.dumps(rec), encoding="utf-8")
+        self.assertLessEqual(json.loads(self.reel("lock", "--status").stdout)["age_min"], 1)
+        self.lock.unlink()
+        st = json.loads(self.reel("lock", "--status").stdout)
+        self.assertIsNone(st["age_min"])
+        self.assertIsNone(st["idle_min"])
+
 
 class TestLockCommand(LockFixture):
     def test_status(self):

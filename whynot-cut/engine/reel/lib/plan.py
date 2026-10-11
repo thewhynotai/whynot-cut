@@ -621,8 +621,43 @@ def plan_fingerprint(paths: Paths) -> str:
     import hashlib
     import json
     spec = json.loads(paths.p("01_analysis/timeline-spec.json").read_text(encoding="utf-8"))
-    body = json.dumps({k: v for k, v in spec.items() if k != "generated"}, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
+    body = {k: v for k, v in spec.items() if k != "generated"}
+    if isinstance(body.get("source_range"), dict):        # `reel range` re-run with the same points: set_at etc. only
+        body["source_range"] = {k: v for k, v in body["source_range"].items() if not _volatile(k)}
+    text = json.dumps(body, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _volatile(key: str) -> bool:
+    """A timestamp key (`set_at`, `selected_at`, any `*_at`): when something was recorded, not what gets built."""
+    return key == "generated" or key.endswith("_at")
+
+
+APPROVAL_FORMAT = 3                        # plan-approval.json records written by 3.0+ carry "format": 3
+
+
+def approval_state(paths: Paths) -> dict:
+    """{"state": "none" | "current" | "stale", "by", "message"} of 01_analysis/plan-approval.json against the plan
+    as it is now (3.0 T11): a stale approval says "plan changed since approval — re-approve", and a record from before
+    3.0 (no "format") adds that the approval format changed, so the editor knows why their approval no longer holds."""
+    appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
+    by = appr.get("by") or "?"
+    if not appr.get("approved"):
+        return {"state": "none", "by": None, "message": "NOT approved"}
+    try:
+        if appr.get("kind") == "motion":
+            from .motion_plan import fingerprint as motion_fp
+            now = motion_fp(paths)
+        else:
+            now = plan_fingerprint(paths)
+    except (OSError, ValueError):
+        now = None                                         # no compiled plan: nothing the approval still matches
+    if not appr.get("stale") and now and appr.get("plan_fingerprint") == now:
+        return {"state": "current", "by": by, "message": f"approved by {by}"}
+    msg = "plan changed since approval — re-approve"
+    if appr.get("format") != APPROVAL_FORMAT:
+        msg += " (approval format changed in 3.0)"
+    return {"state": "stale", "by": by, "message": msg}
 
 
 def speaker_covered_frames(spec: dict) -> int:

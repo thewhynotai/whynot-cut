@@ -369,6 +369,47 @@ class TestReviewRound1(unittest.TestCase):
         write_json(root / common.CLIENT_PROFILE_REL / "profile.json", {"id": "cl-test", "people": [KARIM]})
         self.assertEqual(episode_next(EpisodePaths(root, "EP01"))["notices"], [])
 
+    def test_t11_more_invisible_marks_and_a_line_break_after_the_honorific(self):
+        for t in ("الدكتورة؜ كريم", "الدكتو­رة كريم", "﻿الدكتورة كريم", "الدكتورة⁠ كريم",
+                  "الدكتورة\nكريم", "الدكتورة \n كريم سامبل"):
+            errs, _w = run(t, [KARIM])
+            self.assertEqual(len(errs), 1, (t, errs))
+        self.assertEqual(run("الدكتورة\n\nكريم", [KARIM]), ([], []))     # a blank line ends the clause
+        self.assertEqual(run("الدكتور\nكريم", [KARIM]), ([], []))
+
+    def test_t11_chained_nameless_honorifics_warn_once(self):
+        from lib.people import check_nameless, load_people
+        ppl = load_people({"people": [KARIM]})[0]
+        self.assertEqual(len(check_nameless("G", "صور الأستاذة الدكتورة المعتمدة", ppl)), 1)
+        self.assertEqual(len(check_nameless("G", "صور الأستاذة الدكتور المعتمدة", ppl)), 1)
+        self.assertEqual(len(check_nameless("G", "الأستاذة المعتمدة والدكتورة الجديدة", ppl)), 2)   # two mentions
+
+    def test_t11_motion_next_carries_the_people_notice(self):
+        import subprocess
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        root = tmp / "CL"
+        for d in ("assets", "data"):
+            (root / d).mkdir(parents=True)
+        cli = [sys.executable, str(SK / "engine/reel/cli.py"), "--root", str(root)]
+        self.assertEqual(subprocess.run(cli + ["client-init", "--id", "cl-test"], capture_output=True).returncode, 0)
+        write_json(root / "output/projects/EP01_R01_MO/00_inputs/source.json",
+                   {"kind": "motion_reel", "footage": "data/Episodes/EP01.mp4", "in_ms": 0, "out_ms": 30000})
+
+        def motion_next():
+            r = subprocess.run(cli + ["--video-id", "EP01_R01_MO", "next"], capture_output=True, text=True,
+                               encoding="utf-8")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            out = json.loads(r.stdout)
+            self.assertEqual(out.get("kind"), "motion")
+            return out["notices"]
+        self.assertTrue(any("people[]" in n for n in motion_next()))
+        pj = root / common.CLIENT_PROFILE_REL / "profile.json"
+        prof = json.loads(pj.read_text(encoding="utf-8"))
+        prof["people"] = [KARIM]
+        pj.write_text(json.dumps(prof, ensure_ascii=False), encoding="utf-8")
+        self.assertEqual(motion_next(), [])
+
     def test_lead_skills_carry_the_gender_rule(self):
         for s in ("new-client", "start", "edit", "podcast"):
             body = (SK / "skills" / s / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]

@@ -315,6 +315,17 @@ class TestClipIdReviewFixes(unittest.TestCase):
             # "Dr X" is ambiguous (two extensions): never adopted; ".mov" sorts before ".mp4"
             self.assertEqual({got["data/Raw/Dr X.mp4"], got["data/Raw/Dr X.mov"]}, {"DR_X", "DR_X_MP4"})
 
+    def test_raw_stem_folder_wins_over_the_slug_folder(self):
+        """T11 (E5): both output/projects/<slug> and output/projects/<raw stem> exist for one clip -> the raw stem."""
+        from lib.onboard import inbox
+        with tempfile.TemporaryDirectory() as t:
+            root = make_client(t, ["Dr Sherif intro.mp4", ARABIC_1, "C0001.MP4"])
+            for folder in ("DR_SHERIF_INTRO", "Dr Sherif intro", "VIDEO", "مقابلة ١"):
+                write_json(Paths(root, folder).p("02_transcription/transcript.json"), {"words": []})
+            got = {c["file"]: c["video_id"] for c in inbox(root)["clips"]}
+            self.assertEqual(got["data/Raw/Dr Sherif intro.mp4"], "Dr Sherif intro")
+            self.assertEqual(got["data/Raw/" + ARABIC_1], "مقابلة ١")
+
     def test_gone_clip_is_refused_not_swapped_for_its_sibling(self):
         from lib.onboard import inbox
         inbox(self.root)

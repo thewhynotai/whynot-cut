@@ -379,7 +379,7 @@ def require_plan_approval(p: Paths):
 
 
 def cmd_approve_plan(a):
-    from lib.plan import plan_fingerprint
+    from lib.plan import APPROVAL_FORMAT, plan_fingerprint
     from lib.motion_config import is_motion
     p = P(a)
     if is_motion(p):                      # motion video (2.2): Gate 1 approves the compiled motion plan
@@ -392,14 +392,15 @@ def cmd_approve_plan(a):
         if val.get("fingerprint") != fingerprint(p):
             raise SystemExit("the motion plan is stale (script, words, audio or brand changed): run `motion-plan` again")
         rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": fingerprint(p),
-               "kind": "motion"}
+               "kind": "motion", "format": APPROVAL_FORMAT}
         write_json(p.p("01_analysis/plan-approval.json"), rec)
         set_status(p, "EDIT_PLAN_READY", f"motion plan approved by {a.by}", "plan_approval")
         out(rec)
         return
     if not p.p("01_analysis/timeline-spec.json").exists():
         raise SystemExit("compile the plan first (`plan`)")
-    rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": plan_fingerprint(p)}
+    rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": plan_fingerprint(p),
+           "format": APPROVAL_FORMAT}
     write_json(p.p("01_analysis/plan-approval.json"), rec)
     set_status(p, "EDIT_PLAN_READY", f"plan approved by {a.by}", "plan_approval")
     out(rec)
@@ -633,6 +634,12 @@ def cmd_next(a):
         newer = [u.name for u in ups if t(u) and t(u) > tf + 1]
         if newer or any(s_.split(" (")[0] in [n for n, f2, _ in deps if f2 in ups] for s_ in stale):
             stale.append(f"{name} (older than {', '.join(newer) or 'a stale upstream step'})")
+    from lib.plan import approval_state
+    appr = approval_state(p) if spec.exists() else None
+    if appr and appr["state"] == "stale":            # the approval is for another plan: Gate 1 again, before the build
+        k = next((i for i, s_ in enumerate(stale) if s_.startswith(("ppro-build", "ppro-frames", "qc", "handoff"))),
+                 len(stale))
+        stale.insert(k, f"PLAYBACK edit-plan.md to editor, then approve-plan ({appr['message']})")
     todo = [s_ for s_ in stale] + [n for n in todo if n not in [s_.split(" (")[0] for s_ in stale]]
     status = load_status(p)["status"]
     if stale and status in ("QC_PASSED", "DELIVERED"):
