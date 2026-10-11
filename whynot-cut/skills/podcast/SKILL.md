@@ -61,7 +61,10 @@ Show, in the editor's language, a compact table from `01_analysis/reels-plan.md`
 duration · hook · flags (needs context, AVOID topic, risks). Give the preview folder (`03_candidates/`) and the sheet.
 Then ask which to make and whether any start/end should move.
 - Record only the editor's own choice: `reel reels-select --root "<CLIENT>" --episode <EP> --pick R01,R03 --by editor`
-  (+ `--adjust R03:in=00:12:04.000` / `R03:out=…` for moved edges).
+  (+ `--adjust R03:in=00:12:04.000` / `R03:out=…` for moved edges). An adjusted edge is the editor's own: it snaps to
+  the nearest WORD start (in) or end (out) of the time they gave, plus the usual 120 ms lead-in / 250 ms tail — never
+  to a sentence start 1.5 s away, and never back onto a word that ended before the time (so «start one word later»
+  works). Only the plan's own windows prefer sentence boundaries.
 - "You choose" / «اختار انت» → pick the best by score with a spread of types and no avoid hits, then
   `--by delegated --note "<their words>"`. Say which you picked and why.
 - A candidate with an avoid-topic hit only with the editor's explicit OK: `--confirm-avoid R05`.

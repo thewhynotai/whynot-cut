@@ -19,7 +19,7 @@ ARGS: dict = {
     "reels-preview": [(("--ids",), {"default": None, "help": "e.g. R01,R03 (default: every candidate)"})],
     "reels-select": [
         (("--pick",), {"default": "", "help": "the editor's choice, e.g. R01,R03"}),
-        (("--adjust",), {"action": "append", "default": [], "help": "R03:in=00:12:04.000 or R03:out=00:13:05 (repeatable)"}),
+        (("--adjust",), {"action": "append", "default": [], "help": "R03:in=00:12:04.000 or R03:out=00:13:05 (repeatable; snaps to the nearest word)"}),
         (("--by",), {"required": True, "choices": ["editor", "delegated"],
                      "help": "editor = the editor picked in chat; delegated = they told you to choose"}),
         (("--note",), {"default": "", "help": "the editor's words (required with --by delegated)"}),

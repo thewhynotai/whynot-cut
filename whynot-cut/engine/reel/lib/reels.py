@@ -52,35 +52,47 @@ def _nearest(idx: list, key, t: int) -> int | None:
     return min(idx, key=lambda i: (abs(key(i) - t), i)) if idx else None
 
 
-def snap_in(words: list, t_ms: int, cfg: dict) -> int:
+def snap_in(words: list, t_ms: int, cfg: dict, explicit: bool = False) -> int:
     """In-point at the nearest sentence-like word start within ±search (else the nearest word), minus a short lead-in
-    that never reaches back into the previous word. Never below 0."""
+    that never reaches back into the previous word. Never below 0.
+    explicit=True (the editor's own `--adjust Rxx:in=`): the nearest WORD start, no sentence preference; a word that
+    already ended before t_ms was skipped on purpose and is never chosen (the word t_ms falls inside is kept)."""
     if not words:
         return max(0, int(t_ms))
     sc = cfg.get("snap", {})
     search, lead = sc.get("search_ms", 1500), sc.get("lead_in_ms", 120)
-    starts, _ = boundary_words(words, sc.get("gap_ms", 300))
-    near = [i for i in range(len(words)) if abs(words[i]["start_ms"] - t_ms) <= search]
-    i = _nearest([k for k in near if k in starts], lambda k: words[k]["start_ms"], t_ms)
-    if i is None:
-        i = _nearest(near or list(range(len(words))), lambda k: words[k]["start_ms"], t_ms)
+    if explicit:
+        i = _nearest([k for k in range(len(words)) if words[k]["end_ms"] > t_ms] or [len(words) - 1],
+                     lambda k: words[k]["start_ms"], t_ms)
+    else:
+        starts, _ = boundary_words(words, sc.get("gap_ms", 300))
+        near = [i for i in range(len(words)) if abs(words[i]["start_ms"] - t_ms) <= search]
+        i = _nearest([k for k in near if k in starts], lambda k: words[k]["start_ms"], t_ms)
+        if i is None:
+            i = _nearest(near or list(range(len(words))), lambda k: words[k]["start_ms"], t_ms)
     w = words[i]
     floor = words[i - 1]["end_ms"] + 20 if i else 0
     return max(0, min(w["start_ms"], max(w["start_ms"] - lead, floor)))
 
 
-def snap_out(words: list, t_ms: int, cfg: dict, total_ms: int) -> int:
+def snap_out(words: list, t_ms: int, cfg: dict, total_ms: int, explicit: bool = False) -> int:
     """Out-point at the nearest sentence-like word end within ±search (else the nearest word), plus a short tail that
-    never reaches into the next word. Never beyond the episode."""
+    never reaches into the next word. Never beyond the episode.
+    explicit=True (the editor's own `--adjust Rxx:out=`): the nearest WORD end, no sentence preference; a word that
+    only starts after t_ms was skipped on purpose and is never chosen (the word t_ms falls inside is kept)."""
     if not words:
         return min(int(t_ms), total_ms)
     sc = cfg.get("snap", {})
     search, tail = sc.get("search_ms", 1500), sc.get("tail_ms", 250)
-    _, ends = boundary_words(words, sc.get("gap_ms", 300))
-    near = [i for i in range(len(words)) if abs(words[i]["end_ms"] - t_ms) <= search]
-    i = _nearest([k for k in near if k in ends], lambda k: words[k]["end_ms"], t_ms)
-    if i is None:
-        i = _nearest(near or list(range(len(words))), lambda k: words[k]["end_ms"], t_ms)
+    if explicit:
+        i = _nearest([k for k in range(len(words)) if words[k]["start_ms"] < t_ms] or [0],
+                     lambda k: words[k]["end_ms"], t_ms)
+    else:
+        _, ends = boundary_words(words, sc.get("gap_ms", 300))
+        near = [i for i in range(len(words)) if abs(words[i]["end_ms"] - t_ms) <= search]
+        i = _nearest([k for k in near if k in ends], lambda k: words[k]["end_ms"], t_ms)
+        if i is None:
+            i = _nearest(near or list(range(len(words))), lambda k: words[k]["end_ms"], t_ms)
     w = words[i]
     ceil = words[i + 1]["start_ms"] - 20 if i + 1 < len(words) else total_ms
     return min(total_ms, max(w["end_ms"], min(w["end_ms"] + tail, ceil)))
@@ -593,10 +605,10 @@ def select(ep, picks: list[str], adjust: list[str], by: str, note: str = "", con
                 raise SystemExit(f"{rid} has no content type: add --type ({', '.join(recipe_types())}) or a `type` to the "
                                  "topic in topics.json")
         in_ms, out_ms = c["in_ms"], c["out_ms"]
-        if "in" in adj.get(rid, {}):
-            in_ms = snap_in(wj["words"], adj[rid]["in"], cfg)
+        if "in" in adj.get(rid, {}):         # the editor's own edge: the nearest WORD, never a sentence start 1.5 s away
+            in_ms = snap_in(wj["words"], adj[rid]["in"], cfg, explicit=True)
         if "out" in adj.get(rid, {}):
-            out_ms = snap_out(wj["words"], adj[rid]["out"], cfg, res["duration_ms"])
+            out_ms = snap_out(wj["words"], adj[rid]["out"], cfg, res["duration_ms"], explicit=True)
         d = (out_ms - in_ms) / 1000
         if as_ == "motion":
             if not mdur["hard_min"] <= d <= mdur["hard_max"]:
