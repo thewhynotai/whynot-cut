@@ -906,5 +906,141 @@ class TestShots(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+def reel_fixture(tmp: Path, recipe_type: str | None = "drama", dur_s: int = 12, music: bool = True):
+    """A client with a 16:9 episode and one reel project E_R01 (window 1-11 s), a transcript, semantic stubs and a
+    licensed music file in data/Music."""
+    from lib.transcribe import finalize
+    root = tmp / "RC"
+    for d in ("assets/Brand", "data/Episodes", "data/Music"):
+        (root / d).mkdir(parents=True, exist_ok=True)
+    src = root / "data/Episodes/E.mp4"
+    ff("-f", "lavfi", "-i", f"testsrc2=s=640x360:r=25:d={dur_s}", "-f", "lavfi", "-i", f"sine=f=300:r=48000:d={dur_s}",
+       "-ac", "2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(src))
+    if music:
+        ff("-f", "lavfi", "-i", "sine=f=220:r=48000:d=30", "-ac", "2", "-c:a", "pcm_s16le", str(root / "data/Music/warm_track.wav"))
+    common.set_context(root)
+    reel = Paths(root, "E_R01")
+    reel.ensure_project()
+    from lib.recipes import resolve
+    src_rec = {"footage": "data/Episodes/E.mp4", "in_ms": 1000, "out_ms": 11000, "duration_ms": 10000, "kind": "episode_reel"}
+    if recipe_type:
+        src_rec.update(content_type=recipe_type, recipe=resolve(recipe_type))
+    write_json(reel.p("00_inputs/source.json"), src_rec)
+    ws = [{"id": i + 1, "segment_id": 1, "word": f"كلمه{i}", "start_ms": i * 500, "end_ms": i * 500 + 400,
+           "probability": 0.9} for i in range(20)]
+    finalize(reel, {"source_video": str(src), "backend": "test", "model": "none", "language": "ar",
+                    "language_probability": 1.0, "duration_ms": 10000},
+             [{"id": 1, "start_ms": 0, "end_ms": 9900, "text": " ".join(w["word"] for w in ws), "avg_logprob": -0.2,
+               "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in ws]}], ws)
+    for f in ("main-topic.md", "medical-content-review.md"):
+        (reel.p("01_analysis") / f).write_text("# stub\n", encoding="utf-8")
+    for f in ("narrative-segments.json", "transcript-semantic-analysis.json", "editing-style.json"):
+        write_json(reel.p("01_analysis") / f, {"stub": True})
+    from lib.media import preflight
+    preflight(reel, [src])
+    return root, reel, src
+
+
+def decision(did, a, b, evidence, **kw):
+    d = {"decision_id": did, "segment_id": "S1", "evidence": evidence, "start": a, "end": b, "semantic_intent": "x",
+         "visual_treatment": "x", "confidence": "high"}
+    d.update(kw)
+    return d
+
+
+class TestRecipes(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_audio_clean_defaults_from_recipe(self):
+        from lib.recipes import pause_params
+        root, reel, _src = reel_fixture(self.tmp, "drama", music=False)
+        self.assertEqual(pause_params(reel), {"min_pause_ms": 600, "pad_ms": 160, "source": "recipe drama"})
+        self.assertEqual(pause_params(reel, 300, None)["min_pause_ms"], 300)          # an explicit value wins
+        self.assertEqual(pause_params(reel, 300, None)["pad_ms"], 160)
+        clip = Paths(root, "CLIPX")
+        clip.ensure_project()
+        self.assertEqual(pause_params(clip), {"min_pause_ms": 250, "pad_ms": 80, "source": "default"})
+        write_json(root / common.CLIENT_PROFILE_REL / "style.json", {"remove_pauses": {"min_pause_ms": 300, "pad_ms": 100}})
+        self.assertEqual(pause_params(clip), {"min_pause_ms": 300, "pad_ms": 100, "source": "profile style.json"})
+        self.assertEqual(pause_params(reel)["source"], "recipe drama")                # the reel's recipe beats the profile
+
+    def test_plan_warns_on_recipe_excess(self):
+        from lib.plan import compile_plan
+        _root, reel, _src = reel_fixture(self.tmp, "emotional", music=False)
+        write_json(reel.p("01_analysis/edit-decisions.json"), {"global": {}, "decisions": [
+            decision("EDIT_001", "00:00:00.000", "00:00:04.000", "كلمه0 كلمه1", recipe_note="she pauses here; keep it calm",
+                     graphics=[{"id": "GFX_001", "template": "hook_title", "start": "00:00:00.000", "end": "00:00:02.000",
+                                "text": "كلمه0"},
+                               {"id": "GFX_002", "template": "term_callout", "start": "00:00:02.500", "end": "00:00:04.000",
+                                "text": "كلمه1"}])]})
+        r = compile_plan(reel)
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertTrue(any("recipe emotional" in w and "graphics" in w for w in r["warnings"]), r["warnings"])
+        self.assertTrue(any("term_callout" in w for w in r["warnings"]))               # a template the recipe avoids
+        md = reel.p("01_analysis/edit-plan.md").read_text(encoding="utf-8")
+        self.assertIn("Recipe: emotional", md)
+        self.assertIn("she pauses here", md)
+
+    def test_music_placed_in_xml(self):
+        import xml.etree.ElementTree as ET
+        from lib.plan import compile_plan
+        from lib.premiere_xml import build_xml
+        _root, reel, _src = reel_fixture(self.tmp, "drama")
+        write_json(reel.p("01_analysis/edit-decisions.json"), {"global": {}, "music": {"file": "data/Music/warm_track.wav"},
+                   "decisions": [decision("EDIT_001", "00:00:00.000", "00:00:04.000", "كلمه0 كلمه1")]})
+        r = compile_plan(reel)
+        self.assertTrue(r["ok"], r["errors"])
+        spec = read_json(reel.p("01_analysis/timeline-spec.json"))
+        self.assertEqual(spec["music"]["status"], "PLACED")
+        self.assertEqual(spec["music"]["level_db"], -26)                                 # drama recipe level
+        tm = build_xml(reel, prefer_ae_renders=False)
+        x = ET.parse(tm["xml"]).getroot()
+        mus = [c for c in x.iter("clipitem") if (c.findtext("name") or "").startswith("MUSIC")]
+        self.assertEqual(len(mus), 2)                                                     # L/R mono pair
+        self.assertEqual(int(mus[0].findtext("start")), 0)
+        self.assertEqual(int(mus[0].findtext("end")), spec["duration_frames"])
+        lv = mus[0].find(".//parameter[parameterid='level']")
+        self.assertAlmostEqual(float(lv.findtext("value")), 10 ** (-26 / 20), places=4)
+        self.assertTrue(any(t["id"] == "A06" for t in tm["tracks"]["audio"]))
+
+    def test_music_outside_library_rejected(self):
+        from lib.plan import compile_plan
+        _root, reel, src = reel_fixture(self.tmp, "drama")
+        write_json(reel.p("01_analysis/edit-decisions.json"), {"global": {}, "music": {"file": "data/Episodes/E.mp4"},
+                   "decisions": [decision("EDIT_001", "00:00:00.000", "00:00:04.000", "كلمه0 كلمه1")]})
+        r = compile_plan(reel)
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("data/Music" in e for e in r["errors"]))
+
+    def test_music_library_tags(self):
+        from lib.recipes import music_library
+        root, _reel, _src = reel_fixture(self.tmp, "drama")
+        ff("-f", "lavfi", "-i", "sine=f=500:r=48000:d=2", str(root / "data/Music/tense_dark_loop.wav"))
+        write_json(root / "data/Music/music.json", {"tracks": [{"file": "warm_track.wav", "moods": ["uplifting"],
+                                                                "license": "Artlist #123"}]})
+        lib = {x["rel"]: x for x in music_library(root)}
+        self.assertEqual(lib["data/Music/warm_track.wav"]["moods"], ["uplifting"])        # music.json wins
+        self.assertEqual(lib["data/Music/warm_track.wav"]["license"], "Artlist #123")
+        self.assertIn("tense", lib["data/Music/tense_dark_loop.wav"]["moods"])            # file-name tokens
+
+    def test_protected_pauses_stay(self):
+        from lib.plan import compile_plan
+        _root, reel, _src = reel_fixture(self.tmp, "comedy", music=False)
+        write_json(reel.p("06_audio/dialogue/pauses.json"), {"keep_ms": [[0, 2000], [3000, 10000]], "removed_ms": 1000,
+                                                             "cuts_ms": [[2000, 3000]], "pauses_ms": [[1900, 3100]]})
+        write_json(reel.p("01_analysis/edit-decisions.json"), {"global": {"remove_pauses": {"protect": [
+            ["00:00:01.800", "00:00:03.200"]]}}, "decisions": [decision("EDIT_001", "00:00:00.000", "00:00:04.000", "كلمه0 كلمه1")]})
+        r = compile_plan(reel)
+        self.assertTrue(r["ok"], r["errors"])
+        tm = read_json(reel.p("01_analysis/timeline-spec.json"))["time_map"]
+        self.assertEqual(tm["keep_ms"], [[0, 10000]])
+        self.assertEqual(tm["removed_ms"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

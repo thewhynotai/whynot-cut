@@ -344,12 +344,15 @@ def cmd_audio_clean(a):
     p = P(a)
     src = main_footage(p, None)[0]
     hum = "auto" if a.hum == "auto" else () if a.hum == "off" else tuple(range(int(a.hum) * 2, 501, int(a.hum)))
+    from lib.recipes import pause_params
+    pp = pause_params(p, a.min_pause, a.pad)    # explicit > the reel's recipe > profile style.json > 250/80
     r = clean(p, src, nr_db=a.nr, expander=a.expander, hum_notches_hz=hum)
-    q = detect_pauses(p, min_pause_ms=a.min_pause, pad_ms=a.pad)
+    q = detect_pauses(p, min_pause_ms=pp["min_pause_ms"], pad_ms=pp["pad_ms"])
+    q["pause_params"] = pp
     v = verify_cuts(p) if not a.no_verify else {"skipped": True}
     out({"decisions": r.get("decisions"), "loudness": r.get("loudness"), "metrics": r["metrics"],
          "regions_ms": r["regions_ms"], "pauses": len(q["pauses_ms"]),
-         "removed_ms": q["removed_ms"], "new_duration_ms": q["new_duration_ms"],
+         "removed_ms": q["removed_ms"], "new_duration_ms": q["new_duration_ms"], "pause_params": pp,
          "cut_verification": {k: v.get(k) for k in ("ok", "verdict", "coverage", "orig_words", "tight_words", "missing")}})
 
 
@@ -680,8 +683,9 @@ def main():
             sp.add_argument("--by")
             sp.add_argument("--note")
         if name == "audio-clean":
-            sp.add_argument("--min-pause", type=int, default=250)
-            sp.add_argument("--pad", type=int, default=80)
+            sp.add_argument("--min-pause", type=int, default=None,
+                            help="ms (default: the reel's recipe, else the profile's style.json remove_pauses, else 250)")
+            sp.add_argument("--pad", type=int, default=None, help="ms of breath kept at each cut (default as above, else 80)")
             sp.add_argument("--no-verify", action="store_true")
             sp.add_argument("--nr", type=float, default=None,
                             help="denoise strength in dB (default: 24, or none when the source is already clean; gentler: 16)")

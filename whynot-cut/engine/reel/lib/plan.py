@@ -68,6 +68,17 @@ def subtract_ranges(keep: list, cuts: list) -> list:
     return out
 
 
+def union_ranges(a: list, b: list) -> list:
+    """Union of two lists of [start, end) ranges in ms, merged and sorted (touching ranges join)."""
+    out = []
+    for s, e in sorted([list(x) for x in a] + [list(x) for x in b]):
+        if out and s <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], e)
+        else:
+            out.append([int(s), int(e)])
+    return out
+
+
 def word_cut_ranges(words: list, cut_words: list, dur_ms: int, pad_ms: int = 30) -> tuple[list, list, list]:
     """global.cut_words -> ([a, b] ms ranges, cut word records, errors). Each word is cut from just before it starts to
     just after it ends, never into its neighbours, so the words around it stay whole.
@@ -254,6 +265,29 @@ def compile_plan(paths: Paths) -> dict:
             if b["start_frame"] < a["end_frame"]:
                 errors.append(f"track {tr}: {a['event_id']} overlaps {b['event_id']}")
 
+    # podcast reels follow their content-type recipe (00_inputs/source.json); deviations are warnings the editor sees
+    # at Gate 1, with the story-editor's reason when a decision carries `recipe_note`
+    from .recipes import for_paths
+    recipe = for_paths(paths)
+    recipe_info = None
+    if recipe:
+        rt, dev = recipe.get("type"), []
+        notes = [f"{d['decision_id']}: {d['recipe_note']}" for d in ed.get("decisions", []) if d.get("recipe_note")]
+        g = recipe.get("graphics") or {}
+        starts = sorted(e["start_ms"] for e in events if e["template"] != "flash_transition")
+        if g.get("max_per_30s") is not None and starts:
+            peak = max(sum(1 for t in starts if s <= t < s + 30000) for s in starts)
+            if peak > g["max_per_30s"]:
+                dev.append(f"{peak} graphics within 30 s (recipe max {g['max_per_30s']})")
+        dev += [f"{e['event_id']} uses {e['template']}, which the recipe avoids" for e in events
+                if e["template"] in (g.get("avoid") or [])]
+        mxs = (recipe.get("camera") or {}).get("max_scale")
+        dev += [f"{c['decision_id']} zooms x{c['scale_factor']} (recipe max x{mxs})" for c in camera
+                if mxs and c.get("scale_factor", 1.0) > mxs + 1e-9]
+        warnings += [f"recipe {rt}: {x}" for x in dev]
+        recipe_info = {"type": rt, "label": recipe.get("label"), "deviations": dev, "notes": notes,
+                       "pacing": recipe.get("pacing"), "music": recipe.get("music")}
+
     # camera timeline -> V01 segments (cuts at camera change points)
     base = ed.get("global", {})
     # framing: an explicit global.base_scale_percent wins; "auto"/absent uses preflight's face-centred reframe (wider
@@ -350,6 +384,18 @@ def compile_plan(paths: Paths) -> dict:
     if (rp and pz) or wcut_ranges:
         from .timemap import TimeMap
         keep0 = pz["keep_ms"] if (rp and pz) else [[0, dur_ms]]
+        # pauses the editor wants kept (a comedic beat, a dramatic silence): global.remove_pauses.protect, source time
+        protect = []
+        for pr in ((rp or {}).get("protect") or []) if isinstance(rp, dict) else []:
+            try:
+                a_, b_ = max(0, to_ms(pr[0])), min(dur_ms, to_ms(pr[1]))
+            except Exception:  # noqa: BLE001
+                errors.append(f"global.remove_pauses.protect entry {pr!r}: expected [start, end]")
+                continue
+            if b_ > a_:
+                protect.append([a_, b_])
+        if protect:
+            keep0 = union_ranges(keep0, protect)
         keep = subtract_ranges(keep0, wcut_ranges) if wcut_ranges else keep0
         ms_ = tuple((rp or {}).get("mask_scales", [1.0, 1.06])) if isinstance(rp, dict) else (1.0, 1.06)
         tmap = TimeMap(keep, camera, ms_)
@@ -418,6 +464,13 @@ def compile_plan(paths: Paths) -> dict:
         cps.append(dict(cp, source_ms=int(src_ms), frame=max(0, min(f, dur_f - 1))))
     if cps:
         music["cue_points"] = cps
+    if music.get("file"):   # a licensed bed from the client's library, placed on A06 under the dialogue
+        mf = str(music["file"]).replace("\\", "/")
+        if not mf.lower().startswith("data/music/") or not (paths.root / mf).is_file():
+            errors.append(f"music.file {mf!r} must be an existing licensed track under data/Music/ (never other audio)")
+        else:
+            music.update(status="PLACED", file=mf, fade_out_s=float(music.get("fade_out_s", 2.0)),
+                         level_db=float(music.get("level_db", ((recipe or {}).get("music") or {}).get("level_db", -24))))
     caption_hl = [{"text": h["text"], "at_ms": to_ms(h["at"]) if h.get("at") else None}
                   for h in ed.get("caption_highlights", [])]
 
@@ -435,7 +488,7 @@ def compile_plan(paths: Paths) -> dict:
             "main_segments": merged, "events": sorted(events, key=lambda e: (e["start_frame"], e["track"])),
             "caption_source": "02_transcription/captions-short-seq.srt" if tmap else "02_transcription/captions-short.srt",
             "caption_highlights": caption_hl, "time_map": time_map_info,
-            "music": music}
+            "music": music, "recipe": recipe_info}
     # words the transcript editor flagged as uncertain never go on a graphic until the editor has heard them
     from .transcribe import transcript_flags
     flagged = transcript_flags(paths)
@@ -520,8 +573,16 @@ def write_edit_plan(paths: Paths) -> Path:
          + (f" (source cutaways shown whole: {cut_away / spec.get('fps', 24):.1f} s)" if cut_away else "")
          + f" · {len(pend)} items need content approval", "",
          "Times are on the reel's timeline (after pause removal and word cuts).", "",
-         f"Framing: {spec.get('framing', 'fit')}", "",
-         "## Decisions", "", "| # | Time | Treatment | On-screen text | Why (speaker's words) | Approval |", "|---|---|---|---|---|---|"]
+         f"Framing: {spec.get('framing', 'fit')}", ""]
+    rec = spec.get("recipe")
+    if rec:
+        lab = rec.get("label") or {}
+        L += [f"Recipe: {rec['type']} ({lab.get('ar') or lab.get('en') or ''}); pauses removed from "
+              f"{(rec.get('pacing') or {}).get('min_pause_ms', '?')} ms"]
+        L += [f"- deviation: {x}" for x in rec.get("deviations", [])]
+        L += [f"- story-editor's note: {x}" for x in rec.get("notes", [])]
+        L += [""]
+    L += ["## Decisions", "", "| # | Time | Treatment | On-screen text | Why (speaker's words) | Approval |", "|---|---|---|---|---|---|"]
     for d in ed.get("decisions", []):
         gfx = [e for e in spec["events"] if e["decision_id"] == d["decision_id"] and e["template"] != "flash_transition"]
         text = " / ".join((g["params"].get("text") or g["params"].get("headline") or g["params"].get("title") or
@@ -542,6 +603,8 @@ def write_edit_plan(paths: Paths) -> Path:
     sem = read_json(paths.p("01_analysis/transcript-semantic-analysis.json"), {})
     L += [f"- {o.get('concept')}: {o.get('reason')}" for o in sem.get("broll_opportunities", [])
           if str(o.get("decision", "")).startswith(("rejected", "deferred"))] or ["- (none recorded)"]
-    L += ["", f"Music: {spec.get('music', {}).get('status')}", "",
+    mu = spec.get("music", {})
+    L += ["", f"Music: {mu.get('status')}" + (f" — {mu.get('file')} at {mu.get('level_db')} dB, {mu.get('fade_out_s')} s fade-out"
+                                               if mu.get("status") == "PLACED" else ""), "",
           "**To approve:** reply 'approved' (or list changes). Adobe builds wait for `reel approve-plan`."]
     return write_text(paths.p("01_analysis/edit-plan.md"), "\n".join(L) + "\n")

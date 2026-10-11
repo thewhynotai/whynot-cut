@@ -322,6 +322,35 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
                        f"{fel}<sourcetrack><mediatype>audio</mediatype><trackindex>{ch}</trackindex></sourcetrack>{lv}{links}</clipitem>")
         used_media.append(str(f))
 
+    # ---------------- licensed music bed (A06): under the dialogue from the first frame, trimmed to the sequence,
+    # level from the recipe/decision with a fade-out at the end (only a track from the client's data/Music library)
+    mu = spec.get("music") or {}
+    if mu.get("status") == "PLACED" and mu.get("file"):
+        f = paths.root / mu["file"]
+        if f.exists():
+            n_file = max(1, math.floor(audio_duration(f) * fps))
+            n = min(dur, n_file)
+            lvl = 10 ** (float(mu.get("level_db", -24)) / 20)
+            fo = min(n, round(float(mu.get("fade_out_s", 2.0)) * fps))
+            fe = xb.file_el(f, "audio", n_file, fps, audio_ch=2)
+            idL, idR = xb.clip_id(), xb.clip_id()
+            lv = (f"<filter><effect><name>Audio Levels</name><effectid>audiolevels</effectid><effectcategory>audiolevels</effectcategory>"
+                  f"<effecttype>audiolevels</effecttype><mediatype>audio</mediatype><parameter><parameterid>level</parameterid>"
+                  f"<name>Level</name><valuemin>0</valuemin><valuemax>3.98109</valuemax><value>{lvl:.5f}</value>"
+                  f"<keyframe><when>{n - fo}</when><value>{lvl:.5f}</value></keyframe>"
+                  f"<keyframe><when>{n}</when><value>0</value></keyframe></parameter></effect></filter>")
+            pair = atracks.setdefault("A06", ([], []))
+            k = len(pair[0]) + 1
+            links = (f"<link><linkclipref>{idL}</linkclipref><mediatype>audio</mediatype><trackindex>__TL_A06__</trackindex><clipindex>{k}</clipindex><groupindex>1</groupindex></link>"
+                     f"<link><linkclipref>{idR}</linkclipref><mediatype>audio</mediatype><trackindex>__TR_A06__</trackindex><clipindex>{k}</clipindex><groupindex>1</groupindex></link>")
+            for cid, ch, lst, fel in ((idL, 1, pair[0], fe), (idR, 2, pair[1], f'<file id="{xb.files[str(f)]}"/>')):
+                lst.append(f'<clipitem id="{cid}" premiereChannelType="mono"><name>{escape("MUSIC · " + f.name)}</name><enabled>TRUE</enabled>'
+                           f"<duration>{n_file}</duration>{rate(fps)}<start>0</start><end>{n}</end><in>0</in><out>{n}</out>"
+                           f"{fel}<sourcetrack><mediatype>audio</mediatype><trackindex>{ch}</trackindex></sourcetrack>{lv}{links}</clipitem>")
+            used_media.append(str(f))
+        else:
+            missing.append("MUSIC " + mu["file"])
+
     # ---------------- markers (every decision/event, for the editor)
     markers = []
     for ev in spec["events"]:

@@ -27,7 +27,9 @@ ARGS: dict = {
         (("--force",), {"action": "store_true", "help": "re-slice a reel whose window changed"}),
         (("--resync",), {"action": "store_true", "help": "re-slice selected reels' transcripts after episode corrections"}),
     ],
+    "music": [(("--list",), {"action": "store_true", "help": "list the licensed tracks in data/Music with mood tags"})],
 }
+NO_EPISODE = {"episodes", "music"}
 
 
 def add_args(name: str, sp) -> None:
@@ -46,7 +48,7 @@ def EP(a):
 
 def resolve_episode(a) -> None:
     """Fill a.episode when the command needs one and the client has exactly one episode."""
-    if a.cmd == "episodes" or getattr(a, "episode", None):
+    if a.cmd in NO_EPISODE or getattr(a, "episode", None):
         return
     from .episode import list_episodes
     eps = list_episodes(Path(a.root))
@@ -110,6 +112,15 @@ def cmd_reels_select(a):
     if a.by == "delegated" and not a.note.strip():
         raise SystemExit("--by delegated needs --note with the editor's own words")
     out(select(EP(a), picks, a.adjust, a.by, note=a.note, confirm_avoid=a.confirm_avoid, force=a.force, resync=a.resync))
+
+
+def cmd_music(a):
+    from .recipes import music_library, types
+    lib = music_library(Path(a.root))
+    out({"tracks": lib, "recipe_moods": {t: r.get("music", {}).get("mood") for t, r in types().items()},
+         "how": "pick a track whose moods fit the reel's recipe and set edit-decisions music.file (licensed tracks only; "
+                "no track fits -> leave music for the editor)" if lib else
+                "no licensed music in data/Music: the music track stays for the editor (Needs you: music)"})
 
 
 def _chunks_missing(ep) -> bool:
