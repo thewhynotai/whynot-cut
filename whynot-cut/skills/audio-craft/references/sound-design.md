@@ -9,8 +9,9 @@
   55 dB S/N): one channel, one 100 Hz notch, no denoise, 56.9 → 58.9 dB at −14.3 LUFS. Spectrograms in
   `08_quality_control/audio/`. Original camera audio stays on A7/A8 **disabled** for A/B.
 - **Pause removal:** `audio-clean` detects pauses on the CLEANED audio (noise hid them before), keeps 80 ms breath each side,
-  then re-transcribes the tightened audio in ≤ 20 s chunks and diffs it (`cut-verification.json`); any missing word = bad
-  cut, and too few matched words = inconclusive (listen). Enable with
+  then re-transcribes ±3 s windows around every cut, including a removed lead-in or tail, cut and uncut, and diffs
+  them (`cut-verification.json`). Close cuts share a window of ≤ 20 s; a long removed span is read in ≤ 20 s pieces.
+  Any missing word = bad cut; too few matched words, or a window that heard nothing = inconclusive (listen). Enable with
   `global.remove_pauses` in edit-decisions; the planner remaps all graphics/captions/SFX and alternates a 6 % zoom at cuts.
 - **SFX:** if `data/` contains an approved SFX library (role `sfx`), map kinds → files in `06_audio/sfx-map.json`.
   Otherwise `reel sfx` synthesizes **original** procedural cues (ffmpeg; no third-party audio):

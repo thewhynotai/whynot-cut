@@ -19,10 +19,13 @@ It needs `02_transcription/transcript.json` with word times, so transcribe first
    - already clean (≥ 40 dB speech-to-noise, e.g. a mastered episode) → **no** spectral denoise, which would only add artefacts.
 2. Chain: high-pass 90 Hz (twice) → [hum notches] → [`afftdn` denoise, 24 dB] → plain gain + true-peak limiter to −14 LUFS.
 3. Detects pauses on the **cleaned** audio (the noise hid them before). Each pause keeps 80 ms of breath at both ends.
-4. Proves no speech was cut: in ≤ 20 s chunks split at the cuts, the same Whisper model reads the uncut span and the
-   cut audio with identical, deterministic settings (temperature 0), and the two readings are compared. A word of the
-   uncut reading missing next to a cut is a bad cut. `ok` needs no missing word and ≥ 85 % of the words matched;
-   otherwise the verdict is "inconclusive" and the cuts need the editor's ear. Pauses the edit protects
+4. Proves no speech was cut, in ±3 s windows around every cut, including a removed lead-in or tail. Close cuts share
+   one window of ≤ 20 s, and a long removed span is read in ≤ 20 s pieces. The same Whisper model reads the uncut
+   window and the same window with the cuts applied, with identical, deterministic settings (temperature 0), and the
+   two readings are compared. A word of the uncut reading missing next to a cut is a bad cut, and so is any word heard
+   inside a long removed span. `ok` needs no missing word, ≥ 85 % of the words matched and every window read (words
+   heard, audio not shorter than the span). Otherwise the verdict is "inconclusive" and the cuts need the editor's
+   ear. `windows` in `cut-verification.json` lists each window with its word counts. Pauses the edit protects
    (`global.remove_pauses.protect`) are not cut, so they are not tested.
 
 **Outputs** (`06_audio/dialogue/`):

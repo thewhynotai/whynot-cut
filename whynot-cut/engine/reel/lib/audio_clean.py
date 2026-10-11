@@ -136,11 +136,12 @@ def _stream_win_db(blocks, hop: int = HOP, sig=None) -> tuple[np.ndarray, int]:
     """_win_db over a block source (sig picks the signal from a block; default channel 1) and the length in samples.
     Identical to _win_db on the whole file: each window is reduced on its own and no window straddles two blocks."""
     parts, n = [], 0
-    for b in blocks():
-        if n % hop:
-            raise ValueError(f"streaming blocks must be whole {hop}-sample windows")
-        parts.append(_wpow(b[:, 0] if sig is None else sig(b), hop))
-        n += len(b)
+    with contextlib.closing(blocks()) as it:   # closed (PyAV handle too) even if the loop raises
+        for b in it:
+            if n % hop:
+                raise ValueError(f"streaming blocks must be whole {hop}-sample windows")
+            parts.append(_wpow(b[:, 0] if sig is None else sig(b), hop))
+            n += len(b)
     return (_db(np.concatenate(parts)) if parts else np.zeros(0, np.float32)), n
 
 
@@ -168,18 +169,19 @@ def _hum(blocks, sig, d: np.ndarray, max_hz: int = 500) -> dict:
     use_quiet = int(quiet.sum()) * HOP >= 2 * SR   # else the whole signal
     han = np.hanning(SR)
     total, k, buf, w = None, 0, [], 0
-    for b in blocks():
-        s = sig(b)
-        if use_quiet:
-            nw = len(s) // HOP
-            s = s[:nw * HOP].reshape(nw, HOP)[quiet[w:w + nw]].reshape(-1)
-            w += nw
-        buf.append(s)
-        if sum(len(v) for v in buf) >= SR:   # 1 s FFTs (1 Hz bins) over the concatenated quiet audio, averaged
-            cat = np.concatenate(buf)
-            m = len(cat) // SR
-            spec = np.abs(np.fft.rfft(cat[:m * SR].reshape(m, SR) * han, axis=1)).sum(axis=0)
-            total, k, buf = (spec if total is None else total + spec), k + m, [cat[m * SR:]]
+    with contextlib.closing(blocks()) as it:   # closed (PyAV handle too) even if the loop raises
+        for b in it:
+            s = sig(b)
+            if use_quiet:
+                nw = len(s) // HOP
+                s = s[:nw * HOP].reshape(nw, HOP)[quiet[w:w + nw]].reshape(-1)
+                w += nw
+            buf.append(s)
+            if sum(len(v) for v in buf) >= SR:   # 1 s FFTs (1 Hz bins) over the concatenated quiet audio, averaged
+                cat = np.concatenate(buf)
+                m = len(cat) // SR
+                spec = np.abs(np.fft.rfft(cat[:m * SR].reshape(m, SR) * han, axis=1)).sum(axis=0)
+                total, k, buf = (spec if total is None else total + spec), k + m, [cat[m * SR:]]
     if k < 1:
         return none
     spec = total / k + 1e-12
@@ -212,25 +214,26 @@ def _scan(blocks, segs=()) -> dict:
     sa = np.array([a for a, _ in bounds], dtype=np.int64)
     sb = np.array([b for _, b in bounds], dtype=np.int64)
     ch, n = None, 0
-    for b in blocks():
-        if ch is None:
-            ch = b.shape[1]
-            pw, pw_mean = [[] for _ in range(ch)], []
-            ss, ss_diff = np.zeros(ch), 0.0
-            seg_ss, seg_n = np.zeros((len(bounds), ch)), np.zeros(len(bounds), dtype=np.int64)
-        for c in range(ch):
-            pw[c].append(_wpow(b[:, c], HOP))
-        sq = np.square(b, dtype=np.float64)
-        ss += sq.sum(axis=0)
-        if ch >= 2:
-            pw_mean.append(_wpow(b.mean(axis=1), HOP))
-            ss_diff += float(np.square(b[:, 0] - b[:, 1], dtype=np.float64).sum())
-        p0, p1 = n, n + len(b)
-        for i in np.nonzero((sa < p1) & (sb > p0))[0]:
-            lo, hi = max(int(sa[i]), p0) - p0, min(int(sb[i]), p1) - p0
-            seg_ss[i] += sq[lo:hi].sum(axis=0)
-            seg_n[i] += hi - lo
-        n = p1
+    with contextlib.closing(blocks()) as it:   # closed (PyAV handle too) even if the loop raises
+        for b in it:
+            if ch is None:
+                ch = b.shape[1]
+                pw, pw_mean = [[] for _ in range(ch)], []
+                ss, ss_diff = np.zeros(ch), 0.0
+                seg_ss, seg_n = np.zeros((len(bounds), ch)), np.zeros(len(bounds), dtype=np.int64)
+            for c in range(ch):
+                pw[c].append(_wpow(b[:, c], HOP))
+            sq = np.square(b, dtype=np.float64)
+            ss += sq.sum(axis=0)
+            if ch >= 2:
+                pw_mean.append(_wpow(b.mean(axis=1), HOP))
+                ss_diff += float(np.square(b[:, 0] - b[:, 1], dtype=np.float64).sum())
+            p0, p1 = n, n + len(b)
+            for i in np.nonzero((sa < p1) & (sb > p0))[0]:
+                lo, hi = max(int(sa[i]), p0) - p0, min(int(sb[i]), p1) - p0
+                seg_ss[i] += sq[lo:hi].sum(axis=0)
+                seg_n[i] += hi - lo
+            n = p1
     if ch is None:
         raise ValueError("no audio samples")
     return {"n": n, "channels": ch, "pw": [np.concatenate(v) for v in pw],
@@ -422,15 +425,16 @@ def evidence(paths: Paths, raw: Path, final: Path, plan: list[dict]) -> dict:
     ff = ffmpeg_exe()
     segs = [(int(p["start_ms"] * SR / 1000), int(p["end_ms"] * SR / 1000), p["channel"] - 1) for p in plan]
     parts, pos = [], 0
-    for b in _iter_blocks(raw):  # compare like with like: raw = the same channel choice, unprocessed
-        p0, p1 = pos, pos + len(b)
-        best_raw = np.zeros(len(b), dtype=np.float32)
-        for a, e, c in segs:
-            lo, hi = max(a, p0), min(e, p1)
-            if hi > lo:
-                best_raw[lo - p0:hi - p0] = b[lo - p0:hi - p0, c]
-        parts.append(_wpow(best_raw, HOP))
-        pos = p1
+    with contextlib.closing(_iter_blocks(raw)) as it:   # closed (PyAV handle too) even if the loop raises
+        for b in it:  # compare like with like: raw = the same channel choice, unprocessed
+            p0, p1 = pos, pos + len(b)
+            best_raw = np.zeros(len(b), dtype=np.float32)
+            for a, e, c in segs:
+                lo, hi = max(a, p0), min(e, p1)
+                if hi > lo:
+                    best_raw[lo - p0:hi - p0] = b[lo - p0:hi - p0, c]
+            parts.append(_wpow(best_raw, HOP))
+            pos = p1
     before = _db(np.concatenate(parts)) if parts else np.zeros(0, np.float32)
     after = _stream_win_db(lambda: _iter_blocks(final))[0]
     qc = paths.p("08_quality_control/audio")
@@ -502,8 +506,9 @@ def detect_pauses(paths: Paths, min_pause_ms: int = 250, pad_ms: int = 80, margi
 
 # --------------------------------------------------------------------------- cut proof
 CUT_CONTEXT_MS = 3000    # uncut audio read on each side of a cut
-READ_MAX_MS = 20000      # longest uncut span one reading may hold (close cuts share a reading)
+READ_MAX_MS = 20000      # longest stretch one Whisper reading may hold (close cuts share a reading)
 EDGE_PAD_MS = 100        # a window edge that falls inside a word moves out to just before / after that word
+EDGE_MOVE_MAX_MS = 1500  # ... but never further than this (a run of touching words keeps the plain 3 s edge)
 FADE = int(0.01 * SR)    # 10 ms fades at each join (what Premiere's cut + default audio looks like)
 
 
@@ -512,17 +517,26 @@ def _cut_windows(keeps: list, words: list, dur_ms: int) -> list[dict]:
     Each cut gets >= 3 s of kept audio on both sides (less only where the neighbouring cut or the clip edge comes
     first), window edges are moved out of words, and neighbouring cuts share a window while it stays <= 20 s. A window
     ends inside the keeps next to its own cuts, so it never contains a cut it does not own; two windows may share a
-    stretch of one keep."""
+    stretch of one keep. A single cut whose removed span makes its window longer than 20 s is read in <= 20 s pieces
+    (`pieces`) split inside the removed span; every other window is one piece."""
     ws = np.array([w["start_ms"] for w in words], dtype=float)
     we = np.array([w["end_ms"] for w in words], dtype=float)
 
     def out_of_words(t, bound, lo_side):
-        for _ in range(50):   # words can touch: step out until no word holds the edge
-            inside = (ws < t) & (we > t)
-            if not inside.any():
-                break
-            t = max(bound, int(ws[inside].min()) - EDGE_PAD_MS) if lo_side else min(bound, int(we[inside].max()) + EDGE_PAD_MS)
-        return t
+        inside = (ws < t) & (we > t)
+        if not inside.any():
+            return t
+        if lo_side:   # into the gap before the word that holds the edge
+            s = ws[inside].min()
+            prev = we[we <= s]
+            e = prev.max() if prev.size else -np.inf
+            new = (e + s) / 2 if e > s - EDGE_PAD_MS else s - EDGE_PAD_MS
+            return t if t - new > EDGE_MOVE_MAX_MS else max(bound, int(new))
+        e = we[inside].max()   # into the gap after it
+        nxt = ws[ws >= e]
+        s = nxt.min() if nxt.size else np.inf
+        new = (e + s) / 2 if s < e + EDGE_PAD_MS else e + EDGE_PAD_MS
+        return t if new - t > EDGE_MOVE_MAX_MS else min(bound, int(np.ceil(new)))
 
     start_of = {kb: ka for ka, kb in keeps}   # keep ending where a cut starts -> its start
     end_of = {ka: kb for ka, kb in keeps}     # keep starting where a cut ends -> its end
@@ -530,7 +544,8 @@ def _cut_windows(keeps: list, words: list, dur_ms: int) -> list[dict]:
     if not keeps:
         cuts = [(0, dur_ms)] if dur_ms > 0 else []
     else:
-        cuts = ([(0, keeps[0][0])] if keeps[0][0] > 0 else []) + cuts +                ([(keeps[-1][1], dur_ms)] if dur_ms > keeps[-1][1] else [])
+        cuts = ([(0, keeps[0][0])] if keeps[0][0] > 0 else []) + cuts + \
+               ([(keeps[-1][1], dur_ms)] if dur_ms > keeps[-1][1] else [])
     wins = []
     for ra, rb in cuts:
         bound_lo, bound_hi = start_of.get(ra, ra), end_of.get(rb, rb)
@@ -541,6 +556,17 @@ def _cut_windows(keeps: list, words: list, dur_ms: int) -> list[dict]:
             wins[-1]["cuts"].append((ra, rb))
         else:
             wins.append({"lo": lo, "hi": hi, "cuts": [(ra, rb)]})
+    for w in wins:
+        lo, hi = w["lo"], w["hi"]
+        if hi - lo <= READ_MAX_MS:
+            w["pieces"] = [(lo, hi)]
+            continue
+        # only a single cut can make a window this long (merging stops at READ_MAX_MS): split it into equal pieces,
+        # every split point inside the removed span [ra, rb] (the kept context on each side is ~3 s, a piece >= 10 s)
+        ra, rb = w["cuts"][0]
+        n = -(-(hi - lo) // READ_MAX_MS)
+        edges = [lo] + [min(max(lo + (hi - lo) * j // n, ra), rb) for j in range(1, n)] + [hi]
+        w["pieces"] = [(a, b) for a, b in zip(edges, edges[1:]) if b > a]
     return wins
 
 
@@ -561,15 +587,17 @@ def _faded(seg: np.ndarray, g0: int, k: int, ks: list) -> np.ndarray:
     return out
 
 
-def _tight_pass(clean: Path, keeps: list, wins: list[dict], tight_out: Path):
+def _tight_pass(clean: Path, keeps: list, spans_ms: list, tight_out: Path):
     """ONE pass over the cleaned dialogue: writes the whole tightened check file (tight_out, to listen to) and yields
-    (window index, uncut samples of that window, keep sample bounds). Only the open windows are held in memory."""
+    (span index, uncut samples of that span, keep sample bounds) for each [lo, hi) ms span, in order (spans are sorted
+    and each is <= 20 s, so only a few seconds of audio are ever held). A span past the end of the file comes back
+    short or empty."""
     ks = [(int(a * SR / 1000), int(b * SR / 1000)) for a, b in keeps]
-    spans = [(int(w["lo"] * SR / 1000), int(w["hi"] * SR / 1000)) for w in wins]
+    spans = [(int(a * SR / 1000), int(b * SR / 1000)) for a, b in spans_ms]
     kp, nxt, opened, pos = 0, 0, {}, 0
-    with wave.open(str(tight_out), "wb") as w:
+    with wave.open(str(tight_out), "wb") as w, contextlib.closing(_iter_blocks(clean)) as blocks:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
-        for b in _iter_blocks(clean):
+        for b in blocks:
             s, p0, p1 = b[:, 0], pos, pos + len(b)
             pos = p1
             while kp < len(ks) and ks[kp][1] <= p0:
@@ -591,7 +619,7 @@ def _tight_pass(clean: Path, keeps: list, wins: list[dict], tight_out: Path):
                     opened[i].append(s[lo - p0:hi - p0].copy())
                 if e <= p1:
                     yield i, np.concatenate(opened.pop(i) or [np.zeros(0, np.float32)]), ks
-        for i in list(opened) + list(range(nxt, len(spans))):   # windows that run past the end of the file
+        for i in list(opened) + list(range(nxt, len(spans))):   # spans that run past the end of the file
             yield i, np.concatenate(opened.pop(i, None) or [np.zeros(0, np.float32)]), ks
 
 
@@ -610,7 +638,13 @@ def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
     window's reading exactly as it dropped out of the chunk's. Coverage (>= 85 %) is now measured around the cuts,
     not diluted by long stretches of untouched audio, so that gate can only get stricter; and every cut is now
     compared: the old chunks were split AT cuts, so a cut on a chunk boundary, the removed lead-in and the removed
-    tail were never read."""
+    tail were never read.
+
+    No reading is ever longer than 20 s (one long decode lets Whisper skip a whole 30 s window: G24). A single cut that
+    removes a long span is read uncut in <= 20 s pieces split inside the removed span; any word heard inside the
+    removed span is missing by definition, and the rest is compared with the cut reading (the kept context, joined).
+    A window is not proved when the uncut reading heard no word at all or its audio is shorter than the span (the
+    pauses run past the end of the file): `ok` is then false with an "inconclusive" verdict."""
     import difflib
     import gc
     import re as _re
@@ -626,6 +660,7 @@ def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
     clean = paths.p("06_audio/dialogue/dialogue_clean.wav")
     words = (read_json(paths.p("02_transcription/words.json"), {}) or {}).get("words") or []
     wins = _cut_windows(keeps, words, int(pz.get("source_duration_ms") or (keeps[-1][1] if keeps else 0)))
+    spans = [(wi, pi) for wi, w in enumerate(wins) for pi in range(len(w["pieces"]))]
     out = paths.p("06_audio/dialogue/dialogue_tight_check.wav")
     tj = read_json(paths.p("02_transcription/transcript.json"))
     lang = tj["meta"].get("language")
@@ -637,62 +672,99 @@ def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
     opts = dict(language=lang, beam_size=5, condition_on_previous_text=False, initial_prompt=prompt, temperature=0.0,
                 word_timestamps=True)
     m = whisper_model(model_size)[0] if wins else None   # no cut, nothing to prove: Whisper is not loaded
-    missing, asr_variance, changed, texts = [], [], [], []
+    missing, asr_variance, changed, texts, report = [], [], [], [], []
     matched = total = n_tight = 0
-    for i, uncut, ks in _tight_pass(clean, keeps, wins, out):
-        win = wins[i]
-        s0, g0 = win["lo"], int(win["lo"] * SR / 1000)
-        pieces = []   # the same span with its cuts applied (the keeps inside the window, faded at the joins)
-        for k in range(len(ks)):
-            lo, hi = max(ks[k][0], g0), min(ks[k][1], g0 + len(uncut))
-            if hi > lo:
-                pieces.append(_faded(uncut[lo - g0:hi - g0], lo, k, ks))
-        bsegs, _ = m.transcribe(_to16k(uncut), **opts)
-        base = [(t, s0 + w.start * 1000, s0 + w.end * 1000) for sg in bsegs for w in (sg.words or [])
-                for t in norm(w.word).split()]
-        tsegs, _ = m.transcribe(_to16k(np.concatenate(pieces) if pieces else np.zeros(0, np.float32)), **opts)
-        txt = " ".join(sg.text for sg in tsegs)
-        texts.append(txt)
-        b = norm(txt).split()
-        a = [t for t, _, _ in base]
-        removed = win["cuts"]
+    st = None
+    with contextlib.closing(_tight_pass(clean, keeps, [wins[wi]["pieces"][pi] for wi, pi in spans], out)) as passes:
+        for si, uncut, ks in passes:
+            wi, pi = spans[si]
+            win = wins[wi]
+            if pi == 0:
+                st = {"base": [], "tight": [], "short": False}
+            a0, b0 = win["pieces"][pi]
+            g0 = int(a0 * SR / 1000)
+            if len(uncut) < int(b0 * SR / 1000) - g0 - SR // 100:
+                st["short"] = True       # the pauses run past the end of the audio: this span was not all read
+            bsegs, _ = m.transcribe(_to16k(uncut), **opts)
+            st["base"] += [(t, a0 + w.start * 1000, a0 + w.end * 1000) for sg in bsegs for w in (sg.words or [])
+                           for t in norm(w.word).split()]
+            for k in range(len(ks)):     # the kept parts of this span, faded at the joins
+                lo, hi = max(ks[k][0], g0), min(ks[k][1], g0 + len(uncut))
+                if hi > lo:
+                    st["tight"].append(_faded(uncut[lo - g0:hi - g0], lo, k, ks))
+            if pi < len(win["pieces"]) - 1:
+                gc.collect()
+                continue
+            # the window is complete: one reading of the same span with its cuts applied, then compare
+            tsegs, _ = m.transcribe(_to16k(np.concatenate(st["tight"]) if st["tight"] else np.zeros(0, np.float32)),
+                                    **opts)
+            txt = " ".join(sg.text for sg in tsegs)
+            texts.append(txt)
+            b = norm(txt).split()
+            removed = win["cuts"]
+            base, gone = st["base"], []
+            if len(win["pieces"]) > 1:   # a long removed span: a word heard inside it is missing by definition
+                ra, rb = removed[0]
+                gone = [x for x in base if ra < (x[1] + x[2]) / 2 < rb]
+                base = [x for x in base if not ra < (x[1] + x[2]) / 2 < rb]
+                for t, s0, s1 in gone:
+                    missing.append({"words": t, "src_ms": [round(s0), round(s1)], "cuts_nearby": [(ra, rb)],
+                                    "heard_inside_removed_span": True})
+            a = [t for t, _, _ in base]
 
-        def near_cut(i1, i2, slack=60):
-            e0, e1 = base[i1][1], base[i2 - 1][2]
-            return [(ra, rb) for ra, rb in removed if ra < e1 + slack and rb > e0 - slack]
-        sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
-        for op, i1, i2, j1, j2 in sm.get_opcodes():
-            if op == "delete":
-                item = {"words": " ".join(a[i1:i2]), "src_ms": [round(base[i1][1]), round(base[i2 - 1][2])],
-                        "cuts_nearby": near_cut(i1, i2)}
-                (missing if item["cuts_nearby"] else asr_variance).append(item)
-            elif op == "replace":
-                item = {"orig": " ".join(a[i1:i2]), "tight": " ".join(b[j1:j2]),
-                        "src_ms": [round(base[i1][1]), round(base[i2 - 1][2])], "cuts_nearby": near_cut(i1, i2)}
-                # many words heard as few is lost speech, not a different reading
-                if (i2 - i1) - (j2 - j1) >= 3 and (j2 - j1) < 0.5 * (i2 - i1):
-                    (missing if item["cuts_nearby"] else asr_variance).append(
-                        {"words": item["orig"], "src_ms": item["src_ms"], "cuts_nearby": item["cuts_nearby"],
-                         "heard_as": item["tight"]})
-                else:
-                    changed.append(item)
-        matched += sum(bl.size for bl in sm.get_matching_blocks())
-        gc.collect()   # the two resamplers' filter graphs (see _to16k): memory stays flat over hundreds of windows
-        total += len(a)
-        n_tight += len(b)
+            def near_cut(i1, i2, slack=60):
+                e0, e1 = base[i1][1], base[i2 - 1][2]
+                return [(ra, rb) for ra, rb in removed if ra < e1 + slack and rb > e0 - slack]
+            sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+            for op, i1, i2, j1, j2 in sm.get_opcodes():
+                if op == "delete":
+                    item = {"words": " ".join(a[i1:i2]), "src_ms": [round(base[i1][1]), round(base[i2 - 1][2])],
+                            "cuts_nearby": near_cut(i1, i2)}
+                    (missing if item["cuts_nearby"] else asr_variance).append(item)
+                elif op == "replace":
+                    item = {"orig": " ".join(a[i1:i2]), "tight": " ".join(b[j1:j2]),
+                            "src_ms": [round(base[i1][1]), round(base[i2 - 1][2])], "cuts_nearby": near_cut(i1, i2)}
+                    # many words heard as few is lost speech, not a different reading
+                    if (i2 - i1) - (j2 - j1) >= 3 and (j2 - j1) < 0.5 * (i2 - i1):
+                        (missing if item["cuts_nearby"] else asr_variance).append(
+                            {"words": item["orig"], "src_ms": item["src_ms"], "cuts_nearby": item["cuts_nearby"],
+                             "heard_as": item["tight"]})
+                    else:
+                        changed.append(item)
+            # coverage counts each uncut word once: a stretch of keep read by the previous window too belongs to it
+            owned_from = wins[wi - 1]["hi"] if wi else -np.inf
+            hit = np.zeros(len(a), dtype=bool)
+            for bl in sm.get_matching_blocks():
+                hit[bl.a:bl.a + bl.size] = True
+            own = np.array([x[1] >= owned_from for x in base], dtype=bool)
+            matched += int((hit & own).sum())
+            total += int(own.sum()) + sum(1 for x in gone if x[1] >= owned_from)
+            n_tight += len(b)
+            report.append({"ms": [win["lo"], win["hi"]], "cuts": len(removed), "pieces": len(win["pieces"]),
+                           "uncut_words": len(st["base"]), "cut_words": len(b), "short_audio": st["short"]})
+            st = None
+            gc.collect()   # the resamplers' filter graphs (see _to16k): memory stays flat over hundreds of windows
     coverage = round(matched / max(1, total), 3) if wins else 1.0
-    ok = not missing and coverage >= 0.85
+    unread = [r["ms"] for r in report if not r["uncut_words"]]
+    short = [r["ms"] for r in report if r["short_audio"]]
+    ok = not missing and coverage >= 0.85 and not unread and not short
     res = {"ok": ok, "coverage": coverage, "orig_words": total, "tight_words": n_tight, "chunks": len(wins),
            "cuts": sum(len(w["cuts"]) for w in wins), "windows_ms": [[w["lo"], w["hi"]] for w in wins],
+           "windows": report, "windows_without_words": unread, "windows_short_audio": short,
            "protected_ranges_ms": prot,
            "missing": missing, "asr_variance_not_near_cuts": asr_variance, "changed": changed,
            "rule": "per cut: the same model reads the uncut source around it (>= 3 s each side; close cuts share one "
-                   "<= 20 s window) and the same span with the cuts applied; missing = a word of the uncut reading "
-                   "absent from (or collapsed in) the cut reading AND within 60 ms of a cut; ok also needs >= 85 % matched",
+                   "<= 20 s window; a long removed span is read in <= 20 s pieces and any word heard inside it is "
+                   "missing) and the same span with the cuts applied; missing = a word of the uncut reading absent from "
+                   "(or collapsed in) the cut reading AND within 60 ms of a cut; ok also needs >= 85 % matched and "
+                   "every window read (words heard, audio not short)",
            "tight_transcript": "  ".join(texts).strip(), "at": now_iso()}
     if not wins:
         res["note"] = "no cuts: nothing was removed, so there is nothing to prove"
     elif not ok and not missing:
-        res["verdict"] = "inconclusive: the two readings matched too few words to prove the cuts; listen to them"
+        why = [f"{len(short)} window(s) run past the end of the audio" if short else "",
+               f"{len(unread)} window(s) where the uncut reading heard no word" if unread else "",
+               "the two readings matched too few words to prove the cuts" if coverage < 0.85 else ""]
+        res["verdict"] = "inconclusive: " + "; ".join(x for x in why if x) + "; listen to them"
     write_json(paths.p("06_audio/dialogue/cut-verification.json"), res)
     return res

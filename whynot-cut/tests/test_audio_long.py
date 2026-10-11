@@ -8,6 +8,7 @@ The 60-minute memory test is slow (≈ 1-2 min): it runs only with WHYNOT_SLOW_T
 """
 import sys as _sys
 _sys.dont_write_bytecode = True
+import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import json
 import os
 import shutil
@@ -397,7 +398,10 @@ class TestVerifyCuts(_Proj):
         self.assertEqual(r["missing"], [])
         self.assertEqual(r["cuts"], 11)
         self.assertGreaterEqual(r["coverage"], 0.85)
-        self.assertEqual(r["orig_words"], r["tight_words"])
+        self.assertEqual(r["orig_words"], 48)        # each word counted once, also where two windows share a keep
+        self.assertGreaterEqual(r["tight_words"], 48)
+        self.assertTrue(all(w["uncut_words"] and not w["short_audio"] for w in r["windows"]), r["windows"])
+        self.assertEqual((r["windows_without_words"], r["windows_short_audio"]), ([], []))
         # G57: both readings deterministic and identical in settings (temperature 0, same hint, same model)
         opts = [o for _, o in self.reader.calls]
         self.assertEqual(len(opts) % 2, 0)
@@ -505,6 +509,78 @@ class TestVerifyCuts(_Proj):
         self.assertTrue(all(covered), covered)       # every cut sits inside a window
 
 
+class TestLongRemovedSpans(_Proj):
+    """A single cut that removes a long span is read uncut in <= 20 s pieces (G24: a long decode lets Whisper skip
+    speech); windows that heard nothing or run past the audio are not proved."""
+    DUR = 115.0
+
+    def setUp(self):
+        super().setUp()
+        self.reader = ToneReader()
+        patcher = mock.patch("lib.transcribe.whisper_model", side_effect=lambda *a, **k: (self.reader, "cpu", "int8"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _clip(self, mid_phrase: bool):
+        words = phrases(4) + ([(f"w{j + 5}", 50.0 + 0.5 * j, 0.3) for j in range(4)] if mid_phrase else []) + \
+            phrases(6, start=90.3)
+        write_wav(self.p.p("06_audio/dialogue/dialogue_clean.wav"),
+                  np.repeat(tone_audio(words, self.DUR)[:, None], 2, axis=1))
+        write_transcript(self.p, words, int(self.DUR * 1000))
+        return words
+
+    def _verify(self, keep, dur_ms=None):
+        write_json(self.p.p("06_audio/dialogue/pauses.json"),
+                   {"keep_ms": keep, "source_duration_ms": dur_ms or int(self.DUR * 1000)})
+        return AC.verify_cuts(self.p)
+
+    def test_twenty_second_silence_removed_in_pieces(self):
+        self._clip(mid_phrase=True)
+        r = self._verify([[0, 13000], [33000, 115000]])
+        self.assertTrue(r["ok"], r)
+        self.assertGreater(r["windows_ms"][0][1] - r["windows_ms"][0][0], 20000)
+        self.assertEqual(r["windows"][0]["pieces"], 2)
+        self.assertTrue(all(d <= 20.01 for d, _ in self.reader.calls), self.reader.calls)
+
+    def test_seventy_four_seconds_removed_with_speech_inside_is_caught(self):
+        self._clip(mid_phrase=True)
+        r = self._verify([[0, 13000], [87000, 115000]])
+        self.assertFalse(r["ok"])
+        self.assertEqual(sorted(m["words"] for m in r["missing"] if m.get("heard_inside_removed_span")),
+                         ["w5", "w6", "w7", "w8"])
+        self.assertGreaterEqual(r["windows"][0]["pieces"], 4)
+        self.assertTrue(all(d <= 20.01 for d, _ in self.reader.calls), self.reader.calls)
+
+    def test_seventy_four_seconds_of_silence_removed_passes(self):
+        self._clip(mid_phrase=False)
+        r = self._verify([[0, 13000], [87000, 115000]])
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(all(d <= 20.01 for d, _ in self.reader.calls), self.reader.calls)
+
+    def test_window_that_heard_nothing_is_not_proved(self):
+        self._clip(mid_phrase=False)
+        r = self._verify([[0, 30000], [31000, 115000]])        # a cut deep inside the silence
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["windows_without_words"], [[27000, 34000]])
+        self.assertIn("heard no word", r["verdict"])
+
+    def test_pauses_past_the_end_of_the_audio_are_not_proved(self):
+        self._clip(mid_phrase=False)
+        r = self._verify([[0, 112000]], dur_ms=130000)          # pauses.json says 130 s, the file has 115 s
+        self.assertFalse(r["ok"])
+        self.assertEqual(len(r["windows_short_audio"]), 1)
+        self.assertIn("past the end of the audio", r["verdict"])
+
+    def test_a_failing_proof_closes_its_files(self):
+        self._clip(mid_phrase=False)
+        self.reader.transcribe = mock.Mock(side_effect=RuntimeError("CUDA failed"))
+        with self.assertRaises(RuntimeError):
+            self._verify([[0, 13000], [33000, 115000]])
+        # Windows refuses to delete a file a handle still holds: the wave writer and the PyAV reader are closed
+        self.p.p("06_audio/dialogue/dialogue_tight_check.wav").unlink()
+        self.p.p("06_audio/dialogue/dialogue_clean.wav").unlink()
+
+
 # --------------------------------------------------------------------------- 60-minute memory budget
 HARNESS = r"""
 import json, sys, time
@@ -553,7 +629,8 @@ v = verify_cuts(p); t3 = time.time()
 print(json.dumps({"peak_rss": peak_rss(), "clean_s": round(t1 - t, 1), "pauses_s": round(t2 - t1, 1),
                   "verify_s": round(t3 - t2, 1), "total_s": round(t3 - t, 1), "cuts": len(q["cuts_ms"]),
                   "duration_ms": q["source_duration_ms"], "windows": v.get("chunks"),
-                  "spectrograms": all(Path(f).stat().st_size > 0 for f in r["metrics"]["spectrograms"])}))
+                  "spectrograms": all(Path(f).stat().st_size > 0 for f in r["metrics"]["spectrograms"]),
+                  "mics": sorted({q["channel"] for q in r["channel_plan"]})}))
 """
 
 
@@ -572,6 +649,25 @@ class TestLongClipMemory(_Proj):
                         "-filter_complex", "[0]volume=0.3,volume='lt(mod(t,4),3)':eval=frame[s];"
                                            "[s][1]amix=inputs=2:normalize=0",
                         "-ac", "1", "-c:a", "pcm_s16le", str(src)], check=True)
+        self._run(src, d, [1])
+
+    def test_sixty_minutes_two_mics_under_budget(self):
+        d = self.MINUTES * 60
+        src = self.p.data / "Raw" / "LONG2.wav"
+        # stereo 48 kHz, two different mics taking turns (4 s each): every switch is a crossfaded splice
+        subprocess.run([common.ffmpeg_exe(), "-y", "-loglevel", "error",
+                        "-f", "lavfi", "-i", f"sine=f=220:r=48000:d={d}",
+                        "-f", "lavfi", "-i", f"sine=f=330:r=48000:d={d}",
+                        "-f", "lavfi", "-i", f"anoisesrc=r=48000:a=0.002:d={d}:seed=7",
+                        "-f", "lavfi", "-i", f"anoisesrc=r=48000:a=0.002:d={d}:seed=8",
+                        "-filter_complex", "[0]volume=0.3,volume='lt(mod(t,8),3)':eval=frame[a];"
+                                           "[1]volume=0.3,volume='between(mod(t,8),4,7)':eval=frame[b];"
+                                           "[a][2]amix=inputs=2:normalize=0[l];[b][3]amix=inputs=2:normalize=0[r];"
+                                           "[l][r]amerge=inputs=2",
+                        "-ac", "2", "-c:a", "pcm_s16le", str(src)], check=True)
+        self._run(src, d, [1, 2])
+
+    def _run(self, src, d, mics):
         words = [(f"w{(k % 12) + 1}", 4 * c + 0.5 * j, 0.4) for c in range(d // 4) for j, k in
                  ((j, c * 6 + j) for j in range(6))]
         write_transcript(self.p, words, d * 1000)
@@ -583,10 +679,11 @@ class TestLongClipMemory(_Proj):
                            capture_output=True, text=True, timeout=3600)
         self.assertEqual(r.returncode, 0, r.stderr[-3000:])
         m = json.loads(r.stdout.strip().splitlines()[-1])
-        sys.stderr.write(f"\n[T2.13] {self.MINUTES}-min clip: peak RSS {m['peak_rss'] / 1024 ** 2:.0f} MB, {m}\n")
+        sys.stderr.write(f"\n[T2.13] {self.MINUTES}-min {len(mics)}-mic clip: peak RSS {m['peak_rss'] / 1024 ** 2:.0f} MB, {m}\n")
         self.assertEqual(m["duration_ms"], d * 1000)
         self.assertGreater(m["cuts"], d // 4 - 5)
         self.assertTrue(m["spectrograms"])
+        self.assertEqual(m["mics"], mics)
         self.assertLess(m["peak_rss"], self.BUDGET)
 
 
