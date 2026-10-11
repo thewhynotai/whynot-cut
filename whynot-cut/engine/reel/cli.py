@@ -26,7 +26,7 @@ if __name__ == "__main__" and os.environ.get("WHYNOT_TEST_ECHO_ARGV") == "1":   
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.common import (Paths, load_status, log, read_json, set_status, write_json, now_iso,  # noqa: E402
-                        set_context, active_profile, profile_dirs, project_prefix, ENV_DIR, PROFILES_DIR, CLIENT_PROFILE_REL,
+                        set_context, active_profile, profile_dirs, project_prefix, models_dir, PROFILES_DIR, CLIENT_PROFILE_REL,
                         clients_root, client_folders, resolve_root)
 
 # 01_analysis/editing-style.json is the video's copy of the client reference style (`reel ref-style --apply`), not
@@ -755,7 +755,7 @@ def cmd_model_download(a):
     from faster_whisper.utils import download_model
     from lib.onboard import whisper_model_state
     t0 = time.time()
-    path = download_model(a.model, cache_dir=str(ENV_DIR / "models"))
+    path = download_model(a.model, cache_dir=str(models_dir()))
     out({"model": a.model, "path": path, "elapsed_s": round(time.time() - t0, 1), "state": whisper_model_state()})
 
 

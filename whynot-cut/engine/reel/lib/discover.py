@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 from .common import (AUDIO_EXT, DOC_EXT, FONT_EXT, IMAGE_EXT, RAW_IMAGE_EXT, SUB_EXT, VIDEO_EXT,
-                     Paths, ENV_DIR, ffmpeg_exe, is_junk, now_iso, run, sha1_head, write_json, write_text)
+                     Paths, ffmpeg_exe, models_dir, is_junk, now_iso, run, sha1_head, write_json, write_text)
 
 ROLE_HINTS = [  # (substring in lowercase relative path, role)
     ("brief", "client_brief"), ("profile", "client_brief"), ("about", "client_brief"), ("bio", "client_brief"),
@@ -185,7 +185,7 @@ def audit_environment() -> dict:
     return {"generated": now_iso(), "os": plat.OS_NAME, "platform": platform.platform(), "machine": platform.machine(),
             "adobe_apps": apps, "aerender": str(aer) if aer else None,
             "tools": tools, "python_modules": mods,
-            "models_dir": str(ENV_DIR / "models")}
+            "models_dir": str(models_dir())}
 
 
 def discover(paths: Paths, read_docs: bool = True) -> dict:

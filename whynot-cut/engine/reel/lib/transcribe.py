@@ -9,7 +9,7 @@ import re
 import time
 from pathlib import Path
 
-from .common import (ENV_DIR, Paths, ffmpeg_exe, fmt_ts, log, parse_ts, read_json, run,
+from .common import (Paths, models_dir, ffmpeg_exe, fmt_ts, log, parse_ts, read_json, run,
                      write_json, write_text, load_config)
 from . import srt as srtlib
 
@@ -72,7 +72,7 @@ def whisper_model(model_size: str, compute_type: str = "int8"):
     last = None
     for dev, ct in tries:
         try:
-            return WhisperModel(model_size, device=dev, compute_type=ct, download_root=str(ENV_DIR / "models")), dev, ct
+            return WhisperModel(model_size, device=dev, compute_type=ct, download_root=str(models_dir())), dev, ct
         except Exception as e:  # noqa: BLE001  (e.g. CUDA runtime libraries missing -> CPU)
             last = e
     raise last
@@ -109,7 +109,7 @@ def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
                    + (" - run `reel gpu-enable` (with the editor's OK, ~550 MB) for GPU speed" if "cublas" in str(e).lower() else ""))
         from faster_whisper import WhisperModel
         model, device, compute_type = WhisperModel(model_size, device="cpu", compute_type="int8",
-                                                   download_root=str(ENV_DIR / "models")), "cpu", "int8"
+                                                   download_root=str(models_dir())), "cpu", "int8"
         segs, words, info = _run_whisper(model, wav, language, initial_prompt)
     elapsed = round(time.time() - t0, 1)
     log(paths, f"Transcribed {len(segs)} segments / {len(words)} words in {elapsed}s; "

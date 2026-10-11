@@ -10,11 +10,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import ENV_DIR, now_iso, read_json, write_json
+from .common import engine_home, now_iso, read_json, write_json
 from . import plat
 
-PROBE_DIR = ENV_DIR / "ae-probe"
-CAPS = ENV_DIR / "ae-capabilities.json"
+
+def probe_dir() -> Path:
+    """<engine home>/ae-probe (resolved per call: T2.17)."""
+    return engine_home() / "ae-probe"
+
+
+def caps_file() -> Path:
+    return engine_home() / "ae-capabilities.json"
 DEFAULT_FONTS = {"headline": "ArialMT"} if plat.IS_WIN else {"headline": "GeezaPro"}
 W, H, FPS, FRAMES = 1080, 1920, 30, 90
 CHECK_MARK = [{"vertices": [[-40, 0], [-12, 28], [44, -30]], "inTangents": [[0, 0], [0, 0], [0, 0]],
@@ -42,7 +48,7 @@ def probe_job(fonts: dict[str, str]) -> dict:
         # what motion videos use: one layer per word, chained right-to-left, revealed at the cues, 3rd word emphasised
         dict(base, name="word_layers", text="واحد اتنين تلاتة اربعة", word_layers=True, cues=[15, 30, 45, 60], emphasis=[3]),
     ]
-    return {"aep_path": str(PROBE_DIR / "probe.aep"), "w": W, "h": H, "fps": FPS, "frames": FRAMES,
+    return {"aep_path": str(probe_dir() / "probe.aep"), "w": W, "h": H, "fps": FPS, "frames": FRAMES,
             "fonts": {"headline": head}, "comps": comps}
 
 
@@ -72,20 +78,20 @@ def look_points() -> list[tuple[str, int]]:
 
 def run_probe(fonts: dict | None = None, timeout: int = 600) -> dict:
     from . import ae_bridge, ae_render
-    PROBE_DIR.mkdir(parents=True, exist_ok=True)            # ExtendScript never creates folders itself
+    probe_dir().mkdir(parents=True, exist_ok=True)            # ExtendScript never creates folders itself
     job = probe_job(fonts or DEFAULT_FONTS)
     r = ae_bridge.submit("probe_text", {"job": job}, timeout=timeout)
     if not r.get("ok"):
         return {"ok": False, "step": "probe_text", "bridge": r}
     rb = (r.get("response") or {}).get("result") or {}
     caps = capabilities_from(rb, "High Quality")
-    mov = PROBE_DIR / "probe_all.mov"
+    mov = probe_dir() / "probe_all.mov"
     rend = ae_render.render(Path(job["aep_path"]), "PROBE_ALL", mov, "Best Settings", caps["om_template"],
-                            timeout=timeout, log=PROBE_DIR / "aerender.log")
+                            timeout=timeout, log=probe_dir() / "aerender.log")
     frames = []
     if rend["status"] == "RENDERED":
         pts = look_points()
-        frames = [str(p) for p in ae_render.extract_frames(mov, [f for _, f in pts], FPS, PROBE_DIR / "frames",
+        frames = [str(p) for p in ae_render.extract_frames(mov, [f for _, f in pts], FPS, probe_dir() / "frames",
                                                           [f"{n}.png" for n, _ in pts])]
     rec = {"ae_version": rb.get("ae_version"), "measured": caps, "readback": rb, "render": rend, "frames": frames,
            "word_index_logical": None, "verdict": None, "probed_at": now_iso(),
@@ -93,7 +99,7 @@ def run_probe(fonts: dict | None = None, timeout: int = 600) -> dict:
                        "_35 two words, _50 three (the 3rd in red), _65 all four in reading order; mixed line keeps "
                        "'الـ Isotretinoin' together; brand font; icon drawn (word_reveal/index_map/reveal_step are "
                        "selector diagnostics)"}
-    write_json(CAPS, rec)
+    write_json(caps_file(), rec)
     return dict(rec, ok=rend["status"] == "RENDERED" and bool(frames),
                 next="VIEW every frame, then `reel ae-probe --record ok|fail --word-order logical|visual --notes …`")
 
@@ -103,16 +109,16 @@ def record(verdict: str, notes: str, word_order: str) -> dict:
         raise ValueError("verdict must be ok or fail")
     if word_order not in ("logical", "visual"):
         raise ValueError("word order must be logical or visual")
-    rec = read_json(CAPS)
+    rec = read_json(caps_file())
     if not rec or not rec.get("ae_version"):
         raise SystemExit("no probe to record: run `reel ae-probe` first")
     rec.update(verdict=verdict, notes=notes, word_index_logical=word_order == "logical", recorded_at=now_iso())
-    write_json(CAPS, rec)
+    write_json(caps_file(), rec)
     return rec
 
 
 def capabilities() -> dict:
-    return read_json(CAPS, {}) or {}
+    return read_json(caps_file(), {}) or {}
 
 
 def verdict_ok(ae_version: str) -> bool:

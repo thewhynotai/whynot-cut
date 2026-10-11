@@ -100,32 +100,38 @@ class TestBridge(unittest.TestCase):
     def test_install_never_downgrades(self):
         """Peer request: `reel setup`/`ppro-install` from an older plugin silently put bridge 3.0.0 back over 3.1.0 (and
         dropped the After Effects host). A newer installed bundle is kept unless --force."""
+        import os
+        from unittest import mock
         from lib import plat, ppro_bridge as pb
-        saved = (pb.EXT_DIR, pb.QUEUE, pb.SCRIPTS, pb.LIB, plat.player_debug_mode)
-        pb.EXT_DIR, pb.QUEUE, pb.SCRIPTS = self.tmp / "ext" / pb.EXT_ID, self.tmp / "ppro-queue", self.tmp / "ppro-scripts"
-        pb.LIB = pb.SCRIPTS / pb.LIB.name                                 # never the real engine-home scripts folder
-        plat.player_debug_mode = lambda: {}
-        cfg = pb.EXT_DIR / "bridge-config.json"
-        try:
-            pb.EXT_DIR.mkdir(parents=True)
-            cfg.write_text(json.dumps({"version": "9.0.0"}), encoding="utf-8")
-            r = pb.install()
-            self.assertTrue(r.get("skipped"), r)
-            self.assertTrue("9.0.0" in r["detail"] and pb.BRIDGE_VERSION in r["detail"] and "--force" in r["detail"], r)
-            self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], "9.0.0")
-            cfg.unlink()                                                    # manifest only (no bridge-config.json)
-            (pb.EXT_DIR / "CSXS").mkdir()
-            (pb.EXT_DIR / "CSXS/manifest.xml").write_text('<ExtensionManifest ExtensionBundleVersion="9.1.0">',
-                                                         encoding="utf-8")
-            self.assertTrue(pb.install().get("skipped"))
-            r = pb.install(force=True)
-            self.assertFalse(r.get("skipped"), r)
-            self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], pb.BRIDGE_VERSION)
-            cfg.write_text(json.dumps({"version": "3.0.0"}), encoding="utf-8")        # older: replaced without --force
-            self.assertFalse(pb.install().get("skipped"))
-            self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], pb.BRIDGE_VERSION)
-        finally:
-            pb.EXT_DIR, pb.QUEUE, pb.SCRIPTS, pb.LIB, plat.player_debug_mode = saved
+        # the engine home and CEP folder are resolved per call (T2.17): point them at the temp folder AFTER import
+        with mock.patch.dict(os.environ, {"WHYNOT_HOME": str(self.tmp / "home")}), \
+                mock.patch.object(plat, "cep_extensions_dir", lambda: self.tmp / "ext"), \
+                mock.patch.object(plat, "player_debug_mode", lambda: {}):
+            self.assertEqual(pb.ext_dir(), self.tmp / "ext" / pb.EXT_ID)
+            self.assertEqual(pb.lib_path(), self.tmp / "home" / "ppro-scripts" / pb.LIB_SRC.name)   # never the real home
+            self._install_never_downgrades(pb)
+
+    def _install_never_downgrades(self, pb):
+        EXT_DIR = pb.ext_dir()
+        cfg = EXT_DIR / "bridge-config.json"
+        EXT_DIR.mkdir(parents=True)
+        cfg.write_text(json.dumps({"version": "9.0.0"}), encoding="utf-8")
+        r = pb.install()
+        self.assertTrue(r.get("skipped"), r)
+        self.assertTrue("9.0.0" in r["detail"] and pb.BRIDGE_VERSION in r["detail"] and "--force" in r["detail"], r)
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], "9.0.0")
+        cfg.unlink()                                                    # manifest only (no bridge-config.json)
+        (EXT_DIR / "CSXS").mkdir()
+        (EXT_DIR / "CSXS/manifest.xml").write_text('<ExtensionManifest ExtensionBundleVersion="9.1.0">',
+                                                     encoding="utf-8")
+        self.assertTrue(pb.install().get("skipped"))
+        r = pb.install(force=True)
+        self.assertFalse(r.get("skipped"), r)
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], pb.BRIDGE_VERSION)
+        cfg.write_text(json.dumps({"version": "3.0.0"}), encoding="utf-8")        # older: replaced without --force
+        self.assertFalse(pb.install().get("skipped"))
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], pb.BRIDGE_VERSION)
+        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["base"], str((self.tmp / "home").resolve()))
 
     def test_queue_timeout(self):
         from lib import cep_queue
@@ -150,10 +156,9 @@ class TestBridge(unittest.TestCase):
         self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.1.0")
 
     def test_ae_status_needs_aeft(self):
+        from unittest import mock
         from lib import ae_bridge
-        old = ae_bridge.QUEUE
-        ae_bridge.QUEUE = self.q
-        try:
+        with mock.patch.object(ae_bridge, "queue_dir", lambda: self.q):
             with FakePanel(self.q, host="PPRO", mute=True):
                 st = ae_bridge.status()
             self.assertFalse(st["alive"])
@@ -161,8 +166,6 @@ class TestBridge(unittest.TestCase):
                 st = ae_bridge.status()
             self.assertTrue(st["alive"], st)
             self.assertEqual(st["host"], "AEFT")
-        finally:
-            ae_bridge.QUEUE = old
 
     def test_bridge_js_hosts(self):
         js = (CEP / "js/bridge.js").read_text(encoding="utf-8")
@@ -179,18 +182,15 @@ class TestBridge(unittest.TestCase):
         self.assertEqual(root.get("ExtensionBundleVersion"), "3.1.0")
 
     def test_ae_sync_scripts(self):
+        from unittest import mock
         from lib import ae_bridge
-        old = ae_bridge.SCRIPTS
-        ae_bridge.SCRIPTS = self.tmp / "synced"
-        try:
+        with mock.patch.object(ae_bridge, "scripts_dir", lambda: self.tmp / "synced"):
             r1 = ae_bridge.sync_scripts()
             self.assertEqual(sorted(r1["synced"]), sorted(ae_bridge.LIBS))
             for name in ae_bridge.LIBS:
                 self.assertEqual(hashlib.sha256((self.tmp / "synced" / name).read_bytes()).hexdigest(),
                                  hashlib.sha256((AE_TPL / name).read_bytes()).hexdigest())
             self.assertEqual(ae_bridge.sync_scripts()["synced"], [])
-        finally:
-            ae_bridge.SCRIPTS = old
 
     def test_ae_bridge_jsx_syntax(self):
         for name in ("nh_ae_bridge.jsx", "nh_motion_lib.jsx"):
@@ -244,13 +244,14 @@ class TestProbe(unittest.TestCase):
                                                     "High Quality")["om_template"], "Apple ProRes 422 HQ")
 
     def test_record_and_verdict(self):
+        import os
+        from unittest import mock
         from lib import ae_probe
-        old = ae_probe.CAPS
-        ae_probe.CAPS = self.tmp / "ae-capabilities.json"
-        try:
+        with mock.patch.dict(os.environ, {"WHYNOT_HOME": str(self.tmp)}):      # resolved per call (T2.17)
+            self.assertEqual(ae_probe.caps_file(), self.tmp / "ae-capabilities.json")
             with self.assertRaises(SystemExit):
                 ae_probe.record("ok", "n", "logical")             # nothing probed yet
-            write_json(ae_probe.CAPS, {"ae_version": "26.0.1", "measured": {}, "verdict": None})
+            write_json(ae_probe.caps_file(), {"ae_version": "26.0.1", "measured": {}, "verdict": None})
             r = ae_probe.record("ok", "joined, RTL", "logical")
             self.assertTrue(r["word_index_logical"])
             self.assertTrue(ae_probe.verdict_ok("26.0.1"))
@@ -259,8 +260,6 @@ class TestProbe(unittest.TestCase):
             self.assertFalse(ae_probe.verdict_ok("26.0.1"))
             with self.assertRaises(ValueError):
                 ae_probe.record("maybe", "", "logical")
-        finally:
-            ae_probe.CAPS = old
 
     def test_aerender_cmd_paths(self):
         from lib import ae_render

@@ -464,7 +464,7 @@ def _decode(model, audio, language, prompt, vad: bool) -> dict:
 def whisper_runner(model_size: str, vad: bool, ep: EpisodePaths | None = None):
     """run(audio, start_ms, language, prompt) -> {segments, words, language, language_probability} (chunk-relative
     times). The model loads once, on the GPU when usable; a GPU failure at the first inference retries on the CPU."""
-    from .common import ENV_DIR, log
+    from .common import log, models_dir
     from .transcribe import whisper_model
     state: dict = {}
 
@@ -479,7 +479,7 @@ def whisper_runner(model_size: str, vad: bool, ep: EpisodePaths | None = None):
                 raise
             log(ep, f"GPU transcription failed ({type(e).__name__}: {e}); retrying on CPU")
             from faster_whisper import WhisperModel
-            state["model"] = WhisperModel(model_size, device="cpu", compute_type="int8", download_root=str(ENV_DIR / "models"))
+            state["model"] = WhisperModel(model_size, device="cpu", compute_type="int8", download_root=str(models_dir()))
             state["device"], state["compute_type"] = "cpu", "int8"
             return _decode(state["model"], audio, language, prompt, vad)
     run.state = state

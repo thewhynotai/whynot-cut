@@ -10,7 +10,7 @@ import json
 import time
 from pathlib import Path
 
-from .common import (caption_hide_default, ENV_DIR, TEMPLATES_DIR, Paths, brand_fallback, font_role_fallback, project_prefix, load_config, log, now_iso, read_json, run, write_json, write_text)
+from .common import (caption_hide_default, TEMPLATES_DIR, Paths, brand_fallback, font_role_fallback, project_prefix, load_config, log, now_iso, read_json, run, write_json, write_text)
 from . import srt as srtlib
 from .plan import norm, to_ms
 

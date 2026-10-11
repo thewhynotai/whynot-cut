@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .common import ENV_DIR, read_json
+from .common import engine_home, read_json
 from .motion_config import motion_cfg
 
 FORBIDDEN_SVG = ("linearGradient", "radialGradient", "pattern", "mask", "filter", "clipPath", "<image", "<text")
@@ -22,7 +22,7 @@ def allowed() -> set[str]:
 
 def library_dir() -> Path:
     d = motion_cfg().get("library_dir")
-    return Path(d).expanduser() if d else ENV_DIR / "library" / "motion"
+    return Path(d).expanduser() if d else engine_home() / "library" / "motion"
 
 
 def svg_ok(svg_text: str) -> tuple[bool, str]:

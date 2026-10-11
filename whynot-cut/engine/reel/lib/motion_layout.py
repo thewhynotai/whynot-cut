@@ -138,14 +138,20 @@ def role_of(scene_type: str, element: str) -> str:
     return PRESETS[scene_type][element]["role"]
 
 
-_FONT_FILES: dict = {}
+_FONT_FILES: dict = {}     # PostScript name -> file (or None), valid while the font folders keep _FONT_FILES_STAMP
+_FONT_FILES_STAMP: list = [None]
 
 
 def find_font_file(ps: str) -> str | None:
-    """The installed font file whose PostScript name is `ps` (system and user font folders), or None."""
+    """The installed font file whose PostScript name is `ps` (system and user font folders), or None. The cache is
+    dropped when the font folders change (a font installed while a long-lived process runs is found: T2.17)."""
+    from .plat import font_dirs, font_dirs_stamp
+    stamp = font_dirs_stamp(font_dirs())
+    if _FONT_FILES_STAMP[0] != stamp:
+        _FONT_FILES.clear()
+        _FONT_FILES_STAMP[0] = stamp
     if ps in _FONT_FILES:
         return _FONT_FILES[ps]
-    from .plat import font_dirs
     hit = None
     try:
         import freetype

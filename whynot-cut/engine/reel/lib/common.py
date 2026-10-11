@@ -8,6 +8,8 @@ Timing policy (used everywhere):
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import datetime as _dt
 import hashlib
 import json
@@ -29,12 +31,22 @@ PROFILES_DIR = PLUGIN_DIR / "profiles"
 TEMPLATES_DIR = PLUGIN_DIR / "templates"
 
 
-def _env_dir() -> Path:
-    """Machine state (venv, Whisper models, ffmpeg, Premiere queue) lives OUTSIDE the plugin, which is replaced on update."""
-    return engine_home()
+# Machine state (venv, Whisper models, ffmpeg, bridge queues) lives OUTSIDE the plugin, which is replaced on update:
+# `engine_home()` (re-exported from plat) resolves it on every call, so a WHYNOT_HOME set after import is honoured
+# (3.0 T2.17, engine MI-8: a long-lived `reel serve` must never keep a home computed at import time).
 
 
-ENV_DIR = _env_dir()
+def models_dir() -> Path:
+    """Whisper / face models: <engine home>/models."""
+    return engine_home() / "models"
+
+
+def __getattr__(name: str):
+    # Back-compat for one release (3.0): `common.ENV_DIR` was a constant computed at import. It now resolves live;
+    # new code calls engine_home(). Remove in 3.1.
+    if name == "ENV_DIR":
+        return engine_home()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def clients_root() -> Path | None:
@@ -68,17 +80,13 @@ def resolve_root(root: str | None) -> str | None:
 
 SEQ_FPS = 24   # default only: the client's sequence-settings.json decides -> seq_fps()
 TPS = 254016000000   # Premiere ticks per second
-_RATE_CACHE: dict = {}
 
 
-def seq_rate() -> tuple[int, bool]:
+def seq_rate(ctx: "Context | None" = None) -> tuple[int, bool]:
     """(timebase, ntsc) of the client's sequence: profile sequence-settings.json general.timebase / general.ntsc.
-    29.97 fps = (30, True), 23.976 = (24, True), 25 = (25, False)."""
-    key = (str(_CTX.get("root")), _CTX.get("profile"))
-    if key not in _RATE_CACHE:
-        g = load_config("sequence-settings.json").get("general", {})
-        _RATE_CACHE[key] = (int(g.get("timebase") or SEQ_FPS), bool(g.get("ntsc", False)))
-    return _RATE_CACHE[key]
+    29.97 fps = (30, True), 23.976 = (24, True), 25 = (25, False). Cached on the Context (one request), never per
+    process: a long-lived process gets a fresh Context per request and so sees an edited profile."""
+    return (ctx or current_context()).seq_rate()
 
 
 def seq_fps() -> float:
@@ -275,11 +283,11 @@ def stable_id(name: str, prefix: str) -> str:
 
 # --------------------------------------------------------------------------- tools
 def venv_python() -> Path:
-    return _venv_python(ENV_DIR)
+    return _venv_python(engine_home())
 
 
 def ffmpeg_exe() -> str | None:
-    for cand in (os.environ.get("NH_FFMPEG"), shutil.which("ffmpeg"), str(ENV_DIR / "ffmpeg")):
+    for cand in (os.environ.get("NH_FFMPEG"), shutil.which("ffmpeg"), str(engine_home() / "ffmpeg")):
         if cand and Path(cand).exists():
             return cand
     try:
@@ -361,14 +369,90 @@ def log(paths: Paths | None, msg: str):
 # profile.json (id, prefix, domain) and notes.md (prose for Claude). Lookup, lowest -> highest:
 #   config/defaults/<name>  <-  profiles/<id>/<name> (shipped seed)  <-  <client>/output/client_database/reel-profile/<name>
 CLIENT_PROFILE_REL = "output/client_database/reel-profile"
-_CTX: dict = {"root": None, "profile": None}
 
 
-def set_context(root: Path | None = None, profile: str | None = None):
-    """Called once by the CLI so every load_config() sees the right client."""
-    _CTX["root"] = Path(root).expanduser().resolve() if root else None
-    _CTX["profile"] = profile
-    _RATE_CACHE.clear()
+class Context:
+    """What one engine request works on (3.0 T2.17, engine MI-8): the client root, the --profile override, the engine
+    home and the request's caches (the sequence rate). The CLI builds one per process (`set_context`); a long-lived
+    process (`reel serve`) builds one per request and binds it with `use_context`, so two requests never share a
+    client, a profile or a stale cache. Profile layers are read from disk on every `config()` call."""
+
+    def __init__(self, root: Path | str | None = None, profile: str | None = None, home: Path | str | None = None):
+        self.root = Path(root).expanduser().resolve() if root else None
+        self.profile = profile
+        self._home = Path(home).expanduser() if home else None
+        self._rate: tuple[int, bool] | None = None
+
+    def __repr__(self):
+        return f"Context(root={self.root!s}, profile={self.profile!r}, home={self.engine_home!s})"
+
+    @property
+    def engine_home(self) -> Path:
+        """An explicit home, else the live setting (env / plugin option), resolved now, never at import."""
+        return self._home or engine_home()
+
+    def active_profile(self, root: Path | None = None) -> str | None:
+        """--profile > client's reel-profile/profile.json. A shipped profile (profiles/<id>/) applies only when it is
+        named: by --profile or by the id in the client's own profile.json, never by the client folder's name."""
+        if self.profile:
+            return self.profile
+        root = Path(root) if root else self.root
+        if root:
+            own = read_json(root / CLIENT_PROFILE_REL / "profile.json", {})
+            if own.get("id"):
+                return own["id"]
+        return None
+
+    def profile_dirs(self, root: Path | None = None) -> list[Path]:
+        root = Path(root) if root else self.root
+        dirs = []
+        pid = self.active_profile(root)
+        if pid and (PROFILES_DIR / pid).is_dir():
+            dirs.append(PROFILES_DIR / pid)
+        if root and (root / CLIENT_PROFILE_REL).is_dir():
+            dirs.append(root / CLIENT_PROFILE_REL)
+        return dirs
+
+    def config(self, name: str) -> dict:
+        """config/defaults/<name> <- shipped profile <- the client's reel-profile, merged (read now, not cached)."""
+        cfg = read_json(CONFIG_DIR / name, {})
+        for d in self.profile_dirs():
+            over = read_json(d / name)
+            if over is not None:
+                cfg = deep_merge(cfg, over)
+        return cfg
+
+    def seq_rate(self) -> tuple[int, bool]:
+        if self._rate is None:
+            g = self.config("sequence-settings.json").get("general", {})
+            self._rate = (int(g.get("timebase") or SEQ_FPS), bool(g.get("ntsc", False)))
+        return self._rate
+
+
+_PROCESS_CTX = Context()                     # the one-shot CLI's context (set_context)
+_BOUND_CTX: contextvars.ContextVar = contextvars.ContextVar("whynot_context", default=None)   # per request / thread
+
+
+def current_context() -> Context:
+    """The Context bound by `use_context` (a long-lived process), else the process one from `set_context`."""
+    return _BOUND_CTX.get() or _PROCESS_CTX
+
+
+def set_context(root: Path | None = None, profile: str | None = None) -> Context:
+    """Called once by the CLI so every load_config() sees the right client. Returns the new Context."""
+    global _PROCESS_CTX
+    _PROCESS_CTX = Context(root, profile)
+    return _PROCESS_CTX
+
+
+@contextlib.contextmanager
+def use_context(ctx: Context):
+    """Bind ctx inside the block, for this thread / task only: how a long-lived process serves one request."""
+    tok = _BOUND_CTX.set(ctx)
+    try:
+        yield ctx
+    finally:
+        _BOUND_CTX.reset(tok)
 
 
 def deep_merge(base, over):
@@ -390,36 +474,16 @@ def shipped_profiles() -> dict:
 
 
 def active_profile(root: Path | None = None) -> str | None:
-    """--profile > client's reel-profile/profile.json. A shipped profile (profiles/<id>/) applies only when it is named:
-    by --profile or by the id in the client's own profile.json, never by the client folder's name."""
-    if _CTX["profile"]:
-        return _CTX["profile"]
-    root = Path(root) if root else _CTX["root"]
-    if root:
-        own = read_json(root / CLIENT_PROFILE_REL / "profile.json", {})
-        if own.get("id"):
-            return own["id"]
-    return None
+    """The current Context's profile id (see Context.active_profile)."""
+    return current_context().active_profile(root)
 
 
 def profile_dirs(root: Path | None = None) -> list[Path]:
-    root = Path(root) if root else _CTX["root"]
-    dirs = []
-    pid = active_profile(root)
-    if pid and (PROFILES_DIR / pid).is_dir():
-        dirs.append(PROFILES_DIR / pid)
-    if root and (root / CLIENT_PROFILE_REL).is_dir():
-        dirs.append(root / CLIENT_PROFILE_REL)
-    return dirs
+    return current_context().profile_dirs(root)
 
 
-def load_config(name: str) -> dict:
-    cfg = read_json(CONFIG_DIR / name, {})
-    for d in profile_dirs():
-        over = read_json(d / name)
-        if over is not None:
-            cfg = deep_merge(cfg, over)
-    return cfg
+def load_config(name: str, ctx: Context | None = None) -> dict:
+    return (ctx or current_context()).config(name)
 
 
 def project_prefix() -> str:

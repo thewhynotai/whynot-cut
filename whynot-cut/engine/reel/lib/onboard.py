@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from . import plat
-from .common import ENV_DIR, Paths, ffmpeg_exe, load_status, now_iso, read_json, venv_python, write_json, write_text
+from .common import Paths, engine_home, ffmpeg_exe, models_dir, load_status, now_iso, read_json, venv_python, write_json, write_text
 
 MODULES = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "fontTools", "arabic_reshaper", "bidi",
            "uharfbuzz", "freetype", "pypdf"]
@@ -16,7 +16,8 @@ MODULES = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "fontTools", "
 
 # --------------------------------------------------------------------------- doctor
 def bridge_info() -> dict:
-    from .ppro_bridge import EXT_DIR, status
+    from .ppro_bridge import ext_dir, status
+    EXT_DIR = ext_dir()
     cfg = read_json(EXT_DIR / "bridge-config.json", {}) if EXT_DIR.exists() else {}
     modes = plat.player_debug_mode()
     st = status()
@@ -29,7 +30,7 @@ def whisper_model_state() -> dict:
     """{model: complete|partial} for faster-whisper models in the engine home. A model is complete only when its
     model.bin is there (an interrupted download leaves just the small config files, ~3 MB)."""
     out = {}
-    root = ENV_DIR / "models"
+    root = models_dir()
     for d in sorted(root.glob("models--*")) if root.exists() else []:
         name = d.name.replace("models--Systran--faster-whisper-", "").replace("models--mobiuslabsgmbh--faster-whisper-", "")             .replace("models--", "")
         bins = [b for b in d.glob("snapshots/*/model.bin") if b.stat().st_size > 50 * 1024 * 1024]
@@ -142,7 +143,7 @@ def doctor() -> dict:
     from . import selfid
     rc = selfid.scan_path()
     rep = {"generated": now_iso(), "plugin": selfid.plugin_info(), "reel_command": rc,
-           "system": plat.describe(), "engine_home": str(ENV_DIR),
+           "system": plat.describe(), "engine_home": str(engine_home()),
            "venv_python": str(venv_python()), "venv_ok": venv_python().exists(), "python_modules": mods,
            "ffmpeg": ffmpeg_exe(), "whisper_models": models,
            "whisper_partial_downloads": sorted(k for k, v in states.items() if v == "partial"), "gpu": plat.gpu_info(), "adobe_apps": apps,

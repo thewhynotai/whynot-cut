@@ -20,15 +20,25 @@ except Exception:  # packages missing
 
 _ARABIC = re.compile("[֐-ࣿיִ-﷿ﹰ-﻿]")   # Hebrew + Arabic blocks (strong RTL)
 _FACES: dict = {}
+_FACES_MAX = 32          # a long-lived process renders many clients' fonts: keep the most recent few
 
 
 def _face(path: str):
-    if path not in _FACES:
-        import io
-        from pathlib import Path
+    """(HarfBuzz face, FreeType face) of a font file, cached by (path, size, mtime): a font file replaced in place
+    (a client's corrected brand font) is read again, never served stale (3.0 T2.17)."""
+    import io
+    import os
+    from pathlib import Path
+    st = os.stat(path)
+    key = (path, st.st_size, st.st_mtime_ns)
+    hit = _FACES.pop(key, None)
+    if hit is None:
         data = Path(path).read_bytes()      # FreeType cannot open a non-ANSI path on Windows (an Arabic client folder)
-        _FACES[path] = (hb.Face(hb.Blob(data), 0), freetype.Face(io.BytesIO(data)))
-    return _FACES[path]
+        hit = (hb.Face(hb.Blob(data), 0), freetype.Face(io.BytesIO(data)))
+    _FACES[key] = hit                       # re-inserted last: dict order = least recently used first
+    while len(_FACES) > _FACES_MAX:
+        del _FACES[next(iter(_FACES))]
+    return hit
 
 
 class HBFontSpec:

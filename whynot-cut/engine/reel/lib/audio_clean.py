@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .common import ENV_DIR, Paths, ffmpeg_exe, now_iso, read_json, run, write_json
+from .common import Paths, ffmpeg_exe, now_iso, read_json, run, write_json
 
 SR = 48000
 

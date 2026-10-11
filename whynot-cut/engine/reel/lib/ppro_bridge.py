@@ -13,17 +13,43 @@ import re
 import shutil
 from pathlib import Path
 
-from .common import ENV_DIR, TEMPLATES_DIR
+from .common import TEMPLATES_DIR, engine_home
 from . import plat
 
 EXT_ID = "ai.thewhynot.cut.bridge"
 LEGACY_EXT_IDS = ("com.nh.bridge",)          # reel-editor 1.x bridge; replaced on install
-EXT_DIR = plat.cep_extensions_dir() / EXT_ID
 BRIDGE_VERSION = "3.1.0"
-QUEUE = ENV_DIR / "ppro-queue"
-SCRIPTS = ENV_DIR / "ppro-scripts"
 LIB_SRC = TEMPLATES_DIR / "premiere/nh_ppro_lib.jsx"
-LIB = SCRIPTS / "nh_ppro_lib.jsx"
+
+
+# Locations resolve on every call (3.0 T2.17, engine MI-8): an engine home changed after import is honoured.
+def ext_dir() -> Path:
+    """The installed CEP bundle: <CEP extensions>/ai.thewhynot.cut.bridge."""
+    return plat.cep_extensions_dir() / EXT_ID
+
+
+def queue_dir() -> Path:
+    return engine_home() / "ppro-queue"
+
+
+def scripts_dir() -> Path:
+    """The bridge's whitelisted script folder (<engine home>/ppro-scripts)."""
+    return engine_home() / "ppro-scripts"
+
+
+def lib_path() -> Path:
+    return scripts_dir() / LIB_SRC.name
+
+
+_LIVE = {"QUEUE": "queue_dir", "SCRIPTS": "scripts_dir", "EXT_DIR": "ext_dir", "LIB": "lib_path", "ENTRY": "entry_path"}
+
+
+def __getattr__(name: str):
+    # Back-compat for one release (3.0): these were constants computed at import (engine MI-8). They now resolve per
+    # call from the live engine home; new code calls the functions. Remove in 3.1.
+    if name in _LIVE and _LIVE[name] in globals():
+        return globals()[_LIVE[name]]()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _sha(p: Path) -> str:
@@ -32,28 +58,30 @@ def _sha(p: Path) -> str:
 
 def sync_scripts() -> dict:
     """Copy the plugin's Premiere JSX into the bridge's whitelisted folder when it differs."""
-    SCRIPTS.mkdir(parents=True, exist_ok=True)
+    scripts, lib = scripts_dir(), lib_path()
+    scripts.mkdir(parents=True, exist_ok=True)
     try:
-        SCRIPTS.chmod(0o700)
+        scripts.chmod(0o700)
     except OSError:
         pass
-    changed = _sha(LIB_SRC) != _sha(LIB)
+    changed = _sha(LIB_SRC) != _sha(lib)
     if changed:
-        tmp = LIB.with_suffix(".tmp")
+        tmp = lib.with_suffix(".tmp")
         shutil.copy2(LIB_SRC, tmp)
-        tmp.replace(LIB)
-    return {"scripts_dir": str(SCRIPTS), "synced": changed, "sha256": _sha(LIB)[:12]}
+        tmp.replace(lib)
+    return {"scripts_dir": str(scripts), "synced": changed, "sha256": _sha(lib)[:12]}
 
 
 def installed_version() -> str | None:
     """The installed bundle's version: bridge-config.json "version", else the manifest's ExtensionBundleVersion."""
+    ext = ext_dir()
     try:
-        v = json.loads((EXT_DIR / "bridge-config.json").read_text(encoding="utf-8")).get("version")
+        v = json.loads((ext / "bridge-config.json").read_text(encoding="utf-8")).get("version")
     except (OSError, ValueError):
         v = None
     if not v:
         try:
-            m = re.search(r'ExtensionBundleVersion="([^"]+)"', (EXT_DIR / "CSXS/manifest.xml").read_text(encoding="utf-8"))
+            m = re.search(r'ExtensionBundleVersion="([^"]+)"', (ext / "CSXS/manifest.xml").read_text(encoding="utf-8"))
             v = m.group(1) if m else None
         except OSError:
             v = None
@@ -65,6 +93,7 @@ def _ver(v: str) -> tuple:
 
 
 def install(force: bool = False) -> dict:
+    EXT_DIR, QUEUE = ext_dir(), queue_dir()
     cur = installed_version()
     if cur and not force and _ver(cur) > _ver(BRIDGE_VERSION):
         # an older plugin (e.g. `reel setup` from 2.1.1) must not put its bridge back over a newer one
@@ -77,7 +106,7 @@ def install(force: bool = False) -> dict:
         shutil.rmtree(EXT_DIR)
     shutil.copytree(src, EXT_DIR)
     # tells the panel where the queue lives (the engine home can be a custom folder; Premiere doesn't see our env)
-    (EXT_DIR / "bridge-config.json").write_text(json.dumps({"base": str(ENV_DIR.resolve()), "version": BRIDGE_VERSION}),
+    (EXT_DIR / "bridge-config.json").write_text(json.dumps({"base": str(engine_home().resolve()), "version": BRIDGE_VERSION}),
                                                 encoding="utf-8")
     removed = []
     for old in LEGACY_EXT_IDS:          # only our own earlier bridge, never anything else in the CEP folder
@@ -105,14 +134,16 @@ def install(force: bool = False) -> dict:
 
 def status(max_age_s: float = 5.0) -> dict:
     from . import cep_queue
-    return cep_queue.status(QUEUE, max_age_s, app="Premiere")
+    return cep_queue.status(queue_dir(), max_age_s, app="Premiere")
 
 
-def submit(action: str, data: dict | None = None, timeout: float = 600, script: Path = LIB) -> dict:
+def submit(action: str, data: dict | None = None, timeout: float = 600, script: Path | None = None) -> dict:
+    """Run `action` in Premiere through the bridge; `script` defaults to the synced nh_ppro_lib.jsx."""
     from . import cep_queue
     st = status()          # through this module, so callers/tests that patch ppro_bridge.status keep working
     if not st["alive"]:
         return {"ok": False, "error": "bridge not running", "status": st}
-    if script == LIB:
+    if script is None or Path(script) == lib_path():
         sync_scripts()
-    return cep_queue.submit(QUEUE, script, action, data, timeout, st=st, app="Premiere")
+        script = lib_path()
+    return cep_queue.submit(queue_dir(), script, action, data, timeout, st=st, app="Premiere")

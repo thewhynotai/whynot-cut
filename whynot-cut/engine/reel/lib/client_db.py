@@ -18,30 +18,33 @@ from .discover import read_document
 HEX = re.compile(r"#([0-9A-Fa-f]{6})\b")
 from . import plat
 
-FONT_DIRS = plat.font_dirs()
-_INSTALLED_PS: dict | None = None
+_INSTALLED_PS: dict = {}       # {"stamp": font-folder stamp, "names": {ps: file}}
 
 
 def installed_postscript_names() -> dict:
     """PostScript name -> installed file, for every font in the OS font folders (an installed copy may be renamed,
-    e.g. Windows per-user installs). Built once per run; unreadable files are skipped."""
-    global _INSTALLED_PS
-    if _INSTALLED_PS is None:
+    e.g. Windows per-user installs). Rebuilt only when the font folders change (plat.font_dirs_stamp), so a font
+    installed while a long-lived process runs is found; unreadable files are skipped."""
+    dirs = plat.font_dirs()
+    stamp = plat.font_dirs_stamp(dirs)
+    if _INSTALLED_PS.get("stamp") != stamp:
         from fontTools.ttLib import TTFont
-        _INSTALLED_PS = {}
-        for d in FONT_DIRS:
+        names = {}
+        for d in dirs:
             if not d.is_dir():
                 continue
             for f in d.rglob("*"):
                 if f.suffix.lower() not in (".otf", ".ttf"):
                     continue
                 try:
-                    n = TTFont(str(f), lazy=True, fontNumber=0)["name"].getName(6, 3, 1, 0x409)
+                    with TTFont(str(f), lazy=True, fontNumber=0) as tt:
+                        n = tt["name"].getName(6, 3, 1, 0x409)
                     if n:
-                        _INSTALLED_PS.setdefault(str(n), str(f))
+                        names.setdefault(str(n), str(f))
                 except Exception:
                     continue
-    return _INSTALLED_PS
+        _INSTALLED_PS.update(stamp=stamp, names=names)
+    return _INSTALLED_PS["names"]
 
 
 def hex_to_rgb(h: str) -> list[int]:
@@ -99,7 +102,7 @@ def font_info(p: Path) -> dict:
     latin = sum(1 for c in cmap if 0x41 <= c <= 0x7A)
     pres_forms = sum(1 for c in cmap if 0xFE70 <= c <= 0xFEFF)
     weight = f["OS/2"].usWeightClass if "OS/2" in f else None
-    installed = [str(d / p.name) for d in FONT_DIRS if (d / p.name).exists()]
+    installed = [str(d / p.name) for d in plat.font_dirs() if (d / p.name).exists()]
     if not installed and nm(6):
         hit = installed_postscript_names().get(nm(6))
         installed = [hit] if hit else []

@@ -131,6 +131,19 @@ def font_dirs() -> list[Path]:
     return [Path.home() / ".local/share/fonts", Path.home() / ".fonts", Path("/usr/share/fonts"), Path("/usr/local/share/fonts")]
 
 
+def font_dirs_stamp(dirs: list[Path] | None = None) -> tuple:
+    """Identity of the font folders' contents: (folder, mtime) of each folder and its direct sub-folders. A font
+    installed or removed changes it, so caches keyed on it stay right in a long-lived process (3.0 T2.17)."""
+    out = []
+    for d in (font_dirs() if dirs is None else dirs):
+        try:
+            out.append((str(d), d.stat().st_mtime_ns))
+            out += [(e.path, e.stat().st_mtime_ns) for e in os.scandir(d) if e.is_dir()]
+        except OSError:
+            out.append((str(d), None))
+    return tuple(out)
+
+
 def font_install_hint() -> str:
     if IS_WIN:
         return "right-click each font file > Install (or 'Install for all users')"
