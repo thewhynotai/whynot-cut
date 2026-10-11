@@ -8,3 +8,7 @@ desktop.ini
 .claude/*.local.md
 .claude/*.local.json
 .superpowers/
+dist/
+whynot-cut/evals/results/
+evals/results/
+node_modules/
