@@ -138,8 +138,10 @@ class Paths:
         if self.sandbox:
             env.update(HOME=str(self.home), USERPROFILE=str(self.home), APPDATA=str(self.appdata),
                        LOCALAPPDATA=str(self.localappdata), CLAUDE_CONFIG_DIR=str(self.claude_dir))
+        # uv: our own python and cache folders, no uv.toml / pyproject config (same as setup/setup_env.py uv_env)
         env.update(WHYNOT_HOME=str(self.whynot), UV_PYTHON_INSTALL_DIR=str(self.python_dir),
-                   UV_CACHE_DIR=str(self.cache_dir / "uv"), PYTHONUTF8="1")
+                   UV_CACHE_DIR=str(self.cache_dir / "uv"), UV_NO_CONFIG="1", UV_HTTP_TIMEOUT="60",
+                   UV_HTTP_RETRIES="5", PYTHONUTF8="1")
         return env
 
 

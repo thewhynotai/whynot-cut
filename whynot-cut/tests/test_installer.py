@@ -9,11 +9,13 @@
     (atomic, corrupt file set aside), run_steps (dependencies, an exception is `red` and later steps still run) and
     safe_rmtree (outside the root, client marker, protected paths, symlinks/junctions never followed).
   * cli.py / wnc_install.py: `plan` prints the 14 step names in order, also under `python -I`.
-  * runtime.py (steps runtime / ffmpeg / gpu): the runtime id, a build with tests/fixtures/installer/fake_uv.py
-    (stamps, `current`, `pip sync --require-hashes`), no uv call on a re-run, a failed sync or smoke never moves
-    `current` and leaves no `.building`, a missing lock is skipped, a deleted runtime is rebuilt; ffmpeg from a local
-    zip with the GPL text and SOURCE.txt, a bad sha256 installs nothing, a placeholder is skipped; gpu-enable only on
-    win-x64 with an NVIDIA GPU (WNC_TEST_NVIDIA in the sandbox).
+  * runtime.py (steps runtime / ffmpeg / gpu): the runtime id, an in-place build with
+    tests/fixtures/installer/fake_uv.py (only-managed python, --no-bin --no-registry, UV_NO_CONFIG=1,
+    stamps, `current`, `pip sync --require-hashes`), no uv call on a re-run, a failed sync or smoke never moves
+    `current` and leaves no stamps, the shared build lock (held = amber, stale = taken over, always released),
+    an unstamped runtime is repaired with `pip sync` alone, a missing lock is skipped, a deleted runtime is
+    rebuilt; ffmpeg from a local zip with the GPL text and SOURCE.txt, a bad sha256 installs nothing, a placeholder
+    is skipped; gpu-enable only on win-x64 with an NVIDIA GPU (WNC_TEST_NVIDIA in the sandbox).
 Never touches the real ~/.whynot-cut or ~/.claude: every Paths is a sandbox home in a temp folder, and no real
 network is used (artefacts come from a 127.0.0.1 http.server started here, or file://).
 Run (repo root):
@@ -853,10 +855,24 @@ class TestRuntime(unittest.TestCase):
     def ctx(self):
         return make_ctx(self.home, self.comp, self.plugin)
 
-    def uv_calls(self):
+    def uv_log_lines(self):
         if not self.uv_log.exists():
             return []
         return [json.loads(x) for x in self.uv_log.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+    def uv_calls(self, *prefix):
+        """argv of every uv call (those starting with `prefix` when given)."""
+        return [c["argv"] for c in self.uv_log_lines() if c["argv"][:len(prefix)] == list(prefix)]
+
+    def rid(self, lock=LOCK_A):
+        return "r-" + sha(lock)[:12]
+
+    def build_lock(self, paths, rid=None):
+        return paths.runtimes_dir / f".{rid or self.rid()}.building"
+
+    def assert_unstamped(self, rdir):
+        self.assertFalse((rdir / "WHYNOT_RUNTIME").exists())
+        self.assertFalse((rdir / ".whynot-lock.sha256").exists())
 
     def test_a_runtime_id(self):
         rid = self.rt.runtime_id(self.comp, "win-x64", self.lock)
@@ -869,13 +885,13 @@ class TestRuntime(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.rt.runtime_id(self.comp, "win-x64", self.lock)
 
-    def test_b_fresh_build_then_c_no_uv_call(self):
+    def test_b_fresh_build_in_place_then_c_no_uv_call(self):
         ctx = self.ctx()
         r = self.rt.step_runtime(ctx)
         self.assertEqual(r.status, "ok", r.detail)
-        rid = "r-" + sha(LOCK_A)[:12]
+        rid = self.rid()
         paths = ctx.paths
-        self.assertEqual(paths.current_file.read_bytes(), (rid + "\n").encode())
+        self.assertEqual(paths.current_file.read_bytes(), (rid + "\n").encode())  # one line, no BOM
         self.assertEqual(self.rt.current_runtime(paths), rid)
         rdir = paths.runtimes_dir / rid
         self.assertEqual((rdir / ".whynot-lock.sha256").read_text(encoding="utf-8").strip(), sha(LOCK_A))
@@ -885,12 +901,24 @@ class TestRuntime(unittest.TestCase):
             self.assertTrue(stamp[k], k)
         self.assertEqual(ctx.runtime_python, self.rt.runtime_python(paths, rid))
         self.assertTrue(ctx.runtime_python.is_file())
-        self.assertEqual(sorted(p.name for p in paths.runtimes_dir.iterdir()), [rid])  # no .building left
-        sync = [c for c in self.uv_calls() if c[:2] == ["pip", "sync"]]
+        # built in place: no `<id>.building` folder ever, and the build lock file is released
+        self.assertEqual(sorted(p.name for p in paths.runtimes_dir.iterdir()), [rid])
+        venv = self.uv_calls("venv")
+        self.assertEqual(len(venv), 1)
+        self.assertEqual(Path(venv[0][1]), rdir)
+        self.assertNotIn("--relocatable", venv[0])
+        self.assertEqual(venv[0][venv[0].index("--python-preference") + 1], "only-managed")
+        # `uv python find` printed a warning on stderr: only its stdout (the interpreter) reached `uv venv`
+        self.assertEqual(venv[0][venv[0].index("--python") + 1], sys.executable)
+        find = self.uv_calls("python", "find")
+        self.assertEqual(find[0][find[0].index("--python-preference") + 1], "only-managed")
+        self.assertEqual(self.uv_calls("python", "install"), [])
+        sync = self.uv_calls("pip", "sync")
         self.assertEqual(len(sync), 1)
         self.assertIn("--require-hashes", sync[0])
         self.assertIn(str(self.lock), sync[0])
         self.assertNotIn("--index-url", sync[0])
+        self.assertTrue(all(c["UV_NO_CONFIG"] == "1" for c in self.uv_log_lines()))  # uv never reads uv.toml
         self.assertEqual(ctx.state.data["runtime"]["id"], rid)
         # (c) a second run finds the stamped runtime and its smoke import passing: no uv call at all
         self.uv_log.unlink()
@@ -900,15 +928,55 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual(self.uv_calls(), [])
         self.assertEqual(ctx2.runtime_python, ctx.runtime_python)
 
+    def test_python_install_without_bin_and_registry(self):
+        with mock.patch.dict(os.environ, {"FAKE_UV_FIND_FAIL_ONCE": str(self.uv_log.with_name("find-failed"))}):
+            self.assertEqual(self.rt.step_runtime(self.ctx()).status, "ok")
+        inst = self.uv_calls("python", "install")
+        self.assertEqual(len(inst), 1)
+        self.assertEqual(inst[0][2], "3.12.15")
+        self.assertIn("--no-bin", inst[0])
+        self.assertIn("--no-registry", inst[0])
+        self.assertEqual(len(self.uv_calls("python", "find")), 2)
+
+    def test_uv_child_env(self):
+        env = base.Paths.from_env(str(self.home), env={}).child_env({})
+        self.assertEqual((env["UV_NO_CONFIG"], env["UV_HTTP_TIMEOUT"], env["UV_HTTP_RETRIES"]), ("1", "60", "5"))
+
     def test_index_url_is_passed_when_pinned(self):
         self.comp["runtime"]["index_url"] = "https://mirror.example/simple"
         self.assertEqual(self.rt.step_runtime(self.ctx()).status, "ok")
-        sync = [c for c in self.uv_calls() if c[:2] == ["pip", "sync"]][0]
+        sync = self.uv_calls("pip", "sync")[0]
         self.assertEqual(sync[sync.index("--index-url") + 1], "https://mirror.example/simple")
+
+    def test_fresh_build_lock_held_elsewhere_is_amber(self):
+        paths = self.ctx().paths
+        lk = self.build_lock(paths)
+        lk.parent.mkdir(parents=True)
+        lk.write_text("4242 reel setup\n", encoding="utf-8")
+        ctx = self.ctx()
+        r = self.rt.step_runtime(ctx)
+        self.assertEqual(r.status, "amber")
+        self.assertIn("another WhyNot Cut setup is building this runtime", r.detail)
+        self.assertEqual(self.uv_calls(), [])
+        self.assertEqual(lk.read_text(encoding="utf-8"), "4242 reel setup\n")  # not ours: left alone
+        self.assertFalse(ctx.paths.current_file.exists())
+        self.assertIsNone(ctx.runtime_python)
+
+    def test_stale_build_lock_is_taken_over(self):
+        paths = self.ctx().paths
+        lk = self.build_lock(paths)
+        lk.parent.mkdir(parents=True)
+        lk.write_text("4242 crashed\n", encoding="utf-8")
+        old = __import__("time").time() - 3 * 3600
+        os.utime(lk, (old, old))
+        ctx = self.ctx()
+        self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
+        self.assertFalse(lk.exists())
+        self.assertEqual(self.rt.current_runtime(ctx.paths), self.rid())
 
     def test_d_failed_sync_keeps_the_old_runtime(self):
         self.assertEqual(self.rt.step_runtime(self.ctx()).status, "ok")
-        old = "r-" + sha(LOCK_A)[:12]
+        old, new = self.rid(LOCK_A), self.rid(LOCK_B)
         self.lock.write_bytes(LOCK_B)
         with mock.patch.dict(os.environ, {"FAKE_UV_FAIL": "sync"}):
             ctx = self.ctx()
@@ -916,14 +984,46 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual(r.status, "red")
         self.assertIn("sync", r.detail)
         self.assertEqual(self.rt.current_runtime(ctx.paths), old)
-        self.assertEqual(sorted(p.name for p in ctx.paths.runtimes_dir.iterdir()), [old])  # no .building, no new id
+        # the unfinished new runtime stays in place without stamps (never trusted); the lock file is released
+        self.assertEqual(sorted(p.name for p in ctx.paths.runtimes_dir.iterdir()), sorted([old, new]))
+        self.assert_unstamped(ctx.paths.runtimes_dir / new)
         self.assertIsNone(ctx.runtime_python)
-        # once the sync works the new runtime is built and `current` switches; the old one is kept
+        # the next run repairs it (its python works: only `pip sync`, no `venv`) and `current` switches; old kept
+        self.uv_log.unlink()
         ctx = self.ctx()
         self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
-        new = "r-" + sha(LOCK_B)[:12]
+        self.assertEqual(self.uv_calls("venv"), [])
+        self.assertEqual(len(self.uv_calls("pip", "sync")), 1)
         self.assertEqual(self.rt.current_runtime(ctx.paths), new)
         self.assertEqual(sorted(p.name for p in ctx.paths.runtimes_dir.iterdir()), sorted([old, new]))
+
+    def test_repair_of_an_unstamped_runtime_only_syncs(self):
+        ctx = self.ctx()
+        self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
+        rdir = ctx.paths.runtimes_dir / self.rid()
+        (rdir / "WHYNOT_RUNTIME").unlink()
+        (rdir / ".whynot-lock.sha256").unlink()  # an interrupted earlier build
+        self.uv_log.unlink()
+        ctx = self.ctx()
+        r = self.rt.step_runtime(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertIn("repaired", r.detail)
+        self.assertEqual([c[:2] for c in self.uv_calls()], [["pip", "sync"]])
+        self.assertTrue((rdir / ".whynot-lock.sha256").is_file())
+
+    def test_failed_repair_leaves_no_stamps_and_current_unchanged(self):
+        ctx = self.ctx()
+        self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
+        rdir = ctx.paths.runtimes_dir / self.rid()
+        (rdir / ".whynot-lock.sha256").write_text("0" * 64 + "\n", encoding="utf-8")  # stamped for another lock
+        with mock.patch.dict(os.environ, {"FAKE_UV_FAIL": "sync"}):
+            ctx = self.ctx()
+            r = self.rt.step_runtime(ctx)
+        self.assertEqual(r.status, "red")
+        self.assert_unstamped(rdir)  # the stamps went first: the next run never trusts this runtime
+        self.assertEqual(ctx.paths.current_file.read_text(encoding="utf-8"), self.rid() + "\n")
+        self.assertFalse(self.build_lock(ctx.paths).exists())
+        self.assertEqual(self.uv_calls("venv")[1:], [])  # the repair did not recreate the venv
 
     def test_e_no_lock_is_skipped(self):
         self.lock.unlink()
@@ -945,17 +1045,17 @@ class TestRuntime(unittest.TestCase):
         ctx = self.ctx()
         self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
         self.assertEqual(self.rt.current_runtime(ctx.paths), rid)
-        self.assertTrue([c for c in self.uv_calls() if c[:2] == ["pip", "sync"]])
+        self.assertTrue(self.uv_calls("pip", "sync"))
 
-    def test_unstamped_leftover_is_replaced(self):
+    def test_leftover_without_python_is_removed_and_rebuilt(self):
         ctx = self.ctx()
-        rid = "r-" + sha(LOCK_A)[:12]
+        rid = self.rid()
         leftover = ctx.paths.runtimes_dir / rid
         (leftover / "Lib").mkdir(parents=True)
         (leftover / "Lib" / "half.py").write_text("x", encoding="utf-8")
-        (ctx.paths.runtimes_dir / (rid + ".building")).mkdir()
         self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
         self.assertFalse((leftover / "Lib" / "half.py").exists())
+        self.assertEqual(len(self.uv_calls("venv")), 1)
         self.assertTrue((leftover / ".whynot-lock.sha256").is_file())
         self.assertEqual(sorted(p.name for p in ctx.paths.runtimes_dir.iterdir()), [rid])
 
@@ -966,7 +1066,8 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual(r.status, "red")
         self.assertIn("no_such_module_wnc", r.detail + ctx.log.path.read_text(encoding="utf-8"))
         self.assertFalse(ctx.paths.current_file.exists())
-        self.assertEqual(list(ctx.paths.runtimes_dir.iterdir()), [])
+        self.assert_unstamped(ctx.paths.runtimes_dir / self.rid())
+        self.assertFalse(self.build_lock(ctx.paths).exists())
 
     def test_runtime_python_prefers_the_layout_that_exists(self):
         paths = base.Paths.from_env(str(self.home), env={})

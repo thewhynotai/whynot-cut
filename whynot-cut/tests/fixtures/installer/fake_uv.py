@@ -7,11 +7,14 @@ $FAKE_UV_PYTHON (default `python` / `python3`).
 
 Behaviour:
   --version                       prints `uv <FAKE_UV_VERSION or 0.0.0>`
-  python install <v>              exit 0
-  python find <v>                 prints sys.executable
+  python install <v> ...          exit 0
+  python find <v> ...             prints sys.executable on stdout (plus a warning on stderr, which the core must
+                                  ignore); exit 1 instead, once, while the file $FAKE_UV_FIND_FAIL_ONCE is missing
+                                  (it is created then), so the core goes on to `python install`
   venv <dir> [--python <py>] ...  `<py or sys.executable> -m venv --without-pip <dir>` (other flags ignored)
   pip sync ...                    exit 1 when FAKE_UV_FAIL=sync, else 0
-Every call appends its argv as one JSON line to $FAKE_UV_LOG (when set), so a test can assert "no uv call".
+Every call appends {"argv": [...], "UV_NO_CONFIG": <env value or null>} as one JSON line to $FAKE_UV_LOG (when
+set), so a test can assert "no uv call" and that the core switched uv's config files off.
 """
 import json
 import os
@@ -23,13 +26,20 @@ def main(argv):
     log = os.environ.get("FAKE_UV_LOG")
     if log:
         with open(log, "a", encoding="utf-8") as f:
-            f.write(json.dumps(argv, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"argv": argv, "UV_NO_CONFIG": os.environ.get("UV_NO_CONFIG")},
+                               ensure_ascii=False) + "\n")
     if argv[:1] == ["--version"]:
         print("uv " + os.environ.get("FAKE_UV_VERSION", "0.0.0"))
         return 0
     if argv[:2] == ["python", "install"]:
         return 0
     if argv[:2] == ["python", "find"]:
+        marker = os.environ.get("FAKE_UV_FIND_FAIL_ONCE")
+        if marker and not os.path.exists(marker):
+            open(marker, "w").close()
+            sys.stderr.write("error: no managed Python found\n")
+            return 1
+        sys.stderr.write("warning: this line is on stderr and is not the interpreter\n")
         print(sys.executable)
         return 0
     if argv[:1] == ["venv"] and len(argv) >= 2:
