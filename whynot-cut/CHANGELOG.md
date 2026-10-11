@@ -103,11 +103,14 @@
 - Guard minors from the Phase 1 gate (T2.19). Bash: a `\` before CRLF escapes the CR and is no line continuation (the
   next line runs on its own and is checked); `\$'` and `$$'` open no ANSI-C quote; a continued line that starts with
   `#` (`ls output\` + `#; rm -rf data` is `ls output#; rm -rf data`) is not a comment; `<<` inside `$(( ))` / `(( ))`
-  is a shift, not a heredoc that hides the following lines. PowerShell: a backtick before CRLF continues the line.
-  The SessionStart "protection may be OFF" warning no longer fires after a session that only read or chatted (then
-  `/clear` or a new session): it needs the previous session's transcript, or one of its subagents', to show a Bash,
-  PowerShell, Write or Edit call made since that session started; `last-session-start` now also records the
-  session's transcript path.
+  is a shift, not a heredoc that hides the following lines; a heredoc fed to a shell is found after such a shift on
+  the same line (`echo $((1<<2)) && bash <<EOF`). PowerShell: a backtick before CRLF continues the line; a lone CR
+  ends a statement. The SessionStart "protection may be OFF" warning no longer fires after a session that only read
+  or chatted (then `/clear` or a new session): it needs the previous session's transcript, or one of its subagents',
+  to show a Bash, PowerShell, Write or Edit call made since that session started and after the last guard heartbeat
+  (so a guard that stopped mid-session is caught too). `last-session-start` now also records the transcript path and
+  its size at the start, and only the part written since is read (a 121 MB transcript: 1 ms). A transcript in an
+  unrecognised format falls back to the old rule.
 - Contact sheets lay out exactly the tiles they are given (G73): the previews sheet had six columns for three
   composites, half of it black. Sheets with fewer tiles than columns are now that many tiles wide.
 - Resource leaks (MI-9): every preview probe left a 2-4 MB temp PNG and an open descriptor in `%TEMP%` (the frame now

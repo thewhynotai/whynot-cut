@@ -677,7 +677,7 @@ def scan_sh_line(line: str, q: str | None = None, after: str = "") -> tuple[str,
 def shell_lines(cmd: str) -> tuple[str, list[tuple[str, str]]]:
     """Drop heredoc BODIES (they are data such as a script's text, not shell commands) and make each line its own
     command (newlines separate commands in a shell; shlex would otherwise glue lines together). Returns the command
-    text and [(line that opened the heredoc, body)] so a body fed to a shell can be checked as commands.
+    text and [(line that opened the heredoc minus its `<<DELIM`, body)] so a body fed to a shell can be checked.
     Each physical line loses its comment first (C1); only then does a trailing backslash join the next line, so a
     comment that ends in `\\` never continues (bash runs the next line). `<<` inside quotes opens no heredoc.
     A `\\` before CRLF escapes the CR, not the newline: no continuation (T2.19)."""
@@ -698,8 +698,8 @@ def shell_lines(cmd: str) -> tuple[str, list[tuple[str, str]]]:
             cont = not raw.endswith("\r")        # ... `\` + CRLF: an escaped CR (dropped), the LF still ends it
         for k in heredocs:
             m = _HEREDOC.match(code, k)
-            if m:
-                delim, opener = m.group(2), code
+            if m:              # opener: the line without this `<<DELIM` (an earlier `$((1<<2))` stays intact, M1)
+                delim, opener = m.group(2), code[:m.start()] + " " + code[m.end():]
                 break
         if (join or inside) and out:
             out[-1] += ("" if join else "\n") + code
@@ -927,8 +927,7 @@ def check_xargs_stage(argv: list[str], src: tuple[str, str], cwd: Path, agent: s
 def check_bash(cmd: str, cwd: Path, agent: str | None):
     text, docs = shell_lines(cmd)           # heredoc bodies are data, not commands ...
     for opener, body in docs:               # ... unless a shell reads them: `bash <<'EOF'`, `cat <<EOF | sh`
-        kind = next((shell_kind(norm_exe(t)) for t in re.split(r"[\s|;&]+", opener.split("<<")[0] + " " +
-                                                                 opener.split("<<")[-1]) if shell_kind(norm_exe(t))), None)
+        kind = next((shell_kind(norm_exe(t)) for t in re.split(r"[\s|;&]+", opener) if shell_kind(norm_exe(t))), None)
         if kind:
             check_text(kind, body, cwd, agent)
     for body in substitutions(text):
@@ -1437,7 +1436,8 @@ def strip_filter_values(args: list[str]) -> list[str]:
 
 
 def check_powershell(cmd: str, cwd: Path, agent: str | None):
-    cmd = cmd.replace("\r\n", "\n")              # T2.19: backtick + CRLF continues the line like backtick + LF
+    cmd = cmd.replace("\r\n", "\n").replace("\r", "\n")      # T2.19: CRLF and a lone CR end a line; a backtick
+                                                             # before either continues it (like backtick + LF)
     for body in substitutions(cmd, backticks=False):
         check_powershell(body, cwd, agent)
     check_dotnet(cmd, cwd)

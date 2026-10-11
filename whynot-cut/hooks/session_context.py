@@ -8,8 +8,8 @@ Speaks up when the session opens
   * in the clients folder (setting `clients_root`, or a folder whose preferences file says so): which clients it holds;
   * in a folder that has a WhyNot Cut preferences file but no clients yet: point to /whynot-cut:start.
 Whenever it speaks, it first warns loudly if the guard heartbeat (${CLAUDE_PLUGIN_DATA}/guard-ok, written by
-guard.py) is missing or older than the previous SessionStart while that session's transcript shows a guarded tool
-call since its start: tools ran but the read-only guard did not (a session that only read or chatted is no alarm).
+guard.py) is missing or older than a guarded tool call the previous session's transcript records since it started:
+tools ran but the read-only guard did not (a session that only read or chatted is no alarm).
 Stdlib only; never fails the session (any error -> silent exit 0).
 """
 import json
@@ -36,29 +36,35 @@ def client_root(start: Path):
     return next((p for p in [start, *start.parents] if is_client(p)), None)
 
 
-PREV_START: list = []        # [(time, transcript path or None) of the previous SessionStart, or None], set by main()
+PREV_START: list = []   # [(time, transcript or None, its size then) of the previous SessionStart, or None]; main()
 # the tools the PreToolUse guard inspects (hooks.json matcher; a test keeps the two equal)
 GUARDED_TOOLS = ("Bash", "PowerShell", "Write", "Edit", "MultiEdit", "NotebookEdit")
 _GUARDED_NAME = re.compile(rb'"name"\s*:\s*"(?:' + "|".join(GUARDED_TOOLS).encode() + rb')"')
+_RECORD = re.compile(rb'"type"\s*:\s*"(?:assistant|user)"')      # a transcript record this code knows
 _STAMP = re.compile(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)")
 
 
 def note_session_start(transcript: str = ""):
-    """Record this SessionStart (time + this session's transcript path) in ${CLAUDE_PLUGIN_DATA}/last-session-start and
-    return the previous one as (time, transcript or None); None: no session recorded yet, i.e. a new install. A file
+    """Record this SessionStart in ${CLAUDE_PLUGIN_DATA}/last-session-start: time, this session's transcript path and
+    the transcript's size now (0 when it does not exist yet; a resumed session's older turns lie before it). Returns
+    the previous record as (time, transcript or None, size); None: no session recorded yet, i.e. a new install. A file
     from before T2.19 holds the time only (transcript None: the warning keeps its old rule once)."""
     d = os.environ.get("CLAUDE_PLUGIN_DATA")
     if not d:
         return None
     f = Path(d) / "last-session-start"
     try:
-        lines = f.read_text(encoding="utf-8").splitlines()
-        prev = (float(lines[0].strip()), (lines[1].strip() if len(lines) > 1 else "") or None)
+        lines = f.read_text(encoding="utf-8").splitlines() + ["", ""]
+        prev = (float(lines[0].strip()), lines[1].strip() or None, int(lines[2].strip() or 0))
     except (OSError, ValueError, IndexError):
         prev = None
     try:
+        size = os.path.getsize(transcript) if transcript else 0
+    except OSError:
+        size = 0
+    try:
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(f"{time.time()}\n{transcript}\n", encoding="utf-8")
+        f.write_text(f"{time.time()}\n{transcript}\n{size}\n", encoding="utf-8")
     except OSError:
         pass
     return prev
@@ -73,25 +79,38 @@ def _epoch(stamp):
         return None
 
 
-def guarded_calls_since(transcript: str, since: float) -> bool:
-    """True when the session's transcript, or one of its subagents' (<transcript stem>/subagents/*.jsonl), records a
-    call of a guarded tool made at or after `since` (a resumed or compacted transcript also holds older turns). A
-    missing transcript (a session closed before its first message) holds none. Reads line by line, stops at the
-    first hit; only lines naming a guarded tool are parsed."""
+def guarded_calls_since(transcript: str, since: float, offset: int = 0, beat=None):
+    """Did the previous session make a guarded tool call that the guard did not see? Reads the session's transcript
+    from `offset` (its size when the session started: only that session's own turns, fix round 1 I1; from 0 when the
+    file shrank) and its subagents' transcripts (<transcript stem>/subagents/*.jsonl) changed since then. A call counts
+    when it was made at or after `since` (the session's start) and more than 2 s after the guard's last heartbeat
+    `beat` (None: missing), so a guard that stopped in the middle of a session is caught too (M2).
+    -> True: such a call; False: none (also: no transcript, or nothing written after `offset`); None: lines were
+    written but none is a record this code recognises (a changed transcript format: the caller keeps the old rule, M4).
+    Line by line, stops at the first hit; only lines naming a guarded tool are parsed."""
+    after = since if beat is None else max(since, beat)
     t = Path(transcript)
     try:
-        subs = sorted((t.parent / t.stem / "subagents").glob("*.jsonl"))
+        subs = [s for s in sorted((t.parent / t.stem / "subagents").glob("*.jsonl")) if s.stat().st_mtime >= after - 2]
     except OSError:
         subs = []
-    for f in [t, *subs]:
+    lines_seen = known = False
+    for f, start in [(t, offset), *((s, 0) for s in subs)]:
         try:
             with open(f, "rb") as fh:
+                if start > os.fstat(fh.fileno()).st_size:
+                    start = 0
+                fh.seek(start)
                 for line in fh:
+                    if not line.strip():
+                        continue
+                    lines_seen = True
+                    known = known or bool(_RECORD.search(line))
                     if b'"tool_use"' not in line or not _GUARDED_NAME.search(line):
                         continue
-                    k = line.rfind(b'"timestamp":"')     # the record's own stamp (its last key): older turns are
+                    k = line.rfind(b'"timestamp":"')     # the record's own stamp (its last key): calls before
                     early = _epoch(line[k + 13:k + 32].decode("ascii", "replace")) if k >= 0 else None
-                    if early is not None and early < since - 2:          # skipped without parsing the line
+                    if early is not None and not _counts(early, since, beat):    # `after` skip without parsing
                         continue
                     try:
                         rec = json.loads(line)
@@ -100,22 +119,28 @@ def guarded_calls_since(transcript: str, since: float) -> bool:
                     except (ValueError, KeyError, TypeError):
                         continue
                     when = _epoch(rec.get("timestamp"))
-                    if calls and (when is None or when >= since - 2):
+                    if calls and (when is None or _counts(when, since, beat)):
                         return True
         except OSError:
             continue
-    return False
+    return None if lines_seen and not known else False
+
+
+def _counts(when: float, since: float, beat) -> bool:
+    return when >= since - 2 and (beat is None or when > beat + 2)
 
 
 def heartbeat_warning() -> str:
-    """Loud first sentence when the guard did not run since the previous session started: ${CLAUDE_PLUGIN_DATA}/
-    guard-ok (written by guard.py on every tool call it inspects) is missing or older than that session's start.
-    Not hooks-ok: run_python.sh touches that right before running this hook (gate G1). Not a fixed age either: a
-    weekend without sessions is no alarm (fix round 2, N4). Nor a session that only read or chatted (then /clear or a
-    new session): the guard had nothing to inspect, so the previous session's transcript must show a guarded tool call
-    since its start (T2.19). No previous session recorded, or no CLAUDE_PLUGIN_DATA: silent."""
+    """Loud first sentence when the guard missed tool calls of the previous session: ${CLAUDE_PLUGIN_DATA}/guard-ok
+    (written by guard.py on every tool call it inspects) is missing or older than a guarded tool call that session's
+    transcript records since it started (T2.19; fix round 1: only the part of the transcript written since then is
+    read, and a call after the last heartbeat counts even when the guard ran earlier in that session). A session that
+    only read or chatted, then /clear or a new session, is no alarm: the guard had nothing to inspect. Not hooks-ok:
+    run_python.sh touches that right before running this hook (gate G1). Not a fixed age either: a weekend without
+    sessions is no alarm (N4). Without a usable transcript (none recorded, or an unknown format) the old rule applies:
+    guard-ok missing or older than the previous start. No previous session recorded, or no CLAUDE_PLUGIN_DATA: silent."""
     d = os.environ.get("CLAUDE_PLUGIN_DATA")
-    prev, transcript = (PREV_START[0] if PREV_START and PREV_START[0] else (None, None))
+    prev, transcript, offset = (PREV_START[0] if PREV_START and PREV_START[0] else (None, None, 0))
     if not d or prev is None:
         return ""
     f = Path(d) / "guard-ok"
@@ -123,12 +148,12 @@ def heartbeat_warning() -> str:
         beat = f.stat().st_mtime
     except OSError:
         beat = None
-    if beat is not None and beat >= prev:
+    hit = guarded_calls_since(transcript, prev, offset, beat) if transcript else None
+    if hit is False or (hit is None and beat is not None and beat >= prev):
         return ""
-    if transcript and not guarded_calls_since(transcript, prev):
-        return ""
-    state = "is missing" if beat is None else (f"was last written {(time.time() - beat) / 3600:.0f} h ago, before "
-                                                f"the previous session started")
+    state = "is missing" if beat is None else (
+        f"was last written {(time.time() - beat) / 3600:.1f} h ago, before "
+        + ("a Bash/PowerShell/Write/Edit call of the previous session" if hit else "the previous session started"))
     return (f"WARNING: WhyNot Cut protection may be OFF: the guard heartbeat {state} ({f}), so the guard that keeps "
             f"assets/ and data/ read-only may not be running. Run `reel doctor` and tell the editor before editing. ")
 

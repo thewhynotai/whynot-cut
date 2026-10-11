@@ -65,6 +65,21 @@ class TestGuardPhase2Minors(ClientFixture):
                                     f"Remove-Item {BT}{CR}{LF}-Recurse output/projects/C0001/cache",
                                     f"$s = @'{CR}{LF}Remove-Item data{CR}{LF}'@{CR}{LF}Write-Output $s"])
 
+    def test_r1_heredoc_opener_split_at_its_own_operator(self):
+        """Fix round 1, M1: the heredoc's opener is cut at the matched `<<DELIM`, not at the first `<<` of the line (an
+        arithmetic shift before it hid `bash`); the delimiter word itself is no command (`<<sh` feeds no shell)."""
+        self.blocked("Bash", [f"echo $((1<<2)) && bash <<EOF{LF}rm -rf data{LF}EOF",
+                              f"echo $((x << 1)); cat <<EOF | sh{LF}rm -rf data{LF}EOF",
+                              f"ls output && bash <<EOF{LF}rm -rf data{LF}EOF"])
+        self.allowed("Bash", [f"cat <<sh > output/x.md{LF}rm -rf data{LF}sh",
+                              f"echo $((1<<2)) && cat <<EOF > output/x.md{LF}rm -rf data{LF}EOF"])
+
+    def test_r1_powershell_lone_cr_ends_a_line(self):
+        """Fix round 1, M5: PowerShell ends a statement at a lone CR too."""
+        self.blocked("PowerShell", [f"Get-ChildItem data{CR}Remove-Item -Recurse data",
+                                    f"Remove-Item {BT}{CR}-Recurse data"])
+        self.allowed("PowerShell", [f"Get-ChildItem data{CR}Get-ChildItem output{CR}"])
+
     def test_changelog_names_no_real_client_colour(self):
         self.assertNotIn("81613d", (SK / "CHANGELOG.md").read_text(encoding="utf-8").lower())
 
@@ -129,11 +144,62 @@ class TestHeartbeatAfterReadOnlySessions(ClientFixture):
         self.transcript("s2", _tool_line("Write", time.time()), sub="a1")       # a subagent's call counts
         self.assertIn("protection may be OFF", self.start("s3"))
 
-    def test_guarded_tools_match_the_hook_matcher(self):
+    @staticmethod
+    def module():
         import importlib.util
         spec = importlib.util.spec_from_file_location("session_context_t219", CTX)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+        return mod
+
+    def test_r1_only_the_tail_written_since_the_start_is_read(self):
+        """Fix round 1, I1: SessionStart records the transcript's size; the next start reads only what was written
+        after it (a 100 MB resumed transcript cost 668 ms). The ~24 MB head here holds a Bash call that would count."""
+        big = self.tdir / "s1.jsonl"
+        later = time.time() + 600
+        pad = json.dumps({"type": "user", "timestamp": _stamp(later), "message": {"role": "user", "content": "x" * 4000}})
+        with open(big, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write((pad + "\n") * 6000 + _tool_line("Bash", later) + "\n")
+        size = big.stat().st_size
+        self.assertGreater(size, 20_000_000)
+        self.assertNotIn("protection may be OFF", self.start("s1"))           # records (time, s1.jsonl, size)
+        self.assertEqual((self.data / "last-session-start").read_text(encoding="utf-8").splitlines()[1:],
+                         [str(big), str(size)])
+        mod, since = self.module(), time.time() - 5
+        self.assertIs(mod.guarded_calls_since(str(big), since, 0, None), True)          # the head would count ...
+        t0 = time.perf_counter()
+        self.assertIs(mod.guarded_calls_since(str(big), since, size, None), False)      # ... but is never read
+        self.assertLess(time.perf_counter() - t0, 0.1)
+        self.assertNotIn("protection may be OFF", self.start("s2"))           # guard-ok missing, nothing new in s1
+        with open(big, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(_tool_line("Edit", time.time()) + "\n")
+        self.assertIs(mod.guarded_calls_since(str(big), since, size, None), True)       # the tail is read
+        self.assertIs(mod.guarded_calls_since(str(big), since, size * 2, None), True)   # shrank/rewritten: from 0
+
+    def test_r1_a_call_after_the_last_heartbeat_counts(self):
+        """Fix round 1, M2: a guard that ran early in the session and then stopped is caught; a call before the beat
+        (the guard saw it) is not."""
+        self.start("s1")
+        beat = time.time() + 30
+        hb = self.data / "guard-ok"
+        hb.write_text("1", encoding="utf-8")
+        os.utime(hb, (beat, beat))
+        self.transcript("s1", _tool_line("Bash", beat - 20))
+        self.assertNotIn("protection may be OFF", self.start("s2"))
+        self.transcript("s2", _tool_line("Bash", beat - 10), _tool_line("Write", beat + 90))
+        self.assertIn("protection may be OFF", self.start("s3"))              # guard-ok is newer than s2's start
+
+    def test_r1_unknown_transcript_format_keeps_the_old_rule(self):
+        """Fix round 1, M4: lines written but no record this code knows (a changed format) -> the old rule (guard-ok
+        missing or older than the previous start), never silence; a transcript with nothing new stays silent."""
+        self.start("s1")
+        (self.tdir / "s1.jsonl").write_text('{"kind": "event", "tool": "Bash"}\n', encoding="utf-8")
+        self.assertIn("protection may be OFF", self.start("s2"))
+        (self.tdir / "s2.jsonl").write_text("", encoding="utf-8")
+        self.assertNotIn("protection may be OFF", self.start("s3"))
+
+    def test_guarded_tools_match_the_hook_matcher(self):
+        mod = self.module()
         hooks = json.loads((SK / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
         guard = next(h for h in hooks if "guard.py" in h["hooks"][0]["command"])
         self.assertEqual(set(mod.GUARDED_TOOLS), set(re.split(r"\|", guard["matcher"])))
