@@ -7,14 +7,14 @@
   },
   "metadata": {
     "description": "Claude Code plugins by The Why Not AI",
-    "version": "2.1.0"
+    "version": "2.1.1"
   },
   "plugins": [
     {
       "name": "whynot-cut",
       "source": "./whynot-cut",
       "description": "Raw footage in, Premiere project out. Why not? AI reel editing for Adobe Premiere Pro on macOS and Windows, with podcast mode (episode -> reels plan -> reels + publish package).",
-      "version": "2.1.0",
+      "version": "2.1.1",
       "author": {
         "name": "The Why Not AI",
         "email": "info@thewhynot.ai"

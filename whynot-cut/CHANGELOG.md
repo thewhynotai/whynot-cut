@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.1.1 — 2026-10-11 · Podcast mode polish
+The minor findings of the 2.1.0 review, each reproduced by a failing test first.
+
+**Fixed**
+- Arabic matching (`reels-plan` evidence, publish quotes, plan evidence, avoid topics) folds Arabic-Indic and Persian
+  digits (٣ = ۳ = 3) and hamza seats (ئ → ي, ؤ → و: «دائما» = «دايما», «سؤال» = «سوال»).
+- `publish-check` reads a bare multi-label domain whole (`example.co.uk`, `news.bbc.co.uk/x`): it was cut to
+  `example.co`, which let a different site pass the "links only from the episode sheet" rule.
+- Straight double quotes "…" in publishing copy are emphasis, not a quotation: only «…» and “…” must be the speaker's
+  words.
+- `audio-clean` names each pause value's origin when only one of `--min-pause`/`--pad` is given
+  (e.g. `command line (min_pause_ms), recipe drama (pad_ms)`).
+- `publish-thumbnail --candidates` seeks to each sample instead of decoding the whole episode (a 90-minute episode
+  takes seconds, not minutes).
+- Thumbnail designs: `highlight` draws the named word(s) in the brand colour (a warning when they are not in the
+  text); designs beyond 3 (`platform-limits.json` `thumbnail.designs_max`) are skipped with a warning instead of
+  silently.
+- The per-shot reframe and the 4:5 window are sized from the reel's own footage, not from the first file in
+  preflight.json.
+- `episode-next` flags reels picked from an older reels plan (the plan was re-validated after selection) until the
+  editor confirms them again.
+- `reel inbox` caches each Raw clip's probe by path, modification time and size (`output/discovery/raw-probe-cache.json`)
+  instead of probing every clip on every call.
+- A reel whose episode file changed after selection is now also refused by `audio-clean`, `previews`, `preview-video`,
+  `ppro-build` and `premiere` (before: only `preflight` and `plan`).
+- `preview-video` reaps its ffmpeg decoders (no lingering process / ResourceWarning); the podcast tests close every
+  file they open.
+
 ## 2.1.0 — 2026-10-11 · Podcast mode
 A finished podcast episode becomes a reels plan, the editor picks, and each pick goes through the normal pipeline —
 plus the episode's publishing package. One plugin: after Gate 0 a reel is an ordinary clip project.

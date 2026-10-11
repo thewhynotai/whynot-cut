@@ -25,11 +25,14 @@ rules; update that file rather than the code. Last reviewed for WhyNot Cut 2.1 (
 ## Facts
 - Every URL anywhere in the copy must appear in the episode sheet (compared without scheme, `www.`, case or trailing
   punctuation). An invented link is an error.
-- Every quote in «…», “…” or "…" must be found in the transcript (Arabic-normalised). A paraphrase in quotes is an error.
+- Every quote in «…» or “…” must be found in the transcript (Arabic-normalised). A paraphrase in quotes is an error.
+  Straight "…" is read as emphasis or a term, not a quotation: never use it to quote the speaker.
 - `approval_required` items are listed in `youtube.md` and the reel files for the editor.
 
 ## Thumbnails (`reel publish-thumbnail`)
 - 1280×720, ≤ 2 MB (PNG, else JPEG). Text ≤ 5 words reads at phone size (warning above).
 - `--candidates`: frames with a face, scored on face size, sharpness and contrast, at least 30 s apart.
 - `--render`: the face in one third, the text on the other side over a dark gradient (right side first for Arabic),
-  the client's headline font, a brand-colour bar, the logo when the client database has one.
+  the client's headline font, a brand-colour bar, the logo when the client database has one. `highlight` (optional):
+  word(s) of the text drawn in the brand colour (a warning when they are not in the text). Up to 3 designs (YouTube's
+  test-and-compare); extra designs are skipped with a warning.

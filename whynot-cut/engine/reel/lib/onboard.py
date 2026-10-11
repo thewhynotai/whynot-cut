@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from . import plat
-from .common import ENV_DIR, Paths, ffmpeg_exe, load_status, now_iso, read_json, slug, venv_python, write_text
+from .common import ENV_DIR, Paths, ffmpeg_exe, load_status, now_iso, read_json, slug, venv_python, write_json, write_text
 
 MODULES = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "fontTools", "arabic_reshaper", "bidi",
            "uharfbuzz", "freetype", "pypdf"]
@@ -200,16 +200,29 @@ def inbox(root: Path, refresh: bool = True) -> dict:
     episodes = list_episodes(p.root)
     hints = []
     long_min = podcast_cfg().get("raw_episode_hint_min", 10)
+    # probing every Raw clip on every call is slow on big folders: reuse the last probe while path, mtime and size match
+    cache_f = p.output / "discovery/raw-probe-cache.json"
+    cache, seen = read_json(cache_f, {}) or {}, {}
     for c in clips:   # a whole episode dropped into Raw would be edited as ONE clip: point to data/Episodes
         try:
-            from .media import probe
-            pr = probe(p.root / c["file"])
-            v = pr.get("video") or {}
-            if (pr.get("duration_s") or 0) >= long_min * 60 and v.get("display_width", 0) > v.get("display_height", 0):
-                hints.append(f"{c['file']} is {pr['duration_s'] / 60:.0f} min and 16:9: if it is a podcast episode to cut "
+            f = p.root / c["file"]
+            st = f.stat()
+            key = [st.st_mtime_ns, st.st_size]
+            info = cache.get(c["file"])
+            if not info or info.get("stat") != key:
+                from .media import probe
+                pr = probe(f)
+                v = pr.get("video") or {}
+                info = {"stat": key, "duration_s": pr.get("duration_s") or 0, "width": v.get("display_width", 0),
+                        "height": v.get("display_height", 0)}
+            seen[c["file"]] = info
+            if info["duration_s"] >= long_min * 60 and info["width"] > info["height"]:
+                hints.append(f"{c['file']} is {info['duration_s'] / 60:.0f} min and 16:9: if it is a podcast episode to cut "
                              f"into reels, move it to data/Episodes/ (the editor moves it; data/ is read-only for WhyNot Cut)")
         except Exception:  # noqa: BLE001  (a hint only)
             pass
+    if seen != cache:
+        write_json(cache_f, seen)
     return {"root": str(p.root), "profile": read_json(p.output / "client_database/reel-profile/profile.json", {}).get("id"),
             "episodes": episodes, "episode_hints": hints,
             "clips": clips, "new": [c["video_id"] for c in clips if c["state"] == "new"],

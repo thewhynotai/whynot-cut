@@ -270,6 +270,7 @@ def cmd_plan(a):
 def cmd_previews(a):
     from lib.previews import render_all
     p = P(a)
+    refuse_stale_window(p)
     r = render_all(p, composite_preview=not a.no_composite)
     out({"previews": len(r["previews"]), "contact_sheet": str(p.p("08_quality_control/previews/_contact_sheet.jpg"))})
 
@@ -343,6 +344,7 @@ def cmd_ppro_probe(a):
 def cmd_ppro_build(a):
     from lib.ppro_build import build
     p = P(a)
+    refuse_stale_window(p)
     require_plan_approval(p)
     r = build(p, overwrite=a.force, replace_edited=a.replace_edited)
     if r.get("status") == "PRPROJ_BUILT":
@@ -358,6 +360,7 @@ def cmd_ppro_frames(a):
 def cmd_audio_clean(a):
     from lib.audio_clean import clean, detect_pauses, verify_cuts
     p = P(a)
+    refuse_stale_window(p)
     src = main_footage(p, None)[0]
     hum = "auto" if a.hum == "auto" else () if a.hum == "off" else tuple(range(int(a.hum) * 2, 501, int(a.hum)))
     from lib.recipes import pause_params
@@ -412,6 +415,7 @@ def cmd_ps_build(a):
 def cmd_premiere(a):
     from lib.premiere_xml import build_xml
     p = P(a)
+    refuse_stale_window(p)
     tm = build_xml(p, prefer_ae_renders=False)   # Premiere-only: brand stills, never stale AE renders
     gen = [x for x in tm["media"]]
     set_status(p, "ASSETS_GENERATED", f"{len(gen)} media referenced", "assets")
@@ -587,7 +591,9 @@ def cmd_inbox(a):
 
 def cmd_preview_video(a):
     from lib.preview_video import render
-    out(render(P(a), width=a.width, label=not a.no_label))
+    p = P(a)
+    refuse_stale_window(p)
+    out(render(p, width=a.width, label=not a.no_label))
 
 
 def cmd_settings(a):

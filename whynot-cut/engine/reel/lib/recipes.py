@@ -28,24 +28,22 @@ def for_paths(paths) -> dict | None:
 
 def pause_params(paths, cli_min: int | None = None, cli_pad: int | None = None) -> dict:
     """Pause-removal thresholds: explicit CLI value > the reel's recipe > the profile's style.json remove_pauses >
-    250/80 ms. `source` says where the values came from (shown to the editor)."""
-    vals, src = {"min_pause_ms": 250, "pad_ms": 80}, "default"
+    250/80 ms, per value. `source` says where the values came from (shown to the editor): one origin, or each value's
+    when they differ ("command line (min_pause_ms), recipe drama (pad_ms)")."""
+    keys = ("min_pause_ms", "pad_ms")
+    vals, srcs = {"min_pause_ms": 250, "pad_ms": 80}, dict.fromkeys(keys, "default")
+
+    def layer(given: dict, name: str):
+        for k in keys:
+            if given.get(k) is not None:
+                vals[k], srcs[k] = int(given[k]), name
     style = load_config("style.json").get("remove_pauses") or {}
-    if isinstance(style, dict) and (style.get("min_pause_ms") or style.get("pad_ms")):
-        vals.update({k: int(style[k]) for k in ("min_pause_ms", "pad_ms") if style.get(k)})
-        src = "profile style.json"
+    if isinstance(style, dict):
+        layer({k: style.get(k) or None for k in keys}, "profile style.json")
     rec = for_paths(paths)
-    pacing = (rec or {}).get("pacing") or {}
-    if pacing:
-        vals.update({k: int(pacing[k]) for k in ("min_pause_ms", "pad_ms") if pacing.get(k)})
-        src = f"recipe {rec.get('type')}"
-    if cli_min is not None or cli_pad is not None:
-        if cli_min is not None:
-            vals["min_pause_ms"] = int(cli_min)
-        if cli_pad is not None:
-            vals["pad_ms"] = int(cli_pad)
-        if cli_min is not None and cli_pad is not None:
-            src = "command line"
+    layer({k: ((rec or {}).get("pacing") or {}).get(k) or None for k in keys}, f"recipe {(rec or {}).get('type')}")
+    layer({"min_pause_ms": cli_min, "pad_ms": cli_pad}, "command line")
+    src = srcs[keys[0]] if len(set(srcs.values())) == 1 else ", ".join(f"{srcs[k]} ({k})" for k in keys)
     return dict(vals, source=src)
 
 

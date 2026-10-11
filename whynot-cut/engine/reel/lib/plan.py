@@ -22,10 +22,14 @@ VALID_CONF = {"high", "medium", "low"}
 _AR_DIAC = re.compile(r"[ؐ-ًؚ-ٰٟۖ-ۭـ]")
 
 
+# hamza seats -> the bare letter (دائما = دايما, سؤال = سوال), ta marbuta, alef maqsura, Arabic-Indic and Persian digits
+_AR_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ؤ": "و", "ئ": "ي", "ة": "ه", "ى": "ي",
+                          **{chr(0x660 + i): str(i) for i in range(10)}, **{chr(0x6F0 + i): str(i) for i in range(10)}})
+
+
 def norm(s: str) -> str:
     s = unicodedata.normalize("NFKC", s or "")
-    s = _AR_DIAC.sub("", s)
-    s = s.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ة", "ه").replace("ى", "ي")
+    s = _AR_DIAC.sub("", s).translate(_AR_FOLD)
     s = re.sub(r"[^\w\s]", " ", s.lower())
     return re.sub(r"\s+", " ", s).strip()
 
@@ -119,6 +123,14 @@ def window_rect(framing: str | None, y: int | None = None, seq_w: int = 1080, se
     h = min(seq_h, int(round(seq_w * b / a)))
     top = int(y) if y is not None else (seq_h - h) // 2
     return {"w": seq_w, "h": h, "y": max(0, min(seq_h - h, top)), "mode": f}
+
+
+def main_video(pre: dict, main: str | None) -> dict | None:
+    """Preflight's video info for THIS video's footage (matched by file name); without a named footage, the first file."""
+    vids = [f for f in (pre or {}).get("files", []) if f.get("video")]
+    if main:
+        return next((f["video"] for f in vids if Path(f["path"]).name == Path(main).name), None)
+    return vids[0]["video"] if vids else None
 
 
 def to_ms(v) -> int:
@@ -343,8 +355,10 @@ def compile_plan(paths: Paths) -> dict:
     # moves are composed over the shot layer. Anything without a shot analysis keeps the path above.
     pre_all = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
     shots_rep = pre_all.get("shots") or {}
+    from .common import source_range
+    main_file = base.get("main_footage") or source_range(paths).get("footage")
     if shots_rep.get("shots") and base.get("base_scale_percent") in (None, "auto"):
-        pv = next((f["video"] for f in pre_all.get("files", []) if f.get("video")), None)
+        pv = main_video(pre_all, main_file)
         if pv:
             from .shots import compose_camera, frame_shots
             seq_g = load_config("sequence-settings.json")["general"]
@@ -376,8 +390,7 @@ def compile_plan(paths: Paths) -> dict:
     framing_mode = str(base.get("framing") or load_config("style.json").get("framing") or "9:16")
     win = window_rect(framing_mode, base.get("framing_window_y"))
     if win and bsp:
-        pv_ = next((f["video"] for f in read_json(paths.p("00_inputs/preflight.json"), {"files": []})["files"]
-                    if f.get("video")), None)
+        pv_ = main_video(pre_all, main_file)
         if pv_:
             k45 = max(win["w"] / pv_["display_width"], win["h"] / pv_["display_height"]) * 100 / bsp
             bx = float(box or 0.0)

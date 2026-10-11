@@ -5,7 +5,8 @@ The copy is authored by the publish-writer agent (publish/publish.json, publish/
 checks it against platform limits (config/defaults/platform-limits.json) and the episode's own facts, then renders
 the files the editor copies from. Nothing is uploaded anywhere.
   * every URL must appear in the episode sheet (names and links are never invented)
-  * every quoted line («…», "…", “…”) must be the speaker's words (found in the transcript)
+  * every quoted line («…» or “…”) must be the speaker's words (found in the transcript); straight "…" marks emphasis
+    or a term in copy, so it is not checked
 """
 from __future__ import annotations
 
@@ -15,10 +16,11 @@ from pathlib import Path
 
 from .common import fmt_ts, load_config, now_iso, read_json, write_json, write_text
 
-QUOTE = re.compile(r"«([^»]+)»|“([^”]+)”|\"([^\"]+)\"")
+QUOTE = re.compile(r"«([^»]+)»|“([^”]+)”")
 HASHTAG = re.compile(r"#[^\s#]+")
-URL = re.compile(r"(?:https?://|www\.)[^\s<>«»\"'()]+|(?<![@\w.])(?:[a-z0-9-]+\.)+(?:com|net|org|io|me|tv|co|ai|eg|sa|ae|"
-                 r"ly|gg|app|link|page)(?:/[^\s<>«»\"'()]*)?", re.I)
+URL = re.compile(r"(?:https?://|www\.)[^\s<>«»\"'()]+|(?<![@\w.])(?P<host>(?:[a-z0-9-]+\.)+[a-z]{2,})(?:/[^\s<>«»\"'()]*)?",
+                 re.I)
+TLDS = {"com", "net", "org", "io", "me", "tv", "co", "ai", "eg", "sa", "ae", "ly", "gg", "app", "link", "page"}
 
 
 def limits() -> dict:
@@ -58,8 +60,27 @@ def norm_url(u: str) -> str:
     return u.rstrip(".,;:!?)»\"'/").lower()
 
 
+def _bare_host(host: str) -> str | None:
+    """The longest leading part of a dotted name ending in a known TLD, or a known TLD + a 2-letter country code
+    (example.co.uk, shop.com.eg); None for file names and the like (notes.txt)."""
+    labels = host.split(".")
+    for k in range(len(labels), 1, -1):
+        last = labels[k - 1].lower()
+        if last in TLDS or (k > 2 and len(last) == 2 and labels[k - 2].lower() in TLDS):
+            return ".".join(labels[:k])
+    return None
+
+
 def urls_in(text: str) -> list[str]:
-    return [m.group(0) for m in URL.finditer(text or "")]
+    out = []
+    for m in URL.finditer(text or ""):
+        if not m.group("host"):
+            out.append(m.group(0))
+            continue
+        host = _bare_host(m.group("host"))
+        if host:
+            out.append(m.group(0) if host == m.group("host") else host)
+    return out
 
 
 def count_tags_chars(tags: list[str]) -> int:
@@ -118,11 +139,25 @@ def _sharpness(gray) -> float:
     return float(lap.var())
 
 
-def thumbnail_candidates(ep, n: int = 12, faces_fn=None, every_s: float | None = None, min_gap_ms: int = 30000) -> dict:
-    """Frames worth a thumbnail: sampled across the episode (about 150 samples), kept only with a face, scored on face
-    size, sharpness and contrast; the best n at least min_gap_ms apart, extracted at full resolution and labelled on
-    publish/thumbnail/_candidates.jpg for the publish-writer to look at."""
+def frame_at(src: Path, t_s: float, w: int, h: int):
+    """One frame at t_s seconds, letterboxed into w x h RGB, or None past the end. Input seeking: ffmpeg decodes only
+    from the keyframe before t_s, never the whole file."""
     import subprocess
+    from PIL import Image
+    from .common import ffmpeg_exe
+    r = subprocess.run([ffmpeg_exe(), "-loglevel", "error", "-ss", f"{t_s:.3f}", "-i", str(src), "-an", "-frames:v", "1",
+                        "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2",
+                        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True)
+    if r.returncode or len(r.stdout) < w * h * 3:
+        return None
+    return Image.frombytes("RGB", (w, h), r.stdout[:w * h * 3])
+
+
+def thumbnail_candidates(ep, n: int = 12, faces_fn=None, every_s: float | None = None, min_gap_ms: int = 30000) -> dict:
+    """Frames worth a thumbnail: sampled across the episode (about 150 samples, each one seek, so a 90-min episode
+    takes seconds), kept only with a face, scored on face size, sharpness and contrast; the best n at least min_gap_ms
+    apart, extracted at full resolution and labelled on publish/thumbnail/_candidates.jpg for the publish-writer."""
+    from concurrent.futures import ThreadPoolExecutor
     import numpy as np
     from PIL import Image, ImageDraw
     from .common import ffmpeg_exe, run
@@ -134,28 +169,16 @@ def thumbnail_candidates(ep, n: int = 12, faces_fn=None, every_s: float | None =
     dur_s = info["duration_ms"] / 1000
     step = float(every_s or max(10.0, dur_s / 150))
     W, H = 640, 360
-    p = subprocess.Popen([ffmpeg_exe(), "-loglevel", "error", "-i", str(src), "-an", "-vf",
-                          f"fps=1/{step},scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2",
-                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    rows, k = [], 0
-    try:
-        while True:
-            buf = p.stdout.read(W * H * 3)
-            if len(buf) < W * H * 3:
-                break
-            im = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
-            t = int(round(k * step * 1000))
-            k += 1
-            faces = faces_fn(im)
+    times = [k * step for k in range(int(dur_s / step) + 1) if k * step < dur_s]
+    rows = []
+    with ThreadPoolExecutor(max_workers=4) as pool:            # a few ffmpeg seeks at a time
+        for t, im in zip(times, pool.map(lambda t_: frame_at(src, t_, W, H), times)):
+            faces = faces_fn(im) if im is not None else None
             if not faces:
                 continue
             g = np.asarray(im.convert("L"))
-            rows.append({"frame_ms": t, "face": max(f[2] * f[3] for f in faces), "sharp": _sharpness(g),
+            rows.append({"frame_ms": int(round(t * 1000)), "face": max(f[2] * f[3] for f in faces), "sharp": _sharpness(g),
                          "contrast": float(g.std()) / 128, "faces": len(faces)})
-    finally:
-        p.stdout.close()
-        p.kill()
-        p.wait()
 
     def nz(key):
         vals = [r[key] for r in rows]
@@ -203,9 +226,38 @@ def thumbnail_candidates(ep, n: int = 12, faces_fn=None, every_s: float | None =
     return res
 
 
+def _text_width(font, s: str) -> float:
+    if getattr(font, "engine", None) in ("coretext", "harfbuzz"):
+        return float(font.render(s, (255, 255, 255, 255))[2])
+    from PIL import Image, ImageDraw
+    from .previews import _shape
+    return float(ImageDraw.Draw(Image.new("RGBA", (1, 1))).textlength(_shape(s), font=font))
+
+
+def highlight_spans(text: str, phrase: str, boxes: list, font, max_chars: int) -> list[tuple[int, int, int, int]]:
+    """Screen boxes of the words of `phrase` inside a text block drawn by previews._text_block (same wrap, one box per
+    line). Arabic lines run right to left, so a word's offset is measured from the right edge."""
+    from .ae_builder import wrap_lines
+    from .plan import norm
+    want = set(norm(phrase).split())
+    spans = []
+    for line, (x0, y0, x1, y1) in zip(wrap_lines(text, max_chars).split("\r"), boxes):
+        words = line.split(" ")
+        rtl = bool(re.search("[؀-ۿ]", line))
+        for k, w in enumerate(words):
+            if not norm(w) or norm(w) not in want:
+                continue
+            before = _text_width(font, " ".join(words[:k]) + " ") if k else 0.0
+            ww = _text_width(font, w)
+            a = x1 - before - ww if rtl else x0 + before
+            spans.append((int(a) - 4, int(y0) - 10, int(a + ww) + 4, int(y1) + 10))
+    return spans
+
+
 def render_thumbnails(ep) -> dict:
     """publish.json thumbnail.designs -> 1280x720 images: face-aware cover crop, a dark gradient on the text side, the
-    client's headline font (HarfBuzz/CoreText) with a brand-primary bar, the logo when available; <= 2 MB."""
+    client's headline font (HarfBuzz/CoreText) with a brand-primary bar, the design's `highlight` word(s) in the brand
+    colour, the logo when available; <= 2 MB. At most thumbnail.designs_max designs (YouTube tests up to 3)."""
     import io
     from PIL import Image, ImageDraw
     from .common import ffmpeg_exe, run
@@ -214,7 +266,9 @@ def render_thumbnails(ep) -> dict:
     lim = limits()["thumbnail"]
     TW, TH = lim["width"], lim["height"]
     pub = read_json(ep.p("publish/publish.json"), {}) or {}
-    designs = ((pub.get("thumbnail") or {}).get("designs") or [])[:3]
+    given = (pub.get("thumbnail") or {}).get("designs") or []
+    dmax = int(lim.get("designs_max", 3))
+    designs = given[:dmax]
     if not designs:
         return {"ok": False, "error": "publish.json thumbnail.designs is empty (pick frames from _candidates.jpg)"}
     info = load_episode(ep)
@@ -224,6 +278,9 @@ def render_thumbnails(ep) -> dict:
     logo = next((a.get("display_derivative") for a in man.get("assets", []) if a.get("category") == "logo"), None)
     out_dir = ep.p("publish/thumbnail")
     files, warnings, errors = [], [], []
+    if len(given) > dmax:
+        warnings.append(f"thumbnail.designs has {len(given)} designs: only the first {dmax} are rendered (YouTube tests up "
+                        f"to {dmax} thumbnails per video); drop or reorder the rest")
     for i, dz in enumerate(designs, 1):
         t_ms, text = int(dz.get("frame_ms", 0)), str(dz.get("text") or "").strip()
         if not 0 <= t_ms < info["duration_ms"]:
@@ -266,7 +323,18 @@ def render_thumbnails(ep) -> dict:
         bar = Image.new("RGBA", (TW, TH), (0, 0, 0, 0))
         ImageDraw.Draw(bar).rounded_rectangle((cx - bw // 2, y_bot + 14, cx + bw // 2, y_bot + 30), 8, fill=b.teal + (255,))
         im.alpha_composite(bar)
-        _text_block(ImageDraw.Draw(im), text, f, cx, TH // 2, b.white, max_chars=14, shadow=True)
+        boxes = _text_block(ImageDraw.Draw(im), text, f, cx, TH // 2, b.white, max_chars=14, shadow=True)
+        hl = str(dz.get("highlight") or "").strip()
+        spans = highlight_spans(text, hl, boxes, f, 14) if hl else []
+        if hl and not spans:
+            warnings.append(f"design {i}: highlight «{hl}» is not a word of the text, so nothing is highlighted")
+        if spans:   # the same text in the brand colour, kept only inside the highlighted words' boxes
+            col = Image.new("RGBA", (TW, TH), (0, 0, 0, 0))
+            _text_block(ImageDraw.Draw(col), text, f, cx, TH // 2, b.teal, max_chars=14, shadow=False)
+            mask = Image.new("L", (TW, TH), 0)
+            for sp in spans:
+                ImageDraw.Draw(mask).rectangle(sp, fill=255)
+            im.alpha_composite(Image.composite(col, Image.new("RGBA", (TW, TH), (0, 0, 0, 0)), mask))
         if logo and Path(logo).exists():
             lg = Image.open(logo).convert("RGBA")
             lg.thumbnail((150, 150))

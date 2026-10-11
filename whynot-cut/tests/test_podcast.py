@@ -5,12 +5,14 @@ recipes, publish package. Run:
 import sys as _sys
 _sys.dont_write_bytecode = True
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
@@ -122,6 +124,32 @@ class TestEpisodeIntake(unittest.TestCase):
         r = inbox(self.root)
         self.assertEqual(r["episodes"][0]["episode_id"], "EP12")
         self.assertEqual([c["video_id"] for c in r["clips"]], ["CLIP1"])
+
+    def test_inbox_probe_cached_by_mtime_and_size(self):
+        from lib import media
+        from lib.onboard import inbox
+        own = make_episode_client(Path(tempfile.mkdtemp(dir=self.tmp)), dur_s=4, with_clip=False)
+        shutil.copy(own / "data/Episodes/EP12.mp4", own / "data/Raw/WIDE.mp4")        # a 16:9 file dropped into Raw
+        write_json(own / common.CLIENT_PROFILE_REL / "podcast.json", {"raw_episode_hint_min": 0.05})   # 4 s is "long"
+        common.set_context(own)
+        self.addCleanup(common.set_context, None)
+        calls, real = [], media.probe
+
+        def counting(path):
+            calls.append(Path(path).name)
+            return real(path)
+        with mock.patch.object(media, "probe", counting):
+            first = inbox(own)
+            n = len(calls)
+            second = inbox(own)
+            self.assertEqual(calls[n:], [])                                  # unchanged Raw clips are not re-probed
+            self.assertTrue(second["episode_hints"])
+            self.assertEqual(first["episode_hints"], second["episode_hints"])
+            f = own / "data/Raw/WIDE.mp4"
+            st = f.stat()
+            os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+            inbox(own)
+            self.assertEqual(calls[n:], ["WIDE.mp4"])                        # a changed file is probed again
 
 
 class TestChunkedTranscription(unittest.TestCase):
@@ -282,6 +310,13 @@ class TestReelsPlan(unittest.TestCase):
         from lib.reels import find_evidence
         self.assertTrue(find_evidence(self.words, "أنا قلت إن الشركة", self.words[50]["start_ms"], 3000))
         self.assertFalse(find_evidence(self.words, "أنا قلت إن الشركة", self.words[50]["start_ms"] + 20000, 3000))
+
+    def test_evidence_folds_digits_and_hamza_seats(self):
+        from lib.reels import find_evidence
+        ws = [{"word": w, "start_ms": i * 400, "end_ms": i * 400 + 360}
+              for i, w in enumerate(["عندي", "٣", "نصائح", "دائما", "وسؤال", "۱۰"])]
+        self.assertTrue(find_evidence(ws, "عندي 3 نصايح", 0, 500))             # Arabic-Indic digit, ئ written as ي
+        self.assertTrue(find_evidence(ws, "دايما وسوال 10", 1200, 500))        # ؤ written as و, Persian digits
 
     def test_evidence_missing_is_error(self):
         r = self.run_plan([cand(self.words, 39, 149, evidence="كلام مش موجود خالص")])
@@ -531,6 +566,29 @@ class TestReelsSelect(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("reels-select", r.stdout + r.stderr)
 
+    def test_changed_episode_refused_by_build_commands(self):
+        self.select("R01")
+        reel = Paths(self.root, "EP12_R01")
+        src = read_json(reel.p("00_inputs/source.json"))
+        src["fingerprint"] = "0" * 40
+        write_json(reel.p("00_inputs/source.json"), src)
+        cli = [sys.executable, "-B", str(SK / "engine/reel/cli.py"), "--root", str(self.root), "--video-id", "EP12_R01"]
+        for cmd in ("audio-clean", "previews", "preview-video", "ppro-build", "premiere"):
+            r = subprocess.run(cli + [cmd], capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(r.returncode, 2, (cmd, r.stdout[-400:], r.stderr[-400:]))
+            self.assertIn("reels-select", r.stdout, cmd)
+
+    def test_next_flags_reels_picked_from_an_older_plan(self):
+        from lib.episode import episode_next
+        self.select("R01")
+        self.assertEqual([s for s in episode_next(self.ep)["stale"] if "R01" in s], [])
+        cands = read_json(self.ep.p("01_analysis/reels-plan-validated.json"))["candidates"]
+        validated_plan(self.ep, [dict(cands[0], in_ms=2500, duration_ms=6500)] + cands[1:])   # re-validated after the pick
+        nx = episode_next(self.ep)
+        self.assertTrue([s for s in nx["stale"] if "EP12_R01" in s], nx)
+        self.select("R01", force=True)                                         # the editor re-picks it
+        self.assertEqual([s for s in episode_next(self.ep)["stale"] if "R01" in s], [])
+
     def test_guard_blocks_subagent_select(self):
         cmd = "reel reels-select --episode EP12 --pick R01 --by editor"
         self.assertEqual(run_guard(cmd, "whynot-cut:episode-analyst"), 2)
@@ -683,10 +741,14 @@ class TestWindowMedia(unittest.TestCase):
         common.set_context(self.root)
         self._plan()
         render_all(self.reel, composite_preview=False)
+        import warnings
         t0 = __import__("time").time()
-        r = render(self.reel, width=270, label=False)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceWarning)
+            r = render(self.reel, width=270, label=False)
         self.assertTrue(r["ok"], r)
         self.assertLess(__import__("time").time() - t0, 60)
+        self.assertEqual([str(w.message) for w in caught if issubclass(w.category, ResourceWarning)], [])   # ffmpeg reaped
         from PIL import Image, ImageChops, ImageStat
 
         def grab(video, t, out):
@@ -858,38 +920,70 @@ class TestShots(unittest.TestCase):
         self.assertTrue(tm.pieces[1]["masked"])                                   # counted as a jump-cut zoom
         self.assertFalse(tm.pieces[0]["masked"])
 
-    def test_plan_uses_shot_layer(self):
-        from lib.plan import compile_plan
+    def shot_reel(self, tmp: Path):
+        """Reel E_R01 (window 1-9 s of a 640x360 episode) with preflight, a 2-shot analysis stub and semantic stubs."""
         from lib.transcribe import finalize
+        root = tmp / "SC"
+        for d in ("assets/Brand", "data/Episodes"):
+            (root / d).mkdir(parents=True)
+        src = root / "data/Episodes/E.mp4"
+        ff("-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=12", "-f", "lavfi", "-i", "sine=f=300:r=48000:d=12",
+           "-ac", "2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(src))
+        common.set_context(root)
+        reel = Paths(root, "E_R01")
+        reel.ensure_project()
+        write_json(reel.p("00_inputs/source.json"), {"footage": "data/Episodes/E.mp4", "in_ms": 1000, "out_ms": 9000,
+                                                      "duration_ms": 8000, "kind": "episode_reel"})
+        ws = [{"id": i + 1, "segment_id": 1, "word": f"كلمه{i}", "start_ms": i * 500, "end_ms": i * 500 + 400,
+               "probability": 0.9} for i in range(16)]
+        finalize(reel, {"source_video": str(src), "backend": "test", "model": "none", "language": "ar",
+                        "language_probability": 1.0, "duration_ms": 8000},
+                 [{"id": 1, "start_ms": 0, "end_ms": 7900, "text": " ".join(w["word"] for w in ws), "avg_logprob": -0.2,
+                   "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in ws]}], ws)
+        from lib.media import preflight
+        preflight(reel, [src])
+        pre = read_json(reel.p("00_inputs/preflight.json"))
+        pre["shots"] = {"window": {"offset_ms": 1000, "duration_ms": 8000}, "method": "test",
+                        "shots": [shot(0, 3000, 0.70), shot(3000, 8000, 0.30)]}
+        write_json(reel.p("00_inputs/preflight.json"), pre)
+        for f in ("main-topic.md", "medical-content-review.md"):
+            (reel.p("01_analysis") / f).write_text("# stub\n", encoding="utf-8")
+        for f in ("narrative-segments.json", "transcript-semantic-analysis.json", "editing-style.json"):
+            write_json(reel.p("01_analysis") / f, {"stub": True})
+        return reel
+
+    def test_shot_layer_uses_the_reels_footage(self):
+        """preflight.json listing another file first (e.g. a vertical clip from an earlier --footage run): the per-shot
+        reframe and the 4:5 window are sized from the reel's own episode file, not from files[0]."""
+        from lib.plan import compile_plan
         tmp = Path(tempfile.mkdtemp())
         try:
-            root = tmp / "SC"
-            for d in ("assets/Brand", "data/Episodes"):
-                (root / d).mkdir(parents=True)
-            src = root / "data/Episodes/E.mp4"
-            ff("-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=12", "-f", "lavfi", "-i", "sine=f=300:r=48000:d=12",
-               "-ac", "2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(src))
-            common.set_context(root)
-            reel = Paths(root, "E_R01")
-            reel.ensure_project()
-            write_json(reel.p("00_inputs/source.json"), {"footage": "data/Episodes/E.mp4", "in_ms": 1000, "out_ms": 9000,
-                                                          "duration_ms": 8000, "kind": "episode_reel"})
-            ws = [{"id": i + 1, "segment_id": 1, "word": f"كلمه{i}", "start_ms": i * 500, "end_ms": i * 500 + 400,
-                   "probability": 0.9} for i in range(16)]
-            finalize(reel, {"source_video": str(src), "backend": "test", "model": "none", "language": "ar",
-                            "language_probability": 1.0, "duration_ms": 8000},
-                     [{"id": 1, "start_ms": 0, "end_ms": 7900, "text": " ".join(w["word"] for w in ws), "avg_logprob": -0.2,
-                       "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in ws]}], ws)
-            from lib.media import preflight
-            preflight(reel, [src])
+            reel = self.shot_reel(tmp)
             pre = read_json(reel.p("00_inputs/preflight.json"))
-            pre["shots"] = {"window": {"offset_ms": 1000, "duration_ms": 8000}, "method": "test",
-                            "shots": [shot(0, 3000, 0.70), shot(3000, 8000, 0.30)]}
+            pre["files"].insert(0, {"path": str(reel.root / "data/Raw/OTHER.mov"), "name": "OTHER.mov",
+                                    "video": dict(pre["files"][0]["video"], display_width=1080, display_height=1920)})
             write_json(reel.p("00_inputs/preflight.json"), pre)
-            for f in ("main-topic.md", "medical-content-review.md"):
-                (reel.p("01_analysis") / f).write_text("# stub\n", encoding="utf-8")
-            for f in ("narrative-segments.json", "transcript-semantic-analysis.json", "editing-style.json"):
-                write_json(reel.p("01_analysis") / f, {"stub": True})
+            cover = max(1080 / 640, 1920 / 360) * 100
+            for framing in ("9:16", "4:5"):
+                write_json(reel.p("01_analysis/edit-decisions.json"), {"global": {"framing": framing}, "decisions": [
+                    decision("EDIT_001", "00:00:00.500", "00:00:02.000", "كلمه1 كلمه2")]})
+                r = compile_plan(reel)
+                self.assertTrue(r["ok"], r["errors"])
+                spec = read_json(reel.p("01_analysis/timeline-spec.json"))
+                self.assertAlmostEqual(spec["base_scale_percent"], cover, delta=0.01)
+            framed = [s for s in spec["main_segments"] if s.get("window")]
+            self.assertTrue(framed, spec["main_segments"])
+            for s in framed:                                                   # face shots (x1.0) drawn in the window
+                self.assertAlmostEqual(s["scale_factor"], max(1080 / 640, 1350 / 360) * 100 / cover, delta=1e-4)
+        finally:
+            common.set_context(None)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_plan_uses_shot_layer(self):
+        from lib.plan import compile_plan
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            reel = self.shot_reel(tmp)
             write_json(reel.p("01_analysis/edit-decisions.json"), {"video_id": "E_R01", "global": {}, "decisions": [
                 {"decision_id": "EDIT_001", "segment_id": "S1", "evidence": "كلمه1 كلمه2", "start": "00:00:00.500",
                  "end": "00:00:02.000", "semantic_intent": "hook", "visual_treatment": "punch", "confidence": "high",
@@ -970,6 +1064,20 @@ class TestRecipes(unittest.TestCase):
         write_json(root / common.CLIENT_PROFILE_REL / "style.json", {"remove_pauses": {"min_pause_ms": 300, "pad_ms": 100}})
         self.assertEqual(pause_params(clip), {"min_pause_ms": 300, "pad_ms": 100, "source": "profile style.json"})
         self.assertEqual(pause_params(reel)["source"], "recipe drama")                # the reel's recipe beats the profile
+
+    def test_partial_cli_pause_values_name_each_source(self):
+        from lib.recipes import pause_params
+        root, reel, _src = reel_fixture(self.tmp, "drama", music=False)
+        pp = pause_params(reel, 300, None)
+        self.assertEqual((pp["min_pause_ms"], pp["pad_ms"]), (300, 160))
+        self.assertIn("command line (min_pause_ms)", pp["source"])
+        self.assertIn("recipe drama (pad_ms)", pp["source"])
+        clip = Paths(root, "CLIPX")
+        clip.ensure_project()
+        pp = pause_params(clip, None, 40)
+        self.assertIn("default (min_pause_ms)", pp["source"])
+        self.assertIn("command line (pad_ms)", pp["source"])
+        self.assertEqual(pause_params(reel, 300, 90)["source"], "command line")
 
     def test_plan_warns_on_recipe_excess(self):
         from lib.plan import compile_plan
@@ -1306,6 +1414,30 @@ class TestPublish(unittest.TestCase):
         p["youtube"]["titles"][0] = "«الفلوس مش كل حاجة» — سارة"
         self.assertTrue(any("quote" in e for e in self.run_check(p)["errors"]))
 
+    def test_straight_quotes_are_not_quotations(self):
+        p = good_pub()
+        p["youtube"]["titles"][0] = 'سارة: "الفشل" كان أحسن معلم'          # emphasis / a term, not the speaker's words
+        r = self.run_check(p)
+        self.assertTrue(r["ok"], r["errors"])
+        p["youtube"]["titles"][0] = "“الفلوس مش كل حاجة” — سارة"            # curly quotes still claim a quotation
+        self.assertTrue(any("quote" in e for e in self.run_check(p)["errors"]))
+
+    def set_sheet_links(self, *urls):
+        info = read_json(self.ep.p("00_inputs/episode.json"))
+        info["sheet_text"] = PUB_SHEET + "\n" + "\n".join(urls) + "\n"
+        write_json(self.ep.p("00_inputs/episode.json"), info)
+
+    def test_bare_multilabel_domain_kept_whole(self):
+        from lib.publish import urls_in
+        self.assertEqual(urls_in("الموقع example.co.uk والمتجر shop.com.eg/x."), ["example.co.uk", "shop.com.eg/x."])
+        reel = good_reel()
+        reel["tiktok"]["caption"] += " example.co.uk"
+        self.set_sheet_links("https://example.co.uk/")
+        r = self.run_check(reel=reel)
+        self.assertTrue(r["ok"], r["errors"])
+        self.set_sheet_links("https://example.co")                           # a different site
+        self.assertTrue(any("example.co.uk" in e for e in self.run_check(reel=reel)["errors"]))
+
     def test_reel_caption_limits(self):
         reel = good_reel()
         reel["instagram"]["caption"] = "ا" * 2300
@@ -1363,9 +1495,75 @@ class TestThumbnails(unittest.TestCase):
         r = render_thumbnails(self.ep)
         self.assertTrue(r["ok"], r)
         f = Path(r["files"][0])
-        self.assertEqual(Image.open(f).size, (1280, 720))
+        with Image.open(f) as im:
+            self.assertEqual(im.size, (1280, 720))
         self.assertLessEqual(f.stat().st_size, 2_000_000)
         self.assertTrue(any("words" in w for w in r["warnings"]))
+
+    def test_frame_at_seeks_and_scales(self):
+        from PIL import ImageStat
+        from lib.episode import episode_file
+        from lib.publish import frame_at
+        src = episode_file(self.ep)
+        bright, dark = frame_at(src, 5.0, 320, 180), frame_at(src, 15.0, 320, 180)
+        self.assertEqual(bright.size, (320, 180))
+        self.assertGreater(ImageStat.Stat(bright.convert("L")).mean[0], 100)
+        self.assertLess(ImageStat.Stat(dark.convert("L")).mean[0], 100)
+        self.assertIsNone(frame_at(src, 500.0, 320, 180))                   # past the end
+
+    def test_candidates_decode_only_the_samples(self):
+        from lib import publish
+        times, real = [], publish.frame_at
+
+        def spy(src, t_s, w, h):
+            times.append(t_s)
+            return real(src, t_s, w, h)
+        with mock.patch.object(publish, "frame_at", spy):
+            r = publish.thumbnail_candidates(self.ep, n=3, faces_fn=lambda im: [], every_s=20)
+        self.assertEqual(sorted(times), [0.0, 20.0, 40.0, 60.0, 80.0, 100.0])   # one seek per sample, not the whole file
+        self.assertEqual(r["candidates"], [])
+
+    def brand_font(self):
+        from lib import hb_text
+        from lib.plat import font_dirs
+        if not hb_text.AVAILABLE:
+            self.skipTest("uharfbuzz/freetype not installed")
+        font = next((f for d in font_dirs() if d.exists() for f in sorted(d.glob("*.ttf"))
+                     if f.name.lower() in ("arial.ttf", "tahoma.ttf", "dejavusans.ttf", "notosansarabic-regular.ttf")), None)
+        if font is None:
+            self.skipTest("no Arabic test font found")
+        typ = self.ep.client_db / "branding/typography.json"
+        write_json(typ, {"families": {"test": {"weights": [{"style": "Black", "file": str(font),
+                                                            "postscript_name": font.stem}]}}})
+        self.addCleanup(typ.unlink)
+
+    def test_highlight_word_in_brand_colour(self):
+        from PIL import Image
+        from lib.previews import Brand
+        from lib.publish import render_thumbnails
+        self.brand_font()
+        teal = Brand(self.ep.client_db).teal
+
+        def render(design):
+            write_json(self.ep.p("publish/publish.json"), {"thumbnail": {"designs": [design]}})
+            r = render_thumbnails(self.ep)
+            self.assertTrue(r["ok"], r)
+            with Image.open(r["files"][0]) as im:
+                n = sum(1 for p in im.convert("RGB").getdata() if max(abs(a - b) for a, b in zip(p, teal)) < 40)
+            return n, r
+        plain, _ = render({"frame_ms": 22000, "text": "أول خسارة كبيرة"})
+        marked, _ = render({"frame_ms": 22000, "text": "أول خسارة كبيرة", "highlight": "خسارة"})
+        self.assertGreater(marked - plain, 1500)                             # the word's glyphs are drawn in the brand colour
+        _, r = render({"frame_ms": 22000, "text": "أول خسارة", "highlight": "نجاح"})
+        self.assertTrue(any("highlight" in w for w in r["warnings"]), r["warnings"])
+
+    def test_designs_beyond_the_limit_warn(self):
+        from lib.publish import render_thumbnails
+        write_json(self.ep.p("publish/publish.json"), {"thumbnail": {"designs": [
+            {"frame_ms": 2000 + 20000 * k, "text": "كلمة"} for k in range(4)]}})
+        r = render_thumbnails(self.ep)
+        self.assertEqual(len(r["files"]), 3)
+        self.assertTrue(any("4" in w and "3" in w for w in r["warnings"]), r["warnings"])
 
 
 class TestEpisodeNext(unittest.TestCase):
@@ -1557,6 +1755,23 @@ class TestReviewFixes(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr[-500:])
         w = read_json(Paths(root, "EP12_R01").p("02_transcription/words.json"))["words"]
         self.assertTrue(w and "episode_word_id" in w[0])                   # re-sliced from the episode, not re-decoded
+
+
+class TestHygiene(unittest.TestCase):
+    def test_tests_leave_no_resource_warnings_or_temp_files(self):
+        """The thumbnail tests (images opened and re-opened, ffmpeg run per frame) run without ResourceWarnings and leave
+        nothing in the temp folder. (The preview-video decoders are checked in TestWindowMedia.)"""
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            env = dict(os.environ, TMP=str(tmp), TEMP=str(tmp), TMPDIR=str(tmp))
+            r = subprocess.run([sys.executable, "-B", "-W", "always::ResourceWarning", "-m", "unittest",
+                                "test_podcast.TestThumbnails"],
+                               cwd=str(SK / "tests"), env=env, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(r.returncode, 0, r.stderr[-1500:])
+            self.assertNotIn("ResourceWarning", r.stderr, r.stderr[-3000:])
+            self.assertEqual([p.name for p in tmp.iterdir()], [])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

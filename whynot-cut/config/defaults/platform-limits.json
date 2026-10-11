@@ -14,5 +14,5 @@
   "instagram": {"caption_max": 2200, "hashtags_max": 30},
   "tiktok": {"caption_max": 2200},
   "shorts": {"title_max": 100},
-  "thumbnail": {"width": 1280, "height": 720, "max_bytes": 2000000, "text_words_warn": 5}
+  "thumbnail": {"width": 1280, "height": 720, "max_bytes": 2000000, "text_words_warn": 5, "designs_max": 3}
 }

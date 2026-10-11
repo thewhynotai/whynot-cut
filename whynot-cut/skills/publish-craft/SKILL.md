@@ -20,7 +20,7 @@ and the quotes (`reel publish-check`); you make it worth reading.
                    "hashtags": ["#…", "#…", "#…"]},
    "chapters": [],
    "tags": ["…"]},
- "thumbnail": {"designs": [{"frame_ms": 734000, "text": "<≤5 words>", "zoom": 1.35}]},
+ "thumbnail": {"designs": [{"frame_ms": 734000, "text": "<≤5 words>", "highlight": "<word(s) of the text>", "zoom": 1.35}]},
  "approval_required": []}
 ```
 `chapters` empty → the topic map (`01_analysis/topics.json`) is used. Give `chapters` only to rename or merge topics:

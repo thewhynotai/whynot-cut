@@ -280,11 +280,10 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
     finally:
         enc.stdin.close()
         enc.wait()
-        dec.stdout.close()
-        dec.kill()
-        for d_ in bdec.values():
+        for d_ in [dec, *bdec.values()]:     # stop the decoders and reap them (no zombie ffmpeg, no ResourceWarning)
             d_.stdout.close()
             d_.kill()
+            d_.wait()
         wav.unlink(missing_ok=True)
         (out_dir / "_camera_audio.wav").unlink(missing_ok=True)
     ok = enc.returncode == 0 and mp4.exists() and mp4.stat().st_size > 1000

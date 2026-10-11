@@ -283,6 +283,14 @@ def episode_next(ep: EpisodePaths) -> dict:
     if pv and not pv.get("ok") and "publish-check" not in todo:
         stale.append("publish-check (last run had errors)")
     sel = read_json(ep.p("01_analysis/selection.json"), {}) or {}
+    # a reels plan re-validated after a pick (its fingerprint changed) may have moved or dropped that reel's window
+    fp_now = (read_json(ep.p("01_analysis/reels-plan-validated.json"), {}) or {}).get("fingerprint")
+    picked_with = {r: h.get("plan_fingerprint") for h in sel.get("history", []) for r in h.get("picked", [])}
+    older = sorted(r for r, fp in picked_with.items() if fp and fp_now and fp != fp_now)
+    if older:
+        stale.append(f"reels-select ({', '.join(f'{ep.episode_id}_{r}' for r in older)} picked from an older reels plan: "
+                     f"the editor confirms with `reels-select --pick {','.join(older)} --by editor`, adding --force if a "
+                     "window moved)")
     reels = {}
     for rid in sorted({r for h in sel.get("history", []) for r in h.get("picked", [])}):
         rp = Paths(ep.root, f"{ep.episode_id}_{rid}")
