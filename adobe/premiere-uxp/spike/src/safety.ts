@@ -3,9 +3,21 @@
 // treated as missing, so only the read-only probes run.
 import { toForwardSlashes } from "./home.ts";
 
-/** Forward slashes, lower case, no trailing slash: the comparison form for every safety check. */
+/**
+ * Forward slashes with the Windows long-path / device prefix removed, case preserved:
+ * `\\?\D:/x` and `//?/D:/x` -> `D:/x`; `\\?\UNC\srv\share` -> `//srv/share`. Premiere reports project paths this way.
+ */
+export function cleanPath(p: string): string {
+  let s = toForwardSlashes(p.trim());
+  if (/^\/\/\?\/UNC\//i.test(s)) s = `//${s.slice(8)}`;
+  else if (/^\/\/\?\//.test(s)) s = s.slice(4);
+  const lead = s.startsWith("//") ? "//" : "";
+  return (lead + s.slice(lead.length).replace(/\/{2,}/g, "/")).replace(/(.)\/+$/, "$1");
+}
+
+/** Comparison form for every safety check: cleanPath + lower case + no trailing slash. */
 export function normPath(p: string): string {
-  return toForwardSlashes(p.trim()).replace(/\/+/g, "/").replace(/\/+$/, "").toLowerCase();
+  return cleanPath(p).toLowerCase();
 }
 
 export function isUnder(path: string, root: string): boolean {

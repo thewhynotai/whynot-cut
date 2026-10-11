@@ -57,6 +57,11 @@ Match names are discovered at runtime (component chain and filter lists are dump
 5. To check undo labelling, use **Run, keep project open** (skips `save_close_open`) and then look at Edit > Undo: it must read
    "Undo WhyNot Cut build" and one Ctrl+Z must revert the track name, audio track name and marker together.
 
+The spike manifest (only the spike, not the product plugin) also requests `clipboard: readAndWrite` so **Copy results** works;
+without it `navigator.clipboard` throws. Nothing but the Copy handler touches the clipboard API. Premiere returns
+`project.path` as `\\?\D:/...` (long-path prefix, mixed slashes); the safety checks strip `\\?\`, `//?/` and `\\?\UNC\` first.
+Bump `version` in `spike/manifest.json` (and `SPIKE_VERSION` in `spike/src/spike.ts`) for every rebuild: UPIA replaces only a newer version.
+
 ### Where the home folder comes from
 
 `require("os").homedir()` first; then `process.env.USERPROFILE`, `HOME`, `HOMEDRIVE+HOMEPATH`. Which one worked is recorded as

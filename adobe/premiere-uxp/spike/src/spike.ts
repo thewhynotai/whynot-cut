@@ -9,7 +9,7 @@ import type { UxpFs, UxpModule, UxpOs } from "./uxp-types.ts";
 
 declare const require: (id: string) => unknown;
 
-const SPIKE_VERSION = "0.1.0";
+const SPIKE_VERSION = "0.1.1";
 
 function $(id: string): HTMLElement {
   const el = document.getElementById(id);
@@ -63,25 +63,31 @@ async function copyResults(): Promise<void> {
     status.textContent = "Nothing to copy yet - run the spike first.";
     return;
   }
+  const failures: string[] = [];
+  // 1. async clipboard API (needs the manifest's clipboard permission; the getter itself throws without it)
   try {
     const nav = (globalThis as { navigator?: { clipboard?: { writeText?: (t: string) => Promise<void> } } }).navigator;
-    if (nav?.clipboard?.writeText) {
-      await nav.clipboard.writeText(lastJson);
-      status.textContent = "Results copied to the clipboard.";
-      return;
-    }
-  } catch {
-    // the manifest asks for no clipboard permission (Global Constraints), so this may be refused: fall back below
+    const clip = nav?.clipboard;
+    if (typeof clip?.writeText !== "function") throw new Error("navigator.clipboard.writeText is not available");
+    await clip.writeText(lastJson);
+    status.textContent = "Results copied to the clipboard.";
+    return;
+  } catch (e) {
+    failures.push(`clipboard API: ${errText(e)}`);
   }
+  // 2. fall back to selecting the textarea and execCommand("copy")
   try {
     const area = $("out") as HTMLTextAreaElement;
     area.focus();
     area.select();
     const ok = (document as unknown as { execCommand?: (c: string) => boolean }).execCommand?.("copy");
-    status.textContent = ok ? "Results copied to the clipboard." : "Copy was refused - select the text below and copy it, or read the results file.";
+    if (!ok) throw new Error("execCommand copy returned false");
+    status.textContent = "Results copied to the clipboard.";
+    return;
   } catch (e) {
-    status.textContent = `Copy failed (${errText(e)}) - read the results file instead.`;
+    failures.push(`execCommand: ${errText(e)}`);
   }
+  status.textContent = `Copy failed (${failures.join("; ")}) - select the text below and copy it, or read the results file.`;
 }
 
 async function runSpike(keepOpen: boolean): Promise<void> {
@@ -106,9 +112,9 @@ async function runSpike(keepOpen: boolean): Promise<void> {
     status.textContent = config ? `Running ${probes.length} probes (config: ${dir}/config.json)` : `Running without config - ${error}`;
     let premiere = "unknown";
     try {
-      premiere = await ppro.Application.version;
+      premiere = (await ppro.Application.version) || uxp.host?.version || "unknown";
     } catch {
-      premiere = uxp.host?.version ?? "unknown";
+      premiere = uxp.host?.version || "unknown";
     }
     const resultsPath = `${dir}/results-${ts}.json`;
     const doc = (ops: OpResult[]) => ({

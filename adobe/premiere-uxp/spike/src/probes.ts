@@ -13,7 +13,7 @@ import type {
 } from "@adobe/premierepro";
 import { baseName, ensureDir, readText, statOf, writeText } from "./fsutil.ts";
 import { toForwardSlashes } from "./home.ts";
-import { isUnder, normPath, scratchPathProblem } from "./safety.ts";
+import { cleanPath, isUnder, normPath, scratchPathProblem } from "./safety.ts";
 import { jsonSafe, type ProbeDef, type ProbeOutcome } from "./runner.ts";
 import type { UxpFs, UxpModule, UxpOs } from "./uxp-types.ts";
 
@@ -303,54 +303,43 @@ async function ensureTarget(ctx: Ctx): Promise<TargetClip> {
 const hostInfo: ProbeDef<Ctx> = {
   op: "host_info",
   run: async (ctx) => {
+    // Every part is its own step, so one failing API keeps the rest. Nothing here touches the clipboard API:
+    // `navigator.clipboard` THROWS on a plugin without the clipboard permission (seen live on Premiere 26.5.2).
+    const steps = new Steps();
     const host = ctx.uxp.host ?? {};
-    const detail: Record<string, unknown> = {
-      host: { name: host.name, version: host.version, uiLocale: host.uiLocale },
-      uxp_versions: ctx.uxp.versions ?? null,
-      premiere_version: null,
-      get_background_color: typeof host.getBackgroundColor,
-      background_color: null,
-      host_keys: Object.getOwnPropertyNames(host),
-      os: { platform: ctx.os?.platform?.(), release: ctx.os?.release?.(), arch: ctx.os?.arch?.() },
-      home: ctx.home,
-      home_via: ctx.homeVia,
-      config_loaded: ctx.config !== null,
-      config_error: ctx.configError,
-      fs_members: Object.fromEntries(
-        ["readFile", "writeFile", "mkdir", "lstat", "readdir", "readFileSync", "writeFileSync", "mkdirSync", "lstatSync", "existsSync"].map((k) => [k, typeof ctx.fs[k]]),
-      ),
-      globals: {
-        WebSocket: typeof (globalThis as { WebSocket?: unknown }).WebSocket,
-        fetch: typeof (globalThis as { fetch?: unknown }).fetch,
-        clipboard: typeof (globalThis as { navigator?: { clipboard?: unknown } }).navigator?.clipboard,
-        TextDecoder: typeof TextDecoder,
-      },
-      ppro_members: Object.getOwnPropertyNames(ctx.ppro).slice(0, 120),
-    };
-    try {
-      detail.premiere_version = await ctx.ppro.Application.version;
-    } catch (e) {
-      detail.premiere_version_error = errText(e);
-    }
-    if (typeof host.getBackgroundColor === "function") {
-      try {
-        detail.background_color = jsonSafe(host.getBackgroundColor());
-      } catch (e) {
-        detail.background_color_error = errText(e);
-      }
-    }
-    try {
-      detail.prefers_dark = (globalThis as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? null;
-    } catch {
-      detail.prefers_dark = null;
-    }
-    try {
+    const core = await steps.run("uxp_host", async () => {
+      const info = { name: host.name, version: host.version, uiLocale: host.uiLocale, uxp_versions: ctx.uxp.versions ?? null, host_keys: Object.getOwnPropertyNames(host) };
+      expect(info.name || info.version, "uxp.host has neither name nor version");
+      return info;
+    });
+    await steps.run("premiere_version", async () => {
+      const v = await ctx.ppro.Application.version;
+      expect(v, "Application.version is empty");
+      return { version: v };
+    });
+    await steps.run("background_color", async () => {
+      const fn = host.getBackgroundColor;
+      if (typeof fn !== "function") return { get_background_color: typeof fn, note: "not available in this host" };
+      return { get_background_color: "function", value: jsonSafe(fn.call(host)) };
+    });
+    await steps.run("theme", async () => ({
+      prefers_dark: (globalThis as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? null,
+    }));
+    await steps.run("os", async () => ({ platform: ctx.os?.platform?.(), release: ctx.os?.release?.(), arch: ctx.os?.arch?.() }));
+    await steps.run("home_and_config", async () => ({ home: ctx.home, home_via: ctx.homeVia, config_loaded: ctx.config !== null, config_error: ctx.configError }));
+    await steps.run("fs_members", async () => Object.fromEntries(["readFile", "writeFile", "mkdir", "lstat", "readdir", "readFileSync", "writeFileSync", "mkdirSync", "lstatSync", "existsSync"].map((k) => [k, typeof ctx.fs[k]])));
+    await steps.run("globals", async () => ({
+      WebSocket: typeof (globalThis as { WebSocket?: unknown }).WebSocket,
+      fetch: typeof (globalThis as { fetch?: unknown }).fetch,
+      TextDecoder: typeof TextDecoder,
+    }));
+    await steps.run("ppro_members", async () => ({ members: Object.getOwnPropertyNames(ctx.ppro).slice(0, 120) }));
+    await steps.run("active_project (read-only)", async () => {
       const active = await ctx.ppro.Project.getActiveProject();
-      detail.active_project = active ? { name: active.name, path: active.path } : null;
-    } catch (e) {
-      detail.active_project_error = errText(e);
-    }
-    return { ok: Boolean(host.name || host.version), detail };
+      return active ? { name: active.name, path: active.path } : null;
+    });
+    // ok = the core UXP host info was readable; the other steps are diagnostics and carry their own ok flags
+    return { ok: core !== undefined, detail: { steps: steps.steps } };
   },
 };
 
@@ -406,6 +395,8 @@ const wsLoopback: ProbeDef<Ctx> = {
 
 const createProject: ProbeDef<Ctx> = {
   op: "create_project",
+  // live: createProject took ~33 s on Premiere 26.5.2
+  timeoutMs: 180_000,
   run: async (ctx) => {
     const cfg = needConfig(ctx);
     const workDir = toForwardSlashes(cfg.work_dir).replace(/\/+$/, "");
@@ -418,7 +409,7 @@ const createProject: ProbeDef<Ctx> = {
     // adopt it only if Premiere really put it under work_dir; otherwise no later probe may touch anything
     assertScratchProject({ ...ctx, project }, project);
     ctx.project = project;
-    ctx.projectPath = toForwardSlashes(project.path);
+    ctx.projectPath = cleanPath(project.path);
     const active = await ctx.ppro.Project.getActiveProject();
     return {
       ok: true,
@@ -426,7 +417,9 @@ const createProject: ProbeDef<Ctx> = {
         requested: path,
         name: project.name,
         path: project.path,
-        is_active: active ? toForwardSlashes(active.path) === toForwardSlashes(project.path) : false,
+        path_raw_json: JSON.stringify(project.path),
+        path_normalised: normPath(project.path),
+        is_active: active ? normPath(active.path) === normPath(project.path) : false,
         file_on_disk: await statOf(ctx.fs, ctx.projectPath),
       },
     };
@@ -981,12 +974,13 @@ const saveCloseOpen: ProbeDef<Ctx> = {
     const { ppro } = ctx;
     const project = await getProject(ctx);
     const steps = new Steps();
-    const path = project.path;
+    const rawPath = project.path;
+    const path = cleanPath(rawPath);
     await steps.run("save", async () => {
       const saved = await project.save();
-      const st = await statOf(ctx.fs, toForwardSlashes(path));
+      const st = await statOf(ctx.fs, path);
       expect(saved && st.exists && (st.bytes ?? 0) > 0, `save returned ${saved}; file ${JSON.stringify(st)}`);
-      return { path, bytes: st.bytes };
+      return { path_raw_json: JSON.stringify(rawPath), path, bytes: st.bytes };
     });
     await steps.run("close", async () => {
       const closed = await project.close(new ppro.CloseProjectOptions().setPromptIfDirty(false).setSaveWorkspace(false).setShowCancelButton(false));
