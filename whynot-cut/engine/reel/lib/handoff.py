@@ -81,26 +81,55 @@ def native_track_rows(rec: dict, tm: dict) -> list[tuple[str, object]]:
     return rows
 
 
+def _asset_kind(e: dict) -> str:
+    """image | video | audio | 3d from the Magnific tool name, else from the file extension."""
+    tool = str(e.get("tool") or "").lower()
+    for key, kind in (("video", "video"), ("audio", "audio"), ("music", "audio"), ("sfx", "audio"), ("tts", "audio"),
+                      ("voice", "audio"), ("3d", "3d"), ("image", "image"), ("upscale", "image"), ("svg", "image")):
+        if key in tool:
+            return kind
+    ext = Path(str(e.get("local_path") or e.get("file") or "")).suffix.lower()
+    return ({".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image", ".svg": "image", ".psd": "image",
+             ".mp4": "video", ".mov": "video", ".webm": "video", ".wav": "audio", ".mp3": "audio", ".m4a": "audio",
+             ".glb": "3d", ".obj": "3d"}).get(ext, "—")
+
+
 def licensed_material_lines(paths: Paths) -> list[str]:
-    """The "Licensed material" section (Phase 5 hook): nothing unless `05_assets/magnific-manifest.json` exists; then
-    one row per entry, each marked agency-licensed and not transferable to the client."""
+    """The "Licensed material" section: nothing unless `05_assets/magnific-manifest.json` exists; then one row per
+    asset record (master plan Appendix F: asset_id, need_id, local_path, source mcp-creation | stock-rest, tool, model,
+    license_type, attribution_*, transferable_to_client). Every asset whose record does not say
+    `transferable_to_client: true` is marked agency-licensed, not transferable."""
     mp = paths.p(MAGNIFIC_MANIFEST)
     if not mp.exists():
         return []
     head = ["", "## Licensed material", "", "Assets the agency generated or licensed through Magnific for this clip."]
     try:
         data = read_json(mp, {})
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError) as e:      # read_json raises on a corrupt file: say so instead of failing the handoff
         return head + ["", f"- `{MAGNIFIC_MANIFEST}` could not be read ({type(e).__name__}): ask the agency"]
     entries = data if isinstance(data, list) else next((data[k] for k in ("entries", "assets", "items")
                                                          if isinstance(data, dict) and isinstance(data.get(k), list)), [])
+    entries = [e for e in entries if isinstance(e, dict)]
     if not entries:
         return head + ["", "- none listed yet"]
     cell = lambda v: str(v if v not in (None, "") else "—").replace("|", "/").replace("\n", " ")
-    rows = [f"| {cell(e.get('file') or e.get('path') or e.get('id'))} | {cell(e.get('kind') or e.get('type'))} | "
-            f"{cell(e.get('source') or e.get('model') or e.get('tool') or e.get('id'))} | {LICENCE_NOTE} |"
-            for e in entries if isinstance(e, dict)]
-    return head + ["", "| File | Kind | Source | Licence |", "|---|---|---|---|"] + rows
+
+    def source(e: dict) -> str:
+        if e.get("source") == "stock-rest" or (e.get("stock_id") and not e.get("tool")):
+            return f"stock {e.get('stock_id') or '—'}"
+        return " / ".join(str(x) for x in (e.get("tool"), e.get("model")) if x) or e.get("source") or "—"
+
+    def licence(e: dict) -> str:
+        bits = [e.get("license_type") or "licence not recorded"]
+        if e.get("attribution_required"):
+            bits.append(f"attribution: {e.get('attribution_text') or 'required (text not recorded)'}")
+        if e.get("transferable_to_client") is not True:
+            bits.append(LICENCE_NOTE)
+        return "; ".join(str(b) for b in bits)
+
+    rows = [f"| {cell(e.get('asset_id'))} | {cell(e.get('need_id'))} | {cell(e.get('local_path') or e.get('file'))} | "
+            f"{_asset_kind(e)} | {cell(source(e))} | {cell(licence(e))} |" for e in entries]
+    return head + ["", "| Asset | Need | File | Kind | Source | Licence |", "|---|---|---|---|---|---|"] + rows
 
 
 def build(paths: Paths) -> dict:
@@ -180,7 +209,14 @@ def build(paths: Paths) -> dict:
                  "Punch-ins are separate V1 clips with Scale/Position in Motion.") if tm.get("source_fps") else ""
     markers_line = "Every graphic and decision also appears as a **sequence marker** (ID + transcript evidence)."
     if native:
-        ok_checks = [k for k, v in (rec.get("checks") or {}).items() if v]
+        all_checks = rec.get("checks") or {}
+        ok_checks = [k for k, v in all_checks.items() if v]
+        if not all_checks:
+            read_back = "; no read-back checks were recorded: confirm them in Sequence › Sequence Settings."
+        elif pb["failed_checks"]:
+            read_back = f"; read-back: {len(ok_checks)} of {len(all_checks)} passed — see the failures below."
+        else:
+            read_back = f"; read-back: all {len(all_checks)} checks passed — nothing to set by hand."
         issues = ([f"   - **Not confirmed by the read-back:** {', '.join('`' + c + '`' for c in pb['failed_checks'])}. "
                    "Look at these first; fix and rebuild (`reel ppro-build --force`) or correct them by hand."]
                   if pb["failed_checks"] else [])
@@ -197,8 +233,8 @@ def build(paths: Paths) -> dict:
                 f"1. Premiere Pro → **File › Open Project…** → `{prproj_rel}`. The sequence **{seq_name}** is already built with its "
                 "media, graphics, captions, markers and audio tracks. **Do not import the XML interchange**: it would add a second sequence."]
         sec1 += gone
-        sec1 += [f"2. Sequence settings (frame size, frame rate, preview codec, colour options) were set through Premiere's API and "
-                 f"read back by the bridge: {len(ok_checks)} of {len(rec.get('checks') or {})} checks passed — nothing to set by hand."]
+        sec1 += [f"2. Sequence settings (frame size, frame rate, preview codec, colour options) are set through Premiere's API by the "
+                 f"bridge{read_back}"]
         sec1 += issues
         sec1 += ["3. Track map (as built):", "", "| Track | Clips |", "|---|---|", trk, "", cap_step,
                  f"5. The project stays at `{prproj_rel}`: **File › Save** after your changes. A rebuild (`reel ppro-build --force`) refuses to "

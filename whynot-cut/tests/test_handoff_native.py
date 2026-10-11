@@ -149,6 +149,23 @@ class TestNativeHandoff(HandoffFixture):
         self.assertIn("linear_color_on", md)
         self.assertNotIn("FCP7", md)
 
+    def test_readback_line_does_not_overclaim(self):
+        self.native_build()
+        self.assertIn("read-back: all 7 checks passed — nothing to set by hand", self.readme())
+        self.native_build("PRPROJ_BUILT_WITH_ISSUES", failed_checks=("linear_color_on",))
+        md = self.readme()
+        self.assertIn("read-back: 6 of 7 passed — see the failures below", md)
+        self.assertNotIn("nothing to set by hand", md)
+        rec_p = self.p.p("07_premiere/ppro-build-result.json")
+        import json
+        rec = json.loads(rec_p.read_text(encoding="utf-8"))
+        rec["checks"] = {}
+        write_json(rec_p, rec)
+        md = self.readme()
+        self.assertIn("no read-back checks were recorded", md)
+        self.assertNotIn("nothing to set by hand", md)
+        self.assertNotIn("0 of 0", md)
+
     def test_track_map_falls_back_to_the_premiere_read_back(self):
         """A result written before 3.0 has no job_data: the map comes from what Premiere reported."""
         self.native_build()
@@ -252,9 +269,27 @@ class TestExtrasRows(HandoffFixture):
         self.assertIn("SCRIPT ONLY — run the JSX", self.readme())
 
 
+def appendix_f(**kw) -> dict:
+    """A record as the master plan's Appendix F defines it (the Phase 5 `05_assets/magnific-manifest.json` entry)."""
+    rec = {"asset_id": "MG-0007", "need_id": "N03", "local_path": "05_assets/magnific/logo_upscaled.png",
+           "sha256": "ab" * 32, "source": "mcp-creation", "creation_id": "c-991", "tool": "images_upscale",
+           "model": "magnific-precision", "prompt": None, "reference_inputs": ["output/client_database/assets/logo_small.png"],
+           "credits_before": 12840, "credits_after": 12750, "plan_at_generation": "premium+",
+           "created_at": "2026-10-11T12:00:00+03:00", "license_type": "ai-generated-paid", "license_url": None,
+           "attribution_required": False, "attribution_text": None,
+           "used_in": [{"item": "CLIP1", "at": ["00:00:01.2-00:00:03.0"]}],
+           "relevance_anchor": {"segment": "s041", "start": "00:12:03.40", "end": "00:12:06.10", "phrase": "x"},
+           "sensitivity_review": {"by": "medical-reviewer", "verdict": "ok"}, "approved_by": "editor",
+           "transferable_to_client": False}
+    rec.update(kw)
+    return rec
+
+
 class TestLicensedMaterial(HandoffFixture):
-    ENTRIES = [{"file": "05_assets/magnific/hero-clinic.png", "kind": "image", "source": "Magnific generation 8841"},
-               {"file": "05_assets/magnific/room.mp4", "kind": "video", "source": "Magnific stock 5530"}]
+    STOCK = dict(asset_id="MG-0008", need_id="N05", local_path="05_assets/magnific/waiting-room.mp4",
+                 source="stock-rest", stock_id="5530", tool=None, model=None, license_type="stock-premium",
+                 attribution_required=True, attribution_text="Photo by A. Author / Magnific")
+    ENTRIES = [appendix_f(), STOCK]
 
     def test_absent_without_a_manifest(self):
         self.native_build()
@@ -262,23 +297,60 @@ class TestLicensedMaterial(HandoffFixture):
         self.assertNotIn("Licensed material", md)
         self.assertNotIn("not transferable", md)
 
-    def test_rows_from_the_manifest(self):
+    def test_golden_with_appendix_f_records(self):
+        self.approve()
+        self.native_build()
+        self.magnific(self.ENTRIES)
+        self.golden("native_licensed.md", self.readme())
+
+    def test_rows_read_the_appendix_f_fields(self):
         self.native_build()
         self.magnific(self.ENTRIES)
         md = self.readme()
         self.assertIn("## Licensed material", md)
-        self.assertIn("05_assets/magnific/hero-clinic.png | image | Magnific generation 8841 | "
-                      "agency-licensed, not transferable", md)
-        self.assertIn("05_assets/magnific/room.mp4 | video | Magnific stock 5530 | agency-licensed, not transferable", md)
+        self.assertIn("| MG-0007 | N03 | 05_assets/magnific/logo_upscaled.png | image | images_upscale / magnific-precision | "
+                      "ai-generated-paid; agency-licensed, not transferable |", md)
+        self.assertIn("| MG-0008 | N05 | 05_assets/magnific/waiting-room.mp4 | video | stock 5530 | "
+                      "stock-premium; attribution: Photo by A. Author / Magnific; agency-licensed, not transferable |", md)
 
-    def test_an_unreadable_or_empty_manifest_renders_nothing_fatal(self):
+    def test_transferable_record_is_not_marked_agency_only(self):
+        self.native_build()
+        self.magnific([appendix_f(transferable_to_client=True)])
+        md = self.readme()
+        self.assertIn("ai-generated-paid |", md)
+        self.assertNotIn("not transferable", md)
+        self.magnific([appendix_f(transferable_to_client=None)])         # missing/unknown counts as not transferable
+        self.assertIn("not transferable", self.readme())
+
+    def test_kind_comes_from_the_tool_then_the_extension(self):
+        from lib.handoff import _asset_kind
+        self.assertEqual(_asset_kind({"tool": "video_generate"}), "video")
+        self.assertEqual(_asset_kind({"tool": "audio_sfx_generate"}), "audio")
+        self.assertEqual(_asset_kind({"tool": None, "local_path": "a/b.MOV"}), "video")
+        self.assertEqual(_asset_kind({"file": "a/b.png"}), "image")
+        self.assertEqual(_asset_kind({}), "—")
+
+    def test_bare_list_and_wrapped_lists_are_accepted(self):
+        self.native_build()
+        for wrap in (lambda e: e, lambda e: {"entries": e}, lambda e: {"assets": e}, lambda e: {"items": e}):
+            write_json(self.p.p("05_assets/magnific-manifest.json"), wrap([appendix_f()]))
+            self.assertIn("| MG-0007 |", self.readme())
+
+    def test_a_corrupt_manifest_is_reported_not_fatal(self):
         self.native_build()
         self.p.p("05_assets").mkdir(parents=True, exist_ok=True)
         self.p.p("05_assets/magnific-manifest.json").write_text("{not json", encoding="utf-8")
-        self.assertNotIn("not transferable", self.readme())
+        md = self.readme()
+        self.assertIn("## Licensed material", md)
+        self.assertIn("could not be read", md)
+        self.assertNotIn("not transferable", md)
+
+    def test_an_empty_manifest_says_none_listed(self):
+        self.native_build()
         self.magnific([])
         md = self.readme()
         self.assertIn("## Licensed material", md)               # the manifest exists, with no entries yet
+        self.assertIn("none listed yet", md)
         self.assertNotIn("not transferable", md)
 
     def test_fallback_handoff_also_gets_the_section(self):
@@ -319,7 +391,7 @@ class TestMotionHandoff(unittest.TestCase):
     def test_motion_licensed_material_section_only_with_a_manifest(self):
         self.assertNotIn("Licensed material", motion_readme(self.p).read_text(encoding="utf-8"))
         write_json(self.p.p("05_assets/magnific-manifest.json"),
-                   {"entries": [{"file": "05_assets/magnific/bg.png", "kind": "image", "source": "Magnific 1"}]})
+                   {"entries": [appendix_f(local_path="05_assets/magnific/bg.png")]})
         md = motion_readme(self.p).read_text(encoding="utf-8")
         self.assertIn("## Licensed material", md)
         self.assertIn("agency-licensed, not transferable", md)

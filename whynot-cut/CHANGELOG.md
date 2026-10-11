@@ -269,7 +269,10 @@
   extras were used; paths are written with forward slashes. `ppro-build-result.json` now records
   `job_data.{sequence_name, track_names, native_caption_track}` (an older result falls back to Premiere's read-back).
   New "Licensed material" section (clip and motion handoffs): empty unless `05_assets/magnific-manifest.json` exists,
-  then one "agency-licensed, not transferable" row per entry (Phase 5 fills the manifest). Golden READMEs for the
+  then one row per master-plan Appendix F record (asset id, need, file, kind from the tool or extension, tool/model or
+  stock id, `license_type`, the attribution text when required, and "agency-licensed, not transferable" unless the
+  record says `transferable_to_client: true`). The native-build line no longer says "nothing to set by hand" when
+  read-back checks failed or none were recorded. Golden READMEs for the
   native build, the XML fallback and a motion project (`tests/fixtures/handoff/`, `tests/test_handoff_native.py`).
 
 ### Migration

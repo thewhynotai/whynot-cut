@@ -20,7 +20,7 @@ Generated <TS> by the `whynot-cut` plugin (by The Why Not AI). QC: **PASSED** (s
 ## 1. Open in Premiere Pro (≈1 min)
 
 1. Premiere Pro → **File › Open Project…** → `07_premiere/project/CLIP1_RE_EDIT.prproj`. The sequence **CLIP1_RE_EDIT** is already built with its media, graphics, captions, markers and audio tracks. **Do not import the XML interchange**: it would add a second sequence.
-2. Sequence settings (frame size, frame rate, preview codec, colour options) were set through Premiere's API and read back by the bridge: 7 of 7 checks passed — nothing to set by hand.
+2. Sequence settings (frame size, frame rate, preview codec, colour options) are set through Premiere's API by the bridge; read-back: all 7 checks passed — nothing to set by hand.
 3. Track map (as built):
 
 | Track | Clips |
