@@ -341,5 +341,59 @@ class TestReelsPlan(unittest.TestCase):
             wj.write_bytes(original)
 
 
+def validated_plan(ep, cands: list):
+    """Write a reels-plan.json + a matching (fresh) reels-plan-validated.json without running the validator."""
+    from lib.reels import reels_plan_fingerprint
+    write_json(ep.p("01_analysis/reels-plan.json"), {"episode_id": ep.episode_id, "candidates": cands})
+    write_json(ep.p("01_analysis/reels-plan-validated.json"), {
+        "episode_id": ep.episode_id, "ok": True, "errors": [], "warnings": [], "duration_ms": 20000,
+        "fingerprint": reels_plan_fingerprint(ep), "candidates": cands})
+
+
+class TestReelsPreview(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from lib.episode import EpisodePaths, prep
+        from lib.transcribe import finalize
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root = make_episode_client(cls.tmp, with_clip=False)
+        cls.ep = EpisodePaths(cls.root, "EP12")
+        prep(cls.ep)
+        ws = [{"id": i + 1, "segment_id": 1, "word": f"كلمه{i}", "start_ms": i * 500, "end_ms": i * 500 + 400,
+               "probability": 0.9} for i in range(38)]
+        finalize(cls.ep, {"source_video": "x", "backend": "test", "model": "none", "language": "ar",
+                          "language_probability": 1.0, "duration_ms": 20000},
+                 [{"id": 1, "start_ms": 0, "end_ms": ws[-1]["end_ms"], "text": " ".join(w["word"] for w in ws),
+                   "avg_logprob": -0.2, "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in ws]}], ws)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_previews_rendered(self):
+        from lib.reels import render_candidates
+        from lib.media import probe
+        validated_plan(self.ep, [{"id": "R01", "in_ms": 2000, "out_ms": 6000, "duration_ms": 4000, "type": "advice",
+                                  "type_label": "نصيحة", "total": 7.5, "title": "t", "score": {}}])
+        r = render_candidates(self.ep)
+        self.assertTrue(r["ok"], r)
+        mp4 = self.ep.p("03_candidates/R01.mp4")
+        pr = probe(mp4)
+        self.assertEqual((pr["video"]["display_width"], pr["video"]["display_height"]), (540, 960))
+        self.assertTrue(4.0 <= pr["duration_s"] <= 4.6, pr["duration_s"])
+        self.assertTrue(pr["audio"])
+        self.assertTrue(self.ep.p("03_candidates/R01.jpg").exists())
+        self.assertTrue(self.ep.p("03_candidates/_sheet.jpg").exists())
+        self.assertIn("R01.mp4", self.ep.p("01_analysis/reels-plan.md").read_text(encoding="utf-8"))
+
+    def test_stale_plan_refused(self):
+        from lib.reels import render_candidates
+        validated_plan(self.ep, [{"id": "R01", "in_ms": 2000, "out_ms": 6000, "duration_ms": 4000, "type": "advice",
+                                  "total": 7.5, "score": {}}])
+        write_json(self.ep.p("01_analysis/reels-plan.json"), {"episode_id": "EP12", "candidates": [{"id": "R09"}]})
+        with self.assertRaises(SystemExit):
+            render_candidates(self.ep)
+
+
 if __name__ == "__main__":
     unittest.main()

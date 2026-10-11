@@ -16,6 +16,7 @@ ARGS: dict = {
         (("--force",), {"action": "store_true", "help": "discard the chunk checkpoints and transcribe again"}),
     ],
     "reels-plan": [],
+    "reels-preview": [(("--ids",), {"default": None, "help": "e.g. R01,R03 (default: every candidate)"})],
 }
 
 
@@ -79,6 +80,16 @@ def cmd_reels_plan(a):
          "plan": str(ep.p("01_analysis/reels-plan.md")) if r["ok"] else None,
          "next": (f"reel reels-preview --episode {ep.episode_id}, then show reels-plan.md to the editor (Gate 0)"
                   if r["ok"] else "fix the errors in 01_analysis/reels-plan.json and run reels-plan again")})
+
+
+def cmd_reels_preview(a):
+    from .reels import render_candidates
+    ep = EP(a)
+    ids = [x.strip() for x in a.ids.split(",") if x.strip()] if a.ids else None
+    r = render_candidates(ep, ids)
+    r["plan"] = str(ep.p("01_analysis/reels-plan.md"))
+    r["next"] = "VIEW the sheet, then show the editor reels-plan.md + previews and wait for their pick (Gate 0)"
+    out(r)
 
 
 def _chunks_missing(ep) -> bool:
