@@ -125,14 +125,6 @@ def main():
             prof = json.loads((root / "output/client_database/reel-profile/profile.json").read_text(encoding="utf-8")).get("id")
         except Exception:
             pass
-        if not prof:
-            for pj in sorted((PLUGIN / "profiles").glob("*/profile.json")):
-                try:
-                    toks = json.loads(pj.read_text(encoding="utf-8")).get("match", {}).get("folder_contains", [])
-                except Exception:
-                    continue
-                if not pj.parent.name.startswith("_") and any(t.lower() in root.name.lower() for t in toks):
-                    prof = pj.parent.name
         clips = new_clips(root)
         eps = episodes(root)
         emit(f"WhyNot Cut: this is a client folder ({root}). Profile: {prof or 'NONE (run /whynot-cut:new-client)'}. "

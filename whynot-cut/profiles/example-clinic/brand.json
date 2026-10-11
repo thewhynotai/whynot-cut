@@ -1,0 +1,26 @@
+{
+  "fallback_colors": {
+    "primary": "#2A7FBA",
+    "neutral_light": "#FFFFFF",
+    "paper_tint": "#D6E8F5",
+    "ink": "#10304A"
+  },
+  "font_roles_fallback": {
+    "postscript": {
+      "caption": "Cairo-Bold",
+      "headline": "Cairo-Black",
+      "body": "Cairo-Medium",
+      "term": "Cairo-Bold",
+      "small": "Cairo-Regular"
+    },
+    "weights": {
+      "caption": "bold",
+      "headline": "black",
+      "body": "medium",
+      "term": "bold",
+      "small": "regular"
+    }
+  },
+  "fonts_source": "assets/Font/*.ttf (Cairo, open licence; a fictional example) - install before building",
+  "_note": "Fictional example values for the Example Clinic. Fallbacks only, used when output/client_database/branding/brand-tokens.json is missing. Copy this folder to start a shipped-style seed; a real client's profile lives in that client's own folder (reel client-init)."
+}

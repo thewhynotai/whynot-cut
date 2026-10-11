@@ -798,7 +798,7 @@ def main():
     ap.add_argument("--version", action="version", version=tag(), help="print the plugin name and version")
     ap.add_argument("--root", help="client folder containing assets/ and data/ (default: current folder if it has both)")
     ap.add_argument("--video-id", help="stable project id (default: footage file stem)")
-    ap.add_argument("--profile", help="client profile id (default: client's reel-profile, else folder-name match)")
+    ap.add_argument("--profile", help="shipped profile id to apply (default: the id in the client's own reel-profile; never matched by folder name)")
     ap.add_argument("--episode", help="podcast episode id (`reel episodes` lists them)")
     from lib import motion_cli, podcast_cli
     sub = ap.add_subparsers(dest="cmd", required=True)

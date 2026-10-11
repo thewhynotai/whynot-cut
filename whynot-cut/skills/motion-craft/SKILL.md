@@ -31,7 +31,7 @@ QC composites over real frames go to `08_quality_control/previews/` (`_contact_s
 5. Nothing doubled. A caption hides while a graphic shows the same words. While a card (name card, glass card, CTA) is
    up, captions are lifted above its top edge automatically.
 6. Style matches the profile (e.g. glass only on the closing card) and the reference clips. Hook bars: the template's
-   `bar_style` is `underline` (half-height marker) or `box` (full box like statements; Nahla uses `box`).
+   `bar_style` is `underline` (half-height marker) or `box` (full box like statements; the `example-clinic` profile uses `box`).
 
 To fix something, change the decision params or the profile's `graphics-templates.json`, re-run `previews`, and look again.
 Never edit the PNGs by hand.

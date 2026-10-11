@@ -1,0 +1,10 @@
+{
+  "note": "Example overrides of config/defaults/graphics-templates.json (deep-merged): hook titles use the same full boxes as statements.",
+  "templates": {
+    "hook_title": {
+      "bar_style": "box",
+      "pad_x": 22,
+      "pad_y": 8
+    }
+  }
+}

@@ -8,10 +8,5 @@
   ],
   "rtl": true,
   "speciality": null,
-  "match": {
-    "folder_contains": [
-      "<folder-name-token>"
-    ]
-  },
   "domain": "medical | religious | general"
 }

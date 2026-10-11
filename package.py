@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+PROFILES_DIR = ROOT / "whynot-cut" / "profiles"
 SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", "docs", ".superpowers", "tools"}
 SKIP_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 EXEC = {"bin/reel", "setup/setup_env.sh", "setup/setup_env.py", "hooks/run_python.sh", "hooks/guard.py",
@@ -26,7 +27,24 @@ def wanted(p: Path) -> bool:
     return p.is_file()
 
 
+def disallowed_profiles(profiles_dir: Path) -> list[str]:
+    """Profile folders that must not ship: only the blank `_template` and fictional `example-*` profiles are allowed.
+    A real client's profile belongs in that client's own folder (or a private pack), never in the product."""
+    if not profiles_dir.is_dir():
+        return []
+    return sorted(d.name for d in profiles_dir.iterdir()
+                  if d.is_dir() and d.name != "_template" and not d.name.startswith("example-"))
+
+
 def main():
+    bad = disallowed_profiles(PROFILES_DIR)
+    if bad:
+        print(f"Refusing to package: whynot-cut/profiles/ contains {', '.join(bad)}. Only `_template` and `example-*` "
+              f"profiles may ship (no real client data in the product).\n"
+              f"how: move {'that folder' if len(bad) == 1 else 'those folders'} out of the repo "
+              f"(e.g. to a private profiles folder) or rename a fictional one to example-<name>, then run package.py again.",
+              file=sys.stderr)
+        return 1
     version = json.loads((ROOT / "whynot-cut/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
     out = ROOT.parent / f"whynot-cut-{version}.zip"
     files = sorted(p for p in ROOT.rglob("*") if wanted(p))

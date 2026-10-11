@@ -1,0 +1,12 @@
+{
+  "id": "example-clinic",
+  "display_name": "Example Clinic / عيادة مثال",
+  "prefix": "EC",
+  "languages": [
+    "ar",
+    "en"
+  ],
+  "rtl": true,
+  "speciality": "Dermatology and laser (fictional example)",
+  "domain": "medical"
+}

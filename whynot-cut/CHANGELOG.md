@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.0.0 (unreleased)
+
+### Changed
+- No real client ships in the product: the real client's profile folder was removed from `profiles/`. The plugin now
+  ships only the blank `_template` and a fictional `example-clinic` ("Example Clinic / عيادة مثال", Dr. Sample Example,
+  `domain: medical`, with every file kind: brand, medical glossary, notes, profile, style, transcription, graphics
+  templates). Tests, evals and docs use `example-clinic`.
+- A shipped profile is applied only when it is named: `--profile <id>` or the `id` in the client's own
+  `output/client_database/reel-profile/profile.json`. The folder-name auto-match (`match.folder_contains`, in the engine
+  and in the SessionStart hook) is removed, and the `match` key is gone from `_template/profile.json` and
+  `config/defaults/profile.json`; an old profile that still carries it is ignored. A client folder with no profile of
+  its own now shows "Profile: NONE" until `/whynot-cut:new-client` (or `reel client-init`) creates one.
+- `package.py` refuses to build (exit 1, with a `how:` hint) when `whynot-cut/profiles/` contains any folder other than
+  `_template` and `example-*`.
+
+### Migration
+- The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the
+  zip). A client folder that relied on the folder-name match must now have its own profile: copy that private profile
+  into `<client>/output/client_database/reel-profile/`, or run `reel client-init --from-profile example-clinic` and fill
+  it from the client's own documents. Existing client `reel-profile/` folders keep working unchanged.
+
 ## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names, field-test round 4
 The minor findings of the 2.2.0 review, two bugs found by a live run from a client folder named in Arabic, and the gaps
 G62–G69 found by the first real podcast run (installed 2.1.1, a 34-minute episode), each reproduced by a failing test

@@ -309,7 +309,7 @@ def log(paths: Paths | None, msg: str):
 
 # --------------------------------------------------------------------------- client profiles
 # A profile is a folder of JSON overrides with the same file names as config/defaults/ plus
-# profile.json (id, prefix, match rules) and notes.md (prose for Claude). Lookup, lowest -> highest:
+# profile.json (id, prefix, domain) and notes.md (prose for Claude). Lookup, lowest -> highest:
 #   config/defaults/<name>  <-  profiles/<id>/<name> (shipped seed)  <-  <client>/output/client_database/reel-profile/<name>
 CLIENT_PROFILE_REL = "output/client_database/reel-profile"
 _CTX: dict = {"root": None, "profile": None}
@@ -341,7 +341,8 @@ def shipped_profiles() -> dict:
 
 
 def active_profile(root: Path | None = None) -> str | None:
-    """--profile > client's reel-profile/profile.json > shipped profile whose match rule fits the folder name."""
+    """--profile > client's reel-profile/profile.json. A shipped profile (profiles/<id>/) applies only when it is named:
+    by --profile or by the id in the client's own profile.json, never by the client folder's name."""
     if _CTX["profile"]:
         return _CTX["profile"]
     root = Path(root) if root else _CTX["root"]
@@ -349,10 +350,6 @@ def active_profile(root: Path | None = None) -> str | None:
         own = read_json(root / CLIENT_PROFILE_REL / "profile.json", {})
         if own.get("id"):
             return own["id"]
-        name = root.name.lower()
-        for pid, pj in shipped_profiles().items():
-            if any(tok.lower() in name for tok in pj.get("match", {}).get("folder_contains", [])):
-                return pid
     return None
 
 

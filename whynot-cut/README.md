@@ -199,7 +199,7 @@ it at session start; engine commands read it every time.
 ## Client profiles
 The engine is generic; each client's look and rules come from layered profiles (later wins):
 1. `config/defaults/` (house settings, e.g. the Premiere sequence spec)
-2. `profiles/<id>/` (shipped profiles: `dr-nahla-hunter`)
+2. `profiles/<id>/` (shipped seed profiles: the blank `_template` and the fictional `example-clinic`; a shipped profile applies only when named with `--profile <id>` or by the `id` in the client's own profile, never by folder name)
 3. `<client>/output/client_database/reel-profile/` (the client's own copy, created by `reel client-init`)
 
 `reel profile --root "<client folder>"` shows which applies.
