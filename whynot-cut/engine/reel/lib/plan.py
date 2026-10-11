@@ -359,9 +359,6 @@ def compile_plan(paths: Paths) -> dict:
     from .common import source_range
     main_file = base.get("main_footage") or source_range(paths).get("footage")
     main_v = main_video(pre_all, main_file)
-    if main_file and pre_all.get("files") and main_v is None:
-        warnings.append(f"{Path(main_file).name} is not in 00_inputs/preflight.json: per-shot framing and the framing "
-                        "window are skipped (the picture is fitted) — run `reel preflight` for this video")
     if shots_rep.get("shots") and base.get("base_scale_percent") in (None, "auto"):
         pv = main_v
         if pv:
@@ -394,6 +391,13 @@ def compile_plan(paths: Paths) -> dict:
     # build crops the picture to the window); source cutaways stay whole
     framing_mode = str(base.get("framing") or load_config("style.json").get("framing") or "9:16")
     win = window_rect(framing_mode, base.get("framing_window_y"))
+    if win and main_v is None:       # a 4:5 reel silently built as 9:16 would be the wrong deliverable
+        errors.append(f"framing {framing_mode} needs this video's preflight: "
+                      f"{Path(main_file).name if main_file else 'its footage'} is not in 00_inputs/preflight.json — run "
+                      "`reel preflight` for this video first")
+    elif main_file and pre_all.get("files") and main_v is None:
+        warnings.append(f"{Path(main_file).name} is not in 00_inputs/preflight.json: per-shot framing is skipped (the "
+                        "picture is fitted) — run `reel preflight` for this video")
     if win and bsp:
         pv_ = main_v
         if pv_:

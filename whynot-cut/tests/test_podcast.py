@@ -981,7 +981,13 @@ class TestShots(unittest.TestCase):
                 self.assertAlmostEqual(s["scale_factor"], max(1080 / 640, 1350 / 360) * 100 / cover, delta=1e-4)
             pre["files"] = pre["files"][:1]                                    # the reel's own file missing from preflight
             write_json(reel.p("00_inputs/preflight.json"), pre)
-            r = compile_plan(reel)
+            r = compile_plan(reel)                                             # 4:5 asked for: never silently 9:16
+            self.assertFalse(r["ok"])
+            self.assertTrue(any("4:5" in e and "preflight" in e for e in r["errors"]), r["errors"])
+            write_json(reel.p("01_analysis/edit-decisions.json"), {"global": {"framing": "9:16"}, "decisions": [
+                decision("EDIT_001", "00:00:00.500", "00:00:02.000", "كلمه1 كلمه2")]})
+            r = compile_plan(reel)                                             # 9:16: fitted, with a warning
+            self.assertTrue(r["ok"], r["errors"])
             self.assertTrue(any("E.mp4" in w and "preflight" in w for w in r["warnings"]), r["warnings"])
         finally:
             common.set_context(None)
