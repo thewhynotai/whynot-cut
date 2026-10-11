@@ -360,7 +360,23 @@ def require_plan_approval(p: Paths):
 
 def cmd_approve_plan(a):
     from lib.plan import plan_fingerprint
+    from lib.motion_config import is_motion
     p = P(a)
+    if is_motion(p):                      # motion video (2.2): Gate 1 approves the compiled motion plan
+        from lib.motion_plan import fingerprint
+        val = read_json(p.p("01_analysis/motion-validation.json"))
+        if not p.p("01_analysis/motion-plan.json").exists() or not val:
+            raise SystemExit("compile the motion plan first (`motion-plan`)")
+        if not val.get("ok"):
+            raise SystemExit("the motion plan has errors (01_analysis/motion-plan.md): fix them before approval")
+        if val.get("fingerprint") != fingerprint(p):
+            raise SystemExit("the motion plan is stale (script, words, audio or brand changed): run `motion-plan` again")
+        rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": fingerprint(p),
+               "kind": "motion"}
+        write_json(p.p("01_analysis/plan-approval.json"), rec)
+        set_status(p, "EDIT_PLAN_READY", f"motion plan approved by {a.by}", "plan_approval")
+        out(rec)
+        return
     if not p.p("01_analysis/timeline-spec.json").exists():
         raise SystemExit("compile the plan first (`plan`)")
     rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": plan_fingerprint(p)}

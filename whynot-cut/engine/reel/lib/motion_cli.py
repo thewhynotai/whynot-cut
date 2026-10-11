@@ -22,6 +22,7 @@ ARGS: dict = {
         (("--limit",), {"type": int, "default": 12}),
     ],
     "motion-library": [],
+    "motion-plan": [],
 }
 NO_ID = {"ae-status", "ae-probe", "motion-icons", "motion-library"}
 
@@ -93,6 +94,16 @@ def cmd_motion_library(a):
          "how": "illustrations are used as \"pack/item\"; only packs with ok: true (a pack.json with an allowed "
                 "license) can be used" if packs else
                 "no packs: add licensed illustration packs (each with pack.json) to the library folder, or use icons"})
+
+
+def cmd_motion_plan(a):
+    from .motion_plan import compile_motion
+    p = P(a)
+    r = compile_motion(p)
+    out({"ok": r["ok"], "errors": r["errors"], "warnings": r["warnings"], "approvals": r["approvals"],
+         "editorial_lines": len(r["editorial_lines"]), "plan": r["plan"], "md": r["md"],
+         "next": ("reel motion-animatic, VIEW the storyboard, then show the editor motion-plan.md + the animatic "
+                  "(Gate 1)") if r["ok"] else "fix 01_analysis/motion-script.json and run motion-plan again"})
 
 
 def dispatch(a) -> bool:

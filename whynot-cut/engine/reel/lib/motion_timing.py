@@ -88,7 +88,8 @@ def hero_frame(last_cue: int, end_frame: int, next_transition: int, fps: float, 
 def frame_scenes(anchored: list[dict], tmap, fps: float, cfg: dict,
                  transitions: list[int]) -> tuple[list[dict], list[str]]:
     """Adds start_frame, end_frame, cue_frames and hero_frame. transitions[k] = frames of the NEXT scene's transition
-    (it plays over the end of scene k). A scene whose last cue cannot finish revealing before then is too short."""
+    (it plays over the end of scene k). A scene whose last cue comes after the scene starts leaving is too short (in
+    continuous speech the last word may still be fading in at the cut; the hero frame is then the last frame before it)."""
     reveal_ms = int(cfg.get("word_reveal_ms", 180))
     out, errs = [], []
     for k, sc in enumerate(anchored):
@@ -106,9 +107,9 @@ def frame_scenes(anchored: list[dict], tmap, fps: float, cfg: dict,
             out.append(rec)
             continue
         last = max(cues) if cues else a
-        if last + reveal_frames(fps, reveal_ms) > b - nxt - 1:
-            errs.append(f"{sc['id']}: too short for its content (its last word at frame {last} cannot finish revealing "
-                        f"before frame {b - nxt - 1}): give it more time or move words to the next scene")
-        rec["hero_frame"] = max(a, min(hero_frame(last, b, nxt, fps, reveal_ms), b - 1))
+        if last > b - nxt - 1:
+            errs.append(f"{sc['id']}: too short for its content (its last cue at frame {last} comes after frame "
+                        f"{b - nxt - 1}, where the scene is already leaving): give it more time or move words on")
+        rec["hero_frame"] = max(a, min(max(last, hero_frame(last, b, nxt, fps, reveal_ms)), b - 1))
         out.append(rec)
     return out, errs

@@ -466,7 +466,7 @@ def window_stale(paths) -> str | None:
     """A reel whose episode file changed after selection must not be built from the old window."""
     from .common import sha1_head, source_range
     src = source_range(paths)
-    if src.get("kind") != "episode_reel" or not src.get("fingerprint"):
+    if src.get("kind") not in ("episode_reel", "motion_reel") or not src.get("fingerprint"):
         return None
     f = Path(src["footage"])
     f = f if f.is_absolute() else paths.root / f

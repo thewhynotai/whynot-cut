@@ -769,7 +769,10 @@ class TestMotionTiming(unittest.TestCase):
         self.assertEqual(errs, [])
         self.assertEqual((ok[0]["start_frame"], ok[0]["end_frame"], ok[0]["cue_frames"]), (0, 180, [90]))
         self.assertEqual(ok[0]["hero_frame"], 90 + 6 + 6)
-        _, errs = frame_scenes([{"id": "S07", "start_ms": 0, "end_ms": 5170, "cues_ms": [5000]}], None, 30.0, MCFG, [0])
+        fine, errs = frame_scenes([{"id": "S06", "start_ms": 0, "end_ms": 5170, "cues_ms": [5000]}], None, 30.0, MCFG, [0])
+        self.assertEqual(errs, [])                                         # continuous speech: last word near the cut
+        self.assertEqual(fine[0]["hero_frame"], 154)
+        _, errs = frame_scenes([{"id": "S07", "start_ms": 0, "end_ms": 5170, "cues_ms": [5150]}], None, 30.0, MCFG, [0])
         self.assertEqual(len(errs), 1)
         self.assertIn("S07", errs[0])
         self.assertIn("too short", errs[0])
@@ -831,6 +834,213 @@ class TestMotionLayout(unittest.TestCase):
         self.assertEqual(x, fmt["w"] / 2)
         self.assertTrue(fmt["safe"]["top"] < y < fmt["h"] - fmt["safe"]["bottom"])
         self.assertGreater(place("comparison", "first", fmt, "rtl")[0], fmt["w"] / 2)   # first = the reading-start side
+
+
+# --------------------------------------------------------------------------- motion plan compiler
+W40 = [f"كلمه{i}" for i in range(40)]
+
+
+def motion_plan_fixture(tmp: Path, recipe_type: str = "drama", direction: str = "rtl"):
+    """A motion project EP12_R01_MO: 40 words every 300 ms (12 s window), pauses.json (nothing removed), a cleaned
+    dialogue WAV, brand tokens and a typography file pointing at a system font (None when no test font)."""
+    from lib.recipes import resolve
+    from lib.reels import select
+    root, ep, _ = motion_episode_fixture(tmp)
+    select(ep, ["R01"], [], "editor", as_="motion")
+    reel = Paths(root, "EP12_R01_MO")
+    fake_transcript(reel, step=300, dur_ms=12000, words=W40)
+    src = read_json(reel.p("00_inputs/source.json"))
+    src.update(duration_ms=12000, direction=direction, recipe=resolve(recipe_type), content_type=recipe_type)
+    write_json(reel.p("00_inputs/source.json"), src)
+    write_json(reel.p("06_audio/dialogue/pauses.json"), {"keep_ms": [[0, 12000]], "removed_ms": 0,
+                                                          "source_duration_ms": 12000})
+    ff("-f", "lavfi", "-i", "sine=f=200:r=48000:d=12", "-ac", "2", "-c:a", "pcm_s16le",
+       str(reel.p("06_audio/dialogue/dialogue_clean.wav")))
+    font = test_font()
+    db = reel.client_db
+    write_json(db / "branding/brand-tokens.json", {
+        "roles": {"primary": {"hex": "#20ACAF"}, "neutral_light": {"hex": "#FFFFFF"}},
+        "derived": {"paper_tint": {"hex": "#F4F1EA"}, "ink": {"hex": "#1F2A2A"}}})
+    if font:
+        write_json(db / "branding/typography.json", {"families": {"Test": {"weights": [
+            {"style": s, "file": str(font), "postscript_name": "ArialMT"} for s in ("black", "bold", "medium", "regular")]}},
+            "roles": {r: {"postscript_name": "ArialMT"} for r in ("caption", "headline", "body", "term", "small")}})
+    return root, ep, reel
+
+
+def mscript(*scenes, **top):
+    return dict({"reel_id": "EP12_R01_MO", "beats": [{"id": "B1", "role": "hook"}, {"id": "B2", "role": "peak"}],
+                 "scenes": list(scenes)}, **top)
+
+
+def good_script():
+    return mscript(
+        scene("S01", "kinetic_quote", "@start", beat="B1", text=" ".join(W40[:10]), emphasis=["كلمه2"]),
+        scene("S02", "stat_counter", "كلمه10 كلمه11", beat="B2", value="10", evidence="كلمه10 كلمه11",
+              label="عميل جديد", label_source="editorial"),
+        scene("S03", "list_steps", "كلمه20", items=[{"text": "كلمه20 كلمه21", "at": "كلمه20"},
+                                                   {"text": "كلمه25", "at": "كلمه25"}]),
+        scene("S04", "outro", "@end", cta="تابع {show}"))
+
+
+class TestMotionPlan(unittest.TestCase):
+    def setUp(self):
+        if test_font() is None:
+            self.skipTest("no test font for HarfBuzz fitting")
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root, self.ep, self.reel = motion_plan_fixture(self.tmp)
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def compile(self, script):
+        from lib.motion_plan import compile_motion
+        write_json(self.reel.p("01_analysis/motion-script.json"), script)
+        return compile_motion(self.reel)
+
+    def test_compile_ok(self):
+        r = self.compile(good_script())
+        self.assertTrue(r["ok"], r["errors"])
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        sc = plan["scenes"]
+        self.assertEqual([s["id"] for s in sc], ["S01", "S02", "S03", "S04"])
+        for a, b in zip(sc, sc[1:]):
+            self.assertEqual(a["end_frame"], b["start_frame"])
+        self.assertEqual(plan["duration_frames"], sc[-1]["end_frame"])
+        self.assertEqual(plan["dir"], -1)
+        kq = next(e for e in sc[0]["elements"] if e["kind"] == "text")
+        self.assertEqual(len(kq["tokens"]), 10)
+        self.assertTrue(all(isinstance(t["cue_frame"], int) for t in kq["tokens"]))
+        self.assertEqual(kq["emphasis"], [3])
+        self.assertTrue(kq["rtl"])
+        self.assertEqual(kq["cue_hash"], hashlib.sha1(json.dumps([t["cue_frame"] for t in kq["tokens"]]).encode()).hexdigest()[:12])
+        counter = next(e for e in sc[1]["elements"] if e["kind"] == "counter")
+        self.assertEqual(counter["target"], 10)
+        md = self.reel.p("01_analysis/motion-plan.md").read_text(encoding="utf-8")
+        for sid in ("S01", "S02", "S03", "S04"):
+            self.assertIn(sid, md)
+        self.assertIn("editorial", md)
+        self.assertIn("تابع بودكاست التجربة", md)                     # {show} filled from the sheet
+        self.assertEqual(common.load_status(self.reel)["status"], "ANALYZED")
+        self.assertTrue(Path(plan["audio"]["dialogue"]).exists())
+
+    def test_truth_errors_block(self):
+        lib = self.tmp / "lib"
+        make_pack(lib, "free", "free")
+        write_json(self.root / common.CLIENT_PROFILE_REL / "motion.json", {"duration_s": {"hard_min": 1},
+                                                                          "library_dir": str(lib)})
+        common.set_context(self.root)
+        info_p = self.ep.p("00_inputs/episode.json")
+        info = read_json(info_p)
+        info["sheet"]["guest"] = ""
+        write_json(info_p, info)
+        bad = mscript(
+            scene("S01", "kinetic_quote", "@start", text="كلمه0 كلمه1 زياده"),
+            scene("S02", "icon_point", "كلمه8", icon="trendingup", text="كلمه8 كلمه9"),
+            scene("S03", "context_card", "كلمه14", text="مع {guest}"),
+            scene("S04", "illustration_scene", "كلمه20", illustration="free/doctor"),
+            scene("S05", "title_card", "كلمه26", title="ط" * 200, title_source="editorial"))
+        r = self.compile(bad)
+        self.assertFalse(r["ok"])
+        errs = " | ".join(r["errors"])
+        for needle in ("زياده", "trending-up", "guest", "free", "too long"):
+            self.assertIn(needle, errs)
+        self.assertEqual(len([e for e in r["errors"] if "S05" in e]), 1)
+
+    def test_episode_changed_refused(self):
+        src = read_json(self.reel.p("00_inputs/source.json"))
+        src["fingerprint"] = "0" * 40
+        write_json(self.reel.p("00_inputs/source.json"), src)
+        with self.assertRaises(SystemExit) as cm:
+            self.compile(good_script())
+        self.assertIn("changed", str(cm.exception))
+
+    def test_number_approval(self):
+        s = good_script()
+        s["scenes"][1]["value"] = "1000000"
+        r = self.compile(s)
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertEqual(len(r["approvals"]), 1)
+        self.assertIn("S02", r["approvals"][0])
+
+    def test_dense_scene(self):
+        s = mscript(scene("S01", "kinetic_quote", "@start", text=" ".join(W40[:20])),
+                    scene("S02", "kinetic_quote", "كلمه20", text=" ".join(W40[20:34])))
+        r = self.compile(s)
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("S01" in e and "words" in e for e in r["errors"]), r["errors"])
+        self.assertTrue(any("S02" in w and "words" in w for w in r["warnings"]), r["warnings"])
+
+    def test_recipe_warnings(self):
+        src = read_json(self.reel.p("00_inputs/source.json"))
+        from lib.recipes import resolve
+        src["recipe"] = resolve("emotional")
+        write_json(self.reel.p("00_inputs/source.json"), src)
+        r = self.compile(good_script())
+        self.assertTrue(any("S03" in w and "list_steps" in w for w in r["warnings"]), r["warnings"])
+        s = good_script()
+        s["scenes"][2]["recipe_note"] = "the speaker lists two steps"
+        r = self.compile(s)
+        self.assertFalse(any("S03" in w and "list_steps" in w for w in r["warnings"]), r["warnings"])
+        self.assertIn("the speaker lists two steps", self.reel.p("01_analysis/motion-plan.md").read_text(encoding="utf-8"))
+
+    def test_single_speaker_no_turns(self):
+        self.reel.p("00_inputs/speakers.json").unlink()
+        r = self.compile(dict(good_script(), captions="subtitles"))
+        self.assertTrue(r["ok"], r["errors"])
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        self.assertIsNone(plan["persistent"]["speaker_badge"])
+        self.assertTrue(plan["persistent"]["captions"]["cues"])
+
+    def test_ltr_mirror(self):
+        from lib.motion_config import format_spec
+        w = format_spec("9x16")["w"]
+        s = good_script()
+        s["scenes"][1] = scene("S02", "icon_point", "كلمه10", icon="arrow-right", text="كلمه10 كلمه11")
+        r = self.compile(s)
+        self.assertTrue(r["ok"], r["errors"])
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        num = next(e for e in plan["scenes"][2]["elements"] if e["name"].startswith("S03_number"))
+        self.assertGreater(num["x"], w / 2)
+        self.assertTrue(next(e for e in plan["scenes"][1]["elements"] if e["kind"] == "icon")["mirror"])
+        src = read_json(self.reel.p("00_inputs/source.json"))
+        src["direction"] = "ltr"
+        write_json(self.reel.p("00_inputs/source.json"), src)
+        r = self.compile(s)
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        self.assertEqual(plan["dir"], 1)
+        num = next(e for e in plan["scenes"][2]["elements"] if e["name"].startswith("S03_number"))
+        self.assertLess(num["x"], w / 2)
+        self.assertFalse(next(e for e in plan["scenes"][1]["elements"] if e["kind"] == "icon")["mirror"])
+
+    def test_cc_by_asset_listed(self):
+        lib = self.tmp / "lib"
+        make_pack(lib, "people", "CC-BY-4.0", attribution="People by X (CC BY 4.0)")
+        write_json(self.root / common.CLIENT_PROFILE_REL / "motion.json", {"duration_s": {"hard_min": 1},
+                                                                          "library_dir": str(lib)})
+        common.set_context(self.root)
+        s = good_script()
+        s["scenes"][1] = scene("S02", "illustration_scene", "كلمه10", illustration="people/doctor")
+        r = self.compile(s)
+        self.assertTrue(r["ok"], r["errors"])
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        a = next(x for x in plan["assets"] if x["ref"] == "people/doctor")
+        self.assertEqual((a["license"], a["attribution"]), ("CC-BY-4.0", "People by X (CC BY 4.0)"))
+
+    def test_approve_plan_motion(self):
+        from lib.motion_plan import fingerprint
+        self.assertTrue(self.compile(good_script())["ok"])
+        cli = SK / "engine" / "reel" / "cli.py"
+        r = subprocess.run([sys.executable, "-B", str(cli), "approve-plan", "--root", str(self.root), "--video-id",
+                            "EP12_R01_MO", "--by", "editor"], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rec = read_json(self.reel.p("01_analysis/plan-approval.json"))
+        self.assertEqual(rec["plan_fingerprint"], fingerprint(self.reel))
+        s = good_script()
+        s["scenes"][0]["text"] = " ".join(W40[:9])
+        write_json(self.reel.p("01_analysis/motion-script.json"), s)
+        self.assertNotEqual(rec["plan_fingerprint"], fingerprint(self.reel))
 
 
 if __name__ == "__main__":
