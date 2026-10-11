@@ -657,10 +657,10 @@ class ActionShapeTests(unittest.TestCase):
                   "maximumBitDepth", "maximumRenderQuality"):
             self.assertIn(k, sa)
         text = V.load("ae_readback")["$defs"]["text_layer"]["required"]
-        for k in ("name", "kind", "in", "out", "comment", "text", "font_ps", "substitute", "composer", "direction",
-                  "direction_pr"):                 # motion_readback.compare reads every one of these on a text layer
-            self.assertIn(k, text)
+        for k in ("name", "kind", "in", "out", "comment", "text", "font_ps", "substitute", "composer", "direction"):
+            self.assertIn(k, text)                   # motion_readback.compare reads every one of these on a text layer
         self.assertNotIn("rect", text)               # optional: rect_error stands in for it
+        self.assertNotIn("direction_pr", text)       # optional: an alternative to direction, omitted by the JSX on AE 25.2
         for k in ("name", "kind", "in", "out", "comment"):
             self.assertIn(k, V.load("ae_readback")["$defs"]["other_layer"]["required"])
         self.assertIn("format", V.load("ae_build_motion")["$defs"]["plan"]["required"])   # motion_build.build:239
@@ -837,16 +837,20 @@ class ActionShapeTests(unittest.TestCase):
         def with_layer(layer):
             return dict(base, scenes=[{"id": "S01", "comp": "c", "in_frame": 0, "out_frame": 1, "layers": [layer]}])
         self.assertEqual(V.validate(with_layer(LAYER_TEXT), rb), [])
-        for k in ("text", "font_ps", "substitute", "composer", "direction", "direction_pr"):
+        for k in ("text", "font_ps", "substitute", "composer", "direction"):
             errs = V.validate(with_layer({x: v for x, v in LAYER_TEXT.items() if x != k}), rb)
             self.assertTrue(errs and any("/scenes/0/layers/0" in e for e in errs), (k, errs))
         self.assertTrue(V.validate(with_layer({"name": "S01_text_1", "kind": "text", "in": 0, "out": 9, "comment": ""}), rb))
         for k, v in (("text", 5), ("font_ps", None), ("substitute", "no"), ("composer", 1), ("direction", 3),
-                     ("direction_pr", 3)):
+                     ("direction_pr", 3), ("direction_pr", 5)):
             self.assertTrue(V.validate(with_layer(dict(LAYER_TEXT, **{k: v})), rb), k)
         # nullable direction fields, the measured box optional (rect_error stands in), shapes carry no text fields
         self.assertEqual(V.validate(with_layer(dict(LAYER_TEXT, composer=None, direction=None, direction_pr="RTL")), rb), [])
         self.assertEqual(V.validate(with_layer({x: v for x, v in dict(LAYER_TEXT, rect_error="x").items() if x != "rect"}), rb), [])
+        # direction_pr is optional: the JSX omits it when paragraphRange(0).direction throws (After Effects 25.2 path)
+        self.assertEqual(V.validate(with_layer({x: v for x, v in LAYER_TEXT.items() if x != "direction_pr"}), rb), [])
+        self.assertEqual(V.validate(with_layer(dict(LAYER_TEXT, direction_pr="LTR")), rb), [])
+        self.assertTrue(V.validate(with_layer(dict(LAYER_TEXT, direction_pr=5)), rb))
         self.assertEqual(V.validate(with_layer(LAYER_SHAPE), rb), [])
         self.assertEqual(V.validate(with_layer(dict(LAYER_SHAPE, kind="other")), rb), [])
         self.assertTrue(V.validate(with_layer({k: v for k, v in LAYER_SHAPE.items() if k != "comment"}), rb))

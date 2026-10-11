@@ -177,7 +177,7 @@
             "string",
             "null"
           ],
-          "description": "direction from paragraphRange(0); null when unreadable (compare accepts RTL from either field)"
+          "description": "direction from paragraphRange(0), an alternative to direction in motion_readback.compare. Optional: the JSX omits it when paragraphRange(0).direction throws (the After Effects 25.2 fallback path); when present it is a string or null"
         },
         "rect": {
           "type": "array",
@@ -203,10 +203,9 @@
         "font_ps",
         "substitute",
         "composer",
-        "direction",
-        "direction_pr"
+        "direction"
       ],
-      "description": "A text layer. Every field motion_readback.compare reads is required; rect (safe-area and overlap checks) and rect_error stay optional."
+      "description": "A text layer. Every field motion_readback.compare reads is required except direction_pr (an optional alternative to direction) and rect / rect_error (safe-area and overlap checks, optional)."
     },
     "other_layer": {
       "type": "object",
