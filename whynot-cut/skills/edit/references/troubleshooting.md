@@ -36,6 +36,7 @@ Process (adapted from *systematic-debugging* in obra/superpowers, MIT):
 | XML imports video but **no audio** | Audio tracks lacked Premiere's track attributes / stereo declared instead of mono pairs | Fixed in `premiere_xml.py` (verified by bisecting against `exportAsFinalCutProXML`). Re-run `premiere`/`ppro-build` |
 | Frame review shows a graphic that was already removed | Frames from an earlier build in the same folder | `ppro-frames` now writes `premiere_frames/run-<time>/`; judge only the folder it printed |
 | All `ppro-frames` images identical | `exportFramePNG` given ticks exports frame 0 | Use CTI timecode string (fixed) |
+| Some `ppro-frames` images say "Media pending" in many languages (right after a project opened) | Premiere was still loading the project's media | `ppro-frames` now detects the slate, waits and re-exports; frames still pending are listed under `media_pending` (`ok: false`, not in the sheet). Wait for Premiere to finish loading and run it again; never judge a slate frame |
 | `*_CREATED` but output older than the run | Tool didn't actually write (blocked by a dialog) | Status checks now require mtime ≥ run start |
 | AE `exportAsMotionGraphicsTemplate` made folders / truncated names | It writes `<template name>.mogrt` into the given FOLDER; multi-space names fail | Folder target + space-free names (AE path is opt-in only) |
 | `/c/Users/...` paths not protected / not found (Windows) | Git Bash path form | Engine and guard translate `/d/...` to `D:/...`; quote paths with spaces |

@@ -20,6 +20,11 @@ You get 6–8 PNG paths, each with an expectation row (event id, template, expec
 
 Return only: | frame | event | pass/fail/unsure | reason (what you saw) |. Don't guess; if a detail is unreadable, mark it unsure.
 
+**"Media pending" frames.** If a frame is Premiere's placeholder for media that is still loading (a smooth yellow/olive,
+grey or dark colour field with "Media pending" written in several languages, and none of the picture, graphics or
+captions you were told to expect), it is not evidence about the edit: mark it **unsure** with the reason
+`Media pending: needs a re-export`, never pass and never fail. The qc-reviewer re-exports it.
+
 Podcast reels: also report a face cut by the crop, the wrong person framed in a wide shot, and half-cut burned subtitles or logos from the episode.
 
 ## Motion mode (2.2)

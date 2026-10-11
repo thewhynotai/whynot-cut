@@ -417,5 +417,257 @@ class TestG66SkillsTellTheStory(unittest.TestCase):
                 self.assertIn(needle, text, f"{rel} lacks {needle!r}")
 
 
+# ===================================================================================================== G69
+FIX = Path(__file__).resolve().parent / "fixtures"
+REAL_SLATE = FIX / "media_pending_1080x1920.png"      # a real Premiere 26.5 "Media pending" frame (EP02TEST_R02, run 1)
+REAL_CLEAN = sorted(FIX.glob("clean_*_270x480.jpg"))    # real clean frames exported by the same Premiere
+
+
+def _lines(draw, x0, y0, n, line_h, width, colour=(255, 255, 255), seed=3):
+    """Stand-in for text: n lines of 'words' made of thin strokes (like the slate's multi-language block)."""
+    rng = np.random.default_rng(seed)
+    stroke = max(2, int(line_h * 0.12))
+    for i in range(n):
+        x, y = x0, y0 + i * int(line_h * 1.6)
+        while x < x0 + width * (0.55 + 0.45 * rng.random()):
+            for _ in range(int(rng.integers(3, 8))):                  # one letter-ish: a few thin bars
+                draw.rectangle([x, y, x + stroke, y + int(line_h * 0.7)], fill=colour)
+                x += stroke * 3
+            x += int(line_h * 0.5)                                   # word gap
+
+
+def slate_gradient_left(w=1080, h=1920):
+    """Like the real one: vertical yellow -> olive gradient, a left-aligned multi-line white block."""
+    from PIL import Image, ImageDraw
+    top, bot = np.array([212, 197, 71.0]), np.array([107, 94, 40.0])
+    col = (top[None, :] * (1 - np.linspace(0, 1, h)[:, None]) + bot[None, :] * np.linspace(0, 1, h)[:, None])
+    im = Image.fromarray(np.repeat(col[:, None, :], w, axis=1).astype(np.uint8))
+    _lines(ImageDraw.Draw(im), int(w * 0.26), int(h * 0.2), 9, int(h * 0.03), int(w * 0.5))
+    return im
+
+
+def slate_dark_centre(w=1080, h=1920):
+    """The other slate people remember: near-uniform dark grey, one small centred text line."""
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (w, h), (38, 38, 38))
+    _lines(ImageDraw.Draw(im), int(w * 0.36), int(h * 0.49), 1, int(h * 0.022), int(w * 0.28), colour=(235, 235, 235))
+    return im
+
+
+def slate_landscape(w=1920, h=1080):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (w, h), (60, 66, 72))
+    _lines(ImageDraw.Draw(im), int(w * 0.38), int(h * 0.44), 2, int(h * 0.035), int(w * 0.24), colour=(240, 240, 240))
+    return im
+
+
+def not_a_slate_images():
+    """Frames that must never be taken for the slate."""
+    from PIL import Image, ImageDraw
+    rng = np.random.default_rng(1)
+    out = {}
+    out["black"] = Image.new("RGB", (1080, 1920), (0, 0, 0))
+    out["flat grey, no text"] = Image.new("RGB", (1080, 1920), (60, 60, 60))
+    out["noise"] = Image.fromarray(rng.integers(0, 255, (480, 270, 3), dtype=np.uint8)).resize((1080, 1920))
+    wall = Image.new("RGB", (1080, 1920), (240, 240, 238))        # a speaker on a white backdrop
+    d = ImageDraw.Draw(wall)
+    d.ellipse([400, 450, 680, 800], fill=(190, 150, 125))
+    d.rectangle([270, 800, 810, 1920], fill=(30, 30, 45))
+    out["person on white wall"] = wall
+    card = slate_gradient_left()                                    # same background, but a big photo in the middle
+    ImageDraw.Draw(card).rectangle([180, 300, 900, 1500], fill=(90, 120, 160))
+    out["gradient with a big picture"] = card
+    split = Image.new("RGB", (1080, 1920), (20, 20, 20))            # left half dark, right half bright: not a slate
+    ImageDraw.Draw(split).rectangle([540, 0, 1080, 1920], fill=(200, 200, 200))
+    out["split screen"] = split
+    return out
+
+
+class TestG69PendingDetector(unittest.TestCase):
+    def setUp(self):
+        from lib import media_pending
+        self.mp = media_pending
+
+    def test_the_real_premiere_slate_is_detected(self):
+        self.assertTrue(REAL_SLATE.exists(), "fixture missing")
+        self.assertTrue(self.mp.is_media_pending(REAL_SLATE), self.mp.pending_metrics(REAL_SLATE))
+
+    def test_real_clean_premiere_frames_are_not(self):
+        self.assertGreaterEqual(len(REAL_CLEAN), 3)
+        for f in REAL_CLEAN:
+            self.assertFalse(self.mp.is_media_pending(f), (f.name, self.mp.pending_metrics(f)))
+
+    def test_synthetic_slates_are_detected(self):
+        for name, im in (("gradient+left block", slate_gradient_left()), ("dark+centre line", slate_dark_centre()),
+                         ("landscape", slate_landscape()), ("small 540x960", slate_gradient_left(540, 960))):
+            self.assertTrue(self.mp.is_media_pending(im), (name, self.mp.pending_metrics(im)))
+
+    def test_a_jpeg_compressed_slate_is_still_detected(self):
+        import io
+        from PIL import Image
+        buf = io.BytesIO()
+        slate_gradient_left().save(buf, "JPEG", quality=60)
+        self.assertTrue(self.mp.is_media_pending(Image.open(io.BytesIO(buf.getvalue()))))
+
+    def test_ordinary_frames_are_not_slates(self):
+        for name, im in not_a_slate_images().items():
+            self.assertFalse(self.mp.is_media_pending(im), (name, self.mp.pending_metrics(im)))
+
+    def test_metrics_explain_the_decision(self):
+        m = self.mp.pending_metrics(REAL_SLATE)
+        for k in ("pending", "row_constancy", "smoothness", "text_fraction", "fill"):
+            self.assertIn(k, m)
+        self.assertTrue(m["pending"])
+
+
+class FakeBridge:
+    """Stands in for ppro_bridge.submit: writes one PNG per requested time; `pending_for[ms]` = how many exports of that
+    frame still come out as the Media pending slate (media loading)."""
+
+    def __init__(self, pending_for=None, fail_after=None):
+        self.calls, self.pending_for = [], dict(pending_for or {})
+
+    def __call__(self, action, payload, timeout=0, **kw):
+        from PIL import Image
+        self.calls.append(list(payload["times"]))
+        frames = []
+        for t in payload["times"]:
+            ms = round(t * 1000)
+            out = Path(payload["out_dir"]) / ("frame_%06d.png" % ms)
+            n = self.pending_for.get(ms, 0)
+            if n > 0:
+                self.pending_for[ms] = n - 1
+                shutil.copyfile(REAL_SLATE, out)
+            else:
+                rng = np.random.default_rng(ms)
+                Image.fromarray(rng.integers(0, 255, (240, 135, 3), dtype=np.uint8)).save(out)
+            frames.append({"t": t, "file": str(out), "called": True})
+        return {"ok": True, "elapsed_s": 0.1, "response": {"ok": True, "result": {"frames": frames}}}
+
+
+class TestG69ExportRetry(unittest.TestCase):
+    TIMES = [1.0, 2.5, 3.75, 5.0, 6.5, 8.0]
+
+    def setUp(self):
+        from lib.common import Paths, write_json
+        self.tmp = Path(tempfile.mkdtemp())
+        root = self.tmp / "C"
+        (root / "assets").mkdir(parents=True)
+        (root / "data").mkdir()
+        self.p = Paths(root, "V1")
+        self.p.ensure_project()
+        write_json(self.p.p("01_analysis/timeline-spec.json"), {"events": [], "duration_frames": 240})
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def export(self, bridge, times=None, **kw):
+        from unittest import mock
+        from lib import ppro_build
+        with mock.patch("lib.ppro_bridge.submit", bridge), mock.patch("time.sleep") as sleep:
+            r = ppro_build.export_frames(self.p, times=times or self.TIMES, **kw)
+        return r, sleep
+
+    def test_clean_export_is_one_bridge_call_and_no_wait(self):
+        b = FakeBridge()
+        r, sleep = self.export(b)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["frames"], r["expected"], r["media_pending"]), (6, 6, []))
+        self.assertEqual(len(b.calls), 1)
+        sleep.assert_not_called()
+
+    def test_pending_frames_are_re_exported_after_a_wait(self):
+        """Seen live: 4 of 17 frames were the slate right after the project opened; a second run was clean."""
+        b = FakeBridge({2500: 1, 5000: 1})
+        r, sleep = self.export(b, wait_s=4.0)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["frames"], r["media_pending"]), (6, []))
+        self.assertEqual(len(b.calls), 2)
+        self.assertEqual(sorted(b.calls[1]), [2.5, 5.0])             # only the slate frames are exported again
+        sleep.assert_called_once()
+        self.assertGreaterEqual(sleep.call_args[0][0], 4.0)
+        rec = r["pending_retries"]
+        self.assertEqual(rec["attempts"], 1)
+        self.assertEqual(sorted(rec["recovered"]), [2.5, 5.0])
+        from lib.media_pending import is_media_pending
+        self.assertFalse(any(is_media_pending(f) for f in Path(r["dir"]).glob("frame_*.png")))
+
+    def test_it_waits_longer_each_time_and_gives_up_after_n_retries(self):
+        b = FakeBridge({3750: 99})                                    # media never comes online
+        r, sleep = self.export(b, retries=2, wait_s=3.0)
+        self.assertFalse(r["ok"])
+        self.assertEqual(len(b.calls), 3)                             # first export + 2 re-exports
+        self.assertEqual([c[0][0] for c in sleep.call_args_list], [3.0, 6.0])
+        self.assertEqual((r["frames"], r["expected"]), (5, 6))        # the slate frame is not a normal frame
+        self.assertEqual([m["t"] for m in r["media_pending"]], [3.75])
+        self.assertTrue(r["media_pending"][0]["file"].endswith("frame_003750.png"))
+        self.assertEqual(r["media_pending"][0]["retries"], 2)
+        self.assertIn("Media pending", r["error"])
+        self.assertIn("1 of 6", r["error"])
+        self.assertIn("neither a pass nor a fail", r["next"].lower())
+
+    def test_retries_zero_only_reports(self):
+        b = FakeBridge({1000: 5})
+        r, sleep = self.export(b, retries=0)
+        self.assertEqual(len(b.calls), 1)
+        sleep.assert_not_called()
+        self.assertEqual([m["t"] for m in r["media_pending"]], [1.0])
+        self.assertFalse(r["ok"])
+
+    def test_the_sheet_leaves_slate_frames_out(self):
+        from PIL import Image
+        b = FakeBridge({1000: 99})
+        r, _ = self.export(b, times=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0], retries=1)
+        self.assertTrue(r["sheet"])
+        with Image.open(r["sheet"]) as sheet:
+            self.assertEqual(sheet.size[1] // (480 + 18), 1)         # 6 clean frames = one row of 6 (7 would be two)
+
+    def test_a_re_export_that_writes_nothing_leaves_the_frame_reported_as_pending(self):
+        """The old slate must never turn into a 'normal frame' because the second export failed."""
+        class Dying(FakeBridge):
+            def __call__(self, action, payload, timeout=0, **kw):
+                if len(self.calls) >= 1:                              # the re-export writes nothing
+                    self.calls.append(list(payload["times"]))
+                    return {"ok": True, "response": {"ok": True, "result": {"frames": []}}}
+                return super().__call__(action, payload, timeout, **kw)
+        r, _ = self.export(Dying({2500: 9}), retries=1)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["frames"], 5)
+        self.assertEqual([m["t"] for m in r["media_pending"]], [2.5])
+        self.assertTrue(Path(r["media_pending"][0]["file"]).exists())             # the slate is put back, not lost
+        self.assertEqual(list(Path(r["dir"]).glob("*.slate")), [])
+
+    def test_a_re_export_never_has_to_overwrite_the_slate(self):
+        """Premiere's exportFramePNG might refuse to overwrite: the slate is parked before the re-export."""
+        class Strict(FakeBridge):
+            def __call__(self, action, payload, timeout=0, **kw):
+                if self.calls:                                         # re-export: refuse to overwrite a file
+                    for t in payload["times"]:
+                        if (Path(payload["out_dir"]) / ("frame_%06d.png" % round(t * 1000))).exists():
+                            self.calls.append(list(payload["times"]))
+                            return {"ok": True, "response": {"ok": True, "result": {"frames": [
+                                {"t": t, "error": "file exists"}]}}}
+                return super().__call__(action, payload, timeout, **kw)
+        r, _ = self.export(Strict({2500: 1}), retries=1)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((r["frames"], r["media_pending"]), (6, []))
+
+    def test_cli_has_the_retry_options(self):
+        r = subprocess.run([sys.executable, "-B", str(SK / "engine/reel/cli.py"), "ppro-frames", "--help"],
+                           capture_output=True, text=True, encoding="utf-8")
+        self.assertIn("--pending-retries", r.stdout)
+        self.assertIn("--pending-wait", r.stdout)
+
+
+class TestG69QcDocs(unittest.TestCase):
+    def test_reviewers_treat_media_pending_as_re_export_not_a_verdict(self):
+        for rel in ("agents/qc-reviewer.md", "agents/frame-inspector.md", "skills/qc-craft/SKILL.md"):
+            text = (SK / rel).read_text(encoding="utf-8")
+            self.assertIn("Media pending", text, rel)
+            self.assertIn("re-export", text, rel)
+        for rel in ("agents/qc-reviewer.md", "skills/qc-craft/SKILL.md"):         # the ones that read the JSON
+            self.assertIn("media_pending", (SK / rel).read_text(encoding="utf-8"), rel)
+
+
 if __name__ == "__main__":
     unittest.main()

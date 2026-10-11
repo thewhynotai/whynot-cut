@@ -15,6 +15,12 @@ reel qc          --root "<CLIENT>" --video-id <ID>    # structural checks + evid
 1. Build the expectation list from `01_analysis/timeline-spec.json`. For each event: id, template, timecode, the exact
    expected text (items and lines included), and whether captions should be hidden.
    `ppro-frames` prints the run folder and its `_sheet.jpg`. Use only that folder.
+   **"Media pending" frames:** right after a project opens Premiere may export its placeholder for media that is still
+   loading (a smooth colour field with "Media pending" in nine languages) instead of the picture. `ppro-frames`
+   detects them, waits and re-exports them (`--pending-retries N`, `--pending-wait S`), and lists any that are still
+   the slate under `media_pending` with `ok: false` (they are left out of the sheet and the `frames` count). Such a
+   frame is neither a pass nor a fail: re-export (run `reel ppro-frames` again once Premiere has finished loading),
+   never judge it, and report its rows as unchecked until a clean frame exists.
 2. Fan out `frame-inspector` sub-agents in parallel, 6–8 frames each. Give each its PNG paths with the matching expectation rows.
    Each frame passes only if all of these hold:
    - the text matches word for word, in RTL order (the first word on the right)

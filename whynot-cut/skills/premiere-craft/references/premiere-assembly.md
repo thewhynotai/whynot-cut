@@ -54,6 +54,10 @@ All presets except `flash` add an Opacity fade-out over `fade_out_s` (at most â…
 Exports PNGs of Premiere's own render of the timeline (about 70 % into every event, plus spot times) into a **fresh folder for each
 run**, `08_quality_control/premiere_frames/run-<time>/`, together with a labelled `_sheet.jpg` (timecode + event + template).
 Only judge frames from the run you just made. Older run folders are history: a stale frame once showed a glass card that had already been removed.
+Right after a project opens, Premiere may still be loading media and export its "Media pending" slate instead of the
+picture (4 of 17 frames in a field test). `ppro-frames` detects those frames (`lib/media_pending.py`), waits and exports
+them again (`--pending-retries`, default 3; `--pending-wait`, default 5 s, doubling), and lists any that are still the
+slate under `media_pending` with `ok: false`. They are left out of the sheet: a slate is neither a pass nor a fail.
 
 ## Not scriptable: the editor does these
 - Final mix, licensed music, render or export.

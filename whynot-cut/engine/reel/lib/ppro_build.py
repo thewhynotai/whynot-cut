@@ -271,12 +271,18 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
     return out
 
 
-def export_frames(paths: Paths, times: list[float] | None = None) -> dict:
+def export_frames(paths: Paths, times: list[float] | None = None, *, retries: int = 3, wait_s: float = 5.0) -> dict:
     """Premiere renders frames of its own timeline. Each run gets a FRESH folder (old frames left next to new ones
-    once misled a review) plus a labelled contact sheet `_sheet.jpg` for the reviewer."""
+    once misled a review) plus a labelled contact sheet `_sheet.jpg` for the reviewer.
+
+    Right after a project opens, Premiere may still be loading media and exports its "Media pending" slate instead of
+    the picture (G69). Those frames are detected (media_pending.py), exported again after a wait that grows with each
+    attempt (`wait_s`, 2*`wait_s`, ...) up to `retries` times, and if they are still the slate they are reported under
+    `media_pending` instead of counted as frames: a slate says nothing about the edit."""
     import time as _t
     from .ppro_bridge import submit
     from .common import frame_to_tc
+    from .media_pending import is_media_pending
     spec = read_json(paths.p("01_analysis/timeline-spec.json"))
     labels = {}
     if times is None:
@@ -297,9 +303,40 @@ def export_frames(paths: Paths, times: list[float] | None = None) -> dict:
     od.mkdir(parents=True, exist_ok=True)
     t0 = _t.time()
     prj = paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")
-    r = submit("export_frames", {"sequence_name": f"{paths.video_id}_{project_prefix()}_EDIT", "times": times, "out_dir": str(od),
-                                 "project_path": str(prj) if prj.exists() else None}, timeout=600)
-    frames = sorted(f for f in od.glob("*.png") if not f.name.startswith("._") and f.stat().st_mtime >= t0 - 1)
+
+    def export(ts):
+        return submit("export_frames", {"sequence_name": f"{paths.video_id}_{project_prefix()}_EDIT", "times": ts,
+                                        "out_dir": str(od), "project_path": str(prj) if prj.exists() else None}, timeout=600)
+
+    def pngs():
+        return sorted(f for f in od.glob("*.png") if not f.name.startswith("._") and f.stat().st_mtime >= t0 - 1)
+
+    def ms_of(f):
+        return next((int(tok) for tok in f.stem.split("_") if tok.isdigit()), None)
+    r = export(times)
+    all_frames = pngs()
+    pending = [f for f in all_frames if is_media_pending(f)]
+    ever_pending, attempts, by_ms = {ms_of(f) for f in pending}, 0, {round(t * 1000): t for t in times}
+    while pending and attempts < retries:
+        attempts += 1
+        _t.sleep(wait_s * attempts)                      # media loads in the background: give it longer each time
+        parked = {}
+        for f in pending:                                # the re-export must not depend on overwriting: park the slate
+            try:
+                f.replace(f.with_suffix(".slate"))
+                parked[f] = f.with_suffix(".slate")
+            except OSError:
+                pass
+        export(sorted(by_ms.get(ms_of(f), (ms_of(f) or 0) / 1000) for f in pending))
+        for f, park in parked.items():
+            if f.exists():
+                park.unlink(missing_ok=True)
+            else:                                        # the re-export wrote nothing: the slate is still what we have
+                park.replace(f)
+        pending = [f for f in pending if f.exists() and is_media_pending(f)]
+    all_frames = pngs()
+    frames = [f for f in all_frames if f not in pending]            # a slate is not a frame of the edit
+    media_pending = [{"t": by_ms.get(ms_of(f), (ms_of(f) or 0) / 1000), "file": str(f), "retries": attempts} for f in pending]
     sheet = None
     if frames:
         from PIL import Image, ImageDraw
@@ -321,9 +358,23 @@ def export_frames(paths: Paths, times: list[float] | None = None) -> dict:
     per_frame = ((r.get("response") or {}).get("result") or {}).get("frames") or []
     frame_errors = sorted({f["error"] for f in per_frame if f.get("error")})
     error = None if r.get("ok") else (r.get("response") or r.get("error"))
-    if not error and len(frames) < len(times):
-        error = f"{len(times) - len(frames)} of {len(times)} frames missing" + (f": {frame_errors}" if frame_errors else "")
+    if not error and len(all_frames) < len(times):
+        error = f"{len(times) - len(all_frames)} of {len(times)} frames missing" + (f": {frame_errors}" if frame_errors else "")
+    if media_pending:
+        slate = (f"{len(media_pending)} of {len(times)} frames are Premiere's 'Media pending' slate (the media was still "
+                 f"loading) after {attempts} re-export{'s' if attempts != 1 else ''}")
+        error = f"{error}; {slate}" if error else slate
+    nxt = ("VIEW the sheet (qc-reviewer: fan out frame-inspectors over the PNGs), then the lead records "
+           "`reel verify --record --verdict pass|fail --sheet <sheet> --notes ...`")
+    if media_pending:
+        nxt = (f"{len(media_pending)} frame(s) are Premiere's 'Media pending' slate, listed under media_pending and left "
+               "out of the sheet: a Media pending frame is neither a pass nor a fail. Wait until Premiere has finished "
+               "loading the project's media, run `reel ppro-frames` again, and judge only frames that show the picture. "
+               + nxt)
     return {"bridge": r.get("ok"), "ok": not error, "dir": str(od), "frames": len(frames), "expected": len(times),
-            "sheet": str(sheet) if sheet else None, "error": error,
-            "next": "VIEW the sheet (qc-reviewer: fan out frame-inspectors over the PNGs), then the lead records "
-                    "`reel verify --record --verdict pass|fail --sheet <sheet> --notes ...`"}
+            "sheet": str(sheet) if sheet else None, "error": error, "media_pending": media_pending,
+            "pending_retries": {"attempts": attempts, "wait_s": wait_s,
+                                "recovered": sorted(by_ms.get(m, (m or 0) / 1000) for m in ever_pending
+                                                    if m not in {ms_of(f) for f in pending}),
+                                "still_pending": sorted(m["t"] for m in media_pending)},
+            "next": nxt}

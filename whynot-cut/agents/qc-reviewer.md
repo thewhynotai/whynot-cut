@@ -22,6 +22,14 @@ import fails with ModuleNotFoundError; `-E` alone keeps them. Details: `${CLAUDE
 
 ## How you work
 - Run `reel ppro-frames` and `reel qc`. Build the expectation rows from `timeline-spec.json`.
+- **Media pending.** Right after a project opens, Premiere may still be loading media and export its "Media pending"
+  slate (a smooth colour field with the words in nine languages) instead of the picture. `ppro-frames` detects those
+  frames, re-exports them after a wait (`--pending-retries`, `--pending-wait`) and, if they are still the slate, lists
+  them under `media_pending` (with `ok: false`) and leaves them out of the sheet and the frame count. A Media pending
+  frame is neither a pass nor a fail: never hand it to a frame-inspector, and never report a graphic or caption as
+  verified from it. If `media_pending` is not empty, wait for Premiere to finish loading and run `reel ppro-frames`
+  again; if you see a slate in a frame that is not listed, re-export it the same way. Report the rows it covers as
+  unchecked until a clean frame exists.
 - Spawn `whynot-cut:frame-inspector` sub-agents in parallel, 6–8 frames each, with the matching expectation rows. Then view every frame they mark fail or unsure yourself.
 - Check the audio and cut evidence files and the build read-back checks.
 - Return the verdict table, the owner agent for each failure, and an overall pass/fail recommendation, with the sheet path.

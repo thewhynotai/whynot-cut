@@ -435,7 +435,7 @@ def cmd_ppro_build(a):
 
 def cmd_ppro_frames(a):
     from lib.ppro_build import export_frames
-    out(export_frames(P(a)))
+    out(export_frames(P(a), retries=a.pending_retries, wait_s=a.pending_wait))
 
 
 def cmd_audio_clean(a):
@@ -848,6 +848,11 @@ def main():
             sp.add_argument("--force", action="store_true")
             sp.add_argument("--replace-edited", action="store_true",
                             help="rebuild even though the editor saved changes in Premiere (only with their OK)")
+        if name == "ppro-frames":
+            sp.add_argument("--pending-retries", type=int, default=3,
+                            help="re-exports of frames that came out as Premiere's 'Media pending' slate (0 = only report them)")
+            sp.add_argument("--pending-wait", type=float, default=5.0,
+                            help="seconds to wait before the first re-export (2x before the second, ...)")
         if name == "approve-plan":
             sp.add_argument("--by", required=True, choices=["editor", "delegated"])
             sp.add_argument("--note")
