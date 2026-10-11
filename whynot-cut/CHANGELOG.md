@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.1.0 — 2026-10-11 · Podcast mode
+A finished podcast episode becomes a reels plan, the editor picks, and each pick goes through the normal pipeline —
+plus the episode's publishing package. One plugin: after Gate 0 a reel is an ordinary clip project.
+
+**New for users**
+- `/whynot-cut:podcast` (lead playbook) and `data/Episodes/` (+ optional `<name>.md` episode sheet: host, guest,
+  links, sponsor, topics to avoid). `reel inbox` lists episodes and flags long 16:9 files left in `data/Raw`.
+- `reel episodes`, `episode-prep` (probe, 6 intake frames, time estimate), `episode-transcribe` (whole episode in
+  ~10-minute chunks with checkpoints; resumes after an interruption; VAD; language detected once), `episode-next`.
+- Reels plan: the `episode-analyst` (fans out `moment-scout` per chunk) writes the topic map (= YouTube chapters),
+  speaker turns with seating, and candidates with timecodes, content type, hook, score and risks. `reel reels-plan`
+  validates them against the transcript (evidence near start/end, Arabic-normalised), snaps in/out to sentence
+  boundaries, checks duration/overlap/avoid topics and writes `reels-plan.md`; `reels-preview` renders a quick 9:16
+  preview of each candidate.
+- **Gate 0**: `reel reels-select --pick … --by editor` (subagents blocked by the guard). Each pick becomes
+  `output/projects/<EP>_<RID>/`, a window of the original episode file (shared `00_inputs/source.json` range format)
+  with the sliced transcript, 16 kHz audio, speaker turns and its recipe. Unchanged picks are no-ops; moved windows need
+  `--force`; `--resync` re-slices after episode corrections; a changed episode file is refused.
+- **Per-shot 9:16 reframe** for episode reels: hard cuts plus face-presence runs (catches dissolves to cards), one face
+  → framed on it, two-shots → follow the speaker (turns + seating, 1.5 s minimum hold), no face or unknown speaker →
+  shown whole over the blurred fill; story camera moves compose on top. Verified on a real excerpt.
+- **Content-type recipes** (`recipes.json`: storytelling, drama, success_story, advice, bold_opinion, emotional,
+  comedy): pause thresholds applied by `audio-clean` (explicit > recipe > profile style.json > 250/80), graphics/zoom
+  limits checked by `plan` (with `recipe_note` reasons in edit-plan.md), music mood, SFX palette, copy tone.
+- Licensed music bed: `music.file` (data/Music only) on A06 at the recipe level with a fade-out, mixed into the preview;
+  `reel music --list` with mood tags. `global.remove_pauses.protect` keeps chosen pauses.
+- Templates `stat_card` (a number the speaker says) and `context_card` (one editorial line at the top).
+- **Publish package**: `publish-writer` + `reel publish-check` (YouTube titles/description/chapters/tags/hashtags
+  limits, Instagram/TikTok/Shorts limits from `platform-limits.json`, links only from the episode sheet, quotes only
+  the speaker's words, episode SRT) and `reel publish-thumbnail` (face/sharpness-scored candidates, 1280×720 designs).
+- QC: "Reel starts at its episode in-point", "Reel window inside the episode"; preflight flags variable frame rate.
+
+**Fixed**
+- HarfBuzz text used one FreeType face per font file and set its size only when created, so two sizes of one font in a
+  still (a big value + a label, or a name card's name + lines for a one-weight client) rendered at the wrong size.
+
 ## 2.0.0 — 2026-10-11 · WhyNot Cut (renamed from reel-editor)
 By The Why Not AI (info@thewhynot.ai). One plugin for macOS **and Windows**, from install to "drop your footage here".
 

@@ -12,6 +12,9 @@ Premiere Pro project**:
 - the client's own brand graphics and animated captions, with correct Arabic shaping and right-to-left order
 - **a watchable preview MP4** of the edit before anything is built
 - the Premiere build with exact sequence settings, then evidence-based QC from Premiere's own frames
+- **podcast mode** (2.1): a finished 16:9 episode → a reels plan with timecodes, content type and score → you pick →
+  each reel framed per shot for 9:16 and edited by its content-type recipe → plus the YouTube/Instagram/TikTok copy
+  (titles, description, chapters, tags, captions, hashtags, SRT) and thumbnail designs, checked against platform limits
 
 A human editor finishes, mixes and renders.
 
@@ -36,6 +39,7 @@ Drop files into the client folder that `/whynot-cut:start` (or `reel scaffold`) 
 |---|---|
 | `assets/Logo`, `assets/Fonts`, `assets/Photos`, `assets/Brand` | logo, brand fonts, approved photos, brief + colours (HEX) |
 | `data/Raw` | the raw clips to edit |
+| `data/Episodes` | finished podcast episodes (16:9) to cut into reels, each with an optional `<name>.md` sheet |
 | `data/References` | reference edits you want to look like (optional) |
 | `data/Music`, `data/SFX` | licensed music, your SFX library (optional) |
 
@@ -46,6 +50,7 @@ Then say **"edit the new videos"**. Or use the commands:
 | `/whynot-cut:start` | guided first-time setup |
 | `/whynot-cut:autopilot` | edits every new clip (one combined approval) |
 | `/whynot-cut:edit C0239` | full edit of one clip |
+| `/whynot-cut:podcast EP12` | podcast episode → reels plan → you pick → reels in Premiere + publish package |
 | `/whynot-cut:preview` | watchable MP4 of the planned edit, no Premiere needed |
 | `/whynot-cut:revise "1- … 2- …"` | applies your comments, rebuilds, re-verifies, reports per comment |
 | `/whynot-cut:status` | "is it ready?", with fresh evidence: Verified / Not verified / Needs you |
@@ -57,11 +62,53 @@ Then say **"edit the new videos"**. Or use the commands:
 | `/whynot-cut:help` | cheat sheet |
 | `/whynot-cut:adobe-extras` | After Effects / Photoshop output, only when you ask |
 
+## Podcast mode
+Put the finished episode in `data/Episodes/EP12.mp4` and, ideally, `data/Episodes/EP12.md`:
+```
+---
+show: …
+episode: 12
+host: …
+guest: "Name — role"
+links:
+  - https://…
+sponsor: ""
+avoid: [topics not to cut]
+---
+```
+Say **"make reels from this episode"** (`/whynot-cut:podcast`):
+1. `episode-prep` + `episode-transcribe` (resumable 10-minute chunks), intake check (burned subtitles, layout).
+2. The episode-analyst writes the topic map (= YouTube chapters), speaker turns and **reel candidates** with exact
+   timecodes snapped to sentences, a content type (storytelling, drama, success story, advice, bold opinion, emotional,
+   comedy), a hook, a score and risks; `reels-plan` validates them and `reels-preview` renders a quick preview of each.
+3. **Gate 0: you pick** (`reels-select --by editor`). Each pick becomes a clip project (`EP12_R03`) cut from a window
+   of the original episode file: framed **per shot** for 9:16 (wide shots follow the speaker; cards shown whole),
+   edited by its **content-type recipe** (pauses, zooms, graphics, SFX, licensed music mood, copy tone).
+4. One combined Gate 1, Premiere builds, QC — as for any clip.
+5. The **publish package**: `publish/youtube.md` (titles, description, chapters, tags), `EP12.srt`, per-reel captions
+   for Instagram/TikTok/Shorts and thumbnail designs, checked by `publish-check` (platform limits, links only from the
+   sheet, quotes only the speaker's words). Nothing is uploaded.
+
+| Command | What it does |
+|---|---|
+| `reel episodes` / `reel episode-next --episode EP12` | episodes and what each needs next |
+| `reel episode-prep` · `episode-transcribe` | probe, intake frames, time estimate · chunked Whisper with checkpoints |
+| `reel reels-plan` · `reels-preview` | validate the analyst's plan · preview MP4 per candidate |
+| `reel reels-select --pick R01,R03 --by editor` | Gate 0 (the editor's choice only; subagents are blocked) |
+| `reel publish-check` · `publish-thumbnail --candidates/--render` | check + render the publish package · thumbnails |
+| `reel music --list` | licensed tracks in `data/Music` with mood tags |
+
+Results: `output/episodes/EP12/` (transcript, `01_analysis/reels-plan.md`, `03_candidates/`, `publish/`) and one
+`output/projects/EP12_Rxx/` per reel.
+
 ## Quick start بالعربي
 ١. ثبّت الإضافة من مجلد `whynot-cut-marketplace` ثم اكتب في Claude Code: **`/whynot-cut:start`**.
 ٢. سيتم تجهيز الجهاز وربط Premiere Pro وإنشاء مجلد للعميل خطوة بخطوة.
 ٣. ضع الشعار والخطوط والصور وملف الألوان في `assets/`، والفيديوهات الخام في `data/Raw/`.
 ٤. قل: **"عدّل الفيديوهات الجديدة"** — ستحصل على مشروع Premiere كامل وفيديو معاينة وتقرير جودة.
+٥. **البودكاست:** حط الحلقة الكاملة في `data/Episodes/` (ومعاها ملف `.md` بالضيف واللينكات) وقول **"طلّع ريلز من الحلقة"**:
+توصلك خطة ريلز بالتايم كود ونوع المحتوى (حكاية، دراما، قصة نجاح…) ومعاينة لكل ريل، تختار منها، وكل ريل يتعمل
+مشروع Premiere بإيقاع نوعه، ومعاه العناوين والديسكربشن والشابترز والتاجز والكابشن والثمبنيل.
 لا يتم تعديل ملفاتك الأصلية أبداً؛ كل النتائج في مجلد `output/`.
 
 ## How it works
@@ -71,6 +118,9 @@ the plan or record a verdict. Specialist agents do the stages; some fan out para
 ```
 intake-inspector ─── what was dropped, what's missing (read-only)
 client-researcher ── discover, client DB, reference style            (sub: —)
+episode-analyst ──── podcast: topics, speakers, reels plan           (sub: moment-scout ×N)
+        ▼  Gate 0 (podcast): you pick the reels
+publish-writer ───── podcast: YouTube/social copy, thumbnails, publish-check
 transcript-editor ── Whisper, corrections, words to confirm           (sub: segment-proofreader ×N)
 audio-engineer ───── mic choice, hum/noise cleanup, pause removal + proof
 story-editor ─────── meaning → edit-decisions.json → plan
@@ -86,7 +136,7 @@ setup-doctor ─────── diagnoses machine/Premiere problems (read-onl
 **Guardrails** (hooks, enforced in code for Bash, PowerShell and file edits):
 - `assets/` and `data/` can't be written, moved or deleted. Whole project folders can't be deleted by the agent.
 - After Effects / Photoshop commands need `--extras`.
-- Subagents can't approve plans, record verdicts or change preferences; reviewers are read-only.
+- Subagents can't approve plans, pick reels (Gate 0), record verdicts or change preferences; reviewers are read-only.
 - Adobe preferences (PlayerDebugMode) are never written by Claude: you get the command to run yourself.
 
 ## macOS and Windows

@@ -1,12 +1,33 @@
 {
   "name": "whynot-cut",
   "displayName": "WhyNot Cut",
-  "version": "2.0.0",
-  "description": "Raw footage in, Premiere project out. Why not? AI post-production for vertical talking-head reels (Arabic/English) on macOS and Windows: guided setup, drop-in client folders, Whisper transcript, dialogue cleanup and pause removal, story-driven brand graphics and animated captions, a watchable preview video, a native Adobe Premiere Pro build through a bridge panel, and evidence-based QC. A lead-editor skill coordinates 14 specialist agents; hooks keep client sources read-only.",
-  "author": { "name": "The Why Not AI", "email": "info@thewhynot.ai", "url": "https://thewhynot.ai/" },
+  "version": "2.1.0",
+  "description": "Raw footage in, Premiere project out. Why not? AI post-production for vertical reels (Arabic/English) on macOS and Windows: guided setup, drop-in client folders, Whisper transcript, dialogue cleanup and pause removal, story-driven brand graphics and animated captions, a watchable preview video, a native Adobe Premiere Pro build through a bridge panel, and evidence-based QC. Podcast mode: a finished episode becomes a reels plan with timecodes and content types, the editor picks, each reel is framed per shot and edited by its recipe, plus the YouTube/social publish package. A lead-editor skill coordinates 17 specialist agents; hooks keep client sources read-only.",
+  "author": {
+    "name": "The Why Not AI",
+    "email": "info@thewhynot.ai",
+    "url": "https://thewhynot.ai/"
+  },
   "homepage": "https://thewhynot.ai/",
   "license": "UNLICENSED",
-  "keywords": ["video-editing", "premiere-pro", "adobe", "reels", "arabic", "rtl", "captions", "whisper", "post-production", "windows", "macos"],
+  "keywords": [
+    "video-editing",
+    "premiere-pro",
+    "adobe",
+    "reels",
+    "arabic",
+    "rtl",
+    "captions",
+    "whisper",
+    "post-production",
+    "windows",
+    "macos",
+    "podcast",
+    "youtube",
+    "shorts",
+    "chapters",
+    "thumbnails"
+  ],
   "userConfig": {
     "clients_root": {
       "type": "directory",
