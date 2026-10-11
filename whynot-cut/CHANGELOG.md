@@ -106,8 +106,19 @@
   command names in any case (`RM`) and not-yet-existing paths in any case (`DATA/new`); `git stash` in a client root;
   `cd HKCU:\Software\Adobe; Set-ItemProperty CSXS.11 ...`; deleting or overwriting `<client>/.whynot-client`; role
   rules through wrappers (`timeout 600 reel ...`, `bash .../bin/reel ...`, `py -3 .../cli.py ...`). `git rm --cached`
-  stays allowed. The SessionStart hook points to `reel doctor --fix` in a folder that looks like an unmarked client
-  (assets/, data/ and output/ or START_HERE.md).
+  stays allowed. The SessionStart hook points to `reel doctor --fix` when it opens at the root of a folder that looks
+  like an unmarked client (assets/, data/, output/ and START_HERE.md, output/projects/ or output/discovery/).
+- Guard review round 2: `[IO.File]::` / `[IO.Directory]::` arguments are split bracket-aware and sub-expressions count
+  again (`(Join-Path $PWD 'data/...')`, `(Resolve-Path ...)`, `[IO.Path]::Combine(...)`, `'a' + 'b'`; Copy checks only
+  the destination, WriteAllText only the file); a loop or assigned variable counts only when it starts the path, so
+  `ffmpeg -i "$f" "output/$(basename "$f").wav"` and `"output/${f##*/}.wav"` are allowed again. Also blocked now: cmd
+  `if exist ... CMD`, `for %f in (...) do CMD`, `%CD%`, `cmd /cdel`; `foreach($f in ...)`; `rm -rf {assets,data}`;
+  `Get-ChildItem | Remove-Item -Recurse` and `ls | xargs rm -rf` in a client folder; `Invoke-Expression -Command`,
+  `"..." | iex`, `echo|printf "..." | bash|sh`, `'...' | powershell -Command -`, `iex $s` of a here-string;
+  `export|declare|readonly D=data`, `a=(data assets)`, `$env:X = "data"`, `"da" + "ta"`; `[IO.FileInfo]::new(...)`;
+  `cd -- data`; `bash -e .../bin/reel`; `winpty`, `flock`, `watch`, `parallel CMD ::: ARGS`; deleting
+  `output/client_database` of a client that has no `.whynot-client` (it is that client's only marker). The guard's
+  docstring lists what is still not inspected.
 - Role holes (engine §10): subagents may not run `reel transcript-verify --by editor`; qc-reviewer may not run
   `ref-analyze` (it applies the client style, getting around the `ref-style --apply` block); setup-doctor may not run
   `reel setup`, `model-download`, `gpu-enable`, `ppro-install` or `doctor --fix`.

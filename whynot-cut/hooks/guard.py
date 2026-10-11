@@ -22,9 +22,15 @@ calls, Invoke-Expression), and what they start: `cmd /c|//c` (with its own & && 
 Paths are expanded first: globs (against the real folder), $PWD, $(pwd), $HOME, $env:USERPROFILE, ~, and variables
 assigned from a client source within the same command (`for f in data/Raw/*`, `$f = Get-ChildItem data`,
 `foreach ($f in ...)`, `$_` in a block fed by such a pipeline).
-Limits (a guardrail against mistakes, not a sandbox; it errs on the side of allowing reads): writes made from inside
-an interpreter (`python -c`, a script file, `node -e`), variables set in an earlier tool call, `while read` loops,
-functions and aliases defined on the fly, and folders that hold clients deeper than one level are not inspected.
+Limits (a guardrail against mistakes, not a sandbox; it errs on the side of allowing reads), not inspected:
+  * writes made from inside an interpreter (`python -c`, a script file, `node -e`);
+  * variables set in an earlier tool call or outside the command ($env:X set before; `export` in another call);
+  * arrays and string building beyond the simple forms (`a=(data assets)`, `"da" + "ta"` are caught; `${a[1]}`,
+    `$x = $y + 'ta'`, format strings, `-join` are not);
+  * `while read` loops, functions and aliases defined on the fly, `parallel` beyond `parallel CMD ::: ARGS`;
+  * folders that hold a client deeper than one level (`rm -rf ~/work` when the client is ~/work/clients/X);
+  * a client recognised only by output/client_database (no `.whynot-client`): deleting that folder through a form the
+    guard misses switches its protection off, so run `reel doctor --fix` to write the marker.
 """
 from __future__ import annotations
 
@@ -66,8 +72,10 @@ SHELL_KEYWORDS = {"then", "do", "else", "elif", "if", "while", "until", "!", "{"
 WRAPPERS = {  # prefix commands that run the rest of the line: {name: options that take a value}
     "sudo": {"-u", "-g", "-C", "-D", "-h", "-p", "-U", "-r", "-t"}, "doas": {"-u", "-C"}, "time": {"-f", "-o"},
     "nohup": set(), "command": set(), "builtin": set(), "exec": {"-a"}, "nice": {"-n"}, "ionice": {"-c", "-n", "-p"},
-    "stdbuf": {"-i", "-o", "-e"}, "env": {"-u", "-C", "-S", "--unset", "--chdir"}, "timeout": {"-s", "-k", "--signal",
-                                                                                          "--kill-after"}}
+    "stdbuf": {"-i", "-o", "-e"}, "env": {"-u", "-C", "-S", "--unset", "--chdir"},
+    "timeout": {"-s", "-k", "--signal", "--kill-after"}, "winpty": set(), "watch": {"-n", "--interval"},
+    "flock": {"-w", "--timeout", "-E", "--conflict-exit-code"}}
+LISTERS = {"ls", "dir", "gci", "get-childitem", "find", "fd"}       # list the folder they are given (or the cwd)
 SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}
 PWSH = {"powershell", "pwsh"}
 GIT_MUTATE = {"checkout", "reset", "clean", "rm", "mv", "restore", "stash"}
@@ -78,6 +86,8 @@ PATH_PROPS = {"fullname", "pspath", "path", "literalpath", "directory", "directo
 IS_WIN = os.name == "nt"
 _MSYS = re.compile(r"^/([a-zA-Z])(/|$)")
 TAINT: dict[str, tuple[str, str]] = {}     # variable (lower-case) -> (hit label, a source token) for this command
+VALUES: dict[str, str] = {}                # PowerShell string variables of this command (for `iex $s`)
+CMD_CWD: list[Path] = []                   # working folder of the cmd body being converted
 
 
 def native(s: str) -> str:
@@ -177,18 +187,22 @@ def holds_sources(p: Path) -> str | None:
     return None
 
 
-_VAR = re.compile(r"\$\{?(\w+)\}?((?:\.\w+)*)")
-_PWD = re.compile(r"\$\(\s*(?:pwd|get-location)\s*\)|`pwd`|\$\{PWD\}|\$PWD\b", re.I)
+_VAR = re.compile(r"^%%?(\w+)%?|^\$\{?((?:env:)?\w+)\}?((?:\.\w+)*)", re.I)
+_PWD = re.compile(r"\$\(\s*(?:pwd|get-location)\s*\)|`pwd`|\$\{PWD\}|\$PWD\b|%CD%", re.I)
 _HOME = re.compile(r"\$\{HOME\}|\$HOME\b|\$env:USERPROFILE\b|\$env:HOME\b", re.I)
 
 
 def tainted(tok: str, any_prop: bool = False) -> tuple[str, str] | None:
-    """A variable in tok that was set from a client source in this command ($f, ${f}, $f.FullName; not $f.Name)."""
-    for m in _VAR.finditer(tok):
-        hit = TAINT.get(m.group(1).lower())
-        props = [x for x in m.group(2).lower().split(".") if x]
-        if hit and (any_prop or not props or props[-1] in PATH_PROPS):
-            return hit
+    """The variable that STARTS tok, when it was set from a client source in this command: $f, "$f", ${f}, $f/x,
+    ${F%/}, $f.FullName, %f (cmd). Not "output/${f##*/}.wav" or "output/$(basename "$f")" (the path is output's),
+    not $f.Name / $f.BaseName (a bare name)."""
+    m = _VAR.match(tok.strip("'\"").lstrip("("))
+    if not m:
+        return None
+    hit = TAINT.get((m.group(1) or m.group(2)).lower())
+    props = [x for x in (m.group(3) or "").lower().split(".") if x]
+    if hit and (any_prop or not props or props[-1] in PATH_PROPS):
+        return hit
     return None
 
 
@@ -198,10 +212,24 @@ def expand(s: str, cwd: Path) -> str:
     return s
 
 
+def brace_expand(s: str) -> list[str]:
+    """Bash brace expansion: {assets,data} -> assets data, dat{a,} -> data dat (not ${var})."""
+    m = re.search(r"(?<!\$)\{([^{}]*,[^{}]*)\}", s)
+    if not m:
+        return [s]
+    out = []
+    for part in m.group(1).split(","):
+        out += brace_expand(s[:m.start()] + part + s[m.end():])
+    return out[:64]
+
+
 def paths_of(tok: str, cwd: Path) -> list[Path]:
-    """The paths a shell word names: quotes stripped, $PWD/~ expanded, `key=value` -> value, globs matched against the
-    folder (plus the pattern itself when nothing matches)."""
-    s = native(expand(tok.strip("'\""), cwd))
+    """The paths a shell word names: quotes stripped, $PWD/%CD%/~ expanded, braces expanded, `key=value` -> value,
+    globs matched against the folder (plus the pattern itself when nothing matches)."""
+    words = brace_expand(tok.strip("'\""))
+    if len(words) > 1:
+        return [x for w in words for x in paths_of(w, cwd)]
+    s = native(expand(words[0], cwd))
     if "=" in s and not s.startswith("/") and not re.match(r"^[A-Za-z]:[\\/]", s):   # dd of=..., key=value
         s = s.split("=", 1)[1]
     if not s:
@@ -257,14 +285,48 @@ def first_source(tokens: list[str], cwd: Path) -> tuple[str, str] | None:
     return None
 
 
-def pipe_source(stages: list[tuple[list[str], Path]], cwd: Path) -> tuple[str, str] | None:
-    """A client source named by an earlier stage of the pipeline (a read), or a working directory that is one."""
+def pipe_source(stages: list[tuple[list[str], Path]], cwd: Path, recursive: bool = False) -> tuple[str, str] | None:
+    """A client source named by an earlier stage of the pipeline (a read), or a working directory that is one.
+    recursive=True (the consumer deletes/moves whole trees): also a listed folder that holds a client's sources
+    (`Get-ChildItem | Remove-Item -Recurse`, `ls | xargs rm -rf` in the client folder)."""
     for argv, at in stages:
-        src = first_source(argv[1:] if not argv[0].startswith("$") else argv, at)
-        if src:
-            return src
+        args = argv[1:] if not argv[0].startswith("$") else argv
+        for a in args:
+            hit = protected(a, at, writing=False, recursive=recursive)
+            if hit:
+                return hit, a
+        if recursive and norm_exe(argv[0]) in LISTERS and not [a for a in args if not a.startswith("-")]:
+            hit = holds_sources(at)
+            if hit:
+                return hit, "."
     hit = hit_of(cwd)
     return (hit, ".") if hit else None
+
+
+def piped_text(prev: list[str]) -> str | None:
+    """The text an `echo|printf|Write-Output ... |` stage (or a bare PowerShell string) sends down the pipe."""
+    e = norm_exe(prev[0])
+    if e in ("echo", "printf", "write-output", "write-host", "echo.", "cat") and len(prev) > 1:
+        return " ".join(a for a in prev[1:] if not a.startswith("-"))
+    if len(prev) == 1 and " " in prev[0]:
+        return prev[0]
+    return None
+
+
+def stdin_shell(argv: list[str]) -> str | None:
+    """'sh'|'ps'|'cmd' when this stage runs the commands it reads on stdin (`| bash`, `| powershell -Command -`,
+    `| iex`, `| cmd`)."""
+    e = norm_exe(argv[0])
+    if e in SHELLS and all(a.startswith("-") and not re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", a) for a in argv[1:]):
+        return "sh"
+    if e in PWSH:
+        body = shell_body(e, argv)
+        return "ps" if body is None or body[1].strip() in ("", "-") else None
+    if e in ("invoke-expression", "iex") and not [a for a in argv[1:] if a.lower() != "-command"]:
+        return "ps"
+    if e == "cmd" and shell_body(e, argv) is None:
+        return "cmd"
+    return None
 
 
 # --------------------------------------------------------------------------- Bash
@@ -327,7 +389,11 @@ def check_text(kind: str, text: str, cwd: Path, agent: str | None):
     elif kind == "ps":
         check_powershell(text, cwd, agent)
     else:
-        check_powershell(cmd_to_ps(text), cwd, agent)
+        CMD_CWD.append(cwd)
+        try:
+            check_powershell(cmd_to_ps(text), cwd, agent)
+        finally:
+            CMD_CWD.pop()
 
 
 def substitutions(cmd: str, backticks: bool = True) -> list[str]:
@@ -373,9 +439,51 @@ DOTNET_WRITE = {
                   "createsymboliclink"}}
 
 
+DOTNET_PATH_ARGS = {"copy": (1,), "move": (0, 1), "replace": (0, 1, 2)}       # else the first argument
+
+
+def split_args(inner: str) -> list[str]:
+    """Top-level comma split of a method's argument list (brackets and quotes respected)."""
+    args, cur, depth, q = [], "", 0, None
+    for c in inner:
+        if q:
+            q = None if c == q else q
+        elif c in "'\"":
+            q = c
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            args.append(cur.strip())
+            cur = ""
+            continue
+        cur += c
+    if cur.strip():
+        args.append(cur.strip())
+    return args
+
+
+def arg_paths(arg: str) -> list[str]:
+    """Paths one .NET argument may name: a literal; for (Join-Path $PWD 'a' 'b') / [IO.Path]::Combine('a','b') / 'a' +
+    'b' the joined literals; every literal on its own too; a $variable (checked for taint)."""
+    lits = [b for _, b in re.findall(r"(['\"])(.*?)\1", arg)]
+    if len(lits) == 1 and re.fullmatch(r"(['\"]).*\1", arg):
+        return lits
+    out = []
+    if lits and re.search(r"join-path|::combine", arg, re.I):
+        out.append("/".join(lits))
+    if lits and "+" in arg:
+        out.append("".join(lits))
+    out += lits
+    if arg.lstrip("(").startswith("$"):
+        out.append(arg.lstrip("("))
+    return out
+
+
 def dotnet_writes(text: str) -> list[list[str]]:
-    """Arguments of every [IO.File]:: / [System.IO.Directory]:: call that writes, moves or deletes (for Copy only
-    the destination): string literals and bare $variables. A call with neither gives ['']."""
+    """Path arguments of every [IO.File]:: / [System.IO.Directory]:: call that writes, moves or deletes (Copy: only the
+    destination; WriteAllText: only the file, not the content). A call naming nothing checkable gives ['']."""
     out = []
     for m in _DOTNET.finditer(text):
         kind, meth = m.group(1).lower(), m.group(2).lower()
@@ -385,10 +493,9 @@ def dotnet_writes(text: str) -> list[list[str]]:
         while j < len(text) and depth:
             depth += {"(": 1, ")": -1}.get(text[j], 0)
             j += 1
-        inner = text[m.end():j - 1]
-        args = [a.strip() for a in re.split(r",(?=(?:[^\"']*[\"'][^\"']*[\"'])*[^\"']*$)", inner)]
-        args = [a.strip("'\"") for a in args]
-        out.append(args[1:2] if meth == "copy" else args or [""])
+        args = split_args(text[m.end():j - 1])
+        paths = [x for i in DOTNET_PATH_ARGS.get(meth, (0,)) if i < len(args) for x in arg_paths(args[i])]
+        out.append(paths or [""])
     return out
 
 
@@ -429,8 +536,8 @@ def strip_prefixes(argv: list[str]) -> list[str]:
             argv = argv[1:]
             while argv and argv[0].startswith("-"):
                 argv = argv[2:] if argv[0] in WRAPPERS[w] else argv[1:]
-            if w == "timeout" and argv:
-                argv = argv[1:]                       # the duration
+            if w in ("timeout", "flock") and argv:
+                argv = argv[1:]                       # the duration / the lock file
             continue
         break
     if argv and argv[0][:1] in ("(", "{") and len(argv[0]) > 1:
@@ -503,19 +610,36 @@ def run_bash(stmts: list[tuple[list[str], bool]], cwd: Path, agent: str | None):
             if src:
                 TAINT[argv[1].lower()] = src
             continue
-        for a in argv:                                                       # f=data/Raw/a.mp4; rm "$f"
-            m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.+)$", a)
+        decl = argv[0] in ("export", "declare", "readonly", "local", "typeset")
+        words = [a for a in argv[1:] if not a.startswith("-")] if decl else argv
+        for k, a in enumerate(words):                                        # f=data/Raw/a.mp4; rm "$f"
+            m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", a)
             if not m:
                 break
-            src = first_source([m.group(2)], cwd)
+            vals = [m.group(2)]
+            if m.group(2).startswith("("):                                    # a=(data assets)
+                vals = [m.group(2)[1:]] + words[k + 1:]
+                vals = [v.rstrip(")") for v in vals[:next((n + 1 for n, v in enumerate(vals) if v.endswith(")")),
+                                                          len(vals))]]
+            src = first_source(vals, cwd)
             if src:
                 TAINT[m.group(1).lower()] = src
+        if decl:
+            continue
         argv = strip_prefixes(argv)
         if not argv:
             continue
         stages = stages if piped else []
+        kind = stdin_shell(argv) if piped and stages else None
+        if kind:                                                             # echo "rm -rf data" | bash
+            text = piped_text(stages[-1][0])
+            if text:
+                check_text(kind, text, cwd, agent)
         if piped and norm_exe(argv[0]) == "xargs":
-            src = pipe_source(stages, cwd)
+            sub = strip_prefixes(xargs_parse(argv)[0])
+            tree = bool(sub) and (norm_exe(sub[0]) == "mv" or norm_exe(sub[0]) == "rm" and
+                                  any(a.startswith("-") and "r" in a.lower() for a in sub[1:]))
+            src = pipe_source(stages, cwd, recursive=tree)
             if src:
                 check_xargs_stage(argv, src, cwd, agent)
         stages.append((argv, cwd))
@@ -532,8 +656,10 @@ def shell_body(exe: str, argv: list[str]) -> tuple[str, str] | None:
     `bash|sh|zsh -c ...` and `bash <<< "..."`: the command the wrapper will run (checked like a command of its own)."""
     if exe == "cmd":
         for i, a in enumerate(argv[1:], 1):
-            if a.lower() in ("/c", "/k", "/r", "//c", "//k", "//r"):
-                rest = argv[i + 1:]          # `cmd /c "reg add ..."`: one quoted argument is the whole command
+            m = re.match(r"^/{1,2}([ckr])(.*)$", a, re.I | re.S)
+            if m:                            # /c, //c (Git Bash), /cdel (no space)
+                rest = ([m.group(2)] if m.group(2) else []) + argv[i + 1:]
+                # `cmd /c "reg add ..."`: one quoted argument is the whole command
                 return "cmd", rest[0] if len(rest) == 1 else " ".join(f'"{t}"' if re.search(r"\s", t) else t
                                                                       for t in rest)
         return None
@@ -567,28 +693,54 @@ def shell_body(exe: str, argv: list[str]) -> tuple[str, str] | None:
     return None
 
 
+_CMD_IF = re.compile(r"^if\s+(?:/i\s+)?(?:not\s+)?(?:(?:exist|defined|errorlevel)\s+(?:\"[^\"]*\"|\S+)|"
+                     r"\S+\s*==\s*\S+|\S+\s+(?:equ|neq|lss|leq|gtr|geq)\s+\S+)\s+(.*)$", re.I | re.S)
+_CMD_FOR = re.compile(r"^for\s+(?:/[dlrf]\s+(?:\"[^\"]*\"\s+|(?!%)\S+\s+)?)?%%?(\w)\s+in\s+\((.*?)\)\s+do\s+(.*)$",
+                      re.I | re.S)
+
+
 def cmd_to_ps(body: str) -> str:
-    """cmd.exe syntax -> statements the PowerShell checker reads: & && || -> ;, | stays a pipe, ^ escapes."""
-    out, q, i = [], False, 0
+    """cmd.exe syntax -> statements the PowerShell checker reads: & && || -> ;, | stays a pipe, ^ escapes,
+    `if exist X CMD` / `if A==B CMD` -> CMD, `for %f in (SET) do CMD` -> CMD with %f set from SET, ( ) groups opened."""
+    segs, cur, q, i = [], [], False, 0
     while i < len(body):
         c = body[i]
         if c == '"':
             q = not q
-            out.append(c)
+            cur.append(c)
         elif not q and c == "^" and i + 1 < len(body):
-            out.append(body[i + 1])
+            cur.append(body[i + 1])
             i += 1
-        elif not q and body.startswith(("&&", "||"), i):
-            out.append(" ; ")
-            i += 1
-        elif not q and c == "&":
-            out.append(" ; ")
+        elif not q and (body.startswith(("&&", "||"), i) or c == "&"):
+            segs.append("".join(cur))
+            cur = []
+            i += 1 if body.startswith(("&&", "||"), i) else 0
         elif not q and c == "|":
-            out.append(" | ")
+            cur.append(" | ")
         else:
-            out.append(c)
+            cur.append(c)
         i += 1
-    return "".join(out)
+    segs.append("".join(cur))
+    out = []
+    for seg in segs:
+        seg = seg.strip().strip("()").strip().lstrip("@")
+        while True:
+            m = _CMD_IF.match(seg)
+            if m:
+                seg = m.group(1).strip().strip("()").strip()
+                continue
+            m = _CMD_FOR.match(seg)
+            if m:
+                found = first_source([t.strip('"') for t in m.group(2).split()], Path.cwd() if not CMD_CWD else CMD_CWD[-1])
+                if found:
+                    TAINT[m.group(1).lower()] = found
+                seg = m.group(3).strip().strip("()").strip()
+                continue
+            break
+        if re.match(r"^call\s", seg, re.I):
+            seg = seg[5:]
+        out.append(seg)
+    return " ; ".join(out)
 
 
 def check_git(argv: list[str], cwd: Path):
@@ -637,8 +789,14 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
     if body:                            # the command a wrapper shell runs gets the same checks
         check_text(body[0], body[1], cwd, agent)
         return cwd
-    if exe in SHELLS and len(argv) > 1 and norm_exe(argv[1]) == "reel":     # bash "$CLAUDE_PLUGIN_ROOT/bin/reel" ...
-        argv, exe = argv[1:], "reel"
+    script = next((a for a in argv[1:] if not a.startswith("-")), None) if exe in SHELLS else None
+    if script and norm_exe(script) == "reel":                     # bash [-e] "$CLAUDE_PLUGIN_ROOT/bin/reel" ...
+        argv, exe = argv[argv.index(script):], "reel"
+    if exe == "parallel" and ":::" in argv:                       # parallel rm ::: data/Raw/*
+        i = argv.index(":::")
+        cmd = [a for a in argv[1:i] if not a.startswith("-")]
+        check_argv(cmd + [a for a in argv[i + 1:] if a != ":::"], cwd, agent)
+        return cwd
     if exe == "eval":
         check_bash(" ".join(argv[1:]), cwd, agent)
         return cwd
@@ -648,7 +806,10 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
     if exe == "git":
         check_git(argv, cwd)
     if exe in ("cd", "pushd"):          # later relative paths are relative to the cd target
-        tgt = Path(native(expand(argv[1], cwd))).expanduser() if len(argv) > 1 and argv[1] != "-" else Path.home()
+        rest = [a for a in argv[1:] if a not in ("--", "-P", "-L", "-e", "-@")]
+        if rest and rest[0] == "-":
+            return cwd
+        tgt = Path(native(expand(rest[0], cwd))).expanduser() if rest else Path.home()
         return tgt if tgt.is_absolute() else cwd / tgt
     # redirections anywhere: > target / >> target
     for i, t in enumerate(argv):
@@ -731,6 +892,11 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
             parts = p.parts
             if p.name == "output" and is_client(Path(os.path.abspath(p.parent))):
                 block("deleting a client's whole output/ folder is not allowed — ask the editor to do it.")
+            croot = Path(os.path.abspath(p.parent.parent))
+            if p.name == "client_database" and p.parent.name == "output" and is_client(croot) and \
+                    not (croot / client_marker.MARKER).is_file():
+                block("output/client_database is what marks this client folder (it has no .whynot-client): deleting it "
+                      "would switch off the guard. Run `reel doctor --fix` first, then ask the editor.")
             if len(parts) >= 3 and parts[-2] == "projects" and parts[-3] == "output" and \
                     is_client(Path(os.path.abspath(p.parent.parent.parent))):
                 block(f"deleting the whole project folder {p.name} is not allowed — ask the editor to do it.")
@@ -920,6 +1086,9 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
             argv = argv[1:]
         if not argv:
             continue
+        m = re.match(r"^(foreach|for|while|if|elseif|switch)\((.*)$", argv[0], re.I | re.S)
+        if m:                                                    # foreach($f in ...) without a space
+            argv = [m.group(1), "(" + m.group(2)] + argv[1:]
         stages = stages if piped else []
         low0 = argv[0].lower().lstrip("(")
         if low0 in ("foreach", "for") and len(argv) > 3 and argv[2].lower() == "in":   # foreach ($f in <source>)
@@ -927,12 +1096,22 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
             if src:
                 TAINT[argv[1].lstrip("($").lower()] = src
         if len(argv) > 2 and argv[0].startswith("$") and argv[1] in ("=", "+="):          # $f = Get-ChildItem data
-            src = first_source(argv[2:], cwd)
+            rhs, name = argv[2:], argv[0][1:].strip("{}").lower()
+            cands = rhs + (["".join(t for t in rhs if t != "+")] if "+" in rhs else [])   # "da" + "ta"
+            src = first_source(cands, cwd)
             if src:
-                TAINT[argv[0][1:].strip("{}").lower()] = src
-            argv = argv[2:]
+                TAINT[name] = src
+            VALUES[name] = " ".join(rhs).strip().strip("@").strip()
+            argv = rhs
+        kind = stdin_shell(argv) if piped and stages else None
+        if kind:                                                 # "Remove-Item x" | iex, '...' | powershell -c -
+            text = piped_text(stages[-1][0])
+            if text:
+                check_text(kind, text, cwd, agent)
         if piped and ps_mutates_inputs(argv):
-            src = pipe_source(stages, cwd)
+            tree = argv[0].lower() in PS_TREE - {"remove-item", "rm", "del", "erase", "rd", "rmdir", "ri"} or any(
+                len(a) > 1 and "-recurse".startswith(a.lower()) for a in argv[1:])
+            src = pipe_source(stages, cwd, recursive=tree)
             if src:
                 block(f"`{argv[0]}` would change items piped from the client's source folder ({src[0]}). "
                       f"assets/ and data/ are read-only.")
@@ -944,8 +1123,9 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
                 if hit:
                     block(f"a .NET file call on the client's source folder ({hit}) is not allowed — assets/ and "
                           f"data/ are read-only.")
-        if _PS_METHOD_WRITE.search(text):        # (Get-Item data\x).Delete(), $f.MoveTo(...)
+        if _PS_METHOD_WRITE.search(text):        # (Get-Item data\x).Delete(), $f.MoveTo(...), [IO.FileInfo]::new(x)
             toks = [re.sub(r"\)?\.\w+\s*\(.*$", "", t.lstrip("(")) for t in argv]
+            toks += [x.strip().strip("'\"") for x in re.findall(r"\(([^()]*)\)", text)]
             hit = next((h for h in (tainted(t, any_prop=True) for t in argv) if h), None)
             hit = hit[0] if hit else next((h for h in (protected(t, cwd, writing=False) for t in toks) if h), None)
             if hit:
@@ -966,7 +1146,8 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
         if adobe_pref_change([name] + args, reg_loc):
             block("Adobe preferences (PlayerDebugMode) are the editor's to change. Give them the command to run themselves.")
         if name in ("invoke-expression", "iex"):
-            check_powershell(" ".join(args), cwd, agent)
+            words = [VALUES.get(a[1:].lower(), a) if a.startswith("$") else a for a in args if a.lower() != "-command"]
+            check_powershell(" ".join(words), cwd, agent)
             continue
         if name in PS_CD:
             tgt = next((a for a in args if not a.startswith("-")), None)

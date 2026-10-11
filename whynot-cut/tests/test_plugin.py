@@ -631,7 +631,7 @@ class TestGuardReviewRound1(ClientFixture):
 
     def test_m7_session_context_nudges_unmarked_client(self):
         legacy = Path(self.tmp.name) / "Old Client"
-        for d in ("assets", "data/Raw", "output"):
+        for d in ("assets", "data/Raw", "output/projects"):
             (legacy / d).mkdir(parents=True)
         code, out, _ = hook(CTX, {"cwd": str(legacy)})
         ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
@@ -650,6 +650,100 @@ class TestGuardReviewRound1(ClientFixture):
         self.blocked("PowerShell", ["cd HKCU:\\Software\\Adobe; Set-ItemProperty CSXS.11 PlayerDebugMode 1"])
         self.allowed("PowerShell", ["Get-Content data/Raw/x.srt | Set-Content output/list.txt",
                                     "Get-ChildItem data/Raw | Select-Object Name | Out-File output/list.txt"])
+
+
+class TestGuardReviewRound2(ClientFixture):
+    """T1.5 review round 2: .NET sub-expressions (regression), loop variables inside output/ paths (false positives),
+    and the generalisation gaps the re-review found."""
+
+    def run_tool(self, tool, cmd, agent=None, cwd=None):
+        p = {"tool_name": tool, "tool_input": {"command": cmd}, "cwd": str(cwd or self.root)}
+        if agent:
+            p["agent_type"] = agent
+        return hook(GUARD, p)[0]
+
+    def blocked(self, tool, cmds, cwd=None, agent=None):
+        for c in cmds:
+            self.assertEqual(self.run_tool(tool, c, agent, cwd), 2, c)
+
+    def allowed(self, tool, cmds, cwd=None, agent=None):
+        for c in cmds:
+            self.assertEqual(self.run_tool(tool, c, agent, cwd), 0, c)
+
+    def test_n1_dotnet_sub_expressions(self):
+        self.blocked("PowerShell", [
+            "[IO.File]::Delete((Join-Path $PWD 'data/Raw/C0001.MP4'))",
+            "[IO.File]::Delete((Resolve-Path 'data/Raw/C0001.MP4'))",
+            "[IO.File]::Delete([IO.Path]::Combine('data','Raw','C0001.MP4'))",
+            '[IO.Directory]::Delete((Resolve-Path "data"), $true)',
+            '[IO.File]::WriteAllText((Join-Path (Get-Location) "data\\Raw\\C0001.MP4"), "")',
+            '[IO.File]::Copy("output/x", (Join-Path $PWD "data/Raw/C0001.MP4"), $true)',
+            '[IO.File]::Delete("data/Raw/" + "C0001.MP4")', "[IO.File]::Delete( 'data/Raw/C0001.MP4' )"])
+        self.blocked("Bash", ['''powershell -c "[IO.File]::Delete((Join-Path $PWD 'data/Raw/C0001.MP4'))"'''])
+        self.allowed("PowerShell", [
+            '[IO.File]::Copy((Join-Path $PWD "data/Raw/C0001.MP4"), "output/a.mp4", $true)',
+            '[IO.File]::WriteAllText("output/list.txt", (Get-ChildItem data/Raw | Out-String))'])
+
+    def test_n2_loop_variables_inside_output_paths(self):
+        self.allowed("Bash", [
+            'for f in data/Raw/*.MP4; do ffmpeg -i "$f" "output/$(basename "$f" .MP4).wav"; done',
+            'for f in data/Raw/*.MP4; do ffmpeg -i "$f" "output/${f##*/}.wav"; done',
+            'for f in data/Raw/*.MP4; do cp "$f" "output/$(basename "$f")"; done',
+            'for f in data/Raw/*.MP4; do rm -f "output/$(basename "$f").wav"; done',
+            'f=data/Raw/C0001.MP4; ffmpeg -i "$f" -y "output/${f##*/}.wav"'])
+        self.blocked("Bash", ['for f in data/Raw/*; do rm "$f"; done', 'F=data && rm -rf "${F%/}"',
+                              'for f in data/Raw/*; do mv "$f" "$f.bak"; done', 'f="$PWD/data"; rm -rf "$f"'])
+
+    def test_cmd_gaps(self):
+        self.blocked("PowerShell", ['cmd /c "if exist data del /q data\\Raw\\*"',
+                                    'cmd /c "if not exist output\\x del /q data\\Raw\\C0001.MP4"',
+                                    'cmd /c "for %f in (data\\Raw\\*) do del %f"',
+                                    'cmd /c del %CD%\\data\\Raw\\C0001.MP4'])
+        self.blocked("Bash", ["cmd /cdel data\\\\Raw\\\\C0001.MP4", 'cmd //cdel "data\\Raw\\C0001.MP4"'])
+        self.allowed("PowerShell", ['cmd /c "if exist data dir data"', 'cmd /c "for %f in (data\\Raw\\*) do echo %f"',
+                                    'cmd /c "for %f in (output\\*.tmp) do del %f"'])
+
+    def test_powershell_gaps(self):
+        self.blocked("PowerShell", ["foreach($f in gci data/Raw){ri $f}",
+                                    'Invoke-Expression -Command "Remove-Item data/Raw/C0001.MP4"',
+                                    '"Remove-Item data/Raw/C0001.MP4" | iex',
+                                    "'Remove-Item -Recurse data' | powershell -Command -",
+                                    '[IO.FileInfo]::new("data/Raw/C0001.MP4").Delete()',
+                                    "Get-ChildItem | Remove-Item -Recurse -Force", "gci . | ri -r -fo",
+                                    '$env:X = "data"; Remove-Item -Recurse $env:X', '$d = "da" + "ta"; Remove-Item -Recurse $d',
+                                    "$s = @'\nRemove-Item -Recurse data\n'@; iex $s"])
+        self.allowed("PowerShell", ["Get-ChildItem output | Remove-Item -Recurse -Force", "gci | Select-Object Name",
+                                    '"Get-ChildItem data" | iex'])
+
+    def test_bash_gaps(self):
+        self.blocked("Bash", ["rm -rf {assets,data}", "rm -rf dat{a,}", "cd -- data && rm -rf *", "ls | xargs rm -rf",
+                              'echo "rm -rf data" | bash', "printf 'rm data/Raw/C0001.MP4' | sh",
+                              "export D=data; rm -rf $D", 'declare D=data; rm -rf "$D"', "readonly D=data; rm -rf $D",
+                              'a=(data assets); rm -rf "${a[@]}"', "winpty rm data/Raw/C0001.MP4",
+                              "watch -n1 rm -rf data", "flock /tmp/l rm data/Raw/C0001.MP4",
+                              "parallel rm ::: data/Raw/*"])
+        self.blocked("Bash", ["bash -e /x/bin/reel transcript-verify --by editor"], agent="whynot-cut:transcript-editor")
+        self.allowed("Bash", ["rm -rf {output/a,output/b}", "ls output | xargs rm -rf", 'echo "ls data" | bash',
+                              "export D=output; rm -rf $D/tmp", "cd -- output && rm -rf tmp", "ls | xargs echo"])
+
+    def test_client_database_of_an_unmarked_client(self):
+        legacy = Path(self.tmp.name) / "Legacy"
+        for d in ("assets", "data/Raw", "output/client_database"):
+            (legacy / d).mkdir(parents=True)
+        self.blocked("Bash", ["rm -rf output/client_database"], cwd=legacy)
+        self.allowed("Bash", ["rm -rf output/client_database/tmp"], cwd=legacy)
+
+    def test_m7_nudge_only_at_a_whynot_cut_root(self):
+        legacy = Path(self.tmp.name) / "Old Client"
+        for d in ("assets", "data/Raw", "output/projects/C0001"):
+            (legacy / d).mkdir(parents=True)
+        ctx = json.loads(hook(CTX, {"cwd": str(legacy)})[1])["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("without a marker", ctx)
+        self.assertEqual(hook(CTX, {"cwd": str(legacy / "output")})[1].strip(), "")     # not in a subfolder
+        repo = Path(self.tmp.name) / "ml-repo"                                          # generic data-science layout
+        for d in ("assets", "data", "output"):
+            (repo / d).mkdir(parents=True)
+        self.assertEqual(hook(CTX, {"cwd": str(repo)})[1].strip(), "")
 
 
 class TestProfiles(ClientFixture):
