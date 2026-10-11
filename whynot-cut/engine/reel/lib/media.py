@@ -129,14 +129,30 @@ def analyze_shots(path: Path, duration_s: float, fps: float = 2.0, threshold: fl
         p.wait()
     ref = [r["hist"] for r in rows if r["face"]]
     if not ref:
-        return {"samples": len(rows), "cutaways_ms": [], "note": "no face found anywhere: cutaway detection skipped"}
+        return {"samples": len(rows), "cutaways_ms": [], "other_people_ms": [],
+                "note": "no face found anywhere: cutaway detection skipped"}
     mean = [sum(c) / len(ref) for c in zip(*ref)]
+    # a face is not enough: a two-person show cuts to the HOST (measured on a real episode: speaker 0.87-0.93, host
+    # 0.65-0.67 with a face, graphic card 0.18-0.38). The speaker is whoever looks like the bulk of the face frames:
+    # threshold = their median - 0.12 (never under `threshold`), and a second pass rebuilds the reference from them only
+    sims = sorted(_similarity(r["hist"], mean) for r in rows if r["face"])
+    thr = max(threshold, sims[len(sims) // 2] - 0.12)
+    ref2 = [r["hist"] for r in rows if r["face"] and _similarity(r["hist"], mean) >= thr]
+    if ref2:
+        mean = [sum(c) / len(ref2) for c in zip(*ref2)]
+        sims = sorted(_similarity(h, mean) for h in ref2)
+        thr = max(threshold, sims[len(sims) // 2] - 0.12)
     for r in rows:
         r["sim"] = round(_similarity(r.pop("hist"), mean), 3)
-        r["speaker"] = r["face"] or r["sim"] >= threshold
+        r["speaker"] = r["sim"] >= thr
     cut = cutaway_ranges([r["speaker"] for r in rows], fps, duration_s)
-    return {"samples": len(rows), "fps": fps, "threshold": threshold, "cutaways_ms": cut,
-            "speaker_similarity_median": sorted(r["sim"] for r in rows if r["face"])[len(ref) // 2]}
+    other = []
+    for a, b in cut:   # mostly faces inside = another person on camera (host, guest), else a card / B-roll
+        inside = [r for r in rows if a <= r["t"] * 1000 < b]
+        if inside and sum(r["face"] for r in inside) >= 0.5 * len(inside):
+            other.append([a, b])
+    return {"samples": len(rows), "fps": fps, "threshold": round(thr, 3), "cutaways_ms": cut, "other_people_ms": other,
+            "speaker_similarity_median": round(sims[len(sims) // 2], 3) if sims else None}
 
 
 def auto_reframe(path: Path, v: dict, duration_s: float, sw: int, sh: int, samples: int = 9, start_s: float = 0.0) -> dict:
@@ -250,12 +266,21 @@ def preflight(paths: Paths, main_footage: list[Path]) -> dict:
                 rf["cutaways_ms"] = shots["cutaways_ms"]
                 rf["cutaway_analysis"] = {k: v for k, v in shots.items() if k != "cutaways_ms"}
                 report.setdefault("reframe", {})[str(f)] = rf
-                if shots["cutaways_ms"]:
+                others = shots.get("other_people_ms") or []
+                rf["other_people_ms"] = others
+                cards = [c for c in shots["cutaways_ms"] if c not in others]
+                if cards:
                     report["issues"].append({"file": str(f), "severity": "warning",
                         "msg": "source contains cutaways without the speaker (graphic cards / B-roll burned into the "
-                               "footage) at " + ", ".join(f"{a / 1000:.1f}-{b / 1000:.1f}s" for a, b in shots["cutaways_ms"])
+                               "footage) at " + ", ".join(f"{a / 1000:.1f}-{b / 1000:.1f}s" for a, b in cards)
                                + ": shown whole over a blurred fill instead of cropped; replace or cover them in the edit if "
                                  "the card's text matters"})
+                if others:
+                    report["issues"].append({"file": str(f), "severity": "warning",
+                        "msg": "another person is on camera (host / second guest) at "
+                               + ", ".join(f"{a / 1000:.1f}-{b / 1000:.1f}s" for a, b in others)
+                               + ": shown whole over a blurred fill. The words there may be THEIRS, not the speaker's: check "
+                                 "who speaks before quoting them on a graphic, or end the range before them"})
                 report["issues"].append({"file": str(f), "severity": "info" if rf.get("faces") else "warning",
                     "msg": f"aspect differs from 9:16: auto-reframe to fill the frame ({rf['base_scale_percent']}%, "
                            f"x offset {rf['offset_x']} px, face found in {rf.get('faces', 0)}/{rf.get('samples', 0)} "

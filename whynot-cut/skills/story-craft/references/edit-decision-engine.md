@@ -24,8 +24,10 @@ no drift); don't hand-compute. Times are on the transcript's clock (0 = the reel
     "base_scale_percent": "auto",
     "caption_style": "keywords | highlight_all",
     "captions_hidden_during": ["broll_card", "logo_outro"],
-    "remove_pauses": {"min_pause_ms": 250, "pad_ms": 80, "mask_scales": [1.0, 1.06]},
+    "remove_pauses": {"min_pause_ms": 250, "pad_ms": 80, "mask_scales": [1.0, 1.06],
+                      "protect": [["00:00:02.400", "00:00:33.160"]]},
     "cut_words": [{"word_ids": [52], "reason": "filler «يعني»"}],
+    "framing": "9:16 | 4:5",
     "native_caption_track": false,
     "photoshop_jobs": [
       {"id": "PS_COVER", "image": "assets/Photos/4.jpg", "headline": "<the speaker's words>", "subline": "<exact approved name>",
@@ -87,6 +89,9 @@ The compiler splits V01 at every camera change; timeline time always equals sour
 ## Global switches
 - `remove_pauses`: needs `reel audio-clean` first (writes `06_audio/dialogue/pauses.json`). Decisions stay in SOURCE time;
   the compiler remaps every graphic/caption/SFX and alternates the zoom at cuts (`mask_scales`). Camera decisions win.
+  `protect` (source-time ranges) keeps the pauses inside them, e.g. a joke's comedic timing.
+- `framing`: "9:16" (default, the picture fills the frame) or "4:5" (the speaker in a 1080×1350 window over a blurred
+  fill; punch-ins and jump-cut zooms stay inside the window; `framing_window_y` moves it). Follow the client's plan.
 - `native_caption_track`: false = captions are animated graphics (reference style) + `subtitles-seq.srt` CC sidecar;
   true = also add Premiere's native caption track (would show twice if both are visible).
 - Copy the client's standing choices from the profile's `style.json` (via `reel profile`) — don't re-decide them per video.

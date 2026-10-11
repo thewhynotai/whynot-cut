@@ -202,15 +202,69 @@ CUDA_LIBS = {"windows": ["cublas64_12.dll", "cublasLt64_12.dll"], "linux": ["lib
 CUDA_PIP = {"windows": ["nvidia-cublas-cu12"], "linux": ["nvidia-cublas-cu12", "nvidia-cudnn-cu12==9.*"]}
 
 
+def cuda_home_bin() -> Path:
+    """cuBLAS installed by `reel gpu-enable` from NVIDIA's redistributable (Windows): <engine home>/cuda/bin."""
+    return engine_home() / "cuda" / "bin"
+
+
 def cuda_lib_dirs() -> list:
-    """Folders of NVIDIA's pip wheels (nvidia-cublas-cu12 ...) in this interpreter's site-packages."""
+    """Folders with CUDA libraries for CTranslate2: the engine's own cuda/bin (NVIDIA redist), then NVIDIA's pip wheels
+    (nvidia-cublas-cu12 ...) in this interpreter's site-packages."""
     sub = "bin" if IS_WIN else "lib"
-    out = []
+    out = [cuda_home_bin()] if cuda_home_bin().is_dir() else []
     for sp in sys.path:
         root = Path(sp) / "nvidia"
         if root.is_dir():
             out += [d / sub for d in sorted(root.iterdir()) if (d / sub).is_dir()]
     return out
+
+
+CUDA_REDIST = "https://developer.download.nvidia.com/compute/cuda/redist/"
+CUDA_REDIST_MANIFEST = "redistrib_12.9.1.json"   # cuBLAS 12.x: what CTranslate2 4.x for CUDA 12 loads
+
+
+def install_cuda_redist(log=print) -> dict:
+    """Windows: cuBLAS 12 from NVIDIA's official redistributable (developer.download.nvidia.com), checked against the
+    sha256 in NVIDIA's manifest; only cublas64_12.dll + cublasLt64_12.dll are kept, in <engine home>/cuda/bin.
+    Measured on a real install: 2.4 MB/s from NVIDIA's CDN vs 40 KB/s for the same library from PyPI."""
+    import hashlib
+    import json
+    import shutil
+    import urllib.request
+    import zipfile
+    if not IS_WIN:
+        raise RuntimeError("the NVIDIA redistributable path is for Windows; Linux uses the pip wheels")
+    with urllib.request.urlopen(CUDA_REDIST + CUDA_REDIST_MANIFEST, timeout=60) as r:
+        entry = json.load(r)["libcublas"]["windows-x86_64"]
+    dest = cuda_home_bin()
+    dest.mkdir(parents=True, exist_ok=True)
+    part = dest.parent / (Path(entry["relative_path"]).name + ".part")
+    h = hashlib.sha256()
+    log(f"downloading {entry['relative_path']} ({int(entry['size']) // (1 << 20)} MB) from NVIDIA")
+    with urllib.request.urlopen(CUDA_REDIST + entry["relative_path"], timeout=120) as r, open(part, "wb") as f:
+        while True:
+            b = r.read(1 << 20)
+            if not b:
+                break
+            f.write(b)
+            h.update(b)
+    if h.hexdigest() != entry["sha256"]:
+        part.unlink(missing_ok=True)
+        raise RuntimeError("cuBLAS download failed its sha256 check; nothing was installed")
+    wanted = {"cublas64_12.dll", "cublaslt64_12.dll"}
+    got = []
+    with zipfile.ZipFile(part) as z:
+        for m in z.infolist():
+            name = Path(m.filename).name
+            if name.lower() in wanted:
+                with z.open(m) as src, open(dest / name, "wb") as out:
+                    shutil.copyfileobj(src, out)
+                got.append(name)
+    part.unlink(missing_ok=True)
+    if {g.lower() for g in got} != wanted:
+        raise RuntimeError(f"cuBLAS archive did not contain {sorted(wanted)} (found {got})")
+    return {"source": CUDA_REDIST + entry["relative_path"], "version": entry.get("version"), "sha256": entry["sha256"],
+            "installed": [str(dest / g) for g in got]}
 
 
 def enable_cuda_libs() -> list:

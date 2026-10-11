@@ -29,8 +29,13 @@ reel ref-analyze --root "<CLIENT>" --video-id <ID> # reference cuts, contact she
   - `sequence-settings.json`: the frame rate of the client's delivered reels (probe a reference video), e.g.
     `{"general": {"timebase": 30, "ntsc": true}}` for 29.97 fps
   - `graphics-templates.json`: positions and colour roles measured from the reference reels (keep top graphics under
-    the 250 px safe line even when a reference places them higher; `highlight_caption.box_all` for captions on a
-    translucent box, as many Arabic channels use)
+    the 250 px safe line even when a reference places them higher). `highlight_caption`: `box_all` (captions on a
+    translucent box, as many Arabic channels use), `strip_punctuation` (e.g. "،,.;؛:" when the client wants no commas
+    in burned captions), `lead_in_ms` (e.g. 200: a line appears just before the words), `size`
+  - `style.json`, beyond pacing and music: `reframe_sharpen` {amount, grain_percent} when the client sharpens the
+    upscaled 9:16 crop; `framing` "9:16" or "4:5" (the speaker in a 1080×1350 window over a blurred fill);
+    `export` {name pattern with {episode} {video_id} {name} {version}, video, audio, folder} from the client's
+    delivery spec, which the handoff turns into the exact file name
   - `brand.json`: only if the client supplied HEX codes the extraction missed
 - Every statement cites a source file. Missing facts stay "unavailable". A missing font is reported, never substituted.
   Brand files outrank references, and references outrank generic templates.

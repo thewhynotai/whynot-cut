@@ -51,6 +51,16 @@ People wrote down this speech before you: use them as evidence for corrections (
 - Re-transcribing (a new range, a new model) renumbers words: `transcript-correct` re-anchors each correction to the
   nearest word that still reads `from`, and skips one the new transcript already gets right.
 
+## Before transcribing a reel from a plan
+Put the names and special terms of THIS video in `00_inputs/vocabulary.txt` (one per line, or comma-separated): the
+people, places and words the client's plan mentions for it. They join the client-wide hint for this video only, and the
+review checks them closely. Client-wide names (the speaker, the show) stay in the profile's `transcription.json`.
+
+## Hallucinations
+Whisper invents end-screen phrases on silence or music («اشتركوا في القناة», "Thanks for watching"). A segment that
+matches one and cannot be speech (no-speech probability ≥ 0.5, or more than 6 words a second) is dropped and listed in
+the review under "Dropped Whisper hallucinations". If the speaker really said it, add it back from the review.
+
 ## Cues and RTL
 - Text is stored in logical (spoken) order. Never pre-reverse it.
 - Captions: at most 2 lines, about 18–32 characters per line, and no cue longer than 5.5 s. Cues break on segment boundaries, and a single orphan word is merged into its neighbour.

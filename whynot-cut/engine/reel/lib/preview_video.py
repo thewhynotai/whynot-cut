@@ -241,14 +241,23 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
             oy = (boy + (seg.get("offset_y") or 0.0)) * k
             x0, x1 = cw_ / 2 - (W / 2 + ox) / sc, cw_ / 2 + (W / 2 - ox) / sc
             y0, y1 = ch_ / 2 - (H / 2 + oy) / sc, ch_ / 2 + (H / 2 - oy) / sc
-            if seg.get("decision_id") == "AUTO_CUTAWAY":
-                # source cutaway: the whole card over a blurred cover copy of itself (same as the Premiere build)
+            win = seg.get("window") if seg.get("decision_id") != "AUTO_CUTAWAY" else None
+            if seg.get("decision_id") == "AUTO_CUTAWAY" or win:
+                # source cutaway: the whole card over a blurred cover copy of itself; 4:5 framing: the speaker cropped
+                # to the window over the same blurred fill (same as the Premiere build)
                 bx, by = box * k, boy * k
                 bg = cur.crop((round(cw_ / 2 - (W / 2 + bx)), round(ch_ / 2 - (H / 2 + by)),
                                round(cw_ / 2 + (W / 2 - bx)), round(ch_ / 2 + (H / 2 - by)))).resize((W, H), Image.BILINEAR)
                 frame = bg.filter(ImageFilter.GaussianBlur(radius=max(4, round(28 * k))))
                 cw2, ch2 = max(2, round(cw_ * sc)), max(2, round(ch_ * sc))
-                frame.paste(cur.resize((cw2, ch2), Image.BILINEAR), (round(W / 2 - cw2 / 2 + ox), round(H / 2 - ch2 / 2 + oy)))
+                px, py = round(W / 2 - cw2 / 2 + ox), round(H / 2 - ch2 / 2 + oy)
+                img = cur.resize((cw2, ch2), Image.BILINEAR)
+                if win:   # only the rows inside the window (the build's Crop)
+                    wy0, wy1 = round(win["y"] * k), round((win["y"] + win["h"]) * k)
+                    t0, t1 = max(0, wy0 - py), min(ch2, wy1 - py)
+                    img = img.crop((0, t0, cw2, max(t0 + 1, t1)))
+                    py += t0
+                frame.paste(img, (px, py))
             else:
                 frame = cur.crop((round(x0), round(y0), round(x1), round(y1))).resize((W, H), Image.BILINEAR)
                 if sharp:   # Premiere Sharpen on V1 (approximation: unsharp mask at preview size)

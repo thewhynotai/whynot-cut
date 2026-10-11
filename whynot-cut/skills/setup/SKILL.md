@@ -27,7 +27,8 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    `reel model-download --model large-v3` in the background. `reel doctor` → `whisper_partial_downloads` lists an
    interrupted download; the same command resumes it. With an NVIDIA
    GPU (Windows/Linux), transcription runs on CUDA when NVIDIA's cuBLAS can load. The doctor names the GPU and the
-   missing library; with the editor's OK, `reel gpu-enable` installs it (about 550 MB, 5-10x faster transcription).
+   missing library; with the editor's OK, `reel gpu-enable` installs it (about 520 MB, sha256-checked, from NVIDIA's own
+   download server on Windows, much faster than PyPI; Whisper then runs about 8× faster).
    Without it everything works on the CPU, just slower.
 5. **Premiere bridge:**
    - Premiere must be restarted after the first install, because CEP finds panels only at launch.

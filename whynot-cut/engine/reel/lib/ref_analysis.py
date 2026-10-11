@@ -107,11 +107,33 @@ def analyze_reference(video: Path, out_dir: Path, duration_s: float) -> dict:
 
 
 def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
+    """Reference edits belong to the CLIENT: each one is analysed once into output/client_database/reference_analysis
+    (cached by path, size and modification time) and every video's 01_analysis gets the summary. Ten reels from one
+    episode no longer re-analyse the same references ten times."""
+    import json
     out_dir = paths.p("01_analysis/reference_analysis")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = paths.output / "client_database" / "reference_analysis"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    idx_f = cache_dir / "cache.json"
+    try:
+        idx = json.loads(idx_f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        idx = {}
     results = []
     for v in refs:
+        st = Path(v).stat()
+        key = f"{Path(v).resolve()}|{st.st_size}|{int(st.st_mtime)}"
+        hit = idx.get(key)
+        if hit and all(Path(s).exists() for s in hit.get("contact_sheets", [])):
+            log(paths, f"Reference {v.name}: cached client analysis")
+            results.append(hit)
+            continue
         log(paths, f"Analyzing reference {v.name}")
-        results.append(analyze_reference(v, out_dir, durations.get(str(v), 0)))
+        r = analyze_reference(v, cache_dir, durations.get(str(v), 0))
+        idx[key] = r
+        results.append(r)
+    write_json(idx_f, idx)
     agg_shots = [s for r in results for s in r["shot_durations_s"]]
     summary = {
         "references": [{k: r[k] for k in ("video", "duration_s", "cut_count", "cuts_per_minute",

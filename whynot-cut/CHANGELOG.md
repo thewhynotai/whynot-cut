@@ -36,6 +36,36 @@ plus the episode's publishing package. One plugin: after Gate 0 a reel is an ord
 - HarfBuzz text used one FreeType face per font file and set its size only when created, so two sizes of one font in a
   still (a big value + a label, or a name card's name + lines for a one-weight client) rendered at the wrong size.
 
+**Field test, round 3: reel R05 and the client's written reels plan, live in Premiere** (G46–G58)
+- *GPU.* G54 `reel gpu-enable` takes cuBLAS 12 from NVIDIA's own redistributable (sha256 from NVIDIA's manifest, only
+  the two DLLs kept in `<engine home>/cuda/bin`); pip stays the fallback. Measured: 2.4 MB/s vs 40 KB/s from PyPI.
+  Whisper large-v3 on the RTX 4060 laptop: 9.7× real time (54 s of speech in 5.6 s); a reel's transcription went from
+  1 min 50 s to 20 s.
+- *The client's plan, followed.*
+  - G46 Light Sharpen (+ optional grain) on the speaker clips when the 9:16 reframe upscales ≥ 150 %
+    (`style.json reframe_sharpen`). Premiere 26's "Noise" is a grain effect whose Intensity defaults to 50; the bridge
+    sets it. Read-back check `v1_sharpened`.
+  - G47 **4:5 framing** (`global.framing: "4:5"`): the speaker in a 1080×1350 window over a blurred fill; story moves
+    and jump-cut zooms stay inside it (FCP7 Crop, verified to import into Premiere); cards stay whole.
+  - G48/G49 Burned captions can drop commas (`strip_punctuation`) and appear 0.2 s before the words (`lead_in_ms`),
+    never over the previous line.
+  - G51 The handoff names the export by the client's pattern (e.g. `EP02_R05_Traffic_Light_Shar_9x16_AR_v01.mp4`)
+    with their codec, loudness and delivery folder (`style.json export`); "no music" clients aren't told to add music.
+- *Transcription.*
+  - G52 Per-video vocabulary `00_inputs/vocabulary.txt` (names of THIS reel, e.g. from the client's plan). The
+    client-wide hint only reports misheard names at ≥ 0.8 similarity (it listed noise on every other reel).
+  - G53 Known Whisper hallucinations («اشتركوا في القناة» at the out-point, no-speech 0.93) are dropped when they
+    cannot be speech; the review lists them.
+- *Who is on camera.* G55 A face is not enough: a cut to the host (similarity 0.65–0.67 vs the speaker's 0.87–0.93)
+  counts as "another person on camera". It is shown whole over the blurred fill, and preflight warns that the words
+  there may be theirs. On R05 the closing line was the host's; the reel now ends on the guest's last words.
+- *Proof that no speech was cut.* G56 Protected pauses are not tested as cuts. G57 The check compares two
+  deterministic Whisper readings (temperature 0) of the uncut and the cut audio, per chunk, instead of the corrected
+  transcript. Coverage on a clean joke went from an "inconclusive" 0.82 to 1.0; on R02 0.90 → 0.945.
+- *Speed.* G58 Reference edits are analysed once per client (cache), reused by every reel (5 s → 0.5 s).
+- R05 (52 s, 9:16, punch-ins on the speeds, the joke's pauses kept, wide shot whole) and R02 rebuilt: QC ok,
+  READY_FOR_HUMAN_EDITOR. 186 tests.
+
 ## 2.0.0 — 2026-10-11 · WhyNot Cut (renamed from reel-editor)
 By The Why Not AI (info@thewhynot.ai). One plugin for macOS **and Windows**, from install to "drop your footage here".
 

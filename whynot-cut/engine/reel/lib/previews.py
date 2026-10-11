@@ -241,7 +241,7 @@ def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, ou
                             line_gap=gap, max_chars=mc, shadow=False)
         # box_all (profile): every caption on a translucent box (readable on light backgrounds); keyword cues keep the
         # brand box
-        plain_box = tp == "highlight_caption" and not p.get("highlight") and t.get("box_all")
+        plain_box = tp == "highlight_caption" and not p.get("highlight") and (t.get("box_all") or p.get("on_fill"))
         alpha = int(255 * t.get("plain_box_alpha", 0.6)) if plain_box else 255
         if plain_box:
             box_c = _role_color(b, t.get("plain_box_role", "ink"))
@@ -498,6 +498,11 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
     res = []
     lead = int(t.get("lead_in_ms") or 0)          # a line appears slightly before the speech (client style)
     prev_end = 0
+    # over a source card's blurred fill the background is bright: those captions get the translucent box even when the
+    # client's captions are plain (white text on a light blur was hard to read in a live check)
+    fps_ = float(spec.get("fps") or 24)
+    fills = [(m["start_frame"] * 1000 / fps_, m["end_frame"] * 1000 / fps_) for m in spec.get("main_segments", [])
+             if m.get("decision_id") == "AUTO_CUTAWAY"]
     for i, c in enumerate(srtlib.read_srt(paths.p(spec["caption_source"]))):
         s, e = c["start_ms"], c["end_ms"]
         if lead:
@@ -514,6 +519,8 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
         if not text:
             continue
         ev = {"template": "highlight_caption", "params": {"text": text, "highlight": is_hl}}
+        if any(s < b_ and a_ < e for a_, b_ in fills):
+            ev["params"]["on_fill"] = True
         # a card (name card, glass card, CTA) overlaps the caption band at the same time: move the caption above the
         # card, or below it when there is no room above (a card at the top of the frame: seen on a real client)
         from .ae_builder import wrap_lines
@@ -529,7 +536,7 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
         render_event(ev, t, b, {}, None, fg, layer="fg")
         item = {"id": f"CAP_{i + 1:03d}", "fg": str(fg), "start_ms": s, "end_ms": e, "highlight": is_hl, "text": text}
         prev_end = e
-        if is_hl or t.get("box_all"):
+        if is_hl or t.get("box_all") or ev["params"].get("on_fill"):
             bar = out_dir / f"CAP_{i + 1:03d}_bar.png"
             render_event(ev, t, b, {}, None, bar, layer="bars")
             item["bar"] = str(bar)

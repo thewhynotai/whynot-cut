@@ -534,12 +534,21 @@ def cmd_gpu_enable(a):
         out({"gpu": before, "installed": [], "note": "no NVIDIA GPU visible to CTranslate2: nothing to install"})
         return
     pkgs = plat.CUDA_PIP["windows" if plat.IS_WIN else "linux"]
-    if before.get("cuda_libs_missing"):
+    how, installed, redist_error = None, [], None
+    if before.get("cuda_libs_missing") and plat.IS_WIN:
+        try:   # NVIDIA's own CDN: much faster than PyPI here, sha256-checked
+            r = plat.install_cuda_redist(log=lambda m: print(m, file=sys.stderr))
+            how, installed = "nvidia-redist", r["installed"]
+        except Exception as e:  # noqa: BLE001
+            redist_error = f"{type(e).__name__}: {e}"
+    if before.get("cuda_libs_missing") and not installed:
         r = subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *pkgs])
         if r.returncode:
-            raise SystemExit(f"pip install {' '.join(pkgs)} failed (exit {r.returncode}); Whisper keeps using the CPU")
+            raise SystemExit(f"pip install {' '.join(pkgs)} failed (exit {r.returncode}); Whisper keeps using the CPU"
+                             + (f" (NVIDIA download: {redist_error})" if redist_error else ""))
+        how, installed = "pip", pkgs
     after = plat.gpu_info()
-    out({"gpu_before": before, "gpu": after, "installed": pkgs if before.get("cuda_libs_missing") else [],
+    out({"gpu_before": before, "gpu": after, "installed": installed, "via": how, "redist_error": redist_error,
          "whisper_device": after.get("whisper_device")})
 
 

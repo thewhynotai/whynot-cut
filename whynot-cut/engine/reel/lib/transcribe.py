@@ -92,6 +92,9 @@ def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
     wav = extract_audio(source_video, out / "dialogue_16k_mono.wav", rng)
     if initial_prompt is None:
         initial_prompt = load_config("transcription.json").get("initial_prompt")
+        vv = video_vocabulary(paths)
+        if vv:   # names / terms of THIS video (e.g. from the client's reels plan), after the client-wide hint
+            initial_prompt = ((initial_prompt or "").rstrip(" .،,") + "، " + "، ".join(vv) + ".").lstrip("، ")
 
     log(paths, f"Loading Whisper model {model_size}")
     t0 = time.time()
@@ -162,9 +165,47 @@ def caption_cues(words: list) -> tuple[list, list]:
     return cues, short
 
 
+def video_vocabulary(paths: Paths) -> list:
+    """Names and terms of this one video (00_inputs/vocabulary.txt, one per line or comma-separated), written by the
+    lead from the client's plan before transcribing. Client-wide names stay in the profile's transcription.json."""
+    f = paths.p("00_inputs/vocabulary.txt")
+    if not f.exists():
+        return []
+    return [t.strip() for t in re.split(r"[\n,،;]+", f.read_text(encoding="utf-8")) if t.strip() and not t.startswith("#")]
+
+
+# Phrases Whisper invents on silence, music or noise (end screens of the videos it was trained on)
+HALLUCINATIONS = ["اشتركوا في القناة", "اشتركوا في القناه", "لا تنسوا الاشتراك في القناة", "شكرا على المشاهدة",
+                  "شكرا لكم على المشاهدة", "ترجمة نانسي قنقر", "ترجمة نانسي", "Thanks for watching",
+                  "Thank you for watching", "Subtitles by the Amara.org community", "Please subscribe"]
+
+
+def drop_hallucinations(segs: list, words: list) -> tuple[list, list, list]:
+    """Remove segments that are a known Whisper hallucination AND cannot be speech (no-speech probability >= 0.5 or
+    more than 6 words a second). Seen on a real reel: «اشتركوا في القناة» in 0.32 s at the out-point, no_speech 0.93."""
+    from .plan import norm
+    known = {norm(h) for h in HALLUCINATIONS}
+    drop = []
+    for s in segs:
+        dur = max(1, s["end_ms"] - s["start_ms"]) / 1000
+        n = len(s["text"].split())
+        if norm(s["text"]) in known and (s.get("no_speech_prob", 0) >= 0.5 or n / dur > 6):
+            drop.append(s)
+    if not drop:
+        return segs, words, []
+    gone = {wid for s in drop for wid in s.get("words", [])}
+    return ([s for s in segs if s not in drop], [w for w in words if w["id"] not in gone],
+            [{"text": s["text"], "start_ms": s["start_ms"], "end_ms": s["end_ms"],
+              "no_speech_prob": s.get("no_speech_prob")} for s in drop])
+
+
 def finalize(paths: Paths, meta: dict, segs: list, words: list) -> dict:
     out = paths.p("02_transcription")
     cfg = load_config("subtitle-style.json")
+    segs, words, dropped = drop_hallucinations(segs, words)
+    if dropped:
+        meta["dropped_hallucinations"] = (meta.get("dropped_hallucinations") or []) + dropped
+    meta["video_vocabulary"] = video_vocabulary(paths) or meta.get("video_vocabulary")
     meta["scripts"] = _script_mix(" ".join(s["text"] for s in segs))
     write_json(out / "transcript.json", {"meta": meta, "segments": segs})
     write_json(out / "words.json", {"meta": meta, "words": words})
@@ -313,7 +354,13 @@ def subtitle_review(meta: dict, segs: list, words: list, quotes: list | None = N
     low = [w for w in words if w["probability"] < thr]
     latin = [w for w in words if LATIN.search(w["word"])]
     hits = glossary_hits(words, _glossary_terms())
-    misses = vocabulary_misses(words, meta.get("initial_prompt"))
+    # this video's own names at the normal threshold; the client-wide hint (show title, names that may not occur in
+    # this video) only for close matches, or every reel lists noise (seen: «حلمي» vs «حمرى», «نادال» vs «نازل»)
+    vv = meta.get("video_vocabulary") or []
+    misses = vocabulary_misses(words, "، ".join(vv)) if vv else []
+    seen_m = {m["expected"] for m in misses}
+    client_hint = load_config("transcription.json").get("initial_prompt") or ""
+    misses += [m for m in vocabulary_misses(words, client_hint, min_ratio=0.8) if m["expected"] not in seen_m]
     risky = [s for s in segs if s["avg_logprob"] < -0.8 or s["compression_ratio"] > 2.4
              or s["no_speech_prob"] > 0.6]
     L = [f"# Subtitle Review — {Path(meta['source_video']).name}", "",
@@ -325,6 +372,12 @@ def subtitle_review(meta: dict, segs: list, words: list, quotes: list | None = N
          "**Status: MACHINE TRANSCRIPT — requires human verification before captions are final.**", "",
          f"## Low-confidence words (p < {thr}) — {len(low)}", ""]
     L += [f"- `{fmt_ts(w['start_ms'], '.')}` **{w['word']}** (p={w['probability']})" for w in low] or ["- none"]
+    dh = meta.get("dropped_hallucinations") or []
+    if dh:
+        L += ["", f"## Dropped Whisper hallucinations — {len(dh)}", "",
+              "Known phrases Whisper invents on silence/music, at a speed or no-speech level no person speaks at. "
+              "If the speaker really said it, add it back by ear.", ""]
+        L += [f"- `{fmt_ts(h['start_ms'], '.')}` «{h['text']}» (no-speech {h.get('no_speech_prob')})" for h in dh]
     L += ["", f"## Profile vocabulary not heard verbatim — {len(misses)}", "",
           "Names and terms from the profile's spelling hint that Whisper wrote differently. Confidence is often high "
           "on these, so check each by ear; correct only if the speaker said the expected word.", ""]

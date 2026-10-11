@@ -103,6 +103,15 @@ def audio_duration(path: Path) -> float:
             return w.getnframes() / w.getframerate()
 
 
+def crop_filter(left: float = 0.0, right: float = 0.0, top: float = 0.0, bottom: float = 0.0) -> str:
+    """FCP7 Crop (percent of the source frame per edge); Premiere imports it as its Crop effect."""
+    par = "".join(f'<parameter authoringApp="PremierePro"><parameterid>{k}</parameterid><name>{k}</name><valuemin>0</valuemin>'
+                  f"<valuemax>100</valuemax><value>{min(100.0, max(0.0, v)):.4f}</value></parameter>"
+                  for k, v in (("left", left), ("right", right), ("top", top), ("bottom", bottom)))
+    return ("<filter><effect><name>Crop</name><effectid>crop</effectid><effectcategory>motion</effectcategory>"
+            f"<effecttype>motion</effecttype><mediatype>video</mediatype>{par}</effect></filter>")
+
+
 def motion_filter(scale: float, cx: float = 0.0, cy: float = 0.0) -> str:
     return ("<filter><effect><name>Basic Motion</name><effectid>basic</effectid>"
             "<effectcategory>motion</effectcategory><effecttype>motion</effecttype><mediatype>video</mediatype>"
@@ -198,15 +207,25 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
         cx = (seg["offset_x"] + spec.get("base_offset_x", 0.0)) / W
         cy = (seg["offset_y"] + spec.get("base_offset_y", 0.0)) / H
         fe = xb.file_el(main, "video", round(src_dur_s * src_fps), src_fps, v["display_width"], v["display_height"], audio_ch=2)
-        if seg.get("decision_id") == "AUTO_CUTAWAY":
-            # the whole card goes on the cutaway track; V1 keeps a cover-framed copy as the background (the bridge blurs
-            # it in Premiere), like an editor's "fit + blurred fill" for a 16:9 card in a 9:16 reel
+        win = seg.get("window") if seg.get("decision_id") != "AUTO_CUTAWAY" else None
+        if seg.get("decision_id") == "AUTO_CUTAWAY" or win:
+            # the whole card (or, in 4:5 framing, the speaker cropped to the window) goes on its own track; V1 keeps a
+            # cover-framed copy as the background (the bridge blurs it in Premiere): "fit + blurred fill"
             cut_id = xb.clip_id()
-            vcut.append(f'<clipitem id="{cut_id}"><name>{escape(main.name)} [source cutaway, whole]</name><enabled>TRUE</enabled>'
+            crop = ""
+            if win:
+                sc_ = scale / 100
+                oy_ = (seg["offset_y"] + spec.get("base_offset_y", 0.0))
+                dh_ = v["display_height"]
+                top_src = dh_ / 2 + (win["y"] - H / 2 - oy_) / sc_
+                bot_src = dh_ / 2 + (win["y"] + win["h"] - H / 2 - oy_) / sc_
+                crop = crop_filter(top=max(0.0, top_src) / dh_ * 100, bottom=max(0.0, dh_ - bot_src) / dh_ * 100)
+            label = f"speaker, {win.get('mode', '')} window" if win else "source cutaway, whole"
+            vcut.append(f'<clipitem id="{cut_id}"><name>{escape(main.name)} [{label}]</name><enabled>TRUE</enabled>'
                         f"<duration>{src_frames_seq}</duration>{rate(fps)}<start>{s}</start><end>{e}</end>"
                         f"<in>{fin}</in><out>{fout}</out><pproTicksIn>{tin}</pproTicksIn><pproTicksOut>{tout}</pproTicksOut>"
                         f'<alphatype>none</alphatype><file id="{xb.files[str(main)]}"/>'
-                        f"{motion_filter(scale, cx, cy)}</clipitem>")
+                        f"{motion_filter(scale, cx, cy)}{crop}</clipitem>")
             cut_bg.append(len(v1))
             scale = base_scale
             cx, cy = spec.get("base_offset_x", 0.0) / W, spec.get("base_offset_y", 0.0) / H

@@ -309,27 +309,38 @@ def detect_pauses(paths: Paths, min_pause_ms: int = 250, pad_ms: int = 80, margi
 
 
 def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
-    """Evidence that pause removal cut NO speech: build the tightened dialogue, re-transcribe it, and diff
-    the word sequence against the (corrected) original transcript. Missing words => a bad cut."""
+    """Evidence that pause removal cut NO speech. The tightened dialogue is built and read by Whisper in <= 20 s chunks
+    split at the cuts; each chunk's UNCUT source span is read by the same model with the same hint, and the two readings
+    are compared. A word in the uncut reading that is missing from the cut one, next to a cut, is a bad cut.
+    (Comparing with the corrected transcript instead blamed the cuts for every correction, vocabulary spelling and fast
+    colloquial phrase Whisper reads differently: 77-82 % "coverage" on a clean reel.)"""
     import difflib
-    from .plan import norm
-    from .transcribe import whisper_audio, whisper_model
-    pz = read_json(paths.p("06_audio/dialogue/pauses.json"))
-    x = _read_stereo(paths.p("06_audio/dialogue/dialogue_clean.wav"))[:, 0]
-    parts = [x[int(a * SR / 1000):int(b * SR / 1000)] for a, b in pz["keep_ms"]]
+    import re as _re
+    from .plan import norm, to_ms, union_ranges
+    from .transcribe import _glossary_terms, whisper_audio, whisper_model
+    pz = dict(read_json(paths.p("06_audio/dialogue/pauses.json")))
+    # pauses the edit protects (global.remove_pauses.protect, e.g. a joke's timing) are never cut: check only real cuts
+    rp = (read_json(paths.p("01_analysis/edit-decisions.json"), {}) or {}).get("global", {}).get("remove_pauses")
+    prot = [[to_ms(a), to_ms(b)] for a, b in ((rp or {}).get("protect") or [])] if isinstance(rp, dict) else []
+    if prot:
+        pz["keep_ms"] = union_ranges(pz["keep_ms"], prot)
+    clean = paths.p("06_audio/dialogue/dialogue_clean.wav")
+    x = _read_stereo(clean)[:, 0]
+    parts = [x[int(a * SR / 1000):int(b * SR / 1000)].copy() for a, b in pz["keep_ms"]]
     xf = int(0.01 * SR)
     for i in range(1, len(parts)):  # 10 ms fades at each join (what Premiere's cut + default audio looks like)
         parts[i - 1][-xf:] *= np.linspace(1, 0, xf)
         parts[i][:xf] *= np.linspace(0, 1, xf)
     tight = np.concatenate(parts)
-    # chunks of the tightened audio, split at cut points (silence), each <= 20 s: one long decode lets Whisper
-    # skip a whole 30 s window (seen on a real clip: 36 s of speech came back as one word), which looks like lost speech
+    # chunks of the tightened audio, split at cut points (silence), each <= 20 s: one long decode lets Whisper skip a
+    # whole 30 s window (seen on a real clip: 36 s of speech came back as one word), which looks like lost speech
     chunks, pos = [], 0
-    for part in parts:
+    for (ka, kb), part in zip(pz["keep_ms"], parts):
         if not chunks or (pos - chunks[-1]["t0"] + len(part) > 20 * SR and pos > chunks[-1]["t0"]):
             if chunks:
                 chunks[-1]["t1"] = pos
-            chunks.append({"t0": pos})
+            chunks.append({"t0": pos, "keeps": []})
+        chunks[-1]["keeps"].append((ka, kb))
         pos += len(part)
     if chunks:
         chunks[-1]["t1"] = pos
@@ -340,61 +351,59 @@ def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
     m, _dev, _ct = whisper_model(model_size)
     tj = read_json(paths.p("02_transcription/transcript.json"))
     lang = tj["meta"].get("language")
-    # vocabulary hint = the transcript's own Latin/technical words + the client's glossary: without it Whisper drops
-    # English loanwords ("Hypertrophic Scar") even from RAW audio (verified), which would be misread as bad cuts.
-    import re as _re
-    from .transcribe import _glossary_terms
+    # the same vocabulary hint for both readings (without it Whisper drops English loanwords, verified on C0238)
     vocab = sorted({w for s in tj["segments"] for w in _re.findall(r"[A-Za-z][A-Za-z ]+", s["text"])})
     prompt = (tj["meta"].get("initial_prompt") or "") + " " + ", ".join(vocab + _glossary_terms()[:40])
-    audio16 = whisper_audio(out)
-    texts = []
+    tight16, base16 = whisper_audio(out), whisper_audio(clean)
+    # deterministic readings (temperature 0, same options): Whisper's default temperature fallback samples randomly on
+    # hard passages, so two readings of IDENTICAL audio differed (seen on a fast colloquial joke) and looked like cuts
+    opts = dict(language=lang, beam_size=5, condition_on_previous_text=False, initial_prompt=prompt, temperature=0.0,
+                word_timestamps=True)
+    missing, asr_variance, changed, texts = [], [], [], []
+    matched = total = n_tight = 0
     for c in chunks:
-        segs, _ = m.transcribe(audio16[c["t0"] // 3:c["t1"] // 3], language=lang, beam_size=5,
-                               condition_on_previous_text=False, initial_prompt=prompt)
-        texts.append(" ".join(s.text for s in segs))
-    new_text = "  ".join(texts)
-    # original tokens WITH their source times, so every difference can be checked against the actual cuts
-    a, at = [], []
-    for w in read_json(paths.p("02_transcription/words.json"))["words"]:
-        for t in norm(w["word"]).split():
-            a.append(t)
-            at.append((w["start_ms"], w["end_ms"]))
-    b = norm(new_text).split()
-    removed, prev = [], 0
-    for ka, kb in pz["keep_ms"]:
-        if ka > prev:
-            removed.append((prev, ka))
-        prev = kb
-    def near_cut(i1, i2, slack=60):
-        s0, e0 = at[i1][0], at[i2 - 1][1]
-        return [(ra, rb) for ra, rb in removed if ra < e0 + slack and rb > s0 - slack]
-    sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
-    missing, asr_variance, changed = [], [], []
-    for op, i1, i2, j1, j2 in sm.get_opcodes():
-        if op == "delete":
-            item = {"words": " ".join(a[i1:i2]), "src_ms": [at[i1][0], at[i2 - 1][1]], "cuts_nearby": near_cut(i1, i2)}
-            # a word can only be lost by a cut that touches it; elsewhere a difference is Whisper reading the
-            # processed audio differently (verified on C0238: such phrases sit >1 s from any cut)
-            (missing if item["cuts_nearby"] else asr_variance).append(item)
-        elif op == "replace":
-            item = {"orig": " ".join(a[i1:i2]), "tight": " ".join(b[j1:j2]), "src_ms": [at[i1][0], at[i2 - 1][1]],
-                    "cuts_nearby": near_cut(i1, i2)}
-            # many words heard as few is lost speech, not a different reading (a 60-word stretch came back as 1 word)
-            if (i2 - i1) - (j2 - j1) >= 3 and (j2 - j1) < 0.5 * (i2 - i1):
-                (missing if item["cuts_nearby"] else asr_variance).append(
-                    {"words": item["orig"], "src_ms": item["src_ms"], "cuts_nearby": item["cuts_nearby"],
-                     "heard_as": item["tight"]})
-            else:
-                changed.append(item)
-    matched = sum(bl.size for bl in sm.get_matching_blocks())
-    coverage = round(matched / max(1, len(a)), 3)
+        s0, s1 = c["keeps"][0][0], c["keeps"][-1][1]
+        bsegs, _ = m.transcribe(base16[int(s0 * 16):int(s1 * 16)], **opts)
+        base = [(t, s0 + w.start * 1000, s0 + w.end * 1000) for sg in bsegs for w in (sg.words or [])
+                for t in norm(w.word).split()]
+        tsegs, _ = m.transcribe(tight16[c["t0"] // 3:c["t1"] // 3], **opts)
+        txt = " ".join(sg.text for sg in tsegs)
+        texts.append(txt)
+        b = norm(txt).split()
+        a = [t for t, _, _ in base]
+        removed = [(c["keeps"][i][1], c["keeps"][i + 1][0]) for i in range(len(c["keeps"]) - 1)]
+
+        def near_cut(i1, i2, slack=60):
+            e0, e1 = base[i1][1], base[i2 - 1][2]
+            return [(ra, rb) for ra, rb in removed if ra < e1 + slack and rb > e0 - slack]
+        sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+        for op, i1, i2, j1, j2 in sm.get_opcodes():
+            if op == "delete":
+                item = {"words": " ".join(a[i1:i2]), "src_ms": [round(base[i1][1]), round(base[i2 - 1][2])],
+                        "cuts_nearby": near_cut(i1, i2)}
+                (missing if item["cuts_nearby"] else asr_variance).append(item)
+            elif op == "replace":
+                item = {"orig": " ".join(a[i1:i2]), "tight": " ".join(b[j1:j2]),
+                        "src_ms": [round(base[i1][1]), round(base[i2 - 1][2])], "cuts_nearby": near_cut(i1, i2)}
+                # many words heard as few is lost speech, not a different reading
+                if (i2 - i1) - (j2 - j1) >= 3 and (j2 - j1) < 0.5 * (i2 - i1):
+                    (missing if item["cuts_nearby"] else asr_variance).append(
+                        {"words": item["orig"], "src_ms": item["src_ms"], "cuts_nearby": item["cuts_nearby"],
+                         "heard_as": item["tight"]})
+                else:
+                    changed.append(item)
+        matched += sum(bl.size for bl in sm.get_matching_blocks())
+        total += len(a)
+        n_tight += len(b)
+    coverage = round(matched / max(1, total), 3)
     ok = not missing and coverage >= 0.85
-    res = {"ok": ok, "coverage": coverage, "ratio": round(sm.ratio(), 3), "orig_words": len(a), "tight_words": len(b),
-           "chunks": len(chunks), "missing": missing, "asr_variance_not_near_cuts": asr_variance, "changed": changed,
-           "rule": "missing = original words absent from (or collapsed in) the re-transcription AND overlapping/adjacent "
-                   "(60 ms) to a removed pause; ok also needs >= 85 % of the original words matched",
-           "tight_transcript": new_text.strip(), "at": now_iso()}
+    res = {"ok": ok, "coverage": coverage, "orig_words": total, "tight_words": n_tight, "chunks": len(chunks),
+           "cuts": sum(len(c["keeps"]) - 1 for c in chunks), "protected_ranges_ms": prot,
+           "missing": missing, "asr_variance_not_near_cuts": asr_variance, "changed": changed,
+           "rule": "per chunk: the same model reads the uncut span and the cut audio; missing = a word of the uncut reading "
+                   "absent from (or collapsed in) the cut reading AND within 60 ms of a cut; ok also needs >= 85 % matched",
+           "tight_transcript": "  ".join(texts).strip(), "at": now_iso()}
     if not ok and not missing:
-        res["verdict"] = "inconclusive: the re-transcription matched too few words to prove the cuts; listen to them"
+        res["verdict"] = "inconclusive: the two readings matched too few words to prove the cuts; listen to them"
     write_json(paths.p("06_audio/dialogue/cut-verification.json"), res)
     return res

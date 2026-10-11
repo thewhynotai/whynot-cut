@@ -875,6 +875,179 @@ class TestClientPlanRules(unittest.TestCase):
         self.assertEqual(ex["file_name"], "EP02_R02_Tennis_Racket_Tasleem_9x16_AR_v01.mp4")
         self.assertEqual(ex["folder"], "EP2/Reels Plan/Exports")
 
+    def test_window_rect(self):
+        from lib.plan import window_rect
+        self.assertIsNone(window_rect("9:16"))
+        self.assertEqual(window_rect("4:5"), {"w": 1080, "h": 1350, "y": 285, "mode": "4:5"})
+        self.assertEqual(window_rect("4x5", 400)["y"], 400)
+
+    def test_four_by_five_framing_chain(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import re as _re
+        import test_pipeline as T
+        from PIL import Image, ImageStat
+        from lib.common import ffmpeg_exe, write_json, read_json
+        from lib.discover import run_discovery
+        from lib.media import preflight
+        from lib.plan import compile_plan
+        from lib.premiere_xml import build_xml
+        from lib.previews import render_all
+        from lib.preview_video import render as preview
+        with tempfile.TemporaryDirectory() as t:
+            root, p, _ = T.make_project(Path(t))
+            clip = root / "data/Raw/CLIP1.mov"            # a 16:9 source, like a finished episode
+            subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=384x216:r=25:d=12",
+                            "-f", "lavfi", "-i", "sine=f=440:r=48000:d=12", "-ac", "2", "-c:v", "libx264",
+                            "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", str(clip)], check=True)
+            run_discovery(p)
+            preflight(p, [clip])
+            tc = T.TestPlanToXML()
+            tc.p = p
+            tc._semantic_stub()
+            ed = tc.decisions()
+            ed["global"].update({"base_scale_percent": "auto", "framing": "4:5"})
+            ed["decisions"][0]["camera"] = {"type": "punch_in", "at": "00:00:01.000", "until": "00:00:03.000",
+                                            "scale_factor": 1.08}
+            write_json(p.p("01_analysis/edit-decisions.json"), ed)
+            res = compile_plan(p)
+            self.assertTrue(res["ok"], res["errors"])
+            spec = read_json(p.p("01_analysis/timeline-spec.json"))
+            self.assertIn("4:5 window", spec["framing"])
+            segs = spec["main_segments"]
+            self.assertTrue(all(s.get("window") for s in segs if s["decision_id"] != "AUTO_CUTAWAY"), segs)   # cards stay whole
+            k45 = 1350 / 216 * 100 / spec["base_scale_percent"]
+            hold = next(s for s in segs if s["decision_id"] == "AUTO_WINDOW")
+            punch = next(s for s in segs if s["decision_id"] == "EDIT_001")
+            self.assertAlmostEqual(hold["scale_factor"], k45, places=3)
+            self.assertAlmostEqual(punch["scale_factor"], k45 * 1.08, places=3)
+            xml = Path(build_xml(p)["xml"]).read_text(encoding="utf-8")
+            self.assertIn("<effectid>crop</effectid>", xml)
+            self.assertIn("window]", xml)
+            # the punch-in piece is cropped back to the 1350 px window: top crop grows with the zoom
+            tops = [float(x) for x in _re.findall(r"<parameterid>top</parameterid><name>top</name><valuemin>0</valuemin>"
+                                                  r"<valuemax>100</valuemax><value>([0-9.]+)</value>", xml)]
+            self.assertTrue(tops and max(tops) > min(tops) >= 0, tops)
+            render_all(p, composite_preview=False)
+            pv = preview(p, width=270)
+            self.assertTrue(pv["ok"], pv)
+            png = Path(t) / "f.png"
+            subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", "5.0", "-i", pv["video"], "-frames:v", "1",
+                            str(png)], check=True)
+            with Image.open(png) as im:   # 270x480 preview: window rows 71..409, blurred bands above and below
+                g = im.convert("L")
+                step = lambda y: max(abs(g.getpixel((x + 1, y)) - g.getpixel((x, y))) for x in range(269))
+                self.assertLess(step(45), step(150) / 2, "band blurred (soft steps), window sharp (hard steps)")
+                self.assertLess(step(440), step(150) / 2)
+
+    def test_hallucination_dropped_only_when_not_speech(self):
+        from lib.transcribe import drop_hallucinations
+        segs = [{"id": 1, "start_ms": 0, "end_ms": 4000, "text": "قال له ما تقلقش", "no_speech_prob": 0.01, "words": [1, 2, 3, 4]},
+                {"id": 2, "start_ms": 58800, "end_ms": 59120, "text": "اشتركوا في القناة", "no_speech_prob": 0.93, "words": [5, 6, 7]},
+                {"id": 3, "start_ms": 60000, "end_ms": 63000, "text": "اشتركوا في القناة", "no_speech_prob": 0.05, "words": [8, 9, 10]}]
+        words = [{"id": i} for i in range(1, 11)]
+        s2, w2, dropped = drop_hallucinations(segs, words)
+        self.assertEqual([s["id"] for s in s2], [1, 3])          # a speaker who really asks to subscribe stays
+        self.assertEqual([w["id"] for w in w2], [1, 2, 3, 4, 8, 9, 10])
+        self.assertEqual(dropped[0]["start_ms"], 58800)
+
+    def test_video_vocabulary_file(self):
+        from lib.common import Paths
+        from lib.transcribe import video_vocabulary
+        with tempfile.TemporaryDirectory() as t:
+            p = Paths(Path(t), "R02")
+            p.ensure_project()
+            p.p("00_inputs/vocabulary.txt").write_text("# names\nنادال\nديوكوفيتش، المانيوال\n", encoding="utf-8")
+            self.assertEqual(video_vocabulary(p), ["نادال", "ديوكوفيتش", "المانيوال"])
+
+    def test_other_person_on_camera_is_not_the_speaker(self):
+        from lib import media, previews
+        from lib.common import ffmpeg_exe
+        with tempfile.TemporaryDirectory() as t:
+            v = Path(t) / "ep.mp4"   # speaker look 0-4 s, another set-up 4-6.5 s, speaker again
+            subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=0xC89A50:s=320x180:r=10:d=4",
+                            "-f", "lavfi", "-i", "color=c=0xE8E2D8:s=320x180:r=10:d=2.5",
+                            "-f", "lavfi", "-i", "color=c=0xC89A50:s=320x180:r=10:d=4",
+                            "-filter_complex", "[0][1][2]concat=n=3:v=1:a=0", "-pix_fmt", "yuv420p", str(v)], check=True)
+            real = previews._face_center
+            previews._face_center = lambda im: (0.5, 0.4)     # a face everywhere: the host has one too
+            try:
+                r = media.analyze_shots(v, 10.5)
+            finally:
+                previews._face_center = real
+        self.assertEqual(len(r["other_people_ms"]), 1, r)
+        a, b = r["other_people_ms"][0]
+        self.assertTrue(3500 <= a <= 4500 and 6000 <= b <= 7000, r)
+        self.assertEqual(r["cutaways_ms"], r["other_people_ms"])
+
+    def test_no_sharpen_when_v1_is_all_blurred_fill(self):
+        from lib.ppro_build import sharpen_settings
+        segs = [{"decision_id": "AUTO_WINDOW", "window": {"h": 1350}}, {"decision_id": "AUTO_CUTAWAY"}]
+        self.assertIsNone(sharpen_settings({"base_scale_percent": 177.8, "main_segments": segs}))
+        self.assertIsNotNone(sharpen_settings({"base_scale_percent": 177.8, "main_segments": segs + [{"decision_id": None}]}))
+
+    def test_engine_cuda_folder_is_searched(self):
+        with tempfile.TemporaryDirectory() as h:
+            old = os.environ.get("WHYNOT_HOME")
+            os.environ["WHYNOT_HOME"] = h
+            try:
+                (Path(h) / "cuda" / "bin").mkdir(parents=True)
+                self.assertEqual(plat.cuda_lib_dirs()[0], Path(h) / "cuda" / "bin")
+            finally:
+                if old is None:
+                    os.environ.pop("WHYNOT_HOME", None)
+                else:
+                    os.environ["WHYNOT_HOME"] = old
+
+    def test_reference_analysis_cached_per_client(self):
+        from lib.common import Paths, ffmpeg_exe
+        from lib.ref_analysis import analyze_all
+        with tempfile.TemporaryDirectory() as t:
+            ref = Path(t) / "ref.mp4"
+            subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=216x384:r=25:d=3",
+                            "-pix_fmt", "yuv420p", str(ref)], check=True)
+            p1, p2 = Paths(Path(t), "R01"), Paths(Path(t), "R02")
+            p1.ensure_project()
+            p2.ensure_project()
+            a = analyze_all(p1, [ref], {str(ref): 3.0})
+            b = analyze_all(p2, [ref], {str(ref): 3.0})
+            log2 = p2.p("logs/pipeline.log").read_text(encoding="utf-8")
+            self.assertIn("cached client analysis", log2)
+            self.assertEqual(a["references"], b["references"])
+            self.assertTrue(p2.p("01_analysis/reference_analysis/reference-measurements.json").exists())
+
+    def test_caption_over_blurred_fill_gets_a_box(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import test_pipeline as T
+        from lib.common import ffmpeg_exe, write_json, read_json
+        from lib.discover import run_discovery
+        from lib.media import preflight
+        from lib.plan import compile_plan
+        from lib.previews import render_captions
+        with tempfile.TemporaryDirectory() as t:
+            root, p, _ = T.make_project(Path(t))
+            clip = root / "data/Raw/CLIP1.mov"
+            subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=384x216:r=25:d=12",
+                            "-f", "lavfi", "-i", "sine=f=440:r=48000:d=12", "-ac", "2", "-c:v", "libx264",
+                            "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", str(clip)], check=True)
+            run_discovery(p)
+            preflight(p, [clip])
+            pre = read_json(p.p("00_inputs/preflight.json"))
+            next(iter(pre["reframe"].values()))["cutaways_ms"] = [[2000, 5000]]     # a card in the source
+            write_json(p.p("00_inputs/preflight.json"), pre)
+            tc = T.TestPlanToXML()
+            tc.p = p
+            tc._semantic_stub()
+            ed = tc.decisions()
+            ed["global"]["base_scale_percent"] = "auto"
+            ed["caption_highlights"] = []
+            write_json(p.p("01_analysis/edit-decisions.json"), ed)
+            self.assertTrue(compile_plan(p)["ok"])
+            caps = render_captions(p, [])
+        over = [c for c in caps if c["start_ms"] < 5000 and c["end_ms"] > 2000]
+        away = [c for c in caps if c["start_ms"] >= 5200]
+        self.assertTrue(over and all(c.get("bar") for c in over), over)      # boxed over the bright blur
+        self.assertTrue(away and not any(c.get("bar") for c in away), away)  # the client's plain style elsewhere
+
     def test_bridge_sets_grain_by_intensity_or_amount(self):
         jsx = (SK / "templates/premiere/nh_ppro_lib.jsx").read_text(encoding="utf-8")
         self.assertIn('NHPP.prop(nc, "Intensity") || NHPP.prop(nc, "Amount of Noise")', jsx)   # Premiere 26 default is 50

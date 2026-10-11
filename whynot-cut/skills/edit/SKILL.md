@@ -31,6 +31,12 @@ reel settings --root "<CLIENT_FOLDER>"                  # preferences in effect 
 - **Frame rate:** the sequence follows the client's `reel-profile/sequence-settings.json` (`general.timebase` +
   `ntsc`; 29.97 = 30 + true). When preflight warns that the source fps differs from the sequence and the client's
   reference reels match the source, set it there (24 fps for a 29.97 client drops frames and judders).
+- **Another person on camera** (preflight: "another person is on camera … the words there may be THEIRS"): a two- or
+  three-person show cut to the host or a wide shot. Those stretches are shown whole over a blurred fill. Check who
+  speaks there before quoting anything on a graphic. When the reel's last words are the host's, end the range before
+  them (`reel range … --out <time> --snap`).
+- **4:5 framing** (`global.framing: "4:5"`, or the client's `style.json`): the speaker in a 1080×1350 window over a
+  blurred fill, for clients who alternate formats within a series. Keep one framing per series unless the plan says otherwise.
 - Profile `null` in `reel next` (`NONE` in the session-start message): run `/whynot-cut:new-client` first. Don't guess brand or style.
 - Read the profile's `notes.md` (`${CLAUDE_PLUGIN_ROOT}/profiles/<id>/notes.md`, then the client's
   `output/client_database/reel-profile/notes.md`). It holds the editor's standing style decisions.
