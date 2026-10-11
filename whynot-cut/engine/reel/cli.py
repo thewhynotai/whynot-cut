@@ -18,8 +18,9 @@ import os
 import sys
 from pathlib import Path
 
-if __name__ == "__main__" and os.environ.get("WHYNOT_DEBUG_ARGV") == "1":   # test hook (tests/test_wrappers.py): what
-    print(json.dumps({"argv": sys.argv[1:], "whynot_home": os.environ.get("WHYNOT_HOME")}))  # the wrapper handed us
+if __name__ == "__main__" and os.environ.get("WHYNOT_TEST_ECHO_ARGV") == "1":   # TEST ONLY (tests/test_wrappers.py):
+    print(json.dumps({"argv": sys.argv[1:], "whynot_home": os.environ.get("WHYNOT_HOME"),    # what the wrapper
+                      "env_keys": sorted(os.environ)}))                                     # handed the engine
     sys.exit(0)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))

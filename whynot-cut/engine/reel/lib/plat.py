@@ -35,11 +35,12 @@ def options_file() -> Path:
 
 def _claude_settings_options() -> dict:
     """This plugin's options as Claude Code stores them: settings.json pluginConfigs["whynot-cut@<marketplace>"]
-    .options (thewhynot-ai first, then any other marketplace name)."""
+    .options — whynot-cut@thewhynot-ai when it has an options object, else the first other whynot-cut@* entry (file
+    order) that has one."""
     cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
     try:
         configs = json.loads((cfg / "settings.json").read_text(encoding="utf-8")).get("pluginConfigs") or {}
-        keys = [PLUGIN_ID] + sorted(k for k in configs if k.startswith("whynot-cut@") and k != PLUGIN_ID)
+        keys = [PLUGIN_ID] + [k for k in configs if k.startswith("whynot-cut@") and k != PLUGIN_ID]
         return next((c["options"] for c in (configs.get(k) for k in keys)
                      if isinstance(c, dict) and isinstance(c.get("options"), dict)), {})
     except (OSError, ValueError, AttributeError):
@@ -47,11 +48,17 @@ def _claude_settings_options() -> dict:
 
 
 def saved_options() -> dict:
-    """{engine_home, clients_root} saved for the plugin: the pointer file when it exists (it is authoritative, an
-    empty value there means "not set"), else Claude Code's settings.json. Values are strings, "" when unset."""
+    """{engine_home, clients_root} saved for the plugin. Values are strings, "" when unset.
+
+    Source: the pointer file when it is valid — a JSON object with an "engine_home" string, "" meaning "not set" —
+    else Claude Code's settings.json (_claude_settings_options). bin/reel and bin/reel.cmd apply the same rules to the
+    engine home (valid pointer = an "engine_home" string plus the closing brace; same entry preference in
+    settings.json). Known differences, all outside what Claude Code and the SessionStart hook write: the wrappers read
+    settings.json line by line, so a hand-minified settings.json is read only here; reel.cmd also reads the pointer
+    line by line (the hook writes one key per line), so a hand-minified pointer counts as invalid there."""
     try:
         d = json.loads(options_file().read_text(encoding="utf-8"))
-        if not isinstance(d, dict):
+        if not isinstance(d, dict) or not isinstance(d.get("engine_home"), str):
             raise ValueError
     except (OSError, ValueError):
         d = _claude_settings_options()

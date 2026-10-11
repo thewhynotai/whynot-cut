@@ -175,9 +175,16 @@
   any block, with delayed expansion off, so `100% Natural`, `!`, `$`, `)` and Arabic reach the engine intact (with
   DelayedExpansion on, `!` used to be eaten). It also reads the legacy `.dr-nahla-editor` home like `bin/reel`. `reel
   setup` builds the engine once: `py -3` when the launcher exists (no second run with `python` after a failure), else
-  the first `python` on PATH that is not a Windows Store stub. Its "engine not installed" hint matches `bin/reel`
-  (`run: reel setup`). `tests/test_wrappers.py` runs both wrappers as subprocesses (`cmd /c`, Git Bash) against a real
-  venv and an env-gated argv echo in `cli.py` (`WHYNOT_DEBUG_ARGV=1`).
+  the first `python` on PATH that is not a Windows Store stub; with neither it refuses with bin/reel's "no Python 3.9+
+  found to build the engine" and the winget command (it used to say "engine not installed — run reel setup", a loop).
+  Its "engine not installed" hint matches `bin/reel` (`run: reel setup`). Its own variables are `WNC_*` and are
+  cleared before the engine starts. `tests/test_wrappers.py` runs both wrappers as subprocesses (`cmd /c`, Git Bash)
+  against a real venv and a test-only argv echo in `cli.py` (`WHYNOT_TEST_ECHO_ARGV=1`).
+- The option readers agree (plat, `bin/reel`, `reel.cmd`): a pointer without an `"engine_home"` string or its closing
+  brace is ignored the same way (settings.json is used instead), and with two `whynot-cut@*` entries in settings.json
+  all prefer `whynot-cut@thewhynot-ai`. `bin/reel` also reads a one-line pointer. The Premiere/After Effects bridge's
+  fallback (no `bridge-config.json`) now also needs a `venv` inside `~/.whynot-cut` or a legacy home, so the folder the
+  pointer creates is not taken for the engine. The pointer's temp file is removed when the final rename fails.
 - One Python phrase in the docs, skills and agents: "Python 3.12 (installed by WhyNot Cut)" replaces "3.10–3.12" advice
   (the engine's own minimum-version checks are unchanged).
 

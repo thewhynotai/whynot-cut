@@ -1,96 +1,154 @@
 @echo off
 rem WhyNot Cut engine wrapper for Windows PowerShell / cmd (bin\ is on PATH while the plugin is enabled).
 rem Arguments reach the engine untouched: %* is expanded once, outside any ( ) block, with delayed expansion off, so
-rem %, !, ^, ), $ and Arabic in arguments survive. Every path is quoted, also inside blocks.
+rem %, !, ^, ), $ and Arabic in arguments survive. Every path is quoted, also inside blocks. The wrapper's own
+rem variables are named WNC_* and cleared before the engine starts, so none of them reaches it.
 setlocal EnableExtensions DisableDelayedExpansion
-set "HERE=%~dp0.."
+set "WNC_HERE=%~dp0.."
 rem Engine home, the same order as plat.engine_home(): env > the saved plugin option (the pointer file the SessionStart
-rem hook writes; without one, Claude Code's settings.json pluginConfigs) > %USERPROFILE%\.whynot-cut with an engine >
-rem a legacy home (.reel-editor, .dr-nahla-editor: still read in 3.x, dropped in 4.0) > %USERPROFILE%\.whynot-cut.
-set "HOME_DIR=%WHYNOT_HOME%"
-if not defined HOME_DIR set "HOME_DIR=%CLAUDE_PLUGIN_OPTION_ENGINE_HOME%"
-if not defined HOME_DIR set "HOME_DIR=%REEL_HOME%"
-if not defined HOME_DIR set "HOME_DIR=%CLAUDE_PLUGIN_OPTION_REEL_HOME%"
-if not defined HOME_DIR call :saved_home
-if not defined HOME_DIR call :default_home
-set "WHYNOT_HOME=%HOME_DIR%"
-set "PY=%HOME_DIR%\venv\Scripts\python.exe"
-if not exist "%PY%" if /I "%~1"=="setup" call :setup
-if not exist "%PY%" goto :blocked
+rem hook writes; without a valid one, Claude Code's settings.json pluginConfigs) > %USERPROFILE%\.whynot-cut with an
+rem engine > a legacy home (.reel-editor, .dr-nahla-editor: still read in 3.x, dropped in 4.0) > .whynot-cut.
+rem The validity and entry rules match plat.saved_options() (its docstring lists the remaining edge cases).
+set "WNC_HOME=%WHYNOT_HOME%"
+if not defined WNC_HOME set "WNC_HOME=%CLAUDE_PLUGIN_OPTION_ENGINE_HOME%"
+if not defined WNC_HOME set "WNC_HOME=%REEL_HOME%"
+if not defined WNC_HOME set "WNC_HOME=%CLAUDE_PLUGIN_OPTION_REEL_HOME%"
+if not defined WNC_HOME call :saved_home
+if not defined WNC_HOME call :default_home
+set "WHYNOT_HOME=%WNC_HOME%"
+set "WNC_PY=%WNC_HOME%\venv\Scripts\python.exe"
+if not exist "%WNC_PY%" if /I "%~1"=="setup" call :setup
+if defined WNC_NOPY goto :no_python
+if not exist "%WNC_PY%" goto :blocked
 set "PYTHONDONTWRITEBYTECODE=1"
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
-"%PY%" "%HERE%\engine\reel\cli.py" %*
+rem the whole line is expanded before it runs, so the WNC_* values are used and already cleared for the engine
+set "WNC_HOME=" & set "WNC_PY=" & set "WNC_HERE=" & "%WNC_PY%" "%WNC_HERE%\engine\reel\cli.py" %*
 exit /b %ERRORLEVEL%
 
 :saved_home
-rem engine_home from the pointer file (authoritative when it exists; "" = not set), else from settings.json
-rem pluginConfigs["whynot-cut@..."].options. Both are JSON with one key per line; read as UTF-8 (chcp 65001) so an
-rem Arabic path survives, then the code page is put back.
-set "PTR=%WHYNOT_OPTIONS_FILE%"
-if not defined PTR set "PTR=%USERPROFILE%\.whynot-cut\plugin-options.json"
-set "CFG=%CLAUDE_CONFIG_DIR%"
-if not defined CFG set "CFG=%USERPROFILE%\.claude"
-set "SRC="
-set "INSIDE="
-if exist "%PTR%" set "INSIDE=1"
-if exist "%PTR%" set "SRC=%PTR%"
-if not defined SRC if exist "%CFG%\settings.json" set "SRC=%CFG%\settings.json"
-if not defined SRC exit /b 0
-set "OLDCP="
-for /f "tokens=2 delims=:." %%c in ('chcp') do set "OLDCP=%%c"
-if defined OLDCP set "OLDCP=%OLDCP: =%"
-if not "%OLDCP%"=="65001" chcp 65001 >nul
-set "VAL="
-for /f usebackq^ tokens^=1-4^ delims^=^" %%a in ("%SRC%") do (
+rem engine_home from the pointer file when it is valid (an "engine_home" string line and the closing brace; "" = not
+rem set), else from settings.json. Both are read as JSON with one key per line, as UTF-8 (chcp 65001, put back after)
+rem so an Arabic path survives.
+set "WNC_PTR=%WHYNOT_OPTIONS_FILE%"
+if not defined WNC_PTR set "WNC_PTR=%USERPROFILE%\.whynot-cut\plugin-options.json"
+set "WNC_CFG=%CLAUDE_CONFIG_DIR%"
+if not defined WNC_CFG set "WNC_CFG=%USERPROFILE%\.claude"
+set "WNC_CFG=%WNC_CFG%\settings.json"
+if not exist "%WNC_PTR%" if not exist "%WNC_CFG%" goto :saved_done
+set "WNC_OLDCP="
+for /f "tokens=2 delims=:." %%c in ('chcp') do set "WNC_OLDCP=%%c"
+if defined WNC_OLDCP set "WNC_OLDCP=%WNC_OLDCP: =%"
+if not "%WNC_OLDCP%"=="65001" chcp 65001 >nul
+call :scan_reset
+if exist "%WNC_PTR%" (
+  set "WNC_SRC=%WNC_PTR%"
+  set "WNC_IN_ID=1"
+  set "WNC_SEEN_ID=1"
+  call :scan
+)
+if defined WNC_GOT_ID if defined WNC_CLOSED goto :saved_pick
+call :scan_reset
+if exist "%WNC_CFG%" (
+  set "WNC_SRC=%WNC_CFG%"
+  call :scan
+)
+:saved_pick
+if defined WNC_OLDCP if not "%WNC_OLDCP%"=="65001" chcp %WNC_OLDCP% >nul
+set "WNC_VAL="
+if defined WNC_SEEN_ID (set "WNC_VAL=%WNC_VAL_ID%") else if defined WNC_SEEN_ANY set "WNC_VAL=%WNC_VAL_ANY%"
+if "%WNC_VAL%"=="," set "WNC_VAL="
+if not defined WNC_VAL goto :saved_done
+set "WNC_VAL=%WNC_VAL:\\=\%"
+if "%WNC_VAL:~0,1%"=="~" set "WNC_VAL=%USERPROFILE%%WNC_VAL:~1%"
+set "WNC_HOME=%WNC_VAL%"
+:saved_done
+call :scan_reset
+set "WNC_PTR=" & set "WNC_CFG=" & set "WNC_OLDCP=" & set "WNC_VAL="
+exit /b 0
+
+:scan
+rem one key per line, split on the double quote: %%b = key, %%c = ": " before a string value or ": {" before an
+rem object, %%d = the string value ("," when it is empty). pluginConfigs entry whynot-cut@thewhynot-ai when it has
+rem "options", else the first other whynot-cut@* entry that has them.
+for /f usebackq^ tokens^=1-4^ delims^=^" %%a in ("%WNC_SRC%") do (
   if "%%c"==": {" (
-    set "KEY=%%b"
+    set "WNC_KEY=%%b"
     call :plugin_entry
   )
-  if defined INSIDE if not defined VAL if "%%b"=="engine_home" set "VAL=%%d"
+  if "%%b"=="engine_home" if "%%c"==": " if defined WNC_IN_ID if defined WNC_SEEN_ID if not defined WNC_GOT_ID (
+    set "WNC_VAL_ID=%%d"
+    set "WNC_GOT_ID=1"
+  )
+  if "%%b"=="engine_home" if "%%c"==": " if defined WNC_IN_ANY if defined WNC_SEEN_ANY if not defined WNC_GOT_ANY (
+    set "WNC_VAL_ANY=%%d"
+    set "WNC_GOT_ANY=1"
+  )
+  if "%%a"=="}" set "WNC_CLOSED=1"
 )
-if defined OLDCP if not "%OLDCP%"=="65001" chcp %OLDCP% >nul
-if not defined VAL exit /b 0
-if "%VAL%"=="," exit /b 0
-set "VAL=%VAL:\\=\%"
-if "%VAL:~0,1%"=="~" set "VAL=%USERPROFILE%%VAL:~1%"
-set "HOME_DIR=%VAL%"
 exit /b 0
 
 :plugin_entry
-rem an object key in settings.json: this plugin's entry (whynot-cut@<marketplace>) and its "options" count, others not
-if "%KEY:~0,11%"=="whynot-cut@" (set "INSIDE=1") else if not "%KEY%"=="options" set "INSIDE="
+if "%WNC_KEY%"=="options" (
+  if defined WNC_IN_ID set "WNC_SEEN_ID=1"
+  if defined WNC_IN_ANY set "WNC_SEEN_ANY=1"
+  exit /b 0
+)
+set "WNC_IN_ID="
+set "WNC_IN_ANY="
+if "%WNC_KEY%"=="whynot-cut@thewhynot-ai" (
+  set "WNC_IN_ID=1"
+  exit /b 0
+)
+if not defined WNC_SEEN_ANY if "%WNC_KEY:~0,11%"=="whynot-cut@" set "WNC_IN_ANY=1"
+exit /b 0
+
+:scan_reset
+for %%v in (SRC KEY IN_ID IN_ANY SEEN_ID SEEN_ANY GOT_ID GOT_ANY VAL_ID VAL_ANY CLOSED) do set "WNC_%%v="
 exit /b 0
 
 :default_home
-set "HOME_DIR=%USERPROFILE%\.whynot-cut"
-if exist "%HOME_DIR%\venv\" exit /b 0
-if exist "%USERPROFILE%\.reel-editor\venv\" (set "HOME_DIR=%USERPROFILE%\.reel-editor" & exit /b 0)
-if exist "%USERPROFILE%\.dr-nahla-editor\venv\" (set "HOME_DIR=%USERPROFILE%\.dr-nahla-editor" & exit /b 0)
+set "WNC_HOME=%USERPROFILE%\.whynot-cut"
+if exist "%WNC_HOME%\venv\" exit /b 0
+if exist "%USERPROFILE%\.reel-editor\venv\" (
+  set "WNC_HOME=%USERPROFILE%\.reel-editor"
+  exit /b 0
+)
+if exist "%USERPROFILE%\.dr-nahla-editor\venv\" set "WNC_HOME=%USERPROFILE%\.dr-nahla-editor"
 exit /b 0
 
 :setup
 rem one build: `py -3` when the launcher exists, else the first `python` on PATH that is not a Windows Store stub
-echo WhyNot Cut: no engine yet - creating it in "%HOME_DIR%" (a few minutes, ~400 MB)... 1>&2
+rem (where's output is filtered by findstr, so no path goes through a second `call` expansion); none: WNC_NOPY
+echo WhyNot Cut: no engine yet - creating it in "%WNC_HOME%" (a few minutes, ~400 MB)... 1>&2
 where py >nul 2>nul
 if not errorlevel 1 goto :setup_py
-set "SYS_PY="
-for /f "delims=" %%p in ('where python 2^>nul') do if not defined SYS_PY call :not_store "%%p"
-if not defined SYS_PY exit /b 1
-"%SYS_PY%" "%HERE%\setup\setup_env.py" --home "%HOME_DIR%" 1>&2
+set "WNC_SYS_PY="
+for /f "delims=" %%p in ('where python 2^>nul ^| findstr /v /i /l /c:"\WindowsApps\\"') do if not defined WNC_SYS_PY set "WNC_SYS_PY=%%p"
+if not defined WNC_SYS_PY (
+  set "WNC_NOPY=1"
+  exit /b 1
+)
+"%WNC_SYS_PY%" "%WNC_HERE%\setup\setup_env.py" --home "%WNC_HOME%" 1>&2
+set "WNC_SYS_PY="
 exit /b
 :setup_py
-py -3 "%HERE%\setup\setup_env.py" --home "%HOME_DIR%" 1>&2
+py -3 "%WNC_HERE%\setup\setup_env.py" --home "%WNC_HOME%" 1>&2
 exit /b
-:not_store
-set "CAND=%~1"
-if /I not "%CAND:\WindowsApps\=%"=="%CAND%" exit /b 0
-set "SYS_PY=%CAND%"
+
+:tag
+rem every blocked message names this plugin and its version, so a wrong `reel` on PATH is recognisable
+set "WNC_TAG=WhyNot Cut"
+for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "(Get-Content -Raw -LiteralPath '%WNC_HERE%\.claude-plugin\plugin.json' | ConvertFrom-Json).version" 2^>nul`) do set "WNC_TAG=WhyNot Cut %%v"
 exit /b 0
 
+:no_python
+call :tag
+echo {"blocked": "%WNC_TAG%: no Python 3.9+ found to build the engine", "how": "Windows: winget install Python.Python.3.12 - then run: reel setup"}
+exit /b 2
+
 :blocked
-rem every blocked message names this plugin and its version, so a wrong `reel` on PATH is recognisable
-set "TAG=WhyNot Cut"
-for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "(Get-Content -Raw -LiteralPath '%HERE%\.claude-plugin\plugin.json' | ConvertFrom-Json).version" 2^>nul`) do set "TAG=WhyNot Cut %%v"
-echo {"blocked": "%TAG%: engine not installed", "how": "run: reel setup   (or /whynot-cut:start)"}
+call :tag
+echo {"blocked": "%WNC_TAG%: engine not installed", "how": "run: reel setup   (or /whynot-cut:start)"}
 exit /b 2

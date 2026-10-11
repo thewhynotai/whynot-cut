@@ -168,9 +168,16 @@ def write_pointer(opts: dict):
     body = {"clients_root": opts["clients_root"], "engine_home": opts["engine_home"],
             "updated": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     tmp = f.with_name(f.name + f".{os.getpid()}.tmp")
-    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(json.dumps(body, ensure_ascii=False, indent=1) + "\n")
-    os.replace(tmp, f)
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(body, ensure_ascii=False, indent=1) + "\n")
+        os.replace(tmp, f)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def main():

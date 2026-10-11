@@ -7,28 +7,47 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Engine home, the same order as plat.engine_home(): env > the saved plugin option (the pointer file the SessionStart
 # hook writes; without one, Claude Code's settings.json pluginConfigs) > ~/.whynot-cut with an engine > a legacy home
 # (.reel-editor / .dr-nahla-editor: still read in 3.x, dropped in 4.0) > ~/.whynot-cut. Pure bash: no forks.
-saved_engine_home() {   # $1 = file, $2 = 1: the key only counts inside this plugin's pluginConfigs entry -> $HOME_DIR
-  local line v inside=1 bs='\' q='"' key_re='^[[:space:]]*"engine_home"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)"' \
-        obj_re='^[[:space:]]*"([^"]*)"[[:space:]]*:[[:space:]]*\{'
+# The validity and entry rules match plat.saved_options() (its docstring lists the remaining edge cases).
+bs='\' q='"' str_re='"(([^"\\]|\\.)*)"'
+json_path() {   # $1 = a JSON string body -> $HOME_DIR (the escapes a path can hold: \\ and \")
+  local v="$1"
+  v=${v//"$bs$bs"/$bs}
+  HOME_DIR=${v//"$bs$q"/$q}
+}
+pointer_engine_home() {   # $1 = pointer file, any layout. Valid: an "engine_home" string and the closing brace.
+  local s='' key_re="\"engine_home\"[[:space:]]*:[[:space:]]*$str_re" end_re='[}][[:space:]]*$'
+  [ -r "$1" ] || return 1
+  IFS= read -r -d '' s < "$1" || true
+  [[ $s =~ $end_re ]] || return 1
+  [[ $s =~ $key_re ]] || return 1
+  json_path "${BASH_REMATCH[1]}"
+}
+settings_engine_home() {   # $1 = settings.json, one key per line as Claude Code writes it. pluginConfigs entry
+  # whynot-cut@thewhynot-ai when it has "options", else the first other whynot-cut@* entry that has them.
+  local line blk='' seen_id='' seen_any='' got_id='' got_any='' val_id='' val_any='' \
+        key_re="^[[:space:]]*\"engine_home\"[[:space:]]*:[[:space:]]*$str_re" \
+        obj_re='^[[:space:]]*"([^"]*)"[[:space:]]*:[[:space:]]*[{]'
   [ -r "$1" ] || return 0
-  [ "$2" = 1 ] && inside=0
   while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$2" = 1 ] && [[ $line =~ $obj_re ]]; then
-      case "${BASH_REMATCH[1]}" in whynot-cut@*) inside=1 ;; options) ;; *) inside=0 ;; esac
-    elif [ "$inside" = 1 ] && [[ $line =~ $key_re ]]; then
-      v="${BASH_REMATCH[1]}"            # undo the JSON escapes a path can hold: \\ \" \/
-      v="${v//"$bs$bs"/$'\001'}"; v="${v//"$bs$q"/$q}"; v="${v//"$bs/"/"/"}"; HOME_DIR="${v//$'\001'/$bs}"
-      return 0
+    if [[ $line =~ $obj_re ]]; then
+      case "${BASH_REMATCH[1]}" in
+        options) if [ "$blk" = id ]; then seen_id=1; elif [ "$blk" = any ]; then seen_any=1; fi ;;
+        whynot-cut@thewhynot-ai) blk=id ;;
+        whynot-cut@*) if [ -z "$seen_any" ]; then blk=any; else blk=''; fi ;;
+        *) blk='' ;;
+      esac
+    elif [[ $line =~ $key_re ]]; then
+      if [ "$blk" = id ] && [ -n "$seen_id" ] && [ -z "$got_id" ]; then val_id="${BASH_REMATCH[1]}"; got_id=1; fi
+      if [ "$blk" = any ] && [ -n "$seen_any" ] && [ -z "$got_any" ]; then val_any="${BASH_REMATCH[1]}"; got_any=1; fi
     fi
   done < "$1"
+  if [ -n "$seen_id" ]; then json_path "$val_id"; elif [ -n "$seen_any" ]; then json_path "$val_any"; fi
   return 0
 }
 HOME_DIR="${WHYNOT_HOME:-${CLAUDE_PLUGIN_OPTION_ENGINE_HOME:-${REEL_HOME:-${CLAUDE_PLUGIN_OPTION_REEL_HOME:-}}}}"
 if [ -z "$HOME_DIR" ]; then
-  ptr="${WHYNOT_OPTIONS_FILE:-$HOME/.whynot-cut/plugin-options.json}"
-  cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
-  if [ -f "$ptr" ]; then saved_engine_home "$ptr" 0
-  elif [ -f "$cfg" ]; then saved_engine_home "$cfg" 1
+  if ! pointer_engine_home "${WHYNOT_OPTIONS_FILE:-$HOME/.whynot-cut/plugin-options.json}"; then
+    settings_engine_home "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
   fi
   case "$HOME_DIR" in "~"|"~/"*|"~\\"*) HOME_DIR="$HOME${HOME_DIR:1}" ;; esac
 fi
