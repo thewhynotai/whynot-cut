@@ -20,7 +20,8 @@ The minor findings of the 2.1.0 review, each reproduced by a failing test first.
   text); designs beyond 3 (`platform-limits.json` `thumbnail.designs_max`) are skipped with a warning instead of
   silently.
 - The per-shot reframe and the 4:5 window are sized from the reel's own footage, not from the first file in
-  preflight.json; `plan` warns when that footage is missing from preflight (the picture is then fitted).
+  preflight.json. When that footage is missing from preflight, a 4:5 (any non-9:16) framing is a `plan` error instead of
+  a reel silently built as 9:16; a 9:16 reel gets a warning (per-shot framing skipped, picture fitted).
 - `episode-next` flags reels picked before the reels plan was re-validated until the editor confirms them again.
 - `reel inbox` caches each Raw clip's probe by path, modification time and size (`output/discovery/raw-probe-cache.json`)
   instead of probing every clip on every call; a broken cache file is rebuilt.
