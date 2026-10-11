@@ -627,5 +627,66 @@ class TestLibrary(unittest.TestCase):
         self.assertFalse(svg_ok(many)[0])
 
 
+# --------------------------------------------------------------------------- motion script truth
+SPOKEN = "انا قلت ان الشركه دي هتنجح".split()
+
+
+def scene(sid, typ, at="كلمه1", **kw):
+    return dict({"id": sid, "type": typ, "at": at}, **kw)
+
+
+class TestMotionTruth(unittest.TestCase):
+    def test_subsequence(self):
+        from lib.motion_script import match_subsequence
+        r = match_subsequence("قلت ان الشركه دي هتنجح", SPOKEN, 0.4)
+        self.assertTrue(r["ok"], r)
+        self.assertAlmostEqual(r["dropped_ratio"], 1 / 6)
+        self.assertEqual(r["idx"], [1, 2, 3, 4, 5])
+        self.assertFalse(match_subsequence("قلت الشركه هتنجح", SPOKEN, 0.4)["ok"])          # 3 of 6 dropped
+        r = match_subsequence("قلت الشركه هتنجح جدا", SPOKEN, 1.0)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["added"], ["جدا"])
+        self.assertFalse(match_subsequence("هتنجح الشركه", SPOKEN, 1.0)["ok"])              # order kept
+        self.assertTrue(match_subsequence("إن الشركة", SPOKEN, 1.0)["ok"])                 # spelling variants
+        self.assertTrue(match_subsequence("قُلْت", SPOKEN, 1.0)["ok"])                      # tashkeel
+
+    def test_fields(self):
+        from lib.motion_script import check_fields
+        good = {"beats": [{"id": "B1", "role": "hook"}], "scenes": [
+            scene("S01", "kinetic_quote", "@start", beat="B1", text="x"),
+            scene("S02", "list_steps", items=[{"text": "a", "at": "a"}, {"text": "b", "at": "b"}]),
+            scene("S03", "outro", "@end", cta="تابعنا")]}
+        self.assertEqual(check_fields(good), [])
+        cases = {
+            "duplicate": [scene("S01", "kinetic_quote", "@start", text="x"), scene("S01", "kinetic_quote", text="y")],
+            "unknown type": [scene("S01", "kinetic_quote", "@start", text="x"), scene("S02", "dance")],
+            "missing text": [scene("S01", "kinetic_quote", "@start")],
+            "1 item": [scene("S01", "list_steps", "@start", items=[{"text": "a", "at": "a"}])],
+            "6 items": [scene("S01", "list_steps", "@start", items=[{"text": "a", "at": "a"}] * 6)],
+            "no @start": [scene("S01", "kinetic_quote", "كلام", text="x")],
+            "@end early": [scene("S01", "kinetic_quote", "@start", text="x"), scene("S02", "outro", "@end", cta="c"),
+                           scene("S03", "kinetic_quote", text="y")],
+        }
+        for name, scenes in cases.items():
+            errs = check_fields({"scenes": scenes})
+            self.assertEqual(len(errs), 1, (name, errs))
+            self.assertRegex(errs[0], r"S0\d", name)
+
+    def test_editorial(self):
+        from lib.motion_script import check_editorial, fill_placeholders
+        self.assertTrue(check_editorial("«كلام»", set()))
+        self.assertTrue(check_editorial("3 خطوات", {"5"}))
+        self.assertEqual(check_editorial("3 خطوات", {"3"}), [])
+        self.assertEqual(fill_placeholders("مع {guest}", {"guest": "Sara — CEO"}), ("مع Sara", []))
+        self.assertEqual(fill_placeholders("{host}", {"guest": "Sara"})[1], ["host"])
+
+    def test_numbers(self):
+        from lib.motion_script import check_number
+        self.assertTrue(check_number("٣", "عندنا 3 فروع"))
+        self.assertFalse(check_number("1,000,000", "مليون عميل"))
+        self.assertTrue(check_number("70%", "٧٠ في المية"))
+        self.assertFalse(check_number("93", "سنة 2019 و 3 فروع"))                         # digit runs, not substrings
+
+
 if __name__ == "__main__":
     unittest.main()
