@@ -117,8 +117,18 @@ def run(paths) -> dict:
         detail = f"correlation {s['corr']}, offset {s['offset_frames']} frames"
         if s["corr"] is not None and 0.8 <= s["corr"] < 0.9:
             detail += (" (just under 0.9: the render's full mix is compared with the dry dialogue, so a loud music bed "
-                       "or SFX can cause this; listen to the render, and if the voice is in sync lower music.level_db "
-                       "in motion-script.json)")
+                       "or SFX can cause this)")
+        a = plan.get("audio") or {}
+        if not ok and s["corr"] is not None and (a.get("music") or a.get("sfx")):
+            # is it the bed or the voice? the render against the engine's own mix of the plan (same sequence clock)
+            from .motion_audio import mix
+            m = audio_sync(main, mix(plan, paths.root, paths.p("08_quality_control/_planned_mix.wav")), float(plan["fps"]))
+            detail += (f"; against the planned mix (dialogue + music + SFX): correlation {m['corr']}, offset "
+                       f"{m['offset_frames']} frames")
+            if m["corr"] is not None and m["corr"] >= 0.9 and abs(m["offset_frames"]) <= 1:
+                detail += (" - the render matches the planned mix, so the voice is in sync and the bed lowers the "
+                           "dialogue correlation: lower music.level_db (or the SFX) in motion-script.json, then "
+                           "motion-plan and render again")
         add("audio_sync", ok, detail)
     else:
         add("audio_sync", False, "render or sequence dialogue missing")

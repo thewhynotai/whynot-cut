@@ -1784,6 +1784,30 @@ class TestMotionQC(CompiledMotion):
         self.assertRegex(detail, r"correlation 0\.8\d")
         self.assertIn("music", detail)
 
+    def test_audio_sync_bed_diagnostic(self):
+        """Final review: when the plan's music/SFX bed pulls the dialogue correlation under 0.9, QC also compares the
+        render with the engine's planned mix (dialogue + music + SFX) and says whether the voice itself is in sync."""
+        from lib import motion_build
+        from lib.common import fps_arg
+        from lib.motion_audio import mix
+        plan_p = self.reel.p("01_analysis/motion-plan.json")
+        keep = plan_p.read_bytes()
+        self.addCleanup(plan_p.write_bytes, keep)
+        plan = json.loads(keep.decode("utf-8"))
+        bed = bursty_wav(self.tmp / "bed.wav", self.dur, seed=99)
+        plan["audio"]["music"] = {"file": str(bed), "level_db": -1.94, "fade_out_frames": 0}     # 0.8 x the voice
+        write_json(plan_p, plan)
+        planned = mix(plan, self.root, self.tmp / "planned.wav")
+        rendered = self.tmp / "planned_render.mov"
+        ff("-f", "lavfi", "-i", f"testsrc2=s=108x192:r={fps_arg()}:d={self.dur:.3f}", "-i", str(planned), "-c:v",
+           "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(rendered))
+        shutil.copyfile(rendered, motion_build.render_path(self.reel))
+        r, c = self.checks()
+        detail = next(x["detail"] for x in r["checks"] if x["check"] == "audio_sync")
+        self.assertEqual(c["audio_sync"], "FAIL", detail)                  # the 0.9 rule stands (spec ruling)
+        self.assertRegex(detail, r"planned mix[^;]*correlation (0\.9\d*|1\.0), offset 0")
+        self.assertIn("the render matches the planned mix", detail)
+
     def test_each_check_fails(self):
         import time as _t
         from lib import motion_build
