@@ -1132,13 +1132,22 @@ class TestShippedProfiles(unittest.TestCase):
         self.assertIn("عيادة مثال", text)
         self.assertIn("Dr. Sample Example", text)
 
+    REAL_CLIENT_TOKENS = ("nahla", "hunter", "kasr al-ainy", "قصر العيني")
+
+    def real_client_tokens(self, text: str) -> list[str]:
+        """The real-client words in text; only the legacy engine-home folder name of the original skill (read for
+        upgrades, dropped in 4.0) may remain."""
+        low = text.replace(".dr-nahla-editor", "").lower()
+        return [t for t in self.REAL_CLIENT_TOKENS if t in low]
+
     def test_no_real_client_name_in_the_product(self):
-        """Only the legacy engine-home folder name of the original skill (read for upgrades, dropped in 4.0) may remain."""
-        legacy_home = ".dr-nahla-editor"
-        hits = [str(p.relative_to(SK)) for p in SK.rglob("*")
+        self.assertEqual(self.real_client_tokens("Kasr Al-Ainy / قصر العيني, Dr. Hunter, nahla"),
+                         list(self.REAL_CLIENT_TOKENS))
+        self.assertEqual(self.real_client_tokens("~/.dr-nahla-editor is a legacy home"), [])
+        hits = [(str(p.relative_to(SK)), toks) for p in SK.rglob("*")
                 if p.is_file() and p.suffix in (".md", ".py", ".json", ".js", ".sh", ".txt", "")
                 and p.name != "CHANGELOG.md" and p.relative_to(SK).parts[0] != "tests"
-                and "nahla" in p.read_text(encoding="utf-8", errors="ignore").replace(legacy_home, "").lower()]
+                and (toks := self.real_client_tokens(p.read_text(encoding="utf-8", errors="ignore")))]
         self.assertEqual(hits, [])
 
 
@@ -1188,7 +1197,8 @@ class TestPackageProfileRule(unittest.TestCase):
         from unittest import mock
         (self.dir / "dr-someone").mkdir()
         err = io.StringIO()
-        with mock.patch.object(self.pk, "PROFILES_DIR", self.dir), mock.patch.object(self.pk.zipfile, "ZipFile") as zf,                 contextlib.redirect_stderr(err):
+        with mock.patch.object(self.pk, "PROFILES_DIR", self.dir), \
+                mock.patch.object(self.pk.zipfile, "ZipFile") as zf, contextlib.redirect_stderr(err):
             code = self.pk.main()
         self.assertEqual(code, 1)
         self.assertIn("dr-someone", err.getvalue())
@@ -1240,10 +1250,6 @@ class TestExecutableBits(unittest.TestCase):
         git_plugin = {p[len("whynot-cut/"):] for p, m in self.modes.items()
                       if m == "100755" and p.startswith("whynot-cut/")}
         self.assertEqual(sorted(pk.EXEC), sorted(git_plugin))
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 def _frontmatter(path: Path) -> dict:
@@ -1322,3 +1328,7 @@ class TestListingBudget(unittest.TestCase):
     def test_plugin_description_fits(self):
         pj = json.loads((SK / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertLessEqual(len(pj["description"]), self.PLUGIN_DESC_MAX)
+
+
+if __name__ == "__main__":
+    unittest.main()

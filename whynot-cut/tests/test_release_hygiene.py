@@ -38,6 +38,11 @@ def cli_module():
     return m
 
 
+def norm(text: str) -> str:
+    """Whitespace-normalised help text: argparse re-wraps the lines (also after a hyphen)."""
+    return re.sub(r"-\s+", "-", " ".join(text.split()))
+
+
 def reel(*args):
     return subprocess.run([sys.executable, "-B", str(CLI), *args], capture_output=True, text=True, encoding="utf-8")
 
@@ -54,6 +59,8 @@ class TestPluginVersionConsistency(unittest.TestCase):
         self.assertEqual(changelog_version(), v, "newest CHANGELOG heading")
 
     def test_this_release_is_3_0_0(self):
+        """Pinned on purpose: bumping the version is a release decision, so this test must be edited with it (the
+        consistency test above only proves the four places agree, not that they say the intended release)."""
         pj = json.loads((SK / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(pj["version"], "3.0.0")
 
@@ -72,7 +79,8 @@ class TestBridgeVersionTriple(unittest.TestCase):
         self.assertEqual(j.group(1), ppro_bridge.BRIDGE_VERSION, "bridge.js VERSION")
 
     def test_bridge_version_is_independent_of_the_plugin_version(self):
-        """The bridge only changes when the CEP panel changes (Phase 6); it stays 3.1.0 until then."""
+        """The bridge only changes when the CEP panel changes (Phase 6); it stays 3.1.0 until then. Pinned on purpose,
+        like the plugin version: a bridge bump forces an update of the installed panel, so it must be a decision."""
         from lib import ppro_bridge
         self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.1.0")
 
@@ -106,7 +114,15 @@ class TestReelHelpFromTheCommandTable(unittest.TestCase):
         for name, line in self.table.items():
             self.assertTrue(line.strip(), f"{name} has no one-line help")
             self.assertRegex(self.help, rf"(?m)^\s+{re.escape(name)}\s", f"`reel --help` does not list {name}")
-            self.assertIn(line.split()[0], self.help, f"`reel --help` lacks the help of {name}")
+            self.assertIn(norm(f"{name} {line}"), norm(self.help), f"`reel --help` lacks the full help line of {name}")
+
+    def test_every_table_command_has_a_handler(self):
+        """The other way round: a command in the table that nothing runs would only fail when someone calls it."""
+        from lib import motion_cli, podcast_cli
+        for name in self.table:
+            fn = "cmd_" + name.replace("-", "_")
+            self.assertTrue(any(callable(getattr(m, fn, None)) for m in (self.cli, podcast_cli, motion_cli)),
+                            f"`{name}` is in the command table but no {fn} exists in cli/podcast_cli/motion_cli")
 
     def test_help_has_no_command_beyond_the_table(self):
         """Every registered subparser is in the table and the other way round (no stale or missing entries)."""

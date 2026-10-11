@@ -953,7 +953,7 @@ def main():
             self.print_usage(sys.stderr)
             self.exit(2, f"{tag()}: {self.prog}: error: {message}\n")
     ap = NamedParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--version", action="version", version=f"{tag()}{chr(10)}plugin root: {PLUGIN_DIR}",
+    ap.add_argument("--version", action="version", version=f"{tag()}\nplugin root: {PLUGIN_DIR}",
                     help="print the plugin name and version, and the plugin folder")
     ap.add_argument("--root", help="client folder containing assets/ and data/ (default: current folder if it has both)")
     ap.add_argument("--video-id", help="stable project id (default: footage file stem)")
