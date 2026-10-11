@@ -106,6 +106,21 @@ def word_cut_ranges(words: list, cut_words: list, dur_ms: int, pad_ms: int = 30)
     return ranges, cut, errors
 
 
+def window_rect(framing: str | None, y: int | None = None, seq_w: int = 1080, seq_h: int = 1920) -> dict | None:
+    """The picture window of a framing mode: "4:5" -> 1080x1350 (centred unless global.framing_window_y); "9:16" -> None
+    (the picture fills the frame)."""
+    f = str(framing or "9:16").replace("x", ":").strip()
+    if f in ("9:16", "full", ""):
+        return None
+    try:
+        a, b = (float(v) for v in f.split(":"))
+    except ValueError:
+        return None
+    h = min(seq_h, int(round(seq_w * b / a)))
+    top = int(y) if y is not None else (seq_h - h) // 2
+    return {"w": seq_w, "h": h, "y": max(0, min(seq_h - h, top)), "mode": f}
+
+
 def to_ms(v) -> int:
     if isinstance(v, int):
         return v
@@ -347,6 +362,37 @@ def compile_plan(paths: Paths) -> dict:
                 warnings.append(shots_rep["note"])
             for c in n_whole:
                 warnings.append(f"shown whole {c['at_ms'] / 1000:.1f}-{c['until_ms'] / 1000:.1f}s: {c['rationale']}")
+    # a graphic over a shot shown whole covers the episode's own card or B-roll (seen in a live run): warn the editor
+    for c in camera:
+        if c["decision_id"] != "AUTO_CUTAWAY":
+            continue
+        for e in events:
+            if e["template"] != "flash_transition" and e["start_ms"] < c["until_ms"] and c["at_ms"] < e["end_ms"]:
+                warnings.append(f"{e['event_id']} ({e['template']}) covers {c['at_ms'] / 1000:.1f}-{c['until_ms'] / 1000:.1f}s, "
+                                "a shot shown whole (the episode's own card / B-roll): move it to a speaker shot")
+    # 4:5 framing (a client's plan: "4:5 (1080x1350) inside 9:16 over a blurred fill of the same video, title above,
+    # captions below"): every speaker piece is drawn in a window; story moves and jump-cut zooms stay inside it (the
+    # build crops the picture to the window); source cutaways stay whole
+    framing_mode = str(base.get("framing") or load_config("style.json").get("framing") or "9:16")
+    win = window_rect(framing_mode, base.get("framing_window_y"))
+    if win and bsp:
+        pv_ = next((f["video"] for f in read_json(paths.p("00_inputs/preflight.json"), {"files": []})["files"]
+                    if f.get("video")), None)
+        if pv_:
+            k45 = max(win["w"] / pv_["display_width"], win["h"] / pv_["display_height"]) * 100 / bsp
+            bx = float(box or 0.0)
+            wcam = []
+            for c in camera:
+                if c["decision_id"] == "AUTO_CUTAWAY":
+                    wcam.append(c)
+                    continue
+                k = float(c.get("scale_factor", 1.0))   # face (base) offset and story offset scale with the picture
+                wcam.append(dict(c, scale_factor=round(k * k45, 5), window=win,
+                                 offset_x=round((bx * k + float(c.get("offset_x", 0.0))) * k45 - bx, 2)))
+            camera = [{"decision_id": "AUTO_WINDOW", "type": "window", "at_ms": 0, "frame": 0, "until_ms": dur_ms,
+                       "scale_factor": round(k45, 5), "offset_x": round(bx * k45 - bx, 2), "offset_y": 0.0, "window": win,
+                       "rationale": f"{framing_mode} window {win['w']}x{win['h']} at y {win['y']}"}] + wcam
+            framing += f"; {framing_mode} window {win['w']}x{win['h']} (y {win['y']}) over a blurred fill"
     camera.sort(key=lambda c: c["frame"])
     base = ed.get("global", {})
     main_segments = []
@@ -362,7 +408,8 @@ def compile_plan(paths: Paths) -> dict:
                               "camera": c["type"] if c else "hold",
                               "scale_factor": c["scale_factor"] if c else 1.0,
                               "offset_x": c["offset_x"] if c else 0.0, "offset_y": c["offset_y"] if c else 0.0,
-                              "decision_id": c["decision_id"] if c else None})
+                              "decision_id": c["decision_id"] if c else None,
+                              **({"window": c["window"]} if c and c.get("window") else {})})
     # merge adjacent identical holds
     merged = []
     for s in main_segments:
@@ -402,7 +449,7 @@ def compile_plan(paths: Paths) -> dict:
             keep0 = union_ranges(keep0, protect)
         keep = subtract_ranges(keep0, wcut_ranges) if wcut_ranges else keep0
         ms_ = tuple((rp or {}).get("mask_scales", [1.0, 1.06])) if isinstance(rp, dict) else (1.0, 1.06)
-        tmap = TimeMap(keep, camera, ms_)
+        tmap = TimeMap(keep, camera, ms_, base_offset_x=float(box or 0.0))
         merged = tmap.pieces
         removed = dur_ms - sum(b - a for a, b in keep)
         time_map_info = {"keep_ms": [list(k) for k in keep], "removed_ms": removed,
@@ -568,7 +615,7 @@ def write_edit_plan(paths: Paths) -> Path:
     cover = speaker_covered_frames(spec)
     pend = [e for e in spec["events"] if e["approval_required"]]
     story_cam = [d for d in ed.get("decisions", []) if d.get("camera")]
-    masks = sum(1 for s in spec["main_segments"] if s["camera"] == "jumpcut_mask")
+    masks = sum(1 for s in spec["main_segments"] if s["camera"] == "jumpcut_mask" or s.get("masked"))
     cut_away = sum(s["end_frame"] - s["start_frame"] for s in spec["main_segments"] if s.get("decision_id") == "AUTO_CUTAWAY")
     L = [f"# Edit Plan — {paths.video_id} (for editor approval)", "",
          f"Runtime {frame_to_tc(dur)} at {spec.get('fps', 24):.5g} fps · {len(spec['events'])} graphics · "

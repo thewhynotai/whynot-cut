@@ -11,7 +11,8 @@ from .common import seq_fps
 
 
 class TimeMap:
-    def __init__(self, keep_ms: list, camera: list | None = None, mask_scales=(1.0, 1.06), max_scale: float = 1.2):
+    def __init__(self, keep_ms: list, camera: list | None = None, mask_scales=(1.0, 1.06), max_scale: float = 1.2,
+                 base_offset_x: float = 0.0):
         """keep_ms: [(src_a, src_b)], camera: [{"at_ms","until_ms","scale_factor","type","decision_id",...}]"""
         self.frame_ms = 1000 / seq_fps()   # the client's sequence rate
         camera = sorted(camera or [], key=lambda c: c["at_ms"])
@@ -40,17 +41,28 @@ class TimeMap:
                 # step one mask increment further in (or out, if that would exceed max_scale)
                 cutaway = bool(cam) and cam.get("decision_id") == "AUTO_CUTAWAY"   # a letterboxed card stays whole
                 zoom = 1.0          # a framed (offset) shot scales its offset with the mask step: the face stays put
+                windowed = bool(cam) and bool(cam.get("window"))   # 4:5 window: the zoom step is relative to it
                 if at_cut and last_scale is not None and abs(scale - last_scale) < 1e-6 and not cutaway:
                     step = hi - lo
                     old = scale
-                    scale = round(scale + step, 4) if scale + step <= max_scale + 1e-9 else round(scale - step, 4)
+                    if windowed:
+                        scale = round(scale * (1 + step), 5)
+                    else:
+                        scale = round(scale + step, 4) if scale + step <= max_scale + 1e-9 else round(scale - step, 4)
                     zoom = scale / old if old else 1.0
                 self.pieces.append({"src_in_ms": s, "src_out_ms": s + n * self.frame_ms, "start_frame": f,
                                     "end_frame": f + n, "keep_index": k, "scale_factor": scale,
-                                    "camera": cam["type"] if cam else ("jumpcut_mask" if scale != 1.0 else "hold"),
+                                    "camera": ("jumpcut_mask" if windowed and cam["decision_id"] == "AUTO_WINDOW"
+                                               and zoom != 1.0 else cam["type"]) if cam
+                                              else ("jumpcut_mask" if scale != 1.0 else "hold"),
                                     "decision_id": cam["decision_id"] if cam else None,
-                                    "offset_x": round(cam.get("offset_x", 0.0) * zoom, 2) if cam else 0.0,
-                                    "offset_y": cam.get("offset_y", 0.0) if cam else 0.0})
+                                    # the whole picture offset (base + piece) scales with the step: the face stays put
+                                    "offset_x": round((base_offset_x + cam.get("offset_x", 0.0)) * zoom - base_offset_x, 2)
+                                                if cam else 0.0,
+                                    "offset_y": cam.get("offset_y", 0.0) if cam else 0.0,
+                                    # a jump-cut zoom step on a framed/camera piece (edit-plan counts these too)
+                                    "masked": bool(zoom != 1.0) or (not cam and scale != 1.0),
+                                    **({"window": cam["window"]} if windowed else {})})
                 f += n
                 last_scale = scale
         self.total_frames = f

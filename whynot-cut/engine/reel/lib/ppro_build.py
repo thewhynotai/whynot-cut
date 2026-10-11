@@ -52,6 +52,27 @@ def premiere_captions(paths: Paths, spec: dict, ed: dict) -> Path:
     return p
 
 
+def cutaway_bands(paths: Paths, spec: dict) -> list:
+    """(start_ms, end_ms, top_px, bottom_px) of every source card shown whole (AUTO_CUTAWAY: fit over a blurred fill),
+    on the sequence clock, so captions move off the card like they move off a graphic card."""
+    from .common import seq_fps
+    pre = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
+    v = next((f["video"] for f in pre.get("files", []) if f.get("video")), None)
+    if not v:
+        return []
+    H = load_config("sequence-settings.json")["general"]["frame_height"]
+    bsp = float(spec.get("base_scale_percent") or 100.0)
+    fps = seq_fps()
+    out = []
+    for m in spec.get("main_segments", []):
+        if m.get("decision_id") != "AUTO_CUTAWAY":
+            continue
+        h = v["display_height"] * bsp / 100 * float(m.get("scale_factor", 1.0))
+        cy = H / 2 + float(m.get("offset_y", 0.0)) + float(spec.get("base_offset_y", 0.0))
+        out.append((m["start_frame"] * 1000 / fps, m["end_frame"] * 1000 / fps, int(cy - h / 2), int(cy + h / 2)))
+    return out
+
+
 def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -> dict:
     from .premiere_xml import build_xml
     from .previews import render_captions
@@ -114,6 +135,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
                 bb = Image.open(png).getchannel("A").getbbox()
                 if bb:
                     avoid.append((e["start_ms"], e["end_ms"], bb[1], bb[3]))
+    avoid += cutaway_bands(paths, spec)
     caps = render_captions(paths, hidden, avoid=avoid)
     for c in caps:
         s, en = c["start_ms"] / 1000, c["end_ms"] / 1000
@@ -127,7 +149,8 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
         stage_stills(paths, g_out)
     markers = [{"t": e["start_frame"] * F, "name": e["event_id"],
                 "comment": f"{e['template']} | {(e.get('evidence') or '')[:200]}"} for e in spec["events"]]
-    vnames = ["V1 Main Footage" + (" (+ blurred fill under cutaways)" if cut_off else "")] +         (["V2 Source cutaways (whole)"] if cut_off else []) +         [f"V{i + 2 + cut_off} {LANE_NAMES.get(ln, 'Checklist item ' + ln[4:])}" for i, ln in enumerate(lanes)]
+    windowed = "window" in str(spec.get("framing", ""))
+    vnames = ["V1 Main Footage" + (" (blurred fill)" if windowed else " (+ blurred fill under cutaways)" if cut_off else "")] +         (["V2 Speaker in window + source cutaways" if windowed else "V2 Source cutaways (whole)"] if cut_off else []) +         [f"V{i + 2 + cut_off} {LANE_NAMES.get(ln, 'Checklist item ' + ln[4:])}" for i, ln in enumerate(lanes)]
     dlg = "Dialogue (clean)" if paths.p("06_audio/dialogue/dialogue_clean.wav").exists() else "Dialogue (camera, not cleaned)"
     anames = [f"A1 {dlg} L", f"A2 {dlg} R"]
     for k in base["tracks"]["audio"][1:]:
@@ -148,6 +171,10 @@ def sharpen_settings(spec: dict) -> dict | None:
     (style.json reframe_sharpen). None = leave the footage untouched."""
     cfg = load_config("style.json").get("reframe_sharpen") or {}
     amount = float(cfg.get("amount") or 0)
+    # only the speaker pieces on V1 are sharpened: in 4:5 framing V1 is all blurred fill (the window is upscaled less)
+    if spec.get("main_segments") and not any(m.get("decision_id") != "AUTO_CUTAWAY" and not m.get("window")
+                                             for m in spec["main_segments"]):
+        return None
     if amount <= 0 or float(spec.get("base_scale_percent") or 0) < float(cfg.get("min_upscale_percent", 150)):
         return None
     return {"amount": amount, "grain": float(cfg.get("grain_percent") or 0)}

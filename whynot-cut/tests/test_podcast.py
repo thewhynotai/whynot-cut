@@ -855,6 +855,8 @@ class TestShots(unittest.TestCase):
         self.assertEqual(tm.pieces[0]["offset_x"], -300.0)
         self.assertEqual(tm.pieces[1]["scale_factor"], 1.06)
         self.assertAlmostEqual(tm.pieces[1]["offset_x"], -318.0, delta=0.01)
+        self.assertTrue(tm.pieces[1]["masked"])                                   # counted as a jump-cut zoom
+        self.assertFalse(tm.pieces[0]["masked"])
 
     def test_plan_uses_shot_layer(self):
         from lib.plan import compile_plan
@@ -1060,6 +1062,47 @@ class TestRecipes(unittest.TestCase):
         tm = read_json(reel.p("01_analysis/timeline-spec.json"))["time_map"]
         self.assertEqual(tm["keep_ms"], [[0, 10000]])
         self.assertEqual(tm["removed_ms"], 0)
+
+
+class TestShownWholeCards(unittest.TestCase):
+    """A shot shown whole (the episode's own card / B-roll, fit over a blurred fill) is never covered: captions move
+    off it, and a graphic over it is a plan warning (found in the live run: caption and statement on a burned-in card)."""
+
+    def setUp(self):
+        from lib.plan import compile_plan
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root, self.reel, self.src = reel_fixture(self.tmp, "storytelling", music=False)
+        pre = read_json(self.reel.p("00_inputs/preflight.json"))
+        pre["shots"] = {"window": {"offset_ms": 1000, "duration_ms": 10000}, "method": "test",
+                        "shots": [shot(0, 3000, 0.5), shot(3000, 8000), shot(8000, 10000, 0.5)]}
+        write_json(self.reel.p("00_inputs/preflight.json"), pre)
+        write_json(self.reel.p("01_analysis/edit-decisions.json"), {"global": {}, "decisions": [
+            decision("EDIT_001", "00:00:04.000", "00:00:06.000", "كلمه8 كلمه9",
+                     graphics=[{"id": "GFX_001", "template": "statement_highlight", "start": "00:00:04.500",
+                                "end": "00:00:05.500", "text": "كلمه9"}])]})
+        self.r = compile_plan(self.reel)
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_graphic_over_shown_whole_warns(self):
+        self.assertTrue(self.r["ok"], self.r["errors"])
+        self.assertTrue(any("GFX_001" in w and "shown whole" in w for w in self.r["warnings"]), self.r["warnings"])
+
+    def test_captions_move_off_the_card(self):
+        from PIL import Image
+        from lib.previews import render_all
+        from lib.ppro_build import job_data
+        render_all(self.reel, composite_preview=False)
+        job_data(self.reel)
+        caps = read_json(self.reel.p("03_broll/captions/captions-manifest.json"))["captions"]
+        band = (1920 / 2 - 607.5 / 2, 1920 / 2 + 607.5 / 2)                 # 640x360 card fit into 1080 wide
+        during = [c for c in caps if 3200 <= c["start_ms"] < 7500]
+        self.assertTrue(during)
+        for c in during:
+            bb = Image.open(c["fg"]).getchannel("A").getbbox()
+            self.assertTrue(bb[3] <= band[0] or bb[1] >= band[1], (c["text"], bb, band))
 
 
 class TestNewTemplates(unittest.TestCase):
