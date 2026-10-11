@@ -197,8 +197,18 @@ def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False
         return dict(base, reasons=probs)
     fb = None
     if ctx.get("missing_fonts") and allow_fallback_font:
+        from .motion_layout import find_font_file
+        from .motion_plan import compile_motion
         fbs = motion_cfg().get("fallback_fonts") or {}
         fb = fbs.get("mac" if _pf.system() == "Darwin" else "windows")
+        ffile = find_font_file(fb) if fb else None
+        if not ffile:
+            return dict(base, reasons=[f"the fallback font {fb!r} is not installed either: install the brand fonts"])
+        # re-fit the layout with the font After Effects will draw (same words: the Gate 1 approval stays valid)
+        rc = compile_motion(paths, font_override={"ps": fb, "file": ffile})
+        if not rc["ok"]:
+            return _record(paths, dict(base, status="FAILED", reasons=["re-fit with the fallback font: " + e
+                                                                        for e in rc["errors"]], fallback_font=fb))
     job_p = write_job(paths, fallback_font=fb)
     job = json.loads(job_p.read_text(encoding="ascii"))
     t0 = time.time()

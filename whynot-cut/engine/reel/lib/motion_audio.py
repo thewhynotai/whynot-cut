@@ -12,17 +12,6 @@ import numpy as np
 SR = 48000
 
 
-def _read(path: Path) -> np.ndarray:
-    with wave.open(str(path)) as w:
-        sr, ch, n = w.getframerate(), w.getnchannels(), w.getnframes()
-        x = np.frombuffer(w.readframes(n), dtype=np.int16).astype(np.float32) / 32768.0
-    x = x.reshape(-1, ch) if ch > 1 else x.reshape(-1, 1)
-    if sr != SR:                              # dialogue_clean.wav is 48 kHz; resample anything else linearly
-        t = np.arange(int(len(x) * SR / sr)) * sr / SR
-        x = np.stack([np.interp(t, np.arange(len(x)), x[:, c]) for c in range(x.shape[1])], axis=1)
-    return x
-
-
 def _write(path: Path, x: np.ndarray) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     x = np.clip(x, -1, 1)
@@ -37,11 +26,13 @@ def _write(path: Path, x: np.ndarray) -> Path:
 
 
 def sequence_dialogue(paths, tmap) -> Path:
-    """06_audio/dialogue/dialogue_motion_seq.wav: each kept piece of dialogue_clean.wav at its TimeMap frame."""
+    """06_audio/dialogue/dialogue_motion_seq_<hash>.wav: each kept piece of dialogue_clean.wav at its TimeMap frame.
+    Content-addressed: After Effects keeps imported audio open (Windows), so an unchanged file is never rewritten and
+    changed audio gets a new name the next build imports."""
     src = paths.p("06_audio/dialogue/dialogue_clean.wav")
     if not src.exists():
         raise SystemExit("06_audio/dialogue/dialogue_clean.wav missing — run `reel audio-clean` for this motion project")
-    x = _read(src)
+    x = _decode(src)            # any PCM width (audio-clean writes 24-bit), via ffmpeg
     fms = tmap.frame_ms
     out = np.zeros((int(round(tmap.total_frames * fms * SR / 1000)), x.shape[1]), dtype=np.float32)
     for p in tmap.pieces:
@@ -50,12 +41,20 @@ def sequence_dialogue(paths, tmap) -> Path:
         o = int(round(p["start_frame"] * fms * SR / 1000))
         seg = x[a:a + n]
         out[o:o + len(seg)] = seg[: max(0, len(out) - o)]
-    return _write(paths.p("06_audio/dialogue/dialogue_motion_seq.wav"), out)
+    import hashlib
+    pcm = (np.clip(out, -1, 1) * 32767).astype(np.int16)
+    dst = paths.p(f"06_audio/dialogue/dialogue_motion_seq_{hashlib.sha1(pcm.tobytes()).hexdigest()[:8]}.wav")
+    if dst.exists():
+        return dst
+    tmp = dst.with_suffix(".tmp")
+    _write(tmp, out)
+    tmp.replace(dst)
+    return dst
 
 
 def envelope(wav: Path, fps: float, n_frames: int) -> list[float]:
     """RMS per frame, normalised to 0-1 (95th percentile = 1), rounded to 3 decimals."""
-    x = _read(Path(wav)).mean(axis=1)
+    x = _decode(Path(wav)).mean(axis=1)
     hop = SR / fps
     vals = []
     for k in range(n_frames):
@@ -68,7 +67,9 @@ def envelope(wav: Path, fps: float, n_frames: int) -> list[float]:
 def sfx_files(kinds: set[str], out_dir: Path) -> dict[str, Path]:
     from .sfx import synth
     out_dir.mkdir(parents=True, exist_ok=True)
-    return {k: synth(k, out_dir / f"{k}.wav") for k in sorted(kinds)}
+    # an existing file is reused: synthesis is deterministic and After Effects may hold the old file open
+    return {k: (out_dir / f"{k}.wav") if (out_dir / f"{k}.wav").exists() else synth(k, out_dir / f"{k}.wav")
+            for k in sorted(kinds)}
 
 
 def _decode(path: Path) -> np.ndarray:

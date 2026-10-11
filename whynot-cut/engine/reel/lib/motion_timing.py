@@ -87,8 +87,8 @@ def hero_frame(last_cue: int, end_frame: int, next_transition: int, fps: float, 
 
 def frame_scenes(anchored: list[dict], tmap, fps: float, cfg: dict,
                  transitions: list[int]) -> tuple[list[dict], list[str]]:
-    """Adds start_frame, end_frame, cue_frames and hero_frame. transitions[k] = frames of the NEXT scene's transition
-    (it plays over the end of scene k). A scene whose last cue comes after the scene starts leaving is too short (in
+    """Adds start_frame, end_frame, cue_frames and hero_frame. transitions[k] = frames of the NEXT scene's transition;
+    it plays after scene k's end, over the overlap where scene k's layer is still on (so it does not shorten scene k). A scene whose last cue comes after the scene starts leaving is too short (in
     continuous speech the last word may still be fading in at the cut; the hero frame is then the last frame before it)."""
     reveal_ms = int(cfg.get("word_reveal_ms", 180))
     out, errs = [], []
@@ -100,7 +100,7 @@ def frame_scenes(anchored: list[dict], tmap, fps: float, cfg: dict,
         else:
             b = _frame(sc["end_ms"], tmap, fps)
         cues = [_frame(ms, tmap, fps) for ms in sc.get("cues_ms") or []]
-        nxt = transitions[k] if k < len(transitions) else 0
+        nxt = 0          # the next scene's transition plays AFTER this scene's end (its layer stays on during it)
         rec.update(start_frame=a, end_frame=b, cue_frames=cues)
         if b <= a:
             errs.append(f"{sc['id']}: too short for its content (no frames left after pause removal)")

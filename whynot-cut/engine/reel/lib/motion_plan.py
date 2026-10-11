@@ -25,6 +25,10 @@ ROLE_FONT = {"title": "headline", "quote": "headline", "stat": "headline", "body
              "caption": "caption"}
 NUM_IN = re.compile(r"[0-9٠-٩][0-9٠-٩.,٬٫]*")
 SYSTEM_FONTS = ("arial.ttf", "segoeui.ttf", "tahoma.ttf", "dejavusans.ttf", "notosansarabic-regular.ttf")
+NEAREST = {"headline": ["black", "heavy", "extrabold", "bold", "semibold", "medium", "regular"],
+           "caption": ["bold", "semibold", "extrabold", "black", "medium", "regular"],
+           "body": ["medium", "regular", "book", "semibold", "light", "bold"],
+           "small": ["regular", "book", "medium", "light", "semibold"]}
 
 
 def _f01(rgb) -> list:
@@ -60,7 +64,7 @@ def fingerprint(paths) -> str:
 
 
 class _Compiler:
-    def __init__(self, paths):
+    def __init__(self, paths, font_override: dict | None = None):
         from .episode import EpisodePaths, load_episode
         from .previews import Brand
         from .timemap import TimeMap
@@ -89,17 +93,25 @@ class _Compiler:
             self.sheet = {}
         self.window_digits = set().union(*(digit_runs(w["word"]) for w in self.words)) if self.words else set()
         self.brand = Brand(paths.client_db)
+        self.font_override = font_override
         self.fonts = self._fonts()
 
     # ------------------------------------------------------------------ helpers
     def _fonts(self) -> dict:
+        if self.font_override:               # the font After Effects will actually draw (e.g. an approved fallback)
+            return {role: dict(self.font_override) for role in ROLE_FONT}
         from .ae_builder import fonts_map
         fm = fonts_map(self.paths.client_db)
         out, fallback = {}, None
         for role, brole in ROLE_FONT.items():
             style = self.brand.role_style.get(brole, "regular")
-            f = self.brand.files.get(style) or next(iter(self.brand.files.values()), None)
-            ps = self.brand.ps_names.get(style) or fm.get(brole) or ""
+            # the wanted weight, else the nearest one the brand has: file and PostScript name always from the SAME weight
+            order = [style] + NEAREST.get(brole, NEAREST["body"])
+            pick = next((w for w in order if w in self.brand.files), next(iter(self.brand.files), None))
+            f = self.brand.files.get(pick) if pick else None
+            ps = (self.brand.ps_names.get(pick) if pick else None) or fm.get(brole) or ""
+            if not ps:
+                raise SystemExit(f"no PostScript font name for the {brole} role: run `reel client-db` (typography.json)")
             if not f or not Path(f).exists():
                 fallback = fallback or _system_font()
                 if not fallback:
@@ -235,6 +247,7 @@ class _Compiler:
                 toks = self.speech(sid, field, text, pool)
                 if toks is None:
                     return None
+                cues_ms.extend(self._ms_of(t) for t in toks)       # hero frame and too-short check see these words
                 return self.text_el(sid, 1, typ, element, text, theme, tokens=toks, reveal="word", **kw)
             return self.text_el(sid, 1, typ, element, self.editorial_text(sid, field, text), theme, **kw)
 
@@ -493,7 +506,7 @@ class _Compiler:
         if e:
             els.append(e)
         show = str(self.sheet.get("show") or "").strip()
-        if show and sc.get("show_name", True):
+        if show and sc.get("show_name", True) and (not e or show not in " ".join(e.get("lines") or [])):
             e = self.text_el(sid, 1, "outro", "show", show, theme)
             if e:
                 els.append(e)
@@ -507,7 +520,10 @@ class _Compiler:
         if not f.exists():
             self.warnings.append("captions requested but 02_transcription/captions-short.srt is missing")
             return None
-        blocked = [(s["start_frame"], s["end_frame"]) for s in scenes if s["type"] in REPLAYS_SPEECH]
+        # hidden wherever the scene already shows the spoken words (quotes, list items, timeline labels, speech text)
+        blocked = [(s["start_frame"], s["end_frame"]) for s in scenes
+                   if s["type"] in REPLAYS_SPEECH or s["type"] in ("list_steps", "timeline")
+                   or any(e.get("tokens") for e in s["elements"])]
         cues = []
         for c in srtlib.read_srt(f):
             a, b = self.frame(c["start_ms"]), self.frame(c["end_ms"])
@@ -548,7 +564,7 @@ class _Compiler:
                 "color": _f01(col["text"]), "accent": _f01(col["accent"])}
 
 
-def compile_motion(paths) -> dict:
+def compile_motion(paths, font_override: dict | None = None) -> dict:
     from .reels import window_stale
     from .motion_config import is_motion
     if not is_motion(paths):
@@ -557,7 +573,7 @@ def compile_motion(paths) -> dict:
     if stale:
         raise SystemExit(stale)
     script = load_script(paths)
-    C = _Compiler(paths)
+    C = _Compiler(paths, font_override)
     out_val = paths.p("01_analysis/motion-validation.json")
     errs = check_fields(script)
     if errs:

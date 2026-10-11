@@ -1525,7 +1525,7 @@ class TestMotionQC(CompiledMotion):
         from lib.common import fps_arg
         r = self.reel
         self.dur = self.plan["duration_frames"] / self.plan["fps"]
-        dia = bursty_wav(r.p("06_audio/dialogue/dialogue_motion_seq.wav"), self.dur)
+        dia = bursty_wav(Path(self.plan["audio"]["dialogue"]), self.dur)
         anim = r.p(f"08_quality_control/animatic/{r.video_id}_animatic.mp4")
         anim.parent.mkdir(parents=True, exist_ok=True)
         anim.write_bytes(b"animatic")
@@ -1601,7 +1601,7 @@ class TestMotionQC(CompiledMotion):
         main = motion_build.render_path(r)
         main.touch()
 
-        dia = r.p("06_audio/dialogue/dialogue_motion_seq.wav")
+        dia = Path(self.plan["audio"]["dialogue"])
         late = self.tmp / "late.wav"
         ff("-i", str(dia), "-af", f"adelay={int(3000 / self.plan['fps'])}", str(late))
         keep = dia.read_bytes()
@@ -1801,6 +1801,204 @@ class TestMotionRelease(unittest.TestCase):
         self.assertTrue(package.wanted(SK / "templates/motion/icons/lucide/LICENSE"))
         self.assertTrue(package.wanted(SK / "templates/motion/icons/lucide/icons.json"))
         self.assertTrue(package.wanted(SK / "THIRD_PARTY_NOTICES.md"))
+
+
+class TestTransitionOverlap(unittest.TestCase):
+    """Live run (EP02TEST_R02_MO): the last word of a scene spoken inside the next scene's push window was flagged
+    'too short', but transitions play AFTER the outgoing scene's end (its layer stays on during the overlap)."""
+    def test_transition_after_end(self):
+        from lib.motion_timing import frame_scenes
+        common.set_context(None)
+        out, errs = frame_scenes([{"id": "S01", "start_ms": 0, "end_ms": 3000, "cues_ms": [2800]}], None, 30.0,
+                                 MCFG, [12])
+        self.assertEqual(errs, [])
+        self.assertTrue(out[0]["cue_frames"][0] <= out[0]["hero_frame"] <= out[0]["end_frame"] - 1, out[0])
+
+
+class TestLiveFindings(unittest.TestCase):
+    """Live run (EP02TEST_R02_MO) storyboard: captions repeated words already on screen in list/icon scenes, and the
+    outro repeated the show name already inside the CTA."""
+    @classmethod
+    def setUpClass(cls):
+        if test_font() is None:
+            raise unittest.SkipTest("no test font for HarfBuzz fitting")
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root, cls.ep, cls.reel = motion_plan_fixture(cls.tmp)
+
+    @classmethod
+    def tearDownClass(cls):
+        common.set_context(None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def setUp(self):
+        common.set_context(self.root)
+
+    def test_captions_hidden_where_speech_is_shown(self):
+        from lib.motion_plan import compile_motion
+        s = dict(good_script(), captions="subtitles")
+        s["scenes"][1] = scene("S02", "icon_point", "كلمه10", icon="trophy", text="كلمه10 كلمه11")
+        write_json(self.reel.p("01_analysis/motion-script.json"), s)
+        r = compile_motion(self.reel)
+        self.assertTrue(r["ok"], r["errors"])
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        shown = [(x["start_frame"], x["end_frame"]) for x in plan["scenes"] if x["type"] in ("icon_point", "list_steps")]
+        for c in plan["persistent"]["captions"]["cues"]:
+            for a, b in shown:
+                self.assertFalse(c["start_frame"] < b and c["end_frame"] > a, (c, a, b))
+
+    def test_hero_after_every_spoken_word(self):
+        """Live frames: S04 (icon_point) had its hero frame 11 frames in, before 6 of its 8 words had appeared,
+        because speech text built through `either` (icon/title/label/illustration) never reached the scene cues."""
+        from lib.motion_plan import compile_motion
+        s = good_script()
+        s["scenes"][1] = scene("S02", "icon_point", "كلمه10", icon="trophy", text="كلمه10 كلمه11 كلمه12 كلمه13")
+        write_json(self.reel.p("01_analysis/motion-script.json"), s)
+        r = compile_motion(self.reel)
+        self.assertTrue(r["ok"], r["errors"])
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        for sc in plan["scenes"]:
+            cues = [t["cue_frame"] for e in sc["elements"] for t in e.get("tokens") or []]
+            if cues:
+                self.assertTrue(sc["hero_frame"] >= max(cues), (sc["id"], sc["hero_frame"], max(cues)))
+
+    def test_outro_no_duplicate_show(self):
+        from lib.motion_plan import compile_motion
+        write_json(self.reel.p("01_analysis/motion-script.json"), good_script())       # cta "تابع {show}"
+        self.assertTrue(compile_motion(self.reel)["ok"])
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        outro = plan["scenes"][-1]
+        self.assertFalse(any(e["name"].startswith("S04_show") for e in outro["elements"]))
+
+
+class TestFontRoles(unittest.TestCase):
+    """Live run: a brand with only Medium/SemiBold/Bold weights (no Black) got an EMPTY PostScript name for the
+    headline roles ('Unable to set font' in After Effects)."""
+    def test_nearest_weight_file_and_name_together(self):
+        if test_font() is None:
+            self.skipTest("no test font")
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            root, ep, reel = motion_plan_fixture(tmp)
+            f = str(test_font())
+            write_json(reel.client_db / "branding/typography.json", {"families": {"Brand": {"weights": [
+                {"style": "Medium", "file": f, "postscript_name": "Brand-Medium"},
+                {"style": "SemiBold", "file": f, "postscript_name": "Brand-SemiBold"},
+                {"style": "Bold", "file": f, "postscript_name": "Brand-Bold"}]}}})
+            from lib.motion_plan import compile_motion
+            write_json(reel.p("01_analysis/motion-script.json"), good_script())
+            r = compile_motion(reel)
+            self.assertTrue(r["ok"], r["errors"])
+            plan = read_json(reel.p("01_analysis/motion-plan.json"))
+            for role, spec in plan["fonts"].items():
+                self.assertTrue(spec["ps"].startswith("Brand-"), (role, spec))
+            self.assertEqual(plan["fonts"]["title"]["ps"], "Brand-Bold")      # nearest to Black
+            self.assertEqual(plan["fonts"]["body"]["ps"], "Brand-Medium")
+            for s in plan["scenes"]:
+                for e in s["elements"]:
+                    if e.get("kind") in ("text", "counter"):
+                        self.assertTrue(e["font_ps"], e["name"])
+        finally:
+            common.set_context(None)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestFallbackRefit(CompiledMotion):
+    """Live run: with --allow-fallback-font the layout was measured with the brand font file but After Effects drew
+    the wider fallback font (S01 left the safe area by 9 px). The plan must be re-fitted with the fallback font."""
+    def test_find_font_file(self):
+        from lib.motion_layout import find_font_file
+        tf = test_font()
+        import freetype
+        ps = freetype.Face(str(tf)).postscript_name.decode()
+        self.assertEqual(Path(find_font_file(ps)).name.lower(), tf.name.lower())
+        self.assertIsNone(find_font_file("NoSuchFont-Bold"))
+
+    def test_build_refits_with_fallback(self):
+        import freetype
+        from lib import ae_bridge, ae_probe, motion_build, plat
+        from lib.motion_plan import fingerprint
+        ps = freetype.Face(str(test_font())).postscript_name.decode()
+        write_json(self.root / common.CLIENT_PROFILE_REL / "motion.json",
+                   {"duration_s": {"hard_min": 1}, "fallback_fonts": {"windows": ps, "mac": ps}})
+        common.set_context(self.root)
+        typ = self.reel.client_db / "branding/typography.json"
+        keep_typ = typ.read_bytes()
+        f = str(test_font())
+        write_json(typ, {"families": {"Brand": {"weights": [{"style": st, "file": f, "postscript_name": "Brand-" + st}
+                                                            for st in ("Medium", "Bold")]}}})
+        from lib.motion_plan import compile_motion
+        self.assertTrue(compile_motion(self.reel)["ok"])
+        self.assertTrue(read_json(self.reel.p("01_analysis/motion-plan.json"))["fonts"]["title"]["ps"].startswith("Brand-"))
+        write_json(self.reel.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor",
+                                                                   "plan_fingerprint": fingerprint(self.reel)})
+        self.addCleanup(typ.write_bytes, keep_typ)
+        saved = (ae_bridge.submit, ae_bridge.status, ae_probe.verdict_ok, plat.newest_app)
+        ae = FakeAE(fonts_ok=False)
+        ae_bridge.submit, ae_bridge.status = ae.submit, ae.status
+        ae_probe.verdict_ok = lambda v: True
+        plat.newest_app = lambda key: {"name": "AE", "exe": "AfterFX.exe"}
+        try:
+            r = motion_build.build(self.reel, allow_fallback_font=True)
+        finally:
+            ae_bridge.submit, ae_bridge.status, ae_probe.verdict_ok, plat.newest_app = saved
+        self.assertEqual(r["status"], "PROJECT_ASSEMBLED", r)
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        self.assertTrue(all(v["ps"] == ps for v in plan["fonts"].values()), plan["fonts"])
+        self.assertEqual(Path(plan["fonts"]["title"]["file"]).name.lower(), test_font().name.lower())
+
+
+class TestLockedAudio(CompiledMotion):
+    """Live run (Windows): After Effects holds imported audio open, so recompiling must never rewrite a file it
+    imported: the sequence dialogue is content-addressed and existing SFX are reused."""
+    def test_dialogue_content_addressed(self):
+        import time as _t
+        from lib.motion_audio import sequence_dialogue
+        from lib.timemap import TimeMap
+        tm = TimeMap([[0, 12000]])
+        a = sequence_dialogue(self.reel, tm)
+        self.assertRegex(a.name, r"^dialogue_motion_seq_[0-9a-f]{8}\.wav$")
+        t0 = a.stat().st_mtime
+        _t.sleep(1.1)
+        b = sequence_dialogue(self.reel, tm)
+        self.assertEqual(a, b)
+        self.assertEqual(b.stat().st_mtime, t0)                     # not rewritten
+        c = sequence_dialogue(self.reel, TimeMap([[0, 5000], [6000, 12000]]))
+        self.assertNotEqual(a, c)                                    # different content -> a new file name
+
+    def test_sfx_reused(self):
+        import time as _t
+        from lib.motion_audio import sfx_files
+        d = self.reel.p("06_audio/sfx")
+        f = sfx_files({"pop"}, d)["pop"]
+        t0 = f.stat().st_mtime
+        _t.sleep(1.1)
+        self.assertEqual(sfx_files({"pop"}, d)["pop"].stat().st_mtime, t0)
+
+    def test_qc_uses_plan_dialogue(self):
+        src = (SK / "engine/reel/lib/motion_qc.py").read_text(encoding="utf-8")
+        self.assertNotIn('"06_audio/dialogue/dialogue_motion_seq.wav"', src)
+
+
+class TestDialogue24Bit(CompiledMotion):
+    """Live run: audio-clean writes dialogue_clean.wav as 24-bit PCM; sequence_dialogue decoded it as 16-bit and
+    produced noise (−0.8 LUFS from a −14.3 LUFS source)."""
+    def test_24bit_source_keeps_loudness(self):
+        from lib.audio_clean import _lufs
+        from lib.motion_audio import envelope, sequence_dialogue
+        from lib.timemap import TimeMap
+        src = self.reel.p("06_audio/dialogue/dialogue_clean.wav")
+        keep = src.read_bytes()
+        try:
+            tmp24 = self.tmp / "d24.wav"
+            ff("-f", "lavfi", "-i", "sine=f=220:r=48000:d=12", "-af", "volume=0.25", "-ac", "2", "-c:a", "pcm_s24le",
+               str(tmp24))
+            src.write_bytes(tmp24.read_bytes())
+            out = sequence_dialogue(self.reel, TimeMap([[0, 12000]]))
+            self.assertAlmostEqual(_lufs(out), _lufs(tmp24), delta=1.0)
+            vals = envelope(out, 24.0, 48)
+            self.assertTrue(0.5 < sum(vals) / len(vals) <= 1.0, vals[:5])       # steady tone, not noise
+        finally:
+            src.write_bytes(keep)
 
 
 if __name__ == "__main__":

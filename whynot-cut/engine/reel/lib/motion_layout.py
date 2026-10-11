@@ -135,3 +135,37 @@ def place(scene_type: str, element: str, fmt: dict, direction: str) -> tuple[flo
 
 def role_of(scene_type: str, element: str) -> str:
     return PRESETS[scene_type][element]["role"]
+
+
+_FONT_FILES: dict = {}
+
+
+def find_font_file(ps: str) -> str | None:
+    """The installed font file whose PostScript name is `ps` (system and user font folders), or None."""
+    if ps in _FONT_FILES:
+        return _FONT_FILES[ps]
+    from .plat import font_dirs
+    hit = None
+    try:
+        import freetype
+    except Exception:  # noqa: BLE001 — no FreeType: cannot look fonts up by name
+        return None
+    for d in font_dirs():
+        if not d.exists():
+            continue
+        for f in sorted(d.rglob("*")):
+            if f.suffix.lower() not in (".ttf", ".otf"):
+                continue
+            try:
+                name = freetype.Face(str(f)).postscript_name
+            except Exception:  # noqa: BLE001 — unreadable font file
+                continue
+            name = name.decode() if isinstance(name, bytes) else str(name)
+            _FONT_FILES.setdefault(name, str(f))
+            if name == ps:
+                hit = str(f)
+                break
+        if hit:
+            break
+    _FONT_FILES[ps] = hit
+    return hit

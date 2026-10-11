@@ -103,7 +103,7 @@ def run(paths) -> dict:
         and aep.exists() and main.stat().st_mtime >= aep.stat().st_mtime
     add("render", bool(r_ok), "render exists, is newer than the .aep and matches the plan" if r_ok else
         "render missing, failed, or older than the .aep (motion-render)")
-    dia = paths.p("06_audio/dialogue/dialogue_motion_seq.wav")
+    dia = Path((plan.get("audio") or {}).get("dialogue") or paths.p("06_audio/dialogue/_missing.wav"))
     if main and main.exists() and dia.exists() and plan:
         s = audio_sync(main, dia, float(plan["fps"]))
         ok = s["corr"] is not None and s["corr"] >= 0.9 and abs(s["offset_frames"]) <= 1
