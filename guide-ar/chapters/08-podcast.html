@@ -8,7 +8,7 @@
 <h2 id="ch08-start">ابدأ من الحلقة</h2>
 
 <ol class="steps">
-<li>ضع الحلقة في <bdi dir="ltr"><code>data/Episodes/</code></bdi>، مثل <bdi dir="ltr"><code>EP01.mp4</code></bdi>، وضع بجانبها ورقة الحلقة <bdi dir="ltr"><code>EP01.md</code></bdi> كما في <a href="#ch04-episode-sheet">ورقة الحلقة (episode sheet)</a>. إذا كان اسم الملف عربيًا، يعطيه WhyNot Cut رقمًا قصيرًا ويخبرك به. وإذا وضعت الحلقة في <bdi dir="ltr"><code>data/Raw/</code></bdi> بالخطأ، ينبّهك Claude لتنقلها.</li>
+<li>ضع الحلقة في <bdi dir="ltr"><code>data/Episodes/</code></bdi>، مثل <bdi dir="ltr"><code>EP01.mp4</code></bdi>، وضع بجانبها ورقة الحلقة <bdi dir="ltr"><code>EP01.md</code></bdi> كما في <a href="#ch04-episode-sheet">ورقة الحلقة (episode sheet)</a>. إذا كان اسم الملف عربيًا، يعطيه WhyNot Cut اسمًا قصيرًا بحروف وأرقام لاتينية ويخبرك به. وإذا وضعت الحلقة في <bdi dir="ltr"><code>data/Raw/</code></bdi> بالخطأ، ينبّهك Claude لتنقلها.</li>
 <li>اكتب لـ Claude «طلّع ريلز من الحلقة»، أو استخدم الأمر:
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:podcast EP01</code></bdi></div></li>
 <li>يخبرك Claude بالوقت المتوقع، ثم يبدأ: يفحص الحلقة، ويكتب التفريغ النصي (transcript) لها كاملة، ثم يحللها.</li>
@@ -31,7 +31,7 @@
 
 <p>يقرأ Claude الحلقة كلها قبل أن يقترح أي شيء، ثم يكتب:</p>
 <ul>
-<li><strong>خريطة الموضوعات:</strong> أجزاء الحلقة بالترتيب، وهي نفسها فصول يوتيوب (chapters) في حزمة النشر.</li>
+<li><strong>خريطة الموضوعات:</strong> أجزاء الحلقة بالترتيب، وهي نفسها فصول YouTube (chapters) في حزمة النشر.</li>
 <li><strong>من يتكلم ومتى:</strong> لتتبع الصورةُ المتحدثَ في اللقطات الواسعة.</li>
 <li><strong>الريلز المقترحة:</strong> عادة من 8 إلى 15 ريلًا لكل ساعة، متنوعة الأنواع، ولا يغطي ريلان اللحظة نفسها.</li>
 </ul>
@@ -116,11 +116,11 @@
 <tr><th>الملف</th><th>ما فيه</th></tr>
 </thead>
 <tbody>
-<tr><td><bdi dir="ltr"><code>youtube.md</code></bdi></td><td>من 3 إلى 5 عناوين مقترحة، والوصف (description)، وفصول يوتيوب (chapters) من خريطة الموضوعات، والكلمات المفتاحية (tags).</td></tr>
-<tr><td><bdi dir="ltr"><code>chapters.txt</code></bdi></td><td>فصول يوتيوب جاهزة للصق.</td></tr>
+<tr><td><bdi dir="ltr"><code>youtube.md</code></bdi></td><td>من 3 إلى 5 عناوين مقترحة، والوصف (description)، وفصول YouTube (chapters) من خريطة الموضوعات، والكلمات المفتاحية (tags).</td></tr>
+<tr><td><bdi dir="ltr"><code>chapters.txt</code></bdi></td><td>فصول YouTube جاهزة للصق.</td></tr>
 <tr><td><bdi dir="ltr"><code>tags.txt</code></bdi></td><td>الكلمات المفتاحية جاهزة للصق.</td></tr>
 <tr><td><bdi dir="ltr"><code>EP01.srt</code></bdi></td><td>ملف ترجمة الحلقة.</td></tr>
-<tr><td><bdi dir="ltr"><code>reels/EP01_R03.md</code></bdi></td><td>لكل ريل: الكابشن والهاشتاجات لإنستجرام وتيك توك، وعنوان ووصف YouTube&nbsp;Shorts. يُكتب بعد الموافقة على خطة الريل.</td></tr>
+<tr><td><bdi dir="ltr"><code>reels/EP01_R03.md</code></bdi></td><td>لكل ريل: الكابشن والهاشتاجات لـ Instagram وTikTok، وعنوان ووصف YouTube&nbsp;Shorts. يُكتب بعد الموافقة على خطة الريل.</td></tr>
 <tr><td>الصور المصغرة (thumbnails)</td><td>تصميمات مقترحة من فريمات الحلقة، يشاهدها Claude بنفسه قبل أن يعرضها عليك.</td></tr>
 </tbody>
 </table>
@@ -132,7 +132,7 @@
 </aside>
 
 <aside class="tip">
-<p>لا يُرفع أي شيء على أي منصة. أنت من ينشر: انسخ النصوص من ملفات الحزمة إلى يوتيوب وإنستجرام وتيك توك.</p>
+<p>لا يُرفع أي شيء على أي منصة. أنت من ينشر: انسخ النصوص من ملفات الحزمة إلى YouTube وInstagram وTikTok.</p>
 </aside>
 
 <h2 id="ch08-needs-you">ما يبقى عليك في الحلقة</h2>
