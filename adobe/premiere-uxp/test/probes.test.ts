@@ -19,29 +19,32 @@ function baseCtx(ppro: unknown): Ctx {
   };
 }
 
-test("with an empty Premiere object every probe fails or defers cleanly - none throws", async () => {
+const OPS = [
+  "host_info",
+  "ws_loopback",
+  "create_project",
+  "import_fcp7_xml",
+  "sequence_settings",
+  "export_frame",
+  "keyframes_motion_opacity_crop",
+  "effects_by_match_name",
+  "track_rename",
+  "markers",
+  "undo_transaction",
+  "save_close_open",
+];
+
+test("without a config only the read-only probes run; every other probe is skipped with ok:null 'no config'", async () => {
   const ops = await runAll(buildProbes(), baseCtx({}));
-  assert.equal(ops.length, 12);
   assert.deepEqual(
     ops.map((o) => o.op),
-    [
-      "host_info",
-      "ws_loopback",
-      "create_project",
-      "import_fcp7_xml",
-      "sequence_settings",
-      "export_frame",
-      "keyframes_motion_opacity_crop",
-      "effects_by_match_name",
-      "track_rename",
-      "markers",
-      "undo_transaction",
-      "save_close_open",
-    ],
+    OPS,
   );
-  for (const o of ops) assert.ok(o.ok === false || o.ok === null || o.op === "host_info", `${o.op} -> ${o.ok}`);
+  for (const o of ops.slice(2)) {
+    assert.equal(o.ok, null, `${o.op} -> ${o.ok}`);
+    assert.match(String(o.detail), /^no config/);
+  }
   assert.equal(ops.find((o) => o.op === "ws_loopback")?.detail, "pending reel serve (T6.2)");
-  assert.match(ops.find((o) => o.op === "create_project")?.error ?? "", /config\.json not loaded/);
 });
 
 // ---- a tiny fake Premiere: enough to exercise tx(), Steps and the transaction label -------------------------------
@@ -82,6 +85,7 @@ function fakePremiere() {
     getAudioTrackCount: async () => 1,
   };
   const project = {
+    path: `${WHYNOT_TEST}/_uxp-spike/spike-1.prproj`,
     lockedAccess: (cb: () => void) => cb(),
     executeTransaction: (cb: (ca: { addAction: (a: FakeAction) => boolean }) => void, label?: string) => {
       labels.push(label ?? "");
@@ -103,6 +107,17 @@ function fakePremiere() {
   return { ppro, project, sequence, labels, marks, trackNames };
 }
 
+const WHYNOT_TEST = "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test";
+
+/** A context as it looks after create_project + import_fcp7_xml succeeded against the fake. */
+function scratchCtx(f: ReturnType<typeof fakePremiere>): Ctx {
+  const ctx = baseCtx(f.ppro);
+  ctx.config = { xml_path: `${WHYNOT_TEST}/a.xml`, work_dir: `${WHYNOT_TEST}/_uxp-spike` };
+  ctx.project = f.project as unknown as Ctx["project"];
+  ctx.sequence = f.sequence as unknown as Ctx["sequence"];
+  return ctx;
+}
+
 function probe(op: string) {
   const p = buildProbes().find((d) => d.op === op);
   assert.ok(p, `no probe ${op}`);
@@ -111,9 +126,7 @@ function probe(op: string) {
 
 test("track_rename renames V1 and A1 inside labelled transactions and reads the names back", async () => {
   const f = fakePremiere();
-  const ctx = baseCtx(f.ppro);
-  ctx.project = f.project as unknown as Ctx["project"];
-  ctx.sequence = f.sequence as unknown as Ctx["sequence"];
+  const ctx = scratchCtx(f);
   const r = await runProbe(probe("track_rename"), ctx);
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(f.trackNames, { v: ["WNC Spike V1"], a: ["WNC Spike A1"] });
@@ -123,9 +136,7 @@ test("track_rename renames V1 and A1 inside labelled transactions and reads the 
 
 test("markers adds two markers and recolours one", async () => {
   const f = fakePremiere();
-  const ctx = baseCtx(f.ppro);
-  ctx.project = f.project as unknown as Ctx["project"];
-  ctx.sequence = f.sequence as unknown as Ctx["sequence"];
+  const ctx = scratchCtx(f);
   const r = await runProbe(probe("markers"), ctx);
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(f.marks.length, 2);
@@ -135,9 +146,7 @@ test("markers adds two markers and recolours one", async () => {
 
 test("undo_transaction does three changes in ONE transaction labelled 'WhyNot Cut build'", async () => {
   const f = fakePremiere();
-  const ctx = baseCtx(f.ppro);
-  ctx.project = f.project as unknown as Ctx["project"];
-  ctx.sequence = f.sequence as unknown as Ctx["sequence"];
+  const ctx = scratchCtx(f);
   const r = await runProbe(probe("undo_transaction"), ctx);
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(f.labels, ["WhyNot Cut build"]);
@@ -150,8 +159,7 @@ test("save_close_open is n/a (not a failure) when 'keep project open' is selecte
   skipSaveCloseOpen.value = true;
   try {
     const f = fakePremiere();
-    const ctx = baseCtx(f.ppro);
-    ctx.project = f.project as unknown as Ctx["project"];
+    const ctx = scratchCtx(f);
     const r = await runProbe(probe("save_close_open"), ctx);
     assert.equal(r.ok, null);
   } finally {

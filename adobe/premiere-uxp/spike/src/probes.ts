@@ -13,6 +13,7 @@ import type {
 } from "@adobe/premierepro";
 import { baseName, ensureDir, readText, statOf, writeText } from "./fsutil.ts";
 import { toForwardSlashes } from "./home.ts";
+import { isUnder, normPath, scratchPathProblem } from "./safety.ts";
 import { jsonSafe, type ProbeDef, type ProbeOutcome } from "./runner.ts";
 import type { UxpFs, UxpModule, UxpOs } from "./uxp-types.ts";
 
@@ -109,20 +110,30 @@ function add(ca: CompoundAction, action: Parameters<CompoundAction["addAction"]>
   if (!ca.addAction(action)) throw new Error("CompoundAction.addAction returned false");
 }
 
+/** Refuse any project that is not inside the validated work_dir (path compared normalised: slashes, case). */
+function assertScratchProject(ctx: Ctx, project: Project): void {
+  const cfg = needConfig(ctx);
+  const path = project.path;
+  expect(path, "the project reports no path - refusing to touch a project outside work_dir");
+  expect(isUnder(path, cfg.work_dir), `refusing to touch a project outside work_dir: ${path}`);
+}
+
+/**
+ * The scratch project created by create_project in THIS run - never the user's active project. Every mutating
+ * probe (and save_close_open) goes through here, so a failed create_project leaves the user's project untouched.
+ */
 async function getProject(ctx: Ctx): Promise<Project> {
-  if (ctx.project) return ctx.project;
-  const p = await ctx.ppro.Project.getActiveProject();
-  expect(p, "no active project (create_project did not succeed)");
-  ctx.project = p;
+  const p = ctx.project;
+  expect(p, "no scratch project: create_project did not succeed in this run (refusing to use the active project)");
+  assertScratchProject(ctx, p);
   return p;
 }
 
+/** Only the sequence import_fcp7_xml created in the scratch project. */
 async function getSequence(ctx: Ctx): Promise<Sequence> {
-  if (ctx.sequence) return ctx.sequence;
-  const project = await getProject(ctx);
-  const s = await project.getActiveSequence();
-  expect(s, "no active sequence (import_fcp7_xml did not succeed)");
-  ctx.sequence = s;
+  await getProject(ctx);
+  const s = ctx.sequence;
+  expect(s, "no scratch sequence: import_fcp7_xml did not succeed in this run");
   return s;
 }
 
@@ -207,11 +218,16 @@ async function numericKeyframes(
   );
   const times = param.getKeyframeListAsTickTimes().map((t) => t.seconds);
   const mid = await param.getValueAtTime(tickSeconds(ctx, (a.t + b.t) / 2));
+  const atA = await param.getValueAtTime(tickSeconds(ctx, a.t));
+  const atB = await param.getValueAtTime(tickSeconds(ctx, b.t));
   expect(times.length >= 2, `expected >= 2 keyframes, read back ${times.length}`);
-  return { param: param.displayName, set: [a, b], read_back_times_s: times, value_at_mid: mid, timeVarying: param.isTimeVarying() };
+  return { param: param.displayName, set: [a, b], read_back_times_s: times, value_at_a: atA, value_at_b: atB, value_at_mid: mid, timeVarying: param.isTimeVarying() };
 }
 
-/** The clip the effect/keyframe probes work on: a placed still (config.still_png) or, failing that, any clip. */
+/**
+ * The clip the effect/keyframe probes work on: a placed still (config.still_png) or, failing that, a clip of the
+ * scratch sequence created by import_fcp7_xml (getSequence never returns anything else).
+ */
 async function ensureTarget(ctx: Ctx): Promise<TargetClip> {
   if (ctx.target) return ctx.target;
   const { ppro } = ctx;
@@ -393,12 +409,16 @@ const createProject: ProbeDef<Ctx> = {
   run: async (ctx) => {
     const cfg = needConfig(ctx);
     const workDir = toForwardSlashes(cfg.work_dir).replace(/\/+$/, "");
+    const problem = scratchPathProblem(workDir);
+    expect(!problem, `work_dir rejected: ${problem}`);
     await ensureDir(ctx.fs, workDir);
     const path = `${workDir}/spike-${ctx.stamp}.prproj`;
     const project = await ctx.ppro.Project.createProject(path);
     expect(project, "createProject returned nothing");
+    // adopt it only if Premiere really put it under work_dir; otherwise no later probe may touch anything
+    assertScratchProject({ ...ctx, project }, project);
     ctx.project = project;
-    ctx.projectPath = toForwardSlashes(project.path || path);
+    ctx.projectPath = toForwardSlashes(project.path);
     const active = await ctx.ppro.Project.getActiveProject();
     return {
       ok: true,
@@ -420,6 +440,8 @@ const importXml: ProbeDef<Ctx> = {
     const cfg = needConfig(ctx);
     const project = await getProject(ctx);
     const xml = toForwardSlashes(cfg.xml_path);
+    const xmlProblem = scratchPathProblem(xml);
+    expect(!xmlProblem, `xml_path rejected: ${xmlProblem}`);
     const xmlStat = await statOf(ctx.fs, xml);
     expect(xmlStat.exists, `xml_path does not exist: ${xml}`);
     const before = await project.getSequences();
@@ -435,8 +457,8 @@ const importXml: ProbeDef<Ctx> = {
       fresh = all.filter((s) => !beforeIds.has(s.guid.toString()));
       if (fresh.length === 0) await sleep(500);
     }
-    const seq = fresh[fresh.length - 1] ?? all[all.length - 1];
-    expect(seq, `importFiles returned ${importedOk} but the project has no sequence`);
+    const seq = fresh[fresh.length - 1];
+    expect(seq, `importFiles returned ${importedOk} but it created no new sequence in the scratch project`);
     ctx.sequence = seq;
     ctx.expect.sequenceName = seq.name;
     const detail: Record<string, unknown> = {
@@ -617,86 +639,166 @@ const keyframes: ProbeDef<Ctx> = {
   op: "keyframes_motion_opacity_crop",
   timeoutMs: 180_000,
   run: async (ctx) => {
-    const { ppro } = ctx;
     const project = await getProject(ctx);
     const steps = new Steps();
     const target = await steps.run("place_still_or_pick_clip", async () => {
       const t = await ensureTarget(ctx);
       return { source: t.source, track_index: t.trackIndex, start_s: (await t.clip.getStartTime()).seconds, end_s: (await t.clip.getEndTime()).seconds, in_point_s: (await t.clip.getInPoint()).seconds, notes: ctx.notes.slice() };
     });
-    if (!target || !ctx.target) return steps.outcome();
-    const clip = ctx.target.clip;
-    const chain = await clip.getComponentChain();
-    await steps.run("dump_component_chain", async () => await dumpChain(chain));
-
-    const motion = await findComponent(chain, /ADBE Motion/i);
-    await steps.run("motion_found", async () => {
-      expect(motion, "no component matching /ADBE Motion/ in the chain");
-      return { matchName: motion.matchName };
-    });
-    if (motion) {
-      await steps.run("motion.scale 100->110", () => numericKeyframes(ctx, project, motion.comp, /^scale$/i, { t: 0, v: 100 }, { t: 1, v: 110 }));
-      await steps.run("motion.rotation 0->5", () => numericKeyframes(ctx, project, motion.comp, /^rotation$/i, { t: 0, v: 0 }, { t: 1, v: 5 }));
-      await steps.run("motion.position (PointF)", async () => {
-        const found = findParam(motion.comp, /^position$/i);
-        expect(found, "no param matching /^position$/");
-        const { param } = found;
-        const start = (await param.getStartValue()).value.value as PointF;
-        const kA = param.createKeyframe(new ppro.PointF(start.x, start.y));
-        kA.position = tickSeconds(ctx, 0);
-        const kB = param.createKeyframe(new ppro.PointF(start.x + 0.05, start.y));
-        kB.position = tickSeconds(ctx, 1);
-        expect(tx(project, (ca) => add(ca, param.createSetTimeVaryingAction(true))), "setTimeVarying transaction returned false");
-        expect(
-          tx(project, (ca) => {
-            add(ca, param.createAddKeyframeAction(kA));
-            add(ca, param.createAddKeyframeAction(kB));
-          }),
-          "addKeyframe transaction returned false",
-        );
-        const times = param.getKeyframeListAsTickTimes().map((t) => t.seconds);
-        expect(times.length >= 2, `expected >= 2 position keyframes, read back ${times.length}`);
-        return { start: { x: start.x, y: start.y }, read_back_times_s: times, value_at_1s: await param.getValueAtTime(tickSeconds(ctx, 1)) };
-      });
-      await steps.run("motion.scale interpolation -> bezier at 1s", async () => {
-        const found = findParam(motion.comp, /^scale$/i);
-        expect(found, "no scale param");
-        const { param } = found;
-        expect(tx(project, (ca) => add(ca, param.createSetInterpolationAtKeyframeAction(tickSeconds(ctx, 1), ppro.Keyframe.INTERPOLATION_MODE_BEZIER))), "interpolation transaction returned false");
-        const kf = param.getKeyframePtr(tickSeconds(ctx, 1));
-        return { mode: await kf.getTemporalInterpolationMode(), wanted: ppro.Keyframe.INTERPOLATION_MODE_BEZIER };
-      });
-    }
-
-    const opacity = await findComponent(chain, /ADBE Opacity/i);
-    await steps.run("opacity_found", async () => {
-      expect(opacity, "no component matching /ADBE Opacity/ in the chain");
-      return { matchName: opacity.matchName };
-    });
-    if (opacity) await steps.run("opacity 100->0", () => numericKeyframes(ctx, project, opacity.comp, /^opacity$/i, { t: 0, v: 100 }, { t: 1, v: 0 }));
-
-    let crop = await findComponent(chain, /ADBE Crop/i);
-    if (!crop) {
-      await steps.run("crop: add via VideoFilterFactory", async () => {
-        const names = await ppro.VideoFilterFactory.getMatchNames();
-        const cands = names.filter((n) => /ADBE Crop/i.test(n));
-        expect(cands.length > 0, "no filter match name matching /ADBE Crop/ in VideoFilterFactory");
-        const pick = cands.find((n) => /^AE\.ADBE Crop$/i.test(n)) ?? cands[0] ?? "";
-        const comp = await ppro.VideoFilterFactory.createComponent(pick);
-        expect(tx(project, (ca) => add(ca, chain.createAppendComponentAction(comp))), "append crop transaction returned false");
-        crop = await findComponent(chain, /ADBE Crop/i);
-        expect(crop, "crop not in the chain after append");
-        return { candidates: cands, used: pick };
-      });
-    }
-    if (crop) {
-      const c = crop;
-      await steps.run("crop.left 0->10", () => numericKeyframes(ctx, project, c.comp, /^left$/i, { t: 0, v: 0 }, { t: 1, v: 10 }));
-      await steps.run("crop.top 0->5", () => numericKeyframes(ctx, project, c.comp, /^top$/i, { t: 0, v: 0 }, { t: 1, v: 5 }));
-    }
+    if (target && ctx.target) await stillKeyframes(ctx, project, steps, ctx.target);
+    await timeBasis(ctx, project, steps);
     return steps.outcome();
   },
 };
+
+/** Motion / Opacity / Crop keyframes on the target clip (the placed still, else a clip of the scratch sequence). */
+async function stillKeyframes(ctx: Ctx, project: Project, steps: Steps, target: TargetClip): Promise<void> {
+  const { ppro } = ctx;
+  const clip = target.clip;
+  const chain = await steps.run("get_component_chain", async () => await clip.getComponentChain());
+  if (!chain) return;
+  await steps.run("dump_component_chain", async () => await dumpChain(chain));
+
+  const motion = await findComponent(chain, /ADBE Motion/i);
+  await steps.run("motion_found", async () => {
+    expect(motion, "no component matching /ADBE Motion/ in the chain");
+    return { matchName: motion.matchName };
+  });
+  if (motion) {
+    await steps.run("motion.scale 100->110", () => numericKeyframes(ctx, project, motion.comp, /^scale$/i, { t: 0, v: 100 }, { t: 1, v: 110 }));
+    await steps.run("motion.rotation 0->5", () => numericKeyframes(ctx, project, motion.comp, /^rotation$/i, { t: 0, v: 0 }, { t: 1, v: 5 }));
+    await steps.run("motion.position (PointF)", async () => {
+      const found = findParam(motion.comp, /^position$/i);
+      expect(found, "no param matching /^position$/");
+      const { param } = found;
+      const start = (await param.getStartValue()).value.value as PointF;
+      const kA = param.createKeyframe(new ppro.PointF(start.x, start.y));
+      kA.position = tickSeconds(ctx, 0);
+      const kB = param.createKeyframe(new ppro.PointF(start.x + 0.05, start.y));
+      kB.position = tickSeconds(ctx, 1);
+      expect(tx(project, (ca) => add(ca, param.createSetTimeVaryingAction(true))), "setTimeVarying transaction returned false");
+      expect(
+        tx(project, (ca) => {
+          add(ca, param.createAddKeyframeAction(kA));
+          add(ca, param.createAddKeyframeAction(kB));
+        }),
+        "addKeyframe transaction returned false",
+      );
+      const times = param.getKeyframeListAsTickTimes().map((t) => t.seconds);
+      expect(times.length >= 2, `expected >= 2 position keyframes, read back ${times.length}`);
+      return { start: { x: start.x, y: start.y }, read_back_times_s: times, value_at_1s: await param.getValueAtTime(tickSeconds(ctx, 1)) };
+    });
+    await steps.run("motion.scale interpolation -> bezier at 1s", async () => {
+      const found = findParam(motion.comp, /^scale$/i);
+      expect(found, "no scale param");
+      const { param } = found;
+      expect(tx(project, (ca) => add(ca, param.createSetInterpolationAtKeyframeAction(tickSeconds(ctx, 1), ppro.Keyframe.INTERPOLATION_MODE_BEZIER))), "interpolation transaction returned false");
+      const kf = param.getKeyframePtr(tickSeconds(ctx, 1));
+      return { mode: await kf.getTemporalInterpolationMode(), wanted: ppro.Keyframe.INTERPOLATION_MODE_BEZIER };
+    });
+  }
+
+  const opacity = await findComponent(chain, /ADBE Opacity/i);
+  await steps.run("opacity_found", async () => {
+    expect(opacity, "no component matching /ADBE Opacity/ in the chain");
+    return { matchName: opacity.matchName };
+  });
+  if (opacity) await steps.run("opacity 100->0", () => numericKeyframes(ctx, project, opacity.comp, /^opacity$/i, { t: 0, v: 100 }, { t: 1, v: 0 }));
+
+  let crop = await findComponent(chain, /ADBE Crop/i);
+  if (!crop) {
+    await steps.run("crop: add via VideoFilterFactory", async () => {
+      const names = await ppro.VideoFilterFactory.getMatchNames();
+      const cands = names.filter((n) => /ADBE Crop/i.test(n));
+      expect(cands.length > 0, "no filter match name matching /ADBE Crop/ in VideoFilterFactory");
+      const pick = cands.find((n) => /^AE\.ADBE Crop$/i.test(n)) ?? cands[0] ?? "";
+      const comp = await ppro.VideoFilterFactory.createComponent(pick);
+      expect(tx(project, (ca) => add(ca, chain.createAppendComponentAction(comp))), "append crop transaction returned false");
+      crop = await findComponent(chain, /ADBE Crop/i);
+      expect(crop, "crop not in the chain after append");
+      return { candidates: cands, used: pick };
+    });
+  }
+  if (crop) {
+    const c = crop;
+    await steps.run("crop.left 0->10", () => numericKeyframes(ctx, project, c.comp, /^left$/i, { t: 0, v: 0 }, { t: 1, v: 10 }));
+    await steps.run("crop.top 0->5", () => numericKeyframes(ctx, project, c.comp, /^top$/i, { t: 0, v: 0 }, { t: 1, v: 5 }));
+  }
+}
+
+interface ClipWindow {
+  start_s: number;
+  in_s: number;
+  end_s: number;
+  duration_s: number;
+}
+
+const EPS = 0.02;
+const within = (t: number, lo: number, hi: number) => t >= lo - EPS && t <= hi + EPS;
+
+/** Which time window each read-back keyframe time falls into: clip-local [0,dur], media [in,in+dur], sequence [start,end]. */
+export function classifyTimes(times: number[], w: ClipWindow) {
+  return {
+    inside_local_window: times.map((t) => within(t, 0, w.duration_s)),
+    inside_media_window: times.map((t) => within(t, w.in_s, w.in_s + w.duration_s)),
+    inside_sequence_window: times.map((t) => within(t, w.start_s, w.end_s)),
+  };
+}
+
+/**
+ * Keyframe time basis. A still placed at the end has in-point 0, so it cannot tell 0-relative from in-relative.
+ * Use a clip of the imported scratch sequence with a non-zero in-point AND a non-zero start, and key three
+ * different params with the three candidate bases (0-relative, in-point-relative, start-relative). The read-back
+ * times, the values at those times and which window they land in say which basis Premiere uses.
+ */
+async function timeBasis(ctx: Ctx, project: Project, steps: Steps): Promise<void> {
+  const holder: { clip?: VideoClipTrackItem; w?: ClipWindow } = {};
+  await steps.run("time_basis: find clip with non-zero in-point and start", async () => {
+    const seq = await getSequence(ctx);
+    const vCount = await seq.getVideoTrackCount();
+    for (let ti = 0; ti < vCount; ti++) {
+      const track = await seq.getVideoTrack(ti);
+      for (const c of track.getTrackItems(ctx.ppro.Constants.TrackItemType.CLIP, false)) {
+        const start = (await c.getStartTime()).seconds;
+        const inP = (await c.getInPoint()).seconds;
+        const end = (await c.getEndTime()).seconds;
+        if (inP > 0.1 && start > 0.1 && end - start >= 2) {
+          holder.clip = c;
+          holder.w = { start_s: start, in_s: inP, end_s: end, duration_s: end - start };
+          return { track_index: ti, ...holder.w };
+        }
+      }
+    }
+    throw new Error("no clip with in-point > 0.1 s, start > 0.1 s and duration >= 2 s in the imported scratch sequence");
+  });
+  const { clip, w } = holder;
+  if (!clip || !w) return;
+  const chain = await steps.run("time_basis: get_component_chain", async () => await clip.getComponentChain());
+  if (!chain) return;
+  const motion = await findComponent(chain, /ADBE Motion/i);
+  const opacity = await findComponent(chain, /ADBE Opacity/i);
+  const bases: Array<{ name: string; comp: typeof motion; rx: RegExp; t0: number; a: number; b: number }> = [
+    { name: "A zero-relative (t=0, 1) on Scale", comp: motion, rx: /^scale$/i, t0: 0, a: 100, b: 110 },
+    { name: "B in-point-relative (t=in, in+1) on Rotation", comp: motion, rx: /^rotation$/i, t0: w.in_s, a: 0, b: 5 },
+    { name: "C start-relative (t=start, start+1) on Opacity", comp: opacity, rx: /^opacity$/i, t0: w.start_s, a: 100, b: 20 },
+  ];
+  for (const base of bases) {
+    await steps.run(`time_basis ${base.name}`, async () => {
+      expect(base.comp, `component for ${base.name} not in the chain`);
+      const r = await numericKeyframes(ctx, project, base.comp.comp, base.rx, { t: base.t0, v: base.a }, { t: base.t0 + 1, v: base.b });
+      const times = (r.read_back_times_s as number[]) ?? [];
+      const overlap = w.in_s < w.duration_s || w.start_s < w.duration_s;
+      return {
+        ...r,
+        clip: w,
+        requested_times_s: [base.t0, base.t0 + 1],
+        ...classifyTimes(times, w),
+        windows_overlap: overlap,
+        note: overlap ? "the local/media/sequence windows overlap for this clip, so inside_* is not conclusive: compare read_back_times_s with requested_times_s and value_at_a/value_at_b" : undefined,
+      };
+    });
+  }
+}
 
 const FILTER_TARGETS: Array<{ key: string; display: RegExp; match: RegExp }> = [
   { key: "gaussian_blur", display: /^gaussian blur$/i, match: /gaussian blur/i },
@@ -898,6 +1000,7 @@ const saveCloseOpen: ProbeDef<Ctx> = {
       const reopened = await ppro.Project.open(path, new ppro.OpenProjectOptions().setShowConvertProjectDialog(false).setShowLocateFileDialog(false).setShowWarningDialog(false).setAddToMRUList(false));
       expect(reopened, "Project.open returned nothing");
       ctx.project = reopened;
+      assertScratchProject(ctx, reopened);
       const seqs = await reopened.getSequences();
       const seq = seqs.find((s) => s.name === ctx.expect.sequenceName) ?? seqs[0];
       expect(seq, "no sequences after reopen");
@@ -912,8 +1015,16 @@ const saveCloseOpen: ProbeDef<Ctx> = {
   },
 };
 
+/** Read-only probes: safe without a validated config. Every other probe changes a project, so it needs one. */
+const READ_ONLY_OPS = new Set(["host_info", "ws_loopback"]);
+
 export function buildProbes(): ProbeDef<Ctx>[] {
-  return [hostInfo, wsLoopback, createProject, importXml, sequenceSettings, exportFrame, keyframes, effects, trackRename, markers, undoTransaction, saveCloseOpen];
+  const all = [hostInfo, wsLoopback, createProject, importXml, sequenceSettings, exportFrame, keyframes, effects, trackRename, markers, undoTransaction, saveCloseOpen];
+  return all.map((def) =>
+    READ_ONLY_OPS.has(def.op)
+      ? def
+      : { ...def, run: async (ctx: Ctx): Promise<ProbeOutcome> => (ctx.config ? def.run(ctx) : { ok: null, detail: `no config (${ctx.configError ?? "config.json not loaded"})` }) },
+  );
 }
 
 // ---------------------------------------------------------------------------------------------- context
@@ -924,6 +1035,17 @@ export async function loadConfig(fs: UxpFs, dir: string): Promise<{ config: Spik
     const parsed = JSON.parse(text) as Partial<SpikeConfig>;
     const missing = (["xml_path", "work_dir"] as const).filter((k) => typeof parsed[k] !== "string" || parsed[k] === "");
     if (missing.length) return { config: null, error: `config.json is missing: ${missing.join(", ")}` };
+    // Everything the spike reads or writes must live under .../Editing Plugin/whynot-test/ (never WhyNot Clients).
+    // A config that fails is treated as missing, so only the read-only probes run.
+    for (const key of ["work_dir", "xml_path", "still_png"] as const) {
+      const value = parsed[key];
+      if (typeof value !== "string" || value === "") continue;
+      const problem = scratchPathProblem(value);
+      if (problem) return { config: null, error: `config.json rejected: ${key} (${normPath(value)}) ${problem}` };
+    }
+    if (typeof parsed.ws_url === "string" && !/^ws:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(parsed.ws_url)) {
+      return { config: null, error: `config.json rejected: ws_url must be a ws://127.0.0.1 address` };
+    }
     return { config: parsed as SpikeConfig, error: null };
   } catch (e) {
     return { config: null, error: `cannot read ${dir}/config.json: ${errText(e)}` };

@@ -28,6 +28,7 @@ file is rewritten after every probe, so a hang still leaves partial results.
 Probes, in order: `host_info`, `ws_loopback`, `create_project`, `import_fcp7_xml`, `sequence_settings`, `export_frame`,
 `keyframes_motion_opacity_crop`, `effects_by_match_name`, `track_rename`, `markers`, `undo_transaction`, `save_close_open`.
 Match names are discovered at runtime (component chain and filter lists are dumped into the results).
+`keyframes_motion_opacity_crop` also keys a clip of the imported scratch sequence that has a non-zero in-point and start with three candidate time bases (0-relative, in-point-relative, start-relative) on three different params, so the results show which basis Premiere uses.
 
 ### Preparing a run (controller)
 
@@ -40,7 +41,12 @@ Match names are discovered at runtime (component chain and filter lists are dump
    | `still_png` | a PNG placed on the top video track (past the sequence end) for the keyframe / effect probes, e.g. `.../03_broll/typography/GFX_002.png` (1080x1920 RGBA). Optional: without it the probes use the first clip they find |
    | `ws_url` | optional `ws://127.0.0.1:<port>/...` of the reel serve (T6.2). Absent or `null` -> `ws_loopback` records "pending reel serve (T6.2)" |
 
-   Use absolute paths with forward slashes (`D:/...`). Never point `work_dir` at `D:\WhyNot Clients`.
+   Use absolute paths with forward slashes (`D:/...`). **Safety:** `work_dir`, `xml_path` and `still_png` must all be under
+   `.../Editing Plugin/whynot-test/` (case/slash-insensitive, no `..`) and never under `WhyNot Clients`, and `ws_url` must be
+   `ws://127.0.0.1` or `ws://localhost`; otherwise the whole config is rejected and treated as missing. Without a valid config only
+   the read-only probes (`host_info`, `ws_loopback`) run; the rest are `ok:null` "no config". The spike only ever touches the
+   scratch project it creates itself in `work_dir` (never the project that is open in Premiere): if `create_project` fails or
+   the project lands outside `work_dir`, every later probe fails without calling anything on any project.
 2. `npm run package:spike`, then install `dist/uxp/WhyNotCut-Spike.ccx` with Adobe's installer agent (close Premiere first):
    `"C:\Program Files\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent\UnifiedPluginInstallerAgent.exe" /install "<path>\WhyNotCut-Spike.ccx"`
    (the exact folder may differ per machine; find it with `where /r "C:\Program Files\Common Files\Adobe" UnifiedPluginInstallerAgent.exe`).

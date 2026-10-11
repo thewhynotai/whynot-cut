@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["test/**/*.ts", "spike/src/runner.ts", "spike/src/home.ts", "spike/src/probes.ts", "spike/src/fsutil.ts", "spike/src/uxp-types.ts"]
+  "include": ["test/**/*.ts", "spike/src/runner.ts", "spike/src/home.ts", "spike/src/probes.ts", "spike/src/fsutil.ts", "spike/src/uxp-types.ts", "spike/src/safety.ts"]
 }
