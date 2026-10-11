@@ -29,6 +29,80 @@ def export_spec(paths: Paths) -> dict:
             "folder": ex.get("folder")}
 
 
+NATIVE_STATUSES = ("PRPROJ_BUILT", "PRPROJ_BUILT_WITH_ISSUES")
+MAGNIFIC_MANIFEST = "05_assets/magnific-manifest.json"
+LICENCE_NOTE = "agency-licensed, not transferable"
+
+
+def _rel(paths: Paths, p) -> str | None:
+    """A project-relative path with forward slashes on every OS (the README is read on Windows and macOS)."""
+    if not p:
+        return None
+    try:
+        return Path(p).relative_to(paths.project).as_posix()
+    except ValueError:
+        return str(p)
+
+
+def premiere_build_state(paths: Paths) -> dict:
+    """What `ppro-build` really produced: {"native": bool, "status", "rec", "project", "failed_checks", "why"}.
+    Native = the bridge saved a .prproj (PRPROJ_BUILT | PRPROJ_BUILT_WITH_ISSUES); anything else (no result, FAILED)
+    means the editor works from the XML interchange."""
+    rec = read_json(paths.p("07_premiere/ppro-build-result.json"), {}) or {}
+    status = rec.get("status")
+    native = status in NATIVE_STATUSES
+    if native:
+        why = None
+    elif status:
+        err = rec.get("premiere_error")
+        why = f"the native build ended **{status}**" + (f" ({err})" if err else "") + " — the XML interchange is the fallback"
+    else:
+        why = "not built natively yet (no `07_premiere/ppro-build-result.json`)"
+    default = paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")
+    project = rec.get("project") or str(default)
+    if not Path(project).exists() and default.exists():      # the client folder moved since the build: use the local copy
+        project = str(default)
+    return {"native": native, "status": status, "rec": rec, "why": why, "project": project,
+            "failed_checks": [k for k, v in (rec.get("checks") or {}).items() if not v] if native else []}
+
+
+def native_track_rows(rec: dict, tm: dict) -> list[tuple[str, object]]:
+    """(track name, clip count) for the native sequence. The names are the ones the bridge was told to give the tracks
+    (`job_data.track_names`); the counts are what Premiere reported back. A result without job_data (written before 3.0)
+    falls back to Premiere's own read-back, then to the XML manifest's track map."""
+    live = (rec.get("result") or {}).get("tracks") or {}
+    counts = {k: {t.get("i"): t.get("clips") for t in live.get(k) or []} for k in ("video", "audio")}
+    names = (rec.get("job_data") or {}).get("track_names") or rec.get("track_names") or \
+        {k: [t.get("name") for t in live.get(k) or []] for k in ("video", "audio")}
+    rows = [(n, counts[k].get(i)) for k in ("video", "audio") for i, n in enumerate(names.get(k) or [], 1)]
+    if not rows:
+        rows = [(f"{'V' if k == 'video' else 'A'}{t['xml_index']} {t['name']}", t.get("clips"))
+                for k in ("video", "audio") for t in (tm.get("tracks") or {}).get(k, [])]
+    return rows
+
+
+def licensed_material_lines(paths: Paths) -> list[str]:
+    """The "Licensed material" section (Phase 5 hook): nothing unless `05_assets/magnific-manifest.json` exists; then
+    one row per entry, each marked agency-licensed and not transferable to the client."""
+    mp = paths.p(MAGNIFIC_MANIFEST)
+    if not mp.exists():
+        return []
+    head = ["", "## Licensed material", "", "Assets the agency generated or licensed through Magnific for this clip."]
+    try:
+        data = read_json(mp, {})
+    except (OSError, ValueError) as e:
+        return head + ["", f"- `{MAGNIFIC_MANIFEST}` could not be read ({type(e).__name__}): ask the agency"]
+    entries = data if isinstance(data, list) else next((data[k] for k in ("entries", "assets", "items")
+                                                         if isinstance(data, dict) and isinstance(data.get(k), list)), [])
+    if not entries:
+        return head + ["", "- none listed yet"]
+    cell = lambda v: str(v if v not in (None, "") else "—").replace("|", "/").replace("\n", " ")
+    rows = [f"| {cell(e.get('file') or e.get('path') or e.get('id'))} | {cell(e.get('kind') or e.get('type'))} | "
+            f"{cell(e.get('source') or e.get('model') or e.get('tool') or e.get('id'))} | {LICENCE_NOTE} |"
+            for e in entries if isinstance(e, dict)]
+    return head + ["", "| File | Kind | Source | Licence |", "|---|---|---|---|"] + rows
+
+
 def build(paths: Paths) -> dict:
     from .premiere_xml import timeline_manifest
     tm = timeline_manifest(paths)
@@ -38,120 +112,189 @@ def build(paths: Paths) -> dict:
     qc = read_json(paths.p("08_quality_control/qc-results.json"), {})
     exp = export_spec(paths)
     style = load_config("style.json")
-    music_note = (f"- Music: {style['music']}." if isinstance(style.get("music"), str) and style["music"].lower().startswith("none")
-                  else "- Music: add your licensed track to A06 using the MUSIC markers; duck −18 to −22 dB under dialogue.")
-    music_check = ("- [ ] No music (client style)" if music_note.startswith("- Music: none")
-                   else "- [ ] Add licensed music on A06, duck under dialogue")
+    no_music = isinstance(style.get("music"), str) and style["music"].lower().startswith("none")
     spec = read_json(paths.p("01_analysis/timeline-spec.json"), {})
     ae = read_json(paths.p("04_after_effects/ae-build-result.json"), {})
     aer = read_json(paths.p("04_after_effects/ae-render-result.json"), {})
     ps = read_json(paths.p("05_photoshop/ps-build-result.json"), {})
-    seq = load_config("sequence-settings.json")
-    rel = lambda p: str(Path(p).relative_to(paths.project)) if p and str(p).startswith(str(paths.project)) else p
+    # After Effects / Photoshop are opt-in extras: they appear only when a result or a generated script exists
+    ae_used = bool(ae or aer or paths.p(f"04_after_effects/scripts/build_{paths.video_id}_graphics.jsx").exists())
+    ps_used = bool(ps or paths.p(f"05_photoshop/scripts/build_{paths.video_id}_psd.jsx").exists())
+    ae_captions = paths.p("04_after_effects/compositions/CAPTIONS.mov").exists()
+    pb = premiere_build_state(paths)
+    native, rec = pb["native"], pb["rec"]
+    jd = rec.get("job_data") or {}
+    seq_name = tm.get("sequence_name") or jd.get("sequence_name") or f"{paths.video_id}_{project_prefix()}_EDIT"
+    prproj_rel = _rel(paths, pb["project"])
     pend = [e for e in spec.get("events", []) if e.get("approval_required")]
     from .verify import status as vstatus
     vs = vstatus(paths)
     from .plan import approval_state
     appr = approval_state(paths)        # a stale approval never reads "approved by X" (3.0 T11)
-    vtr = "\n".join(f"| V{t['xml_index']} | {t['id']} — {t['name']} | {t['clips']} |" for t in tm.get("tracks", {}).get("video", []))
-    atr = "\n".join(f"| A{t['xml_index']} | {t['id']} — {t['name']} | {t['clips']} |" for t in tm.get("tracks", {}).get("audio", []))
-    R = f"""# Handoff — {paths.video_id}
+    rows = native_track_rows(rec, tm) if native else []
+    cap_lanes = [n for n, _ in rows if "caption" in n.lower() and n.startswith("V")]
+    native_caps = bool(jd.get("native_caption_track",
+                              read_json(paths.p("01_analysis/edit-decisions.json"), {}).get("global", {}).get("native_caption_track")))
 
-Generated {now_iso()} by the `whynot-cut` plugin (by The Why Not AI). QC: **{'PASSED' if qc.get('ok') else 'NOT PASSED'}** (see `08_quality_control/validation-report.md`).
+    music_note = (f"- Music: {style['music']}." if no_music else
+                  "- Music: add your licensed track on a new audio track under the SFX pair, using the MUSIC markers; duck −18 to −22 dB under dialogue."
+                  if native else
+                  "- Music: add your licensed track to A06 using the MUSIC markers; duck −18 to −22 dB under dialogue.")
+    music_check = "- [ ] No music (client style)" if no_music else (
+        "- [ ] Add licensed music on a new track under the SFX, duck under dialogue" if native else
+        "- [ ] Add licensed music on A06, duck under dialogue")
 
-## What was automated vs. what you do
+    # ---- the status table
+    music_cell = "None, by the client's style" if no_music else "**Not supplied** — markers only"
+    if native:
+        prem_row = (f"Built natively by the WhyNot Cut Bridge (**{pb['status']}**, {rec.get('at', '—')}) → "
+                    "**open the .prproj, nothing to import**")
+        cap_row = ("Animated captions are brand stills on the Caption lanes of the sequence" +
+                   (f" ({', '.join(cap_lanes)})" if cap_lanes else "") + ", placed by the bridge" +
+                   ("; an editable caption track (C01) is also on the sequence" if native_caps else
+                    "; SRT (`02_transcription/subtitles.srt`) for an optional CC track"))
+    else:
+        prem_row = "FCP7 XML interchange (automated) → **you import + save as .prproj**"
+        cap_row = ("Animated captions rendered from AE on C02 (automated); SRT for optional CC track" if ae_captions else
+                   "SRT only (`02_transcription/subtitles.srt`): the XML carries no animated captions — build natively "
+                   "(`reel ppro-build`) for those")
+    table = ["| Component | Status |", "|---|---|",
+             "| Transcription (Whisper large-v3, word timing) | Automated — **needs your verification** (`02_transcription/subtitle-review.md`) |",
+             "| Topic / narrative / statement analysis | Automated by Claude (`01_analysis/`) |",
+             "| Edit plan → frame-accurate timeline spec | Automated (`01_analysis/timeline-spec.json`, readable: `edit-plan.md`) |",
+             f"| Edit plan approval | {appr['message'] if appr['state'] != 'stale' else '**' + appr['message'] + '**'} |",
+             f"| Visual verification of renders/PSDs | {'PASS' if vs['ok'] else 'NOT PASSED'}: {vs['detail']} |"]
+    if ae_used:
+        table += [f"| After Effects comps (.aep, editable) | {ae.get('status', 'SCRIPT ONLY — run the JSX')} |",
+                  f"| AE renders (ProRes 4444 + alpha) | {aer.get('status', 'not rendered')} |"]
+    if ps_used:
+        table += [f"| Photoshop layered PSDs | {ps.get('status', 'SCRIPT ONLY — run the JSX')} |"]
+    table += [f"| Premiere sequence | {prem_row} |", f"| Captions | {cap_row} |",
+              "| SFX | Original procedural SFX placed on A-tracks |",
+              f"| Music | {music_cell} |",
+              "| Final mix, polish, render | You |"]
 
-| Component | Status |
-|---|---|
-| Transcription (Whisper large-v3, word timing) | Automated — **needs your verification** (`02_transcription/subtitle-review.md`) |
-| Topic / narrative / statement analysis | Automated by Claude (`01_analysis/`) |
-| Edit plan → frame-accurate timeline spec | Automated (`01_analysis/timeline-spec.json`, readable: `edit-plan.md`) |
-| Edit plan approval | {appr['message'] if appr['state'] != 'stale' else '**' + appr['message'] + '**'} |
-| Visual verification of renders/PSDs | {'PASS' if vs['ok'] else 'NOT PASSED'}: {vs['detail']} |
-| After Effects comps (.aep, editable) | {ae.get('status', 'SCRIPT ONLY — run the JSX')} |
-| AE renders (ProRes 4444 + alpha) | {aer.get('status', 'not rendered')} |
-| Photoshop layered PSDs | {ps.get('status', 'SCRIPT ONLY — run the JSX')} |
-| Premiere sequence | FCP7 XML interchange (automated) → **you import + save as .prproj** |
-| Captions | Animated captions rendered from AE on C02 (automated); SRT for optional CC track |
-| SFX | Original procedural SFX placed on A-tracks |
-| Music | {"None, by the client's style" if music_check.startswith("- [ ] No music") else "**Not supplied** — markers only"} |
-| Final mix, polish, render | You |
+    # ---- section 1: Premiere
+    main_line = (f"Main footage: source is {float(tm.get('source_fps') or 0):.5g} fps in a {_fps_num} fps sequence, kept at native "
+                 f"speed (no interpretation change), so dialogue sync is exact; base scale {tm.get('base_scale_percent')}%. "
+                 "Punch-ins are separate V1 clips with Scale/Position in Motion.") if tm.get("source_fps") else ""
+    markers_line = "Every graphic and decision also appears as a **sequence marker** (ID + transcript evidence)."
+    if native:
+        ok_checks = [k for k, v in (rec.get("checks") or {}).items() if v]
+        issues = ([f"   - **Not confirmed by the read-back:** {', '.join('`' + c + '`' for c in pb['failed_checks'])}. "
+                   "Look at these first; fix and rebuild (`reel ppro-build --force`) or correct them by hand."]
+                  if pb["failed_checks"] else [])
+        gone = ([f"   - **`{prproj_rel}` is not on disk** — run `reel ppro-build --force` to build it again."]
+                if not Path(pb["project"]).exists() else [])
+        trk = "\n".join(f"| {n} | {c if c is not None else '—'} |" for n, c in rows) or "| (no track map recorded) | — |"
+        cap_step = ("4. Captions: the Caption lanes " + (", ".join(f"**{n}**" for n in cap_lanes) or "(see the track map)") +
+                    " hold the animated caption stills (bar + text)" +
+                    (" and the sequence also has an editable caption track (C01); keep one of the two visible so captions don't appear twice."
+                     if native_caps else ".") +
+                    " Caption wording lives in those stills: to correct it, fix `02_transcription/captions-short.srt` and re-run the pipeline "
+                    "(`reel previews`, then `reel ppro-build --force`), don't retype it in Premiere.")
+        sec1 = ["## 1. Open in Premiere Pro (≈1 min)", "",
+                f"1. Premiere Pro → **File › Open Project…** → `{prproj_rel}`. The sequence **{seq_name}** is already built with its "
+                "media, graphics, captions, markers and audio tracks. **Do not import the XML interchange**: it would add a second sequence."]
+        sec1 += gone
+        sec1 += [f"2. Sequence settings (frame size, frame rate, preview codec, colour options) were set through Premiere's API and "
+                 f"read back by the bridge: {len(ok_checks)} of {len(rec.get('checks') or {})} checks passed — nothing to set by hand."]
+        sec1 += issues
+        sec1 += ["3. Track map (as built):", "", "| Track | Clips |", "|---|---|", trk, "", cap_step,
+                 f"5. The project stays at `{prproj_rel}`: **File › Save** after your changes. A rebuild (`reel ppro-build --force`) refuses to "
+                 "overwrite changes you saved unless `--replace-edited` is added, and it would not carry your edits over.", ""]
+    else:
+        xml_rel = _rel(paths, tm.get("xml")) or f"07_premiere/interchange/{seq_name}.xml"
+        vtr = "\n".join(f"| V{t['xml_index']} | {t['id']} — {t['name']} | {t['clips']} |" for t in tm.get("tracks", {}).get("video", []))
+        atr = "\n".join(f"| A{t['xml_index']} | {t['id']} — {t['name']} | {t['clips']} |" for t in tm.get("tracks", {}).get("audio", []))
+        cap_step = ("3. Burned-in animated captions are **already on the C02 track** (AE render). Optionally **File › Import…** "
+                    "`02_transcription/subtitles.srt` → drag onto the sequence to get an editable caption track (C01) for closed "
+                    "captions/sidecar export — **turn its visibility off** so captions don't appear twice. If you correct caption text, "
+                    "fix it in AE (CAPTIONS comp) or re-run the pipeline after editing the SRT." if ae_captions else
+                    "3. The XML carries no animated captions. **File › Import…** `02_transcription/subtitles.srt` → drag onto the sequence "
+                    "to get an editable caption track (C01), or ask for the native build (`reel ppro-build`, Premiere open with the WhyNot "
+                    "Cut Bridge) which places the animated captions.")
+        sec1 = ["## 1. Open in Premiere Pro (≈3 min)", "", f"This clip was {pb['why']}. The preferred path is `reel ppro-build` "
+                "(Premiere open with the WhyNot Cut Bridge); import the XML only if that cannot run.", "",
+                f"1. Premiere Pro → open/create your project → **File › Import…** → `{xml_rel}`.",
+                f"   Premiere creates a bin with the sequence **{seq_name}** and all linked media.",
+                "2. Open the sequence → **Sequence › Sequence Settings…** and confirm/set the values the XML cannot carry:",
+                f"   - Editing Mode **Custom**, Display Format **{_fps_label} Timecode**, Audio Display Format **Audio Samples**",
+                "   - Preview File Format **QuickTime**, Codec **Apple ProRes 422 LT**, Preview **1080 × 1920**",
+                "   - Maximum Bit Depth **off**, Maximum Render Quality **off**, **Composite in Linear Color on**",
+                f"   - (Verify XML-set values: 1080×1920, {_fps_num} fps, Square Pixels, No Fields, 48000 Hz stereo.)",
+                cap_step,
+                "4. Rename tracks (Premiere does not read track names from XML):", "",
+                "| XML track | Role | Clips |", "|---|---|---|", vtr, atr, "",
+                f"5. **File › Save As…** `07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj`.", ""]
+    sec1 += [x for x in (main_line, markers_line) if x]
 
-## 1. Open in Premiere Pro (≈3 min)
+    # ---- optional extras sections, then approvals and finishing notes (numbered in order)
+    n = 1
+    extras = []
+    if ae_used:
+        n += 1
+        extras += ["", f"## {n}. After Effects",
+                   f"- Project: `{_rel(paths, ae.get('aep') or str(paths.p(f'04_after_effects/project/{paths.video_id}_{project_prefix()}_GFX.aep')))}`. "
+                   "Folders: NH_BRAND (edit colours once in **BRAND_CONTROLS › BRAND**), NH_COMPS (one comp per event, named by event ID), NH_CAPTIONS.",
+                   "- Re-render after edits: Render Queue already set (High Quality with Alpha → `04_after_effects/compositions/<ID>.mov`), or run "
+                   "`reel ae-render`. Premiere clips that use these renders update automatically because file paths stay the same.",
+                   "- Arabic: if any line looks disconnected, set **Preferences › Type › Text Engine: South Asian and Middle Eastern**, restart AE."]
+    if ps_used:
+        n += 1
+        extras += ["", f"## {n}. Photoshop",
+                   "- `05_photoshop/layered-assets/*.psd` — editable text layers, brand band group, placed client photo, logo."]
+    appr_lines = [f"- **{e['event_id']}** ({e['template']}, {e['start_tc']}): {e.get('evidence', '')[:120]}" for e in pend] or ["- none"]
+    finish = ["- Frosted-glass cards: overlays carry a translucent fill; for true backdrop blur add an Adjustment Layer under the card with "
+              "**Gaussian Blur ≈ 40** masked to the card shape (as in the references).",
+              music_note,
+              "- Verify all on-screen wording against the content review `01_analysis/medical-content-review.md`.",
+              f"- **Export:** `{exp['file_name']}` · {exp['video']} · {exp['audio']}" +
+              (f" · deliver to `{exp['folder']}`" if exp.get("folder") else "")]
+    L = [f"# Handoff — {paths.video_id}", "",
+         f"Generated {now_iso()} by the `whynot-cut` plugin (by The Why Not AI). QC: **{'PASSED' if qc.get('ok') else 'NOT PASSED'}** "
+         "(see `08_quality_control/validation-report.md`).", "",
+         "## What was automated vs. what you do", ""] + table + [""] + sec1 + extras + \
+        ["", f"## {n + 1}. Approvals needed ({len(pend)})"] + appr_lines + ["", f"## {n + 2}. Finishing notes"] + finish + \
+        licensed_material_lines(paths)
+    write_text(paths.p("09_handoff/README.md"), "\n".join(L) + "\n")
 
-1. Premiere Pro → open/create your project → **File › Import…** → `{rel(tm.get('xml'))}`.
-   Premiere creates a bin with the sequence **{tm.get('sequence_name')}** and all linked media.
-2. Open the sequence → **Sequence › Sequence Settings…** and confirm/set the values the XML cannot carry:
-   - Editing Mode **Custom**, Display Format **{_fps_label} Timecode**, Audio Display Format **Audio Samples**
-   - Preview File Format **QuickTime**, Codec **Apple ProRes 422 LT**, Preview **1080 × 1920**
-   - Maximum Bit Depth **off**, Maximum Render Quality **off**, **Composite in Linear Color on**
-   - (Verify XML-set values: 1080×1920, {_fps_num} fps, Square Pixels, No Fields, 48000 Hz stereo.)
-3. Burned-in animated captions are **already on the C02 track** (AE render). Optionally **File › Import…** `02_transcription/subtitles.srt` → drag onto the sequence to get an editable caption track (C01) for closed captions/sidecar export — **turn its visibility off** so captions don't appear twice. If you correct caption text, fix it in AE (CAPTIONS comp) or re-run the pipeline after editing the SRT.
-4. Rename tracks (Premiere does not read track names from XML):
-
-| XML track | Role | Clips |
-|---|---|---|
-{vtr}
-{atr}
-
-5. **File › Save As…** `07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj`.
-
-Main footage: source is {float(tm.get('source_fps') or 0):.5g} fps in a {_fps_num} fps sequence, kept at native speed (no interpretation change), so dialogue sync is exact; base scale {tm.get('base_scale_percent')}%. Punch-ins are separate V1 clips with Scale/Position in Motion.
-Every graphic and decision also appears as a **sequence marker** (ID + transcript evidence).
-
-## 2. After Effects
-- Project: `{rel(ae.get('aep') or str(paths.p(f'04_after_effects/project/{paths.video_id}_{project_prefix()}_GFX.aep')))}`. Folders: NH_BRAND (edit colours once in **BRAND_CONTROLS › BRAND**), NH_COMPS (one comp per event, named by event ID), NH_CAPTIONS.
-- Re-render after edits: Render Queue already set (High Quality with Alpha → `04_after_effects/compositions/<ID>.mov`), or run `reel ae-render`. Premiere clips update automatically because file paths stay the same.
-- Arabic: if any line looks disconnected, set **Preferences › Type › Text Engine: South Asian and Middle Eastern**, restart AE.
-
-## 3. Photoshop
-- `05_photoshop/layered-assets/*.psd` — editable text layers, brand band group, placed client photo, logo.
-
-## 4. Approvals needed ({len(pend)})
-""" + ("\n".join(f"- **{e['event_id']}** ({e['template']}, {e['start_tc']}): {e.get('evidence', '')[:120]}" for e in pend) or "- none") + f"""
-
-## 5. Finishing notes
-- Frosted-glass cards: overlays carry a translucent fill; for true backdrop blur add an Adjustment Layer under the card with **Gaussian Blur ≈ 40** masked to the card shape (as in the references).
-{music_note}
-- Verify all on-screen wording against the content review `01_analysis/medical-content-review.md`.
-- **Export:** `{exp['file_name']}` · {exp['video']} · {exp['audio']}{f" · deliver to `{exp['folder']}`" if exp.get('folder') else ""}
-"""
-    write_text(paths.p("09_handoff/README.md"), R)
-    C = f"""# Final Editor Checklist — {paths.video_id}
-
-## Before editing
-- [ ] Read `09_handoff/README.md`
-- [ ] Verify transcript against audio (`02_transcription/subtitle-review.md`) — correct `subtitles.srt`
-- [ ] Review `01_analysis/main-topic.md` and `narrative-segments.json`
-- [ ] Approve or reject pending graphics ({len(pend)})
-- [ ] Review `01_analysis/medical-content-review.md` (all on-screen medical wording)
-
-## Premiere
-- [ ] Import XML, open sequence `{tm.get('sequence_name')}`
-- [ ] Sequence Settings: Custom · {_fps_label} TC · Audio Samples · QuickTime ProRes 422 LT previews 1080×1920 · Max bit depth OFF · Max render quality OFF · Composite in linear color ON
-- [ ] Animated captions (C02) checked against audio; optional `subtitles.srt` caption track kept hidden (CC export only)
-- [ ] Rename tracks per README table
-- [ ] Check no offline media (red frames)
-- [ ] Check punch-ins framing (face/eyes not cropped)
-- [ ] Add frosted backdrop blur under glass cards (optional, reference style)
-- [ ] Save As `.prproj` into `07_premiere/project/`
-
-## Graphics
-- [ ] Spot-check every AE comp vs. preview sheet `08_quality_control/previews/_contact_sheet.jpg`
-- [ ] Arabic shaping & line breaks correct in AE text layers
-- [ ] Brand colours and fonts from `output/client_database/branding/` used throughout
-
-## Audio
-- [ ] Dialogue peaks ≈ −6 dBFS, integrated ≈ −14 LUFS for social
-- [ ] SFX not masking speech; remove any that distract
-{music_check}
-
-## Delivery
-- [ ] Final QC pass full-screen at 100%
-- [ ] Export `{exp['file_name']}`: {exp['video']}; audio {exp['audio']}
-{f"- [ ] Deliver to `{exp['folder']}`" if exp.get('folder') else "- [ ] Deliver where the client expects it"}
-"""
-    write_text(paths.p("09_handoff/final-editor-checklist.md"), C)
+    # ---- the checklist
+    if native:
+        prem_chk = [f"- [ ] Open `{prproj_rel}` (File › Open Project…), sequence `{seq_name}`: nothing to import"]
+        if pb["failed_checks"]:
+            prem_chk.append(f"- [ ] Build issues resolved: {', '.join(pb['failed_checks'])}")
+        prem_chk += [f"- [ ] Animated captions ({', '.join(cap_lanes) or 'Caption lanes'}) checked against audio" +
+                     ("; keep either the stills or the C01 caption track visible, not both" if native_caps else ""),
+                     "- [ ] Check no offline media (red frames)", "- [ ] Check punch-ins framing (face/eyes not cropped)",
+                     "- [ ] Add frosted backdrop blur under glass cards (optional, reference style)",
+                     "- [ ] File › Save (the project stays at the path above)"]
+    else:
+        prem_chk = [f"- [ ] Import XML, open sequence `{seq_name}`",
+                    f"- [ ] Sequence Settings: Custom · {_fps_label} TC · Audio Samples · QuickTime ProRes 422 LT previews 1080×1920 · Max bit depth OFF · Max render quality OFF · Composite in linear color ON",
+                    ("- [ ] Animated captions (C02) checked against audio; optional `subtitles.srt` caption track kept hidden (CC export only)"
+                     if ae_captions else "- [ ] Captions: import `subtitles.srt` as the caption track (or build natively with `reel ppro-build`)"),
+                    "- [ ] Rename tracks per README table", "- [ ] Check no offline media (red frames)",
+                    "- [ ] Check punch-ins framing (face/eyes not cropped)",
+                    "- [ ] Add frosted backdrop blur under glass cards (optional, reference style)",
+                    "- [ ] Save As `.prproj` into `07_premiere/project/`"]
+    gfx_chk = ["- [ ] Spot-check every AE comp vs. preview sheet `08_quality_control/previews/_contact_sheet.jpg`",
+               "- [ ] Arabic shaping & line breaks correct in AE text layers"] if ae_used else \
+              ["- [ ] Spot-check every graphic in the sequence vs. preview sheet `08_quality_control/previews/_contact_sheet.jpg`",
+               "- [ ] Arabic shaping & line breaks correct in the graphics and captions"]
+    C = ["# Final Editor Checklist — " + paths.video_id, "", "## Before editing",
+         "- [ ] Read `09_handoff/README.md`",
+         "- [ ] Verify transcript against audio (`02_transcription/subtitle-review.md`) — correct `subtitles.srt`",
+         "- [ ] Review `01_analysis/main-topic.md` and `narrative-segments.json`",
+         f"- [ ] Approve or reject pending graphics ({len(pend)})",
+         "- [ ] Review `01_analysis/medical-content-review.md` (all on-screen medical wording)", "", "## Premiere"] + prem_chk + \
+        ["", "## Graphics"] + gfx_chk + ["- [ ] Brand colours and fonts from `output/client_database/branding/` used throughout",
+         "", "## Audio", "- [ ] Dialogue peaks ≈ −6 dBFS, integrated ≈ −14 LUFS for social",
+         "- [ ] SFX not masking speech; remove any that distract", music_check, "", "## Delivery",
+         "- [ ] Final QC pass full-screen at 100%",
+         f"- [ ] Export `{exp['file_name']}`: {exp['video']}; audio {exp['audio']}",
+         f"- [ ] Deliver to `{exp['folder']}`" if exp.get("folder") else "- [ ] Deliver where the client expects it"]
+    write_text(paths.p("09_handoff/final-editor-checklist.md"), "\n".join(C) + "\n")
     return {"readme": str(paths.p("09_handoff/README.md")), "checklist": str(paths.p("09_handoff/final-editor-checklist.md")),
             "export": exp}
 
@@ -187,6 +330,7 @@ def motion_readme(paths: Paths) -> Path:
     L += ["", "## Licenses and attributions", ""]
     L += [f"- {a['ref']}: {a['license']}" + (f" — publish with: **{a['attribution']}**" if a.get("attribution") else "")
           for a in assets] or ["- only the client's brand and Lucide icons (ISC)"]
+    L += licensed_material_lines(paths)
     warns = (br.get("comparison") or {}).get("warnings") or []
     if warns:
         L += ["", "## Build warnings (After Effects read-back)", ""] + [f"- {w}" for w in warns]

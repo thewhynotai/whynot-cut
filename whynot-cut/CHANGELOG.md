@@ -259,6 +259,18 @@
   for a chain of nameless honorifics; motion-mode `reel next` shows the people[] notice too. `reel lock --status` adds
   `age_min`, `idle_min` (the 2 h clock) and a `how` line. A stale-lock takeover that has to put a newer lock back without
   hard links now uses an exclusive create, so it can never overwrite a lock created in the meantime.
+- The editor handoff describes the Premiere project that was really built (T2.6, engine IM-9). `reel handoff` reads
+  `07_premiere/ppro-build-result.json`: after a native build (`PRPROJ_BUILT` / `PRPROJ_BUILT_WITH_ISSUES`) the README
+  says "open the .prproj", prints the track map (names the bridge gave the tracks plus Premiere's clip counts), the
+  caption lanes, the checks that did not read back and how a rebuild treats the editor's saved changes, and no longer
+  tells the editor to import the XML (a second sequence) or to rename tracks; the checklist follows. The XML import
+  steps remain only for the fallback (no result, or `FAILED`, with the reason), and its captions line no longer claims
+  an After Effects render that does not exist. After Effects / Photoshop rows and sections appear only when those
+  extras were used; paths are written with forward slashes. `ppro-build-result.json` now records
+  `job_data.{sequence_name, track_names, native_caption_track}` (an older result falls back to Premiere's read-back).
+  New "Licensed material" section (clip and motion handoffs): empty unless `05_assets/magnific-manifest.json` exists,
+  then one "agency-licensed, not transferable" row per entry (Phase 5 fills the manifest). Golden READMEs for the
+  native build, the XML fallback and a motion project (`tests/fixtures/handoff/`, `tests/test_handoff_native.py`).
 
 ### Migration
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the

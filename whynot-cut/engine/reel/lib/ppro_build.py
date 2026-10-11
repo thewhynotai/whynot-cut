@@ -262,6 +262,7 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
            "checks": checks, "project": str(prproj), "bridge": {k: r.get(k) for k in ("ok", "elapsed_s", "job", "error")},
            "premiere_error": resp.get("error"), "previous_version_backup": str(backup) if backup else None,
            "closed_previous": (closed or {}).get("response"),
+           "job_data": {k: data.get(k) for k in ("sequence_name", "track_names", "native_caption_track")},   # for the handoff
            "result": res, "at": now_iso(), "prproj_mtime": prproj.stat().st_mtime if prproj.exists() else None}
     from .verify import prproj_signature
     # what the pipeline saved: a later save that only moves the file time (Premiere saving open projects, auto-save)
