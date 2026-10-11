@@ -21,6 +21,17 @@ STEPS: list = []            # install steps: (name, fn(ctx) -> StepResult, needs
 UNINSTALL_STEPS: list = []  # uninstall steps, run in registration order
 
 
+def _register_step_modules() -> None:
+    """Each step module has register(STEPS) (and, for uninstall, register_uninstall(UNINSTALL_STEPS)). Imported here,
+    after the registries exist, so a step module never imports cli."""
+    from . import runtime
+    for mod in (runtime,):
+        mod.register(STEPS)
+
+
+_register_step_modules()
+
+
 def default_plugin_root() -> Path:
     """The plugin folder: two levels above wnc_install.py (installer/core/ -> plugin root)."""
     return Path(__file__).resolve().parents[3]

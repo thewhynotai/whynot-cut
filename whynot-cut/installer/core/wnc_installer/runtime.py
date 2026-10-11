@@ -1,0 +1,368 @@
+"""Install steps `runtime`, `ffmpeg` and `gpu` (3.0 T7.1, installer.md R.1 runtime contract).
+
+runtime  builds ~/.whynot-cut/runtimes/<id>/ from setup/locks/runtime-<platform>.lock with uv: `uv venv` into
+         runtimes/<id>.building, `uv pip sync --require-hashes`, the smoke import, the stamps, a rename into place,
+         and only then `current` (atomic). Any failure leaves `current` as it was and no `.building` folder.
+ffmpeg   the pinned ffmpeg + ffprobe for this platform into ffmpeg/<version>/ with the GPL text and SOURCE.txt;
+         extraction is staged in ffmpeg/<version>.staging so a crash never leaves a half-written binary in place.
+gpu      Windows x64 with an NVIDIA GPU: `reel gpu-enable` (cuBLAS for Whisper) through the new runtime.
+Stdlib only, like the rest of the core.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+
+from . import base
+
+STAMP = "WHYNOT_RUNTIME"
+LOCK_STAMP = ".whynot-lock.sha256"
+_RID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")  # same rule as the engine (lib/plat.py)
+_MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+UV_VENV_TIMEOUT, PIP_SYNC_TIMEOUT, SMOKE_TIMEOUT, GPU_TIMEOUT = 300, 3600, 120, 1800
+GPL_TEXT = ("installer", "licenses", "GPL-3.0.txt")
+
+
+# --------------------------------------------------------------------------------------------- helpers
+def _check_rid(rid: str) -> str:
+    if not isinstance(rid, str) or not _RID.match(rid) or ".." in rid:
+        raise ValueError(f"not a runtime id: {rid!r}")
+    return rid
+
+
+def _log_output(log: base.Log, text: str) -> None:
+    """A child's output goes to the log file only (indented), never to the console."""
+    if log.path and text.strip():
+        with open(log.path, "a", encoding="utf-8", newline="\n") as f:
+            f.write("".join(f"    | {line}\n" for line in text.rstrip().splitlines()))
+
+
+def run_cmd(ctx: base.Ctx, cmd: list, timeout: int, cwd: Optional[Path] = None) -> tuple:
+    """Run a child with the engine environment, no stdin, output captured into the log. (exit code, output);
+    124 = timed out, 127 = could not start."""
+    cmd = [str(c) for c in cmd]
+    ctx.log.info("run " + " ".join(f'"{c}"' if " " in c else c for c in cmd))
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           env=ctx.paths.child_env(), cwd=str(cwd) if cwd else None, timeout=timeout)
+        out, rc = r.stdout.decode("utf-8", "replace"), r.returncode
+    except subprocess.TimeoutExpired as e:
+        out = (e.output or b"").decode("utf-8", "replace") + f"\n(timed out after {timeout} s)"
+        rc = 124
+    except OSError as e:
+        out, rc = f"cannot start {cmd[0]}: {e}", 127
+    _log_output(ctx.log, out)
+    return rc, out
+
+
+def _tail(out: str) -> str:
+    lines = [x for x in out.strip().splitlines() if x.strip()]
+    return lines[-1].strip()[:300] if lines else ""
+
+
+def _move_aside_and_replace(staged: Path, final: Path, root: Path) -> None:
+    """Rename `staged` to `final`; an existing `final` is moved aside first, put back if the rename fails, and deleted
+    (safe_rmtree inside `root`) once the new one is in place."""
+    old = None
+    if os.path.lexists(final):
+        old = final.with_name(f"{final.name}.old-{os.getpid()}")
+        if os.path.lexists(old) and not base.safe_rmtree(old, [root]):
+            raise OSError(f"cannot clear {old}")
+        base._replace(final, old)
+    try:
+        base._replace(staged, final)
+    except OSError:
+        if old is not None:
+            base._replace(old, final)
+        raise
+    if old is not None and not base.safe_rmtree(old, [root]):
+        raise OSError(f"cannot remove the replaced {old}")
+
+
+# --------------------------------------------------------------------------------------------- runtime
+def lock_rel(components: dict, platform: str) -> str:
+    rel = base.cget(components, f"runtime.locks.{platform}.file")
+    return rel if isinstance(rel, str) and rel and not base.is_placeholder(rel) else f"setup/locks/runtime-{platform}.lock"
+
+
+def runtime_id(components: dict, platform: str, lock_path) -> str:
+    """components `runtime.locks.<platform>.id`, or while that is a placeholder "r-" + sha256(lock bytes)[:12]."""
+    declared = base.cget(components, f"runtime.locks.{platform}.id")
+    if not base.is_placeholder(declared) and isinstance(declared, str) and declared.strip():
+        return _check_rid(declared.strip())
+    return "r-" + base.file_sha256(lock_path)[:12]
+
+
+def runtime_python(paths: base.Paths, rid: str, platform: Optional[str] = None) -> Path:
+    """The runtime's interpreter: the venv layout that exists (Scripts/python.exe or bin/python), else the one this
+    platform's venvs use (`platform`, default this OS)."""
+    d = paths.runtimes_dir / rid
+    win, posix = d / "Scripts" / "python.exe", d / "bin" / "python"
+    expect_win = platform.startswith("win") if platform else os.name == "nt"
+    first, second = (win, posix) if expect_win else (posix, win)
+    for p in (first, second):
+        if p.is_file():
+            return p
+    return first
+
+
+def current_runtime(paths: base.Paths) -> Optional[str]:
+    """The id in `current`, or None when the file is missing, not an id, or names a runtime without its python."""
+    try:
+        rid = paths.current_file.read_text(encoding="utf-8-sig").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not rid or not _RID.match(rid) or ".." in rid:
+        return None
+    return rid if runtime_python(paths, rid).is_file() else None
+
+
+def uv_command(ctx: base.Ctx) -> list:
+    """uv as a command list: WNC_TEST_UV (sandbox only; a .py runs on this interpreter), --uv, else bin/uv(.exe)."""
+    test = os.environ.get("WNC_TEST_UV") if ctx.paths.sandbox else None
+    if test:
+        return [sys.executable, "-B", test] if test.lower().endswith(".py") else [test]
+    if getattr(ctx.args, "uv", None):
+        return [ctx.args.uv]
+    return [str(ctx.paths.bin_dir / ("uv.exe" if ctx.platform.startswith("win") else "uv"))]
+
+
+def _smoke(ctx: base.Ctx, py: Path, modules: list) -> tuple:
+    return run_cmd(ctx, [py, "-s", "-c", "import " + ", ".join(modules)], SMOKE_TIMEOUT)
+
+
+def _base_python(ctx: base.Ctx, uv: list) -> tuple:
+    """(interpreter, error): --python from the bootstrap, else the uv-managed python of components runtime.python."""
+    if getattr(ctx.args, "python", None):
+        return ctx.args.python, None
+    ver = base.cget(ctx.components, "runtime.python") or "3.12"
+    rc, out = run_cmd(ctx, uv + ["python", "find", ver], 60)
+    if rc != 0:
+        rc, out = run_cmd(ctx, uv + ["python", "install", ver], 1800)
+        if rc != 0:
+            return None, f"uv could not install Python {ver}: {_tail(out)}"
+        rc, out = run_cmd(ctx, uv + ["python", "find", ver], 60)
+    found = _tail(out)
+    if rc != 0 or not found:
+        return None, f"uv cannot find Python {ver}: {found}"
+    return found, None
+
+
+def step_runtime(ctx: base.Ctx) -> base.StepResult:
+    paths, plat = ctx.paths, ctx.platform
+    rel = lock_rel(ctx.components, plat)
+    lock = ctx.plugin_root / rel
+    if not lock.is_file():
+        return base.StepResult("runtime", "skipped", f"no {rel} in this build (the runtime lock arrives with T2.1)")
+    lock_sha = base.file_sha256(lock)
+    rid = runtime_id(ctx.components, plat, lock)
+    smoke = base.cget(ctx.components, "runtime.smoke") or []
+    bad = [m for m in smoke if not isinstance(m, str) or not _MODULE.match(m)]
+    if bad or not smoke:
+        return base.StepResult("runtime", "red", f"components.json runtime.smoke is not a list of modules: {smoke!r}")
+    rdir = paths.runtimes_dir / rid
+
+    # already built from this lock and still importing: nothing to do (no uv call)
+    py = runtime_python(paths, rid, plat)
+    try:
+        stamped = (rdir / LOCK_STAMP).read_text(encoding="utf-8").strip() == lock_sha
+    except OSError:
+        stamped = False
+    if stamped and py.is_file():
+        rc, out = _smoke(ctx, py, smoke)
+        if rc == 0:
+            if current_runtime(paths) != rid and not ctx.args.dry_run:
+                base.atomic_write_text(paths.current_file, rid + "\n")
+            return _runtime_ok(ctx, rid, py, lock_sha, f"runtime {rid} is installed")
+        ctx.log.warn(f"runtime {rid} no longer imports ({_tail(out)}); building it again")
+    if ctx.args.dry_run:
+        return base.StepResult("runtime", "skipped", f"dry run: would build runtime {rid} from {rel}")
+
+    uv = uv_command(ctx)
+    building = paths.runtimes_dir / f"{rid}.building"
+    roots = [paths.runtimes_dir]
+
+    def fail(msg: str) -> base.StepResult:
+        try:
+            if not base.safe_rmtree(building, roots):
+                ctx.log.warn(f"could not remove {building}")
+        except OSError as e:
+            ctx.log.warn(f"could not remove {building}: {e}")
+        return base.StepResult("runtime", "red", msg + "; the runtime in use was not changed")
+
+    if not base.safe_rmtree(building, roots):
+        return base.StepResult("runtime", "red", f"cannot clear the leftover {building}")
+    paths.runtimes_dir.mkdir(parents=True, exist_ok=True)
+    base_py, err = _base_python(ctx, uv)
+    if err:
+        return fail(err)
+    # --relocatable: entry points and scripts use relative paths, so renaming .building -> <id> keeps them working
+    rc, out = run_cmd(ctx, uv + ["venv", building, "--python", base_py, "--relocatable"], UV_VENV_TIMEOUT,
+                      cwd=paths.runtimes_dir)
+    if rc != 0:
+        return fail(f"uv venv failed (exit {rc}): {_tail(out)}")
+    bpy = runtime_python(paths, building.name, plat)
+    if not bpy.is_file():
+        return fail(f"uv venv made no interpreter at {bpy}")
+    sync = uv + ["pip", "sync", "--require-hashes", "--python", bpy]
+    index = base.cget(ctx.components, "runtime.index_url")
+    if not base.is_placeholder(index):
+        sync += ["--index-url", index]
+    rc, out = run_cmd(ctx, sync + [lock], PIP_SYNC_TIMEOUT, cwd=paths.runtimes_dir)
+    if rc != 0:
+        return fail(f"uv pip sync failed (exit {rc}): {_tail(out)}")
+    rc, out = _smoke(ctx, bpy, smoke)
+    if rc != 0:
+        return fail(f"the new runtime cannot import {', '.join(smoke)}: {_tail(out)}")
+    rc, ver = run_cmd(ctx, [bpy, "-s", "-c", "import platform; print(platform.python_version())"], SMOKE_TIMEOUT)
+    stamp_obj = {"id": rid, "platform": plat, "python": _tail(ver) if rc == 0 else str(base_py), "lock_file": rel,
+                 "lock_sha256": lock_sha, "created_at": base.now_iso(), "by": "installer"}
+    try:
+        base.atomic_write_json(building / STAMP, stamp_obj)
+        base.atomic_write_text(building / LOCK_STAMP, lock_sha + "\n")
+        _move_aside_and_replace(building, rdir, paths.runtimes_dir)
+    except OSError as e:
+        return fail(f"cannot put runtime {rid} in place ({e}); close programs using WhyNot Cut and run the "
+                    "installer again")
+    py = runtime_python(paths, rid, plat)
+    base.atomic_write_text(paths.current_file, rid + "\n")
+    return _runtime_ok(ctx, rid, py, lock_sha, f"runtime {rid} built from {rel}")
+
+
+def _runtime_ok(ctx: base.Ctx, rid: str, py: Path, lock_sha: str, detail: str) -> base.StepResult:
+    ctx.runtime_python = py
+    ctx.state.data["runtime"] = {"id": rid, "python": str(py), "lock_sha256": lock_sha}
+    ctx.state.record("runtime", "ok", lock_sha, detail)
+    return base.StepResult("runtime", "ok", detail)
+
+
+# --------------------------------------------------------------------------------------------- ffmpeg
+def _ffmpeg_fingerprint(ver: str, files: list) -> str:
+    raw = json.dumps({"version": ver, "files": [[f.get("url"), f.get("sha256"), f.get("members")] for f in files]},
+                     sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def step_ffmpeg(ctx: base.Ctx) -> base.StepResult:
+    paths, plat, c = ctx.paths, ctx.platform, ctx.components
+    ver, source = base.cget(c, "ffmpeg.version"), base.cget(c, "ffmpeg.source")
+    files = base.cget(c, f"ffmpeg.assets.{plat}.files")
+    pinned = isinstance(files, list) and files and all(
+        isinstance(f, dict) and isinstance(f.get("members"), dict) and f["members"]
+        and not base.is_placeholder(f.get("url")) and not base.is_placeholder(f.get("sha256")) for f in files)
+    if base.is_placeholder(ver) or base.is_placeholder(source) or not pinned:
+        return base.StepResult("ffmpeg", "skipped", f"ffmpeg for {plat} is not in this build (placeholder pin)")
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", str(ver)) or ".." in str(ver):
+        return base.StepResult("ffmpeg", "red", f"components.json ffmpeg.version is not a version: {ver!r}")
+    exe = ".exe" if plat.startswith("win") else ""
+    names = (f"ffmpeg{exe}", f"ffprobe{exe}")
+    dest = paths.ffmpeg_dir / ver
+    fp = _ffmpeg_fingerprint(ver, files)
+
+    # already installed from these pins, and the binary is still the one recorded: no download
+    rec = ctx.state.data.get("ffmpeg")
+    main = dest / names[0]
+    if (ctx.state.step_done("ffmpeg", fp) and isinstance(rec, dict) and all((dest / n).is_file() for n in names)
+            and rec.get("sha256") == base.file_sha256(main)):
+        return base.StepResult("ffmpeg", "ok", f"ffmpeg {ver} is installed")
+    lic = ctx.plugin_root.joinpath(*GPL_TEXT)
+    if not lic.is_file():
+        return base.StepResult("ffmpeg", "red", f"the plugin lacks {'/'.join(GPL_TEXT)}; ffmpeg is not installed "
+                                                "without its licence")
+    if ctx.args.dry_run:
+        return base.StepResult("ffmpeg", "skipped", f"dry run: would install ffmpeg {ver} into {dest}")
+
+    archives = []
+    for f in files:
+        leaf = str(f["url"]).rsplit("/", 1)[-1].split("?", 1)[0] or "ffmpeg.zip"
+        try:
+            archives.append(base.download(f["url"], f["sha256"], paths.downloads_dir, ctx.log,
+                                          name=f"ffmpeg-{ver}-{plat}-{leaf}"))
+        except base.DownloadError as e:
+            return base.StepResult("ffmpeg", "red", str(e))
+
+    staging = paths.ffmpeg_dir / f"{ver}.staging"
+    roots = [paths.ffmpeg_dir]
+    if not base.safe_rmtree(staging, roots):
+        return base.StepResult("ffmpeg", "red", f"cannot clear the leftover {staging}")
+    try:
+        for f, archive in zip(files, archives):
+            base.extract(archive, staging, f["members"])
+        missing = [n for n in names if not (staging / n).is_file()]
+        if missing:
+            raise base.ExtractError(f"the archives gave no {', '.join(missing)}")
+        shutil.copyfile(lic, staging / "LICENSE.GPL-3.0.txt")
+        lines = [f"FFmpeg {ver} ({base.cget(c, 'ffmpeg.license') or 'GPL-3.0-or-later'})",
+                 f"Corresponding source code: {source}", "", "Binaries installed by the WhyNot Cut installer from:"]
+        for f in files:
+            lines += [f"  {f['url']}", f"    sha256 {f['sha256']}"]
+        base.atomic_write_text(staging / "SOURCE.txt", "\n".join(lines) + "\n")
+        if os.name != "nt":
+            for n in names:
+                os.chmod(staging / n, 0o755)
+        _move_aside_and_replace(staging, dest, paths.ffmpeg_dir)
+    except (OSError, base.ExtractError) as e:
+        try:
+            base.safe_rmtree(staging, roots)
+        except OSError as e2:
+            ctx.log.warn(f"could not remove {staging}: {e2}")
+        return base.StepResult("ffmpeg", "red", f"ffmpeg {ver} could not be installed: {e}")
+    ctx.state.data["ffmpeg"] = {"version": ver, "path": str(main), "sha256": base.file_sha256(main)}
+    ctx.state.record("ffmpeg", "ok", fp, f"ffmpeg {ver}")
+    return base.StepResult("ffmpeg", "ok", f"ffmpeg {ver} installed in {dest}")
+
+
+# --------------------------------------------------------------------------------------------- gpu
+def _nvidia_present(ctx: base.Ctx) -> bool:
+    if ctx.paths.sandbox:  # never probe the real hardware from a test
+        return os.environ.get("WNC_TEST_NVIDIA") == "1"
+    smi = shutil.which("nvidia-smi")
+    sys32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "nvidia-smi.exe"
+    if not smi and sys32.is_file():
+        smi = str(sys32)
+    if not smi:
+        return False
+    rc, _out = run_cmd(ctx, [smi, "-L"], 30)
+    return rc == 0
+
+
+def step_gpu(ctx: base.Ctx) -> base.StepResult:
+    if ctx.platform == "mac-arm64":
+        return base.StepResult("gpu", "skipped", "nothing to install: MLX comes with the mac-arm64 lock")
+    if ctx.platform != "win-x64":
+        return base.StepResult("gpu", "skipped", "no GPU support for Whisper on Intel Macs; it uses the CPU")
+    ctx.facts["nvidia"] = _nvidia_present(ctx)
+    if not ctx.facts["nvidia"]:
+        return base.StepResult("gpu", "skipped", "no NVIDIA GPU found (nvidia-smi); Whisper uses the CPU")
+    py = ctx.runtime_python
+    if py is None:
+        rid = current_runtime(ctx.paths)
+        py = runtime_python(ctx.paths, rid, ctx.platform) if rid else None
+    if py is None or not Path(py).is_file():
+        return base.StepResult("gpu", "amber", "the engine runtime is missing; Whisper keeps using the CPU")
+    if ctx.args.dry_run:
+        return base.StepResult("gpu", "skipped", "dry run: would run reel gpu-enable")
+    cli_py = ctx.plugin_root / "engine" / "reel" / "cli.py"
+    rc, out = run_cmd(ctx, [py, "-s", "-B", cli_py, "gpu-enable"], GPU_TIMEOUT,
+                      cwd=ctx.paths.whynot if ctx.paths.whynot.is_dir() else None)
+    if rc != 0:
+        return base.StepResult("gpu", "amber", f"reel gpu-enable failed (exit {rc}: {_tail(out)}); "
+                                               "Whisper keeps using the CPU")
+    return base.StepResult("gpu", "ok", "NVIDIA GPU enabled for Whisper")
+
+
+# --------------------------------------------------------------------------------------------- registry
+STEPS = (("runtime", step_runtime, ()), ("ffmpeg", step_ffmpeg, ()), ("gpu", step_gpu, ("runtime",)))
+
+
+def register(steps: list) -> None:
+    """Append this module's install steps to cli.STEPS (once)."""
+    have = {s[0] for s in steps}
+    steps.extend(s for s in STEPS if s[0] not in have)

@@ -9,6 +9,11 @@
     (atomic, corrupt file set aside), run_steps (dependencies, an exception is `red` and later steps still run) and
     safe_rmtree (outside the root, client marker, protected paths, symlinks/junctions never followed).
   * cli.py / wnc_install.py: `plan` prints the 14 step names in order, also under `python -I`.
+  * runtime.py (steps runtime / ffmpeg / gpu): the runtime id, a build with tests/fixtures/installer/fake_uv.py
+    (stamps, `current`, `pip sync --require-hashes`), no uv call on a re-run, a failed sync or smoke never moves
+    `current` and leaves no `.building`, a missing lock is skipped, a deleted runtime is rebuilt; ffmpeg from a local
+    zip with the GPL text and SOURCE.txt, a bad sha256 installs nothing, a placeholder is skipped; gpu-enable only on
+    win-x64 with an NVIDIA GPU (WNC_TEST_NVIDIA in the sandbox).
 Never touches the real ~/.whynot-cut or ~/.claude: every Paths is a sandbox home in a temp folder, and no real
 network is used (artefacts come from a 127.0.0.1 http.server started here, or file://).
 Run (repo root):
@@ -769,6 +774,388 @@ class TestPlanCommand(unittest.TestCase):
             rc = cli.main(["install", "--home", str(self.home), "--dry-run", "--quiet"])
         self.assertEqual(rc, 0)
         self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_runtime_ffmpeg_gpu_are_registered(self):
+        r = self.run_core("plan", "--home", str(self.home), isolated=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        reg = json.loads(r.stdout)["registered"]
+        for name in ("runtime", "ffmpeg", "gpu"):
+            self.assertIn(name, reg)
+        self.assertLess(reg.index("runtime"), reg.index("ffmpeg"))
+        self.assertLess(reg.index("ffmpeg"), reg.index("gpu"))
+        needs = {n: d for n, _f, d in cli.STEPS}
+        self.assertEqual(needs["gpu"], ("runtime",))
+        self.assertEqual((needs["runtime"], needs["ffmpeg"]), ((), ()))
+
+
+# --------------------------------------------------------------------------------------------- T7.1 step helpers
+FIXTURES = SK / "tests" / "fixtures" / "installer"
+FAKE_UV = FIXTURES / "fake_uv.py"
+LOCK_A = b"# fixture lock A\nanyio==4.15.1 \\\n    --hash=sha256:" + b"a" * 64 + b"\n"
+LOCK_B = b"# fixture lock B\nanyio==4.15.2 \\\n    --hash=sha256:" + b"b" * 64 + b"\n"
+
+
+def runtime_module():
+    """Imported inside the tests so this file stays importable while a step module is being written."""
+    from wnc_installer import runtime
+    return runtime
+
+
+def make_ctx(home: Path, components: dict, plugin_root: Path, platform: str = "win-x64", **args) -> base.Ctx:
+    paths = base.Paths.from_env(str(home), env={})
+    st = base.State(paths)
+    st.load()
+    ns = argparse.Namespace(skip=[], dry_run=False, uv=None, python=None, yes=True)
+    for k, v in args.items():
+        setattr(ns, k, v)
+    return base.Ctx(paths=paths, log=Quiet(paths.logs_dir / "install-test.log"), components=components, state=st,
+                    plugin_root=plugin_root, platform=platform, args=ns)
+
+
+class Served:
+    """A 127.0.0.1 http.server (the _Handler above) for one test; stopped and closed by addCleanup."""
+
+    def __init__(self, test: unittest.TestCase, files: dict):
+        self.srv = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+        self.srv.hits, self.srv.files, self.srv.truncate = [], dict(files), {}
+        self.thread = threading.Thread(target=self.srv.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+        self.thread.start()
+        test.addCleanup(self.stop)
+        self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
+
+    def stop(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        self.thread.join(5)
+
+
+# --------------------------------------------------------------------------------------------- runtime step
+class TestRuntime(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        tmp = Path(self._td.name)
+        self.home = tmp / ARABIC_HOME
+        self.plugin = tmp / "plugin root"
+        self.lock = self.plugin / "setup" / "locks" / "runtime-win-x64.lock"
+        self.lock.parent.mkdir(parents=True)
+        self.lock.write_bytes(LOCK_A)
+        self.uv_log = tmp / "uv-calls.jsonl"
+        self.comp = {"schema": 1, "runtime": {
+            "python": "3.12.15", "index_url": None, "smoke": ["json", "sqlite3"],
+            "locks": {"win-x64": {"file": "setup/locks/runtime-win-x64.lock", "id": base.PLACEHOLDER}}}}
+        env = mock.patch.dict(os.environ, {"WNC_TEST_UV": str(FAKE_UV), "FAKE_UV_LOG": str(self.uv_log)})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("FAKE_UV_FAIL", None)
+        self.rt = runtime_module()
+
+    def ctx(self):
+        return make_ctx(self.home, self.comp, self.plugin)
+
+    def uv_calls(self):
+        if not self.uv_log.exists():
+            return []
+        return [json.loads(x) for x in self.uv_log.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+    def test_a_runtime_id(self):
+        rid = self.rt.runtime_id(self.comp, "win-x64", self.lock)
+        self.assertEqual(rid, "r-" + sha(LOCK_A)[:12])
+        self.comp["runtime"]["locks"]["win-x64"]["id"] = None
+        self.assertEqual(self.rt.runtime_id(self.comp, "win-x64", self.lock), rid)
+        self.comp["runtime"]["locks"]["win-x64"]["id"] = "rt-2026.10.1"
+        self.assertEqual(self.rt.runtime_id(self.comp, "win-x64", self.lock), "rt-2026.10.1")
+        self.comp["runtime"]["locks"]["win-x64"]["id"] = "../escape"
+        with self.assertRaises(ValueError):
+            self.rt.runtime_id(self.comp, "win-x64", self.lock)
+
+    def test_b_fresh_build_then_c_no_uv_call(self):
+        ctx = self.ctx()
+        r = self.rt.step_runtime(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        rid = "r-" + sha(LOCK_A)[:12]
+        paths = ctx.paths
+        self.assertEqual(paths.current_file.read_bytes(), (rid + "\n").encode())
+        self.assertEqual(self.rt.current_runtime(paths), rid)
+        rdir = paths.runtimes_dir / rid
+        self.assertEqual((rdir / ".whynot-lock.sha256").read_text(encoding="utf-8").strip(), sha(LOCK_A))
+        stamp = json.loads((rdir / "WHYNOT_RUNTIME").read_text(encoding="utf-8"))
+        self.assertEqual((stamp["id"], stamp["platform"], stamp["lock_sha256"]), (rid, "win-x64", sha(LOCK_A)))
+        for k in ("python", "lock_file", "created_at", "by"):
+            self.assertTrue(stamp[k], k)
+        self.assertEqual(ctx.runtime_python, self.rt.runtime_python(paths, rid))
+        self.assertTrue(ctx.runtime_python.is_file())
+        self.assertEqual(sorted(p.name for p in paths.runtimes_dir.iterdir()), [rid])  # no .building left
+        sync = [c for c in self.uv_calls() if c[:2] == ["pip", "sync"]]
+        self.assertEqual(len(sync), 1)
+        self.assertIn("--require-hashes", sync[0])
+        self.assertIn(str(self.lock), sync[0])
+        self.assertNotIn("--index-url", sync[0])
+        self.assertEqual(ctx.state.data["runtime"]["id"], rid)
+        # (c) a second run finds the stamped runtime and its smoke import passing: no uv call at all
+        self.uv_log.unlink()
+        ctx2 = self.ctx()
+        r2 = self.rt.step_runtime(ctx2)
+        self.assertEqual(r2.status, "ok", r2.detail)
+        self.assertEqual(self.uv_calls(), [])
+        self.assertEqual(ctx2.runtime_python, ctx.runtime_python)
+
+    def test_index_url_is_passed_when_pinned(self):
+        self.comp["runtime"]["index_url"] = "https://mirror.example/simple"
+        self.assertEqual(self.rt.step_runtime(self.ctx()).status, "ok")
+        sync = [c for c in self.uv_calls() if c[:2] == ["pip", "sync"]][0]
+        self.assertEqual(sync[sync.index("--index-url") + 1], "https://mirror.example/simple")
+
+    def test_d_failed_sync_keeps_the_old_runtime(self):
+        self.assertEqual(self.rt.step_runtime(self.ctx()).status, "ok")
+        old = "r-" + sha(LOCK_A)[:12]
+        self.lock.write_bytes(LOCK_B)
+        with mock.patch.dict(os.environ, {"FAKE_UV_FAIL": "sync"}):
+            ctx = self.ctx()
+            r = self.rt.step_runtime(ctx)
+        self.assertEqual(r.status, "red")
+        self.assertIn("sync", r.detail)
+        self.assertEqual(self.rt.current_runtime(ctx.paths), old)
+        self.assertEqual(sorted(p.name for p in ctx.paths.runtimes_dir.iterdir()), [old])  # no .building, no new id
+        self.assertIsNone(ctx.runtime_python)
+        # once the sync works the new runtime is built and `current` switches; the old one is kept
+        ctx = self.ctx()
+        self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
+        new = "r-" + sha(LOCK_B)[:12]
+        self.assertEqual(self.rt.current_runtime(ctx.paths), new)
+        self.assertEqual(sorted(p.name for p in ctx.paths.runtimes_dir.iterdir()), sorted([old, new]))
+
+    def test_e_no_lock_is_skipped(self):
+        self.lock.unlink()
+        ctx = self.ctx()
+        r = self.rt.step_runtime(ctx)
+        self.assertEqual(r.status, "skipped")
+        self.assertIn("T2.1", r.detail)
+        self.assertEqual(self.uv_calls(), [])
+        self.assertFalse(ctx.paths.current_file.exists())
+
+    def test_f_current_naming_a_deleted_runtime_rebuilds(self):
+        ctx = self.ctx()
+        self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
+        rid = self.rt.current_runtime(ctx.paths)
+        import shutil
+        shutil.rmtree(ctx.paths.runtimes_dir / rid)
+        self.assertIsNone(self.rt.current_runtime(ctx.paths))
+        self.uv_log.unlink()
+        ctx = self.ctx()
+        self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
+        self.assertEqual(self.rt.current_runtime(ctx.paths), rid)
+        self.assertTrue([c for c in self.uv_calls() if c[:2] == ["pip", "sync"]])
+
+    def test_unstamped_leftover_is_replaced(self):
+        ctx = self.ctx()
+        rid = "r-" + sha(LOCK_A)[:12]
+        leftover = ctx.paths.runtimes_dir / rid
+        (leftover / "Lib").mkdir(parents=True)
+        (leftover / "Lib" / "half.py").write_text("x", encoding="utf-8")
+        (ctx.paths.runtimes_dir / (rid + ".building")).mkdir()
+        self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
+        self.assertFalse((leftover / "Lib" / "half.py").exists())
+        self.assertTrue((leftover / ".whynot-lock.sha256").is_file())
+        self.assertEqual(sorted(p.name for p in ctx.paths.runtimes_dir.iterdir()), [rid])
+
+    def test_failed_smoke_is_red_and_current_unchanged(self):
+        self.comp["runtime"]["smoke"] = ["json", "no_such_module_wnc"]
+        ctx = self.ctx()
+        r = self.rt.step_runtime(ctx)
+        self.assertEqual(r.status, "red")
+        self.assertIn("no_such_module_wnc", r.detail + ctx.log.path.read_text(encoding="utf-8"))
+        self.assertFalse(ctx.paths.current_file.exists())
+        self.assertEqual(list(ctx.paths.runtimes_dir.iterdir()), [])
+
+    def test_runtime_python_prefers_the_layout_that_exists(self):
+        paths = base.Paths.from_env(str(self.home), env={})
+        d = paths.runtimes_dir / "r-x"
+        win, posix = d / "Scripts" / "python.exe", d / "bin" / "python"
+        self.assertEqual(self.rt.runtime_python(paths, "r-x"), win if IS_WIN else posix)
+        other = posix if IS_WIN else win
+        other.parent.mkdir(parents=True)
+        other.write_bytes(b"")
+        self.assertEqual(self.rt.runtime_python(paths, "r-x"), other)
+        self.assertIsNone(self.rt.current_runtime(paths))  # no `current` file
+        paths.current_file.write_text("r-x\n", encoding="utf-8")
+        self.assertEqual(self.rt.current_runtime(paths), "r-x")
+        paths.current_file.write_text("../evil\n", encoding="utf-8")
+        self.assertIsNone(self.rt.current_runtime(paths))
+
+    def test_test_uv_is_ignored_outside_the_sandbox(self):
+        ctx = self.ctx()
+        ctx.paths.sandbox = False
+        ctx.args.uv = str(self.home / "bin" / "uv.exe")
+        self.assertEqual(self.rt.uv_command(ctx), [ctx.args.uv])
+        ctx.paths.sandbox = True
+        self.assertEqual(self.rt.uv_command(ctx), [sys.executable, "-B", str(FAKE_UV)])
+
+    @unittest.skipUnless(IS_WIN, "the .cmd wrapper is for Windows")
+    def test_cmd_wrapper_runs_fake_uv(self):
+        with mock.patch.dict(os.environ, {"WNC_TEST_UV": str(FIXTURES / "fake_uv.cmd"),
+                                          "FAKE_UV_PYTHON": sys.executable, "FAKE_UV_VERSION": "9.9.9"}):
+            ctx = self.ctx()
+            rc, out = self.rt.run_cmd(ctx, self.rt.uv_command(ctx) + ["--version"], 60)
+        self.assertEqual((rc, out.strip()), (0, "uv 9.9.9"))
+
+
+# --------------------------------------------------------------------------------------------- ffmpeg step
+def ffmpeg_zip(entries: dict) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+class TestFfmpeg(unittest.TestCase):
+    WIN_ZIP = ffmpeg_zip({"ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe": b"MZ ffmpeg",
+                          "ffmpeg-9.0.2-essentials_build/bin/ffprobe.exe": b"MZ ffprobe",
+                          "ffmpeg-9.0.2-essentials_build/README.txt": b"readme"})
+    MAC_FF = ffmpeg_zip({"ffmpeg": b"\xcf\xfa ffmpeg"})
+    MAC_FP = ffmpeg_zip({"ffprobe": b"\xcf\xfa ffprobe"})
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.srv = Served(self, {"/win/ff.zip": self.WIN_ZIP, "/mac/ffmpeg.zip": self.MAC_FF,
+                                 "/mac/ffprobe.zip": self.MAC_FP})
+        self.comp = {"schema": 1, "ffmpeg": {
+            "version": "9.0.2", "license": "GPL-3.0-or-later", "source": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+            "assets": {
+                "win-x64": {"files": [{"url": self.srv.base + "/win/ff.zip", "sha256": sha(self.WIN_ZIP),
+                                       "archive": "zip", "members": {
+                                           "ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe": "ffmpeg.exe",
+                                           "ffmpeg-9.0.2-essentials_build/bin/ffprobe.exe": "ffprobe.exe"}}]},
+                "mac-arm64": {"files": [
+                    {"url": self.srv.base + "/mac/ffmpeg.zip", "sha256": sha(self.MAC_FF), "archive": "zip",
+                     "members": {"ffmpeg": "ffmpeg"}},
+                    {"url": self.srv.base + "/mac/ffprobe.zip", "sha256": sha(self.MAC_FP), "archive": "zip",
+                     "members": {"ffprobe": "ffprobe"}}]}}}}
+        self.rt = runtime_module()
+
+    def test_win_install_with_licence_and_source(self):
+        ctx = make_ctx(self.home, self.comp, SK, "win-x64")
+        r = self.rt.step_ffmpeg(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        d = ctx.paths.ffmpeg_dir / "9.0.2"
+        self.assertEqual(sorted(p.name for p in d.iterdir()),
+                         ["LICENSE.GPL-3.0.txt", "SOURCE.txt", "ffmpeg.exe", "ffprobe.exe"])
+        self.assertEqual((d / "ffmpeg.exe").read_bytes(), b"MZ ffmpeg")
+        self.assertEqual((d / "LICENSE.GPL-3.0.txt").read_bytes(),
+                         (SK / "installer" / "licenses" / "GPL-3.0.txt").read_bytes())
+        src = (d / "SOURCE.txt").read_text(encoding="utf-8")
+        for needle in ("9.0.2", "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz", self.srv.base + "/win/ff.zip",
+                       sha(self.WIN_ZIP)):
+            self.assertIn(needle, src)
+        self.assertEqual(ctx.state.data["ffmpeg"], {"version": "9.0.2", "path": str(d / "ffmpeg.exe"),
+                                                    "sha256": sha(b"MZ ffmpeg")})
+        self.assertEqual(sorted(p.name for p in ctx.paths.ffmpeg_dir.iterdir()), ["9.0.2"])  # no staging left
+        # already there with the same fingerprint: ok without a download
+        hits = len(self.srv.srv.hits)
+        ctx2 = make_ctx(self.home, self.comp, SK, "win-x64")
+        for p in list(ctx2.paths.downloads_dir.iterdir()):  # not even the cached archive is needed
+            p.unlink()
+        self.assertEqual(self.rt.step_ffmpeg(ctx2).status, "ok")
+        self.assertEqual(len(self.srv.srv.hits), hits)
+
+    def test_mac_two_archives_and_exec_bits(self):
+        ctx = make_ctx(self.home, self.comp, SK, "mac-arm64")
+        r = self.rt.step_ffmpeg(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        d = ctx.paths.ffmpeg_dir / "9.0.2"
+        self.assertEqual(sorted(p.name for p in d.iterdir()), ["LICENSE.GPL-3.0.txt", "SOURCE.txt", "ffmpeg", "ffprobe"])
+        src = (d / "SOURCE.txt").read_text(encoding="utf-8")
+        self.assertIn(sha(self.MAC_FF), src)
+        self.assertIn(sha(self.MAC_FP), src)
+        if not IS_WIN:
+            for b in ("ffmpeg", "ffprobe"):
+                self.assertEqual(os.stat(d / b).st_mode & 0o777, 0o755)
+
+    def test_wrong_sha_is_red_and_installs_nothing(self):
+        self.comp["ffmpeg"]["assets"]["win-x64"]["files"][0]["sha256"] = "0" * 64
+        ctx = make_ctx(self.home, self.comp, SK, "win-x64")
+        r = self.rt.step_ffmpeg(ctx)
+        self.assertEqual(r.status, "red")
+        self.assertIn("sha256", r.detail)
+        self.assertFalse((ctx.paths.ffmpeg_dir / "9.0.2").exists())
+        self.assertFalse(ctx.paths.ffmpeg_dir.exists() and any(ctx.paths.ffmpeg_dir.iterdir()))
+        self.assertNotIn("ffmpeg", ctx.state.data)
+
+    def test_placeholder_is_skipped(self):
+        for where in ("url", "sha256"):
+            with self.subTest(where=where):
+                comp = json.loads(json.dumps(self.comp))
+                comp["ffmpeg"]["assets"]["win-x64"]["files"][0][where] = base.PLACEHOLDER
+                ctx = make_ctx(self.home, comp, SK, "win-x64")
+                r = self.rt.step_ffmpeg(ctx)
+                self.assertEqual(r.status, "skipped")
+                self.assertIn("not in this build", r.detail)
+        self.assertEqual(self.srv.srv.hits, [])
+        self.assertFalse((self.home / ".whynot-cut" / "ffmpeg").exists())
+
+
+# --------------------------------------------------------------------------------------------- gpu step
+class TestGpu(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        tmp = Path(self._td.name)
+        self.home = tmp / ARABIC_HOME
+        self.plugin = tmp / "plugin root"
+        cli_py = self.plugin / "engine" / "reel" / "cli.py"
+        cli_py.parent.mkdir(parents=True)
+        self.argv_file = tmp / "argv.json"
+        cli_py.write_text("import json, os, sys\n"
+                          "with open(os.environ['WNC_TEST_ARGV'], 'w', encoding='utf-8') as f:\n"
+                          "    json.dump({'argv': sys.argv, 'home': os.environ.get('WHYNOT_HOME'),\n"
+                          "               'utf8': os.environ.get('PYTHONUTF8')}, f)\n"
+                          "sys.exit(int(os.environ.get('WNC_TEST_EXIT', '0')))\n", encoding="utf-8")
+        env = mock.patch.dict(os.environ, {"WNC_TEST_ARGV": str(self.argv_file)})
+        env.start()
+        self.addCleanup(env.stop)
+        for k in ("WNC_TEST_NVIDIA", "WNC_TEST_EXIT"):
+            os.environ.pop(k, None)
+        self.rt = runtime_module()
+
+    def ctx(self, plat="win-x64"):
+        c = make_ctx(self.home, {"schema": 1}, self.plugin, plat)
+        c.runtime_python = Path(sys.executable)
+        return c
+
+    def test_mac_is_skipped(self):
+        r = self.rt.step_gpu(self.ctx("mac-arm64"))
+        self.assertEqual(r.status, "skipped")
+        self.assertIn("MLX comes with the mac-arm64 lock", r.detail)
+        self.assertEqual(self.rt.step_gpu(self.ctx("mac-x64")).status, "skipped")
+        self.assertFalse(self.argv_file.exists())
+
+    def test_win_sandbox_without_nvidia_is_skipped(self):
+        ctx = self.ctx()
+        r = self.rt.step_gpu(ctx)
+        self.assertEqual(r.status, "skipped")
+        self.assertIn("NVIDIA", r.detail)
+        self.assertFalse(self.argv_file.exists())
+        self.assertFalse(ctx.facts["nvidia"])
+
+    def test_win_with_nvidia_runs_gpu_enable(self):
+        with mock.patch.dict(os.environ, {"WNC_TEST_NVIDIA": "1"}):
+            ctx = self.ctx()
+            r = self.rt.step_gpu(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        rec = json.loads(self.argv_file.read_text(encoding="utf-8"))
+        self.assertEqual(rec["argv"][-1], "gpu-enable")
+        self.assertEqual(Path(rec["argv"][0]), self.plugin / "engine" / "reel" / "cli.py")
+        self.assertEqual((rec["home"], rec["utf8"]), (str(ctx.paths.whynot), "1"))
+        self.assertTrue(ctx.facts["nvidia"])
+
+    def test_gpu_enable_failure_is_amber(self):
+        with mock.patch.dict(os.environ, {"WNC_TEST_NVIDIA": "1", "WNC_TEST_EXIT": "3"}):
+            r = self.rt.step_gpu(self.ctx())
+        self.assertEqual(r.status, "amber")
+        self.assertIn("Whisper keeps using the CPU", r.detail)
 
 
 if __name__ == "__main__":

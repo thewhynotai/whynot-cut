@@ -4,4 +4,5 @@ Stdlib only: it runs on the python-build-standalone interpreter the bootstrap (i
 in ~/.whynot-cut/python, before any package is installed. Entry point: installer/core/wnc_install.py.
   base.py  paths, logging, components.json, downloads, extraction, state.json, safe deletes, the step runner
   cli.py   install / uninstall / plan, and the STEPS registry the step modules append to
+  runtime.py  steps runtime (uv venv + pip sync from the hash lock), ffmpeg (pinned, GPL text) and gpu (NVIDIA)
 """
