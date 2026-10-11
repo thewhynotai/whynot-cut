@@ -35,3 +35,5 @@ reel qc          --root "<CLIENT>" --video-id <ID>    # structural checks + evid
 Red flags and the claim → evidence table: `references/verification.md`.
 
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), do the batches in this agent one after another, with the same rows and format, and say "checked sequentially" in your report.
+
+Podcast reels: `qc` also checks that the first V1 clip starts at the reel's in-point in the episode and that the window lies inside the episode. In the frames, check each shot's face is in the picture and that wide shots frame the person speaking (`00_inputs/speakers.json`).

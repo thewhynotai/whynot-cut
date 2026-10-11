@@ -60,6 +60,12 @@ People wrote down this speech before you: use them as evidence for corrections (
 Only the editor can confirm the transcript by ear. Then: `reel transcript-verify --by editor --note "<what they checked>"`.
 The verification records the transcript's fingerprint: any later correction or re-transcription makes it stale.
 
+## Episodes (podcast mode)
+`reel episode-transcribe --episode <EP>` runs the whole episode in ~10-minute chunks (checkpoints in
+`02_transcription/chunks/`; run again to resume; `--force` restarts), with VAD, the language detected once on chunk 1.
+Same files and correction flow as a clip, with `--episode <EP>`. Reels are sliced from the episode transcript, so
+correct the episode and let the lead `reels-select --resync`.
+
 ## Fan-out
 For long clips, spawn `segment-proofreader` sub-agents in parallel, one per ~20 s chunk. Give each the chunk's word ids, times and text, plus the glossary.
 Merge their proposals and resolve conflicts yourself. They propose; you write the corrections file.

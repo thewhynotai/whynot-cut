@@ -23,6 +23,8 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    - `01_analysis/medical-content-review.md` (approvals pending)
    - `06_audio/dialogue/dialogue-clean-report.json` and `cut-verification.json`
    - `08_quality_control/preview/preview-result.json` (a preview newer than the plan, for the editor to watch)
+   - Podcast episode: `reel episode-next --root "<CLIENT>" --episode <EP>` (episode steps, stale steps, its reels'
+     status) and `publish/publish-validation.json` (publish package checked?).
 3. Answer in the report format:
    - **Verified**: only what the commands you just ran or the files you just read prove. Name the evidence.
    - **Not verified**: anything stale or unchecked, and why.

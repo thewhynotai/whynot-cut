@@ -33,6 +33,13 @@ Then run `reel plan` and fix **every** error it reports (evidence not verbatim, 
   (`broll_video`). Never download or generate footage. No AI likeness, and no retouching of the client.
 - Decisions stay in **source time**. With `remove_pauses`, the compiler remaps everything.
 
+**Podcast reels:** `00_inputs/source.json` holds the reel's content type and recipe. Follow it (pause thresholds are
+applied by the engine; graphics per 30 s, zoom limits and avoided templates are checked by `reel plan`). Explain a
+deliberate deviation in that decision's `recipe_note`. Templates for podcasts: `stat_card` (`value`, `label`) for a
+number the speaker says, `context_card` (`text`) at the start of a reel that needs context (editorial, so keep it
+short and factual). Music only from `reel music --list` (licensed tracks with moods) via `music.file`; keep chosen
+pauses with `global.remove_pauses.protect: [[start, end]]`.
+
 **References:**
 - `references/semantic-analysis.md`
 - `references/edit-decision-engine.md`

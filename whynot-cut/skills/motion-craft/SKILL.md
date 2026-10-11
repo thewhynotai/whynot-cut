@@ -43,3 +43,5 @@ Fan-out: spawn `graphic-checker` sub-agents in parallel, one per family (bars/st
 Give each its image paths and the expected texts. They return pass/fail per image.
 
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), do the batches in this agent one after another, with the same rows and format, and say "checked sequentially" in your report.
+
+Podcast templates (2.1): `stat_card` (value + label on a dense card, brand accent bar; captions hidden during it) and `context_card` (a top pill with one editorial line). Both render through the same HarfBuzz path; check them like the other cards.

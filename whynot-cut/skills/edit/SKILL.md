@@ -35,6 +35,9 @@ reel settings --root "<CLIENT_FOLDER>"                  # preferences in effect 
 - Read the profile's `notes.md` (`${CLAUDE_PLUGIN_ROOT}/profiles/<id>/notes.md`, then the client's
   `output/client_database/reel-profile/notes.md`). It holds the editor's standing style decisions.
 
+- Reels cut from a podcast episode (`<EP>_<RID>`, with `00_inputs/source.json`) follow this playbook too. The episode
+  stages, Gate 0 (the editor picks the reels) and the publish package are in `/whynot-cut:podcast`.
+
 ## 1. Pipeline (agents and order)
 Spawn agents with the Agent tool, `subagent_type: "whynot-cut:<agent>"`. Put independent stages in **one message** so they run in parallel (∥).
 Every spawn prompt must contain:

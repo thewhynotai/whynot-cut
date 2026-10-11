@@ -15,6 +15,7 @@ table, highlighting the one or two rows that fit right now:
 | `/whynot-cut:start` | first-time setup, step by step, until "drop your footage here" |
 | "edit the new videos" · `/whynot-cut:autopilot` | edits every new clip in the client folder(s) |
 | `/whynot-cut:edit C0239` | full edit of one clip: transcript → audio → story → graphics → preview → approval → Premiere → QC |
+| "make reels from this episode" · `/whynot-cut:podcast` | podcast episode -> reels plan with timecodes and content types -> you pick -> reels in Premiere, plus YouTube/social copy and thumbnails |
 | `/whynot-cut:preview` | watchable MP4 of the planned edit (no Premiere needed) |
 | `/whynot-cut:revise "1- … 2- …"` | applies editor comments, rebuilds, re-verifies, reports per comment |
 | `/whynot-cut:status` | "is it ready?", with fresh evidence |

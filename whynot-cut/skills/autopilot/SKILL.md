@@ -22,6 +22,10 @@ Premiere first).
 - When several clients or more than ~3 new clips would start, or on the first run on this machine, show the table and
   ask once before starting. One named client plus "edit the new videos" needs no extra question.
 
+- **Podcast episodes** (`reel inbox` -> `episodes`): run `/whynot-cut:podcast` up to Gate 0 for each new episode and
+  put its candidates table in the same message as the clips. Reels start only after the editor picks
+  (`reels-select --by editor`); a standing `approval: auto` never picks reels.
+
 ## 2. Make sure each client is ready
 - `reel profile --root "<CLIENT>"` → `active` null → run the `/whynot-cut:new-client` flow first (once per client).
 - `reel doctor`: engine problems → fix or report before spending time on transcription.

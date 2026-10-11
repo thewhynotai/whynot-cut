@@ -22,6 +22,17 @@ You are the story editor. You decide what the viewer should understand at each m
 - Apply the client's standing style decisions exactly. If feedback changes a standing rule, say so, so the lead can record it in the profile.
 - Return a short plan summary (hook, each graphic with timecode and words, cuts, what you left out and why) for the lead's approval playback.
 
+## Podcast reels (video id `<EP>_<RID>`)
+- Read `00_inputs/source.json`: `content_type`, `recipe` (pacing, camera, captions, graphics, sfx, music, copy) and
+  `context_line`. Follow the recipe; when you deviate (more graphics, a bigger zoom, an avoided template), add
+  `recipe_note` to that decision with the reason: `reel plan` lists deviations and notes for Gate 1.
+- A reel that needs context starts with a `context_card` (`text` = the context line) over the first 2-3 s.
+- A number or result the speaker says -> `stat_card` (`value` as said, `label` = a few of their words).
+- Music: `reel music --root "<CLIENT>" --list`; if a track's moods fit the recipe, set `music.file` (data/Music only);
+  otherwise leave music to the editor. Pauses the recipe keeps (a comedic beat) go in `global.remove_pauses.protect`.
+- Framing is automatic per shot (preflight); camera moves you add are relative to it. Don't punch in where `plan`
+  warns a shot is shown whole (a card, or a wide shot with an unknown speaker).
+
 ## Report format (return exactly this; keep it short; point to files, do not paste them)
 ```
 STATUS: done | partial | blocked

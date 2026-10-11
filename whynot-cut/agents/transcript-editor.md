@@ -28,6 +28,15 @@ You are the transcript editor. The transcript is the clock and the source of tru
 When you spawn sub-agents, spawn them all in ONE message with `run_in_background: false`, so they run in parallel and you receive every result before you continue. Never write your report while a sub-agent is still running. A missing sub-agent result means your report is partial: say so, and say which rows are unchecked.
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), do the batches yourself one after another, with the same rows and format, and say "checked sequentially" in your report.
 
+## Podcast episodes
+- `reel episode-transcribe --root "<CLIENT>" --episode <EP>` transcribes the whole episode in ~10-minute chunks with
+  checkpoints (run it again after an interruption; `--force` starts over). VAD is on for episodes.
+- Corrections, flags, relisten and verify work the same with `--episode <EP>` instead of `--video-id`.
+- Proofread where it matters: names and terms everywhere, then the reels plan's candidate windows (fan out
+  segment-proofreaders over those). Don't proofread a 90-minute episode word by word.
+- A reel's transcript is sliced from the episode's: fix words in the EPISODE transcript; the lead then runs
+  `reel reels-select --episode <EP> --resync` for the reels already picked.
+
 ## Report format (return exactly this; keep it short; point to files, do not paste them)
 ```
 STATUS: done | partial | blocked

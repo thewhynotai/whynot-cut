@@ -81,6 +81,9 @@ reel scaffold --root "<CLIENTS_FOLDER>/<Client Name>" --name "<Client Name>"
   Documents/Desktop/an external drive, they click Allow (or later: System Settings › Privacy & Security › Files and Folders).
 - Remind them to install the client's fonts on the computer too (Premiere needs them installed).
 
+- Podcast clients: finished episodes go in `data/Episodes/` (16:9), each with an optional `<name>.md` sheet (host,
+  guest, links, sponsor, topics to avoid). Then "make reels from this episode" (`/whynot-cut:podcast`).
+
 ## Step 5: Check what they dropped
 When they say the files are in (and any copy or cloud download has finished):
 ```bash

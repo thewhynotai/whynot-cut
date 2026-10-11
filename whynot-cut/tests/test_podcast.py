@@ -1356,5 +1356,61 @@ class TestEpisodeNext(unittest.TestCase):
         self.assertTrue(any(s.startswith("reels-plan") for s in episode_next(ep)["stale"]))
 
 
+def frontmatter(p: Path) -> dict:
+    text = p.read_text(encoding="utf-8")
+    head = text.split("---", 2)[1]
+    out = {}
+    for line in head.splitlines():
+        if ":" in line and not line.startswith(" "):
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+class TestPluginLayer(unittest.TestCase):
+    def test_new_agents(self):
+        for name in ("episode-analyst", "moment-scout", "publish-writer"):
+            f = SK / "agents" / f"{name}.md"
+            fm = frontmatter(f)
+            self.assertEqual(fm.get("name"), name)
+            for k in ("description", "tools", "model"):
+                self.assertTrue(fm.get(k), f"{name}: {k}")
+            self.assertIn("When to invoke", f.read_text(encoding="utf-8"))
+        self.assertEqual(frontmatter(SK / "agents/moment-scout.md")["tools"], "Read")
+
+    def test_new_skills(self):
+        for name in ("podcast", "episode-craft", "publish-craft"):
+            f = SK / "skills" / name / "SKILL.md"
+            self.assertEqual(frontmatter(f).get("name"), name)
+            self.assertLess(len(f.read_text(encoding="utf-8").splitlines()), 400)
+        pod = (SK / "skills/podcast/SKILL.md").read_text(encoding="utf-8")
+        for must in ("Gate 0", "reels-select", "--by editor", "episode-transcribe", "reels-plan", "publish-check"):
+            self.assertIn(must, pod)
+        for ref in ("episode-craft/references/content-types.md", "episode-craft/references/moment-scoring.md",
+                    "publish-craft/references/platform-rules.md"):
+            self.assertTrue((SK / "skills" / ref).exists(), ref)
+
+    def test_evals(self):
+        for name in ("podcast-reels-plan", "publish-package"):
+            self.assertTrue((SK / "evals" / name / "prompt.md").exists(), name)
+            self.assertTrue((SK / "evals" / name / "graders" / "criteria.md").exists(), name)
+
+    def test_session_context_mentions_episodes(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            root = tmp / "POD"
+            for d in ("assets/Logo", "data/Episodes", "data/Raw"):
+                (root / d).mkdir(parents=True)
+            (root / "data/Episodes/EP07.mp4").write_bytes(b"x")
+            r = subprocess.run([sys.executable, "-B", str(SK / "hooks/session_context.py")],
+                               input=json.dumps({"cwd": str(root)}), capture_output=True, text=True, encoding="utf-8")
+            ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("EP07", ctx)
+            self.assertIn("/whynot-cut:podcast", ctx)
+            self.assertIn("New clips not started yet: none", ctx)        # an episode is not a clip
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -45,11 +45,20 @@ def bridge_state(home: Path) -> str:
 def new_clips(root: Path) -> list:
     out = []
     for f in sorted((root / "data").rglob("*")):
-        if f.suffix.lower() in VIDEO and not f.name.startswith(".") and "ref" not in f.relative_to(root).as_posix().lower():
+        rel = f.relative_to(root).as_posix().lower()
+        if f.suffix.lower() in VIDEO and not f.name.startswith(".") and "ref" not in rel \
+                and not rel.startswith("data/episodes/"):           # episodes are cut into reels (podcast mode)
             vid = "".join(ch if ch.isalnum() else "_" for ch in f.stem).strip("_").upper()
             if not (root / "output/projects" / vid / "02_transcription/transcript.json").exists():
                 out.append(vid)
     return out[:12]
+
+
+def episodes(root: Path) -> list:
+    """Podcast episodes waiting in data/Episodes (file names)."""
+    d = root / "data" / "Episodes"
+    return [f.stem for f in sorted(d.glob("*")) if f.suffix.lower() in VIDEO and not f.name.startswith(".")][:8] \
+        if d.is_dir() else []
 
 
 def prefs_line(st: dict) -> str:
@@ -110,10 +119,14 @@ def main():
                 if not pj.parent.name.startswith("_") and any(t.lower() in root.name.lower() for t in toks):
                     prof = pj.parent.name
         clips = new_clips(root)
+        eps = episodes(root)
         emit(f"WhyNot Cut: this is a client folder ({root}). Profile: {prof or 'NONE (run /whynot-cut:new-client)'}. "
              f"Engine: {'ok' if env_ok else 'not installed (run /whynot-cut:start)'}. "
              f"Premiere bridge: {bridge_state(home)}. "
-             f"New clips not started yet: {', '.join(clips) if clips else 'none'}. {prefs_line(st)} "
+             f"New clips not started yet: {', '.join(clips) if clips else 'none'}. "
+             + (f"Podcast episodes in data/Episodes: {', '.join(eps)} (reels plan + publish package: /whynot-cut:podcast; "
+                f"`reel episodes` shows their state). " if eps else "")
+             + f"{prefs_line(st)} "
              f"Use /whynot-cut:autopilot (edit every new clip), /whynot-cut:edit <clip>, /whynot-cut:revise, "
              f"/whynot-cut:status. assets/ and data/ are read-only.")
         return

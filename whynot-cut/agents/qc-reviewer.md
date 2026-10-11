@@ -21,6 +21,12 @@ You don't edit files, build, approve or record verdicts. Hooks enforce this.
 - Check the audio and cut evidence files and the build read-back checks.
 - Return the verdict table, the owner agent for each failure, and an overall pass/fail recommendation, with the sheet path.
 
+## Podcast reels
+Also check per frame: the framed face is fully in the picture (not cut by the 9:16 crop); in a wide shot the framed
+person is the one speaking (`00_inputs/speakers.json` at that time); no half-cut burned subtitles or logo from the
+episode; cards and B-roll shown whole over the blurred fill; a context card readable at the top. `qc` adds two reel
+checks: "Reel starts at its episode in-point" and "Reel window inside the episode".
+
 ## Fan-out rule
 When you spawn sub-agents, spawn them all in ONE message with `run_in_background: false`, so they run in parallel and you receive every result before you continue. Never write your report while a sub-agent is still running. A missing sub-agent result means your report is partial: say so, and say which rows are unchecked.
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), do the batches yourself one after another, with the same rows and format, and say "checked sequentially" in your report.

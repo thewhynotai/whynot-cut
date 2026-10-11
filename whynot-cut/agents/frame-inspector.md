@@ -19,3 +19,5 @@ You get 6–8 PNG paths, each with an expectation row (event id, template, expec
 - **Spot re-check.** After a fix, re-inspect only the frames that failed before.
 
 Return only: | frame | event | pass/fail/unsure | reason (what you saw) |. Don't guess; if a detail is unreadable, mark it unsure.
+
+Podcast reels: also report a face cut by the crop, the wrong person framed in a wide shot, and half-cut burned subtitles or logos from the episode.
