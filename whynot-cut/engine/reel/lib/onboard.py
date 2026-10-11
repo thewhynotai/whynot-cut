@@ -125,6 +125,23 @@ def client_markers(roots: list[Path], fix_roots=()) -> dict:
     return rep
 
 
+def runtime_report(home: Path | None = None) -> dict:
+    """The engine runtime as the wrappers resolve it (current runtime, else the legacy venv), whether it was built from
+    this plugin's lock, and whether THIS process is isolated in it: every engine module loads from inside the runtime
+    at the locked version, no system or user site (3.0 T2.1, IM-1). {kind, id, dir, python, expected_id,
+    up_to_date, isolated, problems, modules, ...}."""
+    from . import runtime as R
+    home = home or engine_home()
+    st = R.status(home)
+    try:
+        lock = R.parse_lock(Path(st["lock_file"]).read_text(encoding="utf-8")) if st["lock_file"] else {}
+    except (OSError, ValueError):
+        lock = {}
+    iso = R.isolation(plat.engine_runtime(home), lock)
+    st.update(isolated=iso["isolated"], problems=iso["problems"], modules=iso["modules"])
+    return st
+
+
 def doctor() -> dict:
     from . import settings as S
     mods = {}
@@ -145,17 +162,32 @@ def doctor() -> dict:
     rep = {"generated": now_iso(), "plugin": selfid.plugin_info(), "reel_command": rc,
            "system": plat.describe(), "engine_home": str(engine_home()),
            "venv_python": str(venv_python()), "venv_ok": venv_python().exists(), "python_modules": mods,
+           "running_python": sys.executable,
            "ffmpeg": ffmpeg_exe(), "whisper_models": models,
            "whisper_partial_downloads": sorted(k for k, v in states.items() if v == "partial"), "gpu": plat.gpu_info(), "adobe_apps": apps,
            "premiere_bridge": br, "settings_file": st["_file"], "settings_problems": st["_problems"],
            "clients_root": str(cr) if cr else None}
+    rt = rep["runtime"] = runtime_report()
+    rep["isolated"] = rt["isolated"]
     gh = guard_heartbeat()
     rep["guard_active"], rep["guard_heartbeat"] = gh["active"], gh
     fixes = []
     if not rc["ok"]:      # G66: a session started before the install keeps another plugin's `reel` first on PATH
         fixes.append({"item": "wrong `reel` first on PATH: " + rc["message"], "who": "editor", "fix": rc["fix"]})
     if not all(v is True for v in mods.values()):
-        fixes.append({"item": "engine packages", "who": "claude", "fix": "reel setup   (re-installs the pinned packages)"})
+        fixes.append({"item": "engine packages", "who": "claude",
+                      "fix": "reel setup   (re-installs the packages from the hash lock)"})
+    if rt["kind"] != "runtime":
+        fixes.append({"item": "engine runtime not isolated: " + "; ".join(rt["problems"][:3]), "who": "claude",
+                      "fix": "reel setup   (builds the isolated runtime side by side from the hash lock; the old "
+                             "venv/ is kept)"})
+    elif not rt["up_to_date"]:
+        fixes.append({"item": f"engine runtime {rt['id']} was not built from this plugin's lock "
+                              f"(expected {rt['expected_id']})", "who": "claude",
+                      "fix": "reel setup   (builds the new runtime side by side, then switches to it)"})
+    elif not rt["isolated"]:
+        fixes.append({"item": "engine runtime not isolated: " + "; ".join(rt["problems"][:3]), "who": "claude",
+                      "fix": "reel setup --force   (re-installs the runtime from the hash lock)"})
     if not rep["ffmpeg"]:
         fixes.append({"item": "ffmpeg", "who": "claude", "fix": "reel setup   (imageio-ffmpeg provides it)"})
     if not models:

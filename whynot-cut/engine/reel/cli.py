@@ -20,7 +20,8 @@ from pathlib import Path
 
 if __name__ == "__main__" and os.environ.get("WHYNOT_TEST_ECHO_ARGV") == "1":   # TEST ONLY (tests/test_wrappers.py):
     print(json.dumps({"argv": sys.argv[1:], "whynot_home": os.environ.get("WHYNOT_HOME"),    # what the wrapper
-                      "env_keys": sorted(os.environ)}))                                     # handed the engine
+                      "env_keys": sorted(os.environ), "prefix": sys.prefix,                 # handed the engine,
+                      "no_user_site": bool(sys.flags.no_user_site)}))                       # and with which python
     sys.exit(0)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -647,7 +648,7 @@ def cmd_next(a):
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
-NO_ROOT = {"setup", "doctor", "model-download", "gpu-enable", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
+NO_ROOT = {"setup", "doctor", "py", "model-download", "gpu-enable", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
            "ae-status", "ae-probe", "motion-icons", "motion-library"}
 NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
@@ -666,7 +667,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
-CORE_READS = {"setup", "model-download", "gpu-enable", "profile", "ppro-install", "ppro-status", "ppro-probe",
+CORE_READS = {"setup", "py", "model-download", "gpu-enable", "profile", "ppro-install", "ppro-status", "ppro-probe",
               "status", "next", "lock", "doctor"}
 WRITES_IF = {
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
@@ -730,19 +731,84 @@ def cmd_lock(a):
     out(writer_lock.release(a.root) if a.release else writer_lock.status(a.root))
 
 
-def cmd_setup(a):
-    """Idempotent machine setup: packages, ffmpeg, Premiere bridge, then the doctor report (never changes Adobe prefs)."""
+def run_setup_env(force=False, check=False) -> dict:
+    """setup/setup_env.py in a child process (stdlib only, so any engine python runs it): builds or repairs the
+    isolated runtime from the platform's hash lock and switches `current` after a smoke import (3.0 T2.1).
+    Progress goes to stderr; returns its JSON report."""
+    import subprocess
+    from lib.common import PLUGIN_DIR, engine_home
+    cmd = [sys.executable, "-s", str(PLUGIN_DIR / "setup" / "setup_env.py"), "--home", str(engine_home())]
+    cmd += ["--force"] * force + ["--check"] * check
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    try:
+        return json.loads(r.stdout)
+    except ValueError:
+        return {"ok": False, "error": f"setup_env.py exit {r.returncode} without a report", "detail": r.stdout[-2000:]}
+
+
+def doctor_in_engine() -> dict:
+    """The doctor report from the engine's own interpreter: in this process when it is the current runtime, else
+    (setup just built a runtime while the legacy venv runs this command) from the runtime's python."""
+    import subprocess
+    from lib import plat
+    from lib.common import engine_home
     from lib.onboard import doctor
+    rt = plat.engine_runtime(engine_home())
+    if rt["kind"] != "runtime" or Path(sys.prefix).resolve() == Path(rt["dir"]).resolve():
+        return doctor()
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", PYTHONDONTWRITEBYTECODE="1")
+    r = subprocess.run([str(rt["python"]), "-s", str(Path(__file__).resolve()), "doctor"], stdout=subprocess.PIPE,
+                       text=True, encoding="utf-8", errors="replace", env=env)
+    try:
+        return json.loads(r.stdout)
+    except ValueError:
+        rep = doctor()
+        rep["fixes"].append({"item": f"the new runtime's doctor did not run (exit {r.returncode})", "who": "claude",
+                             "fix": "reel doctor   (in a new command, so it runs on the new runtime)"})
+        return rep
+
+
+def cmd_setup(a):
+    """Idempotent machine setup and repair: the isolated runtime (built or re-synced from the hash lock), the
+    Premiere bridge, then the doctor report (never changes Adobe prefs)."""
     from lib.ppro_bridge import install
     from lib import plat
-    rep = {}
+    rep = {"runtime": run_setup_env(force=a.force, check=a.check)}
+    if a.check:
+        out(rep)
+        return
     if not a.no_bridge and plat.newest_app("premiere"):
         rep["bridge_install"] = install()
     elif not a.no_bridge:
         rep["bridge_install"] = "skipped: Premiere Pro not found on this computer"
-    rep["doctor"] = doctor()
-    rep["next"] = [f["fix"] for f in rep["doctor"]["fixes"]] or ["all set: run /whynot-cut:start or reel inbox"]
+    rep["doctor"] = doctor_in_engine()
+    fixes = rep["doctor"].get("fixes") or []
+    if not rep["runtime"].get("ok"):
+        fixes.insert(0, {"item": "engine runtime: " + str(rep["runtime"].get("error") or "not ready"),
+                         "who": "claude", "fix": rep["runtime"].get("how") or "reel setup"})
+    rep["next"] = [f["fix"] for f in fixes] or ["all set: run /whynot-cut:start or reel inbox"]
     out(rep)
+
+
+PY_USAGE = "reel py <script.py> [args] | reel py -m <module> [args] | reel py -c <code> [args]"
+
+
+def cmd_py(a):
+    """Run Python with the engine runtime (3.0 T2.1 / T2.16): engine packages and the engine's `lib` importable,
+    user site off when the engine runs that way. Output and exit code are the script's own."""
+    import subprocess
+    args = list(a.pyargs or [])
+    if args[:1] == ["--"]:
+        args = args[1:]
+    if not args or args[0] in ("-h", "--help"):
+        out({"error": "reel py needs a script, -m <module> or -c <code>", "how": PY_USAGE})
+        raise SystemExit(2)
+    env = dict(os.environ)
+    here = str(Path(__file__).resolve().parent)
+    env["PYTHONPATH"] = os.pathsep.join([here] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+    flags = ["-s"] if sys.flags.no_user_site else []
+    sys.stdout.flush()
+    raise SystemExit(subprocess.run([sys.executable, *flags, *args], env=env).returncode)
 
 
 def cmd_model_download(a):
@@ -909,7 +975,8 @@ def _utf8_stdio():
 # theirs in lib/podcast_cli.HELP and lib/motion_cli.HELP). Order = the order of the editing workflow.
 CORE_COMMANDS: dict[str, str] = {
     "doctor": "machine report (engine, ffmpeg, Premiere bridge, PATH, guard, client markers); --fix marks this client",
-    "setup": "install or repair the engine, packages, ffmpeg and the Premiere bridge (idempotent)",
+    "setup": "install or repair the engine runtime (hash-locked), ffmpeg and the Premiere bridge (idempotent)",
+    "py": "run Python with the engine runtime: reel py <script.py> | -m <module> | -c <code> [args]",
     "scaffold": "create a client folder (assets/, data/, START_HERE.md, .whynot-client)",
     "inbox": "list the new raw clips of a client folder and their video ids",
     "settings": "show or change the editor's WhyNot Cut preferences",
@@ -1052,6 +1119,10 @@ def main():
             sp.add_argument("--extras", action="store_true", help="confirm the editor explicitly asked for After Effects/Photoshop")
         if name == "setup":
             sp.add_argument("--no-bridge", action="store_true")
+            sp.add_argument("--force", action="store_true", help="re-install the runtime from the lock even when it matches")
+            sp.add_argument("--check", action="store_true", help="report what setup would do; change nothing")
+        if name == "py":
+            sp.add_argument("pyargs", nargs=argparse.REMAINDER, help="a script, -m <module> or -c <code>, then its args")
         if name == "doctor":
             sp.add_argument("--fix", action="store_true",
                             help="write the missing .whynot-client marker of --root or the current client folder "
@@ -1090,6 +1161,11 @@ def main():
             g.add_argument("--status", action="store_true", help="who holds the lock, since when, stale or not (default)")
             g.add_argument("--release", action="store_true",
                            help="remove the lock (lead only, when the editor says the other session is finished)")
+    argv = sys.argv[1:]
+    if argv[:1] == ["py"]:          # everything after `py` belongs to the script (argparse would read its -m / -c)
+        a = argparse.Namespace(cmd="py", pyargs=argv[1:])
+        cmd_py(a)
+        return
     a = ap.parse_args()
     if a.cmd in EXTRAS and not a.extras:
         out({"blocked": f"`{a.cmd}` is an optional After Effects/Photoshop extra. The default pipeline is Premiere only.",

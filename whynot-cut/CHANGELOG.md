@@ -3,6 +3,18 @@
 ## 3.0.0 (unreleased)
 
 ### Added
+- Transcription performance and backends (T2.12, review IM-13 / IM-14 / MI-12, decision D9). New
+  `lib/whisper_backends.py`: one runner interface and one output schema for `ct2` (faster-whisper / CTranslate2) and
+  `mlx` (mlx-whisper on Apple Silicon, word timestamps; not verified on a Mac yet), chosen by `transcription.json`
+  `backend: auto | ct2 | mlx` (`faster-whisper` still means ct2) or `--backend`. On the CPU Whisper now uses one
+  thread per physical core (`cpu_threads: "auto"`, faster-whisper's default was 4); on an NVIDIA GPU, VAD-split audio
+  (episodes, long clips) is decoded by `BatchedInferencePipeline` (`batch_size: 8`, `--batch-size`, 0 = the 2.x
+  sequential path). A clip longer than `long_clip_minutes` (10) is transcribed by the episode chunk runner (chunks cut
+  in silence, VAD, resumable checkpoints in `02_transcription/chunks/`) instead of one pass. Chunk checkpoints record
+  the model, prompt and backend that made them, and a mismatch redoes the chunk (one transcript never mixes models).
+  A complete local model snapshot is loaded from its folder (no network, offline-safe even without `refs/main`).
+  New `reel bench --audio <speech> [--seconds 300]` measures the real-time factor and caches it in
+  `<engine home>/bench/whisper-bench.json`; `reel doctor` shows it as `transcription_speed`.
 - Positive client-folder marker (structure 4.1): `reel scaffold` and `reel client-init` write `.whynot-client`
   (`{"whynot_client": 1, "created": ...}`) at the client root; `reel doctor --fix` writes it for an existing client that
   lacks it (only at the client root, never in `assets/` or `data/`). New `lib/client_marker.py` (stdlib only) is shared
@@ -46,6 +58,24 @@
   guard blocks `--release` and deleting/overwriting `output/.whynot-lock` for every subagent; the SessionStart context
   warns "another session is working in this client (<command>, since <time>)"; the edit, autopilot and podcast skills
   stop and tell the editor on a `blocked` from another session.
+- Self-contained engine runtime and real repair (T2.1, review IM-1 / IM-2 / MI-21). The engine now runs from
+  `<engine home>/runtimes/<id>/`, a venv built from a pinned python-build-standalone 3.12.15 (via the pinned uv in
+  `<engine home>/bin/`, sha256-checked) with **no system and no user site-packages**, installed from a hash lock per
+  platform (`setup/locks/runtime-{win-x64,mac-arm64,mac-x64}.lock`, `uv pip compile --generate-hashes --only-binary
+  :all:`; `uv pip sync --require-hashes`, or pip `--require-hashes --timeout 60 --retries 5` without uv).
+  `<engine home>/current` (a one-line text file, never a symlink) names the runtime in use and switches only after a
+  smoke import passes; the previous runtime and the 2.x `venv/` are kept. Runtime id = `components.json` id, or
+  `r-` + sha256(lock)[:12] while that is `<release>` (the installer derives it the same way). Stamps:
+  `WHYNOT_RUNTIME` and `.whynot-lock.sha256`. `bin/reel`, `reel.cmd`, `tools/test.sh` and `tools/test.ps1` pick the
+  current runtime (run with `python -s`), then the legacy `venv/`; never a system Python.
+- `reel setup` really repairs: it compares the runtime's packages with the lock (and the lock hash with the stamp) and
+  re-syncs on any difference; `--force` re-syncs anyway, `--check` only reports. `reel doctor` reports `runtime`
+  (kind, id, expected id, up to date) and `isolated: true|false` (every engine module loads from inside the runtime at
+  the locked version, no user site), with a fix when not.
+- `reel py <script.py> | -m <module> | -c <code> [args]` runs Python with the engine runtime (engine packages and the
+  engine's `lib` importable); its output and exit code are the script's.
+- The engine prefers the pinned ffmpeg the installer puts in the engine home (`state.json` `ffmpeg.path`, else
+  `ffmpeg/<components.json version>/`) over the one on PATH and the imageio-ffmpeg wheel's binary.
 
 ### Changed
 - No real client ships in the product: the real client's profile folder was removed from `profiles/`. The plugin now
@@ -327,6 +357,11 @@
 - Legacy engine homes `~/.reel-editor` (reel-editor 1.x) and `~/.dr-nahla-editor` (the original skill) are still found
   by both wrappers and the engine in 3.x, but **support for them is removed in 4.0**: move the engine to
   `~/.whynot-cut` (or set the `engine_home` plugin option to the old folder) before upgrading to 4.0.
+- Engine runtime (T2.1): run `reel setup` once. It builds the isolated runtime next to the 2.x `venv/` (about 400 MB;
+  the Whisper models are shared) and switches to it; until then the wrappers keep using `venv/`. The old `venv/` is
+  not deleted (remove it by hand once `reel doctor` shows `isolated: true`). `setup_env.py --system-site-packages`
+  is gone from the normal path (a hidden developer flag remains and still installs every locked package into the
+  runtime).
 
 ## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names, field-test round 4
 The minor findings of the 2.2.0 review, two bugs found by a live run from a client folder named in Arabic, and the gaps
