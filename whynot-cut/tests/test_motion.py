@@ -2343,6 +2343,72 @@ class TestReviewMinorsPlan(unittest.TestCase):
         self.assertFalse(any(e["field"] == "verdict" for e in r["editorial_lines"]), r["editorial_lines"])
 
 
+class TestAEHostBehaviour(unittest.TestCase):
+    """Final-review minors in the After Effects / CEP JavaScript, run in node with a fake host."""
+    def test_progress_grows_in_reading_direction(self):
+        """Final review: in LTR the progress bar grew from the centre. It fills from the reading-start edge: the bar's
+        group is anchored (and positioned, so it does not move) at the left edge in LTR, the right edge in RTL."""
+        libs = (AE_TPL / "nh_ae_lib.jsx").read_text(encoding="utf-8") + "\n" + nhm_code()
+        js = libs + r"""
+function F() { this.kids = {}; this.added = []; }
+F.prototype.property = function (k) { return typeof k === "number" ? this.added[k - 1] : (this.kids[k] = this.kids[k] || new F()); };
+F.prototype.addProperty = function (k) { var f = new F(); this.added.push(f); this.kids[k] = this.kids[k] || f; return f; };
+F.prototype.setValue = function (v) { this.value = v; };
+F.prototype.setValueAtTime = function (t, v) { (this.keys = this.keys || []).push(v); };
+function bar(dir) {
+  var main = {width: 1080, height: 1920, frameDuration: 1 / 24, layers: {addShape: function () { return new F(); }}};
+  var L = NHM.P.progress(main, {persistent: {progress: true}, safe: {top: 250}, theme: {accent: [1, 0, 0]},
+                                direction: dir < 0 ? "rtl" : "ltr", dir: dir, duration_frames: 240});
+  var g = L.property("ADBE Root Vectors Group").property(1);
+  var size = g.property("ADBE Vectors Group").property(1).property("ADBE Vector Rect Size").value;
+  var t = g.property("ADBE Vector Transform Group");
+  function ev(e) { var content = function () { return {content: function () { return {size: size}; }}; }; return e ? eval(e) : [0, 0]; }
+  return {anchor: ev(t.property("ADBE Vector Anchor").expression), position: ev(t.property("ADBE Vector Position").expression),
+          scale: t.property("ADBE Vector Scale").keys};
+}
+console.log(JSON.stringify({ltr: bar(1), rtl: bar(-1)}));
+"""
+        out = json.loads(node_run(self, js))
+        for d, edge in (("ltr", -540), ("rtl", 540)):
+            self.assertEqual(out[d]["anchor"], [edge, 0], d)
+            self.assertEqual(out[d]["position"], [edge, 0], d)
+            self.assertEqual(out[d]["scale"], [[0, 100], [100, 100]], d)
+
+    def test_bridge_reads_host_once(self):
+        """Final review (cosmetic): bridge.js asked CEP for the host environment twice at start-up."""
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        ext, base = tmp / "ext", tmp / "home"
+        ext.mkdir()
+        base.mkdir()
+        (ext / "bridge-config.json").write_text(json.dumps({"base": str(base)}), encoding="utf-8")
+        js = ("var EXT = " + json.dumps(str(ext)) + ", HOMEDIR = " + json.dumps(str(tmp)) + ", n = 0, nodeRequire = require;\n"
+              "globalThis.window = {require: function (m) { return m === 'os' ? {homedir: function () { return HOMEDIR; },"
+              " platform: function () { return process.platform; }} : nodeRequire(m); },\n"
+              "  __adobe_cep__: {getHostEnvironment: function () { n++; return JSON.stringify({appName: 'AEFT'}); },\n"
+              "                  getSystemPath: function () { return EXT; }, evalScript: function () {}}};\n"
+              "globalThis.document = {getElementById: function () { return {textContent: ''}; }};\n"
+              "globalThis.setInterval = function () { return 0; };\n"
+              + (CEP / "js" / "bridge.js").read_text(encoding="utf-8") + "\nconsole.log(JSON.stringify({calls: n}));\n")
+        self.assertEqual(json.loads(node_run(self, js))["calls"], 1)
+        self.assertTrue((base / "ae-queue").is_dir())                 # it is the After Effects bridge
+
+    def test_bridge_escaper_ascii_under_any_decoding(self):
+        """Final review: NHAE.q's regex held a raw U+FFFF character. Read with another encoding than UTF-8 that one
+        character becomes three, the class stops at U+00EF and Arabic leaks unescaped into the result JSON. The
+        escaper gives pure ASCII however the file is decoded."""
+        raw = (AE_TPL / "nh_ae_bridge.jsx").read_bytes()
+        s = chr(0x628) + chr(0x627) + chr(1) + 'x"'
+        for enc in ("utf-8", "latin-1"):
+            src = raw.decode(enc)
+            a = src.index("NHAE.q = function")
+            b = src.index("\n};", a) + 3
+            js = ("var NHAE = {};\n" + src[a:b] + "\nvar s = " + json.dumps(s) + ", out = NHAE.q(s);\n"
+                  "console.log(JSON.stringify({ascii: out.split('').every(function (c) { return c.charCodeAt(0) < 128; }),"
+                  " back: JSON.parse(out) === s}));\n")
+            self.assertEqual(json.loads(node_run(self, js)), {"ascii": True, "back": True}, enc)
+
+
 class TestMotionCodeHygiene(unittest.TestCase):
     """Final-review minors that are about the code itself (dead helpers, a bad line join)."""
     ENGINE = SK / "engine" / "reel"

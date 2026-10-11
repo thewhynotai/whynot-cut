@@ -491,9 +491,13 @@ NHM.P.speaker_badge = function (main, plan) {
 
 NHM.P.progress = function (main, plan) {
     if (!plan.persistent.progress) { return null; }
-    var y = plan.safe.top - 30, L = NH.rect(main, "PROGRESS", [main.width, 8], [main.width / 2, y],
-        {fill: plan.theme.accent, rtlSweep: plan.direction === "rtl"});
-    var sc = L.property("ADBE Root Vectors Group").property(1).property("ADBE Vector Transform Group").property("ADBE Vector Scale");
+    var y = plan.safe.top - 30, L = NH.rect(main, "PROGRESS", [main.width, 8], [main.width / 2, y], {fill: plan.theme.accent});
+    var g = L.property("ADBE Root Vectors Group").property(1).property("ADBE Vector Transform Group");
+    // anchored (and placed, so it does not move) at the reading-start edge: scaleX 0 -> 100 fills the reading way
+    var edge = 'var s=content("Box").content("Rectangle Path 1").size;[' + (-plan.dir) + '*s[0]/2,0]';
+    g.property("ADBE Vector Anchor").expression = edge;
+    g.property("ADBE Vector Position").expression = edge;
+    var sc = g.property("ADBE Vector Scale");
     sc.setValueAtTime(0, [0, 100]);
     sc.setValueAtTime(NHM.t(main, plan.duration_frames), [100, 100]);
     return L;

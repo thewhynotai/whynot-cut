@@ -14,7 +14,7 @@ $.evalFile(new File(NHAE_HERE + "/nh_motion_lib.jsx"));
 /* ---- tiny JSON (ExtendScript has no JSON object) ---- */
 NHAE.q = function (s) {
     return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r')
-        .replace(/[\u0000-\u001f\u007f-￿]/g, function (c) { return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4); }) + '"';
+        .replace(/[\u0000-\u001f\u007f-\uffff]/g, function (c) { return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4); }) + '"';
 };
 NHAE.str = function (v) {
     if (v === null || v === undefined) { return 'null'; }

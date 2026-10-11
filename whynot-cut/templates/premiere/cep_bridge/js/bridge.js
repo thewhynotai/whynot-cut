@@ -16,7 +16,8 @@
   function hostId() {
     try { return JSON.parse(window.__adobe_cep__.getHostEnvironment()).appName || 'PPRO'; } catch (e) { return 'PPRO'; }
   }
-  var HOST = HOSTS[hostId()] ? hostId() : 'PPRO';
+  var HOST = hostId();
+  if (!HOSTS[HOST]) { HOST = 'PPRO'; }
   var CFG = HOSTS[HOST];
   function extensionDir() {
     try {
