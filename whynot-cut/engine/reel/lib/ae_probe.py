@@ -20,7 +20,9 @@ W, H, FPS, FRAMES = 1080, 1920, 30, 90
 CHECK_MARK = [{"vertices": [[-40, 0], [-12, 28], [44, -30]], "inTangents": [[0, 0], [0, 0], [0, 0]],
                "outTangents": [[0, 0], [0, 0], [0, 0]], "closed": False}]
 # frames to look at, per comp (comp-local); every comp lies end to end in PROBE_ALL, 90 frames each
-LOOK = {"arabic_rtl": [75], "word_reveal": [20, 65], "emphasis": [75], "mixed": [75], "brand_font": [75], "icon": [75]}
+LOOK = {"arabic_rtl": [75], "word_reveal": [20, 65], "emphasis": [75], "mixed": [75], "brand_font": [75], "icon": [75],
+        "index_map": [8, 23, 38, 53], "reveal_step": [20, 35, 50, 65], "word_layers": [20, 35, 50, 65]}
+ORDER = ["arabic_rtl", "word_reveal", "emphasis", "mixed", "brand_font", "icon", "index_map", "reveal_step", "word_layers"]
 
 
 def probe_job(fonts: dict[str, str]) -> dict:
@@ -33,6 +35,12 @@ def probe_job(fonts: dict[str, str]) -> dict:
         dict(base, name="mixed", text="الـ Isotretinoin ٣ مرات 25%"),
         dict(base, name="brand_font", text="خط البراند"),
         {"name": "icon", "shapes": CHECK_MARK, "stroke": 10},
+        # diagnostics: which word textIndex k is (word k turns red during [(k-1)/2, k/2) s), and a step reveal
+        dict(base, name="index_map", text="واحد اتنين تلاتة اربعة", fill_expr="(Math.floor(time*2)+1==textIndex)?100:0"),
+        dict(base, name="reveal_step", text="واحد اتنين تلاتة اربعة",
+             opacity_expr="var T=[0.5,1,1.5,2];(time>=T[textIndex-1])?0:100"),
+        # what motion videos use: one layer per word, chained right-to-left, revealed at the cues, 3rd word emphasised
+        dict(base, name="word_layers", text="واحد اتنين تلاتة اربعة", word_layers=True, cues=[15, 30, 45, 60], emphasis=[3]),
     ]
     return {"aep_path": str(PROBE_DIR / "probe.aep"), "w": W, "h": H, "fps": FPS, "frames": FRAMES,
             "fonts": {"headline": head}, "comps": comps}
@@ -59,8 +67,7 @@ def capabilities_from(readback: dict, om_pref: str) -> dict:
 
 def look_points() -> list[tuple[str, int]]:
     """(name, frame in PROBE_ALL) for every frame Claude must view."""
-    order = ["arabic_rtl", "word_reveal", "emphasis", "mixed", "brand_font", "icon"]
-    return [(f"{n}_{f:02d}", k * FRAMES + f) for k, n in enumerate(order) for f in LOOK[n]]
+    return [(f"{n}_{f:02d}", k * FRAMES + f) for k, n in enumerate(ORDER) for f in LOOK[n]]
 
 
 def run_probe(fonts: dict | None = None, timeout: int = 600) -> dict:
@@ -82,9 +89,10 @@ def run_probe(fonts: dict | None = None, timeout: int = 600) -> dict:
                                                           [f"{n}.png" for n, _ in pts])]
     rec = {"ae_version": rb.get("ae_version"), "measured": caps, "readback": rb, "render": rend, "frames": frames,
            "word_index_logical": None, "verdict": None, "probed_at": now_iso(),
-           "look_for": "joined Arabic letters; words right-to-left; word_reveal_20 shows only the first word واحد "
-                       "(on the right); emphasis on the 3rd word; mixed line keeps 'الـ Isotretinoin' together; "
-                       "brand font; icon drawn"}
+           "look_for": "joined Arabic letters; words right-to-left; word_layers_20 shows only واحد (on the right), "
+                       "_35 two words, _50 three (the 3rd in red), _65 all four in reading order; mixed line keeps "
+                       "'الـ Isotretinoin' together; brand font; icon drawn (word_reveal/index_map/reveal_step are "
+                       "selector diagnostics)"}
     write_json(CAPS, rec)
     return dict(rec, ok=rend["status"] == "RENDERED" and bool(frames),
                 next="VIEW every frame, then `reel ae-probe --record ok|fail --word-order logical|visual --notes …`")

@@ -118,8 +118,9 @@ NHM.shapeLayer = function (comp, name, shapes, o) {
         s.outTangents = shapes[i].outTangents; s.closed = shapes[i].closed;
         v.addProperty("ADBE Vector Shape - Group").property("ADBE Vector Shape").setValue(s);
     }
-    var tr = v.addProperty("ADBE Vector Filter - Trim");
+    v.addProperty("ADBE Vector Filter - Trim");
     var st = v.addProperty("ADBE Vector Graphic - Stroke");
+    var tr = v.property("ADBE Vector Filter - Trim");   // re-acquired: adding the stroke invalidated the old reference
     st.property("ADBE Vector Stroke Width").setValue(o.stroke || 6);
     st.property("ADBE Vector Stroke Color").setValue(o.color || [1, 1, 1]);
     if (o.colorExpr) { st.property("ADBE Vector Stroke Color").expression = o.colorExpr; }
@@ -204,9 +205,64 @@ NHM.solid = function (comp, name, rgb) {
     return L;
 };
 
+/* Word/line reveal: one text layer per word, chained by sourceRectAtTime from the line's reading-start edge (Arabic
+   never joins across spaces, so shaping is unchanged). An expression selector "Based On: Words" mapped textIndex
+   inconsistently for RTL Arabic in After Effects 26.5 (probe), so no selector is used. A guide layer (not rendered)
+   keeps the whole text: the editable reference, and what the read-back checks. */
+NHM.wordLayers = function (comp, el, sceneStart, byLine) {
+    var caps = NHM.caps || {}, rtl = !!el.rtl, fd = comp.frameDuration;
+    var guide = comp.layers.addText(el.text);
+    guide.name = el.name;
+    NHM.styleText(guide, {text: el.text, font: el.font_ps, size: el.size, color: el.color, rtl: el.rtl,
+        justify: el.anchor === "start" ? (rtl ? "right" : "left") : "center", leading: el.size * 1.25, caps: caps});
+    if (el.anchor === "start") {
+        NHM.tg(guide, "ADBE Anchor Point").expression = rtl ? "var r=sourceRectAtTime(time,false);[r.left+r.width,r.top+r.height/2]" :
+            "var r=sourceRectAtTime(time,false);[r.left,r.top+r.height/2]";
+    }
+    NHM.tg(guide, "ADBE Position").setValue([el.x, el.y]);
+    guide.guideLayer = true;
+    guide.comment = el.cue_hash || "";
+    var lines = el.lines || [el.text], toks = el.tokens || [], k = 0, sp = el.size * 0.3, lh = el.size * 1.25;
+    var rf = Math.max(2, Math.round((NHM.plan.word_reveal_s || 0.18) / fd)), emph = el.emphasis || [];
+    for (var i = 0; i < lines.length; i++) {
+        var raw = String(lines[i]).split(" "), wds = [], names = [], j, q;
+        for (j = 0; j < raw.length; j++) { if (raw[j] !== "") { wds.push(raw[j]); } }
+        for (j = 0; j < wds.length; j++) { names.push('"' + el.name + "_w" + (k + j + 1) + '"'); }
+        var y = el.y + (i - (lines.length - 1) / 2) * lh;
+        for (j = 0; j < wds.length; j++) {
+            var idx = k + j + 1, isE = false;
+            for (q = 0; q < emph.length; q++) { if (emph[q] === idx) { isE = true; } }
+            var W = comp.layers.addText(wds[j]);
+            W.name = el.name + "_w" + idx;
+            NHM.styleText(W, {text: wds[j], font: el.font_ps, size: el.size, color: isE ? el.accent : el.color, rtl: el.rtl,
+                justify: rtl ? "right" : "left", caps: caps});
+            NHM.tg(W, "ADBE Anchor Point").expression = rtl ? "var r=sourceRectAtTime(time,false);[r.left+r.width,r.top+r.height/2]" :
+                "var r=sourceRectAtTime(time,false);[r.left,r.top+r.height/2]";
+            var ex = "var n=[" + names.join(",") + "];var me=" + j + ";var sp=" + sp + ";var w=0,o=0;" +
+                "for(var q=0;q<n.length;q++){var Lq=thisComp.layer(n[q]);var r=Lq.sourceRectAtTime(time,false).width*Lq.transform.scale[0]/100;" +
+                "w+=r;if(q<me){o+=r+sp;}}" +
+                "w+=sp*(n.length-1);";
+            if (el.anchor === "start") { ex += rtl ? "[" + el.x + "-o," + y + "]" : "[" + el.x + "+o," + y + "]"; }
+            else { ex += rtl ? "[" + el.x + "+w/2-o," + y + "]" : "[" + el.x + "-w/2+o," + y + "]"; }
+            NHM.tg(W, "ADBE Position").expression = ex;
+            var cue = byLine ? ((el.line_cues && el.line_cues[i] !== undefined) ? el.line_cues[i] : sceneStart)
+                : ((toks[idx - 1] && toks[idx - 1].cue_frame !== undefined) ? toks[idx - 1].cue_frame : sceneStart);
+            var f0 = cue - sceneStart;
+            NHM.keys(NHM.tg(W, "ADBE Opacity"), comp, [f0, f0 + rf], [0, 100]);
+            NHM.keys(NHM.tg(W, "ADBE Scale"), comp, [f0, f0 + rf], isE ? [[90, 90], [108, 108]] : [[92, 92], [100, 100]]);
+        }
+        k += wds.length;
+    }
+    return guide;
+};
+
 /* text element (plan.scenes[].elements kind text|counter) inside a scene comp starting at sceneStart */
 NHM.textEl = function (comp, el, sceneStart) {
-    var caps = NHM.caps, L = comp.layers.addText(el.text);
+    var caps = NHM.caps, revealMode = el.reveal || "none";
+    if ((revealMode === "word" || revealMode === "line") && el.tokens && el.tokens.length) {
+        return NHM.wordLayers(comp, el, sceneStart, revealMode === "line");
+    }
+    var L = comp.layers.addText(el.text);
     L.name = el.name;
     var just = el.anchor === "start" ? (el.rtl ? "right" : "left") : "center";
     NHM.styleText(L, {text: el.text, font: el.font_ps, size: el.size, color: el.color, rtl: el.rtl, justify: just,
@@ -222,20 +278,7 @@ NHM.textEl = function (comp, el, sceneStart) {
     }
     NHM.tg(L, "ADBE Position").setValue([el.x, el.y]);
     L.comment = el.cue_hash || "";
-    var reveal = el.reveal || "none", fd = comp.frameDuration, secs = [], k;
-    if (reveal === "word" && el.tokens && el.tokens.length) {
-        if (caps.word_index_logical === false && el.line_cues) {
-            for (k = 0; k < el.line_cues.length; k++) { secs.push((el.line_cues[k] - sceneStart) * fd); }
-            NHM.revealWords(L, secs, 4, 0.3);
-            NHM.report.warnings.push(el.name + ": word order not logical in this AE: revealed by line");
-        } else {
-            for (k = 0; k < el.tokens.length; k++) { secs.push((el.tokens[k].cue_frame - sceneStart) * fd); }
-            NHM.revealWords(L, secs, 3, NHM.plan.word_reveal_s || 0.18);
-        }
-    } else if (reveal === "line" && el.line_cues) {
-        for (k = 0; k < el.line_cues.length; k++) { secs.push((el.line_cues[k] - sceneStart) * fd); }
-        NHM.revealWords(L, secs, 4, 0.35);
-    } else if (reveal === "item") {
+    if (revealMode === "item") {
         NHM.appear(comp, L, el.appear_frame - sceneStart, true);
     } else if (el.appear_frame !== null && el.appear_frame !== undefined) {
         NHM.appear(comp, L, el.appear_frame - sceneStart, false);

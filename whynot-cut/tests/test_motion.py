@@ -178,7 +178,14 @@ class TestProbe(unittest.TestCase):
         from lib import ae_probe
         job = ae_probe.probe_job({"headline": "ArialMT"})
         names = [c["name"] for c in job["comps"]]
-        self.assertEqual(names, ["arabic_rtl", "word_reveal", "emphasis", "mixed", "brand_font", "icon"])
+        self.assertEqual(names, ["arabic_rtl", "word_reveal", "emphasis", "mixed", "brand_font", "icon",
+                                 "index_map", "reveal_step", "word_layers"])
+        im = next(c for c in job["comps"] if c["name"] == "index_map")
+        self.assertIn("textIndex", im["fill_expr"])
+        rs = next(c for c in job["comps"] if c["name"] == "reveal_step")
+        self.assertIn("textIndex", rs["opacity_expr"])
+        from lib.ae_probe import look_points
+        self.assertIn(("index_map_23", 6 * 90 + 23), look_points())
         wr = next(c for c in job["comps"] if c["name"] == "word_reveal")
         self.assertEqual(wr["cues"], [15, 30, 45, 60])
         self.assertTrue(wr["text"].startswith("واحد"))          # logical order, never pre-reversed
@@ -1360,6 +1367,135 @@ class TestMotionBuild(CompiledMotion):
         self.assertEqual(r["status"], "SCRIPT_ONLY")
         assert_js_syntax(self, Path(r["jsx"]))
         self.assertNotEqual(common.load_status(self.reel)["status"], "PROJECT_ASSEMBLED")
+
+
+class TestBridgeLibLoading(unittest.TestCase):
+    """Live AE 26.5 showed `NHM is undefined`: $.evalFile inside a function keeps the libraries' globals local."""
+    def test_libs_loaded_at_top_level(self):
+        src = (AE_TPL / "nh_ae_bridge.jsx").read_text(encoding="utf-8")
+        head = src.split("NHAE.q = function", 1)[0]
+        self.assertNotIn("(function", head)
+        self.assertIn('$.evalFile(new File(NHAE_HERE + "/nh_ae_lib.jsx"))', head)
+        self.assertIn('$.evalFile(new File(NHAE_HERE + "/nh_motion_lib.jsx"))', head)
+        self.assertIn("libs_loaded", src)
+
+
+# --------------------------------------------------------------------------- render, MP4, cover, frames
+class TestMotionRender(CompiledMotion):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from lib.common import fps_arg
+        from lib import motion_build
+        motion_build.aep_path(cls.reel).parent.mkdir(parents=True, exist_ok=True)
+        motion_build.aep_path(cls.reel).write_bytes(b"AEP")
+        cls.dur = cls.plan["duration_frames"] / cls.plan["fps"]
+        cls.fakes = {}
+        for name, d, audio in (("ok", cls.dur, True), ("short", cls.dur - 1.0, True), ("mute", cls.dur, False)):
+            f = cls.tmp / f"fake_{name}.mov"
+            args = ["-f", "lavfi", "-i", f"testsrc2=s={cls.plan['w']}x{cls.plan['h']}:r={fps_arg()}:d={d:.3f}"]
+            if audio:
+                args += ["-f", "lavfi", "-i", f"sine=f=300:r=48000:d={d:.3f}", "-c:a", "aac"]
+            ff(*args, "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-t", f"{d:.3f}", str(f))
+            cls.fakes[name] = f
+
+    def setUp(self):
+        super().setUp()
+        from lib import ae_render
+        self.saved = ae_render.render
+        self.use("ok")
+
+    def tearDown(self):
+        from lib import ae_render
+        ae_render.render = self.saved
+
+    def use(self, name):
+        from lib import ae_render
+        src = self.fakes[name]
+
+        def fake(aep, comp, out, rs, om, start_frame=None, end_frame=None, timeout=3600, log=None):
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, out)
+            return {"status": "RENDERED", "returncode": 0, "output": str(out), "elapsed_s": 0.1, "log": None}
+        ae_render.render = fake
+
+    def test_frame_points(self):
+        from lib.motion_render import frame_points
+        pts = frame_points(self.plan)
+        heroes = [p for p in pts if p["kind"] == "hero"]
+        self.assertEqual(len(heroes), len(self.plan["scenes"]))
+        mids = [p for p in pts if p["kind"] == "reveal_mid"]
+        self.assertEqual({p["scene"] for p in mids}, {"S01", "S03"})          # kinetic quote + list
+        kq = next(p for p in mids if p["scene"] == "S01")
+        toks = next(e for e in self.plan["scenes"][0]["elements"] if e["kind"] == "text")["tokens"]
+        self.assertEqual(kq["expect"]["revealed_tokens"], len([t for t in toks if t["cue_frame"] <= kq["frame"]]))
+        self.assertTrue(0 < kq["expect"]["revealed_tokens"] < len(toks))
+        trans = [p for p in pts if p["kind"] == "transition_mid"]
+        self.assertEqual(len(trans), len([s for s in self.plan["scenes"] if s["transition_in"]["frames"] > 0]))
+        self.assertEqual(pts, sorted(pts, key=lambda p: p["frame"]))
+
+    def test_render_ok(self):
+        from lib.motion_render import render
+        r = render(self.reel)
+        self.assertEqual(r["status"], "RENDERED", r)
+        self.assertTrue(Path(r["mp4"]).exists())
+        self.assertTrue(Path(r["cover"]).exists())
+        self.assertEqual((r["probe"]["w"], r["probe"]["h"]), (self.plan["w"], self.plan["h"]))
+
+    def test_render_duration_mismatch(self):
+        from lib.motion_render import render
+        self.use("short")
+        r = render(self.reel)
+        self.assertEqual(r["status"], "FAILED")
+        self.assertTrue(any("duration" in x for x in r["reasons"]), r["reasons"])
+
+    def test_render_no_audio(self):
+        from lib.media import probe
+        from lib.motion_render import render
+        self.use("mute")
+        r = render(self.reel)
+        self.assertEqual(r["status"], "RENDERED", r)
+        self.assertTrue(probe(Path(r["mp4"]))["audio"])
+        self.assertTrue(any("audio" in w for w in r["warnings"]), r["warnings"])
+
+    def test_frames(self):
+        from lib.motion_render import frame_points, frames, render
+        render(self.reel)
+        r = frames(self.reel)
+        pts = frame_points(self.plan)
+        self.assertEqual(r["frames"], len(pts))
+        d = Path(r["dir"])
+        self.assertTrue((d / "_sheet.jpg").exists())
+        fj = read_json(d / "frames.json")
+        self.assertEqual(len(fj["frames"]), len(pts))
+        self.assertTrue(all((d / f["file"]).exists() for f in fj["frames"]))
+        self.assertIn("expect", fj["frames"][0])
+
+
+class TestWordLayers(unittest.TestCase):
+    """Live AE 26.5 probe: an expression selector "Based On: Words" maps textIndex inconsistently for RTL Arabic
+    (indexes 1, 2 and 4 all lit the first word). Word/line reveals therefore use one text layer per word."""
+    def test_word_layers_defined_and_used(self):
+        src = nhm_code()
+        self.assertTrue("NHM.wordLayers = function" in src)
+        body = jsx_fn(src, "NHM.textEl")
+        self.assertTrue("NHM.wordLayers(" in body)
+        self.assertNotIn("NHM.revealWords(", body)
+        wl = jsx_fn(src, "NHM.wordLayers")
+        self.assertTrue("sourceRectAtTime" in wl)
+        self.assertTrue("guideLayer" in wl)
+        self.assertTrue("transform.scale[0]" in wl)        # an emphasised (scaled) word keeps its space (live frame)
+
+    def test_shape_layer_reacquires_trim(self):
+        body = jsx_fn(nhm_code(), "NHM.shapeLayer")
+        stroke_at = body.index('addProperty("ADBE Vector Graphic - Stroke")')
+        self.assertGreater(body.find('property("ADBE Vector Filter - Trim")', stroke_at), stroke_at)
+
+    def test_probe_has_word_layers_comp(self):
+        from lib.ae_probe import look_points, probe_job
+        names = [c["name"] for c in probe_job({"headline": "ArialMT"})["comps"]]
+        self.assertIn("word_layers", names)
+        self.assertIn(("word_layers_20", names.index("word_layers") * 90 + 20), look_points())
 
 
 if __name__ == "__main__":

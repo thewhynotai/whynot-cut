@@ -32,6 +32,11 @@ ARGS: dict = {
         (("--run-script",), {"action": "store_true", "help": "no bridge: hand the JSX to AE (no read-back; QC cannot pass)"}),
         (("--timeout",), {"type": int, "default": 900}),
     ],
+    "motion-render": [
+        (("--scenes",), {"default": None, "help": "e.g. S03,S05: re-render only these scenes into render/pieces/"}),
+        (("--timeout",), {"type": int, "default": 3600}),
+    ],
+    "motion-frames": [],
 }
 NO_ID = {"ae-status", "ae-probe", "motion-icons", "motion-library"}
 
@@ -136,6 +141,22 @@ def cmd_motion_build(a):
     r = {k: v for k, v in r.items() if k != "readback"}
     r["next"] = ("reel motion-render" if r["status"] == "PROJECT_ASSEMBLED" else
                  "fix the reasons above (Needs you items go to the editor), then motion-build again")
+    out(r)
+
+
+def cmd_motion_render(a):
+    from .motion_render import render
+    scenes = [x.strip() for x in a.scenes.split(",") if x.strip()] if a.scenes else None
+    r = render(P(a), scenes=scenes, timeout=a.timeout)
+    r["next"] = "reel motion-frames, then the qc-reviewer inspects them" if r["status"] == "RENDERED" else         "read the reasons and logs/aerender.log"
+    out(r)
+
+
+def cmd_motion_frames(a):
+    from .motion_render import frames
+    r = frames(P(a))
+    r["next"] = ("qc-reviewer splits frames.json across frame-inspectors; the lead VIEWS _sheet.jpg and records "
+                 "`reel verify --record pass|fail --notes …`")
     out(r)
 
 

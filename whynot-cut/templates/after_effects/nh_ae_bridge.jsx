@@ -5,14 +5,11 @@
 */
 var NHAE = NHAE || {};
 
-(function () {
-    var here = File($.fileName).parent.fsName;
-    var libs = ["nh_ae_lib.jsx", "nh_motion_lib.jsx"];
-    for (var i = 0; i < libs.length; i++) {
-        var f = new File(here + "/" + libs[i]);
-        if (f.exists) { $.evalFile(f); }
-    }
-})();
+/* The libraries are evaluated at TOP LEVEL: inside a function their globals (NH, NHM) would stay local to it
+   (seen live in After Effects 26.5: "NHM is undefined"). */
+var NHAE_HERE = File($.fileName).parent.fsName;
+$.evalFile(new File(NHAE_HERE + "/nh_ae_lib.jsx"));
+$.evalFile(new File(NHAE_HERE + "/nh_motion_lib.jsx"));
 
 /* ---- tiny JSON (ExtendScript has no JSON object) ---- */
 NHAE.q = function (s) {
@@ -64,6 +61,8 @@ NHAE.actions.ping = function (d) {
     var info = NHAE.projectInfo();
     info.ae_version = app.version;
     info.fonts_api = !!(app.fonts && app.fonts.getFontsByPostScriptName);
+    info.libs_loaded = (typeof NHM !== "undefined") && (typeof NH !== "undefined");
+    info.scripts_dir = NHAE_HERE;
     return info;
 };
 
@@ -107,7 +106,18 @@ NHAE.actions.probe_text = function (d) {
         var c = app.project.items.addComp(s.name, job.w, job.h, 1, n / fps, fps);
         try {
             c.layers.addSolid([0.08, 0.1, 0.12], "BG", job.w, job.h, 1);
-            if (s.shapes) {
+            if (s.word_layers) {                     // the motion library's own word-layer reveal
+                NHM.caps = {}; NHM.report = {warnings: []};
+                NHM.plan = {recipe_motion: {ease: "smooth"}, dir: -1, brand: {controls: []}, word_reveal_s: 0.18};
+                var toks = [];
+                for (var m = 0; m < s.cues.length; m++) { toks.push({cue_frame: s.cues[m]}); }
+                var g = NHM.wordLayers(c, {name: "wl", text: s.text, lines: [s.text], tokens: toks, font_ps: s.font,
+                    size: s.size, color: [1, 1, 1], accent: [1, 0.15, 0.1], x: job.w / 2, y: job.h / 2, rtl: true,
+                    emphasis: s.emphasis || [], anchor: "center", cue_hash: ""}, 0, false);
+                var gt = NHM.readText(g);
+                r.composer = gt.composer; r.font_ps = gt.font_ps; r.requested_ps = s.font; r.substitute = gt.substitute;
+                r.direction_textdocument = gt.direction; r.layers = c.numLayers;
+            } else if (s.shapes) {
                 var sh = NHM.shapeLayer(c, "icon", s.shapes, {stroke: s.stroke, color: [1, 1, 1]});
                 sh.layer.property("ADBE Transform Group").property("ADBE Position").setValue([job.w / 2, job.h / 2]);
                 sh.layer.property("ADBE Transform Group").property("ADBE Scale").setValue([300, 300]);
@@ -126,6 +136,15 @@ NHAE.actions.probe_text = function (d) {
                     NHM.revealWords(L, secs, 3, 0.18);
                 }
                 if (s.emphasis) { NHM.emphasisWords(L, s.emphasis, [1, 0.15, 0.1]); }
+                if (s.fill_expr || s.opacity_expr) {          // diagnostics: a raw expression selector, Based On Words
+                    var dn = L.property("ADBE Text Properties").property("ADBE Text Animators").addProperty("ADBE Text Animator");
+                    if (s.fill_expr) { dn.property("ADBE Text Animator Properties").addProperty("ADBE Text Fill Color").setValue([1, 0.15, 0.1]); }
+                    else { dn.property("ADBE Text Animator Properties").addProperty("ADBE Text Opacity").setValue(0); }
+                    var ds = dn.property("ADBE Text Selectors").addProperty("ADBE Text Expressible Selector");
+                    try { ds.property("ADBE Text Range Type2").setValue(3); } catch (eB) { r.based_on_error = String(eB); }
+                    ds.property("ADBE Text Expressible Amount").expression = s.fill_expr || s.opacity_expr;
+                    try { r.based_on = ds.property("ADBE Text Range Type2").value; } catch (eC) {}
+                }
                 var rt = NHM.readText(L);
                 r.text = rt.text; r.composer = rt.composer; r.font_ps = rt.font_ps; r.requested_ps = s.font;
                 r.substitute = rt.substitute; r.direction_textdocument = dr.direction_textdocument;
