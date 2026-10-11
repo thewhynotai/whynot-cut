@@ -286,6 +286,29 @@ def compile_plan(paths: Paths) -> dict:
                                "offset_y": -float(boy or 0.0), "rationale": "source cutaway shown whole (not cropped)"})
             warnings.append("source cutaways (not the speaker) shown whole over a blurred fill: " +
                             ", ".join(f"{a / 1000:.1f}-{b / 1000:.1f}s" for a, b in cutaways))
+    # podcast reels: per-shot framing (preflight "shots", see shots.py) replaces the single auto-reframe; story camera
+    # moves are composed over the shot layer. Anything without a shot analysis keeps the path above.
+    pre_all = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
+    shots_rep = pre_all.get("shots") or {}
+    if shots_rep.get("shots") and base.get("base_scale_percent") in (None, "auto"):
+        pv = next((f["video"] for f in pre_all.get("files", []) if f.get("video")), None)
+        if pv:
+            from .shots import compose_camera, frame_shots
+            seq_g = load_config("sequence-settings.json")["general"]
+            SW, SH = seq_g["frame_width"], seq_g["frame_height"]
+            dw, dh = pv["display_width"], pv["display_height"]
+            pc = load_config("podcast.json")
+            layer = frame_shots(shots_rep["shots"], read_json(paths.p("00_inputs/speakers.json"), {}) or {}, dw, dh, SW, SH,
+                                pc.get("speaker_min_hold_ms", 1500), pc.get("shots", {}).get("group_fit", 0.8))
+            camera = compose_camera([c for c in camera if c["decision_id"] != "AUTO_CUTAWAY"], layer, dw, dh, SW, SH)
+            bsp, box, boy = round(max(SW / dw, SH / dh) * 100, 3), 0.0, 0.0
+            n_whole = [c for c in layer if c["decision_id"] == "AUTO_CUTAWAY"]
+            framing = (f"per-shot reframe ({len(shots_rep['shots'])} shots; {sum(1 for c in layer if c.get('target'))} "
+                       f"speaker-follow pieces; {len(n_whole)} shown whole)")
+            if shots_rep.get("note"):
+                warnings.append(shots_rep["note"])
+            for c in n_whole:
+                warnings.append(f"shown whole {c['at_ms'] / 1000:.1f}-{c['until_ms'] / 1000:.1f}s: {c['rationale']}")
     camera.sort(key=lambda c: c["frame"])
     base = ed.get("global", {})
     main_segments = []
@@ -458,6 +481,26 @@ def plan_fingerprint(paths: Paths) -> str:
     return hashlib.sha1(paths.p("01_analysis/timeline-spec.json").read_bytes().split(b'"events"', 1)[-1]).hexdigest()[:16]
 
 
+def speaker_covered_frames(spec: dict) -> int:
+    """Frames where the speaker is not on screen: full-screen cards/B-roll/outro and source cutaways shown whole."""
+    full = sum(e["end_frame"] - e["start_frame"] for e in spec["events"]
+               if e["template"] in ("broll_card", "broll_video", "logo_outro"))
+    return full + sum(m["end_frame"] - m["start_frame"] for m in spec["main_segments"]
+                      if m.get("decision_id") == "AUTO_CUTAWAY")
+
+
+def _seq_frame(spec: dict, src_ms: float) -> int:
+    """A source time on the reel's timeline (pause removal / word cuts), via the compiled main segments."""
+    for m in spec["main_segments"]:
+        a = m.get("src_in_ms", 0)
+        b = a + (m["end_frame"] - m["start_frame"]) * 1000 / spec.get("fps", 24)
+        if src_ms < a:
+            return m["start_frame"]
+        if src_ms < b:
+            return m["start_frame"] + round((src_ms - a) * spec.get("fps", 24) / 1000)
+    return spec["duration_frames"]
+
+
 def write_edit_plan(paths: Paths) -> Path:
     """Human-readable playback of the compiled plan for editor approval (01_analysis/edit-plan.md)."""
     from .common import write_text
@@ -465,20 +508,29 @@ def write_edit_plan(paths: Paths) -> Path:
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     cues = read_json(paths.p("06_audio/audio-cue-sheet.json"), {"cues": []})["cues"]
     dur = spec["duration_frames"] or 1
-    cover = sum(e["end_frame"] - e["start_frame"] for e in spec["events"]
-                if e["template"] in ("broll_card", "broll_video", "logo_outro"))
+    cover = speaker_covered_frames(spec)
     pend = [e for e in spec["events"] if e["approval_required"]]
+    story_cam = [d for d in ed.get("decisions", []) if d.get("camera")]
+    masks = sum(1 for s in spec["main_segments"] if s["camera"] == "jumpcut_mask")
+    cut_away = sum(s["end_frame"] - s["start_frame"] for s in spec["main_segments"] if s.get("decision_id") == "AUTO_CUTAWAY")
     L = [f"# Edit Plan — {paths.video_id} (for editor approval)", "",
-         f"Runtime {frame_to_tc(dur)} · {len(spec['events'])} graphics · "
-         f"{sum(1 for s in spec['main_segments'] if s['camera'] != 'hold')} punch-ins · {len(cues)} SFX cues · "
-         f"speaker covered {cover / dur:.0%} · {len(pend)} items need medical/content approval", "",
+         f"Runtime {frame_to_tc(dur)} at {spec.get('fps', 24):.5g} fps · {len(spec['events'])} graphics · "
+         f"{len(story_cam)} camera moves (+{masks} automatic jump-cut zooms) · {len(cues)} SFX cues · "
+         f"speaker covered {cover / dur:.0%}"
+         + (f" (source cutaways shown whole: {cut_away / spec.get('fps', 24):.1f} s)" if cut_away else "")
+         + f" · {len(pend)} items need content approval", "",
+         "Times are on the reel's timeline (after pause removal and word cuts).", "",
+         f"Framing: {spec.get('framing', 'fit')}", "",
          "## Decisions", "", "| # | Time | Treatment | On-screen text | Why (speaker's words) | Approval |", "|---|---|---|---|---|---|"]
     for d in ed.get("decisions", []):
         gfx = [e for e in spec["events"] if e["decision_id"] == d["decision_id"] and e["template"] != "flash_transition"]
         text = " / ".join((g["params"].get("text") or g["params"].get("headline") or g["params"].get("title") or
                            g["params"].get("name") or "").replace("\n", " ") for g in gfx) or "—"
         cam = f"+{(d['camera'].get('scale_factor', 1) - 1) * 100:.0f}% punch-in; " if d.get("camera") else ""
-        L.append(f"| {d['decision_id']} | {frame_to_tc(ms_to_frame(d['_start_ms'] if '_start_ms' in d else to_ms(d['start'])))} | "
+        segs = [m for m in spec["main_segments"] if m.get("decision_id") == d["decision_id"]]
+        f0 = (min(g["start_frame"] for g in gfx) if gfx else min(m["start_frame"] for m in segs) if segs else
+              _seq_frame(spec, d["_start_ms"] if "_start_ms" in d else to_ms(d["start"])))
+        L.append(f"| {d['decision_id']} | {frame_to_tc(f0)} | "
                  f"{cam}{', '.join(g['template'] for g in gfx) or 'camera only'} | {text[:90]} | "
                  f"{d.get('evidence', '')[:70]} | {'YES' if any(g['approval_required'] for g in gfx) or d.get('approval_required') else ''} |")
     wc = (spec.get("time_map") or {}).get("words_cut") or []

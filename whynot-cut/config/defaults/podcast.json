@@ -7,6 +7,6 @@
   "chunk_minutes": 10,
   "episode_vad": true,
   "speaker_min_hold_ms": 1500,
-  "shots": {"scene_threshold": 0.3, "samples_per_shot": 3, "min_shot_ms": 400, "face_min_ratio": 0.3, "group_fit": 0.8},
+  "shots": {"scene_threshold": 0.3, "sample_fps": 2, "min_shot_ms": 400, "min_presence_run_ms": 1000, "face_min_ratio": 0.3, "group_fit": 0.8},
   "raw_episode_hint_min": 10
 }

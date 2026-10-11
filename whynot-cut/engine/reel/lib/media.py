@@ -50,6 +50,10 @@ def probe(path: Path) -> dict:
                 "sar": str(cc.sample_aspect_ratio or "1"),
                 "timecode": s.metadata.get("timecode"),
                 "start_s": float(s.start_time * s.time_base) if s.start_time is not None else 0.0,
+                # variable frame rate (Zoom / Riverside / phone recordings): average rate far from the stream's base rate
+                "fps_base": float(s.base_rate) if s.base_rate else None,
+                "vfr": bool(s.average_rate and s.base_rate and
+                            abs(float(s.average_rate) - float(s.base_rate)) / float(s.base_rate) > 0.005),
             }
         elif s.type == "audio":
             info["audio"].append({"codec": cc.name, "sample_rate": cc.sample_rate,
@@ -200,6 +204,11 @@ def preflight(paths: Paths, main_footage: list[Path]) -> dict:
             report["issues"].append({"file": str(f), "severity": "error", "msg": "; ".join(pr["errors"]) or "no video stream"})
             continue
         report["valid"].append(str(f))
+        if v.get("vfr"):
+            report["issues"].append({"file": str(f), "severity": "warning",
+                "msg": f"variable frame rate (average {v['fps']:.3f} fps vs base {v.get('fps_base') or 0:.3f} fps; typical of "
+                       "Zoom/Riverside/phone recordings): Premiere can drift out of sync on long files. Ask for a "
+                       "constant-frame-rate export of this file (e.g. HandBrake 'Constant Framerate') before editing."})
         if v["fps"] and abs(v["fps"] - sfps) > 0.01:
             report["issues"].append({"file": str(f), "severity": "warning",
                 "msg": f"source {v['fps']:.5g} fps vs {sfps:.5g} fps sequence: Premiere drops/duplicates frames (motion "
@@ -211,7 +220,28 @@ def preflight(paths: Paths, main_footage: list[Path]) -> dict:
             report["conversions"].append({"file": str(f), "type": "scale",
                 "msg": f"display {v['display_width']}x{v['display_height']} -> scale {sc*100:.2f}% to fill {sw}x{sh}",
                 "scale_percent": round(sc * 100, 3)})
-            if Fraction(v["display_width"], v["display_height"]) != Fraction(sw, sh):
+            wider = Fraction(v["display_width"], v["display_height"]) != Fraction(sw, sh)
+            if wider and rng.get("kind") == "episode_reel" and Path(f).name == Path(rng["footage"]).name:
+                # podcast reel cut from a finished episode: framing per SHOT inside the window (shots.py); the plan
+                # composes it with the story camera moves. One global crop would cut faces off at every camera change.
+                from .shots import analyze_window
+                try:
+                    report["shots"] = analyze_window(Path(f), int(rng["in_ms"]), int(rng["out_ms"] - rng["in_ms"]))
+                except Exception as e:  # noqa: BLE001  (analysis is an aid: the plan falls back to a centred crop)
+                    report["shots"] = {"shots": [], "error": f"{type(e).__name__}: {e}"}
+                    report["issues"].append({"file": str(f), "severity": "warning",
+                                             "msg": f"shot analysis failed ({type(e).__name__}): the reel is centre-cropped"})
+                cover = max(sw / v["display_width"], sh / v["display_height"])
+                shots_ = report["shots"].get("shots", [])
+                report.setdefault("reframe", {})[str(f)] = {
+                    "base_scale_percent": round(cover * 100, 3), "offset_x": 0.0, "offset_y": 0.0, "cutaways_ms": [],
+                    "mode": "per-shot", "shots": len(shots_), "faces": sum(1 for s in shots_ if s.get("n_faces"))}
+                report["issues"].append({"file": str(f), "severity": "info",
+                    "msg": f"per-shot 9:16 reframe: {len(shots_)} shots in the reel, faces found in "
+                           f"{sum(1 for s in shots_ if s.get('n_faces'))}; wide shots follow the speaker "
+                           "(00_inputs/speakers.json), shots without a face are shown whole"
+                           + (f". {report['shots']['note']}" if report["shots"].get("note") else "")})
+            elif wider:
                 rf = auto_reframe(Path(f), v, dur_s, sw, sh, start_s=start_s)
                 try:
                     shots = analyze_shots(Path(f), dur_s, start_s=start_s)

@@ -539,5 +539,372 @@ class TestReelsSelect(unittest.TestCase):
                                    "whynot-cut:story-editor"), 2)
 
 
+def onset_s(wav: Path, thr: float = 0.3) -> float:
+    from lib.audio_clean import _read_stereo
+    import numpy as np
+    x = _read_stereo(wav)
+    x = x[:, 0] if x.ndim == 2 else x
+    idx = int(np.argmax(np.abs(x) > thr))
+    return idx / 48000
+
+
+class TestWindowMedia(unittest.TestCase):
+    """A reel = a window of a longer episode file (shared range mechanism): audio, XML, QC sync and preview read only
+    the window, frame/sample exact, at a non-24 fps source."""
+
+    @classmethod
+    def setUpClass(cls):
+        from lib.transcribe import finalize
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root = root = cls.tmp / "WCLIENT"
+        for d in ("assets/Brand", "data/Episodes"):
+            (root / d).mkdir(parents=True)
+        cls.src = root / "data/Episodes/EPW.mp4"
+        ff("-f", "lavfi", "-i", "testsrc2=s=640x360:r=30000/1001:d=120", "-f", "lavfi",
+           "-i", "aevalsrc=exprs='if(between(t,61,61.01),0.8*sin(2*PI*1000*t),0)':s=48000:d=120",
+           "-ac", "2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+           "-shortest", str(cls.src))
+        common.set_context(root)
+        cls.reel = reel = Paths(root, "EPW_R01")
+        reel.ensure_project()
+        write_json(reel.p("00_inputs/source.json"), {"footage": "data/Episodes/EPW.mp4", "in_ms": 60000, "out_ms": 70000,
+                                                      "duration_ms": 10000, "kind": "episode_reel"})
+        ws = [{"id": i + 1, "segment_id": 1, "word": f"كلمه{i}", "start_ms": i * 500, "end_ms": i * 500 + 400,
+               "probability": 0.9} for i in range(20)]
+        finalize(reel, {"source_video": str(cls.src), "backend": "test", "model": "none", "language": "ar",
+                        "language_probability": 1.0, "duration_ms": 10000},
+                 [{"id": 1, "start_ms": 0, "end_ms": ws[-1]["end_ms"], "text": " ".join(w["word"] for w in ws),
+                   "avg_logprob": -0.2, "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in ws]}], ws)
+
+    @classmethod
+    def tearDownClass(cls):
+        common.set_context(None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _plan(self):
+        from lib.media import preflight
+        from lib.plan import compile_plan
+        common.set_context(self.root)
+        preflight(self.reel, [self.src])
+        for f in ("main-topic.md", "medical-content-review.md"):
+            (self.reel.p("01_analysis") / f).write_text("# stub\n", encoding="utf-8")
+        for f in ("narrative-segments.json", "transcript-semantic-analysis.json", "editing-style.json"):
+            write_json(self.reel.p("01_analysis") / f, {"stub": True})
+        write_json(self.reel.p("01_analysis/edit-decisions.json"), {
+            "video_id": "EPW_R01", "global": {"main_footage": "data/Episodes/EPW.mp4"},
+            "decisions": [{"decision_id": "EDIT_001", "segment_id": "SEG_001", "evidence": "كلمه0 كلمه1",
+                           "start": "00:00:00.000", "end": "00:00:04.000", "semantic_intent": "hook",
+                           "visual_treatment": "punch", "confidence": "high",
+                           "camera": {"type": "punch_in", "at": "00:00:01.000", "until": "00:00:03.000", "scale_factor": 1.1}}]})
+        r = compile_plan(self.reel)
+        self.assertTrue(r["ok"], r["errors"])
+        return r
+
+    def test_audio_extract_sample_exact(self):
+        from lib.audio_clean import clean
+        common.set_context(self.root)
+        clean(self.reel, self.src)
+        reel_onset = onset_s(self.reel.p("06_audio/dialogue/dialogue_raw_48k.wav"))
+        full = self.tmp / "full.wav"
+        ff("-i", str(self.src), "-map", "0:a:0", "-ar", "48000", "-c:a", "pcm_s16le", str(full))
+        self.assertLessEqual(abs((reel_onset + 60.0) - onset_s(full)), 0.001)   # same click, same instant
+        self.assertLessEqual(abs(reel_onset - 1.0), 0.03)
+
+    def test_xml_inpoints_offset(self):
+        import xml.etree.ElementTree as ET
+        from lib.audio_clean import clean
+        from lib.premiere_xml import build_xml, TPS
+        common.set_context(self.root)
+        clean(self.reel, self.src)
+        self._plan()
+        tm = build_xml(self.reel, prefer_ae_renders=False)
+        root = ET.parse(tm["xml"]).getroot()
+        v1 = root.find("./sequence/media/video/track")
+        clips = list(v1.iter("clipitem"))
+        fps = common.seq_fps()
+        self.assertEqual(int(clips[0].findtext("pproTicksIn")), round(60000 * TPS / 1000))
+        self.assertEqual(int(clips[0].findtext("in")), round(60000 * fps / 1000))
+        for c in clips:   # every V1 piece points inside the window of the original file
+            t = int(c.findtext("pproTicksIn")) / TPS
+            self.assertTrue(60.0 - 1e-6 <= t < 70.0, t)
+        a1 = root.find("./sequence/media/audio/track")
+        self.assertEqual(int(next(a1.iter("clipitem")).findtext("pproTicksIn")), 0)   # clean dialogue: reel clock
+        fdur = max(int(f.findtext("duration")) for f in root.iter("file") if f.findtext("duration")
+                   and "EPW.mp4" in (f.findtext("pathurl") or ""))
+        self.assertGreaterEqual(fdur, round(119 * 29.97))                    # the whole episode stays linked (handles)
+
+    def test_qc_sync_offset_aware(self):
+        from lib.audio_clean import clean
+        from lib.premiere_xml import build_xml
+        from lib.qc import run_qc
+        common.set_context(self.root)
+        clean(self.reel, self.src)
+        self._plan()
+        build_xml(self.reel, prefer_ae_renders=False)
+        r = run_qc(self.reel)
+        sync = next(c for c in r["checks"] if c["check"].startswith("Dialogue sync preserved"))
+        self.assertEqual(sync["result"], "PASS", sync)
+
+    def test_qc_reel_checks(self):
+        from lib.audio_clean import clean
+        from lib.premiere_xml import build_xml
+        from lib.qc import run_qc
+        common.set_context(self.root)
+        clean(self.reel, self.src)
+        self._plan()
+        tm = build_xml(self.reel, prefer_ae_renders=False)
+        checks = {c["check"]: c for c in run_qc(self.reel)["checks"]}
+        self.assertEqual(checks["Reel starts at its episode in-point"]["result"], "PASS")
+        self.assertEqual(checks["Reel window inside the episode"]["result"], "PASS")
+        x = Path(tm["xml"])
+        txt = x.read_text(encoding="utf-8")
+        from lib.premiere_xml import TPS
+        x.write_text(txt.replace(f"<pproTicksIn>{round(60000 * TPS / 1000)}</pproTicksIn>", "<pproTicksIn>0</pproTicksIn>", 1),
+                     encoding="utf-8")
+        checks = {c["check"]: c for c in run_qc(self.reel)["checks"]}
+        self.assertEqual(checks["Reel starts at its episode in-point"]["result"], "FAIL")
+
+    def test_vfr_flagged(self):
+        from lib.media import preflight, probe
+        v = self.tmp / "vfr.mp4"
+        ff("-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=2", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=15:d=2",
+           "-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]", "-fps_mode", "vfr", "-c:v", "libx264",
+           "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(v))
+        self.assertTrue(probe(v)["video"]["vfr"])
+        self.assertFalse(probe(self.src)["video"]["vfr"])
+        p = Paths(self.root, "VFRTEST")
+        p.ensure_project()
+        rep = preflight(p, [v])
+        self.assertTrue(any("variable frame rate" in i["msg"] for i in rep["issues"]), rep["issues"])
+
+    def test_preview_video_seeks(self):
+        from lib.preview_video import render
+        from lib.previews import render_all
+        common.set_context(self.root)
+        self._plan()
+        render_all(self.reel, composite_preview=False)
+        t0 = __import__("time").time()
+        r = render(self.reel, width=270, label=False)
+        self.assertTrue(r["ok"], r)
+        self.assertLess(__import__("time").time() - t0, 60)
+        from PIL import Image, ImageChops, ImageStat
+
+        def grab(video, t, out):
+            ff("-ss", f"{t}", "-i", str(video), "-frames:v", "1", "-vf", "scale=64:36", str(out))
+            return Image.open(out).convert("L")
+        p = grab(r["video"], 4.0, self.tmp / "p.png").resize((64, 36))
+        near = grab(self.src, 64.0, self.tmp / "near.png")
+        far = grab(self.src, 4.0, self.tmp / "far.png")
+        d_near = ImageStat.Stat(ImageChops.difference(p, near)).mean[0]
+        d_far = ImageStat.Stat(ImageChops.difference(p, far)).mean[0]
+        self.assertLess(d_near, d_far)                                        # the preview shows 01:04, not 00:04
+
+
+COVER = 1920 / 1080                     # 16:9 1920x1080 source filling a 1080x1920 frame
+LIM = (1920 * COVER - 1080) / 2
+
+
+def shot(a, b, *cxs, w=0.05):
+    return {"start_ms": a, "end_ms": b, "faces": [[cx, 0.4, w, w * 1.6] for cx in cxs], "n_faces": len(cxs)}
+
+
+SPEAKERS = {"people": {"host": {"name": "A", "position": "left"}, "guest": {"name": "S", "position": "right"}},
+            "turns": [{"start_ms": 0, "end_ms": 4000, "speaker": "host"}, {"start_ms": 4000, "end_ms": 9000, "speaker": "guest"}]}
+
+
+class TestShots(unittest.TestCase):
+    def frame(self, shots, speakers=None):
+        from lib.shots import frame_shots
+        return frame_shots(shots, speakers, 1920, 1080)
+
+    def test_single_face_centred(self):
+        e = self.frame([shot(0, 5000, 0.70)])
+        self.assertEqual(len(e), 1)
+        self.assertEqual(e[0]["decision_id"], "AUTO_SHOT")
+        self.assertAlmostEqual(e[0]["offset_x"], max(-LIM, -(0.70 - 0.5) * 1920 * COVER), delta=0.5)
+        self.assertEqual((e[0]["at_ms"], e[0]["until_ms"], e[0]["scale_factor"]), (0, 5000, 1.0))
+
+    def test_face_at_edge_clamped(self):
+        e = self.frame([shot(0, 5000, 0.98)])
+        self.assertAlmostEqual(e[0]["offset_x"], -LIM, delta=0.5)
+
+    def test_group_fits_uses_group_centre(self):
+        e = self.frame([shot(0, 5000, 0.45, 0.55)])
+        self.assertEqual(len(e), 1)
+        self.assertEqual(e[0]["decision_id"], "AUTO_SHOT")
+        self.assertAlmostEqual(e[0]["offset_x"], 0.0, delta=0.5)
+
+    def test_no_face_is_cutaway(self):
+        e = self.frame([shot(0, 3000)])
+        self.assertEqual(e[0]["decision_id"], "AUTO_CUTAWAY")
+        self.assertEqual(e[0]["scale_factor"], round((1080 / 1920) / COVER, 5))
+        self.assertEqual(e[0]["offset_x"], 0.0)
+
+    def test_two_shot_follows_speaker(self):
+        e = self.frame([shot(0, 9000, 0.25, 0.75)], SPEAKERS)
+        self.assertEqual([(x["at_ms"], x["until_ms"], x["target"]) for x in e], [(0, 4000, "host"), (4000, 9000, "guest")])
+        self.assertAlmostEqual(e[0]["offset_x"], -(0.25 - 0.5) * 1920 * COVER, delta=0.5)
+        self.assertAlmostEqual(e[1]["offset_x"], -(0.75 - 0.5) * 1920 * COVER, delta=0.5)
+
+    def test_min_hold_merges_short_turns(self):
+        sp = {"people": SPEAKERS["people"], "turns": [{"start_ms": 0, "end_ms": 4000, "speaker": "host"},
+                                                      {"start_ms": 4000, "end_ms": 4900, "speaker": "guest"},
+                                                      {"start_ms": 4900, "end_ms": 9000, "speaker": "host"}]}
+        e = self.frame([shot(0, 9000, 0.25, 0.75)], sp)
+        self.assertEqual([(x["at_ms"], x["until_ms"], x["target"]) for x in e], [(0, 9000, "host")])
+
+    def test_unknown_layout_whole(self):
+        e = self.frame([shot(0, 9000, 0.25, 0.75)])
+        self.assertEqual(e[0]["decision_id"], "AUTO_CUTAWAY")
+        self.assertIn("speaker", e[0]["rationale"])
+
+    def test_split_by_face_presence_catches_dissolves(self):
+        from lib.shots import split_by_presence
+        face = [[0.5, 0.4, 0.1, 0.16]]
+        samples = [(t, face if (t < 4000 or t >= 8000) else []) for t in range(0, 10000, 500)]
+        parts = split_by_presence(samples, 0, 10000, 1000)
+        self.assertEqual(len(parts), 3)
+        self.assertLessEqual(abs(parts[0][1] - 4000), 500)
+        self.assertLessEqual(abs(parts[1][1] - 8000), 500)
+        self.assertEqual([bool(p[2]) for p in parts], [True, False, True])
+        self.assertEqual((parts[0][0], parts[-1][1]), (0, 10000))
+        flicker = [(t, face if t != 3000 else []) for t in range(0, 10000, 500)]   # one missed detection: no split
+        self.assertEqual(len(split_by_presence(flicker, 0, 10000, 1000)), 1)
+        # speaker looking down for 1.5 s (no face detected) but the frames look like the speaker's: no split, and the
+        # part keeps the speaker's face position
+        turned = [(t, face if not 3000 <= t < 4500 else [], True) for t in range(0, 10000, 500)]
+        parts = split_by_presence(turned, 0, 10000, 1000)
+        self.assertEqual(len(parts), 1)
+        self.assertEqual(parts[0][2], face)
+
+    def test_shots_from_cuts_merges_short(self):
+        from lib.shots import shots_from_cuts
+        self.assertEqual(shots_from_cuts([2000, 2300, 6000], 9000, 400), [(0, 2000), (2000, 6000), (6000, 9000)])
+
+    def test_no_faces_anywhere_note(self):
+        from lib.shots import analyze_window
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            v = tmp / "v.mp4"
+            ff("-f", "lavfi", "-i", "testsrc2=s=320x180:r=25:d=4", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt",
+               "yuv420p", str(v))
+            r = analyze_window(v, 1000, 2000, faces_fn=lambda im: [])
+            self.assertTrue(r["shots"])
+            self.assertIn("motion", r["note"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_preflight_runs_shot_analysis_for_episode_reels(self):
+        from lib.media import preflight
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            root = tmp / "PF"
+            for d in ("assets/Brand", "data/Episodes"):
+                (root / d).mkdir(parents=True)
+            src = root / "data/Episodes/E.mp4"
+            ff("-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=4", "-f", "lavfi", "-i", "color=c=red:s=640x360:r=25:d=4",
+               "-f", "lavfi", "-i", "sine=f=300:r=48000:d=8", "-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]",
+               "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+               "-c:a", "aac", "-shortest", str(src))
+            common.set_context(root)
+            reel = Paths(root, "E_R01")
+            reel.ensure_project()
+            write_json(reel.p("00_inputs/source.json"), {"footage": "data/Episodes/E.mp4", "in_ms": 1000, "out_ms": 7000,
+                                                          "duration_ms": 6000, "kind": "episode_reel"})
+            rep = preflight(reel, [src])
+            sh = rep["shots"]
+            self.assertEqual(sh["window"], {"offset_ms": 1000, "duration_ms": 6000})
+            self.assertGreaterEqual(len(sh["shots"]), 2)
+            self.assertTrue(any(abs(c - 3000) <= 200 for c in sh["cuts_ms"]), sh["cuts_ms"])   # the cut at 4 s -> 3 s
+            self.assertEqual(rep["reframe"][str(src)]["mode"], "per-shot")
+            plain = Paths(root, "E_PLAIN")
+            plain.ensure_project()
+            self.assertNotIn("shots", preflight(plain, [src]))                  # whole-file clips: unchanged path
+        finally:
+            common.set_context(None)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_compose_punch_in_over_shot(self):
+        from lib.shots import compose_camera
+        layer = [{"decision_id": "AUTO_SHOT", "type": "reframe", "at_ms": 0, "until_ms": 9000, "scale_factor": 1.0,
+                  "offset_x": -300.0, "offset_y": 0.0, "rationale": "face", "target": None}]
+        story = [{"decision_id": "EDIT_001", "type": "punch_in", "at_ms": 1000, "until_ms": 3000, "scale_factor": 1.15,
+                  "offset_x": 0.0, "offset_y": 0.0, "rationale": ""}]
+        out = compose_camera(story, layer, 1920, 1080)
+        spans = [(c["at_ms"], c["until_ms"], c["decision_id"]) for c in out]
+        self.assertEqual(spans, [(0, 1000, "AUTO_SHOT"), (1000, 3000, "EDIT_001"), (3000, 9000, "AUTO_SHOT")])
+        mid = out[1]
+        self.assertEqual(mid["scale_factor"], 1.15)
+        self.assertAlmostEqual(mid["offset_x"], -345.0, delta=0.01)
+        self.assertEqual(mid["type"], "punch_in")
+
+    def test_compose_keeps_cutaway(self):
+        from lib.shots import compose_camera
+        layer = [{"decision_id": "AUTO_CUTAWAY", "type": "reframe", "at_ms": 0, "until_ms": 3000, "scale_factor": 0.3,
+                  "offset_x": 0.0, "offset_y": 0.0, "rationale": "no face"}]
+        story = [{"decision_id": "EDIT_001", "type": "punch_in", "at_ms": 1000, "until_ms": 2000, "scale_factor": 1.15,
+                  "offset_x": 0.0, "offset_y": 0.0, "rationale": ""}]
+        out = compose_camera(story, layer, 1920, 1080)
+        self.assertIn("AUTO_CUTAWAY", [c["decision_id"] for c in out])
+
+    def test_timemap_scales_offset_on_mask_step(self):
+        from lib.timemap import TimeMap
+        cam = [{"decision_id": "AUTO_SHOT", "type": "reframe", "at_ms": 0, "until_ms": 5000, "scale_factor": 1.0,
+                "offset_x": -300.0, "offset_y": 0.0}]
+        tm = TimeMap([(0, 2000), (2500, 5000)], cam)
+        self.assertEqual(tm.pieces[0]["offset_x"], -300.0)
+        self.assertEqual(tm.pieces[1]["scale_factor"], 1.06)
+        self.assertAlmostEqual(tm.pieces[1]["offset_x"], -318.0, delta=0.01)
+
+    def test_plan_uses_shot_layer(self):
+        from lib.plan import compile_plan
+        from lib.transcribe import finalize
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            root = tmp / "SC"
+            for d in ("assets/Brand", "data/Episodes"):
+                (root / d).mkdir(parents=True)
+            src = root / "data/Episodes/E.mp4"
+            ff("-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=12", "-f", "lavfi", "-i", "sine=f=300:r=48000:d=12",
+               "-ac", "2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(src))
+            common.set_context(root)
+            reel = Paths(root, "E_R01")
+            reel.ensure_project()
+            write_json(reel.p("00_inputs/source.json"), {"footage": "data/Episodes/E.mp4", "in_ms": 1000, "out_ms": 9000,
+                                                          "duration_ms": 8000, "kind": "episode_reel"})
+            ws = [{"id": i + 1, "segment_id": 1, "word": f"كلمه{i}", "start_ms": i * 500, "end_ms": i * 500 + 400,
+                   "probability": 0.9} for i in range(16)]
+            finalize(reel, {"source_video": str(src), "backend": "test", "model": "none", "language": "ar",
+                            "language_probability": 1.0, "duration_ms": 8000},
+                     [{"id": 1, "start_ms": 0, "end_ms": 7900, "text": " ".join(w["word"] for w in ws), "avg_logprob": -0.2,
+                       "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in ws]}], ws)
+            from lib.media import preflight
+            preflight(reel, [src])
+            pre = read_json(reel.p("00_inputs/preflight.json"))
+            pre["shots"] = {"window": {"offset_ms": 1000, "duration_ms": 8000}, "method": "test",
+                            "shots": [shot(0, 3000, 0.70), shot(3000, 8000, 0.30)]}
+            write_json(reel.p("00_inputs/preflight.json"), pre)
+            for f in ("main-topic.md", "medical-content-review.md"):
+                (reel.p("01_analysis") / f).write_text("# stub\n", encoding="utf-8")
+            for f in ("narrative-segments.json", "transcript-semantic-analysis.json", "editing-style.json"):
+                write_json(reel.p("01_analysis") / f, {"stub": True})
+            write_json(reel.p("01_analysis/edit-decisions.json"), {"video_id": "E_R01", "global": {}, "decisions": [
+                {"decision_id": "EDIT_001", "segment_id": "S1", "evidence": "كلمه1 كلمه2", "start": "00:00:00.500",
+                 "end": "00:00:02.000", "semantic_intent": "hook", "visual_treatment": "punch", "confidence": "high",
+                 "camera": {"type": "punch_in", "at": "00:00:01.000", "until": "00:00:02.000", "scale_factor": 1.1}}]})
+            r = compile_plan(reel)
+            self.assertTrue(r["ok"], r["errors"])
+            spec = read_json(reel.p("01_analysis/timeline-spec.json"))
+            self.assertTrue(spec["framing"].startswith("per-shot"), spec["framing"])
+            self.assertAlmostEqual(spec["base_scale_percent"], max(1080 / 640, 1920 / 360) * 100, delta=0.01)
+            starts = [round(s["src_in_ms"]) for s in spec["main_segments"]]
+            self.assertTrue(any(abs(t - 3000) <= 50 for t in starts), starts)           # a cut at the shot change
+            offs = {round(s["offset_x"]) for s in spec["main_segments"] if s["src_in_ms"] >= 3000}
+            self.assertTrue(offs and all(o > 0 for o in offs), offs)                     # face at 0.30 -> shifted right
+        finally:
+            common.set_context(None)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

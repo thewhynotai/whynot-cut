@@ -31,7 +31,8 @@ def run_qc(paths: Paths) -> dict:
     W, H = seq["general"]["frame_width"], seq["general"]["frame_height"]
     FPS, (TB, NTSC) = seq_fps(), seq_rate()
     spec = read_json(paths.p("01_analysis/timeline-spec.json"))
-    tm = read_json(paths.p("07_premiere/timeline-manifest.json"))
+    from .premiere_xml import timeline_manifest
+    tm = timeline_manifest(paths)       # ppro-build (base-manifest) or the XML-only build (timeline-manifest)
     missing_assets = []
 
     # ---------------- technical: XML
@@ -71,10 +72,35 @@ def run_qc(paths: Paths) -> dict:
             # A/V sync: each V1 clip's in == start (timeline time == source time)
             # sync: every A1 dialogue clip mirrors its V1 picture clip (same timeline span AND same source ticks)
             atr = root.find("./sequence/media/audio/track")
-            vk = [(c.findtext("start"), c.findtext("end"), c.findtext("pproTicksIn")) for c in v1.iter("clipitem")]
-            ak = [(c.findtext("start"), c.findtext("end"), c.findtext("pproTicksIn")) for c in atr.iter("clipitem")] if atr is not None else []
+            # a reel cut from a longer file: V1 points into the original (+ source_in_ms) while the cleaned dialogue was
+            # extracted from the range (reel clock), so the clean A1 ticks are compared with that offset added back
+            off_t = round(float((spec or {}).get("source_in_ms") or 0) * 254016000000 / 1000)
+            vk = [(c.findtext("start"), c.findtext("end"), int(c.findtext("pproTicksIn"))) for c in v1.iter("clipitem")]
+            ak = []
+            for c in (atr.iter("clipitem") if atr is not None else []):
+                clean_a1 = "dialogue_clean" in (c.findtext("name") or "")
+                ak.append((c.findtext("start"), c.findtext("end"), int(c.findtext("pproTicksIn")) + (off_t if clean_a1 else 0)))
             r.add("technical", "Dialogue sync preserved (A1 clips mirror V1 clips: span + source ticks)",
-                  vk == ak and bool(vk), f"{len(vk)} video vs {len(ak)} audio clips")
+                  vk == ak and bool(vk), f"{len(vk)} video vs {len(ak)} audio clips"
+                  + (f"; first mismatch V{vk[[x == y for x, y in zip(vk, ak)].index(False)]}" if vk != ak and
+                     len(vk) == len(ak) and vk else ""))
+            # podcast reels: the picture starts exactly at the selected in-point and the window lies in the episode
+            from .common import source_range
+            rng = source_range(paths)
+            if rng and vk:
+                first = min(v1.iter("clipitem"), key=lambda c: int(c.findtext("start")))
+                want = round(int(rng.get("in_ms", 0)) * 254016000000 / 1000)
+                got = int(first.findtext("pproTicksIn"))
+                tol = round(254016000000 / FPS) // 2      # half a frame (a lead-in snapped to a frame boundary)
+                r.add("technical", "Reel starts at its episode in-point", abs(got - want) <= tol,
+                      f"first V1 source time {got / 254016000000:.3f}s vs in-point {int(rng.get('in_ms', 0)) / 1000:.3f}s")
+                pre = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
+                fdur = next((f.get("duration_s") for f in pre.get("files", []) if Path(f["path"]).name ==
+                             Path(rng["footage"]).name), None)
+                r.add("technical", "Reel window inside the episode",
+                      fdur is not None and 0 <= rng.get("in_ms", 0) < rng.get("out_ms", 0) <= fdur * 1000 + 40,
+                      f"{rng.get('in_ms', 0) / 1000:.3f}-{rng.get('out_ms', 0) / 1000:.3f}s of "
+                      f"{fdur if fdur is not None else '?'}s (preflight)")
         except Exception as e:
             r.add("technical", "XML parses", False, str(e))
     else:
@@ -166,9 +192,10 @@ def run_qc(paths: Paths) -> dict:
 
         # ---------------- creative heuristics
         dur = spec["duration_frames"] or 1
-        full = sum(e["end_frame"] - e["start_frame"] for e in spec["events"]
-                   if e["template"] in ("broll_card", "broll_video", "logo_outro"))
-        r.add("creative", "Speaker visible ≥ 75% of runtime", full / dur <= 0.25, f"full-screen cover {full / dur:.0%}", mandatory=False)
+        from .plan import speaker_covered_frames
+        full = speaker_covered_frames(spec)
+        r.add("creative", "Speaker visible ≥ 75% of runtime", full / dur <= 0.25,
+              f"full-screen cover {full / dur:.0%} (cards, B-roll, source cutaways)", mandatory=False)
         ov = sum(e["end_frame"] - e["start_frame"] for e in spec["events"] if e["template"] not in ("flash_transition",))
         r.add("creative", "Overlay density reasonable (≤ 70% of runtime)", ov / dur <= 0.7, f"{ov / dur:.0%}", mandatory=False)
         cpm = len(cues) / (dur / FPS / 60)

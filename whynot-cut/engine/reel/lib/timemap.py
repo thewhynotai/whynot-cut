@@ -39,14 +39,17 @@ class TimeMap:
                 # a jump cut must show a visible zoom change, also inside a punch-in that spans the cut:
                 # step one mask increment further in (or out, if that would exceed max_scale)
                 cutaway = bool(cam) and cam.get("decision_id") == "AUTO_CUTAWAY"   # a letterboxed card stays whole
+                zoom = 1.0          # a framed (offset) shot scales its offset with the mask step: the face stays put
                 if at_cut and last_scale is not None and abs(scale - last_scale) < 1e-6 and not cutaway:
                     step = hi - lo
+                    old = scale
                     scale = round(scale + step, 4) if scale + step <= max_scale + 1e-9 else round(scale - step, 4)
+                    zoom = scale / old if old else 1.0
                 self.pieces.append({"src_in_ms": s, "src_out_ms": s + n * self.frame_ms, "start_frame": f,
                                     "end_frame": f + n, "keep_index": k, "scale_factor": scale,
                                     "camera": cam["type"] if cam else ("jumpcut_mask" if scale != 1.0 else "hold"),
                                     "decision_id": cam["decision_id"] if cam else None,
-                                    "offset_x": cam.get("offset_x", 0.0) if cam else 0.0,
+                                    "offset_x": round(cam.get("offset_x", 0.0) * zoom, 2) if cam else 0.0,
                                     "offset_y": cam.get("offset_y", 0.0) if cam else 0.0})
                 f += n
                 last_scale = scale
