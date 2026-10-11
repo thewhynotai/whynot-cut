@@ -387,7 +387,14 @@ def cmd_approve_plan(a):
 
 def cmd_verify(a):
     from lib import verify
+    from lib.motion_config import is_motion
     p = P(a)
+    if is_motion(p):                      # motion video (2.2): the sheet of frames After Effects rendered
+        from lib.motion_qc import record_visual
+        if not a.record:
+            raise SystemExit("motion projects: `reel motion-frames` builds the sheet; then `verify --record`")
+        out(record_visual(p, a.verdict, a.notes or "", a.by or "claude"))
+        return
     if a.record:
         out(verify.record(p, a.verdict, a.notes or "", a.by or "claude", a.sheet))
     else:
@@ -500,7 +507,16 @@ def cmd_premiere(a):
 
 def cmd_qc(a):
     from lib.qc import run_qc
+    from lib.motion_config import is_motion
     p = P(a)
+    if is_motion(p):
+        from lib.motion_qc import run as motion_qc
+        r = motion_qc(p)
+        set_status(p, "QC_PASSED" if r["ok"] else "BLOCKED", f"{len(r['failed'])} mandatory failures", "qc",
+                   [p.p("08_quality_control/qc-results.json")],
+                   blockers=[f"{f['check']}: {f['detail']}" for f in r["failed"]])
+        out({"ok": r["ok"], "failed": r["failed"], "warnings": [c for c in r["checks"] if c["result"] == "WARN"]})
+        return
     r = run_qc(p)
     set_status(p, "QC_PASSED" if r["ok"] else "BLOCKED", f"{len(r['failed'])} mandatory failures", "qc",
                [p.p("08_quality_control/validation-report.md")],
@@ -511,8 +527,13 @@ def cmd_qc(a):
 
 def cmd_handoff(a):
     from lib.handoff import build
+    from lib.motion_config import is_motion
     p = P(a)
-    r = build(p)
+    if is_motion(p):
+        from lib.handoff import motion_readme
+        r = {"readme": str(motion_readme(p))}
+    else:
+        r = build(p)
     st = load_status(p)
     if st["status"] == "QC_PASSED":
         set_status(p, "READY_FOR_HUMAN_EDITOR", "handoff package written", "handoff", list(r.values()))
@@ -535,7 +556,12 @@ def _want_preview(p: Paths) -> bool:
 
 def cmd_next(a):
     """Tell Claude/the user what the next step is (resumable workflow)."""
+    from lib.motion_config import is_motion
     p = P(a)
+    if is_motion(p):
+        from lib.motion_qc import motion_next
+        out(motion_next(p))
+        return
     from lib import ref_style
     rs = ref_style.next_step(p)     # Stage 5 is client-level: author once, reuse, flag when the references change
     # references are measured per client: a video that already holds its copy of the style needs no ref-analyze

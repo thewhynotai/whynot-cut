@@ -1498,5 +1498,203 @@ class TestWordLayers(unittest.TestCase):
         self.assertIn(("word_layers_20", names.index("word_layers") * 90 + 20), look_points())
 
 
+# --------------------------------------------------------------------------- motion QC, verify, next, handoff, publish
+def bursty_wav(path: Path, seconds: float, seed: int = 7):
+    """Speech-like loudness bursts (so envelope correlation is meaningful), 48 kHz mono."""
+    import wave
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    n = int(seconds * 48000)
+    env = np.repeat(rng.uniform(0.05, 1.0, int(seconds * 6) + 1), 8000)[:n]
+    x = (np.sin(2 * np.pi * 220 * np.arange(n) / 48000) * env * 0.5 * 32767).astype(np.int16)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(x.tobytes())
+    return path
+
+
+class TestMotionQC(CompiledMotion):
+    def setUp(self):
+        super().setUp()
+        import time as _t
+        from lib import motion_build
+        from lib.motion_plan import fingerprint
+        from lib.common import fps_arg
+        r = self.reel
+        self.dur = self.plan["duration_frames"] / self.plan["fps"]
+        dia = bursty_wav(r.p("06_audio/dialogue/dialogue_motion_seq.wav"), self.dur)
+        anim = r.p(f"08_quality_control/animatic/{r.video_id}_animatic.mp4")
+        anim.parent.mkdir(parents=True, exist_ok=True)
+        anim.write_bytes(b"animatic")
+        write_json(r.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor",
+                                                           "plan_fingerprint": fingerprint(r)})
+        aep = motion_build.aep_path(r)
+        aep.parent.mkdir(parents=True, exist_ok=True)
+        aep.write_bytes(b"AEP built")
+        write_json(r.p("04_after_effects/motion-build-result.json"), {
+            "status": "PROJECT_ASSEMBLED", "aep": str(aep), "aep_sha1": hashlib.sha1(b"AEP built").hexdigest(),
+            "comparison": {"ok": True, "failures": [], "warnings": []}, "readback": {"scenes": []}, "reasons": []})
+        _t.sleep(1.1)
+        main = motion_build.render_path(r)
+        main.parent.mkdir(parents=True, exist_ok=True)
+        ff("-f", "lavfi", "-i", f"testsrc2=s=108x192:r={fps_arg()}:d={self.dur:.3f}", "-i", str(dia), "-c:v", "libx264",
+           "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(main))
+        write_json(r.p("04_after_effects/motion-render-result.json"), {"status": "RENDERED", "main": str(main),
+                                                                       "reasons": [], "warnings": [], "pieces": []})
+        write_json(r.p("06_audio/dialogue/cut-verification.json"), {"ok": True, "verdict": "no speech cut"})
+        _t.sleep(1.1)
+        run = r.p("08_quality_control/ae_frames/run-20990101-000000")
+        run.mkdir(parents=True, exist_ok=True)
+        from PIL import Image
+        Image.new("RGB", (40, 40)).save(run / "_sheet.jpg")
+        write_json(run / "frames.json", {"frames": []})
+        from lib.motion_qc import record_visual
+        record_visual(r, "pass", "frames viewed", "claude")
+
+    def tearDown(self):
+        shutil.rmtree(self.reel.p("08_quality_control/ae_frames"), ignore_errors=True)
+
+    def checks(self):
+        from lib.motion_qc import run
+        r = run(self.reel)
+        return r, {c["check"]: c["result"] for c in r["checks"]}
+
+    def test_complete_passes(self):
+        r, c = self.checks()
+        self.assertTrue(r["ok"], r["failed"])
+        for k in ("plan_valid", "approval_current", "aep_fresh", "readback", "render", "audio_sync", "cut_proof",
+                  "visual_verified", "licenses"):
+            self.assertEqual(c[k], "PASS", k)
+        self.assertTrue(self.reel.p("08_quality_control/qc-results.json").exists())
+
+    def test_each_check_fails(self):
+        import time as _t
+        from lib import motion_build
+        r = self.reel
+        bres = r.p("04_after_effects/motion-build-result.json")
+        good_b = read_json(bres)
+
+        def expect_fail(name):
+            _, c = self.checks()
+            self.assertEqual(c[name], "FAIL", (name, c))
+
+        appr = read_json(r.p("01_analysis/plan-approval.json"))
+        write_json(r.p("01_analysis/plan-approval.json"), dict(appr, plan_fingerprint="x"))
+        expect_fail("approval_current")
+        write_json(r.p("01_analysis/plan-approval.json"), appr)
+
+        write_json(bres, dict(good_b, comparison={"ok": False, "failures": ["S01: font"]}))
+        expect_fail("readback")
+        write_json(bres, dict(good_b, status="BUILT_UNVERIFIED", readback=None, comparison=None))
+        expect_fail("readback")
+        write_json(bres, good_b)
+
+        aep = motion_build.aep_path(r)
+        aep.write_bytes(b"EDITED")
+        expect_fail("aep_fresh")
+        expect_fail("render")                                  # the .aep is now newer than the render
+        aep.write_bytes(b"AEP built")
+        _t.sleep(1.1)
+        main = motion_build.render_path(r)
+        main.touch()
+
+        dia = r.p("06_audio/dialogue/dialogue_motion_seq.wav")
+        late = self.tmp / "late.wav"
+        ff("-i", str(dia), "-af", f"adelay={int(3000 / self.plan['fps'])}", str(late))
+        keep = dia.read_bytes()
+        dia.write_bytes(late.read_bytes())
+        expect_fail("audio_sync")
+        dia.write_bytes(keep)
+
+        cv = r.p("06_audio/dialogue/cut-verification.json")
+        cv.unlink()
+        expect_fail("cut_proof")
+        write_json(cv, {"ok": True})
+
+        _t.sleep(1.1)
+        newer = r.p("08_quality_control/ae_frames/run-20991231-000000")
+        newer.mkdir(parents=True, exist_ok=True)
+        from PIL import Image
+        Image.new("RGB", (40, 40)).save(newer / "_sheet.jpg")
+        expect_fail("visual_verified")
+        shutil.rmtree(newer)
+
+        plan_p = r.p("01_analysis/motion-plan.json")
+        keep_plan = plan_p.read_bytes()
+        plan = json.loads(keep_plan.decode("utf-8"))
+        plan["assets"] = [{"ref": "x/y", "license": "free", "attribution": ""}]
+        write_json(plan_p, plan)
+        expect_fail("licenses")
+        plan_p.write_bytes(keep_plan)
+
+    def test_next_order_and_stale(self):
+        import time as _t
+        from lib.motion_qc import motion_next
+        n = motion_next(self.reel)
+        self.assertTrue(n["next"].startswith(("qc", "handoff")), n)       # qc may be stale from an earlier test
+        _t.sleep(1.1)
+        sp = self.reel.p("01_analysis/motion-script.json")
+        sp.write_bytes(sp.read_bytes())                        # touched: newer than the compiled plan
+        n = motion_next(self.reel)
+        self.assertTrue(n["stale"] and n["stale"][0].startswith("motion-plan"), n)
+
+    def test_verify_record_motion(self):
+        import time as _t
+        cli = SK / "engine" / "reel" / "cli.py"
+        base = [sys.executable, "-B", str(cli), "verify", "--record", "--verdict", "pass", "--notes", "x",
+                "--root", str(self.root), "--video-id", "EP12_R01_MO"]
+        r = subprocess.run(base, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rec = read_json(self.reel.p("08_quality_control/visual-verification.json"))
+        self.assertIn("ae_frames", rec["sheet"])
+        _t.sleep(1.1)
+        from lib import motion_build
+        motion_build.render_path(self.reel).touch()
+        r = subprocess.run(base, capture_output=True, text=True, encoding="utf-8")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_handoff_motion(self):
+        from lib.handoff import motion_readme
+        plan_p = self.reel.p("01_analysis/motion-plan.json")
+        keep = plan_p.read_bytes()
+        try:
+            plan = json.loads(keep.decode("utf-8"))
+            plan["assets"] = [{"ref": "people/doctor", "license": "CC-BY-4.0", "attribution": "People by X (CC BY 4.0)"}]
+            write_json(plan_p, plan)
+            md = motion_readme(self.reel).read_text(encoding="utf-8")
+        finally:
+            plan_p.write_bytes(keep)
+        from lib.motion_build import aep_path
+        self.assertIn(aep_path(self.reel).name, md)
+        self.assertIn("MAIN_", md)
+        self.assertIn("ArialMT", md)
+        self.assertIn("People by X (CC BY 4.0)", md)
+
+    def test_publish_cc_by(self):
+        from test_podcast import good_pub, good_reel
+        from lib.publish import check
+        plan_p = self.reel.p("01_analysis/motion-plan.json")
+        keep = plan_p.read_bytes()
+        try:
+            plan = json.loads(keep.decode("utf-8"))
+            plan["assets"] = [{"ref": "people/doctor", "license": "CC-BY-4.0", "attribution": "People by X (CC BY 4.0)"}]
+            write_json(plan_p, plan)
+            write_json(self.ep.p("publish/publish.json"), good_pub())
+            reel = good_reel()
+            reel["reel_id"] = "EP12_R01_MO"
+            write_json(self.ep.p("publish/reels/EP12_R01_MO.json"), reel)
+            r = check(self.ep)
+            self.assertTrue(any("People by X" in e for e in r["errors"]), r["errors"])
+            reel["instagram"]["caption"] = str(reel["instagram"].get("caption", "")) + "\nPeople by X (CC BY 4.0)"
+            write_json(self.ep.p("publish/reels/EP12_R01_MO.json"), reel)
+            r = check(self.ep)
+            self.assertFalse(any("People by X" in e for e in r["errors"]), r["errors"])
+        finally:
+            plan_p.write_bytes(keep)
+
+
 if __name__ == "__main__":
     unittest.main()

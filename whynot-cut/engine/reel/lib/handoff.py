@@ -153,3 +153,44 @@ Every graphic and decision also appears as a **sequence marker** (ID + transcrip
     write_text(paths.p("09_handoff/final-editor-checklist.md"), C)
     return {"readme": str(paths.p("09_handoff/README.md")), "checklist": str(paths.p("09_handoff/final-editor-checklist.md")),
             "export": exp}
+
+
+def motion_readme(paths: Paths) -> Path:
+    """Handoff for a motion video (2.2): the After Effects project, how it is organised, what to edit, fonts, audio,
+    renders, licenses and attributions, and what still needs the editor."""
+    from .motion_build import aep_path, render_path
+    plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
+    qc = read_json(paths.p("08_quality_control/qc-results.json"), {}) or {}
+    rr = read_json(paths.p("04_after_effects/motion-render-result.json"), {}) or {}
+    fps = float(plan.get("fps") or seq_fps())
+    fonts = sorted({e.get("font_ps") for s in plan.get("scenes", []) for e in s.get("elements", []) if e.get("font_ps")})
+    music = (plan.get("audio") or {}).get("music")
+    L = [f"# {paths.video_id} — motion video handoff", "",
+         f"Generated {now_iso()} · QC: {'PASSED' if qc.get('ok') else 'NOT PASSED'} · "
+         f"{plan.get('format')} · {plan.get('duration_frames', 0) / fps:.1f} s · {fps:.3f} fps", "",
+         "## Open it", "", f"- After Effects project: `{aep_path(paths)}`",
+         f"- Main comp: `MAIN_{plan.get('reel_id', paths.video_id)}` (scenes, persistent layers, audio)",
+         f"- Master render: `{rr.get('main') or render_path(paths)}`",
+         f"- Posting MP4: `{rr.get('mp4') or '(render first)'}` · Cover: `{rr.get('cover') or '—'}`", "",
+         "## How it is organised", "",
+         "- `NH_BRAND/BRAND_CONTROLS`: brand colours; layers whose colour equals a brand colour follow these controls.",
+         "- `NH_SCENES/<scene>_<type>`: one comp per scene, placed in MAIN at its frames with its transition.",
+         "- Word-by-word text: each word is its own layer (`<name>_wN`) chained right-to-left by expressions; the "
+         "guide layer `<name>` (not rendered) holds the whole line. To change a word, edit its word layer.",
+         "- `NH_PERSISTENT`: background, captions, speaker badge, progress, voice pulse.",
+         "- Audio layers in MAIN: DIALOGUE (pauses removed, on the sequence clock), MUSIC, SFX_*.", "",
+         "## Fonts After Effects needs", ""] + [f"- {f}" for f in fonts] + ["",
+         "## Scenes", ""] + [f"- {s['id']} {s['type']} — frames {s['start_frame']}-{s['end_frame']}" for s in plan.get("scenes", [])]
+    assets = plan.get("assets") or []
+    L += ["", "## Licenses and attributions", ""]
+    L += [f"- {a['ref']}: {a['license']}" + (f" — publish with: **{a['attribution']}**" if a.get("attribution") else "")
+          for a in assets] or ["- only the client's brand and Lucide icons (ISC)"]
+    needs = list(plan.get("approvals") or [])
+    if not music:
+        needs.append("music: add a licensed track (the motion video has dialogue and SFX only)")
+    needs += ["final look in After Effects, then render/export for posting",
+              "post with the reel's captions from publish/reels (attributions included)"]
+    L += ["", "## Needs you", ""] + [f"- [ ] {n}" for n in needs]
+    if not qc.get("ok"):
+        L += ["", "## QC failures", ""] + [f"- {c['check']}: {c['detail']}" for c in qc.get("failed", [])]
+    return write_text(paths.p("09_handoff/README.md"), "\n".join(L) + "\n")

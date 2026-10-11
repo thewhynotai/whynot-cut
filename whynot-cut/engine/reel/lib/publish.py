@@ -451,6 +451,14 @@ def check(ep) -> dict:
         for where, text in (("instagram", cap), ("tiktok", tcap), ("shorts", st + "\n" + str(sh.get("description") or ""))):
             facts(f"{rid} {where}", text)
         approvals += [f"{rid}: {a}" for a in r.get("approval_required") or []]
+        if str(rid).endswith("_MO"):           # motion video (2.2): CC-BY art must be credited where it is posted
+            from .common import Paths
+            mplan = read_json(Paths(ep.root, rid).p("01_analysis/motion-plan.json"), {}) or {}
+            posted = "\n".join([cap, tcap, str(sh.get("description") or "")])
+            for a in mplan.get("assets") or []:
+                if a.get("license") == "CC-BY-4.0" and a.get("attribution") and a["attribution"] not in posted:
+                    errors.append(f"{rid}: the CC-BY attribution «{a['attribution']}» is missing from the captions "
+                                  "(it must be published with the video)")
         reels.append((rid, r))
 
     files = []
