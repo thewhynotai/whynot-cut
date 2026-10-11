@@ -8,6 +8,7 @@ _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -251,6 +252,102 @@ class TestClipIdCompat(unittest.TestCase):
             f = cli_module().main_footage(p, None)
             self.assertEqual([x.name for x in f], ["EPW.mp4"])
             self.assertNotIn("EPW_R01", read_json(root / "output/discovery/clip-ids.json"))
+
+
+def hook_new_clips(root: Path) -> list:
+    r = subprocess.run([sys.executable, "-B", str(CTX)], input=json.dumps({"cwd": str(root)}),
+                       capture_output=True, text=True, encoding="utf-8")
+    ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+    line = ctx.split("New clips not started yet: ", 1)[1].split(". ", 1)[0]
+    return [] if line == "none" else line.split(", ")
+
+
+class TestClipIdReviewFixes(unittest.TestCase):
+    """Review round 1: a raw stem as --video-id never lands work outside the inbox project; a gone clip is refused,
+    never swapped for its sibling; rels compare case-insensitively; the hook shows the inbox ids."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = make_client(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def projects(self):
+        return sorted(os.listdir(self.root / "output/projects"))
+
+    def test_raw_stem_video_id_is_rewritten_to_the_inbox_id(self):
+        from lib.onboard import inbox
+        ids = {c["file"]: c["video_id"] for c in inbox(self.root)["clips"]}
+        spaced, arabic = ids["data/Raw/Dr Sherif intro.mp4"], ids["data/Raw/" + ARABIC_1]
+        outro = ids["data/Raw/Dr Sherif outro.mp4"]
+        for given, want in (("Dr Sherif intro", spaced), ("مقابلة ١", arabic), (outro.lower(), outro)):
+            code, out, err = reel(self.root, "preflight", video_id=given)
+            self.assertEqual(code, 0, err)
+            self.assertIn(want, err)                                   # one note says which id was used
+        self.assertEqual(self.projects(), sorted([spaced, arabic, outro]))    # no spaced/Arabic/lower-case folder
+        for vid in (spaced, arabic):
+            write_json(Paths(self.root, vid).p("02_transcription/transcript.json"), {"words": []})
+        ib = inbox(self.root)
+        self.assertIn(spaced, ib["in_progress"])
+        self.assertIn(arabic, ib["in_progress"])
+
+    def test_given_folder_that_already_exists_is_kept(self):
+        from lib.onboard import inbox
+        inbox(self.root)
+        Paths(self.root, "Dr Sherif intro").ensure_project()          # made by hand after the ids were assigned
+        code, out, err = reel(self.root, "preflight", video_id="Dr Sherif intro")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.projects(), ["Dr Sherif intro"])
+
+    def test_2x_raw_stem_project_is_adopted(self):
+        from lib.onboard import inbox
+        with tempfile.TemporaryDirectory() as t:
+            root = make_client(t, ["Dr Sherif intro.mp4", ARABIC_1, "C0001.MP4", "Dr X.mp4", "Dr X.mov"])
+            for given in ("Dr Sherif intro", "مقابلة ١", "Dr X"):
+                write_json(Paths(root, given).p("02_transcription/transcript.json"), {"words": []})
+            ib = inbox(root)
+            got = {c["file"]: c["video_id"] for c in ib["clips"]}
+            self.assertEqual(got["data/Raw/Dr Sherif intro.mp4"], "Dr Sherif intro")
+            self.assertEqual(got["data/Raw/" + ARABIC_1], "مقابلة ١")
+            self.assertEqual(sorted(ib["in_progress"]), sorted(["Dr Sherif intro", "مقابلة ١"]))
+            # "Dr X" is ambiguous (two extensions): never adopted; ".mov" sorts before ".mp4"
+            self.assertEqual({got["data/Raw/Dr X.mp4"], got["data/Raw/Dr X.mov"]}, {"DR_X", "DR_X_MP4"})
+
+    def test_gone_clip_is_refused_not_swapped_for_its_sibling(self):
+        from lib.onboard import inbox
+        inbox(self.root)
+        (self.root / "data/Raw/C0239.MP4").unlink()
+        inbox(self.root)
+        with self.assertRaises(SystemExit) as e:
+            cli_module().main_footage(Paths(self.root, "C0239"), None)
+        msg = str(e.exception.code)
+        self.assertIn("clip id C0239 was data/Raw/C0239.MP4, which is no longer in data/", msg)
+        self.assertIn("--footage", msg)
+
+    def test_rel_case_change_keeps_the_id(self):
+        from lib.onboard import inbox
+        before = {c["file"]: c["video_id"] for c in inbox(self.root)["clips"]}
+        (self.root / "data/Raw/C0239.MP4").rename(self.root / "data/Raw/C0239.mp4")
+        after = {c["file"]: c["video_id"] for c in inbox(self.root)["clips"]}
+        self.assertEqual(after["data/Raw/C0239.mp4"], before["data/Raw/C0239.MP4"])
+        self.assertEqual(len(read_json(self.root / "output/discovery/clip-ids.json")), len(RAW))
+
+    def test_ambiguous_raw_stem_is_refused(self):
+        from lib.onboard import inbox
+        with tempfile.TemporaryDirectory() as t:
+            root = make_client(t, ["Dr X.mp4", "Dr X.mov"])
+            inbox(root)
+            with self.assertRaises(SystemExit):
+                cli_module().main_footage(Paths(root, "Dr X"), None)
+
+    def test_hook_shows_the_inbox_ids_before_the_first_inbox(self):
+        from lib.onboard import inbox
+        (self.root / "data/Broll").mkdir()
+        (self.root / "data/Broll/C0239.mp4").write_bytes(b"b-roll with a raw clip's name")   # sorts before data/Raw
+        shown = hook_new_clips(self.root)                             # no clip-ids.json yet
+        self.assertFalse((self.root / "output/discovery/clip-ids.json").exists())            # the hook writes nothing
+        self.assertEqual(sorted(shown), sorted(inbox(self.root)["new"]))
 
 
 if __name__ == "__main__":

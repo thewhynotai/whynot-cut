@@ -28,6 +28,12 @@
   `main_footage` accepts the id (any case), the raw stem or the 2.x slug; `inbox`, the single-clip `--video-id`
   auto-fill and the SessionStart "new clips" line use the same ids. A lone Arabic clip whose 2.x project is
   `output/projects/VIDEO` keeps that project.
+- A raw stem (`--video-id "Dr Sherif intro"`), the 2.x slug or another case is rewritten to the clip's inbox id (one
+  `note:` on stderr) unless a project folder with the given name already exists, so the work never lands in a folder
+  `inbox` does not track. An id whose clip left `data/` is refused ("restore it or pass --footage") instead of
+  resolving to a sibling with the same stem; a raw stem shared by two files is refused too. Relative paths compare
+  case-insensitively (`C0239.MP4` renamed `C0239.mp4` keeps its id). The SessionStart hook picks raw clips with
+  discovery's classifier, so it shows the ids `inbox` will hand out.
 - The Gate 1 plan approval covers the whole plan (engine IM-3). `plan_fingerprint` hashed only the bytes after `"events"`
   in `01_analysis/timeline-spec.json`, so a camera move, the framing (9:16 / 4:5), the base scale, `main_footage` or the
   duration could change after approval and `ppro-build`, `ae-build`, `ps-build` and QC still saw the plan as approved.
@@ -42,6 +48,11 @@
 - Existing plan approvals are invalidated once: the approval fingerprint has a new definition, so every project with a
   `plan-approval.json` written by 2.x is treated as changed. Re-approve the plan (`reel approve-plan --by editor`) before
   the next build or QC; the plan itself does not need recompiling.
+- Clip ids are assigned once, the first time 3.0 runs `inbox` (or any per-clip command) for a client, in sorted
+  relative-path order. A clip keeps its 2.x project folder when that folder is unambiguous: `output/projects/<slug>`
+  (also `VIDEO` for a lone Arabic clip) or `output/projects/<raw file stem>`. For the same stem with two extensions the
+  first in that order keeps the bare id (`C0239.MP4` before `C0239.mov`, so the `.mov` becomes `C0239_MOV`): if a 2.x
+  project `C0239` was actually built from the `.mov`, edit `output/discovery/clip-ids.json` by hand before continuing.
 
 ## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names, field-test round 4
 The minor findings of the 2.2.0 review, two bugs found by a live run from a client folder named in Arabic, and the gaps

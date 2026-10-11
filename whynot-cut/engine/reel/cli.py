@@ -81,6 +81,29 @@ def main_footage(paths: Paths, explicit: str | None) -> list[Path]:
                      f"--video-id, pass --footage, or cut this video from a longer file with `reel range`")
 
 
+def canonical_video_id(a):
+    """--video-id given as the raw file stem ("Dr Sherif intro", "مقابلة ١"), the 2.x slug or in another case is
+    rewritten to the clip's id from `reel inbox`, so the work lands in the project inbox tracks. A project folder that
+    already exists under the given name is kept (a case-only difference is always normalised). `reel range` names a new
+    reel's id, so it is left alone."""
+    if not a.video_id or getattr(a, "episode", None) or a.cmd == "range":
+        return
+    root = Path(a.root).expanduser()
+    if not (root / "output/discovery/input-inventory.json").exists():
+        return
+    from lib.clip_ids import canonical
+    try:
+        c = canonical(root, a.video_id)
+    except SystemExit:
+        return                    # an id whose clip is gone: main_footage refuses it with the full message
+    if not c or c == a.video_id:
+        return
+    if c.upper() != a.video_id.upper() and Paths(root, a.video_id).project.is_dir():
+        return
+    sys.stderr.write(f"note: --video-id {a.video_id!r} is clip {c} (`reel inbox` id); using output/projects/{c}\n")
+    a.video_id = c
+
+
 def cmd_discover(a):
     from lib.discover import run_discovery
     p = P(a)
@@ -928,6 +951,7 @@ def main():
         else:
             if a.cmd not in OPTIONAL_ID:
                 raise SystemExit("--video-id required (found %d source files; `reel inbox` lists them)" % len(src))
+    canonical_video_id(a)
     globals()["cmd_" + a.cmd.replace("-", "_")](a)
 
 

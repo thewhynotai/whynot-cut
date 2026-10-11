@@ -58,21 +58,34 @@ def load(root) -> dict:
     return {str(k): str(v) for k, v in m.items()} if isinstance(m, dict) else {}
 
 
+def _key(rel) -> str:
+    """Relative paths compare NFC + case-insensitively: C0239.MP4 renamed C0239.mp4 is the same clip (Windows, macOS)."""
+    return _nfc(Path(str(rel)).as_posix()).casefold()
+
+
 def assign(root, rels, ids: dict) -> dict:
     """A copy of `ids` with an id for every clip in `rels` that has none yet (pure: writes nothing)."""
     ids = dict(ids)
-    have = {_nfc(v) for v in ids.values()}
-    new = sorted({_nfc(r) for r in rels} - have)
+    have = {_key(v) for v in ids.values()}
+    new = {}
+    for r in rels:
+        if _key(r) not in have:
+            new.setdefault(_key(r), _nfc(r))
     projects = Paths(root).output / "projects"
-    old_slugs = [slug(Path(_nfc(r)).stem) for r in {_nfc(r) for r in rels} | have]
-    for rel in new:
+    every = [Path(_nfc(r)).stem for r in {_key(r): r for r in list(rels) + list(ids.values())}.values()]
+    old_slugs = [slug(st) for st in every]
+    stems = [st.casefold() for st in every]
+    for rel in sorted(new.values()):                         # C0239.MP4 before C0239.mov, as in 3.0.0
         i = clip_id_for(rel, ids)
-        # 2.x named a project after slug(stem) (VIDEO for an Arabic name): adopt that folder when it exists, no other
-        # clip slugs the same way and it is free, so a lone Arabic clip edited with 2.x keeps its project
-        old = slug(Path(rel).stem)
-        if old != i and old_slugs.count(old) == 1 and old.upper() not in {k.upper() for k in ids} \
-                and (projects / old).is_dir():
-            i = old
+        # a 2.x project of this clip keeps its folder when it is unambiguous (no other clip slugs/is named the same way)
+        # and free: output/projects/<slug(stem)> (VIDEO for a lone Arabic clip, auto-filled by 2.x) or
+        # output/projects/<raw stem> (an agent passed the file name as --video-id)
+        stem = Path(rel).stem
+        taken = {k.upper() for k in ids}
+        for old, ok in ((slug(stem), old_slugs.count(slug(stem)) == 1), (stem, stems.count(stem.casefold()) == 1)):
+            if old.upper() != i.upper() and ok and old.upper() not in taken and (projects / old).is_dir():
+                i = old
+                break
         ids[i] = rel
     return ids
 
@@ -93,24 +106,41 @@ def clip_ids(root, inv: dict | None = None) -> dict:
 
 
 def id_of(ids: dict, rel: str) -> str | None:
-    rel = _nfc(rel)
-    return next((k for k, v in ids.items() if _nfc(v) == rel), None)
+    rel = _key(rel)
+    return next((k for k, v in ids.items() if _key(v) == rel), None)
 
 
-def resolve(root, video_id: str, inv: dict | None = None) -> Path | None:
-    """The raw clip a --video-id names: its id (any case), else the raw file stem, else the 2.x slug when exactly one
-    clip has it. None when nothing matches (or the old slug is shared, e.g. VIDEO for two Arabic names)."""
+def _resolve_rel(root, video_id: str, inv: dict | None):
+    """(ids, files {key: (rel, path)}, the matching key or None). Refuses (SystemExit) an id whose clip is gone."""
     if inv is None:
         inv = read_json(Paths(root).output / "discovery/input-inventory.json", {})
-    files = {_nfc(f["rel"]): Path(f["path"]) for f in (inv or {}).get("files", [])
+    files = {_key(f["rel"]): (f["rel"], Path(f["path"])) for f in (inv or {}).get("files", [])
              if f.get("role") == "source_footage" and f.get("rel")}
     ids = clip_ids(root, inv)
     want = _nfc(video_id)
-    for k, rel in ids.items():
-        if k.upper() == want.upper() and _nfc(rel) in files:
-            return files[_nfc(rel)]
-    stem = [f for r, f in files.items() if Path(r).stem.casefold() == want.casefold()]
-    if stem:
-        return stem[0]
-    old = [f for r, f in files.items() if slug(Path(r).stem) == want.upper()]
-    return old[0] if len(old) == 1 else None
+    key = next((k for k in ids if k.upper() == want.upper()), None)
+    if key is not None:
+        if _key(ids[key]) in files:
+            return ids, files, _key(ids[key])
+        raise SystemExit(f"clip id {key} was {ids[key]}, which is no longer in data/: restore it or pass --footage")
+    stem = [k for k, (r, _) in files.items() if Path(_nfc(r)).stem.casefold() == want.casefold()]
+    if len(stem) == 1:
+        return ids, files, stem[0]
+    if stem:                                     # same stem, several extensions: never guess
+        return ids, files, None
+    old = [k for k, (r, _) in files.items() if slug(Path(_nfc(r)).stem) == want.upper()]
+    return ids, files, (old[0] if len(old) == 1 else None)
+
+
+def resolve(root, video_id: str, inv: dict | None = None) -> Path | None:
+    """The raw clip a --video-id names: its id (any case), else the raw file stem, else the 2.x slug, each only when
+    exactly one clip matches (VIDEO for two Arabic names, or "C0239" for C0239.MP4 + C0239.mov, matches none).
+    An id whose clip left data/ is refused, never swapped for a sibling."""
+    _, files, k = _resolve_rel(root, video_id, inv)
+    return files[k][1] if k else None
+
+
+def canonical(root, video_id: str, inv: dict | None = None) -> str | None:
+    """The map id for what --video-id names (C0239 for "c0239", DR_SHERIF_INTRO for "Dr Sherif intro"), or None."""
+    ids, files, k = _resolve_rel(root, video_id, inv)
+    return id_of(ids, files[k][0]) if k else None
