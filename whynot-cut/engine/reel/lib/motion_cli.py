@@ -21,8 +21,9 @@ ARGS: dict = {
         (("--search",), {"required": True, "help": "concept words in English, e.g. \"money, growth\""}),
         (("--limit",), {"type": int, "default": 12}),
     ],
+    "motion-library": [],
 }
-NO_ID = {"ae-status", "ae-probe", "motion-icons"}
+NO_ID = {"ae-status", "ae-probe", "motion-icons", "motion-library"}
 
 
 def add_args(name: str, sp) -> None:
@@ -82,6 +83,16 @@ def cmd_motion_icons(a):
         hits += [dict(h, query=part.strip()) for h in search(part, a.limit)]
     out({"set": "lucide (ISC)", "icons": len(load_index()), "hits": hits,
          "how": "use the name in motion-script.json (\"icon\": \"<name>\"); arrows/chevrons are mirrored in RTL"})
+
+
+def cmd_motion_library(a):
+    from .motion_library import library_dir, load_packs
+    packs = load_packs()
+    out({"library_dir": str(library_dir()), "packs": [{k: (list(v) if k == "items" else v) for k, v in p.items()}
+                                                      for p in packs],
+         "how": "illustrations are used as \"pack/item\"; only packs with ok: true (a pack.json with an allowed "
+                "license) can be used" if packs else
+                "no packs: add licensed illustration packs (each with pack.json) to the library folder, or use icons"})
 
 
 def dispatch(a) -> bool:

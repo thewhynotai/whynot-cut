@@ -557,5 +557,75 @@ class TestIcons(unittest.TestCase):
                 self.assertAlmostEqual(va[1], vb[1])
 
 
+# --------------------------------------------------------------------------- licensed library
+def make_pack(base: Path, pid: str, license: str, attribution: str = "", proof: str = "", items=None, write_json_=True):
+    d = base / pid
+    d.mkdir(parents=True, exist_ok=True)
+    items = items if items is not None else [{"id": "doctor", "file": "doctor.svg", "tags": ["doctor"]}]
+    for it in items:
+        f = d / it["file"]
+        if it["file"].endswith(".png"):
+            from PIL import Image
+            Image.new("RGBA", (40, 40), (255, 0, 0, 128)).save(f)
+        elif not f.exists():
+            f.write_text(svg('<path d="M2 2 L22 2 L22 22 Z" fill="#20ACAF"/>'), encoding="utf-8")
+    if write_json_:
+        write_json(d / "pack.json", {"id": pid, "name": pid, "license": license, "source": "https://example.com",
+                                     "attribution": attribution, "proof": proof, "items": items})
+    return d
+
+
+class TestLibrary(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def packs(self):
+        from lib.motion_library import load_packs
+        return {p["id"]: p for p in load_packs(self.tmp)}
+
+    def test_license_rules(self):
+        make_pack(self.tmp, "open", "CC0-1.0")
+        make_pack(self.tmp, "by_empty", "CC-BY-4.0")
+        make_pack(self.tmp, "by_ok", "CC-BY-4.0", attribution="Art by X (CC BY 4.0)")
+        make_pack(self.tmp, "bought", "commercial")
+        make_pack(self.tmp, "bought_ok", "commercial", proof="invoice 123")
+        make_pack(self.tmp, "free", "free")
+        make_pack(self.tmp, "nojson", "MIT", write_json_=False)
+        p = self.packs()
+        self.assertTrue(p["open"]["ok"])
+        self.assertFalse(p["by_empty"]["ok"])
+        self.assertTrue(any("attribution" in x for x in p["by_empty"]["problems"]))
+        self.assertTrue(p["by_ok"]["ok"])
+        self.assertFalse(p["bought"]["ok"])
+        self.assertTrue(p["bought_ok"]["ok"])
+        self.assertFalse(p["free"]["ok"])
+        self.assertFalse(p["nojson"]["ok"])
+        self.assertTrue(p["nojson"]["problems"])
+
+    def test_resolve(self):
+        from lib.motion_library import resolve
+        make_pack(self.tmp, "open", "CC0-1.0", items=[{"id": "doctor", "file": "doctor.svg", "tags": []},
+                                                     {"id": "pic", "file": "pic.png", "tags": []}])
+        make_pack(self.tmp, "free", "free")
+        r = resolve("open/doctor", self.tmp)
+        self.assertEqual((r["kind"], r["license"], r["pack"]), ("svg", "CC0-1.0", "open"))
+        self.assertEqual(resolve("open/pic", self.tmp)["kind"], "png")
+        with self.assertRaises(ValueError):
+            resolve("free/doctor", self.tmp)
+        with self.assertRaises(ValueError):
+            resolve("open/nothing", self.tmp)
+
+    def test_svg_ok(self):
+        from lib.motion_library import svg_ok
+        self.assertTrue(svg_ok(svg('<path d="M0 0 L1 1" fill="#000"/>'))[0])
+        bad = svg('<defs><linearGradient id="g"/></defs><path d="M0 0 L1 1" fill="url(#g)"/>')
+        self.assertFalse(svg_ok(bad)[0])
+        many = svg("".join('<path d="M0 0 L1 1"/>' for _ in range(301)))
+        self.assertFalse(svg_ok(many)[0])
+
+
 if __name__ == "__main__":
     unittest.main()
