@@ -34,6 +34,7 @@ REPO = ROOT.parent
 PDF_NAME = "WhyNot-Cut-Guide-AR.pdf"
 DEFAULT_OUTPUTS = (REPO / "whynot-cut" / "docs" / PDF_NAME, REPO / "dist" / PDF_NAME)
 MAX_PASSES = 4
+PRINT_TIMEOUT = int(os.environ.get("WNC_PRINT_TIMEOUT", "300"))  # seconds per browser print
 
 VENV_HINT = (
     "pypdf is not installed for this Python. Run the build with the WhyNot Cut engine venv:\n"
@@ -62,32 +63,85 @@ def plain_text(fragment: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-_ATTR = re.compile(r'([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*"([^"]*)"')
-_HEADING = re.compile(r"<(h1|h2)\b([^>]*)>(.*?)</\1\s*>", re.S | re.I)
+_HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 
 
-def _attrs(raw: str) -> dict[str, str]:
-    return {k.lower(): v for k, v in _ATTR.findall(raw)}
+class _HeadingParser(HTMLParser):
+    """Collects h1–h6 with their attributes and inner HTML.
+
+    A real parser, so headings inside <!-- comments -->, <style> or <script> are
+    ignored and single-quoted / unquoted attributes work.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.found: list[tuple[str, dict[str, str], str]] = []
+        self._cur: tuple[str, dict[str, str], list[str]] | None = None
+        self._raw_depth = 0  # inside <style>/<script>
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("style", "script"):
+            self._raw_depth += 1
+            return
+        if self._raw_depth:
+            return
+        if tag in _HEADING_TAGS and self._cur is None:
+            self._cur = (tag, {k.lower(): (v or "") for k, v in attrs}, [])
+        elif self._cur is not None:
+            self._cur[2].append(self.get_starttag_text())
+
+    def handle_startendtag(self, tag, attrs):
+        if self._cur is not None and not self._raw_depth:
+            self._cur[2].append(self.get_starttag_text())
+
+    def handle_endtag(self, tag):
+        if tag in ("style", "script"):
+            self._raw_depth = max(0, self._raw_depth - 1)
+            return
+        if self._raw_depth or self._cur is None:
+            return
+        if tag == self._cur[0]:
+            self.found.append((self._cur[0], self._cur[1], "".join(self._cur[2])))
+            self._cur = None
+        else:
+            self._cur[2].append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if self._cur is not None and not self._raw_depth:
+            self._cur[2].append(data)
+
+    def handle_entityref(self, name):
+        self.handle_data(f"&{name};")
+
+    def handle_charref(self, name):
+        self.handle_data(f"&#{name};")
+
+
+def all_headings(html: str) -> list[tuple[str, dict[str, str], str]]:
+    """(tag, attrs, inner_html) for every h1–h6 outside comments/style/script, in document order."""
+    p = _HeadingParser()
+    p.feed(html)
+    p.close()
+    return p.found
 
 
 def toc_headings(html: str) -> list[tuple[str, str, str]]:
     """(level, id, inner_html) for every h1.ch-title and h2[id], in document order."""
     found = []
-    for m in _HEADING.finditer(html):
-        level, attrs, inner = m.group(1).lower(), _attrs(m.group(2)), m.group(3)
+    for tag, attrs, inner in all_headings(html):
         hid = attrs.get("id")
-        if not hid:
+        if tag not in ("h1", "h2") or not hid:
             continue
-        if level == "h1" and "ch-title" not in attrs.get("class", "").split():
+        if tag == "h1" and "ch-title" not in attrs.get("class", "").split():
             continue
-        found.append((level, hid, inner))
+        found.append((tag, hid, inner))
     return found
 
 
 # ---------------------------------------------------------------- assemble
 def _toc_label(inner: str) -> str:
     """Heading inner HTML for a TOC entry: keep <bdi>/<code>, drop ids and nested links."""
-    inner = re.sub(r'\s+id="[^"]*"', "", inner)
+    inner = re.sub(r"""\s+id\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""", "", inner)
     inner = re.sub(r"</?a\b[^>]*>", "", inner)
     return re.sub(r"\s+", " ", inner).strip()
 
@@ -121,9 +175,37 @@ def assemble(root: Path) -> str:
 
 # ---------------------------------------------------------------- lint
 _LATIN_RUN = re.compile(r"[A-Za-z0-9_\-./\\:@~%?=&#+]+(?: +[A-Za-z0-9_\-./\\:@~%?=&#+]+)*")
-_NEEDS_ISOLATION = [re.compile(p) for p in (
-    r"/whynot-cut:", r"\breel ", r"\\", r"/", r"\d\d:\d\d", r"@", r"\.md\b", r"\.mp4\b", r"http",
+# A token (space-separated part of a Latin run) is "technical" — a command, path,
+# file name, flag, id, version, time, URL or email — and must sit inside an LTR
+# isolate (<bdi dir="ltr">, or any ancestor with dir="ltr") when it matches one of:
+_TECHNICAL = [(why, re.compile(p)) for why, p in (
+    ("path or URL", r"[/\\]"),
+    ("email", r"@"),
+    ("URL", r"(?i)^(https?|www\.)"),
+    ("colon inside a token (time, drive, /whynot-cut:cmd)", r"\w:\w"),
+    ("CLI flag", r"^--?[A-Za-z]"),
+    ("underscore name", r"_"),
+    ("hyphenated name", r"[A-Za-z0-9]-[A-Za-z0-9]"),
+    ("file name / extension", r"[A-Za-z0-9_]\.[A-Za-z][A-Za-z0-9]{0,6}$|^\.[A-Za-z][A-Za-z0-9]{0,6}$"),
+    ("version or dotted number", r"^v?\d+(\.\d+)+$"),
+    ("id mixing letters and digits", r"^(?=[A-Za-z0-9]*[A-Za-z])(?=[A-Za-z0-9]*\d)[A-Za-z0-9]+$"),
+    ("the reel command", r"^reel$"),
 )]
+# Plain words never need isolation (Premiere Pro, After Effects, Claude, WhyNot Cut,
+# YouTube, TikTok, Whisper, NVIDIA, macOS …): only technical tokens are flagged.
+# Bare format/size names that contain digits or a hyphen are allowed as words:
+_ALLOWED_TOKENS = {"MP4", "MP3", "M4A", "H.264", "H.265", "4K", "8K", "A4", "1080p", "2160p", "B-roll"}
+
+
+def _technical_reason(run: str) -> str | None:
+    for raw in run.split():
+        token = raw.rstrip(".,;:!?")  # sentence punctuation after a word is not part of it
+        if len(token) < 2 or token in _ALLOWED_TOKENS:
+            continue
+        for why, pattern in _TECHNICAL:
+            if pattern.search(token):
+                return why
+    return None
 _ARABIC_DIGIT = re.compile("[\u0660-\u0669\u06f0-\u06f9]")
 _GATE = re.compile(r"\bGate [012]\b")
 _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
@@ -178,8 +260,10 @@ class _Linter(HTMLParser):
         if not ltr:
             for m in _LATIN_RUN.finditer(data):
                 run = m.group(0).strip()
-                if len(run) >= 2 and any(p.search(run) for p in _NEEDS_ISOLATION):
-                    self.problems.append(f'unisolated LTR run «{run}» — wrap it in <bdi dir="ltr">: «{snippet}»')
+                why = _technical_reason(run) if len(run) >= 2 else None
+                if why:
+                    self.problems.append(
+                        f'unisolated LTR run «{run}» ({why}) — wrap it in <bdi dir="ltr">: «{snippet}»')
         if bdi and _ARABIC_DIGIT.search(data):
             self.problems.append(f"Arabic-Indic digit inside <bdi> (use 0-9): «{snippet}»")
         if not ch16 and _GATE.search(data):
@@ -282,12 +366,42 @@ def print_pdf(html_path: Path, pdf_path: Path, browser: Path) -> None:
         "--no-pdf-header-footer", "--generate-pdf-document-outline", "--virtual-time-budget=10000",
         f"--print-to-pdf={pdf_path}", Path(html_path).resolve().as_uri(),
     ]
+    # own process group, so a hung browser and all its child processes can be killed
+    group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+             else {"start_new_session": True})
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                encoding="utf-8", errors="replace", **group)
+        try:
+            _, stderr = proc.communicate(timeout=PRINT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc)
+            raise SystemExit(
+                f"the browser did not finish printing within {PRINT_TIMEOUT} s and was stopped "
+                f"({browser}). Close other Edge/Chrome windows started for printing and run the build "
+                "again, or point WNC_BROWSER to another Edge/Chrome.") from None
     finally:
         shutil.rmtree(profile, ignore_errors=True)
     if not pdf_path.exists() or pdf_path.stat().st_size == 0:
-        raise SystemExit(f"browser did not write {pdf_path} (exit {res.returncode}):\n{res.stderr[-2000:]}")
+        raise SystemExit(f"browser did not write {pdf_path} (exit {proc.returncode}):\n{(stderr or '')[-2000:]}")
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Stop the browser and every child process it started."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=30)
+        else:
+            import signal
+
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        proc.kill()
+        proc.communicate(timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def outline_pages(pdf_path: Path) -> dict[str, int]:
@@ -308,9 +422,6 @@ def outline_pages(pdf_path: Path) -> dict[str, int]:
 
     walk(reader.outline)
     return pages
-
-
-_ANY_HEADING = re.compile(r"<(h[1-6])\b[^>]*>(.*?)</\1\s*>", re.S | re.I)
 
 
 def _chars_key(text: str) -> list[str]:
@@ -350,7 +461,7 @@ def fix_outline(pdf_path: Path, html: str) -> int:
                 flat.append(item)
 
     walk(reader.outline)
-    heads = [(int(m.group(1)[1]), plain_text(m.group(2))) for m in _ANY_HEADING.finditer(html)]
+    heads = [(int(tag[1]), plain_text(inner)) for tag, _, inner in all_headings(html)]
     heads = [h for h in heads if h[1]]
     if len(flat) != len(heads):
         raise SystemExit(f"PDF outline has {len(flat)} bookmarks but the HTML has {len(heads)} headings")
@@ -398,6 +509,11 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
     _pypdf()  # fail early with the venv hint
 
+    # a failed build must never leave last run's artefacts for the PDF tests to pass on
+    build_dir = ROOT / ".build"
+    for stale in ("test.pdf", "toc.json", "pass.pdf", "guide.html"):
+        (build_dir / stale).unlink(missing_ok=True)
+
     html = assemble(ROOT)
     problems = lint(html)
     if problems:
@@ -407,7 +523,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"lint: clean ({len(toc_headings(html))} TOC entries)")
 
-    build_dir = ROOT / ".build"
     build_dir.mkdir(exist_ok=True)
     guide_html = build_dir / "guide.html"
     pass_pdf = build_dir / "pass.pdf"

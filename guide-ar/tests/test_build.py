@@ -7,6 +7,7 @@ build has written guide-ar/.build/test.pdf (and .build/toc.json); they need pypd
 """
 import importlib.util
 import json
+import os
 import re
 import sys
 import tempfile
@@ -109,6 +110,35 @@ class LintTests(unittest.TestCase):
         # plain Latin product names are fine without isolation
         self.assertEqual(build.lint(_wrap("<p>افتح Premiere Pro و After Effects</p>")), [])
 
+    def test_lint_technical_token_classes(self):
+        """Every technical token class is flagged bare and accepted inside <bdi dir="ltr">."""
+        cases = {
+            "file name": ["edit-decisions.json", "reels-plan.md", "C0239.prproj", "clean.wav", "out.srt",
+                          "motion.aep", "C0239.mov", "notes.txt", "cover.jpg", "frame.png", ".prproj"],
+            "version": ["v2.2.1", "3.0.0", "26.5", "3.0"],
+            "CLI flag": ["--fix", "--by editor", "-v"],
+            "hyphen/underscore/id": ["whynot-cut.local.md", "C0239", "EP12_R03", "approval_required",
+                                     "example-clinic", "large-v3"],
+            "standalone command": ["reel", "/whynot-cut", "/whynot-cut:edit"],
+            "path/time/url/email": [r"D:\WhyNot Clients", "~/WhyNot", "00:12:04.000", "https://thewhynot.ai",
+                                    "thewhynot.ai", "info@thewhynot.ai"],
+        }
+        for cls, tokens in cases.items():
+            for token in tokens:
+                with self.subTest(cls=cls, token=token):
+                    bare = build.lint(_wrap(f"<p>اكتب {token} وبعدين كمّل.</p>"))
+                    self.assertEqual(len(bare), 1, f"{token!r} ({cls}) not flagged: {bare}")
+                    ok = build.lint(_wrap(f'<p>اكتب <bdi dir="ltr"><code>{token}</code></bdi> وبعدين كمّل.</p>'))
+                    self.assertEqual(ok, [], f"{token!r} ({cls}) flagged inside bdi")
+                    # any LTR ancestor isolates too (e.g. the .cmd block or a dir="ltr" cell)
+                    self.assertEqual(build.lint(_wrap(f'<div class="cmd" dir="ltr">{token}</div>')), [])
+
+    def test_lint_allows_plain_words(self):
+        words = ("Premiere Pro, After Effects, Claude, WhyNot Cut, Magnific, YouTube, Instagram, TikTok, "
+                 "Whisper, NVIDIA, Windows 11, macOS, Photoshop, Lucide, MP4, XML, PDF, H.264, 4K, B-roll.")
+        self.assertEqual(build.lint(_wrap(f"<p>بيشتغل مع {words}</p>")), [])
+        self.assertEqual(build.lint(_wrap("<p>عندك 3 خطوات بس، وكل خطوة 10 دقايق.</p>")), [])
+
     def test_lint_flags_arabic_digits_in_bdi(self):
         self.assertEqual(len(build.lint(_wrap('<p>الإصدار <bdi dir="ltr">٣.٠</bdi></p>'))), 1)
         self.assertEqual(build.lint(_wrap('<p>الإصدار <bdi dir="ltr">3.0</bdi></p>')), [])
@@ -125,6 +155,54 @@ class LintTests(unittest.TestCase):
         self.assertEqual(
             build.lint(_wrap('<section id="ch16"><p>في السجلات: Gate 1 = الموافقة</p></section>')), [])
         self.assertEqual(len(build.lint(_wrap('<img src="img/logo-dark.svg" alt="">'))), 1)
+
+
+class HeadingTests(unittest.TestCase):
+    def test_headings_ignore_comments_style_script_and_accept_single_quotes(self):
+        html = _wrap(
+            "<!-- <h2 id='old'>قديم</h2> -->"
+            "<style>h2::before{content:'<h2 id=\"css\">x</h2>'}</style>"
+            "<script>var s = '<h2 id=\"js\">y</h2>';</script>"
+            "<h1 class='ch-title' id='c1'>1 · مقدمة</h1>"
+            "<h2 id=c1-a>أول <bdi dir='ltr'><code>reel doctor</code></bdi></h2>"
+            "<h2>من غير id</h2>"
+        )
+        got = build.toc_headings(html)
+        self.assertEqual([(lv, hid) for lv, hid, _ in got], [("h1", "c1"), ("h2", "c1-a")])
+        self.assertEqual(build.plain_text(got[1][2]), "أول reel doctor")
+        toc = build.build_toc(html)
+        self.assertNotIn("old", toc)
+        self.assertIn("<code>reel doctor</code>", toc)
+        self.assertEqual(len(build.all_headings(html)), 3)
+
+
+class PrintTests(unittest.TestCase):
+    def test_print_timeout_stops_browser_and_cleans_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            if sys.platform == "win32":
+                fake = tmp / "hang.cmd"
+                fake.write_text("@ping -n 30 127.0.0.1 >nul\r\n", encoding="ascii")
+            else:
+                fake = tmp / "hang.sh"
+                fake.write_text("#!/bin/sh\nsleep 30\n", encoding="ascii")
+                fake.chmod(0o755)
+            profiles = tmp / "profiles"
+            profiles.mkdir()
+            (tmp / "x.html").write_text("<p>x</p>", encoding="utf-8")
+            old_timeout, old_env = build.PRINT_TIMEOUT, os.environ.get("WNC_BROWSER_TMP")
+            build.PRINT_TIMEOUT, os.environ["WNC_BROWSER_TMP"] = 2, str(profiles)
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    build.print_pdf(tmp / "x.html", tmp / "x.pdf", fake)
+            finally:
+                build.PRINT_TIMEOUT = old_timeout
+                if old_env is None:
+                    os.environ.pop("WNC_BROWSER_TMP", None)
+                else:
+                    os.environ["WNC_BROWSER_TMP"] = old_env
+            self.assertIn("did not finish printing", str(cm.exception))
+            self.assertEqual(list(profiles.iterdir()), [], "temporary browser profile left behind")
 
 
 class ChapterTests(unittest.TestCase):
@@ -151,41 +229,83 @@ class PdfTests(unittest.TestCase):
         import pypdf
         cls.reader = pypdf.PdfReader(str(TEST_PDF))
 
-    def _font_names(self):
-        names = set()
+    def _fonts(self):
+        """{(font name without subset prefix, PDF font subtype)} over all pages."""
+        found = set()
         for page in self.reader.pages:
             res = page.get("/Resources")
-            if res is None:
-                continue
-            res = res.get_object()
-            fonts = res.get("/Font")
+            fonts = res.get_object().get("/Font") if res is not None else None
             if fonts is None:
                 continue
             for ref in fonts.get_object().values():
-                # Type0 fonts carry /BaseFont; Chrome embeds variable fonts (Alexandria,
-                # Inter, Syne) as Type3, whose name is only in /FontDescriptor /FontName.
-                stack = [ref.get_object()]
-                while stack:
-                    font = stack.pop()
-                    for key in ("/BaseFont",):
-                        if key in font:
-                            names.add(str(font[key]).split("+", 1)[-1].lstrip("/"))
-                    desc = font.get("/FontDescriptor")
-                    if desc is not None and "/FontName" in desc.get_object():
-                        names.add(str(desc.get_object()["/FontName"]).split("+", 1)[-1].lstrip("/"))
-                    stack.extend(d.get_object() for d in (font.get("/DescendantFonts") or []))
-        names.discard("")
-        return names
+                font = ref.get_object()
+                subtype = str(font.get("/Subtype", ""))
+                names = []
+                if "/BaseFont" in font:
+                    names.append(font["/BaseFont"])
+                desc = font.get("/FontDescriptor")  # Type3 fonts are named only here
+                if desc is not None and "/FontName" in desc.get_object():
+                    names.append(desc.get_object()["/FontName"])
+                for name in names:
+                    clean = str(name).lstrip("/").split("+", 1)[-1]
+                    if clean:
+                        found.add((clean, subtype))
+        return found
 
     def test_fonts_embedded(self):
-        found = sorted(self._font_names())
-        names = " ".join(found)
-        for family in ("Alexandria", "IBMPlexSansArabic", "Inter", "IBMPlexMono", "Syne"):
+        fonts = self._fonts()
+        names = " ".join(sorted(n for n, _ in fonts))
+        families = ("Alexandria", "IBMPlexSansArabic", "Inter", "IBMPlexMono", "Syne")
+        for family in families:
             self.assertIn(family, names, f"{family} not embedded; fonts found: {names}")
         # no system fallback (Segoe UI, Arial, Times, Tahoma …) anywhere
-        allowed = ("Alexandria", "IBMPlexSansArabic", "Inter", "IBMPlexMono", "Syne")
-        strays = [n for n in found if not n.startswith(allowed)]
+        strays = sorted(n for n, _ in fonts if not n.startswith(families))
         self.assertEqual(strays, [], f"fonts outside the five families: {strays}")
+        # static TTFs only: Chrome turns variable fonts into Type3 glyph procedures
+        type3 = sorted(n for n, sub in fonts if sub == "/Type3")
+        self.assertEqual(type3, [], f"Type3 (variable-font) embeddings: {type3}")
+        # every committed font file is printed somewhere (no unused weights shipped);
+        # the files are named after their PostScript names
+        embedded = {n for n, _ in fonts}
+        for ttf in sorted((GUIDE / "fonts").rglob("*.ttf")):
+            self.assertIn(ttf.stem, embedded, f"{ttf.name} is never used in the PDF")
+
+    def _toc_rows(self, toc_page_numbers):
+        """[(printed page number, link destination page)] for each TOC link, top to bottom."""
+        named = self.reader.named_destinations
+        rows = []
+        for pno in toc_page_numbers:
+            page = self.reader.pages[pno - 1]
+            frags = []
+
+            def visit(text, cm, tm, font, size, frags=frags):
+                if text and text.strip():
+                    x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
+                    y = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
+                    frags.append((x, y, text.strip()))
+
+            page.extract_text(visitor_text=visit)
+            links = []
+            for annot in page.get("/Annots") or []:
+                a = annot.get_object()
+                dest = a.get("/Dest")
+                if dest is None and a.get("/A") is not None:
+                    dest = a["/A"].get_object().get("/D")
+                if dest is None:
+                    continue  # external link
+                if not isinstance(dest, list):
+                    dest = named[str(dest)]
+                    target = self.reader.get_destination_page_number(dest) + 1
+                else:
+                    target = self.reader.get_page_number(dest[0].get_object()) + 1
+                x0, y0, x1, y1 = [float(v) for v in a["/Rect"]]
+                links.append((min(y0, y1), max(y0, y1), min(x0, x1), max(x0, x1), target))
+            for ylo, yhi, xlo, xhi, target in sorted(links, key=lambda r: -r[1]):
+                inside = [(x, t) for x, y, t in frags if ylo - 2 <= y <= yhi + 2 and xlo - 2 <= x <= xhi + 2]
+                numbers = [(x, t) for x, t in inside if re.fullmatch(r"\d+", t)]
+                printed = int(min(numbers)[1]) if numbers else None  # leftmost = the .pg column
+                rows.append((printed, target))
+        return rows
 
     def test_toc_numbers_match_outline(self):
         self.assertTrue(TOC_JSON.exists(), "build.py writes .build/toc.json next to test.pdf")
@@ -195,21 +315,22 @@ class PdfTests(unittest.TestCase):
         for e in entries:
             self.assertIn(e["title"], outline, f"{e['id']} missing from the PDF outline")
             self.assertEqual(e["page"], outline[e["title"]], f"TOC number wrong for {e['id']}")
-        # the printed numbers are really on the TOC page(s): from the «المحتويات»
-        # bookmark up to the page before the first chapter
+        # what is PRINTED on each TOC line (digits inside that line's link box only)
+        # must equal the outline page and the page the link jumps to
         self.assertIn("المحتويات", outline, "the TOC title is not a bookmark")
         first, last = outline["المحتويات"], min(e["page"] for e in entries) - 1
-        text = " ".join(self.reader.pages[p - 1].extract_text() or "" for p in range(first, max(first, last) + 1))
-        digits = set(re.findall(r"\d+", text))
-        for e in entries:
-            self.assertIn(str(e["page"]), digits, f"page {e['page']} not printed in the TOC")
+        rows = self._toc_rows(range(first, max(first, last) + 1))
+        self.assertEqual(len(rows), len(entries), f"TOC links {rows} vs entries {len(entries)}")
+        for e, (printed, target) in zip(entries, rows):
+            self.assertEqual(printed, e["page"], f"#{e['id']}: printed {printed}, outline {e['page']}")
+            self.assertEqual(target, e["page"], f"#{e['id']}: link goes to {target}, printed {printed}")
 
     def test_outline_has_all_chapters(self):
         outline = build.outline_pages(TEST_PDF)
         for path in sorted((GUIDE / "chapters").glob("*.html")):
-            m = re.search(r'<h1 class="ch-title"[^>]*>(.*?)</h1>', path.read_text(encoding="utf-8"), re.S)
-            self.assertIsNotNone(m, f"{path.name} has no h1.ch-title")
-            title = build.plain_text(m.group(1))
+            h1 = [inner for lv, _, inner in build.toc_headings(path.read_text(encoding="utf-8")) if lv == "h1"]
+            self.assertEqual(len(h1), 1, f"{path.name} needs exactly one h1.ch-title with an id")
+            title = build.plain_text(h1[0])
             self.assertIn(title, outline, f"{path.name}: «{title}» is not a PDF bookmark")
 
 

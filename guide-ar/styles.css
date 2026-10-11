@@ -12,7 +12,7 @@
      need a class for running Latin words (Premiere Pro, After Effects …).
    - .brand (and the running header) use "WNC Brand" = Syne 700, same
      unicode-range trick: English brand words only ("WhyNot Cut").
-   - Headings: Alexandria (variable 100–900) for Arabic and Latin letters;
+   - Headings: Alexandria (static 600/700/800/900) for Arabic and Latin letters;
      digits 0-9 and "·" in headings come from Inter ("WNC Head Num").
    - Chapter titles: «N · العنوان» with a Western digit, e.g. «1 · مقدمة».
    - Commands / paths / file names: IBM Plex Mono inside <bdi dir="ltr"><code>.
@@ -32,40 +32,51 @@
      <table>…</table>                                plain tables
    ========================================================================== */
 
-/* ---------- fonts (OFL, unmodified files in fonts/<family>/) ---------- */
-@font-face {
-  font-family: "Alexandria";
-  src: url("fonts/alexandria/Alexandria[wght].ttf") format("truetype");
-  font-weight: 100 900;
-  font-style: normal;
-}
-@font-face { font-family: "IBM Plex Sans Arabic"; src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-Light.ttf") format("truetype"); font-weight: 300; }
+/* ---------- fonts (OFL, official static TTFs, unmodified, in fonts/<family>/) ----------
+   Static files only: Chrome embeds variable fonts as Type3, so each weight is its
+   own file. A face's font-weight RANGE says which requested weights it serves, so
+   no weight is ever synthesised (e.g. Inter Regular also serves 300 Latin in the
+   light cover subtitle; Alexandria SemiBold also serves 500). Files present =
+   weights printed somewhere in the guide; add a file before using a new weight. */
+@font-face { font-family: "Alexandria"; src: url("fonts/alexandria/Alexandria-SemiBold.ttf") format("truetype"); font-weight: 500 600; }
+@font-face { font-family: "Alexandria"; src: url("fonts/alexandria/Alexandria-Bold.ttf") format("truetype"); font-weight: 700; }
+@font-face { font-family: "Alexandria"; src: url("fonts/alexandria/Alexandria-ExtraBold.ttf") format("truetype"); font-weight: 800; }
+@font-face { font-family: "Alexandria"; src: url("fonts/alexandria/Alexandria-Black.ttf") format("truetype"); font-weight: 900; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-Light.ttf") format("truetype"); font-weight: 100 300; }
 @font-face { font-family: "IBM Plex Sans Arabic"; src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf") format("truetype"); font-weight: 400; }
-@font-face { font-family: "IBM Plex Sans Arabic"; src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf") format("truetype"); font-weight: 600; }
-@font-face { font-family: "IBM Plex Sans Arabic"; src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-Bold.ttf") format("truetype"); font-weight: 700; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf") format("truetype"); font-weight: 500 900; }
 @font-face {
   font-family: "WNC Latin";
-  src: url("fonts/inter/Inter[opsz,wght].ttf") format("truetype");
-  font-weight: 100 900;
+  src: url("fonts/inter/Inter-Regular.ttf") format("truetype");
+  font-weight: 100 400;
+  unicode-range: U+0021-007E, U+00A1-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC,
+                 U+2013-2014, U+2018-201E, U+2022, U+2026, U+20AC, U+2122;
+}
+@font-face {
+  font-family: "WNC Latin";
+  src: url("fonts/inter/Inter-SemiBold.ttf") format("truetype");
+  font-weight: 500 600;
+  unicode-range: U+0021-007E, U+00A1-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC,
+                 U+2013-2014, U+2018-201E, U+2022, U+2026, U+20AC, U+2122;
+}
+@font-face {
+  font-family: "WNC Latin";
+  src: url("fonts/inter/Inter-Bold.ttf") format("truetype");
+  font-weight: 700 900;
   unicode-range: U+0021-007E, U+00A1-00FF, U+0131, U+0152-0153, U+02C6, U+02DA, U+02DC,
                  U+2013-2014, U+2018-201E, U+2022, U+2026, U+20AC, U+2122;
 }
 /* headings: Western digits and the "·" separator in Inter (Alexandria's dot is
    heavy enough to read like Arabic zero «٠» next to a chapter number) */
-@font-face {
-  font-family: "WNC Head Num";
-  src: url("fonts/inter/Inter[opsz,wght].ttf") format("truetype");
-  font-weight: 100 900;
-  unicode-range: U+0030-0039, U+00B7;
-}
+@font-face { font-family: "WNC Head Num"; src: url("fonts/inter/Inter-SemiBold.ttf") format("truetype"); font-weight: 100 600; unicode-range: U+0030-0039, U+00B7; }
+@font-face { font-family: "WNC Head Num"; src: url("fonts/inter/Inter-Bold.ttf") format("truetype"); font-weight: 700 900; unicode-range: U+0030-0039, U+00B7; }
 @font-face {
   font-family: "WNC Brand";
-  src: url("fonts/syne/Syne[wght].ttf") format("truetype");
-  font-weight: 400 800;
+  src: url("fonts/syne/Syne-Bold.ttf") format("truetype");
+  font-weight: 100 900;
   unicode-range: U+0021-007E, U+00A1-00FF, U+2013-2014, U+2018-201E, U+2026;
 }
-@font-face { font-family: "IBM Plex Mono"; src: url("fonts/ibmplexmono/IBMPlexMono-Regular.ttf") format("truetype"); font-weight: 400; }
-@font-face { font-family: "IBM Plex Mono"; src: url("fonts/ibmplexmono/IBMPlexMono-SemiBold.ttf") format("truetype"); font-weight: 600; }
+@font-face { font-family: "IBM Plex Mono"; src: url("fonts/ibmplexmono/IBMPlexMono-Regular.ttf") format("truetype"); font-weight: 100 900; }
 
 /* ---------- tokens ---------- */
 :root {
@@ -125,18 +136,15 @@
   @bottom-left { content: none; }
 }
 
-/* every face is laid out once (invisibly) so the browser loads it before print;
-   margin boxes (running header/footer) never trigger a font load themselves */
+/* the faces the running header/footer use are laid out once (invisibly) so the
+   browser loads them before print: margin boxes never trigger a font load */
 .font-preload { position: absolute; visibility: hidden; width: 0; height: 0; overflow: hidden; }
-.fp-a  { font-family: "Alexandria"; font-weight: 800; }
 .fp-p3 { font-family: "IBM Plex Sans Arabic"; font-weight: 300; }
 .fp-p4 { font-family: "IBM Plex Sans Arabic"; font-weight: 400; }
 .fp-p6 { font-family: "IBM Plex Sans Arabic"; font-weight: 600; }
-.fp-p7 { font-family: "IBM Plex Sans Arabic"; font-weight: 700; }
-.fp-i  { font-family: "WNC Latin"; font-weight: 600; }
+.fp-i4 { font-family: "WNC Latin"; font-weight: 400; }
+.fp-i6 { font-family: "WNC Latin"; font-weight: 600; }
 .fp-s  { font-family: "WNC Brand"; font-weight: 700; }
-.fp-m4 { font-family: "IBM Plex Mono"; font-weight: 400; }
-.fp-m6 { font-family: "IBM Plex Mono"; font-weight: 600; }
 
 /* ---------- base ---------- */
 html {
