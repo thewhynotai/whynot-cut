@@ -1,4 +1,4 @@
-"""Round 4 field-test gaps (Dr Sherin EP02, podcast mode):
+"""Round 4 field-test gaps (a podcast episode of Dr. Sample Example, podcast mode):
   G65  the intake sheet missed the name supers (lower thirds) at 01:27 / 16:55 -> an overlay scan nominates them
   G66  a session started before the install keeps the old plugin's `reel` first on PATH -> WhyNot Cut names itself
   G69  `ppro-frames` right after a project opens exported Premiere's "Media pending" slate -> detect and re-export

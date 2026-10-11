@@ -1,10 +1,10 @@
-"""Round 4 brand gaps (field test, Dr Sherin EP02). Run:
+"""Round 4 brand gaps (field test round 4, a podcast episode; fictional example-clinic here). Run:
     ~/.whynot-cut/venv/bin/python -m unittest discover -s <plugin>/tests -p test_round4_brand.py -v
 
 G62  a graphic's font weight comes from typography.json `roles`, then brand.json font_roles_fallback.weights, then the
      NEAREST available weight - never "the first font file".
 G68  a highlight colour drawn over a frame (publish-thumbnail, preview stills) is measured against the pixels behind it
-     and falls back to white/paper, with a warning, when it is unreadable (brand primary was brown #81613D on a warm set).
+     and falls back to white/paper, with a warning, when it is unreadable (brand primary was a brown on a warm set).
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
@@ -24,7 +24,7 @@ from lib.common import CLIENT_PROFILE_REL, read_json, write_json  # noqa: E402
 from test_motion import good_script, motion_plan_fixture, test_font  # noqa: E402
 from test_podcast import ff  # noqa: E402
 
-BROWN = "#81613D"                       # the measured primary of the Dr Sherin set (field test round 4)
+BROWN = "#7F6040"                       # a brown primary like the one measured in field test round 4
 
 
 def brand_db(root: Path, weights: dict, roles: dict | None = None, primary: str | None = None, same_file: bool = False):
@@ -355,7 +355,7 @@ class TestPreviewHighlightContrast(RoleFontCase):
         clip = root / "data/Raw/warm.mp4"
         clip.parent.mkdir(parents=True)
         subprocess.run([common.ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
-                        "color=c=0x81613D:s=360x640:r=25:d=4", "-pix_fmt", "yuv420p", str(clip)], check=True)
+                        "color=c=0x7F6040:s=360x640:r=25:d=4", "-pix_fmt", "yuv420p", str(clip)], check=True)
         write_json(p.p("01_analysis/timeline-spec.json"), {"main_footage": str(clip), "events": [
             {"event_id": "GFX_001", "template": "hook_title", "start_ms": 500, "end_ms": 2500,
              "params": {"text": "Big win today"}}]})
@@ -421,7 +421,7 @@ class TestThumbnailHighlightContrast(unittest.TestCase):
         ws = [w for w in r["warnings"] if "highlight" in w and "contrast" in w]
         self.assertEqual(len(ws), 1, r["warnings"])
         self.assertIn("design 1", ws[0])
-        self.assertIn("#81613D", ws[0])                                  # which colour failed ...
+        self.assertIn("#7F6040", ws[0])                                  # which colour failed ...
         self.assertRegex(ws[0], r"\d\.\d:1")                             # ... by how much
         h = r["highlights"][0]
         self.assertTrue(h["fallback"])

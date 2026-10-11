@@ -240,6 +240,25 @@ class TestClipIdCompat(unittest.TestCase):
             self.assertNotIn("VIDEO", got)
             self.assertEqual(len(set(got)), 2)
 
+    def test_g6_inbox_lists_orphan_projects(self):
+        """Gate G6: a project folder that matches no clip, reel or motion id (the shared 2.x VIDEO folder of two
+        Arabic clips) is listed with a hint instead of being silently ignored."""
+        from lib.onboard import inbox
+        with tempfile.TemporaryDirectory() as t:
+            root = make_client(t, [ARABIC_1, ARABIC_2, "C0001.MP4"])
+            Paths(root, "VIDEO").ensure_project()
+            Paths(root, "C0001").ensure_project()
+            reel_p = Paths(root, "EPW_R01")
+            reel_p.ensure_project()
+            write_json(reel_p.p("00_inputs/source.json"), {"footage": "data/Episodes/EPW.mp4", "in_ms": 0,
+                                                           "out_ms": 1000, "episode_id": "EPW"})
+            ib = inbox(root)
+            self.assertEqual(ib["orphan_projects"], ["VIDEO"])
+            self.assertIn("VIDEO", ib["orphan_hint"])
+            self.assertIn("--footage", ib["orphan_hint"])
+            Paths(root, "VIDEO").project.rename(root / "output/projects/_old")
+            self.assertEqual(inbox(root)["orphan_projects"], ["_old"])
+
     def test_podcast_reel_ids_are_not_raw_clips(self):
         """`<EP>_<ID>` reels resolve through their range, never through the clip map."""
         from lib.onboard import inbox
@@ -325,6 +344,24 @@ class TestClipIdReviewFixes(unittest.TestCase):
             got = {c["file"]: c["video_id"] for c in inbox(root)["clips"]}
             self.assertEqual(got["data/Raw/Dr Sherif intro.mp4"], "Dr Sherif intro")
             self.assertEqual(got["data/Raw/" + ARABIC_1], "مقابلة ١")
+
+    def test_g3_parallel_writers_and_readers_of_one_json_file(self):
+        """Gate G3: write_json used one fixed `.tmp` name, so parallel same-session subagents writing clip-ids.json
+        collided (PermissionError) or a reader saw a torn file. Unique temp names + retried replace/read."""
+        target = Path(self.tmp.name) / "shared.json"
+        code = ("import sys; sys.path.insert(0, %r); from lib.common import read_json, write_json\n"
+                "for i in range(40):\n"
+                "    write_json(sys.argv[1], {'writer': sys.argv[2], 'i': i, 'pad': 'x' * 4000})\n"
+                "    d = read_json(sys.argv[1])\n"
+                "    assert isinstance(d, dict) and d.get('pad') == 'x' * 4000, d\n") % str(SK / "engine/reel")
+        procs = [subprocess.Popen([sys.executable, "-B", "-c", code, str(target), str(n)], stderr=subprocess.PIPE,
+                                  text=True) for n in range(6)]
+        errs = [(p.wait(), p.stderr.read()) for p in procs]
+        for p in procs:
+            p.stderr.close()
+        self.assertEqual([e for e in errs if e[0] != 0], [])
+        self.assertEqual(read_json(target)["pad"], "x" * 4000)
+        self.assertEqual(sorted(f.name for f in target.parent.iterdir() if f.name.startswith("shared")), ["shared.json"])
 
     def test_gone_clip_is_refused_not_swapped_for_its_sibling(self):
         from lib.onboard import inbox

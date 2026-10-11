@@ -337,4 +337,21 @@ def inbox(root: Path, refresh: bool = True) -> dict:
             "in_progress": [c["video_id"] for c in clips if c["state"] == "in progress"],
             "done": [c["video_id"] for c in clips if c["state"] == "done"],
             "missing_material": need, "discovery_warnings": inv.get("warnings", []),
-            "reference_style": {"state": rs["state"], "message": rs["message"]}}
+            "reference_style": {"state": rs["state"], "message": rs["message"]}, **orphan_projects(p, ids)}
+
+
+def orphan_projects(p: Paths, ids: dict) -> dict:
+    """Project folders under output/projects/ that match no clip id and are no reel/motion/range project (no
+    00_inputs/source.json), e.g. the shared 2.x `VIDEO` folder of two Arabic clips (gate G6)."""
+    known = {str(k).upper() for k in ids}
+    try:
+        dirs = sorted(d for d in (p.output / "projects").iterdir() if d.is_dir())
+    except OSError:
+        dirs = []
+    orphans = [d.name for d in dirs if d.name.upper() not in known and not (d / "00_inputs/source.json").exists()]
+    hint = None
+    if orphans:
+        hint = (f"output/projects/{', '.join(orphans)} match no clip in data/ (an older or renamed project). Ask the "
+                "editor which clip it belongs to: continue it with `--video-id <folder> --footage <the raw file>`, or "
+                "leave it; never delete it yourself.")
+    return {"orphan_projects": orphans, "orphan_hint": hint}

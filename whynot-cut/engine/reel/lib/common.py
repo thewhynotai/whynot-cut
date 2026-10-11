@@ -175,22 +175,53 @@ def now_iso() -> str:
     return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+_IO_RETRIES = 50                      # x ~10 ms: Windows refuses to open/replace a file another process is replacing
+
+
+def _retry(fn):
+    """Run fn, retrying a few ms later on PermissionError (Windows: the file is being replaced by a parallel writer)."""
+    import time
+    for k in range(_IO_RETRIES):
+        try:
+            return fn()
+        except PermissionError:
+            if k == _IO_RETRIES - 1:
+                raise
+            time.sleep(0.005 + 0.005 * (k % 4))
+
+
 def read_json(path: Path, default=None):
     path = Path(path)
     if not path.exists():
         return default
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+
+    def load():
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    try:
+        return _retry(load)
+    except FileNotFoundError:
+        return default
 
 
 def write_json(path: Path, data) -> Path:
+    """Atomic write: a temp file with a unique name next to the target (parallel writers never share it), then
+    os.replace, retried while another process holds the target (gate G3: parallel subagents writing clip-ids.json)."""
+    import secrets
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    tmp.replace(path)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}-{secrets.token_hex(4)}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        _retry(lambda: os.replace(tmp, path))
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
     return path
 
 

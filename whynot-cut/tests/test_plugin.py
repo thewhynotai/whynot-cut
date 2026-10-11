@@ -1256,7 +1256,7 @@ class TestShippedProfiles(unittest.TestCase):
         self.assertIn("عيادة مثال", text)
         self.assertIn("Dr. Sample Example", text)
 
-    REAL_CLIENT_TOKENS = ("nahla", "hunter", "kasr al-ainy", "قصر العيني")
+    REAL_CLIENT_TOKENS = ("nahla", "hunter", "kasr al-ainy", "قصر العيني", "sherin", "helmy", "شيرين", "حلمي")
 
     def real_client_tokens(self, text: str) -> list[str]:
         """The real-client words in text; only the legacy engine-home folder name of the original skill (read for
@@ -1265,13 +1265,17 @@ class TestShippedProfiles(unittest.TestCase):
         return [t for t in self.REAL_CLIENT_TOKENS if t in low]
 
     def test_no_real_client_name_in_the_product(self):
-        self.assertEqual(self.real_client_tokens("Kasr Al-Ainy / قصر العيني, Dr. Hunter, nahla"),
+        self.assertEqual(self.real_client_tokens("Kasr Al-Ainy / قصر العيني, Dr. Hunter, nahla, Sherin Helmy / شيرين حلمي"),
                          list(self.REAL_CLIENT_TOKENS))
         self.assertEqual(self.real_client_tokens("~/.dr-nahla-editor is a legacy home"), [])
         hits = [(str(p.relative_to(SK)), toks) for p in SK.rglob("*")
                 if p.is_file() and p.suffix in (".md", ".py", ".json", ".js", ".sh", ".txt", "")
                 and p.name != "CHANGELOG.md" and p.relative_to(SK).parts[0] != "tests"
                 and (toks := self.real_client_tokens(p.read_text(encoding="utf-8", errors="ignore")))]
+        hits += [(str(p.relative_to(SK)), toks) for p in (SK / "tests").rglob("*.py")      # gate G4: the tests
+                 if p.name != "test_plugin.py"                                           # (holds the list)
+                 and (toks := [t for t in self.real_client_tokens(p.read_text(encoding="utf-8"))
+                              if t not in ("nahla", "hunter", "kasr al-ainy", "قصر العيني")])]
         self.assertEqual(hits, [])
 
 

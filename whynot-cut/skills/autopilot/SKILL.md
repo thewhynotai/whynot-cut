@@ -21,6 +21,8 @@ Premiere first).
   A client folder can override the machine-wide file, so never apply one client's `approval` to another.
 - Show a short table: client · new clips · in-progress clips · missing material. In-progress clips resume with
   `reel next`; done clips are left alone unless the user asks. Nothing new: say so, list what's in progress, stop.
+- `orphan_projects` (project folders that match no clip, e.g. an old `VIDEO`): show them with `orphan_hint` and ask the
+  editor; never delete them.
 - If a reel command answers `blocked` because another session holds the client, stop and tell the editor; never
   release another session's lock yourself.
 - When several clients or more than ~3 new clips would start, or on the first run on this machine, show the table and

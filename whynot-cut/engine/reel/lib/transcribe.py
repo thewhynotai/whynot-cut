@@ -355,7 +355,7 @@ def subtitle_review(meta: dict, segs: list, words: list, quotes: list | None = N
     latin = [w for w in words if LATIN.search(w["word"])]
     hits = glossary_hits(words, _glossary_terms())
     # this video's own names at the normal threshold; the client-wide hint (show title, names that may not occur in
-    # this video) only for close matches, or every reel lists noise (seen: «حلمي» vs «حمرى», «نادال» vs «نازل»)
+    # this video) only for close matches, or every reel lists noise (seen: «نادال» vs «نازل»)
     vv = meta.get("video_vocabulary") or []
     misses = vocabulary_misses(words, "، ".join(vv)) if vv else []
     seen_m = {m["expected"] for m in misses}

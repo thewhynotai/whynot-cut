@@ -124,7 +124,7 @@ class TestCommandClassification(unittest.TestCase):
             self.assertFalse(cli.writes(ns(cmd="inbox", no_refresh=True, root=d)))
             self.assertTrue(cli.writes(ns(cmd="inbox", no_refresh=False, root=d)))
         self.assertFalse(cli.writes(ns(cmd="doctor", fix=False)))
-        self.assertTrue(cli.writes(ns(cmd="doctor", fix=True)))
+        self.assertFalse(cli.writes(ns(cmd="doctor", fix=True)))          # gate G2: the marker needs no lease
         self.assertFalse(cli.writes(ns(cmd="settings", init=None)))
         self.assertTrue(cli.writes(ns(cmd="settings", init="X")))
         self.assertFalse(cli.writes(ns(cmd="range", footage=None)))
@@ -420,6 +420,35 @@ class TestSessionLease(LockFixture):
             else:
                 self.assertEqual(json.loads(self.lock.read_text(encoding="utf-8")), fresh, window)
                 self.assertEqual(kept, [], window)
+
+
+class TestGateFixes(LockFixture):
+    def test_g2_doctor_fix_marks_a_client_another_session_holds(self):
+        """Gate G2: the marker write is idempotent and outside output/, so `doctor --fix` takes no lease."""
+        (self.root / ".whynot-client").unlink()
+        self.hold()                                                      # another live session
+        r = self.reel("doctor", "--fix", CLAUDE_CONFIG_DIR=str(self.root.parent / "cfg"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("client_markers", json.loads(r.stdout))
+        self.assertTrue((self.root / ".whynot-client").is_file())
+        self.assertEqual(json.loads(self.lock.read_text(encoding="utf-8"))["session_id"], "other-session")
+
+    def test_g5_a_writing_command_marks_a_2x_client(self):
+        """Gate G5: a 2.x client (assets/ + data/ + output/, no marker) gets `.whynot-client` on its first writing
+        command, with a log line; a reader never writes it."""
+        (self.root / ".whynot-client").unlink()
+        self.assertEqual(self.reel("next", "--video-id", "C0001").returncode, 0)
+        self.assertFalse((self.root / ".whynot-client").exists())
+        r = self.reel("discover")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.root / ".whynot-client").is_file())
+        self.assertIn(".whynot-client", self.log_text())
+        bare = Path(self.tmp.name) / "no output"                        # no output/: not a 2.x client folder
+        for d in ("assets", "data"):
+            (bare / d).mkdir(parents=True)
+        subprocess.run([sys.executable, str(CLI), "--root", str(bare), "settings", "--init", str(bare)],
+                       capture_output=True, text=True, encoding="utf-8", env=env_for())
+        self.assertFalse((bare / ".whynot-client").exists())
 
 
 class TestLockStatusTimes(LockFixture):

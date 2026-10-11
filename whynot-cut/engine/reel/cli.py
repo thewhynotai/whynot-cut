@@ -668,10 +668,11 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
                "transcript-correct", "transcript-verify", "transcript-relisten", "audio-clean", "plan",
                "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build"}
+# doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
+# and works while another session holds the client (gate G2).
 CORE_READS = {"setup", "model-download", "gpu-enable", "profile", "ppro-install", "ppro-status", "ppro-probe",
-              "status", "next", "lock"}
+              "status", "next", "lock", "doctor"}
 WRITES_IF = {
-    "doctor": lambda a: bool(a.fix) and (not getattr(a, "all_clients", False) or getattr(a, "yes", False)),
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
                                                 / "output/discovery/input-inventory.json").exists(),
     "settings": lambda a: bool(a.init),
@@ -688,6 +689,21 @@ def writes(a) -> bool:
     return a.cmd in CORE_WRITES or a.cmd in podcast_cli.WRITES or a.cmd in motion_cli.WRITES
 
 
+def mark_legacy_client(root: Path):
+    """A 2.x client folder (assets/ + data/ + output/, no `.whynot-client`) gets its marker on the first writing
+    command, so the guard protects it from then on (gate G5). Idempotent; logged in output/logs/pipeline.log."""
+    from lib.client_marker import MARKER, write_marker
+    if (root / MARKER).exists() or not (root / "output").is_dir():
+        return
+    try:
+        if write_marker(root):
+            from lib import writer_lock
+            writer_lock.client_log(root, f"wrote {MARKER} at the client root (a 2.x client folder without the marker):"
+                                         " the guard now protects its assets/ and data/")
+    except (OSError, ValueError):
+        pass
+
+
 def take_writer_lock(a):
     """Take or refresh the session's lease on the client for a writing command (None for readers and commands
     without a client folder). Another session's live lease -> `{"blocked", "how"}` and exit 2."""
@@ -697,6 +713,7 @@ def take_writer_lock(a):
     if not ((root / "assets").is_dir() and (root / "data").is_dir()):
         return None                       # not a client folder: the command reports that itself
     from lib import writer_lock
+    mark_legacy_client(root)
     shown = ["reel", a.cmd] + [f"{o} {v}" for o, v in (("--video-id", a.video_id), ("--episode", a.episode)) if v]
     try:
         return writer_lock.acquire(root, " ".join(shown))
