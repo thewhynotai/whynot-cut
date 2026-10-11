@@ -245,5 +245,79 @@ class TestProbe(unittest.TestCase):
         self.assertTrue(all(p.exists() and p.suffix == ".png" for p in outs))
 
 
+# --------------------------------------------------------------------------- audio-only episodes
+def add_audio_episode(root: Path, name: str = "POD3.m4a", dur_s: float = 20) -> Path:
+    """An audio-only episode (sine) + its sheet next to the video episode of make_episode_client."""
+    f = root / "data/Episodes" / name
+    ff("-f", "lavfi", "-i", f"sine=f=330:r=48000:d={dur_s}", "-ac", "2", "-c:a", "aac", str(f))
+    (root / "data/Episodes" / (Path(name).stem + ".md")).write_text(SHEET, encoding="utf-8")
+    return f
+
+
+def fake_transcript(ep, n: int = 38, step: int = 500, dur_ms: int = 20000, words=None):
+    from lib.transcribe import finalize
+    ws = [{"id": i + 1, "segment_id": 1, "word": (words[i] if words else f"كلمه{i}"), "start_ms": i * step,
+           "end_ms": i * step + int(step * 0.8), "probability": 0.9} for i in range(len(words) if words else n)]
+    finalize(ep, {"source_video": "x", "backend": "test", "model": "none", "language": "ar",
+                  "language_probability": 1.0, "duration_ms": dur_ms},
+             [{"id": 1, "start_ms": 0, "end_ms": ws[-1]["end_ms"], "text": " ".join(w["word"] for w in ws),
+               "avg_logprob": -0.2, "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in ws]}], ws)
+    return ws
+
+
+class TestAudioEpisodes(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root = make_episode_client(cls.tmp, with_clip=False)
+        add_audio_episode(cls.root)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_audio_episode_discovered(self):
+        from lib.discover import run_discovery
+        inv = run_discovery(Paths(self.root))["inventory"]
+        by = {Path(f["rel"]).name: f for f in inv["files"]}
+        self.assertEqual(by["POD3.m4a"]["role"], "episode")
+        self.assertEqual(by["POD3.m4a"]["media"], "audio")
+        self.assertEqual(by["EP12.mp4"]["media"], "video")
+        self.assertEqual(by["POD3.md"]["role"], "episode_sheet")
+        from lib.episode import list_episodes
+        eps = {e["episode_id"]: e for e in list_episodes(self.root, refresh=True)}
+        self.assertEqual(eps["POD3"]["media"], "audio")
+
+    def test_prep_audio(self):
+        from lib.episode import EpisodePaths, prep
+        ep = EpisodePaths(self.root, "POD3")
+        r = prep(ep)
+        info = read_json(ep.p("00_inputs/episode.json"))
+        self.assertEqual(info["media"], "audio")
+        self.assertIsNone(info["intake_sheet"])
+        self.assertFalse([w for w in r["warnings"] if "16:9" in w], r["warnings"])
+        self.assertLessEqual(abs(info["duration_ms"] - 20000), 100)
+        self.assertEqual(read_json(EpisodePaths(self.root, "EP12").p("00_inputs/episode.json"), {}).get("media", "video"),
+                         "video")
+
+    def test_preview_audio_card(self):
+        from lib.episode import EpisodePaths, prep
+        from lib.media import probe
+        from lib.reels import render_candidates
+        ep = EpisodePaths(self.root, "POD3")
+        prep(ep)
+        fake_transcript(ep)
+        validated_plan(ep, [{"id": "R01", "in_ms": 2000, "out_ms": 6000, "duration_ms": 4000, "type": "advice",
+                             "type_label": "نصيحة", "total": 7.5, "title": "t", "score": {}}])
+        r = render_candidates(ep)
+        self.assertTrue(r["ok"], r)
+        pr = probe(ep.p("03_candidates/R01.mp4"))
+        self.assertEqual((pr["video"]["display_width"], pr["video"]["display_height"]), (540, 960))
+        self.assertTrue(pr["audio"])
+        self.assertTrue(3.9 <= pr["duration_s"] <= 4.1, pr["duration_s"])
+        self.assertTrue(ep.p("03_candidates/R01.jpg").exists())
+        self.assertTrue(ep.p("03_candidates/_sheet.jpg").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

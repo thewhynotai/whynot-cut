@@ -41,10 +41,14 @@ def classify(p: Path, rel: str) -> dict:
         role = "broll_license"      # SOURCES.md / licence next to the B-roll clips (not an editing reference)
     top = rel.split("/")[0]
     parts = rel.split("/")
-    if top == "data" and len(parts) > 2 and parts[1].lower() == "episodes" and kind in ("video", "document"):
-        # finished podcast episodes are cut into reels (podcast mode); never treated as a clip to edit whole
-        return {"path": str(p), "rel": rel, "kind": kind, "ext": ext,
-                "role": "episode" if kind == "video" else "episode_sheet", "size_bytes": p.stat().st_size}
+    if top == "data" and len(parts) > 2 and parts[1].lower() == "episodes" and kind in ("video", "audio", "document"):
+        # finished podcast episodes are cut into reels (podcast mode); never treated as a clip to edit whole.
+        # An audio-only episode (an audio podcast) can only become motion videos (motion mode, 2.2).
+        if kind == "document":
+            return {"path": str(p), "rel": rel, "kind": kind, "ext": ext, "role": "episode_sheet",
+                    "size_bytes": p.stat().st_size}
+        return {"path": str(p), "rel": rel, "kind": kind, "ext": ext, "role": "episode", "media": kind,
+                "size_bytes": p.stat().st_size}
     if kind == "video" and top == "data":
         role = "editing_reference_video" if role == "editing_reference" else (role or "source_footage")
     if kind == "document" and top == "data" and role != "broll_license":

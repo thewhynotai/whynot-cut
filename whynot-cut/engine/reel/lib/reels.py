@@ -272,6 +272,45 @@ def _label_png(path: Path, lines: list[str], w: int = 540, h: int = 960) -> Path
     return path
 
 
+def audio_card(ep, cand: dict, out: Path) -> Path:
+    """Preview card for an audio-only episode: a dark 540x960 card with the Latin label and the window's waveform,
+    over the window's audio (H.264 + AAC). Also writes <id>.jpg (the card) for the sheet."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont
+    from .common import ffmpeg_exe, run
+    from .episode import episode_file
+    src = episode_file(ep)
+    a, dur = cand["in_ms"] / 1000, (cand["out_ms"] - cand["in_ms"]) / 1000
+    import subprocess
+    pcm = subprocess.run([ffmpeg_exe(), "-loglevel", "error", "-ss", f"{a:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
+                          "-map", "0:a:0", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], capture_output=True).stdout or b""
+    x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    w, h, bars = 540, 960, 90
+    im = Image.new("RGB", (w, h), (17, 17, 17))
+    d = ImageDraw.Draw(im)
+    if x.size:
+        chunks = np.array_split(np.abs(x), bars)
+        peak = max(float(max((c.max() if c.size else 0.0) for c in chunks)), 1e-6)
+        for k, c in enumerate(chunks):
+            v = (float(c.max()) if c.size else 0.0) / peak
+            bh, bx = max(4, int(v * 300)), 30 + k * (w - 60) / bars
+            d.rectangle((bx, h / 2 - bh / 2, bx + (w - 60) / bars * 0.6, h / 2 + bh / 2), fill=(32, 172, 175))
+    try:
+        f = ImageFont.load_default(size=22)
+    except TypeError:   # Pillow < 10.1
+        f = ImageFont.load_default()
+    d.text((14, 14), f"{cand['id']}  score {cand.get('total')}  {cand.get('type')}", fill=(255, 230, 80), font=f)
+    d.text((14, 48), f"{fmt_ts(cand['in_ms'], '.')} -> {fmt_ts(cand['out_ms'], '.')}  ({dur:.0f} s)", fill=(235, 235, 235), font=f)
+    d.text((14, h - 30), "audio-only episode - motion candidate", fill=(200, 200, 200), font=f)
+    card = out.with_suffix(".jpg")
+    im.save(card, quality=88)
+    run([ffmpeg_exe(), "-y", "-loglevel", "error", "-loop", "1", "-framerate", "25", "-i", str(card), "-ss", f"{a:.3f}",
+         "-t", f"{dur:.3f}", "-i", str(src), "-map", "0:v", "-map", "1:a:0", "-t", f"{dur:.3f}", "-c:v", "libx264",
+         "-tune", "stillimage", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k",
+         "-movflags", "+faststart", str(out)], check=False)
+    return out
+
+
 def render_candidates(ep, ids: list[str] | None = None) -> dict:
     """A quick 540x960 preview per candidate: the whole 16:9 frame letterboxed (not cropped: the reframe is decided
     per shot later), the episode audio for the range, and a Latin label. Plus a first-frame JPG and a sheet."""
@@ -284,8 +323,18 @@ def render_candidates(ep, ids: list[str] | None = None) -> dict:
     d = ep.p("03_candidates")
     d.mkdir(parents=True, exist_ok=True)
     outs, failed = [], []
+    from .episode import load_episode
+    audio_only = load_episode(ep).get("media") == "audio"
     for c in cands:
         a, dur = c["in_ms"] / 1000, (c["out_ms"] - c["in_ms"]) / 1000
+        if audio_only:
+            mp4 = audio_card(ep, c, d / f"{c['id']}.mp4")
+            jpg = d / f"{c['id']}.jpg"
+            if mp4.exists():
+                outs.append({"id": c["id"], "mp4": str(mp4), "jpg": str(jpg) if jpg.exists() else None})
+            else:
+                failed.append({"id": c["id"], "error": "audio card not rendered"})
+            continue
         lab = _label_png(d / f"_{c['id']}_label.png",
                          [f"{c['id']}  score {c.get('total')}  {c.get('type')}",
                           f"{fmt_ts(c['in_ms'], '.')} -> {fmt_ts(c['out_ms'], '.')}  ({dur:.0f} s)"])

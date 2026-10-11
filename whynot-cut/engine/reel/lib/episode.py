@@ -132,6 +132,7 @@ def list_episodes(root: Path, refresh: bool = False) -> list[dict]:
         eid = episode_id_for(Path(f["path"]))
         ep = EpisodePaths(root, eid)
         out.append({"episode_id": eid, "file": f["path"], "rel": f["rel"], "size_mb": round(f["size_bytes"] / 1e6, 1),
+                    "media": f.get("media", "video"),
                     "sheet": sheets.get((str(Path(f["rel"]).parent), Path(f["rel"]).stem.lower())),
                     "state": _episode_state(ep), "project": str(ep.project)})
     out.sort(key=lambda e: e["rel"])
@@ -220,8 +221,9 @@ def prep(ep: EpisodePaths) -> dict:
         sheet_text = (ep.root / hit["sheet"]).read_text(encoding="utf-8", errors="replace")
         sheet = {k: val for k, val in parse_sheet(sheet_text).items() if k != "_text"}
     warnings = []
-    if pr["errors"] or not v:
-        warnings.append("unreadable video: " + "; ".join(pr["errors"]))
+    media = hit.get("media", "video")          # an audio podcast (audio file): no picture, motion mode only
+    if pr["errors"] or (media == "video" and not v):
+        warnings.append(f"unreadable {media}: " + "; ".join(pr["errors"]))
     if not pr["audio"]:
         warnings.append("no audio stream: nothing to transcribe")
     if v and v.get("display_width") and v["display_height"] and abs(v["display_width"] / v["display_height"] - 16 / 9) > 0.05:
@@ -229,18 +231,21 @@ def prep(ep: EpisodePaths) -> dict:
     if not hit.get("sheet"):
         warnings.append(f"no episode sheet: add data/Episodes/{src.stem}.md (guest, links, sponsor, avoid) — names "
                         "and links in the publish package come only from it")
+    if media == "audio":
+        warnings.append("audio-only episode: reels from it are motion videos (`reels-select --as motion`)")
     sheet_img = intake_frames(ep, src, dur_s) if v and dur_s else None
     est = _estimate(dur_s / 60)
-    info = {"episode_id": ep.episode_id, "file": str(src), "rel": hit["rel"], "fingerprint": sha1_head(src),
+    info = {"episode_id": ep.episode_id, "file": str(src), "rel": hit["rel"], "media": media, "fingerprint": sha1_head(src),
             "duration_ms": int(round(dur_s * 1000)), "video": {k: v.get(k) for k in ("display_width", "display_height",
             "fps", "codec", "aspect")}, "audio": pr["audio"], "sheet_rel": hit.get("sheet"), "sheet": sheet,
             "sheet_text": sheet_text, "intake_sheet": str(sheet_img) if sheet_img else None,
             "estimate_minutes": est, "warnings": warnings, "created": now_iso()}
     write_json(ep.p("00_inputs/episode.json"), info)
-    return {"episode_id": ep.episode_id, "duration_ms": info["duration_ms"], "video": info["video"],
+    return {"episode_id": ep.episode_id, "duration_ms": info["duration_ms"], "video": info["video"], "media": media,
             "sheet": hit.get("sheet"), "intake_sheet": info["intake_sheet"], "estimate_minutes": est,
             "warnings": warnings,
-            "next": "intake-inspector views the intake sheet (burned subtitles/logo, layout) ∥ `reel episode-transcribe`"}
+            "next": ("`reel episode-transcribe` (audio-only: no intake check)" if media == "audio" else
+                     "intake-inspector views the intake sheet (burned subtitles/logo, layout) ∥ `reel episode-transcribe`")}
 
 
 # --------------------------------------------------------------------------- resumable status
