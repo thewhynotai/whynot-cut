@@ -55,9 +55,11 @@ def parse(text: str) -> tuple[dict, str]:
 def find(start: Path | None = None) -> Path | None:
     start = Path(start or os.getcwd()).resolve()
     cands = [d / ".claude" / FILE for d in [start, *start.parents]]
-    for k in ("WHYNOT_CLIENTS_ROOT", "CLAUDE_PLUGIN_OPTION_CLIENTS_ROOT"):
-        if os.environ.get(k):
-            cands.append(Path(os.environ[k]).expanduser() / ".claude" / FILE)
+    from importlib import import_module      # plat as `lib.plat` (engine) or top-level `plat` (hooks)
+    plat = import_module(".plat", __package__) if __package__ else import_module("plat")
+    base = plat.clients_root_setting()        # plugin option: env, else the saved option (pointer / settings.json)
+    if base:
+        cands.append(base / ".claude" / FILE)
     cands.append(Path.home() / ".claude" / FILE)
     return next((c for c in cands if c.is_file()), None)
 

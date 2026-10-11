@@ -161,6 +161,25 @@
   or any non-audio comment, `motion` is an animated video from a podcast window's audio, `adobe-extras` is After Effects
   / Photoshop output only on explicit request. The 19 agent descriptions lose the sentence `See "When to invoke" in the
   agent body.`; the `plugin.json` description is 220 characters. `TestListingBudget` guards all of it (total <= 4,000).
+- Plugin options reach `reel` on every shell (T1.9). The SessionStart hook wrote `export WHYNOT_HOME="…"` with
+  `json.dumps`, so an Arabic `engine_home`/`clients_root` became a literal `\u0639…` path in bash; it now uses shell
+  quoting. PowerShell commands never receive a path-valued variable from `CLAUDE_ENV_FILE`, so the hook also writes
+  `~/.whynot-cut/plugin-options.json` (`{clients_root, engine_home, updated}`, only from the installed plugin's hook and
+  only when the options change). `plat.engine_home()`, `plat.clients_root_setting()`, the preferences lookup and both
+  wrappers read it after the environment, then Claude Code's own record (`~/.claude/settings.json` →
+  `pluginConfigs["whynot-cut@…"].options`), then the default and legacy homes; `bin/reel` and `reel.cmd` resolve the
+  same order without starting Python. `~/.whynot-cut` counts as the engine home only when it holds a `venv/`, so the
+  pointer file never hides a legacy engine (also in `hooks/run_python.sh`).
+- `reel.cmd`: an engine home with `)` or `&` (`C:\Tools (x86)\…`) broke the script ("… was unexpected at this time")
+  because `%HOME_DIR%` was unquoted inside a `( )` block; every path is now quoted and `%*` is expanded once, outside
+  any block, with delayed expansion off, so `100% Natural`, `!`, `$`, `)` and Arabic reach the engine intact (with
+  DelayedExpansion on, `!` used to be eaten). It also reads the legacy `.dr-nahla-editor` home like `bin/reel`. `reel
+  setup` builds the engine once: `py -3` when the launcher exists (no second run with `python` after a failure), else
+  the first `python` on PATH that is not a Windows Store stub. Its "engine not installed" hint matches `bin/reel`
+  (`run: reel setup`). `tests/test_wrappers.py` runs both wrappers as subprocesses (`cmd /c`, Git Bash) against a real
+  venv and an env-gated argv echo in `cli.py` (`WHYNOT_DEBUG_ARGV=1`).
+- One Python phrase in the docs, skills and agents: "Python 3.12 (installed by WhyNot Cut)" replaces "3.10–3.12" advice
+  (the engine's own minimum-version checks are unchanged).
 
 ### Migration
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the
@@ -184,6 +203,13 @@
   reel-profile/profile.json …". Add each person (name, role, gender, honorific_ar, honorific_en, pronouns) to
   `output/client_database/reel-profile/profile.json` from the client's own material; `unknown` until the editor
   confirms.
+- Plugin options: nothing to do. The first session after updating writes `~/.whynot-cut/plugin-options.json`; until
+  then `reel` falls back to `~/.claude/settings.json`. A Windows user who set `engine_home` and saw "engine not
+  installed" (or got a second engine in `~/.whynot-cut`) in PowerShell gets the configured engine again; a stray
+  second engine can be deleted by hand once `reel doctor` shows the right `engine_home`.
+- Legacy engine homes `~/.reel-editor` (reel-editor 1.x) and `~/.dr-nahla-editor` (the original skill) are still found
+  by both wrappers and the engine in 3.x, but **support for them is removed in 4.0**: move the engine to
+  `~/.whynot-cut` (or set the `engine_home` plugin option to the old folder) before upgrading to 4.0.
 
 ## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names, field-test round 4
 The minor findings of the 2.2.0 review, two bugs found by a live run from a client folder named in Arabic, and the gaps

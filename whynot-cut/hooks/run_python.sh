@@ -27,7 +27,7 @@ for v in WHYNOT_HOME CLAUDE_PLUGIN_OPTION_ENGINE_HOME REEL_HOME CLAUDE_PLUGIN_OP
 done
 if [ -z "$home" ]; then
   home="$HOME/.whynot-cut"
-  if [ ! -e "$home" ]; then
+  if [ ! -e "$home/venv" ]; then     # ~/.whynot-cut alone may only hold plugin-options.json
     for old in "$HOME/.reel-editor" "$HOME/.dr-nahla-editor"; do
       [ -e "$old/venv" ] && { home="$old"; break; }
     done

@@ -29,7 +29,7 @@ A human editor finishes, mixes and renders.
    ```
    In the desktop app: **+ › Plugins › Add plugin** with the same folder.
 3. Start a new session and run **`/whynot-cut:start`**. It walks you through everything, one checked step at a time:
-   - installs the engine in `~/.whynot-cut` (a private Python environment, ~400 MB; Python 3.10–3.12 needed)
+   - installs the engine in `~/.whynot-cut` (a private Python environment, ~400 MB, on Python 3.12 (installed by WhyNot Cut))
    - connects Premiere Pro (installs the WhyNot Cut Bridge panel; gives you the one command for Adobe's PlayerDebugMode)
    - asks three preferences (where clients live, approval mode, transcription speed)
    - creates your first client folder and tells you exactly what to drop where

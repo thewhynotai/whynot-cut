@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -21,17 +22,60 @@ HOME_NAME = ".whynot-cut"
 LEGACY_HOMES = (".reel-editor", ".dr-nahla-editor")   # earlier releases (reel-editor 1.x, the original skill)
 HOME_ENV = ("WHYNOT_HOME", "CLAUDE_PLUGIN_OPTION_ENGINE_HOME", "REEL_HOME", "CLAUDE_PLUGIN_OPTION_REEL_HOME", "NH_ENV_DIR")
 CLIENTS_ENV = ("WHYNOT_CLIENTS_ROOT", "CLAUDE_PLUGIN_OPTION_CLIENTS_ROOT", "REEL_CLIENTS_ROOT")
+OPTIONS_FILE = "plugin-options.json"          # ~/.whynot-cut/plugin-options.json, written by the SessionStart hook
+PLUGIN_ID = "whynot-cut@thewhynot-ai"         # Claude Code's key for this plugin in settings.json pluginConfigs
+
+
+def options_file() -> Path:
+    """The SessionStart hook's record of the plugin options (3.0 T1.9). PowerShell commands never receive a path-valued
+    variable from CLAUDE_ENV_FILE, so the engine and both wrappers read the options from here. Its place is fixed
+    (~/.whynot-cut, also when engine_home points elsewhere); WHYNOT_OPTIONS_FILE overrides it."""
+    return Path(os.environ.get("WHYNOT_OPTIONS_FILE") or Path.home() / HOME_NAME / OPTIONS_FILE).expanduser()
+
+
+def _claude_settings_options() -> dict:
+    """This plugin's options as Claude Code stores them: settings.json pluginConfigs["whynot-cut@<marketplace>"]
+    .options (thewhynot-ai first, then any other marketplace name)."""
+    cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
+    try:
+        configs = json.loads((cfg / "settings.json").read_text(encoding="utf-8")).get("pluginConfigs") or {}
+        keys = [PLUGIN_ID] + sorted(k for k in configs if k.startswith("whynot-cut@") and k != PLUGIN_ID)
+        return next((c["options"] for c in (configs.get(k) for k in keys)
+                     if isinstance(c, dict) and isinstance(c.get("options"), dict)), {})
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def saved_options() -> dict:
+    """{engine_home, clients_root} saved for the plugin: the pointer file when it exists (it is authoritative, an
+    empty value there means "not set"), else Claude Code's settings.json. Values are strings, "" when unset."""
+    try:
+        d = json.loads(options_file().read_text(encoding="utf-8"))
+        if not isinstance(d, dict):
+            raise ValueError
+    except (OSError, ValueError):
+        d = _claude_settings_options()
+    return {k: d.get(k) if isinstance(d.get(k), str) else "" for k in ("engine_home", "clients_root")}
+
+
+def _saved_path(v: str) -> Path:
+    return Path(native_path(v)).expanduser()
 
 
 def engine_home() -> Path:
     """Machine state lives OUTSIDE the plugin (the plugin folder is replaced on every update).
-    Order: explicit setting > ~/.whynot-cut if present > an existing legacy home (keeps the 3 GB of models) > ~/.whynot-cut."""
+    Order: explicit setting (env) > saved plugin option (pointer file, else ~/.claude/settings.json) > ~/.whynot-cut
+    with an engine > an existing legacy home (keeps the 3 GB of models; dropped in 4.0) > ~/.whynot-cut.
+    bin/reel and bin/reel.cmd resolve the same order."""
     for k in HOME_ENV:
         if os.environ.get(k):
             return Path(os.environ[k]).expanduser()
+    saved = saved_options()["engine_home"]
+    if saved:
+        return _saved_path(saved)
     home = Path.home()
     new = home / HOME_NAME
-    if new.exists():
+    if (new / "venv").exists():          # ~/.whynot-cut alone may only hold the pointer file
         return new
     for old in LEGACY_HOMES:
         if (home / old / "venv").exists():
@@ -40,10 +84,12 @@ def engine_home() -> Path:
 
 
 def clients_root_setting() -> Path | None:
+    """The clients folder from the plugin option: env first, then the saved option (pointer file / settings.json)."""
     for k in CLIENTS_ENV:
         if os.environ.get(k):
             return Path(os.environ[k]).expanduser()
-    return None
+    saved = saved_options()["clients_root"]
+    return _saved_path(saved) if saved else None
 
 
 def venv_python(home: Path | None = None) -> Path:

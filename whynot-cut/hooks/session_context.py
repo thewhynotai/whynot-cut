@@ -135,17 +135,42 @@ def prefs_line(st: dict) -> str:
 
 
 def export_options():
-    """Plugin options (engine_home, clients_root) are given to hooks; pass them on to the Bash/PowerShell tool
-    environment so `reel` sees them too (the wrappers read WHYNOT_HOME / WHYNOT_CLIENTS_ROOT)."""
+    """Plugin options (engine_home, clients_root) are given to hooks; pass them on so `reel` sees them too:
+      * CLAUDE_ENV_FILE (Bash tool): `export WHYNOT_HOME='…'`, shell-quoted so Arabic paths stay literal;
+      * the pointer file ~/.whynot-cut/plugin-options.json (plat.options_file()): PowerShell commands never receive
+        a path-valued variable from the env file, so plat and both wrappers read the options from it (3.0 T1.9).
+        Written only by a real SessionStart of the installed plugin (CLAUDE_ENV_FILE and CLAUDE_PLUGIN_DATA both set:
+        a bare run, e.g. a test, never touches ~/.whynot-cut) and only when the options changed; one key per line,
+        UTF-8, so reel.cmd can read it without Python."""
+    opts = {"engine_home": os.environ.get("CLAUDE_PLUGIN_OPTION_ENGINE_HOME") or "",
+            "clients_root": os.environ.get("CLAUDE_PLUGIN_OPTION_CLIENTS_ROOT") or ""}
     env_file = os.environ.get("CLAUDE_ENV_FILE")
-    if not env_file:
-        return
-    pairs = [("WHYNOT_HOME", os.environ.get("CLAUDE_PLUGIN_OPTION_ENGINE_HOME")),
-             ("WHYNOT_CLIENTS_ROOT", os.environ.get("CLAUDE_PLUGIN_OPTION_CLIENTS_ROOT"))]
-    lines = [f"export {k}={json.dumps(v)}" + "\n" for k, v in pairs if v and not os.environ.get(k)]
-    if lines:
-        with open(env_file, "a", encoding="utf-8") as f:
-            f.writelines(lines)
+    if env_file:
+        import shlex
+        pairs = [("WHYNOT_HOME", opts["engine_home"]), ("WHYNOT_CLIENTS_ROOT", opts["clients_root"])]
+        lines = [f"export {k}={shlex.quote(v)}\n" for k, v in pairs if v and not os.environ.get(k)]
+        if lines:
+            with open(env_file, "a", encoding="utf-8", newline="\n") as f:
+                f.writelines(lines)
+    if env_file and os.environ.get("CLAUDE_PLUGIN_DATA"):
+        write_pointer(opts)
+
+
+def write_pointer(opts: dict):
+    f = plat.options_file()
+    try:
+        old = json.loads(f.read_text(encoding="utf-8"))
+        if all(old.get(k) == v for k, v in opts.items()):
+            return
+    except (OSError, ValueError, AttributeError):
+        pass
+    f.parent.mkdir(parents=True, exist_ok=True)
+    body = {"clients_root": opts["clients_root"], "engine_home": opts["engine_home"],
+            "updated": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    tmp = f.with_name(f.name + f".{os.getpid()}.tmp")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(json.dumps(body, ensure_ascii=False, indent=1) + "\n")
+    os.replace(tmp, f)
 
 
 def main():
