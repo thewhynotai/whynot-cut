@@ -1,0 +1,153 @@
+<section class="chapter" id="ch04">
+<h1 class="ch-title" id="ch04-title">4 · فولدر العميل</h1>
+
+<p>لكل عميل فولدر واحد على جهازك، اسمه في هذا الدليل «فولدر العميل (client folder)». فيه كل ما يخص العميل: هويته البصرية، وفيديوهاته الخام، وأمثلة المونتاج التي يحبها، ثم النتائج التي يكتبها WhyNot Cut. يعمل WhyNot Cut على كل شيء من داخل هذا الفولدر، ولا تحتاج إلى إعادة تسمية أي ملف تضعه فيه.</p>
+
+<p>داخل فولدر العميل ثلاثة فولدرات رئيسية:</p>
+<ul>
+<li><bdi dir="ltr"><code>assets/</code></bdi>: هوية العميل (الشعار، الخطوط، الصور، ملف التعريف والألوان).</li>
+<li><bdi dir="ltr"><code>data/</code></bdi>: المادة التي يُعمل عليها (الفيديوهات الخام، الحلقات، المراجع، الموسيقى، المؤثرات).</li>
+<li><bdi dir="ltr"><code>output/</code></bdi>: كل ما يُنتجه WhyNot Cut. يُنشأ تلقائيًا، وهو المكان الوحيد الذي يكتب فيه.</li>
+</ul>
+
+<aside class="warn">
+<p>الفولدران <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> ملك للعميل. WhyNot Cut لا يكتب فيهما ولا ينقل منهما ولا يحذف منهما أي ملف، وهذه الحماية مطبَّقة برمجيًا. أنت من يضيف الملفات إليهما.</p>
+</aside>
+
+<h2 id="ch04-create">إنشاء فولدر لعميل</h2>
+
+<p>أول فولدر عميل يُنشأ لك أثناء الإعداد الأول بالأمر <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>. ولأي عميل بعد ذلك، اكتب لـ Claude «عميل جديد» (الفصل 5)، أو أنشئ الفولدر بنفسك:</p>
+
+<ol class="steps">
+<li>اختر مكان فولدرات العملاء، مثل <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> على Windows أو <bdi dir="ltr"><code>~/Documents/WhyNot Clients</code></bdi> على Mac.</li>
+<li>اكتب الأمر التالي مع اسم العميل، فيُنشئ الفولدر بكل الفولدرات الفرعية:
+<div class="cmd"><bdi dir="ltr"><code>reel scaffold --root "D:/WhyNot Clients/Example Clinic" --name "Example Clinic"</code></bdi></div></li>
+<li>افتح الملف <bdi dir="ltr"><code>START_HERE.md</code></bdi> داخل الفولدر الجديد: فيه جدول بما يوضع في كل فولدر، وملخص بالعربية.</li>
+<li>ضع ملفات العميل في أماكنها كما في الجدول التالي.</li>
+</ol>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: فولدر «Example Clinic» مفتوحًا في مستكشف الملفات، وفيه <bdi dir="ltr">assets</bdi> و<bdi dir="ltr">data</bdi> والملف <bdi dir="ltr">START_HERE.md</bdi></span></div>
+<figcaption>شكل فولدر العميل بعد إنشائه مباشرة.</figcaption>
+</figure>
+
+<aside class="tip">
+<p>عند تسمية الفولدر تجنّب الرموز التي يرفضها Windows: <bdi dir="ltr"><code>\ / : * ? " &lt; &gt; |</code></bdi>، ولا تنهِ الاسم بنقطة أو مسافة.</p>
+</aside>
+
+<h2 id="ch04-folders">ما الذي تضعه في كل فولدر</h2>
+
+<table>
+<thead>
+<tr><th>الفولدر</th><th>ضع فيه</th></tr>
+</thead>
+<tbody>
+<tr><td><bdi dir="ltr"><code>assets/Logo</code></bdi></td><td>ملفات الشعار. الأفضل PNG بخلفية شفافة، ومعه SVG أو AI إن وُجد.</td></tr>
+<tr><td><bdi dir="ltr"><code>assets/Fonts</code></bdi></td><td>ملفات خطوط الهوية (<bdi dir="ltr">.otf</bdi> أو <bdi dir="ltr">.ttf</bdi>). ثبّتها على الجهاز أيضًا.</td></tr>
+<tr><td><bdi dir="ltr"><code>assets/Photos</code></bdi></td><td>صور معتمدة للمتحدث (JPG أو PNG؛ وصيغ RAW للكاميرا تعمل على Mac).</td></tr>
+<tr><td><bdi dir="ltr"><code>assets/Brand</code></bdi></td><td>ملف تعريف بالعميل (brief أو نبذة أو سيرة)، وملف ألوان بأكواد HEX، مثل ملف <bdi dir="ltr"><code>colors.txt</code></bdi> فيه <bdi dir="ltr"><code>#20ACAF</code></bdi>.</td></tr>
+<tr><td><bdi dir="ltr"><code>data/Raw</code></bdi></td><td>الفيديوهات الخام المطلوب مونتاجها (MP4 أو MOV أو MXF)، ملف واحد لكل فيديو.</td></tr>
+<tr><td><bdi dir="ltr"><code>data/Episodes</code></bdi></td><td>حلقات البودكاست الكاملة بمقاس <bdi dir="ltr">16:9</bdi> لتقطيعها إلى ريلز، ومع كل حلقة ورقة اختيارية باسمها (انظر «ورقة الحلقة» بعد قليل).</td></tr>
+<tr><td><bdi dir="ltr"><code>data/References</code></bdi></td><td>فيديوهات مونتاج مرجعية تريد أن يشبهها الشغل، وأي ملاحظات مكتوبة عن الأسلوب. اختياري.</td></tr>
+<tr><td><bdi dir="ltr"><code>data/Broll</code></bdi></td><td>فيديوهات Stock أو B-roll مرخّصة يُسمح باستخدامها، ومعها ملف <bdi dir="ltr"><code>SOURCES.md</code></bdi> أو ملف الترخيص. اختياري.</td></tr>
+<tr><td><bdi dir="ltr"><code>data/Music</code></bdi></td><td>موسيقى مرخّصة فقط. اختياري.</td></tr>
+<tr><td><bdi dir="ltr"><code>data/SFX</code></bdi></td><td>مكتبة المؤثرات الصوتية الخاصة بك. اختياري؛ إذا لم توجد تُصنع مؤثرات أصلية.</td></tr>
+</tbody>
+</table>
+
+<p><strong>رقم الكليب.</strong> كل فيديو خام يأخذ رقمًا (clip id) تستخدمه في طلباتك. إذا كان اسم الملف لاتينيًا بسيطًا فالرقم هو الاسم نفسه بلا امتداد: الملف <bdi dir="ltr"><code>C0001.MP4</code></bdi> رقمه <bdi dir="ltr"><code>C0001</code></bdi>. وإذا كان الاسم عربيًا يُعطى رقمًا قصيرًا مثل <bdi dir="ltr"><code>CLIP_1A2B3C</code></bdi>، وتجد قائمة الأرقام في <bdi dir="ltr"><code>output/discovery/clip-ids.json</code></bdi>.</p>
+
+<p><strong>ماذا لو نقصت ملفات الهوية؟</strong> يمكن البدء بدون الشعار أو الخطوط أو الألوان، لكن سيقول لك Claude ما الذي سيبدو عامًّا بدونها، ولن يخترع بديلًا من عنده.</p>
+
+<h2 id="ch04-check">فحص الملفات بعد وضعها</h2>
+
+<p>بعد أن تنتهي من نسخ الملفات، وبعد أن يكتمل أي تحميل من التخزين السحابي:</p>
+
+<ol class="steps">
+<li>اكتب لـ Claude أنك أضفت ملفات، مثل «حطيت الملفات، افحصها».</li>
+<li>يعرض لك Claude الكليبات التي وجدها والمواد الناقصة. ويمكنه أن يفحص بعمق أكبر: الصيغ، واتجاه الفيديو، والصوت، والملفات الموضوعة في غير مكانها، دون أن يغيّر أي شيء.</li>
+<li>أكمل ما ينقص، أو ابدأ المونتاج إذا كان الموجود كافيًا.</li>
+</ol>
+
+<p>الأمر الذي يُشغَّل في الخلفية لهذا الفحص هو:</p>
+<div class="cmd"><bdi dir="ltr"><code>reel inbox --root "D:/WhyNot Clients/Example Clinic"</code></bdi></div>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: رد Claude بعد فحص فولدر «عيادة مثال»: كليب جديد واحد <bdi dir="ltr">C0001</bdi>، وتنبيه بأن ملف الألوان غير موجود</span></div>
+<figcaption>نتيجة الفحص: ما وُجد، وما ينقص، وأثر النقص على الشكل.</figcaption>
+</figure>
+
+<h2 id="ch04-episode-sheet">ورقة الحلقة (episode sheet)</h2>
+
+<p>لكل حلقة في <bdi dir="ltr"><code>data/Episodes</code></bdi> يمكنك أن تضع ورقة نصية قصيرة بنفس اسم الحلقة وامتداد <bdi dir="ltr"><code>.md</code></bdi>. مثلًا الحلقة <bdi dir="ltr"><code>EP12.mp4</code></bdi> ورقتها <bdi dir="ltr"><code>EP12.md</code></bdi>. الورقة اختيارية، لكنها تحسّن النتيجة كثيرًا، لأن روابط النشر لا تؤخذ إلا منها. شكلها:</p>
+
+<div class="cmd"><bdi dir="ltr"><code>---
+show: …
+episode: 12
+host: …
+guest: "Name — role"
+links:
+  - https://…
+sponsor: ""
+avoid: [topics not to cut]
+---</code></bdi></div>
+
+<table>
+<thead>
+<tr><th>الحقل</th><th>معناه</th></tr>
+</thead>
+<tbody>
+<tr><td><bdi dir="ltr"><code>show</code></bdi></td><td>اسم البرنامج.</td></tr>
+<tr><td><bdi dir="ltr"><code>episode</code></bdi></td><td>رقم الحلقة.</td></tr>
+<tr><td><bdi dir="ltr"><code>host</code></bdi></td><td>مقدّم البرنامج.</td></tr>
+<tr><td><bdi dir="ltr"><code>guest</code></bdi></td><td>الضيف ودوره، بالصيغة: الاسم — الدور.</td></tr>
+<tr><td><bdi dir="ltr"><code>links</code></bdi></td><td>الروابط التي تُذكر في نصوص النشر، كل رابط في سطر.</td></tr>
+<tr><td><bdi dir="ltr"><code>sponsor</code></bdi></td><td>الراعي إن وُجد، أو يُترك فارغًا.</td></tr>
+<tr><td><bdi dir="ltr"><code>avoid</code></bdi></td><td>موضوعات لا يُقطع منها أي ريل.</td></tr>
+</tbody>
+</table>
+
+<p>تفاصيل وضع البودكاست في الفصل 8.</p>
+
+<h2 id="ch04-output">فولدر النتائج <bdi dir="ltr"><code>output/</code></bdi></h2>
+
+<p>كل ما يُنتجه WhyNot Cut يُكتب في <bdi dir="ltr"><code>output/</code></bdi>. لكل كليب فولدر باسم رقمه داخل <bdi dir="ltr"><code>output/projects/</code></bdi>، وأهم ما ستفتحه فيه:</p>
+
+<table>
+<thead>
+<tr><th>المسار (للكليب <bdi dir="ltr">C0001</bdi>)</th><th>ما فيه</th></tr>
+</thead>
+<tbody>
+<tr><td><bdi dir="ltr"><code>output/projects/C0001/01_analysis/edit-plan.md</code></bdi></td><td>خطة المونتاج التي توافق عليها.</td></tr>
+<tr><td><bdi dir="ltr"><code>output/projects/C0001/07_premiere/project/</code></bdi></td><td>مشروع Premiere Pro، مثل <bdi dir="ltr"><code>C0001_EC_EDIT.prproj</code></bdi>.</td></tr>
+<tr><td><bdi dir="ltr"><code>output/projects/C0001/08_quality_control/preview/</code></bdi></td><td>فيديو المعاينة <bdi dir="ltr"><code>C0001_preview.mp4</code></bdi>.</td></tr>
+<tr><td><bdi dir="ltr"><code>output/projects/C0001/08_quality_control/</code></bdi></td><td>نتائج فحص الجودة (QC).</td></tr>
+<tr><td><bdi dir="ltr"><code>output/projects/C0001/09_handoff/</code></bdi></td><td>ملفات التسليم: <bdi dir="ltr"><code>README.md</code></bdi> وقائمة المراجعة الأخيرة <bdi dir="ltr"><code>final-editor-checklist.md</code></bdi>.</td></tr>
+</tbody>
+</table>
+
+<p>وفي <bdi dir="ltr"><code>output/</code></bdi> أيضًا:</p>
+<ul>
+<li><bdi dir="ltr"><code>output/client_database/</code></bdi>: الملف التعريفي للعميل وأسلوبه المرجعي (الفصل 5).</li>
+<li><bdi dir="ltr"><code>output/episodes/EP12/</code></bdi>: نتائج كل حلقة بودكاست: التفريغ النصي، وخطة الريلز، ومعاينات المرشحين، وحزمة النشر. وكل ريل يُختار يصبح كليبًا مستقلًا في <bdi dir="ltr"><code>output/projects/</code></bdi>.</li>
+</ul>
+
+<p>وعند التسليم يُكتب ملف <bdi dir="ltr"><code>HANDOFF.md</code></bdi> في جذر فولدر العميل، يشرح أين وصل العمل وكيف يُستكمل على جهاز آخر (الفصل 6).</p>
+
+<h2 id="ch04-mistakes">أخطاء شائعة في فولدر العميل</h2>
+
+<table>
+<thead>
+<tr><th>الخطأ</th><th>لماذا يسبب مشكلة</th><th>الصواب</th></tr>
+</thead>
+<tbody>
+<tr><td>وضع حلقة بودكاست كاملة في <bdi dir="ltr"><code>data/Raw</code></bdi></td><td><bdi dir="ltr"><code>data/Raw</code></bdi> للفيديوهات الخام، وكل ملف فيه يصبح فيديو واحدًا. أما الحلقة الكاملة فلها وضع البودكاست، الذي يقترح منها ريلز بالتوقيتات.</td><td>ضع الحلقة في <bdi dir="ltr"><code>data/Episodes</code></bdi> واطلب «طلّع ريلز من الحلقة».</td></tr>
+<tr><td>فولدر العملاء داخل OneDrive أو iCloud أو Dropbox</td><td>الملفات المحفوظة «على الإنترنت فقط» لا تكون موجودة فعليًا على الجهاز، فيفشل التفريغ النصي.</td><td>اختر فولدرًا عاديًا على القرص لا يُزامَن.</td></tr>
+<tr><td>البدء قبل انتهاء النسخ أو التحميل</td><td>يُفحص ملف ناقص أو غير موجود بعد.</td><td>انتظر حتى يكتمل النسخ، ثم اطلب الفحص.</td></tr>
+<tr><td>وضع ملفات الخطوط دون تثبيتها على الجهاز</td><td>Premiere Pro وAfter Effects يحتاجان إلى الخطوط مثبّتة. الخط غير المثبّت عائق يُبلَّغ عنه، ولا يُستبدل بخط آخر في صمت.</td><td>ثبّت كل خطوط <bdi dir="ltr"><code>assets/Fonts</code></bdi> على الجهاز.</td></tr>
+<tr><td>ملفات في الفولدر الخطأ، مثل صور في <bdi dir="ltr"><code>data/Raw</code></bdi></td><td>لا تُستخدم في مكانها الصحيح.</td><td>انقلها بنفسك؛ وفحص الملفات ينبّهك إلى ما وُضع في غير مكانه.</td></tr>
+<tr><td>تعديل ملف في <bdi dir="ltr"><code>data/</code></bdi> أو استبداله بعد أن بدأ العمل عليه</td><td>كل خطوة اعتمدت على الملف القديم تصبح قديمة (stale)، ولا تعود نتيجتها صالحة بعد التغيير.</td><td>إذا تغيّرت المادة، اسأل «جاهز؟» ليعرض لك Claude الخطوات التي تحتاج إلى إعادة.</td></tr>
+</tbody>
+</table>
+
+</section>
