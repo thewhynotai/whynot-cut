@@ -6,6 +6,29 @@ from pathlib import Path
 from .common import Paths, project_prefix, frame_to_tc, load_config, now_iso, read_json, seq_fps, write_text
 
 
+def export_spec(paths: Paths) -> dict:
+    """The client's delivery spec (style.json `export`: name pattern, video/audio settings, folder) for this video.
+    Pattern fields: {episode} (the raw file's stem), {video_id}, {name} (the range label without the id), {prefix},
+    {version}. Example: "{episode}_{video_id}_{name}_9x16_AR_v{version:02d}.mp4" -> EP02_R02_Tennis_Racket_Tasleem_..."""
+    from .common import source_range
+    ex = load_config("style.json").get("export") or {}
+    rng = source_range(paths)
+    label = (rng.get("label") or "").strip()
+    name = label[len(paths.video_id):].strip(" _-") if label.startswith(paths.video_id) else label
+    fields = {"episode": Path(rng["footage"]).stem if rng else paths.video_id, "video_id": paths.video_id,
+              "name": (name or paths.video_id).replace(" ", "_"), "prefix": project_prefix(),
+              "version": int(ex.get("version", 1))}
+    try:
+        file_name = (ex.get("name") or "{video_id}_{prefix}_9x16_v{version:02d}.mp4").format(**fields)
+    except (KeyError, ValueError, IndexError) as e:
+        file_name = f"{paths.video_id}_{project_prefix()}_9x16_v01.mp4 (export.name pattern error: {e})"
+    fps = seq_fps()
+    return {"file_name": file_name,
+            "video": ex.get("video") or f"H.264 High Profile, 1080x1920 at {fps:.2f} fps, high bitrate (or ProRes)",
+            "audio": ex.get("audio") or "AAC 320 kbps, 48 kHz stereo, -14 LUFS integrated, true peak <= -1 dB",
+            "folder": ex.get("folder")}
+
+
 def build(paths: Paths) -> dict:
     from .premiere_xml import timeline_manifest
     tm = timeline_manifest(paths)
@@ -13,6 +36,12 @@ def build(paths: Paths) -> dict:
     _fps_num = f"{_fps:.2f}"
     _fps_label = f"{_fps:.2f} fps Non-Drop-Frame" if abs(_fps - round(_fps)) > 0.001 else f"{round(_fps)} fps"
     qc = read_json(paths.p("08_quality_control/qc-results.json"), {})
+    exp = export_spec(paths)
+    style = load_config("style.json")
+    music_note = (f"- Music: {style['music']}." if isinstance(style.get("music"), str) and style["music"].lower().startswith("none")
+                  else "- Music: add your licensed track to A06 using the MUSIC markers; duck −18 to −22 dB under dialogue.")
+    music_check = ("- [ ] No music (client style)" if music_note.startswith("- Music: none")
+                   else "- [ ] Add licensed music on A06, duck under dialogue")
     spec = read_json(paths.p("01_analysis/timeline-spec.json"), {})
     ae = read_json(paths.p("04_after_effects/ae-build-result.json"), {})
     aer = read_json(paths.p("04_after_effects/ae-render-result.json"), {})
@@ -44,7 +73,7 @@ Generated {now_iso()} by the `whynot-cut` plugin (by The Why Not AI). QC: **{'PA
 | Premiere sequence | FCP7 XML interchange (automated) → **you import + save as .prproj** |
 | Captions | Animated captions rendered from AE on C02 (automated); SRT for optional CC track |
 | SFX | Original procedural SFX placed on A-tracks |
-| Music | **Not supplied** — markers only |
+| Music | {"None, by the client's style" if music_check.startswith("- [ ] No music") else "**Not supplied** — markers only"} |
 | Final mix, polish, render | You |
 
 ## 1. Open in Premiere Pro (≈3 min)
@@ -78,12 +107,13 @@ Every graphic and decision also appears as a **sequence marker** (ID + transcrip
 - `05_photoshop/layered-assets/*.psd` — editable text layers, brand band group, placed client photo, logo.
 
 ## 4. Approvals needed ({len(pend)})
-""" + ("\n".join(f"- **{e['event_id']}** ({e['template']}, {e['start_tc']}): {e.get('evidence', '')[:120]}" for e in pend) or "- none") + """
+""" + ("\n".join(f"- **{e['event_id']}** ({e['template']}, {e['start_tc']}): {e.get('evidence', '')[:120]}" for e in pend) or "- none") + f"""
 
 ## 5. Finishing notes
 - Frosted-glass cards: overlays carry a translucent fill; for true backdrop blur add an Adjustment Layer under the card with **Gaussian Blur ≈ 40** masked to the card shape (as in the references).
-- Music: add your licensed track to A06 using the MUSIC markers; duck −18 to −22 dB under dialogue.
-- Verify all medical wording on screen against `01_analysis/medical-content-review.md`.
+{music_note}
+- Verify all on-screen wording against the content review `01_analysis/medical-content-review.md`.
+- **Export:** `{exp['file_name']}` · {exp['video']} · {exp['audio']}{f" · deliver to `{exp['folder']}`" if exp.get('folder') else ""}
 """
     write_text(paths.p("09_handoff/README.md"), R)
     C = f"""# Final Editor Checklist — {paths.video_id}
@@ -113,11 +143,13 @@ Every graphic and decision also appears as a **sequence marker** (ID + transcrip
 ## Audio
 - [ ] Dialogue peaks ≈ −6 dBFS, integrated ≈ −14 LUFS for social
 - [ ] SFX not masking speech; remove any that distract
-- [ ] Add licensed music on A06, duck under dialogue
+{music_check}
 
 ## Delivery
 - [ ] Final QC pass full-screen at 100%
-- [ ] Export 1080×1920 at {_fps_num} fps (H.264 high bitrate or ProRes) — your preset
+- [ ] Export `{exp['file_name']}`: {exp['video']}; audio {exp['audio']}
+{f"- [ ] Deliver to `{exp['folder']}`" if exp.get('folder') else "- [ ] Deliver where the client expects it"}
 """
     write_text(paths.p("09_handoff/final-editor-checklist.md"), C)
-    return {"readme": str(paths.p("09_handoff/README.md")), "checklist": str(paths.p("09_handoff/final-editor-checklist.md"))}
+    return {"readme": str(paths.p("09_handoff/README.md")), "checklist": str(paths.p("09_handoff/final-editor-checklist.md")),
+            "export": exp}

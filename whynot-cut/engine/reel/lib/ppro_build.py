@@ -139,7 +139,18 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
             "native_caption_track": bool(g.get("native_caption_track", False)),
             "markers": markers, "track_names": {"video": vnames, "audio": anames}, "_missing": missing,
             "blur_v1_clips": (base.get("cutaways") or {}).get("blur_v1_clip_indices") or [],
+            "sharpen_v1": sharpen_settings(spec),
             "_lanes": lanes, "duration_s": spec["duration_frames"] * F}
+
+
+def sharpen_settings(spec: dict) -> dict | None:
+    """Sharpen (+ grain) for the speaker clips on V1 when the source is upscaled at least `min_upscale_percent`
+    (style.json reframe_sharpen). None = leave the footage untouched."""
+    cfg = load_config("style.json").get("reframe_sharpen") or {}
+    amount = float(cfg.get("amount") or 0)
+    if amount <= 0 or float(spec.get("base_scale_percent") or 0) < float(cfg.get("min_upscale_percent", 150)):
+        return None
+    return {"amount": amount, "grain": float(cfg.get("grain_percent") or 0)}
 
 
 def stage_stills(paths: Paths, graphics: list) -> Path:
@@ -212,6 +223,8 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
         "max_bit_depth_off": sa.get("maximumBitDepth") is False,
         "max_render_quality_off": sa.get("maximumRenderQuality") is False,
         "all_graphics_placed": len(res.get("placed", [])) == len(data["graphics"]),
+        "v1_sharpened": (len(res.get("sharpened") or []) > 0 and all(x.get("ok") for x in res.get("sharpened") or []))
+                        if data.get("sharpen_v1") else True,
         "caption_track_ok": bool(res.get("captionTrack")) if data["native_caption_track"] else True,
         "dialogue_on_A1_A2": all(a["clips"] > 0 for a in (res.get("tracks", {}).get("audio") or [])[:2]) if res.get("tracks") else False,
     }

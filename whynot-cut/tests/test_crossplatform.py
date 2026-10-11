@@ -797,5 +797,89 @@ class TestFieldTestRound2(unittest.TestCase):
         self.assertGreater(low_card[1], 200)
 
 
+class TestClientPlanRules(unittest.TestCase):
+    """Rules from a client's written reels plan (Reels_Plan_EP02.md) that the plugin must be able to follow."""
+
+    def test_caption_punctuation(self):
+        from lib.previews import caption_text
+        self.assertEqual(caption_text("وعملوا الصالحات،\nبس لازم"), "وعملوا الصالحات، بس لازم")      # default: as heard
+        self.assertEqual(caption_text("وعملوا الصالحات، بس... لازم؟", "،,.;؛:"), "وعملوا الصالحات بس… لازم؟")
+        self.assertEqual(caption_text(" ، ", "،"), "")
+
+    def test_caption_lead_in_never_overlaps(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import test_pipeline as T
+        from lib import common
+        from lib.common import write_json, read_json
+        from lib.plan import compile_plan
+        from lib.previews import render_captions
+        from lib import srt as srtlib
+        with tempfile.TemporaryDirectory() as t:
+            root, p, words = T.make_project(Path(t))
+            prof = root / common.CLIENT_PROFILE_REL
+            prof.mkdir(parents=True, exist_ok=True)
+            write_json(prof / "graphics-templates.json", {"templates": {"highlight_caption": {"lead_in_ms": 200}}})
+            common.set_context(root)
+            try:
+                tc = T.TestPlanToXML()
+                tc.p = p
+                tc._semantic_stub()
+                write_json(p.p("01_analysis/edit-decisions.json"), tc.decisions())
+                self.assertTrue(compile_plan(p)["ok"])
+                spec = read_json(p.p("01_analysis/timeline-spec.json"))
+                src = srtlib.read_srt(p.p(spec["caption_source"]))
+                caps = render_captions(p, [])
+            finally:
+                common.set_context(None)
+        self.assertEqual(caps[0]["start_ms"], max(0, src[0]["start_ms"] - 200))
+        for a, b in zip(caps, caps[1:]):
+            self.assertLessEqual(a["end_ms"], b["start_ms"])
+
+    def test_sharpen_only_on_strong_upscale(self):
+        from lib import common
+        from lib.common import write_json
+        from lib.ppro_build import sharpen_settings
+        self.assertEqual(sharpen_settings({"base_scale_percent": 177.778})["amount"], 15)   # default style
+        self.assertIsNone(sharpen_settings({"base_scale_percent": 100}))                  # native 9:16 untouched
+        with tempfile.TemporaryDirectory() as t:
+            prof = Path(t) / common.CLIENT_PROFILE_REL
+            prof.mkdir(parents=True)
+            write_json(prof / "style.json", {"reframe_sharpen": {"amount": 18, "grain_percent": 2}})
+            common.set_context(Path(t))
+            try:
+                self.assertEqual(sharpen_settings({"base_scale_percent": 177.8}), {"amount": 18.0, "grain": 2.0})
+                write_json(prof / "style.json", {"reframe_sharpen": {"amount": 0}})
+                self.assertIsNone(sharpen_settings({"base_scale_percent": 177.8}))
+            finally:
+                common.set_context(None)
+
+    def test_export_name_from_client_pattern(self):
+        from lib import common
+        from lib.common import Paths, write_json
+        from lib.handoff import export_spec
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t)
+            prof = root / common.CLIENT_PROFILE_REL
+            prof.mkdir(parents=True)
+            write_json(prof / "style.json", {"export": {"name": "{episode}_{video_id}_{name}_9x16_AR_v{version:02d}.mp4",
+                                                        "folder": "EP2/Reels Plan/Exports"}})
+            p = Paths(root, "R02")
+            p.ensure_project()
+            write_json(p.p("00_inputs/source.json"), {"footage": "data/Raw/EP02.mp4", "in_ms": 0, "out_ms": 1000,
+                                                      "label": "R02 Tennis_Racket_Tasleem"})
+            common.set_context(root)
+            try:
+                ex = export_spec(p)
+            finally:
+                common.set_context(None)
+        self.assertEqual(ex["file_name"], "EP02_R02_Tennis_Racket_Tasleem_9x16_AR_v01.mp4")
+        self.assertEqual(ex["folder"], "EP2/Reels Plan/Exports")
+
+    def test_bridge_sets_grain_by_intensity_or_amount(self):
+        jsx = (SK / "templates/premiere/nh_ppro_lib.jsx").read_text(encoding="utf-8")
+        self.assertIn('NHPP.prop(nc, "Intensity") || NHPP.prop(nc, "Amount of Noise")', jsx)   # Premiere 26 default is 50
+        self.assertIn("NHPP.actions.clip_components", jsx)
+
+
 if __name__ == "__main__":
     unittest.main()

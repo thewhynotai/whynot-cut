@@ -186,6 +186,9 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
     src_idx, cur = -1, Image.new("RGB", (cw_, ch_))
     layers = sorted(data["graphics"], key=lambda g: g["track_index"])
     stills = _Stills(W, H)
+    from .ppro_build import sharpen_settings
+    _sh = sharpen_settings(spec)
+    sharp = ImageFilter.UnsharpMask(radius=1.2, percent=int(_sh["amount"] * 4), threshold=2) if _sh else None
     segs = spec["main_segments"]
     si = 0
     brolls = [e for e in spec["events"] if e["template"] == "broll_video"]
@@ -240,6 +243,8 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
                 frame.paste(cur.resize((cw2, ch2), Image.BILINEAR), (round(W / 2 - cw2 / 2 + ox), round(H / 2 - ch2 / 2 + oy)))
             else:
                 frame = cur.crop((round(x0), round(y0), round(x1), round(y1))).resize((W, H), Image.BILINEAR)
+                if sharp:   # Premiere Sharpen on V1 (approximation: unsharp mask at preview size)
+                    frame = frame.filter(sharp)
             for be in brolls:                       # full-screen licensed B-roll replaces the picture (hard cut)
                 if be["start_frame"] <= f < be["end_frame"]:
                     bf = broll_frame(be)

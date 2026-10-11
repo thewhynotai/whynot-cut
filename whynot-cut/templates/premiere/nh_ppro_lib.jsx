@@ -241,6 +241,34 @@ NHPP.actions.build_project = function (d) {
             } else { log.push("Gaussian Blur effect not found"); }
         } catch (eb) { log.push("blur clip " + ci + ": " + eb); }
     }
+    // 4c. strong reframe upscale: light Sharpen (+ optional Noise as grain) on the speaker clips of V1, not on the
+    //     blurred cover copies under source cutaways (client plan: a x1.78 crop looks soft)
+    ev.sharpened = [];
+    if (d.sharpen_v1 && d.sharpen_v1.amount) {
+        var v1 = seq.videoTracks[0];
+        for (var si = 0; si < v1.clips.numItems; si++) {
+            var isBlur = false;
+            for (var bj = 0; d.blur_v1_clips && bj < d.blur_v1_clips.length; bj++) { if (d.blur_v1_clips[bj] === si) { isBlur = true; } }
+            if (isBlur) { continue; }
+            try {
+                var rec = {clip: si, ok: false};
+                if (NHPP.addEffect(seq, 0, si, "Sharpen")) {
+                    var sa = NHPP.prop(NHPP.comp(v1.clips[si], "Sharpen"), "Sharpen Amount");
+                    if (sa) { sa.setValue(d.sharpen_v1.amount, true); rec.ok = true; rec.amount = d.sharpen_v1.amount; }
+                    else { log.push("Sharpen Amount property not found"); }
+                } else { log.push("Sharpen effect not found"); ev.sharpened.push(rec); break; }
+                if (d.sharpen_v1.grain && NHPP.addEffect(seq, 0, si, "Noise")) {
+                    // Premiere 26 resolves "Noise" to its grain effect (ADBE_Noise_FX: Intensity, default 50 = heavy);
+                    // older versions to the classic Noise ("Amount of Noise" %). Set whichever exists.
+                    var nc = NHPP.comp(v1.clips[si], "Noise");
+                    var na = NHPP.prop(nc, "Intensity") || NHPP.prop(nc, "Amount of Noise");
+                    if (na) { na.setValue(d.sharpen_v1.grain, true); rec.grain = na.getValue(); }
+                    else { log.push("Noise: no Intensity / Amount of Noise property"); rec.ok = false; }
+                }
+                ev.sharpened.push(rec);
+            } catch (es) { log.push("sharpen clip " + si + ": " + es); }
+        }
+    }
     // 5. native captions from SRT
     if (d.srt_path && d.native_caption_track) {
         app.project.importFiles([d.srt_path], true, bins["04 Captions"], false);
@@ -283,6 +311,23 @@ NHPP.outPath = function (dir, name) {
     // "Unknown error exception" (probed on Premiere 26.5.2). fsName gives the native form on both systems.
     var win = $.os.indexOf("Windows") >= 0;
     return new Folder(dir).fsName + (win ? "\\" : "/") + name;
+};
+
+NHPP.actions.clip_components = function (d) {
+    // read-only: the effects on one clip and their property names/values (find Premiere's real names per version)
+    var seq = NHPP.findSeq(d.sequence_name);
+    var tr = d.audio ? seq.audioTracks[d.track || 0] : seq.videoTracks[d.track || 0];
+    var clip = tr.clips[d.clip || 0], comps = [];
+    for (var i = 0; i < clip.components.numItems; i++) {
+        var c = clip.components[i], props = [];
+        for (var j = 0; j < c.properties.numItems; j++) {
+            var p = c.properties[j], v = null;
+            try { v = p.getValue(); if (v && typeof v === "object") { v = String(v); } } catch (e) { v = "?"; }
+            props.push({name: p.displayName, value: v});
+        }
+        comps.push({name: c.displayName, match: c.matchName, props: props});
+    }
+    return {clip: clip.name, components: comps};
 };
 
 NHPP.actions.export_frames = function (d) {

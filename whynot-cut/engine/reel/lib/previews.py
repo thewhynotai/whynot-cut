@@ -434,6 +434,16 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
 SAFE_TOP_PX = 220   # platform UI covers the top of a 1080x1920 reel
 
 
+def caption_text(text: str, strip: str | None = None) -> str:
+    """Burned caption text on one line, minus the punctuation the client's style removes (e.g. commas: «احذف
+    الفواصل … واستخدم "…" فقط»); with stripping on, "..." becomes "…"."""
+    out = " ".join((text or "").split())
+    if strip:
+        out = out.replace("...", "…")
+        out = " ".join("".join(ch for ch in out if ch not in strip).split())
+    return out
+
+
 def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) -> list[dict]:
     """Animated caption stills on the SEQUENCE clock: text (pop) + teal box (RTL sweep) on keyword cues.
     Cues under a graphic that already shows the words are trimmed/dropped (reference behaviour)."""
@@ -448,8 +458,12 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
     out_dir = paths.p("03_broll/captions")
     out_dir.mkdir(parents=True, exist_ok=True)
     res = []
+    lead = int(t.get("lead_in_ms") or 0)          # a line appears slightly before the speech (client style)
+    prev_end = 0
     for i, c in enumerate(srtlib.read_srt(paths.p(spec["caption_source"]))):
         s, e = c["start_ms"], c["end_ms"]
+        if lead:
+            s = max(prev_end, s - lead, 0)            # never over the previous line
         for a, z in hidden_ms:
             if a <= s < z:
                 s = z
@@ -458,7 +472,10 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
         if e - s < 250:
             continue
         is_hl = style == "highlight_all" or any(h and h in norm(c["text"]) for h in hl)
-        ev = {"template": "highlight_caption", "params": {"text": c["text"].replace("\n", " "), "highlight": is_hl}}
+        text = caption_text(c["text"], t.get("strip_punctuation"))
+        if not text:
+            continue
+        ev = {"template": "highlight_caption", "params": {"text": text, "highlight": is_hl}}
         # a card (name card, glass card, CTA) overlaps the caption band at the same time: move the caption above the
         # card, or below it when there is no room above (a card at the top of the frame: seen on a real client)
         from .ae_builder import wrap_lines
@@ -472,7 +489,8 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
             ev["params"]["y"] = int(up) if up - half >= SAFE_TOP_PX else int(min(H - 300, bot + half + 24))
         fg = out_dir / f"CAP_{i + 1:03d}_fg.png"
         render_event(ev, t, b, {}, None, fg, layer="fg")
-        item = {"id": f"CAP_{i + 1:03d}", "fg": str(fg), "start_ms": s, "end_ms": e, "highlight": is_hl, "text": c["text"]}
+        item = {"id": f"CAP_{i + 1:03d}", "fg": str(fg), "start_ms": s, "end_ms": e, "highlight": is_hl, "text": text}
+        prev_end = e
         if is_hl or t.get("box_all"):
             bar = out_dir / f"CAP_{i + 1:03d}_bar.png"
             render_event(ev, t, b, {}, None, bar, layer="bars")
