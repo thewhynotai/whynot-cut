@@ -778,5 +778,60 @@ class TestMotionTiming(unittest.TestCase):
         self.assertEqual(out[0]["end_frame"] - out[0]["start_frame"], 75)   # the outro keeps its length past the audio
 
 
+# --------------------------------------------------------------------------- layout
+def test_font() -> Path | None:
+    from lib.plat import font_dirs
+    return next((f for d in font_dirs() if d.exists() for f in sorted(d.glob("*.ttf"))
+                 if f.name.lower() in ("arial.ttf", "dejavusans.ttf", "notosansarabic-regular.ttf",
+                                       "ibmplexsansarabic-medium.ttf")), None)
+
+
+class TestMotionLayout(unittest.TestCase):
+    def test_wrap_glue(self):
+        from lib.motion_layout import wrap
+        for text, keep in (("الـ Isotretinoin مهم جدا", "الـ Isotretinoin"), ("عندنا 3 مليون عميل", "3 مليون"),
+                           ("Vitamin D3 مهم", "Vitamin D3")):
+            lines = wrap(text, 10, 3)
+            self.assertTrue(any(keep in ln for ln in lines), (text, lines))
+            self.assertEqual(" ".join(lines), text)
+        two = wrap("كلمه اولي وتانيه وتالته", 14, 2)
+        self.assertEqual(len(two), 2)
+        self.assertTrue(all(len(ln.split()) == 2 for ln in two), two)
+
+    def test_fit(self):
+        from lib import hb_text
+        from lib.motion_layout import fit
+        font = test_font()
+        if font is None or not hb_text.AVAILABLE:
+            self.skipTest("no test font / HarfBuzz")
+        short = fit("كلام قصير", str(font), 900, (120, 56), 3)
+        long_ = fit("كلام اطول بكتير من الاول ومحتاج سطرين او تلاته علشان يتقري كويس", str(font), 900, (120, 56), 3)
+        self.assertTrue(short["ok"] and long_["ok"])
+        self.assertGreaterEqual(short["size"], long_["size"])
+        self.assertTrue(all(w <= 900 for w in long_["widths"]))
+        self.assertLessEqual(len(long_["lines"]), 3)
+        self.assertFalse(fit("كلمه " * 80, str(font), 900, (120, 56), 3)["ok"])
+
+    def test_contrast(self):
+        from lib.motion_layout import contrast, pick_text_color
+        self.assertAlmostEqual(contrast((255, 255, 255), (0, 0, 0)), 21.0, places=3)
+        cfg = {"min_contrast": 4.5, "min_contrast_large": 3.0, "large_px": 64}
+        name, ratio = pick_text_color((0x20, 0xAC, 0xAF), [("white", (255, 255, 255)), ("ink", (0x1F, 0x2A, 0x2A))], 64, cfg)
+        self.assertEqual(name, "ink")
+        with self.assertRaises(ValueError):
+            pick_text_color((0xA0, 0xA0, 0xA0), [("white", (0xDD, 0xDD, 0xDD)), ("ink", (0x66, 0x66, 0x66))], 40, cfg)
+
+    def test_place_direction(self):
+        from lib.motion_config import format_spec
+        from lib.motion_layout import place
+        fmt = format_spec("9x16")
+        self.assertGreater(place("list_steps", "number", fmt, "rtl")[0], fmt["w"] / 2)
+        self.assertLess(place("list_steps", "number", fmt, "ltr")[0], fmt["w"] / 2)
+        x, y = place("kinetic_quote", "text", fmt, "rtl")
+        self.assertEqual(x, fmt["w"] / 2)
+        self.assertTrue(fmt["safe"]["top"] < y < fmt["h"] - fmt["safe"]["bottom"])
+        self.assertGreater(place("comparison", "first", fmt, "rtl")[0], fmt["w"] / 2)   # first = the reading-start side
+
+
 if __name__ == "__main__":
     unittest.main()
