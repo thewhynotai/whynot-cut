@@ -409,7 +409,8 @@ class TestSessionLease(LockFixture):
                 if window == "after_exists_check" and path == self.lock and free and not taken:
                     take()                                   # free when looked at, taken right after
                 return not free
-            with mock.patch.object(writer_lock.os, "link", side_effect=no_link),                     mock.patch.object(writer_lock.Path, "exists", exists_then_race):
+            with mock.patch.object(writer_lock.os, "link", side_effect=no_link), \
+                    mock.patch.object(writer_lock.Path, "exists", exists_then_race):
                 self.assertFalse(writer_lock._remove_stale(self.lock, {"session_id": "old"}, "test", self.root))
             kept = list(self.lock.parent.glob(".whynot-lock.stale-*"))
             if taken:

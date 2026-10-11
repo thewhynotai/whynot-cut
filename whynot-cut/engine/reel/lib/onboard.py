@@ -77,42 +77,49 @@ def guard_heartbeat(now: float | None = None) -> dict:
             "runner_file": rf, "runner_age_h": round(rage / 3600, 1) if rage is not None else None, "fix": fix}
 
 
+def own_marker_roots(root: str | None) -> list[Path]:
+    """The client `reel doctor --fix` may mark (G70): --root, else the current folder when it has assets/ and data/
+    and WhyNot Cut has worked there (output/ or START_HERE.md: a Hugo site is not a client). Never the other clients
+    of clients_root: those need `--all-clients --yes`."""
+    from .client_marker import has_layout
+    cwd = Path.cwd()
+    cands = [Path(root).expanduser()] if root else         [cwd] if (cwd / "output").is_dir() or (cwd / "START_HERE.md").is_file() else []
+    return [c.resolve() for c in cands if has_layout(c.resolve())]
+
+
 def marker_roots(root: str | None) -> list[Path]:
-    """Client folders `reel doctor` looks at for the `.whynot-client` marker: --root, else the current folder when it
-    has assets/ and data/ and WhyNot Cut has worked there (output/ or START_HERE.md: a Hugo site is not a client),
-    plus every client folder in clients_root."""
+    """Client folders `reel doctor` looks at for the `.whynot-client` marker: own_marker_roots plus every client
+    folder in clients_root (reported; written only with `--fix --all-clients --yes`)."""
     from .client_marker import has_layout
     from .common import client_folders, clients_root
-    cwd = Path.cwd()
-    cands = [Path(root).expanduser()] if root else \
-        [cwd] if (cwd / "output").is_dir() or (cwd / "START_HERE.md").is_file() else []
-    cands += client_folders(clients_root())
-    out = []
-    for c in cands:
+    out = list(own_marker_roots(root))
+    for c in client_folders(clients_root()):
         c = c.resolve()
         if has_layout(c) and c not in out:
             out.append(c)
     return out
 
 
-def client_markers(roots: list[Path], fix: bool = False) -> dict:
-    """{written, present, missing, unprotected}: `unprotected` = no sign at all that it is a client folder (the guard
-    leaves it alone until `reel doctor --fix` writes the marker)."""
+def client_markers(roots: list[Path], fix_roots=()) -> dict:
+    """{written, present, missing, unprotected} for `roots`; the marker is written only into `fix_roots`.
+    `unprotected` = no sign at all that it is a client folder (the guard leaves it alone until the marker exists)."""
     from .client_marker import MARKER, is_client, write_marker
     rep = {"written": [], "present": [], "missing": [], "unprotected": []}
+    fix_roots = {Path(r).resolve() for r in fix_roots}
     for r in roots:
         if (r / MARKER).is_file():
             rep["present"].append(str(r / MARKER))
-        elif fix:
+            continue
+        if r.resolve() in fix_roots:
             try:
                 write_marker(r)
+                rep["written"].append(str(r / MARKER))
+                continue
             except ValueError:            # inside another client's assets/ or data/: never write there
                 continue
-            rep["written"].append(str(r / MARKER))
-        else:
-            rep["missing"].append(str(r))
-            if not is_client(r):
-                rep["unprotected"].append(str(r))
+        rep["missing"].append(str(r))
+        if not is_client(r):
+            rep["unprotected"].append(str(r))
     return rep
 
 

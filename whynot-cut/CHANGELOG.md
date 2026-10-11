@@ -200,6 +200,17 @@
   file-tool branch to Write/Edit/MultiEdit/NotebookEdit only (a subagent may Read the lock), ignores `2>`, `2>&1` and
   `>&` redirects that do not point at the lock, counts `sc ac mi ni ri py sh` only as a command's first word, and also
   blocks `find … -name .whynot-lock -delete` and globs that match the lock (`rm output/.whynot-l*`).
+  Review fixes: in `find`, a predicate after `!`/`-not` (or inside `! ( … )`) or in a branch with `-prune` does not
+  narrow, with `-o` every branch needs a narrowing predicate, and `-newer` alone does not narrow
+  (`find . ! -name '*.tmp' -delete`, `find . -name '*.tmp' -o -type f -delete` are blocked). The comparison with the
+  client's files stops at the first match and shares one budget of 100,000 entries per guard call; past it only a
+  temp-style pattern (`*.tmp`, `*.temp`, `*.log`, `*.bak`, `__pycache__`, `*.pyc`, `.DS_Store`, `Thumbs.db`,
+  `*.part`) still narrows. An unnarrowed listing of a client folder fed to a delete is blocked because it names
+  `.whynot-client` (`find . -maxdepth 1 | xargs rm`).
+- `reel doctor --fix` writes the `.whynot-client` marker only for `--root` or the current client folder (G70: it wrote
+  the marker into every client under `clients_root`, real client folders included). `reel doctor --fix --all-clients`
+  lists the unmarked clients and writes nothing; with `--yes` it marks them all. `reel doctor` lists unmarked clients
+  under `fixes` with `reel doctor --fix --all-clients` (or `--fix --root "<folder>"` for the current one) as the hint.
 - Engine, Phase 1 review minors. The approval fingerprint ignores timestamp keys of `source_range` (`set_at`,
   `selected_at`, any `*_at`), so re-running `reel range` with the same points and `reel plan` keeps the approval.
   `reel next` lists a stale approval as "PLAYBACK edit-plan.md to editor, then approve-plan (plan changed since

@@ -671,7 +671,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
 CORE_READS = {"setup", "model-download", "gpu-enable", "profile", "ppro-install", "ppro-status", "ppro-probe",
               "status", "next", "lock"}
 WRITES_IF = {
-    "doctor": lambda a: bool(a.fix),
+    "doctor": lambda a: bool(a.fix) and (not getattr(a, "all_clients", False) or getattr(a, "yes", False)),
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
                                                 / "output/discovery/input-inventory.json").exists(),
     "settings": lambda a: bool(a.init),
@@ -766,15 +766,26 @@ def cmd_gpu_enable(a):
 
 
 def cmd_doctor(a):
-    """Machine report; also the `.whynot-client` markers of --root / the current client folder / clients_root
-    (--fix writes the missing ones, only at each client root)."""
-    from lib.onboard import client_markers, doctor, marker_roots
+    """Machine report; also the `.whynot-client` markers of --root / the current client folder / clients_root.
+    --fix writes the missing marker only for --root or the current client folder (G70: never every client of
+    clients_root); --fix --all-clients lists the unmarked clients and writes them only with --yes."""
+    from lib.onboard import client_markers, doctor, marker_roots, own_marker_roots
     rep = doctor()
-    cm = rep["client_markers"] = client_markers(marker_roots(a.root), fix=a.fix)
-    if cm["unprotected"]:
-        rep["fixes"].append({"item": "client folder(s) without the .whynot-client marker, so the guard does not protect "
-                                     "their assets/ and data/: " + ", ".join(cm["unprotected"]),
-                             "who": "claude", "fix": "reel doctor --fix" + (f' --root "{a.root}"' if a.root else "")})
+    roots, own = marker_roots(a.root), own_marker_roots(a.root)
+    every = a.fix and a.all_clients
+    fix_roots = (roots if a.yes else []) if every else own if a.fix else []
+    cm = rep["client_markers"] = client_markers(roots, fix_roots)
+    if every and not a.yes:
+        rep["how"] = ("nothing written: these client folders have no .whynot-client marker (client_markers.missing). "
+                      "Show the list to the editor; with their OK run `reel doctor --fix --all-clients --yes`.")
+    if cm["missing"]:
+        mine = {str(r) for r in own}
+        unprot = set(cm["unprotected"])
+        hint = (f'reel doctor --fix --root "{cm["missing"][0]}"' if set(cm["missing"]) <= mine
+                else "reel doctor --fix --all-clients")
+        rep["fixes"].append({"item": "client folder(s) without the .whynot-client marker: " + ", ".join(
+            f"{m} ({'NOT protected by the guard' if m in unprot else 'protected by clients_root or client_database only'})"
+            for m in cm["missing"]), "who": "claude", "fix": hint})
     out(rep)
 
 
@@ -879,7 +890,7 @@ def _utf8_stdio():
 # The command table: every core subcommand with the one line `reel --help` shows (podcast and motion commands carry
 # theirs in lib/podcast_cli.HELP and lib/motion_cli.HELP). Order = the order of the editing workflow.
 CORE_COMMANDS: dict[str, str] = {
-    "doctor": "machine report (engine, ffmpeg, Premiere bridge, PATH, guard, client markers); --fix writes missing markers",
+    "doctor": "machine report (engine, ffmpeg, Premiere bridge, PATH, guard, client markers); --fix marks this client",
     "setup": "install or repair the engine, packages, ffmpeg and the Premiere bridge (idempotent)",
     "scaffold": "create a client folder (assets/, data/, START_HERE.md, .whynot-client)",
     "inbox": "list the new raw clips of a client folder and their video ids",
@@ -1025,7 +1036,11 @@ def main():
             sp.add_argument("--no-bridge", action="store_true")
         if name == "doctor":
             sp.add_argument("--fix", action="store_true",
-                            help="write the missing .whynot-client marker at each client root (never in assets/ or data/)")
+                            help="write the missing .whynot-client marker of --root or the current client folder "
+                                 "(never in assets/ or data/)")
+            sp.add_argument("--all-clients", action="store_true",
+                            help="with --fix: every client of clients_root (lists them; writes only with --yes)")
+            sp.add_argument("--yes", action="store_true", help="with --fix --all-clients: write the markers")
         if name == "client-init":
             sp.add_argument("--id", required=True, help="profile id, kebab-case, e.g. dr-sherif")
             sp.add_argument("--from-profile", help="copy a shipped profile instead of the blank template")

@@ -269,6 +269,40 @@ class TestClientMarker(unittest.TestCase):
         self.assertIn(str(root / MARKER), [str(Path(p)) for p in rep["client_markers"]["written"]])
         self.assertFalse((root / "assets" / MARKER).exists() or (root / "data" / MARKER).exists())
 
+    def test_g70_doctor_fix_marks_only_the_given_client(self):
+        """G70 (live smoke): `doctor --fix` wrote the marker into EVERY client under clients_root. It marks only --root
+        (or the cwd client); `--fix --all-clients` lists the unmarked clients and writes only with `--yes`."""
+        croot = self.base / "clients"
+        a, b, c = (self.site(n, croot) for n in ("Dr A", "Dr B", "Dr C"))
+        env = isolated_env({"WHYNOT_CLIENTS_ROOT": str(croot), "CLAUDE_CONFIG_DIR": str(self.base / "cfg")})
+
+        def doctor(*args, cwd=None):
+            r = subprocess.run([sys.executable, "-B", str(SK / "engine/reel/cli.py"), *args], capture_output=True,
+                               text=True, encoding="utf-8", env=env, cwd=str(cwd or self.base))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)
+        rep = doctor("doctor")                                           # report only: hint, nothing written
+        self.assertFalse(any((x / MARKER).exists() for x in (a, b, c)))
+        hints = [f["fix"] for f in rep["fixes"] if "without the .whynot-client marker" in f["item"]]
+        self.assertEqual(hints, ["reel doctor --fix --all-clients"])
+        rep = doctor("--root", str(a), "doctor", "--fix")
+        self.assertTrue((a / MARKER).is_file())
+        self.assertFalse((b / MARKER).exists() or (c / MARKER).exists())
+        self.assertEqual([Path(p) for p in rep["client_markers"]["written"]], [a.resolve() / MARKER])
+        doctor("doctor", "--fix", cwd=b)                                 # the cwd client (it has output/)
+        self.assertFalse((b / MARKER).exists())                          # no output/ yet: not a known client folder
+        (b / "output").mkdir()
+        doctor("doctor", "--fix", cwd=b)
+        self.assertTrue((b / MARKER).is_file())
+        self.assertFalse((c / MARKER).exists())
+        rep = doctor("doctor", "--fix", "--all-clients")                 # lists, writes nothing
+        self.assertFalse((c / MARKER).exists())
+        self.assertEqual([Path(p) for p in rep["client_markers"]["missing"]], [c.resolve()])
+        self.assertIn("--all-clients --yes", rep["how"])
+        rep = doctor("doctor", "--fix", "--all-clients", "--yes")
+        self.assertTrue((c / MARKER).is_file())
+        self.assertEqual([Path(p) for p in rep["client_markers"]["written"]], [c.resolve() / MARKER])
+
     def test_marker_never_goes_into_sources(self):
         from lib import client_marker
         root = mark_client(self.site("Dr Src"))
@@ -833,7 +867,7 @@ class TestGuardPhase1Minors(ClientFixture):
                                     "Get-ChildItem -Exclude *.tmp | Remove-Item -Recurse"])
         self.allowed("Bash", ["find . -name '*.tmp' | xargs rm -rf", "find . -iname '*.TMP' | xargs rm",
                               "find . -path '*/tmp/*' | xargs rm -f", "find . -regex '.*\\.tmp' | xargs rm",
-                              "find . -newer output/stamp | xargs rm -f", "ls | grep '\\.srt$' | xargs rm",
+                              "ls | grep '\\.srt$' | xargs rm",
                               "find output -type d -empty | xargs rm -rf", "find output -maxdepth 1 | xargs rm -rf"])
         self.allowed("PowerShell", ["gci -File | Remove-Item", "gci -Filter *.tmp | Remove-Item -Recurse",
                                     "gci -Include *.srt -Recurse | Remove-Item",
@@ -851,6 +885,35 @@ class TestGuardPhase1Minors(ClientFixture):
                               "find . -iname '*.MP4' -exec rm {} +", "find . -name '*.mp4' | xargs rm",
                               "find . -path '*/data/*' -delete", "find . -name '*.tmp' -delete -o -path './data/*' -delete"])
         self.blocked("Bash", ["find .. -name '*.mp4' -delete"], cwd=self.root / "output")
+        # fix round 1 (I1): negated predicates, -prune and -o branches without a narrowing predicate, -newer alone
+        self.blocked("Bash", ["find . ! -name '*.tmp' -delete", "find . -not -name '*.tmp' -delete",
+                              "find . -name '*.tmp' -o -type f -delete",
+                              "find . -name '*.tmp' -prune -o -type f -delete", "find . -newer x -delete",
+                              "find . ! \\( -name '*.tmp' \\) -delete", "find . -newer output/x | xargs rm -f",
+                              "find . ! -name '*.tmp' | xargs rm -rf", "find . -name '*.tmp' -o -type d | xargs rm -rf"])
+        self.allowed("Bash", ["find . -name '*.tmp' -o -name '*.bak' -delete", "find . -type f -name '*.tmp' -delete",
+                              "find . \\( -name '*.tmp' -o -name '*.log' \\) -delete",
+                              "find . ! -type d -name '*.tmp' -delete"])
+
+    def test_m3_listing_of_the_client_root_never_deletes_the_marker(self):
+        self.blocked("Bash", ["find . -maxdepth 1 | xargs rm", "ls -A | xargs rm -f", "find . -maxdepth 1 -type f | xargs rm"])
+        self.blocked("PowerShell", ["Get-ChildItem -Force | Remove-Item", "gci -Hidden | Remove-Item"])
+        self.allowed("Bash", ["find output -maxdepth 1 | xargs rm -f", "ls output | xargs cat", "ls -A | xargs cat"])
+
+    def test_i2_scan_budget_never_trusts_a_source_pattern(self):
+        """Fix round 1 (I2): a client too big to scan (budget spent) trusts only temp-style patterns."""
+        for i in range(30):
+            (self.root / "assets/Photos" / f"p{i}.jpg").write_bytes(b"x")
+        env = {"WHYNOT_GUARD_SCAN_BUDGET": "10"}
+
+        def run(cmd):
+            return hook(GUARD, {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(self.root)}, env)[0]
+        for c in ("find . -name '*' -delete", "find . -name '*.mp4' -delete", "find . -name '*.jpg' -exec rm {} +",
+                  "find . -name '*.json' -delete"):
+            self.assertEqual(run(c), 2, c)
+        for c in ("find . -name '*.tmp' -delete", "find . -name '__pycache__' -exec rm -rf {} +",
+                  "find . -name .DS_Store -delete", "find . -iname 'Thumbs.db' | xargs rm -f"):
+            self.assertEqual(run(c), 0, c)
         self.allowed("Bash", ["find . -name '*.mp4' -delete"], cwd=self.root / "output")
         self.blocked("PowerShell", ["gci -r | Remove-Item", "Get-ChildItem -Rec | ForEach-Object { Remove-Item $_ }",
                                     "gci -Recurse -Filter *.mp4 | Remove-Item",

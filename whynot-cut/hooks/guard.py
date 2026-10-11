@@ -311,12 +311,20 @@ FIND_FILTERS = {"-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-who
 PS_FILTERS = {"-filter", "-include", "-exclude", "-file", "-directory", "-attributes", "-hidden"}
 FILTER_STAGES = {"grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sls", "where-object", "where", "?",
                  "awk", "sed", "head", "tail", "select-object", "select"}
-# what narrows a listing (T11): a name/path/regex/newer predicate or a -Filter/-Include that matches none of the
-# client's own files (so `-name '*.tmp'` narrows, `-name '*.mp4'`, `-name '*'`, `-Filter *` do not), -File without
-# recursion, a grep or Where-Object stage. Depth, type, -empty, -Directory, -Exclude, head/tail/select do not.
-FIND_NARROW = {"-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-newer"}
+# what narrows a listing (T11): a name/path/regex predicate or a -Filter/-Include that matches none of the client's
+# own files (so `-name '*.tmp'` narrows, `-name '*.mp4'`, `-name '*'`, `-Filter *` do not), -File without recursion, a
+# grep or Where-Object stage. Depth, type, -empty, -newer, -Directory, -Exclude, head/tail/select do not. In `find`, a
+# predicate after `!`/`-not` or in a branch with -prune does not count, and with -o every branch needs one.
+FIND_NARROW = {"-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex"}
 NARROW_STAGES = {"grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sls", "where-object", "where", "?"}
-SOURCE_SCAN_MAX = 5000                  # entries of a client's assets/ + data/ compared with a filter, else trust it
+# entries of the clients' assets/ + data/ compared with filters, per guard call (the variable is for tests)
+SOURCE_SCAN_BUDGET = int(os.environ.get("WHYNOT_GUARD_SCAN_BUDGET") or 100_000)
+TEMP_PATTERNS = {"*.tmp", "*.temp", "*.log", "*.bak", "__pycache__", "*.pyc", ".ds_store", "thumbs.db", "*.part"}
+_SCAN = {"left": SOURCE_SCAN_BUDGET}
+
+
+class _ScanBudget(Exception):
+    """The call-wide entry budget is spent: the filter cannot be compared with the client's files."""
 
 
 def find_starts(argv: list[str]) -> list[str]:
@@ -330,25 +338,24 @@ def find_starts(argv: list[str]) -> list[str]:
     return starts
 
 
-@lru_cache(maxsize=None)
-def _source_entries(root: str) -> tuple[tuple[str, ...], ...] | None:
-    """(relative posix path, name) of the client's marker and every folder and file under its assets/ and data/;
-    None when there are more than SOURCE_SCAN_MAX (too many to compare quickly: the filter is trusted)."""
-    r = Path(root)
-    out = [(client_marker.MARKER, client_marker.MARKER)] if (r / client_marker.MARKER).exists() else []
+def _source_entries(root: Path):
+    """(relative posix path, name) of the client's marker and every folder and file under its assets/ and data/,
+    lazily; every entry spends one unit of the call-wide budget (_ScanBudget when it is gone)."""
+    if (root / client_marker.MARKER).exists():
+        yield client_marker.MARKER, client_marker.MARKER
     try:
-        subs = [c for c in r.iterdir() if c.is_dir() and c.name.lower() in ("assets", "data")]
+        subs = [c for c in root.iterdir() if c.is_dir() and c.name.lower() in ("assets", "data")]
     except OSError:
-        return tuple(out)
+        return
     for sub in subs:
-        out.append((sub.name, sub.name))
+        yield sub.name, sub.name
         for dirpath, dirs, files in os.walk(sub):
-            rel = Path(dirpath).relative_to(r).as_posix()
+            rel = Path(dirpath).relative_to(root).as_posix()
             for n in dirs + files:
-                out.append((f"{rel}/{n}", n))
-            if len(out) > SOURCE_SCAN_MAX:
-                return None
-    return tuple(out)
+                _SCAN["left"] -= 1
+                if _SCAN["left"] < 0:
+                    raise _ScanBudget
+                yield f"{rel}/{n}", n
 
 
 def _clients_at(p: Path) -> list[Path]:
@@ -365,24 +372,26 @@ def _clients_at(p: Path) -> list[Path]:
         return []
 
 
+def _temp_style(pattern: str) -> bool:
+    """A plain temp/junk-file pattern (`*.tmp`, `__pycache__`, `*/.DS_Store` ...): trusted when the scan budget is gone."""
+    return re.split(r"[\\/]", pattern.lower())[-1] in TEMP_PATTERNS
+
+
+@lru_cache(maxsize=None)
 def filter_spares_sources(opt: str, pattern: str, start: str, at: Path) -> bool:
     """True when the predicate `opt pattern` (find -name/-path/-regex..., Get-ChildItem -Filter/-Include) matches
-    none of the client's own entries reached from `start` (relative to at) -- it narrows the listing away from them."""
+    none of the client's own entries reached from `start` (relative to at) -- it narrows the listing away from them.
+    Stops at the first matching entry; past the call-wide budget only a temp-style pattern is trusted."""
     pattern = pattern.strip("'\"")
-    if opt == "-newer":
-        return True                                     # a time filter: cannot be judged here
     base = Path(native(expand(start.strip("'\""), at))).expanduser()
     base = base if base.is_absolute() else at / base
-    for root in _clients_at(base):
-        entries = _source_entries(str(root))
-        if entries is None:
-            continue
-        prefix = start.strip("'\"").rstrip("/\\") or "."
-        if loose_resolve(base) != root:                 # the start holds the client: find prints <start>/<client>/...
-            prefix = f"{prefix}/{root.name}"
-        for rel, name in entries:
-            path = f"{prefix}/{rel}"
-            try:
+    try:
+        for root in _clients_at(base):
+            prefix = start.strip("'\"").rstrip("/\\") or "."
+            if loose_resolve(base) != root:             # the start holds the client: find prints <start>/<client>/...
+                prefix = f"{prefix}/{root.name}"
+            for rel, name in _source_entries(root):
+                path = f"{prefix}/{rel}"
                 if opt in ("-name", "-filter", "-include", "-iname"):     # Windows/macOS names ignore case
                     hit = fnmatch.fnmatchcase(name.lower(), pattern.lower())
                 elif opt in ("-path", "-wholename"):
@@ -391,21 +400,54 @@ def filter_spares_sources(opt: str, pattern: str, start: str, at: Path) -> bool:
                     hit = fnmatch.fnmatchcase(path.lower(), pattern.lower())
                 else:                                   # -regex / -iregex match the whole path
                     hit = re.fullmatch(pattern, path, re.I if opt == "-iregex" else 0) is not None
-            except re.error:
-                return True
-            if hit:
-                return False
+                if hit:
+                    return False
+    except re.error:
+        return False                                    # a pattern we cannot read narrows nothing
+    except _ScanBudget:
+        return _temp_style(pattern)
     return True
 
 
-def stage_narrowed(argv: list[str], preds: list[tuple[str, str]], starts: list[str], at: Path | None) -> bool:
-    """A listing narrowed by its predicates: one (all, with find's -o) of them spares every client entry it reaches."""
-    if not preds:
+def find_narrowed(argv: list[str], at: Path | None) -> bool:
+    """A `find` whose expression keeps it away from the client's files: every -o branch has a FIND_NARROW predicate
+    that is not negated (`!`, `-not`, inside `! ( ... )`), sits in a branch without -prune, and spares the sources."""
+    starts = find_starts(argv) or ["."]
+    branches, cur, i = [], [], 1
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-o", "-or"):
+            branches.append(cur)
+            cur = []
+        else:
+            cur.append(a)
+        i += 1
+    branches.append(cur)
+
+    def branch_ok(toks: list[str]) -> bool:
+        if "-prune" in toks:
+            return False
+        neg, depth, j = False, 0, 0
+        while j < len(toks):
+            t = toks[j].lower()
+            if t in ("!", "-not"):
+                neg = True
+            elif t in ("(", "\\("):
+                depth += 1 if neg or depth else 0       # a negated group: nothing inside it counts
+                neg = False
+            elif t in (")", "\\)"):
+                depth = max(0, depth - 1)
+            elif t in FIND_FILTERS and t != "-empty" and j + 1 < len(toks):
+                if t in FIND_NARROW and not neg and not depth and \
+                        (at is None or all(filter_spares_sources(t, toks[j + 1], s, at) for s in starts)):
+                    return True
+                neg = False
+                j += 1
+            else:
+                neg = False
+            j += 1
         return False
-    if at is None:
-        return True
-    spare = [all(filter_spares_sources(o, v, s, at) for s in (starts or ["."])) for o, v in preds]
-    return all(spare) if any(a in ("-o", "-or") for a in argv) else any(spare)
+    return all(branch_ok(b) for b in branches)
 
 
 def stage_paths(argv: list[str], at: Path | None = None) -> tuple[list[str], bool]:
@@ -424,7 +466,7 @@ def stage_paths(argv: list[str], at: Path | None = None) -> tuple[list[str], boo
     out, preds, skip, files_only = [], [], None, False
     for a in args:
         if skip:
-            if skip in FIND_NARROW if finder else skip in ("-filter", "-include"):
+            if skip in ("-filter", "-include"):
                 preds.append((skip, a))
             skip = None
             continue
@@ -434,10 +476,12 @@ def stage_paths(argv: list[str], at: Path | None = None) -> tuple[list[str], boo
             skip = low if low not in ("-file", "-directory", "-hidden", "-empty") else None
             continue
         out.append(a)
-    starts = find_starts(argv) if finder else [a for a in out if not a.startswith("-") and
-                                               a.lower() not in PS_PATH_PARAMS]
-    narrowed = (files_only and not lists_tree(argv)) or stage_narrowed(argv, preds, starts, at)
-    return out, narrowed
+    if finder:
+        return out, find_narrowed(argv, at)
+    starts = [a for a in out if not a.startswith("-") and a.lower() not in PS_PATH_PARAMS] or ["."]
+    spare = bool(preds) and any(at is None or all(filter_spares_sources(o, v, s, at) for s in starts)
+                                for o, v in preds)
+    return out, (files_only and not lists_tree(argv)) or spare
 
 
 def lists_tree(argv: list[str]) -> bool:
@@ -454,13 +498,25 @@ def lists_tree(argv: list[str]) -> bool:
     return False
 
 
-def pipe_source(stages: list[tuple[list[str], Path]], cwd: Path, recursive: bool = False) -> tuple[str, str] | None:
+def pipe_source(stages: list[tuple[list[str], Path]], cwd: Path, recursive: bool = False,
+                marker: bool = False) -> tuple[str, str] | None:
     """A client source named by an earlier stage of the pipeline (a read), or a working directory that is one.
     recursive=True (the consumer deletes/moves whole trees): also a listed folder that holds a client's sources
-    (`Get-ChildItem | Remove-Item -Recurse`, `ls | xargs rm -rf` in the client folder)."""
+    (`Get-ChildItem | Remove-Item -Recurse`, `ls | xargs rm -rf` in the client folder). marker=True (the consumer
+    deletes, moves or changes what it gets): also an unnarrowed listing of a client folder, which names its
+    .whynot-client (`find . -maxdepth 1 | xargs rm`)."""
     views = [(argv, at) + stage_paths(argv, at) for argv, at in stages]
-    recursive = (recursive or any(lists_tree(argv) for argv, _ in stages)) and \
-        not any(v[3] for v in views)                             # `find . -name '*.tmp' | xargs rm -rf` is fine
+    narrowed = any(v[3] for v in views)                          # `find . -name '*.tmp' | xargs rm -rf` is fine
+    recursive = (recursive or any(lists_tree(argv) for argv, _ in stages)) and not narrowed
+    if marker and not narrowed:
+        for argv, at, args, _ in views:
+            if norm_exe(argv[0]) not in LISTERS:
+                continue
+            for t in [a for a in args if not a.startswith("-") and a.lower() not in PS_PATH_PARAMS] or ["."]:
+                for lp in paths_of(t, at):
+                    lp = loose_resolve(lp)
+                    if (lp / client_marker.MARKER).is_file() and is_client(lp):
+                        return f"{lp.name}/{client_marker.MARKER}", t
     for argv, at, args, _ in views:
         for a in args:
             hit = protected(a, at, writing=False, recursive=recursive)
@@ -817,7 +873,7 @@ def run_bash(stmts: list[tuple[list[str], bool]], cwd: Path, agent: str | None):
             sub = strip_prefixes(xargs_parse(argv)[0])
             tree = bool(sub) and (norm_exe(sub[0]) == "mv" or norm_exe(sub[0]) == "rm" and
                                   any(a.startswith("-") and "r" in a.lower() for a in sub[1:]))
-            src = pipe_source(stages, cwd, recursive=tree)
+            src = pipe_source(stages, cwd, recursive=tree, marker=True)
             if src:
                 check_xargs_stage(argv, src, cwd, agent)
         stages.append((argv, cwd))
@@ -1056,8 +1112,7 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
         execs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a in ("-exec", "-execdir", "-ok", "-okdir")]
         if "-delete" in argv or any(norm_exe(e) in MUTATE_ALL for e in execs):
             # as `find ... | xargs rm`: a predicate that spares the client's files narrows it (T11)
-            preds = [(a.lower(), argv[i + 1]) for i, a in enumerate(argv[:-1]) if a.lower() in FIND_NARROW]
-            narrowed = stage_narrowed(argv, preds, starts, cwd)
+            narrowed = find_narrowed(argv, cwd)
             for a in starts or ["."]:
                 hit = protected(a, cwd, recursive=not narrowed)
                 if hit:
@@ -1313,7 +1368,7 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
         if piped and ps_mutates_inputs(argv):
             tree = argv[0].lower() in PS_TREE - {"remove-item", "rm", "del", "erase", "rd", "rmdir", "ri"} or any(
                 len(a) > 1 and "-recurse".startswith(a.lower()) for a in argv[1:])
-            src = pipe_source(stages, cwd, recursive=tree)
+            src = pipe_source(stages, cwd, recursive=tree, marker=True)
             if src:
                 block(f"`{argv[0]}` would change items piped from the client's source folder ({src[0]}). "
                       f"assets/ and data/ are read-only.")
