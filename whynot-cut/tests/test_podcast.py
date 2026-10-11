@@ -1272,5 +1272,58 @@ class TestPublish(unittest.TestCase):
         self.assertTrue(any("instagram" in e and "hashtag" in e for e in self.run_check(reel=reel)["errors"]))
 
 
+class TestThumbnails(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from lib.episode import EpisodePaths, prep
+        cls.tmp = Path(tempfile.mkdtemp())
+        root = cls.root = cls.tmp / "TC"
+        for d in ("assets/Brand", "data/Episodes"):
+            (root / d).mkdir(parents=True)
+        # 120 s: bright 10 s / dark 10 s, alternating
+        ff("-f", "lavfi", "-i", "color=c=black:s=640x360:r=5:d=120,geq=lum='if(lt(mod(T,20),10),200,30)':cb=128:cr=128",
+           "-f", "lavfi", "-i", "sine=f=300:r=48000:d=120", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+           "-c:a", "aac", "-shortest", str(root / "data/Episodes/EP9.mp4"))
+        common.set_context(root)
+        cls.ep = EpisodePaths(root, "EP9")
+        prep(cls.ep)
+
+    @classmethod
+    def tearDownClass(cls):
+        common.set_context(None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_candidates_spaced_and_faced(self):
+        from PIL import ImageStat
+        from lib.publish import thumbnail_candidates
+
+        def faces(im):
+            return [(0.5, 0.4, 0.2, 0.3)] if ImageStat.Stat(im.convert("L")).mean[0] > 100 else []
+        r = thumbnail_candidates(self.ep, n=3, faces_fn=faces, every_s=5)
+        ts = [c["frame_ms"] for c in r["candidates"]]
+        self.assertEqual(len(ts), 3)
+        for t in ts:
+            self.assertLess((t / 1000) % 20, 10.5)                       # bright frames only
+        for a in ts:
+            for b in ts:
+                if a != b:
+                    self.assertGreaterEqual(abs(a - b), 30000)
+        for c in r["candidates"]:
+            self.assertTrue(Path(c["file"]).exists())
+        self.assertTrue(self.ep.p("publish/thumbnail/_candidates.jpg").exists())
+
+    def test_render_design(self):
+        from PIL import Image
+        from lib.publish import render_thumbnails
+        write_json(self.ep.p("publish/publish.json"), {"thumbnail": {"designs": [
+            {"frame_ms": 22000, "text": "كلمة كلمة كلمة كلمة كلمة كلمة كلمة", "highlight": "كلمة"}]}})
+        r = render_thumbnails(self.ep)
+        self.assertTrue(r["ok"], r)
+        f = Path(r["files"][0])
+        self.assertEqual(Image.open(f).size, (1280, 720))
+        self.assertLessEqual(f.stat().st_size, 2_000_000)
+        self.assertTrue(any("words" in w for w in r["warnings"]))
+
+
 if __name__ == "__main__":
     unittest.main()

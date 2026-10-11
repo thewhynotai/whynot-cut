@@ -29,6 +29,11 @@ ARGS: dict = {
     ],
     "music": [(("--list",), {"action": "store_true", "help": "list the licensed tracks in data/Music with mood tags"})],
     "publish-check": [],
+    "publish-thumbnail": [
+        (("--candidates",), {"action": "store_true", "help": "pick frames worth a thumbnail (faces, sharp, contrast)"}),
+        (("--render",), {"action": "store_true", "help": "render publish.json thumbnail.designs as 1280x720 images"}),
+        (("--n",), {"type": int, "default": 12, "help": "how many candidate frames"}),
+    ],
 }
 NO_EPISODE = {"episodes", "music"}
 
@@ -131,6 +136,21 @@ def cmd_publish_check(a):
     r["next"] = (f"show the editor {ep.p('publish/youtube.md')} and publish/reels/*.md (they post it themselves)"
                  if r["ok"] else "fix publish/publish.json or publish/reels/*.json and run publish-check again")
     out(r)
+
+
+def cmd_publish_thumbnail(a):
+    from .publish import render_thumbnails, thumbnail_candidates
+    ep = EP(a)
+    if not a.candidates and not a.render:
+        raise SystemExit("--candidates (pick frames) or --render (draw publish.json thumbnail.designs)")
+    res = {}
+    if a.candidates:
+        res["candidates"] = thumbnail_candidates(ep, n=a.n)
+        res["next"] = "VIEW publish/thumbnail/_candidates.jpg, then write 3 designs (frame_ms + text) in publish.json"
+    if a.render:
+        res["render"] = render_thumbnails(ep)
+        res["next"] = "VIEW each thumb_*.png (text readable, face clear, logo not over the face) before showing the editor"
+    out(res)
 
 
 def _chunks_missing(ep) -> bool:

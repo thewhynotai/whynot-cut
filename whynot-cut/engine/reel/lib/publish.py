@@ -110,6 +110,181 @@ def assemble_description(pub: dict, chs: list, lang: str = "ar") -> str:
     return "\n\n".join(str(p).strip() for p in parts if p and str(p).strip())
 
 
+# --------------------------------------------------------------------------- thumbnails
+def _sharpness(gray) -> float:
+    import numpy as np
+    g = gray.astype(np.float32)
+    lap = g[1:-1, :-2] + g[1:-1, 2:] + g[:-2, 1:-1] + g[2:, 1:-1] - 4 * g[1:-1, 1:-1]
+    return float(lap.var())
+
+
+def thumbnail_candidates(ep, n: int = 12, faces_fn=None, every_s: float | None = None, min_gap_ms: int = 30000) -> dict:
+    """Frames worth a thumbnail: sampled across the episode (about 150 samples), kept only with a face, scored on face
+    size, sharpness and contrast; the best n at least min_gap_ms apart, extracted at full resolution and labelled on
+    publish/thumbnail/_candidates.jpg for the publish-writer to look at."""
+    import subprocess
+    import numpy as np
+    from PIL import Image, ImageDraw
+    from .common import ffmpeg_exe, run
+    from .episode import episode_file, load_episode
+    if faces_fn is None:
+        from .shots import face_boxes as faces_fn
+    info = load_episode(ep)
+    src = episode_file(ep)
+    dur_s = info["duration_ms"] / 1000
+    step = float(every_s or max(10.0, dur_s / 150))
+    W, H = 640, 360
+    p = subprocess.Popen([ffmpeg_exe(), "-loglevel", "error", "-i", str(src), "-an", "-vf",
+                          f"fps=1/{step},scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2",
+                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    rows, k = [], 0
+    try:
+        while True:
+            buf = p.stdout.read(W * H * 3)
+            if len(buf) < W * H * 3:
+                break
+            im = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
+            t = int(round(k * step * 1000))
+            k += 1
+            faces = faces_fn(im)
+            if not faces:
+                continue
+            g = np.asarray(im.convert("L"))
+            rows.append({"frame_ms": t, "face": max(f[2] * f[3] for f in faces), "sharp": _sharpness(g),
+                         "contrast": float(g.std()) / 128, "faces": len(faces)})
+    finally:
+        p.stdout.close()
+        p.kill()
+        p.wait()
+
+    def nz(key):
+        vals = [r[key] for r in rows]
+        lo, hi = (min(vals), max(vals)) if vals else (0, 1)
+        for r in rows:
+            r[key + "_n"] = (r[key] - lo) / (hi - lo) if hi > lo else 1.0
+    for key in ("face", "sharp", "contrast"):
+        nz(key)
+    for r in rows:
+        r["score"] = round(float(0.5 * r["face_n"] + 0.3 * r["sharp_n"] + 0.2 * r["contrast_n"]), 4)
+    picked = []
+    for r in sorted(rows, key=lambda r: -r["score"]):
+        if all(abs(r["frame_ms"] - q["frame_ms"]) >= min_gap_ms for q in picked):
+            picked.append(r)
+        if len(picked) >= n:
+            break
+    picked.sort(key=lambda r: r["frame_ms"])
+    d = ep.p("publish/thumbnail/candidates")
+    d.mkdir(parents=True, exist_ok=True)
+    for old in d.glob("T*.jpg"):
+        old.unlink()
+    for i, r in enumerate(picked, 1):
+        f = d / f"T{i:02d}_{r['frame_ms']}.jpg"
+        run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{r['frame_ms'] / 1000:.3f}", "-i", str(src),
+             "-frames:v", "1", "-q:v", "2", str(f)], check=False)
+        r.update(id=f"T{i:02d}", file=str(f))
+    sheet = ep.p("publish/thumbnail/_candidates.jpg")
+    if picked:
+        cols, w, h = 4, 400, 225
+        rws = (len(picked) + cols - 1) // cols
+        im = Image.new("RGB", (cols * w, rws * (h + 24)), "black")
+        dr = ImageDraw.Draw(im)
+        for i, r in enumerate(picked):
+            x, y = (i % cols) * w, (i // cols) * (h + 24)
+            if Path(r["file"]).exists():
+                t_ = Image.open(r["file"]).convert("RGB")
+                t_.thumbnail((w, h))
+                im.paste(t_, (x, y + 24))
+            dr.text((x + 6, y + 6), f"{r['id']}  {fmt_ts(r['frame_ms'], '.')[:8]}  score {r['score']}", fill="yellow")
+        im.save(sheet, quality=85)
+    res = {"generated": now_iso(), "sampled_every_s": step, "with_face": len(rows),
+           "candidates": [{k_: r[k_] for k_ in ("id", "frame_ms", "score", "faces", "file")} for r in picked],
+           "sheet": str(sheet) if picked else None}
+    write_json(ep.p("publish/thumbnail/candidates.json"), res)
+    return res
+
+
+def render_thumbnails(ep) -> dict:
+    """publish.json thumbnail.designs -> 1280x720 images: face-aware cover crop, a dark gradient on the text side, the
+    client's headline font (HarfBuzz/CoreText) with a brand-primary bar, the logo when available; <= 2 MB."""
+    import io
+    from PIL import Image, ImageDraw
+    from .common import ffmpeg_exe, run
+    from .episode import episode_file, load_episode
+    from .previews import Brand, _face_center, _text_block
+    lim = limits()["thumbnail"]
+    TW, TH = lim["width"], lim["height"]
+    pub = read_json(ep.p("publish/publish.json"), {}) or {}
+    designs = ((pub.get("thumbnail") or {}).get("designs") or [])[:3]
+    if not designs:
+        return {"ok": False, "error": "publish.json thumbnail.designs is empty (pick frames from _candidates.jpg)"}
+    info = load_episode(ep)
+    src = episode_file(ep)
+    b = Brand(ep.client_db)
+    man = read_json(ep.client_db / "asset-manifest.json", {"assets": []}) or {"assets": []}
+    logo = next((a.get("display_derivative") for a in man.get("assets", []) if a.get("category") == "logo"), None)
+    out_dir = ep.p("publish/thumbnail")
+    files, warnings, errors = [], [], []
+    for i, dz in enumerate(designs, 1):
+        t_ms, text = int(dz.get("frame_ms", 0)), str(dz.get("text") or "").strip()
+        if not 0 <= t_ms < info["duration_ms"]:
+            errors.append(f"design {i}: frame_ms {t_ms} is outside the episode")
+            continue
+        if len(text.split()) > lim.get("text_words_warn", 5):
+            warnings.append(f"design {i}: {len(text.split())} words — thumbnail text reads best at 5 words or fewer")
+        tmp = out_dir / f"_frame_{i}.png"
+        run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{t_ms / 1000:.3f}", "-i", str(src), "-frames:v", "1",
+             str(tmp)], check=False)
+        if not tmp.exists():
+            errors.append(f"design {i}: could not read the frame at {fmt_ts(t_ms, '.')}")
+            continue
+        fr = Image.open(tmp).convert("RGB")
+        tmp.unlink(missing_ok=True)
+        fc = _face_center(fr) or (0.5, 0.4)
+        # zoom in a little (a 16:9 frame into a 16:9 thumbnail has no room to move the face otherwise)
+        sc = max(TW / fr.width, TH / fr.height) * float(dz.get("zoom", 1.35))
+        big = fr.resize((max(TW, round(fr.width * sc)), max(TH, round(fr.height * sc))), Image.LANCZOS)
+        # the face in one third, the text in the other two (text on the right reads first in Arabic); mirrored when
+        # the source can't move the face that far
+        x0 = int(min(max(0, fc[0] * big.width - TW * 0.30), big.width - TW))
+        y0 = int(min(max(0, fc[1] * big.height - TH * 0.42), big.height - TH))
+        im = big.crop((x0, y0, x0 + TW, y0 + TH)).convert("RGBA")
+        text_right = (fc[0] * big.width - x0) <= TW * 0.5
+        grad = Image.new("L", (TW, 1))
+        for x in range(TW):
+            u = 1 - x / TW if text_right else x / TW          # 0 at the text edge
+            grad.putpixel((x, 0), int(210 * max(0.0, 1 - u * 1.8)))
+        shade = Image.new("RGBA", (TW, TH), (0, 0, 0, 255))
+        shade.putalpha(grad.resize((TW, TH)))
+        im.alpha_composite(shade)
+        face_right = not text_right
+        cx = int(TW * (0.69 if text_right else 0.31))
+        f = b.font("headline", int(dz.get("size", 104)))
+        probe = _text_block(ImageDraw.Draw(Image.new("RGBA", (1, 1))), text, f, cx, TH // 2, b.white, max_chars=14,
+                            shadow=False)
+        y_bot = max(bx[3] for bx in probe)
+        bw = min(TW // 2 - 40, max(bx[2] - bx[0] for bx in probe))
+        bar = Image.new("RGBA", (TW, TH), (0, 0, 0, 0))
+        ImageDraw.Draw(bar).rounded_rectangle((cx - bw // 2, y_bot + 14, cx + bw // 2, y_bot + 30), 8, fill=b.teal + (255,))
+        im.alpha_composite(bar)
+        _text_block(ImageDraw.Draw(im), text, f, cx, TH // 2, b.white, max_chars=14, shadow=True)
+        if logo and Path(logo).exists():
+            lg = Image.open(logo).convert("RGBA")
+            lg.thumbnail((150, 150))
+            im.alpha_composite(lg, (TW - lg.width - 30 if not face_right else 30, 30))
+        rgb = im.convert("RGB")
+        out = out_dir / f"thumb_{i}.png"
+        buf = io.BytesIO()
+        rgb.save(buf, "PNG", optimize=True)
+        if buf.tell() > lim["max_bytes"]:
+            out = out_dir / f"thumb_{i}.jpg"
+            rgb.save(out, "JPEG", quality=90)
+        else:
+            out.write_bytes(buf.getvalue())
+        files.append(str(out))
+    return {"ok": not errors and bool(files), "files": files, "errors": errors, "warnings": warnings,
+            "engines": sorted(b.engines)}
+
+
 # --------------------------------------------------------------------------- check + render
 def check(ep) -> dict:
     from .plan import norm
