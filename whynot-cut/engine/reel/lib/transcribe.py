@@ -152,9 +152,11 @@ def _run_whisper(model, wav: Path, language, initial_prompt):
     return segs, words, info
 
 
-def caption_cues(words: list) -> tuple[list, list]:
-    """(subtitles, short captions) built from word timing with the client's subtitle style."""
-    cfg = load_config("subtitle-style.json")
+def caption_cues(words: list, cfg: dict | None = None) -> tuple[list, list]:
+    """(subtitles, short captions) built from word timing with the client's subtitle style (cfg: an already-loaded
+    subtitle-style.json, e.g. from compile_plan's inputs)."""
+    if cfg is None:
+        cfg = load_config("subtitle-style.json")
     cues = srtlib.build_cues_from_words(words, max_chars=cfg.get("max_chars_per_line", 32),
                                         max_lines=cfg.get("max_lines", 2),
                                         max_dur_ms=cfg.get("max_cue_ms", 4000),

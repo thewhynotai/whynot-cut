@@ -329,7 +329,7 @@ def cmd_plan(a):
         out(res)
         return
     set_status(p, "ANALYZED", "semantic analysis files present", "analysis")
-    r = compile_plan(p)
+    r = compile_plan(p, getattr(a, "ctx", None))
     if rs["step"] or rs["notices"]:
         r["reference_style"] = {"state": rs["client"]["state"], "video": rs["video"]["state"],
                                 "note": rs["step"] or "; ".join(rs["notices"])}
@@ -1111,7 +1111,7 @@ def main():
             known = [p.name for p in client_folders(clients_root())]
             raise SystemExit("--root required (client folder containing assets/ and data/)"
                              + (f"; client folders in {clients_root()}: {', '.join(known)}" if known else ""))
-    set_context(a.root, a.profile)
+    a.ctx = set_context(a.root, a.profile)      # the request's Context, passed down where practical (T2.17)
     lock = take_writer_lock(a)
     try:
         run(a)

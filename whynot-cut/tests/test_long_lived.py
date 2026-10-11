@@ -181,5 +181,55 @@ class TestFontCachesFollowTheFolders(TempDir):
         self.assertLessEqual(len(hb_text._FACES), hb_text._FACES_MAX)
 
 
+class TestCompilePlanSteps(TempDir):
+    """MI-6: compile_plan = read_inputs -> pure steps -> write_outputs. The steps never read or write files and never
+    mutate their inputs; the outputs are byte-identical to the one-function version (golden run in the T2.17 report)."""
+
+    def setUp(self):
+        super().setUp()
+        from test_pipeline import make_project
+        self.root, self.p, self.words = make_project(self.tmp)
+        common.write_json(self.p.p("01_analysis/edit-decisions.json"), {
+            "video_id": "CLIP1", "global": {"main_footage": "data/Raw/CLIP1.mov", "cut_words": [{"word_ids": [3],
+                                                                                                   "reason": "filler"}]},
+            "music": {"status": "NO_MUSIC_SUPPLIED", "cue_points": [{"label": "drop", "at": "00:00:06.000"}]},
+            "decisions": [{"decision_id": "EDIT_001", "segment_id": "SEG_001", "evidence": "هل في حاجات معينة",
+                           "start": "00:00:00.200", "end": "00:00:04.000", "semantic_intent": "hook",
+                           "visual_treatment": "hook", "confidence": "high",
+                           "camera": {"type": "punch_in", "at": "00:00:01.000", "until": "00:00:03.000",
+                                      "scale_factor": 1.1},
+                           "graphics": [{"id": "GFX_001", "template": "checklist", "start": "00:00:05.000",
+                                         "end": "00:00:09.000", "title": "خطوات",
+                                         "items": [{"text": "التشخيص", "at": "00:00:06.000"},
+                                                   {"text": "Isotretinoin", "at": "00:00:07.500"}]}]}]})
+
+    def files(self):
+        return {str(f): f.stat().st_mtime_ns for f in self.p.project.rglob("*") if f.is_file()}
+
+    def test_steps_are_pure_and_compose_to_compile_plan(self):
+        import copy
+        from lib import plan
+        inp = plan.read_inputs(self.p)
+        ed0, before = copy.deepcopy(inp.ed), self.files()
+        vd = plan.validate_decisions(inp)
+        self.assertEqual(len(vd), 3)                                   # (data, errors, warnings)
+        built = plan.build_plan(inp)
+        self.assertEqual(inp.ed, ed0)                                  # inputs untouched
+        self.assertEqual(self.files(), before)                         # nothing read-then-written by the steps
+        self.assertTrue(built["ok"], built["errors"])
+        self.assertTrue(built["spec"]["time_map"]["words_cut"])        # the word cut went through apply_timemap
+        self.assertEqual(set(built["seq_srts"]), {"subtitles", "captions-short"})
+        items = built["spec"]["events"][0]["params"]["items"]
+        self.assertTrue(all("src_frame" in it for it in items))
+        self.assertFalse(any("src_frame" in it for g in ed0["decisions"][0]["graphics"] for it in g["items"]))
+        res = plan.write_outputs(self.p, built)
+        spec1 = common.read_json(self.p.p("01_analysis/timeline-spec.json"))
+        res2 = plan.compile_plan(self.p, common.Context(self.root))
+        spec2 = common.read_json(self.p.p("01_analysis/timeline-spec.json"))
+        self.assertEqual(res, res2)
+        spec1.pop("generated"), spec2.pop("generated")
+        self.assertEqual(spec1, spec2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -89,9 +89,9 @@ def seq_rate(ctx: "Context | None" = None) -> tuple[int, bool]:
     return (ctx or current_context()).seq_rate()
 
 
-def seq_fps() -> float:
+def seq_fps(ctx: "Context | None" = None) -> float:
     """The sequence frame rate as a number (29.97002997... for NTSC 30)."""
-    tb, ntsc = seq_rate()
+    tb, ntsc = seq_rate(ctx)
     return tb * 1000 / 1001 if ntsc else float(tb)
 
 

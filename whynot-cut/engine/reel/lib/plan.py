@@ -159,16 +159,69 @@ def _transcript_text(paths: Paths) -> tuple[str, int]:
     return norm(text), tj["meta"]["duration_ms"]
 
 
-def compile_plan(paths: Paths) -> dict:
-    FPS_ = seq_fps()   # the client's sequence rate (24, 25, 29.97 ...)
+# --------------------------------------------------------------------------- compile_plan
+# 3.0 T2.17 (engine MI-6): one ~440-line function became a chain of steps. `read_inputs` does every read; each step
+# is pure (no file reads or writes, never mutates its inputs) and returns (data, errors, warnings);
+# `write_outputs` does every write. compile_plan concatenates errors/warnings in step order, so plan-validation.json
+# lists them exactly as before. Frame maths uses the bound Context's sequence rate (seq_fps), as before.
+#   validate_decisions -> build_camera -> apply_framing -> apply_timemap -> build_audio -> final_checks -> write_outputs
+_CAPTION_SRTS = ("subtitles", "captions-short")
+
+
+class PlanInputs:
+    """Everything compile_plan reads, read once (files, profile config, the client folder's file checks)."""
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def read_inputs(paths: Paths, ctx=None) -> PlanInputs:
+    from .common import current_context, source_range
+    from .recipes import for_paths
+    from .transcribe import transcript_flags
+    ctx = ctx or current_context()
     ed = read_json(paths.p("01_analysis/edit-decisions.json"))
     if not ed:
         raise FileNotFoundError("01_analysis/edit-decisions.json missing — author it (see references/edit-decision-engine.md)")
-    tpl = load_config("graphics-templates.json")["templates"]
+    tpl = load_config("graphics-templates.json", ctx)["templates"]
     manifest = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
-    known_assets = {a["rel"]: a for a in manifest["assets"]}
     ttext, dur_ms = _transcript_text(paths)
-    dur_f = ms_to_frame(dur_ms)
+    base = ed.get("global", {})
+    rp = base.get("remove_pauses")
+    words = read_json(paths.p("02_transcription/words.json"), {"words": []})["words"]
+    pauses = read_json(paths.p("06_audio/dialogue/pauses.json")) if rp else None
+    wranges, wcut, _ = word_cut_ranges(words, base.get("cut_words") or [], dur_ms)
+    timemap_on = bool((rp and pauses) or wranges)
+    srts = {}                      # the caption files apply_timemap maps onto the sequence clock (None = no file)
+    if timemap_on and not wcut:    # with words cut, the captions are rebuilt from words.json instead
+        from . import srt as srtlib
+        for name in _CAPTION_SRTS:
+            f = paths.p(f"02_transcription/{name}.srt")
+            srts[name] = srtlib.read_srt(f) if f.exists() else None
+    pre_all = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
+    rng = source_range(paths)
+    main_file = base.get("main_footage") or rng.get("footage")
+    shots_on = bool((pre_all.get("shots") or {}).get("shots") and base.get("base_scale_percent") in (None, "auto")
+                    and main_video(pre_all, main_file))
+    flagged = transcript_flags(paths)
+    return PlanInputs(
+        paths=paths, root=paths.root, video_id=paths.video_id, ed=ed, base=base, tpl=tpl,
+        known_assets={a["rel"]: a for a in manifest["assets"]}, ttext=ttext, dur_ms=dur_ms, fps=seq_fps(ctx),
+        recipe=for_paths(paths), pre_all=pre_all, rng=rng, main_file=main_file,
+        seq_cfg=load_config("sequence-settings.json", ctx), style=load_config("style.json", ctx),
+        podcast=load_config("podcast.json", ctx) if shots_on else {},
+        speakers=(read_json(paths.p("00_inputs/speakers.json"), {}) or {}) if shots_on else {},
+        words=words, pauses=pauses, srts=srts,
+        subtitle_style=load_config("subtitle-style.json", ctx) if wcut and timemap_on else None,
+        flagged=flagged, profile=load_config("profile.json", ctx),
+        exists=lambda rel: (paths.root / rel).exists(), is_file=lambda rel: (paths.root / rel).is_file())
+
+
+def validate_decisions(inp: PlanInputs):
+    """Decisions -> graphic events, B-roll entries, SFX cues and the story camera moves; overlap and recipe checks."""
+    import copy
+    ed = copy.deepcopy(inp.ed)            # the steps never mutate their inputs
+    FPS_, tpl, dur_ms, ttext = inp.fps, inp.tpl, inp.dur_ms, inp.ttext
     errors, warnings = [], []
     events, cues, broll, camera = [], [], [], []
     seen_ids = set()
@@ -230,11 +283,11 @@ def compile_plan(paths: Paths) -> dict:
                     errors.append(f"{gid}: item '{it.get('text')}' at outside graphic span")
             imgs = [g["image"]] if g.get("image") else []
             for im in imgs:
-                if im not in known_assets and not (paths.root / im).exists():
+                if im not in inp.known_assets and not inp.exists(im):
                     errors.append(f"{gid}: image not found in client asset manifest: {im}")
             if t == "broll_video":
                 vid = g.get("video")
-                if not vid or not (paths.root / vid).exists():
+                if not vid or not inp.exists(vid):
                     errors.append(f"{gid}: broll_video needs 'video' = an existing file (e.g. data/Broll/clip.mp4), got {vid!r}")
                 elif not any(k in vid.lower() for k in ("broll", "b-roll", "b_roll", "stock")):
                     warnings.append(f"{gid}: {vid} is not in the licensed B-roll folder (data/Broll): confirm the licence")
@@ -299,9 +352,7 @@ def compile_plan(paths: Paths) -> dict:
 
     # podcast reels follow their content-type recipe (00_inputs/source.json); deviations are warnings the editor sees
     # at Gate 1, with the story-editor's reason when a decision carries `recipe_note`
-    from .recipes import for_paths
-    recipe = for_paths(paths)
-    recipe_info = None
+    recipe, recipe_info = inp.recipe, None
     if recipe:
         rt, dev = recipe.get("type"), []
         notes = [f"{d['decision_id']}: {d['recipe_note']}" for d in ed.get("decisions", []) if d.get("recipe_note")]
@@ -319,14 +370,18 @@ def compile_plan(paths: Paths) -> dict:
         warnings += [f"recipe {rt}: {x}" for x in dev]
         recipe_info = {"type": rt, "label": recipe.get("label"), "deviations": dev, "notes": notes,
                        "pacing": recipe.get("pacing"), "music": recipe.get("music")}
+    return {"events": events, "cues": cues, "broll": broll, "camera": camera, "recipe_info": recipe_info}, \
+        errors, warnings
 
-    # camera timeline -> V01 segments (cuts at camera change points)
-    base = ed.get("global", {})
+
+def build_camera(inp: PlanInputs, camera: list, events: list):
+    """The speaker framing: explicit base scale, preflight's auto-reframe, source cutaways shown whole, or per-shot
+    framing (podcast reels); story camera moves are composed over it."""
+    warnings = []
+    camera = list(camera)
+    base, pre_all, main_file = inp.base, inp.pre_all, inp.main_file
     # THIS video's footage (global.main_footage, or a range reel's footage in 00_inputs/source.json) and its preflight
     # entry: every framing step below is sized from this file, never from whichever file preflight lists first
-    from .common import source_range
-    pre_all = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
-    main_file = base.get("main_footage") or source_range(paths).get("footage")
     main_v = main_video(pre_all, main_file)
     # framing: an explicit global.base_scale_percent wins; "auto"/absent uses preflight's face-centred reframe (wider
     # sources such as 16:9 episodes); otherwise the source is fitted as before
@@ -335,7 +390,7 @@ def compile_plan(paths: Paths) -> dict:
     if bsp in (None, "auto"):
         mf = main_file
         rf = next((r for k, r in (pre_all.get("reframe") or {}).items()
-                   if mf and (Path(k).name == Path(mf).name or Path(k) == paths.root / mf)), None)
+                   if mf and (Path(k).name == Path(mf).name or Path(k) == inp.root / mf)), None)
         if rf:
             bsp, framing = rf["base_scale_percent"], f"auto-reframe (face x {rf.get('face_x')}, {rf.get('faces')} faces)"
             box = rf["offset_x"] if box is None else box
@@ -348,7 +403,7 @@ def compile_plan(paths: Paths) -> dict:
     if cutaways and bsp:
         pre_v = main_v
         if pre_v:
-            seq_cfg = load_config("sequence-settings.json")["general"]
+            seq_cfg = inp.seq_cfg["general"]
             fit = min(seq_cfg["frame_width"] / pre_v["display_width"], seq_cfg["frame_height"] / pre_v["display_height"]) * 100
             for a, b in cutaways:
                 camera.append({"decision_id": "AUTO_CUTAWAY", "type": "reframe", "at_ms": a, "frame": ms_to_frame(a),
@@ -363,11 +418,11 @@ def compile_plan(paths: Paths) -> dict:
         pv = main_v
         if pv:
             from .shots import compose_camera, frame_shots
-            seq_g = load_config("sequence-settings.json")["general"]
+            seq_g = inp.seq_cfg["general"]
             SW, SH = seq_g["frame_width"], seq_g["frame_height"]
             dw, dh = pv["display_width"], pv["display_height"]
-            pc = load_config("podcast.json")
-            layer = frame_shots(shots_rep["shots"], read_json(paths.p("00_inputs/speakers.json"), {}) or {}, dw, dh, SW, SH,
+            pc = inp.podcast
+            layer = frame_shots(shots_rep["shots"], inp.speakers, dw, dh, SW, SH,
                                 pc.get("speaker_min_hold_ms", 1500), pc.get("shots", {}).get("group_fit", 0.8))
             camera = compose_camera([c for c in camera if c["decision_id"] != "AUTO_CUTAWAY"], layer, dw, dh, SW, SH)
             bsp, box, boy = round(max(SW / dw, SH / dh) * 100, 3), 0.0, 0.0
@@ -386,20 +441,28 @@ def compile_plan(paths: Paths) -> dict:
             if e["template"] != "flash_transition" and e["start_ms"] < c["until_ms"] and c["at_ms"] < e["end_ms"]:
                 warnings.append(f"{e['event_id']} ({e['template']}) covers {c['at_ms'] / 1000:.1f}-{c['until_ms'] / 1000:.1f}s, "
                                 "a shot shown whole (the episode's own card / B-roll): move it to a speaker shot")
+    return {"camera": camera, "main_v": main_v, "bsp": bsp, "box": box, "boy": boy, "framing": framing}, [], warnings
+
+
+def apply_framing(inp: PlanInputs, cam: dict):
+    """The 4:5 window (when the framing asks for one) and the V01 pieces cut at every camera change point."""
+    errors, warnings = [], []
+    base, main_file, main_v, dur_ms = inp.base, inp.main_file, cam["main_v"], inp.dur_ms
+    camera, bsp, box, framing = list(cam["camera"]), cam["bsp"], cam["box"], cam["framing"]
     # 4:5 framing (a client's plan: "4:5 (1080x1350) inside 9:16 over a blurred fill of the same video, title above,
     # captions below"): every speaker piece is drawn in a window; story moves and jump-cut zooms stay inside it (the
     # build crops the picture to the window); source cutaways stay whole
-    framing_mode = str(base.get("framing") or load_config("style.json").get("framing") or "9:16")
+    framing_mode = str(base.get("framing") or inp.style.get("framing") or "9:16")
     win = window_rect(framing_mode, base.get("framing_window_y"))
     if win and main_v is None:       # a 4:5 reel silently built as 9:16 would be the wrong deliverable
         errors.append(f"framing {framing_mode} needs this video's preflight: "
                       f"{Path(main_file).name if main_file else 'its footage'} is not in 00_inputs/preflight.json — run "
                       "`reel preflight` for this video first")
-    elif main_file and pre_all.get("files") and main_v is None:
+    elif main_file and inp.pre_all.get("files") and main_v is None:
         warnings.append(f"{Path(main_file).name} is not in 00_inputs/preflight.json: per-shot framing is skipped (the "
                         "picture is fitted) — run `reel preflight` for this video")
     if win and main_v and not bsp:   # a source already in the sequence's shape (a phone clip) has no reframe: its fit
-        seq_g = load_config("sequence-settings.json")["general"]   # scale is the base the window zooms from
+        seq_g = inp.seq_cfg["general"]                             # scale is the base the window zooms from
         bsp = round(min(seq_g["frame_width"] / main_v["display_width"],
                         seq_g["frame_height"] / main_v["display_height"]) * 100, 3)
     if win and bsp:
@@ -420,7 +483,7 @@ def compile_plan(paths: Paths) -> dict:
                        "rationale": f"{framing_mode} window {win['w']}x{win['h']} at y {win['y']}"}] + wcam
             framing += f"; {framing_mode} window {win['w']}x{win['h']} (y {win['y']}) over a blurred fill"
     camera.sort(key=lambda c: c["frame"])
-    base = ed.get("global", {})
+    dur_f = ms_to_frame(dur_ms)
     main_segments = []
     pts = sorted({0, dur_f, *[c["frame"] for c in camera], *[ms_to_frame(c["until_ms"]) for c in camera]})
     pts = [p for p in pts if 0 <= p <= dur_f]
@@ -443,95 +506,111 @@ def compile_plan(paths: Paths) -> dict:
             merged[-1]["end_frame"] = s["end_frame"]
         else:
             merged.append(s)
-
     # explicit source ranges on every V01 piece (identity mapping when pauses are kept)
     for s_ in merged:
-        s_["src_in_ms"] = s_["start_frame"] * 1000 / FPS_
-        s_["src_out_ms"] = s_["end_frame"] * 1000 / FPS_
-    tmap, time_map_info = None, None
+        s_["src_in_ms"] = s_["start_frame"] * 1000 / inp.fps
+        s_["src_out_ms"] = s_["end_frame"] * 1000 / inp.fps
+    return {"camera": camera, "merged": merged, "bsp": bsp, "framing": framing}, errors, warnings
+
+
+def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, broll: list, cues: list, box):
+    """Pause removal and word cuts: the TimeMap of kept source ranges, everything moved onto the sequence clock, and
+    the captions mapped (rebuilt without cut words). Identity (no TimeMap) when nothing is removed."""
+    import copy
+    errors, warnings = [], []
+    base, words_all = inp.base, inp.words
+    dur_ms, dur_f, FPS_ = inp.dur_ms, ms_to_frame(inp.dur_ms), inp.fps
+    out = {"merged": merged, "events": events, "broll": broll, "cues": cues, "tmap": None, "time_map_info": None,
+           "seq_srts": {}, "dur_ms": dur_ms, "dur_f": dur_f}
     rp = base.get("remove_pauses")
-    words_all = read_json(paths.p("02_transcription/words.json"), {"words": []})["words"]
     wcut_ranges, words_cut, wcut_err = word_cut_ranges(words_all, base.get("cut_words") or [], dur_ms)
     errors += wcut_err
     pz = None
     if rp:
-        pz = read_json(paths.p("06_audio/dialogue/pauses.json"))
+        pz = inp.pauses
         if not pz:
             errors.append("global.remove_pauses is set but 06_audio/dialogue/pauses.json is missing — run `reel audio-clean`")
-    if (rp and pz) or wcut_ranges:
-        from .timemap import TimeMap
-        keep0 = pz["keep_ms"] if (rp and pz) else [[0, dur_ms]]
-        # pauses the editor wants kept (a comedic beat, a dramatic silence): global.remove_pauses.protect, source time
-        protect = []
-        for pr in ((rp or {}).get("protect") or []) if isinstance(rp, dict) else []:
-            try:
-                a_, b_ = max(0, to_ms(pr[0])), min(dur_ms, to_ms(pr[1]))
-            except Exception:  # noqa: BLE001
-                errors.append(f"global.remove_pauses.protect entry {pr!r}: expected [start, end]")
-                continue
-            if b_ > a_:
-                protect.append([a_, b_])
-        if protect:
-            keep0 = union_ranges(keep0, protect)
-        keep = subtract_ranges(keep0, wcut_ranges) if wcut_ranges else keep0
-        ms_ = tuple((rp or {}).get("mask_scales", [1.0, 1.06])) if isinstance(rp, dict) else (1.0, 1.06)
-        tmap = TimeMap(keep, camera, ms_, base_offset_x=float(box or 0.0))
-        merged = tmap.pieces
-        removed = dur_ms - sum(b - a for a, b in keep)
-        time_map_info = {"keep_ms": [list(k) for k in keep], "removed_ms": removed,
-                         "cuts": len(keep) - 1, "pause_cuts": len(pz["cuts_ms"]) if (rp and pz) else 0,
-                         "words_cut": words_cut, "source_duration_ms": dur_ms, "sequence_frames": tmap.total_frames,
-                         "mask_scales": list(ms_)}
-        kept = []
-        for e in events:
-            e["src_start_ms"], e["src_end_ms"] = e["start_ms"], e["end_ms"]
-            if tmap.removed(e["start_ms"], e["end_ms"]):
-                warnings.append(f"{e['event_id']} falls entirely inside removed pauses -> dropped")
-                continue
-            e["start_ms"], e["end_ms"] = round(tmap.ms(e["src_start_ms"])), round(tmap.ms(e["src_end_ms"]))
-            e["start_frame"], e["end_frame"] = tmap.frame(e["src_start_ms"]), tmap.frame(e["src_end_ms"])
-            e["start_tc"], e["end_tc"] = frame_to_tc(e["start_frame"]), frame_to_tc(e["end_frame"])
-            for it in e["params"].get("items", []):
-                it["src_frame"] = it["frame"]
-                it["frame"] = tmap.frame(it["frame"] * 1000 / FPS_)
-                it["rel_frame"] = it["frame"] - e["start_frame"]
-            kept.append(e)
-        events = kept
-        ev_by_id = {e["event_id"]: e for e in events}
-        broll_all = list(broll)
-        broll = [dict(b, sequence_start_frame=ev_by_id[b["asset_id"]]["start_frame"],
-                      duration_frames=ev_by_id[b["asset_id"]]["end_frame"] - ev_by_id[b["asset_id"]]["start_frame"])
-                 for b in broll if b["asset_id"] in ev_by_id]
-        for c in cues:
-            c["src_at_ms"] = c["at_ms"]
-            c["at_ms"] = round(tmap.ms(c["at_ms"]))
-        dropped = {b["asset_id"] for b in broll_all} - set(ev_by_id)
-        cues = [c for c in cues if c.get("related_visual") not in dropped]
-        # captions on the sequence clock (rebuilt without the cut words, so they never show on screen)
-        from . import srt as _srt
-        from .transcribe import caption_cues
-        gone = {c["word_id"] for c in words_cut}
-        rebuilt = dict(zip(("subtitles", "captions-short"), caption_cues([w for w in words_all if w["id"] not in gone]))) \
-            if gone else {}
-        for name in ("subtitles", "captions-short"):
-            src_p = paths.p(f"02_transcription/{name}.srt")
-            if src_p.exists() or name in rebuilt:
-                out = []
-                for q in (rebuilt[name] if name in rebuilt else _srt.read_srt(src_p)):
-                    if tmap.removed(q["start_ms"], q["end_ms"]):
-                        continue
-                    out.append({"start_ms": round(tmap.ms(q["start_ms"])), "end_ms": round(tmap.ms(q["end_ms"])), "text": q["text"]})
-                _srt.write_srt(paths.p(f"02_transcription/{name}-seq.srt"), out)
-        dur_f = tmap.total_frames
-        dur_ms = round(dur_f * 1000 / FPS_)
+    if not ((rp and pz) or wcut_ranges):
+        return out, errors, warnings
+    from .timemap import TimeMap
+    events, cues = copy.deepcopy(events), copy.deepcopy(cues)
+    keep0 = pz["keep_ms"] if (rp and pz) else [[0, dur_ms]]
+    # pauses the editor wants kept (a comedic beat, a dramatic silence): global.remove_pauses.protect, source time
+    protect = []
+    for pr in ((rp or {}).get("protect") or []) if isinstance(rp, dict) else []:
+        try:
+            a_, b_ = max(0, to_ms(pr[0])), min(dur_ms, to_ms(pr[1]))
+        except Exception:  # noqa: BLE001
+            errors.append(f"global.remove_pauses.protect entry {pr!r}: expected [start, end]")
+            continue
+        if b_ > a_:
+            protect.append([a_, b_])
+    if protect:
+        keep0 = union_ranges(keep0, protect)
+    keep = subtract_ranges(keep0, wcut_ranges) if wcut_ranges else keep0
+    ms_ = tuple((rp or {}).get("mask_scales", [1.0, 1.06])) if isinstance(rp, dict) else (1.0, 1.06)
+    tmap = TimeMap(keep, camera, ms_, base_offset_x=float(box or 0.0))
+    merged = tmap.pieces
+    removed = dur_ms - sum(b - a for a, b in keep)
+    time_map_info = {"keep_ms": [list(k) for k in keep], "removed_ms": removed,
+                     "cuts": len(keep) - 1, "pause_cuts": len(pz["cuts_ms"]) if (rp and pz) else 0,
+                     "words_cut": words_cut, "source_duration_ms": dur_ms, "sequence_frames": tmap.total_frames,
+                     "mask_scales": list(ms_)}
+    kept = []
+    for e in events:
+        e["src_start_ms"], e["src_end_ms"] = e["start_ms"], e["end_ms"]
+        if tmap.removed(e["start_ms"], e["end_ms"]):
+            warnings.append(f"{e['event_id']} falls entirely inside removed pauses -> dropped")
+            continue
+        e["start_ms"], e["end_ms"] = round(tmap.ms(e["src_start_ms"])), round(tmap.ms(e["src_end_ms"]))
+        e["start_frame"], e["end_frame"] = tmap.frame(e["src_start_ms"]), tmap.frame(e["src_end_ms"])
+        e["start_tc"], e["end_tc"] = frame_to_tc(e["start_frame"]), frame_to_tc(e["end_frame"])
+        for it in e["params"].get("items", []):
+            it["src_frame"] = it["frame"]
+            it["frame"] = tmap.frame(it["frame"] * 1000 / FPS_)
+            it["rel_frame"] = it["frame"] - e["start_frame"]
+        kept.append(e)
+    events = kept
+    ev_by_id = {e["event_id"]: e for e in events}
+    broll_all = list(broll)
+    broll = [dict(b, sequence_start_frame=ev_by_id[b["asset_id"]]["start_frame"],
+                  duration_frames=ev_by_id[b["asset_id"]]["end_frame"] - ev_by_id[b["asset_id"]]["start_frame"])
+             for b in broll if b["asset_id"] in ev_by_id]
+    for c in cues:
+        c["src_at_ms"] = c["at_ms"]
+        c["at_ms"] = round(tmap.ms(c["at_ms"]))
+    dropped = {b["asset_id"] for b in broll_all} - set(ev_by_id)
+    cues = [c for c in cues if c.get("related_visual") not in dropped]
+    # captions on the sequence clock (rebuilt without the cut words, so they never show on screen)
+    from .transcribe import caption_cues
+    gone = {c["word_id"] for c in words_cut}
+    rebuilt = dict(zip(_CAPTION_SRTS, caption_cues([w for w in words_all if w["id"] not in gone], inp.subtitle_style))) \
+        if gone else {}
+    seq_srts = {}
+    for name in _CAPTION_SRTS:
+        src = rebuilt[name] if name in rebuilt else inp.srts.get(name)
+        if src is None:
+            continue
+        seq_srts[name] = [{"start_ms": round(tmap.ms(q["start_ms"])), "end_ms": round(tmap.ms(q["end_ms"])),
+                           "text": q["text"]} for q in src if not tmap.removed(q["start_ms"], q["end_ms"])]
+    dur_f = tmap.total_frames
+    out.update(merged=merged, events=events, broll=broll, cues=cues, tmap=tmap, time_map_info=time_map_info,
+               seq_srts=seq_srts, dur_f=dur_f, dur_ms=round(dur_f * 1000 / FPS_))
+    return out, errors, warnings
 
+
+def build_audio(inp: PlanInputs, cues: list, tmap, dur_f: int):
+    """SFX cues on their tracks and frames; the music bed and its cue points."""
+    errors, warnings = [], []
+    FPS_ = inp.fps
+    cues = [dict(c) for c in cues]
     for c in cues:
         c["start_frame"] = ms_to_frame(c["at_ms"])
         c["timeline_tc"] = frame_to_tc(c["start_frame"])
         c["track"] = SFX_TRACK.get(c["kind"], "A03")
     cues.sort(key=lambda c: c["start_frame"])
 
-    music = dict(ed.get("music", {"status": "NO_MUSIC_SUPPLIED"}))
+    music = dict(inp.ed.get("music", {"status": "NO_MUSIC_SUPPLIED"}))
     cps = []
     for cp in music.get("cue_points", []):
         src_ms = to_ms(cp["at"]) if cp.get("at") is not None else int(cp.get("frame", 0)) * 1000 / FPS_
@@ -543,31 +622,23 @@ def compile_plan(paths: Paths) -> dict:
         music["cue_points"] = cps
     if music.get("file"):   # a licensed bed from the client's library, placed on A06 under the dialogue
         mf = str(music["file"]).replace("\\", "/")
-        if not mf.lower().startswith("data/music/") or not (paths.root / mf).is_file():
+        if not mf.lower().startswith("data/music/") or not inp.is_file(mf):
             errors.append(f"music.file {mf!r} must be an existing licensed track under data/Music/ (never other audio)")
         else:
             music.update(status="PLACED", file=mf, fade_out_s=float(music.get("fade_out_s", 2.0)),
-                         level_db=float(music.get("level_db", ((recipe or {}).get("music") or {}).get("level_db", -24))))
-    caption_hl = [{"text": h["text"], "at_ms": to_ms(h["at"]) if h.get("at") else None}
-                  for h in ed.get("caption_highlights", [])]
+                         level_db=float(music.get("level_db", ((inp.recipe or {}).get("music") or {}).get("level_db", -24))))
+    return {"cues": cues, "music": music}, errors, warnings
 
-    rng = source_range(paths)
+
+def final_checks(inp: PlanInputs, events: list):
+    """The range reel's footage, uncertain words on screen, and honorifics against the profile's people[]."""
+    errors, warnings = [], []
+    base, rng = inp.base, inp.rng
     if rng and base.get("main_footage") and Path(base["main_footage"]).name != Path(rng["footage"]).name:
         errors.append(f"global.main_footage {base['main_footage']} is not this video's range file {rng['footage']} "
                       "(`reel range`)")
-    spec = {"generated": now_iso(), "video_id": paths.video_id, "fps": FPS_,
-            "source_in_ms": int(rng.get("in_ms", 0)), "source_range": rng or None,
-            "duration_ms": dur_ms, "duration_frames": dur_f,
-            "rounding_policy": f"frame = round_half_up(ms*{FPS_:.5g}/1000) from absolute time (no accumulation)",
-            "main_footage": base.get("main_footage") or rng.get("footage"), "base_scale_percent": bsp,
-            "base_offset_x": float(box or 0.0), "base_offset_y": float(boy or 0.0), "framing": framing,
-            "main_segments": merged, "events": sorted(events, key=lambda e: (e["start_frame"], e["track"])),
-            "caption_source": "02_transcription/captions-short-seq.srt" if tmap else "02_transcription/captions-short.srt",
-            "caption_highlights": caption_hl, "time_map": time_map_info,
-            "music": music, "recipe": recipe_info}
     # words the transcript editor flagged as uncertain never go on a graphic until the editor has heard them
-    from .transcribe import transcript_flags
-    flagged = transcript_flags(paths)
+    flagged = inp.flagged
     for e in events:
         toks = set(norm(" ".join(onscreen_strings(e["params"]))).split())
         for f in flagged:
@@ -580,22 +651,49 @@ def compile_plan(paths: Paths) -> dict:
                         "them: " + ", ".join(f"#{f['id']} {f['word']}" for f in flagged[:8]))
     # an on-screen honorific must match the person's gender in the profile's people[] («الدكتورة» for a man = error)
     from .people import check_many, check_nameless, load_people
-    ppl, p_issues = load_people()
+    ppl, p_issues = load_people(inp.profile)
     shown = [(e["event_id"], s) for e in events for s in onscreen_strings(e["params"])]
     p_err, p_warn = check_many(shown, ppl)
     errors += p_err
     # and a nameless «الدكتورة» when everyone in people[] is male (or the mirror): the incident's own wording
     warnings += p_issues + p_warn + [w for where, s in shown for w in check_nameless(where, s, ppl)]
-    ok = not errors
+    return {}, errors, warnings
+
+
+def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, recipe_info) -> dict:
+    """The timeline spec (01_analysis/timeline-spec.json) from the steps' data."""
+    FPS_, rng, base = inp.fps, inp.rng, inp.base
+    caption_hl = [{"text": h["text"], "at_ms": to_ms(h["at"]) if h.get("at") else None}
+                  for h in inp.ed.get("caption_highlights", [])]
+    return {"generated": now_iso(), "video_id": inp.video_id, "fps": FPS_,
+            "source_in_ms": int(rng.get("in_ms", 0)), "source_range": rng or None,
+            "duration_ms": tm["dur_ms"], "duration_frames": tm["dur_f"],
+            "rounding_policy": f"frame = round_half_up(ms*{FPS_:.5g}/1000) from absolute time (no accumulation)",
+            "main_footage": base.get("main_footage") or rng.get("footage"), "base_scale_percent": fr["bsp"],
+            "base_offset_x": float(cam["box"] or 0.0), "base_offset_y": float(cam["boy"] or 0.0), "framing": fr["framing"],
+            "main_segments": tm["merged"], "events": sorted(tm["events"], key=lambda e: (e["start_frame"], e["track"])),
+            "caption_source": "02_transcription/captions-short-seq.srt" if tm["tmap"] else "02_transcription/captions-short.srt",
+            "caption_highlights": caption_hl, "time_map": tm["time_map_info"],
+            "music": au["music"], "recipe": recipe_info}
+
+
+def write_outputs(paths: Paths, plan: dict) -> dict:
+    """Every write of `reel plan`: the sequence-clock captions, plan-validation.json and, when valid, the timeline
+    spec, B-roll manifest, audio cue sheet, edit-plan.md and the stale mark on an earlier approval."""
+    from . import srt as srtlib
+    for name, cues_ in plan["seq_srts"].items():
+        srtlib.write_srt(paths.p(f"02_transcription/{name}-seq.srt"), cues_)
+    ok, errors, warnings = plan["ok"], plan["errors"], plan["warnings"]
+    spec, events, cues, merged = plan["spec"], plan["spec"]["events"], plan["cues"], plan["spec"]["main_segments"]
     write_json(paths.p("01_analysis/plan-validation.json"), {"generated": now_iso(), "ok": ok,
-               "errors": errors, "warnings": warnings, "decisions": len(ed.get("decisions", [])),
+               "errors": errors, "warnings": warnings, "decisions": plan["decisions"],
                "events": len(events), "cues": len(cues), "main_segments": len(merged)})
     if ok:
         write_json(paths.p("01_analysis/timeline-spec.json"), spec)
-        write_json(paths.p("03_broll/broll-manifest.json"), {"generated": now_iso(), "assets": broll})
+        write_json(paths.p("03_broll/broll-manifest.json"), {"generated": now_iso(), "assets": plan["broll"]})
         sfx_dir = "06_audio/sfx"
         write_json(paths.p("06_audio/audio-cue-sheet.json"), {
-            "generated": now_iso(), "fps": FPS_, "cues": [dict(c, **{
+            "generated": now_iso(), "fps": spec["fps"], "cues": [dict(c, **{
                 "duration_frames": None, "audio_type": "sfx", "source_file": f"{sfx_dir}/{c['kind']}.wav",
                 "fade": "baked into generated file (short attack, exponential tail)",
                 "gain_instructions": f"clip gain {c['gain_db']} dB; keep dialogue peaks dominant (-6 dBFS dialogue / SFX ≤ -14 dBFS)"})
@@ -611,6 +709,37 @@ def compile_plan(paths: Paths) -> dict:
             appr["stale"] = True
             write_json(paths.p("01_analysis/plan-approval.json"), appr)
     return res
+
+
+def build_plan(inp: PlanInputs) -> dict:
+    """The pure part of compile_plan: the steps in order, their errors and warnings concatenated in that order."""
+    errors, warnings = [], []
+
+    def step(r):
+        data, e, w = r
+        errors.extend(e)
+        warnings.extend(w)
+        return data
+
+    vd = step(validate_decisions(inp))
+    cam = step(build_camera(inp, vd["camera"], vd["events"]))
+    fr = step(apply_framing(inp, cam))
+    tm = step(apply_timemap(inp, fr["camera"], fr["merged"], vd["events"], vd["broll"], vd["cues"], cam["box"]))
+    au = step(build_audio(inp, tm["cues"], tm["tmap"], tm["dur_f"]))
+    spec = assemble_spec(inp, cam, fr, tm, au, vd["recipe_info"])
+    step(final_checks(inp, tm["events"]))
+    return {"ok": not errors, "errors": errors, "warnings": warnings, "spec": spec, "broll": tm["broll"],
+            "cues": au["cues"], "seq_srts": tm["seq_srts"], "decisions": len(inp.ed.get("decisions", []))}
+
+
+def compile_plan(paths: Paths, ctx=None) -> dict:
+    """Validate 01_analysis/edit-decisions.json against the transcript and compile the timeline spec, B-roll manifest
+    and audio cue sheet: read_inputs -> build_plan (pure steps) -> write_outputs. `ctx` (the CLI's Context) is bound
+    for the whole compile; without it the current Context applies."""
+    import contextlib
+    from .common import use_context
+    with use_context(ctx) if ctx is not None else contextlib.nullcontext():
+        return write_outputs(paths, build_plan(read_inputs(paths, ctx)))
 
 
 def plan_fingerprint(paths: Paths) -> str:
