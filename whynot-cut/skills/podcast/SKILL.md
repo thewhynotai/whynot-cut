@@ -112,6 +112,8 @@ a reel done unless its `qc` passed in this message.
   `profile.json`). Until a person's gender is known write «د.» or the name.
 - Gate 0 and Gate 1 come only from the editor's messages (or a standing `approval: auto` for Gate 1, never for Gate 0).
 - `assets/` and `data/` are read-only; everything goes to `output/`. Ask before deleting anything.
+- If a reel command answers `blocked` because another session holds the client, stop and tell the editor; never
+  release another session's lock yourself.
 - Premiere is the deliverable; After Effects/Photoshop only when the editor asks (`/whynot-cut:adobe-extras`).
 
 ## Motion mode (2.2)

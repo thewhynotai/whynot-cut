@@ -16,6 +16,13 @@
           { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_context.py\"", "timeout": 10 }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py\"", "timeout": 10 }
+        ]
+      }
     ]
   }
 }

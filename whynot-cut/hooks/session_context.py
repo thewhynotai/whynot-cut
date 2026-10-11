@@ -4,7 +4,7 @@
 Speaks up when the session opens
   * inside a client folder (assets/ and data/ plus a positive marker: `.whynot-client`, `output/client_database/`, or
     lying under clients_root — see engine/reel/lib/client_marker.py): profile, engine, Premiere bridge, preferences,
-    new clips; first a warning when another session's writing command holds output/.whynot-lock (3.0 T1.8);
+    new clips; first a warning when another session holds the client's lease (output/.whynot-lock, 3.0 T1.8);
   * in the clients folder (setting `clients_root`, or a folder whose preferences file says so): which clients it holds;
   * in a folder that has a WhyNot Cut preferences file but no clients yet: point to /whynot-cut:start.
 Whenever it speaks, it first warns loudly if the hooks heartbeat (${CLAUDE_PLUGIN_DATA}/hooks-ok, written by
@@ -109,18 +109,18 @@ def reference_style_line(root: Path, has_profile: bool) -> str:
 
 
 def writer_line(root: Path, session) -> str:
-    """One writer per client folder (3.0 T1.8): warn when another session's writing command holds the lock now."""
+    """One writer per client folder (3.0 T1.8): warn when another session holds the client's lease."""
     try:
         import writer_lock
-        rec = writer_lock.other_writer(root, session)
+        rec = writer_lock.other_writer(root, session or writer_lock.session_id())
     except Exception:
         return ""
     if not rec:
         return ""
-    return (f"WARNING: another session is working in this client ({writer_lock.describe(rec)}). Its writing commands "
-            f"hold output/.whynot-lock; yours are refused until it finishes, so do not start an edit here in "
-            f"parallel: tell the editor. `reel lock --status` shows it; only if the editor says that session is "
-            f"finished or stuck, the lead runs `reel lock --release`. ")
+    return (f"WARNING: another session is working in this client ({writer_lock.describe(rec)}). It holds the "
+            f"client (output/.whynot-lock), so your writing commands are refused: do not edit here in parallel, "
+            f"tell the editor and never release its lock yourself. `reel lock --status` shows it; only if the "
+            f"editor says that session is finished or stuck, the lead runs `reel lock --release`. ")
 
 
 def prefs_line(st: dict) -> str:
@@ -179,7 +179,7 @@ def main():
             pass
         clips = new_clips(root)
         eps = episodes(root)
-        emit(writer_line(root, data.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID"))
+        emit(writer_line(root, data.get("session_id"))
              + f"WhyNot Cut: this is a client folder ({root}). Profile: {prof or 'NONE (run /whynot-cut:new-client)'}. "
              f"Engine: {'ok' if env_ok else 'not installed (run /whynot-cut:start)'}. "
              f"Premiere bridge: {bridge_state(home)}. "

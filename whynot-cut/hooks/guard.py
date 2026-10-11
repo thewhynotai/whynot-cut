@@ -1260,6 +1260,13 @@ def heartbeat():
             pass
 
 
+# a shell command naming output/.whynot-lock that could change it (subagents only read it; `reel lock --status`)
+LOCK_WRITE = re.compile(r">|\b(rm|del|erase|rd|rmdir|unlink|mv|move|ren|rename|cp|copy|touch|truncate|tee|shred|"
+                        r"sed|perl|python\d*|py|node|ruby|bash|sh|cmd|pwsh|powershell|remove-item|ri|move-item|mi|"
+                        r"rename-item|rni|copy-item|cpi|set-content|sc|add-content|ac|clear-content|clc|out-file|"
+                        r"new-item|ni|set-itemproperty)\b|::\w*(delete|move|write|copy|replace|create)", re.I)
+
+
 def main():
     if sys.version_info < (3, 8):       # run_python.sh no longer probes the version: fail open, but say so
         print("WhyNot Cut guard: Python 3.8+ needed; protection is OFF (run reel doctor)", file=sys.stderr)
@@ -1273,6 +1280,10 @@ def main():
     ti = data.get("tool_input") or {}
     cwd = Path(native(data.get("cwd") or os.getcwd()))
     agent = data.get("agent_type") or None          # full name: `whynot-cut:qc-reviewer` (structure review 4.7)
+    text = str(ti.get("command") or ti.get("file_path") or ti.get("notebook_path") or "")
+    if agent and ".whynot-lock" in text and (tool not in ("Bash", "PowerShell") or LOCK_WRITE.search(text)):
+        block("subagents may not delete or overwrite the client's writer lock (output/.whynot-lock); report it to "
+              "the lead instead (only the lead runs `reel lock --release`, on the editor's word).")
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         fp = ti.get("file_path") or ti.get("notebook_path") or ""
         if own_role(agent) in READ_ONLY_AGENTS:

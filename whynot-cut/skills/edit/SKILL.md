@@ -150,4 +150,6 @@ There is no rendered final video unless the editor made one.
 - Don't change Adobe security preferences (including macOS `defaults write com.adobe.*`), the Windows registry or
   system settings. Don't install software yourself; `reel setup` covers the engine. Don't delete or overwrite outside
   `output/`. Ask before deleting anything.
+- If a reel command answers `blocked` because another session holds the client, stop and tell the editor; never
+  release another session's lock yourself.
 - Cross-platform: give shell commands for the editor's OS (`reel doctor` → `system.os`). Paths with spaces are always quoted.

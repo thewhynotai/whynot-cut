@@ -1,6 +1,6 @@
 """3.0 T1.8 one writer per client folder: output/.whynot-lock, `reel lock`, the guard rule and the SessionStart warning.
 Two Claude sessions worked on one client folder at the same time in the field (chats-other: "Two sessions on one
-client folder, no lock"); writing commands now hold a per-client lock for their duration.
+client folder, no lock"); a session's writing commands now take and refresh a per-client session lease.
 Run:  ~/.whynot-cut/venv/Scripts/python.exe -B -m unittest discover -s whynot-cut/tests -p test_writer_lock.py -v
 """
 import sys as _sys
@@ -24,6 +24,7 @@ from lib import writer_lock  # noqa: E402
 CLI = SK / "engine/reel/cli.py"
 GUARD = SK / "hooks" / "guard.py"
 CTX = SK / "hooks" / "session_context.py"
+END = SK / "hooks" / "session_end.py"
 SESSION_ENV = ("WHYNOT_LOCK_SESSION", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID")
 CLIENTS_ENV = ("WHYNOT_CLIENTS_ROOT", "CLAUDE_PLUGIN_OPTION_CLIENTS_ROOT", "REEL_CLIENTS_ROOT")
 
@@ -212,7 +213,10 @@ class TestOneWriter(LockFixture):
         rec = self.hold(session="me-session")
         r = self.reel("client-init", "--id", "lock-clinic")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(json.loads(self.lock.read_text(encoding="utf-8")), rec, "a re-entrant command took the lock")
+        now = json.loads(self.lock.read_text(encoding="utf-8"))
+        self.assertEqual((now["session_id"], now["pid"], now["started_at"]),
+                         (rec["session_id"], rec["pid"], rec["started_at"]), "a re-entrant command took the lock")
+        self.assertEqual(now["command"], "reel client-init", "the lease shows the session's latest writing command")
 
     def test_writer_leaves_no_lock(self):
         r = self.reel("client-init", "--id", "lock-clinic")
@@ -257,6 +261,127 @@ class TestOneWriter(LockFixture):
         self.assertFalse(self.lock.exists())
 
 
+def sleeper() -> subprocess.Popen:
+    """A stand-in for a session's long-lived Claude Code process (CLAUDE_PID)."""
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
+
+
+class TestSessionLease(LockFixture):
+    """Review round 1: the lock is a SESSION LEASE. Two sessions taking turns on one client over minutes was the field
+    problem, so a session keeps the client between its commands while its Claude Code process (CLAUDE_PID) lives."""
+
+    def a(self, *args, claude=None):
+        return self.reel(*args, session="session-A", CLAUDE_PID=str(claude or os.getpid()))
+
+    def b(self, *args, claude=None):
+        return self.reel(*args, session="session-B", CLAUDE_PID=str(claude or os.getpid()))
+
+    def rec(self):
+        return json.loads(self.lock.read_text(encoding="utf-8"))
+
+    def test_two_sessions_alternating(self):
+        self.assertEqual(self.a("client-init", "--id", "lock-clinic").returncode, 0)
+        lease = self.rec()
+        self.assertEqual((lease["session_id"], lease["pid"]), ("session-A", os.getpid()), "holder = CLAUDE_PID")
+        self.assertTrue(lease.get("pid_created"), "the holder's creation time is recorded")
+        r = self.b("client-init", "--id", "lock-clinic", "--force")
+        self.assertEqual(r.returncode, 2, "B is blocked between A's commands")
+        self.assertIn("never release another session's lock yourself", json.loads(r.stdout)["how"])
+        self.assertEqual(self.a("client-init", "--id", "lock-clinic", "--force").returncode, 0, "A goes on")
+        self.assertEqual(self.rec()["started_at"], lease["started_at"])
+        self.assertEqual(self.b("client-init", "--id", "lock-clinic", "--force").returncode, 2)
+        self.assertEqual(self.b("lock", "--status").returncode, 0, "B can still read")
+
+    def test_same_session_parallel_and_sequential_never_blocked(self):
+        code = ("import sys, time; sys.path.insert(0, sys.argv[1]); from lib import writer_lock as w; "
+                "l = w.acquire(sys.argv[2], 'reel transcribe --video-id C0001'); print('held', flush=True); "
+                "time.sleep(120)")
+        sub = subprocess.Popen([sys.executable, "-c", code, str(SK / "engine/reel"), str(self.root)],
+                               stdout=subprocess.PIPE, text=True,
+                               env=env_for("session-A", CLAUDE_PID=str(os.getpid())))   # a subagent's long command
+        try:
+            self.assertEqual(sub.stdout.readline().strip(), "held")
+            for _ in range(2):                                          # the lead, sequentially, meanwhile
+                r = self.a("client-init", "--id", "lock-clinic", "--force")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        finally:
+            sub.kill()
+            sub.wait()
+            sub.stdout.close()
+        self.assertTrue(self.lock.exists(), "ending a command never ends the session's lease")
+        self.assertEqual(self.rec()["session_id"], "session-A")
+        import shutil
+        shutil.rmtree(self.root / "output/client_database")       # client-init --force keeps one .bak per file
+        self.assertEqual(self.a("client-init", "--id", "lock-clinic").returncode, 0)
+
+    def test_stale_when_the_claude_process_is_gone(self):
+        claude = sleeper()
+        try:
+            self.assertEqual(self.a("client-init", "--id", "lock-clinic", claude=claude.pid).returncode, 0)
+            self.assertEqual(self.rec()["pid"], claude.pid)
+            self.assertEqual(self.b("client-init", "--id", "lock-clinic", "--force").returncode, 2)
+        finally:
+            claude.kill()
+            claude.wait()
+        r = self.b("client-init", "--id", "lock-clinic", "--force")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("took over", self.log_text())
+        self.assertIn("session-A", self.log_text())
+        self.assertEqual(self.rec()["session_id"], "session-B")
+
+    def test_stale_after_2_h_without_a_writing_command(self):
+        self.assertEqual(self.a("client-init", "--id", "lock-clinic").returncode, 0)
+        t = time.time() - 3 * 3600
+        os.utime(self.lock, (t, t))
+        self.assertEqual(self.b("client-init", "--id", "lock-clinic", "--force").returncode, 0)
+        self.assertIn("2 h", self.log_text())
+
+    def test_release_ends_the_lease(self):
+        self.assertEqual(self.a("client-init", "--id", "lock-clinic").returncode, 0)
+        r = self.b("lock", "--release")                                  # the lead of B, on the editor's word
+        self.assertTrue(json.loads(r.stdout)["released"])
+        self.assertEqual(self.b("client-init", "--id", "lock-clinic", "--force").returncode, 0)
+
+    def test_reused_pid_is_dead(self):
+        me = writer_lock.process_created(os.getpid())
+        self.assertTrue(me)
+        self.assertTrue(writer_lock.pid_alive(os.getpid(), me))
+        self.assertFalse(writer_lock.pid_alive(os.getpid(), "12345"))
+        rec = self.hold(session="session-A")
+        rec["pid_created"] = "12345"                                     # same pid, another process start
+        self.lock.write_text(json.dumps(rec), encoding="utf-8")
+        r = self.b("client-init", "--id", "lock-clinic")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("another program", self.log_text())
+
+    def test_plain_terminal_keeps_per_command_behaviour(self):
+        r = self.reel("client-init", "--id", "lock-clinic", session=None)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(self.lock.exists())
+
+    def test_session_end_releases_only_its_own_lease(self):
+        self.assertEqual(self.a("client-init", "--id", "lock-clinic").returncode, 0)
+
+        def end(session, cwd):
+            p = {"session_id": session, "cwd": str(cwd), "hook_event_name": "SessionEnd", "reason": "exit"}
+            return subprocess.run([sys.executable, str(END)], input=json.dumps(p), capture_output=True, text=True,
+                                  encoding="utf-8", env=env_for(None)).returncode
+        self.assertEqual(end("session-B", self.root), 0)
+        self.assertTrue(self.lock.exists(), "another session's lease is never touched")
+        self.assertEqual(end("session-A", self.root.parent), 0)          # session opened in the clients folder
+        self.assertFalse(self.lock.exists())
+        self.assertIn("end of session session-A", self.log_text())
+
+    def test_takeover_never_loses_a_fresh_lock(self):
+        """M3: the aside file is moved back when hard links are unavailable."""
+        from unittest import mock
+        fresh = self.hold(session="fresh")
+        with mock.patch.object(writer_lock.os, "link", side_effect=OSError("no hard links")):
+            self.assertFalse(writer_lock._remove_stale(self.lock, {"session_id": "old"}, "test", self.root))
+        self.assertEqual(json.loads(self.lock.read_text(encoding="utf-8")), fresh)
+        self.assertEqual([p.name for p in self.lock.parent.glob(".whynot-lock.stale-*")], [])
+
+
 class TestLockCommand(LockFixture):
     def test_status(self):
         r = self.reel("lock", "--status")
@@ -298,6 +423,24 @@ class TestGuardAndSessionStart(LockFixture):
             self.assertEqual(self.guard(c, "other-plugin:helper"), 2, c)
             self.assertEqual(self.guard(c), 0, c)                         # the lead may
         self.assertEqual(self.guard("reel lock --status", "whynot-cut:qc-reviewer"), 0)
+
+    def test_subagents_cannot_delete_or_overwrite_the_lock(self):
+        """M7: output/ is writable, so the lock file itself needs a role rule."""
+        sub = "whynot-cut:premiere-builder"
+        for c in ("rm output/.whynot-lock", "rm -f output/.whynot-lock", "echo {} > output/.whynot-lock",
+                  "mv output/.whynot-lock /tmp/x", "python -c \"import os; os.remove('output/.whynot-lock')\""):
+            self.assertEqual(self.guard(c, sub), 2, c)
+            self.assertEqual(self.guard(c), 0, c)                          # the lead is not stopped here
+        self.assertEqual(self.guard("cat output/.whynot-lock", sub), 0)
+        p = {"tool_name": "PowerShell", "tool_input": {"command": "Remove-Item output\\.whynot-lock"},
+             "cwd": str(self.root), "agent_type": sub}
+        self.assertEqual(subprocess.run([sys.executable, str(GUARD)], input=json.dumps(p), capture_output=True,
+                                        text=True, encoding="utf-8", env=env_for()).returncode, 2)
+        for tool in ("Write", "Edit"):
+            p = {"tool_name": tool, "tool_input": {"file_path": str(self.lock)}, "cwd": str(self.root),
+                 "agent_type": sub}
+            self.assertEqual(subprocess.run([sys.executable, str(GUARD)], input=json.dumps(p), capture_output=True,
+                                            text=True, encoding="utf-8", env=env_for()).returncode, 2, tool)
 
     def context(self, session):
         p = {"cwd": str(self.root), "session_id": session, "hook_event_name": "SessionStart"}

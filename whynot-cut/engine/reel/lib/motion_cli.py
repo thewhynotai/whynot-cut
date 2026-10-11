@@ -39,8 +39,8 @@ ARGS: dict = {
     "motion-frames": [],
 }
 NO_ID = {"ae-status", "ae-probe", "motion-icons", "motion-library"}
-# one writer per client folder (3.0 T1.8): writers hold output/.whynot-lock while they run. ae-probe writes only in
-# the engine home (machine level), never in a client folder, so it is a reader here.
+# one writer per client folder (3.0 T1.8): writers take or refresh the session's lease on output/.whynot-lock.
+# ae-probe writes only in the engine home (machine level), never in a client folder, so it is a reader here.
 WRITES = {"motion-plan", "motion-animatic", "motion-build", "motion-render", "motion-frames"}
 READS = {"ae-status", "ae-probe", "motion-icons", "motion-library"}
 

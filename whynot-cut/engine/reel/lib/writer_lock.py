@@ -1,33 +1,40 @@
-"""One writer per client folder (3.0 T1.8): `<client>/output/.whynot-lock`.
+"""One writer per client folder (3.0 T1.8): `<client>/output/.whynot-lock`, a SESSION LEASE.
 
-Two Claude sessions once worked on one client folder at the same time and their writes crossed. Every `reel` command
-that writes into a client folder now holds this lock for its duration (cli.py decides which commands write); a
-command of ANOTHER session gets `{"blocked", "how"}` and exit 2 while the lock is held.
+Two Claude sessions once took turns on one client folder over minutes and hours and their work crossed. The first
+`reel` command of a session that writes into a client folder creates this lease (cli.py decides which commands
+write); every later writing command of the same session refreshes it (touch + `command`), so the session keeps the
+client between its commands. A writing command of ANOTHER session gets `{"blocked", "how"}` and exit 2.
 
-The lock file is JSON `{session_id, pid, host, started_at, command}`, created atomically (O_CREAT | O_EXCL) and
-touched every 10 min while its command runs (its mtime is the last sign of life). It is stale, and the next writer
-takes it over with a line in output/logs/pipeline.log, when
-  * its process (`pid`) is no longer running on this computer (`host`), or
-  * it shows no activity for 2 h (the only test for a lock written by another computer on a shared drive).
+The lease is JSON `{session_id, pid, pid_created, host, started_at, updated_at, command}`, created atomically
+(O_CREAT | O_EXCL). `pid` is the holder that must stay alive:
+  * CLAUDE_PID, the long-lived Claude Code process of the session, when it is set and running: a lease that
+    outlives single commands;
+  * else the command's own process (an editor at a plain terminal): the lock lasts for that command only and is
+    removed when it ends.
+It is stale, and the next writer takes it over with a line in output/logs/pipeline.log, when
+  * its holder process is no longer running on this computer (`host`); a pid whose creation time differs from
+    `pid_created` is a reused pid, so the holder is gone too; or
+  * no writing command touched it for 2 h (also the only test for a lease from another computer on a shared
+    drive). A long command touches it every 10 min while it runs.
+A lease ends only by staleness, by `reel lock --release` (the lead, on the editor's word), or by the SessionEnd hook
+(hooks/session_end.py), which removes the ending session's own lease only. A single command never removes a lease.
 
 Session id (who "one writer" is), first match wins:
   WHYNOT_LOCK_SESSION    set by a writing `reel` for the processes it starts (a nested reel is the same writer)
   CLAUDE_SESSION_ID      if a host exports it
-  CLAUDE_CODE_SESSION_ID what Claude Code gives Bash/PowerShell commands (the lead and its subagents share it)
+  CLAUDE_CODE_SESSION_ID what Claude Code gives Bash/PowerShell commands (the lead and its subagents share it, so
+                         they are one writer: re-entrant, never blocked by each other)
   CLAUDE_PID             the Claude Code process, when only that is exported: "claude-pid-<pid>"
-  else "pid-<pid of this reel>": an editor at a plain terminal runs one command at a time, so a per-process id is
-  enough there; it is never re-entrant, which errs on the safe side (blocks, never merges two writers).
-Sequential commands of one session never meet a lock (each releases its own at the end); the session id makes
-overlapping commands of the SAME session (parallel subagents, a nested reel) re-entrant: they run without taking
-the lock and never remove it.
+  else "pid-<pid of this reel>": never re-entrant, which errs on the safe side (blocks, never merges two writers).
 
-Stdlib only: imported by cli.py (`lib.writer_lock`) and by hooks/session_context.py (`writer_lock`).
+Stdlib only: imported by cli.py (`lib.writer_lock`) and by the hooks (`writer_lock`).
 """
 from __future__ import annotations
 
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -47,6 +54,10 @@ def lock_path(root) -> Path:
     return Path(root).expanduser() / LOCK_REL
 
 
+def now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
 def session_id(env=None) -> str:
     env = os.environ if env is None else env
     for k in (ENV, "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID"):
@@ -57,25 +68,35 @@ def session_id(env=None) -> str:
     return f"pid-{os.getpid()}"
 
 
-def pid_alive(pid) -> bool:
-    """Is process `pid` running on this computer? Windows has no kill(pid, 0): ask OpenProcess + GetExitCodeProcess."""
-    try:
-        pid = int(pid)
-    except (TypeError, ValueError):
-        return False
-    if pid <= 0:
-        return False
+def holder_pid(env=None) -> int:
+    """The process whose life is the lease: the session's Claude Code process (CLAUDE_PID) when it runs, else ours."""
+    env = os.environ if env is None else env
+    v = (env.get("CLAUDE_PID") or "").strip()
+    return int(v) if v.isdigit() and pid_alive(int(v)) else os.getpid()
+
+
+# --------------------------------------------------------------------------- processes (Windows has no kill(pid, 0))
+def _win_open(pid: int):
+    """(kernel32, handle or None, error code)."""
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    k32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    k32.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (ctypes.POINTER(wintypes.FILETIME),) * 4
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    h = k32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
+    return k32, h, (0 if h else ctypes.get_last_error())
+
+
+def _running(pid: int) -> bool:
     if IS_WIN:
         import ctypes
         from ctypes import wintypes
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.OpenProcess.restype = wintypes.HANDLE
-        k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-        k32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
-        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
-        h = k32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
+        k32, h, err = _win_open(pid)
         if not h:
-            return ctypes.get_last_error() == 5           # ERROR_ACCESS_DENIED: it exists (another user's process)
+            return err == 5                           # ERROR_ACCESS_DENIED: it exists (another user's process)
         try:
             code = wintypes.DWORD()
             return not k32.GetExitCodeProcess(h, ctypes.byref(code)) or code.value == 259   # STILL_ACTIVE
@@ -92,6 +113,48 @@ def pid_alive(pid) -> bool:
     return True
 
 
+def process_created(pid) -> str | None:
+    """When process `pid` started, as an opaque string (None: unknown). Same pid + other start = a reused pid."""
+    try:
+        pid = int(pid)
+        if IS_WIN:
+            import ctypes
+            from ctypes import wintypes
+            k32, h, _ = _win_open(pid)
+            if not h:
+                return None
+            try:
+                t = [wintypes.FILETIME() for _ in range(4)]
+                if not k32.GetProcessTimes(h, *(ctypes.byref(x) for x in t)):
+                    return None
+                return str((t[0].dwHighDateTime << 32) | t[0].dwLowDateTime)
+            finally:
+                k32.CloseHandle(h)
+        stat = Path(f"/proc/{pid}/stat")
+        if stat.exists():                             # Linux: field 22 = start time in clock ticks since boot
+            return stat.read_text().rsplit(")", 1)[1].split()[19]
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or None               # macOS
+    except Exception:  # noqa: BLE001  (unknown start time: liveness alone decides)
+        return None
+
+
+def pid_alive(pid, created=None) -> bool:
+    """Is process `pid` running on this computer (and, given `created`, still the same process)?"""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0 or not _running(pid):
+        return False
+    if created:
+        now = process_created(pid)
+        if now is not None and now != str(created):
+            return False
+    return True
+
+
+# --------------------------------------------------------------------------- the lock file
 def read(root) -> dict | None:
     """The lock record, None when there is no lock; {} when the file exists but cannot be read as a record."""
     try:
@@ -124,10 +187,12 @@ def stale_reason(root, rec: dict | None = None) -> str | None:
         return "the lock is gone"
     if not rec:
         return f"unreadable lock file, {age / 60:.0f} min old" if age > WRITING_GRACE_S else None
-    if rec.get("host") == socket.gethostname() and not pid_alive(rec.get("pid")):
-        return f"its process {rec.get('pid')} on {rec.get('host')} is no longer running"
+    if rec.get("host") == socket.gethostname() and not pid_alive(rec.get("pid"), rec.get("pid_created")):
+        reused = pid_alive(rec.get("pid"))
+        return (f"its process {rec.get('pid')} on {rec.get('host')} is no longer running"
+                + (" (the process id now belongs to another program)" if reused else ""))
     if age > STALE_AFTER_S:
-        return f"no activity for over {STALE_AFTER_S // 3600} h ({age / 3600:.1f} h)"
+        return f"no writing command for over {STALE_AFTER_S // 3600} h ({age / 3600:.1f} h)"
     return None
 
 
@@ -136,7 +201,7 @@ def describe(rec: dict) -> str:
 
 
 def client_log(root, msg: str):
-    line = f"[{datetime.now().astimezone().isoformat(timespec='seconds')}] {msg}"
+    line = f"[{now_iso()}] {msg}"
     print(line, file=sys.stderr)
     try:
         f = Path(root).expanduser() / LOG_REL
@@ -148,7 +213,7 @@ def client_log(root, msg: str):
 
 
 class Busy(Exception):
-    """Another session holds the client's lock."""
+    """Another session holds the client's lease."""
 
     def __init__(self, root, rec: dict):
         super().__init__(describe(rec))
@@ -157,27 +222,30 @@ class Busy(Exception):
     def refusal(self) -> dict:
         r = self.rec
         who = f"session {str(r.get('session_id') or '?')[:12]}, process {r.get('pid')} on {r.get('host')}"
-        return {"blocked": f"another session is writing in this client folder ({describe(r)}; {who}). One writer per "
-                           f"client folder: this command would collide with it.",
-                "how": "Wait until that command finishes, or work on another client. Read-only commands still work "
-                       "(`reel next`, `reel status`, `reel inbox --no-refresh`, `reel lock --status`). If the editor "
-                       "says that session is closed or stuck, they run `reel lock --release` (the lead only). The lock "
-                       "goes stale by itself when its process ends or after 2 h without activity.",
+        return {"blocked": f"another session is working in this client folder ({describe(r)}; {who}). One writer per "
+                           f"client folder: this command would collide with its work.",
+                "how": "Stop and tell the editor; never release another session's lock yourself. Read-only commands "
+                       "still work (`reel next`, `reel status`, `reel inbox --no-refresh`, `reel lock --status`). The "
+                       "lock ends when that session ends, after 2 h without a writing command from it, or when the "
+                       "editor says that session is finished and the lead runs `reel lock --release`.",
                 "lock": str(lock_path(self.root)), "holder": r}
 
 
 class Lock:
-    """The lock this process holds (owned) or joined (re-entrant: same session id, never removed by us)."""
+    """This command's hold on the client: touches the lease while the command runs; removes the lock at the end only
+    when the lock lives just for this command (holder = this process, no Claude Code session process)."""
 
-    def __init__(self, root, owned: bool):
-        self.root, self.owned = Path(root), owned
+    def __init__(self, root, sid: str, per_command: bool):
+        self.root, self.sid, self.per_command = Path(root), sid, per_command
         self._stop = threading.Event()
-        if owned:
-            threading.Thread(target=self._touch, name="whynot-lock-touch", daemon=True).start()
+        threading.Thread(target=self._touch, name="whynot-lock-touch", daemon=True).start()
+
+    def _mine(self) -> bool:
+        return (read(self.root) or {}).get("session_id") == self.sid
 
     def _touch(self):
         while not self._stop.wait(TOUCH_EVERY_S):
-            if (read(self.root) or {}).get("pid") == os.getpid():
+            if self._mine():
                 try:
                     os.utime(lock_path(self.root))
                 except OSError:
@@ -185,12 +253,13 @@ class Lock:
 
     def release(self):
         self._stop.set()
-        if self.owned and (read(self.root) or {}).get("pid") == os.getpid():
+        rec = read(self.root) or {}
+        if self.per_command and rec.get("session_id") == self.sid and rec.get("pid") == os.getpid():
             try:
                 lock_path(self.root).unlink()
             except OSError:
                 pass
-        self.owned = False
+        self.per_command = False
 
     def __enter__(self):
         return self
@@ -209,6 +278,25 @@ def _create(path: Path, rec: dict) -> bool:
     return True
 
 
+def _refresh(root, cur: dict, command: str):
+    """A later writing command of the holding session: the lease shows it (`command`, `updated_at`, mtime)."""
+    path = lock_path(root)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps(dict(cur, command=command, updated_at=now_iso()), ensure_ascii=False),
+                       encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        try:
+            os.utime(path)
+        except OSError:
+            pass
+
+
 def _remove_stale(path: Path, seen: dict, why: str, root) -> bool:
     """Move the stale lock aside and check it is the one we judged (not a fresh lock another writer just created)."""
     aside = path.with_name(f"{path.name}.stale-{os.getpid()}")
@@ -222,15 +310,16 @@ def _remove_stale(path: Path, seen: dict, why: str, root) -> bool:
         got = json.loads(aside.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         got = {}
-    if got != seen:                                    # we grabbed a newer lock: put it back, the writer holds it
+    if got != seen:                                    # we grabbed a newer lock: put it back, its writer holds it
         try:
-            os.link(aside, path)
-        except OSError:
-            pass
-        try:
+            os.link(aside, path)                       # fails when the path is taken again: never overwrite
             aside.unlink()
         except OSError:
-            pass
+            if not path.exists():
+                try:
+                    os.replace(aside, path)            # no hard links here (FAT, some shares): move it back
+                except OSError:
+                    pass                               # keep the aside file: the record is not lost
         return False
     try:
         aside.unlink()
@@ -242,18 +331,20 @@ def _remove_stale(path: Path, seen: dict, why: str, root) -> bool:
 
 
 def acquire(root, command: str, env=None) -> Lock:
-    """Take the client's lock for `command` or join it (same session); raise Busy when another session holds it.
-    Sets WHYNOT_LOCK_SESSION in this process, so the reel processes it starts are the same writer."""
+    """Take the client's lease for `command`, or refresh it when this session holds it; raise Busy when another
+    session holds it. Sets WHYNOT_LOCK_SESSION in this process, so the reel processes it starts are the same writer."""
     root = Path(root).expanduser()
+    env = os.environ if env is None else env
     sid = session_id(env)
     os.environ[ENV] = sid
     path = lock_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    rec = {"session_id": sid, "pid": os.getpid(), "host": socket.gethostname(),
-           "started_at": datetime.now().astimezone().isoformat(timespec="seconds"), "command": command}
+    hp = holder_pid(env)
+    rec = {"session_id": sid, "pid": hp, "pid_created": process_created(hp), "host": socket.gethostname(),
+           "started_at": now_iso(), "updated_at": now_iso(), "command": command}
     for _ in range(5):
         if _create(path, rec):
-            return Lock(root, owned=True)
+            return Lock(root, sid, per_command=hp == os.getpid())
         cur = read(root)
         if cur is None:
             continue                                   # released between our two steps
@@ -262,13 +353,13 @@ def acquire(root, command: str, env=None) -> Lock:
             time.sleep(0.1)                            # another writer is writing its record right now
             continue
         if not why and cur.get("session_id") == sid:
-            return Lock(root, owned=False)             # re-entrant: this session already writes here
+            _refresh(root, cur, command)               # re-entrant: this session already holds the client
+            return Lock(root, sid, per_command=False)
         if not why:
             raise Busy(root, cur)
         if not _remove_stale(path, cur, why, root):
             time.sleep(0.05)
-    cur = read(root) or {}
-    raise Busy(root, cur)
+    raise Busy(root, read(root) or {})
 
 
 def status(root, env=None) -> dict:
@@ -292,8 +383,21 @@ def release(root) -> dict:
     return {"released": True, "was": rec}
 
 
+def release_own(root, sid: str | None) -> bool:
+    """SessionEnd: remove the lease only when the ending session holds it."""
+    rec = read(root)
+    if not sid or not rec or rec.get("session_id") != sid:
+        return False
+    try:
+        lock_path(root).unlink()
+    except OSError:
+        return False
+    client_log(root, f"writer lock: released at the end of session {sid} (was {describe(rec)})")
+    return True
+
+
 def other_writer(root, own_session: str | None) -> dict | None:
-    """The live lock of ANOTHER session (for the SessionStart warning), else None."""
+    """The live lease of ANOTHER session (for the SessionStart warning), else None."""
     rec = read(root)
     if not rec or stale_reason(root, rec) or (own_session and rec.get("session_id") == own_session):
         return None

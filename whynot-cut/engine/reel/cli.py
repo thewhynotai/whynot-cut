@@ -644,7 +644,8 @@ NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
 
 # One writer per client folder (3.0 T1.8). Every command chooses (test_writer_lock checks each is in exactly one):
-#   CORE_WRITES  write into the client folder: hold output/.whynot-lock (lib/writer_lock.py) while they run
+#   CORE_WRITES  write into the client folder: take or refresh the session's lease on output/.whynot-lock
+#                (lib/writer_lock.py); another session's writers are refused until the lease ends
 #   CORE_READS   never write into the client folder (machine-level commands write only in the engine home); `lock`
 #                manages the lock itself and never takes it (`--release` is the escape hatch, lead only)
 #   WRITES_IF    write only with a flag. inbox: `--no-refresh` reads the last discovery (its clip-ids map and probe
@@ -675,8 +676,8 @@ def writes(a) -> bool:
 
 
 def take_writer_lock(a):
-    """The client's lock for a writing command (None for readers and commands without a client folder). Another
-    session's live lock -> `{"blocked", "how"}` and exit 2."""
+    """Take or refresh the session's lease on the client for a writing command (None for readers and commands
+    without a client folder). Another session's live lease -> `{"blocked", "how"}` and exit 2."""
     if not a.root or not writes(a):
         return None
     root = Path(a.root).expanduser()

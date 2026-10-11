@@ -19,6 +19,8 @@ Premiere first).
   A client folder can override the machine-wide file, so never apply one client's `approval` to another.
 - Show a short table: client · new clips · in-progress clips · missing material. In-progress clips resume with
   `reel next`; done clips are left alone unless the user asks. Nothing new: say so, list what's in progress, stop.
+- If a reel command answers `blocked` because another session holds the client, stop and tell the editor; never
+  release another session's lock yourself.
 - When several clients or more than ~3 new clips would start, or on the first run on this machine, show the table and
   ask once before starting. One named client plus "edit the new videos" needs no extra question.
 
