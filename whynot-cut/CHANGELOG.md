@@ -2,6 +2,16 @@
 
 ## 3.0.0 (unreleased)
 
+### Added
+- Positive client-folder marker (structure 4.1): `reel scaffold` and `reel client-init` write `.whynot-client`
+  (`{"whynot_client": 1, "created": ...}`) at the client root; `reel doctor --fix` writes it for an existing client that
+  lacks it (only at the client root, never in `assets/` or `data/`). New `lib/client_marker.py` (stdlib only) is shared
+  by the engine, the guard and the SessionStart hook.
+- `reel doctor` reports `guard_active` (a `hooks-ok` heartbeat under `${CLAUDE_PLUGIN_DATA}` or
+  `~/.claude/plugins/data/whynot-cut*/` younger than 24 h) with a fix ("install Git for Windows" on Windows), and
+  `client_markers` (present / missing / written) for `--root`, the current client folder and every folder in
+  `clients_root`.
+
 ### Changed
 - No real client ships in the product: the real client's profile folder was removed from `profiles/`. The plugin now
   ships only the blank `_template` and a fictional `example-clinic` ("Example Clinic / عيادة مثال", Dr. Sample Example,
@@ -14,6 +24,19 @@
   its own now shows "Profile: NONE" until `/whynot-cut:new-client` (or `reel client-init`) creates one.
 - `package.py` refuses to build (exit 1, with a `how:` hint) when `whynot-cut/profiles/` contains any folder other than
   `_template` and `example-*`.
+- A folder is a client folder only with a positive sign: a `.whynot-client` file, an `output/client_database/` folder,
+  or lying under the configured `clients_root` (plugin option / `WHYNOT_CLIENTS_ROOT`, else the preferences file). Before,
+  any folder with `assets/` and `data/` counted, so the guard blocked edits in Hugo sites and other repos with that
+  layout, and the SessionStart hook called them client folders.
+- `hooks/run_python.sh` (structure 4.2, 4.3; engine IM-17) tries the engine runtime first (`$WHYNOT_HOME` or
+  `~/.whynot-cut`: `venv/Scripts/python.exe` / `venv/bin/python`), then the interpreter cached in
+  `${CLAUDE_PLUGIN_DATA}/python`, then `python3` / `python` / `py` on PATH, skipping `*/WindowsApps/*` stubs and, on macOS,
+  `/usr/bin/python3` without the Command Line Tools. It `exec`s the interpreter directly (no separate version probe: the
+  hook scripts check `sys.version_info`) and touches `${CLAUDE_PLUGIN_DATA}/hooks-ok` on every run. Guard latency on the
+  Windows dev PC: about 250-300 ms per tool call before, about 105 ms after.
+- Role rules for WhyNot Cut's own agents match the full `whynot-cut:<name>` agent type (structure 4.7): another
+  plugin's `qc-reviewer` is no longer restricted. Gate rules (approve-plan, reels-select, verify --record, settings
+  --init, ae-probe --record, transcript-verify --by editor) still bind every subagent.
 
 ### Fixed
 - Executable bits are set in git's index (`100755`) for `bin/reel`, `hooks/run_python.sh`, `hooks/*.py`,
@@ -39,6 +62,21 @@
   duration could change after approval and `ppro-build`, `ae-build`, `ps-build` and QC still saw the plan as approved.
   It now hashes every field of the spec except `generated` (sorted keys, 16 hex characters, as before), so a re-compile
   that changes nothing stays approved and anything that changes what gets built needs a new approval.
+- Guard bypasses closed (structure 4.5; engine §10). Each is blocked when it targets a client's `assets/` or `data/`:
+  a PowerShell pipeline whose earlier stage names a source path and whose later stage deletes, moves or writes the
+  piped items (`Get-ChildItem data/Raw | Remove-Item`, `... | % { $_.Delete() }`); `xargs <mutator>`
+  (`ls data/Raw/*.mp4 | xargs rm`); `$( ... )`, `<( ... )` and backtick bodies (`echo $(rm data/Raw/a.mp4)`), plus
+  subshells and `then`/`do` bodies; `[IO.File]::` / `[System.IO.Directory]::` write, delete, move and copy calls;
+  `git -C <source> checkout|reset|clean|rm|mv|restore`, `git checkout -- data/...` and whole-tree `git clean` /
+  `reset --hard` in a client root; and commands run through `cmd /c`, `powershell|pwsh -Command|-EncodedCommand` and
+  `bash|sh -c`, which now get the same checks, so `cmd /c reg add ...CSXS...` and
+  `powershell -Command "Set-ItemProperty ...CSXS..."` no longer bypass the PlayerDebugMode rule.
+- Role holes (engine §10): subagents may not run `reel transcript-verify --by editor`; qc-reviewer may not run
+  `ref-analyze` (it applies the client style, getting around the `ref-style --apply` block); setup-doctor may not run
+  `reel setup`, `model-download`, `gpu-enable`, `ppro-install` or `doctor --fix`.
+- The guard no longer fails silently (engine IM-17): with no Python at all, `run_python.sh` still exits 0 (fail-open)
+  but the SessionStart hook gets "WhyNot Cut protection is OFF: no Python found — run reel doctor"; the SessionStart
+  context starts with a loud warning when the `hooks-ok` heartbeat is missing or older than 24 h.
 
 ### Migration
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the
@@ -53,6 +91,10 @@
   (also `VIDEO` for a lone Arabic clip) or `output/projects/<raw file stem>`. For the same stem with two extensions the
   first in that order keeps the bare id (`C0239.MP4` before `C0239.mov`, so the `.mov` becomes `C0239_MOV`): if a 2.x
   project `C0239` was actually built from the `.mov`, edit `output/discovery/clip-ids.json` by hand before continuing.
+- Existing client folders keep their protection when they have `output/client_database/` (every onboarded client) or
+  lie under `clients_root`; they are recognised automatically. Any other existing client folder (only `assets/` and
+  `data/`) is no longer protected until it gets the marker: run `reel doctor --fix --root "<client folder>"` (or
+  `reel doctor --fix` inside it); `reel doctor` lists such folders under `client_markers.unprotected`.
 
 ## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names, field-test round 4
 The minor findings of the 2.2.0 review, two bugs found by a live run from a client folder named in Arabic, and the gaps

@@ -2052,8 +2052,9 @@ def guard_write(path: str, agent: str | None = None) -> int:
     payload = {"tool_name": "Write", "tool_input": {"file_path": path, "content": "x"}, "cwd": "."}
     if agent:
         payload["agent_type"] = agent
+    from test_plugin import isolated_env
     return subprocess.run([sys.executable, "-B", str(GUARD_PY)], input=json.dumps(payload), capture_output=True,
-                          text=True, encoding="utf-8").returncode
+                          text=True, encoding="utf-8", env=isolated_env()).returncode
 
 
 def front(p: Path) -> str:
@@ -2081,7 +2082,7 @@ class TestMotionPluginLayer(unittest.TestCase):
 
     def test_guard(self):
         self.assertEqual(run_guard("reel ae-probe --record ok --word-order logical", agent="ae-builder"), 2)
-        self.assertEqual(run_guard("reel motion-build --video-id X", agent="qc-reviewer"), 2)
+        self.assertEqual(run_guard("reel motion-build --video-id X", agent="whynot-cut:qc-reviewer"), 2)
         self.assertEqual(run_guard("reel motion-build --video-id X"), 0)                 # not an extra
         self.assertEqual(run_guard("reel ae-status"), 0)
         self.assertEqual(guard_write("C:/Users/x/AppData/Roaming/Adobe/After Effects/26.0/Adobe After Effects 26.0 Prefs.txt"), 2)
@@ -2106,6 +2107,7 @@ class TestMotionPluginLayer(unittest.TestCase):
             for d in ("assets", "data/Episodes"):
                 (root / d).mkdir(parents=True)
             (root / "data/Episodes/POD.m4a").write_bytes(b"x")
+            (root / ".whynot-client").write_text("{}", encoding="utf-8")     # 3.0: positive client marker
             r = subprocess.run([sys.executable, "-B", str(SK / "hooks/session_context.py")], input=json.dumps({"cwd": str(root)}),
                                capture_output=True, text=True, encoding="utf-8", cwd=str(root))
             self.assertIn("motion", r.stdout)

@@ -37,6 +37,76 @@ def whisper_model_state() -> dict:
     return out
 
 
+HEARTBEAT_MAX_AGE_S = 24 * 3600
+
+
+def guard_heartbeat(now: float | None = None) -> dict:
+    """Is the PreToolUse guard running? hooks/run_python.sh touches <plugin data>/hooks-ok on every hook run that
+    found Python; no fresh file (< 24 h) means the hooks never ran: no Git Bash on Windows, no Python, or the plugin
+    is not enabled. Looks at ${CLAUDE_PLUGIN_DATA} and every <claude config>/plugins/data/whynot-cut*/."""
+    import os
+    cands = [Path(os.environ["CLAUDE_PLUGIN_DATA"]) / "hooks-ok"] if os.environ.get("CLAUDE_PLUGIN_DATA") else []
+    cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
+    cands += sorted((cfg / "plugins" / "data").glob("whynot-cut*/hooks-ok"))
+    found = []
+    for c in cands:
+        try:
+            found.append((c.stat().st_mtime, c))
+        except OSError:
+            continue
+    mtime, f = max(found) if found else (None, None)
+    age = (now or time.time()) - mtime if mtime else None
+    active = age is not None and age < HEARTBEAT_MAX_AGE_S
+    fix = None
+    if not active:
+        fix = ("install Git for Windows (https://git-scm.com/download/win), then restart Claude Code: WhyNot Cut's "
+               "guard hooks run through Git Bash. Then run /hooks to check they are listed, and `reel doctor` again."
+               if plat.IS_WIN else
+               "restart Claude Code and run /hooks to check WhyNot Cut's hooks are listed; make sure `python3 --version` "
+               "works (macOS: xcode-select --install), then `reel doctor` again.")
+    return {"active": active, "file": str(f) if f else None, "age_h": round(age / 3600, 1) if age is not None else None,
+            "fix": fix}
+
+
+def marker_roots(root: str | None) -> list[Path]:
+    """Client folders `reel doctor` looks at for the `.whynot-client` marker: --root, else the current folder when it
+    has assets/ and data/ and WhyNot Cut has worked there (output/ or START_HERE.md: a Hugo site is not a client),
+    plus every client folder in clients_root."""
+    from .client_marker import has_layout
+    from .common import client_folders, clients_root
+    cwd = Path.cwd()
+    cands = [Path(root).expanduser()] if root else \
+        [cwd] if (cwd / "output").is_dir() or (cwd / "START_HERE.md").is_file() else []
+    cands += client_folders(clients_root())
+    out = []
+    for c in cands:
+        c = c.resolve()
+        if has_layout(c) and c not in out:
+            out.append(c)
+    return out
+
+
+def client_markers(roots: list[Path], fix: bool = False) -> dict:
+    """{written, present, missing, unprotected}: `unprotected` = no sign at all that it is a client folder (the guard
+    leaves it alone until `reel doctor --fix` writes the marker)."""
+    from .client_marker import MARKER, is_client, write_marker
+    rep = {"written": [], "present": [], "missing": [], "unprotected": []}
+    for r in roots:
+        if (r / MARKER).is_file():
+            rep["present"].append(str(r / MARKER))
+        elif fix:
+            try:
+                write_marker(r)
+            except ValueError:            # inside another client's assets/ or data/: never write there
+                continue
+            rep["written"].append(str(r / MARKER))
+        else:
+            rep["missing"].append(str(r))
+            if not is_client(r):
+                rep["unprotected"].append(str(r))
+    return rep
+
+
 def doctor() -> dict:
     from . import settings as S
     mods = {}
@@ -61,6 +131,8 @@ def doctor() -> dict:
            "whisper_partial_downloads": sorted(k for k, v in states.items() if v == "partial"), "gpu": plat.gpu_info(), "adobe_apps": apps,
            "premiere_bridge": br, "settings_file": st["_file"], "settings_problems": st["_problems"],
            "clients_root": str(cr) if cr else None}
+    gh = guard_heartbeat()
+    rep["guard_active"], rep["guard_heartbeat"] = gh["active"], gh
     fixes = []
     if not rc["ok"]:      # G66: a session started before the install keeps another plugin's `reel` first on PATH
         fixes.append({"item": "wrong `reel` first on PATH: " + rc["message"], "who": "editor", "fix": rc["fix"]})
@@ -97,6 +169,9 @@ def doctor() -> dict:
                           "fix": "open Premiere Pro (quit and reopen it once after setup); the bridge starts by itself"})
     if st["_problems"]:
         fixes.append({"item": "preferences file", "who": "claude", "fix": "; ".join(st["_problems"])})
+    if not gh["active"]:
+        fixes.append({"item": "WhyNot Cut guard hooks not confirmed running (no hooks-ok heartbeat in the last 24 h): "
+                              "assets/ and data/ may not be protected", "who": "editor", "fix": gh["fix"]})
     rep["ready"] = {"engine": rep["venv_ok"] and all(v is True for v in mods.values()) and bool(rep["ffmpeg"]),
                     "premiere_build": bool(apps["premiere"]) and br["installed"] and br["debug_mode_ok"] and br["alive"],
                     "preview_and_xml": rep["venv_ok"] and bool(rep["ffmpeg"]), "reel_command": rc["ok"]}
@@ -168,7 +243,9 @@ def scaffold(root: Path, name: str | None = None) -> dict:
     guide = root / "START_HERE.md"
     if not guide.exists():
         write_text(guide, start_here(name))
-    return {"status": "CREATED", "root": str(root), "folders": made, "guide": str(guide),
+    from .client_marker import MARKER, write_marker
+    write_marker(root)                    # the guard and the session hook recognise the folder by it
+    return {"status": "CREATED", "root": str(root), "folders": made, "guide": str(guide), "marker": str(root / MARKER),
             "next": "Add the files (see START_HERE.md), then run `reel inbox --root \"<this folder>\"`."}
 
 

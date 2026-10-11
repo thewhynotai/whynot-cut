@@ -20,9 +20,31 @@ GUARD = SK / "hooks" / "guard.py"
 CTX = SK / "hooks" / "session_context.py"
 
 
+CLIENTS_ENV = ("WHYNOT_CLIENTS_ROOT", "CLAUDE_PLUGIN_OPTION_CLIENTS_ROOT", "REEL_CLIENTS_ROOT")
+NO_CLIENTS_ROOT = str(Path(tempfile.gettempdir()) / "whynot-test-clients-root-unset")
+MARKER = ".whynot-client"
+
+
+def isolated_env(env=None) -> dict:
+    """Hook environment that never reads the real user's clients_root (an explicit, empty one unless the test sets
+    its own) and has no plugin data folder unless the test gives one."""
+    out = {k: v for k, v in os.environ.items() if k not in CLIENTS_ENV and k != "CLAUDE_PLUGIN_DATA"}
+    env = dict(env or {})
+    if not any(k in env for k in CLIENTS_ENV):
+        env["WHYNOT_CLIENTS_ROOT"] = NO_CLIENTS_ROOT
+    out.update(env)
+    return out
+
+
+def mark_client(root: Path) -> Path:
+    """Client folders are recognised by a positive marker (3.0); test fixtures create it like `reel scaffold` does."""
+    (root / MARKER).write_text('{"whynot_client": 1, "created": "test"}', encoding="utf-8")
+    return root
+
+
 def hook(script, payload, env=None):
     r = subprocess.run([sys.executable, str(script)], input=json.dumps(payload), capture_output=True, text=True,
-                       env=dict(os.environ, **(env or {})))
+                       encoding="utf-8", env=isolated_env(env))
     return r.returncode, r.stdout, r.stderr
 
 
@@ -33,6 +55,7 @@ class ClientFixture(unittest.TestCase):
         for d in ("assets/Photos", "data/Raw", "output/projects/C0001"):
             (self.root / d).mkdir(parents=True)
         (self.root / "data/Raw/C0001.MP4").write_bytes(b"x")
+        mark_client(self.root)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -135,6 +158,360 @@ class TestGuardProtected(ClientFixture):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIsNone(json.loads(r.stdout)["active"])      # no folder-name match for shipped profiles
         self.assertIn("example-clinic", json.loads(r.stdout)["shipped_profiles"])
+
+
+def find_bash():
+    """Git Bash on Windows (never WSL's System32 bash), the system bash elsewhere."""
+    import shutil
+    return next((b for b in (os.environ.get("GIT_BASH"), r"C:\Program Files\Git\bin\bash.exe", shutil.which("bash"))
+                 if b and Path(b).exists() and "system32" not in b.lower()), None)
+
+
+class TestClientMarker(unittest.TestCase):
+    """T1.5 / structure 4.1: a folder is a client folder only with a positive marker — `.whynot-client`, an
+    `output/client_database/`, or lying under clients_root. A Hugo site (assets/ + data/) is left alone."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def site(self, name="HugoSite", parent=None) -> Path:
+        root = (parent or self.base) / name
+        for d in ("assets/css", "data", "content"):
+            (root / d).mkdir(parents=True)
+        (root / "assets/css/main.scss").write_text("body{}", encoding="utf-8")
+        (root / "data/site.yaml").write_text("title: x", encoding="utf-8")
+        return root
+
+    def write(self, path, env=None):
+        return hook(GUARD, {"tool_name": "Write", "cwd": str(self.base),
+                            "tool_input": {"file_path": str(path), "content": "x"}}, env)[0]
+
+    def cmd(self, tool, command, cwd, env=None):
+        return hook(GUARD, {"tool_name": tool, "cwd": str(cwd), "tool_input": {"command": command}}, env)[0]
+
+    def test_hugo_site_is_not_blocked_and_gets_no_context(self):
+        root = self.site()
+        self.assertEqual(self.write(root / "data/site.yaml"), 0)
+        self.assertEqual(hook(GUARD, {"tool_name": "Edit", "cwd": str(root),
+                                      "tool_input": {"file_path": str(root / "assets/css/main.scss")}})[0], 0)
+        self.assertEqual(self.cmd("Bash", "rm data/site.yaml", root), 0)
+        self.assertEqual(self.cmd("Bash", "find assets -name '*.scss' -delete", root), 0)
+        self.assertEqual(self.cmd("PowerShell", "Remove-Item data/site.yaml", root), 0)
+        code, out, _ = hook(CTX, {"cwd": str(root)})
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "")                       # no "this is a client folder"
+
+    def test_marker_makes_a_client(self):
+        root = mark_client(self.site("Dr Marker"))
+        self.assertEqual(self.write(root / "data/site.yaml"), 2)
+        self.assertEqual(self.cmd("Bash", "rm data/site.yaml", root), 2)
+        code, out, _ = hook(CTX, {"cwd": str(root)})
+        self.assertIn("this is a client folder", json.loads(out)["hookSpecificOutput"]["additionalContext"])
+
+    def test_client_database_makes_a_client(self):
+        root = self.site("Dr Legacy")
+        (root / "output/client_database").mkdir(parents=True)
+        self.assertEqual(self.write(root / "assets/css/main.scss"), 2)
+
+    def test_under_clients_root_is_a_client(self):
+        clients = self.base / "Clients"
+        root = self.site("Dr Under", clients)
+        env = {"WHYNOT_CLIENTS_ROOT": str(clients)}
+        self.assertEqual(self.write(root / "data/site.yaml", env), 2)
+        self.assertEqual(self.cmd("Bash", "rm data/site.yaml", root, env), 2)
+        outside = self.site("HugoSite")
+        self.assertEqual(self.write(outside / "data/site.yaml", env), 0)
+        code, out, _ = hook(CTX, {"cwd": str(root)}, env)
+        self.assertIn("this is a client folder", json.loads(out)["hookSpecificOutput"]["additionalContext"])
+
+    def test_clients_root_from_the_preferences_file(self):
+        from unittest import mock
+        sys.path.insert(0, str(SK / "engine/reel"))
+        from lib import client_marker
+        ws = self.base / "ws"
+        (ws / ".claude").mkdir(parents=True)
+        (ws / ".claude/whynot-cut.local.md").write_text(f'---\nclients_root: "{ws.as_posix()}"\n---\n', encoding="utf-8")
+        root = self.site("Dr Prefs", ws)
+        with mock.patch.dict(os.environ, {k: "" for k in CLIENTS_ENV}):   # the walk stops at ws/.claude
+            self.assertEqual(client_marker.clients_base(root).resolve(), ws.resolve())
+            self.assertTrue(client_marker.is_client(root))
+
+    def test_scaffold_writes_the_marker(self):
+        from lib.onboard import scaffold
+        root = self.base / "Dr New"
+        self.assertEqual(scaffold(root, "Dr New")["status"], "CREATED")
+        m = json.loads((root / MARKER).read_text(encoding="utf-8"))
+        self.assertEqual(m["whynot_client"], 1)
+        self.assertTrue(m["created"])
+        self.assertFalse(list((root / "assets").rglob(MARKER)) + list((root / "data").rglob(MARKER)))
+
+    def test_client_init_writes_the_marker(self):
+        root = self.site("Dr Init")
+        r = subprocess.run([sys.executable, "-B", str(SK / "engine/reel/cli.py"), "--root", str(root), "client-init",
+                            "--id", "dr-init"], capture_output=True, text=True, encoding="utf-8", env=isolated_env())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((root / MARKER).read_text(encoding="utf-8"))["whynot_client"], 1)
+
+    def test_doctor_fix_marks_an_existing_client(self):
+        root = self.site("Dr Old")
+        cfg = self.base / "cfg"
+        r = subprocess.run([sys.executable, "-B", str(SK / "engine/reel/cli.py"), "--root", str(root), "doctor", "--fix"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           env=isolated_env({"CLAUDE_CONFIG_DIR": str(cfg)}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rep = json.loads(r.stdout)
+        self.assertTrue((root / MARKER).is_file())
+        self.assertIn(str(root / MARKER), [str(Path(p)) for p in rep["client_markers"]["written"]])
+        self.assertFalse((root / "assets" / MARKER).exists() or (root / "data" / MARKER).exists())
+
+    def test_marker_never_goes_into_sources(self):
+        from lib import client_marker
+        root = mark_client(self.site("Dr Src"))
+        for bad in (root / "data", root / "assets/css"):
+            with self.assertRaises(ValueError):
+                client_marker.write_marker(bad)
+
+
+class TestGuardBypasses(ClientFixture):
+    """T1.5 / structure 4.5, engine IM-17: each bypass found by the review is blocked when it targets client sources."""
+
+    def run_tool(self, tool, cmd, agent=None):
+        p = {"tool_name": tool, "tool_input": {"command": cmd}, "cwd": str(self.root)}
+        if agent:
+            p["agent_type"] = agent
+        return hook(GUARD, p)[0]
+
+    def bash(self, cmd, agent=None):
+        return self.run_tool("Bash", cmd, agent)
+
+    def ps(self, cmd, agent=None):
+        return self.run_tool("PowerShell", cmd, agent)
+
+    def test_powershell_pipeline_into_a_mutator(self):
+        for c in ["Get-ChildItem data/Raw | Remove-Item",
+                  "Get-ChildItem -Path data/Raw -Filter *.MP4 | ForEach-Object { Remove-Item $_.FullName }",
+                  "gci assets -Recurse | ri -Force", "ls data/Raw | Move-Item -Destination output/",
+                  "Get-ChildItem data | % { $_.Delete() }", "Get-ChildItem data/Raw | Set-Content -Value x"]:
+            self.assertEqual(self.ps(c), 2, c)
+        for c in ["Get-ChildItem data/Raw | Select-Object Name", "Get-ChildItem output | Remove-Item",
+                  "Get-Content data/Raw/x.srt | Out-File output/x.srt",
+                  "Get-Content data/Raw/x.srt | Set-Content -Path output/x.srt",
+                  "Get-ChildItem data/Raw; Get-ChildItem output | Remove-Item"]:
+            self.assertEqual(self.ps(c), 0, c)
+
+    def test_xargs_mutator(self):
+        for c in ["ls data/Raw/*.MP4 | xargs rm", "find data -name '*.MP4' -print0 | xargs -0 rm -f",
+                  "xargs rm < list.txt data/Raw/C0001.MP4", "cd data/Raw && ls | xargs rm"]:
+            self.assertEqual(self.bash(c), 2, c)
+        for c in ["ls output | xargs rm", "ls data/Raw | xargs -I{} cp data/Raw/{} output/", "ls data/Raw | xargs echo"]:
+            self.assertEqual(self.bash(c), 0, c)
+
+    def test_command_substitution_bodies(self):
+        for c in ["echo $(rm data/Raw/C0001.MP4)", "echo `rm data/Raw/C0001.MP4`",
+                  'x="$(mv data/Raw/C0001.MP4 /tmp/)"', "echo $(echo $(rm data/Raw/C0001.MP4))",
+                  "(rm data/Raw/C0001.MP4)", "if true; then rm data/Raw/C0001.MP4; fi"]:
+            self.assertEqual(self.bash(c), 2, c)
+        for c in ["echo '$(rm data/Raw/C0001.MP4)'", "echo $(ls data/Raw)", "n=$(wc -l < data/Raw/C0001.MP4)"]:
+            self.assertEqual(self.bash(c), 0, c)
+        self.assertEqual(self.ps("Write-Output $(Remove-Item data/Raw/C0001.MP4)"), 2)
+
+    def test_dotnet_file_calls(self):
+        for c in ['[IO.File]::Delete("data/Raw/C0001.MP4")', "[System.IO.File]::WriteAllText('data/Raw/n.txt', 'x')",
+                  '[System.IO.File]::Move("data/Raw/C0001.MP4", "output/a.mp4")',
+                  '[IO.File]::Copy("output/a.mp4", "assets/Photos/a.mp4")', "[IO.Directory]::Delete('data', $true)"]:
+            self.assertEqual(self.ps(c), 2, c)
+        self.assertEqual(self.bash("""powershell -Command "[IO.File]::Delete('data/Raw/C0001.MP4')" """), 2)
+        for c in ['[IO.File]::ReadAllText("data/Raw/x.srt")', '[IO.File]::Copy("data/Raw/C0001.MP4", "output/a.mp4")',
+                  '[IO.File]::Delete("output/a.mp4")']:
+            self.assertEqual(self.ps(c), 0, c)
+
+    def test_git_on_sources(self):
+        for c in ["git -C data checkout -- .", "git -C data/Raw clean -fdx", "git checkout -- data/Raw/C0001.MP4",
+                  "git rm data/Raw/C0001.MP4", "git mv data/Raw/C0001.MP4 output/", "git -C data reset --hard",
+                  "git restore data/Raw", "git clean -fdx"]:
+            self.assertEqual(self.bash(c), 2, c)
+        self.assertEqual(self.ps("git -C data checkout -- ."), 2)
+        for c in ["git status", "git -C data log --oneline", "git diff data/Raw", "git checkout main",
+                  "git add output/x.json", "git -C output clean -fd"]:
+            self.assertEqual(self.bash(c), 0, c)
+
+    def test_adobe_prefs_through_wrappers(self):
+        import base64
+        key = r"HKCU\Software\Adobe\CSXS.12"
+        enc = base64.b64encode(f"Set-ItemProperty -Path 'HKCU:\\Software\\Adobe\\CSXS.12' -Name PlayerDebugMode -Value 1"
+                               .encode("utf-16-le")).decode()
+        for c in [f'cmd /c reg add "{key}" /v PlayerDebugMode /t REG_SZ /d 1 /f',
+                  f'cmd.exe /c "reg add {key} /v PlayerDebugMode /d 1 /f"',
+                  f'''powershell -Command "Set-ItemProperty -Path 'HKCU:\\Software\\Adobe\\CSXS.12' -Name PlayerDebugMode -Value 1"''',
+                  f'''powershell.exe -NoProfile -ExecutionPolicy Bypass -c "New-ItemProperty -Path 'HKCU:\\Software\\Adobe\\CSXS.11' -Name PlayerDebugMode -Value 1"''',
+                  f"pwsh -EncodedCommand {enc}", 'bash -c "rm data/Raw/C0001.MP4"']:
+            self.assertEqual(self.bash(c), 2, c)
+        self.assertEqual(self.ps(f"cmd /c reg add {key} /v PlayerDebugMode /d 1 /f"), 2)
+        for c in [f'cmd /c reg query "{key}"',
+                  '''powershell -Command "Get-ItemProperty -Path 'HKCU:\\Software\\Adobe\\CSXS.12'"''',
+                  'cmd /c dir data', 'bash -c "ls data/Raw"']:
+            self.assertEqual(self.bash(c), 0, c)
+
+
+class TestGuardRoles(ClientFixture):
+    """T1.5 / engine §10 role holes and structure 4.7 (role rules key on the full whynot-cut:<name>)."""
+
+    def bash(self, cmd, agent=None):
+        p = {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(self.root)}
+        if agent:
+            p["agent_type"] = agent
+        return hook(GUARD, p)[0]
+
+    def test_subagents_cannot_verify_as_the_editor(self):
+        for c in ["reel transcript-verify --video-id C0001 --by editor", "reel transcript-verify --by=editor"]:
+            self.assertEqual(self.bash(c, "whynot-cut:transcript-editor"), 2, c)
+            self.assertEqual(self.bash(c), 0, c)                                    # the lead may
+        self.assertEqual(self.bash("reel transcript-verify --video-id C0001 --by transcript-editor",
+                                   "whynot-cut:transcript-editor"), 0)
+
+    def test_qc_reviewer_cannot_run_ref_analyze(self):
+        self.assertEqual(self.bash("reel ref-analyze --root .", "whynot-cut:qc-reviewer"), 2)
+        self.assertEqual(self.bash("reel ref-analyze --root .", "whynot-cut:client-researcher"), 0)
+
+    def test_setup_doctor_cannot_run_setup(self):
+        self.assertEqual(self.bash("reel setup", "whynot-cut:setup-doctor"), 2)
+        self.assertEqual(self.bash("reel doctor --fix", "whynot-cut:setup-doctor"), 2)
+        self.assertEqual(self.bash("reel doctor", "whynot-cut:setup-doctor"), 0)
+        self.assertEqual(self.bash("reel setup"), 0)
+
+    def test_roles_match_the_full_agent_type(self):
+        for other in ("other-plugin:qc-reviewer", "qc-reviewer"):
+            self.assertEqual(self.bash("reel ppro-build --force", other), 0, other)
+            code = hook(GUARD, {"tool_name": "Write", "agent_type": other.replace("qc-reviewer", "medical-reviewer"),
+                                "cwd": "/", "tool_input": {"file_path": str(self.root / "output/a.md")}})[0]
+            self.assertEqual(code, 0, other)
+        self.assertEqual(self.bash("reel ppro-build --force", "whynot-cut:qc-reviewer"), 2)
+        # gate rules bind every subagent, whatever plugin it comes from
+        self.assertEqual(self.bash("reel approve-plan --by editor", "other-plugin:helper"), 2)
+
+
+class TestHookRunner(unittest.TestCase):
+    """T1.5 / structure 4.2, 4.3, engine IM-17: run_python.sh picks the engine runtime first, skips the Windows Store
+    stub, caches its pick in ${CLAUDE_PLUGIN_DATA}/python, writes a heartbeat, and is never silently off."""
+
+    def setUp(self):
+        self.bash_exe = find_bash()
+        if not self.bash_exe:
+            self.skipTest("no bash")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.t = Path(self.tmp.name)
+        self.data = self.t / "plugin-data"
+        self.home = self.t / "home"
+        self.home.mkdir()
+        self.data.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def fake(self, path: Path, word: str) -> Path:
+        """A stand-in interpreter that refuses `-c` (so a separate version probe would reject it) and echoes."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f'#!/bin/sh\ncase "$1" in -c) exit 1;; esac\necho {word} "$@"\n', encoding="utf-8", newline="\n")
+        path.chmod(0o755)
+        return path
+
+    def run_hook(self, script="guard.py", path_dirs=(), engine_home=None):
+        sysdirs = [str(Path(self.bash_exe).parent.parent / "usr/bin")] if os.name == "nt" else []
+        env = isolated_env({"PATH": os.pathsep.join([str(d) for d in path_dirs] + sysdirs),
+                            "HOME": str(self.home), "WHYNOT_HOME": str(engine_home or self.t / "no-engine"),
+                            "CLAUDE_PLUGIN_DATA": str(self.data), "CLAUDE_PLUGIN_ROOT": str(SK)})
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": str(self.t)})
+        return subprocess.run([self.bash_exe, str(SK / "hooks/run_python.sh"), str(SK / "hooks" / script)], input=payload,
+                              capture_output=True, text=True, encoding="utf-8", env=env)
+
+    def test_engine_runtime_first(self):
+        eng = self.t / "engine"
+        self.fake(eng / "venv/Scripts/python.exe", "ENGINE")
+        self.fake(eng / "venv/bin/python", "ENGINE")
+        self.fake(self.t / "bin/python3", "SYSTEM")
+        r = self.run_hook(path_dirs=[self.t / "bin"], engine_home=eng)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("ENGINE"), r.stdout)
+        self.assertIn("guard.py", r.stdout)
+
+    def test_store_stub_skipped_pick_cached_and_heartbeat(self):
+        self.fake(self.t / "WindowsApps/python3", "STUB")
+        real = self.fake(self.t / "bin/python3", "REAL")
+        r = self.run_hook(path_dirs=[self.t / "WindowsApps", self.t / "bin"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.startswith("REAL"), r.stdout)          # no separate version probe either
+        cached = (self.data / "python").read_text(encoding="utf-8").strip()
+        self.assertTrue(cached.replace("\\", "/").endswith("bin/python3"), cached)
+        hb = self.data / "hooks-ok"
+        self.assertTrue(hb.is_file())
+        import time
+        self.assertLess(time.time() - hb.stat().st_mtime, 60)
+        # the cached pick is used even when PATH no longer has it
+        r = self.run_hook(path_dirs=[self.t / "WindowsApps"])
+        self.assertTrue(r.stdout.startswith("REAL"), (r.stdout, r.stderr))
+        # a cached interpreter that disappeared is re-resolved (here: nothing left -> visible, not silent)
+        real.unlink()
+        hb.unlink()
+        r = self.run_hook(path_dirs=[self.t / "WindowsApps"])
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout.strip(), "")
+        self.assertIn("no Python", r.stderr)
+        self.assertFalse(hb.exists())                                   # no heartbeat without a run
+
+    def test_no_python_is_visible_at_session_start(self):
+        r = self.run_hook("session_context.py")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(ctx["hookEventName"], "SessionStart")
+        self.assertEqual(ctx["additionalContext"], "WhyNot Cut protection is OFF: no Python found — run reel doctor")
+
+
+class TestHeartbeat(ClientFixture):
+    """session_context warns when the hooks heartbeat is missing or stale; doctor reports guard_active."""
+
+    def ctx(self, data: Path):
+        code, out, _ = hook(CTX, {"cwd": str(self.root)}, {"CLAUDE_PLUGIN_DATA": str(data)})
+        self.assertEqual(code, 0)
+        return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+    def test_session_context_warns_without_a_fresh_heartbeat(self):
+        import time
+        data = Path(self.tmp.name) / "pdata"
+        data.mkdir()
+        self.assertIn("protection may be OFF", self.ctx(data))           # missing
+        hb = data / "hooks-ok"
+        hb.write_text("1", encoding="utf-8")
+        self.assertNotIn("protection may be OFF", self.ctx(data))        # fresh
+        old = time.time() - 3 * 86400
+        os.utime(hb, (old, old))
+        self.assertIn("protection may be OFF", self.ctx(data))           # stale
+
+    def test_doctor_guard_active(self):
+        import time
+        from unittest import mock
+        from lib import onboard
+        cfg = Path(self.tmp.name) / "cfg"
+        env = {"CLAUDE_CONFIG_DIR": str(cfg), "CLAUDE_PLUGIN_DATA": ""}
+        with mock.patch.dict(os.environ, env):
+            st = onboard.guard_heartbeat()
+            self.assertFalse(st["active"])
+            self.assertIn("Git for Windows" if os.name == "nt" else "restart Claude Code", st["fix"])
+            hb = cfg / "plugins/data/whynot-cut-thewhynot-ai/hooks-ok"
+            hb.parent.mkdir(parents=True)
+            hb.write_text("1", encoding="utf-8")
+            st = onboard.guard_heartbeat()
+            self.assertTrue(st["active"])
+            self.assertEqual(Path(st["file"]), hb)
+            old = time.time() - 2 * 86400
+            os.utime(hb, (old, old))
+            self.assertFalse(onboard.guard_heartbeat()["active"])
+            rep = onboard.doctor()
+        self.assertIs(rep["guard_active"], False)
+        self.assertTrue(any("guard" in f["item"].lower() for f in rep["fixes"]), rep["fixes"])
 
 
 class TestProfiles(ClientFixture):

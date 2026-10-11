@@ -440,8 +440,9 @@ def run_guard(command: str, agent: str | None = None, cwd: str = ".") -> int:
     payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
     if agent:
         payload["agent_type"] = agent
+    from test_plugin import isolated_env
     return subprocess.run([sys.executable, "-B", str(GUARD)], input=json.dumps(payload), capture_output=True,
-                          text=True, encoding="utf-8").returncode
+                          text=True, encoding="utf-8", env=isolated_env()).returncode
 
 
 class TestReelsSelect(unittest.TestCase):
@@ -1660,6 +1661,7 @@ class TestPluginLayer(unittest.TestCase):
             for d in ("assets/Logo", "data/Episodes", "data/Raw"):
                 (root / d).mkdir(parents=True)
             (root / "data/Episodes/EP07.mp4").write_bytes(b"x")
+            (root / ".whynot-client").write_text("{}", encoding="utf-8")     # 3.0: positive client marker
             r = subprocess.run([sys.executable, "-B", str(SK / "hooks/session_context.py")],
                                input=json.dumps({"cwd": str(root)}), capture_output=True, text=True, encoding="utf-8")
             ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]

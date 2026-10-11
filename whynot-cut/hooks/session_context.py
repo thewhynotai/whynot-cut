@@ -2,9 +2,13 @@
 """SessionStart: tell Claude when WhyNot Cut applies, and nothing otherwise (zero cost in unrelated sessions).
 
 Speaks up when the session opens
-  * inside a client folder (has assets/ and data/): profile, engine, Premiere bridge, preferences, new clips;
+  * inside a client folder (assets/ and data/ plus a positive marker: `.whynot-client`, `output/client_database/`, or
+    lying under clients_root — see engine/reel/lib/client_marker.py): profile, engine, Premiere bridge, preferences,
+    new clips;
   * in the clients folder (setting `clients_root`, or a folder whose preferences file says so): which clients it holds;
   * in a folder that has a WhyNot Cut preferences file but no clients yet: point to /whynot-cut:start.
+Whenever it speaks, it first warns loudly if the hooks heartbeat (${CLAUDE_PLUGIN_DATA}/hooks-ok, written by
+run_python.sh) is missing or older than 24 h: the read-only guard may not be running.
 Stdlib only; never fails the session (any error -> silent exit 0).
 """
 import json
@@ -16,21 +20,40 @@ from pathlib import Path
 sys.dont_write_bytecode = True        # the plugin folder stays clean of __pycache__
 PLUGIN = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parents[1])
 sys.path.insert(0, str(PLUGIN / "engine" / "reel" / "lib"))
-plat = settings = None                # imported in main(), inside the never-fail guard
+plat = settings = client_marker = None    # imported in main(), inside the never-fail guard
 
 VIDEO = {".mp4", ".mov", ".mxf", ".m4v", ".avi", ".mkv"}
+HEARTBEAT_MAX_AGE_S = 24 * 3600
 
 
-def is_client(p: Path) -> bool:
-    return (p / "assets").is_dir() and (p / "data").is_dir()
+def is_client(p: Path, base=None) -> bool:
+    return client_marker.is_client(p, base) if base is not None else client_marker.is_client(p)
 
 
 def client_root(start: Path):
     return next((p for p in [start, *start.parents] if is_client(p)), None)
 
 
+def heartbeat_warning() -> str:
+    """Loud first sentence when ${CLAUDE_PLUGIN_DATA}/hooks-ok is missing or stale (no CLAUDE_PLUGIN_DATA: silent)."""
+    d = os.environ.get("CLAUDE_PLUGIN_DATA")
+    if not d:
+        return ""
+    f = Path(d) / "hooks-ok"
+    try:
+        age = time.time() - f.stat().st_mtime
+    except OSError:
+        age = None
+    if age is not None and age < HEARTBEAT_MAX_AGE_S:
+        return ""
+    state = "is missing" if age is None else f"is {age / 3600:.0f} h old"
+    return (f"WARNING: WhyNot Cut protection may be OFF: the hooks heartbeat {state} ({f}), so the guard that keeps "
+            f"assets/ and data/ read-only may not be running. Run `reel doctor` and tell the editor before editing. ")
+
+
 def emit(ctx: str):
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ctx}}))
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                             "additionalContext": heartbeat_warning() + ctx}}))
 
 
 def bridge_state(home: Path) -> str:
@@ -111,10 +134,15 @@ def export_options():
 
 
 def main():
-    global plat, settings
+    global plat, settings, client_marker
+    if sys.version_info < (3, 8):     # run_python.sh no longer probes the version
+        emit("WhyNot Cut protection is OFF: Python %d.%d is too old (3.8+ needed) — run reel doctor"
+             % sys.version_info[:2])
+        return
     import plat as _plat
     import settings as _settings
-    plat, settings = _plat, _settings
+    import client_marker as _client_marker
+    plat, settings, client_marker = _plat, _settings, _client_marker
     try:
         export_options()
     except OSError:
@@ -151,7 +179,7 @@ def main():
     base = plat.clients_root_setting() or (Path(st["clients_root"]).expanduser() if st.get("clients_root") else None)
     try:
         at_base = bool(base) and cwd.resolve() == Path(plat.native_path(str(base))).resolve()
-        names = sorted(p.name for p in cwd.iterdir() if p.is_dir() and is_client(p)) if at_base else []
+        names = sorted(p.name for p in cwd.iterdir() if p.is_dir() and is_client(p, base)) if at_base else []
     except OSError:
         at_base, names = False, []
     if at_base:

@@ -710,8 +710,16 @@ def cmd_gpu_enable(a):
 
 
 def cmd_doctor(a):
-    from lib.onboard import doctor
-    out(doctor())
+    """Machine report; also the `.whynot-client` markers of --root / the current client folder / clients_root
+    (--fix writes the missing ones, only at each client root)."""
+    from lib.onboard import client_markers, doctor, marker_roots
+    rep = doctor()
+    cm = rep["client_markers"] = client_markers(marker_roots(a.root), fix=a.fix)
+    if cm["unprotected"]:
+        rep["fixes"].append({"item": "client folder(s) without the .whynot-client marker, so the guard does not protect "
+                                     "their assets/ and data/: " + ", ".join(cm["unprotected"]),
+                             "who": "claude", "fix": "reel doctor --fix" + (f' --root "{a.root}"' if a.root else "")})
+    out(rep)
 
 
 def cmd_scaffold(a):
@@ -794,7 +802,12 @@ def cmd_client_init(a):
     if a.prefix:
         pj["prefix"] = a.prefix
     write_json(dst / "profile.json", pj)
-    out({"profile_dir": str(dst), "id": a.id, "from": src.name, "files": written,
+    from lib.client_marker import MARKER, write_marker
+    try:
+        write_marker(p)                   # the guard and the session hook recognise the client folder by it
+    except ValueError as e:
+        print(f"note: {e}", file=sys.stderr)
+    out({"profile_dir": str(dst), "id": a.id, "from": src.name, "files": written, "marker": str(p / MARKER),
          "next": "Fill brand.json / transcription.json / glossary / notes.md from the client's own documents (never invent)."})
 
 
@@ -892,6 +905,9 @@ def main():
             sp.add_argument("--extras", action="store_true", help="confirm the editor explicitly asked for After Effects/Photoshop")
         if name == "setup":
             sp.add_argument("--no-bridge", action="store_true")
+        if name == "doctor":
+            sp.add_argument("--fix", action="store_true",
+                            help="write the missing .whynot-client marker at each client root (never in assets/ or data/)")
         if name == "client-init":
             sp.add_argument("--id", required=True, help="profile id, kebab-case, e.g. dr-sherif")
             sp.add_argument("--from-profile", help="copy a shipped profile instead of the blank template")

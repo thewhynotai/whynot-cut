@@ -42,6 +42,7 @@ def make_client(tmp, names=RAW) -> Path:
         (root / d).mkdir(parents=True)
     for i, n in enumerate(names):
         (root / "data/Raw" / n).write_bytes(b"raw clip %d" % i)
+    (root / ".whynot-client").write_text("{}", encoding="utf-8")     # 3.0: positive client marker (the hooks need it)
     return root
 
 

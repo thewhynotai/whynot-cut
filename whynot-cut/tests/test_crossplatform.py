@@ -21,7 +21,8 @@ GUARD = SK / "hooks" / "guard.py"
 
 
 def guard(tool, cmd, cwd):
-    r = subprocess.run([sys.executable, str(GUARD)], capture_output=True, text=True,
+    from test_plugin import isolated_env
+    r = subprocess.run([sys.executable, str(GUARD)], capture_output=True, text=True, env=isolated_env(),
                        input=json.dumps({"tool_name": tool, "tool_input": {"command": cmd}, "cwd": str(cwd)}))
     return r.returncode
 
@@ -130,6 +131,7 @@ class TestPowerShellGuard(unittest.TestCase):
         for d in ("assets/Logo", "data/Raw", "output"):
             (self.root / d).mkdir(parents=True)
         (self.root / "data/Raw/C1.MP4").write_bytes(b"x")
+        (self.root / ".whynot-client").write_text("{}", encoding="utf-8")     # 3.0: positive client marker
 
     def tearDown(self):
         self.tmp.cleanup()
