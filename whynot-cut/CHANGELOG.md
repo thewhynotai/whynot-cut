@@ -85,6 +85,11 @@ first.
   re-exports those frames (`--pending-retries` 3, `--pending-wait` 5 s, doubling). Frames still pending are listed
   under `media_pending` with `ok: false` and are never shown as frames. QC docs: such a frame means re-export, never
   pass or fail.
+- Verified live (Windows 11, Premiere 26.5.2, bridge 3.1.0): `ppro-frames` for the test reel EP02TEST_R02 exported 17
+  of 17 frames with `media_pending: []` and no retries. All 17 frames were viewed: real shots, Arabic captions joined
+  right to left. The slate path itself (media still loading) is proven by tests on a real slate captured in round 4,
+  not by a live run. G65 was tuned on the real 34:41 episode: both real name supers came first. G66 was checked on
+  this PC: it reports the old reel-editor 1.0.7 first on PATH in a session started before the install.
 
 ## 2.2.0 — 2026-10-11 · Motion mode and client-level reference style
 
