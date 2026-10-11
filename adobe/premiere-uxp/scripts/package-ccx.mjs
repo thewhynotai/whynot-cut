@@ -1,11 +1,11 @@
 // Build a target and zip it into a .ccx (a zip with manifest.json at its root).
 //   node scripts/package-ccx.mjs spike    -> <repo>/dist/uxp/WhyNotCut-Spike.ccx            (gitignored)
-//   node scripts/package-ccx.mjs plugin   -> <repo>/whynot-cut/adobe/WhyNotCut-Premiere-<version>.ccx  (4b)
+//   node scripts/package-ccx.mjs plugin   -> <repo>/whynot-cut/adobe/WhyNotCut-Premiere-<version>.ccx  (gitignored there; whynot-cut/adobe/.gitignore)
 import { zipSync } from "fflate";
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildTarget, root } from "./build.mjs";
+import { buildTarget, mockRequested, root } from "./build.mjs";
 
 const repo = join(root, "..", "..");
 // 2026-01-01: a fixed timestamp makes the zip byte-for-byte reproducible for the same inputs.
@@ -34,7 +34,9 @@ function walk(dir) {
 export async function packageTarget(target) {
   const outFile = OUTPUTS[target]?.();
   if (!outFile) throw new Error(`unknown target "${target}" (expected: ${Object.keys(OUTPUTS).join(", ")})`);
-  const dir = await buildTarget(target);
+  // A .ccx is what gets installed; it must never carry the mock data source.
+  if (target === "plugin" && mockRequested()) throw new Error("refusing to package the plugin from a mock build (WNC_MOCK / --mock): unset it and run again");
+  const dir = await buildTarget(target, { mock: false });
   const entries = {};
   // manifest.json first, then everything else in sorted order; forward slashes, rooted at the plugin folder
   const rel = (f) => relative(dir, f).split(sep).join("/");

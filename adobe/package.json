@@ -3,10 +3,16 @@
   "private": true,
   "version": "0.0.0",
   "description": "WhyNot Cut Adobe workspace: Premiere UXP plugin, UXP spike, shared panel UI.",
-  "workspaces": ["panel-ui", "premiere-uxp"],
+  "workspaces": [
+    "panel-ui",
+    "premiere-uxp"
+  ],
   "scripts": {
     "check": "npm run check --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
-    "package:spike": "npm run package:spike -w premiere-uxp"
+    "package:spike": "npm run package:spike -w premiere-uxp",
+    "package": "npm run package -w premiere-uxp",
+    "package:plugin": "npm run package:plugin -w premiere-uxp",
+    "build:plugin": "npm run build:plugin -w premiere-uxp"
   }
 }

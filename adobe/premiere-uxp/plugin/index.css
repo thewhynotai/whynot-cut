@@ -1,0 +1,57 @@
+/* Shell-only styles. The panel itself is styled by tokens.css + panel.css (shared with After Effects). */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--twn-bg);
+  color: var(--twn-text);
+}
+
+#root {
+  min-height: 100%;
+}
+
+/* "Copy this" fallback shown when the clipboard is not available to the plugin (no clipboard permission). */
+.wnc-copy {
+  margin: 0 12px 12px 12px;
+  padding: 10px;
+  background: var(--twn-surface);
+  border: 1px solid var(--twn-border);
+  border-radius: var(--twn-radius);
+  color: var(--twn-text);
+  font-family: var(--twn-font-ui);
+  font-size: 12px;
+}
+
+.wnc-copy-title {
+  margin: 0 0 6px 0;
+  font-weight: 600;
+}
+
+.wnc-copy-text {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  margin: 0 0 8px 0;
+  padding: 6px;
+  box-sizing: border-box;
+  background: var(--twn-bg);
+  color: var(--twn-text);
+  border: 1px solid var(--twn-border);
+  border-radius: 4px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  direction: ltr;
+  text-align: left;
+}
+
+.wnc-copy-close {
+  padding: 4px 12px;
+  background: var(--twn-primary);
+  color: #fff;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--twn-font-ui);
+}

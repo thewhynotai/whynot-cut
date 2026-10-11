@@ -2,8 +2,8 @@
 
 | Folder | What | Status |
 |---|---|---|
-| `premiere-uxp/` | Premiere Pro UXP: the **spike** plugin (measures which UXP APIs work) and, later, the WhyNot Cut panel plugin | spike: Task 4a; panel: 4b |
-| `panel-ui/` | Shared panel UI (Spectrum-free, brand tokens) hosted by the Premiere plugin and later After Effects | built (T6.5); mounted by the plugin in 4b |
+| `premiere-uxp/` | Premiere Pro UXP: the **spike** plugin (measures which UXP APIs work) and, later, the WhyNot Cut panel plugin | spike: 4a; panel plugin: 4b (this table is current) |
+| `panel-ui/` | Shared panel UI (Spectrum-free, brand tokens) hosted by the Premiere plugin and later After Effects | built (T6.5); mounted by the plugin (`premiere-uxp/src/shell.ts`) |
 
 Node v26 / npm 11. Everything is TypeScript, bundled with esbuild, tested with `node --test` (Node runs `.ts` natively).
 
@@ -13,6 +13,8 @@ npm install            # once
 npm run check          # tsc --noEmit in every workspace
 npm test               # node --test in every workspace
 npm run package:spike  # -> <repo>/dist/uxp/WhyNotCut-Spike.ccx  (gitignored)
+npm run package:plugin # -> <repo>/whynot-cut/adobe/WhyNotCut-Premiere-<version>.ccx  (*.ccx ignored there until a release)
+npm run package        # both
 ```
 
 `@adobe/premierepro` (26.5.0) is types only; at runtime Premiere provides `require("premierepro")`. No maintained UXP typings
@@ -66,6 +68,43 @@ Bump `version` in `spike/manifest.json` (and `SPIKE_VERSION` in `spike/src/spike
 
 `require("os").homedir()` first; then `process.env.USERPROFILE`, `HOME`, `HOMEDRIVE+HOMEPATH`. Which one worked is recorded as
 `home_via` in the results. UXP `fs` calls use the promise API when present, else the `*Sync` twin.
+
+## The plugin (`premiere-uxp/plugin/`, `premiere-uxp/src/`)
+
+The WhyNot Cut panel for Premiere: manifest v5, id `ai.thewhynot.cut.dev` (dev id; the release id is decided at release),
+panel `whynotCut`, `host {app: premierepro, minVersion: 26.5.0}`, permissions **only** `localFileSystem: fullAccess` and the
+loopback network domains (no `clipboard`, no `launchProcess`), panel 340x640 preferred / 280x320 minimum, the same icon set as the
+spike. The manifest `version` must equal `whynot-cut/.claude-plugin/plugin.json` (a test enforces it).
+
+| File | What |
+|---|---|
+| `plugin/manifest.json`, `plugin/index.html`, `plugin/index.css` | package files; the page links `tokens.css`, `panel.css` (copied from `panel-ui/styles/`) then `index.css` (shell-only: page background, the copy box) |
+| `src/main.ts` | entry: builds the environment (`require` of `premierepro`/`uxp` with literal calls, `document`, `navigator`) and calls `startShell`; picks the data source at build time |
+| `src/shell.ts` | `startShell(env)`: theme, data source, `UxpHost`, `mount(root, source, host)`; testable with fakes |
+| `src/offline-source.ts` | `OfflineSource`: the placeholder `PanelDataSource` until the engine daemon exists (T6.2): engine "not running", Host pill from `uxp.host.version` (`Application.version` is empty), language from `uxp.host.uiLocale`, no pipeline data, every action `ok:false` with `how: "start the engine: reel serve (coming in 3.0)"` |
+| `src/uxp-host.ts` | `createUxpHost`: `setPlayerPosition` (active sequence, `TickTime.createWithSeconds`), `openInSourceMonitor` (`SourceMonitor.openFilePath`), `revealPath` (`uxp.shell.openPath`, best effort), `copyText` (`navigator.clipboard`, else a visible copy box) |
+| `src/copy-fallback.ts` | the "copy this" box shown when the clipboard (or opening a folder) is not available |
+| `src/theme.ts` | `uxp.host.getBackgroundColor()` -> `--twn-bg`; `{}` / missing / light colours keep the brand dark default |
+
+None of the host adapter's calls edit the project, so none runs inside `lockedAccess`/`executeTransaction`; the build (T6.3) does.
+
+Build and visual checks:
+
+```
+npm run build:plugin -w premiere-uxp            # build/plugin/
+$env:WNC_MOCK=1; npm run build:plugin -w premiere-uxp   # PowerShell; or: node scripts/build.mjs plugin --mock
+```
+
+A mock build bundles `MockSource` (PODCAST-TEST data) for a look at the panel inside Premiere; `package-ccx.mjs` refuses to package one.
+Install the `.ccx` like the spike (UPIA, Premiere closed); it appears as **Window > UXP Plugins > WhyNot Cut**. Bump the manifest
+`version` (and `plugin.json`) for every re-install: UPIA only replaces a newer version.
+
+## Contract test (`premiere-uxp/test/contract.test.ts`)
+
+ajv (2020 dialect + `ajv-formats`) loads every `whynot-cut/engine/reel/contract/*.schema.json`, compiles them (all added first, then
+fetched by `$id`, `strictSchema` on), checks the request/result envelopes, validates every `request.json` / `result.json` under
+`whynot-cut/tests/fixtures/contract/` (envelope + the action's `$defs/data`, or `$defs/readback` / `readback_failure`; other JSON there only has to
+parse; zero fixtures pass while the folder does not exist) and validates what `MockSource` returns and what the panel's buttons send.
 
 ## Icons
 

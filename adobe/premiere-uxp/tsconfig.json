@@ -1,7 +1,8 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "types": []
+    "types": [],
+    "resolveJsonModule": true
   },
-  "include": ["spike/src/**/*.ts"]
+  "include": ["spike/src/**/*.ts", "src/**/*.ts"]
 }
