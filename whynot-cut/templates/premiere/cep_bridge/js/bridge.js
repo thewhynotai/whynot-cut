@@ -4,7 +4,7 @@
    *.job.json it evaluates the whitelisted JSX with a data file and writes *.result.json. A fixed folder is used because the
    plugin's own install path changes on every update. Writes a heartbeat so the pipeline knows the bridge is running.
    <engine home> comes from bridge-config.json (written at install), else the first of ~/.whynot-cut, ~/.reel-editor,
-   ~/.dr-nahla-editor that holds a venv, else ~/.whynot-cut. */
+   ~/.dr-nahla-editor that holds an engine (a runtime `current` file or a venv), else ~/.whynot-cut. */
 (function () {
   var req = (window.cep_node && window.cep_node.require) || window.require;
   var fs = req('fs'), path = req('path'), os = req('os');
@@ -35,11 +35,15 @@
       var cfg = JSON.parse(fs.readFileSync(path.join(extensionDir(), 'bridge-config.json'), 'utf8'));
       if (cfg.base && fs.existsSync(cfg.base)) { return cfg.base; }
     } catch (e) {}
-    // same rule as bin/reel, reel.cmd and plat.engine_home(): a home counts only with a venv inside (WhyNot Cut's
-    // SessionStart hook creates ~/.whynot-cut for plugin-options.json alone)
+    // same rule as bin/reel, reel.cmd and plat.engine_home(): a home counts only with an engine inside, the runtime's
+    // `current` file (3.0) or a venv folder (WhyNot Cut's SessionStart hook creates ~/.whynot-cut for
+    // plugin-options.json alone)
     var cands = ['.whynot-cut', '.reel-editor', '.dr-nahla-editor'];
     for (var i = 0; i < cands.length; i++) {
-      if (fs.existsSync(path.join(HOME, cands[i], 'venv'))) { return path.join(HOME, cands[i]); }
+      var d = path.join(HOME, cands[i]), cur = path.join(d, 'current');
+      var hasCurrent = false;
+      try { hasCurrent = fs.statSync(cur).isFile(); } catch (e2) {}
+      if (hasCurrent || fs.existsSync(path.join(d, 'venv'))) { return d; }
     }
     return path.join(HOME, '.whynot-cut');
   }

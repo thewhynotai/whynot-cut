@@ -9,7 +9,7 @@ $py = $null; $flags = @()
 $cur = Join-Path $homeDir 'current'
 if (Test-Path -LiteralPath $cur -PathType Leaf) {
     $id = ([IO.File]::ReadAllText($cur)).Trim().TrimStart([char]0xFEFF)
-    if ($id -and $id -notmatch '[\\/:]|\.\.') {
+    if ($id -cmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$' -and $id -notmatch '\.\.') {   # the id rule of lib/plat.py
         $c = Join-Path $homeDir "runtimes\$id\Scripts\python.exe"
         if (Test-Path -LiteralPath $c) { $py = $c; $flags = @('-s') }
     }

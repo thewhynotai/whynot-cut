@@ -126,7 +126,8 @@ def image_info(p: Path, deriv_dir: Path) -> dict:
         how = raw_to_jpeg(p, jpg) if not jpg.exists() else "cached"
         if not jpg.exists():
             info.update(skipped=True, raw_note=f"camera RAW not converted ({how}); export a JPEG from Lightroom/Camera "
-                                               f"Raw into assets/ or install `rawpy` in the engine venv")
+                                               f"Raw into assets/ (the optional `rawpy` reader is not part of the "
+                                               f"engine runtime)")
             return info
         info["raw_derivative"] = str(jpg)
         info["raw_note"] = "Default camera-RAW render; re-develop in Camera Raw for final use."

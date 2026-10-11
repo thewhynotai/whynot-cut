@@ -68,13 +68,14 @@ tag() {   # "WhyNot Cut 2.2.0": every blocked message names this plugin, so a wr
 # The engine interpreter (3.0 T2.1, same order as plat.engine_runtime()): the isolated runtime named by the one-line
 # text file <home>/current (runtimes/<id>/, run with -s: no user site), else the 2.x venv/ (run as before: a venv
 # built with --system-site-packages may rely on the user site). Never a system Python for the engine.
-PY='' PYFLAG=''
+PY='' PYFLAG='' RID_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'
 find_py() {
   local id='' c
   if [ -f "$HOME_DIR/current" ]; then
     IFS= read -r id < "$HOME_DIR/current" || true
+    id="${id#$'\xef\xbb\xbf'}"
     id="${id//[[:space:]]/}"
-    case "$id" in ''|*/*|*'\'*|*..*) id='' ;; esac
+    [[ $id =~ $RID_RE ]] && [[ $id != *..* ]] || id=''      # the id rule of lib/plat.py
     if [ -n "$id" ]; then
       for c in "$HOME_DIR/runtimes/$id/bin/python" "$HOME_DIR/runtimes/$id/Scripts/python.exe"; do
         if [ -x "$c" ]; then PY="$c"; PYFLAG=-s; return 0; fi

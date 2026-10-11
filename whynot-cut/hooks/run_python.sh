@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs a WhyNot Cut hook script (guard.py, session_context.py) with a working Python 3 on macOS, Linux or Windows.
-# Order: the engine runtime ($WHYNOT_HOME or ~/.whynot-cut: venv/Scripts/python.exe or venv/bin/python), then the
-# interpreter cached in ${CLAUDE_PLUGIN_DATA}/python, then python3 / python / py on PATH, skipping the Windows Store
+# Order: the engine interpreter ($WHYNOT_HOME or ~/.whynot-cut, the wrappers' rule: the isolated runtime named by the
+# one-line text file <home>/current — runtimes/<id>/Scripts/python.exe or bin/python, run with -s — else the 2.x
+# venv/Scripts/python.exe or venv/bin/python), then the interpreter cached in ${CLAUDE_PLUGIN_DATA}/python, then python3 / python / py on PATH, skipping the Windows Store
 # stubs (*/WindowsApps/*) and, on macOS, /usr/bin/python3 when the Command Line Tools are missing (it only opens an
 # install dialog). No separate version probe: the hook scripts check sys.version_info themselves.
 # Every run that finds Python touches ${CLAUDE_PLUGIN_DATA}/hooks-ok (`reel doctor` reports guard_active from it).
@@ -27,15 +28,30 @@ for v in WHYNOT_HOME CLAUDE_PLUGIN_OPTION_ENGINE_HOME REEL_HOME CLAUDE_PLUGIN_OP
 done
 if [ -z "$home" ]; then
   home="$HOME/.whynot-cut"
-  if [ ! -e "$home/venv" ]; then     # ~/.whynot-cut alone may only hold plugin-options.json
+  if [ ! -e "$home/venv" ] && [ ! -f "$home/current" ]; then   # it may only hold plugin-options.json
     for old in "$HOME/.reel-editor" "$HOME/.dr-nahla-editor"; do
       [ -e "$old/venv" ] && { home="$old"; break; }
     done
   fi
 fi
-for c in "$home/venv/Scripts/python.exe" "$home/venv/bin/python"; do
-  if [ -f "$c" ] && [ -x "$c" ]; then py="$c"; break; fi
-done
+pyflag=""
+if [ -f "$home/current" ]; then     # 3.0 T2.1: one runtime id (BOM / whitespace stripped; ids as in lib/plat.py)
+  rid=""
+  IFS= read -r rid < "$home/current" || true
+  rid="${rid#$'\xef\xbb\xbf'}"
+  rid="${rid//[[:space:]]/}"
+  rid_re='^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'
+  if [[ $rid =~ $rid_re ]] && [[ $rid != *..* ]]; then
+    for c in "$home/runtimes/$rid/Scripts/python.exe" "$home/runtimes/$rid/bin/python"; do
+      if [ -f "$c" ] && [ -x "$c" ]; then py="$c"; pyflag="-s"; break; fi
+    done
+  fi
+fi
+if [ -z "$py" ]; then
+  for c in "$home/venv/Scripts/python.exe" "$home/venv/bin/python"; do
+    if [ -f "$c" ] && [ -x "$c" ]; then py="$c"; break; fi
+  done
+fi
 
 # 2. the interpreter found on an earlier run
 if [ -z "$py" ] && [ -n "$data" ] && [ -f "$data/python" ]; then
@@ -71,4 +87,4 @@ fi
 if [ -n "$data" ]; then   # heartbeat (its mtime is what counts; EPOCHSECONDS is bash 5+, empty on macOS bash 3.2)
   { [ -d "$data" ] || mkdir -p "$data"; printf '%s\n' "${EPOCHSECONDS:-}" > "$data/hooks-ok"; } 2>/dev/null
 fi
-exec "$py" "$@"
+exec "$py" $pyflag "$@"

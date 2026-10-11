@@ -196,7 +196,9 @@ def doctor() -> dict:
         fixes.append({"item": "engine runtime not isolated: " + "; ".join(rt["problems"][:3]), "who": "claude",
                       "fix": "reel setup --force   (re-installs the runtime from the hash lock)"})
     if not rep["ffmpeg"]:
-        fixes.append({"item": "ffmpeg", "who": "claude", "fix": "reel setup   (imageio-ffmpeg provides it)"})
+        fixes.append({"item": "ffmpeg", "who": "claude",
+                      "fix": "reel setup   (the engine runtime's imageio-ffmpeg provides one; the WhyNot Cut "
+                             "installer adds the pinned ffmpeg)"})
     if not models:
         part = [k for k, v in states.items() if v == "partial"]
         fixes.append({"item": "Whisper large-v3 (~3 GB)" + (f" (interrupted download of {', '.join(part)} found)" if part else ""),

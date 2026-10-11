@@ -2,7 +2,8 @@
 """WhyNot Cut pipeline CLI (Claude Code plugin engine, by The Why Not AI). macOS and Windows.
 
 Run via the plugin wrapper:  reel <command> --root <CLIENT_FOLDER> [--video-id ID] [--profile ID]
-(the wrapper uses the venv in ~/.whynot-cut; `reel setup` creates it)
+(the wrapper runs the engine runtime in ~/.whynot-cut/runtimes/<id>, named by ~/.whynot-cut/current, or a 2.x
+venv/; `reel setup` builds or repairs the runtime)
 
 Deterministic stages are scripts; the semantic stages (client style, main topic, narrative segments, statement
 analysis, edit-decisions.json) are files Claude authors, then `reel plan` validates and compiles them.
@@ -794,6 +795,24 @@ def cmd_setup(a):
 PY_USAGE = "reel py <script.py> [args] | reel py -m <module> [args] | reel py -c <code> [args]"
 
 
+GLOBAL_VALUE_OPTS = ("--root", "--video-id", "--profile", "--episode")
+
+
+def py_argv(argv: list[str]) -> list[str] | None:
+    """The script arguments when the command is `py`, also after global options (`reel --root X py -c ...`; they do
+    not apply to the script), else None."""
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in GLOBAL_VALUE_OPTS:
+            i += 2
+        elif a.startswith(tuple(o + "=" for o in GLOBAL_VALUE_OPTS)):
+            i += 1
+        else:
+            return argv[i + 1:] if a == "py" else None
+    return None
+
+
 def cmd_py(a):
     """Run Python with the engine runtime (3.0 T2.1 / T2.16): engine packages and the engine's `lib` importable,
     user site off when the engine runs that way. Output and exit code are the script's own."""
@@ -1173,10 +1192,9 @@ def main():
             g.add_argument("--status", action="store_true", help="who holds the lock, since when, stale or not (default)")
             g.add_argument("--release", action="store_true",
                            help="remove the lock (lead only, when the editor says the other session is finished)")
-    argv = sys.argv[1:]
-    if argv[:1] == ["py"]:          # everything after `py` belongs to the script (argparse would read its -m / -c)
-        a = argparse.Namespace(cmd="py", pyargs=argv[1:])
-        cmd_py(a)
+    pyargs = py_argv(sys.argv[1:])
+    if pyargs is not None:          # everything after `py` belongs to the script (argparse would read its -m / -c)
+        cmd_py(argparse.Namespace(cmd="py", pyargs=pyargs))
         return
     a = ap.parse_args()
     if a.cmd in EXTRAS and not a.extras:

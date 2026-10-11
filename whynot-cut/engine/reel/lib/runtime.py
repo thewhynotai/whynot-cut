@@ -39,14 +39,16 @@ LOCK_STAMP = ".whynot-lock.sha256"
 DEFAULT_PYTHON = "3.12.15"
 DEFAULT_SMOKE = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "uharfbuzz"]
 
-# every module the engine imports from a package, and the distribution that provides it (doctor's isolation check)
+# every module the engine (or faster-whisper under it) imports from a package, and the distribution that provides it
+# (doctor's isolation check; setup's module report). Optional extras (rawpy, mlx_whisper) are not required.
 ENGINE_MODULES = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "fontTools", "arabic_reshaper", "bidi",
-                  "uharfbuzz", "freetype", "pypdf", "imageio_ffmpeg"]
-MAC_MODULES = ["CoreText", "Quartz", "Vision"]
+                  "uharfbuzz", "freetype", "pypdf", "imageio_ffmpeg", "huggingface_hub", "onnxruntime", "tokenizers"]
+MAC_MODULES = ["CoreText", "Quartz", "Vision", "Foundation"]
 OTHER_MODULES = ["cv2"]
 MODULE_DIST = {"faster_whisper": "faster-whisper", "PIL": "pillow", "fontTools": "fonttools",
                "arabic_reshaper": "arabic-reshaper", "bidi": "python-bidi", "freetype": "freetype-py",
-               "imageio_ffmpeg": "imageio-ffmpeg", "cv2": "opencv-python-headless", "CoreText": "pyobjc-framework-CoreText",
+               "imageio_ffmpeg": "imageio-ffmpeg", "huggingface_hub": "huggingface-hub",
+               "Foundation": "pyobjc-framework-Cocoa", "cv2": "opencv-python-headless", "CoreText": "pyobjc-framework-CoreText",
                "Quartz": "pyobjc-framework-Quartz", "Vision": "pyobjc-framework-Vision"}
 
 
@@ -183,6 +185,57 @@ def write_stamps(rt_dir: Path, *, rid: str, key: str | None, python: str, lock_f
     _atomic_write(rt_dir / STAMP, json.dumps(stamp, indent=2) + "\n")
     _atomic_write(rt_dir / LOCK_STAMP, lock_sha + "\n")
     return stamp
+
+
+def clear_stamps(rt_dir: Path):
+    """Remove both stamps before (re)installing: a runtime whose install did not finish must never look built."""
+    for name in (LOCK_STAMP, STAMP):
+        try:
+            (rt_dir / name).unlink()
+        except FileNotFoundError:
+            pass
+
+
+def python_runs(py: Path, timeout: int = 60) -> bool:
+    """Does the interpreter start at all (its base Python may have been removed)?"""
+    try:
+        return subprocess.run([str(py), "-s", "-c", "pass"], capture_output=True, timeout=timeout).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def prune(home: Path, keep: set[str]) -> dict:
+    """Delete runtimes/<id> folders other than `keep` (current + one previous, for rollback). Only folders that are
+    runtimes (a pyvenv.cfg or a WHYNOT_RUNTIME inside, a valid id) and not being built (no .<id>.building lock).
+    A folder that cannot be removed (in use) is reported, never an error. {removed: [...], kept: [...], failed: {}}."""
+    import shutil
+    out = {"removed": [], "kept": sorted(keep), "failed": {}}
+    d = runtimes_dir(home)
+    if not d.is_dir():
+        return out
+    for rt in sorted(d.iterdir()):
+        rid = rt.name
+        if (rid in keep or not rt.is_dir() or not plat._RUNTIME_ID.match(rid) or ".." in rid
+                or rid.endswith(".building")):
+            continue
+        if not ((rt / "pyvenv.cfg").is_file() or (rt / STAMP).is_file()) or (d / f".{rid}.building").exists():
+            continue
+        def _chmod_retry(fn, path, _exc):
+            try:
+                os.chmod(path, 0o700)
+                fn(path)
+            except OSError:
+                pass
+        try:
+            shutil.rmtree(rt, **({"onexc": _chmod_retry} if sys.version_info >= (3, 12) else
+                                 {"onerror": _chmod_retry}))
+        except OSError:
+            pass
+        if rt.exists():
+            out["failed"][rid] = "in use or locked; removed on a later reel setup"
+        else:
+            out["removed"].append(rid)
+    return out
 
 
 def write_current(home: Path, rid: str):

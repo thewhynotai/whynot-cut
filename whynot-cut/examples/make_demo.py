@@ -3,7 +3,7 @@
 then run the deterministic pipeline end-to-end (no Whisper, no Adobe) including the watchable preview MP4.
 Works on macOS and Windows; uses an installed Arabic font when the Thmanyah brand font isn't available.
 
-Usage (engine Python):  <engine home>/venv/{bin/python|Scripts/python.exe} examples/make_demo.py <EMPTY_FOLDER>
+Usage (engine Python):  reel py examples/make_demo.py <EMPTY_FOLDER>
 """
 import json
 import shutil

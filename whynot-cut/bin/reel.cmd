@@ -33,7 +33,8 @@ set "WNC_HOME=" & set "WNC_PY=" & set "WNC_HERE=" & set "WNC_FLAG=" & set "WNC_S
 exit /b %ERRORLEVEL%
 
 :find_py
-rem WNC_PY (+ WNC_FLAG=-s for a runtime). <home>\current holds one runtime id: one word, no \ / : or ..
+rem WNC_PY (+ WNC_FLAG=-s for a runtime). <home>\current holds one runtime id, the rule of lib/plat.py:
+rem [A-Za-z0-9] then up to 79 of [A-Za-z0-9._-], no ".."; anything else falls back to venv\ (as doctor reports it)
 rem (%WNC_RT:x=y% is expanded when its line is read, also behind a false `if`: so every line that uses it is
 rem reached only by goto once WNC_RT is defined)
 set "WNC_PY="
@@ -49,6 +50,11 @@ if not "%WNC_RT:\=%"=="%WNC_RT%" goto :find_venv
 if not "%WNC_RT:/=%"=="%WNC_RT%" goto :find_venv
 if not "%WNC_RT::=%"=="%WNC_RT%" goto :find_venv
 if not "%WNC_RT:..=%"=="%WNC_RT%" goto :find_venv
+if not "%WNC_RT:~80%"=="" goto :find_venv
+for %%c in (. - _) do if "%WNC_RT:~0,1%"=="%%c" goto :find_venv
+rem every allowed character is a delimiter: any token left is a character outside the rule ("x" keeps the line from
+rem starting with the eol character)
+for /f "eol=| delims=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-" %%x in ("x%WNC_RT%") do goto :find_venv
 if not exist "%WNC_HOME%\runtimes\%WNC_RT%\Scripts\python.exe" goto :find_venv
 set "WNC_PY=%WNC_HOME%\runtimes\%WNC_RT%\Scripts\python.exe"
 set "WNC_FLAG=-s"

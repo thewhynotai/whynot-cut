@@ -62,14 +62,18 @@
   `<engine home>/runtimes/<id>/`, a venv built from a pinned python-build-standalone 3.12.15 (via the pinned uv in
   `<engine home>/bin/`, sha256-checked) with **no system and no user site-packages**, installed from a hash lock per
   platform (`setup/locks/runtime-{win-x64,mac-arm64,mac-x64}.lock`, `uv pip compile --generate-hashes --only-binary
-  :all:`; `uv pip sync --require-hashes`, or pip `--require-hashes --timeout 60 --retries 5` without uv).
+  :all:`, macOS locks for macOS 14+; `uv pip sync --require-hashes`, or pip `--require-hashes --timeout 60 --retries 5` without uv).
   `<engine home>/current` (a one-line text file, never a symlink) names the runtime in use and switches only after a
   smoke import passes; the previous runtime and the 2.x `venv/` are kept. Runtime id = `components.json` id, or
   `r-` + sha256(lock)[:12] while that is `<release>` (the installer derives it the same way). Stamps:
   `WHYNOT_RUNTIME` and `.whynot-lock.sha256`. `bin/reel`, `reel.cmd`, `tools/test.sh` and `tools/test.ps1` pick the
   current runtime (run with `python -s`), then the legacy `venv/`; never a system Python.
 - `reel setup` really repairs: it compares the runtime's packages with the lock (and the lock hash with the stamp) and
-  re-syncs on any difference; `--force` re-syncs anyway, `--check` only reports. `reel doctor` reports `runtime`
+  re-syncs on any difference; `--force` re-syncs anyway, `--check` only reports. A runtime whose python is missing
+  or does not start (its base Python removed) is rebuilt in place (`uv venv --clear`); the stamps are removed before
+  any install and written last, so a failed install never looks built; old runtimes are pruned (the current one and
+  one previous are kept). The hook runner (`hooks/run_python.sh`) and the Premiere/AE bridge's engine-home fallback
+  also recognise a home that has only a runtime. `reel doctor` reports `runtime`
   (kind, id, expected id, up to date) and `isolated: true|false` (every engine module loads from inside the runtime at
   the locked version, no user site), with a fix when not.
 - `reel py <script.py> | -m <module> | -c <code> [args]` runs Python with the engine runtime (engine packages and the

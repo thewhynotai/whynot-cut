@@ -185,18 +185,25 @@ class BuildLock:
 
 def build(home: Path, *, comp: dict, key: str | None, lock_file: Path, rid: str, by: str = "reel setup",
           check=False, force=False, dev_system_site=False, uv: Path | None = None, runner=run,
-          versions=R.installed_versions, smoke: list[str] | None = None, base_python=find_python312) -> dict:
-    """Create or repair runtimes/<rid> from `lock_file`, smoke-import, stamp, then switch `current`.
-    Raises Failed; `current` changes only after everything passed."""
+          versions=R.installed_versions, smoke: list[str] | None = None, base_python=find_python312,
+          probe=R.python_runs, prune=True) -> dict:
+    """Create or repair runtimes/<rid> from `lock_file`, smoke-import, stamp, then switch `current` and prune old
+    runtimes (current + one previous are kept). Raises Failed; `current` changes only after everything passed.
+    A runtime folder whose python is missing or does not start (its base Python removed) is rebuilt in place
+    (`uv venv --clear` / `venv --clear`); the stamps are removed before any install and written last, so an
+    unfinished or failed install never looks built."""
     lock_bytes = lock_file.read_bytes()
     lock = R.parse_lock(lock_bytes.decode("utf-8"))
     sha = R.lock_sha256(lock_bytes)
     rt = R.runtime_dir(home, rid)
     py = plat.env_python(rt)
-    exists = py.is_file()
+    exists = py.is_file() and probe(py)
+    broken = rt.exists() and not exists
     stamp = R.read_stamp(rt)
     dec = R.repair_decision(lock, versions(py) if exists else None, exists=exists, stamp_sha=stamp["lock_sha256"],
                             lock_sha=sha)
+    if broken:
+        dec["reasons"] = ["the runtime folder has no working python: rebuilt in place"]
     if force and dec["action"] == "none":
         dec = {"action": "sync", "reasons": ["--force"]}
     pyver = str((comp.get("runtime") or {}).get("python") or R.DEFAULT_PYTHON)
@@ -210,18 +217,21 @@ def build(home: Path, *, comp: dict, key: str | None, lock_file: Path, rid: str,
         return rep
     env = uv_env(home) if uv else None
     with BuildLock(R.runtimes_dir(home) / f".{rid}.building"):
+        if dec["action"] in ("create", "sync") and rt.exists():
+            R.clear_stamps(rt)
+        clear = ["--clear"] if broken else []
         if dec["action"] == "create":
             if uv:
                 say(f"installing Python {pyver} into {home / 'python'}")
                 runner([uv, "python", "install", pyver, "--no-bin", "--no-registry"], env=env)
-                runner([uv, "venv", "--python", pyver, "--python-preference", "only-managed",
+                runner([uv, "venv", "--python", pyver, "--python-preference", "only-managed", *clear,
                         *(["--system-site-packages"] if dev_system_site else []), rt], env=env)
             else:
                 base = base_python()
                 if not base:
                     raise Failed("no uv and no Python 3.12 to build the engine runtime",
                                  how="check the internet connection (setup downloads uv), then run reel setup again")
-                runner([base, "-m", "venv", *(["--system-site-packages"] if dev_system_site else []), rt])
+                runner([base, "-m", "venv", *clear, *(["--system-site-packages"] if dev_system_site else []), rt])
         if dec["action"] in ("create", "sync"):
             say(f"installing the locked packages into {rt} (first time: a few minutes, ~400 MB)")
             idx = (comp.get("runtime") or {}).get("index_url")
@@ -245,14 +255,27 @@ def build(home: Path, *, comp: dict, key: str | None, lock_file: Path, rid: str,
             raise Failed(f"the new runtime failed its smoke import ({', '.join(smoke)}); {home / 'current'} "
                          "was not changed", how="run reel setup again; reel doctor shows which module fails",
                          detail=e.detail) from None
-        if dec["action"] != "none" or stamp["lock_sha256"] != sha or not stamp["runtime"]:
+        if dec["action"] != "none" or stamp["lock_sha256"] != sha or not stamp["runtime"]:     # written last
             R.write_stamps(rt, rid=rid, key=key, python=pyver, lock_file=lock_file.relative_to(PLUGIN).as_posix()
                            if lock_file.is_relative_to(PLUGIN) else str(lock_file), lock_sha=sha, by=by)
         if previous != rid:
             R.write_current(home, rid)
     rep["current"] = rid
     rep["switched"] = previous != rid
+    if prune:
+        rep["pruned"] = R.prune(home, keep_runtimes(home, rid, previous))
     return rep
+
+
+def keep_runtimes(home: Path, rid: str, previous: str | None) -> set[str]:
+    """Current + one previous for rollback: the runtime `current` named before this setup, else the newest other."""
+    if previous and previous != rid:
+        return {rid, previous}
+    d = R.runtimes_dir(home)
+    others = sorted((p for p in d.iterdir() if p.is_dir() and p.name != rid and not p.name.startswith(".")
+                     and not p.name.endswith(".building") and (p / "pyvenv.cfg").is_file()),
+                    key=lambda p: p.stat().st_mtime, reverse=True) if d.is_dir() else []
+    return {rid} | ({others[0].name} if others else set())
 
 
 def check_modules(py: Path) -> dict:

@@ -11,8 +11,10 @@ PY="" FLAG=""
 ID=""
 if [ -f "$HOME_DIR/current" ]; then
   IFS= read -r ID < "$HOME_DIR/current" || true
+  ID="${ID#$'\xef\xbb\xbf'}"
   ID="${ID//[[:space:]]/}"
-  case "$ID" in */*|*'\'*|*..*) ID="" ;; esac
+  RID_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'          # the id rule of lib/plat.py
+  [[ $ID =~ $RID_RE ]] && [[ $ID != *..* ]] || ID=""
 fi
 if [ -n "$ID" ]; then
   for c in "$HOME_DIR/runtimes/$ID/bin/python" "$HOME_DIR/runtimes/$ID/Scripts/python.exe"; do

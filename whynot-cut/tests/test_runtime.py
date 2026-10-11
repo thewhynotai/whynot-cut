@@ -253,7 +253,8 @@ class TestResolutionOrder(TempHome):
 
     def test_path_like_ids_are_ignored(self):
         fake_venv(self.home)
-        for bad in ("../venv", "a/b", "a\\b", "..", ""):
+        for bad in ("../venv", "a/b", "a\\b", "..", "", "-r1", ".r1", "_r1", "r!1", "r(1)", "r%1", "r" * 81,
+                    "ré1", "r-1..x"):
             (self.home / "current").write_text(bad, encoding="utf-8")
             self.assertEqual(plat.engine_runtime(self.home)["kind"], "venv", bad)
 
@@ -319,7 +320,10 @@ class TestWrappersPickTheRuntime(TempHome):
         """A path, quotes, `&` or an empty line in `current`: never a crash, never a path outside runtimes/."""
         v = fake_venv(self.home, real=True)
         fake_runtime(self.home, "r-wrap3", real=True)
-        for bad in (b'r-x" & echo pwned', b"..\\venv", b"r-wrap3/../..", b"", b"\r\n", b"a:b"):
+        odd = (b"-r1", b".r1", b"r!1", b"r(1)", b"r%PATH%1", b"r^1", b"r" * 81, b"r-wrap3..x")
+        for f in odd:          # their folders exist (a broken interpreter): taking one would fail the echo
+            fake_runtime(self.home, f.decode())
+        for bad in (b'r-x" & echo pwned', b"..\\venv", b"r-wrap3/../..", b"", b"\r\n", b"a:b", *odd):
             (self.home / "current").write_bytes(bad)
             for name, got in self.run_all(WHYNOT_HOME=self.home).items():
                 with self.subTest(wrapper=name, current=bad):
@@ -398,6 +402,10 @@ class FakeRunner:
 SETUP = load_setup_env()
 
 
+def IS_FILE(py):      # the fake interpreters are empty files: "it runs" = it exists
+    return Path(py).is_file()
+
+
 class TestSetupBuild(TempHome):
     def setUp(self):
         super().setUp()
@@ -413,7 +421,8 @@ class TestSetupBuild(TempHome):
 
     def build(self, runner, **kw):
         kw.setdefault("uv", self.uv)
-        return SETUP.build(self.home, comp=self.comp, key="win-x64", lock_file=self.lock, rid="r-new",
+        kw.setdefault("probe", IS_FILE)
+        return SETUP.build(home=self.home, comp=self.comp, key="win-x64", lock_file=self.lock, rid="r-new",
                            runner=runner, versions=lambda py: dict(self.installed), **kw)
 
     def test_create_installs_python_venv_lock_then_switches(self):
@@ -470,7 +479,7 @@ class TestSetupBuild(TempHome):
         def versions(py, calls=[]):                                          # drifted, then fixed by the sync
             calls.append(1)
             return {**self.installed, "numpy": "2.0.2" if len(calls) == 1 else "2.5.4"}
-        rep = SETUP.build(self.home, comp=self.comp, key="win-x64", lock_file=self.lock, rid="r-new", uv=self.uv,
+        rep = SETUP.build(probe=IS_FILE, home=self.home, comp=self.comp, key="win-x64", lock_file=self.lock, rid="r-new", uv=self.uv,
                           runner=run, versions=versions)
         self.assertEqual(rep["action"], "sync")
         self.assertIn("numpy 2.0.2 installed, the lock pins 2.5.4", rep["reasons"])
@@ -524,7 +533,7 @@ class TestSetupBuild(TempHome):
         self.assertEqual(pip[pip.index("--retries") + 1], "5")
         self.assertNotIn("--ignore-installed", pip)
         with self.assertRaises(SETUP.Failed):
-            SETUP.build(self.t / "other", comp=self.comp, key="win-x64", lock_file=self.lock, rid="r-x", uv=None,
+            SETUP.build(probe=IS_FILE, home=self.t / "other", comp=self.comp, key="win-x64", lock_file=self.lock, rid="r-x", uv=None,
                         runner=FakeRunner(), versions=lambda p: {}, base_python=lambda: None)
 
     def test_hidden_dev_flag_reinstalls_into_the_runtime(self):
@@ -533,7 +542,7 @@ class TestSetupBuild(TempHome):
         self.assertIn("--system-site-packages", run.cmds[1])
         self.assertEqual(run.cmds[2][1:4], ["pip", "install", "--reinstall"])
         run = FakeRunner()
-        SETUP.build(self.t / "h2", comp=self.comp, key="win-x64", lock_file=self.lock, rid="r-new", uv=None,
+        SETUP.build(probe=IS_FILE, home=self.t / "h2", comp=self.comp, key="win-x64", lock_file=self.lock, rid="r-new", uv=None,
                     runner=run, versions=lambda p: dict(self.installed), base_python=lambda: Path("py"),
                     dev_system_site=True)
         self.assertIn("--ignore-installed", run.cmds[1])
@@ -547,6 +556,82 @@ class TestSetupBuild(TempHome):
         run = FakeRunner()
         self.build(run, force=True)
         self.assertNotIn("--index-url", run.cmds[-2])
+
+
+    # ---------------------------------------------------------------- review round 1 (I1, I2, M4)
+    def test_folder_without_python_is_rebuilt_with_clear(self):
+        rt = self.home / "runtimes" / "r-new"
+        (rt / "Lib").mkdir(parents=True)                                    # a half-deleted runtime
+        run = FakeRunner()
+        rep = self.build(run)
+        self.assertEqual(rep["action"], "create")
+        self.assertIn("no working python", rep["reasons"][0])
+        self.assertIn("--clear", run.cmds[1])                              # uv venv refuses a folder without it
+        self.assertEqual((self.home / "current").read_text(encoding="utf-8"), "r-new\n")
+
+    def test_python_that_does_not_start_is_rebuilt_with_clear(self):
+        self.make_built()                                                    # stamps match the lock
+        run = FakeRunner()
+        rep = self.build(run, probe=lambda py: False)                       # its base Python was removed
+        self.assertEqual(rep["action"], "create")
+        self.assertIn("--clear", run.cmds[1])
+        run = FakeRunner()
+        self.build(run, uv=None, probe=lambda py: False, base_python=lambda: Path("py312"))
+        self.assertEqual(run.cmds[0][:4], ["py312", "-m", "venv", "--clear"])
+
+    def test_a_fresh_build_does_not_clear(self):
+        run = FakeRunner()
+        self.build(run)
+        self.assertNotIn("--clear", run.cmds[1])
+
+    def test_failed_sync_leaves_no_stamps(self):
+        rt = self.make_built(sha="0" * 64)                                  # lock changed -> sync
+
+        class SyncFails(FakeRunner):
+            def __call__(self, cmd, env=None):
+                if "sync" in [str(c) for c in cmd]:
+                    raise SETUP.Failed("sync", detail="network")
+                return super().__call__(cmd, env)
+        with self.assertRaises(SETUP.Failed):
+            self.build(SyncFails())
+        self.assertFalse((rt / ".whynot-lock.sha256").exists())
+        self.assertFalse((rt / "WHYNOT_RUNTIME").exists())
+        self.assertFalse(R.status(self.home, "win-x64", {})["up_to_date"])
+
+    def test_failed_smoke_after_a_resync_leaves_no_stamps(self):
+        rt = self.make_built()
+        with self.assertRaises(SETUP.Failed):
+            self.build(FakeRunner(smoke_ok=False), force=True)
+        self.assertEqual(R.read_stamp(rt), {"runtime": {}, "lock_sha256": None})
+
+    def old_runtime(self, rid, age_s):
+        d = fake_runtime(self.home, rid)
+        (d / "pyvenv.cfg").write_text("include-system-site-packages = false\n", encoding="utf-8")
+        t = __import__("time").time() - age_s
+        os.utime(d, (t, t))
+        return d
+
+    def test_old_runtimes_are_pruned_keeping_current_and_previous(self):
+        for i, rid in enumerate(("r-old1", "r-old2", "r-old3")):
+            self.old_runtime(rid, 1000 * (i + 1))
+        (self.home / "current").write_text("r-old2\n", encoding="utf-8")
+        building = self.old_runtime("r-busy", 5000)
+        (self.home / "runtimes" / ".r-busy.building").write_text("1", encoding="utf-8")
+        not_rt = self.home / "runtimes" / "notes"
+        not_rt.mkdir()
+        rep = self.build(FakeRunner())
+        self.assertEqual(sorted(rep["pruned"]["removed"]), ["r-old1", "r-old3"])
+        names = sorted(p.name for p in (self.home / "runtimes").iterdir())
+        self.assertEqual(names, [".r-busy.building", "notes", "r-busy", "r-new", "r-old2"])
+        self.assertTrue(building.exists())
+
+    def test_without_a_switch_the_newest_other_runtime_is_kept(self):
+        self.make_built()
+        self.old_runtime("r-a", 100)
+        self.old_runtime("r-b", 5000)
+        rep = self.build(FakeRunner())
+        self.assertEqual(rep["pruned"]["removed"], ["r-b"])
+        self.assertTrue((self.home / "runtimes" / "r-a").is_dir())
 
 
 class TestUvDownload(TempHome):
@@ -748,6 +833,131 @@ class TestPinnedFfmpeg(TempHome):
         env["WHYNOT_HOME"] = str(self.home)
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(common.shutil, "which", return_value=None):
             self.assertNotEqual(common.ffmpeg_exe(), str(self.home / "ffmpeg"))
+
+
+# ===================================================================================================== review round 1
+class TestReviewRound1(TempHome):
+    def test_engine_modules_cover_what_the_engine_and_whisper_import(self):
+        for m in ("huggingface_hub", "onnxruntime", "tokenizers", "faster_whisper", "av"):
+            self.assertIn(m, R.ENGINE_MODULES)
+        self.assertIn("Foundation", R.MAC_MODULES)
+        self.assertEqual(R.MODULE_DIST["huggingface_hub"], "huggingface-hub")
+
+    def test_mac_locks_target_macos_14_and_match_windows_av(self):
+        win = R.parse_lock((LOCKS / "runtime-win-x64.lock").read_text(encoding="utf-8"))
+        for key in ("mac-arm64", "mac-x64"):
+            with self.subTest(platform=key):
+                text = (LOCKS / f"runtime-{key}.lock").read_text(encoding="utf-8")
+                self.assertIn("MACOSX_DEPLOYMENT_TARGET=14.0 uv pip compile", text.splitlines()[1])
+                self.assertEqual(R.parse_lock(text)["av"]["version"], win["av"]["version"])
+
+    def hook(self, home: Path, path_dirs=()):
+        bash = git_bash()
+        if not bash:
+            self.skipTest("no bash")
+        env = {k: v for k, v in os.environ.items() if k not in plat.HOME_ENV and k != "CLAUDE_PLUGIN_DATA"}
+        sysdirs = [str(Path(bash).parent.parent / "usr/bin")] if IS_WIN else ["/usr/bin", "/bin"]
+        env.update(WHYNOT_HOME=str(home), HOME=str(self.t),
+                   PATH=os.pathsep.join([str(d) for d in path_dirs] + sysdirs))
+        return subprocess.run([bash, str(SK / "hooks/run_python.sh"), "x.py"], capture_output=True, text=True,
+                              encoding="utf-8", env=env)
+
+    def fake_py(self, path: Path, word: str):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f'#!/bin/sh\necho {word} "$@"\n', encoding="utf-8", newline="\n")
+        path.chmod(0o755)
+
+    def test_hook_runner_uses_the_runtime_with_s(self):
+        """A home with only a runtime (no venv/): the hooks run on it, with -s; BOM and CRLF in current are fine."""
+        for rel in ("runtimes/r-h1/Scripts/python.exe", "runtimes/r-h1/bin/python"):
+            self.fake_py(self.home / rel, "RUNTIME")
+        (self.home / "current").write_bytes(b"\xef\xbb\xbfr-h1\r\n")
+        r = self.hook(self.home)
+        self.assertEqual(r.stdout.strip(), "RUNTIME -s x.py", r.stderr)
+
+    def test_hook_runner_runtime_before_venv_and_odd_ids_fall_back(self):
+        for rel in ("runtimes/r-h2/Scripts/python.exe", "runtimes/r-h2/bin/python"):
+            self.fake_py(self.home / rel, "RUNTIME")
+        for rel in ("venv/Scripts/python.exe", "venv/bin/python"):
+            self.fake_py(self.home / rel, "VENV")
+        (self.home / "current").write_text("r-h2\n", encoding="utf-8")
+        self.assertEqual(self.hook(self.home).stdout.strip(), "RUNTIME -s x.py")
+        for bad in ("../venv", "-r-h2", "r-h2/..", "r!h2"):
+            (self.home / "current").write_text(bad, encoding="utf-8")
+            self.assertEqual(self.hook(self.home).stdout.strip(), "VENV x.py", bad)
+
+    def test_hook_runner_default_home_with_only_a_runtime(self):
+        bash = git_bash()
+        if not bash:
+            self.skipTest("no bash")
+        new = self.t / ".whynot-cut"
+        for rel in ("runtimes/r-h3/Scripts/python.exe", "runtimes/r-h3/bin/python"):
+            self.fake_py(new / rel, "RUNTIME")
+        (new / "current").write_text("r-h3\n", encoding="utf-8")
+        for rel in ("venv/Scripts/python.exe", "venv/bin/python"):
+            self.fake_py(self.t / ".reel-editor" / rel, "LEGACY")
+        env = {k: v for k, v in os.environ.items() if k not in plat.HOME_ENV and k != "CLAUDE_PLUGIN_DATA"}
+        env.update(HOME=str(self.t), USERPROFILE=str(self.t))
+        r = subprocess.run([bash, str(SK / "hooks/run_python.sh"), "x.py"], capture_output=True, text=True,
+                           encoding="utf-8", env=env)
+        self.assertEqual(r.stdout.strip(), "RUNTIME -s x.py", r.stderr)
+
+    def test_bridge_engine_home_accepts_a_runtime_current_file(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("no node")
+        script = (
+            "const fs = require('fs'), path = require('path');"
+            "const src = fs.readFileSync(process.argv[1], 'utf8');"
+            "const m = src.match(/  function engineHome\\(\\) \\{[\\s\\S]*?\\n  \\}\\n/);"
+            "const f = new Function('fs', 'path', 'HOME', 'extensionDir', m[0] + '; return engineHome();');"
+            "process.stdout.write(f(fs, path, process.argv[2], () => path.join(process.argv[2], 'no-extension')));")
+        user = self.t / "u"
+        (user / ".reel-editor" / "venv").mkdir(parents=True)
+        (user / ".whynot-cut").mkdir()
+        (user / ".whynot-cut" / "plugin-options.json").write_text("{}", encoding="utf-8")
+
+        def home():
+            r = subprocess.run([node, "-e", script, str(SK / "templates/premiere/cep_bridge/js/bridge.js"), str(user)],
+                               capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return norm(r.stdout)
+        self.assertEqual(home(), norm(str(user / ".reel-editor")))           # pointer only: not an engine
+        (user / ".whynot-cut" / "current").mkdir()                           # a folder named current is not it
+        self.assertEqual(home(), norm(str(user / ".reel-editor")))
+        (user / ".whynot-cut" / "current").rmdir()
+        (user / ".whynot-cut" / "current").write_text("r-1\n", encoding="utf-8")
+        self.assertEqual(home(), norm(str(user / ".whynot-cut")))
+
+    def test_reel_py_after_global_options(self):
+        env = dict(os.environ, PYTHONUTF8="1")
+        env.pop("WHYNOT_TEST_ECHO_ARGV", None)
+        for pre in (["--root", "X:/nowhere"], ["--root=X:/nowhere", "--video-id", "C1"]):
+            r = subprocess.run([sys.executable, "-B", str(SK / "engine/reel/cli.py"), *pre, "py", "-c",
+                                "import sys; print(sys.argv[1:])", "--root", "y"], capture_output=True, text=True,
+                               encoding="utf-8", env=env)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, "['--root', 'y']"), (pre, r.stderr))
+
+    def test_py_argv(self):
+        cli = importlib.util.spec_from_file_location("cli_t21", SK / "engine/reel/cli.py")
+        mod = importlib.util.module_from_spec(cli)
+        cli.loader.exec_module(mod)
+        self.assertEqual(mod.py_argv(["py", "-m", "x"]), ["-m", "x"])
+        self.assertEqual(mod.py_argv(["--episode", "EP1", "py"]), [])
+        self.assertIsNone(mod.py_argv(["--root", "py", "doctor"]))          # "py" is --root's value here
+        self.assertIsNone(mod.py_argv(["doctor", "py"]))
+        self.assertIsNone(mod.py_argv([]))
+
+    def test_test_sh_rejects_odd_ids(self):
+        bash = git_bash()
+        if not bash:
+            self.skipTest("no bash")
+        fake_runtime(self.home, "-r1")
+        fake_venv(self.home)
+        (self.home / "current").write_text("-r1\n", encoding="utf-8")
+        r = subprocess.run([bash, str(REPO / "tools" / "test.sh"), "--which"], capture_output=True, text=True,
+                           encoding="utf-8", env=dict(os.environ, WHYNOT_HOME=str(self.home)))
+        self.assertEqual(norm(r.stdout.strip()), norm(str(plat.env_python(self.home / "venv"))))
 
 
 if __name__ == "__main__":
