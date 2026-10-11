@@ -99,9 +99,19 @@ def cmd_client_db(a):
     out(st)
 
 
+def refuse_stale_window(p: Paths):
+    """A reel cut from a podcast episode is never built from an episode file that changed after selection."""
+    from lib.reels import window_stale
+    msg = window_stale(p)
+    if msg:
+        out({"ok": False, "blocked": msg})
+        raise SystemExit(2)
+
+
 def cmd_preflight(a):
     from lib.media import preflight
     p = P(a)
+    refuse_stale_window(p)
     p.ensure_project()
     rep = preflight(p, main_footage(p, a.footage))
     from lib.common import STATUSES
@@ -223,6 +233,7 @@ def cmd_ref_analyze(a):
 def cmd_plan(a):
     from lib.plan import compile_plan
     p = P(a)
+    refuse_stale_window(p)
     missing = [f for f in SEMANTIC_FILES if not p.p(f).exists()]
     if missing:
         set_status(p, load_status(p)["status"], f"semantic files missing: {missing}")

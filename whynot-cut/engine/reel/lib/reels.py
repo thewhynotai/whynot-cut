@@ -322,6 +322,205 @@ def render_candidates(ep, ids: list[str] | None = None) -> dict:
     return {"ok": not failed, "previews": outs, "failed": failed, "sheet": str(sheet) if sheet else None}
 
 
+# --------------------------------------------------------------------------- Gate 0: selection -> reel projects
+def parse_adjust(items: list[str]) -> dict:
+    """['R03:in=00:12:04.000', 'R03:out=780.5'] -> {'R03': {'in': 724000, 'out': 780500}}."""
+    from .plan import to_ms
+    out = {}
+    for it in items or []:
+        m = re.fullmatch(r"\s*(R\d+)\s*:\s*(in|out)\s*=\s*(.+?)\s*", it or "")
+        if not m:
+            raise SystemExit(f"--adjust {it!r}: expected like R03:in=00:12:04.000 or R03:out=00:13:05")
+        out.setdefault(m.group(1), {})[m.group(2)] = to_ms(m.group(3))
+    return out
+
+
+def slice_wav(src: Path, dst: Path, in_ms: int, out_ms: int) -> Path:
+    """Exact sample slice of a PCM WAV (the episode's 16 kHz mono transcript audio)."""
+    import wave
+    with wave.open(str(src)) as r:
+        sr, ch, sw = r.getframerate(), r.getnchannels(), r.getsampwidth()
+        a = int(round(in_ms * sr / 1000))
+        n = int(round(out_ms * sr / 1000)) - a
+        r.setpos(min(a, r.getnframes()))
+        data = r.readframes(max(0, n))
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(dst), "wb") as w:
+        w.setnchannels(ch)
+        w.setsampwidth(sw)
+        w.setframerate(sr)
+        w.writeframes(data)
+    return dst
+
+
+def slice_transcript(ep, reel, in_ms: int, out_ms: int) -> dict:
+    """The reel's transcript = the episode words inside the window, on the reel clock (0 = in-point), renumbered
+    (episode_word_id kept), flags and corrections kept; then the standard transcript files via finalize()."""
+    from .transcribe import finalize, transcript_verified, words_fingerprint
+    wj, tj = read_json(ep.p("02_transcription/words.json")), read_json(ep.p("02_transcription/transcript.json"))
+    dur = out_ms - in_ms
+    words, seg_of = [], {}
+    for w in wj["words"]:
+        if w["start_ms"] >= in_ms - 50 and w["end_ms"] <= out_ms + 50:
+            nw = dict(w, id=len(words) + 1, episode_word_id=w["id"], start_ms=max(0, w["start_ms"] - in_ms),
+                      end_ms=min(dur, w["end_ms"] - in_ms))
+            words.append(nw)
+            seg_of.setdefault(w.get("segment_id"), []).append(nw)
+    src_segs = {s["id"]: s for s in tj["segments"]}
+    segs = []
+    for sid, ws in seg_of.items():
+        s0 = src_segs.get(sid, {})
+        seg = {"id": len(segs) + 1, "start_ms": ws[0]["start_ms"], "end_ms": ws[-1]["end_ms"],
+               "text": " ".join(w["word"] for w in ws), "avg_logprob": s0.get("avg_logprob", 0.0),
+               "no_speech_prob": s0.get("no_speech_prob", 0.0), "compression_ratio": s0.get("compression_ratio", 1.0),
+               "words": [w["id"] for w in ws], "episode_segment_id": sid}
+        for w in ws:
+            w["segment_id"] = seg["id"]
+        segs.append(seg)
+    meta = {k: v for k, v in tj["meta"].items() if k not in ("chunks", "scripts", "corrections_applied", "corrections_file")}
+    meta.update({"duration_ms": dur, "offset_ms": in_ms, "sliced_from": f"episode {ep.episode_id}",
+                 "episode_transcript": str(ep.p("02_transcription/transcript.json"))})
+    out = reel.p("02_transcription")
+    for f in ("verification.json", "transcript-corrections.json"):
+        (out / f).unlink(missing_ok=True)
+    res = finalize(reel, meta, segs, words)
+    for name in ("transcript", "words"):
+        (out / f"{name}.machine.json").write_bytes((out / f"{name}.json").read_bytes())
+    wav = ep.p("02_transcription/dialogue_16k_mono.wav")
+    if wav.exists():
+        slice_wav(wav, out / "dialogue_16k_mono.wav", in_ms, out_ms)
+    if transcript_verified(ep):
+        write_json(out / "verification.json", {"verified": True, "by": "episode verification", "at": now_iso(),
+                                                "note": f"the episode transcript of {ep.episode_id} was verified",
+                                                "words_sha1": words_fingerprint(reel)})
+    return res
+
+
+def slice_speakers(ep, in_ms: int, out_ms: int) -> dict:
+    """Episode speaker turns inside the window, on the reel clock (ints), plus the people and their positions."""
+    from .plan import to_ms
+    sp = read_json(ep.p("01_analysis/speakers.json"), {}) or {}
+    turns = []
+    for t in sp.get("turns", []):
+        try:
+            a, b = to_ms(t["start"]), to_ms(t["end"])
+        except Exception:  # noqa: BLE001
+            continue
+        a, b = max(a, in_ms), min(b, out_ms)
+        if b > a:
+            turns.append({"start_ms": a - in_ms, "end_ms": b - in_ms, "speaker": t.get("speaker")})
+    return {"method": sp.get("method", "none"), "people": sp.get("people", {}), "turns": turns}
+
+
+def window_stale(paths) -> str | None:
+    """A reel whose episode file changed after selection must not be built from the old window."""
+    from .common import sha1_head, source_range
+    src = source_range(paths)
+    if src.get("kind") != "episode_reel" or not src.get("fingerprint"):
+        return None
+    f = Path(src["footage"])
+    f = f if f.is_absolute() else paths.root / f
+    redo = (f"re-run the episode steps (episode-prep, episode-transcribe, reels-plan) and `reel reels-select --episode "
+            f"{src.get('episode_id')} --pick {src.get('reel_id')} --force`")
+    if not f.exists():
+        return f"the episode file {src['footage']} is gone: {redo}"
+    if sha1_head(f) != src["fingerprint"]:
+        return f"the episode file {src['footage']} changed after this reel was selected: {redo}"
+    return None
+
+
+def select(ep, picks: list[str], adjust: list[str], by: str, note: str = "", confirm_avoid=(), force: bool = False,
+           resync: bool = False) -> dict:
+    """Gate 0. Only the editor (or the lead on the editor's explicit delegation) runs this; a hook blocks subagents.
+    Each pick becomes output/projects/<EP>_<RID>/ with 00_inputs/source.json (the shared range format), the sliced
+    transcript and 16 kHz audio, the speaker turns and the recipe. --resync re-slices the transcripts of the reels
+    already selected (after episode transcript corrections) without changing their windows."""
+    from .common import Paths, load_status, set_status, sha1_head
+    from .episode import episode_file, load_episode, podcast_cfg
+    from .recipes import resolve
+    if by not in ("editor", "delegated"):
+        raise SystemExit("--by must be editor or delegated")
+    info = load_episode(ep)
+    src = episode_file(ep)
+    fp = sha1_head(src)
+    if info.get("fingerprint") and info["fingerprint"] != fp:
+        raise SystemExit(f"the episode file changed since episode-prep: re-run `reel episode-prep --episode {ep.episode_id}`, "
+                         "then transcribe and plan again")
+    rel = src.relative_to(ep.root).as_posix() if src.is_relative_to(ep.root) else str(src)
+    sel_f = ep.p("01_analysis/selection.json")
+    sel = read_json(sel_f, {"history": []}) or {"history": []}
+    out = []
+    if resync:
+        done = sorted({r for h in sel["history"] for r in h.get("picked", [])})
+        for rid in done:
+            reel = Paths(ep.root, f"{ep.episode_id}_{rid}")
+            s = read_json(reel.p("00_inputs/source.json"))
+            if not s:
+                continue
+            slice_transcript(ep, reel, s["in_ms"], s["out_ms"])
+            out.append({"reel_id": reel.video_id, "status": "transcript re-sliced", "in_ms": s["in_ms"], "out_ms": s["out_ms"]})
+        return {"reels": out, "next": "re-run `reel plan` for these reels (their approval became stale if words changed)"}
+    res = fresh_validated(ep)
+    byid = {c["id"]: c for c in res["candidates"]}
+    adj = parse_adjust(adjust)
+    unknown = [p for p in picks + list(adj) if p not in byid]
+    if unknown:
+        raise SystemExit(f"unknown candidate(s) {unknown}; the plan has {list(byid)}")
+    blocked = [p for p in picks if byid[p].get("avoid_hits") and p not in (confirm_avoid or ())]
+    if blocked:
+        raise SystemExit(f"{blocked} mention topics the episode sheet says to avoid "
+                         f"({ {p: byid[p]['avoid_hits'] for p in blocked} }): only with the editor's explicit OK, add "
+                         + " ".join(f"--confirm-avoid {p}" for p in blocked))
+    wj = read_json(ep.p("02_transcription/words.json"))
+    cfg = podcast_cfg()
+    dur_cfg = cfg["reel_duration_s"]
+    intake = read_json(ep.p("00_inputs/intake.json"), {}) or {}
+    for rid in picks:
+        c = byid[rid]
+        in_ms, out_ms = c["in_ms"], c["out_ms"]
+        if "in" in adj.get(rid, {}):
+            in_ms = snap_in(wj["words"], adj[rid]["in"], cfg)
+        if "out" in adj.get(rid, {}):
+            out_ms = snap_out(wj["words"], adj[rid]["out"], cfg, res["duration_ms"])
+        d = (out_ms - in_ms) / 1000
+        if adj.get(rid) and not dur_cfg["hard_min"] <= d <= dur_cfg["hard_max"]:   # the plan's own windows were validated
+            raise SystemExit(f"{rid}: adjusted duration {d:.1f} s is outside {dur_cfg['hard_min']}-{dur_cfg['hard_max']} s")
+        reel = Paths(ep.root, f"{ep.episode_id}_{rid}")
+        old = read_json(reel.p("00_inputs/source.json"))
+        status = "created"
+        if old:
+            if (old.get("in_ms"), old.get("out_ms"), old.get("fingerprint")) == (in_ms, out_ms, fp):
+                out.append({"reel_id": reel.video_id, "status": "unchanged", "in_ms": in_ms, "out_ms": out_ms})
+                continue
+            if not force:
+                raise SystemExit(f"{reel.video_id} already exists with {fmt_ts(old['in_ms'], '.')}–{fmt_ts(old['out_ms'], '.')}; "
+                                 f"the new window {fmt_ts(in_ms, '.')}–{fmt_ts(out_ms, '.')} needs --force (the reel is "
+                                 "re-sliced; its plan and build become stale)")
+            status = "re-sliced"
+        reel.ensure_project()
+        cand = {k: v for k, v in c.items() if k not in ("warnings", "ok")}
+        write_json(reel.p("00_inputs/source.json"), {
+            "footage": rel, "in_ms": in_ms, "out_ms": out_ms, "duration_ms": out_ms - in_ms, "offset_ms": in_ms,
+            "label": f"{ep.episode_id} {rid} {c.get('title', '')}".strip(), "set_at": now_iso(),
+            "kind": "episode_reel", "episode_id": ep.episode_id, "reel_id": rid, "fingerprint": fp,
+            "content_type": c.get("type"), "secondary_type": c.get("secondary_type"), "recipe": resolve(c.get("type", "")),
+            "context_line": c.get("context_line") if c.get("needs_context") else "", "candidate": cand,
+            "intake": intake, "selected_by": by, "selected_at": now_iso(), "note": note})
+        write_json(reel.p("00_inputs/speakers.json"), slice_speakers(ep, in_ms, out_ms))
+        slice_transcript(ep, reel, in_ms, out_ms)
+        st = load_status(reel)
+        if st.get("status") in (None, "NOT_STARTED", "TRANSCRIBED") or status == "re-sliced":
+            set_status(reel, "TRANSCRIBED", f"sliced from episode {ep.episode_id} ({rid}, "
+                                            f"{fmt_ts(in_ms, '.')}–{fmt_ts(out_ms, '.')})", "transcribe")
+        out.append({"reel_id": reel.video_id, "status": status, "in_ms": in_ms, "out_ms": out_ms,
+                    "type": c.get("type"), "project": str(reel.project)})
+    sel["history"].append({"picked": picks, "adjust": adjust or [], "confirm_avoid": list(confirm_avoid or ()),
+                           "by": by, "note": note, "at": now_iso(), "plan_fingerprint": res["fingerprint"]})
+    write_json(sel_f, sel)
+    return {"reels": out, "next": "per reel: reel preflight, audio-clean, story-editor (recipe in 00_inputs/source.json), "
+                                  "plan, previews, preview-video, then ONE combined Gate 1"}
+
+
 def write_reels_plan_md(ep, res: dict) -> Path:
     L = [f"# Reels plan — {ep.episode_id} (Gate 0: the editor picks)", "",
          f"Episode {fmt_ts(res['duration_ms'], '.')} · {len(res['candidates'])} candidates · validated {res.get('generated', '')}", "",

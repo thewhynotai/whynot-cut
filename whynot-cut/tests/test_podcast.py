@@ -395,5 +395,149 @@ class TestReelsPreview(unittest.TestCase):
             render_candidates(self.ep)
 
 
+GUARD = SK / "hooks" / "guard.py"
+
+
+def run_guard(command: str, agent: str | None = None, cwd: str = ".") -> int:
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+    if agent:
+        payload["agent_type"] = agent
+    return subprocess.run([sys.executable, "-B", str(GUARD)], input=json.dumps(payload), capture_output=True,
+                          text=True, encoding="utf-8").returncode
+
+
+class TestReelsSelect(unittest.TestCase):
+    def setUp(self):
+        from lib.episode import EpisodePaths, prep
+        from lib.transcribe import extract_audio, finalize
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root = make_episode_client(self.tmp)
+        # a 20 s fixture episode: the client's profile override allows short reels (exercises the override path too)
+        write_json(self.root / common.CLIENT_PROFILE_REL / "podcast.json", {"reel_duration_s": {"min": 1, "hard_min": 1}})
+        common.set_context(self.root)
+        self.ep = EpisodePaths(self.root, "EP12")
+        prep(self.ep)
+        extract_audio(self.root / "data/Episodes/EP12.mp4", self.ep.p("02_transcription/dialogue_16k_mono.wav"))
+        ws = []
+        for i in range(48):
+            s = i * 400 + (300 if i >= 25 else 0)
+            ws.append({"id": i + 1, "segment_id": 1 if i < 25 else 2, "word": "السياسة" if i == 40 else f"كلمه{i}",
+                       "start_ms": s, "end_ms": s + 360, "probability": 0.9})
+        ws[7]["flagged"] = {"note": "unclear", "suggest": None}
+        segs = [{"id": k + 1, "start_ms": g[0]["start_ms"], "end_ms": g[-1]["end_ms"], "text": " ".join(w["word"] for w in g),
+                 "avg_logprob": -0.2, "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in g]}
+                for k, g in enumerate((ws[:25], ws[25:]))]
+        finalize(self.ep, {"source_video": "x", "backend": "test", "model": "none", "language": "ar",
+                           "language_probability": 1.0, "duration_ms": 20000}, segs, ws)
+        self.words = ws
+        write_json(self.ep.p("01_analysis/speakers.json"), {
+            "method": "inferred", "people": {"host": {"name": "Ahmed", "position": "left"},
+                                             "guest": {"name": "Sara", "position": "right"}},
+            "turns": [{"start": "00:00:00.000", "end": "00:00:05.000", "speaker": "host"},
+                      {"start": "00:00:05.000", "end": "00:00:20.000", "speaker": "guest"}]})
+        write_json(self.ep.p("00_inputs/intake.json"), {"burned_subtitles": False, "layout": {"host": "left", "guest": "right"}})
+        validated_plan(self.ep, [
+            {"id": "R01", "in_ms": 2000, "out_ms": 9000, "duration_ms": 7000, "type": "drama", "secondary_type": None,
+             "title": "Sara's first loss", "total": 8.0, "score": {}, "avoid_hits": [], "needs_context": True,
+             "context_line": "she lost her first company"},
+            {"id": "R02", "in_ms": 12000, "out_ms": 19000, "duration_ms": 7000, "type": "advice", "title": "x",
+             "total": 6.0, "score": {}, "avoid_hits": ["السياسه"]}])
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def select(self, *picks, **kw):
+        from lib.reels import select
+        return select(self.ep, list(picks), kw.pop("adjust", []), kw.pop("by", "editor"), **kw)
+
+    def test_select_creates_reel_project(self):
+        import wave
+        r = self.select("R01")
+        self.assertEqual(r["reels"][0]["reel_id"], "EP12_R01")
+        self.assertEqual(r["reels"][0]["status"], "created")
+        reel = Paths(self.root, "EP12_R01")
+        src = read_json(reel.p("00_inputs/source.json"))
+        self.assertEqual((src["in_ms"], src["out_ms"], src["duration_ms"]), (2000, 9000, 7000))
+        self.assertEqual(src["footage"], "data/Episodes/EP12.mp4")
+        self.assertEqual((src["kind"], src["episode_id"], src["reel_id"], src["content_type"]),
+                         ("episode_reel", "EP12", "R01", "drama"))
+        self.assertEqual(src["recipe"]["pacing"]["min_pause_ms"], 600)
+        self.assertEqual(src["intake"]["layout"]["guest"], "right")
+        self.assertEqual(common.source_range(reel)["in_ms"], 2000)            # the shared range mechanism reads it
+        w = read_json(reel.p("02_transcription/words.json"))["words"]
+        self.assertEqual(w[0]["id"], 1)
+        self.assertEqual(w[0]["start_ms"], 0)                                  # word at 2000 ms -> 0 on the reel clock
+        self.assertEqual(w[0]["episode_word_id"], 6)
+        tj = read_json(reel.p("02_transcription/transcript.json"))
+        self.assertEqual(tj["meta"]["duration_ms"], 7000)
+        self.assertEqual(len(tj["segments"]), 1)
+        with wave.open(str(reel.p("02_transcription/dialogue_16k_mono.wav"))) as wf:
+            self.assertLessEqual(abs(wf.getnframes() - 7000 * 16), 1)
+        sp = read_json(reel.p("00_inputs/speakers.json"))
+        self.assertEqual(sp["turns"][0], {"start_ms": 0, "end_ms": 3000, "speaker": "host"})
+        self.assertEqual(sp["turns"][1]["speaker"], "guest")
+        self.assertEqual(common.load_status(reel)["status"], "TRANSCRIBED")
+        sel = read_json(self.ep.p("01_analysis/selection.json"))
+        self.assertEqual(sel["history"][-1]["picked"], ["R01"])
+        self.assertEqual(sel["history"][-1]["by"], "editor")
+
+    def test_flags_and_verification_carry(self):
+        from lib.transcribe import words_fingerprint
+        self.select("R01")
+        reel = Paths(self.root, "EP12_R01")
+        w = read_json(reel.p("02_transcription/words.json"))["words"]
+        self.assertTrue(any(x.get("flagged") for x in w))
+        write_json(self.ep.p("02_transcription/verification.json"),
+                   {"verified": True, "by": "editor", "words_sha1": words_fingerprint(self.ep)})
+        self.select(resync=True)
+        v = read_json(reel.p("02_transcription/verification.json"))
+        self.assertTrue(v["verified"])
+        self.assertEqual(v["words_sha1"], words_fingerprint(reel))
+
+    def test_reselect_noop_and_force(self):
+        self.select("R01")
+        self.assertEqual(self.select("R01")["reels"][0]["status"], "unchanged")
+        with self.assertRaises(SystemExit):
+            self.select("R01", adjust=["R01:in=00:00:03.000"])
+        r = self.select("R01", adjust=["R01:in=00:00:03.000"], force=True)
+        self.assertEqual(r["reels"][0]["status"], "re-sliced")
+        self.assertLessEqual(abs(r["reels"][0]["in_ms"] - 3000), 400)
+
+    def test_avoid_requires_confirm(self):
+        with self.assertRaises(SystemExit):
+            self.select("R02")
+        self.assertEqual(self.select("R02", confirm_avoid=["R02"])["reels"][0]["status"], "created")
+
+    def test_stale_plan_refused(self):
+        write_json(self.ep.p("01_analysis/reels-plan.json"), {"episode_id": "EP12", "candidates": []})
+        with self.assertRaises(SystemExit):
+            self.select("R01")
+
+    def test_window_plain_clip(self):
+        self.assertEqual(common.source_range(Paths(self.root, "CLIP1")), {})
+
+    def test_changed_episode_refused(self):
+        from lib.reels import window_stale
+        self.select("R01")
+        reel = Paths(self.root, "EP12_R01")
+        self.assertIsNone(window_stale(reel))
+        src = read_json(reel.p("00_inputs/source.json"))
+        src["fingerprint"] = "0" * 40
+        write_json(reel.p("00_inputs/source.json"), src)
+        self.assertIn("reels-select", window_stale(reel))
+        r = subprocess.run([sys.executable, "-B", str(SK / "engine/reel/cli.py"), "--root", str(self.root),
+                            "--video-id", "EP12_R01", "preflight"], capture_output=True, text=True, encoding="utf-8")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("reels-select", r.stdout + r.stderr)
+
+    def test_guard_blocks_subagent_select(self):
+        cmd = "reel reels-select --episode EP12 --pick R01 --by editor"
+        self.assertEqual(run_guard(cmd, "whynot-cut:episode-analyst"), 2)
+        self.assertEqual(run_guard(cmd), 0)
+        self.assertEqual(run_guard('reel --root "X" --episode EP12 reels-select --pick R01 --by editor',
+                                   "whynot-cut:story-editor"), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

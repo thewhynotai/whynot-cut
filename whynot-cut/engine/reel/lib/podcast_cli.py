@@ -17,6 +17,16 @@ ARGS: dict = {
     ],
     "reels-plan": [],
     "reels-preview": [(("--ids",), {"default": None, "help": "e.g. R01,R03 (default: every candidate)"})],
+    "reels-select": [
+        (("--pick",), {"default": "", "help": "the editor's choice, e.g. R01,R03"}),
+        (("--adjust",), {"action": "append", "default": [], "help": "R03:in=00:12:04.000 or R03:out=00:13:05 (repeatable)"}),
+        (("--by",), {"required": True, "choices": ["editor", "delegated"],
+                     "help": "editor = the editor picked in chat; delegated = they told you to choose"}),
+        (("--note",), {"default": "", "help": "the editor's words (required with --by delegated)"}),
+        (("--confirm-avoid",), {"action": "append", "default": [], "help": "a candidate id the editor OKs despite an avoid-topic hit"}),
+        (("--force",), {"action": "store_true", "help": "re-slice a reel whose window changed"}),
+        (("--resync",), {"action": "store_true", "help": "re-slice selected reels' transcripts after episode corrections"}),
+    ],
 }
 
 
@@ -90,6 +100,16 @@ def cmd_reels_preview(a):
     r["plan"] = str(ep.p("01_analysis/reels-plan.md"))
     r["next"] = "VIEW the sheet, then show the editor reels-plan.md + previews and wait for their pick (Gate 0)"
     out(r)
+
+
+def cmd_reels_select(a):
+    from .reels import select
+    picks = [x.strip() for x in a.pick.split(",") if x.strip()]
+    if not picks and not a.resync:
+        raise SystemExit("--pick required (the editor's choice), or --resync")
+    if a.by == "delegated" and not a.note.strip():
+        raise SystemExit("--by delegated needs --note with the editor's own words")
+    out(select(EP(a), picks, a.adjust, a.by, note=a.note, confirm_avoid=a.confirm_avoid, force=a.force, resync=a.resync))
 
 
 def _chunks_missing(ep) -> bool:

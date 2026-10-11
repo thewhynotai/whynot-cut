@@ -23,10 +23,12 @@ import sys
 from pathlib import Path
 
 READ_ONLY_AGENTS = {"medical-reviewer", "claim-checker", "frame-inspector", "graphic-checker",
-                    "segment-proofreader", "qc-reviewer", "intake-inspector", "setup-doctor"}
+                    "segment-proofreader", "qc-reviewer", "intake-inspector", "setup-doctor", "moment-scout"}
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
 QC_FORBIDDEN = {"ppro-build", "approve-plan", "plan", "previews", "audio-clean", "transcribe",
-                "transcript-correct", "client-init", "client-db", "sfx", "premiere", "handoff"}
+                "transcript-correct", "client-init", "client-db", "sfx", "premiere", "handoff",
+                "reels-select", "reels-plan", "episode-transcribe", "publish-check"}
+GLOBAL_VALUE_OPTS = ("--root", "--video-id", "--profile", "--episode")
 MUTATE_ALL = {"rm", "mv", "touch", "chmod", "chown", "truncate", "unlink", "rmdir", "shred", "dot_clean",
               "setfile", "srm"}
 MUTATE_DEST = {"cp", "rsync", "ditto", "ln", "ffmpeg", "tee", "mkdir", "install", "scp", "curl", "wget",
@@ -254,13 +256,16 @@ def check_reel(exe: str, argv: list[str], agent: str | None):
                                                                  for a in argv[1:2]))
     if is_reel:
         sub = next((a for a in argv[1:] if not a.startswith("-") and not a.endswith("cli.py")
-                    and argv[argv.index(a) - 1] not in ("--root", "--video-id", "--profile")), None)
+                    and argv[argv.index(a) - 1] not in GLOBAL_VALUE_OPTS), None)
         if sub in EXTRAS and "--extras" not in argv:
             block(f"`reel {sub}` is an optional After Effects/Photoshop extra. The pipeline is Premiere-only "
                   f"unless the editor explicitly asked for AE/PS; then add --extras.")
         if agent:
             if sub == "approve-plan":
                 block("only the lead editor (main conversation) records plan approval, after the editor approves.")
+            if sub == "reels-select":
+                block("only the lead editor records which reels the editor picked (Gate 0), from the editor's own "
+                      "message. Report the candidates instead.")
             if sub == "settings" and "--init" in argv:
                 block("only the lead editor changes the editor's preferences (e.g. approval mode), when the editor asks.")
             if sub == "verify" and "--record" in argv:
