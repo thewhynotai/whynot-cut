@@ -21,7 +21,7 @@ never redo a task marked done here.
 | Phase | State | Tag | Verified / Not verified / Needs you |
 |---|---|---|---|
 | 0 Baseline, one folder | **passed** | v3.0.0-p0 | Verified: suite 483/4s, validate --strict ✔ ×2, installed 2.2.1 + bridge 3.1.0, one folder, PROGRESS. Needs you: open a new Claude session so 2.2.1 skills load |
-| 1 Ship-blockers | **passed** | v3.0.0-p1 | Verified: suite 725 OK/4s (424 s); validate --strict ×2; compileall; node --check; independent phase review (1 Critical found → fixed, re-reviewed clean); live smoke on PODCAST-TEST + Arabic 2-clip fixture (ids, raw-stem rewrite, plan/previews/preview-video, guard Hugo vs client, writer lease); guard 116–155 ms. Not verified: T1.6 listing in a fresh 3.0 session (needs H11 + install); SessionEnd/`/clear` session-id live check (Phase 3). Needs you: H11 (CLI login) |
+| 1 Ship-blockers | **passed** | v3.0.0-p1 | Verified: suite 725 OK/4s (424 s); validate --strict ×2; compileall; node --check; independent phase review (1 Critical found → fixed, re-reviewed clean); live smoke on PODCAST-TEST + Arabic 2-clip fixture (ids, raw-stem rewrite, plan/previews/preview-video, guard Hugo vs client, writer lease); guard 116–155 ms. Verified later the same day: T1.6 fresh headless session with the 3.0 plugin (`claude -p --plugin-dir`, installed 2.2.1 disabled) lists all 25 whynot-cut skills WITH descriptions, incl. status/story-craft/transcript-craft (evidence `docs/superpowers/evidence/2026-10-11-t1.6-fresh-session-skill-listing.txt`). Not verified: SessionEnd/`/clear` session-id live check (Phase 3). Needs you: — |
 | 2 Engine robustness | | | |
 | 3 Plugin layer | | | |
 | 4 Editor features | | | |
@@ -73,6 +73,12 @@ never redo a task marked done here.
 - Ruling (T1.8): the client lock is a session lease (holder CLAUDE_PID, refreshed per writing command, stale on dead holder/pid reuse or 2 h idle, released by `reel lock --release` or SessionEnd) — the field failure was sessions taking turns for hours — cost: an idle session blocks others up to 2 h unless the editor releases.
 - Ruling (Phase 1 execution): implementers ran in parallel only on disjoint file sets (master plan §6.1), each committing only its own hunks — cost: occasional concurrent-suite noise, no lost work observed.
 
+- Ruling: H11 deferred to Phase 3 T3.7 — Yunus didn't follow the CLI-login step and asked Claude to do it; a sign-in needs his own browser approval, so at T3.7 the executor will open the login ready in the Terminal panel and ask for just the one click; until then work continues without headless checks — cost: T1.6 listing proof and evals wait until then.
+
+- Ruling (speed, Yunus approved "اعمل كده"): three parallel side sessions on disjoint folders — Adobe track [wnc-adobe, local_f9018851] (Phase 6: contract v4, panel-ui, premiere-uxp spike/scaffold), installer track [wnc-installer, local_61a829a1] (Phase 7: installer core/front ends, components.json, Git Bash, uninstall), guide track [wnc-guide, local_c357b152] (Phase 10: guide-ar pipeline + stable chapters); the executor keeps Phase 2→ and owns PROGRESS, gates, tags, engine/hooks/skills; status notes in the shared notes folder STATUS-*.md — cost: higher usage burn; gates for 6/7/10 still run in order after their dependencies.
+
+- Fact (2026-10-11): Yunus connected the "Adobe for creativity" connector (account type `auth`). It is cloud-only (Express, Firefly, Acrobat, Adobe Fonts, Stock) — it does NOT drive the local Premiere/AE timeline, so it doesn't replace the UXP/CEP work. Uses planned: Adobe Fonts activation of IBM Plex Sans Arabic (unblocks the brand-font motion build — needs Yunus's OK because it adds fonts to his CC account); Acrobat `pdf_to_image`/`pdf_properties` as a second QC path for the Arabic guide (Phase 10).
+
 ## Gap log (G70+)
 
 | ID | Symptom | Root cause | Fix |
@@ -101,5 +107,5 @@ Asked once at the start (Egyptian Arabic, 2026-10-11 ~15:50).
 | H7 | Close/reopen Premiere + AE on request; CC signed in; other unsigned panels? | pending | live Adobe checks wait |
 | H8 | Dark logo variant approval | pending | white logo on dark only |
 | H9 | 60–90 min episode test copy | pending | EP02 (35 min) |
-| H11 | Sign the bundled Claude Code CLI in once (`claude` → `/login` in a terminal) so headless checks (`claude -p`, `claude plugin eval`) can run — found 2026-10-11: `Not logged in` | pending | listing proof waits for a new session with 3.0 installed; evals (T3.7) blocked |
+| H11 | Bundled Claude Code CLI login | **done 2026-10-11** (`claude auth status`: loggedIn, claude.ai team, info@thewhynot.ai) | — |
 | H10 | Standard Windows user "WN Test" | pending | Windows Sandbox if available, else documented gap |

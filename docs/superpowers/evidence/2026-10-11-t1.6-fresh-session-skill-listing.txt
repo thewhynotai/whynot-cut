@@ -1,0 +1,26 @@
+whynot-cut:adobe-extras :: After Effects or Photoshop output for a clip edit, only when explicitly asked: "make it in After Effects", "build MOGRTs", "Photoshop cover PSD", «اعملها في أفتر إفكتس». Never unprompted.
+whynot-cut:audio-craft :: Reference for the audio-engineer agent (preloaded). Not for direct use.
+whynot-cut:autopilot :: Edit every new raw clip without naming them: "edit the new videos", "process the inbox", "batch edit", «عدّل الفيديوهات الجديدة». One named clip: /whynot-cut:edit.
+whynot-cut:client-craft :: Reference for the client-researcher agent (preloaded). Not for direct use.
+whynot-cut:edit :: Turn raw talking-head footage into a Premiere Pro project: "edit C0239", "make a reel from this clip", "resume C0239", «مونتاج الفيديو ده», «كمّل المونتاج». Many clips: autopilot.
+whynot-cut:episode-craft :: Reference for the episode-analyst agent (preloaded). Not for direct use.
+whynot-cut:fix-audio :: Audio-only request, no other comments: "clean the audio", "remove the noise", "remove all pauses", «الصوت فيه دوشة», «شيل السكتات». Measured, with before/after proof.
+whynot-cut:handoff :: Write the editor handoff for a finished or paused edit: "write the handoff", "package it for the editor", "summarise what's left", «سلّم الشغل».
+whynot-cut:help :: What WhyNot Cut can do and which command to use: "WhyNot Cut help", "what can it do", "which command edits a video", «ايه أوامر WhyNot Cut». First time: /whynot-cut:start.
+whynot-cut:medical-accuracy :: Reference for the medical-reviewer agent (preloaded). Not for direct use.
+whynot-cut:motion :: Animated motion-graphics video from a podcast window's audio (motion mode): "make a motion video from this part", "animate this podcast part", «اعمل موشن من الجزء ده», «البودكاست صوت بس».
+whynot-cut:motion-craft :: Reference for the motion-designer agent (preloaded). Not for direct use.
+whynot-cut:new-client :: Onboard a client with no WhyNot Cut profile: "new client", "onboard Dr. X", "add a client", «عميل جديد», or when the session shows profile NONE.
+whynot-cut:podcast :: Reels or publish package from a finished podcast episode: "make reels from this episode", "reels plan with timecodes", "YouTube description and chapters", «طلّع ريلز من الحلقة».
+whynot-cut:preferences :: See or change WhyNot Cut settings: "change my settings", "stop asking me to approve", "where are my clients", «إعدادات WhyNot Cut», «كلمني بالعربي».
+whynot-cut:premiere-craft :: Reference for the premiere-builder agent (preloaded). Not for direct use.
+whynot-cut:preview :: Render a watchable MP4 of the planned edit, no Premiere needed: "show me the edit", "make a preview video", "quick MP4", «ورّيني الفيديو», «عايز أشوف المونتاج».
+whynot-cut:publish-craft :: Reference for the publish-writer agent (preloaded). Not for direct use.
+whynot-cut:qc-craft :: Reference for the qc-reviewer agent (preloaded). Not for direct use.
+whynot-cut:revise :: Editor feedback on an existing edit, two or more comments including a non-audio one, or any non-audio comment: "make it punchier", "move the name card", «ملاحظات على الفيديو». Rebuilds, re-verifies.
+whynot-cut:setup :: Install or repair WhyNot Cut on a Mac or PC: "install the engine", "reel: command not found", "Premiere bridge not responding", «المحرك مش متثبت», «نقلت على جهاز جديد». New user: /whynot-cut:start.
+whynot-cut:start :: First steps after installing WhyNot Cut, from empty machine to ready: "get started", "set me up", "I just installed the plugin", «أول مرة أستخدمه», «إزاي أبدأ».
+whynot-cut:status :: Where a video stands, with evidence and no changes: "is it done?", "what's left before I send it?", "can I render now?", «جاهز؟», «خلاص جاهز؟».
+whynot-cut:story-craft :: Reference for the story-editor agent (preloaded). Not for direct use.
+whynot-cut:transcript-craft :: Reference for the transcript-editor agent (preloaded). Not for direct use.
+TOTAL=25
