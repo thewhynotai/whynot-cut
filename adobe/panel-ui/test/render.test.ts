@@ -1,0 +1,219 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { esc, initialUi, render } from "../src/render.ts";
+import { AR, EN, stringsFor } from "../src/i18n.ts";
+import { sampleState } from "../src/mock.ts";
+import type { PanelState } from "../src/source.ts";
+
+const STEP_IDS = ["transcript", "plan", "approve", "build", "frames", "qc", "handoff"];
+const EVIL = `<script>alert("x")</script>`;
+const SCENARIOS = ["showcase", "approval", "building", "qc", "idle"] as const;
+
+function evilState(): PanelState {
+  const s = sampleState("en", "showcase");
+  s.client = EVIL;
+  s.item = EVIL;
+  s.editor_name = EVIL;
+  s.connection.host.detail = EVIL;
+  s.context = { project_path: `C:\\"><img src=x onerror=1>\\p.prproj`, sequence_name: EVIL, folder: EVIL, out_dir: EVIL, review_mp4: EVIL };
+  if (s.approval) {
+    s.approval.summary = EVIL;
+    s.approval.preview_mp4 = EVIL;
+    s.approval.fingerprint = `"${EVIL}`;
+    for (const f of s.approval.flagged) {
+      f.text = EVIL;
+      f.tc = EVIL;
+    }
+  }
+  for (const q of s.qc) {
+    q.label = EVIL;
+    q.tc = EVIL;
+    q.file = EVIL;
+    q.thumb = `javascript:${EVIL}`;
+  }
+  for (const l of s.log) {
+    l.text = EVIL;
+    l.ts = EVIL;
+  }
+  for (const st of s.pipeline) st.request_id = EVIL;
+  s.pipeline[0]!.state = `done" onmouseover="x` as never;
+  return s;
+}
+
+test("esc escapes the five HTML-significant characters", () => {
+  assert.equal(esc(`<&>"'`), "&lt;&amp;&gt;&quot;&#39;");
+  assert.equal(esc(5 as unknown as string), "5");
+  assert.equal(esc(null as unknown as string), "");
+});
+
+test("every dynamic value is escaped: an injected <script> never reaches the HTML", () => {
+  const ui = initialUi();
+  ui.logOpen = true;
+  ui.confirmRebuild = true;
+  ui.notice = { kind: "error", text: EVIL };
+  ui.changeText = EVIL;
+  ui.editorName = EVIL;
+  for (const lang of ["en", "ar"] as const) {
+    const s = evilState();
+    s.language = lang;
+    const html = render(s, stringsFor(lang), ui);
+    assert.ok(!html.includes("<script"), `${lang}: raw <script in output`);
+    assert.ok(!/<img[^>]*onerror/i.test(html), `${lang}: attribute breakout`);
+    assert.ok(html.includes("&lt;script&gt;"), `${lang}: escaped form missing`);
+    assert.ok(!/javascript:/i.test(html), `${lang}: javascript: URL kept`);
+    assert.ok(!html.includes("onmouseover"), `${lang}: step state reached a class attribute`);
+  }
+});
+
+test('paths, commands and timecodes sit inside <bdi dir="ltr">', () => {
+  const s = sampleState("ar", "showcase");
+  s.connection.engine = "offline";
+  const html = render(s, AR, { ...initialUi(), logOpen: true });
+  const inBdi = (txt: string) => assert.ok(html.includes(`<bdi dir="ltr">${esc(txt)}</bdi>`), `not isolated: ${txt}`);
+  inBdi(s.context.project_path as string);
+  inBdi(s.approval!.flagged[0]!.tc);
+  inBdi(s.qc[0]!.tc);
+  inBdi("reel doctor");
+  inBdi(s.log[0]!.text);
+});
+
+test("AR render carries dir=rtl lang=ar on the container; EN carries ltr/en", () => {
+  const ar = render(sampleState("ar", "showcase"), AR, initialUi());
+  assert.match(ar, /^<div class="twn-panel twn-rtl" dir="rtl" lang="ar"/);
+  const en = render(sampleState("en", "showcase"), EN, initialUi());
+  assert.match(en, /^<div class="twn-panel twn-ltr" dir="ltr" lang="en"/);
+  assert.ok(!en.includes('dir="rtl"'));
+  assert.ok(!/sp-theme/.test(ar), "RTL must never go through sp-theme");
+});
+
+test('"Claude Code" never appears in any rendered state; "Powered by Claude" does', () => {
+  for (const lang of ["en", "ar"] as const) {
+    for (const scenario of SCENARIOS) {
+      const html = render(sampleState(lang, scenario), stringsFor(lang), { ...initialUi(), logOpen: true, confirmRebuild: true });
+      assert.ok(!/claude\s*code/i.test(html), `${lang}/${scenario}`);
+      assert.ok(html.includes("Powered by Claude"), `${lang}/${scenario}`);
+      assert.ok(html.includes("WhyNot Cut"));
+    }
+  }
+});
+
+test("the pipeline has exactly the 7 steps in order", () => {
+  const html = render(sampleState("en", "showcase"), EN, initialUi());
+  const ids = [...html.matchAll(/data-step="([a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(ids, STEP_IDS);
+});
+
+test("render does not trust a short pipeline: always the 7 steps", () => {
+  const s = sampleState("en", "idle");
+  s.pipeline = [];
+  const ids = [...render(s, EN, initialUi()).matchAll(/data-step="([a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(ids, STEP_IDS);
+});
+
+test("QC tiles carry data-t and a verdict class; Re-export only on pending / media_pending", () => {
+  const s = sampleState("en", "showcase");
+  const html = render(s, EN, initialUi());
+  const tiles = [...html.matchAll(/<div class="qc-tile qc-(\w+)" data-t="([\d.]+)"/g)];
+  assert.equal(tiles.length, s.qc.length);
+  assert.deepEqual(new Set(tiles.map((m) => m[1])), new Set(["pass", "fail", "pending", "media_pending"]));
+  const reexports = [...html.matchAll(/data-action="reexport" data-t="([\d.]+)"/g)].map((m) => Number(m[1]));
+  const expected = s.qc.filter((q) => q.verdict === "pending" || q.verdict === "media_pending").map((q) => q.t_s);
+  assert.deepEqual(reexports, expected);
+  assert.ok(/data-action="seek" data-t="[\d.]+"/.test(html));
+});
+
+test("approval inbox: Approve carries the fingerprint, both flagged items show, Request changes is disabled until text", () => {
+  const s = sampleState("en", "approval");
+  assert.equal(s.approval!.flagged.length, 2);
+  let html = render(s, EN, initialUi());
+  assert.ok(html.includes(`data-action="approve"`));
+  assert.ok(html.includes(`data-fingerprint="${s.approval!.fingerprint}"`));
+  assert.equal((html.match(/class="flag flag-/g) ?? []).length, 2);
+  assert.match(html, /data-action="request-changes"[^>]*disabled/);
+  html = render(s, EN, { ...initialUi(), changeText: "Shorten the intro" });
+  assert.ok(!/data-action="request-changes"[^>]*disabled/.test(html));
+  html = render(s, EN, { ...initialUi(), changeText: "   " });
+  assert.match(html, /data-action="request-changes"[^>]*disabled/);
+});
+
+test("no approval pending: the inbox says so and shows no Approve button", () => {
+  const html = render(sampleState("en", "idle"), EN, initialUi());
+  assert.ok(!html.includes('data-action="approve"'));
+  assert.ok(html.includes(EN["approval.empty"]));
+});
+
+test("without an editor name Approve is disabled and a name field is shown", () => {
+  const s = sampleState("en", "approval");
+  s.editor_name = "";
+  const html = render(s, EN, initialUi());
+  assert.match(html, /data-action="approve"[^>]*disabled/);
+  assert.ok(html.includes('data-field="editor_name"'));
+  const named = render(s, EN, { ...initialUi(), editorName: "Layla" });
+  assert.ok(!/data-action="approve"[^>]*disabled/.test(named));
+});
+
+test("log drawer is collapsed by default and opens from ui state", () => {
+  const s = sampleState("en", "showcase");
+  const closed = render(s, EN, initialUi());
+  assert.ok(closed.includes('data-action="toggle-log"'));
+  assert.ok(!closed.includes('class="log-lines"'));
+  const open = render(s, EN, { ...initialUi(), logOpen: true });
+  assert.ok(open.includes('class="log-lines"'));
+});
+
+test("Rebuild shows the in-panel confirm with the edited-project warning and backup note (no browser confirm)", () => {
+  const s = sampleState("en", "qc");
+  const before = render(s, EN, initialUi());
+  assert.ok(before.includes('data-action="rebuild"'));
+  assert.ok(!before.includes('data-action="rebuild-confirm"'));
+  const html = render(s, EN, { ...initialUi(), confirmRebuild: true });
+  assert.ok(html.includes('data-action="rebuild-confirm"'));
+  assert.ok(html.includes('data-action="rebuild-cancel"'));
+  assert.ok(html.includes(esc(EN["rebuild.warning"])));
+  assert.ok(html.includes(esc(EN["rebuild.backup"])));
+});
+
+test("the build step shows progress, elapsed and Cancel; idle has no Cancel", () => {
+  const html = render(sampleState("en", "building"), EN, initialUi());
+  assert.match(html, /class="progress-fill" style="width:\d+%"/);
+  assert.ok(html.includes('data-action="cancel"'));
+  const idle = render(sampleState("en", "idle"), EN, initialUi());
+  assert.ok(!idle.includes('data-action="cancel"'));
+});
+
+test("pills: Engine / Claude / Host, with state classes", () => {
+  const html = render(sampleState("en", "showcase"), EN, initialUi());
+  for (const k of ["engine", "claude", "host"]) assert.ok(html.includes(`data-pill="${k}"`));
+  const off = sampleState("en", "idle");
+  off.connection.engine = "offline";
+  assert.ok(render(off, EN, initialUi()).includes('class="pill pill-offline" data-pill="engine"'));
+});
+
+test("flexbox only: the shipped CSS has no grid, sticky, :has() or @font-face", () => {
+  for (const f of ["../styles/tokens.css", "../styles/panel.css"]) {
+    const css = readFileSync(new URL(f, import.meta.url), "utf8");
+    assert.ok(!/display\s*:\s*(inline-)?grid|grid-template|position\s*:\s*sticky|:has\(|@font-face/.test(css), f);
+  }
+});
+
+test("tokens.css carries Appendix D verbatim plus --twn-focus", () => {
+  const css = readFileSync(new URL("../styles/tokens.css", import.meta.url), "utf8").replace(/\s+/g, "");
+  for (const t of [
+    "--twn-bg:#161616", "--twn-surface:#1F1F1F", "--twn-surface-2:#2A2A2A", "--twn-border:rgba(255,255,255,.14)",
+    "--twn-text:#FFF", "--twn-text-muted:#B3B3B3", "--twn-primary:#5400FB", "--twn-primary-hover:#6A1FFF",
+    "--twn-primary-text:#9D6BFF", "--twn-accent:#D95C9B", "--twn-deep:#390796",
+    "--twn-gradient:linear-gradient(90deg,#D95C9B0%,#5400FB100%)", "--twn-ok:#3DD68C", "--twn-warn:#FFB020", "--twn-error:#FF5C5C",
+    '--twn-font-display:"Syne","Inter",sans-serif', '--twn-font-ui:"Inter",system-ui,sans-serif',
+    '--twn-font-ar:"IBMPlexSansArabic","NotoSansArabic",sans-serif', "--twn-radius:8px", "--twn-focus:0002px#9D6BFF",
+  ]) {
+    assert.ok(css.includes(t), `missing ${t}`);
+  }
+});
+
+test("every selector class the renderer emits for QC verdicts and pills exists in panel.css", () => {
+  const css = readFileSync(new URL("../styles/panel.css", import.meta.url), "utf8");
+  for (const c of ["qc-pass", "qc-fail", "qc-pending", "qc-media_pending", "pill-ok", "pill-offline", "pill-warn", "progress-fill", "twn-rtl"]) {
+    assert.ok(css.includes(`.${c}`), `panel.css lacks .${c}`);
+  }
+});

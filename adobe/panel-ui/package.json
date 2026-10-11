@@ -1,1 +1,19 @@
-{"name":"@whynot-cut/panel-ui","private":true,"version":"0.0.0"}
+{
+  "name": "@whynot-cut/panel-ui",
+  "private": true,
+  "version": "0.0.0",
+  "description": "WhyNot Cut shared panel UI (EN/AR, RTL, brand tokens). Compiled into the Premiere UXP plugin and the After Effects CEP panel.",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test \"test/*.test.ts\"",
+    "dev:build": "node scripts/dev-build.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

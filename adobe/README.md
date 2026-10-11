@@ -3,7 +3,7 @@
 | Folder | What | Status |
 |---|---|---|
 | `premiere-uxp/` | Premiere Pro UXP: the **spike** plugin (measures which UXP APIs work) and, later, the WhyNot Cut panel plugin | spike: Task 4a; panel: 4b |
-| `panel-ui/` | Shared panel UI (Spectrum-free, brand tokens) hosted by the Premiere plugin and later After Effects | Task 3 |
+| `panel-ui/` | Shared panel UI (Spectrum-free, brand tokens) hosted by the Premiere plugin and later After Effects | built (T6.5); mounted by the plugin in 4b |
 
 Node v26 / npm 11. Everything is TypeScript, bundled with esbuild, tested with `node --test` (Node runs `.ts` natively).
 
@@ -72,3 +72,35 @@ Bump `version` in `spike/manifest.json` (and `SPIKE_VERSION` in `spike/src/spike
 `premiere-uxp/icons/{dark,light}/icon-{23,46,24,48}.png` (+ `@2x` siblings), generated once from `brand/logo.png` by
 `premiere-uxp/scripts/make_icons.py` (engine venv Pillow: `~/.whynot-cut/venv/Scripts/python.exe adobe/premiere-uxp/scripts/make_icons.py`).
 Panel chrome: the open "TWN" mark alone (white on dark, #1C0E47 on light). Plugin list: gradient tile #D95C9B -> #5400FB with the white mark.
+
+## panel-ui (`panel-ui/`)
+
+The shared WhyNot Cut panel: TypeScript + two CSS files, no UI framework. Premiere UXP (4b) and the After Effects CEP panel
+compile it in; each shell passes a `PanelHost` adapter and a `PanelDataSource` (the engine daemon later, `MockSource` now).
+
+```
+cd adobe
+npm test -w panel-ui          # node --test (strings, escaping, bdi, RTL, QC tiles, mount flows, schema conformance)
+npm run check -w panel-ui     # tsc --noEmit
+npm run dev:build -w panel-ui # -> panel-ui/dev/out/ (gitignored)
+```
+
+Open the dev harness over http (a `file://` page works too in most browsers):
+`cd panel-ui/dev/out && python -m http.server 8765`, then `http://127.0.0.1:8765/index.html`. Query string:
+`?lang=ar&w=340&scenario=showcase|approval|building|qc|idle&offline=1`. The toolbar has EN/AR, width 280/340/480, a state picker,
+"Simulate build progress" and "Engine offline".
+
+| File | What |
+|---|---|
+| `src/contract.ts` | v4 types; `PROTOCOL` and the action list come from `whynot-cut/engine/reel/contract/protocol.json` (a test and a compile-time check keep them equal) |
+| `src/source.ts` | `PanelState`, `PanelDataSource` (what the daemon will implement) |
+| `src/mock.ts` | `MockSource` + `sampleState()`: PODCAST-TEST (EN) and an Arabic client-name/path variant |
+| `src/render.ts` | `render(state, strings, ui)` -> HTML string; `esc()`; every dynamic value escaped; commands/paths/timecodes in `<bdi dir="ltr">` |
+| `src/mount.ts` | `mount(root, source, host)`: renders, subscribes, event delegation; the host-only things go through `src/host.ts` |
+| `src/actions.ts` | the host requests the buttons send (checked against the v4 action schemas in tests) |
+| `src/i18n.ts` | EN + AR tables (AR is typed against EN's keys) |
+| `src/monogram.ts` | header monogram = `premiere-uxp/icons/dark/icon-48.png` inlined as a data URI (a test fails on drift) |
+| `styles/tokens.css`, `styles/panel.css` | Appendix D tokens + `--twn-focus`; flexbox only, no web-font loading, RTL by `direction` on `.twn-rtl` |
+
+Shell contract: put `tokens.css` then `panel.css` on the page, give `mount()` an element (`asMountRoot(el)`), a data source and a
+`PanelHost { setPlayerPosition, openInSourceMonitor, revealPath, copyText }`. The panel never touches a host API itself.
