@@ -187,6 +187,18 @@
   pointer creates is not taken for the engine. The pointer's temp file is removed when the final rename fails.
 - One Python phrase in the docs, skills and agents: "Python 3.12 (installed by WhyNot Cut)" replaces "3.10–3.12" advice
   (the engine's own minimum-version checks are unchanged).
+- Guard, Phase 1 review minors. A listing that is fed to a delete is narrowed only by a name/path/regex/newer predicate
+  or a `-Filter`/`-Include` that matches none of the client's own files (`-name '*.tmp'` narrows; `-name '*.mp4'`,
+  `-name '*'`, `-Filter *` do not), by a grep or Where-Object stage, or by `-File` without `-Recurse`; `-type`,
+  `-maxdepth`/`-mindepth`, `-empty`, `-Directory`, `-Exclude`, `head`/`tail` no longer do, and a recursive listing
+  (`find`, `gci -Recurse`) of the client folder counts as listing its sources. `find . -name '*.tmp' -delete` /
+  `-exec rm {} +` follow the same rule as the `| xargs rm` form (allowed when narrowed). A .NET `Delete`/`Move` with an
+  unknown `$base` and a multi-segment source literal (`Join-Path $root 'data/Raw/x.mp4'`) is blocked.
+  `rsync --remove-sent-files` is treated like `--remove-source-files`. `-Filter`/`-Include`/`-Exclude` values are not
+  paths on any cmdlet (`Remove-Item output -Filter *data* -Recurse` is allowed). The writer-lock rule applies the
+  file-tool branch to Write/Edit/MultiEdit/NotebookEdit only (a subagent may Read the lock), ignores `2>`, `2>&1` and
+  `>&` redirects that do not point at the lock, counts `sc ac mi ni ri py sh` only as a command's first word, and also
+  blocks `find … -name .whynot-lock -delete` and globs that match the lock (`rm output/.whynot-l*`).
 
 ### Migration
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the

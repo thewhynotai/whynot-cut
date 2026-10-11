@@ -35,6 +35,7 @@ Limits (a guardrail against mistakes, not a sandbox; it errs on the side of allo
 from __future__ import annotations
 
 import base64
+import fnmatch
 import glob
 import json
 import os
@@ -306,42 +307,160 @@ def first_source(tokens: list[str], cwd: Path) -> tuple[str, str] | None:
 
 FIND_FILTERS = {"-name", "-iname", "-path", "-ipath", "-regex", "-iregex", "-wholename", "-iwholename", "-lname",
                 "-ilname", "-type", "-newer", "-size", "-mtime", "-mmin", "-user", "-group", "-perm", "-maxdepth",
-                "-mindepth", "-empty"}
+                "-mindepth", "-empty"}                       # their values are not paths
 PS_FILTERS = {"-filter", "-include", "-exclude", "-file", "-directory", "-attributes", "-hidden"}
 FILTER_STAGES = {"grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sls", "where-object", "where", "?",
                  "awk", "sed", "head", "tail", "select-object", "select"}
+# what narrows a listing (T11): a name/path/regex/newer predicate or a -Filter/-Include that matches none of the
+# client's own files (so `-name '*.tmp'` narrows, `-name '*.mp4'`, `-name '*'`, `-Filter *` do not), -File without
+# recursion, a grep or Where-Object stage. Depth, type, -empty, -Directory, -Exclude, head/tail/select do not.
+FIND_NARROW = {"-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-newer"}
+NARROW_STAGES = {"grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sls", "where-object", "where", "?"}
+SOURCE_SCAN_MAX = 5000                  # entries of a client's assets/ + data/ compared with a filter, else trust it
 
 
-def stage_paths(argv: list[str]) -> tuple[list[str], bool]:
+def find_starts(argv: list[str]) -> list[str]:
+    """`find` start paths: the words before the first expression token."""
+    starts = []
+    for a in argv[1:]:
+        if a.startswith(("-", "(", "!")) and a not in ("-H", "-L", "-P"):
+            break
+        if not a.startswith("-"):
+            starts.append(a)
+    return starts
+
+
+@lru_cache(maxsize=None)
+def _source_entries(root: str) -> tuple[tuple[str, ...], ...] | None:
+    """(relative posix path, name) of the client's marker and every folder and file under its assets/ and data/;
+    None when there are more than SOURCE_SCAN_MAX (too many to compare quickly: the filter is trusted)."""
+    r = Path(root)
+    out = [(client_marker.MARKER, client_marker.MARKER)] if (r / client_marker.MARKER).exists() else []
+    try:
+        subs = [c for c in r.iterdir() if c.is_dir() and c.name.lower() in ("assets", "data")]
+    except OSError:
+        return tuple(out)
+    for sub in subs:
+        out.append((sub.name, sub.name))
+        for dirpath, dirs, files in os.walk(sub):
+            rel = Path(dirpath).relative_to(r).as_posix()
+            for n in dirs + files:
+                out.append((f"{rel}/{n}", n))
+            if len(out) > SOURCE_SCAN_MAX:
+                return None
+    return tuple(out)
+
+
+def _clients_at(p: Path) -> list[Path]:
+    """The client folders a listing that starts at p reaches: p itself, or the clients directly in it."""
+    try:
+        p = loose_resolve(p)
+        if not p.is_dir():
+            return []
+        if client_marker.has_layout(p) and is_client(p):
+            return [p]
+        return [c for i, c in enumerate(p.iterdir()) if i <= 500 and c.is_dir() and client_marker.has_layout(c)
+                and is_client(c)]
+    except OSError:
+        return []
+
+
+def filter_spares_sources(opt: str, pattern: str, start: str, at: Path) -> bool:
+    """True when the predicate `opt pattern` (find -name/-path/-regex..., Get-ChildItem -Filter/-Include) matches
+    none of the client's own entries reached from `start` (relative to at) -- it narrows the listing away from them."""
+    pattern = pattern.strip("'\"")
+    if opt == "-newer":
+        return True                                     # a time filter: cannot be judged here
+    base = Path(native(expand(start.strip("'\""), at))).expanduser()
+    base = base if base.is_absolute() else at / base
+    for root in _clients_at(base):
+        entries = _source_entries(str(root))
+        if entries is None:
+            continue
+        prefix = start.strip("'\"").rstrip("/\\") or "."
+        if loose_resolve(base) != root:                 # the start holds the client: find prints <start>/<client>/...
+            prefix = f"{prefix}/{root.name}"
+        for rel, name in entries:
+            path = f"{prefix}/{rel}"
+            try:
+                if opt in ("-name", "-filter", "-include", "-iname"):     # Windows/macOS names ignore case
+                    hit = fnmatch.fnmatchcase(name.lower(), pattern.lower())
+                elif opt in ("-path", "-wholename"):
+                    hit = fnmatch.fnmatchcase(path, pattern)
+                elif opt in ("-ipath", "-iwholename"):
+                    hit = fnmatch.fnmatchcase(path.lower(), pattern.lower())
+                else:                                   # -regex / -iregex match the whole path
+                    hit = re.fullmatch(pattern, path, re.I if opt == "-iregex" else 0) is not None
+            except re.error:
+                return True
+            if hit:
+                return False
+    return True
+
+
+def stage_narrowed(argv: list[str], preds: list[tuple[str, str]], starts: list[str], at: Path | None) -> bool:
+    """A listing narrowed by its predicates: one (all, with find's -o) of them spares every client entry it reaches."""
+    if not preds:
+        return False
+    if at is None:
+        return True
+    spare = [all(filter_spares_sources(o, v, s, at) for s in (starts or ["."])) for o, v in preds]
+    return all(spare) if any(a in ("-o", "-or") for a in argv) else any(spare)
+
+
+def stage_paths(argv: list[str], at: Path | None = None) -> tuple[list[str], bool]:
     """(the words of a pipeline stage that name paths, narrowed?) -- filter values (-Filter *data*, find -name
-    'assets*', grep patterns, Where-Object expressions) are not paths; a filter stage or predicate narrows the list."""
+    'assets*', grep patterns, Where-Object expressions) are not paths; only a narrowing stage or predicate narrows
+    the list (see FIND_NARROW; `at` = the stage's working folder, to compare the filters with the client's files)."""
     e = norm_exe(argv[0])
     args = argv[1:] if not argv[0].startswith("$") else argv
     if e in FILTER_STAGES:
         if e in ("grep", "egrep", "fgrep", "rg", "findstr"):
             pos = [a for a in args if not a.startswith("-")]
             return pos[1:], True                # the first word is the pattern
-        return [], True
-    opts = FIND_FILTERS if e in ("find", "fd") else PS_FILTERS if e in ("gci", "get-childitem", "dir", "ls") else set()
-    out, narrowed, skip = [], False, False
+        return [], e in NARROW_STAGES
+    finder = e in ("find", "fd")
+    opts = FIND_FILTERS if finder else PS_FILTERS if e in ("gci", "get-childitem", "dir", "ls") else set()
+    out, preds, skip, files_only = [], [], None, False
     for a in args:
         if skip:
-            skip = False
+            if skip in FIND_NARROW if finder else skip in ("-filter", "-include"):
+                preds.append((skip, a))
+            skip = None
             continue
-        if a.lower() in opts:
-            narrowed = True
-            skip = a.lower() not in ("-file", "-directory", "-hidden", "-empty")
+        low = a.lower()
+        if low in opts:
+            files_only = files_only or (not finder and low == "-file")
+            skip = low if low not in ("-file", "-directory", "-hidden", "-empty") else None
             continue
         out.append(a)
+    starts = find_starts(argv) if finder else [a for a in out if not a.startswith("-") and
+                                               a.lower() not in PS_PATH_PARAMS]
+    narrowed = (files_only and not lists_tree(argv)) or stage_narrowed(argv, preds, starts, at)
     return out, narrowed
+
+
+def lists_tree(argv: list[str]) -> bool:
+    """A listing stage that descends into folders: find/fd (unless -maxdepth 0|1), Get-ChildItem -Recurse/-Depth,
+    ls -R. Fed to a delete, such a list names every file under a client folder it starts from."""
+    e = norm_exe(argv[0])
+    low = [a.lower() for a in argv[1:]]
+    if e in ("find", "fd"):
+        return not any(a in ("-maxdepth", "--max-depth", "-d") and i + 1 < len(low) and low[i + 1] in ("0", "1")
+                       for i, a in enumerate(low))
+    if e in ("gci", "get-childitem", "dir", "ls"):                # -r / -rec... (PowerShell), -R / -lR (ls)
+        return any(len(a) > 1 and ("-recurse".startswith(a) or a == "-depth") for a in low) or \
+            any(re.fullmatch(r"-[a-zA-Z]*R[a-zA-Z]*", a) for a in argv[1:])
+    return False
 
 
 def pipe_source(stages: list[tuple[list[str], Path]], cwd: Path, recursive: bool = False) -> tuple[str, str] | None:
     """A client source named by an earlier stage of the pipeline (a read), or a working directory that is one.
     recursive=True (the consumer deletes/moves whole trees): also a listed folder that holds a client's sources
     (`Get-ChildItem | Remove-Item -Recurse`, `ls | xargs rm -rf` in the client folder)."""
-    views = [(argv, at) + stage_paths(argv) for argv, at in stages]
-    recursive = recursive and not any(v[3] for v in views)       # `find . -name '*.tmp' | xargs rm -rf` is fine
+    views = [(argv, at) + stage_paths(argv, at) for argv, at in stages]
+    recursive = (recursive or any(lists_tree(argv) for argv, _ in stages)) and \
+        not any(v[3] for v in views)                             # `find . -name '*.tmp' | xargs rm -rf` is fine
     for argv, at, args, _ in views:
         for a in args:
             hit = protected(a, at, writing=False, recursive=recursive)
@@ -516,9 +635,11 @@ def split_args(inner: str) -> list[str]:
     return args
 
 
-def arg_paths(arg: str) -> list[str]:
+def arg_paths(arg: str, destructive: bool = False) -> list[str]:
     """Paths one .NET argument may name: a literal; for (Join-Path $PWD 'a' 'b') / [IO.Path]::Combine('a','b') / 'a' +
-    'b' the joined literals; every literal on its own too; a $variable (checked for taint)."""
+    'b' the joined literals; every literal on its own too; a $variable (checked for taint). destructive (Delete, Move,
+    Replace) with an unknown $base: also a literal that is a path of several segments ('data/Raw/x.mp4'), read from
+    the working folder (T11); single names (Combine($out, 'data', 'x.json')) stay the base's."""
     lits = [b for _, b in re.findall(r"(['\"])(.*?)\1", arg)]
     if len(lits) == 1 and re.fullmatch(r"(['\"]).*\1", arg):
         return lits
@@ -526,7 +647,8 @@ def arg_paths(arg: str) -> list[str]:
     if m or (lits and "+" in arg):               # a joined path: judge the whole path, not its pieces
         first = (m.group(1) or m.group(2) or "") if m else arg.lstrip("( ").split("+")[0].strip()
         if first.startswith("$") and not re.match(r"^\$(pwd\b|\{pwd\}|\(\s*(pwd|get-location)\s*\))", first, re.I):
-            return [first]                       # an unknown base: only a tainted variable counts
+            # an unknown base: only a tainted variable counts, or (delete/move) a multi-segment source literal
+            return [first] + ([x for x in lits if re.search(r"[\\/]", x.strip("\\/"))] if destructive else [])
         return ["/".join(lits) if m else "".join(lits)]
     out = list(lits)
     if arg.lstrip("(").startswith("$"):
@@ -547,7 +669,8 @@ def dotnet_writes(text: str) -> list[list[str]]:
             depth += {"(": 1, ")": -1}.get(text[j], 0)
             j += 1
         args = split_args(text[m.end():j - 1])
-        paths = [x for i in DOTNET_PATH_ARGS.get(meth, (0,)) if i < len(args) for x in arg_paths(args[i])]
+        paths = [x for i in DOTNET_PATH_ARGS.get(meth, (0,)) if i < len(args)
+                 for x in arg_paths(args[i], meth in ("delete", "move", "replace"))]
         out.append(paths or [""])
     return out
 
@@ -883,7 +1006,7 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
             hit = protected(a, cwd, recursive=tree and i != last)
             if hit:
                 block(f"`{exe}` on the client's source folder ({hit}) is not allowed — assets/ and data/ are read-only.")
-    if exe == "rsync" and any(a.startswith("--remove-source-files") for a in argv[1:]):
+    if exe == "rsync" and any(a.startswith(("--remove-source-files", "--remove-sent-files")) for a in argv[1:]):
         for a in [a for a in argv[1:] if not a.startswith("-")][:-1]:          # the sources are moved away
             hit = protected(a, cwd, recursive=True)
             if hit:
@@ -929,16 +1052,14 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
                 block(f"`{exe}` would write into the client's source folder ({dest}). Write to <client>/output/ instead.")
     if exe == "find":
         # start paths come before the first expression token; -delete or -exec rm/mv/... mutate everything found
-        starts = []
-        for a in argv[1:]:
-            if a.startswith(("-", "(", "!")) and a not in ("-H", "-L", "-P"):
-                break
-            if not a.startswith("-"):
-                starts.append(a)
+        starts = find_starts(argv)
         execs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a in ("-exec", "-execdir", "-ok", "-okdir")]
         if "-delete" in argv or any(norm_exe(e) in MUTATE_ALL for e in execs):
+            # as `find ... | xargs rm`: a predicate that spares the client's files narrows it (T11)
+            preds = [(a.lower(), argv[i + 1]) for i, a in enumerate(argv[:-1]) if a.lower() in FIND_NARROW]
+            narrowed = stage_narrowed(argv, preds, starts, cwd)
             for a in starts or ["."]:
-                hit = protected(a, cwd, recursive=True)
+                hit = protected(a, cwd, recursive=not narrowed)
                 if hit:
                     block(f"`find` that deletes or changes files in the client's source folder ({hit}) is not allowed.")
         for i, a in enumerate(argv[:-1]):
@@ -1125,6 +1246,21 @@ def ps_mutates_inputs(argv: list[str]) -> bool:
     return name in PS_PIPE_MUTATE or bool(_PS_METHOD_WRITE.search(text)) or bool(dotnet_writes(text))
 
 
+def strip_filter_values(args: list[str]) -> list[str]:
+    """-Filter/-Include/-Exclude and their values (patterns such as *data*, not paths) dropped (T11)."""
+    out, skip = [], False
+    for a in args:
+        low = a.lower()
+        if skip:
+            skip = False
+            continue
+        if len(low) > 3 and any(p.startswith(low) for p in ("-filter", "-include", "-exclude")):
+            skip = True
+            continue
+        out.append(a)
+    return out
+
+
 def check_powershell(cmd: str, cwd: Path, agent: str | None):
     for body in substitutions(cmd, backticks=False):
         check_powershell(body, cwd, agent)
@@ -1208,7 +1344,7 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
                 hit = protected(argv[i + 1], cwd)
                 if hit:
                     block(f"writing into the client's source folder ({hit}) is not allowed. Outputs go to <client>/output/.")
-        args = [a for a in argv[1:] if a != ">"]
+        args = strip_filter_values([a for a in argv[1:] if a != ">"])
         if adobe_pref_change([name] + args, reg_loc):
             block("Adobe preferences (PlayerDebugMode) are the editor's to change. Give them the command to run themselves.")
         if name in ("invoke-expression", "iex"):
@@ -1261,10 +1397,35 @@ def heartbeat():
 
 
 # a shell command naming output/.whynot-lock that could change it (subagents only read it; `reel lock --status`)
-LOCK_WRITE = re.compile(r">|\b(rm|del|erase|rd|rmdir|unlink|mv|move|ren|rename|cp|copy|touch|truncate|tee|shred|"
-                        r"sed|perl|python\d*|py|node|ruby|bash|sh|cmd|pwsh|powershell|remove-item|ri|move-item|mi|"
-                        r"rename-item|rni|copy-item|cpi|set-content|sc|add-content|ac|clear-content|clc|out-file|"
-                        r"new-item|ni|set-itemproperty)\b|::\w*(delete|move|write|copy|replace|create)", re.I)
+LOCK_NAME = ".whynot-lock"
+LOCK_WRITE = re.compile(r">|(?<![\w-])-delete\b|\b(rm|del|erase|rd|rmdir|unlink|mv|move|ren|rename|cp|copy|touch|"
+                        r"truncate|tee|shred|sed|perl|python\d*|node|ruby|bash|cmd|pwsh|powershell|remove-item|"
+                        r"move-item|rename-item|rni|copy-item|cpi|set-content|add-content|clear-content|clc|out-file|"
+                        r"new-item|set-itemproperty)\b|::\w*(delete|move|write|copy|replace|create)", re.I)
+LOCK_SHORT = {"sc", "ac", "mi", "ni", "ri", "py", "sh"}         # 2-letter aliases: only as a command's first word
+_STREAM_REDIR = re.compile(r"[0-9]?>&[0-9-]|[0-9*]>>?\s*(\"[^\"]*\"|'[^']*'|[^\s;|&]+)")
+WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+
+def names_lock(text: str) -> bool:
+    """The text names the lock file, also through a glob (`output/.whynot-l*`, `.whynot-?ock`)."""
+    if LOCK_NAME in text.lower():
+        return True
+    for tok in re.split(r"[\s;|&<>()\"']+", text):
+        base = re.split(r"[\\/]", tok)[-1].lower()
+        if base.startswith(".") and any(c in base for c in "*?[") and fnmatch.fnmatchcase(LOCK_NAME, base):
+            return True
+    return False
+
+
+def lock_write(text: str) -> bool:
+    """A shell command that could change the lock: a writing verb, redirection or interpreter. Stream redirects
+    (`2>/dev/null`, `2>&1`, `>&2`) are reads unless they point at the lock; sc/ac/mi/ni/ri/py/sh count only as the
+    first word of a command (`grep -c py` is a read)."""
+    t = _STREAM_REDIR.sub(lambda m: m.group(0) if names_lock(m.group(0)) else " ", text)
+    if LOCK_WRITE.search(t):
+        return True
+    return any(norm_exe(seg.split()[0]) in LOCK_SHORT for seg in re.split(r"[;|&\n(){}]|\$\(", t) if seg.split())
 
 
 def main():
@@ -1281,10 +1442,11 @@ def main():
     cwd = Path(native(data.get("cwd") or os.getcwd()))
     agent = data.get("agent_type") or None          # full name: `whynot-cut:qc-reviewer` (structure review 4.7)
     text = str(ti.get("command") or ti.get("file_path") or ti.get("notebook_path") or "")
-    if agent and ".whynot-lock" in text and (tool not in ("Bash", "PowerShell") or LOCK_WRITE.search(text)):
-        block("subagents may not delete or overwrite the client's writer lock (output/.whynot-lock); report it to "
-              "the lead instead (only the lead runs `reel lock --release`, on the editor's word).")
-    if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+    if agent and names_lock(text) and (tool in WRITE_TOOLS or (tool in ("Bash", "PowerShell") and lock_write(text))):
+        block("subagents may not change, move or delete the client's writer lock (output/.whynot-lock); reading it is "
+              "fine (`reel lock --status`). Report it to the lead instead: only the lead runs `reel lock --release`, "
+              "on the editor's word.")
+    if tool in WRITE_TOOLS:
         fp = ti.get("file_path") or ti.get("notebook_path") or ""
         if own_role(agent) in READ_ONLY_AGENTS:
             block(f"{own_role(agent)} is a read-only reviewer; it reports findings instead of editing files.")

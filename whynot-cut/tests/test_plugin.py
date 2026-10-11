@@ -95,11 +95,12 @@ class TestGuardProtected(ClientFixture):
         """Destinations that are not the last argument: cp -t, trailing ffmpeg options, find -delete/-exec."""
         blocked = ["cp -t data/Raw /tmp/a.png", "cp --target-directory=assets/Photos /tmp/a.png",
                    "ffmpeg -i in.mp4 data/Raw/out.mp4 -loglevel error", "ffmpeg -i in.mp4 -progress data/Raw/p.txt out.mp4",
-                   "find data -name '*.MP4' -delete", "find assets -exec rm {} +", "find . -name '*.tmp' -delete",
+                   "find data -name '*.MP4' -delete", "find assets -exec rm {} +", "find . -name '*.MP4' -delete",
                    "find output -fprint data/Raw/list.txt"]
         for c in blocked:
             self.assertEqual(self.bash(c), 2, c)
         ok = ["cp -t output/projects/C0001 data/Raw/C0001.MP4", "find data -name '*.MP4'",
+              "find . -name '*.tmp' -delete",                     # T11: narrowed away from the sources, as with xargs
               "find output -name '*.tmp' -delete", "find data -exec ls -l {} +",
               "ffmpeg -hide_banner -i data/Raw/C0001.MP4 -vf subtitles=data/Raw/x.srt output/projects/C0001/a.mp4 -loglevel error"]
         for c in ok:
@@ -812,6 +813,69 @@ class TestGuardReviewRound3(ClientFixture):
         self.allowed("Bash", ["rsync -a data/ output/data_copy/", "rsync -a --remove-source-files output/tmp/ output/done/"])
         self.blocked("PowerShell", ['cmd /c "for /r data %f in (*.MP4) do del %f"'])
         self.allowed("PowerShell", ['cmd /c "for /r output %f in (*.tmp) do del %f"'])
+
+
+class TestGuardPhase1Minors(ClientFixture):
+    """3.0 T11 (deferred review findings): only name/path/regex/newer predicates, a real -Filter/-Include, grep and
+    Where-Object narrow a listing; find -delete/-exec rm follows the xargs rule; unknown-base .NET deletes with a
+    multi-segment source literal; rsync --remove-sent-files; filter values on any cmdlet are not paths."""
+    run_tool = TestGuardReviewRound3.run_tool
+    blocked = TestGuardReviewRound3.blocked
+    allowed = TestGuardReviewRound3.allowed
+
+    def test_g1_depth_type_and_star_filters_do_not_narrow(self):
+        self.blocked("Bash", ["find . -mindepth 1 -maxdepth 1 | xargs rm -rf", "find . -maxdepth 1 | xargs rm -rf",
+                              "find . -type d | xargs rm -rf", "find . -type f | xargs rm",
+                              "find . -empty | xargs rm -rf", "ls | head -5 | xargs rm -rf"])
+        self.blocked("PowerShell", ["gci -Directory | Remove-Item -Recurse -Force",
+                                    "gci -Include * | Remove-Item -Recurse", "gci -Filter * | Remove-Item -Recurse",
+                                    "gci -Filter '*.*' | Remove-Item -Recurse", "gci -Recurse | Remove-Item -Force",
+                                    "Get-ChildItem -Exclude *.tmp | Remove-Item -Recurse"])
+        self.allowed("Bash", ["find . -name '*.tmp' | xargs rm -rf", "find . -iname '*.TMP' | xargs rm",
+                              "find . -path '*/tmp/*' | xargs rm -f", "find . -regex '.*\\.tmp' | xargs rm",
+                              "find . -newer output/stamp | xargs rm -f", "ls | grep '\\.srt$' | xargs rm",
+                              "find output -type d -empty | xargs rm -rf", "find output -maxdepth 1 | xargs rm -rf"])
+        self.allowed("PowerShell", ["gci -File | Remove-Item", "gci -Filter *.tmp | Remove-Item -Recurse",
+                                    "gci -Include *.srt -Recurse | Remove-Item",
+                                    "Get-ChildItem | ? { $_.Name -like '*.tmp' } | Remove-Item -Recurse",
+                                    "Get-ChildItem output -Directory | Remove-Item -Recurse -Force",
+                                    "gci output -r | Remove-Item"])
+
+    def test_g2_find_delete_and_exec_follow_the_xargs_rule(self):
+        self.allowed("Bash", ["find . -name '*.tmp' -delete", "find . -name '*.tmp' -exec rm {} +",
+                              "find . -name '__pycache__' -exec rm -rf {} +", "find output -type f -delete"])
+        self.blocked("Bash", ["find . -delete", "find . -type d -exec rm -rf {} +", "find . -maxdepth 1 -delete",
+                              "find data -name '*.tmp' -delete", "find . -type f -exec rm {} \\;"])
+        # a predicate that matches the client's own files does not narrow (raw footage is *.mp4)
+        self.blocked("Bash", ["find . -name '*.mp4' -delete", "find . -name '*' -delete",
+                              "find . -iname '*.MP4' -exec rm {} +", "find . -name '*.mp4' | xargs rm",
+                              "find . -path '*/data/*' -delete", "find . -name '*.tmp' -delete -o -path './data/*' -delete"])
+        self.blocked("Bash", ["find .. -name '*.mp4' -delete"], cwd=self.root / "output")
+        self.allowed("Bash", ["find . -name '*.mp4' -delete"], cwd=self.root / "output")
+        self.blocked("PowerShell", ["gci -r | Remove-Item", "Get-ChildItem -Rec | ForEach-Object { Remove-Item $_ }",
+                                    "gci -Recurse -Filter *.mp4 | Remove-Item",
+                                    "Get-ChildItem -Recurse -Include *.MP4 | Remove-Item -Force",
+                                    "gci -File -Recurse | Remove-Item"])
+        self.allowed("PowerShell", ["gci -Recurse -Filter *.tmp | Remove-Item"])
+
+    def test_g3_unknown_base_dotnet_delete_with_a_source_literal(self):
+        self.blocked("PowerShell", ["[IO.File]::Delete((Join-Path $root 'data/Raw/C0001.MP4'))",
+                                    "$root = (Get-Location).Path; [IO.File]::Delete((Join-Path $root 'data/Raw/C0001.MP4'))",
+                                    "[IO.File]::Move((Join-Path $root 'data\\Raw\\C0001.MP4'), 'output/x.mp4')"])
+        self.allowed("PowerShell", ["[IO.File]::WriteAllText([IO.Path]::Combine($out, 'data', 'x.json'), $json)",
+                                    "[IO.File]::Delete([IO.Path]::Combine($out, 'data', 'x.json'))",
+                                    "[IO.File]::Delete((Join-Path $out 'tmp/x.json'))"])
+
+    def test_g4_rsync_remove_sent_files_alias(self):
+        self.blocked("Bash", ["rsync -a --remove-sent-files data/Raw/ output/"])
+        self.allowed("Bash", ["rsync -a --remove-sent-files output/tmp/ output/done/"])
+
+    def test_g5_filter_values_on_any_cmdlet(self):
+        self.allowed("PowerShell", ["Remove-Item output -Filter *data* -Recurse",
+                                    "Remove-Item output/* -Include *data* -Recurse",
+                                    "Remove-Item output -Recurse -Exclude data*"])
+        self.blocked("PowerShell", ["Remove-Item data -Filter *.tmp -Recurse",
+                                    "Remove-Item -Path data/Raw -Include *.MP4 -Recurse"])
 
 
 class TestProfiles(ClientFixture):

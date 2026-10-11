@@ -442,6 +442,34 @@ class TestGuardAndSessionStart(LockFixture):
             self.assertEqual(subprocess.run([sys.executable, str(GUARD)], input=json.dumps(p), capture_output=True,
                                             text=True, encoding="utf-8", env=env_for()).returncode, 2, tool)
 
+    def guard_tool(self, tool, text, agent="whynot-cut:premiere-builder"):
+        key = "command" if tool in ("Bash", "PowerShell") else "file_path"
+        p = {"tool_name": tool, "tool_input": {key: text}, "cwd": str(self.root), "agent_type": agent}
+        r = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(p), capture_output=True, text=True,
+                           encoding="utf-8", env=env_for())
+        return r.returncode, r.stderr
+
+    def test_lock_rule_reads_stay_open_and_globs_count(self):
+        """T11 (T1.8 M7 follow-up): reads of the lock (Read tool, stderr redirects, a 2-letter word that is not the
+        command) are allowed; find -delete and a glob that matches the lock are not."""
+        self.assertEqual(self.guard_tool("Read", str(self.lock))[0], 0)
+        for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+            self.assertEqual(self.guard_tool(tool, str(self.lock))[0], 2, tool)
+        for c in ("cat output/.whynot-lock 2>/dev/null", "cat output/.whynot-lock 2>&1 | head -5",
+                  "ls -la output/.whynot-lock >&2", "grep -c py output/.whynot-lock", "cat output/.whynot-lock | grep sh",
+                  "find output -name .whynot-lock", "reel lock --status 2> output/err.txt # .whynot-lock"):
+            self.assertEqual(self.guard_tool("Bash", c), (0, ""), c)
+        for c in ("Get-Content output/.whynot-lock 2>$null", "Get-Item output/.whynot-lock | Select-Object Name, sc"):
+            self.assertEqual(self.guard_tool("PowerShell", c)[0], 0, c)
+        for c in ("find output -name .whynot-lock -delete", "rm output/.whynot-l*", "rm -f output/.whynot-?ock",
+                  "cat x 2> output/.whynot-lock", "echo hi; py -c 1 output/.whynot-lock"):
+            self.assertEqual(self.guard_tool("Bash", c)[0], 2, c)
+        for c in ("sc output/.whynot-lock '{}'", "echo 1; ni output/.whynot-lock -Force", "Remove-Item output/.whynot-*"):
+            self.assertEqual(self.guard_tool("PowerShell", c)[0], 2, c)
+        msg = self.guard_tool("Bash", "rm output/.whynot-lock")[1]
+        self.assertIn("may not change, move or delete", msg)
+        self.assertIn("reading it is fine", msg)
+
     def context(self, session):
         p = {"cwd": str(self.root), "session_id": session, "hook_event_name": "SessionStart"}
         r = subprocess.run([sys.executable, str(CTX)], input=json.dumps(p), capture_output=True, text=True,
