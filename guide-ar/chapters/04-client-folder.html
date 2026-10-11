@@ -3,11 +3,11 @@
 
 <p>لكل عميل فولدر واحد على جهازك، اسمه في هذا الدليل «فولدر العميل (client folder)». فيه كل ما يخص العميل: هويته البصرية، وفيديوهاته الخام، وأمثلة المونتاج التي يحبها، ثم النتائج التي يكتبها WhyNot Cut. يعمل WhyNot Cut على كل شيء من داخل هذا الفولدر، ولا تحتاج إلى إعادة تسمية أي ملف تضعه فيه.</p>
 
-<p>داخل فولدر العميل ثلاثة فولدرات رئيسية:</p>
+<p class="lead-in">داخل فولدر العميل ثلاثة فولدرات رئيسية:</p>
 <ul>
 <li><bdi dir="ltr"><code>assets/</code></bdi>: هوية العميل (الشعار، الخطوط، الصور، ملف التعريف والألوان).</li>
 <li><bdi dir="ltr"><code>data/</code></bdi>: المادة التي يُعمل عليها (الفيديوهات الخام، الحلقات، المراجع، الموسيقى، المؤثرات).</li>
-<li><bdi dir="ltr"><code>output/</code></bdi>: كل ما يُنتجه WhyNot Cut. يُنشأ تلقائيًا، وهو المكان الوحيد الذي يكتب فيه.</li>
+<li><bdi dir="ltr"><code>output/</code></bdi>: كل ما يُنتجه WhyNot Cut. يُنشأ تلقائيًا، وفيه يكتب WhyNot Cut كل نتائجه، ما عدا ملف التسليم <bdi dir="ltr"><code>HANDOFF.md</code></bdi> الذي يُكتب في جذر فولدر العميل.</li>
 </ul>
 
 <aside class="warn">
@@ -48,14 +48,14 @@
 <tr><td><bdi dir="ltr"><code>assets/Brand</code></bdi></td><td>ملف تعريف بالعميل (brief أو نبذة أو سيرة)، وملف ألوان بأكواد HEX، مثل ملف <bdi dir="ltr"><code>colors.txt</code></bdi> فيه <bdi dir="ltr"><code>#20ACAF</code></bdi>.</td></tr>
 <tr><td><bdi dir="ltr"><code>data/Raw</code></bdi></td><td>الفيديوهات الخام المطلوب مونتاجها (MP4 أو MOV أو MXF)، ملف واحد لكل فيديو.</td></tr>
 <tr><td><bdi dir="ltr"><code>data/Episodes</code></bdi></td><td>حلقات البودكاست الكاملة بمقاس <bdi dir="ltr">16:9</bdi> لتقطيعها إلى ريلز، ومع كل حلقة ورقة اختيارية باسمها (انظر «ورقة الحلقة» بعد قليل).</td></tr>
-<tr><td><bdi dir="ltr"><code>data/References</code></bdi></td><td>فيديوهات مونتاج مرجعية تريد أن يشبهها الشغل، وأي ملاحظات مكتوبة عن الأسلوب. اختياري.</td></tr>
+<tr><td><bdi dir="ltr"><code>data/References</code></bdi></td><td>فيديوهات مونتاج مرجعية تريد أن يشبهها المونتاج، وأي ملاحظات مكتوبة عن الأسلوب. اختياري.</td></tr>
 <tr><td><bdi dir="ltr"><code>data/Broll</code></bdi></td><td>فيديوهات Stock أو B-roll مرخّصة يُسمح باستخدامها، ومعها ملف <bdi dir="ltr"><code>SOURCES.md</code></bdi> أو ملف الترخيص. اختياري.</td></tr>
 <tr><td><bdi dir="ltr"><code>data/Music</code></bdi></td><td>موسيقى مرخّصة فقط. اختياري.</td></tr>
 <tr><td><bdi dir="ltr"><code>data/SFX</code></bdi></td><td>مكتبة المؤثرات الصوتية الخاصة بك. اختياري؛ إذا لم توجد تُصنع مؤثرات أصلية.</td></tr>
 </tbody>
 </table>
 
-<p><strong>رقم الكليب.</strong> كل فيديو خام يأخذ رقمًا (clip id) تستخدمه في طلباتك. إذا كان اسم الملف لاتينيًا بسيطًا فالرقم هو الاسم نفسه بلا امتداد: الملف <bdi dir="ltr"><code>C0001.MP4</code></bdi> رقمه <bdi dir="ltr"><code>C0001</code></bdi>. وإذا كان الاسم عربيًا يُعطى رقمًا قصيرًا مثل <bdi dir="ltr"><code>CLIP_1A2B3C</code></bdi>، وتجد قائمة الأرقام في <bdi dir="ltr"><code>output/discovery/clip-ids.json</code></bdi>.</p>
+<p><strong>الاسم المختصر للكليب.</strong> كل فيديو خام يأخذ اسمًا مختصرًا (clip id) تستخدمه في طلباتك. إذا كان اسم الملف لاتينيًا بسيطًا فالاسم المختصر هو اسم الملف نفسه بلا امتداد: الملف <bdi dir="ltr"><code>C0001.MP4</code></bdi> اسمه المختصر <bdi dir="ltr"><code>C0001</code></bdi>. وإذا كان اسم الملف عربيًا يُعطى اسمًا مختصرًا مثل <bdi dir="ltr"><code>CLIP_1A2B3C</code></bdi>، وتجد قائمة الأسماء المختصرة في <bdi dir="ltr"><code>output/discovery/clip-ids.json</code></bdi>.</p>
 
 <p><strong>ماذا لو نقصت ملفات الهوية؟</strong> يمكن البدء بدون الشعار أو الخطوط أو الألوان، لكن سيقول لك Claude ما الذي سيبدو عامًّا بدونها، ولن يخترع بديلًا من عنده.</p>
 
@@ -69,7 +69,7 @@
 <li>أكمل ما ينقص، أو ابدأ المونتاج إذا كان الموجود كافيًا.</li>
 </ol>
 
-<p>الأمر الذي يُشغَّل في الخلفية لهذا الفحص هو:</p>
+<p class="lead-in">الأمر الذي يُشغَّل في الخلفية لهذا الفحص هو:</p>
 <div class="cmd"><bdi dir="ltr"><code>reel inbox --root "D:/WhyNot Clients/Example Clinic"</code></bdi></div>
 
 <figure class="shot">
@@ -79,11 +79,11 @@
 
 <h2 id="ch04-episode-sheet">ورقة الحلقة (episode sheet)</h2>
 
-<p>لكل حلقة في <bdi dir="ltr"><code>data/Episodes</code></bdi> يمكنك أن تضع ورقة نصية قصيرة بنفس اسم الحلقة وامتداد <bdi dir="ltr"><code>.md</code></bdi>. مثلًا الحلقة <bdi dir="ltr"><code>EP12.mp4</code></bdi> ورقتها <bdi dir="ltr"><code>EP12.md</code></bdi>. الورقة اختيارية، لكنها تحسّن النتيجة كثيرًا، لأن روابط النشر لا تؤخذ إلا منها. شكلها:</p>
+<p>لكل حلقة في <bdi dir="ltr"><code>data/Episodes</code></bdi> يمكنك أن تضع ورقة نصية قصيرة بنفس اسم الحلقة وامتداد <bdi dir="ltr"><code>.md</code></bdi>. مثلًا الحلقة <bdi dir="ltr"><code>EP01.mp4</code></bdi> ورقتها <bdi dir="ltr"><code>EP01.md</code></bdi>. الورقة اختيارية، لكنها تحسّن النتيجة كثيرًا، لأن روابط النشر لا تؤخذ إلا منها. شكلها:</p>
 
 <div class="cmd"><bdi dir="ltr"><code>---
 show: …
-episode: 12
+episode: 1
 host: …
 guest: "Name — role"
 links:
@@ -111,7 +111,7 @@ avoid: [topics not to cut]
 
 <h2 id="ch04-output">فولدر النتائج <bdi dir="ltr"><code>output/</code></bdi></h2>
 
-<p>كل ما يُنتجه WhyNot Cut يُكتب في <bdi dir="ltr"><code>output/</code></bdi>. لكل كليب فولدر باسم رقمه داخل <bdi dir="ltr"><code>output/projects/</code></bdi>، وأهم ما ستفتحه فيه:</p>
+<p>نتائج WhyNot Cut كلها تُكتب في <bdi dir="ltr"><code>output/</code></bdi>. لكل كليب فولدر باسمه المختصر داخل <bdi dir="ltr"><code>output/projects/</code></bdi>، وأهم ما ستفتحه فيه:</p>
 
 <table>
 <thead>
@@ -122,17 +122,15 @@ avoid: [topics not to cut]
 <tr><td><bdi dir="ltr"><code>output/projects/C0001/07_premiere/project/</code></bdi></td><td>مشروع Premiere Pro، مثل <bdi dir="ltr"><code>C0001_EC_EDIT.prproj</code></bdi>.</td></tr>
 <tr><td><bdi dir="ltr"><code>output/projects/C0001/08_quality_control/preview/</code></bdi></td><td>فيديو المعاينة <bdi dir="ltr"><code>C0001_preview.mp4</code></bdi>.</td></tr>
 <tr><td><bdi dir="ltr"><code>output/projects/C0001/08_quality_control/</code></bdi></td><td>نتائج فحص الجودة (QC).</td></tr>
-<tr><td><bdi dir="ltr"><code>output/projects/C0001/09_handoff/</code></bdi></td><td>ملفات التسليم: <bdi dir="ltr"><code>README.md</code></bdi> وقائمة المراجعة الأخيرة <bdi dir="ltr"><code>final-editor-checklist.md</code></bdi>.</td></tr>
+<tr><td><bdi dir="ltr"><code>output/projects/C0001/09_handoff/</code></bdi></td><td>ملفات التسليم <bdi dir="ltr"><code>README.md</code></bdi> و<bdi dir="ltr"><code>final-editor-checklist.md</code></bdi>.</td></tr>
 </tbody>
 </table>
 
 <p>وفي <bdi dir="ltr"><code>output/</code></bdi> أيضًا:</p>
 <ul>
 <li><bdi dir="ltr"><code>output/client_database/</code></bdi>: الملف التعريفي للعميل وأسلوبه المرجعي (الفصل 5).</li>
-<li><bdi dir="ltr"><code>output/episodes/EP12/</code></bdi>: نتائج كل حلقة بودكاست: التفريغ النصي، وخطة الريلز، ومعاينات المرشحين، وحزمة النشر. وكل ريل يُختار يصبح كليبًا مستقلًا في <bdi dir="ltr"><code>output/projects/</code></bdi>.</li>
+<li><bdi dir="ltr"><code>output/episodes/EP01/</code></bdi>: نتائج كل حلقة بودكاست: التفريغ النصي، وخطة الريلز، ومعاينات المرشحين، وحزمة النشر. وكل ريل يُختار يصبح كليبًا مستقلًا في <bdi dir="ltr"><code>output/projects/</code></bdi>.</li>
 </ul>
-
-<p>وعند التسليم يُكتب ملف <bdi dir="ltr"><code>HANDOFF.md</code></bdi> في جذر فولدر العميل، يشرح أين وصل العمل وكيف يُستكمل على جهاز آخر (الفصل 6).</p>
 
 <h2 id="ch04-mistakes">أخطاء شائعة في فولدر العميل</h2>
 
