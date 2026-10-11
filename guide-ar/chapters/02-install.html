@@ -1,0 +1,98 @@
+<section class="chapter" id="ch02">
+<h1 class="ch-title" id="ch02-title">2 · التثبيت خطوة بخطوة</h1>
+
+<p>يشرح هذا الفصل تجهيز جهازك لـ WhyNot Cut: ما الذي يُثبَّت وأين، وما يحدث في أول تشغيل، وكيف تتأكد أن كل شيء يعمل. بعد التثبيت ينقلك الفصل 3 إلى أول مشروع.</p>
+
+<h2 id="ch02-steps">خطوات التثبيت على كل نظام</h2>
+
+<aside class="todo" data-phase="7">
+<p>برنامج التثبيت الجديد (installer) للإصدار <bdi dir="ltr">3.0</bdi> يُشرح هنا بالخطوات والصور لكل نظام بعد اكتماله. الخطوات المخطَّطة في الإصدار <bdi dir="ltr">3.0</bdi>:</p>
+<ol>
+<li>ثبّت تطبيق Claude وسجّل الدخول بحسابك.</li>
+<li>شغّل سطر التثبيت الواحد الذي يُنشر مع برنامج التثبيت، أو افتح ملف التثبيت بنقرتين عند صدوره.</li>
+<li>أجب عن سؤالين: مكان فولدر العملاء، ولغة الحديث. تظهر قائمة فحص تتحول بنودها إلى اللون الأخضر، ويُنزَّل نموذج التفريغ النصي في الخلفية.</li>
+<li>إذا كان Premiere Pro أو After Effects مفتوحًا، أغلقه وافتحه من جديد. تجد لوحة WhyNot Cut في Premiere من <bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>، وفي After Effects من <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>.</li>
+<li>يفتح تطبيق Claude وفيه الأمر <bdi dir="ltr"><code>/whynot-cut:start</code></bdi> مكتوبًا. اضغط Enter.</li>
+</ol>
+<p>المستهدف ألا يحتاج أي من هذه الخطوات إلى صلاحيات مسؤول الجهاز (admin)، ولا إلى أي تعديل في سجل Windows (registry).</p>
+</aside>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: قائمة الفحص في نهاية التثبيت، وكل بنودها باللون الأخضر</span></div>
+<figcaption>نهاية التثبيت: الجهاز جاهز، ونموذج التفريغ يُنزَّل في الخلفية.</figcaption>
+</figure>
+
+<h2 id="ch02-what-happens">ما الذي يُثبَّت على جهازك</h2>
+
+<table>
+<thead>
+<tr><th>المكوّن</th><th>ما هو</th></tr>
+</thead>
+<tbody>
+<tr><td>المحرك (engine)</td><td>بيئة Python خاصة بـ WhyNot Cut في الفولدر <bdi dir="ltr"><code>~/.whynot-cut</code></bdi> (على Windows: <bdi dir="ltr"><code>%USERPROFILE%\.whynot-cut</code></bdi>). حجمها نحو 400 MB، وتثبيتها يأخذ بضع دقائق، ولا يتغير شيء آخر في الجهاز. يسألك Claude قبل تثبيتها.</td></tr>
+<tr><td>نموذج التفريغ النصي Whisper</td><td>نحو 3 GB لنموذج <bdi dir="ltr"><code>large-v3</code></bdi>. يُنزَّل مرة واحدة فقط، بعد أن يسألك Claude. وإذا انقطع التنزيل، يكمل من حيث توقف.</td></tr>
+<tr><td>لوحة WhyNot Cut Bridge</td><td>لوحة صغيرة في فولدر إضافات Adobe، يبني Claude من خلالها المشروع داخل Premiere Pro. أغلق Premiere قبل تثبيتها، ثم افتحه بعدها، لأن Premiere يبحث عن اللوحات عند فتحه فقط.</td></tr>
+<tr><td>تسريع كارت NVIDIA (اختياري)</td><td>إذا كان في جهازك كارت NVIDIA، يمكن بموافقتك تنزيل مكتبة من NVIDIA (نحو 520 MB) تجعل التفريغ أسرع بنحو 8 مرات. بدونها يعمل كل شيء على المعالج (CPU)، لكن أبطأ.</td></tr>
+</tbody>
+</table>
+
+<p>المساحة المطلوبة نحو 4 GB للمحرك والنموذج، ثم عدة GB لكل عميل.</p>
+
+<aside class="warn">
+<p>في النسخة الحالية لا يفتح Premiere لوحة WhyNot Cut Bridge إلا إذا كان إعداد Adobe المسمّى PlayerDebugMode مفعّلًا، وهو إعداد يسمح بتحميل إضافات غير موقَّعة من Adobe. هذا الإعداد تغيّره أنت بنفسك، ولا يغيّره Claude أبدًا: يعطيك الأمر المناسب لنظامك من نتيجة فحص الجهاز، وعلى Windows تشغّله في PowerShell. ويمكنك أن تتخطاه وتستورد المشروع في Premiere يدويًا من ملف XML.</p>
+</aside>
+
+<aside class="todo" data-phase="6">
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> تكون لوحات WhyNot Cut موقَّعة، فلا تحتاج إلى PlayerDebugMode. يُحذف التنبيه السابق بعد اكتمالها.</p>
+</aside>
+
+<h2 id="ch02-first-run">أول تشغيل مع معالج البداية</h2>
+
+<p>افتح محادثة جديدة في تطبيق Claude، واكتب «أول مرة أستخدمه» أو الأمر:</p>
+<div class="cmd"><bdi dir="ltr"><code>/whynot-cut:start</code></bdi></div>
+
+<p class="lead-in">يأخذك معالج البداية خطوة واحدة في كل رسالة، ويتأكد من كل خطوة قبل أن ينتقل إلى التالية:</p>
+<ol class="steps">
+<li>يفحص الجهاز. إذا لم يكن المحرك مثبَّتًا، يشرح لك ما سيُثبَّت ويسألك مرة واحدة.</li>
+<li>يربط Premiere Pro. إذا لم يكن Premiere مثبَّتًا، يكمل العمل: تحصل على ملف XML تستورده في Premiere، وعلى فيديو المعاينة.</li>
+<li>يسألك عن الإعدادات (preferences): مكان فولدر العملاء، وهل يتوقف لتوافق على كل خطة، وسرعة التفريغ النصي، وبأي اسم يناديك (اختياري).</li>
+<li>ينشئ أول فولدر عميل (client folder)، ويعرض لك أين تضع كل ملف (الفصل 4).</li>
+<li>بعد أن تضع الملفات، يفحص ما وضعته ويخبرك بما ينقص.</li>
+<li>يبدأ إعداد العميل الجديد (الفصل 5)، ثم يسألك هل يبدأ مونتاج الفيديوهات الجديدة الآن.</li>
+</ol>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: معالج البداية في تطبيق Claude، وقائمة الخطوات بعلامات تم أو ينتظرك أو جارٍ</span></div>
+<figcaption>معالج البداية يعرض تقدّمه كقائمة فحص.</figcaption>
+</figure>
+
+<aside class="tip">
+<p>لا تضع فولدر العملاء داخل فولدر تتم مزامنته مع OneDrive أو iCloud أو Dropbox؛ الملفات المحفوظة على السحابة فقط (<bdi dir="ltr">online-only</bdi>) تُفشل التفريغ النصي.</p>
+</aside>
+
+<h2 id="ch02-magnific">تفعيل Magnific (اختياري)</h2>
+
+<aside class="todo" data-phase="5">
+<p>خطوة اختيارية لربط حسابك في Magnific بتطبيق Claude، تُشرح هنا بالصور بعد اكتمالها. WhyNot Cut يعمل كاملًا بدون Magnific. التفاصيل في الفصل 12.</p>
+</aside>
+
+<h2 id="ch02-doctor">التحقق بأمر <bdi dir="ltr"><code>reel doctor</code></bdi></h2>
+
+<p>الأمر <bdi dir="ltr"><code>reel doctor</code></bdi> فحص للقراءة فقط: لا يغيّر أي شيء في الجهاز. يشغّله Claude في بداية معالج البداية وكلما احتاج إليه، ويمكنك أن تطلب منه تشغيله في أي وقت. يشغّل Claude معه أمر رقم الإصدار:</p>
+<div class="cmd"><bdi dir="ltr"><code>reel --version
+reel doctor</code></bdi></div>
+
+<p class="lead-in">ما يعرضه الفحص:</p>
+<ul>
+<li>الحكم العام (verdict)، وهل الجهاز جاهز (ready).</li>
+<li>قائمة الإصلاحات (fixes)، وكل إصلاح يذكر من يقوم به: Claude أم أنت.</li>
+<li>كارت الشاشة، وبرامج Adobe الموجودة على الجهاز.</li>
+<li>كل نسخة من الأمر <bdi dir="ltr"><code>reel</code></bdi> على الجهاز، ولأي إضافة تتبع.</li>
+</ul>
+
+<p>كل رسالة من WhyNot Cut تبدأ باسمه ورقم إصداره، مثل <bdi dir="ltr"><code>WhyNot Cut &lt;version&gt;</code></bdi>. إذا لم تبدأ هكذا، أو ظهر أن الأمر <bdi dir="ltr"><code>reel</code></bdi> غير معروف، فانظر الفصل 14.</p>
+
+<aside class="todo" data-phase="7">
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> يعرض برنامج التثبيت نتيجة هذا الفحص كقائمة بألوان أخضر وأصفر وأحمر، ويُضاف الأمر <bdi dir="ltr"><code>reel doctor --fix</code></bdi> لإصلاح ما يمكن إصلاحه تلقائيًا (الفصل 14).</p>
+</aside>
+</section>
