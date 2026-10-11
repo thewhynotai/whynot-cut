@@ -1242,6 +1242,16 @@ class TestMotionJSX(CompiledMotion):
                   "calls.push('error: ' + e); } }\nconsole.log(JSON.stringify(calls));\n")
             self.assertEqual(json.loads(node_run(self, js)), want, project)
 
+    def test_fallback_refusal_is_its_result(self):
+        """Review (Minor 4): the refusing script's own result names the project (osascript reports it on macOS)."""
+        from lib.motion_build import write_fallback_script
+        script = write_fallback_script(self.reel).read_text(encoding="utf-8")
+        project = {"dirty": True, "numItems": 3, "file": {"name": "work.aep", "fsName": "D:/their/work.aep"}}
+        js = ("function alert(m) {}\nvar app = {project: " + json.dumps(project) + ", newProject: function () {}};\n"
+              "var src = " + json.dumps(script) + ";\n"
+              "console.log(JSON.stringify(String((function () { return eval(src); })())));\n")
+        self.assertEqual(json.loads(node_run(self, js)), "WHYNOT_REFUSED: work.aep")
+
 
 def jsx_fn(src: str, name: str) -> str:
     """Body of `name = function` in the JSX source (up to the next top-level `NHM.` assignment)."""
@@ -1450,6 +1460,73 @@ class TestMotionBuild(CompiledMotion):
         backups = list(self.reel.p("04_after_effects/project/backups").glob("*.aep"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), b"EDITED IN AE")
+
+    def fake_run_script_env(self, titles: list[str], ae=None):
+        """`--run-script` without the bridge: After Effects' window titles (the OS query) and the AfterFX launcher
+        replaced. `ae(jsx, timeout, done)` plays After Effects; by default it records the launch and returns at once."""
+        from lib import adobe_run
+        launched = []
+        saved = (self.mb.__dict__.get("_ae_titles"), adobe_run.run_after_effects)
+        self.mb._ae_titles = lambda: list(titles)
+        adobe_run.run_after_effects = lambda jsx, timeout, done=None: (launched.append(jsx) or
+                                                                       (ae(jsx, timeout, done) if ae else {"stdout": ""}))
+
+        def restore():
+            adobe_run.run_after_effects = saved[1]
+            if saved[0] is None:
+                self.mb.__dict__.pop("_ae_titles", None)
+            else:
+                self.mb._ae_titles = saved[0]
+        self.addCleanup(restore)
+        return launched
+
+    def test_run_script_refuses_unsaved_project_at_once(self):
+        """Review (Minor 4): `--run-script` launched the fallback script into an After Effects holding unsaved work; the
+        script refused (an alert in AE) and the engine waited the whole --timeout to report "no read-back". After
+        Effects' title ends with " *" while its project has unsaved changes (seen live in AE 26.5, the path elided in
+        the middle): the engine refuses at once, naming the project, without launching anything."""
+        for title, name in (("Adobe After Effects 2026 - D:\\0 Work\\0 Pegasus IM ... ts\\EP02_R02_MO\\04_after_effects"
+                             "\\project\\EP02_R02_MO_RE_MOTION.aep *", "EP02_R02_MO_RE_MOTION.aep"),
+                            ("Adobe After Effects 2026 - Untitled Project.aep *", "Untitled Project.aep")):
+            launched = self.fake_run_script_env(["", title])
+            t0 = time.time()
+            r = self.mb.run_script(self.reel, timeout=30)
+            self.assertEqual(r["status"], "REFUSED", r)
+            self.assertTrue(any(name in x and "unsaved changes" in x for x in r["reasons"]), r["reasons"])
+            self.assertEqual(launched, [])
+            self.assertLess(time.time() - t0, 10)
+        self.assertFalse(self.reel.p(self.mb.RESULT).exists())          # a refusal, like build()'s, records nothing
+
+    def test_run_script_clean_project_launches(self):
+        """A saved project (no " *") and no After Effects running both launch the script."""
+        for titles in (["Adobe After Effects 2026 - D:\\work\\EP02_R02_MO_RE_MOTION.aep"], []):
+            launched = self.fake_run_script_env(titles)
+            self.mb.run_script(self.reel, timeout=1)
+            self.assertEqual(len(launched), 1, titles)
+
+    def test_run_script_timeout_says_why(self):
+        """Review (Minor 4): when the .aep never appears (e.g. After Effects could not tell whether its project is saved,
+        so the script refused with an alert), the result says so instead of only "no read-back"."""
+        def ae_never_saves(jsx, timeout, done):
+            t0 = time.time()
+            while time.time() - t0 < timeout and not done():
+                time.sleep(0.05)
+            return {"stdout": ""}
+        self.fake_run_script_env([], ae_never_saves)
+        r = self.mb.run_script(self.reel, timeout=1)
+        self.assertEqual(r["status"], "FAILED", r)
+        why = " ".join(r["reasons"])
+        self.assertIn("not saved", why)
+        self.assertIn("unsaved changes", why)
+        self.assertNotIn("no read-back", why)
+
+    def test_run_script_reads_the_script_refusal(self):
+        """macOS (no window titles): osascript returns the script's own result; a refusal ends the run as REFUSED."""
+        launched = self.fake_run_script_env([], lambda jsx, timeout, done: {"stdout": "WHYNOT_REFUSED: work.aep\n"})
+        r = self.mb.run_script(self.reel, timeout=30)
+        self.assertEqual(len(launched), 1)
+        self.assertEqual(r["status"], "REFUSED", r)
+        self.assertTrue(any("work.aep" in x and "unsaved changes" in x for x in r["reasons"]), r["reasons"])
 
     def test_refused_replace_edited_keeps_no_backup(self):
         """Final review: --replace-edited copied the editor's .aep to backups/ before the preconditions, so a build

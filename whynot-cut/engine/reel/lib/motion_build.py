@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .common import TEMPLATES_DIR, now_iso, project_prefix, read_json, write_json, write_text
 
+REFUSED_MARK = "WHYNOT_REFUSED:"         # the fallback script's result when it refuses (an unsaved project)
 DEFAULT_CAPS = {"composer_universal": True, "rtl_direction": "textdocument", "word_index_logical": True,
                 "fontobject": True, "emphasis_animator": True, "om_template": "High Quality"}
 
@@ -93,6 +94,7 @@ def write_fallback_script(paths, **kw) -> Path:
           "if (!NHM.mayDiscard(NH_INFO)) {      // the bridge's rule: never discard the editor's unsaved work\n"
           "    alert('WhyNot Cut: After Effects has unsaved changes in ' + (NH_INFO.project || 'an untitled project') +\n"
           "          ' (or cannot tell). Save or close it, then run this script again.');\n"
+          "    '" + REFUSED_MARK + " ' + (NH_INFO.project || 'an untitled project');   // the result osascript prints\n"
           "} else {\n"
           "    app.beginUndoGroup(\"whynot-cut motion\");\n    app.newProject();\n    NHM.build(NH_JOB);\n"
           "    app.endUndoGroup();\n}\n")
@@ -253,16 +255,58 @@ def script_only(paths) -> dict:
             "next": "run it in After Effects (File > Scripts > Run Script File...); it is not verified: no read-back"}
 
 
+def _ae_titles() -> list[str]:
+    """After Effects' main window titles (Windows; [] elsewhere, or when it is not running)."""
+    from . import plat
+    from .common import run
+    if not plat.IS_WIN:
+        return []
+    try:
+        p = run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Process AfterFX -ErrorAction SilentlyContinue | "
+                 "ForEach-Object { $_.MainWindowTitle }"], check=False, timeout=60, encoding="utf-8")
+    except Exception:  # noqa: BLE001 — no PowerShell or a hung query: the script still refuses on its own
+        return []
+    return [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
+
+
+def unsaved_project(titles: list[str]) -> str | None:
+    """The project's file name when an After Effects title marks unsaved changes: AE 26.5 shows
+    "Adobe After Effects 2026 - <path, elided in the middle>.aep *" (seen live)."""
+    from pathlib import PureWindowsPath
+    for t in titles:
+        t = t.rstrip()
+        if t.endswith("*") and " - " in t:
+            return PureWindowsPath(t[:-1].rstrip().split(" - ", 1)[1]).name or "an untitled project"
+    return None
+
+
+def _refusal(project: str) -> str:
+    return (f"After Effects has unsaved changes in {project}: save or close it in After Effects first, then run "
+            "`motion-build --run-script` again (the script never discards them)")
+
+
 def run_script(paths, timeout: int = 900) -> dict:
     import time
     from .adobe_run import run_after_effects
-    jsx = write_fallback_script(paths)
     aep = aep_path(paths)
+    busy = unsaved_project(_ae_titles())       # the script would refuse inside AE: say so now, not after --timeout
+    if busy:
+        return {"status": "REFUSED", "aep": str(aep), "reasons": [_refusal(busy)]}
+    jsx = write_fallback_script(paths)
     t0 = time.time()
     r = run_after_effects(jsx, timeout, done=lambda: aep.exists() and aep.stat().st_mtime >= t0 - 1)
     if r.get("status") == "UNSUPPORTED":
         return dict(r, jsx=str(jsx))
+    said = next((ln.split(REFUSED_MARK, 1)[1].strip() for ln in str(r.get("stdout") or "").splitlines()
+                 if REFUSED_MARK in ln), None)            # macOS: osascript prints the script's result
+    if said is not None:
+        return {"status": "REFUSED", "jsx": str(jsx), "aep": str(aep), "reasons": [_refusal(said or "a project")]}
     fresh = aep.exists() and aep.stat().st_mtime >= t0 - 1
+    why = ["no read-back: the bridge was not used, so QC cannot pass"] if fresh else [
+        f"the .aep was not saved within {timeout} s: After Effects may be showing why (an alert when its open project "
+        "has unsaved changes, or it cannot tell - they are never discarded; or a script error). Save or close the open "
+        "project and run again, or use --script-only and run the script yourself"]
     res = {"status": "BUILT_UNVERIFIED" if fresh else "FAILED", "jsx": str(jsx), "aep": str(aep), "readback": None,
-           "aep_sha1": _sha1(aep) if fresh else "", "reasons": ["no read-back: the bridge was not used, so QC cannot pass"]}
+           "aep_sha1": _sha1(aep) if fresh else "", "reasons": why}
     return _record(paths, res)
