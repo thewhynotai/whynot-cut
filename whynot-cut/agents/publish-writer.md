@@ -28,7 +28,9 @@ platform's limits. You never post anything.
 4. Thumbnails: `reel publish-thumbnail --root "<CLIENT>" --episode <EP> --candidates`, VIEW `_candidates.jpg`, pick 3
    frames (clear face, strong expression, not mid-blink), write `thumbnail.designs` (at most 3: frame_ms + ≤5-word
    text + optional `highlight`, the word(s) of the text drawn in the brand colour), then `--render` and VIEW every
-   `thumb_*.png` (text readable, face clear, logo not over the face, the highlighted word the right one).
+   `thumb_*.png` (text readable, face clear, logo not over the face, the highlighted word the right one). A
+   "contrast" warning means the brand colour was unreadable on that frame and the highlight was drawn in white: keep
+   it or pick another frame.
 5. Run `reel publish-check --root "<CLIENT>" --episode <EP>` and fix every error. Repeat until it passes.
 
 ## Rules

@@ -3,6 +3,8 @@
 
 G62  a graphic's font weight comes from typography.json `roles`, then brand.json font_roles_fallback.weights, then the
      NEAREST available weight - never "the first font file".
+G68  a highlight colour drawn over a frame (publish-thumbnail, preview stills) is measured against the pixels behind it
+     and falls back to white/paper, with a warning, when it is unreadable (brand primary was brown #81613D on a warm set).
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
@@ -21,6 +23,8 @@ from lib import common  # noqa: E402
 from lib.common import CLIENT_PROFILE_REL, read_json, write_json  # noqa: E402
 from test_motion import good_script, motion_plan_fixture, test_font  # noqa: E402
 from test_podcast import ff  # noqa: E402
+
+BROWN = "#81613D"                       # the measured primary of the Dr Sherin set (field test round 4)
 
 
 def brand_db(root: Path, weights: dict, roles: dict | None = None, primary: str | None = None, same_file: bool = False):
@@ -222,9 +226,149 @@ class TestRoleFontFiles(RoleFontCase):
         self.assertEqual(fonts_map(db)["headline"], "Brand-Medium")
 
 
-# --------------------------------------------------------------------------- thumbnails
-class TestThumbnailFont(unittest.TestCase):
-    """G62: publish-thumbnail draws the headline in the role's weight."""
+# --------------------------------------------------------------------------- G68
+class TestLegibility(unittest.TestCase):
+    """G68: the contrast check itself (WCAG relative luminance; thresholds are the engine's motion.json constants)."""
+    WHITE, PAPER = ("white", (255, 255, 255)), ("paper", (244, 241, 234))
+
+    def test_brown_on_a_warm_region_falls_back_to_white(self):
+        from lib.legibility import legible
+        r = legible((129, 97, 61), [(143, 107, 69)], 104, [self.PAPER, self.WHITE])
+        self.assertTrue(r["fallback"])
+        self.assertEqual(r["rgb"], (255, 255, 255))                      # the better of white / paper
+        self.assertLess(r["original_ratio"], 1.6)                        # the field test measured 1.1-1.5
+        self.assertGreaterEqual(r["ratio"], r["need"])
+
+    def test_good_contrast_keeps_the_brand_colour(self):
+        from lib.legibility import legible
+        r = legible((32, 172, 175), [(10, 10, 10)], 104, [self.WHITE, self.PAPER])
+        self.assertFalse(r["fallback"])
+        self.assertEqual(r["rgb"], (32, 172, 175))
+        self.assertEqual(r["ratio"], r["original_ratio"])
+
+    def test_threshold_depends_on_text_size(self):
+        from lib.legibility import legible, needed
+        self.assertEqual(needed(104), 3.0)                               # large text
+        self.assertEqual(needed(40), 4.5)
+        grey = (99, 99, 99)                                              # ~3.5:1 on black
+        self.assertFalse(legible(grey, [(0, 0, 0)], 104, [self.WHITE])["fallback"])
+        self.assertTrue(legible(grey, [(0, 0, 0)], 40, [self.WHITE])["fallback"])
+
+    def test_the_worst_region_decides(self):
+        from lib.legibility import legible
+        r = legible((32, 172, 175), [(10, 10, 10), (32, 172, 175)], 104, [self.WHITE])
+        self.assertTrue(r["fallback"])                                   # one word sits on a teal patch
+
+    def test_no_better_fallback_keeps_the_colour(self):
+        from lib.legibility import legible
+        r = legible((200, 200, 200), [(255, 255, 255)], 104, [self.WHITE, self.PAPER])
+        self.assertFalse(r["fallback"])                                  # nothing is more readable than what we have
+        self.assertLess(r["ratio"], r["need"])                           # ... but the caller still sees it is too low
+
+    def test_region_mean(self):
+        from PIL import Image
+        from lib.legibility import region_mean
+        im = Image.new("RGBA", (100, 100), (0, 0, 0, 255))
+        im.paste((200, 100, 50, 255), (0, 0, 50, 100))
+        self.assertEqual(region_mean(im, (0, 0, 50, 100)), (200, 100, 50))
+        self.assertEqual(region_mean(im, (0, 0, 100, 100)), (100, 50, 25))
+        self.assertEqual(region_mean(im, (80, 80, 400, 400)), (0, 0, 0))   # clamped to the image
+
+
+class TestPreviewHighlightContrast(RoleFontCase):
+    """G68: preview stills. A colour that reaches the footage directly (text without a box) is checked against the frame
+    behind it; the default white text and the boxed texts are never touched."""
+    WARM, DARK = (129, 97, 61, 255), (10, 10, 10, 255)
+
+    def render(self, probe_colour, text_role="primary", notes=None, probe_callable=False, layer="fg", size=86):
+        from PIL import Image
+        from lib import previews
+        db = brand_db(self.root, {"Regular": "Brand-Regular", "Bold": "Brand-Bold"}, primary=BROWN)
+        b = previews.Brand(db)
+        out = self.tmp / "hook.png"
+        img = Image.new("RGBA", (previews.W, previews.H), probe_colour) if probe_colour else None
+        probe = (lambda: img) if (probe_callable and img is not None) else img
+        t = {"size": size, "y": 1080, "bar_style": "underline", "text_role": text_role}
+        previews.render_event({"template": "hook_title", "event_id": "GFX_001", "params": {"text": "Big win today"}},
+                              t, b, {}, None, out, layer=layer, probe=probe, notes=notes)
+        return out
+
+    @staticmethod
+    def glyphs(png: Path, rgb: tuple) -> int:
+        from PIL import Image
+        with Image.open(png) as im:
+            return sum(1 for p in im.convert("RGBA").getdata()
+                       if p[3] >= 250 and all(abs(p[i] - rgb[i]) <= 12 for i in range(3)))
+
+    def test_brown_text_on_a_warm_frame_turns_white_with_a_warning(self):
+        notes = []
+        png = self.render(self.WARM, notes=notes)
+        self.assertGreater(self.glyphs(png, (255, 255, 255)), 300)
+        self.assertEqual(self.glyphs(png, (129, 97, 61)), 0)
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("GFX_001", notes[0])
+        self.assertIn("contrast", notes[0])
+
+    def test_brown_text_on_a_dark_frame_is_kept(self):
+        notes = []
+        png = self.render(self.DARK, notes=notes)
+        self.assertGreater(self.glyphs(png, (129, 97, 61)), 300)
+        self.assertEqual(notes, [])
+
+    def test_lazy_probe_is_used_too(self):
+        notes = []
+        png = self.render(self.WARM, notes=notes, probe_callable=True)
+        self.assertEqual(self.glyphs(png, (129, 97, 61)), 0)
+        self.assertEqual(len(notes), 1)
+
+    def test_nothing_changes_without_a_frame_or_with_the_default_white(self):
+        png = self.render(None)                                          # production still: no frame, colour as configured
+        self.assertGreater(self.glyphs(png, (129, 97, 61)), 300)
+        notes = []
+        png = self.render(self.WARM, text_role="neutral_light", notes=notes)    # the default style: white text
+        self.assertGreater(self.glyphs(png, (255, 255, 255)), 300)
+        self.assertEqual(notes, [])
+
+    def test_boxed_text_is_not_measured_against_the_frame(self):
+        from PIL import Image
+        from lib import previews
+        db = brand_db(self.root, {"Regular": "Brand-Regular", "Bold": "Brand-Bold"}, primary=BROWN)
+        b = previews.Brand(db)
+        notes = []
+        # statement text sits on its own box: what is behind it is the box, not the frame
+        previews.render_event({"template": "statement_highlight", "event_id": "GFX_002", "params": {"text": "Big win"}},
+                              {"size": 70, "y": 900, "box_role": "ink", "text_role": "primary"}, b, {}, None,
+                              self.tmp / "st.png", layer="fg", probe=Image.new("RGBA", (previews.W, previews.H), self.WARM),
+                              notes=notes)
+        self.assertEqual(notes, [])
+
+    def test_render_all_reports_the_warning(self):
+        import subprocess
+        from lib.previews import render_all
+        root = self.root
+        (root / "assets").mkdir()
+        (root / "data").mkdir()
+        p = common.Paths(root, "V1")
+        p.ensure_project()
+        brand_db(root, {"Regular": "Brand-Regular", "Bold": "Brand-Bold"}, primary=BROWN)
+        self.profile("graphics-templates.json", {"templates": {"hook_title": {"text_role": "primary"}}})
+        clip = root / "data/Raw/warm.mp4"
+        clip.parent.mkdir(parents=True)
+        subprocess.run([common.ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                        "color=c=0x81613D:s=360x640:r=25:d=4", "-pix_fmt", "yuv420p", str(clip)], check=True)
+        write_json(p.p("01_analysis/timeline-spec.json"), {"main_footage": str(clip), "events": [
+            {"event_id": "GFX_001", "template": "hook_title", "start_ms": 500, "end_ms": 2500,
+             "params": {"text": "Big win today"}}]})
+        for composite in (False, True):
+            r = render_all(p, composite_preview=composite)
+            self.assertTrue(any("GFX_001" in w and "contrast" in w for w in r["warnings"]), (composite, r.get("warnings")))
+            png = p.p("03_broll/typography/GFX_001_fg.png")
+            self.assertGreater(self.glyphs(png, (255, 255, 255)), 300)
+            self.assertEqual(self.glyphs(png, (129, 97, 61)), 0)
+
+
+class TestThumbnailHighlightContrast(unittest.TestCase):
+    """G68: publish-thumbnail draws the design's highlight word in the brand colour over the frame."""
 
     @classmethod
     def setUpClass(cls):
@@ -252,6 +396,51 @@ class TestThumbnailFont(unittest.TestCase):
             self.skipTest("no test font")
         for rel in ("branding/brand-tokens.json", "branding/typography.json"):
             self.addCleanup((self.ep.client_db / rel).unlink, missing_ok=True)
+
+    def render(self, frame_ms: int, primary: str, text="Big loss today", highlight="loss"):
+        from lib import previews
+        from lib.publish import render_thumbnails
+        brand_db(self.root, {"Black": "Brand-Black"}, primary=primary)      # the episode's client_database
+        write_json(self.ep.p("publish/publish.json"), {"thumbnail": {"designs": [
+            {"frame_ms": frame_ms, "text": text, "highlight": highlight}]}})
+        fills = []
+        real = previews._text_block
+
+        def spy(d, t, font, cx, cy, fill, *a, **kw):
+            fills.append(tuple(fill)[:3])
+            return real(d, t, font, cx, cy, fill, *a, **kw)
+        with mock.patch.object(previews, "_text_block", spy):
+            r = render_thumbnails(self.ep)
+        self.assertTrue(r["ok"], r)
+        return r, fills
+
+    def test_brown_highlight_on_the_warm_set_falls_back(self):
+        r, fills = self.render(5000, BROWN)
+        brown = (129, 97, 61)
+        self.assertNotIn(brown, fills)                                   # the word is never drawn in brown
+        ws = [w for w in r["warnings"] if "highlight" in w and "contrast" in w]
+        self.assertEqual(len(ws), 1, r["warnings"])
+        self.assertIn("design 1", ws[0])
+        self.assertIn("#81613D", ws[0])                                  # which colour failed ...
+        self.assertRegex(ws[0], r"\d\.\d:1")                             # ... by how much
+        h = r["highlights"][0]
+        self.assertTrue(h["fallback"])
+        self.assertIn(h["color"], ("#FFFFFF", "#E6EEF8", "#F4F1EA"))     # white or the brand's light colour
+        self.assertGreaterEqual(h["contrast"], 3.0)
+        self.assertLess(h["brand_contrast"], 3.0)
+
+    def test_readable_highlight_keeps_the_brand_colour(self):
+        r, fills = self.render(15000, "#20ACAF")
+        self.assertIn((32, 172, 175), fills)                             # the dark set: teal reads fine
+        self.assertFalse([w for w in r["warnings"] if "contrast" in w], r["warnings"])
+        h = r["highlights"][0]
+        self.assertFalse(h["fallback"])
+        self.assertEqual(h["color"], "#20ACAF")
+
+    def test_plain_design_has_nothing_to_check(self):
+        r, _ = self.render(5000, BROWN, highlight="")
+        self.assertEqual(r.get("highlights", []), [])
+        self.assertFalse([w for w in r["warnings"] if "contrast" in w])
 
     def test_headline_font_follows_the_roles(self):
         from lib import ct_text, hb_text

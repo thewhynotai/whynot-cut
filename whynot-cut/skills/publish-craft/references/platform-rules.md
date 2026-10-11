@@ -35,5 +35,8 @@ rules; update that file rather than the code. Last reviewed for WhyNot Cut 2.1 (
 - `--render`: the face in one third, the text on the other side over a dark gradient (right side first for Arabic),
   the client's headline font, a brand-colour bar, the logo when the client database has one. `highlight` (optional):
   word(s) of the text drawn in the brand colour (a warning when they are not in the text). Highlight Arabic words or a
-  single Latin term: two Latin words in a row inside an Arabic line may be placed out of order. Up to 3 designs
+  single Latin term: two Latin words in a row inside an Arabic line may be placed out of order. The colour is measured
+  against the frame behind the word (WCAG contrast, 3:1 for thumbnail text): when the brand colour would be unreadable
+  (a brown primary on a warm set) the word is drawn in white/paper and the result carries a warning and a `highlights`
+  entry (`fallback: true`); pick another frame if the brand colour matters. Up to 3 designs
   (YouTube's test-and-compare); extra designs are skipped with a warning.

@@ -329,7 +329,8 @@ def cmd_previews(a):
     p = P(a)
     refuse_stale_window(p)
     r = render_all(p, composite_preview=not a.no_composite)
-    out({"previews": len(r["previews"]), "contact_sheet": str(p.p("08_quality_control/previews/_contact_sheet.jpg"))})
+    out({"previews": len(r["previews"]), "contact_sheet": str(p.p("08_quality_control/previews/_contact_sheet.jpg")),
+         **({"warnings": r["warnings"]} if r.get("warnings") else {})})
 
 
 def cmd_sfx(a):

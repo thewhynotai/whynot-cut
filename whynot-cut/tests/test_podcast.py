@@ -1567,10 +1567,11 @@ class TestThumbnails(unittest.TestCase):
             with Image.open(r["files"][0]) as im:
                 n = sum(1 for p in im.convert("RGB").getdata() if max(abs(a - b) for a, b in zip(p, teal)) < 40)
             return n, r
-        plain, _ = render({"frame_ms": 22000, "text": "أول خسارة كبيرة"})
-        marked, _ = render({"frame_ms": 22000, "text": "أول خسارة كبيرة", "highlight": "خسارة"})
+        # the dark window (10-20 s): teal reads on it. On the bright one the highlight would turn white (G68, test_round4_brand)
+        plain, _ = render({"frame_ms": 12000, "text": "أول خسارة كبيرة"})
+        marked, _ = render({"frame_ms": 12000, "text": "أول خسارة كبيرة", "highlight": "خسارة"})
         self.assertGreater(marked - plain, 1500)                             # the word's glyphs are drawn in the brand colour
-        _, r = render({"frame_ms": 22000, "text": "أول خسارة", "highlight": "نجاح"})
+        _, r = render({"frame_ms": 12000, "text": "أول خسارة", "highlight": "نجاح"})
         self.assertTrue(any("highlight" in w for w in r["warnings"]), r["warnings"])
 
     def test_designs_beyond_the_limit_warn(self):

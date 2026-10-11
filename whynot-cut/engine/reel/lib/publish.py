@@ -265,7 +265,9 @@ def highlight_spans(text: str, phrase: str, boxes: list, font, max_chars: int) -
 def render_thumbnails(ep) -> dict:
     """publish.json thumbnail.designs -> 1280x720 images: face-aware cover crop, a dark gradient on the text side, the
     client's headline font (HarfBuzz/CoreText) with a brand-primary bar, the design's `highlight` word(s) in the brand
-    colour, the logo when available; <= 2 MB. At most thumbnail.designs_max designs (YouTube tests up to 3)."""
+    colour, the logo when available; <= 2 MB. At most thumbnail.designs_max designs (YouTube tests up to 3).
+    The highlight colour is measured (WCAG contrast) against the frame pixels behind the word; when it is too faint
+    (a brown primary on a warm set) the word is drawn in white/paper instead, with a warning and a `highlights` entry."""
     import io
     from PIL import Image, ImageDraw
     from .common import ffmpeg_exe, run
@@ -285,7 +287,7 @@ def render_thumbnails(ep) -> dict:
     man = read_json(ep.client_db / "asset-manifest.json", {"assets": []}) or {"assets": []}
     logo = next((a.get("display_derivative") for a in man.get("assets", []) if a.get("category") == "logo"), None)
     out_dir = ep.p("publish/thumbnail")
-    files, warnings, errors = [], [], []
+    files, warnings, errors, highlights = [], [], [], []
     if len(given) > dmax:
         warnings.append(f"thumbnail.designs has {len(given)} designs: only the first {dmax} are rendered (YouTube tests up "
                         f"to {dmax} thumbnails per video); drop or reorder the rest")
@@ -321,6 +323,7 @@ def render_thumbnails(ep) -> dict:
         shade = Image.new("RGBA", (TW, TH), (0, 0, 0, 255))
         shade.putalpha(grad.resize((TW, TH)))
         im.alpha_composite(shade)
+        behind = im.copy()                                  # the frame as the text will sit on it (contrast is measured here)
         face_right = not text_right
         cx = int(TW * (0.69 if text_right else 0.31))
         f = b.font("headline", int(dz.get("size", 104)))
@@ -337,8 +340,20 @@ def render_thumbnails(ep) -> dict:
         if hl and not spans:
             warnings.append(f"design {i}: highlight «{hl}» is not a word of the text, so nothing is highlighted")
         if spans:   # the same text in the brand colour, kept only inside the highlighted words' boxes
+            from .legibility import legible, region_mean
+            lg_ = legible(b.teal, [region_mean(behind, sp) for sp in spans], int(dz.get("size", 104)),
+                          [("white", b.white), ("paper", b.paper)])
+            hex_ = lambda c: "#%02X%02X%02X" % tuple(c[:3])
+            highlights.append({"design": i, "word": hl, "color": hex_(lg_["rgb"]), "contrast": lg_["ratio"],
+                               "brand_contrast": lg_["original_ratio"], "fallback": lg_["fallback"]})
+            if lg_["fallback"] or lg_["ratio"] < lg_["need"]:
+                warnings.append(f"design {i}: highlight colour {hex_(b.teal)} (brand primary) has contrast "
+                                f"{lg_['original_ratio']:.1f}:1 against the frame behind «{hl}» (needs {lg_['need']:.1f}:1)"
+                                + (f" - drawn in {lg_['name']} ({lg_['ratio']:.1f}:1) instead; pick another frame to keep the "
+                                   f"brand highlight" if lg_["fallback"] else " - kept, white is no better on this frame; "
+                                   "pick another frame"))
             col = Image.new("RGBA", (TW, TH), (0, 0, 0, 0))
-            _text_block(ImageDraw.Draw(col), text, f, cx, TH // 2, b.teal, max_chars=14, shadow=False)
+            _text_block(ImageDraw.Draw(col), text, f, cx, TH // 2, lg_["rgb"], max_chars=14, shadow=False)
             mask = Image.new("L", (TW, TH), 0)
             for sp in spans:
                 ImageDraw.Draw(mask).rectangle(sp, fill=255)
@@ -358,7 +373,7 @@ def render_thumbnails(ep) -> dict:
             out.write_bytes(buf.getvalue())
         files.append(str(out))
     return {"ok": not errors and bool(files), "files": files, "errors": errors, "warnings": warnings,
-            "engines": sorted(b.engines)}
+            "highlights": highlights, "engines": sorted(b.engines)}
 
 
 # --------------------------------------------------------------------------- check + render

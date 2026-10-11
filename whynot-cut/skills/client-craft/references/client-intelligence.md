@@ -17,7 +17,7 @@
 | `profile/content-guidelines.md` | must / must-not / tone / CTA policy; mark *editorial* items |
 | `assets/asset-classification.json` | after VIEWING every image (contact sheet): category headshot/portrait/lifestyle/logo/brand_graphic/background, description, use cases |
 | `branding/brand-roles.json` | assign roles to official colors; any extra tints go under `derived` with method + `official:false`. No HEX codes in any document? `brand-tokens.json` → `measured_palettes` holds colours measured from brand images (posters, covers): after viewing the image, a role may use one, with `"source": "<image rel path>", "measured": true` — and the client is asked to confirm HEX codes |
-| `branding/typography-roles.json` | map PostScript names to roles: headline/caption/term/body/small |
+| `branding/typography-roles.json` | map PostScript names to roles: headline/caption/term/body/small. `{"roles": {"headline": {"postscript_name": "…-Bold"}}}`; a role may also give just a style (`{"style": "Bold"}`). Every graphic draws a role in that weight (then brand.json `font_roles_fallback.weights`, then the house default); a weight the family lacks becomes the nearest one, never the first font file |
 | `branding/branding-guidelines.md`, `visual-style.md`, `motion-design-rules.md` | official vs derived; observed reference styles |
 
 Then re-run `reel client-db` so tokens/manifest merge the roles and classifications.

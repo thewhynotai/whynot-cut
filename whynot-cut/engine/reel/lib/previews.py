@@ -207,6 +207,29 @@ def _role_color(b: "Brand", role: str) -> tuple:
     return {"primary": b.teal, "neutral_light": b.white, "paper": b.paper, "ink": b.ink}.get(role, b.teal)
 
 
+def _hex(rgb) -> str:
+    return "#%02X%02X%02X" % tuple(int(c) for c in rgb[:3])
+
+
+def _readable_over_frame(col: tuple, boxes: list, probe, size: float, b: "Brand", label: str, notes) -> tuple:
+    """Text drawn straight over the footage (no box behind it) in a brand colour: measure it against the frame region
+    behind each line (WCAG contrast, see legibility.py) and fall back to white / paper when it is too faint (a brown
+    brand primary on a warm set read 1.1-1.5:1). White and paper themselves are left alone. `probe` is the frame (1080x1920)
+    or a callable returning it; a warning goes to `notes` when the colour had to change."""
+    if tuple(col) in (tuple(b.white), tuple(b.paper)):
+        return col
+    frame = probe() if callable(probe) else probe
+    if frame is None:
+        return col
+    from .legibility import legible, region_mean
+    r = legible(col, [region_mean(frame, bx) for bx in boxes], size, [("white", b.white), ("paper", b.paper)])
+    if notes is not None and (r["fallback"] or r["ratio"] < r["need"]):
+        notes.append(f"{label}: text colour {_hex(col)} has contrast {r['original_ratio']:.1f}:1 against the frame behind it "
+                     f"(needs {r['need']:.1f}:1)" + (f" - drawn in {r['name']} ({r['ratio']:.1f}:1) instead" if r["fallback"]
+                                                    else " - kept, white is no better on this frame"))
+    return r["rgb"]
+
+
 def save_still(im: Image.Image, out: Path) -> Path:
     """Write a still only when its pixels changed. Unchanged stills are never rewritten: on Windows Premiere keeps the
     stills it imported locked (even after the project closes, until Premiere quits), and a rebuild must not fail on them."""
@@ -229,9 +252,11 @@ def save_still(im: Image.Image, out: Path) -> Path:
 
 
 def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, out: Path, frame_bg=None,
-                 layer: str = "all") -> Path:
+                 layer: str = "all", probe=None, notes: list | None = None) -> Path:
     """layer: 'all' | 'bars' (teal bars/boxes only) | 'fg' (everything except bars) -> separate stills so
-    Premiere can animate bars (RTL crop sweep) and text (pop) independently."""
+    Premiere can animate bars (RTL crop sweep) and text (pop) independently.
+    probe: the frame behind the graphic (1080x1920 image, or a callable returning it). It never reaches the still; it only
+    decides whether a brand-coloured text drawn straight over the footage is readable (else white/paper + a line in `notes`)."""
     BARS, FG = layer in ("all", "bars"), layer in ("all", "fg")
     tp, p = ev["template"], ev["params"]
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -253,6 +278,10 @@ def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, ou
         alpha = int(255 * t.get("plain_box_alpha", 0.6)) if plain_box else 255
         if plain_box:
             box_c = _role_color(b, t.get("plain_box_role", "ink"))
+        if probe is not None and (tp == "term_callout" or (tp == "hook_title" and t.get("bar_style", "underline") != "box")
+                                  or (tp == "highlight_caption" and not p.get("highlight") and not plain_box)):
+            txt_c = _readable_over_frame(txt_c, boxes, probe, p.get("size", t["size"]), b,
+                                         f"{ev.get('event_id', tp)} ({tp})", notes)
         if BARS and (tp != "highlight_caption" or p.get("highlight") or plain_box):
             for (x0, y0, x1, y1) in boxes:
                 if tp == "hook_title" and t.get("bar_style", "underline") == "box":   # same teal box as statements
@@ -417,7 +446,7 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
     logo = next((a["display_derivative"] for a in man["assets"] if a["category"] == "logo"), None)
     main = Path(spec["main_footage"])
     main = main if main.is_absolute() else paths.root / main
-    outs, comps = [], []
+    outs, comps, warns = [], [], []
     for ev in spec["events"]:
         p = ev["params"]
         if p.get("image"):
@@ -429,13 +458,21 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
         out = paths.p(f"03_broll/{cat}/{ev['event_id']}.png")
         # the background frame is a SOURCE frame: after pause removal / word cuts start_ms is on the reel's timeline
         mid = (ev.get("src_start_ms", ev["start_ms"]) + ev.get("src_end_ms", ev["end_ms"])) // 2
+        # the frame behind the graphic, grabbed only when a brand-coloured text has to be measured against it (or for the
+        # QC composite below)
+        grabbed = []
+
+        def probe(mid=mid):
+            if not grabbed:
+                grabbed.append(grab_frame(main, mid + int(spec.get("source_in_ms") or 0)))
+            return grabbed[0]
         # PRODUCTION still: clean transparent overlay (never bake footage into it; the speaker moves)
-        render_event(ev, tpls[ev["template"]], b, assets, logo, out, frame_bg=None)
+        render_event(ev, tpls[ev["template"]], b, assets, logo, out, frame_bg=None, probe=probe, notes=warns)
         outs.append(str(out))
         if ev["template"] in BAR_TEMPLATES:   # separate layers: text (pop) + bars (RTL sweep)
             fg = paths.p(f"03_broll/{cat}/{ev['event_id']}_fg.png")
             bars = paths.p(f"03_broll/{cat}/{ev['event_id']}_bar.png")
-            render_event(ev, tpls[ev["template"]], b, assets, logo, fg, layer="fg")
+            render_event(ev, tpls[ev["template"]], b, assets, logo, fg, layer="fg", probe=probe)
             render_event(ev, tpls[ev["template"]], b, assets, logo, bars, layer="bars")
             outs += [str(fg), str(bars)]
         if ev["template"] == "checklist":
@@ -450,13 +487,13 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
                 ip = paths.p(f"03_broll/{cat}/{ev['event_id']}_i{k + 1}.png")
                 render_event(one, tpls["checklist"], b, assets, logo, ip)
                 outs.append(str(ip))
-        bg = grab_frame(main, mid + int(spec.get("source_in_ms") or 0)) if composite_preview else None
+        bg = probe() if composite_preview else None
         if bg is not None:  # QC composite only: graphic over the actual frame (frosted look simulated)
             import tempfile
             fd, tmp = tempfile.mkstemp(suffix=".png")
             os.close(fd)
             tmp = Path(tmp)
-            render_event(ev, tpls[ev["template"]], b, assets, logo, tmp, frame_bg=bg)
+            render_event(ev, tpls[ev["template"]], b, assets, logo, tmp, frame_bg=bg, probe=probe)
             comp = bg.copy()
             with Image.open(tmp) as im:
                 comp.alpha_composite(im.convert("RGBA"))
@@ -474,7 +511,7 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
             im = Image.open(cpath).resize((270, 480))
             sheet.paste(im, ((i % cols) * 270, (i // cols) * 480))
         sheet.save(paths.p("08_quality_control/previews/_contact_sheet.jpg"), quality=85)
-    return {"previews": outs, "composites": comps}
+    return {"previews": outs, "composites": comps, "warnings": warns}
 
 
 SAFE_TOP_PX = 220   # platform UI covers the top of a 1080x1920 reel
