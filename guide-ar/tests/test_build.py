@@ -5,7 +5,9 @@ Run:  ~/.whynot-cut/venv/Scripts/python.exe -m unittest discover -s guide-ar/tes
 The helper tests need only the standard library. The PDF tests run only after a
 build has written guide-ar/.build/test.pdf (and .build/toc.json); they need pypdf.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -174,6 +176,100 @@ class HeadingTests(unittest.TestCase):
         self.assertNotIn("old", toc)
         self.assertIn("<code>reel doctor</code>", toc)
         self.assertEqual(len(build.all_headings(html)), 3)
+
+
+class OutlineMatchTests(unittest.TestCase):
+    HEADS = [(1, "1 · مقدمة"), (2, "أهم الخطوات"), (2, "إزاي تبدأ")]
+    HEIGHTS = [842.0, 842.0, 842.0, 842.0]
+
+    def _marks(self, *rows):
+        return [{"title": t, "page": p, "top": top, "left": 0.0, "zoom": 0.0} for t, p, top in rows]
+
+    def test_match_outline_tolerates_duplicated_title(self):
+        marks = self._marks((" · مقدمة1", 0, 770.0),          # runs in layout order
+                            ("أهم الخطواتأهم الخطوات", 1, 400.0),  # Edge wrote it twice
+                            ("إزاي تبدأ", 2, 700.0))
+        got = build.match_outline(marks, self.HEADS, self.HEIGHTS)
+        self.assertEqual([(e["title"], e["page"]) for e in got],
+                         [("1 · مقدمة", 0), ("أهم الخطوات", 1), ("إزاي تبدأ", 2)])
+        self.assertTrue(got[1]["notes"])
+        self.assertEqual(got[2]["notes"], [])
+
+    def test_match_outline_moves_page_break_sliver_to_next_page(self):
+        # the duplicated title's bookmark points at the bottom edge of the previous page
+        marks = self._marks(("1 · مقدمة", 0, 770.0), ("أهم الخطواتأهم الخطوات ", 1, 62.7), ("إزاي تبدأ", 2, 500.0))
+        got = build.match_outline(marks, self.HEADS, self.HEIGHTS)
+        self.assertEqual((got[1]["page"], got[1]["top"]), (2, 842.0))
+
+    def test_match_outline_fails_on_count_or_order(self):
+        with self.assertRaises(ValueError):
+            build.match_outline(self._marks(("أ", 0, 700.0)), self.HEADS, self.HEIGHTS)
+        with self.assertRaises(ValueError):
+            build.match_outline(self._marks(("1 · مقدمة", 2, 770.0), ("أهم الخطوات", 1, 400.0),
+                                            ("إزاي تبدأ", 3, 700.0)), self.HEADS, self.HEIGHTS)
+
+    def test_fix_outline_rewrites_a_garbled_pdf_outline(self):
+        try:
+            import pypdf
+            from pypdf.generic import Fit
+        except ImportError:
+            self.skipTest("pypdf missing")
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = Path(tmp) / "o.pdf"
+            w = pypdf.PdfWriter()
+            for _ in range(3):
+                w.add_blank_page(width=595, height=842)
+            top = w.add_outline_item(" · مقدمة1", 0, fit=Fit.xyz(0, 770, 0))
+            w.add_outline_item("أهم الخطواتأهم الخطوات ", 0, parent=top, fit=Fit.xyz(0, 62.7, 0))
+            w.add_outline_item("إزاي تبدأ", 2, parent=top, fit=Fit.xyz(0, 500, 0))
+            with open(pdf, "wb") as fh:
+                w.write(fh)
+            html = _wrap("<h1 class='ch-title' id='a'>1 · مقدمة</h1><h2 id='b'>أهم الخطوات</h2><h2 id='c'>إزاي تبدأ</h2>")
+            notes = io.StringIO()
+            with contextlib.redirect_stdout(notes):
+                self.assertEqual(build.fix_outline(pdf, html), 3)
+            self.assertIn("next page", notes.getvalue())
+            self.assertEqual(build.outline_pages(pdf), {"1 · مقدمة": 1, "أهم الخطوات": 2, "إزاي تبدأ": 3})
+
+
+class CmdAndShotTests(unittest.TestCase):
+    def test_nowrap_cmd_tokens(self):
+        src = ('<div class="cmd"><bdi dir="ltr"><code>reel client-init --root "D:/WhyNot Clients/Example Clinic" '
+               '--id example-clinic &amp;&amp; x</code></bdi></div><p>reel doctor --fix</p>')
+        out = build.nowrap_cmd_tokens(src)
+        self.assertIn('<span class="nw">--id</span> <span class="nw">example-clinic</span>', out)
+        self.assertIn('<span class="nw">&amp;&amp;</span>', out)
+        self.assertIn('<bdi dir="ltr"><code><span class="nw">reel</span>', out)
+        self.assertTrue(out.endswith("<p>reel doctor --fix</p>"), "text outside .cmd untouched")
+        self.assertEqual(build.nowrap_cmd_tokens(out), out, "idempotent")
+        self.assertEqual(re.sub(r"</?span[^>]*>", "", out), src, "visible text unchanged")
+        # multi-line blocks keep their line breaks
+        self.assertIn("\n", build.nowrap_cmd_tokens('<div class="cmd"><code>a: 1\nb: 2</code></div>'))
+
+    def test_lint_flags_cmd_token_too_long_to_wrap(self):
+        long = "output/" + "x" * 80 + ".prproj"
+        html = _wrap(f'<div class="cmd"><bdi dir="ltr"><code>{long}</code></bdi></div>')
+        self.assertEqual(len(build.lint(html)), 1)
+        ok = _wrap('<div class="cmd"><bdi dir="ltr"><code>output/projects/C0001/07_premiere/project/'
+                   'C0001_EC_EDIT.prproj</code></bdi></div>')
+        self.assertEqual(build.lint(ok), [])
+
+    def _rule(self, selector):
+        css = (GUIDE / "styles.css").read_text(encoding="utf-8")
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        m = re.search(r"(?m)^" + re.escape(selector) + r"\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(m, f"no CSS rule for {selector}")
+        return m.group(1)
+
+    def test_css_shot_frame_is_not_flex_and_lead_in_kept_with_next(self):
+        frame = self._rule(".shot-frame")
+        self.assertNotRegex(frame, r"display:\s*(inline-)?(flex|grid)",
+                            "flex/grid would split the caption's <bdi> runs into separate items")
+        self.assertRegex(frame, r"display:\s*table-cell")
+        css = (GUIDE / "styles.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"h2, h3, h4, \.lead-in \{ break-after: avoid;")
+        self.assertRegex(self._rule(".cmd code"), r"overflow-wrap:\s*normal")
+        self.assertRegex(self._rule(".cmd .nw"), r"white-space:\s*nowrap")
 
 
 class PrintTests(unittest.TestCase):

@@ -52,6 +52,14 @@ def _pypdf():
 
 
 # ---------------------------------------------------------------- text helpers
+def _say(message: str) -> None:
+    """print() that never fails on a console without UTF-8 (Windows cp1252)."""
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        print(message.encode("ascii", "backslashreplace").decode("ascii"))
+
+
 _BIDI_CONTROLS = re.compile("[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
 
@@ -156,6 +164,33 @@ def build_toc(chapters_html: str) -> str:
     return '<ol class="toc-list">\n' + "\n".join(items) + "\n</ol>"
 
 
+_CMD_BLOCK = re.compile(r"""(<div\b[^>]*\bclass\s*=\s*["'][^"']*\bcmd\b[^"']*["'][^>]*>)(.*?)(</div\s*>)""",
+                        re.S | re.I)
+CMD_MAX_TOKEN = 75  # IBM Plex Mono 10 pt ≈ 6 pt per character; the .cmd line is ≈ 462 pt wide
+
+
+def _cmd_tokens(inner: str) -> list[str]:
+    parts = re.split(r"(<[^>]+>)", inner)
+    return [t for i, part in enumerate(parts) if i % 2 == 0 for t in re.findall(r"\S+", part)]
+
+
+def nowrap_cmd_tokens(html: str) -> str:
+    """Wrap every space-free token inside a .cmd block in <span class="nw"> (CSS: nowrap).
+
+    A command then wraps only at its spaces — never after the hyphen of
+    `example-clinic` or inside a path — so copying it from the PDF never puts a
+    line break inside a token. Tags and entities are left intact; idempotent.
+    """
+    def block(m: re.Match) -> str:
+        inner = re.sub(r'<span class="nw">(.*?)</span>', r"\1", m.group(2), flags=re.S)
+        parts = re.split(r"(<[^>]+>)", inner)
+        for i in range(0, len(parts), 2):
+            parts[i] = re.sub(r"\S+", lambda t: f'<span class="nw">{t.group(0)}</span>', parts[i])
+        return m.group(1) + "".join(parts) + m.group(3)
+
+    return _CMD_BLOCK.sub(block, html)
+
+
 def assemble(root: Path) -> str:
     """index.html with chapters/*.html (sorted by name) at <!--@chapters--> and the TOC at <!--@toc-->."""
     root = Path(root)
@@ -164,7 +199,7 @@ def assemble(root: Path) -> str:
         raise ValueError("index.html has no <!--@chapters--> marker")
     parts = [p.read_text(encoding="utf-8").strip() for p in sorted((root / "chapters").glob("*.html"))]
     chapters = "\n\n".join(parts)
-    html = shell.replace("<!--@chapters-->", chapters, 1)
+    html = shell.replace("<!--@chapters-->", nowrap_cmd_tokens(chapters), 1)
     toc = build_toc(chapters)
     if "<!--@toc-->" in html:
         html = html.replace("<!--@toc-->", toc, 1)
@@ -282,6 +317,11 @@ def lint(html: str) -> list[str]:
     for target in p.hrefs:
         if target not in p.ids:
             problems.append(f'broken link href="#{target}" (no element has id="{target}")')
+    for m in _CMD_BLOCK.finditer(html):
+        for token in _cmd_tokens(m.group(2)):
+            if len(htmllib.unescape(token)) > CMD_MAX_TOKEN:
+                problems.append(f"command token longer than {CMD_MAX_TOKEN} characters cannot wrap (only spaces "
+                                f"break a .cmd line): «{htmllib.unescape(token)[:60]}…» — shorten it")
     if "logo-dark" in html:
         problems.append("logo-dark referenced — no dark logo variant may be used (white pages use the Syne wordmark)")
     seen: dict[str, str] = {}
@@ -435,14 +475,50 @@ def _num(value):
         return None
 
 
-def fix_outline(pdf_path: Path, html: str) -> int:
-    """Rewrite the bookmark titles Chrome generated, keeping its pages and positions.
+# A bookmark whose /XYZ top is this close to the bottom edge of its page is not a
+# heading: it is the sliver of a heading that starts on the NEXT page (see below).
+SLIVER_TOP_PT = 72.0  # bottom page margin is 22 mm = 62.4 pt
 
-    Chrome's --generate-pdf-document-outline emits a heading's text runs in layout
-    order, so a mixed-direction title such as «1 · مقدمة» comes out as « · مقدمة1».
-    Every bookmark is matched (in document order) with the h1–h6 it came from — the
-    two must contain exactly the same characters — and re-added with the heading's
-    logical text, nested by heading level. Returns the number of bookmarks.
+
+def match_outline(marks: list[dict], heads: list[tuple[int, str]], page_heights: list[float]) -> list[dict]:
+    """Pair Chrome's bookmarks with the HTML headings they came from, by document order.
+
+    `marks`: one dict per bookmark in outline order: title, page (0-based), top,
+    left, zoom (None when not an /XYZ destination). `heads`: (level, logical text)
+    of every h1–h6 in document order. Titles are NOT trusted: Chrome writes the
+    runs of a mixed-direction title in layout order, and when a heading lands at
+    the top of a page Edge may also paint the hamza of أ/إ as a sliver at the
+    bottom of the previous page, then write the title twice and point the bookmark
+    at that sliver. Such a bookmark (top within SLIVER_TOP_PT of the page bottom)
+    is moved to the top of the next page. Raises ValueError when the bookmark
+    count differs from the heading count or the pages go backwards.
+    """
+    if len(marks) != len(heads):
+        raise ValueError(f"PDF outline has {len(marks)} bookmarks but the HTML has {len(heads)} headings")
+    out, last_page = [], 0
+    for mark, (level, title) in zip(marks, heads):
+        page, top, notes = mark["page"], mark.get("top"), []
+        if _chars_key(str(mark["title"])) != _chars_key(title):
+            notes.append(f"Edge title «{mark['title']}» garbled")
+        if top is not None and top <= SLIVER_TOP_PT and page + 1 < len(page_heights):
+            page, top = page + 1, page_heights[page + 1]
+            notes.append("moved from a page-break sliver to the next page")
+        if page < last_page:
+            raise ValueError(f"bookmark for «{title}» is on page {page + 1}, before the previous heading "
+                             f"(page {last_page + 1}): outline and headings are out of order")
+        last_page = page
+        out.append({"level": level, "title": title, "page": page, "top": top,
+                    "left": mark.get("left"), "zoom": mark.get("zoom"), "notes": notes})
+    return out
+
+
+def fix_outline(pdf_path: Path, html: str) -> int:
+    """Rebuild the outline Chrome generated: logical heading titles, Chrome's positions.
+
+    Chrome's --generate-pdf-document-outline gives the right positions but
+    unreliable titles (see match_outline). Every bookmark is re-added with its
+    heading's logical text, nested by heading level. Returns the number of
+    bookmarks; prints a note for each title or page it had to repair.
     """
     import io
 
@@ -461,30 +537,36 @@ def fix_outline(pdf_path: Path, html: str) -> int:
                 flat.append(item)
 
     walk(reader.outline)
+    marks = []
+    for item in flat:
+        xyz = str(item.get("/Type", "")) == "/XYZ" or getattr(item, "typ", None) == "/XYZ"
+        marks.append({"title": str(item.title), "page": reader.get_destination_page_number(item),
+                      "top": _num(item.top) if xyz else None, "left": _num(item.left) if xyz else None,
+                      "zoom": _num(item.zoom) if xyz else None})
     heads = [(int(tag[1]), plain_text(inner)) for tag, _, inner in all_headings(html)]
     heads = [h for h in heads if h[1]]
-    if len(flat) != len(heads):
-        raise SystemExit(f"PDF outline has {len(flat)} bookmarks but the HTML has {len(heads)} headings")
+    heights = [float(pg.mediabox.top) for pg in reader.pages]
+    try:
+        entries = match_outline(marks, heads, heights)
+    except ValueError as exc:
+        raise SystemExit(f"cannot rebuild the PDF bookmarks: {exc}") from None
 
     writer = pypdf.PdfWriter(clone_from=reader)
     if "/Outlines" in writer._root_object:
         del writer._root_object["/Outlines"]
     parents: dict[int, object] = {}
-    for item, (level, title) in zip(flat, heads):
-        if _chars_key(str(item.title)) != _chars_key(title):
-            raise SystemExit(f"bookmark «{item.title}» does not match heading «{title}» (document order)")
-        page = reader.get_destination_page_number(item)
+    for e in entries:
+        for note in e["notes"]:
+            _say(f"  outline: «{e['title']}» (page {e['page'] + 1}): {note}")
+        level = e["level"]
         parent = next((parents[lv] for lv in range(level - 1, 0, -1) if lv in parents), None)
-        if str(item.get("/Type", "")) == "/XYZ" or getattr(item, "typ", None) == "/XYZ":
-            fit = Fit.xyz(left=_num(item.left), top=_num(item.top), zoom=_num(item.zoom))
-        else:
-            fit = Fit.fit()
-        parents[level] = writer.add_outline_item(title, page, parent=parent, fit=fit)
+        fit = Fit.xyz(left=e["left"], top=e["top"], zoom=e["zoom"]) if e["top"] is not None else Fit.fit()
+        parents[level] = writer.add_outline_item(e["title"], e["page"], parent=parent, fit=fit)
         for lv in [lv for lv in parents if lv > level]:
             del parents[lv]
     with open(pdf_path, "wb") as fh:
         writer.write(fh)
-    return len(flat)
+    return len(entries)
 
 
 def page_count(pdf_path: Path) -> int:

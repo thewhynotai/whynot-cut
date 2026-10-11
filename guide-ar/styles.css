@@ -23,13 +23,25 @@
      <aside class="warn"><p>…</p></aside>           تنبيه  (orchid rule, right)
      <aside class="todo" data-phase="11"><p>…</p></aside>  placeholder that names
                                                      the phase that finalises it
-     <figure class="shot"><div class="shot-frame">وصف اللقطة</div>
+     <figure class="shot"><div class="shot-frame">لقطة شاشة: فولدر
+         <bdi dir="ltr"><code>example-clinic</code></bdi> بعد الإنشاء</div>
        <figcaption>…</figcaption></figure>           screenshot placeholder,
-                                                     labelled example-clinic
+                                                     labelled example-clinic.
+         The frame text is plain inline text (with <bdi>/<code> as needed);
+         no wrapper is required (a <span> around it is harmless).
      <ol class="steps"><li>…</li></ol>              violet numbered circles
      <div class="cmd"><bdi dir="ltr"><code>reel doctor</code></bdi></div>
-                                                     LTR command block
+                                                     LTR command block; wraps
+                                                     only at spaces
      <table>…</table>                                plain tables
+     <p class="lead-in">اكتب الأمر ده:</p>          a line ending in «:» that
+                                                     introduces the next list /
+                                                     .cmd / table / shot: never
+                                                     left alone at a page bottom
+                                                     (any <p> directly before a
+                                                     list/.cmd/table/shot gets
+                                                     the same rule via :has())
+     h2/h3/h4 are kept with the next block too (break-after: avoid).
    ========================================================================== */
 
 /* ---------- fonts (OFL, official static TTFs, unmodified, in fonts/<family>/) ----------
@@ -177,9 +189,21 @@ h1, h2, h3, h4 {
   break-after: avoid;
   page-break-after: avoid;
 }
-h2 { font-size: 16pt; font-weight: 700; margin: 1.4em 0 0.5em; }
-h3 { font-size: 13pt; font-weight: 600; margin: 1.2em 0 0.4em; }
-h4 { font-size: 11.5pt; font-weight: 600; margin: 1em 0 0.3em; }
+/* padding-top (not margin) on h2–h4: a heading that lands at the top of a page
+   keeps the hamza of أ/إ inside its own box. Without it Edge paints that ink as a
+   sliver at the bottom of the previous page, writes the bookmark title twice and
+   points the bookmark at the previous page (margins are dropped at a page break,
+   padding is not). Margins are reduced by the same amount. */
+h2 { font-size: 16pt; font-weight: 700; margin: 1.1em 0 0.5em; padding-top: 0.3em; }
+h3 { font-size: 13pt; font-weight: 600; margin: 0.9em 0 0.4em; padding-top: 0.3em; }
+h4 { font-size: 11.5pt; font-weight: 600; margin: 0.7em 0 0.3em; padding-top: 0.3em; }
+
+/* keep a heading or a «… :» lead-in line with the block that follows it.
+   .lead-in is the explicit class; the :has() rule does the same automatically
+   for any paragraph placed directly before a list, command block, table or shot. */
+h2, h3, h4, .lead-in { break-after: avoid; page-break-after: avoid; }
+p:has(+ .cmd, + ol, + ul, + table, + figure.shot) { break-after: avoid; page-break-after: avoid; }
+.lead-in + * { break-before: avoid; page-break-before: avoid; }
 
 /* inline commands, paths, file names: <bdi dir="ltr"><code>…</code></bdi> */
 bdi { unicode-bidi: isolate; }
@@ -247,25 +271,32 @@ h1.ch-title::after {
 .tip > :last-child, .warn > :last-child, .todo > :last-child { margin-bottom: 0; }
 
 /* ---------- screenshot placeholder ---------- */
+/* a table, not flex: the frame is ONE table cell, so its description stays one
+   run of inline RTL text (a flex/grid box would turn every <bdi>/<span> inside
+   it into a separate item and drop the spaces between them). The caption is a
+   bottom table-caption. */
 figure.shot {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   margin: 1.1em 0;
   break-inside: avoid;
   page-break-inside: avoid;
 }
 .shot-frame {
+  display: table-cell;
+  vertical-align: middle;
   position: relative;
-  min-height: 52mm;
+  height: 52mm;            /* a table cell's height is a minimum */
   border: 1.2pt dashed #A99BCB;
   border-radius: 6pt;
   background: #FAF8FF;
   color: var(--muted);
   font-size: 10pt;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   text-align: center;
   padding: 10mm 8mm;
-  box-sizing: border-box;
 }
 .shot-frame::before {
   content: "example-clinic";
@@ -281,8 +312,10 @@ figure.shot {
   border-radius: 3pt;
   padding: 0.1em 0.5em;
 }
-.shot-frame img { max-width: 100%; display: block; }
+.shot-frame img { max-width: 100%; display: block; margin: 0 auto; }
 figure.shot figcaption {
+  display: table-caption;
+  caption-side: bottom;
   margin-top: 0.4em;
   font-size: 9.5pt;
   color: var(--muted);
@@ -339,9 +372,15 @@ ol.steps > li::before {
   color: #FFFFFF;
   font-size: 10pt;
   padding: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre-wrap;    /* keeps the line breaks of multi-line blocks */
+  overflow-wrap: normal;
+  word-break: normal;
 }
+/* build.py wraps every space-free token of a .cmd block in <span class="nw">, so a
+   long command wraps only at its spaces, never inside --id, example-clinic or a
+   path (and copying from the PDF never gets a break inside a token). The lint
+   rejects a single token too long for one line. */
+.cmd .nw { white-space: nowrap; }
 
 /* ---------- tables ---------- */
 table {
