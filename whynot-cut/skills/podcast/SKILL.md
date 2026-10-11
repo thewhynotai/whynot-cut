@@ -108,6 +108,8 @@ a reel done unless its `qc` passed in this message.
 
 ## Non-negotiables
 - No invented speech, names, numbers, links or results — in plans, graphics, captions or descriptions.
+- In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
+  `profile.json`). Until a person's gender is known write «د.» or the name.
 - Gate 0 and Gate 1 come only from the editor's messages (or a standing `approval: auto` for Gate 1, never for Gate 0).
 - `assets/` and `data/` are read-only; everything goes to `output/`. Ask before deleting anything.
 - Premiere is the deliverable; After Effects/Photoshop only when the editor asks (`/whynot-cut:adobe-extras`).

@@ -439,6 +439,7 @@ def check(ep) -> dict:
         errors.append(f"description: contains {''.join(sorted(bad & set(desc)))} (YouTube rejects < and >)")
     d = yt.get("description") or {}
     for lk in d.get("links") or []:
+        gender(f"description link {lk.get('label') or lk.get('url')}", str(lk.get("label") or ""))
         if norm_url(lk.get("url", "")) not in sheet_urls:
             errors.append(f"description link {lk.get('url')} is not in the episode sheet (links are never invented)")
     facts("description", "\n".join(str(d.get(k) or "") for k in ("hook", "summary", "guest", "sponsor", "cta")))

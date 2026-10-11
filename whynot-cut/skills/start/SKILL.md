@@ -118,6 +118,8 @@ Finish with two lines from `/whynot-cut:help` and their next step: "drop more cl
 - Installers (Python, Xcode tools, fonts) are run by the person, never by Claude. `reel setup` covers the engine.
 - Ask before large downloads (engine, Whisper model).
 - `assets/` and `data/` belong to the client: scaffold only creates them for a new client, never edits them.
+- In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
+  `profile.json`). Until a person's gender is known write «د.» or the name.
 
 Troubleshooting: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
 

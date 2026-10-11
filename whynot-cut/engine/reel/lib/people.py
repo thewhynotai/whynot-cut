@@ -5,14 +5,18 @@ profile.json `people`: [{"name", "role", "gender": "male" | "female" | "unknown"
 "pronouns"}], filled by the client-researcher only from the client's own material. `unknown` means: ask the editor.
 Gender is never inferred from a name (a real run wrote «الدكتورة» for a male client from his first name alone).
 
-The check is deterministic: normalise (tashkeel and tatweel stripped, alef forms unified, ة -> ه, ى -> ي), split into
-clauses at punctuation, find a gendered honorific (الدكتور/الدكتورة, دكتور/دكتورة, الأستاذ/الأستاذة, الشيخ/الشيخة,
-المهندس/المهندسة, with or without «ال» and the clitics و ف ب ل ك) or the ungendered «د.» / «د/» / "Dr.", and the
-name run right after it. A run that names a profile person:
+The check is deterministic: normalise (tashkeel, tatweel, direction marks and ZWJ/ZWNJ stripped, alef forms unified,
+ة -> ه, ى -> ي), split into clauses at punctuation (except / : - « “ ( right after an honorific: «الدكتورة/ كريم»),
+find a gendered honorific (الدكتور/الدكتورة, دكتور/دكتورة, الأستاذ/الأستاذة, الشيخ/الشيخة, المهندس/المهندسة, with or
+without «ال» and the clitics و ف ب ل ك) or the ungendered «د.» / «د/» / "Dr.", skip any further honorifics («الأستاذة
+الدكتور كريم»), and read the name run after it. A run that names a profile person:
   * honorific of the other gender                    -> error
+    (a warning instead when the only name word is also a common word after folding: «الدكتورة على حق» vs علي)
   * person's gender `unknown` + gendered honorific    -> warning (ask the editor)
   * a past-tense verb of the other gender right before the honorific (VSO: «قالت الدكتور كريم»), or right after the
-    name when the mention opens the clause («الدكتور كريم قالت») -> warning (agreement can involve another noun)
+    name when the mention opens the clause («الدكتور كريم قالت») and no new subject follows -> warning
+`check_nameless` (used by `reel plan` only): every profile person has one gender and the text uses the other gender's
+honorific with no known name after it («صور الدكتورة المعتمدة» for an all-male profile) -> warning.
 """
 from __future__ import annotations
 
@@ -32,18 +36,27 @@ VERB_GENDER = {**{m: "male" for m, _ in VERBS}, **{f: "female" for _, f in VERBS
 # words inside a name that never identify a person by themselves (عبد الرحمن, أبو بكر, El-Sayed ...)
 PARTICLES = {"عبد", "ابو", "ابي", "ام", "ابن", "بن", "بنت", "ال", "el", "al", "abu", "abd", "bin", "ibn", "bint", "de",
              "van", "von"}
+# normalised function words that a name can fold into (على -> علي, منّي -> مني, إلى -> الي ...): a name run made only of
+# these is too ambiguous for an error
+FUNCTION_WORDS = {"علي", "مني", "الي", "حتي", "في", "الا", "عن", "من", "ما", "لا", "لو", "يا", "او", "ان", "انا", "انت",
+                  "هو", "هي", "كل", "بس", "مع", "عند", "زي", "اللي", "ده", "دي", "لي", "له", "ليه", "ايه", "كان", "بعد",
+                  "قبل", "فوق", "تحت", "بين", "غير", "مش", "متي", "لما", "اذا", "اما", "ثم"}
 TITLES = {"dr", "mr", "mrs", "ms", "miss", "prof", "eng", "sheikh", "د", "م", "ا", "ش"}
 ABBR = "drabbr"                                   # «د.» «د/» "Dr." after normalisation: a title with no gender
+SOFT = set("/:-–—«“\"(")                          # after an honorific these don't end the clause («الدكتورة: كريم»)
 
-_DIAC = re.compile("[ؐ-ًؚ-ٰٟۖ-ۭـ]")   # tashkeel, Quranic marks, dagger alef, tatweel
+_DIAC = re.compile(r"[ؐ-ًؚ-ٰٟۖ-ۭـ]")   # tashkeel, Quranic marks, tatweel
+_INVISIBLE = re.compile(r"[‌‍‎‏‪-‮⁦-⁩]")  # ZWNJ/ZWJ, direction marks
 _FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي"})
 _ABBR_RE = re.compile(r"(?<!\w)(?:د|dr)\s*[./](?=\s*\w)", re.I)
-_CLAUSE = re.compile(r"[^\w\s]+|\n")
+_TOKEN = re.compile(r"\w+|[^\w\s]+|\n")
 
 
 def _clean(s: str) -> str:
-    """Display form: NFKC, tashkeel/tatweel stripped, hashtag underscores as spaces, abbreviated titles as one token."""
-    s = _DIAC.sub("", unicodedata.normalize("NFKC", str(s or ""))).replace("_", " ")     # #الدكتور_كريم
+    """Display form: NFKC, tashkeel/tatweel/invisible marks stripped, hashtag underscores as spaces, abbreviated
+    titles as one token."""
+    s = unicodedata.normalize("NFKC", str(s or ""))
+    s = _DIAC.sub("", _INVISIBLE.sub("", s)).replace("_", " ")     # #الدكتور_كريم
     return _ABBR_RE.sub(f" {ABBR} ", s)
 
 
@@ -53,11 +66,18 @@ def _norm(tok: str) -> str:
 
 def _clauses(text: str) -> list[list[tuple[str, str]]]:
     """[[(display, normalised) token, ...] per clause]."""
-    out = []
-    for c in _CLAUSE.split(_clean(text)):
-        toks = [(("د." if t.lower() == ABBR else t), _norm(t)) for t in c.split()]
-        if toks:
-            out.append(toks)
+    out, cur = [], []
+    for m in _TOKEN.finditer(_clean(text)):
+        t = m.group()
+        if t[0].isalnum() or t[0] == "_":
+            cur.append(("د." if t.lower() == ABBR else t, _norm(t)))
+        elif cur and t != "\n" and set(t) <= SOFT and honorific(cur[-1][1]):
+            continue
+        elif cur:
+            out.append(cur)
+            cur = []
+    if cur:
+        out.append(cur)
     return out
 
 
@@ -102,6 +122,11 @@ def load_people(cfg: dict | None = None) -> tuple[list[dict], list[str]]:
             issues.append(f"profile.json people[{k}] ({p['name']}): gender {p.get('gender')!r} must be male, female or "
                           "unknown; treated as unknown (ask the editor, never guess from the name)")
             g = "unknown"
+        hon = str(p.get("honorific_ar") or "")
+        hg = {h["gender"] for c in _clauses(hon) for _d, t in c if (h := honorific(t)) and h["gender"]}
+        if hg and (hg != {g}):
+            issues.append(f"profile.json people[{k}] ({p['name']}): honorific_ar «{hon}» does not match gender {g!r}: "
+                          "fix whichever is wrong from the client's material (ask the editor if unsure)")
         toks = name_tokens(p["name"])
         if not toks:
             issues.append(f"profile.json people[{k}] ({p['name']}): no usable name word to match")
@@ -110,8 +135,9 @@ def load_people(cfg: dict | None = None) -> tuple[list[dict], list[str]]:
     return people, issues
 
 
-def _who(clause: list, j: int, people: list) -> tuple[int, dict | None]:
-    """The name run starting at token j -> (index after the run, the person it names or None when none/ambiguous)."""
+def _who(clause: list, j: int, people: list) -> tuple[int, dict | None, bool]:
+    """The name run starting at token j -> (index after the run, the person it names or None when none/ambiguous,
+    True when the only name words matched are common function words such as «على»)."""
     known = set().union(*(p["tokens"] for p in people)) if people else set()
     run, k = [], j
     while k < len(clause) and (clause[k][1] in known or clause[k][1] in PARTICLES):
@@ -123,11 +149,19 @@ def _who(clause: list, j: int, people: list) -> tuple[int, dict | None]:
     hits = [(len(p["tokens"] & set(run)), p) for p in people]
     best = max((n for n, _p in hits), default=0)
     if not best:
-        return j, None
+        return j, None, False
     top = [p for n, p in hits if n == best]
     if len({p["gender"] for p in top}) > 1:
-        return k, None                           # two people with these words and different genders: can't tell
-    return k, top[0]
+        return k, None, False                    # two people with these words and different genders: can't tell
+    return k, top[0], (top[0]["tokens"] & set(run)) <= FUNCTION_WORDS
+
+
+def _after_titles(clause: list, i: int) -> int:
+    """Index of the first token after the honorific at i and any honorifics chained to it («الأستاذة الدكتور كريم»)."""
+    j = i + 1
+    while j < len(clause) and honorific(clause[j][1]):
+        j += 1
+    return j
 
 
 def _form(stem: str, gender: str, article: bool) -> str:
@@ -145,25 +179,30 @@ def check_text(where: str, text: str, people: list) -> tuple[list[str], list[str
             h = honorific(tok)
             if not h:
                 continue
-            j = i + 1
-            while j < len(clause) and clause[j][1] == ABBR:
-                j += 1
-            end, p = _who(clause, j, people)
+            end, p, vague = _who(clause, _after_titles(clause, i), people)
             if p is None:
                 continue
             said = " ".join(d for d, _t in clause[i:end])
             g = p["gender"]
             if h["gender"] and g in ("male", "female") and h["gender"] != g:
-                errors.append(f"{where}: «{said}» — {p['name']} is {g} in the client profile (people[]): write "
-                              f"«{_form(h['stem'], g, h['article'])}», not «{disp}»")
-            elif h["gender"] and g == "unknown":
+                fix = f"write «{_form(h['stem'], g, h['article'])}», not «{disp}»"
+                if vague:
+                    words = " ".join(d for d, t in clause[i + 1:end] if t in p["tokens"])
+                    warnings.append(f"{where}: «{said}» — «{words}» is also a common word; if it is {p['name']}, they "
+                                    f"are {g} in the client profile (people[]): {fix}")
+                else:
+                    errors.append(f"{where}: «{said}» — {p['name']} is {g} in the client profile (people[]): {fix}")
+            elif h["gender"] and g == "unknown" and not vague:
                 warnings.append(f"{where}: «{said}» — the gender of {p['name']} is unknown in the client profile: ask "
                                 "the editor and record it in people[] (or write «د.» / the name alone); never guess "
                                 "it from the name")
+            if vague:
+                continue
             verbs = []
-            if i > 0 and not h["object"]:
+            if i > 0 and not h["object"] and not honorific(clause[i - 1][1]):
                 verbs.append(clause[i - 1])
-            if i == 0 and end < len(clause):
+            # «الدكتور كريم قالت الدكتورة سارة»: the verb after the name has a new subject
+            if i == 0 and end < len(clause) and not (end + 1 < len(clause) and honorific(clause[end + 1][1])):
                 verbs.append(clause[end])
             for vd, vt in verbs:
                 vg = VERB_GENDER.get(vt)
@@ -182,3 +221,32 @@ def check_many(items, people: list) -> tuple[list[str], list[str]]:
         errors += e
         warnings += w
     return errors, warnings
+
+
+def check_nameless(where: str, text: str, people: list) -> list[str]:
+    """Warnings for an honorific with no known name when every profile person has the other gender («صور الدكتورة
+    المعتمدة» for an all-male profile: the incident's own sentence). Nothing when genders are mixed or unknown."""
+    genders = {p["gender"] for p in people}
+    if len(genders) != 1 or "unknown" in genders or not text:
+        return []
+    g = genders.pop()
+    out = []
+    for clause in _clauses(text):
+        for i, (disp, tok) in enumerate(clause):
+            h = honorific(tok)
+            if not h or not h["gender"] or h["gender"] == g:
+                continue
+            if _who(clause, _after_titles(clause, i), people)[1] is None:
+                out.append(f"{where}: «{disp}» with no known name, but everyone in the client profile (people[]) is "
+                           f"{g}: write «{_form(h['stem'], g, h['article'])}», or name the person and add them to "
+                           "people[] if they are someone else")
+    return out
+
+
+def profile_notice(root=None) -> str | None:
+    """The `reel next` hint when the client has a profile but no people[] (the gender checks have nothing to use)."""
+    from .common import load_config, profile_dirs
+    if not profile_dirs(root) or load_config("profile.json").get("people"):
+        return None
+    return ("fill people[] in reel-profile/profile.json (name, gender, honorifics, from the client's material only) — "
+            "gender/honorific checks are off until then")

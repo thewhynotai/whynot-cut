@@ -25,6 +25,8 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
      Every video of this client reuses it; `reel next` flags it when the reference edits change.
 5. Review what came back. Every brand or style statement must cite a file in `assets/` or `data/`.
    Missing information stays "unavailable". Fonts not installed are a blocker to report, never a silent substitution.
+   In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
+   `profile.json`). Until a person's gender is known write «د.» or the name, and ask the editor.
 6. Tell the editor what was found, what is missing (fonts to install, HEX codes, approved name-card wording), and that
    `/whynot-cut:edit` is ready.
 

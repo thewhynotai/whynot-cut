@@ -21,7 +21,12 @@
   captions, Shorts, thumbnail text) give an **error** for الدكتور/الدكتورة, الأستاذ/الأستاذة, الشيخ/الشيخة or
   المهندس/المهندسة of the wrong gender before a person's name, a **warning** for a gendered honorific with a person
   whose gender is `unknown`, and a warning for a past-tense verb of the other gender (قال/قالت ...) next to the
-  mention. A real run had written «الدكتورة» for a male client from his first name.
+  mention. A real run had written «الدكتورة» for a male client from his first name. Review round 1: a name word
+  that is also a common word after folding («على» vs علي, «مني» vs منى) gives a warning, not an error; `/ : - « “ (`
+  right after an honorific and invisible direction marks/ZWJ/ZWNJ don't hide the name; chained honorifics («الأستاذة
+  الدكتور كريم») are each checked; `honorific_ar` that contradicts `gender` is reported; description link labels are
+  checked; `reel plan` warns on a nameless «الدكتورة» when everyone in `people[]` is male (and the mirror case); the
+  lead skills (start, new-client, edit, podcast) take «الدكتور/الدكتورة» and he/she only from `people[]`.
 
 ### Changed
 - No real client ships in the product: the real client's profile folder was removed from `profiles/`. The plugin now
@@ -136,6 +141,11 @@
   lie under `clients_root`; they are recognised automatically. Any other existing client folder (only `assets/` and
   `data/`) is no longer protected until it gets the marker: run `reel doctor --fix --root "<client folder>"` (or
   `reel doctor --fix` inside it); `reel doctor` lists such folders under `client_markers.unprotected`.
+- Existing client profiles have no `people[]`, so the gender/honorific checks in `reel plan` and `reel publish-check`
+  are off for them until it is filled: `reel next` and `reel episode-next` show the notice "fill people[] in
+  reel-profile/profile.json …". Add each person (name, role, gender, honorific_ar, honorific_en, pronouns) to
+  `output/client_database/reel-profile/profile.json` from the client's own material; `unknown` until the editor
+  confirms.
 
 ## 2.2.1 — 2026-10-11 · Motion mode polish, client folders with Arabic names, field-test round 4
 The minor findings of the 2.2.0 review, two bugs found by a live run from a client folder named in Arabic, and the gaps

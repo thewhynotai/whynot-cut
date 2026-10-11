@@ -577,6 +577,7 @@ def cmd_next(a):
         out(motion_next(p))
         return
     from lib import ref_style
+    from lib.people import profile_notice as people_notice
     rs = ref_style.next_step(p)     # Stage 5 is client-level: author once, reuse, flag when the references change
     # references are measured per client: a video that already holds its copy of the style needs no ref-analyze
     need_ref = _has_reference_videos(p) and rs["video"]["state"] not in ("current", "legacy")
@@ -633,7 +634,7 @@ def cmd_next(a):
     out({"status": status, "profile": active_profile(p.root), "next": todo[0] if todo else "done",
          "remaining": todo, "stale": stale,
          "reference_style": {"state": rs["client"]["state"], "video": rs["video"]["state"], "message": rs["client"]["message"]},
-         "notices": rs["notices"]})
+         "notices": rs["notices"] + [n for n in (people_notice(p.root),) if n]})
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}

@@ -144,6 +144,8 @@ There is no rendered final video unless the editor made one.
 - Never invent client facts, brand rules, speech, timestamps, medical claims, music or licences. Missing means "unavailable".
 - Every graphic and cut cites exact transcript evidence (the planner rejects evidence that isn't in the transcript). Keep hedges.
 - Medical statements on screen → `approval_required: true`. Words flagged uncertain never go on a graphic.
+- In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
+  `profile.json`). Until a person's gender is known write «د.» or the name.
 - **Premiere is the deliverable.** After Effects and Photoshop are opt-in extras, used only when the editor asks (`/whynot-cut:adobe-extras`).
 - Don't change Adobe security preferences (including macOS `defaults write com.adobe.*`), the Windows registry or
   system settings. Don't install software yourself; `reel setup` covers the engine. Don't delete or overwrite outside

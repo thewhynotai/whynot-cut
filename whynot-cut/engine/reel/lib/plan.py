@@ -579,11 +579,13 @@ def compile_plan(paths: Paths) -> dict:
         warnings.append(f"{len(flagged)} uncertain word(s) stay in the captions as heard until the editor confirms "
                         "them: " + ", ".join(f"#{f['id']} {f['word']}" for f in flagged[:8]))
     # an on-screen honorific must match the person's gender in the profile's people[] («الدكتورة» for a man = error)
-    from .people import check_many, load_people
+    from .people import check_many, check_nameless, load_people
     ppl, p_issues = load_people()
-    p_err, p_warn = check_many([(e["event_id"], s) for e in events for s in onscreen_strings(e["params"])], ppl)
+    shown = [(e["event_id"], s) for e in events for s in onscreen_strings(e["params"])]
+    p_err, p_warn = check_many(shown, ppl)
     errors += p_err
-    warnings += p_issues + p_warn
+    # and a nameless «الدكتورة» when everyone in people[] is male (or the mirror): the incident's own wording
+    warnings += p_issues + p_warn + [w for where, s in shown for w in check_nameless(where, s, ppl)]
     ok = not errors
     write_json(paths.p("01_analysis/plan-validation.json"), {"generated": now_iso(), "ok": ok,
                "errors": errors, "warnings": warnings, "decisions": len(ed.get("decisions", [])),

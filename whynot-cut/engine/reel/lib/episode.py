@@ -376,9 +376,12 @@ def episode_next(ep: EpisodePaths) -> dict:
         reels[rp.video_id] = load_status(rp).get("status") if rp.project.exists() else "not created"
     names = [s.split(" (")[0] for s in stale]
     remaining = stale + [n for n in todo if n not in names]
+    from .people import profile_notice
+    notices = [n for n in (profile_notice(ep.root),) if n]
     return {"episode_id": ep.episode_id, "state": _episode_state(ep), "next": remaining[0] if remaining else "done",
             "remaining": remaining, "stale": stale, "reels": reels,
-            "reels_hint": "each reel resumes with `reel next --video-id <reel id>`" if reels else None}
+            "reels_hint": "each reel resumes with `reel next --video-id <reel id>`" if reels else None,
+            "notices": notices}
 
 
 # --------------------------------------------------------------------------- chunked transcription

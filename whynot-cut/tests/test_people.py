@@ -59,13 +59,13 @@ class TestHonorificGender(unittest.TestCase):
             self.assertEqual(len(errs), 1, (fem, errs))
         for masc in ("الأستاذ", "الشيخ", "المهندس"):
             self.assertEqual(run(f"{masc} كريم"), ([], []), masc)
-            errs, _w = run(f"{masc} منى")
+            errs, _w = run(f"{masc} منى إكزامبل")          # «منى» alone folds to «مني» ("from me"): see round 1
             self.assertEqual(len(errs), 1, (masc, errs))
 
     def test_female_correct_and_wrong(self):
         self.assertEqual(run("الدكتورة منى إكزامبل"), ([], []))
         self.assertEqual(run("د. منى"), ([], []))
-        errs, _w = run("الدكتور منى")
+        errs, _w = run("الدكتور منى إكزامبل")
         self.assertEqual(len(errs), 1, errs)
         self.assertIn("female", errs[0])
         self.assertIn("الدكتورة", errs[0])
@@ -107,7 +107,7 @@ class TestHonorificGender(unittest.TestCase):
         self.assertIn("قالت", warns[0])
         self.assertEqual(run("قال الدكتور كريم إن الليزر آمن"), ([], []))
         self.assertEqual(run("قالت الدكتورة منى"), ([], []))
-        errs, warns = run("أكد د. منى إن")
+        errs, warns = run("أكد د. منى إكزامبل إن")
         self.assertEqual((errs, len(warns)), ([], 1))
         errs, warns = run("الدكتور كريم قالت إن الليزر آمن")      # clause start: the verb's subject is the doctor
         self.assertEqual((errs, len(warns)), ([], 1))
@@ -174,12 +174,12 @@ class TestPeopleInPublishCheck(unittest.TestCase):
         self.assertTrue(any(e.startswith("chapter") for e in bad), r["errors"])      # topic titles are copy too
 
     def test_female_correct_passes(self):
-        r = self.check([dict(KARIM, gender="female")], "لقاء مع الدكتورة كريم")
+        r = self.check([dict(KARIM, gender="female", honorific_ar="الدكتورة")], "لقاء مع الدكتورة كريم")
         self.assertTrue(r["ok"], r["errors"])
         self.assertFalse([w for w in r["warnings"] if "كريم" in w], r["warnings"])
 
     def test_unknown_gender_warns(self):
-        r = self.check([dict(KARIM, gender="unknown")], "لقاء مع الدكتورة كريم")
+        r = self.check([dict(KARIM, gender="unknown", honorific_ar="")], "لقاء مع الدكتورة كريم")
         self.assertTrue(r["ok"], r["errors"])
         self.assertTrue(any("كريم" in w and "unknown" in w for w in r["warnings"]), r["warnings"])
 
@@ -210,11 +210,11 @@ class TestPeopleInPlan(unittest.TestCase):
         self.assertTrue(any(e.startswith("GFX_001") and "كريم" in e and "male" in e for e in r["errors"]), r["errors"])
 
     def test_female_correct_passes(self):
-        r = self.plan([dict(KARIM, gender="female")], "الدكتورة كريم سامبل بتحكي عن أول عيادة")
+        r = self.plan([dict(KARIM, gender="female", honorific_ar="الدكتورة")], "الدكتورة كريم سامبل بتحكي عن أول عيادة")
         self.assertTrue(r["ok"], r["errors"])
 
     def test_unknown_gender_warns(self):
-        r = self.plan([dict(KARIM, gender="unknown")], "الدكتورة كريم سامبل بتحكي عن أول عيادة")
+        r = self.plan([dict(KARIM, gender="unknown", honorific_ar="")], "الدكتورة كريم سامبل بتحكي عن أول عيادة")
         self.assertTrue(r["ok"], r["errors"])
         self.assertTrue(any(w.startswith("GFX_001") and "unknown" in w for w in r["warnings"]), r["warnings"])
 
@@ -257,6 +257,157 @@ class TestPeopleInProfilesAndAgents(unittest.TestCase):
             body = (SK / f).read_text(encoding="utf-8")
             self.assertIn("people[]", body, f)
             self.assertIn("gender", body, f)
+
+
+ALI = {"name": "Dr. Ali Hassan / د. علي حسن", "gender": "male"}
+
+
+class TestReviewRound1(unittest.TestCase):
+    """T1.7 review fixes: function-word names, nameless honorifics in plan, punctuation, chained honorifics,
+    honorific_ar vs gender, the `reel next` hint, description link labels."""
+
+    def test_function_word_names_are_only_a_warning(self):
+        for t in ("ردت الدكتورة على سؤال المتابعين", "الدكتورة على حق"):    # «على» folds to the name «علي»
+            errs, warns = run(t, [ALI])
+            self.assertEqual(errs, [], t)
+            self.assertEqual(len(warns), 1, (t, warns))
+            self.assertIn("common word", warns[0])
+        errs, warns = run("الدكتور مني بيقول", [MONA])                    # «مني» = "from me" and the name منى
+        self.assertEqual((errs, len(warns)), ([], 1))
+        errs, _w = run("الدكتورة علي حسن", [ALI])                       # two name words: no doubt left
+        self.assertEqual(len(errs), 1, errs)
+        errs, _w = run("الدكتورة على", [dict(ALI, name="علي")])         # a one-word name that is a function word
+        self.assertEqual(errs, [])
+        self.assertEqual(run("الدكتورة على حق", [dict(ALI, gender="unknown")]), ([], []))
+        self.assertEqual(run("الدكتور علي حسن قال", [ALI]), ([], []))
+
+    def test_verb_after_the_name_with_a_new_subject_is_not_flagged(self):
+        self.assertEqual(run("الدكتور علي حسن قالت الدكتورة سارة", [ALI]), ([], []))
+        self.assertEqual(run("الدكتور علي حسن قالت د. سارة", [ALI]), ([], []))
+
+    def test_punctuation_and_direction_marks_after_the_honorific(self):
+        for t in ("دكتورة/ كريم", "الدكتورة/كريم", "الدكتورة: كريم", "الدكتورة - كريم سامبل", "الدكتورة «كريم سامبل»",
+                  "الدكتورة “كريم”", "الدكتورة‏ كريم", "‫الدكتورة‬ كريم", "الدكتورة‌ كريم",
+                  "⁧الدكتورة كريم⁩", "الدكتو‍رة كريم"):
+            errs, _w = run(t, [KARIM])
+            self.assertEqual(len(errs), 1, (t, errs))
+        for t in ("الدكتور: كريم", "الدكتور/ كريم", "الدكتور - كريم"):
+            self.assertEqual(run(t, [KARIM]), ([], []), t)
+        self.assertEqual(run("الدكتورة سارة: كريم شاطر", [KARIM]), ([], []))   # the colon after a name still ends it
+
+    def test_chained_honorifics(self):
+        errs, _w = run("الأستاذة الدكتور كريم سامبل", [KARIM])
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("الأستاذة", errs[0])
+        errs, _w = run("الأستاذة الدكتورة كريم", [KARIM])
+        self.assertEqual(len(errs), 2, errs)
+        self.assertEqual(run("الأستاذ الدكتور كريم", [KARIM]), ([], []))
+        self.assertEqual(run("الأستاذ د. كريم", [KARIM]), ([], []))
+
+    def test_honorific_ar_must_agree_with_gender(self):
+        from lib.people import load_people
+        for p, n in ((dict(KARIM, honorific_ar="الدكتورة"), 1), (dict(MONA, honorific_ar="الدكتور"), 1),
+                     (dict(NOUR, honorific_ar="الشيخة"), 1), (KARIM, 0), (MONA, 0), (dict(KARIM, honorific_ar="د."), 0),
+                     (dict(KARIM, honorific_ar="الأستاذ الدكتور"), 0)):
+            issues = load_people({"people": [p]})[1]
+            self.assertEqual(len(issues), n, (p, issues))
+        self.assertIn("honorific_ar", load_people({"people": [dict(KARIM, honorific_ar="الدكتورة")]})[1][0])
+
+    def test_nameless_honorific_when_everyone_has_the_other_gender(self):
+        from lib.people import check_nameless, load_people
+
+        def nameless(text, people):
+            return check_nameless("G", text, load_people({"people": people})[0])
+        self.assertEqual(len(nameless("صور الدكتورة المعتمدة", [KARIM, ALI])), 1)
+        self.assertIn("male", nameless("صور الدكتورة المعتمدة", [KARIM])[0])
+        self.assertEqual(len(nameless("الدكتورة سارة", [KARIM])), 1)            # not a known name
+        self.assertEqual(nameless("صور الدكتور المعتمدة", [KARIM]), [])
+        self.assertEqual(nameless("الدكتورة كريم", [KARIM]), [])                # named: check_text's error covers it
+        self.assertEqual(nameless("الدكتورة على حق", [ALI]), [])                # ambiguous: check_text warns once
+        self.assertEqual(nameless("صور الدكتورة", [KARIM, MONA]), [])           # mixed genders: can't tell
+        self.assertEqual(nameless("صور الدكتورة", [KARIM, NOUR]), [])           # someone unknown: can't tell
+        self.assertEqual(nameless("صور الدكتورة", []), [])
+        self.assertEqual(nameless("د. المعتمدة", [KARIM]), [])
+        self.assertEqual(len(nameless("نصيحة الشيخ اليوم", [MONA])), 1)         # the mirror case
+
+    def test_profile_notice_when_people_is_empty(self):
+        import subprocess
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        root = tmp / "CL"
+        for d in ("assets", "data"):
+            (root / d).mkdir(parents=True)
+        cli = [sys.executable, str(SK / "engine/reel/cli.py"), "--root", str(root)]
+        r = subprocess.run(cli + ["client-init", "--id", "cl-test"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+        def notices():
+            r = subprocess.run(cli + ["--video-id", "C0001", "next"], capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)["notices"]
+        self.assertTrue(any("people[]" in n and "off" in n for n in notices()), notices())
+        pj = root / common.CLIENT_PROFILE_REL / "profile.json"
+        prof = json.loads(pj.read_text(encoding="utf-8"))
+        prof["people"] = [KARIM]
+        pj.write_text(json.dumps(prof, ensure_ascii=False), encoding="utf-8")
+        self.assertFalse(any("people[]" in n for n in notices()))
+        from lib.people import profile_notice
+        common.set_context(tmp / "nowhere")                   # no profile at all: `Profile: NONE` says it already
+        self.addCleanup(common.set_context, None)
+        self.assertIsNone(profile_notice())
+
+    def test_episode_next_carries_the_people_notice(self):
+        from lib.episode import EpisodePaths, episode_next
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        root = tmp / "CL"
+        (root / "data").mkdir(parents=True)
+        write_json(root / common.CLIENT_PROFILE_REL / "profile.json", {"id": "cl-test", "people": []})
+        common.set_context(root)
+        self.addCleanup(common.set_context, None)
+        self.assertTrue(any("people[]" in n for n in episode_next(EpisodePaths(root, "EP01"))["notices"]))
+        write_json(root / common.CLIENT_PROFILE_REL / "profile.json", {"id": "cl-test", "people": [KARIM]})
+        self.assertEqual(episode_next(EpisodePaths(root, "EP01"))["notices"], [])
+
+    def test_lead_skills_carry_the_gender_rule(self):
+        for s in ("new-client", "start", "edit", "podcast"):
+            body = (SK / "skills" / s / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[2]
+            self.assertIn("people[]", body, s)
+            self.assertIn("«د.»", body, s)
+            self.assertIn("own messages, tables and file names", body, s)
+
+
+class TestReviewRound1Engine(unittest.TestCase):
+    """Nameless honorific warning in `reel plan`; description link labels in publish-check."""
+    def test_plan_warns_on_a_nameless_feminine_honorific_for_an_all_male_profile(self):
+        import test_podcast as tp
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.addCleanup(common.set_context, None)
+        root, reel, _src = tp.reel_fixture(tmp, "success_story", music=False)
+        from lib.plan import compile_plan
+        write_json(root / common.CLIENT_PROFILE_REL / "profile.json", {"people": [KARIM]})
+        write_json(reel.p("01_analysis/edit-decisions.json"), {"global": {}, "decisions": [
+            tp.decision("EDIT_001", "00:00:00.000", "00:00:06.000", "كلمه0 كلمه1", graphics=[
+                {"id": "GFX_001", "template": "context_card", "start": "00:00:01.000", "end": "00:00:04.000",
+                 "text": "صور الدكتورة المعتمدة"}])]})
+        r = compile_plan(reel)
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertTrue(any(w.startswith("GFX_001") and "male" in w for w in r["warnings"]), r["warnings"])
+
+    def test_description_link_labels_are_checked(self):
+        t = TestPeopleInPublishCheck("test_female_correct_passes")
+        t.setUp()
+        self.addCleanup(t.tearDown)
+        from lib.publish import check
+        write_json(t.root / common.CLIENT_PROFILE_REL / "profile.json", {"people": [KARIM]})
+        pub = t.tp.good_pub()
+        pub["youtube"]["description"]["links"][0]["label"] = "انستجرام الدكتورة كريم"
+        write_json(t.ep.p("publish/publish.json"), pub)
+        write_json(t.ep.p("publish/reels/EP12_R01.json"), t.tp.good_reel())
+        r = check(t.ep)
+        self.assertTrue(any(e.startswith("description link") and "كريم" in e for e in r["errors"]), r["errors"])
+        self.assertFalse([w for w in r["warnings"] if "male" in w and "chapter" not in w], r["warnings"])
 
 
 if __name__ == "__main__":
