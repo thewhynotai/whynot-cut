@@ -116,9 +116,10 @@ function pipelineSection(s: PanelState, t: Strings): string {
   } else {
     const pr = cur.progress;
     const pct = pr && pr.of > 0 ? Math.max(0, Math.min(100, Math.round((pr.n / pr.of) * 100))) : null;
+    // each part is its own element: the row is a flex row, so nothing depends on bdi flowing inline
     const meta: string[] = [];
-    if (pr) meta.push(fmt(t["pipeline.progress"], { n: ltr(pr.n), of: ltr(pr.of) }));
-    if (cur.elapsed_s !== null && cur.elapsed_s !== undefined) meta.push(`${esc(t["pipeline.elapsed"])} ${ltr(clockOf(cur.elapsed_s))}`);
+    if (pr) meta.push(`<span class="meta-item">${fmt(t["pipeline.progress"], { n: ltr(pr.n), of: ltr(pr.of) })}</span>`);
+    if (cur.elapsed_s !== null && cur.elapsed_s !== undefined) meta.push(`<span class="meta-item">${esc(t["pipeline.elapsed"])} ${ltr(clockOf(cur.elapsed_s))}</span>`);
     const cancel =
       cur.state === "running" && cur.request_id
         ? `<button class="btn btn-small btn-secondary" data-action="cancel" data-id="${esc(cur.request_id)}">${esc(t["pipeline.cancel"])}</button>`
@@ -128,7 +129,7 @@ function pipelineSection(s: PanelState, t: Strings): string {
       `<span class="now-state">${esc(t[`step.state.${cur.state}` as StringKey])}</span>${cancel}</div>` +
       (pr && pr.step ? `<div class="now-step">${auto(pr.step)}</div>` : "") +
       (pct !== null ? `<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="progress-fill" style="width:${pct}%"></div></div>` : "") +
-      (meta.length ? `<div class="now-meta">${meta.join(' <span class="sep">·</span> ')}</div>` : "") +
+      (meta.length ? `<div class="now-meta">${meta.join('<span class="sep">·</span>')}</div>` : "") +
       `</div>`;
   }
   return `<section class="sec" aria-label="${esc(t["section.pipeline"])}"><h2 class="sec-title">${esc(t["section.pipeline"])}</h2><ol class="steps">${items}</ol>${now}</section>`;
@@ -203,7 +204,7 @@ function actionsSection(s: PanelState, t: Strings, ui: UiState): string {
     `<button class="btn btn-secondary btn-act" data-action="${action}"${enabled && !off ? "" : " disabled"}>${esc(t[label])}</button>`;
   const rebuildCard = ui.confirmRebuild
     ? `<div class="card card-warn" role="alertdialog" aria-label="${esc(t["rebuild.title"])}"><div class="lbl lbl-warn">${esc(t["rebuild.title"])}</div>` +
-      `<p>${esc(t["rebuild.warning"])}</p><p>${esc(t["rebuild.backup"])} ${ltr("name_prev_date-time.prproj")}</p>` +
+      `<p>${esc(t["rebuild.warning"])}</p><p>${esc(t["rebuild.backup"])} <span class="cmd">${ltr("name_prev_date-time.prproj")}</span></p>` +
       `<div class="btn-row"><button class="btn btn-primary" data-action="rebuild-confirm"${off ? " disabled" : ""}>${esc(t["rebuild.confirm"])}</button>` +
       `<button class="btn btn-secondary" data-action="rebuild-cancel">${esc(t["rebuild.cancel"])}</button></div></div>`
     : "";

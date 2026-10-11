@@ -313,3 +313,31 @@ test("offline banner: reel doctor is a command chip with the bdi inside", () => 
   assert.match(rule(css, ".cmd"), /white-space: nowrap/);
   assert.match(rule(css, ".cmd"), /font-family: Consolas/);
 });
+
+// ---- UXP does not flow <bdi> inline by default: rows that hold bdi must not depend on it ----
+
+test("CSS: bdi is inline inside the panel; rows with bdi children are explicit flex rows", () => {
+  const css = panelCss();
+  assert.match(rule(css, ".twn-panel bdi"), /display: inline(?!-)/);
+  for (const sel of [".who", ".now-meta", ".log-line"]) {
+    const r = rule(css, sel);
+    assert.match(r, /display: flex/, sel);
+    assert.match(r, /flex-direction: row/, sel);
+    assert.match(r, /align-items: baseline/, sel);
+  }
+  for (const sel of [".who", ".now-meta"]) assert.match(rule(css, sel), /flex-wrap: wrap/, sel);
+  assert.match(rule(css, ".cmd"), /display: inline-flex/);
+  assert.match(rule(css, ".cmd"), /max-width: 100%/);
+  assert.match(rule(css, ".sep"), /margin: 0 3px/, "symmetric, so it is right in RTL too");
+});
+
+test("markup: client/item, progress/elapsed and log rows put their parts in separate elements", () => {
+  const s = sampleState("en", "building");
+  s.log = [{ ts: "10:00:00", level: "info", text: "reel plan --root X" }];
+  const html = render(s, EN, { ...initialUi(), logOpen: true });
+  assert.match(html, /<div class="who"><bdi>PODCAST-TEST<\/bdi> <span class="sep">\u00b7<\/span> <bdi dir="ltr">EP01_R03<\/bdi><\/div>/);
+  assert.match(html, /<div class="now-meta"><span class="meta-item">[^]*?<\/span><span class="sep">\u00b7<\/span><span class="meta-item">[^]*?<\/span><\/div>/);
+  assert.match(html, /<li class="log-line log-info"><span class="log-ts">10:00:00<\/span><bdi dir="ltr">reel plan --root X<\/bdi><\/li>/);
+  const ar = render(sampleState("ar", "building"), AR, initialUi());
+  assert.match(ar, /<span class="meta-item">[^<]*<bdi dir="ltr">31<\/bdi>[^<]*<bdi dir="ltr">47<\/bdi><\/span>/);
+});
