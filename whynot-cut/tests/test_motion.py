@@ -97,6 +97,36 @@ class TestBridge(unittest.TestCase):
         raw = data_files[0].read_bytes()
         self.assertTrue(all(b < 128 for b in raw), "data file must be pure ASCII")
 
+    def test_install_never_downgrades(self):
+        """Peer request: `reel setup`/`ppro-install` from an older plugin silently put bridge 3.0.0 back over 3.1.0 (and
+        dropped the After Effects host). A newer installed bundle is kept unless --force."""
+        from lib import plat, ppro_bridge as pb
+        saved = (pb.EXT_DIR, pb.QUEUE, pb.SCRIPTS, pb.LIB, plat.player_debug_mode)
+        pb.EXT_DIR, pb.QUEUE, pb.SCRIPTS = self.tmp / "ext" / pb.EXT_ID, self.tmp / "ppro-queue", self.tmp / "ppro-scripts"
+        pb.LIB = pb.SCRIPTS / pb.LIB.name                                 # never the real engine-home scripts folder
+        plat.player_debug_mode = lambda: {}
+        cfg = pb.EXT_DIR / "bridge-config.json"
+        try:
+            pb.EXT_DIR.mkdir(parents=True)
+            cfg.write_text(json.dumps({"version": "9.0.0"}), encoding="utf-8")
+            r = pb.install()
+            self.assertTrue(r.get("skipped"), r)
+            self.assertTrue("9.0.0" in r["detail"] and pb.BRIDGE_VERSION in r["detail"] and "--force" in r["detail"], r)
+            self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], "9.0.0")
+            cfg.unlink()                                                    # manifest only (no bridge-config.json)
+            (pb.EXT_DIR / "CSXS").mkdir()
+            (pb.EXT_DIR / "CSXS/manifest.xml").write_text('<ExtensionManifest ExtensionBundleVersion="9.1.0">',
+                                                         encoding="utf-8")
+            self.assertTrue(pb.install().get("skipped"))
+            r = pb.install(force=True)
+            self.assertFalse(r.get("skipped"), r)
+            self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], pb.BRIDGE_VERSION)
+            cfg.write_text(json.dumps({"version": "3.0.0"}), encoding="utf-8")        # older: replaced without --force
+            self.assertFalse(pb.install().get("skipped"))
+            self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], pb.BRIDGE_VERSION)
+        finally:
+            pb.EXT_DIR, pb.QUEUE, pb.SCRIPTS, pb.LIB, plat.player_debug_mode = saved
+
     def test_queue_timeout(self):
         from lib import cep_queue
         with FakePanel(self.q, mute=True):

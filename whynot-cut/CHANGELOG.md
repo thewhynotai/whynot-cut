@@ -39,18 +39,21 @@ project by Claude through the WhyNot Cut Bridge, read back, rendered and QC'd fr
   name; the fallback-font build re-fits the layout (for the job only — the approved plan keeps the brand fonts);
   sequence dialogue is content-addressed (AE keeps imported audio open on Windows); 24-bit dialogue decodes through
   ffmpeg; hero frames follow every spoken word.
+- Premiere 26.5.2 on bundle 3.1.0 (host PPRO): `ppro-frames` for the podcast reel EP02TEST_R02 exported Premiere's
+  own 17 frames through the shared bridge (another open project untouched), QC ok.
 
 **Not verified live**
-- Premiere on bundle 3.1.0 beyond a `ppro-status` ping (its code path is unchanged and its tests pass); macOS; a
-  project folder with an Arabic name through ExtendScript `File()` (tested as a JSON round trip only); a build in the
-  client's brand font (IBM Plex Sans Arabic was not installed — the live build used the Segoe UI Bold fallback).
+- A Premiere `ppro-build` on bundle 3.1.0 (its code path is unchanged and its tests pass); macOS; a project folder
+  with an Arabic name through ExtendScript `File()` (tested as a JSON round trip only); a build in the client's brand
+  font (IBM Plex Sans Arabic was not installed — the live build used the Segoe UI Bold fallback).
 
 **Engine**
 - New: `cep_queue`, `ae_bridge`, `ae_probe`, `ae_render`, `motion_config`, `motion_icons`, `motion_library`,
   `motion_script`, `motion_timing`, `motion_layout`, `motion_plan`, `motion_audio`, `motion_animatic`,
   `motion_build`, `motion_readback`, `motion_render`, `motion_qc`, `motion_cli`; `templates/after_effects/
   nh_ae_bridge.jsx`, `nh_motion_lib.jsx`; `config/defaults/motion.json`; recipe `motion` blocks.
-- `ppro_bridge` keeps its API (queue protocol moved to `cep_queue`).
+- `ppro_bridge` keeps its API (queue protocol moved to `cep_queue`). `reel ppro-install` / `reel setup` keep an
+  installed bridge that is newer than the plugin's (reported as skipped); `ppro-install --force` replaces it.
 
 ### Client-level reference style
 The reference edits in `data/` belong to the client, so their interpretation is now written once per client and

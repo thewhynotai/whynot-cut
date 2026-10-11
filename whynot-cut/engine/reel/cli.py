@@ -405,7 +405,7 @@ def cmd_verify(a):
 
 def cmd_ppro_install(a):
     from lib.ppro_bridge import install
-    out(install())
+    out(install(force=getattr(a, "force", False)))
 
 
 def cmd_ppro_status(a):
@@ -808,6 +808,8 @@ def main():
         motion_cli.add_args(name, sp)
         if name in ("preflight", "transcribe"):
             sp.add_argument("--footage")
+        if name == "ppro-install":
+            sp.add_argument("--force", action="store_true", help="replace an installed bridge that is newer")
         if name == "transcribe":
             sp.add_argument("--model", default=None, help="default: preferences whisper_model, else large-v3")
             sp.add_argument("--language", default=None)

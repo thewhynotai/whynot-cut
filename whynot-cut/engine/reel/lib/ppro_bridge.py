@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -44,7 +45,32 @@ def sync_scripts() -> dict:
     return {"scripts_dir": str(SCRIPTS), "synced": changed, "sha256": _sha(LIB)[:12]}
 
 
-def install() -> dict:
+def installed_version() -> str | None:
+    """The installed bundle's version: bridge-config.json "version", else the manifest's ExtensionBundleVersion."""
+    try:
+        v = json.loads((EXT_DIR / "bridge-config.json").read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError):
+        v = None
+    if not v:
+        try:
+            m = re.search(r'ExtensionBundleVersion="([^"]+)"', (EXT_DIR / "CSXS/manifest.xml").read_text(encoding="utf-8"))
+            v = m.group(1) if m else None
+        except OSError:
+            v = None
+    return v
+
+
+def _ver(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3])
+
+
+def install(force: bool = False) -> dict:
+    cur = installed_version()
+    if cur and not force and _ver(cur) > _ver(BRIDGE_VERSION):
+        # an older plugin (e.g. `reel setup` from 2.1.1) must not put its bridge back over a newer one
+        return {"installed": str(EXT_DIR), "skipped": True, "installed_version": cur, "version": BRIDGE_VERSION,
+                "detail": f"installed bridge {cur} is newer than {BRIDGE_VERSION} (this plugin's): kept it. "
+                          "`reel ppro-install --force` replaces it."}
     src = TEMPLATES_DIR / "premiere/cep_bridge"
     EXT_DIR.parent.mkdir(parents=True, exist_ok=True)
     if EXT_DIR.exists():
