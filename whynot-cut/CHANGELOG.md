@@ -100,6 +100,14 @@
   copies.
 
 ### Fixed
+- Guard minors from the Phase 1 gate (T2.19). Bash: a `\` before CRLF escapes the CR and is no line continuation (the
+  next line runs on its own and is checked); `\$'` and `$$'` open no ANSI-C quote; a continued line that starts with
+  `#` (`ls output\` + `#; rm -rf data` is `ls output#; rm -rf data`) is not a comment; `<<` inside `$(( ))` / `(( ))`
+  is a shift, not a heredoc that hides the following lines. PowerShell: a backtick before CRLF continues the line.
+  The SessionStart "protection may be OFF" warning no longer fires after a session that only read or chatted (then
+  `/clear` or a new session): it needs the previous session's transcript, or one of its subagents', to show a Bash,
+  PowerShell, Write or Edit call made since that session started; `last-session-start` now also records the
+  session's transcript path.
 - Contact sheets lay out exactly the tiles they are given (G73): the previews sheet had six columns for three
   composites, half of it black. Sheets with fewer tiles than columns are now that many tiles wide.
 - Resource leaks (MI-9): every preview probe left a 2-4 MB temp PNG and an open descriptor in `%TEMP%` (the frame now
@@ -371,7 +379,7 @@ first.
   `lib/font_roles.py`.
 - G68 highlight legibility: `publish-thumbnail` and preview stills measure a brand-coloured highlight against the frame
   behind it (WCAG contrast, motion.json thresholds: 3.0 at 64 px and larger, 4.5 below). Below the threshold the
-  highlight is drawn in white/paper and the output warns: the field test's brown #81613D on a warm set measured 1.5:1.
+  highlight is drawn in white/paper and the output warns: a client's dark-brown brand colour on a warm set measured 1.5:1.
   Readable brand colours are kept. New output keys: `highlights` (thumbnails) and `warnings` (previews). Not checked
   yet: unboxed caption stills and decorative bars.
 - G63 `reels-select --adjust Rxx:in=|out=`: an explicit editor time snaps to the nearest word start or end (with the

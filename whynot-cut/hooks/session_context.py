@@ -8,13 +8,16 @@ Speaks up when the session opens
   * in the clients folder (setting `clients_root`, or a folder whose preferences file says so): which clients it holds;
   * in a folder that has a WhyNot Cut preferences file but no clients yet: point to /whynot-cut:start.
 Whenever it speaks, it first warns loudly if the guard heartbeat (${CLAUDE_PLUGIN_DATA}/guard-ok, written by
-guard.py) is missing or older than the previous SessionStart: sessions ran but the read-only guard did not.
+guard.py) is missing or older than the previous SessionStart while that session's transcript shows a guarded tool
+call since its start: tools ran but the read-only guard did not (a session that only read or chatted is no alarm).
 Stdlib only; never fails the session (any error -> silent exit 0).
 """
 import json
 import os
+import re
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.dont_write_bytecode = True        # the plugin folder stays clean of __pycache__
@@ -33,36 +36,86 @@ def client_root(start: Path):
     return next((p for p in [start, *start.parents] if is_client(p)), None)
 
 
-PREV_START: list = []                 # [time of the previous SessionStart or None], filled once by main()
+PREV_START: list = []        # [(time, transcript path or None) of the previous SessionStart, or None], set by main()
+# the tools the PreToolUse guard inspects (hooks.json matcher; a test keeps the two equal)
+GUARDED_TOOLS = ("Bash", "PowerShell", "Write", "Edit", "MultiEdit", "NotebookEdit")
+_GUARDED_NAME = re.compile(rb'"name"\s*:\s*"(?:' + "|".join(GUARDED_TOOLS).encode() + rb')"')
+_STAMP = re.compile(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)")
 
 
-def note_session_start():
-    """Record this SessionStart in ${CLAUDE_PLUGIN_DATA}/last-session-start and return the previous one (None: no
-    session recorded yet, i.e. a new install)."""
+def note_session_start(transcript: str = ""):
+    """Record this SessionStart (time + this session's transcript path) in ${CLAUDE_PLUGIN_DATA}/last-session-start and
+    return the previous one as (time, transcript or None); None: no session recorded yet, i.e. a new install. A file
+    from before T2.19 holds the time only (transcript None: the warning keeps its old rule once)."""
     d = os.environ.get("CLAUDE_PLUGIN_DATA")
     if not d:
         return None
     f = Path(d) / "last-session-start"
     try:
-        prev = float(f.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
+        lines = f.read_text(encoding="utf-8").splitlines()
+        prev = (float(lines[0].strip()), (lines[1].strip() if len(lines) > 1 else "") or None)
+    except (OSError, ValueError, IndexError):
         prev = None
     try:
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(str(time.time()), encoding="utf-8")
+        f.write_text(f"{time.time()}\n{transcript}\n", encoding="utf-8")
     except OSError:
         pass
     return prev
+
+
+def _epoch(stamp):
+    """Transcript timestamp `2026-10-11T20:51:15.355Z` (UTC) -> seconds; None when absent or unreadable."""
+    m = _STAMP.match(str(stamp))                  # not strptime: its first call imports _strptime (slow at startup)
+    try:
+        return datetime(*map(int, m.groups()), tzinfo=timezone.utc).timestamp() if m else None
+    except ValueError:
+        return None
+
+
+def guarded_calls_since(transcript: str, since: float) -> bool:
+    """True when the session's transcript, or one of its subagents' (<transcript stem>/subagents/*.jsonl), records a
+    call of a guarded tool made at or after `since` (a resumed or compacted transcript also holds older turns). A
+    missing transcript (a session closed before its first message) holds none. Reads line by line, stops at the
+    first hit; only lines naming a guarded tool are parsed."""
+    t = Path(transcript)
+    try:
+        subs = sorted((t.parent / t.stem / "subagents").glob("*.jsonl"))
+    except OSError:
+        subs = []
+    for f in [t, *subs]:
+        try:
+            with open(f, "rb") as fh:
+                for line in fh:
+                    if b'"tool_use"' not in line or not _GUARDED_NAME.search(line):
+                        continue
+                    k = line.rfind(b'"timestamp":"')     # the record's own stamp (its last key): older turns are
+                    early = _epoch(line[k + 13:k + 32].decode("ascii", "replace")) if k >= 0 else None
+                    if early is not None and early < since - 2:          # skipped without parsing the line
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        calls = [c for c in rec["message"]["content"] if isinstance(c, dict)
+                                 and c.get("type") == "tool_use" and c.get("name") in GUARDED_TOOLS]
+                    except (ValueError, KeyError, TypeError):
+                        continue
+                    when = _epoch(rec.get("timestamp"))
+                    if calls and (when is None or when >= since - 2):
+                        return True
+        except OSError:
+            continue
+    return False
 
 
 def heartbeat_warning() -> str:
     """Loud first sentence when the guard did not run since the previous session started: ${CLAUDE_PLUGIN_DATA}/
     guard-ok (written by guard.py on every tool call it inspects) is missing or older than that session's start.
     Not hooks-ok: run_python.sh touches that right before running this hook (gate G1). Not a fixed age either: a
-    weekend without sessions is no alarm (fix round 2, N4). No previous session recorded, or no CLAUDE_PLUGIN_DATA:
-    silent."""
+    weekend without sessions is no alarm (fix round 2, N4). Nor a session that only read or chatted (then /clear or a
+    new session): the guard had nothing to inspect, so the previous session's transcript must show a guarded tool call
+    since its start (T2.19). No previous session recorded, or no CLAUDE_PLUGIN_DATA: silent."""
     d = os.environ.get("CLAUDE_PLUGIN_DATA")
-    prev = PREV_START[0] if PREV_START else None
+    prev, transcript = (PREV_START[0] if PREV_START and PREV_START[0] else (None, None))
     if not d or prev is None:
         return ""
     f = Path(d) / "guard-ok"
@@ -71,6 +124,8 @@ def heartbeat_warning() -> str:
     except OSError:
         beat = None
     if beat is not None and beat >= prev:
+        return ""
+    if transcript and not guarded_calls_since(transcript, prev):
         return ""
     state = "is missing" if beat is None else (f"was last written {(time.time() - beat) / 3600:.0f} h ago, before "
                                                 f"the previous session started")
@@ -217,15 +272,17 @@ def main():
     import settings as _settings
     import client_marker as _client_marker
     plat, settings, client_marker = _plat, _settings, _client_marker
-    PREV_START.append(note_session_start())
-    try:
-        export_options()
-    except OSError:
-        pass
     try:
         data = json.load(sys.stdin)
     except Exception:
         data = {}
+    if not isinstance(data, dict):
+        data = {}
+    PREV_START.append(note_session_start(str(data.get("transcript_path") or "")))
+    try:
+        export_options()
+    except OSError:
+        pass
     cwd = Path(plat.native_path(data.get("cwd") or os.getcwd()))
     st = settings.load(cwd)
     home = plat.engine_home()

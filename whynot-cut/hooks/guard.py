@@ -629,12 +629,14 @@ def split_commands(cmd: str, escapes: bool = True) -> list[tuple[list[str], bool
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
-def scan_sh_line(line: str, q: str | None = None) -> tuple[str, str | None, list[int], bool]:
+def scan_sh_line(line: str, q: str | None = None, after: str = "") -> tuple[str, str | None, list[int], bool]:
     """One physical line -> (the line without its `# comment`, the quote still open at its end, where `<<` stands
     outside quotes, whether a comment was cut). `#` starts a comment only at the start of a word outside quotes (not
     in `a#b`, `${#x}`, `$#`, '#...', "#..." or $'#...'); `q` is the quote a previous line left open (a multi-line
-    string): "'", '"' or "$'" (ANSI-C quoting, where \\' does not close it)."""
-    i, n, heredocs = 0, len(line), []
+    string): "'", '"' or "$'" (ANSI-C quoting, where \\' does not close it; `\\$'` and `$$'` open a plain quote).
+    `after` is the character this line is glued to by a `\\`-newline continuation (T2.19: `ls output\\` + `#; rm`
+    is `ls output#; rm`, no comment). `<<` inside `$(( ))` / `(( ))` is a shift, not a heredoc (T2.19)."""
+    i, n, heredocs, parens = 0, len(line), [], []      # parens: "A" for an open (( / $(( , "(" otherwise
     while i < n:
         c = line[i]
         if q == "'":
@@ -647,14 +649,26 @@ def scan_sh_line(line: str, q: str | None = None) -> tuple[str, str | None, list
                 q = None
         elif c == "\\":
             i += 1
-        elif c == "'" and i and line[i - 1] == "$":
+        elif line.startswith("$$", i):
+            i += 1
+        elif line.startswith("$'", i):
             q = "$'"
+            i += 1
         elif c in "'\"":
             q = c
-        elif c == "#" and (i == 0 or line[i - 1] in " \t;&|()<>"):
+        elif c == "#" and (line[i - 1] if i else after[-1:]) in ("", *" \t;&|()<>"):
             return line[:i], None, heredocs, True
+        elif line.startswith("$((", i) or (line.startswith("((", i) and (i == 0 or line[i - 1] in " \t;&|(")):
+            parens.append("A")
+            i += 2 if c == "$" else 1
+        elif c == "(":
+            parens.append("(")
+        elif c == ")" and parens:
+            if parens.pop() == "A" and line.startswith("))", i):
+                i += 1
         elif line.startswith("<<", i) and not line.startswith("<<<", i):
-            heredocs.append(i)
+            if "A" not in parens:
+                heredocs.append(i)
             i += 1
         i += 1
     return line, q, heredocs, False
@@ -665,7 +679,8 @@ def shell_lines(cmd: str) -> tuple[str, list[tuple[str, str]]]:
     command (newlines separate commands in a shell; shlex would otherwise glue lines together). Returns the command
     text and [(line that opened the heredoc, body)] so a body fed to a shell can be checked as commands.
     Each physical line loses its comment first (C1); only then does a trailing backslash join the next line, so a
-    comment that ends in `\\` never continues (bash runs the next line). `<<` inside quotes opens no heredoc."""
+    comment that ends in `\\` never continues (bash runs the next line). `<<` inside quotes opens no heredoc.
+    A `\\` before CRLF escapes the CR, not the newline: no continuation (T2.19)."""
     out, delim, docs, body, opener, q, join = [], None, [], [], "", None, False
     for raw in cmd.split("\n"):
         if delim is not None:
@@ -676,10 +691,11 @@ def shell_lines(cmd: str) -> tuple[str, list[tuple[str, str]]]:
                 body.append(raw)
             continue
         inside = q is not None                   # this line continues a quoted string: keep its newline
-        code, q, heredocs, commented = scan_sh_line(raw.rstrip("\r"), q)
+        code, q, heredocs, commented = scan_sh_line(raw.rstrip("\r"), q, out[-1] if join and out else "")
         cont = not commented and q not in ("'",) and (len(code) - len(code.rstrip("\\"))) % 2 == 1
         if cont:
-            code = code[:-1]                     # `\` + newline: the next line continues this one
+            code = code[:-1]                     # `\` + newline: the next line continues this one ...
+            cont = not raw.endswith("\r")        # ... `\` + CRLF: an escaped CR (dropped), the LF still ends it
         for k in heredocs:
             m = _HEREDOC.match(code, k)
             if m:
@@ -1421,6 +1437,7 @@ def strip_filter_values(args: list[str]) -> list[str]:
 
 
 def check_powershell(cmd: str, cwd: Path, agent: str | None):
+    cmd = cmd.replace("\r\n", "\n")              # T2.19: backtick + CRLF continues the line like backtick + LF
     for body in substitutions(cmd, backticks=False):
         check_powershell(body, cwd, agent)
     check_dotnet(cmd, cwd)
