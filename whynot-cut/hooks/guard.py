@@ -563,6 +563,7 @@ def split_commands(cmd: str, escapes: bool = True) -> list[tuple[list[str], bool
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=";&|<>")
         lex.whitespace_split = True
+        lex.commenters = ""                 # comments were removed per line (shell_lines): `a#b`, `${#x}` are words
         if not escapes:
             lex.escape = ""
         toks = list(lex)
@@ -584,11 +585,36 @@ def split_commands(cmd: str, escapes: bool = True) -> list[tuple[list[str], bool
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
+def strip_sh_comment(line: str, q: str | None = None) -> tuple[str, str | None]:
+    """(the line without its `# comment`, the quote still open at its end). `#` starts a comment only at the start of
+    a word outside quotes (not in `a#b`, `${#x}`, `$#`, '#...' or "#..."); `q` is the quote a previous line left
+    open (a multi-line string)."""
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if q == "'":
+            if c == "'":
+                q = None
+        elif q == '"':
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                q = None
+        elif c == "\\":
+            i += 1
+        elif c in "'\"":
+            q = c
+        elif c == "#" and (i == 0 or line[i - 1] in " \t;&|()<>"):
+            return line[:i], None
+        i += 1
+    return line, q
+
+
 def shell_lines(cmd: str) -> tuple[str, list[tuple[str, str]]]:
     """Drop heredoc BODIES (they are data such as a script's text, not shell commands) and make each line its own
     command (newlines separate commands in a shell; shlex would otherwise glue lines together). Returns the command
     text and [(line that opened the heredoc, body)] so a body fed to a shell can be checked as commands."""
-    out, delim, docs, body, opener = [], None, [], [], ""
+    out, delim, docs, body, opener, q = [], None, [], [], "", None
     for line in cmd.replace("\\\n", " ").split("\n"):
         if delim is not None:
             if line.strip() == delim:
@@ -597,10 +623,15 @@ def shell_lines(cmd: str) -> tuple[str, list[tuple[str, str]]]:
             else:
                 body.append(line)
             continue
+        inside = q is not None                   # this line continues a quoted string: keep its newline
+        line, q = strip_sh_comment(line, q)      # C1: a comment ends at its line, never swallows the next ones
         m = _HEREDOC.search(line)
         if m:
             delim, opener = m.group(2), line
-        out.append(line)
+        if inside and out:
+            out[-1] += "\n" + line
+        else:
+            out.append(line)
     if delim is not None:
         docs.append((opener, "\n".join(body)))
     return " ; ".join(out), docs
@@ -1247,6 +1278,19 @@ def ps_tokens(cmd: str) -> list[tuple[list[str], bool]]:
                 i += 1
             else:
                 tok += c
+        elif tok == "" and c == "#":                 # C1: `# comment` to the end of the line (an apostrophe in it
+            j = cmd.find("\n", i)                    # never opens a quote that hides the next lines)
+            i = (len(cmd) if j < 0 else j) - 1
+        elif tok == "" and cmd.startswith("<#", i):  # <# block comment #>
+            j = cmd.find("#>", i + 2)
+            i = (len(cmd) if j < 0 else j + 2) - 1
+        elif tok == "" and re.match(r"@(['\"])[ \t]*\r?\n", cmd[i:]):    # @' here-string '@ : one string token
+            qc = cmd[i + 1]
+            start = cmd.index("\n", i) + 1
+            j = cmd.find(f"\n{qc}@", start - 1)
+            tok += cmd[start:j if j >= 0 else len(cmd)]
+            push_tok()
+            i = (len(cmd) if j < 0 else j + 3) - 1
         elif c in "'\"":
             q = c
         elif c == "`" and i + 1 < len(cmd):

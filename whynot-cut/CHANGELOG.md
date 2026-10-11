@@ -207,6 +207,15 @@
   temp-style pattern (`*.tmp`, `*.temp`, `*.log`, `*.bak`, `__pycache__`, `*.pyc`, `.DS_Store`, `Thumbs.db`,
   `*.part`) still narrows. An unnarrowed listing of a client folder fed to a delete is blocked because it names
   `.whynot-client` (`find . -maxdepth 1 | xargs rm`).
+- Guard: a comment no longer hides the rest of a multi-line command (Phase 1 gate C1). Bash comments are removed line
+  by line (`#` only at a word start outside quotes, so `a#b` and `${#x}` stay words) before the command is split, so
+  `rm -rf data` on the line after `# they're stale` is checked; PowerShell skips `# …` to the end of the line and `<# … #>`
+  blocks, and reads `@'…'@` / `@"…"@` here-strings as one string, so an apostrophe in a comment or here-string no
+  longer opens a quote that swallows the following lines. The role gates (approve-plan, qc-reviewer, AE/PS extras)
+  are covered the same way.
+- The SessionStart warning checks the guard's own heartbeat (`guard-ok`), not the runner's `hooks-ok`, which
+  `run_python.sh` touches right before the hook runs and so was always fresh (gate G1). A plugin data folder first seen
+  less than an hour ago (`context-first-run`) is a new install and gets no "missing" warning.
 - `reel doctor --fix` writes the `.whynot-client` marker only for `--root` or the current client folder (G70: it wrote
   the marker into every client under `clients_root`, real client folders included). `reel doctor --fix --all-clients`
   lists the unmarked clients and writes nothing; with `--yes` it marks them all. `reel doctor` lists unmarked clients

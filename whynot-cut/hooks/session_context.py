@@ -7,8 +7,8 @@ Speaks up when the session opens
     new clips; first a warning when another session holds the client's lease (output/.whynot-lock, 3.0 T1.8);
   * in the clients folder (setting `clients_root`, or a folder whose preferences file says so): which clients it holds;
   * in a folder that has a WhyNot Cut preferences file but no clients yet: point to /whynot-cut:start.
-Whenever it speaks, it first warns loudly if the hooks heartbeat (${CLAUDE_PLUGIN_DATA}/hooks-ok, written by
-run_python.sh) is missing or older than 24 h: the read-only guard may not be running.
+Whenever it speaks, it first warns loudly if the guard heartbeat (${CLAUDE_PLUGIN_DATA}/guard-ok, written by
+guard.py) is missing or older than 24 h: the read-only guard may not be running.
 Stdlib only; never fails the session (any error -> silent exit 0).
 """
 import json
@@ -24,6 +24,7 @@ plat = settings = client_marker = None    # imported in main(), inside the never
 
 VIDEO = {".mp4", ".mov", ".mxf", ".m4v", ".avi", ".mkv"}
 HEARTBEAT_MAX_AGE_S = 24 * 3600
+NEW_INSTALL_S = 3600
 
 
 def is_client(p: Path, base=None) -> bool:
@@ -35,20 +36,40 @@ def client_root(start: Path):
 
 
 def heartbeat_warning() -> str:
-    """Loud first sentence when ${CLAUDE_PLUGIN_DATA}/hooks-ok is missing or stale (no CLAUDE_PLUGIN_DATA: silent)."""
+    """Loud first sentence when ${CLAUDE_PLUGIN_DATA}/guard-ok (written by guard.py itself on every tool call it
+    inspects) is missing or stale. Not hooks-ok: run_python.sh touches that right before running this hook, so it was
+    always fresh here (Phase 1 gate G1). A data folder this hook first saw less than an hour ago is a new install whose
+    guard has not been called yet: a missing guard-ok is not reported then. No CLAUDE_PLUGIN_DATA: silent."""
     d = os.environ.get("CLAUDE_PLUGIN_DATA")
     if not d:
         return ""
-    f = Path(d) / "hooks-ok"
+    f = Path(d) / "guard-ok"
     try:
         age = time.time() - f.stat().st_mtime
     except OSError:
         age = None
     if age is not None and age < HEARTBEAT_MAX_AGE_S:
         return ""
+    if age is None and time.time() - first_seen(Path(d)) < NEW_INSTALL_S:
+        return ""
     state = "is missing" if age is None else f"is {age / 3600:.0f} h old"
-    return (f"WARNING: WhyNot Cut protection may be OFF: the hooks heartbeat {state} ({f}), so the guard that keeps "
+    return (f"WARNING: WhyNot Cut protection may be OFF: the guard heartbeat {state} ({f}), so the guard that keeps "
             f"assets/ and data/ read-only may not be running. Run `reel doctor` and tell the editor before editing. ")
+
+
+def first_seen(data: Path) -> float:
+    """When this hook first saw the plugin data folder (${CLAUDE_PLUGIN_DATA}/context-first-run, written once)."""
+    f = data / "context-first-run"
+    try:
+        return float(f.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        now = time.time()
+        try:
+            data.mkdir(parents=True, exist_ok=True)
+            f.write_text(str(int(now)), encoding="utf-8")
+        except OSError:
+            pass
+        return now
 
 
 def emit(ctx: str):

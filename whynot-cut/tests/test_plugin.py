@@ -514,16 +514,49 @@ class TestHeartbeat(ClientFixture):
         return json.loads(out)["hookSpecificOutput"]["additionalContext"]
 
     def test_session_context_warns_without_a_fresh_heartbeat(self):
+        """The guard's own heartbeat (guard-ok) counts, not the runner's hooks-ok (gate G1: always fresh here)."""
         import time
         data = Path(self.tmp.name) / "pdata"
         data.mkdir()
+        old = time.time() - 3 * 86400
+        self.assertNotIn("protection may be OFF", self.ctx(data))        # brand-new data folder: not yet
+        (data / "context-first-run").write_text(str(int(old)), encoding="utf-8")
+        (data / "hooks-ok").write_text("1", encoding="utf-8")            # the runner ran, the guard never did
         self.assertIn("protection may be OFF", self.ctx(data))           # missing
-        hb = data / "hooks-ok"
+        hb = data / "guard-ok"
         hb.write_text("1", encoding="utf-8")
         self.assertNotIn("protection may be OFF", self.ctx(data))        # fresh
-        old = time.time() - 3 * 86400
         os.utime(hb, (old, old))
         self.assertIn("protection may be OFF", self.ctx(data))           # stale
+
+    def test_heartbeat_warning_through_the_hook_runner(self):
+        """G1 end to end: run_python.sh touches hooks-ok right before session_context runs; the warning still fires."""
+        import time
+        bash = find_bash()
+        engine = Path.home() / ".whynot-cut"
+        if not bash or not (engine / "venv").is_dir():
+            self.skipTest("needs bash and the engine venv")
+        data = Path(self.tmp.name) / "pdata2"
+        data.mkdir()
+        (data / "context-first-run").write_text(str(int(time.time() - 86400)), encoding="utf-8")
+
+        def ctx():
+            env = isolated_env({"CLAUDE_PLUGIN_DATA": str(data), "CLAUDE_PLUGIN_ROOT": str(SK),
+                                "WHYNOT_HOME": str(engine)})
+            r = subprocess.run([bash, str(SK / "hooks/run_python.sh"), str(SK / "hooks/session_context.py")],
+                               input=json.dumps({"cwd": str(self.root)}), capture_output=True, text=True,
+                               encoding="utf-8", env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("protection may be OFF", ctx())
+        self.assertTrue((data / "hooks-ok").is_file())
+        subprocess.run([bash, str(SK / "hooks/run_python.sh"), str(SK / "hooks/guard.py")],
+                       input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": str(self.root)}),
+                       capture_output=True, text=True, encoding="utf-8",
+                       env=isolated_env({"CLAUDE_PLUGIN_DATA": str(data), "CLAUDE_PLUGIN_ROOT": str(SK),
+                                         "WHYNOT_HOME": str(engine)}))
+        self.assertTrue((data / "guard-ok").is_file())
+        self.assertNotIn("protection may be OFF", ctx())
 
     def test_doctor_guard_active(self):
         import time
@@ -894,6 +927,34 @@ class TestGuardPhase1Minors(ClientFixture):
         self.allowed("Bash", ["find . -name '*.tmp' -o -name '*.bak' -delete", "find . -type f -name '*.tmp' -delete",
                               "find . \\( -name '*.tmp' -o -name '*.log' \\) -delete",
                               "find . ! -type d -name '*.tmp' -delete"])
+
+    def test_c1_comments_never_hide_later_lines(self):
+        """Phase 1 gate C1: a `#` comment (with an apostrophe or not) swallowed every later line of a multi-line command,
+        and in PowerShell an apostrophe in a comment or a here-string opened a quote that hid the rest."""
+        self.blocked("Bash", ["# they're stale\nrm -rf data", "# clean up the stale previews\nrm data/Raw/C0001.MP4",
+                              "ls output # it's fine\nrm data/Raw/C0001.MP4", "# Step 1\nmv data/Raw/C0001.MP4 output/",
+                              "echo start # Yunus's clip\nrm data/Raw/C0001.MP4", "# \"quoted comment\nrm data/Raw/C0001.MP4",
+                              "reel next\n# then\nrm -rf output/projects/C0001", "x=1 #'\n\nrm -rf data",
+                              "bash -c \"# it's\nrm -rf data\""])
+        self.blocked("PowerShell", ["# it's stale\nRemove-Item data/Raw/C0001.MP4",
+                                    "<# don't #>\nRemove-Item data/Raw/C0001.MP4",
+                                    "<# a\nmulti-line 'comment\n#>\nRemove-Item data/Raw/C0001.MP4",
+                                    "Get-ChildItem output # it's\nRemove-Item data/Raw/C0001.MP4",
+                                    "$x = @'\nit's\n'@\nRemove-Item data/Raw/C0001.MP4",
+                                    "$n = @\"\nit's\n\"@\nRemove-Item data/Raw/C0001.MP4"])
+        self.allowed("Bash", ["ls output # rm -rf data", "echo ${#x} a#b", "echo '# not a comment'; ls output",
+                              "# rm -rf data\nls output", "git log --format='%h #%s' -3"])
+        self.allowed("PowerShell", ["Get-ChildItem output # Remove-Item data", "Write-Host '#5'; Get-ChildItem output",
+                                    "<# Remove-Item data #> Get-ChildItem output", "$x = @'\nRemove-Item data\n'@"])
+
+    def test_c1_comments_never_hide_role_gates(self):
+        def run(cmd, agent):
+            return hook(GUARD, {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(self.root),
+                                "agent_type": agent})[0]
+        self.assertEqual(run("# record the approval\nreel approve-plan --root . --video-id C0001 --by delegated",
+                             "whynot-cut:story-editor"), 2)
+        self.assertEqual(run("# rebuild\nreel ppro-build --root . --video-id C0001", "whynot-cut:qc-reviewer"), 2)
+        self.assertEqual(run("# Gate 1\nreel ae-build --root . --video-id C0001", None), 2)
 
     def test_m3_listing_of_the_client_root_never_deletes_the_marker(self):
         self.blocked("Bash", ["find . -maxdepth 1 | xargs rm", "ls -A | xargs rm -f", "find . -maxdepth 1 -type f | xargs rm"])
