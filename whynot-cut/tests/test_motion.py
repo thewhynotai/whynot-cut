@@ -319,5 +319,156 @@ class TestAudioEpisodes(unittest.TestCase):
         self.assertTrue(ep.p("03_candidates/_sheet.jpg").exists())
 
 
+# --------------------------------------------------------------------------- Gate 0 --as motion
+MOTION_KEYS = ("beats", "scene_s", "prefer", "avoid", "reveal", "ease", "transition", "theme", "captions",
+               "speaker_badge", "progress", "voice_pulse", "max_words_on_screen", "emphasis_per_scene", "sfx_on_transition")
+
+
+def motion_episode_fixture(tmp: Path):
+    """The TestReelsSelect client (EP12, 20 s, 48 words every 400 ms, R01 drama 2-9 s, R02 advice 12-19 s), short
+    windows allowed by the client profile, plus topics.json with T01 (2-9 s, no type)."""
+    from lib.episode import EpisodePaths, prep
+    from lib.transcribe import extract_audio, finalize
+    root = make_episode_client(tmp)
+    write_json(root / common.CLIENT_PROFILE_REL / "podcast.json", {"reel_duration_s": {"min": 1, "hard_min": 1}})
+    write_json(root / common.CLIENT_PROFILE_REL / "motion.json", {"duration_s": {"hard_min": 1}})
+    common.set_context(root)
+    ep = EpisodePaths(root, "EP12")
+    prep(ep)
+    extract_audio(root / "data/Episodes/EP12.mp4", ep.p("02_transcription/dialogue_16k_mono.wav"))
+    ws = []
+    for i in range(48):
+        s = i * 400 + (300 if i >= 25 else 0)
+        ws.append({"id": i + 1, "segment_id": 1 if i < 25 else 2, "word": f"كلمه{i}", "start_ms": s, "end_ms": s + 360,
+                   "probability": 0.9})
+    segs = [{"id": k + 1, "start_ms": g[0]["start_ms"], "end_ms": g[-1]["end_ms"], "text": " ".join(w["word"] for w in g),
+             "avg_logprob": -0.2, "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [w["id"] for w in g]}
+            for k, g in enumerate((ws[:25], ws[25:]))]
+    finalize(ep, {"source_video": "x", "backend": "test", "model": "none", "language": "ar",
+                  "language_probability": 1.0, "duration_ms": 20000}, segs, ws)
+    write_json(ep.p("01_analysis/speakers.json"), {
+        "method": "inferred", "people": {"host": {"name": "Ahmed", "position": "left"},
+                                         "guest": {"name": "Sara", "position": "right"}},
+        "turns": [{"start": "00:00:00.000", "end": "00:00:05.000", "speaker": "host"},
+                  {"start": "00:00:05.000", "end": "00:00:20.000", "speaker": "guest"}]})
+    write_json(ep.p("01_analysis/topics.json"), {"topics": [
+        {"id": "T01", "start": "00:00:02.000", "end": "00:00:09.000", "title": "first loss", "summary": "s"}]})
+    validated_plan(ep, [
+        {"id": "R01", "in_ms": 2000, "out_ms": 9000, "duration_ms": 7000, "type": "drama", "secondary_type": None,
+         "title": "Sara's first loss", "total": 8.0, "score": {}, "avoid_hits": [], "needs_context": False}])
+    return root, ep, ws
+
+
+class TestMotionGate0(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root, self.ep, self.words = motion_episode_fixture(self.tmp)
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def select(self, *picks, **kw):
+        from lib.reels import select
+        return select(self.ep, list(picks), kw.pop("adjust", []), kw.pop("by", "editor"), **kw)
+
+    def test_recipes_have_motion_blocks(self):
+        from lib import recipes, sfx
+        for t, r in recipes.types().items():
+            m = r["motion"]
+            for k in MOTION_KEYS:
+                self.assertIn(k, m, f"{t}.motion.{k}")
+            self.assertTrue(m["sfx_on_transition"] is None or m["sfx_on_transition"] in sfx.RECIPES, t)
+            for rule in m.get("sfx_rules", []):
+                self.assertIn(rule["kind"], sfx.RECIPES, t)
+        d, e = recipes.types()["drama"]["motion"], recipes.types()["emotional"]["motion"]
+        self.assertEqual((d["reveal"], d["transition"], d["theme"], d["captions"]), ("word", "cut", "dark", "off"))
+        self.assertEqual((e["reveal"], e["ease"], e["transition"], e["max_words_on_screen"], e["emphasis_per_scene"]),
+                         ("line", "gentle", "fade", 18, 1))
+
+    def test_profile_override_motion(self):
+        from lib import recipes
+        write_json(self.root / common.CLIENT_PROFILE_REL / "recipes.json",
+                   {"types": {"advice": {"motion": {"theme": "dark"}}}})
+        common.set_context(self.root)
+        m = recipes.resolve("advice")["motion"]
+        self.assertEqual(m["theme"], "dark")
+        self.assertEqual(m["transition"], "wipe")
+
+    def test_select_as_motion(self):
+        r = self.select("R01", as_="motion")
+        self.assertEqual(r["reels"][0]["reel_id"], "EP12_R01_MO")
+        mo = Paths(self.root, "EP12_R01_MO")
+        src = read_json(mo.p("00_inputs/source.json"))
+        self.assertEqual((src["kind"], src["source_id"], src["format"], src["direction"], src["media"]),
+                         ("motion_reel", "R01", "9x16", "rtl", "video"))
+        self.assertIn("motion", src["recipe"])
+        self.assertEqual(common.source_range(mo)["in_ms"], 2000)
+        self.assertTrue(mo.p("02_transcription/words.json").exists())
+        sel = read_json(self.ep.p("01_analysis/selection.json"))
+        self.assertEqual((sel["history"][-1]["as"], sel["history"][-1]["format"]), ("motion", "9x16"))
+        from lib.motion_config import is_motion, recipe_motion
+        self.assertTrue(is_motion(mo))
+        self.assertEqual(recipe_motion(mo)["transition"], "cut")      # drama
+
+    def test_video_and_motion_coexist(self):
+        self.select("R01")
+        self.select("R01", as_="motion", fmt="16x9")
+        self.assertTrue(Paths(self.root, "EP12_R01").p("00_inputs/source.json").exists())
+        mo = read_json(Paths(self.root, "EP12_R01_MO").p("00_inputs/source.json"))
+        self.assertEqual(mo["format"], "16x9")
+        from lib.motion_config import is_motion
+        self.assertFalse(is_motion(Paths(self.root, "EP12_R01")))
+
+    def test_topic_rules(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.select("T01")
+        self.assertIn("--as motion", str(cm.exception))
+        with self.assertRaises(SystemExit) as cm:
+            self.select("T01", as_="motion")
+        self.assertIn("advice", str(cm.exception))
+        r = self.select("T01", as_="motion", type_="advice")
+        src = read_json(Paths(self.root, "EP12_T01_MO").p("00_inputs/source.json"))
+        self.assertEqual((src["content_type"], src["recipe"]["type"], src["source_id"]), ("advice", "advice", "T01"))
+        self.assertTrue(0 <= src["in_ms"] < src["out_ms"], src)
+        self.assertEqual(src["topic"]["title"], "first loss")
+        self.assertEqual(r["reels"][0]["reel_id"], "EP12_T01_MO")
+
+    def test_topic_too_long(self):
+        write_json(self.root / common.CLIENT_PROFILE_REL / "motion.json", {"duration_s": {"hard_min": 1, "hard_max": 5}})
+        common.set_context(self.root)
+        with self.assertRaises(SystemExit) as cm:
+            self.select("T01", as_="motion", type_="advice")
+        self.assertIn("split it", str(cm.exception))
+
+    def test_audio_episode_video_refused(self):
+        from lib.episode import EpisodePaths, prep
+        add_audio_episode(self.root)
+        ep = EpisodePaths(self.root, "POD3")
+        prep(ep)
+        fake_transcript(ep)
+        validated_plan(ep, [{"id": "R01", "in_ms": 2000, "out_ms": 9000, "duration_ms": 7000, "type": "advice",
+                             "total": 7.0, "score": {}, "avoid_hits": []}])
+        from lib.reels import select
+        with self.assertRaises(SystemExit) as cm:
+            select(ep, ["R01"], [], "editor")
+        self.assertIn("no picture", str(cm.exception))
+        r = select(ep, ["R01"], [], "editor", as_="motion")
+        src = read_json(Paths(self.root, r["reels"][0]["reel_id"]).p("00_inputs/source.json"))
+        self.assertEqual(src["media"], "audio")
+
+    def test_episode_next_lists_motion(self):
+        from lib.episode import episode_next
+        self.select("R01", as_="motion")
+        self.assertIn("EP12_R01_MO", episode_next(self.ep)["reels"])
+
+    def test_cli_args(self):
+        from lib import podcast_cli
+        opts = {flags[0]: kw for flags, kw in podcast_cli.ARGS["reels-select"]}
+        self.assertEqual(opts["--as"]["choices"], ["video", "motion"])
+        self.assertEqual(opts["--format"]["choices"], ["9x16", "16x9"])
+        self.assertIn("--type", opts)
+
+
 if __name__ == "__main__":
     unittest.main()

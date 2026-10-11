@@ -297,8 +297,8 @@ def episode_next(ep: EpisodePaths) -> dict:
                      f"was picked: the editor confirms with `reels-select --pick {','.join(older)} --by editor`, adding "
                      "--force if a window moved; after transcript corrections run `reels-select --resync` first)")
     reels = {}
-    for rid in sorted({r for h in sel.get("history", []) for r in h.get("picked", [])}):
-        rp = Paths(ep.root, f"{ep.episode_id}_{rid}")
+    for kind, rid in sorted({(h.get("as", "video"), r) for h in sel.get("history", []) for r in h.get("picked", [])}):
+        rp = Paths(ep.root, f"{ep.episode_id}_{rid}_MO" if kind == "motion" else f"{ep.episode_id}_{rid}")
         reels[rp.video_id] = load_status(rp).get("status") if rp.project.exists() else "not created"
     names = [s.split(" (")[0] for s in stale]
     remaining = stale + [n for n in todo if n not in names]

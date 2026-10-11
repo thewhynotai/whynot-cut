@@ -378,7 +378,7 @@ def parse_adjust(items: list[str]) -> dict:
     from .plan import to_ms
     out = {}
     for it in items or []:
-        m = re.fullmatch(r"\s*(R\d+)\s*:\s*(in|out)\s*=\s*(.+?)\s*", it or "")
+        m = re.fullmatch(r"\s*([RT]\d+)\s*:\s*(in|out)\s*=\s*(.+?)\s*", it or "")
         if not m:
             raise SystemExit(f"--adjust {it!r}: expected like R03:in=00:12:04.000 or R03:out=00:13:05")
         out.setdefault(m.group(1), {})[m.group(2)] = to_ms(m.group(3))
@@ -479,17 +479,44 @@ def window_stale(paths) -> str | None:
     return None
 
 
+def motion_id(episode_id: str, src_id: str) -> str:
+    """Project id of a motion video cut from an episode window (a reel candidate R.. or a topic T..)."""
+    return f"{episode_id}_{src_id}_MO"
+
+
+def _topic_windows(ep, words: list, total_ms: int, cfg: dict) -> dict:
+    """topics.json topics as pickable windows for motion mode: edges snapped to sentence-like word boundaries."""
+    from .plan import to_ms
+    out = {}
+    for t in (read_json(ep.p("01_analysis/topics.json"), {}) or {}).get("topics", []):
+        tid = str(t.get("id", ""))
+        if not re.fullmatch(r"T\d+", tid):
+            continue
+        try:
+            a, b = to_ms(t["start"]), to_ms(t["end"])
+        except Exception:  # noqa: BLE001 — an unparsable topic is simply not pickable
+            continue
+        a, b = snap_in(words, a, cfg), snap_out(words, b, cfg, total_ms)
+        out[tid] = {"id": tid, "in_ms": a, "out_ms": b, "duration_ms": b - a, "type": t.get("type"),
+                    "title": t.get("title", ""), "summary": t.get("summary", ""), "avoid_hits": []}
+    return out
+
+
 def select(ep, picks: list[str], adjust: list[str], by: str, note: str = "", confirm_avoid=(), force: bool = False,
-           resync: bool = False) -> dict:
+           resync: bool = False, as_: str = "video", fmt: str = "9x16", type_: str | None = None) -> dict:
     """Gate 0. Only the editor (or the lead on the editor's explicit delegation) runs this; a hook blocks subagents.
     Each pick becomes output/projects/<EP>_<RID>/ with 00_inputs/source.json (the shared range format), the sliced
     transcript and 16 kHz audio, the speaker turns and the recipe. --resync re-slices the transcripts of the reels
-    already selected (after episode transcript corrections) without changing their windows."""
+    already selected (after episode transcript corrections) without changing their windows.
+    as_="motion" (2.2): the pick becomes a motion project <EP>_<ID>_MO built from the window's audio only; reel
+    candidates (R..) and topics (T.., with a content type from the topic or `type_`) are pickable."""
     from .common import Paths, load_status, set_status, sha1_head
     from .episode import episode_file, load_episode, podcast_cfg
-    from .recipes import resolve
+    from .recipes import resolve, types as recipe_types
     if by not in ("editor", "delegated"):
         raise SystemExit("--by must be editor or delegated")
+    if as_ not in ("video", "motion"):
+        raise SystemExit("--as must be video or motion")
     info = load_episode(ep)
     src = episode_file(ep)
     fp = sha1_head(src)
@@ -501,18 +528,33 @@ def select(ep, picks: list[str], adjust: list[str], by: str, note: str = "", con
     sel = read_json(sel_f, {"history": []}) or {"history": []}
     out = []
     if resync:
-        done = sorted({r for h in sel["history"] for r in h.get("picked", [])})
-        for rid in done:
-            reel = Paths(ep.root, f"{ep.episode_id}_{rid}")
+        done = sorted({(h.get("as", "video"), r) for h in sel["history"] for r in h.get("picked", [])})
+        for kind, rid in done:
+            reel = Paths(ep.root, motion_id(ep.episode_id, rid) if kind == "motion" else f"{ep.episode_id}_{rid}")
             s = read_json(reel.p("00_inputs/source.json"))
             if not s:
                 continue
             slice_transcript(ep, reel, s["in_ms"], s["out_ms"])
             out.append({"reel_id": reel.video_id, "status": "transcript re-sliced", "in_ms": s["in_ms"], "out_ms": s["out_ms"]})
-        return {"reels": out, "next": "re-run `reel plan` for these reels (their approval became stale if words changed)"}
-    res = fresh_validated(ep)
-    byid = {c["id"]: c for c in res["candidates"]}
+        return {"reels": out, "next": "re-run `reel plan` (or `reel motion-plan`) for these reels (their approval "
+                                      "became stale if words changed)"}
+    media = info.get("media", "video")
+    if as_ == "video" and media == "audio":
+        raise SystemExit("this is an audio-only episode (no picture): its reels can only be motion videos — "
+                         "pick them with --as motion")
     adj = parse_adjust(adjust)
+    topic_ids = [p for p in picks + list(adj) if re.fullmatch(r"T\d+", p)]
+    if topic_ids and as_ != "motion":
+        raise SystemExit(f"{sorted(set(topic_ids))}: a topic window can be picked only --as motion (it becomes a "
+                         "motion video); reels for video come from the reel candidates (R..)")
+    wj = read_json(ep.p("02_transcription/words.json"))
+    cfg = podcast_cfg()
+    need_plan = [p for p in picks + list(adj) if not re.fullmatch(r"T\d+", p)]
+    res = fresh_validated(ep) if need_plan else {"candidates": [], "fingerprint": None,
+                                                 "duration_ms": int(info.get("duration_ms") or 0)}
+    byid = {c["id"]: c for c in res["candidates"]}
+    if as_ == "motion":
+        byid.update(_topic_windows(ep, wj["words"], res["duration_ms"], cfg))
     unknown = [p for p in picks + list(adj) if p not in byid]
     if unknown:
         raise SystemExit(f"unknown candidate(s) {unknown}; the plan has {list(byid)}")
@@ -521,41 +563,64 @@ def select(ep, picks: list[str], adjust: list[str], by: str, note: str = "", con
         raise SystemExit(f"{blocked} mention topics the episode sheet says to avoid "
                          f"({ {p: byid[p]['avoid_hits'] for p in blocked} }): only with the editor's explicit OK, add "
                          + " ".join(f"--confirm-avoid {p}" for p in blocked))
-    wj = read_json(ep.p("02_transcription/words.json"))
-    cfg = podcast_cfg()
     dur_cfg = cfg["reel_duration_s"]
+    lang = (info.get("sheet") or {}).get("language") or \
+        ((read_json(ep.p("02_transcription/transcript.json"), {}) or {}).get("meta") or {}).get("language")
+    if as_ == "motion":
+        from .motion_config import direction_for, format_spec, motion_cfg
+        format_spec(fmt)                                   # unknown format -> SystemExit before anything is written
+        mdur = motion_cfg().get("duration_s") or {"hard_min": 15, "hard_max": 180}
     intake = read_json(ep.p("00_inputs/intake.json"), {}) or {}
     for rid in picks:
         c = byid[rid]
+        is_topic = bool(re.fullmatch(r"T\d+", rid))
+        ctype = c.get("type")
+        if is_topic:
+            ctype = c.get("type") or type_
+            if ctype not in recipe_types():
+                raise SystemExit(f"{rid} has no content type: add --type ({', '.join(recipe_types())}) or a `type` to the "
+                                 "topic in topics.json")
         in_ms, out_ms = c["in_ms"], c["out_ms"]
         if "in" in adj.get(rid, {}):
             in_ms = snap_in(wj["words"], adj[rid]["in"], cfg)
         if "out" in adj.get(rid, {}):
             out_ms = snap_out(wj["words"], adj[rid]["out"], cfg, res["duration_ms"])
         d = (out_ms - in_ms) / 1000
-        if adj.get(rid) and not dur_cfg["hard_min"] <= d <= dur_cfg["hard_max"]:   # the plan's own windows were validated
+        if as_ == "motion":
+            if not mdur["hard_min"] <= d <= mdur["hard_max"]:
+                raise SystemExit(f"{rid}: {d:.1f} s is outside the motion limits {mdur['hard_min']}-{mdur['hard_max']} s — "
+                                 "split it: pick a reel candidate inside it or move the edges with --adjust")
+        elif adj.get(rid) and not dur_cfg["hard_min"] <= d <= dur_cfg["hard_max"]:   # the plan's own windows were validated
             raise SystemExit(f"{rid}: adjusted duration {d:.1f} s is outside {dur_cfg['hard_min']}-{dur_cfg['hard_max']} s")
-        reel = Paths(ep.root, f"{ep.episode_id}_{rid}")
+        reel = Paths(ep.root, motion_id(ep.episode_id, rid) if as_ == "motion" else f"{ep.episode_id}_{rid}")
         old = read_json(reel.p("00_inputs/source.json"))
         status = "created"
         if old:
-            if (old.get("in_ms"), old.get("out_ms"), old.get("fingerprint")) == (in_ms, out_ms, fp):
+            same = (old.get("in_ms"), old.get("out_ms"), old.get("fingerprint")) == (in_ms, out_ms, fp)
+            if same and (as_ == "video" or old.get("format") == fmt):
                 out.append({"reel_id": reel.video_id, "status": "unchanged", "in_ms": in_ms, "out_ms": out_ms})
                 continue
-            if not force:
+            if not force and not (same and as_ == "motion"):
                 raise SystemExit(f"{reel.video_id} already exists with {fmt_ts(old['in_ms'], '.')}–{fmt_ts(old['out_ms'], '.')}; "
                                  f"the new window {fmt_ts(in_ms, '.')}–{fmt_ts(out_ms, '.')} needs --force (the reel is "
                                  "re-sliced; its plan and build become stale)")
-            status = "re-sliced"
+            status = "re-sliced" if not same else "format changed"
         reel.ensure_project()
         cand = {k: v for k, v in c.items() if k not in ("warnings", "ok")}
-        write_json(reel.p("00_inputs/source.json"), {
+        rec = {
             "footage": rel, "in_ms": in_ms, "out_ms": out_ms, "duration_ms": out_ms - in_ms, "offset_ms": in_ms,
             "label": f"{ep.episode_id} {rid} {c.get('title', '')}".strip(), "set_at": now_iso(),
             "kind": "episode_reel", "episode_id": ep.episode_id, "reel_id": rid, "fingerprint": fp,
-            "content_type": c.get("type"), "secondary_type": c.get("secondary_type"), "recipe": resolve(c.get("type", "")),
+            "content_type": ctype, "secondary_type": c.get("secondary_type"), "recipe": resolve(ctype or ""),
             "context_line": c.get("context_line") if c.get("needs_context") else "", "candidate": cand,
-            "intake": intake, "selected_by": by, "selected_at": now_iso(), "note": note})
+            "intake": intake, "selected_by": by, "selected_at": now_iso(), "note": note}
+        if as_ == "motion":
+            rec.update(kind="motion_reel", source_id=rid, format=fmt, media=media, language=lang,
+                       direction=direction_for(lang))
+            if is_topic:
+                rec.pop("candidate")
+                rec["topic"] = cand
+        write_json(reel.p("00_inputs/source.json"), rec)
         write_json(reel.p("00_inputs/speakers.json"), slice_speakers(ep, in_ms, out_ms))
         slice_transcript(ep, reel, in_ms, out_ms)
         st = load_status(reel)
@@ -563,12 +628,16 @@ def select(ep, picks: list[str], adjust: list[str], by: str, note: str = "", con
             set_status(reel, "TRANSCRIBED", f"sliced from episode {ep.episode_id} ({rid}, "
                                             f"{fmt_ts(in_ms, '.')}–{fmt_ts(out_ms, '.')})", "transcribe")
         out.append({"reel_id": reel.video_id, "status": status, "in_ms": in_ms, "out_ms": out_ms,
-                    "type": c.get("type"), "project": str(reel.project)})
+                    "type": ctype, "project": str(reel.project)})
     sel["history"].append({"picked": picks, "adjust": adjust or [], "confirm_avoid": list(confirm_avoid or ()),
-                           "by": by, "note": note, "at": now_iso(), "plan_fingerprint": res["fingerprint"]})
+                           "by": by, "note": note, "at": now_iso(), "plan_fingerprint": res["fingerprint"],
+                           "as": as_, "format": fmt if as_ == "motion" else None})
     write_json(sel_f, sel)
-    return {"reels": out, "next": "per reel: reel preflight, audio-clean, story-editor (recipe in 00_inputs/source.json), "
-                                  "plan, previews, preview-video, then ONE combined Gate 1"}
+    nxt = ("per motion project: reel audio-clean, motion-director writes 01_analysis/motion-script.json, "
+           "reel motion-plan, reel motion-animatic, then ONE combined Gate 1 (see /whynot-cut:motion)") if as_ == "motion" else \
+        ("per reel: reel preflight, audio-clean, story-editor (recipe in 00_inputs/source.json), "
+         "plan, previews, preview-video, then ONE combined Gate 1")
+    return {"reels": out, "next": nxt}
 
 
 def write_reels_plan_md(ep, res: dict) -> Path:

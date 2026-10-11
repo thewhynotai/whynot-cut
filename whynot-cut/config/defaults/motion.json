@@ -1,0 +1,31 @@
+{
+  "note": "Motion mode (2.2): animated videos built from an episode window's audio, as native After Effects projects. Sizes in px, times in ms. A client profile may override any value (motion.json in the profile).",
+  "formats": {
+    "9x16": {"w": 1080, "h": 1920, "safe": {"top": 250, "bottom": 420, "side": 90}, "text_box_w": 900,
+             "sizes": {"title": [120, 72], "quote": [96, 56], "body": [64, 44], "label": [52, 36], "stat": [260, 160], "caption": [54, 54]}},
+    "16x9": {"w": 1920, "h": 1080, "safe": {"top": 90, "bottom": 120, "side": 160}, "text_box_w": 1500,
+             "sizes": {"title": [110, 64], "quote": [84, 52], "body": [56, 40], "label": [44, 32], "stat": [220, 140], "caption": [48, 48]}}
+  },
+  "duration_s": {"hard_min": 15, "hard_max": 180},
+  "scene_lead_ms": 150,
+  "word_reveal_ms": 180,
+  "transition_ms": {"cut": 0, "push": 400, "wipe": 400, "scale": 300, "fade": 500},
+  "outro_ms": 2500,
+  "edge_slack_ms": 1500,
+  "max_drop_ratio": 0.4,
+  "min_contrast": 4.5,
+  "min_contrast_large": 3.0,
+  "large_px": 64,
+  "rtl_mirror_icons": ["arrow-right", "arrow-left", "arrow-up-right", "arrow-down-right", "chevron-right", "chevron-left",
+                       "chevrons-right", "chevrons-left", "trending-up", "trending-down", "move-right", "move-left",
+                       "send", "reply", "forward", "undo", "redo", "log-in", "log-out"],
+  "themes": {
+    "dark": {"bg": "ink", "text": "white", "accent": "primary"},
+    "light": {"bg": "paper", "text": "ink", "accent": "primary"},
+    "brand": {"bg": "primary", "text": "white", "accent": "ink"}
+  },
+  "render": {"rs_template": "Best Settings", "om_template": "High Quality"},
+  "library_dir": null,
+  "fallback_fonts": {"windows": "SegoeUI-Bold", "mac": "GeezaPro-Bold"},
+  "licenses_allowed": ["CC0-1.0", "MIT", "ISC", "Apache-2.0", "CC-BY-4.0", "commercial"]
+}

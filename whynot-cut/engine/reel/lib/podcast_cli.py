@@ -26,6 +26,11 @@ ARGS: dict = {
         (("--confirm-avoid",), {"action": "append", "default": [], "help": "a candidate id the editor OKs despite an avoid-topic hit"}),
         (("--force",), {"action": "store_true", "help": "re-slice a reel whose window changed"}),
         (("--resync",), {"action": "store_true", "help": "re-slice selected reels' transcripts after episode corrections"}),
+        (("--as",), {"dest": "as_", "choices": ["video", "motion"], "default": "video",
+                     "help": "motion = an animated video built from the window's audio only (After Effects); topics "
+                             "(T..) and audio-only episodes need it"}),
+        (("--format",), {"dest": "fmt", "choices": ["9x16", "16x9"], "default": "9x16", "help": "motion video format"}),
+        (("--type",), {"dest": "type_", "default": None, "help": "content type for topic picks (T..) without one"}),
     ],
     "music": [(("--list",), {"action": "store_true", "help": "list the licensed tracks in data/Music with mood tags"})],
     "publish-check": [],
@@ -118,7 +123,8 @@ def cmd_reels_select(a):
         raise SystemExit("--pick required (the editor's choice), or --resync")
     if a.by == "delegated" and not a.note.strip():
         raise SystemExit("--by delegated needs --note with the editor's own words")
-    out(select(EP(a), picks, a.adjust, a.by, note=a.note, confirm_avoid=a.confirm_avoid, force=a.force, resync=a.resync))
+    out(select(EP(a), picks, a.adjust, a.by, note=a.note, confirm_avoid=a.confirm_avoid, force=a.force, resync=a.resync,
+               as_=a.as_, fmt=a.fmt, type_=a.type_))
 
 
 def cmd_music(a):

@@ -1,5 +1,5 @@
 {
-  "note": "Content-type recipes for reels cut from podcast episodes. The episode-analyst assigns a type per candidate; the reel then follows its recipe (pacing and limits are applied by the engine, the rest guides story-editor and publish-writer). A client profile may override any value (recipes.json in the profile). SFX kinds must be ones the engine can synthesise: whoosh, whoosh_soft, riser_soft, flash, pop, click, tick, hit_soft, shimmer.",
+  "note": "Content-type recipes for reels cut from podcast episodes (and, in `motion`, for motion videos built from an episode window's audio: beats, scene types, pacing, reveal, easing, transitions, theme, captions, SFX). The episode-analyst assigns a type per candidate; the reel then follows its recipe (pacing and limits are applied by the engine, the rest guides story-editor and publish-writer). A client profile may override any value (recipes.json in the profile). SFX kinds must be ones the engine can synthesise: whoosh, whoosh_soft, riser_soft, flash, pop, click, tick, hit_soft, shimmer.",
   "types": {
     "storytelling": {
       "label": {"en": "Storytelling", "ar": "حكاية"},
@@ -9,7 +9,8 @@
       "graphics": {"prefer": ["context_card", "hook_title"], "avoid": [], "max_per_30s": 2},
       "sfx": {"palette": ["whoosh_soft", "riser_soft"], "density": "low"},
       "music": {"mood": ["warm", "curious"], "level_db": -24},
-      "copy": {"tone": "curious, narrative; leave the ending open", "hook_style": "question: what happened next?", "emoji": false}
+      "copy": {"tone": "curious, narrative; leave the ending open", "hook_style": "question: what happened next?", "emoji": false},
+      "motion": {"beats": ["hook", "setup", "turn", "payoff"], "scene_s": {"min": 2.5, "target": 5, "max": 9}, "prefer": ["title_card", "kinetic_quote", "timeline", "icon_point", "context_card"], "avoid": [], "reveal": "word", "ease": "smooth", "transition": "push", "theme": "light", "captions": "subtitles", "speaker_badge": true, "progress": false, "voice_pulse": false, "max_words_on_screen": 12, "emphasis_per_scene": 2, "sfx_on_transition": "whoosh_soft", "sfx_rules": []}
     },
     "drama": {
       "label": {"en": "Drama / confrontation", "ar": "دراما / مواجهة"},
@@ -19,7 +20,8 @@
       "graphics": {"prefer": ["statement_highlight"], "avoid": ["checklist", "broll_card"], "max_per_30s": 1},
       "sfx": {"palette": ["hit_soft", "riser_soft"], "density": "low"},
       "music": {"mood": ["tense", "dark", "cinematic"], "level_db": -26},
-      "copy": {"tone": "suspense, restrained, no clickbait wording", "hook_style": "the conflict in one line", "emoji": false}
+      "copy": {"tone": "suspense, restrained, no clickbait wording", "hook_style": "the conflict in one line", "emoji": false},
+      "motion": {"beats": ["hook", "tension", "peak", "aftermath"], "scene_s": {"min": 2, "target": 4, "max": 8}, "prefer": ["kinetic_quote", "quote_card"], "avoid": ["list_steps"], "reveal": "word", "ease": "snappy", "transition": "cut", "theme": "dark", "captions": "off", "speaker_badge": true, "progress": false, "voice_pulse": false, "max_words_on_screen": 12, "emphasis_per_scene": 2, "sfx_on_transition": null, "sfx_rules": [{"on": "beat:peak", "kind": "hit_soft"}]}
     },
     "success_story": {
       "label": {"en": "Success story", "ar": "قصة نجاح"},
@@ -29,7 +31,8 @@
       "graphics": {"prefer": ["stat_card", "hook_title"], "avoid": [], "max_per_30s": 3},
       "sfx": {"palette": ["riser_soft", "shimmer"], "density": "medium"},
       "music": {"mood": ["uplifting", "inspiring"], "level_db": -22},
-      "copy": {"tone": "inspirational, concrete numbers and dates from the speaker", "hook_style": "the number or result first", "emoji": false}
+      "copy": {"tone": "inspirational, concrete numbers and dates from the speaker", "hook_style": "the number or result first", "emoji": false},
+      "motion": {"beats": ["result", "before", "struggle", "milestone", "lesson"], "scene_s": {"min": 2, "target": 4, "max": 7}, "prefer": ["stat_counter", "timeline", "title_card"], "avoid": [], "reveal": "word", "ease": "snappy", "transition": "push", "theme": "brand", "captions": "subtitles", "speaker_badge": true, "progress": false, "voice_pulse": false, "max_words_on_screen": 12, "emphasis_per_scene": 2, "sfx_on_transition": null, "sfx_rules": [{"on": "type:stat_counter", "kind": "riser_soft"}, {"on": "count_end", "kind": "shimmer"}]}
     },
     "advice": {
       "label": {"en": "Advice / insight", "ar": "نصيحة / معلومة"},
@@ -39,7 +42,8 @@
       "graphics": {"prefer": ["checklist", "term_callout"], "avoid": [], "max_per_30s": 3},
       "sfx": {"palette": ["pop", "click", "tick"], "density": "medium"},
       "music": {"mood": ["light", "upbeat"], "level_db": -24},
-      "copy": {"tone": "direct and useful", "hook_style": "N things / the one mistake", "emoji": false}
+      "copy": {"tone": "direct and useful", "hook_style": "N things / the one mistake", "emoji": false},
+      "motion": {"beats": ["hook", "problem", "steps", "takeaway"], "scene_s": {"min": 2, "target": 3.5, "max": 6}, "prefer": ["list_steps", "icon_point", "comparison"], "avoid": [], "reveal": "word", "ease": "snappy", "transition": "wipe", "theme": "light", "captions": "subtitles", "speaker_badge": true, "progress": false, "voice_pulse": false, "max_words_on_screen": 12, "emphasis_per_scene": 2, "sfx_on_transition": null, "sfx_rules": [{"on": "item", "kind": "tick"}]}
     },
     "bold_opinion": {
       "label": {"en": "Bold opinion", "ar": "رأي جريء"},
@@ -49,7 +53,8 @@
       "graphics": {"prefer": ["hook_title", "statement_highlight"], "avoid": ["checklist"], "max_per_30s": 2},
       "sfx": {"palette": ["hit_soft"], "density": "low"},
       "music": {"mood": ["minimal"], "level_db": -28},
-      "copy": {"tone": "confident; invite disagreement in the comments; never sharpen the speaker's claim", "hook_style": "the opinion as said", "emoji": false}
+      "copy": {"tone": "confident; invite disagreement in the comments; never sharpen the speaker's claim", "hook_style": "the opinion as said", "emoji": false},
+      "motion": {"beats": ["claim", "reasons", "claim_again"], "scene_s": {"min": 2, "target": 3.5, "max": 6}, "prefer": ["kinetic_quote", "title_card"], "avoid": ["list_steps"], "reveal": "word", "ease": "snappy", "transition": "scale", "theme": "dark", "captions": "subtitles", "speaker_badge": true, "progress": false, "voice_pulse": false, "max_words_on_screen": 12, "emphasis_per_scene": 3, "sfx_on_transition": "hit_soft", "sfx_rules": []}
     },
     "emotional": {
       "label": {"en": "Human / emotional moment", "ar": "لحظة إنسانية"},
@@ -59,7 +64,8 @@
       "graphics": {"prefer": [], "avoid": ["checklist", "broll_card", "stat_card", "term_callout"], "max_per_30s": 1},
       "sfx": {"palette": [], "density": "none"},
       "music": {"mood": ["soft", "piano"], "level_db": -26},
-      "copy": {"tone": "gentle, respectful, no clickbait", "hook_style": "a quiet line from the speaker", "emoji": false}
+      "copy": {"tone": "gentle, respectful, no clickbait", "hook_style": "a quiet line from the speaker", "emoji": false},
+      "motion": {"beats": ["moment", "reflection"], "scene_s": {"min": 3.5, "target": 6, "max": 12}, "prefer": ["quote_card", "kinetic_quote"], "avoid": ["list_steps", "stat_counter", "comparison"], "reveal": "line", "ease": "gentle", "transition": "fade", "theme": "dark", "captions": "off", "speaker_badge": true, "progress": false, "voice_pulse": false, "max_words_on_screen": 18, "emphasis_per_scene": 1, "sfx_on_transition": null, "sfx_rules": []}
     },
     "comedy": {
       "label": {"en": "Comedy", "ar": "كوميدي"},
@@ -69,7 +75,8 @@
       "graphics": {"prefer": ["hook_title"], "avoid": ["checklist"], "max_per_30s": 2},
       "sfx": {"palette": ["pop"], "density": "low"},
       "music": {"mood": ["playful"], "level_db": -24},
-      "copy": {"tone": "light, playful", "hook_style": "the setup line", "emoji": true}
+      "copy": {"tone": "light, playful", "hook_style": "the setup line", "emoji": true},
+      "motion": {"beats": ["setup", "beat", "punchline", "tag"], "scene_s": {"min": 1.5, "target": 3, "max": 6}, "prefer": ["kinetic_quote", "icon_point"], "avoid": ["list_steps"], "reveal": "word", "ease": "bouncy", "transition": "scale", "theme": "brand", "captions": "subtitles", "speaker_badge": true, "progress": false, "voice_pulse": false, "max_words_on_screen": 12, "emphasis_per_scene": 2, "sfx_on_transition": "pop", "sfx_rules": []}
     }
   }
 }
