@@ -506,5 +506,296 @@ class TestManifest(unittest.TestCase):
         self.assertTrue((SK / "bin/reel.cmd").exists())
 
 
+def _wav(path: Path, x, sr: int = 16000, ch: int = 1):
+    import wave
+    import numpy as np
+    a = (np.clip(np.asarray(x, dtype=np.float32), -1, 1) * 32767).astype("<i2")
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(ch)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(a.tobytes())
+    return path
+
+
+class TestFieldTestRound2(unittest.TestCase):
+    """Gaps found taking a real reel (R02, a 29.97 fps 16:9 episode, Arabic, religious) through the chain, 2026-10-11."""
+
+    # G17 Whisper audio decoded by the engine (faster-whisper's own decoder breaks with newer PyAV)
+    def test_whisper_audio_any_wav(self):
+        import numpy as np
+        from lib.transcribe import whisper_audio
+        with tempfile.TemporaryDirectory() as t:
+            a = whisper_audio(_wav(Path(t) / "a.wav", np.zeros(16000)))
+            self.assertEqual(a.dtype, np.float32)
+            self.assertEqual(len(a), 16000)
+            st = np.zeros(48000 * 2, dtype=np.float32)          # 1 s stereo 48 kHz, interleaved
+            b = whisper_audio(_wav(Path(t) / "b.wav", st, sr=48000, ch=2))
+            self.assertAlmostEqual(len(b) / 16000, 1.0, places=1)
+            self.assertFalse((Path(t) / "b.16k.wav").exists())  # temp file cleaned up
+
+    # G18 GPU detection says why Whisper runs on the CPU
+    def test_gpu_info_shape(self):
+        g = plat.gpu_info()
+        self.assertIn(g["whisper_device"], ("cpu", "cuda"))
+        if plat.IS_MAC:
+            self.assertEqual(g["whisper_device"], "cpu")
+        self.assertIn("nvidia-cublas-cu12", plat.CUDA_PIP["windows"])
+
+    # G19 glossary hits after Arabic normalisation; short terms keep hamza / ta marbuta
+    def test_glossary_hits_normalised(self):
+        sys.path.insert(0, str(SK / "tests"))
+        from test_pipeline import words_from
+        from lib.transcribe import glossary_hits
+        w = words_from("بس أهم حاجة ايه امنوا الأول وعملوا الصالحات قال تعالى".split())
+        hits = glossary_hits(w, ["آمنوا", "آية", "قال تعالى"])
+        terms = {h["term"]: h for h in hits}
+        self.assertIn("آمنوا", terms)                       # آمنوا = امنوا
+        self.assertNotIn("آية", terms)                      # verse != Egyptian «ايه» (what)
+        self.assertEqual(terms["قال تعالى"]["word_ids"], [9, 10])
+
+    # G20 names from the profile hint that Whisper wrote differently
+    def test_vocabulary_misses(self):
+        sys.path.insert(0, str(SK / "tests"))
+        from test_pipeline import words_from
+        from lib.transcribe import vocabulary_misses
+        w = words_from("وأنا نضال ولا جيكوفيتش آمنوا وعملوا الصالحات".split())
+        miss = {m["expected"]: m["heard"] for m in vocabulary_misses(w, "نادال، ديوكوفيتش، العمل الصالح.")}
+        self.assertEqual(miss.get("نادال"), "نضال")
+        self.assertEqual(miss.get("ديوكوفيتش"), "جيكوفيتش")
+        self.assertNotIn("الصالح", miss)                    # a word form that was heard is not a miss
+
+    # G21 flagged words never go on a graphic; G37 corrections re-anchor after a re-transcription
+    def test_flags_block_graphics_and_reanchor(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import test_pipeline as T
+        from lib.common import write_json, read_json
+        from lib.plan import compile_plan
+        from lib.transcribe import apply_corrections, transcript_flags
+        with tempfile.TemporaryDirectory() as t:
+            root, p, words = T.make_project(Path(t))
+            tc = T.TestPlanToXML()
+            tc.p = p
+            tc._semantic_stub()
+            write_json(p.p("01_analysis/edit-decisions.json"), tc.decisions())
+            write_json(p.p("02_transcription/transcript-corrections.json"),
+                       {"corrections": [{"word_id": 1, "from": "الليزر", "to": "الليزر", "reason": "re-anchor test"}],
+                        "flags": [{"word_id": 3, "note": "unclear"}]})
+            r = apply_corrections(p)
+            self.assertEqual(r["flagged"], 1)
+            self.assertTrue(r["reanchored"] and r["reanchored"][0].startswith("1->"), r)
+            self.assertEqual([f["word"] for f in transcript_flags(p)], ["حاجات"])
+            res = compile_plan(p)
+            self.assertFalse(res["ok"])
+            self.assertTrue(any("GFX_001" in e and "uncertain" in e for e in res["errors"]), res["errors"])
+
+    # G24-G27 audio: identical channels, hum only where it stands out, no denoise on a clean master
+    def test_assess_source(self):
+        import numpy as np
+        from lib.audio_clean import SR, assess_source, detect_hum
+        rng = np.random.default_rng(1)
+        n = SR * 6
+        t = np.arange(n) / SR
+        speech = (np.sin(2 * np.pi * 220 * t) * 0.3) * (np.sin(2 * np.pi * 0.5 * t) > 0)   # on/off "speech"
+        hum = sum(0.004 * np.sin(2 * np.pi * h * t) for h in (100, 150, 200))
+        noisy = speech + hum + rng.normal(0, 0.0005, n)
+        h = detect_hum(noisy.astype(np.float32))
+        self.assertEqual(h["mains_hz"], 50)
+        self.assertIn(100, h["notch_hz"])
+        clean = (speech + rng.normal(0, 1e-5, n)).astype(np.float32)
+        self.assertEqual(detect_hum(clean)["notch_hz"], [])
+        a = assess_source(np.stack([clean, clean], axis=1))
+        self.assertTrue(a["identical_channels"])
+        self.assertTrue(a["already_clean"])
+        two = np.stack([clean, (rng.normal(0, 0.05, n)).astype(np.float32)], axis=1)
+        self.assertFalse(assess_source(two)["identical_channels"])
+
+    # G28 quotes of the speaker in the client's own documents
+    def test_document_quotes(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import test_pipeline as T
+        from lib.discover import run_discovery
+        from lib.transcribe import document_quotes
+        with tempfile.TemporaryDirectory() as t:
+            root, p, words = T.make_project(Path(t))
+            (root / "data/Ref/plan.md").write_text("ابدأ من «هل في حاجات معينة لازم» ثم «أول حاجه التشخيص السليم»\n",
+                                                   encoding="utf-8")
+            run_discovery(p)
+            q = {x["quote"]: x for x in document_quotes(p, words)}
+        self.assertTrue(q["هل في حاجات معينة لازم"]["exact"])
+        diff = q["أول حاجه التشخيص السليم"]
+        self.assertFalse(diff["exact"])
+        self.assertIn("الصحيح", diff["transcript"])
+
+    # G29 word cuts
+    def test_word_cuts(self):
+        sys.path.insert(0, str(SK / "tests"))
+        from test_pipeline import words_from
+        from lib.plan import subtract_ranges, word_cut_ranges
+        self.assertEqual(subtract_ranges([(0, 1000), (1500, 3000)], [(800, 1600), (2000, 2010)]),
+                         [(0, 800), (1600, 2000), (2010, 3000)])
+        w = words_from("يعني أنا جبت مضرب".split(), 0, 400)
+        rng, cut, err = word_cut_ranges(w, [{"word_ids": [1], "reason": "filler"}, 99], 2000)
+        self.assertEqual(rng, [(0, 390)])                    # word end + 30 ms, never into the next word (at 400)
+        self.assertEqual(cut[0]["word"], "يعني")
+        self.assertTrue(err and "99" in err[0])
+
+    def test_word_cut_compiles_out_of_captions(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import test_pipeline as T
+        from lib.common import write_json, read_json
+        from lib.plan import compile_plan
+        from lib import srt as srtlib
+        with tempfile.TemporaryDirectory() as t:
+            root, p, words = T.make_project(Path(t))
+            tc = T.TestPlanToXML()
+            tc.p = p
+            tc._semantic_stub()
+            ed = tc.decisions()
+            ed["global"]["cut_words"] = [{"word_ids": [6], "reason": "test"}]       # «أبقى»
+            write_json(p.p("01_analysis/edit-decisions.json"), ed)
+            res = compile_plan(p)
+            self.assertTrue(res["ok"], res["errors"])
+            spec = read_json(p.p("01_analysis/timeline-spec.json"))
+            self.assertEqual(spec["time_map"]["words_cut"][0]["word"], "أبقى")
+            caps = " ".join(c["text"] for c in srtlib.read_srt(p.p("02_transcription/captions-short-seq.srt")))
+            self.assertNotIn("أبقى", caps)
+            self.assertIn("عارفاها", caps)
+            self.assertIn("Words cut (1)", p.p("01_analysis/edit-plan.md").read_text(encoding="utf-8"))
+
+    # G30 / G31 a reel = a range of a longer raw file; --video-id picks its own clip
+    def test_source_range_schemas_and_ffmpeg_args(self):
+        from lib.common import Paths, range_input_args, source_range, write_json
+        with tempfile.TemporaryDirectory() as t:
+            p = Paths(Path(t), "R02")
+            p.ensure_project()
+            self.assertEqual(source_range(p), {})
+            write_json(p.p("00_inputs/source.json"), {"footage": "data/Raw/EP.mp4", "in_ms": 1500, "out_ms": 4000})
+            self.assertEqual(range_input_args(source_range(p)), ["-ss", "1.500", "-t", "2.500"])
+            write_json(p.p("00_inputs/source.json"), {"kind": "episode_reel", "rel": "data/Episodes/EP.mp4",
+                                                      "offset_ms": 2000, "duration_ms": 1000, "reel_id": "R1"})
+            r = source_range(p)
+            self.assertEqual((r["footage"], r["in_ms"], r["out_ms"], r["reel_id"]), ("data/Episodes/EP.mp4", 2000, 3000, "R1"))
+
+    def test_xml_points_into_the_original_file(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import re as _re
+        import test_pipeline as T
+        from lib.common import write_json, read_json, ticks_per_frame
+        from lib.media import preflight
+        from lib.plan import compile_plan
+        from lib.premiere_xml import build_xml
+        with tempfile.TemporaryDirectory() as t:
+            root, p, words = T.make_project(Path(t))
+            write_json(p.p("00_inputs/source.json"), {"footage": "data/Raw/CLIP1.mov", "in_ms": 500, "out_ms": 12000})
+            preflight(p, [root / "data/Raw/CLIP1.mov"])
+            tc = T.TestPlanToXML()
+            tc.p = p
+            tc._semantic_stub()
+            write_json(p.p("01_analysis/edit-decisions.json"), tc.decisions())
+            self.assertTrue(compile_plan(p)["ok"])
+            spec = read_json(p.p("01_analysis/timeline-spec.json"))
+            self.assertEqual(spec["source_in_ms"], 500)
+            xml = Path(build_xml(p)["xml"]).read_text(encoding="utf-8")
+            first_in = int(_re.search(r"<pproTicksIn>(\d+)</pproTicksIn>", xml).group(1))
+            self.assertEqual(first_in, round((spec["main_segments"][0]["src_in_ms"] + 500) * 254016000000 / 1000))
+
+    # G32 / G33 the sequence rate follows the client; NTSC rates in FCP7 XML
+    def test_ntsc_rate_helpers(self):
+        from lib.common import fps_arg, ms_to_frame, ticks_per_frame
+        from lib.premiere_xml import rate
+        self.assertEqual(rate(29.97002997), "<rate><timebase>30</timebase><ntsc>TRUE</ntsc></rate>")
+        self.assertEqual(rate(25), "<rate><timebase>25</timebase><ntsc>FALSE</ntsc></rate>")
+        self.assertEqual(ticks_per_frame(30000 / 1001), 8475667200)
+        self.assertEqual(ticks_per_frame(25), 10160640000)
+        self.assertEqual(fps_arg(30000 / 1001), "30000/1001")
+        self.assertEqual(ms_to_frame(1001, 30000 / 1001), 30)
+
+    def test_profile_sequence_rate_2997(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import test_pipeline as T
+        from lib import common
+        from lib.common import write_json, read_json
+        from lib.plan import compile_plan
+        from lib.premiere_xml import build_xml
+        from lib.qc import run_qc
+        with tempfile.TemporaryDirectory() as t:
+            root, p, words = T.make_project(Path(t))
+            prof = root / common.CLIENT_PROFILE_REL
+            prof.mkdir(parents=True, exist_ok=True)
+            write_json(prof / "sequence-settings.json", {"general": {"timebase": 30, "ntsc": True}})
+            common.set_context(root)
+            try:
+                from lib.media import preflight
+                preflight(p, [root / "data/Raw/CLIP1.mov"])
+                self.assertAlmostEqual(common.seq_fps(), 29.97, places=2)
+                tc = T.TestPlanToXML()
+                tc.p = p
+                tc._semantic_stub()
+                write_json(p.p("01_analysis/edit-decisions.json"), tc.decisions())
+                self.assertTrue(compile_plan(p)["ok"])
+                spec = read_json(p.p("01_analysis/timeline-spec.json"))
+                self.assertEqual(spec["duration_frames"], round(12000 * 30000 / 1001 / 1000))
+                xml = Path(build_xml(p)["xml"]).read_text(encoding="utf-8")
+                self.assertIn("<timebase>30</timebase><ntsc>TRUE</ntsc>", xml)
+                rate_chk = next(c for c in run_qc(p)["checks"] if c["check"].startswith("Sequence rate"))
+                self.assertEqual(rate_chk["result"], "PASS", rate_chk)
+            finally:
+                common.set_context(None)
+                self.assertEqual(common.seq_fps(), 24.0)
+
+    # G36 a range never starts or ends mid-word
+    def test_snap_range_points(self):
+        import numpy as np
+        from lib.common import ffmpeg_exe
+        from lib.media import snap_range_points
+        sr = 16000
+        x = np.concatenate([np.sin(np.arange(int(0.6 * sr)) * 0.2) * 0.3, np.zeros(int(1.1 * sr)),
+                            np.sin(np.arange(int(3.0 * sr)) * 0.2) * 0.3, np.zeros(int(1.0 * sr)),
+                            np.sin(np.arange(int(1.0 * sr)) * 0.2) * 0.3])
+        with tempfile.TemporaryDirectory() as t:
+            wav = _wav(Path(t) / "ep.wav", x, sr)
+            r = snap_range_points(wav, 300, 4200)
+        self.assertTrue(1500 <= r["in"]["suggested_ms"] <= 1700, r)     # just before speech resumes at 1.7 s
+        self.assertTrue(4700 <= r["out"]["suggested_ms"] <= 4900, r)    # just after it stops at 4.7 s
+
+    # G39 the plan reads on the reel's clock; G42 captions dodge a card only when it overlaps them
+    def test_seq_frame_and_cover(self):
+        from lib.plan import _seq_frame, speaker_covered_frames
+        spec = {"fps": 25, "duration_frames": 100, "events": [{"template": "broll_card", "start_frame": 0, "end_frame": 10}],
+                "main_segments": [{"start_frame": 0, "end_frame": 50, "src_in_ms": 0},
+                                  {"start_frame": 50, "end_frame": 100, "src_in_ms": 3000, "decision_id": "AUTO_CUTAWAY"}]}
+        self.assertEqual(_seq_frame(spec, 1000), 25)
+        self.assertEqual(_seq_frame(spec, 2500), 50)       # inside a removed stretch -> next kept piece
+        self.assertEqual(_seq_frame(spec, 4000), 75)
+        self.assertEqual(speaker_covered_frames(spec), 60)
+
+    def test_caption_avoids_only_overlapping_cards(self):
+        sys.path.insert(0, str(SK / "tests"))
+        import test_pipeline as T
+        from PIL import Image
+        from lib.common import write_json, load_config
+        from lib.plan import compile_plan
+        from lib.previews import render_captions
+        with tempfile.TemporaryDirectory() as t:
+            root, p, words = T.make_project(Path(t))
+            tc = T.TestPlanToXML()
+            tc.p = p
+            tc._semantic_stub()
+            write_json(p.p("01_analysis/edit-decisions.json"), tc.decisions())
+            self.assertTrue(compile_plan(p)["ok"])
+            y = load_config("graphics-templates.json")["templates"]["highlight_caption"]["y"]
+
+            def first_cap_box(avoid):
+                c = render_captions(p, [], avoid=avoid)[0]
+                return Image.open(c["fg"]).getchannel("A").getbbox()
+            base = first_cap_box([])
+            top_card = first_cap_box([(0, 60000, 150, 420)])                # card at the top: caption stays
+            low_card = first_cap_box([(0, 60000, y - 40, y + 160)])         # card on the caption band: moves above
+        self.assertEqual(top_card, base)
+        self.assertLess(low_card[3], y - 40)
+        self.assertGreater(low_card[1], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

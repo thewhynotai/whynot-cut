@@ -26,7 +26,9 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 4. **Whisper large-v3 (about 3 GB)** downloads on the first `transcribe`, or deliberately (ask first) with
    `reel model-download --model large-v3` in the background. `reel doctor` → `whisper_partial_downloads` lists an
    interrupted download; the same command resumes it. With an NVIDIA
-   GPU (Windows/Linux), transcription runs on CUDA automatically and falls back to CPU if the CUDA libraries are missing.
+   GPU (Windows/Linux), transcription runs on CUDA when NVIDIA's cuBLAS can load. The doctor names the GPU and the
+   missing library; with the editor's OK, `reel gpu-enable` installs it (about 550 MB, 5-10x faster transcription).
+   Without it everything works on the CPU, just slower.
 5. **Premiere bridge:**
    - Premiere must be restarted after the first install, because CEP finds panels only at launch.
    - `PlayerDebugMode` must be 1 (CSXS 11–14). It lets Premiere load extensions not signed by Adobe; say so plainly.

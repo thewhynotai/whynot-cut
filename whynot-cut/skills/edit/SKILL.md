@@ -22,6 +22,15 @@ reel settings --root "<CLIENT_FOLDER>"                  # preferences in effect 
 - Unsure what's in the folder, or the user just dropped new files? Spawn `whynot-cut:intake-inspector` first; it returns
   the clips, the missing brand material and footage problems without changing anything.
 - `<ID>` is the footage file stem (e.g. `C0238`). Outputs go to `<root>/output/`. **`assets/` and `data/` are read-only** (a hook enforces this).
+- **A reel cut from a longer file** (a finished episode, a long interview, a client's reels plan with timecodes): give
+  it its own id and a range, never a re-encoded copy:
+  `reel range --root "<CLIENT>" --video-id R02 --footage data/Raw/EP02.mp4 --in 02:04 --out 02:59 --snap`.
+  `--snap` moves in/out to the nearest pause (a real reel started mid-word without it). Every stage then works on the
+  reel's clock, and Premiere links into the original file with handles. Podcast episodes in `data/Episodes/` use
+  `/whynot-cut:podcast` instead (it writes the same range).
+- **Frame rate:** the sequence follows the client's `reel-profile/sequence-settings.json` (`general.timebase` +
+  `ntsc`; 29.97 = 30 + true). When preflight warns that the source fps differs from the sequence and the client's
+  reference reels match the source, set it there (24 fps for a 29.97 client drops frames and judders).
 - Profile `null` in `reel next` (`NONE` in the session-start message): run `/whynot-cut:new-client` first. Don't guess brand or style.
 - Read the profile's `notes.md` (`${CLAUDE_PLUGIN_ROOT}/profiles/<id>/notes.md`, then the client's
   `output/client_database/reel-profile/notes.md`). It holds the editor's standing style decisions.

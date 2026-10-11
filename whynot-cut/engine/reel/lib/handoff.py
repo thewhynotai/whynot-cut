@@ -7,7 +7,8 @@ from .common import Paths, project_prefix, frame_to_tc, load_config, now_iso, re
 
 
 def build(paths: Paths) -> dict:
-    tm = read_json(paths.p("07_premiere/timeline-manifest.json"), {})
+    from .premiere_xml import timeline_manifest
+    tm = timeline_manifest(paths)
     _fps = seq_fps()
     _fps_num = f"{_fps:.2f}"
     _fps_label = f"{_fps:.2f} fps Non-Drop-Frame" if abs(_fps - round(_fps)) > 0.001 else f"{round(_fps)} fps"
@@ -65,7 +66,7 @@ Generated {now_iso()} by the `whynot-cut` plugin (by The Why Not AI). QC: **{'PA
 
 5. **File › Save As…** `07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj`.
 
-Main footage: source is {tm.get('source_fps')} fps in a 24 fps sequence, kept at native speed (no interpretation change), so dialogue sync is exact; base scale {tm.get('base_scale_percent')}%. Punch-ins are separate V1 clips with Scale/Position in Motion.
+Main footage: source is {float(tm.get('source_fps') or 0):.5g} fps in a {_fps_num} fps sequence, kept at native speed (no interpretation change), so dialogue sync is exact; base scale {tm.get('base_scale_percent')}%. Punch-ins are separate V1 clips with Scale/Position in Motion.
 Every graphic and decision also appears as a **sequence marker** (ID + transcript evidence).
 
 ## 2. After Effects
@@ -96,7 +97,7 @@ Every graphic and decision also appears as a **sequence marker** (ID + transcrip
 
 ## Premiere
 - [ ] Import XML, open sequence `{tm.get('sequence_name')}`
-- [ ] Sequence Settings: Custom · 24 fps TC · Audio Samples · QuickTime ProRes 422 LT previews 1080×1920 · Max bit depth OFF · Max render quality OFF · Composite in linear color ON
+- [ ] Sequence Settings: Custom · {_fps_label} TC · Audio Samples · QuickTime ProRes 422 LT previews 1080×1920 · Max bit depth OFF · Max render quality OFF · Composite in linear color ON
 - [ ] Animated captions (C02) checked against audio; optional `subtitles.srt` caption track kept hidden (CC export only)
 - [ ] Rename tracks per README table
 - [ ] Check no offline media (red frames)
@@ -116,7 +117,7 @@ Every graphic and decision also appears as a **sequence marker** (ID + transcrip
 
 ## Delivery
 - [ ] Final QC pass full-screen at 100%
-- [ ] Export 1080×1920 24p (H.264 high bitrate or ProRes) — your preset
+- [ ] Export 1080×1920 at {_fps_num} fps (H.264 high bitrate or ProRes) — your preset
 """
     write_text(paths.p("09_handoff/final-editor-checklist.md"), C)
     return {"readme": str(paths.p("09_handoff/README.md")), "checklist": str(paths.p("09_handoff/final-editor-checklist.md"))}

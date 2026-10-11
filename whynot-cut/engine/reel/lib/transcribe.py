@@ -284,16 +284,19 @@ def document_quotes(paths: Paths, words: list, min_ratio: float = 0.6) -> list:
             if len(qt) < 3 or q in seen or not ARABIC.search(q) and not LATIN.search(q):
                 continue
             seen.add(q)
-            best = (0.0, 0, 0)
-            for n in {len(qt) - 1, len(qt), len(qt) + 1}:
-                if n < 2:
-                    continue
-                for i in range(0, max(0, len(seq) - n) + 1):
-                    r = difflib.SequenceMatcher(None, qt, seq[i:i + n]).ratio()
-                    r_ = r - (0.1 if n != len(qt) else 0)   # prefer the quote's own length: show the differing word
-                    if r_ > best[0]:
-                        best = (r_, i, n, r)
-            _, i, n, r = best if len(best) == 4 else (0, 0, 0, 0.0)
+            # the quote's own length first, so a differing word stays inside the window and shows; one word more or
+            # less only when no same-length window matches (the writer dropped or added a word)
+            r, i, n, aligned = 0.0, 0, 0, -1
+            for lens in ([len(qt)], [len(qt) - 1, len(qt) + 1]):
+                for n_ in lens:
+                    for i_ in range(0, max(0, len(seq) - n_) + 1) if n_ >= 2 else []:
+                        win = seq[i_:i_ + n_]
+                        r_ = difflib.SequenceMatcher(None, qt, win).ratio()
+                        al = sum(a == b for a, b in zip(qt, win))     # ties: the window whose words line up
+                        if (r_, al) > (r, aligned):
+                            r, i, n, aligned = r_, i_, n_, al
+                if r >= min_ratio:
+                    break
             if r < min_ratio:
                 continue
             ws = [w for _, w in toks[i:i + n]]
@@ -414,6 +417,8 @@ def apply_corrections(paths: Paths) -> dict:
         if not w:
             problems.append(f"word_id {c['word_id']} not found")
             continue
+        if c.get("from") and c["from"] != w["word"] and w["word"] == c.get("to"):
+            continue    # the new transcript already says it (e.g. Whisper wrote the hamza this time)
         if c.get("from") and c["from"] != w["word"]:
             problems.append(f"word_id {c['word_id']}: expected {c['from']!r}, found {w['word']!r}")
             continue
@@ -454,13 +459,8 @@ def apply_corrections(paths: Paths) -> dict:
     L += [f"- PROBLEM: {p}" for p in problems]
     rv.write_text(rv.read_text(encoding="utf-8") + "\n".join(L) + "\n", encoding="utf-8")
     if reanchored:
-        rv.write_text(rv.read_text(encoding="utf-8") + "
-## Re-anchored after re-transcription
-
-"
-                      + "
-".join(f"- {r}" for r in reanchored) + "
-", encoding="utf-8")
+        rv.write_text(rv.read_text(encoding="utf-8") + "\n## Re-anchored after re-transcription\n\n"
+                      + "\n".join(f"- {r}" for r in reanchored) + "\n", encoding="utf-8")
     return dict(res, applied=len(applied), flagged=len(fl), reanchored=reanchored, problems=problems)
 
 

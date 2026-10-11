@@ -23,7 +23,12 @@ Then run `reel plan` and fix **every** error it reports (evidence not verbatim, 
   template to use, glass only on the closing card, when captions hide. Copy those choices; don't re-decide them per video.
 - Choose by **communication value**, not a quota. One primary graphic at a time, no graphic on every sentence, no SFX on every word.
 - On-screen wording is the speaker's words with filler removed, or exact client-approved strings. Keep hedges ("يمكن", "ممكن") and warnings.
-- Any medical claim on screen gets `approval_required: true`. Don't use words flagged as uncertain.
+- Any claim the profile's `domain` makes sensitive gets `approval_required: true`: a medical claim; for a religious
+  client a verse, hadith, ruling, or the speaker's words that echo a verse. `reel plan` refuses words flagged as
+  uncertain on any graphic.
+- Fillers the editor or the client's plan asks to cut (a repeated «يعني», "um", a false start) go in
+  `global.cut_words` (word ids + reason): picture, sound and captions lose them together; edit-plan.md lists them.
+  Cut only fillers: a word that carries meaning («يعني» = "i.e." in an explanation) stays.
 - Images come only from the client asset manifest (by `rel` path); stock VIDEO only from the licensed `data/Broll/` folder
   (`broll_video`). Never download or generate footage. No AI likeness, and no retouching of the client.
 - Decisions stay in **source time**. With `remove_pauses`, the compiler remaps everything.

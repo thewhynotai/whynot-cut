@@ -66,7 +66,55 @@ content, Windows). Every gap found was analysed and fixed in the plugin:
   the Mushaf between ﴿ ﴾, hadith/story attribution, no fatwa on screen): the content reviewer follows the profile
   `domain` (medical | religious | general). G14 Template colours were hard-wired (primary box + white text) →
   `box_role`/`text_role` per template (e.g. a cream hook box with dark text). G15 one still-folder mapping
-  (`still_category`) instead of five copies that had drifted apart.
+  (`still_category`) instead of five copies that had drifted apart. G16 a second audio stream (AAC + AC3) is reported.
+
+**Field test, round 2: reel R02 cut from the full 29.97 fps episode, through a live Premiere build** (G17–G45)
+- *Transcription.*
+  - G17 Whisper crashed with newer PyAV (`metadata_errors`): the engine decodes the audio itself.
+  - G18 An NVIDIA GPU silently fell back to the CPU (missing `cublas64_12.dll`). The doctor now names the GPU and the
+    missing library, and `reel gpu-enable` installs it with the editor's OK. The GPU is skipped up front instead of
+    failing after loading 3 GB.
+  - G19 Glossary hits use Arabic normalisation (آمنوا = امنوا) and phrases. Short terms keep their hamza, so the
+    verse word «آية» no longer matches Egyptian «ايه».
+  - G20 The review lists profile names that Whisper wrote differently (نادال → «نضال», ديوكوفيتش → «جيكوفيتش», at
+    high confidence).
+  - G21 "Uncertain words never on a graphic" is enforced: corrections carry `flags`, `reel plan` refuses them on
+    graphics, QC lists them, and a verification goes stale when the transcript changes. `reel transcript-relisten`
+    re-decodes flagged words three ways («حضار المدر» → «هغير المضرب», 2 of 3).
+  - G28 Quotes in the client's documents (a reels plan) are matched against the transcript.
+  - G35 The editor's finished reel is a human transcript too: its captions settled «إيمانهم».
+  - G37 Corrections re-anchor by word text after a re-transcription renumbers the words.
+- *Audio.*
+  - G24 The cut check passed a 36 s stretch that came back as one word. It now decodes ≤ 20 s chunks split at the
+    cuts, counts collapsed stretches as missing, and needs ≥ 85 % of the words matched.
+  - G25–G27 audio-clean measures the source first: dual-mono → one channel; hum notches only on mains harmonics
+    (50/60 Hz) that stand out in the pauses; no spectral denoise on an already-clean master (55 dB S/N).
+  - G38 Pause settings come from the client's style.
+- *Reels from long files.*
+  - G30 A reel is a range of a longer raw file: `reel range --in --out --snap`, `00_inputs/source.json`. Transcript,
+    audio, preflight, previews, preview video and QC all work on the reel's clock, and Premiere links into the
+    original with handles. Podcast mode reuses it.
+  - G31 `--video-id` silently processed the FIRST raw clip of a folder; it now picks its own clip, or refuses.
+  - G36 A range snaps to the nearest pause (the reel started mid-word).
+- *Frame rate.*
+  - G32 The sequence frame rate follows the client (`sequence-settings.json`, NTSC aware) instead of a fixed 24 fps,
+    which juddered on this 29.97 fps client.
+  - G33 FCP7 XML wrote invalid fractional timebases for 29.97 media; it now writes timebase 30 + NTSC, with exact
+    ticks.
+  - Premiere built R02 at 29.97 fps, and all read-back checks passed.
+- *Edit and graphics.*
+  - G29 `global.cut_words` cuts fillers (the plan's repeated «يعني») from picture, sound and captions.
+  - G39 edit-plan.md reads on the reel's timeline: real camera moves, auto zooms apart, coverage including cutaways.
+  - G40 Preview backgrounds used timeline time as source time after pause removal.
+  - G41 Captions can sit on a translucent box, as in the editor's reel.
+  - G42 Captions jumped off-screen to dodge cards placed at the top; they now move only on overlap.
+- *QC and handoff.*
+  - G34 Re-running preflight no longer moves a clip's status back.
+  - G43 Premiere frames include the cutaways and camera moves.
+  - G44 QC failed every bridge build (it looked for the fallback XML's manifest).
+  - G45 Handoff texts said 24 fps.
+  - QC dialogue sync is range-aware.
+- R02 ends READY_FOR_HUMAN_EDITOR: QC ok, cutaway blur confirmed in Premiere's frames.
 
 **Pipeline**
 - Whisper uses an NVIDIA GPU automatically (float16) and retries on CPU if the CUDA libraries fail at first inference.

@@ -8,6 +8,9 @@ For talks on faith, ethics and spirituality (e.g. a sheikh, preacher or scholar)
    Shown between ﴿ ﴾, ideally with the surah and ayah (e.g. ﴿الَّذِينَ آمَنُوا وَعَمِلُوا الصَّالِحَاتِ﴾ — البقرة: ٢٥).
    Whisper often drops or alters words in recitation: never copy a verse from the transcript. If the exact verse and
    reference can't be confirmed from the client's own material, mark `needs-approval` and keep it off screen.
+   A line of the speaker's own that *echoes* a verse (e.g. «آمنوا الأول وعملوا الصالحات» from «الَّذِينَ آمَنُوا وَعَمِلُوا
+   الصَّالِحَاتِ») is not a citation: on a graphic it is the speaker's words (no ﴿ ﴾, no reference), marked
+   `needs-approval` so the content owner confirms that framing. Captions keep it as spoken.
 2. **Hadith (أحاديث):** only if the speaker cites it; show the speaker's words with attribution as the speaker gave it
    ("قال رسول الله ﷺ…" only when the speaker said it). Strength/grading is never added or implied by the edit;
    anything the reels plan or brief marks as needing review → `needs-approval`.

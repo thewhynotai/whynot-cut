@@ -41,6 +41,16 @@ Write `02_transcription/transcript-corrections.json`, then run `reel transcript-
   only with a reason (move it to `"resolved_flags"`).
 - Confidence isn't proof. "Hypertrophic" came out as "هايبر ترافيك" at p=0.66.
 
+## Human transcripts the client already has
+People wrote down this speech before you: use them as evidence for corrections (cite them).
+- `subtitle-review.md` → "Quotes in the client's documents": quotes («…», "…", “…”) from a reels plan or brief matched
+  against the transcript; `≠` lines show where the writer heard something else.
+- A finished reel of the same clip in `data/References` (the editor's own cut): its burned captions are a human
+  transcript. View frames of the caption zone (ffmpeg `-ss T -frames:v 1 -vf crop=...`) where Whisper is unsure.
+  On a real reel both sources agreed on «إيمانهم» where Whisper heard «آمانه» and context suggested «آمنوا».
+- Re-transcribing (a new range, a new model) renumbers words: `transcript-correct` re-anchors each correction to the
+  nearest word that still reads `from`, and skips one the new transcript already gets right.
+
 ## Cues and RTL
 - Text is stored in logical (spoken) order. Never pre-reverse it.
 - Captions: at most 2 lines, about 18–32 characters per line, and no cue longer than 5.5 s. Cues break on segment boundaries, and a single orphan word is merged into its neighbour.

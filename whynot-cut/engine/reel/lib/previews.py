@@ -239,7 +239,13 @@ def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, ou
         y = p.get("y", t["y"])
         boxes = _text_block(ImageDraw.Draw(Image.new("RGBA", (1, 1))), p["text"], f, W // 2, y, b.white,
                             line_gap=gap, max_chars=mc, shadow=False)
-        if BARS and (tp != "highlight_caption" or p.get("highlight")):
+        # box_all (profile): every caption on a translucent box (readable on light backgrounds); keyword cues keep the
+        # brand box
+        plain_box = tp == "highlight_caption" and not p.get("highlight") and t.get("box_all")
+        alpha = int(255 * t.get("plain_box_alpha", 0.6)) if plain_box else 255
+        if plain_box:
+            box_c = _role_color(b, t.get("plain_box_role", "ink"))
+        if BARS and (tp != "highlight_caption" or p.get("highlight") or plain_box):
             for (x0, y0, x1, y1) in boxes:
                 if tp == "hook_title" and t.get("bar_style", "underline") == "box":   # same teal box as statements
                     px, py = t.get("pad_x", 22), t.get("pad_y", 8)
@@ -251,7 +257,7 @@ def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, ou
                     _round_rect(im, (x0 - 10, y1 + 6, x1 + 10, y1 + 14), 4, fill=box_c + (255,))
                 else:  # full box behind each line
                     px, py = t.get("pad_x", 22), t.get("pad_y", 8)
-                    _round_rect(im, (x0 - px, y0 - py, x1 + px, y1 + py - 4), 8, fill=box_c + (255,))
+                    _round_rect(im, (x0 - px, y0 - py, x1 + px, y1 + py - 4), 8, fill=box_c + (alpha,))
         if FG:
             _text_block(ImageDraw.Draw(im), p["text"], f, W // 2, y, txt_c, line_gap=gap, max_chars=mc,
                         shadow=((tp == "hook_title" and t.get("bar_style", "underline") != "box") or tp == "term_callout"
@@ -375,7 +381,8 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
             p["video_path"] = str(paths.root / p["video"])
         cat = still_category(ev["template"])
         out = paths.p(f"03_broll/{cat}/{ev['event_id']}.png")
-        mid = (ev["start_ms"] + ev["end_ms"]) // 2
+        # the background frame is a SOURCE frame: after pause removal / word cuts start_ms is on the reel's timeline
+        mid = (ev.get("src_start_ms", ev["start_ms"]) + ev.get("src_end_ms", ev["end_ms"])) // 2
         # PRODUCTION still: clean transparent overlay (never bake footage into it; the speaker moves)
         render_event(ev, tpls[ev["template"]], b, assets, logo, out, frame_bg=None)
         outs.append(str(out))
@@ -424,6 +431,9 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
     return {"previews": outs, "composites": comps}
 
 
+SAFE_TOP_PX = 220   # platform UI covers the top of a 1080x1920 reel
+
+
 def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) -> list[dict]:
     """Animated caption stills on the SEQUENCE clock: text (pop) + teal box (RTL sweep) on keyword cues.
     Cues under a graphic that already shows the words are trimmed/dropped (reference behaviour)."""
@@ -449,17 +459,21 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
             continue
         is_hl = style == "highlight_all" or any(h and h in norm(c["text"]) for h in hl)
         ev = {"template": "highlight_caption", "params": {"text": c["text"].replace("\n", " "), "highlight": is_hl}}
-        # a card (name card, glass card, CTA) is on screen at the same time: lift the caption above its top edge
-        tops = [top for a, z, top in (avoid or []) if s < z and a < e]
-        if tops:
-            from .ae_builder import wrap_lines
-            n = len(wrap_lines(ev["params"]["text"], t.get("max_chars", 30)).split("\r"))
-            half = n * t["size"] * t.get("line_gap", 1.3) / 2 + t.get("bar_pad_y", 8)
-            ev["params"]["y"] = int(min(t["y"], min(tops) - half - 24))
+        # a card (name card, glass card, CTA) overlaps the caption band at the same time: move the caption above the
+        # card, or below it when there is no room above (a card at the top of the frame: seen on a real client)
+        from .ae_builder import wrap_lines
+        n = len(wrap_lines(ev["params"]["text"], t.get("max_chars", 30)).split("\r"))
+        half = n * t["size"] * t.get("line_gap", 1.3) / 2 + t.get("bar_pad_y", 8)
+        cards = [(av[2], av[3] if len(av) > 3 else H) for av in (avoid or []) if s < av[1] and av[0] < e]
+        clash = [(top, bot) for top, bot in cards if not (bot < t["y"] - half - 12 or top > t["y"] + half + 12)]
+        if clash:
+            top, bot = min(c[0] for c in clash), max(c[1] for c in clash)
+            up = top - half - 24
+            ev["params"]["y"] = int(up) if up - half >= SAFE_TOP_PX else int(min(H - 300, bot + half + 24))
         fg = out_dir / f"CAP_{i + 1:03d}_fg.png"
         render_event(ev, t, b, {}, None, fg, layer="fg")
         item = {"id": f"CAP_{i + 1:03d}", "fg": str(fg), "start_ms": s, "end_ms": e, "highlight": is_hl, "text": c["text"]}
-        if is_hl:
+        if is_hl or t.get("box_all"):
             bar = out_dir / f"CAP_{i + 1:03d}_bar.png"
             render_event(ev, t, b, {}, None, bar, layer="bars")
             item["bar"] = str(bar)

@@ -104,7 +104,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
     for a, b in g.get("captions_hidden_ranges", []):
         a, b = to_ms(a), to_ms(b)
         hidden.append((remap.ms(a), remap.ms(b)) if remap else (a, b))
-    # captions never sit on a card (name card etc.): while one is up, captions move above its top edge
+    # captions never sit on a card (name card etc.): while one overlaps the caption band, the caption moves
     avoid = []
     for e in spec["events"]:
         if e["template"] in ("name_card", "glass_card", "cta"):
@@ -113,7 +113,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
                 from PIL import Image
                 bb = Image.open(png).getchannel("A").getbbox()
                 if bb:
-                    avoid.append((e["start_ms"], e["end_ms"], bb[1]))
+                    avoid.append((e["start_ms"], e["end_ms"], bb[1], bb[3]))
     caps = render_captions(paths, hidden, avoid=avoid)
     for c in caps:
         s, en = c["start_ms"] / 1000, c["end_ms"] / 1000
@@ -238,6 +238,11 @@ def export_frames(paths: Paths, times: list[float] | None = None) -> dict:
                 continue
             t = round((e["start_frame"] + (e["end_frame"] - e["start_frame"]) * 0.7) / seq_fps(), 3)
             labels.setdefault(t, f"{e['event_id']} {e['template']}")
+        # source cutaways (the card whole over a blurred fill) and camera moves are checked in Premiere's own frames too
+        for m in spec["main_segments"]:
+            if m.get("decision_id") and m["end_frame"] - m["start_frame"] >= 6:
+                t = round((m["start_frame"] + m["end_frame"]) / 2 / seq_fps(), 3)
+                labels.setdefault(t, f"{m['decision_id']} {m['camera']}")
         end = spec["duration_frames"] / seq_fps()
         times = sorted(t for t in set(labels) | {2.5, end * 0.15, end * 0.5, end - 0.5} if 0 <= t < end)
         times = sorted({round(t, 3) for t in times})

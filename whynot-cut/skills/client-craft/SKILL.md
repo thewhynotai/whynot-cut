@@ -26,6 +26,11 @@ reel ref-analyze --root "<CLIENT>" --video-id <ID> # reference cuts, contact she
   - `transcription.json`: `initial_prompt` with the name and specialty exactly as spelled in the brief
   - `medical-glossary.json`: domain terms that trigger review
   - `style.json` + `notes.md`: standing style seen in the references or stated by the editor
+  - `sequence-settings.json`: the frame rate of the client's delivered reels (probe a reference video), e.g.
+    `{"general": {"timebase": 30, "ntsc": true}}` for 29.97 fps
+  - `graphics-templates.json`: positions and colour roles measured from the reference reels (keep top graphics under
+    the 250 px safe line even when a reference places them higher; `highlight_caption.box_all` for captions on a
+    translucent box, as many Arabic channels use)
   - `brand.json`: only if the client supplied HEX codes the extraction missed
 - Every statement cites a source file. Missing facts stay "unavailable". A missing font is reported, never substituted.
   Brand files outrank references, and references outrank generic templates.

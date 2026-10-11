@@ -3,14 +3,16 @@
 Combine **SRT meaning + editing-style/rules + client brand**. One decision per meaningful segment that
 needs treatment (talking-head-only segments need no decision unless a camera change happens).
 `reel plan` validates and compiles; fix all errors it reports. Times: `"HH:MM:SS.mmm"` (or seconds).
-Frames are computed by the compiler (24 fps, round-half-up from absolute ms — no drift); don't hand-compute.
+Frames are computed by the compiler at the client's sequence rate (24 / 25 / 29.97 …, round-half-up from absolute ms —
+no drift); don't hand-compute. Times are on the transcript's clock (0 = the reel's in-point for a range).
 
 ### Framing (`global.base_scale_percent`)
 - `"auto"` (or absent): a 9:16 source is fitted; a WIDER source (e.g. a 16:9 episode) is reframed to fill the vertical
   frame, centred on the speaker's face (preflight measures it: `00_inputs/preflight.json` → `reframe`).
 - A number (e.g. `50`) overrides it; `base_offset_x` / `base_offset_y` (sequence px) shift the frame.
 - **Source cutaways** (graphic cards, B-roll or another camera burned into a finished episode, listed in preflight's
-  `reframe.cutaways_ms`) are shown whole, letterboxed, automatically: a 16:9 card cropped to 9:16 loses its text.
+  `reframe.cutaways_ms`) are shown whole over a blurred copy of themselves, automatically: a 16:9 card cropped to
+  9:16 loses its text. Graphics that would sit over the card end before it starts.
   Decide per cutaway: keep it, cover it with your own graphic carrying the same words (statement_highlight etc.), or
   choose a clip range that avoids it. Mention them in the plan summary.
 
@@ -23,6 +25,7 @@ Frames are computed by the compiler (24 fps, round-half-up from absolute ms — 
     "caption_style": "keywords | highlight_all",
     "captions_hidden_during": ["broll_card", "logo_outro"],
     "remove_pauses": {"min_pause_ms": 250, "pad_ms": 80, "mask_scales": [1.0, 1.06]},
+    "cut_words": [{"word_ids": [52], "reason": "filler «يعني»"}],
     "native_caption_track": false,
     "photoshop_jobs": [
       {"id": "PS_COVER", "image": "assets/Photos/4.jpg", "headline": "<the speaker's words>", "subline": "<exact approved name>",
@@ -75,7 +78,10 @@ The compiler splits V01 at every camera change; timeline time always equals sour
 - Same-track graphics cannot overlap (compiler error). One primary graphic at a time.
 - No random zooms, no graphics every sentence, no SFX on every word. Prefer fewer, meaningful events.
 - On-screen wording = the speaker's words (filler removed) or exact client-approved strings (name card).
-- `approval_required: true` for any medical diagram, claim card, dosage, lab values, before/after or likeness.
+- `approval_required: true` for any medical diagram, claim card, dosage, lab values, before/after or likeness, and
+  (religious domain) any verse, hadith, ruling or line that echoes one.
+- Client-approved strings (a hook written in the client's reels plan, the show's standing end card) may be used
+  as on-screen text; say where they come from in `concept`.
 - Images only from the client asset manifest (`client_database/asset-manifest.json`, by `rel` path).
 
 ## Global switches

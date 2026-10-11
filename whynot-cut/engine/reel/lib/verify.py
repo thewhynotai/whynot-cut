@@ -95,7 +95,7 @@ def build(paths: Paths) -> dict:
             continue
         n = e["end_frame"] - e["start_frame"]
         rel = round(n * 0.7) / seq_fps()
-        t = e["start_ms"] / 1000 + rel + (spec.get("source_in_ms") or 0) / 1000
+        t = e.get("src_start_ms", e["start_ms"]) / 1000 + rel + (spec.get("source_in_ms") or 0) / 1000   # a SOURCE time
         mov = paths.p(f"04_after_effects/compositions/{e['event_id']}.mov")
         out = vdir / f"{e['event_id']}.jpg"
         source = "AE render"

@@ -41,6 +41,14 @@ def path_from_url(url: str) -> Path:
     return Path(s)
 
 
+def timeline_manifest(paths: Paths) -> dict:
+    """The built timeline's manifest: the XML-only build writes timeline-manifest.json, the native Premiere build
+    (ppro-build) base-manifest.json. QC and the handoff read whichever exists (the newer when both do)."""
+    cands = [paths.p("07_premiere/timeline-manifest.json"), paths.p("07_premiere/base-manifest.json")]
+    cands = sorted((c for c in cands if c.exists()), key=lambda c: c.stat().st_mtime, reverse=True)
+    return read_json(cands[0], {}) if cands else {}
+
+
 def rate(fps: float) -> str:
     """FCP7 rate: 29.97 -> timebase 30 + NTSC TRUE (a fractional timebase is invalid XML), 25 -> 25 + FALSE."""
     tb = round(fps)
