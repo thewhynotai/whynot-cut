@@ -5,7 +5,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Engine home, the same order as plat.engine_home(): env > the saved plugin option (the pointer file the SessionStart
-# hook writes; without one, Claude Code's settings.json pluginConfigs) > ~/.whynot-cut with an engine > a legacy home
+# hook writes; without one, Claude Code's settings.json pluginConfigs) > ~/.whynot-cut with an engine (a runtime
+# `current` file or venv/) > a legacy home
 # (.reel-editor / .dr-nahla-editor: still read in 3.x, dropped in 4.0) > ~/.whynot-cut. Pure bash: no forks.
 # The validity and entry rules match plat.saved_options() (its docstring lists the remaining edge cases).
 bs='\' q='"' str_re='"(([^"\\]|\\.)*)"'
@@ -53,7 +54,7 @@ if [ -z "$HOME_DIR" ]; then
 fi
 if [ -z "$HOME_DIR" ]; then
   HOME_DIR="$HOME/.whynot-cut"
-  if [ ! -d "$HOME_DIR/venv" ]; then      # ~/.whynot-cut alone may only hold the pointer file
+  if [ ! -d "$HOME_DIR/venv" ] && [ ! -f "$HOME_DIR/current" ]; then   # it may only hold the pointer file
     for old in .reel-editor .dr-nahla-editor; do
       if [ -d "$HOME/$old/venv" ]; then HOME_DIR="$HOME/$old"; break; fi
     done
@@ -64,20 +65,42 @@ tag() {   # "WhyNot Cut 2.2.0": every blocked message names this plugin, so a wr
   local v; v="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$HERE/.claude-plugin/plugin.json" 2>/dev/null | head -n 1 || true)"
   echo "WhyNot Cut ${v:-?}"
 }
-PY="$HOME_DIR/venv/bin/python"
-[ -x "$PY" ] || PY="$HOME_DIR/venv/Scripts/python.exe"
-if [ ! -x "$PY" ]; then
+# The engine interpreter (3.0 T2.1, same order as plat.engine_runtime()): the isolated runtime named by the one-line
+# text file <home>/current (runtimes/<id>/, run with -s: no user site), else the 2.x venv/ (run as before: a venv
+# built with --system-site-packages may rely on the user site). Never a system Python for the engine.
+PY='' PYFLAG=''
+find_py() {
+  local id='' c
+  if [ -f "$HOME_DIR/current" ]; then
+    IFS= read -r id < "$HOME_DIR/current" || true
+    id="${id//[[:space:]]/}"
+    case "$id" in ''|*/*|*'\'*|*..*) id='' ;; esac
+    if [ -n "$id" ]; then
+      for c in "$HOME_DIR/runtimes/$id/bin/python" "$HOME_DIR/runtimes/$id/Scripts/python.exe"; do
+        if [ -x "$c" ]; then PY="$c"; PYFLAG=-s; return 0; fi
+      done
+    fi
+  fi
+  for c in "$HOME_DIR/venv/bin/python" "$HOME_DIR/venv/Scripts/python.exe"; do
+    if [ -x "$c" ]; then PY="$c"; PYFLAG=''; return 0; fi
+  done
+  return 1
+}
+if ! find_py; then
   if [ "${1:-}" = "setup" ]; then
     echo "WhyNot Cut: no engine yet — creating it in $HOME_DIR (a few minutes, ~400 MB)…" >&2
     for sys_py in python3 python py; do
       if command -v "$sys_py" >/dev/null 2>&1 && "$sys_py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' </dev/null >/dev/null 2>&1; then
         "$sys_py" "$HERE/setup/setup_env.py" --home "$HOME_DIR" >&2 || true
+        ran=1
         break
       fi
     done
-    PY="$HOME_DIR/venv/bin/python"
-    [ -x "$PY" ] || PY="$HOME_DIR/venv/Scripts/python.exe"
-    if [ ! -x "$PY" ]; then
+    if ! find_py; then
+      if [ -n "${ran:-}" ]; then
+        echo "{\"blocked\": \"$(tag): building the engine runtime failed (its report is above)\", \"how\": \"check the internet connection, then run: reel setup\"}"
+        exit 2
+      fi
       echo "{\"blocked\": \"$(tag): no Python 3.9+ found to build the engine\", \"how\": \"macOS: xcode-select --install (or python.org). Windows: winget install Python.Python.3.12  — then run: reel setup\"}"
       exit 2
     fi
@@ -87,4 +110,4 @@ if [ ! -x "$PY" ]; then
   fi
 fi
 export PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 PYTHONIOENCODING=utf-8   # no __pycache__ in the plugin; UTF-8 on Windows
-exec "$PY" "$HERE/engine/reel/cli.py" "$@"
+exec "$PY" $PYFLAG "$HERE/engine/reel/cli.py" "$@"

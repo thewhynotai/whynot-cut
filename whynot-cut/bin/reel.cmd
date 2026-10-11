@@ -7,7 +7,7 @@ setlocal EnableExtensions DisableDelayedExpansion
 set "WNC_HERE=%~dp0.."
 rem Engine home, the same order as plat.engine_home(): env > the saved plugin option (the pointer file the SessionStart
 rem hook writes; without a valid one, Claude Code's settings.json pluginConfigs) > %USERPROFILE%\.whynot-cut with an
-rem engine > a legacy home (.reel-editor, .dr-nahla-editor: still read in 3.x, dropped in 4.0) > .whynot-cut.
+rem engine (a runtime "current" file or venv\) > a legacy home (.reel-editor, .dr-nahla-editor: still read in 3.x, dropped in 4.0) > .whynot-cut.
 rem The validity and entry rules match plat.saved_options() (its docstring lists the remaining edge cases).
 set "WNC_HOME=%WHYNOT_HOME%"
 if not defined WNC_HOME set "WNC_HOME=%CLAUDE_PLUGIN_OPTION_ENGINE_HOME%"
@@ -16,16 +16,48 @@ if not defined WNC_HOME set "WNC_HOME=%CLAUDE_PLUGIN_OPTION_REEL_HOME%"
 if not defined WNC_HOME call :saved_home
 if not defined WNC_HOME call :default_home
 set "WHYNOT_HOME=%WNC_HOME%"
-set "WNC_PY=%WNC_HOME%\venv\Scripts\python.exe"
-if not exist "%WNC_PY%" if /I "%~1"=="setup" call :setup
+rem The engine interpreter (3.0 T2.1, same order as plat.engine_runtime()): the isolated runtime named by the one-line
+rem text file <home>\current (runtimes\<id>\, run with -s: no user site), else the 2.x venv\ (run as before). Never a
+rem system Python for the engine; `reel setup` with neither builds the runtime first.
+call :find_py
+if not defined WNC_PY if /I "%~1"=="setup" call :setup
 if defined WNC_NOPY goto :no_python
-if not exist "%WNC_PY%" goto :blocked
+if not defined WNC_PY call :find_py
+if not defined WNC_PY if defined WNC_SETUP_RAN goto :setup_failed
+if not defined WNC_PY goto :blocked
 set "PYTHONDONTWRITEBYTECODE=1"
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 rem the whole line is expanded before it runs, so the WNC_* values are used and already cleared for the engine
-set "WNC_HOME=" & set "WNC_PY=" & set "WNC_HERE=" & "%WNC_PY%" "%WNC_HERE%\engine\reel\cli.py" %*
+set "WNC_HOME=" & set "WNC_PY=" & set "WNC_HERE=" & set "WNC_FLAG=" & set "WNC_SETUP_RAN=" & "%WNC_PY%" %WNC_FLAG% "%WNC_HERE%\engine\reel\cli.py" %*
 exit /b %ERRORLEVEL%
+
+:find_py
+rem WNC_PY (+ WNC_FLAG=-s for a runtime). <home>\current holds one runtime id: one word, no \ / : or ..
+rem (%WNC_RT:x=y% is expanded when its line is read, also behind a false `if`: so every line that uses it is
+rem reached only by goto once WNC_RT is defined)
+set "WNC_PY="
+set "WNC_FLAG="
+set "WNC_RT="
+if exist "%WNC_HOME%\current" set /p WNC_RT=<"%WNC_HOME%\current"
+if not defined WNC_RT goto :find_venv
+set "WNC_RT=%WNC_RT:"=%"
+if not defined WNC_RT goto :find_venv
+set "WNC_RT=%WNC_RT: =%"
+if not defined WNC_RT goto :find_venv
+if not "%WNC_RT:\=%"=="%WNC_RT%" goto :find_venv
+if not "%WNC_RT:/=%"=="%WNC_RT%" goto :find_venv
+if not "%WNC_RT::=%"=="%WNC_RT%" goto :find_venv
+if not "%WNC_RT:..=%"=="%WNC_RT%" goto :find_venv
+if not exist "%WNC_HOME%\runtimes\%WNC_RT%\Scripts\python.exe" goto :find_venv
+set "WNC_PY=%WNC_HOME%\runtimes\%WNC_RT%\Scripts\python.exe"
+set "WNC_FLAG=-s"
+set "WNC_RT="
+exit /b 0
+:find_venv
+set "WNC_RT="
+if exist "%WNC_HOME%\venv\Scripts\python.exe" set "WNC_PY=%WNC_HOME%\venv\Scripts\python.exe"
+exit /b 0
 
 :saved_home
 rem engine_home from the pointer file when it is valid (an "engine_home" string line and the closing brace; "" = not
@@ -111,6 +143,7 @@ exit /b 0
 :default_home
 set "WNC_HOME=%USERPROFILE%\.whynot-cut"
 if exist "%WNC_HOME%\venv\" exit /b 0
+if exist "%WNC_HOME%\current" exit /b 0
 if exist "%USERPROFILE%\.reel-editor\venv\" (
   set "WNC_HOME=%USERPROFILE%\.reel-editor"
   exit /b 0
@@ -130,10 +163,12 @@ if not defined WNC_SYS_PY (
   set "WNC_NOPY=1"
   exit /b 1
 )
+set "WNC_SETUP_RAN=1"
 "%WNC_SYS_PY%" "%WNC_HERE%\setup\setup_env.py" --home "%WNC_HOME%" 1>&2
 set "WNC_SYS_PY="
 exit /b
 :setup_py
+set "WNC_SETUP_RAN=1"
 py -3 "%WNC_HERE%\setup\setup_env.py" --home "%WNC_HOME%" 1>&2
 exit /b
 
@@ -146,6 +181,11 @@ exit /b 0
 :no_python
 call :tag
 echo {"blocked": "%WNC_TAG%: no Python 3.9+ found to build the engine", "how": "Windows: winget install Python.Python.3.12 - then run: reel setup"}
+exit /b 2
+
+:setup_failed
+call :tag
+echo {"blocked": "%WNC_TAG%: building the engine runtime failed (its report is above)", "how": "check the internet connection, then run: reel setup"}
 exit /b 2
 
 :blocked
