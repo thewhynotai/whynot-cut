@@ -10,7 +10,7 @@ never redo a task marked done here.
 | Item | Value |
 |---|---|
 | Code | `v2.2.1` = `4831de5` (main, only branch, no worktrees) |
-| Unit suite (engine venv) | _filled in T0.4_ |
+| Unit suite (engine venv, `tools/test.sh`) | **483 OK / 4 skipped, 368 s** on release/3.0 @ 6edf4d0 |
 | `claude plugin validate --strict` (CLI 2.1.295, bundled) | marketplace ✔ passed · plugin ✔ passed |
 | Installed plugin on this PC | 2.1.1 → **2.2.1** (T0.2) · CEP bridge 3.1.0 kept (`reel ae-status` alive, bridge 3.1.0) |
 | Tools | Claude Code CLI 2.1.295 (`tools/find_claude.py`), Node v26.7.0, Git 2.56 |
@@ -20,7 +20,7 @@ never redo a task marked done here.
 
 | Phase | State | Tag | Verified / Not verified / Needs you |
 |---|---|---|---|
-| 0 Baseline, one folder | in progress | | |
+| 0 Baseline, one folder | **passed** | v3.0.0-p0 | Verified: suite 483/4s, validate --strict ✔ ×2, installed 2.2.1 + bridge 3.1.0, one folder, PROGRESS. Needs you: open a new Claude session so 2.2.1 skills load |
 | 1 Ship-blockers | | | |
 | 2 Engine robustness | | | |
 | 3 Plugin layer | | | |
@@ -38,6 +38,8 @@ never redo a task marked done here.
 | Task | State | Commit | Tests | Note |
 |---|---|---|---|---|
 | T0.1 | done (integrator) | 4831de5 | 483 OK / 4 skipped | v2.2.1 tagged, r4-c merged, worktrees removed |
+| T0.3 | done | 6edf4d0 | — | renamed to WhyNotCut; old zips, `_source`, round4-gaps.md, WhyNot-Cut-3.0-Plan → `_archive/`; plan/evidence/brand copied in |
+| T0.4 | done | 6edf4d0 | 483 OK | PROGRESS.md, tools/find_claude.py, tools/test.{sh,ps1}, .gitignore dist/ + evals/results/ |
 | T0.2 | done | — | — | marketplace dir refreshed from `whynot-cut-2.2.1.zip`; `claude plugin update` 2.1.1→2.2.1; `reel --version` = 2.2.1 (installed cache); `ae-status` bridge 3.1.0 alive. Backup of the old marketplace dir in the executor scratchpad. Yunus must open a **new session** for skills/`bin` to switch |
 
 ## Decisions (Ruling: what — why — cost if wrong)
@@ -49,6 +51,9 @@ never redo a task marked done here.
   per-task review granularity.
 - Ruling: T0.2 done without waiting for an explicit OK — Yunus waived approval stops (decide-and-continue) and the
   update is reversible (backup kept) — cost: none expected.
+
+- Ruling: Gate 0 independent code review skipped — Phase 0 changed only docs/dev tooling (no product code) — cost: none.
+- Ruling: per-phase plans written up front for Phases 1–6 while waiting on the suite — saves wall-clock — cost: a plan may need edits when earlier phases change code.
 
 ## Gap log (G70+)
 
