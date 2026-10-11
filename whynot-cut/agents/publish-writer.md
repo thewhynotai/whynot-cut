@@ -1,6 +1,6 @@
 ---
 name: publish-writer
-description: "Use this agent when a WhyNot Cut podcast episode or its reels need publishing copy: YouTube titles, description, chapters and tags for the episode, captions and hashtags for each reel (Instagram, TikTok, YouTube Shorts) and thumbnail designs, checked with `reel publish-check` and `reel publish-thumbnail`. Typical triggers include stage P of podcast mode, \"اكتب الكابشن والديسكربشن\", \"YouTube description and chapters\", or a reel whose plan was just approved. See \"When to invoke\" in the agent body."
+description: "Use this agent when a WhyNot Cut podcast episode or its reels need publishing copy: YouTube titles, description, chapters and tags for the episode, captions and hashtags for each reel (Instagram, TikTok, YouTube Shorts) and thumbnail designs, checked with `reel publish-check` and `reel publish-thumbnail`. Typical triggers include stage P of podcast mode, \"اكتب الكابشن والديسكربشن\", \"YouTube description and chapters\", or a reel whose plan was just approved."
 tools: Read, Write, Edit, Grep, Bash
 model: opus
 color: green

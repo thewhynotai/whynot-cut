@@ -1,6 +1,6 @@
 ---
 name: premiere-builder
-description: "Use this agent when the native Premiere Pro project for a WhyNot Cut clip must be built or rebuilt through the WhyNot Cut Bridge (or the XML fallback written). Typical triggers include stage 10 after the plan is approved, rebuilds after revisions, and bridge build failures to report. See \"When to invoke\" in the agent body."
+description: "Use this agent when the native Premiere Pro project for a WhyNot Cut clip must be built or rebuilt through the WhyNot Cut Bridge (or the XML fallback written). Typical triggers include stage 10 after the plan is approved, rebuilds after revisions, and bridge build failures to report."
 tools: Read, Bash
 model: sonnet
 color: yellow

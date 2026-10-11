@@ -1,6 +1,6 @@
 ---
 name: client-craft
-description: "This skill should be used when building a whynot-cut client database or profile — discovering client assets, extracting brand colours/fonts, classifying photos, analysing reference edits, writing the client's reel-profile. Knowledge for the client-researcher agent."
+description: "Reference for the client-researcher agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

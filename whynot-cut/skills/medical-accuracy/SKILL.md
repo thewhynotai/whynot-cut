@@ -1,6 +1,6 @@
 ---
 name: medical-accuracy
-description: "This skill should be used when reviewing sensitive statements shown on screen in a whynot-cut edit — medical or health claims, and religious content (Quran verses, hadith, attributed stories, rulings) — qualifiers, exact wording, which graphics need the speaker's or doctor's approval. Knowledge for the medical-reviewer and claim-checker agents."
+description: "Reference for the medical-reviewer agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: segment-proofreader
-description: "Use this agent when one ~20-second chunk of a WhyNot Cut transcript needs proposed corrections (misheard terms, split words, Latin terms written in Arabic script). Typical triggers include fan-out from transcript-editor on clips longer than about 40 seconds. Read-only. See \"When to invoke\" in the agent body."
+description: "Use this agent when one ~20-second chunk of a WhyNot Cut transcript needs proposed corrections (misheard terms, split words, Latin terms written in Arabic script). Typical triggers include fan-out from transcript-editor on clips longer than about 40 seconds. Read-only."
 tools: Read
 model: sonnet
 color: blue

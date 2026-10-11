@@ -1,6 +1,6 @@
 ---
 name: start
-description: "This skill should be used when someone has just installed WhyNot Cut or doesn't know where to begin with it — \"get started\", \"set me up\", \"set up WhyNot Cut\", \"first time\", \"onboard me\", \"install WhyNot Cut\", \"I just installed the plugin\", \"ابدأ مع WhyNot Cut\", \"أول مرة أستخدمه\", \"إزاي أبدأ\", \"جهزلي البرنامج\". It walks the person step by step from an empty machine to \"drop your raw footage here\", checking each step before moving on, on macOS or Windows."
+description: "First steps after installing WhyNot Cut, from empty machine to ready: \"get started\", \"set me up\", \"I just installed the plugin\", «أول مرة أستخدمه», «إزاي أبدأ»."
 argument-hint: "[folder for client folders]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

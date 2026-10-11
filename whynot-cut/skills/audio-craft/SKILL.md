@@ -1,6 +1,6 @@
 ---
 name: audio-craft
-description: "This skill should be used when cleaning dialogue or removing pauses in a whynot-cut project — noise, hum, loudness, multi-mic selection, pause detection, proving no speech was cut. Knowledge for the audio-engineer agent."
+description: "Reference for the audio-engineer agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

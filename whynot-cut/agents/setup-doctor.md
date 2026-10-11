@@ -1,6 +1,6 @@
 ---
 name: setup-doctor
-description: "Use this agent when a WhyNot Cut machine or environment problem needs diagnosing on macOS or Windows without changing anything. Typical triggers include reel setup or reel doctor failing, the Premiere bridge not responding, slow or failing transcription, and engine errors on a new Mac or PC. See \"When to invoke\" in the agent body."
+description: "Use this agent when a WhyNot Cut machine or environment problem needs diagnosing on macOS or Windows without changing anything. Typical triggers include reel setup or reel doctor failing, the Premiere bridge not responding, slow or failing transcription, and engine errors on a new Mac or PC."
 model: sonnet
 color: yellow
 tools: Read, Grep, Glob, Bash

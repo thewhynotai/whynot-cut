@@ -1,6 +1,6 @@
 ---
 name: podcast
-description: "This skill should be used when the user has a finished podcast episode and wants reels cut from it or its publishing package — \"make reels from this episode\", \"reels plan with timecodes\", \"cut the podcast into reels\", \"what are the best moments in the episode\", \"YouTube description and chapters for the episode\", \"طلّع ريلز من الحلقة\", \"اعمل ريلز من البودكاست\", \"خطة ريلز بالتايم كود\", \"الكابشن والديسكربشن والشابترز والتاجز\". It is the lead playbook for podcast mode: episode transcript, a validated reels plan with content types, Gate 0 (the editor picks), each picked reel through the edit pipeline, and the publish package."
+description: "Reels or publish package from a finished podcast episode: \"make reels from this episode\", \"reels plan with timecodes\", \"YouTube description and chapters\", «طلّع ريلز من الحلقة»."
 argument-hint: "[episode id] [client folder]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

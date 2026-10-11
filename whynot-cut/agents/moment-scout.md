@@ -1,6 +1,6 @@
 ---
 name: moment-scout
-description: "Use this agent when one ~10-minute chunk of a WhyNot Cut podcast episode transcript must be searched for reel-worthy moments (self-contained stories, conflicts, success stories, advice, bold opinions, human moments, comedy) with exact start/end evidence. Typical triggers include fan-out from episode-analyst at stage E4. Read-only. See \"When to invoke\" in the agent body."
+description: "Use this agent when one ~10-minute chunk of a WhyNot Cut podcast episode transcript must be searched for reel-worthy moments (self-contained stories, conflicts, success stories, advice, bold opinions, human moments, comedy) with exact start/end evidence. Typical triggers include fan-out from episode-analyst at stage E4. Read-only."
 tools: Read
 model: sonnet
 color: blue

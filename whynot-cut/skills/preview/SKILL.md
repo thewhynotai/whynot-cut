@@ -1,6 +1,6 @@
 ---
 name: preview
-description: "This skill should be used when the editor wants to watch the planned edit before or without Premiere — \"show me the edit\", \"let me watch it\", \"make a preview video\", \"render a preview\", \"quick MP4\", \"I don't have Premiere here\", \"ورّيني الفيديو\", \"عايز أشوف المونتاج\". It renders a watchable MP4 proxy of the current plan on macOS or Windows."
+description: "Render a watchable MP4 of the planned edit, no Premiere needed: \"show me the edit\", \"make a preview video\", \"quick MP4\", «ورّيني الفيديو», «عايز أشوف المونتاج»."
 argument-hint: "[clip id] [--width 540|720|1080]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

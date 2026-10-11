@@ -1,6 +1,6 @@
 ---
 name: fix-audio
-description: "This skill should be used when the request is only about the dialogue audio — \"clean the audio\", \"clean her/his audio\", \"remove the noise/hum\", \"remove all pauses\", \"tighten the gaps\", \"audio sounds bad\", \"الصوت فيه دوشة\", \"شيل السكتات\". Runs the measured cleanup and pause removal with before/after evidence."
+description: "Audio-only request, no other comments: \"clean the audio\", \"remove the noise\", \"remove all pauses\", «الصوت فيه دوشة», «شيل السكتات». Measured, with before/after proof."
 argument-hint: "[clip id] [--min-pause ms] [--pad ms]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

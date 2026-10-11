@@ -1,6 +1,6 @@
 ---
 name: premiere-craft
-description: "This skill should be used when building or debugging the native Premiere Pro project in whynot-cut — WhyNot Cut Bridge status, ppro-build, sequence settings read-back, track layout, audio mono pairs, frame export, the XML fallback. Knowledge for the premiere-builder agent."
+description: "Reference for the premiere-builder agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

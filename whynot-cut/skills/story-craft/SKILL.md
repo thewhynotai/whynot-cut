@@ -1,6 +1,6 @@
 ---
 name: story-craft
-description: "This skill should be used when analysing what a speaker means and authoring edit decisions for a whynot-cut project — main topic, narrative segments, statement analysis, which moments get graphics/B-roll/punch-ins, edit-decisions.json. Knowledge for the story-editor agent."
+description: "Reference for the story-editor agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

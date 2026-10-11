@@ -1,6 +1,6 @@
 ---
 name: graphic-checker
-description: "Use this agent when one family of WhyNot Cut preview stills (statement bars, checklist, cards/B-roll or captions) must be checked visually. Typical triggers include fan-out from motion-designer after `reel previews`. Read-only. See \"When to invoke\" in the agent body."
+description: "Use this agent when one family of WhyNot Cut preview stills (statement bars, checklist, cards/B-roll or captions) must be checked visually. Typical triggers include fan-out from motion-designer after `reel previews`. Read-only."
 tools: Read
 model: sonnet
 color: orange

@@ -1,6 +1,6 @@
 ---
 name: medical-reviewer
-description: "Use this agent when the sensitive statements shown on screen in a WhyNot Cut edit need review before the approval gate: medical or health claims, or religious content (verses, hadith, attributed stories, rulings) for clients whose profile domain is religious. Typical triggers include stage 7b after edit decisions compile, any change to on-screen wording on a health topic, and an editor asking which graphics need the doctor's sign-off. Read-only. See \"When to invoke\" in the agent body."
+description: "Use this agent when the sensitive statements shown on screen in a WhyNot Cut edit need review before the approval gate: medical or health claims, or religious content (verses, hadith, attributed stories, rulings) for clients whose profile domain is religious. Typical triggers include stage 7b after edit decisions compile, any change to on-screen wording on a health topic, and an editor asking which graphics need the doctor's sign-off. Read-only."
 tools: Read, Grep, Glob, Agent
 model: opus
 color: red

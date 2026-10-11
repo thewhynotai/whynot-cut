@@ -1,6 +1,6 @@
 ---
 name: preferences
-description: "This skill should be used when the user wants to see or change how WhyNot Cut behaves for them — \"change my settings\", \"stop asking me to approve\", \"always ask before building\", \"use the faster transcription\", \"talk to me in Arabic\", \"where are my clients\", \"WhyNot Cut preferences\", \"إعدادات WhyNot Cut\", \"متسألنيش قبل ما تبني\", \"كلمني بالعربي\". It reads and writes the .claude/whynot-cut.local.md preferences file."
+description: "See or change WhyNot Cut settings: \"change my settings\", \"stop asking me to approve\", \"where are my clients\", «إعدادات WhyNot Cut», «كلمني بالعربي»."
 argument-hint: "[key=value ...]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

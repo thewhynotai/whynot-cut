@@ -1,6 +1,6 @@
 ---
 name: qc-reviewer
-description: "Use this agent when a built WhyNot Cut project needs independent, adversarial verification. Typical triggers include stage 12 after every build or rebuild, and the editor asking whether a clip is really ready. It exports Premiere's own frames, fans out frame-inspectors and returns a pass/fail table; it never fixes or records verdicts. See \"When to invoke\" in the agent body."
+description: "Use this agent when a built WhyNot Cut project needs independent, adversarial verification. Typical triggers include stage 12 after every build or rebuild, and the editor asking whether a clip is really ready. It exports Premiere's own frames, fans out frame-inspectors and returns a pass/fail table; it never fixes or records verdicts."
 tools: Read, Glob, Grep, Bash, Agent
 model: opus
 color: pink

@@ -1,6 +1,6 @@
 ---
 name: publish-craft
-description: "This skill should be used when writing publishing copy for whynot-cut podcast mode — YouTube titles, description, chapters, tags and SRT for an episode; Instagram/TikTok captions, hashtags and YouTube Shorts titles for each reel; thumbnail designs — and checking it with reel publish-check. Knowledge for the publish-writer agent."
+description: "Reference for the publish-writer agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

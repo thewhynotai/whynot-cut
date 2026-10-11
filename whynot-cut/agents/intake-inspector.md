@@ -1,6 +1,6 @@
 ---
 name: intake-inspector
-description: "Use this agent when new raw material has landed in a client folder and someone must check what is there, what is missing and what will cause problems before editing starts. Typical triggers include the user saying they added or dropped new footage or brand files, a request before an autopilot or batch edit run, onboarding a new client folder, or \"check my files\". See \"When to invoke\" in the agent body."
+description: "Use this agent when new raw material has landed in a client folder and someone must check what is there, what is missing and what will cause problems before editing starts. Typical triggers include the user saying they added or dropped new footage or brand files, a request before an autopilot or batch edit run, onboarding a new client folder, or \"check my files\"."
 model: sonnet
 color: cyan
 tools: Read, Glob, Grep, Bash

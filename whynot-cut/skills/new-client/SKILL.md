@@ -1,6 +1,6 @@
 ---
 name: new-client
-description: "This skill should be used when starting work for a client who has no WhyNot Cut profile yet — \"new client\", \"set up the new client\", \"onboard Dr. X\", \"add a client\", \"عميل جديد\", a new doctor/creator folder with assets/ and data/, or when `reel next` / the session context shows profile NONE."
+description: "Onboard a client with no WhyNot Cut profile: \"new client\", \"onboard Dr. X\", \"add a client\", «عميل جديد», or when the session shows profile NONE."
 argument-hint: "<client folder> [profile-id] [prefix]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

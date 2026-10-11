@@ -1,6 +1,6 @@
 ---
 name: revise
-description: "This skill should be used when the editor gives feedback on an existing edit — \"remove all pauses\", \"clean the noise\", \"make the text animate like the reference\", \"glass only at the end\", \"move the name card\", \"make it punchier\", a numbered list of comments. Turns each comment into decision changes, rebuilds in Premiere and re-verifies."
+description: "Editor feedback on an existing edit, two or more comments or any non-audio comment: \"make it punchier\", \"move the name card\", a numbered list, «ملاحظات على الفيديو». Rebuilds, re-verifies."
 argument-hint: "\"<editor feedback>\" [clip id]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

@@ -1,6 +1,6 @@
 ---
 name: setup
-description: "This skill should be used when installing or repairing WhyNot Cut on a Mac or Windows PC — \"install the engine\", \"reel: command not found\", \"engine missing\", \"set up this computer\", \"Whisper model missing\", \"Premiere bridge not responding\", \"PlayerDebugMode\", \"after a plugin update\", \"moving to a new computer\", \"المحرك مش متثبت\", \"البريميير مش بيستجيب\", \"نقلت على جهاز جديد\", \"ثبّت WhyNot Cut\". For a first-time user, /whynot-cut:start applies, which includes this."
+description: "Install or repair WhyNot Cut on a Mac or PC: \"install the engine\", \"reel: command not found\", \"Premiere bridge not responding\", «المحرك مش متثبت», «نقلت على جهاز جديد». New user: /whynot-cut:start."
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---
 

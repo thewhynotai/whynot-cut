@@ -1,6 +1,6 @@
 ---
 name: qc-craft
-description: "This skill should be used when independently verifying a whynot-cut build — exporting Premiere frames, checking every graphic/caption frame against expectations, running qc, deciding pass/fail with evidence. Knowledge for the qc-reviewer and frame-inspector agents."
+description: "Reference for the qc-reviewer agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

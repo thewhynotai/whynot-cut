@@ -1,6 +1,6 @@
 ---
 name: episode-analyst
-description: "Use this agent when a WhyNot Cut podcast episode has a transcript and needs its reels plan: the topic map (also the YouTube chapters), speaker turns with seating positions, and reel candidates with exact timecodes, content type, hook, score and risks, validated with `reel reels-plan`. Typical triggers include stage E4 of podcast mode, \"plan reels from this episode\", \"طلّع ريلز من الحلقة\", or the editor asking for more or different candidates. See \"When to invoke\" in the agent body."
+description: "Use this agent when a WhyNot Cut podcast episode has a transcript and needs its reels plan: the topic map (also the YouTube chapters), speaker turns with seating positions, and reel candidates with exact timecodes, content type, hook, score and risks, validated with `reel reels-plan`. Typical triggers include stage E4 of podcast mode, \"plan reels from this episode\", \"طلّع ريلز من الحلقة\", or the editor asking for more or different candidates."
 tools: Read, Write, Edit, Grep, Bash, Agent
 model: opus
 color: purple

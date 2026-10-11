@@ -2,7 +2,7 @@
   "name": "whynot-cut",
   "displayName": "WhyNot Cut",
   "version": "2.2.1",
-  "description": "Raw footage in, Premiere project out. Why not? AI post-production for vertical reels (Arabic/English) on macOS and Windows: guided setup, drop-in client folders, Whisper transcript, dialogue cleanup and pause removal, story-driven brand graphics and animated captions, a watchable preview video, a native Adobe Premiere Pro build through a bridge panel, and evidence-based QC. Podcast mode: a finished episode becomes a reels plan with timecodes and content types, the editor picks, each reel is framed per shot and edited by its recipe, plus the YouTube/social publish package. Motion mode: a window of an episode's audio becomes an animated motion-graphics video (Arabic word-by-word kinetic type, icons, counters, steps, timelines) built as a native After Effects project through the same bridge, read back, rendered and QC'd from After Effects' own frames. A lead-editor skill coordinates 19 specialist agents; hooks keep client sources read-only.",
+  "description": "AI post-production for Arabic/English vertical reels and podcasts: raw footage to a native Premiere Pro project, podcast reels plans and publish copy, motion videos in After Effects, evidence-based QC. macOS and Windows.",
   "author": {
     "name": "The Why Not AI",
     "email": "info@thewhynot.ai",

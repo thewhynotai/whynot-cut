@@ -1,6 +1,6 @@
 ---
 name: status
-description: "This skill should be used when the editor asks where a video stands — \"is it done?\", \"what's left before I send it?\", \"status of C0238\", \"can I render now?\". Gives an evidence-backed Verified / Not verified / Needs you answer without changing anything."
+description: "Where a video stands, with evidence and no changes: \"is it done?\", \"what's left before I send it?\", \"can I render now?\", «جاهز؟», «خلاص جاهز؟»."
 argument-hint: "[clip id] [client folder]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

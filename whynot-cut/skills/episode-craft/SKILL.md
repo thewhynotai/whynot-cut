@@ -1,6 +1,6 @@
 ---
 name: episode-craft
-description: "This skill should be used when analysing a whole podcast episode for whynot-cut podcast mode — topic map and YouTube chapters, speaker turns and seating, finding reel-worthy moments, choosing content types (storytelling, drama, success story, advice, bold opinion, emotional, comedy), scoring candidates and writing reels-plan.json. Knowledge for the episode-analyst and moment-scout agents."
+description: "Reference for the episode-analyst agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

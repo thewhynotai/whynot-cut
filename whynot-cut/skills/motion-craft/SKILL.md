@@ -1,6 +1,6 @@
 ---
 name: motion-craft
-description: "This skill should be used when producing or checking whynot-cut graphics and captions — brand stills, Arabic/RTL text rendering, reference-style animation (bar sweep, text pop, slide), safe areas, preview contact sheets. Knowledge for the motion-designer and graphic-checker agents."
+description: "Reference for the motion-designer agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

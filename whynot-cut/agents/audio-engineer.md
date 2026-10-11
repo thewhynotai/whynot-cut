@@ -1,6 +1,6 @@
 ---
 name: audio-engineer
-description: "Use this agent when a WhyNot Cut clip's dialogue needs cleaning or its pauses removed, with measured proof. Typical triggers include stage 3b of an edit (after the transcript exists), editor comments about noise, hum, loudness, breaths or gaps, and re-running cleanup with gentler settings. See \"When to invoke\" in the agent body."
+description: "Use this agent when a WhyNot Cut clip's dialogue needs cleaning or its pauses removed, with measured proof. Typical triggers include stage 3b of an edit (after the transcript exists), editor comments about noise, hum, loudness, breaths or gaps, and re-running cleanup with gentler settings."
 tools: Read, Bash
 model: sonnet
 color: green

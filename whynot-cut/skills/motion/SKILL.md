@@ -1,6 +1,6 @@
 ---
 name: motion
-description: "This skill should be used when the user wants an animated motion-graphics video built from a podcast episode's AUDIO — \"make a motion video from this part\", \"animate this reel\", \"motion graphics from the audio\", \"the podcast is audio only, make videos\", \"build it in After Effects\", \"اعمل موشن من الجزء ده\", \"فيديو موشن جرافيك من الصوت\", \"البودكاست صوت بس\". It is the lead playbook for motion mode: Gate 0 `--as motion`, the motion script and plan, the animatic and Gate 1, the native After Effects build with read-back, the render, frames and QC."
+description: "Animated motion-graphics video from a podcast window's audio (motion mode): \"make a motion video from this part\", \"animate this reel\", «اعمل موشن من الجزء ده», «البودكاست صوت بس»."
 argument-hint: "[episode id] [R/T id] [client folder]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

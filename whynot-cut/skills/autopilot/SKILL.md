@@ -1,6 +1,6 @@
 ---
 name: autopilot
-description: "This skill should be used when the user wants every new raw clip edited without naming them one by one — \"edit the new videos\", \"edit everything\", \"I added new footage\", \"process the inbox\", \"do all the clips\", \"batch edit\", \"autopilot\", \"عدّل الفيديوهات الجديدة\", \"مونتاج كل الكليبات\". It finds new clips in one client folder or across the clients folder and runs the full edit for each, in parallel where possible. For one named clip, /whynot-cut:edit applies."
+description: "Edit every new raw clip without naming them: \"edit the new videos\", \"process the inbox\", \"batch edit\", «عدّل الفيديوهات الجديدة». One named clip: /whynot-cut:edit."
 argument-hint: "[client folder or name]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

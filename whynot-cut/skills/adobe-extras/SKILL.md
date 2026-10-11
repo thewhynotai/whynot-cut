@@ -1,6 +1,6 @@
 ---
 name: adobe-extras
-description: "This skill should be used ONLY when the editor explicitly asks for After Effects or Photoshop output — \"make it in After Effects\", \"build MOGRTs\", \"make a Photoshop cover/thumbnail PSD\". The default pipeline is Premiere-only; never use this on your own initiative."
+description: "After Effects or Photoshop output for a clip edit, only when explicitly asked: \"make it in After Effects\", \"build MOGRTs\", \"Photoshop cover PSD\", «اعملها في أفتر إفكتس». Never unprompted."
 argument-hint: "[ae|ps|mogrt] [clip id]"
 ---
 

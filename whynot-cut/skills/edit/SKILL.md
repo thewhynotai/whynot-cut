@@ -1,6 +1,6 @@
 ---
 name: edit
-description: "This skill should be used when turning raw talking-head footage into an editable Premiere Pro project for a client folder (a folder with assets/ and data/) — \"edit C0239\", \"cut the new video\", \"make a reel from this clip\", \"edit this footage\", \"continue the edit\", \"resume C0239\", \"كمّل المونتاج\", \"مونتاج الفيديو ده\", a full pipeline run, or resuming a half-finished edit. It is the lead-editor playbook that runs the specialist agents, the approval gate and the evidence gate, on macOS or Windows. For every new clip at once, /whynot-cut:autopilot applies."
+description: "Turn raw talking-head footage into a Premiere Pro project: \"edit C0239\", \"make a reel from this clip\", \"resume C0239\", «مونتاج الفيديو ده», «كمّل المونتاج». Many clips: autopilot."
 argument-hint: "[clip id] [client folder]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

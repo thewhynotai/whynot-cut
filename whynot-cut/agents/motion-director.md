@@ -1,6 +1,6 @@
 ---
 name: motion-director
-description: "Use this agent when a WhyNot Cut motion project (<EP>_<ID>_MO, picked at Gate 0 with `reels-select --as motion`) needs its motion script authored or revised: what is said becomes beats and animated scenes, following the window's content-type recipe. Typical triggers include a new motion project after audio-clean, `motion-plan` errors to fix, and the editor's comments on the motion plan or animatic. See \"When to invoke\" in the agent body."
+description: "Use this agent when a WhyNot Cut motion project (<EP>_<ID>_MO, picked at Gate 0 with `reels-select --as motion`) needs its motion script authored or revised: what is said becomes beats and animated scenes, following the window's content-type recipe. Typical triggers include a new motion project after audio-clean, `motion-plan` errors to fix, and the editor's comments on the motion plan or animatic."
 tools: Read, Write, Edit, Grep, Bash
 model: opus
 color: magenta

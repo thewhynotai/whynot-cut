@@ -1,6 +1,6 @@
 ---
 name: frame-inspector
-description: "Use this agent when 6–8 frames that Premiere rendered from a WhyNot Cut timeline must be checked against their expected text and style. Typical triggers include fan-out from qc-reviewer after every build. Read-only. See \"When to invoke\" in the agent body."
+description: "Use this agent when 6–8 frames that Premiere rendered from a WhyNot Cut timeline must be checked against their expected text and style. Typical triggers include fan-out from qc-reviewer after every build. Read-only."
 tools: Read
 model: sonnet
 color: pink

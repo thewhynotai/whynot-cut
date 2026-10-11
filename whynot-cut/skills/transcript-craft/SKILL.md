@@ -1,6 +1,6 @@
 ---
 name: transcript-craft
-description: "This skill should be used when transcribing or correcting a whynot-cut transcript — Whisper runs, word timings, Arabic/English/mixed speech, correcting misheard medical terms, subtitle cues. Knowledge for the transcript-editor agent."
+description: "Reference for the transcript-editor agent (preloaded). Not for direct use."
 user-invocable: false
 ---
 

@@ -880,3 +880,81 @@ class TestExecutableBits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _frontmatter(path: Path) -> dict:
+    """Parse the YAML frontmatter of a SKILL.md / agent .md (PyYAML when the engine venv has it, else a strict
+    parser for the `key: value` / `key: "quoted"` lines these files use)."""
+    text = path.read_text(encoding="utf-8")
+    head = text.split("---")[1]
+    try:
+        import yaml
+        return yaml.safe_load(head)
+    except ImportError:
+        out, last = {}, None
+        for line in head.splitlines():
+            if line.startswith("  - ") and last:
+                out[last] = (out[last] if isinstance(out[last], list) else []) + [line[4:].strip()]
+            elif line and line[0] not in " -#" and ":" in line:
+                last, _, val = line.partition(":")
+                val = val.strip()
+                out[last] = json.loads(val) if val.startswith('"') else val
+        return out
+
+
+class TestListingBudget(unittest.TestCase):
+    """Claude Code drops skill descriptions when the listing overflows its budget (1% of the context window); a skill
+    without a description stops auto-triggering. Keep the plugin's share small (3.0, D11)."""
+    USER_MAX = 200
+    CRAFT_MAX = 90
+    TOTAL_MAX = 4000
+    PLUGIN_DESC_MAX = 250
+    CRAFT_AGENT = {"audio-craft": "audio-engineer", "client-craft": "client-researcher",
+                   "episode-craft": "episode-analyst", "medical-accuracy": "medical-reviewer",
+                   "motion-craft": "motion-designer", "premiere-craft": "premiere-builder",
+                   "publish-craft": "publish-writer", "qc-craft": "qc-reviewer", "story-craft": "story-editor",
+                   "transcript-craft": "transcript-editor"}
+
+    def skills(self):
+        return {f.parent.name: _frontmatter(f) for f in sorted((SK / "skills").glob("*/SKILL.md"))}
+
+    def test_total_and_per_skill_limits(self):
+        total = 0
+        for name, fm in self.skills().items():
+            d = fm["description"]
+            total += len(d)
+            limit = self.CRAFT_MAX if fm.get("user-invocable") is False else self.USER_MAX
+            self.assertLessEqual(len(d), limit, f"{name}: {len(d)} chars > {limit}")
+        self.assertLessEqual(total, self.TOTAL_MAX, f"all skill descriptions total {total} chars")
+
+    def test_craft_skills_are_the_one_line_reference(self):
+        skills = self.skills()
+        craft = sorted(n for n, fm in skills.items() if fm.get("user-invocable") is False)
+        self.assertEqual(craft, sorted(self.CRAFT_AGENT))
+        for name, agent in self.CRAFT_AGENT.items():
+            self.assertEqual(skills[name]["description"],
+                             f"Reference for the {agent} agent (preloaded). Not for direct use.")
+            self.assertNotIn("disable-model-invocation", skills[name])  # preloading needs it off
+
+    def test_craft_skill_is_preloaded_by_the_named_agent(self):
+        for name, agent in self.CRAFT_AGENT.items():
+            fm = _frontmatter(SK / "agents" / f"{agent}.md")
+            self.assertIn(name, fm.get("skills") or [], f"{agent} does not preload {name}")
+
+    def test_user_skills_lead_with_the_use_and_have_arabic_triggers(self):
+        for name, fm in self.skills().items():
+            if fm.get("user-invocable") is False:
+                continue
+            d = fm["description"]
+            self.assertFalse(d.startswith("This skill should be used"), f"{name}: wasted words at the start")
+            self.assertRegex(d, "[\u0600-\u06ff]", f"{name}: no Arabic trigger phrase")
+
+    def test_agent_descriptions_do_not_point_at_the_body(self):
+        for f in sorted((SK / "agents").glob("*.md")):
+            d = _frontmatter(f)["description"]
+            self.assertNotIn("When to invoke", d, f.name)
+            self.assertTrue(d.startswith("Use this agent when"), f.name)
+
+    def test_plugin_description_fits(self):
+        pj = json.loads((SK / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.assertLessEqual(len(pj["description"]), self.PLUGIN_DESC_MAX)

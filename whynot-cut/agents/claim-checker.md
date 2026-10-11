@@ -1,6 +1,6 @@
 ---
 name: claim-checker
-description: "Use this agent when a batch of 3–5 on-screen medical statements from a WhyNot Cut edit must be checked against the exact transcript wording. Typical triggers include fan-out from medical-reviewer on clips with many health graphics. Read-only. See \"When to invoke\" in the agent body."
+description: "Use this agent when a batch of 3–5 on-screen medical statements from a WhyNot Cut edit must be checked against the exact transcript wording. Typical triggers include fan-out from medical-reviewer on clips with many health graphics. Read-only."
 tools: Read, Grep
 model: sonnet
 color: red

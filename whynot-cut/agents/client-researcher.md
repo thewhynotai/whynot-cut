@@ -1,6 +1,6 @@
 ---
 name: client-researcher
-description: "Use this agent when a client's knowledge must be built or refreshed for WhyNot Cut: discovery, client database (colours, fonts, photos), reference-video style and the client's reel-profile. Typical triggers include onboarding a new client, stages 1–2 and 5 of an edit, and new brand files or reference edits arriving. See \"When to invoke\" in the agent body."
+description: "Use this agent when a client's knowledge must be built or refreshed for WhyNot Cut: discovery, client database (colours, fonts, photos), reference-video style and the client's reel-profile. Typical triggers include onboarding a new client, stages 1–2 and 5 of an edit, and new brand files or reference edits arriving."
 tools: Read, Write, Glob, Grep, Bash
 model: sonnet
 color: cyan

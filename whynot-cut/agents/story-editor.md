@@ -1,6 +1,6 @@
 ---
 name: story-editor
-description: "Use this agent when a WhyNot Cut clip's meaning must be analysed and its edit authored: main topic, narrative segments, statement analysis and edit-decisions.json (graphics, captions, cuts, punch-ins, SFX) compiled with `reel plan`. Typical triggers include stages 6–7 of an edit and editor comments about content, wording, timing or which moments get graphics. See \"When to invoke\" in the agent body."
+description: "Use this agent when a WhyNot Cut clip's meaning must be analysed and its edit authored: main topic, narrative segments, statement analysis and edit-decisions.json (graphics, captions, cuts, punch-ins, SFX) compiled with `reel plan`. Typical triggers include stages 6–7 of an edit and editor comments about content, wording, timing or which moments get graphics."
 tools: Read, Write, Edit, Grep, Bash
 model: opus
 color: purple

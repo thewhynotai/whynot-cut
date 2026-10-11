@@ -1,6 +1,6 @@
 ---
 name: motion-designer
-description: "Use this agent when WhyNot Cut graphics and captions must be produced or checked: compiling the plan, rendering layered brand stills and caption stills, synthesising SFX, and visually checking Arabic/RTL text, crops and safe areas. Typical triggers include stage 8 of an edit and editor comments about how graphics or captions look or animate. See \"When to invoke\" in the agent body."
+description: "Use this agent when WhyNot Cut graphics and captions must be produced or checked: compiling the plan, rendering layered brand stills and caption stills, synthesising SFX, and visually checking Arabic/RTL text, crops and safe areas. Typical triggers include stage 8 of an edit and editor comments about how graphics or captions look or animate."
 tools: Read, Edit, Bash, Agent
 model: sonnet
 color: orange

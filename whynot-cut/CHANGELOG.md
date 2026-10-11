@@ -77,6 +77,15 @@
 - The guard no longer fails silently (engine IM-17): with no Python at all, `run_python.sh` still exits 0 (fail-open)
   but the SessionStart hook gets "WhyNot Cut protection is OFF: no Python found — run reel doctor"; the SessionStart
   context starts with a loud warning when the `hooks-ok` heartbeat is missing or older than 24 h.
+- Skill listing budget (D11): Claude Code drops skill descriptions when the listing overflows, so `status`,
+  `handoff` and others stopped auto-triggering. All 25 skill descriptions are rewritten: 8,804 -> 3,223 characters in
+  total; a user-facing skill is at most 200 characters, key use first, with 2-3 English and 1-2 Arabic triggers
+  (`status` «جاهز؟», `revise` «ملاحظات على الفيديو», `handoff` «سلّم الشغل»); the 10 craft skills are the one line
+  "Reference for the <agent> agent (preloaded). Not for direct use." (no `disable-model-invocation`, so agents can still
+  preload them). Trigger overlaps are resolved: `fix-audio` is the audio-only request, `revise` is two or more comments
+  or any non-audio comment, `motion` is an animated video from a podcast window's audio, `adobe-extras` is After Effects
+  / Photoshop output only on explicit request. The 19 agent descriptions lose the sentence `See "When to invoke" in the
+  agent body.`; the `plugin.json` description is 220 characters. `TestListingBudget` guards all of it (total <= 4,000).
 
 ### Migration
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the

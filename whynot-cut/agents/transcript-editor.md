@@ -1,6 +1,6 @@
 ---
 name: transcript-editor
-description: "Use this agent when a WhyNot Cut clip needs its word-timed transcript produced or corrected (Whisper large-v3, Arabic, English or mixed). Typical triggers include stage 4 of an edit, misheard medical terms reported by the editor, and re-transcription after footage changes. See \"When to invoke\" in the agent body."
+description: "Use this agent when a WhyNot Cut clip needs its word-timed transcript produced or corrected (Whisper large-v3, Arabic, English or mixed). Typical triggers include stage 4 of an edit, misheard medical terms reported by the editor, and re-transcription after footage changes."
 tools: Read, Write, Grep, Bash, Agent
 model: opus
 color: blue

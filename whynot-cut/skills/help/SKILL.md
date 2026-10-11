@@ -1,6 +1,6 @@
 ---
 name: help
-description: "This skill should be used when the user asks what WhyNot Cut can do or which WhyNot Cut command to use — \"WhyNot Cut help\", \"what can WhyNot Cut do\", \"list the WhyNot Cut commands\", \"how does this plugin work\", \"which command edits a video\", \"ايه أوامر WhyNot Cut\", \"مساعدة في المونتاج\". It gives a short cheat sheet tailored to where the user is. For first-time setup, /whynot-cut:start applies."
+description: "What WhyNot Cut can do and which command to use: \"WhyNot Cut help\", \"what can it do\", \"which command edits a video\", «ايه أوامر WhyNot Cut». First time: /whynot-cut:start."
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---
 
