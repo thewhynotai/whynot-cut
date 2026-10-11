@@ -288,9 +288,9 @@ def episode_next(ep: EpisodePaths) -> dict:
     picked_with = {r: h.get("plan_fingerprint") for h in sel.get("history", []) for r in h.get("picked", [])}
     older = sorted(r for r, fp in picked_with.items() if fp and fp_now and fp != fp_now)
     if older:
-        stale.append(f"reels-select ({', '.join(f'{ep.episode_id}_{r}' for r in older)} picked from an older reels plan: "
-                     f"the editor confirms with `reels-select --pick {','.join(older)} --by editor`, adding --force if a "
-                     "window moved)")
+        stale.append(f"reels-select (the reels plan was re-validated after {', '.join(f'{ep.episode_id}_{r}' for r in older)} "
+                     f"was picked: the editor confirms with `reels-select --pick {','.join(older)} --by editor`, adding "
+                     "--force if a window moved; after transcript corrections run `reels-select --resync` first)")
     reels = {}
     for rid in sorted({r for h in sel.get("history", []) for r in h.get("picked", [])}):
         rp = Paths(ep.root, f"{ep.episode_id}_{rid}")

@@ -150,6 +150,8 @@ class TestEpisodeIntake(unittest.TestCase):
             os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
             inbox(own)
             self.assertEqual(calls[n:], ["WIDE.mp4"])                        # a changed file is probed again
+            (own / "output/discovery/raw-probe-cache.json").write_text("{not json", encoding="utf-8")
+            self.assertTrue(inbox(own)["episode_hints"])                     # a broken cache is rebuilt, never fatal
 
 
 class TestChunkedTranscription(unittest.TestCase):
@@ -314,9 +316,10 @@ class TestReelsPlan(unittest.TestCase):
     def test_evidence_folds_digits_and_hamza_seats(self):
         from lib.reels import find_evidence
         ws = [{"word": w, "start_ms": i * 400, "end_ms": i * 400 + 360}
-              for i, w in enumerate(["عندي", "٣", "نصائح", "دائما", "وسؤال", "۱۰"])]
+              for i, w in enumerate(["عندي", "٣", "نصائح", "دائما", "وسؤال", "۱۰", "مسئول", "الشؤون"])]
         self.assertTrue(find_evidence(ws, "عندي 3 نصايح", 0, 500))             # Arabic-Indic digit, ئ written as ي
         self.assertTrue(find_evidence(ws, "دايما وسوال 10", 1200, 500))        # ؤ written as و, Persian digits
+        self.assertTrue(find_evidence(ws, "مسؤول الشئون", 2400, 500))          # ئو / ؤو seat swap (Egyptian vs MSA)
 
     def test_evidence_missing_is_error(self):
         r = self.run_plan([cand(self.words, 39, 149, evidence="كلام مش موجود خالص")])
@@ -573,8 +576,9 @@ class TestReelsSelect(unittest.TestCase):
         src["fingerprint"] = "0" * 40
         write_json(reel.p("00_inputs/source.json"), src)
         cli = [sys.executable, "-B", str(SK / "engine/reel/cli.py"), "--root", str(self.root), "--video-id", "EP12_R01"]
-        for cmd in ("audio-clean", "previews", "preview-video", "ppro-build", "premiere"):
-            r = subprocess.run(cli + [cmd], capture_output=True, text=True, encoding="utf-8")
+        for cmd in (["audio-clean"], ["previews"], ["preview-video"], ["ppro-build"], ["premiere"],
+                    ["ae-build", "--extras"], ["ps-build", "--extras"]):
+            r = subprocess.run(cli + cmd, capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(r.returncode, 2, (cmd, r.stdout[-400:], r.stderr[-400:]))
             self.assertIn("reels-select", r.stdout, cmd)
 
@@ -975,6 +979,10 @@ class TestShots(unittest.TestCase):
             self.assertTrue(framed, spec["main_segments"])
             for s in framed:                                                   # face shots (x1.0) drawn in the window
                 self.assertAlmostEqual(s["scale_factor"], max(1080 / 640, 1350 / 360) * 100 / cover, delta=1e-4)
+            pre["files"] = pre["files"][:1]                                    # the reel's own file missing from preflight
+            write_json(reel.p("00_inputs/preflight.json"), pre)
+            r = compile_plan(reel)
+            self.assertTrue(any("E.mp4" in w and "preflight" in w for w in r["warnings"]), r["warnings"])
         finally:
             common.set_context(None)
             shutil.rmtree(tmp, ignore_errors=True)
@@ -1430,6 +1438,8 @@ class TestPublish(unittest.TestCase):
     def test_bare_multilabel_domain_kept_whole(self):
         from lib.publish import urls_in
         self.assertEqual(urls_in("الموقع example.co.uk والمتجر shop.com.eg/x."), ["example.co.uk", "shop.com.eg/x."])
+        self.assertEqual(urls_in("youtu.be/abc و linktr.ee/sara"), ["youtu.be/abc", "linktr.ee/sara"])
+        self.assertEqual(urls_in("the file.app.js script"), [])                 # a file name, not a site
         reel = good_reel()
         reel["tiktok"]["caption"] += " example.co.uk"
         self.set_sheet_links("https://example.co.uk/")

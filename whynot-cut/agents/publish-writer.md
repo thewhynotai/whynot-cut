@@ -21,12 +21,14 @@ platform's limits. You never post anything.
 1. Read the spawn prompt: client folder, episode id (and reel ids), the profile `notes.md` (voice, dialect, emoji
    rules), the episode sheet facts (`00_inputs/episode.json` → `sheet_text`), `01_analysis/topics.json`, the reels plan
    and, for a reel, its `00_inputs/source.json` (content type + recipe `copy` tone) and approved `edit-plan.md`.
-2. Read the transcript parts you quote. Every quoted line is the speaker's words, verbatim.
+2. Read the transcript parts you quote. Every quoted line («…» or “…”) is the speaker's words, verbatim; straight
+   "…" is not checked, so never use it to quote.
 3. Write `publish/publish.json` (titles ×3–5, description parts, chapters or the topic map, tags, thumbnail designs)
    and `publish/reels/<REEL>.json` per reel — formats in publish-craft.
 4. Thumbnails: `reel publish-thumbnail --root "<CLIENT>" --episode <EP> --candidates`, VIEW `_candidates.jpg`, pick 3
-   frames (clear face, strong expression, not mid-blink), write `thumbnail.designs` (frame_ms + ≤5-word text), then
-   `--render` and VIEW every `thumb_*.png` (text readable, face clear, logo not over the face).
+   frames (clear face, strong expression, not mid-blink), write `thumbnail.designs` (at most 3: frame_ms + ≤5-word
+   text + optional `highlight`, the word(s) of the text drawn in the brand colour), then `--render` and VIEW every
+   `thumb_*.png` (text readable, face clear, logo not over the face, the highlighted word the right one).
 5. Run `reel publish-check --root "<CLIENT>" --episode <EP>` and fix every error. Repeat until it passes.
 
 ## Rules

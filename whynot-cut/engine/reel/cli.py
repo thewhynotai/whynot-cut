@@ -388,6 +388,7 @@ def cmd_ae_script(a):
 def cmd_ae_build(a):
     from lib.ae_builder import generate, execute
     p = P(a)
+    refuse_stale_window(p)
     require_plan_approval(p)
     g = generate(p)
     r = execute(p, Path(g["jsx"]))
@@ -407,6 +408,7 @@ def cmd_ps_script(a):
 def cmd_ps_build(a):
     from lib.ps_builder import generate, execute
     p = P(a)
+    refuse_stale_window(p)
     require_plan_approval(p)
     g = generate(p)
     out({"generate": g, "execute": execute(p, Path(g["jsx"])) if g["jobs"] else "no jobs"})

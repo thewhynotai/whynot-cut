@@ -29,7 +29,8 @@ _AR_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ؤ": "و", "ئ": 
 
 def norm(s: str) -> str:
     s = unicodedata.normalize("NFKC", s or "")
-    s = _AR_DIAC.sub("", s).translate(_AR_FOLD)
+    # ئو is the Egyptian spelling of MSA ؤو (مسئول = مسؤول, شئون = شؤون): same word, one form
+    s = _AR_DIAC.sub("", s).replace("ئو", "ؤو").translate(_AR_FOLD)
     s = re.sub(r"[^\w\s]", " ", s.lower())
     return re.sub(r"\s+", " ", s).strip()
 
@@ -357,8 +358,12 @@ def compile_plan(paths: Paths) -> dict:
     shots_rep = pre_all.get("shots") or {}
     from .common import source_range
     main_file = base.get("main_footage") or source_range(paths).get("footage")
+    main_v = main_video(pre_all, main_file)
+    if main_file and pre_all.get("files") and main_v is None:
+        warnings.append(f"{Path(main_file).name} is not in 00_inputs/preflight.json: per-shot framing and the framing "
+                        "window are skipped (the picture is fitted) — run `reel preflight` for this video")
     if shots_rep.get("shots") and base.get("base_scale_percent") in (None, "auto"):
-        pv = main_video(pre_all, main_file)
+        pv = main_v
         if pv:
             from .shots import compose_camera, frame_shots
             seq_g = load_config("sequence-settings.json")["general"]
@@ -390,7 +395,7 @@ def compile_plan(paths: Paths) -> dict:
     framing_mode = str(base.get("framing") or load_config("style.json").get("framing") or "9:16")
     win = window_rect(framing_mode, base.get("framing_window_y"))
     if win and bsp:
-        pv_ = main_video(pre_all, main_file)
+        pv_ = main_v
         if pv_:
             k45 = max(win["w"] / pv_["display_width"], win["h"] / pv_["display_height"]) * 100 / bsp
             bx = float(box or 0.0)

@@ -202,7 +202,11 @@ def inbox(root: Path, refresh: bool = True) -> dict:
     long_min = podcast_cfg().get("raw_episode_hint_min", 10)
     # probing every Raw clip on every call is slow on big folders: reuse the last probe while path, mtime and size match
     cache_f = p.output / "discovery/raw-probe-cache.json"
-    cache, seen = read_json(cache_f, {}) or {}, {}
+    try:
+        cache = read_json(cache_f, {})
+    except (OSError, ValueError):          # a broken cache is rebuilt; it never stops the inbox
+        cache = {}
+    cache, seen = cache if isinstance(cache, dict) else {}, {}
     for c in clips:   # a whole episode dropped into Raw would be edited as ONE clip: point to data/Episodes
         try:
             f = p.root / c["file"]

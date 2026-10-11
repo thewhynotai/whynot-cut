@@ -20,7 +20,9 @@ QUOTE = re.compile(r"«([^»]+)»|“([^”]+)”")
 HASHTAG = re.compile(r"#[^\s#]+")
 URL = re.compile(r"(?:https?://|www\.)[^\s<>«»\"'()]+|(?<![@\w.])(?P<host>(?:[a-z0-9-]+\.)+[a-z]{2,})(?:/[^\s<>«»\"'()]*)?",
                  re.I)
-TLDS = {"com", "net", "org", "io", "me", "tv", "co", "ai", "eg", "sa", "ae", "ly", "gg", "app", "link", "page"}
+TLDS = {"com", "net", "org", "io", "me", "tv", "co", "ai", "eg", "sa", "ae", "ly", "gg", "app", "link", "page",
+        "be", "ee", "gl", "dev", "info", "uk"}           # youtu.be, linktr.ee, goo.gl ...
+SLDS = {"co", "com", "net", "org", "ac", "gov", "edu"}  # second-level labels under a country code (example.co.uk)
 
 
 def limits() -> dict:
@@ -61,13 +63,18 @@ def norm_url(u: str) -> str:
 
 
 def _bare_host(host: str) -> str | None:
-    """The longest leading part of a dotted name ending in a known TLD, or a known TLD + a 2-letter country code
-    (example.co.uk, shop.com.eg); None for file names and the like (notes.txt)."""
+    """The dotted name when it ends in a known TLD, or a second-level label + a 2-letter country code (example.co.uk,
+    shop.com.eg); None for file names and the like (notes.txt, file.app.js)."""
+    def site(ls: list) -> bool:
+        last = ls[-1].lower()
+        return last in TLDS or (len(ls) > 2 and len(last) == 2 and ls[-2].lower() in SLDS)
     labels = host.split(".")
-    for k in range(len(labels), 1, -1):
-        last = labels[k - 1].lower()
-        if last in TLDS or (k > 2 and len(last) == 2 and labels[k - 2].lower() in TLDS):
-            return ".".join(labels[:k])
+    if site(labels):
+        return host
+    while len(labels) > 2 and labels[-1][:1].isupper():     # "example.com.Then": the next sentence, missing a space
+        labels = labels[:-1]
+        if site(labels):
+            return ".".join(labels)
     return None
 
 
@@ -236,7 +243,8 @@ def _text_width(font, s: str) -> float:
 
 def highlight_spans(text: str, phrase: str, boxes: list, font, max_chars: int) -> list[tuple[int, int, int, int]]:
     """Screen boxes of the words of `phrase` inside a text block drawn by previews._text_block (same wrap, one box per
-    line). Arabic lines run right to left, so a word's offset is measured from the right edge."""
+    line). Arabic lines run right to left, so a word's offset is measured from the right edge (logical order: a run of
+    several Latin words inside an Arabic line is laid out LTR, so their boxes would swap; one Latin word is fine)."""
     from .ae_builder import wrap_lines
     from .plan import norm
     want = set(norm(phrase).split())

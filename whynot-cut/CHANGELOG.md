@@ -5,9 +5,11 @@ The minor findings of the 2.1.0 review, each reproduced by a failing test first.
 
 **Fixed**
 - Arabic matching (`reels-plan` evidence, publish quotes, plan evidence, avoid topics) folds Arabic-Indic and Persian
-  digits (٣ = ۳ = 3) and hamza seats (ئ → ي, ؤ → و: «دائما» = «دايما», «سؤال» = «سوال»).
+  digits (٣ = ۳ = 3) and hamza seats (ئ → ي, ؤ → و: «دائما» = «دايما», «سؤال» = «سوال»), and treats the Egyptian ئو
+  spelling as MSA ؤو («مسئول» = «مسؤول», «شئون» = «شؤون»).
 - `publish-check` reads a bare multi-label domain whole (`example.co.uk`, `news.bbc.co.uk/x`): it was cut to
-  `example.co`, which let a different site pass the "links only from the episode sheet" rule.
+  `example.co`, which let a different site pass the "links only from the episode sheet" rule. Bare `youtu.be`,
+  `linktr.ee`, `goo.gl`, `.dev`, `.info` links are now checked too; file names like `file.app.js` are not links.
 - Straight double quotes "…" in publishing copy are emphasis, not a quotation: only «…» and “…” must be the speaker's
   words.
 - `audio-clean` names each pause value's origin when only one of `--min-pause`/`--pad` is given
@@ -18,13 +20,12 @@ The minor findings of the 2.1.0 review, each reproduced by a failing test first.
   text); designs beyond 3 (`platform-limits.json` `thumbnail.designs_max`) are skipped with a warning instead of
   silently.
 - The per-shot reframe and the 4:5 window are sized from the reel's own footage, not from the first file in
-  preflight.json.
-- `episode-next` flags reels picked from an older reels plan (the plan was re-validated after selection) until the
-  editor confirms them again.
+  preflight.json; `plan` warns when that footage is missing from preflight (the picture is then fitted).
+- `episode-next` flags reels picked before the reels plan was re-validated until the editor confirms them again.
 - `reel inbox` caches each Raw clip's probe by path, modification time and size (`output/discovery/raw-probe-cache.json`)
-  instead of probing every clip on every call.
+  instead of probing every clip on every call; a broken cache file is rebuilt.
 - A reel whose episode file changed after selection is now also refused by `audio-clean`, `previews`, `preview-video`,
-  `ppro-build` and `premiere` (before: only `preflight` and `plan`).
+  `ppro-build`, `premiere`, `ae-build` and `ps-build` (before: only `preflight` and `plan`).
 - `preview-video` reaps its ffmpeg decoders (no lingering process / ResourceWarning); the podcast tests close every
   file they open.
 
