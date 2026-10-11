@@ -156,11 +156,7 @@ def compile_reels_plan(ep) -> dict:
     cfg = podcast_cfg()
     dur_cfg, tol = cfg["reel_duration_s"], cfg["snap"].get("evidence_tol_ms", 3000)
     types = content_types()
-    info = read_json(ep.p("00_inputs/episode.json"), {}) or {}
-    raw_avoid = (info.get("sheet", {}) or {}).get("avoid") or []
-    if isinstance(raw_avoid, str):              # `avoid: السياسة` (one topic) is a scalar in the sheet
-        raw_avoid = [raw_avoid]
-    avoid = [a for a in raw_avoid if str(a).strip()]
+    avoid = _avoid_list(ep)
     people = (read_json(ep.p("01_analysis/speakers.json"), {}) or {}).get("people") or {}
     errors, warnings, out, seen = [], [], [], set()
     for c in plan.get("candidates", []):
@@ -205,8 +201,7 @@ def compile_reels_plan(ep) -> dict:
         if unknown:
             cw.append(f"speakers {unknown} not in speakers.json people {list(people)}")
         inside = [w for w in words if w["start_ms"] >= in_ms - 50 and w["end_ms"] <= out_ms + 50]
-        text = norm(" ".join(w["word"] for w in inside))
-        hits = [a for a in avoid if norm(str(a)) and re.search(rf"(^| ){re.escape(norm(str(a)))}( |$)", text)]
+        hits = _avoid_hits(words, in_ms, out_ms, avoid)
         if hits:
             cw.append(f"mentions topics the sheet says to avoid: {hits} (selection needs --confirm-avoid {cid})")
         warnings += [f"{cid}: {x}" for x in cw]
@@ -484,10 +479,26 @@ def motion_id(episode_id: str, src_id: str) -> str:
     return f"{episode_id}_{src_id}_MO"
 
 
+def _avoid_list(ep) -> list:
+    info = read_json(ep.p("00_inputs/episode.json"), {}) or {}
+    raw_avoid = (info.get("sheet", {}) or {}).get("avoid") or []
+    if isinstance(raw_avoid, str):              # `avoid: السياسة` (one topic) is a scalar in the sheet
+        raw_avoid = [raw_avoid]
+    return [a for a in raw_avoid if str(a).strip()]
+
+
+def _avoid_hits(words: list, in_ms: int, out_ms: int, avoid: list) -> list:
+    """The sheet's avoid topics said inside the window (whole words, normalised)."""
+    from .plan import norm
+    inside = [w for w in words if w["start_ms"] >= in_ms - 50 and w["end_ms"] <= out_ms + 50]
+    text = norm(" ".join(w["word"] for w in inside))
+    return [a for a in avoid if norm(str(a)) and re.search(rf"(^| ){re.escape(norm(str(a)))}( |$)", text)]
+
+
 def _topic_windows(ep, words: list, total_ms: int, cfg: dict) -> dict:
     """topics.json topics as pickable windows for motion mode: edges snapped to sentence-like word boundaries."""
     from .plan import to_ms
-    out = {}
+    out, avoid = {}, _avoid_list(ep)
     for t in (read_json(ep.p("01_analysis/topics.json"), {}) or {}).get("topics", []):
         tid = str(t.get("id", ""))
         if not re.fullmatch(r"T\d+", tid):
@@ -498,7 +509,8 @@ def _topic_windows(ep, words: list, total_ms: int, cfg: dict) -> dict:
             continue
         a, b = snap_in(words, a, cfg), snap_out(words, b, cfg, total_ms)
         out[tid] = {"id": tid, "in_ms": a, "out_ms": b, "duration_ms": b - a, "type": t.get("type"),
-                    "title": t.get("title", ""), "summary": t.get("summary", ""), "avoid_hits": []}
+                    "title": t.get("title", ""), "summary": t.get("summary", ""),
+                    "avoid_hits": _avoid_hits(words, a, b, avoid)}
     return out
 
 

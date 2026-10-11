@@ -32,6 +32,18 @@ project by Claude through the WhyNot Cut Bridge, read back, rendered and QC'd fr
 - Found and fixed: libraries evaluated inside a function stayed local (`NHM is undefined`); a stale Trim Paths
   reference ("Object is invalid"); an expression selector "Based On: Words" maps `textIndex` inconsistently for RTL
   Arabic, so word reveals use one text layer per word (verified frame by frame).
+- End to end on a test client (PODCAST-TEST, reel EP02TEST_R02_MO, 9 scenes, 32 s): Gate 0 `--as motion`,
+  audio-clean with cut proof, motion-plan, animatic, motion-build (read-back ok), motion-render (1080x1920, 24 fps,
+  −14.3 LUFS), 24 AE frames viewed, `qc` 10/10, handoff. Fixed on the way: transitions play after a scene's end;
+  captions hide where speech is already on screen; per-role fonts take the nearest weight with its own PostScript
+  name; the fallback-font build re-fits the layout (for the job only — the approved plan keeps the brand fonts);
+  sequence dialogue is content-addressed (AE keeps imported audio open on Windows); 24-bit dialogue decodes through
+  ffmpeg; hero frames follow every spoken word.
+
+**Not verified live**
+- Premiere on bundle 3.1.0 beyond a `ppro-status` ping (its code path is unchanged and its tests pass); macOS; a
+  project folder with an Arabic name through ExtendScript `File()` (tested as a JSON round trip only); a build in the
+  client's brand font (IBM Plex Sans Arabic was not installed — the live build used the Segoe UI Bold fallback).
 
 **Engine**
 - New: `cep_queue`, `ae_bridge`, `ae_probe`, `ae_render`, `motion_config`, `motion_icons`, `motion_library`,

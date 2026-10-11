@@ -431,6 +431,11 @@ NHM.persistentComp = function (name, plan) {
     return c;
 };
 
+/* RTL paragraph direction only for text in Arabic script (an English window's Latin captions and names stay LTR) */
+NHM.isArabic = function (s) {
+    return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(String(s));
+};
+
 NHM.P.captions = function (main, plan) {
     var cap = plan.persistent.captions;
     if (!cap || !cap.cues.length) { return null; }
@@ -438,7 +443,8 @@ NHM.P.captions = function (main, plan) {
     for (var i = 0; i < cap.cues.length; i++) {
         var q = cap.cues[i], L = c.layers.addText(q.text);
         L.name = "CAP_" + (i + 1);
-        NHM.styleText(L, {text: q.text, font: cap.font_ps, size: cap.size, color: cap.color, rtl: true, justify: "center", caps: NHM.caps});
+        NHM.styleText(L, {text: q.text, font: cap.font_ps, size: cap.size, color: cap.color, rtl: NHM.isArabic(q.text), justify: "center",
+            caps: NHM.caps});
         NHM.tg(L, "ADBE Position").setValue([cap.x, cap.y]);
         NH.shadow(L, 0.45, 4, 14);
         L.inPoint = NHM.t(c, q.start_frame);
@@ -456,7 +462,8 @@ NHM.P.speaker_badge = function (main, plan) {
     for (var i = 0; i < b.segments.length; i++) {
         var g = b.segments[i], L = c.layers.addText(g.name);
         L.name = "BADGE_" + (i + 1);
-        NHM.styleText(L, {text: g.name, font: b.font_ps, size: b.size, color: b.accent, rtl: true, justify: rtl ? "right" : "left", caps: NHM.caps});
+        NHM.styleText(L, {text: g.name, font: b.font_ps, size: b.size, color: b.accent, rtl: NHM.isArabic(g.name),
+            justify: rtl ? "right" : "left", caps: NHM.caps});
         NHM.tg(L, "ADBE Anchor Point").expression = rtl ? "var r=sourceRectAtTime(time,false);[r.left+r.width,r.top+r.height/2]" :
             "var r=sourceRectAtTime(time,false);[r.left,r.top+r.height/2]";
         NHM.tg(L, "ADBE Position").setValue([b.x, b.y]);
@@ -608,7 +615,9 @@ NHM.S.comparison = function (comp, scene) {
         {stroke: 3, color: NHM.plan.theme.text, colorExpr: NHM.colorExpr(NHM.plan.theme.text)});
     NHM.keys(r.trim.property("ADBE Vector Trim End"), comp, [2, 14], [0, 100]);
     NHM.tg(r.layer, "ADBE Opacity").setValue(40);
-    r.layer.moveToEnd();
+    var bg = null;
+    try { bg = comp.layer(scene.id + "_bg"); } catch (e) { bg = null; }
+    if (bg) { r.layer.moveBefore(bg); } else { r.layer.moveToEnd(); }     // under the texts, above a themed scene's solid
     return made;
 };
 

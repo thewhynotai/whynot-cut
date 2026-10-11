@@ -172,11 +172,12 @@ class _Compiler:
                 return flat[k][1]
         return None
 
-    def editorial_text(self, sid: str, field: str, text: str) -> str:
+    def editorial_text(self, sid: str, field: str, text: str, digits_ok: bool = False) -> str:
+        """digits_ok: the caller checks this field's numbers itself (timeline.when → approval, spec §4.1 Numbers)."""
         filled, missing = fill_placeholders(text, self.sheet)
         for m in missing:
             self.err(f"{sid}: {field} uses {{{m}}} but the episode sheet has no {m}")
-        for p in check_editorial(filled, self.window_digits):
+        for p in check_editorial(filled, set(self.window_digits) | (digit_runs(filled) if digits_ok else set())):
             self.err(f"{sid}: {field} «{filled[:50]}»: {p}")
         self.editorial.append({"scene": sid, "field": field, "text": filled})
         return filled
@@ -437,7 +438,11 @@ class _Compiler:
                 if lab:
                     els.append(lab)
             if p.get("when"):
-                wh = self.text_el(sid, n, "timeline", "when", self.editorial_text(sid, f"points[{n - 1}].when", p["when"]),
+                fld = f"points[{n - 1}].when"
+                if digit_runs(p["when"]) and not check_number(p["when"], p.get("at", "")):
+                    self.approvals.append(f"{sid}: number {p['when']} in {fld} written from the spoken words "
+                                          f"«{p.get('at', '')}» — confirm it")
+                wh = self.text_el(sid, n, "timeline", "when", self.editorial_text(sid, fld, p["when"], digits_ok=True),
                                   theme, appear=cue, box_w=box, x=x, name=f"{sid}_when_{n}")
                 if wh:
                     wh["color"] = wh["accent"]
@@ -564,7 +569,9 @@ class _Compiler:
                 "color": _f01(col["text"]), "accent": _f01(col["accent"])}
 
 
-def compile_motion(paths, font_override: dict | None = None) -> dict:
+def compile_motion(paths, font_override: dict | None = None, write: bool = True) -> dict:
+    """write=False compiles without touching the approved plan, validation, motion-plan.md or the status, and returns
+    the plan as `plan_data` (motion-build's re-fit with a fallback font)."""
     from .reels import window_stale
     from .motion_config import is_motion
     if not is_motion(paths):
@@ -574,6 +581,7 @@ def compile_motion(paths, font_override: dict | None = None) -> dict:
         raise SystemExit(stale)
     script = load_script(paths)
     C = _Compiler(paths, font_override)
+    C.write = write
     out_val = paths.p("01_analysis/motion-validation.json")
     errs = check_fields(script)
     if errs:
@@ -726,6 +734,9 @@ def _finish(paths, C: _Compiler, script: dict, scenes: list[dict] | None, early:
     fp = fingerprint(paths)
     if plan is not None:
         plan["fingerprint"] = fp
+    if not getattr(C, "write", True):
+        return {"ok": ok, "errors": C.errors, "warnings": C.warnings, "plan_data": plan}
+    if plan is not None:
         write_json(paths.p("01_analysis/motion-plan.json"), plan)
     val = {"ok": ok, "errors": C.errors, "warnings": C.warnings, "approvals": C.approvals,
            "editorial_lines": C.editorial, "recipe_notes": C.notes, "fingerprint": fp, "generated": now_iso()}

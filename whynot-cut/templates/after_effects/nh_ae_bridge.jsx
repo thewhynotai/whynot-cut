@@ -36,9 +36,16 @@ NHAE.read = function (p) {
 };
 
 NHAE.projectInfo = function () {
-    var p = app.project, dirty = null;
+    var p = app.project, dirty = null, n = null;
     try { dirty = p.dirty; } catch (e) { dirty = null; }       // undocumented, present since AE 17.5
-    return {project: p && p.file ? p.file.name : null, project_path: p && p.file ? p.file.fsName : null, dirty: dirty};
+    try { n = p.numItems; } catch (e2) { n = null; }
+    return {project: p && p.file ? p.file.name : null, project_path: p && p.file ? p.file.fsName : null, dirty: dirty,
+            num_items: n};
+};
+
+/* app.newProject() discards the open project: only when AE reports it clean, or it is an empty untitled project */
+NHAE.mayDiscard = function (info) {
+    return info.dirty === false || (info.dirty === null && !info.project_path && info.num_items === 0);
 };
 
 NHAE.fontInfo = function (ps) {
@@ -97,7 +104,7 @@ NHAE.run = function (dataPath) {
 /* Arabic capability probe (spec §4.6): comps laid end to end in PROBE_ALL for one aerender run */
 NHAE.actions.probe_text = function (d) {
     var job = d.job, info = NHAE.projectInfo();
-    if (info.dirty === true) { return {ok: false, reason: "dirty", project: info.project}; }
+    if (!NHAE.mayDiscard(info)) { return {ok: false, reason: "dirty", project: info.project}; }
     app.newProject();
     var fps = job.fps, n = job.frames, out = {ae_version: app.version, comps: [], om_templates: []};
     var all = app.project.items.addComp("PROBE_ALL", job.w, job.h, 1, n * job.comps.length / fps, fps);
@@ -171,7 +178,7 @@ NHAE.actions.probe_text = function (d) {
 NHAE.actions.build_motion = function (d) {
     var job = d.job, info = NHAE.projectInfo();
     var target = new File(job.aep_path).fsName;
-    if (info.dirty === true) {
+    if (!NHAE.mayDiscard(info)) {
         return {ok: false, reason: (info.project_path === target ? "dirty_target" : "dirty"), project: info.project,
                 project_path: info.project_path};
     }

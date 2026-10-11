@@ -441,6 +441,17 @@ class TestMotionGate0(unittest.TestCase):
         self.assertEqual(src["topic"]["title"], "first loss")
         self.assertEqual(r["reels"][0]["reel_id"], "EP12_T01_MO")
 
+    def test_topic_avoid_guard(self):
+        """Review: a topic window mentioning a sheet `avoid:` topic needs --confirm-avoid, like a reel candidate."""
+        epj = self.ep.p("00_inputs/episode.json")
+        info = read_json(epj)
+        write_json(epj, dict(info, sheet=dict(info.get("sheet") or {}, avoid=["كلمه7"])))     # said at 2.8 s, inside T01
+        with self.assertRaises(SystemExit) as cm:
+            self.select("T01", as_="motion", type_="advice")
+        self.assertIn("--confirm-avoid T01", str(cm.exception))
+        r = self.select("T01", as_="motion", type_="advice", confirm_avoid=["T01"])
+        self.assertEqual(r["reels"][0]["reel_id"], "EP12_T01_MO")
+
     def test_topic_too_long(self):
         write_json(self.root / common.CLIENT_PROFILE_REL / "motion.json", {"duration_s": {"hard_min": 1, "hard_max": 5}})
         common.set_context(self.root)
@@ -1177,6 +1188,25 @@ class TestMotionScenesJSX(unittest.TestCase):
         for t in SCENE_TYPES:
             self.assertTrue(f"NHM.S.{t} = function" in src, t)
 
+    def test_persistent_text_direction_follows_text(self):
+        """Review: captions and the speaker badge were always RTL; Latin captions in an English (ltr) window got RTL
+        paragraph direction (punctuation at the wrong end)."""
+        src = nhm_code()
+        self.assertTrue("NHM.isArabic = function" in src)
+        for fn, var in (("NHM.P.captions", "q.text"), ("NHM.P.speaker_badge", "g.name")):
+            body = jsx_fn(src, fn)
+            self.assertFalse("rtl: true" in body, fn)
+            self.assertTrue(f"rtl: NHM.isArabic({var})" in body, fn)
+        import re
+        rx = re.search(r"NHM\.isArabic = function \(s\) \{\s*return (/\[.*?\]/)\.test", src).group(1)
+        py = re.compile(rx.strip("/"))
+        self.assertTrue(py.search("كلمه") and py.search("ﻻ") and not py.search("Hello, world!"))
+
+    def test_comparison_divider_above_scene_bg(self):
+        """Review: moveToEnd() put the divider under the scene's own _bg solid on themed scenes."""
+        body = jsx_fn(nhm_code(), "NHM.S.comparison")
+        self.assertTrue('scene.id + "_bg"' in body and "moveBefore(" in body, body)
+
     def test_icons_draw_on_and_round_caps(self):
         src = nhm_code()
         self.assertTrue("ADBE Vector Filter - Trim" in src)
@@ -1216,9 +1246,9 @@ def rb_from_plan(job: dict) -> dict:
 
 
 class FakeAE:
-    def __init__(self, dirty=False, project_path=None, fonts_ok=True, version="26.0", readback=None):
+    def __init__(self, dirty=False, project_path=None, fonts_ok=True, version="26.0", readback=None, num_items=3):
         self.dirty, self.project_path, self.fonts_ok, self.version = dirty, project_path, fonts_ok, version
-        self.readback, self.jobs = readback, []
+        self.readback, self.jobs, self.num_items = readback, [], num_items
 
     @staticmethod
     def ok(result):
@@ -1230,7 +1260,8 @@ class FakeAE:
 
     def submit(self, action, data=None, timeout=900):
         if action == "ping":
-            return self.ok({"ae_version": self.version, "dirty": self.dirty, "project_path": self.project_path})
+            return self.ok({"ae_version": self.version, "dirty": self.dirty, "project_path": self.project_path,
+                            "num_items": self.num_items})
         if action == "fonts":
             return self.ok({"fonts": {n: {"found": self.fonts_ok, "substitute": False} for n in data["postscript_names"]},
                             "missing_or_substituted": []})
@@ -1322,6 +1353,20 @@ class TestMotionBuild(CompiledMotion):
         self.assertEqual(self.ae.jobs, [])
         self.ae.dirty = False
         self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+
+    def test_unknown_dirty_refused(self):
+        """Review: AE that cannot report `dirty` (null) must not count as clean: app.newProject() would discard work."""
+        n = len(self.ae.jobs)
+        self.ae.dirty, self.ae.project_path = None, "D:/their/work.aep"
+        r = self.mb.build(self.reel)
+        self.assertEqual(r["status"], "REFUSED", r)
+        self.assertTrue(any("unsaved" in x for x in r["reasons"]), r["reasons"])
+        self.assertEqual(len(self.ae.jobs), n)
+        self.ae.project_path, self.ae.num_items = None, 0          # an empty untitled project has nothing to lose
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+        bridge = (AE_TPL / "nh_ae_bridge.jsx").read_text(encoding="utf-8")
+        self.assertNotIn("info.dirty === true", bridge)
+        self.assertEqual(bridge.count("NHAE.mayDiscard(info)"), 2)
 
     def test_rebuild_protection(self):
         self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
@@ -1569,6 +1614,35 @@ class TestMotionQC(CompiledMotion):
                   "visual_verified", "licenses"):
             self.assertEqual(c[k], "PASS", k)
         self.assertTrue(self.reel.p("08_quality_control/qc-results.json").exists())
+
+    def test_piece_render_after_rebuild_fails_render(self):
+        """Review: a `--scenes` piece render after a rebuild must not let QC pass on the old MAIN render / MP4."""
+        import time as _t
+        from lib import motion_build
+        from lib.motion_qc import record_visual
+        r = self.reel
+        _t.sleep(1.1)
+        aep = motion_build.aep_path(r)
+        aep.write_bytes(b"AEP rebuilt")
+        bres = r.p("04_after_effects/motion-build-result.json")
+        write_json(bres, dict(read_json(bres), aep_sha1=hashlib.sha1(b"AEP rebuilt").hexdigest()))
+        _t.sleep(1.1)
+        piece = r.p(f"04_after_effects/render/pieces/{r.video_id}_S01.mov")
+        piece.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(motion_build.render_path(r), piece)
+        piece.touch()
+        rr = r.p("04_after_effects/motion-render-result.json")
+        write_json(rr, dict(read_json(rr), pieces=[{"scene": "S01", "file": str(piece), "start_frame": 0,
+                                                    "end_frame": 10, "rendered_at": _t.time()}]))
+        _t.sleep(1.1)
+        run = r.p("08_quality_control/ae_frames/run-20990101-000001")
+        run.mkdir(parents=True, exist_ok=True)
+        from PIL import Image
+        Image.new("RGB", (40, 40)).save(run / "_sheet.jpg")
+        record_visual(r, "pass", "piece frames viewed", "claude")
+        res, c = self.checks()
+        self.assertEqual(c["render"], "FAIL", c)
+        self.assertFalse(res["ok"])
 
     def test_each_check_fails(self):
         import time as _t
@@ -1846,6 +1920,26 @@ class TestLiveFindings(unittest.TestCase):
             for a, b in shown:
                 self.assertFalse(c["start_frame"] < b and c["end_frame"] > a, (c, a, b))
 
+    def test_timeline_when_digits_need_approval(self):
+        """Review (spec §4.1 Numbers): digits in timeline.when not said as digits go to approval, not an error — a year
+        said in words («ألفين وتسعتاشر») is written 2019 on screen."""
+        from lib.motion_plan import compile_motion
+        s = good_script()
+        s["scenes"][2] = scene("S03", "timeline", "كلمه20", points=[
+            {"label": "كلمه20 كلمه21", "at": "كلمه20", "when": "1999"},
+            {"label": "كلمه25", "at": "كلمه25", "when": "«2005»"}])
+        write_json(self.reel.p("01_analysis/motion-script.json"), s)
+        r = compile_motion(self.reel)
+        self.assertFalse(r["ok"])                                       # quotes in an editorial line are still errors
+        self.assertTrue(any("quotation" in e for e in r["errors"]), r["errors"])
+        self.assertFalse(any("not said in this window" in e for e in r["errors"]), r["errors"])
+        s["scenes"][2]["points"][1]["when"] = "2005"
+        write_json(self.reel.p("01_analysis/motion-script.json"), s)
+        r = compile_motion(self.reel)
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertTrue(any("1999" in a for a in r["approvals"]) and any("2005" in a for a in r["approvals"]),
+                        r["approvals"])
+
     def test_hero_after_every_spoken_word(self):
         """Live frames: S04 (icon_point) had its hero frame 11 frames in, before 6 of its 8 words had appeared,
         because speech text built through `either` (icon/title/label/illustration) never reached the scene cues."""
@@ -1942,9 +2036,21 @@ class TestFallbackRefit(CompiledMotion):
         finally:
             ae_bridge.submit, ae_bridge.status, ae_probe.verdict_ok, plat.newest_app = saved
         self.assertEqual(r["status"], "PROJECT_ASSEMBLED", r)
+        # the job carries the layout re-fitted with the font After Effects draws ...
+        job = json.loads(self.reel.p("04_after_effects/data/motion-job.json").read_text(encoding="ascii"))["plan"]
+        self.assertTrue(all(v["ps"] == ps for v in job["fonts"].values()), job["fonts"])
+        self.assertEqual(Path(job["fonts"]["title"]["file"]).name.lower(), test_font().name.lower())
+        # ... but the approved plan keeps the brand fonts (review: a later plain rebuild must not ship the fallback)
         plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
-        self.assertTrue(all(v["ps"] == ps for v in plan["fonts"].values()), plan["fonts"])
-        self.assertEqual(Path(plan["fonts"]["title"]["file"]).name.lower(), test_font().name.lower())
+        self.assertTrue(plan["fonts"]["title"]["ps"].startswith("Brand-"), plan["fonts"])
+        self.assertEqual(plan["fingerprint"], fingerprint(self.reel))
+        res = read_json(self.reel.p(motion_build.RESULT))
+        self.assertEqual(res["fallback_font"], ps)
+        self.assertTrue(any(n.startswith("Brand-") for n in res["brand_fonts"]), res.get("brand_fonts"))
+        from lib.handoff import motion_readme
+        txt = motion_readme(self.reel).read_text(encoding="utf-8")
+        needs = txt.split("## Needs you", 1)[1]
+        self.assertTrue(ps in needs and "Brand-" in needs, needs)
 
 
 class TestLockedAudio(CompiledMotion):

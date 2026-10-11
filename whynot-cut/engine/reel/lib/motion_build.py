@@ -44,9 +44,10 @@ def _line_cues(el: dict) -> list[int]:
     return out
 
 
-def job_data(paths, fallback_font: str | None = None) -> dict:
+def job_data(paths, fallback_font: str | None = None, plan: dict | None = None) -> dict:
+    """`plan` replaces the approved plan file for this job only (the layout re-fitted with a fallback font)."""
     from .motion_config import motion_cfg
-    plan = read_json(paths.p("01_analysis/motion-plan.json"))
+    plan = plan or read_json(paths.p("01_analysis/motion-plan.json"))
     if not plan:
         raise SystemExit("01_analysis/motion-plan.json missing — run `reel motion-plan` first")
     caps, src = capabilities()
@@ -154,10 +155,12 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
     if not ae_probe.verdict_ok(ver):
         probs.append(f"no ok Arabic probe verdict for After Effects {ver}: run `reel ae-probe`, view the frames, record it")
     target = str(aep_path(paths))
-    if ping.get("dirty") is True:
+    dirty = ping.get("dirty")      # None = AE could not say: never treat as clean (the build opens a new project)
+    if dirty is not False and not (dirty is None and not ping.get("project_path") and ping.get("num_items") == 0):
         same = bool(ping.get("project_path")) and Path(ping["project_path"]).resolve() == Path(target).resolve()
         where = " in this reel's project" if same else f" in {ping.get('project_path') or 'an untitled project'}"
-        probs.append("After Effects has unsaved changes" + where + ": save or close it in After Effects first")
+        what = "has unsaved changes" if dirty is True else "could not report whether it has unsaved changes"
+        probs.append(f"After Effects {what}{where}: save or close it in After Effects first")
     plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
     if plan:
         fonts = _inner(ae_bridge.submit("fonts", {"postscript_names": _plan_fonts(plan)}, timeout=60)).get("fonts") or {}
@@ -195,7 +198,7 @@ def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False
     probs, ctx = preconditions(paths, allow_fallback_font)
     if probs:
         return dict(base, reasons=probs)
-    fb = None
+    fb, fb_plan, brand = None, None, []
     if ctx.get("missing_fonts") and allow_fallback_font:
         from .motion_layout import find_font_file
         from .motion_plan import compile_motion
@@ -204,12 +207,14 @@ def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False
         ffile = find_font_file(fb) if fb else None
         if not ffile:
             return dict(base, reasons=[f"the fallback font {fb!r} is not installed either: install the brand fonts"])
-        # re-fit the layout with the font After Effects will draw (same words: the Gate 1 approval stays valid)
-        rc = compile_motion(paths, font_override={"ps": fb, "file": ffile})
+        # re-fit the layout with the font After Effects will draw (same words: the Gate 1 approval stays valid), for
+        # this job only: the approved plan keeps the brand fonts, so a rebuild after installing them uses them
+        rc = compile_motion(paths, font_override={"ps": fb, "file": ffile}, write=False)
         if not rc["ok"]:
             return _record(paths, dict(base, status="FAILED", reasons=["re-fit with the fallback font: " + e
                                                                         for e in rc["errors"]], fallback_font=fb))
-    job_p = write_job(paths, fallback_font=fb)
+        fb_plan, brand = rc["plan_data"], ctx["missing_fonts"]
+    job_p = write_job(paths, fallback_font=fb, plan=fb_plan)
     job = json.loads(job_p.read_text(encoding="ascii"))
     t0 = time.time()
     r = ae_bridge.submit("build_motion", {"job": job}, timeout=timeout)
@@ -226,7 +231,8 @@ def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False
     ok = cmp_["ok"] and not rep.get("failed")
     fails = cmp_["failures"] + [f"{f.get('scene')}: {f.get('error')}" for f in rep.get("failed") or []]
     res = dict(base, status="PROJECT_ASSEMBLED" if ok else "FAILED", reasons=[] if ok else fails, report=rep,
-               readback=rb, comparison=cmp_, aep_sha1=_sha1(aep), fallback_font=fb, caps_source=job.get("caps_source"),
+               readback=rb, comparison=cmp_, aep_sha1=_sha1(aep), fallback_font=fb, brand_fonts=brand,
+               caps_source=job.get("caps_source"),
                plan_fingerprint=job["plan"].get("fingerprint"))
     _record(paths, res)
     if ok:

@@ -162,6 +162,7 @@ def motion_readme(paths: Paths) -> Path:
     plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
     qc = read_json(paths.p("08_quality_control/qc-results.json"), {}) or {}
     rr = read_json(paths.p("04_after_effects/motion-render-result.json"), {}) or {}
+    br = read_json(paths.p("04_after_effects/motion-build-result.json"), {}) or {}
     fps = float(plan.get("fps") or seq_fps())
     fonts = sorted({e.get("font_ps") for s in plan.get("scenes", []) for e in s.get("elements", []) if e.get("font_ps")})
     music = (plan.get("audio") or {}).get("music")
@@ -185,7 +186,14 @@ def motion_readme(paths: Paths) -> Path:
     L += ["", "## Licenses and attributions", ""]
     L += [f"- {a['ref']}: {a['license']}" + (f" — publish with: **{a['attribution']}**" if a.get("attribution") else "")
           for a in assets] or ["- only the client's brand and Lucide icons (ISC)"]
+    warns = (br.get("comparison") or {}).get("warnings") or []
+    if warns:
+        L += ["", "## Build warnings (After Effects read-back)", ""] + [f"- {w}" for w in warns]
     needs = list(plan.get("approvals") or [])
+    if br.get("fallback_font"):
+        needs.insert(0, f"fonts: this build used the fallback font {br['fallback_font']} because "
+                        f"{', '.join(br.get('brand_fonts') or ['the brand font'])} is not installed: install it from "
+                        "assets/Fonts, restart After Effects, then `reel motion-build` again")
     if not music:
         needs.append("music: add a licensed track (the motion video has dialogue and SFX only)")
     needs += ["final look in After Effects, then render/export for posting",
