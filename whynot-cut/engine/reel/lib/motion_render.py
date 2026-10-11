@@ -34,6 +34,16 @@ def _probe(f: Path) -> dict:
             "duration_s": pr.get("duration_s"), "audio": bool(pr.get("audio"))}
 
 
+def _clear(files) -> None:
+    """Removes the previous outputs first; Windows refuses while a player (or After Effects) has one open."""
+    for f in files:
+        try:
+            f.unlink(missing_ok=True)
+        except PermissionError:
+            raise SystemExit(f"{f} is open in another program (a video player?): close the file, then run "
+                             "motion-render again") from None
+
+
 def render(paths, scenes: list[str] | None = None, timeout: int = 3600) -> dict:
     from . import ae_render
     from .audio_clean import _lufs
@@ -55,11 +65,12 @@ def render(paths, scenes: list[str] | None = None, timeout: int = 3600) -> dict:
         pieces = [p for p in prior.get("pieces", []) if p["scene"] not in scenes]
         by_id = {s["id"]: s for s in plan["scenes"]}
         for sid in scenes:
-            sc = by_id.get(sid)
-            if not sc:
+            if sid not in by_id:
                 raise SystemExit(f"unknown scene {sid}")
-            out = paths.p(f"04_after_effects/render/pieces/{paths.video_id}_{sid}.mov")
-            out.unlink(missing_ok=True)
+        outs = {sid: paths.p(f"04_after_effects/render/pieces/{paths.video_id}_{sid}.mov") for sid in scenes}
+        _clear(outs.values())
+        for sid in scenes:
+            sc, out = by_id[sid], outs[sid]
             end = min(plan["duration_frames"], sc["end_frame"]) - 1
             r = ae_render.render(aep, comp, out, rs, om, sc["start_frame"], end, timeout=timeout, log=log)
             if r["status"] != "RENDERED":
@@ -72,7 +83,8 @@ def render(paths, scenes: list[str] | None = None, timeout: int = 3600) -> dict:
         write_json(paths.p(RESULT), res)
         return res
     main = render_path(paths)
-    main.unlink(missing_ok=True)
+    mp4 = paths.p(f"04_after_effects/render/{paths.video_id}_motion.mp4")
+    _clear([main, mp4])
     r = ae_render.render(aep, comp, main, rs, om, timeout=timeout, log=log)
     if r["status"] != "RENDERED":
         res["reasons"].append(f"aerender {r['status']}: {r.get('msg') or 'see ' + str(log)}")
@@ -87,7 +99,6 @@ def render(paths, scenes: list[str] | None = None, timeout: int = 3600) -> dict:
         res["reasons"].append(f"fps {pr['fps']}, plan {fps:.3f}")
     if pr["duration_s"] is None or abs(pr["duration_s"] - want) > 1.5 / fps:
         res["reasons"].append(f"duration {pr['duration_s']} s, plan {want:.3f} s (±1 frame)")
-    mp4 = paths.p(f"04_after_effects/render/{paths.video_id}_motion.mp4")
     cmd = [ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(main)]
     if not pr["audio"]:
         wav = mix(plan, paths.root, paths.p("04_after_effects/render/_mix.wav"))

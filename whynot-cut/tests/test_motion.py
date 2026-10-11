@@ -1567,6 +1567,29 @@ class TestMotionRender(CompiledMotion):
         self.assertTrue(all((d / f["file"]).exists() for f in fj["frames"]))
         self.assertIn("expect", fj["frames"][0])
 
+    @unittest.skipUnless(sys.platform == "win32", "only Windows refuses to delete a file another program holds open")
+    def test_open_output_says_close_the_file(self):
+        """Final review: a player holding the previous MOV/MP4 open made motion-render die with a raw PermissionError
+        (Windows) instead of saying which file to close."""
+        from lib.motion_build import render_path
+        from lib.motion_render import render
+        r = render(self.reel)
+        self.assertEqual(r["status"], "RENDERED", r)
+        self.assertEqual(render(self.reel, scenes=["S01"])["status"], "RENDERED")
+        piece = self.reel.p(f"04_after_effects/render/pieces/{self.reel.video_id}_S01.mov")
+        for f, kw in ((render_path(self.reel), {}), (Path(r["mp4"]), {}), (piece, {"scenes": ["S01"]})):
+            with open(f, "rb"):
+                try:
+                    render(self.reel, **kw)
+                except SystemExit as e:
+                    msg = str(e)
+                except PermissionError as e:
+                    self.fail(f"{f.name}: raw {e!r}")
+                else:
+                    self.fail(f"{f.name}: no refusal while the file is open")
+            self.assertIn("close the file", msg)
+            self.assertIn(f.name, msg)
+
 
 class TestWordLayers(unittest.TestCase):
     """Live AE 26.5 probe: an expression selector "Based On: Words" maps textIndex inconsistently for RTL Arabic
@@ -1694,6 +1717,43 @@ class TestMotionQC(CompiledMotion):
         res, c = self.checks()
         self.assertEqual(c["render"], "FAIL", c)
         self.assertFalse(res["ok"])
+
+    def test_silent_render_fails_render_check(self):
+        """Final review: a MOV without an audio stream passed the render check and only failed later as audio_sync
+        «no audio to compare»; the render check names it."""
+        from lib import motion_build
+        from lib.common import fps_arg
+        silent = self.tmp / "silent.mov"
+        ff("-f", "lavfi", "-i", f"testsrc2=s=108x192:r={fps_arg()}:d={self.dur:.3f}", "-c:v", "libx264", "-preset",
+           "ultrafast", "-pix_fmt", "yuv420p", str(silent))
+        shutil.copyfile(silent, motion_build.render_path(self.reel))
+        r, c = self.checks()
+        self.assertEqual(c["render"], "FAIL", c)
+        self.assertIn("no audio stream", next(x["detail"] for x in r["checks"] if x["check"] == "render"))
+
+    def test_audio_sync_near_miss_hint(self):
+        """Final review: the render's full mix (music + SFX) is correlated with the dry dialogue; a loud music bed can
+        pull it just under 0.9 with no diagnostic. QC keeps the FAIL but says what it measured and what to look at."""
+        from lib import motion_build
+        from lib.common import fps_arg
+
+        def sync():
+            r, c = self.checks()
+            return c["audio_sync"], next(x["detail"] for x in r["checks"] if x["check"] == "audio_sync")
+        res, detail = sync()
+        self.assertEqual(res, "PASS", detail)
+        self.assertNotIn("music", detail)
+        dia = Path(self.plan["audio"]["dialogue"])
+        bed = bursty_wav(self.tmp / "bed.wav", self.dur, seed=99)             # measured: correlation 0.86
+        mixed = self.tmp / "loud_bed.mov"
+        ff("-f", "lavfi", "-i", f"testsrc2=s=108x192:r={fps_arg()}:d={self.dur:.3f}", "-i", str(dia), "-i", str(bed),
+           "-filter_complex", "[2:a]volume=0.8[b];[1:a][b]amix=inputs=2:normalize=0[a]", "-map", "0:v", "-map", "[a]",
+           "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(mixed))
+        shutil.copyfile(mixed, motion_build.render_path(self.reel))
+        res, detail = sync()
+        self.assertEqual(res, "FAIL", detail)
+        self.assertRegex(detail, r"correlation 0\.8\d")
+        self.assertIn("music", detail)
 
     def test_each_check_fails(self):
         import time as _t
@@ -2218,6 +2278,39 @@ class TestReviewMinorsPlan(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(len([e for e in r["errors"] if "verdict" in e]), 1, r["errors"])
         self.assertFalse(any(e["field"] == "verdict" for e in r["editorial_lines"]), r["editorial_lines"])
+
+
+class TestMotionCodeHygiene(unittest.TestCase):
+    """Final-review minors that are about the code itself (dead helpers, a bad line join)."""
+    ENGINE = SK / "engine" / "reel"
+
+    def test_motion_qc_has_no_dead_helpers(self):
+        """Final review: motion_qc.plan_fonts and motion_qc.sha1 were never called. Every public function of motion_qc
+        is used by the engine (inside the module or imported elsewhere), not only defined."""
+        import ast
+        import re
+        mod = self.ENGINE / "lib" / "motion_qc.py"
+        src = mod.read_text(encoding="utf-8")
+        others = "\n".join(f.read_text(encoding="utf-8") for f in self.ENGINE.rglob("*.py") if f != mod)
+        public = [n.name for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and not n.name.startswith("_")]
+        for fn in public:
+            inside = len(re.findall(rf"(?<![\w.]){fn}\(", src)) - len(re.findall(rf"\bdef {fn}\(", src))
+            outside = re.search(rf"motion_qc import[^\n]*\b{fn}\b|motion_qc\.{fn}\b", others)
+            self.assertTrue(inside > 0 or outside, f"motion_qc.{fn} is never used")
+
+    def test_no_stray_space_runs(self):
+        """Final review (cosmetic): `... else         "read the reasons ..."` in motion_cli (a bad line join). No motion
+        module has a run of 3+ spaces between two code tokens on a line (alignment before a # comment is fine; spaces
+        inside strings are content)."""
+        import tokenize
+        skip = (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENCODING)
+        bad = []
+        for f in sorted((self.ENGINE / "lib").glob("motion_*.py")):
+            with open(f, "rb") as fh:
+                toks = [t for t in tokenize.tokenize(fh.readline) if t.type not in skip]
+            bad += [f"{f.name}:{b.start[0]}" for a, b in zip(toks, toks[1:])
+                    if a.end[0] == b.start[0] and b.start[1] - a.end[1] >= 3 and b.type != tokenize.COMMENT]
+        self.assertEqual(bad, [])
 
 
 if __name__ == "__main__":

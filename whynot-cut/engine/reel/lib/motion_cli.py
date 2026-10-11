@@ -148,7 +148,8 @@ def cmd_motion_render(a):
     from .motion_render import render
     scenes = [x.strip() for x in a.scenes.split(",") if x.strip()] if a.scenes else None
     r = render(P(a), scenes=scenes, timeout=a.timeout)
-    r["next"] = "reel motion-frames, then the qc-reviewer inspects them" if r["status"] == "RENDERED" else         "read the reasons and logs/aerender.log"
+    r["next"] = ("reel motion-frames, then the qc-reviewer inspects them" if r["status"] == "RENDERED" else
+                 "read the reasons and logs/aerender.log")
     out(r)
 
 

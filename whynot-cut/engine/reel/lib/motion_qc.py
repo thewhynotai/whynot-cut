@@ -3,7 +3,6 @@ resumable step list (`reel next`, spec §4.11). Every FAIL blocks QC_PASSED; evi
 """
 from __future__ import annotations
 
-import hashlib
 import time
 from pathlib import Path
 
@@ -49,6 +48,11 @@ def _env(x: np.ndarray, fps: float) -> np.ndarray:
     hop = 48000 / fps
     n = int(len(x) / hop)
     return np.array([np.sqrt(np.mean(x[int(k * hop):int((k + 1) * hop)] ** 2)) for k in range(n)])
+
+
+def _has_audio(f: Path) -> bool:
+    from .media import probe
+    return bool(probe(Path(f)).get("audio"))
 
 
 def audio_sync(render: Path, dialogue: Path, fps: float, max_lag: int = 6) -> dict:
@@ -101,13 +105,21 @@ def run(paths) -> dict:
     main = Path(rr["main"]) if rr.get("main") else None
     r_ok = rr.get("status") == "RENDERED" and not rr.get("reasons") and main is not None and main.exists() \
         and aep.exists() and main.stat().st_mtime >= aep.stat().st_mtime
-    add("render", bool(r_ok), "render exists, is newer than the .aep and matches the plan" if r_ok else
+    silent = bool(r_ok) and not _has_audio(main)
+    add("render", bool(r_ok) and not silent,
+        "the render has no audio stream: check the DIALOGUE layer in MAIN and the output module's audio output, then "
+        "motion-render again" if silent else "render exists, is newer than the .aep and matches the plan" if r_ok else
         "render missing, failed, or older than the .aep (motion-render)")
     dia = Path((plan.get("audio") or {}).get("dialogue") or paths.p("06_audio/dialogue/_missing.wav"))
     if main and main.exists() and dia.exists() and plan:
         s = audio_sync(main, dia, float(plan["fps"]))
         ok = s["corr"] is not None and s["corr"] >= 0.9 and abs(s["offset_frames"]) <= 1
-        add("audio_sync", ok, f"correlation {s['corr']}, offset {s['offset_frames']} frames")
+        detail = f"correlation {s['corr']}, offset {s['offset_frames']} frames"
+        if s["corr"] is not None and 0.8 <= s["corr"] < 0.9:
+            detail += (" (just under 0.9: the render's full mix is compared with the dry dialogue, so a loud music bed "
+                       "or SFX can cause this; listen to the render, and if the voice is in sync lower music.level_db "
+                       "in motion-script.json)")
+        add("audio_sync", ok, detail)
     else:
         add("audio_sync", False, "render or sequence dialogue missing")
     cv = read_json(paths.p("06_audio/dialogue/cut-verification.json"), {}) or {}
@@ -192,12 +204,3 @@ def motion_next(paths) -> dict:
         status = f"{status} (STALE: inputs changed since)"
     return {"status": status, "profile": active_profile(paths.root), "kind": "motion",
             "next": remaining[0] if remaining else "done", "remaining": remaining, "stale": stale}
-
-
-def plan_fonts(plan: dict) -> list[str]:
-    from .motion_build import _plan_fonts
-    return _plan_fonts(plan)
-
-
-def sha1(p: Path) -> str:
-    return hashlib.sha1(p.read_bytes()).hexdigest() if p.exists() else ""
