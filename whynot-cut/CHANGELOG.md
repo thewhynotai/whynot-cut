@@ -98,6 +98,15 @@
   `build_audio`, `final_checks`) between one read and one write step, with byte-identical outputs. New
   `lib/media_util.py`: one time parser, one frame grab and one contact-sheet builder replace four, four and seven
   copies.
+- `reel audio-clean` handles long clips (T2.13, engine perf §9 / IM-14): the measurements stream the audio in 60 s
+  blocks instead of holding the whole 48 kHz file as float32 arrays, and the 40 ms mic crossfade is a running count
+  instead of a full-length convolution. A 60-minute mono clip went from 6.0 GB peak memory to 0.17 GB (fake Whisper),
+  with identical numbers on short clips. A long clip's spectrograms are drawn from 16 kHz mono (ffmpeg child 1.6 GB ->
+  0.3 GB at 60 min; 0-8 kHz is still all there). The cut proof (`cut-verification.json`) now reads ±3 s around each
+  cut instead of the whole clip twice (close cuts share one <= 20 s window; new `windows_ms`); the two-reading rule,
+  temperature 0, the 60 ms "missing" rule, the 85 % coverage gate and protected pauses are unchanged. It now also
+  checks the cuts that fell on the old chunk boundaries and the removed lead-in and tail, which were never read; with
+  no cut at all it reports `ok` without loading Whisper. First unit tests for `detect_pauses` and `verify_cuts`.
 
 ### Fixed
 - Guard minors from the Phase 1 gate (T2.19). Bash: a `\` before CRLF escapes the CR and is no line continuation (the
