@@ -720,6 +720,27 @@ class TestMotionTruth(unittest.TestCase):
             self.assertEqual(len(errs), 1, (name, errs))
             self.assertRegex(errs[0], r"S0\d", name)
 
+    def test_field_value_typos(self):
+        """Final review: a typo in transition_in / theme / captions / reveal silently became a cut, the dark theme, no
+        captions or a word reveal. motion-plan names it."""
+        from lib.motion_script import check_fields
+
+        def two(**kw):
+            return {"scenes": [scene("S01", "kinetic_quote", "@start", text="x"),
+                               scene("S02", "kinetic_quote", text="y", **kw)]}
+        for kw in ({"transition_in": "push", "theme": "light", "captions": "off", "reveal": "line"}, {"captions": "on"},
+                   {"transition_in": "fade", "theme": "brand", "reveal": "word"}):
+            self.assertEqual(check_fields(two(**kw)), [], kw)
+        for field, bad in (("transition_in", "puhs"), ("theme", "drak"), ("captions", "of"), ("reveal", "words")):
+            errs = check_fields(two(**{field: bad}))
+            self.assertEqual(len(errs), 1, (field, errs))
+            self.assertTrue(errs[0].startswith("S02") and field in errs[0] and repr(bad) in errs[0], errs)
+        self.assertEqual(check_fields(dict(two(), theme="brand", captions="subtitles")), [])
+        for field, bad in (("theme", "brnad"), ("captions", "subtitle")):                    # the video-wide values
+            errs = check_fields(dict(two(), **{field: bad}))
+            self.assertEqual(len(errs), 1, (field, errs))
+            self.assertTrue(field in errs[0] and repr(bad) in errs[0], errs)
+
     def test_editorial(self):
         from lib.motion_script import check_editorial, fill_placeholders
         self.assertTrue(check_editorial("«كلام»", set()))
@@ -2135,6 +2156,68 @@ class TestDialogue24Bit(CompiledMotion):
             self.assertTrue(0.5 < sum(vals) / len(vals) <= 1.0, vals[:5])       # steady tone, not noise
         finally:
             src.write_bytes(keep)
+
+
+# --------------------------------------------------------------------------- final-review minors (2.2.0)
+
+
+class TestReviewMinorsPlan(unittest.TestCase):
+    """Final-review minors in the plan compiler (one motion project, compiled per test)."""
+    @classmethod
+    def setUpClass(cls):
+        if test_font() is None:
+            raise unittest.SkipTest("no test font for HarfBuzz fitting")
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.root, cls.ep, cls.reel = motion_plan_fixture(cls.tmp)
+
+    @classmethod
+    def tearDownClass(cls):
+        common.set_context(None)
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def setUp(self):
+        common.set_context(self.root)
+
+    def compile(self, script):
+        from lib.motion_plan import compile_motion
+        write_json(self.reel.p("01_analysis/motion-script.json"), script)
+        return compile_motion(self.reel), read_json(self.reel.p("01_analysis/motion-plan.json"))
+
+    @staticmethod
+    def cues_in(plan, sid):
+        sc = next(x for x in plan["scenes"] if x["id"] == sid)
+        cues = ((plan["persistent"].get("captions") or {}).get("cues")) or []
+        return [c for c in cues if c["start_frame"] < sc["end_frame"] and c["end_frame"] > sc["start_frame"]]
+
+    def test_scene_captions_override(self):
+        """Spec §3.4: a scene's own `captions` overrides the video's — "off" hides them in that scene, "on" shows them
+        there when the video has none. Only the automatic hiding (speech on screen) existed."""
+        s = dict(good_script(), captions="subtitles")
+        r, plan = self.compile(s)
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertTrue(self.cues_in(plan, "S02"))                  # the stat counter shows captions by default
+        s["scenes"][1]["captions"] = "off"
+        r, plan = self.compile(s)
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertEqual(self.cues_in(plan, "S02"), [])
+        s = good_script()                                           # drama: captions off for the video
+        s["scenes"][1]["captions"] = "on"
+        r, plan = self.compile(s)
+        self.assertTrue(r["ok"], r["errors"])
+        cues = plan["persistent"]["captions"]["cues"]
+        self.assertTrue(cues)
+        self.assertEqual(cues, self.cues_in(plan, "S02"))
+
+    def test_comparison_verdict_not_said_one_error(self):
+        """Final review: a speech-source comparison `verdict` that is not said was reported, then ALSO run through the
+        editorial checks (a second error and a bogus editorial line)."""
+        s = good_script()
+        s["scenes"][1] = scene("S02", "comparison", "كلمه10", first={"label": "كلمه11"}, second={"label": "كلمه13"},
+                               verdict="الافضل 100")
+        r, _ = self.compile(s)
+        self.assertFalse(r["ok"])
+        self.assertEqual(len([e for e in r["errors"] if "verdict" in e]), 1, r["errors"])
+        self.assertFalse(any(e["field"] == "verdict" for e in r["editorial_lines"]), r["editorial_lines"])
 
 
 if __name__ == "__main__":

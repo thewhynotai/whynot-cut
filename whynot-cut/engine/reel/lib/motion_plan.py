@@ -406,9 +406,11 @@ class _Compiler:
                         e["color"] = e["accent"]
                     els.append(e)
         if sc.get("verdict"):
-            v = sc["verdict"] if source_of(sc, "verdict") == "speech" and self.speech(sid, "verdict", sc["verdict"], pool) \
-                else self.editorial_text(sid, "verdict", sc["verdict"])
-            e = self.text_el(sid, 1, "comparison", "verdict", v, theme)
+            if source_of(sc, "verdict") == "speech":       # not said: that error only, never an editorial line too
+                v = sc["verdict"] if self.speech(sid, "verdict", sc["verdict"], pool) is not None else None
+            else:
+                v = self.editorial_text(sid, "verdict", sc["verdict"])
+            e = self.text_el(sid, 1, "comparison", "verdict", v, theme) if v else None
             if e:
                 els.append(e)
 
@@ -517,17 +519,19 @@ class _Compiler:
                 els.append(e)
 
     # ------------------------------------------------------------------ persistent layers
-    def captions(self, scenes: list[dict], mode: str, theme: str) -> dict | None:
-        if mode != "subtitles":
+    def captions(self, scenes: list[dict], modes: list[str], theme: str) -> dict | None:
+        """modes: per scene, "subtitles" or "off" (the scene's own `captions`, else the video's; spec §3.4)."""
+        if "subtitles" not in modes:
             return None
         from . import srt as srtlib
         f = self.paths.p("02_transcription/captions-short.srt")
         if not f.exists():
             self.warnings.append("captions requested but 02_transcription/captions-short.srt is missing")
             return None
-        # hidden wherever the scene already shows the spoken words (quotes, list items, timeline labels, speech text)
-        blocked = [(s["start_frame"], s["end_frame"]) for s in scenes
-                   if s["type"] in REPLAYS_SPEECH or s["type"] in ("list_steps", "timeline")
+        # hidden where captions are off and wherever the scene already shows the spoken words (quotes, list items,
+        # timeline labels, speech text)
+        blocked = [(s["start_frame"], s["end_frame"]) for s, m in zip(scenes, modes)
+                   if m != "subtitles" or s["type"] in REPLAYS_SPEECH or s["type"] in ("list_steps", "timeline")
                    or any(e.get("tokens") for e in s["elements"])]
         cues = []
         for c in srtlib.read_srt(f):
@@ -583,7 +587,7 @@ def compile_motion(paths, font_override: dict | None = None, write: bool = True)
     C = _Compiler(paths, font_override)
     C.write = write
     out_val = paths.p("01_analysis/motion-validation.json")
-    errs = check_fields(script)
+    errs = check_fields(script, C.cfg)
     if errs:
         return _finish(paths, C, script, None, errs)
     anchored, errs = anchor_scenes(script["scenes"], C.words, dict(C.cfg, total_ms=C.total_ms))
@@ -714,7 +718,9 @@ def _finish(paths, C: _Compiler, script: dict, scenes: list[dict] | None, early:
     if scenes is not None:
         duration = max(s["end_frame"] for s in scenes)
         g_theme = script.get("theme") or C.rm.get("theme", "dark")
-        caps = C.captions(scenes, script.get("captions") or C.rm.get("captions", "off"), g_theme)
+        video = _caption_mode(script.get("captions")) or _caption_mode(C.rm.get("captions", "off"))
+        by_id = {sc["id"]: sc for sc in script["scenes"]}
+        caps = C.captions(scenes, [_caption_mode(by_id[s["id"]].get("captions")) or video for s in scenes], g_theme)
         audio = _audio(C, scenes, script, duration)
         voice = audio.pop("voice_values")
         gcol = C.colors(g_theme, 64)
@@ -745,6 +751,11 @@ def _finish(paths, C: _Compiler, script: dict, scenes: list[dict] | None, early:
     if ok:
         set_status(paths, "ANALYZED", f"motion plan compiled ({len(plan['scenes'])} scenes)", "motion_plan", [md])
     return dict(val, plan=str(paths.p("01_analysis/motion-plan.json")) if plan else None, md=str(md))
+
+
+def _caption_mode(v: str | None) -> str | None:
+    """A script/recipe `captions` value (checked: on|subtitles|off) as "subtitles" | "off"; None when not set."""
+    return None if v is None else ("off" if v == "off" else "subtitles")
 
 
 def _dedupe(assets: list[dict]) -> list[dict]:

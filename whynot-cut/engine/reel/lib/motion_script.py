@@ -27,6 +27,8 @@ SCENE_TYPES: dict[str, dict] = {
     "outro": {"required": ["cta"], "speech": [], "editorial": ["cta"], "either": []},
 }
 REPLAYS_SPEECH = {"kinetic_quote", "quote_card"}     # shown word by word as spoken: the drop-ratio limit applies
+REVEALS = ("word", "line")
+CAPTIONS = ("on", "subtitles", "off")                 # scenes say on|off, recipes off|subtitles: "on" = "subtitles"
 QUOTES = "«»\"“”„"
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 _RUN = re.compile(r"\d+(?:[.,٬٫]\d+)*")
@@ -47,11 +49,19 @@ def source_of(scene: dict, field: str) -> str:
     return scene.get(key) or "speech"
 
 
-def check_fields(script: dict) -> list[str]:
-    errs = []
+def check_fields(script: dict, cfg: dict | None = None) -> list[str]:
+    """cfg: motion.json as the compiler sees it (a profile may add themes); the defaults when None."""
+    if cfg is None:
+        from .motion_config import motion_cfg
+        cfg = motion_cfg()
+    # a typo here would silently become a cut, the dark theme, no captions or a word reveal
+    allowed = {"transition_in": sorted(cfg.get("transition_ms") or {}), "theme": sorted(cfg.get("themes") or {}),
+               "captions": list(CAPTIONS), "reveal": list(REVEALS)}
+    errs = [f"motion-script.json: {k} {script[k]!r} is not one of {', '.join(allowed[k])}"
+            for k in ("theme", "captions") if script.get(k) is not None and script[k] not in allowed[k]]
     scenes = script.get("scenes") or []
     if not scenes:
-        return ["motion-script.json has no scenes"]
+        return errs + ["motion-script.json has no scenes"]
     beats = {b.get("id") for b in script.get("beats") or []}
     seen = set()
     for k, sc in enumerate(scenes):
@@ -69,6 +79,9 @@ def check_fields(script: dict) -> list[str]:
         missing = [f for f in spec["required"] if sc.get(f) in (None, "", [], {})]
         if missing:
             errs.append(f"{where} ({typ}): missing {', '.join(missing)}")
+        for f, vals in allowed.items():
+            if sc.get(f) is not None and sc[f] not in vals:
+                errs.append(f"{where}: {f} {sc[f]!r} is not one of {', '.join(vals)}")
         at = sc.get("at")
         if not at:
             errs.append(f"{where}: `at` is required (the first words spoken when the scene starts, or @start/@end)")
