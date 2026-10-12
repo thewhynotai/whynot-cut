@@ -6,11 +6,16 @@
 <h2 id="ch14-first">أول خطوة عند أي مشكلة</h2>
 
 <ol class="steps">
-<li>اطلب من Claude أن يفحص الجهاز. يشغّل الأمر <bdi dir="ltr"><code>reel doctor</code></bdi>، وهو فحص للقراءة فقط (من دون <bdi dir="ltr"><code>--fix</code></bdi>) لا يغيّر شيئًا، ويعرض قائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت (الفصل 2).</li>
+<li>اطلب من Claude أن يفحص الجهاز. يشغّل الأمر <bdi dir="ltr"><code>reel doctor</code></bdi>، وهو فحص للقراءة فقط (من دون <bdi dir="ltr"><code>--fix</code></bdi>) لا يغيّر شيئًا، ويعرض قائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت (<a href="#ch02-title">الفصل&nbsp;2</a>).</li>
 <li>لإصلاح المحرك أو لوحة Premiere، استخدم الأمر التالي. يصلح كل ما يخص WhyNot Cut، ويمكن تكراره بأمان. أغلق Premiere قبل تشغيله:
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:setup</code></bdi></div></li>
 <li>نفّذ أنت الإصلاحات المكتوب أنها لك، مثل تثبيت الخطوط أو تغيير إعداد في Adobe، ثم اطلب الفحص مرة أخرى.</li>
 </ol>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: نتيجة الفحص <bdi dir="ltr"><code>reel doctor</code></bdi> في المحادثة، وقائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت</span></div>
+<figcaption>نتيجة الفحص: كل إصلاح مكتوب بجانبه من يقوم به.</figcaption>
+</figure>
 
 <aside class="tip">
 <p>لا يجرّب Claude حلولًا عشوائية: إذا فشل الإصلاح مرتين يستعين بمساعد متخصص في تشخيص الجهاز، وبعد ثلاث محاولات فاشلة للمشكلة نفسها يتوقف ويشرح لك ما جرّبه وما عرفه.</p>
@@ -30,7 +35,7 @@
 <tr><td>لوحة WhyNot Cut Bridge لا تظهر في <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>.</td><td>كان Premiere مفتوحًا أثناء التثبيت، أو إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> غير مفعّل.</td><td>أغلق Premiere وافتحه. وإذا كان <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> غير مفعّل، ففعّله بنفسك بالأوامر التي يعطيك إياها Claude من الفحص (على Windows في PowerShell، لا في Git Bash)، ثم أعد فتح Premiere.</td></tr>
 <tr><td>فعّلت <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> لكن اللوحة لا تعمل.</td><td>الأمر نُفّذ في حساب مستخدم آخر، أو في نافذة خاطئة.</td><td>نفّذ الأمر في حسابك أنت على الجهاز، واطلب من Claude أمر التحقق من القيمة، ثم أعد فتح Premiere.</td></tr>
 <tr><td>Claude يقول إن Premiere لا يستجيب.</td><td>اللوحة مغلقة، أو في Premiere نافذة حوار مفتوحة.</td><td>اجعل نافذة Premiere في المقدمة وأغلق أي نافذة حوار، ثم افتح <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions&nbsp;› WhyNot&nbsp;Cut&nbsp;Bridge</bdi>.</td></tr>
-<tr><td>التفريغ النصي بطيء جدًا.</td><td>يعمل على المعالج (CPU) فقط.</td><td>مع كارت NVIDIA: وافق على تنزيل مكتبة التسريع حين يعرضها Claude (نحو 520 MB). بدونه: غيّر نموذج التفريغ إلى <bdi dir="ltr"><code>large-v3-turbo</code></bdi> (الفصل 13).</td></tr>
+<tr><td>التفريغ النصي بطيء جدًا.</td><td>يعمل على المعالج (CPU) فقط.</td><td>مع كارت NVIDIA: وافق على تنزيل مكتبة التسريع حين يعرضها Claude (نحو 520 MB). بدونه: غيّر نموذج التفريغ إلى <bdi dir="ltr"><code>large-v3-turbo</code></bdi> (<a href="#ch13-title">الفصل&nbsp;13</a>).</td></tr>
 <tr><td>توقف تنزيل نموذج Whisper في منتصفه.</td><td>انقطع الاتصال أو أُغلق الجهاز.</td><td>اطلب من Claude إكمال التنزيل؛ الفحص يُظهر التنزيل الناقص، والأمر نفسه يكمله.</td></tr>
 <tr><td>التفريغ يفشل لملفات في OneDrive أو iCloud أو Dropbox.</td><td>الملفات محفوظة على السحابة فقط، وليست على الجهاز.</td><td>انتظر حتى ينتهي تنزيل الملفات ونسخها، والأفضل أن يكون فولدر العملاء خارج الفولدرات المتزامنة.</td></tr>
 <tr><td>خطوط العميل لا تظهر في Premiere، أو تظهر رسالة <bdi dir="ltr">Fonts not installed</bdi>.</td><td>الخطوط موجودة في <bdi dir="ltr"><code>assets/Fonts</code></bdi> فقط، وليست مثبَّتة على الجهاز.</td><td>ثبّتها أنت: على Windows زر الماوس الأيمن ثم Install، وعلى macOS نقرتان ثم Install Font. فيديو المعاينة يستخدم ملفات الخطوط مباشرة، لكن Premiere يحتاج إليها مثبَّتة.</td></tr>

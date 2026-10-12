@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Build the Arabic WhyNot Cut user guide PDF.
 
-    ~/.whynot-cut/venv/Scripts/python.exe guide-ar/build.py [--out PATH]
+    ~/.whynot-cut/venv/Scripts/python.exe guide-ar/build.py [--out PATH] [--release]
 
 Pipeline: assemble (index.html + chapters/*.html, TOC from h1.ch-title / h2[id])
--> lint (bidi isolation, digits, anchors, ids, forbidden words) -> print with
-headless Edge/Chrome -> read the PDF outline -> fill the TOC page numbers ->
-print again -> check TOC numbers == outline pages -> copy.
+-> lint (bidi isolation, digits, anchors, ids, images, forbidden words) -> print
+with headless Edge/Chrome -> rebuild the outline + write the PDF metadata (title,
+author, open with bookmarks, source hash) -> read the outline -> fill the TOC page
+numbers -> print again -> check TOC numbers == outline pages -> copy.
+
+The default build is a DRAFT (placeholders allowed; the PDF subject says «مسودة»).
+--release (or WNC_RELEASE=1) also fails on any .todo / data-phase, any .shot-frame
+without an <img>, and draft-only phrases outside a .todo. The committed PDF of a
+release must come from a --release build.
 
 Outputs: whynot-cut/docs/WhyNot-Cut-Guide-AR.pdf and dist/WhyNot-Cut-Guide-AR.pdf
 (or only --out PATH), plus guide-ar/.build/{guide.html,test.pdf,toc.json} for the
@@ -18,6 +24,7 @@ lazily: run with the WhyNot Cut engine venv python, which has it.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html as htmllib
 import json
 import os
@@ -34,7 +41,30 @@ REPO = ROOT.parent
 PDF_NAME = "WhyNot-Cut-Guide-AR.pdf"
 DEFAULT_OUTPUTS = (REPO / "whynot-cut" / "docs" / PDF_NAME, REPO / "dist" / PDF_NAME)
 MAX_PASSES = 4
-PRINT_TIMEOUT = int(os.environ.get("WNC_PRINT_TIMEOUT", "300"))  # seconds per browser print
+DEFAULT_PRINT_TIMEOUT = 300
+PDF_TITLE = "WhyNot Cut — دليل الاستخدام"
+PDF_AUTHOR = "The Why Not AI"
+PDF_SUBJECT = "دليل استخدام WhyNot Cut · Powered by Claude"
+PDF_SUBJECT_DRAFT = PDF_SUBJECT + " — مسودة (draft)"
+HASH_KEY = "/WNC_SourceHash"
+
+
+def _print_timeout(raw: str | None) -> int:
+    """WNC_PRINT_TIMEOUT in seconds; anything that is not a positive whole number falls back to the default."""
+    if raw is None or not raw.strip():
+        return DEFAULT_PRINT_TIMEOUT
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        value = 0
+    if value <= 0:
+        sys.stderr.write(f"warning: WNC_PRINT_TIMEOUT={raw!r} is not a positive number of seconds; "
+                         f"using {DEFAULT_PRINT_TIMEOUT}\n")
+        return DEFAULT_PRINT_TIMEOUT
+    return value
+
+
+PRINT_TIMEOUT = _print_timeout(os.environ.get("WNC_PRINT_TIMEOUT"))  # seconds per browser print
 
 VENV_HINT = (
     "pypdf is not installed for this Python. Run the build with the WhyNot Cut engine venv:\n"
@@ -247,18 +277,39 @@ _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "me
          "param", "source", "track", "wbr"}
 
 
+# Phrases that only make sense in a draft (a placeholder or a "later" promise). A
+# release build fails on them outside a .todo (inside one, the .todo itself fails).
+# Matched on the text with Arabic diacritics removed, so «المخطَّط» = «المخطط».
+DRAFT_PHRASES = [(label, re.compile(p)) for label, p in (
+    ("قيد الإعداد", r"قيد الإعداد"),
+    ("قيد البناء", r"قيد البناء"),
+    ("المخطَّط", r"المخطط"),
+    ("حتى ذلك الحين", r"حتى ذلك الحين"),
+    ("النسخة الحالية", r"النسخة الحالية"),
+    ("مرحلة N", r"مرحلة \d"),
+)]
+_DIACRITICS = re.compile("[ً-ْٰ]")
+_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
+
+
 class _Linter(HTMLParser):
-    def __init__(self) -> None:
+    def __init__(self, root: Path, release: bool) -> None:
         super().__init__(convert_charrefs=True)
-        # each frame: (tag, ltr, in_bdi, in_ch16, skip)
-        self.stack: list[tuple[str, bool, bool, bool, bool]] = [("#root", False, False, False, False)]
+        self.root = Path(root)
+        self.release = release
+        # each frame: (tag, ltr, in_bdi, in_ch16, skip, in_todo)
+        self.stack: list[tuple[str, bool, bool, bool, bool, bool]] = [("#root", False, False, False, False, False)]
         self.ids: dict[str, int] = {}
         self.hrefs: list[str] = []
         self.problems: list[str] = []
+        self.images: list[str] = []  # src of every <img>, in document order
+        # open .shot-frame elements: [stack depth, has an <img>, text seen inside]
+        self.frames: list[list] = []
 
     def _frame(self, tag: str, attrs: list[tuple[str, str | None]]):
         a = {k.lower(): (v or "") for k, v in attrs}
-        _, ltr, bdi, ch16, skip = self.stack[-1]
+        classes = a.get("class", "").split()
+        _, ltr, bdi, ch16, skip, todo = self.stack[-1]
         if "dir" in a:
             ltr = a["dir"].lower() == "ltr"
         if tag == "bdi":
@@ -271,12 +322,40 @@ class _Linter(HTMLParser):
             self.ids[a["id"]] = self.ids.get(a["id"], 0) + 1
         if a.get("href", "").startswith("#"):
             self.hrefs.append(a["href"][1:])
-        return (tag, ltr, bdi, ch16, skip)
+        if "todo" in classes:
+            todo = True
+            if not a.get("data-phase", "").strip():
+                self.problems.append('.todo without data-phase — name the phase that finalises it: '
+                                     '<aside class="todo" data-phase="N">')
+        if self.release and ("todo" in classes or "data-phase" in a):
+            self.problems.append(f'release: placeholder left (<{tag} class="{a.get("class", "")}" '
+                                 f'data-phase="{a.get("data-phase", "")}">) — write the final text or remove it')
+        if tag == "img":
+            self._image(a)
+            for f in self.frames:
+                f[1] = True
+        return (tag, ltr, bdi, ch16, skip, todo), "shot-frame" in classes
+
+    def _image(self, a: dict[str, str]) -> None:
+        raw = self.get_starttag_text() or ""
+        src = a.get("src", "")
+        if not re.search(r'\ssrc="[^"]+"', raw):
+            self.problems.append(f'<img> src must be a non-empty double-quoted path ( src="img/…" ): {raw[:100]}')
+        if not src:
+            return
+        self.images.append(src)
+        if _SCHEME.match(src) or src.startswith(("/", "\\")):
+            self.problems.append(f'<img src="{src}"> must be a relative path to a file under guide-ar/ '
+                                 "(no URL, data: or absolute path)")
+        elif not (self.root / src).is_file():
+            self.problems.append(f'<img src="{src}">: file not found (guide-ar/{src})')
 
     def handle_starttag(self, tag, attrs):
-        frame = self._frame(tag, attrs)
+        frame, is_shot = self._frame(tag, attrs)
         if tag not in _VOID:
             self.stack.append(frame)
+            if is_shot:
+                self.frames.append([len(self.stack), False, []])
 
     def handle_startendtag(self, tag, attrs):
         self._frame(tag, attrs)
@@ -285,12 +364,26 @@ class _Linter(HTMLParser):
         for i in range(len(self.stack) - 1, 0, -1):
             if self.stack[i][0] == tag:
                 del self.stack[i:]
-                return
+                break
+        while self.frames and self.frames[-1][0] > len(self.stack):
+            self._close_shot(self.frames.pop())
+
+    def _close_shot(self, frame: list) -> None:
+        if self.release and not frame[1]:
+            text = re.sub(r"\s+", " ", " ".join(frame[2])).strip()[:70]
+            self.problems.append(f"release: screenshot slot without an <img>: «{text}»")
+
+    def close(self):
+        super().close()
+        while self.frames:
+            self._close_shot(self.frames.pop())
 
     def handle_data(self, data):
-        _, ltr, bdi, ch16, skip = self.stack[-1]
+        _, ltr, bdi, ch16, skip, todo = self.stack[-1]
         if skip or not data.strip():
             return
+        for f in self.frames:
+            f[2].append(data)
         snippet = re.sub(r"\s+", " ", data.strip())[:80]
         if not ltr:
             for m in _LATIN_RUN.finditer(data):
@@ -303,11 +396,26 @@ class _Linter(HTMLParser):
             self.problems.append(f"Arabic-Indic digit inside <bdi> (use 0-9): «{snippet}»")
         if not ch16 and _GATE.search(data):
             self.problems.append(f"internal gate name outside the glossary chapter (#ch16): «{snippet}»")
+        if self.release and not todo:
+            bare = _DIACRITICS.sub("", data)
+            for label, pattern in DRAFT_PHRASES:
+                if pattern.search(bare):
+                    self.problems.append(f"release: draft phrase «{label}» outside a .todo: «{snippet}»")
 
 
-def lint(html: str) -> list[str]:
-    """Problems that must be fixed before printing (empty list = clean)."""
-    p = _Linter()
+def is_release(flag: bool = False) -> bool:
+    """--release, or WNC_RELEASE set to 1/true/yes."""
+    return flag or os.environ.get("WNC_RELEASE", "").strip().lower() in ("1", "true", "yes")
+
+
+def lint(html: str, release: bool = False, root: Path | None = None) -> list[str]:
+    """Problems that must be fixed before printing (empty list = clean).
+
+    `root` is the folder <img src> paths are relative to (default: guide-ar/).
+    `release` adds the release-only checks (placeholders, empty screenshot slots,
+    draft phrases).
+    """
+    p = _Linter(ROOT if root is None else root, release)
     p.feed(html)
     p.close()
     problems = list(p.problems)
@@ -363,13 +471,15 @@ def expected_numbers(html: str, pages: dict[str, int]) -> dict[str, int | None]:
 
 
 # ---------------------------------------------------------------- browser / PDF
-def find_browser() -> Path:
-    """Edge, then Chrome. WNC_BROWSER (a path) wins."""
-    env = os.environ.get("WNC_BROWSER")
-    if env:
-        if Path(env).exists():
-            return Path(env)
-        raise SystemExit(f"WNC_BROWSER points to a missing file: {env}")
+_MAC_APPS = (
+    "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "Google Chrome.app/Contents/MacOS/Google Chrome",
+    "Chromium.app/Contents/MacOS/Chromium",
+)
+
+
+def browser_candidates() -> list[Path]:
+    """Install locations checked in order: Windows (Edge, Chrome), then macOS /Applications and ~/Applications."""
     candidates = []
     for base in (os.environ.get("PROGRAMFILES(X86)"), os.environ.get("PROGRAMFILES"), os.environ.get("LOCALAPPDATA")):
         if base:
@@ -377,12 +487,23 @@ def find_browser() -> Path:
     for base in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)"), os.environ.get("LOCALAPPDATA")):
         if base:
             candidates.append(Path(base) / "Google/Chrome/Application/chrome.exe")
-    candidates += [
-        Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-        Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
-    ]
-    for c in candidates:
+    for app in _MAC_APPS:
+        candidates.append(Path("/Applications") / app)
+        try:
+            candidates.append(Path.home() / "Applications" / app)  # per-user install
+        except RuntimeError:  # no home directory
+            pass
+    return candidates
+
+
+def find_browser() -> Path:
+    """Edge, then Chrome. WNC_BROWSER (a path) wins."""
+    env = os.environ.get("WNC_BROWSER")
+    if env:
+        if Path(env).exists():
+            return Path(env)
+        raise SystemExit(f"WNC_BROWSER points to a missing file: {env}")
+    for c in browser_candidates():
         if c.exists():
             return c
     for name in ("msedge", "microsoft-edge", "microsoft-edge-stable", "google-chrome", "google-chrome-stable",
@@ -512,13 +633,24 @@ def match_outline(marks: list[dict], heads: list[tuple[int, str]], page_heights:
     return out
 
 
-def fix_outline(pdf_path: Path, html: str) -> int:
+def pdf_metadata(source_digest: str | None = None, release: bool = False) -> dict[str, str]:
+    """Document info written into the guide PDF (the subject marks a draft build)."""
+    meta = {"/Title": PDF_TITLE, "/Author": PDF_AUTHOR,
+            "/Subject": PDF_SUBJECT if release else PDF_SUBJECT_DRAFT}
+    if source_digest:
+        meta[HASH_KEY] = source_digest
+    return meta
+
+
+def fix_outline(pdf_path: Path, html: str, metadata: dict[str, str] | None = None) -> int:
     """Rebuild the outline Chrome generated: logical heading titles, Chrome's positions.
 
     Chrome's --generate-pdf-document-outline gives the right positions but
     unreliable titles (see match_outline). Every bookmark is re-added with its
-    heading's logical text, nested by heading level. Returns the number of
-    bookmarks; prints a note for each title or page it had to repair.
+    heading's logical text, nested by heading level. The PDF opens with the
+    bookmarks panel (/UseOutlines); `metadata` (see pdf_metadata) is merged into
+    the document info. Returns the number of bookmarks; prints a note for each
+    title or page it had to repair.
     """
     import io
 
@@ -564,6 +696,9 @@ def fix_outline(pdf_path: Path, html: str) -> int:
         parents[level] = writer.add_outline_item(e["title"], e["page"], parent=parent, fit=fit)
         for lv in [lv for lv in parents if lv > level]:
             del parents[lv]
+    writer.page_mode = "/UseOutlines"
+    if metadata:
+        writer.add_metadata(metadata)
     with open(pdf_path, "wb") as fh:
         writer.write(fh)
     return len(entries)
@@ -573,22 +708,54 @@ def page_count(pdf_path: Path) -> int:
     return len(_pypdf().PdfReader(str(pdf_path)).pages)
 
 
-_RELATIVE_URL = re.compile(r'(\s(?:src|href)=")(?!#|[a-zA-Z][a-zA-Z0-9+.-]*:|/)')
+_RELATIVE_URL = re.compile(r"""(\s(?:src|href)\s*=\s*(["']))(?!#|[a-zA-Z][a-zA-Z0-9+.-]*:|/|\\|["'])""",
+                           re.I)
 
 
 def relocate(html: str, prefix: str = "../") -> str:
-    """Prefix relative src/href so the document works from guide-ar/.build/ (anchors untouched)."""
+    """Prefix relative src/href (stylesheet, logo, screenshots) so the document works from
+    guide-ar/.build/; anchors, URLs and absolute paths are untouched."""
     return _RELATIVE_URL.sub(lambda m: m.group(1) + prefix, html)
+
+
+_IMG_SRC = re.compile(r"""<img\b[^>]*?\ssrc\s*=\s*["']([^"']+)["']""", re.I)
+
+
+def source_hash(root: Path = ROOT, html: str | None = None) -> str:
+    """SHA-256 over what the PDF is printed from: the assembled HTML, styles.css and every local <img>.
+
+    Written into the PDF (HASH_KEY) so a test can tell when the committed PDF is
+    older than its sources.
+    """
+    root = Path(root)
+    html = assemble(root) if html is None else html
+    h = hashlib.sha256()
+    h.update(html.replace("\r\n", "\n").encode("utf-8"))
+    h.update(b"\0styles.css\0")
+    h.update((root / "styles.css").read_bytes().replace(b"\r\n", b"\n"))
+    for src in sorted(set(_IMG_SRC.findall(html))):
+        path = root / src
+        if not _SCHEME.match(src) and path.is_file():
+            data = path.read_bytes()
+            if path.suffix.lower() == ".svg":  # text: same hash with LF or CRLF checkouts
+                data = data.replace(b"\r\n", b"\n")
+            h.update(b"\0" + src.encode("utf-8") + b"\0")
+            h.update(data)
+    return h.hexdigest()
 
 
 # ---------------------------------------------------------------- main
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Build the Arabic WhyNot Cut guide PDF.")
     ap.add_argument("--out", type=Path, help="write the PDF only here (default: whynot-cut/docs/ and dist/)")
+    ap.add_argument("--release", action="store_true",
+                    help="release build: also fail on placeholders (.todo), empty screenshot slots and draft "
+                         "phrases (same as WNC_RELEASE=1)")
     args = ap.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
+    release = is_release(args.release)
     _pypdf()  # fail early with the venv hint
 
     # a failed build must never leave last run's artefacts for the PDF tests to pass on
@@ -597,13 +764,14 @@ def main(argv: list[str] | None = None) -> int:
         (build_dir / stale).unlink(missing_ok=True)
 
     html = assemble(ROOT)
-    problems = lint(html)
+    problems = lint(html, release=release)
     if problems:
-        print(f"LINT: {len(problems)} problem(s):")
+        print(f"LINT{' (release)' if release else ''}: {len(problems)} problem(s):")
         for p in problems:
             print("  -", p)
         return 1
-    print(f"lint: clean ({len(toc_headings(html))} TOC entries)")
+    print(f"lint{' (release)' if release else ' (draft)'}: clean ({len(toc_headings(html))} TOC entries)")
+    meta = pdf_metadata(source_hash(ROOT, html), release)
 
     build_dir.mkdir(exist_ok=True)
     guide_html = build_dir / "guide.html"
@@ -620,7 +788,7 @@ def main(argv: list[str] | None = None) -> int:
             print("ERROR: the printed PDF has no outline (bookmarks); the browser ignored "
                   "--generate-pdf-document-outline. Use a newer Edge/Chrome or set WNC_BROWSER.")
             return 1
-        fix_outline(pass_pdf, current)
+        fix_outline(pass_pdf, current, meta)
         final_pages = outline_pages(pass_pdf)
         want = expected_numbers(current, final_pages)
         missing = [hid for hid, n in want.items() if n is None]
@@ -650,7 +818,7 @@ def main(argv: list[str] | None = None) -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(pass_pdf, out)
         print(f"wrote {out}")
-    print(f"pages: {page_count(pass_pdf)}")
+    print(f"pages: {page_count(pass_pdf)} ({'release' if release else 'draft'}; source hash {meta[HASH_KEY][:12]}…)")
     return 0
 
 

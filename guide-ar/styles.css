@@ -23,12 +23,26 @@
      <aside class="warn"><p>…</p></aside>           تنبيه  (orchid rule, right)
      <aside class="todo" data-phase="11"><p>…</p></aside>  placeholder that names
                                                      the phase that finalises it
+                                                     (data-phase is required:
+                                                     the lint fails without it;
+                                                     --release fails on any)
      <figure class="shot"><div class="shot-frame">لقطة شاشة: فولدر
          <bdi dir="ltr"><code>example-clinic</code></bdi> بعد الإنشاء</div>
        <figcaption>…</figcaption></figure>           screenshot placeholder,
                                                      labelled example-clinic.
          The frame text is plain inline text (with <bdi>/<code> as needed);
          no wrapper is required (a <span> around it is harmless).
+     FILLED screenshot slot (replace the frame text with the image; keep the
+     caption):
+       <figure class="shot"><div class="shot-frame"><img src="img/chNN-slug.png"
+           alt="…"></div><figcaption>…</figcaption></figure>
+       Capture guide: PNG, at least 1600 px wide, cropped to the part the
+       caption names; only the fictional example-clinic («عيادة مثال»,
+       «د. سامبل إكزامبل») — no real client names, faces, footage or paths.
+       File name img/chNN-slug.png (NN = chapter). The src must be a double-
+       quoted path relative to guide-ar/ and the file must exist: the build
+       lint fails otherwise. A release build (build.py --release) fails on any
+       slot still without an <img>.
      <ol class="steps"><li>…</li></ol>              violet numbered circles
      <div class="cmd"><bdi dir="ltr"><code>reel doctor</code></bdi></div>
                                                      LTR command block; wraps
@@ -213,9 +227,11 @@ code {
   color: var(--heading);
   background: var(--tip-bg);
   border-radius: 3px;
-  padding: 0.05em 0.35em;
+  padding: 0.05em 0.2em;     /* narrow sides: a chip before «،» or «.» must not read as a space */
   white-space: nowrap;
 }
+/* on the violet tip background the default chip colour disappears */
+.tip code { background: #FFFFFF; }
 
 /* ---------- chapters ---------- */
 section.chapter {
@@ -312,7 +328,23 @@ figure.shot {
   border-radius: 3pt;
   padding: 0.1em 0.5em;
 }
-.shot-frame img { max-width: 100%; display: block; margin: 0 auto; }
+/* a FILLED slot (real screenshot): the frame shrinks to the image, solid thin
+   border, no dashed placeholder look and no "example-clinic" label */
+.shot-frame:has(img) {
+  height: auto;
+  padding: 0;
+  border: 0.75pt solid var(--line);
+  background: #FFFFFF;
+}
+.shot-frame:has(img)::before { content: none; }
+.shot-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: 150mm;
+  width: auto;
+  height: auto;
+  margin: 0 auto;
+}
 figure.shot figcaption {
   display: table-caption;
   caption-side: bottom;

@@ -156,7 +156,152 @@ class LintTests(unittest.TestCase):
         self.assertEqual(len(build.lint(_wrap("<p>بعد Gate 1 مباشرة</p>"))), 1)
         self.assertEqual(
             build.lint(_wrap('<section id="ch16"><p>في السجلات: Gate 1 = الموافقة</p></section>')), [])
-        self.assertEqual(len(build.lint(_wrap('<img src="img/logo-dark.svg" alt="">'))), 1)
+        # logo-dark.svg does not exist either: 2 problems (dark logo + missing file)
+        dark = build.lint(_wrap('<img src="img/logo-dark.svg" alt="">'))
+        self.assertTrue(any("logo-dark" in p for p in dark), dark)
+
+    def test_lint_todo_needs_data_phase(self):
+        self.assertEqual(len(build.lint(_wrap('<aside class="todo"><p>نص</p></aside>'))), 1)
+        self.assertEqual(len(build.lint(_wrap('<aside class="todo" data-phase=""><p>نص</p></aside>'))), 1)
+        self.assertEqual(build.lint(_wrap('<aside class="todo" data-phase="7"><p>نص</p></aside>')), [])
+
+
+SHOT_IMG = ('<figure class="shot"><div class="shot-frame"><img src="{src}" alt="لقطة"></div>'
+            "<figcaption>تعليق</figcaption></figure>")
+
+
+class ImageTests(unittest.TestCase):
+    def test_missing_image_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            problems = build.lint(_wrap(SHOT_IMG.format(src="img/ch99-missing.png")), root=Path(tmp))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("file not found", problems[0])
+
+    def test_existing_image_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "img").mkdir()
+            (Path(tmp) / "img" / "ch99-ok.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+            html = _wrap(SHOT_IMG.format(src="img/ch99-ok.png"))
+            self.assertEqual(build.lint(html, root=Path(tmp)), [])
+            # a filled slot also passes the release checks
+            self.assertEqual(build.lint(html, release=True, root=Path(tmp)), [])
+
+    def test_image_src_must_be_double_quoted_local_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "img").mkdir()
+            (Path(tmp) / "img" / "a.png").write_bytes(b"x")
+            root = Path(tmp)
+            self.assertEqual(len(build.lint(_wrap("<img src='img/a.png' alt=''>"), root=root)), 1)
+            self.assertEqual(len(build.lint(_wrap("<img src=img/a.png alt=''>"), root=root)), 1)
+            self.assertEqual(len(build.lint(_wrap('<img alt="">'), root=root)), 1)
+            self.assertEqual(len(build.lint(_wrap('<img src="https://example.com/a.png" alt="">'), root=root)), 1)
+
+    def test_shell_logo_resolves(self):
+        """The real index.html images exist relative to guide-ar/ (default root)."""
+        shell = (GUIDE / "index.html").read_text(encoding="utf-8")
+        self.assertEqual([p for p in build.lint(shell) if "img" in p], [])
+
+    def test_relocate_prefixes_image_src(self):
+        html = ('<link rel="stylesheet" href="styles.css"><img src="img/ch06-plan.png" alt="">'
+                "<img src='img/x.png'><a href=\"#ch06-title\">6</a><a href=\"https://thewhynot.ai\">x</a>")
+        out = build.relocate(html)
+        self.assertIn('href="../styles.css"', out)
+        self.assertIn('src="../img/ch06-plan.png"', out)
+        self.assertIn("src='../img/x.png'", out)
+        self.assertIn('href="#ch06-title"', out)
+        self.assertIn('href="https://thewhynot.ai"', out)
+
+
+DRAFT_DOC = _wrap(
+    '<section id="ch02"><h2 id="a">التحديث</h2>'
+    '<aside class="todo" data-phase="7"><p>المخطَّط: قيد البناء.</p></aside>'
+    '<p>حتى ذلك الحين يعمل كل شيء من المحادثة.</p>'
+    '<figure class="shot"><div class="shot-frame"><span>لقطة شاشة: فولدر العميل</span></div>'
+    "<figcaption>تعليق</figcaption></figure></section>")
+
+
+class ReleaseTests(unittest.TestCase):
+    def test_draft_fixture_fails_only_under_release(self):
+        self.assertEqual(build.lint(DRAFT_DOC), [], "the default (draft) build accepts placeholders")
+        problems = build.lint(DRAFT_DOC, release=True)
+        text = "\n".join(problems)
+        self.assertIn("placeholder left", text)                # the .todo / data-phase
+        self.assertIn("screenshot slot without an <img>", text)
+        self.assertIn("حتى ذلك الحين", text)                   # draft phrase outside the .todo
+        self.assertNotIn("قيد البناء", text, "phrases inside a .todo are covered by the .todo problem")
+        self.assertEqual(len(problems), 3, problems)
+
+    def test_draft_phrases_ignore_diacritics_and_need_a_digit_for_phase(self):
+        self.assertEqual(len(build.lint(_wrap("<p>الأقسام المخططة</p>"), release=True)), 1)
+        self.assertEqual(len(build.lint(_wrap("<p>يكتمل في مرحلة 7</p>"), release=True)), 1)
+        self.assertEqual(build.lint(_wrap("<p>كل مرحلة لها ملف</p>"), release=True), [])
+
+    def test_release_flag_and_env(self):
+        old = os.environ.pop("WNC_RELEASE", None)
+        try:
+            self.assertFalse(build.is_release())
+            self.assertTrue(build.is_release(True))
+            os.environ["WNC_RELEASE"] = "1"
+            self.assertTrue(build.is_release())
+            os.environ["WNC_RELEASE"] = "0"
+            self.assertFalse(build.is_release())
+        finally:
+            os.environ.pop("WNC_RELEASE", None)
+            if old is not None:
+                os.environ["WNC_RELEASE"] = old
+
+    def test_main_release_exits_1_on_draft_lint(self):
+        """--release stops at the lint (no browser needed) when a placeholder is left."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "chapters").mkdir()
+            (root / "index.html").write_text(SHELL, encoding="utf-8")
+            (root / "chapters" / "01-intro.html").write_text(
+                CH1.replace("<p>نص</p>", '<aside class="todo" data-phase="7"><p>نص</p></aside>'),
+                encoding="utf-8")
+            old_root = build.ROOT
+            build.ROOT = root
+            out = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(build.main(["--release", "--out", str(root / "x.pdf")]), 1)
+            finally:
+                build.ROOT = old_root
+            self.assertIn("LINT (release)", out.getvalue())
+            self.assertFalse((root / "x.pdf").exists())
+
+
+class EnvTests(unittest.TestCase):
+    def test_print_timeout_falls_back_on_bad_values(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(build._print_timeout("abc"), 300)
+            self.assertEqual(build._print_timeout("-5"), 300)
+        self.assertIn("WNC_PRINT_TIMEOUT", err.getvalue())
+        self.assertEqual(build._print_timeout(None), 300)
+        self.assertEqual(build._print_timeout(" 45 "), 45)
+
+    def test_module_imports_with_non_numeric_timeout(self):
+        old = os.environ.get("WNC_PRINT_TIMEOUT")
+        os.environ["WNC_PRINT_TIMEOUT"] = "five minutes"
+        try:
+            spec = importlib.util.spec_from_file_location("guide_build_timeout", GUIDE / "build.py")
+            mod = importlib.util.module_from_spec(spec)
+            with contextlib.redirect_stderr(io.StringIO()):
+                spec.loader.exec_module(mod)  # must not raise
+            self.assertEqual(mod.PRINT_TIMEOUT, 300)
+        finally:
+            if old is None:
+                os.environ.pop("WNC_PRINT_TIMEOUT", None)
+            else:
+                os.environ["WNC_PRINT_TIMEOUT"] = old
+
+    def test_browser_candidates_include_per_user_mac_apps(self):
+        found = [str(p) for p in build.browser_candidates()]
+        home_apps = Path.home() / "Applications"
+        self.assertIn(str(home_apps / "Google Chrome.app/Contents/MacOS/Google Chrome"), found)
+        self.assertIn(str(home_apps / "Microsoft Edge.app/Contents/MacOS/Microsoft Edge"), found)
+        self.assertIn(str(Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")), found)
 
 
 class HeadingTests(unittest.TestCase):
@@ -226,10 +371,36 @@ class OutlineMatchTests(unittest.TestCase):
                 w.write(fh)
             html = _wrap("<h1 class='ch-title' id='a'>1 · مقدمة</h1><h2 id='b'>أهم الخطوات</h2><h2 id='c'>إزاي تبدأ</h2>")
             notes = io.StringIO()
+            meta = build.pdf_metadata("ab" * 32, release=False)
             with contextlib.redirect_stdout(notes):
-                self.assertEqual(build.fix_outline(pdf, html), 3)
+                self.assertEqual(build.fix_outline(pdf, html, meta), 3)
             self.assertIn("next page", notes.getvalue())
             self.assertEqual(build.outline_pages(pdf), {"1 · مقدمة": 1, "أهم الخطوات": 2, "إزاي تبدأ": 3})
+            r = pypdf.PdfReader(str(pdf))
+            self.assertEqual(r.trailer["/Root"]["/PageMode"], "/UseOutlines")
+            self.assertEqual(r.metadata["/Author"], "The Why Not AI")
+            self.assertEqual(r.metadata["/Title"], "WhyNot Cut — دليل الاستخدام")
+            self.assertIn("مسودة", r.metadata["/Subject"])
+            self.assertEqual(r.metadata[build.HASH_KEY], "ab" * 32)
+        self.assertNotIn("مسودة", build.pdf_metadata(None, release=True)["/Subject"])
+
+    def test_source_hash_tracks_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "chapters").mkdir()
+            (root / "img").mkdir()
+            (root / "index.html").write_text(SHELL, encoding="utf-8")
+            (root / "styles.css").write_text("body{}", encoding="utf-8")
+            (root / "chapters" / "01-intro.html").write_text(
+                CH1.replace("<p>نص</p>", '<p><img src="img/a.png" alt=""></p>'), encoding="utf-8")
+            (root / "img" / "a.png").write_bytes(b"one")
+            first = build.source_hash(root)
+            self.assertEqual(build.source_hash(root), first, "deterministic")
+            (root / "img" / "a.png").write_bytes(b"two")
+            second = build.source_hash(root)
+            self.assertNotEqual(second, first, "a changed screenshot changes the hash")
+            (root / "styles.css").write_text("body{color:red}", encoding="utf-8")
+            self.assertNotEqual(build.source_hash(root), second, "a changed stylesheet changes the hash")
 
 
 class CmdAndShotTests(unittest.TestCase):
@@ -270,6 +441,16 @@ class CmdAndShotTests(unittest.TestCase):
         self.assertRegex(css, r"h2, h3, h4, \.lead-in \{ break-after: avoid;")
         self.assertRegex(self._rule(".cmd code"), r"overflow-wrap:\s*normal")
         self.assertRegex(self._rule(".cmd .nw"), r"white-space:\s*nowrap")
+
+    def test_css_filled_shot_and_tip_code(self):
+        filled = self._rule(".shot-frame:has(img)")
+        self.assertRegex(filled, r"height:\s*auto")
+        self.assertRegex(filled, r"padding:\s*0")
+        self.assertRegex(self._rule(".shot-frame:has(img)::before"), r"content:\s*none")
+        img = self._rule(".shot-frame img")
+        self.assertRegex(img, r"max-width:\s*100%")
+        self.assertRegex(img, r"max-height:\s*150mm")
+        self.assertRegex(self._rule(".tip code"), r"background:\s*#FFFFFF")
 
 
 class PrintTests(unittest.TestCase):
@@ -421,6 +602,13 @@ class PdfTests(unittest.TestCase):
             self.assertEqual(printed, e["page"], f"#{e['id']}: printed {printed}, outline {e['page']}")
             self.assertEqual(target, e["page"], f"#{e['id']}: link goes to {target}, printed {printed}")
 
+    def test_metadata_and_page_mode(self):
+        self.assertEqual(self.reader.trailer["/Root"].get("/PageMode"), "/UseOutlines")
+        meta = self.reader.metadata
+        self.assertEqual(meta.get("/Author"), "The Why Not AI")
+        self.assertEqual(meta.get("/Title"), "WhyNot Cut — دليل الاستخدام")
+        self.assertRegex(str(meta.get(build.HASH_KEY, "")), r"^[0-9a-f]{64}$")
+
     def test_outline_has_all_chapters(self):
         outline = build.outline_pages(TEST_PDF)
         for path in sorted((GUIDE / "chapters").glob("*.html")):
@@ -428,6 +616,26 @@ class PdfTests(unittest.TestCase):
             self.assertEqual(len(h1), 1, f"{path.name} needs exactly one h1.ch-title with an id")
             title = build.plain_text(h1[0])
             self.assertIn(title, outline, f"{path.name}: «{title}» is not a PDF bookmark")
+
+
+COMMITTED_PDF = GUIDE.parent / "whynot-cut" / "docs" / "WhyNot-Cut-Guide-AR.pdf"
+
+
+class CommittedPdfTests(unittest.TestCase):
+    def test_committed_pdf_matches_sources(self):
+        """The published PDF must be rebuilt after any change to the chapters, shell, stylesheet or screenshots."""
+        if not COMMITTED_PDF.exists():
+            self.skipTest(f"{COMMITTED_PDF} is absent (nothing published yet)")
+        try:
+            import pypdf
+        except ImportError:
+            self.skipTest("pypdf missing: run with the WhyNot Cut engine venv python")
+        meta = pypdf.PdfReader(str(COMMITTED_PDF)).metadata or {}
+        stored = meta.get(build.HASH_KEY)
+        self.assertIsNotNone(stored, f"{COMMITTED_PDF.name} has no {build.HASH_KEY}: rebuild it with guide-ar/build.py")
+        self.assertEqual(str(stored), build.source_hash(GUIDE),
+                         f"{COMMITTED_PDF.name} is stale: the guide sources changed since it was built. "
+                         "Run guide-ar/build.py and commit the new PDF.")
 
 
 if __name__ == "__main__":
