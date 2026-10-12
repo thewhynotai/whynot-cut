@@ -40,6 +40,8 @@ BROWSER_SCHEMES = frozenset({"http", "https", "file", "chrome-extension", "moz-e
 REDACTED = "[redacted]"
 _HEX_RUN = re.compile(r"[0-9a-fA-F]{64,}")
 _FIELD_MAX = 500          # audit fields are clipped (after redaction) so a hostile peer cannot bloat the log
+TOKEN_RE = re.compile(r"[0-9a-f]{64}")      # the only token shape ever written or accepted (make_token's)
+RESERVED_KEYS = frozenset({"port", "token", "pid", "version", "protocol"})
 
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -50,11 +52,17 @@ def make_token() -> str:
     return secrets.token_hex(32)
 
 
+def token_shape_ok(token) -> bool:
+    """True for exactly 64 lowercase hex characters (a make_token() value)."""
+    return isinstance(token, str) and TOKEN_RE.fullmatch(token) is not None
+
+
 def token_ok(given, expected) -> bool:
-    """Constant-time compare. Anything that is not a non-empty string never authenticates; never raises."""
-    if not isinstance(given, str) or not isinstance(expected, str) or not expected:
+    """Constant-time compare. Both sides must be 64 lowercase hex characters, else it never authenticates; never
+    raises."""
+    if not token_shape_ok(given) or not token_shape_ok(expected):
         return False
-    return hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8"))
+    return hmac.compare_digest(given.encode("ascii"), expected.encode("ascii"))
 
 
 def engine_json_path(home) -> Path:
@@ -80,7 +88,7 @@ def restrict_to_user(path) -> None:
     exe = shutil.which("icacls") or os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "icacls.exe")
     try:
         r = subprocess.run([exe, p, "/inheritance:r", "/grant:r", f"{_windows_principal()}:F"],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, timeout=30)     # bytes: only the return code is read
     except (OSError, subprocess.SubprocessError) as e:
         raise OSError(f"icacls failed for {p}: {type(e).__name__}") from e
     if r.returncode != 0:
@@ -89,7 +97,13 @@ def restrict_to_user(path) -> None:
 
 def write_engine_json(home, *, port: int, token: str, pid: int, version: str, **extra) -> Path:
     """Atomically write <home>/bridge/engine.json. The temp file is restricted BEFORE the token is written, so the
-    token is never on disk under a wider ACL; on any failure the old file is untouched and the temp file removed."""
+    token is never on disk under a wider ACL; on any failure the old file is untouched and the temp file removed.
+    `token` must be 64 lowercase hex characters; `extra` may not name a reserved key (ValueError)."""
+    if not token_shape_ok(token):
+        raise ValueError("the engine token must be 64 lowercase hex characters (make_token)")
+    clash = RESERVED_KEYS.intersection(extra)
+    if clash:
+        raise ValueError(f"extra fields may not override {sorted(clash)}")
     path = engine_json_path(home)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     data = {"port": int(port), "token": token, "pid": int(pid), "version": version, "protocol": PROTOCOL}
@@ -115,7 +129,14 @@ def write_engine_json(home, *, port: int, token: str, pid: int, version: str, **
         except OSError:
             pass
         raise
-    restrict_to_user(path)          # belt and braces: the final file never relies on what replace() kept
+    try:
+        restrict_to_user(path)      # belt and braces: the final file never relies on what replace() kept
+    except BaseException:
+        try:                        # never leave the token behind under an ACL we could not confirm
+            path.unlink()
+        except OSError:
+            pass
+        raise
     return path
 
 
@@ -254,7 +275,10 @@ class AuditLog:
             self._token = token
 
     def _clean(self, v) -> str:
-        return redact(v, self._token)[:_FIELD_MAX]
+        try:
+            return redact(v, self._token)[:_FIELD_MAX]
+        except Exception:           # a value whose str() raises (or anything odd) is logged as redacted, never raised
+            return REDACTED
 
     def _rotate(self) -> None:
         def rn(a: Path, b: Path):
@@ -273,6 +297,12 @@ class AuditLog:
         rn(self.path, numbered(1))
 
     def log(self, event, *, peer="", session=None, action=None, outcome, reason=None) -> bool:
+        try:
+            return self._log(event, peer, session, action, outcome, reason)
+        except Exception:           # auditing must never take the daemon down
+            return False
+
+    def _log(self, event, peer, session, action, outcome, reason) -> bool:
         with self._lock:
             row = {"at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
                    "event": self._clean(event), "peer": self._clean(peer)}

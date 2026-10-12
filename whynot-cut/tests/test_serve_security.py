@@ -64,7 +64,7 @@ class EngineJson(_Tmp):
         self.assertEqual(d["protocol"], 4)
 
     def test_extra_fields_kept(self):
-        security.write_engine_json(self.home, port=1, token="t" * 64, pid=1, version="v", started_at="2026-10-12T00:00:00Z")
+        security.write_engine_json(self.home, port=1, token="c" * 64, pid=1, version="v", started_at="2026-10-12T00:00:00Z")
         self.assertEqual(security.read_engine_json(self.home)["started_at"], "2026-10-12T00:00:00Z")
 
     def test_read_missing_or_corrupt_is_none(self):
@@ -96,6 +96,65 @@ class EngineJson(_Tmp):
             security.restrict_to_user = real
         self.assertEqual(security.read_engine_json(self.home)["port"], 1)   # fail closed: the old file is untouched
         self.assertEqual([x.name for x in (self.home / "bridge").iterdir()], ["engine.json"])
+
+    def test_token_shape_enforced(self):
+        """Only a 64-lower-hex token is ever written (T4 hardening): a short, upper-case or non-hex one is refused."""
+        for bad in ("", "a" * 63, "a" * 65, "A" * 64, "g" * 64, " " + "a" * 63, None, 123):
+            with self.subTest(token=bad), self.assertRaises(ValueError):
+                security.write_engine_json(self.home, port=1, token=bad, pid=1, version="v")
+        self.assertFalse(security.engine_json_path(self.home).exists())
+
+    def test_extra_cannot_override_reserved_keys(self):
+        """`protocol` is the only reserved key **extra could reach (the others are named parameters): it is refused."""
+        with self.assertRaises(ValueError):
+            security.write_engine_json(self.home, port=1, token="a" * 64, pid=1, version="v", protocol=3)
+        for key in ("port", "token", "pid", "version"):
+            with self.subTest(key=key), self.assertRaises(TypeError):
+                security.write_engine_json(self.home, **{"port": 1, "token": "a" * 64, "pid": 1, "version": "v"},
+                                           **{key: 2})
+        self.assertFalse(security.engine_json_path(self.home).exists())
+
+    def test_temp_file_is_empty_when_first_restricted(self):
+        """The ACL goes on before the token is written: the first restrict_to_user call sees an empty temp file."""
+        real = security.restrict_to_user
+        seen = []
+
+        def spy(path):
+            seen.append((Path(path).name, Path(path).stat().st_size))
+            real(path)
+        security.restrict_to_user = spy
+        try:
+            security.write_engine_json(self.home, port=1, token="a" * 64, pid=1, version="v")
+        finally:
+            security.restrict_to_user = real
+        self.assertTrue(seen[0][0].endswith(".tmp"), seen)
+        self.assertEqual(seen[0][1], 0)
+        self.assertEqual(seen[-1][0], "engine.json")
+
+    def test_second_restrict_failure_removes_the_file(self):
+        """If the final file cannot be restricted after the replace, it is removed (never left with a wide ACL)."""
+        real = security.restrict_to_user
+        calls = []
+
+        def second_fails(path):
+            calls.append(path)
+            if len(calls) == 2:
+                raise OSError("acl failed")
+            real(path)
+        security.restrict_to_user = second_fails
+        try:
+            with self.assertRaises(OSError):
+                security.write_engine_json(self.home, port=1, token="a" * 64, pid=1, version="v")
+        finally:
+            security.restrict_to_user = real
+        self.assertEqual(list((self.home / "bridge").iterdir()), [])
+
+    def test_icacls_output_is_not_decoded(self):
+        """icacls output is never decoded (only the return code matters): no text=True, so a non-UTF-8 console
+        code page cannot raise."""
+        import inspect
+        src = inspect.getsource(security.restrict_to_user)
+        self.assertNotIn("text=True", src)
 
     def test_remove_only_if_pid_matches(self):
         security.write_engine_json(self.home, port=1, token="a" * 64, pid=77, version="v")
@@ -167,6 +226,15 @@ class Token(unittest.TestCase):
         self.assertFalse(security.token_ok(123, t))
         self.assertFalse(security.token_ok("\u00e9" * 64, t))   # non-ASCII must not raise
         self.assertFalse(security.token_ok("", ""))             # an empty expected token never authenticates
+
+    def test_token_ok_requires_64_lower_hex_on_both_sides(self):
+        t = "a" * 64
+        self.assertTrue(security.token_ok(t, t))
+        for bad in ("A" * 64, "a" * 63, "x" * 64, "a" * 64 + chr(10), " " + "a" * 63):
+            with self.subTest(bad=bad):
+                self.assertFalse(security.token_ok(bad, bad))       # equal but the wrong shape: never authenticates
+                self.assertFalse(security.token_ok(bad, t))
+                self.assertFalse(security.token_ok(t, bad))
 
     def test_uses_compare_digest(self):
         import inspect
@@ -409,6 +477,15 @@ class Audit(_Tmp):
         for kw in ({"max_bytes": 0}, {"keep": 0}):
             with self.assertRaises(ValueError):
                 self._log(**kw)
+
+    def test_log_never_raises_on_a_field_that_cannot_be_turned_into_text(self):
+        class Evil:
+            def __str__(self):
+                raise RuntimeError("no text for you")
+        a = security.AuditLog(self.home / "logs" / "a.log")
+        self.assertTrue(a.log("x", peer=Evil(), action=Evil(), outcome="ok", reason=Evil()))
+        row = json.loads((self.home / "logs" / "a.log").read_text(encoding="utf-8"))
+        self.assertEqual((row["peer"], row["action"], row["reason"]), (security.REDACTED,) * 3)
 
     def test_log_never_raises_on_io_failure(self):
         """The audit log must not take the daemon down: an unwritable path is swallowed (and reported by return value)."""

@@ -281,6 +281,28 @@ class TestHttp(ServeCase):
                 self.assertEqual(headers["connection"], "close")
         self.assertEqual(self.requests, [])
 
+    async def test_request_bodies_are_refused(self):
+        """No request has a body: any Transfer-Encoding, any Content-Length but 0, or both together is 400 (a body
+        that is never read could be smuggled in as a second request)."""
+        bad = [
+            b"GET /json HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+            b"GET /json HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: identity\r\n\r\n",
+            b"GET /json HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\nhello",
+            b"GET /json HTTP/1.1\r\nHost: x\r\nContent-Length: 00\r\n\r\n",
+            b"GET /json HTTP/1.1\r\nHost: x\r\nContent-Length: -1\r\n\r\n",
+            b"GET /json HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n",
+            b"GET /json HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+        ]
+        for data in bad:
+            with self.subTest(data=data):
+                c = await self.client()
+                status, headers, _ = await c.http(data)
+                self.assertEqual(status, 400)
+        self.assertEqual(self.requests, [])
+        c = await self.client()                                    # an explicit zero length is fine
+        status, _, _ = await c.http(b"GET /json HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n")
+        self.assertEqual(status, 200)
+
     async def test_header_too_large_gets_400(self):
         c = await self.client()
         status, _, _ = await c.http(b"GET / HTTP/1.1\r\nHost: x\r\nX-Big: " + b"a" * 9000 + b"\r\n\r\n")

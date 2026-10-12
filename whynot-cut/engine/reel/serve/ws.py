@@ -11,7 +11,8 @@ Rules it enforces, all bounded:
     obs-fold, no control characters, security-relevant headers (Host, Origin, Authorization, Sec-WebSocket-*, ...)
     may not repeat, HTTP/1.1 needs Host, at most `limit` bytes and MAX_HEADERS lines within HEADER_TIMEOUT seconds;
     anything else is HttpError(400) (408 on the timeout), answered by the connection wrapper, then closed;
-  * every HTTP response carries Content-Length and `Connection: close`; there is no keep-alive and no request body;
+  * every HTTP response carries Content-Length and `Connection: close`; there is no keep-alive and no request body
+    (any Transfer-Encoding, or a Content-Length other than 0, is 400);
   * WebSocket: GET + HTTP/1.1, `Upgrade: websocket`, `Connection` lists `upgrade`, `Sec-WebSocket-Version: 13`, a
     24-character base64 `Sec-WebSocket-Key` of 16 bytes; no extensions and no subprotocols are ever accepted;
   * frames: client frames masked (else 1002), RSV bits clear (1002), known opcodes (1002), binary refused (1003),
@@ -158,6 +159,10 @@ async def parse_http(reader: asyncio.StreamReader, limit: int = HEADER_LIMIT, *,
             headers[key] = value
     if version == "HTTP/1.1" and "host" not in headers:
         raise HttpError(400, "missing Host header")
+    if "transfer-encoding" in headers:                    # no request has a body: one never read could be smuggled
+        raise HttpError(400, "Transfer-Encoding is not accepted")
+    if headers.get("content-length", "0") != "0":
+        raise HttpError(400, "a request body is not accepted")
     return Request(method, path, version, headers, peer)
 
 
