@@ -170,25 +170,45 @@ def submit(queue: Path, script: Path, action: str, data: dict | None = None, tim
     sweep(queue)
     claim_s = timeout if claim_timeout is None else claim_timeout
     jid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
-    payload = dict(data or {}, action=action, job_id=jid, submitted=now_iso())
-    data_file = queue / f"{jid}.data.json"
-    data_file.write_text(json.dumps(payload, ensure_ascii=True), encoding="ascii")
-    t0 = time.time()
-    # resolved paths: the bridge compares realpath(script) with its whitelisted folder (a custom WHYNOT_HOME whose
-    # drive-letter case or symlinks differ must not be rejected)
-    job = {"id": jid, "action": action, "script": str(Path(script).resolve()), "data_file": str(data_file.resolve()),
-           "submitted": payload["submitted"], "expires_at": _iso_utc(t0 + claim_s)}
-    tmp = queue / f"{jid}.tmp"
-    tmp.write_text(json.dumps(job), encoding="utf-8")
-    job_p = queue / f"{jid}.job.json"
-    tmp.rename(job_p)      # atomic: the bridge never sees a half-written job
-    try:
+    data_file, tmp, job_p = queue / f"{jid}.data.json", queue / f"{jid}.tmp", queue / f"{jid}.job.json"
+    try:        # everything from the first file on: a Ctrl-C at any point must not leave a job that runs unwatched
+        payload = dict(data or {}, action=action, job_id=jid, submitted=now_iso())
+        data_file.write_text(json.dumps(payload, ensure_ascii=True), encoding="ascii")
+        t0 = time.time()
+        # resolved paths: the bridge compares realpath(script) with its whitelisted folder (a custom WHYNOT_HOME whose
+        # drive-letter case or symlinks differ must not be rejected)
+        job = {"id": jid, "action": action, "script": str(Path(script).resolve()), "data_file": str(data_file.resolve()),
+               "submitted": payload["submitted"], "expires_at": _iso_utc(t0 + claim_s)}
+        tmp.write_text(json.dumps(job), encoding="utf-8")
+        tmp.rename(job_p)      # atomic: the bridge never sees a half-written job
         return _wait(queue, jid, t0, claim_s, timeout, poll_s, app)
-    except BaseException as e:  # Ctrl-C while waiting: a job nobody waits for must not run later
-        cancelled = _cancel(queue, jid)
-        with contextlib.suppress(Exception):
-            e.wnc_claimed = not cancelled     # True: the bridge has (or had) the job, the host may still act on it
+    except BaseException as e:  # Ctrl-C (or a write error): a job nobody waits for must not run later
+        claimed = True          # unless proven otherwise the host may still act on it (also if this cleanup is interrupted)
+        try:
+            claimed = _bridge_has_job(queue, jid)
+        except BaseException as e2:       # a second Ctrl-C inside the cleanup: the job may still run
+            _flag_claimed(e2, True)
+            _flag_claimed(e, True)
+            raise
+        _flag_claimed(e, claimed)
         raise
+
+
+def _flag_claimed(e: BaseException, claimed: bool) -> None:
+    """`wnc_claimed` on the exception: False = the job was taken back or never existed, it will not run."""
+    with contextlib.suppress(Exception):
+        e.wnc_claimed = claimed
+
+
+def _bridge_has_job(queue: Path, jid: str) -> bool:
+    """Take the job back. False: it will not run (cancelled, or it never became visible to the bridge). True: the
+    bridge has (or had) it, so Premiere / After Effects may still act on it."""
+    if _cancel(queue, jid):
+        return False
+    if any((queue / f"{jid}.{s}").exists() for s in ("job.json", "claimed", "running", "result.json")):
+        return True
+    _unlink(queue / f"{jid}.tmp", queue / f"{jid}.data.json")      # interrupted before the job file was renamed in
+    return False
 
 
 def _cancel(queue: Path, jid: str) -> bool:
@@ -253,8 +273,8 @@ def _wait(queue: Path, jid: str, t0: float, claim_s: float, timeout: float, poll
 
 # --------------------------------------------------------------------------- one build at a time (machine-wide)
 class BuildLockBusy(RuntimeError):
-    def __init__(self, holder: dict, waited_s: float):
-        self.holder, self.waited_s = holder, waited_s
+    def __init__(self, holder: dict, waited_s: float, queue: Path | None = None):
+        self.holder, self.waited_s, self.queue = holder, waited_s, queue
         super().__init__(f"another build is running: {describe_lock(holder)}")
 
 
@@ -328,7 +348,7 @@ def build_lock(queue: Path, what: str, *, hold_s: float = 1800.0, wait_s: float 
                 _unlink(stale)
                 continue
             if time.time() - t0 >= wait_s:
-                raise BuildLockBusy(held or {}, round(time.time() - t0, 1))
+                raise BuildLockBusy(held or {}, round(time.time() - t0, 1), queue)
             time.sleep(poll_s)
             continue
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -343,5 +363,31 @@ def build_lock(queue: Path, what: str, *, hold_s: float = 1800.0, wait_s: float 
 
 def lock_busy_result(e: BuildLockBusy, app: str) -> dict:
     """The engine's refusal when the lock wait ran out."""
+    how = f"Let it finish (one build at a time per {app}), then run the command again."
+    stuck = _stuck_holder(e.holder, e.queue)
+    if stuck:
+        how = f"{how} But {stuck}"
     return {"blocked": f"another build is running in {app}: {describe_lock(e.holder)}; waited {e.waited_s:g}s",
-            "how": f"Let it finish (one build at a time per {app}), then run the command again."}
+            "how": how}
+
+
+def _stuck_holder(h: dict, queue: Path | None) -> str:
+    """Guidance when the holder runs on this computer but is past its expected end, or cannot be told apart from a
+    reused pid: such a lock is never taken over by itself (a long build must not be), so a hung holder needs a person."""
+    if not h or h.get("host") != socket.gethostname():
+        return ""
+    try:
+        past = time.time() > float(h.get("expires_at") or 0)
+    except (TypeError, ValueError):
+        past = True
+    if not past and h.get("pid_created"):
+        return ""
+    try:
+        age = time.time() - _dt.datetime.fromisoformat(str(h.get("started_at"))).timestamp()
+        held = f"has held it for {max(1, round(age / 60))} min"
+    except (TypeError, ValueError):
+        held = "has held it for an unknown time"
+    lock = Path(queue) / LOCK_NAME if queue else f"<queue>/{LOCK_NAME}"
+    why = "is past its expected end" if past else "cannot be told apart from a reused process id"
+    return (f"process {h.get('pid')} {held} and {why}. If it is not a reel build that is still working, stop "
+            f"process {h.get('pid')} or delete {lock}, then run the command again.")

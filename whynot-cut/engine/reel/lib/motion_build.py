@@ -196,7 +196,7 @@ def _record(paths, res: dict) -> dict:
     return res
 
 
-LOCK_HOLD_S = 3600          # a build lock older than this is a crash's leftover
+LOCK_HOLD_S = 3600          # the expiry written in the lock: honoured for holders on OTHER computers only (a live holder here is never stale)
 
 
 def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False, timeout: int = 900, *,

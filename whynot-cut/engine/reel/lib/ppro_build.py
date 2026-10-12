@@ -199,7 +199,7 @@ def stage_stills(paths: Paths, graphics: list) -> Path:
     return dst
 
 
-LOCK_HOLD_S = 3600          # a build lock older than this is a crash's leftover (each bridge call times out sooner)
+LOCK_HOLD_S = 3600          # the expiry written in the lock: honoured for holders on OTHER computers only (a live holder here is never stale)
 
 
 def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False, *, lock_wait_s: float | None = None) -> dict:
@@ -236,10 +236,10 @@ def parked_previous(paths: Paths) -> dict | None:
         return None
     last = parked[-1]
     return {"file": str(last), "project": str(prproj),
-            "how": f"The last build stopped before it finished, so the previous project is still parked as {last.name} "
-                   f"and there is no {prproj.name}. Make sure Premiere is not building this reel, then rename "
-                   f"{last.name} back to {prproj.name} to keep working in it; or re-run with --force to build a new "
-                   "project (the parked file stays as a backup)."}
+            "how": f"A previous project was parked as {last.name} and no project is at the expected path "
+                   f"({prproj.name}). Make sure Premiere is not building this reel, then rename {last.name} back to "
+                   f"{prproj.name} to keep working in it, or run with --force to build a new project (the parked file "
+                   "stays as a backup)."}
 
 
 def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: bool) -> dict:
@@ -248,13 +248,14 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
     from .verify import editor_modified
     parked = parked_previous(paths)
     if parked and not overwrite:
-        return {"status": "PREVIOUS_PARKED", "ok": False, "error": f"no {prproj.name}; the previous project is parked",
+        return {"status": "PREVIOUS_PARKED", "ok": False, "blocked": f"no {prproj.name}; a previous project is parked",
                 "parked_previous": parked, "how": parked["how"]}
     if prproj.exists() and not overwrite:
         return {"status": "EXISTS", "project": str(prproj), "fix": "re-run with --force (previous version is kept as a backup)"}
     em = editor_modified(paths) if prproj.exists() else None
     if em and not replace_edited:
         return {"status": "EDITOR_CHANGES_PRESENT", "detail": em,
+                "blocked": "the editor saved changes in Premiere after the last build",
                 "fix": "The editor saved changes in Premiere after the last build. A rebuild starts from the plan, so their manual "
                        "edits would NOT carry over (the old file is kept as *_prev_*.prproj). Ask the editor; only with their OK "
                        "re-run with --force --replace-edited."}
@@ -290,7 +291,7 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
         claimed = bool(r.get("claimed"))
         saved_now = prproj.exists() and prproj.stat().st_mtime >= t0 - 1      # before any restore below
     except BaseException as e:          # Ctrl-C, or an OSError writing the job: cep_queue says whether it was claimed
-        claimed = bool(getattr(e, "wnc_claimed", False))
+        claimed = claimed or bool(getattr(e, "wnc_claimed", False))       # never downgrade a claimed job
         raise
     finally:
         if backup and not prproj.exists() and not claimed:

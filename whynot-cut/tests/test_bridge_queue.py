@@ -9,6 +9,7 @@ exported. The real js/bridge.js is run in node with a stubbed CEP (`window.__ado
 import sys as _sys
 _sys.dont_write_bytecode = True
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import contextlib
 import contextvars
 import datetime as dt
 import json
@@ -214,6 +215,61 @@ class TestExpiryCancelCleanup(_Home):
                 cep_queue.submit(self.q, self.script, "build_project", timeout=5, st={"alive": True})
         self.assertIs(cm.exception.wnc_claimed, True)
 
+    def _interrupt_submit(self, patches):
+        self.q.mkdir(parents=True, exist_ok=True)
+        with contextlib.ExitStack() as st:
+            for p in patches:
+                st.enter_context(p)
+            with self.assertRaises(KeyboardInterrupt) as cm:
+                cep_queue.submit(self.q, self.script, "build_project", timeout=5, st={"alive": True})
+        return cm.exception
+
+    def test_ctrl_c_right_after_the_job_file_appears_cancels_it(self):
+        """The job file is visible one statement before `_wait`: a Ctrl-C there must still take it back (Minor 2)."""
+        real = Path.rename
+
+        def rename(path, target):
+            real(path, target)
+            if path.suffix == ".tmp":
+                raise KeyboardInterrupt           # the job is published, nobody waits for it yet
+        e = self._interrupt_submit([mock.patch.object(Path, "rename", rename)])
+        self.assertIs(e.wnc_claimed, False)
+        self.assertEqual(self.leftovers(), [])                            # cancelled: it never runs
+
+    def test_ctrl_c_before_the_job_file_appears_leaves_nothing_and_is_not_claimed(self):
+        real = Path.rename
+
+        def rename(path, target):
+            if path.suffix == ".tmp":
+                raise KeyboardInterrupt
+            return real(path, target)
+        e = self._interrupt_submit([mock.patch.object(Path, "rename", rename)])
+        self.assertIs(e.wnc_claimed, False)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_write_error_before_the_job_exists_is_not_claimed(self):
+        self.q.mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(Path, "write_text", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError) as cm:
+                cep_queue.submit(self.q, self.script, "build_project", timeout=5, st={"alive": True})
+        self.assertIs(cm.exception.wnc_claimed, False)
+
+    def test_a_second_ctrl_c_inside_the_cancel_counts_as_claimed(self):
+        """The job may still run when the cancel itself is interrupted: the host must not put the old project back."""
+        calls = []
+
+        def cancel(queue, jid):
+            calls.append(jid)
+            raise KeyboardInterrupt               # the second Ctrl-C
+        e = self._interrupt_submit([mock.patch.object(cep_queue, "_wait", side_effect=KeyboardInterrupt),
+                                    mock.patch.object(cep_queue, "_cancel", cancel)])
+        self.assertEqual(len(calls), 1)
+        self.assertIs(e.wnc_claimed, True)
+        e = self._interrupt_submit([mock.patch.object(cep_queue, "_wait", side_effect=KeyboardInterrupt),
+                                    mock.patch.object(cep_queue, "_cancel", return_value=False),
+                                    mock.patch.object(cep_queue, "_bridge_has_job", side_effect=KeyboardInterrupt)])
+        self.assertIs(e.wnc_claimed, True)
+
     def test_data_result_and_claim_files_are_removed_after_reading(self):
         with FakeBridge(self.q):
             r = cep_queue.submit(self.q, self.script, "ping", {"echo": "عربي"}, timeout=10)
@@ -402,6 +458,38 @@ class TestBuildLock(_Home):
         self.assertFalse(cep_queue.lock_stale(self.q, rec))
         self.assertTrue(cep_queue.lock_stale(self.q, dict(rec, host="another-pc")))        # elsewhere: expiry rules
 
+    def test_a_hung_holder_on_this_computer_gets_stop_or_delete_guidance(self):
+        """A same-host holder past its expiry is never taken over (a long build must not be): the refusal tells the
+        user which process to stop and which file to delete (Minor 3)."""
+        import socket
+        from lib.writer_lock import process_created
+        started = (dt.datetime.now().astimezone() - dt.timedelta(hours=3)).isoformat(timespec="seconds")
+        h = {"pid": 4242, "pid_created": process_created(os.getpid()), "host": socket.gethostname(),
+             "what": "ppro-build V1", "started_at": started, "expires_at": time.time() - 60}
+        r = cep_queue.lock_busy_result(cep_queue.BuildLockBusy(h, 1200, self.q), "Premiere")
+        self.assertIn("4242", r["how"])
+        self.assertIn("180 min", r["how"])
+        self.assertIn("stop", r["how"])
+        self.assertIn(str(self.q / cep_queue.LOCK_NAME), r["how"])
+        self.assertIn("Let it finish", r["how"])
+        # creation time unknown (a reused pid cannot be ruled out), not yet expired: same guidance
+        r = cep_queue.lock_busy_result(cep_queue.BuildLockBusy(dict(h, pid_created=None, expires_at=time.time() + 600),
+                                                               1200, self.q), "Premiere")
+        self.assertIn(str(self.q / cep_queue.LOCK_NAME), r["how"])
+        # a healthy holder, or one on another computer: just wait
+        for ok in (dict(h, expires_at=time.time() + 600), dict(h, host="another-pc")):
+            r = cep_queue.lock_busy_result(cep_queue.BuildLockBusy(ok, 1200, self.q), "Premiere")
+            self.assertNotIn(cep_queue.LOCK_NAME, r["how"])
+
+    def test_a_real_expired_live_lock_refuses_with_the_guidance(self):
+        with ppro_bridge.build_lock("ppro-build hung", hold_s=-5):
+            with self.assertRaises(cep_queue.BuildLockBusy) as cm:
+                with ppro_bridge.build_lock("ppro-build B", wait_s=0.2, poll_s=0.05):
+                    pass
+        r = cep_queue.lock_busy_result(cm.exception, "Premiere")
+        self.assertIn(f"process {os.getpid()}", r["how"])
+        self.assertIn(cep_queue.LOCK_NAME, r["how"])
+
     def test_an_unreadable_lock_replaced_by_a_live_one_is_put_back(self):
         """Waiter A read the lock while it was unreadable; before A renamed it, waiter B took over and wrote a fresh
         record. A must put B's lock back, not delete it (Minor 2)."""
@@ -456,6 +544,8 @@ class TestBuildLock(_Home):
                 edited.set()                          # ... and the editor saves their work in Premiere
             t.join(30)
         self.assertEqual(out["r"]["status"], "EDITOR_CHANGES_PRESENT", out)
+        from lib import errors
+        self.assertEqual(errors.exit_code(out["r"]), 2)                    # a stop for a decision, never read as success
         sub.assert_not_called()
         self.assertEqual(prj.read_text(encoding="utf-8"), "BUILT")
 
@@ -527,6 +617,27 @@ class TestPreviousProjectKept(_Home):
                 self.assertEqual(list(d.glob("*_prev_*")), [])
                 shutil.rmtree(self.tmp / "C")
 
+    def test_an_error_after_a_claimed_submit_never_downgrades_claimed(self):
+        """The stat race in `saved_now` (or any later error in the try) must not make the finally restore over a
+        project Premiere is still writing (Minor 1)."""
+        state = {"after": False, "n": 0}
+        real_exists = Path.exists
+
+        def exists(self, *a, **k):
+            if state["after"] and not state["n"] and self.suffix == ".prproj" and "_prev_" not in self.name:
+                state["n"] += 1
+                raise OSError("stat race")           # the first look at the project after the submit
+            return real_exists(self, *a, **k)
+
+        def answer(prj):
+            state["after"] = True
+            return {"ok": False, "error": "timeout after 900s", "claimed": True}
+        with mock.patch.object(Path, "exists", exists), self.assertRaises(OSError):
+            self.run_build(answer)
+        d = self.project_dir()
+        self.assertEqual(len(list(d.glob("*_prev_*"))), 1)
+        self.assertEqual([f.name for f in d.glob("*.prproj") if "_prev_" not in f.name], [])
+
     def test_ctrl_c_after_the_claim_keeps_the_backup_aside(self):
         def boom(prj):
             e = KeyboardInterrupt()
@@ -555,7 +666,10 @@ class TestPreviousProjectKept(_Home):
         self.assertIn(parked.name, r["how"])
         self.assertIn(prj.name, r["how"])
         self.assertIn("--force", r["how"])
-        self.assertNotEqual(errors.exit_code(r), 0)
+        self.assertIn("no project is at the expected path", r["how"])
+        self.assertNotIn("stopped before", r["how"])                        # a deleted project looks the same: no blame
+        self.assertEqual(errors.exit_code(r), 2)
+        self.assertTrue(r["blocked"])
         sub.assert_not_called()
         self.assertEqual(ppro_build.parked_previous(p)["file"], str(parked))
         self.assertTrue(parked.exists())                                   # report only: nothing is moved
