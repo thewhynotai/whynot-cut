@@ -60,8 +60,9 @@ def _prune_dialogue(paths, keep: Path) -> None:
     run (Windows refuses to delete it)."""
     from pathlib import PureWindowsPath     # splits on / and \ alike
     from .common import read_json
-    from .stamps import read_compiled
-    plan = read_compiled(paths.p("01_analysis/motion-plan.json"), {}) or {}
+    # the PREVIOUS plan, read while motion-plan compiles the new one: plain read_json, no version check (Gate 2 live
+    # check: read_compiled here warned "motion-plan.json has no engine_version" about the file being replaced)
+    plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}     # compiler-side read (the plan it replaces)
     job = (read_json(paths.p("04_after_effects/data/motion-job.json"), {}) or {}).get("plan") or {}
     named = {keep.name} | {PureWindowsPath(p["audio"]["dialogue"]).name for p in (plan, job)
                            if (p.get("audio") or {}).get("dialogue")}

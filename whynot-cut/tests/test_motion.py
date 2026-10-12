@@ -1570,6 +1570,72 @@ class TestMotionBuild(CompiledMotion):
         self.assertEqual(list(self.reel.p("04_after_effects/project/backups").glob("*.aep")), [])
         self.assertEqual(self.mb.aep_path(self.reel).read_bytes(), b"EDITED IN AE")
 
+    def cli(self, **kw) -> tuple[int, dict]:
+        """`reel motion-build` through motion_cli (exit code, printed document) with this reel."""
+        import argparse
+        import contextlib
+        import io
+        from unittest import mock
+        from lib import motion_cli
+        a = argparse.Namespace(**dict(dict(script_only=False, run_script=False, replace_edited=False,
+                                           allow_fallback_font=False, timeout=30), **kw))
+        so, code = io.StringIO(), 0
+        with mock.patch.object(motion_cli, "P", return_value=self.reel), contextlib.redirect_stdout(so):
+            try:
+                motion_cli.cmd_motion_build(a)
+            except SystemExit as e:
+                code = e.code if isinstance(e.code, int) else 1
+        return code, json.loads(so.getvalue())
+
+    def test_cli_gate_refusals_exit_2(self):
+        """Gate 2 A2: a missing or stale Gate 1 approval and an .aep the editor changed are refusals (exit 2, `blocked`),
+        like ppro-build's EDITOR_CHANGES_PRESENT and the bridge version mismatch - not exit 1."""
+        self.reel.p("01_analysis/plan-approval.json").unlink()
+        code, doc = self.cli()
+        self.assertEqual((code, doc["status"]), (2, "REFUSED"), doc)
+        self.assertIn("Gate 1", doc["blocked"])
+        write_json(self.reel.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor",
+                                                                   "plan_fingerprint": "an-older-plan"})
+        code, doc = self.cli()
+        self.assertEqual(code, 2, doc)
+        self.assertIn("stale", doc["blocked"])
+        self.approve()
+        code, doc = self.cli()
+        self.assertEqual((code, doc["status"]), (0, "PROJECT_ASSEMBLED"), doc)
+        self.mb.aep_path(self.reel).write_bytes(b"EDITED IN AE")
+        code, doc = self.cli()
+        self.assertEqual(code, 2, doc)
+        self.assertIn("editor changed", doc["blocked"])
+        self.assertIn("--replace-edited", doc["how"])
+        code, doc = self.cli(replace_edited=True)
+        self.assertEqual((code, doc["status"]), (0, "PROJECT_ASSEMBLED"), doc)
+
+    def test_cli_other_refusal_reasons_stay_exit_1(self):
+        """A missing probe verdict is something to fix, not a gate: exit 1 as before."""
+        from lib import ae_probe
+        ae_probe.verdict_ok = lambda v: False
+        code, doc = self.cli()
+        self.assertEqual(code, 1, doc)
+        self.assertNotIn("blocked", doc)
+
+    def test_run_script_built_unverified_is_not_exit_0(self):
+        """Gate 2 minor: --run-script that saved the .aep has no read-back (QC cannot pass): ok false, exit 1."""
+        from lib.errors import exit_code
+        aep = self.mb.aep_path(self.reel)
+        self.fake_run_script_env([], lambda jsx, timeout, done: (aep.write_bytes(b"AEP by script"), {"stdout": ""})[1])
+        r = self.mb.run_script(self.reel, timeout=5)
+        self.assertEqual(r["status"], "BUILT_UNVERIFIED", r)
+        self.assertIs(r["ok"], False)
+        self.assertEqual(exit_code(r), 1)
+
+    def test_run_script_lock_refusal_is_blocked(self):
+        """The run-script driver waits on the After Effects build lock; still held: REFUSED with `blocked` (exit 2)."""
+        from lib.errors import exit_code
+        self.fake_run_script_env([], lambda jsx, timeout, done: {"status": "REFUSED", "blocked": "another build is "
+                                                                  "running in After Effects", "how": "wait"})
+        r = self.mb.run_script(self.reel, timeout=5)
+        self.assertEqual((r["status"], exit_code(r)), ("REFUSED", 2), r)
+
     def test_compare(self):
         from lib.motion_config import format_spec
         from lib.motion_readback import compare
@@ -2391,6 +2457,19 @@ class TestFallbackRefit(CompiledMotion):
         needs = txt.split("## Needs you", 1)[1]
         self.assertTrue(ps in needs and "Brand-" in needs, needs)
 
+    def test_fallback_font_is_in_the_warnings(self):
+        """Gate 2 live check: --allow-fallback-font named the font only in `fallback_font`; the editor reads `warnings`."""
+        import freetype
+        from lib import motion_layout
+        ps = freetype.Face(str(test_font())).postscript_name.decode()
+        if motion_layout.find_font_face(ps) is None:
+            self.skipTest(f"{test_font().name} is not found by font discovery on this machine")
+        self.brand_plan_approved(ps)
+        r = self.build_with_missing_brand_fonts()
+        self.assertEqual(r["status"], "PROJECT_ASSEMBLED", r)
+        self.assertTrue(any(ps in w and "fallback" in w and "Brand-" in w for w in r.get("warnings") or []),
+                        r.get("warnings"))
+
     def test_fallback_at_face_1_of_a_collection_reaches_the_job_with_its_index(self):
         """T2.10 review round 2: the approved fallback is face 1 of a .ttc (GeezaPro-Bold in GeezaPro.ttc): build()
         hands compile_motion font_override with the face index, so the job's fonts carry it (fit() measured with it)."""
@@ -2428,6 +2507,23 @@ class TestFallbackRefit(CompiledMotion):
             write_json(res, {"status": "PROJECT_ASSEMBLED", "fallback_font": "SegoeUI-Bold", "brand_fonts": fonts})
             needs = motion_readme(self.reel).read_text(encoding="utf-8").split("## Needs you", 1)[1]
             self.assertIn(want, needs)
+
+
+class TestPlanVersionNote(CompiledMotion):
+    def test_motion_plan_does_not_warn_about_the_plan_it_replaces(self):
+        """Gate 2 live check: `reel motion-plan` warned "motion-plan.json has no engine_version" - it read the previous
+        (2.x, unstamped) plan while compiling the new one. Compiling over an unstamped plan notes nothing."""
+        from lib.motion_plan import compile_motion
+        f = self.reel.p("01_analysis/motion-plan.json")
+        old = read_json(f)
+        old.pop("engine_version", None)
+        write_json(f, old)
+        ctx = common.Context(self.root)
+        with common.use_context(ctx):
+            r = compile_motion(self.reel)
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertEqual([n for n in (getattr(ctx, "version_warnings", None) or []) if "motion-plan" in n], [])
+        self.assertIn("engine_version", read_json(f))
 
 
 class TestLockedAudio(CompiledMotion):

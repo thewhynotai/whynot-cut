@@ -45,13 +45,28 @@ def osascript_argv(app: str, command: str, timeout: int, *args, pre: tuple = ())
 PS_ALIAS = "set jsxFile to ((item 1 of argv) as POSIX file) as alias"
 
 
-def run_after_effects(jsx: Path, timeout: int, done: Callable[[], bool] | None = None) -> dict:
+def run_after_effects(jsx: Path, timeout: int, done: Callable[[], bool] | None = None, *,
+                      lock_wait_s: float | None = None) -> dict:
+    """Run `jsx` in After Effects under the bridge's build lock (Gate 2 minor: ae-build, mogrt-build and
+    `motion-build --run-script` start a new project too, so they queue behind a bridge build and each other). A lock
+    still held after `lock_wait_s` (default cep_queue.LOCK_WAIT_S): REFUSED with `blocked` (exit 2)."""
     app = plat.newest_app("after_effects")
     if not app:
         return {"status": "UNSUPPORTED", "msg": "After Effects not installed"}
     refused = plat.sandbox_refusal("launch After Effects")                                   # G79: never in tests
     if refused:
         return {"status": "REFUSED", "msg": refused["error"], "how": refused["how"]}
+    from . import ae_bridge, cep_queue
+    wait = cep_queue.LOCK_WAIT_S if lock_wait_s is None else lock_wait_s
+    try:
+        with ae_bridge.build_lock(f"After Effects script {Path(jsx).name}", hold_s=timeout + 300, wait_s=wait):
+            return _run_after_effects(app, jsx, timeout, done)
+    except cep_queue.BuildLockBusy as e:
+        r = cep_queue.lock_busy_result(e, "After Effects")
+        return dict(r, status="REFUSED", msg=r["blocked"])
+
+
+def _run_after_effects(app: dict, jsx: Path, timeout: int, done: Callable[[], bool] | None) -> dict:
     t0 = time.time()
     if plat.IS_MAC:
         p = run(osascript_argv(app["name"], "DoScriptFile (item 1 of argv)", timeout, jsx),

@@ -148,10 +148,15 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
     elif val.get("fingerprint") != fp:
         probs.append("the motion plan is stale (script, words, audio or brand changed): run `reel motion-plan` again")
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
+    gate = None
     if not appr.get("approved"):
-        probs.append("no Gate 1 approval: the editor approves motion-plan.md and the animatic (`reel approve-plan`)")
+        gate = "no Gate 1 approval: the editor approves motion-plan.md and the animatic (`reel approve-plan`)"
     elif appr.get("plan_fingerprint") != fp:
-        probs.append("the Gate 1 approval is stale (the plan changed after approval): show the editor again")
+        gate = "the Gate 1 approval is stale (the plan changed after approval): show the editor again"
+    if gate:                    # an approval gate is a refusal (exit 2), like ppro-build's (Gate 2 A2)
+        probs.append(gate)
+        ctx["refusal"] = {"blocked": gate, "how": "Show the editor motion-plan.md and the animatic; only with their "
+                                                  "words run `reel approve-plan --by editor`, then motion-build again"}
     st = ae_bridge.status()
     if not st.get("alive"):
         probs.append(f"the WhyNot Cut Bridge is not running in After Effects: {st.get('detail')} (`reel ae-status`)")
@@ -226,9 +231,12 @@ def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeou
     aep = aep_path(paths)
     base = {"status": "REFUSED", "reasons": [], "aep": str(aep), "fallback_font": None}
     edited = editor_changed(paths)
-    if edited and not replace_edited:
-        return dict(base, reasons=["the editor changed the .aep since the last build: rebuilding would discard that "
-                                   "work - `--replace-edited` keeps a backup copy first"])
+    if edited and not replace_edited:       # a refusal (exit 2), like ppro-build's EDITOR_CHANGES_PRESENT (Gate 2 A2)
+        why = ("the editor changed the .aep since the last build: rebuilding would discard that work - "
+               "`--replace-edited` keeps a backup copy first")
+        return dict(base, reasons=[why], blocked="the editor changed the .aep since the last build",
+                    how="Ask the editor; only with their OK run motion-build again with --replace-edited (their .aep "
+                        "is copied to 04_after_effects/project/backups/ first)")
     probs, ctx = preconditions(paths, allow_fallback_font)
     if probs:
         return dict(base, reasons=probs, **(ctx.get("refusal") or {}))
@@ -269,7 +277,13 @@ def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeou
     cmp_ = compare(job["plan"], rb, format_spec(job["plan"]["format"]), job["caps"])
     ok = cmp_["ok"] and not rep.get("failed")
     fails = cmp_["failures"] + [f"{f.get('scene')}: {f.get('error')}" for f in rep.get("failed") or []]
+    warnings = []
+    if fb:                      # the editor must see it in the warnings, not only in a field (Gate 2 live check)
+        warnings.append(f"built with the fallback font {fb} instead of the brand font(s) {', '.join(brand)} (not "
+                        "installed for After Effects): install them from assets/Fonts and run motion-build again to "
+                        "use the brand fonts")
     res = dict(base, status="PROJECT_ASSEMBLED" if ok else "FAILED", reasons=[] if ok else fails, report=rep,
+               warnings=warnings,
                readback=rb, comparison=cmp_, aep_sha1=_sha1(aep), fallback_font=fb, brand_fonts=brand,
                caps_source=job.get("caps_source"),
                plan_fingerprint=job["plan"].get("fingerprint"))
@@ -326,8 +340,8 @@ def run_script(paths, timeout: int = 900) -> dict:
     jsx = write_fallback_script(paths)
     t0 = time.time()
     r = run_after_effects(jsx, timeout, done=lambda: aep.exists() and aep.stat().st_mtime >= t0 - 1)
-    if r.get("status") == "UNSUPPORTED":                 # nothing built is never exit 0 (T2.16 review)
-        return dict(r, ok=False, jsx=str(jsx))
+    if r.get("status") in ("UNSUPPORTED", "REFUSED"):    # nothing built is never exit 0 (T2.16 review); REFUSED:
+        return dict(r, ok=False, jsx=str(jsx))           # the sandbox, or the build lock (`blocked`: exit 2)
     said = next((ln.split(REFUSED_MARK, 1)[1].strip() for ln in str(r.get("stdout") or "").splitlines()
                  if REFUSED_MARK in ln), None)            # macOS: osascript prints the script's result
     if said is not None:
@@ -337,6 +351,7 @@ def run_script(paths, timeout: int = 900) -> dict:
         f"the .aep was not saved within {timeout} s: After Effects may be showing why (an alert when its open project "
         "has unsaved changes, or it cannot tell - they are never discarded; or a script error). Save or close the open "
         "project and run again, or use --script-only and run the script yourself"]
-    res = {"status": "BUILT_UNVERIFIED" if fresh else "FAILED", "jsx": str(jsx), "aep": str(aep), "readback": None,
-           "aep_sha1": _sha1(aep) if fresh else "", "reasons": why}
+    # BUILT_UNVERIFIED is not a pass (no read-back, QC cannot pass): ok false, exit 1 (Gate 2 minor)
+    res = {"status": "BUILT_UNVERIFIED" if fresh else "FAILED", "ok": False, "jsx": str(jsx), "aep": str(aep),
+           "readback": None, "aep_sha1": _sha1(aep) if fresh else "", "reasons": why}
     return _record(paths, res)

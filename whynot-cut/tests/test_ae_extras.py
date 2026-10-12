@@ -142,6 +142,103 @@ class TestExtrasFps(TempDir):
             self.assertEqual(json.loads(r.stdout), want, data)
 
 
+class TestExtrasFrameSize(TempDir):
+    """Gate 2 A1: the After Effects extras use the profile's frame size (a 4:5 client gets 1080x1350 comps)."""
+
+    def paths(self, size=None) -> Paths:
+        root = client(self.tmp, 25, False, f"S{size[1] if size else 0}")
+        if size:
+            write_json(root / common.CLIENT_PROFILE_REL / "sequence-settings.json",
+                       {"general": {"timebase": 25, "ntsc": False, "frame_width": size[0], "frame_height": size[1]}})
+        p = Paths(root, "V1")
+        p.ensure_project()
+        write_json(p.p("01_analysis/timeline-spec.json"),
+                   {"fps": 25.0, "duration_frames": 240, "events": [], "main_segments": []})
+        return p
+
+    def test_clip_graphics_and_mogrt_scripts_carry_the_profile_size(self):
+        from lib import ae_builder, mogrt_builder
+        for size, want in (((1080, 1350), [1080, 1350]), ((1920, 1080), [1920, 1080]), (None, [1080, 1920])):
+            p = self.paths(size)
+            with common.use_context(common.Context(p.root)):
+                res = ae_builder.generate(p)
+                jsx = mogrt_builder.generate(p)
+            for d in (nh_data(Path(res["jsx"])), nh_data(jsx)):
+                self.assertEqual([d["w"], d["h"]], want, size)
+
+    def test_library_sets_the_size_from_the_data_before_building(self):
+        text = LIB_JSX.read_text(encoding="utf-8")
+        for fn in ("NH.build = function", "NH.buildMogrts = function"):
+            body = text[text.index(fn):]
+            self.assertIn("NH.applyFrameSize();", body[:body.index("app.beginUndoGroup") + 80], fn)
+
+    @unittest.skipUnless(shutil.which("node"), "needs node to run the library's plain-JS part")
+    def test_apply_frame_size_runs(self):
+        lib = LIB_JSX.read_text(encoding="utf-8")
+        for data, want in (({"w": 1080, "h": 1350}, [1080, 1350]), ({"w": 1920, "h": 1080}, [1920, 1080]),
+                           ({}, [1080, 1920]), ({"w": 0, "h": -5}, [1080, 1920])):
+            js = self.tmp / "t.js"
+            js.write_text(f"var NH_DATA = {json.dumps(data)};\n{lib}\nNH.applyFrameSize();\n"
+                          "console.log(JSON.stringify([NH.W, NH.H]));", encoding="utf-8")
+            r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(json.loads(r.stdout), want, data)
+
+
+class TestScriptDriverLock(TempDir):
+    """Gate 2 minor: ae-build, mogrt-build and `motion-build --run-script` (adobe_run.run_after_effects) start a new
+    After Effects project too, so they take the bridge's build lock like `motion-build`."""
+
+    def setUp(self):
+        super().setUp()
+        from lib import adobe_run
+        self.adobe_run = adobe_run
+        self.launched = []
+        patches = [mock.patch.object(plat, "newest_app", lambda key: {"name": "AE", "exe": "AfterFX.exe"}),
+                   mock.patch.object(plat, "sandbox_refusal", lambda what, *t: None),
+                   mock.patch.object(plat, "IS_MAC", False),
+                   mock.patch.object(adobe_run.subprocess, "Popen", lambda argv, **kw: self.launched.append(argv))]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_the_script_runs_under_the_lock(self):
+        from lib import ae_bridge, cep_queue
+        seen = []
+        res = self.adobe_run.run_after_effects(self.tmp / "x.jsx", 5,
+                                               done=lambda: seen.append(cep_queue.read_lock(ae_bridge.queue_dir())) or True)
+        self.assertEqual(len(self.launched), 1, res)
+        self.assertTrue(seen and seen[0] and "x.jsx" in seen[0]["what"], seen)
+        self.assertIsNone(cep_queue.read_lock(ae_bridge.queue_dir()))           # released after the run
+
+    def test_a_held_lock_refuses_with_blocked(self):
+        from lib import ae_bridge
+        from lib.errors import exit_code
+        with ae_bridge.build_lock("motion-build other"):
+            res = self.adobe_run.run_after_effects(self.tmp / "x.jsx", 5, lock_wait_s=0.2)
+        self.assertEqual(res["status"], "REFUSED", res)
+        self.assertIn("another build", res["blocked"])
+        self.assertEqual((self.launched, exit_code(res)), ([], 2))
+
+    def test_mogrt_partial_is_a_failure(self):
+        """Gate 2 minor: some templates missing (PARTIAL) exited 0."""
+        from lib import mogrt_builder
+        from lib.errors import exit_code
+        p = Paths(client(self.tmp, 25, False), "V1")
+        d = mogrt_builder.mogrt_dir(p)
+
+        def fake_ae(jsx, timeout, done=None):
+            import zipfile
+            with zipfile.ZipFile(d / "NH_hook_title.mogrt", "w") as z:
+                z.writestr("definition.json", "{}")
+            return {"returncode": None}
+        with mock.patch.object(self.adobe_run, "run_after_effects", fake_ae), common.use_context(common.Context(p.root)):
+            res = mogrt_builder.build(p)
+        self.assertEqual(res["status"], "PARTIAL", res)
+        self.assertIs(res["ok"], False)
+        self.assertEqual(exit_code(res), 1)
+
+
 class AerenderCase(TempDir):
     """ae_builder.render with the aerender process replaced."""
 

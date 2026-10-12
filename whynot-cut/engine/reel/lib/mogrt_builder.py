@@ -10,7 +10,7 @@ import json
 import time
 from pathlib import Path
 
-from .common import TEMPLATES_DIR, Paths, load_config, now_iso, run, write_json, write_text
+from .common import TEMPLATES_DIR, Paths, frame_size, load_config, now_iso, run, write_json, write_text
 from .ae_builder import brand_controls, comp_fps, fonts_map
 
 MOGRTS = ["hook_title", "term_callout", "glass_card", "name_card", "cta", "checklist"]
@@ -24,7 +24,8 @@ def generate(paths: Paths) -> Path:
     d = mogrt_dir(paths)
     d.mkdir(parents=True, exist_ok=True)
     fps = comp_fps()
-    data = {"fps": fps, "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
+    w, h = frame_size(paths)          # Gate 2 A1: the profile's frame size, not fixed 1080x1920
+    data = {"fps": fps, "w": w, "h": h, "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
             "templates": load_config("graphics-templates.json")["templates"], "events": [], "captions": None,
             "mogrt_dir": str(d), "mogrt_frames": round(4 * fps),   # 4.0 s at any rate (96 only at 24 fps)
             "aep_path": str(d / "NH_MOGRT_TEMPLATES.aep"),
@@ -66,5 +67,7 @@ def build(paths: Paths, timeout: int = 600) -> dict:
            "mogrts_written_this_run": fresh, "missing": [k for k, v in fresh.items() if not v],
            "status": "MOGRTS_CREATED" if all(fresh.values()) else ("PARTIAL" if any(fresh.values()) else "FAILED"),
            "elapsed_s": round(time.time() - t0, 1), "at": now_iso()}
+    if res["status"] != "MOGRTS_CREATED":
+        res["ok"] = False       # PARTIAL: some templates are missing - a failed build (exit 1), not exit 0 (Gate 2 minor)
     write_json(d / "mogrt-build-result.json", res)
     return res

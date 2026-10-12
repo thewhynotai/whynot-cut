@@ -11,7 +11,7 @@ import shutil
 import time
 from pathlib import Path
 
-from .common import (seq_fps, caption_hide_default, TEMPLATES_DIR, Paths, brand_fallback, font_role_fallback, project_prefix, load_config, log, now_iso, read_json, run, write_json, write_text)
+from .common import (seq_fps, frame_size, caption_hide_default, TEMPLATES_DIR, Paths, brand_fallback, font_role_fallback, project_prefix, load_config, log, now_iso, read_json, run, write_json, write_text)
 from . import srt as srtlib
 from .plan import norm, to_ms
 
@@ -173,7 +173,8 @@ def generate(paths: Paths) -> dict:
     if spec.get("fps") and abs(float(spec["fps"]) - fps) > 0.01:
         warnings.append(f"the plan was compiled at {float(spec['fps']):.5g} fps but the profile is {fps:.5g} fps: the "
                         "comps use the profile rate, so run plan again before building")
-    data = {"fps": fps, "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
+    w, h = frame_size(paths)          # Gate 2 A1: comps at the profile's frame size (4:5 -> 1080x1350), not fixed 9:16
+    data = {"fps": fps, "w": w, "h": h, "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
             "templates": tpls, "events": events, "captions": caption_data(paths, spec, ed),
             "logo": logo.get("display_derivative") if logo else None,
             "render_dir": str(render_dir), "aep_path": str(aep), "render_template": RENDER_TEMPLATE,

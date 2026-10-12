@@ -1,6 +1,7 @@
 /*  whynot-cut — After Effects graphics library (ExtendScript, ES3).
     Loaded by the generated build script, which defines `NH_DATA` before including this file.
-    Builds editable, brand-linked comps (1080x1920, square pixels, the profile's frame rate: NH_DATA.fps):
+    Builds editable, brand-linked comps (the profile's frame size NH_DATA.w x NH_DATA.h, 1080x1920 by default; square
+    pixels; the profile's frame rate: NH_DATA.fps):
       * BRAND_CONTROLS comp with a "BRAND" null holding Color Controls; every fill/stroke links to it.
       * One comp per timeline event (template driven) + an optional CAPTIONS comp.
       * Adds every comp to the Render Queue (ProRes 4444 + alpha template) and saves the .aep.
@@ -8,7 +9,7 @@
 */
 var NH = NH || {};
 
-NH.W = 1080; NH.H = 1920; NH.FPS = 24;   // NH.FPS is the default only: NH.applyFps() takes the profile rate from NH_DATA.fps
+NH.W = 1080; NH.H = 1920; NH.FPS = 24;   // defaults only: NH.applyFrameSize() / NH.applyFps() take NH_DATA.w/h/fps: NH.applyFps() takes the profile rate from NH_DATA.fps
 NH.log = [];
 
 NH.rgb = function (a) { return [a[0], a[1], a[2]]; };
@@ -20,6 +21,16 @@ NH.applyFps = function () {
     var f = (typeof NH_DATA !== "undefined" && NH_DATA) ? NH_DATA.fps : 0;
     NH.FPS = (f > 0) ? f : 24;
     return NH.FPS;
+};
+
+/* The comps' frame size is the client's sequence size, written into NH_DATA.w / NH_DATA.h by the generator (Gate 2
+   A1): a 4:5 profile gets 1080x1350 comps. 1080x1920 when the data carries none (or a size that is not positive). */
+NH.applyFrameSize = function () {
+    var d = (typeof NH_DATA !== "undefined" && NH_DATA) ? NH_DATA : {};
+    var ok = d.w > 0 && d.h > 0;
+    NH.W = ok ? d.w : 1080;
+    NH.H = ok ? d.h : 1920;
+    return [NH.W, NH.H];
 };
 
 NH.folder = function (name) {
@@ -475,6 +486,7 @@ NH.queue = function (comp, outPath) {
 
 NH.build = function () {
     NH.applyFps();
+    NH.applyFrameSize();
     app.beginUndoGroup("NH build");
     if (NH_DATA.new_project) { app.newProject(); }
     NH.buildBrand();
@@ -586,6 +598,7 @@ NH.buildChecklistMogrt = function (c, t, n) {
 
 NH.buildMogrts = function () {
     NH.applyFps();
+    NH.applyFrameSize();
     app.beginUndoGroup("NH mogrts");
     if (NH_DATA.new_project) { app.newProject(); }
     NH.BRAND_SCOPE = "local";
