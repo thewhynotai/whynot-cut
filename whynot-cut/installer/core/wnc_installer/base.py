@@ -233,11 +233,13 @@ class Paths:
     def child_env(self, base_env: Optional[Mapping] = None) -> dict:
         """Environment for every child process (uv, the runtime, claude, reel). PYTHONPATH / PYTHONHOME are dropped:
         an editor's (or another tool's) value would put foreign packages, or another Python's stdlib, under the
-        runtime and the engine."""
+        runtime and the engine. A sandbox also drops CLAUDE_CLI: a developer's would lead a child to the real Claude
+        Code CLI and the real ~/.claude (the sandbox's own stand-in is WNC_CLAUDE_CLI)."""
         env = dict(os.environ if base_env is None else base_env)
         for k in ("PYTHONPATH", "PYTHONHOME"):
             env.pop(k, None)
         if self.sandbox:
+            env.pop("CLAUDE_CLI", None)
             env.update(HOME=str(self.home), USERPROFILE=str(self.home), APPDATA=str(self.appdata),
                        LOCALAPPDATA=str(self.localappdata), CLAUDE_CONFIG_DIR=str(self.claude_dir))
         # uv: our own python and cache folders, no uv.toml / pyproject config (same as setup/setup_env.py uv_env)

@@ -340,7 +340,14 @@ param(
             if ($homeToo -and (-not $failed) -and [IO.Directory]::Exists($root) -and
                 (@([IO.Directory]::GetFileSystemEntries($root)).Count -eq 0)) {
                 [IO.Directory]::Delete($root, $false)
-                Write-Host "deleted $root"
+                # a program that still has the folder open (an antivirus or indexer scanning what was just deleted)
+                # can keep its name listed for a moment after the delete succeeded: wait for it, briefly
+                for ($i = 0; ($i -lt 30) -and [IO.Directory]::Exists($root); $i++) { Start-Sleep -Milliseconds 100 }
+                if ([IO.Directory]::Exists($root)) {
+                    Write-Host "WARNING: $root is still listed; Windows removes it once the program holding it lets go"
+                } else {
+                    Write-Host "deleted $root"
+                }
             }
         } catch {
             Write-Host "WARNING: could not finish the clean-up of $root ($($_.Exception.Message))"

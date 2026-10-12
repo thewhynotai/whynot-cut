@@ -211,12 +211,14 @@ The installer's own tests are in `tests/test_installer.py` (run with `bash tools
 run both front ends end to end against a fixture plugin, served from a local `http.server`, with a home folder whose
 name has a space and Arabic letters.
 
-Optional checks in the same file, skipped when their tool or switch is missing:
+Optional checks in the same file, skipped when their tool or switch is missing. The two lint variables are not named
+`WNC_*` on purpose: other suites check that no `WNC_*` variable reaches the engine, so exporting them for a full run
+is safe.
 
 | Variable | Check |
 |---|---|
-| `WNC_PSSA_PATH` | Path to `PSScriptAnalyzer.psd1` (otherwise the PowerShell module path is used): no `Error` finding in the `.ps1` files. |
-| `WNC_SHELLCHECK` | Path to `shellcheck` (otherwise `PATH`): `shellcheck` exits 0 on the `.sh` files. |
+| `WHYNOTCUT_PSSA_PATH` | Path to `PSScriptAnalyzer.psd1` (otherwise the PowerShell module path is used): no `Error` finding in the `.ps1` files. |
+| `WHYNOTCUT_SHELLCHECK` | Path to `shellcheck` (otherwise `PATH`): `shellcheck` exits 0 on the `.sh` files. |
 | `WNC_INSTALLER_LIVE=1` | The live smoke, with real network: the pinned uv download, then `uv python install --no-bin --no-registry`, `uv venv` and `uv pip sync --require-hashes` of `tests/fixtures/installer/live_lock.txt` (six), all through the runtime step in a temp home. |
 
 The PowerShell parser (`[System.Management.Automation.Language.Parser]::ParseFile`) and `bash -n` always run when

@@ -54,7 +54,8 @@
     paths, `--fill-artefacts` pins adobe/*.zxp|*.ccx (file + sha256) changing only those value lines (two candidates =
     exit 2, nothing written), its docstring names the T7.6 executor steps and the release index; static checks: the
     PowerShell parser on every .ps1 and `bash -n` on every .sh (never skipped when the shell exists), PSScriptAnalyzer
-    (WNC_PSSA_PATH) without Error findings and shellcheck (WNC_SHELLCHECK) exit 0 (skipped when absent); the README's
+    (WHYNOTCUT_PSSA_PATH) without Error findings and shellcheck (WHYNOTCUT_SHELLCHECK) exit 0 (skipped when absent;
+    the lint variables are never named WNC_*: other suites assert that none reaches the engine); the README's
     Verified / Not verified section; TestLiveSmoke (WNC_INSTALLER_LIVE=1 only, real network): the pinned uv, `uv python
     install --no-bin --no-registry`, the runtime step with tests/fixtures/installer/live_lock.txt (six, hashed), and
     no ~/.local/bin python or HKCU Python\\Astral key left in the real profile.
@@ -334,10 +335,12 @@ class TestPaths(unittest.TestCase):
                 p = base.Paths.from_env(str(self.tmp / "h") if sandbox else None,
                                         env={"HOME": str(self.tmp), "USERPROFILE": str(self.tmp)})
                 env = p.child_env({"PATH": "keep-me", "PYTHONPATH": str(self.tmp / "evil"),
-                                   "PYTHONHOME": str(self.tmp / "other python")})
+                                   "PYTHONHOME": str(self.tmp / "other python"), "CLAUDE_CLI": "the real claude"})
                 self.assertNotIn("PYTHONPATH", env)
                 self.assertNotIn("PYTHONHOME", env)
                 self.assertEqual(env["PATH"], "keep-me")
+                # a sandbox never hands a developer's real Claude Code CLI to its children
+                self.assertEqual("CLAUDE_CLI" in env, not sandbox)
 
 
 # --------------------------------------------------------------------------------------------- engine home
@@ -351,17 +354,19 @@ class EngineHomeCases:
 
     @staticmethod
     def pointer(home: Path, obj, raw: bytes = None) -> None:
-        touch(home / ".whynot-cut" / "plugin-options.json", raw if raw is not None else json.dumps(obj).encode())
+        touch(home / ".whynot-cut" / "plugin-options.json",
+              raw if raw is not None else json.dumps(obj, ensure_ascii=False).encode("utf-8"))  # raw UTF-8 Arabic
 
     @staticmethod
     def settings(home: Path, configs) -> None:
-        touch(home / ".claude" / "settings.json", json.dumps({"theme": "dark", "pluginConfigs": configs}).encode())
+        touch(home / ".claude" / "settings.json",
+              json.dumps({"theme": "dark", "pluginConfigs": configs}, ensure_ascii=False).encode("utf-8"))
 
     @classmethod
     def cases(cls, tmp: Path) -> list:
-        far = tmp / "engine far"
-        other = tmp / "engine other"
-        third = tmp / "engine third"
+        far = tmp / "engine far محرك"  # Arabic letters: the files carry them as raw UTF-8, never backslash-u escapes
+        other = tmp / "engine other محرك"
+        third = tmp / "engine third محرك"
         P, S = cls.pointer, cls.settings
         return [
             ("default", lambda h: None, {}, ".whynot-cut", "default"),
@@ -373,7 +378,8 @@ class EngineHomeCases:
              lambda h: (P(h, {"engine_home": ""}), S(h, {"whynot-cut@thewhynot-ai": {
                  "options": {"engine_home": str(other)}}})), {}, ".whynot-cut", "default"),
             ("a pointer with a BOM is invalid: settings",
-             lambda h: (P(h, None, b"\xef\xbb\xbf" + json.dumps({"engine_home": str(far)}).encode()),
+             lambda h: (P(h, None, b"\xef\xbb\xbf" + json.dumps({"engine_home": str(far)},
+                                                                    ensure_ascii=False).encode("utf-8")),
                         S(h, {"whynot-cut@thewhynot-ai": {"options": {"engine_home": str(other)}}})),
              {}, other, "settings"),
             ("a pointer that is not an object is invalid: settings",
@@ -400,11 +406,13 @@ class EngineHomeCases:
             ("settings: ~ is the user home", lambda h: S(h, {"whynot-cut@thewhynot-ai": {
                 "options": {"engine_home": "~/WhyNot Engine"}}}), {}, "WhyNot Engine", "settings"),
             ("WHYNOT_OPTIONS_FILE moves the pointer",
-             lambda h: touch(tmp / "elsewhere" / "opts.json", json.dumps({"engine_home": str(far)}).encode()),
+             lambda h: touch(tmp / "elsewhere" / "opts.json",
+                             json.dumps({"engine_home": str(far)}, ensure_ascii=False).encode("utf-8")),
              {"WHYNOT_OPTIONS_FILE": str(tmp / "elsewhere" / "opts.json")}, far, "pointer"),
             ("CLAUDE_CONFIG_DIR moves settings.json",
              lambda h: touch(tmp / "cfg dir" / "settings.json", json.dumps({"pluginConfigs": {
-                 "whynot-cut@thewhynot-ai": {"options": {"engine_home": str(other)}}}}).encode()),
+                 "whynot-cut@thewhynot-ai": {"options": {"engine_home": str(other)}}}}, ensure_ascii=False)
+                 .encode("utf-8")),
              {"CLAUDE_CONFIG_DIR": str(tmp / "cfg dir")}, other, "settings"),
             ("REEL_HOME beats the pointer", lambda h: P(h, {"engine_home": str(far)}),
              {"REEL_HOME": str(third)}, third, "env:REEL_HOME"),
@@ -461,6 +469,15 @@ class TestEngineHome(unittest.TestCase):
         got, src = base.resolve_engine_home({"USERPROFILE": str(home)}, home)
         self.assertEqual(norm(got), norm("D:/WhyNot Engine"))
 
+    def test_the_case_files_carry_raw_utf8_arabic(self):
+        arabic = 0
+        for name, home, _extra, _want, _kind in self.each_case():
+            for f in (home / ".whynot-cut" / "plugin-options.json", home / ".claude" / "settings.json"):
+                if f.is_file():
+                    self.assertNotIn(b"\\u", f.read_bytes(), name)
+                    arabic += "محرك".encode("utf-8") in f.read_bytes()
+        self.assertGreaterEqual(arabic, 10)
+
     def test_paths_use_it_outside_the_sandbox_only(self):
         home = self.tmp / ARABIC_HOME
         far = self.tmp / "engine far"
@@ -488,6 +505,9 @@ class TestEngineHome(unittest.TestCase):
                 rc = cli.main(["plan", "--engine-home", str(home / ".whynot-cut")])
             self.assertEqual(rc, 2)
             self.assertIn(str(far), err.getvalue())
+            # and says how the editor fixes it alone: choose the folder explicitly
+            for needle in ("-EngineHome", "--engine-home", "run the installer again"):
+                self.assertIn(needle, err.getvalue())
         self.assertFalse((home / ".whynot-cut").exists())
         self.assertFalse(far.exists())
 
@@ -4096,6 +4116,12 @@ class TestPowerShellUninstall(TestPowerShellFrontEnd):
         self.assertIn("uv and Python are not downloaded", r.stdout)
         for p in (self.paths.python_dir, self.paths.bin_dir, self.paths.whynot):  # by the bootstrap, after the core
             self.assertIn(f"deleted {p}", r.stdout)
+        # (the bootstrap waits until the name is gone before it says "deleted"; under a loaded full run an antivirus
+        # or indexer holding the folder kept it listed for a moment once: give Windows the same short grace here)
+        for _ in range(50):
+            if not os.path.lexists(self.paths.whynot):
+                break
+            time.sleep(0.1)
         self.assertFalse(self.paths.whynot.exists(), sorted(os.listdir(self.paths.whynot))
                          if self.paths.whynot.exists() else out)
         settings = json.loads(self.paths.settings_file.read_text(encoding="utf-8"))
@@ -4278,8 +4304,8 @@ SH_FILES = sorted(INSTALLER.rglob("*.sh"))
 
 
 class TestStaticChecks(unittest.TestCase):
-    """Parsers always run when the shell exists; PSScriptAnalyzer (WNC_PSSA_PATH = its .psd1, or the PS module path)
-    and shellcheck (WNC_SHELLCHECK, or PATH) are skipped cleanly when they are not on this machine."""
+    """Parsers always run when the shell exists; PSScriptAnalyzer (WHYNOTCUT_PSSA_PATH = its .psd1, or the PS module
+    path) and shellcheck (WHYNOTCUT_SHELLCHECK, or PATH) are skipped cleanly when they are not on this machine."""
 
     def setUp(self):
         self._td = TempDir()
@@ -4349,7 +4375,7 @@ class TestStaticChecks(unittest.TestCase):
         self.assertNotEqual(self.bash_n(bad).returncode, 0)
 
     def test_psscriptanalyzer_finds_no_errors(self):
-        body = ("$p = $env:WNC_PSSA_PATH\n"
+        body = ("$p = $env:WHYNOTCUT_PSSA_PATH\n"
                 "try {\n"
                 "    if ($p) { Import-Module $p -ErrorAction Stop } else { Import-Module PSScriptAnalyzer -ErrorAction Stop }\n"
                 "} catch { Write-Output ('NOPSSA ' + $_); exit 7 }\n"
@@ -4363,15 +4389,15 @@ class TestStaticChecks(unittest.TestCase):
                 "(Get-Module PSScriptAnalyzer).Version)\n")
         r = self.ps(body, PS1_FILES)
         if r.returncode == 7:
-            self.skipTest("PSScriptAnalyzer is not importable (set WNC_PSSA_PATH to its .psd1)")
+            self.skipTest("PSScriptAnalyzer is not importable (set WHYNOTCUT_PSSA_PATH to its .psd1)")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual([x for x in r.stdout.splitlines() if x.startswith("ERR")], [], r.stdout)
         self.assertIn(f"analyzed {len(PS1_FILES)} with PSScriptAnalyzer", r.stdout, r.stdout + r.stderr)
 
     def test_shellcheck_is_clean(self):
-        sc = os.environ.get("WNC_SHELLCHECK") or shutil.which("shellcheck")
+        sc = os.environ.get("WHYNOTCUT_SHELLCHECK") or shutil.which("shellcheck")
         if not sc or not Path(sc).is_file() and not shutil.which(sc):
-            self.skipTest("shellcheck is not available (set WNC_SHELLCHECK to the executable)")
+            self.skipTest("shellcheck is not available (set WHYNOTCUT_SHELLCHECK to the executable)")
         r = subprocess.run([sc, "--shell=bash", *[str(f) for f in SH_FILES]], capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=300, stdin=subprocess.DEVNULL)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

@@ -101,8 +101,10 @@ def main(argv=None) -> int:
     paths = base.Paths.from_env(args.home)
     if args.engine_home and not paths.sandbox and base._norm(args.engine_home) != base._norm(paths.whynot):
         print(f"ERROR: the bootstrap placed uv and Python in {args.engine_home}, but the engine home is "
-              f"{paths.whynot} ({base.describe_engine_home_source(paths.engine_home_source)}). Nothing was changed; "
-              "tell WhyNot Cut support (the two resolvers disagree).", file=sys.stderr)
+              f"{paths.whynot} ({base.describe_engine_home_source(paths.engine_home_source)}). Nothing was changed. "
+              f"To fix it yourself, run the installer again with -EngineHome \"{paths.whynot}\" (macOS: --engine-home "
+              f"\"{paths.whynot}\"), or name the other folder the same way; if it happens again, tell WhyNot Cut "
+              "support (the two resolvers disagree).", file=sys.stderr)
         return 2
 
     if args.command == "plan":
