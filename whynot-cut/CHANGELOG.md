@@ -15,6 +15,12 @@
   A complete local model snapshot is loaded from its folder (no network, offline-safe even without `refs/main`).
   New `reel bench --audio <speech> [--seconds 300]` measures the real-time factor and caches it in
   `<engine home>/bench/whisper-bench.json`; `reel doctor` shows it as `transcription_speed`.
+  Review round 1: a batched segment that repeats itself, is likely silence or holds a known hallucination phrase
+  is decoded again one by one with the 2.x options and spliced in; the hallucination filter (G53) also drops a
+  known phrase found as a fast, low-confidence or no-speech run of words inside a longer segment (all
+  transcripts, including reels sliced from an episode); checkpoints also record the decoder (device, batch,
+  VAD) and a GPU fallback is marked and listed; CUDA out of memory halves the batch first; an incomplete model
+  offline says to run `reel model-download`; `auto` picks mlx only once `mlx_verified` is true.
 - Positive client-folder marker (structure 4.1): `reel scaffold` and `reel client-init` write `.whynot-client`
   (`{"whynot_client": 1, "created": ...}`) at the client root; `reel doctor --fix` writes it for an existing client that
   lacks it (only at the client root, never in `assets/` or `data/`). New `lib/client_marker.py` (stdlib only) is shared

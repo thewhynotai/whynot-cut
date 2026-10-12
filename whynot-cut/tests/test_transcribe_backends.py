@@ -66,9 +66,13 @@ def ct2_segments():
 class FakeWhisperModel:
     instances: list = []
     fail_on_cuda = False
+    seq_fn = None              # (audio, kw) -> segments of a sequential decode
+    fail_names = False         # loading by model NAME fails (no network)
 
     def __init__(self, model_size_or_path, device="auto", compute_type="default", cpu_threads=0, download_root=None,
                  **kw):
+        if FakeWhisperModel.fail_names and not os.path.isdir(str(model_size_or_path)):
+            raise OSError("cannot reach huggingface.co")
         self.src, self.device, self.compute_type = model_size_or_path, device, compute_type
         self.cpu_threads, self.download_root = cpu_threads, download_root
         self.calls = []
@@ -78,12 +82,15 @@ class FakeWhisperModel:
         self.calls.append(kw)
         if self.device == "cuda" and FakeWhisperModel.fail_on_cuda:
             raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
-        return iter(ct2_segments()), SimpleNamespace(language=kw.get("language") or "ar", language_probability=0.97,
+        segs = FakeWhisperModel.seq_fn(audio, kw) if FakeWhisperModel.seq_fn else ct2_segments()
+        return iter(segs), SimpleNamespace(language=kw.get("language") or "ar", language_probability=0.97,
                                                      duration=len(audio) / SR)
 
 
 class FakeBatched:
     instances: list = []
+    segments = None            # the batched pass's segments (default: ct2_segments())
+    max_ok = 99                # a larger batch raises CUDA out of memory
 
     def __init__(self, model):
         self.model, self.calls = model, []
@@ -91,8 +98,10 @@ class FakeBatched:
 
     def transcribe(self, audio, **kw):
         self.calls.append(kw)
-        return iter(ct2_segments()), SimpleNamespace(language=kw.get("language") or "ar", language_probability=0.97,
-                                                     duration=len(audio) / SR)
+        if kw["batch_size"] > FakeBatched.max_ok:
+            raise RuntimeError("CUDA failed with error out of memory")
+        return iter(FakeBatched.segments or ct2_segments()), SimpleNamespace(
+            language=kw.get("language") or "ar", language_probability=0.97, duration=len(audio) / SR)
 
 
 def fake_faster_whisper():
@@ -141,7 +150,9 @@ class _Home(unittest.TestCase):
         self.addCleanup(env.stop)
         self.addCleanup(shutil.rmtree, self.tmp, True)
         FakeWhisperModel.instances, FakeBatched.instances = [], []
-        FakeWhisperModel.fail_on_cuda = False
+        FakeWhisperModel.fail_on_cuda = FakeWhisperModel.fail_names = False
+        FakeWhisperModel.seq_fn = FakeBatched.segments = None
+        FakeBatched.max_ok = 99
 
     def fakes(self, cuda=1, cuda_missing=()):
         mods = dict(fake_faster_whisper(), ctranslate2=fake_ctranslate2(cuda))
@@ -156,7 +167,8 @@ class _Home(unittest.TestCase):
         d = self.home / "models" / ("models--" + repo.replace("/", "--"))
         s = d / "snapshots" / rev
         s.mkdir(parents=True)
-        for f in files or (["config.json", "tokenizer.json"] + (["model.bin"] if complete else [])):
+        for f in files or (["config.json", "tokenizer.json", "preprocessor_config.json"]
+                           + (["model.bin"] if complete else [])):
             (s / f).write_bytes(b"x" * 64)
         if ref:
             (d / "refs").mkdir()
@@ -194,11 +206,22 @@ class TestCpuThreads(unittest.TestCase):
 
 # --------------------------------------------------------------------------- backend selection
 class TestBackendSelection(unittest.TestCase):
-    def pick(self, want, sysname, machine, mlx=True):
-        return WB.choose_backend({"backend": want}, sysname=sysname, machine=machine, mlx_ok=lambda: mlx)
+    def pick(self, want, sysname, machine, mlx=True, verified=True):
+        return WB.choose_backend({"backend": want, "mlx_verified": verified}, sysname=sysname, machine=machine,
+                                 mlx_ok=lambda: mlx)
 
-    def test_auto_on_apple_silicon_with_mlx_is_mlx(self):
+    def test_auto_on_apple_silicon_with_verified_mlx_is_mlx(self):
         self.assertEqual(self.pick("auto", "darwin", "arm64")[0], "mlx")
+
+    def test_auto_never_picks_unverified_mlx(self):
+        """M6: until the Mac parity test sets mlx_verified, auto stays on the verified faster-whisper."""
+        name, note = self.pick("auto", "darwin", "arm64", verified=False)
+        self.assertEqual(name, "ct2")
+        self.assertIn("mlx_verified", note)
+        self.assertFalse(read_json(common.CONFIG_DIR / "transcription.json")["mlx_verified"])
+
+    def test_explicit_mlx_works_before_verification(self):
+        self.assertEqual(self.pick("mlx", "darwin", "arm64", verified=False), ("mlx", None))
 
     def test_auto_on_apple_silicon_without_mlx_falls_back_to_ct2_with_a_note(self):
         name, note = self.pick("auto", "darwin", "arm64", mlx=False)
@@ -635,8 +658,9 @@ class TestBench(_Home):
         self.assertEqual(r["elapsed_s"], 6.0)
         self.assertEqual(r["rt_factor"], 10.0)
         cache = read_json(self.home / "bench" / "whisper-bench.json")
-        self.assertEqual(cache["latest"], "ct2/large-v3/cuda/batched")
-        self.assertEqual(cache["results"]["ct2/large-v3/cuda/batched"]["rt_factor"], 10.0)
+        self.assertEqual(cache["latest"], "ct2/large-v3/cuda/batch8/no-hint")
+        self.assertEqual(cache["results"]["ct2/large-v3/cuda/batch8/no-hint"]["rt_factor"], 10.0)
+        self.assertFalse(r["hint"])
         got = WB.read_bench()
         self.assertTrue(got["measured"])
         self.assertEqual(got["rt_factor"], 10.0)
@@ -683,6 +707,353 @@ class TestCliFlags(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr[-400:])
             self.assertIn("--batch-size", r.stdout)
             self.assertIn("--backend", r.stdout)
+
+
+# --------------------------------------------------------------------------- review round 1: batched safety nets (I1a)
+def seg(text, start, end, words, cr=1.3, ns=0.01, lp=-0.2):
+    s = FakeSeg(text, start, end, [FakeWord(w, a, b, p) for w, a, b, p in words])
+    s.compression_ratio, s.no_speech_prob, s.avg_logprob = cr, ns, lp
+    return s
+
+
+GOOD = ("أهلا بيك", 0.5, 1.4, [(" أهلا", 0.5, 0.9, 0.9), (" بيك", 1.0, 1.4, 0.9)])
+
+
+class TestBatchedSafetyNets(_Home):
+    """The batched pipeline has no temperature fallback, no no-speech skip, and ~30 s segments: a suspect segment's
+    span is decoded again sequentially (2.x options) and its words are spliced in."""
+    audio = np.zeros(SR * 40, np.float32)
+
+    def setUp(self):
+        super().setUp()
+        self.fakes(cuda=1)
+        self.seq_calls = []
+
+        def seq(audio, kw):
+            self.seq_calls.append(dict(kw, samples=len(audio)))
+            return [seg(" كلام صحيح", 1.0, 2.0, [(" كلام", 1.0, 1.5, 0.9), (" صحيح", 1.6, 2.0, 0.9)])]
+        FakeWhisperModel.seq_fn = seq
+
+    def run_with(self, bad):
+        FakeBatched.segments = [seg(*GOOD), bad]
+        run = WB.make_runner("large-v3", vad=True, backend="ct2", batch_size=4)
+        return run, run(self.audio, 0, "ar", "هنا")
+
+    def test_repetition_is_decoded_again_and_spliced(self):
+        run, r = self.run_with(seg(" نعم نعم نعم نعم", 10.0, 20.0, [(" نعم", 10 + i, 10.5 + i, 0.9) for i in range(4)],
+                                   cr=3.1))
+        self.assertEqual(len(self.seq_calls), 1)
+        kw = self.seq_calls[0]
+        self.assertEqual(kw["samples"], 10 * SR)                       # only the suspect segment's span
+        self.assertFalse(kw["vad_filter"])
+        self.assertEqual(kw["temperature"], [0.0, 0.2, 0.4])           # the 2.x temperature retry
+        self.assertEqual((kw["beam_size"], kw["initial_prompt"], kw["language"]), (5, "هنا", "ar"))
+        self.assertEqual([w["word"] for w in r["words"]], ["أهلا", "بيك", "كلام", "صحيح"])
+        self.assertEqual(r["words"][2]["start_ms"], 11000)            # span-relative times made chunk-relative
+        self.assertEqual([s["start_ms"] for s in r["segments"]], [500, 11000])
+        self.assertEqual(run.state["redecoded"], [{"start_ms": 10000, "end_ms": 20000, "reason": "compression_ratio",
+                                                   "words_before": 4, "words_after": 2}])
+
+    def test_likely_silence_is_decoded_again(self):
+        FakeWhisperModel.seq_fn = lambda audio, kw: self.seq_calls.append(kw) or []   # 2.x skips it: no words
+        run, r = self.run_with(seg(" شكرا", 25.0, 27.0, [(" شكرا", 25.0, 27.0, 0.3)], ns=0.8, lp=-1.4))
+        self.assertEqual(run.state["redecoded"][0]["reason"], "no_speech")
+        self.assertEqual([w["word"] for w in r["words"]], ["أهلا", "بيك"])
+
+    def test_no_speech_alone_is_not_suspect(self):
+        run, r = self.run_with(seg(" شكرا", 25.0, 27.0, [(" شكرا", 25.0, 27.0, 0.9)], ns=0.8, lp=-0.4))
+        self.assertEqual(self.seq_calls, [])
+        self.assertEqual(run.state["redecoded"], [])
+
+    def test_hallucination_phrase_inside_a_long_segment(self):
+        words = [(" طيب", 30.0, 30.4, 0.9), (" اشتركوا", 31.0, 31.1, 0.9), (" في", 31.1, 31.2, 0.9),
+                 (" القناة", 31.2, 31.3, 0.9)]
+        run, r = self.run_with(seg(" طيب اشتركوا في القناة", 30.0, 31.3, words))
+        self.assertEqual(run.state["redecoded"][0]["reason"], "hallucination_phrase")
+
+    def test_clean_batch_is_left_alone(self):
+        run, r = self.run_with(seg(" Botox", 2.0, 2.6, [(" Botox", 2.0, 2.6, 0.7)]))
+        self.assertEqual(self.seq_calls, [])
+        self.assertEqual(len(r["words"]), 3)
+
+    def test_sequential_decoding_is_never_double_checked(self):
+        FakeWhisperModel.seq_fn = None
+        run = WB.make_runner("large-v3", vad=True, backend="ct2", batch_size=0)
+        run(self.audio, 0, "ar", None)
+        self.assertEqual(run.state["redecoded"], [])
+        self.assertEqual(len(FakeWhisperModel.instances[0].calls), 1)
+
+
+# --------------------------------------------------------------------------- review round 1: word-level G53 (I1b)
+def transcript(words, ns=0.1):
+    ws = [{"id": i + 1, "segment_id": 1, "word": w, "start_ms": a, "end_ms": b, "probability": p}
+          for i, (w, a, b, p) in enumerate(words)]
+    s = {"id": 1, "start_ms": ws[0]["start_ms"], "end_ms": ws[-1]["end_ms"], "text": " ".join(w["word"] for w in ws),
+         "avg_logprob": -0.3, "no_speech_prob": ns, "compression_ratio": 1.2, "words": [w["id"] for w in ws]}
+    return [s], ws
+
+
+class TestWordLevelHallucinations(unittest.TestCase):
+    def drop(self, words, ns=0.1):
+        from lib.transcribe import drop_hallucinations
+        return drop_hallucinations(*transcript(words, ns))
+
+    def test_fast_phrase_inside_a_segment_is_dropped(self):
+        segs, words, dropped = self.drop([("طيب", 0, 400, 0.9), ("اشتركوا", 1000, 1100, 0.9), ("في", 1100, 1200, 0.9),
+                                          ("القناة", 1200, 1300, 0.9)])
+        self.assertEqual([w["word"] for w in words], ["طيب"])
+        self.assertEqual(segs[0]["text"], "طيب")
+        self.assertEqual(segs[0]["words"], [1])
+        self.assertEqual(dropped[0]["level"], "words")
+        self.assertEqual(dropped[0]["text"], "اشتركوا في القناة")
+
+    def test_low_probability_phrase_is_dropped(self):
+        _, words, dropped = self.drop([("كلام", 0, 400, 0.9), ("شكرا", 1000, 1500, 0.2), ("على", 1500, 2000, 0.3),
+                                       ("المشاهدة", 2000, 2600, 0.25)])
+        self.assertEqual([w["word"] for w in words], ["كلام"])
+        self.assertEqual(dropped[0]["mean_probability"], 0.25)
+
+    def test_phrase_in_a_high_no_speech_segment_is_dropped(self):
+        _, words, _ = self.drop([("كلام", 0, 400, 0.9), ("Thanks", 1000, 1500, 0.9), ("for", 1500, 1900, 0.9),
+                                 ("watching", 1900, 2500, 0.9)], ns=0.7)
+        self.assertEqual([w["word"] for w in words], ["كلام"])
+
+    def test_a_host_who_really_says_it_is_kept(self):
+        segs, words, dropped = self.drop([("وطبعا", 0, 500, 0.9), ("اشتركوا", 600, 1200, 0.9), ("في", 1200, 1400, 0.9),
+                                          ("القناة", 1400, 2000, 0.9)])
+        self.assertEqual(len(words), 4)
+        self.assertEqual(dropped, [])
+        self.assertEqual(segs[0]["text"], "وطبعا اشتركوا في القناة")
+
+    def test_whole_segment_rule_still_applies(self):
+        segs, words, dropped = self.drop([("اشتركوا", 0, 100, 0.9), ("في", 100, 200, 0.9), ("القناة", 200, 320, 0.9)],
+                                         ns=0.93)
+        self.assertEqual((segs, words), ([], []))
+        self.assertEqual(dropped[0]["level"], "segment")
+
+    def test_finalize_applies_it_to_every_transcript(self):
+        """Episodes, long clips and reels sliced from an episode all go through finalize."""
+        from lib.transcribe import finalize
+        tmp = Path(tempfile.mkdtemp(prefix="whynot-t212-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        p = Paths(tmp / "C", "V1")
+        p.ensure_project()
+        segs, words = transcript([("طيب", 0, 400, 0.9), ("اشتركوا", 1000, 1100, 0.9), ("في", 1100, 1200, 0.9),
+                                  ("القناة", 1200, 1300, 0.9)])
+        finalize(p, {"source_video": "x.mp4", "backend": "test", "model": "none", "language": "ar",
+                     "language_probability": 1.0, "duration_ms": 2000}, segs, words)
+        wj = read_json(p.p("02_transcription/words.json"))
+        self.assertEqual([w["word"] for w in wj["words"]], ["طيب"])
+        self.assertEqual(wj["meta"]["dropped_hallucinations"][0]["level"], "words")
+        self.assertIn("Dropped Whisper hallucinations — 1", p.p("02_transcription/subtitle-review.md").read_text(
+            encoding="utf-8"))
+
+
+# --------------------------------------------------------------------------- review round 1: decoder in checkpoints (I2)
+class SigRunner:
+    """A fake runner with a decoder signature, like make_runner's."""
+
+    def __init__(self, sig):
+        self.backend, self.sig, self.calls = "ct2", dict(sig), []
+        self.state = {"redecoded": []}
+        self.on_call = None
+
+    def signature(self):
+        return dict(self.sig)
+
+    def __call__(self, audio, start_ms, language, prompt):
+        self.calls.append(start_ms)
+        if self.on_call:
+            self.on_call(self, start_ms)
+        return {"language": "ar", "language_probability": 0.9,
+                "segments": [{"id": 1, "start_ms": 100, "end_ms": 900, "text": "كلام", "avg_logprob": -0.2,
+                              "no_speech_prob": 0.0, "compression_ratio": 1.1, "words": [1]}],
+                "words": [{"id": 1, "segment_id": 1, "word": "كلام", "start_ms": 100, "end_ms": 900, "probability": 0.9}]}
+
+
+GPU4 = {"device": "cuda", "batch_size": 4, "vad": True}
+
+
+class TestDecoderCheckpoints(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="whynot-t212-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.paths = Paths(self.tmp / "C", "V1")
+        self.cdir = self.tmp / "chunks"
+        self.cdir.mkdir()
+        self.audio = np.zeros(SR * 30, np.float32)
+        self.plan = {"chunks": [[0, 10000], [10000, 20000], [20000, 30000]]}
+
+    def go(self, runner):
+        from lib.episode import run_chunks
+        return run_chunks(self.paths, self.cdir, self.audio, self.plan, runner, model="large-v3", prompt="هنا",
+                          language=None, label="test")
+
+    def test_records_device_batch_and_vad(self):
+        self.go(SigRunner(GPU4))
+        rec = read_json(self.cdir / "chunk_000.json")
+        self.assertEqual(rec["decoder"], GPU4)
+        self.assertNotIn("fallback_from", rec)
+
+    def test_any_decoder_change_redoes_the_chunks(self):
+        self.go(SigRunner(GPU4))
+        for change in ({"batch_size": 0}, {"vad": False}, {"device": "cpu", "batch_size": 0}, {"batch_size": 8}):
+            r = SigRunner(dict(GPU4, **change))
+            self.go(r)
+            self.assertEqual(r.calls, [0, 10000, 20000], change)
+            self.go(SigRunner(GPU4))                  # back to the original decoder for the next case
+
+    def test_same_decoder_resumes(self):
+        self.go(SigRunner(GPU4))
+        r = SigRunner(GPU4)
+        self.assertEqual(self.go(r)["ran"], 0)
+
+    def test_checkpoint_without_decoder_is_redone(self):
+        self.go(SigRunner(GPU4))
+        rec = read_json(self.cdir / "chunk_001.json")
+        rec.pop("decoder")
+        write_json(self.cdir / "chunk_001.json", rec)
+        r = SigRunner(GPU4)
+        self.go(r)
+        self.assertEqual(r.calls, [10000])
+
+    def test_mid_run_cpu_fallback_is_marked_kept_and_reported(self):
+        def fall(runner, start_ms):
+            if start_ms == 10000:                     # the GPU fails on the second chunk
+                runner.state["fallback_from"] = dict(GPU4)
+                runner.sig = {"device": "cpu", "batch_size": 0, "vad": True}
+        r = SigRunner(GPU4)
+        r.on_call = fall
+        done = self.go(r)
+        self.assertEqual(read_json(self.cdir / "chunk_000.json")["decoder"], GPU4)
+        later = read_json(self.cdir / "chunk_002.json")
+        self.assertEqual(later["decoder"]["device"], "cpu")
+        self.assertEqual(later["fallback_from"], GPU4)
+        self.assertEqual(done["decoders"], ["cuda/batch4/vad", "cpu/sequential/vad (fallback)"])
+        again = SigRunner(GPU4)                        # a re-run that wants the GPU keeps every chunk (no force)
+        self.assertEqual(self.go(again)["ran"], 0)
+        seq = SigRunner(dict(GPU4, batch_size=0))     # but asking for another decoder redoes them all
+        self.go(seq)
+        self.assertEqual(seq.calls, [0, 10000, 20000])
+
+    def test_redecoded_segments_are_recorded_per_chunk_in_absolute_time(self):
+        def mark(runner, start_ms):
+            if start_ms == 20000:
+                runner.state["redecoded"].append({"start_ms": 1000, "end_ms": 4000, "reason": "compression_ratio"})
+        r = SigRunner(GPU4)
+        r.on_call = mark
+        done = self.go(r)
+        self.assertEqual(read_json(self.cdir / "chunk_002.json")["redecoded"][0]["start_ms"], 21000)
+        self.assertEqual(read_json(self.cdir / "chunk_001.json")["redecoded"], [])
+        self.assertEqual(len(done["redecoded"]), 1)
+
+    def test_runner_signature_needs_no_model_load(self):
+        h = _Home("setUp")
+        h.setUp()
+        try:
+            h.fakes(cuda=1)
+            run = WB.make_runner("large-v3", vad=True, backend="ct2", batch_size=4)
+            self.assertEqual(run.signature(), GPU4)
+            self.assertEqual(FakeWhisperModel.instances, [])
+            self.assertEqual(WB.make_runner("large-v3", vad=False, backend="ct2", batch_size=4).signature(),
+                             {"device": "cuda", "batch_size": 0, "vad": False})
+        finally:
+            h.doCleanups()
+
+
+# --------------------------------------------------------------------------- review round 1: minors
+class TestOutOfMemory(_Home):
+    """M7: CUDA out of memory with a batch halves the batch before falling back to the CPU."""
+    audio = np.zeros(SR * 40, np.float32)
+
+    def test_halves_the_batch(self):
+        self.fakes(cuda=1)
+        FakeBatched.max_ok = 2
+        run = WB.make_runner("large-v3", vad=True, backend="ct2", batch_size=8)
+        r = run(self.audio, 0, "ar", None)
+        self.assertEqual([c["batch_size"] for b in FakeBatched.instances for c in b.calls], [8, 4, 2])
+        self.assertEqual((run.state["device"], run.state["batch_size"]), ("cuda", 2))
+        self.assertEqual(run.state["fallback_from"], {"device": "cuda", "batch_size": 8, "vad": True})
+        self.assertEqual(len(r["words"]), 3)
+
+    def test_sequential_gpu_before_cpu(self):
+        self.fakes(cuda=1)
+        FakeBatched.max_ok = 0
+        run = WB.make_runner("large-v3", vad=True, backend="ct2", batch_size=4)
+        run(self.audio, 0, "ar", None)
+        self.assertEqual((run.state["device"], run.state["batch_size"]), ("cuda", 0))
+        self.assertEqual(len(FakeWhisperModel.instances), 1)    # never reloaded on the CPU
+
+
+class TestModelCompleteness(_Home):
+    def test_large_v3_needs_its_preprocessor_config(self):
+        """M2: without preprocessor_config.json faster-whisper uses 80 mel bins; large-v3 needs 128."""
+        self.snapshot(files=["config.json", "tokenizer.json", "model.bin"])
+        self.assertIsNone(WB.snapshot_dir("large-v3", min_bytes=10))
+
+    def test_offline_with_a_partial_model_says_what_to_do(self):
+        """M1"""
+        self.fakes(cuda=0)
+        self.snapshot(complete=False)
+        with mock.patch.dict(os.environ, {"HF_HUB_OFFLINE": "1"}), self.assertRaises(RuntimeError) as cm:
+            WB.load_ct2("large-v3")
+        self.assertIn("incomplete", str(cm.exception))
+        self.assertIn("reel model-download --model large-v3", str(cm.exception))
+        self.assertEqual(FakeWhisperModel.instances, [])
+
+    def test_offline_without_any_model(self):
+        self.fakes(cuda=0)
+        with mock.patch.dict(os.environ, {"HF_HUB_OFFLINE": "1"}), self.assertRaises(RuntimeError) as cm:
+            WB.load_ct2("large-v3")
+        self.assertIn("not downloaded", str(cm.exception))
+
+    def test_partial_model_that_cannot_be_completed(self):
+        self.fakes(cuda=0)
+        self.snapshot(complete=False)
+        FakeWhisperModel.fail_names = True
+        with mock.patch.dict(os.environ, {"HF_HUB_OFFLINE": ""}), self.assertRaises(RuntimeError) as cm:
+            WB.load_ct2("large-v3")
+        self.assertIn("reel model-download", str(cm.exception))
+
+
+class TestMacCores(unittest.TestCase):
+    """M4: Apple Silicon counts its performance cores; Intel Macs every physical core."""
+
+    def sysctl(self, values):
+        def run(cmd, **kw):
+            v = values.get(cmd[-1])
+            return SimpleNamespace(returncode=0 if v else 1, stdout=f"{v}\n" if v else "")
+        return mock.patch.object(WB.subprocess, "run", side_effect=run)
+
+    def test_performance_cores_first(self):
+        with self.sysctl({"hw.perflevel0.physicalcpu": 8, "hw.physicalcpu": 12}):
+            self.assertEqual(WB._mac_physical_cores(), 8)
+
+    def test_intel_mac(self):
+        with self.sysctl({"hw.physicalcpu": 6}):
+            self.assertEqual(WB._mac_physical_cores(), 6)
+
+
+class TestBenchHint(_Home):
+    def test_root_uses_the_client_hint_and_the_key_says_so(self):
+        """M3"""
+        root = self.tmp / "C"
+        (root / common.CLIENT_PROFILE_REL).mkdir(parents=True)
+        write_json(root / common.CLIENT_PROFILE_REL / "transcription.json", {"initial_prompt": "د. سامبل إكزامبل"})
+        seen = []
+
+        def factory(model_size, vad, log_to=None, backend=None, batch_size=None):
+            def run(a, s, lang, prompt):
+                seen.append(prompt)
+                return {"segments": [], "words": [], "language": "ar", "language_probability": 0.9}
+            run.backend, run.load = "ct2", lambda: None
+            run.state = {"device": "cuda", "batch_size": 4, "compute_type": "float16"}
+            return run
+        with use_context(Context(root)), mock.patch.object(WB, "make_runner", side_effect=factory):
+            r = WB.bench(np.zeros(SR * 10, np.float32), model="large-v3")
+        self.assertEqual(seen, ["د. سامبل إكزامبل"])
+        self.assertTrue(r["hint"])
+        self.assertEqual(r["key"], "ct2/large-v3/cuda/batch4/hint")
 
 
 if __name__ == "__main__":

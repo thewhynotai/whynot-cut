@@ -418,11 +418,32 @@ def whisper_runner(model_size: str, vad: bool, ep: EpisodePaths | None = None, b
     return WB.make_runner(model_size, vad, ep, backend=backend, batch_size=batch_size)
 
 
-def _decoder_matches(rec: dict, model: str, prompt, backend) -> bool:
-    """MI-12: a checkpoint is reused only when the same model, prompt and backend decoded it. A changed
-    whisper_model, vocabulary hint or backend (or a 2.x checkpoint that recorded none of them) redoes the chunk, so
-    one transcript never mixes two decoders."""
-    return rec.get("model") == model and rec.get("prompt") == prompt and rec.get("backend") == backend
+def _decoder_matches(rec: dict, model: str, prompt, backend, decoder: dict | None = None) -> bool:
+    """MI-12: a checkpoint is reused only when the same decoder made it: model, prompt, backend, and (T2.12 review)
+    device, batched or sequential (batch size) and VAD. A changed whisper_model, vocabulary hint, backend or
+    `batch_size: 0` after a partial batched run (or a 2.x / early-3.0 checkpoint without these fields) redoes the
+    chunk, so one transcript never mixes two decoders silently. A chunk decoded after a GPU fallback (smaller batch
+    or CPU) records `fallback_from` = the decoder the run wanted: it is kept when that decoder is wanted again (the
+    fallback is listed in the transcript meta); `--force` redoes it."""
+    if rec.get("model") != model or rec.get("prompt") != prompt or rec.get("backend") != backend:
+        return False
+    if rec.get("decoder") == decoder:
+        return True
+    return rec.get("fallback_from") is not None and rec.get("fallback_from") == decoder
+
+
+def decoders_used(results: list) -> list:
+    """The distinct decoders of a run's chunks, e.g. ["cuda/batch4/vad"], with "(fallback)" marks."""
+    out = []
+    for r in results:
+        d = r.get("decoder") or {}
+        if not d:
+            continue
+        name = (f"{d.get('device')}/{'batch' + str(d['batch_size']) if d.get('batch_size') else 'sequential'}/"
+                f"{'vad' if d.get('vad') else 'no-vad'}" + (" (fallback)" if r.get("fallback_from") else ""))
+        if name not in out:
+            out.append(name)
+    return out
 
 
 def run_chunks(paths, cdir: Path, audio, plan: dict, runner, *, model: str, prompt, language: str | None,
@@ -433,32 +454,45 @@ def run_chunks(paths, cdir: Path, audio, plan: dict, runner, *, model: str, prom
     import time
     from .common import log
     backend = getattr(runner, "backend", None) or "injected"
+    sig = getattr(runner, "signature", None)
+    want = sig() if sig else None          # the decoder this run starts with (before any GPU fallback)
+    st = getattr(runner, "state", None) or {}
     lang, prob, results, ran, t0 = language, None, [], 0, time.time()
     n = len(plan["chunks"])
     for i, (a, b) in enumerate(plan["chunks"]):
         f = cdir / f"chunk_{i:03d}.json"
         rec = read_json(f)
-        if rec and rec.get("start_ms") == a and rec.get("end_ms") == b and _decoder_matches(rec, model, prompt, backend):
+        if rec and rec.get("start_ms") == a and rec.get("end_ms") == b and _decoder_matches(rec, model, prompt, backend, want):
             results.append(rec)
             lang = lang or rec.get("language")
             prob = prob if prob is not None else rec.get("language_probability")
             continue
+        seen = len(st.get("redecoded") or [])
         r = runner(audio[a * 16:b * 16], a, lang, prompt)
         lang = lang or r.get("language")
         prob = prob if prob is not None else r.get("language_probability")
         rec = {"index": i, "start_ms": a, "end_ms": b, "language": r.get("language"),
                "language_probability": r.get("language_probability"), "model": model, "prompt": prompt,
-               "backend": backend,
+               "backend": backend, "decoder": sig() if sig else None,
+               "redecoded": [dict(x, start_ms=x["start_ms"] + a, end_ms=x["end_ms"] + a)
+                             for x in (st.get("redecoded") or [])[seen:]],
                "segments": [dict(s, start_ms=s["start_ms"] + a, end_ms=s["end_ms"] + a) for s in r["segments"]],
                "words": [dict(w, start_ms=w["start_ms"] + a, end_ms=w["end_ms"] + a) for w in r["words"]]}
+        if st.get("fallback_from"):
+            rec["fallback_from"] = st["fallback_from"]
         write_json(f, rec)
         results.append(rec)
         ran += 1
         el = time.time() - t0
         log(paths, f"{label}: chunk {i + 1}/{n} ({fmt_ts(a, '.')}–{fmt_ts(b, '.')}) {len(rec['words'])} words; "
                    f"elapsed {el:.0f}s, ETA {el / ran * (n - len(results)):.0f}s")
+    used = decoders_used(results)
+    if len(used) > 1:
+        log(paths, f"{label}: the chunks were decoded by {len(used)} decoders ({', '.join(used)}); "
+                   "--force transcribes every chunk again with one")
     return {"results": results, "ran": ran, "language": lang, "language_probability": prob,
-            "elapsed_s": round(time.time() - t0, 1)}
+            "elapsed_s": round(time.time() - t0, 1), "decoders": used,
+            "redecoded": [x for r in results for x in (r.get("redecoded") or [])]}
 
 
 def chunk_plan(cdir: Path, audio, fingerprint: str, chunk_ms: int, language: str | None, force: bool = False) -> dict:
@@ -511,7 +545,9 @@ def transcribe_episode(ep: EpisodePaths, model_size: str = "large-v3", language:
             "batch_size": st.get("batch_size"), "cpu_threads": st.get("cpu_threads"),
             "language": done["language"], "language_probability": prob if prob is not None else 1.0,
             "duration_ms": plan["total_ms"], "initial_prompt": prompt, "elapsed_s": done["elapsed_s"],
-            "translated": False, "chunks": len(plan["chunks"]), "vad": st.get("vad", vad), "episode_id": ep.episode_id}
+            "translated": False, "chunks": len(plan["chunks"]), "vad": st.get("vad", vad), "episode_id": ep.episode_id,
+            "decoders": done["decoders"], "mixed_decoders": len(done["decoders"]) > 1,
+            "redecoded_segments": done["redecoded"]}
     res = finalize(ep, meta, segs, words)
     for name in ("transcript", "words"):   # a NEW machine transcript replaces the old machine originals
         (out / f"{name}.machine.json").write_bytes((out / f"{name}.json").read_bytes())

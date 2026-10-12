@@ -102,6 +102,8 @@ def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
         segs, words = stitch(done["results"])
         lang, prob = done["language"], done["language_probability"]
         extra = {"chunks": len(plan["chunks"]), "chunks_run": done["ran"]}
+        decoders = {"decoders": done["decoders"], "mixed_decoders": len(done["decoders"]) > 1,
+                    "redecoded_segments": done["redecoded"]}
     else:
         r = run(audio, 0, language, initial_prompt)
         segs, words, lang, prob = r["segments"], r["words"], r["language"], r["language_probability"]
@@ -116,7 +118,7 @@ def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
             "language": lang, "language_probability": prob if prob is not None else 1.0,
             "duration_ms": total_ms, "initial_prompt": initial_prompt, "elapsed_s": elapsed, "translated": False}
     if chunked:
-        meta.update(chunks=extra["chunks"], vad=st.get("vad", True))
+        meta.update(chunks=extra["chunks"], vad=st.get("vad", True), **decoders)
     res = finalize(paths, meta, segs, words)
     for name in ("transcript", "words"):   # a NEW machine transcript replaces the old machine originals
         (out / f"{name}.machine.json").write_bytes((out / f"{name}.json").read_bytes())
@@ -153,23 +155,75 @@ HALLUCINATIONS = ["اشتركوا في القناة", "اشتركوا في ال�
                   "Thank you for watching", "Subtitles by the Amara.org community", "Please subscribe"]
 
 
+def hallucination_runs(words: list) -> list:
+    """(first, last word index, phrase) of every known hallucination phrase spelled out by consecutive words,
+    compared after Arabic normalisation (a phrase inside a longer segment is found too)."""
+    from .plan import norm
+    flat = [(t, i) for i, w in enumerate(words) for t in norm(w).split()]
+    toks = [t for t, _ in flat]
+    out, seen = [], set()
+    for h in HALLUCINATIONS:          # two spellings fold to one phrase (القناة / القناه): one run per word span
+        p = norm(h).split()
+        for k in range(len(toks) - len(p) + 1) if p else []:
+            span = (flat[k][1], flat[k + len(p) - 1][1])
+            if toks[k:k + len(p)] == p and span not in seen:
+                seen.add(span)
+                out.append((*span, h))
+    return out
+
+
+HALLUCINATION_WPS = 6          # words a second no person speaks at
+HALLUCINATION_MIN_P = 0.4      # mean word probability below this = the model was guessing
+HALLUCINATION_NO_SPEECH = 0.5
+
+
 def drop_hallucinations(segs: list, words: list) -> tuple[list, list, list]:
-    """Remove segments that are a known Whisper hallucination AND cannot be speech (no-speech probability >= 0.5 or
-    more than 6 words a second). Seen on a real reel: «اشتركوا في القناة» in 0.32 s at the out-point, no_speech 0.93."""
+    """G53. Remove a known Whisper hallucination that cannot be speech: a whole segment that is the phrase (no-speech
+    probability >= 0.5 or more than 6 words a second; seen on a real reel: «اشتركوا في القناة» in 0.32 s at the
+    out-point, no_speech 0.93), and (3.0 T2.12) the same phrase as a run of words inside a longer segment when those
+    words are that fast, their mean probability is below 0.4, or the segment is high no-speech. Batched decoding
+    gives ~30 s segments, so the whole-segment rule alone never fires there. A host who really says «اشتركوا في
+    القناة» at a normal pace and confidence is kept."""
     from .plan import norm
     known = {norm(h) for h in HALLUCINATIONS}
     drop = []
     for s in segs:
         dur = max(1, s["end_ms"] - s["start_ms"]) / 1000
         n = len(s["text"].split())
-        if norm(s["text"]) in known and (s.get("no_speech_prob", 0) >= 0.5 or n / dur > 6):
+        if norm(s["text"]) in known and (s.get("no_speech_prob", 0) >= HALLUCINATION_NO_SPEECH
+                                         or n / dur > HALLUCINATION_WPS):
             drop.append(s)
-    if not drop:
-        return segs, words, []
+    dropped = [{"text": s["text"], "start_ms": s["start_ms"], "end_ms": s["end_ms"],
+                "no_speech_prob": s.get("no_speech_prob"), "level": "segment"} for s in drop]
     gone = {wid for s in drop for wid in s.get("words", [])}
-    return ([s for s in segs if s not in drop], [w for w in words if w["id"] not in gone],
-            [{"text": s["text"], "start_ms": s["start_ms"], "end_ms": s["end_ms"],
-              "no_speech_prob": s.get("no_speech_prob")} for s in drop])
+    by_id = {w["id"]: w for w in words}
+    kept_segs = []
+    for s in segs:
+        if s in drop:
+            continue
+        ws = [by_id[i] for i in s.get("words", []) if i in by_id]
+        cut = set()
+        for a, b, _h in hallucination_runs([w.get("word") or "" for w in ws]):
+            run = ws[a:b + 1]
+            dur = max(1, run[-1]["end_ms"] - run[0]["start_ms"]) / 1000
+            mean_p = sum(w.get("probability", 1.0) for w in run) / len(run)
+            if (len(run) / dur > HALLUCINATION_WPS or mean_p < HALLUCINATION_MIN_P
+                    or s.get("no_speech_prob", 0) >= HALLUCINATION_NO_SPEECH):
+                cut |= {w["id"] for w in run}
+                dropped.append({"text": " ".join(w["word"] for w in run), "start_ms": run[0]["start_ms"],
+                                "end_ms": run[-1]["end_ms"], "no_speech_prob": s.get("no_speech_prob"),
+                                "words_per_s": round(len(run) / dur, 1), "mean_probability": round(mean_p, 3),
+                                "level": "words"})
+        if not cut:
+            kept_segs.append(s)
+            continue
+        gone |= cut
+        rest = [w for w in ws if w["id"] not in cut]
+        if rest:
+            kept_segs.append(dict(s, text=" ".join(w["word"] for w in rest), words=[w["id"] for w in rest]))
+    if not dropped:
+        return segs, words, []
+    return kept_segs, [w for w in words if w["id"] not in gone], sorted(dropped, key=lambda d: d["start_ms"])
 
 
 def finalize(paths: Paths, meta: dict, segs: list, words: list) -> dict:
@@ -339,6 +393,10 @@ def subtitle_review(meta: dict, segs: list, words: list, quotes: list | None = N
     L = [f"# Subtitle Review — {Path(meta['source_video']).name}", "",
          f"- Backend: {meta['backend']} / model `{meta['model']}` on {meta.get('device', 'cpu')}",
          f"- Detected language: **{meta['language']}** (p={meta['language_probability']})",
+         *([f"- Decoders: {', '.join(meta['decoders'])}" + (" — MIXED (a GPU fallback mid-run; `--force` redoes "
+            "every chunk with one decoder)" if meta.get("mixed_decoders") else "")] if meta.get("decoders") else []),
+         *([f"- Batched segments decoded again one by one (repetition, silence or a known hallucination phrase): "
+            f"{len(meta['redecoded_segments'])}"] if meta.get("redecoded_segments") else []),
          f"- Script mix: {meta['scripts']}",
          f"- Duration: {fmt_ts(meta['duration_ms'], '.')} — {len(segs)} segments, {len(words)} words",
          f"- Translation: none (original speech preserved)", "",

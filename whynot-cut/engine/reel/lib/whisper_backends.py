@@ -5,7 +5,7 @@
        splits (episodes, clips longer than `long_clip_minutes`) is decoded by `BatchedInferencePipeline`.
   mlx  mlx-whisper on Apple Silicon (Metal), word timestamps. Not verified live yet (needs a Mac, T9.3).
 
-`transcription.json` `backend`: auto (mlx on Apple Silicon when mlx-whisper is installed, else ct2) | ct2 | mlx.
+`transcription.json` `backend`: auto (ct2; mlx on Apple Silicon once `mlx_verified`) | ct2 | mlx.
 A runner from `make_runner` decodes one stretch of 16 kHz audio and returns chunk-relative times:
   {segments: [{id, start_ms, end_ms, text, avg_logprob, no_speech_prob, compression_ratio, words: [ids]}],
    words: [{id, segment_id, word, start_ms, end_ms, probability}], language, language_probability}
@@ -64,6 +64,16 @@ def _linux_physical_cores() -> int | None:
     return len(cores) or None
 
 
+def _mac_physical_cores() -> int | None:
+    """Apple Silicon: the performance cores (hw.perflevel0); the efficiency cores slow CTranslate2's kernels down.
+    Intel Macs (no perflevel0): every physical core."""
+    for key in ("hw.perflevel0.physicalcpu", "hw.physicalcpu"):
+        r = subprocess.run(["sysctl", "-n", key], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip().isdigit() and int(r.stdout.strip()) > 0:
+            return int(r.stdout.strip())
+    return None
+
+
 def physical_cores() -> int:
     """Physical CPU cores (hyper-threads are no help to CTranslate2's matrix kernels); os.cpu_count() if unknown."""
     n = None
@@ -71,8 +81,7 @@ def physical_cores() -> int:
         if sys.platform == "win32":
             n = _win_physical_cores()
         elif sys.platform == "darwin":
-            r = subprocess.run(["sysctl", "-n", "hw.physicalcpu"], capture_output=True, text=True, timeout=5)
-            n = int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip().isdigit() else None
+            n = _mac_physical_cores()
         else:
             n = _linux_physical_cores()
     except Exception:  # noqa: BLE001  (any probe failure: fall back to the logical count)
@@ -112,8 +121,11 @@ def mlx_available() -> bool:
 
 def choose_backend(cfg: dict | None = None, explicit: str | None = None, *, sysname: str | None = None,
                    machine: str | None = None, mlx_ok=None) -> tuple[str, str | None]:
-    """(ct2 | mlx, a note when the wish could not be honoured). `explicit` (a CLI flag) beats the config."""
-    want = str(explicit or (cfg or {}).get("backend") or "auto").strip().lower()
+    """(ct2 | mlx, a note when the wish could not be honoured). `explicit` (a CLI flag) beats the config.
+    `auto` picks mlx only once `mlx_verified` is true (set after the Mac parity test against faster-whisper on Arabic,
+    T9.3); `backend: mlx` / `--backend mlx` uses it on Apple Silicon before that."""
+    cfg = cfg or {}
+    want = str(explicit or cfg.get("backend") or "auto").strip().lower()
     want = ALIASES.get(want, want)
     if want not in BACKENDS:
         raise ValueError(f"transcription backend {want!r} unknown: use one of {', '.join(BACKENDS)}")
@@ -121,13 +133,20 @@ def choose_backend(cfg: dict | None = None, explicit: str | None = None, *, sysn
         return "ct2", None
     apple = is_apple_silicon(sysname, machine)
     have = (mlx_ok or mlx_available)() if apple else False
-    if apple and have:
-        return "mlx", None
-    if want == "auto":
+    if want == "mlx":
+        if apple and have:
+            return "mlx", None
+        return "ct2", ("mlx needs Apple Silicon: using faster-whisper" if not apple else
+                       "mlx-whisper is not installed (reel setup installs it on Apple Silicon): using faster-whisper")
+    if not apple:
+        return "ct2", None
+    if not have:
         return "ct2", ("Apple Silicon without mlx-whisper: faster-whisper runs on the CPU (reel setup installs "
-                       "mlx-whisper on this Mac)" if apple else None)
-    return "ct2", ("mlx needs Apple Silicon: using faster-whisper" if not apple else
-                   "mlx-whisper is not installed (reel setup installs it on Apple Silicon): using faster-whisper")
+                       "mlx-whisper on this Mac)")
+    if not cfg.get("mlx_verified"):
+        return "ct2", ("mlx-whisper is installed but not yet verified against faster-whisper on Arabic "
+                       "(transcription.json mlx_verified): using faster-whisper; backend: mlx uses it anyway")
+    return "mlx", None
 
 
 # --------------------------------------------------------------------------- local snapshots (offline)
@@ -139,10 +158,14 @@ def _ct2_repo(model: str) -> str | None:
         return CT2_REPOS.get(model)
 
 
+def _repo_dir(repo: str | None) -> Path | None:
+    return models_dir() / ("models--" + repo.replace("/", "--")) if repo else None
+
+
 def _snapshot(repo: str | None, need: list, min_bytes: int, any_of: list | None = None) -> Path | None:
-    if not repo:
+    d = _repo_dir(repo)
+    if d is None:
         return None
-    d = models_dir() / ("models--" + repo.replace("/", "--"))
     snaps = d / "snapshots"
     if not snaps.is_dir():
         return None
@@ -159,6 +182,12 @@ def _snapshot(repo: str | None, need: list, min_bytes: int, any_of: list | None 
     return None
 
 
+def _ct2_needs(model: str) -> list:
+    # large-v3 / large-v3-turbo use 128 mel bins: without preprocessor_config.json faster-whisper silently falls back
+    # to 80 and transcribes garbage
+    return ["config.json", "tokenizer.json"] + (["preprocessor_config.json"] if model.startswith("large-v3") else [])
+
+
 def snapshot_dir(model: str, min_bytes: int | None = None) -> Path | None:
     """The complete local faster-whisper snapshot of `model` (refs/main first, else the newest complete one), or None.
     Loading from this folder never touches the network; a model NAME makes huggingface_hub try it first (connection
@@ -166,7 +195,13 @@ def snapshot_dir(model: str, min_bytes: int | None = None) -> Path | None:
     if Path(model).is_dir():
         return Path(model)
     mb = MIN_MODEL_BYTES if min_bytes is None else min_bytes
-    return _snapshot(_ct2_repo(model), ["config.json", "tokenizer.json"], mb, ["model.bin"])
+    return _snapshot(_ct2_repo(model), _ct2_needs(model), mb, ["model.bin"])
+
+
+def partial_download(model: str) -> bool:
+    """Some files of `model` are in the engine home but no complete snapshot (an interrupted download)."""
+    d = _repo_dir(_ct2_repo(model))
+    return bool(d and d.is_dir()) and snapshot_dir(model) is None
 
 
 def mlx_snapshot_dir(model: str, min_bytes: int | None = None) -> Path | None:
@@ -187,11 +222,7 @@ def mlx_model_source(model: str) -> str:
 
 
 # --------------------------------------------------------------------------- CTranslate2 loading
-def load_ct2(model_size: str, compute_type: str = "int8", device: str | None = None):
-    """faster-whisper on an NVIDIA GPU when usable, else on the CPU. `transcription.json` device: auto | cpu | cuda.
-    Returns (model, device, compute_type)."""
-    from faster_whisper import WhisperModel
-    cfg = load_config("transcription.json")
+def _device_tries(cfg: dict, device: str | None, compute_type: str) -> list:
     want = (device or cfg.get("device") or "auto").lower()
     tries = []
     if want in ("auto", "cuda"):
@@ -205,7 +236,26 @@ def load_ct2(model_size: str, compute_type: str = "int8", device: str | None = N
             pass
     if want != "cuda" or not tries:
         tries.append(("cpu", compute_type))
+    return tries
+
+
+def _offline() -> bool:
+    return os.environ.get("HF_HUB_OFFLINE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def load_ct2(model_size: str, compute_type: str = "int8", device: str | None = None):
+    """faster-whisper on an NVIDIA GPU when usable, else on the CPU. `transcription.json` device: auto | cpu | cuda.
+    Returns (model, device, compute_type)."""
+    from faster_whisper import WhisperModel
+    cfg = load_config("transcription.json")
+    tries = _device_tries(cfg, device, compute_type)
     snap = snapshot_dir(model_size)
+    how = (f"run `reel model-download --model {model_size}` (about 3 GB for large-v3; it resumes an interrupted "
+           "download) with an internet connection")
+    if not snap and _offline():
+        raise RuntimeError(f"Whisper model {model_size} is "
+                           f"{'incomplete (an interrupted download)' if partial_download(model_size) else 'not downloaded'}"
+                           f" and this computer is offline (HF_HUB_OFFLINE): {how}")
     kw = {"cpu_threads": cpu_threads(cfg)}
     if not snap:
         kw["download_root"] = str(models_dir())
@@ -215,88 +265,168 @@ def load_ct2(model_size: str, compute_type: str = "int8", device: str | None = N
             return WhisperModel(str(snap) if snap else model_size, device=dev, compute_type=ct, **kw), dev, ct
         except Exception as e:  # noqa: BLE001  (e.g. CUDA runtime libraries missing -> CPU)
             last = e
+    if not snap and partial_download(model_size):
+        raise RuntimeError(f"Whisper model {model_size} is incomplete (an interrupted download) and could not be "
+                           f"completed ({type(last).__name__}: {last}): {how}") from last
     raise last
 
 
 # --------------------------------------------------------------------------- output schema
-def _seg_dict(segs, words, start, end, text, avg_logprob, no_speech_prob, compression_ratio, wlist):
-    seg = {"id": len(segs) + 1, "start_ms": int(round(start * 1000)), "end_ms": int(round(end * 1000)),
-           "text": text.strip(), "avg_logprob": round(avg_logprob, 3), "no_speech_prob": round(no_speech_prob, 3),
-           "compression_ratio": round(compression_ratio, 3), "words": []}
-    for w, ws, we, p in wlist:
-        wd = {"id": len(words) + 1, "segment_id": seg["id"], "word": w.strip(), "start_ms": int(round(ws * 1000)),
-              "end_ms": int(round(we * 1000)), "probability": round(p, 3)}
-        words.append(wd)
-        seg["words"].append(wd["id"])
-    segs.append(seg)
+def _raw_ct2(s) -> dict:
+    """A faster-whisper Segment as plain data (seconds), so segments can be re-decoded and spliced."""
+    return {"start": s.start, "end": s.end, "text": s.text, "avg_logprob": s.avg_logprob,
+            "no_speech_prob": s.no_speech_prob, "compression_ratio": s.compression_ratio,
+            "words": [(w.word, w.start, w.end, w.probability) for w in (s.words or [])]}
+
+
+def _shift(raw: dict, dt: float) -> dict:
+    return dict(raw, start=raw["start"] + dt, end=raw["end"] + dt,
+                words=[(w, a + dt, b + dt, p) for w, a, b, p in raw["words"]])
+
+
+def _from_raw(raws: list, language, language_probability) -> dict:
+    segs, words = [], []
+    for r in raws:
+        seg = {"id": len(segs) + 1, "start_ms": int(round(r["start"] * 1000)), "end_ms": int(round(r["end"] * 1000)),
+               "text": (r["text"] or "").strip(), "avg_logprob": round(r["avg_logprob"], 3),
+               "no_speech_prob": round(r["no_speech_prob"], 3), "compression_ratio": round(r["compression_ratio"], 3),
+               "words": []}
+        for w, ws, we, p in r["words"]:
+            wd = {"id": len(words) + 1, "segment_id": seg["id"], "word": w.strip(), "start_ms": int(round(ws * 1000)),
+                  "end_ms": int(round(we * 1000)), "probability": round(p, 3)}
+            words.append(wd)
+            seg["words"].append(wd["id"])
+        segs.append(seg)
+    return {"segments": segs, "words": words, "language": language, "language_probability": language_probability}
 
 
 def ct2_result(segments, info) -> dict:
-    segs, words = [], []
-    for s in segments:
-        _seg_dict(segs, words, s.start, s.end, s.text, s.avg_logprob, s.no_speech_prob, s.compression_ratio,
-                  [(w.word, w.start, w.end, w.probability) for w in (s.words or [])])
-    return {"segments": segs, "words": words, "language": info.language,
-            "language_probability": round(info.language_probability, 3)}
+    return _from_raw([_raw_ct2(s) for s in segments], info.language, round(info.language_probability, 3))
 
 
 def mlx_result(res: dict, language: str | None) -> dict:
-    segs, words = [], []
-    for s in res.get("segments") or []:
-        _seg_dict(segs, words, s["start"], s["end"], s.get("text", ""), s.get("avg_logprob", 0.0),
-                  s.get("no_speech_prob", 0.0), s.get("compression_ratio", 0.0),
-                  [(w["word"], w["start"], w["end"], w.get("probability", 0.0)) for w in (s.get("words") or [])])
+    raws = [{"start": s["start"], "end": s["end"], "text": s.get("text", ""), "avg_logprob": s.get("avg_logprob", 0.0),
+             "no_speech_prob": s.get("no_speech_prob", 0.0), "compression_ratio": s.get("compression_ratio", 0.0),
+             "words": [(w["word"], w["start"], w["end"], w.get("probability", 0.0)) for w in (s.get("words") or [])]}
+            for s in res.get("segments") or []]
     # mlx-whisper reports no language probability: 1.0 when the caller fixed the language, else unknown
-    return {"segments": segs, "words": words, "language": res.get("language") or language,
-            "language_probability": 1.0 if language else None}
+    return _from_raw(raws, res.get("language") or language, 1.0 if language else None)
+
+
+# --------------------------------------------------------------------------- batched safety nets
+def suspect(raw: dict) -> str | None:
+    """Why a batched segment must be decoded again sequentially, or None. The batched pipeline has none of 2.x's
+    three safety nets: no temperature fallback when the text repeats (compression ratio > 2.4), no skip of silence
+    the model 'heard' (no-speech > 0.6 with avg logprob < -1), and its ~30 s segments hide a known hallucination
+    phrase from the whole-segment filter."""
+    from .transcribe import hallucination_runs
+    if raw["compression_ratio"] > 2.4:
+        return "compression_ratio"
+    if raw["no_speech_prob"] > 0.6 and raw["avg_logprob"] < -1.0:
+        return "no_speech"
+    if hallucination_runs([w[0] for w in raw["words"]] or (raw["text"] or "").split()):
+        return "hallucination_phrase"
+    return None
+
+
+def _oom(e: Exception) -> bool:
+    s = str(e).lower()
+    return "out of memory" in s or "cuda_error_out_of_memory" in s
 
 
 # --------------------------------------------------------------------------- runners
 def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, compute_type: str = "int8"):
-    state: dict = {"backend": LABEL["ct2"], "vad": vad}
+    state: dict = {"backend": LABEL["ct2"], "vad": vad, "redecoded": []}
+
+    def effective_batch(device: str) -> int:
+        return batch_size if (vad and device == "cuda" and batch_size > 1) else 0
 
     def load(device: str | None = None):
+        expected = None if "device" in state else signature()
         state["model"], state["device"], state["compute_type"] = load_ct2(model_size, compute_type, device=device)
         state["cpu_threads"] = cpu_threads(cfg)
-        bs = batch_size if (vad and state["device"] == "cuda") else 0
-        state["pipeline"] = None
-        if bs > 1:
-            from faster_whisper import BatchedInferencePipeline
-            state["pipeline"] = BatchedInferencePipeline(state["model"])
-        state["batch_size"] = bs if state["pipeline"] else 0
+        set_batch(effective_batch(state["device"]))
+        if expected and expected["device"] != state["device"]:      # the GPU would not even load the model
+            state.setdefault("fallback_from", expected)
         log(log_to, f"Whisper {model_size} on {state['device']} ({state['compute_type']}), VAD {'on' if vad else 'off'}, "
                     + (f"batched x{state['batch_size']}" if state["batch_size"] else
                        f"sequential, {state['cpu_threads']} CPU threads"))
 
-    def decode(audio, language, prompt):
-        opts = dict(language=language, task="transcribe", beam_size=5, word_timestamps=True, vad_filter=vad,
+    def set_batch(bs: int):
+        state["batch_size"] = bs if bs > 1 else 0
+        state["pipeline"] = None
+        if state["batch_size"]:
+            from faster_whisper import BatchedInferencePipeline
+            state["pipeline"] = BatchedInferencePipeline(state["model"])
+
+    def signature() -> dict:
+        """The decoder a checkpoint records: device, batched (batch size) or sequential (0), VAD. Before the model
+        loads it is the expected one (no 3 GB load just to compare checkpoints)."""
+        if "device" in state:
+            return {"device": state["device"], "batch_size": state["batch_size"], "vad": vad}
+        dev = _device_tries(cfg, None, compute_type)[0][0]
+        return {"device": dev, "batch_size": effective_batch(dev), "vad": vad}
+
+    def options(language, prompt):
+        return dict(language=language, task="transcribe", beam_size=5, word_timestamps=True, vad_filter=vad,
                     condition_on_previous_text=False, initial_prompt=prompt, temperature=TEMPERATURES)
-        if state["pipeline"] is not None:
-            segments, info = state["pipeline"].transcribe(audio, batch_size=state["batch_size"], **opts)
-        else:
-            segments, info = state["model"].transcribe(audio, **opts)
-        return ct2_result(segments, info)       # consumes the lazy generator: GPU errors surface here
+
+    def sequential(audio, language, prompt, vad_filter):
+        segments, info = state["model"].transcribe(audio, **dict(options(language, prompt), vad_filter=vad_filter))
+        return [_raw_ct2(s) for s in segments], info       # consumes the lazy generator: GPU errors surface here
+
+    def decode(audio, language, prompt):
+        if state["pipeline"] is None:
+            raws, info = sequential(audio, language, prompt, vad)
+            return _from_raw(raws, info.language, round(info.language_probability, 3))
+        segments, info = state["pipeline"].transcribe(audio, batch_size=state["batch_size"], **options(language, prompt))
+        raws, out = [_raw_ct2(s) for s in segments], []
+        lang = language or info.language
+        for r in raws:
+            why = suspect(r)
+            if not why:
+                out.append(r)
+                continue
+            a, b = max(0, int(r["start"] * 16000)), min(len(audio), int(round(r["end"] * 16000)))
+            again, _ = sequential(audio[a:b], lang, prompt, False) if b > a else ([], None)
+            again = [_shift(x, a / 16000) for x in again]
+            state["redecoded"].append({"start_ms": int(round(r["start"] * 1000)), "end_ms": int(round(r["end"] * 1000)),
+                                       "reason": why, "words_before": len(r["words"]),
+                                       "words_after": sum(len(x["words"]) for x in again)})
+            out.extend(again)
+        return _from_raw(out, info.language, round(info.language_probability, 3))
+
+    def degrade(e):
+        """GPU trouble: a smaller batch on an out-of-memory, then the CPU. Marked on the checkpoints that follow."""
+        state.setdefault("fallback_from", signature())
+        if state["batch_size"] > 1 and _oom(e):
+            set_batch(state["batch_size"] // 2)
+            log(log_to, f"GPU out of memory: retrying with "
+                        + (f"batch x{state['batch_size']}" if state["batch_size"] else "sequential decoding"))
+            return
+        log(log_to, f"GPU transcription failed ({type(e).__name__}: {e}); retrying on CPU"
+                    + (" - run `reel gpu-enable` (with the editor's OK, ~550 MB) for GPU speed"
+                       if "cublas" in str(e).lower() else ""))
+        load("cpu")
 
     def run(audio, start_ms, language, prompt):
         if "model" not in state:
             load()
-        try:
-            return decode(audio, language, prompt)
-        except Exception as e:  # noqa: BLE001  (GPU libraries can fail only at the first inference)
-            if state["device"] != "cuda":
-                raise
-            log(log_to, f"GPU transcription failed ({type(e).__name__}: {e}); retrying on CPU"
-                        + (" - run `reel gpu-enable` (with the editor's OK, ~550 MB) for GPU speed"
-                           if "cublas" in str(e).lower() else ""))
-            load("cpu")
-            return decode(audio, language, prompt)
-    run.state, run.backend, run.load = state, "ct2", lambda: run.state.get("model") or load()
+        while True:
+            try:
+                return decode(audio, language, prompt)
+            except Exception as e:  # noqa: BLE001  (GPU libraries can fail only at the first inference)
+                if state["device"] != "cuda":
+                    raise
+                degrade(e)
+    run.state, run.backend, run.signature = state, "ct2", signature
+    run.load = lambda: run.state.get("model") or load()
     return run
 
 
 def _mlx_runner(model_size: str, vad: bool, log_to):
     state: dict = {"backend": LABEL["mlx"], "device": "metal", "compute_type": "float16", "batch_size": 0,
-                   "vad": False}      # mlx-whisper has no VAD: the episode chunks still cut in silence
+                   "vad": False, "redecoded": []}   # mlx-whisper has no VAD: the episode chunks still cut in silence
 
     def load():
         import mlx_whisper
@@ -311,14 +441,17 @@ def _mlx_runner(model_size: str, vad: bool, log_to):
                                       word_timestamps=True, condition_on_previous_text=False, initial_prompt=prompt,
                                       temperature=tuple(TEMPERATURES), verbose=None)
         return mlx_result(res, language)
-    run.state, run.backend, run.load = state, "mlx", lambda: run.state.get("mlx") or load()
+    run.state, run.backend = state, "mlx"
+    run.signature = lambda: {"device": "metal", "batch_size": 0, "vad": False}
+    run.load = lambda: run.state.get("mlx") or load()
     return run
 
 
 def make_runner(model_size: str, vad: bool, log_to=None, backend: str | None = None, batch_size: int | None = None,
                 compute_type: str = "int8"):
     """run(audio, start_ms, language, prompt) -> the schema above. The backend is chosen now (cheap); the model loads
-    at the first call (or `run.load()`). run.state: backend label, device, compute_type, batch_size, cpu_threads."""
+    at the first call (or `run.load()`). run.state: backend label, device, compute_type, batch_size, cpu_threads,
+    redecoded (batched segments decoded again); run.signature(): the decoder checkpoints record."""
     cfg = load_config("transcription.json")
     name, note = choose_backend(cfg, backend)
     if note:
@@ -357,7 +490,9 @@ def bench_file() -> Path:
 def bench(audio, model: str = "large-v3", backend: str | None = None, batch_size: int | None = None,
           source: str | None = None, clock=None) -> dict:
     """Decode `audio` (16 kHz float32, ~5 minutes of speech) once with VAD, as an episode chunk is decoded, and
-    record the real-time factor (minutes of audio per minute of decoding) for `reel doctor`."""
+    record the real-time factor (minutes of audio per minute of decoding) for `reel doctor`. The client's vocabulary
+    hint is used when the request has a client (`--root`): it changes the speed (prompt tokens x beams x batch), so
+    the cache key records it and the exact batch size."""
     import time
     clock = clock or time.perf_counter
     run = make_runner(model, vad=True, backend=backend, batch_size=batch_size)
@@ -375,9 +510,12 @@ def bench(audio, model: str = "large-v3", backend: str | None = None, batch_size
              "label": st.get("backend"), "device": st.get("device"), "compute_type": st.get("compute_type"),
              "batch_size": st.get("batch_size", 0), "cpu_threads": st.get("cpu_threads"),
              "load_s": round(t1 - t0, 2), "elapsed_s": round(el, 2), "rt_factor": round(audio_s / el, 2),
-             "words": len(r.get("words", [])), "language": r.get("language"),
+             "words": len(r.get("words", [])), "language": r.get("language"), "hint": bool(prompt),
+             "hint_chars": len(prompt or ""), "redecoded": len(st.get("redecoded") or []),
              "system": f"{platform.system()} {platform.machine()}"}
-    key = f"{entry['backend']}/{model}/{entry['device']}/{'batched' if entry['batch_size'] else 'sequential'}"
+    key = (f"{entry['backend']}/{model}/{entry['device']}/"
+           f"{'batch' + str(entry['batch_size']) if entry['batch_size'] else 'sequential'}/"
+           f"{'hint' if prompt else 'no-hint'}")
     f = bench_file()
     cache = read_json(f, {}) or {}
     cache.setdefault("results", {})[key] = entry
@@ -398,7 +536,8 @@ def read_bench() -> dict:
     return {"measured": True, "rt_factor": rt, "backend": e.get("backend"), "model": e.get("model"),
             "device": e.get("device"), "batch_size": e.get("batch_size"), "date": e.get("measured"),
             "summary": f"{e.get('model')} on {e.get('device')} ({e.get('backend')}"
-                       + (f", batched x{e['batch_size']}" if e.get("batch_size") else "") + f"): {rt} min of audio per "
+                       + (f", batched x{e['batch_size']}" if e.get("batch_size") else "")
+                       + (", with the client's vocabulary hint" if e.get("hint") else "") + f"): {rt} min of audio per "
                        f"minute" + (f"; a 60-minute episode ≈ {round(60 / rt, 1)} min" if rt else ""),
             "all": {k: v.get("rt_factor") for k, v in res.items()}}
 
