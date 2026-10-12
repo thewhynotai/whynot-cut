@@ -14,8 +14,11 @@ import {
   findSequence,
   fsPath,
   getPpro,
+  isAbsolutePath,
   isWindowsPath,
+  mtimeOf,
   nativePath,
+  removeFile,
   requireActiveProject,
   statOf,
 } from "./premiere.ts";
@@ -35,24 +38,44 @@ export function exportFolder(outDir: string): string {
 
 type Settled = { ok: true } | { ok: false; why: string };
 
-/** Wait until the file exists and two reads `pollMs` apart give the same non-zero size. */
-async function waitForStableFile(ctx: OpContext, path: string, timing: FrameTiming): Promise<Settled> {
+/** An older PNG at the target that could not be deleted: the new frame must differ from it in size or mtime. */
+interface OldFile {
+  size: number;
+  mtime: number | null;
+}
+
+/** Wait until the file exists and two reads `pollMs` apart give the same non-zero size. With `old`, a file that still
+ *  looks like the old one (same size and same or unreported mtime) does not count as the new frame. */
+async function waitForStableFile(ctx: OpContext, path: string, timing: FrameTiming, old: OldFile | null): Promise<Settled> {
   const { env } = ctx;
   const fs = env.fs();
   const t0 = env.now();
   let last = -1;
   let seen = false;
+  let stale = false;
   for (;;) {
     ctx.throwIfCancelled();
     const st = await statOf(fs, path);
-    const size = typeof st?.size === "number" ? st.size : st ? 0 : -1;
+    let size = typeof st?.size === "number" ? st.size : st ? 0 : -1;
+    if (old && size === old.size) {
+      const m = mtimeOf(st);
+      if (m === null || m === old.mtime) {
+        stale = true;
+        size = -1; // still the old file: not the new frame yet
+      }
+    }
     if (size > 0) {
       if (size === last) return { ok: true };
       seen = true;
     }
     last = size;
     const waited = env.now() - t0;
-    if (!seen && waited >= timing.appearMs) return { ok: false, why: `no file appeared at ${path} within ${Math.round(timing.appearMs / 1000)} s` };
+    if (!seen && waited >= timing.appearMs) {
+      const name = path.split("/").pop();
+      return stale
+        ? { ok: false, why: `the older ${name} in that folder could not be deleted and was not replaced within ${Math.round(timing.appearMs / 1000)} s` }
+        : { ok: false, why: `no file appeared at ${path} within ${Math.round(timing.appearMs / 1000)} s` };
+    }
     if (waited >= timing.settleMs) return { ok: false, why: `${path} was still being written after ${Math.round(timing.settleMs / 1000)} s` };
     await env.sleep(timing.pollMs);
   }
@@ -63,6 +86,9 @@ export const exportFrames: Op<ExportFramesData, ExportFramesReadback> = {
   exclusive: true,
   async run(data, ctx) {
     const timing: FrameTiming = { ...DEFAULT_TIMING, ...ctx.env.timing };
+    if (!isAbsolutePath(data.out_dir)) {
+      throw new OpError(`The frames folder "${data.out_dir}" is not an absolute folder path.`, "Send the full path of the frames folder (for example D:\\Clients\\X\\frames), then run the command again.");
+    }
     const ppro = getPpro(ctx.env);
     const project = data.project_path ? await activateProject(ctx.env, ppro, data.project_path) : await requireActiveProject(ppro);
     const seq = await findSequence(project, data.sequence_name);
@@ -86,6 +112,13 @@ export const exportFrames: Op<ExportFramesData, ExportFramesReadback> = {
       const t = data.times[i] as number;
       ctx.progress(`Frame ${i + 1} of ${n}`, i, n);
       const name = frameName(t);
+      const target = `${fsPath(folder)}${name}`;
+      // an older frame of the same name would look exported: delete it; if it stays, the new one must differ from it
+      let old: OldFile | null = null;
+      const before = await statOf(ctx.env.fs(), target);
+      if (before && !(await removeFile(ctx.env.fs(), target))) {
+        old = { size: typeof before.size === "number" ? before.size : 0, mtime: mtimeOf(before) };
+      }
       let returned: unknown;
       try {
         returned = await ppro.Exporter.exportSequenceFrame(seq, ppro.TickTime.createWithSeconds(t), name, folder, width, height);
@@ -97,7 +130,7 @@ export const exportFrames: Op<ExportFramesData, ExportFramesReadback> = {
         frames.push({ t, error: `Premiere did not export the frame (exportSequenceFrame returned ${String(returned)}).` });
         continue;
       }
-      const settled = await waitForStableFile(ctx, `${fsPath(folder)}${name}`, timing);
+      const settled = await waitForStableFile(ctx, target, timing, old);
       frames.push(settled.ok ? { t, file: `${folder}${name}`, called: true } : { t, error: `Premiere reported the frame exported, but ${settled.why}.` });
     }
     return { frames };

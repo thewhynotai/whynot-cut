@@ -9,6 +9,21 @@ import type { OpEnv } from "./types.ts";
 
 export { cleanPath, nativePath };
 
+/** uxp.host.version, guarded exactly like the adapter's hello: a throw or nothing is "", at most 64 characters. */
+export function hostVersionOf(env: OpEnv): string {
+  try {
+    return String(env.hostVersion() ?? "").slice(0, 64);
+  } catch {
+    return "";
+  }
+}
+
+/** An absolute path: a Windows drive path (D:\ or D:/), a UNC share (\\server or //server, also after the long-path
+ *  prefix) or a POSIX path from the root. "C:frames", "./x" and "x/y" are relative. */
+export function isAbsolutePath(p: string): boolean {
+  return /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(cleanPath(p));
+}
+
 /** A Windows path (drive letter or UNC share) once the long-path prefix is gone. */
 export function isWindowsPath(p: string): boolean {
   return /^(?:[A-Za-z]:[\\/]|\\\\|\/\/)/.test(cleanPath(p));
@@ -105,7 +120,17 @@ export async function activateProject(env: OpEnv, ppro: Ppro, path: string): Pro
   } catch (e) {
     why = e instanceof Error ? e.message : String(e);
   }
-  if (opened) return opened;
+  if (opened) {
+    // Premiere may leave another project active (a dialog dismissed, a project it would not switch to)
+    const got = String(opened.path ?? "");
+    if (!samePath(got, path)) {
+      throw new OpError(
+        `Premiere made ${reportedPath(got) || "another project"} the active project instead of ${native}.`,
+        "Look for a dialog in Premiere, open the item's project there, then run the command again.",
+      );
+    }
+    return opened;
+  }
   if (!(await statOf(env.fs(), fsPath(path)))) {
     throw new OpError(`There is no project file at ${native}.`, "Check the path, or rebuild the project, then run the command again.");
   }
@@ -149,6 +174,26 @@ export async function statOf(fs: UxpFs, path: string): Promise<UxpStats | undefi
     return undefined;
   }
   return undefined;
+}
+
+/** The file's modification time in ms (mtimeMs, else mtime as a Date / number / date text), or null when not reported. */
+export function mtimeOf(st: UxpStats | undefined): number | null {
+  if (!st) return null;
+  if (typeof st.mtimeMs === "number" && Number.isFinite(st.mtimeMs)) return st.mtimeMs;
+  const m = st.mtime;
+  const t = m instanceof Date ? m.getTime() : typeof m === "number" ? m : typeof m === "string" ? Date.parse(m) : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+/** Delete a file through UXP fs (promise API, else the *Sync twin). True when it is gone afterwards. */
+export async function removeFile(fs: UxpFs, path: string): Promise<boolean> {
+  try {
+    if (typeof fs.unlink === "function") await fs.unlink(path);
+    else if (typeof fs.unlinkSync === "function") fs.unlinkSync(path);
+  } catch {
+    // the stat below says whether it is still there
+  }
+  return !(await statOf(fs, path));
 }
 
 /** mkdir -p one segment at a time (UXP's mkdir has no guaranteed `recursive`), with fs-form paths. */

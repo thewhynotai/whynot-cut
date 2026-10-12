@@ -4,6 +4,9 @@
 
 export interface UxpStats {
   size?: number;
+  /** modification time (Node-style Stats; not every UXP build reports it) */
+  mtimeMs?: number;
+  mtime?: Date | number | string;
   isFile?: () => boolean;
   isDirectory?: () => boolean;
 }
@@ -19,6 +22,8 @@ export interface UxpFs {
   writeFileSync?: (path: string, data: string | ArrayBuffer, options?: { encoding: string } | string) => unknown;
   mkdirSync?: (path: string, options?: { recursive?: boolean }) => unknown;
   lstatSync?: (path: string) => UxpStats;
+  unlink?: (path: string) => Promise<unknown>;
+  unlinkSync?: (path: string) => unknown;
   [name: string]: unknown;
 }
 

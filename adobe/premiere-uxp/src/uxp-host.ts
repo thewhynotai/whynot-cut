@@ -59,11 +59,12 @@ export function cleanPath(p: string): string {
 
 /**
  * The path as the host APIs want it: no long-path prefix, and backslashes for a Windows path (a drive letter or a UNC
- * share). Live parity: Project.open and exportSequenceFrame only work with backslash paths; macOS paths are left alone.
+ * share, also when written //server/share). Live parity: Project.open and exportSequenceFrame only work with backslash
+ * paths; macOS paths are left alone.
  */
 export function nativePath(p: string): string {
   const clean = cleanPath(p);
-  return /^(?:[A-Za-z]:[\\/]|\\\\)/.test(clean) ? clean.replace(/\//g, "\\") : clean;
+  return /^(?:[A-Za-z]:[\\/]|\\\\|\/\/)/.test(clean) ? clean.replace(/\//g, "\\") : clean;
 }
 
 /** PanelHost with every method async (the adapter always awaits Premiere), so callers and tests can await rejections. */

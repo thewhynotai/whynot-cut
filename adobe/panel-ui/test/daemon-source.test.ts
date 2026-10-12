@@ -701,3 +701,63 @@ test("PanelState stays schema-valid through a whole session (connect, progress, 
   const res: Result = await r.src.run("status", {});
   assert.equal(res.ok, true);
 });
+
+// ---------------------------------------------------------------------------------------------------- Task 4 carried
+test("no structuredClone (older UXP / CEP): snapshot and pushes fall back to a JSON copy and stay independent", async () => {
+  const g = globalThis as { structuredClone?: unknown };
+  const saved = g.structuredClone;
+  g.structuredClone = undefined;
+  try {
+    const r = rig();
+    // rig() already subscribed (the first read used structuredClone and failed): the in-attempt re-reads use this one
+    r.transport.readEngineJson = async () => ({ port: 51234, token: TOKEN, pid: 4242, version: "3.0.0", protocol: 4 });
+    await r.clock.advance(ENGINE_JSON_RETRIES * ENGINE_JSON_RETRY_MS);
+    assert.equal(r.src.diagnosis.code, "connected");
+    const a = await r.src.snapshot();
+    assert.equal(a.connection.engine, "connected");
+    assert.ok(validPanelState(a), JSON.stringify(validPanelState.errors));
+    a.connection.engine = "offline";
+    a.log.push({ ts: "00:00:00", level: "info", text: "mutated by the caller" });
+    const b = await r.src.snapshot();
+    assert.equal(b.connection.engine, "connected", "the caller's copy is not the source's state");
+    assert.ok(!b.log.some((l) => l.text === "mutated by the caller"));
+    assert.ok(r.states.length > 0 && r.states.every((s) => validPanelState(s)));
+    r.src.stop();
+  } finally {
+    g.structuredClone = saved;
+  }
+});
+
+test("request ids: two panels created in the same millisecond never share an id base (random suffix)", async () => {
+  const a = await connected();
+  const b = await connected();
+  assert.equal(a.clock.now(), b.clock.now(), "same clock reading");
+  void a.src.run("set_player_position", { sequence_name: "S", t_s: 1 });
+  void b.src.run("set_player_position", { sequence_name: "S", t_s: 1 });
+  await a.clock.advance(0);
+  await b.clock.advance(0);
+  const idOf = (r: Rig) => sentOf(r.daemon.last, "command").map((m) => (m["request"] as { id: string }).id)[0]!;
+  const [ia, ib] = [idOf(a), idOf(b)];
+  assert.ok(ID_RE.test(ia) && ID_RE.test(ib), `${ia} ${ib}`);
+  assert.notEqual(ia, ib);
+  assert.notEqual(ia.split("-")[1], ib.split("-")[1], "the id bases differ");
+  assert.ok(ia.length <= 64);
+  a.src.stop();
+  b.src.stop();
+});
+
+test("localHost: while offline the host pill shows the panel's own host (validates); online it is the daemon's", async () => {
+  const r = rig();
+  const src = new DaemonSource({ transport: r.transport, localHost: { state: "uxp", detail: "Premiere Pro 26.5.2" } });
+  const off = await src.snapshot();
+  assert.deepEqual(off.connection, { engine: "offline", claude: "unknown", host: { state: "uxp", detail: "Premiere Pro 26.5.2" } });
+  assert.ok(validPanelState(off), JSON.stringify(validPanelState.errors));
+  await r.clock.advance(0);
+  r.daemon.host = "cep";
+  r.daemon.hostDetail = undefined;
+  await r.clock.advance(2000);
+  assert.deepEqual((await src.snapshot()).connection.host, { state: "cep" });
+  src.stop();
+  assert.deepEqual((await src.snapshot()).connection.host, { state: "uxp", detail: "Premiere Pro 26.5.2" });
+  r.src.stop();
+});

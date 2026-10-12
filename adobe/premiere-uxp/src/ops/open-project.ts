@@ -12,6 +12,7 @@ export const openProject: Op<OpenProjectData, OpenProjectReadback> = {
     const ppro = getPpro(ctx.env);
     ctx.progress(`Opening ${nativePath(data.path)}`, 0, 1);
     const project = await activateProject(ctx.env, ppro, data.path);
+    ctx.throwIfCancelled();
     return { opened: true, project: reportedPath(String(project.path ?? "")) || nativePath(data.path) };
   },
 };

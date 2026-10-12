@@ -50,13 +50,20 @@ export function resultErrors(res: { action?: string; ok?: boolean; readback?: un
 
 // ---- fake UXP fs ------------------------------------------------------------------------------------------------
 
-/** Files keyed by the exact path string; a file's size steps through `growth` one lstat at a time (then stays). */
+/** Files keyed by the exact path string; a file's size steps through `growth` one lstat at a time (then stays). Every
+ *  write gets a newer mtime (mtimeMs and mtime, like Node's Stats); `unlink` deletes (or throws when unlinkThrows). */
 export class FakeFs {
-  files = new Map<string, { sizes: number[]; reads: number }>();
+  files = new Map<string, { sizes: number[]; reads: number; mtimeMs: number }>();
   dirs = new Set<string>();
   calls: string[] = [];
-  write(path: string, sizes: number[]): void {
-    this.files.set(path, { sizes, reads: 0 });
+  unlinkThrows = false;
+  /** false: this fs has no unlink at all (older UXP) */
+  hasUnlink = true;
+  /** false: lstat reports no mtime */
+  reportsMtime = true;
+  private writes = 0;
+  write(path: string, sizes: number[], mtimeMs?: number): void {
+    this.files.set(path, { sizes, reads: 0, mtimeMs: mtimeMs ?? 1_700_000_000_000 + ++this.writes * 1000 });
   }
   lstat = async (path: string) => {
     this.calls.push(`lstat ${path}`);
@@ -64,7 +71,8 @@ export class FakeFs {
     if (f) {
       const size = f.sizes[Math.min(f.reads, f.sizes.length - 1)] ?? 0;
       f.reads++;
-      return { size, isFile: () => true, isDirectory: () => false };
+      const times = this.reportsMtime ? { mtimeMs: f.mtimeMs, mtime: new Date(f.mtimeMs) } : {};
+      return { size, ...times, isFile: () => true, isDirectory: () => false };
     }
     if (this.dirs.has(path)) return { size: 0, isFile: () => false, isDirectory: () => true };
     throw new Error(`ENOENT: ${path}`);
@@ -73,6 +81,14 @@ export class FakeFs {
     this.calls.push(`mkdir ${path}`);
     this.dirs.add(path);
   };
+  get unlink(): ((path: string) => Promise<void>) | undefined {
+    if (!this.hasUnlink) return undefined;
+    return async (path: string) => {
+      this.calls.push(`unlink ${path}`);
+      if (this.unlinkThrows) throw new Error(`EPERM: ${path}`);
+      if (!this.files.delete(path)) throw new Error(`ENOENT: ${path}`);
+    };
+  }
 }
 
 // ---- fake premierepro -----------------------------------------------------------------------------------------

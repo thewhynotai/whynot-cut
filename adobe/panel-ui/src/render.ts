@@ -14,6 +14,13 @@ export interface Notice {
   how?: string;
 }
 
+/** Why the engine link is down (DaemonSource.diagnosis code), set by the shell: the offline banner names it. */
+export interface LinkInfo {
+  code: string;
+  /** set while the panel is waiting to try again */
+  retry_in_s?: number;
+}
+
 /** View state that is not engine data: what is expanded, what the editor has typed so far. */
 export interface UiState {
   logOpen: boolean;
@@ -23,6 +30,8 @@ export interface UiState {
   notice: Notice | null;
   /** a command is in flight: action buttons are disabled until it answers */
   working: boolean;
+  /** the engine link's diagnosis; absent = the generic offline banner */
+  link?: LinkInfo | null;
 }
 
 export function initialUi(): UiState {
@@ -92,9 +101,45 @@ function sentenceWithCommand(text: string): { line: string; cmd: string | null }
   return { line: withCommands(lead) + (/[:.!?]$/.test(lead) ? "" : ":"), cmd: m[2]! };
 }
 
+/** What the editor runs for each link diagnosis: the engine is not there -> start it; it is there but refuses -> doctor. */
+const LINK_CMD: Readonly<Record<string, string>> = {
+  no_engine: "reel serve --ensure",
+  down: "reel serve --ensure",
+  unreachable: "reel serve --ensure",
+  bad_engine_json: "reel serve --ensure",
+  auth: "reel serve --ensure",
+  no_welcome: "reel serve --ensure",
+  lost: "reel serve --ensure",
+  refused_host: "reel doctor",
+  refused_busy: "reel doctor",
+  refused: "reel doctor",
+  protocol: "reel doctor",
+  too_large: "reel doctor",
+};
+
+/** The offline banner for a known link diagnosis, or null (unknown code: the generic banner). */
+function linkBanner(link: LinkInfo, t: Strings): string | null {
+  const code = String(link.code);
+  const plain = (key: StringKey) =>
+    `<div class="banner banner-error" role="alert" data-link="${esc(code)}"><div class="banner-text"><div class="banner-line"><strong>${esc(t[key])}</strong></div></div></div>`;
+  if (code === "connecting" || code === "idle") return plain("status.connecting");
+  if (code === "stopped") return plain("offline.stopped");
+  const cmd = Object.prototype.hasOwnProperty.call(LINK_CMD, code) ? LINK_CMD[code] : undefined;
+  if (!cmd) return null;
+  const title = t[`offline.${code}` as StringKey];
+  const retry = typeof link.retry_in_s === "number" ? `<div class="banner-line">${esc(t["offline.retry"])}</div>` : "";
+  return (
+    `<div class="banner banner-error" role="alert" data-link="${esc(code)}"><div class="banner-text">` +
+    `<div class="banner-line"><strong>${withCommands(title)}</strong> ${esc(t["offline.hint"])}</div>${cmdRow(cmd)}${retry}</div></div>`
+  );
+}
+
 function banners(s: PanelState, t: Strings, ui: UiState): string {
   let out = "";
-  if (s.connection.engine === "offline") {
+  const linked = s.connection.engine === "offline" && ui.link ? linkBanner(ui.link, t) : null;
+  if (linked) {
+    out += linked;
+  } else if (s.connection.engine === "offline") {
     out +=
       `<div class="banner banner-error" role="alert"><div class="banner-text"><div class="banner-line"><strong>${esc(t["offline.title"])}</strong> ${esc(t["offline.hint"])}</div>` +
       `${cmdRow("reel doctor")}</div></div>`;

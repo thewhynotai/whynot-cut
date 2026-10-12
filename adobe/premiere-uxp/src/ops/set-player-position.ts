@@ -17,6 +17,7 @@ export const setPlayerPosition: Op<SetPlayerPositionData, SetPlayerPositionReadb
     const moved = await seq.setPlayerPosition(ppro.TickTime.createWithSeconds(data.t_s));
     if (moved === false) throw new OpError("Premiere did not move the playhead.", "Click in the Timeline once, then run the command again.");
     const at = await seq.getPlayerPosition();
+    ctx.throwIfCancelled();
     return { position_s: typeof at?.seconds === "number" ? at.seconds : data.t_s };
   },
 };

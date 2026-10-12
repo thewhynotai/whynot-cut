@@ -19,7 +19,7 @@ import type {
   SessionErrorCode, SnapshotMessage,
 } from "./session.ts";
 import { STEP_IDS } from "./source.ts";
-import type { ConnectionState, Language, LogLine, PanelDataSource, PanelState, PipelineStep, Result, StepId } from "./source.ts";
+import type { ConnectionState, HostState, Language, LogLine, PanelDataSource, PanelState, PipelineStep, Result, StepId } from "./source.ts";
 
 // ------------------------------------------------------------------------------------------------ injected transport
 
@@ -262,6 +262,11 @@ export interface DaemonSourceOptions {
   cancelWaitMs?: number;
   /** seconds per action before the request expires; merged over COMMAND_TIMEOUT_S */
   commandTimeoutS?: Partial<Record<ActionName, number>>;
+  /** the host the panel itself runs in (e.g. {state: "uxp", detail: "Premiere Pro 26.5.2"}): the host pill while the
+   *  engine is offline. Default {state: "offline"}. Online, the daemon's connection wins. */
+  localHost?: { state: HostState; detail?: string };
+  /** a number in [0, 1) for the request-id base (default Math.random) */
+  random?: () => number;
 }
 
 interface PendingCommand {
@@ -283,13 +288,21 @@ interface PendingCancel {
 
 const INTENT_LABEL: Record<ReplyIntent, string> = { approve: "Approving", request_changes: "Requesting changes", rebuild: "Rebuilding" };
 
-function offlineConnection(): ConnectionState {
-  return { engine: "offline", claude: "unknown", host: { state: "offline" } };
+function offlineConnection(host?: { state: HostState; detail?: string }): ConnectionState {
+  const h: ConnectionState["host"] = { state: host?.state ?? "offline" };
+  if (host?.detail) h.detail = host.detail.slice(0, 256);
+  return { engine: "offline", claude: "unknown", host: h };
 }
 
-function emptyState(language: Language, editor_name: string): PanelState {
+/** A deep copy of plain JSON data: structuredClone where the host has it (not every UXP / CEP runtime does). */
+function clone<T>(v: T): T {
+  const sc = (globalThis as { structuredClone?: (x: unknown) => unknown }).structuredClone;
+  return typeof sc === "function" ? (sc(v) as T) : (JSON.parse(JSON.stringify(v)) as T);
+}
+
+function emptyState(language: Language, editor_name: string, host?: { state: HostState; detail?: string }): PanelState {
   return {
-    connection: offlineConnection(),
+    connection: offlineConnection(host),
     client: "",
     item: "",
     language,
@@ -332,6 +345,7 @@ export class DaemonSource implements PanelDataSource {
   private intents = new Map<string, PendingIntent>();
   private cancels = new Map<string, PendingCancel>();
   private readonly idBase: string;
+  private readonly localHost: { state: HostState; detail?: string } | undefined;
   private seq = 0;
   private diag: LinkDiagnosis = { code: "idle", text: "Not connected to the engine yet." };
   private lastLogged: LinkCode | null = null;
@@ -344,8 +358,12 @@ export class DaemonSource implements PanelDataSource {
     this.intentTimeoutMs = opts.intentTimeoutMs ?? INTENT_TIMEOUT_MS;
     this.cancelWaitMs = opts.cancelWaitMs ?? CANCEL_WAIT_MS;
     this.timeouts = { ...COMMAND_TIMEOUT_S, ...opts.commandTimeoutS };
-    this.state = emptyState(opts.language ?? "en", opts.editor_name ?? "");
-    this.idBase = Math.floor(this.t.now()).toString(36).slice(-8);
+    this.localHost = opts.localHost;
+    this.state = emptyState(opts.language ?? "en", opts.editor_name ?? "", this.localHost);
+    // time + a random suffix: two panels created in the same millisecond must not share ids (the daemon's id map is global)
+    const r = (opts.random ?? Math.random)();
+    const rand = Math.floor((Number.isFinite(r) ? Math.abs(r) % 1 : 0) * 36 ** 5).toString(36).padStart(5, "0");
+    this.idBase = Math.floor(this.t.now()).toString(36).slice(-8) + rand;
   }
 
   // ---------------------------------------------------------------------------------------------- public
@@ -380,7 +398,7 @@ export class DaemonSource implements PanelDataSource {
     }
     this.failAll("The panel closed its engine connection.");
     this.diag = { code: "stopped", text: "The panel stopped its engine connection." };
-    this.update({ connection: offlineConnection() });
+    this.update({ connection: offlineConnection(this.localHost) });
   }
 
   /** Local settings the daemon's stub state does not carry. */
@@ -390,7 +408,7 @@ export class DaemonSource implements PanelDataSource {
 
   async snapshot(): Promise<PanelState> {
     this.start();
-    return structuredClone(this.state);
+    return clone(this.state);
   }
 
   subscribe(cb: (s: PanelState) => void): () => void {
@@ -534,7 +552,7 @@ export class DaemonSource implements PanelDataSource {
     this.welcomed = false;
     this.clearTimers();
     this.failAll("The engine connection was lost before it answered.");
-    this.update({ connection: offlineConnection() });
+    this.update({ connection: offlineConnection(this.localHost) });
     const err = this.lastError;
     if (code === 1008 && err?.code === "schema" && /protocol/i.test(err.message)) {
       return this.retry({ code: "protocol", text: "The engine is a different version from this panel (protocol 4 required).", how: "Update the WhyNot Cut panel and engine to the same version." });
@@ -582,7 +600,7 @@ export class DaemonSource implements PanelDataSource {
     this.failures++;
     const ms = backoffMs(this.failures);
     this.setDiag({ ...d, retry_in_s: Math.round(ms / 1000) }, true);
-    this.update({ connection: offlineConnection() });
+    this.update({ connection: offlineConnection(this.localHost) });
     this.stopRetry = this.t.setTimer(() => {
       this.stopRetry = null;
       void this.connect();
@@ -807,7 +825,7 @@ export class DaemonSource implements PanelDataSource {
     this.state = { ...this.state, ...patch };
     for (const cb of [...this.subs]) {
       try {
-        cb(structuredClone(this.state));
+        cb(clone(this.state));
       } catch {
         // a subscriber's failure is the subscriber's (mount turns render errors into an error view)
       }

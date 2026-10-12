@@ -16,6 +16,7 @@ import { ACTION_NAMES, PROTOCOL } from "../../panel-ui/src/contract.ts";
 import type { ActionName, ProgressEvent, ResultEnvelope } from "../../panel-ui/src/contract.ts";
 import type { ErrorMessage, HelloMessage, WelcomeMessage } from "../../panel-ui/src/session.ts";
 import { OPS } from "./ops/index.ts";
+import { hostVersionOf } from "./ops/premiere.ts";
 import { OpError, cancelledError } from "./ops/types.ts";
 import type { Op, OpContext, OpEnv } from "./ops/types.ts";
 import { validateData, validateReadback } from "./ops/validate.ts";
@@ -229,12 +230,7 @@ export function startHostAdapter(opts: HostAdapterOptions): HostAdapter {
     opts.onClose?.();
   };
 
-  let hostVersion: string | undefined;
-  try {
-    hostVersion = String(env.hostVersion() ?? "").slice(0, 64) || undefined;
-  } catch {
-    hostVersion = undefined;
-  }
+  const hostVersion = hostVersionOf(env) || undefined;
   const hello: HelloMessage = {
     type: "hello",
     token: opts.token,

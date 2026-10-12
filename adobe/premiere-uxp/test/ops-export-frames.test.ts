@@ -47,8 +47,9 @@ test("export_frames: waits until the PNG stops growing (it shows up before it is
   const path = `${OUT_FWD}/frame_001000.png`;
   const reads = fs.calls.filter((c) => c === `lstat ${path}`).length;
   // 0 (not there yet), 114 967, 900 000, 1 610 035, then 1 610 035 again = stable
-  assert.ok(reads >= 5, `polled ${reads} times`);
-  assert.equal(fs.files.get(path)?.reads, reads);
+  // (+1: the target is looked up once before the export, to delete an older frame of the same name)
+  assert.ok(reads >= 6, `polled ${reads} times`);
+  assert.equal(fs.files.get(path)?.reads, reads - 1);
 });
 
 test("export_frames: forward slashes, a trailing separator and the \\\\?\\ prefix in out_dir all give the same native folder", async () => {
