@@ -212,8 +212,10 @@ def read_engine_json(home) -> dict | None:
 def remove_engine_json(home, pid: int) -> bool:
     """Delete engine.json only when it records `pid` (a newer daemon's file is never removed by an older one).
     No check-then-delete race: the file is first renamed to a private tombstone (atomic), the tombstone is read, and
-    only the tombstone is deleted. When it records another pid it goes back with a rename that never overwrites, so a
-    file another daemon wrote meanwhile always wins (and the tombstone, an older record, is dropped)."""
+    only the tombstone is deleted. When it records another pid it goes back without ever overwriting: a file another
+    daemon wrote meanwhile always wins (the tombstone, an older record, is then dropped). The tombstone is deleted
+    only once engine.json exists again; if every way back fails, it stays on disk (user-only, like engine.json), so
+    a live daemon's record is never lost."""
     path = engine_json_path(home)
     tomb = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.gone")
     try:
@@ -221,22 +223,20 @@ def remove_engine_json(home, pid: int) -> bool:
     except OSError:
         return False                               # missing (or cannot be moved): nothing of ours to remove
     try:
+        d = json.loads(tomb.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = None
+    ours = isinstance(d, dict) and d.get("pid") == pid
+    if ours or _restore_no_overwrite(tomb, path):
         try:
-            d = json.loads(tomb.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            d = None
-        if isinstance(d, dict) and d.get("pid") == pid:
-            return True                            # ours: the finally below deletes it
-        _restore_no_overwrite(tomb, path)
-        return False
-    finally:
-        try:
-            tomb.unlink()
+            tomb.unlink()                          # gone already when the restore renamed it back
         except OSError:
             pass
+    return ours
 
 
 REPLACE_TRIES = 20
+RETRY_S = 0.025
 
 
 def _replace_retry(src: Path, dst: Path) -> None:
@@ -249,32 +249,54 @@ def _replace_retry(src: Path, dst: Path) -> None:
         except PermissionError:
             if i == REPLACE_TRIES - 1:
                 raise
-            time.sleep(0.025)
+            time.sleep(RETRY_S)
 
 
-def _restore_no_overwrite(tomb: Path, path: Path) -> None:
-    """Put `tomb` back at `path` unless `path` exists again: a hard link (same file, same ACL) when the volume has
-    them, else a rename (on Windows it never replaces an existing file). The caller removes `tomb` afterwards."""
+def _restore_once(tomb: Path, path: Path) -> bool:
+    """One non-overwriting attempt to put `tomb` back at `path`. True when `path` exists afterwards (put back, or a
+    newer file is already there)."""
     try:
-        os.link(tomb, path)
-        return
+        os.link(tomb, path)                        # same file, same ACL
+        return True
     except FileExistsError:
-        return
+        return True
     except OSError:
         pass
     if os.name == "nt":
         try:
             os.rename(tomb, path)                  # Windows: FileExistsError instead of replacing
+            return True
+        except FileExistsError:
+            return True
         except OSError:
-            pass
-        return
+            return path.exists()
     try:                                           # POSIX without hard links: exclusive create, user-only from birth
         data = tomb.read_bytes()
         fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return True
     except OSError:
-        return
+        return path.exists()
     with os.fdopen(fd, "wb") as f:
         f.write(data)
+    return True
+
+
+def _restore_no_overwrite(tomb: Path, path: Path) -> bool:
+    """Put `tomb` back at `path`, never over a file that exists there again. Retried briefly (a sharing violation on
+    Windows); while `path` is still missing after that, a last os.replace (_replace_retry) puts it back. True when
+    `path` exists at the end, so the caller may delete `tomb`; False keeps the tombstone (nothing worked)."""
+    for _ in range(REPLACE_TRIES):
+        if _restore_once(tomb, path):
+            return True
+        time.sleep(RETRY_S)
+    if path.exists():
+        return True
+    try:
+        _replace_retry(tomb, path)
+    except OSError:
+        return path.exists()
+    return True
 
 
 # ----------------------------------------------------------------------------------------------------------------

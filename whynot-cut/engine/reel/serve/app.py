@@ -51,9 +51,11 @@ PRE_AUTH_MAX = 16 * 1024
 POST_AUTH_MAX = 8 * 1024 * 1024
 HELLO_TIMEOUT = 3.0
 MAX_CONNECTIONS = 32
-CLOSE_SESSIONS_S = 1.0            # close(): how long sessions get to answer the close frame (all at once)
-CLOSE_HANDLERS_S = 0.5            # close(): how long a cancelled connection gets before its socket is aborted
+CLOSE_BUDGET = 2.0                # close(): the whole shutdown, whatever the peers do (the steps below add up to it)
+CLOSE_SESSIONS_S = 0.8            # close(): how long sessions get to answer the close frame (all at once)
+CLOSE_HANDLERS_S = 0.4            # close(): how long a cancelled connection gets before its socket is aborted
 CLOSE_ROUNDS = 3                  # close(): abort-and-cancel rounds before a task is reported as stuck
+CLOSE_ROUND_S = 0.2               # close(): the wait after each abort round, and for the listener to close
 RATE = (20.0, 60)                  # messages per second per session, burst
 MAX_RUNNING = 16                   # commands one session may have running at once
 OFFLOAD_BYTES = 256 * 1024         # messages above this are parsed and validated in a worker thread
@@ -155,36 +157,43 @@ class App:
         return self.port
 
     async def close(self) -> None:
-        """Stop listening, close every session (1001), end every connection, restore the context switch. Bounded
-        (about CLOSE_BUDGET seconds whatever the peers do) and it awaits every connection task: a session whose peer
-        never answers the close frame is aborted, a task still running after the cancel is cancelled again with its
-        socket aborted, then awaited. A command waiting on a stuck CEP queue call is cancelled at once (its daemon
-        worker thread is left behind and never blocks the process exit)."""
+        """Stop listening, close every session (1001), end every connection, restore the context switch. Bounded by
+        one deadline, CLOSE_BUDGET (2 s), whatever the peers do, and it awaits every connection task: sessions get
+        CLOSE_SESSIONS_S to answer the close frame (all at once; a silent peer is aborted), cancelled connections get
+        CLOSE_HANDLERS_S, then up to CLOSE_ROUNDS rounds abort the socket, cancel again and await (CLOSE_ROUND_S
+        each). A task that survives all of that is logged, never waited on. A command waiting on a stuck CEP queue
+        call is cancelled at once (its daemon worker thread is left behind and never blocks the process exit)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + CLOSE_BUDGET
+
+        def left(step: float) -> float:
+            return max(0.01, min(step, deadline - loop.time()))
+
         if self._server is not None:
             self._server.close()
         sessions = list(self.sessions.values())
         if sessions:                                   # concurrently: N silent peers cost one timeout, not N
             closing = [asyncio.ensure_future(self._close_session(s)) for s in sessions]
-            done, pending = await asyncio.wait(closing, timeout=CLOSE_SESSIONS_S)
+            _, pending = await asyncio.wait(closing, timeout=left(CLOSE_SESSIONS_S))
             for t in pending:
-                t.cancel()
+                t.cancel()                             # _close_session aborts the socket: this is immediate
             await asyncio.gather(*closing, return_exceptions=True)
         for t in list(self._handlers):
             t.cancel()
         if self._handlers:
-            await asyncio.wait(list(self._handlers), timeout=CLOSE_HANDLERS_S)
+            await asyncio.wait(list(self._handlers), timeout=left(CLOSE_HANDLERS_S))
         for _ in range(CLOSE_ROUNDS):                 # past the timeout: abort the socket, cancel again, await
             if not self._handlers:
                 break
             for t, w in list(self._handlers.items()):
                 w.transport.abort()
                 t.cancel()
-            await asyncio.wait(list(self._handlers), timeout=CLOSE_HANDLERS_S)
+            await asyncio.wait(list(self._handlers), timeout=left(CLOSE_ROUND_S))
         if self._handlers:                             # a task that ignores cancellation: say so, never hang
             log.warning("reel serve: %d connection task(s) did not stop", len(self._handlers))
         if self._server is not None:
             with contextlib.suppress(TimeoutError):
-                async with asyncio.timeout(CLOSE_HANDLERS_S):
+                async with asyncio.timeout(left(CLOSE_ROUND_S)):
                     await self._server.wait_closed()
             self._server = None
         if self._strict:

@@ -32,7 +32,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import common  # noqa: E402
-from serve import adapters, cli as serve_cli, daemon, security  # noqa: E402
+from serve import adapters, app as serve_app, cli as serve_cli, daemon, security  # noqa: E402
 from test_serve_app import PING_READBACK, AppCase, cep_ok, command, http, request  # noqa: E402
 
 T = 10.0
@@ -156,9 +156,15 @@ class CloseBounded(AppCase):
         t0 = time.monotonic()
         await self.app.close()
         took = time.monotonic() - t0
-        self.assertLess(took, 2.5, f"close took {took:.2f}s")
+        self.assertLess(took, serve_app.CLOSE_BUDGET + 0.3, f"close took {took:.2f}s")
         self.assertTrue(all(t.done() for t in handlers), [t for t in handlers if not t.done()])
         self.assertFalse(self.app._handlers)
+
+    def test_the_close_budget_is_about_two_seconds(self):
+        self.assertLessEqual(serve_app.CLOSE_BUDGET, 2.0)
+        worst = (serve_app.CLOSE_SESSIONS_S + serve_app.CLOSE_HANDLERS_S
+                 + serve_app.CLOSE_ROUNDS * serve_app.CLOSE_ROUND_S + serve_app.CLOSE_ROUND_S)
+        self.assertLessEqual(worst, serve_app.CLOSE_BUDGET + 1e-9)
 
     async def test_close_does_not_wait_for_a_stuck_queue_call(self):
         gate = threading.Event()
@@ -330,10 +336,16 @@ class Ensure(_Home):
         self.assertEqual(security.read_engine_json(self.home)["version"], "3.0.0-test")
 
     def test_ensure_reports_a_child_that_exits(self):
-        with mock.patch.object(daemon, "_spawn", return_value=types.SimpleNamespace(pid=1, poll=lambda: 3)):
-            res = daemon.ensure(self.home, wait=1.0)
-        self.assertFalse(res["ok"], res)
-        self.assertTrue(res["error"] and res["how"])
+        """Each exit code gets its own guidance: EXIT_LOCKED (a hung daemon holds the home) says stop / end the
+        process; any other code points at the logs."""
+        for code, state, hint in ((daemon.EXIT_LOCKED, "not_answering", "reel serve --stop"),
+                                  (daemon.EXIT_FAILED, "failed", "serve.log")):
+            with self.subTest(code=code), \
+                    mock.patch.object(daemon, "_spawn", return_value=types.SimpleNamespace(pid=1, poll=lambda: code)):
+                res = daemon.ensure(self.home, wait=1.0)
+            self.assertEqual((res["ok"], res["state"]), (False, state), res)
+            self.assertIn(hint, res["how"])
+            self.assertTrue(res["error"])
 
     def test_ensure_says_starting_when_the_wait_is_over(self):
         with mock.patch.object(daemon, "_spawn", return_value=types.SimpleNamespace(pid=4242, poll=lambda: None)):
@@ -367,6 +379,51 @@ class Ensure(_Home):
         self.assertFalse(res["ok"], res)
         self.assertEqual(res["state"], "not_answering")
         self.assertTrue(res["how"])
+
+
+def py_cmd(*args) -> list:
+    cmd = [sys.executable]
+    if sys.flags.no_user_site:
+        cmd.append("-s")
+    return cmd + ["-B", "-P", *map(str, args)]
+
+
+class LockedHome(_Home):
+    """The EXIT_LOCKED path through real processes: the code the child exits with is the one ensure() reads."""
+
+    def hold_lock(self):
+        lock = daemon.InstanceLock(self.home)
+        self.assertTrue(lock.acquire())
+        self.addCleanup(lock.release)
+
+    def test_foreground_on_a_locked_home_exits_3(self):
+        self.hold_lock()
+        r = subprocess.run(py_cmd(daemon.MAIN, "--foreground", "--home", self.home), capture_output=True,
+                           timeout=60, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, daemon.EXIT_LOCKED, (r.stdout, r.stderr))
+        self.assertEqual(json.loads(r.stdout.decode("utf-8"))["state"], "refused")
+        self.assertFalse(security.engine_json_path(self.home).exists())
+
+    def test_ensure_against_a_hung_daemon_says_not_answering(self):
+        """engine.json names a live pid that does not answer and the instance lock is held (a hung daemon): the
+        spawned child exits EXIT_LOCKED and ensure() gives the stop / end-process guidance, not "reel doctor"."""
+        self.hold_lock()
+        with socket.socket() as s:                     # a port nothing listens on
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        security.write_engine_json(self.home, port=port, token=security.make_token(), pid=os.getpid(), version="v")
+
+        def reap():
+            for p in list(daemon._children):
+                if p.poll() is None:
+                    p.kill()
+                p.wait(10)
+                daemon._children.remove(p)
+        self.addCleanup(reap)
+        res = daemon.ensure(self.home, wait=60)
+        self.assertEqual((res["ok"], res["state"]), (False, "not_answering"), res)
+        self.assertIn("reel serve --stop", res["how"])
+        self.assertEqual(daemon._children[-1].poll(), daemon.EXIT_LOCKED)
 
 
 class Spawn(_Home):
@@ -565,6 +622,47 @@ class TombstoneRemove(_Home):
 
     def test_missing_file(self):
         self.assertFalse(security.remove_engine_json(self.home, 1))
+
+    @staticmethod
+    def _no_way_back():
+        """os.link, the Windows rename and the POSIX exclusive create all refuse (the replace fallback stays)."""
+        refuse = OSError(1, "operation not permitted")
+        stack = contextlib.ExitStack()
+        for name in ("link", "rename", "open"):
+            stack.enter_context(mock.patch.object(security.os, name, side_effect=refuse))
+        return stack
+
+    def test_failed_restore_falls_back_to_replace_and_never_loses_the_file(self):
+        """os.link and the Windows rename fallback both fail: the live daemon's engine.json comes back anyway."""
+        p = self._write(77)
+        before = p.read_bytes()
+        with self._no_way_back(), mock.patch.object(security.time, "sleep"):
+            self.assertFalse(security.remove_engine_json(self.home, 78))
+        self.assertEqual(p.read_bytes(), before)
+        self.assertEqual(sorted(x.name for x in p.parent.iterdir()), ["engine.json"])
+
+    def test_when_nothing_can_restore_it_the_tombstone_is_kept(self):
+        """Every way back fails: the record stays on disk as the tombstone (user-only, like the file) instead of
+        being deleted."""
+        p = self._write(77)
+        before = p.read_bytes()
+        real_replace, calls = os.replace, []
+
+        def first_only(src, dst):                     # the move to the tombstone works, nothing after it
+            calls.append((src, dst))
+            if len(calls) == 1:
+                return real_replace(src, dst)
+            raise PermissionError(32, "being used by another process")
+
+        with self._no_way_back(), mock.patch.object(security.os, "replace", first_only), \
+                mock.patch.object(security.time, "sleep"):
+            self.assertFalse(security.remove_engine_json(self.home, 78))
+        self.assertFalse(p.exists())
+        kept = [x for x in p.parent.iterdir() if x.name.endswith(".gone")]
+        self.assertEqual(len(kept), 1, list(p.parent.iterdir()))
+        self.assertEqual(kept[0].read_bytes(), before)
+        if WIN:                                      # still user-only: a rename keeps the ACL
+            self.assertEqual(_dacl(kept[0]), [(0, 0, 0x1F01FF, _whoami_sid())])
 
     def test_a_reader_holding_the_file_briefly_does_not_stop_the_removal(self):
         """Windows: a reader with engine.json open at that instant makes the rename fail (sharing violation)."""

@@ -380,7 +380,7 @@ class StuckQueueDoesNotBlockExit(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(res["ok"], res)
         await asyncio.to_thread(proc.wait, 10)
         took = time.monotonic() - t0
-        self.assertLess(took, 3.0, f"the daemon took {took:.2f}s to exit with a stuck queue call")
+        self.assertLess(took, 2.5, f"the daemon took {took:.2f}s to exit with a stuck queue call")
         self.assertFalse(security.engine_json_path(home).exists())
 
 

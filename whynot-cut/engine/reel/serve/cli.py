@@ -5,8 +5,10 @@ Two entries share this module:
     `build_parser(subparsers)`) and runs `cmd_serve(a)`; `serve` needs no client folder and takes no writer lock;
   * `python -m serve` / `python -P <plugin>/engine/reel/serve/__main__.py` call `main(argv)` (the detached daemon is
     started this way, so it does not depend on cli.py).
-Every mode but --foreground prints one JSON document (lib.errors.emit: a failure exits 1); --quiet prints nothing and
-always exits 0 (the SessionStart hook). The token is never printed.
+--ensure / --status / --stop print one JSON document (lib.errors.emit: a failure exits 1); --quiet prints nothing and
+then always exits 0 (the SessionStart hook). --foreground prints a `running` line when it serves and a closing
+document, and exits with the daemon's own code whatever --quiet says: 0, 1 (could not start) or 3 (EXIT_LOCKED: another
+daemon holds this engine home; ensure() turns that into its "not answering" guidance). The token is never printed.
 """
 from __future__ import annotations
 
@@ -72,6 +74,11 @@ def cmd_serve(a) -> None:
             else:
                 doc = {"ok": False, "running": False, "state": "failed", "error": "reel serve could not start",
                        "how": f"see {home / 'logs' / 'serve-audit.log'}, then run: reel doctor"}
+            if not quiet:                  # not emit(): it maps every failure to 1, and ensure() reads EXIT_LOCKED
+                print(json.dumps(doc, ensure_ascii=False, indent=2), flush=True)
+            if code != daemon.EXIT_OK:
+                raise SystemExit(code)
+            return
         elif getattr(a, "stop", False):
             doc = daemon.stop(home)
         elif getattr(a, "ensure", False):
