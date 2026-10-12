@@ -1,4 +1,5 @@
-// npm run dev:build -> panel-ui/dev/out/{index.html,dev.js,fonts.css,fonts/,tokens.css,panel.css} (gitignored). Open dev/out/index.html.
+// npm run dev:build -> panel-ui/dev/out/{index.html,dev.js,fonts.css,fonts/,tokens.css,panel.css,kit.css} (gitignored).
+// Open dev/out/index.html; ?scenario=kit shows the component kit in EN and AR.
 import { build } from "esbuild";
 import { copyFileSync, cpSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -23,4 +24,5 @@ copyFileSync(join(root, "..", "..", "brand", "tokens.css"), join(out, "tokens.cs
 copyFileSync(join(root, "styles", "fonts.css"), join(out, "fonts.css"));
 cpSync(join(root, "fonts"), join(out, "fonts"), { recursive: true });
 copyFileSync(join(root, "styles", "panel.css"), join(out, "panel.css"));
+copyFileSync(join(root, "styles", "kit.css"), join(out, "kit.css"));
 console.log(`dev harness: ${join(out, "index.html")}`);

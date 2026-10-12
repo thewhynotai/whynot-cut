@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { AR, EN, fmt, stringsFor } from "../src/i18n.ts";
 import { PANEL_UI } from "./tokens-util.ts";
@@ -105,8 +105,10 @@ test("the literal scanner sees text, attributes, nested templates, word literals
   assert.deepEqual(hardCoded(sample).sort(), ["Hello", "Inner", 'title="Close"', "WhyNot Cut § · build §", "name_prev.prproj"].sort());
 });
 
-test("no hard-coded user-visible strings in panel-ui/src render code (render.ts, mount.ts): all copy comes from the table", () => {
-  for (const f of ["render.ts", "mount.ts"]) {
+test("no hard-coded user-visible strings in panel-ui/src render code (render.ts, mount.ts, kit/*.ts): all copy comes from the table", () => {
+  const kit = readdirSync(join(PANEL_UI, "src", "kit")).filter((f) => f.endsWith(".ts")).map((f) => `kit/${f}`);
+  assert.ok(kit.length >= 10, "the component kit is scanned");
+  for (const f of ["render.ts", "mount.ts", ...kit]) {
     const found = hardCoded(readFileSync(join(PANEL_UI, "src", f), "utf8"));
     assert.deepEqual(found, [], `${f}: ${found.join(" | ")}`);
   }

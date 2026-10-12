@@ -97,6 +97,7 @@ test("every var(--twn-*) the kit uses is defined in brand/tokens.css", () => {
 test("panel CSS has no colour literals: every colour is a var(--twn-*) token", () => {
   const files = PANEL_CSS_FILES();
   assert.ok(files.some((f) => f.endsWith("panel.css")));
+  assert.ok(files.some((f) => f.endsWith("kit.css")), "the component kit's CSS is checked too");
   for (const f of files) {
     const css = read(f).replace(/\/\*[\s\S]*?\*\//g, "");
     assert.deepEqual(coloursIn(css), [], `${relative(REPO, f)} has colour literals; use the tokens`);

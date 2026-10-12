@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="panel.css">
+<link rel="stylesheet" href="kit.css">
 <style>
   /* harness chrome only (not part of the panel) */
   html, body { margin: 0; height: auto; min-height: 100%; overflow: auto; background: #0c0c0c; color: #ddd; font: 12px/1.4 system-ui, sans-serif; }
@@ -22,6 +23,9 @@
   /* the panel scrolls inside its own region (like a UXP dock): the frame is a fixed box, the page never scrolls it */
   .col { height: 640px; overflow: hidden; border: 1px solid #2a2a2a; background: #000000; }
   #root { height: 100%; }
+  .kitstage { align-items: flex-start; }
+  .stage[hidden] { display: none; }
+  .kitcol { margin: 0 8px; }
   .calls { max-width: 560px; margin: 0 auto; padding: 0 16px 16px; color: #8a8a8a; font: 11px/1.5 Consolas, monospace; }
 </style>
 </head>
@@ -37,12 +41,15 @@
         <option value="building">Build running</option>
         <option value="qc">QC frames</option>
         <option value="idle">Just started</option>
+        <option value="kit">Component kit (EN + AR side by side)</option>
       </select>
     </div>
     <label class="grp"><input type="checkbox" id="progress"> Simulate build progress</label>
     <label class="grp"><input type="checkbox" id="offline"> Engine offline</label>
   </div>
-  <div class="stage"><div class="col" id="col"><div id="root"></div></div></div>
+  <div class="stage" id="panelstage"><div class="col" id="col"><div id="root"></div></div></div>
+  <!-- the "Kit" scenario: every src/kit component (dev/kit-gallery.ts), English and Arabic at the chosen width -->
+  <div class="stage kitstage" id="kitstage" hidden><div class="col kitcol" id="kit-en"></div><div class="col kitcol" id="kit-ar"></div></div>
   <div class="calls" id="calls">Host adapter calls appear here.</div>
   <script src="dev.js"></script>
 </body>

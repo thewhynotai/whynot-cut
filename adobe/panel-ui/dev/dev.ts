@@ -1,9 +1,11 @@
 // Dev harness: mounts the panel with MockSource in a browser. Query string: ?lang=ar&w=340&scenario=qc&offline=1
+// ?scenario=kit (or "Component kit" in the State menu) shows every src/kit component in EN and AR side by side.
 import { asMountRoot, mount } from "../src/mount.ts";
 import type { PanelHost } from "../src/host.ts";
 import { MockSource, SCENARIOS } from "../src/mock.ts";
 import type { Scenario } from "../src/mock.ts";
 import type { Language } from "../src/source.ts";
+import { kitGallery } from "./kit-gallery.ts";
 
 const q = new URLSearchParams(location.search);
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -13,6 +15,7 @@ let width = [280, 340, 480].includes(Number(q.get("w"))) ? Number(q.get("w")) : 
 let height = [470, 640, 900].includes(Number(q.get("h"))) ? Number(q.get("h")) : 640;
 const scenarioParam = q.get("scenario") as Scenario | null;
 const scenario: Scenario = scenarioParam && SCENARIOS.includes(scenarioParam) ? scenarioParam : "showcase";
+let kit = q.get("scenario") === "kit";
 
 const source = new MockSource({ language: lang, scenario });
 
@@ -40,13 +43,23 @@ mount(asMountRoot($("root")), source, host);
 function pressed(group: string, value: string): void {
   for (const b of Array.from($(group).querySelectorAll("button"))) b.setAttribute("aria-pressed", String(b.getAttribute("data-v") === value));
 }
+const COLS = ["col", "kit-en", "kit-ar"];
 function applyWidth(): void {
-  $("col").style.width = `${width}px`;
+  for (const id of COLS) $(id).style.width = `${width}px`;
   pressed("width", String(width));
 }
 function applyHeight(): void {
-  $("col").style.height = `${height}px`;
+  for (const id of COLS) $(id).style.height = `${height}px`;
   pressed("height", String(height));
+}
+/** The "Kit" scenario: the gallery in both languages instead of the mounted panel. */
+function applyKit(): void {
+  $("panelstage").hidden = kit;
+  $("kitstage").hidden = !kit;
+  if (kit) {
+    $("kit-en").innerHTML = kitGallery("en");
+    $("kit-ar").innerHTML = kitGallery("ar");
+  }
 }
 function applyLang(): void {
   pressed("lang", lang);
@@ -76,8 +89,12 @@ $("width").addEventListener("click", (e) => {
   }
 });
 const sel = $<HTMLSelectElement>("scenario");
-sel.value = scenario;
-sel.addEventListener("change", () => source.setScenario(sel.value as Scenario));
+sel.value = kit ? "kit" : scenario;
+sel.addEventListener("change", () => {
+  kit = sel.value === "kit";
+  if (!kit) source.setScenario(sel.value as Scenario);
+  applyKit();
+});
 $<HTMLInputElement>("offline").checked = q.get("offline") === "1";
 $("offline").addEventListener("change", (e) => source.setEngine((e.target as HTMLInputElement).checked ? "offline" : "connected"));
 if (q.get("offline") === "1") source.setEngine("offline");
@@ -91,3 +108,4 @@ $("progress").addEventListener("change", (e) => {
 applyLang();
 applyWidth();
 applyHeight();
+applyKit();

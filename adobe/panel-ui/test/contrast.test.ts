@@ -10,14 +10,15 @@ import { join } from "node:path";
 import { initialUi, render } from "../src/render.ts";
 import { stringsFor } from "../src/i18n.ts";
 import { SCENARIOS, sampleState } from "../src/mock.ts";
+import { kitGallery } from "../dev/kit-gallery.ts";
 import { ADOBE, PANEL_UI, TOKENS, contrast, over, parseCss, tokenMap, walk } from "./tokens-util.ts";
 import type { Rgb } from "./tokens-util.ts";
 
 const tokens = tokenMap(readFileSync(TOKENS, "utf8"));
 
-/** A token (or "<translucent token> over <token>") as the opaque colour the eye sees. */
+/** A token (or "<translucent token> over <spec>", nested) as the opaque colour the eye sees. */
 function colour(spec: string): Rgb {
-  const m = /^(--twn-[a-z0-9-]+) over (--twn-[a-z0-9-]+)$/.exec(spec);
+  const m = /^(--twn-[a-z0-9-]+) over (.+)$/.exec(spec);
   if (m) return over(parseCss(value(m[1]!)), colour(m[2]!));
   const c = parseCss(value(spec));
   assert.equal(c.a, 1, `${spec} is translucent: say what it sits on ("${spec} over --twn-bg")`);
@@ -33,6 +34,8 @@ function value(name: string): string {
 /** The card: glass over the black background (about #141414), as on thewhynot.ai (Addendum B §B2, magnific-brand
  *  §2.2). Glass never sits on #121212 (the stacking guard below enforces it), so this is the only glass composite. */
 const GLASS = "--twn-glass over --twn-bg";
+/** A kit control drawn in glass (secondary button, toast, dialog) inside a glass card: glass on glass over black. */
+const GLASS2 = `--twn-glass over ${GLASS}`;
 const TEXT = 4.5;
 const NON_TEXT = 3;
 
@@ -76,6 +79,19 @@ const PAIRS: readonly [string, string, number, string][] = [
   ["--twn-ok", GLASS, NON_TEXT, "glass card: ok icon"],
   ["--twn-warn", GLASS, NON_TEXT, "glass card: warn icon"],
   ["--twn-error", GLASS, NON_TEXT, "glass card: error icon"],
+  // the kit (B-T1): glass controls inside a glass card (secondary button, toast or dialog in a card)
+  ["--twn-text", GLASS2, TEXT, "kit: secondary button / toast text in a card"],
+  ["--twn-text-muted", GLASS2, TEXT, "kit: toast how-line, dialog labels in a card"],
+  // violet and pink on two glass layers are about 4.25:1: fine for icons (3:1), NOT for text. Violet/pink TEXT (eyebrows,
+  // info/accent chips, links) stays on one glass layer at most; test/kit.test.ts checks the kit never nests it deeper.
+  ["--twn-primary-text", GLASS2, NON_TEXT, "kit: info toast icon in a card"],
+  ["--twn-accent", GLASS2, NON_TEXT, "kit: pink icon on a glass control in a card"],
+  ["--twn-ok", GLASS2, TEXT, "kit: ok toast in a card"],
+  ["--twn-warn", GLASS2, TEXT, "kit: warn toast / dialog icon in a card"],
+  ["--twn-error", GLASS2, TEXT, "kit: error toast in a card"],
+  ["--twn-focus", GLASS2, NON_TEXT, "kit: focus ring on a glass control in a card"],
+  // the kit: waveform / frame placeholder
+  ["--twn-text", "--twn-frame-bg", TEXT, "kit: waveform / frame placeholder text"],
 ];
 
 test("every text/background pair meets WCAG: 4.5:1 text, 3:1 focus ring and status icons", () => {
@@ -188,7 +204,11 @@ test("stacking guard self-check: it catches glass on a surface (same rule, selec
   assert.deepEqual(glassStacking(css.replace(/\.card \.tip[^}]*\}|\.both[^}]*\}/g, ""), ['<div class="glass">on black</div>']), []);
 });
 
-test("stacking guard: no panel-ui CSS rule or rendered screen puts glass on a --twn-surface background", () => {
+test("the kit's CSS is under the colour and stacking guards (styles/kit.css is walked with panel.css)", () => {
+  assert.ok(KIT_CSS().some((f) => f.endsWith("kit.css")));
+});
+
+test("stacking guard: no panel-ui CSS rule or rendered screen (panel and kit) puts glass on a --twn-surface background", () => {
   const css = KIT_CSS().map((f) => readFileSync(f, "utf8")).join("\n");
   const htmls: string[] = [];
   for (const lang of ["en", "ar"] as const) {
@@ -198,6 +218,8 @@ test("stacking guard: no panel-ui CSS rule or rendered screen puts glass on a --
       htmls.push(render(s, t, initialUi()));
       htmls.push(render(s, t, { ...initialUi(), logOpen: true, confirmRebuild: true, notice: { kind: "error", text: "x", how: "Run `reel doctor`." } }));
     }
+    // the component kit: every component (the dev harness "Kit" scenario)
+    htmls.push(kitGallery(lang));
   }
   assert.deepEqual(glassStacking(css, htmls), []);
 });
