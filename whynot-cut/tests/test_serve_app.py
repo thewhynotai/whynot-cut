@@ -389,13 +389,32 @@ class ConnectionCaps(AppCase):
 # --------------------------------------------------------------------------------------------- handshake + auth
 class Handshake(AppCase):
     async def test_browser_origins_are_403_before_the_upgrade(self):
-        for origin in ("https://evil.example", "http://127.0.0.1", "null", "file://", "chrome-extension://abc"):
+        # bare "file://" is UXP's measured Origin (allowed, below); every other file form stays a browser Origin
+        for origin in ("https://evil.example", "http://127.0.0.1", "null", "file:///x", "file://host", "FILE://",
+                       "chrome-extension://abc"):
             with self.subTest(origin=origin):
                 c = await self.connect(origin=origin)
                 self.assertEqual(c.status, 403)
         rows = self.events("origin")
         self.assertIn("https://evil.example", [r["reason"] for r in rows])     # the raw value is audited
         self.assertTrue(any(r["outcome"] == "rejected" for r in rows))
+        self.assertFalse(any(r["reason"] == "file:///x" and r["outcome"] == "allowed" for r in rows))
+
+    async def test_uxp_file_origin_reaches_the_hello_and_needs_the_token(self):
+        """Premiere 26.5.2's UXP WebSocket sends exactly `Origin: file://` (measured live): it passes the Origin
+        gate, and the token still decides."""
+        client = {"kind": "uxp", "version": "3.0.0", "protocol": 4, "capabilities": [], "host": "premiere",
+                  "hostVersion": "26.5.2"}
+        c = await self.connect(origin="file://")
+        self.assertEqual(c.status, 101)
+        await c.send({"type": "hello", "token": self.token, "client": client})
+        self.assertEqual((await c.recv())["type"], "welcome")
+        bad = await self.connect(origin="file://")
+        self.assertEqual(bad.status, 101)
+        await bad.send({"type": "hello", "token": "f" * 64, "client": client})
+        msg = await bad.recv()
+        self.assertEqual((msg["type"], msg["code"]), ("error", "auth"))
+        self.assertTrue(any(r["reason"] == "file://" and r["outcome"] == "allowed" for r in self.events("origin")))
 
     async def test_uxp_origin_is_allowed_and_audited(self):
         c = await self.connect(origin="uxp://ai.thewhynot.cut")
