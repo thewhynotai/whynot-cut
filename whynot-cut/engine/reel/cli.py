@@ -387,16 +387,17 @@ def cmd_previews(a):
 
 
 def cmd_sfx(a):
-    from lib.sfx import synth_needed
+    from lib.sfx import MAP_REL, install_needed, load_map
     p = P(a)
     cues = read_json(p.p("06_audio/audio-cue-sheet.json"), {"cues": []})["cues"]
     kinds = {c["kind"] for c in cues}
+    sfx_map = load_map(p.p(MAP_REL))
     inv = read_json(p.output / "discovery/input-inventory.json", {"files": []})
-    if [f for f in inv["files"] if f["role"] == "sfx"]:
+    if [f for f in inv["files"] if f["role"] == "sfx"] and not sfx_map:
         log(p, "Client SFX library present — map kinds to library files in 06_audio/sfx-map.json (procedural used for unmapped kinds)")
-    r = synth_needed(kinds, p.p("06_audio/sfx"))
+    r = install_needed(kinds, sfx_map, p.root, p.p("06_audio/sfx"))
     write_json(p.p("06_audio/sfx/sfx-library.json"), r)
-    out({"kinds": sorted(kinds), "files": len(r)})
+    out({"kinds": sorted(kinds), "files": len(r), "mapped": sorted(k for k in r if k in sfx_map)})
 
 
 def require_plan_approval(p: Paths):

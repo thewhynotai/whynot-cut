@@ -230,8 +230,14 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
         speakers=(read_json(paths.p("00_inputs/speakers.json"), {}) or {}) if shots_on else {},
         words=words, pauses=pauses, srts=srts,
         subtitle_style=load_config("subtitle-style.json", ctx) if wcut and timemap_on else None,
-        flagged=flagged, profile=load_config("profile.json", ctx),
+        flagged=flagged, profile=load_config("profile.json", ctx), sfx_kinds=_sfx_kinds(paths),
         exists=lambda rel: (paths.root / rel).exists(), is_file=lambda rel: (paths.root / rel).is_file())
+
+
+def _sfx_kinds(paths: Paths) -> list[str]:
+    """Cue kinds a decision's `sound[].type` may name: the procedural recipes and the keys of 06_audio/sfx-map.json (T2.7)."""
+    from . import sfx
+    return sfx.valid_kinds(sfx.load_map(paths.p(sfx.MAP_REL)))
 
 
 def _default_footage(paths: Paths) -> str | None:
@@ -411,6 +417,9 @@ def validate_decisions(inp: PlanInputs):
                                  "decision_id": did, "segment_id": d.get("segment_id"), "auto": True, "gain_db": -18})
 
         for s in d.get("sound", []):
+            if s.get("type", "pop") not in inp.sfx_kinds:
+                errors.append(f"{did}: sound.type {s.get('type')!r} is not a sound kind — use one of: "
+                              f"{', '.join(inp.sfx_kinds)} (or map it in 06_audio/sfx-map.json)")
             at = ms(f"{did}: sound.at", s.get("at", d["start"]))
             if at is None:
                 continue

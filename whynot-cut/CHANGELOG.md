@@ -166,6 +166,7 @@
   not proved (`ok` false, "inconclusive"). First unit tests for `detect_pauses` and `verify_cuts`.
 
 ### Fixed
+- SFX kinds are checked at plan time; the client's SFX map works (T2.7, review IM-10). `compile_plan` rejects a decision's `sound[].type` that is neither a procedural recipe nor a key of `06_audio/sfx-map.json`, and the plan error lists the valid kinds (before, an unknown kind passed the plan and crashed `reel sfx` with a KeyError). `reel sfx` now converts each mapped client library file to `06_audio/sfx/<kind>.wav` (48 kHz / 24-bit stereo, like the synthesised cues) with `<kind>.provenance.json` beside it (source path, sha256, converted_at, the map entry); an unchanged source is reused. A map entry whose file is missing or not audio, a malformed map, and an unmapped unknown kind are plain-English guidance, never a traceback. The client's `assets/` and `data/` are only read. Documented in audio-craft/references/sound-design.md.
 - Bridge queue robustness, bridge 3.1.1 (T2.9, review IM-4 / IM-5 / IM-6 / MI-22). A queued job carries `expires_at`
   and the bridge answers an expired job `{ok: false, error: "expired"}` without running it; a job the bridge has not
   started when the engine stops waiting is cancelled (`<id>.job.cancelled`), so a timed-out build never runs later

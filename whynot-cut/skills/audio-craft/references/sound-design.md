@@ -13,8 +13,13 @@
   them (`cut-verification.json`). Close cuts share a window of ≤ 20 s; a long removed span is read in ≤ 20 s pieces.
   Any missing word = bad cut; too few matched words, or a window that heard nothing = inconclusive (listen). Enable with
   `global.remove_pauses` in edit-decisions; the planner remaps all graphics/captions/SFX and alternates a 6 % zoom at cuts.
-- **SFX:** if `data/` contains an approved SFX library (role `sfx`), map kinds → files in `06_audio/sfx-map.json`.
-  Otherwise `reel sfx` synthesizes **original** procedural cues (ffmpeg; no third-party audio):
+- **SFX:** if `data/` contains an approved SFX library (role `sfx`), map kinds → files in `06_audio/sfx-map.json`:
+  `{"whoosh": "data/SFX/whoosh_01.mp3", "door_knock": {"file": "data/SFX/knock.wav"}}` (path absolute or
+  relative to the client folder; keys starting with `_` are notes). A mapped key is a valid `sound[].type`, and a
+  mapped recipe name uses the library file instead of the synthesised one. `reel plan` rejects any other `type`
+  and lists the valid kinds; `reel sfx` converts each mapped file to `06_audio/sfx/<kind>.wav` (48 kHz/24-bit stereo)
+  with `<kind>.provenance.json` (source, sha256, converted_at, map entry); a missing file is a plain-English error.
+  For every other kind `reel sfx` synthesizes **original** procedural cues (ffmpeg; no third-party audio):
   whoosh, whoosh_soft, pop, click, tick, riser_soft, hit_soft, shimmer (48 kHz/24-bit stereo).
 - Cue sources: template defaults (graphic entries) + explicit `sound` entries in decisions. Restraint:
   ≤ ~12–18 cues/min, none on sensitive statements, none on every caption.
