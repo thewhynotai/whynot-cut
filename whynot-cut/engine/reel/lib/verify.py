@@ -68,18 +68,87 @@ _VOLATILE = [r"<MZ\.BuildVersion\.Modified>[^<]*</MZ\.BuildVersion\.Modified>", 
              r"<Node Version=\"1\">\s*<ID>\d+</ID>\s*</Node>"]
 
 
-def prproj_signature(path: Path) -> str | None:
-    """sha1 of the project's XML without Premiere's save-time bookkeeping (None if unreadable)."""
+def _prproj_xml(path: Path) -> str | None:
     import gzip
-    import hashlib
     try:
         with gzip.open(path) as f:
-            xml = f.read().decode("utf-8", "replace")
+            return f.read().decode("utf-8", "replace")
     except (OSError, EOFError):
         return None
+
+
+def _legacy_signature(xml: str) -> str:
+    """The 2.x / pre-B2 signature (no prefix): records written by those builds are still compared with it."""
+    import hashlib
     for pat in _VOLATILE:
         xml = re.sub(pat, "", xml)
     return hashlib.sha1(re.sub(r"\s+", " ", xml).encode("utf-8")).hexdigest()
+
+
+# Gate 2 B2 (measured on 26.5, 13-Oct, a byte diff of the build's save against the save Premiere makes when the next
+# build closes the project, nothing touched): Premiere finishes background work AFTER the build has saved, so the close
+# save differs although no one edited. Elements it adds or rewrites on its own, never editor content:
+#   - the content-credentials scan of imported media: <ContentCredentialsInfo>65536 (pending) -> <CCFileModTime>
+#     (every still, first build in a fresh Premiere);
+#   - the timeline's source patching / track targeting, written when the timeline panel initialises the new
+#     sequence, before or after the build's save (a race): HSL.TimelinePatchingAndTargeting.* on the sequence,
+#     MZ.SourceTrackState / MZ.SourceTrackNumber on every track;
+#   - property bags (<Properties>, <ScratchDiskSettings>) saved in another key order (a hash map).
+# Also left out by name: pure view state (timeline scroll/zoom, Program monitor zoom, bin expansion) that a save
+# writes whenever the panel moved. The rest of the file counts: a deny-list, not an allow-list, because a missing
+# allow-list entry would silently miss editor work (the loss B2 guards against), while a missing deny-list entry
+# only costs a refusal that names --replace-edited.
+_VOLATILE_TAG = re.compile(
+    r"MZ\.BuildVersion\.Modified|NextID|MasterClipChangeVersion|MZ\.EditLine"
+    r"|ContentCredentialsInfo|CCFileModTime"
+    r"|HSL\.TimelinePatchingAndTargeting\..*|MZ\.SourceTrackState|MZ\.SourceTrackNumber"
+    r"|TL\.SQ(?:VisibleBaseTime|TimePerPixel|VideoVisibleBase|AudioVisibleBase|DataVisibleBase)"
+    r"|Monitor\.ProgramZoom(?:In|Out)|list\.view\.expanded\.state\..*")
+SIGNATURE_PREFIX = "c2:"
+
+
+def _canonical(el, out: list) -> None:
+    """Element -> text: attributes sorted, whitespace trimmed, Premiere's own drift (above) left out. Children whose
+    names are all different and that have no children of their own (property bags, param records) are sorted by name:
+    their order carries nothing. Lists (repeated names) keep their order."""
+    kids = [k for k in el if not _VOLATILE_TAG.fullmatch(k.tag)
+            and not (k.tag == "Node" and [c.tag for c in k] == ["ID"] and not k.attrib.keys() - {"Version"})]
+    if kids and all(len(k) == 0 for k in kids) and len({k.tag for k in kids}) == len(kids):
+        kids.sort(key=lambda k: k.tag)
+    out.append("<" + el.tag + "".join(f' {a}="{v}"' for a, v in sorted(el.attrib.items())) + ">"
+               + (el.text or "").strip())
+    for k in kids:
+        _canonical(k, out)
+    out.append("</" + el.tag + ">")
+
+
+def _content_signature(xml: str) -> str | None:
+    import hashlib
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return None
+    out: list = []
+    _canonical(root, out)
+    return SIGNATURE_PREFIX + hashlib.sha1("\n".join(out).encode("utf-8")).hexdigest()
+
+
+def prproj_signature(path: Path) -> str | None:
+    """Signature of the project's editable content: Premiere's save-time bookkeeping, its background drift and view
+    state left out (None if unreadable)."""
+    xml = _prproj_xml(path)
+    return _content_signature(xml) if xml is not None else None
+
+
+def signature_matches(path: Path, recorded: str | None) -> bool:
+    """The file's content equals what was recorded, in the recorded signature's own format (2.x records have none)."""
+    if not recorded:
+        return False
+    if recorded.startswith(SIGNATURE_PREFIX):
+        return prproj_signature(path) == recorded
+    xml = _prproj_xml(path)
+    return xml is not None and _legacy_signature(xml) == recorded
 
 
 def editor_modified(paths: Paths) -> dict | None:
@@ -94,7 +163,7 @@ def editor_modified(paths: Paths) -> dict | None:
         bt = prproj_build_time(paths, m)
         if bt is not None and m.stat().st_mtime > bt + 120:
             sig = rec.get("content_signature")
-            if sig and prproj_signature(m) == sig:
+            if sig and signature_matches(m, sig):
                 continue   # saved, not edited
             f = lambda t: _dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
             return {"project": str(m), "built_at": f(bt), "edited_at": f(m.stat().st_mtime),

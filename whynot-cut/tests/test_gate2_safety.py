@@ -154,6 +154,213 @@ class TestB2CloseSaveIsNotThePipelines(_Client):
         self.assertGreater(rec["prproj_mtime"], time.time() - 120)
 
 
+def prproj_xml(*, cc="scanned", patching=None, bag_order=False, saved="2:16:19 AM", next_id=1000001, change=390,
+               empty_node=False, view=0, start=None, end=3556224000000, items=1, text="A sample statement",
+               opacity=100.0, tracks=2, markers=1):
+    """A Premiere 26.5 project shaped like the 13-Oct captures (fictional names). The keyword defaults are one save of
+    the build; `cc`, `patching`, `bag_order`, `saved`, `next_id`, `change`, `empty_node` and `view` are what Premiere
+    itself rewrites (Gate 2 B2); the rest is editor content."""
+    cc_el = ("<ContentCredentialsInfo>65536</ContentCredentialsInfo>" if cc == "pending"
+             else "<CCFileModTime>1791830622799451</CCFileModTime>")
+    scratch = ["<AudioPreviewLocation0>SameAsProject</AudioPreviewLocation0>",
+               "<CCLibrariesLocation0>SameAsProject</CCLibrariesLocation0>",
+               "<CapsuleMediaLocation0>SameAsProject</CapsuleMediaLocation0>",
+               "<AutoSaveLocation0>SameAsProject</AutoSaveLocation0>"]
+    seq_props = ["<MZ.ZeroPoint>0</MZ.ZeroPoint>", "<AMM.CurrentSolo>[]</AMM.CurrentSolo>",
+                 f"<MZ.EditLine>{view * 1000}</MZ.EditLine>",
+                 f"<TL.SQVisibleBaseTime>{view * 254016000000}</TL.SQVisibleBaseTime>",
+                 f"<Monitor.ProgramZoomOut>{3556224000000 + view}</Monitor.ProgramZoomOut>"]
+    if patching:
+        audio = ('<HSL.TimelinePatchingAndTargeting.AudioPatchesbf04c4b5_45_603a_45_2652_45_0974_45_7bc70000001f>'
+                 '[{"mNumber":0,"mState":2},{"mNumber":1,"mState":2}]'
+                 '</HSL.TimelinePatchingAndTargeting.AudioPatchesbf04c4b5_45_603a_45_2652_45_0974_45_7bc70000001f>')
+        video = ('<HSL.TimelinePatchingAndTargeting.VideoPatches4b7f66de_45_1bb0_45_cba9_45_abba_45_e67900000017>'
+                 '[{"mNumber":0,"mState":2},{"mNumber":-1,"mState":0}]'
+                 '</HSL.TimelinePatchingAndTargeting.VideoPatches4b7f66de_45_1bb0_45_cba9_45_abba_45_e67900000017>')
+        seq_props = ([audio, video] if patching == "audio_first" else [video, audio]) + seq_props
+    if bag_order:
+        scratch.reverse()
+        seq_props.reverse()
+
+    def track(i):
+        props = ["<TL.SQTrackExpanded>0</TL.SQTrackExpanded>", f"<MZ.TrackName>V{i + 1} Sample Track</MZ.TrackName>"]
+        if patching:
+            props[1:1] = [f"<MZ.SourceTrackState>{2 if i == 0 else 0}</MZ.SourceTrackState>",
+                          f"<MZ.SourceTrackNumber>{0 if i == 0 else -1}</MZ.SourceTrackNumber>"]
+        if bag_order:
+            props.reverse()
+        return (f'<VideoClipTrack ObjectUID="0000000{i}-0000-4000-8000-000000000000" Version="1"><ClipTrack Version="2">'
+                f'<Track Version="4"><Node Version="1"><Properties Version="1">{"".join(props)}</Properties></Node>'
+                f'<ID>{i + 1}</ID><Index>{i}</Index></Track><ClipItems Version="3"><TrackItems Version="1">'
+                + "".join(f'<TrackItem Index="{k}" ObjectRef="{134 + k}"/>' for k in range(items if i == 0 else 0))
+                + "</TrackItems></ClipItems></ClipTrack></VideoClipTrack>")
+
+    item = lambda k: (f'<VideoClipTrackItem ObjectID="{134 + k}" Version="8"><ClipTrackItem Version="8">'
+                      f'<TrackItem Version="4"><TrackIndex>0</TrackIndex><Type>1</Type>'
+                      + (f"<Start>{start}</Start>" if start is not None and k == 0 else "")
+                      + f'<End>{end + k * 1000}</End></TrackItem><SubClip ObjectRef="140"/>'
+                      f"<IsMuted>false</IsMuted></ClipTrackItem><FrameRect>0,0,1080,1920</FrameRect>"
+                      f"</VideoClipTrackItem>")
+    marker = lambda k: (f'<Marker ObjectID="{108 + k}" Version="3"><DVAMarker>{{"DVAMarker":{{"mComment":'
+                        f'"context_card | Sample marker {k}","mName":"GFX_00{k + 1}","mStartTime":{{"ticks":'
+                        f'{74088000000 + k}}},"mType":"Comment"}}}}</DVAMarker></Marker>')
+    return ('<?xml version="1.0" encoding="UTF-8" ?>\n<PremiereData Version="3">\n'
+            f'<Project ObjectID="1" Version="40"><Node Version="1"><Properties Version="1">'
+            f"<MZ.BuildVersion.Created>26.5.2x5 - 10/13/2026 2:16:19 AM</MZ.BuildVersion.Created>"
+            f"<MZ.BuildVersion.Modified>26.5.2x5 - 10/13/2026 {saved}</MZ.BuildVersion.Modified>"
+            f"</Properties></Node><NextID>{next_id}</NextID></Project>\n"
+            f'<ScratchDiskSettings ObjectID="9" Version="4">{"".join(scratch)}</ScratchDiskSettings>\n'
+            f'<MasterClip ObjectUID="11111111-0000-4000-8000-000000000000" Version="12"><Name>SAMPLE_RE_EDIT</Name>'
+            f"<MasterClipChangeVersion>{change}</MasterClipChangeVersion></MasterClip>\n"
+            f'<MasterClip ObjectUID="22222222-0000-4000-8000-000000000000" Version="12">'
+            + ('<Node Version="1">\n<ID>1000001</ID>\n</Node>' if empty_node else "")
+            + '<LoggingInfo ObjectRef="45"/></MasterClip>\n'
+            f'<Media ObjectUID="33333333-0000-4000-8000-000000000000" Version="30">'
+            f"<ActualMediaFilePath>D:\\Sample Client\\stills\\typography__GFX_001.png</ActualMediaFilePath>{cc_el}"
+            f"</Media>\n"
+            + "".join(marker(k) for k in range(markers))
+            + f'\n<Sequence ObjectUID="44444444-0000-4000-8000-000000000000" Version="12"><Node Version="1">'
+            f'<Properties Version="1">{"".join(seq_props)}</Properties></Node><Name>Sample Sequence</Name></Sequence>\n'
+            + "".join(track(i) for i in range(tracks)) + "\n"
+            + "".join(item(k) for k in range(items))
+            + f'\n<VideoComponentParam ObjectID="200" Version="10"><Name>Source Text</Name>'
+            f"<CurrentValue>{text}</CurrentValue></VideoComponentParam>"
+            f'<VideoComponentParam ObjectID="201" Version="10"><Name>Opacity</Name>'
+            f"<CurrentValue>{opacity}</CurrentValue></VideoComponentParam>\n</PremiereData>\n")
+
+
+def write_prproj(path: Path, xml: str, mtime: float | None = None):
+    with gzip.open(path, "wb") as f:
+        f.write(xml.encode("utf-8"))
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+
+
+class TestB2SignatureIgnoresPremieresOwnDrift(unittest.TestCase):
+    """Fix loop 1: what Premiere adds after the build's save (measured 13-Oct) is not an editor change; real edits are."""
+
+    def sig(self, **kw):
+        from lib.verify import prproj_signature
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        write_prproj(tmp / "p.prproj", prproj_xml(**kw))
+        return prproj_signature(tmp / "p.prproj")
+
+    def test_observed_close_saves_keep_the_signature(self):
+        base = self.sig(cc="pending")                         # the build's save, first build in a fresh Premiere
+        self.assertTrue(base.startswith("c2:"), base)
+        drift = {
+            "content-credentials scan done (cold start, 02:16)": dict(cc="scanned"),
+            "timeline patching/targeting written after the save (02:09)": dict(cc="scanned", patching="audio_first"),
+            "patching keys in another order (warm, 02:18)": dict(cc="pending", patching="video_first"),
+            "property bags in another key order": dict(cc="pending", bag_order=True),
+            "save stamp, ids, empty node": dict(cc="pending", saved="2:16:21 AM", next_id=1000002, change=391,
+                                                empty_node=True),
+            "timeline scrolled / zoomed, playhead moved": dict(cc="pending", view=7),
+            "all of it at once": dict(cc="scanned", patching="video_first", bag_order=True, saved="2:17:00 AM",
+                                      next_id=1000009, change=395, empty_node=True, view=3),
+        }
+        for what, kw in drift.items():
+            with self.subTest(what):
+                self.assertEqual(self.sig(**kw), base)
+        self.assertEqual(self.sig(patching="audio_first"), self.sig(patching="video_first", bag_order=True))
+
+    def test_each_real_edit_changes_it(self):
+        base = self.sig(patching="audio_first")
+        edits = {
+            "clip moved": dict(start=254016000000),
+            "clip trimmed": dict(end=3556224000000 - 10584000000),
+            "clip added": dict(items=2),
+            "clip removed": dict(items=0),
+            "graphic text changed": dict(text="A different statement"),
+            "effect value changed": dict(opacity=80.0),
+            "track added": dict(tracks=3),
+            "marker added": dict(markers=2),
+        }
+        seen = {base}
+        for what, kw in edits.items():
+            with self.subTest(what):
+                s = self.sig(patching="audio_first", **kw)
+                self.assertNotEqual(s, base)
+                self.assertNotEqual(self.sig(patching="video_first", bag_order=True, cc="pending", **kw), base)
+                seen.add(s)
+        self.assertEqual(len(seen), len(edits) + 1)           # every edit is its own content
+
+    def test_unreadable_project_has_no_signature(self):
+        from lib.verify import prproj_signature
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        (tmp / "x.prproj").write_bytes(b"not gzip")
+        self.assertIsNone(prproj_signature(tmp / "x.prproj"))
+        write_prproj(tmp / "y.prproj", "<PremiereData><Project>")
+        self.assertIsNone(prproj_signature(tmp / "y.prproj"))
+
+
+class TestB2RebuildAfterPremieresDrift(_Client):
+    def built_real(self, age_s=3600, **kw):
+        from lib.verify import prproj_signature
+        bt = time.time() - age_s
+        write_prproj(self.prj, prproj_xml(**kw), bt)
+        write_json(self.rec_p, {"status": "PRPROJ_BUILT", "project": str(self.prj), "prproj_mtime": bt,
+                                "content_signature": prproj_signature(self.prj), "checks": {}})
+        return bt
+
+    def test_untouched_rebuild_after_a_cold_start_goes_ahead(self):
+        self.built_real(age_s=5, cc="pending")
+        drift = lambda prj: write_prproj(prj, prproj_xml(cc="scanned", patching="audio_first", bag_order=True,
+                                                         saved="2:16:21 AM", next_id=1000002, empty_node=True))
+        r, sent = self.build(failed, close=drift, overwrite=True)
+        self.assertNotEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+        self.assertIn("build_project", sent)
+
+    def test_a_real_edit_under_the_drift_is_still_refused(self):
+        self.built_real(age_s=5, cc="pending")
+        sig0 = read_json(self.rec_p)["content_signature"]
+        edit = lambda prj: write_prproj(prj, prproj_xml(cc="scanned", patching="audio_first", end=3000000000000))
+        r, sent = self.build(failed, close=edit, overwrite=True)
+        self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+        self.assertEqual(sent, ["close_project_path"])
+        self.assertEqual(read_json(self.rec_p)["content_signature"], sig0)
+
+    def test_a_drift_only_save_long_after_the_build_is_not_the_editors(self):
+        from lib.verify import editor_modified
+        bt = self.built_real(cc="pending")
+        write_prproj(self.prj, prproj_xml(cc="scanned", patching="video_first"), bt + 1800)
+        self.assertIsNone(editor_modified(self.p))
+        write_prproj(self.prj, prproj_xml(cc="scanned", patching="video_first", text="Edited"), bt + 2400)
+        self.assertEqual(editor_modified(self.p)["content"], "changed")
+
+    def test_a_2x_record_without_the_prefix_still_compares(self):
+        """Records written by 2.2.1 / earlier 3.0 builds hold the old signature: an unchanged project is not reported
+        as the editor's after the upgrade, and an edited one still is."""
+        from lib.verify import _legacy_signature, editor_modified, signature_matches
+        bt = time.time() - 3600
+        xml = prproj_xml()
+        write_prproj(self.prj, xml, bt)
+        legacy = _legacy_signature(xml)
+        self.assertFalse(legacy.startswith("c2:"))
+        write_json(self.rec_p, {"status": "PRPROJ_BUILT", "project": str(self.prj), "prproj_mtime": bt,
+                                "content_signature": legacy, "checks": {}})
+        self.assertTrue(signature_matches(self.prj, legacy))
+        write_prproj(self.prj, prproj_xml(saved="9:00:00 AM", next_id=1000005), bt + 1800)
+        self.assertIsNone(editor_modified(self.p))
+        write_prproj(self.prj, prproj_xml(items=2), bt + 2400)
+        self.assertIsNotNone(editor_modified(self.p))
+
+    def test_a_2x_record_is_upgraded_by_an_unchanged_close(self):
+        from lib.verify import _legacy_signature
+        xml = prproj_xml()
+        write_prproj(self.prj, xml, time.time() - 5)
+        write_json(self.rec_p, {"status": "PRPROJ_BUILT", "project": str(self.prj), "prproj_mtime": time.time() - 5,
+                                "content_signature": _legacy_signature(xml), "checks": {}})
+        r, sent = self.build(failed, close=lambda prj: write_prproj(prj, prproj_xml(saved="9:00:00 AM")),
+                             overwrite=True)
+        self.assertIn("build_project", sent)
+        self.assertTrue(read_json(self.rec_p)["content_signature"].startswith("c2:"))
+        r, sent = self.build(failed, close=lambda prj: write_prproj(prj, prproj_xml(text="Edited")), overwrite=True)
+        self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+
+
 class TestB3NoReplyCountsAsClaimed(unittest.TestCase):
     def test_the_bridges_own_timeout_keeps_the_job_claimed(self):
         q = Path(tempfile.mkdtemp())

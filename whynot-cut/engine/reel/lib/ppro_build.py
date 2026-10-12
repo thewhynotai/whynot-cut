@@ -283,16 +283,19 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
     backup = None
     closed = None
     if prproj.exists():
-        from .verify import prproj_signature
+        from .verify import prproj_signature, signature_matches
         rec_p = paths.p("07_premiere/ppro-build-result.json")
         rec = read_json(rec_p, {}) or {}
         # what the pipeline saved last (else, for a project it never signed, the file as it is before the close)
         pipeline_sig = rec.get("content_signature") or prproj_signature(prproj)
         # close it in Premiere first: on Windows an open project locks the stills it uses, and they are re-rendered
         # below. The close SAVES the open project, so it may write the editor's unsaved work to disk (Gate 2 B2).
+        # The signature leaves out what Premiere itself adds after the build's save (verify._VOLATILE_TAG).
         closed = submit("close_project_path", {"path": str(prproj)}, timeout=60)
         after_sig = prproj_signature(prproj) if prproj.exists() else pipeline_sig
-        if after_sig != pipeline_sig and not replace_edited:
+        unchanged = signature_matches(prproj, pipeline_sig) if prproj.exists() and pipeline_sig \
+            else after_sig == pipeline_sig
+        if not unchanged and not replace_edited:
             # never recorded as the pipeline's: the record keeps the pipeline's signature, so the next run sees it too
             return {"status": "EDITOR_CHANGES_PRESENT", "closed_previous": (closed or {}).get("response"),
                     "detail": {"project": str(prproj), "content": "changed (saved by Premiere when the build closed "
@@ -302,7 +305,7 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
                            "from the plan, so their manual edits would NOT carry over. Ask the editor; only with their "
                            "OK re-run with --force --replace-edited (the old file is kept as *_prev_*.prproj)."}
         if ((closed.get("response") or {}).get("result") or {}).get("closed") and not em and rec \
-                and after_sig == pipeline_sig and prproj.exists():
+                and unchanged and prproj.exists():
             # that close saved the file without a change: the save is the pipeline's own, not the editor's (else a
             # failed rebuild would make the next one report EDITOR_CHANGES_PRESENT)
             rec["prproj_mtime"] = prproj.stat().st_mtime
