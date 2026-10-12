@@ -1,5 +1,9 @@
 """The command router of `reel serve` (3.0 T6.2): one `command` message in, one `result` (or `error`) message out.
 
+    0. a RESERVED action (protocol.json status "reserved": the Phase 6B Kalam / Hush / Tidy / WNC_AUDIO host operations)
+       is never routed: it is answered `ok: false` "reserved for Phase 6B (<tool>), not available yet" with a `how`,
+       before data, expiry or adapters are looked at (the session schema already checked the envelope), and audited
+       with outcome "reserved";
     1. contract.validate_request: the envelope and the action's data (`schema` error otherwise; an unknown action is
        already refused by the session schema's action enum);
     2. expires_at in the past -> `timeout` error; an id that is already running -> `schema` error;
@@ -17,20 +21,34 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from contract import validate_request, validate_result
+from contract import RESERVED, validate_request, validate_result
 from contract.cep import CEP_NAME
 from lib.common import Context, use_context
 
 from . import messages
 from .adapters import ACTION_HOSTS, FileQueueAdapter, UxpAdapter, failure, seconds_left
 
-__all__ = ["Router", "OUTSIDE_CONTRACT"]
+__all__ = ["Router", "OUTSIDE_CONTRACT", "reserved_result"]
 
 log = logging.getLogger(__name__)
 
 OUTSIDE_CONTRACT = "host answered outside the contract"
 OUTSIDE_HOW = ("The panel or bridge sent an answer this engine cannot check: update the WhyNot Cut panel and bridge "
                "to this engine's version, then run the command again.")
+
+# Phase 6B (Addendum A2): the tool and the task that will make each reserved action prefix work
+RESERVED_TOOLS = {"audio": ("WNC_AUDIO shared audio export", "T6.11"), "hush": ("Hush", "T6.12"),
+                  "tidy": ("Tidy", "T6.13"), "kalam": ("Kalam", "T6.14")}
+
+
+def reserved_result(action: str, rid: str) -> dict:
+    """The `ok: false` answer to a reserved action (it validates with contract.validate_result)."""
+    if action not in RESERVED:
+        raise ValueError(f"{action!r} is not a reserved action")
+    tool, task = RESERVED_TOOLS[action.split("_", 1)[0]]
+    return failure(action, rid, f"reserved for Phase 6B ({tool}), not available yet",
+                   f"This WhyNot Cut version only reserves {action}; Phase 6B ({task}) builds it. Nothing to fix on "
+                   "your side: update WhyNot Cut when that version ships.")
 
 
 class Router:
@@ -49,6 +67,8 @@ class Router:
 
     def pick(self, action: str):
         """(adapter, label) for `action`, or (None, reason). The most recently connected capable session wins."""
+        if action in RESERVED:                         # Phase 6B: no panel or queue runs it, whatever it claims
+            return None, f"{action} is reserved for Phase 6B"
         host = ACTION_HOSTS.get(action)
         for s in reversed(list(self._sessions())):
             if (s.kind == "uxp" and not s.link.closed and action in s.capabilities
@@ -62,6 +82,10 @@ class Router:
         """The message answering a validated `command` message. `send(msg)` delivers progress to the requester."""
         req = msg["request"]
         rid, action = req["id"], req["action"]
+        if action in RESERVED:
+            self._audit("command", peer=peer, session=session_id, action=action, outcome="reserved",
+                        reason="reserved for Phase 6B, not routed")
+            return {"type": "result", "result": reserved_result(action, rid)}
         errors = validate_request(req)
         if errors:
             self._audit("command", peer=peer, session=session_id, action=action, outcome="rejected",

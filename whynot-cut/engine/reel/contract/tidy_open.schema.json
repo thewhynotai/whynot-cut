@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/tidy_open.schema.json",
+  "title": "tidy_open",
+  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_open, FR-15; not routed yet. CEP WNC_TIDY.open (signed bridge). Undo = open the backup copy '<name> (Tidy backup YYYY-MM-DD HHMMSS)'. uxp true: open an existing project with a native backslash path is green in docs/adobe/uxp-parity.md (O2).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the .prproj to open"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false,
+      "description": "tidy_open {path}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "opened": {
+          "description": "whether it opened: its type is not stated in the PRD, left open"
+        }
+      },
+      "required": [
+        "opened"
+      ],
+      "description": "opened. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

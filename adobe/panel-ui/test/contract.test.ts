@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import protocol from "../../../whynot-cut/engine/reel/contract/protocol.json" with { type: "json" };
-import { ACTION_NAMES, PROTOCOL } from "../src/contract.ts";
+import { readdirSync, readFileSync } from "node:fs";
+import { ACTION_NAMES, ACTIVE_ACTION_NAMES, PROTOCOL, RESERVED_ACTION_NAMES } from "../src/contract.ts";
 import type { ExportedFrame, PingPremiereReadback, ResultEnvelope } from "../src/contract.ts";
 
 test("PROTOCOL comes from protocol.json (one source)", () => {
@@ -11,6 +12,19 @@ test("PROTOCOL comes from protocol.json (one source)", () => {
 
 test("the panel's action list equals protocol.json's, in order", () => {
   assert.deepEqual([...ACTION_NAMES], Object.keys(protocol.actions));
+});
+
+test("round 4: the active and reserved lists equal protocol.json's status, and the panel exposes no reserved action", () => {
+  const entries = Object.entries(protocol.actions as Record<string, { status: string }>);
+  assert.deepEqual([...ACTIVE_ACTION_NAMES], entries.filter(([, e]) => e.status === "active").map(([a]) => a));
+  assert.deepEqual([...RESERVED_ACTION_NAMES], entries.filter(([, e]) => e.status === "reserved").map(([a]) => a));
+  assert.equal(RESERVED_ACTION_NAMES.length, 20);
+  assert.equal(ACTIVE_ACTION_NAMES.length + RESERVED_ACTION_NAMES.length, ACTION_NAMES.length);
+  const src = new URL("../src/", import.meta.url);
+  for (const f of readdirSync(src).filter((n) => n.endsWith(".ts") && n !== "contract.ts")) {
+    const text = readFileSync(new URL(f, src), "utf8");
+    for (const a of RESERVED_ACTION_NAMES) assert.ok(!text.includes(`"${a}"`), `${f} must not expose ${a} (Phase 6B)`);
+  }
 });
 
 // The TypeScript mirror of the schemas is checked by the compiler (npm run check): these literals must keep type-checking.

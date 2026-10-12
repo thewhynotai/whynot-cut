@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/tidy_scan.schema.json",
+  "title": "tidy_scan",
+  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_scan, FR-1, FR-2, FR-9; not routed yet. CEP WNC_TIDY.scan (signed bridge). Read only: walk the project tree (items and bins), usage per sequence (clips of video + audio tracks) and up to 3 graphic Source Texts per sequence.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "description": "No data (the PRD's host function takes no argument)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+              },
+              "name": {
+                "type": "string",
+                "description": "item name"
+              },
+              "bin": {
+                "type": "string",
+                "description": "bin path"
+              },
+              "isSequence": {
+                "type": "boolean",
+                "description": "a sequence"
+              },
+              "path": {
+                "description": "media path (a sequence has none): its type is not stated in the PRD, left open"
+              },
+              "offline": {
+                "type": "boolean",
+                "description": "Premiere's flag (FR-3: unreliable, the engine checks the file)"
+              },
+              "color": {
+                "description": "label colour: its type is not stated in the PRD, left open"
+              },
+              "duration": {
+                "description": "duration: its type is not stated in the PRD, left open"
+              }
+            },
+            "required": [
+              "nodeId",
+              "name",
+              "bin",
+              "isSequence",
+              "path",
+              "offline",
+              "color",
+              "duration"
+            ],
+            "description": "{nodeId,name,bin,isSequence,path,offline,color,duration}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+          },
+          "description": "every project item"
+        },
+        "bins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+              },
+              "path": {
+                "type": "string",
+                "description": "bin path"
+              },
+              "name": {
+                "type": "string",
+                "description": "bin name"
+              }
+            },
+            "required": [
+              "nodeId",
+              "path",
+              "name"
+            ],
+            "description": "{nodeId,path,name}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+          },
+          "description": "every bin"
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "nodeIds used"
+          },
+          "description": "{seqNodeId: [nodeIds]}: project items referenced by each sequence's clips"
+        },
+        "texts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "raw Source Text"
+          },
+          "description": "{seqNodeId: [raw Source Text]} (FR-2, top video track first, at most 3)"
+        },
+        "project": {
+          "description": "the project: its type is not stated in the PRD, left open"
+        },
+        "name": {
+          "type": "string",
+          "description": "project name"
+        }
+      },
+      "required": [
+        "items",
+        "bins",
+        "usage",
+        "texts",
+        "project",
+        "name"
+      ],
+      "description": "{items,bins,usage,texts,project,name}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

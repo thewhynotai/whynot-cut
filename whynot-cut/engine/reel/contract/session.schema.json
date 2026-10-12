@@ -459,7 +459,7 @@
             },
             "capabilities": {
               "type": "array",
-              "maxItems": 15,
+              "maxItems": 35,
               "items": {
                 "$ref": "request.schema.json#/properties/action"
               },

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/tidy_save.schema.json",
+  "title": "tidy_save",
+  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_save, FR-15; not routed yet. CEP WNC_TIDY.save (signed bridge). Save the project before the backup copy (the copy itself is engine-side: UXP and the engine may read and copy files). uxp true: save (O3) and the active project path (P3) are green in docs/adobe/uxp-parity.md.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "description": "No data (the PRD's host function takes no argument)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the saved .prproj"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "description": "path: the saved project. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

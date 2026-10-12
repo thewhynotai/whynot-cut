@@ -4,7 +4,8 @@ import protocol from "../../../whynot-cut/engine/reel/contract/protocol.json" wi
 
 export const PROTOCOL: number = protocol.protocol;
 
-export const ACTION_NAMES = [
+/** protocol.json status "active": the actions the engine routes today. */
+export const ACTIVE_ACTION_NAMES = [
   "ping",
   "status",
   "probe",
@@ -21,6 +22,36 @@ export const ACTION_NAMES = [
   "ae_fonts",
   "ae_probe_text",
 ] as const;
+
+/** protocol.json status "reserved" (round 4): the Phase 6B Kalam / Hush / Tidy / WNC_AUDIO host operations. Named so the
+ *  types stay equal to protocol.json; never routed (the engine answers "reserved for Phase 6B") and the panel UI does not
+ *  expose them (docs/adobe/phase-6b-reservations.md). */
+export const RESERVED_ACTION_NAMES = [
+  "audio_export_range",
+  "audio_export_clip",
+  "hush_info",
+  "hush_clip_sources",
+  "hush_cut",
+  "hush_markers",
+  "hush_clear_markers",
+  "hush_set_playhead",
+  "hush_restore",
+  "tidy_scan",
+  "tidy_apply",
+  "tidy_save",
+  "tidy_open",
+  "tidy_build_synced",
+  "kalam_info",
+  "kalam_captions_track",
+  "kalam_mogrt",
+  "kalam_remove_clips",
+  "kalam_set_playhead",
+  "kalam_version",
+] as const;
+
+export const ACTION_NAMES = [...ACTIVE_ACTION_NAMES, ...RESERVED_ACTION_NAMES] as const;
+export type ActiveActionName = (typeof ACTIVE_ACTION_NAMES)[number];
+export type ReservedActionName = (typeof RESERVED_ACTION_NAMES)[number];
 export type ActionName = (typeof ACTION_NAMES)[number];
 
 // Compile-time guard: if protocol.json gains or loses an action this stops compiling.

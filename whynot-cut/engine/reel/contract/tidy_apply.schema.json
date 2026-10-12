@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/tidy_apply.schema.json",
+  "title": "tidy_apply",
+  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_apply, FR-12, FR-16, FR-17, FR-18, \u00a78; not routed yet. CEP WNC_TIDY.apply (signed bridge). Apply a previewed plan. The host re-checks usage live and refuses to remove a used item or a non-backup sequence even if asked (FR-16). Order (FR-17): moves -> removals (into one temporary bin, then that bin is deleted) -> empty bins by nodeId, only when children.numItems === 0, index rebuilt after each delete -> colours -> nest renames; each step fail-safe, failures go to problems. Safety (verbatim, \u00a78): remove from the project only, media files are only ever read; never remove a used item or a non-backup sequence; never delete a bin that holds anything, find bins by nodeId; save + backup copy before applying (tidy_save, then the engine copies the .prproj).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "removals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+              },
+              "name": {
+                "type": "string",
+                "description": "item name"
+              },
+              "checked": {
+                "type": "boolean",
+                "description": "ticked in the preview"
+              }
+            },
+            "required": [
+              "nodeId",
+              "name",
+              "checked"
+            ],
+            "additionalProperties": false,
+            "description": "{nodeId,name,checked}"
+          },
+          "description": "FR-10, FR-11"
+        },
+        "moves": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "description": "target bin path, e.g. '03 Audio/SFX'"
+              }
+            },
+            "required": [
+              "nodeId",
+              "to"
+            ],
+            "additionalProperties": false,
+            "description": "{nodeId,to}"
+          },
+          "description": "FR-12"
+        },
+        "emptyBins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+              },
+              "path": {
+                "type": "string",
+                "description": "bin path (shown only)"
+              }
+            },
+            "required": [
+              "nodeId",
+              "path"
+            ],
+            "additionalProperties": false,
+            "description": "{nodeId,path}"
+          },
+          "description": "deepest first (FR-12)"
+        },
+        "colors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+              },
+              "color": {
+                "description": "label colour per type: its type is not stated in the PRD, left open"
+              }
+            },
+            "required": [
+              "nodeId",
+              "color"
+            ],
+            "additionalProperties": false,
+            "description": "{nodeId,color}"
+          },
+          "description": "FR-12"
+        },
+        "renames": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "description": "new nest name (FR-13)"
+              },
+              "checked": {
+                "type": "boolean",
+                "description": "ticked in the preview"
+              }
+            },
+            "required": [
+              "nodeId",
+              "to",
+              "checked"
+            ],
+            "additionalProperties": false,
+            "description": "{nodeId,to,checked}"
+          },
+          "description": "FR-13"
+        }
+      },
+      "required": [
+        "removals",
+        "moves",
+        "emptyBins",
+        "colors",
+        "renames"
+      ],
+      "additionalProperties": false,
+      "description": "tidy_apply {removals,moves,emptyBins,colors,renames}; FR-18 options leave a list empty."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "moved": {
+          "description": "items moved (a count or the list): its type is not stated in the PRD, left open"
+        },
+        "removed": {
+          "description": "items removed (a count or the list): its type is not stated in the PRD, left open"
+        },
+        "skipped": {
+          "description": "removals refused by the live re-check (FR-16): its type is not stated in the PRD, left open"
+        },
+        "binsRemoved": {
+          "description": "empty bins deleted: its type is not stated in the PRD, left open"
+        },
+        "colored": {
+          "description": "items coloured: its type is not stated in the PRD, left open"
+        },
+        "renamed": {
+          "description": "nests renamed: its type is not stated in the PRD, left open"
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "description": "one failed step; item shape not stated in the PRD"
+          },
+          "description": "FR-17: every failed step, the rest continued"
+        }
+      },
+      "required": [
+        "moved",
+        "removed",
+        "skipped",
+        "binsRemoved",
+        "colored",
+        "renamed",
+        "problems"
+      ],
+      "description": "{moved,removed,skipped,binsRemoved,colored,renamed,problems}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/tidy_build_synced.schema.json",
+  "title": "tidy_build_synced",
+  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_buildSynced, FR-22, FR-23, \u00a78; not routed yet. CEP WNC_TIDY.buildSynced (signed bridge). Podcast sync: a new sequence '<project> - Synced' in '06 Sequences', settings from Cam 1's longest clip, tracks added through QE addTracks and re-read, Cam n on video track n (an overlapping clip gets a new track, never overwrites an angle), mics on the audio tracks after the last camera one, every placement read back within one frame and mismatches reported; existing sequences untouched. UXP cannot add audio tracks (T3b red), so uxp is false.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the new sequence name"
+        },
+        "bin": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the bin to create it in"
+        },
+        "first": {
+          "description": "what 'first' carries (the clip whose settings the sequence takes?) is not stated in the PRD, left open"
+        },
+        "cams": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+              },
+              "start": {
+                "type": "number",
+                "description": "placement, sequence seconds (the earliest clip starts at 0, FR-22)"
+              },
+              "track": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "track index (0-based, as Premiere's DOM numbers tracks)"
+              }
+            },
+            "required": [
+              "nodeId",
+              "start",
+              "track"
+            ],
+            "additionalProperties": false,
+            "description": "{nodeId,start,track}"
+          },
+          "description": "camera clips"
+        },
+        "mics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+              },
+              "start": {
+                "type": "number",
+                "description": "placement, sequence seconds"
+              }
+            },
+            "required": [
+              "nodeId",
+              "start"
+            ],
+            "additionalProperties": false,
+            "description": "{nodeId,start}"
+          },
+          "description": "mic recordings"
+        }
+      },
+      "required": [
+        "name",
+        "bin",
+        "first",
+        "cams",
+        "mics"
+      ],
+      "additionalProperties": false,
+      "description": "tidy_buildSynced {name,bin,first,cams:[{nodeId,start,track}],mics:[{nodeId,start}]}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "placed": {
+          "description": "placements made (a count or the list): its type is not stated in the PRD, left open"
+        },
+        "sequence": {
+          "description": "the new sequence (name or object): its type is not stated in the PRD, left open"
+        },
+        "videoTracks": {
+          "description": "video tracks used: its type is not stated in the PRD, left open"
+        },
+        "audioTracks": {
+          "description": "audio tracks used: its type is not stated in the PRD, left open"
+        },
+        "micTrack": {
+          "description": "the first mic track: its type is not stated in the PRD, left open"
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "description": "one mismatch or failure; item shape not stated in the PRD"
+          },
+          "description": "read-back mismatches and skipped placements (FR-23)"
+        }
+      },
+      "required": [
+        "placed",
+        "sequence",
+        "videoTracks",
+        "audioTracks",
+        "micTrack",
+        "problems"
+      ],
+      "description": "{placed,sequence,videoTracks,audioTracks,micTrack,problems}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

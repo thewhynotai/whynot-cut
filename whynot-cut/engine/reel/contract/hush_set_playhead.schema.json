@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/hush_set_playhead.schema.json",
+  "title": "hush_set_playhead",
+  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_setPlayhead, FR-15, FR-17; not routed yet. CEP WNC_HUSH.setPlayhead (signed bridge). Move the active sequence's playhead (play button 0.5 s before a filler, click on the waveform). uxp true: Sequence.setPlayerPosition is green in docs/adobe/uxp-parity.md (H2, spike 0.1.3).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "number",
+          "minimum": 0,
+          "description": "sequence seconds"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "additionalProperties": false,
+      "description": "hush_setPlayhead {t}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {},
+      "description": "The PRD returns {}: no key is required. The object stays open: keys the host adds are not rejected."
+    }
+  }
+}

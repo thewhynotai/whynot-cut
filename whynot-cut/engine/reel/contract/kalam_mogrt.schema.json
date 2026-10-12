@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/kalam_mogrt.schema.json",
+  "title": "kalam_mogrt",
+  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_mogrt, FR-18, FR-19, \u00a78; not routed yet. CEP WNC_KALAM.mogrt (signed bridge). One MOGRT clip per caption on the chosen video track (importMGT), the text written into the template's text field. All-or-nothing (\u00a78): a template without editable text is a clear error and every clip placed so far is removed. MOGRT text is not available in UXP before 27.0 (M1), so uxp is false.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "mogrtPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the .mogrt (FR-19 gallery or a file)"
+        },
+        "videoTrack": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "track index (0-based, as Premiere's DOM numbers tracks)"
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "description": "range start, sequence seconds"
+        },
+        "textParam": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the text field by name; null = the first real text field (FR-18)"
+        },
+        "captions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "s": {
+                "type": "number",
+                "minimum": 0,
+                "description": "sequence seconds"
+              },
+              "e": {
+                "type": "number",
+                "minimum": 0,
+                "description": "sequence seconds"
+              },
+              "text": {
+                "type": "string",
+                "description": "caption text"
+              }
+            },
+            "required": [
+              "s",
+              "e",
+              "text"
+            ],
+            "additionalProperties": false,
+            "description": "{s,e,text}"
+          },
+          "description": "the captions to place"
+        }
+      },
+      "required": [
+        "mogrtPath",
+        "videoTrack",
+        "start",
+        "textParam",
+        "captions"
+      ],
+      "additionalProperties": false,
+      "description": "kalam_mogrt {mogrtPath,videoTrack,start,textParam|null,captions:[{s,e,text}]}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "added": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "clips placed"
+        },
+        "field": {
+          "description": "the text field written: its type is not stated in the PRD, left open"
+        }
+      },
+      "required": [
+        "added",
+        "field"
+      ],
+      "description": "{added,field}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

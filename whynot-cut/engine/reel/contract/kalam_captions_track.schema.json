@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/kalam_captions_track.schema.json",
+  "title": "kalam_captions_track",
+  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_captionsTrack, FR-17, FR-20, FR-22; not routed yet. CEP WNC_KALAM.captionsTrack (signed bridge). Import the SRT and place it with createCaptionTrack (subtitle format) at sequence time. The captions track cannot be read back or removed by script (kalam-prd.md \u00a712); UXP has no createCaptionTrack (C1 red).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "srtPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the SRT (always written, FR-21)"
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "description": "where it starts, sequence seconds"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the imported item's name"
+        }
+      },
+      "required": [
+        "srtPath",
+        "start",
+        "name"
+      ],
+      "additionalProperties": false,
+      "description": "kalam_captionsTrack {srtPath,start,name}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "item": {
+          "description": "the imported SRT item: its type is not stated in the PRD, left open"
+        },
+        "nodeId": {
+          "type": "string",
+          "description": "its project nodeId"
+        }
+      },
+      "required": [
+        "item",
+        "nodeId"
+      ],
+      "description": "{item,nodeId}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

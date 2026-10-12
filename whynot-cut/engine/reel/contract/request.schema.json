@@ -34,7 +34,27 @@
         "ae_readback",
         "ae_render",
         "ae_fonts",
-        "ae_probe_text"
+        "ae_probe_text",
+        "audio_export_range",
+        "audio_export_clip",
+        "hush_info",
+        "hush_clip_sources",
+        "hush_cut",
+        "hush_markers",
+        "hush_clear_markers",
+        "hush_set_playhead",
+        "hush_restore",
+        "tidy_scan",
+        "tidy_apply",
+        "tidy_save",
+        "tidy_open",
+        "tidy_build_synced",
+        "kalam_info",
+        "kalam_captions_track",
+        "kalam_mogrt",
+        "kalam_remove_clips",
+        "kalam_set_playhead",
+        "kalam_version"
       ]
     },
     "data": {

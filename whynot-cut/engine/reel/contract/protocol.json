@@ -1,81 +1,216 @@
 {
   "protocol": 4,
-  "description": "Contract v4: every action with the host that runs it, the legacy CEP action it replaces (null: none) and the `uxp` flag: the planned target, i.e. the UXP plugin is meant to implement that action. It is not a measurement: routing (engine daemon) must use what the connected plugin reports at runtime (status), and docs/adobe/uxp-parity.md holds the measured status of each Premiere API. host 'engine' = runs in the Python engine, 'any' = both hosts answer it.",
+  "description": "Contract v4: every action with the host that runs it, the legacy CEP action it replaces (null: none), the `uxp` flag and its `status`. `uxp` is the planned target, i.e. the UXP plugin is meant to implement that action. It is not a measurement: routing (engine daemon) must use what the connected plugin reports at runtime (status), and docs/adobe/uxp-parity.md holds the measured status of each Premiere API; for a reserved action `uxp` is true only where that file is green for the exact operation. `status`: \"active\" = routed today; \"reserved\" = named and given its schema for Phase 6B (Kalam / Hush / Tidy and the shared WNC_AUDIO export, Addendum A2), never routed: the engine daemon answers it ok:false \"reserved for Phase 6B (<tool>), not available yet\" without asking any host (docs/adobe/phase-6b-reservations.md). host 'engine' = runs in the Python engine, 'any' = both hosts answer it.",
   "actions": {
     "ping": {
       "host": "any",
       "cep": "ping",
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "status": {
       "host": "any",
       "cep": null,
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "probe": {
       "host": "premiere",
       "cep": "probe",
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "build_project": {
       "host": "premiere",
       "cep": "build_project",
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "export_frames": {
       "host": "premiere",
       "cep": "export_frames",
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "close_project_path": {
       "host": "premiere",
       "cep": "close_project_path",
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "clip_components": {
       "host": "premiere",
       "cep": "clip_components",
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "open_project": {
       "host": "premiere",
       "cep": null,
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "set_player_position": {
       "host": "premiere",
       "cep": null,
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "render_review": {
       "host": "premiere",
       "cep": null,
-      "uxp": true
+      "uxp": true,
+      "status": "active"
     },
     "ae_build_motion": {
       "host": "aftereffects",
       "cep": "build_motion",
-      "uxp": false
+      "uxp": false,
+      "status": "active"
     },
     "ae_readback": {
       "host": "aftereffects",
       "cep": "readback",
-      "uxp": false
+      "uxp": false,
+      "status": "active"
     },
     "ae_render": {
       "host": "engine",
       "cep": null,
-      "uxp": false
+      "uxp": false,
+      "status": "active"
     },
     "ae_fonts": {
       "host": "aftereffects",
       "cep": "fonts",
-      "uxp": false
+      "uxp": false,
+      "status": "active"
     },
     "ae_probe_text": {
       "host": "aftereffects",
       "cep": "probe_text",
-      "uxp": false
+      "uxp": false,
+      "status": "active"
+    },
+    "audio_export_range": {
+      "host": "premiere",
+      "cep": "WNC_AUDIO.exportRange",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "audio_export_clip": {
+      "host": "premiere",
+      "cep": "WNC_AUDIO.exportClipAudio",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "hush_info": {
+      "host": "premiere",
+      "cep": "WNC_HUSH.info",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "hush_clip_sources": {
+      "host": "premiere",
+      "cep": "WNC_HUSH.clipSources",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "hush_cut": {
+      "host": "premiere",
+      "cep": "WNC_HUSH.cut",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "hush_markers": {
+      "host": "premiere",
+      "cep": "WNC_HUSH.markers",
+      "uxp": true,
+      "status": "reserved"
+    },
+    "hush_clear_markers": {
+      "host": "premiere",
+      "cep": "WNC_HUSH.clearMarkers",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "hush_set_playhead": {
+      "host": "premiere",
+      "cep": "WNC_HUSH.setPlayhead",
+      "uxp": true,
+      "status": "reserved"
+    },
+    "hush_restore": {
+      "host": "premiere",
+      "cep": "WNC_HUSH.restore",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "tidy_scan": {
+      "host": "premiere",
+      "cep": "WNC_TIDY.scan",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "tidy_apply": {
+      "host": "premiere",
+      "cep": "WNC_TIDY.apply",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "tidy_save": {
+      "host": "premiere",
+      "cep": "WNC_TIDY.save",
+      "uxp": true,
+      "status": "reserved"
+    },
+    "tidy_open": {
+      "host": "premiere",
+      "cep": "WNC_TIDY.open",
+      "uxp": true,
+      "status": "reserved"
+    },
+    "tidy_build_synced": {
+      "host": "premiere",
+      "cep": "WNC_TIDY.buildSynced",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "kalam_info": {
+      "host": "premiere",
+      "cep": "WNC_KALAM.info",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "kalam_captions_track": {
+      "host": "premiere",
+      "cep": "WNC_KALAM.captionsTrack",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "kalam_mogrt": {
+      "host": "premiere",
+      "cep": "WNC_KALAM.mogrt",
+      "uxp": false,
+      "status": "reserved"
+    },
+    "kalam_remove_clips": {
+      "host": "premiere",
+      "cep": "WNC_KALAM.removeClips",
+      "uxp": true,
+      "status": "reserved"
+    },
+    "kalam_set_playhead": {
+      "host": "premiere",
+      "cep": "WNC_KALAM.setPlayhead",
+      "uxp": true,
+      "status": "reserved"
+    },
+    "kalam_version": {
+      "host": "premiere",
+      "cep": "WNC_KALAM.version",
+      "uxp": true,
+      "status": "reserved"
     }
   }
 }

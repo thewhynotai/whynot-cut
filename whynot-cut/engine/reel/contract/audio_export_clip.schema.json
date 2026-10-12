@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/audio_export_clip.schema.json",
+  "title": "audio_export_clip",
+  "description": "RESERVED for Phase 6B (T6.11) \u2014 shape from tidy-prd.md \u00a77 tidy_exportClipAudio, Tidy FR-20, FR-19; not routed yet. CEP WNC_AUDIO.exportClipAudio (signed bridge). Export one project item's sound to a WAV: a temporary sequence + the Wave48mono16 preset, the temporary sequence deleted after (in finally, tidy-prd.md \u00a78) and the active sequence restored. A clip that fails to export is left out by the caller with its name (FR-20).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the project item"
+        },
+        "outPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the WAV to write"
+        }
+      },
+      "required": [
+        "nodeId",
+        "outPath"
+      ],
+      "additionalProperties": false,
+      "description": "tidy_exportClipAudio {nodeId,outPath}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the WAV written"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "description": "path: the WAV written. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

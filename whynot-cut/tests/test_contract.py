@@ -26,6 +26,35 @@ SESSION = "session"           # the daemon-link WebSocket message schema: neithe
 V4_ACTIONS = ["ping", "status", "probe", "build_project", "export_frames", "close_project_path", "clip_components",
               "open_project", "set_player_position", "render_review", "ae_build_motion", "ae_readback", "ae_render",
               "ae_fonts", "ae_probe_text"]
+# Round 4 (Addendum A): the Phase 6B editor-tool host operations, named and given schemas now, never routed until
+# T6.11-T6.14 build them. action -> (CEP function, uxp planned target, PRD host function it comes from).
+RESERVED = {
+    "audio_export_range": ("WNC_AUDIO.exportRange", False, "hush_exportAudio + kalam_exportAudio"),
+    "audio_export_clip": ("WNC_AUDIO.exportClipAudio", False, "tidy_exportClipAudio"),
+    "hush_info": ("WNC_HUSH.info", False, "hush_info"),
+    "hush_clip_sources": ("WNC_HUSH.clipSources", False, "hush_clipSources"),
+    "hush_cut": ("WNC_HUSH.cut", False, "hush_cut"),
+    "hush_markers": ("WNC_HUSH.markers", True, "hush_markers"),
+    "hush_clear_markers": ("WNC_HUSH.clearMarkers", False, "hush_clearMarkers"),
+    "hush_set_playhead": ("WNC_HUSH.setPlayhead", True, "hush_setPlayhead"),
+    "hush_restore": ("WNC_HUSH.restore", False, "hush_restore"),
+    "tidy_scan": ("WNC_TIDY.scan", False, "tidy_scan"),
+    "tidy_apply": ("WNC_TIDY.apply", False, "tidy_apply"),
+    "tidy_save": ("WNC_TIDY.save", True, "tidy_save"),
+    "tidy_open": ("WNC_TIDY.open", True, "tidy_open"),
+    "tidy_build_synced": ("WNC_TIDY.buildSynced", False, "tidy_buildSynced"),
+    "kalam_info": ("WNC_KALAM.info", False, "kalam_info"),
+    "kalam_captions_track": ("WNC_KALAM.captionsTrack", False, "kalam_captionsTrack"),
+    "kalam_mogrt": ("WNC_KALAM.mogrt", False, "kalam_mogrt"),
+    "kalam_remove_clips": ("WNC_KALAM.removeClips", True, "kalam_removeClips"),
+    "kalam_set_playhead": ("WNC_KALAM.setPlayhead", True, "kalam_setPlayhead"),
+    "kalam_version": ("WNC_KALAM.version", True, "kalam_version"),
+}
+RESERVED_ACTIONS = list(RESERVED)
+ALL_ACTIONS = V4_ACTIONS + RESERVED_ACTIONS
+PHASE_6B = {"audio": ("T6.11", "WNC_AUDIO"), "hush": ("T6.12", "WNC_HUSH"), "tidy": ("T6.13", "WNC_TIDY"),
+            "kalam": ("T6.14", "WNC_KALAM")}
+EMPTY_READBACK = {"hush_set_playhead", "kalam_set_playhead"}   # the PRDs return {} for these: nothing to require
 NOW = "2026-10-11T12:00:00Z"
 
 
@@ -133,6 +162,62 @@ SAMPLES = {
                                 "rect": [1.0, 2.0, 3.0, 4.0]},
                                {"name": "icon", "ok": False, "error": "Error: x", "line": 3}]}},
 }
+TRACK_CHIP = {"kind": "audio", "index": 0, "name": "A1", "clips": 2, "locked": False}
+SAMPLES.update({                       # Phase 6B reservations: PRD-shaped samples (round 4)
+    "audio_export_range": {"data": {"outPath": "C:/t/range.wav", "start": 1.5, "end": 61.5, "audioTracks": [0, 2]},
+                           "readback": {"path": "C:/t/range.wav", "start": 1.5, "end": 61.5}},
+    "audio_export_clip": {"data": {"nodeId": "000f4243", "outPath": "C:/t/cam1.wav"}, "readback": {"path": "C:/t/cam1.wav"}},
+    "hush_info": {"data": {},
+                  "readback": {"sequence": {"name": "R01_EDIT", "id": "seq-1", "fps": 29.97, "end": 62.0, "inPoint": 1.5,
+                                            "outPoint": 61.5, "video": [dict(TRACK_CHIP, kind="video", name="V1")],
+                                            "audio": [TRACK_CHIP],
+                                            "selection": [{"name": "C0239.MP4", "start": 0.0, "end": 12.0, "type": "video"}]}}},
+    "hush_clip_sources": {"data": {}, "readback": {"clips": [{"path": "C:/t/C0239.wav", "start": 0.0, "end": 12.0,
+                                                              "inPoint": 3.0}]}},
+    "hush_cut": {"data": {"cuts": [[1.2, 1.8], [4.0, 4.4]], "video": [0], "audio": [0, 1], "ripple": True, "backup": True,
+                          "link": True},
+                 "readback": {"removed": 6, "cuts": 2, "backup": {"id": "seq-2", "name": "R01_EDIT (Hush backup 12:00:00)"},
+                              "sequence": "R01_EDIT", "sequenceId": "seq-1", "linked": 2}},
+    "hush_markers": {"data": {"ranges": [{"s": 1.2, "e": 1.8, "kind": "silence", "label": "0.6 s"}]},
+                     "readback": {"added": 1}},
+    "hush_clear_markers": {"data": {}, "readback": {"removed": 1}},
+    "hush_set_playhead": {"data": {"t": 3.5}, "readback": {}},
+    "hush_restore": {"data": {"backupId": "seq-2", "cutId": "seq-1", "originalName": "R01_EDIT"},
+                     "readback": {"restored": True}},
+    "tidy_scan": {"data": {},
+                  "readback": {"items": [{"nodeId": "000f4243", "name": "C0239.MP4", "bin": "Footage", "isSequence": False,
+                                          "path": "C:/t/C0239.MP4", "offline": False, "color": 5, "duration": 12.0}],
+                               "bins": [{"nodeId": "000f4240", "path": "Footage", "name": "Footage"}],
+                               "usage": {"000f4250": ["000f4243"]}, "texts": {"000f4250": ["hello"]},
+                               "project": "C:/t/test.prproj", "name": "test.prproj"}},
+    "tidy_apply": {"data": {"removals": [{"nodeId": "000f4244", "name": "old.mp4", "checked": True}],
+                            "moves": [{"nodeId": "000f4243", "to": "01 Footage"}],
+                            "emptyBins": [{"nodeId": "000f4240", "path": "Footage"}],
+                            "colors": [{"nodeId": "000f4243", "color": 5}],
+                            "renames": [{"nodeId": "000f4251", "to": "Intro", "checked": True}]},
+                   "readback": {"moved": 1, "removed": 1, "skipped": 0, "binsRemoved": 1, "colored": 1, "renamed": 1,
+                                "problems": []}},
+    "tidy_save": {"data": {}, "readback": {"path": "C:/t/test.prproj"}},
+    "tidy_open": {"data": {"path": "C:/t/test (Tidy backup 2026-10-12 120000).prproj"}, "readback": {"opened": True}},
+    "tidy_build_synced": {"data": {"name": "test - Synced", "bin": "06 Sequences", "first": "000f4243",
+                                   "cams": [{"nodeId": "000f4243", "start": 0.0, "track": 0}],
+                                   "mics": [{"nodeId": "000f4245", "start": 3.217}]},
+                          "readback": {"placed": 2, "sequence": "test - Synced", "videoTracks": 1, "audioTracks": 2,
+                                       "micTrack": 1, "problems": []}},
+    "kalam_info": {"data": {},
+                   "readback": {"sequence": {"name": "R01_EDIT", "id": "seq-1", "fps": 30, "end": 62.0, "inPoint": 0,
+                                             "outPoint": 62.0, "playhead": 3.5, "video": [{"index": 0}], "audio": [{"index": 0}],
+                                             "selection": [{"name": "C0239.MP4", "type": "video", "start": 0.0, "end": 12.0}]},
+                                "projectPath": "C:/t/test.prproj"}},
+    "kalam_captions_track": {"data": {"srtPath": "C:/t/Kalam Captions/R01_EDIT 120000.srt", "start": 0.0, "name": "Kalam"},
+                             "readback": {"item": "R01_EDIT 120000.srt", "nodeId": "000f4260"}},
+    "kalam_mogrt": {"data": {"mogrtPath": "C:/t/Comic.mogrt", "videoTrack": 2, "start": 0.0, "textParam": None,
+                             "captions": [{"s": 0.4, "e": 1.9, "text": "hello"}]},
+                    "readback": {"added": 1, "field": "Text"}},
+    "kalam_remove_clips": {"data": {"videoTrack": 2, "from": 0.0, "to": 62.0}, "readback": {"removed": 1}},
+    "kalam_set_playhead": {"data": {"t": 3.5}, "readback": {}},
+    "kalam_version": {"data": {}, "readback": {"version": "26.5.2", "os": "Windows 11", "panel": "3.0.0"}},
+})
 AE_PING = {"ae_version": "26.5x89", "project": None, "project_path": None, "dirty": None, "num_items": 0,
            "fonts_api": True, "libs_loaded": True, "scripts_dir": "C:/x/ae-scripts"}
 
@@ -154,17 +239,20 @@ class ContractFilesTests(unittest.TestCase):
         files = {p.name[:-len(".schema.json")] for p in schema_files()} - ENVELOPES - {SESSION}
         self.assertEqual(set(proto["actions"]), files)
         self.assertEqual(set(contract.ACTIONS), files)
-        self.assertEqual(sorted(contract.ACTIONS), sorted(V4_ACTIONS))
-        self.assertEqual(len(contract.ACTIONS), 15)
+        self.assertEqual(list(contract.ACTIONS), ALL_ACTIONS)            # the 15 routed ones first, then the reservations
+        self.assertEqual(len(contract.ACTIONS), 35)
         self.assertTrue(ENVELOPES | {SESSION} <= {p.name[:-len(".schema.json")] for p in schema_files()})
 
-    def test_protocol_entries_have_host_cep_uxp(self):
+    def test_protocol_entries_have_host_cep_uxp_status(self):
         proto = json.loads((contract.CONTRACT_DIR / "protocol.json").read_text(encoding="utf-8"))
         for name, e in proto["actions"].items():
-            self.assertEqual(set(e), {"host", "cep", "uxp"}, name)
+            self.assertEqual(set(e), {"host", "cep", "uxp", "status"}, name)
             self.assertIn(e["host"], ("premiere", "aftereffects", "engine", "any"), name)
             self.assertTrue(e["cep"] is None or (isinstance(e["cep"], str) and e["cep"]), name)
             self.assertIsInstance(e["uxp"], bool, name)
+            self.assertIn(e["status"], ("active", "reserved"), name)          # explicit on every entry, never absent
+        self.assertEqual([a for a, e in proto["actions"].items() if e["status"] == "active"], V4_ACTIONS)
+        self.assertEqual([a for a, e in proto["actions"].items() if e["status"] == "reserved"], RESERVED_ACTIONS)
         self.assertEqual(proto["actions"]["ae_build_motion"]["cep"], "build_motion")
         self.assertEqual(proto["actions"]["ae_readback"]["cep"], "readback")
         self.assertEqual(proto["actions"]["ae_fonts"]["cep"], "fonts")
@@ -217,7 +305,7 @@ class ContractFilesTests(unittest.TestCase):
         pp = (SK / "templates/premiere/nh_ppro_lib.jsx").read_text(encoding="utf-8")
         ae = (SK / "templates/after_effects/nh_ae_bridge.jsx").read_text(encoding="utf-8")
         for name, e in proto["actions"].items():
-            if not e["cep"]:
+            if not e["cep"] or e["status"] == "reserved":        # WNC_* functions arrive with Phase 6B (T6.11-T6.14)
                 continue
             if e["host"] == "aftereffects":
                 self.assertIn(f"NHAE.actions.{e['cep']} =", ae, name)
@@ -270,6 +358,164 @@ class ContractFilesTests(unittest.TestCase):
                 m = re.match(r"\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)", line)
                 if m and m.group(1) not in ("__future__",):
                     self.assertIn(m.group(1), sys.stdlib_module_names, f"{p.name}: {line.strip()}")
+
+
+# ------------------------------------------------------------------------------------------------ Phase 6B reservations
+class Phase6BReservationTests(unittest.TestCase):
+    """Round 4 (Addendum A2): Kalam / Hush / Tidy host operations and the shared WNC_AUDIO export are reserved: a name,
+    a PRD-derived schema and a protocol.json entry with status "reserved". Nothing routes them yet (test_serve_app)."""
+
+    def setUp(self):
+        self.proto = json.loads((contract.CONTRACT_DIR / "protocol.json").read_text(encoding="utf-8"))["actions"]
+
+    def test_contract_exports_the_active_and_reserved_lists(self):
+        self.assertEqual(contract.ACTIVE, tuple(V4_ACTIONS))
+        self.assertEqual(contract.RESERVED, tuple(RESERVED_ACTIONS))
+        self.assertEqual(set(contract.ACTIVE) | set(contract.RESERVED), set(contract.ACTIONS))
+        self.assertFalse(set(contract.ACTIVE) & set(contract.RESERVED))
+
+    def test_reserved_entries_are_premiere_with_their_wnc_cep_function(self):
+        for a, (cep_fn, _uxp, _src) in RESERVED.items():
+            e = self.proto[a]
+            self.assertEqual(e["host"], "premiere", a)
+            self.assertEqual(e["cep"], cep_fn, a)
+            prefix = a.split("_", 1)[0]
+            self.assertIn(prefix, PHASE_6B, a)                                      # audio_* / hush_* / tidy_* / kalam_*
+            self.assertTrue(e["cep"].startswith(PHASE_6B[prefix][1] + "."), a)     # the tool's own namespace
+            self.assertRegex(e["cep"], r"^WNC_(AUDIO|HUSH|TIDY|KALAM)\.[a-z][A-Za-z]*$", a)
+            self.assertRegex(a, r"^[a-z]+(_[a-z]+)+$", a)
+        cep_fns = [e["cep"] for e in self.proto.values() if e["cep"]]
+        self.assertEqual(len(cep_fns), len(set(cep_fns)), "one CEP function per action")
+
+    def test_uxp_is_false_for_what_uxp_cannot_do_and_true_only_where_parity_is_green(self):
+        for a, (_cep, uxp, _src) in RESERVED.items():
+            self.assertIs(self.proto[a]["uxp"], uxp, a)
+        # no razor (hush_cut), no QE addTracks (tidy_build_synced), no caption track, no MOGRT text in UXP 26.5
+        for a in ("hush_cut", "tidy_build_synced", "kalam_captions_track", "kalam_mogrt", "audio_export_range",
+                  "audio_export_clip"):
+            self.assertIs(self.proto[a]["uxp"], False, a)
+        parity = (SK.parent / "docs" / "adobe" / "uxp-parity.md").read_text(encoding="utf-8")
+        green = {"hush_markers": "MK1", "hush_set_playhead": "H2", "tidy_save": "O3", "tidy_open": "O2",
+                 "kalam_remove_clips": "T4", "kalam_set_playhead": "H2", "kalam_version": "P1"}
+        self.assertEqual({a for a in RESERVED if self.proto[a]["uxp"]}, set(green))
+        for a, row in green.items():
+            self.assertRegex(parity, rf"\n\| {row} \|[^\n]*\| \U0001F7E2 \|", f"{a}: parity row {row} must be green")
+            self.assertIn(row, V.load(a)["description"], f"{a} names the parity row it relies on")
+
+    def test_schemas_say_reserved_with_the_task_the_prd_and_its_frs(self):
+        prd = {"hush": "hush-prd.md", "tidy": "tidy-prd.md", "kalam": "kalam-prd.md"}
+        for a in RESERVED_ACTIONS:
+            d = V.load(a)["description"]
+            task = PHASE_6B[a.split("_", 1)[0]][0]
+            self.assertTrue(d.startswith(f"RESERVED for Phase 6B ({task}) \u2014 shape from "), (a, d[:80]))
+            self.assertIn("; not routed yet.", d, a)
+            self.assertRegex(d, r"FR-[0-9]+", a)
+            self.assertIn(RESERVED[a][0], d, f"{a} names its CEP function")
+            tool = a.split("_", 1)[0]
+            if tool in prd:
+                self.assertIn(prd[tool], d, a)
+            else:                                               # the shared export cites the PRDs it unifies
+                self.assertTrue(any(p in d for p in prd.values()), a)
+            for src in RESERVED[a][2].split(" + "):
+                self.assertIn(src, d, f"{a} names the PRD host function {src}")
+
+    def test_readbacks_stay_open_and_unstated_types_say_so(self):
+        """Addendum A0 + the brief: where a PRD does not state a field or its type, the object stays open."""
+        for a in RESERVED_ACTIONS:
+            rb = V.load(a)["$defs"]["readback"]
+            self.assertNotEqual(rb.get("additionalProperties"), False, f"{a}: a reserved readback stays open")
+            self.assertIn("open", rb["description"], a)
+        for a, key in (("hush_cut", "cuts"), ("hush_cut", "linked"), ("tidy_build_synced", "placed"),
+                       ("tidy_apply", "moved"), ("hush_restore", "restored")):
+            prop = V.load(a)["$defs"]["readback"]["properties"][key]
+            self.assertNotIn("type", prop, (a, key))
+            self.assertIn("not stated in the PRD", prop["description"], (a, key))
+        first = V.load("tidy_build_synced")["$defs"]["data"]["properties"]["first"]
+        self.assertNotIn("type", first)
+        self.assertIn("not stated in the PRD", first["description"])
+
+    def test_prd_host_contract_fields_are_kept_verbatim(self):
+        """The field names of each PRD's host function table (camelCase as the PRDs write them), nothing added."""
+        expect = {
+            "audio_export_range": ({"outPath", "start", "end", "audioTracks"}, {"extDir"}, {"path"}),
+            "audio_export_clip": ({"nodeId", "outPath"}, set(), {"path"}),
+            "hush_info": (set(), set(), {"sequence"}),
+            "hush_clip_sources": (set(), set(), {"clips"}),
+            "hush_cut": ({"cuts", "video", "audio", "ripple", "backup", "link"}, set(),
+                         {"removed", "cuts", "backup", "sequence", "sequenceId", "linked"}),
+            "hush_markers": ({"ranges"}, set(), {"added"}),
+            "hush_clear_markers": (set(), set(), {"removed"}),
+            "hush_set_playhead": ({"t"}, set(), set()),
+            "hush_restore": ({"backupId", "cutId", "originalName"}, set(), {"restored"}),
+            "tidy_scan": (set(), set(), {"items", "bins", "usage", "texts", "project", "name"}),
+            "tidy_apply": ({"removals", "moves", "emptyBins", "colors", "renames"}, set(),
+                           {"moved", "removed", "skipped", "binsRemoved", "colored", "renamed", "problems"}),
+            "tidy_save": (set(), set(), {"path"}),
+            "tidy_open": ({"path"}, set(), {"opened"}),
+            "tidy_build_synced": ({"name", "bin", "first", "cams", "mics"}, set(),
+                                  {"placed", "sequence", "videoTracks", "audioTracks", "micTrack", "problems"}),
+            "kalam_info": (set(), set(), {"sequence", "projectPath"}),
+            "kalam_captions_track": ({"srtPath", "start", "name"}, set(), {"item", "nodeId"}),
+            "kalam_mogrt": ({"mogrtPath", "videoTrack", "start", "textParam", "captions"}, set(), {"added", "field"}),
+            "kalam_remove_clips": ({"videoTrack", "from", "to"}, set(), {"removed"}),
+            "kalam_set_playhead": ({"t"}, set(), set()),
+            "kalam_version": (set(), set(), {"version", "os", "panel"}),
+        }
+        self.assertEqual(set(expect), set(RESERVED_ACTIONS))
+        for a, (required, optional, readback) in expect.items():
+            defs = V.load(a)["$defs"]
+            self.assertEqual(set(defs["data"]["required"]) if required else set(defs["data"].get("required", [])),
+                             required, a)
+            self.assertEqual(set(defs["data"]["properties"]), required | optional, a)
+            self.assertIs(defs["data"]["additionalProperties"], False, a)
+            self.assertEqual(set(defs["readback"].get("required", [])), readback, a)
+            self.assertEqual(set(defs["readback"].get("properties", {})), readback | (
+                {"start", "end"} if a == "audio_export_range" else set()), a)
+
+    def test_prd_shapes_reject_what_the_prd_rules_out(self):
+        bad = [
+            ("hush_cut", "data", {"cuts": [[1.0]]}),                          # a cut is a [start, end] pair
+            ("hush_cut", "data", {"cuts": [[1.0, 2.0, 3.0]]}),
+            ("hush_cut", "data", {"ripple": "yes"}),
+            ("hush_cut", "data", {"audio": [-1]}),
+            ("hush_cut", "readback", {"backup": "R01 (Hush backup)"}),        # {id, name} or null
+            ("hush_cut", "readback", {"backup": {"id": "x"}}),
+            ("audio_export_range", "data", {"audioTracks": "A1"}),
+            ("audio_export_range", "data", {"outPath": ""}),
+            ("kalam_mogrt", "data", {"textParam": 3}),                        # a field name or null (= first text field)
+            ("kalam_mogrt", "data", {"captions": [{"s": 0, "e": 1}]}),
+            ("tidy_apply", "data", {"removals": [{"nodeId": "x", "name": "y"}]}),
+            ("tidy_apply", "data", {"moves": [{"nodeId": "x", "to": "y", "extra": 1}]}),
+            ("tidy_apply", "readback", {"problems": "none"}),
+            ("tidy_build_synced", "data", {"cams": [{"nodeId": "x", "start": 0}]}),
+        ]
+        for a, part, change in bad:
+            inst = dict(copy.deepcopy(SAMPLES[a][part]), **change)
+            self.assertTrue(V.validate(inst, f"{a}#/$defs/{part}"), (a, part, change))
+        good = [("hush_cut", "readback", {"backup": None}), ("kalam_mogrt", "data", {"textParam": "Source Text"}),
+                ("audio_export_range", "data", {"extDir": "C:/ext"}), ("audio_export_range", "readback", {"extra": 1}),
+                ("hush_set_playhead", "readback", {"anything": True})]
+        for a, part, change in good:
+            inst = dict(copy.deepcopy(SAMPLES[a][part]), **change)
+            self.assertEqual(V.validate(inst, f"{a}#/$defs/{part}"), [], (a, part, change))
+
+    def test_protocol_description_explains_status_and_reserved_uxp(self):
+        d = V.load("protocol")["description"]
+        for words in ("`status`", "\"active\"", "\"reserved\"", "Phase 6B", "never routed", "not available yet",
+                      "phase-6b-reservations.md"):
+            self.assertIn(words, d)
+
+    def test_the_reservation_doc_lists_every_reserved_action(self):
+        doc = (SK.parent / "docs" / "adobe" / "phase-6b-reservations.md").read_text(encoding="utf-8")
+        for a, (cep_fn, uxp, src) in RESERVED.items():
+            row = re.search(rf"\n\| `{a}` \|([^\n]*)\n", doc)
+            self.assertTrue(row, a)
+            self.assertIn(f"`{cep_fn}`", row.group(1), a)
+            self.assertIn("true" if uxp else "false", row.group(1), a)
+            self.assertIn(src.split(" + ")[0], row.group(1), a)
+        for cli in ("reel kalam run", "reel kalam doctor", "reel hush scan", "reel hush plan", "reel hush apply",
+                    "reel tidy scan", "reel tidy plan", "reel tidy apply", "reel tidy undo", "reel tidy sync"):
+            self.assertIn(cli, doc)
 
 
 # ------------------------------------------------------------------------------------------------ validator keywords
@@ -684,6 +930,9 @@ class ActionShapeTests(unittest.TestCase):
             req = required_of(a, "readback")
             if a == "ping":
                 continue                                     # anyOf: covered by its own test
+            if a in EMPTY_READBACK:                          # the PRD returns {}: nothing to require, nothing invented
+                self.assertEqual(req, [], a)
+                continue
             self.assertTrue(req, f"{a}: readback has no required field")
             for k in req:
                 rb = copy.deepcopy(SAMPLES[a]["readback"])
@@ -1999,7 +2248,7 @@ class SessionContractTests(unittest.TestCase):
         self.assertEqual(session_errors(minimal, "hello"), [])
         cases = [("kind", "browser"), ("kind", None), ("version", ""), ("version", 3), ("host", "photoshop"),
                  ("hostVersion", 26), ("capabilities", "ping"), ("capabilities", ["ping", "rm_rf"]),
-                 ("capabilities", ["ping"] * 16), ("capabilities", [3])]
+                 ("capabilities", ["ping"] * (len(contract.ACTIONS) + 1)), ("capabilities", [3])]
         for key, value in cases:
             bad = copy.deepcopy(h)
             bad["client"][key] = value
@@ -2016,6 +2265,7 @@ class SessionContractTests(unittest.TestCase):
     def test_hello_capabilities_are_the_contract_actions(self):
         caps = V.load(SESSION)["$defs"]["hello"]["properties"]["client"]["properties"]["capabilities"]
         self.assertEqual(caps["items"], {"$ref": "request.schema.json#/properties/action"})
+        self.assertEqual(caps["maxItems"], len(contract.ACTIONS))      # grows with the contract (round 4: 35)
         every = copy.deepcopy(SESSION_SAMPLES["hello"])
         every["client"]["capabilities"] = list(contract.ACTIONS)
         self.assertEqual(session_errors(every, "hello"), [])

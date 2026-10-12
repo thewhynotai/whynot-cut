@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/kalam_set_playhead.schema.json",
+  "title": "kalam_set_playhead",
+  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_setPlayhead, FR-22; not routed yet. CEP WNC_KALAM.setPlayhead (signed bridge). Click a caption in the results list: move the playhead there. uxp true: Sequence.setPlayerPosition is green in docs/adobe/uxp-parity.md (H2, spike 0.1.3).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "number",
+          "minimum": 0,
+          "description": "sequence seconds"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "additionalProperties": false,
+      "description": "kalam_setPlayhead {t}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {},
+      "description": "The PRD returns {}: no key is required. The object stays open: keys the host adds are not rejected."
+    }
+  }
+}

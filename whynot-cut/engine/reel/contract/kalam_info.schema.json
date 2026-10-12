@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/kalam_info.schema.json",
+  "title": "kalam_info",
+  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_info, FR-2, FR-3; not routed yet. CEP WNC_KALAM.info (signed bridge). The active sequence for Kalam's range and audio chips: name, id, fps, end, In/Out, playhead, tracks, selected clips, and the project path (FR-20 writes the SRT next to the project).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "description": "No data (the PRD's host function takes no argument)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "sequence": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "sequence name"
+            },
+            "id": {
+              "type": "string",
+              "description": "sequence id"
+            },
+            "fps": {
+              "type": "number",
+              "description": "frame rate"
+            },
+            "end": {
+              "type": "number",
+              "minimum": 0,
+              "description": "sequence end, sequence seconds"
+            },
+            "inPoint": {
+              "description": "In point (FR-2 errors when there is none; how an unset In is reported): its type is not stated in the PRD, left open"
+            },
+            "outPoint": {
+              "description": "Out point (and how an unset Out is reported): its type is not stated in the PRD, left open"
+            },
+            "playhead": {
+              "type": "number",
+              "minimum": 0,
+              "description": "playhead, sequence seconds (FR-2: from the playhead to the end)"
+            },
+            "video": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "one track; kalam_info writes [...]: item shape not stated in the PRD, left open"
+              },
+              "description": "video tracks"
+            },
+            "audio": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "one track; kalam_info writes [...]: item shape not stated in the PRD, left open"
+              },
+              "description": "audio tracks (FR-3 chips)"
+            },
+            "selection": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "clip name"
+                  },
+                  "type": {
+                    "type": "string",
+                    "description": "clip type"
+                  },
+                  "start": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "sequence seconds"
+                  },
+                  "end": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "sequence seconds"
+                  }
+                },
+                "required": [
+                  "name",
+                  "type",
+                  "start",
+                  "end"
+                ],
+                "description": "{name,type,start,end}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+              },
+              "description": "selected clips (FR-2)"
+            }
+          },
+          "required": [
+            "name",
+            "id",
+            "fps",
+            "end",
+            "inPoint",
+            "outPoint",
+            "playhead",
+            "video",
+            "audio",
+            "selection"
+          ],
+          "description": "{name,id,fps,end,inPoint,outPoint,playhead,video,audio,selection}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+        },
+        "projectPath": {
+          "description": "the project path (an unsaved project may have none): its type is not stated in the PRD, left open"
+        }
+      },
+      "required": [
+        "sequence",
+        "projectPath"
+      ],
+      "description": "{sequence,projectPath}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

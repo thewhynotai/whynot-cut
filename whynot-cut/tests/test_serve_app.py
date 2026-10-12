@@ -800,6 +800,113 @@ class Routing(AppCase):
         self.assertTrue((await c.recv())["result"]["ok"])
 
 
+RESERVED_TOOL = {"audio": "WNC_AUDIO shared audio export", "hush": "Hush", "tidy": "Tidy", "kalam": "Kalam"}
+
+
+class ReservedRouting(AppCase):
+    """Round 4: a Phase 6B reserved action is never routed. The router answers ok:false itself (no adapter, no queue,
+    no panel), with a `how`, and audits it."""
+
+    def no_bridge(self):
+        boom = AssertionError("a reserved action must not reach a CEP queue")
+        return mock.patch("lib.ppro_bridge.submit", side_effect=boom), mock.patch("lib.ae_bridge.submit", side_effect=boom)
+
+    async def test_every_reserved_action_is_answered_reserved(self):
+        self.assertEqual(len(contract.RESERVED), 20)
+        c = await self.cli()
+        pp, ae = self.no_bridge()
+        with pp, ae, mock.patch.object(adapters.FileQueueAdapter, "run", side_effect=AssertionError("adapter used")), \
+                mock.patch.object(adapters.UxpAdapter, "run", side_effect=AssertionError("adapter used")):
+            for action in contract.RESERVED:
+                msg = command(action, {})
+                await c.send(msg)
+                res = await c.recv()
+                self.assertEqual(res["type"], "result", (action, res))
+                r = res["result"]
+                tool = RESERVED_TOOL[action.split("_", 1)[0]]
+                self.assertEqual(r["ok"], False, action)
+                self.assertEqual(r["action"], action)
+                self.assertEqual(r["id"], msg["request"]["id"])
+                self.assertEqual(r["error"], f"reserved for Phase 6B ({tool}), not available yet")
+                self.assertTrue(r["how"].strip(), action)
+                self.assertNotIn("readback", r)
+                self.assertEqual(contract.validate_result(r), [], action)
+        rows = [r for r in self.events("command") if r["action"] in contract.RESERVED]
+        self.assertEqual(sorted(r["action"] for r in rows), sorted(contract.RESERVED))
+        for row in rows:
+            self.assertEqual(row["outcome"], "reserved", row)
+            self.assertIn("Phase 6B", row["reason"], row)
+
+    async def test_a_panel_claiming_a_reserved_capability_is_not_asked(self):
+        p = await self.panel(caps=("ping", "hush_markers", "tidy_save"))
+        c = await self.cli()
+        pp, ae = self.no_bridge()
+        with pp, ae:
+            msg = command("hush_markers", {"ranges": [{"s": 1.0, "e": 2.0, "kind": "silence", "label": "x"}]})
+            self.assertEqual(contract.validate_request(msg["request"]), [])
+            await c.send(msg)
+            res = await c.recv()
+            self.assertEqual(res["result"]["error"], "reserved for Phase 6B (Hush), not available yet")
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(p.recv(), 0.3)                  # the panel never saw the command
+        self.assertFalse([r for r in self.events("command") if r.get("outcome") == "routed"
+                          and r["action"] in contract.RESERVED])
+
+    async def test_reserved_wins_over_bad_data_and_expiry(self):
+        """The reserved answer comes first: a schema or expiry error would send the caller fixing a command that
+        cannot run anyway (the envelope itself was already checked by the session schema)."""
+        c = await self.cli()
+        pp, ae = self.no_bridge()
+        with pp, ae:
+            for msg in (command("kalam_mogrt", {"surprise": 1}), command("tidy_scan", expires_in=-1)):
+                await c.send(msg)
+                res = await c.recv()
+                self.assertEqual(res["type"], "result", res)
+                self.assertFalse(res["result"]["ok"])
+                self.assertIn("reserved for Phase 6B", res["result"]["error"])
+
+    async def test_existing_routing_is_unchanged(self):
+        await self.panel(caps=("probe",))
+        c = await self.cli()
+        with mock.patch("lib.ppro_bridge.submit", return_value=cep_ok("ping", PING_READBACK)) as sub:
+            msg = command("ping")
+            await c.send(msg)
+            res = await c.recv()
+        sub.assert_called_once()
+        self.assertEqual(res["result"], {"ok": True, "action": "ping", "id": msg["request"]["id"], "readback": PING_READBACK})
+        await c.send(command("open_project", {"path": "C:/x.prproj"}))
+        err = await c.recv()
+        self.assertEqual((err["type"], err["code"]), ("error", "no_route"))
+
+
+class RouterReservedUnit(unittest.TestCase):
+    def test_pick_never_returns_an_adapter_for_a_reserved_action(self):
+        class Link:
+            closed = False
+
+        class S:
+            id, kind, host, link = "s1", "uxp", "premiere", Link()
+            capabilities = list(contract.ACTIONS)
+
+        r = router.Router(home=Path(tempfile.gettempdir()), sessions=lambda: [S()])
+        for action in contract.RESERVED:
+            adapter, why = r.pick(action)
+            self.assertIsNone(adapter, action)
+            self.assertIn("reserved for Phase 6B", why, action)
+        self.assertIsNotNone(r.pick("ping")[0])                         # a routed action still finds the panel
+
+    def test_reserved_answer_names_the_tool_and_the_task(self):
+        for action, tool, task in (("audio_export_range", "WNC_AUDIO shared audio export", "T6.11"),
+                                   ("hush_cut", "Hush", "T6.12"), ("tidy_build_synced", "Tidy", "T6.13"),
+                                   ("kalam_mogrt", "Kalam", "T6.14")):
+            res = router.reserved_result(action, "r-1")
+            self.assertEqual(res["error"], f"reserved for Phase 6B ({tool}), not available yet")
+            self.assertIn(task, res["how"])
+            self.assertEqual(contract.validate_result(res), [])
+        with self.assertRaises(ValueError):
+            router.reserved_result("ping", "r-1")
+
+
 class UxpTimeout(AppCase):
     async def test_panel_that_never_answers_times_out_at_expires_at(self):
         p = await self.panel(caps=("ping",))

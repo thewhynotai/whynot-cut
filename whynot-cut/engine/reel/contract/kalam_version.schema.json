@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/kalam_version.schema.json",
+  "title": "kalam_version",
+  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_version, FR-24; not routed yet. CEP WNC_KALAM.version (signed bridge). Versions for 'Save a report for the developer' (OS, Premiere / panel versions; never settings or keys). uxp true: host version and OS are green in docs/adobe/uxp-parity.md (P1, uxp.host.version).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "description": "No data (the PRD's host function takes no argument)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "version"
+        },
+        "os": {
+          "type": "string",
+          "description": "operating system"
+        },
+        "panel": {
+          "type": "string",
+          "description": "panel version"
+        }
+      },
+      "required": [
+        "version",
+        "os",
+        "panel"
+      ],
+      "description": "{version,os,panel}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/hush_markers.schema.json",
+  "title": "hush_markers",
+  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_markers, FR-22; not routed yet. CEP WNC_HUSH.markers (signed bridge). Mode Markers: one sequence marker per planned cut (name = kind/label), no edit. uxp true: adding markers with a name is green in docs/adobe/uxp-parity.md (MK1).",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "ranges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "s": {
+                "type": "number",
+                "minimum": 0,
+                "description": "sequence seconds"
+              },
+              "e": {
+                "type": "number",
+                "minimum": 0,
+                "description": "sequence seconds"
+              },
+              "kind": {
+                "type": "string",
+                "description": "silence / filler / unclear"
+              },
+              "label": {
+                "type": "string",
+                "description": "the marker label"
+              }
+            },
+            "required": [
+              "s",
+              "e",
+              "kind",
+              "label"
+            ],
+            "additionalProperties": false,
+            "description": "{s,e,kind,label}"
+          },
+          "description": "one per planned cut"
+        }
+      },
+      "required": [
+        "ranges"
+      ],
+      "additionalProperties": false,
+      "description": "hush_markers {ranges:[{s,e,kind,label}]}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "added": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "markers added"
+        }
+      },
+      "required": [
+        "added"
+      ],
+      "description": "added: markers added. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

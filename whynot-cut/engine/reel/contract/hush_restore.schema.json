@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/hush_restore.schema.json",
+  "title": "hush_restore",
+  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_restore, FR-23, FR-20; not routed yet. CEP WNC_HUSH.restore (signed bridge). Undo: the backup becomes the open sequence under the original name; the cut version is kept, renamed '<name> (Hush cut HH:MM:SS)'.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "backupId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the backup sequence id (hush_cut readback backup.id)"
+        },
+        "cutId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the cut sequence id"
+        },
+        "originalName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the name to give back to the backup"
+        }
+      },
+      "required": [
+        "backupId",
+        "cutId",
+        "originalName"
+      ],
+      "additionalProperties": false,
+      "description": "hush_restore {backupId,cutId,originalName}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "restored": {
+          "description": "whether the swap happened: its type is not stated in the PRD, left open"
+        }
+      },
+      "required": [
+        "restored"
+      ],
+      "description": "restored. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/hush_clear_markers.schema.json",
+  "title": "hush_clear_markers",
+  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_clearMarkers, FR-22; not routed yet. CEP WNC_HUSH.clearMarkers (signed bridge). 'Remove all Hush markers': removes the markers Hush added, nothing else.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false,
+      "description": "No data (the PRD's host function takes no argument)."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "removed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "markers removed"
+        }
+      },
+      "required": [
+        "removed"
+      ],
+      "description": "removed: markers removed. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}

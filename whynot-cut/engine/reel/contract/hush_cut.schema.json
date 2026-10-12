@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/hush_cut.schema.json",
+  "title": "hush_cut",
+  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_cut, FR-19, FR-20, FR-21, \u00a78; not routed yet. CEP WNC_HUSH.cut (signed bridge). Mode Cut: QE razor on every ticked track at every cut boundary, remove the pieces inside the cuts, close the gaps in one pass, relink video with the audio under it (linkSelection). Backup first (clone the sequence as '<name> (Hush backup HH:MM:SS)', switch back, abort when the original cannot be made active); a locked ticked track aborts with nothing cut. Safety (verbatim, \u00a78): never cut into speech, boundaries rounded inward to frames; backup before cutting; re-read track objects after every razor; gap closing in one pass; unticked tracks, locked tracks and media on disk untouched. UXP has no razor.",
+  "$defs": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "cuts": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "description": "sequence seconds"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "[start, end]"
+          },
+          "description": "[[s,e],...] sequence seconds, frame aligned (snapped inward to whole frames, FR-16)"
+        },
+        "video": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "track index (0-based, as Premiere's DOM numbers tracks)"
+          },
+          "description": "ticked video tracks (FR-2): only these are cut and moved"
+        },
+        "audio": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "track index (0-based, as Premiere's DOM numbers tracks)"
+          },
+          "description": "ticked audio tracks (FR-2)"
+        },
+        "ripple": {
+          "type": "boolean",
+          "description": "close the gaps (FR-19)"
+        },
+        "backup": {
+          "type": "boolean",
+          "description": "clone the sequence first (FR-20, default on)"
+        },
+        "link": {
+          "type": "boolean",
+          "description": "relink video pieces with the audio under them (FR-19)"
+        }
+      },
+      "required": [
+        "cuts",
+        "video",
+        "audio",
+        "ripple",
+        "backup",
+        "link"
+      ],
+      "additionalProperties": false,
+      "description": "hush_cut {cuts,video,audio,ripple,backup,link}."
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "removed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "pieces removed (\u00a711: cut -> removed count)"
+        },
+        "cuts": {
+          "description": "the cuts applied (a count or the list): its type is not stated in the PRD, left open"
+        },
+        "backup": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "backup sequence id"
+            },
+            "name": {
+              "type": "string",
+              "description": "'<name> (Hush backup HH:MM:SS)'"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "description": "{id,name} of the backup sequence, null when backup was off"
+        },
+        "sequence": {
+          "type": "string",
+          "description": "the cut sequence's name"
+        },
+        "sequenceId": {
+          "type": "string",
+          "description": "the cut sequence's id"
+        },
+        "linked": {
+          "description": "the relinked items (a count or a flag): its type is not stated in the PRD, left open"
+        }
+      },
+      "required": [
+        "removed",
+        "cuts",
+        "backup",
+        "sequence",
+        "sequenceId",
+        "linked"
+      ],
+      "description": "{removed,cuts,backup,sequence,sequenceId,linked}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+    }
+  }
+}
