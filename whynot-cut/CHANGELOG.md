@@ -144,7 +144,9 @@
   temperature 0, the 60 ms "missing" rule, the 85 % coverage gate and protected pauses are unchanged. It now also
   checks the cuts that fell on the old chunk boundaries and the removed lead-in and tail, which were never read; with
   no cut at all it reports `ok` without loading Whisper. No reading is longer than 20 s: a cut that removes a long span
-  is read uncut in <= 20 s pieces, and any word heard inside the removed span is missing. Per-window word counts
+  is read uncut in <= 20 s pieces that overlap by 1 s (a word on a split is read whole and counted once), and a word
+  heard > 150 ms inside the removed span is missing. A lost word whose audio sits at the noise floor is a "possible
+  hallucination" (Whisper hears words in silence), which makes the proof inconclusive, never a pass. Per-window word counts
   (`windows`); a window that heard no word or whose audio is shorter than the span (pauses past the end of the file) is
   not proved (`ok` false, "inconclusive"). First unit tests for `detect_pauses` and `verify_cuts`.
 

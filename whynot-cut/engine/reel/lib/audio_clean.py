@@ -89,7 +89,8 @@ def _n_samples(path: Path) -> int:
         with wave.open(str(path)) as w:
             return w.getnframes()
     except (wave.Error, EOFError):
-        return sum(len(b) for b in _iter_blocks(path))
+        with contextlib.closing(_iter_blocks(path)) as blocks:
+            return sum(len(b) for b in blocks)
 
 
 def _pcm16(x: np.ndarray) -> bytes:
@@ -510,6 +511,9 @@ READ_MAX_MS = 20000      # longest stretch one Whisper reading may hold (close c
 EDGE_PAD_MS = 100        # a window edge that falls inside a word moves out to just before / after that word
 EDGE_MOVE_MAX_MS = 1500  # ... but never further than this (a run of touching words keeps the plain 3 s edge)
 FADE = int(0.01 * SR)    # 10 ms fades at each join (what Premiere's cut + default audio looks like)
+PIECE_OVERLAP_MS = 1000  # neighbouring pieces of a long removed span overlap: a word on a split is read whole once
+INSIDE_MARGIN_MS = 150   # a word heard this far inside a long removed span is lost speech (not a timestamp wobble)
+HALLUCINATION_DB = 3.0   # ... unless its audio is within this of the noise floor: Whisper invents words in silence
 
 
 def _cut_windows(keeps: list, words: list, dur_ms: int) -> list[dict]:
@@ -518,7 +522,9 @@ def _cut_windows(keeps: list, words: list, dur_ms: int) -> list[dict]:
     first), window edges are moved out of words, and neighbouring cuts share a window while it stays <= 20 s. A window
     ends inside the keeps next to its own cuts, so it never contains a cut it does not own; two windows may share a
     stretch of one keep. A single cut whose removed span makes its window longer than 20 s is read in <= 20 s pieces
-    (`pieces`) split inside the removed span; every other window is one piece."""
+    split inside the removed span; neighbouring pieces overlap by 1 s and each OWNS the stretch up to the split, so a
+    word on a split is read whole and counted once. `pieces` = [(read_lo, read_hi, own_lo, own_hi)]; a short window
+    is one piece that reads and owns all of it."""
     ws = np.array([w["start_ms"] for w in words], dtype=float)
     we = np.array([w["end_ms"] for w in words], dtype=float)
 
@@ -559,14 +565,16 @@ def _cut_windows(keeps: list, words: list, dur_ms: int) -> list[dict]:
     for w in wins:
         lo, hi = w["lo"], w["hi"]
         if hi - lo <= READ_MAX_MS:
-            w["pieces"] = [(lo, hi)]
+            w["pieces"] = [(lo, hi, lo, hi)]
             continue
-        # only a single cut can make a window this long (merging stops at READ_MAX_MS): split it into equal pieces,
-        # every split point inside the removed span [ra, rb] (the kept context on each side is ~3 s, a piece >= 10 s)
+        # only a single cut can make a window this long (merging stops at READ_MAX_MS): split it into equal pieces of
+        # <= 19 s, every split inside the removed span [ra, rb] (the kept context on each side is <= 4.5 s, a piece
+        # >= 9.5 s); each reading adds half the overlap on each inner side, so it stays <= 20 s
         ra, rb = w["cuts"][0]
-        n = -(-(hi - lo) // READ_MAX_MS)
+        half = PIECE_OVERLAP_MS // 2
+        n = -(-(hi - lo) // (READ_MAX_MS - PIECE_OVERLAP_MS))
         edges = [lo] + [min(max(lo + (hi - lo) * j // n, ra), rb) for j in range(1, n)] + [hi]
-        w["pieces"] = [(a, b) for a, b in zip(edges, edges[1:]) if b > a]
+        w["pieces"] = [(max(lo, a - half), min(hi, b + half), a, b) for a, b in zip(edges, edges[1:]) if b > a]
     return wins
 
 
@@ -641,10 +649,13 @@ def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
     tail were never read.
 
     No reading is ever longer than 20 s (one long decode lets Whisper skip a whole 30 s window: G24). A single cut that
-    removes a long span is read uncut in <= 20 s pieces split inside the removed span; any word heard inside the
-    removed span is missing by definition, and the rest is compared with the cut reading (the kept context, joined).
-    A window is not proved when the uncut reading heard no word at all or its audio is shorter than the span (the
-    pauses run past the end of the file): `ok` is then false with an "inconclusive" verdict."""
+    removes a long span is read uncut in <= 20 s pieces split inside the removed span, overlapping by 1 s (a word on
+    a split is read whole by the piece that holds its centre, and counted once). A word heard more than 150 ms inside
+    the removed span is missing by definition, unless its audio sits at the noise floor: Whisper invents words in
+    silence, so that one is a possible hallucination (inconclusive, listen). The rest is compared with the cut
+    reading (the kept context, joined). A window is not proved when the uncut reading heard no word at all or its
+    audio is shorter than the span (the pauses run past the end of the file): `ok` is then false with an
+    "inconclusive" verdict."""
     import difflib
     import gc
     import re as _re
@@ -672,27 +683,38 @@ def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
     opts = dict(language=lang, beam_size=5, condition_on_previous_text=False, initial_prompt=prompt, temperature=0.0,
                 word_timestamps=True)
     m = whisper_model(model_size)[0] if wins else None   # no cut, nothing to prove: Whisper is not loaded
-    missing, asr_variance, changed, texts, report = [], [], [], [], []
+    floor_db = pz.get("noise_floor_db")
+    floor_db = -70.0 if floor_db is None else float(floor_db)
+    missing, asr_variance, changed, texts, report, halluc = [], [], [], [], [], []
     matched = total = n_tight = 0
     st = None
-    with contextlib.closing(_tight_pass(clean, keeps, [wins[wi]["pieces"][pi] for wi, pi in spans], out)) as passes:
+    with contextlib.closing(_tight_pass(clean, keeps, [wins[wi]["pieces"][pi][:2] for wi, pi in spans], out)) as passes:
         for si, uncut, ks in passes:
             wi, pi = spans[si]
             win = wins[wi]
             if pi == 0:
                 st = {"base": [], "tight": [], "short": False}
-            a0, b0 = win["pieces"][pi]
+            a0, b0, own0, own1 = win["pieces"][pi]
+            last = pi == len(win["pieces"]) - 1
             g0 = int(a0 * SR / 1000)
             if len(uncut) < int(b0 * SR / 1000) - g0 - SR // 100:
                 st["short"] = True       # the pauses run past the end of the audio: this span was not all read
             bsegs, _ = m.transcribe(_to16k(uncut), **opts)
-            st["base"] += [(t, a0 + w.start * 1000, a0 + w.end * 1000) for sg in bsegs for w in (sg.words or [])
-                           for t in norm(w.word).split()]
-            for k in range(len(ks)):     # the kept parts of this span, faded at the joins
-                lo, hi = max(ks[k][0], g0), min(ks[k][1], g0 + len(uncut))
+            for sg in bsegs:
+                for w in (sg.words or []):
+                    s0, s1 = a0 + w.start * 1000, a0 + w.end * 1000
+                    c = (s0 + s1) / 2
+                    if len(win["pieces"]) > 1 and not (own0 <= c < own1 or (last and c == own1)):
+                        continue     # the overlapping neighbour piece owns this word: count it once
+                    i0, i1 = max(0, int((s0 - a0) * SR / 1000)), max(0, int((s1 - a0) * SR / 1000))
+                    db = _rms_db(uncut[i0:i1]) if i1 > i0 and i0 < len(uncut) else -180.0
+                    st["base"] += [(t, s0, s1, db) for t in norm(w.word).split()]
+            go0, go1 = int(own0 * SR / 1000), int(own1 * SR / 1000)
+            for k in range(len(ks)):     # the kept parts this piece owns, faded at the joins
+                lo, hi = max(ks[k][0], go0, g0), min(ks[k][1], go1, g0 + len(uncut))
                 if hi > lo:
                     st["tight"].append(_faded(uncut[lo - g0:hi - g0], lo, k, ks))
-            if pi < len(win["pieces"]) - 1:
+            if not last:
                 gc.collect()
                 continue
             # the window is complete: one reading of the same span with its cuts applied, then compare
@@ -705,30 +727,43 @@ def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
             base, gone = st["base"], []
             if len(win["pieces"]) > 1:   # a long removed span: a word heard inside it is missing by definition
                 ra, rb = removed[0]
-                gone = [x for x in base if ra < (x[1] + x[2]) / 2 < rb]
-                base = [x for x in base if not ra < (x[1] + x[2]) / 2 < rb]
-                for t, s0, s1 in gone:
-                    missing.append({"words": t, "src_ms": [round(s0), round(s1)], "cuts_nearby": [(ra, rb)],
-                                    "heard_inside_removed_span": True})
-            a = [t for t, _, _ in base]
+                inside = [ra + INSIDE_MARGIN_MS < (x[1] + x[2]) / 2 < rb - INSIDE_MARGIN_MS for x in base]
+                gone = [x for x, i in zip(base, inside) if i]
+                base = [x for x, i in zip(base, inside) if not i]
+                for t, s0, s1, db in gone:
+                    item = {"words": t, "src_ms": [round(s0), round(s1)], "cuts_nearby": [(ra, rb)],
+                            "heard_inside_removed_span": True, "level_db": round(db, 1)}
+                    (halluc if db < floor_db + HALLUCINATION_DB else missing).append(item)
+            a = [x[0] for x in base]
 
             def near_cut(i1, i2, slack=60):
                 e0, e1 = base[i1][1], base[i2 - 1][2]
                 return [(ra, rb) for ra, rb in removed if ra < e1 + slack and rb > e0 - slack]
             sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+            ghost = np.zeros(len(a), dtype=bool)   # uncut words classed as possible hallucinations (not coverage)
+
+            def lost(i1, i2, item):
+                """A lost run next to a cut is missing speech, unless all of its audio sits at the noise floor:
+                Whisper hears words in silence (seen on a real clip: a 25 s removed silence read as a loop of one
+                word), so that run is a possible hallucination (inconclusive, listen), never a pass."""
+                if not item["cuts_nearby"]:
+                    asr_variance.append(item)
+                elif all(base[i][3] < floor_db + HALLUCINATION_DB for i in range(i1, i2)):
+                    ghost[i1:i2] = True
+                    halluc.append(dict(item, level_db=round(max(base[i][3] for i in range(i1, i2)), 1)))
+                else:
+                    missing.append(item)
             for op, i1, i2, j1, j2 in sm.get_opcodes():
                 if op == "delete":
-                    item = {"words": " ".join(a[i1:i2]), "src_ms": [round(base[i1][1]), round(base[i2 - 1][2])],
-                            "cuts_nearby": near_cut(i1, i2)}
-                    (missing if item["cuts_nearby"] else asr_variance).append(item)
+                    lost(i1, i2, {"words": " ".join(a[i1:i2]), "src_ms": [round(base[i1][1]), round(base[i2 - 1][2])],
+                                  "cuts_nearby": near_cut(i1, i2)})
                 elif op == "replace":
                     item = {"orig": " ".join(a[i1:i2]), "tight": " ".join(b[j1:j2]),
                             "src_ms": [round(base[i1][1]), round(base[i2 - 1][2])], "cuts_nearby": near_cut(i1, i2)}
                     # many words heard as few is lost speech, not a different reading
                     if (i2 - i1) - (j2 - j1) >= 3 and (j2 - j1) < 0.5 * (i2 - i1):
-                        (missing if item["cuts_nearby"] else asr_variance).append(
-                            {"words": item["orig"], "src_ms": item["src_ms"], "cuts_nearby": item["cuts_nearby"],
-                             "heard_as": item["tight"]})
+                        lost(i1, i2, {"words": item["orig"], "src_ms": item["src_ms"], "cuts_nearby": item["cuts_nearby"],
+                                      "heard_as": item["tight"]})
                     else:
                         changed.append(item)
             # coverage counts each uncut word once: a stretch of keep read by the previous window too belongs to it
@@ -736,26 +771,29 @@ def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
             hit = np.zeros(len(a), dtype=bool)
             for bl in sm.get_matching_blocks():
                 hit[bl.a:bl.a + bl.size] = True
-            own = np.array([x[1] >= owned_from for x in base], dtype=bool)
+            own = np.array([x[1] >= owned_from for x in base], dtype=bool) & ~ghost
             matched += int((hit & own).sum())
-            total += int(own.sum()) + sum(1 for x in gone if x[1] >= owned_from)
+            total += int(own.sum()) + sum(1 for x in gone if x[1] >= owned_from and x[3] >= floor_db + HALLUCINATION_DB)
             n_tight += len(b)
             report.append({"ms": [win["lo"], win["hi"]], "cuts": len(removed), "pieces": len(win["pieces"]),
+                           "pieces_ms": [list(q[:2]) for q in win["pieces"]],
                            "uncut_words": len(st["base"]), "cut_words": len(b), "short_audio": st["short"]})
             st = None
             gc.collect()   # the resamplers' filter graphs (see _to16k): memory stays flat over hundreds of windows
     coverage = round(matched / max(1, total), 3) if wins else 1.0
     unread = [r["ms"] for r in report if not r["uncut_words"]]
     short = [r["ms"] for r in report if r["short_audio"]]
-    ok = not missing and coverage >= 0.85 and not unread and not short
+    ok = not missing and coverage >= 0.85 and not unread and not short and not halluc
     res = {"ok": ok, "coverage": coverage, "orig_words": total, "tight_words": n_tight, "chunks": len(wins),
            "cuts": sum(len(w["cuts"]) for w in wins), "windows_ms": [[w["lo"], w["hi"]] for w in wins],
            "windows": report, "windows_without_words": unread, "windows_short_audio": short,
            "protected_ranges_ms": prot,
-           "missing": missing, "asr_variance_not_near_cuts": asr_variance, "changed": changed,
+           "missing": missing, "possible_hallucinations": halluc, "noise_floor_db": floor_db,
+           "asr_variance_not_near_cuts": asr_variance, "changed": changed,
            "rule": "per cut: the same model reads the uncut source around it (>= 3 s each side; close cuts share one "
-                   "<= 20 s window; a long removed span is read in <= 20 s pieces and any word heard inside it is "
-                   "missing) and the same span with the cuts applied; missing = a word of the uncut reading absent from "
+                   "<= 20 s window; a long removed span is read in <= 20 s pieces overlapping by 1 s, and a word "
+                   "heard > 150 ms inside it is missing, or a possible hallucination when its audio is at the noise "
+                   "floor) and the same span with the cuts applied; missing = a word of the uncut reading absent from "
                    "(or collapsed in) the cut reading AND within 60 ms of a cut; ok also needs >= 85 % matched and "
                    "every window read (words heard, audio not short)",
            "tight_transcript": "  ".join(texts).strip(), "at": now_iso()}
@@ -764,6 +802,8 @@ def verify_cuts(paths: Paths, model_size: str = "large-v3") -> dict:
     elif not ok and not missing:
         why = [f"{len(short)} window(s) run past the end of the audio" if short else "",
                f"{len(unread)} window(s) where the uncut reading heard no word" if unread else "",
+               f"{len(halluc)} word(s) heard only in near-silence at a cut (possible hallucination: Whisper hears words in silence)"
+               if halluc else "",
                "the two readings matched too few words to prove the cuts" if coverage < 0.85 else ""]
         res["verdict"] = "inconclusive: " + "; ".join(x for x in why if x) + "; listen to them"
     write_json(paths.p("06_audio/dialogue/cut-verification.json"), res)

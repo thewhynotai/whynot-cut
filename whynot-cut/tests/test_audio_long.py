@@ -8,7 +8,6 @@ The 60-minute memory test is slow (≈ 1-2 min): it runs only with WHYNOT_SLOW_T
 """
 import sys as _sys
 _sys.dont_write_bytecode = True
-import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import json
 import os
 import shutil
@@ -435,6 +434,28 @@ class TestVerifyCuts(_Proj):
         self.assertEqual({k: r[k] for k in ("ok", "coverage", "orig_words", "windows_ms", "missing")},
                          {k: r2[k] for k in ("ok", "coverage", "orig_words", "windows_ms", "missing")})
 
+    def test_word_heard_in_the_silent_pause_is_not_called_lost_speech(self):
+        keep = self._gap_keep()
+        one = [[0, keep[5][1]], [keep[6][0], 40000]]
+        self._pauses(one)
+        lo = AC._cut_windows(one, read_json(self.p.p("02_transcription/words.json"))["words"], 40000)[0]["lo"]
+        cut_mid = (keep[5][1] + keep[6][0]) / 2
+        read, n = self.reader.transcribe, [0]
+
+        def ghost(audio, **o):          # the uncut reading "hears" a word in the removed (silent) pause
+            segs = list(read(audio, **o)[0])
+            n[0] += 1
+            if n[0] == 1:
+                t = (cut_mid - lo) / 1000
+                segs.append(SimpleNamespace(text=" w11", words=[SimpleNamespace(word=" w11", start=t, end=t + 0.2)]))
+            return iter(segs), None
+        self.reader.transcribe = ghost
+        r = AC.verify_cuts(self.p)
+        self.assertEqual(r["missing"], [])
+        self.assertEqual([h["words"] for h in r["possible_hallucinations"]], ["w11"])
+        self.assertFalse(r["ok"])                     # never a pass: the editor listens
+        self.assertIn("possible hallucination", r["verdict"])
+
     def test_window_edges_do_not_split_a_word(self):
         keep = self._gap_keep()
         self._pauses([[0, keep[5][1]], [keep[6][0], 40000]])
@@ -550,12 +571,56 @@ class TestLongRemovedSpans(_Proj):
                          ["w5", "w6", "w7", "w8"])
         self.assertGreaterEqual(r["windows"][0]["pieces"], 4)
         self.assertTrue(all(d <= 20.01 for d, _ in self.reader.calls), self.reader.calls)
+        # the cut reading of a multi-piece window is only the kept context, joined: 3.2 s + 3 s
+        self.assertAlmostEqual(self.reader.calls[-1][0], 6.2, delta=0.05)
 
     def test_seventy_four_seconds_of_silence_removed_passes(self):
         self._clip(mid_phrase=False)
         r = self._verify([[0, 13000], [87000, 115000]])
         self.assertTrue(r["ok"], r)
         self.assertTrue(all(d <= 20.01 for d, _ in self.reader.calls), self.reader.calls)
+
+    def _splits(self, keep):
+        words = read_json(self.p.p("02_transcription/words.json"))["words"]
+        win = AC._cut_windows(keep, words, int(self.DUR * 1000))[0]
+        return [q[3] for q in win["pieces"][:-1]]
+
+    def test_word_on_a_split_point_is_caught_and_counted_once(self):
+        keep = [[0, 13000], [87000, 115000]]
+        self._clip(mid_phrase=False)
+        splits = self._splits(keep)
+        # a 160 ms word centred on one split (half of it in each piece without the overlap: too short to be heard)
+        # and a 300 ms word on another (heard whole by both overlapping pieces: must count once)
+        words = phrases(4) + [("w9", splits[0] / 1000 - 0.08, 0.16), ("w10", splits[1] / 1000 - 0.15, 0.3)] + \
+            phrases(6, start=90.3)
+        write_wav(self.p.p("06_audio/dialogue/dialogue_clean.wav"),
+                  np.repeat(tone_audio(words, self.DUR)[:, None], 2, axis=1))
+        write_transcript(self.p, words, int(self.DUR * 1000))
+        self.assertEqual(self._splits(keep), splits)
+        r = self._verify(keep)
+        self.assertFalse(r["ok"])
+        self.assertEqual(sorted(m["words"] for m in r["missing"] if m.get("heard_inside_removed_span")), ["w10", "w9"])
+        self.assertTrue(all(d <= 20.01 for d, _ in self.reader.calls), self.reader.calls)
+        pieces = r["windows"][0]["pieces_ms"]
+        self.assertTrue(all(a[1] - b[0] >= 900 for a, b in zip(pieces, pieces[1:])), pieces)   # 1 s overlaps
+
+    def test_word_heard_in_silence_is_a_possible_hallucination(self):
+        self._clip(mid_phrase=False)
+        read = self.reader.transcribe
+
+        def hallucinating(audio, **o):
+            segs, info = read(audio, **o)
+            segs = list(segs)
+            if len(audio) / 16000 > 15:   # the long uncut pieces: Whisper "hears" a word in the silence
+                segs.append(SimpleNamespace(text=" w11", words=[SimpleNamespace(word=" w11", start=8.0, end=8.3)]))
+            return iter(segs), info
+        self.reader.transcribe = hallucinating
+        r = self._verify([[0, 13000], [87000, 115000]])
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["missing"], [])
+        self.assertTrue(r["possible_hallucinations"])
+        self.assertTrue(all(h["level_db"] < -70 for h in r["possible_hallucinations"]))
+        self.assertIn("possible hallucination", r["verdict"])
 
     def test_window_that_heard_nothing_is_not_proved(self):
         self._clip(mid_phrase=False)
