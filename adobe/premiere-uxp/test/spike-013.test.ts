@@ -90,6 +90,8 @@ interface Behaviour {
   /** "open" (default), or "refuse": error + close 1006 without ever opening (a 403 on the upgrade looks like this) */
   connect?: "open" | "refuse";
   onSend?: (ws: FakeWs, msg: Record<string, unknown>) => void;
+  /** the close reason the fake reports for a close() by the spike */
+  closeReason?: string;
 }
 
 class FakeWs {
@@ -132,7 +134,7 @@ class FakeWs {
     setTimeout(() => this.onclose?.({ code, reason, wasClean: code === 1000 }), 1);
   }
   close(code = 1000, reason = "") {
-    this.drop(code, reason);
+    this.drop(code, FakeWs.behaviour.closeReason ?? reason);
   }
 }
 
@@ -455,7 +457,7 @@ test("host_calls: SourceMonitor.openFilePath returning false fails that step but
 });
 
 test("host_calls: setPlayerPosition is set at three times and read back with getPlayerPosition; the player position is restored; beyond-end / negative are informational", async () => {
-  const { ctx, calls } = hostRig();
+  const { ctx, calls, seq } = hostRig();
   const r = await runProbe(probe("host_calls"), ctx);
   const step = stepNamed(r, "Sequence.setPlayerPosition");
   assert.equal(step.ok, true, JSON.stringify(step));
@@ -471,6 +473,12 @@ test("host_calls: setPlayerPosition is set at three times and read back with get
   assert.equal(edge.beyond_end.wanted_s, 30);
   assert.match(String(edge.negative.error), /negative time/);
   assert.equal(stepNamed(r, "setPlayerPosition beyond").ok, true);
+  // the beyond-end probe moved the playhead (clamped to 20 s): the original position is put back so later probes start clean
+  const restored = (edge as unknown as { restored_original: { wanted_s: number; read_back_s: number } }).restored_original;
+  assert.equal(restored.wanted_s, 7);
+  assert.equal(restored.read_back_s, 7);
+  assert.equal((await seq.getPlayerPosition()).seconds, 7);
+  assert.equal(calls.filter((c) => c.startsWith("setPlayerPosition(")).at(-1), "setPlayerPosition(7)");
 });
 
 test("host_calls: a read-back that differs from what was set fails the step and keeps every point", async () => {
@@ -688,4 +696,38 @@ test("export_frame: the prepare calls and every export attempt (exportSequenceFr
 test("export_frame: the playhead-moving attempts stamp setPlayerPosition too", async () => {
   const r = await stampedExport(false);
   assertStamped(callsOf(r), [/setPlayerPosition/, /exportSequenceFrame/]);
+});
+
+// ---- review fixes -----------------------------------------------------------------------------------------------------
+
+test("ws_loopback: a malformed engine.json never leaks a token fragment (V8's JSON.parse message quotes the file): only 'invalid JSON (name)' is recorded", async () => {
+  const frag = TOKEN.slice(0, 24);
+  // broken after the token's start, so the parse error message would quote part of the token
+  const fs = memFs({ [ENGINE_JSON]: `{"port": 51234, "token": "${TOKEN}" "pid": 4242}` });
+  const r = await withWs(GOOD, () => runProbe(probe("ws_loopback"), baseCtx({}, { fs, timing: FAST })));
+  assert.equal(r.ok, false);
+  const step = stepNamed(r, "engine.json");
+  assert.equal(step.ok, false);
+  assert.match(step.error ?? "", /invalid JSON \(SyntaxError\)/);
+  const json = JSON.stringify(r);
+  assert.ok(!json.includes(frag), "no part of the token (24 chars) in the results");
+  assert.ok(!json.includes(TOKEN));
+  assert.equal(FakeWs.all.length, 0);
+});
+
+test("ws_loopback: the Origin instructions say that no origin row means no Origin header", async () => {
+  const fs = memFs({ [ENGINE_JSON]: engineFile() });
+  const r = await withWs(GOOD, () => runProbe(probe("ws_loopback"), baseCtx({}, { fs, timing: FAST })));
+  const how = (r.detail as { how_to_read_origin: string }).how_to_read_origin;
+  assert.match(how, /NO origin row/);
+  assert.match(how, /no Origin header/);
+  assert.match(how, /session/);
+});
+
+test("ws_loopback: the close reason of a successful close is redacted too", async () => {
+  const fs = memFs({ [ENGINE_JSON]: engineFile() });
+  const r = await withWs({ ...GOOD, closeReason: `bye ${TOKEN}` }, () => runProbe(probe("ws_loopback"), baseCtx({}, { fs, timing: FAST })));
+  assert.equal(r.ok, true, JSON.stringify(r).slice(0, 500));
+  assert.equal((stepNamed(r, "close").info as { close_reason: string }).close_reason, "bye [redacted]");
+  assert.ok(!JSON.stringify(r).includes(TOKEN));
 });

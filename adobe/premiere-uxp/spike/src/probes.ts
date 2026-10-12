@@ -449,7 +449,15 @@ const wsLoopback: ProbeDef<Ctx> = {
       let last = "";
       for (let attempt = 1; attempt <= 5; attempt++) {
         try {
-          const parsed = JSON.parse(await readText(ctx.fs, path)) as Record<string, unknown>;
+          const text = await readText(ctx.fs, path);
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(text) as Record<string, unknown>;
+          } catch (e) {
+            // V8's JSON.parse message quotes part of the file (it can include part of the token): never record it
+            throw new Error(`invalid JSON (${e instanceof Error ? e.name : "parse error"})`);
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("engine.json is not a JSON object");
           const port = parsed.port;
           const tok = parsed.token;
           if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`engine.json has no valid port (keys: ${Object.keys(parsed).join(", ")})`);
@@ -476,7 +484,7 @@ const wsLoopback: ProbeDef<Ctx> = {
       return failWith(`engine.json not found or unusable after 5 attempts: ${redact(last, token)} (is reel serve running? start it with: reel serve --ensure)`, { path, attempts: 5 });
     });
     const audit = eng?.engine_home ? `${eng.engine_home}/logs/serve-audit.log` : `${ctx.home}/.whynot-cut/logs/serve-audit.log`;
-    Object.assign(head, { audit_log: audit, how_to_read_origin: `find the "origin" row of ${audit} whose time is within a second of the connect step's started_at: its "reason" is the exact Origin header UXP sent` });
+    Object.assign(head, { audit_log: audit, how_to_read_origin: `find the "origin" row of ${audit} whose time is within a second of the connect step's started_at: its "reason" is the exact Origin header UXP sent. If the connect step succeeded but there is NO origin row, UXP sent no Origin header (the daemon writes an origin row only when the header is present); the "session" row confirms the connection` });
     if (!eng) return steps.outcome(head);
     const base = `127.0.0.1:${eng.port}`;
     head.url = `ws://${base}/session`;
@@ -522,7 +530,7 @@ const wsLoopback: ProbeDef<Ctx> = {
           connect_ms: s.openAtMs,
           error_events: s.errorEvents,
           close_code: s.closed?.code ?? null,
-          close_reason: s.closed?.reason ?? null,
+          close_reason: s.closed ? redact(s.closed.reason, token) : null,
           ready_state: s.ws.readyState,
           ws_protocol: s.ws.protocol ?? null,
           ws_extensions: s.ws.extensions ?? null,
@@ -609,7 +617,7 @@ const wsLoopback: ProbeDef<Ctx> = {
           s.close(1000, "spike done");
           const r = await s.wait(() => (s.closed ? true : undefined), 3000);
           if (r === "timeout") failWith("no close event within 3 s of close()", { was_open: wasOpen });
-          return { was_open: wasOpen, close_code: s.closed?.code ?? null, close_reason: s.closed?.reason ?? null, was_clean: s.closed?.wasClean ?? null };
+          return { was_open: wasOpen, close_code: s.closed?.code ?? null, close_reason: s.closed ? redact(s.closed.reason, token) : null, was_clean: s.closed?.wasClean ?? null };
         });
       }
     }
@@ -2083,6 +2091,7 @@ const hostCalls: ProbeDef<Ctx> = {
       const back = (await steps.stamp("Sequence.getPlayerPosition", () => seq.getPlayerPosition())).seconds;
       return { returned, read_back_s: back, delta_s: back - t };
     };
+    let initialPlayerS: number | null = null;
     await steps.run("Sequence.setPlayerPosition (TickTime) read back", async () => {
       for (const [k, fn] of [
         ["openSequence", () => project.openSequence(seq)],
@@ -2105,6 +2114,7 @@ const hostCalls: ProbeDef<Ctx> = {
       }
       const endS = (await seq.getEndTime()).seconds;
       const initial = (await steps.stamp("Sequence.getPlayerPosition (initial)", () => seq.getPlayerPosition())).seconds;
+      initialPlayerS = initial;
       const wanted = [0.25, 0.5, 0.75].map((f) => Math.round(endS * f * 1000) / 1000);
       const points: Array<Record<string, unknown>> = [];
       for (const t of wanted) points.push({ wanted_s: t, ...(await player(t)) });
@@ -2129,7 +2139,12 @@ const hostCalls: ProbeDef<Ctx> = {
           return { wanted_s: t, error: errText(e) };
         }
       };
-      return { beyond_end: await probeAt(endS + 10), negative: await probeAt(-1) };
+      const beyondEnd = await probeAt(endS + 10);
+      const negative = await probeAt(-1);
+      // leave the playhead where it was before the first setPlayerPosition, so later probes start clean
+      let restored: { wanted_s: number; returned?: unknown; read_back_s?: number; error?: string } | null = null;
+      if (initialPlayerS !== null) restored = await probeAt(initialPlayerS);
+      return { beyond_end: beyondEnd, negative, restored_original: restored };
     });
 
     // 4. shell.openPath: the work_dir folder, the mp4, the folder again (is the consent remembered?)
