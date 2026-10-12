@@ -50,8 +50,17 @@
     shells; a running host with --remove-engine keeps a small state.json so the next uninstall removes the panel; the
     Git Bash entry stays until --remove-engine; the UXP id recorded at install wins; a strong engine-home mark is
     required; the newest engine Python is chosen by version number in both shells.
+  * task 7: tools/release.py (stub) on a temp COPY of components.json: `components --check` lists the placeholder
+    paths, `--fill-artefacts` pins adobe/*.zxp|*.ccx (file + sha256) changing only those value lines (two candidates =
+    exit 2, nothing written), its docstring names the T7.6 executor steps and the release index; static checks: the
+    PowerShell parser on every .ps1 and `bash -n` on every .sh (never skipped when the shell exists), PSScriptAnalyzer
+    (WNC_PSSA_PATH) without Error findings and shellcheck (WNC_SHELLCHECK) exit 0 (skipped when absent); the README's
+    Verified / Not verified section; TestLiveSmoke (WNC_INSTALLER_LIVE=1 only, real network): the pinned uv, `uv python
+    install --no-bin --no-registry`, the runtime step with tests/fixtures/installer/live_lock.txt (six, hashed), and
+    no ~/.local/bin python or HKCU Python\\Astral key left in the real profile.
 Never touches the real ~/.whynot-cut or ~/.claude: every Paths is a sandbox home in a temp folder, and no real
-network is used (artefacts come from a 127.0.0.1 http.server started here, or file://).
+network is used (artefacts come from a 127.0.0.1 http.server started here, or file://) - except by TestLiveSmoke,
+which runs only with WNC_INSTALLER_LIVE=1.
 Run (repo root):
     bash tools/test.sh -p test_installer.py
 """
@@ -3762,6 +3771,291 @@ class TestBashUninstall(TestBashFrontEnd):
         self.assertIn(f"deleted {self.paths.whynot.as_posix()}/python", r.stdout)  # by the bootstrap, after the core
         self.assertEqual(os.listdir(self.paths.whynot), ["models"], out)
         self.assertEqual(model.read_bytes(), b"weights")
+
+
+# --------------------------------------------------------------------------------------------- task 7: release stub
+RELEASE = SK.parent / "tools" / "release.py"
+LIVE_LOCK = FIXTURES / "live_lock.txt"
+
+
+def run_release(*args):
+    return subprocess.run([sys.executable, "-B", str(RELEASE), *[str(a) for a in args]], capture_output=True,
+                          text=True, encoding="utf-8", errors="replace", timeout=120, stdin=subprocess.DEVNULL)
+
+
+def placeholder_paths(obj) -> set:
+    return {p for p, v in leaves(obj) if base.is_placeholder(v)}
+
+
+class TestReleaseStub(unittest.TestCase):
+    """tools/release.py components --check / --fill-artefacts, always on a temp COPY of components.json."""
+
+    def setUp(self):
+        self.real = COMPONENTS.read_bytes()
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.plugin = Path(self._td.name) / "plugin root"
+        self.comp = self.plugin / "setup" / "components.json"
+        self.comp.parent.mkdir(parents=True)
+        self.comp.write_bytes(self.real)
+        self.adobe = self.plugin / "adobe"
+        self.adobe.mkdir()
+
+    def tearDown(self):
+        self.assertEqual(COMPONENTS.read_bytes(), self.real)  # the real file is only ever read
+
+    def fill(self):
+        return run_release("components", "--fill-artefacts", "--plugin", self.plugin)
+
+    def changed_lines(self) -> list:
+        old, new = self.real.decode("utf-8").split("\n"), self.comp.read_bytes().decode("utf-8").split("\n")
+        self.assertEqual(len(old), len(new))
+        return [(a.strip(), b.strip()) for a, b in zip(old, new) if a != b]
+
+    def test_check_lists_the_placeholder_paths(self):
+        r = run_release("components", "--check", "--components", self.comp)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        listed = set(r.stdout.split())
+        self.assertIn("bridge.cep.sha256", listed)
+        self.assertEqual(listed, placeholder_paths(json.loads(self.real)))
+        r = run_release("components", "--check", "--plugin", self.plugin)  # the plugin's own setup/components.json
+        self.assertEqual((r.returncode, set(r.stdout.split())), (0, listed), r.stderr)
+        r = run_release("components", "--check")  # default: this checkout's file, read only
+        self.assertEqual((r.returncode, set(r.stdout.split())), (0, placeholder_paths(json.loads(self.real))))
+
+    def test_fill_writes_the_zxp_sha256_and_name_and_nothing_else(self):
+        zxp = self.adobe / "WhyNotCut-Bridge-3.0.0.zxp"
+        zxp.write_bytes(b"PK fixture zxp")
+        r = self.fill()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        c = json.loads(self.comp.read_text(encoding="utf-8"))
+        self.assertEqual(c["bridge"]["cep"]["zxp"], "adobe/WhyNotCut-Bridge-3.0.0.zxp")
+        self.assertEqual(c["bridge"]["cep"]["sha256"], sha(b"PK fixture zxp"))
+        self.assertEqual(placeholder_paths(c),
+                         placeholder_paths(json.loads(self.real)) - {"bridge.cep.zxp", "bridge.cep.sha256"})
+        # the formatting is kept: the same lines, only the two values changed, still one trailing LF
+        self.assertEqual(self.changed_lines(), [
+            ('"zxp": "<release>",', '"zxp": "adobe/WhyNotCut-Bridge-3.0.0.zxp",'),
+            ('"sha256": "<release>",', f'"sha256": "{sha(b"PK fixture zxp")}",')])
+        self.assertEqual(self.comp.read_bytes().endswith(b"\n"), self.real.endswith(b"\n"))
+        # and the installer's adobe step finds it from the plugin root
+        from wnc_installer import adobe
+        ctx = make_ctx(Path(self._td.name) / "home", base.load_components(self.comp), self.plugin)
+        self.assertEqual(adobe._artefact(ctx, "bridge.cep.zxp"), zxp)
+
+    def test_fill_both_panels_keeps_the_other_placeholders(self):
+        (self.adobe / "WhyNotCut-Bridge-3.0.0.zxp").write_bytes(b"zxp")
+        (self.adobe / "WhyNotCut-Premiere-3.0.0.ccx").write_bytes(b"ccx")
+        r = self.fill()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        c = json.loads(self.comp.read_text(encoding="utf-8"))
+        self.assertEqual((c["bridge"]["uxp"]["ccx"], c["bridge"]["uxp"]["sha256"]),
+                         ("adobe/WhyNotCut-Premiere-3.0.0.ccx", sha(b"ccx")))
+        self.assertEqual(c["bridge"]["cep"]["sha256"], sha(b"zxp"))
+        for still in ("bridge.cep.bundle", "bridge.uxp.version", "bridge.uxp.id", "marketplace.url"):
+            self.assertTrue(base.is_placeholder(base.cget(c, still)), still)
+        self.assertEqual(len(self.changed_lines()), 4)
+
+    def test_a_rebuilt_artefact_is_filled_again(self):
+        zxp = self.adobe / "WhyNotCut-Bridge-3.0.0.zxp"
+        zxp.write_bytes(b"one")
+        self.assertEqual(self.fill().returncode, 0)
+        zxp.write_bytes(b"two")
+        r = self.fill()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(json.loads(self.comp.read_text(encoding="utf-8"))["bridge"]["cep"]["sha256"], sha(b"two"))
+
+    def test_no_artefacts_changes_nothing(self):
+        r = self.fill()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.comp.read_bytes(), self.real)
+
+    def test_two_candidates_are_refused(self):
+        (self.adobe / "a.zxp").write_bytes(b"a")
+        (self.adobe / "b.zxp").write_bytes(b"b")
+        r = self.fill()
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("a.zxp", r.stderr)
+        self.assertEqual(self.comp.read_bytes(), self.real)
+
+    def test_the_docstring_hands_the_pipeline_to_the_executor_and_names_the_index(self):
+        import ast
+        doc = ast.get_docstring(ast.parse(RELEASE.read_text(encoding="utf-8")))
+        for needle in ("T7.6", "executor", '"stable"', '"beta"', '"url"', '"sha256"', "release.index_url",
+                       "--check", "--fill-artefacts", "stdlib"):
+            self.assertIn(needle, doc)
+
+
+# --------------------------------------------------------------------------------------------- task 7: static checks
+PS1_FILES = sorted(INSTALLER.rglob("*.ps1"))
+SH_FILES = sorted(INSTALLER.rglob("*.sh"))
+
+
+class TestStaticChecks(unittest.TestCase):
+    """Parsers always run when the shell exists; PSScriptAnalyzer (WNC_PSSA_PATH = its .psd1, or the PS module path)
+    and shellcheck (WNC_SHELLCHECK, or PATH) are skipped cleanly when they are not on this machine."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+
+    def test_the_file_lists(self):
+        self.assertEqual([p.name for p in PS1_FILES], ["bootstrap.ps1", "install.ps1"])
+        self.assertEqual([p.name for p in SH_FILES], ["bootstrap.sh", "install.sh"])
+
+    def ps(self, body: str, files: list):
+        if not find_powershell():
+            self.skipTest("Windows PowerShell is not available")
+        script = self.tmp / "check.ps1"
+        script.write_text(body, encoding="ascii")
+        env = dict(os.environ, WNC_PS_FILES="|".join(str(f) for f in files))
+        return subprocess.run([find_powershell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                               "-File", str(script)], capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", env=env, timeout=600, stdin=subprocess.DEVNULL)
+
+    PARSE = ("$ErrorActionPreference = 'Stop'\n"
+             "$files = $env:WNC_PS_FILES -split '\\|'\n"
+             "foreach ($f in $files) {\n"
+             "    $tokens = $null; $errors = $null\n"
+             "    [void][System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$tokens, [ref]$errors)\n"
+             "    foreach ($e in $errors) { Write-Output ('ERR {0}:{1}: {2}' -f $f, $e.Extent.StartLineNumber, "
+             "$e.Message) }\n"
+             "}\n"
+             "Write-Output ('parsed ' + $files.Count)\n")
+
+    def test_powershell_parses_every_ps1(self):
+        r = self.ps(self.PARSE, PS1_FILES)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual([x for x in r.stdout.splitlines() if x.startswith("ERR")], [], r.stdout)
+        self.assertIn(f"parsed {len(PS1_FILES)}", r.stdout.splitlines(), r.stdout + r.stderr)
+
+    def test_the_readme_says_what_was_verified_and_what_was_not(self):
+        text = (INSTALLER / "README.md").read_text(encoding="utf-8")
+        self.assertIn("## Verified / Not verified", text)
+        verified, _, rest = text.partition("## Verified / Not verified")[2].partition("### Not verified")
+        for needle in ("0.13.0", "3.12.15", "--no-bin --no-registry", "PortableGit", "WNC_TEST_PLATFORM",
+                       "PowerShell 5.1"):
+            self.assertIn(needle, verified)
+        for needle in ("Mac", "JXA", "HKCU", "UPIA", "Claude Code CLI", "Phase 6", "Gate 7", "H10", "SAC"):
+            self.assertIn(needle, rest)
+
+    def test_the_parser_check_catches_a_broken_file(self):
+        bad = self.tmp / "bad.ps1"
+        bad.write_text("function Broken {\n  if ($x) {\n", encoding="ascii")
+        r = self.ps(self.PARSE, [bad])
+        self.assertIn(f"ERR {bad}:", r.stdout, r.stderr)
+
+    def bash_n(self, path: Path):
+        if not find_bash():
+            self.skipTest("bash is not available")
+        return subprocess.run([find_bash(), "-n", path.as_posix()], capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=120, stdin=subprocess.DEVNULL)
+
+    def test_bash_n_on_every_sh(self):
+        for f in SH_FILES:
+            r = self.bash_n(f)
+            self.assertEqual((r.returncode, r.stderr), (0, ""), f.name)
+
+    def test_bash_n_catches_a_broken_file(self):
+        bad = self.tmp / "bad.sh"
+        bad.write_bytes(b"#!/usr/bin/env bash\nif true; then\n  echo x\n")
+        self.assertNotEqual(self.bash_n(bad).returncode, 0)
+
+    def test_psscriptanalyzer_finds_no_errors(self):
+        body = ("$p = $env:WNC_PSSA_PATH\n"
+                "try {\n"
+                "    if ($p) { Import-Module $p -ErrorAction Stop } else { Import-Module PSScriptAnalyzer -ErrorAction Stop }\n"
+                "} catch { Write-Output ('NOPSSA ' + $_); exit 7 }\n"
+                "$files = $env:WNC_PS_FILES -split '\\|'\n"
+                "foreach ($f in $files) {\n"
+                "    foreach ($d in @(Invoke-ScriptAnalyzer -Path $f -Severity Error, ParseError)) {\n"
+                "        Write-Output ('ERR {0}:{1}: {2} {3}' -f $d.ScriptName, $d.Line, $d.RuleName, $d.Message)\n"
+                "    }\n"
+                "}\n"
+                "Write-Output ('analyzed ' + $files.Count + ' with PSScriptAnalyzer ' + "
+                "(Get-Module PSScriptAnalyzer).Version)\n")
+        r = self.ps(body, PS1_FILES)
+        if r.returncode == 7:
+            self.skipTest("PSScriptAnalyzer is not importable (set WNC_PSSA_PATH to its .psd1)")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual([x for x in r.stdout.splitlines() if x.startswith("ERR")], [], r.stdout)
+        self.assertIn(f"analyzed {len(PS1_FILES)} with PSScriptAnalyzer", r.stdout, r.stdout + r.stderr)
+
+    def test_shellcheck_is_clean(self):
+        sc = os.environ.get("WNC_SHELLCHECK") or shutil.which("shellcheck")
+        if not sc or not Path(sc).is_file() and not shutil.which(sc):
+            self.skipTest("shellcheck is not available (set WNC_SHELLCHECK to the executable)")
+        r = subprocess.run([sc, "--shell=bash", *[str(f) for f in SH_FILES]], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=300, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
+# --------------------------------------------------------------------------------------------- task 7: live smoke
+def real_side_effects() -> dict:
+    """Read-only: what a bare `uv python install` would leave in the REAL profile (installer.md: never)."""
+    out = {"local_bin": sorted(p.name for p in (real_profile() / ".local" / "bin").glob("python3*"))}
+    if IS_WIN:
+        import winreg
+        try:
+            winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Python\Astral"))
+            out["astral_key"] = True
+        except OSError:
+            out["astral_key"] = False
+    return out
+
+
+@unittest.skipUnless(os.environ.get("WNC_INSTALLER_LIVE") == "1", "live network smoke: set WNC_INSTALLER_LIVE=1")
+class TestLiveSmoke(unittest.TestCase):
+    """The real thing, once per release: uv from the PINNED components.json URL + sha256, `uv python install
+    <pinned> --no-bin --no-registry`, `uv venv`, `uv pip sync --require-hashes` of tests/fixtures/installer/
+    live_lock.txt (six, hashed), all through the core's runtime step, in a temp home with Arabic letters."""
+
+    def test_real_uv_python_and_a_hashed_lock_build_a_runtime(self):
+        try:
+            plat = base.platform_id()
+        except base.Unsupported as e:
+            self.skipTest(str(e))
+        real = base.load_components(COMPONENTS)
+        before, side = live_snapshot(), real_side_effects()
+        with TempDir() as d, mock.patch.dict(os.environ):
+            os.environ.pop("WNC_TEST_UV", None)
+            tmp = Path(d)
+            plugin = tmp / "plugin root"
+            rel = f"setup/locks/runtime-{plat}.lock"
+            (plugin / rel).parent.mkdir(parents=True)
+            shutil.copyfile(LIVE_LOCK, plugin / rel)
+            comp = {"schema": 1, "uv": real["uv"], "runtime": {
+                "python": real["runtime"]["python"], "index_url": None, "smoke": ["six"],
+                "locks": {plat: {"file": rel, "id": base.PLACEHOLDER}}}}
+            ctx = make_ctx(tmp / ARABIC_HOME, comp, plugin, plat)
+            asset = comp["uv"]["assets"][plat]
+            arc = base.download(asset["url"], asset["sha256"], ctx.paths.downloads_dir, ctx.log)
+            uv = ctx.paths.bin_dir / ("uv.exe" if plat.startswith("win") else "uv")
+            base.extract(arc, ctx.paths.bin_dir, {asset["member"]: uv.name})
+            ver = subprocess.run([str(uv), "--version"], capture_output=True, text=True, timeout=60,
+                                 env=ctx.paths.child_env(), stdin=subprocess.DEVNULL)
+            self.assertTrue(ver.stdout.startswith(f"uv {real['uv']['version']}"), ver.stdout + ver.stderr)
+
+            res = runtime_module().step_runtime(ctx)
+            log = (ctx.paths.logs_dir / "install-test.log").read_text(encoding="utf-8")
+            self.assertEqual(res.status, "ok", res.detail + "\n" + log[-4000:])
+            self.assertIn("--no-bin --no-registry", log)
+            rid = ctx.paths.current_file.read_text(encoding="utf-8").strip()
+            self.assertEqual(rid, "r-" + sha(LIVE_LOCK.read_bytes())[:12])
+            py = runtime_module().runtime_python(ctx.paths, rid, plat)
+            probe = subprocess.run([str(py), "-s", "-I", "-c",
+                                    "import json, platform, sys, six; print(json.dumps([six.__version__, "
+                                    "platform.python_version(), sys.base_prefix]))"],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=120,
+                                   env=ctx.paths.child_env(), stdin=subprocess.DEVNULL)
+            self.assertEqual(probe.returncode, 0, probe.stdout + probe.stderr)
+            six_ver, py_ver, base_prefix = json.loads(probe.stdout.strip().splitlines()[-1])
+            self.assertEqual((six_ver, py_ver), ("1.17.0", real["runtime"]["python"]))
+            self.assertTrue(Path(base_prefix).resolve().is_relative_to(ctx.paths.python_dir.resolve()), base_prefix)
+            self.assertTrue((ctx.paths.runtimes_dir / rid / runtime_module().STAMP).is_file())
+        self.assertEqual(live_snapshot(), before)
+        self.assertEqual(real_side_effects(), side)  # no ~/.local/bin/python3.12(.exe), no HKCU Python\Astral key
 
 
 if __name__ == "__main__":

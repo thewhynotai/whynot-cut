@@ -177,3 +177,55 @@ Test hooks, honoured only together with `--home`:
 The installer's own tests are in `tests/test_installer.py` (run with `bash tools/test.sh -p test_installer.py`). They
 run both front ends end to end against a fixture plugin, served from a local `http.server`, with a home folder whose
 name has a space and Arabic letters.
+
+Optional checks in the same file, skipped when their tool or switch is missing:
+
+| Variable | Check |
+|---|---|
+| `WNC_PSSA_PATH` | Path to `PSScriptAnalyzer.psd1` (otherwise the PowerShell module path is used): no `Error` finding in the `.ps1` files. |
+| `WNC_SHELLCHECK` | Path to `shellcheck` (otherwise `PATH`): `shellcheck` exits 0 on the `.sh` files. |
+| `WNC_INSTALLER_LIVE=1` | The live smoke, with real network: the pinned uv download, then `uv python install --no-bin --no-registry`, `uv venv` and `uv pip sync --require-hashes` of `tests/fixtures/installer/live_lock.txt` (six), all through the runtime step in a temp home. |
+
+The PowerShell parser (`[System.Management.Automation.Language.Parser]::ParseFile`) and `bash -n` always run when
+the shell is there.
+
+## Release tool (stub)
+
+`python tools/release.py components --check` lists every placeholder (`"<release>"` or `null`) left in
+`setup/components.json`. `python tools/release.py components --fill-artefacts` pins the panel files found in
+`whynot-cut/adobe/`: `*.zxp` goes into `bridge.cep.zxp` + `bridge.cep.sha256`, and `*.ccx` into `bridge.uxp.ccx` +
+`bridge.uxp.sha256`. Everything else stays as it is. The full release pipeline (T7.6) is not part of the installer
+track. The docstring of `tools/release.py` describes the release index that the one-line mode reads.
+
+## Verified / Not verified
+
+### Verified
+
+- **uv and Python, live.** The pinned uv 0.13.0 (URL and sha256 from `components.json`) was downloaded for real.
+  `uv python install 3.12.15 --no-bin --no-registry` installed the pinned Python into a temp home. A runtime was
+  built from a hashed lock (`uv pip sync --require-hashes`) and imported its package. Afterwards the real profile had
+  no `~/.local/bin/python3.12.exe` and there was no `HKCU\Software\Python\Astral` key: no side effects (the
+  `WNC_INSTALLER_LIVE=1` test, and earlier checks by the controller).
+- **Git for Windows.** The real PortableGit 7z self-extractor unpacks into paths with spaces and Arabic letters. Under
+  a very long base path it fails (Windows MAX_PATH) after a partial extraction. The `gitbash` step then cleans up
+  its staging folder and turns amber with the download link, so a broken Git is never set.
+- **Windows front end.** `install.ps1` and `bootstrap.ps1` under Windows PowerShell 5.1, end to end in a sandbox home
+  (uv download and sha256, the core, one log, the real `~/.claude` and `~/.whynot-cut` untouched), plus the one-line
+  modes, uninstall and `-RemoveEngine`.
+- **macOS script, on Windows.** `install.sh` and `bootstrap.sh` were run under Git Bash with
+  `WNC_TEST_PLATFORM=mac-arm64`, end to end the same way.
+- **Static checks.** The PowerShell parser and PSScriptAnalyzer 1.25.0 found no errors in the `.ps1` files.
+  `bash -n` and shellcheck 0.11.0 are clean on the `.sh` files.
+
+### Not verified
+
+- A real Mac run. Not yet checked there: reading JSON through JXA (`osascript -l JavaScript`), `shasum` and `tar`
+  from macOS, and questions asked through `/dev/tty`.
+- Real per-user font registration on Windows (`HKCU\...\Fonts` values and the font-change broadcast). The tests use a
+  fake `LOCALAPPDATA` and a JSON stand-in for the registry.
+- Adobe's plugin installer (UPIA) installing or removing the UXP panel.
+- Installing the plugin with the real Claude Code CLI (`claude plugin marketplace add` / `plugin install`). The tests
+  use a stand-in CLI.
+- Signed ZXP and `.ccx` panels: they arrive with Phase 6. Until then the `adobe` step is skipped.
+- A clean standard-user Windows account with no Python and no Git (Gate 7, H10).
+- Windows Smart App Control (SAC) switched on.

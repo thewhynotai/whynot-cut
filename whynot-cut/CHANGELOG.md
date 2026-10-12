@@ -111,6 +111,17 @@
   engine's `lib` importable); its output and exit code are the script's.
 - The engine prefers the pinned ffmpeg the installer puts in the engine home (`state.json` `ffmpeg.path`, else
   `ffmpeg/<components.json version>/`) over the one on PATH and the imageio-ffmpeg wheel's binary.
+- Per-user installer (T7.1, T7.2, T7.8; `whynot-cut/installer/`). Windows: from the extracted zip,
+  `powershell -ExecutionPolicy Bypass -File whynot-cut\installer\install.ps1`, or the one-liner
+  `irm https://thewhynot.ai/install.ps1 | iex` once hosting is ready (H3); macOS: `bash whynot-cut/installer/install.sh`
+  (or `curl -fsSL https://thewhynot.ai/install.sh | bash`). It puts the pinned uv and Python in `~/.whynot-cut` (every
+  download pinned to a URL and sha256), builds the engine runtime from the hashed lock, then installs ffmpeg, Git Bash
+  (Windows), the Claude Code plugin and settings (merged, with a backup), the Adobe panel, the fonts and the Whisper
+  model, and ends with `reel doctor` and a checklist. `-Uninstall` / `--uninstall` removes it again (`-RemoveEngine`,
+  `-RemoveModels`) and never touches client folders. No admin rights, no UAC prompt, nothing in HKLM or Program Files,
+  and no registry edit for Adobe's debug mode: an unsigned panel is reported, never installed. `installer/README.md`
+  says what was verified and what was not; `tools/release.py` (a stub) lists the placeholders left in
+  `setup/components.json` and pins the panel files.
 
 ### Changed
 - No real client ships in the product: the real client's profile folder was removed from `profiles/`. The plugin now

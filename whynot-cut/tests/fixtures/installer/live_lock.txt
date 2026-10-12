@@ -1,0 +1,5 @@
+# Live-smoke lock for tests/test_installer.py TestLiveSmoke (WNC_INSTALLER_LIVE=1), in the
+# `uv pip compile --generate-hashes` format: one tiny pure-Python wheel (six 1.17.0, ~11 KB, py2.py3-none-any).
+# The hash is the PyPI sha256 of six-1.17.0-py2.py3-none-any.whl (https://pypi.org/pypi/six/1.17.0/json).
+six==1.17.0 \
+    --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
