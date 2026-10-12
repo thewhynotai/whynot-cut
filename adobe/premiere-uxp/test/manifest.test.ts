@@ -16,9 +16,10 @@ test("spike manifest: v5, ids, single premierepro host object", () => {
   assert.deepEqual(manifest.host, { app: "premierepro", minVersion: "26.5.0" });
 });
 
-test("spike manifest: permissions are full file access + loopback network", () => {
+test("spike manifest: permissions are full file access + network \"all\" (the explicit 127.0.0.1 entries failed live)", () => {
   assert.equal(manifest.requiredPermissions.localFileSystem, "fullAccess");
-  assert.deepEqual(manifest.requiredPermissions.network.domains, ["ws://127.0.0.1", "http://127.0.0.1"]);
+  // live evidence: Premiere 26.5.2, spike 0.1.3 run results-20261012-211920 - "Permission denied to the url ws://127.0.0.1:53672/session. Manifest entry not found." (and the same for http://127.0.0.1:53672/status): the explicit ws://127.0.0.1 / http://127.0.0.1 entries do not match a URL with a port, so the spec's fallback applies (docs/adobe/evidence/2026-10-12-premiere-run4-panel-blocked.webp)
+  assert.equal(manifest.requiredPermissions.network.domains, "all");
 });
 
 test("spike manifest: one panel entrypoint, 340x640 preferred, 280x320 minimum", () => {

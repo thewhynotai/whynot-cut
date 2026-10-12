@@ -15,7 +15,7 @@ import type { PanelLifecycle, ShellDoc, ShellEnv } from "./shell.ts";
 import { createDaemonTransport, readEngineJson, timerOf } from "./uxp-transport.ts";
 import type { FetchFn, LinkGlobals, WebSocketCtor } from "./uxp-transport.ts";
 import type { UxpFs, UxpModule, UxpOs } from "./uxp-types.ts";
-import manifest from "../plugin/manifest.json";
+import { version as manifestVersion } from "../plugin/manifest.json";
 
 declare const require: (id: string) => unknown;
 /** replaced by esbuild `define` (scripts/build.mjs): true only for `WNC_MOCK=1` builds */
@@ -62,7 +62,7 @@ function linkGlobals(): LinkGlobals {
 
 const uxpModule = () => maybe<UxpModule>("uxp");
 /** the plugin's own version (uxp.versions.plugin, else the manifest it was built with), 1-64 characters */
-const bundleVersion = () => (String(uxpModule()?.versions?.plugin ?? "") || String(manifest.version) || "0.0.0").slice(0, 64);
+const bundleVersion = () => (String(uxpModule()?.versions?.plugin ?? "") || String(manifestVersion) || "0.0.0").slice(0, 64);
 
 const env: ShellEnv = {
   document: document as unknown as ShellDoc,

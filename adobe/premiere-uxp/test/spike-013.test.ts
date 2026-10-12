@@ -178,7 +178,7 @@ test("ws_loopback: reads engine.json, hellos as uxp/protocol 4 with the token, g
   const hello = JSON.parse(ws.sent[0] ?? "{}") as { type: string; token: string; client: Record<string, unknown> };
   assert.equal(hello.type, "hello");
   assert.equal(hello.token, TOKEN);
-  assert.deepEqual(hello.client, { kind: "uxp", version: "0.1.3", host: "premiere", hostVersion: "26.5.2", protocol: 4, capabilities: [] });
+  assert.deepEqual(hello.client, { kind: "uxp", version: "0.1.4", host: "premiere", hostVersion: "26.5.2", protocol: 4, capabilities: [] });
   assert.equal(JSON.parse(ws.sent[1] ?? "{}").type, "snapshot");
 
   const eng = stepNamed(r, "engine.json").info as Record<string, unknown>;
@@ -559,16 +559,18 @@ test("probe order: host_calls runs after project_views and before undo_transacti
 
 // ---- 0.1.3 packaging --------------------------------------------------------------------------------------------------
 
-test("spike 0.1.3: manifest version + launchProcess (the product's entry, verbatim), SPIKE_VERSION, example config", () => {
+test("spike 0.1.4 (the 0.1.3 probes, network \"all\"): manifest version + launchProcess (the product's entry, verbatim), SPIKE_VERSION, example config", () => {
   const manifest = JSON.parse(readFileSync(join(root, "spike", "manifest.json"), "utf8"));
   const product = JSON.parse(readFileSync(join(root, "plugin", "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "0.1.3");
+  assert.equal(manifest.version, "0.1.4");
   assert.deepEqual(manifest.requiredPermissions.launchProcess, { schemes: ["file"], extensions: [".mp4", ".mov", ".prproj", ""] });
   assert.deepEqual(manifest.requiredPermissions.launchProcess, product.requiredPermissions.launchProcess);
   assert.equal(manifest.requiredPermissions.clipboard, "readAndWrite");
   assert.equal(manifest.requiredPermissions.localFileSystem, "fullAccess");
-  assert.deepEqual(manifest.requiredPermissions.network.domains, ["ws://127.0.0.1", "http://127.0.0.1"]);
-  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0\.1\.3"/);
+  // live evidence: Premiere 26.5.2, spike 0.1.3 run results-20261012-211920 - "Permission denied to the url ws://127.0.0.1:53672/session. Manifest entry not found." (and the same for http://127.0.0.1:53672/status): the explicit ws://127.0.0.1 / http://127.0.0.1 entries do not match a URL with a port, so the spec's fallback applies (docs/adobe/evidence/2026-10-12-premiere-run4-panel-blocked.webp)
+  assert.equal(manifest.requiredPermissions.network.domains, "all");
+  assert.deepEqual(manifest.requiredPermissions.network, product.requiredPermissions.network);
+  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0\.1\.4"/);
   const spike = readFileSync(join(root, "spike", "src", "spike.ts"), "utf8");
   assert.match(spike, /import \{ SPIKE_VERSION \} from "\.\/version\.ts"/);
   assert.doesNotMatch(spike, /SPIKE_VERSION = "/, "one source of truth for the version");

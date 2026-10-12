@@ -174,3 +174,23 @@ test("the shipped index.js with a WebSocket and no engine.json: DaemonSource dia
   assert.deepEqual(Object.keys(panels), ["whynotCut"], "the manifest's panel id");
   panels["whynotCut"]!.destroy();
 });
+
+test("network \"all\" guard: the shipped code only ever builds ws://127.0.0.1:<port> and http://127.0.0.1:<port> URLs", () => {
+  // The manifest grants network "all" because Premiere 26.5.2 refused the explicit 127.0.0.1 entries for a URL with a
+  // port (spike 0.1.3, results-20261012-211920). The code stays loopback-only: every URL literal in the bundle is the
+  // daemon's session or status URL, nothing else (no other host, no https, no wss).
+  const js = text(unzipSync(new Uint8Array(readFileSync(ccx)))["index.js"]);
+  const urls = [...js.matchAll(/\b(?:wss?|https?):\/\/[^\s"'`)<>\\]*/gi)].map((m) => m[0]);
+  assert.deepEqual([...new Set(urls)].sort(), ["http://127.0.0.1:${port}/status", "ws://127.0.0.1:${port}/session"], urls.join(", "));
+  // the two builders, as written in the panel kit
+  const src = readFileSync(join(root, "..", "panel-ui", "src", "daemon-source.ts"), "utf8");
+  assert.match(src, /return `ws:\/\/127\.0\.0\.1:\$\{port\}\/session`;/);
+  assert.match(src, /return `http:\/\/127\.0\.0\.1:\$\{port\}\/status`;/);
+  // every socket and fetch in the plugin's own code goes through them (or through the URL handed in by DaemonSource)
+  for (const f of ["host-link.ts", "uxp-transport.ts", "main.ts"]) {
+    const code = readFileSync(join(root, "src", f), "utf8").replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.doesNotMatch(code, /(?:wss?|https?):\/\//i, `${f} has its own URL literal`);
+  }
+  const manifest = JSON.parse(text(unzipSync(new Uint8Array(readFileSync(ccx)))["manifest.json"]));
+  assert.equal(manifest.requiredPermissions.network.domains, "all");
+});
