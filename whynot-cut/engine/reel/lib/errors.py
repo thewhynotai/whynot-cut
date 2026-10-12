@@ -142,6 +142,21 @@ def describe(exc: BaseException) -> dict:
         return {"ok": False, "error": f"{name} did not finish within {exc.timeout:g} s and was stopped", "where": where,
                 "how": f"Check that {name} is not waiting on a dialog (close any open dialog in After Effects or "
                        "Premiere) and that the media plays; then run the command again"}
+    if isinstance(exc, subprocess.CalledProcessError):     # Gate 2 minor: keep what the tool said (ffmpeg's reason)
+        name = _cmd_name(exc.cmd)
+        err = exc.stderr if exc.stderr is not None else exc.output
+        if isinstance(err, bytes):
+            err = err.decode("utf-8", errors="replace")
+        tail = " | ".join(ln.strip() for ln in str(err or "").strip().splitlines()[-6:] if ln.strip())[-600:]
+        error = f"{name} failed (exit {exc.returncode})" + (f": {tail}" if tail else "")
+        if name.lower().startswith(("ffmpeg", "ffprobe")):
+            how = ("Check that the media file plays and is fully copied or synced (a file still downloading from a "
+                   "network share or cloud folder is cut short); a file ffmpeg cannot decode needs re-exporting (for "
+                   "example to H.264 MP4 or WAV). The last lines of ffmpeg's message are in `error`; then run the "
+                   "command again")
+        else:
+            how = f"The last lines of {name}'s message are in `error`: fix what it names, then run the command again"
+        return {"ok": False, "error": error, "where": where, "how": how}
     if isinstance(exc, PermissionError):
         f = exc.filename or "a file"
         return {"ok": False, "error": f"no permission to use {f}", "where": str(exc.filename or where),

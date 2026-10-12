@@ -603,12 +603,11 @@ def cli_bench(a, project=None) -> dict:
     src = Path(a.audio).expanduser() if a.audio else None
     if src is None and project is not None:
         src = project.p("02_transcription/dialogue_16k_mono.wav")
-    if src is None or not src.is_file():
-        print(__import__("json").dumps({
-            "error": f"no speech recording to measure ({src} not found)" if src else "no speech recording to measure",
-            "how": "reel bench --audio <a file with about 5 minutes of speech> (or --root <client> --episode <EP> "
-                   "after episode-transcribe)"}, ensure_ascii=False))
-        raise SystemExit(2)
+    if src is None or not src.is_file():          # through the CLI's handler: one JSON document, exit 1 (Gate 2)
+        from .errors import Guidance
+        raise Guidance(f"no speech recording to measure ({src} not found)" if src else "no speech recording to measure",
+                       "reel bench --audio <a file with about 5 minutes of speech> (or --root <client> --episode <EP> "
+                       "after episode-transcribe)", where=str(src) if src else None)
     if not a.model:
         from . import settings as S
         a.model = S.load().get("whisper_model") or "large-v3"

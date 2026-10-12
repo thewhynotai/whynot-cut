@@ -327,6 +327,56 @@ class TestCliGuidance(TempDir):
             code, out, err = run_main(m, ["--root", str(self.root), "--video-id", "C1", "status"])
         self.assert_guidance(code, json.loads(out), err, error_has=("ffmpeg", "600"))
 
+    def test_failed_ffmpeg_keeps_its_message(self):
+        """Gate 2 minor: a CalledProcessError lost ffmpeg's stderr ("unexpected CalledProcessError")."""
+        m = cli_module()
+        boom = subprocess.CalledProcessError(1, ["ffmpeg", "-i", "x.mov"], output="",
+                                             stderr="ffmpeg version 7.1\n...\nx.mov: Invalid data found when processing input\n")
+        with mock.patch.object(m, "cmd_status", side_effect=boom):
+            code, out, err = run_main(m, ["--root", str(self.root), "--video-id", "C1", "status"])
+        doc = self.assert_guidance(code, json.loads(out), err, error_has=("ffmpeg", "exit 1", "Invalid data found"),
+                                   how_has=("media file plays",))
+        self.assertNotIn("unexpected", doc["error"])
+        from lib.errors import describe
+        d = describe(subprocess.CalledProcessError(2, ["tool"], stderr=b"bad \xff byte\n"))
+        self.assertIn("tool failed (exit 2): bad", d["error"])
+
+    def test_bench_without_audio_goes_through_the_handler(self):
+        """Gate 2 minor: `reel bench` printed its own JSON and exited 2; now the one guidance document, exit 1."""
+        m = cli_module()
+        code, out, err = run_main(m, ["bench", "--audio", str(self.tmp / "missing.wav")])
+        doc = json.loads(out)
+        self.assertEqual((code, doc["ok"]), (1, False), doc)
+        self.assertIn("no speech recording", doc["error"])
+        self.assertIn("reel bench --audio", doc["how"])
+
+    def test_audio_clean_failed_verification_exits_1(self):
+        """Gate 2 minor: cuts not proven to keep every word (cut verification ok false) exited 0."""
+        import argparse
+        from lib import audio_clean, recipes
+        m = cli_module()
+        p = Paths(self.root, "C1")
+        a = argparse.Namespace(hum="off", min_pause=None, pad=None, nr=12, expander=True, no_verify=False)
+        clean = {"decisions": {}, "loudness": {}, "metrics": {}, "regions_ms": []}
+        pauses = {"pauses_ms": [[1000, 1500]], "removed_ms": 500, "new_duration_ms": 9500}
+        for verdict, want in (({"ok": False, "missing": ["كلمة"]}, 1), ({"ok": True, "missing": []}, 0)):
+            so = io.StringIO()
+            with mock.patch.object(m, "P", return_value=p), mock.patch.object(m, "refuse_stale_window"), \
+                    mock.patch.object(m, "main_footage", return_value=[self.tmp / "a.mov"]), \
+                    mock.patch.object(recipes, "pause_params", return_value={"min_pause_ms": 250, "pad_ms": 80}), \
+                    mock.patch.object(audio_clean, "clean", return_value=clean), \
+                    mock.patch.object(audio_clean, "detect_pauses", return_value=dict(pauses)), \
+                    mock.patch.object(audio_clean, "verify_cuts", return_value=verdict), \
+                    contextlib.redirect_stdout(so):
+                code = 0
+                try:
+                    m.cmd_audio_clean(a)
+                except SystemExit as e:
+                    code = e.code
+            doc = json.loads(so.getvalue())
+            self.assertEqual(code, want, doc)
+            self.assertEqual(doc.get("ok", True), not want)
+
     def test_unexpected_error_still_gives_guidance(self):
         m = cli_module()
         with mock.patch.object(m, "cmd_status", side_effect=TypeError("'NoneType' object is not subscriptable")):
@@ -406,6 +456,23 @@ class TestRenderTimeouts(TempDir):
         self.assertTrue(r["how"])
         self.assertEqual(r["log"], str(log))
         self.assertIn("rendering 10%", log.read_text(encoding="utf-8"))
+
+    def test_document_tools_have_a_timeout(self):
+        """Gate 2 minor: textutil / mdls ran without a timeout inside the discovery lock (a cloud placeholder hangs)."""
+        from lib import discover
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append((cmd[0], kw.get("timeout")))
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout") or 0)
+        for name in ("brief.docx", "colours.pdf"):
+            f = self.tmp / name
+            f.write_bytes(b"x")
+            with mock.patch.object(discover.shutil, "which", return_value="/usr/bin/tool"), \
+                    mock.patch.object(discover, "run", run):
+                self.assertIn("unreadable", discover.read_document(f))
+        self.assertEqual([c[0] for c in calls], ["textutil", "mdls"])
+        self.assertTrue(all(t and t <= 120 for _, t in calls), calls)
 
     def test_ae_builder_render_timeout(self):
         from lib import ae_builder

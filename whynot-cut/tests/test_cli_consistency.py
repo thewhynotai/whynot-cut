@@ -355,6 +355,57 @@ class TestLockAndInterrupts(InProcess):
 
 
 # --------------------------------------------------------------------------- errors.py / settings.py minors
+class TestSetupAndGpuExitCodes(InProcess):
+    """Gate 2 A3: `reel setup` exited 0 when the runtime build failed. Minor: `reel gpu-enable` let pip/uv print on
+    stdout before the JSON document, and a failed install was a bare message exit."""
+
+    def setup_cmd(self, runtime: dict, *extra):
+        with mock.patch.object(self.m, "run_setup_env", return_value=runtime), \
+                mock.patch.object(self.m, "doctor_in_engine", return_value={"fixes": []}):
+            return run_main(self.m, ["setup", "--no-bridge", *extra])
+
+    def test_failed_runtime_build_exits_1(self):
+        code, so, _ = self.setup_cmd({"ok": False, "error": "uv sync failed", "how": "reel setup --force"})
+        doc = json.loads(so)
+        self.assertEqual((code, doc["ok"]), (1, False), doc)
+        self.assertIn("uv sync failed", json.dumps(doc))
+
+    def test_runtime_ok_exits_0(self):
+        code, so, _ = self.setup_cmd({"ok": True})
+        self.assertEqual((code, json.loads(so)["ok"]), (0, True))
+
+    def test_check_only_reports(self):
+        code, so, _ = self.setup_cmd({"ok": False, "error": "not built"}, "--check")
+        self.assertEqual(code, 0)
+        self.assertNotIn("ok", json.loads(so))
+
+    def gpu_cmd(self, returncode: int, stdout: str = "", stderr: str = ""):
+        from lib import plat
+
+        def fake_run(cmd, **kw):          # like a real child: prints on our stdout unless it is captured
+            if not kw.get("capture_output") and kw.get("stdout") is None:
+                print(stdout, end="")
+                return subprocess.CompletedProcess(cmd, returncode)
+            return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
+        gpu = {"cuda_devices": 1, "cuda_libs_missing": True, "whisper_device": "cuda"}
+        with mock.patch.object(plat, "gpu_info", return_value=gpu), mock.patch.object(plat, "IS_MAC", False), \
+                mock.patch.object(plat, "IS_WIN", False), \
+                mock.patch.object(self.m, "cuda_wheel_install", return_value=(["pip", "install"], {}, "pip")), \
+                mock.patch("subprocess.run", fake_run):
+            return run_main(self.m, ["gpu-enable"])
+
+    def test_gpu_enable_prints_only_the_json(self):
+        code, so, _ = self.gpu_cmd(0, stdout="Collecting nvidia-cublas-cu12\nSuccessfully installed\n")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(so)["via"], "pip")              # the whole stdout is the one document
+
+    def test_gpu_enable_failure_is_a_json_error_with_the_tail(self):
+        code, so, _ = self.gpu_cmd(1, stdout="Collecting nvidia-cublas-cu12\n", stderr="ERROR: No space left on device\n")
+        doc = json.loads(so)
+        self.assertEqual((code, doc["ok"]), (1, False), doc)
+        self.assertIn("No space left", doc["error"])
+
+
 class TestErrorLog(Base):
     def test_an_unwritable_log_falls_back_to_the_engine_home(self):
         from lib import errors
@@ -643,7 +694,9 @@ class TestCompiledReads(unittest.TestCase):
             if f.name == "plan.py":                   # the compiler reads back what it just wrote
                 continue
             for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
-                if pat.search(line):
+                # the motion-plan compiler reads the plan it is replacing (motion_audio._prune_dialogue): no version
+                # check there - a 2.x plan has no stamp, an older major one must still be recompilable (Gate 2 live)
+                if pat.search(line) and not line.rstrip().endswith("# compiler-side read (the plan it replaces)"):
                     bad.append(f"{f.name}:{n}")
         self.assertEqual(bad, [])
 

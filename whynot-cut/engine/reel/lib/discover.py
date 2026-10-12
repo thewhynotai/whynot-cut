@@ -161,6 +161,9 @@ def classify(p: Path, rel: str) -> dict:
     return item
 
 
+DOC_TOOL_TIMEOUT_S = 60
+
+
 def read_document(p: Path) -> str:
     """Plain text of a client document. macOS uses textutil/mdls when present; every OS has the pure-Python readers
     below (.docx, .rtf, .pdf via pypdf), so Windows reads the same briefs and colour files."""
@@ -169,7 +172,8 @@ def read_document(p: Path) -> str:
         return p.read_text(encoding="utf-8", errors="replace")
     try:
         if ext in (".rtf", ".docx", ".doc", ".html") and shutil.which("textutil"):
-            return run(["textutil", "-convert", "txt", "-stdout", str(p)]).stdout
+            # a timeout: discovery holds its lock, so a hung textutil/mdls (a cloud placeholder) must not hang it
+            return run(["textutil", "-convert", "txt", "-stdout", str(p)], timeout=DOC_TOOL_TIMEOUT_S).stdout
         if ext == ".docx":
             return _docx_text(p)
         if ext == ".rtf":
@@ -180,7 +184,8 @@ def read_document(p: Path) -> str:
         if ext == ".pdf":
             txt = ""
             if shutil.which("mdls"):
-                txt = run(["mdls", "-raw", "-name", "kMDItemTextContent", str(p)], check=False).stdout
+                txt = run(["mdls", "-raw", "-name", "kMDItemTextContent", str(p)], check=False,
+                          timeout=DOC_TOOL_TIMEOUT_S).stdout
             if not txt.strip() or txt.strip() == "(null)":
                 txt = _pdf_text(p)
             return txt

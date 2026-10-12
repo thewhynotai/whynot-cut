@@ -694,8 +694,9 @@ class TestBench(_Home):
     def test_bench_without_audio_refuses_with_how(self):
         r = subprocess.run([sys.executable, "-B", str(ENGINE / "cli.py"), "bench"], capture_output=True, text=True,
                            encoding="utf-8", env=dict(os.environ, WHYNOT_HOME=str(self.home)))
-        self.assertEqual(r.returncode, 2, r.stderr[-400:])
+        self.assertEqual(r.returncode, 1, r.stderr[-400:])       # Gate 2: the CLI's guidance document, exit 1
         out = json.loads(r.stdout)
+        self.assertIs(out["ok"], False)
         self.assertIn("error", out)
         self.assertIn("--audio", out["how"])
 

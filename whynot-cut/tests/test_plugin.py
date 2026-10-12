@@ -590,6 +590,36 @@ class TestHeartbeat(ClientFixture):
         self.assertIs(rep["guard_active"], False)
         self.assertTrue(any("guard" in f["item"].lower() for f in rep["fixes"]), rep["fixes"])
 
+    def test_doctor_older_plugin_guard_is_not_reported_as_off(self):
+        """Gate 2 live check: with only the installed 2.2.1 plugin (its guard writes no guard-ok) doctor said "guard hooks
+        not confirmed running" while that guard was active. It must say the check cannot see an older guard instead;
+        a 3.0 guard (writes guard-ok) without a heartbeat is still reported as not running."""
+        from unittest import mock
+        from lib import onboard
+        cfg = Path(self.tmp.name) / "cfg_old"
+
+        def install(version: str, guard_src: str):
+            path = cfg / "plugins/cache/thewhynot-ai/whynot-cut" / version
+            (path / "hooks").mkdir(parents=True, exist_ok=True)
+            (path / "hooks/guard.py").write_text(guard_src, encoding="utf-8")
+            reg = cfg / "plugins/installed_plugins.json"
+            doc = json.loads(reg.read_text(encoding="utf-8")) if reg.exists() else {"version": 2, "plugins": {}}
+            doc["plugins"]["whynot-cut@thewhynot-ai"] = [{"scope": "user", "installPath": str(path), "version": version}]
+            reg.write_text(json.dumps(doc), encoding="utf-8")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(cfg), "CLAUDE_PLUGIN_DATA": ""}):
+            install("2.2.1", "def main():\n    pass  # no heartbeat in 2.x\n")
+            st = onboard.guard_heartbeat()
+            self.assertIsNone(st["active"], st)
+            self.assertEqual([g["version"] for g in st["silent_guards"]], ["2.2.1"])
+            self.assertIn("/hooks", st["fix"])
+            rep = onboard.doctor()
+            items = [f["item"] for f in rep["fixes"] if "guard" in f["item"].lower()]
+            self.assertTrue(items and all("not confirmed running" not in i and "2.2.1" in i for i in items), items)
+            install("3.0.0", 'Path(d, "guard-ok").write_text("1")\n')       # a 3.0 guard that never ran: still OFF
+            st = onboard.guard_heartbeat()
+            self.assertIs(st["active"], False)
+            self.assertEqual(st["silent_guards"], [])
+
 
 class TestGuardReviewRound1(ClientFixture):
     """T1.5 review fix round 1: wrapper shells, script blocks, the client folder itself, globs and $PWD, prefixes,

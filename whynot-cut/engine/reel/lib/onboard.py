@@ -50,8 +50,7 @@ HEARTBEAT_MAX_AGE_S = 24 * 3600
 def _newest_beat(name: str, now: float) -> tuple[str | None, float | None]:
     import os
     cands = [Path(os.environ["CLAUDE_PLUGIN_DATA"]) / name] if os.environ.get("CLAUDE_PLUGIN_DATA") else []
-    cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
-    cands += sorted((cfg / "plugins" / "data").glob(f"whynot-cut*/{name}"))
+    cands += sorted((_claude_config_dir() / "plugins" / "data").glob(f"whynot-cut*/{name}"))
     found = []
     for c in cands:
         try:
@@ -64,6 +63,37 @@ def _newest_beat(name: str, now: float) -> tuple[str | None, float | None]:
     return str(f), now - mtime
 
 
+def _claude_config_dir() -> Path:
+    import os
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
+
+
+def silent_guards() -> list[dict]:
+    """Installed WhyNot Cut plugins whose guard writes no guard-ok heartbeat (2.x: the heartbeat came with 3.0), from
+    <claude config>/plugins/installed_plugins.json: [{"version", "path"}]. Such a guard may well be running; doctor
+    just cannot see it (Gate 2 live check: the installed 2.2.1 guard was active, doctor said "not confirmed")."""
+    import json
+    try:
+        reg = json.loads((_claude_config_dir() / "plugins/installed_plugins.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for name, entries in ((reg or {}).get("plugins") or {}).items() if isinstance(reg, dict) else ():
+        if not str(name).startswith("whynot-cut@") or not isinstance(entries, list):
+            continue
+        for e in entries:
+            if not isinstance(e, dict) or not e.get("installPath"):
+                continue
+            guard = Path(e["installPath"]) / "hooks/guard.py"
+            try:
+                writes = "guard-ok" in guard.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue            # not on disk: no guard of it can run
+            if not writes and not any(o["path"] == str(guard.parent.parent) for o in out):
+                out.append({"version": str(e.get("version") or "?"), "path": str(guard.parent.parent)})
+    return out
+
+
 def guard_heartbeat(now: float | None = None) -> dict:
     """Is the PreToolUse guard running? guard.py touches <plugin data>/guard-ok on every tool call it inspects, and
     hooks/run_python.sh touches hooks-ok whenever it found Python (the runner). No fresh guard-ok (< 24 h) means the
@@ -73,15 +103,22 @@ def guard_heartbeat(now: float | None = None) -> dict:
     f, age = _newest_beat("guard-ok", now)
     rf, rage = _newest_beat("hooks-ok", now)
     active = age is not None and age < HEARTBEAT_MAX_AGE_S
-    fix = None
-    if not active:
+    fix, silent = None, ([] if active else silent_guards())
+    if silent:                  # an older plugin's guard writes no heartbeat: unknown, not "not running"
+        vers = ", ".join(sorted({g["version"] for g in silent}))
+        active = None
+        fix = (f"the installed WhyNot Cut {vers} guard writes no heartbeat (that check came with 3.0), so `reel "
+               "doctor` cannot see it run: type /hooks in Claude Code - when WhyNot Cut's PreToolUse hook is listed, "
+               "the guard is on. Updating the plugin to 3.0 makes this check automatic.")
+    elif not active:
         fix = ("install Git for Windows (https://git-scm.com/download/win), then restart Claude Code: WhyNot Cut's "
                "guard hooks run through Git Bash. Then run /hooks to check they are listed, and `reel doctor` again."
                if plat.IS_WIN else
                "restart Claude Code and run /hooks to check WhyNot Cut's hooks are listed; make sure `python3 --version` "
                "works (macOS: xcode-select --install), then `reel doctor` again.")
     return {"active": active, "file": f, "age_h": round(age / 3600, 1) if age is not None else None,
-            "runner_file": rf, "runner_age_h": round(rage / 3600, 1) if rage is not None else None, "fix": fix}
+            "runner_file": rf, "runner_age_h": round(rage / 3600, 1) if rage is not None else None, "fix": fix,
+            "silent_guards": silent}
 
 
 def own_marker_roots(root: str | None) -> list[Path]:
@@ -242,7 +279,11 @@ def doctor() -> dict:
         fixes.append({"item": pr["error"], "who": "editor", "fix": pr["how"]})
     if st["_problems"]:
         fixes.append({"item": "preferences file", "who": "claude", "fix": "; ".join(st["_problems"])})
-    if not gh["active"]:
+    if gh["active"] is None:      # only an older plugin's guard, which writes no heartbeat: say exactly that
+        fixes.append({"item": "WhyNot Cut guard not checkable from here: the installed plugin "
+                              f"{', '.join(sorted({g['version'] for g in gh['silent_guards']}))} predates the guard "
+                              "heartbeat", "who": "editor", "fix": gh["fix"]})
+    elif not gh["active"]:
         fixes.append({"item": "WhyNot Cut guard hooks not confirmed running (no guard-ok heartbeat in the last 24 h): "
                               "assets/ and data/ may not be protected", "who": "editor", "fix": gh["fix"]})
     rep["ready"] = {"engine": rep["venv_ok"] and all(v is True for v in mods.values()) and bool(rep["ffmpeg"]),

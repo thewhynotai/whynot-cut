@@ -569,10 +569,16 @@ def cmd_audio_clean(a):
     q = detect_pauses(p, min_pause_ms=pp["min_pause_ms"], pad_ms=pp["pad_ms"])
     q["pause_params"] = pp
     v = verify_cuts(p) if not a.no_verify else {"skipped": True}
-    out({"decisions": r.get("decisions"), "loudness": r.get("loudness"), "metrics": r["metrics"],
-         "regions_ms": r["regions_ms"], "pauses": len(q["pauses_ms"]),
-         "removed_ms": q["removed_ms"], "new_duration_ms": q["new_duration_ms"], "pause_params": pp,
-         "cut_verification": {k: v.get(k) for k in ("ok", "verdict", "coverage", "orig_words", "tight_words", "missing")}})
+    doc = {"decisions": r.get("decisions"), "loudness": r.get("loudness"), "metrics": r["metrics"],
+           "regions_ms": r["regions_ms"], "pauses": len(q["pauses_ms"]),
+           "removed_ms": q["removed_ms"], "new_duration_ms": q["new_duration_ms"], "pause_params": pp,
+           "cut_verification": {k: v.get(k) for k in ("ok", "verdict", "coverage", "orig_words", "tight_words", "missing")}}
+    if v.get("ok") is False:        # Gate 2 minor: cuts not proven to keep every word is a failed result (exit 1)
+        doc["ok"] = False
+        doc["how"] = ("the pause cuts are not proven to keep every word (cut_verification, 06_audio/dialogue/"
+                      "cut-verification.json): listen at the listed cuts; re-run audio-clean with a larger --pad or "
+                      "--min-pause, and never ship cuts that drop a word")
+    out(doc)
 
 
 def cmd_mogrt_build(a):
@@ -982,6 +988,7 @@ def cmd_setup(a):
         fixes.insert(0, {"item": "engine runtime: " + str(rep["runtime"].get("error") or "not ready"),
                          "who": "claude", "fix": rep["runtime"].get("how") or "reel setup"})
     rep["next"] = [f["fix"] for f in fixes] or ["all set: run /whynot-cut:start or reel inbox"]
+    rep["ok"] = bool(rep["runtime"].get("ok"))      # Gate 2 A3: a failed runtime build is exit 1, not 0
     out(rep)
 
 
@@ -1115,10 +1122,15 @@ def cmd_gpu_enable(a):
                            "missing" + (f" (NVIDIA download: {redist_error})" if redist_error else ""),
                            "run `reel setup` (it puts the pinned uv in the engine home), then `reel gpu-enable` again; "
                            "Whisper keeps using the CPU meanwhile")
-        r = subprocess.run(cmd, env=env)
+        # captured: pip/uv progress printed on stdout came before the one JSON document (Gate 2 minor)
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if r.returncode:
-            raise SystemExit(f"{how} install {' '.join(pkgs)} failed (exit {r.returncode}); Whisper keeps using the CPU"
-                             + (f" (NVIDIA download: {redist_error})" if redist_error else ""))
+            from lib.errors import Guidance
+            tail = " | ".join(((r.stderr or "") + "\n" + (r.stdout or "")).strip().splitlines()[-8:])
+            raise Guidance(f"{how} install {' '.join(pkgs)} failed (exit {r.returncode}); Whisper keeps using the CPU"
+                           + (f" (NVIDIA download: {redist_error})" if redist_error else "") + (f": {tail}" if tail else ""),
+                           "check the internet connection (or a proxy / antivirus blocking the download), then run "
+                           "`reel gpu-enable` again")
         installed = pkgs
     after = plat.gpu_info()
     out({"gpu_before": before, "gpu": after, "installed": installed, "via": how, "redist_error": redist_error,
