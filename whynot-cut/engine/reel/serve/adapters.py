@@ -10,7 +10,10 @@
                        (expired, cancelled, claimed, status, job, refused) do not cross the wire. The submit calls of
                        one bridge are serialized (SUBMIT_LOCKS): bridge.submit shares files between calls
                        (sync_scripts' fixed temp path), and the bridge runs one job at a time anyway; Premiere's and
-                       After Effects' queues still run side by side.
+                       After Effects' queues still run side by side, each on its own daemon QueueWorker (never the
+                       event loop's default executor; a stuck submit never blocks process exit). The time left is
+                       computed once the call holds its bridge's lock: a request that expired while it waited is
+                       answered ok:false without reaching the queue.
     HostLink           the commands in flight to ONE connected host session: sends `command`, matches the `result`
                        by id, hands `progress` to the requester; on a timeout it sends the host a best-effort
                        `cancel` for that id first; fail_all() when the session goes away.
@@ -21,8 +24,10 @@ Adapters return a v4 result dict; the router validates it (contract.validate_res
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import copy
+import queue
 import threading
 from datetime import datetime, timezone
 
@@ -30,7 +35,8 @@ from contract import load
 from contract.cep import CEP_NAME, from_cep
 from lib.common import current_context, use_context
 
-__all__ = ["ACTION_HOSTS", "HostGone", "FileQueueAdapter", "HostLink", "UxpAdapter", "failure", "seconds_left"]
+__all__ = ["ACTION_HOSTS", "HostGone", "FileQueueAdapter", "HostLink", "UxpAdapter", "QueueWorker", "QUEUE_WORKERS",
+           "cancel_queued", "failure", "seconds_left"]
 
 ACTION_HOSTS: dict[str, str] = {a: e["host"] for a, e in load("protocol")["actions"].items()}
 QUEUE_TIMEOUT_S = {"aftereffects": 900.0}          # the bridges' own defaults (ae_bridge 900 s, ppro_bridge 600 s)
@@ -39,6 +45,65 @@ UXP_TIMEOUT_MAX_S = 900.0
 APP_NAMES = {"aftereffects": "After Effects"}       # everything else runs in Premiere
 CANCEL_SEND_S = 1.0                                 # how long a best-effort cancel may take to send
 SUBMIT_LOCKS = {"premiere": threading.Lock(), "aftereffects": threading.Lock()}   # one queue call per bridge
+WORKER_IDLE_S = 2.0                                 # an idle queue worker thread ends after this
+_EXPIRED = object()
+
+
+class QueueWorker:
+    """One daemon thread that runs one bridge's queue calls in order (the bridge runs one job at a time anyway), so
+    queue calls never occupy the event loop's default executor (status checks, big parses) and Premiere's queue never
+    starves After Effects'. Daemon: a call stuck in submit (a dialog in the Adobe app) never keeps the process alive.
+    Started on demand, ends after WORKER_IDLE_S idle. A call whose requester went away before it started is skipped
+    (its future was cancelled through asyncio.wrap_future); cancel_pending() drops every waiting call at shutdown."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self._q: queue.SimpleQueue = queue.SimpleQueue()
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+
+    def submit(self, fn) -> concurrent.futures.Future:
+        fut: concurrent.futures.Future = concurrent.futures.Future()
+        with self._lock:
+            self._q.put((fut, fn))
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._loop, name=self.name, daemon=True)
+                self._thread.start()
+        return fut
+
+    def _loop(self) -> None:
+        while True:
+            try:
+                fut, fn = self._q.get(timeout=WORKER_IDLE_S)
+            except queue.Empty:
+                with self._lock:                     # submit() puts under the same lock: nothing is stranded
+                    if self._q.empty():
+                        self._thread = None
+                        return
+                continue
+            if not fut.set_running_or_notify_cancel():
+                continue
+            try:
+                fut.set_result(fn())
+            except BaseException as e:               # noqa: BLE001 — handed to the awaiting task
+                fut.set_exception(e)
+
+    def cancel_pending(self) -> int:
+        n = 0
+        while True:
+            try:
+                fut, _ = self._q.get_nowait()
+            except queue.Empty:
+                return n
+            n += bool(fut.cancel())
+
+
+QUEUE_WORKERS = {lane: QueueWorker(f"reel-serve-queue-{lane}") for lane in SUBMIT_LOCKS}
+
+
+def cancel_queued() -> int:
+    """Drop every queue call that has not started (daemon shutdown). Running ones are left to their daemon thread."""
+    return sum(w.cancel_pending() for w in QUEUE_WORKERS.values())
 
 
 class HostGone(ConnectionError):
@@ -66,7 +131,7 @@ def seconds_left(request: dict, now: datetime | None = None) -> float:
 
 # ------------------------------------------------------------------------------------------------- CEP file queue
 class FileQueueAdapter:
-    """The legacy CEP bridge's file queue (Premiere's or After Effects'), one worker thread per command."""
+    """The legacy CEP bridge's file queue (Premiere's or After Effects'), run on that bridge's QueueWorker."""
 
     kind = "cep"
 
@@ -78,20 +143,27 @@ class FileQueueAdapter:
         host = ACTION_HOSTS.get(action)
         data = copy.deepcopy(request.get("data") or {})
         cap = QUEUE_TIMEOUT_S.get(host, QUEUE_TIMEOUT_DEFAULT_S)
-        timeout = max(1.0, min(seconds_left(request), cap))
+        lane = "aftereffects" if host == "aftereffects" else "premiere"    # "any" (ping): Premiere is the primary
 
         ctx = current_context()                      # the request's (raises in reel serve when none is bound)
 
         def call():                                  # the worker binds it: contextvars do not follow a thread
             with use_context(ctx):
-                if host == "aftereffects":
+                if lane == "aftereffects":
                     from lib import ae_bridge as bridge
-                else:                                # premiere, and "any" (ping): Premiere is the primary host
+                else:
                     from lib import ppro_bridge as bridge
-                with SUBMIT_LOCKS["aftereffects" if host == "aftereffects" else "premiere"]:
-                    return bridge.submit(name, data, timeout=timeout)
+                with SUBMIT_LOCKS[lane]:
+                    left = seconds_left(request)     # now, after waiting for the worker and the lock
+                    if left <= 0:
+                        return _EXPIRED
+                    return bridge.submit(name, data, timeout=max(1.0, min(left, cap)))
 
-        r = await asyncio.to_thread(call)
+        r = await asyncio.wrap_future(QUEUE_WORKERS[lane].submit(call))
+        if r is _EXPIRED:
+            return failure(action, rid, "The request expired while it waited for the bridge queue (another command "
+                                        "was running).",
+                           "Run the command again once the running one has finished.")
         response = r.get("response") if isinstance(r, dict) else None
         if response is not None:
             res = from_cep(action, response, id=rid)

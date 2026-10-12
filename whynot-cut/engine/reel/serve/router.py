@@ -64,6 +64,8 @@ class Router:
         rid, action = req["id"], req["action"]
         errors = validate_request(req)
         if errors:
+            self._audit("command", peer=peer, session=session_id, action=action, outcome="rejected",
+                        reason="schema: " + "; ".join(errors))
             return messages.error("schema", "; ".join(errors), rid)
         if seconds_left(req) <= 0:
             self._audit("command", peer=peer, session=session_id, action=action, outcome="rejected", reason="expired")

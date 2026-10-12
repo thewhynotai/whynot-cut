@@ -8,13 +8,16 @@ Host gate (missing -> 400, anything but 127.0.0.1:<port> / localhost:<port> -> 4
 browser Origin -> 403 + audit). Then:
     GET /status    needs `Authorization: Bearer <token>` (401 otherwise); answers {protocol, daemon_version, pid, port,
                    sessions: [{kind, host, hostVersion, capabilities}], uptime_s}
+    POST /shutdown needs the same bearer token (401 otherwise; other methods 405): 202 {ok, stopping}, then
+                   `stop_requested` is set and the daemon (serve/daemon.py) closes the app and exits. The only
+                   mutating HTTP endpoint.
     /session       the WebSocket session (below)
     anything else  404
 Session: the upgrade caps messages at 16 KiB until the client is authenticated. The first message must be a valid
 `hello` within `hello_timeout` (3 s) whose token is 64 lowercase hex characters and equals the engine token
 (constant-time); anything else is `error{code: auth}` + close 1008 + audit. After `welcome` the cap is 8 MiB and every
 message is parsed and validated against its type in session.schema.json (`schema` / `unknown_type` errors keep the
-connection). Rate limits are per session and by type: what a client asks for (command, snapshot, the intents, cancel,
+connection and are audit-logged as `message` rejections). Rate limits are per session and by type: what a client asks for (command, snapshot, the intents, cancel,
 and anything invalid) is limited (`error{rate}` with the message's id); a host's `result` is never limited (dropping it
 would leave the requester waiting until expiry); `progress` over its own budget is dropped silently. `command` runs in
 its own task through the Router (UXP panel or CEP file queue, a Context per request); `result` / `progress` from a host
@@ -48,6 +51,9 @@ PRE_AUTH_MAX = 16 * 1024
 POST_AUTH_MAX = 8 * 1024 * 1024
 HELLO_TIMEOUT = 3.0
 MAX_CONNECTIONS = 32
+CLOSE_SESSIONS_S = 1.0            # close(): how long sessions get to answer the close frame (all at once)
+CLOSE_HANDLERS_S = 0.5            # close(): how long a cancelled connection gets before its socket is aborted
+CLOSE_ROUNDS = 3                  # close(): abort-and-cancel rounds before a task is reported as stuck
 RATE = (20.0, 60)                  # messages per second per session, burst
 MAX_RUNNING = 16                   # commands one session may have running at once
 OFFLOAD_BYTES = 256 * 1024         # messages above this are parsed and validated in a worker thread
@@ -59,6 +65,12 @@ NOT_YET_HOW = ("Use the reel CLI for this step for now (e.g. `reel approve` / `r
 
 def _dumps(msg: dict) -> str:
     return json.dumps(msg, ensure_ascii=False, separators=(",", ":"))
+
+
+def _type_of(msg) -> str:
+    """The message's `type` for the audit log when it is a short plain word, else "?" (never a raw value)."""
+    t = msg.get("type") if isinstance(msg, dict) else None
+    return t if isinstance(t, str) and t.isascii() and t.replace("_", "").isalnum() and len(t) <= 32 else "?"
 
 
 def _parse(raw: str):
@@ -126,10 +138,11 @@ class App:
         self.router = Router(home=home, sessions=lambda: list(self.sessions.values()),
                              file_queue=file_queue if file_queue is not None else FileQueueAdapter(), audit=self.audit)
         self._conns = 0
-        self._handlers: set[asyncio.Task] = set()
+        self._handlers: dict[asyncio.Task, asyncio.StreamWriter] = {}
         self._server: asyncio.Server | None = None
         self._strict = False
         self._t0 = time.monotonic()
+        self.stop_requested = asyncio.Event()        # set by an authenticated POST /shutdown
 
     # ------------------------------------------------------------------------------------------------ lifecycle
     async def start(self, port: int = 0, *, strict_context: bool = True) -> int:
@@ -142,24 +155,55 @@ class App:
         return self.port
 
     async def close(self) -> None:
-        """Stop listening, close every session (1001), end every connection, restore the context switch."""
+        """Stop listening, close every session (1001), end every connection, restore the context switch. Bounded
+        (about CLOSE_BUDGET seconds whatever the peers do) and it awaits every connection task: a session whose peer
+        never answers the close frame is aborted, a task still running after the cancel is cancelled again with its
+        socket aborted, then awaited. A command waiting on a stuck CEP queue call is cancelled at once (its daemon
+        worker thread is left behind and never blocks the process exit)."""
         if self._server is not None:
             self._server.close()
-        for s in list(self.sessions.values()):
-            with contextlib.suppress(ConnectionError, OSError, ValueError):
-                await s.sock.close(1001, "reel serve is stopping")
+        sessions = list(self.sessions.values())
+        if sessions:                                   # concurrently: N silent peers cost one timeout, not N
+            closing = [asyncio.ensure_future(self._close_session(s)) for s in sessions]
+            done, pending = await asyncio.wait(closing, timeout=CLOSE_SESSIONS_S)
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*closing, return_exceptions=True)
         for t in list(self._handlers):
             t.cancel()
         if self._handlers:
-            await asyncio.wait(list(self._handlers), timeout=ws.CLOSE_TIMEOUT * 4)
+            await asyncio.wait(list(self._handlers), timeout=CLOSE_HANDLERS_S)
+        for _ in range(CLOSE_ROUNDS):                 # past the timeout: abort the socket, cancel again, await
+            if not self._handlers:
+                break
+            for t, w in list(self._handlers.items()):
+                w.transport.abort()
+                t.cancel()
+            await asyncio.wait(list(self._handlers), timeout=CLOSE_HANDLERS_S)
+        if self._handlers:                             # a task that ignores cancellation: say so, never hang
+            log.warning("reel serve: %d connection task(s) did not stop", len(self._handlers))
         if self._server is not None:
             with contextlib.suppress(TimeoutError):
-                async with asyncio.timeout(ws.CLOSE_TIMEOUT * 4):
+                async with asyncio.timeout(CLOSE_HANDLERS_S):
                     await self._server.wait_closed()
             self._server = None
         if self._strict:
             common.require_bound_context(False)
             self._strict = False
+
+    @staticmethod
+    async def _close_session(s: Session) -> None:
+        try:
+            await s.sock.close(1001, "reel serve is stopping")
+        except (ConnectionError, OSError, ValueError):
+            pass
+        except asyncio.CancelledError:                 # the peer did not answer in time: drop the connection
+            s.sock.abort()
+            raise
+
+    async def wait_stop(self) -> None:
+        """Until an authenticated POST /shutdown asks the daemon to stop."""
+        await self.stop_requested.wait()
 
     def status(self) -> dict:
         return {"protocol": 4, "daemon_version": self.version, "pid": os.getpid(), "port": self.port,
@@ -179,12 +223,15 @@ class App:
             return
         self._conns += 1
         task = asyncio.current_task()
-        self._handlers.add(task)
+        self._handlers[task] = writer               # until the task ends (ws's linger-close runs after this returns)
+        task.add_done_callback(self._forget)
         try:
             await self._serve(reader, writer, peer, peer_s)
         finally:
-            self._handlers.discard(task)
             self._conns -= 1
+
+    def _forget(self, task: asyncio.Task) -> None:
+        self._handlers.pop(task, None)
 
     async def _serve(self, reader, writer, peer, peer_s: str) -> None:
         try:
@@ -211,22 +258,44 @@ class App:
             return
         if req.path == "/status":
             await self._status(req, writer, peer_s)
+        elif req.path == "/shutdown":
+            await self._shutdown(req, writer, peer_s)
         elif req.path == "/session":
             await self._session(req, reader, writer, peer_s)
         else:
             await ws.write_response(writer, ws.json_response(404, {"error": "not found"}))
 
+    def _bearer_ok(self, req: ws.Request) -> bool:
+        scheme, _, given = req.headers.get("authorization", "").partition(" ")
+        return scheme.lower() == "bearer" and security.token_ok(given.strip(), self.token)
+
+    async def _unauthorized(self, writer) -> None:
+        await ws.write_response(writer, ws.json_response(401, {"error": "token required"},
+                                                         {"WWW-Authenticate": "Bearer"}))
+
     async def _status(self, req: ws.Request, writer, peer_s: str) -> None:
         if req.method != "GET":
             await ws.write_response(writer, ws.json_response(405, {"error": "GET only"}, {"Allow": "GET"}))
             return
-        scheme, _, given = req.headers.get("authorization", "").partition(" ")
-        if scheme.lower() != "bearer" or not security.token_ok(given.strip(), self.token):
+        if not self._bearer_ok(req):
             self._audit("status", peer_s, outcome="rejected", reason="missing or wrong bearer token")
-            await ws.write_response(writer, ws.json_response(401, {"error": "token required"},
-                                                             {"WWW-Authenticate": "Bearer"}))
+            await self._unauthorized(writer)
             return
         await ws.write_response(writer, ws.json_response(200, self.status()))
+
+    async def _shutdown(self, req: ws.Request, writer, peer_s: str) -> None:
+        """The only mutating HTTP endpoint: POST + the bearer token -> 202, then the daemon stops (stop_requested)."""
+        if req.method != "POST":
+            self._audit("shutdown", peer_s, outcome="rejected", reason=f"method {req.method}")
+            await ws.write_response(writer, ws.json_response(405, {"error": "POST only"}, {"Allow": "POST"}))
+            return
+        if not self._bearer_ok(req):
+            self._audit("shutdown", peer_s, outcome="rejected", reason="missing or wrong bearer token")
+            await self._unauthorized(writer)
+            return
+        self._audit("shutdown", peer_s, outcome="accepted", reason="POST /shutdown")
+        await ws.write_response(writer, ws.json_response(202, {"ok": True, "stopping": True}))
+        self.stop_requested.set()
 
     # ------------------------------------------------------------------------------------------------ session
     async def _session(self, req: ws.Request, reader, writer, peer_s: str) -> None:
@@ -301,6 +370,8 @@ class App:
                 continue
             if problem is not None:
                 code, errors = problem
+                self._audit("message", s.peer, session=s.id, action=_type_of(msg), outcome="rejected",
+                            reason=f"{code}: {'; '.join(errors)}")
                 await s.send(messages.error(code, "; ".join(errors), messages.message_id(msg)))
                 continue
             try:

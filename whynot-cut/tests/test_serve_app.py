@@ -864,35 +864,27 @@ class FileQueue(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res["how"], "Restart Premiere to load bridge 3.1.1.")
 
     async def test_worker_binds_the_request_context_explicitly(self):
-        """The queue call sees the request's Context even in a worker that does not copy contextvars by itself."""
+        """The queue call sees the request's Context on its QueueWorker thread, a plain thread that does not copy
+        contextvars by itself (Task 5: queue calls left asyncio.to_thread for their own daemon workers)."""
         home = Path(tempfile.mkdtemp(prefix="wnc-ctx-"))
         self.addCleanup(shutil.rmtree, home, True)
         ctx = common.Context(home=home)
         seen = []
 
         def fake_submit(action, data=None, timeout=600):
-            seen.append((common.current_context(), threading.current_thread() is not threading.main_thread()))
+            t = threading.current_thread()
+            seen.append((common.current_context(), t is not threading.main_thread(), t.name))
             return cep_ok("ping", PING_READBACK)
-
-        real_to_thread = asyncio.to_thread
-
-        async def bare_thread(fn, *args, **kwargs):          # a plain thread: no contextvars copied
-            box = {}
-            t = threading.Thread(target=lambda: box.setdefault("r", fn(*args, **kwargs)))
-            t.start()
-            await real_to_thread(t.join, T)                  # (only to wait; fn runs in the bare thread `t`)
-            return box["r"]
 
         common.require_bound_context(True)
         try:
-            with mock.patch("lib.ppro_bridge.submit", fake_submit), \
-                    mock.patch.object(adapters.asyncio, "to_thread", bare_thread):
+            with mock.patch("lib.ppro_bridge.submit", fake_submit):
                 with common.use_context(ctx):
                     res = await adapters.FileQueueAdapter().run(request("ping", id="r10"))
         finally:
             common.require_bound_context(False)
         self.assertTrue(res["ok"], res)
-        self.assertEqual(seen, [(ctx, True)])
+        self.assertEqual(seen, [(ctx, True, "reel-serve-queue-premiere")])
 
     async def test_actions_without_a_cep_name_are_refused(self):
         with self.assertRaises(ValueError):

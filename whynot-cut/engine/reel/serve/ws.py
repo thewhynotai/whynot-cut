@@ -388,6 +388,13 @@ class WebSocket:
         else:
             await self._finish()
 
+    def abort(self) -> None:
+        """Drop the connection now, without a close handshake (a peer that does not answer while the server stops).
+        A running recv() then returns None."""
+        if self.close_code is None:
+            self.close_code = 1006
+        self._writer.transport.abort()
+
     # ---------------------------------------------------------------------------------------------- internals
     async def _wait_done(self) -> None:
         try:

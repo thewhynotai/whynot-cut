@@ -2,17 +2,17 @@
 
 Pure stdlib, no server or engine-state dependency, so the daemon, the app and the tests share one implementation:
   * `<engine home>/bridge/engine.json` (port, token, pid, version): written atomically, user-only permissions
-    (POSIX chmod 0600; Windows: inheritance removed and only the current user granted, via icacls);
+    (POSIX chmod 0600; Windows: inheritance removed and only the process user's SID granted, via icacls), and removed
+    only by the daemon that wrote it (tombstone rename, no check-then-delete race);
   * `check_host` / `check_origin`: DNS-rebinding and browser-origin defences for the HTTP/WebSocket handshake;
   * `token_ok`: constant-time token compare; `make_token`: 256-bit token;
   * `RateLimiter`: token bucket (clock injectable);
-  * `AuditLog`: JSON lines, size-capped rotation, thread-safe, and it can never write the token (every field is
-    redacted: the exact token value and any run of 64 or more hex characters).
+  * `AuditLog`: JSON lines, size-capped rotation (cleared when rotation fails), thread-safe, and it can never write the
+    token (every field is redacted: the exact token value and any run of 64 or more hex characters).
 The token must never appear in a URL, a log line or an error message; callers pass it in only to compare / redact.
 """
 from __future__ import annotations
 
-import getpass
 import hmac
 import json
 import os
@@ -73,21 +73,81 @@ def audit_log_path(home) -> Path:
     return Path(home) / "logs" / "serve-audit.log"
 
 
-def _windows_principal() -> str:
-    user = os.environ.get("USERNAME") or getpass.getuser()
-    dom = os.environ.get("USERDOMAIN")
-    return f"{dom}\\{user}" if dom else user
+_SID_RE = re.compile(r"S-1-\d+(-\d+)+")
+_SID: list = []                                  # the process user's SID, once known (it cannot change)
+
+
+def _sid_from_token() -> str:
+    """The current process user's SID string, read from the process token (Win32 API, no child process)."""
+    import ctypes
+    from ctypes import wintypes
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    vp = ctypes.c_void_p
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    k32.LocalFree.argtypes = (vp,)
+    k32.LocalFree.restype = vp
+    adv.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE))
+    adv.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int, vp, wintypes.DWORD,
+                                        ctypes.POINTER(wintypes.DWORD))
+    adv.ConvertSidToStringSidW.argtypes = (vp, ctypes.POINTER(vp))
+    token = wintypes.HANDLE()
+    if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):      # TOKEN_QUERY
+        raise OSError(f"OpenProcessToken failed ({ctypes.get_last_error()})")
+    try:
+        size = wintypes.DWORD()
+        adv.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))                       # 1 = TokenUser
+        if not size.value:
+            raise OSError(f"GetTokenInformation failed ({ctypes.get_last_error()})")
+        buf = ctypes.create_string_buffer(size.value)
+        if not adv.GetTokenInformation(token, 1, buf, size, ctypes.byref(size)):
+            raise OSError(f"GetTokenInformation failed ({ctypes.get_last_error()})")
+        psid = ctypes.cast(buf, ctypes.POINTER(vp))[0]          # TOKEN_USER.User.Sid is the first field
+        text = vp()
+        if not adv.ConvertSidToStringSidW(psid, ctypes.byref(text)):
+            raise OSError(f"ConvertSidToStringSidW failed ({ctypes.get_last_error()})")
+        try:
+            return ctypes.wstring_at(text.value)
+        finally:
+            k32.LocalFree(text)
+    finally:
+        k32.CloseHandle(token)
+
+
+def _sid_from_whoami() -> str:
+    exe = shutil.which("whoami") or os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "whoami.exe")
+    r = subprocess.run([exe, "/user", "/fo", "csv", "/nh"], capture_output=True, timeout=30)
+    return r.stdout.decode("utf-8", "replace").strip().rsplit(",", 1)[-1].strip().strip('"')
+
+
+def current_user_sid() -> str:
+    """The SID (S-1-5-...) of the user this process runs as: from the process token, else `whoami /user`. Never the
+    USERNAME / USERDOMAIN environment variables (any parent process can set those). OSError when neither works."""
+    if _SID:
+        return _SID[0]
+    for how in (_sid_from_token, _sid_from_whoami):
+        try:
+            sid = how()
+        except (OSError, ValueError, AttributeError, subprocess.SubprocessError):
+            continue
+        if isinstance(sid, str) and _SID_RE.fullmatch(sid):
+            _SID[:] = [sid]
+            return sid
+    raise OSError("cannot tell which user this process runs as (no SID)")
 
 
 def restrict_to_user(path) -> None:
-    """Make `path` readable and writable by the current user only. Fails closed: raises OSError if it cannot."""
+    """Make `path` readable and writable by the current user only. Fails closed: raises OSError if it cannot.
+    Windows: inheritance removed and full control granted to the process user's SID only (`*S-1-5-...:F`)."""
     p = str(path)
     if os.name != "nt":
         os.chmod(p, 0o600)
         return
+    sid = current_user_sid()
     exe = shutil.which("icacls") or os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "icacls.exe")
     try:
-        r = subprocess.run([exe, p, "/inheritance:r", "/grant:r", f"{_windows_principal()}:F"],
+        r = subprocess.run([exe, p, "/inheritance:r", "/grant:r", f"*{sid}:F"],
                            capture_output=True, timeout=30)     # bytes: only the return code is read
     except (OSError, subprocess.SubprocessError) as e:
         raise OSError(f"icacls failed for {p}: {type(e).__name__}") from e
@@ -122,7 +182,7 @@ def write_engine_json(home, *, port: int, token: str, pid: int, version: str, **
         finally:
             if fd != -1:
                 os.close(fd)
-        os.replace(tmp, path)
+        _replace_retry(tmp, path)
     except BaseException:
         try:
             tmp.unlink()
@@ -150,15 +210,71 @@ def read_engine_json(home) -> dict | None:
 
 
 def remove_engine_json(home, pid: int) -> bool:
-    """Delete engine.json only when it records `pid` (a newer daemon's file is never removed by an older one)."""
-    d = read_engine_json(home)
-    if d is None or d.get("pid") != pid:
-        return False
+    """Delete engine.json only when it records `pid` (a newer daemon's file is never removed by an older one).
+    No check-then-delete race: the file is first renamed to a private tombstone (atomic), the tombstone is read, and
+    only the tombstone is deleted. When it records another pid it goes back with a rename that never overwrites, so a
+    file another daemon wrote meanwhile always wins (and the tombstone, an older record, is dropped)."""
+    path = engine_json_path(home)
+    tomb = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.gone")
     try:
-        engine_json_path(home).unlink()
+        _replace_retry(path, tomb)
     except OSError:
+        return False                               # missing (or cannot be moved): nothing of ours to remove
+    try:
+        try:
+            d = json.loads(tomb.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = None
+        if isinstance(d, dict) and d.get("pid") == pid:
+            return True                            # ours: the finally below deletes it
+        _restore_no_overwrite(tomb, path)
         return False
-    return True
+    finally:
+        try:
+            tomb.unlink()
+        except OSError:
+            pass
+
+
+REPLACE_TRIES = 20
+
+
+def _replace_retry(src: Path, dst: Path) -> None:
+    """os.replace, retried briefly on PermissionError: on Windows a reader that has engine.json open at that instant
+    (`reel serve --status`, the stop poller, an antivirus scan) makes the rename fail with a sharing violation."""
+    for i in range(REPLACE_TRIES):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == REPLACE_TRIES - 1:
+                raise
+            time.sleep(0.025)
+
+
+def _restore_no_overwrite(tomb: Path, path: Path) -> None:
+    """Put `tomb` back at `path` unless `path` exists again: a hard link (same file, same ACL) when the volume has
+    them, else a rename (on Windows it never replaces an existing file). The caller removes `tomb` afterwards."""
+    try:
+        os.link(tomb, path)
+        return
+    except FileExistsError:
+        return
+    except OSError:
+        pass
+    if os.name == "nt":
+        try:
+            os.rename(tomb, path)                  # Windows: FileExistsError instead of replacing
+        except OSError:
+            pass
+        return
+    try:                                           # POSIX without hard links: exclusive create, user-only from birth
+        data = tomb.read_bytes()
+        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except OSError:
+        return
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
 
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -322,14 +438,29 @@ class AuditLog:
             data = line.encode("utf-8")
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    size = self.path.stat().st_size
-                except OSError:
-                    size = 0
+                size = self._size()
                 if size and size + len(data) > self.max_bytes:
                     self._rotate()
-                with open(self.path, "ab") as f:
+                    if self._size():                  # rotation failed (e.g. a reader holds the file on Windows)
+                        data = self._truncated_row() + data
+                        mode = "wb"                   # start over rather than grow without bound
+                    else:
+                        mode = "ab"
+                else:
+                    mode = "ab"
+                with open(self.path, mode) as f:
                     f.write(data)
             except OSError:
                 return False
             return True
+
+    def _size(self) -> int:
+        try:
+            return self.path.stat().st_size
+        except OSError:
+            return 0
+
+    def _truncated_row(self) -> bytes:
+        row = {"at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"), "event": "audit", "peer": "",
+               "outcome": "truncated", "reason": "rotation failed: the log was cleared to stay within its size cap"}
+        return (json.dumps(row, ensure_ascii=True, separators=(",", ":")) + "\n").encode("utf-8")
