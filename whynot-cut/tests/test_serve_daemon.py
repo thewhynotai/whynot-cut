@@ -382,6 +382,59 @@ class Ensure(_Home):
         self.assertTrue(res["how"])
 
 
+class DiscoveryCopy(_Home):
+    """<home>/bridge/engine.json with a `home` field naming another folder is the discovery copy of a daemon serving
+    that other home (written into ~/.whynot-cut for the UXP panel): ensure / status / stop of this home never return it
+    as this home's daemon and never stop it."""
+
+    def setUp(self):
+        super().setUp()
+        self.other = Path(tempfile.mkdtemp(prefix="wnc-daemon-other-"))
+        self.addCleanup(shutil.rmtree, self.other, True)
+        InProcessDaemon(self.other).start(self)
+        info = security.read_engine_json(self.other)
+        security.write_engine_json(self.home, port=info["port"], token=info["token"], pid=info["pid"],
+                                   version=info["version"], pid_created=info.get("pid_created"),
+                                   started_at=info.get("started_at"), home=str(self.other))
+        self.info = info
+
+    def other_still_runs(self):
+        self.assertTrue(port_open(self.info["port"]))
+        self.assertEqual(security.read_engine_json(self.other)["pid"], self.info["pid"])
+        st = daemon.status(self.other)
+        self.assertEqual((st["running"], st["state"]), (True, "running"), st)
+
+    def test_status_does_not_report_the_other_homes_daemon(self):
+        st = daemon.status(self.home)
+        self.assertEqual((st["ok"], st["running"], st["state"]), (True, False, "stopped"), st)
+        self.assertNotIn("port", st)
+        self.assertNotIn(self.info["token"], json.dumps(st))
+        self.assertTrue(security.engine_json_path(self.home).exists())      # read-only
+        self.other_still_runs()
+
+    def test_stop_never_stops_the_other_homes_daemon(self):
+        res = daemon.stop(self.home)
+        self.assertEqual((res["ok"], res["running"], res["state"]), (True, False, "not_running"), res)
+        self.other_still_runs()
+        self.assertEqual(security.read_engine_json(self.home)["home"], str(self.other))   # left in place
+
+    def test_ensure_starts_this_homes_daemon_instead(self):
+        with mock.patch.object(daemon, "_spawn", return_value=types.SimpleNamespace(pid=4242, poll=lambda: None)) as sp, \
+                mock.patch.object(daemon, "_version", return_value="3.0.0-test"):
+            res = daemon.ensure(self.home, wait=0.3)
+        sp.assert_called_once()
+        self.assertEqual((res["ok"], res["state"]), (True, "starting"), res)
+        self.assertNotEqual(res.get("port"), self.info["port"])
+        self.other_still_runs()
+
+    def test_a_home_field_naming_this_home_is_this_homes_daemon(self):
+        security.write_engine_json(self.other, port=self.info["port"], token=self.info["token"], pid=self.info["pid"],
+                                   version=self.info["version"], pid_created=self.info.get("pid_created"),
+                                   started_at=self.info.get("started_at"), home=str(self.other))
+        st = daemon.status(self.other)
+        self.assertEqual((st["running"], st["state"]), (True, "running"), st)
+
+
 def py_cmd(*args) -> list:
     cmd = [sys.executable]
     if sys.flags.no_user_site:

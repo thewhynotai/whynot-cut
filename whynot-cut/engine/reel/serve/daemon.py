@@ -27,6 +27,9 @@
     stop(home)    POST /shutdown with the token, then waits (STOP_WAIT) for engine.json to go and the process to
                   exit; a stale file (dead pid) is removed. A daemon that does not answer is reported, never killed
                   (its pid could belong to another program by now).
+    A <home>/bridge/engine.json whose `home` field names another folder is the discovery copy of a daemon serving that
+    other home (only ~/.whynot-cut gets one): ensure / status / stop of this home treat it as "no daemon here". It is
+    never returned as running and never stopped; a new daemon for this home simply replaces it.
 The detached daemon command (no cli.py needed, so it works before `reel serve` is registered):
     <this python> [-s] -B -P <plugin>/engine/reel/serve/__main__.py --foreground --home <engine home>
 -P keeps the working directory off sys.path; cwd is the engine home (never the plugin folder, which is replaced on
@@ -224,6 +227,18 @@ def _write_discovery(home: Path, record: dict, audit) -> Path | None:
 
 
 # ------------------------------------------------------------------------------------------------- probing
+def _own_record(home: Path) -> dict | None:
+    """<home>/bridge/engine.json when it is this home's daemon's record; None when missing or when it is the discovery
+    copy of a daemon serving another home (its `home` field names another folder)."""
+    info = security.read_engine_json(home)
+    if info is None or "home" not in info:
+        return info
+    other = info.get("home")
+    if isinstance(other, str) and other and _same_dir(Path(other), Path(home)):
+        return info
+    return None
+
+
 def _alive(info: dict) -> bool:
     return writer_lock.pid_alive(info.get("pid"), info.get("pid_created"))
 
@@ -319,7 +334,7 @@ def _spawn(home: Path):
 def ensure(home=None, *, wait: float = ENSURE_WAIT) -> dict:
     """The running daemon ({ok, running, state: running, started: false, pid, port, ...}), else start one."""
     home = _home(home)
-    info = security.read_engine_json(home)
+    info = _own_record(home)
     previous: dict = {}
     if info is not None:
         if _alive(info):
@@ -344,14 +359,14 @@ def ensure(home=None, *, wait: float = ENSURE_WAIT) -> dict:
     proc = _spawn(home)
     deadline = time.monotonic() + max(0.0, float(wait))
     while True:
-        cur = security.read_engine_json(home)
+        cur = _own_record(home)
         if cur is not None and cur != info and _alive(cur):
             st = _probe(cur)
             if st is not None:
                 return _doc(cur, st, "restarted" if previous else "running", started=True, **previous)
         code = proc.poll()
         if code is not None:
-            cur = security.read_engine_json(home)
+            cur = _own_record(home)
             if cur is not None and _alive(cur):
                 st = _probe(cur, PROBE_TRIES)
                 if st is not None:                 # another ensure's daemon won the instance lock
@@ -375,7 +390,7 @@ def ensure(home=None, *, wait: float = ENSURE_WAIT) -> dict:
 # ------------------------------------------------------------------------------------------------- status / stop
 def status(home=None) -> dict:
     home = _home(home)
-    info = security.read_engine_json(home)
+    info = _own_record(home)
     if info is None:
         return {"ok": True, "running": False, "state": "stopped"}
     if not _alive(info):
@@ -391,7 +406,7 @@ def status(home=None) -> dict:
 
 def stop(home=None, *, wait: float = STOP_WAIT) -> dict:
     home = _home(home)
-    info = security.read_engine_json(home)
+    info = _own_record(home)
     if info is None:
         return {"ok": True, "running": False, "state": "not_running"}
     pid = info.get("pid")
