@@ -8,6 +8,8 @@ user-invocable: false
 
 ```bash
 reel ppro-status --root "<CLIENT>"                        # alive + ping. If not alive: Premiere running? restarted since install?
+reel ppro-probe  --root "<CLIENT>"                        # what the bridge's host reports back (version, project, API); for diagnosis
+reel status      --root "<CLIENT>" --video-id <ID>        # the project's status record (status, history, blockers, parked_previous)
 reel ppro-build  --root "<CLIENT>" --video-id <ID> [--force]   # needs the CURRENT plan approved (Gate 1)
 reel premiere    --root "<CLIENT>" --video-id <ID>        # fallback standalone XML when the bridge can't run
 ```
@@ -24,6 +26,9 @@ reel premiere    --root "<CLIENT>" --video-id <ID>        # fallback standalone 
 - The sequence settings are the editor's house spec (`config/defaults/sequence-settings.json`). Don't change them.
 - `EDITOR_CHANGES_PRESENT` means the editor saved changes in Premiere after the last build. Stop and report it to the lead.
   `--replace-edited` is only for when the editor explicitly agrees that their manual edits won't carry over.
+- Nothing built is never exit 0: `EXISTS` (the project is already there; `--force` rebuilds) and
+  `EDITOR_CHANGES_PRESENT` / `PREVIOUS_PARKED` are refusals (exit 2, with `how`); `MISSING_GRAPHICS` is a failure
+  (exit 1, `ok: false`).
 - If `ppro-build` returns `MISSING_GRAPHICS`, run previews. If it returns `BRIDGE_NOT_RUNNING`, the editor must start Premiere.
   Don't try to start or quit Premiere yourself unless the editor asked. It may hold their unsaved work.
 

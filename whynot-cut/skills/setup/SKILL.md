@@ -20,7 +20,9 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    It is read-only and returns `verdict`, `ready`, and a `fixes` list (each fix says who does it: claude / editor).
    `reel_command` lists every `reel` on PATH; if the first is not this plugin's, a fix says so.
 3. `reel setup` repairs everything WhyNot Cut owns. It's idempotent:
-   - engine venv in `~/.whynot-cut` (Windows: `%USERPROFILE%\.whynot-cut`), pinned packages, ffmpeg
+   - the engine runtime `~/.whynot-cut/runtimes/<id>` (Windows: `%USERPROFILE%\.whynot-cut\runtimes\<id>`), built or
+     re-synced from the hash lock, with the one-line `current` file naming it; ffmpeg. `reel doctor` → `isolated:
+     true` when every engine module loads from it. Engine-side scripts run with `reel py`
    - the WhyNot Cut Bridge panel in Premiere's CEP folder (replacing the old "Reel Editor Bridge" if present)
    - a fresh doctor report
 

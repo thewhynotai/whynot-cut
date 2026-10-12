@@ -465,6 +465,29 @@
   `ppro-build` without the queue's verdict parks the old project instead of restoring it over one Premiere may still
   save. Not verified on a Mac (osascript, ioreg) or against a real NAS share.
 
+- CLI consistency (T2.16, review MI-1 to MI-5, plugin structure 3.7). Every list option takes a comma list or the
+  option repeated (`--pick`, `--ids`, `--scenes`, `--words`, `--adjust`, `--set` and `--confirm-avoid`:
+  `--confirm-avoid R05,R06` used to match nothing). `reels-select --by` is needed only with `--pick`, so
+  `reels-select --resync` works as the docs write it. `--note` is the spelling everywhere, `--notes` its alias
+  (approve-plan, transcript-verify, verify, reels-select, ae-probe, handoff). `verify --record` without `--verdict` is
+  refused with the right form, and the motion-frames hint says `verify --record --verdict pass|fail`. `music --list`
+  is documented as the listing it always was. A command that built nothing no longer exits 0: `ppro-build` EXISTS is
+  a refusal (exit 2, `--force` in `how`) and MISSING_GRAPHICS a failure (exit 1); `ae-build` / `ps-build` /
+  `mogrt-build` without After Effects / Photoshop and `ae-render` SKIPPED exit 1, and a refused run keeps its
+  REFUSED status. A traceback whose log cannot be written goes to the engine home's `logs/pipeline.log`;
+  `WHYNOT_DEBUG=1` also prints it. "Not found" errors of verify / premiere / plan say which step to run.
+  `reel status` and `reel next` report a lone `_prev_` Premiere project (with the rename-back hint) and the version
+  warnings of the compiled plan. New `reel handoff --delivered [--note …]` records DELIVERED (lead only; after qc
+  and the handoff). `reel validate` with `--video-id` / `--episode` checks the project's or episode's file first and
+  prints its absolute path (`also_found` for the others). A half-made reel folder (`<EP>_R<nn>` without
+  source.json) is listed by `inbox` as `unfinished_reels` with the `reels-select` to re-run, and `reel plan` refuses
+  it instead of planning a whole clip. A moved clip's "main_footage not found" names the path its clip id resolves
+  to. Framing `4X5` works like `4x5`. The remaining frame-size reads go through `common.frame_size` and the
+  remaining compiled-plan reads through the version check. `WHYNOT_FFMPEG_TIMEOUT_SCALE` is capped at 100 and every
+  ffmpeg timeout stays below Python's limit (no OverflowError). Docs: the 13 agents' engine-python block is one
+  line, "Run engine-side Python with `reel py`", and the setup docs describe the 3.0 runtime
+  (`~/.whynot-cut/runtimes/<id>` + `current`, `reel setup` repairs it); `reel status` and `ppro-probe` are documented.
+
 ### Migration
 - Bridge 3.1.1 (T2.9): after updating, run `reel ppro-install` and restart Premiere and After Effects. Until they are
   restarted, bridge jobs are refused with "restart Premiere to load bridge 3.1.1".

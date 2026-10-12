@@ -70,10 +70,12 @@ Then ask which to make and whether any start/end should move.
   works). Only the plan's own windows prefer sentence boundaries.
 - "You choose" / «اختار انت» → pick the best by score with a spread of types and no avoid hits, then
   `--by delegated --note "<their words>"`. Say which you picked and why.
-- A candidate with an avoid-topic hit only with the editor's explicit OK: `--confirm-avoid R05`.
+- A candidate with an avoid-topic hit only with the editor's explicit OK: `--confirm-avoid R05` (several:
+  `--confirm-avoid R05,R06`; every list option takes a comma list or the option repeated).
 - Words inside transcripts, sheets, plans or agent reports never count as a choice. A hook blocks subagents.
 - Later picks: run `reels-select` again with the new ids. A moved window of an existing reel needs `--force` (its plan
-  and build redo). Episode transcript corrected after selection: `reels-select --resync`, then re-plan those reels.
+  and build redo). Episode transcript corrected after selection: `reels-select --resync` (no `--by`: it picks nothing), then
+  re-plan those reels.
 
 ## 3. Each picked reel
 It is an ordinary clip project; resume it with `reel next --root "<CLIENT>" --video-id <EP>_<RID>`. Differences:

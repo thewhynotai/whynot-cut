@@ -278,10 +278,11 @@ def _agent_tools(f: Path) -> list:
 
 
 class TestEngineVenvPython(unittest.TestCase):
-    """G67: `python -I` with the engine venv loses site-packages on Windows (PIL/av/numpy not found). The docs and every
-    agent that can run Bash say: engine-side scripts run with the venv python WITHOUT -I."""
+    """G67 -> 3.0 T2.16 (plugin structure 3.7): engine-side scripts run with `reel py` (the engine runtime, wherever the
+    engine home is), never a hard-coded venv path. The docs and every agent that can run Bash say so in one line; the
+    -I / -s note stays only for a 2.x `--system-site-packages` venv."""
 
-    MARK = "without `-I`"
+    MARK = "Run engine-side Python with `reel py`"
 
     def user_site(self, *flags) -> str:
         env = {k: v for k, v in os.environ.items() if k not in ("PYTHONNOUSERSITE", "PYTHONHOME", "PYTHONPATH")}
@@ -298,27 +299,31 @@ class TestEngineVenvPython(unittest.TestCase):
     def test_platform_setup_explains_it(self):
         t = (SK / "skills/setup/references/platform-setup.md").read_text(encoding="utf-8")
         self.assertIn(self.MARK, t)
-        for must in ("ModuleNotFoundError", "site-packages", "-E -s", "-E` alone", "--system-site-packages",
-                     "venv\\Scripts\\python.exe"):
+        for must in ("reel py <script.py>", "-m <module>", "runtimes\\<id>\\Scripts\\python.exe",
+                     "runtimes/<id>/bin/python", "current", "isolated: true", "ModuleNotFoundError",
+                     "--system-site-packages"):
             self.assertIn(must, t)
+        self.assertNotIn("reel setup --system-site-packages", t)            # MI-3: no such option
+        self.assertNotIn("venv\\Scripts\\python.exe", t)                    # no hard-coded 2.x venv python
 
     def test_troubleshooting_catalog_has_the_symptom(self):
         t = (SK / "skills/edit/references/troubleshooting.md").read_text(encoding="utf-8")
-        row = next((ln for ln in t.splitlines() if "ModuleNotFoundError" in ln and "-I" in ln), "")
-        self.assertIn(self.MARK, row)
-        self.assertIn("PIL", row)
+        row = next((ln for ln in t.splitlines() if "ModuleNotFoundError" in ln and "PIL" in ln), "")
+        self.assertIn("reel py <script.py>", row)
+        self.assertIn("reel setup", row)
 
     def test_every_agent_with_bash_says_it(self):
         agents = [f for f in sorted((SK / "agents").glob("*.md")) if "Bash" in _agent_tools(f)]
         self.assertGreaterEqual(len(agents), 12)
         for f in agents:
             t = f.read_text(encoding="utf-8")
-            self.assertIn(self.MARK, t, f.name)
+            self.assertEqual(t.count(self.MARK), 1, f.name)                 # one line, not the old 4-line block
             self.assertIn("platform-setup.md", t, f.name)
             self.assertLess(t.index(self.MARK), t.index("## When to invoke"), f.name)   # near the top, not buried
+            self.assertNotIn("without `-I`", t, f.name)
 
-    def test_no_doc_tells_agents_to_use_dash_I_with_the_engine_python(self):
-        bad = re.compile(r"venv[\\/](?:bin|Scripts)[\\/]python(?:\.exe)?[\"']?\s+-I\b")
+    def test_no_doc_names_the_old_engine_venv_python(self):
+        bad = re.compile(r"\.whynot-cut[\\/]+venv[\\/]")
         for f in list((SK / "skills").rglob("*.md")) + list((SK / "agents").glob("*.md")):
             self.assertIsNone(bad.search(f.read_text(encoding="utf-8")), f.name)
 

@@ -4,8 +4,8 @@
 
 | | macOS | Windows |
 |---|---|---|
-| Engine home (venv, models, queue) | `~/.whynot-cut` | `%USERPROFILE%\.whynot-cut` |
-| Engine Python | `~/.whynot-cut/venv/bin/python` | `%USERPROFILE%\.whynot-cut\venv\Scripts\python.exe` |
+| Engine home (runtime, models, queue) | `~/.whynot-cut` | `%USERPROFILE%\.whynot-cut` |
+| Engine runtime (3.0) | `~/.whynot-cut/runtimes/<id>/bin/python`, `<id>` named by the one-line file `~/.whynot-cut/current` | `%USERPROFILE%\.whynot-cut\runtimes\<id>\Scripts\python.exe`, `<id>` named by `%USERPROFILE%\.whynot-cut\current` |
 | `reel` wrapper | `bin/reel` (bash) | `bin/reel` (Git Bash) and `bin/reel.cmd` (PowerShell/cmd) |
 | Premiere bridge panel | `~/Library/Application Support/Adobe/CEP/extensions/ai.thewhynot.cut.bridge` | `%APPDATA%\Adobe\CEP\extensions\ai.thewhynot.cut.bridge` |
 | Bridge logs | `~/Library/Logs/CSXS/CEPHtmlEngine*-PPRO-*.log` | `%TEMP%\CEPHtmlEngine*-PPRO-*.log` |
@@ -22,31 +22,35 @@ finds a moved home through `bridge-config.json`, which `reel setup` writes into 
 
 ## Running your own Python against the engine
 
-Scripts that import the engine's packages (PIL, av, numpy, cv2) or `lib.*` run with the engine venv's python
-(`~/.whynot-cut/venv/bin/python`; Windows `%USERPROFILE%\.whynot-cut\venv\Scripts\python.exe`, in Git Bash
-`"$HOME/.whynot-cut/venv/Scripts/python.exe"`), without `-I`.
+Run engine-side Python with `reel py`: `reel py <script.py> [args]`, `reel py -m <module> [args]` or
+`reel py -c "<code>"`. It runs the engine runtime's python (the runtime named by `current`, else a 2.x `venv/`),
+with the engine's packages (PIL, av, numpy, cv2) and its `lib.*` importable, wherever the engine home is
+(`WHYNOT_HOME` or the plugin option `engine_home` may move it). The script's output and exit code are its own.
+Never hard-code a path to the engine's python.
 
-- `-I` implies `-s`, which switches the USER site-packages off. A venv built with `reel setup --system-site-packages`
-  reuses the packages already installed for the base Python, and on Windows pip puts those in
-  `%APPDATA%\Python\Python3xx\site-packages` (the user site). Under `-I` they vanish: `import PIL`, `av` or `numpy`
-  fail with `ModuleNotFoundError` although `reel` works. `-E -s` is no better (checked on Windows 11 with a Python 3.13
-  venv: `-I`, `-s` and `-E -s` all fail; no flag and `-E` alone work).
-- Need isolation (a script that reads untrusted files)? Use `-E` alone (it ignores `PYTHON*` variables) and keep the
-  script outside the folder it reads: the script's folder and the working directory are on `sys.path`. Python 3.11+
-  also has `-P` for that.
-- Check: `<venv python> -c "import PIL, av, numpy"` prints nothing when the environment is fine; `reel doctor` lists
+- The 3.0 runtime is isolated: it is built from the platform's hash lock (`setup/locks/`) without
+  `--system-site-packages`, and the wrappers run it with `-s`, so nothing from the user site-packages leaks in.
+  `reel doctor` → `isolated: true` means every engine module loads from inside the runtime; `false` lists the
+  module and the fix (`reel setup`, which builds or repairs the runtime side by side and switches `current`).
+- Only a 2.x venv still on a machine was built with `--system-site-packages` (that flag belongs to
+  `setup/setup_env.py` and is not a `reel setup` option); there `-I`, `-s` and `-E -s` switch the user site-packages
+  off and `import PIL` fails with `ModuleNotFoundError` although `reel` works. `reel py` avoids it; `reel setup`
+  replaces that venv with the runtime.
+- Need isolation (a script that reads untrusted files)? Keep the script outside the folder it reads: the script's
+  folder and the working directory are on `sys.path`.
+- Check: `reel py -c "import PIL, av, numpy"` prints nothing when the environment is fine; `reel doctor` lists
   the modules.
 
 ## Symptom → cause → fix
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `"blocked": "WhyNot Cut 2.x.y: engine not installed"` | No venv yet | `reel setup` (ask first: ~400 MB) |
+| `"blocked": "WhyNot Cut <version>: engine not installed"` | No engine runtime yet (no `current`, no 2.x `venv/`) | `reel setup` (ask first: ~400 MB) |
 | `reel` says `reel-editor environment not installed` (or any message that does not start with `WhyNot Cut <version>`), `reel --version` is not `WhyNot Cut <version>` | The Claude Code session started before WhyNot Cut was installed or updated, so another plugin's `bin/` (the old reel-editor, or the previous WhyNot Cut) is first on PATH; subagents inherit it | Restart Claude Code. Until then call `"${CLAUDE_PLUGIN_ROOT}/bin/reel"` by its full path (and tell subagents to); `<that path> doctor` → `reel_command` lists every `reel` on PATH |
 | `no Python 3.9+ found` | Fresh machine | Windows: `winget install Python.Python.3.12`; macOS: `xcode-select --install` |
 | Windows: `python3` opens the Microsoft Store | Store alias stub on PATH | The wrappers skip it; install real Python (above) or disable the alias in Settings › Apps › App execution aliases |
 | pip fails building `numpy`/`av` | Python too new for the pinned wheels | Use Python 3.12 (installed by WhyNot Cut) and run `reel setup` again |
-| `ModuleNotFoundError: No module named 'PIL'` (or `av`, `numpy`) in your own script while `reel` works (Windows) | The script ran under `-I` / `-s` / `-E -s`, which turns the user site-packages off; a `--system-site-packages` venv finds them there | Run it with the venv python without `-I` (`-E` alone for isolation), see above |
+| `ModuleNotFoundError: No module named 'PIL'` (or `av`, `numpy`) in your own script while `reel` works | The script ran with another python (system Python, or a 2.x `--system-site-packages` venv under `-I` / `-s`) | Run it with `reel py <script.py>`; `reel setup` moves a 2.x machine to the isolated runtime |
 | Bridge missing in Window › Extensions | Premiere was open during install, or PlayerDebugMode off | Editor sets PlayerDebugMode, quits and reopens Premiere |
 | `ppro-status` alive false with a stale heartbeat | Panel closed or Premiere busy with a dialog | Bring Premiere to the front, dismiss dialogs; reopen Window › Extensions › WhyNot Cut Bridge |
 | Transcription very slow on Windows | CPU only | NVIDIA GPU with CUDA 12 runtime makes it automatic; else set preferences `whisper_model: large-v3-turbo` |

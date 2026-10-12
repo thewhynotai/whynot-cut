@@ -15,6 +15,9 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
      `/plugin install whynot-cut@thewhynot-ai`), run `/whynot-cut:start`, then `/whynot-cut:status`
    - the open items ("Needs you"), with evidence
    - known caveats
-3. Never describe something as done unless it's verified (see `/whynot-cut:status`). Keep "Not verified" honest.
-4. In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
+3. When the editor says the finished video went to the client, record it (the lead only):
+   `reel handoff --delivered --note "<where / when>"`. It needs qc passed and the handoff written (else it is refused,
+   exit 2) and sets the status DELIVERED, which the client board, `reel next` and the stale checks count as done.
+4. Never describe something as done unless it's verified (see `/whynot-cut:status`). Keep "Not verified" honest.
+5. In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
    `profile.json`). Until a person's gender is known write «د.» or the name.

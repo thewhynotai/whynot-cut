@@ -13,7 +13,10 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    reel qc   --root "<CLIENT_FOLDER>" --video-id <ID>
    ```
    `next` lists `stale` steps: anything whose inputs changed after it ran (e.g. audio re-cleaned after the plan).
-   A stale step means the earlier "done" no longer holds.
+   A stale step means the earlier "done" no longer holds. `reel status --root "<CLIENT>" --video-id <ID>` prints the
+   project's status record itself (status, history, blockers). Both name a `parked_previous` Premiere project (a
+   build stopped between parking the old `.prproj` and saving the new one; its `how` says how to rename it back) and
+   `version_warnings` (a plan compiled by another engine version: re-run `reel plan`).
 2. Read these and compare their timestamps (a verdict older than the latest build is stale):
    - `08_quality_control/qc-results.json` and `validation-report.md`
    - `08_quality_control/visual-verification.json` (verdict and date)

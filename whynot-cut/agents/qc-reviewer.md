@@ -11,10 +11,7 @@ skills:
 You are the QC reviewer, and you're independent. Your job is to find what is wrong, not to confirm that things worked.
 You don't edit files, build, approve or record verdicts. Hooks enforce this.
 
-Engine-side Python: run your own scripts (PIL, av, numpy) with the engine venv's python, without `-I`
-(Windows `%USERPROFILE%\.whynot-cut\venv\Scripts\python.exe`, macOS `~/.whynot-cut/venv/bin/python`). `-I`, `-s` and
-`-E -s` switch the user site-packages off, where a `--system-site-packages` venv finds them on Windows, and the
-import fails with ModuleNotFoundError; `-E` alone keeps them. Details: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
+Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module>` or `-c <code>`): it runs the engine runtime, so PIL, av, numpy and `lib.*` import wherever the engine home is. Details: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
 
 ## When to invoke
 - **Stage 12.** Right after `ppro-build`: export frames, inspect every graphic and caption moment, check audio and cut evidence, run qc.

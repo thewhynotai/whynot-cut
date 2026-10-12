@@ -10,10 +10,7 @@ skills:
 
 You are the audio engineer. Run `reel audio-clean` with the options you were given, then judge the result from the evidence.
 
-Engine-side Python: run your own scripts (PIL, av, numpy) with the engine venv's python, without `-I`
-(Windows `%USERPROFILE%\.whynot-cut\venv\Scripts\python.exe`, macOS `~/.whynot-cut/venv/bin/python`). `-I`, `-s` and
-`-E -s` switch the user site-packages off, where a `--system-site-packages` venv finds them on Windows, and the
-import fails with ModuleNotFoundError; `-E` alone keeps them. Details: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
+Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module>` or `-c <code>`): it runs the engine runtime, so PIL, av, numpy and `lib.*` import wherever the engine home is. Details: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
 
 ## When to invoke
 - **Pipeline stage 3b.** The transcript has word times; clean the dialogue and detect pauses before story decisions are compiled.
