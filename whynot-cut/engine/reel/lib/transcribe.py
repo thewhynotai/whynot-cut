@@ -173,54 +173,86 @@ def hallucination_runs(words: list) -> list:
 
 
 HALLUCINATION_WPS = 6          # words a second no person speaks at
-HALLUCINATION_MIN_P = 0.4      # mean word probability below this = the model was guessing
+HALLUCINATION_MIN_P = 0.4      # mean word probability below this = the model was guessing ...
+HALLUCINATION_SHORT_MS = 1500  # ... on a short run ...
+HALLUCINATION_GAP_MS = 600     # ... with this much silence on both sides
 HALLUCINATION_NO_SPEECH = 0.5
 
 
-def drop_hallucinations(segs: list, words: list) -> tuple[list, list, list]:
-    """G53. Remove a known Whisper hallucination that cannot be speech: a whole segment that is the phrase (no-speech
-    probability >= 0.5 or more than 6 words a second; seen on a real reel: «اشتركوا في القناة» in 0.32 s at the
-    out-point, no_speech 0.93), and (3.0 T2.12) the same phrase as a run of words inside a longer segment when those
-    words are that fast, their mean probability is below 0.4, or the segment is high no-speech. Batched decoding
-    gives ~30 s segments, so the whole-segment rule alone never fires there. A host who really says «اشتركوا في
-    القناة» at a normal pace and confidence is kept."""
+def drop_hallucinations(segs: list, words: list, keep_phrases: list | None = None) -> tuple[list, list, list]:
+    """G53. Remove a known Whisper hallucination that cannot be speech.
+    - Whole segment = the phrase, with no-speech probability >= 0.5 or more than 6 words a second (seen on a real
+      reel: «اشتركوا في القناة» in 0.32 s at the out-point, no_speech 0.93).
+    - (3.0 T2.12) The phrase as a run of words inside a longer segment (batched decoding gives ~30 s segments), judged
+      on the run's OWN evidence only: more than 6 words a second, or a short run (<= 1.5 s) the model was unsure of
+      (mean probability < 0.4) with silence (>= 0.6 s) on both sides. The segment's no-speech probability is never
+      used for a run: a music bed under a real outro raises it («وفي النهاية شكرا على المشاهدة» was deleted).
+    A host who says the phrase at a normal pace is kept. `keep_phrases` (client transcription.json) are never
+    dropped; words restored by the editor (`"restore"` in transcript-corrections.json, flag `restored`) neither.
+    Each dropped entry keeps its words (ids, times) and segment so `transcript-correct` can bring them back."""
     from .plan import norm
-    known = {norm(h) for h in HALLUCINATIONS}
-    drop = []
+    if keep_phrases is None:
+        keep_phrases = load_config("transcription.json").get("keep_phrases") or []
+    keep = {norm(p) for p in keep_phrases if norm(p)}
+    known = {norm(h) for h in HALLUCINATIONS} - keep
+    by_id = {w["id"]: w for w in words}
+    order = sorted(words, key=lambda w: (w.get("start_ms", 0), w["id"]))
+    pos = {w["id"]: k for k, w in enumerate(order)}
+
+    def restored(ids):
+        return any(by_id.get(i, {}).get("restored") for i in ids)
+
+    drop, dropped = [], []
     for s in segs:
         dur = max(1, s["end_ms"] - s["start_ms"]) / 1000
         n = len(s["text"].split())
-        if norm(s["text"]) in known and (s.get("no_speech_prob", 0) >= HALLUCINATION_NO_SPEECH
-                                         or n / dur > HALLUCINATION_WPS):
+        if norm(s["text"]) in known and not restored(s.get("words", [])) and (
+                s.get("no_speech_prob", 0) >= HALLUCINATION_NO_SPEECH or n / dur > HALLUCINATION_WPS):
             drop.append(s)
-    dropped = [{"text": s["text"], "start_ms": s["start_ms"], "end_ms": s["end_ms"],
-                "no_speech_prob": s.get("no_speech_prob"), "level": "segment"} for s in drop]
+            dropped.append({"text": s["text"], "start_ms": s["start_ms"], "end_ms": s["end_ms"],
+                            "no_speech_prob": s.get("no_speech_prob"), "level": "segment", "segment_id": s.get("id"),
+                            "segment": dict(s), "words": [by_id[i] for i in s.get("words", []) if i in by_id]})
     gone = {wid for s in drop for wid in s.get("words", [])}
-    by_id = {w["id"]: w for w in words}
+
+    def gap(w, step):
+        k = pos[w["id"]] + step
+        if k < 0 or k >= len(order):
+            return float("inf")
+        o = order[k]
+        return (w["start_ms"] - o["end_ms"]) if step < 0 else (o["start_ms"] - w["end_ms"])
+
     kept_segs = []
     for s in segs:
         if s in drop:
             continue
         ws = [by_id[i] for i in s.get("words", []) if i in by_id]
         cut = set()
-        for a, b, _h in hallucination_runs([w.get("word") or "" for w in ws]):
+        for a, b, h in hallucination_runs([w.get("word") or "" for w in ws]):
             run = ws[a:b + 1]
-            dur = max(1, run[-1]["end_ms"] - run[0]["start_ms"]) / 1000
+            text = " ".join(w["word"] for w in run)
+            if norm(h) in keep or norm(text) in keep or restored([w["id"] for w in run]):
+                continue
+            span_ms = max(1, run[-1]["end_ms"] - run[0]["start_ms"])
             mean_p = sum(w.get("probability", 1.0) for w in run) / len(run)
-            if (len(run) / dur > HALLUCINATION_WPS or mean_p < HALLUCINATION_MIN_P
-                    or s.get("no_speech_prob", 0) >= HALLUCINATION_NO_SPEECH):
+            fast = len(run) / (span_ms / 1000) > HALLUCINATION_WPS
+            unsure_in_silence = (mean_p < HALLUCINATION_MIN_P and span_ms <= HALLUCINATION_SHORT_MS
+                                 and gap(run[0], -1) >= HALLUCINATION_GAP_MS and gap(run[-1], 1) >= HALLUCINATION_GAP_MS)
+            if fast or unsure_in_silence:
                 cut |= {w["id"] for w in run}
-                dropped.append({"text": " ".join(w["word"] for w in run), "start_ms": run[0]["start_ms"],
-                                "end_ms": run[-1]["end_ms"], "no_speech_prob": s.get("no_speech_prob"),
-                                "words_per_s": round(len(run) / dur, 1), "mean_probability": round(mean_p, 3),
-                                "level": "words"})
+                dropped.append({"text": text, "start_ms": run[0]["start_ms"], "end_ms": run[-1]["end_ms"],
+                                "no_speech_prob": s.get("no_speech_prob"),
+                                "words_per_s": round(len(run) / (span_ms / 1000), 1),
+                                "mean_probability": round(mean_p, 3), "level": "words",
+                                "reason": "too fast" if fast else "unsure, alone in silence",
+                                "segment_id": s.get("id"), "segment": dict(s), "words": [dict(w) for w in run]})
         if not cut:
             kept_segs.append(s)
             continue
         gone |= cut
         rest = [w for w in ws if w["id"] not in cut]
-        if rest:
-            kept_segs.append(dict(s, text=" ".join(w["word"] for w in rest), words=[w["id"] for w in rest]))
+        if rest:          # the segment now spans only what is left
+            kept_segs.append(dict(s, text=" ".join(w["word"] for w in rest), words=[w["id"] for w in rest],
+                                  start_ms=rest[0]["start_ms"], end_ms=rest[-1]["end_ms"]))
     if not dropped:
         return segs, words, []
     return kept_segs, [w for w in words if w["id"] not in gone], sorted(dropped, key=lambda d: d["start_ms"])
@@ -232,6 +264,15 @@ def finalize(paths: Paths, meta: dict, segs: list, words: list) -> dict:
     segs, words, dropped = drop_hallucinations(segs, words)
     if dropped:
         meta["dropped_hallucinations"] = (meta.get("dropped_hallucinations") or []) + dropped
+    side = out / "dropped-hallucinations.json"
+    if meta.get("dropped_hallucinations"):    # the editor's way back: transcript-corrections.json "restore": [ids]
+        write_json(side, {"dropped": meta["dropped_hallucinations"],
+                          "how": "to keep words the speaker really said, list their word ids in "
+                                 "02_transcription/transcript-corrections.json as \"restore\": [ids] (or \"all\") and run "
+                                 "`reel transcript-correct`; to never drop a phrase for this client, add it to "
+                                 "reel-profile/transcription.json keep_phrases"})
+    else:
+        side.unlink(missing_ok=True)
     meta["video_vocabulary"] = video_vocabulary(paths) or meta.get("video_vocabulary")
     meta["scripts"] = _script_mix(" ".join(s["text"] for s in segs))
     write_json(out / "transcript.json", {"meta": meta, "segments": segs})
@@ -407,8 +448,12 @@ def subtitle_review(meta: dict, segs: list, words: list, quotes: list | None = N
     if dh:
         L += ["", f"## Dropped Whisper hallucinations — {len(dh)}", "",
               "Known phrases Whisper invents on silence/music, at a speed or no-speech level no person speaks at. "
-              "If the speaker really said it, add it back by ear.", ""]
-        L += [f"- `{fmt_ts(h['start_ms'], '.')}` «{h['text']}» (no-speech {h.get('no_speech_prob')})" for h in dh]
+              "If the speaker really said it (check by ear), bring it back: `\"restore\": [word ids]` in "
+              "transcript-corrections.json, then `reel transcript-correct` (dropped-hallucinations.json lists them).", ""]
+        L += [f"- `{fmt_ts(h['start_ms'], '.')}` «{h['text']}» (no-speech {h.get('no_speech_prob')}"
+              + (f", {h['reason']}" if h.get("reason") else "")
+              + (f"; words {', '.join(str(w['id']) for w in h['words'])}" if h.get("words") else "")
+              + (") — RESTORED by the editor" if h.get("restored") else ")") for h in dh]
     L += ["", f"## Profile vocabulary not heard verbatim — {len(misses)}", "",
           "Names and terms from the profile's spelling hint that Whisper wrote differently. Confidence is often high "
           "on these, so check each by ear; correct only if the speaker said the expected word.", ""]
@@ -477,6 +522,7 @@ def apply_corrections(paths: Paths) -> dict:
     wj = read_json(out / "words.machine.json")
     words = {w["id"]: dict(w) for w in wj["words"]}
     applied, problems, reanchored = [], [], []
+    restored = _restore_dropped(tj, words, corr.get("restore") or [])
 
     def anchor(item, key="from"):
         """The correction's word: by id when it still says `from`; after a re-transcription (new range, new model) the
@@ -545,7 +591,35 @@ def apply_corrections(paths: Paths) -> dict:
     if reanchored:
         rv.write_text(rv.read_text(encoding="utf-8") + "\n## Re-anchored after re-transcription\n\n"
                       + "\n".join(f"- {r}" for r in reanchored) + "\n", encoding="utf-8")
-    return dict(res, applied=len(applied), flagged=len(fl), reanchored=reanchored, problems=problems)
+    return dict(res, applied=len(applied), flagged=len(fl), reanchored=reanchored, problems=problems,
+                restored=restored)
+
+
+def _restore_dropped(tj: dict, words: dict, restore) -> list:
+    """Bring back words the hallucination filter dropped (G53) that the editor heard as real speech: `"restore":
+    [word ids]` or `"all"` in transcript-corrections.json. They return with `restored: true`, so finalize never
+    drops them again; a whole dropped segment comes back as it was."""
+    if not restore:
+        return []
+    back = []
+    for e in tj["meta"].get("dropped_hallucinations") or []:
+        ids = [w["id"] for w in e.get("words") or []]
+        if not ids or not (restore == "all" or any(i in restore for i in ids)):
+            continue
+        for w in e["words"]:
+            words[w["id"]] = dict(w, restored=True)
+        seg = next((x for x in tj["segments"] if x.get("id") == e.get("segment_id")), None)
+        if seg is None and e.get("segment"):
+            seg = dict(e["segment"], words=[])
+            tj["segments"].append(seg)
+        if seg is not None:
+            seg["words"] = sorted(set(seg["words"]) | set(ids))
+            ws = [words[i] for i in seg["words"] if i in words]
+            seg["start_ms"], seg["end_ms"] = min(seg["start_ms"], ws[0]["start_ms"]), max(seg["end_ms"], ws[-1]["end_ms"])
+        e["restored"] = True
+        back += ids
+    tj["segments"].sort(key=lambda x: x["start_ms"])
+    return back
 
 
 def words_fingerprint(paths: Paths) -> str:

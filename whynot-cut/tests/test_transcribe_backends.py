@@ -745,15 +745,68 @@ class TestBatchedSafetyNets(_Home):
                                    cr=3.1))
         self.assertEqual(len(self.seq_calls), 1)
         kw = self.seq_calls[0]
-        self.assertEqual(kw["samples"], 10 * SR)                       # only the suspect segment's span
+        self.assertEqual(kw["samples"], 11 * SR)          # the suspect segment's span, padded 0.5 s each side
         self.assertFalse(kw["vad_filter"])
         self.assertEqual(kw["temperature"], [0.0, 0.2, 0.4])           # the 2.x temperature retry
         self.assertEqual((kw["beam_size"], kw["initial_prompt"], kw["language"]), (5, "هنا", "ar"))
         self.assertEqual([w["word"] for w in r["words"]], ["أهلا", "بيك", "كلام", "صحيح"])
-        self.assertEqual(r["words"][2]["start_ms"], 11000)            # span-relative times made chunk-relative
-        self.assertEqual([s["start_ms"] for s in r["segments"]], [500, 11000])
-        self.assertEqual(run.state["redecoded"], [{"start_ms": 10000, "end_ms": 20000, "reason": "compression_ratio",
-                                                   "words_before": 4, "words_after": 2}])
+        self.assertEqual(r["words"][2]["start_ms"], 10500)            # span-relative times made chunk-relative
+        self.assertEqual([s["start_ms"] for s in r["segments"]], [500, 10500])
+        self.assertEqual(run.state["redecoded"], [{"start_ms": 10000, "end_ms": 20000, "span_ms": [9500, 20500],
+                                                   "reason": "compression_ratio", "words_before": 4, "words_after": 2}])
+
+    def test_span_pads_half_the_gap_to_each_neighbour(self):
+        """N2: batched segment edges come from DTW word alignment (often 100-300 ms off): pad into the gaps, never
+        into the neighbours' words."""
+        FakeBatched.segments = [seg(" أهلا", 9.0, 9.8, [(" أهلا", 9.0, 9.8, 0.9)]),
+                                seg(" نعم نعم نعم", 10.0, 20.0, [(" نعم", 10 + i, 10.5 + i, 0.9) for i in range(3)],
+                                    cr=3.0),
+                                seg(" بيك", 20.2, 21.0, [(" بيك", 20.2, 21.0, 0.9)])]
+        run = WB.make_runner("large-v3", vad=True, backend="ct2", batch_size=4)
+        r = run(self.audio, 0, "ar", None)
+        self.assertEqual(run.state["redecoded"][0]["span_ms"], [9900, 20100])
+        self.assertEqual(self.seq_calls[0]["samples"], int(round(20.1 * SR)) - int(9.9 * SR))
+        self.assertEqual([w["word"] for w in r["words"]], ["أهلا", "كلام", "صحيح", "بيك"])
+        self.assertEqual(r["words"][1]["start_ms"], 10900)
+
+    def test_span_padding_is_at_most_half_a_second_and_stays_in_the_audio(self):
+        raws = [{"start": 0.1, "end": 5.0}, {"start": 30.0, "end": 39.9}]
+        self.assertEqual(WB.redecode_span(raws, 0, 40.0), (0.05, 5.5))
+        b = WB.redecode_span(raws, 1, 40.0)
+        self.assertEqual(b[0], 29.5)
+        self.assertAlmostEqual(b[1], 39.95)
+
+    def test_redecode_out_of_memory_retries_with_beam_1_not_a_smaller_batch(self):
+        """M3"""
+        def seq(audio, kw):
+            if kw["beam_size"] == 5:
+                raise RuntimeError("CUDA failed with error out of memory")
+            self.seq_calls.append(kw)
+            return [seg(" كلام", 1.0, 1.5, [(" كلام", 1.0, 1.5, 0.9)])]
+        FakeWhisperModel.seq_fn = seq
+        run, r = self.run_with(seg(" نعم نعم نعم", 10.0, 20.0, [(" نعم", 10 + i, 10.5 + i, 0.9) for i in range(3)],
+                                   cr=3.0))
+        self.assertEqual(run.state["batch_size"], 4)
+        self.assertNotIn("fallback_from", run.state)
+        self.assertEqual(len(run.state["redecoded"]), 1)
+        self.assertEqual(run.state["redecoded"][0]["beam_size"], 1)
+
+    def test_records_only_a_decode_that_succeeded(self):
+        """M3: a GPU failure after one re-decode retries the chunk (on the CPU): no duplicate records."""
+        n = []
+
+        def seq(audio, kw):
+            n.append(1)
+            if len(n) == 2:
+                raise RuntimeError("CUDA error: an illegal memory access was encountered")
+            return []
+        FakeWhisperModel.seq_fn = seq
+        FakeBatched.segments = [seg(" نعم نعم", 1.0, 5.0, [(" نعم", 1, 2, 0.9), (" نعم", 2, 3, 0.9)], cr=3.0),
+                                seg(" لا لا", 10.0, 15.0, [(" لا", 10, 11, 0.9), (" لا", 11, 12, 0.9)], cr=3.0)]
+        run = WB.make_runner("large-v3", vad=True, backend="ct2", batch_size=4)
+        run(self.audio, 0, "ar", None)
+        self.assertEqual(run.state["device"], "cpu")       # the chunk was decoded again, sequentially, on the CPU
+        self.assertEqual(run.state["redecoded"], [])
 
     def test_likely_silence_is_decoded_again(self):
         FakeWhisperModel.seq_fn = lambda audio, kw: self.seq_calls.append(kw) or []   # 2.x skips it: no words
@@ -805,19 +858,82 @@ class TestWordLevelHallucinations(unittest.TestCase):
         self.assertEqual([w["word"] for w in words], ["طيب"])
         self.assertEqual(segs[0]["text"], "طيب")
         self.assertEqual(segs[0]["words"], [1])
+        self.assertEqual((segs[0]["start_ms"], segs[0]["end_ms"]), (0, 400))       # M4: the span of what is left
         self.assertEqual(dropped[0]["level"], "words")
         self.assertEqual(dropped[0]["text"], "اشتركوا في القناة")
 
-    def test_low_probability_phrase_is_dropped(self):
-        _, words, dropped = self.drop([("كلام", 0, 400, 0.9), ("شكرا", 1000, 1500, 0.2), ("على", 1500, 2000, 0.3),
-                                       ("المشاهدة", 2000, 2600, 0.25)])
+    def test_unsure_short_phrase_alone_in_silence_is_dropped(self):
+        _, words, dropped = self.drop([("كلام", 0, 400, 0.9), ("شكرا", 1200, 1600, 0.2), ("على", 1600, 1900, 0.3),
+                                       ("المشاهدة", 1900, 2400, 0.25)])
         self.assertEqual([w["word"] for w in words], ["كلام"])
         self.assertEqual(dropped[0]["mean_probability"], 0.25)
+        self.assertEqual(dropped[0]["reason"], "unsure, alone in silence")
 
-    def test_phrase_in_a_high_no_speech_segment_is_dropped(self):
-        _, words, _ = self.drop([("كلام", 0, 400, 0.9), ("Thanks", 1000, 1500, 0.9), ("for", 1500, 1900, 0.9),
-                                 ("watching", 1900, 2500, 0.9)], ns=0.7)
-        self.assertEqual([w["word"] for w in words], ["كلام"])
+    def test_real_outro_under_a_music_bed_is_kept(self):
+        """N1 probe: «وفي النهاية شكرا على المشاهدة», 2.1 words/s, mean p 0.93, segment no-speech 0.55 (music)."""
+        segs, words, dropped = self.drop([("وفي", 0, 450, 0.95), ("النهاية", 450, 1000, 0.94),
+                                          ("شكرا", 1000, 1400, 0.92), ("على", 1400, 1750, 0.93),
+                                          ("المشاهدة", 1750, 2400, 0.91)], ns=0.55)
+        self.assertEqual(len(words), 5)
+        self.assertEqual(dropped, [])
+
+    def test_unsure_dialect_phrase_at_a_normal_pace_is_kept(self):
+        """N1: low confidence alone is no proof (p 0.38 on a genuine Egyptian phrase between other words)."""
+        _, words, dropped = self.drop([("يعني", 0, 400, 0.9), ("اشتركوا", 550, 1100, 0.38), ("في", 1100, 1300, 0.38),
+                                       ("القناة", 1300, 1900, 0.38), ("بقى", 2000, 2300, 0.9)])
+        self.assertEqual(len(words), 5)
+        self.assertEqual(dropped, [])
+
+    def test_keep_phrases_are_never_dropped(self):
+        from lib.transcribe import drop_hallucinations
+        segs, words = transcript([("طيب", 0, 400, 0.9), ("اشتركوا", 1000, 1100, 0.9), ("في", 1100, 1200, 0.9),
+                                  ("القناة", 1200, 1300, 0.9)])
+        _, kept, dropped = drop_hallucinations(segs, words, keep_phrases=["اشتركوا في القناه"])
+        self.assertEqual((len(kept), dropped), (4, []))
+
+    def project(self):
+        tmp = Path(tempfile.mkdtemp(prefix="whynot-t212-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        p = Paths(tmp / "C", "V1")
+        p.ensure_project()
+        return p
+
+    META = {"source_video": "x.mp4", "backend": "test", "model": "none", "language": "ar",
+            "language_probability": 1.0, "duration_ms": 2000}
+
+    def test_restore_brings_dropped_words_back_for_good(self):
+        """N1: the editor heard it: "restore": [ids] in transcript-corrections.json."""
+        from lib.transcribe import apply_corrections, finalize
+        p = self.project()
+        segs, words = transcript([("طيب", 0, 400, 0.9), ("اشتركوا", 1000, 1100, 0.9), ("في", 1100, 1200, 0.9),
+                                  ("القناة", 1200, 1300, 0.9)])
+        finalize(p, dict(self.META), segs, words)
+        side = read_json(p.p("02_transcription/dropped-hallucinations.json"))
+        self.assertEqual([w["id"] for w in side["dropped"][0]["words"]], [2, 3, 4])
+        write_json(p.p("02_transcription/transcript-corrections.json"), {"corrections": [], "restore": [2]})
+        r = apply_corrections(p)
+        self.assertEqual(r["restored"], [2, 3, 4])
+        wj = read_json(p.p("02_transcription/words.json"))
+        self.assertEqual([w["word"] for w in wj["words"]], ["طيب", "اشتركوا", "في", "القناة"])
+        self.assertTrue(wj["words"][1]["restored"])
+        tj = read_json(p.p("02_transcription/transcript.json"))
+        self.assertEqual(tj["segments"][0]["text"], "طيب اشتركوا في القناة")
+        self.assertEqual((tj["segments"][0]["start_ms"], tj["segments"][0]["end_ms"]), (0, 1300))
+        self.assertTrue(read_json(p.p("02_transcription/dropped-hallucinations.json"))["dropped"][0]["restored"])
+        self.assertIn("RESTORED", p.p("02_transcription/subtitle-review.md").read_text(encoding="utf-8"))
+        apply_corrections(p)                                   # idempotent from the machine originals
+        self.assertEqual(len(read_json(p.p("02_transcription/words.json"))["words"]), 4)
+
+    def test_restore_of_a_whole_dropped_segment(self):
+        from lib.transcribe import apply_corrections, finalize
+        p = self.project()
+        segs, words = transcript([("اشتركوا", 0, 100, 0.9), ("في", 100, 200, 0.9), ("القناة", 200, 320, 0.9)], ns=0.93)
+        finalize(p, dict(self.META), segs, words)
+        self.assertEqual(read_json(p.p("02_transcription/words.json"))["words"], [])
+        write_json(p.p("02_transcription/transcript-corrections.json"), {"corrections": [], "restore": "all"})
+        apply_corrections(p)
+        tj = read_json(p.p("02_transcription/transcript.json"))
+        self.assertEqual([x["text"] for x in tj["segments"]], ["اشتركوا في القناة"])
 
     def test_a_host_who_really_says_it_is_kept(self):
         segs, words, dropped = self.drop([("وطبعا", 0, 500, 0.9), ("اشتركوا", 600, 1200, 0.9), ("في", 1200, 1400, 0.9),
@@ -987,6 +1103,12 @@ class TestOutOfMemory(_Home):
 
 
 class TestModelCompleteness(_Home):
+    def test_every_128_mel_model_needs_its_preprocessor_config(self):
+        """M6"""
+        for m in ("large-v3", "large-v3-turbo", "turbo", "distil-large-v3"):
+            self.assertIn("preprocessor_config.json", WB._ct2_needs(m), m)
+        self.assertNotIn("preprocessor_config.json", WB._ct2_needs("medium"))
+
     def test_large_v3_needs_its_preprocessor_config(self):
         """M2: without preprocessor_config.json faster-whisper uses 80 mel bins; large-v3 needs 128."""
         self.snapshot(files=["config.json", "tokenizer.json", "model.bin"])

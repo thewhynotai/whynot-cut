@@ -21,6 +21,12 @@
   transcripts, including reels sliced from an episode); checkpoints also record the decoder (device, batch,
   VAD) and a GPU fallback is marked and listed; CUDA out of memory halves the batch first; an incomplete model
   offline says to run `reel model-download`; `auto` picks mlx only once `mlx_verified` is true.
+  Review round 2: a hallucination phrase inside a longer segment is judged on its own words only (faster than 6
+  words a second, or unsure and alone in silence), never on the segment's no-speech level (a real outro under a
+  music bed was deleted); the client's `keep_phrases` are never dropped, and dropped words (kept with their ids
+  in `02_transcription/dropped-hallucinations.json`) come back with `"restore": [ids]` in
+  transcript-corrections.json; a re-decoded batched segment is padded into the silence around it so its first
+  and last words are not clipped.
 - Positive client-folder marker (structure 4.1): `reel scaffold` and `reel client-init` write `.whynot-client`
   (`{"whynot_client": 1, "created": ...}`) at the client root; `reel doctor --fix` writes it for an existing client that
   lacks it (only at the client root, never in `assets/` or `data/`). New `lib/client_marker.py` (stdlib only) is shared

@@ -18,6 +18,8 @@
   "long_clip_note": "A clip longer than long_clip_minutes is transcribed like an episode: chunks of about chunk_minutes cut in silence, VAD, resumable checkpoints in 02_transcription/chunks/. 0 = always one pass.",
   "language": null,
   "low_confidence_threshold": 0.5,
+  "keep_phrases": [],
+  "keep_phrases_note": "End-screen phrases this client really says (a host who always asks viewers to subscribe): the hallucination filter never drops them. One-off: \"restore\" in transcript-corrections.json.",
   "initial_prompt": null,
   "initial_prompt_note": "Vocabulary hint set per client profile (name + specialty from the client's own brief). It biases spelling only; never used to insert content. null = disabled."
 }

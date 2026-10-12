@@ -23,9 +23,13 @@ The vocabulary hint (`initial_prompt`) and the glossary come from the client pro
 
 A clip longer than 10 minutes (`long_clip_minutes` in transcription.json) is transcribed like an episode: chunks cut in
 silence, VAD, checkpoints in `02_transcription/chunks/` (run again to resume; `--force` restarts). A checkpoint is
-reused only if the same model, hint and backend made it. Backends: faster-whisper (NVIDIA GPU, batched on long audio;
-else the CPU on every physical core) or mlx-whisper on Apple Silicon (`backend` in transcription.json, `--backend`).
-`reel bench --audio <speech file>` measures the speed on this computer; `reel doctor` shows it.
+reused only if the same model, hint, backend and decoder (device, batched or one by one, VAD) made it; a chunk done
+after a GPU fallback is marked, and the review lists "Decoders … MIXED" — `--force` redoes every chunk with one.
+Backends: faster-whisper (NVIDIA GPU, batched on long audio; else the CPU on every physical core) or mlx-whisper on
+Apple Silicon (`backend: mlx` / `--backend mlx`; `auto` picks it only once `mlx_verified` is true after the Mac parity
+test). With batching, a segment that repeats itself, is probably silence or holds a known hallucination phrase is
+decoded again one by one (the 2.x way) and the review counts those. `reel bench --audio <speech file>` measures the
+speed on this computer; `reel doctor` shows it.
 
 ## Correct
 Write `02_transcription/transcript-corrections.json`, then run `reel transcript-correct`. This step is idempotent: it always starts again from `*.machine.json`.
@@ -65,7 +69,13 @@ review checks them closely. Client-wide names (the speaker, the show) stay in th
 ## Hallucinations
 Whisper invents end-screen phrases on silence or music («اشتركوا في القناة», "Thanks for watching"). A segment that
 matches one and cannot be speech (no-speech probability ≥ 0.5, or more than 6 words a second) is dropped and listed in
-the review under "Dropped Whisper hallucinations". If the speaker really said it, add it back from the review.
+the review under "Dropped Whisper hallucinations". The same phrase inside a longer segment is dropped only on its own
+evidence: more than 6 words a second, or a short run (≤ 1.5 s) the model was unsure of (mean p < 0.4) with silence on
+both sides. A real outro said at a normal pace stays, even under music.
+If the speaker really said a dropped phrase (check by ear): put its word ids (listed in the review and in
+`02_transcription/dropped-hallucinations.json`) in transcript-corrections.json as `"restore": [ids]` (or `"all"`) and
+run `reel transcript-correct`; restored words are never dropped again. For a phrase this client really uses (a host who
+always says «اشتركوا في القناة»), add it to `keep_phrases` in the client's reel-profile `transcription.json`.
 
 ## Cues and RTL
 - Text is stored in logical (spoken) order. Never pre-reverse it.

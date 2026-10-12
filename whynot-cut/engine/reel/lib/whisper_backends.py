@@ -183,9 +183,10 @@ def _snapshot(repo: str | None, need: list, min_bytes: int, any_of: list | None 
 
 
 def _ct2_needs(model: str) -> list:
-    # large-v3 / large-v3-turbo use 128 mel bins: without preprocessor_config.json faster-whisper silently falls back
-    # to 80 and transcribes garbage
-    return ["config.json", "tokenizer.json"] + (["preprocessor_config.json"] if model.startswith("large-v3") else [])
+    # the 128-mel models (large-v3, large-v3-turbo / turbo, distil-large-v3 and later): without
+    # preprocessor_config.json faster-whisper silently falls back to 80 mel bins and transcribes garbage
+    mel128 = "large-v3" in model or model == "turbo"
+    return ["config.json", "tokenizer.json"] + (["preprocessor_config.json"] if mel128 else [])
 
 
 def snapshot_dir(model: str, min_bytes: int | None = None) -> Path | None:
@@ -329,6 +330,22 @@ def suspect(raw: dict) -> str | None:
     return None
 
 
+REDECODE_PAD_S = 0.5
+
+
+def redecode_span(raws: list, k: int, total_s: float) -> tuple[float, float]:
+    """The span decoded again for batched segment k: its edges come from DTW word alignment and are often 100-300 ms
+    off, so a re-decode cut exactly there can clip the first or last word. Pad into the silence on each side: half the
+    gap to the neighbouring segment (or the audio edge), at most 0.5 s. The neighbours' words lie outside their gaps,
+    so nothing is decoded twice."""
+    r = raws[k]
+    prev_end = raws[k - 1]["end"] if k > 0 else 0.0
+    next_start = raws[k + 1]["start"] if k + 1 < len(raws) else total_s
+    before = min(REDECODE_PAD_S, max(0.0, (r["start"] - prev_end) / 2))
+    after = min(REDECODE_PAD_S, max(0.0, (next_start - r["end"]) / 2))
+    return max(0.0, r["start"] - before), min(total_s, r["end"] + after)
+
+
 def _oom(e: Exception) -> bool:
     s = str(e).lower()
     return "out of memory" in s or "cuda_error_out_of_memory" in s
@@ -380,21 +397,36 @@ def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, 
             raws, info = sequential(audio, language, prompt, vad)
             return _from_raw(raws, info.language, round(info.language_probability, 3))
         segments, info = state["pipeline"].transcribe(audio, batch_size=state["batch_size"], **options(language, prompt))
-        raws, out = [_raw_ct2(s) for s in segments], []
+        raws, out, recs = [_raw_ct2(s) for s in segments], [], []
         lang = language or info.language
-        for r in raws:
+        total_s = len(audio) / 16000
+        for k, r in enumerate(raws):
             why = suspect(r)
             if not why:
                 out.append(r)
                 continue
-            a, b = max(0, int(r["start"] * 16000)), min(len(audio), int(round(r["end"] * 16000)))
-            again, _ = sequential(audio[a:b], lang, prompt, False) if b > a else ([], None)
+            a_s, b_s = redecode_span(raws, k, total_s)
+            a, b = max(0, int(a_s * 16000)), min(len(audio), int(round(b_s * 16000)))
+            again, beam = redecode(audio[a:b], lang, prompt) if b > a else ([], 5)
             again = [_shift(x, a / 16000) for x in again]
-            state["redecoded"].append({"start_ms": int(round(r["start"] * 1000)), "end_ms": int(round(r["end"] * 1000)),
-                                       "reason": why, "words_before": len(r["words"]),
-                                       "words_after": sum(len(x["words"]) for x in again)})
+            recs.append({"start_ms": int(round(r["start"] * 1000)), "end_ms": int(round(r["end"] * 1000)),
+                         "span_ms": [int(round(a_s * 1000)), int(round(b_s * 1000))], "reason": why,
+                         "words_before": len(r["words"]), "words_after": sum(len(x["words"]) for x in again),
+                         **({"beam_size": beam} if beam != 5 else {})})
             out.extend(again)
+        state["redecoded"].extend(recs)      # only once the whole decode succeeded (no duplicates after a retry)
         return _from_raw(out, info.language, round(info.language_probability, 3))
+
+    def redecode(span, lang, prompt):
+        """The 2.x sequential decode of one suspect span; on a GPU out-of-memory, once more with beam 1 (far less
+        memory) before the whole chunk degrades (smaller batch, then the CPU)."""
+        try:
+            return sequential(span, lang, prompt, False)[0], 5
+        except Exception as e:  # noqa: BLE001
+            if not _oom(e):
+                raise
+            segments, _ = state["model"].transcribe(span, **dict(options(lang, prompt), vad_filter=False, beam_size=1))
+            return [_raw_ct2(x) for x in segments], 1
 
     def degrade(e):
         """GPU trouble: a smaller batch on an out-of-memory, then the CPU. Marked on the checkpoints that follow."""
