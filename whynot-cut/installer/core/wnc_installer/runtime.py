@@ -179,6 +179,8 @@ def step_runtime(ctx: base.Ctx) -> base.StepResult:
         stamped = (rdir / LOCK_STAMP).read_text(encoding="utf-8").strip() == lock_sha
     except OSError:
         stamped = False
+    if stamped and py.is_file() and ctx.args.dry_run:  # a dry run starts no process, not even the smoke import
+        return base.StepResult("runtime", "skipped", f"dry run: would check runtime {rid} (built from {rel})")
     if stamped and py.is_file():
         rc, out = _smoke(ctx, py, smoke)
         if rc == 0:
@@ -350,6 +352,8 @@ def step_gpu(ctx: base.Ctx) -> base.StepResult:
         return base.StepResult("gpu", "skipped", "nothing to install: MLX comes with the mac-arm64 lock")
     if ctx.platform != "win-x64":
         return base.StepResult("gpu", "skipped", "no GPU support for Whisper on Intel Macs; it uses the CPU")
+    if ctx.args.dry_run:  # no nvidia-smi either
+        return base.StepResult("gpu", "skipped", "dry run: with an NVIDIA GPU, would run reel gpu-enable")
     ctx.facts["nvidia"] = _nvidia_present(ctx)
     if not ctx.facts["nvidia"]:
         return base.StepResult("gpu", "skipped", "no NVIDIA GPU found (nvidia-smi); Whisper uses the CPU")
@@ -359,8 +363,6 @@ def step_gpu(ctx: base.Ctx) -> base.StepResult:
         py = runtime_python(ctx.paths, rid, ctx.platform) if rid else None
     if py is None or not Path(py).is_file():
         return base.StepResult("gpu", "amber", "the engine runtime is missing; Whisper keeps using the CPU")
-    if ctx.args.dry_run:
-        return base.StepResult("gpu", "skipped", "dry run: would run reel gpu-enable")
     cli_py = ctx.plugin_root / "engine" / "reel" / "cli.py"
     rc, out = base.run_cmd(ctx, [py, "-s", "-B", cli_py, "gpu-enable"], GPU_TIMEOUT,
                       cwd=ctx.paths.whynot if ctx.paths.whynot.is_dir() else None)

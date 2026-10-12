@@ -193,6 +193,57 @@ class Log:
         self._write("ERROR", msg, traceback.format_exc())
 
 
+# --------------------------------------------------------------------------------------------- questions
+def _terminal():
+    """(reader, must_close) for the editor's keyboard, or None. stdin when it is a terminal; on POSIX /dev/tty when
+    stdin is a pipe (`curl ... | bash` hands the script to bash on stdin, but the terminal is still there)."""
+    try:
+        if sys.stdin is not None and sys.stdin.isatty():
+            return sys.stdin, False
+    except (AttributeError, ValueError):
+        pass
+    if os.name != "nt":
+        try:
+            return open("/dev/tty", "r", encoding="utf-8", errors="replace"), True
+        except OSError:
+            return None
+    return None
+
+
+def can_ask(args) -> bool:
+    """Questions only without --yes / --quiet and with a terminal to read the answer from (never in tests)."""
+    if getattr(args, "yes", False) or getattr(args, "quiet", False):
+        return False
+    t = _terminal()
+    if t is not None and t[1]:
+        t[0].close()
+    return t is not None
+
+
+def ask(prompt: str, default: str = "") -> str:
+    """One line from the editor; Enter, end of input or no terminal keeps `default`."""
+    t = _terminal()
+    if t is None:
+        return default
+    reader, close = t
+    try:
+        out = sys.stdout
+        if out is not None:
+            try:
+                out.write(prompt)
+            except UnicodeEncodeError:
+                enc = out.encoding or "ascii"
+                out.write(prompt.encode(enc, "backslashreplace").decode(enc, "replace"))
+            out.flush()
+        line = reader.readline()
+    except (OSError, ValueError, KeyboardInterrupt):
+        line = ""
+    finally:
+        if close:
+            reader.close()
+    return line.strip() or default
+
+
 # --------------------------------------------------------------------------------------------- components / files
 def load_components(path) -> dict:
     with open(path, encoding="utf-8-sig") as f:
@@ -744,16 +795,20 @@ class Ctx:
 StepFn = Callable[[Ctx], StepResult]
 
 
-def run_steps(ctx: Ctx, steps) -> list:
+def run_steps(ctx: Ctx, steps, status: Optional[dict] = None) -> list:
     """Run (name, fn, needs) in order. A step whose `needs` are not all `ok` is skipped ("needs <name>"); a name in
-    --skip is skipped; an exception is `red` (traceback in the log) and later independent steps still run. A red step
-    is recorded in state.json so the next run does it again; ok steps record their own fingerprint."""
+    --skip is skipped (unless the step function has `handles_skip = True`: then it is called and says itself what was
+    skipped); an exception is `red` (traceback in the log) and later independent steps still run. In a dry run a need
+    that was only `skipped` (it said what it would do) does not stop the step, so every step says what it would do.
+    A red step is recorded in state.json so the next run does it again; ok steps record their own fingerprint.
+    `status` may carry the outcome of steps run before (a second batch of the same install)."""
     skip = set(getattr(ctx.args, "skip", None) or ())
-    results, status = [], {}
+    dry = bool(getattr(ctx.args, "dry_run", False))
+    results, status = [], dict(status or {})
     for name, fn, needs in steps:
         ctx.log.step(name)
-        missing = [n for n in needs if status.get(n) != "ok"]
-        if name in skip:
+        missing = [n for n in needs if status.get(n) != "ok" and not (dry and status.get(n) == "skipped")]
+        if name in skip and not getattr(fn, "handles_skip", False):
             r = StepResult(name, "skipped", "skipped with --skip")
         elif missing:
             r = StepResult(name, "skipped", "needs " + ", ".join(missing))

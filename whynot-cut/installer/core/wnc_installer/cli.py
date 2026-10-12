@@ -4,7 +4,10 @@ The bootstrap (install.ps1 / install.sh) has put uv and python-build-standalone 
     <engine python> -I -B installer/core/wnc_install.py install [--log <file>] [--yes] ...
 Step modules append (name, fn, needs) to STEPS (install) or UNINSTALL_STEPS; `install` runs the registered steps in
 STEP_ORDER, whatever order they were registered in. `plan` prints the order as JSON and writes nothing.
-Exit codes: 0 done (ok / amber / skipped), 1 at least one step red, 2 cannot start (platform, components.json).
+Exit codes: 0 done (ok / amber / skipped), 1 at least one step red, 2 cannot start (platform, components.json) or
+preflight is red (not enough free space: nothing was downloaded).
+After the steps, install prints the checklist ([OK] / [!!] / [XX] per step and the doctor's fixes, also written to
+logs/install-checklist.json) and how to start (/whynot-cut:start).
 """
 from __future__ import annotations
 
@@ -24,8 +27,8 @@ UNINSTALL_STEPS: list = []  # uninstall steps, run in registration order
 def _register_step_modules() -> None:
     """Each step module has register(STEPS) (and, for uninstall, register_uninstall(UNINSTALL_STEPS)). Imported here,
     after the registries exist, so a step module never imports cli."""
-    from . import claude, runtime
-    for mod in (runtime, claude):
+    from . import claude, runtime, system
+    for mod in (runtime, claude, system):
         mod.register(STEPS)
 
 
@@ -131,10 +134,45 @@ def main(argv=None) -> int:
                    platform=plat, args=args)
     log.info(f"WhyNot Cut {components.get('plugin')} {args.command} on {plat}; engine home {paths.whynot}"
              + (" (sandbox)" if paths.sandbox else "") + (" (dry run: nothing is written)" if args.dry_run else ""))
-    steps = ordered(STEPS) if args.command == "install" else list(UNINSTALL_STEPS)
-    results = base.run_steps(ctx, steps)
+    if args.command == "install":
+        return install(ctx)
+    results = base.run_steps(ctx, list(UNINSTALL_STEPS))
     red = [r.name for r in results if r.status == "red"]
     log.info(f"{args.command} finished: " + (", ".join(f"{r.name} {r.status}" for r in results) or "no steps"))
     if log.path:
         log.info(f"log: {log.path}")
     return 1 if red else 0
+
+
+def install(ctx: base.Ctx) -> int:
+    """preflight first: red (too little free space) stops here with 2, before any download. Then every other step in
+    STEP_ORDER, the checklist, and how to start. 0 when no step is red, else 1."""
+    from . import system
+    log, steps = ctx.log, ordered(STEPS)
+    first = [s for s in steps if s[0] == "preflight"]
+    results = base.run_steps(ctx, first)
+    if any(r.status == "red" for r in results):
+        log.error("preflight found a problem that stops the install (see above); nothing was downloaded")
+        _finish(ctx, results, system)
+        return 2
+    results += base.run_steps(ctx, [s for s in steps if s[0] != "preflight"], {r.name: r.status for r in results})
+    _finish(ctx, results, system)
+    return 1 if any(r.status == "red" for r in results) else 0
+
+
+def _finish(ctx: base.Ctx, results: list, system) -> None:
+    log, doctor = ctx.log, ctx.facts.get("doctor")
+    log.info("")
+    log.info("WhyNot Cut install checklist:")
+    for line in system.render_checklist(results, doctor).splitlines():
+        log.info(line)
+    if not ctx.args.dry_run:
+        try:
+            system.write_checklist(ctx.paths, results, doctor)
+        except OSError as e:
+            log.warn(f"could not write the checklist file: {e}")
+    log.info("")
+    log.info(system.START_MESSAGE)
+    log.info(system.START_MESSAGE_AR)
+    if log.path:
+        log.info(f"log: {log.path}")

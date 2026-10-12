@@ -22,6 +22,13 @@
     marketplace folder, the claude step with tests/fixtures/installer/fake_claude.py (marketplace add -> plugin
     install / update, a legacy marketplace removed first, an old CLI amber, no CLI = settings only), and the per-user
     Git Bash (found / unpacked from a local zip / placeholder amber; the 7z SFX command checked without running one).
+  * system.py / adobe.py / fonts.py (task 4): preflight (free space red / amber, Arabic home, OneDrive, sandbox reads no
+    registry; red stops `install` with 2 before any download), questions (flags > preferences file > defaults, `ar`,
+    the clients folder never created), the Adobe hook (placeholders skipped, unsigned ZXP amber, signed ZXP extracted
+    with one .prev, a running host amber, UXP command recorded, no code sets Adobe's debug flag), fonts (fake
+    LOCALAPPDATA + registry-fonts.json, ~/Library/Fonts, a different file kept, bad sha red), model_for and the model
+    step (never spawned in tests), settings / doctor through the stub engine of make_fixture_plugin(), the checklist,
+    launch, a dry run that writes nothing, and a whole sandboxed install (twice: no new download).
 Never touches the real ~/.whynot-cut or ~/.claude: every Paths is a sandbox home in a temp folder, and no real
 network is used (artefacts come from a 127.0.0.1 http.server started here, or file://).
 Run (repo root):
@@ -37,11 +44,13 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 import threading
+import types
 import unittest
 import zipfile
 from pathlib import Path
@@ -1954,6 +1963,666 @@ class TestGitBash(unittest.TestCase):
         self.assertFalse(ctx.paths.claude_dir.exists())
         self.assertFalse((ctx.paths.localappdata / "WhyNotCut").exists())
         self.assertEqual(self.srv.srv.hits, [])
+
+
+# --------------------------------------------------------------------------------------------- T7.1 task 4 helpers
+GB = 1024 ** 3
+FONT_A, FONT_B = b"\x00\x01\x00\x00 fixture font A " * 40, b"\x00\x01\x00\x00 fixture font B " * 40
+OFL = b"SIL OPEN FONT LICENSE Version 1.1 (fixture)\n"
+DOCTOR_JSON = {"verdict": "ready", "ready": True, "fixes": [{"item": "x", "who": "editor", "fix": "y"}]}
+ENGINE_STUB = (
+    "import json, os, sys\n"
+    "log = os.environ.get('WNC_TEST_ENGINE_LOG')\n"
+    "if log:\n"
+    "    with open(log, 'a', encoding='utf-8') as f:\n"
+    "        f.write(json.dumps(sys.argv[1:], ensure_ascii=False) + '\\n')\n"
+    "cmd = sys.argv[1] if len(sys.argv) > 1 else ''\n"
+    "if cmd == 'doctor':\n"
+    "    raw = os.environ.get('WNC_TEST_DOCTOR_RAW')\n"
+    f"    print(raw if raw is not None else json.dumps({DOCTOR_JSON!r}))\n"
+    "else:\n"
+    "    print(json.dumps({'ok': True, 'cmd': cmd}))\n"
+    "sys.exit(int(os.environ.get('WNC_TEST_ENGINE_EXIT', '0')))\n")
+
+
+def system_module():
+    """Imported inside the tests so this file stays importable while a step module is being written."""
+    from wnc_installer import system
+    return system
+
+
+def tgz(entries: dict) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, data in entries.items():
+            ti = tarfile.TarInfo(name)
+            ti.size, ti.mode = len(data), 0o755
+            tf.addfile(ti, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def fixture_fonts(base_url: str) -> tuple:
+    """(components `fonts` section, {served path: bytes}) for two tiny fonts and one licence."""
+    served = {"/fonts/FixA-Regular.ttf": FONT_A, "/fonts/Fix%5Bwght%5D.ttf": FONT_B, "/fonts/OFL.txt": OFL}
+    section = {"version": "1", "commit": "fixture", "files": [
+        {"family": "Fix Sans", "file": "FixA-Regular.ttf", "url": base_url + "/fonts/FixA-Regular.ttf",
+         "sha256": sha(FONT_A), "bytes": len(FONT_A)},
+        {"family": "Fix Sans", "file": "Fix[wght].ttf", "url": base_url + "/fonts/Fix%5Bwght%5D.ttf",
+         "sha256": sha(FONT_B), "bytes": len(FONT_B)}],
+        "licenses": [{"family": "Fix Sans", "url": base_url + "/fonts/OFL.txt", "sha256": sha(OFL), "bytes": len(OFL)}]}
+    return section, served
+
+
+def make_fixture_plugin(root: Path, base_url: str) -> types.SimpleNamespace:
+    """A plugin tree the whole installer can run against, WITHOUT the real engine (Tasks 4, 5 and 6 use it).
+
+    Layout: <root>/.claude-plugin/marketplace.json (the marketplace the claude step registers) and <root>/whynot-cut/
+    (the plugin root) holding a copy of installer/ (the core and the GPL text), .claude-plugin/plugin.json (3.0.0),
+    setup/components.json whose every URL points at `base_url` (a test http.server), setup/locks/runtime-<plat>.lock
+    (LOCK_A) and engine/reel/cli.py = ENGINE_STUB (appends its argv as JSON to $WNC_TEST_ENGINE_LOG; `doctor` prints
+    DOCTOR_JSON or $WNC_TEST_DOCTOR_RAW; exit $WNC_TEST_ENGINE_EXIT). The Adobe panel pins stay placeholders.
+    Returns .root, .plugin_root, .components (dict), .components_path, .lock and .served ({url path: bytes}: put them
+    on the server, e.g. Served.srv.files.update(fx.served)). Runtime smoke = ["json"], so the fake uv's venv passes."""
+    root = Path(root)
+    plugin = root / "whynot-cut"
+    shutil.copytree(SK / "installer", plugin / "installer",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    touch(root / ".claude-plugin" / "marketplace.json",
+          b'{"name": "thewhynot-ai", "plugins": [{"name": "whynot-cut", "source": "./whynot-cut"}]}')
+    touch(plugin / ".claude-plugin" / "plugin.json", b'{"name": "whynot-cut", "version": "3.0.0"}')
+    touch(plugin / "engine" / "reel" / "cli.py", ENGINE_STUB.encode("utf-8"))
+    served = {}
+    uv = {"win-x64": ("/uv/uv-x86_64-pc-windows-msvc.zip", ffmpeg_zip({"uv.exe": b"MZ fake uv"}), "zip", "uv.exe")}
+    for plat, triple in (("mac-arm64", "uv-aarch64-apple-darwin"), ("mac-x64", "uv-x86_64-apple-darwin")):
+        uv[plat] = (f"/uv/{triple}.tar.gz", tgz({f"{triple}/uv": b"#!/bin/sh\necho uv 0.0.0\n"}), "tar.gz",
+                    f"{triple}/uv")
+    uv_assets = {}
+    for plat, (path, data, kind, member) in uv.items():
+        served[path] = data
+        uv_assets[plat] = {"url": base_url + path, "sha256": sha(data), "bytes": len(data), "archive": kind,
+                           "member": member}
+    ff_assets = {}
+    for plat in sorted(PLATFORMS):
+        exe = ".exe" if plat.startswith("win") else ""
+        data = ffmpeg_zip({f"bin/ffmpeg{exe}": b"fake ffmpeg " + plat.encode(),
+                           f"bin/ffprobe{exe}": b"fake ffprobe " + plat.encode()})
+        path = f"/ffmpeg/ffmpeg-{plat}.zip"
+        served[path] = data
+        ff_assets[plat] = {"files": [{"url": base_url + path, "sha256": sha(data), "bytes": len(data),
+                                      "archive": "zip", "members": {f"bin/ffmpeg{exe}": f"ffmpeg{exe}",
+                                                                    f"bin/ffprobe{exe}": f"ffprobe{exe}"}}]}
+    git = ffmpeg_zip({"bin/bash.exe": b"MZ bash", "cmd/git.exe": b"MZ git"})
+    served["/git/PortableGit.zip"] = git
+    fonts, font_files = fixture_fonts(base_url)
+    served.update(font_files)
+    locks = {}
+    for plat in sorted(PLATFORMS):
+        lock = touch(plugin / "setup" / "locks" / f"runtime-{plat}.lock", LOCK_A)
+        locks[plat] = {"file": f"setup/locks/runtime-{plat}.lock", "id": base.PLACEHOLDER}
+    comp = {
+        "schema": 1, "plugin": "3.0.0", "channel": "stable", "claude_code": {"min": "2.1.224"},
+        "marketplace": {"name": "thewhynot-ai", "plugin": "whynot-cut", "url": base.PLACEHOLDER},
+        "release": {"index_url": base.PLACEHOLDER},
+        "uv": {"version": "0.13.0", "assets": uv_assets},
+        "runtime": {"python": "3.12.15", "index_url": None, "smoke": ["json"], "locks": locks},
+        "ffmpeg": {"version": "9.0.2", "license": "GPL-3.0-or-later",
+                   "source": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz", "assets": ff_assets},
+        "git": {"version": "2.56.0.windows.2", "assets": {"win-x64": {
+            "url": base_url + "/git/PortableGit.zip", "sha256": sha(git), "bytes": len(git), "archive": "zip"}}},
+        "bridge": {"protocol": 4, "min_protocol": 4,
+                   "cep": {"bundle": base.PLACEHOLDER, "zxp": base.PLACEHOLDER, "sha256": base.PLACEHOLDER,
+                           "hosts": {"PPRO": "[22.0,99.9]", "AEFT": "[24.0,99.9]"}},
+                   "uxp": {"version": base.PLACEHOLDER, "ccx": base.PLACEHOLDER, "sha256": base.PLACEHOLDER,
+                           "min_host": "26.5.0", "id": base.PLACEHOLDER}},
+        "models": {"by_hardware": {"nvidia": "large-v3", "apple_silicon": "large-v3", "cpu": "large-v3-turbo"}},
+        "fonts": fonts}
+    comp_path = plugin / "setup" / "components.json"
+    touch(comp_path, json.dumps(comp, indent=2).encode("utf-8"))
+    return types.SimpleNamespace(root=root, plugin_root=plugin, components=comp, components_path=comp_path,
+                                 lock=lock, served=served)
+
+
+def only_the_test_log(paths: base.Paths) -> bool:
+    """Nothing under the sandbox home but the log folder (and log) of make_ctx's Quiet log."""
+    found = sorted(str(p.relative_to(paths.home)) for p in paths.home.rglob("*") if p.parent != paths.logs_dir)
+    return found == sorted([".whynot-cut", os.path.join(".whynot-cut", "logs")])
+
+
+def sandbox_env(**extra) -> dict:
+    """Environment for a sandboxed core run: no engine / Claude locations of this machine, the fakes switched on."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("WHYNOT_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_CLI", "WNC_TEST_NVIDIA", "WNC_TEST_MODEL",
+                        "WNC_TEST_HOSTS_RUNNING", "WNC_TEST_ADOBE_HOSTS", "FAKE_CLAUDE_FAIL", "FAKE_UV_FAIL")}
+    env.update(PYTHONUTF8="1", **extra)
+    return env
+
+
+# --------------------------------------------------------------------------------------------- preflight
+class TestPreflight(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.sy = system_module()
+        for k in ("WNC_TEST_HOSTS_RUNNING", "WNC_TEST_ADOBE_HOSTS", "WNC_TEST_NVIDIA"):
+            os.environ.pop(k, None)
+
+    def run_pre(self, free_gb, home="plain-home", plat="win-x64"):
+        ctx = make_ctx(self.tmp / home, {"schema": 1}, SK, plat)
+        usage = types.SimpleNamespace(total=500 * GB, used=0, free=int(free_gb * GB))
+        with mock.patch.object(shutil, "disk_usage", return_value=usage):
+            return ctx, self.sy.preflight(ctx)
+
+    def test_free_space_thresholds(self):
+        for free, want in ((5, "red"), (7, "amber"), (50, "ok")):
+            with self.subTest(free=free):
+                ctx, r = self.run_pre(free)
+                self.assertEqual(r.status, want, r.detail)
+                self.assertEqual(ctx.facts["free_gb"], free)
+        ctx, r = self.run_pre(5)
+        self.assertIn("6 GB", r.detail)
+
+    def test_facts(self):
+        ctx, r = self.run_pre(50)
+        f = ctx.facts
+        for key in ("os", "arch", "free_gb", "home_ascii", "home_space", "onedrive_documents", "icloud_documents",
+                    "claude_found", "adobe_hosts", "nvidia", "existing", "sac"):
+            self.assertIn(key, f)
+        self.assertEqual((f["os"], f["arch"]), ("windows", "x64"))
+        self.assertTrue(f["home_ascii"])
+        self.assertFalse(f["home_space"])
+        self.assertIsNone(f["sac"])  # sandbox: the registry is never read
+        self.assertEqual(f["adobe_hosts"], [])
+        self.assertEqual(f["existing"], {"engine": False, "legacy_reel_editor": False, "marketplace_source": None})
+        self.assertEqual(only_the_test_log(ctx.paths), True)  # read-only
+
+    def test_arabic_home_with_a_space_is_amber(self):
+        ctx, r = self.run_pre(50, home=ARABIC_HOME)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertFalse(ctx.facts["home_ascii"])
+        self.assertTrue(ctx.facts["home_space"])
+        self.assertIn("non-ASCII", r.detail)
+
+    def test_onedrive_documents_is_amber(self):
+        ctx = make_ctx(self.tmp / "plain-home", {"schema": 1}, SK, "win-x64")
+        usage = types.SimpleNamespace(total=500 * GB, used=0, free=50 * GB)
+        with mock.patch.object(shutil, "disk_usage", return_value=usage), \
+                mock.patch.object(self.sy, "documents_dir", return_value=self.tmp / "OneDrive" / "Documents"):
+            r = self.sy.preflight(ctx)
+        self.assertEqual(r.status, "amber")
+        self.assertTrue(ctx.facts["onedrive_documents"])
+        self.assertIn("OneDrive", r.detail)
+
+    def test_adobe_hosts_from_the_test_variables(self):
+        hosts = [{"app": "premiere", "version": "26.5.2"}, {"app": "after_effects", "version": "26.1.0"}]
+        with mock.patch.dict(os.environ, {"WNC_TEST_ADOBE_HOSTS": json.dumps(hosts),
+                                          "WNC_TEST_HOSTS_RUNNING": "AfterFX.exe"}):
+            ctx, _r = self.run_pre(50)
+        got = {h["app"]: (h["version"], h["running"]) for h in ctx.facts["adobe_hosts"]}
+        self.assertEqual(got, {"premiere": ("26.5.2", False), "after_effects": ("26.1.0", True)})
+
+    def test_install_stops_with_2_before_any_download(self):
+        home = self.tmp / ARABIC_HOME
+        usage = types.SimpleNamespace(total=500 * GB, used=0, free=5 * GB)
+        with mock.patch.object(shutil, "disk_usage", return_value=usage), \
+                mock.patch.object(base, "download", side_effect=AssertionError("no download may start")):
+            rc = cli.main(["install", "--home", str(home), "--yes", "--quiet"])
+        self.assertEqual(rc, 2)
+        paths = base.Paths.from_env(str(home), env={})
+        self.assertFalse(paths.downloads_dir.exists())
+        self.assertFalse(paths.runtimes_dir.exists())
+        self.assertFalse(paths.claude_dir.exists())
+
+
+# --------------------------------------------------------------------------------------------- questions
+class TestQuestions(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.sy = system_module()
+
+    def ctx(self, **args):
+        a = {"clients_folder": None, "language": None}
+        a.update(args)
+        return make_ctx(self.home, {"schema": 1}, SK, "win-x64", **a)
+
+    def test_yes_without_preferences_takes_the_defaults(self):
+        ctx = self.ctx()
+        r = self.sy.step_questions(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        want = self.home / "Documents" / "WhyNot Clients"
+        self.assertEqual(ctx.answers["clients_root"], str(want))
+        self.assertEqual(ctx.answers["language"], "ar")
+        self.assertFalse(want.exists())  # never created
+        self.assertTrue(only_the_test_log(ctx.paths))
+
+    def test_existing_preferences_win(self):
+        prefs = self.home / ".claude" / "whynot-cut.local.md"
+        theirs = self.home.parent / "عملاء WhyNot"
+        touch(prefs, (f'---\neditor_name: Yunus\nlanguage: en\nclients_root: "{theirs}"\n---\nnotes\n')
+              .encode("utf-8"))
+        ctx = self.ctx()
+        self.sy.step_questions(ctx)
+        self.assertEqual(ctx.answers["clients_root"], str(theirs))
+        self.assertEqual(ctx.answers["language"], "en")
+        self.assertFalse(theirs.exists())
+
+    def test_flags_win_over_preferences(self):
+        touch(self.home / ".claude" / "whynot-cut.local.md", b"---\nlanguage: en\nclients_root: E:/Old\n---\n")
+        target = self.home.parent / "Clients Here"
+        ctx = self.ctx(clients_folder=str(target), language="ar")
+        self.sy.step_questions(ctx)
+        self.assertEqual((ctx.answers["clients_root"], ctx.answers["language"]), (str(target), "ar"))
+        self.assertFalse(target.exists())
+
+    def test_bad_preference_values_are_ignored(self):
+        touch(self.home / ".claude" / "whynot-cut.local.md", b"---\nlanguage: fr\nclients_root: ''\n---\n")
+        ctx = self.ctx()
+        self.sy.step_questions(ctx)
+        self.assertEqual(ctx.answers["language"], "ar")
+        self.assertEqual(ctx.answers["clients_root"], str(self.home / "Documents" / "WhyNot Clients"))
+
+    def test_no_questions_with_yes(self):
+        self.assertFalse(base.can_ask(argparse.Namespace(yes=True)))
+
+
+# --------------------------------------------------------------------------------------------- adobe
+class TestAdobe(unittest.TestCase):
+    SIGNED = ffmpeg_zip({"CSXS/manifest.xml": b"<ExtensionManifest/>", "index.html": b"<html>v1</html>",
+                         "META-INF/signatures.xml": b"<signatures/>", "mimetype": b"application/vnd.adobe.air"})
+    UNSIGNED = ffmpeg_zip({"CSXS/manifest.xml": b"<ExtensionManifest/>", "index.html": b"<html/>"})
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.home = self.tmp / ARABIC_HOME
+        self.plugin = self.tmp / "plugin root"
+        self.comp = {"schema": 1, "bridge": {
+            "cep": {"zxp": base.PLACEHOLDER, "sha256": base.PLACEHOLDER},
+            "uxp": {"ccx": base.PLACEHOLDER, "sha256": base.PLACEHOLDER, "min_host": "26.5.0"}}}
+        for k in ("WNC_TEST_HOSTS_RUNNING", "WNC_TEST_ADOBE_HOSTS"):
+            os.environ.pop(k, None)
+        self.sy = system_module()
+
+    def ctx(self, plat="win-x64"):
+        return make_ctx(self.home, self.comp, self.plugin, plat)
+
+    def zxp(self, data, pin=True):
+        touch(self.plugin / "dist" / "bridge.zxp", data)
+        self.comp["bridge"]["cep"].update(zxp="dist/bridge.zxp", sha256=sha(data) if pin else base.PLACEHOLDER)
+
+    def bundle(self, ctx):
+        return self.sy.cep_extensions_dir(ctx.paths, ctx.platform) / "ai.thewhynot.cut.bridge"
+
+    def test_cep_dir(self):
+        ctx = self.ctx()
+        self.assertEqual(self.sy.cep_extensions_dir(ctx.paths, "win-x64"),
+                         self.home / "AppData" / "Roaming" / "Adobe" / "CEP" / "extensions")
+        self.assertEqual(self.sy.cep_extensions_dir(ctx.paths, "mac-arm64"),
+                         self.home / "Library" / "Application Support" / "Adobe" / "CEP" / "extensions")
+
+    def test_no_artefacts_is_skipped(self):
+        r = self.sy.step_adobe(self.ctx())
+        self.assertEqual(r.status, "skipped")
+        self.assertIn("Adobe panel files are not in this build yet", r.detail)
+        self.comp["bridge"]["cep"]["zxp"] = "dist/missing.zxp"
+        ctx = self.ctx()
+        self.assertEqual(self.sy.step_adobe(ctx).status, "skipped")
+        self.assertTrue(only_the_test_log(ctx.paths))
+
+    def test_unsigned_zxp_is_amber_and_not_extracted(self):
+        self.zxp(self.UNSIGNED)
+        ctx = self.ctx()
+        r = self.sy.step_adobe(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("unsigned panel: not installed", r.detail)
+        self.assertFalse(self.sy.cep_extensions_dir(ctx.paths, ctx.platform).exists())
+
+    def test_signed_zxp_is_extracted_and_a_second_run_keeps_one_prev(self):
+        self.zxp(self.SIGNED)
+        ctx = self.ctx()
+        r = self.sy.step_adobe(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        b = self.bundle(ctx)
+        self.assertEqual((b / "META-INF" / "signatures.xml").read_bytes(), b"<signatures/>")
+        self.assertEqual(ctx.state.data["adobe"]["cep"]["path"], str(b))
+        r2 = self.sy.step_adobe(self.ctx())
+        self.assertEqual(r2.status, "ok", r2.detail)
+        r3 = self.sy.step_adobe(self.ctx())
+        self.assertEqual(r3.status, "ok", r3.detail)
+        names = sorted(p.name for p in b.parent.iterdir())
+        self.assertEqual(names, ["ai.thewhynot.cut.bridge", "ai.thewhynot.cut.bridge.prev"])
+        self.assertEqual((b.parent / "ai.thewhynot.cut.bridge.prev" / "index.html").read_bytes(), b"<html>v1</html>")
+
+    def test_mac_cep_dir_is_used(self):
+        self.zxp(self.SIGNED)
+        ctx = self.ctx("mac-arm64")
+        self.assertEqual(self.sy.step_adobe(ctx).status, "ok")
+        self.assertTrue((self.home / "Library" / "Application Support" / "Adobe" / "CEP" / "extensions" /
+                         "ai.thewhynot.cut.bridge" / "CSXS" / "manifest.xml").is_file())
+
+    def test_bad_sha_is_red(self):
+        self.zxp(self.SIGNED)
+        self.comp["bridge"]["cep"]["sha256"] = "0" * 64
+        ctx = self.ctx()
+        self.assertEqual(self.sy.step_adobe(ctx).status, "red")
+        self.assertFalse(self.bundle(ctx).exists())
+
+    def test_running_host_without_questions_is_amber(self):
+        self.zxp(self.SIGNED)
+        with mock.patch.dict(os.environ, {"WNC_TEST_HOSTS_RUNNING": "Adobe Premiere Pro.exe"}):
+            self.assertEqual(self.sy.hosts_running(True), ["Adobe Premiere Pro.exe"])
+            ctx = self.ctx()
+            r = self.sy.step_adobe(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("Adobe Premiere Pro.exe", r.detail)
+        self.assertFalse(self.bundle(ctx).exists())
+
+    def test_hosts_running_in_the_sandbox_never_probes(self):
+        with mock.patch.object(subprocess, "run", side_effect=AssertionError("probed")):
+            self.assertEqual(self.sy.hosts_running(True), [])
+
+    def test_uxp_command_is_recorded_in_the_sandbox(self):
+        touch(self.plugin / "dist" / "bridge.ccx", b"PK ccx")
+        self.comp["bridge"]["uxp"].update(ccx="dist/bridge.ccx", sha256=sha(b"PK ccx"))
+        hosts = [{"app": "premiere", "version": "26.5.2"}]
+        with mock.patch.dict(os.environ, {"WNC_TEST_ADOBE_HOSTS": json.dumps(hosts)}):
+            ctx = self.ctx()
+            r = self.sy.step_adobe(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        cmd = ctx.state.data["adobe"]["uxp"]["command"]
+        self.assertEqual(cmd[1:], ["/install", str(self.plugin / "dist" / "bridge.ccx")])
+        self.assertTrue(cmd[0].endswith("UnifiedPluginInstallerAgent.exe"))
+        self.assertFalse(ctx.state.data["adobe"]["uxp"]["ran"])
+
+    def test_uxp_needs_a_new_enough_premiere(self):
+        touch(self.plugin / "dist" / "bridge.ccx", b"PK ccx")
+        self.comp["bridge"]["uxp"].update(ccx="dist/bridge.ccx", sha256=sha(b"PK ccx"))
+        with mock.patch.dict(os.environ, {"WNC_TEST_ADOBE_HOSTS": '[{"app": "premiere", "version": "25.6.0"}]'}):
+            r = self.sy.step_adobe(self.ctx())
+        self.assertEqual(r.status, "skipped", r.detail)
+        self.assertIn("26.5.0", r.detail)
+
+    def test_no_code_sets_the_adobe_debug_flag(self):
+        flag = "Player" + "DebugMode"  # spelled in two halves so this test file is not a hit for other greps
+        hits = [str(p) for p in (SK / "installer").rglob("*") if p.is_file() and flag.encode() in p.read_bytes()]
+        self.assertEqual(hits, [])
+
+
+# --------------------------------------------------------------------------------------------- fonts
+class TestFonts(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.srv = Served(self, {})
+        fonts, served = fixture_fonts(self.srv.base)
+        self.srv.srv.files.update(served)
+        self.comp = {"schema": 1, "fonts": fonts}
+        self.sy = system_module()
+
+    def ctx(self, plat="win-x64"):
+        return make_ctx(self.home, self.comp, SK, plat)
+
+    def registry(self, ctx):
+        return json.loads((ctx.paths.sandbox_dir / "registry-fonts.json").read_text(encoding="utf-8"))
+
+    def test_windows_sandbox(self):
+        ctx = self.ctx()
+        r = self.sy.step_fonts(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        fdir = self.home / "AppData" / "Local" / "Microsoft" / "Windows" / "Fonts"
+        self.assertEqual(self.sy.user_font_dir(ctx.paths, "win-x64"), fdir)
+        self.assertEqual((fdir / "FixA-Regular.ttf").read_bytes(), FONT_A)
+        self.assertEqual((fdir / "Fix[wght].ttf").read_bytes(), FONT_B)
+        self.assertEqual(self.registry(ctx), {"FixA-Regular (TrueType)": str(fdir / "FixA-Regular.ttf"),
+                                              "Fix[wght] (TrueType)": str(fdir / "Fix[wght].ttf")})
+        self.assertEqual((ctx.paths.fonts_dir / "1" / "Fix Sans-OFL.txt").read_bytes(), OFL)
+        st = ctx.state.data["fonts"]
+        self.assertEqual(sorted(st["installed"]), sorted([str(fdir / "FixA-Regular.ttf"), str(fdir / "Fix[wght].ttf")]))
+        self.assertEqual(sorted(st["registry"]), ["FixA-Regular (TrueType)", "Fix[wght] (TrueType)"])
+        hits = len(self.srv.srv.hits)
+        ctx2 = self.ctx()
+        self.assertEqual(self.sy.step_fonts(ctx2).status, "ok")
+        self.assertEqual(len(self.srv.srv.hits), hits)  # cached
+        self.assertEqual(sorted(ctx2.state.data["fonts"]["installed"]), sorted(st["installed"]))
+
+    def test_font_registry_interface(self):
+        ctx = self.ctx()
+        reg = self.sy.FontRegistry.for_paths(ctx.paths)
+        reg.set("A (TrueType)", "C:/x/A.ttf")
+        self.assertEqual(reg.get("A (TrueType)"), "C:/x/A.ttf")
+        reg.delete("A (TrueType)")
+        reg.delete("not there")
+        self.assertIsNone(reg.get("A (TrueType)"))
+        self.assertEqual(self.registry(ctx), {})
+
+    def test_mac(self):
+        ctx = self.ctx("mac-arm64")
+        r = self.sy.step_fonts(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual((self.home / "Library" / "Fonts" / "FixA-Regular.ttf").read_bytes(), FONT_A)
+        self.assertFalse((ctx.paths.sandbox_dir / "registry-fonts.json").exists())
+        self.assertEqual(ctx.state.data["fonts"]["registry"], [])
+
+    def test_a_different_existing_file_is_left_alone(self):
+        ctx = self.ctx()
+        mine = touch(self.sy.user_font_dir(ctx.paths, "win-x64") / "FixA-Regular.ttf", b"the editor's own font")
+        r = self.sy.step_fonts(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("FixA-Regular.ttf", r.detail)
+        self.assertEqual(mine.read_bytes(), b"the editor's own font")
+        self.assertEqual(list(self.registry(ctx)), ["Fix[wght] (TrueType)"])
+        self.assertNotIn(str(mine), ctx.state.data["fonts"]["installed"])
+
+    def test_bad_sha_is_red_and_nothing_is_installed(self):
+        self.comp["fonts"]["files"][1]["sha256"] = "0" * 64
+        ctx = self.ctx()
+        r = self.sy.step_fonts(ctx)
+        self.assertEqual(r.status, "red", r.detail)
+        self.assertFalse(self.sy.user_font_dir(ctx.paths, "win-x64").exists())
+        self.assertFalse((ctx.paths.sandbox_dir / "registry-fonts.json").exists())
+
+    def test_placeholder_is_skipped(self):
+        self.comp["fonts"]["files"][0]["sha256"] = base.PLACEHOLDER
+        r = self.sy.step_fonts(self.ctx())
+        self.assertEqual(r.status, "skipped")
+        self.assertEqual(self.srv.srv.hits, [])
+
+
+# --------------------------------------------------------------------------------------------- model
+class TestModelFor(unittest.TestCase):
+    def test_by_hardware(self):
+        sy = system_module()
+        comp = base.load_components(COMPONENTS)
+        self.assertEqual(sy.model_for({"nvidia": True}, "win-x64", comp), "large-v3")
+        self.assertEqual(sy.model_for({"nvidia": False}, "mac-arm64", comp), "large-v3")
+        self.assertEqual(sy.model_for({"nvidia": False}, "win-x64", comp), "large-v3-turbo")
+        self.assertEqual(sy.model_for({}, "mac-x64", {"schema": 1}), "large-v3-turbo")
+
+
+class TestModelStep(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        os.environ.pop("WNC_TEST_MODEL", None)
+        self.sy = system_module()
+        self.comp = base.load_components(COMPONENTS)
+
+    def test_sandbox_is_skipped_with_the_command(self):
+        ctx = make_ctx(self.home, self.comp, SK, "win-x64")
+        ctx.runtime_python = Path(sys.executable)
+        ctx.facts["nvidia"] = False
+        with mock.patch.object(subprocess, "Popen", side_effect=AssertionError("no background process in tests")):
+            r = self.sy.step_model(ctx)
+        self.assertEqual(r.status, "skipped")
+        self.assertIn("model-download --model large-v3-turbo", r.detail)
+        self.assertFalse(ctx.paths.logs_dir.exists() and list(ctx.paths.logs_dir.glob("model-download-*")))
+
+    def test_skip_flag_still_says_the_command(self):
+        ctx = make_ctx(self.home, self.comp, SK, "win-x64", skip=["model"])
+        ctx.runtime_python = Path(sys.executable)
+        [r] = base.run_steps(ctx, [("model", self.sy.step_model, ())])
+        self.assertEqual(r.status, "skipped")
+        self.assertIn("model-download --model large-v3-turbo", r.detail)
+
+
+# --------------------------------------------------------------------------------------------- settings / doctor
+class TestSettingsAndDoctor(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        tmp = Path(self._td.name)
+        self.home = tmp / ARABIC_HOME
+        self.fx = make_fixture_plugin(tmp / "repo", "http://127.0.0.1:9")
+        self.elog = tmp / "engine-calls.jsonl"
+        env = mock.patch.dict(os.environ, {"WNC_TEST_ENGINE_LOG": str(self.elog)})
+        env.start()
+        self.addCleanup(env.stop)
+        for k in ("WNC_TEST_DOCTOR_RAW", "WNC_TEST_ENGINE_EXIT"):
+            os.environ.pop(k, None)
+        self.sy = system_module()
+
+    def ctx(self):
+        c = make_ctx(self.home, self.fx.components, self.fx.plugin_root, "win-x64")
+        c.runtime_python = Path(sys.executable)
+        c.answers = {"clients_root": str(self.home / "Documents" / "WhyNot Clients"), "language": "ar"}
+        c.facts["nvidia"] = False
+        return c
+
+    def calls(self):
+        return [json.loads(x) for x in self.elog.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+    def test_settings_argv(self):
+        r = self.sy.step_settings(self.ctx())
+        self.assertEqual(r.status, "ok", r.detail)
+        [argv] = self.calls()
+        self.assertEqual(argv[:4], ["settings", "--init", str(self.home), "--force"])
+        sets = [argv[i + 1] for i, a in enumerate(argv) if a == "--set"]
+        self.assertEqual(sets, [f"clients_root={self.home / 'Documents' / 'WhyNot Clients'}", "language=ar",
+                                "whisper_model=large-v3-turbo"])
+
+    def test_settings_failure_is_amber(self):
+        with mock.patch.dict(os.environ, {"WNC_TEST_ENGINE_EXIT": "2"}):
+            r = self.sy.step_settings(self.ctx())
+        self.assertEqual(r.status, "amber")
+
+    def test_doctor_and_checklist(self):
+        ctx = self.ctx()
+        r = self.sy.step_doctor(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual([c[0] for c in self.calls()], ["doctor"])
+        ld = ctx.state.data["last_doctor"]
+        self.assertEqual((ld["verdict"], ld["ready"]), ("ready", True))
+        results = [base.StepResult("runtime", "ok", "built"), base.StepResult("gpu", "skipped", "no NVIDIA GPU"),
+                   base.StepResult("fonts", "red", "sha256 mismatch"), r]
+        text = self.sy.render_checklist(results, ctx.facts["doctor"])
+        lines = text.splitlines()
+        self.assertTrue(lines[0].startswith("[OK] runtime"))
+        self.assertTrue(lines[1].startswith("[!!] gpu") and "no NVIDIA GPU" in lines[1])
+        self.assertTrue(lines[2].startswith("[XX] fonts"))
+        self.assertIn("[!!] x -> y", lines)
+
+    def test_doctor_not_json_is_amber(self):
+        with mock.patch.dict(os.environ, {"WNC_TEST_DOCTOR_RAW": "Traceback: boom"}):
+            ctx = self.ctx()
+            r = self.sy.step_doctor(ctx)
+        self.assertEqual(r.status, "amber")
+        self.assertIsNone(ctx.state.data["last_doctor"]["verdict"])
+
+    def test_real_doctor_shape(self):
+        ready = {"engine": True, "premiere_build": False}
+        with mock.patch.dict(os.environ, {"WNC_TEST_DOCTOR_RAW": json.dumps(
+                {"verdict": "READY (no live Premiere build yet)", "ready": ready, "fixes": []})}):
+            ctx = self.ctx()
+            r = self.sy.step_doctor(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertTrue(ctx.state.data["last_doctor"]["ready"])
+
+
+# --------------------------------------------------------------------------------------------- launch
+class TestLaunch(unittest.TestCase):
+    def test_sandbox_never_opens_anything(self):
+        sy = system_module()
+        with tempfile.TemporaryDirectory() as td:
+            ctx = make_ctx(Path(td) / "h", {"schema": 1}, SK, "win-x64")
+            with mock.patch.object(subprocess, "run", side_effect=AssertionError("ran")):
+                r = sy.step_launch(ctx)
+        self.assertEqual(r.status, "skipped")
+        self.assertIn("/whynot-cut:start", sy.START_MESSAGE)
+        self.assertIn("افتح Claude واكتب /whynot-cut:start", sy.START_MESSAGE_AR)
+
+
+# --------------------------------------------------------------------------------------------- whole install
+class TestInstallDryRun(unittest.TestCase):
+    def test_dry_run_writes_nothing_and_names_every_step(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / ARABIC_HOME
+            home.mkdir()
+            r = subprocess.run([sys.executable, "-B", str(CORE / "wnc_install.py"), "install", "--home", str(home),
+                                "--dry-run", "--yes"], capture_output=True, text=True, encoding="utf-8",
+                               env=sandbox_env(), timeout=120, stdin=subprocess.DEVNULL)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(list(home.iterdir()), [])
+        for name in STEP_NAMES:
+            self.assertIn(f"== {name} ==", r.stdout)
+        self.assertIn("dry run", r.stdout)
+
+
+class TestInstallEndToEnd(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.home = self.tmp / ARABIC_HOME
+        self.srv = Served(self, {})
+        self.fx = make_fixture_plugin(self.tmp / "zip root", self.srv.base)
+        self.srv.srv.files.update(self.fx.served)
+        self.elog = self.tmp / "engine-calls.jsonl"
+        self.env = sandbox_env(WNC_TEST_UV=str(FAKE_UV), WNC_CLAUDE_CLI=str(FAKE_CLAUDE),
+                               FAKE_CLAUDE_LOG=str(self.tmp / "claude.jsonl"), WNC_TEST_ENGINE_LOG=str(self.elog))
+
+    def install(self):
+        core = self.fx.plugin_root / "installer" / "core" / "wnc_install.py"
+        return subprocess.run([sys.executable, "-B", "-I", str(core), "install", "--home", str(self.home), "--yes",
+                               "--skip", "model"], capture_output=True, text=True, encoding="utf-8", env=self.env,
+                              timeout=600, stdin=subprocess.DEVNULL)
+
+    def test_install_then_reinstall(self):
+        r = self.install()
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        paths = base.Paths.from_env(str(self.home), env={})
+        self.assertTrue(paths.current_file.is_file())
+        st = json.loads(paths.state_file.read_text(encoding="utf-8"))
+        bad = {k: v for k, v in st["steps"].items() if v["status"] not in ("ok", "skipped")}
+        self.assertEqual(bad, {}, out)
+        self.assertEqual(st["plugin"], "3.0.0")
+        self.assertEqual(st["runtime"]["id"], "r-" + sha(LOCK_A)[:12])
+        self.assertEqual(st["answers"]["language"], "ar")
+        self.assertEqual(st["answers"]["clients_root"], str(self.home / "Documents" / "WhyNot Clients"))
+        self.assertEqual(st["last_doctor"]["verdict"], "ready")
+        for key in ("channel", "installed_at", "platform", "uv", "python"):
+            self.assertIn(key, st)
+        settings = json.loads(paths.settings_file.read_text(encoding="utf-8"))
+        self.assertIn("thewhynot-ai", settings["extraKnownMarketplaces"])
+        self.assertTrue(settings["enabledPlugins"]["whynot-cut@thewhynot-ai"])
+        if IS_WIN:
+            self.assertEqual(len(json.loads((paths.sandbox_dir / "registry-fonts.json").read_text("utf-8"))), 2)
+        self.assertTrue(list(paths.logs_dir.glob("install-*.log")))
+        self.assertTrue((paths.logs_dir / "install-checklist.json").is_file())
+        self.assertIn("[!!] x -> y", r.stdout)
+        self.assertIn("/whynot-cut:start", r.stdout)
+        self.assertFalse((self.home / "Documents" / "WhyNot Clients").exists())
+        engine = [json.loads(x)[0] for x in self.elog.read_text(encoding="utf-8").splitlines() if x.strip()]
+        self.assertEqual(engine, ["settings", "doctor"])  # no model-download (skipped), no gpu-enable (no NVIDIA)
+        hits = len(self.srv.srv.hits)
+        r2 = self.install()
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertEqual(len(self.srv.srv.hits), hits, self.srv.srv.hits[hits:])
 
 
 if __name__ == "__main__":
