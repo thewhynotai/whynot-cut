@@ -295,8 +295,9 @@ class HostOrigin(unittest.TestCase):
         self.assertEqual(tuple(security.ALLOWED_ORIGINS_EXACT), ("file://",))
         src = Path(security.__file__).read_text(encoding="utf-8")
         i = src.index("ALLOWED_ORIGINS_EXACT =")
-        near = src[max(0, i - 900):i + 100]
-        for cite in ("0.1.4", "26.5.2", "serve-audit.log", '"reason":"file://"'):
+        near = src[max(0, i - 1600):i + 100]
+        for cite in ("0.1.4", "26.5.2", "serve-audit.log", '"reason":"file://"', "--allow-file-access-from-files",
+                     "validate_exact_origins"):
             self.assertIn(cite, near)
 
     def test_uxp_file_origin_is_allowed(self):
@@ -330,16 +331,34 @@ class HostOrigin(unittest.TestCase):
     def test_exact_file_origin_repeated_is_refused(self):
         self.assertEqual(security.origin_rejection({"Origin": "file://", "origin": "file://"}), "origin-repeated")
 
+    WIDENED = ("null", "NULL", "http://localhost:1", "https://evil.example", "HTTP://127.0.0.1:1", "file:///x",
+               "file://host", "FILE://", "File://", "file:", "chrome-extension://abc", "moz-extension://abc",
+               "safari-web-extension://abc", "ws://127.0.0.1:1", "wss://example.com")
+
     def test_exact_allowlist_cannot_open_null_or_a_browser_page(self):
-        """Even if someone widened the exact list, "null" and file pages with a path stay refused: the exact list is
-        an exact compare, never a prefix, and only after the malformed check."""
+        """The exact list is read before the null / browser-scheme checks, so a widened list must not open them: an
+        entry that is "null" or a browser-scheme value other than the exact `file://` is never honoured (check time),
+        and the module refuses to load with one (import time, validate_exact_origins)."""
         old = security.ALLOWED_ORIGINS_EXACT
-        security.ALLOWED_ORIGINS_EXACT = ("file://",)
+        security.ALLOWED_ORIGINS_EXACT = ("file://",) + self.WIDENED
         try:
-            for o in ("file:///x", "file://x", "FILE://", "file:// ", "null"):
+            for o in self.WIDENED + ("file://x", "file:// "):
                 self.assertFalse(security.check_origin({"Origin": o}), repr(o))
+                self.assertIsNotNone(security.origin_rejection({"Origin": o}), repr(o))
+            self.assertEqual(security.origin_rejection({"Origin": "null"}), "origin-null")
+            self.assertEqual(security.origin_rejection({"Origin": "https://evil.example"}), "origin-browser-scheme")
+            self.assertTrue(security.check_origin({"Origin": "file://"}))
         finally:
             security.ALLOWED_ORIGINS_EXACT = old
+
+    def test_exact_allowlist_is_validated_at_import(self):
+        security.validate_exact_origins(security.ALLOWED_ORIGINS_EXACT)          # the shipped list is valid
+        security.validate_exact_origins(("file://", "uxp-host-app"))             # a non-browser exact value is fine
+        for bad in self.WIDENED + ("", " file://", "file://\t", "file:// x", None, 7):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                security.validate_exact_origins(("file://", bad))
+        src = Path(security.__file__).read_text(encoding="utf-8")
+        self.assertIn("validate_exact_origins(ALLOWED_ORIGINS_EXACT)", src)      # called when the module loads
 
     def test_prefix_allowlist_cannot_open_browser_schemes(self):
         old = security.ALLOWED_ORIGIN_PREFIXES

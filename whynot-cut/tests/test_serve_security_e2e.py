@@ -382,8 +382,9 @@ class UxpFileOrigin(LiveCase):
 
     async def test_outer_whitespace_is_not_part_of_the_value(self):
         """RFC 9110 5.5: optional whitespace around a field value is not part of it, so the request parser strips
-        it before the Origin gate. `Origin: file:// ` on the wire IS the value `file://` (no browser sends it: a
-        file page's Origin is `null`); whitespace inside the value is refused (above)."""
+        it before the Origin gate. `Origin: file:// ` on the wire IS the value `file://`, so it reaches the hello
+        like bare `file://` (UXP; Chromium-family browsers send `null` from a file page by default, `file://` only
+        with file-URL access enabled) and the token still decides; whitespace inside the value is refused (above)."""
         for raw in ("file:// ", " file://", "file://\t"):
             c = await self.connect(origin=raw)
             self.assertEqual(c.status, 101, repr(raw))

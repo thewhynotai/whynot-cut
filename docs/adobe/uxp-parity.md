@@ -238,10 +238,14 @@ reopened copy `spike-20261012-211920-copy`.
 `211920` (spike 0.1.3) was still blocked inside Premiere by the manifest (W1, W2: "Permission denied to the url ...
 Manifest entry not found"). Once the network permission let the request out, the WhyNot Cut panel 3.0.0 and spike 0.1.4
 reached the daemon (port 53672), and every `/session` upgrade carried that exact value: `~/.whynot-cut/logs/serve-audit.log`
-holds 136 rows `{"event":"origin","action":"/session","outcome":"rejected","reason":"file://"}` between 18:28Z and
-18:44Z on 2026-10-12, each followed by `{"event":"http",...,"reason":"origin-browser-scheme"}`. No other Origin value
-appears. There is no `/status` row, so whether UXP's `fetch` sends an Origin is still not observed. The provisional
-policy refused `file` as a browser scheme, so the panel could never connect.
+holds 205 rows `{"event":"origin","action":"/session","outcome":"rejected","reason":"file://"}` from 18:28:58Z to
+18:52:26Z on 2026-10-12 (daemon pid 83576), each followed by `{"event":"http",...,"reason":"origin-browser-scheme"}`.
+No other Origin value appears. There is no `/status` row, so whether UXP's `fetch` sends an Origin is still not
+observed. The provisional policy refused `file` as a browser scheme, so the panel could never connect.
+
+After the fix (`304cc06`) the daemon was restarted at 18:52:36Z (pid 159548, port 56549). Within 5 s two `/session` upgrades were logged with `"outcome":"allowed","reason":"file://"`, and both authenticated (`auth` `ok`):
+- the spike (`uxp premiere ping,status,...`) at 18:52:40.656Z;
+- the panel at 18:52:41.310Z.
 
 **Policy (controller ruling, T6.2; `serve/security.py` `ALLOWED_ORIGINS_EXACT`).** The daemon allows the exact value
 `file://` and nothing else new. The compare is case-sensitive and exact, so these stay refused:
@@ -261,17 +265,30 @@ The `uxp://` / `plugin:` prefixes of the provisional policy are kept, but they a
 
 **Threat model.** Senders of `file://`:
 - **UXP (measured)** sends it.
-- **Chromium, Firefox and Safari** do not send it. A page opened from disk sends `null`, and web or extension pages send their own http(s) or *-extension origin. All of those are refused.
-- **Some Electron or CEF apps** may send it from a page loaded from disk. A CEP panel runs in CEF, so the future CEP adapter connection is likely to send `file://` too. The same rule covers it; measure it when that adapter is built.
+- **Chromium-family browsers** send `null` from a file page by default, and that is refused. They send `file://` when file-URL access is enabled. The T6.2 security review measured Chrome 154 started with `--allow-file-access-from-files` sending `Origin: file://` on both the WebSocket and `fetch`.
+- **Embedders with the equivalent setting** send it too: Electron `allowFileAccessFromFileUrls` or `webSecurity: false`, and Android WebView.
+- **CEP panels.** A CEP panel runs in CEF, so the future CEP adapter connection is likely to send `file://` as well. The same rule covers it; measure it when that adapter is built.
+- **Everything else** is still refused: web and extension pages send their own http(s) or *-extension origin.
 
 A client that passes the Origin gate this way still gets nothing without the token:
-- The token lives only in `<engine home>/bridge/engine.json`. That file is user-only (POSIX 0600, or a Windows DACL for the user's SID alone), and no browser page can read it.
+- Those contexts reach only the pre-auth surface: a WebSocket upgrade with 3 s (`hello_timeout`) to send a valid `hello` while it holds one of the 32 connection slots (`MAX_CONNECTIONS`), or a 401 from the HTTP routes.
+- The token lives only in `<engine home>/bridge/engine.json`. That file is user-only (POSIX 0600, or a Windows DACL for the user's SID alone), and no web page can read it.
 - The Host check stops DNS rebinding.
 - The 127.0.0.1-only bind keeps everything off the machine out.
 
-A process that runs as the user and can read engine.json is already past every one of these defences, the same trust as the user's own shell. Allowing `file://` therefore adds no reachable attacker.
+A process that runs as the user and can read engine.json is already past every one of these defences, the same trust as the user's own shell.
+
+Allowing `file://` therefore adds pre-auth WebSocket surface to those contexts only, and nothing gets past `hello` without the token.
+
+**Residual risk.** A file page that has file-URL access can also read the user's local files, `engine.json` included, so for that page the token is no barrier. That attack needs both of these:
+- the user runs such a browser or embedder;
+- the user opens a hostile local HTML file.
+
+Such a page already holds the user's files. Before T6.2 the Origin gate refused it.
 
 **Still to record:** whether UXP's `fetch` sends an Origin, the round trip of a protocol-4 `ping`, how long an idle socket stays open, and the macOS Origin.
+
+**Follow-up (tracked, T6.2):** once macOS UXP is measured, replace the `uxp://` / `plugin:` prefixes (`ALLOWED_ORIGIN_PREFIXES`) with the exact values measured on macOS in `ALLOWED_ORIGINS_EXACT`, or drop them if macOS also sends `file://`. Update `test_serve_app.py::test_uxp_origin_is_allowed_and_audited` with them.
 
 ## Spike defects: status after 0.1.2
 

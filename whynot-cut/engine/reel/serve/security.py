@@ -15,15 +15,21 @@ The token must never appear in a URL, a log line or an error message; callers pa
 
 Origin threat model. The Origin gate only keeps browser pages out; it is not what authenticates. Premiere 26.5.2's UXP
 WebSocket sends exactly `Origin: file://` (measured live, see ALLOWED_ORIGINS_EXACT), so that one exact value passes
-the gate. Chromium, Firefox and Safari do not send it: a page opened from disk sends `null`, and web or extension pages
-send their own http(s) / *-extension origin; all of those stay refused, and so does every other file form. What else
-may send `file://` is a desktop app embedding a browser engine (some Electron or CEF pages loaded from disk; a CEP
-panel runs in CEF, so the future CEP adapter connection is covered by this same rule). Passing the Origin gate gives
-such a client nothing without the token: the token lives only in engine.json, which is user-only (POSIX 0600 / a DACL
-for the user's SID) and which no browser page can read, and a hello or HTTP request without it is refused. The Host
-check (`127.0.0.1:<port>` / `localhost:<port>` only) stops DNS rebinding, and the daemon binds 127.0.0.1 only, so
-nothing off the machine reaches it. A process running as the user that can read engine.json is already past every
-defence here (the same trust as the user's own shell).
+the gate; every other file form, `null` and every http(s) / ws(s) / *-extension origin stay refused. Not only UXP
+sends it. Chromium-family browsers send `null` from a file page by default, but `file://` when file-URL access is
+enabled (measured by the T6.2 security review: Chrome 154 with `--allow-file-access-from-files` sends `Origin: file://`
+on both WebSocket and fetch), and embedders with the equivalent setting do too (Electron `allowFileAccessFromFileUrls`
+or `webSecurity: false`, Android WebView); a CEP panel runs in CEF, so the future CEP adapter connection is likely to
+send it as well and is covered by this rule. Those contexts reach only the pre-auth surface: a WebSocket upgrade with
+`hello_timeout` (3 s) to send a valid hello while holding one connection slot (MAX_CONNECTIONS), or a 401 from the
+HTTP routes. The token still decides: it lives only in engine.json, which is user-only (POSIX 0600 / a DACL for the
+user's SID) and which no web page can read, and a hello or HTTP request without it is refused. Residual risk: a file
+page in a context with file-URL access enabled can also read the user's local files, engine.json included, so for
+it the token is no barrier. That needs the user to run such a browser or embedder AND open a hostile local HTML file,
+which already holds the user's files (the same trust as the user's own processes, below); the Origin gate refused it
+before T6.2 allowed `file://`. The Host check (`127.0.0.1:<port>` / `localhost:<port>` only) stops DNS rebinding,
+and the daemon binds 127.0.0.1 only, so nothing off the machine reaches it. A process running as the user that can
+read engine.json is already past every defence here (the same trust as the user's own shell).
 """
 from __future__ import annotations
 
@@ -46,10 +52,14 @@ PROTOCOL = 4
 # Premiere Pro 26.5.2 (UXP 9.3.0): the WhyNot Cut panel 3.0.0 and spike 0.1.4 send exactly `file://` on the /session
 # upgrade (spike 0.1.3's attempt never left Premiere: manifest, parity W1), and the daemon refused every one while
 # `file` was only a browser scheme
-# (~/.whynot-cut/logs/serve-audit.log, 2026-10-12 18:28Z-18:44Z: 136 rows
-# {"event":"origin","action":"/session","outcome":"rejected","reason":"file://"} and no other Origin). Browsers never
-# send it (a file page sends "null"); the module docstring has the threat model. Controller ruling (T6.2): this one
-# value and nothing else new; the token, the Host check and the loopback bind still apply to it.
+# (~/.whynot-cut/logs/serve-audit.log, 2026-10-12 18:28:58Z-18:52:26Z: 205 rows
+# {"event":"origin","action":"/session","outcome":"rejected","reason":"file://"} and no other Origin). Chromium-family
+# browsers send "null" from a file page by default, but `file://` when file-URL access is enabled
+# (`--allow-file-access-from-files`, or embedders with the equivalent setting); those contexts reach only the pre-auth
+# hello (3 s window, one connection slot) and the token still decides (module docstring: threat model). Controller
+# ruling (T6.2): this one value and nothing else new; the token, the Host check and the loopback bind still apply.
+# Every entry must pass validate_exact_origins (no "null", no browser-scheme value except this exact `file://`),
+# because origin_rejection reads this list before the null / browser-scheme checks.
 ALLOWED_ORIGINS_EXACT = ("file://",)
 
 # Origin prefixes kept from the provisional policy. UNMEASURED: nothing live has sent them (the UXP panel sends
@@ -63,6 +73,30 @@ ALLOWED_ORIGIN_PREFIXES = ("uxp://", "plugin:")
 # `FILE://`, `file:`) is refused as a browser scheme.
 BROWSER_SCHEMES = frozenset({"http", "https", "file", "chrome-extension", "moz-extension", "safari-web-extension",
                              "ws", "wss"})
+
+_BAD_ORIGIN_CHARS = re.compile(r"[\s\x00-\x1f\x7f]")
+
+
+def _exact_entry_ok(value) -> bool:
+    """May `value` stand in ALLOWED_ORIGINS_EXACT? The list is read BEFORE the "null" / browser-scheme checks, so an
+    entry must not be "null" (any case) nor a browser-scheme value, except the one measured `file://`."""
+    if not isinstance(value, str) or not value or _BAD_ORIGIN_CHARS.search(value):
+        return False
+    low = value.lower()
+    if low == "null":
+        return False
+    scheme = low.split(":", 1)[0] if ":" in low else ""
+    return scheme not in BROWSER_SCHEMES or value == "file://"
+
+
+def validate_exact_origins(values) -> None:
+    """ValueError unless every entry may stand in ALLOWED_ORIGINS_EXACT (_exact_entry_ok)."""
+    bad = [v for v in values if not _exact_entry_ok(v)]
+    if bad:
+        raise ValueError(f"ALLOWED_ORIGINS_EXACT may not hold null, a browser-scheme value or a malformed one: {bad!r}")
+
+
+validate_exact_origins(ALLOWED_ORIGINS_EXACT)        # import time; origin_rejection re-checks at check time too
 
 REDACTED = "[redacted]"
 _HEX_RUN = re.compile(r"[0-9a-fA-F]{64,}")
@@ -489,8 +523,9 @@ def origin_rejection(headers) -> str | None:
     low = origin.lower()
     if not origin or re.search(r"[\s\x00-\x1f\x7f]", origin):
         return "origin-malformed"
-    if origin in ALLOWED_ORIGINS_EXACT:
-        return None            # the measured UXP value, exactly (FILE://, file:///x, file://host fall through)
+    if origin in ALLOWED_ORIGINS_EXACT and _exact_entry_ok(origin):
+        return None            # the measured UXP value, exactly (FILE://, file:///x, file://host fall through; a
+                               # widened entry that is null or a browser-scheme value is never honoured)
     if low == "null":
         return "origin-null"
     scheme = low.split(":", 1)[0] if ":" in low else ""
