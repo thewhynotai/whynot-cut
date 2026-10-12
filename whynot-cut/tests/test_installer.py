@@ -29,6 +29,14 @@
     LOCALAPPDATA + registry-fonts.json, ~/Library/Fonts, a different file kept, bad sha red), model_for and the model
     step (never spawned in tests), settings / doctor through the stub engine of make_fixture_plugin(), the checklist,
     launch, a dry run that writes nothing, and a whole sandboxed install (twice: no new download).
+  * the shells (task 5, T7.2): install.ps1 / bootstrap.ps1 under Windows PowerShell and install.sh / bootstrap.sh under
+    bash (Git Bash on Windows with WNC_TEST_PLATFORM=mac-arm64), end to end in a home with a space and Arabic letters:
+    the uv archive downloaded and verified even with WNC_TEST_UV, one log shared with the core, the real ~/.claude and
+    ~/.whynot-cut untouched, a dry run leaves the home empty, a bad sha256 exits 3 naming the file, uv at the pinned
+    version is not downloaded again, the one-liner modes (-Source zip + sha256; `irm | iex` and the script-block form
+    keep the session; no -Source = the H3 line in English and Arabic, exit 2; `bash -s < install.sh` does not hang),
+    Git Bash without the test platform exits 2, plus static checks (ASCII .ps1, LF .sh, the step list, the README).
+    Temp folders use TempDir (cleanup retried: Windows WinError 32 / 145).
 Never touches the real ~/.whynot-cut or ~/.claude: every Paths is a sandbox home in a temp folder, and no real
 network is used (artefacts come from a 127.0.0.1 http.server started here, or file://).
 Run (repo root):
@@ -46,11 +54,13 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import threading
+import time
 import types
 import unittest
 import zipfile
@@ -105,6 +115,47 @@ class Quiet(base.Log):
 
     def __init__(self, path=None, dry_run=False):
         super().__init__(path, dry_run, console=False)
+
+
+def rmtree_retry(path, attempts: int = 8) -> bool:
+    """rmtree that survives Windows' transient refusals (WinError 32 / 145 while the indexer or antivirus still holds a
+    file the test just wrote): read-only entries get write permission, short doubling back-off, then give up quietly.
+    True when the folder is gone."""
+    def fix(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+            func(p)
+        except OSError:
+            pass
+    kw = {"onexc": fix} if sys.version_info >= (3, 12) else {"onerror": fix}
+    for i in range(attempts):
+        if not os.path.lexists(path):
+            return True
+        try:
+            shutil.rmtree(path, **kw)
+        except OSError:
+            pass
+        if not os.path.lexists(path):
+            return True
+        time.sleep(min(0.05 * 2 ** i, 1.0))
+    return not os.path.lexists(path)
+
+
+class TempDir:
+    """tempfile.TemporaryDirectory for these tests: same .name / .cleanup() / `with ... as name`, but the cleanup
+    retries and finally ignores what Windows still refuses to delete (a leftover in %TEMP% must not fail a test)."""
+
+    def __init__(self):
+        self.name = tempfile.mkdtemp(prefix="wnc-")
+
+    def cleanup(self) -> None:
+        rmtree_retry(self.name)
+
+    def __enter__(self) -> str:
+        return self.name
+
+    def __exit__(self, *exc) -> None:
+        self.cleanup()
 
 
 # --------------------------------------------------------------------------------------------- components.json
@@ -206,7 +257,7 @@ class TestPlatformId(unittest.TestCase):
 
 class TestPaths(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.tmp = Path(self._td.name)
 
     def tearDown(self):
@@ -259,7 +310,7 @@ class TestPaths(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- files / log
 class TestFiles(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.tmp = Path(self._td.name) / ARABIC_HOME
 
     def tearDown(self):
@@ -328,7 +379,7 @@ class TestDownload(unittest.TestCase):
     BODY = b"pinned artefact " * 1000
 
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.tmp = Path(self._td.name) / ARABIC_HOME
         self.dl = self.tmp / ".whynot-cut" / "downloads"
         self.srv = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
@@ -474,7 +525,7 @@ class TestDownload(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- extract
 class TestExtract(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.tmp = Path(self._td.name) / ARABIC_HOME
         self.tmp.mkdir()
         self.dest = self.tmp / "out"
@@ -554,7 +605,7 @@ class TestExtract(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- state
 class TestState(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.paths = base.Paths.from_env(str(Path(self._td.name) / ARABIC_HOME), env={})
 
     def tearDown(self):
@@ -617,7 +668,7 @@ class TestState(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- run_steps
 class TestRunSteps(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.paths = base.Paths.from_env(str(Path(self._td.name) / ARABIC_HOME), env={})
         self.logf = self.paths.logs_dir / "install-test.log"
         st = base.State(self.paths)
@@ -687,7 +738,7 @@ def make_dir_link(link: Path, target: Path) -> bool:
 
 class TestSafeRmtree(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.tmp = Path(self._td.name)
         self.root = self.tmp / "home" / ".whynot-cut"
         (self.root / "runtimes" / "r-1" / "Lib").mkdir(parents=True)
@@ -752,7 +803,7 @@ class TestSafeRmtree(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- cli
 class TestPlanCommand(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.home = Path(self._td.name) / ARABIC_HOME
         self.home.mkdir()
 
@@ -850,7 +901,7 @@ class Served:
 # --------------------------------------------------------------------------------------------- runtime step
 class TestRuntime(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         tmp = Path(self._td.name)
         self.home = tmp / ARABIC_HOME
@@ -1134,7 +1185,7 @@ class TestFfmpeg(unittest.TestCase):
     MAC_FP = ffmpeg_zip({"ffprobe": b"\xcf\xfa ffprobe"})
 
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.home = Path(self._td.name) / ARABIC_HOME
         self.srv = Served(self, {"/win/ff.zip": self.WIN_ZIP, "/mac/ffmpeg.zip": self.MAC_FF,
@@ -1217,7 +1268,7 @@ class TestFfmpeg(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- gpu step
 class TestGpu(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         tmp = Path(self._td.name)
         self.home = tmp / ARABIC_HOME
@@ -1301,7 +1352,7 @@ def norm(p) -> str:
 
 class TestFindClaudeParity(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
         self.empty = self.tmp / "empty path"
@@ -1357,7 +1408,7 @@ class TestSettingsMerge(unittest.TestCase):
     MKT = {"thewhynot-ai": {"source": {"source": "directory", "path": "C:\\Users\\x\\.whynot-cut\\marketplace"}}}
 
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.f = Path(self._td.name) / ARABIC_HOME / ".claude" / "settings.json"
         self.cl = claude_module()
@@ -1471,7 +1522,7 @@ class TestSettingsMerge(unittest.TestCase):
 
 class TestUnmerge(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         tmp = Path(self._td.name)
         self.f = tmp / ARABIC_HOME / ".claude" / "settings.json"
@@ -1540,7 +1591,7 @@ def make_marketplace_src(root: Path, version: bytes = b"v1") -> Path:
 
 class TestRefreshMarketplace(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         tmp = Path(self._td.name)
         self.src = tmp / "zip root"
@@ -1574,7 +1625,7 @@ class TestRefreshMarketplace(unittest.TestCase):
 
 class TestStepClaude(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
         self.home = self.tmp / ARABIC_HOME
@@ -1819,7 +1870,7 @@ class TestGitBash(unittest.TestCase):
     ZIP = ffmpeg_zip({"bin/bash.exe": b"MZ bash", "cmd/git.exe": b"MZ git"})
 
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
         self.home = self.tmp / ARABIC_HOME
@@ -2101,7 +2152,7 @@ def sandbox_env(**extra) -> dict:
 # --------------------------------------------------------------------------------------------- preflight
 class TestPreflight(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
         self.sy = system_module()
@@ -2178,7 +2229,7 @@ class TestPreflight(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- questions
 class TestQuestions(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.home = Path(self._td.name) / ARABIC_HOME
         self.sy = system_module()
@@ -2235,7 +2286,7 @@ class TestAdobe(unittest.TestCase):
     UNSIGNED = ffmpeg_zip({"CSXS/manifest.xml": b"<ExtensionManifest/>", "index.html": b"<html/>"})
 
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
         self.home = self.tmp / ARABIC_HOME
@@ -2395,7 +2446,7 @@ class TestAdobe(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- fonts
 class TestFonts(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.home = Path(self._td.name) / ARABIC_HOME
         self.srv = Served(self, {})
@@ -2498,7 +2549,7 @@ class TestModelFor(unittest.TestCase):
 
 class TestModelStep(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.home = Path(self._td.name) / ARABIC_HOME
         os.environ.pop("WNC_TEST_MODEL", None)
@@ -2526,7 +2577,7 @@ class TestModelStep(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- settings / doctor
 class TestSettingsAndDoctor(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         tmp = Path(self._td.name)
         self.home = tmp / ARABIC_HOME
@@ -2618,7 +2669,7 @@ class TestSettingsAndDoctor(unittest.TestCase):
 class TestLaunch(unittest.TestCase):
     def test_sandbox_never_opens_anything(self):
         sy = system_module()
-        with tempfile.TemporaryDirectory() as td:
+        with TempDir() as td:
             ctx = make_ctx(Path(td) / "h", {"schema": 1}, SK, "win-x64")
             with mock.patch.object(subprocess, "run", side_effect=AssertionError("ran")):
                 r = sy.step_launch(ctx)
@@ -2630,7 +2681,7 @@ class TestLaunch(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- whole install
 class TestInstallDryRun(unittest.TestCase):
     def test_dry_run_writes_nothing_and_names_every_step(self):
-        with tempfile.TemporaryDirectory() as td:
+        with TempDir() as td:
             home = Path(td) / ARABIC_HOME
             home.mkdir()
             r = subprocess.run([sys.executable, "-B", str(CORE / "wnc_install.py"), "install", "--home", str(home),
@@ -2645,7 +2696,7 @@ class TestInstallDryRun(unittest.TestCase):
 
 class TestInstallEndToEnd(unittest.TestCase):
     def setUp(self):
-        self._td = tempfile.TemporaryDirectory()
+        self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
         self.home = self.tmp / ARABIC_HOME
@@ -2694,6 +2745,390 @@ class TestInstallEndToEnd(unittest.TestCase):
         r2 = self.install()
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
         self.assertEqual(len(self.srv.srv.hits), hits, self.srv.srv.hits[hits:])
+
+
+# --------------------------------------------------------------------------------------------- T7.2 shells
+INSTALLER = SK / "installer"
+SHELL_FILES = {"install.ps1": INSTALLER / "install.ps1", "install.sh": INSTALLER / "install.sh",
+               "bootstrap.ps1": INSTALLER / "core" / "bootstrap.ps1", "bootstrap.sh": INSTALLER / "core" / "bootstrap.sh"}
+H3_EN = "hosting is not ready yet (H3)"
+H3_AR = "الاستضافة غير جاهزة بعد (H3)"
+
+
+def find_powershell():
+    """Windows PowerShell 5.1 (what every editor's PC has); None elsewhere."""
+    return shutil.which("powershell") if IS_WIN else None
+
+
+def find_bash():
+    """Git Bash on Windows (never WSL's System32\\bash.exe), else bash from PATH."""
+    if not IS_WIN:
+        return shutil.which("bash")
+    cands = []
+    git = shutil.which("git")
+    if git:
+        root = Path(git).resolve().parents[1]
+        cands += [root / "bin" / "bash.exe", root / "usr" / "bin" / "bash.exe"]
+    cands.append(Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe")
+    return next((str(c) for c in cands if c.is_file()), None)
+
+
+def real_profile() -> Path:
+    """This user's REAL profile folder, from the OS rather than the (possibly sandboxed) environment."""
+    if IS_WIN:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(32768)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x0028, None, 0, buf) == 0:  # CSIDL_PROFILE
+            return Path(buf.value)
+    else:
+        import pwd
+        return Path(pwd.getpwuid(os.getuid()).pw_dir)
+    return Path.home()
+
+
+def live_snapshot() -> dict:
+    """Read-only fingerprint of the real ~/.claude/settings.json and the real ~/.whynot-cut top level."""
+    prof = real_profile()
+    settings, engine = prof / ".claude" / "settings.json", prof / ".whynot-cut"
+    st = settings.stat() if settings.is_file() else None
+    return {"settings": (st.st_mtime_ns, st.st_size) if st else None,
+            "engine_home": sorted(os.listdir(engine)) if engine.is_dir() else None}
+
+
+def release_zip(fx: types.SimpleNamespace, dest: Path) -> str:
+    """The fixture marketplace as a release zip (whynot-cut-marketplace/... like package.py); returns its sha256."""
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in sorted(fx.root.rglob("*")):
+            if p.is_file():
+                z.write(p, "whynot-cut-marketplace/" + p.relative_to(fx.root).as_posix())
+    return sha(dest.read_bytes())
+
+
+def shell_steps(text: str, pattern: str) -> list:
+    m = re.search(pattern, text)
+    return re.findall(r"[a-z]+", m.group(1)) if m else []
+
+
+class TestShellScripts(unittest.TestCase):
+    """Static checks of the four shell files (they run on machines this suite cannot always reach)."""
+
+    def test_the_files_exist_ps1_are_ascii_and_sh_are_lf(self):
+        for name, p in SHELL_FILES.items():
+            data = p.read_bytes()
+            if name.endswith(".ps1"):  # Windows PowerShell 5.1 reads a BOM-less file as ANSI: keep them ASCII
+                self.assertTrue(all(b < 128 for b in data), name)
+            else:
+                self.assertNotIn(b"\r\n", data, name)
+                self.assertTrue(data.startswith(b"#!/usr/bin/env bash\n"), name)
+
+    def test_the_bootstraps_know_the_core_steps(self):
+        ps = SHELL_FILES["bootstrap.ps1"].read_text(encoding="utf-8")
+        sh = SHELL_FILES["bootstrap.sh"].read_text(encoding="utf-8")
+        self.assertEqual(shell_steps(ps, r"\$WncStepNames\s*=\s*@\(([^)]*)\)"), list(cli.STEP_ORDER))
+        self.assertEqual(shell_steps(sh, r'STEP_NAMES="([^"]*)"'), list(cli.STEP_ORDER))
+
+    def test_the_bootstraps_use_the_runtime_contract(self):
+        for name in ("bootstrap.ps1", "bootstrap.sh"):
+            text = SHELL_FILES[name].read_text(encoding="utf-8")
+            for needle in ("--no-bin", "--no-registry", "only-managed", "UV_NO_MODIFY_PATH", "UV_NO_CONFIG",
+                           "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "UV_PYTHON_PREFERENCE", "utf8", "wnc_install.py"):
+                self.assertIn(needle, text, f"{name}: {needle}")
+
+    def test_the_readme_names_every_flag(self):
+        text = (INSTALLER / "README.md").read_text(encoding="utf-8")
+        for flag in ("-Home", "-DryRun", "-Yes", "-ClientsFolder", "-Language", "-Channel", "-Components", "-Skip",
+                     "-Uninstall", "-RemoveEngine", "-RemoveModels", "-Source", "-SourceSha256",
+                     "--home", "--dry-run", "--yes", "--clients-folder", "--language", "--channel", "--components",
+                     "--skip", "--uninstall", "--remove-engine", "--remove-models", "--source", "--source-sha256",
+                     "WNC_TEST_UV", "WNC_TEST_PLATFORM", "logs"):
+            self.assertIn(flag, text)
+
+
+class _ShellCase(unittest.TestCase):
+    """A sandbox home with a space and Arabic letters, a fixture plugin whose pins point at a local http.server."""
+    UV_PLAT = "win-x64"
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.home = self.tmp / ARABIC_HOME
+        self.srv = Served(self, {})
+        self.fx = make_fixture_plugin(self.tmp / "zip root", self.srv.base)
+        self.srv.srv.files.update(self.fx.served)
+        self.paths = base.Paths.from_env(str(self.home), env={})
+
+    def uv_asset(self, plat=None) -> dict:
+        return self.fx.components["uv"]["assets"][plat or self.UV_PLAT]
+
+    def uv_archive(self, plat=None) -> Path:
+        return self.paths.downloads_dir / self.uv_asset(plat)["url"].rsplit("/", 1)[-1]
+
+    def break_uv_sha(self, plat=None) -> None:
+        comp = json.loads(self.fx.components_path.read_text(encoding="utf-8"))
+        comp["uv"]["assets"][plat or self.UV_PLAT]["sha256"] = "0" * 64
+        self.fx.components_path.write_text(json.dumps(comp, indent=2), encoding="utf-8")
+
+    def uv_hits(self, plat=None) -> list:
+        path = "/" + self.uv_asset(plat)["url"].split("/", 3)[-1]
+        return [h for h in self.srv.srv.hits if h == path]
+
+    def assert_installed(self, r, plat: str) -> None:
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        arc = self.uv_archive(plat)
+        self.assertTrue(arc.is_file(), out)  # the uv archive was downloaded and verified, even with WNC_TEST_UV
+        self.assertEqual(sha(arc.read_bytes()), self.uv_asset(plat)["sha256"])
+        self.assertTrue((self.paths.bin_dir / ("uv.exe" if plat.startswith("win") else "uv")).is_file(), out)
+        self.assertEqual(len(self.uv_hits(plat)), 1)
+        self.assertTrue(self.paths.current_file.is_file(), out)
+        settings = json.loads(self.paths.settings_file.read_text(encoding="utf-8"))
+        self.assertIn("thewhynot-ai", settings["extraKnownMarketplaces"])
+        logs = list(self.paths.logs_dir.glob("install-*.log"))
+        self.assertEqual(len(logs), 1, [p.name for p in logs])  # one log, shared by the bootstrap and the core
+        text = logs[0].read_text(encoding="utf-8")
+        for needle in ("== uv ==", "== python ==", "== runtime ==", "== launch =="):
+            self.assertIn(needle, text)
+        self.assertIn("/whynot-cut:start", r.stdout)
+        self.assertFalse((self.home / "Documents" / "WhyNot Clients").exists())
+
+
+@unittest.skipUnless(find_powershell(), "Windows PowerShell is not available")
+class TestPowerShellFrontEnd(_ShellCase):
+    def env(self, **extra) -> dict:
+        env = sandbox_env(WNC_TEST_UV=str(FIXTURES / "fake_uv.cmd"), FAKE_UV_PYTHON=sys.executable,
+                          WNC_CLAUDE_CLI=str(FIXTURES / "fake_claude.cmd"), FAKE_CLAUDE_PYTHON=sys.executable,
+                          FAKE_CLAUDE_LOG=str(self.tmp / "claude.jsonl"),
+                          WNC_TEST_ENGINE_LOG=str(self.tmp / "engine.jsonl"))
+        env.pop("WNC_TEST_PLATFORM", None)
+        env.update(extra)
+        return {k: v for k, v in env.items() if v is not None}
+
+    def ps(self, script: Path, *args, env=None):
+        return subprocess.run([find_powershell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                               "-File", str(script), *[str(a) for a in args]], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=env or self.env(), timeout=600,
+                              stdin=subprocess.DEVNULL, cwd=str(self.tmp))
+
+    def front(self) -> Path:
+        return self.fx.plugin_root / "installer" / "install.ps1"
+
+    def test_install_in_an_arabic_home_touches_nothing_outside(self):
+        before = live_snapshot()
+        r = self.ps(self.front(), "-Home", self.home, "-Yes", "-Skip", "model,launch",
+                    "-Components", self.fx.components_path)
+        self.assert_installed(r, "win-x64")
+        self.assertEqual((self.paths.bin_dir / "uv.exe").read_bytes(), b"MZ fake uv")
+        self.assertEqual(live_snapshot(), before)
+        self.assertLessEqual(set(os.listdir(self.tmp)), {ARABIC_HOME, "zip root", "claude.jsonl", "engine.jsonl"})
+
+    def test_dry_run_leaves_the_home_empty(self):
+        self.home.mkdir()
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(list(self.home.iterdir()), [])
+        self.assertEqual(self.srv.srv.hits, [])
+        for name in ("uv", "python", "preflight", "launch"):  # with WNC_TEST_UV the core's own dry run follows
+            self.assertIn(f"== {name} ==", r.stdout)
+
+    def test_dry_run_without_uv_names_the_remaining_steps(self):
+        self.home.mkdir()
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Yes", env=self.env(WNC_TEST_UV=None))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(list(self.home.iterdir()), [])
+        self.assertNotIn("== preflight ==", r.stdout)
+        self.assertIn(", ".join(cli.STEP_ORDER), r.stdout)
+        self.assertIn(self.uv_asset()["url"], r.stdout)
+
+    def test_a_bad_uv_sha256_stops_with_3_and_names_the_file(self):
+        self.break_uv_sha()
+        r = self.ps(self.front(), "-Home", self.home, "-Yes", "-Skip", "model,launch")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 3, out)
+        self.assertIn("uv-x86_64-pc-windows-msvc.zip", out)
+        self.assertIn("sha256", out)
+        self.assertFalse(self.uv_archive().exists())
+        self.assertEqual(list(self.paths.downloads_dir.iterdir()), [])
+        self.assertFalse(self.paths.current_file.exists())
+        logs = list(self.paths.logs_dir.glob("install-*.log"))
+        self.assertEqual(len(logs), 1)
+        self.assertIn(str(logs[0]), out)
+
+
+@unittest.skipUnless(find_powershell(), "Windows PowerShell is not available")
+class TestPowerShellOneLiner(TestPowerShellFrontEnd):
+    """install.ps1 alone (as `irm | iex` gets it): the plugin comes from -Source, never from the script's folder."""
+
+    def setUp(self):
+        super().setUp()
+        self.zip = self.tmp / "WhyNotCut-3.0.0.zip"
+        self.zip_sha = release_zip(self.fx, self.zip)
+        lone = self.tmp / "lone"
+        lone.mkdir()
+        self.lone = lone / "install.ps1"
+        shutil.copyfile(INSTALLER / "install.ps1", self.lone)
+
+    # the inherited local-mode tests are not repeated here
+    test_install_in_an_arabic_home_touches_nothing_outside = None
+    test_dry_run_leaves_the_home_empty = None
+    test_dry_run_without_uv_names_the_remaining_steps = None
+    test_a_bad_uv_sha256_stops_with_3_and_names_the_file = None
+
+    def test_installs_from_the_source_zip(self):
+        r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Skip", "model,launch", "-Source", self.zip,
+                    "-SourceSha256", self.zip_sha)
+        self.assert_installed(r, "win-x64")
+        rel = self.paths.downloads_dir / f"release-{self.zip_sha[:8]}"
+        self.assertEqual(sha((rel / self.zip.name).read_bytes()), self.zip_sha)
+        plugin = rel / "x" / "whynot-cut-marketplace" / "whynot-cut"
+        self.assertTrue((plugin / "installer" / "core" / "bootstrap.ps1").is_file())
+
+    def test_the_scriptblock_one_liner_returns_to_the_session(self):
+        # `& ([scriptblock]::Create((irm ...))) -Source ...`: no script path, so the script must not `exit` (that
+        # would close the editor's PowerShell window); the exit code is left in $LASTEXITCODE instead
+        env = self.env(WNC_T_SCRIPT=str(self.lone), WNC_T_HOME=str(self.home), WNC_T_ZIP=str(self.zip),
+                       WNC_T_SHA=self.zip_sha)
+        cmd = ("& ([scriptblock]::Create([IO.File]::ReadAllText($env:WNC_T_SCRIPT))) -Home $env:WNC_T_HOME -Yes "
+               "-Skip model,launch -Source $env:WNC_T_ZIP -SourceSha256 $env:WNC_T_SHA; "
+               "'after the one-liner: ' + $LASTEXITCODE")
+        r = subprocess.run([find_powershell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                            "-Command", cmd], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           env=env, timeout=600, stdin=subprocess.DEVNULL, cwd=str(self.tmp))
+        self.assert_installed(r, "win-x64")
+        self.assertIn("after the one-liner: 0", r.stdout)
+
+    def test_a_wrong_source_sha256_installs_nothing(self):
+        r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Source", self.zip, "-SourceSha256", "1" * 64)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 3, out)
+        self.assertIn(self.zip.name, out)
+        self.assertFalse(list(self.paths.downloads_dir.rglob("*.zip")))
+        self.assertFalse(self.paths.current_file.exists())
+
+    def test_without_source_the_placeholder_index_says_h3_in_arabic_too(self):
+        r = self.ps(self.lone, "-Home", self.home, "-Yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn(H3_EN, out)
+        self.assertIn(H3_AR, out)
+        self.assertIn("installer\\install.ps1", out)
+        self.assertFalse(self.home.exists())
+
+    def test_plain_irm_iex_says_h3_and_keeps_the_session(self):
+        # `irm ... | iex` runs the text in the caller's scope with no parameters at all (a ValidateSet on a parameter
+        # breaks exactly this). No -Home is possible here, so the profile variables point into the temp folder too.
+        guard = self.tmp / "guard profile"
+        env = self.env(WNC_T_SCRIPT=str(self.lone), USERPROFILE=str(guard), HOME=str(guard),
+                       WHYNOT_HOME=str(guard / ".whynot-cut"))
+        cmd = ("$ErrorActionPreference = 'Continue'; [IO.File]::ReadAllText($env:WNC_T_SCRIPT) | iex; "
+               "'after iex: ' + $LASTEXITCODE + ' ' + $ErrorActionPreference")
+        r = subprocess.run([find_powershell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                            "-Command", cmd], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           env=env, timeout=120, stdin=subprocess.DEVNULL, cwd=str(self.tmp))
+        out = r.stdout + r.stderr
+        self.assertIn(H3_EN, out)
+        self.assertIn(H3_AR, out)
+        self.assertIn("after iex: 2 Continue", r.stdout)  # the session goes on, its preferences untouched
+        for name in (".whynot-cut", ".claude"):  # (PowerShell itself makes AppData\Roaming under a new profile)
+            self.assertFalse((guard / name).exists(), name)
+
+
+@unittest.skipUnless(find_bash(), "bash is not available")
+class TestBashFrontEnd(_ShellCase):
+    """install.sh with WNC_TEST_PLATFORM=mac-arm64 (on Windows: Git Bash, the core on the test interpreter)."""
+    UV_PLAT = "mac-arm64"
+
+    def env(self, **extra) -> dict:
+        shim = self.tmp / "shim"
+        shim.mkdir(exist_ok=True)
+        py3 = shim / "python3"  # the bootstrap's JSON reader and a .py WNC_TEST_UV run on the test interpreter
+        py3.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n', encoding="utf-8", newline="\n")
+        os.chmod(py3, 0o755)
+        # Windows: the core is a Windows python, which cannot start a .sh; the .py stand-in runs on its interpreter
+        fake_uv = FIXTURES / ("fake_uv.py" if IS_WIN else "fake_uv.sh")
+        env = sandbox_env(WNC_TEST_PLATFORM="mac-arm64", WNC_TEST_UV=str(fake_uv), FAKE_UV_PYTHON=sys.executable,
+                          WNC_CLAUDE_CLI=str(FAKE_CLAUDE), FAKE_CLAUDE_LOG=str(self.tmp / "claude.jsonl"),
+                          WNC_TEST_ENGINE_LOG=str(self.tmp / "engine.jsonl"))
+        env["PATH"] = str(shim) + os.pathsep + env.get("PATH", "")
+        env.update(extra)
+        return {k: v for k, v in env.items() if v is not None}
+
+    def sh(self, *args, env=None, stdin=None):
+        kw = {"stdin": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
+        return subprocess.run([find_bash(), *[str(a) for a in args]], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=env or self.env(), timeout=600,
+                              cwd=str(self.tmp), **kw)
+
+    def front(self) -> str:
+        return (self.fx.plugin_root / "installer" / "install.sh").as_posix()
+
+    def home_arg(self) -> str:
+        return self.home.as_posix()
+
+    def test_install_in_an_arabic_home_touches_nothing_outside(self):
+        before = live_snapshot()
+        r = self.sh(self.front(), "--home", self.home_arg(), "--yes", "--skip", "model,launch",
+                    "--components", self.fx.components_path.as_posix())
+        self.assert_installed(r, "mac-arm64")
+        self.assertTrue((self.home / "Library" / "Fonts").is_dir())
+        self.assertEqual(live_snapshot(), before)
+        self.assertLessEqual(set(os.listdir(self.tmp)),
+                             {ARABIC_HOME, "zip root", "claude.jsonl", "engine.jsonl", "shim"})
+
+    def test_uv_already_at_the_pinned_version_is_not_downloaded(self):
+        uv = self.paths.bin_dir / "uv"
+        uv.parent.mkdir(parents=True)
+        uv.write_text("#!/bin/sh\necho 'uv 0.13.0 (fixture)'\n", encoding="utf-8", newline="\n")
+        os.chmod(uv, 0o755)
+        r = self.sh(self.front(), "--home", self.home_arg(), "--yes", "--skip", "model,launch")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.uv_hits(), [])
+        self.assertFalse(self.uv_archive().exists())
+        self.assertTrue(self.paths.current_file.is_file())
+
+    def test_dry_run_leaves_the_home_empty(self):
+        self.home.mkdir()
+        r = self.sh(self.front(), "--home", self.home_arg(), "--dry-run", "--yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(list(self.home.iterdir()), [])
+        self.assertEqual(self.srv.srv.hits, [])
+        for name in ("uv", "python", "preflight", "launch"):
+            self.assertIn(f"== {name} ==", r.stdout)
+
+    def test_a_bad_uv_sha256_stops_with_3_and_names_the_file(self):
+        self.break_uv_sha()
+        r = self.sh(self.front(), "--home", self.home_arg(), "--yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 3, out)
+        self.assertIn("uv-aarch64-apple-darwin.tar.gz", out)
+        self.assertFalse(self.uv_archive().exists())
+        self.assertFalse(self.paths.current_file.exists())
+
+    @unittest.skipUnless(IS_WIN, "Git Bash only")
+    def test_git_bash_without_test_platform_says_use_install_ps1(self):
+        r = self.sh(self.front(), "--home", self.home_arg(), "--yes", env=self.env(WNC_TEST_PLATFORM=None))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("install.ps1", r.stdout + r.stderr)
+        self.assertFalse(self.home.exists())
+
+    def test_piped_script_with_yes_does_not_hang(self):
+        zf = self.tmp / "WhyNotCut-3.0.0.zip"
+        zsha = release_zip(self.fx, zf)
+        with open(INSTALLER / "install.sh", "rb") as script:  # `curl ... | bash` hands bash the script on stdin
+            r = self.sh("-s", "--", "--home", self.home_arg(), "--yes", "--skip", "model,launch",
+                        "--source", zf.as_posix(), "--source-sha256", zsha, stdin=script)
+        self.assert_installed(r, "mac-arm64")
+        rel = self.paths.downloads_dir / f"release-{zsha[:8]}"
+        self.assertTrue((rel / "x" / "whynot-cut-marketplace" / "whynot-cut" / "setup" / "components.json").is_file())
+
+    def test_piped_without_source_says_h3_in_arabic_too(self):
+        with open(INSTALLER / "install.sh", "rb") as script:
+            r = self.sh("-s", "--", "--home", self.home_arg(), "--yes", stdin=script)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn(H3_EN, out)
+        self.assertIn(H3_AR, out)
+        self.assertFalse(self.home.exists())
 
 
 if __name__ == "__main__":
