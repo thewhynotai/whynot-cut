@@ -254,6 +254,41 @@ class TestExpiryCancelCleanup(_Home):
                 cep_queue.submit(self.q, self.script, "build_project", timeout=5, st={"alive": True})
         self.assertIs(cm.exception.wnc_claimed, False)
 
+    def test_the_cancel_retries_a_locked_job_file(self):
+        """T2.15: Windows answers a rename of a file the antivirus or the panel has open with a sharing violation for a
+        moment; the cancel tries again (5 x 0.1 s) before it gives up and reports the job as claimed."""
+        self.q.mkdir(parents=True, exist_ok=True)
+        job = self.q / "J1.job.json"
+        job.write_text("{}", encoding="utf-8")
+        real, tries = Path.rename, []
+
+        def rename(path, target):
+            tries.append(path.name)
+            if len(tries) < 3:
+                raise PermissionError(32, "being used by another process")
+            return real(path, target)
+        with mock.patch.object(Path, "rename", rename), mock.patch.object(cep_queue.time, "sleep") as sleep:
+            self.assertTrue(cep_queue._cancel(self.q, "J1"))
+        self.assertEqual(len(tries), 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertFalse(job.exists())
+        with mock.patch.object(cep_queue.time, "sleep") as sleep:
+            self.assertFalse(cep_queue._cancel(self.q, "J1"))               # claimed / gone: no retry
+        sleep.assert_not_called()
+        job.write_text("{}", encoding="utf-8")
+        with mock.patch.object(Path, "rename", side_effect=PermissionError(32, "locked")), \
+                mock.patch.object(cep_queue.time, "sleep"):
+            self.assertFalse(cep_queue._cancel(self.q, "J1"))               # still locked after 5 tries
+
+    def test_a_job_with_a_result_is_done_not_claimed(self):
+        """T2.15: result.json already written = the bridge finished; nothing more will happen to the project."""
+        self.q.mkdir(parents=True, exist_ok=True)
+        (self.q / "J2.result.json").write_text('{"ok": false}', encoding="utf-8")
+        (self.q / "J2.claimed").write_text("", encoding="utf-8")
+        self.assertIs(cep_queue._bridge_has_job(self.q, "J2"), False)
+        (self.q / "J2.result.json").unlink()
+        self.assertIs(cep_queue._bridge_has_job(self.q, "J2"), True)
+
     def test_a_second_ctrl_c_inside_the_cancel_counts_as_claimed(self):
         """The job may still run when the cancel itself is interrupted: the host must not put the old project back."""
         calls = []
@@ -609,6 +644,7 @@ class TestPreviousProjectKept(_Home):
         for exc in (KeyboardInterrupt(), OSError("disk full")):
             with self.subTest(exc=type(exc).__name__):
                 def boom(prj, exc=exc):
+                    exc.wnc_claimed = False           # cep_queue's verdict: nothing was queued, or it was taken back
                     raise exc
                 with self.assertRaises(type(exc)):
                     self.run_build(boom)
@@ -637,6 +673,30 @@ class TestPreviousProjectKept(_Home):
         d = self.project_dir()
         self.assertEqual(len(list(d.glob("*_prev_*"))), 1)
         self.assertEqual([f.name for f in d.glob("*.prproj") if "_prev_" not in f.name], [])
+
+    def test_an_exception_without_a_verdict_while_submitting_keeps_the_backup_aside(self):
+        """T2.15: a second Ctrl-C inside cep_queue's own cleanup reaches ppro_build without `wnc_claimed`; the job may
+        be queued, so the old project is parked, never restored over a project Premiere may still save."""
+        def boom(prj):
+            raise KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_build(boom)
+        d = self.project_dir()
+        self.assertEqual(len(list(d.glob("*_prev_*"))), 1)
+        self.assertEqual([f.name for f in d.glob("*.prproj") if "_prev_" not in f.name], [])
+
+    def test_a_failure_before_anything_is_queued_says_not_claimed(self):
+        """T2.15: ppro_bridge.submit (status, script sync) and cep_queue.submit (queue folder, sweep) flag their own
+        early failures `wnc_claimed = False`, so the previous project still goes back."""
+        with mock.patch.object(ppro_bridge, "status", return_value={"alive": True}), \
+                mock.patch.object(ppro_bridge, "sync_scripts", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError) as cm:
+                ppro_bridge.submit("build_project", {})
+        self.assertIs(cm.exception.wnc_claimed, False)
+        with mock.patch.object(cep_queue, "sweep", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt) as cm:
+                cep_queue.submit(self.tmp / "q", self.tmp / "s.jsx", "build_project", st={"alive": True})
+        self.assertIs(cm.exception.wnc_claimed, False)
 
     def test_ctrl_c_after_the_claim_keeps_the_backup_aside(self):
         def boom(prj):

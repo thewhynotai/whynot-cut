@@ -216,7 +216,7 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
     pre_all = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
     rng = source_range(paths)
     main_file = base.get("main_footage") or rng.get("footage")
-    main_default = None if main_file else _default_footage(paths)     # G71: never compile a plan without footage
+    main_default, main_default_why = (None, None) if main_file else _default_footage(paths)   # G71: never without footage
     main_file = main_file or main_default
     shots_on = bool((pre_all.get("shots") or {}).get("shots") and base.get("base_scale_percent") in (None, "auto")
                     and main_video(pre_all, main_file))
@@ -225,6 +225,7 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
         ctx=ctx, paths=paths, root=paths.root, video_id=paths.video_id, ed=ed, base=base, tpl=tpl,
         known_assets={a["rel"]: a for a in manifest["assets"]}, ttext=ttext, dur_ms=dur_ms, fps=seq_fps(ctx),
         recipe=for_paths(paths), pre_all=pre_all, rng=rng, main_file=main_file, main_default=main_default,
+        main_default_why=main_default_why,
         seq_cfg=load_config("sequence-settings.json", ctx), style=load_config("style.json", ctx),
         podcast=load_config("podcast.json", ctx) if shots_on else {},
         speakers=(read_json(paths.p("00_inputs/speakers.json"), {}) or {}) if shots_on else {},
@@ -251,24 +252,40 @@ def _sfx_kind_ok(errors: list, label: str, kind, inp) -> bool:
     return False
 
 
-def _default_footage(paths: Paths) -> str | None:
-    """global.main_footage left out of a whole-clip video (gap G71): the raw clip this video id names (`reel inbox`),
-    else the client's only raw clip, as a path relative to the client root; None when discovery cannot tell."""
+def _default_footage(paths: Paths) -> tuple[str | None, str | None]:
+    """global.main_footage left out of a whole-clip video (gap G71): (path, why) of the raw clip this video id names
+    (`reel inbox`), else of the client's only raw clip; the path relative to the client root; (None, None) when
+    discovery cannot tell."""
     from .clip_ids import resolve
     inv = read_json(paths.output / "discovery/input-inventory.json")
     if not inv or not paths.video_id:
-        return None
+        return None, None
     try:
         f = resolve(paths.root, paths.video_id, inv)
     except SystemExit:                    # an id whose clip left data/: no default (the plan error says what to do)
-        return None
+        return None, None
+    why = f"the raw clip of {paths.video_id}"
     raw = [x for x in inv.get("files", []) if x.get("role") == "source_footage"]
     if f is None and len(raw) == 1:
         f = Path(raw[0]["path"])
+        why = f"the client's only raw clip; the video id {paths.video_id} names no raw clip"
     if f is None:
-        return None
+        return None, None
+    return _client_rel(paths, f, inv), why
+
+
+def _client_rel(paths: Paths, f, inv: dict) -> str:
+    """f relative to the client folder (3.0 T2.15): the inventory's own `rel` for that file, else both sides through
+    os.path.realpath (a junction or 8.3 short name in either spelling); absolute only when f is really outside, so
+    a moved client folder keeps working."""
+    import os
+    real = os.path.normcase(os.path.realpath(f))
+    for x in inv.get("files", []):
+        if (x.get("role") == "source_footage" and x.get("rel") and x.get("path")
+                and os.path.normcase(os.path.realpath(x["path"])) == real):
+            return str(x["rel"]).replace("\\", "/")
     try:
-        return Path(f).resolve().relative_to(paths.root).as_posix()
+        return Path(os.path.realpath(f)).relative_to(os.path.realpath(paths.root)).as_posix()
     except ValueError:
         return str(f)
 
@@ -753,7 +770,8 @@ def final_checks(inp: PlanInputs, events: list):
         errors.append(f"global.main_footage {inp.main_file} not found in the client folder: give the raw file's path "
                       "relative to the client folder (e.g. data/Raw/C0239.MP4)")
     elif inp.main_default:
-        warnings.append(f"global.main_footage not set: using {inp.main_default} (the raw clip of {inp.video_id}); "
+        why = getattr(inp, "main_default_why", None) or f"the raw clip of {inp.video_id}"
+        warnings.append(f"global.main_footage not set: using {inp.main_default} ({why}); "
                         "set it in edit-decisions.json to make it explicit")
     # words the transcript editor flagged as uncertain never go on a graphic until the editor has heard them
     flagged = inp.flagged

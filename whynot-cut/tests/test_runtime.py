@@ -835,10 +835,11 @@ class TestPinnedFfmpeg(TempHome):
         env = {k: v for k, v in os.environ.items() if k not in plat.HOME_ENV and k != "NH_FFMPEG"}
         env["WHYNOT_HOME"] = str(self.home)
         with mock.patch.dict(os.environ, env, clear=True), \
-                mock.patch.object(common.shutil, "which", return_value=str(other)):
+                mock.patch.object(common.shutil, "which", return_value=str(other)), \
+                mock.patch.dict(sys.modules, {"imageio_ffmpeg": None}):    # T2.15: the runtime's ffmpeg also beats PATH
             self.assertEqual(Path(common.ffmpeg_exe()), ff)
             (self.home / "state.json").unlink()
-            self.assertEqual(Path(common.ffmpeg_exe()), other)
+            self.assertEqual(Path(common.ffmpeg_exe()), other)          # PATH: the last resort
 
     def test_a_folder_named_ffmpeg_is_not_the_binary(self):
         """The installer's ffmpeg/<ver>/ folder must not be mistaken for the 2.x <home>/ffmpeg symlink."""

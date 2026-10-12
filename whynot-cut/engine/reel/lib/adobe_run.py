@@ -23,6 +23,20 @@ def app_name(key: str) -> str | None:
     return a["name"] if a else None
 
 
+def _as_string(s: str) -> str:
+    """An AppleScript string literal (quotes and backslashes escaped)."""
+    return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def osascript_argv(app: str, command: str, timeout: int, *args) -> list[str]:
+    """osascript with the `on run argv` form (3.0 T2.15, review §10): the script file path travels as an argument,
+    never inside the AppleScript source, so a `"` in a client folder name cannot end the string and run code. The app
+    name stays a literal (discovered by plat, escaped): AppleScript needs it at compile time for DoScriptFile."""
+    return ["osascript", "-e", "on run argv", "-e", f"with timeout of {int(timeout)} seconds",
+            "-e", f"tell application {_as_string(app)} to {command}", "-e", "end timeout", "-e", "end run",
+            *[str(a) for a in args]]
+
+
 def run_after_effects(jsx: Path, timeout: int, done: Callable[[], bool] | None = None) -> dict:
     app = plat.newest_app("after_effects")
     if not app:
@@ -32,8 +46,7 @@ def run_after_effects(jsx: Path, timeout: int, done: Callable[[], bool] | None =
         return {"status": "REFUSED", "msg": refused["error"], "how": refused["how"]}
     t0 = time.time()
     if plat.IS_MAC:
-        p = run(["osascript", "-e", f"with timeout of {timeout} seconds",
-                 "-e", f'tell application "{app["name"]}" to DoScriptFile "{jsx}"', "-e", "end timeout"],
+        p = run(osascript_argv(app["name"], "DoScriptFile (item 1 of argv)", timeout, jsx),
                 check=False, timeout=timeout + 30)
         res = {"returncode": p.returncode, "stdout": p.stdout.strip(), "stderr": p.stderr.strip()}
     else:
@@ -56,9 +69,8 @@ def run_photoshop(jsx: Path, timeout: int) -> dict:
         return {"status": "REFUSED", "msg": refused["error"], "how": refused["how"]}
     t0 = time.time()
     if plat.IS_MAC:
-        p = run(["osascript", "-e", f"with timeout of {timeout} seconds",
-                 "-e", f'tell application "{app["name"]}" to do javascript file (POSIX file "{jsx}")',
-                 "-e", "end timeout"], check=False, timeout=timeout + 30)
+        p = run(osascript_argv(app["name"], "do javascript (POSIX file (item 1 of argv) as alias)", timeout, jsx),
+                check=False, timeout=timeout + 30)
     else:
         ps = ("$ErrorActionPreference='Stop'; $app = New-Object -ComObject Photoshop.Application; "
               f"$r = $app.DoJavaScriptFile('{str(jsx).replace(chr(39), chr(39) * 2)}'); Write-Output $r")

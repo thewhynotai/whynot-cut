@@ -23,18 +23,34 @@ from .common import still_category, seq_fps, ticks_per_frame, Paths, project_pre
 TPS = 254016000000  # Premiere ticks per second
 
 
+def _unc(s: str) -> str | None:
+    """"server/share/dir/f.mov" for a UNC path (two leading backslashes or slashes), else None."""
+    s = s.replace("\\", "/")
+    if s.startswith("//?/UNC/"):                       # the long-path form of a share
+        return s[8:]
+    if s.startswith("//") and not s.startswith(("//?/", "//./")) and len(s) > 2 and s[2] != "/":
+        return s[2:]
+    return None
+
+
 def pathurl(p: Path) -> str:
     """FCP7 file URL Premiere accepts on both systems: file://localhost/Volumes/x/a%20b.mov (macOS) and
-    file://localhost/C:/Users/x/a%20b.mov (Windows). Backslashes or an encoded drive colon break media linking."""
-    posix = Path(p).resolve().as_posix()
-    if not posix.startswith("/"):
-        posix = "/" + posix
-    return "file://localhost" + quote(posix, safe="/:")
+    file://localhost/C:/Users/x/a%20b.mov (Windows). Backslashes or an encoded drive colon break media linking.
+    A UNC path (a NAS share) becomes file://server/share/x.mov, never file://localhost//server/... (T2.15, MI-16)."""
+    unc = _unc(str(p))                                 # checked before resolve(): no network lookup for a share
+    if unc is None:
+        posix = Path(p).resolve().as_posix()
+        unc = _unc(posix)                              # a mapped drive or a link that resolves onto a share
+        if unc is None:
+            return "file://localhost" + quote(posix if posix.startswith("/") else "/" + posix, safe="/:")
+    return "file://" + quote(unc, safe="/:")
 
 
 def path_from_url(url: str) -> Path:
-    """Inverse of pathurl (also reads URLs written by older releases)."""
+    """Inverse of pathurl (also reads URLs written by older releases, and file://server/share/... of a share)."""
     from urllib.parse import unquote
+    if url.startswith("file://") and not url.startswith(("file://localhost/", "file:///")):
+        return Path("//" + unquote(url[len("file://"):]))         # file://server/share/x -> //server/share/x
     s = unquote(url.replace("file://localhost", "", 1).replace("file://", "", 1))
     if len(s) > 2 and s[0] == "/" and s[2] == ":":       # /C:/Users/... -> C:/Users/...
         s = s[1:]

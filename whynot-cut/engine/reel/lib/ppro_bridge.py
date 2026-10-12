@@ -148,12 +148,16 @@ def submit(action: str, data: dict | None = None, timeout: float = 600, script: 
     refused = plat.sandbox_refusal(f"queue the {action} job", queue_dir(), scripts_dir())   # G79: never in tests
     if refused:
         return refused
-    st = status()          # through this module, so callers/tests that patch ppro_bridge.status keep working
-    if not st["alive"]:
-        return {"ok": False, "error": "bridge not running", "status": st}
-    if script is None or Path(script) == lib_path():
-        sync_scripts()
-        script = lib_path()
+    try:
+        st = status()      # through this module, so callers/tests that patch ppro_bridge.status keep working
+        if not st["alive"]:
+            return {"ok": False, "error": "bridge not running", "status": st}
+        if script is None or Path(script) == lib_path():
+            sync_scripts()
+            script = lib_path()
+    except BaseException as e:      # nothing is queued yet: the job cannot run (T2.15; ppro_build reads the flag)
+        cep_queue._flag_claimed(e, False)
+        raise
     return cep_queue.submit(queue_dir(), script, action, data, timeout, st=st, app="Premiere",
                             expect_version=BRIDGE_VERSION)
 

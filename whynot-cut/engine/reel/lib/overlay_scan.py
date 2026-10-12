@@ -30,6 +30,7 @@ import time
 import numpy as np
 
 from .common import ffmpeg_exe
+from .media_util import ff_timeout
 
 TH_W, TH_H = 320, 180            # thumbnail size the scan works on
 STEP_S = 1.0                     # one thumbnail per second
@@ -74,7 +75,7 @@ def decode_thumbs(src, start_s: float, length_s: float) -> np.ndarray:
     cmd = [ffmpeg_exe(), "-nostdin", "-v", "error", "-ss", f"{max(0.0, start_s):.3f}", "-i", str(src),
            "-t", f"{length_s:.3f}", "-an", "-sn", "-vf", f"fps=1,scale={TH_W}:{TH_H}:flags=area,format=rgb24",
            "-f", "rawvideo", "-"]
-    raw = subprocess.run(cmd, capture_output=True, check=False).stdout
+    raw = subprocess.run(cmd, capture_output=True, check=False, timeout=ff_timeout(cmd)).stdout
     fs = TH_W * TH_H * 3
     n = len(raw) // fs
     return np.frombuffer(raw[:n * fs], dtype=np.uint8).reshape(n, TH_H, TH_W, 3)

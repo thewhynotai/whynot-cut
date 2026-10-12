@@ -148,7 +148,7 @@ def frame_size(paths: "Paths | None" = None, ctx: "Context | None" = None) -> tu
 STATUSES = [
     "NOT_STARTED", "INPUTS_DISCOVERED", "INPUTS_VALIDATED", "CLIENT_DATABASE_READY",
     "TRANSCRIBED", "ANALYZED", "EDIT_PLAN_READY", "AWAITING_APPROVAL",
-    "ASSETS_GENERATED", "PROJECT_ASSEMBLED", "QC_PASSED", "READY_FOR_HUMAN_EDITOR",
+    "ASSETS_GENERATED", "PROJECT_ASSEMBLED", "QC_PASSED", "READY_FOR_HUMAN_EDITOR", "DELIVERED",
     "BLOCKED",
 ]
 
@@ -355,23 +355,47 @@ def venv_python() -> Path:
     return _venv_python(engine_home())
 
 
-def ffmpeg_exe() -> str | None:
-    """NH_FFMPEG > the pinned ffmpeg in the engine home (state.json / ffmpeg/<ver>/, 3.0 T2.1) > PATH > the 2.x
-    <home>/ffmpeg symlink > the imageio-ffmpeg wheel's binary."""
+FFMPEG_OVERRIDES = ("WHYNOT_FFMPEG", "NH_FFMPEG")
+
+
+def ffmpeg_choice() -> dict:
+    """{path, source, bad_override}: which ffmpeg the engine runs (3.0 T2.15, MI-18). An override (WHYNOT_FFMPEG, or
+    the 2.x NH_FFMPEG) > the pinned ffmpeg in the engine home (state.json / ffmpeg/<ver>/, T2.1) > the 2.x
+    <home>/ffmpeg file > the engine runtime's imageio-ffmpeg binary > PATH last: an old system build (Chocolatey,
+    Homebrew) may lack filters the engine uses. bad_override names an override that is set but not a file."""
     from .plat import engine_ffmpeg
+    bad = None
+    for k in FFMPEG_OVERRIDES:
+        v = os.environ.get(k)
+        if v and Path(native_path(v)).expanduser().is_file():
+            return {"path": str(Path(native_path(v)).expanduser()), "source": f"override {k}", "bad_override": None}
+        if v and not bad:
+            bad = f"{k}={v}"
     pinned = engine_ffmpeg(engine_home())
-    for cand in (os.environ.get("NH_FFMPEG"), pinned and str(pinned), shutil.which("ffmpeg"),
-                 str(engine_home() / "ffmpeg")):
+    legacy = engine_home() / "ffmpeg"
+    for src, cand in (("pinned (engine home)", pinned and str(pinned)), ("engine home (2.x)", str(legacy))):
         if cand and Path(cand).is_file():
-            return cand
+            return {"path": cand, "source": src, "bad_override": bad}
     try:
         import imageio_ffmpeg  # type: ignore
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:
-        return None
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and Path(exe).is_file():
+            return {"path": exe, "source": "engine runtime (imageio-ffmpeg)", "bad_override": bad}
+    except Exception:  # noqa: BLE001
+        pass
+    w = shutil.which("ffmpeg")
+    return {"path": w, "source": "PATH" if w else None, "bad_override": bad}
+
+
+def ffmpeg_exe() -> str | None:
+    """The ffmpeg the engine runs (ffmpeg_choice), or None."""
+    return ffmpeg_choice()["path"]
 
 
 def run(cmd, check=True, capture=True, timeout=None, **kw) -> subprocess.CompletedProcess:
+    if timeout is None:              # T2.15 (MI-17): an ffmpeg call on a corrupt file or a stalled share never hangs
+        from .media_util import ff_timeout
+        timeout = ff_timeout(cmd)
     return subprocess.run(cmd, check=check, capture_output=capture, text=True, timeout=timeout, **kw)
 
 
@@ -412,6 +436,9 @@ def load_status(paths: Paths) -> dict:
     return st
 
 
+STATUS_HISTORY_MAX = 200              # project-status.json keeps the last 200 status changes
+
+
 def set_status(paths: Paths, status: str, note: str = "", stage: str | None = None,
                outputs: list | None = None, blockers: list | None = None) -> dict:
     assert status in STATUSES, status
@@ -419,7 +446,8 @@ def set_status(paths: Paths, status: str, note: str = "", stage: str | None = No
         st = load_status(paths)
         st["status"] = status
         st["updated"] = now_iso()
-        st["history"].append({"status": status, "at": st["updated"], "note": note})
+        st["history"] = (st.get("history") or [])[-(STATUS_HISTORY_MAX - 1):] + [
+            {"status": status, "at": st["updated"], "note": note}]       # T2.15: capped, inside the lock
         if stage:
             st["stages"][stage] = {"done": status != "BLOCKED", "at": st["updated"],
                                    "note": note, "outputs": [str(o) for o in (outputs or [])]}

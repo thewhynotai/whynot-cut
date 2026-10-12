@@ -101,8 +101,9 @@ def _decode(path: Path) -> np.ndarray:
     """Any audio file -> float32 (n, 2) at 48 kHz (ffmpeg; SFX are 24-bit, music may be mp3/m4a)."""
     import subprocess
     from .common import ffmpeg_exe
-    raw = subprocess.run([ffmpeg_exe(), "-loglevel", "error", "-i", str(path), "-ac", "2", "-ar", str(SR), "-f", "s16le",
-                          "-"], capture_output=True).stdout or b""
+    from .media_util import ff_timeout
+    cmd = [ffmpeg_exe(), "-loglevel", "error", "-i", str(path), "-ac", "2", "-ar", str(SR), "-f", "s16le", "-"]
+    raw = subprocess.run(cmd, capture_output=True, timeout=ff_timeout(cmd)).stdout or b""
     return (np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0).reshape(-1, 2)
 
 

@@ -281,18 +281,22 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
         return {"status": "MISSING_GRAPHICS", "missing": data["_missing"], "fix": "run `reel previews`"}
     import time
     t0 = time.time()
-    r, claimed, restored, saved_now = {}, False, False, False
+    r, claimed, restored, saved_now, submitting = {}, False, False, False, False
     try:
         if prproj.exists():
             # out of Premiere's way (it creates the new project at this path); it stays `_prev_` only if the build
             # saves a new project, else it is put back below
             backup = prproj.with_name(f"{prproj.stem}_prev_{time.strftime('%Y%m%d-%H%M%S')}.prproj")
             prproj.rename(backup)
+        submitting = True       # from here an exception without cep_queue's verdict may come after the job was queued
         r = submit("build_project", {k: v for k, v in data.items() if not k.startswith("_")}, timeout=900)
         claimed = bool(r.get("claimed"))
+        submitting = False
         saved_now = prproj.exists() and prproj.stat().st_mtime >= t0 - 1      # before any restore below
     except BaseException as e:          # Ctrl-C, or an OSError writing the job: cep_queue says whether it was claimed
-        claimed = claimed or bool(getattr(e, "wnc_claimed", False))       # never downgrade a claimed job
+        # never downgrade a claimed job; no verdict at all (a second Ctrl-C inside cep_queue's own cleanup, T2.15)
+        # while submitting = maybe queued: keep the backup aside rather than restore over a project Premiere may write
+        claimed = claimed or bool(getattr(e, "wnc_claimed", submitting))
         raise
     finally:
         if backup and not prproj.exists() and not claimed:

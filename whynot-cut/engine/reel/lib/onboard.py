@@ -201,6 +201,9 @@ def doctor() -> dict:
         fixes.append({"item": "ffmpeg", "who": "claude",
                       "fix": "reel setup   (the engine runtime's imageio-ffmpeg provides one; the WhyNot Cut "
                              "installer adds the pinned ffmpeg)"})
+    from .portability import doctor_checks        # T2.15: non-ASCII engine home, OpenCV face model, ffmpeg filters
+    rep["portability"], more = doctor_checks(engine_home())
+    fixes += more
     if not models:
         part = [k for k, v in states.items() if v == "partial"]
         fixes.append({"item": "Whisper large-v3 (~3 GB)" + (f" (interrupted download of {', '.join(part)} found)" if part else ""),

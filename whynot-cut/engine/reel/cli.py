@@ -80,13 +80,21 @@ def fail(a, exc: BaseException):
     out(report(exc, error_log(a), " ".join(shown)))
 
 
+def footage_path(paths: Paths, s: str) -> Path:
+    """A --footage value as a path: a Git Bash path (/d/Work/x.mp4) or ~ through plat.native_path (T2.15, MI-15),
+    a relative one under the client folder."""
+    from lib.plat import native_path
+    f = Path(native_path(str(s))).expanduser()
+    return f if f.is_absolute() else paths.root / f
+
+
 def main_footage(paths: Paths, explicit: str | None) -> list[Path]:
     """The raw file of THIS video: --footage, else the project's range (`reel range`), else the raw clip the video id
     names (its id from `reel inbox`, its file stem or its 2.x slug: lib/clip_ids.py), else the only raw clip. Never
     silently another clip."""
     from lib.common import source_range
     if explicit:
-        return [Path(explicit) if Path(explicit).is_absolute() else paths.root / explicit]
+        return [footage_path(paths, explicit)]
     rng = source_range(paths)
     if rng:
         f = Path(rng["footage"])
@@ -196,8 +204,7 @@ def cmd_range(a):
     if not a.footage:
         out(read_json(f_src, {}) or {"range": None, "note": "whole raw file (no range set)"})
         return
-    f = Path(a.footage)
-    f = f if f.is_absolute() else p.root / f
+    f = footage_path(p, a.footage)
     if not f.exists():
         raise SystemExit(f"{f} not found")
     dur_ms = int((probe(f).get("duration_s") or 0) * 1000)
@@ -926,6 +933,27 @@ def cmd_bench(a):
     out(cli_bench(a, P(a) if a.root and (a.video_id or a.episode) else None))
 
 
+def cuda_wheel_install(pkgs: list[str], home: Path | None = None) -> tuple[list | None, dict | None, str]:
+    """(argv, env, via) installing the cuBLAS wheels into the engine runtime (T2.15): uv-built runtimes have no pip,
+    so the pinned uv of the engine home installs with `uv pip install --python <runtime python>`; a 2.x venv
+    (pip inside) uses pip. (None, None, "") when neither is possible."""
+    import subprocess
+    from lib import plat
+    from lib.common import engine_home
+    home = home or engine_home()
+    rt = plat.engine_runtime(home)
+    py = str(rt["python"]) if rt.get("kind") == "runtime" and rt.get("python") else sys.executable
+    uv = home / "bin" / ("uv.exe" if plat.IS_WIN else "uv")
+    if uv.is_file():
+        env = dict(os.environ, UV_CACHE_DIR=str(home / "cache" / "uv"), UV_NO_CONFIG="1", UV_HTTP_TIMEOUT="60",
+                   UV_HTTP_RETRIES="5")
+        return [str(uv), "pip", "install", "--python", py, *pkgs], env, "uv pip"
+    has_pip = subprocess.run([py, "-m", "pip", "--version"], capture_output=True).returncode == 0
+    if has_pip:
+        return [py, "-m", "pip", "install", "--disable-pip-version-check", *pkgs], None, "pip"
+    return None, None, ""
+
+
 def cmd_gpu_enable(a):
     """Install NVIDIA's cuBLAS 12 (pip wheel, ~550 MB) into the engine so Whisper runs on an NVIDIA GPU.
     Ask the editor first. macOS has no CUDA: Whisper stays on the CPU there."""
@@ -944,11 +972,18 @@ def cmd_gpu_enable(a):
         except Exception as e:  # noqa: BLE001
             redist_error = f"{type(e).__name__}: {e}"
     if before.get("cuda_libs_missing") and not installed:
-        r = subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *pkgs])
+        cmd, env, how = cuda_wheel_install(pkgs)
+        if not cmd:
+            from lib.errors import Guidance
+            raise Guidance("the cuBLAS wheels cannot be installed: the engine runtime has no pip and the pinned uv is "
+                           "missing" + (f" (NVIDIA download: {redist_error})" if redist_error else ""),
+                           "run `reel setup` (it puts the pinned uv in the engine home), then `reel gpu-enable` again; "
+                           "Whisper keeps using the CPU meanwhile")
+        r = subprocess.run(cmd, env=env)
         if r.returncode:
-            raise SystemExit(f"pip install {' '.join(pkgs)} failed (exit {r.returncode}); Whisper keeps using the CPU"
+            raise SystemExit(f"{how} install {' '.join(pkgs)} failed (exit {r.returncode}); Whisper keeps using the CPU"
                              + (f" (NVIDIA download: {redist_error})" if redist_error else ""))
-        how, installed = "pip", pkgs
+        installed = pkgs
     after = plat.gpu_info()
     out({"gpu_before": before, "gpu": after, "installed": installed, "via": how, "redist_error": redist_error,
          "whisper_device": after.get("whisper_device")})

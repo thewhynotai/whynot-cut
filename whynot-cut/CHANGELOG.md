@@ -423,6 +423,25 @@
   read-back checks failed or none were recorded. Golden READMEs for the
   native build, the XML fallback and a motion project (`tests/fixtures/handoff/`, `tests/test_handoff_native.py`).
 - After Effects extras take their frame rate from the profile (T2.18, MI-13). The clip-graphics build and the MOGRT build wrote a hard-coded 24 fps into every comp whatever the client's sequence was; both generators now put the profile's rate in `NH_DATA.fps` (29.97 / 23.976 / 59.94 as After Effects names them) and `nh_ae_lib.jsx` applies it (`NH.applyFps`) before building. `reel ae-script` warns when the plan was compiled at another rate. `reel ae-render` reports `RENDERED` only for `.mov` files this run wrote (changed since the start, newer than it, not empty); a file left by an earlier run gives `STALE_OUTPUT_NOT_RENDERED` with `stale_outputs` and a message instead of a false success. On Windows it renders an ASCII copy of the project when the client folder has a non-ASCII name, through the same helper as the motion renderer (`ae_render.stage_ascii`). Not verified live in After Effects (`tests/test_ae_extras.py` mocks aerender).
+- Portability edges (T2.15, review MI-14 to MI-18, §10). `reel doctor` warns when the engine home has non-ASCII
+  characters on Windows (Whisper's model loader and OpenCV open files through narrow paths there) and suggests
+  `setx WHYNOT_HOME C:\whynot`; it checks that OpenCV's face model loads (`CascadeClassifier(...).empty()`), and its
+  new `portability.ffmpeg` says which ffmpeg runs (path, source, version) with a self-test of the filters the engine
+  uses. The engine's ffmpeg is now an override (`WHYNOT_FFMPEG`, or the 2.x `NH_FFMPEG`), else the pinned one in the
+  engine home, else the runtime's imageio-ffmpeg, and PATH only last (an old Chocolatey or Homebrew build no longer
+  wins). ffmpeg calls time out after 10 s + 3 × the media duration instead of hanging on a corrupt file or a stalled
+  share. `--footage` accepts Git Bash paths (`/d/Work/x.mp4`). FCP7 XML links media on a NAS share as
+  `file://server/share/...`. On macOS the After Effects and Photoshop runners pass the script path to `osascript` as
+  an argument (`on run argv`), so a `"` in a client folder name cannot break out of the AppleScript. `DELIVERED` is a
+  project status, and `project-status.json` keeps the last 200 status changes. The writer lease and the build lock
+  compare a stable host id (a Mac's hardware UUID), so a Mac whose hostname changed with the network still takes over
+  a dead session's lock. `reel gpu-enable` installs the cuBLAS wheels with the engine home's pinned uv
+  (`uv pip install --python <runtime python>`; runtimes built by uv have no pip). `reel plan` stores a defaulted
+  `main_footage` relative to the client folder even when `data/Raw` is a junction or a link, and its warning says when
+  it fell back to the client's only raw clip. Bridge queue: a cancel retries a `job.json` that Windows keeps locked
+  for a moment (5 × 0.1 s), a job with a result counts as finished (the old project goes back), and an interrupted
+  `ppro-build` without the queue's verdict parks the old project instead of restoring it over one Premiere may still
+  save. Not verified on a Mac (osascript, ioreg) or against a real NAS share.
 
 ### Migration
 - Bridge 3.1.1 (T2.9): after updating, run `reel ppro-install` and restart Premiere and After Effects. Until they are

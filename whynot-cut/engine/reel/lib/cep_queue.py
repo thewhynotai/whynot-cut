@@ -166,8 +166,12 @@ def submit(queue: Path, script: Path, action: str, data: dict | None = None, tim
         refused = version_refusal(st, expect_version, app)
         if refused:
             return refused
-    queue.mkdir(parents=True, exist_ok=True)
-    sweep(queue)
+    try:
+        queue.mkdir(parents=True, exist_ok=True)
+        sweep(queue)
+    except BaseException as e:          # nothing is queued yet: no job can run (T2.15, ppro_build relies on the flag)
+        _flag_claimed(e, False)
+        raise
     claim_s = timeout if claim_timeout is None else claim_timeout
     jid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     data_file, tmp, job_p = queue / f"{jid}.data.json", queue / f"{jid}.tmp", queue / f"{jid}.job.json"
@@ -205,19 +209,30 @@ def _bridge_has_job(queue: Path, jid: str) -> bool:
     bridge has (or had) it, so Premiere / After Effects may still act on it."""
     if _cancel(queue, jid):
         return False
-    if any((queue / f"{jid}.{s}").exists() for s in ("job.json", "claimed", "running", "result.json")):
+    if (queue / f"{jid}.result.json").exists():
+        return False              # the bridge finished it (T2.15): nothing more will happen, the old project goes back
+    if any((queue / f"{jid}.{s}").exists() for s in ("job.json", "claimed", "running")):
         return True
     _unlink(queue / f"{jid}.tmp", queue / f"{jid}.data.json")      # interrupted before the job file was renamed in
     return False
 
 
+CANCEL_TRIES, CANCEL_RETRY_S = 5, 0.1      # a Windows sharing lock on job.json passes within moments
+
+
 def _cancel(queue: Path, jid: str) -> bool:
     """Take back a job the bridge has not claimed (True): it never runs. False = it was claimed meanwhile."""
     job_p, gone = queue / f"{jid}.job.json", queue / f"{jid}.job.cancelled"
-    try:
-        job_p.rename(gone)
-    except OSError:
-        return False
+    for i in range(CANCEL_TRIES):
+        try:
+            job_p.rename(gone)
+            break
+        except FileNotFoundError:
+            return False                     # claimed (renamed by the bridge) or already gone
+        except OSError:                      # a sharing violation (antivirus, the indexer, the panel reading it)
+            if i == CANCEL_TRIES - 1:
+                return False
+            time.sleep(CANCEL_RETRY_S)
     _unlink(gone, queue / f"{jid}.data.json")
     return True
 
@@ -297,7 +312,7 @@ def lock_stale(queue: Path, rec: dict | None) -> bool:
     """A lock may be taken over when its process on this computer is gone (pid + creation time), or, held from another
     computer, when it expired. A live holder on this computer is never stale: it does not renew its expiry, and a build
     may run past it."""
-    from .writer_lock import pid_alive
+    from .writer_lock import pid_alive, same_host
     if rec is None:
         return False
     if not rec:                                  # unreadable: being written right now, unless it is old
@@ -305,7 +320,7 @@ def lock_stale(queue: Path, rec: dict | None) -> bool:
             return time.time() - (Path(queue) / LOCK_NAME).stat().st_mtime > 30
         except OSError:
             return True
-    if rec.get("host") == socket.gethostname():
+    if same_host(rec):
         return not pid_alive(rec.get("pid"), rec.get("pid_created"))
     try:
         return time.time() > float(rec.get("expires_at") or 0)
@@ -318,14 +333,14 @@ def build_lock(queue: Path, what: str, *, hold_s: float = 1800.0, wait_s: float 
     """Hold `<queue>/.build.lock` around one build: a second build (another session, another reel) waits up to
     `wait_s` for it, so its own bridge timeout never runs out while it queues. The record carries the pid (a crashed
     holder's lock is taken over) and an expiry `hold_s` ahead. Raises BuildLockBusy when still held after `wait_s`."""
-    from .writer_lock import process_created
+    from .writer_lock import host_id, process_created
     queue = Path(queue)
     queue.mkdir(parents=True, exist_ok=True)
     lock = queue / LOCK_NAME
     t0 = time.time()
     while True:
         rec = {"pid": os.getpid(), "pid_created": process_created(os.getpid()), "host": socket.gethostname(),
-               "what": what, "started_at": now_iso(), "expires_at": time.time() + hold_s}
+               "host_id": host_id(), "what": what, "started_at": now_iso(), "expires_at": time.time() + hold_s}
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError:
@@ -374,7 +389,8 @@ def lock_busy_result(e: BuildLockBusy, app: str) -> dict:
 def _stuck_holder(h: dict, queue: Path | None) -> str:
     """Guidance when the holder runs on this computer but is past its expected end, or cannot be told apart from a
     reused pid: such a lock is never taken over by itself (a long build must not be), so a hung holder needs a person."""
-    if not h or h.get("host") != socket.gethostname():
+    from .writer_lock import same_host
+    if not h or not same_host(h):
         return ""
     try:
         past = time.time() > float(h.get("expires_at") or 0)

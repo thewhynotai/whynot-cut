@@ -6,6 +6,7 @@ closed at once by `open_rgb`); frames come through a pipe (rawvideo), never a te
 """
 from __future__ import annotations
 
+import functools
 import re
 import subprocess
 from pathlib import Path
@@ -35,6 +36,62 @@ def parse_time(v, *, int_is_ms: bool = False) -> int:
     h, mi, sec, frac = m.groups()
     ms = ((int(h or 0) * 60 + int(mi)) * 60 + int(sec)) * 1000
     return ms + (int(round(float("0." + frac) * 1000)) if frac else 0)
+
+
+# --------------------------------------------------------------------------- ffmpeg timeouts (3.0 T2.15, MI-17)
+FF_TIMEOUT_BASE_S, FF_TIMEOUT_PER_MEDIA_S = 10, 3     # 10 s + 3 x the media duration
+FF_TIMEOUT_UNKNOWN_S = 3600                           # no -t and no probe-able input (a lavfi source): 1 h
+
+
+def is_ff(cmd) -> bool:
+    """An ffmpeg / ffprobe argv (also imageio-ffmpeg's ffmpeg-win-x86_64-v7.1.exe)."""
+    if not isinstance(cmd, (list, tuple)) or not cmd:
+        return False
+    return Path(str(cmd[0])).name.lower().startswith(("ffmpeg", "ffprobe"))
+
+
+def media_duration_s(path) -> float | None:
+    """A media file's duration in seconds (PyAV reads the header), None when it has none or cannot be opened."""
+    try:
+        st = Path(path).stat()
+    except (OSError, ValueError):
+        return None
+    return _duration_cached(str(path), st.st_size, st.st_mtime_ns)
+
+
+@functools.lru_cache(maxsize=256)
+def _duration_cached(path: str, size: int, mtime_ns: int) -> float | None:      # keyed by the file's stat
+    try:
+        import av  # type: ignore
+        with av.open(path) as c:
+            return c.duration / 1_000_000 if c.duration else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def ff_timeout(cmd) -> float | None:
+    """The timeout for an ffmpeg / ffprobe call: 10 s + 3 x the media duration (the largest `-t`, else the longest
+    `-i` input), FF_TIMEOUT_UNKNOWN_S when neither is known; None for any other command."""
+    if not is_ff(cmd):
+        return None
+    args = [str(a) for a in cmd[1:]]
+    ts, ins = [], []
+    for k, v in zip(args, args[1:]):
+        if k == "-t":
+            try:
+                ts.append(parse_time(v))
+            except ValueError:
+                pass
+        elif k == "-i":
+            ins.append(v)
+    if ts:
+        dur = max(ts) / 1000
+    else:
+        ds = [d for d in (media_duration_s(i) for i in ins if i not in ("-", "pipe:", "pipe:0")) if d]
+        if not ds:
+            return FF_TIMEOUT_UNKNOWN_S
+        dur = max(ds)
+    return FF_TIMEOUT_BASE_S + FF_TIMEOUT_PER_MEDIA_S * dur
 
 
 # --------------------------------------------------------------------------- frames
@@ -67,8 +124,9 @@ def grab_frame(video: Path, t_s: float, w: int, h: int, *, fit: str = "pad", mod
         vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
     else:
         vf = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2"
-    r = subprocess.run([_ffmpeg(), "-loglevel", "error", "-ss", f"{t_s:.3f}", "-i", str(video), "-an", "-frames:v", "1",
-                        "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True)
+    cmd = [_ffmpeg(), "-loglevel", "error", "-ss", f"{t_s:.3f}", "-i", str(video), "-an", "-frames:v", "1",
+           "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    r = subprocess.run(cmd, capture_output=True, timeout=ff_timeout(cmd))
     if r.returncode or len(r.stdout) < w * h * 3:
         return None
     im = Image.frombytes("RGB", (w, h), r.stdout[:w * h * 3])

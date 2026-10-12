@@ -5,15 +5,15 @@ Two Claude sessions once took turns on one client folder over minutes and hours 
 write); every later writing command of the same session refreshes it (touch + `command`), so the session keeps the
 client between its commands. A writing command of ANOTHER session gets `{"blocked", "how"}` and exit 2.
 
-The lease is JSON `{session_id, pid, pid_created, host, started_at, updated_at, command}`, created atomically
+The lease is JSON `{session_id, pid, pid_created, host, host_id, started_at, updated_at, command}`, created atomically
 (O_CREAT | O_EXCL). `pid` is the holder that must stay alive:
   * CLAUDE_PID, the long-lived Claude Code process of the session, when it is set and running: a lease that
     outlives single commands;
   * else the command's own process (an editor at a plain terminal): the lock lasts for that command only and is
     removed when it ends.
 It is stale, and the next writer takes it over with a line in output/logs/pipeline.log, when
-  * its holder process is no longer running on this computer (`host`); a pid whose creation time differs from
-    `pid_created` is a reused pid, so the holder is gone too; or
+  * its holder process is no longer running on this computer (`host_id`, else `host` for an older lease); a pid
+    whose creation time differs from `pid_created` is a reused pid, so the holder is gone too; or
   * no writing command touched it for 2 h (also the only test for a lease from another computer on a shared
     drive). A long command touches it every 10 min while it runs.
 A lease ends only by staleness, by `reel lock --release` (the lead, on the editor's word), or by the SessionEnd hook
@@ -31,8 +31,10 @@ Stdlib only: imported by cli.py (`lib.writer_lock`) and by the hooks (`writer_lo
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -48,6 +50,31 @@ TOUCH_EVERY_S = 600
 WRITING_GRACE_S = 30            # an unreadable lock younger than this is being written right now
 ENV = "WHYNOT_LOCK_SESSION"
 IS_WIN = os.name == "nt"
+IS_MAC = sys.platform == "darwin"
+
+
+@functools.lru_cache(maxsize=1)
+def host_id() -> str:
+    """This computer, stably (3.0 T2.15): a Mac's hostname changes with the network, which would make a dead holder
+    look like another computer's and disable the takeover. macOS: the hardware UUID (ioreg), else the Bonjour
+    LocalHostName (scutil); elsewhere the computer name."""
+    if IS_MAC:
+        for cmd, pat in ((["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], r'"IOPlatformUUID"\s*=\s*"([^"]+)"'),
+                         (["scutil", "--get", "LocalHostName"], r"^\s*(\S+)\s*$")):
+            try:
+                out = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout or ""
+            except (OSError, subprocess.SubprocessError):
+                continue
+            m = re.search(pat, out, re.M)
+            if m:
+                return "mac:" + m.group(1)
+    return socket.gethostname()
+
+
+def same_host(rec: dict) -> bool:
+    """Was this lock record written on this computer? `host_id` when it has one, else (older records) `host`."""
+    hid = rec.get("host_id")
+    return hid == host_id() if hid else rec.get("host") == socket.gethostname()
 
 
 def lock_path(root) -> Path:
@@ -187,7 +214,7 @@ def stale_reason(root, rec: dict | None = None) -> str | None:
         return "the lock is gone"
     if not rec:
         return f"unreadable lock file, {age / 60:.0f} min old" if age > WRITING_GRACE_S else None
-    if rec.get("host") == socket.gethostname() and not pid_alive(rec.get("pid"), rec.get("pid_created")):
+    if same_host(rec) and not pid_alive(rec.get("pid"), rec.get("pid_created")):
         reused = pid_alive(rec.get("pid"))
         return (f"its process {rec.get('pid')} on {rec.get('host')} is no longer running"
                 + (" (the process id now belongs to another program)" if reused else ""))
@@ -355,7 +382,7 @@ def acquire(root, command: str, env=None) -> Lock:
     path.parent.mkdir(parents=True, exist_ok=True)
     hp = holder_pid(env)
     rec = {"session_id": sid, "pid": hp, "pid_created": process_created(hp), "host": socket.gethostname(),
-           "started_at": now_iso(), "updated_at": now_iso(), "command": command}
+           "host_id": host_id(), "started_at": now_iso(), "updated_at": now_iso(), "command": command}
     for _ in range(5):
         if _create(path, rec):
             return Lock(root, sid, per_command=hp == os.getpid())
