@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -529,10 +530,56 @@ class TestSetupBuild(TempHome):
     def test_concurrent_build_is_refused(self):
         lock = self.home / "runtimes" / ".r-new.building"
         lock.parent.mkdir(parents=True)
-        lock.write_text("1", encoding="utf-8")
+        lock.write_text(str(os.getpid()), encoding="utf-8")       # a running holder
         with self.assertRaises(SETUP.Failed) as cm:
             self.build(FakeRunner())
         self.assertIn("another WhyNot Cut setup", str(cm.exception))
+        self.assertTrue(lock.exists())
+
+    def dead_pid(self) -> int:
+        p = subprocess.Popen([sys.executable, "-c", "pass"])
+        p.wait()
+        return p.pid
+
+    def put_lock(self, text: str) -> Path:
+        lock = self.home / "runtimes" / ".r-new.building"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(text, encoding="utf-8")
+        return lock
+
+    def test_lock_of_a_dead_pid_is_stale_and_taken_over(self):
+        """Installer request 7: a closed installer window leaves "<pid> <time> installer"; `reel setup` takes over."""
+        for text in ("%d", "%d 2026-10-12T10:00:00+03:00 installer\n"):
+            with self.subTest(text=text):
+                self.put_lock(text % self.dead_pid())
+                self.build(FakeRunner())                           # no Failed: the lock was taken over
+                self.assertFalse((self.home / "runtimes" / ".r-new.building").exists())   # released after the build
+
+    def test_lock_of_a_live_pid_in_the_installer_format_is_refused(self):
+        lock = self.put_lock("%d 2026-10-12T10:00:00+03:00 installer\n" % os.getpid())
+        with self.assertRaises(SETUP.Failed):
+            self.build(FakeRunner())
+        self.assertTrue(lock.exists())
+
+    def test_lock_with_a_garbage_first_line_follows_the_two_hour_rule(self):
+        for text in ("", "garbage", "-5 x", "0", "12abc"):
+            with self.subTest(text=text):
+                lock = self.put_lock(text)
+                with self.assertRaises(SETUP.Failed):             # fresh: kept, refused
+                    self.build(FakeRunner())
+                self.assertTrue(lock.exists())
+                old = time.time() - SETUP.BUILD_LOCK_STALE_S - 60
+                os.utime(lock, (old, old))                        # older than 2 h: taken over
+                self.build(FakeRunner())
+                self.assertFalse(lock.exists())
+
+    def test_lock_of_another_host_is_never_stolen_for_a_dead_pid(self):
+        lock = self.put_lock("%d host=some-other-machine" % self.dead_pid())
+        with self.assertRaises(SETUP.Failed):
+            self.build(FakeRunner())
+        self.assertTrue(lock.exists())
+        lock.write_text("%d host=%s" % (self.dead_pid(), SETUP.socket.gethostname()), encoding="utf-8")
+        self.assertEqual(self.build(FakeRunner())["action"], "create")      # this machine's own: stale
 
     def test_without_uv_python_312_and_pip_with_hashes(self):
         run = FakeRunner()

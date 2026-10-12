@@ -29,6 +29,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tarfile
@@ -41,6 +42,7 @@ PLUGIN = HERE.parent
 sys.path.insert(0, str(PLUGIN / "engine" / "reel" / "lib"))
 import plat  # noqa: E402  (stdlib only)
 import runtime as R  # noqa: E402  (stdlib only)
+import writer_lock as WL  # noqa: E402  (stdlib only: pid_alive)
 
 BUILD_LOCK_STALE_S = 2 * 3600
 
@@ -151,11 +153,28 @@ def find_python312() -> Path | None:
 
 # --------------------------------------------------------------------------- build / repair
 class BuildLock:
-    """<home>/runtimes/.<id>.building, created exclusively: two setups never build the same runtime at once (one
-    older than BUILD_LOCK_STALE_S is a crashed run and is taken over)."""
+    """<home>/runtimes/.<id>.building, created exclusively: two setups never build the same runtime at once. A lock
+    is stale, and taken over, when the process named on its first line is not running on this computer (the installer
+    writes "<pid> <time> installer", this class "<pid>"; a "host=<name>" word, if one is there, must be this computer:
+    another machine's lock on a shared home is never stolen) or, as a backstop for an unreadable or reused pid, when it
+    is older than BUILD_LOCK_STALE_S."""
 
     def __init__(self, path: Path):
         self.path = path
+
+    @staticmethod
+    def owner_is_gone(path: Path) -> bool:
+        """True only when the lock names a pid that is certainly not running here; anything unreadable is False."""
+        try:
+            words = path.read_text(encoding="utf-8", errors="replace").split()
+        except OSError:
+            return False
+        if not words or not words[0].isdigit() or int(words[0]) <= 0:
+            return False
+        for w in words[1:]:
+            if w.startswith("host=") and w[5:] != socket.gethostname():
+                return False
+        return not WL.pid_alive(int(words[0]))
 
     def __enter__(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +186,8 @@ class BuildLock:
                 return self
             except FileExistsError:
                 try:
-                    if time.time() - self.path.stat().st_mtime > BUILD_LOCK_STALE_S:
+                    if (time.time() - self.path.stat().st_mtime > BUILD_LOCK_STALE_S
+                            or self.owner_is_gone(self.path)):
                         self.path.unlink()
                         continue
                 except OSError:
