@@ -37,6 +37,15 @@
     keep the session; no -Source = the H3 line in English and Arabic, exit 2; `bash -s < install.sh` does not hang),
     Git Bash without the test platform exits 2, plus static checks (ASCII .ps1, LF .sh, the step list, the README).
     Temp folders use TempDir (cleanup retried: Windows WinError 32 / 145).
+  * uninstall (task 6, T7.8), after a whole sandboxed install with a signed CEP panel, the UXP command and two fonts:
+    settings.json loses only our keys (the original bytes backed up; unreadable JSON = no CLI call, byte-identical),
+    `claude plugin uninstall` + `marketplace remove`, the CEP folder / fonts / registry values / marketplace folder
+    gone, the engine home kept; --remove-engine keeps models/, a clients folder with `.whynot-client` (also the
+    preferences' clients_root) and the target of a link, and lists python/ + bin/ in .delete-after-exit;
+    --remove-models; a running Adobe host keeps the panel; recorded paths outside their folders are left alone; an
+    engine home that is the user folder is refused; a dry run changes nothing. install.ps1 -Uninstall -RemoveEngine
+    and install.sh --uninstall --remove-engine after an install: no download, the bootstrap deletes python/ and bin/
+    after the core exits (a junction inside is removed as a link).
 Never touches the real ~/.whynot-cut or ~/.claude: every Paths is a sandbox home in a temp folder, and no real
 network is used (artefacts come from a 127.0.0.1 http.server started here, or file://).
 Run (repo root):
@@ -1559,6 +1568,20 @@ class TestUnmerge(unittest.TestCase):
         self.assertEqual(self.unmerge()["changed"], False)
         self.assertFalse(self.f.exists())
 
+    def test_plugins_the_install_switched_off_go_back_on_only_while_still_off(self):
+        d = json.loads(self.f.read_text(encoding="utf-8"))
+        d["enabledPlugins"].update({"reel-editor@old": False, "reel-editor@kept": True})
+        self.f.write_text(json.dumps(d), encoding="utf-8")
+        r = self.cl.unmerge_claude_settings(self.f, marketplace_name="thewhynot-ai", plugin_id=PID,
+                                            env_keys_if_under={}, enable=["reel-editor@old", "reel-editor@kept",
+                                                                          "reel-editor@gone", PID],
+                                            make_backup=False)
+        self.assertEqual(r["enabled"], ["reel-editor@old"])
+        self.assertIsNone(r["backup"])  # the caller keeps its own backup
+        self.assertEqual(list(self.f.parent.glob("settings.json.whynot-backup-*")), [])
+        plugins = json.loads(self.f.read_text(encoding="utf-8"))["enabledPlugins"]
+        self.assertEqual(plugins, {"x@y": True, "reel-editor@old": True, "reel-editor@kept": True})
+
 
 class TestMarketplaceEntry(unittest.TestCase):
     def test_placeholder_is_the_managed_directory_and_a_pin_is_the_url(self):
@@ -2825,7 +2848,11 @@ class TestShellScripts(unittest.TestCase):
         ps = SHELL_FILES["bootstrap.ps1"].read_text(encoding="utf-8")
         sh = SHELL_FILES["bootstrap.sh"].read_text(encoding="utf-8")
         self.assertEqual(shell_steps(ps, r"\$WncStepNames\s*=\s*@\(([^)]*)\)"), list(cli.STEP_ORDER))
-        self.assertEqual(shell_steps(sh, r'STEP_NAMES="([^"]*)"'), list(cli.STEP_ORDER))
+        self.assertEqual(shell_steps(sh, r'\nSTEP_NAMES="([^"]*)"'), list(cli.STEP_ORDER))
+        # and the uninstall steps (a dry run without Python names them)
+        un = [n for n, _f, _d in cli.UNINSTALL_STEPS]
+        self.assertEqual(shell_steps(ps, r"\$WncUninstallStepNames\s*=\s*@\(([^)]*)\)"), un)
+        self.assertEqual(shell_steps(sh, r'UNINSTALL_STEP_NAMES="([^"]*)"'), un)
 
     def test_the_bootstraps_use_the_runtime_contract(self):
         for name in ("bootstrap.ps1", "bootstrap.sh"):
@@ -3205,6 +3232,386 @@ class TestBashFrontEnd(_ShellCase):
         self.assertIn(H3_EN, out)
         self.assertIn(H3_AR, out)
         self.assertFalse(self.home.exists())
+
+
+# --------------------------------------------------------------------------------------------- T7.8 uninstall
+UXP_ID = "ai.thewhynot.cut.uxp"
+PREMIERE_26_5 = json.dumps([{"app": "premiere", "version": "26.5.0"}])
+UNINSTALL_STEP_NAMES = ["plugin", "adobe", "fonts", "marketplace", "engine"]
+DEFER_LIST = ".delete-after-exit"
+
+
+def uninstall_module():
+    """Imported inside the tests so this file stays importable while the module is being written."""
+    from wnc_installer import uninstall
+    return uninstall
+
+
+def add_adobe_panels(fx: types.SimpleNamespace) -> None:
+    """A signed ZXP and a .ccx inside the fixture plugin, pinned in its components.json: the install puts the CEP panel
+    in the fake CEP folder and (sandbox) records the UPIA command for the UXP one."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("META-INF/signatures.xml", "<signatures/>")
+        z.writestr("index.html", "<html>panel</html>")
+    zxp, ccx = buf.getvalue(), b"PK fixture ccx"
+    touch(fx.plugin_root / "bridge" / "cep.zxp", zxp)
+    touch(fx.plugin_root / "bridge" / "uxp.ccx", ccx)
+    comp = json.loads(fx.components_path.read_text(encoding="utf-8"))
+    comp["bridge"]["cep"].update(zxp="bridge/cep.zxp", sha256=sha(zxp))
+    comp["bridge"]["uxp"].update(ccx="bridge/uxp.ccx", sha256=sha(ccx), version="1.0.0", id=UXP_ID)
+    fx.components_path.write_text(json.dumps(comp, indent=2), encoding="utf-8")
+    fx.components = comp
+
+
+def tree(root: Path) -> list:
+    """Every path under root (relative, sorted), with the bytes of each file: proof that nothing changed."""
+    out = []
+    for p in sorted(root.rglob("*")):
+        out.append((str(p.relative_to(root)), p.read_bytes() if p.is_file() else None))
+    return out
+
+
+class _InstalledHome(unittest.TestCase):
+    """A sandboxed install (the core, fake uv / claude / engine, a signed CEP panel, the UXP command, two fonts) in a
+    home with a space and Arabic letters whose settings.json already holds the editor's own keys."""
+    EDITOR_SETTINGS = {"theme": "dark", "enabledPlugins": {"x@y": True}}
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.home = self.tmp / ARABIC_HOME
+        self.srv = Served(self, {})
+        self.fx = make_fixture_plugin(self.tmp / "zip root", self.srv.base)
+        self.srv.srv.files.update(self.fx.served)
+        add_adobe_panels(self.fx)
+        self.paths = base.Paths.from_env(str(self.home), env={})
+        self.claude_log = self.tmp / "claude.jsonl"
+        self.env = sandbox_env(WNC_TEST_UV=str(FAKE_UV), WNC_CLAUDE_CLI=str(FAKE_CLAUDE),
+                               FAKE_CLAUDE_LOG=str(self.claude_log), WNC_TEST_ENGINE_LOG=str(self.tmp / "engine.jsonl"),
+                               WNC_TEST_ADOBE_HOSTS=PREMIERE_26_5)
+        touch(self.paths.settings_file, json.dumps(self.EDITOR_SETTINGS, indent=2).encode("utf-8"))
+
+    def core(self, *args, env=None):
+        core = self.fx.plugin_root / "installer" / "core" / "wnc_install.py"
+        return subprocess.run([sys.executable, "-B", "-I", "-X", "utf8", str(core), *args, "--home", str(self.home),
+                               "--yes"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env=env or self.env, timeout=600, stdin=subprocess.DEVNULL)
+
+    def install(self) -> dict:
+        r = self.core("install", "--skip", "model")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return json.loads(self.paths.state_file.read_text(encoding="utf-8"))
+
+    def claude_calls(self) -> list:
+        if not self.claude_log.is_file():
+            return []
+        return [json.loads(x)["argv"] for x in self.claude_log.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+    def bootstrap_leftovers(self) -> tuple:
+        """What the bootstrap puts in the engine home before the core runs: python-build-standalone and uv."""
+        pbs = self.paths.python_dir / "cpython-3.12.15-windows-x86_64-none"
+        touch(pbs / "python.exe", b"MZ python")
+        touch(self.paths.bin_dir / "uv.exe", b"MZ uv")
+        return pbs, self.paths.bin_dir
+
+    def deferred(self) -> list:
+        return (self.paths.whynot / DEFER_LIST).read_text(encoding="utf-8").splitlines()
+
+
+class TestUninstall(_InstalledHome):
+    def test_default_uninstall_removes_ours_and_keeps_the_engine(self):
+        st = self.install()
+        cep = Path(st["adobe"]["cep"]["path"])
+        fonts = [Path(p) for p in st["fonts"]["installed"]]
+        self.assertTrue(cep.is_dir())
+        self.assertEqual(len(fonts), 2)
+        self.assertTrue(all(f.is_file() for f in fonts))
+        before = self.paths.settings_file.read_bytes()
+        n_calls = len(self.claude_calls())
+        model = touch(self.paths.models_dir / "large-v3" / "model.bin", b"weights")
+        prefs = touch(self.paths.claude_dir / "whynot-cut.local.md", b"---\nlanguage: ar\n---\n")
+        r = self.core("uninstall")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        # settings.json: only our keys gone, the editor's intact, the original bytes backed up
+        self.assertEqual(json.loads(self.paths.settings_file.read_text(encoding="utf-8")), self.EDITOR_SETTINGS)
+        backups = [p.read_bytes() for p in self.paths.claude_dir.glob("settings.json.whynot-backup-*")]
+        self.assertIn(before, backups)
+        argv = self.claude_calls()[n_calls:]
+        self.assertIn(["plugin", "uninstall", PID, "--scope", "user"], argv)
+        self.assertIn(["plugin", "marketplace", "remove", "thewhynot-ai"], argv)
+        # Adobe panel, fonts (files + registry values), the marketplace folder
+        self.assertFalse(cep.exists())
+        self.assertTrue(cep.parent.is_dir())
+        self.assertIn(UXP_ID, out)  # the UPIA remove command (recorded only in a sandbox)
+        self.assertFalse(any(f.exists() for f in fonts))
+        if IS_WIN:
+            self.assertEqual(json.loads((self.paths.sandbox_dir / "registry-fonts.json").read_text("utf-8")), {})
+            self.assertTrue((self.paths.localappdata / "WhyNotCut" / "git").is_dir())  # only with --remove-engine
+        self.assertFalse(self.paths.marketplace_dir.exists())
+        # the engine home stays: runtimes, current, models, the uninstall log
+        self.assertTrue(self.paths.runtimes_dir.is_dir())
+        self.assertTrue(self.paths.current_file.is_file())
+        self.assertEqual(model.read_bytes(), b"weights")
+        self.assertTrue(list(self.paths.logs_dir.glob("uninstall-*.log")))
+        self.assertTrue(prefs.is_file())
+        self.assertIn("whynot-cut.local.md", r.stdout)  # kept and reported
+        for name in UNINSTALL_STEP_NAMES:
+            self.assertIn(f"== {name} ==", r.stdout)
+        st2 = json.loads(self.paths.state_file.read_text(encoding="utf-8"))
+        for key in ("adobe", "fonts", "claude"):
+            self.assertNotIn(key, st2)
+        self.assertIn("uninstalled", st2)
+        self.assertFalse((self.paths.whynot / DEFER_LIST).exists())
+        # a second uninstall finds nothing more to do and still exits 0
+        r2 = self.core("uninstall")
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+
+    def test_remove_engine_keeps_models_client_folders_and_link_targets(self):
+        self.install()
+        clients = self.paths.whynot / "WhyNot Clients"
+        touch(clients / "Dr X" / ".whynot-client", b"{}")
+        footage = touch(clients / "Dr X" / "raw" / "C0239.mp4", b"precious footage")
+        touch(self.paths.claude_dir / "whynot-cut.local.md",
+              f"---\nclients_root: {clients}\nlanguage: ar\n---\n".encode("utf-8"))
+        model = touch(self.paths.models_dir / "large-v3" / "model.bin", b"weights")
+        outside = self.tmp / "client elsewhere"
+        kept = touch(outside / "keep.mp4", b"precious")
+        linked = make_dir_link(self.paths.whynot / "linked clients", outside)
+        pbs, bin_dir = self.bootstrap_leftovers()
+        r = self.core("uninstall", "--remove-engine")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        left = set(os.listdir(self.paths.whynot))
+        self.assertEqual(left, {"models", "WhyNot Clients", "python", "bin", DEFER_LIST}, out)
+        self.assertEqual(model.read_bytes(), b"weights")
+        self.assertEqual(footage.read_bytes(), b"precious footage")
+        self.assertTrue((clients / "Dr X" / ".whynot-client").is_file())
+        self.assertEqual(kept.read_bytes(), b"precious")  # a link is removed as a link: its target is untouched
+        if linked:
+            self.assertFalse(os.path.lexists(self.paths.whynot / "linked clients"))
+        # python/ and bin/ are left to the bootstrap (Windows locks the running python.exe): listed, not deleted
+        self.assertEqual(self.deferred(), [str(self.paths.python_dir), str(bin_dir)])
+        self.assertTrue((pbs / "python.exe").is_file())
+        if IS_WIN:
+            self.assertFalse((self.paths.localappdata / "WhyNotCut").exists())
+        self.assertIn("WhyNot Clients", out)  # reported as kept
+        self.assertTrue(self.paths.settings_file.is_file())
+
+    def test_remove_models_too(self):
+        self.install()
+        touch(self.paths.models_dir / "large-v3" / "model.bin", b"weights")
+        self.bootstrap_leftovers()
+        r = self.core("uninstall", "--remove-engine", "--remove-models")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(set(os.listdir(self.paths.whynot)), {"python", "bin", DEFER_LIST}, out)
+        # nothing else is left, so the engine home itself goes too, once the bootstrap removed python/ and bin/
+        self.assertEqual(self.deferred(), [str(self.paths.python_dir), str(self.paths.bin_dir),
+                                           str(self.paths.whynot)])
+
+    def test_a_running_adobe_host_keeps_the_panel_and_the_rest_goes(self):
+        st = self.install()
+        cep = Path(st["adobe"]["cep"]["path"])
+        env = dict(self.env, WNC_TEST_HOSTS_RUNNING="Adobe Premiere Pro.exe")
+        r = self.core("uninstall", env=env)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertTrue((cep / "index.html").is_file())
+        self.assertIn("[!!] adobe", r.stdout)
+        self.assertIn("Adobe Premiere Pro.exe", r.stdout)
+        st2 = json.loads(self.paths.state_file.read_text(encoding="utf-8"))
+        self.assertEqual(st2["adobe"]["cep"]["path"], str(cep))  # still recorded: the next uninstall removes it
+        self.assertNotIn("fonts", st2)
+        r2 = self.core("uninstall")
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertFalse(cep.exists())
+
+    def test_unreadable_settings_runs_no_cli_and_stays_byte_identical(self):
+        self.install()
+        bad = b'{"theme": "dark",, "enabledPlugins": {"whynot-cut@thewhynot-ai": true}}'
+        self.paths.settings_file.write_bytes(bad)
+        n_calls = len(self.claude_calls())
+        r = self.core("uninstall")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(self.paths.settings_file.read_bytes(), bad)
+        self.assertEqual(self.claude_calls()[n_calls:], [])
+        self.assertIn("[!!] plugin", r.stdout)
+        self.assertIn("extraKnownMarketplaces", r.stdout)  # what to remove by hand
+        self.assertIn(PID, r.stdout)
+
+
+class TestUninstallSteps(unittest.TestCase):
+    """The steps one by one, in-process, against hand-made state."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.un = uninstall_module()
+        os.environ.pop("WNC_TEST_HOSTS_RUNNING", None)
+
+    def ctx(self, plat="win-x64", **args):
+        args.setdefault("remove_engine", False)
+        args.setdefault("remove_models", False)
+        return make_ctx(self.tmp / ARABIC_HOME, {"schema": 1}, SK, plat, **args)
+
+    def test_registered_in_order(self):
+        self.assertEqual([n for n, _f, _d in cli.UNINSTALL_STEPS], UNINSTALL_STEP_NAMES)
+        self.assertTrue(all(d == () for _n, _f, d in cli.UNINSTALL_STEPS))
+
+    def test_a_recorded_cep_path_outside_the_cep_folder_is_not_deleted(self):
+        ctx = self.ctx()
+        elsewhere = self.tmp / "elsewhere" / "ai.thewhynot.cut.bridge"
+        touch(elsewhere / "index.html", b"x")
+        ctx.state.data["adobe"] = {"cep": {"path": str(elsewhere), "signed": True}}
+        r = self.un.step_adobe(ctx)
+        self.assertNotEqual(r.status, "red", r.detail)
+        self.assertTrue((elsewhere / "index.html").is_file())
+
+    def test_fonts_only_recorded_files_inside_the_font_dir_and_their_own_values(self):
+        fx = fonts_module()
+        ctx = self.ctx()
+        fdir = fx.user_font_dir(ctx.paths, "win-x64")
+        ours = touch(fdir / "A.ttf", b"a")
+        theirs = touch(fdir / "Theirs.ttf", b"t")
+        outside = touch(self.tmp / "other" / "B.ttf", b"b")
+        reg = fx.FontRegistry.for_paths(ctx.paths)
+        reg.set("A (TrueType)", str(ours))
+        reg.set("C (TrueType)", str(self.tmp / "someone" / "C.ttf"))  # recorded name, but now someone else's value
+        reg.set("Theirs (TrueType)", str(theirs))
+        ctx.state.data["fonts"] = {"installed": [str(ours), str(outside)],
+                                   "registry": ["A (TrueType)", "C (TrueType)"]}
+        r = self.un.step_fonts(ctx)
+        self.assertNotEqual(r.status, "red", r.detail)
+        self.assertFalse(ours.exists())
+        self.assertTrue(outside.is_file())
+        self.assertTrue(theirs.is_file())
+        self.assertEqual(sorted(reg.names()), ["C (TrueType)", "Theirs (TrueType)"])
+
+    def test_remove_models_alone_keeps_the_rest_of_the_engine(self):
+        ctx = self.ctx(remove_models=True)
+        touch(ctx.paths.models_dir / "large-v3" / "model.bin", b"w")
+        rt = touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
+        r = self.un.step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertFalse(ctx.paths.models_dir.exists())
+        self.assertTrue(rt.is_file())
+
+    def test_an_engine_home_that_is_the_user_home_is_refused(self):
+        h = self.tmp / "profile"
+        touch(h / "Documents" / "thesis.docx", b"mine")
+        touch(h / "state.json", b"{}")
+        paths = base.Paths(home=h, whynot=h, claude_dir=h / ".claude", appdata=h / "AppData" / "Roaming",
+                           localappdata=h / "AppData" / "Local", sandbox=True)
+        ns = argparse.Namespace(skip=[], dry_run=False, yes=True, remove_engine=True, remove_models=True)
+        ctx = base.Ctx(paths=paths, log=Quiet(None), components={"schema": 1}, state=base.State(paths), plugin_root=SK,
+                       platform="win-x64", args=ns)
+        r = self.un.step_engine(ctx)
+        self.assertEqual(r.status, "red", r.detail)
+        self.assertEqual((h / "Documents" / "thesis.docx").read_bytes(), b"mine")
+
+    def test_dry_run_changes_nothing_and_runs_nothing(self):
+        ctx = self.ctx(dry_run=True, remove_engine=True, remove_models=True)
+        ctx.log = Quiet(None, dry_run=True)
+        touch(ctx.paths.settings_file, json.dumps({"enabledPlugins": {PID: True}}).encode("utf-8"))
+        touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
+        touch(ctx.paths.marketplace_dir / ".claude-plugin" / "marketplace.json", b"{}")
+        touch(ctx.paths.models_dir / "m.bin", b"w")
+        before = tree(ctx.paths.home)
+        with mock.patch.object(base, "run_cmd", side_effect=AssertionError("no process in a dry run")):
+            results = self.un.uninstall(ctx, remove_engine=True, remove_models=True)
+        self.assertEqual([r.name for r in results], UNINSTALL_STEP_NAMES)
+        self.assertEqual(tree(ctx.paths.home), before)
+
+
+def fonts_module():
+    from wnc_installer import fonts
+    return fonts
+
+
+@unittest.skipUnless(find_powershell(), "Windows PowerShell is not available")
+class TestPowerShellUninstall(TestPowerShellFrontEnd):
+    """install.ps1 -Uninstall after an install.ps1 install: no download, the deferred python/ and bin/ removed after the
+    core exits (a junction inside them removed as a link), and the engine home gone."""
+    test_install_in_an_arabic_home_touches_nothing_outside = None
+    test_dry_run_leaves_the_home_empty = None
+    test_dry_run_without_uv_names_the_remaining_steps = None
+    test_a_bad_uv_sha256_stops_with_3_and_names_the_file = None
+    test_paths_ending_in_a_backslash_reach_the_core_intact = None
+    test_the_bootstraps_quoting_guard_doubles_trailing_backslashes = None
+    test_uv_already_at_the_pinned_version_is_not_downloaded = None
+
+    def test_dry_run_uninstall_without_python_names_the_uninstall_steps(self):
+        self.home.mkdir()
+        r = self.ps(self.front(), "-Home", self.home, "-Uninstall", "-RemoveEngine", "-DryRun", "-Yes",
+                    env=self.env(WNC_TEST_UV=None))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(", ".join(UNINSTALL_STEP_NAMES), r.stdout)
+        self.assertEqual(list(self.home.iterdir()), [])
+        self.assertEqual(self.srv.srv.hits, [])
+
+    def test_uninstall_remove_engine_after_an_install(self):
+        r = self.ps(self.front(), "-Home", self.home, "-Yes", "-Skip", "model,launch")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        hits = len(self.srv.srv.hits)
+        pbs = self.paths.python_dir / "cpython-3.12.15-windows-x86_64-none"
+        touch(pbs / "python.exe", b"MZ python")
+        outside = self.tmp / "outside"
+        kept = touch(outside / "keep.txt", b"precious")
+        linked = make_dir_link(pbs / "Lib", outside)
+        before = live_snapshot()
+        r = self.ps(self.front(), "-Home", self.home, "-Uninstall", "-RemoveEngine", "-Yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(len(self.srv.srv.hits), hits, self.srv.srv.hits[hits:])  # no uv / Python download
+        self.assertTrue(linked)  # mklink /J needs no admin rights
+        self.assertEqual(kept.read_bytes(), b"precious")  # junction python/.../Lib -> outside: removed as a link
+        self.assertIn("uv and Python are not downloaded", r.stdout)
+        for p in (self.paths.python_dir, self.paths.bin_dir, self.paths.whynot):  # by the bootstrap, after the core
+            self.assertIn(f"deleted {p}", r.stdout)
+        self.assertFalse(self.paths.whynot.exists(), sorted(os.listdir(self.paths.whynot))
+                         if self.paths.whynot.exists() else out)
+        settings = json.loads(self.paths.settings_file.read_text(encoding="utf-8"))
+        self.assertNotIn("thewhynot-ai", settings.get("extraKnownMarketplaces", {}))
+        self.assertEqual(live_snapshot(), before)
+
+
+@unittest.skipUnless(find_bash(), "bash is not available")
+class TestBashUninstall(TestBashFrontEnd):
+    """install.sh --uninstall after an install.sh install, run on the engine's own Python (found by its path, without
+    uv): no download, python/ and bin/ removed after the core exits, models kept."""
+    test_install_in_an_arabic_home_touches_nothing_outside = None
+    test_uv_already_at_the_pinned_version_is_not_downloaded = None
+    test_uv_is_found_anywhere_in_its_archive = None
+    test_dry_run_leaves_the_home_empty = None
+    test_a_bad_uv_sha256_stops_with_3_and_names_the_file = None
+    test_git_bash_without_test_platform_says_use_install_ps1 = None
+    test_piped_script_with_yes_does_not_hang = None
+    test_piped_without_source_says_h3_in_arabic_too = None
+
+    def test_uninstall_remove_engine_on_the_engine_python(self):
+        r = self.sh(self.front(), "--home", self.home_arg(), "--yes", "--skip", "model,launch")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        hits = len(self.srv.srv.hits)
+        pbs = self.paths.python_dir / "cpython-3.12.15-macos-aarch64-none" / "bin" / "python3"
+        pbs.parent.mkdir(parents=True)
+        pbs.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n', encoding="utf-8", newline="\n")
+        os.chmod(pbs, 0o755)
+        model = touch(self.paths.models_dir / "large-v3" / "model.bin", b"weights")
+        r = self.sh(self.front(), "--home", self.home_arg(), "--uninstall", "--remove-engine", "--yes",
+                    env=self.env(WNC_TEST_UV=None))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(len(self.srv.srv.hits), hits, self.srv.srv.hits[hits:])
+        self.assertIn(f"at {pbs.as_posix()}", r.stdout)
+        self.assertIn("uv and Python are not downloaded", r.stdout)
+        self.assertIn(f"deleted {self.paths.whynot.as_posix()}/python", r.stdout)  # by the bootstrap, after the core
+        self.assertEqual(os.listdir(self.paths.whynot), ["models"], out)
+        self.assertEqual(model.read_bytes(), b"weights")
 
 
 if __name__ == "__main__":

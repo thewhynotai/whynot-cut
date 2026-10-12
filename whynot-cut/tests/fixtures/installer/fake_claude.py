@@ -18,6 +18,8 @@ always sets; without it every call that would write fails, so the real ~/.claude
                                          is REPLACED (the worst case a real CLI could do), so a test can prove the
                                          installer never lets the CLI near an unreadable settings.json
   plugin update <id>                     exit 0 (exit 1 when <id> is not installed)
+  plugin uninstall <id> [--scope user]   removes <id> from installed_plugins.json and settings.json enabledPlugins
+                                         (exit 1 when it is not installed)
   FAKE_CLAUDE_INSTALLED=1                every call (even --version) first lists whynot-cut@thewhynot-ai in
                                          installed_plugins.json (an editor who already has the plugin)
   FAKE_CLAUDE_FAIL=<word>                exit 1 for the call whose argv contains <word> (add / remove / install /
@@ -84,6 +86,23 @@ def _settings(key, name, value):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def _unset(key, name):
+    """del settings.json[key][name] (and an emptied [key]), written only when that changes anything."""
+    path = os.path.join(os.path.dirname(_plugins_dir()), "settings.json")
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return
+    if not isinstance(data, dict) or not isinstance(data.get(key), dict) or name not in data[key]:
+        return
+    del data[key][name]
+    if not data[key]:
+        del data[key]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
 def main(argv):
     log = os.environ.get("FAKE_CLAUDE_LOG")
     if log:
@@ -122,6 +141,15 @@ def main(argv):
         return 0
     if argv[:2] == ["plugin", "update"] and len(argv) >= 3:
         return 0 if argv[2] in _load("installed_plugins.json").get("plugins", {}) else 1
+    if argv[:2] == ["plugin", "uninstall"] and len(argv) >= 3:
+        inst = _load("installed_plugins.json")
+        if argv[2] not in inst.get("plugins", {}):
+            sys.stderr.write(f"fake claude: {argv[2]} is not installed\n")
+            return 1
+        del inst["plugins"][argv[2]]
+        _save("installed_plugins.json", inst)
+        _unset("enabledPlugins", argv[2])
+        return 0
     sys.stderr.write(f"fake claude: unsupported call {argv!r}\n")
     return 2
 

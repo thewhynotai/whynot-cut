@@ -28,7 +28,7 @@ import shutil
 import stat
 import sys
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Iterable, Mapping, Optional
 
 from . import base
 
@@ -230,17 +230,24 @@ def merge_claude_settings(path, *, marketplace: Optional[dict], plugin_id: Optio
     return {"changed": changed, "backup": backup, "disabled": disabled}
 
 
+def unmerge_snippet(marketplace_name: str, plugin_id: str, env_keys: Iterable = ()) -> str:
+    """One line of JSON naming what uninstall removes (shown when settings.json cannot be changed)."""
+    return json.dumps({"remove": {"extraKnownMarketplaces": [marketplace_name], "enabledPlugins": [plugin_id],
+                                  "env": sorted(env_keys)}}, ensure_ascii=False)
+
+
 def unmerge_claude_settings(path, *, marketplace_name: str, plugin_id: str, env_keys_if_under: dict,
-                            dry_run: bool = False) -> dict:
+                            enable=(), dry_run: bool = False, make_backup: bool = True) -> dict:
     """Undo merge_claude_settings (uninstall): remove extraKnownMarketplaces[marketplace_name] and
     enabledPlugins[plugin_id], and each env key of `env_keys_if_under` only when its value is a path inside (or equal
-    to) the given folder. A container emptied by this is removed. Same backup / atomic rules; {changed, backup}."""
+    to) the given folder. A container emptied by this is removed. `enable`: plugin ids the install switched off (ID-5)
+    that are set back to true, only while they are still false. Same backup / atomic rules; {changed, backup,
+    enabled}. make_backup=False: the caller keeps its own backup of the original (around the CLI calls)."""
     path = Path(path)
-    snippet = json.dumps({"remove": {"extraKnownMarketplaces": [marketplace_name], "enabledPlugins": [plugin_id],
-                                     "env": sorted(env_keys_if_under)}}, ensure_ascii=False)
+    snippet = unmerge_snippet(marketplace_name, plugin_id, env_keys_if_under)
     data, raw = _read_settings(path, snippet)
     if raw is None:
-        return {"changed": False, "backup": None}
+        return {"changed": False, "backup": None, "enabled": []}
     before = copy.deepcopy(data)
     for key, sub in (("extraKnownMarketplaces", marketplace_name), ("enabledPlugins", plugin_id)):
         cont = data.get(key)
@@ -257,9 +264,16 @@ def unmerge_claude_settings(path, *, marketplace_name: str, plugin_id: str, env_
                 del env[k]
         if not env and before.get("env"):
             del data["env"]
+    enabled = []
+    plugins = data.get("enabledPlugins")
+    if isinstance(plugins, dict):
+        for key in enable:
+            if isinstance(key, str) and key != plugin_id and plugins.get(key) is False:
+                plugins[key] = True
+                enabled.append(key)
     changed = data != before
-    backup = _write_settings(path, raw, data) if changed and not dry_run else None
-    return {"changed": changed, "backup": backup}
+    backup = _write_settings(path, raw, data, make_backup) if changed and not dry_run else None
+    return {"changed": changed, "backup": backup, "enabled": enabled}
 
 
 # --------------------------------------------------------------------------------------------- marketplace

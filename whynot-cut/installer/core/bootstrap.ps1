@@ -10,6 +10,13 @@
 #   then          <python> -I -B -X utf8 installer\core\wnc_install.py install|uninstall --plugin-root ... --uv ...
 #                 --python ... --log ... (the 14 steps). -X utf8: -I ignores PYTHONUTF8, and Arabic must survive
 #                 a cp1252 console.
+# -Uninstall runs on the engine's own Python when it is there (uv python find with the uv in bin\, at any version, else
+# python\cpython-<ver>*\python.exe): nothing is downloaded; only without one are uv and Python fetched as above.
+# -Uninstall -RemoveEngine: the core cannot delete the Python it runs on (Windows locks python.exe and its DLLs), so it
+# lists python\ and bin\ (and the engine home itself when nothing else is left) in <engine>\.delete-after-exit. Once
+# the core has exited, this script deletes exactly those paths: only inside the engine home, never through a link or
+# junction (a link is removed as a link), the engine home only when empty; then the list file. The log went with
+# logs\, so the summary is on the console only.
 # Log: ~\.whynot-cut\logs\install-YYYYmmdd-HHMMSS.log (uninstall-... for -Uninstall), shared with the core (--log).
 # Exit code (in $LASTEXITCODE): the core's; 2 = cannot start (not Windows x64, unreadable components.json, missing
 # core); 3 = a bootstrap step failed (download, sha256, uv, python), with a one-line message and the log path.
@@ -49,6 +56,8 @@ param(
     # the core's STEP_ORDER (wnc_installer/cli.py); tests/test_installer.py keeps the two in step
     $WncStepNames = @('preflight', 'questions', 'runtime', 'ffmpeg', 'gitbash', 'gpu', 'claude', 'adobe', 'fonts',
         'settings', 'model', 'state', 'doctor', 'launch')
+    # and its uninstall steps (wnc_installer/uninstall.py STEP_NAMES)
+    $WncUninstallStepNames = @('plugin', 'adobe', 'fonts', 'marketplace', 'engine')
     $S = @{ Log = $null; Step = 'start'; Code = 0; Utf8 = (New-Object System.Text.UTF8Encoding $false) }
     $EnvNames = @('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'CLAUDE_CONFIG_DIR', 'WHYNOT_HOME',
         'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_NO_CONFIG', 'UV_PYTHON_PREFERENCE', 'UV_NO_MODIFY_PATH')
@@ -204,6 +213,113 @@ param(
         return $null
     }
 
+    function Find-WncEnginePython([string]$Uv, [string]$Version, [string]$Engine) {
+        # uninstall: the python-build-standalone already in the engine home, or $null (nothing is downloaded here)
+        if ($Uv -and (Test-Path -LiteralPath $Uv -PathType Leaf)) {
+            $py = $null
+            try { $py = Find-WncPython $Uv $Version } catch { $py = $null }
+            if ($py) { return $py }
+        }
+        $dir = Join-Path $Engine 'python'
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return $null }
+        $dirs = @(Get-ChildItem -LiteralPath $dir -Directory -Filter "cpython-$Version*" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending)
+        foreach ($d in $dirs) {
+            $exe = Join-Path $d.FullName 'python.exe'
+            if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { continue }
+            try {
+                $r = Invoke-WncNative $exe @('-I', '-B', '-c', 'pass')
+                if ($r.Code -eq 0) { return $exe }
+            } catch {
+                Write-WncLog 'INFO' "  $exe does not start: $($_.Exception.Message)"
+            }
+        }
+        return $null
+    }
+
+    function Test-WncReparse([string]$Path) {
+        # a junction, symlink or any other reparse point
+        try {
+            $attr = [IO.File]::GetAttributes($Path)
+        } catch {
+            return $false
+        }
+        return (($attr -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+    }
+
+    function Invoke-WncDeleteTree([string]$Path) {
+        # never Remove-Item -Recurse (Windows PowerShell 5.1 follows junctions): a link is removed as a link, its
+        # target never entered; read-only files are cleared first
+        if (Test-WncReparse $Path) {
+            if ([IO.Directory]::Exists($Path)) { [IO.Directory]::Delete($Path, $false) } else { [IO.File]::Delete($Path) }
+            return
+        }
+        if ([IO.Directory]::Exists($Path)) {
+            foreach ($child in [IO.Directory]::GetFileSystemEntries($Path)) { Invoke-WncDeleteTree $child }
+            [IO.Directory]::Delete($Path, $false)
+        } elseif ([IO.File]::Exists($Path)) {
+            [IO.File]::SetAttributes($Path, [IO.FileAttributes]::Normal)
+            [IO.File]::Delete($Path)
+        }
+    }
+
+    function Invoke-WncDeferredDelete([string]$Engine) {
+        # after `uninstall --remove-engine`: the paths the core listed in <engine>\.delete-after-exit (see the header)
+        $list = Join-Path $Engine '.delete-after-exit'
+        if (-not [IO.File]::Exists($list)) { return }
+        $root = [IO.Path]::GetFullPath($Engine).TrimEnd([char]92)
+        if (Test-WncReparse $root) {
+            Write-Host "WARNING: $root is a link; the paths in $list were left alone"
+            return
+        }
+        $homeToo = $false
+        $failed = $false
+        foreach ($line in [IO.File]::ReadAllLines($list, $S.Utf8)) {
+            $p = $line.Trim()
+            if (-not $p) { continue }
+            $full = [IO.Path]::GetFullPath($p).TrimEnd([char]92)
+            if ($full -ieq $root) { $homeToo = $true; continue }
+            if (-not $full.StartsWith($root + [char]92, [StringComparison]::OrdinalIgnoreCase)) {
+                Write-Host "WARNING: $full is outside $root; left alone"
+                continue
+            }
+            $linked = $false
+            $parent = [IO.Path]::GetDirectoryName($full)
+            while ($parent -and ($parent.Length -gt $root.Length)) {
+                if (Test-WncReparse $parent) { $linked = $true; break }
+                $parent = [IO.Path]::GetDirectoryName($parent)
+            }
+            if ($linked) {
+                Write-Host "WARNING: $full lies behind a link; left alone"
+                continue
+            }
+            $err = $null
+            for ($i = 1; $i -le 5; $i++) {
+                # the core has just exited: Windows may hold its files a moment longer
+                try {
+                    Invoke-WncDeleteTree $full
+                    $err = $null
+                    break
+                } catch {
+                    $err = $_.Exception.Message
+                    Start-Sleep -Milliseconds (200 * $i)
+                }
+            }
+            if ($null -ne $err) {
+                Write-Host "WARNING: could not delete $full ($err); delete it by hand"
+                $failed = $true
+            } else {
+                Write-Host "deleted $full"
+            }
+        }
+        [IO.File]::Delete($list)
+        if ($homeToo -and (-not $failed) -and [IO.Directory]::Exists($root) -and
+            (@([IO.Directory]::GetFileSystemEntries($root)).Count -eq 0)) {
+            [IO.Directory]::Delete($root, $false)
+            Write-Host "deleted $root"
+        }
+    }
+
     function Initialize-WncBootstrap {
         # @{ Code; Run; Py; CoreArgs } - every check and download; the core itself runs outside, uncaptured
         $arch = $env:PROCESSOR_ARCHITEW6432
@@ -267,11 +383,26 @@ param(
         if ($DryRun) { $mode += ' (dry run: nothing is written)' }
         Write-WncLine "WhyNot Cut bootstrap: $command on win-x64; engine home $engine$mode"
 
+        $env:UV_PYTHON_INSTALL_DIR = Join-Path $engine 'python'
+        $env:UV_CACHE_DIR = Join-Path $engine 'cache\uv'
+        $env:UV_NO_CONFIG = '1'
+        $env:UV_PYTHON_PREFERENCE = 'only-managed'
+        $env:UV_NO_MODIFY_PATH = '1'
+        $uvExe = Join-Path $engine 'bin\uv.exe'
+        $py = $null
+        if ($Uninstall) {
+            $probe = $uvExe
+            if ($testUv) { $probe = $testUv }
+            $py = Find-WncEnginePython -Uv $probe -Version $pyVer -Engine $engine
+        }
+
         # == uv ==
         Write-WncStep 'uv'
-        $uvExe = Join-Path $engine 'bin\uv.exe'
-        $haveUv = Test-WncUv $uvExe $uvVer
-        if ($haveUv) {
+        $haveUv = $false
+        if ($py) {
+            Write-WncLine "uninstall: the engine's own Python is there; uv and Python are not downloaded"
+        } elseif (Test-WncUv $uvExe $uvVer) {
+            $haveUv = $true
             Write-WncLine "uv $uvVer is installed ($uvExe)"
         } elseif ($DryRun) {
             Write-WncLine "dry run: would download uv $uvVer from $uvUrl (sha256 $uvSha) and unpack it to $uvExe"
@@ -288,17 +419,13 @@ param(
 
         # == python ==
         Write-WncStep 'python'
-        $env:UV_PYTHON_INSTALL_DIR = Join-Path $engine 'python'
-        $env:UV_CACHE_DIR = Join-Path $engine 'cache\uv'
-        $env:UV_NO_CONFIG = '1'
-        $env:UV_PYTHON_PREFERENCE = 'only-managed'
-        $env:UV_NO_MODIFY_PATH = '1'
-        $py = $null
-        if ($haveUv -or $testUv) { $py = Find-WncPython $uv $pyVer }
+        if ((-not $py) -and ($haveUv -or $testUv)) { $py = Find-WncPython $uv $pyVer }
         if (-not $py) {
             if ($DryRun) {
                 Write-WncLine "dry run: would install Python $pyVer with uv into $($env:UV_PYTHON_INSTALL_DIR) (--no-bin --no-registry)"
-                Write-WncLine ("dry run: then the installer core would run these steps: " + ($WncStepNames -join ', '))
+                $names = $WncStepNames
+                if ($Uninstall) { $names = $WncUninstallStepNames }
+                Write-WncLine ("dry run: then the installer core would run these steps: " + ($names -join ', '))
                 return @{ Code = 0 }
             }
             Write-WncLine "installing Python $pyVer into $($env:UV_PYTHON_INSTALL_DIR)"
@@ -324,7 +451,7 @@ param(
         if ($Uninstall -and $RemoveEngine) { $a += '--remove-engine' }
         if ($Uninstall -and $RemoveModels) { $a += '--remove-models' }
         Write-WncLog 'INFO' ("bootstrap: running the installer core: $py " + ($a -join ' '))
-        return @{ Code = 0; Run = $true; Py = $py; CoreArgs = $a }
+        return @{ Code = 0; Run = $true; Py = $py; CoreArgs = $a; Engine = $engine }
     }
 
     $saved = @{}
@@ -345,6 +472,10 @@ param(
             $coreArgs = ConvertTo-WncNativeArgument $prep.CoreArgs
             & $py @coreArgs
             $S.Code = $LASTEXITCODE
+            if ($Uninstall -and $RemoveEngine -and (-not $DryRun)) {
+                $S.Log = $null  # it went with logs\
+                Invoke-WncDeferredDelete $prep.Engine
+            }
         } else {
             $S.Code = $prep.Code
         }

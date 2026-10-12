@@ -9,4 +9,5 @@ in ~/.whynot-cut/python, before any package is installed. Entry point: installer
   system.py   steps preflight, questions, settings, model, state, doctor (+ the checklist), launch; registers
   adobe.py    step adobe (signed CEP ZXP per user, UXP .ccx through UPIA) and
   fonts.py    step fonts (OFL fonts per user, HKCU font values on Windows)
+  uninstall.py  the uninstall steps plugin, adobe, fonts, marketplace, engine (--remove-engine / --remove-models)
 """

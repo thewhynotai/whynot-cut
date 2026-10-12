@@ -9,6 +9,12 @@
 #                 uv python find -> the python-build-standalone interpreter.
 #   then          <python> -I -B -X utf8 installer/core/wnc_install.py install|uninstall --plugin-root ... --uv ...
 #                 --python ... --log ... (the 14 steps).
+# --uninstall runs on the engine's own Python when it is there (uv python find with the uv in bin/, at any version,
+# else python/cpython-<ver>*/bin/python3): nothing is downloaded; only without one are uv and Python fetched as above.
+# --uninstall --remove-engine: the core leaves python/ and bin/ (the Python it runs on, and uv) and lists them, plus the
+# engine home itself when nothing else is left, in <engine>/.delete-after-exit. Once the core has exited, this script
+# deletes exactly those paths: only inside the engine home, never through a link (a link is removed as a link), the
+# engine home only when empty; then the list file. The log went with logs/, so the summary is on the console only.
 # Log: ~/.whynot-cut/logs/install-YYYYmmdd-HHMMSS.log (uninstall-... for --uninstall), shared with the core (--log).
 # Exit code: the core's; 2 = cannot start (not macOS, Git Bash/MSYS, unreadable components.json, missing core);
 # 3 = a bootstrap step failed (download, sha256, uv, python), with a one-line message and the log path.
@@ -22,6 +28,7 @@
 # bash 3.2 (the macOS default): no associative arrays, no ${var,,}, no mapfile. No `set -e`: every failure is handled.
 
 STEP_NAMES="preflight questions runtime ffmpeg gitbash gpu claude adobe fonts settings model state doctor launch"
+UNINSTALL_STEP_NAMES="plugin adobe fonts marketplace engine"  # wnc_installer/uninstall.py STEP_NAMES
 LOG=""
 STEP="start"
 
@@ -170,6 +177,64 @@ EOF
   PY="$last"
 }
 
+engine_python() { # uninstall: the python-build-standalone already in the engine home -> PY (nothing is downloaded)
+  PY=""
+  if [ -n "$TEST_UV" ] || [ -f "$UV_BIN" ]; then
+    UV="$UV_BIN"
+    [ -n "$TEST_UV" ] && UV="$TEST_UV"
+    if find_python; then return 0; fi
+  fi
+  PY=""
+  for cand in "$ENGINE"/python/cpython-"$PY_VER"*/bin/python3; do  # glob order: the newest last
+    [ -f "$cand" ] || continue
+    if "$cand" -I -B -c pass >/dev/null 2>&1 </dev/null; then PY="$cand"; fi
+  done
+  [ -n "$PY" ]
+}
+
+delete_deferred() { # after `uninstall --remove-engine`: the paths the core listed in $ENGINE/.delete-after-exit
+  list="$ENGINE/.delete-after-exit"
+  [ -f "$list" ] || return 0
+  root="${ENGINE%/}"
+  if [ -L "$root" ]; then
+    printf 'WARNING: %s is a link; the paths in %s were left alone\n' "$root" "$list"
+    return 0
+  fi
+  home_too="" failed=""
+  while IFS= read -r p || [ -n "$p" ]; do
+    p="${p%$'\r'}"
+    [ -n "$p" ] || continue
+    case "$OS_NAME" in MINGW*|MSYS*|CYGWIN*) p="${p//\\//}" ;; esac  # the core wrote C:\...
+    p="${p%/}"
+    if [ "$p" = "$root" ]; then home_too=1; continue; fi
+    case "$p" in
+      */../*|*/..|*/./*) printf 'WARNING: %s is not a plain path; left alone\n' "$p"; continue ;;
+      "$root"/*) ;;
+      *) printf 'WARNING: %s is outside %s; left alone\n' "$p" "$root"; continue ;;
+    esac
+    linked="" a="${p%/*}"
+    while [ "${#a}" -gt "${#root}" ]; do
+      if [ -L "$a" ]; then linked=1; break; fi
+      a="${a%/*}"
+    done
+    if [ -n "$linked" ]; then printf 'WARNING: %s lies behind a link; left alone\n' "$p"; continue; fi
+    if [ -L "$p" ]; then
+      rm -f "$p"  # the link only, never its target
+    else
+      rm -rf "$p"  # rm removes a link inside as a link; it never follows one
+    fi
+    if [ -e "$p" ] || [ -L "$p" ]; then
+      failed=1
+      printf 'WARNING: could not delete %s; delete it by hand\n' "$p"
+    else
+      printf 'deleted %s\n' "$p"
+    fi
+  done < "$list"
+  rm -f "$list"
+  if [ -n "$home_too" ] && [ -z "$failed" ] && rmdir "$root" 2>/dev/null; then printf 'deleted %s\n' "$root"; fi
+  return 0
+}
+
 # ------------------------------------------------------------------------------------------- arguments
 PLUGIN_ROOT="" HOME_OVR="" DRY="" YES="" CLIENTS="" LANG_OPT="" CHANNEL="" COMPONENTS="" SKIP=""
 UNINSTALL="" REMOVE_ENGINE="" REMOVE_MODELS=""
@@ -262,13 +327,20 @@ MODE=""
 [ -n "$DRY" ] && MODE="$MODE (dry run: nothing is written)"
 say "WhyNot Cut bootstrap: $CMD on $PLAT; engine home $ENGINE$MODE"
 
-# ------------------------------------------------------------------------------------------- == uv ==
-step uv
+export UV_PYTHON_INSTALL_DIR="$ENGINE/python" UV_CACHE_DIR="$ENGINE/cache/uv" UV_NO_CONFIG=1
+export UV_PYTHON_PREFERENCE=only-managed UV_NO_MODIFY_PATH=1
 UV_NAME="uv"
 case "$PLAT" in win-*) UV_NAME="uv.exe" ;; esac
 UV_BIN="$ENGINE/bin/$UV_NAME"
+PY=""
+if [ -n "$UNINSTALL" ]; then engine_python || PY=""; fi
+
+# ------------------------------------------------------------------------------------------- == uv ==
+step uv
 HAVE_UV=""
-if uv_version_ok "$UV_BIN" "$UV_VER"; then
+if [ -n "$PY" ]; then
+  say "uninstall: the engine's own Python is there; uv and Python are not downloaded"
+elif uv_version_ok "$UV_BIN" "$UV_VER"; then
   HAVE_UV=1
   say "uv $UV_VER is installed ($UV_BIN)"
 elif [ -n "$DRY" ]; then
@@ -306,14 +378,13 @@ fi
 
 # ------------------------------------------------------------------------------------------- == python ==
 step python
-export UV_PYTHON_INSTALL_DIR="$ENGINE/python" UV_CACHE_DIR="$ENGINE/cache/uv" UV_NO_CONFIG=1
-export UV_PYTHON_PREFERENCE=only-managed UV_NO_MODIFY_PATH=1
-PY=""
-if [ -n "$HAVE_UV" ] || [ -n "$TEST_UV" ]; then find_python; fi
+if [ -z "$PY" ] && { [ -n "$HAVE_UV" ] || [ -n "$TEST_UV" ]; }; then find_python; fi
 if [ -z "$PY" ]; then
   if [ -n "$DRY" ]; then
     say "dry run: would install Python $PY_VER with uv into $UV_PYTHON_INSTALL_DIR (--no-bin --no-registry)"
-    say "dry run: then the installer core would run these steps: $(printf '%s' "$STEP_NAMES" | sed 's/ /, /g')"
+    names="$STEP_NAMES"
+    [ -n "$UNINSTALL" ] && names="$UNINSTALL_STEP_NAMES"
+    say "dry run: then the installer core would run these steps: $(printf '%s' "$names" | sed 's/ /, /g')"
     exit 0
   fi
   say "installing Python $PY_VER into $UV_PYTHON_INSTALL_DIR"
@@ -345,4 +416,9 @@ if [ -t 0 ]; then
 else
   "$PY" "$@" </dev/null  # stdin may be the script itself (curl | bash): the core asks through /dev/tty instead
 fi
-exit $?
+RC=$?
+if [ -n "$UNINSTALL" ] && [ -n "$REMOVE_ENGINE" ] && [ -z "$DRY" ]; then
+  LOG=""  # it went with logs/
+  delete_deferred
+fi
+exit $RC

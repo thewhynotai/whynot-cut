@@ -3,7 +3,8 @@
 The bootstrap (install.ps1 / install.sh) has put uv and python-build-standalone in place and runs
     <engine python> -I -B installer/core/wnc_install.py install [--log <file>] [--yes] ...
 Step modules append (name, fn, needs) to STEPS (install) or UNINSTALL_STEPS; `install` runs the registered steps in
-STEP_ORDER, whatever order they were registered in. `plan` prints the order as JSON and writes nothing.
+STEP_ORDER, whatever order they were registered in; `uninstall` runs uninstall.py's steps (plugin, adobe, fonts,
+marketplace, engine) with --remove-engine / --remove-models and prints its own checklist. `plan` prints the order as JSON and writes nothing.
 Exit codes: 0 done (ok / amber / skipped), 1 at least one step red, 2 cannot start (platform, components.json) or
 preflight is red (not enough free space: nothing was downloaded).
 After the steps, install prints the checklist ([OK] / [!!] / [XX] per step and the doctor's fixes, also written to
@@ -27,9 +28,10 @@ UNINSTALL_STEPS: list = []  # uninstall steps, run in registration order
 def _register_step_modules() -> None:
     """Each step module has register(STEPS) (and, for uninstall, register_uninstall(UNINSTALL_STEPS)). Imported here,
     after the registries exist, so a step module never imports cli."""
-    from . import claude, runtime, system
+    from . import claude, runtime, system, uninstall
     for mod in (runtime, claude, system):
         mod.register(STEPS)
+    uninstall.register_uninstall(UNINSTALL_STEPS)
 
 
 _register_step_modules()
@@ -89,9 +91,10 @@ def main(argv=None) -> int:
     _utf8_console()
     parser = build_parser()
     args = parser.parse_args(argv)
-    unknown = [s for s in args.skip if s not in STEP_ORDER]
+    names = [n for n, _f, _d in UNINSTALL_STEPS] if args.command == "uninstall" else list(STEP_ORDER)
+    unknown = [s for s in args.skip if s not in names]
     if unknown:
-        parser.error(f"--skip: unknown step(s) {', '.join(unknown)}; steps are {', '.join(STEP_ORDER)}")
+        parser.error(f"--skip: unknown step(s) {', '.join(unknown)}; steps are {', '.join(names)}")
     plugin_root = Path(args.plugin_root).resolve() if args.plugin_root else default_plugin_root()
     paths = base.Paths.from_env(args.home)
 
@@ -136,7 +139,8 @@ def main(argv=None) -> int:
              + (" (sandbox)" if paths.sandbox else "") + (" (dry run: nothing is written)" if args.dry_run else ""))
     if args.command == "install":
         return install(ctx)
-    results = base.run_steps(ctx, list(UNINSTALL_STEPS))
+    from . import uninstall
+    results = uninstall.uninstall(ctx, args.remove_engine, args.remove_models)
     red = [r.name for r in results if r.status == "red"]
     log.info(f"{args.command} finished: " + (", ".join(f"{r.name} {r.status}" for r in results) or "no steps"))
     if log.path:

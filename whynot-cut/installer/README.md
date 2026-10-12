@@ -132,9 +132,30 @@ powershell -ExecutionPolicy Bypass -File whynot-cut\installer\install.ps1 -Unins
 bash whynot-cut/installer/install.sh --uninstall [--remove-engine] [--remove-models]
 ```
 
-This removes the plugin, the Adobe panel, the fonts the installer added, and its settings entries. The installer
-removes these by undoing its own `settings.json` merge, using the backup rules above. The Whisper models and the engine
-home stay unless you ask for them to go.
+Uninstall runs on the Python that is already in `~/.whynot-cut/python`, so it downloads nothing. It downloads uv and
+Python only when that Python is gone. It runs these steps in order:
+
+| Step | What it removes |
+|---|---|
+| `plugin` | It checks `~/.claude/settings.json` first and backs up the original bytes. Then it runs `claude plugin uninstall whynot-cut@thewhynot-ai --scope user` and `claude plugin marketplace remove thewhynot-ai`. Last, it removes our entries from `settings.json`. The Git Bash entry is removed only when it points into `%LOCALAPPDATA%\WhyNotCut\git`. A plugin the install switched off (`reel-editor@*`) is switched back on. If `settings.json` is not valid JSON, nothing is changed and the Claude Code CLI does not run; the step shows what to remove by hand. |
+| `adobe` | The CEP panel folder the install recorded, and the UXP panel through Adobe's plugin installer (`/remove <id>`). If Premiere Pro or After Effects is running, nothing is removed; close them and run uninstall again. |
+| `fonts` | Only the font files the install recorded, and only their own registry values. A font you had before stays. |
+| `marketplace` | `~/.whynot-cut/marketplace` (and its `.new` / `.prev` copies). |
+| `engine` | Only with `-RemoveEngine` / `--remove-engine`: everything in `~/.whynot-cut` except `models/`, plus `%LOCALAPPDATA%\WhyNotCut\git`. With `-RemoveModels` / `--remove-models` the models go too. `-RemoveModels` on its own deletes only `models/`. |
+
+Uninstall never touches:
+
+- your clients folder (`clients_root` in your preferences) or any folder that holds a `.whynot-client` file, even
+  inside `~/.whynot-cut`;
+- your preferences file `~/.claude/whynot-cut.local.md`. It is kept and named in the summary, so a later install
+  uses it again;
+- fonts, registry values or Adobe folders the install did not record;
+- the target of a link or junction inside `~/.whynot-cut`. The link itself is removed, never followed.
+
+With `-RemoveEngine`, the Python that runs the uninstall cannot delete itself, because Windows locks a running
+`python.exe`. So the core lists `python/` and `bin/` in `~/.whynot-cut/.delete-after-exit`, and the install script
+deletes exactly those once the core has finished. It also deletes `~/.whynot-cut` itself if nothing else is left.
+The uninstall log is in `logs/`, so it is deleted with the engine home; the summary stays on the screen.
 
 ## Sandbox and test mode
 
