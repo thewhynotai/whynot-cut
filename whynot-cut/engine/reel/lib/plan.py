@@ -869,14 +869,23 @@ def compile_plan(paths: Paths, ctx=None) -> dict:
     return write_outputs(paths, build_plan(read_inputs(paths, ctx)))
 
 
-def plan_fingerprint(paths: Paths) -> str:
+def plan_fingerprint(paths: Paths, checked: bool = False) -> str:
     """Gate 1 fingerprint: the whole compiled timeline spec (camera, framing, scale, duration, main footage, events,
     captions, music) except the `generated` timestamp, so a re-compile that changes nothing stays approved and
     anything that changes what gets built does not (3.0 T1.4, engine IM-3). Sorted keys: the hash does not depend on
-    key order or file formatting."""
+    key order or file formatting. `checked=True` (approve-plan) reads the spec through stamps.read_compiled: another
+    minor version or a 2.x spec warns, another major version is refused with a re-run hint (T2.3). The other callers
+    (the re-plan that invalidates an approval, qc, the gate) must still read a spec the re-run is about to replace."""
     import hashlib
     import json
-    spec = json.loads(paths.p("01_analysis/timeline-spec.json").read_text(encoding="utf-8"))
+    f = paths.p("01_analysis/timeline-spec.json")
+    if checked:
+        from .stamps import read_compiled
+        spec = read_compiled(f)
+        if spec is None:
+            raise FileNotFoundError(f)
+    else:
+        spec = json.loads(f.read_text(encoding="utf-8"))
     body = {k: v for k, v in spec.items() if k not in ("generated", "engine_version")}   # T2.3: a re-compile by a newer
     # engine that changes nothing stays approved
     if isinstance(body.get("source_range"), dict):        # `reel range` re-run with the same points: set_at etc. only

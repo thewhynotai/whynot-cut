@@ -379,12 +379,27 @@ def cmd_plan(a):
 
 def cmd_validate(a):
     """3.0 T2.3: {ok, kind, file, errors[{path, msg}]}; the kind from the file name or --kind. A relative path that is
-    not in the current folder is looked up in --root."""
+    not in the current folder is looked up in the project (--video-id: output/projects/<ID>/), the episode (--episode:
+    output/episodes/<EP>/) and then --root, so `reel --root C --video-id CLIP1 validate 01_analysis/edit-decisions.json`
+    finds the clip's own file. When nothing exists the error lists every place tried."""
     from lib.schemas import validate_file
     f = Path(a.file).expanduser()
-    if not f.is_absolute() and not f.exists() and a.root:
-        f = Path(a.root).expanduser() / f
-    out(validate_file(f, a.kind))
+    tried = [f]
+    if not f.is_absolute() and a.root:
+        root = Path(a.root).expanduser()
+        if a.video_id:
+            tried.append(Paths(root, a.video_id).p(a.file))
+        if getattr(a, "episode", None):
+            from lib.episode import EpisodePaths
+            tried.append(EpisodePaths(root, a.episode).p(a.file))
+        tried.append(root / f)
+    found = next((c for c in tried if c.exists()), tried[0])
+    res = validate_file(found, a.kind)
+    if not found.exists() and res.get("error", "").startswith("not found"):
+        res["tried"] = [str(c) for c in tried]
+        res["error"] = f"not found: {a.file}"
+        res["how"] = "looked in: " + "; ".join(str(c) for c in tried)
+    out(res)
 
 
 def cmd_previews(a):
@@ -444,7 +459,7 @@ def cmd_approve_plan(a):
         return
     if not p.p("01_analysis/timeline-spec.json").exists():
         raise SystemExit("compile the plan first (`plan`)")
-    rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": plan_fingerprint(p),
+    rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": plan_fingerprint(p, checked=True),
            "format": APPROVAL_FORMAT}
     write_json(p.p("01_analysis/plan-approval.json"), rec)
     set_status(p, "EDIT_PLAN_READY", f"plan approved by {a.by}", "plan_approval")
