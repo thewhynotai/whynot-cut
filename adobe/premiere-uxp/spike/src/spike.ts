@@ -1,6 +1,8 @@
 // WhyNot Cut Spike - panel entry. "Run spike" runs every probe (probes.ts), writes
 // ~/.whynot-cut/uxp-spike/results-<ts>.json after each probe (so a hang keeps the partial results), and shows them.
+// 0.1.5: the panel also watches ~/.whynot-cut/uxp-spike/run-request.json (autorun.ts) and runs the spike by itself.
 import type { premierepro as Ppro } from "@adobe/premierepro";
+import { createAutoRunner, type RunMode, type RunSummary } from "./autorun.ts";
 import { ensureDir, writeText } from "./fsutil.ts";
 import { resolveHome, spikeDir } from "./home.ts";
 import { buildProbes, errText, loadConfig, skipSaveCloseOpen, type Ctx } from "./probes.ts";
@@ -89,18 +91,32 @@ async function copyResults(): Promise<void> {
   status.textContent = `Copy failed (${failures.join("; ")}) - select the text below and copy it, or read the results file.`;
 }
 
-async function runSpike(keepOpen: boolean): Promise<void> {
+let running = false;
+
+function hostModules() {
+  const uxp = (tryRequire<UxpModule>("uxp") ?? {}) as UxpModule;
+  const fs = (tryRequire<UxpFs>("fs") ?? {}) as UxpFs;
+  const os = tryRequire<UxpOs>("os");
+  const proc = tryRequire<{ env?: Record<string, string | undefined> }>("process") ?? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  const { home, via } = resolveHome({ ...(os?.homedir ? { osHomedir: () => os.homedir?.() ?? "" } : {}), env: proc?.env ?? {} });
+  return { uxp, fs, os, home, via };
+}
+
+/** One run: the buttons call it with no autoId, the auto-runner with the request's id. Never throws. */
+async function runSpike(keepOpen: boolean, autoId?: string): Promise<RunSummary> {
   const status = $("status");
+  const say = (text: string) => void (status.textContent = autoId ? `Auto-run ${autoId} - ${text}` : text);
+  if (running) return { results_file: null, ok: false, pass: 0, fail: 0, na: 0, error: "another run is already in progress" };
+  running = true;
   const buttons = ["run", "run-keep"].map((id) => $(id) as HTMLButtonElement);
   buttons.forEach((b) => (b.disabled = true));
   skipSaveCloseOpen.value = keepOpen;
+  let resultsFile: string | null = null;
+  let counts = { pass: 0, fail: 0, na: 0 };
+  let problem: string | null = null;
   try {
     const ppro = require("premierepro") as Ppro;
-    const uxp = (tryRequire<UxpModule>("uxp") ?? {}) as UxpModule;
-    const fs = (tryRequire<UxpFs>("fs") ?? {}) as UxpFs;
-    const os = tryRequire<UxpOs>("os");
-    const proc = tryRequire<{ env?: Record<string, string | undefined> }>("process") ?? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
-    const { home, via } = resolveHome({ ...(os?.homedir ? { osHomedir: () => os.homedir?.() ?? "" } : {}), env: proc?.env ?? {} });
+    const { uxp, fs, os, home, via } = hostModules();
     if (!home) throw new Error("cannot resolve the home folder (os.homedir() and USERPROFILE/HOME all unavailable)");
     const dir = spikeDir(home);
     await ensureDir(fs, dir);
@@ -108,7 +124,7 @@ async function runSpike(keepOpen: boolean): Promise<void> {
     const ts = stamp();
     const ctx: Ctx = { ppro, fs, uxp, os, home, homeVia: via, stamp: ts, config, configError: error, expect: {}, notes: [] };
     const probes = buildProbes({ keepOpen });
-    status.textContent = config ? `Running ${probes.length} probes (config: ${dir}/config.json)` : `Running without config - ${error}`;
+    say(config ? `Running ${probes.length} probes (config: ${dir}/config.json)` : `Running without config - ${error}`);
     let premiere = "unknown";
     try {
       // Application.version resolves empty on 26.5.2; uxp.host.version is the reliable source
@@ -129,6 +145,7 @@ async function runSpike(keepOpen: boolean): Promise<void> {
       config_error: error,
       kept_project_open: keepOpen,
       notes: ctx.notes,
+      ...(autoId ? { auto_run_id: autoId } : {}),
       ops,
     });
     let writeError: string | null = null;
@@ -148,14 +165,44 @@ async function runSpike(keepOpen: boolean): Promise<void> {
     await write(ops);
     const pass = ops.filter((o) => o.ok === true).length;
     const fail = ops.filter((o) => o.ok === false).length;
-    const counts = `${pass} pass, ${fail} fail, ${ops.length - pass - fail} n/a`;
-    status.textContent = writeError
-      ? `Done: ${counts}. COULD NOT WRITE ${resultsPath}: ${writeError} - use Copy results or select the text below.`
-      : `Done: ${counts}. Results: ${resultsPath}`;
+    counts = { pass, fail, na: ops.length - pass - fail };
+    const text = `${pass} pass, ${fail} fail, ${counts.na} n/a`;
+    resultsFile = resultsPath;
+    if (writeError) problem = `COULD NOT WRITE ${resultsPath}: ${writeError}`;
+    say(writeError ? `Done: ${text}. ${problem} - use Copy results or select the text below.` : `Done: ${text}. Results: ${resultsPath}`);
   } catch (e) {
-    status.textContent = `Spike could not start: ${errText(e)}`;
+    problem = `Spike could not start: ${errText(e)}`;
+    say(problem);
   } finally {
+    running = false;
     buttons.forEach((b) => (b.disabled = false));
+  }
+  return { results_file: resultsFile, ok: problem === null, ...counts, ...(problem === null ? {} : { error: problem }) };
+}
+
+/** 0.1.5: poll ~/.whynot-cut/uxp-spike/run-request.json (on load, then every 5 s) and run what it asks for. */
+function startAutoRun(): void {
+  const status = $("status");
+  try {
+    const { fs, home } = hostModules();
+    if (!home) throw new Error("cannot resolve the home folder");
+    const dir = spikeDir(home);
+    const runner = createAutoRunner({
+      fs,
+      dir,
+      now: () => Date.now(),
+      isBusy: () => running,
+      run: (mode: RunMode, id: string) => runSpike(mode === "keep_open", id),
+      setStatus: (text) => void (status.textContent = text),
+      schedule: (fn, ms) => {
+        const handle = setTimeout(fn, ms);
+        return () => clearTimeout(handle);
+      },
+    });
+    status.textContent = `Ready. Watching ${dir}/run-request.json every 5 s.`;
+    void runner.start();
+  } catch (e) {
+    status.textContent = `Ready. Auto-run is off: ${errText(e)}`;
   }
 }
 
@@ -175,6 +222,7 @@ function boot(): void {
   $("run").addEventListener("click", () => void runSpike(false));
   $("run-keep").addEventListener("click", () => void runSpike(true));
   $("copy").addEventListener("click", () => void copyResults());
+  startAutoRun();
 }
 
 boot();

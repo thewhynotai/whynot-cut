@@ -58,6 +58,20 @@ export async function ensureDir(fs: UxpFs, dir: string): Promise<void> {
   }
 }
 
+/** True when this UXP build exposes a rename (promise or Sync twin). Measured live: not guaranteed. */
+export function canRename(fs: UxpFs): boolean {
+  return typeof fs.rename === "function" || typeof fs.renameSync === "function";
+}
+
+export async function renameFile(fs: UxpFs, from: string, to: string): Promise<void> {
+  await fsCall(fs, "rename", from, to);
+}
+
+/** Delete one file (fs.unlink, or unlinkSync). Throws when this UXP build has neither. */
+export async function removeFile(fs: UxpFs, path: string): Promise<void> {
+  await fsCall(fs, "unlink", path);
+}
+
 export function baseName(path: string): string {
   const p = toForwardSlashes(path);
   return p.slice(p.lastIndexOf("/") + 1);
