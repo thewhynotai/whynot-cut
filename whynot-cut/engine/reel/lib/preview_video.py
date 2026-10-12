@@ -8,6 +8,7 @@ finishes, mixes and renders in Premiere.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 import wave
@@ -156,7 +157,21 @@ def build_audio(paths: Paths, spec: dict, out: Path, src_video: Path) -> Path:
 
 
 # --------------------------------------------------------------------------- video
-def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
+PREVIEW_WORKERS = min(4, os.cpu_count() or 1)     # chunks rendered at once (each also runs two ffmpeg processes)
+MIN_CHUNK_FRAMES = 96                              # a chunk is worth its own start-up from about 4 s of timeline
+
+
+def chunk_bounds(total: int, workers: int, min_chunk: int = MIN_CHUNK_FRAMES) -> list[int]:
+    """Frame boundaries [0, ..., total] of the chunks a timeline of `total` frames is rendered in: at most `workers`,
+    none shorter than `min_chunk` frames (a short preview is one chunk: the plain single pass)."""
+    n = max(1, min(int(workers), total // max(1, int(min_chunk))))
+    return [round(total * i / n) for i in range(n + 1)]
+
+
+def render(paths: Paths, width: int = 540, label: bool = True, workers: int | None = None,
+           min_chunk_frames: int = MIN_CHUNK_FRAMES) -> dict:
+    """Render the preview MP4. The timeline is cut into up to `workers` chunks that are rendered at the same time and
+    joined with ffmpeg's concat demuxer (same codec parameters, so the join is lossless); `workers=1` is one pass."""
     from .ppro_build import job_data
     t0 = time.time()
     from .stamps import read_compiled
@@ -186,111 +201,167 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
     cw_, ch_ = max(2, round(dw * s / 2) * 2), max(2, round(dh * s / 2) * 2)
     box, boy = spec.get("base_offset_x", 0.0), spec.get("base_offset_y", 0.0)
     off = ["-ss", f"{(spec.get('source_in_ms') or 0) / 1000:.3f}"] if spec.get("source_in_ms") else []
-    dec = subprocess.Popen([ff, "-loglevel", "error", *off, "-i", str(src), "-an", "-vf", f"fps={fps_arg()},scale={cw_}:{ch_}",
-                            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
-    enc = subprocess.Popen([ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-                            "-r", fps_arg(), "-i", "-", "-i", str(wav), "-c:v", "libx264", "-preset", "veryfast",
-                            "-crf", "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-shortest",
-                            "-movflags", "+faststart", str(mp4)], stdin=subprocess.PIPE)
     fsize = cw_ * ch_ * 3
-    src_idx, cur = -1, Image.new("RGB", (cw_, ch_))
     layers = sorted(data["graphics"], key=lambda g: g["track_index"])
-    stills = _Stills(W, H)
     from .ppro_build import sharpen_settings
     _sh = sharpen_settings(spec)
     sharp = ImageFilter.UnsharpMask(radius=1.2, percent=int(_sh["amount"] * 4), threshold=2) if _sh else None
     segs = spec["main_segments"]
-    si = 0
     brolls = [e for e in spec["events"] if e["template"] == "broll_video"]
-    bdec, blast = {}, {}
-
-    def broll_frame(ev):
-        """Next frame of a B-roll clip (its own decoder, started at the clip's in-point), cover-cropped to WxH."""
-        eid = ev["event_id"]
-        if eid not in bdec:
-            pp = ev["params"]
-            cx, cy = (pp.get("crop_center") or [0.5, 0.5])[:2]
-            bdec[eid] = subprocess.Popen(
-                [ff, "-loglevel", "error", "-ss", str(float(pp.get("in", 0) or 0)), "-i", str(paths.root / pp["video"]), "-an",
-                 "-vf", f"fps={fps_arg()},scale={W}:{H}:force_original_aspect_ratio=increase,"
-                        f"crop={W}:{H}:x='(iw-{W})*{float(cx)}':y='(ih-{H})*{float(cy)}'",
-                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
-        buf = bdec[eid].stdout.read(W * H * 3)
-        if len(buf) == W * H * 3:
-            blast[eid] = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
-        return blast.get(eid)
     total = spec["duration_frames"]
+    fps_n, fps_s = seq_fps(), fps_arg()               # read once, here: the workers below never ask the Context
     tag = None
     if label:
         tag = Image.new("RGBA", (W, 22), (0, 0, 0, 120))
         ImageDraw.Draw(tag).text((6, 5), f"WhyNot Cut preview - {paths.video_id} - not the final render", fill=(255, 255, 255, 220))
+    bounds = chunk_bounds(total, PREVIEW_WORKERS if workers is None else workers, min_chunk_frames)
+    nch = len(bounds) - 1
+
+    def seg_index(f):
+        si = 0
+        while si < len(segs) - 1 and f >= segs[si]["end_frame"]:
+            si += 1
+        return si
+
+    def source_frame(f, seg):
+        """Index of the decoded source frame the timeline frame f shows."""
+        src_ms = seg.get("src_in_ms", seg["start_frame"] * 1000 / fps_n) + (f - seg["start_frame"]) * 1000 / fps_n
+        return int(round(src_ms * fps_n / 1000))
+
+    def render_range(f0, f1, enc):
+        """Timeline frames f0..f1-1 into the encoder's stdin. A range that does not start at frame 0 has its decoders
+        skip the frames before it INSIDE ffmpeg (`trim` after the same `fps` filter, so every frame is the one a single
+        pass would have used); the one starting at 0 is the plain sequential pass."""
+        skip = source_frame(f0, segs[seg_index(f0)]) if f0 else 0
+        trim = f",trim=start_frame={skip},setpts=PTS-STARTPTS" if skip else ""
+        # `-r` after a trim: without it ffmpeg falls back to the SOURCE's rate for the output and duplicates frames
+        dec = subprocess.Popen([ff, "-loglevel", "error", *off, "-i", str(src), "-an", "-vf",
+                                f"fps={fps_s}{trim},scale={cw_}:{ch_}", *(["-r", fps_s] if skip else []),
+                                "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+        src_idx, cur = skip - 1, Image.new("RGB", (cw_, ch_))
+        stills = _Stills(W, H, cap=max(12, 48 // nch))
+        si = 0
+        bdec, blast = {}, {}
+
+        def broll_frame(ev, f):
+            """Next frame of a B-roll clip (its own decoder, started at the clip's in-point), cover-cropped to WxH."""
+            eid = ev["event_id"]
+            if eid not in bdec:
+                pp = ev["params"]
+                cx, cy = (pp.get("crop_center") or [0.5, 0.5])[:2]
+                into = max(0, f - ev["start_frame"]) if f0 else 0      # a range that starts inside the clip's event
+                bdec[eid] = subprocess.Popen(
+                    [ff, "-loglevel", "error", "-ss", str(float(pp.get("in", 0) or 0)), "-i", str(paths.root / pp["video"]), "-an",
+                     "-vf", f"fps={fps_s}" + (f",trim=start_frame={into},setpts=PTS-STARTPTS" if into else "") +
+                            f",scale={W}:{H}:force_original_aspect_ratio=increase,"
+                            f"crop={W}:{H}:x='(iw-{W})*{float(cx)}':y='(ih-{H})*{float(cy)}'",
+                     *(["-r", fps_s] if into else []), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+            buf = bdec[eid].stdout.read(W * H * 3)
+            if len(buf) == W * H * 3:
+                blast[eid] = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
+            return blast.get(eid)
+        try:
+            for f in range(f0, f1):
+                while si < len(segs) - 1 and f >= segs[si]["end_frame"]:
+                    si += 1
+                seg = segs[si]
+                want = source_frame(f, seg)
+                while src_idx < want:
+                    buf = dec.stdout.read(fsize)
+                    if len(buf) < fsize:
+                        break                                   # source ended: hold the last frame
+                    cur = Image.frombuffer("RGB", (cw_, ch_), buf, "raw", "RGB", 0, 1)
+                    src_idx += 1
+                # Premiere: output = (source - centre) * scale + frame centre + offset  ->  invert for the source window
+                sc = seg.get("scale_factor", 1.0) or 1.0
+                ox = (box + (seg.get("offset_x") or 0.0)) * k
+                oy = (boy + (seg.get("offset_y") or 0.0)) * k
+                x0, x1 = cw_ / 2 - (W / 2 + ox) / sc, cw_ / 2 + (W / 2 - ox) / sc
+                y0, y1 = ch_ / 2 - (H / 2 + oy) / sc, ch_ / 2 + (H / 2 - oy) / sc
+                win = seg.get("window") if seg.get("decision_id") != "AUTO_CUTAWAY" else None
+                if seg.get("decision_id") == "AUTO_CUTAWAY" or win:
+                    # source cutaway: the whole card over a blurred cover copy of itself; 4:5 framing: the speaker cropped
+                    # to the window over the same blurred fill (same as the Premiere build)
+                    bx, by = box * k, boy * k
+                    bg = cur.crop((round(cw_ / 2 - (W / 2 + bx)), round(ch_ / 2 - (H / 2 + by)),
+                                   round(cw_ / 2 + (W / 2 - bx)), round(ch_ / 2 + (H / 2 - by)))).resize((W, H), Image.BILINEAR)
+                    frame = bg.filter(ImageFilter.GaussianBlur(radius=max(4, round(28 * k))))
+                    cw2, ch2 = max(2, round(cw_ * sc)), max(2, round(ch_ * sc))
+                    px, py = round(W / 2 - cw2 / 2 + ox), round(H / 2 - ch2 / 2 + oy)
+                    img = cur.resize((cw2, ch2), Image.BILINEAR)
+                    if win:   # only the rows inside the window (the build's Crop)
+                        wy0, wy1 = round(win["y"] * k), round((win["y"] + win["h"]) * k)
+                        t0, t1 = max(0, wy0 - py), min(ch2, wy1 - py)
+                        img = img.crop((0, t0, cw2, max(t0 + 1, t1)))
+                        py += t0
+                    frame.paste(img, (px, py))
+                else:
+                    frame = cur.crop((round(x0), round(y0), round(x1), round(y1))).resize((W, H), Image.BILINEAR)
+                    if sharp:   # Premiere Sharpen on V1 (approximation: unsharp mask at preview size)
+                        frame = frame.filter(sharp)
+                for be in brolls:                       # full-screen licensed B-roll replaces the picture (hard cut)
+                    if be["start_frame"] <= f < be["end_frame"]:
+                        bf = broll_frame(be, f)
+                        if bf is not None:
+                            frame = bf
+                frame = frame.convert("RGBA")
+                t = f / fps_n
+                for g in layers:
+                    if g["start_s"] <= t < g["end_s"]:
+                        im = _apply(stills.get(g["png"]), anim_state(g, t - g["start_s"]), k)
+                        if im is not None:
+                            frame.alpha_composite(im)
+                if tag is not None:
+                    frame.alpha_composite(tag)
+                enc.stdin.write(frame.convert("RGB").tobytes())
+        finally:
+            for d_ in [dec, *bdec.values()]:     # stop the decoders and reap them (no zombie ffmpeg, no ResourceWarning)
+                d_.kill()                        # first: closing the pipe under a running decoder makes it print "Broken pipe"
+                d_.stdout.close()
+                d_.wait()
+
+    def encode(f0, f1, dest, audio):
+        """Render f0..f1 and encode it to `dest` (with the dialogue when `audio`: the single-pass file). Same codec
+        parameters for every chunk, which is what makes the concatenation lossless. -> the encoder's exit code."""
+        cmd = [ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", fps_s, "-i", "-"]
+        if audio:
+            cmd += ["-i", str(wav)]
+        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
+        cmd += ["-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart"] if audio else []
+        enc = subprocess.Popen(cmd + [str(dest)], stdin=subprocess.PIPE)
+        try:
+            render_range(f0, f1, enc)
+        finally:
+            enc.stdin.close()
+            enc.wait()
+        return enc.returncode
+    chunk_files = [out_dir / f"_preview_chunk_{i}.mp4" for i in range(nch)] if nch > 1 else []
+    listing = out_dir / "_preview_chunks.txt"
     try:
-        for f in range(total):
-            while si < len(segs) - 1 and f >= segs[si]["end_frame"]:
-                si += 1
-            seg = segs[si]
-            src_ms = seg.get("src_in_ms", seg["start_frame"] * 1000 / seq_fps()) + (f - seg["start_frame"]) * 1000 / seq_fps()
-            want = int(round(src_ms * seq_fps() / 1000))
-            while src_idx < want:
-                buf = dec.stdout.read(fsize)
-                if len(buf) < fsize:
-                    break                                   # source ended: hold the last frame
-                cur = Image.frombuffer("RGB", (cw_, ch_), buf, "raw", "RGB", 0, 1)
-                src_idx += 1
-            # Premiere: output = (source - centre) * scale + frame centre + offset  ->  invert for the source window
-            sc = seg.get("scale_factor", 1.0) or 1.0
-            ox = (box + (seg.get("offset_x") or 0.0)) * k
-            oy = (boy + (seg.get("offset_y") or 0.0)) * k
-            x0, x1 = cw_ / 2 - (W / 2 + ox) / sc, cw_ / 2 + (W / 2 - ox) / sc
-            y0, y1 = ch_ / 2 - (H / 2 + oy) / sc, ch_ / 2 + (H / 2 - oy) / sc
-            win = seg.get("window") if seg.get("decision_id") != "AUTO_CUTAWAY" else None
-            if seg.get("decision_id") == "AUTO_CUTAWAY" or win:
-                # source cutaway: the whole card over a blurred cover copy of itself; 4:5 framing: the speaker cropped
-                # to the window over the same blurred fill (same as the Premiere build)
-                bx, by = box * k, boy * k
-                bg = cur.crop((round(cw_ / 2 - (W / 2 + bx)), round(ch_ / 2 - (H / 2 + by)),
-                               round(cw_ / 2 + (W / 2 - bx)), round(ch_ / 2 + (H / 2 - by)))).resize((W, H), Image.BILINEAR)
-                frame = bg.filter(ImageFilter.GaussianBlur(radius=max(4, round(28 * k))))
-                cw2, ch2 = max(2, round(cw_ * sc)), max(2, round(ch_ * sc))
-                px, py = round(W / 2 - cw2 / 2 + ox), round(H / 2 - ch2 / 2 + oy)
-                img = cur.resize((cw2, ch2), Image.BILINEAR)
-                if win:   # only the rows inside the window (the build's Crop)
-                    wy0, wy1 = round(win["y"] * k), round((win["y"] + win["h"]) * k)
-                    t0, t1 = max(0, wy0 - py), min(ch2, wy1 - py)
-                    img = img.crop((0, t0, cw2, max(t0 + 1, t1)))
-                    py += t0
-                frame.paste(img, (px, py))
-            else:
-                frame = cur.crop((round(x0), round(y0), round(x1), round(y1))).resize((W, H), Image.BILINEAR)
-                if sharp:   # Premiere Sharpen on V1 (approximation: unsharp mask at preview size)
-                    frame = frame.filter(sharp)
-            for be in brolls:                       # full-screen licensed B-roll replaces the picture (hard cut)
-                if be["start_frame"] <= f < be["end_frame"]:
-                    bf = broll_frame(be)
-                    if bf is not None:
-                        frame = bf
-            frame = frame.convert("RGBA")
-            t = f / seq_fps()
-            for g in layers:
-                if g["start_s"] <= t < g["end_s"]:
-                    im = _apply(stills.get(g["png"]), anim_state(g, t - g["start_s"]), k)
-                    if im is not None:
-                        frame.alpha_composite(im)
-            if tag is not None:
-                frame.alpha_composite(tag)
-            enc.stdin.write(frame.convert("RGB").tobytes())
+        if nch <= 1:
+            ok = encode(0, total, mp4, True) == 0
+        else:
+            from .parallel import parallel_map
+            done = parallel_map(lambda i: encode(bounds[i], bounds[i + 1], chunk_files[i], False), range(nch), nch)
+            for good, v in done:
+                if not good:
+                    raise v
+            ok = all(v == 0 for _, v in done)
+            if ok:      # the concat demuxer joins the chunks without re-encoding; the dialogue is encoded once over the whole
+                listing.write_text("".join(f"file '{c.name}'\n" for c in chunk_files), encoding="utf-8")
+                cat = subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing.name,
+                                      "-i", str(wav), "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest",
+                                      "-movflags", "+faststart", str(mp4)], cwd=out_dir)
+                ok = cat.returncode == 0
     finally:
-        enc.stdin.close()
-        enc.wait()
-        for d_ in [dec, *bdec.values()]:     # stop the decoders and reap them (no zombie ffmpeg, no ResourceWarning)
-            d_.stdout.close()
-            d_.kill()
-            d_.wait()
         wav.unlink(missing_ok=True)
         (out_dir / "_camera_audio.wav").unlink(missing_ok=True)
-    ok = enc.returncode == 0 and mp4.exists() and mp4.stat().st_size > 1000
+        listing.unlink(missing_ok=True)
+        for c in chunk_files:
+            c.unlink(missing_ok=True)
+    ok = ok and mp4.exists() and mp4.stat().st_size > 1000
     res = {"ok": ok, "video": str(mp4), "size": f"{W}x{H}", "frames": total, "seconds": round(total / seq_fps(), 2),
-           "layers": len(layers), "elapsed_s": round(time.time() - t0, 1), "at": now_iso(),
+           "layers": len(layers), "chunks": nch, "elapsed_s": round(time.time() - t0, 1), "at": now_iso(),
            "dialogue": "cleaned" if paths.p("06_audio/dialogue/dialogue_clean.wav").exists() else "camera (not cleaned yet)",
            "note": "Proxy preview for review only. The deliverable is the Premiere project; the editor renders the final."}
     write_json(out_dir / "preview-result.json", res)

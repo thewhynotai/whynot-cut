@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 from .common import (AUDIO_EXT, DOC_EXT, FONT_EXT, IMAGE_EXT, RAW_IMAGE_EXT, SUB_EXT, VIDEO_EXT,
-                     Paths, ffmpeg_exe, models_dir, is_junk, now_iso, run, sha1_head, write_json, write_text)
+                     Paths, ffmpeg_exe, models_dir, is_junk, now_iso, read_json, run, sha1_head, write_json, write_text)
 
 # Role hints (3.0 T2.5, IM-8). Two kinds of hint:
 #   * AMBIGUOUS words (ref, raw, stock, footage, about, bio) sit inside ordinary words and names ("Refractive", "Reflux",
@@ -284,11 +284,15 @@ def audit_environment() -> dict:
             "models_dir": str(models_dir())}
 
 
-def discover(paths: Paths, read_docs: bool = True) -> dict:
+def discover(paths: Paths, read_docs: bool = True, cache: dict | None = None) -> dict:
+    """Inventory of the client folder. `cache` ({rel: {"stat": [size, mtime_ns], "fingerprint", "text"?}}, 3.0 T2.14):
+    a file whose size and mtime_ns match its entry keeps the fingerprint and the extracted text it had (nothing is
+    read again); the dict is replaced in place by the entries of this run (files that vanished drop out)."""
     if not paths.assets.is_dir() or not paths.data.is_dir():
         missing = [d.name for d in (paths.assets, paths.data) if not d.is_dir()]
         raise FileNotFoundError(f"Expected assets/ and data/ under {paths.root}; missing: {missing}")
     files, docs, skipped = [], {}, []
+    old, new = (cache if cache is not None else {}), {}
     for top in (paths.assets, paths.data):
         for p in sorted(top.rglob("*")):
             if p.is_dir():
@@ -298,11 +302,18 @@ def discover(paths: Paths, read_docs: bool = True) -> dict:
                 continue
             rel = p.relative_to(paths.root).as_posix()
             item = classify(p, rel)
-            item["fingerprint"] = sha1_head(p)
+            st = p.stat()
+            hit = old.get(rel)
+            hit = hit if isinstance(hit, dict) and hit.get("stat") == [st.st_size, st.st_mtime_ns] else {}
+            item["fingerprint"] = hit.get("fingerprint") or sha1_head(p)
             files.append(item)
+            ent = new[rel] = {"stat": [st.st_size, st.st_mtime_ns], "fingerprint": item["fingerprint"]}
+            if isinstance(hit.get("text"), str):
+                ent["text"] = hit["text"]
             if read_docs and item["kind"] in ("document", "subtitle"):
-                txt = read_document(p)
-                docs[rel] = txt
+                if "text" not in ent:
+                    ent["text"] = read_document(p)
+                txt = docs[rel] = ent["text"]
                 item["text_chars"] = len(txt)
     by_role = {}
     for f in files:
@@ -345,6 +356,9 @@ def discover(paths: Paths, read_docs: bool = True) -> dict:
         warnings.append("No SFX library supplied — pipeline will synthesize original procedural SFX.")
     inv = {"generated": now_iso(), "root": str(paths.root), "file_count": len(files),
            "files": files, "by_role": by_role, "skipped_junk": len(skipped), "warnings": warnings}
+    if cache is not None:
+        cache.clear()
+        cache.update(new)
     return {"inventory": inv, "documents": docs}
 
 
@@ -366,8 +380,10 @@ def report_md(inv: dict, env: dict) -> str:
 DISCOVERY_WAIT_S = 600.0              # a second discovery of the same client waits for the running one (T2.4)
 
 
-def run_discovery(paths: Paths) -> dict:
-    """Discovery of one client runs one at a time (3.0 T2.4): parallel subagents never interleave its writes."""
+def run_discovery(paths: Paths, audit: bool = True) -> dict:
+    """Discovery of one client runs one at a time (3.0 T2.4): parallel subagents never interleave its writes.
+    `audit=False` (`reel inbox`, 3.0 T2.14): the environment audit (it imports every engine module) is not repeated
+    when the last one is on disk; the first discovery of a client always audits."""
     from .file_lock import locked
     if not paths.assets.is_dir() or not paths.data.is_dir():
         # before the lock: taking it creates `<folder>/output/discovery/*.lock`, which a wrong --root (or one inside
@@ -375,16 +391,41 @@ def run_discovery(paths: Paths) -> dict:
         missing = [d.name for d in (paths.assets, paths.data) if not d.is_dir()]
         raise FileNotFoundError(f"Expected assets/ and data/ under {paths.root}; missing: {missing}")
     with locked(paths.output / "discovery" / "input-inventory.json", DISCOVERY_WAIT_S):
-        return _run_discovery(paths)
+        return _run_discovery(paths, audit)
 
 
-def _run_discovery(paths: Paths) -> dict:
-    res = discover(paths)
-    env = audit_environment()
+CACHE_REL = "discovery/discovery-cache.json"       # under output/: never in assets/ or data/ (read-only for the engine)
+CACHE_VERSION = 1
+
+
+def _load_cache(f: Path) -> dict:
+    """{rel: entry} of the last discovery; anything unreadable or foreign is an empty cache (it only costs time)."""
+    try:
+        doc = read_json(f, {})
+    except (OSError, ValueError):
+        return {}
+    files = doc.get("files") if isinstance(doc, dict) and doc.get("version") == CACHE_VERSION else None
+    return {k: v for k, v in files.items() if isinstance(v, dict)} if isinstance(files, dict) else {}
+
+
+def _save_cache(f: Path, cache: dict) -> None:
+    write_json(f, {"version": CACHE_VERSION, "files": cache})
+
+
+def _run_discovery(paths: Paths, audit: bool = True) -> dict:
+    cache_f = paths.output / CACHE_REL
+    cache = _load_cache(cache_f)                        # inside the client lock (run_discovery), like every write below
+    res = discover(paths, cache=cache)
+    env = None if audit else read_json(paths.output / "discovery/environment.json", None)
+    fresh_env = not isinstance(env, dict)
+    if fresh_env:
+        env = audit_environment()
     inv = res["inventory"]
     out = paths.output
     write_json(out / "discovery/input-inventory.json", inv)
-    write_json(out / "discovery/environment.json", env)
+    if fresh_env:
+        write_json(out / "discovery/environment.json", env)
+    _save_cache(cache_f, cache)
     for rel, txt in res["documents"].items():
         write_text(out / "discovery/extracted_text" / (rel.replace("/", "__") + ".txt"), txt)
     write_text(out / "discovery/discovery-report.md", report_md(inv, env))

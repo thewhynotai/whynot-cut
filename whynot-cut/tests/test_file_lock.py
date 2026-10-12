@@ -399,9 +399,9 @@ class TestSharedFilesAreLocked(TempDir):
         seen = []
         real = discover.discover
 
-        def spy(paths):
+        def spy(paths, **kw):
             seen.append(self.held(paths.output / "discovery" / "input-inventory.json"))
-            return real(paths)
+            return real(paths, **kw)
         env = {"platform": "test", "adobe_apps": [], "aerender": None, "tools": {}, "python_modules": {}}
         with mock.patch.object(discover, "discover", spy), mock.patch.object(discover, "audit_environment",
                                                                              return_value=env):

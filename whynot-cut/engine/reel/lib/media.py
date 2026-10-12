@@ -75,6 +75,14 @@ def _hist(im) -> list:
     return [x / tot for x in h]
 
 
+def _hist_np(im):
+    """`_hist` as a NumPy vector: the same 768 bins, the same values (integer counts / the same total)."""
+    import numpy as np
+    a = np.asarray(im.resize((64, 36)).convert("RGB"))             # 36 x 64 x 3, uint8
+    h = np.concatenate([np.bincount(a[:, :, c].ravel(), minlength=256) for c in range(3)]).astype(np.float64)
+    return h / (float(h.sum()) or 1.0)
+
+
 def _similarity(a: list, b: list) -> float:
     return sum(min(x, y) for x, y in zip(a, b))      # histogram intersection, 0..1
 
@@ -110,6 +118,7 @@ def analyze_shots(path: Path, duration_s: float, fps: float = 2.0, threshold: fl
     speaker. Runs of >= 1 s of non-speaker samples are cutaways (dissolves included; a cut detector misses those).
     Measured on a real episode: speaker frames 0.89-0.93 (also without a face), graphic card 0.17-0.38."""
     import subprocess
+    import numpy as np
     from PIL import Image
     from .previews import _face_center
     W, H = 480, 270
@@ -123,27 +132,32 @@ def analyze_shots(path: Path, duration_s: float, fps: float = 2.0, threshold: fl
             if len(b) < W * H * 3:
                 break
             im = Image.frombuffer("RGB", (W, H), b, "raw", "RGB", 0, 1)
-            rows.append({"t": len(rows) / fps, "face": bool(_face_center(im)), "hist": _hist(im)})
+            rows.append({"t": len(rows) / fps, "face": bool(_face_center(im)), "hist": _hist_np(im)})
     finally:
         p.stdout.close()
         p.wait()
-    ref = [r["hist"] for r in rows if r["face"]]
-    if not ref:
+    face = np.array([r["face"] for r in rows], dtype=bool)
+    if not face.any():
         return {"samples": len(rows), "cutaways_ms": [], "other_people_ms": [],
                 "note": "no face found anywhere: cutaway detection skipped"}
-    mean = [sum(c) / len(ref) for c in zip(*ref)]
+    H_ = np.stack([r["hist"] for r in rows])                   # samples x 768 bins, every row one frame's histogram
+    sim_to = lambda rows_idx, m: np.minimum(H_[rows_idx], m).sum(axis=1)     # histogram intersection with the mean
+    fi = np.flatnonzero(face)
+    mean = H_[fi].mean(axis=0)
     # a face is not enough: a two-person show cuts to the HOST (measured on a real episode: speaker 0.87-0.93, host
     # 0.65-0.67 with a face, graphic card 0.18-0.38). The speaker is whoever looks like the bulk of the face frames:
     # threshold = their median - 0.12 (never under `threshold`), and a second pass rebuilds the reference from them only
-    sims = sorted(_similarity(r["hist"], mean) for r in rows if r["face"])
+    face_sims = sim_to(fi, mean)
+    sims = sorted(face_sims.tolist())
     thr = max(threshold, sims[len(sims) // 2] - 0.12)
-    ref2 = [r["hist"] for r in rows if r["face"] and _similarity(r["hist"], mean) >= thr]
-    if ref2:
-        mean = [sum(c) / len(ref2) for c in zip(*ref2)]
-        sims = sorted(_similarity(h, mean) for h in ref2)
+    ref2 = fi[face_sims >= thr]
+    if len(ref2):
+        mean = H_[ref2].mean(axis=0)
+        sims = sorted(sim_to(ref2, mean).tolist())
         thr = max(threshold, sims[len(sims) // 2] - 0.12)
-    for r in rows:
-        r["sim"] = round(_similarity(r.pop("hist"), mean), 3)
+    for r, sim in zip(rows, sim_to(slice(None), mean).tolist()):
+        r.pop("hist")
+        r["sim"] = round(sim, 3)
         r["speaker"] = r["sim"] >= thr
     cut = cutaway_ranges([r["speaker"] for r in rows], fps, duration_s)
     other = []

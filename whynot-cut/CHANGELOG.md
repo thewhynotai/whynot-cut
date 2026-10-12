@@ -177,6 +177,17 @@
   hallucination" (Whisper hears words in silence), which makes the proof inconclusive, never a pass. Per-window word counts
   (`windows`); a window that heard no word or whose audio is shorter than the span (pauses past the end of the file) is
   not proved (`ok` false, "inconclusive"). First unit tests for `detect_pauses` and `verify_cuts`.
+- Performance without changing a result (T2.14). `reel reels-preview` renders the candidates in a pool of 3 ffmpeg jobs
+  (plan order kept, a failing reel is listed in `failed` with its error and the others still render; 8 reels of 8 s:
+  3.4 s -> 2.0 s). `document_quotes` looks each quote up through a token index instead of comparing every window of the
+  transcript (30 quotes in a 20 000-word transcript: 3.4 s -> 0.07 s, the same quotes). Discovery keeps
+  `output/discovery/discovery-cache.json` (size + mtime_ns -> fingerprint and extracted text, read and written inside
+  the client lock), so a file that did not change is not read again; `reel inbox` also skips the environment audit when
+  `environment.json` exists (`reel discover` and the first discovery still run it). `reel preview-video` renders a
+  timeline of 4 s or more in up to 4 chunks at the same time and joins them with ffmpeg's concat demuxer without
+  re-encoding (a 40 s reel: 7 s -> 4 s; `chunks` in the result); the frames are those of a single pass. `analyze_shots`
+  computes the histograms and similarities with NumPy (same cutaways). The preview's `elapsed_s` is the real time
+  (a window crop overwrote its start time), and stopping the decoders no longer prints "Broken pipe" lines.
 
 ### Fixed
 - Font discovery in one place, font collections and Adobe Fonts included (T2.10, review IM-12, G72). `lib/fonts.py` indexes every face of the font folders, recursively: `.ttf` / `.otf` files and `.ttc` / `.otc` collections face by face (PostScript name -> file + face index); Windows system and per-user fonts; macOS `~/Library/Fonts`, `/Library/Fonts`, `/System/Library/Fonts` and `/System/Library/Fonts/Supplemental`; and the Adobe Fonts (Creative Cloud) livetype folder, whose files have obfuscated names, so a face is found by the PostScript, full or family name inside it. `client-db` (is a brand font installed), `motion-plan` / `motion-build` (the font files After Effects text is measured with) and the previews all ask it; the index is cached in `<engine home>/cache/font-index.json` and rebuilt when a font folder changes. `GeezaPro-Bold` now resolves on a Mac (it lives in a `.ttc`). A client without an Arabic font no longer gets its Arabic graphic text as tofu in Pillow's tiny bitmap font: graphic stills, caption stills and thumbnails draw Arabic with a system fallback at the same size (Windows: Segoe UI, Arial, Tahoma; macOS: Geeza Pro, Arial) and `reel previews` warns "client has no Arabic font — using <fallback>; install the brand font".

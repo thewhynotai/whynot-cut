@@ -335,45 +335,55 @@ def audio_card(ep, cand: dict, out: Path) -> Path:
     return out
 
 
-def render_candidates(ep, ids: list[str] | None = None) -> dict:
+def render_candidates(ep, ids: list[str] | None = None, workers: int | None = None) -> dict:
     """A quick 540x960 preview per candidate: the whole 16:9 frame letterboxed (not cropped: the reframe is decided
-    per shot later), the episode audio for the range, and a Latin label. Plus a first-frame JPG and a sheet."""
+    per shot later), the episode audio for the range, and a Latin label. Plus a first-frame JPG and a sheet.
+    The candidates render in a small thread pool (each one is an ffmpeg process; 3.0 T2.14): the result lists them in
+    plan order whatever finishes first, and a candidate that fails is reported in `failed` without stopping the rest.
+    `workers=1` renders one after the other (the same files)."""
     from .common import ffmpeg_exe, run
-    from .episode import episode_file
+    from .episode import episode_file, load_episode
     from .media_util import contact_sheet, grab_frame_file
+    from .parallel import DEFAULT_WORKERS, parallel_map
     res = fresh_validated(ep)
     src = episode_file(ep)
     cands = [c for c in res["candidates"] if not ids or c["id"] in ids]
     d = ep.p("03_candidates")
     d.mkdir(parents=True, exist_ok=True)
-    outs, failed = [], []
-    from .episode import load_episode
     audio_only = load_episode(ep).get("media") == "audio"
-    for c in cands:
+    ff = ffmpeg_exe()
+
+    def one(c: dict) -> dict:
+        """One candidate -> its {id, mp4, jpg}; raises (an Exception) when it did not render."""
         a, dur = c["in_ms"] / 1000, (c["out_ms"] - c["in_ms"]) / 1000
         if audio_only:
             mp4 = audio_card(ep, c, d / f"{c['id']}.mp4")
             jpg = d / f"{c['id']}.jpg"
-            if mp4.exists():
-                outs.append({"id": c["id"], "mp4": str(mp4), "jpg": str(jpg) if jpg.exists() else None})
-            else:
-                failed.append({"id": c["id"], "error": "audio card not rendered"})
-            continue
+            if not mp4.exists():
+                raise RuntimeError("audio card not rendered")
+            return {"id": c["id"], "mp4": str(mp4), "jpg": str(jpg) if jpg.exists() else None}
         lab = _label_png(d / f"_{c['id']}_label.png",
                          [f"{c['id']}  score {c.get('total')}  {c.get('type')}",
                           f"{fmt_ts(c['in_ms'], '.')} -> {fmt_ts(c['out_ms'], '.')}  ({dur:.0f} s)"])
         mp4, jpg = d / f"{c['id']}.mp4", d / f"{c['id']}.jpg"
-        r = run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", f"{a:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
-                 "-i", str(lab), "-filter_complex",
-                 "[0:v]scale=540:-2,pad=540:960:0:(oh-ih)/2:color=0x111111[v];[v][1:v]overlay=0:0[o]",
-                 "-map", "[o]", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
-                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(mp4)], check=False)
-        grab_frame_file(src, a + 0.2, jpg, vf="scale=540:-2", quality=3)
-        lab.unlink(missing_ok=True)
+        try:
+            r = run([ff, "-y", "-loglevel", "error", "-ss", f"{a:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
+                     "-i", str(lab), "-filter_complex",
+                     "[0:v]scale=540:-2,pad=540:960:0:(oh-ih)/2:color=0x111111[v];[v][1:v]overlay=0:0[o]",
+                     "-map", "[o]", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(mp4)], check=False)
+            grab_frame_file(src, a + 0.2, jpg, vf="scale=540:-2", quality=3)
+        finally:
+            lab.unlink(missing_ok=True)
         if r.returncode or not mp4.exists():
-            failed.append({"id": c["id"], "error": (r.stderr or "")[-300:]})
-            continue
-        outs.append({"id": c["id"], "mp4": str(mp4), "jpg": str(jpg) if jpg.exists() else None})
+            raise RuntimeError((r.stderr or "")[-300:])
+        return {"id": c["id"], "mp4": str(mp4), "jpg": str(jpg) if jpg.exists() else None}
+    outs, failed = [], []
+    for c, (ok, v) in zip(cands, parallel_map(one, cands, DEFAULT_WORKERS if workers is None else workers)):
+        if ok:
+            outs.append(v)
+        else:
+            failed.append({"id": c["id"], "error": getattr(v, "error", None) or str(v) or type(v).__name__})
     byid = {c["id"]: c for c in cands}
     sheet = contact_sheet([(o["jpg"], f"{o['id']}  {byid[o['id']].get('total')}  {byid[o['id']].get('type')}  "
                                       f"{fmt_ts(byid[o['id']]['in_ms'], '.')[:8]}") for o in outs if o["jpg"]],

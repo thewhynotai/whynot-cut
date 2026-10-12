@@ -369,11 +369,58 @@ def vocabulary_misses(words: list, prompt: str | None, min_ratio: float = 0.65) 
 QUOTE_RE = re.compile(r'«([^»]{6,200})»|"([^"\n]{6,200})"|“([^”]{6,200})”')
 
 
-def document_quotes(paths: Paths, words: list, min_ratio: float = 0.6) -> list:
+def _token_index(seq: list) -> dict:
+    """token -> its positions in `seq` (ascending)."""
+    index: dict = {}
+    for pos, t in enumerate(seq):
+        index.setdefault(t, []).append(pos)
+    return index
+
+
+def _window_starts(seq_len: int, qt: list, n_: int, min_ratio: float, index: dict | None):
+    """The window starts worth comparing for a window of n_ words, ascending. Without an index: every start. With
+    one: only the windows holding enough of the quote's words to reach `min_ratio` at all. SequenceMatcher's ratio is
+    2*M/(len(quote)+len(window)) and M can't exceed the window's words that occur in the quote, so a window with fewer
+    than ceil(min_ratio*T/2) of them scores below `min_ratio`: it can never be the answer."""
+    full = range(0, max(0, seq_len - n_) + 1)
+    if index is None or min_ratio <= 0 or seq_len < n_:
+        return full
+    import math
+    import numpy as np
+    mark = np.zeros(seq_len, dtype=np.int32)
+    for t in set(qt):
+        pos = index.get(t)
+        if pos:
+            mark[pos] = 1
+    cum = np.concatenate(([0], np.cumsum(mark)))
+    need = max(1, math.ceil(min_ratio * (len(qt) + n_) / 2 - 1e-9))
+    return np.flatnonzero(cum[n_:] - cum[:-n_] >= need).tolist()
+
+
+def _best_window(seq: list, qt: list, min_ratio: float, index: dict | None = None) -> tuple:
+    """(ratio, start, length) of the transcript window that best matches the quote's words `qt`. The quote's own
+    length first, so a differing word stays inside the window and shows; one word more or less only when no same-length
+    window matches (the writer dropped or added a word). Ties: the window whose words line up, then the earliest."""
+    import difflib
+    r, i, n, aligned = 0.0, 0, 0, -1
+    for lens in ([len(qt)], [len(qt) - 1, len(qt) + 1]):
+        for n_ in lens:
+            for i_ in (_window_starts(len(seq), qt, n_, min_ratio, index) if n_ >= 2 else []):
+                win = seq[i_:i_ + n_]
+                r_ = difflib.SequenceMatcher(None, qt, win).ratio()
+                al = sum(a == b for a, b in zip(qt, win))     # ties: the window whose words line up
+                if (r_, al) > (r, aligned):
+                    r, i, n, aligned = r_, i_, n_, al
+        if r >= min_ratio:
+            break
+    return r, i, n
+
+
+def document_quotes(paths: Paths, words: list, min_ratio: float = 0.6, use_index: bool = True) -> list:
     """Speaker quotes in the client's documents (a reels plan, a brief: «...», "...", “...”) located in this transcript.
     A person wrote those lines down after listening, so where they differ from Whisper they are strong evidence for a
-    correction (e.g. plan «شوف هي الفكرة في إيمانهم», Whisper «شوف هي الفكرة في آمانه»). Exact matches confirm."""
-    import difflib
+    correction (e.g. plan «شوف هي الفكرة في إيمانهم», Whisper «شوف هي الفكرة في آمانه»). Exact matches confirm.
+    `use_index` (3.0 T2.14): windows are looked up through a token index; `False` compares every window (same quotes)."""
     from .discover import read_document
     from .plan import norm
     inv = read_json(paths.output / "discovery/input-inventory.json", {"files": []})
@@ -381,6 +428,7 @@ def document_quotes(paths: Paths, words: list, min_ratio: float = 0.6) -> list:
     toks = [(norm(w["word"]), w) for w in words]
     toks = [(t, w) for t, w in toks if t]
     seq = [t for t, _ in toks]
+    index = _token_index(seq) if use_index else None
     out, seen = [], set()
     for d in docs:
         try:
@@ -393,19 +441,7 @@ def document_quotes(paths: Paths, words: list, min_ratio: float = 0.6) -> list:
             if len(qt) < 3 or q in seen or not ARABIC.search(q) and not LATIN.search(q):
                 continue
             seen.add(q)
-            # the quote's own length first, so a differing word stays inside the window and shows; one word more or
-            # less only when no same-length window matches (the writer dropped or added a word)
-            r, i, n, aligned = 0.0, 0, 0, -1
-            for lens in ([len(qt)], [len(qt) - 1, len(qt) + 1]):
-                for n_ in lens:
-                    for i_ in range(0, max(0, len(seq) - n_) + 1) if n_ >= 2 else []:
-                        win = seq[i_:i_ + n_]
-                        r_ = difflib.SequenceMatcher(None, qt, win).ratio()
-                        al = sum(a == b for a, b in zip(qt, win))     # ties: the window whose words line up
-                        if (r_, al) > (r, aligned):
-                            r, i, n, aligned = r_, i_, n_, al
-                if r >= min_ratio:
-                    break
+            r, i, n = _best_window(seq, qt, min_ratio, index)
             if r < min_ratio:
                 continue
             ws = [w for _, w in toks[i:i + n]]

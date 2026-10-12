@@ -325,7 +325,7 @@ def inbox(root: Path, refresh: bool = True) -> dict:
     from .discover import run_discovery
     p = Paths(root)
     if refresh:
-        run_discovery(p)
+        run_discovery(p, audit=False)          # T2.14: the environment audit is for `reel discover` / doctor, not every inbox
     inv = read_json(p.output / "discovery/input-inventory.json", {"files": [], "warnings": []})
     by = inv.get("by_role", {})
     clips = []
