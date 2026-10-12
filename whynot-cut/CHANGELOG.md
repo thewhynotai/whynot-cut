@@ -201,7 +201,8 @@
   B-roll and out of `reel inbox` and autopilot); the distinctive asset hints (logo, brief, colo(u)r, palet, brand, font,
   photo, headshot, ...) keep 2.x substring matching, so "whitelogo.png" and "brandcolors.txt" still resolve. A file whose
   folder and a ref / raw / stock / b-roll name hint disagree keeps the folder's role and discovery warns; a document
-  under `data/Raw` stays unclassified and is warned about. The session-context "new clips" fallback follows the same rule.
+  under `data/Raw` stays unclassified and is warned about. The session-context "new clips" fallback follows the same rule. A mixed-word folder ("Raw B-roll", "Reference Raw") takes the more specific role, never source footage;
+  the separated b-roll spellings ("b-roll", "b roll") need a word start, so "Jacob rolls" and "Sub roll" stay source clips.
 - The unit tests no longer reach the real engine home or a running Adobe app (G79): a test that mocked only the
   bridge status had queued real `build_project` jobs that an open Premiere ran. Every test process now runs in a temp
   sandbox (`tests/_isolation.py`, imported first by every test module: WHYNOT_HOME, HOME/USERPROFILE, APPDATA and
@@ -394,6 +395,7 @@
   record says `transferable_to_client: true`). The native-build line no longer says "nothing to set by hand" when
   read-back checks failed or none were recorded. Golden READMEs for the
   native build, the XML fallback and a motion project (`tests/fixtures/handoff/`, `tests/test_handoff_native.py`).
+- After Effects extras take their frame rate from the profile (T2.18, MI-13). The clip-graphics build and the MOGRT build wrote a hard-coded 24 fps into every comp whatever the client's sequence was; both generators now put the profile's rate in `NH_DATA.fps` (29.97 / 23.976 / 59.94 as After Effects names them) and `nh_ae_lib.jsx` applies it (`NH.applyFps`) before building. `reel ae-script` warns when the plan was compiled at another rate. `reel ae-render` reports `RENDERED` only for `.mov` files this run wrote (changed since the start, newer than it, not empty); a file left by an earlier run gives `STALE_OUTPUT_NOT_RENDERED` with `stale_outputs` and a message instead of a false success. On Windows it renders an ASCII copy of the project when the client folder has a non-ASCII name, through the same helper as the motion renderer (`ae_render.stage_ascii`). Not verified live in After Effects (`tests/test_ae_extras.py` mocks aerender).
 
 ### Migration
 - Bridge 3.1.1 (T2.9): after updating, run `reel ppro-install` and restart Premiere and After Effects. Until they are

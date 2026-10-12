@@ -28,18 +28,24 @@ plat = settings = client_marker = None    # imported in main(), inside the never
 VIDEO = {".mp4", ".mov", ".mxf", ".m4v", ".avi", ".mkv"}
 # the fallback scan of new_clips (engine unavailable) follows discovery's rule (lib/discover.py): the first folder under
 # data/ decides (by its words), file-name hints are WORDS (camelCase and digits are word breaks)
-FOLDER_WORDS = [("source", {"raw", "rushes"}), ("skip", {"ref", "refs", "reference", "references", "broll", "stock",
-                                                        "stocks", "episodes", "music", "sfx"}), ("source", {"footage"})]
+# Same order as discover._FOLDER_WORDS: the most specific role first ("Raw B-roll" is B-roll). Music/SFX folders are
+# not listed: discovery gives them an audio role only, so a VIDEO there is judged by its path like any loose video.
+FOLDER_WORDS = [("skip", {"ref", "refs", "reference", "references", "broll", "stock", "stocks"}),
+                ("source", {"raw", "rushes"}), ("source", {"footage"})]
+_L = r"[^\W\d_]"
+_BROLL = rf"broll|(?<!{_L})b[-_ ]rolls?(?!{_L})"       # as discover._BROLL: "Jacob rolls", "Bob rolling" are not B-roll
 
 
 def _words(text: str) -> set:
     words = {w for w in re.split(r"[^a-z]+", re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text).lower()) if w}
-    return words | ({"broll"} if re.search(r"b[-_ ]?roll", text.lower()) else set())
+    return words | ({"broll"} if re.search(_BROLL, text.lower()) else set())
 
 
 def _is_source_clip(segs: list) -> bool:
     """segs = path segments below the client root, e.g. ['data', 'Raw', 'a.mp4']."""
     if len(segs) > 2:
+        if segs[1].lower() == "episodes":
+            return False                       # finished episodes are cut into reels, never edited whole
         w = _words(segs[1])
         kind = next((k for k, ws in FOLDER_WORDS if ws & w), None)
         if kind:

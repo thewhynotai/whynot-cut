@@ -17,6 +17,9 @@ from .common import (AUDIO_EXT, DOC_EXT, FONT_EXT, IMAGE_EXT, RAW_IMAGE_EXT, SUB
 #     in 2.x: "whitelogo.png", "clientbrief.docx", "brandcolors.txt" are what real asset folders hold.
 _L = r"[^\W\d_]"                                 # one letter in any script
 _LOWER_UPPER = re.compile(r"(?<=[a-z])(?=[A-Z])")
+# B-roll: the glued "broll" stays a substring as in 2.x; the separated forms ("b-roll", "b_roll", "b roll") need a word
+# start and end, so "Jacob rolls", "Bob rolling", "Sub roll" are not B-roll (fix round 2, review I1)
+_BROLL = rf"broll|(?<!{_L})b[-_ ]rolls?(?!{_L})"
 _HINTS = [  # (key, word-bounded?, regex on the lowercase path, role); the first hint that fits the file kind wins
     ("brief", False, r"brief", "client_brief"), ("profile", False, r"profile", "client_brief"),
     ("about", True, r"about(?:us|me)?", "client_brief"), ("bio", True, r"bios?", "client_brief"),
@@ -26,7 +29,7 @@ _HINTS = [  # (key, word-bounded?, regex on the lowercase path, role); the first
     ("typo", False, r"typo", "typography"),
     ("logo", False, r"logo", "logo"), ("headshot", False, r"headshot", "headshot"),
     ("portrait", False, r"portrait", "portrait"), ("photo", False, r"photo", "client_photo"),
-    ("broll", False, r"b[-_ ]?roll", "broll_video"), ("stock", True, r"stocks?", "broll_video"),
+    ("broll", False, _BROLL, "broll_video"), ("stock", True, r"stocks?", "broll_video"),
     ("ref", True, r"refs?|references?", "editing_reference"), ("raw", True, r"raw", "source_footage"),
     ("footage", True, r"footage", "source_footage"),
     ("music", False, r"music", "music"), ("sfx", False, r"sfx", "sfx"), ("sound", False, r"sound", "sfx"),
@@ -34,7 +37,7 @@ _HINTS = [  # (key, word-bounded?, regex on the lowercase path, role); the first
 ROLE_HINTS = [(key, re.compile(rf"(?<!{_L})(?:{pat})(?!{_L})" if word else pat), word, role)
               for key, word, pat, role in _HINTS]
 _BRAND_IMAGE = re.compile(r"brand|colo|palet")        # a poster in assets/Brand: an image whose colours can be measured
-_BROLL_DOC = re.compile(rf"b[-_ ]?roll|(?<!{_L})stocks?(?!{_L})")
+_BROLL_DOC = re.compile(rf"{_BROLL}|(?<!{_L})stocks?(?!{_L})")
 CONFLICT_KEYS = {"ref", "raw", "stock", "broll"}      # only these hints are specific enough to warn when a folder disagrees
 
 # hints only apply to file kinds they make sense for: "Profile.jpg" is a photo, not a client brief (seen on a real
@@ -79,16 +82,17 @@ _FOLDER_ROLES = {
     "music": {"audio": "music"},
     "sfx": {"audio": "sfx"},
 }
-_FOLDER_WORDS = [   # (folder kind, words); the first row with a word in the folder name wins: Raw, Reference, B-roll
-    ("source", {"raw", "rushes"}), ("reference", {"ref", "refs", "reference", "references"}),
-    ("broll", {"broll", "stock", "stocks"}), ("source", {"footage"}), ("music", {"music"}), ("sfx", {"sfx"}),
+_FOLDER_WORDS = [   # (folder kind, words); the first row with a word in the folder name wins, the MOST SPECIFIC role
+    # first: "Raw B-roll", "B-roll raw", "Raw Stock" are B-roll and "Reference Raw" is references, never source footage
+    ("reference", {"ref", "refs", "reference", "references"}), ("broll", {"broll", "stock", "stocks"}),
+    ("source", {"raw", "rushes"}), ("source", {"footage"}), ("music", {"music"}), ("sfx", {"sfx"}),
 ]
 
 
 def folder_kind(name: str) -> str | None:
     """The kind of known data folder a folder name is (source/reference/broll/music/sfx), by its words."""
     w = {x for x in re.split(r"[^a-z]+", _words(name)) if x}
-    if re.search(r"b[-_ ]?roll", name.lower()):
+    if re.search(_BROLL, name.lower()):
         w.add("broll")
     return next((k for k, ws in _FOLDER_WORDS if ws & w), None)
 
@@ -323,7 +327,7 @@ def discover(paths: Paths, read_docs: bool = True) -> dict:
              and f["rel"].startswith("data/")
              and (hint_role(f["rel"]) is None or folder_kind(f["rel"].split("/")[1]) == "source")]
     if loose:
-        warnings.append(f"Documents in data/ not used as editing references (no 'ref' in the path): {', '.join(loose[:8])}"
+        warnings.append(f"Documents in data/ not used as editing references (data/Raw documents never are; elsewhere a 'ref' or 'reference' word in the path makes one): {', '.join(loose[:8])}"
                         f" — if one is a reference edit or a reels plan, move it to data/References/.")
     if len(by_role.get("editing_reference_doc", [])) > 1:
         warnings.append("Multiple editing-reference docs — check for conflicts; later files do not silently override.")
@@ -358,7 +362,17 @@ def report_md(inv: dict, env: dict) -> str:
     return "\n".join(L) + "\n"
 
 
+DISCOVERY_WAIT_S = 600.0              # a second discovery of the same client waits for the running one (T2.4)
+
+
 def run_discovery(paths: Paths) -> dict:
+    """Discovery of one client runs one at a time (3.0 T2.4): parallel subagents never interleave its writes."""
+    from .file_lock import locked
+    with locked(paths.output / "discovery" / "input-inventory.json", DISCOVERY_WAIT_S):
+        return _run_discovery(paths)
+
+
+def _run_discovery(paths: Paths) -> dict:
     res = discover(paths)
     env = audit_environment()
     inv = res["inventory"]
