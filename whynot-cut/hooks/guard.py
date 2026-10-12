@@ -1265,15 +1265,23 @@ def has_opt(argv: list[str], name: str) -> bool:
     return any(is_opt(a, name) for a in argv[1:])
 
 
-def opt_value(argv: list[str], name: str) -> str | None:
+def opt_values(argv: list[str], name: str) -> list[str]:
+    """Every value given to the option `name` (also abbreviated / `--name=value`), in order."""
+    out = []
     for i, a in enumerate(argv):
         if not is_opt(a, name):
             continue
         if "=" in a:
-            return a.split("=", 1)[1]
-        if i + 1 < len(argv):
-            return argv[i + 1]
-    return None
+            out.append(a.split("=", 1)[1])
+        elif i + 1 < len(argv):
+            out.append(argv[i + 1])
+    return out
+
+
+def opt_value(argv: list[str], name: str) -> str | None:
+    """The value argparse would keep: the LAST occurrence wins (`--by agent --by editor` is `editor`)."""
+    vals = opt_values(argv, name)
+    return vals[-1] if vals else None
 
 
 def check_reel(exe: str, argv: list[str], agent: str | None):
@@ -1303,7 +1311,7 @@ def check_reel(exe: str, argv: list[str], agent: str | None):
                       "video went to the client.")
             if sub == "verify" and has_opt(argv, "--record"):
                 block("subagents report a verdict; the lead editor records it after viewing the evidence itself.")
-            if sub == "transcript-verify" and (opt_value(argv, "--by") or "").strip("'\"").lower() == "editor":
+            if sub == "transcript-verify" and any(v.strip("'\"").lower() == "editor" for v in opt_values(argv, "--by")):
                 block("only the lead editor records `transcript-verify --by editor`, after the editor confirmed the "
                       "words. Report the corrections instead.")
             if role == "qc-reviewer" and sub == "ref-style" and (has_opt(argv, "--record") or has_opt(argv, "--apply")):

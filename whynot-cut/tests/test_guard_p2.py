@@ -91,15 +91,32 @@ class TestGuardPhase2Minors(ClientFixture):
         for cmd in ("reel handoff --deliv --video-id C1", "reel handoff --delivered=1 --video-id C1",
                     "reel --video-id C1 handoff --del", "reel verify --rec --verdict pass --video-id C1",
                     "reel verify --record=1 --verdict pass", "reel lock --rel", "reel settings --ini x",
-                    "reel ae-probe --reco ok", "reel transcript-verify --b editor", "reel transcript-verify --by=editor"):
+                    "reel ae-probe --reco ok", "reel transcript-verify --b editor", "reel transcript-verify --by=editor",
+                    # argparse keeps the LAST --by; the guard blocks when ANY occurrence is `editor`
+                    "reel transcript-verify --by agent --by editor", "reel transcript-verify --by=agent --b editor",
+                    "reel transcript-verify --by editor --by agent", "reel transcript-verify --by=agent --by=Editor",
+                    "reel transcript-verify --by agent --by=agent --b 'editor'"):
             with self.subTest(cmd=cmd):
                 self.assertEqual(run(cmd, "whynot-cut:premiere-builder"), 2)
         self.assertEqual(run("reel ref-style --app", "whynot-cut:qc-reviewer"), 2)
         self.assertEqual(run("reel doctor --fi", "whynot-cut:setup-doctor"), 2)
         for cmd in ("reel handoff --video-id C1", "reel verify --video-id C1", "reel transcript-verify --by agent",
+                    "reel transcript-verify --by agent --by=agent --b agent",
                     "reel handoff --note delivered --video-id C1"):
             with self.subTest(allowed=cmd):
                 self.assertEqual(run(cmd, "whynot-cut:premiere-builder"), 0)
+
+    def test_option_value_is_the_last_occurrence_like_argparse(self):
+        """Only `transcript-verify --by` reads an option's value (every other guarded flag is presence-only via
+        has_opt, which already matches any occurrence). `opt_value` returns the last value, `opt_values` all of them."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("guard_under_test", GUARD)
+        g = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(g)
+        argv = ["reel", "transcript-verify", "--by", "agent", "--b=editor"]
+        self.assertEqual(g.opt_values(argv, "--by"), ["agent", "editor"])
+        self.assertEqual(g.opt_value(argv, "--by"), "editor")
+        self.assertIsNone(g.opt_value(["reel", "verify"], "--by"))
 
     def test_changelog_names_no_real_client_colour(self):
         self.assertNotIn("81613d", (SK / "CHANGELOG.md").read_text(encoding="utf-8").lower())
