@@ -141,6 +141,38 @@ Rows that turned from red or partial in 0.1.1 to green in 0.1.2 and why: O2 (bac
 13. **Frame export**: the PNG file appears before it is fully written; poll the size until stable.
 14. **Install**: UPIA `/install` of the `.ccx` is enough (no Developer Mode, no PlayerDebugMode, no UDT); one Premiere restart; listed as "Enabled WhyNot Cut Spike 0.1.1" (0.1.2 replaces it).
 
+## UXP adapter checklist (contract <-> UXP differences)
+
+The v4 contract (`whynot-cut/engine/reel/contract/`) is the CEP-shaped wire form; the UXP adapter converts at its edge.
+Each line is a difference the adapter owns, with where the contract says it.
+
+- **Preview codec: FourCC on the wire, display name in UXP** (final review C1). `settings.previewCodec` and
+  `settings_after.previewCodec` carry the FourCC (`"apcs"`; the engine check is `lib/ppro_build.py:249`). UXP's setter
+  and getter use display names. The adapter owns the table (measured: `apcs` <-> `"Apple ProRes 422 LT"`, fact 3). A
+  codec it does not know passes through as the display name on read-back, so the engine check fails correctly instead
+  of the adapter guessing.
+- **`exportSequenceFrame`** (C4; facts 1 and 13): a **bare file name** plus a **backslash folder with a trailing
+  backslash**; a `false` return is not a throw (map it to the `{t, error}` frame form; `called` means "the export call
+  reported success"); the PNG appears before it is fully written, so wait for a stable size. UXP takes a `TickTime`, so
+  the frame entry has no `tc` (optional in the contract).
+- **Strip `\\?\` from every path Premiere reports** (C3, U1; fact 1): `project.path`, sequence and clip media paths and
+  everything else in a readback is a native OS path (adapters strip the Windows long-path prefix; `\\?\UNC\` becomes
+  `\`). Going the other way, `Project.open` and `exportSequenceFrame` need native backslash paths; the panel host
+  (`premiere-uxp/src/uxp-host.ts` `nativePath`) does the same for `SourceMonitor.openFilePath` and `shell.openPath`.
+- **`Application.version` is empty**: ping and status take the version from `uxp.host.version` (C5; fact 11). UXP has no
+  source for a build number, so `build` is optional in the Premiere ping.
+- **Keyframe times are media time** (K7): key at `clip.getInPoint().seconds + seconds_into_clip`, not at the sequence
+  time. A placed still reports an in-point near 3600 s.
+- **One `executeTransaction` per build** (U1/U2): `project.lockedAccess(() => project.executeTransaction(build, "WhyNot
+  Cut build"))`, so the whole build is one undo step with one label. Reads and the playhead stay outside it.
+- **Three host calls were never measured**: `SourceMonitor.openFilePath`, `Sequence.setPlayerPosition` and
+  `shell.openPath` are used by the panel host from the types and unit tests only. They are item (h) of the spike 0.1.3
+  list below; until then they are not green.
+- **`set_player_position` needs `sequence_name`, but `PanelHost.setPlayerPosition(t_s)` cannot pass it yet**: the host
+  moves the playhead of the active sequence. T6.5 widens the host method to take the sequence name.
+- **Failures are `ok:false` with an `error`** (C6): the result envelope is one shape per outcome (`ok:true` has a
+  `readback` and no `error`; `ok:false` has an `error`); the UXP adapter never answers `ok:true` with a lone error.
+
 ## Dialogs (modal dialogs block automation)
 
 What is known. Both dialogs appeared during the 0.1.1 runs; **the step that raised them was not logged**. Yunus reports
@@ -203,7 +235,8 @@ For a spike 0.1.3 (small): (a) the in-point probe must read the clip's current i
 `sequence_settings` (including each `createSetSettingsAction` transaction) and `export_frame`'s `prepare`, to attribute Project Modified; (d) re-run the time-basis check on an XML clip whose frames
 actually change (the 0.1.2 XML variant rendered a frozen picture); (e) wait for the exported file to stop growing before
 recording its size; (f) the temp-folder export forms were never needed (the work-folder backslash form won first), so
-that remains untested; (g) press Ctrl+Z once and check the three mutations (U3).
+that remains untested; (g) press Ctrl+Z once and check the three mutations (U3);
+(h) measure the three host calls the panel host uses and the spike never ran: `SourceMonitor.openFilePath` (native path), `Sequence.setPlayerPosition(TickTime)` and `uxp.shell.openPath`.
 
 ## Decisions summary
 
