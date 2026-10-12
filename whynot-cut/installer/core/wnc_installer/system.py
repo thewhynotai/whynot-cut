@@ -42,6 +42,10 @@ CLIENTS_FOLDER = "WhyNot Clients"
 START_URL = "claude://code/new?q=%2Fwhynot-cut%3Astart"
 START_MESSAGE = "Open Claude and type /whynot-cut:start"
 START_MESSAGE_AR = "افتح Claude واكتب /whynot-cut:start"
+# macOS (installer.md R.2): the first file access to Documents or an external drive brings a privacy (TCC) dialog
+MAC_ALLOW_MESSAGE = ("The first time Claude opens files in Documents or on an external drive, macOS asks for "
+                     "permission: click Allow")
+MAC_ALLOW_MESSAGE_AR = "أول مرة يفتح فيها Claude ملفات في Documents أو على قرص خارجي سيطلب macOS الإذن: اضغط Allow"
 MARK = {"ok": "[OK]", "skipped": "[!!]", "amber": "[!!]", "red": "[XX]"}
 _DETACHED: list = []  # background downloads started by this process: kept referenced, never waited for
 
@@ -139,7 +143,7 @@ def preflight(ctx: base.Ctx) -> base.StepResult:
              onedrive_documents=plat.startswith("win") and "onedrive" in str(docs).lower(),
              icloud_documents=(not plat.startswith("win")) and _icloud_documents(paths),
              claude_found=bool(claude.claude_candidates(os.environ, paths.home, plat, paths.sandbox)),
-             sac=_sac_state(paths, plat))
+             sac=_sac_state(paths, plat), engine_home=str(paths.whynot), engine_home_source=paths.engine_home_source)
     f["adobe_hosts"] = adobe_hosts(paths, plat, probe_processes=paths.sandbox or not dry)
     if paths.sandbox:
         f["nvidia"] = os.environ.get("WNC_TEST_NVIDIA") == "1"
@@ -174,7 +178,9 @@ def preflight(ctx: base.Ctx) -> base.StepResult:
                      "troubleshooting chapter")
     if notes and status == "ok":
         status = "amber"
-    facts = [f"{f['os']} {f['arch']}", f"{f['free_gb']} GB free",
+    facts = [f"{f['os']} {f['arch']}",
+             f"engine home {paths.whynot} ({base.describe_engine_home_source(paths.engine_home_source)})",
+             f"{f['free_gb']} GB free",
              "Claude Code found" if f["claude_found"] else "no Claude Code CLI (settings.json is used)"]
     if f["adobe_hosts"]:
         facts.append(", ".join(f"{h['app']} {h.get('version')}" + (" (running)" if h.get("running") else "")
@@ -211,14 +217,24 @@ def read_preferences(paths: base.Paths) -> dict:
     return out
 
 
-def default_clients_root(paths: base.Paths, platform: str) -> Path:
-    """The `start` skill's default: Windows D:\\WhyNot Clients when D:\\ exists, else Documents\\WhyNot Clients; macOS
-    ~/Documents/WhyNot Clients. A sandbox never looks at D:\\."""
+def cloud_documents(facts: Optional[dict]) -> Optional[str]:
+    """"OneDrive" / "iCloud Drive" when preflight found Documents synced to that cloud, else None."""
+    f = facts or {}
+    return "OneDrive" if f.get("onedrive_documents") else "iCloud Drive" if f.get("icloud_documents") else None
+
+
+def default_clients_root(paths: base.Paths, platform: str, facts: Optional[dict] = None) -> Path:
+    """The `start` skill's default: Windows D:\\WhyNot Clients when D:\\ exists (always first), else Documents\\WhyNot
+    Clients; macOS ~/Documents/WhyNot Clients. When Documents is synced to OneDrive / iCloud Drive (preflight facts),
+    ~/WhyNot Clients instead: raw footage must not be uploaded or evicted by the cloud. A sandbox never looks at D:\\
+    (its ~ is the fake home)."""
+    if platform.startswith("win") and not paths.sandbox and os.path.isdir("D:\\"):
+        return Path("D:\\") / CLIENTS_FOLDER
+    if cloud_documents(facts):
+        return paths.home / CLIENTS_FOLDER
     if paths.sandbox:
         return paths.home / "Documents" / CLIENTS_FOLDER
     if platform.startswith("win"):
-        if os.path.isdir("D:\\"):
-            return Path("D:\\") / CLIENTS_FOLDER
         return documents_dir(paths, platform) / CLIENTS_FOLDER
     return paths.home / "Documents" / CLIENTS_FOLDER
 
@@ -236,7 +252,10 @@ def resolve_answers(ctx: base.Ctx) -> dict:
     elif prefs.get("clients_root"):
         root, rsrc = prefs["clients_root"], "your preferences"
     else:
-        root, rsrc = str(default_clients_root(ctx.paths, ctx.platform)), "default"
+        root = str(default_clients_root(ctx.paths, ctx.platform, ctx.facts))
+        cloud = cloud_documents(ctx.facts)
+        rsrc = f"default: outside Documents, which {cloud} syncs" \
+            if cloud and Path(root) == ctx.paths.home / CLIENTS_FOLDER else "default"
     if flag_lang in LANGUAGES:
         lang, lsrc = flag_lang, "--language"
     elif prefs.get("language") in LANGUAGES:
@@ -249,6 +268,12 @@ def resolve_answers(ctx: base.Ctx) -> dict:
 def step_questions(ctx: base.Ctx) -> base.StepResult:
     a = resolve_answers(ctx)
     if base.can_ask(ctx.args):
+        cloud = cloud_documents(ctx.facts)
+        if cloud and a["from"]["clients_root"].startswith("default:"):
+            ctx.log.info(f"Your Documents folder is synced to {cloud}; the suggested clients folder is outside it, so "
+                         "raw footage is not uploaded or moved to the cloud.")
+            ctx.log.info(f"مجلد Documents متزامن مع {cloud}؛ المجلد المقترح للعملاء خارجه حتى لا تُرفع ملفات "
+                         "التصوير إلى السحابة.")
         root = base.ask(f"Folder for your client folders / مجلد العملاء [{a['clients_root']}]: ", "")
         if root:
             a["clients_root"], a["from"]["clients_root"] = _norm_folder(root), "you"
@@ -311,33 +336,7 @@ def step_settings(ctx: base.Ctx) -> base.StepResult:
                                           f"{a['language']}, Whisper {model}")
 
 
-def _pid_alive(pid) -> bool:
-    if not isinstance(pid, int) or pid <= 0:
-        return False
-    if os.name == "nt":  # never os.kill on Windows: it terminates the process
-        try:
-            import ctypes
-            from ctypes import wintypes
-            k32 = ctypes.windll.kernel32
-            h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-            if not h:
-                return False
-            try:
-                code = wintypes.DWORD()
-                return bool(k32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
-            finally:
-                k32.CloseHandle(h)
-        except (OSError, AttributeError):
-            return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+_pid_alive = base.pid_alive  # kept under its old name (moved to base: the build lock and uninstall use it)
 
 
 def _spawn_detached(cmd: list, log_path: Path, env: dict, cwd: Optional[Path]) -> int:

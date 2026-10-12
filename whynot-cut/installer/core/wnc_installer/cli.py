@@ -53,6 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--components", help="components.json (default: <plugin>/setup/components.json)")
     common.add_argument("--uv", help="uv binary the bootstrap installed")
     common.add_argument("--python", help="python-build-standalone interpreter the bootstrap installed")
+    common.add_argument("--engine-home", help="the engine home the bootstrap resolved (outside a sandbox it must be "
+                                              "the core's own resolution, else the run stops with 2)")
     common.add_argument("--log", help="log file shared with the bootstrap (default: logs/<command>-<time>.log)")
     common.add_argument("--dry-run", action="store_true", help="say what would happen; write nothing")
     common.add_argument("--yes", "-y", action="store_true", help="no questions: take the defaults")
@@ -97,6 +99,11 @@ def main(argv=None) -> int:
         parser.error(f"--skip: unknown step(s) {', '.join(unknown)}; steps are {', '.join(names)}")
     plugin_root = Path(args.plugin_root).resolve() if args.plugin_root else default_plugin_root()
     paths = base.Paths.from_env(args.home)
+    if args.engine_home and not paths.sandbox and base._norm(args.engine_home) != base._norm(paths.whynot):
+        print(f"ERROR: the bootstrap placed uv and Python in {args.engine_home}, but the engine home is "
+              f"{paths.whynot} ({base.describe_engine_home_source(paths.engine_home_source)}). Nothing was changed; "
+              "tell WhyNot Cut support (the two resolvers disagree).", file=sys.stderr)
+        return 2
 
     if args.command == "plan":
         try:
@@ -105,7 +112,8 @@ def main(argv=None) -> int:
             plat = None
         print(json.dumps({"steps": list(STEP_ORDER), "registered": [n for n, _f, _d in ordered(STEPS)],
                           "uninstall": [n for n, _f, _d in UNINSTALL_STEPS], "skip": args.skip, "platform": plat,
-                          "engine_home": str(paths.whynot), "sandbox": paths.sandbox}, ensure_ascii=False, indent=2))
+                          "engine_home": str(paths.whynot), "engine_home_source": paths.engine_home_source,
+                          "sandbox": paths.sandbox}, ensure_ascii=False, indent=2))
         return 0
 
     try:
@@ -135,8 +143,9 @@ def main(argv=None) -> int:
         log.warn(f"state.json was unreadable; kept it as {state.set_aside.name} and started fresh")
     ctx = base.Ctx(paths=paths, log=log, components=components, state=state, plugin_root=plugin_root,
                    platform=plat, args=args)
-    log.info(f"WhyNot Cut {components.get('plugin')} {args.command} on {plat}; engine home {paths.whynot}"
-             + (" (sandbox)" if paths.sandbox else "") + (" (dry run: nothing is written)" if args.dry_run else ""))
+    log.info(f"WhyNot Cut {components.get('plugin')} {args.command} on {plat}; engine home {paths.whynot} "
+             f"({base.describe_engine_home_source(paths.engine_home_source)})"
+             + (" (dry run: nothing is written)" if args.dry_run else ""))
     if args.command == "install":
         return install(ctx)
     from . import uninstall
@@ -178,5 +187,8 @@ def _finish(ctx: base.Ctx, results: list, system) -> None:
     log.info("")
     log.info(system.START_MESSAGE)
     log.info(system.START_MESSAGE_AR)
+    if ctx.platform.startswith("mac"):
+        log.info(system.MAC_ALLOW_MESSAGE)
+        log.info(system.MAC_ALLOW_MESSAGE_AR)
     if log.path:
         log.info(f"log: {log.path}")

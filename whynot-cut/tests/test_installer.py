@@ -328,6 +328,234 @@ class TestPaths(unittest.TestCase):
         self.assertEqual(p2.whynot, home / ".whynot-cut")
         self.assertEqual(p2.claude_dir, home / ".claude")
 
+    def test_child_env_drops_pythonpath_and_pythonhome(self):
+        for sandbox in (True, False):
+            with self.subTest(sandbox=sandbox):
+                p = base.Paths.from_env(str(self.tmp / "h") if sandbox else None,
+                                        env={"HOME": str(self.tmp), "USERPROFILE": str(self.tmp)})
+                env = p.child_env({"PATH": "keep-me", "PYTHONPATH": str(self.tmp / "evil"),
+                                   "PYTHONHOME": str(self.tmp / "other python")})
+                self.assertNotIn("PYTHONPATH", env)
+                self.assertNotIn("PYTHONHOME", env)
+                self.assertEqual(env["PATH"], "keep-me")
+
+
+# --------------------------------------------------------------------------------------------- engine home
+ENGINE_HOME_ENV = ("WHYNOT_HOME", "CLAUDE_PLUGIN_OPTION_ENGINE_HOME", "REEL_HOME", "CLAUDE_PLUGIN_OPTION_REEL_HOME",
+                   "NH_ENV_DIR")
+
+
+class EngineHomeCases:
+    """A fake user home (space + Arabic letters) with the pointer file and settings.json written by each case.
+    Every case: (name, writer(home), extra env, expected path relative-to-home or absolute, expected source kind)."""
+
+    @staticmethod
+    def pointer(home: Path, obj, raw: bytes = None) -> None:
+        touch(home / ".whynot-cut" / "plugin-options.json", raw if raw is not None else json.dumps(obj).encode())
+
+    @staticmethod
+    def settings(home: Path, configs) -> None:
+        touch(home / ".claude" / "settings.json", json.dumps({"theme": "dark", "pluginConfigs": configs}).encode())
+
+    @classmethod
+    def cases(cls, tmp: Path) -> list:
+        far = tmp / "engine far"
+        other = tmp / "engine other"
+        third = tmp / "engine third"
+        P, S = cls.pointer, cls.settings
+        return [
+            ("default", lambda h: None, {}, ".whynot-cut", "default"),
+            ("pointer", lambda h: P(h, {"engine_home": str(far), "clients_root": ""}), {}, far, "pointer"),
+            ("pointer wins over settings",
+             lambda h: (P(h, {"engine_home": str(far)}), S(h, {"whynot-cut@thewhynot-ai": {
+                 "options": {"engine_home": str(other)}}})), {}, far, "pointer"),
+            ("an empty pointer value is the default, settings are not read",
+             lambda h: (P(h, {"engine_home": ""}), S(h, {"whynot-cut@thewhynot-ai": {
+                 "options": {"engine_home": str(other)}}})), {}, ".whynot-cut", "default"),
+            ("a pointer with a BOM is invalid: settings",
+             lambda h: (P(h, None, b"\xef\xbb\xbf" + json.dumps({"engine_home": str(far)}).encode()),
+                        S(h, {"whynot-cut@thewhynot-ai": {"options": {"engine_home": str(other)}}})),
+             {}, other, "settings"),
+            ("a pointer that is not an object is invalid: settings",
+             lambda h: (P(h, [{"engine_home": str(far)}]),
+                        S(h, {"whynot-cut@thewhynot-ai": {"options": {"engine_home": str(other)}}})),
+             {}, other, "settings"),
+            ("a pointer without an engine_home string is invalid: settings",
+             lambda h: (P(h, {"engine_home": 5}),
+                        S(h, {"whynot-cut@thewhynot-ai": {"options": {"engine_home": str(other)}}})),
+             {}, other, "settings"),
+            ("settings: our key first, whatever the file order",
+             lambda h: S(h, {"whynot-cut@dev": {"options": {"engine_home": str(third)}},
+                             "whynot-cut@thewhynot-ai": {"options": {"engine_home": str(other)}}}),
+             {}, other, "settings"),
+            ("settings: else the first other whynot-cut@ entry that has options",
+             lambda h: S(h, {"whynot-cut@thewhynot-ai": {"enabled": True}, "x@y": {"options": {"engine_home": "no"}},
+                             "whynot-cut@dev": {"options": {"engine_home": str(third)}},
+                             "whynot-cut@zzz": {"options": {"engine_home": str(far)}}}),
+             {}, third, "settings"),
+            ("settings: options without engine_home is the default",
+             lambda h: S(h, {"whynot-cut@thewhynot-ai": {"options": {"clients_root": "x"}},
+                             "whynot-cut@dev": {"options": {"engine_home": str(third)}}}),
+             {}, ".whynot-cut", "default"),
+            ("settings: ~ is the user home", lambda h: S(h, {"whynot-cut@thewhynot-ai": {
+                "options": {"engine_home": "~/WhyNot Engine"}}}), {}, "WhyNot Engine", "settings"),
+            ("WHYNOT_OPTIONS_FILE moves the pointer",
+             lambda h: touch(tmp / "elsewhere" / "opts.json", json.dumps({"engine_home": str(far)}).encode()),
+             {"WHYNOT_OPTIONS_FILE": str(tmp / "elsewhere" / "opts.json")}, far, "pointer"),
+            ("CLAUDE_CONFIG_DIR moves settings.json",
+             lambda h: touch(tmp / "cfg dir" / "settings.json", json.dumps({"pluginConfigs": {
+                 "whynot-cut@thewhynot-ai": {"options": {"engine_home": str(other)}}}}).encode()),
+             {"CLAUDE_CONFIG_DIR": str(tmp / "cfg dir")}, other, "settings"),
+            ("REEL_HOME beats the pointer", lambda h: P(h, {"engine_home": str(far)}),
+             {"REEL_HOME": str(third)}, third, "env:REEL_HOME"),
+            ("WHYNOT_HOME beats every other variable", lambda h: None,
+             {"WHYNOT_HOME": str(far), "CLAUDE_PLUGIN_OPTION_ENGINE_HOME": str(other)}, far, "env:WHYNOT_HOME"),
+            ("the plugin option variable", lambda h: None,
+             {"CLAUDE_PLUGIN_OPTION_ENGINE_HOME": str(other), "REEL_HOME": str(third)}, other,
+             "env:CLAUDE_PLUGIN_OPTION_ENGINE_HOME"),
+        ]
+
+
+def clean_engine_env(home: Path, **extra) -> dict:
+    """os.environ without any engine-home / options / Claude config variable, the user home = `home`."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ENGINE_HOME_ENV + ("WHYNOT_OPTIONS_FILE", "CLAUDE_CONFIG_DIR")}
+    env.update(HOME=str(home), USERPROFILE=str(home), **extra)
+    return env
+
+
+class TestEngineHome(unittest.TestCase):
+    """Outside the sandbox the engine home is resolved exactly like the engine (engine/reel/lib/plat.py
+    engine_home, minus its legacy-home fallback); always with an injected env and a temp home, never the real one."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+
+    def each_case(self):
+        for i, (name, write, extra, want, kind) in enumerate(EngineHomeCases.cases(self.tmp)):
+            home = self.tmp / f"case {i}" / ARABIC_HOME
+            home.mkdir(parents=True)
+            write(home)
+            yield name, home, extra, (want if isinstance(want, Path) else home / want), kind
+
+    def test_the_resolver_follows_the_engine_order(self):
+        for name, home, extra, want, kind in self.each_case():
+            with self.subTest(name):
+                env = {"HOME": str(home), "USERPROFILE": str(home), **extra}
+                got, src = base.resolve_engine_home(env, home)
+                self.assertEqual(norm(got), norm(want), src)
+                self.assertEqual(src.split(":", 1)[0] if not src.startswith("env:") else src, kind)
+
+    def test_same_answer_as_the_engine(self):
+        from lib import plat  # the engine's own resolver (tests/_isolation.py put engine/reel on sys.path)
+        for name, home, extra, want, _kind in self.each_case():
+            with self.subTest(name), mock.patch.dict(os.environ, clean_engine_env(home, **extra), clear=True):
+                self.assertEqual(norm(base.resolve_engine_home(os.environ, home)[0]), norm(plat.engine_home()))
+
+    @unittest.skipUnless(IS_WIN, "Git-Bash style paths are converted on Windows only")
+    def test_git_bash_style_saved_path(self):
+        home = self.tmp / "h"
+        EngineHomeCases.pointer(home, {"engine_home": "/d/WhyNot Engine"})
+        got, src = base.resolve_engine_home({"USERPROFILE": str(home)}, home)
+        self.assertEqual(norm(got), norm("D:/WhyNot Engine"))
+
+    def test_paths_use_it_outside_the_sandbox_only(self):
+        home = self.tmp / ARABIC_HOME
+        far = self.tmp / "engine far"
+        EngineHomeCases.pointer(home, {"engine_home": str(far)})
+        p = base.Paths.from_env(None, env={"HOME": str(home), "USERPROFILE": str(home)})
+        self.assertEqual((norm(p.whynot), p.engine_home_source.split(":")[0]), (norm(far), "pointer"))
+        self.assertEqual(p.child_env({})["WHYNOT_HOME"], str(p.whynot))
+        s = base.Paths.from_env(str(home), env={"WHYNOT_HOME": str(far)})
+        self.assertEqual((s.whynot, s.engine_home_source), (home / ".whynot-cut", "sandbox"))
+
+    def test_plan_outside_the_sandbox_and_a_disagreeing_bootstrap(self):
+        home = self.tmp / ARABIC_HOME
+        far = self.tmp / "engine far"
+        EngineHomeCases.settings(home, {"whynot-cut@thewhynot-ai": {"options": {"engine_home": str(far)}}})
+        with mock.patch.dict(os.environ, clean_engine_env(home), clear=True):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = cli.main(["plan", "--engine-home", str(far)])
+            self.assertEqual(rc, 0)
+            plan = json.loads(out.getvalue())
+            self.assertEqual(norm(plan["engine_home"]), norm(far))
+            self.assertTrue(plan["engine_home_source"].startswith("settings"), plan)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                rc = cli.main(["plan", "--engine-home", str(home / ".whynot-cut")])
+            self.assertEqual(rc, 2)
+            self.assertIn(str(far), err.getvalue())
+        self.assertFalse((home / ".whynot-cut").exists())
+        self.assertFalse(far.exists())
+
+
+class TestEngineHomeInTheShells(unittest.TestCase):
+    """The bootstraps' own resolvers (they place uv and Python before the core exists) give the core's answer for
+    every case. Each resolver function runs alone with an injected env and a temp home."""
+    PS_FUNCS = ("Get-WncFullPath", "Read-WncJsonObject", "Get-WncMember", "ConvertTo-WncHomePath",
+                "Resolve-WncEngineHome")
+    SH_FUNCS = ("abs_path", "home_path", "saved_engine_home", "resolve_engine_home")
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+
+    def cases(self):
+        yield from TestEngineHome.each_case(self)
+
+    def test_powershell_resolver(self):
+        if not find_powershell():
+            self.skipTest("Windows PowerShell is not available")
+        boot = INSTALLER / "core" / "bootstrap.ps1"
+        script = self.tmp / "resolve.ps1"
+        script.write_text("".join(shell_function(boot, n, True) for n in self.PS_FUNCS)
+                          + "$r = Resolve-WncEngineHome $env:WNC_T_HOME\n"
+                          + "[IO.File]::WriteAllText($env:WNC_T_OUT, (Get-WncFullPath $r.Path) + \"`n\" + $r.Source,"
+                          + " (New-Object System.Text.UTF8Encoding $false))\n", encoding="utf-8-sig")
+        for name, home, extra, want, kind in self.cases():
+            with self.subTest(name):
+                out = self.tmp / "out.txt"
+                env = clean_engine_env(home, WNC_T_HOME=str(home), WNC_T_OUT=str(out), **extra)
+                r = subprocess.run([find_powershell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                                    "-File", str(script)], capture_output=True, text=True, encoding="utf-8",
+                                   errors="replace", env=env, timeout=120, stdin=subprocess.DEVNULL, cwd=str(self.tmp))
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                path, src = out.read_text(encoding="utf-8").split("\n", 1)
+                self.assertEqual(norm(path), norm(want), src)
+                self.assertEqual(src if src.startswith("env:") else src.split(":", 1)[0], kind)
+                self.assertEqual(norm(path), norm(base.resolve_engine_home(env, home)[0]))
+
+    def test_bash_resolver(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash is not available")
+        boot = INSTALLER / "core" / "bootstrap.sh"
+        script = self.tmp / "resolve.sh"
+        script.write_bytes(('OS_NAME="$(uname -s)"\nJSON_PY="$1"\n'
+                            + "".join(shell_function(boot, n, False) for n in self.SH_FUNCS)
+                            + 'resolve_engine_home\n'
+                            + 'if command -v cygpath >/dev/null 2>&1; then ENGINE="$(cygpath -w "$ENGINE")"; fi\n'
+                            + "printf '%s\\n%s\\n' \"$ENGINE\" \"$ENGINE_SRC\"\n").encode("utf-8"))
+        for name, home, extra, want, kind in self.cases():
+            with self.subTest(name):
+                env = clean_engine_env(home, **extra)
+                r = subprocess.run([bash, script.as_posix(), Path(sys.executable).as_posix()], capture_output=True,
+                                   env=env, timeout=120, stdin=subprocess.DEVNULL, cwd=str(self.tmp))
+                out = r.stdout.decode("utf-8", "replace")
+                self.assertEqual(r.returncode, 0, out + r.stderr.decode("utf-8", "replace"))
+                path, src = out.rstrip("\n").split("\n", 1)
+                self.assertEqual(norm(path), norm(want), src)
+                self.assertEqual(src if src.startswith("env:") else src.split(":", 1)[0], kind)
+
+    def test_the_bootstraps_pass_the_resolved_home_to_the_core(self):
+        for name, needle in (("bootstrap.ps1", "Resolve-WncEngineHome $h"), ("bootstrap.sh", "resolve_engine_home"),
+                             ("bootstrap.ps1", "'--engine-home'"), ("bootstrap.sh", "--engine-home")):
+            self.assertIn(needle, SHELL_FILES[name].read_text(encoding="utf-8"), name)
+
 
 # --------------------------------------------------------------------------------------------- files / log
 class TestFiles(unittest.TestCase):
@@ -542,6 +770,30 @@ class TestDownload(unittest.TestCase):
             out = base.download(self.url, sha(self.BODY), self.dl, self.log)
         self.assertEqual(out.read_bytes(), self.BODY)
         self.assertEqual(len(self.srv.hits), 1)
+
+    def fake_curl(self, code: int) -> str:
+        """A curl that fails like a real one behind a proxy it cannot use (exit 5 / 6 / 7)."""
+        d = self.tmp / f"fake curl {code}"
+        d.mkdir(parents=True, exist_ok=True)
+        if IS_WIN:
+            p = d / "curl.cmd"
+            p.write_text(f"@echo curl: ({code}) could not connect 1>&2\r\n@exit /b {code}\r\n", encoding="ascii")
+        else:
+            p = d / "curl"
+            p.write_text(f'#!/bin/sh\necho "curl: ({code}) could not connect" >&2\nexit {code}\n', encoding="ascii")
+            os.chmod(p, 0o755)
+        return str(p)
+
+    def test_curl_proxy_resolve_connect_errors_fall_back_to_urllib(self):
+        for code in (5, 6, 7):
+            with self.subTest(curl_exit=code):
+                log = Quiet(self.tmp / f"dl-{code}.log")
+                with mock.patch.object(base, "find_curl", return_value=self.fake_curl(code)):
+                    out = base.download(self.url, sha(self.BODY), self.dl, log, retries=1)
+                self.assertEqual(out.read_bytes(), self.BODY)
+                self.assertIn(f"curl exit {code}", log.path.read_text(encoding="utf-8"))
+                out.unlink()
+        self.assertEqual(len(self.srv.hits), 3)  # one urllib request per download; the fake curl made none
 
 
 # --------------------------------------------------------------------------------------------- extract
@@ -1038,25 +1290,63 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual(sync[sync.index("--index-url") + 1], "https://mirror.example/simple")
 
     def test_fresh_build_lock_held_elsewhere_is_amber(self):
+        # held by a running process: this test's own (the installer's format: "<pid> <time> <who>")
         paths = self.ctx().paths
         lk = self.build_lock(paths)
         lk.parent.mkdir(parents=True)
-        lk.write_text("4242 reel setup\n", encoding="utf-8")
+        text = f"{os.getpid()} 2026-10-12T10:00:00+03:00 reel setup\n"
+        lk.write_text(text, encoding="utf-8")
+        old = time.time() - 125
+        os.utime(lk, (old, old))
         ctx = self.ctx()
         r = self.rt.step_runtime(ctx)
         self.assertEqual(r.status, "amber")
         self.assertIn("another WhyNot Cut setup is building this runtime", r.detail)
+        self.assertIn(str(lk), r.detail)  # where the lock is
+        self.assertIn("2 min", r.detail)  # and how old
         self.assertEqual(self.uv_calls(), [])
-        self.assertEqual(lk.read_text(encoding="utf-8"), "4242 reel setup\n")  # not ours: left alone
+        self.assertEqual(lk.read_text(encoding="utf-8"), text)  # not ours: left alone
         self.assertFalse(ctx.paths.current_file.exists())
         self.assertIsNone(ctx.runtime_python)
 
+    def test_fresh_lock_of_a_running_reel_setup_is_amber(self):
+        # the engine's setup_env.BuildLock writes the bare pid (no newline): a live sleeper holds it
+        sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], stdin=subprocess.DEVNULL)
+        self.addCleanup(sleeper.wait, 30)
+        self.addCleanup(sleeper.kill)
+        lk = self.build_lock(self.ctx().paths)
+        lk.parent.mkdir(parents=True)
+        lk.write_text(str(sleeper.pid), encoding="utf-8")
+        r = self.rt.step_runtime(self.ctx())
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn(str(lk), r.detail)
+        self.assertTrue(lk.exists())
+
+    def test_fresh_lock_of_a_process_that_is_gone_is_taken_over(self):
+        # the installer window was closed during `pip sync`: the lock is fresh but its process is gone
+        dead = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.DEVNULL)
+        dead.wait(30)
+        for text in (f"{dead.pid} 2026-10-12T10:00:00+03:00 installer\n", str(dead.pid)):  # installer, engine
+            with self.subTest(lock=text):
+                ctx = self.ctx()
+                rdir = ctx.paths.runtimes_dir / self.rid()
+                if rdir.exists():
+                    rmtree_retry(rdir)
+                lk = self.build_lock(ctx.paths)
+                lk.parent.mkdir(parents=True, exist_ok=True)
+                lk.write_text(text, encoding="utf-8")
+                r = self.rt.step_runtime(ctx)
+                self.assertEqual(r.status, "ok", r.detail)
+                self.assertFalse(lk.exists())
+                self.assertEqual(self.rt.current_runtime(ctx.paths), self.rid())
+
     def test_stale_build_lock_is_taken_over(self):
+        # the 2 h rule stays as the backstop (a pid the OS has given to another process looks alive)
         paths = self.ctx().paths
         lk = self.build_lock(paths)
         lk.parent.mkdir(parents=True)
-        lk.write_text("4242 crashed\n", encoding="utf-8")
-        old = __import__("time").time() - 3 * 3600
+        lk.write_text(f"{os.getpid()} crashed\n", encoding="utf-8")
+        old = time.time() - 3 * 3600
         os.utime(lk, (old, old))
         ctx = self.ctx()
         self.assertEqual(self.rt.step_runtime(ctx).status, "ok")
@@ -1422,8 +1712,9 @@ class TestFindClaudeParity(unittest.TestCase):
         self.assertIn(norm(on_path), [norm(p) for p in real])  # the test machine's PATH search does work
         self.assertNotIn(str(FAKE_CLAUDE), [str(p) for p in real])  # WNC_CLAUDE_CLI is a sandbox-only switch
         self.assertEqual(sand, [FAKE_CLAUDE, new, old])  # env CLI, then the bundles only: no PATH, no fixed paths
+        # in a sandbox only the test switch counts: a CLAUDE_CLI of this machine never leads to the real CLI
         sand2 = self.cl.claude_candidates({"CLAUDE_CLI": str(FAKE_CLAUDE)}, home, "win-x64", True)
-        self.assertEqual(sand2[0], FAKE_CLAUDE)
+        self.assertEqual(sand2, [new, old])
 
 
 class TestSettingsMerge(unittest.TestCase):
@@ -2224,6 +2515,15 @@ class TestPreflight(unittest.TestCase):
         self.assertEqual(f["existing"], {"engine": False, "legacy_reel_editor": False, "marketplace_source": None})
         self.assertEqual(only_the_test_log(ctx.paths), True)  # read-only
 
+    def test_reports_the_engine_home_and_where_it_came_from(self):
+        ctx, r = self.run_pre(50)
+        self.assertEqual(ctx.facts["engine_home"], str(ctx.paths.whynot))
+        self.assertEqual(ctx.facts["engine_home_source"], "sandbox")
+        self.assertIn(f"engine home {ctx.paths.whynot} (sandbox)", r.detail)
+        ctx.paths.engine_home_source = "pointer:" + str(self.tmp / "opts.json")
+        r = self.sy.preflight(ctx)
+        self.assertIn("plugin option engine_home in " + str(self.tmp / "opts.json"), r.detail)
+
     def test_arabic_home_with_a_space_is_amber(self):
         ctx, r = self.run_pre(50, home=ARABIC_HOME)
         self.assertEqual(r.status, "amber", r.detail)
@@ -2313,6 +2613,30 @@ class TestQuestions(unittest.TestCase):
 
     def test_no_questions_with_yes(self):
         self.assertFalse(base.can_ask(argparse.Namespace(yes=True)))
+
+    def test_documents_in_the_cloud_moves_the_default_out_of_it(self):
+        for plat, fact, cloud in (("win-x64", "onedrive_documents", "OneDrive"),
+                                  ("mac-arm64", "icloud_documents", "iCloud")):
+            with self.subTest(plat):
+                ctx = make_ctx(self.home, {"schema": 1}, SK, plat, clients_folder=None, language=None)
+                ctx.facts[fact] = True
+                r = self.sy.step_questions(ctx)
+                want = self.home / "WhyNot Clients"
+                self.assertEqual(ctx.answers["clients_root"], str(want))
+                self.assertIn(cloud, r.detail)  # says why it is not in Documents
+                self.assertFalse(want.exists())
+
+    def test_cloud_documents_never_beat_a_flag_or_a_saved_preference(self):
+        target = self.home.parent / "Clients Here"
+        ctx = self.ctx(clients_folder=str(target))
+        ctx.facts["onedrive_documents"] = True
+        self.sy.step_questions(ctx)
+        self.assertEqual(ctx.answers["clients_root"], str(target))
+        touch(self.home / ".claude" / "whynot-cut.local.md", f"---\nclients_root: {target}\n---\n".encode("utf-8"))
+        ctx = self.ctx()
+        ctx.facts["onedrive_documents"] = True
+        self.sy.step_questions(ctx)
+        self.assertEqual(ctx.answers["clients_root"], str(target))
 
 
 # --------------------------------------------------------------------------------------------- adobe
@@ -2713,6 +3037,21 @@ class TestLaunch(unittest.TestCase):
         self.assertIn("/whynot-cut:start", sy.START_MESSAGE)
         self.assertIn("افتح Claude واكتب /whynot-cut:start", sy.START_MESSAGE_AR)
 
+    def test_macos_says_to_click_allow_after_the_install(self):
+        sy = system_module()
+        self.assertIn("Allow", sy.MAC_ALLOW_MESSAGE)
+        self.assertIn("Allow", sy.MAC_ALLOW_MESSAGE_AR)
+        for plat, shown in (("mac-arm64", True), ("mac-x64", True), ("win-x64", False)):
+            with self.subTest(plat), TempDir() as td:
+                home = Path(td) / ARABIC_HOME
+                r = subprocess.run([sys.executable, "-B", str(CORE / "wnc_install.py"), "install", "--home", str(home),
+                                    "--dry-run", "--yes"], capture_output=True, text=True, encoding="utf-8",
+                                   env=sandbox_env(WNC_TEST_PLATFORM=plat), timeout=120, stdin=subprocess.DEVNULL)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertEqual(sy.MAC_ALLOW_MESSAGE in r.stdout, shown)
+                self.assertEqual(sy.MAC_ALLOW_MESSAGE_AR in r.stdout, shown)
+                self.assertIn(sy.START_MESSAGE_AR, r.stdout)
+
 
 # --------------------------------------------------------------------------------------------- whole install
 class TestInstallDryRun(unittest.TestCase):
@@ -2892,6 +3231,9 @@ class TestShellScripts(unittest.TestCase):
                      "--skip", "--uninstall", "--remove-engine", "--remove-models", "--source", "--source-sha256",
                      "WNC_TEST_UV", "WNC_TEST_PLATFORM", "logs"):
             self.assertIn(flag, text)
+        # what -RemoveEngine keeps, and where the engine home comes from
+        for needle in ("library/", "plugin-options.json", "pluginConfigs", "WHYNOT_HOME", "--engine-home"):
+            self.assertIn(needle, text)
 
 
 class _ShellCase(unittest.TestCase):
@@ -3582,6 +3924,50 @@ class TestUninstallSteps(unittest.TestCase):
         self.assertEqual(r.status, "ok", r.detail)
         self.assertFalse(ctx.paths.models_dir.exists())
         self.assertTrue(rt.is_file())
+
+    def test_remove_engine_keeps_the_motion_library_even_with_remove_models(self):
+        ctx = self.ctx(remove_engine=True, remove_models=True)
+        touch(ctx.paths.state_file, b"{}")
+        pack = touch(ctx.paths.whynot / "library" / "motion" / "licensed-pack" / "hand.png", b"paid illustration")
+        touch(ctx.paths.models_dir / "large-v3" / "model.bin", b"w")
+        touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
+        r = self.un.step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(pack.read_bytes(), b"paid illustration")
+        self.assertIn("library", r.detail)  # reported as kept
+        self.assertFalse(ctx.paths.models_dir.exists())
+        self.assertFalse(ctx.paths.runtimes_dir.exists())
+        self.assertEqual(sorted(os.listdir(ctx.paths.whynot)), ["library"])
+
+    def test_locked_files_during_a_model_download_name_the_download(self):
+        ctx = self.ctx(remove_engine=True)
+        touch(ctx.paths.state_file, b"{}")
+        touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
+        mlog = ctx.paths.logs_dir / "model-download-20261012-100000.log"
+        ctx.state.data["models"] = {"model": "large-v3", "pid": os.getpid(), "log": str(mlog)}  # a live pid
+        real = base.safe_rmtree
+
+        def locked(p, *a, **kw):
+            if Path(p).name == "runtimes":
+                raise PermissionError(13, "The process cannot access the file", str(p))
+            return real(p, *a, **kw)
+        with mock.patch.object(base, "safe_rmtree", side_effect=locked):
+            r = self.un.step_engine(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        said = r.detail + " " + (r.needs_you or "")
+        self.assertIn("model download", said)
+        self.assertIn(str(mlog), said)
+        # a download that is over is not blamed
+        ctx = self.ctx(remove_engine=True)
+        touch(ctx.paths.state_file, b"{}")
+        touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
+        gone = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.DEVNULL)
+        gone.wait(30)
+        ctx.state.data["models"] = {"model": "large-v3", "pid": gone.pid, "log": str(mlog)}
+        with mock.patch.object(base, "safe_rmtree", side_effect=locked):
+            r = self.un.step_engine(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertNotIn("model download", r.detail + " " + (r.needs_you or ""))
 
     def test_an_engine_home_that_is_the_user_home_is_refused(self):
         h = self.tmp / "profile"

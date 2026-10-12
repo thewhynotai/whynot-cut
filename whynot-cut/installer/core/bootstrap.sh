@@ -22,6 +22,11 @@
 # 3 = a bootstrap step failed (download, sha256, uv, python), with a one-line message and the log path.
 # --dry-run writes nothing (no log, no folder); it runs the core's dry run only when uv and Python are already there
 # (or WNC_TEST_UV is set), otherwise it names the steps that would follow.
+# Engine home (outside a sandbox): resolved exactly like the engine (resolve_engine_home: WHYNOT_HOME and the other
+# engine-home variables, else the plugin option engine_home from ~/.whynot-cut/plugin-options.json, else from
+# settings.json pluginConfigs, else ~/.whynot-cut) BEFORE anything is downloaded, so uv, Python, the log and every later
+# step land in that one folder; it is passed to the core as --engine-home, and the core stops with 2 if its own
+# resolution (wnc_installer.base.resolve_engine_home) disagrees.
 # Sandbox (--home <dir>): HOME, USERPROFILE, APPDATA, LOCALAPPDATA, CLAUDE_CONFIG_DIR and WHYNOT_HOME point into <dir>
 # before anything is downloaded (as wnc_installer.base.Paths.child_env does), and --home is passed on. Only then are
 # the test hooks honoured: WNC_TEST_PLATFORM (win-x64 | mac-arm64 | mac-x64; lets Git Bash run the macOS path) and
@@ -299,6 +304,107 @@ abs_path() { # an absolute path (POSIX /x or Windows C:/x stays as it is)
   esac
 }
 
+home_path() { # a configured path: ~ and ~/x are under $HOME, a relative one is made absolute (the core's abspath)
+  case "$1" in
+    \~) abs_path "$HOME" ;;
+    \~/*) abs_path "$HOME/${1#\~/}" ;;
+    *) abs_path "$1" ;;
+  esac
+}
+
+saved_engine_home() { # pointer-file settings-file -> "pointer<TAB>value", "settings<TAB>key<TAB>value" or "none"
+  # the plugin option engine_home as the engine reads it (engine/reel/lib/plat.py saved_options): the pointer file
+  # when it is a JSON object with an "engine_home" string ("" = not set), else settings.json pluginConfigs
+  # ["whynot-cut@thewhynot-ai"].options, else the first other whynot-cut@* entry (file order) with options. Both
+  # files are UTF-8 without a BOM (a BOM is not JSON, as for the engine). macOS: JXA; elsewhere (Git Bash in tests)
+  # the same rules in Python.
+  local js py
+  js='function run(argv) {
+    ObjC.import("Foundation");
+    function isObj(v) { return v !== null && typeof v === "object" && !Array.isArray(v); }
+    function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+    function load(p) {
+      var t = $.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, null);
+      if (t.isNil()) { return null; }
+      var s = ObjC.unwrap(t);
+      if (s.charCodeAt(0) === 0xFEFF) { return null; }
+      try { var v = JSON.parse(s); return isObj(v) ? v : null; } catch (e) { return null; }
+    }
+    var p = load(argv[0]);
+    if (p !== null && own(p, "engine_home") && typeof p.engine_home === "string") {
+      return "pointer\t" + p.engine_home;
+    }
+    var s = load(argv[1]);
+    var c = (s !== null && own(s, "pluginConfigs")) ? s.pluginConfigs : null;
+    if (!isObj(c)) { return "none"; }
+    var keys = ["whynot-cut@thewhynot-ai"];
+    Object.keys(c).forEach(function (k) { if (k.indexOf("whynot-cut@") === 0 && k !== keys[0]) { keys.push(k); } });
+    for (var i = 0; i < keys.length; i++) {
+      var e = own(c, keys[i]) ? c[keys[i]] : null;
+      if (isObj(e) && own(e, "options") && isObj(e.options)) {
+        var h = e.options.engine_home;
+        return "settings\t" + keys[i] + "\t" + (typeof h === "string" ? h : "");
+      }
+    }
+    return "none";
+  }'
+  py='import json, sys
+def load(p):
+    try:
+        v = json.loads(open(p, encoding="utf-8").read())
+    except (OSError, ValueError):
+        return None
+    return v if isinstance(v, dict) else None
+p = load(sys.argv[1])
+if p is not None and isinstance(p.get("engine_home"), str):
+    print("pointer\t" + p["engine_home"])
+    sys.exit(0)
+c = (load(sys.argv[2]) or {}).get("pluginConfigs") or {}
+ours = "whynot-cut@thewhynot-ai"
+for k in ([ours] + [k for k in c if k.startswith("whynot-cut@") and k != ours]) if isinstance(c, dict) else []:
+    e = c.get(k)
+    if isinstance(e, dict) and isinstance(e.get("options"), dict):
+        h = e["options"].get("engine_home")
+        print("settings\t" + k + "\t" + (h if isinstance(h, str) else ""))
+        sys.exit(0)
+print("none")'
+  if [ "$OS_NAME" = "Darwin" ]; then
+    osascript -l JavaScript -e "$js" "$1" "$2" 2>/dev/null </dev/null
+  elif [ -n "$JSON_PY" ]; then
+    "$JSON_PY" -I -X utf8 -c "$py" "$1" "$2" 2>/dev/null </dev/null | tr -d '\r'
+  else
+    printf 'none\n'
+  fi
+}
+
+resolve_engine_home() { # outside a sandbox: the engine home the engine itself uses -> ENGINE, ENGINE_SRC
+  # engine/reel/lib/plat.py engine_home (the core's wnc_installer.base.resolve_engine_home is the same): the first
+  # engine-home variable that is set, else the saved plugin option (saved_engine_home), else ~/.whynot-cut. The
+  # sources are named like the core's: env:<NAME>, pointer:<file>, settings:<file> <key>, default.
+  local n v pointer cfg out rest key src
+  for n in WHYNOT_HOME CLAUDE_PLUGIN_OPTION_ENGINE_HOME REEL_HOME CLAUDE_PLUGIN_OPTION_REEL_HOME NH_ENV_DIR; do
+    v="${!n:-}"
+    if [ -n "$v" ]; then ENGINE="$(home_path "$v")"; ENGINE_SRC="env:$n"; return 0; fi
+  done
+  pointer="$HOME/.whynot-cut/plugin-options.json"
+  if [ -n "${WHYNOT_OPTIONS_FILE:-}" ]; then pointer="$(home_path "$WHYNOT_OPTIONS_FILE")"; fi
+  cfg="$HOME/.claude"
+  if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then cfg="$(home_path "$CLAUDE_CONFIG_DIR")"; fi
+  out="$(saved_engine_home "$pointer" "$cfg/settings.json")"
+  v="" src=""
+  case "$out" in
+    pointer$'\t'*) v="${out#*$'\t'}"; src="pointer:$pointer" ;;
+    settings$'\t'*)
+      rest="${out#*$'\t'}"; key="${rest%%$'\t'*}"; v="${rest#*$'\t'}"
+      src="settings:$cfg/settings.json $key" ;;
+  esac
+  if [ -n "$v" ]; then
+    ENGINE="$(home_path "$v")"; ENGINE_SRC="$src"
+  else
+    ENGINE="$HOME/.whynot-cut"; ENGINE_SRC="default"
+  fi
+}
+
 # ------------------------------------------------------------------------------------------- platform and paths
 OS_NAME="$(uname -s)"
 PLAT=""
@@ -327,7 +433,8 @@ if [ -n "$HOME_OVR" ]; then
   export HOME="$H" USERPROFILE="$H" APPDATA="$H/AppData/Roaming" LOCALAPPDATA="$H/AppData/Local"
   export CLAUDE_CONFIG_DIR="$H/.claude" WHYNOT_HOME="$ENGINE"
 else
-  ENGINE="${WHYNOT_HOME:-$HOME/.whynot-cut}"
+  ENGINE="" ENGINE_SRC=""
+  resolve_engine_home  # before any download: uv, Python, the log and the core all use this one folder
 fi
 TEST_UV=""
 [ -n "$HOME_OVR" ] && TEST_UV="${WNC_TEST_UV:-}"
@@ -356,7 +463,7 @@ if [ -z "$DRY" ]; then
   LOG="$ENGINE/logs/$CMD-$(date '+%Y%m%d-%H%M%S').log"
   : > "$LOG" || fail "cannot write $LOG"
 fi
-MODE=""
+MODE=" (from $ENGINE_SRC)"
 [ -n "$HOME_OVR" ] && MODE=" (sandbox)"
 [ -n "$DRY" ] && MODE="$MODE (dry run: nothing is written)"
 say "WhyNot Cut bootstrap: $CMD on $PLAT; engine home $ENGINE$MODE"
@@ -434,7 +541,7 @@ say "Python $PY_VER at $PY"
 # ------------------------------------------------------------------------------------------- the core
 set -- -I -B -X utf8 "$CORE" "$CMD" --plugin-root "$ROOT" --uv "$UV" --python "$PY"
 [ -n "$LOG" ] && set -- "$@" --log "$LOG"
-[ -n "$HOME_OVR" ] && set -- "$@" --home "$H"
+if [ -n "$HOME_OVR" ]; then set -- "$@" --home "$H"; else set -- "$@" --engine-home "$ENGINE"; fi
 [ -n "$COMPONENTS" ] && set -- "$@" --components "$COMP"
 [ -n "$DRY" ] && set -- "$@" --dry-run
 [ -n "$YES" ] && set -- "$@" --yes

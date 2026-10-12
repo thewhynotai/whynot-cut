@@ -23,6 +23,11 @@
 # core); 3 = a bootstrap step failed (download, sha256, uv, python), with a one-line message and the log path.
 # -DryRun: writes nothing (no log, no folder). Runs the core's dry run only when uv and Python are already there (or
 # WNC_TEST_UV is set); otherwise it names the steps that would follow.
+# Engine home (outside a sandbox): resolved exactly like the engine (Resolve-WncEngineHome: WHYNOT_HOME and the other
+# engine-home variables, else the plugin option engine_home from ~\.whynot-cut\plugin-options.json, else from
+# settings.json pluginConfigs, else ~\.whynot-cut) BEFORE anything is downloaded, so uv, Python, the log and every
+# later step land in that one folder; it is passed to the core as --engine-home, and the core stops with 2 if its own
+# resolution (wnc_installer.base.resolve_engine_home) disagrees.
 # Sandbox (-Home <dir>): HOME, USERPROFILE, APPDATA, LOCALAPPDATA, CLAUDE_CONFIG_DIR and WHYNOT_HOME point into <dir>
 # before anything is downloaded (as wnc_installer.base.Paths.child_env does), and --home is passed on. Only then is
 # the test hook WNC_TEST_UV honoured: a uv stand-in used for `python install/find` after the real archive was still
@@ -342,6 +347,101 @@ param(
         }
     }
 
+    function Read-WncJsonObject([string]$Path) {
+        # the file as a JSON object, read the way the engine reads it (json.loads of UTF-8 text: a BOM or invalid
+        # UTF-8 is not JSON); $null when it is missing, unreadable, not JSON or not an object
+        try {
+            if ((-not $Path) -or (-not [IO.File]::Exists($Path))) { return $null }
+            $bytes = [IO.File]::ReadAllBytes($Path)
+            if (($bytes.Length -ge 3) -and ($bytes[0] -eq 0xEF) -and ($bytes[1] -eq 0xBB) -and ($bytes[2] -eq 0xBF)) {
+                return $null
+            }
+            $text = (New-Object System.Text.UTF8Encoding -ArgumentList $false, $true).GetString($bytes)
+            if ($text.TrimStart([char[]]@(32, 9, 10, 13)) -notmatch '^\{') { return $null }
+            $obj = $text | ConvertFrom-Json
+            if ($obj -is [System.Management.Automation.PSCustomObject]) { return $obj }
+        } catch {
+            Write-Verbose "not a JSON object: $Path ($($_.Exception.Message))"
+        }
+        return $null
+    }
+
+    function Get-WncMember($Object, [string]$Name) {
+        # @{ Found; Value } of the member named exactly $Name (case-sensitive, like a Python dict key)
+        if ($Object -is [System.Management.Automation.PSCustomObject]) {
+            foreach ($p in $Object.PSObject.Properties) {
+                if ($p.Name -ceq $Name) { return @{ Found = $true; Value = $p.Value } }
+            }
+        }
+        return @{ Found = $false; Value = $null }
+    }
+
+    function ConvertTo-WncHomePath([string]$Value, [string]$UserHome, [bool]$Saved) {
+        # a configured path as the engine reads it: a saved plugin option goes through plat.native_path (a Git-Bash
+        # path /d/x is D:/x); then ~, ~/x and ~\x are under the user home
+        $v = $Value
+        if ($Saved -and ($v -match '^/([a-zA-Z])(/|$)')) {
+            $v = $Matches[1].ToUpperInvariant() + ':/' + $v.Substring([Math]::Min(3, $v.Length))
+        }
+        if (($v -eq '~') -or $v.StartsWith('~/') -or $v.StartsWith('~\')) { $v = $UserHome + $v.Substring(1) }
+        return $v
+    }
+
+    function Resolve-WncEngineHome([string]$UserHome) {
+        # outside a sandbox: the engine home exactly as the engine resolves it (engine\reel\lib\plat.py engine_home;
+        # the core's wnc_installer.base.resolve_engine_home is the same): the first variable that is set, else the
+        # plugin option engine_home from the pointer file (~\.whynot-cut\plugin-options.json or WHYNOT_OPTIONS_FILE,
+        # when it is a JSON object with an engine_home string; "" = not set), else from settings.json
+        # pluginConfigs (whynot-cut@thewhynot-ai, else the first other whynot-cut@* entry with options), else
+        # ~\.whynot-cut. @{ Path; Source }; Source is named like the core's (env:<NAME>, pointer:<file>,
+        # settings:<file> <key>, default). uv and Python are placed there, and the core checks it (--engine-home).
+        $names = @('WHYNOT_HOME', 'CLAUDE_PLUGIN_OPTION_ENGINE_HOME', 'REEL_HOME', 'CLAUDE_PLUGIN_OPTION_REEL_HOME',
+            'NH_ENV_DIR')
+        foreach ($n in $names) {
+            $v = [Environment]::GetEnvironmentVariable($n, 'Process')
+            if ($v) {
+                $p = ConvertTo-WncHomePath -Value $v -UserHome $UserHome -Saved $false
+                return @{ Path = $p; Source = "env:$n" }
+            }
+        }
+        $pointer = Join-Path $UserHome '.whynot-cut\plugin-options.json'
+        if ($env:WHYNOT_OPTIONS_FILE) {
+            $pointer = ConvertTo-WncHomePath -Value $env:WHYNOT_OPTIONS_FILE -UserHome $UserHome -Saved $false
+        }
+        $saved = ''
+        $source = 'default'
+        $m = Get-WncMember (Read-WncJsonObject $pointer) 'engine_home'
+        if ($m.Found -and ($m.Value -is [string])) {
+            $saved = $m.Value
+            $source = "pointer:$pointer"
+        } else {
+            $cfg = Join-Path $UserHome '.claude'
+            if ($env:CLAUDE_CONFIG_DIR) {
+                $cfg = ConvertTo-WncHomePath -Value $env:CLAUDE_CONFIG_DIR -UserHome $UserHome -Saved $false
+            }
+            $settings = Join-Path $cfg 'settings.json'
+            $configs = (Get-WncMember (Read-WncJsonObject $settings) 'pluginConfigs').Value
+            if ($configs -is [System.Management.Automation.PSCustomObject]) {
+                $ours = 'whynot-cut@thewhynot-ai'
+                $keys = @($ours) + @($configs.PSObject.Properties | ForEach-Object { $_.Name } |
+                        Where-Object { $_.StartsWith('whynot-cut@', [StringComparison]::Ordinal) -and ($_ -cne $ours) })
+                foreach ($k in $keys) {
+                    $opts = (Get-WncMember (Get-WncMember $configs $k).Value 'options').Value
+                    if ($opts -is [System.Management.Automation.PSCustomObject]) {
+                        $e = (Get-WncMember $opts 'engine_home').Value
+                        if ($e -is [string]) { $saved = $e }
+                        $source = "settings:$settings $k"
+                        break
+                    }
+                }
+            }
+        }
+        if ($saved) {
+            return @{ Path = (ConvertTo-WncHomePath -Value $saved -UserHome $UserHome -Saved $true); Source = $source }
+        }
+        return @{ Path = (Join-Path $UserHome '.whynot-cut'); Source = 'default' }
+    }
+
     function Initialize-WncBootstrap {
         # @{ Code; Run; Py; CoreArgs } - every check and download; the core itself runs outside, uncaptured
         $arch = $env:PROCESSOR_ARCHITEW6432
@@ -364,7 +464,8 @@ param(
         } else {
             $h = $env:USERPROFILE
             if (-not $h) { $h = $env:HOME }
-            if ($env:WHYNOT_HOME) { $engine = Get-WncFullPath $env:WHYNOT_HOME } else { $engine = Join-Path $h '.whynot-cut' }
+            $resolved = Resolve-WncEngineHome $h
+            $engine = Get-WncFullPath $resolved.Path
         }
         $testUv = $null
         if ($sandbox -and $env:WNC_TEST_UV) { $testUv = $env:WNC_TEST_UV }
@@ -400,8 +501,7 @@ param(
             $S.Log = Join-Path $logs ("{0}-{1}.log" -f $command, (Get-Date -Format 'yyyyMMdd-HHmmss'))
             [IO.File]::WriteAllText($S.Log, '', $S.Utf8)
         }
-        $mode = ''
-        if ($sandbox) { $mode = ' (sandbox)' }
+        if ($sandbox) { $mode = ' (sandbox)' } else { $mode = " (from $($resolved.Source))" }
         if ($DryRun) { $mode += ' (dry run: nothing is written)' }
         Write-WncLine "WhyNot Cut bootstrap: $command on win-x64; engine home $engine$mode"
 
@@ -460,7 +560,7 @@ param(
 
         $a = @('-I', '-B', '-X', 'utf8', $core, $command, '--plugin-root', $root, '--uv', $uv, '--python', $py)
         if ($S.Log) { $a += @('--log', $S.Log) }
-        if ($sandbox) { $a += @('--home', $h) }
+        if ($sandbox) { $a += @('--home', $h) } else { $a += @('--engine-home', $engine) }
         if ($Components) { $a += @('--components', $compPath) }
         if ($DryRun) { $a += '--dry-run' }
         if ($Yes) { $a += '--yes' }

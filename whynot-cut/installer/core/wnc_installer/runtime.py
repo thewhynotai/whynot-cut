@@ -93,23 +93,40 @@ def _smoke(ctx: base.Ctx, py: Path, modules: list) -> tuple:
 
 class BuildLock:
     """runtimes/.<id>.building, created with O_EXCL: the installer and `reel setup` (setup_env.BuildLock) never build
-    the same runtime at once. A lock older than BUILD_LOCK_STALE_S is a crashed run and is taken over."""
+    the same runtime at once. Both write the holder's process id first ("<pid> <time> installer" here, "<pid>" from
+    setup_env). The lock is stale, and taken over, when that process is no longer running (an installer window closed
+    during `pip sync`) or, as a backstop, when it is older than BUILD_LOCK_STALE_S (the pid may have been reused)."""
 
     def __init__(self, path: Path):
         self.path = path
         self.held = False
+        self.holder: Optional[int] = None  # pid in a lock held by someone else (after a refused acquire)
+        self.age_s: Optional[float] = None
+
+    @staticmethod
+    def owner(path: Path) -> Optional[int]:
+        """The pid at the start of the lock file; None when there is none (empty, being written, not a number)."""
+        try:
+            first = path.read_text(encoding="utf-8", errors="replace").split(None, 1)
+        except OSError:
+            return None
+        return int(first[0]) if first and first[0].isdigit() else None
 
     def acquire(self) -> bool:
-        """True when taken; False when another process holds a fresh lock."""
+        """True when taken; False when another running process holds it (self.holder / self.age_s say who and since
+        when)."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        for _ in range(2):
+        for _ in range(3):
             try:
                 fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
                 try:
-                    if time.time() - self.path.stat().st_mtime <= BUILD_LOCK_STALE_S:
+                    age = time.time() - self.path.stat().st_mtime
+                    pid = self.owner(self.path)
+                    if age <= BUILD_LOCK_STALE_S and (pid is None or base.pid_alive(pid)):
+                        self.holder, self.age_s = pid, max(0.0, age)
                         return False
-                    self.path.unlink()  # stale: a crashed run
+                    self.path.unlink()  # stale: its process is gone, or it is too old
                 except FileNotFoundError:
                     pass  # released meanwhile: try again
                 except OSError:
@@ -130,6 +147,11 @@ class BuildLock:
                 self.path.unlink()
             except OSError:
                 pass
+
+
+def _age(seconds: Optional[float]) -> str:
+    s = int(seconds or 0)
+    return f"{s} s" if s < 120 else f"{s // 60} min"
 
 
 def _base_python(ctx: base.Ctx, uv: list) -> tuple:
@@ -193,8 +215,11 @@ def step_runtime(ctx: base.Ctx) -> base.StepResult:
 
     build_lock = BuildLock(paths.runtimes_dir / f".{rid}.building")
     if not build_lock.acquire():
-        return base.StepResult("runtime", "amber", "another WhyNot Cut setup is building this runtime; run the "
-                                                   "installer again when it finishes")
+        who = f"process {build_lock.holder}" if build_lock.holder else "a process that is still starting"
+        return base.StepResult("runtime", "amber", f"another WhyNot Cut setup is building this runtime ({who}; lock "
+                                                   f"{build_lock.path}, {_age(build_lock.age_s)} old); run the "
+                                                   "installer again when it finishes",
+                               f"wait for the other setup to finish; if none is running, delete {build_lock.path}")
     try:
         return _build_in_place(ctx, rid, rdir, rel, lock, lock_sha, smoke)
     finally:

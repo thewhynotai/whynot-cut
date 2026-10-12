@@ -66,14 +66,16 @@ def claude_candidates(env: Mapping, home, platform: str, sandbox: bool) -> list:
     """Every Claude Code CLI on this machine, best first: the same order and rules as WhyNotCut/tools/find_claude.py
     (`candidates`; that file is not shipped, so its logic lives here too): $CLAUDE_CLI, `claude` on PATH, fixed npm /
     native install paths, then the CLIs bundled with the desktop app, newest version first. `platform` is sys.platform
-    style ("win32", "darwin") or ours ("win-x64", ...). In a sandbox only $WNC_CLAUDE_CLI / $CLAUDE_CLI and the bundles
-    under the (fake) home are searched: never PATH, AppData from the environment, or /usr/local."""
+    style ("win32", "darwin") or ours ("win-x64", ...). In a sandbox only $WNC_CLAUDE_CLI (the test switch) and the
+    bundles under the (fake) home are searched: never $CLAUDE_CLI (a developer's would lead to the real CLI and the
+    real ~/.claude), PATH, AppData from the environment, or /usr/local."""
     home = Path(home)
     win = _is_win(platform)
     exe = "claude.exe" if win else "claude"
     out = []
     if sandbox:
-        out += [Path(env[k]) for k in ("WNC_CLAUDE_CLI", "CLAUDE_CLI") if env.get(k)]
+        if env.get("WNC_CLAUDE_CLI"):
+            out.append(Path(env["WNC_CLAUDE_CLI"]))
         appdata = home / "AppData" / "Roaming"
     else:
         if env.get("CLAUDE_CLI"):

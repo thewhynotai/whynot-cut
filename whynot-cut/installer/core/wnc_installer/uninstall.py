@@ -12,7 +12,8 @@ adobe        a running Premiere Pro / After Effects: amber, nothing removed. Els
 fonts        only the files listed in state.fonts.installed that sit in the user font folder, and only the registry
              values listed in state.fonts.registry that still point at one of those files.
 marketplace  ~/.whynot-cut/marketplace (+ .new / .prev); a link (a development checkout) is left alone.
-engine       only with --remove-engine: every child of ~/.whynot-cut except models/ (unless --remove-models), plus
+engine       only with --remove-engine: every child of ~/.whynot-cut except models/ (unless --remove-models) and
+             library/ (the editor's licensed motion packs, engine motion_library.py: always kept), plus
              %LOCALAPPDATA%\\WhyNotCut\\git, then the settings env CLAUDE_CODE_GIT_BASH_PATH that points into it.
              python/ and bin/ (the interpreter running this code: Windows locks it) are listed in
              ~/.whynot-cut/.delete-after-exit, which the bootstrap deletes after this process exits (and the engine
@@ -37,6 +38,7 @@ from .system import PREFS, read_preferences, render_checklist
 
 DEFER_LIST = ".delete-after-exit"
 DEFERRED = ("python", "bin")  # the interpreter running this core, and uv: removed by the bootstrap after it exits
+KEPT = "library"  # <engine home>/library: licensed motion / illustration packs (engine motion_library.py); never ours
 _ENGINE_MARKS = ("state.json", "current", "bin/uv", "bin/uv.exe")  # only WhyNot Cut leaves these
 RETRY_SECTIONS = ("adobe", "fonts")  # what an earlier step may leave recorded for the next uninstall
 
@@ -396,6 +398,7 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
     if problem:
         return _done("engine", "red", [f"nothing was deleted: {problem}"])
     protected = _protected(ctx)
+    busy = _running_download(ctx)  # read now: state.json may be reduced below
     if not engine:  # --remove-models alone
         if not os.path.lexists(paths.models_dir):
             return _done("engine", "skipped", ["no Whisper models to delete"])
@@ -404,12 +407,15 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         removed, kept, failed = [], [], []
         _delete_child(ctx, paths.models_dir, protected, removed, kept, failed)
         status = "amber" if kept or failed else "ok"
-        return _done("engine", status, [f"deleted {paths.models_dir}" if removed else ""] +
-                     [f"kept {k}" for k in kept] + [f"could not delete {f}" for f in failed])
+        notes = [f"deleted {paths.models_dir}" if removed else ""] + [f"kept {k}" for k in kept] + [
+            f"could not delete {f}" for f in failed]
+        if failed and busy:
+            notes.append(busy)
+        return _done("engine", status, notes, _locked_hint(busy, "--remove-models") if failed and busy else None)
     keep_models = not models
     if _dry(ctx):
         return _done("engine", "skipped", [f"dry run: would delete everything in {paths.whynot}"
-                                           + (" except models/" if keep_models else "")
+                                           + (" except models/ and library/" if keep_models else " except library/")
                                            + f" and {claude.managed_git_dir(paths)}"])
     # what an earlier step could not remove (a running Adobe host, a font in use) stays recorded in a minimal
     # state.json, so the uninstall the editor is told to run again still knows about it
@@ -428,6 +434,9 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
             continue
         if name == "models" and keep_models:
             kept.append("models (the Whisper models; --remove-models deletes them)")
+            continue
+        if name == KEPT:
+            kept.append("library (your motion and illustration packs: never deleted by the uninstall)")
             continue
         if name == "state.json" and retry:
             continue
@@ -470,9 +479,27 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
                      + (", then the engine home itself" if not rest else ""))
     notes += [f"kept {k}" for k in kept] + [f"could not delete {f}" for f in failed]
     if failed:
-        return _done("engine", "amber", notes, "close Premiere Pro, After Effects and Claude, then run the uninstall "
-                                               "again with --remove-engine")
+        if busy:
+            notes.append(busy)
+        return _done("engine", "amber", notes, _locked_hint(busy, "--remove-engine"))
     return _done("engine", "ok", notes)
+
+
+def _running_download(ctx: base.Ctx) -> Optional[str]:
+    """A note naming the background Whisper model download (state.models) when its process is still running: it
+    holds files of the engine home open, the likely reason a delete failed. None when there is none."""
+    m = _section(ctx, "models")
+    if not base.pid_alive(m.get("pid")):
+        return None
+    return (f"the background model download (Whisper {m.get('model') or '?'}, process {m.get('pid')}, log "
+            f"{m.get('log') or '?'}) is still running and is the likely cause")
+
+
+def _locked_hint(busy: Optional[str], flag: str) -> str:
+    if busy:
+        return ("wait for the model download to finish (or end that process), close Premiere Pro, After Effects and "
+                f"Claude, then run the uninstall again with {flag}")
+    return f"close Premiere Pro, After Effects and Claude, then run the uninstall again with {flag}"
 
 
 def _drop_git_bash_key(ctx: base.Ctx, git: Path, kept: list, failed: list) -> None:

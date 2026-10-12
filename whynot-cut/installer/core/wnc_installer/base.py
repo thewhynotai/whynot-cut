@@ -90,6 +90,101 @@ def _abs(p) -> Path:
     return Path(os.path.abspath(os.path.expanduser(str(p))))
 
 
+# --------------------------------------------------------------------------------------------- engine home
+# The engine's own order (engine/reel/lib/plat.py engine_home + saved_options; mirrored, never imported): the first
+# set variable, else the saved plugin option (the pointer file when it is valid, else Claude Code's settings.json
+# pluginConfigs), else ~/.whynot-cut. The engine's legacy-home fallback (~/.reel-editor with a venv) is left out on
+# purpose: the installer writes `current` into ~/.whynot-cut, after which the engine picks that folder too.
+# bootstrap.ps1 (Resolve-WncEngineHome) and bootstrap.sh (resolve_engine_home) apply the same rules before uv and
+# Python are placed, and pass the folder as --engine-home; cli.main refuses to go on when the two disagree.
+ENGINE_HOME_ENV = ("WHYNOT_HOME", "CLAUDE_PLUGIN_OPTION_ENGINE_HOME", "REEL_HOME", "CLAUDE_PLUGIN_OPTION_REEL_HOME",
+                   "NH_ENV_DIR")
+PLUGIN_KEY = "whynot-cut@thewhynot-ai"  # Claude Code's key for the plugin in settings.json pluginConfigs
+OPTIONS_FILE = "plugin-options.json"  # <home>/.whynot-cut/plugin-options.json, written by the SessionStart hook
+_MSYS = re.compile(r"^/([a-zA-Z])(/|$)")
+
+
+def _tilde(v: str, home: Path) -> str:
+    """`~`, `~/x`, `~\\x` -> under `home` (the injected user home, not this process's); other text unchanged."""
+    if v == "~" or v.startswith(("~/", "~\\")):
+        return str(home) + v[1:]
+    return os.path.expanduser(v) if v.startswith("~") else v
+
+
+def _native(v: str, home: Path, windows: bool) -> str:
+    """plat.native_path for a saved value: on Windows a Git-Bash path /d/x -> D:/x; then `~` -> the user home."""
+    if windows and v:
+        m = _MSYS.match(v)
+        if m:
+            v = f"{m.group(1).upper()}:/{v[3:]}"
+    return _tilde(v, home)
+
+
+def _json_object(path: Path) -> Optional[dict]:
+    """The file as a JSON object, read like the engine reads it (UTF-8 without a BOM: a BOM is invalid); None when
+    missing, unreadable, not JSON or not an object."""
+    try:
+        v = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return v if isinstance(v, dict) else None
+
+
+def _settings_options(settings: Path) -> Optional[tuple]:
+    """(key, options) of settings.json pluginConfigs: whynot-cut@thewhynot-ai when it has an options object, else the
+    first other whynot-cut@* entry (file order) that has one; None when there is none."""
+    d = _json_object(settings)
+    configs = (d or {}).get("pluginConfigs") or {}
+    if not isinstance(configs, dict):
+        return None
+    keys = [PLUGIN_KEY] + [k for k in configs if isinstance(k, str) and k.startswith("whynot-cut@") and k != PLUGIN_KEY]
+    for k in keys:
+        c = configs.get(k)
+        if isinstance(c, dict) and isinstance(c.get("options"), dict):
+            return k, c["options"]
+    return None
+
+
+def resolve_engine_home(env: Mapping, home, *, windows: Optional[bool] = None) -> tuple:
+    """(engine home, source) outside a sandbox, the engine's way (see ENGINE_HOME_ENV above). `env` and the user `home`
+    are injected (tests never read this machine's). source: "env:<NAME>", "pointer:<file>", "settings:<file>
+    <pluginConfigs key>" or "default". The path is absolute (abspath; `~` is the user home)."""
+    home = Path(home)
+    windows = os.name == "nt" if windows is None else windows
+    for k in ENGINE_HOME_ENV:
+        if env.get(k):
+            return _abs(_tilde(env[k], home)), f"env:{k}"
+    pointer = Path(_tilde(env["WHYNOT_OPTIONS_FILE"], home)) if env.get("WHYNOT_OPTIONS_FILE") else \
+        home / ".whynot-cut" / OPTIONS_FILE
+    saved, source = "", "default"
+    p = _json_object(pointer)
+    if p is not None and isinstance(p.get("engine_home"), str):  # a valid pointer, "" = not set
+        saved, source = p["engine_home"], f"pointer:{_abs(pointer)}"
+    else:
+        cfg = Path(_tilde(env["CLAUDE_CONFIG_DIR"], home)) if env.get("CLAUDE_CONFIG_DIR") else home / ".claude"
+        found = _settings_options(cfg / "settings.json")
+        if found is not None:
+            key, opts = found
+            saved = opts.get("engine_home") if isinstance(opts.get("engine_home"), str) else ""
+            source = f"settings:{_abs(cfg / 'settings.json')} {key}"
+    if saved:
+        return _abs(_native(saved, home, windows)), source
+    return home / ".whynot-cut", "default"
+
+
+def describe_engine_home_source(source: str) -> str:
+    """The source of resolve_engine_home in words, for preflight and the log."""
+    kind, _, rest = (source or "").partition(":")
+    if kind == "env":
+        return f"{rest} is set"
+    if kind == "pointer":
+        return f"the plugin option engine_home in {rest}"
+    if kind == "settings":
+        f, _, key = rest.rpartition(" ")
+        return f"the plugin option engine_home in {f} (pluginConfigs {key})"
+    return {"sandbox": "sandbox", "default": "default"}.get(source, source or "default")
+
+
 @dataclass
 class Paths:
     """Every location the installer touches. A --home override is a sandbox: nothing outside that folder is used."""
@@ -99,21 +194,24 @@ class Paths:
     appdata: Path
     localappdata: Path
     sandbox: bool
+    engine_home_source: str = "default"  # resolve_engine_home's source; "sandbox" under --home
 
     @classmethod
     def from_env(cls, home_override: Optional[str] = None, env: Mapping = os.environ) -> "Paths":
         if home_override:
             home = _abs(home_override)
             return cls(home=home, whynot=home / ".whynot-cut", claude_dir=home / ".claude",
-                       appdata=home / "AppData" / "Roaming", localappdata=home / "AppData" / "Local", sandbox=True)
+                       appdata=home / "AppData" / "Roaming", localappdata=home / "AppData" / "Local", sandbox=True,
+                       engine_home_source="sandbox")
         order = ("USERPROFILE", "HOME") if os.name == "nt" else ("HOME", "USERPROFILE")
         raw = next((env[k] for k in order if env.get(k)), None)
         home = _abs(raw) if raw else Path.home()
-        whynot = _abs(env["WHYNOT_HOME"]) if env.get("WHYNOT_HOME") else home / ".whynot-cut"
+        whynot, source = resolve_engine_home(env, home)
         claude = _abs(env["CLAUDE_CONFIG_DIR"]) if env.get("CLAUDE_CONFIG_DIR") else home / ".claude"
         appdata = _abs(env["APPDATA"]) if env.get("APPDATA") else home / "AppData" / "Roaming"
         local = _abs(env["LOCALAPPDATA"]) if env.get("LOCALAPPDATA") else home / "AppData" / "Local"
-        return cls(home=home, whynot=whynot, claude_dir=claude, appdata=appdata, localappdata=local, sandbox=False)
+        return cls(home=home, whynot=whynot, claude_dir=claude, appdata=appdata, localappdata=local, sandbox=False,
+                   engine_home_source=source)
 
     # engine home layout (installer.md R.1)
     bin_dir = property(lambda s: s.whynot / "bin")
@@ -133,8 +231,12 @@ class Paths:
     sandbox_dir = property(lambda s: s.home / ".wnc-sandbox")
 
     def child_env(self, base_env: Optional[Mapping] = None) -> dict:
-        """Environment for every child process (uv, the runtime, claude, reel)."""
+        """Environment for every child process (uv, the runtime, claude, reel). PYTHONPATH / PYTHONHOME are dropped:
+        an editor's (or another tool's) value would put foreign packages, or another Python's stdlib, under the
+        runtime and the engine."""
         env = dict(os.environ if base_env is None else base_env)
+        for k in ("PYTHONPATH", "PYTHONHOME"):
+            env.pop(k, None)
         if self.sandbox:
             env.update(HOME=str(self.home), USERPROFILE=str(self.home), APPDATA=str(self.appdata),
                        LOCALAPPDATA=str(self.localappdata), CLAUDE_CONFIG_DIR=str(self.claude_dir))
@@ -382,6 +484,38 @@ class State:
         self.save()
 
 
+# --------------------------------------------------------------------------------------------- processes
+def pid_alive(pid) -> bool:
+    """Is this process id running? Read-only on every OS (never os.kill on Windows: it terminates the process).
+    A non-int or non-positive pid is False. Shared by the model step, the runtime build lock and uninstall."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.windll.kernel32
+            h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return False
+            try:
+                code = wintypes.DWORD()
+                return bool(k32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+            finally:
+                k32.CloseHandle(h)
+        except (OSError, AttributeError):
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 # --------------------------------------------------------------------------------------------- download
 class _Fatal(Exception):
     """A request another try cannot fix (HTTP 4xx): fail at once."""
@@ -391,9 +525,15 @@ class _CurlUnusable(OSError):
     """curl cannot do this request here (missing, TLS / certificate / revocation trouble, old build): use urllib."""
 
 
+class _CurlNoRoute(OSError):
+    """curl could not resolve the proxy / the host or could not connect (exit 5 / 6 / 7). On Windows that is often a
+    proxy curl does not know about: urllib reads the system (registry) proxy settings, so it gets one go."""
+
+
 # curl exit codes meaning "this curl cannot do it" rather than "the transfer broke": switch to urllib for good.
 # 1 protocol, 2 init, 4 feature not built in; 35 51 53 54 58 59 60 66 77 80 82 83 90 91 TLS and certificates.
 _CURL_UNUSABLE = {1, 2, 4, 35, 51, 53, 54, 58, 59, 60, 66, 77, 80, 82, 83, 90, 91}
+_CURL_NO_ROUTE = {5, 6, 7}  # could not resolve proxy, could not resolve host, failed to connect
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -435,6 +575,8 @@ def _fetch_curl(curl: str, url: str, part: Path, loopback: bool) -> None:
             raise _Fatal(f"HTTP {m.group(1)}")
     if r.returncode in _CURL_UNUSABLE:
         raise _CurlUnusable(msg)
+    if r.returncode in _CURL_NO_ROUTE:
+        raise _CurlNoRoute(msg)
     raise OSError(msg)
 
 
@@ -469,8 +611,9 @@ def download(url, sha256, dest_dir, log: Log, *, name: Optional[str] = None, ret
     completeness, verified, then renamed. Transfer errors (connection drop, short body, timeout, 5xx) are retried up to
     `retries` tries and the final failure says it was the transfer; HTTP 4xx fails at once. A complete file whose
     sha256 does not match is deleted and raises DownloadError (not retried: the pin or the server is wrong). curl goes
-    first; urllib takes over when curl is missing or cannot do the request (TLS, certificates). Placeholder pins are
-    refused before any request. http(s):// and file:// only."""
+    first; urllib takes over for good when curl is missing or cannot do the request (TLS, certificates), and for that
+    attempt when curl cannot reach the server (exit 5 / 6 / 7: urllib reads the system proxy settings). Placeholder pins
+    are refused before any request. http(s):// and file:// only."""
     if is_placeholder(url) or is_placeholder(sha256):
         raise DownloadError(f"not available in this build (placeholder pin): {url!r} sha256={sha256!r}")
     if not isinstance(sha256, str) or not _HEX64.match(sha256):
@@ -513,6 +656,10 @@ def download(url, sha256, dest_dir, log: Log, *, name: Optional[str] = None, ret
                 except _CurlUnusable as e:
                     log.warn(f"curl cannot do this here ({e}); using Python's downloader from now on")
                     curl = None
+                    _fetch_urllib(url, part, loopback)
+                except _CurlNoRoute as e:  # this attempt only: the next one tries curl again
+                    log.warn(f"curl could not reach the server ({e}); trying Python's downloader, which uses the "
+                             "system proxy settings")
                     _fetch_urllib(url, part, loopback)
             else:
                 _fetch_urllib(url, part, loopback)

@@ -71,7 +71,7 @@ and `x/whynot-cut-marketplace/whynot-cut` becomes the plugin folder.
 | `-Components <file>` | `--components <file>` | Use another `components.json` (tests, release checks). |
 | `-Skip a,b` | `--skip a,b` | Skip core steps by name: `preflight questions runtime ffmpeg gitbash gpu claude adobe fonts settings model state doctor launch`. |
 | `-Uninstall` | `--uninstall` | Remove WhyNot Cut for this user. |
-| `-RemoveEngine` | `--remove-engine` | With uninstall: also delete `~/.whynot-cut` (runtimes, ffmpeg, ...). |
+| `-RemoveEngine` | `--remove-engine` | With uninstall: also delete the engine home (runtimes, ffmpeg, ...). `models/` stays unless you add `-RemoveModels`; `library/` (your licensed motion and illustration packs) always stays. |
 | `-RemoveModels` | `--remove-models` | With uninstall: also delete the Whisper models (about 3 GB each). |
 | `-Source <zip\|url>` | `--source <zip\|url>` | One-line mode: the release zip to install from. |
 | `-SourceSha256 <hex>` | `--source-sha256 <hex>` | The sha256 of that zip. It is required with `-Source`. |
@@ -85,6 +85,27 @@ Exit codes:
 | 2 | Cannot start, for one of these reasons: wrong OS or CPU, Git Bash on Windows, no hosting yet, a bad option, an unreadable `components.json`, or too little free space. |
 | 3 | A download or a bootstrap step failed: uv, Python, or a sha256 mismatch. The message names the file and the log. |
 
+## Where the engine home is
+
+The engine home is the folder written `~/.whynot-cut` in this README. Outside a sandbox, the installer finds it exactly
+the way the engine does (`engine/reel/lib/plat.py`), in this order:
+
+1. the first of these variables that is set: `WHYNOT_HOME`, `CLAUDE_PLUGIN_OPTION_ENGINE_HOME`, `REEL_HOME`,
+   `CLAUDE_PLUGIN_OPTION_REEL_HOME`, `NH_ENV_DIR`;
+2. the plugin option `engine_home` saved in `~/.whynot-cut/plugin-options.json` (the file the plugin's SessionStart hook
+   writes; `WHYNOT_OPTIONS_FILE` moves it), when that file is a JSON object with an `engine_home` text (`""` means
+   "not set" and ends the search);
+3. otherwise the same option in Claude Code's `settings.json` (`~/.claude`, or `CLAUDE_CONFIG_DIR`), under
+   `pluginConfigs["whynot-cut@thewhynot-ai"].options`, else the first other `whynot-cut@...` entry with `options`;
+4. otherwise `~/.whynot-cut`.
+
+`~` in a saved value is your user folder; on Windows a Git Bash path such as `/d/WhyNot` means `D:/WhyNot`. The
+bootstrap works this out before it downloads anything, so uv, Python, the log and every step land in that one folder.
+It hands the folder to the core as `--engine-home`; the core works it out again and stops with exit code 2 if the two
+disagree. Preflight shows the folder and where it came from. The engine's old fallback to an earlier `~/.reel-editor`
+home is not used: after the install the engine finds the new `current` file and uses this folder too. A sandbox
+(`--home`) always uses `<dir>/.whynot-cut`.
+
 ## What happens
 
 1. **uv.** The pinned uv from `components.json` (`uv.assets.<platform>`) is downloaded into `~/.whynot-cut/downloads/`,
@@ -96,12 +117,24 @@ Exit codes:
    `uv python find` names the interpreter.
 3. **The core.** The bootstrap runs `<python> -I -B -X utf8 installer/core/wnc_install.py install ...`, which runs
    these steps:
-   - preflight, then the two questions (clients folder and language);
+   - preflight, then the two questions (clients folder and language). The suggested clients folder is
+     `D:\WhyNot Clients` when a `D:` drive exists, else `Documents/WhyNot Clients`; when Documents is synced to
+     OneDrive or iCloud Drive it is `~/WhyNot Clients` instead (raw footage should not go to the cloud), and the
+     question says why. A folder you saved in your preferences, or `--clients-folder`, always wins;
    - the runtime (from `setup/locks/`), ffmpeg, Git Bash (Windows), GPU libraries (NVIDIA);
    - the Claude Code plugin and settings, the Adobe panel, fonts, preferences;
    - the Whisper model download, which keeps going in the background;
    - `state.json`, `reel doctor`, and the checklist;
-   - opening Claude with `/whynot-cut:start`.
+   - opening Claude with `/whynot-cut:start`. On macOS the end of the install also says (in English and Arabic): the
+     first time Claude opens files in Documents or on an external drive, macOS asks for permission; click **Allow**.
+
+The runtime is built in place under the lock file `runtimes/.<id>.building`, which `reel setup` uses too. Both write
+their process id first. A lock whose process is no longer running (for example, the installer window was closed
+during `pip sync`) is taken over at once; a lock older than 2 hours is taken over too. Otherwise the step is amber
+and names the lock file and its age.
+
+Downloads use the system `curl` first. When curl cannot reach the server (exit 5, 6 or 7: proxy or host not found, no
+connection), that try is repeated with Python's own downloader, which reads the system proxy settings.
 
 ## What the installer never does
 
@@ -141,7 +174,7 @@ Python only when that Python is gone. It runs these steps in order:
 | `adobe` | The CEP panel folder the install recorded, and the UXP panel through Adobe's plugin installer (`/remove <id>`). If Premiere Pro or After Effects is running, nothing is removed; close them and run uninstall again. |
 | `fonts` | Only the font files the install recorded, and only their own registry values. A font you had before stays. |
 | `marketplace` | `~/.whynot-cut/marketplace` (and its `.new` / `.prev` copies). |
-| `engine` | Only with `-RemoveEngine` / `--remove-engine`: everything in `~/.whynot-cut` except `models/`, plus `%LOCALAPPDATA%\WhyNotCut\git` and then its Git Bash entry in `settings.json`. It refuses a folder that holds none of `state.json`, `current` or `bin/uv(.exe)`. If the `adobe` or `fonts` step could not remove something (a running Premiere Pro, a font in use), a small `state.json` keeps that record, so running uninstall again finishes it. With `-RemoveModels` / `--remove-models` the models go too. `-RemoveModels` on its own deletes only `models/`. |
+| `engine` | Only with `-RemoveEngine` / `--remove-engine`: everything in `~/.whynot-cut` except `models/` and `library/` (your licensed motion and illustration packs, always kept and reported), plus `%LOCALAPPDATA%\WhyNotCut\git` and then its Git Bash entry in `settings.json`. It refuses a folder that holds none of `state.json`, `current` or `bin/uv(.exe)`. If the `adobe` or `fonts` step could not remove something (a running Premiere Pro, a font in use), a small `state.json` keeps that record, so running uninstall again finishes it. With `-RemoveModels` / `--remove-models` the models go too. `-RemoveModels` on its own deletes only `models/`. If files are locked while the background Whisper model download is still running, the step says so and names its log. |
 
 Uninstall never touches:
 
