@@ -263,27 +263,30 @@ def font_install_hint() -> str:
 # scan. macOS: Spotlight (mdfind, by bundle id), then /Applications and ~/Applications. A "(Beta)" build is found but
 # never preferred to a release. The newest is picked deterministically: release before beta, then year, then version.
 # Overrides: WHYNOT_PREMIERE_APP, WHYNOT_AE_APP (the app: .app / .exe / its folder), WHYNOT_AERENDER (the executable);
-# a wrong one is Guidance naming the variable. The registry reader and the mdfind runner are injectable
-# (AdobeSources), so tests never read the real registry.
+# a wrong one is Guidance naming the variable. The registry reader, the file-version reader and the mdfind runner are
+# injectable (AdobeSources), so tests never read the real registry. `version` is the app's own (the exe's file version
+# on Windows, CFBundleShortVersionString on macOS). The registry KEY name is not a version (Photoshop 2026 is
+# "200.0", Premiere 26.5 is "26.0"), so it is kept apart as `reg_version` and only ranks an install whose file
+# version cannot be read; `version` is then None (unknown), never a wrong number.
 _ADOBE = {
     # key: label, folder prefix, Windows exe relative to the app folder, mdfind bundle ids, HKLM keys, App Paths exe,
-    # override variable
+    # override variable, year_base (marketing year = base + major version: Premiere 26.5 = 2026, Photoshop 27 = 2026)
     "premiere": dict(label="Premiere Pro", prefix="Adobe Premiere Pro", win_exe="Adobe Premiere Pro.exe",
                      mac_ids=("com.adobe.PremierePro*",),
                      reg=("SOFTWARE\\Adobe\\Premiere Pro", "SOFTWARE\\Adobe\\Adobe Premiere Pro"),
-                     app_path="Adobe Premiere Pro.exe", override="WHYNOT_PREMIERE_APP"),
+                     app_path="Adobe Premiere Pro.exe", override="WHYNOT_PREMIERE_APP", year_base=2000),
     "after_effects": dict(label="After Effects", prefix="Adobe After Effects", win_exe="Support Files/AfterFX.exe",
                           mac_ids=("com.adobe.AfterEffects*",),
                           reg=("SOFTWARE\\Adobe\\After Effects", "SOFTWARE\\Adobe\\Adobe After Effects"),
-                          app_path="AfterFX.exe", override="WHYNOT_AE_APP"),
+                          app_path="AfterFX.exe", override="WHYNOT_AE_APP", year_base=2000),
     "photoshop": dict(label="Photoshop", prefix="Adobe Photoshop", win_exe="Photoshop.exe",
                       mac_ids=("com.adobe.Photoshop*",),
                       reg=("SOFTWARE\\Adobe\\Photoshop", "SOFTWARE\\Adobe\\Adobe Photoshop"),
-                      app_path="Photoshop.exe", override=None),
+                      app_path="Photoshop.exe", override=None, year_base=1999),
     "media_encoder": dict(label="Media Encoder", prefix="Adobe Media Encoder", win_exe="Adobe Media Encoder.exe",
                           mac_ids=("com.adobe.ame.application*",),
                           reg=("SOFTWARE\\Adobe\\Adobe Media Encoder", "SOFTWARE\\Adobe\\Media Encoder"),
-                          app_path="Adobe Media Encoder.exe", override=None),
+                          app_path="Adobe Media Encoder.exe", override=None, year_base=2000),
 }
 AERENDER_ENV = "WHYNOT_AERENDER"
 APP_PATHS_KEY = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\"
@@ -365,19 +368,93 @@ class WinRegistry:
         return out
 
 
+def _fmt_version(parts) -> str | None:
+    """(26, 5, 2, 5) -> "26.5.2.5"; trailing zero parts go ("26.5.0.0" -> "26.5"); all zero -> None."""
+    parts = [int(x) for x in parts]
+    while len(parts) > 2 and parts[-1] == 0:
+        parts.pop()
+    return ".".join(map(str, parts)) if any(parts) else None
+
+
+def _win_file_version(path) -> str | None:
+    """The exe's own version (VS_FIXEDFILEINFO: the file version, else the product version when that one is empty),
+    read through version.dll. None when the file has no version resource or this is not Windows. Never raises."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        dll = ctypes.WinDLL("version", use_last_error=True)
+        dll.GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+        dll.GetFileVersionInfoSizeW.restype = wintypes.DWORD
+        dll.GetFileVersionInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+        dll.GetFileVersionInfoW.restype = wintypes.BOOL
+        dll.VerQueryValueW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_void_p),
+                                       ctypes.POINTER(wintypes.UINT)]
+        dll.VerQueryValueW.restype = wintypes.BOOL
+        size = dll.GetFileVersionInfoSizeW(str(path), None)
+        if not size:
+            return None
+        buf = ctypes.create_string_buffer(size)
+        if not dll.GetFileVersionInfoW(str(path), 0, size, buf):
+            return None
+        ptr, length = ctypes.c_void_p(), wintypes.UINT()
+        if not dll.VerQueryValueW(buf, "\\", ctypes.byref(ptr), ctypes.byref(length)) or length.value < 24:
+            return None
+
+        class _Fixed(ctypes.Structure):
+            _fields_ = [(n, wintypes.DWORD) for n in ("sig", "struc", "fvms", "fvls", "pvms", "pvls")]
+        fi = ctypes.cast(ptr, ctypes.POINTER(_Fixed)).contents
+        if fi.sig != 0xFEEF04BD:
+            return None
+        for ms, ls in ((fi.fvms, fi.fvls), (fi.pvms, fi.pvls)):
+            v = _fmt_version((ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF))
+            if v:
+                return v
+    except Exception:  # noqa: BLE001  (no dll, odd file, locked: the version is only for ranking and the report)
+        pass
+    return None
+
+
+_MDFIND_TTL = 30.0
+_MDFIND_CACHE: dict[str, tuple[float, list[str]]] = {}
+
+
 def _run_mdfind(query: str) -> list[str]:
-    r = subprocess.run(["mdfind", query], capture_output=True, text=True, timeout=15)
-    return r.stdout.splitlines()
+    """Spotlight, cached for 30 s per process: doctor / setup / discover ask for several apps in one command, and a
+    stalled Spotlight would otherwise cost 15 s every time."""
+    import time
+    hit = _MDFIND_CACHE.get(query)
+    if hit and time.monotonic() - hit[0] < _MDFIND_TTL:
+        return list(hit[1])
+    try:
+        r = subprocess.run(["mdfind", query], capture_output=True, text=True, timeout=15)
+        lines = r.stdout.splitlines()
+    except (OSError, subprocess.SubprocessError):
+        lines = []                                    # a failure is cached too: no second 15 s wait
+    _MDFIND_CACHE[query] = (time.monotonic(), lines)
+    return list(lines)
 
 
 class AdobeSources:
     """Where discovery looks. Each part defaults to the real machine, read when asked (never at import); tests pass
     fakes: env (a mapping), registry (.subkeys(path) / .values(path)), mdfind (query -> [paths]), os_name
-    ("windows" | "macos" | "linux"), program_dirs, mac_app_dirs."""
+    ("windows" | "macos" | "linux"), program_dirs, mac_app_dirs, file_version (exe path -> "26.5.2.5" | None)."""
 
-    def __init__(self, env=None, registry=None, mdfind=None, os_name=None, program_dirs=None, mac_app_dirs=None):
+    def __init__(self, env=None, registry=None, mdfind=None, os_name=None, program_dirs=None, mac_app_dirs=None,
+                 file_version=None):
         self._env, self._registry, self._mdfind, self._os = env, registry, mdfind, os_name
         self._program_dirs, self._mac_app_dirs = program_dirs, mac_app_dirs
+        self._file_version = file_version
+
+    def file_version(self, exe) -> str | None:
+        """The exe's own version (Windows). None when it cannot be read; never raises."""
+        try:
+            if self._file_version is not None:
+                v = self._file_version(str(exe))
+            else:
+                v = _win_file_version(exe) if self.os_name == "windows" and IS_WIN else None
+            return str(v) if v else None
+        except Exception:  # noqa: BLE001
+            return None
 
     @property
     def env(self):
@@ -408,9 +485,9 @@ class AdobeSources:
             return []
 
 
-def _app_record(key: str, name: str, folder, exe, source: str, version=None) -> dict:
+def _app_record(key: str, name: str, folder, exe, source: str, version=None, reg_version=None) -> dict:
     return {"key": key, "name": name, "year": _year(name) or _year(Path(folder).name), "version": version,
-            "beta": "beta" in name.lower() or "beta" in Path(folder).name.lower(),
+            "reg_version": reg_version, "beta": "beta" in name.lower() or "beta" in Path(folder).name.lower(),
             "folder": str(folder), "exe": str(exe), "source": source, "sources": [source]}
 
 
@@ -438,7 +515,7 @@ def _win_candidates(key: str, src: AdobeSources) -> list[dict]:
             for name in _REG_FOLDER_VALUES:
                 hit = _win_app_at(key, vals[name]) if vals.get(name) else None
                 if hit:
-                    out.append(_app_record(key, hit[0].name, hit[0], hit[1], "registry", ver))
+                    out.append(_app_record(key, hit[0].name, hit[0], hit[1], "registry", reg_version=ver))
                     break
     vals = reg.values(APP_PATHS_KEY + spec["app_path"])
     for raw in (vals.get(""), vals.get("Path")):
@@ -511,6 +588,9 @@ def _override_app(key: str, src: AdobeSources) -> dict | None:
         return _mac_record(key, apps[-1], "override")
     hit = _win_app_at(key, p)
     if p.is_file():
+        want = Path(spec["win_exe"]).name
+        if p.name.lower() != want.lower():                       # notepad.exe, or aerender.exe given as After Effects
+            raise _guidance(f"{var} is set to {raw}, but that file is not Adobe {spec['label']}'s {want}.", how, var)
         folder, exe = hit if hit and hit[1] == p else (p.parent, p)
     elif hit:
         folder, exe = hit
@@ -530,13 +610,26 @@ def _merge(found: list[dict]) -> list[dict]:
             continue
         if rec["source"] not in cur["sources"]:
             cur["sources"].append(rec["source"])
-        if not cur["version"] and rec["version"]:
-            cur["version"] = rec["version"]
+        for f in ("version", "reg_version"):
+            if not cur[f] and rec[f]:
+                cur[f] = rec[f]
     return list(by.values())
 
 
+def _finish(rec: dict, src: AdobeSources) -> dict:
+    """Windows: the real version from the exe. Then the year when the folder name has none (a custom folder): the
+    marketing year follows the major version, so a newer app in D:/PPro still beats an older stock install."""
+    if src.os_name == "windows":
+        rec["version"] = src.file_version(rec["exe"])
+    if not rec["year"]:
+        major = (_vtuple(rec["version"] or rec["reg_version"]) or (0,))[0]
+        if 20 <= major <= 39:
+            rec["year"] = _ADOBE[rec["key"]]["year_base"] + major
+    return rec
+
+
 def _rank(a: dict) -> tuple:
-    return (not a["beta"], a["year"], _vtuple(a["version"]), a["exe"].lower())
+    return (not a["beta"], a["year"], _vtuple(a["version"] or a["reg_version"]), a["exe"].lower())
 
 
 def find_adobe_apps(key: str | None = None, sources: AdobeSources | None = None) -> list[dict]:
@@ -549,8 +642,9 @@ def find_adobe_apps(key: str | None = None, sources: AdobeSources | None = None)
         over = _override_app(k, src)
         cands = (_win_candidates(k, src) if src.os_name == "windows" else
                  _mac_candidates(k, src) if src.os_name == "macos" else [])
-        apps = sorted(_merge(cands), key=_rank, reverse=True)
+        apps = sorted((_finish(a, src) for a in _merge(cands)), key=_rank, reverse=True)
         if over:
+            over = _finish(over, src)
             same = os.path.normcase(os.path.normpath(over["exe"]))
             apps = [over] + [a for a in apps if os.path.normcase(os.path.normpath(a["exe"])) != same]
         found += apps
@@ -568,10 +662,15 @@ def aerender_info(sources: AdobeSources | None = None) -> dict | None:
     src = sources or AdobeSources()
     raw = str(src.env.get(AERENDER_ENV) or "").strip().strip('"')
     if raw:
-        if not Path(raw).expanduser().is_file():
-            raise _guidance(f"{AERENDER_ENV} is set to {raw}, but that is not a file.",
-                            f"Set {AERENDER_ENV} to aerender (aerender.exe on Windows, in the After Effects folder), or "
-                            "remove the variable and WhyNot Cut finds it beside After Effects.", AERENDER_ENV)
+        how = (f"Set {AERENDER_ENV} to aerender (aerender.exe on Windows, in the After Effects folder), or "
+               "remove the variable and WhyNot Cut finds it beside After Effects.")
+        p = Path(raw).expanduser()
+        if not p.is_file():
+            raise _guidance(f"{AERENDER_ENV} is set to {raw}, but that is not a file.", how, AERENDER_ENV)
+        want = "aerender.exe" if src.os_name == "windows" else "aerender"
+        if p.name.lower() != want:
+            raise _guidance(f"{AERENDER_ENV} is set to {raw}, but that file is not After Effects' {want}.", how,
+                            AERENDER_ENV)
         return {"path": str(Path(raw).expanduser()), "source": "override"}
     for ae in find_adobe_apps("after_effects", src):
         cand = (Path(ae["folder"]) / "aerender") if src.os_name == "macos" else Path(ae["exe"]).parent / "aerender.exe"
@@ -586,20 +685,24 @@ def aerender_path(sources: AdobeSources | None = None) -> Path | None:
 
 
 def adobe_report(sources: AdobeSources | None = None) -> dict:
-    """What `reel doctor` shows; never raises on a bad override. found[key] = the newest install {name, version, year,
+    """What `reel doctor` shows; never raises (a bad override or a failing lookup becomes a problem). found[key] = the newest install {name, version, year,
     path, folder, source, sources, beta, others} or None; names[key] = its name; all = every install found;
-    aerender = {path, source} or None; problems = [{error, how}] for override variables that point nowhere."""
+    aerender = {path, source} or None; problems = [{error, how}] for override variables that point nowhere
+    or a lookup that failed."""
     src = sources or AdobeSources()
     rep = {"found": {}, "names": {}, "all": [], "aerender": None, "problems": []}
 
     def attempt(fn):
         try:
             return fn()
-        except Exception as e:  # noqa: BLE001  (Guidance, whichever way errors was imported)
-            if not hasattr(e, "how"):
-                raise
-            if not any(x["error"] == e.error for x in rep["problems"]):
-                rep["problems"].append({"error": e.error, "how": e.how})
+        except Exception as e:  # noqa: BLE001  (doctor is the diagnostic that must survive: nothing escapes)
+            if hasattr(e, "how") and hasattr(e, "error"):                      # Guidance, whichever way errors was imported
+                err, how = e.error, e.how
+            else:
+                err = f"Adobe app lookup failed: {type(e).__name__}: {e}"
+                how = "run reel doctor again; if it repeats, send this report to the WhyNot Cut team"
+            if not any(x["error"] == err for x in rep["problems"]):
+                rep["problems"].append({"error": err, "how": how})
             return None
     for k in sorted(_ADOBE):
         apps = attempt(lambda k=k: find_adobe_apps(k, src)) or []

@@ -215,10 +215,12 @@ def doctor() -> dict:
                       "who": "editor decides", "optional": True,
                       "fix": "with the editor's OK: reel gpu-enable   (~550 MB from PyPI; transcription and the "
                              "no-speech-cut check run about 5-10x faster). Everything works without it, just slower."})
+    prem_var_bad = any("WHYNOT_PREMIERE_APP" in pr["error"] for pr in found["problems"])
     if not apps["premiere"]:
-        fixes.append({"item": "Adobe Premiere Pro", "who": "editor",
-                      "fix": "install Premiere Pro (2022 or newer) from Creative Cloud; until then WhyNot Cut builds "
-                             "an importable XML and a preview MP4"})
+        if not prem_var_bad:        # a bad WHYNOT_PREMIERE_APP hides a real install: the variable fix below is the fix
+            fixes.append({"item": "Adobe Premiere Pro", "who": "editor",
+                          "fix": "install Premiere Pro (2022 or newer) from Creative Cloud; until then WhyNot Cut "
+                                 "builds an importable XML and a preview MP4"})
         if apps["after_effects"] and not br["installed"]:      # T2.11: the same bundle serves After Effects
             fixes.append({"item": "WhyNot Cut Bridge (After Effects)", "who": "claude",
                           "fix": "reel setup   (installs the bridge panel; After Effects uses it too)"})

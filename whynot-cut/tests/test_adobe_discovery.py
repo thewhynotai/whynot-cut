@@ -49,9 +49,14 @@ def touch(p: Path) -> Path:
     return p
 
 
-def win_sources(env=None, registry=None, program_dirs=()):
+def win_sources(env=None, registry=None, program_dirs=(), file_version=None):
+    """file_version: exe path -> version (a dict keyed by the exe's file name, or a callable); default: unreadable."""
+    if isinstance(file_version, dict):
+        table = file_version
+        file_version = lambda p: table.get(Path(p).name)                      # noqa: E731
     return plat.AdobeSources(env=env or {}, registry=registry or FakeRegistry(), os_name="windows",
-                             program_dirs=list(program_dirs), mdfind=None, mac_app_dirs=[])
+                             program_dirs=list(program_dirs), mdfind=None, mac_app_dirs=[],
+                             file_version=file_version or (lambda p: None))
 
 
 def mac_sources(app_dirs, mdfind, env=None):
@@ -92,11 +97,11 @@ class WindowsRegistry(WindowsLayout):
                 "PluginInstallPath": str(app / "Plug-ins" / "Common"),
                 "CommonPluginInstallPath": str(self.pf / "Adobe" / "Common" / "Plug-ins" / "7.0" / "MediaCore")},
             "SOFTWARE\\Adobe\\Premiere Pro\\CurrentVersion": {"": "26.0"}})
-        a = plat.newest_app("premiere", win_sources(registry=reg))
+        a = plat.newest_app("premiere", win_sources(registry=reg, file_version={"Adobe Premiere Pro.exe": "26.5.2.5"}))
         self.assertEqual(Path(a["exe"]), exe)
         self.assertEqual(Path(a["folder"]), app)
         self.assertEqual((a["source"], a["version"], a["year"], a["name"]),
-                         ("registry", "26.0", 2026, "Adobe Premiere Pro 2026"))
+                         ("registry", "26.5.2.5", 2026, "Adobe Premiere Pro 2026"))
 
     def test_after_effects_install_path_is_the_support_files_folder(self):
         exe = self.ae()
@@ -162,7 +167,7 @@ class WindowsAppPathsAndScan(WindowsLayout):
         self.assertEqual(len(apps), 1)
         self.assertEqual(apps[0]["source"], "registry")
         self.assertEqual(apps[0]["sources"], ["registry", "app-paths", "scan"])
-        self.assertEqual(apps[0]["version"], "26.0")
+        self.assertEqual(apps[0]["reg_version"], "26.0")
 
     def test_a_beta_build_is_never_preferred_to_a_release_but_found_when_alone(self):
         beta = self.adobe("Adobe Premiere Pro (Beta)", "Adobe Premiere Pro.exe")
@@ -388,10 +393,11 @@ class Report(WindowsLayout):
     def test_report_lists_version_path_source_and_names(self):
         exe, ae = self.premiere(), self.ae()
         reg = FakeRegistry({"SOFTWARE\\Adobe\\Premiere Pro\\26.0": {"InstallPath": str(exe.parent)}})
-        rep = plat.adobe_report(win_sources(registry=reg, program_dirs=[self.pf]))
+        rep = plat.adobe_report(win_sources(registry=reg, program_dirs=[self.pf],
+                                            file_version={"Adobe Premiere Pro.exe": "26.5.2.5"}))
         p = rep["found"]["premiere"]
         self.assertEqual((p["name"], p["version"], Path(p["path"]), p["source"]),
-                         ("Adobe Premiere Pro 2026", "26.0", exe, "registry"))
+                         ("Adobe Premiere Pro 2026", "26.5.2.5", exe, "registry"))
         self.assertEqual(rep["found"]["after_effects"]["source"], "scan")
         self.assertIsNone(rep["found"]["photoshop"])
         self.assertEqual(rep["names"]["premiere"], "Adobe Premiere Pro 2026")
@@ -414,6 +420,269 @@ class Report(WindowsLayout):
         self.assertTrue(all(p["how"] for p in rep["problems"]))
 
 
+class RealVersion(WindowsLayout):
+    """3.0 T2.11 fix 1 (I1): the version is the app's own (the exe's file version), never the registry key name."""
+
+    def test_the_exe_file_version_is_reported_and_the_registry_key_name_never_is(self):
+        pre, ae, ps = self.premiere(), self.ae(), self.photoshop()
+        self.adobe("Adobe Media Encoder 2026", "Adobe Media Encoder.exe")
+        reg = FakeRegistry({
+            "SOFTWARE\\Adobe\\Premiere Pro\\26.0": {"InstallPath": str(pre.parent)},
+            "SOFTWARE\\Adobe\\After Effects\\26.0": {"InstallPath": str(ae.parent)},
+            "SOFTWARE\\Adobe\\Photoshop\\200.0": {"ApplicationPath": str(ps.parent) + "\\"}})
+        fv = {"Adobe Premiere Pro.exe": "26.5.2.5", "AfterFX.exe": "26.5.0.89", "Photoshop.exe": "27.11.0.26",
+              "Adobe Media Encoder.exe": "26.5.2.2"}
+        src = win_sources(registry=reg, program_dirs=[self.pf], file_version=fv)
+        got = {a["key"]: a["version"] for a in plat.find_adobe_apps(None, src)}
+        self.assertEqual(got, {"premiere": "26.5.2.5", "after_effects": "26.5.0.89", "photoshop": "27.11.0.26",
+                               "media_encoder": "26.5.2.2"})
+        self.assertNotIn("200.0", got.values())
+        self.assertEqual(plat.newest_app("photoshop", src)["reg_version"], "200.0")        # kept apart, for ranking
+        rep = plat.adobe_report(src)
+        self.assertEqual(rep["found"]["photoshop"]["version"], "27.11.0.26")
+        self.assertEqual(rep["found"]["media_encoder"]["version"], "26.5.2.2")             # found by scan only
+
+    def test_a_consumer_can_compare_the_real_version(self):
+        exe = self.premiere()
+        reg = FakeRegistry({"SOFTWARE\\Adobe\\Premiere Pro\\26.0": {"InstallPath": str(exe.parent)}})
+        a = plat.newest_app("premiere", win_sources(registry=reg, file_version={"Adobe Premiere Pro.exe": "26.5.2.5"}))
+        self.assertGreaterEqual(plat._vtuple(a["version"]), (26, 5))          # the registry key "26.0" would say CEP
+
+    def test_unreadable_file_version_gives_none_and_the_registry_key_only_ranks(self):
+        old = touch(self.tmp / "tools" / "A" / "Adobe Premiere Pro.exe")
+        new = touch(self.tmp / "tools" / "B" / "Adobe Premiere Pro.exe")
+        reg = FakeRegistry({"SOFTWARE\\Adobe\\Premiere Pro\\25.6": {"InstallPath": str(old.parent)},
+                            "SOFTWARE\\Adobe\\Premiere Pro\\26.0": {"InstallPath": str(new.parent)}})
+        apps = plat.find_adobe_apps("premiere", win_sources(registry=reg))
+        self.assertEqual([Path(a["exe"]) for a in apps], [new, old])
+        self.assertEqual([(a["version"], a["reg_version"]) for a in apps], [(None, "26.0"), (None, "25.6")])
+
+    def test_a_failing_reader_is_none_not_a_crash(self):
+        self.premiere()
+
+        def boom(path):
+            raise OSError("locked")
+        a = plat.newest_app("premiere", win_sources(program_dirs=[self.pf], file_version=boom))
+        self.assertIsNone(a["version"])
+        self.assertEqual(a["source"], "scan")
+
+    def test_override_installs_get_their_version_too(self):
+        exe = self.premiere(2024)
+        src = win_sources(env={"WHYNOT_PREMIERE_APP": str(exe.parent)},
+                          file_version={"Adobe Premiere Pro.exe": "24.6.1.3"})
+        self.assertEqual(plat.newest_app("premiere", src)["version"], "24.6.1.3")
+
+    def test_version_formatting_drops_trailing_zero_parts(self):
+        self.assertEqual(plat._fmt_version((26, 5, 2, 5)), "26.5.2.5")
+        self.assertEqual(plat._fmt_version((26, 5, 0, 89)), "26.5.0.89")
+        self.assertEqual(plat._fmt_version((26, 5, 0, 0)), "26.5")
+        self.assertEqual(plat._fmt_version((26, 0, 0, 0)), "26.0")
+        self.assertIsNone(plat._fmt_version((0, 0, 0, 0)))
+
+    def test_the_real_reader_reads_a_real_exe_and_survives_nonsense(self):
+        self.assertIsNone(plat._win_file_version(self.tmp / "nope.exe"))
+        junk = touch(self.tmp / "junk.exe")                                   # no version resource
+        self.assertIsNone(plat._win_file_version(junk))
+        if plat.IS_WIN:
+            v = plat._win_file_version(sys.executable)                        # python.exe carries its own version
+            self.assertRegex(v or "", r"^\d+\.\d+")
+            self.assertEqual(plat._vtuple(v)[0], sys.version_info[0])
+        src = plat.AdobeSources(env={}, registry=FakeRegistry(), os_name="macos")      # not Windows: never reads
+        self.assertIsNone(src.file_version(junk))
+
+
+class RankingByVersion(WindowsLayout):
+    """M1: a custom-folder install (no year in the name) is ranked by its version, not as year 0."""
+
+    def custom(self, name):
+        return touch(self.tmp / "tools" / name / "Adobe Premiere Pro.exe")
+
+    def test_a_newer_custom_folder_install_beats_an_older_stock_one(self):
+        stock = self.premiere(2025)
+        mine = self.custom("PPro")
+        reg = FakeRegistry({"SOFTWARE\\Adobe\\Premiere Pro\\26.0": {"InstallPath": str(mine.parent)}})
+        for fv in ({"Adobe Premiere Pro.exe": "26.5.2.5"}, None):              # readable, and registry key only
+            with self.subTest(file_version=fv):
+                src = win_sources(registry=reg, program_dirs=[self.pf], file_version=fv)
+                apps = plat.find_adobe_apps("premiere", src)
+                self.assertEqual([Path(a["exe"]) for a in apps], [mine, stock])
+                self.assertEqual(apps[0]["year"], 2026)
+
+    def test_an_older_custom_folder_install_does_not_beat_a_newer_stock_one(self):
+        stock = self.premiere(2026)
+        mine = self.custom("OldPPro")
+        reg = FakeRegistry({"SOFTWARE\\Adobe\\Premiere Pro\\25.6": {"InstallPath": str(mine.parent)}})
+        src = win_sources(registry=reg, program_dirs=[self.pf], file_version={"Adobe Premiere Pro.exe": "25.6.0.1"})
+        self.assertEqual(Path(plat.newest_app("premiere", src)["exe"]), stock)
+
+    def test_photoshop_year_follows_its_own_version_numbering(self):
+        ps = touch(self.tmp / "tools" / "PS" / "Photoshop.exe")
+        reg = FakeRegistry({"SOFTWARE\\Adobe\\Photoshop\\200.0": {"ApplicationPath": str(ps.parent) + "\\"}})
+        a = plat.newest_app("photoshop", win_sources(registry=reg, file_version={"Photoshop.exe": "27.11.0.26"}))
+        self.assertEqual(a["year"], 2026)                                     # Photoshop 27 = 2026; "200.0" is no year
+        b = plat.newest_app("photoshop", win_sources(registry=reg))
+        self.assertEqual(b["year"], 0)
+
+
+class OverrideNames(WindowsLayout):
+    """I2: an override that is a FILE must be the app's own exe (case-insensitive), else Guidance naming the variable."""
+
+    def test_other_exes_are_refused_for_premiere_and_after_effects(self):
+        notepad = touch(self.tmp / "Windows" / "notepad.exe")
+        aer = self.ae().parent / "aerender.exe"
+        cases = (("WHYNOT_PREMIERE_APP", "premiere", notepad), ("WHYNOT_AE_APP", "after_effects", notepad),
+                 ("WHYNOT_AE_APP", "after_effects", aer))
+        for var, key, exe in cases:
+            with self.subTest(var=var, exe=exe.name):
+                with self.assertRaises(Guidance) as cm:
+                    plat.newest_app(key, win_sources(env={var: str(exe)}, program_dirs=[self.pf]))
+                self.assertIn(var, cm.exception.error)
+                self.assertIn(exe.name, cm.exception.error)
+                self.assertIn(var, cm.exception.how)
+
+    def test_the_right_exe_is_accepted_whatever_its_case(self):
+        mine = touch(self.tmp / "p" / "ADOBE PREMIERE PRO.EXE")
+        a = plat.newest_app("premiere", win_sources(env={"WHYNOT_PREMIERE_APP": str(mine)}))
+        self.assertEqual((Path(a["exe"]), a["source"]), (mine, "override"))
+        fx = touch(self.tmp / "ae" / "Support Files" / "afterfx.exe")
+        a = plat.newest_app("after_effects", win_sources(env={"WHYNOT_AE_APP": str(fx)}))
+        self.assertEqual(Path(a["exe"]), fx)
+
+    def test_aerender_override_must_be_aerender(self):
+        notepad = touch(self.tmp / "Windows" / "notepad.exe")
+        with self.assertRaises(Guidance) as cm:
+            plat.aerender_path(win_sources(env={"WHYNOT_AERENDER": str(notepad)}))
+        self.assertIn("WHYNOT_AERENDER", cm.exception.error)
+        self.assertIn("aerender.exe", cm.exception.error)
+        upper = touch(self.tmp / "x" / "AERENDER.EXE")
+        self.assertEqual(plat.aerender_path(win_sources(env={"WHYNOT_AERENDER": str(upper)})), upper)
+
+    def test_the_report_turns_a_wrong_exe_into_a_problem(self):
+        notepad = touch(self.tmp / "Windows" / "notepad.exe")
+        rep = plat.adobe_report(win_sources(env={"WHYNOT_AE_APP": str(notepad)}, program_dirs=[self.pf]))
+        self.assertIsNone(rep["found"]["after_effects"])
+        self.assertIn("WHYNOT_AE_APP", rep["problems"][0]["error"])
+
+
+class RaisingLookup(WindowsLayout):
+    """M2: doctor is the diagnostic that must survive: any failure becomes a problem, nothing escapes."""
+
+    def test_report_records_a_crashing_lookup_as_a_problem(self):
+        class Broken:
+            def subkeys(self, path):
+                raise PermissionError("access denied")
+            values = subkeys
+        rep = plat.adobe_report(win_sources(registry=Broken(), program_dirs=[self.pf]))
+        self.assertTrue(all(v is None for v in rep["found"].values()))
+        self.assertIsNone(rep["aerender"])
+        self.assertEqual(len(rep["problems"]), 1)                        # one report line, not one per app
+        self.assertIn("Adobe app lookup failed: PermissionError: access denied", rep["problems"][0]["error"])
+        self.assertTrue(rep["problems"][0]["how"])
+
+    def test_the_other_apps_still_report_when_one_lookup_fails(self):
+        self.photoshop()
+        real = plat.find_adobe_apps
+
+        def flaky(key=None, sources=None):
+            if key == "premiere":
+                raise RuntimeError("boom")
+            return real(key, sources)
+        with mock.patch.object(plat, "find_adobe_apps", flaky):
+            rep = plat.adobe_report(win_sources(program_dirs=[self.pf]))
+        self.assertEqual(rep["found"]["photoshop"]["name"], "Adobe Photoshop 2026")
+        self.assertIsNone(rep["found"]["premiere"])
+        self.assertIn("RuntimeError: boom", rep["problems"][0]["error"])
+
+
+class MdfindCache(unittest.TestCase):
+    """M6: one Spotlight answer per query per process (30 s), failures included: a stalled Spotlight costs 15 s once."""
+
+    def setUp(self):
+        plat._MDFIND_CACHE.clear()
+        self.addCleanup(plat._MDFIND_CACHE.clear)
+
+    def src(self):
+        return plat.AdobeSources(env={}, registry=NoRegistry(), os_name="macos", program_dirs=[], mac_app_dirs=[])
+
+    def test_the_default_runner_asks_spotlight_once_for_repeated_lookups(self):
+        ran = mock.Mock(return_value=mock.Mock(stdout="/Applications/Adobe Premiere Pro 2026/x.app\n"))
+        with mock.patch.object(plat.subprocess, "run", ran):
+            for _ in range(3):
+                plat.find_adobe_apps("premiere", self.src())
+        self.assertEqual(ran.call_count, 1)
+        self.assertEqual(ran.call_args[0][0], ["mdfind", "kMDItemCFBundleIdentifier == 'com.adobe.PremierePro*'"])
+
+    def test_a_timeout_is_cached_and_the_scan_still_answers(self):
+        import subprocess
+        ran = mock.Mock(side_effect=subprocess.TimeoutExpired("mdfind", 15))
+        with mock.patch.object(plat.subprocess, "run", ran):
+            self.assertEqual(plat.find_adobe_apps("premiere", self.src()), [])
+            self.assertEqual(plat.find_adobe_apps("premiere", self.src()), [])
+        self.assertEqual(ran.call_count, 1)
+
+    def test_the_answer_expires_and_injected_runners_are_never_cached(self):
+        ran = mock.Mock(return_value=mock.Mock(stdout=""))
+        clock = mock.Mock(side_effect=[100.0, 101.0, 140.0, 140.0])
+        with mock.patch.object(plat.subprocess, "run", ran), mock.patch("time.monotonic", clock):
+            plat._run_mdfind("q")
+            plat._run_mdfind("q")                  # 1 s later: cached
+            plat._run_mdfind("q")                  # 40 s later: asked again
+        self.assertEqual(ran.call_count, 2)
+        asked = []
+        fake = plat.AdobeSources(env={}, registry=NoRegistry(), os_name="macos", program_dirs=[], mac_app_dirs=[],
+                                 mdfind=lambda q: asked.append(q) or [])
+        plat.find_adobe_apps("premiere", fake)
+        plat.find_adobe_apps("premiere", fake)
+        self.assertEqual(len(asked), 2)
+
+
+class FakeWinreg:
+    """A stand-in for the winreg module: HKLM as {(path, view flag): {"keys": [...], "values": [(name, data, type)]}}.
+    A key listed in `deny` raises PermissionError from OpenKey; `broken_enum` raises mid-enumeration."""
+    HKEY_LOCAL_MACHINE = "HKLM"
+    KEY_READ = 0x20019
+    KEY_WOW64_64KEY = 0x0100
+    KEY_WOW64_32KEY = 0x0200
+
+    def __init__(self, tree, deny=(), broken_enum=()):
+        self.tree, self.deny, self.broken_enum, self.opened = tree, set(deny), set(broken_enum), []
+
+    def OpenKey(self, hive, path, reserved, access):                        # noqa: N802
+        self.opened.append((hive, path, reserved, access))
+        view = access & (self.KEY_WOW64_64KEY | self.KEY_WOW64_32KEY)
+        if (path, view) in self.deny:
+            raise PermissionError("access denied")
+        if (path, view) not in self.tree:
+            raise FileNotFoundError(path)
+        return FakeKey(self, (path, view))
+
+    def EnumKey(self, key, i):                                              # noqa: N802
+        names = key.data.get("keys", [])
+        if key.id in self.broken_enum and i >= 1:
+            raise PermissionError("denied mid-enumeration")
+        if i >= len(names):
+            raise OSError("no more data")
+        return names[i]
+
+    def EnumValue(self, key, i):                                            # noqa: N802
+        vals = key.data.get("values", [])
+        if i >= len(vals):
+            raise OSError("no more data")
+        return vals[i]
+
+
+class FakeKey:
+    def __init__(self, reg, kid):
+        self.reg, self.id, self.data = reg, kid, reg.tree[kid]
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.closed = True
+
+
 class RealRegistryReader(unittest.TestCase):
     def test_without_winreg_the_reader_is_empty_and_quiet(self):
         with mock.patch.dict(sys.modules, {"winreg": None}):                 # import winreg -> ImportError (macOS)
@@ -421,18 +690,85 @@ class RealRegistryReader(unittest.TestCase):
             self.assertEqual(reg.values("SOFTWARE\\Adobe"), {})
             self.assertEqual(reg.subkeys("SOFTWARE\\Adobe"), [])
 
+    def reader(self, tree, **kw):
+        fake = FakeWinreg(tree, **kw)
+        patcher = mock.patch.dict(sys.modules, {"winreg": fake})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return plat.WinRegistry(), fake
+
+    V64, V32 = FakeWinreg.KEY_WOW64_64KEY, FakeWinreg.KEY_WOW64_32KEY
+    PATH = "SOFTWARE\\Adobe\\Premiere Pro"
+
+    def test_the_64_bit_view_is_opened_read_only_first_then_the_32_bit_one(self):
+        reg, fake = self.reader({(self.PATH, self.V64): {"keys": ["26.0"]}, (self.PATH, self.V32): {"keys": ["25.0"]}})
+        self.assertEqual(reg.subkeys(self.PATH), ["26.0", "25.0"])
+        self.assertEqual([(h, p, r, a) for h, p, r, a in fake.opened],
+                         [("HKLM", self.PATH, 0, FakeWinreg.KEY_READ | self.V64),
+                          ("HKLM", self.PATH, 0, FakeWinreg.KEY_READ | self.V32)])
+
+    def test_subkeys_of_both_views_merge_without_duplicates(self):
+        reg, _ = self.reader({(self.PATH, self.V64): {"keys": ["26.0", "25.0"]},
+                              (self.PATH, self.V32): {"keys": ["25.0", "24.0"]}})
+        self.assertEqual(reg.subkeys(self.PATH), ["26.0", "25.0", "24.0"])
+
+    def test_a_missing_or_denied_key_is_skipped_and_the_other_view_still_answers(self):
+        reg, _ = self.reader({(self.PATH, self.V64): {"keys": ["26.0"]}, (self.PATH, self.V32): {"keys": ["25.0"]}},
+                             deny=[(self.PATH, self.V64)])
+        self.assertEqual(reg.subkeys(self.PATH), ["25.0"])                   # PermissionError is an OSError
+        only32, _ = self.reader({(self.PATH, self.V32): {"keys": ["25.0"]}})  # no key in the 64-bit view at all
+        self.assertEqual(only32.subkeys(self.PATH), ["25.0"])
+        self.assertEqual(only32.subkeys("SOFTWARE\\Nothing"), [])
+        self.assertEqual(only32.values("SOFTWARE\\Nothing"), {})
+
+    def test_an_error_in_the_middle_of_an_enumeration_keeps_what_was_read(self):
+        reg, _ = self.reader({(self.PATH, self.V64): {"keys": ["26.0", "25.0", "24.0"]}},
+                             broken_enum=[(self.PATH, self.V64)])
+        self.assertEqual(reg.subkeys(self.PATH), ["26.0"])
+
+    def test_values_keep_text_only_expand_variables_and_prefer_the_64_bit_view(self):
+        var = "%WNC_TEST_PF%" if plat.IS_WIN else "$WNC_TEST_PF"
+        tree = {(self.PATH + "\\26.0", self.V64): {"values": [("InstallPath", var + "/Adobe", 2),
+                                                               ("Count", 7, 4), ("Blob", b"\x01", 3)]},
+                (self.PATH + "\\26.0", self.V32): {"values": [("InstallPath", "other", 1), ("Extra", "x", 1)]}}
+        reg, _ = self.reader(tree)
+        with mock.patch.dict("os.environ", {"WNC_TEST_PF": "C:/PF"}):
+            vals = reg.values(self.PATH + "\\26.0")
+        self.assertEqual(vals, {"InstallPath": "C:/PF/Adobe", "Extra": "x"})
+
+    def test_the_keys_are_closed_after_reading(self):
+        keys = []
+        reg, fake = self.reader({(self.PATH, self.V64): {"keys": ["26.0"]}})
+        real_open = fake.OpenKey
+        fake.OpenKey = lambda *a: keys.append(real_open(*a)) or keys[-1]
+        reg.subkeys(self.PATH)
+        self.assertTrue(keys and all(k.closed for k in keys))
+
+    def test_discovery_through_the_real_reader_with_a_fake_winreg(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        exe = touch(Path(td.name) / "Adobe Premiere Pro 2026" / "Adobe Premiere Pro.exe")
+        reg, _ = self.reader({(self.PATH + "\\26.0", self.V32): {"values": [("InstallPath", str(exe.parent), 1)]},
+                              (self.PATH, self.V32): {"keys": ["26.0", "CurrentVersion"]}})
+        src = plat.AdobeSources(env={}, registry=reg, os_name="windows", program_dirs=[], mdfind=None,
+                                mac_app_dirs=[], file_version=lambda p: "26.5.2.5")
+        a = plat.newest_app("premiere", src)
+        self.assertEqual((Path(a["exe"]), a["source"], a["version"], a["reg_version"]),
+                         (exe, "registry", "26.5.2.5", "26.0"))
+
 
 class SetupAndDoctor(unittest.TestCase):
     """reel setup installs the bridge when only After Effects exists (the same CEP bundle serves both)."""
 
-    def run_setup(self, apps):
+    def run_setup(self, apps, doctor_fixes=()):
         import cli
         installs = []
         printed = []
         args = mock.Mock(force=False, check=False, no_bridge=False)
-        with mock.patch.object(plat, "newest_app", lambda key: apps.get(key)), \
+        lookup = apps if callable(apps) else (lambda key: apps.get(key))
+        with mock.patch.object(plat, "newest_app", lookup), \
                 mock.patch.object(cli, "run_setup_env", lambda **kw: {"ok": True}), \
-                mock.patch.object(cli, "doctor_in_engine", lambda: {"fixes": []}), \
+                mock.patch.object(cli, "doctor_in_engine", lambda: {"fixes": list(doctor_fixes)}), \
                 mock.patch.object(cli, "out", printed.append), \
                 mock.patch("lib.ppro_bridge.install", lambda: installs.append(1) or {"installed": "x"}):
             cli.cmd_setup(args)
@@ -467,6 +803,72 @@ class SetupAndDoctor(unittest.TestCase):
         self.assertTrue(any("WHYNOT_PREMIERE_APP" in i for i in items), items)
         if not rep["premiere_bridge"]["installed"]:                        # After Effects alone still gets the bridge
             self.assertIn("WhyNot Cut Bridge (After Effects)", items)
+
+    def stale_premiere_variable(self, ae=None):
+        err = "WHYNOT_PREMIERE_APP is set to X, but nothing is there."
+        how = "Set WHYNOT_PREMIERE_APP to Adobe Premiere Pro's .exe or its install folder."
+
+        def lookup(key):
+            if key == "premiere":
+                raise Guidance(err, how, "WHYNOT_PREMIERE_APP")
+            return ae
+        return lookup, err, how
+
+    def test_a_stale_override_does_not_abort_setup_before_the_report(self):
+        lookup, err, how = self.stale_premiere_variable()
+        installs, rep = self.run_setup(lookup)                               # used to raise Guidance out of cmd_setup
+        self.assertEqual(installs, [])
+        self.assertEqual(rep["bridge_install"], "skipped: " + err)
+        self.assertIn("doctor", rep)
+        self.assertIn(how, rep["next"])                                      # the problem is in the report's next steps
+
+    def test_the_stale_override_is_listed_once_when_the_doctor_already_has_it(self):
+        lookup, err, how = self.stale_premiere_variable()
+        _, rep = self.run_setup(lookup, doctor_fixes=[{"item": err, "who": "editor", "fix": how}])
+        self.assertEqual(rep["next"].count(how), 1)
+
+    def test_a_stale_premiere_override_still_installs_the_bridge_for_after_effects(self):
+        lookup, err, how = self.stale_premiere_variable(ae={"name": "AE"})
+        installs, rep = self.run_setup(lookup)
+        self.assertEqual(installs, [1])
+        self.assertEqual(rep["bridge_install"], {"installed": "x"})
+        self.assertIn(how, rep["next"])
+
+    def doctor_items(self, premiere_bad, ae):
+        from lib import onboard
+        found = {"premiere": None, "photoshop": None, "media_encoder": None,
+                 "after_effects": ({"name": "Adobe After Effects 2026", "version": "26.5", "year": 2026,
+                                    "path": "C:/AE/AfterFX.exe", "folder": "C:/AE", "source": "registry",
+                                    "sources": ["registry"], "beta": False, "others": []} if ae else None)}
+        problems = ([{"error": "WHYNOT_PREMIERE_APP is set to X, but nothing is there.",
+                      "how": "Set WHYNOT_PREMIERE_APP to Adobe Premiere Pro's .exe"}] if premiere_bad else [])
+        report = {"found": found, "names": {k: (v or {}).get("name") for k, v in found.items()}, "all": [],
+                  "aerender": None, "problems": problems}
+        with mock.patch.object(plat, "adobe_report", lambda *a, **k: report):
+            return onboard.doctor()
+
+    def test_doctor_does_not_say_install_premiere_when_the_variable_is_the_problem(self):
+        rep = self.doctor_items(premiere_bad=True, ae=False)
+        items = [f["item"] for f in rep["fixes"]]
+        self.assertNotIn("Adobe Premiere Pro", items)
+        self.assertTrue(any("WHYNOT_PREMIERE_APP" in i for i in items), items)
+
+    def test_doctor_still_says_install_premiere_when_it_really_is_missing(self):
+        rep = self.doctor_items(premiere_bad=False, ae=False)
+        self.assertIn("Adobe Premiere Pro", [f["item"] for f in rep["fixes"]])
+
+    def test_the_after_effects_bridge_fix_survives_a_bad_premiere_variable(self):
+        rep = self.doctor_items(premiere_bad=True, ae=True)
+        items = [f["item"] for f in rep["fixes"]]
+        self.assertNotIn("Adobe Premiere Pro", items)
+        if not rep["premiere_bridge"]["installed"]:
+            self.assertIn("WhyNot Cut Bridge (After Effects)", items)
+
+    def test_the_sandbox_drops_the_adobe_override_variables(self):
+        import _isolation
+        for name in ("WHYNOT_PREMIERE_APP", "WHYNOT_AE_APP", "WHYNOT_AERENDER"):
+            self.assertIn(name, _isolation._DROP)
+            self.assertNotIn(name, __import__("os").environ)
 
     def test_skips_and_says_so_when_neither_exists(self):
         installs, rep = self.run_setup({})

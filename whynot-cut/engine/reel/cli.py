@@ -839,17 +839,30 @@ def cmd_setup(a):
     """Idempotent machine setup and repair: the isolated runtime (built or re-synced from the hash lock), the
     Premiere bridge, then the doctor report (never changes Adobe prefs)."""
     from lib.ppro_bridge import install
+    from lib.errors import Guidance
     from lib import plat
     rep = {"runtime": run_setup_env(force=a.force, check=a.check)}
     if a.check:
         out(rep)
         return
-    if not a.no_bridge and (plat.newest_app("premiere") or plat.newest_app("after_effects")):   # one bundle serves both
-        rep["bridge_install"] = install()
-    elif not a.no_bridge:
-        rep["bridge_install"] = "skipped: Premiere Pro or After Effects not found on this computer"
+    skipped = None
+    if not a.no_bridge:
+        have = None
+        for key in ("premiere", "after_effects"):       # one bundle serves both
+            try:    # a stale WHYNOT_PREMIERE_APP / _AE_APP is the doctor's fix to list, not a reason to lose the report
+                have = have or plat.newest_app(key)
+            except Guidance as e:
+                skipped = skipped or e
+        if have:
+            rep["bridge_install"] = install()
+        elif skipped:
+            rep["bridge_install"] = f"skipped: {skipped.error}"
+        else:
+            rep["bridge_install"] = "skipped: Premiere Pro or After Effects not found on this computer"
     rep["doctor"] = doctor_in_engine()
     fixes = rep["doctor"].get("fixes") or []
+    if skipped and not any(f.get("item") == skipped.error for f in fixes):
+        fixes.append({"item": skipped.error, "who": "editor", "fix": skipped.how})
     if not rep["runtime"].get("ok"):
         fixes.insert(0, {"item": "engine runtime: " + str(rep["runtime"].get("error") or "not ready"),
                          "who": "claude", "fix": rep["runtime"].get("how") or "reel setup"})

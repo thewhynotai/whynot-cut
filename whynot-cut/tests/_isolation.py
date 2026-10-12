@@ -43,7 +43,8 @@ from lib import plat  # noqa: E402  (stdlib only; computes nothing at import)
 PREFIX = "whynot-test-sandbox-"
 MARKER = ".whynot-test-sandbox"          # written into every sandbox: only folders holding it are ever swept
 STALE_S = 24 * 3600
-_DROP = ("CLAUDE_PLUGIN_DATA", "CLAUDE_ENV_FILE", "WHYNOT_OPTIONS_FILE") + plat.HOME_ENV + plat.CLIENTS_ENV
+_DROP = ("CLAUDE_PLUGIN_DATA", "CLAUDE_ENV_FILE", "WHYNOT_OPTIONS_FILE",
+         "WHYNOT_PREMIERE_APP", "WHYNOT_AE_APP", "WHYNOT_AERENDER") + plat.HOME_ENV + plat.CLIENTS_ENV
 
 
 def _live_roots() -> list:
