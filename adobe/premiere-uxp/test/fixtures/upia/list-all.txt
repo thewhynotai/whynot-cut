@@ -1,0 +1,30 @@
+0 extension installed for Adobe Media Encoder (ver 26.5.2)
+ Status                        Extension Name                         Version
+=========  =======================================================  ==========
+
+0 extension installed for After Effects (ver 26.5.0)
+ Status                        Extension Name                         Version
+=========  =======================================================  ==========
+
+0 extension installed for Bridge (ver 16.0.8)
+ Status                        Extension Name                         Version
+=========  =======================================================  ==========
+
+0 extension installed for Illustrator 2026 (ver 30.8.2)
+ Status                        Extension Name                         Version
+=========  =======================================================  ==========
+
+0 extension installed for Photoshop 2026 64 (ver 27.11.0)
+ Status                        Extension Name                         Version
+=========  =======================================================  ==========
+
+2 extensions installed for Premiere Pro (ver 26.5.2)
+ Status                        Extension Name                         Version
+=========  =======================================================  ==========
+ Enabled    WhyNot Cut                                                   3.0.0
+ Enabled    WhyNot Cut Spike                                             0.1.4
+
+0 extension installed for Others
+ Status                        Extension Name                         Version
+=========  =======================================================  ==========
+

@@ -47,6 +47,16 @@ test("package-ccx plugin writes whynot-cut/adobe/WhyNotCut-Premiere-<version>.cc
   const manifest = JSON.parse(text(files["manifest.json"]));
   assert.equal(manifest.id, "ai.thewhynot.cut.dev");
   assert.equal(manifest.version, version);
+  // C2.6: the dev id ships visibly as a dev build (Window > UXP Plugins and UPIA /list all show names, not ids)
+  assert.equal(manifest.name, "WhyNot Cut (dev)");
+  assert.equal(manifest.entrypoints[0].label.default, "WhyNot Cut (dev)");
+  assert.equal(manifest.entrypoints[0].id, "whynotCut");
+  // C2.6: build.json {product, build, sha}: product = manifest version, build = UTC timestamp id, sha = git short hash
+  const build = JSON.parse(text(files["build.json"]));
+  assert.deepEqual(Object.keys(build), ["product", "build", "sha"]);
+  assert.equal(build.product, version);
+  assert.match(build.build, /^\d{8}T\d{6}Z$/);
+  assert.match(build.sha, /^(?:[0-9a-f]{4,40}(?:-dirty)?|unknown)$/);
   const icons = names.filter((n) => n.startsWith("icons/") && n.endsWith(".png"));
   assert.ok(icons.length >= 12, `expected the icon set, got ${icons.length}`);
   // every icon the manifest names is in the package

@@ -24,6 +24,14 @@ test("package-ccx spike builds dist/uxp/WhyNotCut-Spike.ccx with manifest.json a
   );
   const manifest = JSON.parse(new TextDecoder().decode(files["manifest.json"]));
   assert.equal(manifest.id, "ai.thewhynot.cut.spike");
+  assert.match(manifest.name, /Spike/);
+  assert.doesNotMatch(manifest.name, /\(dev\)/);
+  // C2.6: build.json {product, build, sha} next to manifest.json (dev-install compares the installed copy with it)
+  const build = JSON.parse(new TextDecoder().decode(files["build.json"]));
+  assert.deepEqual(Object.keys(build), ["product", "build", "sha"]);
+  assert.equal(build.product, manifest.version);
+  assert.match(build.build, /^\d{8}T\d{6}Z$/);
+  assert.match(build.sha, /^(?:[0-9a-f]{4,40}(?:-dirty)?|unknown)$/);
   const icons = names.filter((n) => n.startsWith("icons/") && n.endsWith(".png"));
   assert.ok(icons.length >= 12, `expected the icon set, got ${icons.length}`);
 });

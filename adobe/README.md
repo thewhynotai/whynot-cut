@@ -99,6 +99,15 @@ A mock build bundles `MockSource` (PODCAST-TEST data) for a look at the panel in
 Install the `.ccx` like the spike (UPIA, Premiere closed); it appears as **Window > UXP Plugins > WhyNot Cut**. Bump the manifest
 `version` (and `plugin.json`) for every re-install: UPIA only replaces a newer version.
 
+**Dev install without a version bump (C2.6):** every `.ccx` carries `build.json {product, build, sha}` (manifest version, UTC
+build id, `git rev-parse --short HEAD` + `-dirty`). A dev id (`*.dev`) is packaged as **"WhyNot Cut (dev)"** (name and panel
+label); the source manifest keeps the release name "WhyNot Cut". From `adobe/`:
+`npm run package:plugin && npm run dev-install -- ../whynot-cut/adobe/WhyNotCut-Premiere-<version>.ccx`. It starts Creative Cloud
+if needed, runs UPIA `/remove <id>` (then `/remove <installed name>` when the id does not work), `/install`, and exits non-zero
+unless the output says "Installation Successful", `/list all` lists the name and version under Premiere Pro, and the installed
+folder's `build.json` (located through `%APPDATA%\Adobe\UXP\PluginsInfo\v1\premierepro.json`) equals the packaged one. The release
+id `ai.thewhynot.cut` needs `--release`. Exit 2 = could not start (one sentence why), 1 = install not confirmed.
+
 ## Contract test (`premiere-uxp/test/contract.test.ts`)
 
 ajv (2020 dialect + `ajv-formats`) loads every `whynot-cut/engine/reel/contract/*.schema.json`, compiles them (all added first, then

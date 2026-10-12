@@ -13,6 +13,7 @@
     "package:spike": "npm run package:spike -w premiere-uxp",
     "package": "npm run package -w premiere-uxp",
     "package:plugin": "npm run package:plugin -w premiere-uxp",
-    "build:plugin": "npm run build:plugin -w premiere-uxp"
+    "build:plugin": "npm run build:plugin -w premiere-uxp",
+    "dev-install": "node premiere-uxp/scripts/dev-install.mjs"
   }
 }
