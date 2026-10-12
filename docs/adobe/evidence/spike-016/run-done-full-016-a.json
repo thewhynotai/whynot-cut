@@ -1,0 +1,11 @@
+{
+  "id": "full-016-a",
+  "mode": "full",
+  "results_file": "C:/Users/LOQ/.whynot-cut/uxp-spike/results-20261013-024944.json",
+  "ok": true,
+  "pass": 1,
+  "fail": 16,
+  "na": 2,
+  "started_at": "2026-10-12T23:49:44.406Z",
+  "finished_at": "2026-10-12T23:55:47.495Z"
+}

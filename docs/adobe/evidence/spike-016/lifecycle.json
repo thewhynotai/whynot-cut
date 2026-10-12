@@ -1,0 +1,89 @@
+{
+  "spike": "0.1.6",
+  "updated_at": "2026-10-12T23:56:17.562Z",
+  "events": [
+    {
+      "seq": 1,
+      "event": "script.loaded",
+      "at": "2026-10-12T23:49:44.276Z",
+      "t_ms": 0,
+      "detail": {
+        "listeners": [
+          "panel.create",
+          "panel.show",
+          "panel.hide",
+          "panel.destroy",
+          "document.visibilitychange"
+        ],
+        "entrypoints_setup": "called"
+      }
+    },
+    {
+      "seq": 2,
+      "event": "panel.create",
+      "at": "2026-10-12T23:56:17.562Z",
+      "t_ms": 393286,
+      "detail": [
+        {
+          "keys": [
+            "_ownerDocument",
+            "_parentNode",
+            "_firstChild",
+            "_lastChild",
+            "_nextSibling",
+            "_previousSibling",
+            "_registeredObservers",
+            "_transientObservers",
+            "_nodeName",
+            "_namespaceURI",
+            "_elementState",
+            "_layoutInfo",
+            "_scrollInfo",
+            "_properties",
+            "_style",
+            "_selEngineId",
+            "_siblingIndex",
+            "_siblingIndexMutation",
+            "_typeIndex",
+            "_lastTypeIndex"
+          ],
+          "tag": "BODY"
+        }
+      ]
+    },
+    {
+      "seq": 3,
+      "event": "panel.show",
+      "at": "2026-10-12T23:56:17.562Z",
+      "t_ms": 393286,
+      "detail": [
+        {
+          "keys": [
+            "_ownerDocument",
+            "_parentNode",
+            "_firstChild",
+            "_lastChild",
+            "_nextSibling",
+            "_previousSibling",
+            "_registeredObservers",
+            "_transientObservers",
+            "_nodeName",
+            "_namespaceURI",
+            "_elementState",
+            "_layoutInfo",
+            "_scrollInfo",
+            "_properties",
+            "_style",
+            "_selEngineId",
+            "_siblingIndex",
+            "_siblingIndexMutation",
+            "_typeIndex",
+            "_lastTypeIndex"
+          ],
+          "tag": "BODY"
+        },
+        "undefined"
+      ]
+    }
+  ]
+}

@@ -213,6 +213,28 @@ assumed unattended. The daemon must treat any project-level call as possibly blo
 alert to the user, and the CEP compat op as the fallback). Next run: a `Date.now()` stamp before and after each call
 inside `sequence_settings` (and its transaction) and `export_frame`'s `prepare` step, and Yunus noting each dialog with the clock time.
 
+## Spike 0.1.6 live run `024944` (2026-10-13, full mode; Addendum C2.7 probes)
+
+The panel and spike were installed with `npm run dev-install`. It removes by name, installs, then verifies the build:
+the panel is "WhyNot Cut (dev)" 3.0.0, build 20261012T234905Z; the spike is "WhyNot Cut Spike" 0.1.6. UPIA accepted
+both the explicit `network.domains` list and the `whynotcut` `launchProcess` scheme.
+
+The evidence is in `docs/adobe/evidence/spike-016/`: the results, lifecycle and run-done files, and two dialog captures.
+The results files contain no token; this was checked against the live `engine.json`.
+
+| Probe | Measured | Consequence |
+|---|---|---|
+| Loopback `network.domains` | `ws://localhost:*` and `http://localhost:*` are **allowed**. The connections opened, and `/status` answered 401 without a token. `ws://127.0.0.1:*` and `http://127.0.0.1:*` are **denied** ("Manifest entry not found"). Each localhost connect took about 2.0 s, against 3 ms for a denied one: Windows resolves `localhost` to `::1` first, and the daemon binds only 127.0.0.1 | The product can drop `"all"`. Use `ws://localhost:*` + `http://localhost:*`; DaemonSource connects to `localhost`; the daemon also binds `::1` (otherwise every connect pays the ~2 s fallback). This closes the open security item from the plan session |
+| `shell.openExternal("whynotcut://engine/start")` | UXP shows a modal **"Request For Permission"**: "The plugin WhyNot Cut Spike wants to open: whynotcut://engine/start", followed by the manifest's developer text (`consent-whynotcut-link.png`). Dismissed with Escape → rejected "User denied." after 177 s (the probe was blocked behind it) | The "Start engine" button through `whynotcut://` needs the editor's consent once. Keep the developer text short and in plain words. Whether "allow" is remembered is not measured; it needs a run that clicks Allow with a handler registered (T7.1 step 7b) |
+| Quit / restart API | No quit, exit, restart or relaunch member exists on `premierepro` (72 names), `premierepro.Application(.prototype)` or `uxp.host`. The only matches are `CloseProjectOptions` and `ProjectClosedEvent`. Nothing was read or called | The panel cannot restart Premiere. A "Restart Premiere" card is text plus the editor's own action (Addendum C §3.4) |
+| Hide / show lifecycle | Only `script.loaded` was recorded, with `entrypoints.setup` called. No `panel.create` or `panel.show` came, because the spike panel was not open in this workspace (the plugin ran headless) | The hide/show order is still unmeasured. It needs the panel opened from Window ▸ UXP Plugins |
+| UI probes (fonts, svg, box-shadow, gradient, kit-code) | Every box measured **0 × 0**, because the panel was not shown. Computed styles did resolve: box-shadow `#9D6BFF 0px 0px 0px 2px` (token = literal); gradient `linear-gradient(90deg,#D95C9B,#5400FB)`; `kit-code` `display:inline`, background `#1E1E1E`, font "IBM Plex Mono"; svg color `#3DD68C` | `var()` resolves in UXP computed styles. Font loading and the svg paint are still unmeasured; the next run needs the panel visible (`style_guide` mode) |
+| Premiere ops (create_project … save_close_open) | `create_project` timed out after 180 s and the rest were skipped (no scratch project) | Not a regression: a modal blocked it (next row). The ops were green in 0.1.3–0.1.5 and are unchanged |
+| **Scratch Disk Error** (attributed) | Appeared **during `createProject`** on this PC (`scratch-disk-error.png`), while the permission dialog was stacked on top of it. Answering Yes created and opened the scratch project | `createProject` itself can raise this modal. Any engine path that creates a project must expect it: a long timeout plus a "Premiere is waiting for you" card |
+
+Automation note: Adobe's dialogs ignore posted keyboard and mouse messages. Answering one needs a brief real foreground
+with a real click or key, at the coordinates of the process's DPI-virtualised window rect.
+
 ## Product panel in real UXP
 
 The WhyNot Cut product panel was loaded in Premiere as real UXP (screenshot

@@ -1,0 +1,998 @@
+{
+  "spike": "0.1.6",
+  "premiere": "26.5.2",
+  "uxp": "uxp-9.3.0-local",
+  "at": "2026-10-12T23:55:47.491Z",
+  "home": "C:/Users/LOQ",
+  "home_via": "os.homedir",
+  "results_file": "C:/Users/LOQ/.whynot-cut/uxp-spike/results-20261013-024944.json",
+  "config": {
+    "xml_path": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/PODCAST-TEST/output/projects/EP02TEST_R02/07_premiere/interchange/EP02TEST_R02_RE_EDIT_base.xml",
+    "work_dir": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/_uxp-spike",
+    "still_png": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/PODCAST-TEST/output/projects/EP02TEST_R02/03_broll/typography/GFX_002.png",
+    "mp4_source": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/PODCAST-TEST/output/projects/EP02TEST_R02/08_quality_control/preview/EP02TEST_R02_preview.mp4"
+  },
+  "config_error": null,
+  "mode": "full",
+  "kept_project_open": false,
+  "notes": [],
+  "auto_run_id": "full-016-a",
+  "ops": [
+    {
+      "op": "host_info",
+      "ok": true,
+      "ms": 0,
+      "detail": {
+        "steps": [
+          {
+            "step": "uxp_host",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": {
+              "name": "premierepro",
+              "version": "26.5.2",
+              "uiLocale": "en_US",
+              "uxp_version": "uxp-9.3.0-local",
+              "plugin_version": "0.1.6",
+              "uxp_versions_keys": [],
+              "host_keys": []
+            }
+          },
+          {
+            "step": "premiere_version (informational)",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": {
+              "host_version": "26.5.2",
+              "raw": {
+                "type": "undefined",
+                "value": "undefined"
+              },
+              "awaited": {
+                "type": "undefined",
+                "value": "undefined"
+              },
+              "value": "26.5.2",
+              "source": "uxp.host.version"
+            }
+          },
+          {
+            "step": "background_color",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": {
+              "get_background_color": "function",
+              "value": {}
+            }
+          },
+          {
+            "step": "theme",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": {
+              "prefers_dark": null
+            }
+          },
+          {
+            "step": "os",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": {
+              "platform": "win32",
+              "release_compat_string": "6.2.9200",
+              "arch": "x64"
+            }
+          },
+          {
+            "step": "home_and_config",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": {
+              "home": "C:/Users/LOQ",
+              "home_via": "os.homedir",
+              "config_loaded": true,
+              "config_error": null
+            }
+          },
+          {
+            "step": "fs_members",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": {
+              "readFile": "function",
+              "writeFile": "function",
+              "mkdir": "function",
+              "lstat": "function",
+              "readdir": "function",
+              "readFileSync": "function",
+              "writeFileSync": "function",
+              "mkdirSync": "undefined",
+              "lstatSync": "function",
+              "existsSync": "undefined"
+            }
+          },
+          {
+            "step": "globals",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": {
+              "WebSocket": "function",
+              "fetch": "function",
+              "TextDecoder": "undefined"
+            }
+          },
+          {
+            "step": "ppro_members",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": {
+              "members": [
+                "AAFExportOptions",
+                "Action",
+                "AddTransitionOptions",
+                "AppPreference",
+                "Application",
+                "AudioClipTrackItem",
+                "AudioComponentChain",
+                "AudioFilterComponent",
+                "AudioFilterFactory",
+                "AudioTrack",
+                "C2PAService",
+                "CaptionTrack",
+                "ClipProjectItem",
+                "CloseProjectOptions",
+                "Color",
+                "Component",
+                "CompoundAction",
+                "EncoderManager",
+                "Exporter",
+                "FolderItem",
+                "FootageInterpretation",
+                "FrameRate",
+                "Guid",
+                "IngestSettings",
+                "Keyframe",
+                "Marker",
+                "Markers",
+                "Media",
+                "MediaManager",
+                "Metadata",
+                "ObjectMaskUtils",
+                "OpenProjectOptions",
+                "OperationCompleteEvent",
+                "PRProduction",
+                "PointF",
+                "PointKeyframe",
+                "Project",
+                "ProjectClosedEvent",
+                "ProjectConverter",
+                "ProjectEvent",
+                "ProjectItem",
+                "ProjectItemSelection",
+                "ProjectSettings",
+                "ProjectUtils",
+                "Properties",
+                "RectF",
+                "ScratchDiskSettings",
+                "Sequence",
+                "SequenceEditor",
+                "SequenceSettings",
+                "SequenceUtils",
+                "SnapEvent",
+                "TextSegments",
+                "TickTime",
+                "TrackItemSelection",
+                "TransitionFactory",
+                "UniqueSerializeable",
+                "Utils",
+                "WorkAreaUtils",
+                "VideoClipTrackItem",
+                "VideoComponentChain",
+                "VideoFilterComponent",
+                "VideoFilterFactory",
+                "VideoTrack",
+                "VideoTransition",
+                "eventRoot",
+                "EventManager",
+                "SequenceEvent",
+                "SourceMonitor",
+                "Transcript",
+                "Constants"
+              ]
+            }
+          },
+          {
+            "step": "active_project (read-only)",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.166Z",
+            "ms": 0,
+            "info": null
+          }
+        ]
+      },
+      "error": null
+    },
+    {
+      "op": "ws_loopback",
+      "ok": false,
+      "ms": 2,
+      "detail": {
+        "started_at": "2026-10-12T23:49:50.168Z",
+        "started_epoch_ms": 1791848990168,
+        "audit_log": "C:/Users/LOQ/.whynot-cut/logs/serve-audit.log",
+        "how_to_read_origin": "find the \"origin\" row of C:/Users/LOQ/.whynot-cut/logs/serve-audit.log whose time is within a second of the connect step's started_at: its \"reason\" is the exact Origin header UXP sent. If the connect step succeeded but there is NO origin row, UXP sent no Origin header (the daemon writes an origin row only when the header is present); the \"session\" row confirms the connection",
+        "url": "ws://127.0.0.1:60276/session",
+        "connect_started_at": "2026-10-12T23:49:50.170Z",
+        "steps": [
+          {
+            "step": "engine.json (read; the token's length only)",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.168Z",
+            "ms": 1,
+            "info": {
+              "path": "C:/Users/LOQ/.whynot-cut/bridge/engine.json",
+              "attempts": 1,
+              "keys": [
+                "port",
+                "token",
+                "pid",
+                "version",
+                "protocol",
+                "pid_created",
+                "started_at"
+              ],
+              "port": 60276,
+              "pid": 124276,
+              "version": "3.0.0",
+              "protocol": 4,
+              "engine_home": null,
+              "token_read": true,
+              "token_length": 64,
+              "token_shape_ok": true
+            }
+          },
+          {
+            "step": "http: fetch /status with the bearer token (informational)",
+            "ok": true,
+            "at": "2026-10-12T23:49:50.169Z",
+            "ms": 0,
+            "info": {
+              "url": "http://127.0.0.1:60276/status",
+              "started_at": "2026-10-12T23:49:50.169Z",
+              "error": "Permission denied to the url http://127.0.0.1:60276/status. Manifest entry not found."
+            }
+          },
+          {
+            "step": "connect: ws://127.0.0.1:<port>/session (the daemon audits the Origin now)",
+            "ok": false,
+            "at": "2026-10-12T23:49:50.169Z",
+            "ms": 1,
+            "error": "Permission denied to the url ws://127.0.0.1:60276/session. Manifest entry not found."
+          }
+        ]
+      },
+      "error": null
+    },
+    {
+      "op": "create_project",
+      "ok": false,
+      "ms": 180018,
+      "detail": null,
+      "error": "timed out after 180000 ms",
+      "stack": "Error: timed out after 180000 ms\n    at index.js:863:39\n    at uxp://uxp-internal/runtime_scripts_loader.js:2:28858"
+    },
+    {
+      "op": "scratch_disk",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:2328:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "import_fcp7_xml",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:1400:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "sequence_settings",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:1585:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "export_frame",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:1691:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "keyframes_motion_opacity_crop",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:1828:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "keyframe_time_basis",
+      "ok": false,
+      "ms": 1,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:2092:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "effects_by_match_name",
+      "ok": false,
+      "ms": 1,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:2197:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "clip_edits_transitions_tracks",
+      "ok": false,
+      "ms": 1,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:2244:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "track_rename",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:2380:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "markers",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:2415:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "project_views",
+      "ok": false,
+      "ms": 0,
+      "detail": {
+        "steps": [
+          {
+            "step": "ProjectUtils.getProjectViewIds + getProjectFromViewId",
+            "ok": false,
+            "at": "2026-10-12T23:52:50.212Z",
+            "ms": 0,
+            "error": "no project views"
+          }
+        ]
+      },
+      "error": null
+    },
+    {
+      "op": "host_calls",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:2615:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "undo_transaction",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:2452:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "save_close_open",
+      "ok": false,
+      "ms": 0,
+      "detail": null,
+      "error": "no scratch project: create_project did not succeed in this run (refusing to use the active project)",
+      "stack": "Error: no scratch project: create_project did not succeed in this run (refusing to use the active project)\n    at expect (index.js:909:20)\n    at getProject (index.js:965:3)\n    at Object.run (index.js:2500:27)\n    at Object.run (index.js:2792:18)\n    at index.js:865:74\n    at async runProbe (index.js:865:21)\n    at async runAll (index.js:877:15)\n    at async runSpike (index.js:4509:13)\n    at async claimAndRun (index.js:263:17)\n    at async pollOnce (index.js:247:14)"
+    },
+    {
+      "op": "save_as",
+      "ok": null,
+      "ms": 0,
+      "detail": "no open scratch project (the reopen in save_close_open did not succeed)",
+      "error": null
+    },
+    {
+      "op": "encoder_export",
+      "ok": null,
+      "ms": 0,
+      "detail": "off: set \"encoder_export\": true in config.json to try EncoderManager.exportSequence (may start Media Encoder)",
+      "error": null
+    }
+  ],
+  "ui_probes": {
+    "fonts": {
+      "op": "fonts",
+      "ok": false,
+      "ms": 1526,
+      "detail": {
+        "rule": "loaded = the brand-family span's width differs from the same text in BOTH fallbacks (monospace, serif); not loaded = differs from neither; else inconclusive",
+        "loaded_count": 0,
+        "not_loaded_count": 4,
+        "document_fonts": false,
+        "settle_ms": 1500,
+        "families": {
+          "syne": {
+            "family": "Syne",
+            "weight": 700,
+            "sample": "WhyNot Cut Style Guide MWQ",
+            "font_size_px": 20,
+            "computed_family": "\"Syne\",",
+            "loaded": false,
+            "widths": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "widths_before_settle": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "document_fonts_check": null
+          },
+          "inter": {
+            "family": "Inter",
+            "weight": 400,
+            "sample": "Quick brown fox jumps 0123456789",
+            "font_size_px": 20,
+            "computed_family": "\"Inter\",",
+            "loaded": false,
+            "widths": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "widths_before_settle": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "document_fonts_check": null
+          },
+          "plex_arabic": {
+            "family": "IBM Plex Sans Arabic",
+            "weight": 400,
+            "sample": "مراجعة المونتاج قبل التصدير",
+            "font_size_px": 20,
+            "computed_family": "\"IBM Plex Sans Arabic\",",
+            "loaded": false,
+            "widths": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "widths_before_settle": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "document_fonts_check": null
+          },
+          "plex_mono": {
+            "family": "IBM Plex Mono",
+            "weight": 400,
+            "sample": "00:00:12:04 C0239_prev.prproj",
+            "font_size_px": 20,
+            "computed_family": "\"IBM Plex Mono\",",
+            "loaded": false,
+            "widths": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "widths_before_settle": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "document_fonts_check": null
+          }
+        }
+      },
+      "error": null
+    },
+    "svg": {
+      "op": "svg",
+      "ok": false,
+      "ms": 9,
+      "detail": {
+        "svg_box": {
+          "width": 0,
+          "height": 0
+        },
+        "svg_fill": "currentcolor",
+        "svg_color": "#3DD68C",
+        "svg_display": "block",
+        "wrapper_color": "#3DD68C",
+        "path_present": true,
+        "path_box": {
+          "width": 0,
+          "height": 0
+        },
+        "path_fill": "black",
+        "expected_color": "the --twn-ok token, #3DD68C = rgb(61, 214, 140)"
+      },
+      "error": null
+    },
+    "box_shadow": {
+      "op": "box_shadow",
+      "ok": true,
+      "ms": 8,
+      "detail": {
+        "via_token": "#9D6BFF 0px 0px 0px 2px",
+        "literal": "#9D6BFF 0px 0px 0px 2px",
+        "root_custom_property_twn_focus": "",
+        "kit_use": ".kit-focus:focus { box-shadow: var(--twn-focus) } (the focus ring)"
+      },
+      "error": null
+    },
+    "gradient": {
+      "op": "gradient",
+      "ok": true,
+      "ms": 8,
+      "detail": {
+        "hairline (.kit-hairline)": {
+          "background_image": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background_color": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          }
+        },
+        "progress fill (.kit-fill)": {
+          "background_image": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background_color": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          }
+        },
+        "literal": {
+          "background_image": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background_color": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          }
+        },
+        "root_custom_property_twn_gradient": "",
+        "root_custom_property_twn_bg": ""
+      },
+      "error": null
+    },
+    "kit_code": {
+      "op": "kit_code",
+      "ok": true,
+      "ms": 9,
+      "detail": {
+        "en": {
+          "present": true,
+          "display": "inline",
+          "background_color": "#1E1E1E",
+          "font_family": "\"IBM Plex Mono\",Consolas,\"SF Mono\",Menlo,",
+          "font_size": "0.92em",
+          "padding_left": "3px",
+          "border_radius": "4px",
+          "direction": "",
+          "unicode_bidi": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          },
+          "paragraph_box": {
+            "width": 0,
+            "height": 0
+          },
+          "client_rects": null,
+          "expected": "display inline; background the --twn-surface-2 token #1E1E1E = rgb(30, 30, 30); font IBM Plex Mono"
+        },
+        "ar": {
+          "present": true,
+          "display": "inline",
+          "background_color": "#1E1E1E",
+          "font_family": "\"IBM Plex Mono\",Consolas,\"SF Mono\",Menlo,",
+          "font_size": "0.92em",
+          "padding_left": "3px",
+          "border_radius": "4px",
+          "direction": "",
+          "unicode_bidi": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          },
+          "paragraph_box": {
+            "width": 0,
+            "height": 0
+          },
+          "client_rects": null,
+          "expected": "display inline; background the --twn-surface-2 token #1E1E1E = rgb(30, 30, 30); font IBM Plex Mono"
+        }
+      },
+      "error": null
+    }
+  },
+  "eco_probes": {
+    "quit_restart_names": {
+      "op": "quit_restart_names",
+      "ok": true,
+      "ms": 1,
+      "detail": {
+        "pattern": "/quit|exit|restart|relaunch|close/i",
+        "matches_total": 2,
+        "called": false,
+        "rule": "names only: no matching member was read or called",
+        "scanned": [
+          {
+            "path": "premierepro",
+            "present": true,
+            "type": "object",
+            "names_count": 72,
+            "names": [
+              "AAFExportOptions",
+              "Action",
+              "AddTransitionOptions",
+              "AppPreference",
+              "Application",
+              "AudioClipTrackItem",
+              "AudioComponentChain",
+              "AudioFilterComponent",
+              "AudioFilterFactory",
+              "AudioTrack",
+              "C2PAService",
+              "CaptionTrack",
+              "ClipProjectItem",
+              "CloseProjectOptions",
+              "Color",
+              "Component",
+              "CompoundAction",
+              "Constants",
+              "EncoderManager",
+              "EventManager",
+              "Exporter",
+              "FolderItem",
+              "FootageInterpretation",
+              "FrameRate",
+              "Guid",
+              "IngestSettings",
+              "Keyframe",
+              "Marker",
+              "Markers",
+              "Media",
+              "MediaManager",
+              "Metadata",
+              "ObjectMaskUtils",
+              "OpenProjectOptions",
+              "OperationCompleteEvent",
+              "PRProduction",
+              "PointF",
+              "PointKeyframe",
+              "Project",
+              "ProjectClosedEvent",
+              "ProjectConverter",
+              "ProjectEvent",
+              "ProjectItem",
+              "ProjectItemSelection",
+              "ProjectSettings",
+              "ProjectUtils",
+              "Properties",
+              "RectF",
+              "ScratchDiskSettings",
+              "Sequence",
+              "SequenceEditor",
+              "SequenceEvent",
+              "SequenceSettings",
+              "SequenceUtils",
+              "SnapEvent",
+              "SourceMonitor",
+              "TextSegments",
+              "TickTime",
+              "TrackItemSelection",
+              "Transcript",
+              "TransitionFactory",
+              "UniqueSerializeable",
+              "Utils",
+              "VideoClipTrackItem",
+              "VideoComponentChain",
+              "VideoFilterComponent",
+              "VideoFilterFactory",
+              "VideoTrack",
+              "VideoTransition",
+              "WorkAreaUtils",
+              "constructor",
+              "eventRoot"
+            ],
+            "matches": [
+              {
+                "name": "CloseProjectOptions",
+                "kind": "function"
+              },
+              {
+                "name": "ProjectClosedEvent",
+                "kind": "function"
+              }
+            ]
+          },
+          {
+            "path": "premierepro.Application",
+            "present": true,
+            "type": "function",
+            "names_count": 5,
+            "names": [
+              "arguments",
+              "caller",
+              "length",
+              "name",
+              "prototype"
+            ],
+            "matches": []
+          },
+          {
+            "path": "premierepro.Application.prototype",
+            "present": true,
+            "type": "object",
+            "names_count": 5,
+            "names": [
+              "addEventListener",
+              "constructor",
+              "dispatchEvent",
+              "removeEventListener",
+              "version"
+            ],
+            "matches": []
+          },
+          {
+            "path": "uxp",
+            "present": true,
+            "type": "object",
+            "names_count": 11,
+            "names": [
+              "dialog",
+              "entrypoints",
+              "host",
+              "hostPluginMessaging",
+              "pluginLoader",
+              "pluginManager",
+              "secureStorage",
+              "shell",
+              "storage",
+              "versions",
+              "xmp"
+            ],
+            "matches": []
+          },
+          {
+            "path": "uxp.host",
+            "present": true,
+            "type": "object",
+            "names_count": 6,
+            "names": [
+              "applicationPath",
+              "constructor",
+              "getBackgroundColor",
+              "name",
+              "uiLocale",
+              "version"
+            ],
+            "matches": []
+          }
+        ]
+      },
+      "error": null
+    },
+    "loopback": {
+      "op": "loopback",
+      "ok": false,
+      "ms": 4103,
+      "detail": {
+        "manifest_domains": [
+          "ws://127.0.0.1:*",
+          "ws://localhost:*",
+          "http://127.0.0.1:*",
+          "http://localhost:*",
+          "ws://127.0.0.1",
+          "ws://localhost",
+          "http://127.0.0.1",
+          "http://localhost"
+        ],
+        "denied_pattern": "/permission denied|manifest entry not found/i",
+        "token_sent": false,
+        "engine_json": "C:/Users/LOQ/.whynot-cut/bridge/engine.json",
+        "port": 60276,
+        "forms": [
+          {
+            "form": "ws://127.0.0.1:<port>/session",
+            "url": "ws://127.0.0.1:60276/session",
+            "kind": "ws",
+            "host": "127.0.0.1",
+            "allowed": false,
+            "outcome": "constructor threw",
+            "error": "Permission denied to the url ws://127.0.0.1:60276/session. Manifest entry not found.",
+            "ms": 3
+          },
+          {
+            "form": "ws://localhost:<port>/session",
+            "url": "ws://localhost:60276/session",
+            "kind": "ws",
+            "host": "localhost",
+            "allowed": true,
+            "outcome": "open",
+            "error": null,
+            "ms": 2027
+          },
+          {
+            "form": "http://127.0.0.1:<port>/status",
+            "url": "http://127.0.0.1:60276/status",
+            "kind": "http",
+            "host": "127.0.0.1",
+            "allowed": false,
+            "outcome": "rejected",
+            "error": "Permission denied to the url http://127.0.0.1:60276/status. Manifest entry not found.",
+            "ms": 14
+          },
+          {
+            "form": "http://localhost:<port>/status",
+            "url": "http://localhost:60276/status",
+            "kind": "http",
+            "host": "localhost",
+            "allowed": true,
+            "outcome": "response",
+            "status": 401,
+            "status_text": "Unauthorized",
+            "error": null,
+            "ms": 2054
+          }
+        ]
+      },
+      "error": null
+    },
+    "hide_show": {
+      "op": "hide_show",
+      "ok": true,
+      "ms": 0,
+      "detail": {
+        "setup": {
+          "entrypoints_setup": "called",
+          "panel_id": "whynotCutSpike",
+          "listeners": [
+            "panel.create",
+            "panel.show",
+            "panel.hide",
+            "panel.destroy",
+            "document.visibilitychange"
+          ]
+        },
+        "events": [
+          {
+            "seq": 1,
+            "event": "script.loaded",
+            "at": "2026-10-12T23:49:44.276Z",
+            "t_ms": 0,
+            "detail": {
+              "listeners": [
+                "panel.create",
+                "panel.show",
+                "panel.hide",
+                "panel.destroy",
+                "document.visibilitychange"
+              ],
+              "entrypoints_setup": "called"
+            }
+          }
+        ],
+        "order": [
+          "script.loaded"
+        ],
+        "file": "lifecycle.json next to the results (updated on every event, so hiding and showing the panel after the run is recorded too)",
+        "how": "dock the panel in a tab group, switch to another tab and back (hide/show), or close and reopen it from Window > UXP Plugins; then read lifecycle.json"
+      },
+      "error": null
+    },
+    "open_external": {
+      "op": "open_external",
+      "ok": false,
+      "ms": 177260,
+      "detail": {
+        "url": "whynotcut://engine/start",
+        "developer_text": "WhyNot Cut spike 0.1.6 is measuring what happens when it asks to start the WhyNot Cut engine.",
+        "handler_registered": false,
+        "consent_suspect_ms": 1500,
+        "called_at": "2026-10-12T23:52:50.232Z",
+        "settled": "rejected",
+        "elapsed_ms": 177259,
+        "value": null,
+        "value_is_empty_string": false,
+        "error": "User denied.",
+        "consent_dialog_suspected": true,
+        "timeout_ms": 180000,
+        "note": "no whynotcut:// handler is registered on this machine yet: this records what UXP and the OS do with an unknown scheme. Whether a dialog was really shown is not visible to the probe (timing only)"
+      },
+      "error": null
+    }
+  }
+}
