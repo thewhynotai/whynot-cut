@@ -78,6 +78,33 @@ class TestMapKinds(unittest.TestCase):
             self.assertIn(repr(bad), cm.exception.error)
             self.assertIn("sfx-map.json", cm.exception.how)
 
+    def test_case_collisions_are_refused_naming_both_keys(self):
+        m = self.out_dir / "sfx-map.json"
+        write_json(m, {"Pop": "data/SFX/a.wav"})                           # collides with the built-in recipe "pop"
+        with self.assertRaises(Guidance) as cm:
+            sfx.load_map(m)
+        self.assertIn("'Pop'", cm.exception.error)
+        self.assertIn("'pop'", cm.exception.error)
+        self.assertIn("differ only by case", cm.exception.error)
+        self.assertIn("sfx-map.json", cm.exception.error + cm.exception.how)
+        write_json(m, {"Door": "data/SFX/a.wav", "door": "data/SFX/b.wav"})   # two map keys
+        with self.assertRaises(Guidance) as cm:
+            sfx.load_map(m)
+        self.assertIn("'Door'", cm.exception.error)
+        self.assertIn("'door'", cm.exception.error)
+        write_json(m, {"pop": "data/SFX/a.wav", "door": "data/SFX/b.wav"})    # the exact recipe name is fine
+        self.assertEqual(set(sfx.load_map(m)), {"pop", "door"})
+
+    def test_all_bad_keys_are_reported_in_one_guidance(self):
+        write_json(self.out_dir / "sfx-map.json", {"../x": "a.wav", "good": "a.wav", "a b": "a.wav", "Pop": "a.wav",
+                                                   "boom": 5, "Hit": "a.wav", "hit": "a.wav"})
+        with self.assertRaises(Guidance) as cm:
+            sfx.load_map(self.out_dir / "sfx-map.json")
+        for frag in ("'../x'", "'a b'", "'Pop'", "'boom'", "'Hit'", "'hit'"):
+            self.assertIn(frag, cm.exception.error)
+        self.assertNotIn("'good'", cm.exception.error)
+        self.assertEqual(cm.exception.where, str(self.out_dir / "sfx-map.json"))
+
     def test_plain_keys_are_accepted(self):
         keys = ["whoosh", "door_knock", "Hit-2", "a", "x" * 64, "9lives"]
         write_json(self.out_dir / "sfx-map.json", {k: "data/SFX/a.wav" for k in keys})
@@ -223,6 +250,15 @@ class TestInstall(unittest.TestCase):
         prov = json.loads((self.out_dir / "pop.provenance.json").read_text(encoding="utf-8"))
         self.assertEqual(prov["kind"], "pop")
 
+    def test_case_colliding_map_key_deletes_and_converts_nothing(self):
+        make_tone(self.root / "data/SFX/a.wav", seconds=0.5)
+        sfx.install_needed({"pop"}, {}, self.root, self.out_dir)          # the built-in pop.wav
+        before = {p.name: p.read_bytes() for p in self.out_dir.iterdir()}
+        write_json(self.root / "06_audio/sfx-map.json", {"Pop": "data/SFX/a.wav"})
+        with self.assertRaises(Guidance):
+            sfx.install_needed({"pop", "Pop"}, sfx.load_map(self.root / "06_audio/sfx-map.json"), self.root, self.out_dir)
+        self.assertEqual({p.name: p.read_bytes() for p in self.out_dir.iterdir()}, before)
+
     def test_install_needed_unknown_kind_is_guidance_listing_valid(self):
         with self.assertRaises(Guidance) as cm:
             sfx.install_needed({"zzz"}, {}, self.root, self.out_dir)
@@ -308,6 +344,14 @@ class TestPlanValidation(unittest.TestCase):
             r = self.compile_with_graphic(sfx=bad)
             self.assertFalse(r["ok"], bad)
             self.assertTrue(any("graphics sfx" in e for e in r["errors"]), r["errors"])
+
+    def test_kind_differing_only_by_case_is_a_plan_error_with_a_hint(self):
+        for kind in ("Pop", "POP"):
+            r = self.compile_with({"type": kind, "at": "00:00:01.000"})
+            self.assertFalse(r["ok"], kind)
+            self.assertTrue(any("case-sensitive" in e and "'pop'" in e for e in r["errors"]), r["errors"])
+        r = self.compile_with_graphic(sfx="Whoosh")
+        self.assertTrue(any("graphics sfx" in e and "case-sensitive" in e for e in r["errors"]), r["errors"])
 
     def test_map_with_an_unsafe_key_stops_the_plan_with_guidance(self):
         write_json(self.p.p("06_audio/sfx-map.json"), {"../x": "data/SFX/x.wav"})

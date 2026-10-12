@@ -93,17 +93,37 @@ def load_map(path: Path) -> dict:
         raise Guidance(f"{MAP_REL} must be a JSON object {{\"kind\": \"path to the client's sound file\"}}",
                        f"Rewrite {path} as an object, for example {{\"whoosh\": \"data/SFX/whoosh_01.mp3\"}}",
                        str(path))
-    out = {}
+    out, problems, how = {}, [], []
     for kind, entry in data.items():
         if str(kind).startswith("_"):
             continue
-        check_kind_name(kind)
+        try:
+            check_kind_name(kind)
+        except Guidance as e:
+            problems.append(e.error.removeprefix(f"{MAP_REL}: "))
+            how.append(e.how)
+            continue
         ok = (isinstance(entry, str) and entry.strip()) or (isinstance(entry, dict) and isinstance(entry.get("file"), str)
                                                               and entry["file"].strip())
         if not ok:
-            raise Guidance(f"{MAP_REL}: the entry for '{kind}' must be a file path or an object with \"file\"",
-                           f"Fix '{kind}' in {path}: \"{kind}\": \"data/SFX/<file>\"", str(path))
+            problems.append(f"the entry for '{kind}' must be a file path or an object with \"file\"")
+            how.append(f"Fix '{kind}' in {path}: \"{kind}\": \"data/SFX/<file>\"")
+            continue
         out[str(kind)] = entry
+    # kinds become file names, and Windows / macOS treat names that differ only by case as one file: "Pop" would
+    # overwrite or delete the built-in pop.wav (or another key's file), so such a key is refused, never merged
+    seen = {}
+    for kind in out:
+        seen.setdefault(kind.lower(), []).append(kind)
+    for low, keys in seen.items():
+        clash = list(keys) + ([low] if low in RECIPES and low not in keys else [])
+        if len(clash) > 1:
+            problems.append("the SFX kinds " + " and ".join(repr(k) for k in clash) + " differ only by case")
+            how.append(f"Keep one spelling of {' / '.join(repr(k) for k in clash)} in {path} (kinds are file names, and "
+                       "Windows and macOS treat names that differ only by case as the same file)")
+    if problems:
+        raise Guidance(f"{MAP_REL}: " + "; ".join(problems),
+                       " | ".join(dict.fromkeys(how)) if len(how) > 1 else how[0], str(path))
     return out
 
 

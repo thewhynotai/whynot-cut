@@ -244,7 +244,9 @@ def _sfx_kind_ok(errors: list, label: str, kind, inp) -> bool:
     """One cue kind checked against the valid kinds (a plan error naming them when it is not a known string)."""
     if isinstance(kind, str) and kind in inp.sfx_kinds:
         return True
-    errors.append(f"{label} {kind!r} is not a sound kind — use one of: {', '.join(inp.sfx_kinds)} "
+    near = [k for k in inp.sfx_kinds if isinstance(kind, str) and k.lower() == kind.lower()]
+    case = f" (kinds are case-sensitive: did you mean {near[0]!r}?)" if near else ""
+    errors.append(f"{label} {kind!r} is not a sound kind{case} — use one of: {', '.join(inp.sfx_kinds)} "
                   "(or map it in 06_audio/sfx-map.json)")
     return False
 
