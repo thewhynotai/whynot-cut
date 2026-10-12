@@ -2,6 +2,7 @@
 // Commands, paths and timecodes are wrapped in <bdi dir="ltr"> so they stay left-to-right inside Arabic text.
 // Markup is flexbox-friendly and uses only simple classes (UXP and CEP render the same CSS).
 import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction } from "./actions.ts";
+import type { BuildInfo } from "./diagnostics.ts";
 import { fmt } from "./i18n.ts";
 import type { StringKey, Strings } from "./i18n.ts";
 import { MONOGRAM_DATA_URI } from "./monogram.ts";
@@ -32,6 +33,8 @@ export interface UiState {
   working: boolean;
   /** the engine link's diagnosis; absent = the generic offline banner */
   link?: LinkInfo | null;
+  /** the plugin's version and build stamp (shown in the log drawer, copied with the diagnostics); set by the shell */
+  build?: BuildInfo | null;
 }
 
 export function initialUi(): UiState {
@@ -115,6 +118,7 @@ const LINK_CMD: Readonly<Record<string, string>> = {
   refused: "reel doctor",
   protocol: "reel doctor",
   too_large: "reel doctor",
+  blocked: "reel serve --status",
 };
 
 /** The offline banner for a known link diagnosis, or null (unknown code: the generic banner). */
@@ -299,7 +303,8 @@ function logSection(s: PanelState, t: Strings, ui: UiState): string {
         .map((l) => `<li class="log-line log-${l.level === "warn" || l.level === "error" ? l.level : "info"}"><span class="log-ts">${esc(l.ts)}</span>${ltr(l.text)}</li>`)
         .join("")}</ul>`
     : `<p class="muted">${esc(t["log.empty"])}</p>`;
-  return `<section class="sec sec-log">${toggle}${lines}</section>`;
+  const build = ui.build ? `<p class="muted hint log-build">${ltr(`WhyNot Cut ${ui.build.version} · build ${ui.build.build}`)}</p>` : "";
+  return `<section class="sec sec-log">${toggle}${lines}${build}</section>`;
 }
 
 export function render(state: PanelState, t: Strings, ui: UiState = initialUi()): string {

@@ -171,7 +171,7 @@ test("with a DaemonSource the offline banner names the diagnosis (no engine.json
   assert.ok(made[0]!.held.every((x) => !x.live), "no retry timer survives unmount");
 });
 
-test("hide() stops the source for good (stop() is permanent); show() mounts a new one; the host link lives until unmount", async () => {
+test("I1: hide and show keep both sessions (a hidden panel's commands are not cancelled; Premiere may fire show once); only destroy stops them", async () => {
   const { env, root } = makeEnv();
   const made: ReturnType<typeof noEngineSource>[] = [];
   env.createSource = (info) => {
@@ -193,22 +193,39 @@ test("hide() stops the source for good (stop() is permanent); show() mounts a ne
   assert.ok(reg.lifecycle, "show / hide / destroy were registered with the host");
   assert.equal(hostLinks.length, 1);
   reg.lifecycle!.hide();
-  assert.equal(made[0]!.src.diagnosis.code, "stopped");
-  assert.equal(root!.listeners["click"], undefined, "the hidden panel is unmounted");
-  assert.equal(hostLinks[0]!.stopped, false, "hiding the panel keeps Premiere reachable for the engine");
-  reg.lifecycle!.hide(); // twice is harmless
-  reg.lifecycle!.show();
+  reg.lifecycle!.hide();
   await settleShell();
-  assert.equal(made.length, 2, "a new DaemonSource on show");
-  assert.equal(made[1]!.src.diagnosis.code, "no_engine");
-  assert.equal(typeof root!.listeners["click"], "function");
+  assert.equal(made[0]!.src.diagnosis.code, "no_engine", "hiding does not stop the panel's session");
+  assert.equal(typeof root!.listeners["click"], "function", "still mounted");
+  assert.equal(hostLinks[0]!.stopped, false);
+  reg.lifecycle!.show();
+  reg.lifecycle!.show();
+  assert.equal(made.length, 1, "show mounts nothing new: the one session lives on");
   assert.match(root!.innerHTML, /data-link="no_engine"/);
-  reg.lifecycle!.show(); // already shown: nothing new
-  assert.equal(made.length, 2);
   reg.lifecycle!.destroy();
-  assert.equal(made[1]!.src.diagnosis.code, "stopped");
+  assert.equal(made[0]!.src.diagnosis.code, "stopped");
+  assert.equal(root!.listeners["click"], undefined);
   assert.equal(hostLinks[0]!.stopped, true);
+  reg.lifecycle!.show(); // after destroy: nothing comes back
+  assert.equal(made.length, 1);
   assert.equal(hostLinks.length, 1);
+});
+
+test("M8: the shell hands the plugin version and build stamp to the panel: Copy diagnostics carries them, the log drawer shows them", async () => {
+  const { env, root } = makeEnv();
+  const copied: string[] = [];
+  env.navigator = { clipboard: { writeText: async (t: string) => void copied.push(t) } };
+  env.build = { version: "3.0.0", build: "61b12aa 2026-10-12T18:40Z" };
+  const shell = startShell(env);
+  await shell.ready;
+  const click = (action: string) =>
+    root!.listeners["click"]!({ target: { closest: (sel: string) => (sel === "[data-action]" ? { getAttribute: (n: string) => (n === "data-action" ? action : null) } : null), getAttribute: () => null } });
+  click("copy-diagnostics");
+  await settleShell();
+  assert.deepEqual((JSON.parse(copied[0]!) as Record<string, unknown>)["plugin"], { version: "3.0.0", build: "61b12aa 2026-10-12T18:40Z" });
+  click("toggle-log");
+  assert.match(root!.innerHTML, /WhyNot Cut 3\.0\.0 · build 61b12aa 2026-10-12T18:40Z/);
+  shell.unmount();
 });
 
 test("a failing host link start never blanks the panel", async () => {

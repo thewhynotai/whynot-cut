@@ -2,6 +2,7 @@
 //   node scripts/build.mjs spike      -> build/spike/
 //   node scripts/build.mjs plugin     -> build/plugin/   (the WhyNot Cut panel; `--mock` or WNC_MOCK=1 bundles MockSource for visual checks)
 import { build } from "esbuild";
+import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,6 +34,22 @@ export function outDir(target) {
   return join(root, "build", target);
 }
 
+/** The build stamp shown in the panel's log drawer and copied with its diagnostics: the short git hash of HEAD (with
+ *  "+dirty" when adobe/ has uncommitted changes) and the build time in UTC to the minute, e.g.
+ *  "61b12aa 2026-10-12T18:40Z". It tells two builds of the same plugin version apart on a live machine. */
+export function buildStamp(now = new Date()) {
+  const git = (args) => {
+    try {
+      return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      return "";
+    }
+  };
+  const hash = git(["rev-parse", "--short", "HEAD"]) || "nogit";
+  const dirty = git(["status", "--porcelain", "--", ".."]) ? "+dirty" : "";
+  return `${hash}${dirty} ${now.toISOString().slice(0, 16)}Z`;
+}
+
 /** True for `WNC_MOCK=1` / `--mock`: the plugin bundles the panel kit's MockSource instead of the offline source. */
 export function mockRequested(argv = process.argv, env = process.env) {
   return argv.includes("--mock") || ["1", "true"].includes(String(env.WNC_MOCK ?? "").toLowerCase());
@@ -59,7 +76,7 @@ export async function buildTarget(target, { mock = mockRequested() } = {}) {
     external: EXTERNAL,
     legalComments: "none",
     // build-time flag read by src/main.ts; false in every normal build, so esbuild drops MockSource from the bundle
-    define: { __WNC_MOCK__: target === "plugin" && mock ? "true" : "false" },
+    define: { __WNC_MOCK__: target === "plugin" && mock ? "true" : "false", __WNC_BUILD__: JSON.stringify(buildStamp()) },
     logLevel: "warning",
   });
   for (const [from, to] of Object.entries(t.files)) cpSync(join(root, from), join(out, to));

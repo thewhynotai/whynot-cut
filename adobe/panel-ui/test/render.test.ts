@@ -508,6 +508,7 @@ const LINK_CASES: Array<[string, string, string]> = [
   ["refused", "refused", "reel doctor"],
   ["protocol", "different version", "reel doctor"],
   ["too_large", "too large", "reel doctor"],
+  ["blocked", "could not reach the engine on its port", "reel serve --status"],
 ];
 
 test("offline banner names the link diagnosis (EN and AR): its own sentence, its command as a chip, 'tries again by itself'", () => {
@@ -554,4 +555,14 @@ test("link banner: an unknown code falls back to the generic offline banner; a c
   const on = render(s, EN, { ...initialUi(), link: { code: "lost", retry_in_s: 2 } });
   assert.ok(!on.includes("data-link="));
   assert.ok(!on.includes(esc(EN["offline.lost"])));
+});
+
+test("M8: the open log drawer shows the plugin version and build stamp as one left-to-right run; closed, it is not rendered", () => {
+  const s = sampleState("ar", "idle");
+  const build = { version: "3.0.0", build: "61b12aa 2026-10-12T18:40Z" };
+  const open = render(s, AR, { ...initialUi(), logOpen: true, build });
+  assert.ok(open.includes('<p class="muted hint log-build"><bdi dir="ltr">WhyNot Cut 3.0.0 · build 61b12aa 2026-10-12T18:40Z</bdi></p>'), open.slice(-600));
+  const closed = render(s, AR, { ...initialUi(), logOpen: false, build });
+  assert.ok(!closed.includes("log-build"));
+  assert.ok(!render(s, AR, { ...initialUi(), logOpen: true }).includes("log-build"));
 });

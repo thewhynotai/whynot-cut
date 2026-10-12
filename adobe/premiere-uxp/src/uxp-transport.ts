@@ -1,12 +1,15 @@
 // The UXP side of the engine link: what DaemonSource (the panel, a requester) and the host link (the Premiere ops, a
 // host) need from the plugin runtime, built from injected globals so node tests run it on fakes and on Node's own
 // WebSocket / fetch / fs (test/daemon-e2e.test.ts).
-//   - engine.json: <os.homedir()>/.whynot-cut/bridge/engine.json through UXP fs (readFile with utf-8, else
-//     readFileSync). Missing -> null (DaemonSource retries); there but not JSON -> {} (diagnosed as a damaged file).
+//   - engine.json: <os.homedir()>/.whynot-cut/bridge/engine.json through UXP fs (readFile with {encoding: "utf-8"},
+//     the form the spike measured, else readFileSync(path, "utf-8")); bytes are decoded by hand when the runtime has
+//     no TextDecoder (UXP). Missing -> null (DaemonSource retries); there but not JSON -> {} (a damaged file).
 //     The discovery copy of a daemon serving another engine home looks the same (plus `home`): it is used as is.
 //   - WebSocket: the global one (UXP has it, parity P1), wrapped to DaemonSocket for the panel; the host adapter takes
 //     the raw socket (it fits HostSocket).
-//   - GET /status: the global fetch with only the Authorization header. The panel never sets an Origin; whether UXP's
+//   - GET /status: the global fetch with only the Authorization header; a fetch that throws is passed on (DaemonSource
+//     calls it "blocked": engine.json names a port the panel cannot reach), no answer in time is null. The panel never
+//     sets an Origin; whether UXP's
 //     fetch adds one by itself is measured live (spike 0.1.3): if it does and the daemon refuses it, /status answers
 //     403 and the panel says "refused (Host / Origin)", which is also the right diagnosis for the refused WebSocket.
 // Nothing here logs, stores or returns the token except inside the parsed engine.json handed to its two users.
@@ -58,16 +61,51 @@ export function engineJsonPath(home: string): string {
   return `${home.replace(/\\/g, "/").replace(/\/+$/, "")}/.whynot-cut/bridge/engine.json`;
 }
 
+/** UTF-8 bytes to text: TextDecoder when the runtime has it (UXP does not), else by hand (invalid bytes -> U+FFFD). */
+export function decodeUtf8(data: ArrayBuffer | ArrayBufferView): string {
+  const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  const TD = (globalThis as { TextDecoder?: new () => { decode(b: Uint8Array): string } }).TextDecoder;
+  if (typeof TD === "function") return new TD().decode(bytes);
+  const BAD = "�";
+  let out = "";
+  for (let i = 0; i < bytes.length; ) {
+    const b = bytes[i]!;
+    if (b < 0x80) {
+      out += String.fromCharCode(b);
+      i += 1;
+      continue;
+    }
+    // continuation bytes after a lead byte: 110xxxxx -> 1, 1110xxxx -> 2, 11110xxx -> 3
+    const need = b >= 0xf0 && b < 0xf8 ? 3 : b >= 0xe0 && b < 0xf0 ? 2 : b >= 0xc0 && b < 0xe0 ? 1 : 0;
+    if (need === 0 || i + need >= bytes.length) {
+      out += BAD;
+      i += 1;
+      continue;
+    }
+    let cp = b & (0x3f >> need);
+    let ok = true;
+    for (let k = 1; k <= need; k++) {
+      const c = bytes[i + k]!;
+      if ((c & 0xc0) !== 0x80) ok = false;
+      cp = (cp << 6) | (c & 0x3f);
+    }
+    if (!ok || cp > 0x10ffff) {
+      out += BAD;
+      i += 1;
+      continue;
+    }
+    out += String.fromCodePoint(cp);
+    i += need + 1;
+  }
+  return out;
+}
+
 async function readText(fs: UxpFs, path: string): Promise<string> {
-  if (typeof fs.readFile === "function") {
-    const data = await fs.readFile(path, { encoding: "utf-8" });
-    return typeof data === "string" ? data : new TextDecoder().decode(data);
-  }
-  if (typeof fs.readFileSync === "function") {
-    const data = fs.readFileSync(path, { encoding: "utf-8" });
-    return typeof data === "string" ? data : new TextDecoder().decode(data);
-  }
-  throw new Error("UXP fs cannot read files here");
+  let data: string | ArrayBuffer | ArrayBufferView;
+  if (typeof fs.readFile === "function") data = await fs.readFile(path, { encoding: "utf-8" });
+  else if (typeof fs.readFileSync === "function") data = fs.readFileSync(path, "utf-8");
+  else throw new Error("UXP fs cannot read files here");
+  return typeof data === "string" ? data : decodeUtf8(data);
 }
 
 /** The parsed engine.json: null when it is missing or unreadable, {} when it is there but not a JSON object. */
@@ -114,7 +152,8 @@ export function timerOf(g: Pick<LinkGlobals, "setTimeout" | "clearTimeout">): (f
   };
 }
 
-/** GET url with these headers: the HTTP status, or null when nothing answers within STATUS_TIMEOUT_MS. */
+/** GET url with these headers: the HTTP status, null when nothing answers within STATUS_TIMEOUT_MS; a fetch that
+ *  throws (the port is blocked or refused) rejects, which DaemonSource diagnoses as "blocked". */
 export function statusProbe(g: Pick<LinkGlobals, "fetch" | "setTimeout" | "clearTimeout">): ((url: string, headers: { Authorization: string }) => Promise<number | null>) | undefined {
   const f = g.fetch;
   if (typeof f !== "function") return undefined;
@@ -128,8 +167,6 @@ export function statusProbe(g: Pick<LinkGlobals, "fetch" | "setTimeout" | "clear
       // only Authorization: never an Origin (the daemon refuses browser origins)
       const res = await Promise.race([f(url, { method: "GET", headers: { Authorization: headers.Authorization } }), timeout]);
       return res && typeof res.status === "number" ? res.status : null;
-    } catch {
-      return null;
     } finally {
       (stop as (() => void) | null)?.();
     }

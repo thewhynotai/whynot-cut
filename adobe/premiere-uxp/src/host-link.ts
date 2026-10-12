@@ -4,6 +4,9 @@
 // is open, hands it to startHostAdapter (which says hello as kind "uxp" with its capabilities). When the socket closes,
 // fails to open or opens but never gets a welcome, the link waits and tries again: 1-2-4-8-15 s, the panel's backoff,
 // reset by a welcome. It is independent of the panel's own (requester) session: hiding the panel does not stop it.
+// Keepalive: the daemon pings a silent session after 30 s and closes it after 60 s, and whether UXP's WebSocket
+// answers pings is unmeasured, so a connected host sends a `snapshot` every KEEPALIVE_MS itself (the daemon answers
+// with `state`, which the host adapter ignores).
 import { backoffMs, sessionUrl } from "../../panel-ui/src/daemon-source.ts";
 import { startHostAdapter } from "./host-adapter.ts";
 import type { HostAdapter } from "./host-adapter.ts";
@@ -34,6 +37,8 @@ export interface HostLink {
 }
 
 export const HOST_CONNECT_TIMEOUT_MS = 10_000;
+/** a connected host session sends a snapshot this often (the daemon closes a session silent for 60 s) */
+export const KEEPALIVE_MS = 20_000;
 
 function recordOf(raw: unknown): { port: number; token: string } | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -54,6 +59,8 @@ export function startHostLink(opts: HostLinkOptions): HostLink {
   let adapter: HostAdapter | null = null;
   let stopRetry: (() => void) | null = null;
   let stopConnect: (() => void) | null = null;
+  let stopKeepalive: (() => void) | null = null;
+  let keepaliveSeq = 0;
   let lastWhy = "";
 
   const log = (level: "info" | "warn" | "error", text: string) => {
@@ -76,7 +83,22 @@ export function startHostLink(opts: HostLinkOptions): HostLink {
   function clearTimers(): void {
     stopRetry?.();
     stopConnect?.();
-    stopRetry = stopConnect = null;
+    stopKeepalive?.();
+    stopRetry = stopConnect = stopKeepalive = null;
+  }
+
+  /** every KEEPALIVE_MS while this connection is the current one and welcomed */
+  function keepalive(g: number, sock: WebSocketLike): void {
+    stopKeepalive = opts.setTimer(() => {
+      stopKeepalive = null;
+      if (stopped || g !== gen || ws !== sock || state !== "connected") return;
+      try {
+        sock.send(JSON.stringify({ type: "snapshot", id: `host-keepalive-${++keepaliveSeq}` }));
+      } catch {
+        return; // the close that follows retries
+      }
+      keepalive(g, sock);
+    }, KEEPALIVE_MS);
   }
 
   function drop(): void {
@@ -152,6 +174,8 @@ export function startHostLink(opts: HostLinkOptions): HostLink {
           stopConnect?.();
           stopConnect = null;
           setState("connected");
+          stopKeepalive?.();
+          keepalive(g, sock);
         },
         onClose: () => {
           if (g !== gen) return;

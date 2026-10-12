@@ -198,7 +198,7 @@ interface Rig {
   states: PanelState[];
 }
 
-function rig(opts: { record?: unknown; noProbe?: boolean; openThrows?: boolean } = {}): Rig {
+function rig(opts: { record?: unknown; noProbe?: boolean; openThrows?: boolean; probeThrows?: boolean } = {}): Rig {
   const r = {
     clock: new Clock(),
     daemon: new FakeDaemon(),
@@ -230,6 +230,7 @@ function rig(opts: { record?: unknown; noProbe?: boolean; openThrows?: boolean }
   if (!opts.noProbe) {
     transport.httpGetStatus = async (url: string, headers: { Authorization: string }) => {
       r.probes.push({ url, headers: { ...headers } });
+      if (opts.probeThrows) throw new TypeError("Network request failed");
       return r.daemon.statusCode;
     };
   }
@@ -567,7 +568,7 @@ test("diagnosis: close 1009 -> too_large; a lost connection fails pending comman
 });
 
 test("diagnosis: refused before the upgrade -> GET /status with the bearer header tells down / Host-Origin / busy / stale token", async () => {
-  for (const [status, code] of [[null, "down"], [403, "refused_host"], [503, "refused_busy"], [401, "auth"], [200, "refused"]] as const) {
+  for (const [status, code] of [[null, "down"], [403, "refused_host"], [503, "refused_busy"], [401, "auth"], [200, "refused_host"], [500, "refused"]] as const) {
     const r = rig();
     r.daemon.mode = "refuse";
     r.daemon.statusCode = status;
@@ -759,5 +760,64 @@ test("localHost: while offline the host pill shows the panel's own host (validat
   assert.deepEqual((await src.snapshot()).connection.host, { state: "cep" });
   src.stop();
   assert.deepEqual((await src.snapshot()).connection.host, { state: "uxp", detail: "Premiere Pro 26.5.2" });
+  r.src.stop();
+});
+
+// ---------------------------------------------------------------------------------------------- final fix wave
+test("I2: engine.json is there but the port cannot be reached (the socket throws at once, or /status throws) -> blocked, not 'not running'", async () => {
+  // the WebSocket constructor throws (a network permission refusing the port): no probe needed
+  const a = rig({ openThrows: true });
+  a.src.start();
+  await a.clock.advance(0);
+  assert.equal(a.src.diagnosis.code, "blocked");
+  assert.match(a.src.diagnosis.text, /could not reach the engine on its port/);
+  assert.match(a.src.diagnosis.how ?? "", /reel serve --status/);
+  assert.deepEqual(a.probes, []);
+  a.src.stop();
+  // the socket fails before it opens and the /status probe throws too
+  const b = rig({ probeThrows: true });
+  b.daemon.mode = "refuse";
+  b.src.start();
+  await b.clock.advance(0);
+  assert.equal(b.src.diagnosis.code, "blocked");
+  assert.equal(b.probes.length, 1);
+  b.src.stop();
+  // a probe that answers nothing in time (null) is still "down"; no engine.json is still no_engine
+  const c = rig();
+  c.daemon.mode = "refuse";
+  c.daemon.statusCode = null;
+  c.src.start();
+  await c.clock.advance(0);
+  assert.equal(c.src.diagnosis.code, "down");
+  c.src.stop();
+  const d = rig({ record: undefined, openThrows: true });
+  d.src.start();
+  await d.clock.advance(1000);
+  assert.equal(d.src.diagnosis.code, "no_engine");
+  d.src.stop();
+});
+
+test("M1: error{auth} before a close that UXP reports as 1006 is still the wrong-key diagnosis", async () => {
+  const r = rig();
+  r.daemon.token = TOKEN2;
+  r.daemon.receive = (s, m) => {
+    if (m.type !== "hello") return;
+    s.deliver({ type: "error", code: "auth", message: "The first message must be a hello with the engine token from engine.json." });
+    s.serverClose(1006, "");
+  };
+  r.src.start();
+  await r.clock.advance(0);
+  assert.equal(r.src.diagnosis.code, "auth");
+  r.src.stop();
+});
+
+test("M2: the socket is refused but /status answers 200 with the token -> the Origin was refused (refused_host)", async () => {
+  const r = rig();
+  r.daemon.mode = "refuse";
+  r.daemon.statusCode = 200;
+  r.src.start();
+  await r.clock.advance(0);
+  assert.equal(r.src.diagnosis.code, "refused_host");
+  assert.match(r.src.diagnosis.text, /Origin/);
   r.src.stop();
 });

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { startHostLink } from "../src/host-link.ts";
 import type { HostLinkState } from "../src/host-link.ts";
-import { createDaemonTransport, engineJsonPath, homeOf, readEngineJson, statusProbe, wrapSocket } from "../src/uxp-transport.ts";
+import { createDaemonTransport, decodeUtf8, engineJsonPath, homeOf, readEngineJson, statusProbe, wrapSocket } from "../src/uxp-transport.ts";
 import type { LinkGlobals, WebSocketLike } from "../src/uxp-transport.ts";
 import { CAPABILITIES } from "../src/ops/index.ts";
 import { SEQ, WIN_PROJECT, makeEnv } from "./host-adapter.fakes.ts";
@@ -153,7 +153,7 @@ test("wrapSocket: open / text messages / close(code, reason) reach DaemonSource'
   assert.ok(wrapSocket(new FakeWs("u")));
 });
 
-test("the /status probe: GET with the Authorization header only (never an Origin); a throw or a hang is null", async () => {
+test("the /status probe: GET with the Authorization header only (never an Origin); a hang is null, a throw is passed on (blocked)", async () => {
   const calls: Array<[string, unknown]> = [];
   const probe = statusProbe(globals({
     fetch: async (url, init) => {
@@ -164,7 +164,7 @@ test("the /status probe: GET with the Authorization header only (never an Origin
   assert.equal(await probe("http://127.0.0.1:51234/status", { Authorization: `Bearer ${TOKEN}` }), 403);
   assert.deepEqual(calls, [["http://127.0.0.1:51234/status", { method: "GET", headers: { Authorization: `Bearer ${TOKEN}` } }]]);
   const failing = statusProbe(globals({ fetch: async () => { throw new Error("ECONNREFUSED"); } }))!;
-  assert.equal(await failing("http://127.0.0.1:1/status", { Authorization: "Bearer x" }), null);
+  await assert.rejects(() => failing("http://127.0.0.1:1/status", { Authorization: "Bearer x" }), /ECONNREFUSED/);
   let fire: (() => void) | null = null;
   const hanging = statusProbe(globals({
     fetch: () => new Promise(() => {}),
@@ -247,7 +247,7 @@ test("host link: no engine.json / a refused socket / a closed session -> back of
   assert.equal((second.sent[0] as { token: string }).token, "d4".repeat(32));
   second.deliver(welcome);
   assert.equal(r.link.state, "connected");
-  assert.deepEqual(r.timers.pending(), [], "the connect timeout is cleared by the welcome");
+  assert.deepEqual(r.timers.pending(), [20_000], "the connect timeout is cleared by the welcome; the keepalive runs");
   second.drop(1001, "daemon stopping"); // the daemon stops
   await flush();
   assert.equal(r.link.state, "waiting");
@@ -283,4 +283,70 @@ test("host link: stop() while waiting or connecting leaves no socket and no time
   assert.deepEqual(r.timers.pending(), []);
   FakeWs.all[0]!.open(); // a late open after stop does nothing
   assert.equal(FakeWs.all[0]!.sent.length, 0);
+});
+
+// ---- final fix wave ----------------------------------------------------------------------------------------------
+
+test("I3: the host session keeps itself alive: a snapshot every 20 s while connected (the daemon pings at 30 s, closes at 60 s)", async () => {
+  const r = hostRig({ value: REC });
+  await flush();
+  const ws = FakeWs.all[0]!;
+  ws.open();
+  await r.timers.advance(5_000); // welcomed well inside the 10 s connect timeout
+  ws.deliver(welcome);
+  const snaps = () => ws.sent.filter((m) => m["type"] === "snapshot");
+  await r.timers.advance(19_999);
+  assert.equal(snaps().length, 0, "nothing before 20 s after the welcome");
+  await r.timers.advance(1);
+  assert.equal(snaps().length, 1);
+  await r.timers.advance(40_000);
+  assert.equal(snaps().length, 3);
+  for (const m of snaps()) assert.match(String(m["id"]), /^[A-Za-z0-9._-]{1,64}$/);
+  assert.equal(new Set(snaps().map((m) => m["id"])).size, 3, "fresh ids");
+  // the daemon's answer (state) is ignored by the host adapter: no reply, no error
+  const before = ws.sent.length;
+  ws.deliver({ type: "state", id: snaps()[0]!["id"], state: {} });
+  assert.equal(ws.sent.length, before);
+  ws.drop(1001, "daemon stopping");
+  await flush();
+  await r.timers.advance(20_000);
+  assert.equal(snaps().length, 3, "no keepalive on a closed session");
+  r.link.stop();
+  assert.deepEqual(r.timers.pending(), []);
+});
+
+test("M3: engine.json bytes (readFile without a string) are decoded without TextDecoder; readFileSync gets 'utf-8'", async () => {
+  const g = globalThis as { TextDecoder?: unknown };
+  const saved = g.TextDecoder;
+  const text = `\uFEFF${JSON.stringify({ ...REC, home: "C:/Users/يونس/.whynot-cut-2" })}`;
+  const bytes = new Uint8Array(Buffer.from(text, "utf8")).buffer;
+  g.TextDecoder = undefined;
+  try {
+    const os = { homedir: () => "/Users/ed" };
+    const got = (await readEngineJson({ readFile: async () => bytes }, os)) as Record<string, unknown>;
+    assert.equal(got["home"], "C:/Users/يونس/.whynot-cut-2");
+    assert.equal(got["token"], TOKEN);
+    const seen: unknown[] = [];
+    const sync = (await readEngineJson({ readFileSync: (_p: string, o?: unknown) => (seen.push(o), JSON.stringify(REC)) }, os)) as Record<string, unknown>;
+    assert.equal(sync["port"], REC.port);
+    assert.deepEqual(seen, ["utf-8"]);
+  } finally {
+    g.TextDecoder = saved;
+  }
+});
+
+test("M3: the hand-written UTF-8 decoder equals Node's for Arabic, emoji and ASCII; broken bytes become U+FFFD", () => {
+  const g = globalThis as { TextDecoder?: unknown };
+  const saved = g.TextDecoder;
+  g.TextDecoder = undefined;
+  try {
+    for (const s of ["", "plain ascii", "يونس — WhyNot Cut", "a😀b", "﻿{\"x\":1}", "é€𝄞"]) {
+      assert.equal(decodeUtf8(new Uint8Array(Buffer.from(s, "utf8"))), s);
+    }
+    assert.equal(decodeUtf8(new Uint8Array([0x61, 0xd9])), "a�", "a truncated sequence");
+    assert.equal(decodeUtf8(new Uint8Array([0x80, 0x62])), "�b", "a stray continuation byte");
+    assert.equal(decodeUtf8(new Uint8Array([0xe2, 0x28, 0xa1])), "�(�", "a bad continuation");
+  } finally {
+    g.TextDecoder = saved;
+  }
 });

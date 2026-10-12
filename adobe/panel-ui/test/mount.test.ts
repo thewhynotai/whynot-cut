@@ -327,3 +327,11 @@ test("Reveal folder / Copy diagnostics: a host that did it ('done') gets a short
   await tick();
   assert.ok(r2.innerHTML.includes("banner-error") && r2.innerHTML.includes("host broke"));
 });
+
+test("M8: Copy diagnostics carries ui.build (the plugin version and build stamp the shell set)", async () => {
+  const { root, calls, handle } = await setup();
+  handle.ui.build = { version: "3.0.0", build: "61b12aa 2026-10-12T18:40Z" };
+  root.click({ "data-action": "copy-diagnostics" });
+  const d = JSON.parse(calls.copy[0]!) as Record<string, unknown>;
+  assert.deepEqual(d["plugin"], { version: "3.0.0", build: "61b12aa 2026-10-12T18:40Z" });
+});

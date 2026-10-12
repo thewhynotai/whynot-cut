@@ -18,7 +18,7 @@ export interface UxpFs {
   mkdir?: (path: string, options?: { recursive?: boolean }) => Promise<unknown>;
   lstat?: (path: string) => Promise<UxpStats>;
   readdir?: (path: string) => Promise<string[]>;
-  readFileSync?: (path: string, options?: { encoding: string } | string) => string | ArrayBuffer;
+  readFileSync?: (path: string, options?: { encoding: string } | string) => string | ArrayBuffer | ArrayBufferView;
   writeFileSync?: (path: string, data: string | ArrayBuffer, options?: { encoding: string } | string) => unknown;
   mkdirSync?: (path: string, options?: { recursive?: boolean }) => unknown;
   lstatSync?: (path: string) => UxpStats;

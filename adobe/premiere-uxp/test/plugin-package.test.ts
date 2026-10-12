@@ -78,6 +78,8 @@ test("the shipped bundle: UXP host modules stay external, no mock data, the engi
   assert.match(js, /ws:\/\/127\.0\.0\.1:/);
   assert.match(js, /reel serve --ensure/);
   assert.match(js, /kind: "uxp"/);
+  // M8: the build stamp (short git hash [+dirty] + UTC build time) is baked in for the log drawer and the diagnostics
+  assert.match(js, /build: "(?:[0-9a-f]{7,}|nogit)(?:\+dirty)? \d{4}-\d\d-\d\dT\d\d:\d\dZ"/);
   const html = text(files["index.html"]);
   assert.match(html, /<script[^>]+src="index\.js"/);
   assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["tokens.css", "panel.css", "index.css"]);

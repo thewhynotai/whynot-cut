@@ -20,6 +20,8 @@ import manifest from "../plugin/manifest.json";
 declare const require: (id: string) => unknown;
 /** replaced by esbuild `define` (scripts/build.mjs): true only for `WNC_MOCK=1` builds */
 declare const __WNC_MOCK__: boolean;
+/** replaced by esbuild `define`: "<short git hash>[+dirty] <UTC build time>" (scripts/build.mjs buildStamp) */
+declare const __WNC_BUILD__: string;
 
 // literal require() calls, exactly as the spike proved them in Premiere: only the host modules the plugin uses
 function hostModule(id: string): unknown {
@@ -104,9 +106,10 @@ const env: ShellEnv = {
       log: (level, text) => (level === "info" ? g.console?.log?.(text) : g.console?.log?.(`[${level}] ${text}`)),
     });
   },
+  build: { version: bundleVersion(), build: __WNC_BUILD__ },
   onLifecycle: (handlers: PanelLifecycle) => {
-    // the manifest's one panel; UXP calls show / hide as the editor opens and closes it. Not measured in Premiere yet
-    // (whether hide fires for a docked panel); without the calls the panel just stays mounted.
+    // the manifest's one panel. show / hide are no-ops in the shell (the sessions outlive a hidden panel; Premiere's
+    // events are unmeasured); destroy ends both sessions.
     const entrypoints = (uxpModule() as { entrypoints?: { setup?: (cfg: unknown) => void } } | undefined)?.entrypoints;
     entrypoints?.setup?.({
       panels: {

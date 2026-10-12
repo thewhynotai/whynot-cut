@@ -50,8 +50,9 @@ export interface DaemonTransport {
   readEngineJson(): unknown | Promise<unknown>;
   /** Open a WebSocket to `url` (always ws://127.0.0.1:<port>/session). May throw: treated as a refused connection. */
   openSocket(url: string): DaemonSocket;
-  /** GET `url` (http://127.0.0.1:<port>/status) with these headers; resolves the HTTP status code, or null when nothing
-   *  answers (connection refused / network error). Optional: without it a failed upgrade is "unreachable". */
+  /** GET `url` (http://127.0.0.1:<port>/status) with these headers; resolves the HTTP status code, null when nothing
+   *  answers in time, and THROWS when the request cannot be made at all (a network permission refusing the port, a
+   *  refused connection): that is the "blocked" diagnosis. Optional: without it a failed upgrade is "unreachable". */
   httpGetStatus?(url: string, headers: { Authorization: string }): Promise<number | null>;
   /** Milliseconds since the epoch. */
   now(): number;
@@ -114,6 +115,7 @@ export type LinkCode =
   | "bad_engine_json" // engine.json is there but unusable
   | "down" // engine.json names a port nothing answers on
   | "unreachable" // the upgrade failed and there is no /status probe to say why
+  | "blocked" // engine.json names a port, but the socket or the /status request throws (a permission, a dead port)
   | "refused_host" // HTTP 403: the daemon refused this panel's Host / Origin
   | "refused_busy" // HTTP 503: the daemon's connection cap
   | "refused" // the daemon answers /status but the WebSocket failed
@@ -134,6 +136,11 @@ export interface LinkDiagnosis {
 }
 
 const START_HOW = "Start it from your Claude session (reel serve --ensure), then wait a moment.";
+const BLOCKED: Omit<LinkDiagnosis, "retry_in_s"> = {
+  code: "blocked",
+  text: "The panel could not reach the engine on its port (engine.json names it, but the connection was refused or blocked).",
+  how: "Check it from your Claude session: reel serve --status.",
+};
 
 // ------------------------------------------------------------------------------------------------ incoming messages
 
@@ -518,7 +525,7 @@ export class DaemonSource implements PanelDataSource {
       sock = this.t.openSocket(sessionUrl(rec.port));
     } catch (e) {
       this.logLine("warn", `The engine connection could not be opened: ${this.scrub(e instanceof Error ? e.message : String(e))}`);
-      return this.unreached(gen);
+      return this.retry({ ...BLOCKED });
     }
     this.sock = sock;
     sock.onopen = () => {
@@ -557,7 +564,8 @@ export class DaemonSource implements PanelDataSource {
     if (code === 1008 && err?.code === "schema" && /protocol/i.test(err.message)) {
       return this.retry({ code: "protocol", text: "The engine is a different version from this panel (protocol 4 required).", how: "Update the WhyNot Cut panel and engine to the same version." });
     }
-    if (code === 1008) {
+    // UXP may report the daemon's 1008 as 1006: the error{auth} that came before it says the same
+    if (code === 1008 || err?.code === "auth") {
       return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel reads engine.json again on the next try; if this repeats, restart the engine (reel serve --ensure)." });
     }
     if (code === 1009) {
@@ -578,13 +586,19 @@ export class DaemonSource implements PanelDataSource {
       return this.retry({ code: "unreachable", text: "The panel could not reach the WhyNot Cut engine.", how: START_HOW });
     }
     let status: number | null = null;
+    let threw = false;
     try {
       status = await probe.call(this.t, statusUrl(this.port), { Authorization: `Bearer ${token}` });
     } catch {
-      status = null;
+      threw = true;
     }
     if (gen !== this.gen || this.stopped) return;
+    if (threw) return this.retry({ ...BLOCKED });
     if (status === null) return this.retry({ code: "down", text: "The WhyNot Cut engine is not running.", how: START_HOW });
+    if (status === 200) {
+      // /status accepts the token, so the daemon is up and the key is right: only the WebSocket's Origin was refused
+      return this.retry({ code: "refused_host", text: "The engine is running, but it refused the panel's connection (Origin check).", how: "Reinstall the WhyNot Cut panel; if this repeats, send the engine log (serve-audit.log names the Origin)." });
+    }
     if (status === 403) {
       return this.retry({ code: "refused_host", text: "The engine refused the panel's connection (Host / Origin check).", how: "Reinstall the WhyNot Cut panel; if this repeats, send the engine log." });
     }

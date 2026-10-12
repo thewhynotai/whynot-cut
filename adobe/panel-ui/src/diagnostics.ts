@@ -13,11 +13,19 @@ function connectionOf(c: PanelState["connection"] | null | undefined): Record<st
   return { ...pick(c, ["engine", "claude"]), host: pick(c?.host, ["state", "detail"]) };
 }
 
+/** Which plugin build is running: the version and a build stamp (short git hash + build time), so two builds of the
+ *  same version can be told apart on a live machine. The shell sets it (UiState.build). */
+export interface BuildInfo {
+  version: string;
+  build: string;
+}
+
 /** Plain text a support person can read: what the panel shows, the context paths and the last log lines. */
-export function diagnosticsText(s: PanelState): string {
+export function diagnosticsText(s: PanelState, build?: BuildInfo | null): string {
   return JSON.stringify(
     {
       product: "WhyNot Cut panel",
+      ...(build ? { plugin: { version: String(build.version), build: String(build.build) } } : {}),
       protocol: PROTOCOL,
       client: s.client,
       item: s.item,

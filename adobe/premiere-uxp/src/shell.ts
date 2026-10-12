@@ -5,12 +5,14 @@
 // Two engine sessions, both chosen by main.ts:
 //   - the panel's data source (createSource): DaemonSource, a requester of `reel serve` (state, intents, commands,
 //     cancel), or OfflineSource when the runtime cannot reach the engine at all. A source with a link diagnosis
-//     (DaemonSource) puts it into the panel's offline banner (ui.link). Hiding the panel stops the source (stop() is
-//     permanent) and showing it mounts a new one.
-//   - the host link (startHostLink): the Premiere ops the engine routes here. Started once, kept while the panel is
-//     hidden (the engine may still need Premiere), stopped when the plugin's panel is destroyed (unmount).
+//     (DaemonSource) puts it into the panel's offline banner (ui.link).
+//   - the host link (startHostLink): the Premiere ops the engine routes here.
+// Both are started once and live until the panel is destroyed (unmount). Hiding the panel changes nothing: stopping
+// the panel's session would make the daemon cancel every command it started, and Premiere's show / hide events are
+// unmeasured (in Photoshop UXP `show` fires only once, so a panel stopped on hide could never come back).
 import { asMountRoot, mount } from "../../panel-ui/src/mount.ts";
 import type { MountHandle } from "../../panel-ui/src/mount.ts";
+import type { BuildInfo } from "../../panel-ui/src/diagnostics.ts";
 import type { LinkInfo } from "../../panel-ui/src/render.ts";
 import type { Language, PanelDataSource } from "../../panel-ui/src/source.ts";
 import type { UxpModule } from "./uxp-types.ts";
@@ -45,15 +47,17 @@ export interface ShellEnv {
   startHostLink?: () => { stop(): void } | null;
   /** hands the shell's show / hide / destroy to the host (UXP entrypoints.setup) */
   onLifecycle?: (handlers: PanelLifecycle) => void;
+  /** the plugin version and build stamp: shown in the log drawer and copied with the diagnostics */
+  build?: BuildInfo;
 }
 
 export interface Shell {
   ready: Promise<void>;
   /** the panel is gone: stops the data source and the host link */
   unmount(): void;
-  /** the panel became visible again: a new data source is mounted (nothing happens while one is mounted) */
+  /** the panel became visible: nothing to do (the sessions never stop while the panel exists) */
   show(): void;
-  /** the panel was hidden: its data source is stopped and unmounted; the host link keeps running */
+  /** the panel was hidden: nothing to do (see the file comment) */
   hide(): void;
 }
 
@@ -141,11 +145,12 @@ export function startShell(env: ShellEnv): Shell {
       void source.snapshot().then((s) => void (language = s.language), () => {});
       handle = mount(asMountRoot(rootEl), source, host);
       if (isLinked(source)) handle.ui.link = linkOf(source);
+      if (env.build) handle.ui.build = { version: String(env.build.version), build: String(env.build.build) };
       current = { source, handle, offs };
       return handle.ready;
     };
 
-    const hide = () => {
+    const teardown = () => {
       const c = current;
       if (!c) return;
       current = null;
@@ -153,18 +158,13 @@ export function startShell(env: ShellEnv): Shell {
       c.handle.unmount();
       if (isLinked(c.source)) c.source.stop();
     };
-    const show = () => {
-      if (destroyed || current) return;
-      try {
-        void mountSource();
-      } catch (e) {
-        say(doc, `WhyNot Cut could not start: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    };
+    // hide / show: deliberately nothing (I1). The panel's session and its running commands outlive a hidden panel.
+    const hide = () => {};
+    const show = () => {};
     const unmount = () => {
       if (destroyed) return;
       destroyed = true;
-      hide();
+      teardown();
       try {
         hostLink?.stop();
       } catch {

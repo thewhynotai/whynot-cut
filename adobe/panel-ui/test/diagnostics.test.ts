@@ -27,3 +27,11 @@ test("U4: a state with no connection or context still gives text, not an excepti
   const s = sampleState("en", "idle");
   assert.doesNotThrow(() => diagnosticsText({ ...s, connection: null, context: undefined } as never));
 });
+
+test("M8: diagnostics name the plugin version and its build stamp (a same-version rebuild is told apart); without them nothing changes", () => {
+  const s = sampleState("en", "idle");
+  const d = JSON.parse(diagnosticsText(s, { version: "3.0.0", build: "61b12aa 2026-10-12T18:40Z" })) as Record<string, unknown>;
+  assert.deepEqual(d["plugin"], { version: "3.0.0", build: "61b12aa 2026-10-12T18:40Z" });
+  const plain = JSON.parse(diagnosticsText(s)) as Record<string, unknown>;
+  assert.ok(!("plugin" in plain));
+});
