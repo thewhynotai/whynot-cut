@@ -90,8 +90,8 @@ p { margin: 0 0 8px 0; }
 .pill-warn .pill-v { color: var(--twn-warn); }
 .pill-idle .pill-v, .pill-unknown .pill-v { color: var(--twn-text-muted); }
 
-/* a command the editor can copy: a monospace chip on its own row (.cmd-row is a flex container; UXP draws an
-   inline-flex chip over running text, so a chip is never placed inside a sentence). */
+/* a file name chip (the rebuild backup name) in a monospace run on its own row (.cmd-row is a flex container; UXP draws
+   an inline-flex chip over running text, so a chip is never placed inside a sentence). Commands are never on screen. */
 .cmd-row { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; width: 100%; margin-top: 4px; }
 .cmd {
   display: flex;
@@ -140,6 +140,8 @@ p { margin: 0 0 8px 0; }
 .banner-ok { border-color: var(--twn-ok); }
 .banner-x { flex: 0 0 auto; margin: 0 0 0 8px; padding: 0 4px; background: transparent; border: 0; color: var(--twn-text-muted); cursor: pointer; font-size: 12px; }
 .twn-rtl .banner-x { margin: 0 8px 0 0; }
+/* a problem's one fix button (Start engine / Try again / Copy diagnostics) under its sentence */
+.banner-fix { width: 100%; margin-top: 6px; }
 
 /* ---- pipeline ---- */
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: row; flex-wrap: wrap; }

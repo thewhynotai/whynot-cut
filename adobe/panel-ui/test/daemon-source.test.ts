@@ -774,7 +774,10 @@ test("I2: engine.json is there but the port cannot be reached (the socket throws
   await a.clock.advance(0);
   assert.equal(a.src.diagnosis.code, "blocked");
   assert.match(a.src.diagnosis.text, /could not reach the engine on its port/);
-  assert.match(a.src.diagnosis.how ?? "", /reel serve --status/);
+  // C2.2: the how the editor may read names no command; the command that fixes it is in the log line (and diagnostics)
+  assert.match(a.src.diagnosis.how ?? "", /Copy the diagnostics/);
+  assert.doesNotMatch(a.src.diagnosis.how ?? "", /reel /);
+  assert.ok((await a.src.snapshot()).log.some((l) => l.text.endsWith("[fix: reel serve --status]")), "the log line names the fix command");
   assert.deepEqual(a.probes, []);
   a.src.stop();
   // the socket fails before it opens and the /status probe throws too

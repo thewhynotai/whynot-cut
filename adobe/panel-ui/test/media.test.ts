@@ -20,6 +20,9 @@ test("isSafeImg: data:image, file:/// (empty host), plugin: and local paths only
     "../out/a.png",
     "/Users/ed/a.png",
     "my frames/a b.png",
+    // a data URL names no host: percent-encoded SVG keeps its "%2F" closing tags
+    "data:image/svg+xml;utf8,%3Csvg%3E%3C%2Fsvg%3E",
+    "file:///C:/frames/100%25.png",
   ]) {
     assert.ok(isSafeImg(ok), `refused a local thumbnail: ${ok}`);
   }
@@ -48,6 +51,24 @@ test("isSafeImg: data:image, file:/// (empty host), plugin: and local paths only
     "/\t/evil.example/a.png",
     "/\n/evil.example/a.png",
     "",
+    // review minors (dd9cbba): scheme case, a backslash after file:/, percent-encoded and look-alike separators
+    "FiLe://HOST",
+    "FiLe://HOST/a.png",
+    "file:/\\host",
+    "file:/\\host/a.png",
+    "file:///%5Chost",
+    "file:///%5chost/a.png",
+    "file:///%2Fhost",
+    "file:///%2fhost/a.png",
+    "frames/%2F%2Fhost/a.png",
+    "%5C%5Chost/a.png",
+    "∕∕host",
+    "∕∕host/a.png",
+    "＼＼host",
+    "＼＼host\\a.png",
+    "／／host/a.png",
+    "⁄⁄host/a.png",
+    "file:///∕∕host/a.png",
   ]) {
     assert.ok(!isSafeImg(bad), `drew a thumbnail from ${JSON.stringify(bad)}`);
   }

@@ -13,6 +13,7 @@
 // PanelState, a diagnosis or an error text (every text the transport hands back is scrubbed of it).
 import { ACTION_NAMES, PROTOCOL } from "./contract.ts";
 import type { ActionName, RequestEnvelope } from "./contract.ts";
+import { linkFixCommand } from "./diagnostics.ts";
 import { PANEL_UPDATE_STATES, SESSION_ERROR_CODES, SESSION_PROTOCOL } from "./session.ts";
 import type {
   ApproveMessage, CancelMessage, CommandMessage, HelloMessage, PanelUpdate, RebuildMessage, ReplyIntent,
@@ -135,11 +136,14 @@ export interface LinkDiagnosis {
   retry_in_s?: number;
 }
 
-const START_HOW = "Start it from your Claude session (reel serve --ensure), then wait a moment.";
+// What the editor reads: plain words, never a command (Addendum C1.4). The command that fixes a link problem goes into
+// the log line (setDiag) and the Copy diagnostics payload, from diagnostics.ts.
+const START_HOW = "Open your Claude session to start the engine, then wait a moment.";
+const RESTART_HOW = "If this repeats, start the engine again from your Claude session.";
 const BLOCKED: Omit<LinkDiagnosis, "retry_in_s"> = {
   code: "blocked",
   text: "The panel could not reach the engine on its port (engine.json names it, but the connection was refused or blocked).",
-  how: "Check it from your Claude session: reel serve --status.",
+  how: "Copy the diagnostics and send them to support.",
 };
 
 // ------------------------------------------------------------------------------------------------ incoming messages
@@ -524,7 +528,7 @@ export class DaemonSource implements PanelDataSource {
     }
     const rec = readRecord(raw);
     if (rec === "invalid") {
-      return this.retry({ code: "bad_engine_json", text: "The engine's connection file (engine.json) is incomplete or damaged.", how: "Restart the engine: reel serve --ensure." });
+      return this.retry({ code: "bad_engine_json", text: "The engine's connection file (engine.json) is incomplete or damaged.", how: START_HOW });
     }
     if (rec === "protocol") {
       return this.retry({ code: "protocol", text: "The engine is a different version from this panel (protocol 4 required).", how: "Update the WhyNot Cut panel and engine to the same version." });
@@ -581,13 +585,13 @@ export class DaemonSource implements PanelDataSource {
     }
     // UXP may report the daemon's 1008 as 1006: the error{auth} that came before it says the same
     if (code === 1008 || err?.code === "auth") {
-      return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel reads engine.json again on the next try; if this repeats, restart the engine (reel serve --ensure)." });
+      return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel reads engine.json again on the next try; if this repeats, start the engine again from your Claude session." });
     }
     if (code === 1009) {
       return this.retry({ code: "too_large", text: "The engine closed the connection: a message was larger than it accepts.", how: "Send fewer items at once; the panel reconnects by itself." });
     }
     if (timedOut && wasOpened) {
-      return this.retry({ code: "no_welcome", text: "The engine did not answer the panel's hello.", how: "If this repeats, restart the engine (reel serve --ensure)." });
+      return this.retry({ code: "no_welcome", text: "The engine did not answer the panel's hello.", how: RESTART_HOW });
     }
     if (!wasOpened) return this.unreached(gen);
     return this.retry({ code: "lost", text: `The engine connection was lost (code ${code || "none"}).`, how: "The panel reconnects by itself." });
@@ -619,9 +623,9 @@ export class DaemonSource implements PanelDataSource {
     }
     if (status === 503) return this.retry({ code: "refused_busy", text: "The engine has too many connections open.", how: "Close other WhyNot Cut panels or restart the engine." });
     if (status === 401) {
-      return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel reads engine.json again on the next try; if this repeats, restart the engine (reel serve --ensure)." });
+      return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel reads engine.json again on the next try; if this repeats, start the engine again from your Claude session." });
     }
-    return this.retry({ code: "refused", text: `The engine is running but refused the panel's session (HTTP ${status}).`, how: "Restart the engine (reel serve --ensure); if this repeats, send the engine log." });
+    return this.retry({ code: "refused", text: `The engine is running but refused the panel's session (HTTP ${status}).`, how: "Start the engine again from your Claude session; if this repeats, send the engine log." });
   }
 
   private retry(d: LinkDiagnosis): void {
@@ -835,7 +839,9 @@ export class DaemonSource implements PanelDataSource {
     if (!log || this.lastLogged === d.code) return;
     this.lastLogged = d.code;
     const level: LogLine["level"] = d.code === "connected" ? "info" : d.code === "lost" || d.code === "no_engine" ? "warn" : "error";
-    this.logLine(level, d.how ? `${this.diag.text} ${this.scrub(d.how)}` : this.diag.text);
+    // the log drawer is where the command goes (never the banner): it names what fixes this diagnosis
+    const fix = linkFixCommand(d.code);
+    this.logLine(level, (d.how ? `${this.diag.text} ${this.scrub(d.how)}` : this.diag.text) + (fix ? ` [fix: ${fix}]` : ""));
   }
 
   private logLine(level: LogLine["level"], text: string): void {
@@ -866,7 +872,7 @@ export class DaemonSource implements PanelDataSource {
 }
 
 const HOW_BY_CODE: Record<SessionErrorCode, string> = {
-  auth: "Restart the engine (reel serve --ensure); the panel reconnects by itself.",
+  auth: "Start the engine again from your Claude session; the panel reconnects by itself.",
   origin: "Reinstall the WhyNot Cut panel.",
   host: "Reinstall the WhyNot Cut panel.",
   too_large: "Send fewer items at once.",

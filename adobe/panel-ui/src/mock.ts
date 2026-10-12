@@ -29,7 +29,7 @@ const EN_FLAVOR: Flavor = {
   editor: "Yara",
   folder: "E:\\Clients\\PODCAST-TEST\\output\\episodes\\EP01\\EP01_R03",
   summary:
-    "58 s vertical reel from Episode 1, 31:10 to 32:08. Hook: the first coffee myth. 14 statement bars, 6 checklist cards, captions in English, 2 punch-ins, music bed at -24 LUFS.",
+    "58 s vertical clip from Episode 1, 31:10 to 32:08. Hook: the first coffee myth. 14 statement bars, 6 checklist cards, captions in English, 2 punch-ins, music bed at -24 LUFS.",
   flagged: [
     "Caffeine after 2 pm always ruins sleep.",
     "00:00:21:10",

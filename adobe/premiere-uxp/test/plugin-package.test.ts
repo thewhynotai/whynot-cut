@@ -111,7 +111,8 @@ test("the shipped bundle: UXP host modules stay external, no mock data, the engi
   assert.doesNotMatch(js, /PODCAST-TEST|عيادة النور/, "MockSource data must not ship");
   assert.doesNotMatch(js, /Claude Code/);
   assert.match(js, /Powered by thewhynot.ai/);
-  assert.match(js, /In your Claude session run `reel doctor`\./);
+  assert.match(js, /Open your Claude session to start the engine, then wait a moment\./);
+  assert.doesNotMatch(js, /In your Claude session run/, "C2.2: no command lead-in ships");
   // T6.5: the panel is wired to `reel serve` (DaemonSource + the host link), offline banner per diagnosis
   assert.match(js, /require\(\s*["']fs["']\s*\)/);
   assert.match(js, /require\(\s*["']os["']\s*\)/);
@@ -209,7 +210,8 @@ test("the shipped index.js with a WebSocket and no engine.json: DaemonSource dia
   assert.deepEqual(sockets, [], "no engine.json: no socket");
   const html = painted[painted.length - 1] ?? "";
   assert.match(html, /data-link="no_engine"/);
-  assert.match(html, /<bdi dir="ltr">reel serve --ensure<\/bdi>/);
+  assert.match(html, /data-action="start-engine"/, "one fix button, no command (C2.2)");
+  assert.doesNotMatch(html.replace(/<section class="sec sec-log">[\s\S]*?<\/section>/, ""), /reel /);
   assert.match(html, /dir="rtl"/, "Arabic UI locale: the banner is the Arabic one");
   assert.match(html, /Premiere Pro 26\.5\.2/);
   assert.deepEqual(Object.keys(panels), ["whynotCut"], "the manifest's panel id");

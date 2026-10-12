@@ -150,7 +150,7 @@ const settleShell = async () => {
   for (let i = 0; i < 20; i++) await new Promise<void>((r) => setImmediate(r));
 };
 
-test("with a DaemonSource the offline banner names the diagnosis (no engine.json -> reel serve --ensure) and the host pill stays Premiere", async () => {
+test("with a DaemonSource the offline banner names the diagnosis (no engine.json -> one sentence + Start engine, no command) and the host pill stays Premiere", async () => {
   const { env, root } = makeEnv();
   const made: ReturnType<typeof noEngineSource>[] = [];
   env.createSource = (info) => {
@@ -163,7 +163,8 @@ test("with a DaemonSource the offline banner names the diagnosis (no engine.json
   await settleShell();
   assert.equal(made[0]!.src.diagnosis.code, "no_engine");
   assert.match(root!.innerHTML, /data-link="no_engine"/);
-  assert.match(root!.innerHTML, /<bdi dir="ltr">reel serve --ensure<\/bdi>/);
+  assert.match(root!.innerHTML, /data-action="start-engine"/);
+  assert.doesNotMatch(root!.innerHTML.replace(/<section class="sec sec-log">[\s\S]*?<\/section>/, ""), /reel /, "no command outside the log drawer");
   assert.match(root!.innerHTML, /tries again by itself/);
   assert.match(root!.innerHTML, /Premiere Pro 26\.5\.2/);
   shell.unmount();

@@ -11,6 +11,7 @@ import { sampleState } from "../mock.ts";
 import type { Language, LogLine } from "../source.ts";
 import { button, buttonRow } from "./button.ts";
 import { card, paragraph, section } from "./card.ts";
+import { checklist, checklistItem } from "./checklist.ts";
 import { chip, chips } from "./chip.ts";
 import { dialog } from "./dialog.ts";
 import { emptyState } from "./empty.ts";
@@ -23,11 +24,8 @@ import { progress } from "./progress.ts";
 import { footer, kitRoot } from "./root.ts";
 import { stepStrip } from "./steps.ts";
 import { tabs } from "./tabs.ts";
-import { toast } from "./toast.ts";
+import { fixAction, toast } from "./toast.ts";
 import { waveformFrame } from "./waveform.ts";
-
-/** The command the offline hint names (the same in both languages). */
-const ENSURE = "reel serve --ensure";
 
 export interface GallerySection {
   /** the component function's name, e.g. "card()" */
@@ -137,11 +135,26 @@ export function kitGallerySections(lang: Language): readonly GallerySection[] {
     block(
       "toast()",
       join([
-        toast({ t, kind: "error", text: t["offline.no_engine"], how: `${t["offline.hint"]} \`${ENSURE}\``, fix: { label: t["action.retry"], action: "retry" } }),
+        // one plain sentence + one fix button, never a command (Addendum C1.4)
+        toast({ t, kind: "error", text: t["offline.no_engine"], fix: fixAction(t, "start-engine") }),
+        toast({ t, kind: "error", text: t["offline.lost"], fix: fixAction(t, "retry") }),
+        toast({ t, kind: "error", text: t["offline.refused_host"] }),
         toast({ t, kind: "warn", text: t["offline.bad_engine_json"] }),
         toast({ t, kind: "ok", text: t["notice.approved"] }),
         toast({ t, kind: "info", text: t["qc.hint"], dismiss: false }),
       ]),
+    ),
+    block(
+      "checklist()",
+      checklist(
+        [
+          checklistItem(t, "engine", "error", fixAction(t, "start-engine")),
+          checklistItem(t, "premiere", "ok"),
+          checklistItem(t, "claude", "warn", fixAction(t, "retry")),
+          checklistItem(t, "clients", "pending", { label: t["empty.noclient.action"], action: "choose-client" }, true),
+        ],
+        t,
+      ),
     ),
     block(
       "dialog()",

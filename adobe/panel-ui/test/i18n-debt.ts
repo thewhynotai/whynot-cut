@@ -2,11 +2,13 @@
 // itself: the error / how / text it reports, its intent labels and its log lines. DaemonSource behaviour is frozen in
 // B-T1, so they are not in the string table yet; test/i18n.test.ts keeps this list EXACT (a new hard-coded string there
 // fails, and so does an entry that no longer exists), so the debt stays visible until B-T2 moves them into
-// i18n/{en,ar}.json. "§" stands for a template expression.
+// i18n/{en,ar}.json. "§" stands for a template expression. C2.2 (2026-10-13): none of them names a command any more
+// (the guard in test/no-commands.test.ts); the command that fixes a link problem is in DaemonSource's log line.
 export const DAEMON_SOURCE_STRINGS_TO_MIGRATE_IN_B_T2: readonly string[] = [
-  "Start it from your Claude session (reel serve --ensure), then wait a moment.",
+  "Open your Claude session to start the engine, then wait a moment.",
+  "If this repeats, start the engine again from your Claude session.",
   "The panel could not reach the engine on its port (engine.json names it, but the connection was refused or blocked).",
-  "Check it from your Claude session: reel serve --status.",
+  "Copy the diagnostics and send them to support.",
   "Approving",
   "Requesting changes",
   "Rebuilding",
@@ -23,17 +25,15 @@ export const DAEMON_SOURCE_STRINGS_TO_MIGRATE_IN_B_T2: readonly string[] = [
   "Connecting to the WhyNot Cut engine...",
   "The WhyNot Cut engine is not running (no engine.json).",
   "The engine's connection file (engine.json) is incomplete or damaged.",
-  "Restart the engine: reel serve --ensure.",
   "The engine is a different version from this panel (protocol 4 required).",
   "Update the WhyNot Cut panel and engine to the same version.",
   "The engine connection could not be opened: §",
   "The engine connection was lost before it answered.",
   "The engine refused the panel's key (engine.json is out of date or from another engine).",
-  "The panel reads engine.json again on the next try; if this repeats, restart the engine (reel serve --ensure).",
+  "The panel reads engine.json again on the next try; if this repeats, start the engine again from your Claude session.",
   "The engine closed the connection: a message was larger than it accepts.",
   "Send fewer items at once; the panel reconnects by itself.",
   "The engine did not answer the panel's hello.",
-  "If this repeats, restart the engine (reel serve --ensure).",
   "The engine connection was lost (code §).",
   "The panel reconnects by itself.",
   "The panel could not reach the WhyNot Cut engine.",
@@ -46,7 +46,7 @@ export const DAEMON_SOURCE_STRINGS_TO_MIGRATE_IN_B_T2: readonly string[] = [
   "The engine has too many connections open.",
   "Close other WhyNot Cut panels or restart the engine.",
   "The engine is running but refused the panel's session (HTTP §).",
-  "Restart the engine (reel serve --ensure); if this repeats, send the engine log.",
+  "Start the engine again from your Claude session; if this repeats, send the engine log.",
   "Connected to the WhyNot Cut engine §.",
   "§ is not available from the panel in this engine yet.",
   "The engine refused this.",
@@ -60,7 +60,7 @@ export const DAEMON_SOURCE_STRINGS_TO_MIGRATE_IN_B_T2: readonly string[] = [
   "The panel reconnects by itself; try again once the engine pill says connected.",
   "The engine connection was lost before the cancel was confirmed.",
   "The WhyNot Cut engine is not connected.",
-  "Restart the engine (reel serve --ensure); the panel reconnects by itself.",
+  "Start the engine again from your Claude session; the panel reconnects by itself.",
   "Reinstall the WhyNot Cut panel.",
   "Wait a moment, then try again.",
   "Open Premiere with the WhyNot Cut panel (or start the bridge), then try again.",

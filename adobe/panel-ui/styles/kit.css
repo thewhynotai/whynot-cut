@@ -373,7 +373,18 @@
 .kit-toast-info .kit-toast-icon { color: var(--twn-primary-text); }
 .kit-toast-body { display: flex; flex-direction: column; align-items: stretch; flex: 1 1 auto; min-width: 0; margin: 0 6px; }
 .kit-toast-text { display: block; font-weight: var(--twn-weight-semibold); }
-.kit-toast-how { display: block; margin: 2px 0 0 0; color: var(--twn-text-muted); }
+
+/* ---- checklist: one row per setup item; status icon (colour AND shape) + label + at most one fix button ---- */
+.kit-check { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.kit-check-row { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; min-height: 32px; padding: 4px 0; border-bottom: 1px solid var(--twn-border); }
+.kit-check-icon { display: flex; flex: 0 0 auto; margin: 0 8px 0 0; }
+.kit-rtl .kit-check-icon { margin: 0 0 0 8px; }
+.kit-check-label { display: block; flex: 1 1 auto; min-width: 0; }
+.kit-check-act { display: flex; flex: 0 0 auto; margin: 2px 0; }
+.kit-check-ok .kit-check-icon { color: var(--twn-ok); }
+.kit-check-warn .kit-check-icon { color: var(--twn-warn); }
+.kit-check-error .kit-check-icon { color: var(--twn-error); }
+.kit-check-pending .kit-check-icon { color: var(--twn-text-muted); }
 .kit-x {
   display: flex;
   align-items: center;

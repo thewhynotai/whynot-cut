@@ -13,6 +13,9 @@ import {
   button,
   buttonRow,
   card,
+  checklist,
+  checklistItem,
+  CHECKLIST_ROWS,
   chip,
   chips,
   cmdRow,
@@ -20,6 +23,7 @@ import {
   emptyState,
   esc,
   eyebrow,
+  fixAction,
   footer,
   frameGrid,
   header,
@@ -156,6 +160,9 @@ test("tabs: a tablist; the active tab is selected (pink underline class); DOM or
   assert.deepEqual(bs.map((b) => attr(b.attrs, "role")), ["tab", "tab", "tab"]);
   assert.ok(classesOf(bs[1]!.attrs).includes("kit-tab-on"));
   assert.match(html, /<span class="kit-tab-count"><bdi dir="ltr">2<\/bdi><\/span>/);
+  // review minor (dd9cbba): the label may be cut with an ellipsis, so its title holds the full label (escaped)
+  assert.match(html, /<span class="kit-tab-label" title="Edit">Edit<\/span>/);
+  assert.match(tabs({ t: EN, items: [{ id: "x", label: `A "long" <label>` }], active: "x" }), /<span class="kit-tab-label" title="A &quot;long&quot; &lt;label&gt;">A &quot;long&quot; &lt;label&gt;<\/span>/);
   // an unknown active id selects the first tab
   assert.equal(attr(buttons(tabs({ t: EN, items, active: "nope" }))[0]!.attrs, "aria-selected"), "true");
   const ar = tabs({ t: AR, items: items.map((i) => ({ ...i, label: AR[`tab.${i.id}` as keyof Strings] })), active: "edit" });
@@ -294,32 +301,132 @@ test("progress: plain-language status, n of N as LTR runs, gradient bar with ari
 
 // ---- toast ----
 
-test("toast: status colour + icon; errors are alerts with a fix action and Copy diagnostics; commands become chips", () => {
-  const err = toast({ t: EN, kind: "error", text: EN["offline.no_engine"], how: "In your session run `reel serve --ensure`", fix: { label: EN["action.retry"], action: "retry" } });
+test("toast: status colour + icon; one plain sentence and at most ONE fix button (C1.4); an error without a fix gets Copy diagnostics", () => {
+  const err = toast({ t: EN, kind: "error", text: EN["offline.no_engine"], fix: fixAction(EN, "start-engine") });
   assert.match(err, /^<div class="kit-toast kit-toast-error" role="alert" aria-live="assertive"><span class="kit-toast-icon"><svg [^>]*kit-icon-error[^>]*role="img" aria-label="Error"/);
-  assert.match(err, /<div class="kit-cmd-row"><span class="kit-cmd"><bdi dir="ltr">reel serve --ensure<\/bdi><\/span><\/div>/);
-  assert.match(err, /<div class="kit-toast-how">In your session run:<\/div>/);
+  assert.match(err, /<div class="kit-toast-text">The WhyNot Cut engine is not running\.<\/div>/);
+  assert.doesNotMatch(err, /kit-cmd|kit-toast-how/, "no command chip, no second line");
   const bs = buttons(err);
-  assert.deepEqual(bs.map((b) => attr(b.attrs, "data-action")), ["retry", "copy-diagnostics", "dismiss-toast"]);
-  assert.equal(bs[1]!.text, EN["actions.diagnostics"]);
-  assert.equal(attr(bs[2]!.attrs, "aria-label"), EN["notice.dismiss"]);
+  assert.deepEqual(bs.map((b) => attr(b.attrs, "data-action")), ["start-engine", "dismiss-toast"]);
+  assert.equal(bs[0]!.text, EN["action.start_engine"]);
+  assert.equal(attr(bs[1]!.attrs, "aria-label"), EN["notice.dismiss"]);
   assert.ok(bs.every((b) => !classesOf(b.attrs).includes("kit-btn-primary")), "a toast never adds a primary button");
+  // the three fix buttons, translated
+  for (const [t, kind, key] of [[EN, "retry", "action.retry"], [AR, "start-engine", "action.start_engine"], [AR, "copy-diagnostics", "actions.diagnostics"]] as const) {
+    const b = buttons(toast({ t, kind: "error", text: "x", fix: fixAction(t, kind), dismiss: false }));
+    assert.deepEqual(b.map((x) => [attr(x.attrs, "data-action"), x.text]), [[kind, t[key]]]);
+  }
+  // an error with no fix still says what to do: its one button is Copy diagnostics
+  for (const fix of [undefined, null]) {
+    const b = buttons(toast({ t: EN, kind: "error", text: "x", fix, dismiss: false }));
+    assert.deepEqual(b.map((x) => attr(x.attrs, "data-action")), ["copy-diagnostics"]);
+  }
   const ok = toast({ t: EN, kind: "ok", text: EN["notice.approved"] });
   assert.match(ok, /^<div class="kit-toast kit-toast-ok" role="status" aria-live="polite">/);
-  assert.doesNotMatch(ok, /copy-diagnostics/, "Copy diagnostics is for errors (unless asked)");
+  assert.doesNotMatch(ok, /copy-diagnostics/, "an ok toast has no fix button");
   assert.doesNotMatch(toast({ t: EN, kind: "warn", text: "x", dismiss: false }), /dismiss-toast/);
   assert.match(toast({ t: EN, kind: "warn", text: "Check `engine.json`." }), /<bdi dir="ltr" class="kit-code">engine\.json<\/bdi>/);
-  // an error always says what to do: a fix action or a how-line (type + runtime)
-  // @ts-expect-error an error toast with neither fix nor how
-  assert.throws(() => toast({ t: EN, kind: "error", text: "x" }), /kit\.toast\.error-needs-fix-or-how/);
-  // @ts-expect-error fix: null and no how is still nothing to do
-  assert.throws(() => toast({ t: EN, kind: "error", text: "x", fix: null }), /kit\.toast\.error-needs-fix-or-how/);
-  assert.throws(() => toast({ t: EN, kind: "error", text: "x", how: "  " }), /kit\.toast\.error-needs-fix-or-how/);
-  assert.match(toast({ t: EN, kind: "error", text: "x", how: "Run `reel doctor`." }), /kit-toast-error/);
-  assert.match(toast({ t: EN, kind: "error", text: "x", fix: { label: "a", action: "a" } }), /kit-toast-error/);
   assert.match(toast({ t: EN, kind: "bogus" as never, text: "x" }), /kit-toast-info/);
-  noScript(toast({ t: EN, kind: "error", text: EVIL, how: EVIL, fix: { label: EVIL, action: EVIL } }));
+  // @ts-expect-error a how-line is gone: a problem is ONE plain sentence
+  toast({ t: EN, kind: "error", text: "x", how: "y" });
+  noScript(toast({ t: EN, kind: "error", text: EVIL, fix: { label: EVIL, action: EVIL } }));
   assertControlsAccessible(err);
+});
+
+// ---- checklist (C2.2: first-run setup rows; B-T2 places it) ----
+
+test("checklist: a labelled list, one row per item in order, label from the string table, status class per row", () => {
+  const html = checklist(
+    [
+      checklistItem(EN, "engine", "error", fixAction(EN, "start-engine")),
+      checklistItem(EN, "premiere", "ok"),
+      checklistItem(EN, "claude", "warn", fixAction(EN, "retry")),
+      checklistItem(EN, "clients", "pending"),
+    ],
+    EN,
+  );
+  assert.match(html, /^<ul class="kit-check" aria-label="Setup checklist"><li class="kit-check-row kit-check-error" data-check="engine">/);
+  const rows = tags(html, "li");
+  assert.deepEqual(rows.map((a) => attr(a, "data-check")), ["engine", "premiere", "claude", "clients"]);
+  assert.deepEqual(rows.map((a) => classesOf(a)[1]), ["kit-check-error", "kit-check-ok", "kit-check-warn", "kit-check-pending"]);
+  for (const [id, key] of [["engine", "checklist.engine"], ["premiere", "checklist.premiere"], ["claude", "checklist.claude"], ["clients", "checklist.clients"]] as const) {
+    assert.ok(html.includes(`<span class="kit-check-label"><bdi>${esc(EN[key])}</bdi></span>`), id);
+  }
+  assert.deepEqual([...CHECKLIST_ROWS], ["engine", "premiere", "claude", "clients"]);
+  assert.deepEqual([EN["checklist.engine"], EN["checklist.premiere"], EN["checklist.claude"], EN["checklist.clients"]], ["Engine", "Premiere link", "Claude", "Clients folder"]);
+  assertControlsAccessible(html);
+});
+
+test("checklist: every row has a status icon (shape AND colour, labelled for screen readers); pending is its own ring icon", () => {
+  const html = checklist((["ok", "warn", "error", "pending"] as const).map((s, i) => ({ id: `r${i}`, state: s, label: "x" })), EN);
+  const icons = [...html.matchAll(/<span class="kit-check-icon">(<svg [^>]*>)/g)].map((m) => m[1]!);
+  assert.equal(icons.length, 4);
+  assert.deepEqual(icons.map((s) => attr(s, "data-icon")), ["ok", "warn", "error", "pending"]);
+  assert.deepEqual(icons.map((s) => attr(s, "aria-label")), [EN["status.ok"], EN["status.warn"], EN["status.error"], EN["status.pending"]]);
+  assert.ok(icons.every((s) => attr(s, "role") === "img"));
+  assert.notEqual(icon("pending"), icon("info"), "pending has its own shape");
+  // an unknown state reads as pending; the colour rules exist for every state
+  assert.match(checklist([{ id: "x", state: "bogus" as never, label: "x" }], EN), /kit-check-pending[^]*data-icon="pending"/);
+  assert.match(cssRule(".kit-check-ok .kit-check-icon"), /color: var\(--twn-ok\)/);
+  assert.match(cssRule(".kit-check-warn .kit-check-icon"), /color: var\(--twn-warn\)/);
+  assert.match(cssRule(".kit-check-error .kit-check-icon"), /color: var\(--twn-error\)/);
+  assert.match(cssRule(".kit-check-pending .kit-check-icon"), /color: var\(--twn-text-muted\)/);
+});
+
+test("checklist: at most ONE fix button per row (secondary), none on a row without an action; at most one primary in the list", () => {
+  const items = CHECKLIST_ROWS.map((id, i) => checklistItem(EN, id, i % 2 ? "ok" : "error", i % 2 ? null : fixAction(EN, "retry")));
+  const html = checklist(items, EN);
+  const perRow = [...html.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/g)].map((m) => buttons(m[1]!).length);
+  assert.deepEqual(perRow, [1, 0, 1, 0]);
+  assert.equal(primaryCount(html), 0, "row buttons are secondary");
+  assert.ok(buttons(html).every((b) => classesOf(b.attrs).includes("kit-btn-secondary")));
+  // one row may carry the screen's primary action; a second is a bug (B4: one primary per screen)
+  const one = checklist([checklistItem(EN, "engine", "ok"), checklistItem(EN, "clients", "pending", { label: EN["empty.noclient.action"], action: "choose-client" }, true)], EN);
+  assert.equal(primaryCount(one), 1);
+  assert.throws(
+    () => checklist([checklistItem(EN, "engine", "error", fixAction(EN, "start-engine"), true), checklistItem(EN, "clients", "pending", fixAction(EN, "retry"), true)], EN),
+    /kit\.checklist\.one-primary/,
+  );
+  // the item type has room for ONE action only
+  // @ts-expect-error actions is not a checklist item field
+  checklist([{ id: "x", state: "ok", label: "x", actions: [] }], EN);
+});
+
+test("checklist: every dynamic value is escaped (id, label, action)", () => {
+  const html = checklist([{ id: EVIL, state: "error", label: EVIL, action: { label: EVIL, action: EVIL } }], EN);
+  noScript(html);
+  assert.ok(html.includes("&lt;script&gt;"));
+  assert.doesNotMatch(html, /data-check="<|<bdi><script/);
+});
+
+test("checklist: RTL through CSS direction only (same DOM order in AR), Arabic labels from the table, mirrored icon margin", () => {
+  const rows = (t: Strings) => checklist(CHECKLIST_ROWS.map((id) => checklistItem(t, id, "ok")), t);
+  const en = rows(EN);
+  const ar = rows(AR);
+  const order = (h: string) => tags(h, "li").map((a) => attr(a, "data-check"));
+  assert.deepEqual(order(ar), order(en), "never reversed in the DOM");
+  assert.doesNotMatch(ar, /dir="rtl"/, "the component sets no direction itself");
+  for (const k of ["checklist.engine", "checklist.premiere", "checklist.clients"] as const) {
+    assert.match(AR[k], /[\u0600-\u06FF]/, `${k} is Arabic`);
+    assert.ok(ar.includes(`<bdi>${esc(AR[k])}</bdi>`), k);
+  }
+  assert.match(ar, new RegExp(`aria-label="${AR["checklist.label"]}"`));
+  assert.match(kitRoot({ lang: "ar", body: ar }), /^<div class="kit-root kit-rtl" dir="rtl" lang="ar">/);
+  assert.match(cssRule(".kit-check-icon"), /margin: 0 8px 0 0/);
+  assert.match(cssRule(".kit-rtl .kit-check-icon"), /margin: 0 0 0 8px/);
+  assert.match(cssRule(".kit-check-row"), /display: flex/);
+  assert.match(cssRule(".kit-check-row"), /flex-wrap: wrap/, "a long label and its button wrap at 280 px, never scroll sideways");
+  assert.match(cssRule(".kit-check-row"), /min-height: 32px/);
+});
+
+test("gallery: the checklist has its own section (EN and AR), with at most one primary", () => {
+  for (const lang of ["en", "ar"] as const) {
+    const s = kitGallerySections(lang).find((x) => x.name === "checklist()");
+    assert.ok(s, `${lang}: no checklist() section`);
+    assert.match(s!.html, /class="kit-check"/);
+    assert.equal(tags(s!.html, "li").length, 4);
+    assert.ok(primaryCount(s!.html) <= 1);
+  }
 });
 
 // ---- dialog ----
@@ -329,7 +436,7 @@ test("dialog: destructive confirm shows what will change and the backup name (LT
     t: EN,
     id: "rebuild",
     title: EN["rebuild.title"],
-    changes: [EN["rebuild.warning"], "Uses `reel ppro-build --force`."],
+    changes: [EN["rebuild.warning"], "Replaces `C0239.prproj`."],
     backupName: "C0239_prev_2026-10-13-1412.prproj",
     confirm: { label: EN["rebuild.confirm"], action: "rebuild-confirm" },
     cancel: { label: EN["rebuild.cancel"], action: "rebuild-cancel" },
@@ -340,11 +447,15 @@ test("dialog: destructive confirm shows what will change and the backup name (LT
   assert.match(html, /<h3 class="kit-dialog-title" id="rebuild-title">Rebuild this project\?<\/h3>/);
   assert.match(html, /<div class="kit-label">What will change<\/div><ul class="kit-dialog-changes" id="rebuild-changes"><li class="kit-dialog-change">/);
   assert.equal(tags(html, "li").length, 2);
-  assert.match(html, /<bdi dir="ltr" class="kit-code">reel ppro-build --force<\/bdi>/);
+  assert.match(html, /<bdi dir="ltr" class="kit-code">C0239\.prproj<\/bdi>/);
   // a confirm with nothing listed under "what will change" is a bug (type + runtime)
   // @ts-expect-error an empty changes list
   assert.throws(() => dialog({ t: EN, title: "x", changes: [], confirm: { label: "a", action: "a" }, cancel: { label: "b", action: "b" } }), /kit\.dialog\.changes-empty/);
   assert.throws(() => dialog({ t: EN, title: "x", changes: [" "], confirm: { label: "a", action: "a" }, cancel: { label: "b", action: "b" } }), /kit\.dialog\.changes-empty/);
+  // review minor (dd9cbba): ONE empty or whitespace-only line among real ones is refused too
+  for (const bad of [["Real line.", ""], ["Real line.", "  \t "], ["", "Real line."], ["Real line.", 5]]) {
+    assert.throws(() => dialog({ t: EN, title: "x", changes: bad as never, confirm: { label: "a", action: "a" }, cancel: { label: "b", action: "b" } }), /kit\.dialog\.changes-empty/, JSON.stringify(bad));
+  }
   assert.match(html, /<div class="kit-label">Backup copy<\/div><div class="kit-cmd-row"><span class="kit-cmd"><bdi dir="ltr">C0239_prev_2026-10-13-1412\.prproj<\/bdi><\/span><\/div>/);
   const bs = buttons(html);
   assert.deepEqual(bs.map((b) => attr(b.attrs, "data-action")), ["rebuild-confirm", "rebuild-cancel"]);
@@ -682,7 +793,8 @@ test("B4: every gallery section (a screen's worth) and every component's default
     chip: chip({ label: "x" }),
     stepStrip: stepStrip({ t: EN, steps: [], rtl: false }),
     progress: progress({ t: EN, status: "x", n: 1, of: 2, cancel: { action: "cancel" } }),
-    toast: toast({ t: EN, kind: "error", text: "x", how: "Run `reel doctor`.", fix: { label: "a", action: "a" } }),
+    toast: toast({ t: EN, kind: "error", text: "x", fix: { label: "a", action: "a" } }),
+    checklist: checklist(CHECKLIST_ROWS.map((id) => checklistItem(EN, id, "error", fixAction(EN, "retry"), id === "clients")), EN),
     dialog: dialog({ t: EN, title: "x", changes: ["y"], destructive: false, confirm: { label: "a", action: "a" }, cancel: { label: "b", action: "b" } }),
     emptyState: emptyState({ title: "x", text: "y", action: { label: "a", action: "a" } }),
     logDrawer: logDrawer({ t: EN, open: true, lines: [], rtl: false }),

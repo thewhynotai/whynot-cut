@@ -66,15 +66,15 @@ test("every dynamic value is escaped: an injected <script> never reaches the HTM
   }
 });
 
-test('paths, commands and timecodes sit inside <bdi dir="ltr">', () => {
+test('paths, file names and timecodes sit inside <bdi dir="ltr">', () => {
   const s = sampleState("ar", "showcase");
   s.connection.engine = "offline";
-  const html = render(s, AR, { ...initialUi(), logOpen: true });
+  const html = render(s, AR, { ...initialUi(), logOpen: true, confirmRebuild: true });
   const inBdi = (txt: string) => assert.ok(html.includes(`<bdi dir="ltr">${esc(txt)}</bdi>`), `not isolated: ${txt}`);
   inBdi(s.context.project_path as string);
   inBdi(s.approval!.flagged[0]!.tc);
   inBdi(s.qc[0]!.tc);
-  inBdi("reel doctor"); // also wrapped in a .cmd chip (own test below)
+  inBdi(AR["rebuild.backup_name"]); // also wrapped in a .cmd chip (own test below)
   inBdi(s.log[0]!.text);
 });
 
@@ -288,32 +288,47 @@ test("CSS: brand line never wraps; header and pills are explicit flex; pills wra
   assert.match(rule(css, ".twn-rtl .pill"), /margin: 0 0 4px 6px/);
 });
 
-test("offline banner: the sentence is one block, then reel doctor as a chip on its own row (EN and AR)", () => {
+test("offline banner (no diagnosis): one plain sentence and ONE fix button, Start engine; no command, no chip (EN and AR)", () => {
   const s = sampleState("ar", "idle");
   s.connection.engine = "offline";
   for (const [lang, t] of [["ar", AR], ["en", EN]] as const) {
     s.language = lang;
     const html = render(s, t, initialUi());
-    assert.ok(html.includes('<div class="cmd-row"><span class="cmd"><bdi dir="ltr">reel doctor</bdi></span></div>'), lang);
-    const line = /<div class="banner-line">([\s\S]*?)<\/div>/.exec(html)![1]!;
-    assert.ok(!line.includes("reel doctor") && !line.includes("cmd"), "the sentence holds no chip");
-    assert.ok(line.trimEnd().endsWith(":"), `${lang}: the sentence leads into the command`);
+    const banner = /<div class="banner banner-error" role="alert">([\s\S]*?)<\/button><\/div><\/div><\/div>/.exec(html)![1]!;
+    assert.ok(banner.includes(`<div class="banner-line"><strong>${esc(t["offline.title"])}</strong></div>`), lang);
+    assert.ok(banner.includes(`<div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="start-engine">${esc(t["action.start_engine"])}`), lang);
+    assert.equal((banner.match(/<button/g) ?? []).length, 1, `${lang}: one fix button`);
+    assert.ok(!banner.includes("cmd") && !banner.includes("reel"), `${lang}: no command`);
   }
   const css = panelCss();
   assert.match(rule(css, ".cmd"), /white-space: nowrap/);
   assert.match(rule(css, ".cmd"), /font-family: var\(--twn-font-mono\)/);
+  assert.match(rule(css, ".banner-fix"), /margin-top: 6px/);
+  assert.match(rule(css, ".btn-row"), /display: flex/);
 });
 
-test("a notice's how ending in a command: sentence block + chip row; a command mid-sentence stays a plain ltr run", () => {
+test("an error notice: its sentence and ONE fix button (default Copy diagnostics); a how that holds a command is not shown", () => {
   const s = sampleState("en", "idle");
   const ui = initialUi();
   ui.notice = { kind: "error", text: "Failed.", how: "In your Claude session run `reel doctor`." };
   let html = render(s, EN, ui);
-  assert.ok(html.includes('<div class="banner-line">Failed. In your Claude session run:</div><div class="cmd-row"><span class="cmd"><bdi dir="ltr">reel doctor</bdi></span></div>'));
-  ui.notice = { kind: "error", text: "Failed.", how: "Run `reel setup` now, then retry." };
+  assert.ok(html.includes('<div class="banner-line">Failed.</div><div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="copy-diagnostics">Copy diagnostics</button></div>'), html);
+  assert.ok(!html.includes("reel doctor") && !html.includes('class="cmd"'));
+  for (const fix of ["start-engine", "retry", "copy-diagnostics"] as const) {
+    ui.notice = { kind: "error", text: "Failed.", how: "Wait and retry.", fix };
+    html = render(s, EN, ui);
+    const banner = /<div class="banner banner-error" role="status"[\s\S]*?data-action="dismiss-notice"/.exec(html)![0];
+    assert.ok(banner.includes('<div class="banner-line">Failed. Wait and retry.</div>'), fix);
+    assert.deepEqual([...banner.matchAll(/data-action="([^"]+)"/g)].map((m) => m[1]), [fix, "dismiss-notice"], fix);
+  }
+  // an unknown fix falls back to Copy diagnostics; an ok notice has no fix button; a text that is a command is replaced
+  ui.notice = { kind: "error", text: "x", fix: "bogus" as never };
+  assert.ok(render(s, EN, ui).includes('data-action="copy-diagnostics">'));
+  ui.notice = { kind: "ok", text: "Done." };
+  assert.ok(!/banner-fix/.test(render(s, EN, ui)));
+  ui.notice = { kind: "error", text: "Run reel serve --ensure" };
   html = render(s, EN, ui);
-  assert.ok(html.includes('Run <bdi dir="ltr">reel setup</bdi> now, then retry.'));
-  assert.ok(!html.includes('class="cmd"'), "no chip inside running text");
+  assert.ok(html.includes(`<div class="banner-line">${esc(EN["notice.failed"])}</div>`) && !html.includes("reel serve"));
 });
 
 test("every .cmd chip sits directly in a .cmd-row (a flex container), never in inline text", () => {
@@ -369,22 +384,24 @@ test("markup: client/item, progress/elapsed and log rows put their parts in sepa
 
 // ---- final review: how wording, thumbnails, the host-only button ----
 
-test("U3: a notice's how puts every backticked command in a left-to-right run, in EN and AR; the backticks are not shown", () => {
+test("U3: a notice's how keeps every backticked file name a left-to-right run (the backticks are markup), in EN and AR; a backticked command is not shown", () => {
   for (const [lang, t, how] of [
-    ["en", EN, "In your Claude session run `reel doctor`."],
-    ["ar", AR, "في جلسة Claude الخاصة بك، شغّل `reel doctor`."],
+    ["en", EN, "Check `engine.json` and `assets`."],
+    ["ar", AR, "افحص `engine.json` و`assets`."],
   ] as const) {
     const s = sampleState(lang, "idle");
     const ui = initialUi();
     ui.notice = { kind: "error", text: "x", how };
     const html = render(s, t, ui);
-    assert.ok(html.includes('<bdi dir="ltr">reel doctor</bdi>'), lang);
+    assert.ok(html.includes('<bdi dir="ltr">engine.json</bdi>') && html.includes('<bdi dir="ltr">assets</bdi>'), lang);
     assert.ok(!html.includes("`"), `${lang}: the backticks are markup, not text`);
+    ui.notice = { kind: "error", text: "x", how: "Run `reel setup` now, then retry." };
+    assert.ok(!render(s, t, ui).includes("reel setup"), `${lang}: a command is not shown`);
   }
   const s = sampleState("en", "idle");
   const ui = initialUi();
-  ui.notice = { kind: "error", text: "x", how: `run \`<img src=x onerror=1>\` now` };
-  assert.ok(!render(s, EN, ui).includes("<img src=x"), "the command is escaped too");
+  ui.notice = { kind: "error", text: "x", how: "open `<img src=x onerror=1>` now" };
+  assert.ok(!render(s, EN, ui).includes("<img src=x"), "the run is escaped too");
   ui.notice = { kind: "error", text: "x", how: "no command here, a stray ` backtick" };
   assert.ok(render(s, EN, ui).includes("no command here, a stray ` backtick"));
 });
@@ -481,63 +498,68 @@ test("log summary: caret, title and count are separate flex items inside .log-ro
 });
 
 // ------------------------------------------------------------------------------------- Task 4: the link diagnosis
-const LINK_CASES: Array<[string, string, string]> = [
-  // code, EN title fragment, command
-  ["no_engine", "is not running", "reel serve --ensure"],
-  ["down", "does not answer", "reel serve --ensure"],
-  ["unreachable", "could not reach", "reel serve --ensure"],
-  ["bad_engine_json", "is incomplete or damaged", "reel serve --ensure"],
-  ["auth", "key", "reel serve --ensure"],
-  ["no_welcome", "did not answer", "reel serve --ensure"],
-  ["lost", "was lost", "reel serve --ensure"],
-  ["refused_host", "Host / Origin", "reel doctor"],
-  ["refused_busy", "too many connections", "reel doctor"],
-  ["refused", "refused", "reel doctor"],
-  ["protocol", "different version", "reel doctor"],
-  ["too_large", "too large", "reel doctor"],
-  ["blocked", "could not reach the engine on its port", "reel serve --status"],
+const LINK_CASES: Array<[string, string, "start-engine" | "copy-diagnostics"]> = [
+  // code, EN title fragment, its one fix button (C2.2: the command that fixes it is only in diagnostics and the log)
+  ["no_engine", "is not running", "start-engine"],
+  ["down", "does not answer", "start-engine"],
+  ["unreachable", "could not reach", "start-engine"],
+  ["bad_engine_json", "is incomplete or damaged", "start-engine"],
+  ["auth", "key", "start-engine"],
+  ["no_welcome", "did not answer", "start-engine"],
+  ["lost", "was lost", "start-engine"],
+  ["refused_host", "does not recognise", "copy-diagnostics"],
+  ["refused_busy", "too many connections", "copy-diagnostics"],
+  ["refused", "refused", "copy-diagnostics"],
+  ["protocol", "different version", "copy-diagnostics"],
+  ["too_large", "too large", "copy-diagnostics"],
+  ["blocked", "the connection was blocked", "copy-diagnostics"],
 ];
 
-test("offline banner names the link diagnosis (EN and AR): its own sentence, its command as a chip, 'tries again by itself'", () => {
+test("offline banner names the link diagnosis (EN and AR): its own plain sentence, ONE fix button, 'tries again by itself'; no command", () => {
   const s = sampleState("en", "idle");
   s.connection.engine = "offline";
-  for (const [code, fragment, cmd] of LINK_CASES) {
+  for (const [code, fragment, fix] of LINK_CASES) {
     for (const [lang, t] of [["en", EN], ["ar", AR]] as const) {
       s.language = lang;
       const ui = { ...initialUi(), link: { code, retry_in_s: 4 } };
       const html = render(s, t, ui);
-      const banner = /<div class="banner banner-error" role="alert" data-link="([a-z_]+)">([\s\S]*?)<\/div><\/div>/.exec(html);
+      const banner = /<div class="banner banner-error" role="alert" data-link="([a-z_]+)">([\s\S]*?)<\/button><\/div><\/div><\/div>/.exec(html);
       assert.ok(banner, `${code} ${lang}: no link banner`);
       assert.equal(banner![1], code);
       const key = `offline.${code}` as keyof typeof EN;
       assert.ok(t[key], `${lang}: no string for ${key}`);
-      assert.ok(html.includes(`<div class="cmd-row"><span class="cmd"><bdi dir="ltr">${cmd}</bdi></span></div>`), `${code} ${lang}: command chip`);
+      const label = fix === "start-engine" ? t["action.start_engine"] : t["actions.diagnostics"];
+      assert.ok(banner![2]!.includes(`<button class="btn btn-secondary" data-action="${fix}">${esc(label)}`), `${code} ${lang}: fix button`);
+      assert.equal((banner![2]!.match(/<button/g) ?? []).length, 1, `${code} ${lang}: one fix button`);
+      assert.ok(!/reel|cmd-row|`/.test(banner![0]), `${code} ${lang}: no command`);
       assert.ok(html.includes(esc(t["offline.retry"])), `${code} ${lang}: retry line`);
-      if (lang === "en") assert.ok(html.includes(fragment), `${code}: ${fragment}`);
-      if (lang === "ar") assert.ok(!html.includes(EN[key].replace(/`/g, "")), `${code}: the Arabic banner is not English`);
+      if (lang === "en") assert.ok(html.includes(esc(fragment)), `${code}: ${fragment}`);
+      if (lang === "ar") assert.ok(!html.includes(esc(EN[key])), `${code}: the Arabic banner is not English`);
     }
   }
 });
 
-test("link banner: engine.json stays a left-to-right run inside the Arabic sentence; connecting shows no command", () => {
+test("link banner: the sentences are plain (no file names, no Host / Origin jargon); connecting / stopped show no fix button and no retry line", () => {
+  for (const [code] of LINK_CASES) {
+    for (const t of [EN, AR]) assert.doesNotMatch(t[`offline.${code}` as keyof typeof EN], /engine\.json|Origin|`/, code);
+  }
   const s = sampleState("ar", "idle");
   s.connection.engine = "offline";
-  const html = render(s, AR, { ...initialUi(), link: { code: "bad_engine_json", retry_in_s: 1 } });
-  assert.ok(html.includes('<bdi dir="ltr">engine.json</bdi>'));
-  for (const code of ["connecting", "idle"]) {
+  for (const code of ["connecting", "idle", "stopped"]) {
     const h = render(s, AR, { ...initialUi(), link: { code } });
-    assert.ok(h.includes(esc(AR["status.connecting"])), code);
-    assert.ok(!h.includes("cmd-row"), `${code}: no command while connecting`);
+    assert.ok(h.includes(esc(AR[code === "stopped" ? "offline.stopped" : "status.connecting"])), code);
+    assert.ok(!h.includes("banner-fix"), `${code}: nothing to fix while connecting`);
     assert.ok(!h.includes(esc(AR["offline.retry"])), code);
   }
 });
 
-test("link banner: an unknown code falls back to the generic offline banner; a connected engine shows no offline banner", () => {
+test("link banner: an unknown code falls back to the generic offline banner (Start engine); a connected engine shows no offline banner", () => {
   const s = sampleState("en", "idle");
   s.connection.engine = "offline";
   const h = render(s, EN, { ...initialUi(), link: { code: "something_new" } });
   assert.ok(h.includes(esc(EN["offline.title"])));
-  assert.ok(h.includes('<bdi dir="ltr">reel doctor</bdi>'));
+  assert.ok(h.includes('data-action="start-engine"'));
+  assert.ok(!h.includes("reel "));
   s.connection.engine = "connected";
   const on = render(s, EN, { ...initialUi(), link: { code: "lost", retry_in_s: 2 } });
   assert.ok(!on.includes("data-link="));

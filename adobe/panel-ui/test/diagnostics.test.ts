@@ -35,3 +35,19 @@ test("M8: diagnostics name the plugin version and its build stamp (a same-versio
   const plain = JSON.parse(diagnosticsText(s)) as Record<string, unknown>;
   assert.ok(!("plugin" in plain));
 });
+
+test("C2.2: diagnostics carry the link diagnosis and the command that fixes it (commands live here and in the log, never on screen)", async () => {
+  const { LINK_FIX_COMMAND, linkFixCommand } = await import("../src/diagnostics.ts");
+  const s = sampleState("en", "idle");
+  const d = (link?: { code: string } | null) => JSON.parse(diagnosticsText(s, null, link)) as Record<string, unknown>;
+  assert.deepEqual(d({ code: "no_engine" })["link"], { code: "no_engine", fix: "reel serve --ensure" });
+  assert.deepEqual(d({ code: "refused_host" })["link"], { code: "refused_host", fix: "reel doctor" });
+  assert.deepEqual(d({ code: "blocked" })["link"], { code: "blocked", fix: "reel serve --status" });
+  assert.deepEqual(d({ code: "connecting" })["link"], { code: "connecting" }, "nothing to fix while connecting");
+  assert.ok(!("link" in d(null)) && !("link" in d()));
+  assert.equal(linkFixCommand("__proto__"), null);
+  assert.equal(linkFixCommand(5), null);
+  for (const code of ["no_engine", "down", "unreachable", "bad_engine_json", "auth", "no_welcome", "lost", "refused_host", "refused_busy", "refused", "protocol", "too_large", "blocked"]) {
+    assert.match(LINK_FIX_COMMAND[code]!, /^reel (serve --ensure|doctor|serve --status)$/, code);
+  }
+});

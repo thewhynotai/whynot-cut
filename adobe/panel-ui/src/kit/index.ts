@@ -11,6 +11,7 @@ export * from "./chip.ts";
 export * from "./steps.ts";
 export * from "./progress.ts";
 export * from "./toast.ts";
+export * from "./checklist.ts";
 export * from "./dialog.ts";
 export * from "./empty.ts";
 export * from "./log.ts";

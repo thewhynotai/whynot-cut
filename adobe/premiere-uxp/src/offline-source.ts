@@ -12,11 +12,11 @@ export interface OfflineInfo {
   uiLocale?: string | undefined;
 }
 
-/** What to do, in the words the editor is told, the same as the panel's offline banner. The command sits in `backticks`:
- *  the panel renders it as a left-to-right run (render.ts) so it stays intact inside an Arabic sentence. */
-export const OFFLINE_HOW = "In your Claude session run `reel doctor`.";
+/** What to do, in the words the editor is told: plain words, never a command (Addendum C1.4, C2.2). The panel's banner
+ *  carries the Start engine button; the command lives only in the log drawer and the Copy diagnostics payload. */
+export const OFFLINE_HOW = "Open your Claude session to start the engine, then wait a moment.";
 const OFFLINE_ERROR = "The WhyNot Cut engine is not running.";
-const OFFLINE_HOW_AR = "في جلسة Claude شغّل الأمر `reel doctor`.";
+const OFFLINE_HOW_AR = "افتح جلسة Claude لتشغيل المحرّك، ثم انتظر قليلًا.";
 const OFFLINE_ERROR_AR = "محرّك WhyNot Cut لا يعمل.";
 
 export function languageOf(uiLocale: string | null | undefined): Language {

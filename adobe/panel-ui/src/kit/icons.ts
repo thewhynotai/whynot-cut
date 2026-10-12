@@ -9,7 +9,8 @@ import type { Html } from "./html.ts";
 export type StatusKind = "ok" | "warn" | "error" | "info";
 /** Icons that point along the reading direction: whoever draws one must say which direction the panel reads. */
 export type DirectionalIcon = "chevron-start" | "chevron-end";
-export type IconName = StatusKind | DirectionalIcon | "chevron-down" | "close";
+/** "pending": an open ring (not checked yet), for the checklist's rows that are still being probed. */
+export type IconName = StatusKind | DirectionalIcon | "chevron-down" | "close" | "pending";
 export const isDirectional = (name: unknown): name is DirectionalIcon => name === "chevron-start" || name === "chevron-end";
 
 // Shapes are drawn as one evenodd path: the inner marks (check, cross, bar, dot) are holes in the filled shape.
@@ -17,6 +18,7 @@ const PATHS: Readonly<Record<string, string>> = {
   ok: "M8 1a7 7 0 1 0 0 14A7 7 0 1 0 8 1z M4.5 8.2l1.1-1.1 1.5 1.5 3.3-3.3 1.1 1.1-4.4 4.4z",
   error: "M8 1a7 7 0 1 0 0 14A7 7 0 1 0 8 1z M5.2 4.1L8 6.9l2.8-2.8 1.1 1.1L9.1 8l2.8 2.8-1.1 1.1L8 9.1l-2.8 2.8-1.1-1.1L6.9 8 4.1 5.2z",
   info: "M8 1a7 7 0 1 0 0 14A7 7 0 1 0 8 1z M7.1 4h1.8v1.8H7.1z M7.1 7h1.8v5H7.1z",
+  pending: "M8 1a7 7 0 1 0 0 14A7 7 0 1 0 8 1z M8 2.8a5.2 5.2 0 1 0 0 10.4A5.2 5.2 0 1 0 8 2.8z",
   warn: "M8 1.2l7.2 13.2H.8z M7.1 5.5h1.8v4.6H7.1z M7.1 11.2h1.8V13H7.1z",
   "chevron-right": "M5.6 2.6L11 8l-5.4 5.4-1.2-1.2L8.6 8 4.4 3.8z",
   "chevron-left": "M10.4 2.6L5 8l5.4 5.4 1.2-1.2L7.4 8l4.2-4.2z",

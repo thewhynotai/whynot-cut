@@ -10,10 +10,22 @@ import { MONOGRAM_DATA_URI } from "./monogram.ts";
 import { STEP_IDS } from "./source.ts";
 import type { ConnectionState, PanelState, PipelineStep, QcFrame, StepId } from "./source.ts";
 
+/** The one fix button a problem carries (Addendum C1.4: one plain sentence + one fix button, never a command).
+ *  start-engine is wired to the whynotcut:// launcher later; today the shell only logs it. */
+export type FixAction = "start-engine" | "retry" | "copy-diagnostics";
+const FIX_ACTIONS: readonly FixAction[] = ["start-engine", "retry", "copy-diagnostics"];
+const FIX_LABEL: Record<FixAction, StringKey> = {
+  "start-engine": "action.start_engine",
+  retry: "action.retry",
+  "copy-diagnostics": "actions.diagnostics",
+};
+
 export interface Notice {
   kind: "ok" | "error";
   text: string;
   how?: string;
+  /** an error's one fix button; default Copy diagnostics */
+  fix?: FixAction;
 }
 
 /** Why the engine link is down (DaemonSource.diagnosis code), set by the shell: the offline banner names it. */
@@ -90,50 +102,64 @@ function header(s: PanelState, t: Strings): string {
   );
 }
 
-/** A command chip on its own row. The row is a flex container, so the chip is never laid out inside running text
- *  (UXP draws inline-flex over the sentence). */
-const cmdRow = (cmd: string) => `<div class="cmd-row"><span class="cmd">${ltr(cmd)}</span></div>`;
+/** A file name chip on its own row (the rebuild backup name). The row is a flex container, so the chip is never laid
+ *  out inside running text (UXP draws inline-flex over the sentence). Never a command: commands are not shown. */
+const cmdRow = (text: string) => `<div class="cmd-row"><span class="cmd">${ltr(text)}</span></div>`;
 
-/** A sentence that may end in a `command`: the command moves to a chip row and the sentence leads into it with a colon.
- *  Commands earlier in the sentence stay plain left-to-right runs (never chips in the text). */
-function sentenceWithCommand(text: string): { line: string; cmd: string | null } {
-  const m = /^([^]*?)\s*`([^`]+)`\s*[.!?]?\s*$/.exec(text);
-  if (!m) return { line: withCommands(text), cmd: null };
-  const lead = m[1]!.trimEnd();
-  return { line: withCommands(lead) + (/[:.!?]$/.test(lead) ? "" : ":"), cmd: m[2]! };
+/** Text that holds a command (Addendum C1.4: commands live only in the log drawer and the diagnostics): a `backticked`
+ *  run with a space in it (a verb and its arguments); a reel / claude / npm / python invocation with a flag
+ *  ("reel serve --ensure", "claude -p") or a known reel subcommand ("reel doctor"); or "Claude Code". A backticked
+ *  single token (a folder or file name) is not a command, and neither is the word "reel" in a sentence ("a 58 s reel").
+ *  Text from the engine or a host that holds one is not shown: mount moves it to the log. */
+export function hasCommand(text: unknown): boolean {
+  if (typeof text !== "string") return false;
+  return (
+    /`[^`\s]+\s[^`]*`/.test(text) ||
+    /(?:^|[^\w-])(?:reel|claude|npm|npx|python3?)\s+(?:[a-z][\w-]*\s+)?--?[a-z]/i.test(text) ||
+    /(?:^|[^\w-])reel\s+(?:doctor|setup|serve|next|status|update|watch)\b/i.test(text) ||
+    /claude\s*code/i.test(text)
+  );
 }
 
-/** What the editor runs for each link diagnosis: the engine is not there -> start it; it is there but refuses -> doctor. */
-const LINK_CMD: Readonly<Record<string, string>> = {
-  no_engine: "reel serve --ensure",
-  down: "reel serve --ensure",
-  unreachable: "reel serve --ensure",
-  bad_engine_json: "reel serve --ensure",
-  auth: "reel serve --ensure",
-  no_welcome: "reel serve --ensure",
-  lost: "reel serve --ensure",
-  refused_host: "reel doctor",
-  refused_busy: "reel doctor",
-  refused: "reel doctor",
-  protocol: "reel doctor",
-  too_large: "reel doctor",
-  blocked: "reel serve --status",
+/** The one fix button of a problem (a secondary button: the screen's primary is the main action, Addendum B4). */
+function fixButton(fix: FixAction, t: Strings): string {
+  const a = FIX_ACTIONS.includes(fix) ? fix : "copy-diagnostics";
+  return `<div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="${a}">${esc(t[FIX_LABEL[a]])}</button></div>`;
+}
+
+/** The fix for each link diagnosis: the engine is not there (or must start again) -> Start engine; it is there but
+ *  refuses, or the panel cannot reach its port -> Copy diagnostics (the payload names the command that fixes it). */
+const LINK_FIX: Readonly<Record<string, FixAction>> = {
+  no_engine: "start-engine",
+  down: "start-engine",
+  unreachable: "start-engine",
+  bad_engine_json: "start-engine",
+  auth: "start-engine",
+  no_welcome: "start-engine",
+  lost: "start-engine",
+  refused_host: "copy-diagnostics",
+  refused_busy: "copy-diagnostics",
+  refused: "copy-diagnostics",
+  protocol: "copy-diagnostics",
+  too_large: "copy-diagnostics",
+  blocked: "copy-diagnostics",
 };
 
-/** The offline banner for a known link diagnosis, or null (unknown code: the generic banner). */
+/** The offline banner for a known link diagnosis, or null (unknown code: the generic banner). One plain sentence (plus
+ *  "tries again by itself" while it does) and one fix button; never a command. */
 function linkBanner(link: LinkInfo, t: Strings): string | null {
   const code = String(link.code);
   const plain = (key: StringKey) =>
     `<div class="banner banner-error" role="alert" data-link="${esc(code)}"><div class="banner-text"><div class="banner-line"><strong>${esc(t[key])}</strong></div></div></div>`;
   if (code === "connecting" || code === "idle") return plain("status.connecting");
   if (code === "stopped") return plain("offline.stopped");
-  const cmd = Object.prototype.hasOwnProperty.call(LINK_CMD, code) ? LINK_CMD[code] : undefined;
-  if (!cmd) return null;
+  const fix = Object.prototype.hasOwnProperty.call(LINK_FIX, code) ? LINK_FIX[code] : undefined;
+  if (!fix) return null;
   const title = t[`offline.${code}` as StringKey];
   const retry = typeof link.retry_in_s === "number" ? `<div class="banner-line">${esc(t["offline.retry"])}</div>` : "";
   return (
     `<div class="banner banner-error" role="alert" data-link="${esc(code)}"><div class="banner-text">` +
-    `<div class="banner-line"><strong>${withCommands(title)}</strong> ${esc(t["offline.hint"])}</div>${cmdRow(cmd)}${retry}</div></div>`
+    `<div class="banner-line"><strong>${withCommands(title)}</strong></div>${retry}${fixButton(fix, t)}</div></div>`
   );
 }
 
@@ -144,15 +170,18 @@ function banners(s: PanelState, t: Strings, ui: UiState): string {
     out += linked;
   } else if (s.connection.engine === "offline") {
     out +=
-      `<div class="banner banner-error" role="alert"><div class="banner-text"><div class="banner-line"><strong>${esc(t["offline.title"])}</strong> ${esc(t["offline.hint"])}</div>` +
-      `${cmdRow("reel doctor")}</div></div>`;
+      `<div class="banner banner-error" role="alert"><div class="banner-text"><div class="banner-line"><strong>${esc(t["offline.title"])}</strong></div>` +
+      `${fixButton("start-engine", t)}</div></div>`;
   }
   if (ui.notice) {
     const n = ui.notice;
-    const how = n.how ? sentenceWithCommand(n.how) : null;
+    const error = n.kind !== "ok";
+    // a text or how that holds a command is never shown (mount has put it in the log): the editor reads a plain line
+    const text = hasCommand(n.text) ? t["notice.failed"] : n.text;
+    const how = n.how && !hasCommand(n.how) ? ` ${withCommands(n.how)}` : "";
     out +=
-      `<div class="banner banner-${n.kind === "ok" ? "ok" : "error"}" role="status" aria-live="polite">` +
-      `<div class="banner-text"><div class="banner-line">${esc(n.text)}${how ? ` ${how.line}` : ""}</div>${how?.cmd ? cmdRow(how.cmd) : ""}</div>` +
+      `<div class="banner banner-${error ? "error" : "ok"}" role="status" aria-live="polite">` +
+      `<div class="banner-text"><div class="banner-line">${esc(text)}${how}</div>${error ? fixButton(n.fix ?? "copy-diagnostics", t) : ""}</div>` +
       `<button class="banner-x" data-action="dismiss-notice" title="${esc(t["notice.dismiss"])}" aria-label="${esc(t["notice.dismiss"])}">✕</button></div>`;
   }
   return out;

@@ -6,9 +6,12 @@
  *  letter "C:" reads as a scheme), file: with a host or a UNC share (file://host/..., file:////host/...), and paths
  *  that browsers resolve to a remote host ("//host", "\\host", "/\host", "\/host"). The first character may not be a
  *  space or a control character (URL parsers strip those, so " //host" would become "//host") and no tab, CR or LF
- *  may appear anywhere (URL parsers delete them, so "/\t/host" would become "//host"). */
+ *  may appear anywhere (URL parsers delete them, so "/\t/host" would become "//host"). Outside data:image (a data URL
+ *  names no host, and percent-encoded SVG holds "%2F" in every closing tag), a percent-encoded separator (%2f / %5c, any
+ *  case) or a look-alike slash (U+2044, U+2215, U+29F5, U+FE68, U+FF0F, U+FF3C) anywhere refuses the URL too: a decoder
+ *  or a Unicode normalizer could turn either into "/" or "\" ("file:///%5Chost", "∕∕host"). */
 export const SAFE_IMG =
-  /^(?:data:image\/|file:\/\/\/(?![\\/])|plugin:|(?![a-z][a-z0-9+.-]*:|\\|\/[\\/]))[^\u0000- \u007f][^\t\n\r\u0000-\u001f\u007f]*$/i;
+  /^(?:data:image\/|(?![^]*(?:%2f|%5c|[⁄∕⧵﹨／＼]))(?:file:\/\/\/(?![\\/])|plugin:|(?![a-z][a-z0-9+.-]*:|\\|\/[\\/])))[^\u0000- \u007f][^\t\n\r\u0000-\u001f\u007f]*$/i;
 
 export const isSafeImg = (src: unknown): src is string => typeof src === "string" && SAFE_IMG.test(src);
 

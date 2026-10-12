@@ -335,3 +335,101 @@ test("M8: Copy diagnostics carries ui.build (the plugin version and build stamp 
   const d = JSON.parse(calls.copy[0]!) as Record<string, unknown>;
   assert.deepEqual(d["plugin"], { version: "3.0.0", build: "61b12aa 2026-10-12T18:40Z" });
 });
+
+// ---------------------------------------------------------------------------- C2.2: one sentence + one fix button
+
+test("C2.2 Start engine: only a log line that names what will run (the launcher ships later); no throw, no engine call, no notice", async () => {
+  const { root, source, handle } = await setup();
+  const before = (await source.snapshot()).log.length;
+  assert.doesNotThrow(() => root.click({ "data-action": "start-engine" }));
+  await tick();
+  assert.deepEqual(source.calls, { approve: [], requestChanges: [], run: [], rebuild: [], cancel: [] });
+  assert.equal(handle.ui.notice, null);
+  root.click({ "data-action": "toggle-log" });
+  const lines = [...root.innerHTML.matchAll(/<li class="log-line[^"]*">([\s\S]*?)<\/li>/g)].map((m) => m[1]!);
+  assert.equal(lines.length, before + 1, "one more log line");
+  const expected = EN["log.start_engine"].replace("{command}", "reel serve --ensure");
+  assert.ok(lines.some((l) => l.includes(expected.replace(/'/g, "&#39;"))), "the line names the command (log drawer only)");
+  // the panel's own lines go into Copy diagnostics too
+  const { calls, root: r2 } = await (async () => {
+    const h = hostRec();
+    const r = new FakeRoot();
+    await mount(r, new RecSource(), h.host).ready;
+    return { calls: h.calls, root: r };
+  })();
+  r2.click({ "data-action": "start-engine" });
+  r2.click({ "data-action": "copy-diagnostics" });
+  const d = JSON.parse(calls.copy[0]!) as { log: { text: string }[] };
+  assert.ok(d.log.some((l) => l.text.includes("reel serve --ensure")));
+});
+
+test("C2.2 Try again: a failed engine action's notice carries ONE fix button, Try again, which runs the same action again", async () => {
+  const { root, source } = await setup();
+  source.nextResult = { ok: false, error: "Premiere is busy.", how: "Wait and retry." };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  const fixes = [...root.innerHTML.matchAll(/class="btn-row banner-fix"><button class="btn btn-secondary" data-action="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(fixes, ["retry"]);
+  source.nextResult = { ok: true };
+  root.click({ "data-action": "retry" });
+  await tick();
+  assert.equal(source.calls.run.length, 2);
+  assert.deepEqual(source.calls.run[1], source.calls.run[0], "the same request again");
+  assert.ok(root.innerHTML.includes("banner-ok"));
+  // Try again with nothing to repeat only clears the notice
+  const fresh = await setup();
+  assert.doesNotThrow(() => fresh.root.click({ "data-action": "retry" }));
+});
+
+test("C2.2 Try again after a failed rebuild shows the confirm card again (a rebuild is never re-run unasked)", async () => {
+  const { root, source } = await setup();
+  source.nextResult = { ok: false, error: "The engine did not answer in time." };
+  root.click({ "data-action": "rebuild" });
+  root.click({ "data-action": "rebuild-confirm" });
+  await tick();
+  assert.equal(source.calls.rebuild.length, 1);
+  assert.ok(root.innerHTML.includes('data-action="retry"'));
+  root.click({ "data-action": "retry" });
+  await tick();
+  assert.equal(source.calls.rebuild.length, 1, "not sent again");
+  assert.ok(root.innerHTML.includes('data-action="rebuild-confirm"'), "the confirm card is back");
+});
+
+test("C2.2 the fix button follows the problem: engine offline -> Start engine; a host-only failure -> Try again, never Start engine", async () => {
+  const { root, source, state } = await setup();
+  for (const cb of source.cbs) cb({ ...state, connection: { ...state.connection, engine: "offline" } });
+  source.nextResult = { ok: false, error: "The WhyNot Cut engine is not connected." };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  assert.match(root.innerHTML, /role="status"[\s\S]*?data-action="start-engine"/);
+  const host: PanelHost = { ...hostRec().host, revealPath: () => { throw new Error("host broke"); } };
+  const r2 = new FakeRoot();
+  const s2 = new RecSource();
+  await mount(r2, s2, host).ready;
+  for (const cb of s2.cbs) cb({ ...state, connection: { ...state.connection, engine: "offline" } });
+  r2.click({ "data-action": "reveal" });
+  await tick();
+  const notice = /<div class="banner banner-error" role="status"[\s\S]*?data-action="dismiss-notice"/.exec(r2.innerHTML)![0];
+  assert.match(notice, /data-action="retry"/);
+  assert.doesNotMatch(notice, /start-engine/);
+});
+
+test("C2.2 an engine text or how that names a command is not shown: the notice is plain, the full text goes to the log drawer", async () => {
+  const { root, source } = await setup();
+  source.nextResult = { ok: false, error: "Bridge not ready.", how: "In your Claude session run `reel doctor`." };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  const screen = root.innerHTML;
+  assert.ok(screen.includes("Bridge not ready."));
+  assert.ok(!screen.includes("reel doctor"), "no command on screen");
+  root.click({ "data-action": "toggle-log" });
+  assert.ok(root.innerHTML.includes("Bridge not ready. In your Claude session run `reel doctor`."), "kept in the log drawer");
+});
+
+test("C2.2 Copy diagnostics names the link diagnosis and the command that fixes it (diagnostics.ts), never on screen", async () => {
+  const { root, calls, handle } = await setup();
+  handle.ui.link = { code: "no_engine", retry_in_s: 2 };
+  root.click({ "data-action": "copy-diagnostics" });
+  const d = JSON.parse(calls.copy[0]!) as Record<string, unknown>;
+  assert.deepEqual(d["link"], { code: "no_engine", fix: "reel serve --ensure" });
+});

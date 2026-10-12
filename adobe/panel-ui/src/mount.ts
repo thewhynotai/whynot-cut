@@ -1,14 +1,20 @@
 // mount(root, source, host): renders the panel into root, re-renders on every state change and wires the
 // buttons by event delegation (one click and one input listener on the root). The host adapter does the
 // things only the host app can do (playhead, Source Monitor, reveal, clipboard).
+// Every problem on screen is one plain sentence and one fix button (Addendum C1.4): Start engine, Try again (runs the
+// last action again) or Copy diagnostics. A text from the engine or a host that holds a command is not shown; it goes
+// to the log drawer, through the panel's own log lines (merged with the source's, newest last).
 import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction } from "./actions.ts";
 import type { BuiltAction } from "./actions.ts";
-import { diagnosticsText } from "./diagnostics.ts";
+import { diagnosticsText, START_ENGINE_COMMAND } from "./diagnostics.ts";
 import type { HostOutcome, PanelHost } from "./host.ts";
-import { stringsFor } from "./i18n.ts";
-import { initialUi, render, renderError, renderLoading } from "./render.ts";
-import type { UiState } from "./render.ts";
-import type { PanelDataSource, PanelState, Result } from "./source.ts";
+import { fmt, stringsFor } from "./i18n.ts";
+import { hasCommand, initialUi, render, renderError, renderLoading } from "./render.ts";
+import type { FixAction, UiState } from "./render.ts";
+import type { LogLine, PanelDataSource, PanelState, Result } from "./source.ts";
+
+/** the panel's own log lines kept (the source keeps its own) */
+const LOCAL_LOG_MAX = 50;
 
 /** The slice of a DOM element the panel uses; real elements and the test fake both satisfy it. */
 export interface PanelElement {
@@ -49,6 +55,28 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
   let state: PanelState | null = null;
   let off: (() => void) | null = null;
   let live = true;
+  /** the panel's own log lines: button presses the engine cannot log yet, texts held back from the screen */
+  const localLog: LogLine[] = [];
+  /** "Try again" runs this: the last action, the same way */
+  let lastRun: (() => void) | null = null;
+
+  /** The state as shown: the source's log lines and the panel's own, in time order (a stable sort keeps each list's order). */
+  function view(s: PanelState): PanelState {
+    if (!localLog.length) return s;
+    return { ...s, log: [...s.log, ...localLog].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0)).slice(-200) };
+  }
+
+  function addLog(level: LogLine["level"], text: string): void {
+    localLog.push({ ts: new Date().toISOString().slice(11, 19), level, text: text.slice(0, 4000) });
+    if (localLog.length > LOCAL_LOG_MAX) localLog.splice(0, localLog.length - LOCAL_LOG_MAX);
+  }
+
+  /** An error's one fix: an engine action while the engine is not running -> Start engine; an action failed -> Try
+   *  again; else Copy diagnostics. A host-only action (reveal, copy, seek) never asks to start the engine. */
+  function fixFor(engine: boolean): FixAction {
+    if (engine && state?.connection.engine === "offline") return "start-engine";
+    return lastRun ? "retry" : "copy-diagnostics";
+  }
 
   const strings = () => stringsFor(state?.language === "ar" ? "ar" : "en");
 
@@ -74,7 +102,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       const field = active?.getAttribute ? active.getAttribute("data-field") : null;
       const selStart = active?.selectionStart ?? null;
       const selEnd = active?.selectionEnd ?? null;
-      root.innerHTML = render(state, strings(), ui);
+      root.innerHTML = render(view(state), strings(), ui);
       if (field && root.querySelector) {
         const el = root.querySelector(`[data-field="${field}"]`);
         if (el?.focus) {
@@ -87,15 +115,27 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
     }
   }
 
-  function setNotice(r: Result | null, okText?: string, error?: unknown): void {
+  function setNotice(r: Result | null, okText?: string, error?: unknown, engine = true): void {
     const t = strings();
-    if (error !== undefined) ui.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
-    else if (r && !r.ok) ui.notice = { kind: "error", text: r.error || t["notice.failed"], ...(r.how ? { how: r.how } : {}) };
-    else ui.notice = okText ? { kind: "ok", text: okText } : null;
+    let text: string | null = null;
+    let how: string | undefined;
+    if (error !== undefined) text = error instanceof Error ? error.message : String(error);
+    else if (r && !r.ok) {
+      text = r.error || t["notice.failed"];
+      how = r.how || undefined;
+    }
+    if (text === null) {
+      ui.notice = okText ? { kind: "ok", text: okText } : null;
+      return;
+    }
+    // render shows neither a text nor a how that holds a command: the full words go to the log drawer
+    if (hasCommand(text) || hasCommand(how)) addLog("error", how ? `${text} ${how}` : text);
+    ui.notice = { kind: "error", text, ...(how ? { how } : {}), fix: fixFor(engine) };
   }
 
   /** Runs one command and shows its outcome. lock = disable the action buttons meanwhile (engine commands, not host nudges). */
-  async function perform(fn: () => Promise<Result | void> | Result | void, okText?: string, lock = true): Promise<boolean> {
+  async function perform(fn: () => Promise<Result | void> | Result | void, okText?: string, lock = true, retry?: () => void): Promise<boolean> {
+    lastRun = retry ?? (() => void perform(fn, okText, lock));
     ui.notice = null;
     if (lock) {
       ui.working = true;
@@ -105,10 +145,10 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
     try {
       const r = await fn();
       if (r && !r.ok) ok = false;
-      setNotice(r ?? null, okText);
+      setNotice(r ?? null, okText, undefined, lock);
     } catch (e) {
       ok = false;
-      setNotice(null, undefined, e);
+      setNotice(null, undefined, e, lock);
     }
     if (lock) ui.working = false;
     paint();
@@ -118,12 +158,13 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
   /** Reveal / Copy: the host tries the real thing first ("done" -> a short ok notice) and falls back to a visible box
    *  ("shown" or nothing -> no banner: the box is the outcome). Only a real failure is a red banner. */
   async function hostShow(fn: () => Promise<HostOutcome | void> | HostOutcome | void, okKey: "notice.opened" | "notice.copied"): Promise<void> {
+    lastRun = () => void hostShow(fn, okKey);
     ui.notice = null;
     try {
       const outcome = await fn();
       ui.notice = outcome === "done" ? { kind: "ok", text: strings()[okKey] } : null;
     } catch (e) {
-      setNotice(null, undefined, e);
+      setNotice(null, undefined, e, false);
     }
     paint();
   }
@@ -208,7 +249,12 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
         ui.confirmRebuild = false;
         const input = rebuildInput(s);
         if (!input) return missing();
-        void perform(() => source.rebuild(input), t["notice.ok"]);
+        // Try again shows the confirm card again: a rebuild replaces the editor's edits, so it is never re-run unasked
+        void perform(() => source.rebuild(input), t["notice.ok"], true, () => {
+          ui.notice = null;
+          ui.confirmRebuild = true;
+          paint();
+        });
         return;
       }
       case "reveal": {
@@ -218,8 +264,20 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
         return;
       }
       case "copy-diagnostics":
-        void hostShow(() => host.copyText(diagnosticsText(s, ui.build)), "notice.copied");
+        void hostShow(() => host.copyText(diagnosticsText(view(s), ui.build, ui.link)), "notice.copied");
         return;
+      case "start-engine":
+        // wired to the launcher (whynotcut://engine/start) once it ships; today a log line that names what will run
+        addLog("info", fmt(t["log.start_engine"], { command: START_ENGINE_COMMAND }));
+        paint();
+        return;
+      case "retry": {
+        const again = lastRun;
+        ui.notice = null;
+        if (again) again();
+        else paint();
+        return;
+      }
       case "cancel": {
         const id = el.getAttribute("data-id");
         if (id) void perform(() => source.cancel(id));
@@ -243,6 +301,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
     try {
       handleClick(e);
     } catch (err) {
+      lastRun = null; // the handler itself broke: Copy diagnostics, not a re-run of an earlier action
       setNotice(null, undefined, err);
       paint();
     }

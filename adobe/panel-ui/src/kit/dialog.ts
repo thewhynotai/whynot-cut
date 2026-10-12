@@ -2,7 +2,8 @@
 // for a confirm. The backup name is a left-to-right chip; with no backup the dialog says so. The confirm is a danger
 // button (primary when the action is not destructive), the cancel a secondary one. Rendered in place (no overlay), so it
 // works the same in UXP and CEP; it has no focus trap, so it does not claim aria-modal. An empty "what will change"
-// list is a bug: the type requires one line and the function throws on none.
+// list, or an empty / whitespace-only line in it, is a bug: the type requires one line and the function throws on any
+// empty one (an empty bullet would read as "nothing changes here").
 import type { Strings } from "../i18n.ts";
 import { button, buttonRow } from "./button.ts";
 import { cmdRow, esc, safeId, trusted, withCommands } from "./html.ts";
@@ -14,7 +15,7 @@ export interface DialogOpts {
   /** element id (aria-labelledby / describedby are derived from it); default "kit-dialog" */
   id?: string;
   title: string;
-  /** what will change, one line each (at least one); `commands` stay left-to-right */
+  /** what will change, one non-empty line each (at least one); `file names` stay left-to-right */
   changes: readonly [string, ...string[]];
   /** the backup the action keeps first; absent = "No backup copy is made" */
   backupName?: string | null;
@@ -25,7 +26,7 @@ export interface DialogOpts {
 }
 
 export function dialog(o: DialogOpts): Html {
-  if (!Array.isArray(o.changes) || !o.changes.some((c) => typeof c === "string" && c.trim() !== "")) throw new Error("kit.dialog.changes-empty");
+  if (!Array.isArray(o.changes) || o.changes.length === 0 || !o.changes.every((c) => typeof c === "string" && c.trim() !== "")) throw new Error("kit.dialog.changes-empty");
   const id = safeId(o.id ?? "kit-dialog");
   const changes = o.changes.map((c) => `<li class="kit-dialog-change">${withCommands(c)}</li>`).join("");
   const backup = o.backupName
