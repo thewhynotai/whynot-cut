@@ -5,6 +5,7 @@ Run:  ~/.whynot-cut/venv/Scripts/python.exe -B -m unittest discover -s whynot-cu
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
+import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import importlib.util
 import json
 import os

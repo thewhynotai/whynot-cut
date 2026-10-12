@@ -353,6 +353,48 @@ def debug_mode_commands() -> list[str]:
     return [f"defaults write com.adobe.CSXS.{v} PlayerDebugMode 1" for v in CSXS_VERSIONS]
 
 
+# --------------------------------------------------------------------------- test sandbox (3.0 G79)
+# A unit test once queued real build_project jobs that a running Premiere executed. tests/_isolation.py runs every test
+# process with WHYNOT_TEST_SANDBOX set (a temp folder) and records the machine's real locations in
+# WHYNOT_TEST_LIVE_ROOTS before it redirects HOME / WHYNOT_HOME. Under that flag the engine refuses to write into a live
+# root (job queues, bridge scripts, the CEP bundle) and to launch After Effects / Photoshop / aerender, unless a
+# deliberate live run sets WHYNOT_TEST_ALLOW_LIVE_BRIDGE=1. Outside tests the flag is never set: nothing changes.
+SANDBOX_ENV = "WHYNOT_TEST_SANDBOX"
+LIVE_ROOTS_ENV = "WHYNOT_TEST_LIVE_ROOTS"
+ALLOW_LIVE_ENV = "WHYNOT_TEST_ALLOW_LIVE_BRIDGE"
+
+
+def _norm(p) -> str:
+    return os.path.normcase(os.path.abspath(str(p)))
+
+
+def live_roots() -> list[Path]:
+    """The real machine's engine home(s) and CEP folder as tests/_isolation.py recorded them; without that record,
+    ~/.whynot-cut, the legacy homes and the CEP folder as the environment gives them now."""
+    rec = [Path(p) for p in os.environ.get(LIVE_ROOTS_ENV, "").split(os.pathsep) if p]
+    return rec or [Path.home() / HOME_NAME, *(Path.home() / h for h in LEGACY_HOMES), cep_extensions_dir()]
+
+
+def sandbox_refusal(what: str, *targets) -> dict | None:
+    """None, except inside a test sandbox without the live opt-in, when a target lies in a live root — or when there
+    is no target at all (launching an Adobe app is always refused there). The refusal is an engine error document."""
+    if not os.environ.get(SANDBOX_ENV) or os.environ.get(ALLOW_LIVE_ENV) == "1":
+        return None
+    hit = None
+    if targets:
+        roots = [_norm(r) for r in live_roots()]
+        hit = next((t for t in targets if any(_norm(t) == r or _norm(t).startswith(r.rstrip("\\/") + os.sep)
+                                              for r in roots)), None)
+        if hit is None:
+            return None
+    where = f" ({hit} is the real machine's)" if hit is not None else ""
+    return {"ok": False, "refused": "test-sandbox",
+            "error": f"test sandbox: refused to {what}{where} - a unit test must never reach the real engine home or a "
+                     "running Adobe app",
+            "how": "mock the bridge (ppro_bridge.status/submit, ae_bridge.status/submit) or the launcher in the test, "
+                   f"or point WHYNOT_HOME at a temp folder; set {ALLOW_LIVE_ENV}=1 only for a deliberate live run"}
+
+
 # --------------------------------------------------------------------------- misc
 # CTranslate2 (Whisper) needs NVIDIA's cuBLAS 12 at run time; its Windows wheel already carries cuDNN 9.
 # Missing -> "Library cublas64_12.dll is not found" at the first inference and a silent CPU fallback (5-10x slower).

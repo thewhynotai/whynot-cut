@@ -1,0 +1,130 @@
+"""Test sandbox (3.0 G79): no unit test reaches the real engine home, the real ~/.claude or a running Adobe app.
+
+Why a module and not a hook: unittest has no conftest, and the suite is started several ways (tools/test.sh,
+`python -m unittest discover -s whynot-cut/tests [-p <file>]`, one file run as a script). Every test module imports
+this module as its first statement after the bytecode prelude (tests/test_isolation.py enforces it), so whichever
+module is imported first sandboxes the whole process before any engine code runs; later imports are no-ops (module
+cache). Child processes inherit the environment, so the engine, hooks and wrappers a test spawns are sandboxed too.
+
+What it does, once per process:
+  * records the machine's REAL locations first (plat.engine_home() as the environment gives it, ~/.whynot-cut and the
+    legacy homes, the CEP extensions folder) in WHYNOT_TEST_LIVE_ROOTS; REAL_ENGINE_HOME is kept for the few tests that
+    read the real runtime (never write to it);
+  * points WHYNOT_HOME, HOME, USERPROFILE, APPDATA (Windows: the CEP folder) and CLAUDE_CONFIG_DIR into a per-run temp
+    folder and sets WHYNOT_TEST_SANDBOX to it; drops the variables that would lead back to the real machine
+    (CLAUDE_PLUGIN_DATA, CLAUDE_ENV_FILE, WHYNOT_OPTIONS_FILE, other engine-home / clients-root settings and plugin
+    options). A test that sets its own (mock.patch.dict) still wins inside that test;
+  * keeps the pinned ffmpeg of the real engine home findable (NH_FFMPEG, read-only) so media tests behave as before;
+  * puts every temp folder of the run inside the sandbox (tempfile.tempdir, and TMP/TEMP/TMPDIR for child processes)
+    and makes TemporaryDirectory clean up robustly: Windows under load answers rmtree with WinError 145 ("directory is
+    not empty") or a read-only / briefly locked file, so cleanup retries (chmod + short backoff) and whatever still
+    lingers stays inside the sandbox, which is removed (with the same retries) when the process that made it exits.
+The interpreter itself is unaffected: tools/test.sh resolves the runtime before Python starts.
+Under WHYNOT_TEST_SANDBOX the engine also refuses to queue jobs in, sync scripts into or install the bridge into a live
+root, and to launch After Effects, Photoshop or aerender (plat.sandbox_refusal), unless WHYNOT_TEST_ALLOW_LIVE_BRIDGE=1.
+The sandbox folder is removed when the process that made it exits.
+"""
+import atexit
+import os
+import shutil
+import stat
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+_ENGINE = str(Path(__file__).resolve().parents[1] / "engine" / "reel")
+if _ENGINE not in sys.path:
+    sys.path.insert(0, _ENGINE)
+
+from lib import plat  # noqa: E402  (stdlib only; computes nothing at import)
+
+_DROP = ("CLAUDE_PLUGIN_DATA", "CLAUDE_ENV_FILE", "WHYNOT_OPTIONS_FILE") + plat.HOME_ENV + plat.CLIENTS_ENV
+
+
+def _live_roots() -> list:
+    home = Path.home()
+    roots = [plat.engine_home(), home / plat.HOME_NAME] + [home / h for h in plat.LEGACY_HOMES]
+    roots.append(plat.cep_extensions_dir())
+    out = []
+    for r in roots:
+        s = os.path.abspath(str(r))
+        if s not in out:
+            out.append(s)
+    return out
+
+
+def rmtree_retry(path, attempts: int = 6) -> bool:
+    """rmtree that survives Windows' transient refusals: read-only entries get write permission, then retry with a
+    short backoff (0.05 s doubling). True when the folder is gone."""
+    def fix(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+            func(p)
+        except OSError:
+            pass
+    kw = {"onexc": fix} if sys.version_info >= (3, 12) else {"onerror": fix}
+    for i in range(attempts):
+        if not os.path.lexists(path):
+            return True
+        try:
+            shutil.rmtree(path, **kw)
+        except OSError:
+            pass
+        if not os.path.lexists(path):
+            return True
+        time.sleep(0.05 * 2 ** i)
+    return not os.path.lexists(path)
+
+
+class _TemporaryDirectory(tempfile.TemporaryDirectory):
+    """tempfile.TemporaryDirectory for the test run: cleanup retries (rmtree_retry) and never raises; a folder that
+    still cannot go stays in the sandbox and leaves with it."""
+    def __init__(self, *a, **kw):
+        kw.setdefault("ignore_cleanup_errors", True)
+        super().__init__(*a, **kw)
+
+    def cleanup(self):
+        if self._finalizer.detach() or os.path.exists(self.name):
+            rmtree_retry(self.name)
+
+
+def _sandbox() -> None:
+    if os.environ.get(plat.SANDBOX_ENV):            # a parent test process already sandboxed this one
+        return
+    real_engine = plat.engine_home()
+    pinned = plat.engine_ffmpeg(real_engine) or next(
+        (p for p in [real_engine / "ffmpeg"] if p.is_file()), None)          # or the 2.x <home>/ffmpeg link
+    roots = _live_roots()
+    box = Path(tempfile.mkdtemp(prefix="whynot-test-sandbox-"))
+    pid = os.getpid()
+    atexit.register(lambda: os.getpid() == pid and rmtree_retry(box))
+    user = box / "user-home"
+    (user / ".claude").mkdir(parents=True)
+    tmp = box / "tmp"
+    tmp.mkdir()
+    for k in list(os.environ):
+        if k in _DROP or k.startswith("CLAUDE_PLUGIN_OPTION_"):
+            del os.environ[k]
+    os.environ.update({
+        plat.SANDBOX_ENV: str(box),
+        plat.LIVE_ROOTS_ENV: os.pathsep.join(roots),
+        "WHYNOT_TEST_REAL_ENGINE_HOME": str(real_engine),
+        "WHYNOT_HOME": str(box / "engine-home"),
+        "HOME": str(user),
+        "USERPROFILE": str(user),
+        "CLAUDE_CONFIG_DIR": str(user / ".claude"),
+        "TMP": str(tmp), "TEMP": str(tmp), "TMPDIR": str(tmp),
+    })
+    if plat.IS_WIN:
+        os.environ["APPDATA"] = str(user / "AppData" / "Roaming")
+    if pinned and not os.environ.get("NH_FFMPEG"):
+        os.environ["NH_FFMPEG"] = str(pinned)
+
+
+_sandbox()
+tempfile.tempdir = None                 # re-read TMP/TEMP/TMPDIR: this process's temp folders land in the sandbox too
+if sys.version_info >= (3, 10) and not issubclass(tempfile.TemporaryDirectory, _TemporaryDirectory):
+    tempfile.TemporaryDirectory = _TemporaryDirectory
+REAL_ENGINE_HOME = Path(os.environ["WHYNOT_TEST_REAL_ENGINE_HOME"])
+LIVE_ROOTS = os.environ[plat.LIVE_ROOTS_ENV]

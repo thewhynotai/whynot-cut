@@ -11,6 +11,7 @@ import time
 import uuid
 from pathlib import Path
 
+from . import plat
 from .common import now_iso
 
 
@@ -38,6 +39,9 @@ def submit(queue: Path, script: Path, action: str, data: dict | None = None, tim
            poll_s: float = 0.5, st: dict | None = None, app: str = "the Adobe app") -> dict:
     """Queue one job and wait for its result. `st` = a status already checked by the caller (else checked here)."""
     queue = Path(queue)
+    refused = plat.sandbox_refusal(f"queue the {action} job", queue, script)          # G79: never in tests
+    if refused:
+        return refused
     st = st if st is not None else status(queue, app=app)
     if not st["alive"]:
         return {"ok": False, "error": "bridge not running", "status": st}

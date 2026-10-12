@@ -5,6 +5,7 @@ plugin + engine daemon later); the validator is the stdlib-only draft-2020-12 su
 """
 import sys as _sys
 _sys.dont_write_bytecode = True
+import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import copy
 import json
 import re

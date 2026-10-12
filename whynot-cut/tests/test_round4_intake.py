@@ -7,6 +7,7 @@ Run:
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
+import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import json
 import shutil
 import subprocess

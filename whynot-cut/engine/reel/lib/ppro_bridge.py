@@ -94,6 +94,9 @@ def _ver(v: str) -> tuple:
 
 def install(force: bool = False) -> dict:
     EXT_DIR, QUEUE = ext_dir(), queue_dir()
+    refused = plat.sandbox_refusal("install the bridge", EXT_DIR, QUEUE, scripts_dir())     # G79: never in tests
+    if refused:
+        return refused
     cur = installed_version()
     if cur and not force and _ver(cur) > _ver(BRIDGE_VERSION):
         # an older plugin (e.g. `reel setup` from 2.1.1) must not put its bridge back over a newer one
@@ -140,6 +143,9 @@ def status(max_age_s: float = 5.0) -> dict:
 def submit(action: str, data: dict | None = None, timeout: float = 600, script: Path | None = None) -> dict:
     """Run `action` in Premiere through the bridge; `script` defaults to the synced nh_ppro_lib.jsx."""
     from . import cep_queue
+    refused = plat.sandbox_refusal(f"queue the {action} job", queue_dir(), scripts_dir())   # G79: never in tests
+    if refused:
+        return refused
     st = status()          # through this module, so callers/tests that patch ppro_bridge.status keep working
     if not st["alive"]:
         return {"ok": False, "error": "bridge not running", "status": st}

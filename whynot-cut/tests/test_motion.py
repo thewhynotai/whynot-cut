@@ -4,6 +4,7 @@ library, motion plan (truth, timing, layout), animatic, AE library, build/read-b
 """
 import sys as _sys
 _sys.dont_write_bytecode = True
+import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import hashlib
 import inspect
 import json

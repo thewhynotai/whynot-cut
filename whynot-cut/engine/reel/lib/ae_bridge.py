@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 
 from .common import TEMPLATES_DIR, engine_home
-from . import cep_queue
+from . import cep_queue, plat
 
 SRC = TEMPLATES_DIR / "after_effects"
 LIBS = ("nh_ae_lib.jsx", "nh_motion_lib.jsx", "nh_ae_bridge.jsx")
@@ -76,6 +76,9 @@ def status(max_age_s: float = 5.0) -> dict:
 
 
 def submit(action: str, data: dict | None = None, timeout: float = 900) -> dict:
+    refused = plat.sandbox_refusal(f"queue the {action} job", queue_dir(), scripts_dir())   # G79: never in tests
+    if refused:
+        return refused
     st = status()
     if not st["alive"]:
         return {"ok": False, "error": "bridge not running", "status": st}

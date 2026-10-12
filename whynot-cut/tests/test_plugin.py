@@ -3,6 +3,7 @@ Run:  ~/.whynot-cut/venv/bin/python -m unittest discover -s <plugin>/tests -v
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
+import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import json
 import os
 import subprocess
@@ -536,7 +537,7 @@ class TestHeartbeat(ClientFixture):
         """G1 end to end: run_python.sh touches hooks-ok right before session_context runs; the warning still fires."""
         import time
         bash = find_bash()
-        engine = Path.home() / ".whynot-cut"
+        engine = _isolation.REAL_ENGINE_HOME          # read only: its interpreter runs the hooks (G79 sandbox)
         if not bash or not (engine / "venv").is_dir():
             self.skipTest("needs bash and the engine venv")
         data = Path(self.tmp.name) / "pdata2"
@@ -1142,10 +1143,13 @@ class TestEditorEdits(ClientFixture):
         self.assertIsNotNone(verify.editor_modified(p))
         self.assertAlmostEqual(verify.newest_render_mtime(p), built, delta=1)   # verification not made stale
         from unittest import mock
+        # G79: the bridge is mocked both ways - this test once queued real build_project jobs into a running Premiere
         with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), \
+                mock.patch("lib.ppro_bridge.submit", side_effect=AssertionError("must not reach Premiere")) as submit, \
                 mock.patch.object(ppro_build, "job_data", return_value={"_missing": [], "project_path": str(prj)}):
             r = ppro_build.build(p, overwrite=True)
         self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT")
+        submit.assert_not_called()
         self.assertEqual(prj.read_text(encoding="utf-8"), "editor saved changes")       # untouched
 
 

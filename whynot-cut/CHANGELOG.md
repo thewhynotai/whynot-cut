@@ -157,6 +157,13 @@
   not proved (`ok` false, "inconclusive"). First unit tests for `detect_pauses` and `verify_cuts`.
 
 ### Fixed
+- The unit tests no longer reach the real engine home or a running Adobe app (G79): a test that mocked only the
+  bridge status had queued real `build_project` jobs that an open Premiere ran. Every test process now runs in a temp
+  sandbox (`tests/_isolation.py`, imported first by every test module: WHYNOT_HOME, HOME/USERPROFILE, APPDATA and
+  CLAUDE_CONFIG_DIR point into it), and under that sandbox the engine refuses to queue Premiere/After Effects jobs in,
+  sync scripts into or install the bridge into the real engine home or CEP folder, and to launch After Effects,
+  Photoshop or aerender, unless a deliberate live run sets `WHYNOT_TEST_ALLOW_LIVE_BRIDGE=1`. Outside tests nothing
+  changes.
 - Guard minors from the Phase 1 gate (T2.19). Bash: a `\` before CRLF escapes the CR and is no line continuation (the
   next line runs on its own and is checked); `\$'` and `$$'` open no ANSI-C quote; a continued line that starts with
   `#` (`ls output\` + `#; rm -rf data` is `ls output#; rm -rf data`) is not a comment; `<<` inside `$(( ))` / `(( ))`

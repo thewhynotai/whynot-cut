@@ -27,6 +27,9 @@ def run_after_effects(jsx: Path, timeout: int, done: Callable[[], bool] | None =
     app = plat.newest_app("after_effects")
     if not app:
         return {"status": "UNSUPPORTED", "msg": "After Effects not installed"}
+    refused = plat.sandbox_refusal("launch After Effects")                                   # G79: never in tests
+    if refused:
+        return {"status": "REFUSED", "msg": refused["error"], "how": refused["how"]}
     t0 = time.time()
     if plat.IS_MAC:
         p = run(["osascript", "-e", f"with timeout of {timeout} seconds",
@@ -48,6 +51,9 @@ def run_photoshop(jsx: Path, timeout: int) -> dict:
     app = plat.newest_app("photoshop")
     if not app:
         return {"status": "UNSUPPORTED", "msg": "Photoshop not installed"}
+    refused = plat.sandbox_refusal("launch Photoshop")                                       # G79: never in tests
+    if refused:
+        return {"status": "REFUSED", "msg": refused["error"], "how": refused["how"]}
     t0 = time.time()
     if plat.IS_MAC:
         p = run(["osascript", "-e", f"with timeout of {timeout} seconds",

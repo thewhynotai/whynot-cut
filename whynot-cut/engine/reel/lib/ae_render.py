@@ -38,6 +38,10 @@ def render(aep: Path, comp: str, out: Path, rs: str, om: str, start_frame: int |
     if not exe or not Path(exe).exists() or not aep.exists():
         return {"status": "SKIPPED", "returncode": None, "output": str(out), "elapsed_s": 0,
                 "log": None, "msg": f"aerender={exe} aep_exists={aep.exists()}"}
+    refused = Path(exe).stem.lower() == "aerender" and plat.sandbox_refusal("run aerender")   # G79: never in tests
+    if refused:
+        return {"status": "REFUSED", "returncode": None, "output": str(out), "elapsed_s": 0, "log": None,
+                "msg": refused["error"], "how": refused["how"]}
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     stage, r_aep, r_out = None, aep, out
