@@ -1,5 +1,5 @@
-// The visible "copy this" box. The product manifest has no clipboard permission (navigator.clipboard throws), so when the
-// panel asks the host to copy something - or to open a folder it cannot open - the text is shown in a read-only,
+// The visible "copy this" box: the fallback when the clipboard write is refused (navigator.clipboard throws without the
+// manifest permission, or the user denies it) or a folder cannot be opened. The text is shown in a read-only,
 // pre-selected box the editor can copy from with Ctrl/Cmd+C. It lives outside the panel root, so a re-render never wipes it.
 
 export interface FallbackEl {

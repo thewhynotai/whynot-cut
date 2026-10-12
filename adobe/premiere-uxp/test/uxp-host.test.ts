@@ -67,11 +67,12 @@ test("openInSourceMonitor: SourceMonitor.openFilePath(path); a false return is a
   await assert.rejects(() => createUxpHost(bad.deps).openInSourceMonitor("E:/x/preview.mp4"), /source monitor/i);
 });
 
-test("copyText: uses the clipboard when the plugin may", async () => {
+test("copyText: clipboard success -> the text is on the clipboard, no box, and the host reports \"done\" (the panel shows the ok notice)", async () => {
   const { deps, calls, shown } = makeDeps();
-  await createUxpHost(deps).copyText("hello");
+  const outcome = await createUxpHost(deps).copyText("hello");
   assert.deepEqual(calls, ["clip hello"]);
   assert.deepEqual(shown, []);
+  assert.equal(outcome, "done");
 });
 
 test("U2 copyText: no clipboard permission (the call throws or is missing) -> the text is shown to copy by hand, and that is a normal outcome, not an error", async () => {
@@ -80,9 +81,10 @@ test("U2 copyText: no clipboard permission (the call throws or is missing) -> th
     undefined,
   ]) {
     const { deps, shown } = makeDeps({ clip });
-    await createUxpHost(deps).copyText("diagnostics text");
+    const outcome = await createUxpHost(deps).copyText("diagnostics text");
     assert.equal(shown.length, 1);
     assert.equal(shown[0]!.text, "diagnostics text");
+    assert.equal(outcome, "shown", "the box is the outcome: the panel must not claim 'Copied'");
   }
 });
 
@@ -95,9 +97,19 @@ test("copyText: Arabic panel gets the Arabic title on the box", async () => {
 test("revealPath: shell.openPath on the folder; an empty answer is success", async () => {
   const opened: string[] = [];
   const { deps, shown } = makeDeps({ shell: { openPath: async (p: string) => (opened.push(p), "") } });
-  await createUxpHost(deps).revealPath("E:\\Clients\\X");
+  const outcome = await createUxpHost(deps).revealPath("E:\\Clients\\X");
   assert.deepEqual(opened, ["E:\\Clients\\X"]);
   assert.deepEqual(shown, []);
+  assert.equal(outcome, "done", "the panel shows the 'Opened' notice");
+});
+
+test("revealPath: a review MP4 / project file goes to openPath as a native path with a developerText for Adobe's consent dialog", async () => {
+  const seen: { p: string; text: unknown }[] = [];
+  const { deps } = makeDeps({ shell: { openPath: async (p: string, text?: string) => (seen.push({ p, text }), "") } });
+  await createUxpHost(deps).revealPath("\\\\?\\D:/Clients/EP01/review.mp4");
+  assert.equal(seen[0]!.p, "D:\\Clients\\EP01\\review.mp4");
+  assert.equal(typeof seen[0]!.text, "string");
+  assert.ok((seen[0]!.text as string).length > 10);
 });
 
 test("U2 revealPath: openPath that throws, answers with an error string or is missing -> the path is shown, no error", async () => {
@@ -108,7 +120,8 @@ test("U2 revealPath: openPath that throws, answers with an error string or is mi
     undefined,
   ]) {
     const { deps, shown } = makeDeps({ shell });
-    await createUxpHost(deps).revealPath("\\\\?\\E:\\Clients\\X");
+    const outcome = await createUxpHost(deps).revealPath("\\\\?\\E:\\Clients\\X");
+    assert.equal(outcome, "shown", "the box is the outcome: the panel must not claim 'Opened'");
     assert.equal(shown.length, 1);
     assert.equal(shown[0]!.text, "E:\\Clients\\X", "the long-path prefix is not shown to the editor");
   }

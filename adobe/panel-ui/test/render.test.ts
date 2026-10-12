@@ -379,11 +379,11 @@ test("U5: a thumbnail is only drawn for data:image, file:, plugin: and relative 
   }
 });
 
-test("U2: the panel offers 'Show folder path' and 'Show diagnostics'; the folder button is host-only, so it works while the engine is offline", () => {
-  assert.equal(EN["actions.reveal"], "Show folder path");
-  assert.equal(EN["actions.diagnostics"], "Show diagnostics");
-  assert.equal(AR["actions.reveal"], "إظهار مسار المجلد");
-  assert.equal(AR["actions.diagnostics"], "عرض التشخيص");
+test("the panel offers 'Reveal folder' and 'Copy diagnostics' (the permissions are granted again); the folder button is host-only, so it works while the engine is offline", () => {
+  assert.equal(EN["actions.reveal"], "Reveal folder");
+  assert.equal(EN["actions.diagnostics"], "Copy diagnostics");
+  assert.equal(AR["actions.reveal"], "إظهار المجلد");
+  assert.equal(AR["actions.diagnostics"], "نسخ التشخيص");
   const s = sampleState("en", "qc");
   s.connection.engine = "offline";
   assert.ok(s.context.folder);

@@ -4,7 +4,7 @@
 import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction } from "./actions.ts";
 import type { BuiltAction } from "./actions.ts";
 import { diagnosticsText } from "./diagnostics.ts";
-import type { PanelHost } from "./host.ts";
+import type { HostOutcome, PanelHost } from "./host.ts";
 import { stringsFor } from "./i18n.ts";
 import { initialUi, render, renderError, renderLoading } from "./render.ts";
 import type { UiState } from "./render.ts";
@@ -115,6 +115,19 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
     return ok;
   }
 
+  /** Reveal / Copy: the host tries the real thing first ("done" -> a short ok notice) and falls back to a visible box
+   *  ("shown" or nothing -> no banner: the box is the outcome). Only a real failure is a red banner. */
+  async function hostShow(fn: () => Promise<HostOutcome | void> | HostOutcome | void, okKey: "notice.opened" | "notice.copied"): Promise<void> {
+    ui.notice = null;
+    try {
+      const outcome = await fn();
+      ui.notice = outcome === "done" ? { kind: "ok", text: strings()[okKey] } : null;
+    } catch (e) {
+      setNotice(null, undefined, e);
+    }
+    paint();
+  }
+
   function missing(): void {
     ui.notice = { kind: "error", text: strings()["notice.missing"] };
     paint();
@@ -201,11 +214,11 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       case "reveal": {
         const folder = s.context.folder;
         if (!folder) return missing();
-        void perform(() => host.revealPath(folder), undefined, false);
+        void hostShow(() => host.revealPath(folder), "notice.opened");
         return;
       }
       case "copy-diagnostics":
-        void perform(() => host.copyText(diagnosticsText(s)), undefined, false);
+        void hostShow(() => host.copyText(diagnosticsText(s)), "notice.copied");
         return;
       case "cancel": {
         const id = el.getAttribute("data-id");

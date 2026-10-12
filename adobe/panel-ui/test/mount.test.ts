@@ -291,12 +291,34 @@ test("a snapshot that rejects shows an error view; a later pushed state replaces
   assert.ok(root.innerHTML.includes(good.client));
 });
 
-test("U2: Show folder path / Show diagnostics leave no banner when the host resolves (the box is the outcome); a rejection is still shown", async () => {
-  const { root, state } = await setup();
-  root.click({ "data-action": "reveal" });
-  root.click({ "data-action": "copy-diagnostics" });
-  await tick();
-  assert.ok(!root.innerHTML.includes("banner-error") && !root.innerHTML.includes("banner-ok"));
+test("Reveal folder / Copy diagnostics: a host that did it ('done') gets a short ok notice (EN + AR); a host that showed the box ('shown') or returns nothing gets no banner; a rejection is still an error", async () => {
+  for (const [lang, table, opened, copied] of [["en", EN, "Opened.", "Copied."], ["ar", AR, "تم الفتح.", "تم النسخ."]] as const) {
+    const source = new RecSource();
+    source.inner = new MockSource({ language: lang, scenario: "approval" });
+    const host: PanelHost = { ...hostRec().host, revealPath: async () => "done" as const, copyText: async () => "done" as const };
+    const root = new FakeRoot();
+    await mount(root, source, host).ready;
+    assert.equal(table["notice.opened"], opened);
+    assert.equal(table["notice.copied"], copied);
+    root.click({ "data-action": "reveal" });
+    await tick();
+    assert.ok(root.innerHTML.includes("banner-ok") && root.innerHTML.includes(opened), `${lang} opened notice`);
+    root.click({ "data-action": "copy-diagnostics" });
+    await tick();
+    assert.ok(root.innerHTML.includes("banner-ok") && root.innerHTML.includes(copied), `${lang} copied notice`);
+    assert.ok(!root.innerHTML.includes("banner-error"));
+  }
+  // the box was shown (or an older host returns nothing): no banner at all, never a red one
+  for (const out of ["shown", undefined] as const) {
+    const source = new RecSource();
+    const host: PanelHost = { ...hostRec().host, revealPath: async () => out as never, copyText: async () => out as never };
+    const root = new FakeRoot();
+    await mount(root, source, host).ready;
+    root.click({ "data-action": "reveal" });
+    root.click({ "data-action": "copy-diagnostics" });
+    await tick();
+    assert.ok(!root.innerHTML.includes("banner-error") && !root.innerHTML.includes("banner-ok"), String(out));
+  }
   const source = new RecSource();
   const host: PanelHost = { ...hostRec().host, revealPath: () => { throw new Error("host broke"); } };
   const r2 = new FakeRoot();
@@ -304,5 +326,4 @@ test("U2: Show folder path / Show diagnostics leave no banner when the host reso
   r2.click({ "data-action": "reveal" });
   await tick();
   assert.ok(r2.innerHTML.includes("banner-error") && r2.innerHTML.includes("host broke"));
-  assert.ok(state.context.folder);
 });

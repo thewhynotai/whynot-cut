@@ -10,6 +10,18 @@
   },
   "requiredPermissions": {
     "localFileSystem": "fullAccess",
+    "clipboard": "readAndWrite",
+    "launchProcess": {
+      "schemes": [
+        "file"
+      ],
+      "extensions": [
+        ".mp4",
+        ".mov",
+        ".prproj",
+        ""
+      ]
+    },
     "network": {
       "domains": [
         "ws://127.0.0.1",

@@ -19,7 +19,7 @@ export interface ShellDoc extends FallbackDoc, ThemeDoc {}
 
 export interface ShellEnv {
   document: ShellDoc;
-  /** `navigator`, read lazily: with no clipboard permission, touching navigator.clipboard throws in UXP */
+  /** `navigator`, read lazily: without the manifest clipboard permission, touching navigator.clipboard throws in UXP */
   navigator: { clipboard?: { writeText?: (text: string) => Promise<void> } } | undefined;
   /** UXP's `require` (host modules: "premierepro", "uxp") */
   require: (id: string) => unknown;

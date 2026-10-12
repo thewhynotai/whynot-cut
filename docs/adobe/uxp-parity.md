@@ -168,6 +168,7 @@ Each line is a difference the adapter owns, with where the contract says it.
 - **Three host calls were never measured**: `SourceMonitor.openFilePath`, `Sequence.setPlayerPosition` and
   `shell.openPath` are used by the panel host from the types and unit tests only. They are item (h) of the spike 0.1.3
   list below; until then they are not green.
+- **The product manifest now grants `clipboard: readAndWrite` and `launchProcess`** (owner decision, 2026-10-12): `launchProcess {schemes: ["file"], extensions: [".mp4", ".mov", ".prproj", ""]}` (the `""` is what Adobe's external-process recipe says allows folders; dotted vs undotted extensions is documented inconsistently). The panel host tries `navigator.clipboard.writeText` / `shell.openPath` first ("Copied." / "Opened.") and falls back to the copyable box. `openPath` behaviour (consent dialog, folder via `""`, dot form of the extensions, whether `file` is needed in `schemes`) is unmeasured -> spike 0.1.3.
 - **`set_player_position` needs `sequence_name`, but `PanelHost.setPlayerPosition(t_s)` cannot pass it yet**: the host
   moves the playhead of the active sequence. T6.5 widens the host method to take the sequence name.
 - **Failures are `ok:false` with an `error`** (C6): the result envelope is one shape per outcome (`ok:true` has a

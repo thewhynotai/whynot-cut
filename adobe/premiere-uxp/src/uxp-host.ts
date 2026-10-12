@@ -2,10 +2,13 @@
 // Nothing here mutates the project, so none of it needs project.lockedAccess / executeTransaction: moving the playhead,
 // opening a file in the Source Monitor, opening a folder and the clipboard are not edits and do not enter the undo stack.
 // Every real failure is thrown as a plain sentence; the panel shows it in its notice banner (never a blank panel).
-// The two "show it to me" helpers (folder path, diagnostics) never fail: the product manifest has no clipboard and no
-// launchProcess permission, so they try the clipboard / shell.openPath silently and fall back to a visible, selected box.
+// The two "show it to me" helpers (reveal folder, copy diagnostics) never fail: the product manifest grants clipboard
+// (readAndWrite) and launchProcess (file scheme; .mp4 / .mov / .prproj and "" for folders; owner decision 2026-10-12),
+// so they try navigator.clipboard / shell.openPath first and report "done"; if that throws or answers with an error
+// (permission refused, consent dialog declined, an extension the manifest does not list) they fall back to a visible,
+// selected box and report "shown". Neither outcome is an error.
 import type { premierepro as Ppro } from "@adobe/premierepro";
-import type { PanelHost } from "../../panel-ui/src/host.ts";
+import type { HostOutcome, PanelHost } from "../../panel-ui/src/host.ts";
 import type { Language } from "../../panel-ui/src/source.ts";
 
 /** `require("uxp").shell`: openPath resolves "" on success and an error text otherwise. */
@@ -17,7 +20,7 @@ export interface UxpHostDeps {
   /** `require("premierepro")`, looked up per call so a failure to load becomes a notice, not a crash at startup */
   getPpro: () => Ppro;
   getShell: () => UxpShell | undefined;
-  /** the async clipboard write, or undefined when the plugin has no clipboard; it may also throw (no permission) */
+  /** the async clipboard write, or undefined when it is not there; it may also throw (permission refused) */
   clipboardWriteText: ((text: string) => Promise<void>) | undefined;
   /** show text the editor can copy by hand (title is already in the panel's language) */
   showText: (text: string, title: string, closeLabel: string) => void;
@@ -30,6 +33,7 @@ const EN = {
   noSequence: "There is no active sequence. Open the item's sequence in the Timeline first.",
   notMoved: "Premiere did not move the playhead.",
   noMonitor: "Premiere could not open that file in the Source Monitor.",
+  openWhy: "WhyNot Cut wants to open this location on your computer.",
   copyTitle: "Copy this text (it is selected: press Ctrl+C, or Cmd+C on a Mac)",
   pathTitle: "Folder path (it is selected: press Ctrl+C, or Cmd+C on a Mac, to copy it)",
   close: "Close",
@@ -40,6 +44,7 @@ const AR: typeof EN = {
   noSequence: "لا يوجد تسلسل نشط. افتح تسلسل العنصر في الخط الزمني أولًا.",
   notMoved: "لم يحرّك Premiere مؤشر التشغيل.",
   noMonitor: "تعذّر على Premiere فتح هذا الملف في شاشة المصدر.",
+  openWhy: "يريد WhyNot Cut فتح هذا الموقع على جهازك.",
   copyTitle: "انسخ هذا النص (محدّد الآن: اضغط Ctrl+C أو Cmd+C على Mac)",
   pathTitle: "مسار المجلد (محدّد الآن: اضغط Ctrl+C أو Cmd+C على Mac لنسخه)",
   close: "إغلاق",
@@ -65,8 +70,8 @@ export function nativePath(p: string): string {
 export interface UxpPanelHost extends PanelHost {
   setPlayerPosition(t_s: number): Promise<void>;
   openInSourceMonitor(path: string): Promise<void>;
-  revealPath(path: string): Promise<void>;
-  copyText(text: string): Promise<void>;
+  revealPath(path: string): Promise<HostOutcome>;
+  copyText(text: string): Promise<HostOutcome>;
 }
 
 export function createUxpHost(deps: UxpHostDeps): UxpPanelHost {
@@ -99,29 +104,32 @@ export function createUxpHost(deps: UxpHostDeps): UxpPanelHost {
       if (ok === false) throw new Error(t().noMonitor);
     },
 
-    async revealPath(path: string): Promise<void> {
+    async revealPath(path: string): Promise<HostOutcome> {
       const native = nativePath(path);
       try {
         const shell = deps.getShell();
         const open = shell?.openPath;
         if (typeof open !== "function") throw new Error("shell.openPath is not available");
-        const answer = await open.call(shell, native);
-        if (typeof answer !== "string" || answer.trim() === "") return;   // "" = Premiere's host opened the folder
+        // developerText is what Adobe's one-time consent dialog shows the editor
+        const answer = await open.call(shell, native, t().openWhy);
+        if (typeof answer !== "string" || answer.trim() === "") return "done";   // "" = the host opened it
       } catch {
-        // no launchProcess permission in the product manifest: fall through to the visible box
+        // refused, declined or not listed in launchProcess: fall through to the visible box
       }
       deps.showText(native, t().pathTitle, t().close);
+      return "shown";
     },
 
-    async copyText(text: string): Promise<void> {
+    async copyText(text: string): Promise<HostOutcome> {
       try {
         if (!deps.clipboardWriteText) throw new Error("clipboard is not available");
         await deps.clipboardWriteText(text);
-        return;
+        return "done";
       } catch {
-        // no clipboard permission in the product manifest: fall through to the visible box
+        // clipboard refused or missing: fall through to the visible box
       }
       deps.showText(text, t().copyTitle, t().close);
+      return "shown";
     },
   };
 }

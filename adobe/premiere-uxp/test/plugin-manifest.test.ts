@@ -23,12 +23,22 @@ test("plugin manifest: version is the product version (plugin.json), so a releas
   assert.equal(manifest.version, productVersion);
 });
 
-test("plugin manifest: full file access + loopback network and NOTHING else (no clipboard, no launchProcess)", () => {
+test("plugin manifest: full file access + loopback network (unchanged) + clipboard readAndWrite + launchProcess for file/folder open (owner decision 2026-10-12), and NOTHING else", () => {
   assert.deepEqual(manifest.requiredPermissions, {
     localFileSystem: "fullAccess",
+    clipboard: "readAndWrite",
+    launchProcess: { schemes: ["file"], extensions: [".mp4", ".mov", ".prproj", ""] },
     network: { domains: ["ws://127.0.0.1", "http://127.0.0.1"] },
   });
-  assert.equal("clipboard" in manifest.requiredPermissions, false);
+  assert.deepEqual(Object.keys(manifest.requiredPermissions).sort(), ["clipboard", "launchProcess", "localFileSystem", "network"]);
+});
+
+test("plugin manifest: launchProcess is as narrow as it works - only the file scheme, only the types the panel opens, and \"\" (Adobe's recipe: folders need an empty extension); never a web scheme", () => {
+  const lp = manifest.requiredPermissions.launchProcess;
+  assert.deepEqual(lp.schemes, ["file"]);
+  assert.deepEqual([...lp.extensions].sort(), ["", ".mov", ".mp4", ".prproj"]);
+  assert.equal(lp.schemes.some((s: string) => /^(https?|mailto)$/.test(s)), false);
+  assert.equal(lp.extensions.includes("*"), false);
 });
 
 test("plugin manifest: one panel entrypoint, 340x640 preferred, 280x320 minimum", () => {

@@ -72,8 +72,8 @@ Bump `version` in `spike/manifest.json` (and `SPIKE_VERSION` in `spike/src/spike
 ## The plugin (`premiere-uxp/plugin/`, `premiere-uxp/src/`)
 
 The WhyNot Cut panel for Premiere: manifest v5, id `ai.thewhynot.cut.dev` (dev id; the release id is decided at release),
-panel `whynotCut`, `host {app: premierepro, minVersion: 26.5.0}`, permissions **only** `localFileSystem: fullAccess` and the
-loopback network domains (no `clipboard`, no `launchProcess`), panel 340x640 preferred / 280x320 minimum, the same icon set as the
+panel `whynotCut`, `host {app: premierepro, minVersion: 26.5.0}`, permissions `localFileSystem: fullAccess`, the
+loopback network domains, `clipboard: readAndWrite` and `launchProcess {schemes: ["file"], extensions: [".mp4", ".mov", ".prproj", ""]}` (owner decision 2026-10-12), panel 340x640 preferred / 280x320 minimum, the same icon set as the
 spike. The manifest `version` must equal `whynot-cut/.claude-plugin/plugin.json` (a test enforces it).
 
 | File | What |
@@ -82,7 +82,7 @@ spike. The manifest `version` must equal `whynot-cut/.claude-plugin/plugin.json`
 | `src/main.ts` | entry: builds the environment (`require` of `premierepro`/`uxp` with literal calls, `document`, `navigator`) and calls `startShell`; picks the data source at build time |
 | `src/shell.ts` | `startShell(env)`: theme, data source, `UxpHost`, `mount(root, source, host)`; testable with fakes |
 | `src/offline-source.ts` | `OfflineSource`: the placeholder `PanelDataSource` until the engine daemon exists (T6.2): engine "not running", Host pill from `uxp.host.version` (`Application.version` is empty), language from `uxp.host.uiLocale`, no pipeline data, every action `ok:false` with `how: "In your Claude session run `reel doctor`."` (the panel renders a backticked command as a left-to-right run) |
-| `src/uxp-host.ts` | `createUxpHost`: `setPlayerPosition` (active sequence, `TickTime.createWithSeconds`), `openInSourceMonitor` (`SourceMonitor.openFilePath`), `revealPath` ("Show folder path": `uxp.shell.openPath` on the native path, else a visible, selected path box), `copyText` ("Show diagnostics": `navigator.clipboard`, else a visible, selected box). Both fallbacks are a normal outcome, not an error: the product manifest has no clipboard or launchProcess permission. Paths lose the `\\?\` prefix and use backslashes on Windows (`nativePath`) |
+| `src/uxp-host.ts` | `createUxpHost`: `setPlayerPosition` (active sequence, `TickTime.createWithSeconds`), `openInSourceMonitor` (`SourceMonitor.openFilePath`), `revealPath` ("Reveal folder": `uxp.shell.openPath` on the native path, returns `"done"` -> "Opened." notice, else a visible, selected path box and `"shown"`), `copyText` ("Copy diagnostics": `navigator.clipboard`, `"done"` -> "Copied." notice, else a visible, selected box). The box is a normal outcome, not an error (permission or consent refused). Paths lose the `\\?\` prefix and use backslashes on Windows (`nativePath`) |
 | `src/copy-fallback.ts` | the "copy this" box shown when the clipboard (or opening a folder) is not available |
 | `src/theme.ts` | `uxp.host.getBackgroundColor()` -> `--twn-bg`; `{}` / missing / light colours keep the brand dark default |
 
