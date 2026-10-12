@@ -119,5 +119,39 @@ Running either door again repairs or updates.
 | D-T8 | Tests: core in no-question mode end to end in a sandbox; the AskUserQuestion path mocked; model pack resolution per hardware matrix (NVIDIA / no GPU / M-series / Intel Mac / low disk); resume after an interrupted download; offline bundle install with the network blocked; both doors give an identical `state.json` |
 | D-T9 | Live: clean Windows standard user via Door 1 and via Door 2; this PC upgrade 2.2.1 → 3.0; macOS when H6; time to "first edit possible" recorded (target: under 15 min of the editor's attention, downloads excluded) |
 
+## D7. The download people get: `WhyNotCut-Setup.exe` (Windows) and `WhyNotCut.dmg` (macOS), P0 for 3.0
+Yunus asked, in his words: «بفكر انه تبقي برنامج صيغه exe للويندوز وهو يعمل كل حاجه» ("I'm thinking it should be a
+program in .exe format for Windows that does everything").
+- **Windows, `WhyNotCut-Setup.exe`** (Inno Setup, per user, no admin, ~10 MB):
+  - a branded wizard in the website look (Addendum B), AR/EN;
+  - one screen "Install everything (recommended)" + Customise;
+  - a progress/checklist page;
+  - it embeds the same core and downloads the rest. With the offline bundle next to it, it installs offline;
+  - it registers an uninstaller in Settings ▸ Apps.
+- **macOS, `WhyNotCut.dmg`:** "Install WhyNot Cut.app", which runs the same core as the user and shows the same
+  checklist. No `.pkg`.
+- **"Install Claude for me":** if the Claude desktop app is missing, the installer downloads Anthropic's **official**
+  installer from claude.ai/download (HTTPS, publisher signature checked) and launches it. Then it waits for the editor
+  to sign in and continues. The sign-in itself stays the editor's.
+- **The plugin inside Claude is added by the installer.** No Claude command is needed (Door 2 stays for people who
+  start from Claude).
+- **Signing:**
+  - The exe is built now and works **unsigned for testing**. An unsigned public download shows Windows' "Windows
+    protected your PC" (More info ▸ Run anyway) and never builds SmartScreen reputation.
+  - For the public release: an **OV code-signing certificate** (H4). Azure Artifact Signing is not available for
+    Egypt.
+  - macOS needs the **Apple Developer Program** for a notarized app (H4). Until then, macOS users get the one-liner.
+  - The release checklist blocks a "public" release of an unsigned exe/dmg; internal/agency builds may be unsigned.
+- **Download page:** two buttons (Windows / Mac) on thewhynot.ai (Framer) linking to the hosted files with sha256
+  (H3), plus the offline bundles and the Arabic guide PDF.
+- **Tasks:**
+  - **D-T10:** Inno Setup wizard + branding + an AR/EN checklist UI over the core's JSON progress + uninstaller entry.
+  - **D-T11:** the macOS app wrapper (SwiftUI or AppleScript) + dmg layout.
+  - **D-T12:** "Install Claude for me" (download, signature check, launch, wait for sign-in).
+  - **D-T13:** signing hooks in `release.py` (signtool / codesign + notarytool), a no-op until certs exist.
+  - **D-T14:** download page content.
+  - **Tests:** a silent install mode for CI (`/VERYSILENT` equivalent → the core's `-Yes`), an uninstall leaves
+    client folders untouched, and the unsigned-build warning is documented in the guide.
+
 **Gates:** Phase 7 gate + Addendum C scenarios E1–E20 + D-T8/D-T9. A first-time editor follows the Arabic guide's
 install chapter and never types a command except the one-liner (Door 1) or the one sentence in Claude (Door 2).
