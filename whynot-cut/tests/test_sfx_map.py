@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock as mock
 import wave
 from pathlib import Path
 
@@ -66,6 +67,21 @@ class TestMapKinds(unittest.TestCase):
         write_json(self.out_dir / "sfx-map.json", {"boom": 5})
         with self.assertRaises(Guidance):
             sfx.load_map(self.out_dir / "sfx-map.json")
+
+
+    def test_unsafe_keys_are_guidance_naming_the_key(self):
+        for bad in ("x/../../../../../../data/evil", "../x", "a/b", "a\\b", "a:b", "a*b", "a?b", 'a"b', "a<b", "a|b", ".",
+                    "..", "", ".hidden", "con", "NUL", "x" * 65, "sp ace"):
+            write_json(self.out_dir / "sfx-map.json", {bad: "data/SFX/a.wav"})
+            with self.assertRaises(Guidance, msg=repr(bad)) as cm:
+                sfx.load_map(self.out_dir / "sfx-map.json")
+            self.assertIn(repr(bad), cm.exception.error)
+            self.assertIn("sfx-map.json", cm.exception.how)
+
+    def test_plain_keys_are_accepted(self):
+        keys = ["whoosh", "door_knock", "Hit-2", "a", "x" * 64, "9lives"]
+        write_json(self.out_dir / "sfx-map.json", {k: "data/SFX/a.wav" for k in keys})
+        self.assertEqual(set(sfx.load_map(self.out_dir / "sfx-map.json")), set(keys))
 
 
 class TestInstall(unittest.TestCase):
@@ -138,6 +154,75 @@ class TestInstall(unittest.TestCase):
         self.assertIn("procedural", res["pop"]["license"])
         self.assertTrue((self.out_dir / "pop.wav").is_file())
 
+    def test_traversal_key_is_refused_and_writes_nothing_outside_the_sfx_folder(self):
+        make_tone(self.root / "data/SFX/a.wav")
+        evil = "x/../../../../../../data/evil"
+        with self.assertRaises(Guidance):
+            sfx.install_mapped(evil, "data/SFX/a.wav", self.root, self.out_dir)
+        with self.assertRaises(Guidance):
+            sfx.install_needed({evil}, {evil: "data/SFX/a.wav"}, self.root, self.out_dir)
+        everything = {p.relative_to(self.root).as_posix() for p in self.root.rglob("*") if p.is_file()}
+        self.assertEqual(everything, {"data/SFX/a.wav"})                  # nothing written anywhere
+
+    def test_source_longer_than_30_seconds_is_refused(self):
+        make_tone(self.root / "data/SFX/long.wav", rate=8000, seconds=31)
+        with self.assertRaises(Guidance) as cm:
+            sfx.install_mapped("long", "data/SFX/long.wav", self.root, self.out_dir)
+        self.assertIn("31 s", cm.exception.error)
+        self.assertIn("long.wav", cm.exception.error)
+        self.assertFalse((self.out_dir / "long.wav").exists())
+
+    def test_ffmpeg_gets_nostdin_and_a_timeout_and_a_hang_is_guidance(self):
+        make_tone(self.root / "data/SFX/h.wav")
+        calls = []
+
+        def hang(cmd, **kw):
+            calls.append((cmd, kw))
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+        with mock.patch.object(sfx, "run", hang):
+            with self.assertRaises(Guidance) as cm:
+                sfx.install_mapped("h", "data/SFX/h.wav", self.root, self.out_dir)
+        cmd, kw = calls[0]
+        self.assertIn("-nostdin", cmd)
+        self.assertEqual(kw.get("timeout"), sfx.CONVERT_TIMEOUT_S)
+        self.assertIn("120 s", cm.exception.error)
+        self.assertFalse((self.out_dir / "h.wav").exists())
+        self.assertEqual([p.name for p in self.out_dir.glob("*")], [])    # no .converting leftovers
+
+    def test_wav_held_open_is_a_close_the_project_message(self):
+        make_tone(self.root / "data/SFX/k.wav")
+        with mock.patch.object(Path, "replace", side_effect=PermissionError(13, "Access is denied")):
+            with self.assertRaises(Guidance) as cm:
+                sfx.install_mapped("k", "data/SFX/k.wav", self.root, self.out_dir)
+        g = cm.exception
+        self.assertIn("in use", g.error)
+        self.assertNotIn("could not read", g.error)
+        self.assertIn("Close the Premiere project", g.how)
+        self.assertEqual([p.name for p in self.out_dir.glob("*")], [])
+        self.assertFalse((self.out_dir / "k.provenance.json").exists())
+
+    def test_unmapping_a_recipe_kind_removes_the_library_file_and_provenance(self):
+        make_tone(self.root / "data/SFX/p.wav", seconds=0.5)
+        res = sfx.install_needed({"pop"}, {"pop": "data/SFX/p.wav"}, self.root, self.out_dir)
+        self.assertIn("provenance", res["pop"])
+        self.assertAlmostEqual(res["pop"]["duration_s"], 0.5, delta=0.05)
+        self.assertTrue((self.out_dir / "pop.provenance.json").is_file())
+        res = sfx.install_needed({"pop"}, {}, self.root, self.out_dir)    # the entry was removed from the map
+        self.assertFalse((self.out_dir / "pop.provenance.json").exists())
+        self.assertNotIn("provenance", res["pop"])
+        self.assertIn("procedural", res["pop"]["license"])
+        self.assertAlmostEqual(res["pop"]["duration_s"], sfx.RECIPES["pop"][1], delta=0.02)   # synthesised again
+        self.assertAlmostEqual(wav_info(self.out_dir / "pop.wav")[3] / 48000, sfx.RECIPES["pop"][1], delta=0.02)
+
+    def test_mapped_recipe_name_overrides_an_existing_synthesised_file(self):
+        sfx.install_needed({"pop"}, {}, self.root, self.out_dir)          # the synthesised pop.wav (0.18 s)
+        make_tone(self.root / "data/SFX/p.wav", seconds=0.5)
+        res = sfx.install_needed({"pop"}, {"pop": "data/SFX/p.wav"}, self.root, self.out_dir)
+        self.assertIn("provenance", res["pop"])
+        self.assertAlmostEqual(wav_info(self.out_dir / "pop.wav")[3] / 48000, 0.5, delta=0.05)
+        prov = json.loads((self.out_dir / "pop.provenance.json").read_text(encoding="utf-8"))
+        self.assertEqual(prov["kind"], "pop")
+
     def test_install_needed_unknown_kind_is_guidance_listing_valid(self):
         with self.assertRaises(Guidance) as cm:
             sfx.install_needed({"zzz"}, {}, self.root, self.out_dir)
@@ -191,6 +276,46 @@ class TestPlanValidation(unittest.TestCase):
         self.assertTrue(any("swoosh_x" in e for e in r["errors"]))
 
 
+    def compile_with_graphic(self, **extra):
+        from lib.plan import compile_plan
+        ed = self.tc.decisions()
+        ed["decisions"][0]["graphics"][0].update(extra)
+        write_json(self.p.p("01_analysis/edit-decisions.json"), ed)
+        return compile_plan(self.p)
+
+    def test_graphic_default_sfx_unknown_kind_is_a_plan_error(self):
+        r = self.compile_with_graphic(sfx="boom")
+        self.assertFalse(r["ok"])
+        msg = next(e for e in r["errors"] if "boom" in e)
+        self.assertIn("graphics sfx", msg)
+        for kind in sfx.RECIPES:
+            self.assertIn(kind, msg)
+
+    def test_graphic_default_sfx_recipe_mapped_and_none_pass(self):
+        for kind in ("whoosh", "none", None):
+            r = self.compile_with_graphic(sfx=kind)
+            self.assertTrue(r["ok"], (kind, r.get("errors")))
+        write_json(self.p.p("06_audio/sfx-map.json"), {"swoosh_x": "data/SFX/x.wav"})
+        self.assertTrue(self.compile_with_graphic(sfx="swoosh_x")["ok"])
+        r = self.compile_with_graphic(sfx="boom")
+        self.assertTrue(any("swoosh_x" in e for e in r["errors"]))
+
+    def test_non_string_kinds_are_plan_errors_not_crashes(self):
+        for bad in ([], 5, {"a": 1}):
+            r = self.compile_with({"type": bad, "at": "00:00:01.000"})
+            self.assertFalse(r["ok"], bad)
+            self.assertTrue(any("sound.type" in e and "not a sound kind" in e for e in r["errors"]), r["errors"])
+            r = self.compile_with_graphic(sfx=bad)
+            self.assertFalse(r["ok"], bad)
+            self.assertTrue(any("graphics sfx" in e for e in r["errors"]), r["errors"])
+
+    def test_map_with_an_unsafe_key_stops_the_plan_with_guidance(self):
+        write_json(self.p.p("06_audio/sfx-map.json"), {"../x": "data/SFX/x.wav"})
+        with self.assertRaises(Guidance) as cm:
+            self.compile_with({"type": "pop", "at": "00:00:01.000"})
+        self.assertIn("../x", cm.exception.error)
+
+
 class TestCli(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -223,6 +348,18 @@ class TestCli(unittest.TestCase):
         self.assertFalse(doc["ok"])
         self.assertIn("gone.wav", doc["error"])
         self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+    def test_reel_sfx_traversal_key_is_guidance_and_writes_nothing_outside(self):
+        make_tone(self.root / "data/SFX/a.wav")
+        write_json(self.p.p("06_audio/sfx-map.json"), {"x/../../../../../../../../data/evil": "data/SFX/a.wav"})
+        r = self.sfx_cmd()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        doc = json.loads(r.stdout)
+        self.assertFalse(doc["ok"])
+        self.assertIn("data/evil", doc["error"])
+        self.assertNotIn("Traceback", r.stdout + r.stderr)
+        self.assertEqual([p.name for p in (self.root / "data").glob("evil*")], [])
+        self.assertEqual([p.name for p in (self.root / "data").glob("*.wav")], [])
 
     def test_reel_sfx_unmapped_unknown_kind_is_guidance(self):
         r = self.sfx_cmd()                       # "boom" is neither a recipe nor mapped

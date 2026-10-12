@@ -1066,7 +1066,8 @@ CORE_COMMANDS: dict[str, str] = {
     "plan": "validate and compile edit-decisions.json into the build plan",
     "approve-plan": "record the approval of the compiled plan (editor or delegated)",
     "previews": "render PNG previews of the graphics and captions, with QC composites",
-    "sfx": "synthesize the sound effects the plan needs",
+    "sfx": "prepare the sound effects the plan needs: the client's mapped library files (06_audio/sfx-map.json) "
+           "converted to wav, built-in synthesized sounds for the rest",
     "preview-video": "render a watchable MP4 of the planned edit (no Premiere needed)",
     "ppro-install": "install the Premiere bridge (WhyNot Cut Bridge CEP panel)",
     "ppro-status": "is Premiere running and the bridge answering",

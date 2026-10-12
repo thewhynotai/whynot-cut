@@ -700,7 +700,8 @@ def _audio(C: _Compiler, scenes: list[dict], script: dict, duration: int) -> dic
     from .sfx import RECIPES
     bad = sorted({k for k, _ in cues if k not in RECIPES})
     for k in bad:
-        C.err(f"sfx {k!r} cannot be synthesised (kinds: {', '.join(RECIPES)})")
+        C.err(f"sfx {k!r} is not one of the built-in sounds ({', '.join(RECIPES)}); motion mode uses only the built-in "
+              "procedural sounds, not the client's 06_audio/sfx-map.json library — use one of those kinds")
     files = sfx_files({k for k, _ in cues if k in RECIPES}, C.paths.p("06_audio/sfx"))
     return {"dialogue": str(dia), "music": music,
             "sfx": [{"kind": k, "file": str(files[k]), "frame": f} for k, f in sorted(cues, key=lambda c: c[1]) if k in files],

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import wave
 from pathlib import Path
@@ -23,6 +24,10 @@ from .common import ffmpeg_exe, now_iso, read_json, run, write_json
 from .errors import Guidance
 
 MAP_REL = "06_audio/sfx-map.json"
+MAX_SOURCE_S = 30.0          # a cue is a short effect: a longer mapped file is almost surely the wrong one
+CONVERT_TIMEOUT_S = 120      # ffmpeg limit for one file (a hung network path must not block `reel sfx`)
+_KIND_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 
 RECIPES = {
     # kind: (lavfi source graph, duration_s, description)
@@ -52,9 +57,9 @@ def synth(kind: str, out: Path) -> Path:
         raise KeyError(f"unknown sfx kind {kind}")
     src, dur, _ = RECIPES[kind]
     out.parent.mkdir(parents=True, exist_ok=True)
-    run([ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", src,
+    run([ffmpeg_exe(), "-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", src,
          "-t", str(dur), "-af", "aformat=channel_layouts=stereo,alimiter=limit=0.7",
-         "-ar", "48000", "-c:a", "pcm_s24le", str(out)])
+         "-ar", "48000", "-c:a", "pcm_s24le", str(out)], timeout=CONVERT_TIMEOUT_S)
     return out
 
 
@@ -70,6 +75,16 @@ def synth_needed(kinds: set[str], out_dir: Path) -> dict:
 
 
 # --------------------------------------------------------------------------- the client library map (T2.7)
+def check_kind_name(kind) -> str:
+    """A cue kind becomes the file name <kind>.wav: letters, digits, '_' and '-' only (a letter or digit first, 64 characters
+    at most, no Windows device name), so a map key can never point outside 06_audio/sfx. Anything else is Guidance."""
+    if (not isinstance(kind, str) or not _KIND_RE.fullmatch(kind) or kind.lower() in _RESERVED):
+        raise Guidance(f"{MAP_REL}: the SFX kind {kind!r} cannot be used as a file name",
+                       "Use letters, digits, '_' or '-' only, starting with a letter or digit, up to 64 characters "
+                       f"(for example \"whoosh_01\") — rename that key in {MAP_REL}", MAP_REL)
+    return kind
+
+
 def load_map(path: Path) -> dict:
     """{kind: entry} from 06_audio/sfx-map.json ({} when there is none). An entry is a path string or an object with
     `file`; "_" keys are notes. Anything else is guidance naming the file."""
@@ -82,6 +97,7 @@ def load_map(path: Path) -> dict:
     for kind, entry in data.items():
         if str(kind).startswith("_"):
             continue
+        check_kind_name(kind)
         ok = (isinstance(entry, str) and entry.strip()) or (isinstance(entry, dict) and isinstance(entry.get("file"), str)
                                                               and entry["file"].strip())
         if not ok:
@@ -108,6 +124,16 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _source_seconds(path: Path) -> float | None:
+    """Duration of a media file via the engine's probe (None when it cannot tell: ffmpeg then reports the real problem)."""
+    try:
+        from .media import probe
+        d = probe(path).get("duration_s")
+        return float(d) if d else None
+    except Exception:
+        return None
+
+
 def _wav_seconds(path: Path) -> float:
     with wave.open(str(path), "rb") as w:
         return round(w.getnframes() / float(w.getframerate()), 3)
@@ -117,6 +143,7 @@ def install_mapped(kind: str, entry, root: Path, out_dir: Path) -> dict:
     """Convert the client's library file for `kind` to out_dir/<kind>.wav (48 kHz, 24-bit stereo, like synth) and write
     out_dir/<kind>.provenance.json (source path, sha256, converted_at, the map entry). Reused when the source's sha256
     matches the recorded one. A missing or unreadable file is Guidance; nothing is left behind then."""
+    check_kind_name(kind)
     rel = _entry_file(entry)
     src = Path(rel).expanduser()
     src = (src if src.is_absolute() else Path(root) / src).resolve()
@@ -130,6 +157,11 @@ def install_mapped(kind: str, entry, root: Path, out_dir: Path) -> dict:
     prev = read_json(prov_p, {}) if prov_p.exists() else {}
     if out.exists() and isinstance(prev, dict) and prev.get("sha256") == digest and prev.get("source") == str(src):
         return {"file": str(out), "duration_s": _wav_seconds(out), "provenance": str(prov_p), "reused": True}
+    secs = _source_seconds(src)
+    if secs is not None and secs > MAX_SOURCE_S:
+        raise Guidance(f"SFX '{kind}' is mapped to {src.name}, which is {secs:.0f} s long (a sound effect is at most "
+                       f"{MAX_SOURCE_S:.0f} s)",
+                       f"Map '{kind}' to the short effect file in {MAP_REL} (or trim {src.name} first)", str(src))
     exe = ffmpeg_exe()
     if not exe:
         raise Guidance("ffmpeg is not available, so the client's SFX files cannot be converted",
@@ -137,13 +169,24 @@ def install_mapped(kind: str, entry, root: Path, out_dir: Path) -> dict:
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     tmp = Path(out_dir) / f".{kind}.converting.wav"
     try:
-        run([exe, "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-vn", "-af",
-             "aformat=channel_layouts=stereo", "-ar", "48000", "-c:a", "pcm_s24le", str(tmp)])
-        tmp.replace(out)
-    except (subprocess.CalledProcessError, OSError) as e:
-        raise Guidance(f"SFX '{kind}': ffmpeg could not read {src.name} as audio "
-                       f"({(getattr(e, 'stderr', '') or str(e)).strip()[:200]})",
-                       f"Replace the file or fix the '{kind}' entry in {MAP_REL}", str(src)) from e
+        try:
+            run([exe, "-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-i", str(src), "-vn", "-af",
+                 "aformat=channel_layouts=stereo", "-ar", "48000", "-c:a", "pcm_s24le", str(tmp)],
+                timeout=CONVERT_TIMEOUT_S)
+        except subprocess.TimeoutExpired as e:
+            raise Guidance(f"SFX '{kind}': converting {src.name} took more than {CONVERT_TIMEOUT_S} s and was stopped",
+                           f"Check that {src} opens (a file on a slow or disconnected network drive can hang), copy it "
+                           "to the client folder, or map a shorter file", str(src)) from e
+        except (subprocess.CalledProcessError, OSError) as e:
+            raise Guidance(f"SFX '{kind}': ffmpeg could not read {src.name} as audio "
+                           f"({(getattr(e, 'stderr', '') or str(e)).strip()[:200]})",
+                           f"Replace the file or fix the '{kind}' entry in {MAP_REL}", str(src)) from e
+        try:
+            tmp.replace(out)
+        except OSError as e:                 # on Windows: Premiere / After Effects / a player holds the old wav open
+            raise Guidance(f"SFX '{kind}': cannot replace {out.name} — the file is in use ({e})",
+                           "Close the Premiere project (and any player) that has the file open, then run `reel sfx` "
+                           "again", str(out)) from e
     finally:
         tmp.unlink(missing_ok=True)
     write_json(prov_p, {"kind": kind, "source": str(src), "sha256": digest, "converted_at": now_iso(),

@@ -240,6 +240,15 @@ def _sfx_kinds(paths: Paths) -> list[str]:
     return sfx.valid_kinds(sfx.load_map(paths.p(sfx.MAP_REL)))
 
 
+def _sfx_kind_ok(errors: list, label: str, kind, inp) -> bool:
+    """One cue kind checked against the valid kinds (a plan error naming them when it is not a known string)."""
+    if isinstance(kind, str) and kind in inp.sfx_kinds:
+        return True
+    errors.append(f"{label} {kind!r} is not a sound kind — use one of: {', '.join(inp.sfx_kinds)} "
+                  "(or map it in 06_audio/sfx-map.json)")
+    return False
+
+
 def _default_footage(paths: Paths) -> str | None:
     """global.main_footage left out of a whole-clip video (gap G71): the raw clip this video id names (`reel inbox`),
     else the client's only raw clip, as a path relative to the client root; None when discovery cannot tell."""
@@ -406,8 +415,8 @@ def validate_decisions(inp: PlanInputs):
                 "approval_status": "PENDING_APPROVAL" if ev_["approval_required"] else "AUTO_APPROVED_STYLE",
                 "validation_status": "PLANNED"})
             # template default sound
-            if g.get("sfx", info.get("sfx")) and g.get("sfx") != "none":
-                kind = g.get("sfx", info.get("sfx"))
+            kind = g.get("sfx", info.get("sfx"))
+            if kind not in (None, "", "none") and _sfx_kind_ok(errors, f"{did}: graphics sfx", kind, inp):
                 cues.append({"cue_id": f"SFX_{gid}", "kind": kind, "at_ms": gs, "related_visual": gid,
                              "decision_id": did, "segment_id": d.get("segment_id"), "auto": True,
                              "gain_db": g.get("sfx_gain_db", -14)})
@@ -417,11 +426,9 @@ def validate_decisions(inp: PlanInputs):
                                  "decision_id": did, "segment_id": d.get("segment_id"), "auto": True, "gain_db": -18})
 
         for s in d.get("sound", []):
-            if s.get("type", "pop") not in inp.sfx_kinds:
-                errors.append(f"{did}: sound.type {s.get('type')!r} is not a sound kind — use one of: "
-                              f"{', '.join(inp.sfx_kinds)} (or map it in 06_audio/sfx-map.json)")
+            kind_ok = _sfx_kind_ok(errors, f"{did}: sound.type", s.get("type", "pop"), inp)
             at = ms(f"{did}: sound.at", s.get("at", d["start"]))
-            if at is None:
+            if at is None or not kind_ok:
                 continue
             cues.append({"cue_id": s.get("cue_id") or f"SFX_{did}_{at}", "kind": s.get("type", "pop"),
                          "at_ms": at, "related_visual": s.get("related_visual"), "decision_id": did,

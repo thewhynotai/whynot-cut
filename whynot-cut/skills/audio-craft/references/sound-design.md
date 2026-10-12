@@ -19,6 +19,9 @@
   mapped recipe name uses the library file instead of the synthesised one. `reel plan` rejects any other `type`
   and lists the valid kinds; `reel sfx` converts each mapped file to `06_audio/sfx/<kind>.wav` (48 kHz/24-bit stereo)
   with `<kind>.provenance.json` (source, sha256, converted_at, map entry); a missing file is a plain-English error.
+  Keys are file names: letters, digits, `_` and `-` only (start with a letter or digit, ≤ 64 characters); a library
+  file longer than 30 s is refused. The graphics' default `sfx` (a template or a decision's `graphics[].sfx`) is
+  checked like `sound[].type`. Motion mode (`reel motion-plan`) uses only the built-in recipes, not the map.
   For every other kind `reel sfx` synthesizes **original** procedural cues (ffmpeg; no third-party audio):
   whoosh, whoosh_soft, pop, click, tick, riser_soft, hit_soft, shimmer (48 kHz/24-bit stereo).
 - Cue sources: template defaults (graphic entries) + explicit `sound` entries in decisions. Restraint:

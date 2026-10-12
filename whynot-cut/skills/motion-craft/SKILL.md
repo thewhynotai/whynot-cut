@@ -9,7 +9,7 @@ user-invocable: false
 ```bash
 reel plan     --root "<CLIENT>" --video-id <ID>     # compile decisions → timeline-spec.json (fix all errors)
 reel previews --root "<CLIENT>" --video-id <ID>     # layered PNG stills + QC composites + caption stills
-reel sfx      --root "<CLIENT>" --video-id <ID>     # original procedural SFX for the cues
+reel sfx      --root "<CLIENT>" --video-id <ID>     # SFX for the cues: the client's mapped files (06_audio/sfx-map.json), original procedural sounds for the rest
 ```
 **Layered stills** (Premiere animates each layer separately):
 - `<id>_bar.png`: the brand box, animated with `bar_sweep`
