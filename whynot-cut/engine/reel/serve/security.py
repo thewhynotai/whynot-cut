@@ -4,6 +4,8 @@ Pure stdlib, no server or engine-state dependency, so the daemon, the app and th
   * `<engine home>/bridge/engine.json` (port, token, pid, version): written atomically, user-only permissions
     (POSIX chmod 0600; Windows: inheritance removed and only the process user's SID granted, via icacls), and removed
     only by the daemon that wrote it (tombstone rename, no check-then-delete race);
+  * `private_dir` / `private_file` / `open_private`: the daemon's folders and files user-only even when they already
+    existed (POSIX 0700 / 0600; Windows an exact protected DACL for the process SID, inherited by new files);
   * `check_host` / `check_origin`: DNS-rebinding and browser-origin defences for the HTTP/WebSocket handshake;
   * `token_ok`: constant-time token compare; `make_token`: 256-bit token;
   * `RateLimiter`: token bucket (clock injectable);
@@ -155,7 +157,127 @@ def restrict_to_user(path) -> None:
         raise OSError(f"icacls failed for {p} (exit {r.returncode})")
 
 
-def write_engine_json(home, *, port: int, token: str, pid: int, version: str, **extra) -> Path:
+def _dacl(path) -> list[tuple[int, int, str]] | None:
+    """Windows: [(ACE type, ACE flags, SID)] of `path`'s DACL, read with the Win32 API; None when it cannot be read
+    (or the DACL is NULL, i.e. open to everyone)."""
+    import ctypes
+    from ctypes import wintypes
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    vp = ctypes.c_void_p
+    adv.GetNamedSecurityInfoW.argtypes = (wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, vp, vp,
+                                          ctypes.POINTER(vp), vp, ctypes.POINTER(vp))
+    adv.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    adv.GetAce.argtypes = (vp, wintypes.DWORD, ctypes.POINTER(vp))
+    adv.ConvertSidToStringSidW.argtypes = (vp, ctypes.POINTER(vp))
+    k32.LocalFree.argtypes = (vp,)
+    k32.LocalFree.restype = vp
+    dacl, sd = vp(), vp()
+    if adv.GetNamedSecurityInfoW(str(path), 1, 4, None, None, ctypes.byref(dacl), None, ctypes.byref(sd)) != 0:
+        return None                                  # 1 = SE_FILE_OBJECT, 4 = DACL_SECURITY_INFORMATION
+    try:
+        if not dacl.value:
+            return None
+        out = []
+        for i in range(ctypes.c_uint16.from_address(dacl.value + 4).value):      # ACL.AceCount
+            ace = vp()
+            if not adv.GetAce(dacl, i, ctypes.byref(ace)):
+                return None
+            text = vp()
+            if not adv.ConvertSidToStringSidW(ace.value + 8, ctypes.byref(text)):  # ACCESS_ALLOWED_ACE.SidStart
+                return None
+            try:
+                out.append((ctypes.c_ubyte.from_address(ace.value).value,
+                            ctypes.c_ubyte.from_address(ace.value + 1).value, ctypes.wstring_at(text.value)))
+            finally:
+                k32.LocalFree(text)
+        return out
+    finally:
+        k32.LocalFree(sd)
+
+
+def user_only(path, *, directory: bool = False) -> bool:
+    """Windows: is the DACL of `path` "this process's user, allowed" and nothing else? For a folder the ACE must also
+    be inherited by new files and folders (OI|CI), so what is created inside is user-only from birth."""
+    try:
+        aces = _dacl(path)
+        sid = current_user_sid()
+    except (OSError, AttributeError, ValueError):
+        return False
+    if not aces or any(t != 0 or s != sid for t, _, s in aces):
+        return False
+    return not directory or any(f & 0x03 == 0x03 and not f & 0x10 for _, f, _ in aces)
+
+
+def private_dir(path) -> Path:
+    """Create `path` (and parents) and make it user-only even when it already existed (mkdir's mode does not touch
+    an existing folder): POSIX chmod 0700; Windows inheritance removed and full control for the process user's SID
+    only, inherited by everything created inside (`*SID:(OI)(CI)F`). Skipped when it already is. Raises OSError."""
+    p = Path(path)
+    p.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name != "nt":
+        os.chmod(p, 0o700)
+        return p
+    if not user_only(p, directory=True):
+        _set_dacl(p, f"D:P(A;OICI;FA;;;{current_user_sid()})")
+    return p
+
+
+def _set_dacl(path, sddl: str) -> None:
+    """Windows: replace the DACL of `path` with exactly the one in `sddl`, protected from inheritance (Win32
+    SetNamedSecurityInfoW, which also passes inheritable ACEs on to what is inside a folder). icacls cannot do this
+    for a folder: `/inheritance:r` keeps explicit ACEs, such as the SYSTEM and Administrators entries Python's
+    mkdir(mode=0o700) puts on Windows, and new files would inherit them. Raises OSError."""
+    import ctypes
+    from ctypes import wintypes
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    vp = ctypes.c_void_p
+    adv.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD,
+                                                                         ctypes.POINTER(vp), vp)
+    adv.GetSecurityDescriptorDacl.argtypes = (vp, ctypes.POINTER(wintypes.BOOL), ctypes.POINTER(vp),
+                                              ctypes.POINTER(wintypes.BOOL))
+    adv.SetNamedSecurityInfoW.argtypes = (wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD, vp, vp, vp, vp)
+    adv.SetNamedSecurityInfoW.restype = wintypes.DWORD
+    k32.LocalFree.argtypes = (vp,)
+    k32.LocalFree.restype = vp
+    sd = vp()
+    if not adv.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(sd), None):
+        raise OSError(f"bad security descriptor ({ctypes.get_last_error()})")
+    try:
+        present, defaulted, dacl = wintypes.BOOL(), wintypes.BOOL(), vp()
+        if not adv.GetSecurityDescriptorDacl(sd, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)):
+            raise OSError(f"GetSecurityDescriptorDacl failed ({ctypes.get_last_error()})")
+        # 1 = SE_FILE_OBJECT; DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
+        rc = adv.SetNamedSecurityInfoW(str(path), 1, 0x00000004 | 0x80000000, None, None, dacl, None)
+        if rc != 0:
+            raise OSError(f"SetNamedSecurityInfoW failed for {path} ({rc})")
+    finally:
+        k32.LocalFree(sd)
+
+
+def private_file(path) -> None:
+    """Make an existing file user-only (POSIX 0600; Windows restrict_to_user unless it already is). Raises OSError."""
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+    elif not user_only(path):
+        restrict_to_user(path)
+
+
+def open_private(path, flags: int) -> int:
+    """os.open with O_CREAT and mode 0600, so a new file is never readable by others for an instant (POSIX); an
+    existing file is narrowed to 0600 too. Windows: the caller's folder (private_dir) makes it user-only."""
+    fd = os.open(str(path), flags | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+    if os.name != "nt":
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            os.close(fd)
+            raise
+    return fd
+
+
+def write_engine_json(home, /, *, port: int, token: str, pid: int, version: str, **extra) -> Path:
     """Atomically write <home>/bridge/engine.json. The temp file is restricted BEFORE the token is written, so the
     token is never on disk under a wider ACL; on any failure the old file is untouched and the temp file removed.
     `token` must be 64 lowercase hex characters; `extra` may not name a reserved key (ValueError)."""
@@ -165,7 +287,7 @@ def write_engine_json(home, *, port: int, token: str, pid: int, version: str, **
     if clash:
         raise ValueError(f"extra fields may not override {sorted(clash)}")
     path = engine_json_path(home)
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_dir(path.parent)
     data = {"port": int(port), "token": token, "pid": int(pid), "version": version, "protocol": PROTOCOL}
     data.update(extra)
     payload = (json.dumps(data, indent=2) + "\n").encode("utf-8")
@@ -407,6 +529,7 @@ class AuditLog:
         self.keep = int(keep)
         self._token = token
         self._lock = threading.Lock()
+        self._private = False
 
     def set_token(self, token: str | None) -> None:
         with self._lock:
@@ -459,22 +582,33 @@ class AuditLog:
             line = _HEX_RUN.sub(REDACTED, line) + "\n"
             data = line.encode("utf-8")
             try:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self._make_private()
                 size = self._size()
+                flags = os.O_WRONLY | os.O_APPEND
                 if size and size + len(data) > self.max_bytes:
                     self._rotate()
                     if self._size():                  # rotation failed (e.g. a reader holds the file on Windows)
                         data = self._truncated_row() + data
-                        mode = "wb"                   # start over rather than grow without bound
-                    else:
-                        mode = "ab"
-                else:
-                    mode = "ab"
-                with open(self.path, mode) as f:
+                        flags = os.O_WRONLY | os.O_TRUNC   # start over rather than grow without bound
+                with os.fdopen(open_private(self.path, flags), "wb") as f:
                     f.write(data)
             except OSError:
                 return False
             return True
+
+    def _make_private(self) -> None:
+        """Once per log: the folder user-only (files created in it inherit that on Windows; POSIX files are created
+        0600 by open_private) and an existing log narrowed too. A failure here never stops the auditing."""
+        if self._private:
+            return
+        self._private = True
+        try:
+            private_dir(self.path.parent)
+            for f in [self.path] + [self.path.with_name(f"{self.path.name}.{i}") for i in range(1, self.keep + 1)]:
+                if f.exists():
+                    private_file(f)
+        except OSError:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def _size(self) -> int:
         try:

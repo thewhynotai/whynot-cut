@@ -313,7 +313,8 @@ class Run(_Home):
 class Ensure(_Home):
     def test_ensure_returns_the_running_daemon_and_never_spawns_a_second(self):
         self.start_daemon()
-        with mock.patch.object(daemon, "_spawn", side_effect=AssertionError("must not spawn")):
+        with mock.patch.object(daemon, "_spawn", side_effect=AssertionError("must not spawn")), \
+                mock.patch.object(daemon, "_version", return_value="3.0.0-test"):    # this plugin's version
             a = daemon.ensure(self.home)
             b = daemon.ensure(self.home)
         self.assertEqual((a["ok"], a["state"], a["started"]), (True, "running", False), a)
@@ -435,7 +436,7 @@ class Spawn(_Home):
                 captured["cmd"], captured["kw"] = cmd, kw
                 self.pid = 4242
 
-        with mock.patch.object(daemon.subprocess, "Popen", FakePopen):
+        with mock.patch.object(daemon, "_popen", FakePopen):
             daemon._spawn(self.home)
         cmd, kw = captured["cmd"], captured["kw"]
         self.assertEqual(cmd[0], sys.executable)

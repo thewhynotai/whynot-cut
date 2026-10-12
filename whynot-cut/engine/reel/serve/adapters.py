@@ -15,8 +15,11 @@
                        computed once the call holds its bridge's lock: a request that expired while it waited is
                        answered ok:false without reaching the queue.
     HostLink           the commands in flight to ONE connected host session: sends `command`, matches the `result`
-                       by id, hands `progress` to the requester; on a timeout it sends the host a best-effort
-                       `cancel` for that id first; fail_all() when the session goes away.
+                       by id, hands `progress` to the requester through a bounded per-command queue and its own relay
+                       task (a requester that stops reading never stalls the host's receive loop; excess progress is
+                       dropped, results never); on a timeout, and when the requester goes away (its task is
+                       cancelled), it sends the host a best-effort `cancel` for that id; fail_all() when the host
+                       session goes away.
     UxpAdapter         runs a command through a HostLink with the request's remaining time as the timeout.
 
 Adapters return a v4 result dict; the router validates it (contract.validate_result) before anyone sees it.
@@ -28,6 +31,7 @@ import concurrent.futures
 import contextlib
 import copy
 import queue
+import logging
 import threading
 from datetime import datetime, timezone
 
@@ -38,12 +42,16 @@ from lib.common import current_context, use_context
 __all__ = ["ACTION_HOSTS", "HostGone", "FileQueueAdapter", "HostLink", "UxpAdapter", "QueueWorker", "QUEUE_WORKERS",
            "cancel_queued", "failure", "seconds_left"]
 
+log = logging.getLogger(__name__)
+
 ACTION_HOSTS: dict[str, str] = {a: e["host"] for a, e in load("protocol")["actions"].items()}
 QUEUE_TIMEOUT_S = {"aftereffects": 900.0}          # the bridges' own defaults (ae_bridge 900 s, ppro_bridge 600 s)
 QUEUE_TIMEOUT_DEFAULT_S = 600.0
 UXP_TIMEOUT_MAX_S = 900.0
 APP_NAMES = {"aftereffects": "After Effects"}       # everything else runs in Premiere
 CANCEL_SEND_S = 1.0                                 # how long a best-effort cancel may take to send
+PROGRESS_QUEUE = 32                                 # progress events waiting for one requester (more are dropped)
+PROGRESS_FLUSH_S = 1.0                              # how long a finished command waits for its queued progress
 SUBMIT_LOCKS = {"premiere": threading.Lock(), "aftereffects": threading.Lock()}   # one queue call per bridge
 WORKER_IDLE_S = 2.0                                 # an idle queue worker thread ends after this
 _EXPIRED = object()
@@ -192,10 +200,27 @@ def _queue_failure(r):
 
 # ------------------------------------------------------------------------------------------------------------ UXP
 class _Pending:
-    __slots__ = ("future", "action", "on_progress")
+    __slots__ = ("future", "action", "on_progress", "queue", "relay")
 
     def __init__(self, future, action, on_progress):
         self.future, self.action, self.on_progress = future, action, on_progress
+        self.queue: asyncio.Queue | None = None      # progress waiting for the requester (bounded)
+        self.relay: asyncio.Task | None = None       # the task that hands it over, one per command
+
+
+async def _relay(p: _Pending) -> None:
+    """Hand queued progress to the requester, in order. Runs in its own task, so a requester that stops reading
+    stalls only this task, never the host session's receive loop."""
+    while True:
+        item = await p.queue.get()
+        try:
+            await p.on_progress(item)
+        except (ConnectionError, OSError):
+            pass                                     # the requester is gone: its command task ends soon
+        except Exception as e:                       # noqa: BLE001 — a relay failure must not end the command
+            log.warning("reel serve: progress relay failed (%s)", type(e).__name__)
+        finally:
+            p.queue.task_done()
 
 
 class HostLink:
@@ -205,6 +230,7 @@ class HostLink:
         self._send = send
         self._pending: dict[str, _Pending] = {}
         self.closed = False
+        self.progress_dropped = 0                    # progress events a slow requester never got
 
     def __contains__(self, rid) -> bool:
         return rid in self._pending
@@ -218,23 +244,48 @@ class HostLink:
         if rid in self._pending:
             raise ValueError(f"a command with id {rid} is already in flight to this host")
         fut = asyncio.get_running_loop().create_future()
-        self._pending[rid] = _Pending(fut, request["action"], on_progress)
+        pending = self._pending[rid] = _Pending(fut, request["action"], on_progress)
+        flush = True
         try:
             await self._send({"type": "command", "request": request})
             try:
                 async with asyncio.timeout(timeout):
                     return await asyncio.shield(fut)
             except TimeoutError:                     # tell the host to stop before the requester hears "no answer"
-                with contextlib.suppress(ConnectionError, OSError, TimeoutError):
-                    async with asyncio.timeout(CANCEL_SEND_S):
-                        await self._send({"type": "cancel", "id": rid})
+                await self._cancel_on_host(rid)
+                raise
+            except asyncio.CancelledError:           # the requester went away (or the daemon stops): same courtesy
+                flush = False
+                await self._cancel_on_host(rid)
                 raise
         finally:
             self._pending.pop(rid, None)
+            await self._stop_relay(pending, flush)
             if fut.done() and not fut.cancelled():
                 fut.exception()                      # retrieved: never "Future exception was never retrieved"
             else:
                 fut.cancel()
+
+    async def _cancel_on_host(self, rid: str) -> None:
+        """Best effort: tell the host to stop working on `rid` (bounded; never raises)."""
+        if self.closed:
+            return
+        with contextlib.suppress(ConnectionError, OSError, TimeoutError):
+            async with asyncio.timeout(CANCEL_SEND_S):
+                await self._send({"type": "cancel", "id": rid})
+
+    @staticmethod
+    async def _stop_relay(p: _Pending, flush: bool) -> None:
+        """Let the queued progress reach the requester before its result (bounded), then end the relay task."""
+        if p.relay is None:
+            return
+        if flush:
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(PROGRESS_FLUSH_S):
+                    await p.queue.join()
+        p.relay.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await p.relay
 
     async def cancel(self, rid: str) -> bool:
         """Forward a client's cancel to the host (its result then answers the command)."""
@@ -254,11 +305,21 @@ class HostLink:
         return True
 
     async def deliver_progress(self, progress: dict) -> bool:
+        """Queue a progress event for the command's requester and return at once (never waits for the requester:
+        the host session's receive loop calls this). When PROGRESS_QUEUE events already wait, it is dropped;
+        results never take this path."""
         p = self._pending.get(progress.get("id")) if isinstance(progress, dict) else None
         if p is None or p.future.done() or progress.get("action") != p.action:
             return False
-        if p.on_progress is not None:
-            await p.on_progress(progress)
+        if p.on_progress is None:
+            return True
+        if p.relay is None:
+            p.queue = asyncio.Queue(PROGRESS_QUEUE)
+            p.relay = asyncio.create_task(_relay(p))
+        try:
+            p.queue.put_nowait(progress)
+        except asyncio.QueueFull:
+            self.progress_dropped += 1
         return True
 
     def fail_all(self) -> None:

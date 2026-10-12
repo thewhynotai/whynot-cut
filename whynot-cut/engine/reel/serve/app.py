@@ -15,11 +15,17 @@ browser Origin -> 403 + audit). Then:
     anything else  404
 Session: the upgrade caps messages at 16 KiB until the client is authenticated. The first message must be a valid
 `hello` within `hello_timeout` (3 s) whose token is 64 lowercase hex characters and equals the engine token
-(constant-time); anything else is `error{code: auth}` + close 1008 + audit. After `welcome` the cap is 8 MiB and every
-message is parsed and validated against its type in session.schema.json (`schema` / `unknown_type` errors keep the
-connection and are audit-logged as `message` rejections). Rate limits are per session and by type: what a client asks for (command, snapshot, the intents, cancel,
-and anything invalid) is limited (`error{rate}` with the message's id); a host's `result` is never limited (dropping it
-would leave the requester waiting until expiry); `progress` over its own budget is dropped silently. `command` runs in
+(constant-time); anything else is `error{code: auth}` + close 1008 + audit, except a hello whose client.protocol is not
+4: that is `error{code: schema, message: "protocol 4 required"}` + close 1008 + audit, so an outdated panel is not told
+its token is wrong. After `welcome` the cap is 8 MiB and every message is parsed and validated against its type in
+session.schema.json (`schema` / `unknown_type` errors keep the connection and are audit-logged as `message`
+rejections). Rate limits are per session and by type: what a client asks for (command, snapshot, the intents, cancel,
+and anything invalid) is limited (`error{rate}` with the message's id); a host's `result` for a command it was sent
+(its id pending on that session's link) is never limited (dropping it would leave the requester waiting until
+expiry), an unmatched `result` is charged like any client message and only the first one per session is audited;
+`progress` over its own budget is dropped silently (likewise, only the first unmatched one is audited). Progress is
+handed to the requester through a bounded queue (adapters.HostLink), so a requester that stops reading never stalls
+the host session. `command` runs in
 its own task through the Router (UXP panel or CEP file queue, a Context per request); `result` / `progress` from a host
 session answer the commands sent to it; the panel intents approve / request_changes / rebuild get a `reply` saying they
 are not implemented in the serve core yet; `snapshot` gets a `state` echoing its id; `cancel` is forwarded to the panel
@@ -60,6 +66,7 @@ RATE = (20.0, 60)                  # messages per second per session, burst
 MAX_RUNNING = 16                   # commands one session may have running at once
 OFFLOAD_BYTES = 256 * 1024         # messages above this are parsed and validated in a worker thread
 AUTH_REFUSED = "The first message must be a hello with the engine token from engine.json."
+PROTOCOL_REQUIRED = "protocol 4 required"
 NOT_YET = "not implemented in the serve core yet"
 NOT_YET_HOW = ("Use the reel CLI for this step for now (e.g. `reel approve` / `reel build`); the panel will do it "
                "once the engine-state part of reel serve ships.")
@@ -67,6 +74,16 @@ NOT_YET_HOW = ("Use the reel CLI for this step for now (e.g. `reel approve` / `r
 
 def _dumps(msg: dict) -> str:
     return json.dumps(msg, ensure_ascii=False, separators=(",", ":"))
+
+
+_NO_PROTOCOL = object()
+
+
+def _hello_protocol(msg):
+    """`client.protocol` of a hello-shaped message, or _NO_PROTOCOL when the message is not a hello or has none."""
+    if not isinstance(msg, dict) or msg.get("type") != "hello" or not isinstance(msg.get("client"), dict):
+        return _NO_PROTOCOL
+    return msg["client"].get("protocol", _NO_PROTOCOL)
 
 
 def _type_of(msg) -> str:
@@ -99,6 +116,8 @@ class Session:
         self.limiter = limiter                                     # client requests (and invalid messages)
         self.progress_limiter = security.RateLimiter(limiter.rate, int(limiter.burst))   # a host's progress events
         self.progress_dropped = 0
+        self.late_results = 0                                      # results / progress nobody waits for
+        self.late_progress = 0
         self.link = HostLink(self._send_or_raise)
         self.tasks: set[asyncio.Task] = set()
 
@@ -343,6 +362,15 @@ class App:
             await self._refuse(sock, peer_s, f"closed before hello ({sock.close_code})")
             return None
         msg, problem = _parse(raw)
+        proto = _hello_protocol(msg)
+        if proto is not _NO_PROTOCOL and (isinstance(proto, bool) or proto != security.PROTOCOL):
+            # an older / newer panel: say what is wrong instead of "wrong token" (nothing about the token is told)
+            self._audit("auth", peer_s, outcome="rejected", reason=f"protocol {str(proto)[:16]} (4 required)")
+            with contextlib.suppress(ConnectionError, OSError):
+                await sock.send(_dumps(messages.error("schema", PROTOCOL_REQUIRED)))
+            with contextlib.suppress(ConnectionError, OSError):
+                await sock.close(1008, PROTOCOL_REQUIRED)
+            return None
         if problem is not None or msg.get("type") != "hello":
             await self._refuse(sock, peer_s, "first message is not a valid hello")
             return None
@@ -373,7 +401,10 @@ class App:
                 if s.progress_dropped == 1:
                     self._audit("rate", s.peer, session=s.id, outcome="dropped", reason="progress over the rate")
                 continue
-            if kind not in ("result", "progress") and not s.limiter.allow():
+            # a host's result for a command it was sent is never limited (dropping it would leave the requester
+            # waiting); any other result (unmatched: nobody waits for it) is charged like every client message
+            exempt = kind == "progress" or (kind == "result" and msg["result"].get("id") in s.link)
+            if not exempt and not s.limiter.allow():
                 self._audit("rate", s.peer, session=s.id, action=kind, outcome="rejected", reason="message rate")
                 await s.send(messages.error("rate", "Too many messages: slow down.", messages.message_id(msg)))
                 continue
@@ -404,12 +435,16 @@ class App:
             task.add_done_callback(s.tasks.discard)
         elif t == "result":
             if not s.link.deliver_result(msg["result"]):
-                self._audit("late-result", s.peer, session=s.id, action=msg["result"].get("action"),
-                            outcome="ignored", reason="no command waits for this id")
+                s.late_results += 1                  # audited once per session: a flood cannot rotate the trail away
+                if s.late_results == 1:
+                    self._audit("late-result", s.peer, session=s.id, action=msg["result"].get("action"),
+                                outcome="ignored", reason="no command waits for this id (later ones are not logged)")
         elif t == "progress":
             if not await s.link.deliver_progress(msg["progress"]):
-                self._audit("late-progress", s.peer, session=s.id, action=msg["progress"].get("action"),
-                            outcome="ignored", reason="no command waits for this id")
+                s.late_progress += 1
+                if s.late_progress == 1:
+                    self._audit("late-progress", s.peer, session=s.id, action=msg["progress"].get("action"),
+                                outcome="ignored", reason="no command waits for this id (later ones are not logged)")
         elif t == "snapshot":
             await s.send(await self._state(msg.get("id")))
         elif t in ("approve", "request_changes", "rebuild"):

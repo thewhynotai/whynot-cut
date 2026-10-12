@@ -7,7 +7,11 @@
                   on (App.start), serves until an authenticated POST /shutdown (or Ctrl+C / SIGTERM), then closes the
                   app (bounded, every task awaited), drops the CEP queue calls that have not started, removes
                   engine.json only while it still names this pid, and releases the lock. A queue call stuck in submit
-                  runs on a daemon thread and never holds the process.
+                  runs on a daemon thread and never holds the process. bridge/ and logs/ are made user-only
+                  (security.private_dir), and so are serve.lock, serve.log and the audit logs. When the home is not
+                  ~/.whynot-cut (the only home the UXP panel can compute), a discovery record with the same fields plus
+                  `home` is written to ~/.whynot-cut/bridge/engine.json (same atomic user-only writer; never over a
+                  live daemon's file) and removed, pid-guarded, on exit.
     ensure(home)  idempotent start (the SessionStart hook). A daemon whose engine.json pid is alive (same process start
                   time when recorded) and whose GET /status answers with the token within PROBE_TIMEOUT is returned as
                   is: no second daemon. Otherwise a stale file (dead pid) is removed and a detached daemon is started
@@ -15,7 +19,10 @@
                   CREATE_BREAKAWAY_FROM_JOB tried first so a hook's job object cannot take it down; POSIX
                   start_new_session=True), then it waits up to `wait` (ENSURE_WAIT) for engine.json + /status. Still
                   starting after that is {ok: true, state: starting}. Two ensures at once may both spawn; the instance
-                  lock lets one daemon live and the other exits at once.
+                  lock lets one daemon live and the other exits at once. A daemon of another plugin version or
+                  protocol (left running by a plugin update, from a stale or deleted folder) is stopped through the
+                  authenticated /shutdown and replaced: {state: restarted, previous_version, previous_protocol}; one
+                  that does not stop is reported (not_answering), never killed.
     status(home)  reads engine.json and probes it; changes nothing.
     stop(home)    POST /shutdown with the token, then waits (STOP_WAIT) for engine.json to go and the process to
                   exit; a stale file (dead pid) is removed. A daemon that does not answer is reported, never killed
@@ -78,8 +85,8 @@ class InstanceLock:
         self._f = None
 
     def acquire(self) -> bool:
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        f = open(self.path, "a+b")
+        security.private_dir(self.path.parent)
+        f = os.fdopen(security.open_private(self.path, os.O_RDWR), "r+b")   # 0600: no other user can flock it
         try:
             if os.name == "nt":
                 import msvcrt
@@ -92,6 +99,10 @@ class InstanceLock:
             f.close()
             return False
         self._f = f
+        try:
+            security.private_file(self.path)       # Windows: user-only (a no-op when the folder already made it so)
+        except OSError:
+            pass
         return True
 
     def release(self) -> None:
@@ -130,22 +141,31 @@ async def _serve(home: Path, *, port, version, ready, app_options, install_signa
     token = security.make_token()
     audit = security.AuditLog(security.audit_log_path(home), token=token)
     lock = InstanceLock(home)
-    if not lock.acquire():
+    try:
+        locked = lock.acquire()
+    except OSError as e:                   # the bridge folder or the lock file cannot be made user-only
+        audit.log("daemon", outcome="failed", reason=f"pid {pid}: serve.lock ({type(e).__name__})")
+        return EXIT_FAILED
+    if not locked:
         audit.log("daemon", outcome="refused", reason=f"pid {pid}: another reel serve already holds this engine home")
         return EXIT_LOCKED
     app = App(home=home, token=token, version=version, audit=audit, **app_options)
     started = False
+    discovery = None
     try:
         port = await app.start(port)
+        record = {"port": port, "token": token, "pid": pid, "version": version,
+                  "pid_created": writer_lock.process_created(pid),
+                  "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         try:
-            security.write_engine_json(home, port=port, token=token, pid=pid, version=version,
-                                       pid_created=writer_lock.process_created(pid),
-                                       started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+            security.private_dir(home / "logs")
+            security.write_engine_json(home, **record)
         except (OSError, ValueError) as e:
             audit.log("daemon", outcome="failed", reason=f"engine.json could not be written ({type(e).__name__})")
             return EXIT_FAILED
         started = True
         audit.log("daemon", outcome="started", reason=f"127.0.0.1:{port} pid {pid} version {version}")
+        discovery = _write_discovery(home, record, audit)
         loop = asyncio.get_running_loop()
         if install_signals and os.name != "nt":
             for sig in (signal.SIGTERM, signal.SIGHUP):
@@ -161,9 +181,46 @@ async def _serve(home: Path, *, port, version, ready, app_options, install_signa
         await app.close()
         adapters.cancel_queued()
         security.remove_engine_json(home, pid)
+        if discovery is not None:
+            security.remove_engine_json(discovery, pid)
         if started:
             audit.log("daemon", outcome="stopped", reason=f"pid {pid}")
         lock.release()
+
+
+# ----------------------------------------------------------------------------------------------- discovery
+def default_home() -> Path:
+    """The only engine home the UXP panel can compute by itself: os.homedir()/.whynot-cut."""
+    return Path.home() / plat.HOME_NAME
+
+
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+    except (OSError, ValueError):
+        return False
+
+
+def _write_discovery(home: Path, record: dict, audit) -> Path | None:
+    """When this daemon's home is not ~/.whynot-cut (WHYNOT_HOME, the plugin option, a legacy home), also write
+    ~/.whynot-cut/bridge/engine.json with the same fields plus `home`, so the UXP panel finds it. Same atomic,
+    user-only writer; removed pid-guarded on exit. A live daemon's file there (any daemon) is never touched.
+    Returns the discovery home when it was written."""
+    disc = default_home()
+    if _same_dir(home, disc):
+        return None
+    where = f"~/{plat.HOME_NAME}/bridge/engine.json"
+    try:
+        cur = security.read_engine_json(disc)
+        if cur is not None and _alive(cur):
+            audit.log("discovery", outcome="skipped", reason=f"{where} belongs to a running daemon (pid {cur.get('pid')})")
+            return None
+        security.write_engine_json(disc, **record, home=str(home))
+    except (OSError, ValueError) as e:
+        audit.log("discovery", outcome="failed", reason=f"{where} ({type(e).__name__})")
+        return None
+    audit.log("discovery", outcome="written", reason=f"{where} points at this engine home")
+    return disc
 
 
 # ------------------------------------------------------------------------------------------------- probing
@@ -228,28 +285,33 @@ def _rotate_log(path: Path) -> None:
         pass
 
 
+def _popen(cmd, **kw):
+    """subprocess.Popen for the daemon command only (tests replace this, not the module-wide Popen)."""
+    return subprocess.Popen(cmd, **kw)
+
+
 def _spawn(home: Path):
     """Start a detached daemon for `home`; returns its Popen (on Windows a venv's python.exe may be a launcher whose
     pid differs from the daemon's: engine.json holds the daemon's own pid)."""
     home = Path(home)
-    logs = home / "logs"
-    logs.mkdir(parents=True, exist_ok=True)
+    logs = security.private_dir(home / "logs")
     log_path = logs / "serve.log"
     _rotate_log(log_path)
     env = dict(os.environ, WHYNOT_HOME=str(home), PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="1",
                PYTHONIOENCODING="utf-8")
     cmd = daemon_command(home)
-    with open(log_path, "ab") as err:
+    with os.fdopen(security.open_private(log_path, os.O_WRONLY | os.O_APPEND), "ab") as err:
+        security.private_file(log_path)
         kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": err, "cwd": str(home),
               "env": env, "close_fds": True}
         if os.name == "nt":
             flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             try:
-                proc = subprocess.Popen(cmd, creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, **kw)
+                proc = _popen(cmd, creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, **kw)
             except OSError:            # the job (e.g. a hook runner's) forbids breakaway: start inside it
-                proc = subprocess.Popen(cmd, creationflags=flags, **kw)
+                proc = _popen(cmd, creationflags=flags, **kw)
         else:
-            proc = subprocess.Popen(cmd, start_new_session=True, **kw)
+            proc = _popen(cmd, start_new_session=True, **kw)
     _children.append(proc)
     return proc
 
@@ -258,11 +320,25 @@ def ensure(home=None, *, wait: float = ENSURE_WAIT) -> dict:
     """The running daemon ({ok, running, state: running, started: false, pid, port, ...}), else start one."""
     home = _home(home)
     info = security.read_engine_json(home)
+    previous: dict = {}
     if info is not None:
         if _alive(info):
             st = _probe(info, PROBE_TRIES)
             if st is not None:
-                return _doc(info, st, "running", started=False)
+                old_version, old_protocol = st.get("daemon_version", info.get("version")), st.get("protocol")
+                if old_version == _version() and old_protocol == security.PROTOCOL:
+                    return _doc(info, st, "running", started=False)
+                # a daemon of another plugin version (or protocol) would keep running from a stale or deleted
+                # plugin folder: stop it (authenticated, never killed), then start this version's
+                res = stop(home)
+                if not res.get("ok"):
+                    return {"ok": False, "running": True, "state": "not_answering", "pid": info.get("pid"),
+                            "version": old_version,
+                            "error": f"reel serve {old_version} (pid {info.get('pid')}) is not this plugin's version "
+                                     f"({_version()}) and did not stop: {res.get('error', 'no answer')}",
+                            "how": res.get("how") or f"end process {info.get('pid')} (Task Manager / kill), then "
+                                                     "run: reel serve --ensure"}
+                previous = {"previous_version": old_version, "previous_protocol": old_protocol}
         else:
             security.remove_engine_json(home, info.get("pid"))
     proc = _spawn(home)
@@ -272,7 +348,7 @@ def ensure(home=None, *, wait: float = ENSURE_WAIT) -> dict:
         if cur is not None and cur != info and _alive(cur):
             st = _probe(cur)
             if st is not None:
-                return _doc(cur, st, "running", started=True)
+                return _doc(cur, st, "restarted" if previous else "running", started=True, **previous)
         code = proc.poll()
         if code is not None:
             cur = security.read_engine_json(home)
