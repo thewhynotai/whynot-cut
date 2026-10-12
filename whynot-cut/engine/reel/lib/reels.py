@@ -376,14 +376,17 @@ def render_candidates(ep, ids: list[str] | None = None, workers: int | None = No
         finally:
             lab.unlink(missing_ok=True)
         if r.returncode or not mp4.exists():
-            raise RuntimeError((r.stderr or "")[-300:])
+            tail = " | ".join((r.stderr or "").strip().splitlines()[-3:])[-300:]
+            raise RuntimeError(f"ffmpeg exited with code {r.returncode}" + (f": {tail}" if tail else
+                               " and printed no error" if r.returncode else " but wrote no file"))
         return {"id": c["id"], "mp4": str(mp4), "jpg": str(jpg) if jpg.exists() else None}
     outs, failed = [], []
     for c, (ok, v) in zip(cands, parallel_map(one, cands, DEFAULT_WORKERS if workers is None else workers)):
         if ok:
             outs.append(v)
         else:
-            failed.append({"id": c["id"], "error": getattr(v, "error", None) or str(v) or type(v).__name__})
+            failed.append({"id": c["id"], "error": getattr(v, "error", None) or
+                           (f"{type(v).__name__}: {v}" if str(v) else type(v).__name__)})
     byid = {c["id"]: c for c in cands}
     sheet = contact_sheet([(o["jpg"], f"{o['id']}  {byid[o['id']].get('total')}  {byid[o['id']].get('type')}  "
                                       f"{fmt_ts(byid[o['id']]['in_ms'], '.')[:8]}") for o in outs if o["jpg"]],

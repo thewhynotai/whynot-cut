@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
+import threading
 import time
 import wave
 from pathlib import Path
@@ -17,7 +19,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-from .common import fps_arg, frame_size, seq_fps, Paths, ffmpeg_exe, log, now_iso, read_json, write_json
+from .common import fps_arg, frame_size, seq_fps, Paths, ffmpeg_exe, log, now_iso, read_json, run, write_json
 
 SR = 48000
 F = 1 / 24   # animation time unit (the Premiere JSX presets use the same 1/24 s), not the sequence rate
@@ -113,8 +115,8 @@ def build_audio(paths: Paths, spec: dict, out: Path, src_video: Path) -> Path:
     else:   # no cleanup yet: the camera's own audio
         raw = out.with_name("_camera_audio.wav")
         off = ["-ss", f"{(spec.get('source_in_ms') or 0) / 1000:.3f}"] if spec.get("source_in_ms") else []
-        subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", *off, "-i", str(src_video), "-map", "0:a:0", "-ac", "1",
-                        "-ar", str(SR), "-c:a", "pcm_s16le", str(raw)], check=True)
+        run([ffmpeg_exe(), "-y", "-loglevel", "error", *off, "-i", str(src_video), "-map", "0:a:0", "-ac", "1",
+             "-ar", str(SR), "-c:a", "pcm_s16le", str(raw)], check=True)        # T2.15 timeout (common.run)
         dia = _mono(raw)
     n = round(spec["duration_frames"] * SR / seq_fps())
     mix = np.zeros(n, dtype=np.float32)
@@ -157,8 +159,109 @@ def build_audio(paths: Paths, spec: dict, out: Path, src_video: Path) -> Path:
 
 
 # --------------------------------------------------------------------------- video
-PREVIEW_WORKERS = min(4, os.cpu_count() or 1)     # chunks rendered at once (each also runs two ffmpeg processes)
-MIN_CHUNK_FRAMES = 96                              # a chunk is worth its own start-up from about 4 s of timeline
+PREVIEW_WORKERS = min(2, os.cpu_count() or 1)     # chunks rendered at once: each runs a decoder + an encoder (+ the B-roll
+                                                   # decoder of the clip it is in), so <= ~6 ffmpeg (T2.14 review I2)
+MIN_CHUNK_FRAMES = 240                             # a chunk is worth its own start-up from about 10 s of timeline
+DLL_INIT_FAILED = (3221225794, -1073741502)        # 0xC0000142: Windows could not start the process (spawn load)
+
+
+class _FFFailed(Exception):
+    """An ffmpeg process of a chunk failed: `what` (source decoder / B-roll decoder / encoder), exit code, stderr tail."""
+
+    def __init__(self, what: str, rc, tail: str = ""):
+        super().__init__(f"the {what} ffmpeg exited with code {rc}" + (f": {tail}" if tail else ""))
+        self.what, self.rc, self.tail = what, rc, tail
+
+    @property
+    def spawn(self) -> bool:
+        return self.rc in DLL_INIT_FAILED
+
+
+class _Timeout(Exception):
+    pass
+
+
+def chunk_timeout_s(dur_s: float) -> float:
+    """The watchdog of a chunk of dur_s seconds of timeline: T2.15's ffmpeg rule, 10 s + 3 x the duration."""
+    from .media_util import FF_TIMEOUT_BASE_S, FF_TIMEOUT_PER_MEDIA_S
+    return FF_TIMEOUT_BASE_S + FF_TIMEOUT_PER_MEDIA_S * dur_s
+
+
+class _Watch:
+    """The ffmpeg processes of one chunk: stderr kept in a temp file (for the error), registered with the parallel map
+    (Ctrl+C kills them) and a deadline (T2.15's 10 s + 3 x the duration) after which they are all killed."""
+
+    def __init__(self, seconds: float):
+        from .parallel import kill_tree
+        self.kill_tree, self.procs, self.fired = kill_tree, [], False
+        self.timer = threading.Timer(seconds, self._fire)
+        self.timer.daemon = True
+        self.timer.start()
+
+    def _fire(self):
+        self.fired = True
+        for p in list(self.procs):
+            self.kill_tree(p)
+
+    def spawn(self, cmd, **kw) -> subprocess.Popen:
+        from .parallel import track
+        err = tempfile.TemporaryFile()
+        try:
+            p = subprocess.Popen(cmd, stderr=err, **kw)
+        except BaseException:
+            err.close()
+            raise
+        p.wnc_err = err
+        self.procs.append(p)
+        track(p)
+        if self.fired:
+            self.kill_tree(p)
+        return p
+
+    @staticmethod
+    def tail(p) -> str:
+        try:
+            p.wnc_err.seek(0)
+            lines = p.wnc_err.read().decode("utf-8", "replace").strip().splitlines()
+        except (OSError, ValueError):
+            return ""
+        return " | ".join(lines[-3:])[-400:]
+
+    def finish(self, p, what: str, read_any: bool):
+        """A decoder whose output ended: raise unless it exited 0 having delivered at least one frame."""
+        try:
+            rc = p.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.kill_tree(p)
+            rc = p.wait()
+        if self.fired:
+            raise _Timeout()
+        if rc != 0:
+            raise _FFFailed(what, rc, self.tail(p))
+        if not read_any:
+            raise _FFFailed(what, rc, self.tail(p) or "no frame decoded")
+
+    def close(self, p):
+        """Stop a process and reap it (no zombie ffmpeg, no ResourceWarning)."""
+        from .parallel import untrack
+        if p.poll() is None:
+            p.kill()                     # first: closing the pipe under a running decoder makes it print "Broken pipe"
+        for s in (p.stdin, p.stdout):
+            if s is not None:
+                try:
+                    s.close()
+                except OSError:
+                    pass
+        p.wait()
+        p.wnc_err.close()
+        untrack(p)
+        if p in self.procs:
+            self.procs.remove(p)
+
+    def stop(self):
+        self.timer.cancel()
+        for p in list(self.procs):
+            self.close(p)
 
 
 def chunk_bounds(total: int, workers: int, min_chunk: int = MIN_CHUNK_FRAMES) -> list[int]:
@@ -228,50 +331,74 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
         src_ms = seg.get("src_in_ms", seg["start_frame"] * 1000 / fps_n) + (f - seg["start_frame"]) * 1000 / fps_n
         return int(round(src_ms * fps_n / 1000))
 
-    def render_range(f0, f1, enc):
+    threads = ["-threads", str(max(1, (os.cpu_count() or 1) // nch))] if nch > 1 else []   # chunks share the cores
+    from .parallel import check as cancel_check
+
+    def render_range(f0, f1, enc, watch):
         """Timeline frames f0..f1-1 into the encoder's stdin. A range that does not start at frame 0 has its decoders
         skip the frames before it INSIDE ffmpeg (`trim` after the same `fps` filter, so every frame is the one a single
-        pass would have used); the one starting at 0 is the plain sequential pass."""
+        pass would have used); the one starting at 0 is the plain sequential pass. A decoder that fails, or delivers no
+        frame, raises _FFFailed (never a silent black or speaker-only chunk, T2.14 review I3)."""
         skip = source_frame(f0, segs[seg_index(f0)]) if f0 else 0
         trim = f",trim=start_frame={skip},setpts=PTS-STARTPTS" if skip else ""
         # `-r` after a trim: without it ffmpeg falls back to the SOURCE's rate for the output and duplicates frames
-        dec = subprocess.Popen([ff, "-loglevel", "error", *off, "-i", str(src), "-an", "-vf",
-                                f"fps={fps_s}{trim},scale={cw_}:{ch_}", *(["-r", fps_s] if skip else []),
-                                "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+        dec = watch.spawn([ff, "-loglevel", "error", *threads, *off, "-i", str(src), "-an", "-vf",
+                           f"fps={fps_s}{trim},scale={cw_}:{ch_}", *(["-r", fps_s] if skip else []),
+                           "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
         src_idx, cur = skip - 1, Image.new("RGB", (cw_, ch_))
+        dec_read, dec_end = 0, False
         stills = _Stills(W, H, cap=max(12, 48 // nch))
         si = 0
-        bdec, blast = {}, {}
+        bdec, blast, bread, bdone = {}, {}, {}, set()
 
         def broll_frame(ev, f):
             """Next frame of a B-roll clip (its own decoder, started at the clip's in-point), cover-cropped to WxH."""
             eid = ev["event_id"]
+            if eid in bdone:                                    # the clip's decoder ended: hold its last frame
+                return blast.get(eid)
             if eid not in bdec:
                 pp = ev["params"]
                 cx, cy = (pp.get("crop_center") or [0.5, 0.5])[:2]
                 into = max(0, f - ev["start_frame"]) if f0 else 0      # a range that starts inside the clip's event
-                bdec[eid] = subprocess.Popen(
-                    [ff, "-loglevel", "error", "-ss", str(float(pp.get("in", 0) or 0)), "-i", str(paths.root / pp["video"]), "-an",
+                bdec[eid] = watch.spawn(
+                    [ff, "-loglevel", "error", *threads, "-ss", str(float(pp.get("in", 0) or 0)), "-i", str(paths.root / pp["video"]), "-an",
                      "-vf", f"fps={fps_s}" + (f",trim=start_frame={into},setpts=PTS-STARTPTS" if into else "") +
                             f",scale={W}:{H}:force_original_aspect_ratio=increase,"
                             f"crop={W}:{H}:x='(iw-{W})*{float(cx)}':y='(ih-{H})*{float(cy)}'",
                      *(["-r", fps_s] if into else []), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+                bread[eid] = 0
             buf = bdec[eid].stdout.read(W * H * 3)
             if len(buf) == W * H * 3:
                 blast[eid] = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
+                bread[eid] += 1
+            else:       # the clip ended (exit 0 after a frame: hold it) or its decoder failed (raise)
+                bdone.add(eid)
+                p = bdec.pop(eid)
+                try:
+                    watch.finish(p, f"B-roll decoder ({ev['params'].get('video')})", bread[eid] > 0)
+                finally:
+                    watch.close(p)
             return blast.get(eid)
         try:
             for f in range(f0, f1):
+                cancel_check()                          # Ctrl+C on the parallel map: stop at the next frame
+                for be in brolls:                       # a clip whose event is over: its decoder is not needed any more
+                    if be["event_id"] in bdec and f >= be["end_frame"]:
+                        watch.close(bdec.pop(be["event_id"]))
+                        bdone.add(be["event_id"])
                 while si < len(segs) - 1 and f >= segs[si]["end_frame"]:
                     si += 1
                 seg = segs[si]
                 want = source_frame(f, seg)
-                while src_idx < want:
+                while src_idx < want and not dec_end:
                     buf = dec.stdout.read(fsize)
                     if len(buf) < fsize:
-                        break                                   # source ended: hold the last frame
+                        dec_end = True                  # source ended (exit 0: hold the last frame) or the decoder failed
+                        watch.finish(dec, "source decoder", dec_read > 0)
+                        break
                     cur = Image.frombuffer("RGB", (cw_, ch_), buf, "raw", "RGB", 0, 1)
                     src_idx += 1
+                    dec_read += 1
                 # Premiere: output = (source - centre) * scale + frame centre + offset  ->  invert for the source window
                 sc = seg.get("scale_factor", 1.0) or 1.0
                 ox = (box + (seg.get("offset_x") or 0.0)) * k
@@ -315,55 +442,94 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
                     frame.alpha_composite(tag)
                 enc.stdin.write(frame.convert("RGB").tobytes())
         finally:
-            for d_ in [dec, *bdec.values()]:     # stop the decoders and reap them (no zombie ffmpeg, no ResourceWarning)
-                d_.kill()                        # first: closing the pipe under a running decoder makes it print "Broken pipe"
-                d_.stdout.close()
-                d_.wait()
+            for p in [dec, *bdec.values()]:     # stop the decoders and reap them (no zombie ffmpeg, no ResourceWarning)
+                watch.close(p)
 
-    def encode(f0, f1, dest, audio):
+    def encode_once(f0, f1, dest, audio):
         """Render f0..f1 and encode it to `dest` (with the dialogue when `audio`: the single-pass file). Same codec
-        parameters for every chunk, which is what makes the concatenation lossless. -> the encoder's exit code."""
+        parameters for every chunk, which is what makes the concatenation lossless. Raises _FFFailed / _Timeout."""
         cmd = [ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", fps_s, "-i", "-"]
         if audio:
             cmd += ["-i", str(wav)]
-        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
+        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", *threads]
         cmd += ["-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart"] if audio else []
-        enc = subprocess.Popen(cmd + [str(dest)], stdin=subprocess.PIPE)
+        # T2.15 watchdog: 10 s + 3 x the chunk's duration, then every process of the chunk is killed
+        watch = _Watch(chunk_timeout_s((f1 - f0) / fps_n))
         try:
-            render_range(f0, f1, enc)
-        finally:
-            enc.stdin.close()
+            enc = watch.spawn(cmd + [str(dest)], stdin=subprocess.PIPE)
+            try:
+                render_range(f0, f1, enc, watch)
+            except OSError:                     # the encoder died under us (broken pipe): its exit code says why
+                if enc.poll() is None and not watch.fired:
+                    raise
+            finally:
+                try:
+                    enc.stdin.close()
+                except OSError:
+                    pass
             enc.wait()
-        return enc.returncode
+            if watch.fired:
+                raise _Timeout()
+            if enc.returncode != 0:
+                raise _FFFailed("encoder", enc.returncode, watch.tail(enc))
+        finally:
+            watch.stop()
+
+    def encode(f0, f1, dest, audio):
+        """encode_once, retried once when Windows could not start one of its ffmpeg (0xC0000142 under process-creation
+        load); any other failure is a Guidance (ok: false with what failed and what to do)."""
+        from .errors import Guidance
+        what = f"timeline frames {f0}-{f1 - 1}"
+        for attempt in (1, 2):
+            try:
+                return encode_once(f0, f1, dest, audio)
+            except _FFFailed as e:
+                if e.spawn and attempt == 1:
+                    log(paths, f"preview video: {e} ({what}); Windows could not start ffmpeg, retrying once")
+                    continue
+                raise Guidance(f"preview-video could not render {what}: {e}",
+                               "Check that the footage (and any B-roll clip) opens: `reel preflight`, then run `reel "
+                               "preview-video` again. Exit code 3221225794 (0xC0000142) means Windows could not start "
+                               "another process: close other renders or exports and retry.") from e
+            except _Timeout:
+                raise Guidance(f"preview-video stopped: {what} did not finish within "
+                               f"{chunk_timeout_s((f1 - f0) / fps_n):.0f} s",
+                               "The footage may be on a stalled network share or a sleeping drive: copy it to a local "
+                               "disk or wake the drive, then run `reel preview-video` again.") from None
     chunk_files = [out_dir / f"_preview_chunk_{i}.mp4" for i in range(nch)] if nch > 1 else []
     listing = out_dir / "_preview_chunks.txt"
+    err = None
     try:
         if nch <= 1:
-            ok = encode(0, total, mp4, True) == 0
+            encode(0, total, mp4, True)
         else:
             from .parallel import parallel_map
             done = parallel_map(lambda i: encode(bounds[i], bounds[i + 1], chunk_files[i], False), range(nch), nch)
             for good, v in done:
                 if not good:
                     raise v
-            ok = all(v == 0 for _, v in done)
-            if ok:      # the concat demuxer joins the chunks without re-encoding; the dialogue is encoded once over the whole
-                listing.write_text("".join(f"file '{c.name}'\n" for c in chunk_files), encoding="utf-8")
-                cat = subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing.name,
-                                      "-i", str(wav), "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest",
-                                      "-movflags", "+faststart", str(mp4)], cwd=out_dir)
-                ok = cat.returncode == 0
+            # the concat demuxer joins the chunks without re-encoding; the dialogue is encoded once over the whole
+            listing.write_text("".join(f"file '{c.name}'\n" for c in chunk_files), encoding="utf-8")
+            cat = run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing.name,
+                       "-i", str(wav), "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest",
+                       "-movflags", "+faststart", str(mp4)], check=False, cwd=out_dir)     # T2.15 timeout
+            if cat.returncode != 0:
+                err = f"joining the chunks failed (ffmpeg exit {cat.returncode}): " + \
+                      " | ".join((cat.stderr or "").strip().splitlines()[-3:])[-400:]
     finally:
         wav.unlink(missing_ok=True)
         (out_dir / "_camera_audio.wav").unlink(missing_ok=True)
         listing.unlink(missing_ok=True)
         for c in chunk_files:
             c.unlink(missing_ok=True)
+    ok = err is None
     ok = ok and mp4.exists() and mp4.stat().st_size > 1000
     res = {"ok": ok, "video": str(mp4), "size": f"{W}x{H}", "frames": total, "seconds": round(total / seq_fps(), 2),
            "layers": len(layers), "chunks": nch, "elapsed_s": round(time.time() - t0, 1), "at": now_iso(),
            "dialogue": "cleaned" if paths.p("06_audio/dialogue/dialogue_clean.wav").exists() else "camera (not cleaned yet)",
            "note": "Proxy preview for review only. The deliverable is the Premiere project; the editor renders the final."}
+    if err:
+        res["error"] = err
     write_json(out_dir / "preview-result.json", res)
     log(paths, f"preview video: {mp4} ({res['seconds']} s, {res['elapsed_s']} s to render)")
     return res

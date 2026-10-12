@@ -4,6 +4,7 @@ from __future__ import annotations
 import platform
 import re
 import shutil
+import time
 from pathlib import Path
 
 from .common import (AUDIO_EXT, DOC_EXT, FONT_EXT, IMAGE_EXT, RAW_IMAGE_EXT, SUB_EXT, VIDEO_EXT,
@@ -284,10 +285,16 @@ def audit_environment() -> dict:
             "models_dir": str(models_dir())}
 
 
+def stat_key(st) -> list:
+    """What says a file is unchanged: [size, mtime_ns] plus the file id (st_ino) where the filesystem has one; NTFS
+    gives a replaced file a new id even when a copy kept its size and time (robocopy /COPY:DAT, cloud sync)."""
+    return [st.st_size, st.st_mtime_ns] + ([st.st_ino] if st.st_ino else [])
+
+
 def discover(paths: Paths, read_docs: bool = True, cache: dict | None = None) -> dict:
-    """Inventory of the client folder. `cache` ({rel: {"stat": [size, mtime_ns], "fingerprint", "text"?}}, 3.0 T2.14):
-    a file whose size and mtime_ns match its entry keeps the fingerprint and the extracted text it had (nothing is
-    read again); the dict is replaced in place by the entries of this run (files that vanished drop out)."""
+    """Inventory of the client folder. `cache` ({rel: {"stat": stat_key, "fingerprint", "text"?}}, 3.0 T2.14):
+    a file whose size, mtime_ns and file id match its entry keeps the fingerprint and the extracted text it had
+    (nothing is read again); the dict is replaced in place by the entries of this run (files that vanished drop out)."""
     if not paths.assets.is_dir() or not paths.data.is_dir():
         missing = [d.name for d in (paths.assets, paths.data) if not d.is_dir()]
         raise FileNotFoundError(f"Expected assets/ and data/ under {paths.root}; missing: {missing}")
@@ -304,10 +311,11 @@ def discover(paths: Paths, read_docs: bool = True, cache: dict | None = None) ->
             item = classify(p, rel)
             st = p.stat()
             hit = old.get(rel)
-            hit = hit if isinstance(hit, dict) and hit.get("stat") == [st.st_size, st.st_mtime_ns] else {}
+            key = stat_key(st)
+            hit = hit if isinstance(hit, dict) and hit.get("stat") == key else {}
             item["fingerprint"] = hit.get("fingerprint") or sha1_head(p)
             files.append(item)
-            ent = new[rel] = {"stat": [st.st_size, st.st_mtime_ns], "fingerprint": item["fingerprint"]}
+            ent = new[rel] = {"stat": key, "fingerprint": item["fingerprint"]}
             if isinstance(hit.get("text"), str):
                 ent["text"] = hit["text"]
             if read_docs and item["kind"] in ("document", "subtitle"):
@@ -383,7 +391,8 @@ DISCOVERY_WAIT_S = 600.0              # a second discovery of the same client wa
 def run_discovery(paths: Paths, audit: bool = True) -> dict:
     """Discovery of one client runs one at a time (3.0 T2.4): parallel subagents never interleave its writes.
     `audit=False` (`reel inbox`, 3.0 T2.14): the environment audit (it imports every engine module) is not repeated
-    when the last one is on disk; the first discovery of a client always audits."""
+    when the last one is on disk, less than a day old and made by this engine version; the first discovery of a client
+    always audits."""
     from .file_lock import locked
     if not paths.assets.is_dir() or not paths.data.is_dir():
         # before the lock: taking it creates `<folder>/output/discovery/*.lock`, which a wrong --root (or one inside
@@ -395,31 +404,58 @@ def run_discovery(paths: Paths, audit: bool = True) -> dict:
 
 
 CACHE_REL = "discovery/discovery-cache.json"       # under output/: never in assets/ or data/ (read-only for the engine)
-CACHE_VERSION = 1
+CACHE_VERSION = 2
+READ_DOC_VERSION = 1      # bump when read_document's extraction changes: every cached text is read again
+ENV_MAX_AGE_S = 24 * 3600  # `inbox` audits the environment again when environment.json is older (or another engine's)
+
+
+def _cache_header() -> dict:
+    """What the cached texts and fingerprints were made by (T2.14 review I4): another engine version or another
+    extractor version means a full rebuild."""
+    from .stamps import engine_version
+    return {"version": CACHE_VERSION, "engine_version": engine_version(), "extractor": READ_DOC_VERSION}
 
 
 def _load_cache(f: Path) -> dict:
-    """{rel: entry} of the last discovery; anything unreadable or foreign is an empty cache (it only costs time)."""
+    """{rel: entry} of the last discovery; anything unreadable, foreign or made by another engine / extractor version
+    is an empty cache (it only costs time)."""
     try:
         doc = read_json(f, {})
     except (OSError, ValueError):
         return {}
-    files = doc.get("files") if isinstance(doc, dict) and doc.get("version") == CACHE_VERSION else None
+    head = _cache_header()
+    same = isinstance(doc, dict) and all(doc.get(k) == v for k, v in head.items())
+    files = doc.get("files") if same else None
     return {k: v for k, v in files.items() if isinstance(v, dict)} if isinstance(files, dict) else {}
 
 
 def _save_cache(f: Path, cache: dict) -> None:
-    write_json(f, {"version": CACHE_VERSION, "files": cache})
+    write_json(f, dict(_cache_header(), files=cache))
+
+
+def _env_stale(env, f: Path) -> bool:
+    """environment.json must be audited again: missing, from another engine version, or older than ENV_MAX_AGE_S."""
+    if not isinstance(env, dict):
+        return True
+    from .stamps import engine_version
+    if env.get("engine_version") != engine_version():
+        return True
+    try:
+        return time.time() - f.stat().st_mtime > ENV_MAX_AGE_S
+    except OSError:
+        return True
 
 
 def _run_discovery(paths: Paths, audit: bool = True) -> dict:
     cache_f = paths.output / CACHE_REL
     cache = _load_cache(cache_f)                        # inside the client lock (run_discovery), like every write below
     res = discover(paths, cache=cache)
-    env = None if audit else read_json(paths.output / "discovery/environment.json", None)
-    fresh_env = not isinstance(env, dict)
+    env_f = paths.output / "discovery/environment.json"
+    env = None if audit else read_json(env_f, None)
+    fresh_env = _env_stale(env, env_f)          # `inbox`: the last audit unless it is a day old or another engine's
     if fresh_env:
-        env = audit_environment()
+        from .stamps import engine_version
+        env = dict(audit_environment(), engine_version=engine_version())
     inv = res["inventory"]
     out = paths.output
     write_json(out / "discovery/input-inventory.json", inv)

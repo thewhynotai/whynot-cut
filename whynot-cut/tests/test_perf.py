@@ -56,6 +56,61 @@ class TestParallelMap(unittest.TestCase):
             shutil.rmtree(root, ignore_errors=True)
 
 
+    def interrupt_at(self, seconds):
+        import _thread
+        import threading
+        t = threading.Timer(seconds, _thread.interrupt_main)
+        t.start()
+        return t
+
+    def test_ctrl_c_cancels_the_queued_items(self):
+        """T2.14 review I1: 12 slow items, 2 workers, Ctrl+C at 0.05 s -> raised at once, no queued item starts."""
+        import threading
+        import time
+        from lib.parallel import parallel_map
+        started, lock = [], threading.Lock()
+
+        def slow(i):
+            with lock:
+                started.append(i)
+            time.sleep(0.4)
+            return i
+        t0 = time.monotonic()
+        timer = self.interrupt_at(0.05)
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                parallel_map(slow, range(12), workers=2)
+        finally:
+            timer.cancel()
+        self.assertLess(time.monotonic() - t0, 0.5)                      # not after the 12 items (2.4 s)
+        time.sleep(0.8)                                                   # the running two end; nothing new starts
+        self.assertEqual(sorted(started), [0, 1])
+
+    def test_ctrl_c_kills_the_processes_the_workers_registered(self):
+        import time
+        from lib.parallel import parallel_map, track, untrack
+        procs = []
+
+        def child(_):
+            p = track(subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"]))
+            procs.append(p)
+            try:
+                return p.wait()
+            finally:
+                untrack(p)
+        timer = self.interrupt_at(1.0)                                   # the children are running by then
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                parallel_map(child, range(2), workers=2)
+        finally:
+            timer.cancel()
+        t0 = time.monotonic()
+        for p in procs:
+            p.wait(timeout=10)
+        self.assertEqual(len(procs), 2)
+        self.assertLess(time.monotonic() - t0, 5)
+
+
 class TestReelsPreviewParallel(unittest.TestCase):
     """reels-preview renders the candidates in a thread pool: the same files, in the same order, errors per reel."""
 
@@ -161,6 +216,57 @@ class TestDocumentQuotesIndex(unittest.TestCase):
         self.assertTrue(any(not q["exact"] for q in fast))
 
 
+    def test_seeded_fuzz_the_index_finds_what_the_full_scan_finds(self):
+        """T2.14 review I5: >= 2000 seeded cases (small vocabularies with repeats, Arabic spelling variants that norm()
+        folds together, random edits, min_ratio values that land exactly on 2M/(T+n)): wherever the full scan finds a
+        window at or above min_ratio, the indexed lookup returns the same (ratio, start, length); where it finds none,
+        neither does the index. Made one stricter (`need + 1` in _window_starts), this test fails."""
+        import random
+        from lib.plan import norm
+        from lib.transcribe import _best_window, _token_index
+        rng = random.Random(20261012)
+        arabic = ["إيمانهم", "ايمانهم", "آمانه", "الْفِكْرَةِ", "الفكرة", "مسئول", "مسؤول", "شئون", "شؤون", "في", "من",
+                  "هي", "شوف", "أحمد", "احمد", "إلى", "الى", "مَرِيض", "مريض", "ٱلله", "الله"]
+        ratios = [0.6, 2 / 3, 4 / 7, 0.5, 0.75, 0.8, 1.0, 0.3, 0.65, 5 / 9, 0.7]
+        compared, boundary, found, bad = 0, 0, 0, []
+        while compared < 2200:
+            vocab = rng.sample(arabic, rng.randint(1, 8)) + [f"w{i}" for i in range(rng.randint(1, 32))]
+            raw = [rng.choice(vocab) for _ in range(rng.randint(4, 45))]
+            if rng.random() < 0.8:                          # a stretch of the transcript, then a few edits
+                a = rng.randrange(len(raw))
+                q = raw[a:a + rng.randint(3, 10)]
+                for _ in range(rng.choice([0, 0, 1, 1, 2, 3])):
+                    op, j = rng.random(), rng.randrange(len(q) + 1)
+                    if op < 0.35 and j < len(q):
+                        q[j] = rng.choice(vocab + ["زائد"])           # a word differs
+                    elif op < 0.55 and j < len(q) and len(q) > 1:
+                        del q[j]                                     # the writer dropped a word
+                    elif op < 0.8:
+                        q.insert(j, rng.choice(vocab + ["زائد"]))     # ... or added one
+                    elif j < len(q):
+                        q.insert(j, q[j])                            # a repeated word
+            else:                                           # words from the vocabulary in any order
+                q = [rng.choice(vocab) for _ in range(rng.randint(3, 9))]
+            seq = [norm(w) for w in raw]
+            qt = norm(" ".join(q)).split()
+            if len(qt) < 3:                                 # document_quotes skips those
+                continue
+            mr = rng.choice(ratios)
+            full = _best_window(seq, qt, mr, None)
+            fast = _best_window(seq, qt, mr, _token_index(seq))
+            compared += 1
+            if full[0] >= mr:
+                found += 1
+                boundary += full[0] == mr
+                if fast != full:
+                    bad.append((raw, q, mr, full, fast))
+            elif fast[0] >= mr:
+                bad.append((raw, q, mr, full, fast))
+        self.assertEqual(bad[:3], [])
+        self.assertGreater(found, 1000)                     # most cases do find their quote
+        self.assertGreater(boundary, 50)                    # and many sit exactly on the bound
+
+
 class TestDiscoveryCache(unittest.TestCase):
     """Discovery re-reads only the files whose (size, mtime_ns) changed; `inbox` skips the module audit."""
 
@@ -221,6 +327,70 @@ class TestDiscoveryCache(unittest.TestCase):
             again, fp, rd = self.run_counting()
             self.assertEqual(self.stable(again), self.stable(first))
             self.assertEqual(fp, first["inventory"]["file_count"])        # rebuilt from scratch
+
+    def test_another_engine_or_extractor_version_rebuilds_the_cache(self):
+        """T2.14 review I4: cached texts are only reused by the engine and the extractor version that made them."""
+        from lib import discover, stamps
+        first, _, _ = self.run_counting()
+        n = first["inventory"]["file_count"]
+        _, fp, rd = self.run_counting()
+        self.assertEqual((fp, rd), (0, 0))
+        head = json.loads((self.p.output / "discovery/discovery-cache.json").read_text(encoding="utf-8"))
+        self.assertEqual((head["engine_version"], head["extractor"]), (stamps.engine_version(), discover.READ_DOC_VERSION))
+        with mock.patch.object(stamps, "engine_version", return_value="99.0.0"):
+            _, fp, rd = self.run_counting()
+            self.assertEqual(fp, n)                                       # everything again
+            self.assertGreaterEqual(rd, 2)
+            _, fp, rd = self.run_counting()
+            self.assertEqual((fp, rd), (0, 0))                            # and cached under that version
+        with mock.patch.object(discover, "READ_DOC_VERSION", discover.READ_DOC_VERSION + 1):
+            _, fp, rd = self.run_counting()
+            self.assertEqual(fp, n)
+            self.assertGreaterEqual(rd, 2)
+
+    def test_a_replaced_file_with_the_same_size_and_time_is_read_again(self):
+        """M3: a copy that keeps size and mtime (robocopy /COPY:DAT) still has a new file id where the volume has ids."""
+        import os
+        self.run_counting()
+        ref = self.root / "data/Ref/style.md"
+        old = ref.read_bytes()
+        st = ref.stat()
+        if not st.st_ino:
+            self.skipTest("this filesystem reports no file ids")
+        repl = ref.with_name("style.md.new")
+        repl.write_bytes(b"!" + old[1:])                                 # same length, other content
+        self.assertEqual(repl.stat().st_size, st.st_size)
+        os.utime(repl, ns=(st.st_atime_ns, st.st_mtime_ns))
+        os.replace(repl, ref)
+        st2 = ref.stat()
+        self.assertEqual((st2.st_size, st2.st_mtime_ns), (st.st_size, st.st_mtime_ns))
+        if st2.st_ino == st.st_ino:
+            self.skipTest("the volume reused the file id")
+        _, fp, rd = self.run_counting()
+        self.assertEqual((fp, rd), (1, 1))
+
+    def test_inbox_audits_again_when_the_environment_is_old_or_another_engines(self):
+        """M4: `inbox` keeps environment.json for a day and for one engine version, then audits again."""
+        import os
+        import time
+        from lib import discover, stamps
+        from lib.onboard import inbox
+        discover.run_discovery(self.p)
+        env_file = self.p.output / "discovery/environment.json"
+        self.assertEqual(json.loads(env_file.read_text(encoding="utf-8"))["engine_version"], stamps.engine_version())
+
+        def audits():
+            with mock.patch.object(discover, "audit_environment", wraps=discover.audit_environment) as audit:
+                inbox(self.root)
+                return audit.call_count
+        self.assertEqual(audits(), 0)                                     # fresh, this engine: kept
+        old = time.time() - 25 * 3600
+        os.utime(env_file, (old, old))
+        self.assertEqual(audits(), 1)                                     # a day old: audited again ...
+        self.assertEqual(audits(), 0)                                     # ... and fresh again
+        with mock.patch.object(stamps, "engine_version", return_value="99.0.0"):
+            self.assertEqual(audits(), 1)                                 # another engine version
+        self.assertEqual(audits(), 1)                                     # (and back)
 
     def test_the_cache_is_read_and_written_inside_the_client_lock(self):
         from lib import discover, file_lock
@@ -441,6 +611,24 @@ class TestPreviewVideoParallel(unittest.TestCase):
         n, third = 288, 96
         self.compare(3, 8, 3, (0, 1, third - 1, third, third + 1, 2 * third - 1, 2 * third, 2 * third + 1, n // 2, n - 1))
 
+    def test_a_dying_broll_decoder_is_an_error(self):
+        """T2.14 review I3: a B-roll clip that does not decode is not silently replaced by the speaker."""
+        from lib.errors import Guidance
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            case = TestPreviewVideoParallel.__new__(TestPreviewVideoParallel)
+            unittest.TestCase.__init__(case)
+            case.ctx, case.p = build_preview_project(tmp, broll=True)
+            patch, hits = case.fake_decoder(lambda c: any("force_original" in str(x) for x in c),
+                                            "import sys; sys.stderr.write('no such clip'); sys.exit(1)")
+            with patch, self.assertRaises(Guidance) as cm:
+                case.render(workers=2, min_chunk_frames=8)
+            self.assertTrue(hits)
+            self.assertIn("B-roll decoder (data/Broll/stock.mp4) ffmpeg exited with code 1: no such clip",
+                          cm.exception.error)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_a_chunk_that_starts_inside_a_broll_clip(self):
         tmp = Path(tempfile.mkdtemp())
         try:
@@ -451,6 +639,67 @@ class TestPreviewVideoParallel(unittest.TestCase):
             one, par = case.compare(8, 8, 8, (47, 48, 49, 71, 72, 73, 93, 94, 150, 287))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def fake_decoder(self, match, script, times=10 ** 6):
+        """Patch Popen: the first `times` ffmpeg commands that `match` run `python -c script` instead."""
+        from lib import preview_video as PV
+        real, hits = subprocess.Popen, []
+
+        def popen(cmd, *a, **kw):
+            if isinstance(cmd, list) and match(cmd) and len(hits) < times:
+                hits.append(cmd)
+                cmd = [sys.executable, "-c", script]
+            return real(cmd, *a, **kw)
+        return mock.patch.object(PV.subprocess, "Popen", side_effect=popen), hits
+
+    @staticmethod
+    def is_source_decoder(cmd):
+        return ("rawvideo" in cmd and cmd[-1] == "-" and "-s" not in cmd
+                and not any("force_original" in str(c) for c in cmd))
+
+    def test_a_dying_source_decoder_is_an_error_not_a_black_chunk(self):
+        """T2.14 review I3: one pass and a chunk of a parallel render alike."""
+        from lib.errors import Guidance, describe
+        die = "import sys; sys.stderr.write('fake decoder died'); sys.exit(3)"
+        for kw in ({"workers": 1}, {"workers": 2, "min_chunk_frames": 8}):
+            with self.subTest(**kw):
+                patch, hits = self.fake_decoder(self.is_source_decoder, die)
+                with patch, self.assertRaises(Guidance) as cm:
+                    self.render(**kw)
+                self.assertTrue(hits)
+                doc = describe(cm.exception)
+                self.assertIs(doc["ok"], False)
+                self.assertIn("source decoder ffmpeg exited with code 3: fake decoder died", doc["error"])
+                self.assertEqual(list(self.p.p("08_quality_control/preview").glob("_preview_chunk*")), [])
+        patch, hits = self.fake_decoder(self.is_source_decoder, "import sys; sys.exit(0)")   # exit 0, no frame at all
+        with patch, self.assertRaises(Guidance) as cm:
+            self.render(workers=1)
+        self.assertIn("no frame decoded", cm.exception.error)
+
+    def test_a_process_windows_could_not_start_is_retried_once(self):
+        from lib import preview_video as PV
+        from lib.errors import Guidance
+        patch, hits = self.fake_decoder(self.is_source_decoder, "import sys; sys.exit(7)", times=1)
+        with patch, mock.patch.object(PV, "DLL_INIT_FAILED", (7,)):
+            r = self.render(workers=1)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(len(hits), 1)
+        patch, hits = self.fake_decoder(self.is_source_decoder, "import sys; sys.exit(7)", times=2)
+        with patch, mock.patch.object(PV, "DLL_INIT_FAILED", (7,)), self.assertRaises(Guidance):
+            self.render(workers=1)                                        # only once
+        self.assertEqual(len(hits), 2)
+
+    def test_a_stalled_decoder_is_stopped_by_the_watchdog(self):
+        """M1: a chunk past its deadline (T2.15: 10 s + 3 x its duration; 1.5 s here) kills its ffmpeg and says so."""
+        import time
+        from lib import preview_video as PV
+        from lib.errors import Guidance
+        patch, hits = self.fake_decoder(self.is_source_decoder, "import time; time.sleep(60)")
+        t0 = time.monotonic()
+        with patch, mock.patch.object(PV, "chunk_timeout_s", lambda d: 1.5), self.assertRaises(Guidance) as cm:
+            self.render(workers=2, min_chunk_frames=8)
+        self.assertLess(time.monotonic() - t0, 30)
+        self.assertIn("did not finish within 2 s", cm.exception.error)
 
     def test_a_short_timeline_is_one_chunk(self):
         r = self.render(min_chunk_frames=10 ** 6)
