@@ -19,17 +19,24 @@ set "WHYNOT_HOME=%WNC_HOME%"
 rem The engine interpreter (3.0 T2.1, same order as plat.engine_runtime()): the isolated runtime named by the one-line
 rem text file <home>\current (runtimes\<id>\, run with -s: no user site), else the 2.x venv\ (run as before). Never a
 rem system Python for the engine; `reel setup` with neither builds the runtime first.
+rem `reel setup` also starts the runtime's interpreter once (-s -c pass), so a corrupt one takes the rebuild route,
+rem and hands setup_env.py its own flags (--check stays a check)
+if /I "%~1"=="setup" call :setup_flags %*
 call :find_py
+if /I "%~1"=="setup" call :probe_setup
 if not defined WNC_PY if /I "%~1"=="setup" call :setup
 if defined WNC_NOPY goto :no_python
-if not defined WNC_PY call :find_py
+if defined WNC_SETUP_RAN set "WNC_SKIP="
+if defined WNC_SETUP_RAN call :find_py
+if defined WNC_SETUP_RAN call :probe_setup
+if not defined WNC_PY if defined WNC_SETUP_RAN if defined WNC_SCHECK goto :setup_checked
 if not defined WNC_PY if defined WNC_SETUP_RAN goto :setup_failed
 if not defined WNC_PY goto :blocked
 set "PYTHONDONTWRITEBYTECODE=1"
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 rem the whole line is expanded before it runs, so the WNC_* values are used and already cleared for the engine
-set "WNC_HOME=" & set "WNC_PY=" & set "WNC_HERE=" & set "WNC_FLAG=" & set "WNC_SETUP_RAN=" & set "WNC_BROKEN=" & "%WNC_PY%" %WNC_FLAG% "%WNC_HERE%\engine\reel\cli.py" %*
+set "WNC_HOME=" & set "WNC_PY=" & set "WNC_HERE=" & set "WNC_FLAG=" & set "WNC_SETUP_RAN=" & set "WNC_BROKEN=" & set "WNC_RTID=" & set "WNC_SKIP=" & set "WNC_SFLAGS=" & set "WNC_SCHECK=" & "%WNC_PY%" %WNC_FLAG% "%WNC_HERE%\engine\reel\cli.py" %*
 exit /b %ERRORLEVEL%
 
 :find_py
@@ -56,22 +63,60 @@ for %%c in (. - _) do if "%WNC_RT:~0,1%"=="%%c" goto :find_venv
 rem every allowed character is a delimiter: any token left is a character outside the rule ("x" keeps the line from
 rem starting with the eol character)
 for /f "eol=| delims=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-" %%x in ("x%WNC_RT%") do goto :find_venv
+if "%WNC_SKIP%"=="%WNC_RT%" set "WNC_BROKEN=%WNC_RT%"
+if "%WNC_SKIP%"=="%WNC_RT%" goto :find_venv
 if not exist "%WNC_HOME%\runtimes\%WNC_RT%\" goto :find_venv
 rem "can it start", without starting it (plat.runtime_usable): the interpreter, a pyvenv.cfg and the base Python its
 rem `home` names; a runtime whose base Python under <home>\python was removed is broken and `reel setup` rebuilds it
 set "WNC_BROKEN=%WNC_RT%"
 set "WNC_BASE="
 if not exist "%WNC_HOME%\runtimes\%WNC_RT%\Scripts\python.exe" goto :find_venv
+for %%f in ("%WNC_HOME%\runtimes\%WNC_RT%\Scripts\python.exe") do if "%%~zf"=="0" goto :find_venv
 if not exist "%WNC_HOME%\runtimes\%WNC_RT%\pyvenv.cfg" goto :find_venv
-for /f "usebackq tokens=1,* delims== " %%a in ("%WNC_HOME%\runtimes\%WNC_RT%\pyvenv.cfg") do if /i "%%a"=="home" set "WNC_BASE=%%b"
+call :read_base
 if not defined WNC_BASE goto :find_venv
 if not exist "%WNC_BASE%\python.exe" goto :find_venv
 set "WNC_BASE="
 set "WNC_BROKEN="
 set "WNC_PY=%WNC_HOME%\runtimes\%WNC_RT%\Scripts\python.exe"
+set "WNC_RTID=%WNC_RT%"
 set "WNC_FLAG=-s"
 set "WNC_RT="
 exit /b 0
+:read_base
+rem WNC_BASE = pyvenv.cfg `home`, read as UTF-8 (chcp 65001, put back after): a non-ASCII engine home (an Arabic
+rem user name) must not turn into console-code-page mojibake and make a healthy runtime look broken
+set "WNC_OLDCP="
+for /f "tokens=2 delims=:." %%c in ('chcp') do set "WNC_OLDCP=%%c"
+if defined WNC_OLDCP set "WNC_OLDCP=%WNC_OLDCP: =%"
+if not "%WNC_OLDCP%"=="65001" chcp 65001 >nul
+for /f "usebackq tokens=1,* delims== " %%a in ("%WNC_HOME%\runtimes\%WNC_RT%\pyvenv.cfg") do if /i "%%a"=="home" set "WNC_BASE=%%b"
+if defined WNC_OLDCP if not "%WNC_OLDCP%"=="65001" chcp %WNC_OLDCP% >nul
+set "WNC_OLDCP="
+exit /b 0
+
+:probe_setup
+rem `reel setup` only: start the runtime's interpreter once; when it cannot start, skip it (venv\ or the rebuild route)
+if not defined WNC_FLAG exit /b 0
+"%WNC_PY%" -s -c pass >nul 2>nul
+if not errorlevel 1 exit /b 0
+set "WNC_SKIP=%WNC_RTID%"
+call :find_py
+exit /b 0
+
+:setup_flags
+rem the flags setup_env.py understands (--no-bridge is reel setup's own)
+set "WNC_SFLAGS="
+set "WNC_SCHECK="
+:setup_flags_next
+shift
+if "%~1"=="" exit /b 0
+if /I "%~1"=="--check" set "WNC_SFLAGS=%WNC_SFLAGS% --check"
+if /I "%~1"=="--check" set "WNC_SCHECK=1"
+if /I "%~1"=="--force" set "WNC_SFLAGS=%WNC_SFLAGS% --force"
+if /I "%~1"=="--upgrade" set "WNC_SFLAGS=%WNC_SFLAGS% --force"
+goto :setup_flags_next
+
 :find_venv
 set "WNC_RT="
 set "WNC_BASE="
@@ -173,8 +218,9 @@ exit /b 0
 :setup
 rem one build: `py -3` when the launcher exists, else the first `python` on PATH that is not a Windows Store stub
 rem (where's output is filtered by findstr, so no path goes through a second `call` expansion); none: WNC_NOPY
-if defined WNC_BROKEN echo WhyNot Cut: the engine runtime %WNC_BROKEN% cannot start - rebuilding it in "%WNC_HOME%" (a few minutes)... 1>&2
-if not defined WNC_BROKEN echo WhyNot Cut: no engine yet - creating it in "%WNC_HOME%" (a few minutes, ~400 MB)... 1>&2
+if defined WNC_SCHECK echo WhyNot Cut: no working engine in "%WNC_HOME%" - checking what setup would do (nothing is changed)... 1>&2
+if not defined WNC_SCHECK if defined WNC_BROKEN echo WhyNot Cut: the engine runtime %WNC_BROKEN% cannot start - rebuilding it in "%WNC_HOME%" (a few minutes)... 1>&2
+if not defined WNC_SCHECK if not defined WNC_BROKEN echo WhyNot Cut: no engine yet - creating it in "%WNC_HOME%" (a few minutes, ~400 MB)... 1>&2
 where py >nul 2>nul
 if not errorlevel 1 goto :setup_py
 set "WNC_SYS_PY="
@@ -184,12 +230,12 @@ if not defined WNC_SYS_PY (
   exit /b 1
 )
 set "WNC_SETUP_RAN=1"
-"%WNC_SYS_PY%" "%WNC_HERE%\setup\setup_env.py" --home "%WNC_HOME%" 1>&2
+"%WNC_SYS_PY%" "%WNC_HERE%\setup\setup_env.py" --home "%WNC_HOME%" %WNC_SFLAGS% 1>&2
 set "WNC_SYS_PY="
 exit /b
 :setup_py
 set "WNC_SETUP_RAN=1"
-py -3 "%WNC_HERE%\setup\setup_env.py" --home "%WNC_HOME%" 1>&2
+py -3 "%WNC_HERE%\setup\setup_env.py" --home "%WNC_HOME%" %WNC_SFLAGS% 1>&2
 exit /b
 
 :tag
@@ -201,6 +247,12 @@ exit /b 0
 :no_python
 call :tag
 echo {"blocked": "%WNC_TAG%: no Python 3.9+ found to build the engine", "how": "Windows: winget install Python.Python.3.12 - then run: reel setup"}
+exit /b 2
+
+:setup_checked
+call :tag
+if defined WNC_BROKEN echo {"blocked": "%WNC_TAG%: the engine runtime is broken (%WNC_BROKEN% cannot start); reel setup --check changed nothing (its report is above)", "how": "run: reel setup"}
+if not defined WNC_BROKEN echo {"blocked": "%WNC_TAG%: the engine runtime is not installed; reel setup --check changed nothing (its report is above)", "how": "run: reel setup"}
 exit /b 2
 
 :setup_failed

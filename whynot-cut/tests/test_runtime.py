@@ -11,7 +11,6 @@ Never touches the real ~/.whynot-cut: every home is a temp folder.
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
-import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import hashlib
 import importlib.util
 import io
@@ -76,7 +75,7 @@ def fake_runtime(home: Path, rid: str, real=False, usable=True) -> Path:
     else:
         py = plat.env_python(d)
         py.parent.mkdir(parents=True, exist_ok=True)
-        py.write_text("", encoding="utf-8")
+        py.write_bytes(b"fake interpreter\n")      # not empty: an empty interpreter file counts as broken
         py.chmod(0o755)
         base = home / "python" / f"base-{rid[:20]}"
         if usable:
@@ -1103,11 +1102,13 @@ class TestBrokenRuntime(TempHome):
         self.assertEqual(len(lines), len(runs), runs)                     # setup_env.py reached once per wrapper
         for line in lines:
             self.assertIn("--home", line)
+            self.assertIn("--check", line.split())                       # round 3: the check stays a check
         for name, (rc, out, err) in runs:
             with self.subTest(wrapper=name):
                 self.assertEqual(rc, 2, (out, err))
-                self.assertIn("cannot start", err)
-                self.assertIn("building the engine runtime failed", json.loads(out.strip().splitlines()[-1])["blocked"])
+                self.assertIn("nothing is changed", err)
+                self.assertIn("broken (r-bad cannot start); reel setup --check changed nothing",
+                              json.loads(out.strip().splitlines()[-1])["blocked"])
                 self.assertNotIn("not compatible", err)
 
     def test_setup_env_rebuilds_a_runtime_whose_base_is_gone(self):
@@ -1115,6 +1116,147 @@ class TestBrokenRuntime(TempHome):
         self.assertFalse(R.python_runs(plat.env_python(self.bogus_runtime(self.home))))
         self.assertFalse(R.python_runs(self.t / "missing" / "python.exe"))
         self.assertTrue(R.python_runs(Path(sys.executable)))
+
+
+# ===================================================================================================== review round 3
+def plug_copy(t: Path, record: Path) -> Path:
+    """The two wrappers + plugin.json in a temp plugin whose setup_env.py is a stub recording its arguments."""
+    plug = t / "plug"
+    (plug / "bin").mkdir(parents=True)
+    shutil.copy2(SK / "bin" / "reel.cmd", plug / "bin" / "reel.cmd")
+    shutil.copy2(SK / "bin" / "reel", plug / "bin" / "reel")
+    (plug / ".claude-plugin").mkdir()
+    shutil.copy2(SK / ".claude-plugin/plugin.json", plug / ".claude-plugin/plugin.json")
+    (plug / "setup").mkdir()
+    (plug / "setup" / "setup_env.py").write_text(
+        "import os, sys\nwith open(os.environ['SETUP_RECORD'], 'a', encoding='utf-8') as f:\n"
+        "    f.write(' '.join(sys.argv[1:]) + '\\n')\nsys.exit(1)\n", encoding="utf-8")
+    return plug
+
+
+class TestReviewRound3(TempHome):
+    def test_non_ascii_engine_home_under_legacy_code_pages(self):
+        """reel.cmd reads pyvenv.cfg as UTF-8: a healthy runtime under an Arabic engine home is used under chcp 437
+        and 1256 (not reported broken). The runtime's base Python is reached through a junction with an Arabic name,
+        so its pyvenv.cfg `home` is non-ASCII too."""
+        if not IS_WIN:
+            self.skipTest("code pages are a cmd.exe matter")
+        home = self.t / "مرحبا يونس" / "engine"
+        rt = fake_runtime(home, "r-ar1", real=True)
+        base = Path(sys._base_executable).parent
+        link = home / "python" / "قاعدة"
+        link.parent.mkdir(parents=True)
+        r = subprocess.run(["cmd", "/d", "/c", "mklink", "/J", str(link), str(base)], capture_output=True)
+        if r.returncode != 0:
+            self.skipTest("cannot create a junction here")
+        try:
+            self.non_ascii_home_runs(rt, home, link)
+        finally:
+            os.rmdir(link)                    # the junction only (before the temp folder goes), never its target
+
+    def non_ascii_home_runs(self, rt: Path, home: Path, link: Path):
+        cfg = (rt / "pyvenv.cfg").read_text(encoding="utf-8").splitlines()
+        cfg = [f"home = {link}" if ln.split("=")[0].strip() == "home" else ln for ln in cfg]
+        (rt / "pyvenv.cfg").write_text("\n".join(cfg) + "\n", encoding="utf-8")
+        (home / "current").write_text("r-ar1\n", encoding="utf-8")
+        self.assertTrue(plat.runtime_usable(rt))
+        user = self.t / "user"
+        user.mkdir()
+        env = clean_env(user, WHYNOT_HOME=home)
+        for cp in ("437", "1256", "720", "65001"):
+            if subprocess.run(["cmd", "/d", "/c", f"chcp {cp}"], capture_output=True).returncode != 0:
+                continue
+            with self.subTest(codepage=cp):
+                line = f'cmd /d /s /c "chcp {cp} >nul & "{SK / "bin" / "reel.cmd"}" status x"'
+                p = subprocess.run(line, capture_output=True, env=env, timeout=120)
+                out, err = p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
+                got = echo_of(p.returncode, out, err)
+                self.assertEqual(norm(got["prefix"]), norm(str(rt)))
+                self.assertFalse({k for k in got["env_keys"] if k.upper().startswith("WNC_")})
+        if git_bash():
+            got = echo_of(*run_bash(["status"], env))
+            self.assertEqual(norm(got["prefix"]), norm(str(rt)))
+
+    def corrupt_runtime(self, home: Path, rid: str, content: bytes):
+        d = home / "runtimes" / rid
+        py = plat.env_python(d)
+        py.parent.mkdir(parents=True)
+        py.write_bytes(content)
+        py.chmod(0o755)
+        base = fake_base(home / "python" / f"base-{rid}")                  # the base Python is still there
+        (d / "pyvenv.cfg").write_text(f"home = {base}\n", encoding="utf-8")
+        (home / "current").write_text(rid + "\n", encoding="utf-8")
+        return d
+
+    def run_setup(self, plug: Path, home: Path, record: Path, args):
+        sys_py = fake_venv(self.t / "sys python", real=True) if not (self.t / "sys python").exists() \
+            else self.t / "sys python" / "venv"
+        py_dir = plat.env_python(sys_py).parent
+        user = self.t / "user"
+        user.mkdir(exist_ok=True)
+        runs = []
+        if IS_WIN:
+            sys32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+            env = clean_env(user, WHYNOT_HOME=home, SETUP_RECORD=record,
+                            PATH=os.pathsep.join([str(py_dir), str(sys32)]))
+            runs.append(("reel.cmd", run_cmd(args, env, wrapper=plug / "bin" / "reel.cmd")))
+        bash = git_bash()
+        if bash:
+            usr = [str(Path(bash).parent.parent / "usr/bin")] if IS_WIN else ["/usr/bin", "/bin"]
+            env = clean_env(user, WHYNOT_HOME=home, SETUP_RECORD=record, PATH=os.pathsep.join([str(py_dir)] + usr))
+            r = subprocess.run([bash, str(plug / "bin" / "reel"), *args], capture_output=True, env=env, timeout=120)
+            runs.append(("bin/reel", (r.returncode, r.stdout.decode("utf-8", "replace"),
+                                      r.stderr.decode("utf-8", "replace"))))
+        if not runs:
+            self.skipTest("no shell for either wrapper")
+        return runs
+
+    def test_setup_probes_a_corrupt_interpreter_and_check_stays_a_check(self):
+        """A garbage or empty python.exe whose base Python still exists passes the file checks; `reel setup` starts it
+        once, sees it fail and takes the system-Python route, handing setup_env.py its --check (nothing rebuilt)."""
+        record = self.t / "setup-runs.txt"
+        plug = plug_copy(self.t, record)
+        for rid, content in (("r-garbage", b"MZ this is not a program\n"), ("r-empty", b"")):
+            with self.subTest(interpreter=rid):
+                home = self.t / rid
+                self.corrupt_runtime(home, rid, content)
+                if record.exists():
+                    record.unlink()
+                runs = self.run_setup(plug, home, record, ["setup", "--check", "--no-bridge"])
+                lines = record.read_text(encoding="utf-8").splitlines() if record.exists() else []
+                self.assertEqual(len(lines), len(runs), runs)
+                for line in lines:
+                    self.assertIn("--check", line.split())
+                    self.assertNotIn("--no-bridge", line)
+                for name, (rc, out, err) in runs:
+                    with self.subTest(wrapper=name):
+                        self.assertEqual(rc, 2, (out, err))
+                        blocked = json.loads(out.strip().splitlines()[-1])
+                        self.assertIn("--check changed nothing", blocked["blocked"])
+                        self.assertEqual(blocked["how"], "run: reel setup")
+                        self.assertIn("nothing is changed", err)
+
+    def test_bootstrap_passes_force_and_drops_unknown_flags(self):
+        record = self.t / "setup-runs.txt"
+        plug = plug_copy(self.t, record)
+        home = self.t / "fresh"                                            # no engine at all
+        runs = self.run_setup(plug, home, record, ["setup", "--force", "--no-bridge"])
+        lines = record.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), len(runs))
+        for line in lines:
+            words = line.split()
+            self.assertIn("--force", words)
+            self.assertNotIn("--check", words)
+            self.assertNotIn("--no-bridge", words)
+        for name, (rc, out, err) in runs:
+            with self.subTest(wrapper=name):
+                self.assertIn("building the engine runtime failed",
+                              json.loads(out.strip().splitlines()[-1])["blocked"])
+
+    def test_empty_interpreter_is_not_usable(self):
+        d = self.corrupt_runtime(self.home, "r-zero", b"")
+        self.assertFalse(plat.runtime_usable(d))
+        self.assertEqual(plat.engine_runtime(self.home)["broken"], "r-zero")
 
 
 if __name__ == "__main__":

@@ -128,7 +128,10 @@ def runtime_usable(env_dir: Path) -> bool:
     apply the same rule with shell builtins): the interpreter file, a pyvenv.cfg, and the base Python its `home`
     names (python.exe on Windows, python3 / python elsewhere). A runtime whose base Python under <home>/python was
     removed fails this, so the wrappers fall back and `reel setup` can rebuild it."""
-    if not env_python(env_dir).is_file():
+    try:
+        if not env_python(env_dir).is_file() or env_python(env_dir).stat().st_size == 0:
+            return False
+    except OSError:
         return False
     try:
         cfg = (env_dir / "pyvenv.cfg").read_text(encoding="utf-8-sig", errors="replace")

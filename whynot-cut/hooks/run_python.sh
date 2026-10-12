@@ -53,7 +53,7 @@ if [ -f "$home/current" ]; then     # 3.0 T2.1: one runtime id (BOM / whitespace
     done < "$home/runtimes/$rid/pyvenv.cfg"
     if [ -n "$base" ] && { [ -f "$base/python.exe" ] || [ -f "$base/python3" ] || [ -f "$base/python" ]; }; then
       for c in "$home/runtimes/$rid/Scripts/python.exe" "$home/runtimes/$rid/bin/python"; do
-        if [ -f "$c" ] && [ -x "$c" ]; then py="$c"; pyflag="-s"; break; fi
+        if [ -f "$c" ] && [ -x "$c" ] && [ -s "$c" ]; then py="$c"; pyflag="-s"; break; fi
       done
     fi
   fi

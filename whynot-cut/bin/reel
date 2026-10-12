@@ -70,7 +70,8 @@ tag() {   # "WhyNot Cut 2.2.0": every blocked message names this plugin, so a wr
 # before: a venv built with --system-site-packages may rely on the user site). Never a system Python for the engine.
 # "Can start" is checked with builtins, like plat.runtime_usable(): the interpreter, a pyvenv.cfg, and the base
 # Python its `home` names (removed <home>/python = broken runtime: `reel setup` rebuilds it with a system Python).
-PY='' PYFLAG='' RT_BROKEN='' RID_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$' BOM=''
+# `reel setup` also starts the runtime's interpreter once (-s -c pass), so a corrupt one takes that route too.
+PY='' PYFLAG='' RT_BROKEN='' RT_ID='' SKIP_RT='' RID_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$' BOM=''
 printf -v BOM '\357\273\277'      # a UTF-8 BOM, stripped from `current` (printf -v: a builtin, bash 3.2 safe)
 runtime_ok() {   # $1 = runtime folder
   local line base=''
@@ -86,15 +87,21 @@ runtime_ok() {   # $1 = runtime folder
 }
 find_py() {
   local id='' c
+  PY='' PYFLAG=''
   if [ -f "$HOME_DIR/current" ]; then
     IFS= read -r id < "$HOME_DIR/current" || true
     id="${id#"$BOM"}"
     id="${id//[[:space:]]/}"
     [[ $id =~ $RID_RE ]] && [[ $id != *..* ]] || id=''      # the id rule of lib/plat.py
-    if [ -n "$id" ]; then
+    if [ -n "$id" ] && [ "$SKIP_RT" = "$id" ]; then
+      RT_BROKEN="$id"
+    elif [ -n "$id" ]; then
       for c in "$HOME_DIR/runtimes/$id/bin/python" "$HOME_DIR/runtimes/$id/Scripts/python.exe"; do
         if [ -x "$c" ]; then
-          if runtime_ok "$HOME_DIR/runtimes/$id"; then PY="$c"; PYFLAG=-s; RT_BROKEN=''; return 0; fi
+          # -s: an empty file would run as an empty shell script here (exit 0) instead of failing
+          if [ -s "$c" ] && runtime_ok "$HOME_DIR/runtimes/$id"; then
+            PY="$c"; PYFLAG=-s; RT_BROKEN=''; RT_ID="$id"; return 0
+          fi
           RT_BROKEN="$id"
           break
         fi
@@ -107,21 +114,48 @@ find_py() {
   done
   return 1
 }
-if ! find_py; then
+probe_setup() {   # `reel setup` only: a runtime interpreter that does not start is broken (skipped from then on)
+  if [ "${1:-}" = "setup" ] && [ "$PYFLAG" = "-s" ] && ! "$PY" -s -c pass </dev/null >/dev/null 2>&1; then
+    SKIP_RT="$RT_ID"
+    find_py
+  fi
+  [ -n "$PY" ]
+}
+SETUP_FLAGS='' SETUP_CHECK=''
+if [ "${1:-}" = "setup" ]; then   # what setup_env.py understands of `reel setup`'s own flags (--no-bridge is not one)
+  for a in "${@:2}"; do
+    case "$a" in
+      --check) SETUP_FLAGS="$SETUP_FLAGS --check"; SETUP_CHECK=1 ;;
+      --force|--upgrade) SETUP_FLAGS="$SETUP_FLAGS --force" ;;
+    esac
+  done
+fi
+find_py || true
+if ! probe_setup "$@"; then
   if [ "${1:-}" = "setup" ]; then
-    if [ -n "$RT_BROKEN" ]; then
+    if [ -n "$SETUP_CHECK" ]; then
+      echo "WhyNot Cut: no working engine in $HOME_DIR — checking what setup would do (nothing is changed)…" >&2
+    elif [ -n "$RT_BROKEN" ]; then
       echo "WhyNot Cut: the engine runtime $RT_BROKEN cannot start — rebuilding it in $HOME_DIR (a few minutes)…" >&2
     else
       echo "WhyNot Cut: no engine yet — creating it in $HOME_DIR (a few minutes, ~400 MB)…" >&2
     fi
     for sys_py in python3 python py; do
       if command -v "$sys_py" >/dev/null 2>&1 && "$sys_py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' </dev/null >/dev/null 2>&1; then
-        "$sys_py" "$HERE/setup/setup_env.py" --home "$HOME_DIR" >&2 || true
+        # shellcheck disable=SC2086  # flags are single words
+        "$sys_py" "$HERE/setup/setup_env.py" --home "$HOME_DIR" $SETUP_FLAGS >&2 || true
         ran=1
         break
       fi
     done
-    if ! find_py; then
+    SKIP_RT=''      # setup_env.py may have rebuilt it in place
+    find_py || true
+    if ! probe_setup "$@"; then
+      if [ -n "${ran:-}" ] && [ -n "$SETUP_CHECK" ]; then
+        state="not installed"; [ -z "$RT_BROKEN" ] || state="broken ($RT_BROKEN cannot start)"
+        echo "{\"blocked\": \"$(tag): the engine runtime is $state; reel setup --check changed nothing (its report is above)\", \"how\": \"run: reel setup\"}"
+        exit 2
+      fi
       if [ -n "${ran:-}" ]; then
         echo "{\"blocked\": \"$(tag): building the engine runtime failed (its report is above)\", \"how\": \"check the internet connection, then run: reel setup\"}"
         exit 2
