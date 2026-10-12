@@ -11,7 +11,12 @@ if (Test-Path -LiteralPath $cur -PathType Leaf) {
     $id = ([IO.File]::ReadAllText($cur)).Trim().TrimStart([char]0xFEFF)
     if ($id -cmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$' -and $id -notmatch '\.\.') {   # the id rule of lib/plat.py
         $c = Join-Path $homeDir "runtimes\$id\Scripts\python.exe"
-        if (Test-Path -LiteralPath $c) { $py = $c; $flags = @('-s') }
+        $cfg = Join-Path $homeDir "runtimes\$id\pyvenv.cfg"       # can it start: plat.runtime_usable()
+        $base = if (Test-Path -LiteralPath $cfg) { Get-Content -LiteralPath $cfg | Where-Object { $_ -match '^\s*home\s*=' } |
+            Select-Object -First 1 | ForEach-Object { ($_ -split '=', 2)[1].Trim() } }
+        if ((Test-Path -LiteralPath $c) -and $base -and (Test-Path -LiteralPath (Join-Path $base 'python.exe'))) {
+            $py = $c; $flags = @('-s')
+        } else { Write-Warning "runtime $id cannot start (run reel setup); trying the 2.x venv" }
     }
 }
 if (-not $py) {

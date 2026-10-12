@@ -57,8 +57,17 @@ def load_setup_env():
     return mod
 
 
-def fake_runtime(home: Path, rid: str, real=False) -> Path:
-    """runtimes/<rid>: a real tiny venv (real=True, for the wrappers' echo) or an empty interpreter file."""
+def fake_base(folder: Path) -> Path:
+    """A stand-in base Python folder (what pyvenv.cfg `home` names): python.exe / python3 files."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for n in ("python.exe", "python3"):
+        (folder / n).write_text("", encoding="utf-8")
+    return folder
+
+
+def fake_runtime(home: Path, rid: str, real=False, usable=True) -> Path:
+    """runtimes/<rid>: a real tiny venv (real=True, for the wrappers' echo) or an empty interpreter file with a
+    pyvenv.cfg whose `home` exists (usable) or was removed (usable=False: the base Python is gone)."""
     d = home / "runtimes" / rid
     if real:
         import venv
@@ -68,6 +77,11 @@ def fake_runtime(home: Path, rid: str, real=False) -> Path:
         py.parent.mkdir(parents=True, exist_ok=True)
         py.write_text("", encoding="utf-8")
         py.chmod(0o755)
+        base = home / "python" / f"base-{rid[:20]}"
+        if usable:
+            fake_base(base)
+        (d / "pyvenv.cfg").write_text(f"home = {base}\nimplementation = CPython\n"
+                                      "include-system-site-packages = false\n", encoding="utf-8")
     return d
 
 
@@ -862,10 +876,31 @@ class TestReviewRound1(TempHome):
         return subprocess.run([bash, str(SK / "hooks/run_python.sh"), "x.py"], capture_output=True, text=True,
                               encoding="utf-8", env=env)
 
-    def fake_py(self, path: Path, word: str):
+    def fake_py(self, path: Path, word: str, usable=True):
+        """An echoing stand-in interpreter; under runtimes/<id>/ also a pyvenv.cfg whose base Python exists (usable)
+        or was removed."""
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f'#!/bin/sh\necho {word} "$@"\n', encoding="utf-8", newline="\n")
         path.chmod(0o755)
+        rt = path.parent.parent
+        if rt.parent.name == "runtimes":
+            base = rt.parent.parent / "python" / f"base-{rt.name}"
+            if usable:
+                fake_base(base)
+            (rt / "pyvenv.cfg").write_text(f"home = {base}\r\n", encoding="utf-8")
+
+    def test_hook_runner_skips_a_runtime_that_cannot_start(self):
+        """N1: the base Python under <home>/python was removed: the hook runs on venv/, not a dead interpreter."""
+        for rel in ("runtimes/r-h4/Scripts/python.exe", "runtimes/r-h4/bin/python"):
+            self.fake_py(self.home / rel, "RUNTIME", usable=False)
+        for rel in ("venv/Scripts/python.exe", "venv/bin/python"):
+            self.fake_py(self.home / rel, "VENV")
+        (self.home / "current").write_text("r-h4\n", encoding="utf-8")
+        self.assertEqual(self.hook(self.home).stdout.strip(), "VENV x.py")
+        (self.home / "python" / "base-r-h4").mkdir(parents=True)                 # folder there, no python in it
+        self.assertEqual(self.hook(self.home).stdout.strip(), "VENV x.py")
+        (self.home / "runtimes" / "r-h4" / "pyvenv.cfg").unlink()                  # no pyvenv.cfg at all
+        self.assertEqual(self.hook(self.home).stdout.strip(), "VENV x.py")
 
     def test_hook_runner_uses_the_runtime_with_s(self):
         """A home with only a runtime (no venv/): the hooks run on it, with -s; BOM and CRLF in current are fine."""
@@ -958,6 +993,127 @@ class TestReviewRound1(TempHome):
         r = subprocess.run([bash, str(REPO / "tools" / "test.sh"), "--which"], capture_output=True, text=True,
                            encoding="utf-8", env=dict(os.environ, WHYNOT_HOME=str(self.home)))
         self.assertEqual(norm(r.stdout.strip()), norm(str(plat.env_python(self.home / "venv"))))
+
+
+# ===================================================================================================== review round 2
+class TestBrokenRuntime(TempHome):
+    """N1: a runtime whose python cannot start (its base Python under <home>/python removed, or a bogus file) never
+    reaches exec: commands fall back to venv/ or get the blocked JSON, and `reel setup` takes the system-Python route
+    to setup_env.py so it can rebuild the runtime."""
+
+    def bogus_runtime(self, home: Path, rid="r-bad", how="base-removed"):
+        d = home / "runtimes" / rid
+        py = plat.env_python(d)
+        py.parent.mkdir(parents=True, exist_ok=True)
+        py.write_bytes(b"not an executable\n")
+        py.chmod(0o755)
+        if how == "base-removed":
+            (d / "pyvenv.cfg").write_text(f"home = {home / 'python' / 'gone'}\nversion_info = 3.12.15\n",
+                                          encoding="utf-8")
+        (home / "current").write_text(rid + "\n", encoding="utf-8")
+        return d
+
+    def shells(self):
+        out = []
+        if IS_WIN:
+            out.append(("reel.cmd", lambda args, env: run_cmd(args, env)))
+        if git_bash():
+            out.append(("bin/reel", lambda args, env: run_bash(args, env)))
+        if not out:
+            self.skipTest("no shell for either wrapper")
+        return out
+
+    def test_plat_reports_it_broken(self):
+        for how in ("base-removed", "no-pyvenv"):
+            home = self.t / how
+            self.bogus_runtime(home, how=how)
+            rt = plat.engine_runtime(home)
+            self.assertEqual((rt["kind"], rt["broken"]), (None, "r-bad"), how)
+            fake_venv(home)
+            self.assertEqual(plat.engine_runtime(home)["kind"], "venv")
+            self.assertEqual(plat.venv_python(home), plat.env_python(home / "venv"))
+            iso = R.isolation(plat.engine_runtime(home), {}, [])
+            self.assertIn("cannot start", iso["problems"][0])
+        self.assertTrue(plat.runtime_usable(fake_runtime(self.t / "ok", "r-ok")))
+
+    def test_commands_get_the_blocked_json(self):
+        self.bogus_runtime(self.home)
+        user = self.t / "user"
+        user.mkdir()
+        for name, run in self.shells():
+            for args in (["status"], ["doctor"]):
+                with self.subTest(wrapper=name, args=args):
+                    rc, out, err = run(args, clean_env(user, WHYNOT_HOME=self.home))
+                    self.assertEqual(rc, 2, (out, err))
+                    blocked = json.loads(out.strip().splitlines()[-1])
+                    self.assertIn("the engine runtime is broken", blocked["blocked"])
+                    self.assertIn("WhyNot Cut", blocked["blocked"])
+                    self.assertEqual(blocked["how"], "run: reel setup")
+                    self.assertNotIn("not compatible", err)
+                    self.assertNotIn("command not found", err)
+
+    def test_commands_fall_back_to_the_venv(self):
+        self.bogus_runtime(self.home)
+        v = fake_venv(self.home, real=True)
+        user = self.t / "user"
+        user.mkdir()
+        for name, run in self.shells():
+            with self.subTest(wrapper=name):
+                got = echo_of(*run(["status"], clean_env(user, WHYNOT_HOME=self.home)))
+                self.assertEqual(norm(got["prefix"]), norm(str(v)))
+
+    def test_setup_takes_the_system_python_route(self):
+        """`reel setup --check` with a broken runtime and no venv/: setup_env.py runs with a system Python (a stub here
+        that records its arguments), not the dead runtime interpreter."""
+        plug = self.t / "plug"
+        (plug / "bin").mkdir(parents=True)
+        shutil.copy2(SK / "bin" / "reel.cmd", plug / "bin" / "reel.cmd")
+        shutil.copy2(SK / "bin" / "reel", plug / "bin" / "reel")
+        (plug / ".claude-plugin").mkdir()
+        shutil.copy2(SK / ".claude-plugin/plugin.json", plug / ".claude-plugin/plugin.json")
+        (plug / "setup").mkdir()
+        record = self.t / "setup-runs.txt"
+        (plug / "setup" / "setup_env.py").write_text(
+            "import os, sys\nwith open(os.environ['SETUP_RECORD'], 'a', encoding='utf-8') as f:\n"
+            "    f.write(' '.join(sys.argv[1:]) + '\\n')\nsys.exit(1)\n", encoding="utf-8")
+        self.bogus_runtime(self.home)
+        sys_py = fake_venv(self.t / "sys python", real=True)
+        py_dir = plat.env_python(sys_py).parent
+        user = self.t / "user"
+        user.mkdir()
+        runs = []
+        if IS_WIN:
+            sys32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+            env = clean_env(user, WHYNOT_HOME=self.home, SETUP_RECORD=record, PATH=os.pathsep.join([str(py_dir),
+                                                                                                   str(sys32)]))
+            runs.append(("reel.cmd", run_cmd(["setup", "--check"], env, wrapper=plug / "bin" / "reel.cmd")))
+        bash = git_bash()
+        if bash:
+            usr = [str(Path(bash).parent.parent / "usr/bin")] if IS_WIN else ["/usr/bin", "/bin"]
+            env = clean_env(user, WHYNOT_HOME=self.home, SETUP_RECORD=record,
+                            PATH=os.pathsep.join([str(py_dir)] + usr))
+            r = subprocess.run([bash, str(plug / "bin" / "reel"), "setup", "--check"], capture_output=True, env=env,
+                               timeout=120)
+            runs.append(("bin/reel", (r.returncode, r.stdout.decode("utf-8", "replace"),
+                                      r.stderr.decode("utf-8", "replace"))))
+        if not runs:
+            self.skipTest("no shell for either wrapper")
+        lines = record.read_text(encoding="utf-8").splitlines() if record.exists() else []
+        self.assertEqual(len(lines), len(runs), runs)                     # setup_env.py reached once per wrapper
+        for line in lines:
+            self.assertIn("--home", line)
+        for name, (rc, out, err) in runs:
+            with self.subTest(wrapper=name):
+                self.assertEqual(rc, 2, (out, err))
+                self.assertIn("cannot start", err)
+                self.assertIn("building the engine runtime failed", json.loads(out.strip().splitlines()[-1])["blocked"])
+                self.assertNotIn("not compatible", err)
+
+    def test_setup_env_rebuilds_a_runtime_whose_base_is_gone(self):
+        """The real probe (python_runs) says a bogus interpreter does not run -> create with --clear."""
+        self.assertFalse(R.python_runs(plat.env_python(self.bogus_runtime(self.home))))
+        self.assertFalse(R.python_runs(self.t / "missing" / "python.exe"))
+        self.assertTrue(R.python_runs(Path(sys.executable)))
 
 
 if __name__ == "__main__":

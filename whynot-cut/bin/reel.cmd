@@ -29,7 +29,7 @@ set "PYTHONDONTWRITEBYTECODE=1"
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 rem the whole line is expanded before it runs, so the WNC_* values are used and already cleared for the engine
-set "WNC_HOME=" & set "WNC_PY=" & set "WNC_HERE=" & set "WNC_FLAG=" & set "WNC_SETUP_RAN=" & "%WNC_PY%" %WNC_FLAG% "%WNC_HERE%\engine\reel\cli.py" %*
+set "WNC_HOME=" & set "WNC_PY=" & set "WNC_HERE=" & set "WNC_FLAG=" & set "WNC_SETUP_RAN=" & set "WNC_BROKEN=" & "%WNC_PY%" %WNC_FLAG% "%WNC_HERE%\engine\reel\cli.py" %*
 exit /b %ERRORLEVEL%
 
 :find_py
@@ -40,6 +40,7 @@ rem reached only by goto once WNC_RT is defined)
 set "WNC_PY="
 set "WNC_FLAG="
 set "WNC_RT="
+set "WNC_BROKEN="
 if exist "%WNC_HOME%\current" set /p WNC_RT=<"%WNC_HOME%\current"
 if not defined WNC_RT goto :find_venv
 set "WNC_RT=%WNC_RT:"=%"
@@ -55,13 +56,25 @@ for %%c in (. - _) do if "%WNC_RT:~0,1%"=="%%c" goto :find_venv
 rem every allowed character is a delimiter: any token left is a character outside the rule ("x" keeps the line from
 rem starting with the eol character)
 for /f "eol=| delims=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-" %%x in ("x%WNC_RT%") do goto :find_venv
+if not exist "%WNC_HOME%\runtimes\%WNC_RT%\" goto :find_venv
+rem "can it start", without starting it (plat.runtime_usable): the interpreter, a pyvenv.cfg and the base Python its
+rem `home` names; a runtime whose base Python under <home>\python was removed is broken and `reel setup` rebuilds it
+set "WNC_BROKEN=%WNC_RT%"
+set "WNC_BASE="
 if not exist "%WNC_HOME%\runtimes\%WNC_RT%\Scripts\python.exe" goto :find_venv
+if not exist "%WNC_HOME%\runtimes\%WNC_RT%\pyvenv.cfg" goto :find_venv
+for /f "usebackq tokens=1,* delims== " %%a in ("%WNC_HOME%\runtimes\%WNC_RT%\pyvenv.cfg") do if /i "%%a"=="home" set "WNC_BASE=%%b"
+if not defined WNC_BASE goto :find_venv
+if not exist "%WNC_BASE%\python.exe" goto :find_venv
+set "WNC_BASE="
+set "WNC_BROKEN="
 set "WNC_PY=%WNC_HOME%\runtimes\%WNC_RT%\Scripts\python.exe"
 set "WNC_FLAG=-s"
 set "WNC_RT="
 exit /b 0
 :find_venv
 set "WNC_RT="
+set "WNC_BASE="
 if exist "%WNC_HOME%\venv\Scripts\python.exe" set "WNC_PY=%WNC_HOME%\venv\Scripts\python.exe"
 exit /b 0
 
@@ -160,7 +173,8 @@ exit /b 0
 :setup
 rem one build: `py -3` when the launcher exists, else the first `python` on PATH that is not a Windows Store stub
 rem (where's output is filtered by findstr, so no path goes through a second `call` expansion); none: WNC_NOPY
-echo WhyNot Cut: no engine yet - creating it in "%WNC_HOME%" (a few minutes, ~400 MB)... 1>&2
+if defined WNC_BROKEN echo WhyNot Cut: the engine runtime %WNC_BROKEN% cannot start - rebuilding it in "%WNC_HOME%" (a few minutes)... 1>&2
+if not defined WNC_BROKEN echo WhyNot Cut: no engine yet - creating it in "%WNC_HOME%" (a few minutes, ~400 MB)... 1>&2
 where py >nul 2>nul
 if not errorlevel 1 goto :setup_py
 set "WNC_SYS_PY="
@@ -196,5 +210,10 @@ exit /b 2
 
 :blocked
 call :tag
+if defined WNC_BROKEN goto :broken
 echo {"blocked": "%WNC_TAG%: engine not installed", "how": "run: reel setup   (or /whynot-cut:start)"}
+exit /b 2
+
+:broken
+echo {"blocked": "%WNC_TAG%: the engine runtime is broken (%WNC_BROKEN% cannot start: its base Python is missing)", "how": "run: reel setup"}
 exit /b 2

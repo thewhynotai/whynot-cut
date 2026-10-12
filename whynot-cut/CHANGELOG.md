@@ -73,7 +73,10 @@
   or does not start (its base Python removed) is rebuilt in place (`uv venv --clear`); the stamps are removed before
   any install and written last, so a failed install never looks built; old runtimes are pruned (the current one and
   one previous are kept). The hook runner (`hooks/run_python.sh`) and the Premiere/AE bridge's engine-home fallback
-  also recognise a home that has only a runtime. `reel doctor` reports `runtime`
+  also recognise a home that has only a runtime. The wrappers and the hook runner never start a runtime that cannot
+  run (its base Python gone): other commands fall back to `venv/` or answer `{"blocked": "... the engine runtime is
+  broken", "how": "run: reel setup"}`, and `reel setup` rebuilds it through a system Python. `reel doctor` reports
+  `runtime`
   (kind, id, expected id, up to date) and `isolated: true|false` (every engine module loads from inside the runtime at
   the locked version, no user site), with a fix when not.
 - `reel py <script.py> | -m <module> | -c <code> [args]` runs Python with the engine runtime (engine packages and the

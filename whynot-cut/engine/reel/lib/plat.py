@@ -123,19 +123,41 @@ def current_runtime_id(home: Path | None = None) -> str | None:
     return rid if _RUNTIME_ID.match(rid) and ".." not in rid else None
 
 
+def runtime_usable(env_dir: Path) -> bool:
+    """Can this venv-style folder's interpreter start? Checked without starting it (the wrappers and the hook runner
+    apply the same rule with shell builtins): the interpreter file, a pyvenv.cfg, and the base Python its `home`
+    names (python.exe on Windows, python3 / python elsewhere). A runtime whose base Python under <home>/python was
+    removed fails this, so the wrappers fall back and `reel setup` can rebuild it."""
+    if not env_python(env_dir).is_file():
+        return False
+    try:
+        cfg = (env_dir / "pyvenv.cfg").read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return False
+    base = next((ln.split("=", 1)[1].strip() for ln in cfg.splitlines()
+                 if "=" in ln and ln.split("=", 1)[0].strip().lower() == "home"), "")
+    if not base:
+        return False
+    b = Path(base)
+    return (b / "python.exe").is_file() if IS_WIN else any((b / n).is_file() for n in ("python3", "python"))
+
+
 def engine_runtime(home: Path | None = None) -> dict:
-    """The engine interpreter, in the wrappers' order: the current runtime, else the legacy venv.
-    {kind: "runtime" | "venv" | None, id, dir, python} (python is None when neither exists)."""
+    """The engine interpreter, in the wrappers' order: the current runtime when it can start (runtime_usable), else
+    the legacy venv. {kind: "runtime" | "venv" | None, id, dir, python, broken} (python is None when neither exists;
+    broken = the id of a current runtime that cannot start, else None)."""
     home = home or engine_home()
     rid = current_runtime_id(home)
+    broken = None
     if rid:
         d = home / RUNTIMES_DIR / rid
-        if env_python(d).is_file():
-            return {"kind": "runtime", "id": rid, "dir": d, "python": env_python(d)}
+        if runtime_usable(d):
+            return {"kind": "runtime", "id": rid, "dir": d, "python": env_python(d), "broken": None}
+        broken = rid if d.exists() else None
     d = home / "venv"
     if env_python(d).is_file():
-        return {"kind": "venv", "id": None, "dir": d, "python": env_python(d)}
-    return {"kind": None, "id": None, "dir": None, "python": None}
+        return {"kind": "venv", "id": None, "dir": d, "python": env_python(d), "broken": broken}
+    return {"kind": None, "id": None, "dir": None, "python": None, "broken": broken}
 
 
 def venv_python(home: Path | None = None) -> Path:

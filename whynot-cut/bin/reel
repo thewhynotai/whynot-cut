@@ -66,20 +66,40 @@ tag() {   # "WhyNot Cut 2.2.0": every blocked message names this plugin, so a wr
   echo "WhyNot Cut ${v:-?}"
 }
 # The engine interpreter (3.0 T2.1, same order as plat.engine_runtime()): the isolated runtime named by the one-line
-# text file <home>/current (runtimes/<id>/, run with -s: no user site), else the 2.x venv/ (run as before: a venv
-# built with --system-site-packages may rely on the user site). Never a system Python for the engine.
-PY='' PYFLAG='' RID_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'
+# text file <home>/current (runtimes/<id>/, run with -s: no user site) when it can start, else the 2.x venv/ (run as
+# before: a venv built with --system-site-packages may rely on the user site). Never a system Python for the engine.
+# "Can start" is checked with builtins, like plat.runtime_usable(): the interpreter, a pyvenv.cfg, and the base
+# Python its `home` names (removed <home>/python = broken runtime: `reel setup` rebuilds it with a system Python).
+PY='' PYFLAG='' RT_BROKEN='' RID_RE='^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$' BOM=''
+printf -v BOM '\357\273\277'      # a UTF-8 BOM, stripped from `current` (printf -v: a builtin, bash 3.2 safe)
+runtime_ok() {   # $1 = runtime folder
+  local line base=''
+  [ -f "$1/pyvenv.cfg" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      home*=*) base="${line#*=}"; base="${base#"${base%%[![:space:]]*}"}"; base="${base%"${base##*[![:space:]]}"}" ;;
+    esac
+  done < "$1/pyvenv.cfg"
+  [ -n "$base" ] || return 1
+  [ -f "$base/python.exe" ] || [ -f "$base/python3" ] || [ -f "$base/python" ]
+}
 find_py() {
   local id='' c
   if [ -f "$HOME_DIR/current" ]; then
     IFS= read -r id < "$HOME_DIR/current" || true
-    id="${id#$'\xef\xbb\xbf'}"
+    id="${id#"$BOM"}"
     id="${id//[[:space:]]/}"
     [[ $id =~ $RID_RE ]] && [[ $id != *..* ]] || id=''      # the id rule of lib/plat.py
     if [ -n "$id" ]; then
       for c in "$HOME_DIR/runtimes/$id/bin/python" "$HOME_DIR/runtimes/$id/Scripts/python.exe"; do
-        if [ -x "$c" ]; then PY="$c"; PYFLAG=-s; return 0; fi
+        if [ -x "$c" ]; then
+          if runtime_ok "$HOME_DIR/runtimes/$id"; then PY="$c"; PYFLAG=-s; RT_BROKEN=''; return 0; fi
+          RT_BROKEN="$id"
+          break
+        fi
       done
+      [ -n "$RT_BROKEN" ] || { [ -d "$HOME_DIR/runtimes/$id" ] && RT_BROKEN="$id"; }
     fi
   fi
   for c in "$HOME_DIR/venv/bin/python" "$HOME_DIR/venv/Scripts/python.exe"; do
@@ -89,7 +109,11 @@ find_py() {
 }
 if ! find_py; then
   if [ "${1:-}" = "setup" ]; then
-    echo "WhyNot Cut: no engine yet — creating it in $HOME_DIR (a few minutes, ~400 MB)…" >&2
+    if [ -n "$RT_BROKEN" ]; then
+      echo "WhyNot Cut: the engine runtime $RT_BROKEN cannot start — rebuilding it in $HOME_DIR (a few minutes)…" >&2
+    else
+      echo "WhyNot Cut: no engine yet — creating it in $HOME_DIR (a few minutes, ~400 MB)…" >&2
+    fi
     for sys_py in python3 python py; do
       if command -v "$sys_py" >/dev/null 2>&1 && "$sys_py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' </dev/null >/dev/null 2>&1; then
         "$sys_py" "$HERE/setup/setup_env.py" --home "$HOME_DIR" >&2 || true
@@ -105,6 +129,9 @@ if ! find_py; then
       echo "{\"blocked\": \"$(tag): no Python 3.9+ found to build the engine\", \"how\": \"macOS: xcode-select --install (or python.org). Windows: winget install Python.Python.3.12  — then run: reel setup\"}"
       exit 2
     fi
+  elif [ -n "$RT_BROKEN" ]; then
+    echo "{\"blocked\": \"$(tag): the engine runtime is broken ($RT_BROKEN cannot start: its base Python is missing)\", \"how\": \"run: reel setup\"}"
+    exit 2
   else
     echo "{\"blocked\": \"$(tag): engine not installed\", \"how\": \"run: reel setup   (or /whynot-cut:start)\"}"
     exit 2

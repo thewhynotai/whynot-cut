@@ -327,6 +327,8 @@ def isolation(rt: dict, lock: dict[str, dict], modules: list[str] | None = None,
     modules = engine_modules() if modules is None else modules
     problems = []
     d = rt.get("dir")
+    if rt.get("broken"):
+        problems.append(f"runtime {rt['broken']} cannot start (its base Python is missing): reel setup rebuilds it")
     if rt.get("kind") != "runtime" or not d:
         problems.append("the engine runs from the legacy venv/, not an isolated runtime" if rt.get("kind") == "venv"
                         else "no engine runtime")
@@ -382,7 +384,8 @@ def status(home: Path, key: str | None = None, comp: dict | None = None) -> dict
     want_id = runtime_id(data, ent["declared_id"]) if data is not None else None
     want_sha = lock_sha256(data) if data is not None else None
     st = read_stamp(Path(rt["dir"])) if rt["kind"] == "runtime" else {"runtime": {}, "lock_sha256": None}
-    return {"kind": rt["kind"], "id": rt["id"], "dir": str(rt["dir"]) if rt["dir"] else None,
+    return {"kind": rt["kind"], "id": rt["id"], "broken": rt.get("broken"),
+            "dir": str(rt["dir"]) if rt["dir"] else None,
             "python": str(rt["python"]) if rt["python"] else None, "platform": key,
             "lock_file": str(ent["file"]) if data is not None else None, "expected_id": want_id,
             "lock_sha256": want_sha, "stamp": st["runtime"], "stamp_lock_sha256": st["lock_sha256"],

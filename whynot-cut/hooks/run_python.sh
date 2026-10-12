@@ -36,15 +36,26 @@ if [ -z "$home" ]; then
 fi
 pyflag=""
 if [ -f "$home/current" ]; then     # 3.0 T2.1: one runtime id (BOM / whitespace stripped; ids as in lib/plat.py)
-  rid=""
+  rid="" bom="" base="" line=""
+  printf -v bom '\357\273\277'      # a UTF-8 BOM (printf -v: a builtin, bash 3.2 safe)
   IFS= read -r rid < "$home/current" || true
-  rid="${rid#$'\xef\xbb\xbf'}"
+  rid="${rid#"$bom"}"
   rid="${rid//[[:space:]]/}"
   rid_re='^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'
-  if [[ $rid =~ $rid_re ]] && [[ $rid != *..* ]]; then
-    for c in "$home/runtimes/$rid/Scripts/python.exe" "$home/runtimes/$rid/bin/python"; do
-      if [ -f "$c" ] && [ -x "$c" ]; then py="$c"; pyflag="-s"; break; fi
-    done
+  # usable only when it can start (plat.runtime_usable, builtins): a pyvenv.cfg whose `home` still holds the base
+  # Python; a broken runtime falls through to venv/ and PATH (`reel setup` rebuilds it)
+  if [[ $rid =~ $rid_re ]] && [[ $rid != *..* ]] && [ -f "$home/runtimes/$rid/pyvenv.cfg" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"
+      case "$line" in
+        home*=*) base="${line#*=}"; base="${base#"${base%%[![:space:]]*}"}"; base="${base%"${base##*[![:space:]]}"}" ;;
+      esac
+    done < "$home/runtimes/$rid/pyvenv.cfg"
+    if [ -n "$base" ] && { [ -f "$base/python.exe" ] || [ -f "$base/python3" ] || [ -f "$base/python" ]; }; then
+      for c in "$home/runtimes/$rid/Scripts/python.exe" "$home/runtimes/$rid/bin/python"; do
+        if [ -f "$c" ] && [ -x "$c" ]; then py="$c"; pyflag="-s"; break; fi
+      done
+    fi
   fi
 fi
 if [ -z "$py" ]; then
