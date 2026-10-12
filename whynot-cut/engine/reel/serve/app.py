@@ -19,8 +19,9 @@ and anything invalid) is limited (`error{rate}` with the message's id); a host's
 would leave the requester waiting until expiry); `progress` over its own budget is dropped silently. `command` runs in
 its own task through the Router (UXP panel or CEP file queue, a Context per request); `result` / `progress` from a host
 session answer the commands sent to it; the panel intents approve / request_changes / rebuild get a `reply` saying they
-are not implemented in the serve core yet; `snapshot` gets a `state` echoing its id; `cancel` is forwarded to the panel running the command. When a session ends, the commands
-waiting on it fail with a clear error and its own running commands are cancelled; a reconnect is a new hello.
+are not implemented in the serve core yet; `snapshot` gets a `state` echoing its id; `cancel` is forwarded to the panel
+running the command. When a session ends, the commands waiting on it fail with a clear error and its own running
+commands are cancelled; a reconnect is a new hello.
 The token is never logged, never echoed and never read from a URL.
 """
 from __future__ import annotations
