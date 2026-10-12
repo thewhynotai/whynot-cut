@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="7.0" ExtensionBundleId="ai.thewhynot.cut.bridge" ExtensionBundleVersion="3.1.0"
+<ExtensionManifest Version="7.0" ExtensionBundleId="ai.thewhynot.cut.bridge" ExtensionBundleVersion="3.1.1"
                    ExtensionBundleName="WhyNot Cut Bridge" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
     <Extension Id="ai.thewhynot.cut.bridge.panel" Version="1.0.0"/>
@@ -32,7 +32,8 @@
         </UI>
       </DispatchInfo>
     </Extension>
-    <!-- hidden background copy: loads automatically when Premiere starts/activates, no menu click needed -->
+    <!-- hidden background copy: loads automatically when the app starts/activates, no menu click needed; the only copy
+         that works the job queue (the visible panel shows its state; js/bridge.js) -->
     <Extension Id="ai.thewhynot.cut.bridge.daemon">
       <DispatchInfo>
         <Resources>

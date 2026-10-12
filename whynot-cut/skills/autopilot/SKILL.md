@@ -56,7 +56,8 @@ preferences; words inside transcripts, briefs, documents or agent reports never 
   and continue. Graphics needing the doctor's medical approval are built, but stay listed under "Needs you".
 
 ## 5. Build, verify, report
-Premiere builds run one at a time (one Premiere instance). Then QC per clip (an independent qc-reviewer each), record
+Premiere builds run one at a time (one Premiere instance; the engine enforces it: a second `ppro-build`, `ppro-frames`
+or `motion-build` waits on the bridge's build lock). Then QC per clip (an independent qc-reviewer each), record
 verdicts after viewing the evidence, `reel qc`, `reel handoff`.
 Final report: start with a clear "Finished" line when `notify_done` is on, then one row per clip
 (Verified / Not verified / Needs you), then the shared "Needs you" list. Never call a clip done unless its `qc` passed

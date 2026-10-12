@@ -163,6 +163,20 @@
   not proved (`ok` false, "inconclusive"). First unit tests for `detect_pauses` and `verify_cuts`.
 
 ### Fixed
+- Bridge queue robustness, bridge 3.1.1 (T2.9, review IM-4 / IM-5 / IM-6 / MI-22). A queued job carries `expires_at`
+  and the bridge answers an expired job `{ok: false, error: "expired"}` without running it; a job the bridge has not
+  started when the engine stops waiting is cancelled (`<id>.job.cancelled`), so a timed-out build never runs later
+  (on the next Premiere start). The result timeout starts when the bridge claims the job (`<id>.claimed`): waiting
+  behind another job no longer eats it. The engine deletes each job's data, result and claim files once read, and
+  removes queue files older than a day; `ppro-status` lists orphaned `.running` jobs. One build at a time per app
+  on the machine: `ppro-build`, `ppro-frames` and `motion-build` hold `<queue>/.build.lock` (pid + expiry; a
+  crashed holder's lock is taken over) and a second one waits for it, then reports `BRIDGE_BUSY` / `blocked`. Only
+  the hidden background copy of the bridge works the queue (the visible panel shows its state, and takes over only
+  when the background copy did not load), so `busy` is reliable. A running bridge of another version is refused:
+  "restart Premiere to load bridge 3.1.1". `ppro-build` moves the old project to `*_prev_*` and puts it back when
+  the build saved no new project. `ppro-frames` first polls one frame until Premiere's media is online (up to
+  30 s, `media_wait`), keeps the Media pending re-export, and reports `pending_frames` (never `ok: true` while one
+  remains). The engine sends resolved script paths, and a heartbeat without a time no longer crashes `ppro-status`.
 - Discovery decides a file's role by its folder first (T2.5, review IM-8, structure 4.6): everything under `data/Raw`
   is source footage, `data/References` references, `data/Broll` B-roll, `data/Music` music, `data/SFX` sound effects
   (any case, any depth). Filename hints apply only outside those folders and only as whole words ("ref", "stock",
@@ -364,6 +378,8 @@
   native build, the XML fallback and a motion project (`tests/fixtures/handoff/`, `tests/test_handoff_native.py`).
 
 ### Migration
+- Bridge 3.1.1 (T2.9): after updating, run `reel ppro-install` and restart Premiere and After Effects. Until they are
+  restarted, bridge jobs are refused with "restart Premiere to load bridge 3.1.1".
 - The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the
   zip). A client folder that relied on the folder-name match must now have its own profile: copy that private profile
   into `<client>/output/client_database/reel-profile/`, or run `reel client-init --from-profile example-clinic` and fill

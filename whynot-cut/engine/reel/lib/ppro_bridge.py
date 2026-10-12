@@ -13,12 +13,12 @@ import re
 import shutil
 from pathlib import Path
 
-from .common import TEMPLATES_DIR, engine_home
+from .common import TEMPLATES_DIR, current_context
 from . import plat
 
 EXT_ID = "ai.thewhynot.cut.bridge"
 LEGACY_EXT_IDS = ("com.nh.bridge",)          # reel-editor 1.x bridge; replaced on install
-BRIDGE_VERSION = "3.1.0"
+BRIDGE_VERSION = "3.1.1"          # the CEP bundle (manifest + bridge.js); the running one must match
 LIB_SRC = TEMPLATES_DIR / "premiere/nh_ppro_lib.jsx"
 
 
@@ -29,12 +29,13 @@ def ext_dir() -> Path:
 
 
 def queue_dir() -> Path:
-    return engine_home() / "ppro-queue"
+    """<engine home>/ppro-queue; the engine home of the bound Context (`reel serve` binds one per request)."""
+    return current_context().engine_home / "ppro-queue"
 
 
 def scripts_dir() -> Path:
     """The bridge's whitelisted script folder (<engine home>/ppro-scripts)."""
-    return engine_home() / "ppro-scripts"
+    return current_context().engine_home / "ppro-scripts"
 
 
 def lib_path() -> Path:
@@ -109,8 +110,8 @@ def install(force: bool = False) -> dict:
         shutil.rmtree(EXT_DIR)
     shutil.copytree(src, EXT_DIR)
     # tells the panel where the queue lives (the engine home can be a custom folder; Premiere doesn't see our env)
-    (EXT_DIR / "bridge-config.json").write_text(json.dumps({"base": str(engine_home().resolve()), "version": BRIDGE_VERSION}),
-                                                encoding="utf-8")
+    base = str(current_context().engine_home.resolve())
+    (EXT_DIR / "bridge-config.json").write_text(json.dumps({"base": base, "version": BRIDGE_VERSION}), encoding="utf-8")
     removed = []
     for old in LEGACY_EXT_IDS:          # only our own earlier bridge, never anything else in the CEP folder
         od = EXT_DIR.parent / old
@@ -141,7 +142,8 @@ def status(max_age_s: float = 5.0) -> dict:
 
 
 def submit(action: str, data: dict | None = None, timeout: float = 600, script: Path | None = None) -> dict:
-    """Run `action` in Premiere through the bridge; `script` defaults to the synced nh_ppro_lib.jsx."""
+    """Run `action` in Premiere through the bridge; `script` defaults to the synced nh_ppro_lib.jsx. `timeout` runs from
+    the moment the bridge claims the job (cep_queue.submit); a running bridge of another version is refused."""
     from . import cep_queue
     refused = plat.sandbox_refusal(f"queue the {action} job", queue_dir(), scripts_dir())   # G79: never in tests
     if refused:
@@ -152,4 +154,11 @@ def submit(action: str, data: dict | None = None, timeout: float = 600, script: 
     if script is None or Path(script) == lib_path():
         sync_scripts()
         script = lib_path()
-    return cep_queue.submit(queue_dir(), script, action, data, timeout, st=st, app="Premiere")
+    return cep_queue.submit(queue_dir(), script, action, data, timeout, st=st, app="Premiere",
+                            expect_version=BRIDGE_VERSION)
+
+
+def build_lock(what: str, **kw):
+    """One Premiere build at a time on this machine (ppro-build, ppro-frames): cep_queue.build_lock on ppro-queue."""
+    from . import cep_queue
+    return cep_queue.build_lock(queue_dir(), what, **kw)

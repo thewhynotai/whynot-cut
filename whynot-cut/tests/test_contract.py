@@ -1828,12 +1828,16 @@ class EnginePremiereRequestTests(unittest.TestCase):
 
     def test_export_frames_sends_valid_requests_with_and_without_a_project_file(self):
         from lib import ppro_build
-        self.run_engine(lambda: ppro_build.export_frames(self.reel, times=None, retries=0, wait_s=0))
+        self.run_engine(lambda: ppro_build.export_frames(self.reel, times=None, retries=0, wait_s=0, media_wait_s=0))
         self.assertIsNone(self.calls[0][1]["project_path"])                      # no .prproj yet: null, which the schema allows
         self.prj.parent.mkdir(parents=True, exist_ok=True)
         self.prj.write_text("built", encoding="utf-8")
+        self.run_engine(lambda: ppro_build.export_frames(self.reel, times=[1.5, 2.5], retries=0, wait_s=0, media_wait_s=0))
+        self.check_calls(["export_frames", "export_frames"])
+        self.calls.clear()                                    # the one-frame media check before the export (T2.9)
         self.run_engine(lambda: ppro_build.export_frames(self.reel, times=[1.5, 2.5], retries=0, wait_s=0))
         self.check_calls(["export_frames", "export_frames"])
+        self.assertEqual(self.calls[0][1]["times"], [2.5])
         self.assertEqual(self.calls[1][1]["project_path"], str(self.prj))
         self.assertEqual(self.calls[1][1]["times"], [1.5, 2.5])
 

@@ -14,7 +14,8 @@ Premiere can't be scripted from outside (macOS AppleScript exposes only capture/
 
 ## `reel ppro-build` (about 7 s inside Premiere)
 The build runs these steps:
-1. Close any open copy, keep the previous file as `<ID>_<PREFIX>_EDIT_prev_<ts>.prproj`, and create a new project.
+1. Close any open copy, move the previous file aside as `<ID>_<PREFIX>_EDIT_prev_<ts>.prproj` (put back if the build saves
+   no new project), and create a new project.
 2. Import the base XML (`*_base.xml`). It holds the footage pieces (pause-tightened, jump cuts masked with alternating zoom), the cleaned dialogue on A1/A2 linked to V1, SFX on A3–A6, the original camera audio muted on A7/A8, and empty named graphic tracks.
 3. `setSettings`: preview codec "apcs" (ProRes 422 LT) 1080×1920, max bit depth OFF, max render quality OFF, composite in linear colour ON. Every value is read back.
 4. Place the brand stills on lanes and animate them with Premiere keyframes. The lanes are: B-roll, Graphic bars, Cards, Graphic text, one lane per checklist item, Caption bars, Caption text, Transitions.
@@ -57,7 +58,14 @@ Only judge frames from the run you just made. Older run folders are history: a s
 Right after a project opens, Premiere may still be loading media and export its "Media pending" slate instead of the
 picture (4 of 17 frames in a field test). `ppro-frames` detects those frames (`lib/media_pending.py`), waits and exports
 them again (`--pending-retries`, default 3; `--pending-wait`, default 5 s, doubling), and lists any that are still the
-slate under `media_pending` with `ok: false`. They are left out of the sheet: a slate is neither a pass nor a fail.
+slate under `media_pending` / `pending_frames` with `ok: false`. They are left out of the sheet: a slate is neither a pass
+nor a fail. Before the export it first polls one frame into a scratch folder until it shows the picture (up to 30 s,
+`media_wait` in the result).
+
+Bridge 3.1.1 queue rules: a job carries `expires_at` (the bridge never starts it later), a job not started in time is
+cancelled, the result timeout starts when the bridge claims the job, one build or frame export runs at a time
+(`ppro-queue/.build.lock`), and a running bridge of another version is refused ("restart Premiere to load bridge
+3.1.1"). Only the hidden background copy works the queue; the visible panel shows its state.
 
 ## Not scriptable: the editor does these
 - Final mix, licensed music, render or export.

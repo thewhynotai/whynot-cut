@@ -199,13 +199,22 @@ def stage_stills(paths: Paths, graphics: list) -> Path:
     return dst
 
 
-def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -> dict:
-    from .ppro_bridge import submit, status
+LOCK_HOLD_S = 3600          # a build lock older than this is a crash's leftover (each bridge call times out sooner)
+
+
+def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False, *, lock_wait_s: float | None = None) -> dict:
+    """Build the reel's .prproj in Premiere. One build at a time on this machine (the bridge's build lock): a second
+    session waits up to `lock_wait_s` (default cep_queue.LOCK_WAIT_S), then gets BRIDGE_BUSY."""
+    from . import cep_queue
+    from .ppro_bridge import BRIDGE_VERSION, build_lock, status
     st = status()
     if not st["alive"]:
         return {"status": "BRIDGE_NOT_RUNNING", "detail": st["detail"]}
+    if "bridge_version" in st:          # a heartbeat that names its version must be this engine's bridge
+        refused = cep_queue.version_refusal(st, BRIDGE_VERSION, "Premiere")
+        if refused:
+            return {"status": "BRIDGE_VERSION_MISMATCH", "error": refused["error"], "how": refused["how"]}
     prproj = paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")
-    backup = None
     if prproj.exists() and not overwrite:
         return {"status": "EXISTS", "project": str(prproj), "fix": "re-run with --force (previous version is kept as a backup)"}
     from .verify import editor_modified
@@ -215,6 +224,17 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
                 "fix": "The editor saved changes in Premiere after the last build. A rebuild starts from the plan, so their manual "
                        "edits would NOT carry over (the old file is kept as *_prev_*.prproj). Ask the editor; only with their OK "
                        "re-run with --force --replace-edited."}
+    wait = cep_queue.LOCK_WAIT_S if lock_wait_s is None else lock_wait_s
+    try:
+        with build_lock(f"ppro-build {paths.video_id}", hold_s=LOCK_HOLD_S, wait_s=wait):
+            return _build_locked(paths, prproj, overwrite, em)
+    except cep_queue.BuildLockBusy as e:
+        return dict(cep_queue.lock_busy_result(e, "Premiere"), status="BRIDGE_BUSY")
+
+
+def _build_locked(paths: Paths, prproj: Path, overwrite: bool, em) -> dict:
+    from .ppro_bridge import submit
+    backup = None
     closed = None
     if prproj.exists():
         # close it in Premiere first (saved, nothing lost): on Windows an open project locks the stills it uses, and they
@@ -234,6 +254,8 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
     if data["_missing"]:
         return {"status": "MISSING_GRAPHICS", "missing": data["_missing"], "fix": "run `reel previews`"}
     if prproj.exists():
+        # out of Premiere's way (it creates the new project at this path); it stays `_prev_` only if the build saves a
+        # new project, else it is put back below
         import time as _t
         backup = prproj.with_name(f"{prproj.stem}_prev_{_t.strftime('%Y%m%d-%H%M%S')}.prproj")
         prproj.rename(backup)
@@ -243,6 +265,12 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
     resp = (r.get("response") or {})
     res = resp.get("result") or {}
     saved_now = prproj.exists() and prproj.stat().st_mtime >= t0 - 1
+    restored = False
+    if backup and not saved_now and not prproj.exists() and not r.get("claimed"):
+        # nothing new was saved (and Premiere is not still working on it: a claimed job that timed out may yet save
+        # there): the previous project goes back where the editor expects it
+        backup.rename(prproj)
+        backup, restored = None, True
     sa = res.get("settings_after", {})
     checks = {
         "prproj_saved_this_run": saved_now,
@@ -261,9 +289,12 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
     out = {"status": "PRPROJ_BUILT" if all(checks.values()) else ("PRPROJ_BUILT_WITH_ISSUES" if saved_now else "FAILED"),
            "checks": checks, "project": str(prproj), "bridge": {k: r.get(k) for k in ("ok", "elapsed_s", "job", "error")},
            "premiere_error": resp.get("error"), "previous_version_backup": str(backup) if backup else None,
+           "previous_restored": restored,
            "closed_previous": (closed or {}).get("response"),
            "job_data": {k: data.get(k) for k in ("sequence_name", "track_names", "native_caption_track")},   # for the handoff
            "result": res, "at": now_iso(), "prproj_mtime": prproj.stat().st_mtime if prproj.exists() else None}
+    if r.get("how"):
+        out["how"] = r["how"]
     from .verify import prproj_signature
     # what the pipeline saved: a later save that only moves the file time (Premiere saving open projects, auto-save)
     # is not an editor change (verify.editor_modified)
@@ -272,14 +303,64 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False) -
     return out
 
 
-def export_frames(paths: Paths, times: list[float] | None = None, *, retries: int = 3, wait_s: float = 5.0) -> dict:
+MEDIA_WAIT_S, MEDIA_POLL_S = 30.0, 3.0      # wait for Premiere's media before the frames are exported (G69)
+
+
+def export_frames(paths: Paths, times: list[float] | None = None, *, retries: int = 3, wait_s: float = 5.0,
+                  media_wait_s: float = MEDIA_WAIT_S, media_poll_s: float = MEDIA_POLL_S,
+                  lock_wait_s: float | None = None) -> dict:
     """Premiere renders frames of its own timeline. Each run gets a FRESH folder (old frames left next to new ones
     once misled a review) plus a labelled contact sheet `_sheet.jpg` for the reviewer.
 
     Right after a project opens, Premiere may still be loading media and exports its "Media pending" slate instead of
-    the picture (G69). Those frames are detected (media_pending.py), exported again after a wait that grows with each
-    attempt (`wait_s`, 2*`wait_s`, ...) up to `retries` times, and if they are still the slate they are reported under
-    `media_pending` instead of counted as frames: a slate says nothing about the edit."""
+    the picture (G69). So, first, one frame is exported into a scratch folder every `media_poll_s` until it shows the
+    picture, for up to `media_wait_s` (0 = no wait); then all frames are exported. Slate frames are detected
+    (media_pending.py), exported again after a wait that grows with each attempt (`wait_s`, 2*`wait_s`, ...) up to
+    `retries` times, and if they are still the slate they are reported under `media_pending` / `pending_frames` instead
+    of counted as frames: a slate says nothing about the edit, and the result is never ok while one remains.
+    Holds the bridge's build lock (one Premiere build or frame export at a time on this machine)."""
+    from . import cep_queue
+    from .ppro_bridge import build_lock
+    wait = cep_queue.LOCK_WAIT_S if lock_wait_s is None else lock_wait_s
+    try:
+        with build_lock(f"ppro-frames {paths.video_id}", hold_s=LOCK_HOLD_S, wait_s=wait):
+            return _export_frames(paths, times, retries, wait_s, media_wait_s, media_poll_s)
+    except cep_queue.BuildLockBusy as e:
+        r = cep_queue.lock_busy_result(e, "Premiere")
+        return dict(r, ok=False, error=r["blocked"], frames=0, media_pending=[], pending_frames=[])
+
+
+def _wait_for_media(export, probe_dir: Path, t: float, limit_s: float, poll_s: float) -> dict:
+    """Export the frame at `t` into `probe_dir` until it is not Premiere's Media pending slate. online: True (the
+    picture), False (still the slate after `limit_s`), None (Premiere wrote no frame: the export itself reports why)."""
+    import shutil
+    import time as _t
+    from .media_pending import is_media_pending
+    polls, online = 0, None
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        while True:
+            for f in probe_dir.glob("*.png"):
+                f.unlink(missing_ok=True)
+            polls += 1
+            export([t], probe_dir)
+            got = sorted(probe_dir.glob("*.png"))
+            if not got:
+                online = None
+                break
+            if not is_media_pending(got[0]):
+                online = True
+                break
+            if polls * poll_s >= limit_s:           # counted, not timed: the waits are the polls' own
+                online = False
+                break
+            _t.sleep(poll_s)
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
+    return {"online": online, "polls": polls, "limit_s": limit_s}
+
+
+def _export_frames(paths: Paths, times, retries: int, wait_s: float, media_wait_s: float, media_poll_s: float) -> dict:
     import time as _t
     from .ppro_bridge import submit
     from .common import frame_to_tc
@@ -305,15 +386,19 @@ def export_frames(paths: Paths, times: list[float] | None = None, *, retries: in
     t0 = _t.time()
     prj = paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")
 
-    def export(ts):
+    def export(ts, out_dir=od):
         return submit("export_frames", {"sequence_name": f"{paths.video_id}_{project_prefix()}_EDIT", "times": ts,
-                                        "out_dir": str(od), "project_path": str(prj) if prj.exists() else None}, timeout=600)
+                                        "out_dir": str(out_dir), "project_path": str(prj) if prj.exists() else None},
+                      timeout=600)
 
     def pngs():
         return sorted(f for f in od.glob("*.png") if not f.name.startswith("._") and f.stat().st_mtime >= t0 - 1)
 
     def ms_of(f):
         return next((int(tok) for tok in f.stem.split("_") if tok.isdigit()), None)
+    media = {"online": None, "polls": 0, "limit_s": media_wait_s}
+    if media_wait_s > 0 and times:
+        media = _wait_for_media(export, od / "_media_check", times[len(times) // 2], media_wait_s, media_poll_s)
     r = export(times)
     all_frames = pngs()
     pending = [f for f in all_frames if is_media_pending(f)]
@@ -366,6 +451,7 @@ def export_frames(paths: Paths, times: list[float] | None = None, *, retries: in
                + nxt)
     return {"bridge": r.get("ok"), "ok": not error, "dir": str(od), "frames": len(frames), "expected": len(times),
             "sheet": str(sheet) if sheet else None, "error": error, "media_pending": media_pending,
+            "pending_frames": [m["t"] for m in media_pending], "media_wait": media,
             "pending_retries": {"attempts": attempts, "wait_s": wait_s,
                                 "recovered": sorted(by_ms.get(m, (m or 0) / 1000) for m in ever_pending
                                                     if m not in {ms_of(f) for f in pending}),

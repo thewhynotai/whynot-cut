@@ -565,6 +565,7 @@ class TestG69ExportRetry(unittest.TestCase):
     def export(self, bridge, times=None, **kw):
         from unittest import mock
         from lib import ppro_build
+        kw.setdefault("media_wait_s", 0)       # the re-export logic alone (the wait before the export: test_bridge_queue)
         with mock.patch("lib.ppro_bridge.submit", bridge), mock.patch("time.sleep") as sleep:
             r = ppro_build.export_frames(self.p, times=times or self.TIMES, **kw)
         return r, sleep

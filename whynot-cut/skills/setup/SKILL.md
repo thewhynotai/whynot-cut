@@ -52,7 +52,7 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 Platform details and fixes: `references/platform-setup.md`. Pipeline failures: `${CLAUDE_PLUGIN_ROOT}/skills/edit/references/troubleshooting.md`.
 
 ## Motion mode (2.2)
-`reel ppro-install` installs one bundle for Premiere and After Effects (bridge 3.1.0). Check After Effects with
+`reel ppro-install` installs one bundle for Premiere and After Effects (bridge 3.1.1). Check After Effects with
 `reel ae-status`; then `reel ae-probe` once per After Effects version (the lead views the frames and records the
 verdict). The plugin never changes After Effects preferences. If the installed bridge is newer than this plugin's,
 `ppro-install`/`setup` keep it and report `skipped`; replace it only on the editor's word (`reel ppro-install --force`).

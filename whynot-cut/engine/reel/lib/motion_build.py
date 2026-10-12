@@ -155,6 +155,15 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
     if not st.get("alive"):
         probs.append(f"the WhyNot Cut Bridge is not running in After Effects: {st.get('detail')} (`reel ae-status`)")
         return probs, ctx
+    if "bridge_version" in st:          # a heartbeat that names its version must be this engine's bridge
+        from .cep_queue import version_refusal
+        from .ppro_bridge import BRIDGE_VERSION
+        refused = version_refusal(st, BRIDGE_VERSION, "After Effects")
+        if refused:
+            probs.append(f"{refused['error']}: {refused['how']}")
+            return probs, ctx
+    # `busy` comes from the bridge's daemon alone (3.1.1): another session's build waits on the build lock instead,
+    # so busy here is a short job (a ping, a probe) of someone else
     if st.get("busy"):
         probs.append("After Effects is busy with another bridge job: try again when it finishes")
     ping = _inner(ae_bridge.submit("ping", {}, timeout=60))
@@ -186,7 +195,24 @@ def _record(paths, res: dict) -> dict:
     return res
 
 
-def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False, timeout: int = 900) -> dict:
+LOCK_HOLD_S = 3600          # a build lock older than this is a crash's leftover
+
+
+def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False, timeout: int = 900, *,
+          lock_wait_s: float | None = None) -> dict:
+    """One After Effects build at a time on this machine (the bridge's build lock on ae-queue): a second session
+    waits up to `lock_wait_s` (default cep_queue.LOCK_WAIT_S), then gets REFUSED with `blocked`."""
+    from . import ae_bridge, cep_queue
+    wait = cep_queue.LOCK_WAIT_S if lock_wait_s is None else lock_wait_s
+    try:
+        with ae_bridge.build_lock(f"motion-build {paths.video_id}", hold_s=LOCK_HOLD_S, wait_s=wait):
+            return _build_locked(paths, replace_edited, allow_fallback_font, timeout)
+    except cep_queue.BuildLockBusy as e:
+        r = cep_queue.lock_busy_result(e, "After Effects")
+        return dict(r, status="REFUSED", reasons=[r["blocked"]], aep=str(aep_path(paths)), fallback_font=None)
+
+
+def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeout: int) -> dict:
     import platform as _pf
     import shutil
     import time

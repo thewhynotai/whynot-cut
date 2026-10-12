@@ -149,10 +149,12 @@ class TestBridgeVersionTriple(unittest.TestCase):
         self.assertEqual(j.group(1), ppro_bridge.BRIDGE_VERSION, "bridge.js VERSION")
 
     def test_bridge_version_is_independent_of_the_plugin_version(self):
-        """The bridge only changes when the CEP panel changes (Phase 6); it stays 3.1.0 until then. Pinned on purpose,
-        like the plugin version: a bridge bump forces an update of the installed panel, so it must be a decision."""
+        """The bridge only changes when the CEP panel changes: 3.1.1 since T2.9 (queue protocol: expiry, claim marker,
+        daemon-only worker; it also carries T2.1's runtime engine home). Pinned on purpose, like the plugin version: a
+        bridge bump forces an update of the installed panel (the engine refuses a running bridge of another version),
+        so it must be a decision."""
         from lib import ppro_bridge
-        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.1.0")
+        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.1.1")
 
 
 class TestReelVersionFlag(unittest.TestCase):

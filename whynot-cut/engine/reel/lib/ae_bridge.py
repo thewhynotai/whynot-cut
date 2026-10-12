@@ -10,7 +10,7 @@ import hashlib
 import shutil
 from pathlib import Path
 
-from .common import TEMPLATES_DIR, engine_home
+from .common import TEMPLATES_DIR, current_context
 from . import cep_queue, plat
 
 SRC = TEMPLATES_DIR / "after_effects"
@@ -20,12 +20,13 @@ ENTRY_NAME = "nh_ae_bridge.jsx"
 
 # Locations resolve on every call (3.0 T2.17, engine MI-8): an engine home changed after import is honoured.
 def queue_dir() -> Path:
-    return engine_home() / "ae-queue"
+    """<engine home>/ae-queue; the engine home of the bound Context (`reel serve` binds one per request)."""
+    return current_context().engine_home / "ae-queue"
 
 
 def scripts_dir() -> Path:
     """The bridge's whitelisted AE script folder (<engine home>/ae-scripts)."""
-    return engine_home() / "ae-scripts"
+    return current_context().engine_home / "ae-scripts"
 
 
 def entry_path() -> Path:
@@ -83,4 +84,11 @@ def submit(action: str, data: dict | None = None, timeout: float = 900) -> dict:
     if not st["alive"]:
         return {"ok": False, "error": "bridge not running", "status": st}
     sync_scripts()
-    return cep_queue.submit(queue_dir(), entry_path(), action, data, timeout, st=st, app="After Effects")
+    from .ppro_bridge import BRIDGE_VERSION          # one bundle for both hosts
+    return cep_queue.submit(queue_dir(), entry_path(), action, data, timeout, st=st, app="After Effects",
+                            expect_version=BRIDGE_VERSION)
+
+
+def build_lock(what: str, **kw):
+    """One After Effects build at a time on this machine (motion-build): cep_queue.build_lock on ae-queue."""
+    return cep_queue.build_lock(queue_dir(), what, **kw)

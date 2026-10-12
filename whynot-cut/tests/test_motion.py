@@ -36,6 +36,7 @@ class FakePanel:
 
     def __init__(self, queue: Path, host: str = "AEFT", mute: bool = False, age_s: float = 0.0):
         self.q, self.host, self.mute, self.age = queue, host, mute, age_s
+        self.data_raw = []
         self.stop = threading.Event()
         self.t = threading.Thread(target=self.loop, daemon=True)
 
@@ -51,7 +52,7 @@ class FakePanel:
 
     def beat(self):
         tmp = self.q / "bridge.heartbeat.tmp"
-        tmp.write_text(json.dumps({"at": (time.time() - self.age) * 1000, "busy": False, "version": "3.1.0",
+        tmp.write_text(json.dumps({"at": (time.time() - self.age) * 1000, "busy": False, "version": "3.1.1",
                                    "host": self.host}), encoding="utf-8")
         try:
             tmp.replace(self.q / "bridge.heartbeat")
@@ -68,7 +69,8 @@ class FakePanel:
                 job = json.loads(jf.read_text(encoding="utf-8"))
                 run = jf.with_name(jf.name.replace(".job.json", ".running"))
                 jf.rename(run)
-                data = json.loads(Path(job["data_file"]).read_text(encoding="ascii"))
+                self.data_raw.append(Path(job["data_file"]).read_bytes())     # the engine deletes it once answered
+                data = json.loads(self.data_raw[-1].decode("ascii"))
                 inner = json.dumps({"ok": True, "echo": data["action"]})
                 (self.q / f"{job['id']}.result.json").write_text(json.dumps({"ok": True, "result": inner}),
                                                                   encoding="utf-8")
@@ -89,14 +91,13 @@ class TestBridge(unittest.TestCase):
 
     def test_queue_roundtrip(self):
         from lib import cep_queue
-        with FakePanel(self.q):
+        with FakePanel(self.q) as fp:
             r = cep_queue.submit(self.q, self.script, "ping", {"a": 1, "t": "عربي"}, timeout=10)
         self.assertTrue(r["ok"], r)
         self.assertEqual(r["response"]["echo"], "ping")
-        data_files = list(self.q.glob("*.data.json"))
-        self.assertEqual(len(data_files), 1)
-        raw = data_files[0].read_bytes()
-        self.assertTrue(all(b < 128 for b in raw), "data file must be pure ASCII")
+        self.assertEqual(len(fp.data_raw), 1)
+        self.assertTrue(all(b < 128 for b in fp.data_raw[0]), "data file must be pure ASCII")
+        self.assertEqual(list(self.q.glob("*.data.json")), [])          # cleaned up once the result was read (T2.9)
 
     def test_install_never_downgrades(self):
         """Peer request: `reel setup`/`ppro-install` from an older plugin silently put bridge 3.0.0 back over 3.1.0 (and
@@ -154,7 +155,7 @@ class TestBridge(unittest.TestCase):
         from lib import ppro_bridge
         self.assertEqual(list(inspect.signature(ppro_bridge.submit).parameters), ["action", "data", "timeout", "script"])
         self.assertEqual(ppro_bridge.QUEUE.name, "ppro-queue")
-        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.1.0")
+        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.1.1")
 
     def test_ae_status_needs_aeft(self):
         from unittest import mock
@@ -173,14 +174,14 @@ class TestBridge(unittest.TestCase):
         self.assertIn("PPRO: { queue: 'ppro-queue', scripts: 'ppro-scripts', entry: 'NHPP' }", js)
         self.assertIn("AEFT: { queue: 'ae-queue', scripts: 'ae-scripts', entry: 'NHAE' }", js)
         self.assertIn("getHostEnvironment", js)
-        self.assertIn("VERSION = '3.1.0'", js)
+        self.assertIn("VERSION = '3.1.1'", js)
         assert_js_syntax(self, CEP / "js/bridge.js")
 
     def test_manifest_hosts(self):
         root = ET.parse(CEP / "CSXS/manifest.xml").getroot()
         hosts = {h.get("Name"): h.get("Version") for h in root.iter("Host")}
         self.assertEqual(hosts, {"PPRO": "[22.0,99.9]", "AEFT": "[24.0,99.9]"})
-        self.assertEqual(root.get("ExtensionBundleVersion"), "3.1.0")
+        self.assertEqual(root.get("ExtensionBundleVersion"), "3.1.1")
 
     def test_ae_sync_scripts(self):
         from unittest import mock

@@ -4,12 +4,16 @@
    *.job.json it evaluates the whitelisted JSX with a data file and writes *.result.json. A fixed folder is used because the
    plugin's own install path changes on every update. Writes a heartbeat so the pipeline knows the bridge is running.
    <engine home> comes from bridge-config.json (written at install), else the first of ~/.whynot-cut, ~/.reel-editor,
-   ~/.dr-nahla-editor that holds an engine (a runtime `current` file or a venv), else ~/.whynot-cut. */
+   ~/.dr-nahla-editor that holds an engine (a runtime `current` file or a venv), else ~/.whynot-cut.
+   Two copies of this script load (manifest.xml): the hidden daemon works the queue; the visible panel only shows the
+   daemon's state, and works the queue itself only while no daemon heartbeat is fresh (the daemon did not load).
+   Queue protocol 3.1.1 (engine/reel/lib/cep_queue.py documents every file): a job past its `expires_at` is answered
+   {ok:false, error:"expired"} and never run; `<id>.claimed` marks the claim (the engine's result timeout starts there). */
 (function () {
   var req = (window.cep_node && window.cep_node.require) || window.require;
   var fs = req('fs'), path = req('path'), os = req('os');
   var HOME = os.homedir();
-  var VERSION = '3.1.0';
+  var VERSION = '3.1.1';
   var HOSTS = {
     PPRO: { queue: 'ppro-queue', scripts: 'ppro-scripts', entry: 'NHPP' },
     AEFT: { queue: 'ae-queue', scripts: 'ae-scripts', entry: 'NHAE' }
@@ -20,6 +24,10 @@
   var HOST = hostId();
   if (!HOSTS[HOST]) { HOST = 'PPRO'; }
   var CFG = HOSTS[HOST];
+  var EXT_ID = '';
+  try { EXT_ID = String(window.__adobe_cep__.getExtensionId() || ''); } catch (e) {}
+  // an unknown id (an older CEP) keeps the old behaviour: this copy works the queue
+  var ROLE = /\.panel$/.test(EXT_ID) ? 'panel' : 'daemon';
   function extensionDir() {
     try {
       var p = decodeURI(window.__adobe_cep__.getSystemPath('extension')).replace(/^file:\/+/, '');
@@ -51,11 +59,14 @@
   if (!fs.existsSync(BASE)) { fs.mkdirSync(BASE, { recursive: true }); }
   BASE = fs.realpathSync(BASE);
   var QUEUE = path.join(BASE, CFG.queue);
+  var HEARTBEAT = path.join(QUEUE, 'bridge.heartbeat');
   var ALLOWED = path.join(BASE, CFG.scripts) + path.sep;
   var busy = false;
   // the running job; a lost evalScript callback must not block the queue forever (callers give up after <= 15 min)
-  var current = null, currentFile = null, startedAt = 0;
+  var current = null, currentFile = null, currentAction = '', startedAt = 0;
   var JOB_TIMEOUT_MS = 20 * 60 * 1000;
+  var DAEMON_STALE_MS = 3000;              // the panel takes over when the daemon has not beaten for this long
+  var loadedAt = Date.now(), working = (ROLE === 'daemon');
   var stateEl = document.getElementById('state'), logEl = document.getElementById('log');
 
   function log(m) {
@@ -66,24 +77,48 @@
     if (!fs.existsSync(QUEUE)) { fs.mkdirSync(QUEUE, { recursive: true, mode: 448 }); }
     try { fs.chmodSync(QUEUE, 448); } catch (e) {}
   }
+  // write then rename: a reader never sees half a file (Windows refuses the rename while a reader has the file open:
+  // then write in place, the engine retries a torn read)
+  function writeAtomic(file, text) {
+    var tmp = file + '.' + ROLE + '.tmp';
+    try { fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); return; } catch (e) {}
+    try { fs.unlinkSync(tmp); } catch (e2) {}
+    fs.writeFileSync(file, text);
+  }
   function heartbeat() {
     try {
-      fs.writeFileSync(path.join(QUEUE, 'bridge.heartbeat'),
-        JSON.stringify({ at: Date.now(), busy: busy, version: VERSION, host: HOST, who: (document.getElementById('state') ? 'ui' : 'bg') }));
+      writeAtomic(HEARTBEAT, JSON.stringify({ at: Date.now(), busy: busy, version: VERSION, host: HOST, role: ROLE,
+                                              current: current, action: currentAction || null }));
     } catch (e) {}
   }
+  function readBeat() {
+    try { return JSON.parse(fs.readFileSync(HEARTBEAT, 'utf8')); } catch (e) { return null; }
+  }
   function finish(job, file, payload) {
-    try { fs.writeFileSync(path.join(QUEUE, job.id + '.result.json'), JSON.stringify(payload)); }
+    try { writeAtomic(path.join(QUEUE, job.id + '.result.json'), JSON.stringify(payload)); }
     catch (e) { log('could not write result for ' + job.id + ': ' + e); }
     try { fs.unlinkSync(file); } catch (e) {}
-    if (current === job.id) { busy = false; current = null; currentFile = null; }
+    if (current === job.id) { busy = false; current = null; currentFile = null; currentAction = ''; }
+  }
+  function expired(job) {
+    var t = job && job.expires_at ? Date.parse(job.expires_at) : NaN;
+    return !isNaN(t) && Date.now() > t;
   }
   function runJob(file) {
-    var job;
-    try { job = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { try { fs.unlinkSync(file); } catch (e2) {} return; }
-    var running = file.replace(/\.job\.json$/, '.running');
-    // atomic claim: if the panel and the background copy both see the job, only one rename succeeds
+    var job, running = file.replace(/\.job\.json$/, '.running');
+    try { job = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
+      if (e.code === 'ENOENT') { return; }                 // the engine cancelled it this instant
+      try { fs.renameSync(file, running); } catch (e2) { return; }
+      return finish({ id: path.basename(file).replace(/\.job\.json$/, '') }, running,
+                    { ok: false, error: 'unreadable job: ' + e, at: Date.now() });
+    }
+    // atomic claim: if two copies (or a cancelling engine) race for the job, only one rename succeeds
     try { fs.renameSync(file, running); } catch (e) { return; }
+    if (expired(job)) {
+      log('EXPIRED ' + job.id + ' (' + (job.action || '') + ') — not run');
+      return finish(job, running, { ok: false, error: 'expired', expires_at: job.expires_at, at: Date.now() });
+    }
+    try { fs.writeFileSync(path.join(QUEUE, job.id + '.claimed'), JSON.stringify({ at: Date.now(), by: ROLE })); } catch (e) {}
     var script;
     try { script = fs.realpathSync(job.script); } catch (e) {
       log('REJECTED missing script: ' + job.script);
@@ -93,9 +128,10 @@
       log('REJECTED script outside ' + CFG.scripts + ': ' + script);
       return finish(job, running, { ok: false, error: 'script not in whitelisted folder', script: script, at: Date.now() });
     }
-    busy = true; current = job.id; currentFile = running; startedAt = Date.now();
-    stateEl.textContent = 'running ' + job.id + ' (' + (job.action || '') + ')';
-    log('run ' + job.id + ' ' + (job.action || ''));
+    busy = true; current = job.id; currentFile = running; currentAction = job.action || ''; startedAt = Date.now();
+    heartbeat();
+    stateEl.textContent = 'running ' + job.id + ' (' + currentAction + ')';
+    log('run ' + job.id + ' ' + currentAction);
     var code = '$.evalFile(new File(' + JSON.stringify(script) + ')); ' + CFG.entry + '.run(' + JSON.stringify(job.data_file) + ');';
     window.__adobe_cep__.evalScript(code, function (res) {
       if (current !== job.id) { log('late result ignored ' + job.id); return; }   // already timed out
@@ -105,7 +141,27 @@
       finish(job, running, { ok: ok, result: res, at: Date.now() });
     });
   }
+  // the panel: show the daemon's state; work the queue only while the daemon is not beating
+  function panelShouldWork() {
+    var hb = readBeat();
+    var daemon = hb && hb.role === 'daemon' && Date.now() - hb.at < DAEMON_STALE_MS;
+    if (daemon) {
+      if (working && !busy) { working = false; log('background bridge running: this panel shows its state only'); }
+      if (!working) {
+        stateEl.textContent = hb.busy ? 'running ' + hb.current + ' (' + (hb.action || '') + ') in the background'
+                                      : 'idle — the background bridge is watching the queue';
+      }
+      return working;
+    }
+    if (!working && Date.now() - loadedAt >= DAEMON_STALE_MS) {
+      working = true;
+      stateEl.textContent = 'idle — watching queue';
+      log('background bridge not running: this panel works the queue');
+    }
+    return working;
+  }
   function tick() {
+    if (ROLE === 'panel' && !panelShouldWork()) { return; }
     heartbeat();
     if (busy && Date.now() - startedAt > JOB_TIMEOUT_MS) {
       log('TIMEOUT ' + current + ' — no reply from ' + HOST + '; queue released');
@@ -119,8 +175,8 @@
   }
   try {
     ensureQueue();
-    stateEl.textContent = 'idle — watching queue';
-    log('WhyNot Cut Bridge ' + VERSION + ' (' + HOST + ') started; queue ' + QUEUE);
+    stateEl.textContent = ROLE === 'daemon' ? 'idle — watching queue' : 'looking for the background bridge…';
+    log('WhyNot Cut Bridge ' + VERSION + ' (' + HOST + ', ' + ROLE + ') started; queue ' + QUEUE);
     setInterval(tick, 1000);
   } catch (e) {
     stateEl.textContent = 'FAILED to start: ' + e;
