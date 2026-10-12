@@ -173,7 +173,8 @@ def resolve_engine_home(env: Mapping, home, *, windows: Optional[bool] = None) -
 
 
 def describe_engine_home_source(source: str) -> str:
-    """The source of resolve_engine_home in words, for preflight and the log."""
+    """The source of resolve_engine_home in words, for preflight and the log ("chosen": -EngineHome / --engine-home
+    or the bootstrap's location question)."""
     kind, _, rest = (source or "").partition(":")
     if kind == "env":
         return f"{rest} is set"
@@ -182,7 +183,73 @@ def describe_engine_home_source(source: str) -> str:
     if kind == "settings":
         f, _, key = rest.rpartition(" ")
         return f"the plugin option engine_home in {f} (pluginConfigs {key})"
-    return {"sandbox": "sandbox", "default": "default"}.get(source, source or "default")
+    return {"sandbox": "sandbox", "default": "default", "chosen": "chosen"}.get(source, source or "default")
+
+
+def saved_path(value: str, home, *, windows: Optional[bool] = None) -> Path:
+    """A saved engine_home value as the engine reads it (plat.native_path, `~` = the user home), made absolute."""
+    windows = os.name == "nt" if windows is None else windows
+    return _abs(_native(value, Path(home), windows))
+
+
+def same_path(a, b) -> bool:
+    return _norm(a) == _norm(b)
+
+
+def engine_home_choice_problem(path, *, home, plugin_root, clients_roots: Iterable = (),
+                               sandbox_home=None) -> Optional[str]:
+    """Why `path` must not be the engine home the editor chose (-EngineHome / --engine-home, or the bootstrap's
+    location question), else None. The bootstraps check the same before anything is downloaded, plus free space and
+    write access. Refused: not a full path; a drive root; inside the plugin folder (replaced on every update); the
+    user folder or a folder holding it; inside Claude's folder; the clients folder or inside it; a folder with a
+    `.whynot-client` marker in it or in a folder above it; in a sandbox, outside the sandbox home."""
+    p = str(path or "").strip()
+    if not p or not os.path.isabs(p) or (os.name == "nt" and not re.match(r"^([A-Za-z]:[\\/]|[\\/]{2})", p)):
+        return f"{p or '(empty)'} is not a full path (for example C:\\WhyNotCut or /Users/you/WhyNotCut)"
+    n = _norm(p)
+    if Path(n).parent == Path(n):
+        return f"{p} is a drive root; choose a folder on it, for example {Path(n) / 'WhyNotCut'}"
+    if _within(n, _norm(plugin_root), strict=False):
+        return f"{p} is inside the plugin folder {plugin_root}, which is replaced on every update"
+    if _within(_norm(home), n, strict=False):
+        return f"{p} is your user folder or holds it; choose a folder of its own, for example {Path(n) / 'WhyNotCut'}"
+    if _within(n, _norm(Path(home) / ".claude"), strict=False):
+        return f"{p} is inside Claude's folder {Path(home) / '.claude'}"
+    for c in clients_roots:
+        if c and _within(n, _norm(c), strict=False):
+            return f"{p} is your clients folder {c} (or inside it); keep the engine apart from client footage"
+    cur = Path(n)
+    while True:
+        if (cur / CLIENT_MARKER).exists():
+            return f"{p} is inside a client folder ({cur} holds {CLIENT_MARKER})"
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    if sandbox_home is not None and not _within(n, _norm(sandbox_home), strict=True):
+        return f"{p} is outside the sandbox home {sandbox_home} (--home: nothing outside it is used)"
+    return None
+
+
+# --------------------------------------------------------------------------------------------- the pointer file
+def pointer_file(env: Mapping, home) -> Path:
+    """The SessionStart hook's record of the plugin options (engine plat.options_file): WHYNOT_OPTIONS_FILE, else
+    <home>/.whynot-cut/plugin-options.json. It stays there also when the engine home is elsewhere."""
+    home = Path(home)
+    if env.get("WHYNOT_OPTIONS_FILE"):
+        return _abs(_tilde(env["WHYNOT_OPTIONS_FILE"], home))
+    return home / ".whynot-cut" / OPTIONS_FILE
+
+
+def read_pointer(path) -> Optional[dict]:
+    """The pointer as the engine reads it (a JSON object, UTF-8 without a BOM), else None."""
+    return _json_object(Path(path))
+
+
+def pointer_bytes(clients_root: str, engine_home: str) -> bytes:
+    """Exactly what hooks/session_context.py write_pointer writes: the keys clients_root, engine_home, updated, one
+    per line (indent 1; bin/reel.cmd reads it line by line), raw UTF-8 (ensure_ascii=False), a final newline."""
+    body = {"clients_root": clients_root, "engine_home": engine_home, "updated": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    return (json.dumps(body, ensure_ascii=False, indent=1) + "\n").encode("utf-8")
 
 
 @dataclass
@@ -194,24 +261,45 @@ class Paths:
     appdata: Path
     localappdata: Path
     sandbox: bool
-    engine_home_source: str = "default"  # resolve_engine_home's source; "sandbox" under --home
+    engine_home_source: str = "default"  # resolve_engine_home's source; "sandbox" (its default) under --home;
+    #                                      "chosen" for --engine-home with --engine-home-chosen
+    pointer: Optional[Path] = None  # the plugin options pointer file (pointer_file); None = <home>/.whynot-cut/...
 
     @classmethod
-    def from_env(cls, home_override: Optional[str] = None, env: Mapping = os.environ) -> "Paths":
+    def from_env(cls, home_override: Optional[str] = None, env: Mapping = os.environ,
+                 engine_home: Optional[str] = None) -> "Paths":
+        """`engine_home`: the folder the editor chose (bootstrap -EngineHome / --engine-home or its location
+        question); it wins over the resolver. A sandbox (--home) resolves the engine's way too, but only from its own
+        files (<dir>/.whynot-cut/plugin-options.json, <dir>/.claude/settings.json), never from the environment."""
         if home_override:
             home = _abs(home_override)
-            return cls(home=home, whynot=home / ".whynot-cut", claude_dir=home / ".claude",
+            if engine_home:
+                whynot, source = _abs(engine_home), "chosen"
+            else:
+                whynot, source = resolve_engine_home({}, home)
+                source = "sandbox" if source == "default" else source
+            return cls(home=home, whynot=whynot, claude_dir=home / ".claude",
                        appdata=home / "AppData" / "Roaming", localappdata=home / "AppData" / "Local", sandbox=True,
-                       engine_home_source="sandbox")
+                       engine_home_source=source, pointer=home / ".whynot-cut" / OPTIONS_FILE)
         order = ("USERPROFILE", "HOME") if os.name == "nt" else ("HOME", "USERPROFILE")
         raw = next((env[k] for k in order if env.get(k)), None)
         home = _abs(raw) if raw else Path.home()
-        whynot, source = resolve_engine_home(env, home)
+        whynot, source = (_abs(engine_home), "chosen") if engine_home else resolve_engine_home(env, home)
         claude = _abs(env["CLAUDE_CONFIG_DIR"]) if env.get("CLAUDE_CONFIG_DIR") else home / ".claude"
         appdata = _abs(env["APPDATA"]) if env.get("APPDATA") else home / "AppData" / "Roaming"
         local = _abs(env["LOCALAPPDATA"]) if env.get("LOCALAPPDATA") else home / "AppData" / "Local"
         return cls(home=home, whynot=whynot, claude_dir=claude, appdata=appdata, localappdata=local, sandbox=False,
-                   engine_home_source=source)
+                   engine_home_source=source, pointer=pointer_file(env, home))
+
+    @property
+    def options_file(self) -> Path:
+        """The pointer ~/.whynot-cut/plugin-options.json (or WHYNOT_OPTIONS_FILE outside a sandbox)."""
+        return self.pointer or self.home / ".whynot-cut" / OPTIONS_FILE
+
+    @property
+    def default_whynot(self) -> Path:
+        """~/.whynot-cut: the engine home when nothing names another one (where the pointer always lives)."""
+        return self.home / ".whynot-cut"
 
     # engine home layout (installer.md R.1)
     bin_dir = property(lambda s: s.whynot / "bin")

@@ -5,11 +5,15 @@ preflight  read-only facts (ctx.facts): OS, free space on the engine drive (< 6 
            download; < 9 GB amber), a home path with non-ASCII letters or a space, Documents in OneDrive / iCloud,
            Claude Code, Adobe hosts, NVIDIA, an earlier install, Windows Smart App Control. A sandbox (--home) never
            reads the registry or probes processes; a dry run starts no process.
-questions  the clients folder and the chat language, asked right after preflight (ID-6) so the long downloads run
-           unattended: --clients-folder / --language, else the editor's preferences file, else the defaults
-           (language `ar`, ID-4). The clients folder is never created here.
+questions  the clients folder, the chat language and the Whisper model, asked right after preflight (ID-6) so the long
+           downloads run unattended: --clients-folder / --language / --model, else the editor's preferences file,
+           else the defaults (language `ar`, ID-4; the model large-v3, the strongest, on every machine: ID-8 / ID-9).
+           The clients folder is never created here. Then the engine home is remembered (claude.remember_engine_home,
+           ID-10: settings.json pluginConfigs + the pointer file, only when it is not ~/.whynot-cut or one of them
+           names another folder). With --skip questions nothing is asked, but the answers and the engine home are
+           still settled.
 settings   `reel settings --init <home> --force --set clients_root=... --set language=... --set whisper_model=...`.
-model      the Whisper model for this hardware, downloaded by a detached background `reel model-download`.
+model      the chosen Whisper model, downloaded by a detached background `reel model-download`.
 state      state.json: plugin, channel, installed_at, platform, uv, python, runtime, answers.
 doctor     `reel doctor` (JSON) -> state.last_doctor; render_checklist() prints [OK] / [!!] / [XX] per step and the
            doctor's fixes.
@@ -37,7 +41,13 @@ RED_GB, AMBER_GB = 6, 9  # without the model / with large-v3
 ENGINE_TIMEOUT = 300  # settings, doctor
 PREFS = "whynot-cut.local.md"
 LANGUAGES = ("ar", "en")
-MODELS = ("large-v3", "large-v3-turbo", "medium", "small")  # `reel model-download --model` choices
+MODELS = ("large-v3", "large-v3-turbo", "medium", "small")  # `reel model-download --model` choices, strongest first
+DEFAULT_MODEL = "large-v3"  # ID-8 / ID-9 (owner decision 2026-10-12): the strongest, on every machine
+MODEL_SIZES = {"large-v3": "2.9 GB", "large-v3-turbo": "1.6 GB", "medium": "1.5 GB", "small": "0.5 GB"}  # download
+MODEL_NOTES = {"large-v3": ("best accuracy (recommended)", "أعلى دقة (موصى به)"),
+               "large-v3-turbo": ("faster, a little less accurate", "أسرع، ودقته أقل قليلًا"),
+               "medium": ("smaller, less accurate", "أصغر، ودقته أقل"),
+               "small": ("smallest, least accurate", "الأصغر، والأقل دقة")}
 CLIENTS_FOLDER = "WhyNot Clients"
 START_URL = "claude://code/new?q=%2Fwhynot-cut%3Astart"
 START_MESSAGE = "Open Claude and type /whynot-cut:start"
@@ -247,6 +257,7 @@ def resolve_answers(ctx: base.Ctx) -> dict:
     """The answers without asking: flags, else preferences, else defaults."""
     prefs = read_preferences(ctx.paths)
     flag_root, flag_lang = getattr(ctx.args, "clients_folder", None), getattr(ctx.args, "language", None)
+    flag_model = getattr(ctx.args, "model", None)
     if flag_root:
         root, rsrc = flag_root, "--clients-folder"
     elif prefs.get("clients_root"):
@@ -262,12 +273,39 @@ def resolve_answers(ctx: base.Ctx) -> dict:
         lang, lsrc = prefs["language"], "your preferences"
     else:
         lang, lsrc = "ar", "default"
-    return {"clients_root": _norm_folder(root), "language": lang, "from": {"clients_root": rsrc, "language": lsrc}}
+    saved = saved_model(ctx.paths)
+    if flag_model in MODELS:
+        model, msrc = flag_model, "--model"
+    elif saved:
+        model, msrc = saved, "your preferences"
+    else:
+        model, msrc = DEFAULT_MODEL, "default"
+    return {"clients_root": _norm_folder(root), "language": lang, "whisper_model": model,
+            "from": {"clients_root": rsrc, "language": lsrc, "whisper_model": msrc}}
+
+
+def _ask_model(ctx: base.Ctx, a: dict) -> None:
+    """The Whisper model question (English + Arabic, sizes shown); the current answer is the default."""
+    ctx.log.info("Transcription model (Whisper), downloaded in the background / نموذج التفريغ الصوتي (Whisper)، "
+                 "يُنزَّل في الخلفية:")
+    for i, m in enumerate(MODELS, 1):
+        en, ar = MODEL_NOTES[m]
+        ctx.log.info(f"  {i}) {m:<15} about {MODEL_SIZES[m]:<7} {en} / {ar}")
+    while True:
+        got = base.ask(f"Model / النموذج: 1-{len(MODELS)} or a name [{a['whisper_model']}]: ", "").strip().lower()
+        if not got:
+            return
+        pick = MODELS[int(got) - 1] if got.isdigit() and 1 <= int(got) <= len(MODELS) else got
+        if pick in MODELS:
+            a["whisper_model"], a["from"]["whisper_model"] = pick, "you"
+            return
+        ctx.log.info(f"'{got}' is not one of the choices / ليس من الاختيارات: {', '.join(MODELS)}")
 
 
 def step_questions(ctx: base.Ctx) -> base.StepResult:
     a = resolve_answers(ctx)
-    if base.can_ask(ctx.args):
+    skipped = "questions" in (getattr(ctx.args, "skip", None) or ())
+    if not skipped and base.can_ask(ctx.args):
         cloud = cloud_documents(ctx.facts)
         if cloud and a["from"]["clients_root"].startswith("default:"):
             ctx.log.info(f"Your Documents folder is synced to {cloud}; the suggested clients folder is outside it, so "
@@ -284,25 +322,23 @@ def step_questions(ctx: base.Ctx) -> base.StepResult:
             if lang in LANGUAGES:
                 a["language"], a["from"]["language"] = lang, "you"
                 break
+        _ask_model(ctx, a)
     ctx.answers = a
-    return base.StepResult("questions", "ok", f"clients folder {a['clients_root']} ({a['from']['clients_root']}; "
-                                              "created when you add your first client); language "
-                                              f"{a['language']} ({a['from']['language']})")
+    m = a["whisper_model"]
+    detail = (("not asked (--skip questions): " if skipped else "")
+              + f"clients folder {a['clients_root']} ({a['from']['clients_root']}; created when you add your first "
+              f"client); language {a['language']} ({a['from']['language']}); Whisper {m} (about {MODEL_SIZES[m]}; "
+              f"{a['from']['whisper_model']})")
+    home = claude.remember_engine_home(ctx.paths, {} if ctx.paths.sandbox else os.environ, ctx.log,
+                                       dry_run=bool(ctx.args.dry_run))
+    status = "amber" if home["status"] == "amber" else "ok"
+    return base.StepResult("questions", status, f"{detail}; {home['detail']}", home["needs_you"])
+
+
+step_questions.handles_skip = True  # --skip questions: nothing is asked, the engine home is still remembered
 
 
 # --------------------------------------------------------------------------------------------- settings / model
-def model_for(facts: dict, platform: str, components: dict) -> str:
-    """components models.by_hardware: NVIDIA -> large-v3, Apple silicon -> large-v3 (MLX), else large-v3-turbo."""
-    table = base.cget(components, "models.by_hardware") or {}
-    if facts.get("nvidia"):
-        m = table.get("nvidia", "large-v3")
-    elif platform == "mac-arm64":
-        m = table.get("apple_silicon", "large-v3")
-    else:
-        m = table.get("cpu", "large-v3-turbo")
-    return m if m in MODELS else "large-v3-turbo"
-
-
 def saved_model(paths: base.Paths) -> Optional[str]:
     """The editor's own whisper_model from the raw preferences file (not the engine's defaults); None when there is
     none or it is not a model the engine knows."""
@@ -311,18 +347,16 @@ def saved_model(paths: base.Paths) -> Optional[str]:
 
 
 def chosen_model(ctx: base.Ctx) -> str:
-    """The editor's saved choice wins (kept on re-install); else the model for this hardware."""
-    return saved_model(ctx.paths) or model_for(ctx.facts, ctx.platform, ctx.components)
+    """The questions step's answer (--model, the question, else the saved preference, else large-v3)."""
+    m = (ctx.answers or {}).get("whisper_model")
+    return m if m in MODELS else resolve_answers(ctx)["whisper_model"]
 
 
 def step_settings(ctx: base.Ctx) -> base.StepResult:
     a = ctx.answers or resolve_answers(ctx)
-    saved = saved_model(ctx.paths)
-    model = saved or model_for(ctx.facts, ctx.platform, ctx.components)
+    model = chosen_model(ctx)
     args = ["settings", "--init", str(ctx.paths.home), "--force", "--set", f"clients_root={a['clients_root']}",
-            "--set", f"language={a['language']}"]
-    if not saved:  # an existing choice is kept: only a first install (or an unusable value) gets the hardware pick
-        args += ["--set", f"whisper_model={model}"]
+            "--set", f"language={a['language']}", "--set", f"whisper_model={model}"]
     if ctx.args.dry_run:
         return base.StepResult("settings", "skipped", "dry run: would run reel " + _shown(args))
     if _engine_missing(ctx):
@@ -379,8 +413,9 @@ def step_model(ctx: base.Ctx) -> base.StepResult:
                        f"run it later: {shown}")
     ctx.state.data["models"] = {"model": model, "pid": pid, "log": str(log_path), "started_at": base.now_iso(),
                                 "command": shown}
-    return _record(ctx, "model", "ok", f"Whisper {model} is downloading in the background (about 3 GB; log "
-                                       f"{log_path}); you can start working meanwhile")
+    return _record(ctx, "model", "ok", f"Whisper {model} is downloading in the background (about "
+                                       f"{MODEL_SIZES.get(model, '3 GB')}; log {log_path}); you can start working "
+                                       "meanwhile")
 
 
 step_model.handles_skip = True  # says itself how to download the model later
@@ -422,7 +457,9 @@ def step_state(ctx: base.Ctx) -> base.StepResult:
              channel=getattr(ctx.args, "channel", None) or ctx.components.get("channel", "stable"),
              installed_at=base.now_iso(), platform=ctx.platform,
              uv={"version": _uv_version(ctx) or base.cget(ctx.components, "uv.version")}, python=py_ver,
-             answers={"clients_root": a["clients_root"], "language": a["language"]})
+             answers={"clients_root": a["clients_root"], "language": a["language"],
+                      "whisper_model": chosen_model(ctx)},
+             engine_home={"path": str(ctx.paths.whynot), "source": ctx.paths.engine_home_source})
     d["runtime"] = dict(rt, id=rid, lock_sha256=lock_sha) if rid else rt
     return _record(ctx, "state", "ok", f"{ctx.paths.state_file} written")
 

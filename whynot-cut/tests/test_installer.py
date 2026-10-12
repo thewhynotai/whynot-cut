@@ -478,15 +478,69 @@ class TestEngineHome(unittest.TestCase):
                     arabic += "محرك".encode("utf-8") in f.read_bytes()
         self.assertGreaterEqual(arabic, 10)
 
-    def test_paths_use_it_outside_the_sandbox_only(self):
+    def test_paths_resolve_it_outside_and_inside_the_sandbox(self):
         home = self.tmp / ARABIC_HOME
         far = self.tmp / "engine far"
         EngineHomeCases.pointer(home, {"engine_home": str(far)})
         p = base.Paths.from_env(None, env={"HOME": str(home), "USERPROFILE": str(home)})
         self.assertEqual((norm(p.whynot), p.engine_home_source.split(":")[0]), (norm(far), "pointer"))
         self.assertEqual(p.child_env({})["WHYNOT_HOME"], str(p.whynot))
+        # a sandbox follows its OWN pointer / settings.json (so its uninstall finds a chosen home) and never the
+        # environment of the machine running it
+        inner = home / "WhyNot Engine"
+        EngineHomeCases.pointer(home, {"engine_home": str(inner)})
+        s = base.Paths.from_env(str(home), env={"WHYNOT_HOME": str(far)})
+        self.assertEqual((norm(s.whynot), s.engine_home_source.split(":")[0]), (norm(inner), "pointer"))
+        (home / ".whynot-cut" / "plugin-options.json").unlink()
         s = base.Paths.from_env(str(home), env={"WHYNOT_HOME": str(far)})
         self.assertEqual((s.whynot, s.engine_home_source), (home / ".whynot-cut", "sandbox"))
+        # a chosen folder (-EngineHome / the location question) wins over both
+        c = base.Paths.from_env(str(home), env={}, engine_home=str(home / "Chosen"))
+        self.assertEqual((c.whynot, c.engine_home_source), (home / "Chosen", "chosen"))
+        c = base.Paths.from_env(None, env={"HOME": str(home), "USERPROFILE": str(home)}, engine_home=str(far))
+        self.assertEqual((c.whynot, c.engine_home_source), (far, "chosen"))
+
+    def test_a_chosen_engine_home_wins_and_is_not_cross_checked(self):
+        home = self.tmp / ARABIC_HOME
+        far = self.tmp / "engine far"
+        chosen = self.tmp / "chosen engine محرك"
+        EngineHomeCases.settings(home, {"whynot-cut@thewhynot-ai": {"options": {"engine_home": str(far)}}})
+        with mock.patch.dict(os.environ, clean_engine_env(home), clear=True):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = cli.main(["plan", "--engine-home", str(chosen), "--engine-home-chosen"])
+        self.assertEqual(rc, 0)
+        plan = json.loads(out.getvalue())
+        self.assertEqual((norm(plan["engine_home"]), plan["engine_home_source"]), (norm(chosen), "chosen"))
+        self.assertFalse(chosen.exists())  # plan writes nothing
+
+    def test_a_chosen_engine_home_must_be_a_safe_place(self):
+        home = self.tmp / ARABIC_HOME
+        plugin = self.tmp / "zip root" / "whynot-cut"
+        clients = self.tmp / "WhyNot Clients"
+        touch(self.tmp / "marked" / ".whynot-client", b"{}")
+        check = lambda p, **kw: base.engine_home_choice_problem(  # noqa: E731
+            p, home=home, plugin_root=plugin, clients_roots=[clients], **kw)
+        for path, needle in (("engine", "full path"), (Path(self.tmp.anchor), "drive root"),
+                             (plugin / "engine", "plugin folder"), (home, "user folder"),
+                             (home.parent, "user folder"), (home / ".claude" / "x", "Claude"),
+                             (clients, "clients folder"), (clients / "engine", "clients folder"),
+                             (self.tmp / "marked", "client folder"), (self.tmp / "marked" / "sub", "client folder")):
+            with self.subTest(str(path)):
+                problem = check(str(path))
+                self.assertIsNotNone(problem)
+                self.assertIn(needle, problem)
+        self.assertIsNone(check(str(self.tmp / "WhyNot Engine")))
+        self.assertIsNone(check(str(home / "WhyNot Engine"), sandbox_home=home))
+        self.assertIn("sandbox", check(str(self.tmp / "WhyNot Engine"), sandbox_home=home))
+        # the core refuses it before anything is written (exit 2)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = cli.main(["plan", "--home", str(home), "--engine-home", str(self.tmp / "outside"),
+                           "--engine-home-chosen"])
+        self.assertEqual(rc, 2)
+        self.assertIn("sandbox", err.getvalue())
+        self.assertFalse(home.exists())
 
     def test_plan_outside_the_sandbox_and_a_disagreeing_bootstrap(self):
         home = self.tmp / ARABIC_HOME
@@ -570,6 +624,46 @@ class TestEngineHomeInTheShells(unittest.TestCase):
                 path, src = out.rstrip("\n").split("\n", 1)
                 self.assertEqual(norm(path), norm(want), src)
                 self.assertEqual(src if src.startswith("env:") else src.split(":", 1)[0], kind)
+
+    def test_the_sandbox_resolvers_read_only_the_sandbox_files(self):
+        # -Home / --home: the sandbox's own pointer names the engine home; WHYNOT_HOME of the machine is ignored
+        home = self.tmp / ARABIC_HOME
+        inner = home / "WhyNot Engine محرك"
+        EngineHomeCases.pointer(home, {"engine_home": str(inner), "clients_root": ""})
+        env = clean_engine_env(home, WHYNOT_HOME=str(self.tmp / "machine engine"),
+                               CLAUDE_CONFIG_DIR=str(self.tmp / "machine claude"))
+        if find_powershell():
+            boot = INSTALLER / "core" / "bootstrap.ps1"
+            script = self.tmp / "resolve-sandbox.ps1"
+            script.write_text("".join(shell_function(boot, n, True) for n in self.PS_FUNCS)
+                              + "$r = Resolve-WncEngineHome $env:WNC_T_HOME -Sandbox\n"
+                              + "[IO.File]::WriteAllText($env:WNC_T_OUT, (Get-WncFullPath $r.Path) + \"`n\" + "
+                              + "$r.Source, (New-Object System.Text.UTF8Encoding $false))\n", encoding="utf-8-sig")
+            out = self.tmp / "out.txt"
+            r = subprocess.run([find_powershell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                                "-File", str(script)], capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", env=dict(env, WNC_T_HOME=str(home), WNC_T_OUT=str(out)), timeout=120,
+                               stdin=subprocess.DEVNULL, cwd=str(self.tmp))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            path, src = out.read_text(encoding="utf-8").split("\n", 1)
+            self.assertEqual((norm(path), src.split(":", 1)[0]), (norm(inner), "pointer"))
+        bash = find_bash()
+        if bash:
+            boot = INSTALLER / "core" / "bootstrap.sh"
+            script = self.tmp / "resolve-sandbox.sh"
+            script.write_bytes(('OS_NAME="$(uname -s)"\nJSON_PY="$1"\n'
+                                + "".join(shell_function(boot, n, False) for n in self.SH_FUNCS)
+                                + 'resolve_engine_home sandbox\n'
+                                + 'if command -v cygpath >/dev/null 2>&1; then ENGINE="$(cygpath -w "$ENGINE")"; fi\n'
+                                + "printf '%s\\n%s\\n' \"$ENGINE\" \"$ENGINE_SRC\"\n").encode("utf-8"))
+            r = subprocess.run([bash, script.as_posix(), Path(sys.executable).as_posix()], capture_output=True,
+                               env=env, timeout=120, stdin=subprocess.DEVNULL, cwd=str(self.tmp))
+            out = r.stdout.decode("utf-8", "replace")
+            self.assertEqual(r.returncode, 0, out + r.stderr.decode("utf-8", "replace"))
+            path, src = out.rstrip("\n").split("\n", 1)
+            self.assertEqual((norm(path), src.split(":", 1)[0]), (norm(inner), "pointer"))
+        if not find_powershell() and not bash:
+            self.skipTest("neither PowerShell nor bash is available")
 
     def test_the_bootstraps_pass_the_resolved_home_to_the_core(self):
         for name, needle in (("bootstrap.ps1", "Resolve-WncEngineHome $h"), ("bootstrap.sh", "resolve_engine_home"),
@@ -1164,8 +1258,9 @@ def runtime_module():
     return runtime
 
 
-def make_ctx(home: Path, components: dict, plugin_root: Path, platform: str = "win-x64", **args) -> base.Ctx:
-    paths = base.Paths.from_env(str(home), env={})
+def make_ctx(home: Path, components: dict, plugin_root: Path, platform: str = "win-x64", engine_home=None,
+             **args) -> base.Ctx:
+    paths = base.Paths.from_env(str(home), env={}, engine_home=str(engine_home) if engine_home else None)
     st = base.State(paths)
     st.load()
     ns = argparse.Namespace(skip=[], dry_run=False, uv=None, python=None, yes=True)
@@ -2659,6 +2754,152 @@ class TestQuestions(unittest.TestCase):
         self.assertEqual(ctx.answers["clients_root"], str(target))
 
 
+# --------------------------------------------------------------------------------------------- the chosen engine home
+POINTER_KEYS = ["clients_root", "engine_home", "updated"]  # hooks/session_context.py write_pointer, in this order
+
+
+class TestRememberEngineHome(unittest.TestCase):
+    """ID-10: a chosen engine home is remembered through the engine's own mechanisms only: settings.json
+    pluginConfigs["whynot-cut@thewhynot-ai"].options.engine_home (merged with every settings.json safety) and the
+    pointer ~/.whynot-cut/plugin-options.json (the SessionStart hook's format). A default install writes neither."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.home = self.tmp / ARABIC_HOME
+        self.engine = self.home / "WhyNot Engine محرك"
+        self.pointer = self.home / ".whynot-cut" / "plugin-options.json"
+        self.settings = self.home / ".claude" / "settings.json"
+        self.sy = system_module()
+
+    def ctx(self, engine_home=None, **args):
+        a = {"clients_folder": None, "language": None, "model": None}
+        a.update(args)
+        return make_ctx(self.home, {"schema": 1}, SK, "win-x64", engine_home=engine_home, **a)
+
+    def engine_sees(self) -> Path:
+        """What the engine itself (engine/reel/lib/plat.py) resolves now, with no variable set."""
+        from lib import plat
+        with mock.patch.dict(os.environ, clean_engine_env(self.home), clear=True):
+            return plat.engine_home()
+
+    def test_the_default_home_writes_nothing(self):
+        ctx = self.ctx()
+        r = self.sy.step_questions(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertFalse(self.pointer.exists())
+        self.assertFalse(self.settings.exists())
+        self.assertTrue(only_the_test_log(ctx.paths))
+        ctx = self.ctx(engine_home=self.home / ".whynot-cut")  # chosen, but it is the default: still nothing
+        self.assertEqual(self.sy.step_questions(ctx).status, "ok")
+        self.assertFalse(self.pointer.exists() or self.settings.exists())
+
+    def test_a_chosen_home_is_remembered_in_both_places(self):
+        original = json.dumps({"theme": "dark", "pluginConfigs": {
+            "x@y": {"options": {"a": 1}}, PID: {"enabled": True, "options": {"clients_root": "D:/عملاء"}}},
+            "zlast": True}, indent=2, ensure_ascii=False).encode("utf-8")
+        touch(self.settings, original)
+        touch(self.pointer, json.dumps({"clients_root": "D:/عملاء", "engine_home": "", "updated": "x"},
+                                       ensure_ascii=False, indent=1).encode("utf-8") + b"\n")
+        if not IS_WIN:
+            os.chmod(self.settings, 0o600)
+        ctx = self.ctx(engine_home=self.engine)
+        r = self.sy.step_questions(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertIn(str(self.engine), r.detail)
+        # the pointer: the hook's own format (one key per line, raw UTF-8, indent 1), clients_root kept
+        raw = self.pointer.read_bytes()
+        p = json.loads(raw.decode("utf-8"))
+        self.assertEqual(list(p), POINTER_KEYS)
+        self.assertEqual((p["engine_home"], p["clients_root"]), (str(self.engine), "D:/عملاء"))
+        self.assertEqual(raw, (json.dumps(p, ensure_ascii=False, indent=1) + "\n").encode("utf-8"))
+        self.assertIn("محرك".encode("utf-8"), raw)
+        # settings.json: only our option added, key order and the other entries kept, the original bytes backed up
+        s = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(list(s), ["theme", "pluginConfigs", "zlast"])
+        self.assertEqual(s["pluginConfigs"]["x@y"], {"options": {"a": 1}})
+        self.assertEqual(s["pluginConfigs"][PID], {"enabled": True, "options": {"clients_root": "D:/عملاء",
+                                                                                "engine_home": str(self.engine)}})
+        backups = list(self.settings.parent.glob("settings.json.whynot-backup-*"))
+        self.assertEqual([b.read_bytes() for b in backups], [original])
+        if not IS_WIN:
+            self.assertEqual(stat.S_IMODE(os.stat(self.settings).st_mode), 0o600)
+        # the engine and the installer now find it without any flag
+        self.assertEqual(norm(self.engine_sees()), norm(self.engine))
+        self.assertEqual(norm(base.Paths.from_env(str(self.home), env={}).whynot), norm(self.engine))
+        # a second run changes nothing (no second backup)
+        self.assertEqual(self.sy.step_questions(self.ctx()).status, "ok")
+        self.assertEqual(len(list(self.settings.parent.glob("settings.json.whynot-backup-*"))), 1)
+        self.assertEqual(self.pointer.read_bytes(), raw)
+
+    def test_no_files_yet_get_both_written(self):
+        ctx = self.ctx(engine_home=self.engine)
+        self.assertEqual(self.sy.step_questions(ctx).status, "ok")
+        p = json.loads(self.pointer.read_text(encoding="utf-8"))
+        self.assertEqual((list(p), p["engine_home"], p["clients_root"]), (POINTER_KEYS, str(self.engine), ""))
+        s = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(s, {"pluginConfigs": {PID: {"options": {"engine_home": str(self.engine)}}}})
+        self.assertEqual(set(os.listdir(self.home / ".whynot-cut")), {"plugin-options.json"})  # nothing else there
+
+    def test_back_to_the_default_clears_a_home_named_before(self):
+        old = self.home / "Old Engine"
+        EngineHomeCases.pointer(self.home, {"clients_root": "", "engine_home": str(old), "updated": "x"})
+        EngineHomeCases.settings(self.home, {PID: {"options": {"engine_home": str(old)}}})
+        ctx = self.ctx(engine_home=self.home / ".whynot-cut")
+        self.assertEqual(self.sy.step_questions(ctx).status, "ok")
+        self.assertEqual(json.loads(self.pointer.read_text(encoding="utf-8"))["engine_home"], "")
+        s = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(s["pluginConfigs"][PID]["options"]["engine_home"], "")
+        self.assertEqual(norm(self.engine_sees()), norm(self.home / ".whynot-cut"))
+
+    def test_settings_named_another_home_alone_is_rewritten_too(self):
+        # the SessionStart hook rewrites the pointer from the plugin option on every session: both must agree
+        EngineHomeCases.settings(self.home, {PID: {"options": {"engine_home": str(self.home / "Old Engine")}}})
+        ctx = self.ctx(engine_home=self.home / ".whynot-cut")
+        self.assertEqual(self.sy.step_questions(ctx).status, "ok")
+        s = json.loads(self.settings.read_text(encoding="utf-8"))
+        self.assertEqual(s["pluginConfigs"][PID]["options"]["engine_home"], "")
+
+    def test_unreadable_settings_is_amber_untouched_and_the_pointer_still_written(self):
+        bad = b'{"theme": "dark",, "pluginConfigs": {}}'
+        touch(self.settings, bad)
+        ctx = self.ctx(engine_home=self.engine)
+        r = self.sy.step_questions(ctx)
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertEqual(self.settings.read_bytes(), bad)
+        self.assertFalse(list(self.settings.parent.glob("settings.json.whynot-backup-*")))
+        self.assertIn("pluginConfigs", r.needs_you)  # the JSON to merge by hand
+        self.assertIn(json.dumps(str(self.engine), ensure_ascii=False), r.needs_you)
+        self.assertEqual(json.loads(self.pointer.read_text(encoding="utf-8"))["engine_home"], str(self.engine))
+
+    def test_plugin_configs_of_the_wrong_type_is_amber_and_untouched(self):
+        bad = json.dumps({"pluginConfigs": {PID: {"options": ["not", "an", "object"]}}}).encode("utf-8")
+        touch(self.settings, bad)
+        r = self.sy.step_questions(self.ctx(engine_home=self.engine))
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertEqual(self.settings.read_bytes(), bad)
+
+    def test_dry_run_writes_nothing(self):
+        ctx = self.ctx(engine_home=self.engine, dry_run=True)
+        ctx.log = Quiet(None, dry_run=True)
+        r = self.sy.step_questions(ctx)
+        self.assertIn("dry run", r.detail)
+        self.assertFalse(self.pointer.exists() or self.settings.exists())
+
+    def test_a_variable_that_overrides_the_choice_is_named(self):
+        # outside a sandbox: WHYNOT_HOME (or another engine-home variable) beats the saved option in the engine
+        other = self.tmp / "other engine"
+        env = {"HOME": str(self.home), "USERPROFILE": str(self.home), "WHYNOT_HOME": str(other)}
+        paths = base.Paths.from_env(None, env=env, engine_home=str(self.engine))
+        claude = claude_module()
+        r = claude.remember_engine_home(paths, env, Quiet(None))
+        self.assertEqual(r["status"], "amber", r)
+        self.assertIn("WHYNOT_HOME", r["detail"])
+        self.assertIn(str(other), r["detail"])
+        self.assertEqual(json.loads(self.pointer.read_text(encoding="utf-8"))["engine_home"], str(self.engine))
+
+
 # --------------------------------------------------------------------------------------------- adobe
 class TestAdobe(unittest.TestCase):
     SIGNED = ffmpeg_zip({"CSXS/manifest.xml": b"<ExtensionManifest/>", "index.html": b"<html>v1</html>",
@@ -2917,14 +3158,75 @@ class TestFonts(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------------------------- model
-class TestModelFor(unittest.TestCase):
-    def test_by_hardware(self):
-        sy = system_module()
-        comp = base.load_components(COMPONENTS)
-        self.assertEqual(sy.model_for({"nvidia": True}, "win-x64", comp), "large-v3")
-        self.assertEqual(sy.model_for({"nvidia": False}, "mac-arm64", comp), "large-v3")
-        self.assertEqual(sy.model_for({"nvidia": False}, "win-x64", comp), "large-v3-turbo")
-        self.assertEqual(sy.model_for({}, "mac-x64", {"schema": 1}), "large-v3-turbo")
+class TestModelChoice(unittest.TestCase):
+    """ID-8 / ID-9 (owner decision 2026-10-12): the installer asks which Whisper model to install; the default is
+    the strongest, large-v3, on every machine; a saved preference is the default on a re-install; --model wins."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.sy = system_module()
+        self.comp = base.load_components(COMPONENTS)
+
+    def ctx(self, plat="win-x64", **args):
+        a = {"clients_folder": None, "language": None, "model": None}
+        a.update(args)
+        return make_ctx(self.home, self.comp, SK, plat, **a)
+
+    def test_the_choices_strongest_first_with_their_sizes(self):
+        self.assertEqual(self.sy.MODELS, ("large-v3", "large-v3-turbo", "medium", "small"))
+        self.assertEqual(self.sy.DEFAULT_MODEL, "large-v3")
+        self.assertEqual(self.sy.MODEL_SIZES, {"large-v3": "2.9 GB", "large-v3-turbo": "1.6 GB", "medium": "1.5 GB",
+                                               "small": "0.5 GB"})
+
+    def test_the_default_is_large_v3_on_every_machine(self):
+        for plat, nvidia in (("win-x64", True), ("win-x64", False), ("mac-arm64", False), ("mac-x64", False)):
+            with self.subTest(plat=plat, nvidia=nvidia):
+                ctx = self.ctx(plat)
+                ctx.facts["nvidia"] = nvidia
+                a = self.sy.resolve_answers(ctx)
+                self.assertEqual((a["whisper_model"], a["from"]["whisper_model"]), ("large-v3", "default"))
+
+    def test_the_flag_wins_then_the_saved_preference(self):
+        prefs = touch(self.home / ".claude" / "whynot-cut.local.md", b"---\nwhisper_model: small\n---\n")
+        self.assertEqual(self.sy.resolve_answers(self.ctx())["whisper_model"], "small")
+        a = self.sy.resolve_answers(self.ctx(model="medium"))
+        self.assertEqual((a["whisper_model"], a["from"]["whisper_model"]), ("medium", "--model"))
+        prefs.write_bytes(b"---\nwhisper_model: tiny-xl\n---\n")  # not a model the engine knows: the default
+        self.assertEqual(self.sy.resolve_answers(self.ctx())["whisper_model"], "large-v3")
+
+    def test_the_question_lists_every_model_with_its_size_in_both_languages(self):
+        touch(self.home / ".claude" / "whynot-cut.local.md", b"---\nwhisper_model: medium\n---\n")
+        prompts = []
+
+        def answer(replies):
+            def ask(prompt, default=""):
+                prompts.append(prompt)
+                return replies.pop(0) if replies else default
+            return ask
+        for replies, want in (([""], "medium"), (["2"], "large-v3-turbo"), (["small"], "small"),
+                              (["huge", "9", "1"], "large-v3")):
+            with self.subTest(replies=list(replies)):
+                ctx = self.ctx()
+                prompts.clear()
+                # clients folder and language keep their defaults; then the model answers
+                with mock.patch.object(base, "can_ask", return_value=True), \
+                        mock.patch.object(base, "ask", side_effect=answer(["", ""] + list(replies))):
+                    r = self.sy.step_questions(ctx)
+                self.assertEqual(ctx.answers["whisper_model"], want, r.detail)
+                self.assertIn("Whisper " + want, r.detail)
+                self.assertIn("[medium]", prompts[2])  # the saved preference is the default on a re-install
+        text = ctx.paths.logs_dir.joinpath("install-test.log").read_text(encoding="utf-8")
+        for needle in ("large-v3", "2.9 GB", "large-v3-turbo", "1.6 GB", "medium", "1.5 GB", "small", "0.5 GB",
+                       "best accuracy", "faster", "أعلى دقة", "أسرع"):
+            self.assertIn(needle, text)
+
+    def test_no_question_with_yes(self):
+        ctx = self.ctx()
+        with mock.patch.object(base, "ask", side_effect=AssertionError("asked with --yes")):
+            self.sy.step_questions(ctx)
+        self.assertEqual(ctx.answers["whisper_model"], "large-v3")
 
 
 class TestModelStep(unittest.TestCase):
@@ -2943,7 +3245,7 @@ class TestModelStep(unittest.TestCase):
         with mock.patch.object(subprocess, "Popen", side_effect=AssertionError("no background process in tests")):
             r = self.sy.step_model(ctx)
         self.assertEqual(r.status, "skipped")
-        self.assertIn("model-download --model large-v3-turbo", r.detail)
+        self.assertTrue(r.detail.endswith("model-download --model large-v3"), r.detail)  # no NVIDIA: still large-v3
         self.assertFalse(ctx.paths.logs_dir.exists() and list(ctx.paths.logs_dir.glob("model-download-*")))
 
     def test_skip_flag_still_says_the_command(self):
@@ -2951,7 +3253,14 @@ class TestModelStep(unittest.TestCase):
         ctx.runtime_python = Path(sys.executable)
         [r] = base.run_steps(ctx, [("model", self.sy.step_model, ())])
         self.assertEqual(r.status, "skipped")
-        self.assertIn("model-download --model large-v3-turbo", r.detail)
+        self.assertTrue(r.detail.endswith("model-download --model large-v3"), r.detail)
+
+    def test_the_chosen_model_is_downloaded(self):
+        ctx = make_ctx(self.home, self.comp, SK, "win-x64")
+        ctx.runtime_python = Path(sys.executable)
+        ctx.answers = {"clients_root": str(self.home / "C"), "language": "ar", "whisper_model": "small"}
+        r = self.sy.step_model(ctx)
+        self.assertTrue(r.detail.endswith("model-download --model small"), r.detail)
 
 
 # --------------------------------------------------------------------------------------------- settings / doctor
@@ -2987,7 +3296,7 @@ class TestSettingsAndDoctor(unittest.TestCase):
         self.assertEqual(argv[:4], ["settings", "--init", str(self.home), "--force"])
         sets = [argv[i + 1] for i, a in enumerate(argv) if a == "--set"]
         self.assertEqual(sets, [f"clients_root={self.home / 'Documents' / 'WhyNot Clients'}", "language=ar",
-                                "whisper_model=large-v3-turbo"])
+                                "whisper_model=large-v3"])  # the strongest, also without an NVIDIA GPU
 
     def test_a_saved_model_choice_is_kept(self):
         touch(self.home / ".claude" / "whynot-cut.local.md",
@@ -2995,17 +3304,25 @@ class TestSettingsAndDoctor(unittest.TestCase):
         ctx = self.ctx()
         self.assertEqual(self.sy.step_settings(ctx).status, "ok")
         [argv] = self.calls()
-        self.assertFalse([a for a in argv if a.startswith("whisper_model=")], argv)
+        self.assertIn("whisper_model=medium", argv)
         self.assertIn("language=ar", argv)  # ctx.answers (flags / questions) still go in
         r = self.sy.step_model(ctx)  # sandbox: skipped, but it names the command it would run
         self.assertEqual(r.status, "skipped")
-        self.assertIn("model-download --model medium", r.detail)
+        self.assertTrue(r.detail.endswith("model-download --model medium"), r.detail)
 
-    def test_an_unusable_saved_model_gets_the_hardware_pick(self):
+    def test_the_answered_model_is_written(self):
+        touch(self.home / ".claude" / "whynot-cut.local.md", b"---\nwhisper_model: medium\n---\n")
+        ctx = self.ctx()
+        ctx.answers["whisper_model"] = "large-v3-turbo"  # --model / the question beat the saved preference
+        self.assertEqual(self.sy.step_settings(ctx).status, "ok")
+        [argv] = self.calls()
+        self.assertIn("whisper_model=large-v3-turbo", argv)
+
+    def test_an_unusable_saved_model_gets_the_strongest(self):
         touch(self.home / ".claude" / "whynot-cut.local.md", b"---\nwhisper_model: tiny-xl\n---\n")
         self.assertEqual(self.sy.step_settings(self.ctx()).status, "ok")
         [argv] = self.calls()
-        self.assertIn("whisper_model=large-v3-turbo", argv)
+        self.assertIn("whisper_model=large-v3", argv)
 
     def test_settings_failure_is_amber(self):
         with mock.patch.dict(os.environ, {"WNC_TEST_ENGINE_EXIT": "2"}):
@@ -3249,11 +3566,19 @@ class TestShellScripts(unittest.TestCase):
                      "-Uninstall", "-RemoveEngine", "-RemoveModels", "-Source", "-SourceSha256",
                      "--home", "--dry-run", "--yes", "--clients-folder", "--language", "--channel", "--components",
                      "--skip", "--uninstall", "--remove-engine", "--remove-models", "--source", "--source-sha256",
-                     "WNC_TEST_UV", "WNC_TEST_PLATFORM", "logs"):
+                     "WNC_TEST_UV", "WNC_TEST_PLATFORM", "logs", "-Model", "--model", "-EngineHome",
+                     "WNC_TEST_ANSWERS", "WNC_TEST_FREE_GB"):
             self.assertIn(flag, text)
         # what -RemoveEngine keeps, and where the engine home comes from
         for needle in ("library/", "plugin-options.json", "pluginConfigs", "WHYNOT_HOME", "--engine-home"):
             self.assertIn(needle, text)
+        # task 8: the model choices with their sizes, the suggested plain folder, and the optional lint variables
+        # (never named WNC_*: other suites assert that no WNC_* variable reaches the engine)
+        for needle in ("large-v3-turbo", "2.9 GB", "1.6 GB", "1.5 GB", "0.5 GB", "C:" + chr(92) + "WhyNotCut",
+                       "WHYNOTCUT_PSSA_PATH", "WHYNOTCUT_SHELLCHECK"):
+            self.assertIn(needle, text)
+        for old in ("WNC_PSSA_PATH", "WNC_SHELLCHECK"):
+            self.assertNotIn(old, text.replace("WHYNOTCUT_", "-"))
 
 
 class _ShellCase(unittest.TestCase):
@@ -3989,6 +4314,69 @@ class TestUninstallSteps(unittest.TestCase):
         self.assertEqual(r.status, "amber", r.detail)
         self.assertNotIn("model download", r.detail + " " + (r.needs_you or ""))
 
+    def chosen_home(self, pointer_clients_root: str = "") -> types.SimpleNamespace:
+        """A sandbox whose pointer and settings.json name a chosen engine home inside it, with an install in it and a
+        client folder inside the engine home."""
+        home = self.tmp / ARABIC_HOME
+        ns = types.SimpleNamespace(home=home, engine=home / "WhyNot Engine محرك",
+                                   pointer=home / ".whynot-cut" / "plugin-options.json",
+                                   settings=home / ".claude" / "settings.json")
+        EngineHomeCases.pointer(home, {"clients_root": pointer_clients_root, "engine_home": str(ns.engine),
+                                       "updated": "x"})
+        EngineHomeCases.settings(home, {PID: {"options": {"engine_home": str(ns.engine), "clients_root": "C"}},
+                                        "x@y": {"options": {}}})
+        touch(ns.engine / "state.json", b"{}")
+        touch(ns.engine / "runtimes" / "r-1" / "pyvenv.cfg", b"x")
+        ns.model = touch(ns.engine / "models" / "large-v3" / "model.bin", b"weights")
+        ns.client = touch(ns.engine / "WhyNot Clients" / "Dr X" / ".whynot-client", b"{}")
+        return ns
+
+    def test_remove_engine_of_a_chosen_home_forgets_it(self):
+        ns = self.chosen_home()
+        ctx = self.ctx(remove_engine=True)
+        self.assertEqual(norm(ctx.paths.whynot), norm(ns.engine))  # found through the sandbox's own pointer
+        r = self.un.step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(sorted(os.listdir(ns.engine)), ["WhyNot Clients", "models"])  # never a client folder
+        self.assertEqual((ns.client.read_bytes(), ns.model.read_bytes()), (b"{}", b"weights"))
+        # the pointer held nothing else: it goes, and ~/.whynot-cut with it (it held only the pointer)
+        self.assertFalse(ns.pointer.exists())
+        self.assertFalse((ns.home / ".whynot-cut").exists())
+        s = json.loads(ns.settings.read_text(encoding="utf-8"))
+        self.assertEqual(s["pluginConfigs"][PID], {"options": {"clients_root": "C"}})  # only engine_home went
+        self.assertEqual(s["pluginConfigs"]["x@y"], {"options": {}})
+        self.assertTrue(list(ns.settings.parent.glob("settings.json.whynot-backup-*")))
+        self.assertIn("-EngineHome", r.detail)  # how to use the kept models again
+        self.assertEqual(norm(base.Paths.from_env(str(ns.home), env={}).whynot), norm(ns.home / ".whynot-cut"))
+
+    def test_a_pointer_that_still_names_a_clients_folder_keeps_it(self):
+        ns = self.chosen_home(pointer_clients_root="D:/عملاء")
+        r = self.un.step_engine(self.ctx(remove_engine=True))
+        self.assertEqual(r.status, "ok", r.detail)
+        p = json.loads(ns.pointer.read_text(encoding="utf-8"))
+        self.assertEqual((list(p), p["engine_home"], p["clients_root"]), (POINTER_KEYS, "", "D:/عملاء"))
+
+    def test_a_failed_delete_keeps_the_pointer_and_the_option(self):
+        ns = self.chosen_home()
+        before = (ns.pointer.read_bytes(), ns.settings.read_bytes())
+        real = base.safe_rmtree
+
+        def locked(p, *a, **kw):
+            if Path(p).name == "runtimes":
+                raise PermissionError(13, "The process cannot access the file", str(p))
+            return real(p, *a, **kw)
+        with mock.patch.object(base, "safe_rmtree", side_effect=locked):
+            r = self.un.step_engine(self.ctx(remove_engine=True))
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertEqual((ns.pointer.read_bytes(), ns.settings.read_bytes()), before)  # the next uninstall finds it
+
+    def test_without_remove_engine_the_pointer_stays(self):
+        ns = self.chosen_home()
+        before = (ns.pointer.read_bytes(), ns.settings.read_bytes())
+        r = self.un.step_engine(self.ctx())
+        self.assertEqual(r.status, "skipped", r.detail)
+        self.assertEqual((ns.pointer.read_bytes(), ns.settings.read_bytes()), before)
+
     def test_an_engine_home_that_is_the_user_home_is_refused(self):
         h = self.tmp / "profile"
         touch(h / "Documents" / "thesis.docx", b"mine")
@@ -4183,6 +4571,168 @@ class TestBashUninstall(TestBashFrontEnd):
         self.assertIn(f"deleted {self.paths.whynot.as_posix()}/python", r.stdout)  # by the bootstrap, after the core
         self.assertEqual(os.listdir(self.paths.whynot), ["models"], out)
         self.assertEqual(model.read_bytes(), b"weights")
+
+
+# --------------------------------------------------------------------------------------------- task 8: the location
+def assert_chosen_home_installed(test: "_ShellCase", r, engine: Path, plat: str) -> None:
+    """Everything of a chosen engine home landed there (uv, the runtime, state, the one log); ~/.whynot-cut keeps only
+    the pointer; settings.json and the pointer name the folder."""
+    out = r.stdout + r.stderr
+    test.assertEqual(r.returncode, 0, out)
+    custom = base.Paths.from_env(str(test.home), env={}, engine_home=str(engine))
+    test.assertTrue((custom.bin_dir / ("uv.exe" if plat.startswith("win") else "uv")).is_file(), out)
+    test.assertTrue((custom.downloads_dir / test.uv_asset(plat)["url"].rsplit("/", 1)[-1]).is_file(), out)
+    test.assertTrue(custom.current_file.is_file(), out)
+    test.assertTrue(custom.runtimes_dir.is_dir(), out)
+    st = json.loads(custom.state_file.read_text(encoding="utf-8"))
+    test.assertEqual(st["answers"]["whisper_model"], "large-v3")
+    test.assertEqual(len(list(custom.logs_dir.glob("install-*.log"))), 1, out)
+    default = test.home / ".whynot-cut"
+    test.assertEqual(os.listdir(default), ["plugin-options.json"], out)
+    p = json.loads((default / "plugin-options.json").read_text(encoding="utf-8"))
+    test.assertEqual((list(p), norm(p["engine_home"])), (POINTER_KEYS, norm(engine)))
+    s = json.loads(test.paths.settings_file.read_text(encoding="utf-8"))
+    test.assertEqual(norm(s["pluginConfigs"][PID]["options"]["engine_home"]), norm(engine))
+    test.assertIn("thewhynot-ai", s["extraKnownMarketplaces"])
+
+
+@unittest.skipUnless(find_powershell(), "Windows PowerShell is not available")
+class TestPowerShellEngineHome(TestPowerShellFrontEnd):
+    """-EngineHome / the location question / -Model through install.ps1 and bootstrap.ps1, under the sandbox home."""
+    test_install_in_an_arabic_home_touches_nothing_outside = None
+    test_dry_run_leaves_the_home_empty = None
+    test_dry_run_without_uv_names_the_remaining_steps = None
+    test_a_bad_uv_sha256_stops_with_3_and_names_the_file = None
+    test_paths_ending_in_a_backslash_reach_the_core_intact = None
+    test_the_bootstraps_quoting_guard_doubles_trailing_backslashes = None
+    test_uv_already_at_the_pinned_version_is_not_downloaded = None
+
+    def test_a_chosen_engine_home_installs_there_and_uninstalls_from_there(self):
+        engine = self.home / "WhyNot Engine"
+        before = live_snapshot()
+        r = self.ps(self.front(), "-Home", self.home, "-EngineHome", engine, "-Yes", "-Skip", "model,launch")
+        assert_chosen_home_installed(self, r, engine, "win-x64")
+        out = r.stdout + r.stderr
+        self.assertIn("C:\\WhyNotCut", out)  # the sandbox home has Arabic letters: warned, and kept with -Yes
+        self.assertIn("حروف", out)
+        # a second run without -EngineHome finds it through the pointer: nothing downloaded again
+        hits = len(self.srv.srv.hits)
+        r2 = self.ps(self.front(), "-Home", self.home, "-Yes", "-Skip", "model,launch")
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertEqual(len(self.srv.srv.hits), hits, self.srv.srv.hits[hits:])
+        self.assertEqual(os.listdir(self.home / ".whynot-cut"), ["plugin-options.json"])
+        # uninstall -RemoveEngine, again without -EngineHome: that folder goes, never the client folder inside it
+        client = touch(engine / "WhyNot Clients" / "Dr X" / ".whynot-client", b"{}")
+        r3 = self.ps(self.front(), "-Home", self.home, "-Uninstall", "-RemoveEngine", "-Yes")
+        out3 = r3.stdout + r3.stderr
+        self.assertEqual(r3.returncode, 0, out3)
+        self.assertEqual(os.listdir(engine), ["WhyNot Clients"], out3)
+        self.assertEqual(client.read_bytes(), b"{}")
+        self.assertFalse((self.home / ".whynot-cut").exists(), out3)  # it held only the pointer
+        s = json.loads(self.paths.settings_file.read_text(encoding="utf-8"))
+        self.assertNotIn("engine_home", (s.get("pluginConfigs") or {}).get(PID, {}).get("options", {}))
+        self.assertEqual(live_snapshot(), before)
+
+    def test_the_location_question(self):
+        # no -Yes: the bootstrap asks (answers from the sandbox-only test hook WNC_TEST_ANSWERS, one per line)
+        answers = self.tmp / "answers.txt"
+        answers.write_text("\n".join(["engine", str(self.home / "Engine Y"), ""]) + "\n", encoding="utf-8")
+        self.home.mkdir()
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", env=self.env(WNC_TEST_ANSWERS=str(answers)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn(str(self.home / ".whynot-cut"), out)  # the default offered first
+        self.assertIn("full path", out)  # "engine" is refused: asked again
+        self.assertIn("حروف", out)  # Engine Y has Arabic letters: warned (EN + AR), asked again
+        suggestion = self.home / "WhyNotCut"  # (C:\WhyNotCut outside a sandbox)
+        self.assertIn(f"engine home {suggestion} (chosen)", out)  # Enter took the suggestion
+        self.assertEqual(list(self.home.iterdir()), [])  # a dry run creates nothing
+
+    def test_free_space_on_the_chosen_drive(self):
+        self.home.mkdir()
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Yes", env=self.env(WNC_TEST_FREE_GB="7"))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)  # 6 GB + 3 GB for the model
+        self.assertIn("9 GB", out)
+        self.assertEqual(self.srv.srv.hits, [])
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Yes", "-Skip", "model",
+                    env=self.env(WNC_TEST_FREE_GB="7"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)  # without the model 6 GB are enough
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Yes", env=self.env(WNC_TEST_FREE_GB="5"))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+    def test_unsafe_engine_homes_stop_before_any_download(self):
+        touch(self.home / "Clients" / ".whynot-client", b"{}")
+        for bad, needle in ((self.home / "Clients" / "engine", "client folder"),
+                            (self.fx.plugin_root / "engine home", "plugin folder"),
+                            (self.tmp / "outside the sandbox", "sandbox")):
+            with self.subTest(str(bad)):
+                r = self.ps(self.front(), "-Home", self.home, "-EngineHome", bad, "-Yes", "-Skip", "model,launch")
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 2, out)
+                self.assertIn(needle, out)
+                self.assertFalse(os.path.lexists(bad), out)
+        self.assertEqual(self.srv.srv.hits, [])
+
+    def test_the_model_flag(self):
+        self.home.mkdir()
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Yes", "-Model", "medium")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("model-download --model medium", r.stdout)
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Yes", "-Model", "huge")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("large-v3-turbo", r.stdout + r.stderr)  # names the choices
+        self.assertEqual(self.srv.srv.hits, [])
+
+
+@unittest.skipUnless(find_bash(), "bash is not available")
+class TestBashEngineHome(TestBashFrontEnd):
+    """--engine-home / the location question / --model through install.sh and bootstrap.sh, under the sandbox home."""
+    test_install_in_an_arabic_home_touches_nothing_outside = None
+    test_uv_already_at_the_pinned_version_is_not_downloaded = None
+    test_uv_is_found_anywhere_in_its_archive = None
+    test_dry_run_leaves_the_home_empty = None
+    test_a_bad_uv_sha256_stops_with_3_and_names_the_file = None
+    test_git_bash_without_test_platform_says_use_install_ps1 = None
+    test_piped_script_with_yes_does_not_hang = None
+    test_piped_without_source_says_h3_in_arabic_too = None
+
+    def test_a_chosen_engine_home_installs_there_and_uninstalls_from_there(self):
+        engine = self.home / "WhyNot Engine"
+        r = self.sh(self.front(), "--home", self.home_arg(), "--engine-home", engine.as_posix(), "--yes",
+                    "--skip", "model,launch")
+        assert_chosen_home_installed(self, r, engine, "mac-arm64")
+        client = touch(engine / "WhyNot Clients" / "Dr X" / ".whynot-client", b"{}")
+        r3 = self.sh(self.front(), "--home", self.home_arg(), "--uninstall", "--remove-engine", "--yes")
+        out3 = r3.stdout + r3.stderr
+        self.assertEqual(r3.returncode, 0, out3)
+        self.assertEqual(os.listdir(engine), ["WhyNot Clients"], out3)
+        self.assertEqual(client.read_bytes(), b"{}")
+        self.assertFalse((self.home / ".whynot-cut").exists(), out3)
+
+    def test_the_location_question(self):
+        answers = self.tmp / "answers.txt"
+        answers.write_text("engine\n" + (self.home / "Engine Z").as_posix() + "\n", encoding="utf-8", newline="\n")
+        self.home.mkdir()
+        r = self.sh(self.front(), "--home", self.home_arg(), "--dry-run",
+                    env=self.env(WNC_TEST_ANSWERS=answers.as_posix()))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("full path", out)
+        self.assertIn(f"engine home {(self.home / 'Engine Z').as_posix()} (chosen)", out)
+        self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_free_space_and_the_model_flag(self):
+        self.home.mkdir()
+        r = self.sh(self.front(), "--home", self.home_arg(), "--dry-run", "--yes", env=self.env(WNC_TEST_FREE_GB="7"))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("9 GB", r.stdout + r.stderr)
+        r = self.sh(self.front(), "--home", self.home_arg(), "--dry-run", "--yes", "--model", "small")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("model-download --model small", r.stdout)
+        r = self.sh(self.front(), "--home", self.home_arg(), "--dry-run", "--yes", "--model", "huge")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertEqual(self.srv.srv.hits, [])
 
 
 # --------------------------------------------------------------------------------------------- task 7: release stub

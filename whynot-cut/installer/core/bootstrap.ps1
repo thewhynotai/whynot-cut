@@ -23,16 +23,27 @@
 # core); 3 = a bootstrap step failed (download, sha256, uv, python), with a one-line message and the log path.
 # -DryRun: writes nothing (no log, no folder). Runs the core's dry run only when uv and Python are already there (or
 # WNC_TEST_UV is set); otherwise it names the steps that would follow.
-# Engine home (outside a sandbox): resolved exactly like the engine (Resolve-WncEngineHome: WHYNOT_HOME and the other
-# engine-home variables, else the plugin option engine_home from ~\.whynot-cut\plugin-options.json, else from
-# settings.json pluginConfigs, else ~\.whynot-cut) BEFORE anything is downloaded, so uv, Python, the log and every
-# later step land in that one folder; it is passed to the core as --engine-home, and the core stops with 2 if its own
-# resolution (wnc_installer.base.resolve_engine_home) disagrees.
+# Engine home: resolved exactly like the engine (Resolve-WncEngineHome: WHYNOT_HOME and the other engine-home
+# variables, else the plugin option engine_home from ~\.whynot-cut\plugin-options.json, else from settings.json
+# pluginConfigs, else ~\.whynot-cut) BEFORE anything is downloaded. That folder is the default of the location question
+# (owner decision 2026-10-12): -EngineHome <folder> answers it, -Yes takes the default, and without a terminal the
+# default is used. The answer is checked (Get-WncEngineHomeProblem: a full path, not a drive root, not inside the
+# plugin folder, not the user folder or Claude's folder, not the clients folder or a folder marked .whynot-client, in
+# a sandbox inside the sandbox; 6 GB free on its drive, 9 GB with the Whisper model, unless WhyNot Cut is already
+# there; it can be created and written); a refused folder is asked again (with -Yes: exit 2, nothing downloaded). A
+# path with non-ASCII letters gets a warning (English + Arabic) suggesting C:\WhyNotCut and is asked again; -Yes keeps
+# it. uv, Python, the log and every later step land in that one folder: it is passed to the core as --engine-home
+# (+ --engine-home-chosen when the editor chose it: the core then uses it as it is; otherwise the core stops with 2 if
+# its own resolution, wnc_installer.base.resolve_engine_home, disagrees). The core remembers a chosen folder in
+# settings.json pluginConfigs and the pointer file (questions step). -Uninstall asks nothing: the resolved folder, or
+# -EngineHome. -Model <large-v3|large-v3-turbo|medium|small> goes to the core (its model question).
 # Sandbox (-Home <dir>): HOME, USERPROFILE, APPDATA, LOCALAPPDATA, CLAUDE_CONFIG_DIR and WHYNOT_HOME point into <dir>
-# before anything is downloaded (as wnc_installer.base.Paths.child_env does), and --home is passed on. Only then is
-# the test hook WNC_TEST_UV honoured: a uv stand-in used for `python install/find` after the real archive was still
-# downloaded and verified. Every environment variable it sets is restored when it ends (the script may run inside the
-# editor's own PowerShell session through `irm | iex`), so is the console encoding.
+# before anything is downloaded (as wnc_installer.base.Paths.child_env does), and --home is passed on; the engine home
+# is resolved from the sandbox's own pointer / settings.json only (never this machine's variables). Only then are the
+# test hooks honoured: WNC_TEST_UV (a uv stand-in used for `python install/find` after the real archive was still
+# downloaded and verified), WNC_TEST_ANSWERS (a file: one answer per line for the location question) and
+# WNC_TEST_FREE_GB (the free space the check sees). Every environment variable it sets is restored when it ends (the
+# script may run inside the editor's own PowerShell session through `irm | iex`), so is the console encoding.
 # ASCII only: Windows PowerShell 5.1 reads a file without a BOM as ANSI.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '',
     Justification = 'The parameters are read inside the & { } block below, which the analyzer does not follow.')]
@@ -51,7 +62,9 @@ param(
     [string[]]$Skip,
     [switch]$Uninstall,
     [switch]$RemoveEngine,
-    [switch]$RemoveModels
+    [switch]$RemoveModels,
+    [string]$EngineHome,
+    [string]$Model
 )
 
 & {
@@ -64,7 +77,24 @@ param(
         'settings', 'model', 'state', 'doctor', 'launch')
     # and its uninstall steps (wnc_installer/uninstall.py STEP_NAMES)
     $WncUninstallStepNames = @('plugin', 'adobe', 'fonts', 'marketplace', 'engine')
-    $S = @{ Log = $null; Step = 'start'; Code = 0; Utf8 = (New-Object System.Text.UTF8Encoding $false) }
+    $S = @{ Log = $null; Step = 'start'; Code = 0; Utf8 = (New-Object System.Text.UTF8Encoding $false);
+        Answers = $null; AnswerAt = 0; FreeGb = $null }
+    $WncModels = @('large-v3', 'large-v3-turbo', 'medium', 'small')  # wnc_installer/system.py MODELS
+    $WncNeedGb = 6  # free space for the engine; + $WncModelGb with the Whisper model (system.py RED_GB / AMBER_GB)
+    $WncModelGb = 3
+    # the Arabic lines, UTF-8 in base64 (this file stays ASCII)
+    $WncAr = @{
+        Intro = ('2KPZitmGINmK2K3Zgdi4IFdoeU5vdCBDdXQg2YXZhNmB2KfYqiDYp9mE2KrYtNi62YrZhCAo2KjYp9mK2KvZiNmGINmIIGZmbXBlZyDZiNmG' +
+            '2YXZiNiw2KwgV2hpc3BlcinYnyDYqtit2KrYp9isINit2YjYp9mE2YogNiDYrNmK2KzYp9io2KfZitiq2Iwg2Yg5INmF2Lkg2KfZhNmG2YXZiNiw' +
+            '2KwuINin2LbYuti3IEVudGVyINmE2KfYrtiq2YrYp9ixINin2YTZhdis2YTYryDYqNmK2YYg2KfZhNmC2YjYs9mK2YYu')
+        Existing = ('V2h5Tm90IEN1dCDZhdir2KjZkdiqINio2KfZhNmB2LnZhCDZgdmKINmH2LDYpyDYp9mE2YXYrNmE2K/YmyDYp9i22LrYtyBFbnRlciDZhNil' +
+            '2KjZgtin2KbZhy4=')
+        NonAscii = ('2KrZhtio2YrZhzog2YHZiiDZh9iw2Kcg2KfZhNmF2LPYp9ixINit2LHZiNmBINi62YrYsSDYpdmG2KzZhNmK2LLZitip2Iwg2YjZgtivINiq' +
+            '2YHYtNmEINio2LnYtiDYp9mE2KPYr9mI2KfYqiDZhdi52YfYmyDYp9mE2KPZgdi22YQg2YXYrNmE2K8g2KjYs9mK2Lcg2YXYq9mEIEM6XFdoeU5v' +
+            'dEN1dA==')
+        Folder = '2KfZhNmF2KzZhNiv'
+        Cannot = ('2YTYpyDZitmF2YPZhiDYp9iz2KrYrtiv2KfZhSDZh9iw2Kcg2KfZhNmF2KzZhNiv2Jsg2KfYrtiq2LEg2YXYrNmE2K/Zi9inINii2K7YsS4=')
+    }
     $EnvNames = @('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'CLAUDE_CONFIG_DIR', 'WHYNOT_HOME',
         'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_NO_CONFIG', 'UV_PYTHON_PREFERENCE', 'UV_NO_MODIFY_PATH')
 
@@ -394,16 +424,18 @@ param(
         return $v
     }
 
-    function Resolve-WncEngineHome([string]$UserHome) {
-        # outside a sandbox: the engine home exactly as the engine resolves it (engine\reel\lib\plat.py engine_home;
-        # the core's wnc_installer.base.resolve_engine_home is the same): the first variable that is set, else the
-        # plugin option engine_home from the pointer file (~\.whynot-cut\plugin-options.json or WHYNOT_OPTIONS_FILE,
-        # when it is a JSON object with an engine_home string; "" = not set), else from settings.json
-        # pluginConfigs (whynot-cut@thewhynot-ai, else the first other whynot-cut@* entry with options), else
-        # ~\.whynot-cut. @{ Path; Source }; Source is named like the core's (env:<NAME>, pointer:<file>,
-        # settings:<file> <key>, default). uv and Python are placed there, and the core checks it (--engine-home).
+    function Resolve-WncEngineHome([string]$UserHome, [switch]$Sandbox) {
+        # the engine home exactly as the engine resolves it (engine\reel\lib\plat.py engine_home; the core's
+        # wnc_installer.base.resolve_engine_home is the same): the first variable that is set, else the plugin option
+        # engine_home from the pointer file (~\.whynot-cut\plugin-options.json or WHYNOT_OPTIONS_FILE, when it is a
+        # JSON object with an engine_home string; "" = not set), else from settings.json pluginConfigs
+        # (whynot-cut@thewhynot-ai, else the first other whynot-cut@* entry with options), else ~\.whynot-cut.
+        # -Sandbox: no variable at all, only <UserHome>\.whynot-cut\plugin-options.json and <UserHome>\.claude.
+        # @{ Path; Source }; Source is named like the core's (env:<NAME>, pointer:<file>, settings:<file> <key>,
+        # default). It is the location question's default.
         $names = @('WHYNOT_HOME', 'CLAUDE_PLUGIN_OPTION_ENGINE_HOME', 'REEL_HOME', 'CLAUDE_PLUGIN_OPTION_REEL_HOME',
             'NH_ENV_DIR')
+        if ($Sandbox) { $names = @() }
         foreach ($n in $names) {
             $v = [Environment]::GetEnvironmentVariable($n, 'Process')
             if ($v) {
@@ -412,7 +444,7 @@ param(
             }
         }
         $pointer = Join-Path $UserHome '.whynot-cut\plugin-options.json'
-        if ($env:WHYNOT_OPTIONS_FILE) {
+        if ($env:WHYNOT_OPTIONS_FILE -and (-not $Sandbox)) {
             $pointer = ConvertTo-WncHomePath -Value $env:WHYNOT_OPTIONS_FILE -UserHome $UserHome -Saved $false
         }
         $saved = ''
@@ -423,7 +455,7 @@ param(
             $source = "pointer:$pointer"
         } else {
             $cfg = Join-Path $UserHome '.claude'
-            if ($env:CLAUDE_CONFIG_DIR) {
+            if ($env:CLAUDE_CONFIG_DIR -and (-not $Sandbox)) {
                 $cfg = ConvertTo-WncHomePath -Value $env:CLAUDE_CONFIG_DIR -UserHome $UserHome -Saved $false
             }
             $settings = Join-Path $cfg 'settings.json'
@@ -449,6 +481,233 @@ param(
         return @{ Path = (Join-Path $UserHome '.whynot-cut'); Source = 'default' }
     }
 
+    function Get-WncArabic([string]$Key) {
+        return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($WncAr[$Key]))
+    }
+
+    function Get-WncNormPath([string]$Path) {
+        # absolute, \ only, no trailing \ (a drive root keeps its \): for comparisons, which ignore case
+        $full = [IO.Path]::GetFullPath($Path).TrimEnd([char[]]@([char]92, [char]47))
+        if ($full -match '^[A-Za-z]:$') { return $full + [char]92 }
+        return $full
+    }
+
+    function Test-WncWithin([string]$Child, [string]$Parent, [switch]$Strict) {
+        # $Child is $Parent or below it (both from Get-WncNormPath); -Strict: below it only
+        if ($Child -ieq $Parent) { return (-not $Strict) }
+        $prefix = $Parent.TrimEnd([char]92) + [char]92
+        return $Child.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+    }
+
+    function Get-WncClientRootList([string]$UserHome, [string]$Pointer) {
+        # the clients folders saved so far: clients_root in ~\.claude\whynot-cut.local.md (the preferences) and in
+        # the pointer file
+        $out = @()
+        $prefs = Join-Path $UserHome '.claude\whynot-cut.local.md'
+        try {
+            if ([IO.File]::Exists($prefs)) {
+                $text = [IO.File]::ReadAllText($prefs, [Text.Encoding]::UTF8)
+                if ($text -match '(?s)\A\s*---\s*\r?\n(.*?)\r?\n---') {
+                    foreach ($line in ($Matches[1] -split '\r?\n')) {
+                        if ($line -match '^\s*clients_root\s*:\s*(.*)$') {
+                            $v = $Matches[1].Trim()
+                            if ($v -match '^"(.*)"$' -or $v -match "^'(.*)'$") {
+                                $v = $Matches[1]
+                            } else {
+                                $v = ($v -split ' #')[0].Trim()
+                            }
+                            if ($v) { $out += $v }
+                        }
+                    }
+                }
+            }
+        } catch {
+            Write-Verbose "preferences not read: $($_.Exception.Message)"
+        }
+        $m = Get-WncMember (Read-WncJsonObject $Pointer) 'clients_root'
+        if ($m.Found -and ($m.Value -is [string]) -and $m.Value.Trim()) { $out += $m.Value }
+        return ,@($out | ForEach-Object { ConvertTo-WncHomePath -Value $_ -UserHome $UserHome -Saved $true })
+    }
+
+    function Get-WncEngineHomeProblem([string]$Path, [string]$UserHome, [string]$Root, [string[]]$Clients,
+        [string]$SandboxRoot) {
+        # why $Path cannot be the engine home, or $null: the core's base.engine_home_choice_problem, same order
+        if ((-not $Path) -or ($Path -notmatch '^([A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)')) {
+            return "$Path is not a full path (for example C:\WhyNotCut)"
+        }
+        $n = Get-WncNormPath $Path
+        if (($n -match '^[A-Za-z]:\\$') -or ($n -match '^\\\\[^\\]+\\[^\\]+$')) {
+            return "$Path is a drive root; choose a folder on it, for example $(Join-Path $n 'WhyNotCut')"
+        }
+        $r = Get-WncNormPath $Root
+        if (Test-WncWithin $n $r) { return "$Path is inside the plugin folder $r, which is replaced on every update" }
+        if (Test-WncWithin (Get-WncNormPath $UserHome) $n) {
+            return ("$Path is your user folder or holds it; choose a folder of its own, for example " +
+                (Join-Path $n 'WhyNotCut'))
+        }
+        if (Test-WncWithin $n (Get-WncNormPath (Join-Path $UserHome '.claude'))) {
+            return "$Path is inside Claude's folder $(Join-Path $UserHome '.claude')"
+        }
+        foreach ($c in @($Clients | Where-Object { $_ })) {
+            try { $cn = Get-WncNormPath $c } catch { continue }
+            if (Test-WncWithin $n $cn) {
+                return "$Path is your clients folder $c (or inside it); keep the engine apart from client footage"
+            }
+        }
+        $d = $n
+        while ($d) {
+            if (Test-Path -LiteralPath (Join-Path $d '.whynot-client')) {
+                return "$Path is inside a client folder ($d holds .whynot-client)"
+            }
+            $up = [IO.Path]::GetDirectoryName($d)
+            if ((-not $up) -or ($up -eq $d)) { break }
+            $d = $up
+        }
+        if ($SandboxRoot -and (-not (Test-WncWithin $n (Get-WncNormPath $SandboxRoot) -Strict))) {
+            return "$Path is outside the sandbox home $SandboxRoot (-Home: nothing outside it is used)"
+        }
+        return $null
+    }
+
+    function Get-WncFreeGb([string]$Path) {
+        # free space on the drive of $Path in GB, or $null when it cannot be read (a network path)
+        if ($null -ne $S.FreeGb) { return [double]$S.FreeGb }
+        try {
+            $rootDir = [IO.Path]::GetPathRoot($Path)
+            if ($rootDir -match '^[A-Za-z]:') {
+                return [math]::Round((New-Object IO.DriveInfo $rootDir).AvailableFreeSpace / 1GB, 1)
+            }
+        } catch {
+            Write-Verbose "free space not read: $($_.Exception.Message)"
+        }
+        return $null
+    }
+
+    function Test-WncCanAsk {
+        # the location question: never with -Yes, never for -Uninstall; the test hook (sandbox only); else only
+        # with a keyboard (an interactive session whose input is not redirected, not -NonInteractive)
+        if ($Yes -or $Uninstall) { return $false }
+        if ($null -ne $S.Answers) { return $true }
+        try { if ([Console]::IsInputRedirected) { return $false } } catch { return $false }
+        if (-not [Environment]::UserInteractive) { return $false }
+        if (@([Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^-noni' }).Count -gt 0) { return $false }
+        return $true
+    }
+
+    function Read-WncAnswer([string]$Default) {
+        # one line from the editor (Enter = $Default, shown in brackets); $null when there is no more input
+        Write-Host -NoNewline ("Folder / " + (Get-WncArabic 'Folder') + " [$Default]: ")
+        if ($null -ne $S.Answers) {
+            if ($S.AnswerAt -ge $S.Answers.Count) {
+                Write-Host ''
+                return $null
+            }
+            $a = [string]$S.Answers[$S.AnswerAt]
+            $S.AnswerAt++
+            Write-Host $a
+            return $a.Trim()
+        }
+        $line = Read-Host
+        if ($null -eq $line) { return $null }
+        return $line.Trim()
+    }
+
+    function ConvertFrom-WncTyped([string]$Text, [string]$UserHome) {
+        # a typed or -EngineHome folder: quotes trimmed, ~ is the user folder; a full path made canonical, any other
+        # text returned as it is (Get-WncEngineHomeProblem refuses it)
+        $t = $Text.Trim().Trim([char]34).Trim([char]39)
+        $t = ConvertTo-WncHomePath -Value $t -UserHome $UserHome -Saved $false
+        if ($t -match '^([A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)') { return Get-WncFullPath $t }
+        return $t
+    }
+
+    function Select-WncEngineHome([string]$Default, [string]$UserHome, [string]$Root, [string]$Pointer,
+        [string]$SandboxRoot, [bool]$WithModel) {
+        # the location question (see the header): @{ Code = 0; Path; Chosen } or @{ Code = 2 }
+        $ask = Test-WncCanAsk
+        $clients = Get-WncClientRootList -UserHome $UserHome -Pointer $Pointer
+        $suggest = 'C:\WhyNotCut'
+        if ($SandboxRoot) { $suggest = Join-Path $SandboxRoot 'WhyNotCut' }
+        $chosen = $false
+        $text = $Default
+        if ($EngineHome) {
+            $text = $EngineHome
+            $chosen = $true
+        } elseif ($ask) {
+            Write-Host ('Where should WhyNot Cut keep its engine (Python, ffmpeg, the Whisper model)? It needs about ' +
+                "$WncNeedGb GB, $($WncNeedGb + $WncModelGb) GB with the model. Enter keeps the folder in brackets.")
+            Write-Host (Get-WncArabic 'Intro')
+            if ([IO.File]::Exists((Join-Path $Default 'state.json')) -or
+                [IO.File]::Exists((Join-Path $Default 'current'))) {
+                Write-Host "WhyNot Cut is already installed in $Default; Enter keeps it there."
+                Write-Host (Get-WncArabic 'Existing')
+            }
+            $a = Read-WncAnswer $Default
+            if ($a) {
+                $text = $a
+                $chosen = $true
+            }
+        }
+        $warned = $false  # warned once about non-ASCII letters: the next answer is taken as it is
+        for ($try = 1; $try -le 8; $try++) {
+            $p = ConvertFrom-WncTyped -Text $text -UserHome $UserHome
+            $problem = Get-WncEngineHomeProblem -Path $p -UserHome $UserHome -Root $Root -Clients $clients `
+                -SandboxRoot $SandboxRoot
+            if ((-not $problem) -and ($p -match '[^\x00-\x7F]') -and (-not $warned)) {
+                Write-Host ("WARNING: $p has non-English letters. Some tools can fail on such a path; a plain " +
+                    'folder such as C:\WhyNotCut is safer.')
+                Write-Host (Get-WncArabic 'NonAscii')
+                $warned = $true
+                if ($ask) {
+                    $a = Read-WncAnswer $suggest
+                    if ($null -eq $a) { return @{ Code = 2 } }
+                    if ($a) { $text = $a } else { $text = $suggest }
+                    $chosen = $true
+                    continue
+                }
+                Write-Host '(kept: no question was asked)'
+            }
+            $existing = (-not $problem) -and ([IO.File]::Exists((Join-Path $p 'state.json')) -or
+                [IO.File]::Exists((Join-Path $p 'current')))
+            if ((-not $problem) -and (-not $existing)) {
+                $need = $WncNeedGb
+                if ($WithModel) { $need += $WncModelGb }
+                $free = Get-WncFreeGb $p
+                if (($null -ne $free) -and ($free -lt $need)) {
+                    $problem = ("only $free GB free on its drive; WhyNot Cut needs $need GB there ($WncNeedGb GB, plus " +
+                        "$WncModelGb GB for the Whisper model unless you add -Skip model)")
+                }
+            }
+            if ((-not $problem) -and (-not $DryRun)) {
+                try {
+                    $null = [IO.Directory]::CreateDirectory($p)
+                    $probe = Join-Path $p (".wnc-write-test-$PID")
+                    [IO.File]::WriteAllText($probe, 'x')
+                    [IO.File]::Delete($probe)
+                } catch {
+                    $problem = "it cannot be created or written ($($_.Exception.Message))"
+                }
+            }
+            if (-not $problem) { return @{ Code = 0; Path = $p; Chosen = $chosen } }
+            Write-Host "WhyNot Cut cannot use $p as its engine home: $problem"
+            Write-Host (Get-WncArabic 'Cannot')
+            if (-not $ask) {
+                Write-Host 'Nothing was downloaded. Run the installer again with -EngineHome <folder>.'
+                return @{ Code = 2 }
+            }
+            $a = Read-WncAnswer $Default
+            if ($null -eq $a) { return @{ Code = 2 } }
+            if ($a) {
+                $text = $a
+                $chosen = $true
+            } else {
+                $text = $Default
+                $chosen = $false
+            }
+        }
+        return @{ Code = 2 }
+    }
+
     function Initialize-WncBootstrap {
         # @{ Code; Run; Py; CoreArgs } - every check and download; the core itself runs outside, uncaptured
         $arch = $env:PROCESSOR_ARCHITEW6432
@@ -458,22 +717,52 @@ param(
             return @{ Code = 2 }
         }
         $root = Get-WncFullPath $PluginRoot
+        if ($Model -and ($WncModels -notcontains $Model)) {
+            Write-Host "ERROR: -Model $Model is not one of $($WncModels -join ', ')"
+            return @{ Code = 2 }
+        }
+        $skipList = @($Skip | Where-Object { $_ } | ForEach-Object { $_ -split ',' } | Where-Object { $_.Trim() } |
+            ForEach-Object { $_.Trim() })
         $sandbox = [bool]$SandboxHome
         if ($sandbox) {
             $h = Get-WncFullPath $SandboxHome
-            $engine = Join-Path $h '.whynot-cut'
             $env:HOME = $h
             $env:USERPROFILE = $h
             $env:APPDATA = Join-Path $h 'AppData\Roaming'
             $env:LOCALAPPDATA = Join-Path $h 'AppData\Local'
             $env:CLAUDE_CONFIG_DIR = Join-Path $h '.claude'
-            $env:WHYNOT_HOME = $engine
+            $resolved = Resolve-WncEngineHome $h -Sandbox
+            $pointer = Join-Path $h '.whynot-cut\plugin-options.json'
+            if ($env:WNC_TEST_ANSWERS) { $S.Answers = @([IO.File]::ReadAllLines($env:WNC_TEST_ANSWERS, $S.Utf8)) }
+            if ($env:WNC_TEST_FREE_GB) { $S.FreeGb = $env:WNC_TEST_FREE_GB }
         } else {
             $h = $env:USERPROFILE
             if (-not $h) { $h = $env:HOME }
             $resolved = Resolve-WncEngineHome $h
-            $engine = Get-WncFullPath $resolved.Path
+            $pointer = Join-Path $h '.whynot-cut\plugin-options.json'
+            if ($env:WHYNOT_OPTIONS_FILE) {
+                $pointer = ConvertTo-WncHomePath -Value $env:WHYNOT_OPTIONS_FILE -UserHome $h -Saved $false
+            }
         }
+        $default = Get-WncFullPath $resolved.Path
+        $chosen = $false
+        $sandboxRoot = $null
+        if ($sandbox) { $sandboxRoot = $h }
+        if ($Uninstall) {
+            # no question: the folder the engine uses (or -EngineHome); the core checks a chosen one
+            $engine = $default
+            if ($EngineHome) {
+                $engine = ConvertFrom-WncTyped -Text $EngineHome -UserHome $h
+                $chosen = $true
+            }
+        } else {
+            $sel = Select-WncEngineHome -Default $default -UserHome $h -Root $root -Pointer $pointer `
+                -SandboxRoot $sandboxRoot -WithModel ($skipList -notcontains 'model')
+            if ($sel.Code -ne 0) { return @{ Code = 2 } }
+            $engine = $sel.Path
+            $chosen = $sel.Chosen
+        }
+        if ($sandbox) { $env:WHYNOT_HOME = $engine }
         $testUv = $null
         if ($sandbox -and $env:WNC_TEST_UV) { $testUv = $env:WNC_TEST_UV }
 
@@ -508,7 +797,14 @@ param(
             $S.Log = Join-Path $logs ("{0}-{1}.log" -f $command, (Get-Date -Format 'yyyyMMdd-HHmmss'))
             [IO.File]::WriteAllText($S.Log, '', $S.Utf8)
         }
-        if ($sandbox) { $mode = ' (sandbox)' } else { $mode = " (from $($resolved.Source))" }
+        if ($chosen) {
+            $mode = ' (chosen)'
+        } elseif ($resolved.Source -eq 'default') {
+            $mode = ' (default)'
+        } else {
+            $mode = " (from $($resolved.Source))"
+        }
+        if ($sandbox) { $mode += ' (sandbox)' }
         if ($DryRun) { $mode += ' (dry run: nothing is written)' }
         Write-WncLine "WhyNot Cut bootstrap: $command on win-x64; engine home $engine$mode"
 
@@ -567,12 +863,19 @@ param(
 
         $a = @('-I', '-B', '-X', 'utf8', $core, $command, '--plugin-root', $root, '--uv', $uv, '--python', $py)
         if ($S.Log) { $a += @('--log', $S.Log) }
-        if ($sandbox) { $a += @('--home', $h) } else { $a += @('--engine-home', $engine) }
+        if ($sandbox) {
+            $a += @('--home', $h)
+            if ($chosen -or ((Get-WncNormPath $engine) -ine (Get-WncNormPath (Join-Path $h '.whynot-cut')))) {
+                $a += @('--engine-home', $engine)
+            }
+        } else {
+            $a += @('--engine-home', $engine)
+        }
+        if ($chosen) { $a += '--engine-home-chosen' }
+        if ($Model) { $a += @('--model', $Model) }
         if ($Components) { $a += @('--components', $compPath) }
         if ($DryRun) { $a += '--dry-run' }
         if ($Yes) { $a += '--yes' }
-        $skipList = @($Skip | Where-Object { $_ } | ForEach-Object { $_ -split ',' } | Where-Object { $_.Trim() } |
-            ForEach-Object { $_.Trim() })
         if ($skipList.Count -gt 0) { $a += @('--skip', ($skipList -join ',')) }
         if ($ClientsFolder) { $a += @('--clients-folder', (Get-WncFullPath $ClientsFolder)) }
         if ($Language) { $a += @('--language', $Language) }

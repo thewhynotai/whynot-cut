@@ -53,8 +53,15 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--components", help="components.json (default: <plugin>/setup/components.json)")
     common.add_argument("--uv", help="uv binary the bootstrap installed")
     common.add_argument("--python", help="python-build-standalone interpreter the bootstrap installed")
-    common.add_argument("--engine-home", help="the engine home the bootstrap resolved (outside a sandbox it must be "
-                                              "the core's own resolution, else the run stops with 2)")
+    common.add_argument("--engine-home", help="the engine home the bootstrap uses: with --engine-home-chosen the "
+                                              "folder the editor chose (it wins); without it, the folder the "
+                                              "bootstrap resolved, which must be the core's own resolution (else "
+                                              "the run stops with 2)")
+    common.add_argument("--engine-home-chosen", action="store_true",
+                        help="--engine-home was chosen by the editor (-EngineHome / --engine-home or the bootstrap's "
+                             "location question), not resolved")
+    common.add_argument("--model", choices=("large-v3", "large-v3-turbo", "medium", "small"),
+                        help="the Whisper model to install (default: your saved preference, else large-v3)")
     common.add_argument("--log", help="log file shared with the bootstrap (default: logs/<command>-<time>.log)")
     common.add_argument("--dry-run", action="store_true", help="say what would happen; write nothing")
     common.add_argument("--yes", "-y", action="store_true", help="no questions: take the defaults")
@@ -89,6 +96,24 @@ def _utf8_console() -> None:
             pass
 
 
+def _engine_home_problem(paths: base.Paths, plugin_root: Path, chosen) -> str:
+    """A chosen engine home is checked like the bootstraps check it (base.engine_home_choice_problem: the clients
+    folder from the preferences and the pointer counts); a sandbox's engine home must stay inside the sandbox."""
+    if not chosen and not paths.sandbox:
+        return ""
+    from .system import read_preferences
+    roots = [read_preferences(paths).get("clients_root")]
+    ptr = base.read_pointer(paths.options_file)
+    roots.append(ptr.get("clients_root") if ptr is not None else None)
+    roots = [base.saved_path(r, paths.home) for r in roots if isinstance(r, str) and r.strip()]
+    if not chosen:  # a sandbox's own pointer / settings.json named it: only the sandbox rule
+        return "" if base._within(base._norm(paths.whynot), base._norm(paths.home), strict=True) else \
+            f"it is outside the sandbox home {paths.home} (--home: nothing outside it is used)"
+    return base.engine_home_choice_problem(str(chosen), home=paths.home, plugin_root=plugin_root,
+                                           clients_roots=roots,
+                                           sandbox_home=paths.home if paths.sandbox else None) or ""
+
+
 def main(argv=None) -> int:
     _utf8_console()
     parser = build_parser()
@@ -98,13 +123,19 @@ def main(argv=None) -> int:
     if unknown:
         parser.error(f"--skip: unknown step(s) {', '.join(unknown)}; steps are {', '.join(names)}")
     plugin_root = Path(args.plugin_root).resolve() if args.plugin_root else default_plugin_root()
-    paths = base.Paths.from_env(args.home)
-    if args.engine_home and not paths.sandbox and base._norm(args.engine_home) != base._norm(paths.whynot):
+    chosen = args.engine_home if args.engine_home and args.engine_home_chosen else None
+    paths = base.Paths.from_env(args.home, engine_home=chosen)
+    if args.engine_home and not chosen and base._norm(args.engine_home) != base._norm(paths.whynot):
         print(f"ERROR: the bootstrap placed uv and Python in {args.engine_home}, but the engine home is "
               f"{paths.whynot} ({base.describe_engine_home_source(paths.engine_home_source)}). Nothing was changed. "
               f"To fix it yourself, run the installer again with -EngineHome \"{paths.whynot}\" (macOS: --engine-home "
               f"\"{paths.whynot}\"), or name the other folder the same way; if it happens again, tell WhyNot Cut "
               "support (the two resolvers disagree).", file=sys.stderr)
+        return 2
+    problem = _engine_home_problem(paths, plugin_root, chosen)
+    if problem:
+        print(f"ERROR: WhyNot Cut cannot use {paths.whynot} as its engine home: {problem}. Nothing was changed; run "
+              "the installer again with -EngineHome <folder> (macOS: --engine-home <folder>).", file=sys.stderr)
         return 2
 
     if args.command == "plan":

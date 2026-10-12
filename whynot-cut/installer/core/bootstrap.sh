@@ -22,16 +22,27 @@
 # 3 = a bootstrap step failed (download, sha256, uv, python), with a one-line message and the log path.
 # --dry-run writes nothing (no log, no folder); it runs the core's dry run only when uv and Python are already there
 # (or WNC_TEST_UV is set), otherwise it names the steps that would follow.
-# Engine home (outside a sandbox): resolved exactly like the engine (resolve_engine_home: WHYNOT_HOME and the other
-# engine-home variables, else the plugin option engine_home from ~/.whynot-cut/plugin-options.json, else from
-# settings.json pluginConfigs, else ~/.whynot-cut) BEFORE anything is downloaded, so uv, Python, the log and every later
-# step land in that one folder; it is passed to the core as --engine-home, and the core stops with 2 if its own
-# resolution (wnc_installer.base.resolve_engine_home) disagrees.
+# Engine home: resolved exactly like the engine (resolve_engine_home: WHYNOT_HOME and the other engine-home variables,
+# else the plugin option engine_home from ~/.whynot-cut/plugin-options.json, else from settings.json pluginConfigs,
+# else ~/.whynot-cut) BEFORE anything is downloaded. That folder is the default of the location question (owner
+# decision 2026-10-12): --engine-home <folder> answers it, --yes takes the default, without a terminal the default is
+# used; the answer is read from the terminal, or from /dev/tty when stdin is not one (never from stdin under
+# `curl | bash`). It is checked (engine_home_problem: a full path, not a drive root, not inside the plugin folder,
+# not the user folder or Claude's folder, not the clients folder or a folder marked .whynot-client, in a sandbox
+# inside the sandbox; 6 GB free on its drive, 9 GB with the Whisper model, unless WhyNot Cut is already there; it can
+# be created and written); a refused folder is asked again (with --yes: exit 2, nothing downloaded). uv, Python, the
+# log and every later step land in that one folder: it is passed to the core as --engine-home (+ --engine-home-chosen
+# when the editor chose it: the core then uses it as it is; otherwise the core stops with 2 if its own resolution,
+# wnc_installer.base.resolve_engine_home, disagrees). The core remembers a chosen folder in settings.json pluginConfigs
+# and the pointer file. --uninstall asks nothing: the resolved folder, or --engine-home. --model <large-v3 |
+# large-v3-turbo | medium | small> goes to the core (its model question).
 # Sandbox (--home <dir>): HOME, USERPROFILE, APPDATA, LOCALAPPDATA, CLAUDE_CONFIG_DIR and WHYNOT_HOME point into <dir>
-# before anything is downloaded (as wnc_installer.base.Paths.child_env does), and --home is passed on. Only then are
-# the test hooks honoured: WNC_TEST_PLATFORM (win-x64 | mac-arm64 | mac-x64; lets Git Bash run the macOS path) and
-# WNC_TEST_UV (a uv stand-in used for `python install/find` after the real archive was still downloaded and
-# verified; a .sh runs with bash, a .py with the JSON-reading python).
+# before anything is downloaded (as wnc_installer.base.Paths.child_env does), and --home is passed on; the engine home
+# is resolved from the sandbox's own pointer / settings.json only. Only then are the test hooks honoured:
+# WNC_TEST_PLATFORM (win-x64 | mac-arm64 | mac-x64; lets Git Bash run the macOS path), WNC_TEST_UV (a uv stand-in used
+# for `python install/find` after the real archive was still downloaded and verified; a .sh runs with bash, a .py
+# with the JSON-reading python), WNC_TEST_ANSWERS (a file: one answer per line for the location question) and
+# WNC_TEST_FREE_GB (the free space the check sees).
 # bash 3.2 (the macOS default): no associative arrays, no ${var,,}, no mapfile. No `set -e`: every failure is handled.
 
 STEP_NAMES="preflight questions runtime ffmpeg gitbash gpu claude adobe fonts settings model state doctor launch"
@@ -216,7 +227,11 @@ engine_python() { # uninstall: the python-build-standalone already in the engine
 
 norm_path() { # lexical: \ (Git Bash), repeated /, . and .. resolved, no trailing / -> NORM; lower case on Windows
   local p="$1" out="" part lead=""
-  case "$OS_NAME" in MINGW*|MSYS*|CYGWIN*) p="${p//\\//}" ;; esac
+  case "$OS_NAME" in
+    MINGW*|MSYS*|CYGWIN*)
+      p="${p//\\//}"
+      case "$p" in /[a-zA-Z]|/[a-zA-Z]/*) p="${p:1:1}:${p:2}" ;; esac ;;  # Git Bash /c/x is C:/x
+  esac
   case "$p" in /*) lead="/" ;; esac
   local IFS=/
   set -f
@@ -276,11 +291,13 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
 
 # ------------------------------------------------------------------------------------------- arguments
 PLUGIN_ROOT="" HOME_OVR="" DRY="" YES="" CLIENTS="" LANG_OPT="" CHANNEL="" COMPONENTS="" SKIP=""
-UNINSTALL="" REMOVE_ENGINE="" REMOVE_MODELS=""
+UNINSTALL="" REMOVE_ENGINE="" REMOVE_MODELS="" ENGINE_OPT="" MODEL_OPT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --plugin-root) PLUGIN_ROOT="$2"; shift ;;
     --home) HOME_OVR="$2"; shift ;;
+    --engine-home) ENGINE_OPT="$2"; shift ;;
+    --model) MODEL_OPT="$2"; shift ;;
     --dry-run) DRY=1 ;;
     --yes|-y) YES=1 ;;
     --clients-folder) CLIENTS="$2"; shift ;;
@@ -296,6 +313,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "$PLUGIN_ROOT" ] || stop2 "bootstrap: --plugin-root is required"
+case "$MODEL_OPT" in
+  ""|large-v3|large-v3-turbo|medium|small) ;;  # wnc_installer/system.py MODELS
+  *) stop2 "--model $MODEL_OPT is not one of large-v3, large-v3-turbo, medium, small" ;;
+esac
 
 abs_path() { # an absolute path (POSIX /x or Windows C:/x stays as it is)
   case "$1" in
@@ -377,19 +398,22 @@ print("none")'
   fi
 }
 
-resolve_engine_home() { # outside a sandbox: the engine home the engine itself uses -> ENGINE, ENGINE_SRC
+resolve_engine_home() { # [sandbox]: the engine home the engine itself uses -> ENGINE, ENGINE_SRC
   # engine/reel/lib/plat.py engine_home (the core's wnc_installer.base.resolve_engine_home is the same): the first
   # engine-home variable that is set, else the saved plugin option (saved_engine_home), else ~/.whynot-cut. The
-  # sources are named like the core's: env:<NAME>, pointer:<file>, settings:<file> <key>, default.
-  local n v pointer cfg out rest key src
-  for n in WHYNOT_HOME CLAUDE_PLUGIN_OPTION_ENGINE_HOME REEL_HOME CLAUDE_PLUGIN_OPTION_REEL_HOME NH_ENV_DIR; do
-    v="${!n:-}"
-    if [ -n "$v" ]; then ENGINE="$(home_path "$v")"; ENGINE_SRC="env:$n"; return 0; fi
-  done
+  # sources are named like the core's: env:<NAME>, pointer:<file>, settings:<file> <key>, default. "sandbox": no
+  # variable at all, only $HOME/.whynot-cut/plugin-options.json and $HOME/.claude/settings.json.
+  local n v pointer cfg out rest key src sandbox="${1:-}"
+  if [ -z "$sandbox" ]; then
+    for n in WHYNOT_HOME CLAUDE_PLUGIN_OPTION_ENGINE_HOME REEL_HOME CLAUDE_PLUGIN_OPTION_REEL_HOME NH_ENV_DIR; do
+      v="${!n:-}"
+      if [ -n "$v" ]; then ENGINE="$(home_path "$v")"; ENGINE_SRC="env:$n"; return 0; fi
+    done
+  fi
   pointer="$HOME/.whynot-cut/plugin-options.json"
-  if [ -n "${WHYNOT_OPTIONS_FILE:-}" ]; then pointer="$(home_path "$WHYNOT_OPTIONS_FILE")"; fi
+  if [ -z "$sandbox" ] && [ -n "${WHYNOT_OPTIONS_FILE:-}" ]; then pointer="$(home_path "$WHYNOT_OPTIONS_FILE")"; fi
   cfg="$HOME/.claude"
-  if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then cfg="$(home_path "$CLAUDE_CONFIG_DIR")"; fi
+  if [ -z "$sandbox" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then cfg="$(home_path "$CLAUDE_CONFIG_DIR")"; fi
   out="$(saved_engine_home "$pointer" "$cfg/settings.json")"
   v="" src=""
   case "$out" in
@@ -403,6 +427,175 @@ resolve_engine_home() { # outside a sandbox: the engine home the engine itself u
   else
     ENGINE="$HOME/.whynot-cut"; ENGINE_SRC="default"
   fi
+}
+
+# ------------------------------------------------------------------------------------------- the location question
+NEED_GB=6 MODEL_GB=3  # free space for the engine, + the Whisper model (wnc_installer/system.py RED_GB / AMBER_GB)
+
+within() { # a b (both from norm_path): a is b or below it
+  [ "$1" = "$2" ] && return 0
+  case "$1" in "${2%/}"/*) return 0 ;; esac
+  return 1
+}
+
+client_roots() { # -> CLIENT_ROOTS (one per line): clients_root of the preferences file and of the pointer file
+  local prefs="$HOME/.claude/whynot-cut.local.md" v
+  CLIENT_ROOTS=""
+  if [ -f "$prefs" ]; then
+    v="$(awk 'NR == 1 && !/^---/ { exit } NR > 1 && /^---/ { exit }
+              NR > 1 && /^[[:space:]]*clients_root[[:space:]]*:/ {
+                sub(/^[[:space:]]*clients_root[[:space:]]*:[[:space:]]*/, ""); print; exit }' "$prefs" 2>/dev/null \
+         | tr -d '\r')"
+    case "$v" in
+      \"*\") v="${v#\"}"; v="${v%\"}" ;;
+      \'*\') v="${v#\'}"; v="${v%\'}" ;;
+      *) v="${v%% #*}" ;;
+    esac
+    [ -n "$v" ] && CLIENT_ROOTS="$(home_path "$v")"
+  fi
+  v="$(json_get "$POINTER" clients_root)"
+  if [ -n "$v" ]; then CLIENT_ROOTS="$CLIENT_ROOTS"$'\n'"$(home_path "$v")"; fi
+}
+
+typed_path() { # text -> TYPED: quotes trimmed, ~ is the home folder, no trailing / (any other text stays as typed)
+  local t="$1"
+  t="${t#\"}"; t="${t%\"}"; t="${t#\'}"; t="${t%\'}"
+  case "$t" in \~) t="$HOME" ;; \~/*) t="$HOME/${t#\~/}" ;; esac
+  while [ "${t%/}" != "$t" ] && [ "${t%/}" != "" ] && [ "${t%/}" != "${t%%:*}:" ]; do t="${t%/}"; done
+  TYPED="$t"
+}
+
+engine_home_problem() { # path -> PROBLEM (empty: fine); the core's base.engine_home_choice_problem, same order
+  local p="$1" n c d up
+  PROBLEM=""
+  case "$p" in
+    /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
+    *) PROBLEM="$p is not a full path (for example $HOME/WhyNotCut)"; return 0 ;;
+  esac
+  norm_path "$p"; n="$NORM"
+  case "$n" in
+    /|[A-Za-z]:|[A-Za-z]:/) PROBLEM="$p is a drive root; choose a folder on it"; return 0 ;;
+  esac
+  norm_path "$ROOT"
+  if within "$n" "$NORM"; then
+    PROBLEM="$p is inside the plugin folder $ROOT, which is replaced on every update"; return 0
+  fi
+  norm_path "$HOME"
+  if within "$NORM" "$n"; then PROBLEM="$p is your user folder or holds it; choose a folder of its own"; return 0; fi
+  norm_path "$HOME/.claude"
+  if within "$n" "$NORM"; then PROBLEM="$p is inside Claude's folder $HOME/.claude"; return 0; fi
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    norm_path "$c"
+    if within "$n" "$NORM"; then
+      PROBLEM="$p is your clients folder $c (or inside it); keep the engine apart from client footage"; return 0
+    fi
+  done <<EOF
+$CLIENT_ROOTS
+EOF
+  d="$p"
+  while [ -n "$d" ]; do
+    if [ -e "$d/.whynot-client" ]; then PROBLEM="$p is inside a client folder ($d holds .whynot-client)"; return 0; fi
+    up="${d%/*}"
+    [ "$up" = "$d" ] && break
+    d="$up"
+  done
+  if [ -n "$HOME_OVR" ]; then
+    norm_path "$H"
+    if [ "$n" = "$NORM" ] || ! within "$n" "$NORM"; then
+      PROBLEM="$p is outside the sandbox home $H (--home: nothing outside it is used)"
+    fi
+  fi
+  return 0
+}
+
+free_gb() { # path -> FREE: whole GB free on its drive (empty when unknown)
+  local d="$1" up kb
+  FREE=""
+  if [ -n "$TEST_FREE" ]; then FREE="${TEST_FREE%%.*}"; return 0; fi
+  while [ -n "$d" ] && [ ! -d "$d" ]; do
+    up="${d%/*}"
+    [ "$up" = "$d" ] && break
+    d="$up"
+  done
+  [ -n "$d" ] || d="/"
+  kb="$(df -Pk "$d" 2>/dev/null </dev/null | awk 'NR == 2 { print $4 }')"
+  case "$kb" in ''|*[!0-9]*) return 0 ;; esac
+  FREE=$((kb / 1048576))
+}
+
+can_ask() { # the location question: never with --yes or --uninstall; the test hook; else a terminal (or /dev/tty)
+  [ -z "$YES" ] && [ -z "$UNINSTALL" ] || return 1
+  [ -n "$ANSWERS" ] && return 0
+  [ -t 0 ] && return 0
+  { : </dev/tty; } 2>/dev/null
+}
+
+ask_line() { # default -> ANSWER (trimmed; empty = the default); status 1 when there is no more input
+  printf 'Folder / المجلد [%s]: ' "$1"
+  ANSWER=""
+  if [ -n "$ANSWERS" ]; then
+    if ! IFS= read -r ANSWER <&3 && [ -z "$ANSWER" ]; then printf '\n'; return 1; fi
+    printf '%s\n' "$ANSWER"
+  elif [ -t 0 ]; then
+    IFS= read -r ANSWER || [ -n "$ANSWER" ] || return 1
+  else
+    IFS= read -r ANSWER </dev/tty || [ -n "$ANSWER" ] || return 1  # curl | bash: stdin is the script
+  fi
+  ANSWER="${ANSWER%$'\r'}"
+  ANSWER="${ANSWER#"${ANSWER%%[![:space:]]*}"}"
+  ANSWER="${ANSWER%"${ANSWER##*[![:space:]]}"}"
+  return 0
+}
+
+select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no usable folder is given)
+  local default="$1" with_model="$2" text ask="" tries=0 need p
+  CHOSEN=""
+  client_roots
+  can_ask && ask=1
+  text="$default"
+  if [ -n "$ENGINE_OPT" ]; then
+    text="$ENGINE_OPT"; CHOSEN=1
+  elif [ -n "$ask" ]; then
+    printf '%s %s GB, %s GB with the model. Enter keeps the folder in brackets.\n' \
+      "Where should WhyNot Cut keep its engine (Python, ffmpeg, the Whisper model)? It needs about" \
+      "$NEED_GB" "$((NEED_GB + MODEL_GB))"
+    printf '%s\n' "أين يحفظ WhyNot Cut ملفات التشغيل (بايثون و ffmpeg ونموذج Whisper)؟ تحتاج حوالي 6 جيجابايت، و9 مع النموذج. اضغط Enter لاختيار المجلد بين القوسين."
+    if [ -f "$default/state.json" ] || [ -f "$default/current" ]; then
+      printf 'WhyNot Cut is already installed in %s; Enter keeps it there.\n' "$default"
+      printf '%s\n' "WhyNot Cut مثبّت بالفعل في هذا المجلد؛ اضغط Enter لإبقائه."
+    fi
+    if ask_line "$default" && [ -n "$ANSWER" ]; then text="$ANSWER"; CHOSEN=1; fi
+  fi
+  while [ "$tries" -lt 8 ]; do
+    tries=$((tries + 1))
+    typed_path "$text"; p="$TYPED"
+    engine_home_problem "$p"
+    if [ -z "$PROBLEM" ] && [ ! -f "$p/state.json" ] && [ ! -f "$p/current" ]; then
+      need="$NEED_GB"
+      [ -n "$with_model" ] && need=$((NEED_GB + MODEL_GB))
+      free_gb "$p"
+      if [ -n "$FREE" ] && [ "$FREE" -lt "$need" ]; then
+        PROBLEM="only $FREE GB free on its drive; WhyNot Cut needs $need GB there ($NEED_GB GB, plus $MODEL_GB GB"
+        PROBLEM="$PROBLEM for the Whisper model unless you add --skip model)"
+      fi
+    fi
+    if [ -z "$PROBLEM" ] && [ -z "$DRY" ]; then
+      if ! { mkdir -p "$p" && : > "$p/.wnc-write-test.$$" && rm -f "$p/.wnc-write-test.$$"; } 2>/dev/null; then
+        PROBLEM="it cannot be created or written"
+      fi
+    fi
+    if [ -z "$PROBLEM" ]; then ENGINE="$p"; return 0; fi
+    printf 'WhyNot Cut cannot use %s as its engine home: %s\n' "$p" "$PROBLEM"
+    printf '%s\n' "لا يمكن استخدام هذا المجلد؛ اختر مجلدًا آخر."
+    if [ -z "$ask" ]; then
+      printf 'Nothing was downloaded. Run the installer again with --engine-home <folder>.\n'
+      exit 2
+    fi
+    ask_line "$default" || exit 2
+    if [ -n "$ANSWER" ]; then text="$ANSWER"; CHOSEN=1; else text="$default"; CHOSEN=""; fi
+  done
+  exit 2
 }
 
 # ------------------------------------------------------------------------------------------- platform and paths
@@ -427,19 +620,33 @@ else
 fi
 
 ROOT="$(abs_path "$PLUGIN_ROOT")"
+TEST_UV="" ANSWERS="" TEST_FREE=""
 if [ -n "$HOME_OVR" ]; then
-  H="$(abs_path "$HOME_OVR")"
-  ENGINE="$H/.whynot-cut"
-  export HOME="$H" USERPROFILE="$H" APPDATA="$H/AppData/Roaming" LOCALAPPDATA="$H/AppData/Local"
-  export CLAUDE_CONFIG_DIR="$H/.claude" WHYNOT_HOME="$ENGINE"
-else
-  ENGINE="" ENGINE_SRC=""
-  resolve_engine_home  # before any download: uv, Python, the log and the core all use this one folder
+  TEST_UV="${WNC_TEST_UV:-}" ANSWERS="${WNC_TEST_ANSWERS:-}" TEST_FREE="${WNC_TEST_FREE_GB:-}"
 fi
-TEST_UV=""
-[ -n "$HOME_OVR" ] && TEST_UV="${WNC_TEST_UV:-}"
 JSON_PY=""
 if [ "$OS_NAME" != "Darwin" ] || [ "${TEST_UV%.py}" != "$TEST_UV" ]; then JSON_PY="$(pick_py)"; fi
+ENGINE="" ENGINE_SRC="" CHOSEN=""
+if [ -n "$HOME_OVR" ]; then
+  H="$(abs_path "$HOME_OVR")"
+  export HOME="$H" USERPROFILE="$H" APPDATA="$H/AppData/Roaming" LOCALAPPDATA="$H/AppData/Local"
+  export CLAUDE_CONFIG_DIR="$H/.claude"
+  resolve_engine_home sandbox  # the sandbox's own pointer / settings.json only
+  POINTER="$H/.whynot-cut/plugin-options.json"
+else
+  resolve_engine_home  # before any download: uv, Python, the log and the core all use this one folder
+  POINTER="$HOME/.whynot-cut/plugin-options.json"
+  if [ -n "${WHYNOT_OPTIONS_FILE:-}" ]; then POINTER="$(home_path "$WHYNOT_OPTIONS_FILE")"; fi
+fi
+DEFAULT_ENGINE="$ENGINE"
+if [ -n "$UNINSTALL" ]; then  # no question: the folder the engine uses (or --engine-home; the core checks it)
+  if [ -n "$ENGINE_OPT" ]; then typed_path "$ENGINE_OPT"; ENGINE="$TYPED"; CHOSEN=1; fi
+else
+  [ -n "$ANSWERS" ] && exec 3<"$ANSWERS"
+  case ",$SKIP," in *,model,*) WITH_MODEL="" ;; *) WITH_MODEL=1 ;; esac
+  select_engine_home "$DEFAULT_ENGINE" "$WITH_MODEL"
+fi
+[ -n "$HOME_OVR" ] && export WHYNOT_HOME="$ENGINE"
 
 COMP="$ROOT/setup/components.json"
 [ -n "$COMPONENTS" ] && COMP="$(abs_path "$COMPONENTS")"
@@ -463,8 +670,14 @@ if [ -z "$DRY" ]; then
   LOG="$ENGINE/logs/$CMD-$(date '+%Y%m%d-%H%M%S').log"
   : > "$LOG" || fail "cannot write $LOG"
 fi
-MODE=" (from $ENGINE_SRC)"
-[ -n "$HOME_OVR" ] && MODE=" (sandbox)"
+if [ -n "$CHOSEN" ]; then
+  MODE=" (chosen)"
+elif [ "$ENGINE_SRC" = "default" ]; then
+  MODE=" (default)"
+else
+  MODE=" (from $ENGINE_SRC)"
+fi
+[ -n "$HOME_OVR" ] && MODE="$MODE (sandbox)"
 [ -n "$DRY" ] && MODE="$MODE (dry run: nothing is written)"
 say "WhyNot Cut bootstrap: $CMD on $PLAT; engine home $ENGINE$MODE"
 
@@ -541,7 +754,16 @@ say "Python $PY_VER at $PY"
 # ------------------------------------------------------------------------------------------- the core
 set -- -I -B -X utf8 "$CORE" "$CMD" --plugin-root "$ROOT" --uv "$UV" --python "$PY"
 [ -n "$LOG" ] && set -- "$@" --log "$LOG"
-if [ -n "$HOME_OVR" ]; then set -- "$@" --home "$H"; else set -- "$@" --engine-home "$ENGINE"; fi
+if [ -n "$HOME_OVR" ]; then
+  set -- "$@" --home "$H"
+  norm_path "$ENGINE"; n_engine="$NORM"
+  norm_path "$H/.whynot-cut"
+  if [ -n "$CHOSEN" ] || [ "$n_engine" != "$NORM" ]; then set -- "$@" --engine-home "$ENGINE"; fi
+else
+  set -- "$@" --engine-home "$ENGINE"
+fi
+[ -n "$CHOSEN" ] && set -- "$@" --engine-home-chosen
+[ -n "$MODEL_OPT" ] && set -- "$@" --model "$MODEL_OPT"
 [ -n "$COMPONENTS" ] && set -- "$@" --components "$COMP"
 [ -n "$DRY" ] && set -- "$@" --dry-run
 [ -n "$YES" ] && set -- "$@" --yes

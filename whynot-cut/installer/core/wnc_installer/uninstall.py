@@ -19,7 +19,9 @@ engine       only with --remove-engine: every child of ~/.whynot-cut except mode
              ~/.whynot-cut/.delete-after-exit, which the bootstrap deletes after this process exits (and the engine
              home itself when nothing else is left). When adobe / fonts left something recorded (a running host, a
              font in use), a minimal state.json keeps those records for the next uninstall. Refused unless the folder
-             holds state.json, current or bin/uv(.exe). --remove-models alone deletes models/ only.
+             holds state.json, current or bin/uv(.exe). --remove-models alone deletes models/ only. Once nothing is
+             left to retry, the saved engine home is forgotten (claude.forget_engine_home: the pointer's engine_home,
+             our pluginConfigs option, then an empty ~/.whynot-cut), only while they name this folder.
 Never touched: a clients folder (preferences `clients_root`, any folder holding `.whynot-client`), the preferences file
 ~/.claude/whynot-cut.local.md (kept and reported), fonts / registry values / CEP folders not recorded, anything outside
 the engine home, the recorded paths and the managed Git folder. Links are removed as links or left alone, never
@@ -482,6 +484,12 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         if busy:
             notes.append(busy)
         return _done("engine", "amber", notes, _locked_hint(busy, "--remove-engine"))
+    if not retry:  # nothing left to retry: WhyNot Cut no longer points at this folder (ID-10)
+        notes += claude.forget_engine_home(paths, ctx.log)
+        custom = not base.same_path(paths.whynot, paths.default_whynot)
+        if custom and any(k.startswith(("models", KEPT)) for k in kept):
+            notes.append(f"{paths.whynot} keeps what is listed above; to use it again, install with -EngineHome "
+                         f"\"{paths.whynot}\" (macOS: --engine-home)")
     return _done("engine", "ok", notes)
 
 

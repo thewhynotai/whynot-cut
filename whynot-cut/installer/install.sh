@@ -25,7 +25,7 @@
 WNC_RELEASE_INDEX_URL='<release>'
 
 main() {
-  local home="" dry="" channel="" source="" source_sha="" root="" src="" here="" code=0
+  local home="" dry="" channel="" source="" source_sha="" root="" src="" here="" code=0 engine_home=""
   local pass=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -33,7 +33,8 @@ main() {
       --source-sha256) source_sha="$2"; shift ;;
       --home) home="$2"; pass+=("$1" "$2"); shift ;;
       --channel) channel="$2"; pass+=("$1" "$2"); shift ;;
-      --clients-folder|--language|--components|--skip) pass+=("$1" "$2"); shift ;;
+      --engine-home) engine_home="$2"; pass+=("$1" "$2"); shift ;;
+      --clients-folder|--language|--components|--skip|--model) pass+=("$1" "$2"); shift ;;
       --dry-run) dry=1; pass+=("$1") ;;
       --yes|-y|--uninstall|--remove-engine|--remove-models) pass+=("$1") ;;
       -h|--help) sed -n '2,22p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null || echo "see installer/README.md"; return 0 ;;
@@ -56,7 +57,7 @@ main() {
     if [ -n "$here" ] && [ -f "$here/setup/components.json" ]; then root="$here"; fi
   fi
   if [ -z "$root" ]; then
-    wnc_release "$home" "$dry" "$channel" "$source" "$source_sha" || return $?
+    wnc_release "$home" "$dry" "$channel" "$source" "$source_sha" "$engine_home" || return $?
     root="$RELEASE_ROOT"
     [ -n "$root" ] || return 0  # dry run: nothing fetched
   fi
@@ -121,8 +122,8 @@ for k in sys.argv[1].split("."):
 print("" if v is None else v)' "$2" 2>/dev/null | tr -d '\r'
 }
 
-wnc_release() { # home dry channel source sha -> RELEASE_ROOT (empty after a dry run); status 2 / 3 on failure
-  local home="$1" dry="$2" channel="$3" src="$4" sha="$5" engine="" name="" dir="" zip="" x="" plugin="" got="" idx=""
+wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty after a dry run); status 2 / 3
+  local home="$1" dry="$2" channel="$3" src="$4" sha="$5" engine="$6" name="" dir="" zip="" x="" plugin="" got="" idx=""
   RELEASE_ROOT=""
   if [ -z "$src" ]; then
     case "$WNC_RELEASE_INDEX_URL" in
@@ -150,7 +151,9 @@ wnc_release() { # home dry channel source sha -> RELEASE_ROOT (empty after a dry
     /*|[A-Za-z]:*) ;;
     *) src="$PWD/$src" ;;
   esac
-  if [ -n "$home" ]; then
+  if [ -n "$engine" ]; then  # --engine-home: the release zip is cached there too
+    case "$engine" in /*|[A-Za-z]:*) ;; *) engine="$PWD/$engine" ;; esac
+  elif [ -n "$home" ]; then
     case "$home" in /*|[A-Za-z]:*) ;; *) home="$PWD/$home" ;; esac
     engine="$home/.whynot-cut"
   else

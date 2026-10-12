@@ -122,6 +122,13 @@
   and no registry edit for Adobe's debug mode: an unsigned panel is reported, never installed. `installer/README.md`
   says what was verified and what was not; `tools/release.py` (a stub) lists the placeholders left in
   `setup/components.json` and pins the panel files.
+- The installer asks which Whisper model to install (`large-v3` about 2.9 GB, the default: the strongest, on every
+  computer; `large-v3-turbo` 1.6 GB; `medium` 1.5 GB; `small` 0.5 GB; `-Model` / `--model`; a saved choice is the
+  default on a re-install) and where to put the engine (`-EngineHome` / `--engine-home`; default the folder the engine
+  already uses, normally `~/.whynot-cut`), before anything is downloaded. The folder is checked (free space, not the
+  plugin or a clients folder, a warning for non-English letters on Windows) and remembered only through the plugin
+  option `engine_home` in Claude Code's `settings.json` and `~/.whynot-cut/plugin-options.json`; uninstall finds it
+  there and forgets it with `-RemoveEngine`.
 
 ### Changed
 - No real client ships in the product: the real client's profile folder was removed from `profiles/`. The plugin now

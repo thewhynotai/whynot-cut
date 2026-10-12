@@ -33,6 +33,8 @@ param(
     [switch]$Uninstall,
     [switch]$RemoveEngine,
     [switch]$RemoveModels,
+    [string]$EngineHome,
+    [string]$Model,
     [string]$Source,
     [string]$SourceSha256
 )
@@ -58,6 +60,8 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
     }
 
     function Get-WncEngineHome {
+        # where the release zip is cached (-Source mode, before any plugin file exists): -EngineHome when given
+        if ($EngineHome) { return Get-WncFullPath $EngineHome }
         if ($SandboxHome) { return Join-Path (Get-WncFullPath $SandboxHome) '.whynot-cut' }
         if ($env:WHYNOT_HOME) { return Get-WncFullPath $env:WHYNOT_HOME }
         $h = $env:USERPROFILE
@@ -191,6 +195,8 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
             if ($Uninstall) { $bootArgs.Uninstall = $true }
             if ($RemoveEngine) { $bootArgs.RemoveEngine = $true }
             if ($RemoveModels) { $bootArgs.RemoveModels = $true }
+            if ($EngineHome) { $bootArgs.EngineHome = $EngineHome }
+            if ($Model) { $bootArgs.Model = $Model }
             & $block @bootArgs
             $code = $LASTEXITCODE
         }

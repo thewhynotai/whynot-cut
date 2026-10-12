@@ -13,6 +13,9 @@ claude   registers the WhyNot Cut marketplace and plugin with Claude Code:
              editor gets the plugin on the next Claude Code start.
          Until `marketplace.url` is pinned the source is the managed folder ~/.whynot-cut/marketplace, refreshed from
          the folder the installer runs from; once pinned, the URL with autoUpdate (ID-7).
+The engine home the editor chose is remembered here too (remember_engine_home, called by the questions step; ID-10):
+settings.json pluginConfigs["whynot-cut@thewhynot-ai"].options.engine_home plus the pointer
+~/.whynot-cut/plugin-options.json; uninstall --remove-engine forgets both (forget_engine_home).
 settings.json is merged, never overwritten: read as utf-8-sig, key order kept, a timestamped backup only when something
 changes, written atomically (indent 2, UTF-8, trailing newline). Invalid JSON is never written to: the step is amber and
 gives the editor the JSON to paste. Managed settings are never touched. Stdlib only.
@@ -112,7 +115,8 @@ def _version(text) -> Optional[tuple]:
 
 # --------------------------------------------------------------------------------------------- settings.json
 def settings_snippet(marketplace: Optional[dict] = None, plugin_id: Optional[str] = None,
-                     env: Optional[dict] = None) -> str:
+                     env: Optional[dict] = None, plugin_options: Optional[dict] = None,
+                     options_key: str = base.PLUGIN_KEY) -> str:
     """One line of JSON with what we would merge: shown to the editor when settings.json cannot be merged."""
     snip = {}
     if marketplace:
@@ -121,7 +125,33 @@ def settings_snippet(marketplace: Optional[dict] = None, plugin_id: Optional[str
         snip["enabledPlugins"] = {plugin_id: True}
     if env:
         snip["env"] = env
+    if plugin_options:
+        snip["pluginConfigs"] = {options_key: {"options": plugin_options}}
     return json.dumps(snip, ensure_ascii=False)
+
+
+def _plugin_options(data: dict, key: str, snippet: str, create: bool) -> Optional[dict]:
+    """settings pluginConfigs[key].options (created when `create`); SettingsUnreadable when a level of it is there
+    but is not an object (never overwritten); None when absent and not created."""
+    configs = data.get("pluginConfigs")
+    if configs is None and not create:
+        return None
+    if configs is not None and not isinstance(configs, dict):
+        raise SettingsUnreadable(snippet, "not valid JSON for settings (`pluginConfigs` is not an object)")
+    configs = data.setdefault("pluginConfigs", {}) if create else configs
+    entry = configs.get(key)
+    if entry is None and not create:
+        return None
+    if entry is not None and not isinstance(entry, dict):
+        raise SettingsUnreadable(snippet, f"not valid JSON for settings (`pluginConfigs.{key}` is not an object)")
+    entry = configs.setdefault(key, {}) if create else entry
+    opts = entry.get("options")
+    if opts is None and not create:
+        return None
+    if opts is not None and not isinstance(opts, dict):
+        raise SettingsUnreadable(snippet, f"not valid JSON for settings (`pluginConfigs.{key}.options` is not an "
+                                          "object)")
+    return entry.setdefault("options", {}) if create else opts
 
 
 def _read_settings(path: Path, snippet: str) -> tuple:
@@ -201,15 +231,21 @@ def _write_settings(path: Path, raw_before: Optional[bytes], data: dict, make_ba
 
 def merge_claude_settings(path, *, marketplace: Optional[dict], plugin_id: Optional[str],
                           env: Optional[dict] = None, disable=(), dry_run: bool = False,
-                          make_backup: bool = True) -> dict:
+                          make_backup: bool = True, plugin_options: Optional[dict] = None,
+                          options_key: str = base.PLUGIN_KEY) -> dict:
     """Merge into a Claude Code settings.json. `marketplace` = {name: entry}: extraKnownMarketplaces[name] is replaced
     by ours (in place, other marketplaces kept); enabledPlugins[plugin_id] = true; `env` merged key by key; plugins
-    matching a `disable` pattern (fnmatch, e.g. "reel-editor@*") that are on are set to false, never added. Returns
-    {changed, backup, disabled}; nothing is written (and no backup made) when nothing changes or with dry_run.
-    make_backup=False: the caller keeps its own backup of the original (step_claude, around the CLI calls)."""
+    matching a `disable` pattern (fnmatch, e.g. "reel-editor@*") that are on are set to false, never added;
+    `plugin_options` merged key by key into pluginConfigs[options_key].options (the plugin's userConfig values, which
+    Claude Code hands to the hooks as CLAUDE_PLUGIN_OPTION_*). Returns {changed, backup, disabled}; nothing is written
+    (and no backup made) when nothing changes or with dry_run. make_backup=False: the caller keeps its own backup of
+    the original (step_claude, around the CLI calls)."""
     path = Path(path)
-    data, raw = _read_settings(path, settings_snippet(marketplace, plugin_id, env))
+    snippet = settings_snippet(marketplace, plugin_id, env, plugin_options, options_key)
+    data, raw = _read_settings(path, snippet)
     before = copy.deepcopy(data)
+    if plugin_options:
+        _plugin_options(data, options_key, snippet, create=True).update(plugin_options)
     if marketplace:
         ekm = data.setdefault("extraKnownMarketplaces", {})
         for name, entry in marketplace.items():
@@ -276,6 +312,149 @@ def unmerge_claude_settings(path, *, marketplace_name: str, plugin_id: str, env_
     changed = data != before
     backup = _write_settings(path, raw, data, make_backup) if changed and not dry_run else None
     return {"changed": changed, "backup": backup, "enabled": enabled}
+
+
+def drop_plugin_option(path, name: str, *, options_key: str = base.PLUGIN_KEY, only_if=None,
+                       dry_run: bool = False) -> dict:
+    """Remove pluginConfigs[options_key].options[name] (uninstall); `only_if(value)` must be true for it to go. An
+    options object, entry or pluginConfigs emptied by this is removed too. Same backup / atomic rules; {changed,
+    backup}."""
+    path = Path(path)
+    snippet = json.dumps({"remove": {"pluginConfigs": {options_key: {"options": [name]}}}}, ensure_ascii=False)
+    data, raw = _read_settings(path, snippet)
+    if raw is None:
+        return {"changed": False, "backup": None}
+    opts = _plugin_options(data, options_key, snippet, create=False)
+    if opts is None or name not in opts or (only_if is not None and not only_if(opts[name])):
+        return {"changed": False, "backup": None}
+    del opts[name]
+    entry = data["pluginConfigs"][options_key]
+    if not opts:
+        del entry["options"]
+    if not entry:
+        del data["pluginConfigs"][options_key]
+    if not data["pluginConfigs"]:
+        del data["pluginConfigs"]
+    backup = None if dry_run else _write_settings(path, raw, data)
+    return {"changed": True, "backup": backup}
+
+
+# --------------------------------------------------------------------------------------------- the engine home
+def _names_another(value, chosen: Path, home: Path) -> bool:
+    """A saved engine_home value that names a folder other than `chosen` ("" and non-strings name none)."""
+    return isinstance(value, str) and bool(value.strip()) and not base.same_path(base.saved_path(value, home), chosen)
+
+
+def remember_engine_home(paths: base.Paths, env, log: base.Log, *, dry_run: bool = False) -> dict:
+    """ID-10: remember the engine home through the engine's own mechanisms only (never a WHYNOT_HOME user variable,
+    never a shell profile): settings.json pluginConfigs["whynot-cut@thewhynot-ai"].options.engine_home (Claude Code
+    hands it to the hooks as CLAUDE_PLUGIN_OPTION_ENGINE_HOME, and the SessionStart hook rewrites the pointer from it
+    on every session) AND the pointer ~/.whynot-cut/plugin-options.json (so `reel` finds it before the first session;
+    the hook's own format, an existing clients_root kept). The value is "" ("not set") for ~/.whynot-cut itself.
+    Written only when the home is not ~/.whynot-cut or when one of the two already names another folder: a default
+    install leaves both files as they are. {status, detail, needs_you}; settings.json follows every merge rule (an
+    unreadable file is left byte-identical: amber with the JSON to merge by hand)."""
+    chosen, home = paths.whynot, paths.home
+    default = base.same_path(chosen, paths.default_whynot)
+    value = "" if default else str(chosen)
+    ptr = paths.options_file
+    pobj = base.read_pointer(ptr)
+    p_val = pobj.get("engine_home") if pobj is not None else None
+    found = base._settings_options(paths.settings_file)
+    s_val = found[1].get("engine_home") if found else None
+    notes, status, needs = [], "ok", None
+    if not paths.sandbox:  # a variable beats the saved option in the engine: say so, it cannot be fixed from here
+        for k in base.ENGINE_HOME_ENV:
+            v = env.get(k)
+            if v and not base.same_path(base._abs(base._tilde(v, home)), chosen):
+                status = "amber"
+                notes.append(f"{k} is set to {v} in your environment and the engine uses it before this choice; "
+                             f"remove it (or set it to {chosen})")
+                needs = f"remove the {k} environment variable (or set it to {chosen}), then open a new terminal"
+    if default and not _names_another(p_val, chosen, home) and not _names_another(s_val, chosen, home):
+        return {"status": status, "detail": "; ".join([f"engine home {chosen} (the default: nothing to remember)"]
+                                                      + notes), "needs_you": needs}
+    if dry_run:
+        return {"status": "skipped", "detail": f"dry run: would remember the engine home {chosen} in {ptr} and in "
+                                               f"{paths.settings_file} (pluginConfigs)", "needs_you": None}
+    done = []
+    # the pointer: the hook's format; an existing clients_root is kept (an unreadable pointer is the hook's to
+    # rewrite anyway: it is replaced)
+    if p_val != value or pobj is None or list(pobj) != ["clients_root", "engine_home", "updated"]:
+        keep = pobj.get("clients_root") if pobj is not None and isinstance(pobj.get("clients_root"), str) else ""
+        try:
+            base.atomic_write_bytes(ptr, base.pointer_bytes(keep, value))
+            done.append(f"remembered in {ptr}")
+        except OSError as e:
+            status = "amber"
+            notes.append(f"could not write {ptr}: {e}")
+    # settings.json pluginConfigs: what Claude Code gives the plugin (and the SessionStart hook the pointer)
+    snippet = settings_snippet(plugin_options={"engine_home": value})
+    try:
+        r = merge_claude_settings(paths.settings_file, marketplace=None, plugin_id=None,
+                                  plugin_options={"engine_home": value})
+        if r["changed"]:
+            done.append(f"set as the plugin option engine_home in {paths.settings_file}"
+                        + (f" (backup {r['backup']})" if r["backup"] else ""))
+    except SettingsUnreadable as e:
+        status = "amber"
+        notes.append(f"{paths.settings_file} is {e.reason}; it was left exactly as it is. Merge in the JSON below "
+                     "by hand, or Claude Code will point WhyNot Cut back at ~/.whynot-cut")
+        needs = e.snippet
+    except (OSError, UnicodeError, ValueError) as e:
+        status = "amber"
+        notes.append(f"could not write {paths.settings_file}: {type(e).__name__}: {e}")
+        needs = snippet
+    notes = done + notes
+    if notes:
+        log.info(f"engine home {chosen}: " + "; ".join(notes))
+    return {"status": status, "detail": "; ".join([f"engine home {chosen}"] + notes), "needs_you": needs}
+
+
+def forget_engine_home(paths: base.Paths, log: base.Log) -> list:
+    """Uninstall --remove-engine, after the engine home was emptied: the pointer's engine_home (the whole pointer
+    file when it holds nothing else, e.g. no clients_root) and our pluginConfigs option engine_home go, but only
+    while they name this engine home (or ""), then ~/.whynot-cut itself when that is not the engine home and is now
+    empty. Returns notes; problems are notes too (never raises)."""
+    notes = []
+    gone = paths.whynot
+    names_it = (lambda v: isinstance(v, str) and (not v.strip()
+                                                 or base.same_path(base.saved_path(v, paths.home), gone)))
+    ptr = paths.options_file
+    pobj = base.read_pointer(ptr)
+    if pobj is not None and "engine_home" in pobj and names_it(pobj.get("engine_home")):
+        rest = {k: v for k, v in pobj.items() if k not in ("engine_home", "updated")}
+        try:
+            if any(not (isinstance(v, str) and not v.strip()) for v in rest.values()):
+                keep = pobj.get("clients_root") if isinstance(pobj.get("clients_root"), str) else ""
+                if pobj.get("engine_home") != "" or list(pobj) != ["clients_root", "engine_home", "updated"]:
+                    base.atomic_write_bytes(ptr, base.pointer_bytes(keep, ""))
+                    notes.append(f"{ptr} no longer names an engine home")
+            else:
+                base._unlink(str(ptr))
+                notes.append(f"deleted {ptr}")
+        except OSError as e:
+            notes.append(f"could not update {ptr}: {e}")
+    try:
+        r = drop_plugin_option(paths.settings_file, "engine_home", only_if=names_it)
+        if r["changed"]:
+            notes.append(f"removed the plugin option engine_home from {paths.settings_file} (backup {r['backup']})")
+    except SettingsUnreadable as e:
+        notes.append(f"the plugin option engine_home is still in {paths.settings_file} ({paths.settings_file.name} "
+                     f"is {e.reason}; remove it by hand)")
+    except (OSError, UnicodeError, ValueError) as e:
+        notes.append(f"could not remove the plugin option engine_home from {paths.settings_file}: {e}")
+    d = paths.default_whynot
+    if not base.same_path(d, gone) and d.is_dir() and not base.is_link(d):
+        try:
+            if not os.listdir(d):
+                os.rmdir(d)
+                notes.append(f"deleted the empty {d}")
+        except OSError:
+            pass
+    for n in notes:
+        log.info(n)
+    return notes
 
 
 # --------------------------------------------------------------------------------------------- marketplace

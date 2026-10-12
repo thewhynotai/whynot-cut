@@ -64,7 +64,9 @@ and `x/whynot-cut-marketplace/whynot-cut` becomes the plugin folder.
 |---|---|---|
 | `-Home <dir>` | `--home <dir>` | Sandbox or test mode. Everything goes under `<dir>` (see below). |
 | `-DryRun` | `--dry-run` | Says what would happen and writes nothing: no log, no folder. |
-| `-Yes` | `--yes` | Asks no questions and takes the defaults. |
+| `-Yes` | `--yes` | Asks no questions and takes the defaults (the strongest choice everywhere). |
+| `-EngineHome <dir>` | `--engine-home <dir>` | Where the engine goes (uv, Python, runtimes, ffmpeg, the Whisper model, logs, `state.json`): answers the location question. Default: the folder found as described in [Where the engine home is](#where-the-engine-home-is), normally `~/.whynot-cut`. With `-Uninstall`: the engine home to remove. |
+| `-Model <name>` | `--model <name>` | The Whisper model to install: `large-v3` (about 2.9 GB, the default: best accuracy), `large-v3-turbo` (about 1.6 GB: faster, a little less accurate), `medium` (about 1.5 GB) or `small` (about 0.5 GB). Answers the model question. |
 | `-ClientsFolder <dir>` | `--clients-folder <dir>` | The folder that holds the client folders. The folder itself is never created. |
 | `-Language ar\|en` | `--language ar\|en` | Language of the answers (default `ar`). |
 | `-Channel stable\|beta` | `--channel stable\|beta` | Release channel (default: the one in `components.json`). |
@@ -72,7 +74,7 @@ and `x/whynot-cut-marketplace/whynot-cut` becomes the plugin folder.
 | `-Skip a,b` | `--skip a,b` | Skip core steps by name: `preflight questions runtime ffmpeg gitbash gpu claude adobe fonts settings model state doctor launch`. |
 | `-Uninstall` | `--uninstall` | Remove WhyNot Cut for this user. |
 | `-RemoveEngine` | `--remove-engine` | With uninstall: also delete the engine home (runtimes, ffmpeg, ...). `models/` stays unless you add `-RemoveModels`; `library/` (your licensed motion and illustration packs) always stays. |
-| `-RemoveModels` | `--remove-models` | With uninstall: also delete the Whisper models (about 3 GB each). |
+| `-RemoveModels` | `--remove-models` | With uninstall: also delete the Whisper models (0.5 to 2.9 GB each). |
 | `-Source <zip\|url>` | `--source <zip\|url>` | One-line mode: the release zip to install from. |
 | `-SourceSha256 <hex>` | `--source-sha256 <hex>` | The sha256 of that zip. It is required with `-Source`. |
 
@@ -82,7 +84,7 @@ Exit codes:
 |---|---|
 | 0 | Done. Some rows may be amber or skipped; the checklist says why. |
 | 1 | At least one step failed (red). |
-| 2 | Cannot start, for one of these reasons: wrong OS or CPU, Git Bash on Windows, no hosting yet, a bad option, an unreadable `components.json`, or too little free space. |
+| 2 | Cannot start, for one of these reasons: wrong OS or CPU, Git Bash on Windows, no hosting yet, a bad option, an unreadable `components.json`, too little free space, or an engine home that cannot be used (see the location question). Nothing was downloaded. |
 | 3 | A download or a bootstrap step failed: uv, Python, or a sha256 mismatch. The message names the file and the log. |
 
 ## Where the engine home is
@@ -100,11 +102,63 @@ the way the engine does (`engine/reel/lib/plat.py`), in this order:
 4. otherwise `~/.whynot-cut`.
 
 `~` in a saved value is your user folder; on Windows a Git Bash path such as `/d/WhyNot` means `D:/WhyNot`. The
-bootstrap works this out before it downloads anything, so uv, Python, the log and every step land in that one folder.
-It hands the folder to the core as `--engine-home`; the core works it out again and stops with exit code 2 if the two
-disagree. Preflight shows the folder and where it came from. The engine's old fallback to an earlier `~/.reel-editor`
-home is not used: after the install the engine finds the new `current` file and uses this folder too. A sandbox
-(`--home`) always uses `<dir>/.whynot-cut`.
+engine's old fallback to an earlier `~/.reel-editor` home is not used: after the install the engine finds the new
+`current` file and uses this folder too.
+
+### The location question
+
+The bootstrap works this folder out before it downloads anything and offers it as the default of its first question
+(in English and Arabic):
+
+> Where should WhyNot Cut keep its engine (Python, ffmpeg, the Whisper model)? It needs about 6 GB, 9 GB with the
+> model. Enter keeps the folder in brackets.
+
+`-EngineHome <dir>` / `--engine-home <dir>` answers it; `-Yes` / `--yes` takes the default; without a terminal the
+default is used. On macOS the answer is read from the terminal, or from `/dev/tty` under `curl | bash` (never from
+the piped script). When WhyNot Cut is already installed there, the question says so: Enter keeps it.
+
+The folder is checked before anything is downloaded. It must be a full path; not a drive root; not inside the plugin
+folder (it is replaced on every update); not your user folder (or a folder holding it) or Claude's folder; not your
+clients folder (`clients_root` in your preferences or in `plugin-options.json`) or anything inside it, and not inside
+a folder marked `.whynot-client`. Its drive needs 6 GB free, 9 GB with the Whisper model (6 GB with
+`-Skip model`), unless WhyNot Cut is already installed there. It must be possible to create the folder and write in
+it. A refused folder is explained and asked again; with `-Yes` the installer stops with exit code 2 and downloads
+nothing.
+
+On Windows, a path with non-English (non-ASCII) letters gets a warning in English and Arabic, because some tools can
+fail on such a path; it suggests `C:\WhyNotCut` and asks again (Enter takes the suggestion; typing the same folder
+again keeps it). With `-Yes` the folder is kept and the warning stays on the screen.
+
+uv, Python, the log and every step then land in that one folder, and `state.json` lives there. The bootstrap hands the
+folder to the core as `--engine-home`. When you chose it (the flag or an answer) it also passes
+`--engine-home-chosen`, and the core uses the folder as it is, after the same checks. Otherwise the core works the
+folder out again and stops with exit code 2 if the two disagree; the message says how to fix it yourself: run the
+installer again with `-EngineHome <folder>` (`--engine-home <folder>`). Preflight shows the folder and where it came
+from.
+
+### Where the choice is saved
+
+Only through the engine's own two places, so the engine, the `reel` wrappers and Claude Code all find it:
+
+- Claude Code's `settings.json`: `pluginConfigs["whynot-cut@thewhynot-ai"].options.engine_home`. Claude Code hands it
+  to the plugin's hooks, and the SessionStart hook rewrites `~/.whynot-cut/plugin-options.json` from it at the start of
+  every session. It is merged like every other settings change: other keys and their order are kept, the original
+  bytes are backed up first, and a `settings.json` that is not valid JSON is left untouched (the step turns amber and
+  shows the JSON to add by hand).
+- the pointer `~/.whynot-cut/plugin-options.json`, in the hook's own format (`clients_root`, `engine_home`, `updated`,
+  one per line, UTF-8), so `reel` finds the folder before the first Claude session. A `clients_root` already in it is
+  kept.
+
+Both are written only when the folder is not `~/.whynot-cut`, or when one of them already names another folder
+(choosing `~/.whynot-cut` again then sets both back to `""`, which means "the default"). A default install leaves both
+files as they are. `~/.whynot-cut` then holds only the pointer. No `WHYNOT_HOME` user variable is set and no shell
+profile is changed: a variable would beat the plugin option, so a later change in `/plugin` would be silently
+ignored. If `WHYNOT_HOME` (or another engine-home variable) is already set to another folder, the questions step turns
+amber and says to remove it.
+
+A sandbox (`--home`) finds its engine home the same way, but only from its own `<dir>/.whynot-cut/plugin-options.json`
+and `<dir>/.claude/settings.json`, never from the variables of the machine running it, and a chosen folder must be
+inside `<dir>`.
 
 ## What happens
 
@@ -117,13 +171,27 @@ home is not used: after the install the engine finds the new `current` file and 
    `uv python find` names the interpreter.
 3. **The core.** The bootstrap runs `<python> -I -B -X utf8 installer/core/wnc_install.py install ...`, which runs
    these steps:
-   - preflight, then the two questions (clients folder and language). The suggested clients folder is
-     `D:\WhyNot Clients` when a `D:` drive exists, else `Documents/WhyNot Clients`; when Documents is synced to
-     OneDrive or iCloud Drive it is `~/WhyNot Clients` instead (raw footage should not go to the cloud), and the
-     question says why. A folder you saved in your preferences, or `--clients-folder`, always wins;
+   - preflight, then the questions: clients folder, language and the Whisper (transcription) model. The suggested
+     clients folder is `D:\WhyNot Clients` when a `D:` drive exists, else `Documents/WhyNot Clients`; when Documents
+     is synced to OneDrive or iCloud Drive it is `~/WhyNot Clients` instead (raw footage should not go to the cloud),
+     and the question says why. A folder you saved in your preferences, or `--clients-folder`, always wins. The model
+     question lists the four models with their download size, in English and Arabic:
+
+     | Model | About | |
+     |---|---|---|
+     | `large-v3` | 2.9 GB | best accuracy (the default, on every computer) |
+     | `large-v3-turbo` | 1.6 GB | faster, a little less accurate |
+     | `medium` | 1.5 GB | smaller, less accurate |
+     | `small` | 0.5 GB | smallest, least accurate |
+
+     Answer with the number or the name; Enter keeps the model in brackets. That is the model saved in your
+     preferences when there is one (a re-install keeps your choice), else `large-v3`. `-Model` / `--model` answers
+     it, and `-Yes` takes the default. Every choice defaults to the strongest option: `large-v3`, the GPU libraries
+     whenever an NVIDIA GPU is there, and the full font set. The chosen model is written into your preferences
+     (`reel settings --set whisper_model=...`). The engine home is saved here too (see above);
    - the runtime (from `setup/locks/`), ffmpeg, Git Bash (Windows), GPU libraries (NVIDIA);
    - the Claude Code plugin and settings, the Adobe panel, fonts, preferences;
-   - the Whisper model download, which keeps going in the background;
+   - the download of the chosen Whisper model, which keeps going in the background;
    - `state.json`, `reel doctor`, and the checklist;
    - opening Claude with `/whynot-cut:start`. On macOS the end of the install also says (in English and Arabic): the
      first time Claude opens files in Documents or on an external drive, macOS asks for permission; click **Allow**.
@@ -154,7 +222,8 @@ connection), that try is repeated with Python's own downloader, which reads the 
 Every run that is not a dry run writes one log, which the bootstrap and the core share:
 `~/.whynot-cut/logs/install-YYYYmmdd-HHMMSS.log` (or `uninstall-...` for an uninstall). The checklist is also saved as
 `~/.whynot-cut/logs/install-checklist.json`. The background model download logs to `logs/model-download-<time>.log`.
-On Windows, `~` is `%USERPROFILE%`.
+On Windows, `~` is `%USERPROFILE%`. With an engine home in another folder, `logs/` (and `state.json`) are in that
+folder.
 
 ## Uninstall
 
@@ -175,6 +244,16 @@ Python only when that Python is gone. It runs these steps in order:
 | `fonts` | Only the font files the install recorded, and only their own registry values. A font you had before stays. |
 | `marketplace` | `~/.whynot-cut/marketplace` (and its `.new` / `.prev` copies). |
 | `engine` | Only with `-RemoveEngine` / `--remove-engine`: everything in `~/.whynot-cut` except `models/` and `library/` (your licensed motion and illustration packs, always kept and reported), plus `%LOCALAPPDATA%\WhyNotCut\git` and then its Git Bash entry in `settings.json`. It refuses a folder that holds none of `state.json`, `current` or `bin/uv(.exe)`. If the `adobe` or `fonts` step could not remove something (a running Premiere Pro, a font in use), a small `state.json` keeps that record, so running uninstall again finishes it. With `-RemoveModels` / `--remove-models` the models go too. `-RemoveModels` on its own deletes only `models/`. If files are locked while the background Whisper model download is still running, the step says so and names its log. |
+
+**An engine home in another folder.** Uninstall asks nothing: it finds the engine home exactly as the install does
+(the variables, then `plugin-options.json`, then `settings.json` `pluginConfigs`), or takes `-EngineHome <dir>` /
+`--engine-home <dir>`. `-RemoveEngine` empties that folder with the same rules as above (`models/` and `library/`
+stay unless asked, a client folder is never touched). Once nothing is left to retry, it also removes the saved
+choice: `engine_home` from our `pluginConfigs` options in `settings.json` (with a backup), and from
+`~/.whynot-cut/plugin-options.json` (the whole file when it holds nothing else; a `clients_root` in it is kept), then
+`~/.whynot-cut` itself when it is empty. Both are removed only while they still name that folder. If `models/` or
+`library/` stayed in the folder, the summary says how to use it again: install with `-EngineHome <that folder>`. If
+something could not be deleted, the saved choice stays, so the next uninstall finds the same folder.
 
 Uninstall never touches:
 
@@ -206,6 +285,8 @@ Test hooks, honoured only together with `--home`:
 | `WNC_TEST_UV` | A uv stand-in, such as `tests/fixtures/installer/fake_uv.cmd`, `.sh` or `.py`. It is used for `uv python install/find` and by the core. The real uv archive is still downloaded and verified first. |
 | `WNC_TEST_PLATFORM` | `win-x64`, `mac-arm64` or `mac-x64`. It lets Git Bash run the macOS path in tests; without it, `install.sh` on Git Bash says "use install.ps1" and exits 2. |
 | `WNC_CLAUDE_CLI` | A Claude Code CLI stand-in (`tests/fixtures/installer/fake_claude.*`). |
+| `WNC_TEST_ANSWERS` | A text file with one answer per line for the bootstrap's location question (read instead of the keyboard). |
+| `WNC_TEST_FREE_GB` | The free space (GB) the bootstrap's location check sees. |
 
 The installer's own tests are in `tests/test_installer.py` (run with `bash tools/test.sh -p test_installer.py`). They
 run both front ends end to end against a fixture plugin, served from a local `http.server`, with a home folder whose
