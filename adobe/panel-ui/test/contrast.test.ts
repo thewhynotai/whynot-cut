@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { initialUi, render } from "../src/render.ts";
 import { stringsFor } from "../src/i18n.ts";
 import { SCENARIOS, sampleState } from "../src/mock.ts";
-import { kitGallery } from "../dev/kit-gallery.ts";
+import { kitGallery } from "../src/kit/gallery.ts";
 import { ADOBE, PANEL_UI, TOKENS, contrast, over, parseCss, tokenMap, walk } from "./tokens-util.ts";
 import type { Rgb } from "./tokens-util.ts";
 
@@ -47,7 +47,7 @@ const PAIRS: readonly [string, string, number, string][] = [
   ["--twn-text-muted", "--twn-bg", TEXT, "header who-line, pill keys, hints, footer"],
   ["--twn-text-muted", "--twn-surface", TEXT, "idle now box, banner close, log timestamps"],
   ["--twn-text-muted", "--twn-surface-2", TEXT, "pending step dot"],
-  ["--twn-text-muted", "--twn-frame-bg", TEXT, "QC tile with no image"],
+  ["--twn-text-muted", "--twn-frame-bg", TEXT, "QC tile with no image; kit: frame / waveform placeholder text"],
   ["--twn-primary-text", "--twn-bg", TEXT, "violet text / links"],
   ["--twn-primary-text", "--twn-surface", TEXT, "violet text on a solid panel"],
   ["--twn-accent", "--twn-bg", TEXT, "pink eyebrow section titles"],
@@ -90,8 +90,6 @@ const PAIRS: readonly [string, string, number, string][] = [
   ["--twn-warn", GLASS2, TEXT, "kit: warn toast / dialog icon in a card"],
   ["--twn-error", GLASS2, TEXT, "kit: error toast in a card"],
   ["--twn-focus", GLASS2, NON_TEXT, "kit: focus ring on a glass control in a card"],
-  // the kit: waveform / frame placeholder
-  ["--twn-text", "--twn-frame-bg", TEXT, "kit: waveform / frame placeholder text"],
 ];
 
 test("every text/background pair meets WCAG: 4.5:1 text, 3:1 focus ring and status icons", () => {
@@ -222,4 +220,17 @@ test("stacking guard: no panel-ui CSS rule or rendered screen (panel and kit) pu
     htmls.push(kitGallery(lang));
   }
   assert.deepEqual(glassStacking(css, htmls), []);
+});
+
+test("each pair is listed once, and a frame-bg pair is one the CSS paints (muted placeholder text, never --twn-text)", () => {
+  const keys = PAIRS.map(([fg, bg, min]) => `${fg} on ${bg} @${min}`);
+  assert.deepEqual(keys.filter((k, i) => keys.indexOf(k) !== i), [], "a redundant pair");
+  const css = KIT_CSS().map((f) => readFileSync(f, "utf8")).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
+  const frameBgRules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((m) => /background\s*:\s*var\(--twn-frame-bg\)/.test(m[2]!));
+  assert.ok(frameBgRules.length >= 3);
+  for (const m of frameBgRules) {
+    const colour = /(?:^|;)\s*color\s*:\s*var\((--twn-[a-z0-9-]+)\)/.exec(m[2]!)?.[1];
+    if (colour) assert.ok(PAIRS.some(([fg, bg]) => fg === colour && bg === "--twn-frame-bg"), `${m[1]!.trim()}: ${colour} on --twn-frame-bg has no pair`);
+  }
+  assert.ok(!PAIRS.some(([fg, bg]) => fg === "--twn-text" && bg === "--twn-frame-bg"), "no kit element paints --twn-text on --twn-frame-bg");
 });

@@ -7,7 +7,10 @@ import { esc, trusted } from "./html.ts";
 import type { Html } from "./html.ts";
 
 export type StatusKind = "ok" | "warn" | "error" | "info";
-export type IconName = StatusKind | "chevron-start" | "chevron-end" | "chevron-down" | "close";
+/** Icons that point along the reading direction: whoever draws one must say which direction the panel reads. */
+export type DirectionalIcon = "chevron-start" | "chevron-end";
+export type IconName = StatusKind | DirectionalIcon | "chevron-down" | "close";
+export const isDirectional = (name: unknown): name is DirectionalIcon => name === "chevron-start" || name === "chevron-end";
 
 // Shapes are drawn as one evenodd path: the inner marks (check, cross, bar, dot) are holes in the filled shape.
 const PATHS: Readonly<Record<string, string>> = {

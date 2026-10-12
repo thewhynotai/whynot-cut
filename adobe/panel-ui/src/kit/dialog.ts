@@ -1,7 +1,8 @@
 // The confirm dialog (Addendum B4.2): a destructive action always shows what will change and the backup name, and asks
 // for a confirm. The backup name is a left-to-right chip; with no backup the dialog says so. The confirm is a danger
 // button (primary when the action is not destructive), the cancel a secondary one. Rendered in place (no overlay), so it
-// works the same in UXP and CEP.
+// works the same in UXP and CEP; it has no focus trap, so it does not claim aria-modal. An empty "what will change"
+// list is a bug: the type requires one line and the function throws on none.
 import type { Strings } from "../i18n.ts";
 import { button, buttonRow } from "./button.ts";
 import { cmdRow, esc, safeId, trusted, withCommands } from "./html.ts";
@@ -24,6 +25,7 @@ export interface DialogOpts {
 }
 
 export function dialog(o: DialogOpts): Html {
+  if (!Array.isArray(o.changes) || !o.changes.some((c) => typeof c === "string" && c.trim() !== "")) throw new Error("kit.dialog.changes-empty");
   const id = safeId(o.id ?? "kit-dialog");
   const changes = o.changes.map((c) => `<li class="kit-dialog-change">${withCommands(c)}</li>`).join("");
   const backup = o.backupName
@@ -31,7 +33,7 @@ export function dialog(o: DialogOpts): Html {
     : `<p class="kit-dialog-nobackup">${esc(o.t["dialog.nobackup"])}</p>`;
   const destructive = o.destructive !== false;
   return trusted(
-    `<div class="kit-dialog" id="${id}" role="alertdialog" aria-modal="true" aria-labelledby="${id}-title" aria-describedby="${id}-changes">` +
+    `<div class="kit-dialog" id="${id}" role="alertdialog" aria-labelledby="${id}-title" aria-describedby="${id}-changes">` +
       `<div class="kit-dialog-head"><span class="kit-dialog-icon">${icon("warn")}</span><h3 class="kit-dialog-title" id="${id}-title">${esc(o.title)}</h3></div>` +
       `<div class="kit-label">${esc(o.t["dialog.changes"])}</div><ul class="kit-dialog-changes" id="${id}-changes">${changes}</ul>` +
       backup +

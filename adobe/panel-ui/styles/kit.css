@@ -1,7 +1,8 @@
 /* WhyNot Cut component kit (Addendum B, B-T1): the website's look for every panel screen. Loaded after fonts.css and
    brand/tokens.css; every colour is a var(--twn-*) token (test/tokens.test.ts, test/contrast.test.ts).
    UXP rules, from the live renders:
-   - flexbox only: no grid, no gap (margins instead), no sticky, no :has(), no attribute selectors (state is a class);
+   - flexbox only: no grid, no gap (margins instead), no sticky, no :has(); no [attr=value] selectors (state is a
+     class) - the valueless [disabled] on buttons is the one attribute selector;
    - every element the kit emits has an explicit display (UXP does not apply browser defaults to unknown elements);
    - no inline-flex / inline-block inside running text: chips and command chips sit on their own flex rows;
    - <bdi> is set inline here; an explicit height chain (root > scroll) for the one scroll region;
@@ -159,8 +160,8 @@
   cursor: pointer;
 }
 .kit-tab-on { color: var(--twn-text); border-bottom-color: var(--twn-accent); }
-/* a long label (Arabic with its English term) wraps onto two lines inside the tab: never cut, never sideways scroll */
-.kit-tab-label { display: block; min-width: 0; padding: 4px 0; line-height: 1.25; text-align: center; word-wrap: break-word; }
+/* tab labels are one short word in both languages (the English term in parentheses belongs to body copy), on one line */
+.kit-tab-label { display: block; min-width: 0; padding: 4px 0; line-height: 1.25; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kit-tab-count {
   display: flex;
   align-items: center;
@@ -275,6 +276,21 @@
 .kit-chip-error { border-color: var(--twn-error); color: var(--twn-error); }
 .kit-chip-info { border-color: var(--twn-primary-text); color: var(--twn-primary-text); }
 .kit-chip-accent { border-color: var(--twn-accent); color: var(--twn-accent); }
+
+/* a command / path / file name inside a sentence: a left-to-right code run (inline, never inline-block), read as one
+   token inside Arabic */
+.kit-code {
+  display: inline;
+  padding: 0 3px;
+  background: var(--twn-surface-2);
+  border-radius: 4px;
+  color: var(--twn-text);
+  font-family: var(--twn-font-mono);
+  font-size: .92em;
+  font-weight: var(--twn-weight-regular);
+}
+/* a run that never breaks inside (build-stamp tokens) */
+.kit-nowrap { display: inline; white-space: nowrap; }
 
 /* a copyable command / file name on its own row */
 .kit-cmd-row { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; width: 100%; margin: 4px 0 0 0; }
@@ -464,6 +480,9 @@
   border-radius: var(--twn-radius);
   font-family: var(--twn-font-mono);
   font-size: 10.5px;
+  /* machine output: left-to-right and left-aligned in Arabic too (the lines carry dir="ltr") */
+  direction: ltr;
+  text-align: left;
 }
 .kit-log-line { display: flex; flex-direction: row; align-items: flex-start; margin: 0 0 3px 0; }
 .kit-log-ts { display: block; flex: 0 0 auto; margin: 0 3px; color: var(--twn-text-muted); }
@@ -474,7 +493,7 @@
 .kit-log-error { color: var(--twn-error); }
 .kit-log-empty { display: block; margin: 4px 2px; color: var(--twn-text-muted); }
 .kit-log-foot { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin: 6px 0 0 0; }
-.kit-log-build { display: block; flex: 1 1 auto; min-width: 0; margin: 0 2px; color: var(--twn-text-muted); font-family: var(--twn-font-mono); font-size: 10.5px; word-break: break-all; }
+.kit-log-build { display: block; flex: 1 1 auto; min-width: 0; margin: 0 2px; color: var(--twn-text-muted); font-family: var(--twn-font-mono); font-size: 10.5px; }
 
 /* ---- frame grid (aspect from w/h via inline padding-top); two tiles a row from 280 px ---- */
 .kit-frames { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; margin: 0 -4px; }

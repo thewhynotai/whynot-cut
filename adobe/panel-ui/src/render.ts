@@ -5,6 +5,7 @@ import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction
 import type { BuildInfo } from "./diagnostics.ts";
 import { fmt } from "./i18n.ts";
 import type { StringKey, Strings } from "./i18n.ts";
+import { aspectPct, isSafeImg } from "./media.ts";
 import { MONOGRAM_DATA_URI } from "./monogram.ts";
 import { STEP_IDS } from "./source.ts";
 import type { ConnectionState, PanelState, PipelineStep, QcFrame, StepId } from "./source.ts";
@@ -50,8 +51,6 @@ const ltr = (text: unknown) => `<bdi dir="ltr">${esc(text)}</bdi>`;
 const auto = (text: unknown) => `<bdi>${esc(text)}</bdi>`;
 /** A sentence that may hold commands in `backticks`: each command becomes a left-to-right run (the backticks are markup). */
 const withCommands = (text: unknown) => esc(text).replace(/`([^`]+)`/g, (_m, cmd: string) => `<bdi dir="ltr">${cmd}</bdi>`);
-// data:image, file: and plugin: URLs and relative paths only: a thumbnail never makes the panel fetch from the network.
-const SAFE_IMG = /^(?:data:image\/|file:|plugin:|(?![a-z][a-z0-9+.-]*:|\/\/)\S)/i;
 
 const STEP_GLYPH: Record<string, string> = { done: "✓", failed: "✕" };
 const VERDICT_GLYPH: Record<string, string> = { pass: "✓", fail: "✕", pending: "…", media_pending: "…" };
@@ -233,17 +232,10 @@ function approvalSection(s: PanelState, t: Strings, ui: UiState): string {
   );
 }
 
-/** Height as a percentage of the width for the frame box. Default 9:16; invalid w/h fall back; clamped to 40..300. */
-function aspectPct(q: QcFrame): number {
-  const ok = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
-  const pct = ok(q.w) && ok(q.h) ? (q.h / q.w) * 100 : (1920 / 1080) * 100;
-  return Math.round(Math.max(40, Math.min(300, pct)) * 100) / 100;
-}
-
 function tile(q: QcFrame, t: Strings): string {
   const verdict = ["pass", "fail", "pending", "media_pending"].includes(q.verdict) ? q.verdict : "pending";
   const img =
-    q.thumb && SAFE_IMG.test(q.thumb)
+    isSafeImg(q.thumb)
       ? `<img class="qc-img" src="${esc(q.thumb)}" alt="">`
       : `<span class="qc-noimg">${esc(t[`qc.${verdict}` as StringKey])}</span>`;
   const reexport =
@@ -252,7 +244,7 @@ function tile(q: QcFrame, t: Strings): string {
       : "";
   return (
     `<div class="qc-tile qc-${verdict}" data-t="${esc(q.t_s)}">` +
-    `<button class="qc-thumb" data-action="seek" data-t="${esc(q.t_s)}" title="${esc(q.tc)}"><span class="qc-frame" style="padding-top:${aspectPct(q)}%">${img}</span></button>` +
+    `<button class="qc-thumb" data-action="seek" data-t="${esc(q.t_s)}" title="${esc(q.tc)}"><span class="qc-frame" style="padding-top:${aspectPct(q.w, q.h)}%">${img}</span></button>` +
     `<div class="qc-meta"><span class="qc-tc">${ltr(q.tc)}</span><span class="qc-verdict">${VERDICT_GLYPH[verdict]} ${esc(t[`qc.${verdict}` as StringKey])}</span></div>` +
     `<div class="qc-label">${auto(q.label)}</div>${reexport}</div>`
   );

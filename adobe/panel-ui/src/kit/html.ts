@@ -18,9 +18,12 @@ export function esc(value: unknown): string {
 export const ltr = (text: unknown): Html => trusted(`<bdi dir="ltr">${esc(text)}</bdi>`);
 /** Text of unknown direction (a client name, a statement): isolated, direction from its own first letter. */
 export const auto = (text: unknown): Html => trusted(`<bdi>${esc(text)}</bdi>`);
-/** A sentence that may hold commands in `backticks`: each becomes a left-to-right run (the backticks are markup). */
+/** A sentence that may hold commands, paths or file names in `backticks`: each becomes a left-to-right code run (the
+ *  backticks are markup). The run is set in the mono face on a code background (kit.css .kit-code, display inline), so
+ *  inside Arabic it reads as one token: without the box an RTL reader meets a path's edge punctuation first and reads
+ *  "assets/" as "/assets". */
 export const withCommands = (text: unknown): Html =>
-  trusted(esc(text).replace(/`([^`]+)`/g, (_m, cmd: string) => `<bdi dir="ltr">${cmd}</bdi>`));
+  trusted(esc(text).replace(/`([^`]+)`/g, (_m, cmd: string) => `<bdi dir="ltr" class="kit-code">${cmd}</bdi>`));
 
 /** A command chip on its own flex row (UXP draws an inline-flex chip over running text, so never inside a sentence). */
 export const cmdRow = (cmd: string): Html => trusted(`<div class="kit-cmd-row"><span class="kit-cmd">${ltr(cmd)}</span></div>`);

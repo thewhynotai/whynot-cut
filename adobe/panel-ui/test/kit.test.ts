@@ -28,6 +28,7 @@ import {
   langSwitch,
   logDrawer,
   paragraph,
+  primaryCount,
   progress,
   section,
   statusIcon,
@@ -39,7 +40,7 @@ import {
 import type { Html } from "../src/kit/index.ts";
 import { esc as renderEsc } from "../src/render.ts";
 import { sampleState } from "../src/mock.ts";
-import { kitGallery } from "../dev/kit-gallery.ts";
+import { kitGallery, kitGallerySections } from "../src/kit/gallery.ts";
 import { PANEL_UI } from "./tokens-util.ts";
 
 const EVIL = `<script>alert("x")</script>`;
@@ -108,6 +109,14 @@ test("header: monogram + WhyNot Cut + Needs-you badge + ع/EN switch + gradient 
   assert.match(html, /<button type="button" class="kit-badge kit-focus" data-action="open-needs-you" aria-label="[^"]*3[^"]*">/);
   assert.match(html, /<span class="kit-badge-count"><bdi dir="ltr">3<\/bdi><\/span>/);
   assert.ok(html.includes(esc(EN["needs.label"])));
+  // WCAG 2.5.3: the accessible name starts with the visible label (and says the count)
+  for (const lang of ["en", "ar"] as const) {
+    const t = stringsFor(lang);
+    const badge = buttons(header({ t, lang, needsYou: 3 })).find((b) => attr(b.attrs, "data-action") === "open-needs-you")!;
+    const name = attr(badge.attrs, "aria-label") ?? "";
+    assert.ok(name.startsWith(t["needs.label"]), `${lang}: aria-label "${name}" does not start with the visible label "${t["needs.label"]}"`);
+    assert.match(name, /3/);
+  }
   // no badge when nothing needs the editor; a bad count is no badge either
   for (const n of [0, -2, Number.NaN, undefined]) assert.doesNotMatch(header({ t: EN, lang: "en", needsYou: n }), /kit-badge/);
   assert.match(header({ t: EN, lang: "en", needsYou: 2.7 }), /<bdi dir="ltr">2<\/bdi>/);
@@ -155,6 +164,18 @@ test("tabs: a tablist; the active tab is selected (pink underline class); DOM or
   assertControlsAccessible(html);
 });
 
+test("tabs and the Needs-you badge use the short word only (no English term in parentheses) and never wrap", () => {
+  for (const t of [EN, AR]) {
+    for (const k of ["tab.home", "tab.edit", "tab.tools", "needs.label"] as const) assert.doesNotMatch(t[k], /[()]/, `${k}: "${t[k]}"`);
+  }
+  assert.equal(AR["tab.edit"], "المونتاج");
+  assert.equal(AR["tab.tools"], "الأدوات");
+  assert.equal(AR["needs.label"], "مطلوب منك");
+  assert.match(cssRule(".kit-tab-label"), /white-space: nowrap/);
+  assert.doesNotMatch(cssRule(".kit-tab-label"), /word-wrap|word-break/);
+  assert.match(cssRule(".kit-badge-label"), /white-space: nowrap/);
+});
+
 // ---- card, section, paragraph ----
 
 test("card: glass section with an optional eyebrow, title and status tone; body is kit HTML", () => {
@@ -167,7 +188,7 @@ test("card: glass section with an optional eyebrow, title and status tone; body 
   assert.match(section({ title: EN["section.qc"], body }), /^<section class="kit-section" aria-label="Frames and QC"><h2 class="kit-eyebrow"><bdi>Frames and QC<\/bdi><\/h2>/);
   assert.equal(eyebrow(EVIL), `<div class="kit-eyebrow"><bdi>${esc(EVIL)}</bdi></div>`, "titles are isolated runs");
   // a paragraph keeps `commands` left-to-right
-  assert.match(paragraph("Run `reel doctor` now."), /<bdi dir="ltr">reel doctor<\/bdi>/);
+  assert.match(paragraph("Run `reel doctor` now."), /<bdi dir="ltr" class="kit-code">reel doctor<\/bdi>/);
 });
 
 // ---- buttons ----
@@ -179,6 +200,16 @@ test("buttons: primary / secondary-glass / danger, type=button, data-action + da
   );
   assert.match(button({ label: "x", action: "a" }), /kit-btn kit-btn-secondary kit-focus/, "secondary is the default");
   assert.match(button({ label: "x", action: "a", variant: "danger" }), /kit-btn kit-btn-danger kit-focus/);
+  // danger is never colour alone: it carries the warn icon unless the caller names another
+  assert.match(button({ label: "x", action: "a", variant: "danger" }), /<button [^>]*kit-btn-danger[^>]*><svg [^>]*kit-icon-warn[^>]*aria-hidden="true"/);
+  assert.match(button({ label: "x", action: "a", variant: "danger", icon: "close" }), /kit-icon-close/);
+  assert.doesNotMatch(button({ label: "x", action: "a", variant: "secondary" }), /<svg/);
+  // a directional icon needs the panel direction (type + runtime), so a chevron never points the wrong way
+  // @ts-expect-error chevron-end without rtl
+  assert.throws(() => button({ label: "x", action: "a", icon: "chevron-end" }), /kit\.button\.rtl-required/);
+  // @ts-expect-error chevron-start without rtl
+  assert.throws(() => button({ label: "x", action: "a", icon: "chevron-start" }), /kit\.button\.rtl-required/);
+  assert.match(button({ label: "x", action: "a", icon: "chevron-end", rtl: false }), /kit-icon-chevron-right/);
   assert.match(button({ label: "x", action: "a", variant: "nope" as never }), /kit-btn-secondary/);
   assert.match(button({ label: "x", action: "a", disabled: true }), /<button [^>]* disabled>/);
   assert.match(button({ label: "x", action: "a", block: true }), /class="kit-btn kit-btn-secondary kit-focus kit-btn-block"/);
@@ -277,7 +308,15 @@ test("toast: status colour + icon; errors are alerts with a fix action and Copy 
   assert.match(ok, /^<div class="kit-toast kit-toast-ok" role="status" aria-live="polite">/);
   assert.doesNotMatch(ok, /copy-diagnostics/, "Copy diagnostics is for errors (unless asked)");
   assert.doesNotMatch(toast({ t: EN, kind: "warn", text: "x", dismiss: false }), /dismiss-toast/);
-  assert.match(toast({ t: EN, kind: "warn", text: "Check `engine.json`." }), /<bdi dir="ltr">engine\.json<\/bdi>/);
+  assert.match(toast({ t: EN, kind: "warn", text: "Check `engine.json`." }), /<bdi dir="ltr" class="kit-code">engine\.json<\/bdi>/);
+  // an error always says what to do: a fix action or a how-line (type + runtime)
+  // @ts-expect-error an error toast with neither fix nor how
+  assert.throws(() => toast({ t: EN, kind: "error", text: "x" }), /kit\.toast\.error-needs-fix-or-how/);
+  // @ts-expect-error fix: null and no how is still nothing to do
+  assert.throws(() => toast({ t: EN, kind: "error", text: "x", fix: null }), /kit\.toast\.error-needs-fix-or-how/);
+  assert.throws(() => toast({ t: EN, kind: "error", text: "x", how: "  " }), /kit\.toast\.error-needs-fix-or-how/);
+  assert.match(toast({ t: EN, kind: "error", text: "x", how: "Run `reel doctor`." }), /kit-toast-error/);
+  assert.match(toast({ t: EN, kind: "error", text: "x", fix: { label: "a", action: "a" } }), /kit-toast-error/);
   assert.match(toast({ t: EN, kind: "bogus" as never, text: "x" }), /kit-toast-info/);
   noScript(toast({ t: EN, kind: "error", text: EVIL, how: EVIL, fix: { label: EVIL, action: EVIL } }));
   assertControlsAccessible(err);
@@ -295,11 +334,17 @@ test("dialog: destructive confirm shows what will change and the backup name (LT
     confirm: { label: EN["rebuild.confirm"], action: "rebuild-confirm" },
     cancel: { label: EN["rebuild.cancel"], action: "rebuild-cancel" },
   });
-  assert.match(html, /^<div class="kit-dialog" id="rebuild" role="alertdialog" aria-modal="true" aria-labelledby="rebuild-title" aria-describedby="rebuild-changes">/);
+  // rendered in place with no focus trap: never claims aria-modal
+  assert.match(html, /^<div class="kit-dialog" id="rebuild" role="alertdialog" aria-labelledby="rebuild-title" aria-describedby="rebuild-changes">/);
+  assert.doesNotMatch(html, /aria-modal/);
   assert.match(html, /<h3 class="kit-dialog-title" id="rebuild-title">Rebuild this project\?<\/h3>/);
   assert.match(html, /<div class="kit-label">What will change<\/div><ul class="kit-dialog-changes" id="rebuild-changes"><li class="kit-dialog-change">/);
   assert.equal(tags(html, "li").length, 2);
-  assert.match(html, /<bdi dir="ltr">reel ppro-build --force<\/bdi>/);
+  assert.match(html, /<bdi dir="ltr" class="kit-code">reel ppro-build --force<\/bdi>/);
+  // a confirm with nothing listed under "what will change" is a bug (type + runtime)
+  // @ts-expect-error an empty changes list
+  assert.throws(() => dialog({ t: EN, title: "x", changes: [], confirm: { label: "a", action: "a" }, cancel: { label: "b", action: "b" } }), /kit\.dialog\.changes-empty/);
+  assert.throws(() => dialog({ t: EN, title: "x", changes: [" "], confirm: { label: "a", action: "a" }, cancel: { label: "b", action: "b" } }), /kit\.dialog\.changes-empty/);
   assert.match(html, /<div class="kit-label">Backup copy<\/div><div class="kit-cmd-row"><span class="kit-cmd"><bdi dir="ltr">C0239_prev_2026-10-13-1412\.prproj<\/bdi><\/span><\/div>/);
   const bs = buttons(html);
   assert.deepEqual(bs.map((b) => attr(b.attrs, "data-action")), ["rebuild-confirm", "rebuild-cancel"]);
@@ -323,7 +368,14 @@ test("empty state: icon, title, teaching text, exactly ONE action (primary by de
   const html = emptyState({ title: EN["empty.noclient.title"], text: EN["empty.noclient.text"], action: { label: EN["empty.noclient.action"], action: "choose-client" } });
   assert.match(html, /^<div class="kit-empty" role="status"><span class="kit-empty-icon"><svg [^>]*kit-icon-info/);
   assert.match(html, /<h3 class="kit-empty-title">No client folder yet<\/h3><p class="kit-empty-text">/);
-  assert.match(html, /<bdi dir="ltr">assets\/<\/bdi>/);
+  assert.match(html, /<bdi dir="ltr" class="kit-code">assets<\/bdi>/);
+  // Arabic: the folder names are left-to-right code runs, with no slash for an RTL reader to meet first ("/assets")
+  const ar = emptyState({ title: AR["empty.noclient.title"], text: AR["empty.noclient.text"], action: { label: AR["empty.noclient.action"], action: "choose-client" } });
+  assert.match(ar, /<bdi dir="ltr" class="kit-code">assets<\/bdi>/);
+  assert.match(ar, /<bdi dir="ltr" class="kit-code">data<\/bdi>/);
+  assert.doesNotMatch(ar.replace(/<[^>]*>/g, ""), /\//, "no slash beside Arabic text");
+  assert.match(cssRule(".kit-code"), /font-family: var\(--twn-font-mono\)/);
+  assert.match(cssRule(".kit-code"), /display: inline(?!-)/);
   const bs = buttons(html);
   assert.equal(bs.length, 1);
   assert.ok(classesOf(bs[0]!.attrs).includes("kit-btn-primary"));
@@ -342,20 +394,41 @@ test("log drawer: toggle with aria-expanded/controls and a direction-aware chevr
     { ts: "14:12:12", level: `x" onclick="y`, text: "z" },
   ] as const;
   const closed = logDrawer({ t: EN, open: false, lines: lines as never, rtl: false });
-  assert.match(closed, /^<section class="kit-log" aria-label="Log"><button type="button" class="kit-log-toggle kit-focus" data-action="toggle-log" aria-expanded="false" aria-controls="kit-log-lines"><svg [^>]*kit-icon-chevron-right/);
+  // closed: nothing to control yet, so no aria-controls pointing at a missing element
+  assert.match(closed, /^<section class="kit-log" aria-label="Log"><button type="button" class="kit-log-toggle kit-focus" data-action="toggle-log" aria-expanded="false"><svg [^>]*kit-icon-chevron-right/);
   assert.match(closed, /<span class="kit-log-count"><bdi dir="ltr">4<\/bdi> lines<\/span>/);
   assert.doesNotMatch(closed, /<ul class="kit-log-lines"/);
   assert.match(logDrawer({ t: EN, open: false, lines: [], rtl: true }), /kit-icon-chevron-left/);
   const open = logDrawer({ t: EN, open: true, lines: lines as never, rtl: false, build: { version: "3.0.0", build: "c0112b5" } });
   assert.match(open, /aria-expanded="true"[^>]*><svg [^>]*kit-icon-chevron-down/);
-  assert.match(open, /<ul class="kit-log-lines" id="kit-log-lines">/);
+  assert.match(open, /aria-controls="kit-log-lines"/);
+  // machine output: the lines are a left-to-right block in both languages (the drawer label stays localized)
+  assert.match(open, /<ul class="kit-log-lines" id="kit-log-lines" dir="ltr">/);
+  assert.match(logDrawer({ t: AR, open: true, lines: lines as never, rtl: true }), /<ul class="kit-log-lines" id="kit-log-lines" dir="ltr">/);
+  assert.match(cssRule(".kit-log-lines"), /direction: ltr/);
+  assert.match(cssRule(".kit-log-lines"), /text-align: left/);
   assert.match(open, /<li class="kit-log-line kit-log-info"><span class="kit-log-ts"><bdi dir="ltr">14:12:03<\/bdi><\/span><span class="kit-log-text"><bdi dir="ltr">reel build --video-id C0239<\/bdi><\/span><\/li>/);
   assert.match(open, /<li class="kit-log-line kit-log-warn"><span class="kit-log-ts"><bdi dir="ltr">14:12:09<\/bdi><\/span><span class="kit-log-icon"><svg [^>]*kit-icon-warn/);
   assert.equal((open.match(/kit-log-line kit-log-info/g) ?? []).length, 2, "an unknown level is info");
-  assert.match(open, /<span class="kit-log-build"><bdi dir="ltr">WhyNot Cut 3\.0\.0 · build c0112b5<\/bdi><\/span>/);
+  // the build stamp wraps only between tokens: each token is its own nowrap run ("WhyNot Cut" is one token)
+  const stamp = logDrawer({ t: AR, open: true, lines: [], rtl: true, build: { version: "3.0.0", build: "c589a67 2026-10-12T22:37Z" } });
+  const tok = (w: string) => `<span class="kit-nowrap">${w}</span>`;
+  assert.ok(
+    stamp.includes(`<span class="kit-log-build"><bdi dir="ltr">${[tok("WhyNot\u00a0Cut"), tok("3.0.0"), tok("·"), tok("build"), tok("c589a67"), tok("2026-10-12T22:37Z")].join(" ")}</bdi></span>`),
+    stamp,
+  );
+  assert.match(cssRule(".kit-nowrap"), /white-space: nowrap/);
+  assert.match(cssRule(".kit-nowrap"), /display: inline(?!-)/);
+  assert.doesNotMatch(cssRule(".kit-log-build"), /break-all/, "never breaks inside a token");
+  assert.ok(open.includes(`<bdi dir="ltr">${tok("WhyNot\u00a0Cut")} ${tok("3.0.0")} ${tok("·")} ${tok("build")} ${tok("c0112b5")}</bdi>`));
   assert.match(open, /data-action="copy-diagnostics"/);
   noScript(open);
-  assert.match(logDrawer({ t: EN, open: true, lines: [], rtl: false }), /<p class="kit-log-empty">No log lines yet\.<\/p>/);
+  const empty = logDrawer({ t: EN, open: true, lines: [], rtl: false });
+  assert.match(empty, /<p class="kit-log-empty" id="kit-log-lines">No log lines yet\.<\/p>/);
+  // every aria-controls names an element that exists in the same markup
+  for (const html of [closed, open, empty, logDrawer({ t: EN, open: false, lines: [], rtl: false, id: "x" })]) {
+    for (const [, id] of html.matchAll(/aria-controls="([^"]*)"/g)) assert.ok(html.includes(`id="${id}"`), `aria-controls="${id}" names no element`);
+  }
   // only the last `max` lines
   const many = Array.from({ length: 150 }, (_, i) => ({ ts: String(i), level: "info" as const, text: `l${i}` }));
   const m = logDrawer({ t: EN, open: true, lines: many, rtl: false });
@@ -392,8 +465,12 @@ test("frame grid: aspect from w/h (9:16 default, 4:5, clamped), safe thumbnails 
       { t_s: 1, tc: EVIL, file: EVIL, label: EVIL, verdict: "fail", thumb: `javascript:${EVIL}` },
       { t_s: 2, tc: "x", file: "y", label: "z", verdict: `pass" onclick="x` as never, thumb: "https://example.com/a.png" },
       { t_s: 3, tc: "x", file: "y", label: "z", verdict: "pass", thumb: "data:image/png;base64,AAAA" },
+      { t_s: 4, tc: "x", file: "y", label: "z", verdict: "pass", thumb: "\\\\evil.com\\a.png" },
+      { t_s: 5, tc: "x", file: "y", label: "z", verdict: "pass", thumb: "/\\evil.com/a.png" },
+      { t_s: 6, tc: "x", file: "y", label: "z", verdict: "pass", thumb: "file://evil.com/share/a.png" },
     ],
   });
+  assert.doesNotMatch(evil, /evil\.com/, "no UNC / remote file thumbnail");
   noScript(evil);
   assert.doesNotMatch(evil, /javascript:|https:\/\//, "no script or network thumbnail");
   assert.match(evil, /<img class="kit-frame-img" src="data:image\/png;base64,AAAA" alt="">/);
@@ -408,6 +485,8 @@ test("waveform frame: a labelled container with a slot, mid line and placeholder
   assert.match(html, /^<div class="kit-wave" role="group" aria-label="Audio waveform"><div class="kit-wave-box" data-wave-slot="hush" style="height:64px"><div class="kit-wave-mid" aria-hidden="true"><\/div><div class="kit-wave-placeholder">The waveform appears after the scan\.<\/div><\/div>/);
   assert.match(html, /<div class="kit-wave-ruler"><span class="kit-wave-tc"><bdi dir="ltr">00:00:00:00<\/bdi><\/span><span class="kit-spacer"><\/span><span class="kit-wave-tc"><bdi dir="ltr">00:00:42:10<\/bdi><\/span><\/div>/);
   assert.doesNotMatch(waveformFrame({ t: EN }), /kit-wave-ruler/);
+  // Arabic: the visible placeholder carries the English term on first use
+  assert.match(waveformFrame({ t: AR }), /<div class="kit-wave-placeholder">[^<]*\(Waveform\)[^<]*<\/div>/);
   assert.match(waveformFrame({ t: EN, height: 5000 }), /height:240px/);
   assert.match(waveformFrame({ t: EN, height: 2 }), /height:32px/);
   noScript(waveformFrame({ t: EN, label: EVIL, start: EVIL, end: EVIL, slot: EVIL }));
@@ -563,11 +642,58 @@ test("violet / pink text never sits on two glass layers (a chip or eyebrow insid
 test("kit sources: one file per component group, all re-exported from src/kit/index.ts", () => {
   const files = readdirSync(join(PANEL_UI, "src", "kit")).filter((f) => f.endsWith(".ts")).sort();
   const index = readFileSync(join(PANEL_UI, "src", "kit", "index.ts"), "utf8");
-  for (const f of files) if (f !== "index.ts") assert.ok(index.includes(`./${f}"`), `index.ts does not re-export ${f}`);
+  for (const f of files) if (f !== "index.ts" && f !== "gallery.ts") assert.ok(index.includes(`./${f}"`), `index.ts does not re-export ${f}`);
+  // the gallery (style-guide corpus for the dev harness, the spike style guide and these tests) lives with the kit so the
+  // hard-coded-string scanner covers it, but the runtime kit never bundles it (it reads the mock data)
+  assert.ok(files.includes("gallery.ts"), "src/kit/gallery.ts");
+  assert.doesNotMatch(index, /gallery/);
+  assert.ok(!readdirSync(join(PANEL_UI, "dev")).includes("kit-gallery.ts"), "the old dev/kit-gallery.ts is gone");
 });
 
 test("Html is a branded string: kit functions return markup the next function accepts", () => {
   const h: Html = paragraph("x");
   assert.equal(typeof h, "string");
   assert.match(card({ body: h }), /<p class="kit-text">x<\/p>/);
+});
+
+// ---- B4: one primary button per screen ----
+
+test("primaryCount counts primary buttons (a glow wraps one, it is not a second)", () => {
+  assert.equal(primaryCount(""), 0);
+  assert.equal(primaryCount(button({ label: "a", action: "a", variant: "primary" })), 1);
+  assert.equal(primaryCount(button({ label: "a", action: "a", variant: "primary", glow: true })), 1);
+  assert.equal(primaryCount(buttonRow([button({ label: "a", action: "a", variant: "primary" }), button({ label: "b", action: "b", variant: "primary" })])), 2);
+  assert.equal(primaryCount(button({ label: "a", action: "a", variant: "danger" }) + button({ label: "b", action: "b" })), 0);
+  assert.equal(primaryCount(header({ t: EN, lang: "en", needsYou: 2 })), 0, "the language switch's on state is not a primary button");
+});
+
+test("B4: every gallery section (a screen's worth) and every component's default render has at most ONE primary button", () => {
+  for (const lang of ["en", "ar"] as const) {
+    const sections = kitGallerySections(lang);
+    assert.ok(sections.length >= 12, "the gallery is split per component");
+    for (const s of sections) assert.ok(primaryCount(s.html) <= 1, `${lang} gallery section ${s.name} has ${primaryCount(s.html)} primary buttons`);
+  }
+  const frames = sampleState("en", "qc").qc;
+  const defaults: Record<string, Html> = {
+    header: header({ t: EN, lang: "en", needsYou: 1 }),
+    tabs: tabs({ t: EN, items: [{ id: "a", label: "A" }], active: "a" }),
+    card: card({ body: paragraph("x") }),
+    button: button({ label: "x", action: "a" }),
+    chip: chip({ label: "x" }),
+    stepStrip: stepStrip({ t: EN, steps: [], rtl: false }),
+    progress: progress({ t: EN, status: "x", n: 1, of: 2, cancel: { action: "cancel" } }),
+    toast: toast({ t: EN, kind: "error", text: "x", how: "Run `reel doctor`.", fix: { label: "a", action: "a" } }),
+    dialog: dialog({ t: EN, title: "x", changes: ["y"], destructive: false, confirm: { label: "a", action: "a" }, cancel: { label: "b", action: "b" } }),
+    emptyState: emptyState({ title: "x", text: "y", action: { label: "a", action: "a" } }),
+    logDrawer: logDrawer({ t: EN, open: true, lines: [], rtl: false }),
+    frameGrid: frameGrid({ t: EN, frames }),
+    waveformFrame: waveformFrame({ t: EN }),
+  };
+  for (const [name, html] of Object.entries(defaults)) assert.ok(primaryCount(html) <= 1, `${name}() renders ${primaryCount(html)} primary buttons`);
+});
+
+test("kit.css header comment states the attribute-selector rule as it is (valueless [disabled] is allowed, no [attr=value])", () => {
+  const head = /^\/\*[\s\S]*?\*\//.exec(KIT_CSS)![0];
+  if (/\[[a-z-]+\]/.test(FLAT_CSS)) assert.doesNotMatch(head, /no attribute selectors(?! with)/, "the comment says 'no attribute selectors' but kit.css uses one");
+  assert.match(head, /\[disabled\]/);
 });

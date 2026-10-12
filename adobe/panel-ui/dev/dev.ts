@@ -5,7 +5,7 @@ import type { PanelHost } from "../src/host.ts";
 import { MockSource, SCENARIOS } from "../src/mock.ts";
 import type { Scenario } from "../src/mock.ts";
 import type { Language } from "../src/source.ts";
-import { kitGallery } from "./kit-gallery.ts";
+import { kitGallery } from "../src/kit/gallery.ts";
 
 const q = new URLSearchParams(location.search);
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;

@@ -87,6 +87,10 @@ test("Arabic: every key UI term carries its English name in parentheses on first
   assert.equal(ar["status.noclient"], "لم يُختَر أي عنصر");
   assert.equal(ar["log.lines"], "عدد الأسطر: {n}");
   assert.match(ar["qc.hint"] as string, /مؤشر التشغيل \(Playhead\)/);
+  // the kit's own first uses: the waveform placeholder (visible) and the frame seek label
+  assert.match(ar["wave.placeholder"] as string, /الموجة الصوتية \(Waveform\)/);
+  assert.doesNotMatch(ar["wave.label"] as string, /\(Waveform\)/, "the term goes on the first VISIBLE use, once");
+  assert.match(ar["frame.seek"] as string, /مؤشر التشغيل \(Playhead\)/);
 });
 
 // ---- no hard-coded user-visible strings in the render code ----
@@ -108,6 +112,7 @@ test("the literal scanner sees text, attributes, nested templates, word literals
 test("no hard-coded user-visible strings in panel-ui/src render code (render.ts, mount.ts, kit/*.ts): all copy comes from the table", () => {
   const kit = readdirSync(join(PANEL_UI, "src", "kit")).filter((f) => f.endsWith(".ts")).map((f) => `kit/${f}`);
   assert.ok(kit.length >= 10, "the component kit is scanned");
+  assert.ok(kit.includes("kit/gallery.ts"), "the gallery (the style guide and the kit tests' corpus) is scanned too");
   for (const f of ["render.ts", "mount.ts", ...kit]) {
     const found = hardCoded(readFileSync(join(PANEL_UI, "src", f), "utf8"));
     assert.deepEqual(found, [], `${f}: ${found.join(" | ")}`);
@@ -120,4 +125,30 @@ test("i18n debt: DaemonSource's own user-visible strings are exactly the documen
   assert.deepEqual(found.filter((s) => !debt.includes(s)), [], "a new hard-coded string in daemon-source.ts: put it in the string table");
   assert.deepEqual(debt.filter((s) => !found.includes(s)), [], "a debt entry no longer exists in daemon-source.ts: remove it from test/i18n-debt.ts");
   assert.ok(readFileSync(join(PANEL_UI, "test", "i18n-debt.ts"), "utf8").includes("to migrate in B-T2"));
+});
+
+// ---- paths, file names and commands inside sentences stay left-to-right ----
+
+/** A path, a file name or a reel command outside `backticks` (the kit turns a backticked run into <bdi dir="ltr">). */
+const BARE_LTR = /(?:[A-Za-z0-9_.-]+[\\/][A-Za-z0-9_./\\-]*|\b[\w-]+\.(?:md|json|prproj|aep|mogrt|mp4|mov|wav|txt|py|ccx|zxp|jsx|png)\b|\breel [a-z-]+)/;
+/** Whole-string technical values: the kit renders each of them as one left-to-right run. */
+const WHOLE_LTR = new Set(["rebuild.backup_name", "log.build", "footer.powered", "product.name"]);
+
+test("every path, file name and command inside a translated sentence is in `backticks` (a <bdi dir=ltr> run), in EN and AR", () => {
+  assert.ok(BARE_LTR.test("holds assets/ and data/") && BARE_LTR.test("open NEEDS-YOU.md") && !BARE_LTR.test("holds `assets` and `data`".replace(/`[^`]+`/g, "")));
+  for (const [lang, t] of [["en", EN], ["ar", AR]] as const) {
+    for (const [k, v] of Object.entries(t)) {
+      if (WHOLE_LTR.has(k)) continue;
+      const bare = BARE_LTR.exec(v.replace(/`[^`]+`/g, ""));
+      assert.equal(bare, null, `${lang}.${k}: "${bare?.[0]}" is not in backticks`);
+    }
+  }
+});
+
+test("a folder name inside an Arabic sentence carries no slash (an RTL reader meets a trailing slash first: '/assets')", () => {
+  for (const [k, v] of Object.entries(AR)) {
+    for (const [, run] of v.matchAll(/`([^`]+)`/g)) {
+      if (!/^reel /.test(run!)) assert.doesNotMatch(run!, /[\\/]$/, `ar.${k}: \`${run}\` ends in a slash`);
+    }
+  }
 });
