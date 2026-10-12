@@ -8,6 +8,7 @@ _sys.dont_write_bytecode = True
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -525,9 +526,9 @@ def decode_frames(video):
         return [f.to_ndarray(format="rgb24") for f in c.decode(video=0)]
 
 
-def build_preview_project(tmp: Path, broll: bool = False):
+def build_preview_project(tmp: Path, broll: bool = False, broll_in: float = 0.5):
     """A planned and previewed 12 s synthetic reel (270x480 preview): (Context, Paths). `broll`: a licensed-looking clip
-    (testsrc2, so every frame is recognisable) fills 00:02.000-00:03.900."""
+    (testsrc2 5 s, so every frame is recognisable) fills 00:02.000-00:03.900 from `broll_in` s into the clip."""
     import test_frame_size as FS
     import test_pipeline as T
     from lib.client_db import build as build_db
@@ -548,7 +549,7 @@ def build_preview_project(tmp: Path, broll: bool = False):
         if broll:
             ed = common.read_json(p.p("01_analysis/edit-decisions.json"))
             ed["decisions"][0]["graphics"].append({"id": "BR_001", "template": "broll_video", "start": "00:00:02.000",
-                                                   "end": "00:00:03.900", "video": "data/Broll/stock.mp4", "in": 0.5})
+                                                   "end": "00:00:03.900", "video": "data/Broll/stock.mp4", "in": broll_in})
             common.write_json(p.p("01_analysis/edit-decisions.json"), ed)
         assert compile_plan(p)["ok"]
         render_all(p, composite_preview=True)
@@ -602,7 +603,7 @@ class TestPreviewVideoParallel(unittest.TestCase):
                 # levels; a frame off by one (the frame counter and the bouncing ball move) differs by 7 or more
                 self.assertLess(diff(want[k], got[k]), 4.0)
                 for j in (k - 1, k + 1):
-                    if 0 <= j < n:
+                    if 0 <= j < n and diff(want[j], want[k]) >= 4.0:     # a held frame: its neighbour IS the picture
                         self.assertLess(diff(want[k], got[k]), diff(want[j], got[k]), f"frame {k} is closer to {j}")
         self.assertEqual(list((Path(par["video"]).parent).glob("_preview_chunk*")), [])     # no chunk files left behind
         return one, par
@@ -639,6 +640,161 @@ class TestPreviewVideoParallel(unittest.TestCase):
             one, par = case.compare(8, 8, 8, (47, 48, 49, 71, 72, 73, 93, 94, 150, 287))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_a_chunk_that_starts_after_a_short_broll_clip_ended(self):
+        """T2.14 review 2, I1: a clip shorter than its event (5 s clip from 4.6 s: ~10 frames for the event 48-93). The
+        chunk from frame 72 starts after the clip's last frame: it holds that frame, as the single pass does, and does
+        not fail with "no frame decoded"."""
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            case = TestPreviewVideoParallel.__new__(TestPreviewVideoParallel)
+            unittest.TestCase.__init__(case)
+            case.ctx, case.p = build_preview_project(tmp, broll=True, broll_in=4.6)
+            one, par = case.compare(8, 8, 8, (47, 48, 49, 56, 57, 58, 59, 71, 72, 73, 90, 93, 94, 108, 287))
+            self.assertTrue(par["ok"], par)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def counting_popen(self, interrupt_on=None):
+        """Patch Popen (real processes) and record, for the rawvideo ffmpeg of the render: each command, the largest
+        number alive at once, and for each B-roll decoder how many frames its chunk's encoder had received when it was
+        stopped. `interrupt_on(n)`: every source decoder stalls (sleeps), and Ctrl+C (interrupt_main) comes while the
+        n-th one starts, inside _Watch.spawn."""
+        import _thread
+        import threading
+        from lib import preview_video as PV
+        real, rec = subprocess.Popen, {"cmds": [], "procs": [], "peak": 0, "broll_stopped_at": [], "src": 0}
+        lock, enc_of = threading.Lock(), {}
+
+        class Counting:
+            def __init__(self, f):
+                self.f, self.n = f, 0
+
+            def write(self, b):
+                self.n += 1
+                return self.f.write(b)
+
+            def __getattr__(self, a):
+                return getattr(self.f, a)
+
+        def popen(cmd, *a, **kw):
+            if not (isinstance(cmd, list) and "rawvideo" in cmd):
+                return real(cmd, *a, **kw)
+            tid = threading.get_ident()
+            if interrupt_on and self.is_source_decoder(cmd):
+                with lock:
+                    rec["src"] += 1
+                    n = rec["src"]
+                if interrupt_on(n):
+                    _thread.interrupt_main()
+                cmd = [sys.executable, "-c", "import time; time.sleep(60)"]
+            p = real(cmd, *a, **kw)
+            with lock:
+                rec["cmds"].append(cmd)
+                rec["procs"].append(p)
+                rec["peak"] = max(rec["peak"], sum(q.poll() is None for q in rec["procs"]))
+            if kw.get("stdin") == subprocess.PIPE:                        # a chunk's encoder: count its frames
+                p.stdin = enc_of[tid] = Counting(p.stdin)
+            elif any("force_original" in str(c) for c in cmd):            # a B-roll decoder: when is it stopped?
+                kill, enc = p.kill, enc_of.get(tid)
+
+                def stopped():
+                    rec["broll_stopped_at"].append(enc.n if enc else None)
+                    kill()
+                p.kill = stopped
+            return p
+        return mock.patch.object(PV.subprocess, "Popen", side_effect=popen), rec
+
+    def test_at_most_six_ffmpeg_with_threads_and_broll_closed_after_its_event(self):
+        """T2.14 review 2, M1 (guards I2): the default worker count and chunk length keep a reel to 2 chunks and a short
+        one to 1; a chunked render runs <= 6 ffmpeg at once (2 x decoder + encoder + B-roll decoder), each with `-threads
+        N >= 1`, and a B-roll decoder is stopped when its event ends, not at the end of the chunk."""
+        from lib import preview_video as PV
+        from lib.stamps import read_compiled
+        if (os.cpu_count() or 1) < 2:
+            self.skipTest("one CPU: the preview is one pass")
+        self.assertLessEqual(len(PV.chunk_bounds(40 * 24, PV.PREVIEW_WORKERS)) - 1, 2)   # a 40 s reel: <= 2 chunks
+        self.assertEqual(len(PV.chunk_bounds(8 * 24, PV.PREVIEW_WORKERS)) - 1, 1)        # an 8 s one: one pass
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            case = TestPreviewVideoParallel.__new__(TestPreviewVideoParallel)
+            unittest.TestCase.__init__(case)
+            case.ctx, case.p = build_preview_project(tmp, broll=True)
+            patch, rec = self.counting_popen()
+            with patch:
+                r = case.render(min_chunk_frames=8)                       # the default worker count
+            self.assertTrue(r["ok"], r)
+            self.assertEqual(r["chunks"], 2)
+            self.assertLessEqual(rec["peak"], 6, rec["peak"])
+            self.assertEqual(len(rec["cmds"]), 5)                         # 2 x (decoder + encoder) + 1 B-roll decoder
+            for cmd in rec["cmds"]:
+                with self.subTest(cmd=cmd[:6]):
+                    self.assertIn("-threads", cmd)
+                    self.assertGreaterEqual(int(cmd[cmd.index("-threads") + 1]), 1)
+            ev = next(e for e in read_compiled(case.p.p("01_analysis/timeline-spec.json"))["events"]
+                      if e["template"] == "broll_video")
+            self.assertLess(ev["end_frame"], 144)                         # the event is inside the first chunk (0-143)
+            self.assertEqual(rec["broll_stopped_at"], [ev["end_frame"]])  # stopped at its end frame, not at 144
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_the_watchdog_counts_the_source_span_of_a_chunk(self):
+        """T2.14 review 2, M3: the second chunk's decoder decodes the source from the start to the chunk's end."""
+        from lib import preview_video as PV
+        got = []
+        with mock.patch.object(PV, "chunk_timeout_s", lambda d: got.append(d) or 600.0):
+            r = self.render(workers=2, min_chunk_frames=8)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(len(got), 2)
+        self.assertAlmostEqual(min(got), 144 / 24, delta=0.5)             # 0-143: its timeline and source span alike
+        self.assertGreaterEqual(max(got), 288 / 24 - 0.1)                 # 144-287: the source up to frame 287, not 6 s
+
+    def test_ctrl_c_during_a_chunked_render(self):
+        """T2.14 review 2, M4: Ctrl+C while the second chunk starts its decoder (stalled decoders: only a kill ends them).
+        The KeyboardInterrupt comes out, every ffmpeg of the render is killed at once (registered with the parallel map
+        in _Watch.spawn), and a chunk file left by a killed encoder can be deleted."""
+        import threading
+        import time
+        patch, rec = self.counting_popen(interrupt_on=lambda n: n == 2)
+        t0 = time.monotonic()
+        try:
+            with patch, self.assertRaises(KeyboardInterrupt):
+                self.render(workers=2, min_chunk_frames=8)
+            self.assertLess(time.monotonic() - t0, 10)
+            self.assertEqual(len(rec["procs"]), 4)                        # 2 encoders, 2 (stalled) decoders
+            t1 = time.monotonic()
+            for p in rec["procs"]:
+                p.wait(timeout=15)
+            self.assertLess(time.monotonic() - t1, 5)                     # killed by the map, not the ~28 s watchdog
+        finally:
+            for t in threading.enumerate():
+                if t.name.startswith("wnc"):
+                    t.join(timeout=30)
+        for c in self.p.p("08_quality_control/preview").glob("_preview_chunk*"):
+            c.unlink()                                                    # left by a killed encoder: harmless
+
+    def test_a_locked_chunk_file_never_replaces_the_ctrl_c(self):
+        """T2.14 review 2, M2: deleting a chunk file still held by a killed encoder (WinError 32) is not an error."""
+        from lib import parallel
+        out = self.p.p("08_quality_control/preview")
+        real = Path.unlink
+
+        def interrupted(fn, items, workers):
+            for i in items:
+                (out / f"_preview_chunk_{i}.mp4").write_bytes(b"x")
+            raise KeyboardInterrupt
+
+        def unlink(path, *a, **kw):
+            if path.name.startswith("_preview_chunk_"):
+                raise PermissionError(32, "The process cannot access the file")
+            return real(path, *a, **kw)
+        try:
+            with mock.patch.object(parallel, "parallel_map", interrupted), \
+                    mock.patch.object(Path, "unlink", unlink), self.assertRaises(KeyboardInterrupt):
+                self.render(workers=2, min_chunk_frames=8)
+        finally:
+            for c in out.glob("_preview_chunk*"):
+                real(c)
 
     def fake_decoder(self, match, script, times=10 ** 6):
         """Patch Popen: the first `times` ffmpeg commands that `match` run `python -c script` instead."""

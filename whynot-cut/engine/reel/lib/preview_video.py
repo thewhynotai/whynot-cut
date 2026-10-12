@@ -264,6 +264,20 @@ class _Watch:
             self.close(p)
 
 
+def _unlink(path: Path, tries: int = 10) -> None:
+    """Delete a temp file of the render, never raising. On Ctrl+C the main thread gets here right after the chunks'
+    ffmpeg were killed (TerminateProcess is asynchronous): a handle still open (WinError 32) must not replace the
+    KeyboardInterrupt (T2.14 review 2, M2). Retried briefly; a file that stays locked is left (the next render
+    overwrites it)."""
+    for i in range(tries):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except OSError:
+            if i + 1 < tries:
+                time.sleep(0.05)
+
+
 def chunk_bounds(total: int, workers: int, min_chunk: int = MIN_CHUNK_FRAMES) -> list[int]:
     """Frame boundaries [0, ..., total] of the chunks a timeline of `total` frames is rendered in: at most `workers`,
     none shorter than `min_chunk` frames (a short preview is one chunk: the plain single pass)."""
@@ -332,6 +346,14 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
         return int(round(src_ms * fps_n / 1000))
 
     threads = ["-threads", str(max(1, (os.cpu_count() or 1) // nch))] if nch > 1 else []   # chunks share the cores
+
+    def chunk_deadline_s(f0, f1):
+        """The watchdog of the chunk f0..f1-1. Its decoder decodes the source from the in-point (`-ss`) up to the chunk's
+        last frame (the frames before f0 are decoded and dropped by `trim`), which is longer than the chunk's timeline
+        span, and longer still when pauses were removed: the deadline counts that source span (T2.14 review 2, M3)."""
+        last = max(f0, f1 - 1)
+        src_s = (max(0, source_frame(last, segs[seg_index(last)])) + 1) / fps_n
+        return chunk_timeout_s(max((f1 - f0) / fps_n, src_s))
     from .parallel import check as cancel_check
 
     def render_range(f0, f1, enc, watch):
@@ -351,21 +373,28 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
         si = 0
         bdec, blast, bread, bdone = {}, {}, {}, set()
 
+        binto = {}
+
+        def open_broll(ev, into):
+            """The decoder of a B-roll clip from its in-point, skipping `into` frames inside ffmpeg (as for the source)."""
+            pp = ev["params"]
+            cx, cy = (pp.get("crop_center") or [0.5, 0.5])[:2]
+            return watch.spawn(
+                [ff, "-loglevel", "error", *threads, "-ss", str(float(pp.get("in", 0) or 0)), "-i", str(paths.root / pp["video"]), "-an",
+                 "-vf", f"fps={fps_s}" + (f",trim=start_frame={into},setpts=PTS-STARTPTS" if into else "") +
+                        f",scale={W}:{H}:force_original_aspect_ratio=increase,"
+                        f"crop={W}:{H}:x='(iw-{W})*{float(cx)}':y='(ih-{H})*{float(cy)}'",
+                 *(["-r", fps_s] if into else []), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+
         def broll_frame(ev, f):
             """Next frame of a B-roll clip (its own decoder, started at the clip's in-point), cover-cropped to WxH."""
             eid = ev["event_id"]
+            what = f"B-roll decoder ({ev['params'].get('video')})"
             if eid in bdone:                                    # the clip's decoder ended: hold its last frame
                 return blast.get(eid)
             if eid not in bdec:
-                pp = ev["params"]
-                cx, cy = (pp.get("crop_center") or [0.5, 0.5])[:2]
-                into = max(0, f - ev["start_frame"]) if f0 else 0      # a range that starts inside the clip's event
-                bdec[eid] = watch.spawn(
-                    [ff, "-loglevel", "error", *threads, "-ss", str(float(pp.get("in", 0) or 0)), "-i", str(paths.root / pp["video"]), "-an",
-                     "-vf", f"fps={fps_s}" + (f",trim=start_frame={into},setpts=PTS-STARTPTS" if into else "") +
-                            f",scale={W}:{H}:force_original_aspect_ratio=increase,"
-                            f"crop={W}:{H}:x='(iw-{W})*{float(cx)}':y='(ih-{H})*{float(cy)}'",
-                     *(["-r", fps_s] if into else []), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+                binto[eid] = max(0, f - ev["start_frame"]) if f0 else 0   # a range that starts inside the clip's event
+                bdec[eid] = open_broll(ev, binto[eid])
                 bread[eid] = 0
             buf = bdec[eid].stdout.read(W * H * 3)
             if len(buf) == W * H * 3:
@@ -374,10 +403,26 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
             else:       # the clip ended (exit 0 after a frame: hold it) or its decoder failed (raise)
                 bdone.add(eid)
                 p = bdec.pop(eid)
+                late = bread[eid] == 0 and binto[eid] > 0       # this range starts after the clip's last frame
                 try:
-                    watch.finish(p, f"B-roll decoder ({ev['params'].get('video')})", bread[eid] > 0)
+                    watch.finish(p, what, bread[eid] > 0 or late)
                 finally:
                     watch.close(p)
+                if late:
+                    # the clip is shorter than its event and ended before this range: the single pass holds the clip's
+                    # last frame here, so decode the clip once more from its in-point (no trim: the same command as the
+                    # single pass, at most `into` frames) and hold the last frame it delivers (T2.14 review 2, I1)
+                    p, n, last = open_broll(ev, 0), 0, None
+                    try:
+                        while True:
+                            buf = p.stdout.read(W * H * 3)
+                            if len(buf) < W * H * 3:
+                                break
+                            last, n = buf, n + 1
+                        watch.finish(p, what, n > 0)
+                    finally:
+                        watch.close(p)
+                    blast[eid] = Image.frombuffer("RGB", (W, H), last, "raw", "RGB", 0, 1)
             return blast.get(eid)
         try:
             for f in range(f0, f1):
@@ -453,8 +498,8 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
             cmd += ["-i", str(wav)]
         cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", *threads]
         cmd += ["-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart"] if audio else []
-        # T2.15 watchdog: 10 s + 3 x the chunk's duration, then every process of the chunk is killed
-        watch = _Watch(chunk_timeout_s((f1 - f0) / fps_n))
+        # T2.15 watchdog: 10 s + 3 x the chunk's work (its source span), then every process of the chunk is killed
+        watch = _Watch(chunk_deadline_s(f0, f1))
         try:
             enc = watch.spawn(cmd + [str(dest)], stdin=subprocess.PIPE)
             try:
@@ -493,7 +538,7 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
                                "another process: close other renders or exports and retry.") from e
             except _Timeout:
                 raise Guidance(f"preview-video stopped: {what} did not finish within "
-                               f"{chunk_timeout_s((f1 - f0) / fps_n):.0f} s",
+                               f"{chunk_deadline_s(f0, f1):.0f} s",
                                "The footage may be on a stalled network share or a sleeping drive: copy it to a local "
                                "disk or wake the drive, then run `reel preview-video` again.") from None
     chunk_files = [out_dir / f"_preview_chunk_{i}.mp4" for i in range(nch)] if nch > 1 else []
@@ -517,11 +562,8 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
                 err = f"joining the chunks failed (ffmpeg exit {cat.returncode}): " + \
                       " | ".join((cat.stderr or "").strip().splitlines()[-3:])[-400:]
     finally:
-        wav.unlink(missing_ok=True)
-        (out_dir / "_camera_audio.wav").unlink(missing_ok=True)
-        listing.unlink(missing_ok=True)
-        for c in chunk_files:
-            c.unlink(missing_ok=True)
+        for f in (wav, out_dir / "_camera_audio.wav", listing, *chunk_files):
+            _unlink(f)
     ok = err is None
     ok = ok and mp4.exists() and mp4.stat().st_size > 1000
     res = {"ok": ok, "video": str(mp4), "size": f"{W}x{H}", "frames": total, "seconds": round(total / seq_fps(), 2),
