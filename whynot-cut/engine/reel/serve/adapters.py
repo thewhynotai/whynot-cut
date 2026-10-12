@@ -7,9 +7,13 @@
                        one named by a client. The queue's own failures (bridge 3.1.1: not running, version mismatch,
                        expired, cancelled before the claim, timed out after it, refused by the bridge, build lock held,
                        test sandbox) all become ok:false with the queue's sentence and a `how`; their extra flags
-                       (expired, cancelled, claimed, status, job, refused) do not cross the wire.
+                       (expired, cancelled, claimed, status, job, refused) do not cross the wire. The submit calls of
+                       one bridge are serialized (SUBMIT_LOCKS): bridge.submit shares files between calls
+                       (sync_scripts' fixed temp path), and the bridge runs one job at a time anyway; Premiere's and
+                       After Effects' queues still run side by side.
     HostLink           the commands in flight to ONE connected host session: sends `command`, matches the `result`
-                       by id, hands `progress` to the requester; fail_all() when the session goes away.
+                       by id, hands `progress` to the requester; on a timeout it sends the host a best-effort
+                       `cancel` for that id first; fail_all() when the session goes away.
     UxpAdapter         runs a command through a HostLink with the request's remaining time as the timeout.
 
 Adapters return a v4 result dict; the router validates it (contract.validate_result) before anyone sees it.
@@ -17,7 +21,9 @@ Adapters return a v4 result dict; the router validates it (contract.validate_res
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
+import threading
 from datetime import datetime, timezone
 
 from contract import load
@@ -31,6 +37,8 @@ QUEUE_TIMEOUT_S = {"aftereffects": 900.0}          # the bridges' own defaults (
 QUEUE_TIMEOUT_DEFAULT_S = 600.0
 UXP_TIMEOUT_MAX_S = 900.0
 APP_NAMES = {"aftereffects": "After Effects"}       # everything else runs in Premiere
+CANCEL_SEND_S = 1.0                                 # how long a best-effort cancel may take to send
+SUBMIT_LOCKS = {"premiere": threading.Lock(), "aftereffects": threading.Lock()}   # one queue call per bridge
 
 
 class HostGone(ConnectionError):
@@ -80,7 +88,8 @@ class FileQueueAdapter:
                     from lib import ae_bridge as bridge
                 else:                                # premiere, and "any" (ping): Premiere is the primary host
                     from lib import ppro_bridge as bridge
-                return bridge.submit(name, data, timeout=timeout)
+                with SUBMIT_LOCKS["aftereffects" if host == "aftereffects" else "premiere"]:
+                    return bridge.submit(name, data, timeout=timeout)
 
         r = await asyncio.to_thread(call)
         response = r.get("response") if isinstance(r, dict) else None
@@ -140,8 +149,14 @@ class HostLink:
         self._pending[rid] = _Pending(fut, request["action"], on_progress)
         try:
             await self._send({"type": "command", "request": request})
-            async with asyncio.timeout(timeout):
-                return await asyncio.shield(fut)
+            try:
+                async with asyncio.timeout(timeout):
+                    return await asyncio.shield(fut)
+            except TimeoutError:                     # tell the host to stop before the requester hears "no answer"
+                with contextlib.suppress(ConnectionError, OSError, TimeoutError):
+                    async with asyncio.timeout(CANCEL_SEND_S):
+                        await self._send({"type": "cancel", "id": rid})
+                raise
         finally:
             self._pending.pop(rid, None)
             if fut.done() and not fut.cancelled():

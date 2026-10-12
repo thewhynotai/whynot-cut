@@ -1,9 +1,11 @@
 """The `reel serve` application (3.0 T6.2): the per-connection handler on top of serve/ws.py.
 
-HTTP (every request): connection caps first (global and per peer address; excess -> 503 + audit), then the request head
-(ws.parse_http; a refused head is answered 400/408 by ws's connection wrapper), then the Host gate (missing -> 400,
-anything but 127.0.0.1:<port> / localhost:<port> -> 403 + audit) and the Origin gate (every Origin seen is audit-logged
-with its raw value; a browser Origin -> 403 + audit). Then:
+HTTP (every request): the connection cap first (one global cap, MAX_CONNECTIONS; excess -> 503 + audit. There is no
+per-address cap: on loopback every peer is 127.0.0.1, so it would only be a second, smaller global cap), then the
+request head (ws.parse_http; a refused head is answered 400/408 by ws's connection wrapper), then every Origin seen is
+audit-logged with its raw value (before any other check, so a rebinding attempt's Origin is on record too), then the
+Host gate (missing -> 400, anything but 127.0.0.1:<port> / localhost:<port> -> 403 + audit) and the Origin gate (a
+browser Origin -> 403 + audit). Then:
     GET /status    needs `Authorization: Bearer <token>` (401 otherwise); answers {protocol, daemon_version, pid, port,
                    sessions: [{kind, host, hostVersion, capabilities}], uptime_s}
     /session       the WebSocket session (below)
@@ -11,9 +13,11 @@ with its raw value; a browser Origin -> 403 + audit). Then:
 Session: the upgrade caps messages at 16 KiB until the client is authenticated. The first message must be a valid
 `hello` within `hello_timeout` (3 s) whose token is 64 lowercase hex characters and equals the engine token
 (constant-time); anything else is `error{code: auth}` + close 1008 + audit. After `welcome` the cap is 8 MiB and every
-message is rate-limited, parsed and validated against its type in session.schema.json (`schema` / `unknown_type` errors
-keep the connection). `command` runs in its own task through the Router (UXP panel or CEP file queue, a Context per
-request); `result` / `progress` from a host session answer the commands sent to it; the panel intents approve /
+message is parsed and validated against its type in session.schema.json (`schema` / `unknown_type` errors keep the
+connection). Rate limits are per session and by type: what a client asks for (command, snapshot, the intents, cancel,
+and anything invalid) is limited (`error{rate}` with the message's id); a host's `result` is never limited (dropping it
+would leave the requester waiting until expiry); `progress` over its own budget is dropped silently. `command` runs in
+its own task through the Router (UXP panel or CEP file queue, a Context per request); `result` / `progress` from a host session answer the commands sent to it; the panel intents approve /
 request_changes / rebuild get a `reply` saying they are not implemented in the serve core yet; `snapshot` gets a
 `state` echoing its id; `cancel` is forwarded to the panel running the command. When a session ends, the commands
 waiting on it fail with a clear error and its own running commands are cancelled; a reconnect is a new hello.
@@ -28,7 +32,6 @@ import logging
 import os
 import secrets
 import time
-from collections import Counter
 
 from lib import common
 
@@ -44,7 +47,6 @@ PRE_AUTH_MAX = 16 * 1024
 POST_AUTH_MAX = 8 * 1024 * 1024
 HELLO_TIMEOUT = 3.0
 MAX_CONNECTIONS = 32
-MAX_PER_PEER = 8
 RATE = (20.0, 60)                  # messages per second per session, burst
 MAX_RUNNING = 16                   # commands one session may have running at once
 OFFLOAD_BYTES = 256 * 1024         # messages above this are parsed and validated in a worker thread
@@ -79,7 +81,9 @@ class Session:
         self.host = client.get("host")
         self.host_version = client.get("hostVersion")
         self.capabilities = tuple(dict.fromkeys(client.get("capabilities") or ()))
-        self.limiter = limiter
+        self.limiter = limiter                                     # client requests (and invalid messages)
+        self.progress_limiter = security.RateLimiter(limiter.rate, int(limiter.burst))   # a host's progress events
+        self.progress_dropped = 0
         self.link = HostLink(self._send_or_raise)
         self.tasks: set[asyncio.Task] = set()
 
@@ -103,7 +107,7 @@ class App:
 
     def __init__(self, *, home, token: str, version: str, audit: security.AuditLog | None = None,
                  hello_timeout: float = HELLO_TIMEOUT, max_connections: int = MAX_CONNECTIONS,
-                 max_per_peer: int = MAX_PER_PEER, rate: tuple = RATE, max_running: int = MAX_RUNNING,
+                 rate: tuple = RATE, max_running: int = MAX_RUNNING,
                  idle_timeout: float = ws.IDLE_TIMEOUT, file_queue=None):
         if not security.token_shape_ok(token):
             raise ValueError("the engine token must be 64 lowercase hex characters (security.make_token)")
@@ -113,7 +117,6 @@ class App:
         self.audit = audit if audit is not None else security.AuditLog(security.audit_log_path(home), token=token)
         self.hello_timeout = hello_timeout
         self.max_connections = max_connections
-        self.max_per_peer = max_per_peer
         self.rate = rate
         self.max_running = max_running
         self.idle_timeout = idle_timeout
@@ -122,7 +125,6 @@ class App:
         self.router = Router(home=home, sessions=lambda: list(self.sessions.values()),
                              file_queue=file_queue if file_queue is not None else FileQueueAdapter(), audit=self.audit)
         self._conns = 0
-        self._per_peer: Counter = Counter()
         self._handlers: set[asyncio.Task] = set()
         self._server: asyncio.Server | None = None
         self._strict = False
@@ -169,15 +171,12 @@ class App:
     # ------------------------------------------------------------------------------------------------ HTTP
     async def handler(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
-        ip = str(peer[0]) if peer else "?"
         peer_s = f"{peer[0]}:{peer[1]}" if peer else "?"
-        if self._conns >= self.max_connections or self._per_peer[ip] >= self.max_per_peer:
-            which = "global" if self._conns >= self.max_connections else "per-peer"
-            self._audit("connection", peer_s, outcome="rejected", reason=f"{which} connection cap")
+        if self._conns >= self.max_connections:
+            self._audit("connection", peer_s, outcome="rejected", reason=f"connection cap ({self.max_connections})")
             await ws.write_response(writer, ws.json_response(503, {"error": "too many connections"}))
             return
         self._conns += 1
-        self._per_peer[ip] += 1
         task = asyncio.current_task()
         self._handlers.add(task)
         try:
@@ -185,9 +184,6 @@ class App:
         finally:
             self._handlers.discard(task)
             self._conns -= 1
-            self._per_peer[ip] -= 1
-            if self._per_peer[ip] <= 0:
-                del self._per_peer[ip]
 
     async def _serve(self, reader, writer, peer, peer_s: str) -> None:
         try:
@@ -196,6 +192,11 @@ class App:
             self._audit("http", peer_s, outcome="rejected", reason=f"{e.status} {e.reason}")
             raise
         h = req.headers
+        refused = None
+        if "origin" in h:                                   # on record before any other check (rebinding attempts too)
+            refused = security.origin_rejection(h)
+            self._audit("origin", peer_s, action=req.path, outcome="rejected" if refused else "allowed",
+                        reason=h["origin"])
         if "host" not in h:                                 # HTTP/1.0 may omit it; we never do without it
             self._audit("http", peer_s, action=req.path, outcome="rejected", reason="missing host")
             raise ws.HttpError(400, "missing Host header")
@@ -203,11 +204,6 @@ class App:
             self._audit("http", peer_s, action=req.path, outcome="rejected", reason="host")
             await ws.write_response(writer, ws.json_response(403, {"error": "Host not allowed"}))
             return
-        refused = None
-        if "origin" in h:
-            refused = security.origin_rejection(h)
-            self._audit("origin", peer_s, action=req.path, outcome="rejected" if refused else "allowed",
-                        reason=h["origin"])
         if refused:
             self._audit("http", peer_s, action=req.path, outcome="rejected", reason=refused)
             await ws.write_response(writer, ws.json_response(403, {"error": "Origin not allowed"}))
@@ -288,14 +284,20 @@ class App:
 
     async def _run(self, s: Session) -> None:
         while (raw := await s.sock.recv()) is not None:
-            if not s.limiter.allow():
-                self._audit("rate", s.peer, session=s.id, outcome="rejected", reason="message rate")
-                await s.send(messages.error("rate", "Too many messages: slow down."))
-                continue
             if len(raw) > OFFLOAD_BYTES:                     # a big message must not stall the other sessions
                 msg, problem = await asyncio.to_thread(_parse, raw)
             else:
                 msg, problem = _parse(raw)
+            kind = msg.get("type") if problem is None else None
+            if kind == "progress" and not s.progress_limiter.allow():
+                s.progress_dropped += 1                      # a burst of progress: drop silently, never the result
+                if s.progress_dropped == 1:
+                    self._audit("rate", s.peer, session=s.id, outcome="dropped", reason="progress over the rate")
+                continue
+            if kind not in ("result", "progress") and not s.limiter.allow():
+                self._audit("rate", s.peer, session=s.id, action=kind, outcome="rejected", reason="message rate")
+                await s.send(messages.error("rate", "Too many messages: slow down.", messages.message_id(msg)))
+                continue
             if problem is not None:
                 code, errors = problem
                 await s.send(messages.error(code, "; ".join(errors), messages.message_id(msg)))

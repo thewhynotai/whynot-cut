@@ -339,6 +339,12 @@ class Status(AppCase):
                 self.assertEqual(status, 403)
         self.assertTrue(any(r["outcome"] == "rejected" and r["reason"] == "host" for r in self.events("http")))
 
+    async def test_origin_is_audited_even_when_the_host_is_wrong(self):
+        status, _, _ = await http(self.port, f"GET /session HTTP/1.1\r\nHost: evil.example:{self.port}\r\n"
+                                             f"Origin: https://rebind.example\r\n\r\n".encode())
+        self.assertEqual(status, 403)
+        self.assertIn("https://rebind.example", [r["reason"] for r in self.events("origin")])
+
     async def test_missing_host_is_refused_even_over_http_1_0(self):
         status, _, _ = await http(self.port, f"GET /status HTTP/1.0\r\nAuthorization: Bearer {self.token}\r\n\r\n".encode())
         self.assertEqual(status, 400)
@@ -354,9 +360,12 @@ class Status(AppCase):
 
 
 class ConnectionCaps(AppCase):
-    app_options = {"max_per_peer": 2, "max_connections": 32}
+    app_options = {"max_connections": 2}
 
-    async def test_per_peer_cap_is_503_and_audited(self):
+    async def test_global_cap_is_503_and_audited_and_frees_on_hang_up(self):
+        """One global cap: on loopback every peer is 127.0.0.1, so a per-address cap would only be a second, smaller
+        global cap (review fix round 1)."""
+        self.assertFalse(hasattr(self.app, "max_per_peer"))
         a = await self.connect()
         b = await self.connect()
         self.assertEqual((a.status, b.status), (101, 101))
@@ -371,15 +380,9 @@ class ConnectionCaps(AppCase):
             await asyncio.sleep(0.05)
         self.assertEqual(d.status, 101)
 
-
-class GlobalCap(AppCase):
-    app_options = {"max_per_peer": 8, "max_connections": 2}
-
-    async def test_global_cap(self):
-        await self.connect()
-        await self.connect()
-        c = await self.connect()
-        self.assertEqual(c.status, 503)
+    def test_defaults(self):
+        self.assertEqual(serve_app.MAX_CONNECTIONS, 32)
+        self.assertFalse(hasattr(serve_app, "MAX_PER_PEER"))
 
 
 # --------------------------------------------------------------------------------------------- handshake + auth
@@ -532,8 +535,34 @@ class Rate(AppCase):
             await c.send({"type": "snapshot", "id": f"s{i}"})
         got = [await c.recv() for _ in range(4)]
         self.assertEqual([m["type"] for m in got[:3]], ["state"] * 3)
-        self.assertEqual((got[3]["type"], got[3]["code"]), ("error", "rate"))
+        self.assertEqual((got[3]["type"], got[3]["code"], got[3]["id"]), ("error", "rate", "s3"))
         self.assertTrue(self.events("rate"))
+
+    async def test_progress_burst_never_drops_the_result(self):
+        """A panel bursting progress over the limit still delivers its result; excess progress is dropped silently
+        (no id-less rate error to the panel), results are never rate-limited (review fix round 1)."""
+        p = await self.panel(caps=("ping",))
+        c = await self.cli()
+        msg = command("ping")
+        rid = msg["request"]["id"]
+        await c.send(msg)
+        await p.recv()
+        for i in range(10):
+            await p.send({"type": "progress", "progress": {"event": "progress", "id": rid, "action": "ping",
+                                                            "step": f"step {i}", "n": i, "of": 10}})
+        await p.send({"type": "result", "result": {"ok": True, "action": "ping", "id": rid, "readback": PING_READBACK}})
+        got = []
+        while True:
+            m = await c.recv()
+            got.append(m)
+            if m["type"] == "result":
+                break
+        self.assertTrue(got[-1]["result"]["ok"], got[-1])
+        self.assertLess(len(got) - 1, 10)                      # some progress was dropped ...
+        self.assertTrue(all(m["type"] == "progress" for m in got[:-1]))
+        await asyncio.sleep(1.1)                              # ... and the panel got no rate error for it
+        await p.send({"type": "snapshot", "id": "after"})
+        self.assertEqual((await p.recv())["type"], "state")
 
 
 # ------------------------------------------------------------------------------------------------------- routing
@@ -723,6 +752,8 @@ class UxpTimeout(AppCase):
         res = await c.recv()
         self.assertFalse(res["result"]["ok"])
         self.assertIn("did not answer", res["result"]["error"])
+        cancel = await p.recv()                               # sent to the panel before the requester was failed
+        self.assertEqual(cancel, {"type": "cancel", "id": msg["request"]["id"]})
 
 
 # ------------------------------------------------------------------------------------------------------- context
@@ -736,17 +767,43 @@ class RequestContext(AppCase):
 
         def fake_submit(action, data=None, timeout=600):
             ctx = common.current_context()          # strict mode: raises unless the router bound one
-            barrier.wait()                          # both commands are inside the queue call at the same time
+            barrier.wait()                          # both commands are inside a queue call at the same time
             seen.append((ctx.root, ctx.profile, ctx.engine_home))
+            if action == "ping":
+                return cep_ok("ping", PING_READBACK)
+            return cep_ok("fonts", {"fonts": {}, "missing_or_substituted": []})
+
+        c = await self.cli()                        # Premiere and After Effects queues run side by side
+        with mock.patch("lib.ppro_bridge.submit", fake_submit), mock.patch("lib.ae_bridge.submit", fake_submit):
+            await c.send(command("ping", root=roots[0], profile="p0"))
+            await c.send(command("ae_fonts", {"postscript_names": []}, root=roots[1], profile="p1"))
+            res = [await c.recv(), await c.recv()]
+        self.assertTrue(all(r["result"]["ok"] for r in res), res)
+        self.assertEqual(sorted(seen), sorted([(roots[0].resolve(), "p0", self.home), (roots[1].resolve(), "p1", self.home)]))
+
+
+    async def test_queue_calls_of_one_bridge_never_overlap(self):
+        """bridge.submit shares files (sync_scripts' fixed temp path): one call per bridge at a time."""
+        active, peak, lock = [0], [0], threading.Lock()
+
+        def fake_submit(action, data=None, timeout=600):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+            try:
+                threading.Event().wait(0.2)
+            finally:
+                with lock:
+                    active[0] -= 1
             return cep_ok("ping", PING_READBACK)
 
         c = await self.cli()
         with mock.patch("lib.ppro_bridge.submit", fake_submit):
-            await c.send(command("ping", root=roots[0], profile="p0"))
-            await c.send(command("ping", root=roots[1], profile="p1"))
-            res = [await c.recv(), await c.recv()]
+            for _ in range(3):
+                await c.send(command("ping"))
+            res = [await c.recv() for _ in range(3)]
         self.assertTrue(all(r["result"]["ok"] for r in res), res)
-        self.assertEqual(sorted(seen), sorted([(roots[0].resolve(), "p0", self.home), (roots[1].resolve(), "p1", self.home)]))
+        self.assertEqual(peak[0], 1)
 
 
 # ------------------------------------------------------------------------------------------------------ adapters
