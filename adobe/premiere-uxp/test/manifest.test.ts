@@ -16,10 +16,15 @@ test("spike manifest: v5, ids, single premierepro host object", () => {
   assert.deepEqual(manifest.host, { app: "premierepro", minVersion: "26.5.0" });
 });
 
-test("spike manifest: permissions are full file access + network \"all\" (the explicit 127.0.0.1 entries failed live)", () => {
+test("spike manifest: permissions are full file access + an explicit loopback network list (0.1.6, C2.7: no \"all\")", () => {
   assert.equal(manifest.requiredPermissions.localFileSystem, "fullAccess");
-  // live evidence: Premiere 26.5.2, spike 0.1.3 run results-20261012-211920 - "Permission denied to the url ws://127.0.0.1:53672/session. Manifest entry not found." (and the same for http://127.0.0.1:53672/status): the explicit ws://127.0.0.1 / http://127.0.0.1 entries do not match a URL with a port, so the spec's fallback applies (docs/adobe/evidence/2026-10-12-premiere-run4-panel-blocked.webp)
-  assert.equal(manifest.requiredPermissions.network.domains, "all");
+  // round-1 evidence: Premiere 26.5.2, spike 0.1.3 run results-20261012-211920 - "Permission denied to the url
+  // ws://127.0.0.1:53672/session. Manifest entry not found." with the port-less entries; 0.1.4/0.1.5 ran with "all".
+  // 0.1.6 measures port-wildcard forms next to the port-less ones (test/spike-016.test.ts has the exact list)
+  const domains = manifest.requiredPermissions.network.domains;
+  assert.ok(Array.isArray(domains), "an explicit list, not \"all\"");
+  for (const d of ["ws://127.0.0.1:*", "http://127.0.0.1:*", "ws://127.0.0.1", "http://127.0.0.1"]) assert.ok(domains.includes(d), d);
+  assert.ok(domains.every((d: string) => /^(ws|http):\/\/(127\.0\.0\.1|localhost)(:\*)?$/.test(d)), "loopback only");
 });
 
 test("spike manifest: one panel entrypoint, 340x640 preferred, 280x320 minimum", () => {

@@ -1,28 +1,37 @@
-:root {
-  --twn-bg: #1c1c1c;
-  --twn-fg: #e8e8ea;
-  --twn-muted: #a3a3ab;
-  --twn-violet-text: #9d6bff;
-  --twn-accent: #d95c9b;
-  --twn-fill: #5400fb;
-  --twn-pass: #3fbf7f;
-  --twn-fail: #ff6b6b;
-  --twn-na: #c9a227;
-  --twn-hairline: linear-gradient(90deg, #d95c9b 0%, #5400fb 100%);
-}
+/* The spike's own layout. Every colour is a brand token from tokens.css (brand/tokens.css, the ONE source, copied into
+   the bundle by scripts/build.mjs and linked before this file); fonts come from fonts.css through the token stacks.
+   The spike's button / row rules are scoped to its own views so they never leak into the kit gallery (kit.css). */
 
 html,
 body {
+  height: 100%;
   margin: 0;
   padding: 0;
+  overflow: hidden;
   background: var(--twn-bg);
-  color: var(--twn-fg);
-  font-family: system-ui, sans-serif;
+  color: var(--twn-text);
+  font-family: var(--twn-font-ui);
   font-size: 12px;
 }
 
 body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- the probe view (0.1.5 layout, now scrolling inside its own region) ---- */
+.main-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 10px 12px 14px 12px;
+}
+
+.main-view > * {
+  flex: 0 0 auto;
 }
 
 .head {
@@ -37,25 +46,32 @@ body {
 }
 
 .title {
+  font-family: var(--twn-font-display);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--twn-weight-bold);
 }
 
 .ver {
   margin-left: 8px;
-  color: var(--twn-muted);
+  color: var(--twn-text-muted);
 }
 
 .hairline {
+  display: block;
   height: 2px;
-  background: var(--twn-hairline);
+  background: var(--twn-gradient);
   margin-bottom: 8px;
 }
 
 .hint {
-  color: var(--twn-muted);
+  color: var(--twn-text-muted);
   line-height: 1.4;
   margin: 0 0 8px 0;
+}
+
+.main-view bdi,
+.guide-view .guide-caption bdi {
+  display: inline;
 }
 
 .buttons {
@@ -65,51 +81,51 @@ body {
   margin-bottom: 6px;
 }
 
-button {
-  background: var(--twn-fill);
-  color: #fff;
+.main-view button {
+  background: var(--twn-primary);
+  color: var(--twn-on-primary);
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--twn-radius);
   padding: 5px 10px;
   margin: 0 6px 6px 0;
   font-size: 12px;
 }
 
-button:disabled {
+.main-view button:disabled {
   opacity: 0.5;
 }
 
 .status {
   margin: 4px 0 2px 0;
-  color: var(--twn-violet-text);
+  color: var(--twn-primary-text);
   word-break: break-all;
 }
 
 .progress {
   margin: 0 0 6px 0;
-  color: var(--twn-muted);
+  color: var(--twn-text-muted);
 }
 
 .op {
-  border-left: 3px solid var(--twn-na);
+  border-left: 3px solid var(--twn-warn);
   padding: 2px 0 2px 8px;
   margin-bottom: 4px;
 }
 
 .op.pass {
-  border-left-color: var(--twn-pass);
+  border-left-color: var(--twn-ok);
 }
 
 .op.fail {
-  border-left-color: var(--twn-fail);
+  border-left-color: var(--twn-error);
 }
 
 .op-head {
-  font-weight: 600;
+  font-weight: var(--twn-weight-semibold);
 }
 
 .op-err {
-  color: var(--twn-fail);
+  color: var(--twn-error);
   word-break: break-all;
   margin-top: 1px;
 }
@@ -117,15 +133,89 @@ button:disabled {
 .out {
   width: 100%;
   margin-top: 8px;
-  background: #111;
-  color: var(--twn-fg);
-  border: 1px solid #333;
-  font-family: monospace;
+  background: var(--twn-surface);
+  color: var(--twn-text);
+  border: 1px solid var(--twn-border);
+  font-family: var(--twn-font-mono);
   font-size: 10px;
 }
 
 .foot {
   margin-top: 8px;
-  color: var(--twn-muted);
+  color: var(--twn-text-muted);
   font-size: 10px;
+}
+
+/* ---- the style guide view (0.1.6): an explicit height chain body > view > scroll > frame > kit-root ---- */
+.guide-view {
+  display: none;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.guide-bar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--twn-border);
+}
+
+.guide-bar button {
+  min-height: 24px;
+  margin: 2px 4px 2px 0;
+  padding: 3px 8px;
+  border: 1px solid var(--twn-border);
+  border-radius: var(--twn-radius-pill);
+  background: var(--twn-glass);
+  color: var(--twn-text);
+  font-family: var(--twn-font-ui);
+  font-size: 11px;
+}
+
+.guide-bar button.on {
+  background: var(--twn-primary);
+  border-color: var(--twn-primary);
+  color: var(--twn-on-primary);
+}
+
+.guide-gap {
+  display: block;
+  width: 8px;
+}
+
+.guide-caption {
+  display: block;
+  flex: 0 0 auto;
+  margin: 4px 8px;
+  color: var(--twn-text-muted);
+  font-size: 10px;
+}
+
+.guide-scroll {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.guide-frame {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  height: 100%;
+  border-right: 1px solid var(--twn-border);
+}
+
+.guide-host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
 }

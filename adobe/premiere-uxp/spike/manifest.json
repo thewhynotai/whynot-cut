@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "ai.thewhynot.cut.spike",
   "name": "WhyNot Cut Spike",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "main": "index.html",
   "host": {
     "app": "premierepro",
@@ -12,11 +12,20 @@
     "localFileSystem": "fullAccess",
     "clipboard": "readAndWrite",
     "launchProcess": {
-      "schemes": ["file"],
+      "schemes": ["file", "whynotcut"],
       "extensions": [".mp4", ".mov", ".prproj", ""]
     },
     "network": {
-      "domains": "all"
+      "domains": [
+        "ws://127.0.0.1:*",
+        "ws://localhost:*",
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "ws://127.0.0.1",
+        "ws://localhost",
+        "http://127.0.0.1",
+        "http://localhost"
+      ]
     }
   },
   "entrypoints": [

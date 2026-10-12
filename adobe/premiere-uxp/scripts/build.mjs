@@ -24,7 +24,9 @@ const BRAND_KIT = {
 export const TARGETS = {
   spike: {
     entry: "spike/src/spike.ts",
-    files: { "spike/manifest.json": "manifest.json", "spike/index.html": "index.html", "spike/index.css": "index.css", ...BRAND_KIT },
+    // 0.1.6: the style guide renders the panel kit, so the spike carries kit.css too (index.html links fonts.css,
+    // tokens.css, kit.css, index.css in that order)
+    files: { "spike/manifest.json": "manifest.json", "spike/index.html": "index.html", "spike/index.css": "index.css", ...BRAND_KIT, "../panel-ui/styles/kit.css": "kit.css" },
   },
   plugin: {
     entry: "src/main.ts",
@@ -32,10 +34,12 @@ export const TARGETS = {
       "plugin/manifest.json": "manifest.json",
       "plugin/index.html": "index.html",
       "plugin/index.css": "index.css",
-      // the brand kit, then the shared panel kit's stylesheet, ship as-is (the page links fonts.css, tokens.css,
-      // panel.css, index.css in that order)
+      // the brand kit, then the shared panel stylesheets, ship as-is (the page links fonts.css, tokens.css,
+      // panel.css, kit.css, index.css in that order; kit.css is scoped to .kit-root, so it changes nothing until B-T2
+      // screens use the kit)
       ...BRAND_KIT,
       "../panel-ui/styles/panel.css": "panel.css",
+      "../panel-ui/styles/kit.css": "kit.css",
     },
   },
 };

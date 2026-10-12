@@ -2,35 +2,61 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <!-- the brand kit (scripts/build.mjs copies them into the bundle): bundled fonts, the ONE token source
+         (brand/tokens.css), the panel kit's stylesheet, then the spike's own layout -->
+    <link rel="stylesheet" href="fonts.css" />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="kit.css" />
     <link rel="stylesheet" href="index.css" />
   </head>
   <body>
-    <header class="head">
-      <img class="mark" src="icons/dark/icon-46.png" width="23" height="23" alt="" />
-      <span class="title">WhyNot Cut Spike</span>
-      <span class="ver" id="version"></span>
-    </header>
-    <div class="hairline"></div>
+    <div id="main-view" class="main-view">
+      <header class="head">
+        <img class="mark" src="icons/dark/icon-46.png" width="23" height="23" alt="" />
+        <span class="title">WhyNot Cut Spike</span>
+        <span class="ver" id="version"></span>
+      </header>
+      <div class="hairline"></div>
 
-    <p class="hint">
-      Measures which Premiere UXP APIs work on this machine. Reads <bdi dir="ltr">~/.whynot-cut/uxp-spike/config.json</bdi>, works in a scratch
-      project, writes <bdi dir="ltr">results-&lt;time&gt;.json</bdi> next to it. Also runs by itself when
-      <bdi dir="ltr">run-request.json</bdi> appears there (checked every 5 s).
-    </p>
+      <p class="hint">
+        Measures which Premiere UXP APIs work on this machine. Reads <bdi dir="ltr">~/.whynot-cut/uxp-spike/config.json</bdi>, works in a scratch
+        project, writes <bdi dir="ltr">results-&lt;time&gt;.json</bdi> next to it. Also runs by itself when
+        <bdi dir="ltr">run-request.json</bdi> appears there (checked every 5 s).
+      </p>
 
-    <div class="buttons">
-      <button id="run" type="button">Run spike</button>
-      <button id="run-keep" type="button">Run, keep project open</button>
-      <button id="copy" type="button">Copy results</button>
+      <div class="buttons">
+        <button id="run" type="button">Run spike</button>
+        <button id="run-keep" type="button">Run, keep project open</button>
+        <button id="copy" type="button">Copy results</button>
+        <button id="guide-open" type="button">Style guide</button>
+      </div>
+
+      <p id="status" class="status">Ready.</p>
+      <p id="progress" class="progress"></p>
+      <div id="ops" class="ops"></div>
+
+      <textarea id="out" class="out" readonly="readonly" rows="10" spellcheck="false"></textarea>
+
+      <footer class="foot">Powered by thewhynot.ai</footer>
     </div>
 
-    <p id="status" class="status">Ready.</p>
-    <p id="progress" class="progress"></p>
-    <div id="ops" class="ops"></div>
-
-    <textarea id="out" class="out" readonly="readonly" rows="10" spellcheck="false"></textarea>
-
-    <footer class="foot">Powered by Claude</footer>
+    <!-- 0.1.6: every panel-kit component (adobe/panel-ui/src/kit/gallery.ts), EN or AR, in a 280 / 340 / 480 px column -->
+    <div id="guide-view" class="guide-view">
+      <div class="guide-bar">
+        <button id="guide-back" type="button" class="seg">Back</button>
+        <span class="guide-gap"></span>
+        <button id="guide-en" type="button" class="seg">EN</button>
+        <button id="guide-ar" type="button" class="seg">AR</button>
+        <span class="guide-gap"></span>
+        <button id="guide-w280" type="button" class="seg">280</button>
+        <button id="guide-w340" type="button" class="seg">340</button>
+        <button id="guide-w480" type="button" class="seg">480</button>
+      </div>
+      <p id="guide-caption" class="guide-caption"></p>
+      <div class="guide-scroll">
+        <div id="guide-frame" class="guide-frame"><div id="guide-host" class="guide-host"></div></div>
+      </div>
+    </div>
     <script src="index.js"></script>
   </body>
 </html>

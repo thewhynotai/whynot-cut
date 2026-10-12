@@ -1,5 +1,7 @@
-// Hands-free auto-run (spike 0.1.5). On panel load and then every POLL_MS while the panel is open, look for
-// <spike dir>/run-request.json = {"id": "<string>", "mode": "full" | "keep_open", "requested_at": "<iso>"}.
+// Hands-free auto-run (spike 0.1.5; 0.1.6 adds "style_guide"). On panel load and then every POLL_MS while the panel is
+// open, look for <spike dir>/run-request.json =
+//   {"id": "<string>", "mode": "full" | "keep_open" | "style_guide", "requested_at": "<iso>"}
+// and, for "style_guide" only, the optional view {"lang": "en" | "ar", "width": 280 | 340 | 480}.
 // A fresh request with an unseen id is claimed, run once, and answered with run-done-<id>.json. Claude writes the
 // request and reads the done file + results file; nobody clicks. Pure logic over injected fs / clock / run, so the
 // tests drive it with fakes. Nothing in here may throw out of poll(): a bad request must never crash the panel.
@@ -9,7 +11,18 @@ import type { UxpFs } from "../../src/uxp-types.ts";
 export const POLL_MS = 5000;
 export const STALE_MS = 30 * 60 * 1000;
 
-export type RunMode = "full" | "keep_open";
+export type RunMode = "full" | "keep_open" | "style_guide";
+export const RUN_MODES: readonly RunMode[] = ["full", "keep_open", "style_guide"];
+
+/** The style guide's view: one language and one panel width at a time (the controller screenshots each). */
+export type GuideLang = "en" | "ar";
+export const GUIDE_WIDTHS = [280, 340, 480] as const;
+export type GuideWidth = (typeof GUIDE_WIDTHS)[number];
+export interface GuideView {
+  lang: GuideLang;
+  width: GuideWidth;
+}
+export const DEFAULT_VIEW: GuideView = { lang: "en", width: 340 };
 
 export interface RunSummary {
   results_file: string | null;
@@ -32,7 +45,8 @@ export interface AutoRunDeps {
   /** takes the run lock atomically (false = a run already holds it); held from before the claim until the done file is written */
   tryLock: () => boolean;
   unlock: () => void;
-  run: (mode: RunMode, id: string) => Promise<RunSummary>;
+  /** `view` is given for "style_guide" only (the request's lang/width, defaults filled in) */
+  run: (mode: RunMode, id: string, view?: GuideView) => Promise<RunSummary>;
   setStatus: (text: string) => void;
   /** arms one timer, returns its cancel function */
   schedule: (fn: () => void, ms: number) => () => void;
@@ -63,6 +77,7 @@ interface ParsedRequest {
   mode: RunMode;
   requested_at: string;
   requestedMs: number;
+  view?: GuideView;
 }
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -76,11 +91,19 @@ function validate(value: unknown): ParsedRequest | string {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return "the request is not a JSON object";
   const r = value as Record<string, unknown>;
   if (typeof r.id !== "string" || !SAFE_ID.test(r.id)) return '"id" must be a string of letters, digits, ".", "_" or "-" (max 64, starting with a letter or digit)';
-  if (r.mode !== "full" && r.mode !== "keep_open") return '"mode" must be "full" or "keep_open"';
+  if (typeof r.mode !== "string" || !(RUN_MODES as readonly string[]).includes(r.mode)) return '"mode" must be "full", "keep_open" or "style_guide"';
+  const mode = r.mode as RunMode;
   if (typeof r.requested_at !== "string") return '"requested_at" must be an ISO time string';
   const requestedMs = Date.parse(r.requested_at);
   if (!Number.isFinite(requestedMs)) return '"requested_at" is not a valid ISO time';
-  return { id: r.id, mode: r.mode, requested_at: r.requested_at, requestedMs };
+  if (mode !== "style_guide") {
+    if (r.lang !== undefined || r.width !== undefined) return '"lang" and "width" belong to mode "style_guide" only';
+    return { id: r.id, mode, requested_at: r.requested_at, requestedMs };
+  }
+  if (r.lang !== undefined && r.lang !== "en" && r.lang !== "ar") return '"lang" must be "en" or "ar"';
+  if (r.width !== undefined && !(GUIDE_WIDTHS as readonly unknown[]).includes(r.width)) return '"width" must be 280, 340 or 480';
+  const view: GuideView = { lang: (r.lang as GuideLang | undefined) ?? DEFAULT_VIEW.lang, width: (r.width as GuideWidth | undefined) ?? DEFAULT_VIEW.width };
+  return { id: r.id, mode, requested_at: r.requested_at, requestedMs, view };
 }
 
 export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
@@ -211,7 +234,7 @@ export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
       return reportMalformed(text, req, typeof maybeId === "string" && SAFE_ID.test(maybeId) ? maybeId : undefined);
     }
 
-    const { id, mode } = req;
+    const { id, mode, view } = req;
     if (deps.now() - req.requestedMs > STALE_MS) {
       await moveAside(requestPath, `${dir}/run-request.${id}.stale`);
       deps.setStatus(`Auto-run ${id} ignored: stale (requested ${req.requested_at}, more than 30 minutes ago)`);
@@ -224,13 +247,13 @@ export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
 
     if (!deps.tryLock()) return { kind: "busy" }; // a button run started meanwhile: the request stays for the next poll
     try {
-      return await claimAndRun(id, mode);
+      return await claimAndRun(id, mode, view);
     } finally {
       deps.unlock();
     }
   }
 
-  async function claimAndRun(id: string, mode: RunMode): Promise<PollOutcome> {
+  async function claimAndRun(id: string, mode: RunMode, view?: GuideView): Promise<PollOutcome> {
     const why = await claim(id);
     if (why !== null) {
       deps.setStatus(`Auto-run ${id} could not claim the request (${why}); not run`);
@@ -238,15 +261,17 @@ export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
     }
     ran.add(id);
     const startedAt = iso(deps.now());
-    deps.setStatus(`Auto-run ${id} claimed - running ${mode}`);
+    deps.setStatus(`Auto-run ${id} claimed - running ${mode}${view ? ` (${view.lang}, ${view.width} px)` : ""}`);
     let summary: RunSummary;
     try {
-      summary = await deps.run(mode, id);
+      summary = await (view ? deps.run(mode, id, view) : deps.run(mode, id));
     } catch (e) {
       summary = { results_file: null, ok: false, pass: 0, fail: 0, na: 0, error: `run failed: ${errText(e)}` };
     }
     await writeDone(id, {
       id,
+      mode,
+      ...(view ? { view } : {}),
       results_file: summary.results_file,
       ok: summary.ok,
       pass: summary.pass,

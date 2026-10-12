@@ -55,3 +55,23 @@ test("the spike bundle carries the brand kit for its style guide: brand tokens, 
   for (const u of urls) assert.ok(u in files, `${u} is not in the spike .ccx`);
   assert.ok(Object.keys(files).some((n) => n.endsWith("/OFL.txt")));
 });
+
+test("spike 0.1.6: the bundle carries kit.css (as-is), the string table (EN + AR) and the kit gallery for the style guide", () => {
+  const files = unzipSync(new Uint8Array(readFileSync(ccx)));
+  assert.equal(new TextDecoder().decode(files["kit.css"]), readFileSync(join(root, "..", "panel-ui", "styles", "kit.css"), "utf8"));
+  const html = new TextDecoder().decode(files["index.html"]);
+  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "kit.css", "index.css"]);
+  // esbuild writes non-ASCII as \uXXXX escapes: read them back before looking for the Arabic strings
+  const js = new TextDecoder().decode(files["index.js"]).replace(/\\u([0-9a-fA-F]{4})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
+  const ar = JSON.parse(readFileSync(join(root, "..", "panel-ui", "i18n", "ar.json"), "utf8")) as Record<string, string>;
+  const en = JSON.parse(readFileSync(join(root, "..", "panel-ui", "i18n", "en.json"), "utf8")) as Record<string, string>;
+  for (const key of ["tab.home", "approval.approve"]) {
+    assert.ok(js.includes(en[key]!), `EN ${key}`);
+    assert.ok(js.includes(ar[key]!), `AR ${key}`);
+  }
+  assert.match(js, /kit-root/);
+  assert.match(js, /whynotcut:\/\/engine\/start/);
+  const manifest = JSON.parse(new TextDecoder().decode(files["manifest.json"]));
+  assert.equal(manifest.version, "0.1.6");
+  assert.ok(Array.isArray(manifest.requiredPermissions.network.domains));
+});

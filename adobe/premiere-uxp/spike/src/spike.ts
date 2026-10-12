@@ -1,12 +1,18 @@
 // WhyNot Cut Spike - panel entry. "Run spike" runs every probe (probes.ts), writes
 // ~/.whynot-cut/uxp-spike/results-<ts>.json after each probe (so a hang keeps the partial results), and shows them.
 // 0.1.5: the panel also watches ~/.whynot-cut/uxp-spike/run-request.json (autorun.ts) and runs the spike by itself.
+// 0.1.6: a "Style guide" view (style-guide.ts; run-request mode "style_guide" opens it and leaves it open), live UXP UI
+// measurements (ui-probes.ts -> `ui_probes`) and the C2.7 ecosystem probes (eco-probes.ts -> `eco_probes`).
 import type { premierepro as Ppro } from "@adobe/premierepro";
-import { createAutoRunner, type RunMode, type RunSummary } from "./autorun.ts";
+import { createAutoRunner, type GuideView, type RunMode, type RunSummary } from "./autorun.ts";
+import { createLifecycle, lifecycleWriter, setupLifecycle, type EcoCtx, type LifecycleEvent, type LifecycleSetup } from "./eco-probes.ts";
 import { ensureDir, writeText } from "./fsutil.ts";
 import { resolveHome, spikeDir } from "./home.ts";
 import { buildProbes, errText, loadConfig, skipSaveCloseOpen, type Ctx } from "./probes.ts";
 import { jsonSafe, runAll, type OpResult } from "./runner.ts";
+import { runPostSections, runPreSections, sectionCounts, type ResultsDoc, type Sections } from "./sections.ts";
+import { createStyleGuide, type StyleGuide } from "./style-guide.ts";
+import { domStage, type UiCtx } from "./ui-probes.ts";
 import { SPIKE_VERSION } from "./version.ts";
 import type { UxpFs, UxpModule, UxpOs } from "../../src/uxp-types.ts";
 
@@ -95,7 +101,7 @@ let running = false;
 
 function setRunning(on: boolean): void {
   running = on;
-  for (const id of ["run", "run-keep"]) ($(id) as HTMLButtonElement).disabled = on;
+  for (const id of ["run", "run-keep", "guide-open"]) ($(id) as HTMLButtonElement).disabled = on;
 }
 
 function hostModules() {
@@ -107,8 +113,40 @@ function hostModules() {
   return { uxp, fs, os, home, via };
 }
 
-/** One run: the buttons call it with no autoId, the auto-runner with the request's id. Never throws. */
-async function runSpike(keepOpen: boolean, autoId?: string): Promise<RunSummary> {
+/** The manifest's one panel: the lifecycle (hide / show) recorder is registered once, at load (eco-probes.ts). */
+const PANEL_ID = "whynotCutSpike";
+let lifecycle = createLifecycle(() => Date.now());
+let lifecycleSetup: LifecycleSetup | undefined;
+let guide: StyleGuide | undefined;
+
+function ecoCtx(uxp: UxpModule, ppro: unknown, fs: UxpFs, home: string | null): EcoCtx {
+  const g = globalThis as { WebSocket?: EcoCtx["WebSocket"]; fetch?: (url: string, init?: unknown) => Promise<{ status: number; statusText?: string }> };
+  const f = g.fetch;
+  return {
+    uxp,
+    ppro,
+    fs,
+    home,
+    ...(g.WebSocket ? { WebSocket: g.WebSocket } : {}),
+    ...(typeof f === "function" ? { fetch: (url: string, init?: unknown) => f.call(globalThis, url, init) } : {}),
+    now: () => Date.now(),
+    lifecycle,
+    ...(lifecycleSetup ? { lifecycleSetup } : {}),
+  };
+}
+
+function uiCtx(): UiCtx {
+  return { stage: domStage(document, (el) => getComputedStyle(el), document.body) };
+}
+
+/**
+ * One run: the buttons call it with no autoId, the auto-runner with the request's id. Never throws.
+ *   full        - ui_probes + eco_probes (names, loopback, hide/show), every Premiere probe, then openExternal last
+ *   keep_open   - the same without save/close/open and without openExternal: the scratch project stays open
+ *   style_guide - opens the style guide (it stays open), ui_probes + eco_probes (no openExternal), no Premiere probe
+ */
+async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promise<RunSummary> {
+  const keepOpen = mode === "keep_open";
   const status = $("status");
   const say = (text: string) => void (status.textContent = autoId ? `Auto-run ${autoId} - ${text}` : text);
   // an auto-run already holds the lock (taken before its claim, see startAutoRun); a button press takes it here
@@ -125,25 +163,33 @@ async function runSpike(keepOpen: boolean, autoId?: string): Promise<RunSummary>
   let counts = { pass: 0, fail: 0, na: 0 };
   let problem: string | null = null;
   try {
-    const ppro = require("premierepro") as Ppro;
+    // a literal require, so the bundle keeps it external (test/package.test.ts); the style guide works without it
+    let ppro: Ppro | undefined;
+    try {
+      ppro = require("premierepro") as Ppro;
+    } catch (e) {
+      if (mode !== "style_guide") throw e;
+    }
     const { uxp, fs, os, home, via } = hostModules();
     if (!home) throw new Error("cannot resolve the home folder (os.homedir() and USERPROFILE/HOME all unavailable)");
     const dir = spikeDir(home);
     await ensureDir(fs, dir);
     const { config, error } = await loadConfig(fs, dir);
     const ts = stamp();
-    const ctx: Ctx = { ppro, fs, uxp, os, home, homeVia: via, stamp: ts, config, configError: error, expect: {}, notes: [] };
-    const probes = buildProbes({ keepOpen });
-    say(config ? `Running ${probes.length} probes (config: ${dir}/config.json)` : `Running without config - ${error}`);
+    const ctx: Ctx = { ppro: ppro as Ppro, fs, uxp, os, home, homeVia: via, stamp: ts, config, configError: error, expect: {}, notes: [] };
+    const probes = mode === "style_guide" ? [] : buildProbes({ keepOpen });
+    const sections: Sections = { ui_probes: {}, eco_probes: {} };
+    if (mode === "style_guide") guide?.show(view ?? {});
+    say(mode === "style_guide" ? "Style guide open - measuring" : config ? `Running ${probes.length} probes (config: ${dir}/config.json)` : `Running without config - ${error}`);
     let premiere = "unknown";
     try {
       // Application.version resolves empty on 26.5.2; uxp.host.version is the reliable source
-      premiere = uxp.host?.version || (await ppro.Application.version) || "unknown";
+      premiere = uxp.host?.version || (await ppro?.Application.version) || "unknown";
     } catch {
       premiere = uxp.host?.version || "unknown";
     }
     const resultsPath = `${dir}/results-${ts}.json`;
-    const doc = (ops: OpResult[]) => ({
+    const doc = (ops: OpResult[]): ResultsDoc => ({
       spike: SPIKE_VERSION,
       premiere,
       uxp: uxp.versions?.uxp ?? null,
@@ -153,10 +199,14 @@ async function runSpike(keepOpen: boolean, autoId?: string): Promise<RunSummary>
       results_file: resultsPath,
       config: config ?? null,
       config_error: error,
+      mode,
       kept_project_open: keepOpen,
       notes: ctx.notes,
       ...(autoId ? { auto_run_id: autoId } : {}),
+      ...(guide?.isOpen() ? { style_guide_view: guide.view() } : {}),
       ops,
+      ui_probes: sections.ui_probes,
+      eco_probes: sections.eco_probes,
     });
     let writeError: string | null = null;
     const write = async (ops: OpResult[]) => {
@@ -171,12 +221,29 @@ async function runSpike(keepOpen: boolean, autoId?: string): Promise<RunSummary>
       }
     };
     renderOps([], probes.length);
-    const ops = await runAll(probes, ctx, (_done, all) => write(all));
+    // 1. the UI measurements (a visible kit stage, removed after each probe) and the quick ecosystem probes
+    const eco = ecoCtx(uxp, ppro, fs, home);
+    await runPreSections(sections, uiCtx(), eco, async (label) => {
+      say(label);
+      await write([]);
+    });
+    // 2. the Premiere probes (none in style_guide mode)
+    let ops: OpResult[] = [];
+    if (probes.length) {
+      ops = await runAll(probes, ctx, (_done, all) => write(all));
+      await write(ops);
+    }
+    // 3. openExternal last, in "full" only; then the lifecycle events up to now
+    await runPostSections(mode, sections, ecoCtx(uxp, ppro, fs, home), (label) => say(label));
     await write(ops);
-    const pass = ops.filter((o) => o.ok === true).length;
-    const fail = ops.filter((o) => o.ok === false).length;
-    counts = { pass, fail, na: ops.length - pass - fail };
-    const text = `${pass} pass, ${fail} fail, ${counts.na} n/a`;
+    if (mode === "style_guide") {
+      counts = sectionCounts(sections);
+    } else {
+      const pass = ops.filter((o) => o.ok === true).length;
+      const fail = ops.filter((o) => o.ok === false).length;
+      counts = { pass, fail, na: ops.length - pass - fail };
+    }
+    const text = `${counts.pass} pass, ${counts.fail} fail, ${counts.na} n/a${mode === "style_guide" ? " (ui + eco probes)" : ""}`;
     resultsFile = resultsPath;
     if (writeError) problem = `COULD NOT WRITE ${resultsPath}: ${writeError}`;
     say(writeError ? `Done: ${text}. ${problem} - use Copy results or select the text below.` : `Done: ${text}. Results: ${resultsPath}`);
@@ -207,7 +274,7 @@ function startAutoRun(): void {
         return true;
       },
       unlock: () => setRunning(false),
-      run: (mode: RunMode, id: string) => runSpike(mode === "keep_open", id),
+      run: (mode: RunMode, id: string, view?: GuideView) => runSpike(mode, id, view),
       setStatus: (text) => void (status.textContent = text),
       schedule: (fn, ms) => {
         const handle = setTimeout(fn, ms);
@@ -221,22 +288,42 @@ function startAutoRun(): void {
   }
 }
 
-function applyTheme(): void {
+/** 0.1.6: panel create / show / hide / destroy + visibilitychange, recorded from load on (and into lifecycle.json). */
+function startLifecycle(): void {
   try {
-    const uxp = tryRequire<UxpModule>("uxp");
-    const bg = uxp?.host?.getBackgroundColor?.();
-    if (typeof bg === "string") document.documentElement.style.setProperty("--twn-bg", bg);
-  } catch {
-    // keep the stylesheet default
+    const { uxp, fs, home } = hostModules();
+    const persist = home ? lifecycleWriter(fs, spikeDir(home)) : undefined;
+    lifecycle = createLifecycle(() => Date.now(), persist ? (events: LifecycleEvent[]) => persist(events) : undefined);
+    lifecycleSetup = setupLifecycle(uxp, PANEL_ID, lifecycle, document);
+  } catch (e) {
+    lifecycleSetup = { entrypoints_setup: "threw", error: errText(e), panel_id: PANEL_ID, listeners: [] };
   }
 }
 
+function startGuide(): void {
+  guide = createStyleGuide({
+    main: $("main-view"),
+    guide: $("guide-view"),
+    frame: $("guide-frame"),
+    host: $("guide-host"),
+    caption: $("guide-caption"),
+    buttons: {
+      lang: { en: $("guide-en"), ar: $("guide-ar") },
+      width: { 280: $("guide-w280"), 340: $("guide-w340"), 480: $("guide-w480") },
+      back: $("guide-back"),
+    },
+  });
+  $("guide-open").addEventListener("click", () => void guide?.show());
+}
+
 function boot(): void {
-  applyTheme();
+  // the lifecycle first: entrypoints.setup has to run while the plugin loads
+  startLifecycle();
   $("version").textContent = `v${SPIKE_VERSION}`;
-  $("run").addEventListener("click", () => void runSpike(false));
-  $("run-keep").addEventListener("click", () => void runSpike(true));
+  $("run").addEventListener("click", () => void runSpike("full"));
+  $("run-keep").addEventListener("click", () => void runSpike("keep_open"));
   $("copy").addEventListener("click", () => void copyResults());
+  startGuide();
   startAutoRun();
 }
 

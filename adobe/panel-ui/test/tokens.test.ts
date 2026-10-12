@@ -66,11 +66,10 @@ test("one source: no other tokens.css in the Adobe sources; the builds copy bran
 });
 
 /** CSS that still defines --twn-* tokens of its own, with the reason it may for now. Nothing else under adobe/ may. */
-const TOKEN_DEFINITION_ALLOWED: Record<string, string> = {
-  "adobe/premiere-uxp/spike/index.css": "the spike's own drift block; replaced in Task 3 (the style guide links brand/tokens.css)",
-};
+// Empty since B-T1 Task 3 (spike 0.1.6): the spike's drift block is gone, its index.html links brand/tokens.css.
+const TOKEN_DEFINITION_ALLOWED: Record<string, string> = {};
 
-test("one source: no CSS under adobe/ defines a --twn-* token except the copied brand/tokens.css (spike drift block allow-listed until Task 3)", () => {
+test("one source: no CSS under adobe/ defines a --twn-* token except the copied brand/tokens.css", () => {
   const offenders: string[] = [];
   for (const f of walk(ADOBE, (p) => p.endsWith(".css"))) {
     const rel = relative(REPO, f).replace(/\\/g, "/");

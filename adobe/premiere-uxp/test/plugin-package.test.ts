@@ -39,7 +39,7 @@ test("package-ccx plugin writes whynot-cut/adobe/WhyNotCut-Premiere-<version>.cc
   assert.ok(existsSync(ccx), `ccx not written: ${ccx}`);
   const files = unzipSync(new Uint8Array(readFileSync(ccx)));
   const names = Object.keys(files);
-  for (const need of ["manifest.json", "index.html", "index.js", "index.css", "fonts.css", "tokens.css", "panel.css"]) {
+  for (const need of ["manifest.json", "index.html", "index.js", "index.css", "fonts.css", "tokens.css", "panel.css", "kit.css"]) {
     assert.ok(names.includes(need), `missing ${need} at zip root (got ${names.join(", ")})`);
   }
   assert.equal(names[0], "manifest.json", "manifest.json first");
@@ -124,7 +124,7 @@ test("the shipped bundle: UXP host modules stay external, no mock data, the engi
   assert.match(js, /build: "(?:[0-9a-f]{7,}|nogit)(?:\+dirty)? \d{4}-\d\d-\d\dT\d\d:\d\dZ"/);
   const html = text(files["index.html"]);
   assert.match(html, /<script[^>]+src="index\.js"/);
-  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "panel.css", "index.css"]);
+  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "panel.css", "kit.css", "index.css"]);
   assert.ok(!js.includes("sourceMappingURL"), "no source map reference in a shipped file");
 });
 

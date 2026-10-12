@@ -279,12 +279,13 @@ test("a throwing fs never escapes poll()", async () => {
 
 // ---- the run + the done file -------------------------------------------------------------------------------------
 
-test("run-done-<id>.json holds id, results_file, ok, pass, fail, na, started_at, finished_at (the run's own clock)", async () => {
+test("run-done-<id>.json holds id, mode (0.1.6), results_file, ok, pass, fail, na, started_at, finished_at (the run's own clock)", async () => {
   const h = harness({ initial: { [REQ]: request("done1") } });
   await h.runner.poll();
   const done = JSON.parse(h.fs.files.get(`${DIR}/run-done-done1.json`) ?? "null");
   assert.deepEqual(done, {
     id: "done1",
+    mode: "full",
     results_file: `${DIR}/results-20261012-120000.json`,
     ok: true,
     pass: 20,
@@ -467,10 +468,10 @@ test("spike.ts wires the auto-runner on boot and keeps the three buttons", () =>
   for (const id of ["run", "run-keep", "copy"]) assert.match(spike, new RegExp(`\\$\\("${id}"\\)\\.addEventListener\\("click"`));
 });
 
-test("spike 0.1.5: manifest version, SPIKE_VERSION and the safety guards are unchanged", () => {
+test("spike 0.1.6: manifest version, SPIKE_VERSION and the safety guards are unchanged", () => {
   const manifest = JSON.parse(readFileSync(join(root, "spike", "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "0.1.5");
-  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0\.1\.5"/);
+  assert.equal(manifest.version, "0.1.6");
+  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0\.1\.6"/);
   const autorun = readFileSync(join(root, "spike", "src", "autorun.ts"), "utf8");
   assert.doesNotMatch(autorun, /scratchPathProblem|whynot-test/, "auto-run must not touch the safety rules");
 });
