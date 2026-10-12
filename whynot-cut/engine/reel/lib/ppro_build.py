@@ -292,9 +292,13 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
         # below. The close SAVES the open project, so it may write the editor's unsaved work to disk (Gate 2 B2).
         # The signature leaves out what Premiere itself adds after the build's save (verify._VOLATILE_TAG).
         closed = submit("close_project_path", {"path": str(prproj)}, timeout=60)
-        after_sig = prproj_signature(prproj) if prproj.exists() else pipeline_sig
-        unchanged = signature_matches(prproj, pipeline_sig) if prproj.exists() and pipeline_sig \
-            else after_sig == pipeline_sig
+        if not prproj.exists():
+            after_sig, unchanged = pipeline_sig, True
+        else:
+            # hashed once; a c2/raw record is compared with it directly. No signature on either side (a project that
+            # is not readable gzip) is a change: None == None must never let a rebuild go over the editor's work
+            after_sig = prproj_signature(prproj)
+            unchanged = bool(pipeline_sig and after_sig) and signature_matches(prproj, pipeline_sig, after_sig)
         if not unchanged and not replace_edited:
             # never recorded as the pipeline's: the record keeps the pipeline's signature, so the next run sees it too
             return {"status": "EDITOR_CHANGES_PRESENT", "closed_previous": (closed or {}).get("response"),
@@ -380,7 +384,8 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
     from .verify import prproj_signature
     # what the pipeline saved: a later save that only moves the file time (Premiere saving open projects, auto-save)
     # is not an editor change (verify.editor_modified)
-    out["content_signature"] = prproj_signature(prproj) if prproj.exists() else None
+    if not (restored and not saved_now):         # (else the previous record's signature is kept, below: no parse)
+        out["content_signature"] = prproj_signature(prproj) if prproj.exists() else None
     if restored and not saved_now:
         # Gate 2 B1: the project on disk is the PREVIOUS one again (maybe with the editor's work): the record keeps what
         # the pipeline saved last, so verify.editor_modified still sees the editor's changes on the next --force

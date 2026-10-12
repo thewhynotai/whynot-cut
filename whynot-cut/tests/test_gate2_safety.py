@@ -76,10 +76,16 @@ class _Client(unittest.TestCase):
                                 "content_signature": prproj_signature(self.prj), "checks": {}})
         return bt
 
-    def build(self, answer, close=None, **kw):
-        """ppro_build.build with a fake bridge: `close(prj)` plays Premiere's save-and-close, `answer(prj)` the build."""
+    def build(self, answer, close=None, at_job_data=None, **kw):
+        """ppro_build.build with a fake bridge: `close(prj)` plays Premiere's save-and-close, `answer(prj)` the build;
+        `at_job_data()` runs when the build gets past the close check."""
         from lib import ppro_build
         sent = []
+
+        def job_data(*a, **k):
+            if at_job_data:
+                at_job_data()
+            return dict(DATA)
 
         def submit(action, data=None, timeout=0, **k):
             sent.append(action)
@@ -91,7 +97,7 @@ class _Client(unittest.TestCase):
 
         with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), \
                 mock.patch("lib.ppro_bridge.submit", side_effect=submit), \
-                mock.patch.object(ppro_build, "job_data", return_value=dict(DATA)):
+                mock.patch.object(ppro_build, "job_data", side_effect=job_data):
             r = ppro_build.build(self.p, **kw)
         return r, sent
 
@@ -156,10 +162,11 @@ class TestB2CloseSaveIsNotThePipelines(_Client):
 
 def prproj_xml(*, cc="scanned", patching=None, bag_order=False, saved="2:16:19 AM", next_id=1000001, change=390,
                empty_node=False, view=0, start=None, end=3556224000000, items=1, text="A sample statement",
-               opacity=100.0, tracks=2, markers=1):
+               opacity=100.0, tracks=2, markers=1, name="SAMPLE_RE_EDIT", in_point=0, effects_swapped=False,
+               disabled=False, gain=0.0, pad=0):
     """A Premiere 26.5 project shaped like the 13-Oct captures (fictional names). The keyword defaults are one save of
     the build; `cc`, `patching`, `bag_order`, `saved`, `next_id`, `change`, `empty_node` and `view` are what Premiere
-    itself rewrites (Gate 2 B2); the rest is editor content."""
+    itself rewrites (Gate 2 B2); the rest is editor content. `pad` adds that many sample bins (a large project)."""
     cc_el = ("<ContentCredentialsInfo>65536</ContentCredentialsInfo>" if cc == "pending"
              else "<CCFileModTime>1791830622799451</CCFileModTime>")
     scratch = ["<AudioPreviewLocation0>SameAsProject</AudioPreviewLocation0>",
@@ -167,6 +174,7 @@ def prproj_xml(*, cc="scanned", patching=None, bag_order=False, saved="2:16:19 A
                "<CapsuleMediaLocation0>SameAsProject</CapsuleMediaLocation0>",
                "<AutoSaveLocation0>SameAsProject</AutoSaveLocation0>"]
     seq_props = ["<MZ.ZeroPoint>0</MZ.ZeroPoint>", "<AMM.CurrentSolo>[]</AMM.CurrentSolo>",
+                 f"<MZ.InPoint>{in_point}</MZ.InPoint>",
                  f"<MZ.EditLine>{view * 1000}</MZ.EditLine>",
                  f"<TL.SQVisibleBaseTime>{view * 254016000000}</TL.SQVisibleBaseTime>",
                  f"<Monitor.ProgramZoomOut>{3556224000000 + view}</Monitor.ProgramZoomOut>"]
@@ -199,8 +207,18 @@ def prproj_xml(*, cc="scanned", patching=None, bag_order=False, saved="2:16:19 A
                       f'<TrackItem Version="4"><TrackIndex>0</TrackIndex><Type>1</Type>'
                       + (f"<Start>{start}</Start>" if start is not None and k == 0 else "")
                       + f'<End>{end + k * 1000}</End></TrackItem><SubClip ObjectRef="140"/>'
-                      f"<IsMuted>false</IsMuted></ClipTrackItem><FrameRect>0,0,1080,1920</FrameRect>"
+                      f"<IsMuted>false</IsMuted><Disabled>{str(disabled and k == 0).lower()}</Disabled>"
+                      f"</ClipTrackItem><FrameRect>0,0,1080,1920</FrameRect>"
                       f"</VideoClipTrackItem>")
+    refs = [301, 302] if not effects_swapped else [302, 301]
+    audio_item = [f"<Gain>{gain}</Gain>", "<IsMuted>false</IsMuted>", "<Channel>0</Channel>"]
+    if bag_order:
+        audio_item.reverse()
+    bin_ = lambda k: (f'<BinProjectItem ObjectUID="5555{k:04d}-0000-4000-8000-000000000000" Version="3"><ProjectItem '
+                      f'Version="1"><Name>Sample Bin {k}</Name><Node Version="1"><Properties Version="1">'
+                      f'<Column.PropertyText.Comment>Sample note {k}</Column.PropertyText.Comment>'
+                      f'<Column.PropertyText.Label>BE.Prefs.LabelColors.{k % 8}</Column.PropertyText.Label>'
+                      f'</Properties></Node></ProjectItem></BinProjectItem>\n')
     marker = lambda k: (f'<Marker ObjectID="{108 + k}" Version="3"><DVAMarker>{{"DVAMarker":{{"mComment":'
                         f'"context_card | Sample marker {k}","mName":"GFX_00{k + 1}","mStartTime":{{"ticks":'
                         f'{74088000000 + k}}},"mType":"Comment"}}}}</DVAMarker></Marker>')
@@ -210,7 +228,7 @@ def prproj_xml(*, cc="scanned", patching=None, bag_order=False, saved="2:16:19 A
             f"<MZ.BuildVersion.Modified>26.5.2x5 - 10/13/2026 {saved}</MZ.BuildVersion.Modified>"
             f"</Properties></Node><NextID>{next_id}</NextID></Project>\n"
             f'<ScratchDiskSettings ObjectID="9" Version="4">{"".join(scratch)}</ScratchDiskSettings>\n'
-            f'<MasterClip ObjectUID="11111111-0000-4000-8000-000000000000" Version="12"><Name>SAMPLE_RE_EDIT</Name>'
+            f'<MasterClip ObjectUID="11111111-0000-4000-8000-000000000000" Version="12"><Name>{name}</Name>'
             f"<MasterClipChangeVersion>{change}</MasterClipChangeVersion></MasterClip>\n"
             f'<MasterClip ObjectUID="22222222-0000-4000-8000-000000000000" Version="12">'
             + ('<Node Version="1">\n<ID>1000001</ID>\n</Node>' if empty_node else "")
@@ -226,7 +244,12 @@ def prproj_xml(*, cc="scanned", patching=None, bag_order=False, saved="2:16:19 A
             + f'\n<VideoComponentParam ObjectID="200" Version="10"><Name>Source Text</Name>'
             f"<CurrentValue>{text}</CurrentValue></VideoComponentParam>"
             f'<VideoComponentParam ObjectID="201" Version="10"><Name>Opacity</Name>'
-            f"<CurrentValue>{opacity}</CurrentValue></VideoComponentParam>\n</PremiereData>\n")
+            f"<CurrentValue>{opacity}</CurrentValue></VideoComponentParam>\n"
+            f'<VideoComponentChain ObjectID="300" Version="3"><ComponentChain Version="3"><Components Version="1">'
+            f'<Component Index="0" ObjectRef="{refs[0]}"/><Component Index="1" ObjectRef="{refs[1]}"/></Components>'
+            f"</ComponentChain></VideoComponentChain>\n"
+            f'<AudioClipTrackItem ObjectID="150" Version="8">{"".join(audio_item)}</AudioClipTrackItem>\n'
+            + "".join(bin_(k) for k in range(pad)) + "</PremiereData>\n")
 
 
 def write_prproj(path: Path, xml: str, mtime: float | None = None):
@@ -286,14 +309,49 @@ class TestB2SignatureIgnoresPremieresOwnDrift(unittest.TestCase):
                 seen.add(s)
         self.assertEqual(len(seen), len(edits) + 1)           # every edit is its own content
 
-    def test_unreadable_project_has_no_signature(self):
+    def test_only_a_missing_project_has_no_signature(self):
         from lib.verify import prproj_signature
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)
+        self.assertIsNone(prproj_signature(tmp / "missing.prproj"))
         (tmp / "x.prproj").write_bytes(b"not gzip")
-        self.assertIsNone(prproj_signature(tmp / "x.prproj"))
-        write_prproj(tmp / "y.prproj", "<PremiereData><Project>")
-        self.assertIsNone(prproj_signature(tmp / "y.prproj"))
+        (tmp / "y.prproj").write_bytes(b"not gzip either")
+        self.assertTrue(prproj_signature(tmp / "x.prproj").startswith("bytes:"))
+        self.assertNotEqual(prproj_signature(tmp / "x.prproj"), prproj_signature(tmp / "y.prproj"))
+        (tmp / "z.prproj").write_bytes(gzip.compress(b"<PremiereData>")[:-6])        # truncated gzip
+        self.assertTrue(prproj_signature(tmp / "z.prproj").startswith("bytes:"))
+
+    def test_a_readable_project_always_has_one(self):
+        """Review fix: XML that ElementTree rejects (a truncated file, a character XML 1.0 forbids pasted into a title)
+        is still signed, from its raw text: None would compare equal to None and let a rebuild go ahead."""
+        from lib.verify import prproj_signature
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for what, xml in {"truncated": "<PremiereData><Project>", "&#x1; in a name": prproj_xml(name="A&#x1;B"),
+                          "raw \\x01 in a text": prproj_xml(text="A\x01B"),
+                          "raw \\x0b in a text": prproj_xml(text="A\x0bB")}.items():
+            with self.subTest(what):
+                write_prproj(tmp / "y.prproj", xml)
+                s = prproj_signature(tmp / "y.prproj")
+                self.assertTrue(s and s.startswith("raw:"), s)
+        write_prproj(tmp / "a.prproj", prproj_xml(name="A&#x1;B"))
+        write_prproj(tmp / "b.prproj", prproj_xml(name="A&#x1;B", text="Edited"))
+        self.assertNotEqual(prproj_signature(tmp / "a.prproj"), prproj_signature(tmp / "b.prproj"))
+
+    def test_the_sort_rule_keeps_list_order_and_bag_values(self):
+        """Review minor 4: only key/value records with all-different names are sorted. A same-named list keeps its
+        order (effects are <Component Index=...> siblings), and sorting a record never drops a value."""
+        base = self.sig()
+        self.assertEqual(self.sig(bag_order=True), base)               # key order only: the same content
+        edits = {"effect order (Component Index list)": dict(effects_swapped=True),
+                 "sequence in point (MZ.InPoint, a bag value)": dict(in_point=254016000000),
+                 "clip disabled": dict(disabled=True),
+                 "audio gain (a sorted record)": dict(gain=-6.0),
+                 "clip renamed": dict(name="SAMPLE_RE_EDIT_2")}
+        for what, kw in edits.items():
+            with self.subTest(what):
+                self.assertNotEqual(self.sig(**kw), base)
+                self.assertNotEqual(self.sig(bag_order=True, **kw), base)
 
 
 class TestB2RebuildAfterPremieresDrift(_Client):
@@ -359,6 +417,129 @@ class TestB2RebuildAfterPremieresDrift(_Client):
         self.assertTrue(read_json(self.rec_p)["content_signature"].startswith("c2:"))
         r, sent = self.build(failed, close=lambda prj: write_prproj(prj, prproj_xml(text="Edited")), overwrite=True)
         self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+
+
+class TestB2UnparsableProjectKeepsTheCheck(_Client):
+    """Review fix 1: a project ElementTree cannot parse never turns the edit check off."""
+    NAME = "SAMPLE&#x1;CLIP"            # pasted text with a character XML 1.0 forbids (fictional)
+    built_real = TestB2RebuildAfterPremieresDrift.built_real
+
+    def test_it_is_recorded_with_a_raw_signature(self):
+        self.built_real(age_s=5, name=self.NAME)
+        self.assertTrue(read_json(self.rec_p)["content_signature"].startswith("raw:"))
+
+    def test_an_edit_saved_by_the_close_is_refused(self):
+        self.built_real(age_s=5, name=self.NAME)
+        sig0 = read_json(self.rec_p)["content_signature"]
+        edit = lambda prj: write_prproj(prj, prproj_xml(name=self.NAME, end=3000000000000))
+        r, sent = self.build(failed, close=edit, overwrite=True)
+        self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+        self.assertEqual(sent, ["close_project_path"])
+        self.assertEqual(read_json(self.rec_p)["content_signature"], sig0)
+        r, sent = self.build(failed, overwrite=True, replace_edited=True)
+        self.assertIn("build_project", sent)
+
+    def test_an_untouched_project_is_still_rebuilt(self):
+        self.built_real(age_s=5, name=self.NAME)
+        resave = lambda prj: write_prproj(prj, prproj_xml(name=self.NAME, saved="3:00:00 AM"))
+        r, sent = self.build(failed, close=resave, overwrite=True)
+        self.assertNotEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+        self.assertIn("build_project", sent)
+
+    def test_a_c2_record_against_a_project_that_now_only_signs_raw_is_changed(self):
+        self.built_real(age_s=5)
+        r, sent = self.build(failed, close=lambda prj: write_prproj(prj, prproj_xml(name=self.NAME)), overwrite=True)
+        self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+
+    def test_a_2x_record_compares_with_the_raw_hash(self):
+        from lib.verify import _legacy_signature, prproj_signature, signature_matches
+        xml = prproj_xml(name=self.NAME)
+        write_prproj(self.prj, xml)
+        cur = prproj_signature(self.prj)
+        self.assertTrue(signature_matches(self.prj, _legacy_signature(xml)))
+        self.assertTrue(signature_matches(self.prj, _legacy_signature(xml), current=cur))
+        self.assertFalse(signature_matches(self.prj, _legacy_signature(prproj_xml(name=self.NAME, text="X")),
+                                           current=cur))
+
+    def test_editor_modified_sees_raw_projects(self):
+        from lib.verify import editor_modified
+        bt = self.built_real(name=self.NAME)
+        write_prproj(self.prj, prproj_xml(name=self.NAME, saved="9:00:00 AM", next_id=1000004), bt + 1800)
+        self.assertIsNone(editor_modified(self.p))                      # saved, not edited
+        write_prproj(self.prj, prproj_xml(name=self.NAME, text="Edited"), bt + 2400)
+        self.assertEqual(editor_modified(self.p)["content"], "changed")
+
+    def test_a_project_that_is_not_gzip_is_compared_by_its_bytes(self):
+        """No recorded signature and a file that is not gzip: the close is checked on the bytes, not None == None."""
+        write_json(self.rec_p, {"status": "PRPROJ_BUILT", "project": str(self.prj), "prproj_mtime": time.time(),
+                                "checks": {}})
+        self.prj.write_bytes(b"not gzip")
+        r, sent = self.build(failed, close=lambda prj: prj.write_bytes(b"not gzip, edited"), overwrite=True)
+        self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+        self.assertEqual(sent, ["close_project_path"])
+        r, sent = self.build(failed, overwrite=True)                    # the close wrote nothing: goes ahead
+        self.assertIn("build_project", sent)
+
+    def test_an_existing_project_without_any_signature_counts_as_changed(self):
+        """A file that exists but cannot be signed (unreadable), and no record: a change, unless --replace-edited."""
+        write_prproj(self.prj, prproj_xml())
+        write_json(self.rec_p, {"status": "PRPROJ_BUILT", "project": str(self.prj), "prproj_mtime": time.time(),
+                                "checks": {}})
+        with mock.patch("lib.verify.prproj_signature", return_value=None):
+            r, sent = self.build(failed, overwrite=True)
+            self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+            self.assertEqual(sent, ["close_project_path"])
+            r, sent = self.build(failed, overwrite=True, replace_edited=True)
+            self.assertIn("build_project", sent)
+
+
+class TestB2OneParsePerCheck(_Client):
+    """Review minor 2: the close check hashes the project once (the record already holds the pipeline's c2 hash)."""
+    built_real = TestB2RebuildAfterPremieresDrift.built_real
+
+    def counted(self, **kw):
+        from lib import verify
+        at = []
+        with mock.patch.object(verify, "_content_signature", side_effect=verify._content_signature) as m:
+            r, sent = self.build(failed, at_job_data=lambda: at.append(m.call_count), **kw)
+        return r, sent, at
+
+    def test_the_close_check_parses_once(self):
+        self.built_real(age_s=5, cc="pending")
+        r, sent, at = self.counted(close=lambda prj: write_prproj(prj, prproj_xml(cc="scanned")), overwrite=True)
+        self.assertIn("build_project", sent)
+        self.assertEqual(at, [1])
+
+    def test_with_an_editor_save_check_it_is_one_parse_each(self):
+        bt = self.built_real(cc="pending")
+        write_prproj(self.prj, prproj_xml(cc="scanned", patching="video_first"), bt + 1800)   # drift-only save
+        r, sent, at = self.counted(close=lambda prj: write_prproj(prj, prproj_xml(cc="scanned")), overwrite=True)
+        self.assertIn("build_project", sent)
+        self.assertEqual(at, [2])                       # editor_modified before the close, the close check after it
+
+    def test_editor_modified_reuses_a_fresh_hash(self):
+        from lib import verify
+        bt = self.built_real(cc="pending")
+        write_prproj(self.prj, prproj_xml(cc="scanned", text="Edited"), bt + 1800)
+        fresh = verify.prproj_signature(self.prj)
+        with mock.patch.object(verify, "_content_signature", side_effect=verify._content_signature) as m:
+            self.assertEqual(verify.editor_modified(self.p, current={str(self.prj): fresh})["content"], "changed")
+            self.assertEqual(m.call_count, 0)
+            self.assertIsNone(verify.editor_modified(self.p, current={str(self.prj): read_json(self.rec_p)
+                                                                      ["content_signature"]}))
+            self.assertEqual(m.call_count, 0)
+
+    def test_a_large_project_hashes_in_reasonable_time(self):
+        from lib.verify import prproj_signature
+        xml = prproj_xml(pad=20000)
+        self.assertGreater(len(xml), 5_000_000)
+        write_prproj(self.prj, xml)
+        t = time.perf_counter()
+        s = prproj_signature(self.prj)
+        dt = time.perf_counter() - t
+        print(f"\n  c2 hash of a {len(xml) / 1e6:.1f} MB project XML: {dt:.2f} s", file=_sys.stderr)
+        self.assertTrue(s.startswith("c2:"))
+        self.assertLess(dt, 30.0)                       # generous: only a pathological slowdown fails
 
 
 class TestB3NoReplyCountsAsClaimed(unittest.TestCase):

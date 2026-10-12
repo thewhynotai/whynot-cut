@@ -122,13 +122,21 @@ def _canonical(el, out: list) -> None:
     out.append("</" + el.tag + ">")
 
 
-def _content_signature(xml: str) -> str | None:
+# XML that ElementTree rejects (a character XML 1.0 forbids, e.g. `&#x1;` or a raw \x01 pasted into a title, or a
+# truncated file) is signed from its raw text instead, and a file that is not gzip at all from its bytes: it still
+# changes with every edit, but also with Premiere's drift, so such a project can only cost a refusal, never a missed
+# edit. Every readable file has a signature: a None one would compare equal to None.
+RAW_PREFIX = "raw:"
+BYTES_PREFIX = "bytes:"
+
+
+def _content_signature(xml: str) -> str:
     import hashlib
     import xml.etree.ElementTree as ET
     try:
         root = ET.fromstring(xml)
     except ET.ParseError:
-        return None
+        return RAW_PREFIX + _legacy_signature(xml)
     out: list = []
     _canonical(root, out)
     return SIGNATURE_PREFIX + hashlib.sha1("\n".join(out).encode("utf-8")).hexdigest()
@@ -136,25 +144,44 @@ def _content_signature(xml: str) -> str | None:
 
 def prproj_signature(path: Path) -> str | None:
     """Signature of the project's editable content: Premiere's save-time bookkeeping, its background drift and view
-    state left out (None if unreadable)."""
-    xml = _prproj_xml(path)
-    return _content_signature(xml) if xml is not None else None
+    state left out ("raw:" when the XML does not parse, "bytes:" when the file is not gzip; None only when the file
+    cannot be read at all)."""
+    import gzip
+    import hashlib
+    import zlib
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    try:
+        xml = gzip.decompress(data).decode("utf-8", "replace")
+    except (OSError, EOFError, zlib.error):
+        return BYTES_PREFIX + hashlib.sha1(data).hexdigest()
+    return _content_signature(xml)
 
 
-def signature_matches(path: Path, recorded: str | None) -> bool:
-    """The file's content equals what was recorded, in the recorded signature's own format (2.x records have none)."""
+def signature_matches(path: Path, recorded: str | None, current: str | None = None) -> bool:
+    """The file's content equals what was recorded, compared like with like: a "c2:" / "raw:" / "bytes:" record with
+    the file's own signature (`current` when the caller already has it fresh: no second parse; a c2 record against a
+    project that now only signs raw is a change), a 2.x record (no prefix) with the legacy hash of the file."""
     if not recorded:
         return False
-    if recorded.startswith(SIGNATURE_PREFIX):
-        return prproj_signature(path) == recorded
+    if recorded.startswith((SIGNATURE_PREFIX, RAW_PREFIX, BYTES_PREFIX)):
+        if current is None:
+            current = prproj_signature(path)
+        return current is not None and current == recorded
+    if current is not None and current.startswith(RAW_PREFIX):
+        return current[len(RAW_PREFIX):] == recorded         # the raw hash IS the legacy one
     xml = _prproj_xml(path)
     return xml is not None and _legacy_signature(xml) == recorded
 
 
-def editor_modified(paths: Paths) -> dict | None:
+def editor_modified(paths: Paths, current: dict | None = None) -> dict | None:
     """The .prproj was saved after the pipeline built it AND its content differs from what the pipeline saved -> the
     editor has been working in it. A save with no change (Premiere saving an open project when another one is built,
-    or its auto-save) only moves the file time: seen live, it blocked a rebuild as "editor changes"."""
+    or its auto-save) only moves the file time: seen live, it blocked a rebuild as "editor changes".
+    `current` ({project path: signature}) passes signatures the caller hashed just now, so they are not parsed again.
+    A project without a signature (not readable) counts as changed."""
     import datetime as _dt
     rec = read_json(paths.p("07_premiere/ppro-build-result.json"), {}) or {}
     for m in paths.p("07_premiere/project").glob("*.prproj"):
@@ -163,7 +190,7 @@ def editor_modified(paths: Paths) -> dict | None:
         bt = prproj_build_time(paths, m)
         if bt is not None and m.stat().st_mtime > bt + 120:
             sig = rec.get("content_signature")
-            if sig and signature_matches(m, sig):
+            if sig and signature_matches(m, sig, (current or {}).get(str(m))):
                 continue   # saved, not edited
             f = lambda t: _dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
             return {"project": str(m), "built_at": f(bt), "edited_at": f(m.stat().st_mtime),
