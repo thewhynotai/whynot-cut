@@ -552,7 +552,8 @@ def apply_framing(inp: PlanInputs, cam: dict):
     # captions below"): every speaker piece is drawn in a window; story moves and jump-cut zooms stay inside it (the
     # build crops the picture to the window); source cutaways stay whole
     framing_mode = str(base.get("framing") or inp.style.get("framing") or "9:16")
-    win = window_rect(framing_mode, base.get("framing_window_y"))
+    seq_g0 = inp.seq_cfg["general"]
+    win = window_rect(framing_mode, base.get("framing_window_y"), seq_g0["frame_width"], seq_g0["frame_height"])
     if win and main_v is None:       # a 4:5 reel silently built as 9:16 would be the wrong deliverable
         errors.append(f"framing {framing_mode} needs this video's preflight: "
                       f"{Path(main_file).name if main_file else 'its footage'} is not in 00_inputs/preflight.json — run "

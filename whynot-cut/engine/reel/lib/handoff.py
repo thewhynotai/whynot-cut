@@ -29,7 +29,7 @@ def export_spec(paths: Paths) -> dict:
     try:
         file_name = (ex.get("name") or "{video_id}_{prefix}_{aspect}_v{version:02d}.mp4").format(**fields)
     except (KeyError, ValueError, IndexError) as e:
-        file_name = f"{paths.video_id}_{project_prefix()}_{fields["aspect"]}_v01.mp4 (export.name pattern error: {e})"
+        file_name = f"{paths.video_id}_{project_prefix()}_{fields['aspect']}_v01.mp4 (export.name pattern error: {e})"
     fps = seq_fps()
     fw, fh = frame_size(paths)
     return {"file_name": file_name,

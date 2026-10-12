@@ -307,5 +307,26 @@ class TestFrameSizeEverywhere(unittest.TestCase):
                 self.assertEqual(g.call_args.args[2:4], (w, h))
 
 
+class TestFramingWindowFollowsTheSequence(unittest.TestCase):
+    """T2.8 review: the framing window is placed inside the sequence's own frame, not a 1080x1920 one."""
+
+    def window(self, sw, sh, framing="4:5"):
+        from types import SimpleNamespace
+        from lib.plan import apply_framing
+        inp = SimpleNamespace(ctx=Context(Path(tempfile.gettempdir())), base={"framing": framing}, style={}, pre_all={},
+                              main_file=None, main_v={"display_width": 1080, "display_height": 1920}, dur_ms=2000,
+                              fps=25.0, seq_cfg={"general": {"frame_width": sw, "frame_height": sh}})
+        cam = {"camera": [], "main_v": inp.main_v, "bsp": 100.0, "box": 0.0, "framing": ""}
+        out, errors, _warnings = apply_framing(inp, cam)
+        self.assertEqual(errors, [])
+        return out["merged"][0]["window"]
+
+    def test_a_4x5_window_in_a_1080x1350_sequence_fills_it(self):
+        self.assertEqual(self.window(1080, 1350), {"w": 1080, "h": 1350, "y": 0, "mode": "4:5"})
+
+    def test_a_4x5_window_in_the_default_sequence_is_centred(self):
+        self.assertEqual(self.window(1080, 1920), {"w": 1080, "h": 1350, "y": 285, "mode": "4:5"})
+
+
 if __name__ == "__main__":
     unittest.main()

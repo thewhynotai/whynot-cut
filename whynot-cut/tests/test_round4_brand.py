@@ -288,7 +288,7 @@ class TestPreviewHighlightContrast(RoleFontCase):
         db = brand_db(self.root, {"Regular": "Brand-Regular", "Bold": "Brand-Bold"}, primary=BROWN)
         b = previews.Brand(db)
         out = self.tmp / "hook.png"
-        img = Image.new("RGBA", (previews.W, previews.H), probe_colour) if probe_colour else None
+        img = Image.new("RGBA", common.frame_size(), probe_colour) if probe_colour else None
         probe = (lambda: img) if (probe_callable and img is not None) else img
         t = {"size": size, "y": 1080, "bar_style": "underline", "text_role": text_role}
         previews.render_event({"template": "hook_title", "event_id": "GFX_001", "params": {"text": "Big win today"}},
@@ -340,7 +340,7 @@ class TestPreviewHighlightContrast(RoleFontCase):
         # statement text sits on its own box: what is behind it is the box, not the frame
         previews.render_event({"template": "statement_highlight", "event_id": "GFX_002", "params": {"text": "Big win"}},
                               {"size": 70, "y": 900, "box_role": "ink", "text_role": "primary"}, b, {}, None,
-                              self.tmp / "st.png", layer="fg", probe=Image.new("RGBA", (previews.W, previews.H), self.WARM),
+                              self.tmp / "st.png", layer="fg", probe=Image.new("RGBA", common.frame_size(), self.WARM),
                               notes=notes)
         self.assertEqual(notes, [])
 
