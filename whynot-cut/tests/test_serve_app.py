@@ -19,6 +19,7 @@ import struct
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -525,24 +526,62 @@ class SessionMessages(AppCase):
         self.assertNotIn("id", st)
         self.assertEqual(st["state"]["connection"]["host"]["state"], "uxp")
 
+    async def status_sessions(self) -> list:
+        status, _, body = await http(self.port, f"GET /status HTTP/1.1\r\nHost: localhost:{self.port}\r\n"
+                                                f"Authorization: Bearer {self.token}\r\n\r\n".encode())
+        self.assertEqual(status, 200)
+        return json.loads(body)["sessions"]
+
+    async def pill(self, c, sid: str, *, cep_alive=False) -> dict:
+        """The host part of the state the daemon answers to a snapshot (the CEP heartbeat fixed by the test)."""
+        with mock.patch("lib.ppro_bridge.status", return_value={"alive": cep_alive}):
+            await c.send({"type": "snapshot", "id": sid})
+            st = await c.recv()
+        self.assertEqual((st["type"], st.get("id")), ("state", sid), st)
+        return st["state"]["connection"]["host"]
+
     async def test_host_pill_counts_only_a_uxp_premiere_session_with_capabilities(self):
         """A uxp session that implements nothing (spike 0.1.3, an old probe) is not the product host: the pill falls
-        back to the CEP heartbeat instead of saying uxp while no Premiere host can run a command (review M7)."""
+        back to the CEP heartbeat instead of saying uxp while no Premiere host can run a command (review M7). Each step
+        first checks the daemon's registry (/status) holds exactly the sessions the step expects, so the snapshot never
+        races a session that is still being added or removed."""
         c = await self.cli()
         await self.panel(caps=())
-        with mock.patch("lib.ppro_bridge.status", return_value={"alive": False}):
-            await c.send({"type": "snapshot", "id": "no-caps"})
-            st = await c.recv()
-        self.assertEqual(st["state"]["connection"]["host"]["state"], "offline", st)
+        self.assertEqual(sorted((s["kind"], s["host"], tuple(s["capabilities"])) for s in await self.status_sessions()),
+                         [("cli", None, ()), ("uxp", "premiere", ())])
+        self.assertEqual((await self.pill(c, "no-caps"))["state"], "offline")
         await self.panel(caps=("ping",), host="aftereffects")      # an AE host is not the Premiere pill either
-        with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}):
-            await c.send({"type": "snapshot", "id": "cep"})
-            st = await c.recv()
-        self.assertEqual(st["state"]["connection"]["host"]["state"], "cep", st)
+        self.assertEqual(len(await self.status_sessions()), 3)
+        self.assertEqual((await self.pill(c, "cep", cep_alive=True))["state"], "cep")
         await self.panel(caps=("ping",))
-        await c.send({"type": "snapshot", "id": "product"})
-        st = await c.recv()
-        self.assertEqual(st["state"]["connection"]["host"], {"state": "uxp", "detail": "Premiere Pro 26.0"}, st)
+        self.assertEqual(len(await self.status_sessions()), 4)
+        self.assertEqual(await self.pill(c, "product"), {"state": "uxp", "detail": "Premiere Pro 26.0"})
+
+    async def test_a_closed_host_session_no_longer_lights_the_pill_while_its_removal_is_pending(self):
+        """Race fix: between a host's socket closing and the session leaving the registry (App._end, async) the
+        session must not count. _end is held here so the window stays open for the assertion."""
+        release = asyncio.Event()
+        orig_end = self.app._end
+
+        async def held_end(s):
+            await release.wait()
+            await orig_end(s)
+        self.app._end = held_end
+        try:
+            c = await self.cli()
+            p = await self.panel(caps=("ping",))
+            self.assertEqual(await self.pill(c, "up"), {"state": "uxp", "detail": "Premiere Pro 26.0"})
+            sess = next(s for s in self.app.sessions.values() if s.kind == "uxp")
+            await p.aclose()
+            deadline = time.monotonic() + T
+            while not sess.sock.closed and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+            self.assertTrue(sess.sock.closed)
+            self.assertIn(sess.id, self.app.sessions, "the removal is still pending (held)")
+            self.assertEqual((await self.pill(c, "closing"))["state"], "offline")
+        finally:
+            release.set()
+
 
 
 class Rate(AppCase):
