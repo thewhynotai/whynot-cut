@@ -345,7 +345,7 @@ def main(argv=None):
                            capture_output=True, text=True)
         ff = r.stdout.strip() or None
     rep["ffmpeg"] = str(ff) if ff else shutil.which("ffmpeg")
-    rep["adobe_apps"] = [f"{x['name']}" for x in plat.find_adobe_apps()]
+    rep["adobe_apps"] = [f"{x['name']}" for x in plat.adobe_report()["all"]]
     mods_ok = bool(rep["python_modules"]) and all(v is True for v in rep["python_modules"].values())
     rt = rep.get("runtime") or {}
     built = eng["kind"] == "runtime" and eng["id"] == rt.get("id") and (not a.check or rt.get("action") == "none")

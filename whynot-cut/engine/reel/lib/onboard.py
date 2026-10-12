@@ -159,7 +159,8 @@ def doctor() -> dict:
             mods[m] = f"missing ({type(e).__name__})"
     states = whisper_model_state()
     models = sorted(k for k, v in states.items() if v == "complete")
-    apps = {k: (plat.newest_app(k) or {}).get("name") for k in ("premiere", "after_effects", "photoshop", "media_encoder")}
+    found = plat.adobe_report()      # T2.11: name + version + path + source per app; a bad WHYNOT_*_APP is a problem, not a crash
+    apps = found["names"]
     br = bridge_info()
     st = S.load()
     cr = plat.clients_root_setting() or (Path(st["clients_root"]).expanduser() if st.get("clients_root") else None)
@@ -171,6 +172,7 @@ def doctor() -> dict:
            "running_python": sys.executable,
            "ffmpeg": ffmpeg_exe(), "whisper_models": models,
            "whisper_partial_downloads": sorted(k for k, v in states.items() if v == "partial"), "gpu": plat.gpu_info(), "adobe_apps": apps,
+           "adobe_found": found["found"], "aerender": found["aerender"],
            "premiere_bridge": br, "settings_file": st["_file"], "settings_problems": st["_problems"],
            "clients_root": str(cr) if cr else None}
     rt = rep["runtime"] = runtime_report()
@@ -217,6 +219,9 @@ def doctor() -> dict:
         fixes.append({"item": "Adobe Premiere Pro", "who": "editor",
                       "fix": "install Premiere Pro (2022 or newer) from Creative Cloud; until then WhyNot Cut builds "
                              "an importable XML and a preview MP4"})
+        if apps["after_effects"] and not br["installed"]:      # T2.11: the same bundle serves After Effects
+            fixes.append({"item": "WhyNot Cut Bridge (After Effects)", "who": "claude",
+                          "fix": "reel setup   (installs the bridge panel; After Effects uses it too)"})
     else:
         if not br["installed"]:
             fixes.append({"item": "Premiere bridge panel", "who": "claude", "fix": "reel setup   (installs the panel)"})
@@ -226,6 +231,8 @@ def doctor() -> dict:
         if br["installed"] and br["debug_mode_ok"] and not br["alive"]:
             fixes.append({"item": "Premiere bridge not running", "who": "editor",
                           "fix": "open Premiere Pro (quit and reopen it once after setup); the bridge starts by itself"})
+    for pr in found["problems"]:                                # a WHYNOT_PREMIERE_APP / _AE_APP / _AERENDER that points nowhere
+        fixes.append({"item": pr["error"], "who": "editor", "fix": pr["how"]})
     if st["_problems"]:
         fixes.append({"item": "preferences file", "who": "claude", "fix": "; ".join(st["_problems"])})
     if not gh["active"]:

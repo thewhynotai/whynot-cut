@@ -262,7 +262,8 @@ def audit_environment() -> dict:
 
     def which(n):
         return shutil.which(n)
-    apps = {a["name"]: a["exe"] for a in plat.find_adobe_apps()}
+    found = plat.adobe_report()                         # T2.11: a bad WHYNOT_*_APP is reported, not raised, here
+    apps = {a["name"]: a["exe"] for a in found["all"]}
     tools = {
         "python_venv": str(venv_python()) if venv_python().exists() else None,
         "ffmpeg": ffmpeg_exe(), "ffprobe": which("ffprobe"),
@@ -276,9 +277,9 @@ def audit_environment() -> dict:
             mods[m] = True
         except Exception:
             mods[m] = False
-    aer = plat.aerender_path()
+    aer = (found["aerender"] or {}).get("path")
     return {"generated": now_iso(), "os": plat.OS_NAME, "platform": platform.platform(), "machine": platform.machine(),
-            "adobe_apps": apps, "aerender": str(aer) if aer else None,
+            "adobe_apps": apps, "aerender": aer,
             "tools": tools, "python_modules": mods,
             "models_dir": str(models_dir())}
 

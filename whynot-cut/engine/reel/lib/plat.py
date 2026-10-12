@@ -247,14 +247,40 @@ def font_install_hint() -> str:
     return "copy the font files to ~/.local/share/fonts and run fc-cache -f"
 
 
-# --------------------------------------------------------------------------- Adobe apps
-_APPS = {
-    # key: (folder prefix, macOS bundle glob, Windows exe name relative to the app folder)
-    "premiere": ("Adobe Premiere Pro", "Adobe Premiere Pro*.app", "Adobe Premiere Pro.exe"),
-    "after_effects": ("Adobe After Effects", "Adobe After Effects*.app", "Support Files/AfterFX.exe"),
-    "photoshop": ("Adobe Photoshop", "Adobe Photoshop*.app", "Photoshop.exe"),
-    "media_encoder": ("Adobe Media Encoder", "Adobe Media Encoder*.app", "Adobe Media Encoder.exe"),
+# --------------------------------------------------------------------------- Adobe apps (3.0 T2.11)
+# ONE place finds Adobe apps; every caller (doctor, setup, discover, After Effects / Photoshop runners, aerender,
+# motion) asks here. Windows: registry (HKLM\SOFTWARE\Adobe\<app>\<version>), App Paths, then the Program Files
+# scan. macOS: Spotlight (mdfind, by bundle id), then /Applications and ~/Applications. A "(Beta)" build is found but
+# never preferred to a release. The newest is picked deterministically: release before beta, then year, then version.
+# Overrides: WHYNOT_PREMIERE_APP, WHYNOT_AE_APP (the app: .app / .exe / its folder), WHYNOT_AERENDER (the executable);
+# a wrong one is Guidance naming the variable. The registry reader and the mdfind runner are injectable
+# (AdobeSources), so tests never read the real registry.
+_ADOBE = {
+    # key: label, folder prefix, Windows exe relative to the app folder, mdfind bundle ids, HKLM keys, App Paths exe,
+    # override variable
+    "premiere": dict(label="Premiere Pro", prefix="Adobe Premiere Pro", win_exe="Adobe Premiere Pro.exe",
+                     mac_ids=("com.adobe.PremierePro*",),
+                     reg=("SOFTWARE\\Adobe\\Premiere Pro", "SOFTWARE\\Adobe\\Adobe Premiere Pro"),
+                     app_path="Adobe Premiere Pro.exe", override="WHYNOT_PREMIERE_APP"),
+    "after_effects": dict(label="After Effects", prefix="Adobe After Effects", win_exe="Support Files/AfterFX.exe",
+                          mac_ids=("com.adobe.AfterEffects*",),
+                          reg=("SOFTWARE\\Adobe\\After Effects", "SOFTWARE\\Adobe\\Adobe After Effects"),
+                          app_path="AfterFX.exe", override="WHYNOT_AE_APP"),
+    "photoshop": dict(label="Photoshop", prefix="Adobe Photoshop", win_exe="Photoshop.exe",
+                      mac_ids=("com.adobe.Photoshop*",),
+                      reg=("SOFTWARE\\Adobe\\Photoshop", "SOFTWARE\\Adobe\\Adobe Photoshop"),
+                      app_path="Photoshop.exe", override=None),
+    "media_encoder": dict(label="Media Encoder", prefix="Adobe Media Encoder", win_exe="Adobe Media Encoder.exe",
+                          mac_ids=("com.adobe.ame.application*",),
+                          reg=("SOFTWARE\\Adobe\\Adobe Media Encoder", "SOFTWARE\\Adobe\\Media Encoder"),
+                          app_path="Adobe Media Encoder.exe", override=None),
 }
+AERENDER_ENV = "WHYNOT_AERENDER"
+APP_PATHS_KEY = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\"
+# registry values that hold the install folder (Photoshop, After Effects), or a folder at most two levels below it
+# (Premiere Pro 26 has no InstallPath: only its presets and plug-in folders)
+_REG_FOLDER_VALUES = ("installpath", "installdir", "applicationpath", "sequencepresetspath",
+                      "sequencepreviewpresetspath", "plugininstallpath", "pluginpath")
 
 
 def _program_dirs() -> list[Path]:
@@ -271,42 +297,310 @@ def _year(name: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def find_adobe_apps(key: str | None = None) -> list[dict]:
-    """Installed Adobe apps, newest first: [{key, name, year, folder, exe}] ('exe' = what to launch/script)."""
-    keys = [key] if key else list(_APPS)
+def _vtuple(v) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", str(v or ""))[:4])
+
+
+def _guidance(error: str, how: str, where: str | None = None):
+    """errors.Guidance. plat is also imported as a top-level module (hooks, setup_env), where lib/ is on sys.path."""
+    try:
+        from .errors import Guidance
+    except ImportError:
+        from errors import Guidance
+    return Guidance(error, how, where)
+
+
+class WinRegistry:
+    """HKLM, read-only, the 64-bit view first and then the 32-bit one. A missing key (or no winreg: macOS) is empty."""
+
+    def _views(self, path: str):
+        try:
+            import winreg
+        except ImportError:
+            return
+        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+            try:
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ | view)
+            except OSError:
+                continue
+            with key:
+                yield winreg, key
+
+    def subkeys(self, path: str) -> list[str]:
+        out: list[str] = []
+        for winreg, key in self._views(path):
+            i = 0
+            while True:
+                try:
+                    name = winreg.EnumKey(key, i)
+                except OSError:
+                    break
+                i += 1
+                if name not in out:
+                    out.append(name)
+        return out
+
+    def values(self, path: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for winreg, key in self._views(path):
+            i = 0
+            while True:
+                try:
+                    name, val, _t = winreg.EnumValue(key, i)
+                except OSError:
+                    break
+                i += 1
+                if isinstance(val, str):
+                    out.setdefault(name, os.path.expandvars(val))
+        return out
+
+
+def _run_mdfind(query: str) -> list[str]:
+    r = subprocess.run(["mdfind", query], capture_output=True, text=True, timeout=15)
+    return r.stdout.splitlines()
+
+
+class AdobeSources:
+    """Where discovery looks. Each part defaults to the real machine, read when asked (never at import); tests pass
+    fakes: env (a mapping), registry (.subkeys(path) / .values(path)), mdfind (query -> [paths]), os_name
+    ("windows" | "macos" | "linux"), program_dirs, mac_app_dirs."""
+
+    def __init__(self, env=None, registry=None, mdfind=None, os_name=None, program_dirs=None, mac_app_dirs=None):
+        self._env, self._registry, self._mdfind, self._os = env, registry, mdfind, os_name
+        self._program_dirs, self._mac_app_dirs = program_dirs, mac_app_dirs
+
+    @property
+    def env(self):
+        return os.environ if self._env is None else self._env
+
+    @property
+    def os_name(self) -> str:
+        return self._os or ("windows" if IS_WIN else "macos" if IS_MAC else "linux")
+
+    @property
+    def registry(self):
+        return WinRegistry() if self._registry is None else self._registry
+
+    @property
+    def program_dirs(self) -> list[Path]:
+        return _program_dirs() if self._program_dirs is None else [Path(d) for d in self._program_dirs]
+
+    @property
+    def mac_app_dirs(self) -> list[Path]:
+        if self._mac_app_dirs is not None:
+            return [Path(d) for d in self._mac_app_dirs]
+        return [Path("/Applications"), Path.home() / "Applications"]
+
+    def mdfind(self, query: str) -> list[str]:
+        try:
+            return list((self._mdfind or _run_mdfind)(query))
+        except (OSError, subprocess.SubprocessError):
+            return []
+
+
+def _app_record(key: str, name: str, folder, exe, source: str, version=None) -> dict:
+    return {"key": key, "name": name, "year": _year(name) or _year(Path(folder).name), "version": version,
+            "beta": "beta" in name.lower() or "beta" in Path(folder).name.lower(),
+            "folder": str(folder), "exe": str(exe), "source": source, "sources": [source]}
+
+
+def _win_app_at(key: str, path) -> tuple[Path, Path] | None:
+    """(app folder, exe) when the app is at `path` or at most two folders above it (a presets folder, the exe itself)."""
+    rel = Path(_ADOBE[key]["win_exe"])
+    p = Path(str(path).strip().strip('"'))
+    if p.suffix.lower() == ".exe":
+        p = p.parent
+    for d in (p, p.parent, p.parent.parent):
+        if (d / rel).is_file():
+            return d, d / rel
+        if rel.parent != Path(".") and (d / rel.name).is_file():          # AfterFX.exe sits in "Support Files"
+            return d.parent, d / rel.name
+    return None
+
+
+def _win_candidates(key: str, src: AdobeSources) -> list[dict]:
+    spec, reg, out = _ADOBE[key], src.registry, []
+    for base in spec["reg"]:
+        for ver in reg.subkeys(base):
+            if not ver[:1].isdigit():                                       # "CurrentVersion"
+                continue
+            vals = {k.lower(): v for k, v in reg.values(f"{base}\\{ver}").items()}
+            for name in _REG_FOLDER_VALUES:
+                hit = _win_app_at(key, vals[name]) if vals.get(name) else None
+                if hit:
+                    out.append(_app_record(key, hit[0].name, hit[0], hit[1], "registry", ver))
+                    break
+    vals = reg.values(APP_PATHS_KEY + spec["app_path"])
+    for raw in (vals.get(""), vals.get("Path")):
+        hit = _win_app_at(key, raw) if raw else None
+        if hit:
+            out.append(_app_record(key, hit[0].name, hit[0], hit[1], "app-paths"))
+            break
+    for base in src.program_dirs:
+        adobe = base / "Adobe"
+        for folder in sorted(adobe.glob(spec["prefix"] + "*")) if adobe.is_dir() else []:
+            hit = _win_app_at(key, folder)
+            if hit:
+                out.append(_app_record(key, hit[0].name, hit[0], hit[1], "scan"))
+    return out
+
+
+def _mac_ok(app: Path, prefix: str) -> bool:
+    parts = [x.lower() for x in app.parts[:-1]]
+    return (app.suffix == ".app" and app.name.startswith(prefix) and "Render" not in app.name
+            and "Helper" not in app.name and not any(x.endswith(".app") for x in parts)
+            and ".trash" not in parts and "backups.backupdb" not in parts and app.is_dir())
+
+
+def _mac_version(app: Path) -> str | None:
+    try:
+        import plistlib
+        with open(app / "Contents" / "Info.plist", "rb") as f:
+            v = plistlib.load(f).get("CFBundleShortVersionString")
+        return str(v) if v else None
+    except Exception:  # noqa: BLE001  (no plist, binary garbage: the version is only for ranking and the report)
+        return None
+
+
+def _mac_record(key: str, app: Path, source: str) -> dict:
+    prefix = _ADOBE[key]["prefix"]
+    folder = app.parent if app.parent.name.startswith(prefix) else app
+    return _app_record(key, app.stem, folder, app, source, _mac_version(app))
+
+
+def _mac_candidates(key: str, src: AdobeSources) -> list[dict]:
+    spec, out = _ADOBE[key], []
+    for bid in spec["mac_ids"]:
+        for line in src.mdfind(f"kMDItemCFBundleIdentifier == '{bid}'"):
+            app = Path(line.strip())
+            if line.strip() and _mac_ok(app, spec["prefix"]):
+                out.append(_mac_record(key, app, "mdfind"))
+    for base in src.mac_app_dirs:
+        for folder in sorted(base.glob(spec["prefix"] + "*")) if base.is_dir() else []:
+            apps = [folder] if folder.suffix == ".app" else sorted(folder.glob(spec["prefix"] + "*.app"))
+            out += [_mac_record(key, a, "scan") for a in apps if _mac_ok(a, spec["prefix"])]
+    return out
+
+
+def _override_app(key: str, src: AdobeSources) -> dict | None:
+    spec = _ADOBE[key]
+    var = spec["override"]
+    raw = str(src.env.get(var) or "").strip().strip('"') if var else ""
+    if not raw:
+        return None
+    p = Path(raw).expanduser()
+    what = "the .app bundle" if src.os_name == "macos" else f"Adobe {spec['label']}'s .exe or its install folder"
+    how = f"Set {var} to {what}, or remove the variable and WhyNot Cut finds {spec['label']} by itself."
+    if not p.exists():
+        raise _guidance(f"{var} is set to {raw}, but nothing is there.", how, var)
+    if src.os_name == "macos":
+        apps = [p] if p.suffix == ".app" else sorted(p.glob(spec["prefix"] + "*.app")) if p.is_dir() else []
+        apps = [a for a in apps if _mac_ok(a, spec["prefix"])]
+        if not apps:
+            raise _guidance(f"{var} is set to {raw}, but that is not an Adobe {spec['label']} app.", how, var)
+        return _mac_record(key, apps[-1], "override")
+    hit = _win_app_at(key, p)
+    if p.is_file():
+        folder, exe = hit if hit and hit[1] == p else (p.parent, p)
+    elif hit:
+        folder, exe = hit
+    else:
+        raise _guidance(f"{var} is set to {raw}, but {Path(spec['win_exe']).name} is not in it.", how, var)
+    return _app_record(key, folder.name, folder, exe, "override")
+
+
+def _merge(found: list[dict]) -> list[dict]:
+    """One record per executable: the first source in priority order names it, later ones add `sources`/`version`."""
+    by: dict[str, dict] = {}
+    for rec in found:
+        k = os.path.normcase(os.path.normpath(rec["exe"]))
+        cur = by.get(k)
+        if not cur:
+            by[k] = rec
+            continue
+        if rec["source"] not in cur["sources"]:
+            cur["sources"].append(rec["source"])
+        if not cur["version"] and rec["version"]:
+            cur["version"] = rec["version"]
+    return list(by.values())
+
+
+def _rank(a: dict) -> tuple:
+    return (not a["beta"], a["year"], _vtuple(a["version"]), a["exe"].lower())
+
+
+def find_adobe_apps(key: str | None = None, sources: AdobeSources | None = None) -> list[dict]:
+    """Installed Adobe apps, best first: [{key, name, year, version, beta, folder, exe, source, sources}]. 'exe' is
+    what to launch/script; 'source' is where it was found first (override, registry, app-paths, mdfind, scan). An
+    override variable that points nowhere is Guidance naming the variable."""
+    src = sources or AdobeSources()
     found = []
-    for k in keys:
-        prefix, mac_glob, win_exe = _APPS[k]
-        if IS_MAC:
-            for folder in sorted(Path("/Applications").glob(f"{prefix}*")):
-                if "Render" in folder.name:
-                    continue
-                app = folder if folder.suffix == ".app" else next(iter(sorted(folder.glob(mac_glob))), None)
-                if app:
-                    found.append({"key": k, "name": app.stem, "year": _year(folder.name), "folder": str(folder),
-                                  "exe": str(app)})
-        elif IS_WIN:
-            for base in _program_dirs():
-                for folder in sorted((base / "Adobe").glob(f"{prefix}*")) if (base / "Adobe").is_dir() else []:
-                    exe = folder / win_exe
-                    if exe.exists():
-                        found.append({"key": k, "name": folder.name, "year": _year(folder.name),
-                                      "folder": str(folder), "exe": str(exe)})
-    found.sort(key=lambda a: (a["key"], -a["year"]))
+    for k in [key] if key else sorted(_ADOBE):
+        over = _override_app(k, src)
+        cands = (_win_candidates(k, src) if src.os_name == "windows" else
+                 _mac_candidates(k, src) if src.os_name == "macos" else [])
+        apps = sorted(_merge(cands), key=_rank, reverse=True)
+        if over:
+            same = os.path.normcase(os.path.normpath(over["exe"]))
+            apps = [over] + [a for a in apps if os.path.normcase(os.path.normpath(a["exe"])) != same]
+        found += apps
     return found
 
 
-def newest_app(key: str) -> dict | None:
-    apps = find_adobe_apps(key)
+def newest_app(key: str, sources: AdobeSources | None = None) -> dict | None:
+    apps = find_adobe_apps(key, sources)
     return apps[0] if apps else None
 
 
-def aerender_path() -> Path | None:
-    ae = newest_app("after_effects")
-    if not ae:
-        return None
-    cands = [Path(ae["folder"]) / "aerender"] if IS_MAC else [Path(ae["exe"]).parent / "aerender.exe"]
-    return next((c for c in cands if c.exists()), None)
+def aerender_info(sources: AdobeSources | None = None) -> dict | None:
+    """{path, source} of aerender: WHYNOT_AERENDER (checked), else the one beside the newest After Effects that has
+    one (a broken newest install does not hide a whole older one)."""
+    src = sources or AdobeSources()
+    raw = str(src.env.get(AERENDER_ENV) or "").strip().strip('"')
+    if raw:
+        if not Path(raw).expanduser().is_file():
+            raise _guidance(f"{AERENDER_ENV} is set to {raw}, but that is not a file.",
+                            f"Set {AERENDER_ENV} to aerender (aerender.exe on Windows, in the After Effects folder), or "
+                            "remove the variable and WhyNot Cut finds it beside After Effects.", AERENDER_ENV)
+        return {"path": str(Path(raw).expanduser()), "source": "override"}
+    for ae in find_adobe_apps("after_effects", src):
+        cand = (Path(ae["folder"]) / "aerender") if src.os_name == "macos" else Path(ae["exe"]).parent / "aerender.exe"
+        if cand.exists():
+            return {"path": str(cand), "source": ae["source"]}
+    return None
+
+
+def aerender_path(sources: AdobeSources | None = None) -> Path | None:
+    info = aerender_info(sources)
+    return Path(info["path"]) if info else None
+
+
+def adobe_report(sources: AdobeSources | None = None) -> dict:
+    """What `reel doctor` shows; never raises on a bad override. found[key] = the newest install {name, version, year,
+    path, folder, source, sources, beta, others} or None; names[key] = its name; all = every install found;
+    aerender = {path, source} or None; problems = [{error, how}] for override variables that point nowhere."""
+    src = sources or AdobeSources()
+    rep = {"found": {}, "names": {}, "all": [], "aerender": None, "problems": []}
+
+    def attempt(fn):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001  (Guidance, whichever way errors was imported)
+            if not hasattr(e, "how"):
+                raise
+            if not any(x["error"] == e.error for x in rep["problems"]):
+                rep["problems"].append({"error": e.error, "how": e.how})
+            return None
+    for k in sorted(_ADOBE):
+        apps = attempt(lambda k=k: find_adobe_apps(k, src)) or []
+        rep["all"] += apps
+        top = apps[0] if apps else None
+        rep["names"][k] = top["name"] if top else None
+        rep["found"][k] = {"name": top["name"], "version": top["version"], "year": top["year"], "path": top["exe"],
+                           "folder": top["folder"], "source": top["source"], "sources": top["sources"],
+                           "beta": top["beta"], "others": [a["exe"] for a in apps[1:]]} if top else None
+    rep["aerender"] = attempt(lambda: aerender_info(src))
+    return rep
 
 
 # --------------------------------------------------------------------------- CEP (Premiere bridge)

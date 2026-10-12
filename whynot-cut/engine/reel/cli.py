@@ -829,10 +829,10 @@ def cmd_setup(a):
     if a.check:
         out(rep)
         return
-    if not a.no_bridge and plat.newest_app("premiere"):
+    if not a.no_bridge and (plat.newest_app("premiere") or plat.newest_app("after_effects")):   # one bundle serves both
         rep["bridge_install"] = install()
     elif not a.no_bridge:
-        rep["bridge_install"] = "skipped: Premiere Pro not found on this computer"
+        rep["bridge_install"] = "skipped: Premiere Pro or After Effects not found on this computer"
     rep["doctor"] = doctor_in_engine()
     fixes = rep["doctor"].get("fixes") or []
     if not rep["runtime"].get("ok"):
