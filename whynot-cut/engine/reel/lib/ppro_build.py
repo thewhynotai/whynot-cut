@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import still_category, caption_hide_default, frame_size, Paths, seq_fps, project_prefix, load_config, ms_to_frame, now_iso, read_json, write_json
+from .common import still_category, caption_hide_default, Paths, seq_fps, project_prefix, load_config, ms_to_frame, now_iso, read_json, write_json
 from . import srt as srtlib
 from .plan import norm, to_ms
 
 SETTINGS = {  # user's sequence spec; verified field names/values from Premiere 26.5 getSettings()
-    "previewCodec": "apcs",               # Apple ProRes 422 LT; previewFrameWidth/Height = the profile's frame (job_data)
+    "previewCodec": "apcs",               # Apple ProRes 422 LT
+    "previewFrameWidth": 1080, "previewFrameHeight": 1920,
     "maximumBitDepth": False, "maximumRenderQuality": False, "compositeLinearColor": True,
 }
 LANE_NAMES = {"broll": "B-roll (full screen)", "gfx_bar": "Graphic bars (sweep)", "card": "Cards (closing glass)",
@@ -60,7 +61,7 @@ def cutaway_bands(paths: Paths, spec: dict) -> list:
     v = main_video(pre, spec.get("main_footage"))     # this reel's footage, not the first file preflight lists
     if not v:
         return []
-    H = frame_size(paths)[1]
+    H = load_config("sequence-settings.json")["general"]["frame_height"]
     bsp = float(spec.get("base_scale_percent") or 100.0)
     fps = seq_fps()
     out = []
@@ -158,8 +159,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
         anames += [f"A{len(anames) + 1} {nm} L", f"A{len(anames) + 2} {nm} R"]
     return {"project_path": str(paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")),
             "overwrite_existing": overwrite, "xml_path": base["xml"], "sequence_name": base["sequence_name"],
-            "settings": dict(SETTINGS, **dict(zip(("previewFrameWidth", "previewFrameHeight"), frame_size(paths)))),
-            "graphics": g_out, "srt_path": str(paths.p("02_transcription/subtitles-seq.srt")),
+            "settings": SETTINGS, "graphics": g_out, "srt_path": str(paths.p("02_transcription/subtitles-seq.srt")),
             "native_caption_track": bool(g.get("native_caption_track", False)),
             "markers": markers, "track_names": {"video": vnames, "audio": anames}, "_missing": missing,
             "blur_v1_clips": (base.get("cutaways") or {}).get("blur_v1_clip_indices") or [],
@@ -213,27 +213,51 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False, *
     if "bridge_version" in st:          # a heartbeat that names its version must be this engine's bridge
         refused = cep_queue.version_refusal(st, BRIDGE_VERSION, "Premiere")
         if refused:
-            return {"status": "BRIDGE_VERSION_MISMATCH", "error": refused["error"], "how": refused["how"]}
+            return {"status": "BRIDGE_VERSION_MISMATCH", "ok": False, "blocked": refused["blocked"],
+                    "error": refused["error"], "how": refused["how"]}
     prproj = paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")
+    wait = cep_queue.LOCK_WAIT_S if lock_wait_s is None else lock_wait_s
+    try:
+        with build_lock(f"ppro-build {paths.video_id}", hold_s=LOCK_HOLD_S, wait_s=wait):
+            return _build_locked(paths, prproj, overwrite, replace_edited)
+    except cep_queue.BuildLockBusy as e:
+        return dict(cep_queue.lock_busy_result(e, "Premiere"), ok=False, status="BRIDGE_BUSY")
+
+
+def parked_previous(paths: Paths) -> dict | None:
+    """The newest `<project>_prev_*.prproj` when the project itself is missing: a build was hard-killed between moving
+    the old project aside and putting it back (or Premiere never saved the new one). Reported with how to restore it;
+    nothing is moved (Premiere may still be saving a claimed build at that path)."""
+    prproj = paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")
+    if prproj.exists():
+        return None
+    parked = sorted(prproj.parent.glob(f"{prproj.stem}_prev_*.prproj"))
+    if not parked:
+        return None
+    last = parked[-1]
+    return {"file": str(last), "project": str(prproj),
+            "how": f"The last build stopped before it finished, so the previous project is still parked as {last.name} "
+                   f"and there is no {prproj.name}. Make sure Premiere is not building this reel, then rename "
+                   f"{last.name} back to {prproj.name} to keep working in it; or re-run with --force to build a new "
+                   "project (the parked file stays as a backup)."}
+
+
+def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: bool) -> dict:
+    # decided once the lock is held: the editor may save in Premiere while this build waits behind another one
+    from .ppro_bridge import submit
+    from .verify import editor_modified
+    parked = parked_previous(paths)
+    if parked and not overwrite:
+        return {"status": "PREVIOUS_PARKED", "ok": False, "error": f"no {prproj.name}; the previous project is parked",
+                "parked_previous": parked, "how": parked["how"]}
     if prproj.exists() and not overwrite:
         return {"status": "EXISTS", "project": str(prproj), "fix": "re-run with --force (previous version is kept as a backup)"}
-    from .verify import editor_modified
     em = editor_modified(paths) if prproj.exists() else None
     if em and not replace_edited:
         return {"status": "EDITOR_CHANGES_PRESENT", "detail": em,
                 "fix": "The editor saved changes in Premiere after the last build. A rebuild starts from the plan, so their manual "
                        "edits would NOT carry over (the old file is kept as *_prev_*.prproj). Ask the editor; only with their OK "
                        "re-run with --force --replace-edited."}
-    wait = cep_queue.LOCK_WAIT_S if lock_wait_s is None else lock_wait_s
-    try:
-        with build_lock(f"ppro-build {paths.video_id}", hold_s=LOCK_HOLD_S, wait_s=wait):
-            return _build_locked(paths, prproj, overwrite, em)
-    except cep_queue.BuildLockBusy as e:
-        return dict(cep_queue.lock_busy_result(e, "Premiere"), status="BRIDGE_BUSY")
-
-
-def _build_locked(paths: Paths, prproj: Path, overwrite: bool, em) -> dict:
-    from .ppro_bridge import submit
     backup = None
     closed = None
     if prproj.exists():
@@ -253,30 +277,37 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, em) -> dict:
     data = job_data(paths, overwrite, stage_media=True)
     if data["_missing"]:
         return {"status": "MISSING_GRAPHICS", "missing": data["_missing"], "fix": "run `reel previews`"}
-    if prproj.exists():
-        # out of Premiere's way (it creates the new project at this path); it stays `_prev_` only if the build saves a
-        # new project, else it is put back below
-        import time as _t
-        backup = prproj.with_name(f"{prproj.stem}_prev_{_t.strftime('%Y%m%d-%H%M%S')}.prproj")
-        prproj.rename(backup)
     import time
     t0 = time.time()
-    r = submit("build_project", {k: v for k, v in data.items() if not k.startswith("_")}, timeout=900)
+    r, claimed, restored, saved_now = {}, False, False, False
+    try:
+        if prproj.exists():
+            # out of Premiere's way (it creates the new project at this path); it stays `_prev_` only if the build
+            # saves a new project, else it is put back below
+            backup = prproj.with_name(f"{prproj.stem}_prev_{time.strftime('%Y%m%d-%H%M%S')}.prproj")
+            prproj.rename(backup)
+        r = submit("build_project", {k: v for k, v in data.items() if not k.startswith("_")}, timeout=900)
+        claimed = bool(r.get("claimed"))
+        saved_now = prproj.exists() and prproj.stat().st_mtime >= t0 - 1      # before any restore below
+    except BaseException as e:          # Ctrl-C, or an OSError writing the job: cep_queue says whether it was claimed
+        claimed = bool(getattr(e, "wnc_claimed", False))
+        raise
+    finally:
+        if backup and not prproj.exists() and not claimed:
+            # nothing new was saved (and Premiere is not still working on it: a claimed job that timed out may yet
+            # save there): the previous project goes back where the editor expects it
+            try:
+                backup.rename(prproj)
+                backup, restored = None, True
+            except OSError:
+                pass                    # left parked: the next ppro-build reports it (parked_previous)
     resp = (r.get("response") or {})
     res = resp.get("result") or {}
-    saved_now = prproj.exists() and prproj.stat().st_mtime >= t0 - 1
-    restored = False
-    if backup and not saved_now and not prproj.exists() and not r.get("claimed"):
-        # nothing new was saved (and Premiere is not still working on it: a claimed job that timed out may yet save
-        # there): the previous project goes back where the editor expects it
-        backup.rename(prproj)
-        backup, restored = None, True
     sa = res.get("settings_after", {})
-    fw, fh = frame_size(paths)
     checks = {
         "prproj_saved_this_run": saved_now,
         "preview_codec_prores_422_lt": sa.get("previewCodec") == "apcs",
-        f"frame_{fw}x{fh}": (sa.get("videoFrameWidth"), sa.get("videoFrameHeight")) == (fw, fh),
+        "frame_1080x1920": (sa.get("videoFrameWidth"), sa.get("videoFrameHeight")) == (1080, 1920),
         f"fps_{seq_fps():.4g}": abs((sa.get("videoFrameRate") or {}).get("seconds", 0) - 1 / seq_fps()) < 1e-6,
         "linear_color_on": sa.get("compositeLinearColor") is True,
         "max_bit_depth_off": sa.get("maximumBitDepth") is False,
@@ -296,6 +327,8 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, em) -> dict:
            "result": res, "at": now_iso(), "prproj_mtime": prproj.stat().st_mtime if prproj.exists() else None}
     if r.get("how"):
         out["how"] = r["how"]
+    if parked:                          # --force over a parked project: it stays a backup; say where
+        out["parked_previous"] = parked
     from .verify import prproj_signature
     # what the pipeline saved: a later save that only moves the file time (Premiere saving open projects, auto-save)
     # is not an editor change (verify.editor_modified)

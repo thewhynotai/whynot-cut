@@ -15,7 +15,8 @@ Premiere can't be scripted from outside (macOS AppleScript exposes only capture/
 ## `reel ppro-build` (about 7 s inside Premiere)
 The build runs these steps:
 1. Close any open copy, move the previous file aside as `<ID>_<PREFIX>_EDIT_prev_<ts>.prproj` (put back if the build saves
-   no new project), and create a new project.
+   no new project, also on Ctrl-C), and create a new project. If a hard kill left only the `_prev_` file, the next
+   `ppro-build` stops with `PREVIOUS_PARKED` and says how to rename it back (`--force` builds anew and keeps it).
 2. Import the base XML (`*_base.xml`). It holds the footage pieces (pause-tightened, jump cuts masked with alternating zoom), the cleaned dialogue on A1/A2 linked to V1, SFX on A3–A6, the original camera audio muted on A7/A8, and empty named graphic tracks.
 3. `setSettings`: preview codec "apcs" (ProRes 422 LT) 1080×1920, max bit depth OFF, max render quality OFF, composite in linear colour ON. Every value is read back.
 4. Place the brand stills on lanes and animate them with Premiere keyframes. The lanes are: B-roll, Graphic bars, Cards, Graphic text, one lane per checklist item, Caption bars, Caption text, Transitions.

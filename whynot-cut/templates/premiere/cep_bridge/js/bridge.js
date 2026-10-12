@@ -65,7 +65,9 @@
   // the running job; a lost evalScript callback must not block the queue forever (callers give up after <= 15 min)
   var current = null, currentFile = null, currentAction = '', startedAt = 0;
   var JOB_TIMEOUT_MS = 20 * 60 * 1000;
-  var DAEMON_STALE_MS = 3000;              // the panel takes over when the daemon has not beaten for this long
+  // the panel takes over when the daemon has not beaten for this long. Keep it ABOVE the engine's heartbeat window
+  // (cep_queue.status max_age_s = 5 s): while the engine still counts the daemon alive, the panel must not compete
+  var DAEMON_STALE_MS = 6500;
   var loadedAt = Date.now(), working = (ROLE === 'daemon');
   var stateEl = document.getElementById('state'), logEl = document.getElementById('log');
 

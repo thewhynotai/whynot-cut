@@ -34,7 +34,7 @@ CEP = SK / "templates" / "premiere" / "cep_bridge"
 
 
 def _iso(t: float) -> str:
-    return dt.datetime.fromtimestamp(t, dt.timezone.utc).isoformat(timespec="seconds")
+    return dt.datetime.fromtimestamp(t, dt.timezone.utc).isoformat(timespec="milliseconds")   # what the engine writes
 
 
 class FakeBridge:
@@ -146,6 +146,7 @@ class TestExpiryCancelCleanup(_Home):
         job = fb.claimed[0]
         exp = dt.datetime.fromisoformat(job["expires_at"]).timestamp()
         self.assertTrue(t0 + 29 <= exp <= t0 + 32, (t0, job["expires_at"]))
+        self.assertRegex(job["expires_at"], r"T\d\d:\d\d:\d\d\.\d{3}\+00:00$")    # milliseconds, not whole seconds
         self.assertEqual(job["script"], str(self.script.resolve()))
         self.assertEqual(job["data_file"], str(Path(job["data_file"]).resolve()))
 
@@ -198,6 +199,20 @@ class TestExpiryCancelCleanup(_Home):
         self.assertTrue(r["ok"], r)
         self.assertGreater(r["elapsed_s"], 1.0)                       # it waited longer than its own timeout
         self.assertEqual([a for _, a, *_ in fb.ran], ["slow", "ping"])
+
+    def test_ctrl_c_before_the_claim_cancels_and_says_so(self):
+        """The exception carries `wnc_claimed`: False = the job was taken back and never runs (ppro_build relies on it)."""
+        self.q.mkdir(parents=True)
+        with mock.patch.object(cep_queue, "_wait", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt) as cm:
+                cep_queue.submit(self.q, self.script, "build_project", timeout=5, st={"alive": True})
+        self.assertIs(cm.exception.wnc_claimed, False)
+        self.assertEqual(self.leftovers(), [])
+        with mock.patch.object(cep_queue, "_wait", side_effect=KeyboardInterrupt), \
+                mock.patch.object(cep_queue, "_cancel", return_value=False):          # the bridge had claimed it
+            with self.assertRaises(KeyboardInterrupt) as cm:
+                cep_queue.submit(self.q, self.script, "build_project", timeout=5, st={"alive": True})
+        self.assertIs(cm.exception.wnc_claimed, True)
 
     def test_data_result_and_claim_files_are_removed_after_reading(self):
         with FakeBridge(self.q):
@@ -266,6 +281,44 @@ class TestVersionHandshake(_Home):
         self.assertIn(f"Restart Premiere to load bridge {ppro_bridge.BRIDGE_VERSION}", r["how"])
         self.assertEqual(fb.claimed, [])
         self.assertEqual(self.leftovers(), [])                     # nothing was queued
+
+    def test_a_newer_running_bridge_asks_to_update_the_plugin(self):
+        """`reel ppro-install` skips a newer installed bridge, so telling the editor to run it would loop (Minor 5)."""
+        r = cep_queue.version_refusal({"bridge_version": "3.2.0"}, "3.1.1", "Premiere")
+        self.assertIn("newer", r["how"])
+        self.assertIn("update", r["how"].lower())
+        self.assertIn("reel ppro-install --force", r["how"])
+        old = cep_queue.version_refusal({"bridge_version": "3.1.0"}, "3.1.1", "Premiere")
+        self.assertIn("`reel ppro-install`", old["how"])
+        self.assertNotIn("--force", old["how"])
+        self.assertTrue(old["blocked"] and old["ok"] is False)
+
+    def test_ppro_build_refuses_a_version_mismatch_with_a_failing_exit(self):
+        from lib import errors, ppro_build
+        p = _reel(self.tmp)
+        with mock.patch("lib.ppro_bridge.status", return_value={"alive": True, "bridge_version": "3.1.0"}), \
+                mock.patch("lib.ppro_bridge.submit") as sub:
+            r = ppro_build.build(p)
+        self.assertEqual(r["status"], "BRIDGE_VERSION_MISMATCH")
+        self.assertIs(r["ok"], False)
+        self.assertIn("3.1.0", r["blocked"])
+        self.assertIn("Restart Premiere", r["how"])
+        self.assertNotEqual(errors.exit_code(r), 0)
+        sub.assert_not_called()
+
+    def test_motion_build_refuses_a_version_mismatch_as_blocked(self):
+        from lib import errors, motion_build
+        p = _reel(self.tmp)
+        with mock.patch("lib.plat.newest_app", return_value={"version": "26"}), \
+                mock.patch("lib.motion_plan.fingerprint", return_value="fp"), \
+                mock.patch("lib.ae_bridge.status", return_value={"alive": True, "bridge_version": "3.0.0"}), \
+                mock.patch("lib.ae_bridge.submit") as sub:
+            r = motion_build.build(p, lock_wait_s=0)
+        self.assertEqual(r["status"], "REFUSED")
+        self.assertIn("3.0.0", r["blocked"])
+        self.assertIn("Restart After Effects", r["how"])
+        self.assertEqual(errors.exit_code(r), 2)
+        sub.assert_not_called()
 
     def test_the_matching_bridge_runs_the_job(self):
         with FakeBridge(self.q):
@@ -340,6 +393,37 @@ class TestBuildLock(_Home):
                     self.assertEqual(cep_queue.read_lock(self.q), mine)
             self.assertFalse(lock.exists())
 
+    def test_a_live_holder_on_this_computer_is_never_stale_even_past_its_expiry(self):
+        """The holder does not renew its lock: a build that runs past `hold_s` must not be taken over (Minor 3)."""
+        import socket
+        from lib.writer_lock import process_created
+        rec = {"pid": os.getpid(), "pid_created": process_created(os.getpid()), "host": socket.gethostname(),
+               "what": "long build", "expires_at": time.time() - 60}
+        self.assertFalse(cep_queue.lock_stale(self.q, rec))
+        self.assertTrue(cep_queue.lock_stale(self.q, dict(rec, host="another-pc")))        # elsewhere: expiry rules
+
+    def test_an_unreadable_lock_replaced_by_a_live_one_is_put_back(self):
+        """Waiter A read the lock while it was unreadable; before A renamed it, waiter B took over and wrote a fresh
+        record. A must put B's lock back, not delete it (Minor 2)."""
+        import socket
+        from lib.writer_lock import process_created
+        self.q.mkdir(parents=True, exist_ok=True)
+        lock = self.q / cep_queue.LOCK_NAME
+        live = {"pid": os.getpid(), "pid_created": process_created(os.getpid()), "host": socket.gethostname(),
+                "what": "ppro-build B", "started_at": "now", "expires_at": time.time() + 999}
+        lock.write_text(json.dumps(live), encoding="utf-8")
+        os.utime(lock, (time.time() - 120,) * 2)        # A saw an old, unreadable file: stale by its age
+        real, calls = cep_queue.read_lock, []
+
+        def read_lock(q):
+            calls.append(1)
+            return {} if len(calls) == 1 else real(q)
+        with mock.patch.object(cep_queue, "read_lock", side_effect=read_lock):
+            with self.assertRaises(cep_queue.BuildLockBusy):
+                with ppro_bridge.build_lock("ppro-build A", wait_s=0.2, poll_s=0.05):
+                    pass
+        self.assertEqual(json.loads(lock.read_text(encoding="utf-8")), live)
+
     def test_ppro_build_waits_for_the_lock_and_reports_busy(self):
         from lib import ppro_build
         p = _reel(self.tmp)
@@ -349,6 +433,31 @@ class TestBuildLock(_Home):
         self.assertEqual(r["status"], "BRIDGE_BUSY", r)
         self.assertIn("ppro-frames other", r["blocked"])
         sub.assert_not_called()
+
+    def test_an_editor_save_during_the_lock_wait_is_caught(self):
+        """EXISTS / EDITOR_CHANGES_PRESENT are decided once the lock is held: the editor may save while the build
+        waits behind another one (Important 2)."""
+        from lib import ppro_build
+        p = _reel(self.tmp)
+        prj = p.p(f"07_premiere/project/{p.video_id}_{common.project_prefix()}_EDIT.prproj")
+        prj.parent.mkdir(parents=True, exist_ok=True)
+        prj.write_text("BUILT", encoding="utf-8")
+        edited = threading.Event()
+        out = {}
+        with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), \
+                mock.patch("lib.ppro_bridge.submit") as sub, \
+                mock.patch("lib.verify.editor_modified",
+                           side_effect=lambda _p: {"project": str(prj)} if edited.is_set() else None):
+            with ppro_bridge.build_lock("ppro-build other"):
+                t = threading.Thread(target=contextvars.copy_context().run,
+                                     args=(lambda: out.update(r=ppro_build.build(p, overwrite=True, lock_wait_s=20)),))
+                t.start()
+                time.sleep(0.5)                       # the build is waiting on the lock now
+                edited.set()                          # ... and the editor saves their work in Premiere
+            t.join(30)
+        self.assertEqual(out["r"]["status"], "EDITOR_CHANGES_PRESENT", out)
+        sub.assert_not_called()
+        self.assertEqual(prj.read_text(encoding="utf-8"), "BUILT")
 
     def test_ppro_frames_and_motion_build_take_the_lock(self):
         from lib import ae_bridge, motion_build, ppro_build
@@ -383,12 +492,13 @@ class TestPreviousProjectKept(_Home):
     DATA = {"_missing": [], "graphics": [], "native_caption_track": False, "sharpen_v1": None,
             "sequence_name": "V1", "track_names": {}}
 
-    def run_build(self, answer):
+    def run_build(self, answer, old=True, overwrite=True):
         from lib import ppro_build
         p = _reel(self.tmp)
         prj = p.p(f"07_premiere/project/{p.video_id}_{common.project_prefix()}_EDIT.prproj")
         prj.parent.mkdir(parents=True, exist_ok=True)
-        prj.write_text("OLD", encoding="utf-8")
+        if old:
+            prj.write_text("OLD", encoding="utf-8")
 
         def submit(action, data=None, timeout=0, **kw):
             if action == "close_project_path":
@@ -399,8 +509,68 @@ class TestPreviousProjectKept(_Home):
                 mock.patch("lib.ppro_bridge.submit", side_effect=submit), \
                 mock.patch.object(ppro_build, "job_data", return_value=dict(self.DATA)), \
                 mock.patch("lib.verify.editor_modified", return_value=None):
-            r = ppro_build.build(p, overwrite=True)
+            r = ppro_build.build(p, overwrite=overwrite)
         return r, prj
+
+    def project_dir(self) -> Path:
+        return next(self.tmp.glob("C/**/07_premiere/project"))
+
+    def test_ctrl_c_or_an_error_while_queueing_puts_the_previous_project_back(self):
+        for exc in (KeyboardInterrupt(), OSError("disk full")):
+            with self.subTest(exc=type(exc).__name__):
+                def boom(prj, exc=exc):
+                    raise exc
+                with self.assertRaises(type(exc)):
+                    self.run_build(boom)
+                d = self.project_dir()
+                self.assertEqual((d / f"V1_{common.project_prefix()}_EDIT.prproj").read_text(encoding="utf-8"), "OLD")
+                self.assertEqual(list(d.glob("*_prev_*")), [])
+                shutil.rmtree(self.tmp / "C")
+
+    def test_ctrl_c_after_the_claim_keeps_the_backup_aside(self):
+        def boom(prj):
+            e = KeyboardInterrupt()
+            e.wnc_claimed = True                      # Premiere took the job: it may still save the new project
+            raise e
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_build(boom)
+        d = self.project_dir()
+        self.assertEqual(len(list(d.glob("*_prev_*"))), 1)
+        self.assertEqual([f.name for f in d.glob("*.prproj") if "_prev_" not in f.name], [])
+
+    def test_a_lone_prev_is_reported_with_how_to_restore(self):
+        """A hard kill between the rename and the restore leaves only `_prev_`: the next ppro-build says so."""
+        from lib import errors, ppro_build
+        p = _reel(self.tmp)
+        d = p.p("07_premiere/project")
+        d.mkdir(parents=True, exist_ok=True)
+        prj = d / f"{p.video_id}_{common.project_prefix()}_EDIT.prproj"
+        parked = d / f"{prj.stem}_prev_20261012-101010.prproj"
+        parked.write_text("EDITOR'S", encoding="utf-8")
+        with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), \
+                mock.patch("lib.ppro_bridge.submit") as sub:
+            r = ppro_build.build(p)
+        self.assertEqual(r["status"], "PREVIOUS_PARKED", r)
+        self.assertEqual(r["parked_previous"]["file"], str(parked))
+        self.assertIn(parked.name, r["how"])
+        self.assertIn(prj.name, r["how"])
+        self.assertIn("--force", r["how"])
+        self.assertNotEqual(errors.exit_code(r), 0)
+        sub.assert_not_called()
+        self.assertEqual(ppro_build.parked_previous(p)["file"], str(parked))
+        self.assertTrue(parked.exists())                                   # report only: nothing is moved
+
+    def test_force_builds_anyway_and_still_names_the_parked_file(self):
+        def built(prj):
+            prj.write_text("NEW", encoding="utf-8")
+            return {"ok": True, "response": {"ok": True, "result": {}}}
+        p = _reel(self.tmp)
+        d = p.p("07_premiere/project")
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"V1_{common.project_prefix()}_EDIT_prev_20261012-101010.prproj").write_text("EDITOR'S", encoding="utf-8")
+        r, prj = self.run_build(built, old=False)
+        self.assertEqual(prj.read_text(encoding="utf-8"), "NEW")
+        self.assertIn("_prev_20261012-101010", r["parked_previous"]["file"])
 
     def test_a_failed_build_restores_the_previous_project(self):
         r, prj = self.run_build(lambda prj: {"ok": False, "error": "bridge not running"})
@@ -595,9 +765,19 @@ class TestBridgeJs(_Home):
         self.assertTrue((self.q / "c.job.json").exists())
         self.assertIn("background bridge", out["state"])
 
+    def test_the_panel_waits_longer_than_the_engine_heartbeat_window(self):
+        """The panel must not take over while the engine still counts the daemon alive (cep_queue.status max_age_s)."""
+        import inspect
+        import re
+        js = (CEP / "js/bridge.js").read_text(encoding="utf-8")
+        ms = int(re.search(r"var DAEMON_STALE_MS = (\d+);", js).group(1))
+        engine_s = inspect.signature(cep_queue.status).parameters["max_age_s"].default
+        self.assertGreaterEqual(ms, 6000)
+        self.assertGreater(ms, engine_s * 1000)
+
     def test_the_panel_works_the_queue_when_no_daemon_beats(self):
         self.job("d", "ping", 60)
-        out = self.run_bridge(role="panel", ms=4500)
+        out = self.run_bridge(role="panel", ms=8000)
         self.assertEqual(out["evals"], ["ping"])
         self.assertIn("this panel works the queue", out["log"])
         self.assertEqual(json.loads((self.q / "bridge.heartbeat").read_text(encoding="utf-8"))["role"], "panel")

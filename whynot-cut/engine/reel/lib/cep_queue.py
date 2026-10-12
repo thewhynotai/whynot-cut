@@ -40,16 +40,21 @@ SWEEP_AGE_S = 24 * 3600                  # queue files older than this are a cra
 ORPHAN_AGE_S = 21 * 60                   # a .running older than the bridge's own 20-minute job limit
 CLAIM_CHECK_S = 2.0                      # how often an unclaimed wait re-reads the heartbeat
 LOCK_NAME = ".build.lock"
-LOCK_WAIT_S = 1200.0                     # a second build waits this long for the first (a build times out at 900 s)
+# a second build waits this long for the first, then gets BRIDGE_BUSY. Not a bound on the first build: its bridge call
+# may take claim 900 s + result 900 s in the worst case (submit's two clocks), so a long wait can still end busy
+LOCK_WAIT_S = 1200.0
 _SWEEP_SUFFIXES = (".data.json", ".result.json", ".job.json", ".running", ".claimed", ".job.cancelled", ".tmp",
                    ".result.tmp")
 
 
 def _iso_utc(t: float) -> str:
-    return _dt.datetime.fromtimestamp(t, _dt.timezone.utc).isoformat(timespec="seconds")
+    # milliseconds: a whole-second stamp would end a short claim window up to 1 s early (bridge.js Date.parse reads both)
+    return _dt.datetime.fromtimestamp(t, _dt.timezone.utc).isoformat(timespec="milliseconds")
 
 
 def status(queue: Path, max_age_s: float = 5.0, app: str = "the Adobe app") -> dict:
+    """The bridge as the heartbeat shows it. `max_age_s` must stay below bridge.js DAEMON_STALE_MS (6.5 s): the panel
+    takes over only after the engine has stopped counting the daemon alive."""
     queue = Path(queue)
     hb = queue / "bridge.heartbeat"
     if not hb.exists():
@@ -111,17 +116,27 @@ def sweep(queue: Path, max_age_s: float = SWEEP_AGE_S) -> list[str]:
     return gone
 
 
+def _ver(v) -> tuple:
+    import re
+    return tuple(int(x) for x in re.findall(r"\d+", str(v or ""))[:3])
+
+
 def version_refusal(st: dict, expect: str, app: str) -> dict | None:
     """The running bridge must be the one this engine ships: a host that was not restarted after a plugin update
-    still runs the old panel against the new scripts."""
+    still runs the old panel against the new scripts. A refusal (`blocked`: exit 2)."""
     have = st.get("bridge_version")
     if have == expect:
         return None
-    return {"ok": False, "error": f"the WhyNot Cut Bridge running in {app} is {have or 'an unknown version'}; this engine "
-                                  f"needs bridge {expect}",
-            "how": f"Restart {app} to load bridge {expect}. If it still reports {have or 'another version'}, run "
-                   "`reel ppro-install` first, then restart it.",
-            "status": st}
+    error = f"the WhyNot Cut Bridge running in {app} is {have or 'an unknown version'}; this engine needs bridge {expect}"
+    if have and _ver(have) > _ver(expect):
+        # a newer plugin installed it; `reel ppro-install` keeps a newer bridge, so it would not help
+        how = (f"The running bridge {have} is newer than this engine's {expect}: update the WhyNot Cut plugin to the "
+               f"version that ships bridge {have}. Only to go back to {expect} on purpose: `reel ppro-install --force`, "
+               f"then restart {app}.")
+    else:
+        how = (f"Restart {app} to load bridge {expect}. If it still reports {have or 'another version'}, run "
+               "`reel ppro-install` first, then restart it.")
+    return {"ok": False, "error": error, "blocked": error, "how": how, "status": st}
 
 
 def _unlink(*paths: Path) -> None:
@@ -169,8 +184,10 @@ def submit(queue: Path, script: Path, action: str, data: dict | None = None, tim
     tmp.rename(job_p)      # atomic: the bridge never sees a half-written job
     try:
         return _wait(queue, jid, t0, claim_s, timeout, poll_s, app)
-    except BaseException:  # Ctrl-C while waiting: a job nobody waits for must not run later
-        _cancel(queue, jid)
+    except BaseException as e:  # Ctrl-C while waiting: a job nobody waits for must not run later
+        cancelled = _cancel(queue, jid)
+        with contextlib.suppress(Exception):
+            e.wnc_claimed = not cancelled     # True: the bridge has (or had) the job, the host may still act on it
         raise
 
 
@@ -257,7 +274,9 @@ def read_lock(queue: Path) -> dict | None:
 
 
 def lock_stale(queue: Path, rec: dict | None) -> bool:
-    """A lock may be taken over when it expired or its process on this computer is gone."""
+    """A lock may be taken over when its process on this computer is gone (pid + creation time), or, held from another
+    computer, when it expired. A live holder on this computer is never stale: it does not renew its expiry, and a build
+    may run past it."""
     from .writer_lock import pid_alive
     if rec is None:
         return False
@@ -266,12 +285,12 @@ def lock_stale(queue: Path, rec: dict | None) -> bool:
             return time.time() - (Path(queue) / LOCK_NAME).stat().st_mtime > 30
         except OSError:
             return True
+    if rec.get("host") == socket.gethostname():
+        return not pid_alive(rec.get("pid"), rec.get("pid_created"))
     try:
-        if time.time() > float(rec.get("expires_at") or 0):
-            return True
+        return time.time() > float(rec.get("expires_at") or 0)
     except (TypeError, ValueError):
         return True
-    return rec.get("host") == socket.gethostname() and not pid_alive(rec.get("pid"), rec.get("pid_created"))
 
 
 @contextlib.contextmanager
@@ -301,7 +320,9 @@ def build_lock(queue: Path, what: str, *, hold_s: float = 1800.0, wait_s: float 
                     took = json.loads(stale.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     took = {}
-                if held and took != held:       # another waiter took over first: that lock is live, put it back
+                # another waiter took over first (also when we read the lock while it was unreadable): that lock is
+                # live, put it back
+                if isinstance(took, dict) and took and took != held:
                     with contextlib.suppress(OSError):
                         stale.rename(lock)
                 _unlink(stale)

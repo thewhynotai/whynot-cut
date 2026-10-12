@@ -161,6 +161,7 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
         refused = version_refusal(st, BRIDGE_VERSION, "After Effects")
         if refused:
             probs.append(f"{refused['error']}: {refused['how']}")
+            ctx["refusal"] = {"blocked": refused["blocked"], "how": refused["how"]}     # a refusal: exit 2
             return probs, ctx
     # `busy` comes from the bridge's daemon alone (3.1.1): another session's build waits on the build lock instead,
     # so busy here is a short job (a ping, a probe) of someone else
@@ -228,7 +229,7 @@ def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeou
                                    "work - `--replace-edited` keeps a backup copy first"])
     probs, ctx = preconditions(paths, allow_fallback_font)
     if probs:
-        return dict(base, reasons=probs)
+        return dict(base, reasons=probs, **(ctx.get("refusal") or {}))
     if edited:                  # only once the build will run: a refused build leaves no backup behind
         bdir = aep.parent / "backups"
         bdir.mkdir(parents=True, exist_ok=True)
