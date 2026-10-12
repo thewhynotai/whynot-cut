@@ -65,6 +65,27 @@ test("one source: no other tokens.css in the Adobe sources; the builds copy bran
   assert.match(read(join(PANEL_UI, "scripts", "dev-build.mjs")), /"brand", "tokens\.css"/);
 });
 
+/** CSS that still defines --twn-* tokens of its own, with the reason it may for now. Nothing else under adobe/ may. */
+const TOKEN_DEFINITION_ALLOWED: Record<string, string> = {
+  "adobe/premiere-uxp/spike/index.css": "the spike's own drift block; replaced in Task 3 (the style guide links brand/tokens.css)",
+};
+
+test("one source: no CSS under adobe/ defines a --twn-* token except the copied brand/tokens.css (spike drift block allow-listed until Task 3)", () => {
+  const offenders: string[] = [];
+  for (const f of walk(ADOBE, (p) => p.endsWith(".css"))) {
+    const rel = relative(REPO, f).replace(/\\/g, "/");
+    if (rel in TOKEN_DEFINITION_ALLOWED) continue;
+    const css = read(f).replace(/\/\*[\s\S]*?\*\//g, "");
+    const defs = [...css.matchAll(/(--twn-[a-z0-9-]+)\s*:/g)].map((m) => m[1]);
+    if (defs.length) offenders.push(`${rel}: ${defs.join(", ")}`);
+  }
+  assert.deepEqual(offenders, []);
+  // the allow-list stays honest: each entry exists and really defines tokens
+  for (const rel of Object.keys(TOKEN_DEFINITION_ALLOWED)) {
+    assert.match(read(join(REPO, rel)), /--twn-[a-z0-9-]+\s*:/, `${rel} no longer defines tokens: drop it from the allow-list`);
+  }
+});
+
 test("every var(--twn-*) the kit uses is defined in brand/tokens.css", () => {
   const defined = tokenMap(read(TOKENS));
   for (const f of PANEL_CSS_FILES()) {

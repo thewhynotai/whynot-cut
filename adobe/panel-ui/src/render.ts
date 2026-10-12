@@ -272,7 +272,7 @@ function actionsSection(s: PanelState, t: Strings, ui: UiState): string {
     `<button class="btn btn-secondary btn-act" data-action="${action}"${enabled && (hostOnly || !off) ? "" : " disabled"}>${esc(t[label])}</button>`;
   const rebuildCard = ui.confirmRebuild
     ? `<div class="card card-warn" role="alertdialog" aria-label="${esc(t["rebuild.title"])}"><div class="lbl lbl-warn">${esc(t["rebuild.title"])}</div>` +
-      `<p>${esc(t["rebuild.warning"])}</p><p>${esc(t["rebuild.backup"])}</p>${cmdRow("name_prev_date-time.prproj")}` +
+      `<p>${esc(t["rebuild.warning"])}</p><p>${esc(t["rebuild.backup"])}</p>${cmdRow(t["rebuild.backup_name"])}` +
       `<div class="btn-row"><button class="btn btn-primary" data-action="rebuild-confirm"${off ? " disabled" : ""}>${esc(t["rebuild.confirm"])}</button>` +
       `<button class="btn btn-secondary" data-action="rebuild-cancel">${esc(t["rebuild.cancel"])}</button></div></div>`
     : "";
@@ -303,7 +303,7 @@ function logSection(s: PanelState, t: Strings, ui: UiState): string {
         .map((l) => `<li class="log-line log-${l.level === "warn" || l.level === "error" ? l.level : "info"}"><span class="log-ts">${esc(l.ts)}</span>${ltr(l.text)}</li>`)
         .join("")}</ul>`
     : `<p class="muted">${esc(t["log.empty"])}</p>`;
-  const build = ui.build ? `<p class="muted hint log-build">${ltr(`WhyNot Cut ${ui.build.version} · build ${ui.build.build}`)}</p>` : "";
+  const build = ui.build ? `<p class="muted hint log-build">${ltr(fmt(t["log.build"], { version: ui.build.version, build: ui.build.build }))}</p>` : "";
   return `<section class="sec sec-log">${toggle}${lines}${build}</section>`;
 }
 

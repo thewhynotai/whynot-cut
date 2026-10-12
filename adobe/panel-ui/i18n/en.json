@@ -81,6 +81,7 @@
   "rebuild.title": "Rebuild this project?",
   "rebuild.warning": "If you edited this project in Premiere since the last build, a rebuild replaces your edits.",
   "rebuild.backup": "The current project is kept next to it as a backup copy before the rebuild starts. Backup name:",
+  "rebuild.backup_name": "name_prev_date-time.prproj",
   "rebuild.confirm": "Rebuild",
   "rebuild.cancel": "Keep my project",
   "notice.ok": "Done.",
@@ -94,5 +95,6 @@
   "log.toggle": "Log",
   "log.lines": "{n} lines",
   "log.empty": "No log lines yet.",
+  "log.build": "WhyNot Cut {version} · build {build}",
   "footer.powered": "Powered by thewhynot.ai"
 }

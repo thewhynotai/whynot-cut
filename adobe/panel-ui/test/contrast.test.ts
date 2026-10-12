@@ -1,17 +1,21 @@
 // B-T1 contrast test: every text/background pair the panel kit paints meets WCAG (Addendum B4.8): 4.5:1 for text,
 // 3:1 for the focus ring and status icons. Colours are read from brand/tokens.css, never restated here; translucent
 // layers (glass) are composited over what they sit on. A guard makes sure every colour/background token the CSS uses
-// is covered by a pair, so a new text colour cannot skip this test.
+// is covered by a pair, so a new text colour cannot skip this test; a stacking guard makes sure glass only ever sits
+// on the black background (the card ruling in brand/tokens.css).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { initialUi, render } from "../src/render.ts";
+import { stringsFor } from "../src/i18n.ts";
+import { SCENARIOS, sampleState } from "../src/mock.ts";
 import { ADOBE, PANEL_UI, TOKENS, contrast, over, parseCss, tokenMap, walk } from "./tokens-util.ts";
 import type { Rgb } from "./tokens-util.ts";
 
 const tokens = tokenMap(readFileSync(TOKENS, "utf8"));
 
-/** A token (or "glass over <token>") as the opaque colour the eye sees. */
+/** A token (or "<translucent token> over <token>") as the opaque colour the eye sees. */
 function colour(spec: string): Rgb {
   const m = /^(--twn-[a-z0-9-]+) over (--twn-[a-z0-9-]+)$/.exec(spec);
   if (m) return over(parseCss(value(m[1]!)), colour(m[2]!));
@@ -26,6 +30,8 @@ function value(name: string): string {
   return name === "--twn-focus" ? v.split(/\s+/).pop()! : v;
 }
 
+/** The card: glass over the black background (about #141414), as on thewhynot.ai (Addendum B §B2, magnific-brand
+ *  §2.2). Glass never sits on #121212 (the stacking guard below enforces it), so this is the only glass composite. */
 const GLASS = "--twn-glass over --twn-bg";
 const TEXT = 4.5;
 const NON_TEXT = 3;
@@ -33,19 +39,16 @@ const NON_TEXT = 3;
 /** [foreground, background, minimum, where] for every pair the kit paints. */
 const PAIRS: readonly [string, string, number, string][] = [
   ["--twn-text", "--twn-bg", TEXT, "panel body, inputs, step names"],
-  ["--twn-text", "--twn-surface", TEXT, "cards, banners, now box, copy box"],
+  ["--twn-text", "--twn-surface", TEXT, "solid (non-glass) panels: banners, now box, copy box"],
   ["--twn-text", "--twn-surface-2", TEXT, "command chips, flagged statements"],
-  ["--twn-text", GLASS, TEXT, "glass card (Addendum B)"],
   ["--twn-text-muted", "--twn-bg", TEXT, "header who-line, pill keys, hints, footer"],
   ["--twn-text-muted", "--twn-surface", TEXT, "idle now box, banner close, log timestamps"],
   ["--twn-text-muted", "--twn-surface-2", TEXT, "pending step dot"],
   ["--twn-text-muted", "--twn-frame-bg", TEXT, "QC tile with no image"],
-  ["--twn-text-muted", GLASS, TEXT, "glass card secondary text"],
   ["--twn-primary-text", "--twn-bg", TEXT, "violet text / links"],
-  ["--twn-primary-text", "--twn-surface", TEXT, "violet text on a card"],
-  ["--twn-primary-text", GLASS, TEXT, "violet text on a glass card"],
+  ["--twn-primary-text", "--twn-surface", TEXT, "violet text on a solid panel"],
   ["--twn-accent", "--twn-bg", TEXT, "pink eyebrow section titles"],
-  ["--twn-accent", "--twn-surface", TEXT, "pink eyebrow on a card"],
+  ["--twn-accent", "--twn-surface", TEXT, "pink eyebrow on a solid panel"],
   ["--twn-accent", "--twn-surface-2", TEXT, "religious flag chip"],
   ["--twn-ok", "--twn-bg", TEXT, "ok pill value"],
   ["--twn-ok", "--twn-surface", TEXT, "QC pass verdict"],
@@ -60,10 +63,19 @@ const PAIRS: readonly [string, string, number, string][] = [
   ["--twn-on-accent", "--twn-accent", TEXT, "waiting step dot"],
   ["--twn-on-error", "--twn-error", TEXT, "failed step dot"],
   ["--twn-focus", "--twn-bg", NON_TEXT, "focus ring"],
-  ["--twn-focus", "--twn-surface", NON_TEXT, "focus ring on a card"],
-  ["--twn-ok", GLASS, NON_TEXT, "ok icon on a glass card"],
-  ["--twn-warn", GLASS, NON_TEXT, "warn icon on a glass card"],
-  ["--twn-error", GLASS, NON_TEXT, "error icon on a glass card"],
+  ["--twn-focus", "--twn-surface", NON_TEXT, "focus ring on a solid panel"],
+  // the glass card (glass over black): every text token reads at 4.5:1 or better on it, icons at 3:1
+  ["--twn-text", GLASS, TEXT, "glass card: text"],
+  ["--twn-text-muted", GLASS, TEXT, "glass card: secondary text"],
+  ["--twn-primary-text", GLASS, TEXT, "glass card: violet text / links"],
+  ["--twn-accent", GLASS, TEXT, "glass card: pink eyebrow"],
+  ["--twn-ok", GLASS, TEXT, "glass card: ok text"],
+  ["--twn-warn", GLASS, TEXT, "glass card: warn text"],
+  ["--twn-error", GLASS, TEXT, "glass card: error text"],
+  ["--twn-focus", GLASS, NON_TEXT, "glass card: focus ring"],
+  ["--twn-ok", GLASS, NON_TEXT, "glass card: ok icon"],
+  ["--twn-warn", GLASS, NON_TEXT, "glass card: warn icon"],
+  ["--twn-error", GLASS, NON_TEXT, "glass card: error icon"],
 ];
 
 test("every text/background pair meets WCAG: 4.5:1 text, 3:1 focus ring and status icons", () => {
@@ -81,19 +93,111 @@ test("Addendum B's own numbers hold: white on #5400FB is about 7.6:1; raw #5400F
   assert.ok(contrast(colour("--twn-primary"), colour("--twn-bg")) < TEXT, "#5400FB must never be a text colour");
 });
 
-test("guard: every colour and solid background token the kit CSS uses is covered by a pair", () => {
-  const files = [...walk(join(PANEL_UI, "styles"), (p) => p.endsWith(".css")), join(ADOBE, "premiere-uxp", "plugin", "index.css")];
-  const fgs = new Set(PAIRS.map((p) => p[0]));
-  const bgs = new Set(PAIRS.flatMap((p) => [p[1], ...(p[1].includes(" over ") ? [p[1].split(" over ")[1]!] : [])]));
-  // no text sits on these: the gradient (hairline, progress fill) and the progress track
-  const NO_TEXT = new Set(["--twn-gradient", "--twn-track"]);
+// ---- guard: every colour / background token the CSS uses has a pair ----
+
+/** Tokens a pair covers: plain foregrounds and backgrounds, and the translucent layer X of an "X over Y" pair (where
+ *  the layer may sit is the stacking guard's job). */
+const FGS = new Set(PAIRS.map((p) => p[0]));
+const BGS = new Set(PAIRS.map((p) => p[1].split(" over ")[0]!));
+/** No text sits on these: the gradient (hairline, progress fill) and the progress track. */
+const NO_TEXT = new Set(["--twn-gradient", "--twn-track"]);
+
+function uncovered(cssText: string): string[] {
+  const css = cssText.replace(/\/\*[\s\S]*?\*\//g, "");
   const missing: string[] = [];
-  for (const f of files) {
-    const css = readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-    for (const m of css.matchAll(/(?:^|[;{\s])color\s*:\s*var\((--twn-[a-z0-9-]+)\)/g)) if (!fgs.has(m[1]!)) missing.push(`color ${m[1]}`);
-    for (const m of css.matchAll(/background(?:-color)?\s*:\s*var\((--twn-[a-z0-9-]+)\)/g)) {
-      if (!bgs.has(m[1]!) && !NO_TEXT.has(m[1]!)) missing.push(`background ${m[1]}`);
+  for (const m of css.matchAll(/(?:^|[;{\s])color\s*:\s*var\((--twn-[a-z0-9-]+)\)/g)) if (!FGS.has(m[1]!)) missing.push(`color ${m[1]}`);
+  for (const m of css.matchAll(/background(?:-color)?\s*:\s*var\((--twn-[a-z0-9-]+)\)/g)) {
+    if (!BGS.has(m[1]!) && !NO_TEXT.has(m[1]!)) missing.push(`background ${m[1]}`);
+  }
+  return [...new Set(missing)];
+}
+
+const KIT_CSS = () => [...walk(join(PANEL_UI, "styles"), (p) => p.endsWith(".css")), join(ADOBE, "premiere-uxp", "plugin", "index.css")];
+
+test("guard self-check: glass (an 'X over Y' pair) counts as covered; a token with no pair does not", () => {
+  assert.deepEqual(uncovered(".x { background: var(--twn-glass); color: var(--twn-text); }"), []);
+  assert.deepEqual(uncovered(".x { background: var(--twn-deep); color: var(--twn-deep); }"), ["color --twn-deep", "background --twn-deep"]);
+});
+
+test("guard: every colour and background token the kit CSS uses is covered by a pair", () => {
+  for (const f of KIT_CSS()) assert.deepEqual(uncovered(readFileSync(f, "utf8")), [], f);
+});
+
+// ---- stacking guard: glass sits on the black background, never on a #121212 surface ----
+
+interface Rule {
+  selector: string;
+  body: string;
+}
+function rules(cssText: string): Rule[] {
+  const css = cssText.replace(/\/\*[\s\S]*?\*\//g, "").replace(/@font-face\s*\{[^}]*\}/g, "");
+  return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].flatMap((m) => m[1]!.split(",").map((s) => ({ selector: s.trim(), body: m[2]! })));
+}
+const backgroundsOf = (body: string) => [...body.matchAll(/background(?:-color)?\s*:([^;]+)/g)].map((m) => m[1]!);
+const hasToken = (body: string, token: string) => backgroundsOf(body).some((b) => new RegExp(`var\\(${token}\\)`).test(b));
+const classesOf = (compound: string) => [...compound.matchAll(/\.([A-Za-z0-9_-]+)/g)].map((m) => m[1]!);
+
+/** Where glass is stacked on a surface: a rule painting both; a glass rule whose selector sits inside a surface class;
+ *  and, in rendered markup, an element with a glass class inside (or on) an element with a surface class. Classes are
+ *  mapped from the last compound of each selector. */
+export function glassStacking(cssText: string, htmls: readonly string[]): string[] {
+  const rs = rules(cssText);
+  const glass = new Set<string>();
+  const surface = new Set<string>();
+  const found: string[] = [];
+  for (const r of rs) {
+    const last = classesOf(r.selector.split(/\s+|>/).filter(Boolean).pop() ?? "");
+    if (hasToken(r.body, "--twn-glass")) last.forEach((c) => glass.add(c));
+    if (hasToken(r.body, "--twn-surface")) last.forEach((c) => surface.add(c));
+    if (hasToken(r.body, "--twn-glass") && hasToken(r.body, "--twn-surface")) found.push(`${r.selector}: glass and surface in one rule`);
+  }
+  for (const r of rs) {
+    if (!hasToken(r.body, "--twn-glass")) continue;
+    const ancestors = r.selector.split(/\s+|>/).filter(Boolean).slice(0, -1);
+    for (const a of ancestors) for (const c of classesOf(a)) if (surface.has(c)) found.push(`${r.selector}: glass inside .${c} (a surface)`);
+  }
+  if (glass.size) {
+    for (const html of htmls) {
+      const stack: string[][] = [];
+      for (const m of html.matchAll(/<(\/?)([a-z][a-z0-9]*)\b([^>]*)>/gi)) {
+        const [, close, tag, attrs] = m;
+        if (close) {
+          stack.pop();
+          continue;
+        }
+        const cls = (/\bclass="([^"]*)"/.exec(attrs!)?.[1] ?? "").split(/\s+/).filter(Boolean);
+        if (cls.some((c) => glass.has(c))) {
+          const under = [...stack.flat(), ...cls].filter((c) => surface.has(c));
+          if (under.length) found.push(`<${tag} class="${cls.join(" ")}"> is glass on .${under.join(", .")}`);
+        }
+        if (!/^(img|input|br|hr|meta|link)$/i.test(tag!) && !attrs!.trimEnd().endsWith("/")) stack.push(cls);
+      }
     }
   }
-  assert.deepEqual([...new Set(missing)], []);
+  return [...new Set(found)];
+}
+
+test("stacking guard self-check: it catches glass on a surface (same rule, selector nesting, rendered nesting)", () => {
+  const css = ".card { background: var(--twn-surface); } .glass { background: var(--twn-glass); } .card .tip { background: var(--twn-glass); } .both { background: var(--twn-surface); background: var(--twn-glass); }";
+  const found = glassStacking(css, ['<div class="card"><p><span class="glass">x</span></p></div>', '<div class="glass">ok on black</div>']);
+  assert.deepEqual(found.sort(), [
+    ".both: glass and surface in one rule",
+    ".card .tip: glass inside .card (a surface)",
+    '<span class="glass"> is glass on .card',
+  ].sort());
+  assert.deepEqual(glassStacking(css.replace(/\.card \.tip[^}]*\}|\.both[^}]*\}/g, ""), ['<div class="glass">on black</div>']), []);
+});
+
+test("stacking guard: no panel-ui CSS rule or rendered screen puts glass on a --twn-surface background", () => {
+  const css = KIT_CSS().map((f) => readFileSync(f, "utf8")).join("\n");
+  const htmls: string[] = [];
+  for (const lang of ["en", "ar"] as const) {
+    for (const scenario of SCENARIOS) {
+      const s = sampleState(lang, scenario);
+      const t = stringsFor(lang);
+      htmls.push(render(s, t, initialUi()));
+      htmls.push(render(s, t, { ...initialUi(), logOpen: true, confirmRebuild: true, notice: { kind: "error", text: "x", how: "Run `reel doctor`." } }));
+    }
+  }
+  assert.deepEqual(glassStacking(css, htmls), []);
 });

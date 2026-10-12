@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AR, EN, fmt, stringsFor } from "../src/i18n.ts";
 import { PANEL_UI } from "./tokens-util.ts";
+import { hardCoded, sentences } from "./literal-scan.ts";
+import { DAEMON_SOURCE_STRINGS_TO_MIGRATE_IN_B_T2 } from "./i18n-debt.ts";
 
 const table = (lang: "en" | "ar") => JSON.parse(readFileSync(join(PANEL_UI, "i18n", `${lang}.json`), "utf8")) as Record<string, unknown>;
 
@@ -50,6 +52,11 @@ test("product name is WhyNot Cut in both languages and the footer says Powered b
   assert.equal(AR["product.name"], "WhyNot Cut");
   assert.equal(EN["footer.powered"], "Powered by thewhynot.ai");
   assert.equal(AR["footer.powered"], "Powered by thewhynot.ai");
+  // technical left-to-right runs, identical in both languages: the build stamp and the backup file-name pattern
+  assert.equal(EN["log.build"], "WhyNot Cut {version} · build {build}");
+  assert.equal(AR["log.build"], EN["log.build"]);
+  assert.equal(EN["rebuild.backup_name"], "name_prev_date-time.prproj");
+  assert.equal(AR["rebuild.backup_name"], EN["rebuild.backup_name"]);
 });
 
 test("stringsFor picks the table; fmt fills placeholders", () => {
@@ -59,116 +66,43 @@ test("stringsFor picks the table; fmt fills placeholders", () => {
   assert.equal(fmt("no placeholders", { n: 1 }), "no placeholders");
 });
 
+// ---- Arabic copy (Addendum B3): clear MSA, the English UI term in parentheses the first time ----
+
+/** The UI terms an Arabic editor meets in Premiere / the guide in English: each label carries it once, in parentheses. */
+const AR_TERMS = ["Pipeline", "Approval", "QC", "Transcript", "Plan", "Approve", "Build", "Frames", "Handoff", "Rebuild", "Playhead", "Engine", "Host"];
+
+test("Arabic: every key UI term carries its English name in parentheses on first use (the label), not in every sentence", () => {
+  const values = Object.values(table("ar")) as string[];
+  for (const term of AR_TERMS) {
+    const uses = values.filter((v) => v.includes(`(${term})`)).length;
+    assert.ok(uses >= 1, `no Arabic string carries "(${term})"`);
+    assert.ok(uses <= 2, `"(${term})" is repeated in ${uses} strings: only the label carries it`);
+  }
+  const ar = table("ar");
+  assert.equal(ar["section.pipeline"], "مراحل العمل (Pipeline)");
+  assert.equal(ar["section.qc"], "الإطارات وفحص الجودة (QC)");
+  assert.equal(ar["step.transcript"], "التفريغ النصي (Transcript)");
+  assert.equal(ar["step.frames"], "الإطارات (Frames)");
+  assert.equal(ar["actions.rebuild"], "إعادة البناء (Rebuild)");
+  assert.equal(ar["status.noclient"], "لم يُختَر أي عنصر");
+  assert.equal(ar["log.lines"], "عدد الأسطر: {n}");
+  assert.match(ar["qc.hint"] as string, /مؤشر التشغيل \(Playhead\)/);
+});
+
 // ---- no hard-coded user-visible strings in the render code ----
 
-/** The static text of every string and template literal in a TS source (template expressions become "§"). Comments
- *  and regular expressions are skipped. Small on purpose: enough for the panel's own render code. */
-export function literals(src: string): string[] {
-  const out: string[] = [];
-  let i = 0;
-  let prev = "";
-  const n = src.length;
-  function template(): string {
-    // at the opening backtick
-    let text = "";
-    i++;
-    while (i < n && src[i] !== "`") {
-      if (src[i] === "\\") {
-        text += src.slice(i, i + 2);
-        i += 2;
-      } else if (src[i] === "$" && src[i + 1] === "{") {
-        i += 2;
-        code(true);
-        text += "§";
-      } else text += src[i++];
-    }
-    i++;
-    return text;
-  }
-  function quoted(q: string): string {
-    let text = "";
-    i++;
-    while (i < n && src[i] !== q) {
-      if (src[i] === "\\") {
-        text += src.slice(i, i + 2);
-        i += 2;
-      } else text += src[i++];
-    }
-    i++;
-    return text;
-  }
-  /** Code until the end (or, inside a template expression, until its closing brace). */
-  function code(inExpr: boolean): void {
-    let depth = 0;
-    while (i < n) {
-      const c = src[i]!;
-      if (c === "/" && src[i + 1] === "/") {
-        i = src.indexOf("\n", i);
-        if (i < 0) i = n;
-      } else if (c === "/" && src[i + 1] === "*") {
-        i = src.indexOf("*/", i) + 2;
-      } else if (c === "/" && (prev === "" || "(,=:[!&|?{};+".includes(prev) || /\breturn$/.test(src.slice(0, i).trimEnd()))) {
-        // a regular expression literal
-        i++;
-        let cls = false;
-        while (i < n && (cls || src[i] !== "/")) {
-          if (src[i] === "\\") i++;
-          else if (src[i] === "[") cls = true;
-          else if (src[i] === "]") cls = false;
-          i++;
-        }
-        i++;
-        prev = "/";
-      } else if (c === "`") {
-        out.push(template());
-        prev = "`";
-      } else if (c === '"' || c === "'") {
-        out.push(quoted(c));
-        prev = c;
-      } else {
-        if (c === "{") depth++;
-        else if (c === "}") {
-          if (inExpr && depth === 0) {
-            i++;
-            prev = "}";
-            return;
-          }
-          depth--;
-        }
-        if (!/\s/.test(c)) prev = c;
-        i++;
-      }
-    }
-  }
-  code(false);
-  return out;
-}
-
-const LETTERS = /[A-Za-z\u0600-\u06FF]/;
-
-/** Hard-coded words in an HTML-building literal: text between tags, and literal words in user-visible attributes. */
-export function hardCoded(src: string): string[] {
-  const found: string[] = [];
-  for (const lit of literals(src)) {
-    if (!/<[a-z/][^>]*>/i.test(lit) && !/^[^<]*>/.test(lit)) continue; // not markup
-    for (const m of lit.matchAll(/\b(title|aria-label|placeholder|alt|aria-valuetext)="([^"]*)"/g)) {
-      if (LETTERS.test(m[2]!.replace(/§/g, ""))) found.push(`${m[1]}="${m[2]}"`);
-    }
-    const text = lit.replace(/<[^>]*>/g, " ").replace(/^[^<]*>/, " ").replace(/<[^>]*$/, " ").replace(/§/g, " ");
-    if (LETTERS.test(text)) found.push(text.trim());
-  }
-  return found;
-}
-
-test("the literal scanner sees text, attributes, templates and nested templates, and skips regexes and comments", () => {
+test("the literal scanner sees text, attributes, nested templates, word literals and helper arguments; it skips regexes, comments, keys and commands", () => {
   const sample = [
     "// <p>comment</p>",
     "const a = esc(x).replace(/</g, \"&lt;\").replace(/\"/g, '&quot;');",
-    "const b = `<p>${esc(t[\"k\"])}</p><b>Hello</b>`;",
+    "const b = `<p>${esc(t[\"k.key\"])}</p><b>Hello</b>`;",
     "const c = `<i title=\"Close\">${x ? `<em>Inner</em>` : \"\"}</i>`;",
     "const d = '<span>' + esc(v) + '</span>';",
+    "const e = ltr(`WhyNot Cut ${v} · build ${b}`);",
+    "const f = cmdRow(\"name_prev.prproj\") + cmdRow(\"reel doctor\") + cls(\"twn-rtl\") + t[\"pill.engine\"];",
+    "const g = x ? \" disabled\" : \"\";",
   ].join("\n");
-  assert.deepEqual(hardCoded(sample).sort(), ["Hello", "Inner", 'title="Close"'].sort());
+  assert.deepEqual(hardCoded(sample).sort(), ["Hello", "Inner", 'title="Close"', "WhyNot Cut § · build §", "name_prev.prproj"].sort());
 });
 
 test("no hard-coded user-visible strings in panel-ui/src render code (render.ts, mount.ts): all copy comes from the table", () => {
@@ -176,4 +110,12 @@ test("no hard-coded user-visible strings in panel-ui/src render code (render.ts,
     const found = hardCoded(readFileSync(join(PANEL_UI, "src", f), "utf8"));
     assert.deepEqual(found, [], `${f}: ${found.join(" | ")}`);
   }
+});
+
+test("i18n debt: DaemonSource's own user-visible strings are exactly the documented to-migrate-in-B-T2 list", () => {
+  const found = [...new Set(sentences(readFileSync(join(PANEL_UI, "src", "daemon-source.ts"), "utf8")))];
+  const debt = [...DAEMON_SOURCE_STRINGS_TO_MIGRATE_IN_B_T2];
+  assert.deepEqual(found.filter((s) => !debt.includes(s)), [], "a new hard-coded string in daemon-source.ts: put it in the string table");
+  assert.deepEqual(debt.filter((s) => !found.includes(s)), [], "a debt entry no longer exists in daemon-source.ts: remove it from test/i18n-debt.ts");
+  assert.ok(readFileSync(join(PANEL_UI, "test", "i18n-debt.ts"), "utf8").includes("to migrate in B-T2"));
 });

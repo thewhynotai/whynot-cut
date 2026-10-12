@@ -8,8 +8,12 @@
    - #D95C9B is for eyebrow labels and the active tab underline.
    - The gradient is for the header hairline, progress bars and the main CTA border glow only.
    - Status colours always come with an icon, never colour alone.
-   - Glass sits on the black background (it reads as #141414). Do not stack glass on a #121212 card under small coloured
-     text: pink and violet drop to about 4.35:1 there.
+   Cards (controller ruling, 2026-10-13, per Addendum B §B2 and docs/review/2026-10-11/magnific-brand.md §2.2):
+   - A card is glass, rgba(255,255,255,.08), over the black background (it reads as about #141414), exactly as on
+     thewhynot.ai, where the glass token is the card fill over black.
+   - Glass is never stacked on #121212. --twn-surface (#121212) stays the solid surface for non-glass panels.
+   - adobe/panel-ui/test/contrast.test.ts checks every text token on glass-over-black (all at least 4.5:1) and fails
+     if any panel CSS rule or rendered screen puts glass on a --twn-surface background.
    Fonts: the families are declared in fonts.css from bundled OFL files; every stack ends in a generic family, so the
    panel degrades to it if a host ignores @font-face. */
 :root{
