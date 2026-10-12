@@ -16,11 +16,16 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .common import seq_fps, still_category, Paths, ffmpeg_exe, frame_to_tc, now_iso, read_json, run, write_json, write_text
+from .common import seq_fps, still_category, Paths, ffmpeg_exe, frame_size, frame_to_tc, now_iso, read_json, run, write_json, write_text
 
-SAFE = {"x0": 60, "x1": 1020, "y0": 150, "y1": 1720}
 FULLSCREEN = {"broll_card", "broll_video", "logo_outro", "flash_transition"}
-W, H = 1080, 1920
+TILE_W = 360     # a verify tile is this wide; its height keeps the frame's aspect
+
+
+def safe_area(w: int, h: int) -> dict:
+    """The platform safe area of a w x h frame: 60 px at the sides, 150 px at the top, 200 px at the bottom
+    (the 9:16 values, 60/1020/150/1720, are what 1080x1920 gives)."""
+    return {"x0": 60, "x1": w - 60, "y0": 150, "y1": h - 200}
 
 
 def _rendered_media(paths: Paths) -> list[Path]:
@@ -110,6 +115,9 @@ def build(paths: Paths) -> dict:
         raise FileNotFoundError("timeline-spec.json missing — run plan first")
     from .common import spec_footage
     src = spec_footage(paths, spec)
+    W, H = frame_size(paths)
+    TH = round(TILE_W * H / W)
+    SAFE = safe_area(W, H)
     vdir = paths.p("08_quality_control/verify")
     vdir.mkdir(parents=True, exist_ok=True)
     ff = ffmpeg_exe()
@@ -132,7 +140,7 @@ def build(paths: Paths) -> dict:
             alpha_png = vdir / f"{e['event_id']}_alpha.png"
             run([ff, "-y", "-loglevel", "error", "-ss", f"{rel:.3f}", "-i", str(mov), "-frames:v", "1", str(alpha_png)], check=False)
             run([ff, "-y", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(src), "-ss", f"{rel:.3f}", "-i", str(mov),
-                 "-filter_complex", f"[0]scale={W}:{H}[b];[b][1]overlay,scale=360:640", "-frames:v", "1", str(out)], check=False)
+                 "-filter_complex", f"[0]scale={W}:{H}[b];[b][1]overlay,scale={TILE_W}:{TH}", "-frames:v", "1", str(out)], check=False)
             bbox = _alpha_bbox(alpha_png) if alpha_png.exists() else None
             alpha_png.unlink(missing_ok=True)
         else:
@@ -142,7 +150,7 @@ def build(paths: Paths) -> dict:
             source = "PREVIEW ONLY (not AE)"
             bbox = _alpha_bbox(png) if png.exists() else None
             if comp.exists():
-                open_rgb(comp).resize((360, 640)).save(out, quality=85)
+                open_rgb(comp).resize((TILE_W, TH)).save(out, quality=85)
         safe_ok = None
         if bbox and e["template"] not in FULLSCREEN:
             safe_ok = bbox[0] >= SAFE["x0"] and bbox[2] <= SAFE["x1"] and bbox[1] >= SAFE["y0"] and bbox[3] <= SAFE["y1"]
@@ -168,7 +176,7 @@ def build(paths: Paths) -> dict:
             out = vdir / f"CAP_{int(t * 1000):06d}.jpg"
             ts = t + (spec.get("source_in_ms") or 0) / 1000
             run([ff, "-y", "-loglevel", "error", "-ss", f"{ts:.3f}", "-i", str(src), "-ss", f"{t:.3f}", "-i", str(cap),
-                 "-filter_complex", f"[0]scale={W}:{H}[b];[b][1]overlay,scale=360:640", "-frames:v", "1", str(out)], check=False)
+                 "-filter_complex", f"[0]scale={W}:{H}[b];[b][1]overlay,scale={TILE_W}:{TH}", "-frames:v", "1", str(out)], check=False)
             rows.append({"tile": len(tiles) + 1, "event": "CAPTIONS", "template": "highlight_caption",
                          "tc": frame_to_tc(round(t * seq_fps())), "source": "AE render",
                          "expected_text": c["text"].replace("\n", " ") + "  (may be hidden if a graphic carries the words)"})
@@ -177,14 +185,14 @@ def build(paths: Paths) -> dict:
         if psd_prev.name.startswith("._"):
             continue
         out = vdir / (psd_prev.stem + ".jpg")
-        open_rgb(psd_prev).resize((360, 640)).save(out, quality=85)
+        open_rgb(psd_prev).resize((TILE_W, TH)).save(out, quality=85)
         rows.append({"tile": len(tiles) + 1, "event": psd_prev.stem.replace("_preview", ""), "template": "psd",
                      "source": "Photoshop", "expected_text": "see edit-decisions.global.photoshop_jobs"})
         tile(out, f"{len(tiles) + 1} PSD")
 
     sheet_p = vdir / "verify_sheet.jpg"
-    if not contact_sheet(tiles, sheet_p, cols=6, tile_w=360, tile_h=640, label_box=(150, 24)):
-        Image.new("RGB", (6 * 360, 640), "black").save(sheet_p, quality=85)  # nothing to verify: the old empty sheet
+    if not contact_sheet(tiles, sheet_p, cols=6, tile_w=TILE_W, tile_h=TH, label_box=(150, 24)):
+        Image.new("RGB", (6 * TILE_W, TH), "black").save(sheet_p, quality=85)  # nothing to verify: the old empty sheet
 
     L = [f"# Visual Verification Checklist — {paths.video_id}", "", f"Sheet: `{sheet_p}` (generated {now_iso()})", "",
          "View the sheet and check EVERY tile. A tile passes only if all of these hold:", "",

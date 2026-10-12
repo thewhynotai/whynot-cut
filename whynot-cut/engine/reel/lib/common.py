@@ -109,6 +109,42 @@ def ticks_per_frame(fps: float | None = None) -> int:
     """Premiere ticks of one frame (exact for 23.976 / 24 / 25 / 29.97 / 30 / 50 / 59.94 / 60)."""
     return round(Fraction(TPS) / fps_fraction(seq_fps() if fps is None else fps))
 
+
+# --- frame size (3.0 T2.8, IM-16): the client's sequence-settings.json decides, never a literal 1080x1920 ---
+DEFAULT_FRAME_SIZE = (1080, 1920)    # only when the settings carry no size at all (the shipped default says 1080x1920)
+MAX_FRAME_SIDE = 16384
+
+
+def frame_size(paths: "Paths | None" = None, ctx: "Context | None" = None) -> tuple[int, int]:
+    """(width, height) in pixels of the client's sequence: sequence-settings.json general.frame_width / frame_height,
+    config default <- shipped profile <- the client's reel-profile. `paths` names the client (its folder's profile);
+    else `ctx`, else the current Context. Read now on every call (an edited profile is seen by the next request).
+    A size the settings leave out is DEFAULT_FRAME_SIZE; one that is not a whole number from 1 to 16384 is a Guidance
+    error naming the file and key (never a 0-pixel still or a ZeroDivisionError further on)."""
+    if ctx is None:
+        cur = current_context()
+        ctx = Context(paths.root, cur.profile, cur.engine_home) if paths is not None else cur
+    general = (ctx.config("sequence-settings.json") or {}).get("general") or {}
+    out = []
+    for key, default in zip(("frame_width", "frame_height"), DEFAULT_FRAME_SIZE):
+        v = general.get(key)
+        if v is None and key not in general:
+            out.append(default)
+            continue
+        if isinstance(v, str) and v.strip().isdigit():
+            v = int(v)
+        elif isinstance(v, float) and v.is_integer():
+            v = int(v)
+        if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= MAX_FRAME_SIDE:
+            from .errors import Guidance
+            raise Guidance(f"sequence-settings.json general.{key} is {v!r}: it must be a whole number of pixels "
+                           f"(1 to {MAX_FRAME_SIDE})",
+                           f"Fix `general.{key}` in the client's reel-profile/sequence-settings.json "
+                           f"(1080 and 1920 for a 9:16 reel, 1080 and 1350 for 4:5), then run this again",
+                           where="sequence-settings.json")
+        out.append(v)
+    return out[0], out[1]
+
 STATUSES = [
     "NOT_STARTED", "INPUTS_DISCOVERED", "INPUTS_VALIDATED", "CLIENT_DATABASE_READY",
     "TRANSCRIBED", "ANALYZED", "EDIT_PLAN_READY", "AWAITING_APPROVAL",

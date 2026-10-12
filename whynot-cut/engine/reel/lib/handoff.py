@@ -3,13 +3,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import Paths, project_prefix, frame_to_tc, load_config, now_iso, read_json, seq_fps, write_text
+from .common import Paths, project_prefix, frame_size, frame_to_tc, load_config, now_iso, read_json, seq_fps, write_text
+
+
+def aspect_label(w: int, h: int) -> str:
+    """The aspect of a w x h frame as a file-name tag: 9x16, 4x5, 16x9, 1x1 ... (else the size, e.g. 1000x1500)."""
+    from math import gcd
+    g = gcd(w, h)
+    a, b = w // g, h // g
+    return f"{a}x{b}" if max(a, b) <= 21 else f"{w}x{h}"
 
 
 def export_spec(paths: Paths) -> dict:
     """The client's delivery spec (style.json `export`: name pattern, video/audio settings, folder) for this video.
     Pattern fields: {episode} (the raw file's stem), {video_id}, {name} (the range label without the id), {prefix},
-    {version}. Example: "{episode}_{video_id}_{name}_9x16_AR_v{version:02d}.mp4" -> EP02_R02_Tennis_Racket_Tasleem_..."""
+    {version}, {aspect} (9x16, 4x5, 16x9 ... from the frame size). Example: "{episode}_{video_id}_{name}_9x16_AR_v{version:02d}.mp4" -> EP02_R02_Tennis_Racket_Tasleem_..."""
     from .common import source_range
     ex = load_config("style.json").get("export") or {}
     rng = source_range(paths)
@@ -17,14 +25,15 @@ def export_spec(paths: Paths) -> dict:
     name = label[len(paths.video_id):].strip(" _-") if label.startswith(paths.video_id) else label
     fields = {"episode": Path(rng["footage"]).stem if rng else paths.video_id, "video_id": paths.video_id,
               "name": (name or paths.video_id).replace(" ", "_"), "prefix": project_prefix(),
-              "version": int(ex.get("version", 1))}
+              "version": int(ex.get("version", 1)), "aspect": aspect_label(*frame_size(paths))}
     try:
-        file_name = (ex.get("name") or "{video_id}_{prefix}_9x16_v{version:02d}.mp4").format(**fields)
+        file_name = (ex.get("name") or "{video_id}_{prefix}_{aspect}_v{version:02d}.mp4").format(**fields)
     except (KeyError, ValueError, IndexError) as e:
-        file_name = f"{paths.video_id}_{project_prefix()}_9x16_v01.mp4 (export.name pattern error: {e})"
+        file_name = f"{paths.video_id}_{project_prefix()}_{fields["aspect"]}_v01.mp4 (export.name pattern error: {e})"
     fps = seq_fps()
+    fw, fh = frame_size(paths)
     return {"file_name": file_name,
-            "video": ex.get("video") or f"H.264 High Profile, 1080x1920 at {fps:.2f} fps, high bitrate (or ProRes)",
+            "video": ex.get("video") or f"H.264 High Profile, {fw}x{fh} at {fps:.2f} fps, high bitrate (or ProRes)",
             "audio": ex.get("audio") or "AAC 320 kbps, 48 kHz stereo, -14 LUFS integrated, true peak <= -1 dB",
             "folder": ex.get("folder")}
 
@@ -137,6 +146,7 @@ def build(paths: Paths) -> dict:
     tm = timeline_manifest(paths)
     _fps = seq_fps()
     _fps_num = f"{_fps:.2f}"
+    _fw, _fh = frame_size(paths)
     _fps_label = f"{_fps:.2f} fps Non-Drop-Frame" if abs(_fps - round(_fps)) > 0.001 else f"{round(_fps)} fps"
     qc = read_json(paths.p("08_quality_control/qc-results.json"), {})
     exp = export_spec(paths)
@@ -256,9 +266,9 @@ def build(paths: Paths) -> dict:
                 f"   Premiere creates a bin with the sequence **{seq_name}** and all linked media.",
                 "2. Open the sequence → **Sequence › Sequence Settings…** and confirm/set the values the XML cannot carry:",
                 f"   - Editing Mode **Custom**, Display Format **{_fps_label} Timecode**, Audio Display Format **Audio Samples**",
-                "   - Preview File Format **QuickTime**, Codec **Apple ProRes 422 LT**, Preview **1080 × 1920**",
+                f"   - Preview File Format **QuickTime**, Codec **Apple ProRes 422 LT**, Preview **{_fw} × {_fh}**",
                 "   - Maximum Bit Depth **off**, Maximum Render Quality **off**, **Composite in Linear Color on**",
-                f"   - (Verify XML-set values: 1080×1920, {_fps_num} fps, Square Pixels, No Fields, 48000 Hz stereo.)",
+                f"   - (Verify XML-set values: {_fw}×{_fh}, {_fps_num} fps, Square Pixels, No Fields, 48000 Hz stereo.)",
                 cap_step,
                 "4. Rename tracks (Premiere does not read track names from XML):", "",
                 "| XML track | Role | Clips |", "|---|---|---|", vtr, atr, "",
@@ -307,7 +317,7 @@ def build(paths: Paths) -> dict:
                      "- [ ] File › Save (the project stays at the path above)"]
     else:
         prem_chk = [f"- [ ] Import XML, open sequence `{seq_name}`",
-                    f"- [ ] Sequence Settings: Custom · {_fps_label} TC · Audio Samples · QuickTime ProRes 422 LT previews 1080×1920 · Max bit depth OFF · Max render quality OFF · Composite in linear color ON",
+                    f"- [ ] Sequence Settings: Custom · {_fps_label} TC · Audio Samples · QuickTime ProRes 422 LT previews {_fw}×{_fh} · Max bit depth OFF · Max render quality OFF · Composite in linear color ON",
                     ("- [ ] Animated captions (C02) checked against audio; optional `subtitles.srt` caption track kept hidden (CC export only)"
                      if ae_captions else "- [ ] Captions: import `subtitles.srt` as the caption track (or build natively with `reel ppro-build`)"),
                     "- [ ] Rename tracks per README table", "- [ ] Check no offline media (red frames)",

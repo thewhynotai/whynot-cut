@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-from .common import fps_arg, seq_fps, Paths, ffmpeg_exe, log, now_iso, read_json, write_json
+from .common import fps_arg, frame_size, seq_fps, Paths, ffmpeg_exe, log, now_iso, read_json, write_json
 
 SR = 48000
 F = 1 / 24   # animation time unit (the Premiere JSX presets use the same 1/24 s), not the sequence rate
@@ -24,7 +24,7 @@ F = 1 / 24   # animation time unit (the Premiere JSX presets use the same 1/24 s
 
 # --------------------------------------------------------------------------- animation (same presets as nh_ppro_lib.jsx)
 def anim_state(g: dict, u: float) -> dict:
-    """Opacity 0-1, scale, crop_left 0-1 (fraction hidden from the left) and x shift (px @1080) at local time u."""
+    """Opacity 0-1, scale, crop_left 0-1 (fraction hidden from the left) and x shift (px of the sequence frame) at local time u."""
     dur = g["end_s"] - g["start_s"]
     fo = min(g.get("fade_out_s") or 0, dur / 3)
     out = 1.0 if fo <= 0 or u < dur - fo else max(0.0, (dur - u) / fo)
@@ -167,9 +167,10 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
         return {"ok": False, "error": "graphics stills missing - run `reel previews` first", "missing": data["_missing"][:10]}
     from .common import spec_footage
     src = spec_footage(paths, spec)
+    SW, SH = frame_size(paths)                  # the sequence frame (profile); the preview keeps its aspect
     W = int(width) // 2 * 2
-    H = int(round(W * 16 / 9)) // 2 * 2
-    k = W / 1080
+    H = int(round(W * SH / SW)) // 2 * 2
+    k = W / SW
     out_dir = paths.p("08_quality_control/preview")
     out_dir.mkdir(parents=True, exist_ok=True)
     mp4 = out_dir / f"{paths.video_id}_preview.mp4"
@@ -179,8 +180,8 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
     # reframe) but never cropped here, so per-piece zooms can also zoom OUT (source cutaways shown whole)
     pre = read_json(paths.p("00_inputs/preflight.json"), {"files": []})
     mp = next((f for f in pre["files"] if f.get("video") and Path(f["path"]).name == src.name), None)
-    dw, dh = (mp["video"]["display_width"], mp["video"]["display_height"]) if mp else (1080, 1920)
-    s = (spec.get("base_scale_percent") or min(1080 / dw, 1920 / dh) * 100) / 100 * k
+    dw, dh = (mp["video"]["display_width"], mp["video"]["display_height"]) if mp else (SW, SH)
+    s = (spec.get("base_scale_percent") or min(SW / dw, SH / dh) * 100) / 100 * k
     cw_, ch_ = max(2, round(dw * s / 2) * 2), max(2, round(dh * s / 2) * 2)
     box, boy = spec.get("base_offset_x", 0.0), spec.get("base_offset_y", 0.0)
     off = ["-ss", f"{(spec.get('source_in_ms') or 0) / 1000:.3f}"] if spec.get("source_in_ms") else []

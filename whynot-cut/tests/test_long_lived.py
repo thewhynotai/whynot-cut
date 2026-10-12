@@ -351,7 +351,7 @@ class TestFrameGrab(TempDir):
         # MI-9: previews.grab_frame left a mkstemp PNG (and its fd) behind on every call
         with mock.patch("tempfile.mkstemp", side_effect=AssertionError("no temp files")):
             im = no_resource_warnings(self, lambda: previews.grab_frame(v, 1000))
-        self.assertEqual((im.size, im.mode), ((previews.W, previews.H), "RGBA"))
+        self.assertEqual((im.size, im.mode), (common.frame_size(), "RGBA"))
 
     def test_grab_frame_file_never_returns_a_stale_file(self):
         from lib import media_util

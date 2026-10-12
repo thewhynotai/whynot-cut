@@ -9,13 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import still_category, caption_hide_default, Paths, seq_fps, project_prefix, load_config, ms_to_frame, now_iso, read_json, write_json
+from .common import still_category, caption_hide_default, frame_size, Paths, seq_fps, project_prefix, load_config, ms_to_frame, now_iso, read_json, write_json
 from . import srt as srtlib
 from .plan import norm, to_ms
 
 SETTINGS = {  # user's sequence spec; verified field names/values from Premiere 26.5 getSettings()
-    "previewCodec": "apcs",               # Apple ProRes 422 LT
-    "previewFrameWidth": 1080, "previewFrameHeight": 1920,
+    "previewCodec": "apcs",               # Apple ProRes 422 LT; previewFrameWidth/Height = the profile's frame (job_data)
     "maximumBitDepth": False, "maximumRenderQuality": False, "compositeLinearColor": True,
 }
 LANE_NAMES = {"broll": "B-roll (full screen)", "gfx_bar": "Graphic bars (sweep)", "card": "Cards (closing glass)",
@@ -61,7 +60,7 @@ def cutaway_bands(paths: Paths, spec: dict) -> list:
     v = main_video(pre, spec.get("main_footage"))     # this reel's footage, not the first file preflight lists
     if not v:
         return []
-    H = load_config("sequence-settings.json")["general"]["frame_height"]
+    H = frame_size(paths)[1]
     bsp = float(spec.get("base_scale_percent") or 100.0)
     fps = seq_fps()
     out = []
@@ -159,7 +158,8 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
         anames += [f"A{len(anames) + 1} {nm} L", f"A{len(anames) + 2} {nm} R"]
     return {"project_path": str(paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")),
             "overwrite_existing": overwrite, "xml_path": base["xml"], "sequence_name": base["sequence_name"],
-            "settings": SETTINGS, "graphics": g_out, "srt_path": str(paths.p("02_transcription/subtitles-seq.srt")),
+            "settings": dict(SETTINGS, **dict(zip(("previewFrameWidth", "previewFrameHeight"), frame_size(paths)))),
+            "graphics": g_out, "srt_path": str(paths.p("02_transcription/subtitles-seq.srt")),
             "native_caption_track": bool(g.get("native_caption_track", False)),
             "markers": markers, "track_names": {"video": vnames, "audio": anames}, "_missing": missing,
             "blur_v1_clips": (base.get("cutaways") or {}).get("blur_v1_clip_indices") or [],
@@ -272,10 +272,11 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, em) -> dict:
         backup.rename(prproj)
         backup, restored = None, True
     sa = res.get("settings_after", {})
+    fw, fh = frame_size(paths)
     checks = {
         "prproj_saved_this_run": saved_now,
         "preview_codec_prores_422_lt": sa.get("previewCodec") == "apcs",
-        "frame_1080x1920": (sa.get("videoFrameWidth"), sa.get("videoFrameHeight")) == (1080, 1920),
+        f"frame_{fw}x{fh}": (sa.get("videoFrameWidth"), sa.get("videoFrameHeight")) == (fw, fh),
         f"fps_{seq_fps():.4g}": abs((sa.get("videoFrameRate") or {}).get("seconds", 0) - 1 / seq_fps()) < 1e-6,
         "linear_color_on": sa.get("compositeLinearColor") is True,
         "max_bit_depth_off": sa.get("maximumBitDepth") is False,

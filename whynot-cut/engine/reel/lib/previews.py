@@ -1,4 +1,4 @@
-"""Static PNG previews of every planned graphic (1080x1920, transparent where overlay).
+"""Static PNG previews of every planned graphic (the profile's frame size, 1080x1920 by default; transparent where overlay).
 
 Purpose: (1) instant visual QC of the plan, (2) fallback media for the Premiere XML when
 After Effects renders are unavailable. Final animated/editable versions are the AE comps.
@@ -13,10 +13,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
-from .common import still_category, Paths, brand_fallback, font_role_fallback, load_config, read_json, write_json, now_iso, ms_to_frame
+from .common import still_category, Paths, brand_fallback, font_role_fallback, frame_size, load_config, read_json, write_json, now_iso, ms_to_frame
 from .font_roles import DEFAULT_ROLE_STYLE, resolve
-
-W, H = 1080, 1920
 
 
 def _shape(s: str) -> str:
@@ -252,11 +250,13 @@ def save_still(im: Image.Image, out: Path) -> Path:
 
 
 def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, out: Path, frame_bg=None,
-                 layer: str = "all", probe=None, notes: list | None = None) -> Path:
+                 layer: str = "all", probe=None, notes: list | None = None, size: tuple | None = None) -> Path:
     """layer: 'all' | 'bars' (teal bars/boxes only) | 'fg' (everything except bars) -> separate stills so
     Premiere can animate bars (RTL crop sweep) and text (pop) independently.
-    probe: the frame behind the graphic (1080x1920 image, or a callable returning it). It never reaches the still; it only
-    decides whether a brand-coloured text drawn straight over the footage is readable (else white/paper + a line in `notes`)."""
+    probe: the frame behind the graphic (a frame-sized image, or a callable returning it). It never reaches the still; it only
+    decides whether a brand-coloured text drawn straight over the footage is readable (else white/paper + a line in `notes`).
+    size: the frame (width, height); default the profile's (common.frame_size). The layout (style.json y, sizes) is in pixels."""
+    W, H = size or frame_size()
     BARS, FG = layer in ("all", "bars"), layer in ("all", "fg")
     tp, p = ev["template"], ev["params"]
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -419,17 +419,18 @@ def render_event(ev: dict, t: dict, b: Brand, assets: dict, logo: str | None, ou
             lg.thumbnail((780, 780))
             im.alpha_composite(lg, (W // 2 - lg.width // 2, H // 2 - lg.height // 2))
     elif tp == "broll_video":   # QC/contact-sheet still only; Premiere gets the real clip from the XML
-        fr = grab_frame(Path(p["video_path"]), int(float(p.get("in", 0) or 0) * 1000) + 500) if p.get("video_path") else None
+        fr = grab_frame(Path(p["video_path"]), int(float(p.get("in", 0) or 0) * 1000) + 500, (W, H)) if p.get("video_path") else None
         im = fr if fr is not None else Image.new("RGBA", (W, H), (40, 40, 40, 255))
     elif tp == "flash_transition":
         im = Image.new("RGBA", (W, H), (255, 255, 255, int(255 * t.get("peak_opacity", 0.9))))
     return save_still(im, out)
 
 
-def grab_frame(video: Path, ms: int) -> Image.Image | None:
-    """The source frame at ms, cropped to fill the W x H sequence frame (RGBA), or None. Through a pipe: the old
-    version left a temp PNG and its descriptor behind on every call (MI-9)."""
+def grab_frame(video: Path, ms: int, size: tuple | None = None) -> Image.Image | None:
+    """The source frame at ms, cropped to fill the W x H sequence frame (RGBA; the profile's size by default), or None.
+    Through a pipe: the old version left a temp PNG and its descriptor behind on every call (MI-9)."""
     from .media_util import grab_frame as _grab
+    W, H = size or frame_size()
     return _grab(video, ms / 1000, W, H, fit="crop", mode="RGBA")
 
 
@@ -440,6 +441,8 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
         from .errors import Guidance
         raise Guidance("no compiled plan yet (01_analysis/timeline-spec.json)", "Run `reel plan` first")
     main = spec_footage(paths, spec)
+    size = frame_size(paths)
+    W, H = size
     tpls = load_config("graphics-templates.json")["templates"]
     b = Brand(paths.client_db)
     man = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
@@ -463,28 +466,28 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
 
         def probe(mid=mid):
             if not grabbed:
-                grabbed.append(grab_frame(main, mid + int(spec.get("source_in_ms") or 0)))
+                grabbed.append(grab_frame(main, mid + int(spec.get("source_in_ms") or 0), size))
             return grabbed[0]
         # PRODUCTION still: clean transparent overlay (never bake footage into it; the speaker moves)
-        render_event(ev, tpls[ev["template"]], b, assets, logo, out, frame_bg=None, probe=probe, notes=warns)
+        render_event(ev, tpls[ev["template"]], b, assets, logo, out, frame_bg=None, probe=probe, notes=warns, size=size)
         outs.append(str(out))
         if ev["template"] in BAR_TEMPLATES:   # separate layers: text (pop) + bars (RTL sweep)
             fg = paths.p(f"03_broll/{cat}/{ev['event_id']}_fg.png")
             bars = paths.p(f"03_broll/{cat}/{ev['event_id']}_bar.png")
-            render_event(ev, tpls[ev["template"]], b, assets, logo, fg, layer="fg", probe=probe)
-            render_event(ev, tpls[ev["template"]], b, assets, logo, bars, layer="bars")
+            render_event(ev, tpls[ev["template"]], b, assets, logo, fg, layer="fg", probe=probe, size=size)
+            render_event(ev, tpls[ev["template"]], b, assets, logo, bars, layer="bars", size=size)
             outs += [str(fg), str(bars)]
         if ev["template"] == "checklist":
             # title still + one still per item in its final row -> items slide in one by one in Premiere
             items = ev["params"].get("items", [])
             ttl = dict(ev, params=dict(ev["params"], items=[], _row_count=len(items)))
             tp_ = paths.p(f"03_broll/{cat}/{ev['event_id']}_title.png")
-            render_event(ttl, tpls["checklist"], b, assets, logo, tp_)
+            render_event(ttl, tpls["checklist"], b, assets, logo, tp_, size=size)
             outs.append(str(tp_))
             for k, it in enumerate(items):
                 one = dict(ev, params=dict(ev["params"], items=[it], _row_count=len(items), _row_offset=k, _no_title=True))
                 ip = paths.p(f"03_broll/{cat}/{ev['event_id']}_i{k + 1}.png")
-                render_event(one, tpls["checklist"], b, assets, logo, ip)
+                render_event(one, tpls["checklist"], b, assets, logo, ip, size=size)
                 outs.append(str(ip))
         bg = probe() if composite_preview else None
         if bg is not None:  # QC composite only: graphic over the actual frame (frosted look simulated)
@@ -492,20 +495,20 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
             fd, tmp = tempfile.mkstemp(suffix=".png")
             os.close(fd)
             tmp = Path(tmp)
-            render_event(ev, tpls[ev["template"]], b, assets, logo, tmp, frame_bg=bg, probe=probe)
+            render_event(ev, tpls[ev["template"]], b, assets, logo, tmp, frame_bg=bg, probe=probe, size=size)
             comp = bg.copy()
             with Image.open(tmp) as im:
                 comp.alpha_composite(im.convert("RGBA"))
             tmp.unlink(missing_ok=True)
             cp = paths.p(f"08_quality_control/previews/{ev['event_id']}_{ev['template']}.jpg")
             cp.parent.mkdir(parents=True, exist_ok=True)
-            comp.convert("RGB").resize((540, 960)).save(cp, quality=85)
+            comp.convert("RGB").resize((540, round(540 * H / W))).save(cp, quality=85)
             comps.append(str(cp))
     # contact sheet of composites: exactly one tile per composite (G73: it was half empty, 6 columns for 3 tiles)
     if comps:
         from .media_util import contact_sheet
         contact_sheet([(c, "") for c in comps], paths.p("08_quality_control/previews/_contact_sheet.jpg"),
-                      cols=6, tile_w=270, tile_h=480)
+                      cols=6, tile_w=270, tile_h=round(270 * H / W))
     return {"previews": outs, "composites": comps, "warnings": warns}
 
 
@@ -527,6 +530,8 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
     Cues under a graphic that already shows the words are trimmed/dropped (reference behaviour)."""
     from . import srt as srtlib
     from .plan import norm
+    size = frame_size(paths)
+    W, H = size
     spec = read_json(paths.p("01_analysis/timeline-spec.json"))
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     t = load_config("graphics-templates.json")["templates"]["highlight_caption"]
@@ -573,12 +578,12 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
             up = top - half - 24
             ev["params"]["y"] = int(up) if up - half >= SAFE_TOP_PX else int(min(H - 300, bot + half + 24))
         fg = out_dir / f"CAP_{i + 1:03d}_fg.png"
-        render_event(ev, t, b, {}, None, fg, layer="fg")
+        render_event(ev, t, b, {}, None, fg, layer="fg", size=size)
         item = {"id": f"CAP_{i + 1:03d}", "fg": str(fg), "start_ms": s, "end_ms": e, "highlight": is_hl, "text": text}
         prev_end = e
         if is_hl or t.get("box_all") or ev["params"].get("on_fill"):
             bar = out_dir / f"CAP_{i + 1:03d}_bar.png"
-            render_event(ev, t, b, {}, None, bar, layer="bars")
+            render_event(ev, t, b, {}, None, bar, layer="bars", size=size)
             item["bar"] = str(bar)
         res.append(item)
     write_json(out_dir / "captions-manifest.json", {"generated": now_iso(), "captions": res})
