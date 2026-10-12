@@ -179,8 +179,10 @@ class TestReelsSelectBy(InProcess):
     def test_pick_without_by_is_refused_with_the_form(self):
         with mock.patch("lib.reels.select") as sel:
             code, out, err = self.main("--episode", "EP1", "reels-select", "--pick", "R01")
-        self.assertEqual(code, 1)
-        self.assertIn("--by editor|delegated required with --pick", err)
+        self.assertEqual(code, 2, (out, err))                 # a JSON refusal, like verify --record (T2.16 review)
+        doc = json.loads(out)
+        self.assertIn("--by editor|delegated required with --pick", doc["refused"])
+        self.assertIn("--pick R01,R03 --by editor", doc["how"])
         sel.assert_not_called()
 
     def test_the_avoid_hint_names_the_comma_form(self):
@@ -474,6 +476,40 @@ class TestDelivered(Base):
         self.assertEqual(code, 2, (doc, err))
         self.assertIn("not ready", doc["refused"])
         self.assertEqual(common.load_status(self.p)["status"], "TRANSCRIBED")
+
+    def test_delivered_after_a_stale_qc_is_refused(self):
+        """T2.16 review (Minor 2): QC passed, then the frames were verified again: `reel next` says STALE (qc and the
+        handoff are older than what they checked), so the delivery is refused (exit 2) and the status stays."""
+        common.set_status(self.p, "READY_FOR_HUMAN_EDITOR", "handoff written")
+        old = 1_700_000_000
+        for rel in ("08_quality_control/qc-results.json", "09_handoff/README.md",
+                    "08_quality_control/visual-verification.json"):
+            f = self.p.p(rel)
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("{}", encoding="utf-8")
+            if "verification" not in rel:                 # visual-verification.json was written after QC
+                os.utime(f, (old, old))
+        stale = cli_module().stale_steps(self.p)
+        self.assertTrue(any(s.startswith("qc (") for s in stale), stale)
+        code, doc, err = reel(self.root, "handoff", "--delivered", video_id="CLIP1")
+        self.assertEqual(code, 2, (doc, err))
+        self.assertIn("STALE", doc["refused"])
+        self.assertTrue(doc["stale"])
+        self.assertIn("reel next", doc["how"])
+        self.assertEqual(common.load_status(self.p)["status"], "READY_FOR_HUMAN_EDITOR")
+
+    def test_abbreviated_flags_are_usage_errors(self):
+        """T2.16 review (Minor 1): allow_abbrev=False — `--deliv` is not `--delivered`, on any parser."""
+        common.set_status(self.p, "READY_FOR_HUMAN_EDITOR", "handoff written")
+        self.p.p("09_handoff/README.md").write_text("# handoff", encoding="utf-8")
+        for argv in (["handoff", "--deliv"], ["verify", "--rec", "--verdict", "pass"]):
+            with self.subTest(argv=argv):
+                code, out, err = reel(self.root, *argv, video_id="CLIP1")
+                self.assertEqual(code, 2, (out, err))
+                self.assertIn("unrecognized arguments", err)
+        code, out, err = reel(None, "--ro", str(self.root), "status")
+        self.assertEqual(code, 2, (out, err))
+        self.assertEqual(common.load_status(self.p)["status"], "READY_FOR_HUMAN_EDITOR")
 
     def test_only_the_lead_records_a_delivery(self):
         def guard(agent):

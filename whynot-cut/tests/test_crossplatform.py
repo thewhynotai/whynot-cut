@@ -4,6 +4,8 @@ Run:  <engine venv python> -m unittest discover -s <plugin>/tests -v
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -411,7 +413,8 @@ class TestRealClientGaps(unittest.TestCase):
             fit = min(1080 / 384, 1920 / 216) * 100
             self.assertAlmostEqual(cut[0]["scale_factor"] * spec["base_scale_percent"], fit, places=1)
             render_all(p, composite_preview=False)
-            pv = preview(p, width=270)
+            with contextlib.redirect_stderr(io.StringIO()):       # its `[time] preview video` log line
+                pv = preview(p, width=270)
             self.assertTrue(pv["ok"], pv)
             png = Path(t) / "f.png"
             subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", "7.0", "-i", pv["video"], "-frames:v", "1",
@@ -468,7 +471,8 @@ class TestBrollVideo(unittest.TestCase):
             self.assertEqual(len(vids), 1)
             audio_names = [c.findtext("name") or "" for c in xml.find("./sequence/media/audio").iter("clipitem")]
             self.assertFalse([n for n in audio_names if "stock_red" in n], "B-roll audio must never reach the timeline")
-            pv = preview(p, width=270)
+            with contextlib.redirect_stderr(io.StringIO()):       # its `[time] preview video` log line
+                pv = preview(p, width=270)
             self.assertTrue(pv["ok"], pv)
             png = Path(t) / "b.png"
             subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", "3.0", "-i", pv["video"], "-frames:v", "1",
@@ -931,7 +935,8 @@ class TestClientPlanRules(unittest.TestCase):
                                                   r"<valuemax>100</valuemax><value>([0-9.]+)</value>", xml)]
             self.assertTrue(tops and max(tops) > min(tops) >= 0, tops)
             render_all(p, composite_preview=False)
-            pv = preview(p, width=270)
+            with contextlib.redirect_stderr(io.StringIO()):       # its `[time] preview video` log line
+                pv = preview(p, width=270)
             self.assertTrue(pv["ok"], pv)
             png = Path(t) / "f.png"
             subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", "5.0", "-i", pv["video"], "-frames:v", "1",
@@ -1011,8 +1016,9 @@ class TestClientPlanRules(unittest.TestCase):
             p1, p2 = Paths(Path(t), "R01"), Paths(Path(t), "R02")
             p1.ensure_project()
             p2.ensure_project()
-            a = analyze_all(p1, [ref], {str(ref): 3.0})
-            b = analyze_all(p2, [ref], {str(ref): 3.0})
+            with contextlib.redirect_stderr(io.StringIO()):       # the `[time] Reference ...` log lines
+                a = analyze_all(p1, [ref], {str(ref): 3.0})
+                b = analyze_all(p2, [ref], {str(ref): 3.0})
             log2 = p2.p("logs/pipeline.log").read_text(encoding="utf-8")
             self.assertIn("cached client analysis", log2)
             self.assertEqual(a["references"], b["references"])

@@ -66,7 +66,7 @@ Agents don't see this conversation, so give them what they need.
 | **9 Gate 1** | **you + the editor** | approve-plan | the editor approved this plan (or `approval: auto`) |
 | 10 Build | `premiere-builder` | ppro-status, ppro-build (or `premiere` fallback) | PRPROJ_BUILT, all read-back checks true |
 | 12 Verify | `qc-reviewer` (independent, fresh context) | ppro-frames, qc | per-frame verdicts returned |
-| 13 Record + hand off | **you** | verify --record, qc, handoff | qc ok **in this message** |
+| 13 Record + hand off | **you** | `verify --record --verdict pass\|fail --note "…"`, qc, handoff | qc ok **in this message** |
 
 Stage 5 is **client-level**: the reference style is written once per client in `output/client_database/reference_style/`
 (`editing-style-analysis.md`, `editing-style.json`, `editing-rules.json`) and recorded with `reel ref-style --record`.

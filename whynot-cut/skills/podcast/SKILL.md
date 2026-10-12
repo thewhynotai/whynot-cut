@@ -38,7 +38,7 @@ reel profile --root "<CLIENT>"                          # client profile (NONE -
 | Per reel | the edit pipeline (`edit/SKILL.md`), video id `<EP>_<RID>` | preflight, audio-clean, plan, previews, preview-video | reel plan + preview |
 | P Publish (∥ from E4) | `publish-writer` | `publish-check`, `publish-thumbnail` | package passes |
 | **Gate 1** (one, combined) | you + the editor | `approve-plan` per reel | approved reels |
-| Build → QC → report | as in `edit/SKILL.md` | `ppro-build`, `ppro-frames`, `verify --record`, `qc`, `handoff` | qc ok per reel |
+| Build → QC → report | as in `edit/SKILL.md` | `ppro-build`, `ppro-frames`, `verify --record --verdict pass\|fail --note "…"`, `qc`, `handoff` | qc ok per reel |
 
 Long episode on CPU: `episode-transcribe` resumes from its chunk checkpoints; if it stops, run it again. Whisper on an
 NVIDIA GPU is much faster (`reel gpu-enable`, with the editor's OK).

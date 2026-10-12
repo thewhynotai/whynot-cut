@@ -5,6 +5,8 @@ Set NH_INTEGRATION=1 to also run Whisper (uses macOS `say` to synthesize Arabic 
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -321,7 +323,8 @@ class TestPlanToXML(unittest.TestCase):
         # watchable preview of the plan: same layers as the Premiere build, real H.264 + AAC of the sequence length
         from lib.preview_video import render as preview
         from lib.media import probe
-        pv = preview(self.p, width=270)
+        with contextlib.redirect_stderr(io.StringIO()):       # its `[time] preview video: ...` log line (T2.16 review)
+            pv = preview(self.p, width=270)
         self.assertTrue(pv["ok"], pv)
         pr = probe(Path(pv["video"]))
         self.assertAlmostEqual(pr["duration_s"], spec["duration_frames"] / 24, delta=0.25)

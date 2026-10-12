@@ -31,7 +31,8 @@ Never hard-code a path to the engine's python.
 - The 3.0 runtime is isolated: it is built from the platform's hash lock (`setup/locks/`) without
   `--system-site-packages`, and the wrappers run it with `-s`, so nothing from the user site-packages leaks in.
   `reel doctor` → `isolated: true` means every engine module loads from inside the runtime; `false` lists the
-  module and the fix (`reel setup`, which builds or repairs the runtime side by side and switches `current`).
+  module and the fix (`reel setup`, which repairs the runtime in place, or builds a new one side by side and
+  switches `current`).
 - Only a 2.x venv still on a machine was built with `--system-site-packages` (that flag belongs to
   `setup/setup_env.py` and is not a `reel setup` option); there `-I`, `-s` and `-E -s` switch the user site-packages
   off and `import PIL` fails with `ModuleNotFoundError` although `reel` works. `reel py` avoids it; `reel setup`

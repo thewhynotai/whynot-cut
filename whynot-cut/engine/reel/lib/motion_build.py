@@ -326,8 +326,8 @@ def run_script(paths, timeout: int = 900) -> dict:
     jsx = write_fallback_script(paths)
     t0 = time.time()
     r = run_after_effects(jsx, timeout, done=lambda: aep.exists() and aep.stat().st_mtime >= t0 - 1)
-    if r.get("status") == "UNSUPPORTED":
-        return dict(r, jsx=str(jsx))
+    if r.get("status") == "UNSUPPORTED":                 # nothing built is never exit 0 (T2.16 review)
+        return dict(r, ok=False, jsx=str(jsx))
     said = next((ln.split(REFUSED_MARK, 1)[1].strip() for ln in str(r.get("stdout") or "").splitlines()
                  if REFUSED_MARK in ln), None)            # macOS: osascript prints the script's result
     if said is not None:

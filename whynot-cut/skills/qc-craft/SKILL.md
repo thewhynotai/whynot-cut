@@ -47,4 +47,5 @@ Podcast reels: `qc` also checks that the first V1 clip starts at the reel's in-p
 ## Motion mode (2.2)
 `reel qc` on a motion project checks: plan_valid, approval_current, aep_fresh, readback, render, audio_sync
 (correlation ≥ 0.9, offset ≤ 1 frame), cut_proof, visual_verified (pass on the newest AE frames sheet), licenses;
-approvals are a warning. Record the verdict with `reel verify --record` only after viewing the frames sheet yourself.
+approvals are a warning. Record the verdict with `reel verify --record --verdict pass|fail --note "…"` only after
+viewing the frames sheet yourself.

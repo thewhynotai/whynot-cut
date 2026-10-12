@@ -1523,6 +1523,18 @@ class TestMotionBuild(CompiledMotion):
             self.mb.run_script(self.reel, timeout=1)
             self.assertEqual(len(launched), 1, titles)
 
+    def test_run_script_without_after_effects_is_not_exit_0(self):
+        """T2.16 review (Minor 4): with no After Effects to run the script, nothing is built: ok:false (exit 1), the
+        status kept as UNSUPPORTED and the script named so the editor can run it later."""
+        from lib.errors import exit_code
+        self.fake_run_script_env([], lambda jsx, timeout, done: {"status": "UNSUPPORTED",
+                                                                  "msg": "After Effects not installed"})
+        r = self.mb.run_script(self.reel, timeout=1)
+        self.assertEqual(r["status"], "UNSUPPORTED")
+        self.assertIs(r["ok"], False)
+        self.assertTrue(r["jsx"])
+        self.assertEqual(exit_code(r), 1)
+
     def test_run_script_timeout_says_why(self):
         """Review (Minor 4): when the .aep never appears (e.g. After Effects could not tell whether its project is saved,
         so the script refused with an alert), the result says so instead of only "no read-back"."""

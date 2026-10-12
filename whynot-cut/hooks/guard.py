@@ -1254,12 +1254,25 @@ def own_role(agent: str | None) -> str | None:
     return agent[len(PLUGIN_AGENT):] if agent and agent.startswith(PLUGIN_AGENT) else None
 
 
+def is_opt(tok: str, name: str) -> bool:
+    """`tok` names the long option `name`: exactly, as `name=value`, or abbreviated (`--deliv`, `--rec=1`). The CLI
+    refuses abbreviations (allow_abbrev=False, T2.16 review); the guard treats any prefix as the flag all the same."""
+    t = tok.strip("'\"").split("=", 1)[0]
+    return len(t) > 2 and t.startswith("--") and name.startswith(t)
+
+
+def has_opt(argv: list[str], name: str) -> bool:
+    return any(is_opt(a, name) for a in argv[1:])
+
+
 def opt_value(argv: list[str], name: str) -> str | None:
     for i, a in enumerate(argv):
-        if a == name and i + 1 < len(argv):
-            return argv[i + 1]
-        if a.startswith(name + "="):
+        if not is_opt(a, name):
+            continue
+        if "=" in a:
             return a.split("=", 1)[1]
+        if i + 1 < len(argv):
+            return argv[i + 1]
     return None
 
 
@@ -1277,29 +1290,29 @@ def check_reel(exe: str, argv: list[str], agent: str | None):
         if agent:                       # gate rules: every subagent, whatever plugin it comes from
             if sub == "approve-plan":
                 block("only the lead editor (main conversation) records plan approval, after the editor approves.")
-            if sub == "lock" and "--release" in argv:
+            if sub == "lock" and has_opt(argv, "--release"):
                 block("only the lead editor releases the client's writer lock (`reel lock --release`), when the editor "
                       "says the other session is finished. Report the lock instead.")
             if sub == "reels-select":
                 block("only the lead editor records which reels the editor picked (Gate 0), from the editor's own "
                       "message. Report the candidates instead.")
-            if sub == "settings" and "--init" in argv:
+            if sub == "settings" and has_opt(argv, "--init"):
                 block("only the lead editor changes the editor's preferences (e.g. approval mode), when the editor asks.")
-            if sub == "handoff" and "--delivered" in argv:         # 3.0 T2.16
+            if sub == "handoff" and has_opt(argv, "--delivered"):         # 3.0 T2.16
                 block("only the lead editor records a delivery (`reel handoff --delivered`), when the editor says the "
                       "video went to the client.")
-            if sub == "verify" and "--record" in argv:
+            if sub == "verify" and has_opt(argv, "--record"):
                 block("subagents report a verdict; the lead editor records it after viewing the evidence itself.")
             if sub == "transcript-verify" and (opt_value(argv, "--by") or "").strip("'\"").lower() == "editor":
                 block("only the lead editor records `transcript-verify --by editor`, after the editor confirmed the "
                       "words. Report the corrections instead.")
-            if role == "qc-reviewer" and sub == "ref-style" and ("--record" in argv or "--apply" in argv):
+            if role == "qc-reviewer" and sub == "ref-style" and (has_opt(argv, "--record") or has_opt(argv, "--apply")):
                 block("qc-reviewer is independent and read-only: it may not record or apply the client reference style.")
-            if sub == "ae-probe" and "--record" in argv:
+            if sub == "ae-probe" and has_opt(argv, "--record"):
                 block("only the lead editor records the After Effects probe verdict, after viewing the probe frames itself.")
             if role == "qc-reviewer" and sub in QC_FORBIDDEN:
                 block(f"qc-reviewer is independent and read-only: it may not run `reel {sub}`. Report the issue instead.")
-            if role == "setup-doctor" and (sub in SETUP_DOCTOR_FORBIDDEN or (sub == "doctor" and "--fix" in argv)):
+            if role == "setup-doctor" and (sub in SETUP_DOCTOR_FORBIDDEN or (sub == "doctor" and has_opt(argv, "--fix"))):
                 block(f"setup-doctor diagnoses without changing anything: it may not run `reel {sub}`. Give the lead "
                       f"the exact fix instead.")
 

@@ -155,9 +155,11 @@ def cmd_reels_select(a):
     adjust = items(a.adjust, start=ADJUST_START)
     if not picks and not a.resync:
         raise SystemExit("--pick required (the editor's choice), or --resync")
-    if (picks or adjust) and not a.by:
-        raise SystemExit("--by editor|delegated required with --pick (who chose: the editor in chat, or you on their "
-                         "explicit delegation)")
+    if (picks or adjust) and not a.by:          # a JSON refusal (exit 2), like `verify --record` without --verdict
+        out({"refused": "--by editor|delegated required with --pick (who chose: the editor in chat, or you on their "
+                        "explicit delegation)",
+             "how": "reel reels-select --pick R01,R03 --by editor   (or --by delegated --note \"the editor's own words\")"})
+        return
     if a.by == "delegated" and not a.note.strip():
         raise SystemExit("--by delegated needs --note with the editor's own words")
     out(select(EP(a), picks, adjust, a.by, note=a.note, confirm_avoid=items(a.confirm_avoid), force=a.force,

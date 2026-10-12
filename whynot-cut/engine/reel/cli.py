@@ -370,7 +370,7 @@ def cmd_plan(a):
     p = P(a)
     refuse_stale_window(p)
     refuse_unfinished_reel(p)
-    missing =[f for f in SEMANTIC_FILES if not p.p(f).exists()]
+    missing = [f for f in SEMANTIC_FILES if not p.p(f).exists()]
     from lib import ref_style
     rs = ref_style.next_step(p)
     if missing:
@@ -657,7 +657,8 @@ def cmd_qc(a):
 def mark_delivered(p: Paths, note: str | None):
     """`reel handoff --delivered` (3.0 T2.16): the editor says the finished video went to the client. Only a project
     whose handoff is written and that passed QC (QC_PASSED / READY_FOR_HUMAN_EDITOR) moves to DELIVERED, which the
-    client board, the stale checks and `reel next` count as done; anything else is refused (exit 2)."""
+    client board, the stale checks and `reel next` count as done; anything else, or a project whose steps went stale
+    after QC (`reel next` shows "STALE"), is refused (exit 2)."""
     from lib.common import DONE_STATUSES
     st = load_status(p).get("status")
     readme = p.p("09_handoff/README.md")
@@ -669,6 +670,17 @@ def mark_delivered(p: Paths, note: str | None):
                         + ("" if readme.exists() else ", no handoff written") + ")",
              "how": "Finish it first: `reel next` shows what is left (qc must pass, then `reel handoff`); record the "
                     "delivery only after the editor says it went to the client"})
+        raise SystemExit(2)
+    from lib.motion_config import is_motion
+    if is_motion(p):
+        from lib.motion_qc import motion_next
+        stale = motion_next(p).get("stale") or []
+    else:
+        stale = stale_steps(p)
+    if stale:                              # QC passed, then something changed: what was checked is not what exists
+        out({"refused": f"{p.video_id} changed after its QC (status {st}, STALE): " + "; ".join(stale),
+             "stale": stale,
+             "how": "Re-run the stale steps first (`reel next` lists them), then record the delivery"})
         raise SystemExit(2)
     set_status(p, "DELIVERED", "delivered to the client" + (f": {note}" if note else ""), "handoff", [readme])
     out({"status": "DELIVERED", "previous": st, "note": note or "", "at": now_iso()})
@@ -723,6 +735,44 @@ def _want_preview(p: Paths) -> bool:
     return bool(S.load(p.root).get("preview_video", True))
 
 
+def stale_steps(p: Paths, missing=()) -> list[str]:
+    """The clip's steps whose inputs changed after they ran (e.g. audio re-cleaned after the plan), in pipeline
+    order, with Gate 1 again when the approval is for another plan. A step that has not run (or is in `missing`) is
+    never stale. `reel next` shows them; `reel handoff --delivered` refuses while there are any (T2.16 review)."""
+    from lib.plan import approval_state
+    from lib.verify import prproj_build_time
+    prj = p.p(f"07_premiere/project/{p.video_id}_{project_prefix()}_EDIT.prproj")
+
+    def t(f):
+        f = Path(f)
+        if f == prj and f.exists():
+            return prproj_build_time(p, f) or f.stat().st_mtime
+        return f.stat().st_mtime if f.exists() else None
+    audio, ed = p.p("06_audio/dialogue/pauses.json"), p.p("01_analysis/edit-decisions.json")
+    spec, prev = p.p("01_analysis/timeline-spec.json"), p.p("08_quality_control/previews/_contact_sheet.jpg")
+    vv, qcr, ho = p.p("08_quality_control/visual-verification.json"), p.p("08_quality_control/qc-results.json"), \
+        p.p("09_handoff/README.md")
+    pv = p.p(f"08_quality_control/preview/{p.video_id}_preview.mp4")
+    deps = [("plan", spec, [audio, ed]), ("previews", prev, [spec]),
+            ("preview-video (the editor watches the edit)", pv, [spec, prev]), ("ppro-build --force", prj, [spec, prev]),
+            ("ppro-frames, LOOK at every frame, verify --record", vv, [prj]), ("qc", qcr, [vv, prj]),
+            ("handoff", ho, [qcr])]
+    stale = []
+    for name, f, ups in deps:
+        tf = t(f)
+        if tf is None or name in missing:
+            continue
+        newer = [u.name for u in ups if t(u) and t(u) > tf + 1]
+        if newer or any(s_.split(" (")[0] in [n for n, f2, _ in deps if f2 in ups] for s_ in stale):
+            stale.append(f"{name} (older than {', '.join(newer) or 'a stale upstream step'})")
+    appr = approval_state(p) if spec.exists() else None
+    if appr and appr["state"] == "stale":            # the approval is for another plan: Gate 1 again, before the build
+        k = next((i for i, s_ in enumerate(stale) if s_.startswith(("ppro-build", "ppro-frames", "qc", "handoff"))),
+                 len(stale))
+        stale.insert(k, f"PLAYBACK edit-plan.md to editor, then approve-plan ({appr['message']})")
+    return stale
+
+
 def cmd_next(a):
     """Tell Claude/the user what the next step is (resumable workflow)."""
     from lib.motion_config import is_motion
@@ -756,38 +806,7 @@ def cmd_next(a):
         ("handoff", p.p("09_handoff/README.md")),
     ]
     todo = [name for name, f in chk if f is None or not Path(f).exists()]
-    # a step is STALE when something it depends on changed after it ran (e.g. audio re-cleaned after the plan)
-    from lib.verify import prproj_build_time
-    prj = p.p(f"07_premiere/project/{p.video_id}_{project_prefix()}_EDIT.prproj")
-
-    def t(f):
-        f = Path(f)
-        if f == prj and f.exists():
-            return prproj_build_time(p, f) or f.stat().st_mtime
-        return f.stat().st_mtime if f.exists() else None
-    audio, ed = p.p("06_audio/dialogue/pauses.json"), p.p("01_analysis/edit-decisions.json")
-    spec, prev = p.p("01_analysis/timeline-spec.json"), p.p("08_quality_control/previews/_contact_sheet.jpg")
-    vv, qcr, ho = p.p("08_quality_control/visual-verification.json"), p.p("08_quality_control/qc-results.json"), \
-        p.p("09_handoff/README.md")
-    pv = p.p(f"08_quality_control/preview/{p.video_id}_preview.mp4")
-    deps = [("plan", spec, [audio, ed]), ("previews", prev, [spec]),
-            ("preview-video (the editor watches the edit)", pv, [spec, prev]), ("ppro-build --force", prj, [spec, prev]),
-            ("ppro-frames, LOOK at every frame, verify --record", vv, [prj]), ("qc", qcr, [vv, prj]),
-            ("handoff", ho, [qcr])]
-    stale = []
-    for name, f, ups in deps:
-        tf = t(f)
-        if tf is None or name in todo:
-            continue
-        newer = [u.name for u in ups if t(u) and t(u) > tf + 1]
-        if newer or any(s_.split(" (")[0] in [n for n, f2, _ in deps if f2 in ups] for s_ in stale):
-            stale.append(f"{name} (older than {', '.join(newer) or 'a stale upstream step'})")
-    from lib.plan import approval_state
-    appr = approval_state(p) if spec.exists() else None
-    if appr and appr["state"] == "stale":            # the approval is for another plan: Gate 1 again, before the build
-        k = next((i for i, s_ in enumerate(stale) if s_.startswith(("ppro-build", "ppro-frames", "qc", "handoff"))),
-                 len(stale))
-        stale.insert(k, f"PLAYBACK edit-plan.md to editor, then approve-plan ({appr['message']})")
+    stale = stale_steps(p, todo)
     todo = [s_ for s_ in stale] + [n for n in todo if n not in [s_.split(" (")[0] for s_ in stale]]
     status = load_status(p)["status"]
     from lib.common import DONE_STATUSES
@@ -1302,7 +1321,8 @@ def main(argv: list[str] | None = None):
         def error(self, message):
             self.print_usage(sys.stderr)
             self.exit(2, f"{tag()}: {self.prog}: error: {message}\n")
-    ap = NamedParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    # allow_abbrev=False on every parser (T2.16 review): `--deliv` must never parse as the lead-only `--delivered`
+    ap = NamedParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False)
     ap.add_argument("--version", action="version", version=f"{tag()}\nplugin root: {PLUGIN_DIR}",
                     help="print the plugin name and version, and the plugin folder")
     ap.add_argument("--root", help="client folder containing assets/ and data/ (default: current folder if it has both)")
@@ -1313,7 +1333,7 @@ def main(argv: list[str] | None = None):
     table = command_table()
     sub = ap.add_subparsers(dest="cmd", required=True, title="commands", metavar="<command>")
     for name in registered_commands():
-        sp = sub.add_parser(name, help=table[name], description=table[name])
+        sp = sub.add_parser(name, help=table[name], description=table[name], allow_abbrev=False)
         # global options are accepted after the command too (`reel next --root X`), as the skills write them
         sp.add_argument("--root", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         sp.add_argument("--video-id", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
