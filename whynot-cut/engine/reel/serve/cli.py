@@ -40,7 +40,7 @@ def add_args(sp) -> None:
 
 def build_parser(subparsers):
     """Register `serve` on an argparse subparsers object; returns its parser."""
-    sp = subparsers.add_parser("serve", help=HELP, description=HELP)
+    sp = subparsers.add_parser("serve", help=HELP, description=HELP, allow_abbrev=False)
     add_args(sp)
     return sp
 
@@ -96,7 +96,8 @@ def cmd_serve(a) -> None:
 
 def main(argv=None) -> int:
     """`python -m serve [--ensure|--status|--stop|--foreground] [--wait S] [--quiet]`; returns the exit code."""
-    ap = argparse.ArgumentParser(prog="reel serve", description=HELP)
+    # allow_abbrev=False on both parsers, like the main reel CLI (T2.16 review): `--ens` is not `--ensure`
+    ap = argparse.ArgumentParser(prog="reel serve", description=HELP, allow_abbrev=False)
     add_args(ap)
     a = ap.parse_args(sys.argv[1:] if argv is None else list(argv))
     try:

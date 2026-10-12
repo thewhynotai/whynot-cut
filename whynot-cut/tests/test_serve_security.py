@@ -274,22 +274,72 @@ class HostOrigin(unittest.TestCase):
 
     def test_origin_table(self):
         rejected = ["null", "NULL", "", " ", "http://localhost:3000", "https://evil.com", "HTTP://127.0.0.1:51234",
-                    "file://", "file:///C:/x.html", "chrome-extension://abcdef", "moz-extension://abc",
+                    "file:///C:/x.html", "chrome-extension://abcdef", "moz-extension://abc",
                     "safari-web-extension://abc", "ws://127.0.0.1:1", "wss://example.com", "ftp://x", "data:text/html,x",
                     "javascript:alert(1)", "about:blank", "uxp:/x", "plugin", "uxpx://a", "xplugin:a",
                     "uxp://ok bad", "uxp://ok\r\nX-Evil: 1", "foo"]
         for o in rejected:
             self.assertFalse(security.check_origin({"Origin": o}), repr(o))
-        for o in ["uxp://com.whynot.cut", "UXP://host/panel", "plugin:com.whynot.cut", "plugin://x"]:
+        for o in ["uxp://com.whynot.cut", "UXP://host/panel", "plugin:com.whynot.cut", "plugin://x", "file://"]:
             self.assertTrue(security.check_origin({"Origin": o}), o)
         self.assertTrue(security.check_origin({"origin": "uxp://a"}))     # header name case
 
-    def test_allowed_prefixes_constant_is_provisional_and_listed(self):
+    def test_allowed_prefixes_constant_is_listed_as_unmeasured(self):
         self.assertEqual(security.ALLOWED_ORIGIN_PREFIXES, ("uxp://", "plugin:"))
         src = Path(security.__file__).read_text(encoding="utf-8")
-        i = src.index("ALLOWED_ORIGIN_PREFIXES")
-        self.assertIn("provisional", src[max(0, i - 400):i + 400].lower())
-        self.assertIn("0.1.3", src[max(0, i - 400):i + 400])
+        i = src.index("ALLOWED_ORIGIN_PREFIXES =")
+        self.assertIn("unmeasured", src[max(0, i - 600):i + 100].lower())
+
+    # --- the measured UXP Origin (spike 0.1.3 / 0.1.4 on Premiere 26.5.2 sent exactly "file://") -----------------
+    def test_exact_allowlist_is_only_the_measured_file_origin(self):
+        self.assertEqual(tuple(security.ALLOWED_ORIGINS_EXACT), ("file://",))
+        src = Path(security.__file__).read_text(encoding="utf-8")
+        i = src.index("ALLOWED_ORIGINS_EXACT =")
+        near = src[max(0, i - 900):i + 100]
+        for cite in ("0.1.4", "26.5.2", "serve-audit.log", '"reason":"file://"'):
+            self.assertIn(cite, near)
+
+    def test_uxp_file_origin_is_allowed(self):
+        self.assertTrue(security.check_origin({"Origin": "file://"}))
+        self.assertIsNone(security.origin_rejection({"Origin": "file://"}))
+        self.assertIsNone(security.origin_rejection({"origin": "file://"}))           # header name case
+        from email.message import Message
+        m = Message()
+        m["Origin"] = "file://"
+        self.assertTrue(security.check_origin(m))
+
+    def test_every_other_file_form_is_refused(self):
+        cases = {
+            "file:///x": "origin-browser-scheme", "file:///": "origin-browser-scheme",
+            "file:///C:/Users/x/panel.html": "origin-browser-scheme", "file://host": "origin-browser-scheme",
+            "file://localhost": "origin-browser-scheme", "file://localhost/": "origin-browser-scheme",
+            "file://./": "origin-browser-scheme", "file:": "origin-browser-scheme", "file:/": "origin-browser-scheme",
+            "file:///file://": "origin-browser-scheme", "file://file://": "origin-browser-scheme",
+            "FILE://": "origin-browser-scheme", "File://": "origin-browser-scheme", "fILE://": "origin-browser-scheme",
+            "file://%20": "origin-browser-scheme", "file://?": "origin-browser-scheme",
+            "file://#": "origin-browser-scheme",
+            "file:// ": "origin-malformed", " file://": "origin-malformed", "file://\t": "origin-malformed",
+            "file://\r\n": "origin-malformed", "file://\x00": "origin-malformed", "file:// x": "origin-malformed",
+            "file://\u00a0": "origin-malformed", "\ufefffile://": "origin-not-allowed",
+            "null": "origin-null", "NULL": "origin-null", "Null": "origin-null",
+        }
+        for o, why in cases.items():
+            self.assertFalse(security.check_origin({"Origin": o}), repr(o))
+            self.assertEqual(security.origin_rejection({"Origin": o}), why, repr(o))
+
+    def test_exact_file_origin_repeated_is_refused(self):
+        self.assertEqual(security.origin_rejection({"Origin": "file://", "origin": "file://"}), "origin-repeated")
+
+    def test_exact_allowlist_cannot_open_null_or_a_browser_page(self):
+        """Even if someone widened the exact list, "null" and file pages with a path stay refused: the exact list is
+        an exact compare, never a prefix, and only after the malformed check."""
+        old = security.ALLOWED_ORIGINS_EXACT
+        security.ALLOWED_ORIGINS_EXACT = ("file://",)
+        try:
+            for o in ("file:///x", "file://x", "FILE://", "file:// ", "null"):
+                self.assertFalse(security.check_origin({"Origin": o}), repr(o))
+        finally:
+            security.ALLOWED_ORIGINS_EXACT = old
 
     def test_prefix_allowlist_cannot_open_browser_schemes(self):
         old = security.ALLOWED_ORIGIN_PREFIXES

@@ -526,6 +526,24 @@ class Cli(_Home):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             ap.parse_args(["serve", "--ensure", "--stop"])
 
+    def test_abbreviated_flags_are_refused(self):
+        """allow_abbrev=False, like the main reel CLI (T2.16): `--ens` must never parse as `--ensure`."""
+        import argparse
+        ap = argparse.ArgumentParser()
+        sub = ap.add_subparsers(dest="cmd")
+        serve_cli.build_parser(sub)
+        for argv in (["serve", "--ens"], ["serve", "--fore"], ["serve", "--st"], ["serve", "--qui"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                ap.parse_args(argv)
+        # main() (python -m serve): only harmless verbs here, so a parser that still abbreviated starts nothing
+        for args in (["--stat"], ["--sto"], ["--status", "--wai", "1"], ["--status", "--qu"]):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()), \
+                    self.assertRaises(SystemExit) as cm:
+                serve_cli.main([*args, "--home", str(self.home)])
+            self.assertEqual(cm.exception.code, 2, args)
+            self.assertIn("unrecognized arguments", err.getvalue(), args)
+
     def test_status_prints_one_json_document(self):
         code, out = self.run_cli("--status")
         self.assertEqual(code, 0)

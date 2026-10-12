@@ -234,14 +234,44 @@ reopened copy `spike-20261012-211920-copy`.
 
 ## Origin header
 
-**Still unmeasured: blocked before leaving Premiere.** In run `211920` the spike read `engine.json` (port 53672, protocol 4,
-version 3.0.0, a 64-character token) and tried `new WebSocket("ws://127.0.0.1:53672/session")` and `fetch("http://127.0.0.1:53672/status")`;
-UXP refused both with "Permission denied to the url ... Manifest entry not found" (W1, W2). The request never left
-Premiere, so the daemon has no `origin` row in `~/.whynot-cut/logs/serve-audit.log` and the keepalive could not be
-observed. After the manifest uses `network.domains: "all"`, record here: the exact `Origin` header the UXP `WebSocket`
-sends (the daemon writes an `origin` audit row only when the header is present; a `session` row without an `origin` row
-means UXP sent none), whether any port is accepted, the round trip of a protocol-4 `ping`, and how long an idle socket
-stays open. The daemon must not hard-code an allowed Origin until this is measured.
+**Measured: UXP's `WebSocket` sends exactly `Origin: file://`** (Windows 11, Premiere Pro 26.5.2, UXP 9.3.0). Run
+`211920` (spike 0.1.3) was still blocked inside Premiere by the manifest (W1, W2: "Permission denied to the url ...
+Manifest entry not found"). Once the network permission let the request out, the WhyNot Cut panel 3.0.0 and spike 0.1.4
+reached the daemon (port 53672), and every `/session` upgrade carried that exact value: `~/.whynot-cut/logs/serve-audit.log`
+holds 136 rows `{"event":"origin","action":"/session","outcome":"rejected","reason":"file://"}` between 18:28Z and
+18:44Z on 2026-10-12, each followed by `{"event":"http",...,"reason":"origin-browser-scheme"}`. No other Origin value
+appears. There is no `/status` row, so whether UXP's `fetch` sends an Origin is still not observed. The provisional
+policy refused `file` as a browser scheme, so the panel could never connect.
+
+**Policy (controller ruling, T6.2; `serve/security.py` `ALLOWED_ORIGINS_EXACT`).** The daemon allows the exact value
+`file://` and nothing else new. The compare is case-sensitive and exact, so these stay refused:
+- `FILE://`;
+- `file:///...` with any path;
+- `file://host`;
+- `file:`;
+- whitespace or a control character inside the value;
+- `null`;
+- every other browser scheme (http, https, ws, wss, extension schemes).
+
+The request parser strips the optional whitespace around a header value before the check, as RFC 9110 §5.5 says it is not part of the value.
+
+`file://` passes only the Origin gate. The client still needs the token (in the WebSocket `hello`, or as `Authorization: Bearer` for HTTP), a Host of `127.0.0.1:<port>` or `localhost:<port>`, and the loopback-only bind. Every Origin seen is audit-logged with its raw value and the outcome, allowed or rejected.
+
+The `uxp://` / `plugin:` prefixes of the provisional policy are kept, but they are unmeasured. macOS UXP has not been measured, and `test_serve_app` pins `uxp://`. Remove them once the macOS measurement shows what macOS sends.
+
+**Threat model.** Senders of `file://`:
+- **UXP (measured)** sends it.
+- **Chromium, Firefox and Safari** do not send it. A page opened from disk sends `null`, and web or extension pages send their own http(s) or *-extension origin. All of those are refused.
+- **Some Electron or CEF apps** may send it from a page loaded from disk. A CEP panel runs in CEF, so the future CEP adapter connection is likely to send `file://` too. The same rule covers it; measure it when that adapter is built.
+
+A client that passes the Origin gate this way still gets nothing without the token:
+- The token lives only in `<engine home>/bridge/engine.json`. That file is user-only (POSIX 0600, or a Windows DACL for the user's SID alone), and no browser page can read it.
+- The Host check stops DNS rebinding.
+- The 127.0.0.1-only bind keeps everything off the machine out.
+
+A process that runs as the user and can read engine.json is already past every one of these defences, the same trust as the user's own shell. Allowing `file://` therefore adds no reachable attacker.
+
+**Still to record:** whether UXP's `fetch` sends an Origin, the round trip of a protocol-4 `ping`, how long an idle socket stays open, and the macOS Origin.
 
 ## Spike defects: status after 0.1.2
 

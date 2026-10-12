@@ -12,6 +12,18 @@ Pure stdlib, no server or engine-state dependency, so the daemon, the app and th
   * `AuditLog`: JSON lines, size-capped rotation (cleared when rotation fails), thread-safe, and it can never write the
     token (every field is redacted: the exact token value and any run of 64 or more hex characters).
 The token must never appear in a URL, a log line or an error message; callers pass it in only to compare / redact.
+
+Origin threat model. The Origin gate only keeps browser pages out; it is not what authenticates. Premiere 26.5.2's UXP
+WebSocket sends exactly `Origin: file://` (measured live, see ALLOWED_ORIGINS_EXACT), so that one exact value passes
+the gate. Chromium, Firefox and Safari do not send it: a page opened from disk sends `null`, and web or extension pages
+send their own http(s) / *-extension origin; all of those stay refused, and so does every other file form. What else
+may send `file://` is a desktop app embedding a browser engine (some Electron or CEF pages loaded from disk; a CEP
+panel runs in CEF, so the future CEP adapter connection is covered by this same rule). Passing the Origin gate gives
+such a client nothing without the token: the token lives only in engine.json, which is user-only (POSIX 0600 / a DACL
+for the user's SID) and which no browser page can read, and a hello or HTTP request without it is refused. The Host
+check (`127.0.0.1:<port>` / `localhost:<port>` only) stops DNS rebinding, and the daemon binds 127.0.0.1 only, so
+nothing off the machine reaches it. A process running as the user that can read engine.json is already past every
+defence here (the same trust as the user's own shell).
 """
 from __future__ import annotations
 
@@ -29,13 +41,26 @@ from pathlib import Path
 
 PROTOCOL = 4
 
-# Origins a non-browser client (the Premiere UXP panel) may send. PROVISIONAL until spike 0.1.3 records the exact
-# Origin UXP's WebSocket really sends (the spike's probe was waiting for this daemon). Every Origin seen is
-# audit-logged by the caller so the spike can confirm. Browser schemes (BROWSER_SCHEMES) and "null" are always
-# rejected, whatever is listed here.
+# The exact Origin values a non-browser client may send, compared as-is (case-sensitive, no prefix, no path; a value
+# with whitespace or a control character anywhere is refused before this list is read). Measured live on Windows 11,
+# Premiere Pro 26.5.2 (UXP 9.3.0): the WhyNot Cut panel 3.0.0 and spike 0.1.4 send exactly `file://` on the /session
+# upgrade (spike 0.1.3's attempt never left Premiere: manifest, parity W1), and the daemon refused every one while
+# `file` was only a browser scheme
+# (~/.whynot-cut/logs/serve-audit.log, 2026-10-12 18:28Z-18:44Z: 136 rows
+# {"event":"origin","action":"/session","outcome":"rejected","reason":"file://"} and no other Origin). Browsers never
+# send it (a file page sends "null"); the module docstring has the threat model. Controller ruling (T6.2): this one
+# value and nothing else new; the token, the Host check and the loopback bind still apply to it.
+ALLOWED_ORIGINS_EXACT = ("file://",)
+
+# Origin prefixes kept from the provisional policy. UNMEASURED: nothing live has sent them (the UXP panel sends
+# `file://`, above). Kept because macOS UXP has not been measured yet and test_serve_app pins `uxp://`; no browser gives
+# a page a uxp: or plugin: origin, and they pass only the Origin gate (the token still decides). Drop them once the
+# macOS measurement shows what macOS sends. "null" and BROWSER_SCHEMES are always rejected, whatever is listed here.
 ALLOWED_ORIGIN_PREFIXES = ("uxp://", "plugin:")
 
 # A web page (or a browser extension) can reach 127.0.0.1; these origins mean "this came from a browser context".
+# `file` stays: every file-scheme Origin except the exact ALLOWED_ORIGINS_EXACT value (`file:///C:/...`, `file://host`,
+# `FILE://`, `file:`) is refused as a browser scheme.
 BROWSER_SCHEMES = frozenset({"http", "https", "file", "chrome-extension", "moz-extension", "safari-web-extension",
                              "ws", "wss"})
 
@@ -452,7 +477,10 @@ def check_host(headers, port: int) -> bool:
 
 
 def origin_rejection(headers) -> str | None:
-    """None when the Origin is acceptable, else a short reason code (safe to audit-log, no values)."""
+    """None when the Origin is acceptable, else a short reason code (safe to audit-log, no values). Order: absent ->
+    ok; repeated / empty / any whitespace or control character -> refused; an exact ALLOWED_ORIGINS_EXACT value
+    (case-sensitive) -> ok; "null" or a BROWSER_SCHEMES scheme (any case) -> refused; an ALLOWED_ORIGIN_PREFIXES
+    prefix -> ok; anything else -> refused."""
     origin = _header(headers, "Origin")
     if origin is None:
         return None            # non-browser clients send no Origin
@@ -461,6 +489,8 @@ def origin_rejection(headers) -> str | None:
     low = origin.lower()
     if not origin or re.search(r"[\s\x00-\x1f\x7f]", origin):
         return "origin-malformed"
+    if origin in ALLOWED_ORIGINS_EXACT:
+        return None            # the measured UXP value, exactly (FILE://, file:///x, file://host fall through)
     if low == "null":
         return "origin-null"
     scheme = low.split(":", 1)[0] if ":" in low else ""

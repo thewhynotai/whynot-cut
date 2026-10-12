@@ -299,6 +299,100 @@ class Attacks(LiveCase):
         self.assertEqual(pids, [self.pid, self.pid])
 
 
+class UxpFileOrigin(LiveCase):
+    """The Origin Premiere 26.5.2's UXP WebSocket really sends is exactly `file://` (spike 0.1.3 / 0.1.4, measured in
+    the live serve-audit.log). It is let through the Origin gate and nothing more: the token, the Host check and the
+    loopback bind still decide. Every other file form, `null` and any look-alike stay refused, and every Origin seen,
+    allowed or refused, is on record in the audit log with its raw value."""
+
+    PANEL = {"kind": "uxp", "version": "3.0.0", "protocol": 4, "capabilities": [], "host": "premiere",
+             "hostVersion": "26.5.2"}
+
+    def origin_rows(self, value, outcome):
+        return [r for r in self.rows("origin") if r["reason"] == value and r["outcome"] == outcome]
+
+    async def test_file_origin_with_the_token_gets_welcome(self):
+        c = await self.connect(origin="file://")
+        self.assertEqual(c.status, 101)
+        await c.send({"type": "hello", "token": self.token, "client": self.PANEL})
+        w = await c.recv()
+        self.assertEqual(w["type"], "welcome", w)
+        status, _, body = await http(self.port, f"GET /status HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
+                                                f"Origin: file://\r\nAuthorization: Bearer {self.token}\r\n\r\n"
+                                                .encode())
+        self.assertEqual(status, 200)
+        self.assertNotIn(self.token.encode(), body)
+        await self.eventually(lambda: len(self.origin_rows("file://", "allowed")) >= 2, "origin allowed: file:// x2")
+        self.assertTrue(any(r["action"] == "/session" for r in self.origin_rows("file://", "allowed")))
+        self.assertTrue(any(r["action"] == "/status" for r in self.origin_rows("file://", "allowed")))
+
+    async def test_file_origin_without_or_with_a_wrong_token_is_refused(self):
+        c = await self.connect(origin="file://")
+        self.assertEqual(c.status, 101)
+        await c.send({"type": "hello", "client": self.PANEL})                      # no token
+        msg = await c.recv()
+        self.assertEqual((msg["type"], msg["code"]), ("error", "auth"))
+        self.assertIsNone(await c.recv())
+        self.assertEqual(c.close_code, 1008)
+        c = await self.connect(origin="file://")
+        self.assertEqual(c.status, 101)
+        await c.send({"type": "hello", "token": "f" * 64, "client": self.PANEL})   # wrong token
+        msg = await c.recv()
+        self.assertEqual((msg["type"], msg["code"]), ("error", "auth"))
+        self.assertIsNone(await c.recv())
+        self.assertEqual(c.close_code, 1008)
+        for auth in ("", f"Authorization: Bearer {'e' * 64}\r\n"):
+            status, _, _ = await http(self.port, f"GET /status HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
+                                                 f"Origin: file://\r\n{auth}\r\n".encode())
+            self.assertEqual(status, 401)
+            status, _, _ = await http(self.port, f"POST /shutdown HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
+                                                 f"Origin: file://\r\n{auth}Content-Length: 0\r\n\r\n".encode())
+            self.assertEqual(status, 401)
+        await self.eventually(lambda: any(r["outcome"] == "rejected" and r["reason"] == "wrong token"
+                                          for r in self.rows("auth")), "auth rejected: wrong token")
+        await self.eventually(lambda: any(r["outcome"] == "rejected" and "not a valid hello" in r["reason"]
+                                          for r in self.rows("auth")), "auth rejected: no token")
+        await self.eventually(lambda: len(self.origin_rows("file://", "allowed")) >= 6, "origin allowed: file:// x6")
+        self.assertTrue(port_open(self.port))                    # still running: no token, no shutdown
+
+    async def test_file_origin_still_needs_the_host(self):
+        c = await self.connect(origin="file://", host=f"rebind.example:{self.port}")
+        self.assertEqual(c.status, 403)
+        status, _, _ = await http(self.port, f"GET /status HTTP/1.1\r\nHost: 127.0.0.1:{self.port + 1}\r\n"
+                                             f"Origin: file://\r\nAuthorization: Bearer {self.token}\r\n\r\n".encode())
+        self.assertEqual(status, 403)
+        await self.eventually(lambda: len([r for r in self.rows("http") if r["reason"] == "host"]) >= 2,
+                              "http rejected: host x2")
+
+    async def test_every_other_file_form_and_null_are_refused(self):
+        refused = ("null", "file:///x", "file://host", "FILE://", "File://", "file:///C:/Users/x/panel.html",
+                   "file://localhost", "file:// x", "file://\t/")
+        for origin in refused:
+            c = await self.connect(origin=origin)
+            self.assertEqual(c.status, 403, repr(origin))
+            status, _, _ = await http(self.port, f"POST /shutdown HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
+                                                 f"Origin: {origin}\r\nAuthorization: Bearer {self.token}\r\n"
+                                                 f"Content-Length: 0\r\n\r\n".encode())
+            self.assertEqual(status, 403, repr(origin))
+        for origin in refused:
+            await self.eventually(lambda: len(self.origin_rows(origin, "rejected")) >= 2,
+                                  f"origin rejected: {origin!r}")
+            self.assertEqual(self.origin_rows(origin, "allowed"), [], repr(origin))
+        self.assertTrue(port_open(self.port))                    # still running: no look-alike could stop it
+
+    async def test_outer_whitespace_is_not_part_of_the_value(self):
+        """RFC 9110 5.5: optional whitespace around a field value is not part of it, so the request parser strips
+        it before the Origin gate. `Origin: file:// ` on the wire IS the value `file://` (no browser sends it: a
+        file page's Origin is `null`); whitespace inside the value is refused (above)."""
+        for raw in ("file:// ", " file://", "file://\t"):
+            c = await self.connect(origin=raw)
+            self.assertEqual(c.status, 101, repr(raw))
+            await c.send({"type": "hello", "token": "f" * 64, "client": self.PANEL})
+            msg = await c.recv()
+            self.assertEqual((msg["type"], msg["code"]), ("error", "auth"))      # the token still decides
+        self.assertEqual([r for r in self.rows("origin") if r["reason"] != r["reason"].strip()], [])
+
+
 class StopViaCli(unittest.TestCase):
     """`--ensure` then `--stop` through the CLI entry: the port closes, engine.json goes, the process exits."""
 
