@@ -233,6 +233,8 @@ class ReleaseTests(unittest.TestCase):
 
     def test_draft_phrases_ignore_diacritics_and_need_a_digit_for_phase(self):
         self.assertEqual(len(build.lint(_wrap("<p>الأقسام المخططة</p>"), release=True)), 1)
+        self.assertEqual(build.lint(_wrap("<p>فيديو للمونتاج المخطَّط، والمونتاج المخطط</p>"), release=True), [],
+                         "«المونتاج المخطَّط» = the planned edit, not a draft phrase")
         self.assertEqual(len(build.lint(_wrap("<p>يكتمل في مرحلة 7</p>"), release=True)), 1)
         self.assertEqual(build.lint(_wrap("<p>كل مرحلة لها ملف</p>"), release=True), [])
 

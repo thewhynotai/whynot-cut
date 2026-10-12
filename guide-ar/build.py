@@ -44,7 +44,7 @@ MAX_PASSES = 4
 DEFAULT_PRINT_TIMEOUT = 300
 PDF_TITLE = "WhyNot Cut — دليل الاستخدام"
 PDF_AUTHOR = "The Why Not AI"
-PDF_SUBJECT = "دليل استخدام WhyNot Cut · Powered by Claude"
+PDF_SUBJECT = "دليل استخدام WhyNot Cut · Powered by thewhynot.ai"
 PDF_SUBJECT_DRAFT = PDF_SUBJECT + " — مسودة (draft)"
 HASH_KEY = "/WNC_SourceHash"
 
@@ -283,7 +283,8 @@ _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "me
 DRAFT_PHRASES = [(label, re.compile(p)) for label, p in (
     ("قيد الإعداد", r"قيد الإعداد"),
     ("قيد البناء", r"قيد البناء"),
-    ("المخطَّط", r"المخطط"),
+    # «المونتاج المخطَّط» is "the planned edit" (a real feature), not a draft promise
+    ("المخطَّط", r"(?<!المونتاج )(?<!للمونتاج )المخطط"),
     ("حتى ذلك الحين", r"حتى ذلك الحين"),
     ("النسخة الحالية", r"النسخة الحالية"),
     ("مرحلة N", r"مرحلة \d"),
