@@ -22,7 +22,8 @@ What it does, once per process:
 The interpreter itself is unaffected: tools/test.sh resolves the runtime before Python starts.
 Under WHYNOT_TEST_SANDBOX the engine also refuses to queue jobs in, sync scripts into or install the bridge into a live
 root, and to launch After Effects, Photoshop or aerender (plat.sandbox_refusal), unless WHYNOT_TEST_ALLOW_LIVE_BRIDGE=1.
-The sandbox folder is removed when the process that made it exits.
+The sandbox folder is removed when the process that made it exits; a run that was killed leaves it behind, so each
+run first sweeps sandboxes older than 24 h from the real temp folder (exact prefix + marker file only).
 """
 import atexit
 import os
@@ -39,6 +40,9 @@ if _ENGINE not in sys.path:
 
 from lib import plat  # noqa: E402  (stdlib only; computes nothing at import)
 
+PREFIX = "whynot-test-sandbox-"
+MARKER = ".whynot-test-sandbox"          # written into every sandbox: only folders holding it are ever swept
+STALE_S = 24 * 3600
 _DROP = ("CLAUDE_PLUGIN_DATA", "CLAUDE_ENV_FILE", "WHYNOT_OPTIONS_FILE") + plat.HOME_ENV + plat.CLIENTS_ENV
 
 
@@ -89,6 +93,28 @@ class _TemporaryDirectory(tempfile.TemporaryDirectory):
             rmtree_retry(self.name)
 
 
+def sweep_stale(tmp_root, now=None) -> list:
+    """Remove sandboxes of earlier runs that never cleaned up (killed): folders in `tmp_root` named PREFIX* that hold
+    MARKER written more than STALE_S ago. Anything else (no marker, a fresh marker, another name, a file) is left."""
+    now = time.time() if now is None else now
+    gone = []
+    try:
+        entries = list(os.scandir(tmp_root))
+    except OSError:
+        return gone
+    for e in entries:
+        try:
+            if not e.name.startswith(PREFIX) or not e.is_dir(follow_symlinks=False):
+                continue
+            if now - os.stat(os.path.join(e.path, MARKER)).st_mtime <= STALE_S:
+                continue
+        except OSError:                 # no marker: not ours
+            continue
+        if rmtree_retry(e.path, attempts=3):
+            gone.append(e.path)
+    return gone
+
+
 def _sandbox() -> None:
     if os.environ.get(plat.SANDBOX_ENV):            # a parent test process already sandboxed this one
         return
@@ -96,7 +122,9 @@ def _sandbox() -> None:
     pinned = plat.engine_ffmpeg(real_engine) or next(
         (p for p in [real_engine / "ffmpeg"] if p.is_file()), None)          # or the 2.x <home>/ffmpeg link
     roots = _live_roots()
-    box = Path(tempfile.mkdtemp(prefix="whynot-test-sandbox-"))
+    sweep_stale(tempfile.gettempdir())
+    box = Path(tempfile.mkdtemp(prefix=PREFIX))
+    (box / MARKER).write_text(str(os.getpid()), encoding="utf-8")
     pid = os.getpid()
     atexit.register(lambda: os.getpid() == pid and rmtree_retry(box))
     user = box / "user-home"

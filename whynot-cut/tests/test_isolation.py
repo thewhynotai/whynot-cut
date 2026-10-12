@@ -37,9 +37,12 @@ def _under(p, root) -> bool:
 class TestEveryModuleIsSandboxed(unittest.TestCase):
     def test_every_test_module_imports_isolation_first(self):
         """unittest has no conftest: the sandbox holds only because each module imports _isolation before it imports
-        the engine or touches the environment (the bytecode prelude may come first)."""
+        the engine or touches the environment (the bytecode prelude may come first). Every file unittest could
+        discover counts (its pattern test*.py, subfolders included), not only test_*.py at the top."""
         bad = []
-        for f in sorted(TESTS.glob("test_*.py")):
+        files = sorted(f for f in TESTS.rglob("test*.py") if "__pycache__" not in f.parts)
+        self.assertIn(TESTS / "test_isolation.py", files)
+        for f in files:
             body = ast.parse(f.read_text(encoding="utf-8")).body
             for node in body:
                 if isinstance(node, ast.Expr) and isinstance(getattr(node, "value", None), ast.Constant):
@@ -49,7 +52,7 @@ class TestEveryModuleIsSandboxed(unittest.TestCase):
                 if isinstance(node, ast.Assign) and ast.unparse(node).startswith("_sys.dont_write_bytecode"):
                     continue
                 if not (isinstance(node, ast.Import) and [a.name for a in node.names] == ["_isolation"]):
-                    bad.append(f"{f.name}:{node.lineno}: {ast.unparse(node)[:60]}")
+                    bad.append(f"{f.relative_to(TESTS)}:{node.lineno}: {ast.unparse(node)[:60]}")
                 break
             else:
                 bad.append(f"{f.name}: no statements")
@@ -104,6 +107,35 @@ class TestEveryModuleIsSandboxed(unittest.TestCase):
             t.cleanup()                                                  # no exception
         self.assertTrue(_under(t.name, os.environ[plat.SANDBOX_ENV]))
         self.assertTrue(_isolation.rmtree_retry(t.name))
+
+    def test_stale_sandboxes_of_killed_runs_are_swept(self):
+        """A killed run leaves its sandbox in the real temp folder: the next run removes those older than 24 h, and only
+        folders with the exact prefix that hold the sandbox marker."""
+        import time
+        with tempfile.TemporaryDirectory() as t:
+            t, old = Path(t), time.time() - 25 * 3600
+
+            def box(name, marker=True, age=old):
+                d = t / name
+                (d / "user-home").mkdir(parents=True)
+                if marker:
+                    m = d / _isolation.MARKER
+                    m.write_text("x", encoding="utf-8")
+                    os.utime(m, (age, age))
+                return d
+            stale = box("whynot-test-sandbox-aaa")
+            fresh = box("whynot-test-sandbox-bbb", age=time.time())
+            unmarked = box("whynot-test-sandbox-ccc", marker=False)
+            other = box("whynot-test-sandboxed-ddd")
+            plain = t / "whynot-test-sandbox-file"
+            plain.write_text("x", encoding="utf-8")
+            self.assertEqual(_isolation.sweep_stale(t), [str(stale)])
+            self.assertFalse(stale.exists())
+            for keep in (fresh, unmarked, other, plain):
+                self.assertTrue(keep.exists(), keep)
+
+    def test_this_run_marks_its_sandbox(self):
+        self.assertTrue((Path(os.environ[plat.SANDBOX_ENV]) / _isolation.MARKER).is_file())
 
     def test_the_real_engine_home_is_a_live_root(self):
         self.assertTrue(any(_under(_isolation.REAL_ENGINE_HOME, r) for r in plat.live_roots()))

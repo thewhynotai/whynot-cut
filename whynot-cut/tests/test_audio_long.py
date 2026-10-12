@@ -8,6 +8,7 @@ The 60-minute memory test is slow (≈ 1-2 min): it runs only with WHYNOT_SLOW_T
 """
 import sys as _sys
 _sys.dont_write_bytecode = True
+import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import json
 import os
 import shutil
