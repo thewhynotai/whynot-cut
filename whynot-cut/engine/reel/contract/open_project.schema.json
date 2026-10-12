@@ -29,7 +29,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "its path as Premiere reports it, null when it could not be opened; native OS path; adapters strip the Windows \\\\?\\ long-path prefix"
         }
       },
       "required": [

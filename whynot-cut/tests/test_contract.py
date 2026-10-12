@@ -173,6 +173,42 @@ class ContractFilesTests(unittest.TestCase):
             self.assertIsNone(proto["actions"][uxp_only]["cep"], uxp_only)
             self.assertTrue(proto["actions"][uxp_only]["uxp"], uxp_only)
 
+    def test_uxp_flag_is_the_planned_target_not_a_measurement(self):
+        """Final review C2: `uxp` says what the plugin is meant to implement; routing uses what the plugin reports."""
+        proto = json.loads((contract.CONTRACT_DIR / "protocol.json").read_text(encoding="utf-8"))
+        d = proto["description"]
+        self.assertIn("planned", d)
+        self.assertIn("meant to implement", d)
+        self.assertIn("runtime", d)
+        self.assertIn("uxp-parity.md", d)
+        self.assertNotIn("whether the UXP plugin implements it", d)
+
+    def test_final_review_descriptions(self):
+        """C1, C3, C4, C5, C8: the facts the UXP adapter relies on are written where a reader looks."""
+        bp = V.load("build_project")
+        for text in (bp["$defs"]["data"]["properties"]["settings"]["properties"]["previewCodec"]["description"],
+                     bp["$defs"]["settings_after"]["properties"]["previewCodec"]["description"]):
+            self.assertIn("FourCC", text)
+            self.assertIn("Apple ProRes 422 LT", text)
+            self.assertIn("UXP adapter", text)
+            self.assertIn("pass through", text)
+        paths = [V.load("open_project")["$defs"]["readback"]["properties"]["project"],
+                 V.load("status")["$defs"]["readback"]["properties"]["project"],
+                 V.load("probe")["$defs"]["readback"]["properties"]["project"],
+                 V.load("ping")["$defs"]["premiere"]["properties"]["project"]]
+        for prop in paths:
+            self.assertIn("native OS path", prop["description"])
+            self.assertIn("\\?\\", prop["description"])
+        self.assertIn("native OS path", bp["$defs"]["readback"]["properties"]["project"]["description"])
+        ef = V.load("export_frames")["$defs"]["readback"]["properties"]["frames"]["items"]["oneOf"][0]
+        self.assertNotIn("tc", ef["required"])
+        self.assertIn("tc", ef["properties"])
+        self.assertIn("the export call reported success", ef["properties"]["called"]["description"])
+        pr = V.load("ping")["$defs"]["premiere"]
+        self.assertNotIn("build", pr["required"])
+        self.assertIn("build", pr["properties"])
+        self.assertIn("REFUSED", V.load("ae_render")["$defs"]["readback"]["properties"]["status"]["enum"])
+
     def test_cep_names_are_the_real_extendscript_actions(self):
         """No drift between protocol.json and what the CEP libraries actually register."""
         proto = json.loads((contract.CONTRACT_DIR / "protocol.json").read_text(encoding="utf-8"))
@@ -546,6 +582,18 @@ class EnvelopeTests(unittest.TestCase):
         self.assertTrue(V.validate_result(self.res(readback=[])))
         self.assertTrue(V.validate_result(self.res(readback="done")))
 
+    def test_result_ok_forbids_error_and_failure_requires_it(self):
+        """Final review C6: the envelope is one shape per outcome, the schema says so."""
+        self.assertTrue(V.validate_result(self.res(error="x")))                       # ok:true with an error
+        self.assertTrue(V.validate_result({"ok": False, "action": "ping"}))           # ok:false without one
+        self.assertTrue(V.validate_result({"ok": False, "action": "export_frames", "how": "y", "readback": {"frames": []}}))
+        self.assertTrue(V.validate_result({"ok": False, "action": "ping", "readback": {"version": "1"}}))
+        self.assertEqual(V.validate_result({"ok": False, "action": "ping", "error": "x"}), [])
+        self.assertEqual(V.validate_result(self.res()), [])
+        schema = V.load("result")
+        self.assertEqual(V.check_schema(schema), [])
+        self.assertEqual(V.validate({"ok": True, "action": "ping", "readback": {}, "error": "x"}, "result") != [], True)
+
     def test_result_bad_fields(self):
         for bad, frag in [(self.res(ok="true"), "/ok"), (self.res(ok=1), "/ok"), (self.res(action="nope"), "/action"),
                           (self.res(error=5), "/error"), (self.res(how=["x"]), "/how"), (self.res(id="a b"), "/id"),
@@ -747,6 +795,20 @@ class ActionShapeTests(unittest.TestCase):
             self.assertTrue(V.validate(dict(base, **{k: v}), d), (k, v))
         self.assertEqual(V.validate(dict(base, project_path="C:/p/x.prproj"), d), [])
 
+    def test_export_frames_without_a_timecode_and_ping_without_a_build(self):
+        """Final review C4/C5: UXP exports by TickTime (no timecode string) and has no build number."""
+        rb = "export_frames#/$defs/readback"
+        self.assertEqual(V.validate({"frames": [{"t": 1.0, "file": "C:/f.png", "called": True}]}, rb), [])
+        self.assertTrue(V.validate({"frames": [{"t": 1.0, "tc": 5, "file": "C:/f.png", "called": True}]}, rb))
+        self.assertEqual(V.validate({"version": "26.5.2", "project": "", "projects_open": 1}, "ping#/$defs/readback"), [])
+        self.assertTrue(V.validate({"version": "26.5.2", "build": 5, "project": "", "projects_open": 1}, "ping#/$defs/readback"))
+
+    def test_ae_render_can_be_refused(self):
+        """Final review C8: lib/ae_render.py reports REFUSED (G79)."""
+        rb = dict(SAMPLES["ae_render"]["readback"], status="REFUSED", returncode=None, msg="no render under the sandbox")
+        self.assertEqual(V.validate(rb, "ae_render#/$defs/readback"), [])
+        self.assertTrue(V.validate(dict(rb, status="DENIED"), "ae_render#/$defs/readback"))
+
     def test_small_premiere_actions_negatives(self):
         self.assertTrue(V.validate({"closed": "yes"}, "close_project_path#/$defs/readback"))
         self.assertEqual(V.validate({"closed": False, "reason": "not open"}, "close_project_path#/$defs/readback"), [])
@@ -867,6 +929,17 @@ class ActionShapeTests(unittest.TestCase):
 
 class EcmaParityTests(unittest.TestCase):
     """`$` and digits behave like ECMA-262 / ajv, not like Python: no match before a final newline, ASCII digits only."""
+
+    def test_the_docstring_records_the_date_time_differences_from_ajv(self):
+        """Final review C9: the Python subset and ajv-formats 3.0.1 disagree on exotic date-times; the module says where."""
+        doc = V.__doc__
+        for frag in ("ajv-formats 3.0.1", "space separator", "+0300", "+03", ":60", "23:59:60", "expires_at",
+                     "isoformat()", "toISOString()"):
+            self.assertIn(frag, doc)
+        from datetime import datetime, timezone
+        self.assertEqual(V.validate(datetime.now(timezone.utc).isoformat(), {"type": "string", "format": "date-time"}), [])
+        self.assertEqual(V.validate(datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                                    {"type": "string", "format": "date-time"}), [])
 
     def test_date_time_rejects_a_trailing_newline_and_non_ascii_digits(self):
         s = {"type": "string", "format": "date-time"}
@@ -1379,6 +1452,17 @@ class CepAdapterTests(unittest.TestCase):
         self.assertNotIn("ok", res["readback"])
         self.assertIn("2 scenes", res["error"])
         self.assertIn("S01", res["error"])
+        self.assertEqual(V.validate_result(res), [])
+
+    def test_an_outer_how_is_forwarded(self):
+        """Final review C7: a bridge answer that already carries a `how` keeps it over the derived one."""
+        res = cep.from_cep("ping", {"ok": False, "error": "bridge not running", "how": "Open the panel.",
+                                    "status": {"alive": False, "detail": "no heartbeat"}})
+        self.assertEqual(res["how"], "Open the panel.")
+        res = cep.from_cep("build_project", {"ok": False, "error": "timeout after 9s", "how": "Wait for the dialog."})
+        self.assertEqual(res["how"], "Wait for the dialog.")
+        res = cep.from_cep("build_project", {"ok": False, "error": "timeout after 9s", "how": ""})
+        self.assertIn("dialog", res["how"])                                   # empty outer how: the derivation stays
         self.assertEqual(V.validate_result(res), [])
 
     def test_when_the_bridge_never_answered(self):

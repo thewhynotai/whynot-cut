@@ -58,7 +58,7 @@
                   },
                   "tc": {
                     "type": "string",
-                    "description": "sequence timecode used for the export"
+                    "description": "sequence timecode used for the export; optional: UXP takes a TickTime and has no timecode string"
                   },
                   "file": {
                     "type": "string",
@@ -66,12 +66,11 @@
                   },
                   "called": {
                     "type": "boolean",
-                    "description": "exportFramePNG returned without throwing"
+                    "description": "the export call reported success (CEP: exportFramePNG returned without throwing; UXP: exportSequenceFrame returned true; a false return maps to the {t, error} form)"
                   }
                 },
                 "required": [
                   "t",
-                  "tc",
                   "file",
                   "called"
                 ],

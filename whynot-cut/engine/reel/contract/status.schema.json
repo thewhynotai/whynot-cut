@@ -36,7 +36,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "active project path or null; native OS path; adapters strip the Windows \\\\?\\ long-path prefix"
         }
       },
       "required": [

@@ -31,7 +31,7 @@
           "properties": {
             "previewCodec": {
               "type": "string",
-              "description": "'apcs' = Apple ProRes 422 LT"
+              "description": "Preview codec as a FourCC on the wire, both ways ('apcs' = Apple ProRes 422 LT; the engine check preview_codec_prores_422_lt reads it). UXP's getter and setter use display names, so the UXP adapter owns a FourCC <-> display-name table (measured: 'apcs' <-> 'Apple ProRes 422 LT'); codecs it does not know pass through as the display name, so the engine check fails correctly."
             },
             "previewFrameWidth": {
               "type": "integer"
@@ -172,7 +172,7 @@
       "properties": {
         "project": {
           "type": "string",
-          "description": "path of the project Premiere created"
+          "description": "path of the project Premiere created; native OS path; adapters strip the Windows \\\\?\\ long-path prefix"
         },
         "saved": {
           "type": "boolean",
@@ -404,7 +404,7 @@
       "properties": {
         "previewCodec": {
           "type": "string",
-          "description": "FourCC of the preview codec; ppro_build.build check preview_codec_prores_422_lt wants 'apcs'"
+          "description": "Preview codec read back, as a FourCC ('apcs'; ppro_build.build check preview_codec_prores_422_lt wants it). The UXP adapter owns the FourCC <-> display-name table (measured: 'apcs' <-> 'Apple ProRes 422 LT', UXP reports the display name): codecs it does not know pass through as the display name, so the engine check fails correctly."
         },
         "previewFrameWidth": {
           "type": "integer"

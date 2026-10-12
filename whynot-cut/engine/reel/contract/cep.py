@@ -23,6 +23,8 @@ What from_cep decides (the legacy bridge reported failures in several shapes; v4
 * `{ok: false, result: {ok: false, reason, ...}}` (After Effects refusing to touch unsaved work, a failed read-back) is
   `ok: false` with the whole result as `readback`: motion_build.build tells REFUSED from FAILED by `readback.reason`.
 * `{ok: false, result: {failed: [...], ...}}` (scenes that did not build) is `ok: false` with the partial result as `readback`.
+* A top-level `how` on an `{ok: false, error}` answer is forwarded as the result's `how`; without one it is derived from
+  the bridge status or the timeout.
 * Anything else with ok true is `ok: true` and the result is the `readback`. The host's own top-level `ok` flag inside the
   result belongs to the envelope and is not copied.
 
@@ -146,9 +148,12 @@ def from_cep(action_v4: str, cep_response, *, id: str | None = None) -> dict:
     line = cep_response.get("line")
     if isinstance(line, int) and not isinstance(line, bool):
         err = f"{err} (script line {line})"
-    how = None
+    how = cep_response.get("how")                            # an answer that already says what to do keeps it
+    how = how if isinstance(how, str) and how.strip() else None
     status = cep_response.get("status")
-    if isinstance(status, dict) and isinstance(status.get("detail"), str) and status["detail"]:
+    if how:
+        pass
+    elif isinstance(status, dict) and isinstance(status.get("detail"), str) and status["detail"]:
         how = status["detail"]                               # "no heartbeat: start Premiere ..."
     elif err.startswith("timeout"):
         how = "Dismiss any dialog the app is showing, then run the command again."

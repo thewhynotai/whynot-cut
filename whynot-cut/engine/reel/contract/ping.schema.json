@@ -26,18 +26,18 @@
       "properties": {
         "version": {
           "type": "string",
-          "description": "app.version"
+          "description": "app.version (UXP: uxp.host.version, since Application.version is empty there)"
         },
         "build": {
           "type": "string",
-          "description": "app.build"
+          "description": "app.build; optional: UXP has no source for it"
         },
         "project": {
           "type": [
             "string",
             "null"
           ],
-          "description": "path of the active project, '' when none"
+          "description": "path of the active project, '' when none; native OS path; adapters strip the Windows \\\\?\\ long-path prefix"
         },
         "projects_open": {
           "type": [
@@ -49,11 +49,10 @@
       },
       "required": [
         "version",
-        "build",
         "project",
         "projects_open"
       ],
-      "description": "Premiere ping (NHPP.actions.ping)."
+      "description": "Premiere ping (NHPP.actions.ping). The UXP plugin has no build number and omits `build`."
     },
     "aftereffects": {
       "type": "object",

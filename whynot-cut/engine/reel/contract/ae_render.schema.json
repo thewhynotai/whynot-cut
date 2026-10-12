@@ -71,9 +71,10 @@
           "enum": [
             "RENDERED",
             "FAILED",
-            "SKIPPED"
+            "SKIPPED",
+            "REFUSED"
           ],
-          "description": "RENDERED: the output exists, is non-empty and newer than the call. SKIPPED: aerender or the .aep missing. FAILED: anything else."
+          "description": "RENDERED: the output exists, is non-empty and newer than the call. SKIPPED: aerender or the .aep missing. FAILED: anything else. REFUSED: the engine declined to render (the sandbox, lib/ae_render.py)."
         },
         "returncode": {
           "type": [

@@ -8,6 +8,12 @@ schemas and nothing else. Supported keywords:
     minItems, maxItems, enum, const, minimum, maximum, minLength, maxLength, pattern (re.search, unanchored), anyOf,
     oneOf, format ("date-time" only: RFC 3339 with a time zone)
 
+format "date-time" differs from ajv-formats 3.0.1 (the TypeScript side of the contract tests) at the edges, on purpose:
+ajv also accepts a space separator (instead of "T") and the offsets "+0300" and "+03" (no colon / no minutes);
+this validator wants RFC 3339 strictly (T or t, "Z" or "+hh:mm"). In the other direction Python accepts a leap second
+(":60") at any time of day, ajv only at 23:59:60. Values a program writes itself, `expires_at` from Python's isoformat()
+or JavaScript's toISOString(), pass both.
+
 plus the annotation keywords $schema, $id, title, description, examples, default. Any other keyword in a contract schema
 is an error (`check_schema`): a schema author must not rely on something this validator would silently ignore.
 

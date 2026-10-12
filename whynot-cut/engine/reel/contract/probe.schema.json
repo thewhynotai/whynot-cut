@@ -21,7 +21,7 @@
             "string",
             "null"
           ],
-          "description": "active project path"
+          "description": "active project path; native OS path; adapters strip the Windows \\\\?\\ long-path prefix"
         },
         "sequences": {
           "type": "array",

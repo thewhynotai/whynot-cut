@@ -123,6 +123,47 @@ test("the result envelope: ok:true needs a readback, ok:false needs none, an unk
   assert.equal(v({ ok: "yes", action: "ping" }), false);
 });
 
+test("C6: ok:true forbids error, ok:false requires it (also with a readback or a how)", () => {
+  const v = getDef("result")!;
+  assert.equal(v({ ok: true, action: "ping", readback: {}, error: "x" }), false);
+  assert.equal(v({ ok: true, action: "ping", readback: {}, error: "" }), false);
+  assert.equal(v({ ok: false, action: "ping" }), false);
+  assert.equal(v({ ok: false, action: "ping", how: "y" }), false);
+  assert.equal(v({ ok: false, action: "ping", readback: { frames: [] } }), false);
+  assert.ok(v({ ok: false, action: "ping", error: "x", readback: { reason: "dirty" } }));
+  assert.ok(v({ ok: true, action: "ping", readback: { pong: 1 }, how: "fine to carry a how" }));
+});
+
+test("C4/C5/C8: a UXP frame has no timecode, a UXP ping has no build, aerender can be refused", () => {
+  const frames = getDef("export_frames", "readback")!;
+  assert.ok(frames({ frames: [{ t: 1, file: "D:\f.png", called: true }, { t: 2, error: "exportSequenceFrame returned false" }] }), JSON.stringify(frames.errors));
+  assert.ok(frames({ frames: [{ t: 1, tc: "00:00:01:00", file: "D:/f.png", called: true }] }), "the CEP form still validates");
+  assert.equal(frames({ frames: [{ t: 1, tc: 7, file: "f.png", called: true }] }), false);
+  const ping = getDef("ping", "readback")!;
+  assert.ok(ping({ version: "26.5.2", project: "", projects_open: 1 }), JSON.stringify(ping.errors));
+  assert.equal(ping({ version: "26.5.2", build: 5, project: "", projects_open: 1 }), false);
+  const render = getDef("ae_render", "readback")!;
+  const base = { status: "REFUSED", returncode: null, output: "x.mov", elapsed_s: 0, log: null, msg: "sandbox" };
+  assert.ok(render(base), JSON.stringify(render.errors));
+  assert.equal(render({ ...base, status: "DENIED" }), false);
+});
+
+test("C1/C3: the schemas say who owns the codec table and that paths are native (no \\?\ prefix)", () => {
+  const text = readFileSync(join(CONTRACT_DIR, "build_project.schema.json"), "utf8");
+  assert.match(text, /UXP adapter owns a FourCC <-> display-name table/);
+  assert.match(text, /Apple ProRes 422 LT/);
+  for (const f of ["open_project", "status", "probe", "ping", "build_project"]) {
+    assert.match(JSON.parse(readFileSync(join(CONTRACT_DIR, `${f}.schema.json`), "utf8")) && readFileSync(join(CONTRACT_DIR, `${f}.schema.json`), "utf8"), /native OS path/, f);
+  }
+  assert.match(String((JSON.parse(readFileSync(join(CONTRACT_DIR, "protocol.json"), "utf8")) as { description: string }).description), /planned/);
+});
+
+test("the offline source's results validate as ok:false envelopes (error present, no readback)", async () => {
+  const { OfflineSource } = await import("../src/offline-source.ts");
+  const src = new OfflineSource({ uiLocale: "ar" });
+  for (const a of ACTION_NAMES) assert.deepEqual(validateResult(await src.run(a)), [], a);
+});
+
 // ---- golden fixtures ------------------------------------------------------------------------------------------
 
 interface FixtureReport {

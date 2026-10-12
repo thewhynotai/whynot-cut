@@ -37,14 +37,11 @@ export interface RequestEnvelope<A extends ActionName = ActionName, D = object> 
   expires_at: string;
 }
 
-export interface ResultEnvelope<R = object> {
-  ok: boolean;
-  action: ActionName;
-  readback?: R;
-  error?: string;
-  how?: string;
-  id?: string;
-}
+/** One shape per outcome (result.schema.json): ok:true needs a readback and carries no error; ok:false needs an error,
+ *  with how to fix it and, sometimes, a partial readback. */
+export type ResultEnvelope<R = object> =
+  | { ok: true; action: ActionName; readback: R; error?: never; how?: string; id?: string }
+  | { ok: false; action: ActionName; readback?: object; error: string; how?: string; id?: string };
 
 export interface ProgressEvent {
   event: "progress";
@@ -67,6 +64,9 @@ export interface StatusReadback {
   project: string | null;
 }
 
+/** Premiere ping (ping.schema.json $defs/premiere). `build` is optional: UXP has no source for it (version comes from uxp.host.version). */
+export interface PingPremiereReadback { version: string; build?: string; project: string | null; projects_open: number | null }
+
 export interface OpenProjectData { path: string }
 export interface OpenProjectReadback { opened: boolean; project: string | null }
 
@@ -76,7 +76,9 @@ export interface ExportFramesData {
   out_dir: string;
   project_path?: string | null;
 }
-export type ExportedFrame = { t: number; tc: string; file: string; called: boolean } | { t: number; error: string };
+/** `tc` is optional: UXP exports by TickTime and has no timecode string. `called`: the export call reported success
+ *  (UXP: exportSequenceFrame returned true); a false return is the `{ t, error }` form. */
+export type ExportedFrame = { t: number; tc?: string; file: string; called: boolean } | { t: number; error: string };
 export interface ExportFramesReadback { frames: ExportedFrame[] }
 
 export interface RenderReviewData { sequence_name: string; out_path: string; preset_path?: string }

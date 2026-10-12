@@ -1,6 +1,6 @@
 {
   "protocol": 4,
-  "description": "Contract v4: every action with the host that runs it, the legacy CEP action it replaces (null: none) and whether the UXP plugin implements it. host 'engine' = runs in the Python engine, 'any' = both hosts answer it.",
+  "description": "Contract v4: every action with the host that runs it, the legacy CEP action it replaces (null: none) and the `uxp` flag: the planned target, i.e. the UXP plugin is meant to implement that action. It is not a measurement: routing (engine daemon) must use what the connected plugin reports at runtime (status), and docs/adobe/uxp-parity.md holds the measured status of each Premiere API. host 'engine' = runs in the Python engine, 'any' = both hosts answer it.",
   "actions": {
     "ping": {
       "host": "any",
