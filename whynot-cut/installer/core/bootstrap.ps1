@@ -27,12 +27,16 @@
 # variables, else the plugin option engine_home from ~\.whynot-cut\plugin-options.json, else from settings.json
 # pluginConfigs, else ~\.whynot-cut) BEFORE anything is downloaded. That folder is the default of the location question
 # (owner decision 2026-10-12): -EngineHome <folder> answers it, -Yes takes the default, and without a terminal the
-# default is used. The answer is checked (Get-WncEngineHomeProblem: a full path, not a drive root, not inside the
-# plugin folder, not the user folder or Claude's folder, not the clients folder or a folder marked .whynot-client, in
-# a sandbox inside the sandbox; 6 GB free on its drive, 9 GB with the Whisper model, unless WhyNot Cut is already
+# default is used. The answer is placed and checked (Get-WncEnginePlace, the core's base.choose_engine_home: a full
+# path, not a drive root / mounted volume / link, not inside the plugin folder; unless WhyNot Cut is already there
+# also not holding the plugin, not the clients folder or holding / inside it, not inside or holding a folder marked
+# .whynot-client; the user folder, Desktop, Documents, Downloads and any folder holding the editor's own files get a
+# WhyNotCut subfolder (said in English and Arabic), so uninstall never empties a folder of the editor's files; in a
+# sandbox inside the sandbox; 6 GB free on its drive, 9 GB with the Whisper model, unless WhyNot Cut is already
 # there; it can be created and written); a refused folder is asked again (with -Yes: exit 2, nothing downloaded). A
 # path with non-ASCII letters gets a warning (English + Arabic) suggesting C:\WhyNotCut and is asked again; -Yes keeps
-# it. uv, Python, the log and every later step land in that one folder: it is passed to the core as --engine-home
+# it; a folder WhyNot Cut is already installed in is kept without asking again. Choosing a folder other than an
+# existing install's says (English + Arabic) that the old one is left behind, and where. uv, Python, the log and every later step land in that one folder: it is passed to the core as --engine-home
 # (+ --engine-home-chosen when the editor chose it: the core then uses it as it is; otherwise the core stops with 2 if
 # its own resolution, wnc_installer.base.resolve_engine_home, disagrees). The core remembers a chosen folder in
 # settings.json pluginConfigs and the pointer file (questions step). -Uninstall asks nothing: the resolved folder, or
@@ -94,7 +98,21 @@ param(
             'dEN1dA==')
         Folder = '2KfZhNmF2KzZhNiv'
         Cannot = ('2YTYpyDZitmF2YPZhiDYp9iz2KrYrtiv2KfZhSDZh9iw2Kcg2KfZhNmF2KzZhNiv2Jsg2KfYrtiq2LEg2YXYrNmE2K/Zi9inINii2K7YsS4=')
+        Subfolder = ('2YfYsNinINin2YTZhdis2YTYryDZgdmK2Ycg2YXZhNmB2KfYqiDYo9iu2LHZidiMINmE2LDZhNmDINiz2YrZj9ir2KjZjtmR2KogV2h5Tm90' +
+            'IEN1dCDZgdmKINmF2KzZhNivINiu2KfYtSDYqNmHINiv2KfYrtmE2YcgKFdoeU5vdEN1dCnYjCDZiNmE2YYg2YrZhNmF2LMg2KfZhNil2YTYutin' +
+            '2KEg2KjYp9mC2Yog2KfZhNmF2YTZgdin2Kou')
+        LeftBehind = ('2KrZhtio2YrZhzog2KfZhNiq2KvYqNmK2Kog2KfZhNmC2K/ZitmFINiz2YrYqNmC2Ykg2YHZiiDZhdmD2KfZhtmHINmI2YTZhiDZitmP2LPY' +
+            'qtiu2K/ZhSDYqNi52K8g2KfZhNii2YbYmyDYp9it2LDZgdmHINio2YbZgdiz2YMg2KXZhiDZhNmFINiq2LnYryDYqtit2KrYp9is2Yc6')
     }
+    # what WhyNot Cut puts in an engine home: wnc_installer/base.py ENGINE_LAYOUT / ENGINE_LAYOUT_PREFIXES (the tests
+    # keep the three copies in step); the location check counts a folder holding only these (and models, library,
+    # the pointer) as an engine home or empty
+    $WncEngineLayout = @('bin', 'python', 'runtimes', 'current', 'ffmpeg', 'cuda', 'bridge', 'state.json', 'logs',
+        'cache', 'downloads', 'fonts', 'marketplace', 'marketplace.new', 'marketplace.prev', '.delete-after-exit',
+        'venv', 'ppro-queue', 'ppro-scripts', 'ae-queue', 'ae-scripts', 'ae-probe', 'ae-capabilities.json', 'bench',
+        'tmp')
+    $WncEngineLayoutPrefixes = @('state.json.corrupt-', '.state.json.', '.current.', '.plugin-options.json.',
+        '.wnc-write-test')
     $EnvNames = @('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'CLAUDE_CONFIG_DIR', 'WHYNOT_HOME',
         'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_NO_CONFIG', 'UV_PYTHON_PREFERENCE', 'UV_NO_MODIFY_PATH')
 
@@ -529,44 +547,120 @@ param(
         return ,@($out | ForEach-Object { ConvertTo-WncHomePath -Value $_ -UserHome $UserHome -Saved $true })
     }
 
-    function Get-WncEngineHomeProblem([string]$Path, [string]$UserHome, [string]$Root, [string[]]$Clients,
+    function Test-WncEngineHomeMark([string]$Path) {
+        # WhyNot Cut is installed there (state.json, current or bin\uv(.exe): only WhyNot Cut leaves these)
+        foreach ($m in @('state.json', 'current', 'bin\uv', 'bin\uv.exe')) {
+            if ([IO.File]::Exists((Join-Path $Path $m))) { return $true }
+        }
+        return $false
+    }
+
+    function Get-WncForeignEntry([string]$Path) {
+        # the children of $Path that WhyNot Cut does not put there (wnc_installer.base.foreign_entries), sorted
+        $out = @()
+        if (-not [IO.Directory]::Exists($Path)) { return ,$out }
+        foreach ($e in [IO.Directory]::GetFileSystemEntries($Path)) {
+            $n = [IO.Path]::GetFileName($e)
+            $ours = ($WncEngineLayout -contains $n) -or (@('models', 'library', 'plugin-options.json') -contains $n)
+            foreach ($pre in $WncEngineLayoutPrefixes) {
+                if ($n.StartsWith($pre, [StringComparison]::OrdinalIgnoreCase)) { $ours = $true }
+            }
+            if (-not $ours) { $out += $n }
+        }
+        return ,@($out | Sort-Object)
+    }
+
+    function Find-WncMarkerBelow([string]$Path) {
+        # a folder up to 3 levels below $Path holding .whynot-client (bounded, links never entered), or $null
+        $seen = 0
+        $stack = New-Object System.Collections.Stack
+        $stack.Push(@($Path, 0))
+        while ($stack.Count -gt 0) {
+            $item = $stack.Pop()
+            try { $entries = [IO.Directory]::GetFileSystemEntries($item[0]) } catch { continue }
+            foreach ($e in $entries) {
+                $seen++
+                if ($seen -gt 5000) { return $null }
+                if ([IO.Path]::GetFileName($e) -eq '.whynot-client') { return $item[0] }
+                if (($item[1] -lt 3) -and [IO.Directory]::Exists($e) -and (-not (Test-WncReparse $e))) {
+                    $stack.Push(@($e, ($item[1] + 1)))
+                }
+            }
+        }
+        return $null
+    }
+
+    function Get-WncEnginePlace([string]$Path, [string]$UserHome, [string]$Root, [string[]]$Clients,
         [string]$SandboxRoot) {
-        # why $Path cannot be the engine home, or $null: the core's base.engine_home_choice_problem, same order
+        # where the engine goes for the folder the editor chose: @{ Path; Note; Problem }. The core's
+        # wnc_installer.base.choose_engine_home, same rules and order: refused - not a full path, a drive root or
+        # mounted volume, a link / mount point, inside the plugin folder; unless it is already an engine home also
+        # one that holds the plugin (except in its downloads\: the -Source cache), is / holds / lies inside the saved
+        # clients folder, lies inside or holds (3 levels) a .whynot-client folder. Moved into <it>\WhyNotCut: the user
+        # folder, Desktop, Documents, Downloads, and any folder holding something WhyNot Cut does not put there
+        # that is not already an engine home. Then the final folder: not holding the user folder, not inside
+        # Claude's folder, not a WhyNotCut subfolder holding other files, in a sandbox inside it.
         if ((-not $Path) -or ($Path -notmatch '^([A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)')) {
-            return "$Path is not a full path (for example C:\WhyNotCut)"
+            return @{ Problem = "$Path is not a full path (for example C:\WhyNotCut)" }
         }
         $n = Get-WncNormPath $Path
         if (($n -match '^[A-Za-z]:\\$') -or ($n -match '^\\\\[^\\]+\\[^\\]+$')) {
-            return "$Path is a drive root; choose a folder on it, for example $(Join-Path $n 'WhyNotCut')"
+            return @{ Problem = "$Path is a drive root or a mounted volume; choose a folder on it, for example $(Join-Path $n 'WhyNotCut')" }
+        }
+        if ([IO.Directory]::Exists($n) -and (Test-WncReparse $n)) {
+            return @{ Problem = "$Path is a link or mount point; choose a real folder" }
         }
         $r = Get-WncNormPath $Root
-        if (Test-WncWithin $n $r) { return "$Path is inside the plugin folder $r, which is replaced on every update" }
-        if (Test-WncWithin (Get-WncNormPath $UserHome) $n) {
-            return ("$Path is your user folder or holds it; choose a folder of its own, for example " +
-                (Join-Path $n 'WhyNotCut'))
+        if (Test-WncWithin $n $r) {
+            return @{ Problem = "$Path is inside the plugin folder $r, which is replaced on every update" }
         }
-        if (Test-WncWithin $n (Get-WncNormPath (Join-Path $UserHome '.claude'))) {
-            return "$Path is inside Claude's folder $(Join-Path $UserHome '.claude')"
-        }
-        foreach ($c in @($Clients | Where-Object { $_ })) {
-            try { $cn = Get-WncNormPath $c } catch { continue }
-            if (Test-WncWithin $n $cn) {
-                return "$Path is your clients folder $c (or inside it); keep the engine apart from client footage"
+        $existing = Test-WncEngineHomeMark $n
+        if (-not $existing) {
+            if ((Test-WncWithin $r $n -Strict) -and (-not (Test-WncWithin $r (Join-Path $n 'downloads'))) -and
+                (-not (Test-WncWithin $r (Join-Path $n 'WhyNotCut\downloads')))) {
+                return @{ Problem = "$Path holds the plugin folder $r; choose a folder of its own" }
+            }
+            foreach ($c in @($Clients | Where-Object { $_ })) {
+                try { $cn = Get-WncNormPath $c } catch { continue }
+                if ((Test-WncWithin $n $cn) -or (Test-WncWithin $cn $n -Strict)) {
+                    return @{ Problem = "$Path is, holds or is inside your clients folder $c; keep the engine apart from client footage" }
+                }
+            }
+            $d = $n
+            while ($d) {
+                if (Test-Path -LiteralPath (Join-Path $d '.whynot-client')) {
+                    return @{ Problem = "$Path is inside a client folder ($d holds .whynot-client)" }
+                }
+                $up = [IO.Path]::GetDirectoryName($d)
+                if ((-not $up) -or ($up -eq $d)) { break }
+                $d = $up
+            }
+            if ([IO.Directory]::Exists($n)) {
+                $below = Find-WncMarkerBelow $n
+                if ($below) { return @{ Problem = "$Path holds a client folder ($below holds .whynot-client)" } }
             }
         }
-        $d = $n
-        while ($d) {
-            if (Test-Path -LiteralPath (Join-Path $d '.whynot-client')) {
-                return "$Path is inside a client folder ($d holds .whynot-client)"
-            }
-            $up = [IO.Path]::GetDirectoryName($d)
-            if ((-not $up) -or ($up -eq $d)) { break }
-            $d = $up
+        $final = $n
+        $note = ''
+        $homeRoots = @($UserHome) + @('Desktop', 'Documents', 'Downloads' | ForEach-Object { Join-Path $UserHome $_ })
+        $isRoot = @($homeRoots | Where-Object { (Get-WncNormPath $_) -ieq $n }).Count -gt 0
+        if ((-not $existing) -and ($isRoot -or ((Get-WncForeignEntry $n).Count -gt 0))) {
+            $final = Join-Path $n 'WhyNotCut'
+            $note = "$Path already holds other files, so WhyNot Cut goes into its own folder $final (uninstall then never touches the rest)"
         }
-        if ($SandboxRoot -and (-not (Test-WncWithin $n (Get-WncNormPath $SandboxRoot) -Strict))) {
-            return "$Path is outside the sandbox home $SandboxRoot (-Home: nothing outside it is used)"
+        if (Test-WncWithin (Get-WncNormPath $UserHome) $final) {
+            return @{ Problem = "$final is your user folder or holds it; choose a folder of its own" }
         }
-        return $null
+        if (Test-WncWithin $final (Get-WncNormPath (Join-Path $UserHome '.claude'))) {
+            return @{ Problem = "$final is inside Claude's folder $(Join-Path $UserHome '.claude')" }
+        }
+        if (($final -ine $n) -and (-not (Test-WncEngineHomeMark $final)) -and ((Get-WncForeignEntry $final).Count -gt 0)) {
+            return @{ Problem = "$final already holds other files; choose an empty folder or one of its own" }
+        }
+        if ($SandboxRoot -and (-not (Test-WncWithin $final (Get-WncNormPath $SandboxRoot) -Strict))) {
+            return @{ Problem = "$final is outside the sandbox home $SandboxRoot (-Home: nothing outside it is used)" }
+        }
+        return @{ Path = $final; Note = $note; Problem = $null }
     }
 
     function Get-WncFreeGb([string]$Path) {
@@ -614,7 +708,7 @@ param(
 
     function ConvertFrom-WncTyped([string]$Text, [string]$UserHome) {
         # a typed or -EngineHome folder: quotes trimmed, ~ is the user folder; a full path made canonical, any other
-        # text returned as it is (Get-WncEngineHomeProblem refuses it)
+        # text returned as it is (Get-WncEnginePlace refuses it)
         $t = $Text.Trim().Trim([char]34).Trim([char]39)
         $t = ConvertTo-WncHomePath -Value $t -UserHome $UserHome -Saved $false
         if ($t -match '^([A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)') { return Get-WncFullPath $t }
@@ -649,11 +743,24 @@ param(
             }
         }
         $warned = $false  # warned once about non-ASCII letters: the next answer is taken as it is
+        $oldInstall = Test-WncEngineHomeMark $Default  # WhyNot Cut already lives in the default folder
         for ($try = 1; $try -le 8; $try++) {
             $p = ConvertFrom-WncTyped -Text $text -UserHome $UserHome
-            $problem = Get-WncEngineHomeProblem -Path $p -UserHome $UserHome -Root $Root -Clients $clients `
+            $place = Get-WncEnginePlace -Path $p -UserHome $UserHome -Root $Root -Clients $clients `
                 -SandboxRoot $SandboxRoot
-            if ((-not $problem) -and ($p -match '[^\x00-\x7F]') -and (-not $warned)) {
+            $problem = $place.Problem
+            if (-not $problem) {
+                if ($place.Note) {
+                    Write-Host $place.Note
+                    Write-Host (Get-WncArabic 'Subfolder')
+                }
+                $p = $place.Path
+            }
+            $existing = (-not $problem) -and (Test-WncEngineHomeMark $p)
+            if ((-not $problem) -and ($p -match '[^\x00-\x7F]') -and $existing) {
+                # an existing install is never moved by Enter: no re-ask (fix round 1)
+                Write-Host "note: $p has non-English letters; WhyNot Cut is already installed there, so it stays there"
+            } elseif ((-not $problem) -and ($p -match '[^\x00-\x7F]') -and (-not $warned)) {
                 Write-Host ("WARNING: $p has non-English letters. Some tools can fail on such a path; a plain " +
                     'folder such as C:\WhyNotCut is safer.')
                 Write-Host (Get-WncArabic 'NonAscii')
@@ -667,8 +774,6 @@ param(
                 }
                 Write-Host '(kept: no question was asked)'
             }
-            $existing = (-not $problem) -and ([IO.File]::Exists((Join-Path $p 'state.json')) -or
-                [IO.File]::Exists((Join-Path $p 'current')))
             if ((-not $problem) -and (-not $existing)) {
                 $need = $WncNeedGb
                 if ($WithModel) { $need += $WncModelGb }
@@ -688,7 +793,14 @@ param(
                     $problem = "it cannot be created or written ($($_.Exception.Message))"
                 }
             }
-            if (-not $problem) { return @{ Code = 0; Path = $p; Chosen = $chosen } }
+            if (-not $problem) {
+                if ($oldInstall -and ((Get-WncNormPath $p) -ine (Get-WncNormPath $Default))) {
+                    Write-Host ("WARNING: the WhyNot Cut already installed in $Default stays there and is no longer " +
+                        'used; delete it yourself when you no longer need it.')
+                    Write-Host ((Get-WncArabic 'LeftBehind') + " $Default")
+                }
+                return @{ Code = 0; Path = $p; Chosen = $chosen }
+            }
             Write-Host "WhyNot Cut cannot use $p as its engine home: $problem"
             Write-Host (Get-WncArabic 'Cannot')
             if (-not $ask) {

@@ -515,21 +515,29 @@ class TestEngineHome(unittest.TestCase):
         self.assertFalse(chosen.exists())  # plan writes nothing
 
     def test_a_chosen_engine_home_must_be_a_safe_place(self):
-        home = self.tmp / ARABIC_HOME
-        plugin = self.tmp / "zip root" / "whynot-cut"
+        home = self.tmp / "users" / ARABIC_HOME
+        repo = self.tmp / "repo"
+        plugin = repo / "zip root" / "whynot-cut"
         clients = self.tmp / "WhyNot Clients"
         touch(self.tmp / "marked" / ".whynot-client", b"{}")
+        touch(self.tmp / "bigger" / "Dr X" / "raw" / ".whynot-client", b"{}")
         check = lambda p, **kw: base.engine_home_choice_problem(  # noqa: E731
             p, home=home, plugin_root=plugin, clients_roots=[clients], **kw)
         for path, needle in (("engine", "full path"), (Path(self.tmp.anchor), "drive root"),
-                             (plugin / "engine", "plugin folder"), (home, "user folder"),
+                             (plugin / "engine", "plugin folder"), (plugin, "plugin folder"),
+                             (repo, "plugin folder"),  # a folder holding the plugin checkout
                              (home.parent, "user folder"), (home / ".claude" / "x", "Claude"),
                              (clients, "clients folder"), (clients / "engine", "clients folder"),
-                             (self.tmp / "marked", "client folder"), (self.tmp / "marked" / "sub", "client folder")):
+                             (self.tmp, "plugin folder"),  # holds the plugin and the clients folder
+                             (self.tmp / "marked", "client folder"), (self.tmp / "marked" / "sub", "client folder"),
+                             (self.tmp / "bigger", "client folder")):
             with self.subTest(str(path)):
                 problem = check(str(path))
                 self.assertIsNotNone(problem)
                 self.assertIn(needle, problem)
+        work = self.tmp / "work"
+        self.assertIn("clients folder", base.engine_home_choice_problem(
+            str(work), home=home, plugin_root=plugin, clients_roots=[work / "Clients"]))  # it holds them
         self.assertIsNone(check(str(self.tmp / "WhyNot Engine")))
         self.assertIsNone(check(str(home / "WhyNot Engine"), sandbox_home=home))
         self.assertIn("sandbox", check(str(self.tmp / "WhyNot Engine"), sandbox_home=home))
@@ -541,6 +549,59 @@ class TestEngineHome(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("sandbox", err.getvalue())
         self.assertFalse(home.exists())
+
+    def test_mounted_volumes_are_drive_roots(self):
+        plugin = self.tmp / "zip root" / "whynot-cut"
+        vol = self.tmp / "usb stick"
+        vol.mkdir()
+        real = os.path.ismount
+        with mock.patch.object(os.path, "ismount", side_effect=lambda p: base._norm(p) == base._norm(vol) or real(p)):
+            problem = base.engine_home_choice_problem(str(vol), home=self.tmp / "h", plugin_root=plugin)
+        self.assertIn("mounted volume", problem)
+        if not IS_WIN:
+            self.assertIn("mounted volume", base.engine_home_choice_problem(
+                "/Volumes/USB", home=self.tmp / "h", plugin_root=plugin))
+        self.assertTrue(base._is_drive_root("/Volumes/My Disk") or IS_WIN)
+
+    def test_a_folder_with_the_editors_files_gets_a_whynotcut_subfolder(self):
+        # fix round 1 (CRITICAL): never an engine home that holds the editor's own files - uninstall would empty it
+        home = self.tmp / ARABIC_HOME
+        plugin = self.tmp / "zip root" / "whynot-cut"
+        place = lambda p: base.choose_engine_home(str(p), home=home, plugin_root=plugin)  # noqa: E731
+        docs = home / "Documents"
+        touch(docs / "thesis.docx", b"mine")
+        for chosen in (docs, home, home / "Desktop", home / "Downloads"):  # (Desktop / Downloads need not exist)
+            with self.subTest(str(chosen)):
+                final, note, problem = place(chosen)
+                self.assertIsNone(problem)
+                self.assertEqual(final, chosen / "WhyNotCut")
+                self.assertIn("WhyNotCut", note)
+        work = touch(self.tmp / "D Work" / "budget.xlsx", b"mine").parent
+        self.assertEqual(place(work)[0], work / "WhyNotCut")
+        # an existing engine home (even with something foreign in it), an empty folder or one holding only WhyNot
+        # Cut's own entries stays as chosen
+        eng = self.tmp / "engine home"
+        touch(eng / "state.json", b"{}")
+        touch(eng / "uxp-spike" / "x.txt", b"x")
+        self.assertEqual(place(eng), (eng, "", None))
+        only_ours = self.tmp / "only ours"
+        touch(only_ours / "downloads" / "release-1" / "a.zip", b"z")
+        touch(only_ours / "plugin-options.json", b"{}")
+        self.assertEqual(place(only_ours)[0], only_ours)
+        self.assertEqual(place(self.tmp / "new folder")[0], self.tmp / "new folder")
+        # the -Source cache: the plugin unpacked under <engine>/downloads is fine
+        cached = only_ours / "downloads" / "release-1" / "x" / "whynot-cut-marketplace" / "whynot-cut"
+        self.assertIsNone(base.engine_home_choice_problem(str(only_ours), home=home, plugin_root=cached))
+        # a WhyNotCut subfolder that itself holds other files is refused, not entered
+        touch(work / "WhyNotCut" / "notes.txt", b"mine")
+        self.assertIn("already holds other files", place(work)[2])
+        # the core moves a chosen Documents into its subfolder too (the bootstraps normally did it already)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.main(["plan", "--home", str(home), "--engine-home", str(docs), "--engine-home-chosen"])
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertEqual(norm(json.loads(out.getvalue())["engine_home"]), norm(docs / "WhyNotCut"))
+        self.assertIn("WhyNotCut", err.getvalue())
 
     def test_plan_outside_the_sandbox_and_a_disagreeing_bootstrap(self):
         home = self.tmp / ARABIC_HOME
@@ -2778,6 +2839,10 @@ class TestRememberEngineHome(unittest.TestCase):
         a.update(args)
         return make_ctx(self.home, {"schema": 1}, SK, "win-x64", engine_home=engine_home, **a)
 
+    def remember(self, ctx, results=()):
+        """The engine home is saved after every step (fix round 1: never before the install succeeded)."""
+        return self.sy.step_location(ctx, list(results))
+
     def engine_sees(self) -> Path:
         """What the engine itself (engine/reel/lib/plat.py) resolves now, with no variable set."""
         from lib import plat
@@ -2786,13 +2851,13 @@ class TestRememberEngineHome(unittest.TestCase):
 
     def test_the_default_home_writes_nothing(self):
         ctx = self.ctx()
-        r = self.sy.step_questions(ctx)
+        r = self.remember(ctx)
         self.assertEqual(r.status, "ok", r.detail)
         self.assertFalse(self.pointer.exists())
         self.assertFalse(self.settings.exists())
-        self.assertTrue(only_the_test_log(ctx.paths))
+        self.assertEqual(sorted(os.listdir(ctx.paths.whynot)), ["logs", "state.json"])  # only its own record
         ctx = self.ctx(engine_home=self.home / ".whynot-cut")  # chosen, but it is the default: still nothing
-        self.assertEqual(self.sy.step_questions(ctx).status, "ok")
+        self.assertEqual(self.remember(ctx).status, "ok")
         self.assertFalse(self.pointer.exists() or self.settings.exists())
 
     def test_a_chosen_home_is_remembered_in_both_places(self):
@@ -2805,7 +2870,7 @@ class TestRememberEngineHome(unittest.TestCase):
         if not IS_WIN:
             os.chmod(self.settings, 0o600)
         ctx = self.ctx(engine_home=self.engine)
-        r = self.sy.step_questions(ctx)
+        r = self.remember(ctx)
         self.assertEqual(r.status, "ok", r.detail)
         self.assertIn(str(self.engine), r.detail)
         # the pointer: the hook's own format (one key per line, raw UTF-8, indent 1), clients_root kept
@@ -2829,13 +2894,13 @@ class TestRememberEngineHome(unittest.TestCase):
         self.assertEqual(norm(self.engine_sees()), norm(self.engine))
         self.assertEqual(norm(base.Paths.from_env(str(self.home), env={}).whynot), norm(self.engine))
         # a second run changes nothing (no second backup)
-        self.assertEqual(self.sy.step_questions(self.ctx()).status, "ok")
+        self.assertEqual(self.remember(self.ctx()).status, "ok")
         self.assertEqual(len(list(self.settings.parent.glob("settings.json.whynot-backup-*"))), 1)
         self.assertEqual(self.pointer.read_bytes(), raw)
 
     def test_no_files_yet_get_both_written(self):
         ctx = self.ctx(engine_home=self.engine)
-        self.assertEqual(self.sy.step_questions(ctx).status, "ok")
+        self.assertEqual(self.remember(ctx).status, "ok")
         p = json.loads(self.pointer.read_text(encoding="utf-8"))
         self.assertEqual((list(p), p["engine_home"], p["clients_root"]), (POINTER_KEYS, str(self.engine), ""))
         s = json.loads(self.settings.read_text(encoding="utf-8"))
@@ -2847,7 +2912,7 @@ class TestRememberEngineHome(unittest.TestCase):
         EngineHomeCases.pointer(self.home, {"clients_root": "", "engine_home": str(old), "updated": "x"})
         EngineHomeCases.settings(self.home, {PID: {"options": {"engine_home": str(old)}}})
         ctx = self.ctx(engine_home=self.home / ".whynot-cut")
-        self.assertEqual(self.sy.step_questions(ctx).status, "ok")
+        self.assertEqual(self.remember(ctx).status, "ok")
         self.assertEqual(json.loads(self.pointer.read_text(encoding="utf-8"))["engine_home"], "")
         s = json.loads(self.settings.read_text(encoding="utf-8"))
         self.assertEqual(s["pluginConfigs"][PID]["options"]["engine_home"], "")
@@ -2857,7 +2922,7 @@ class TestRememberEngineHome(unittest.TestCase):
         # the SessionStart hook rewrites the pointer from the plugin option on every session: both must agree
         EngineHomeCases.settings(self.home, {PID: {"options": {"engine_home": str(self.home / "Old Engine")}}})
         ctx = self.ctx(engine_home=self.home / ".whynot-cut")
-        self.assertEqual(self.sy.step_questions(ctx).status, "ok")
+        self.assertEqual(self.remember(ctx).status, "ok")
         s = json.loads(self.settings.read_text(encoding="utf-8"))
         self.assertEqual(s["pluginConfigs"][PID]["options"]["engine_home"], "")
 
@@ -2865,7 +2930,7 @@ class TestRememberEngineHome(unittest.TestCase):
         bad = b'{"theme": "dark",, "pluginConfigs": {}}'
         touch(self.settings, bad)
         ctx = self.ctx(engine_home=self.engine)
-        r = self.sy.step_questions(ctx)
+        r = self.remember(ctx)
         self.assertEqual(r.status, "amber", r.detail)
         self.assertEqual(self.settings.read_bytes(), bad)
         self.assertFalse(list(self.settings.parent.glob("settings.json.whynot-backup-*")))
@@ -2876,16 +2941,46 @@ class TestRememberEngineHome(unittest.TestCase):
     def test_plugin_configs_of_the_wrong_type_is_amber_and_untouched(self):
         bad = json.dumps({"pluginConfigs": {PID: {"options": ["not", "an", "object"]}}}).encode("utf-8")
         touch(self.settings, bad)
-        r = self.sy.step_questions(self.ctx(engine_home=self.engine))
+        r = self.remember(self.ctx(engine_home=self.engine))
         self.assertEqual(r.status, "amber", r.detail)
         self.assertEqual(self.settings.read_bytes(), bad)
 
     def test_dry_run_writes_nothing(self):
         ctx = self.ctx(engine_home=self.engine, dry_run=True)
         ctx.log = Quiet(None, dry_run=True)
-        r = self.sy.step_questions(ctx)
+        r = self.remember(ctx)
         self.assertIn("dry run", r.detail)
         self.assertFalse(self.pointer.exists() or self.settings.exists())
+
+    def test_nothing_is_saved_before_the_install_succeeded(self):
+        # the questions step no longer saves it; a red step keeps the previous location, and the checklist says so
+        old = self.home / "Old Engine"
+        EngineHomeCases.pointer(self.home, {"clients_root": "", "engine_home": str(old), "updated": "x"})
+        before = self.pointer.read_bytes()
+        ctx = self.ctx(engine_home=self.engine)
+        self.sy.step_questions(ctx)
+        self.assertEqual(self.pointer.read_bytes(), before)
+        self.assertFalse(self.settings.exists())
+        r = self.remember(ctx, [base.StepResult("runtime", "red", "pip sync failed"),
+                                base.StepResult("state", "ok", "")])
+        self.assertEqual(r.status, "amber", r.detail)
+        self.assertIn("NOT saved", r.detail)
+        self.assertIn("runtime", r.detail)
+        self.assertIn(f"still uses {old}", r.detail)
+        self.assertEqual(self.pointer.read_bytes(), before)
+        self.assertFalse(self.settings.exists())
+        self.assertIn("[!!] location", self.sy.render_checklist([r], None))
+        r = self.remember(ctx, [base.StepResult("runtime", "ok", ""), base.StepResult("gpu", "amber", "")])
+        self.assertEqual(r.status, "ok", r.detail)  # amber steps do not stop it
+        self.assertEqual(json.loads(self.pointer.read_text(encoding="utf-8"))["engine_home"], str(self.engine))
+
+    def test_unknown_pointer_keys_are_kept(self):
+        touch(self.pointer, json.dumps({"clients_root": "", "engine_home": "", "updated": "x", "future_key": "keep me"},
+                                       indent=1).encode("utf-8"))
+        self.assertEqual(self.remember(self.ctx(engine_home=self.engine)).status, "ok")
+        p = json.loads(self.pointer.read_text(encoding="utf-8"))
+        self.assertEqual(list(p), POINTER_KEYS + ["future_key"])
+        self.assertEqual((p["engine_home"], p["future_key"]), (str(self.engine), "keep me"))
 
     def test_a_variable_that_overrides_the_choice_is_named(self):
         # outside a sandbox: WHYNOT_HOME (or another engine-home variable) beats the saved option in the engine
@@ -3543,6 +3638,18 @@ class TestShellScripts(unittest.TestCase):
         self.assertEqual(shell_steps(ps, r"\$WncUninstallStepNames\s*=\s*@\(([^)]*)\)"), un)
         self.assertEqual(shell_steps(sh, r'UNINSTALL_STEP_NAMES="([^"]*)"'), un)
 
+    def test_the_three_engine_layout_lists_agree(self):
+        # what uninstall may delete and what the location check counts as ours: base.py and both bootstraps
+        ps = SHELL_FILES["bootstrap.ps1"].read_text(encoding="utf-8")
+        sh = SHELL_FILES["bootstrap.sh"].read_text(encoding="utf-8")
+        ps_names = re.findall(r"'([^']+)'", re.search(r"\$WncEngineLayout = @\((.*?)\)", ps, re.S).group(1))
+        ps_pre = re.findall(r"'([^']+)'", re.search(r"\$WncEngineLayoutPrefixes = @\((.*?)\)", ps, re.S).group(1))
+        sh_names = " ".join(re.findall(r'^ENGINE_LAYOUT="(?:\$ENGINE_LAYOUT )?([^"]*)"', sh, re.M)).split()
+        sh_pre = re.search(r'^ENGINE_LAYOUT_PREFIXES="([^"]*)"', sh, re.M).group(1).split()
+        self.assertEqual(ps_names, list(base.ENGINE_LAYOUT))
+        self.assertEqual(sh_names, list(base.ENGINE_LAYOUT))
+        self.assertEqual((ps_pre, sh_pre), (list(base.ENGINE_LAYOUT_PREFIXES), list(base.ENGINE_LAYOUT_PREFIXES)))
+
     def test_the_bootstraps_use_the_runtime_contract(self):
         for name in ("bootstrap.ps1", "bootstrap.sh"):
             text = SHELL_FILES[name].read_text(encoding="utf-8")
@@ -3784,6 +3891,21 @@ class TestPowerShellOneLiner(TestPowerShellFrontEnd):
                            env=env, timeout=600, stdin=subprocess.DEVNULL, cwd=str(self.tmp))
         self.assert_installed(r, "win-x64")
         self.assertIn("after the one-liner: 0", r.stdout)
+
+    def test_the_release_zip_is_cached_under_the_chosen_engine_home(self):
+        # fix round 1 (small 1): -Source caches under the engine home, here a Documents folder's WhyNotCut subfolder
+        docs = self.home / "Documents"
+        thesis = touch(docs / "thesis.docx", b"my thesis")
+        r = self.ps(self.lone, "-Home", self.home, "-EngineHome", docs, "-Yes", "-Skip", "model,launch",
+                    "-Source", self.zip, "-SourceSha256", self.zip_sha)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        engine = docs / "WhyNotCut"
+        rel = engine / "downloads" / f"release-{self.zip_sha[:8]}"
+        self.assertEqual(sha((rel / self.zip.name).read_bytes()), self.zip_sha)
+        self.assertTrue((engine / "current").is_file(), out)
+        self.assertFalse((self.home / ".whynot-cut" / "downloads").exists())
+        self.assertEqual(thesis.read_bytes(), b"my thesis")
 
     def test_a_wrong_source_sha256_installs_nothing(self):
         r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Source", self.zip, "-SourceSha256", "1" * 64)
@@ -4130,13 +4252,15 @@ class TestUninstall(_InstalledHome):
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
         left = set(os.listdir(self.paths.whynot))
-        self.assertEqual(left, {"models", "WhyNot Clients", "python", "bin", DEFER_LIST}, out)
+        # fix round 1: only WhyNot Cut's own entries go; "WhyNot Clients" and the link are not ours: kept and listed
+        self.assertEqual(left, {"models", "WhyNot Clients", "python", "bin", DEFER_LIST}
+                         | ({"linked clients"} if linked else set()), out)
         self.assertEqual(model.read_bytes(), b"weights")
         self.assertEqual(footage.read_bytes(), b"precious footage")
         self.assertTrue((clients / "Dr X" / ".whynot-client").is_file())
-        self.assertEqual(kept.read_bytes(), b"precious")  # a link is removed as a link: its target is untouched
+        self.assertEqual(kept.read_bytes(), b"precious")  # never followed: its target is untouched
         if linked:
-            self.assertFalse(os.path.lexists(self.paths.whynot / "linked clients"))
+            self.assertIn("linked clients", out)
         # python/ and bin/ are left to the bootstrap (Windows locks the running python.exe): listed, not deleted
         self.assertEqual(self.deferred(), [str(self.paths.python_dir), str(bin_dir)])
         self.assertTrue((pbs / "python.exe").is_file())
@@ -4196,6 +4320,44 @@ class TestUninstall(_InstalledHome):
         self.assertFalse(cep.exists())
         self.assertFalse(self.paths.state_file.exists())
         self.assertEqual(os.listdir(self.paths.whynot), ["models"])
+
+    def test_unknown_entries_of_the_engine_home_survive_remove_engine(self):
+        # fix round 1 (CRITICAL): --remove-engine deletes only what WhyNot Cut puts there, in ~/.whynot-cut too
+        self.install()
+        mine = touch(self.paths.whynot / "my notes.txt", b"mine")
+        project = touch(self.paths.whynot / "Old Project" / "edit.prproj", b"mine")
+        self.bootstrap_leftovers()
+        r = self.core("uninstall", "--remove-engine", "--remove-models")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual((mine.read_bytes(), project.read_bytes()), (b"mine", b"mine"))
+        self.assertEqual(set(os.listdir(self.paths.whynot)), {"my notes.txt", "Old Project", "python", "bin",
+                                                              DEFER_LIST}, out)
+        self.assertIn("my notes.txt", r.stdout)  # listed as kept
+        self.assertIn("Old Project", r.stdout)
+        # the engine home is not empty: it is not listed for the bootstrap's final delete
+        self.assertEqual(self.deferred(), [str(self.paths.python_dir), str(self.paths.bin_dir)])
+
+    def test_a_chosen_documents_folder_installs_into_its_own_subfolder(self):
+        # fix round 1 (CRITICAL): the reviewer's case - Documents with the editor's files as the engine home
+        docs = self.home / "Documents"
+        thesis = touch(docs / "thesis.docx", b"my thesis")
+        taxes = touch(docs / "Taxes" / "2025.pdf", b"my taxes")
+        r = self.core("install", "--skip", "model", "--engine-home", str(docs), "--engine-home-chosen")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        engine = docs / "WhyNotCut"
+        self.assertTrue((engine / "current").is_file(), out)
+        self.assertTrue((engine / "state.json").is_file(), out)
+        self.assertEqual(sorted(os.listdir(docs)), ["Taxes", "WhyNotCut", "thesis.docx"])
+        p = json.loads(self.paths.options_file.read_text(encoding="utf-8"))
+        self.assertEqual(norm(p["engine_home"]), norm(engine))
+        # uninstall --remove-engine (found through the pointer) leaves every file of the editor where it was
+        touch(engine / "python" / "cpython-3.12.15-x" / "python.exe", b"MZ")
+        r = self.core("uninstall", "--remove-engine", "--remove-models")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((thesis.read_bytes(), taxes.read_bytes()), (b"my thesis", b"my taxes"))
+        self.assertEqual(sorted(os.listdir(engine)), sorted(["python", DEFER_LIST]))  # the bootstrap's, next
 
     def test_unreadable_settings_runs_no_cli_and_stays_byte_identical(self):
         self.install()
@@ -4674,6 +4836,66 @@ class TestPowerShellEngineHome(TestPowerShellFrontEnd):
                 self.assertFalse(os.path.lexists(bad), out)
         self.assertEqual(self.srv.srv.hits, [])
 
+    def test_a_chosen_documents_folder_gets_its_own_subfolder(self):
+        # fix round 1 (CRITICAL): Documents with the editor's files; install and uninstall never touch them
+        docs = self.home / "Documents"
+        thesis = touch(docs / "thesis.docx", b"my thesis")
+        taxes = touch(docs / "Taxes" / "2025.pdf", b"my taxes")
+        r = self.ps(self.front(), "-Home", self.home, "-EngineHome", docs, "-Yes", "-Skip", "model,launch")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        engine = docs / "WhyNotCut"
+        self.assertIn(f"goes into its own folder {engine}", out)
+        self.assertIn("مجلد خاص", out)
+        self.assertTrue((engine / "current").is_file(), out)
+        self.assertEqual(sorted(os.listdir(docs)), ["Taxes", "WhyNotCut", "thesis.docx"])
+        r = self.ps(self.front(), "-Home", self.home, "-Uninstall", "-RemoveEngine", "-Yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual((thesis.read_bytes(), taxes.read_bytes()), (b"my thesis", b"my taxes"))
+        for _ in range(50):
+            if not engine.exists():
+                break
+            time.sleep(0.1)
+        self.assertFalse(engine.exists(), out)  # only WhyNot Cut's own entries were in it
+        self.assertEqual(sorted(os.listdir(docs)), ["Taxes", "thesis.docx"])
+
+    def test_enter_on_a_reinstall_keeps_the_existing_install(self):
+        # fix round 1 (IMPORTANT 1): an Arabic-letter home with an install: no non-ASCII re-ask, no move
+        touch(self.home / ".whynot-cut" / "state.json", b"{}")
+        answers = self.tmp / "answers.txt"
+        answers.write_text("\n", encoding="utf-8")  # Enter, once: a second question would end the answers (exit 2)
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", env=self.env(WNC_TEST_ANSWERS=str(answers)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("already installed there, so it stays there", out)
+        self.assertIn(f"engine home {self.home / '.whynot-cut'} (default)", out)
+        self.assertNotIn("stays there and is no longer used", out)
+
+    def test_another_folder_says_the_old_install_stays_behind(self):
+        touch(self.home / ".whynot-cut" / "state.json", b"{}")
+        r = self.ps(self.front(), "-Home", self.home, "-EngineHome", self.home / "Other", "-DryRun", "-Yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn(f"already installed in {self.home / '.whynot-cut'} stays there and is no longer used", out)
+        self.assertIn("التثبيت القديم سيبقى", out)
+
+    def test_links_and_folders_holding_the_plugin_are_refused(self):
+        target = self.tmp / "target"
+        target.mkdir()
+        junction = self.home / "junction"
+        self.home.mkdir()
+        cases = [(self.fx.root, "holds the plugin folder")]
+        if make_dir_link(junction, target):
+            cases.append((junction, "link or mount point"))
+        for bad, needle in cases:
+            with self.subTest(str(bad)):
+                r = self.ps(self.front(), "-Home", self.home, "-EngineHome", bad, "-Yes", "-Skip", "model,launch")
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn(needle, r.stdout + r.stderr)
+        self.assertEqual(os.listdir(target), [])
+        self.assertEqual(self.srv.srv.hits, [])
+
     def test_the_model_flag(self):
         self.home.mkdir()
         r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Yes", "-Model", "medium")
@@ -4721,6 +4943,46 @@ class TestBashEngineHome(TestBashFrontEnd):
         self.assertIn("full path", out)
         self.assertIn(f"engine home {(self.home / 'Engine Z').as_posix()} (chosen)", out)
         self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_a_chosen_documents_folder_gets_its_own_subfolder(self):
+        docs = self.home / "Documents"
+        thesis = touch(docs / "thesis.docx", b"my thesis")
+        r = self.sh(self.front(), "--home", self.home_arg(), "--engine-home", docs.as_posix(), "--yes",
+                    "--skip", "model,launch")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        engine = docs / "WhyNotCut"
+        self.assertIn(f"goes into its own folder {docs.as_posix()}/WhyNotCut", out)
+        self.assertIn("مجلد خاص", out)
+        self.assertTrue((engine / "current").is_file(), out)
+        r = self.sh(self.front(), "--home", self.home_arg(), "--uninstall", "--remove-engine", "--yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(thesis.read_bytes(), b"my thesis")
+        self.assertEqual(sorted(os.listdir(docs)), ["thesis.docx"], r.stdout + r.stderr)
+
+    def test_piped_source_is_cached_under_the_chosen_engine_home(self):
+        zf = self.tmp / "WhyNotCut-3.0.0.zip"
+        zsha = release_zip(self.fx, zf)
+        engine = self.home / "WhyNot Engine"
+        r = self.sh("-s", "--", "--home", self.home_arg(), "--engine-home", engine.as_posix(), "--yes",
+                    "--skip", "model,launch", "--source", zf.as_posix(), "--source-sha256", zsha,
+                    script=(INSTALLER / "install.sh").read_bytes())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((engine / "downloads" / f"release-{zsha[:8]}" / zf.name).is_file())
+        self.assertTrue((engine / "current").is_file())
+        self.assertFalse((self.home / ".whynot-cut" / "downloads").exists())
+
+    def test_another_folder_says_the_old_install_stays_behind(self):
+        touch(self.home / ".whynot-cut" / "state.json", b"{}")
+        r = self.sh(self.front(), "--home", self.home_arg(), "--engine-home", (self.home / "Other").as_posix(),
+                    "--dry-run", "--yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("stays there and is no longer used", out)
+        self.assertIn("التثبيت القديم سيبقى", out)
+        r = self.sh(self.front(), "--home", self.home_arg(), "--engine-home", self.fx.root.as_posix(), "--yes")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("holds the plugin folder", r.stdout + r.stderr)
 
     def test_free_space_and_the_model_flag(self):
         self.home.mkdir()

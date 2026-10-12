@@ -122,6 +122,43 @@ for k in sys.argv[1].split("."):
 print("" if v is None else v)' "$2" 2>/dev/null | tr -d '\r'
 }
 
+wnc_engine_home() { # sandbox-home engine-home -> WNC_ENGINE: where the -Source release zip is cached
+  # the engine home as bootstrap.sh will find it: --engine-home (its WhyNotCut subfolder when it holds other files or
+  # is the home folder / Desktop / Documents / Downloads, as engine_place does), else the engine-home variables (not
+  # in a sandbox), the pointer's engine_home, our settings.json pluginConfigs option, else ~/.whynot-cut. A rare
+  # disagreement with the bootstrap only means the zip is cached elsewhere.
+  local h="${1:-$HOME}" e="$2" n v cfg d
+  if [ -n "$e" ]; then
+    case "$e" in /*|[A-Za-z]:*) ;; *) e="$PWD/$e" ;; esac
+    e="${e%/}"
+    WNC_ENGINE="$e"
+    if [ -f "$e/state.json" ] || [ -f "$e/current" ] || [ -f "$e/bin/uv" ] || [ -f "$e/bin/uv.exe" ]; then return 0; fi
+    for d in "$h" "$h/Desktop" "$h/Documents" "$h/Downloads"; do
+      if [ "${d%/}" = "$e" ]; then WNC_ENGINE="$e/WhyNotCut"; return 0; fi
+    done
+    if [ -d "$e" ] && [ -n "$(ls -A "$e" 2>/dev/null)" ]; then WNC_ENGINE="$e/WhyNotCut"; fi
+    return 0
+  fi
+  if [ -z "$1" ]; then
+    for n in WHYNOT_HOME CLAUDE_PLUGIN_OPTION_ENGINE_HOME REEL_HOME CLAUDE_PLUGIN_OPTION_REEL_HOME NH_ENV_DIR; do
+      v="${!n:-}"
+      if [ -n "$v" ]; then WNC_ENGINE="$v"; return 0; fi
+    done
+  fi
+  v=""
+  if [ -f "$h/.whynot-cut/plugin-options.json" ]; then
+    v="$(wnc_index_get "$(cat "$h/.whynot-cut/plugin-options.json" 2>/dev/null)" engine_home)"
+  fi
+  if [ -z "$v" ]; then
+    cfg="$h/.claude"
+    [ -z "$1" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ] && cfg="$CLAUDE_CONFIG_DIR"
+    if [ -f "$cfg/settings.json" ]; then
+      v="$(wnc_index_get "$(cat "$cfg/settings.json" 2>/dev/null)" "pluginConfigs.whynot-cut@thewhynot-ai.options.engine_home")"
+    fi
+  fi
+  WNC_ENGINE="${v:-$h/.whynot-cut}"
+}
+
 wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty after a dry run); status 2 / 3
   local home="$1" dry="$2" channel="$3" src="$4" sha="$5" engine="$6" name="" dir="" zip="" x="" plugin="" got="" idx=""
   RELEASE_ROOT=""
@@ -151,14 +188,11 @@ wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty
     /*|[A-Za-z]:*) ;;
     *) src="$PWD/$src" ;;
   esac
-  if [ -n "$engine" ]; then  # --engine-home: the release zip is cached there too
-    case "$engine" in /*|[A-Za-z]:*) ;; *) engine="$PWD/$engine" ;; esac
-  elif [ -n "$home" ]; then
+  if [ -n "$home" ]; then
     case "$home" in /*|[A-Za-z]:*) ;; *) home="$PWD/$home" ;; esac
-    engine="$home/.whynot-cut"
-  else
-    engine="${WHYNOT_HOME:-$HOME/.whynot-cut}"
   fi
+  wnc_engine_home "$home" "$engine"
+  engine="$WNC_ENGINE"
   name="${src##*/}"; name="${name%%\?*}"
   [ -n "$name" ] || name="WhyNotCut.zip"
   dir="$engine/downloads/release-$(printf '%s' "$sha" | cut -c1-8)"

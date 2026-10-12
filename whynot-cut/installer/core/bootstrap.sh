@@ -27,10 +27,15 @@
 # else ~/.whynot-cut) BEFORE anything is downloaded. That folder is the default of the location question (owner
 # decision 2026-10-12): --engine-home <folder> answers it, --yes takes the default, without a terminal the default is
 # used; the answer is read from the terminal, or from /dev/tty when stdin is not one (never from stdin under
-# `curl | bash`). It is checked (engine_home_problem: a full path, not a drive root, not inside the plugin folder,
-# not the user folder or Claude's folder, not the clients folder or a folder marked .whynot-client, in a sandbox
-# inside the sandbox; 6 GB free on its drive, 9 GB with the Whisper model, unless WhyNot Cut is already there; it can
-# be created and written); a refused folder is asked again (with --yes: exit 2, nothing downloaded). uv, Python, the
+# `curl | bash`). It is placed and checked (engine_place, the core's base.choose_engine_home: a full path, not a drive
+# root / mounted volume (/Volumes/<name>, a df mount point) / link, not inside the plugin folder; unless WhyNot Cut is
+# already there also not holding the plugin, not the clients folder or holding / inside it, not inside or holding a
+# folder marked .whynot-client; the user folder, Desktop, Documents, Downloads and any folder holding the editor's own
+# files get a WhyNotCut subfolder (said in English and Arabic), so uninstall never empties a folder of the editor's
+# files; in a sandbox inside the sandbox; 6 GB free on its drive, 9 GB with the Whisper model, unless WhyNot Cut is
+# already there; it can be created and written); a refused folder is asked again (with --yes: exit 2, nothing
+# downloaded). Choosing a folder other than an existing install's says (English + Arabic) that the old one is left
+# behind, and where. uv, Python, the
 # log and every later step land in that one folder: it is passed to the core as --engine-home (+ --engine-home-chosen
 # when the editor chose it: the core then uses it as it is; otherwise the core stops with 2 if its own resolution,
 # wnc_installer.base.resolve_engine_home, disagrees). The core remembers a chosen folder in settings.json pluginConfigs
@@ -465,47 +470,120 @@ typed_path() { # text -> TYPED: quotes trimmed, ~ is the home folder, no trailin
   TYPED="$t"
 }
 
-engine_home_problem() { # path -> PROBLEM (empty: fine); the core's base.engine_home_choice_problem, same order
-  local p="$1" n c d up
-  PROBLEM=""
+# What WhyNot Cut puts in an engine home: wnc_installer/base.py ENGINE_LAYOUT / ENGINE_LAYOUT_PREFIXES (the tests keep
+# the three copies in step). A folder holding only these (and models, library, the pointer) counts as an engine home
+# or empty for the location check.
+ENGINE_LAYOUT="bin python runtimes current ffmpeg cuda bridge state.json logs cache downloads fonts marketplace"
+ENGINE_LAYOUT="$ENGINE_LAYOUT marketplace.new marketplace.prev .delete-after-exit venv ppro-queue ppro-scripts ae-queue"
+ENGINE_LAYOUT="$ENGINE_LAYOUT ae-scripts ae-probe ae-capabilities.json bench tmp"
+ENGINE_LAYOUT_PREFIXES="state.json.corrupt- .state.json. .current. .plugin-options.json. .wnc-write-test"
+
+is_engine_home() { # dir: WhyNot Cut is installed there (state.json, current or bin/uv(.exe): only WhyNot Cut leaves these)
+  [ -f "$1/state.json" ] || [ -f "$1/current" ] || [ -f "$1/bin/uv" ] || [ -f "$1/bin/uv.exe" ]
+}
+
+has_foreign() { # dir: status 0 when it holds something WhyNot Cut does not put there (base.foreign_entries)
+  local e n k ours
+  [ -d "$1" ] || return 1
+  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    n="${e##*/}"
+    ours=""
+    case " $ENGINE_LAYOUT models library plugin-options.json " in *" $n "*) ours=1 ;; esac
+    if [ -z "$ours" ]; then
+      for k in $ENGINE_LAYOUT_PREFIXES; do
+        case "$n" in "$k"*) ours=1 ;; esac
+      done
+    fi
+    [ -n "$ours" ] || return 0
+  done
+  return 1
+}
+
+is_mount() { # path: /Volumes/<name>, or an existing folder that df reports as its own mount point
+  local n m low
+  norm_path "$1"; n="$NORM"
+  low="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')"
+  case "$low" in /volumes/*/*) ;; /volumes/?*) return 0 ;; esac
+  [ -d "$1" ] || return 1
+  m="$(df -P "$1" 2>/dev/null </dev/null | awk 'NR == 2 { for (i = 6; i <= NF; i++) printf "%s%s", $i, (i < NF ? " " : "") }')"
+  [ -n "$m" ] || return 1
+  norm_path "$m"
+  [ "$NORM" = "$n" ]
+}
+
+engine_place() { # path -> PLACED, PLACE_NOTE, PROBLEM (empty: fine); the core's base.choose_engine_home, same order
+  local p="$1" n r c d up f nf d1 d2 lp root_like="" existing=""
+  PLACED="" PLACE_NOTE="" PROBLEM=""
   case "$p" in
     /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
     *) PROBLEM="$p is not a full path (for example $HOME/WhyNotCut)"; return 0 ;;
   esac
   norm_path "$p"; n="$NORM"
   case "$n" in
-    /|[A-Za-z]:|[A-Za-z]:/) PROBLEM="$p is a drive root; choose a folder on it"; return 0 ;;
+    /|[A-Za-z]:|[A-Za-z]:/) PROBLEM="$p is a drive root or a mounted volume; choose a folder on it"; return 0 ;;
   esac
-  norm_path "$ROOT"
-  if within "$n" "$NORM"; then
+  if is_mount "$p"; then PROBLEM="$p is a drive root or a mounted volume; choose a folder on it"; return 0; fi
+  if [ -L "$p" ]; then PROBLEM="$p is a link or mount point; choose a real folder"; return 0; fi
+  norm_path "$ROOT"; r="$NORM"
+  if within "$n" "$r"; then
     PROBLEM="$p is inside the plugin folder $ROOT, which is replaced on every update"; return 0
   fi
-  norm_path "$HOME"
-  if within "$NORM" "$n"; then PROBLEM="$p is your user folder or holds it; choose a folder of its own"; return 0; fi
-  norm_path "$HOME/.claude"
-  if within "$n" "$NORM"; then PROBLEM="$p is inside Claude's folder $HOME/.claude"; return 0; fi
-  while IFS= read -r c; do
-    [ -n "$c" ] || continue
-    norm_path "$c"
-    if within "$n" "$NORM"; then
-      PROBLEM="$p is your clients folder $c (or inside it); keep the engine apart from client footage"; return 0
+  is_engine_home "$p" && existing=1
+  if [ -z "$existing" ]; then
+    if [ "$r" != "$n" ] && within "$r" "$n"; then  # it holds the plugin (fine only in its downloads/: -Source cache)
+      norm_path "$p/downloads"; d1="$NORM"
+      norm_path "$p/WhyNotCut/downloads"; d2="$NORM"
+      if ! within "$r" "$d1" && ! within "$r" "$d2"; then
+        PROBLEM="$p holds the plugin folder $ROOT; choose a folder of its own"; return 0
+      fi
     fi
-  done <<EOF
+    while IFS= read -r c; do
+      [ -n "$c" ] || continue
+      norm_path "$c"
+      if within "$n" "$NORM" || within "$NORM" "$n"; then
+        PROBLEM="$p is, holds or is inside your clients folder $c; keep the engine apart from client footage"
+        return 0
+      fi
+    done <<EOF
 $CLIENT_ROOTS
 EOF
-  d="$p"
-  while [ -n "$d" ]; do
-    if [ -e "$d/.whynot-client" ]; then PROBLEM="$p is inside a client folder ($d holds .whynot-client)"; return 0; fi
-    up="${d%/*}"
-    [ "$up" = "$d" ] && break
-    d="$up"
-  done
-  if [ -n "$HOME_OVR" ]; then
-    norm_path "$H"
-    if [ "$n" = "$NORM" ] || ! within "$n" "$NORM"; then
-      PROBLEM="$p is outside the sandbox home $H (--home: nothing outside it is used)"
+    d="$p"
+    while [ -n "$d" ]; do
+      if [ -e "$d/.whynot-client" ]; then PROBLEM="$p is inside a client folder ($d holds .whynot-client)"; return 0; fi
+      up="${d%/*}"
+      [ "$up" = "$d" ] && break
+      d="$up"
+    done
+    if [ -d "$p" ]; then
+      lp="$(find "$p" -maxdepth 4 -name .whynot-client 2>/dev/null </dev/null | head -n 1)"
+      if [ -n "$lp" ]; then PROBLEM="$p holds a client folder (${lp%/*} holds .whynot-client)"; return 0; fi
     fi
   fi
+  for d in "$HOME" "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads"; do
+    norm_path "$d"
+    [ "$NORM" = "$n" ] && root_like=1
+  done
+  f="$p"
+  if [ -z "$existing" ] && { [ -n "$root_like" ] || has_foreign "$p"; }; then
+    f="${p%/}/WhyNotCut"
+    PLACE_NOTE="$p already holds other files, so WhyNot Cut goes into its own folder $f (uninstall then never touches the rest)"
+  fi
+  norm_path "$f"; nf="$NORM"
+  norm_path "$HOME"
+  if within "$NORM" "$nf"; then PROBLEM="$f is your user folder or holds it; choose a folder of its own"; return 0; fi
+  norm_path "$HOME/.claude"
+  if within "$nf" "$NORM"; then PROBLEM="$f is inside Claude's folder $HOME/.claude"; return 0; fi
+  if [ "$f" != "$p" ] && ! is_engine_home "$f" && has_foreign "$f"; then
+    PROBLEM="$f already holds other files; choose an empty folder or one of its own"; return 0
+  fi
+  if [ -n "$HOME_OVR" ]; then
+    norm_path "$H"
+    if [ "$nf" = "$NORM" ] || ! within "$nf" "$NORM"; then
+      PROBLEM="$f is outside the sandbox home $H (--home: nothing outside it is used)"; return 0
+    fi
+  fi
+  PLACED="$f"
   return 0
 }
 
@@ -549,7 +627,7 @@ ask_line() { # default -> ANSWER (trimmed; empty = the default); status 1 when t
 }
 
 select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no usable folder is given)
-  local default="$1" with_model="$2" text ask="" tries=0 need p
+  local default="$1" with_model="$2" text ask="" tries=0 need p old_install n_new
   CHOSEN=""
   client_roots
   can_ask && ask=1
@@ -567,11 +645,20 @@ select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no us
     fi
     if ask_line "$default" && [ -n "$ANSWER" ]; then text="$ANSWER"; CHOSEN=1; fi
   fi
+  old_install=""
+  is_engine_home "$default" && old_install=1  # WhyNot Cut already lives in the default folder
   while [ "$tries" -lt 8 ]; do
     tries=$((tries + 1))
     typed_path "$text"; p="$TYPED"
-    engine_home_problem "$p"
-    if [ -z "$PROBLEM" ] && [ ! -f "$p/state.json" ] && [ ! -f "$p/current" ]; then
+    engine_place "$p"
+    if [ -z "$PROBLEM" ]; then
+      if [ -n "$PLACE_NOTE" ]; then
+        printf '%s\n' "$PLACE_NOTE"
+        printf '%s\n' "هذا المجلد فيه ملفات أخرى، لذلك سيُثبَّت WhyNot Cut في مجلد خاص به داخله (WhyNotCut)، ولن يلمس الإلغاء باقي الملفات."
+      fi
+      p="$PLACED"
+    fi
+    if [ -z "$PROBLEM" ] && ! is_engine_home "$p"; then
       need="$NEED_GB"
       [ -n "$with_model" ] && need=$((NEED_GB + MODEL_GB))
       free_gb "$p"
@@ -585,7 +672,16 @@ select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no us
         PROBLEM="it cannot be created or written"
       fi
     fi
-    if [ -z "$PROBLEM" ]; then ENGINE="$p"; return 0; fi
+    if [ -z "$PROBLEM" ]; then
+      norm_path "$p"; n_new="$NORM"
+      norm_path "$default"
+      if [ -n "$old_install" ] && [ "$n_new" != "$NORM" ]; then
+        printf 'WARNING: the WhyNot Cut already installed in %s stays there and is no longer used; delete it yourself when you no longer need it.\n' "$default"
+        printf '%s %s\n' "تنبيه: التثبيت القديم سيبقى في مكانه ولن يُستخدم بعد الآن؛ احذفه بنفسك إن لم تعد تحتاجه:" "$default"
+      fi
+      ENGINE="$p"
+      return 0
+    fi
     printf 'WhyNot Cut cannot use %s as its engine home: %s\n' "$p" "$PROBLEM"
     printf '%s\n' "لا يمكن استخدام هذا المجلد؛ اختر مجلدًا آخر."
     if [ -z "$ask" ]; then
@@ -620,6 +716,9 @@ else
 fi
 
 ROOT="$(abs_path "$PLUGIN_ROOT")"
+case "$OS_NAME" in  # Git Bash: `pwd` may say /tmp/... for %TEMP%; the location checks compare Windows paths
+  MINGW*|MSYS*|CYGWIN*) if command -v cygpath >/dev/null 2>&1; then ROOT="$(cygpath -m "$ROOT")"; fi ;;
+esac
 TEST_UV="" ANSWERS="" TEST_FREE=""
 if [ -n "$HOME_OVR" ]; then
   TEST_UV="${WNC_TEST_UV:-}" ANSWERS="${WNC_TEST_ANSWERS:-}" TEST_FREE="${WNC_TEST_FREE_GB:-}"

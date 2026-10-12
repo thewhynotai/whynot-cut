@@ -60,12 +60,51 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
     }
 
     function Get-WncEngineHome {
-        # where the release zip is cached (-Source mode, before any plugin file exists): -EngineHome when given
-        if ($EngineHome) { return Get-WncFullPath $EngineHome }
-        if ($SandboxHome) { return Join-Path (Get-WncFullPath $SandboxHome) '.whynot-cut' }
-        if ($env:WHYNOT_HOME) { return Get-WncFullPath $env:WHYNOT_HOME }
+        # where the release zip is cached (-Source mode, before any plugin file exists): the engine home as the
+        # bootstrap will find it - -EngineHome (its WhyNotCut subfolder when it holds other files or is the user
+        # folder / Desktop / Documents / Downloads, as bootstrap.ps1 Get-WncEnginePlace does), else the engine-home
+        # variables (not in a sandbox), the pointer's engine_home, our settings.json pluginConfigs option, else
+        # ~\.whynot-cut. A rare disagreement with the bootstrap only means the zip is cached elsewhere.
         $h = $env:USERPROFILE
         if (-not $h) { $h = $env:HOME }
+        if ($SandboxHome) { $h = Get-WncFullPath $SandboxHome }
+        if ($EngineHome) {
+            $e = Get-WncFullPath $EngineHome
+            $mark = @('state.json', 'current', 'bin\uv.exe', 'bin\uv') |
+                Where-Object { Test-Path -LiteralPath (Join-Path $e $_) -PathType Leaf }
+            $roots = @($h) + @('Desktop', 'Documents', 'Downloads' | ForEach-Object { Join-Path $h $_ })
+            $isRoot = @($roots | Where-Object { $_.TrimEnd([char]92) -ieq $e.TrimEnd([char]92) }).Count -gt 0
+            $full = (Test-Path -LiteralPath $e -PathType Container) -and
+                (@(Get-ChildItem -LiteralPath $e -Force -ErrorAction SilentlyContinue).Count -gt 0)
+            if ((-not $mark) -and ($isRoot -or $full)) { return Join-Path $e 'WhyNotCut' }
+            return $e
+        }
+        if (-not $SandboxHome) {
+            foreach ($n in @('WHYNOT_HOME', 'CLAUDE_PLUGIN_OPTION_ENGINE_HOME', 'REEL_HOME',
+                    'CLAUDE_PLUGIN_OPTION_REEL_HOME', 'NH_ENV_DIR')) {
+                $v = [Environment]::GetEnvironmentVariable($n, 'Process')
+                if ($v) { return Get-WncFullPath $v }
+            }
+        }
+        try {
+            $o = [IO.File]::ReadAllText((Join-Path $h '.whynot-cut\plugin-options.json'), [Text.Encoding]::UTF8) |
+                ConvertFrom-Json
+            if ($o.engine_home -is [string]) {
+                if ($o.engine_home) { return Get-WncFullPath $o.engine_home }
+                return Join-Path $h '.whynot-cut'
+            }
+        } catch {
+            Write-Verbose "no pointer: $($_.Exception.Message)"
+        }
+        try {
+            $cfg = Join-Path $h '.claude'
+            if ($env:CLAUDE_CONFIG_DIR -and (-not $SandboxHome)) { $cfg = $env:CLAUDE_CONFIG_DIR }
+            $s = [IO.File]::ReadAllText((Join-Path $cfg 'settings.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json
+            $v = $s.pluginConfigs.'whynot-cut@thewhynot-ai'.options.engine_home
+            if ($v -is [string] -and $v) { return Get-WncFullPath $v }
+        } catch {
+            Write-Verbose "no saved engine home in settings.json: $($_.Exception.Message)"
+        }
         return Join-Path $h '.whynot-cut'
     }
 

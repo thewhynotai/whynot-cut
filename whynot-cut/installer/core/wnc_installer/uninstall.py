@@ -12,12 +12,17 @@ adobe        a running Premiere Pro / After Effects: amber, nothing removed. Els
 fonts        only the files listed in state.fonts.installed that sit in the user font folder, and only the registry
              values listed in state.fonts.registry that still point at one of those files.
 marketplace  ~/.whynot-cut/marketplace (+ .new / .prev); a link (a development checkout) is left alone.
-engine       only with --remove-engine: every child of ~/.whynot-cut except models/ (unless --remove-models) and
-             library/ (the editor's licensed motion packs, engine motion_library.py: always kept), plus
+engine       only with --remove-engine: ONLY the children of the engine home that WhyNot Cut puts there
+             (base.ENGINE_LAYOUT: bin, python, runtimes, current, ffmpeg, cuda, bridge, state.json, logs, cache,
+             downloads, fonts, marketplace(.new/.prev), the deferred list, the engine's venv / queues / scripts /
+             probe / bench / tmp, and their set-aside leftovers; fix round 1), in every engine home including
+             ~/.whynot-cut. Anything else is the editor's: kept and listed. models/ is kept unless --remove-models,
+             library/ (the editor's licensed motion packs, engine motion_library.py) always, plugin-options.json
+             follows the pointer rules (forget_engine_home). Plus
              %LOCALAPPDATA%\\WhyNotCut\\git, then the settings env CLAUDE_CODE_GIT_BASH_PATH that points into it.
              python/ and bin/ (the interpreter running this code: Windows locks it) are listed in
              ~/.whynot-cut/.delete-after-exit, which the bootstrap deletes after this process exits (and the engine
-             home itself when nothing else is left). When adobe / fonts left something recorded (a running host, a
+             home itself only when it is then empty). When adobe / fonts left something recorded (a running host, a
              font in use), a minimal state.json keeps those records for the next uninstall. Refused unless the folder
              holds state.json, current or bin/uv(.exe). --remove-models alone deletes models/ only. Once nothing is
              left to retry, the saved engine home is forgotten (claude.forget_engine_home: the pointer's engine_home,
@@ -41,7 +46,6 @@ from .system import PREFS, read_preferences, render_checklist
 DEFER_LIST = ".delete-after-exit"
 DEFERRED = ("python", "bin")  # the interpreter running this core, and uv: removed by the bootstrap after it exits
 KEPT = "library"  # <engine home>/library: licensed motion / illustration packs (engine motion_library.py); never ours
-_ENGINE_MARKS = ("state.json", "current", "bin/uv", "bin/uv.exe")  # only WhyNot Cut leaves these
 RETRY_SECTIONS = ("adobe", "fonts")  # what an earlier step may leave recorded for the next uninstall
 
 
@@ -358,13 +362,13 @@ def engine_home_problem(paths: base.Paths) -> Optional[str]:
     for other in (paths.home, paths.claude_dir, paths.appdata, paths.localappdata):
         if base._within(base._norm(other), w, strict=False):
             return f"{paths.whynot} is (or holds) {other}"
-    if Path(w).parent == Path(w):
-        return f"{paths.whynot} is a drive root"
+    if base._is_drive_root(str(paths.whynot)):
+        return f"{paths.whynot} is a drive root or a mounted volume"
     if base.is_link(paths.whynot):
         return f"{paths.whynot} is a link"
-    if not any(os.path.isfile(paths.whynot / m) for m in _ENGINE_MARKS):
+    if not base.is_engine_home(paths.whynot):
         return (f"{paths.whynot} does not look like a WhyNot Cut engine home (none of "
-                f"{', '.join(_ENGINE_MARKS)})")
+                f"{', '.join(base.ENGINE_MARKS)})")
     return None
 
 
@@ -416,9 +420,10 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         return _done("engine", status, notes, _locked_hint(busy, "--remove-models") if failed and busy else None)
     keep_models = not models
     if _dry(ctx):
-        return _done("engine", "skipped", [f"dry run: would delete everything in {paths.whynot}"
-                                           + (" except models/ and library/" if keep_models else " except library/")
-                                           + f" and {claude.managed_git_dir(paths)}"])
+        return _done("engine", "skipped", [f"dry run: would delete WhyNot Cut's own folders and files in "
+                                           f"{paths.whynot}" + (" except models/ and library/" if keep_models
+                                                                 else " except library/")
+                                           + f", and {claude.managed_git_dir(paths)}; anything else stays"])
     # what an earlier step could not remove (a running Adobe host, a font in use) stays recorded in a minimal
     # state.json, so the uninstall the editor is told to run again still knows about it
     retry = {k: ctx.state.data[k] for k in RETRY_SECTIONS if isinstance(ctx.state.data.get(k), dict)}
@@ -427,7 +432,7 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
                                "answers": _section(ctx, "answers")}, **retry)
     else:
         ctx.state.dry_run = True  # state.json goes too: nothing may write it again in this run
-    removed, kept, failed = [], [], []
+    removed, kept, failed, foreign = [], [], [], []
     with os.scandir(paths.whynot) as it:
         children = sorted((e.name for e in it), key=lambda n: (n == "logs", n))  # logs last: the log goes with it
     for name in children:
@@ -441,6 +446,11 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
             kept.append("library (your motion and illustration packs: never deleted by the uninstall)")
             continue
         if name == "state.json" and retry:
+            continue
+        if name == base.OPTIONS_FILE:  # the pointer: its own rules (claude.forget_engine_home, below)
+            continue
+        if not (base.is_engine_entry(name) or name == "models"):  # not WhyNot Cut's: never deleted (fix round 1)
+            foreign.append(name)
             continue
         if name == "logs":
             ctx.log.info("the uninstall log goes with the engine home; this summary stays on the screen only")
@@ -457,6 +467,8 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         pass
     if not os.path.lexists(git):  # the Git Bash entry goes together with the managed Git folder, never before it
         _drop_git_bash_key(ctx, git, kept, failed)
+    # nothing left to retry: WhyNot Cut no longer points at this folder (ID-10); before `rest` (the pointer may go)
+    forgot = claude.forget_engine_home(paths, ctx.log) if not failed and not retry else []
     later = [paths.whynot / n for n in DEFERRED if os.path.lexists(paths.whynot / n)]
     rest = [n for n in os.listdir(paths.whynot) if n not in DEFERRED and n != DEFER_LIST]
     defer_file = paths.whynot / DEFER_LIST
@@ -480,16 +492,17 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
                      "deleted by the installer right after it exits"
                      + (", then the engine home itself" if not rest else ""))
     notes += [f"kept {k}" for k in kept] + [f"could not delete {f}" for f in failed]
+    if foreign:
+        notes.append(f"kept (not WhyNot Cut's, left alone): {', '.join(foreign)}")
     if failed:
         if busy:
             notes.append(busy)
         return _done("engine", "amber", notes, _locked_hint(busy, "--remove-engine"))
-    if not retry:  # nothing left to retry: WhyNot Cut no longer points at this folder (ID-10)
-        notes += claude.forget_engine_home(paths, ctx.log)
-        custom = not base.same_path(paths.whynot, paths.default_whynot)
-        if custom and any(k.startswith(("models", KEPT)) for k in kept):
-            notes.append(f"{paths.whynot} keeps what is listed above; to use it again, install with -EngineHome "
-                         f"\"{paths.whynot}\" (macOS: --engine-home)")
+    notes += forgot
+    custom = not base.same_path(paths.whynot, paths.default_whynot)
+    if not retry and custom and any(k.startswith(("models", KEPT)) for k in kept):
+        notes.append(f"{paths.whynot} keeps what is listed above; to use it again, install with -EngineHome "
+                     f"\"{paths.whynot}\" (macOS: --engine-home)")
     return _done("engine", "ok", notes)
 
 

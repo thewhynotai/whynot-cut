@@ -13,7 +13,7 @@ claude   registers the WhyNot Cut marketplace and plugin with Claude Code:
              editor gets the plugin on the next Claude Code start.
          Until `marketplace.url` is pinned the source is the managed folder ~/.whynot-cut/marketplace, refreshed from
          the folder the installer runs from; once pinned, the URL with autoUpdate (ID-7).
-The engine home the editor chose is remembered here too (remember_engine_home, called by the questions step; ID-10):
+The engine home the editor chose is remembered here too (remember_engine_home, called at the end of the install; ID-10):
 settings.json pluginConfigs["whynot-cut@thewhynot-ai"].options.engine_home plus the pointer
 ~/.whynot-cut/plugin-options.json; uninstall --remove-engine forgets both (forget_engine_home).
 settings.json is merged, never overwritten: read as utf-8-sig, key order kept, a timestamped backup only when something
@@ -380,10 +380,10 @@ def remember_engine_home(paths: base.Paths, env, log: base.Log, *, dry_run: bool
     done = []
     # the pointer: the hook's format; an existing clients_root is kept (an unreadable pointer is the hook's to
     # rewrite anyway: it is replaced)
-    if p_val != value or pobj is None or list(pobj) != ["clients_root", "engine_home", "updated"]:
+    if p_val != value or pobj is None or tuple(pobj)[:3] != base.POINTER_KEYS:
         keep = pobj.get("clients_root") if pobj is not None and isinstance(pobj.get("clients_root"), str) else ""
-        try:
-            base.atomic_write_bytes(ptr, base.pointer_bytes(keep, value))
+        try:  # other keys someone put in the pointer are kept
+            base.atomic_write_bytes(ptr, base.pointer_bytes(keep, value, pobj))
             done.append(f"remembered in {ptr}")
         except OSError as e:
             status = "amber"
@@ -427,8 +427,8 @@ def forget_engine_home(paths: base.Paths, log: base.Log) -> list:
         try:
             if any(not (isinstance(v, str) and not v.strip()) for v in rest.values()):
                 keep = pobj.get("clients_root") if isinstance(pobj.get("clients_root"), str) else ""
-                if pobj.get("engine_home") != "" or list(pobj) != ["clients_root", "engine_home", "updated"]:
-                    base.atomic_write_bytes(ptr, base.pointer_bytes(keep, ""))
+                if pobj.get("engine_home") != "" or tuple(pobj)[:3] != base.POINTER_KEYS:
+                    base.atomic_write_bytes(ptr, base.pointer_bytes(keep, "", pobj))
                     notes.append(f"{ptr} no longer names an engine home")
             else:
                 base._unlink(str(ptr))

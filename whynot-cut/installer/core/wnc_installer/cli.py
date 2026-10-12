@@ -96,22 +96,25 @@ def _utf8_console() -> None:
             pass
 
 
-def _engine_home_problem(paths: base.Paths, plugin_root: Path, chosen) -> str:
-    """A chosen engine home is checked like the bootstraps check it (base.engine_home_choice_problem: the clients
-    folder from the preferences and the pointer counts); a sandbox's engine home must stay inside the sandbox."""
+def _engine_home_check(paths: base.Paths, plugin_root: Path, chosen) -> tuple:
+    """(problem, final folder, note). A chosen engine home is placed and checked like the bootstraps do it
+    (base.choose_engine_home: the clients folder from the preferences and the pointer counts; a folder holding the
+    editor's own files becomes <it>/WhyNotCut); a sandbox's resolved engine home must stay inside the sandbox."""
     if not chosen and not paths.sandbox:
-        return ""
+        return "", paths.whynot, ""
     from .system import read_preferences
     roots = [read_preferences(paths).get("clients_root")]
     ptr = base.read_pointer(paths.options_file)
     roots.append(ptr.get("clients_root") if ptr is not None else None)
     roots = [base.saved_path(r, paths.home) for r in roots if isinstance(r, str) and r.strip()]
     if not chosen:  # a sandbox's own pointer / settings.json named it: only the sandbox rule
-        return "" if base._within(base._norm(paths.whynot), base._norm(paths.home), strict=True) else \
-            f"it is outside the sandbox home {paths.home} (--home: nothing outside it is used)"
-    return base.engine_home_choice_problem(str(chosen), home=paths.home, plugin_root=plugin_root,
-                                           clients_roots=roots,
-                                           sandbox_home=paths.home if paths.sandbox else None) or ""
+        inside = base._within(base._norm(paths.whynot), base._norm(paths.home), strict=True)
+        return ("" if inside else f"it is outside the sandbox home {paths.home} (--home: nothing outside it is "
+                                  "used)"), paths.whynot, ""
+    final, note, problem = base.choose_engine_home(str(chosen), home=paths.home, plugin_root=plugin_root,
+                                                   clients_roots=roots,
+                                                   sandbox_home=paths.home if paths.sandbox else None)
+    return problem or "", final, note
 
 
 def main(argv=None) -> int:
@@ -132,11 +135,14 @@ def main(argv=None) -> int:
               f"\"{paths.whynot}\"), or name the other folder the same way; if it happens again, tell WhyNot Cut "
               "support (the two resolvers disagree).", file=sys.stderr)
         return 2
-    problem = _engine_home_problem(paths, plugin_root, chosen)
+    problem, final, note = _engine_home_check(paths, plugin_root, chosen)
     if problem:
         print(f"ERROR: WhyNot Cut cannot use {paths.whynot} as its engine home: {problem}. Nothing was changed; run "
               "the installer again with -EngineHome <folder> (macOS: --engine-home <folder>).", file=sys.stderr)
         return 2
+    if chosen and not base.same_path(final, paths.whynot):  # the editor's own files are there: its own subfolder
+        paths = base.Paths.from_env(args.home, engine_home=str(final))
+        print(note, file=sys.stderr)  # (plan prints JSON on stdout)
 
     if args.command == "plan":
         try:
@@ -202,6 +208,14 @@ def install(ctx: base.Ctx) -> int:
         _finish(ctx, results, system)
         return 2
     results += base.run_steps(ctx, [s for s in steps if s[0] != "preflight"], {r.name: r.status for r in results})
+    # the engine home is saved only now, after the state step, and only when nothing was red (system.step_location)
+    log.step("location")
+    loc = system.step_location(ctx, results)
+    {"red": log.error, "amber": log.warn}.get(loc.status, log.info)(
+        f"location: {loc.status}" + (f" - {loc.detail}" if loc.detail else ""))
+    if loc.needs_you:
+        log.warn(f"location: you need to: {loc.needs_you}")
+    results.append(loc)
     _finish(ctx, results, system)
     return 1 if any(r.status == "red" for r in results) else 0
 

@@ -54,7 +54,8 @@ You can point a one-liner at a specific release zip, either a file or an https U
 curl -fsSL https://thewhynot.ai/install.sh | bash -s -- --source https://.../WhyNotCut-3.0.0.zip --source-sha256 <64 hex>
 ```
 
-The installer copies or downloads the zip into `~/.whynot-cut/downloads/release-<first 8 of the sha256>/` and checks it
+The installer copies or downloads the zip into `downloads/release-<first 8 of the sha256>/` of the engine home (normally
+`~/.whynot-cut`; see [Where the engine home is](#where-the-engine-home-is)) and checks it
 against the sha256. A mismatch deletes the file and exits with code 3. It then extracts the zip into `x/` next to it,
 and `x/whynot-cut-marketplace/whynot-cut` becomes the plugin folder.
 
@@ -117,17 +118,31 @@ The bootstrap works this folder out before it downloads anything and offers it a
 default is used. On macOS the answer is read from the terminal, or from `/dev/tty` under `curl | bash` (never from
 the piped script). When WhyNot Cut is already installed there, the question says so: Enter keeps it.
 
-The folder is checked before anything is downloaded. It must be a full path; not a drive root; not inside the plugin
-folder (it is replaced on every update); not your user folder (or a folder holding it) or Claude's folder; not your
-clients folder (`clients_root` in your preferences or in `plugin-options.json`) or anything inside it, and not inside
-a folder marked `.whynot-client`. Its drive needs 6 GB free, 9 GB with the Whisper model (6 GB with
-`-Skip model`), unless WhyNot Cut is already installed there. It must be possible to create the folder and write in
-it. A refused folder is explained and asked again; with `-Yes` the installer stops with exit code 2 and downloads
-nothing.
+The folder is checked before anything is downloaded (the same rules in both bootstraps and the core):
+
+- refused: not a full path; a drive root or a mounted volume (`D:\`, `/Volumes/<name>`, any mount point) or a link;
+  anything inside the plugin folder (it is replaced on every update);
+- refused, unless WhyNot Cut is already installed there: a folder that holds the plugin folder (except in its own
+  `downloads/`, where the one-line mode caches the release); one that is, holds or lies inside your clients folder
+  (`clients_root` in your preferences or in `plugin-options.json`); one inside a folder marked `.whynot-client`, or
+  holding one (three levels down);
+- **moved into its own `WhyNotCut` subfolder**: your user folder, Desktop, Documents and Downloads themselves, and any
+  folder that already holds something WhyNot Cut does not put there (and is not already a WhyNot Cut engine home).
+  Choosing `D:\Work` or `Documents` therefore installs into `D:\Work\WhyNotCut` or `Documents\WhyNotCut`, and the
+  installer says so in English and Arabic. Uninstall can then never empty a folder of your own files. A `WhyNotCut`
+  subfolder that itself holds other files is refused;
+- then: not Claude's folder; in a sandbox, inside the sandbox; 6 GB free on the drive, 9 GB with the Whisper model
+  (6 GB with `-Skip model`), unless WhyNot Cut is already installed there; the folder can be created and written in.
+
+A refused folder is explained and asked again; with `-Yes` the installer stops with exit code 2 and downloads nothing.
 
 On Windows, a path with non-English (non-ASCII) letters gets a warning in English and Arabic, because some tools can
 fail on such a path; it suggests `C:\WhyNotCut` and asks again (Enter takes the suggestion; typing the same folder
-again keeps it). With `-Yes` the folder is kept and the warning stays on the screen.
+again keeps it). With `-Yes` the folder is kept and the warning stays on the screen. A folder WhyNot Cut is already
+installed in is never questioned again: on a re-install, Enter keeps the engine where it is (a one-line note mentions
+the letters). When you choose a folder other than the one WhyNot Cut is already installed in, the installer says (in
+English and Arabic) that the old install stays where it is, unused, and names the folder, so you can delete it
+yourself.
 
 uv, Python, the log and every step then land in that one folder, and `state.json` lives there. The bootstrap hands the
 folder to the core as `--engine-home`. When you chose it (the flag or an answer) it also passes
@@ -147,14 +162,20 @@ Only through the engine's own two places, so the engine, the `reel` wrappers and
   shows the JSON to add by hand).
 - the pointer `~/.whynot-cut/plugin-options.json`, in the hook's own format (`clients_root`, `engine_home`, `updated`,
   one per line, UTF-8), so `reel` finds the folder before the first Claude session. A `clients_root` already in it is
-  kept.
+  kept, and so is any other key in it.
 
-Both are written only when the folder is not `~/.whynot-cut`, or when one of them already names another folder
+They are written at the very end, after `state.json`, and only when no step failed (red): an install whose runtime
+(or any other step) failed leaves the saved location as it was, so the previous engine home stays the active one; the
+checklist's `location` line says so. Both are written only when the folder is not `~/.whynot-cut`, or when one of them
+already names another folder
 (choosing `~/.whynot-cut` again then sets both back to `""`, which means "the default"). A default install leaves both
 files as they are. `~/.whynot-cut` then holds only the pointer. No `WHYNOT_HOME` user variable is set and no shell
 profile is changed: a variable would beat the plugin option, so a later change in `/plugin` would be silently
-ignored. If `WHYNOT_HOME` (or another engine-home variable) is already set to another folder, the questions step turns
-amber and says to remove it.
+ignored. If `WHYNOT_HOME` (or another engine-home variable) is already set to another folder, the `location` line of
+the checklist turns amber and says to remove it.
+
+In the one-line mode (`-Source`), the release zip is cached in `downloads/` of the engine home found the same way
+(with `-EngineHome`, after the same `WhyNotCut` subfolder rule), not always in `~/.whynot-cut`.
 
 A sandbox (`--home`) finds its engine home the same way, but only from its own `<dir>/.whynot-cut/plugin-options.json`
 and `<dir>/.claude/settings.json`, never from the variables of the machine running it, and a chosen folder must be
@@ -188,11 +209,12 @@ inside `<dir>`.
      preferences when there is one (a re-install keeps your choice), else `large-v3`. `-Model` / `--model` answers
      it, and `-Yes` takes the default. Every choice defaults to the strongest option: `large-v3`, the GPU libraries
      whenever an NVIDIA GPU is there, and the full font set. The chosen model is written into your preferences
-     (`reel settings --set whisper_model=...`). The engine home is saved here too (see above);
+     (`reel settings --set whisper_model=...`);
    - the runtime (from `setup/locks/`), ffmpeg, Git Bash (Windows), GPU libraries (NVIDIA);
    - the Claude Code plugin and settings, the Adobe panel, fonts, preferences;
    - the download of the chosen Whisper model, which keeps going in the background;
-   - `state.json`, `reel doctor`, and the checklist;
+   - `state.json`, `reel doctor`, and the checklist; only now, when no step failed, is a chosen engine home saved
+     (the checklist's `location` line, see above);
    - opening Claude with `/whynot-cut:start`. On macOS the end of the install also says (in English and Arabic): the
      first time Claude opens files in Documents or on an external drive, macOS asks for permission; click **Allow**.
 
@@ -243,15 +265,17 @@ Python only when that Python is gone. It runs these steps in order:
 | `adobe` | The CEP panel folder the install recorded, and the UXP panel through Adobe's plugin installer (`/remove <id>`). If Premiere Pro or After Effects is running, nothing is removed; close them and run uninstall again. |
 | `fonts` | Only the font files the install recorded, and only their own registry values. A font you had before stays. |
 | `marketplace` | `~/.whynot-cut/marketplace` (and its `.new` / `.prev` copies). |
-| `engine` | Only with `-RemoveEngine` / `--remove-engine`: everything in `~/.whynot-cut` except `models/` and `library/` (your licensed motion and illustration packs, always kept and reported), plus `%LOCALAPPDATA%\WhyNotCut\git` and then its Git Bash entry in `settings.json`. It refuses a folder that holds none of `state.json`, `current` or `bin/uv(.exe)`. If the `adobe` or `fonts` step could not remove something (a running Premiere Pro, a font in use), a small `state.json` keeps that record, so running uninstall again finishes it. With `-RemoveModels` / `--remove-models` the models go too. `-RemoveModels` on its own deletes only `models/`. If files are locked while the background Whisper model download is still running, the step says so and names its log. |
+| `engine` | Only with `-RemoveEngine` / `--remove-engine`, in every engine home (`~/.whynot-cut` too): **only what WhyNot Cut puts there** - `bin`, `python`, `runtimes`, `current`, `ffmpeg`, `cuda`, `bridge`, `state.json`, `logs`, `cache`, `downloads`, `fonts`, `marketplace` (and `.new` / `.prev`), `.delete-after-exit`, the engine's `venv`, `ppro-queue`, `ppro-scripts`, `ae-queue`, `ae-scripts`, `ae-probe`, `ae-capabilities.json`, `bench`, `tmp`, and their set-aside leftovers. Anything else in the folder is yours: it is kept and listed in the summary, and the folder itself is removed only when it is then empty. `models/` stays unless you add `-RemoveModels`; `library/` (your licensed motion and illustration packs) always stays; `plugin-options.json` follows the pointer rules below. Plus `%LOCALAPPDATA%\WhyNotCut\git` and then its Git Bash entry in `settings.json`. It refuses a folder that holds none of `state.json`, `current` or `bin/uv(.exe)`. If the `adobe` or `fonts` step could not remove something (a running Premiere Pro, a font in use), a small `state.json` keeps that record, so running uninstall again finishes it. With `-RemoveModels` / `--remove-models` the models go too. `-RemoveModels` on its own deletes only `models/`. If files are locked while the background Whisper model download is still running, the step says so and names its log. |
 
 **An engine home in another folder.** Uninstall asks nothing: it finds the engine home exactly as the install does
 (the variables, then `plugin-options.json`, then `settings.json` `pluginConfigs`), or takes `-EngineHome <dir>` /
-`--engine-home <dir>`. `-RemoveEngine` empties that folder with the same rules as above (`models/` and `library/`
-stay unless asked, a client folder is never touched). Once nothing is left to retry, it also removes the saved
-choice: `engine_home` from our `pluginConfigs` options in `settings.json` (with a backup), and from
-`~/.whynot-cut/plugin-options.json` (the whole file when it holds nothing else; a `clients_root` in it is kept), then
-`~/.whynot-cut` itself when it is empty. Both are removed only while they still name that folder. If `models/` or
+`--engine-home <dir>`. `-RemoveEngine` removes WhyNot Cut's own entries from that folder with the same rules as
+above (anything else stays and is listed; `models/` and `library/` stay unless asked; a client folder is never
+touched). Once nothing is left to retry, it also removes the saved choice, for every engine home (`~/.whynot-cut`
+included): `engine_home` from our `pluginConfigs` options in `settings.json` (with a backup), and from the pointer
+`~/.whynot-cut/plugin-options.json` - the whole file when it holds nothing else; when it still holds a
+`clients_root` (or another key) the file stays with `engine_home` set to `""` - then `~/.whynot-cut` itself, but only
+when it is then empty. Both are removed only while they still name that folder (or `""`). If `models/` or
 `library/` stayed in the folder, the summary says how to use it again: install with `-EngineHome <that folder>`. If
 something could not be deleted, the saved choice stays, so the next uninstall finds the same folder.
 
@@ -267,7 +291,8 @@ Uninstall never touches:
 With `-RemoveEngine`, the Python that runs the uninstall cannot delete itself, because Windows locks a running
 `python.exe`. So the core lists `python/` and `bin/` in `~/.whynot-cut/.delete-after-exit`, and the install script
 deletes them once the core has finished. The script accepts only `python/` and `bin/` from that list (and
-`~/.whynot-cut` itself, only once it is empty); any other line is refused and reported.
+the engine home itself, only once it is then empty: the core lists it only when nothing else is left); any other
+line is refused and reported.
 The uninstall log is in `logs/`, so it is deleted with the engine home; the summary stays on the screen.
 
 ## Sandbox and test mode

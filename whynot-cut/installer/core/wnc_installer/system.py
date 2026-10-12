@@ -8,10 +8,11 @@ preflight  read-only facts (ctx.facts): OS, free space on the engine drive (< 6 
 questions  the clients folder, the chat language and the Whisper model, asked right after preflight (ID-6) so the long
            downloads run unattended: --clients-folder / --language / --model, else the editor's preferences file,
            else the defaults (language `ar`, ID-4; the model large-v3, the strongest, on every machine: ID-8 / ID-9).
-           The clients folder is never created here. Then the engine home is remembered (claude.remember_engine_home,
-           ID-10: settings.json pluginConfigs + the pointer file, only when it is not ~/.whynot-cut or one of them
-           names another folder). With --skip questions nothing is asked, but the answers and the engine home are
-           still settled.
+           The clients folder is never created here.
+location   not a registered step: cli.install runs step_location after every step (fix round 1). It remembers the
+           engine home (claude.remember_engine_home, ID-10: settings.json pluginConfigs + the pointer file, only when it
+           is not ~/.whynot-cut or one of them names another folder) - only when no step was red; otherwise the saved
+           location is left as it was and the checklist says the previous install is still the active one.
 settings   `reel settings --init <home> --force --set clients_root=... --set language=... --set whisper_model=...`.
 model      the chosen Whisper model, downloaded by a detached background `reel model-download`.
 state      state.json: plugin, channel, installed_at, platform, uv, python, runtime, answers.
@@ -304,8 +305,7 @@ def _ask_model(ctx: base.Ctx, a: dict) -> None:
 
 def step_questions(ctx: base.Ctx) -> base.StepResult:
     a = resolve_answers(ctx)
-    skipped = "questions" in (getattr(ctx.args, "skip", None) or ())
-    if not skipped and base.can_ask(ctx.args):
+    if base.can_ask(ctx.args):
         cloud = cloud_documents(ctx.facts)
         if cloud and a["from"]["clients_root"].startswith("default:"):
             ctx.log.info(f"Your Documents folder is synced to {cloud}; the suggested clients folder is outside it, so "
@@ -325,17 +325,35 @@ def step_questions(ctx: base.Ctx) -> base.StepResult:
         _ask_model(ctx, a)
     ctx.answers = a
     m = a["whisper_model"]
-    detail = (("not asked (--skip questions): " if skipped else "")
-              + f"clients folder {a['clients_root']} ({a['from']['clients_root']}; created when you add your first "
-              f"client); language {a['language']} ({a['from']['language']}); Whisper {m} (about {MODEL_SIZES[m]}; "
-              f"{a['from']['whisper_model']})")
-    home = claude.remember_engine_home(ctx.paths, {} if ctx.paths.sandbox else os.environ, ctx.log,
-                                       dry_run=bool(ctx.args.dry_run))
-    status = "amber" if home["status"] == "amber" else "ok"
-    return base.StepResult("questions", status, f"{detail}; {home['detail']}", home["needs_you"])
+    return base.StepResult("questions", "ok", f"clients folder {a['clients_root']} ({a['from']['clients_root']}; "
+                                              "created when you add your first client); language "
+                                              f"{a['language']} ({a['from']['language']}); Whisper {m} (about "
+                                              f"{MODEL_SIZES[m]}; {a['from']['whisper_model']})")
 
 
-step_questions.handles_skip = True  # --skip questions: nothing is asked, the engine home is still remembered
+def step_location(ctx: base.Ctx, results: list) -> base.StepResult:
+    """After every step (cli.install, not a registered step): remember the engine home (claude.remember_engine_home,
+    ID-10) - but only when no step was red. A failed install (say the runtime) leaves the saved location as it was:
+    the previous engine home stays the active one, and the checklist says so."""
+    env = {} if ctx.paths.sandbox else os.environ
+    red = [r.name for r in results if r.status == "red"]
+    if red and not ctx.args.dry_run:
+        prev = base.resolve_engine_home(env, ctx.paths.home)[0]
+        if base.same_path(prev, ctx.paths.whynot):
+            return base.StepResult("location", "skipped", f"engine home {ctx.paths.whynot}: not changed")
+        r = base.StepResult("location", "amber", f"the engine home {ctx.paths.whynot} was NOT saved because "
+                                                 f"{', '.join(red)} failed: WhyNot Cut still uses {prev}, and the "
+                                                 "install there is still the active one",
+                            needs_you="fix what failed and run the installer again with the same folder")
+    else:
+        home = claude.remember_engine_home(ctx.paths, env, ctx.log, dry_run=bool(ctx.args.dry_run))
+        r = base.StepResult("location", home["status"], home["detail"], home["needs_you"])
+    if not ctx.args.dry_run:
+        try:
+            ctx.state.record("location", r.status, None, r.detail)
+        except OSError as e:
+            ctx.log.warn(f"could not update state.json: {e}")
+    return r
 
 
 # --------------------------------------------------------------------------------------------- settings / model

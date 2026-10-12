@@ -196,38 +196,144 @@ def same_path(a, b) -> bool:
     return _norm(a) == _norm(b)
 
 
-def engine_home_choice_problem(path, *, home, plugin_root, clients_roots: Iterable = (),
-                               sandbox_home=None) -> Optional[str]:
-    """Why `path` must not be the engine home the editor chose (-EngineHome / --engine-home, or the bootstrap's
-    location question), else None. The bootstraps check the same before anything is downloaded, plus free space and
-    write access. Refused: not a full path; a drive root; inside the plugin folder (replaced on every update); the
-    user folder or a folder holding it; inside Claude's folder; the clients folder or inside it; a folder with a
-    `.whynot-client` marker in it or in a folder above it; in a sandbox, outside the sandbox home."""
-    p = str(path or "").strip()
-    if not p or not os.path.isabs(p) or (os.name == "nt" and not re.match(r"^([A-Za-z]:[\\/]|[\\/]{2})", p)):
-        return f"{p or '(empty)'} is not a full path (for example C:\\WhyNotCut or /Users/you/WhyNotCut)"
+# What WhyNot Cut itself puts in an engine home (installer.md R.1 + the engine's own folders, engine/reel/lib plat.py,
+# common.py, cep_queue / ae_* and serve/: 2.x venv, the Premiere / After Effects queues and scripts, the AE probe, the
+# Whisper bench, ae_render's tmp). Uninstall --remove-engine deletes ONLY these (plus models/ when asked); anything
+# else is the editor's and is kept and listed. The location check counts a folder holding nothing but these (and
+# models/, library/, the pointer) as an engine home or empty. bootstrap.ps1 $WncEngineLayout and bootstrap.sh
+# ENGINE_LAYOUT carry the same list (tests/test_installer.py keeps them in step).
+ENGINE_LAYOUT = ("bin", "python", "runtimes", "current", "ffmpeg", "cuda", "bridge", "state.json", "logs", "cache",
+                 "downloads", "fonts", "marketplace", "marketplace.new", "marketplace.prev", ".delete-after-exit",
+                 "venv", "ppro-queue", "ppro-scripts", "ae-queue", "ae-scripts", "ae-probe", "ae-capabilities.json",
+                 "bench", "tmp")
+ENGINE_LAYOUT_PREFIXES = ("state.json.corrupt-", ".state.json.", ".current.", ".plugin-options.json.",
+                          ".wnc-write-test")  # set-aside and atomic-write leftovers, the bootstraps' write probe
+ENGINE_KEPT = ("models", "library")  # models/ unless --remove-models; library/ (licensed packs) always
+ENGINE_MARKS = ("state.json", "current", "bin/uv", "bin/uv.exe")  # only WhyNot Cut leaves these
+HOME_ROOTS = ("Desktop", "Documents", "Downloads")  # with the user folder itself: never the engine home directly
+SUBFOLDER = "WhyNotCut"
+
+
+def is_engine_entry(name: str) -> bool:
+    """A top-level name WhyNot Cut puts in an engine home (ENGINE_LAYOUT / its prefixes); not models/, library/ or the
+    pointer, which have their own rules."""
+    return name in ENGINE_LAYOUT or name.startswith(ENGINE_LAYOUT_PREFIXES)
+
+
+def is_engine_home(path) -> bool:
+    return any(os.path.isfile(Path(path) / m) for m in ENGINE_MARKS)
+
+
+def foreign_entries(path) -> list:
+    """Children of `path` that WhyNot Cut does not put there (sorted); [] when it is missing or holds only ours."""
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return []
+    return sorted(n for n in names if not (is_engine_entry(n) or n in ENGINE_KEPT or n == OPTIONS_FILE))
+
+
+def _is_drive_root(p: str) -> bool:
+    """A drive root, a mounted volume (os.path.ismount: macOS /Volumes/<name>, a Windows volume mount point) or the
+    /Volumes/<name> form itself."""
     n = _norm(p)
     if Path(n).parent == Path(n):
-        return f"{p} is a drive root; choose a folder on it, for example {Path(n) / 'WhyNotCut'}"
-    if _within(n, _norm(plugin_root), strict=False):
-        return f"{p} is inside the plugin folder {plugin_root}, which is replaced on every update"
-    if _within(_norm(home), n, strict=False):
-        return f"{p} is your user folder or holds it; choose a folder of its own, for example {Path(n) / 'WhyNotCut'}"
-    if _within(n, _norm(Path(home) / ".claude"), strict=False):
-        return f"{p} is inside Claude's folder {Path(home) / '.claude'}"
-    for c in clients_roots:
-        if c and _within(n, _norm(c), strict=False):
-            return f"{p} is your clients folder {c} (or inside it); keep the engine apart from client footage"
-    cur = Path(n)
-    while True:
-        if (cur / CLIENT_MARKER).exists():
-            return f"{p} is inside a client folder ({cur} holds {CLIENT_MARKER})"
-        if cur.parent == cur:
-            break
-        cur = cur.parent
-    if sandbox_home is not None and not _within(n, _norm(sandbox_home), strict=True):
-        return f"{p} is outside the sandbox home {sandbox_home} (--home: nothing outside it is used)"
+        return True
+    if re.match(r"^/volumes/[^/]+$", n.replace("\\", "/").lower()):
+        return True
+    try:
+        return os.path.ismount(p)
+    except OSError:
+        return False
+
+
+def _marker_below(top: str, depth: int = 3, limit: int = 5000) -> Optional[str]:
+    """A `.whynot-client` marker up to `depth` levels below `top` (bounded: a huge folder is not walked whole)."""
+    seen, stack = 0, [(top, 0)]
+    while stack:
+        d, lvl = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    seen += 1
+                    if seen > limit:
+                        return None
+                    if e.name == CLIENT_MARKER:
+                        return d
+                    if lvl < depth and not is_link(e.path) and e.is_dir(follow_symlinks=False):
+                        stack.append((e.path, lvl + 1))
+        except OSError:
+            continue
     return None
+
+
+def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (), sandbox_home=None) -> tuple:
+    """Where the engine goes for the folder the editor chose (-EngineHome / --engine-home, or the bootstrap's location
+    question): (final folder or None, note or "", problem or None). The bootstraps apply the same rules before
+    anything is downloaded, plus free space and write access (Get-WncEngineHomeProblem / engine_home_problem).
+
+    Refused: not a full path; a drive root or mounted volume (/Volumes/<name>, any mount point) or a link; a folder
+    that is, holds or lies inside the plugin folder (the plugin may sit in <it>/downloads: the -Source cache); one that
+    is, holds or lies inside the saved clients folder, lies inside a `.whynot-client` folder or holds one (3 levels
+    deep) - unless it is already an engine home.
+    Moved into <it>/WhyNotCut (controller ruling, fix round 1): the user folder, Desktop, Documents and Downloads
+    themselves, and any existing folder holding something WhyNot Cut does not put there that is not already an engine
+    home - so uninstall can never empty a folder of the editor's own files. Then the final folder is checked again:
+    not holding the user folder, not inside Claude's folder, not a WhyNotCut subfolder that holds other files, and in a
+    sandbox strictly inside the sandbox home."""
+    p = str(path or "").strip()
+    if not p or not os.path.isabs(p) or (os.name == "nt" and not re.match(r"^([A-Za-z]:[\\/]|[\\/]{2})", p)):
+        return None, "", f"{p or '(empty)'} is not a full path (for example C:\\WhyNotCut or /Users/you/WhyNotCut)"
+    n = _norm(p)
+    if _is_drive_root(p):
+        return None, "", f"{p} is a drive root or a mounted volume; choose a folder on it, for example " \
+                         f"{Path(p) / SUBFOLDER}"
+    if is_link(p):
+        return None, "", f"{p} is a link or mount point; choose a real folder"
+    plug = _norm(plugin_root)
+    if _within(n, plug, strict=False):
+        return None, "", f"{p} is inside the plugin folder {plugin_root}, which is replaced on every update"
+    existing = is_engine_home(p)
+    if not existing:
+        if _within(plug, n) and not _within(plug, _norm(Path(p) / "downloads")) \
+                and not _within(plug, _norm(Path(p) / SUBFOLDER / "downloads")):
+            return None, "", f"{p} holds the plugin folder {plugin_root}; choose a folder of its own"
+        for c in clients_roots:
+            if c and (_within(n, _norm(c), strict=False) or _within(_norm(c), n)):
+                return None, "", f"{p} is, holds or is inside your clients folder {c}; keep the engine apart from " \
+                                 "client footage"
+        cur = Path(n)
+        while True:
+            if (cur / CLIENT_MARKER).exists():
+                return None, "", f"{p} is inside a client folder ({cur} holds {CLIENT_MARKER})"
+            if cur.parent == cur:
+                break
+            cur = cur.parent
+        if os.path.isdir(p):
+            below = _marker_below(p)
+            if below:
+                return None, "", f"{p} holds a client folder ({below} holds {CLIENT_MARKER})"
+    final, note = Path(p), ""
+    roots = [Path(home)] + [Path(home) / r for r in HOME_ROOTS]
+    if not existing and (any(_norm(r) == n for r in roots) or foreign_entries(p)):
+        final = Path(p) / SUBFOLDER
+        note = (f"{p} already holds other files, so WhyNot Cut goes into its own folder {final} (uninstall then "
+                "never touches the rest)")
+    f = _norm(final)
+    if _within(_norm(home), f, strict=False):
+        return None, "", f"{final} is your user folder or holds it; choose a folder of its own"
+    if _within(f, _norm(Path(home) / ".claude"), strict=False):
+        return None, "", f"{final} is inside Claude's folder {Path(home) / '.claude'}"
+    if final != Path(p) and not is_engine_home(final) and foreign_entries(final):
+        return None, "", f"{final} already holds other files; choose an empty folder or one of its own"
+    if sandbox_home is not None and not _within(f, _norm(sandbox_home), strict=True):
+        return None, "", f"{final} is outside the sandbox home {sandbox_home} (--home: nothing outside it is used)"
+    return final, note, None
+
+
+def engine_home_choice_problem(path, **kw) -> Optional[str]:
+    """Why `path` cannot be used as (or moved into a WhyNotCut subfolder for) the engine home, else None."""
+    return choose_engine_home(path, **kw)[2]
 
 
 # --------------------------------------------------------------------------------------------- the pointer file
@@ -245,10 +351,15 @@ def read_pointer(path) -> Optional[dict]:
     return _json_object(Path(path))
 
 
-def pointer_bytes(clients_root: str, engine_home: str) -> bytes:
+POINTER_KEYS = ("clients_root", "engine_home", "updated")
+
+
+def pointer_bytes(clients_root: str, engine_home: str, extra: Optional[Mapping] = None) -> bytes:
     """Exactly what hooks/session_context.py write_pointer writes: the keys clients_root, engine_home, updated, one
-    per line (indent 1; bin/reel.cmd reads it line by line), raw UTF-8 (ensure_ascii=False), a final newline."""
+    per line (indent 1; bin/reel.cmd reads it line by line), raw UTF-8 (ensure_ascii=False), a final newline. `extra`:
+    other keys already in the file, kept after those three (never dropped)."""
     body = {"clients_root": clients_root, "engine_home": engine_home, "updated": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    body.update({k: v for k, v in (extra or {}).items() if k not in POINTER_KEYS})
     return (json.dumps(body, ensure_ascii=False, indent=1) + "\n").encode("utf-8")
 
 
