@@ -37,3 +37,13 @@ test("bundled spike script keeps UXP host modules external and loads from index.
   assert.match(html, /<script[^>]+src="index\.js"/);
   assert.match(html, /<link[^>]+href="index\.css"/);
 });
+
+test("the spike bundle carries the brand kit for its style guide: brand tokens, fonts.css and every font file it names", () => {
+  const files = unzipSync(new Uint8Array(readFileSync(ccx)));
+  assert.equal(new TextDecoder().decode(files["tokens.css"]), readFileSync(join(repo, "brand", "tokens.css"), "utf8"));
+  const css = new TextDecoder().decode(files["fonts.css"]);
+  const urls = [...css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/g)].map((m) => m[1]!);
+  assert.ok(urls.length >= 7);
+  for (const u of urls) assert.ok(u in files, `${u} is not in the spike .ccx`);
+  assert.ok(Object.keys(files).some((n) => n.endsWith("/OFL.txt")));
+});

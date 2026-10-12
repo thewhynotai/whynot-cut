@@ -78,7 +78,7 @@ spike. The manifest `version` must equal `whynot-cut/.claude-plugin/plugin.json`
 
 | File | What |
 |---|---|
-| `plugin/manifest.json`, `plugin/index.html`, `plugin/index.css` | package files; the page links `tokens.css`, `panel.css` (copied from `panel-ui/styles/`) then `index.css` (shell-only: page background, the copy box) |
+| `plugin/manifest.json`, `plugin/index.html`, `plugin/index.css` | package files; the page links `fonts.css`, `tokens.css` (copied from `brand/tokens.css`, the one token source), `panel.css` (from `panel-ui/styles/`) then `index.css` (shell-only: page background, the copy box); the build also copies `panel-ui/fonts/` (bundled OFL fonts) into the plugin and the spike |
 | `src/main.ts` | entry: builds the environment (`require` of `premierepro`/`uxp` with literal calls, `document`, `navigator`) and calls `startShell`; picks the data source at build time |
 | `src/shell.ts` | `startShell(env)`: theme, data source, `UxpHost`, `mount(root, source, host)`; testable with fakes |
 | `src/offline-source.ts` | `OfflineSource`: the placeholder `PanelDataSource` until the engine daemon exists (T6.2): engine "not running", Host pill from `uxp.host.version` (`Application.version` is empty), language from `uxp.host.uiLocale`, no pipeline data, every action `ok:false` with `how: "In your Claude session run `reel doctor`."` (the panel renders a backticked command as a left-to-right run) |
@@ -137,9 +137,9 @@ Open the dev harness over http (a `file://` page works too in most browsers):
 | `src/render.ts` | `render(state, strings, ui)` -> HTML string; `esc()`; every dynamic value escaped; commands/paths/timecodes in `<bdi dir="ltr">` |
 | `src/mount.ts` | `mount(root, source, host)`: renders, subscribes, event delegation; the host-only things go through `src/host.ts` |
 | `src/actions.ts` | the host requests the buttons send (checked against the v4 action schemas in tests) and the `rebuild` intent (`PanelDataSource.rebuild`: the daemon expands it into a full engine rebuild; the panel never sends `build_project`) |
-| `src/i18n.ts` | EN + AR tables (AR is typed against EN's keys) |
+| `i18n/en.json`, `i18n/ar.json`, `src/i18n.ts` | the ONE string table (identical keys; tests fail on a missing key or a hard-coded string in the render code); `i18n.ts` only loads and types it (AR is typed against EN's keys) |
 | `src/monogram.ts` | header monogram = `premiere-uxp/icons/dark/icon-48.png` inlined as a data URI (a test fails on drift) |
-| `styles/tokens.css`, `styles/panel.css` | Appendix D tokens + `--twn-focus`; flexbox only, no web-font loading, RTL by `direction` on `.twn-rtl` |
+| `../brand/tokens.css`, `styles/fonts.css`, `fonts/`, `styles/panel.css` | Addendum B brand tokens (always dark; copied at build time, never duplicated), `@font-face` for Syne / Inter / IBM Plex Sans Arabic / IBM Plex Mono from bundled OFL files (stacks fall back if a host ignores them), the panel styles (colours only via tokens; flexbox only; RTL by `direction` on `.twn-rtl`) |
 
-Shell contract: put `tokens.css` then `panel.css` on the page, give `mount()` an element (`asMountRoot(el)`), a data source and a
+Shell contract: put `fonts.css`, `tokens.css` then `panel.css` on the page, give `mount()` an element (`asMountRoot(el)`), a data source and a
 `PanelHost { setPlayerPosition, openInSourceMonitor, revealPath, copyText }`. The panel never touches a host API itself.

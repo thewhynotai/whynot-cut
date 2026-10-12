@@ -1,4 +1,4 @@
-// Bundle a UXP plugin target into build/<target>/ (manifest + index.html + index.css + index.js + icons).
+// Bundle a UXP plugin target into build/<target>/ (manifest + index.html + index.css + index.js + icons + the brand kit).
 //   node scripts/build.mjs spike      -> build/spike/
 //   node scripts/build.mjs plugin     -> build/plugin/   (the WhyNot Cut panel; `--mock` or WNC_MOCK=1 bundles MockSource for visual checks)
 import { build } from "esbuild";
@@ -12,10 +12,19 @@ export const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** UXP host modules: provided by Premiere at runtime, never bundled. */
 const EXTERNAL = ["premierepro", "uxp", "fs", "os", "path", "process"];
 
+/** The brand kit every bundle carries (Addendum B): the ONE token source (brand/tokens.css, copied as-is), the font
+ *  faces and the bundled OFL font files (fonts.css sits next to fonts/, so its relative URLs resolve). The string table
+ *  (panel-ui/i18n/{en,ar}.json) needs no copy: esbuild bundles it into index.js wherever the panel kit is imported. */
+const BRAND_KIT = {
+  "../../brand/tokens.css": "tokens.css",
+  "../panel-ui/styles/fonts.css": "fonts.css",
+  "../panel-ui/fonts": "fonts",
+};
+
 export const TARGETS = {
   spike: {
     entry: "spike/src/spike.ts",
-    files: { "spike/manifest.json": "manifest.json", "spike/index.html": "index.html", "spike/index.css": "index.css" },
+    files: { "spike/manifest.json": "manifest.json", "spike/index.html": "index.html", "spike/index.css": "index.css", ...BRAND_KIT },
   },
   plugin: {
     entry: "src/main.ts",
@@ -23,8 +32,9 @@ export const TARGETS = {
       "plugin/manifest.json": "manifest.json",
       "plugin/index.html": "index.html",
       "plugin/index.css": "index.css",
-      // the shared panel kit's stylesheets ship as-is (the page links tokens.css, panel.css, index.css in that order)
-      "../panel-ui/styles/tokens.css": "tokens.css",
+      // the brand kit, then the shared panel kit's stylesheet, ship as-is (the page links fonts.css, tokens.css,
+      // panel.css, index.css in that order)
+      ...BRAND_KIT,
       "../panel-ui/styles/panel.css": "panel.css",
     },
   },
@@ -79,7 +89,7 @@ export async function buildTarget(target, { mock = mockRequested() } = {}) {
     define: { __WNC_MOCK__: target === "plugin" && mock ? "true" : "false", __WNC_BUILD__: JSON.stringify(buildStamp()) },
     logLevel: "warning",
   });
-  for (const [from, to] of Object.entries(t.files)) cpSync(join(root, from), join(out, to));
+  for (const [from, to] of Object.entries(t.files)) cpSync(join(root, from), join(out, to), { recursive: true });
   cpSync(join(root, "icons"), join(out, "icons"), { recursive: true });
   return out;
 }

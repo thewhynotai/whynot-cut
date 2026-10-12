@@ -1,6 +1,8 @@
 /* WhyNot Cut panel. Rules so the same file renders in Premiere UXP and After Effects CEP:
-   flexbox only, margins instead of flex gap, no sticky positioning, no web-font loading (the font stacks fall back),
-   simple selectors. Arabic: CSS direction on the container (.twn-rtl), never sp-theme dir. */
+   flexbox only, margins instead of flex gap, no sticky positioning, simple selectors. Every colour is a brand token
+   (brand/tokens.css, loaded before this file); fonts come from fonts.css (bundled OFL files) through the token stacks,
+   which fall back to system faces if the host ignores @font-face. Arabic: CSS direction on the container (.twn-rtl),
+   never sp-theme dir. */
 
 .twn-panel, .twn-panel * { box-sizing: border-box; }
 /* UXP does not lay <bdi> out inline by default. Every <bdi> in the panel is inline, and the rows that hold several
@@ -74,7 +76,7 @@ p { margin: 0 0 8px 0; }
   margin: 0 6px 4px 0;
   padding: 1px 9px;
   border: 1px solid var(--twn-border);
-  border-radius: 999px;
+  border-radius: var(--twn-radius-pill);
   font-size: 10.5px;
 }
 .twn-rtl .pill { margin: 0 0 4px 6px; }
@@ -101,7 +103,7 @@ p { margin: 0 0 8px 0; }
   border: 1px solid var(--twn-border);
   border-radius: 5px;
   white-space: nowrap;
-  font-family: Consolas, "SF Mono", Menlo, monospace;
+  font-family: var(--twn-font-mono);
   font-size: 11px;
 }
 
@@ -148,7 +150,7 @@ p { margin: 0 0 8px 0; }
   margin: 0 5px 5px 0;
   padding: 2px 9px 2px 3px;
   border: 1px solid var(--twn-border);
-  border-radius: 999px;
+  border-radius: var(--twn-radius-pill);
   font-size: 10.5px;
   color: var(--twn-text-muted);
 }
@@ -167,13 +169,13 @@ p { margin: 0 0 8px 0; }
   color: var(--twn-text-muted);
 }
 .step-done { color: var(--twn-text); }
-.step-done .step-dot { background: var(--twn-ok); color: #0b1f14; }
+.step-done .step-dot { background: var(--twn-ok); color: var(--twn-on-ok); }
 .step-running { border-color: var(--twn-primary-text); color: var(--twn-text); }
-.step-running .step-dot { background: var(--twn-primary); color: #fff; }
+.step-running .step-dot { background: var(--twn-primary); color: var(--twn-on-primary); }
 .step-waiting { border-color: var(--twn-accent); color: var(--twn-text); }
-.step-waiting .step-dot { background: var(--twn-accent); color: #2a0a1a; }
+.step-waiting .step-dot { background: var(--twn-accent); color: var(--twn-on-accent); }
 .step-failed { border-color: var(--twn-error); color: var(--twn-text); }
-.step-failed .step-dot { background: var(--twn-error); color: #2a0808; }
+.step-failed .step-dot { background: var(--twn-error); color: var(--twn-on-error); }
 
 .now { margin-top: 6px; padding: 8px 10px; background: var(--twn-surface); border: 1px solid var(--twn-border); border-radius: var(--twn-radius); }
 .now-idle { color: var(--twn-text-muted); }
@@ -182,7 +184,7 @@ p { margin: 0 0 8px 0; }
 .now-state { margin: 0 8px; color: var(--twn-text-muted); flex: 1 1 auto; }
 .now-step { margin-top: 2px; color: var(--twn-text-muted); }
 .now-meta { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; margin-top: 6px; color: var(--twn-text-muted); font-size: 11px; }
-.progress { height: 6px; margin-top: 8px; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; }
+.progress { height: 6px; margin-top: 8px; border-radius: 3px; background: var(--twn-track); overflow: hidden; }
 .progress-fill { height: 100%; background: var(--twn-gradient); border-radius: 3px; }
 
 /* ---- buttons and inputs ---- */
@@ -201,7 +203,7 @@ p { margin: 0 0 8px 0; }
   cursor: pointer;
 }
 .btn:focus, .banner-x:focus, .qc-thumb:focus, .log-toggle:focus, .input:focus { outline: none; box-shadow: var(--twn-focus); }
-.btn-primary { background: var(--twn-primary); color: #fff; }
+.btn-primary { background: var(--twn-primary); color: var(--twn-on-primary); }
 .btn-primary:hover { background: var(--twn-primary-hover); }
 .btn-secondary { background: var(--twn-surface); color: var(--twn-text); border-color: var(--twn-border); }
 .btn-secondary:hover { background: var(--twn-surface-2); }
@@ -232,7 +234,7 @@ textarea.input { resize: vertical; min-height: 56px; }
 .summary { margin: 0 0 8px 0; }
 .flags { list-style: none; margin: 0 0 4px 0; padding: 0; }
 .flag { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin: 0 0 6px 0; padding: 6px 8px; background: var(--twn-surface-2); border-radius: 6px; }
-.flag-kind { margin: 0 8px 0 0; padding: 0 7px; border: 1px solid currentColor; border-radius: 999px; font-size: 10px; font-weight: 600; }
+.flag-kind { margin: 0 8px 0 0; padding: 0 7px; border: 1px solid currentColor; border-radius: var(--twn-radius-pill); font-size: 10px; font-weight: 600; }
 .twn-rtl .flag-kind { margin: 0 0 0 8px; }
 .flag-medical .flag-kind { color: var(--twn-warn); }
 .flag-religious .flag-kind { color: var(--twn-accent); }
@@ -263,7 +265,7 @@ textarea.input { resize: vertical; min-height: 56px; }
   padding: 0;
   border: 0;
   border-radius: 5px;
-  background: #0d0d0d;
+  background: var(--twn-frame-bg);
   color: var(--twn-text-muted);
   overflow: hidden;
   cursor: pointer;
@@ -283,7 +285,7 @@ textarea.input { resize: vertical; min-height: 56px; }
 .qc-redo { display: block; width: 100%; margin-top: 4px; }
 
 /* ---- actions ---- */
-.path { margin: 0 0 8px 0; font-family: Consolas, "SF Mono", Menlo, monospace; font-size: 10.5px; color: var(--twn-text-muted); word-wrap: break-word; }
+.path { margin: 0 0 8px 0; font-family: var(--twn-font-mono); font-size: 10.5px; color: var(--twn-text-muted); word-wrap: break-word; }
 .actions { display: flex; flex-direction: row; flex-wrap: wrap; margin: 0 -3px; }
 .btn-act { flex: 1 1 118px; margin: 3px; }
 
@@ -309,7 +311,7 @@ textarea.input { resize: vertical; min-height: 56px; }
 .caret { flex: 0 0 auto; width: 12px; margin: 0 4px; }
 .log-title { flex: 0 0 auto; margin: 0 4px; }
 .log-count { flex: 0 0 auto; margin: 0 8px; font-weight: 400; }
-.log-lines { list-style: none; margin: 4px 0 0 0; padding: 6px 8px; max-height: 180px; overflow: auto; background: var(--twn-surface); border: 1px solid var(--twn-border); border-radius: 6px; font-family: Consolas, "SF Mono", Menlo, monospace; font-size: 10.5px; }
+.log-lines { list-style: none; margin: 4px 0 0 0; padding: 6px 8px; max-height: 180px; overflow: auto; background: var(--twn-surface); border: 1px solid var(--twn-border); border-radius: 6px; font-family: var(--twn-font-mono); font-size: 10.5px; }
 .log-line { display: flex; flex-direction: row; align-items: baseline; margin: 0 0 3px 0; }
 .log-line bdi { flex: 1 1 0; min-width: 0; word-wrap: break-word; }
 .log-ts { flex: 0 0 auto; margin: 0 6px 0 0; color: var(--twn-text-muted); }

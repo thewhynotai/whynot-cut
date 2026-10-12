@@ -39,7 +39,7 @@ test("package-ccx plugin writes whynot-cut/adobe/WhyNotCut-Premiere-<version>.cc
   assert.ok(existsSync(ccx), `ccx not written: ${ccx}`);
   const files = unzipSync(new Uint8Array(readFileSync(ccx)));
   const names = Object.keys(files);
-  for (const need of ["manifest.json", "index.html", "index.js", "index.css", "tokens.css", "panel.css"]) {
+  for (const need of ["manifest.json", "index.html", "index.js", "index.css", "fonts.css", "tokens.css", "panel.css"]) {
     assert.ok(names.includes(need), `missing ${need} at zip root (got ${names.join(", ")})`);
   }
   assert.equal(names[0], "manifest.json", "manifest.json first");
@@ -54,11 +54,42 @@ test("package-ccx plugin writes whynot-cut/adobe/WhyNotCut-Premiere-<version>.cc
   for (const i of all) assert.ok(names.includes(i.path), `manifest icon ${i.path} not packaged`);
 });
 
-test("the panel stylesheets in the package are the panel kit's own files", () => {
+test("the panel stylesheets in the package are the brand token source and the panel kit's own files", () => {
   const files = unzipSync(new Uint8Array(readFileSync(ccx)));
-  assert.equal(text(files["tokens.css"]), readFileSync(join(root, "..", "panel-ui", "styles", "tokens.css"), "utf8"));
+  assert.equal(text(files["tokens.css"]), readFileSync(join(repo, "brand", "tokens.css"), "utf8"), "tokens.css is brand/tokens.css (the one source)");
   assert.equal(text(files["panel.css"]), readFileSync(join(root, "..", "panel-ui", "styles", "panel.css"), "utf8"));
+  assert.equal(text(files["fonts.css"]), readFileSync(join(root, "..", "panel-ui", "styles", "fonts.css"), "utf8"));
   assert.match(text(files["tokens.css"]), /--twn-primary:#5400FB/);
+  assert.match(text(files["tokens.css"]), /--twn-bg:#000000/);
+});
+
+test("font bundle: every @font-face src in the package resolves to a font file inside the .ccx, with its OFL licence; no network URL", () => {
+  const files = unzipSync(new Uint8Array(readFileSync(ccx)));
+  const css = text(files["fonts.css"]);
+  assert.doesNotMatch(css, /https?:|\/\//i);
+  const urls = [...css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/g)].map((m) => m[1]!);
+  assert.ok(urls.length >= 7, `expected the brand faces, got ${urls.join(", ")}`);
+  for (const u of urls) {
+    assert.ok(u in files, `${u} is not in the .ccx`);
+    assert.ok(files[u]!.length > 10_000, `${u} is not a font file`);
+    assert.deepEqual([...files[u]!.subarray(0, 4)], [0, 1, 0, 0], `${u} is not a TrueType file`);
+    const ofl = `${u.slice(0, u.lastIndexOf("/"))}/OFL.txt`;
+    assert.match(text(files[ofl]), /SIL Open Font License/, `${ofl} missing`);
+  }
+  for (const fam of ["Syne", "Inter", "IBM Plex Sans Arabic", "IBM Plex Mono"]) assert.match(css, new RegExp(`font-family:\\s*"${fam}"`));
+});
+
+test("one string table ships in the bundle: index.js carries the en.json and ar.json copy", () => {
+  const js = text(unzipSync(new Uint8Array(readFileSync(ccx)))["index.js"]);
+  const en = JSON.parse(readFileSync(join(root, "..", "panel-ui", "i18n", "en.json"), "utf8")) as Record<string, string>;
+  const ar = JSON.parse(readFileSync(join(root, "..", "panel-ui", "i18n", "ar.json"), "utf8")) as Record<string, string>;
+  // esbuild may write non-ASCII as \uXXXX escapes: accept the literal text or its escaped form
+  const escaped = (s: string) => s.replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`).toLowerCase();
+  const has = (s: string) => js.includes(s) || js.toLowerCase().includes(escaped(s));
+  for (const k of ["offline.title", "rebuild.backup", "qc.hint"]) {
+    assert.ok(has(en[k]!), `EN ${k}`);
+    assert.ok(has(ar[k]!), `AR ${k}`);
+  }
 });
 
 test("the shipped bundle: UXP host modules stay external, no mock data, the engine link wired in, brand footer, no 'Claude Code'", () => {
@@ -82,7 +113,7 @@ test("the shipped bundle: UXP host modules stay external, no mock data, the engi
   assert.match(js, /build: "(?:[0-9a-f]{7,}|nogit)(?:\+dirty)? \d{4}-\d\d-\d\dT\d\d:\d\dZ"/);
   const html = text(files["index.html"]);
   assert.match(html, /<script[^>]+src="index\.js"/);
-  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["tokens.css", "panel.css", "index.css"]);
+  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "panel.css", "index.css"]);
   assert.ok(!js.includes("sourceMappingURL"), "no source map reference in a shipped file");
 });
 

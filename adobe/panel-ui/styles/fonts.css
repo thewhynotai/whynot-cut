@@ -1,0 +1,49 @@
+/* WhyNot Cut brand fonts (Addendum B), bundled with the panel: no network fonts.
+   The files are byte copies of the OFL fonts vendored in guide-ar/fonts/ (each family folder carries its OFL.txt).
+   Every bundle puts this file next to its fonts/ folder, so the URLs are relative to the bundle root.
+   Only @font-face rules live here; the families are used through the token stacks in brand/tokens.css, which all end
+   in a generic family. If a host (Premiere UXP: unverified) ignores @font-face, the panel falls back to the stack.
+   Weights shipped are the static files vendored today: Syne 700 (a 600 request resolves to it), Inter 400/600
+   (a 300 request resolves to 400), IBM Plex Sans Arabic 300/400/600, IBM Plex Mono 400. */
+@font-face {
+  font-family: "Syne";
+  font-weight: 700;
+  font-style: normal;
+  src: url("fonts/syne/Syne-Bold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 400;
+  font-style: normal;
+  src: url("fonts/inter/Inter-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 600;
+  font-style: normal;
+  src: url("fonts/inter/Inter-SemiBold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  font-weight: 300;
+  font-style: normal;
+  src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-Light.ttf") format("truetype");
+}
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  font-weight: 400;
+  font-style: normal;
+  src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  font-weight: 600;
+  font-style: normal;
+  src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 400;
+  font-style: normal;
+  src: url("fonts/ibmplexmono/IBMPlexMono-Regular.ttf") format("truetype");
+}

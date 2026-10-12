@@ -190,24 +190,11 @@ test("pills: Engine / Claude / Host, with state classes", () => {
   assert.ok(render(off, EN, initialUi()).includes('class="pill pill-offline" data-pill="engine"'));
 });
 
-test("flexbox only: the shipped CSS has no grid, sticky, :has() or @font-face", () => {
-  for (const f of ["../styles/tokens.css", "../styles/panel.css"]) {
-    const css = readFileSync(new URL(f, import.meta.url), "utf8");
-    assert.ok(!/display\s*:\s*(inline-)?grid|grid-template|position\s*:\s*sticky|:has\(|@font-face/.test(css), f);
-  }
-});
-
-test("tokens.css carries Appendix D verbatim plus --twn-focus", () => {
-  const css = readFileSync(new URL("../styles/tokens.css", import.meta.url), "utf8").replace(/\s+/g, "");
-  for (const t of [
-    "--twn-bg:#161616", "--twn-surface:#1F1F1F", "--twn-surface-2:#2A2A2A", "--twn-border:rgba(255,255,255,.14)",
-    "--twn-text:#FFF", "--twn-text-muted:#B3B3B3", "--twn-primary:#5400FB", "--twn-primary-hover:#6A1FFF",
-    "--twn-primary-text:#9D6BFF", "--twn-accent:#D95C9B", "--twn-deep:#390796",
-    "--twn-gradient:linear-gradient(90deg,#D95C9B0%,#5400FB100%)", "--twn-ok:#3DD68C", "--twn-warn:#FFB020", "--twn-error:#FF5C5C",
-    '--twn-font-display:"Syne","Inter",sans-serif', '--twn-font-ui:"Inter",system-ui,sans-serif',
-    '--twn-font-ar:"IBMPlexSansArabic","NotoSansArabic",sans-serif', "--twn-radius:8px", "--twn-focus:0002px#9D6BFF",
-  ]) {
-    assert.ok(css.includes(t), `missing ${t}`);
+test("flexbox only: the shipped CSS has no grid, gap, sticky or :has(); @font-face lives only in fonts.css", () => {
+  for (const f of ["../../../brand/tokens.css", "../styles/panel.css", "../styles/fonts.css"]) {
+    const css = readFileSync(new URL(f, import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.ok(!/display\s*:\s*(inline-)?grid|grid-template|(?:^|[;{\s])(?:row-|column-)?gap\s*:|position\s*:\s*sticky|:has\(/.test(css), f);
+    if (!f.endsWith("fonts.css")) assert.ok(!/@font-face/.test(css), `${f}: @font-face belongs in fonts.css`);
   }
 });
 
@@ -314,7 +301,7 @@ test("offline banner: the sentence is one block, then reel doctor as a chip on i
   }
   const css = panelCss();
   assert.match(rule(css, ".cmd"), /white-space: nowrap/);
-  assert.match(rule(css, ".cmd"), /font-family: Consolas/);
+  assert.match(rule(css, ".cmd"), /font-family: var\(--twn-font-mono\)/);
 });
 
 test("a notice's how ending in a command: sentence block + chip row; a command mid-sentence stays a plain ltr run", () => {

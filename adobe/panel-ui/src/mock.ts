@@ -100,13 +100,13 @@ function tcOf(t: number): string {
 
 /** A small neutral frame as an SVG data URI so tiles look like tiles without any media on disk. */
 function thumbFor(i: number, w = 108, h = 192): string {
-  const hues = ["#2b2b3a", "#33283a", "#2a3340", "#3a2f2a"];
+  const hues = ["#121212", "#390796", "#1E1E1E", "#000000"];
   const bg = hues[i % hues.length]!;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
     `<rect width="${w}" height="${h}" fill="${bg}"/><rect x="10" y="${h - 60}" width="88" height="14" rx="3" fill="#5400FB" opacity=".85"/>` +
-    `<rect x="10" y="${h - 40}" width="60" height="8" rx="3" fill="#ffffff" opacity=".6"/>` +
-    `<circle cx="54" cy="${Math.round(h / 3)}" r="22" fill="#ffffff" opacity=".18"/></svg>`;
+    `<rect x="10" y="${h - 40}" width="60" height="8" rx="3" fill="#FFFFFF" opacity=".6"/>` +
+    `<circle cx="54" cy="${Math.round(h / 3)}" r="22" fill="#FFFFFF" opacity=".18"/></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 

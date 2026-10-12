@@ -1,4 +1,4 @@
-/* Shell-only styles. The panel itself is styled by tokens.css + panel.css (shared with After Effects). */
+/* Shell-only styles. The panel itself is styled by fonts.css + tokens.css (brand/tokens.css) + panel.css (shared with After Effects). */
 /* UXP does not scroll the document: html/body are exactly the viewport and never scroll, #root is a full-height flex
    column, and the panel scrolls inside its own .twn-scroll region (panel.css). The copy box below is a flex sibling of
    #root, so it takes its own space at the bottom and #root shrinks (min-height: 0) instead of being pushed off screen. */
@@ -54,7 +54,7 @@ body {
   color: var(--twn-text);
   border: 1px solid var(--twn-border);
   border-radius: 4px;
-  font-family: Consolas, monospace;
+  font-family: var(--twn-font-mono);
   font-size: 11px;
   direction: ltr;
   text-align: left;
@@ -63,7 +63,7 @@ body {
 .wnc-copy-close {
   padding: 4px 12px;
   background: var(--twn-primary);
-  color: #fff;
+  color: var(--twn-on-primary);
   border: 0;
   border-radius: 4px;
   cursor: pointer;

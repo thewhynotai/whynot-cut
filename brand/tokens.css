@@ -1,0 +1,58 @@
+/* WhyNot Cut brand tokens: the ONE source for every WhyNot surface (Addendum B, "look like thewhynot.ai").
+   The Premiere plugin, the spike and the panel-ui dev harness copy this file as-is at build time
+   (adobe/premiere-uxp/scripts/build.mjs, adobe/panel-ui/scripts/dev-build.mjs); nothing else defines tokens.
+   Always dark. Addendum B values are verbatim; the rest are derived and checked by adobe/panel-ui/test/contrast.test.ts.
+   Colour rules:
+   - #5400FB is a FILL only (white text on it is about 7.6:1). Violet TEXT, links and the focus ring use #9D6BFF;
+     raw #5400FB as text is 2.77:1 and must not be used.
+   - #D95C9B is for eyebrow labels and the active tab underline.
+   - The gradient is for the header hairline, progress bars and the main CTA border glow only.
+   - Status colours always come with an icon, never colour alone.
+   - Glass sits on the black background (it reads as #141414). Do not stack glass on a #121212 card under small coloured
+     text: pink and violet drop to about 4.35:1 there.
+   Fonts: the families are declared in fonts.css from bundled OFL files; every stack ends in a generic family, so the
+   panel degrades to it if a host ignores @font-face. */
+:root{
+/* surfaces */
+--twn-bg:#000000;
+--twn-surface:#121212;
+--twn-glass:rgba(255,255,255,.08);
+--twn-border:rgba(255,255,255,.14);
+--twn-surface-2:#1E1E1E;
+--twn-frame-bg:#0D0D0D;
+--twn-track:rgba(255,255,255,.12);
+/* text */
+--twn-text:#FFFFFF;
+--twn-text-muted:#B3B3B3;
+/* brand */
+--twn-primary:#5400FB;
+--twn-primary-hover:#6A1FFF;
+--twn-primary-text:#9D6BFF;
+--twn-accent:#D95C9B;
+--twn-deep:#390796;
+--twn-gradient:linear-gradient(90deg,#D95C9B,#5400FB);
+/* status (always with an icon) */
+--twn-ok:#3DD68C;
+--twn-warn:#FFB020;
+--twn-error:#FF5C5C;
+/* text on a coloured fill */
+--twn-on-primary:#FFFFFF;
+--twn-on-ok:#0B1F14;
+--twn-on-accent:#2A0A1A;
+--twn-on-error:#2A0808;
+/* shape */
+--twn-radius:8px;
+--twn-radius-card:16px;
+--twn-radius-pill:999px;
+--twn-focus:0 0 0 2px #9D6BFF;
+/* type: Syne 600/700 titles and uppercase eyebrows, Inter 300/400/600 UI, IBM Plex Sans Arabic for Arabic,
+   IBM Plex Mono for commands and timecodes */
+--twn-font-display:"Syne","Inter",system-ui,sans-serif;
+--twn-font-ui:"Inter",system-ui,"Segoe UI",sans-serif;
+--twn-font-ar:"IBM Plex Sans Arabic","Noto Sans Arabic","Segoe UI",sans-serif;
+--twn-font-mono:"IBM Plex Mono",Consolas,"SF Mono",Menlo,monospace;
+--twn-weight-light:300;
+--twn-weight-regular:400;
+--twn-weight-semibold:600;
+--twn-weight-bold:700;
+}

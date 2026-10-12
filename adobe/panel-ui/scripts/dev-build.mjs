@@ -1,6 +1,6 @@
-// npm run dev:build -> panel-ui/dev/out/{index.html,dev.js,tokens.css,panel.css} (gitignored). Open dev/out/index.html.
+// npm run dev:build -> panel-ui/dev/out/{index.html,dev.js,fonts.css,fonts/,tokens.css,panel.css} (gitignored). Open dev/out/index.html.
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +18,9 @@ await build({
   logLevel: "info",
 });
 copyFileSync(join(root, "dev", "index.html"), join(out, "index.html"));
-copyFileSync(join(root, "styles", "tokens.css"), join(out, "tokens.css"));
+// the brand kit, as the plugin bundles it: brand/tokens.css (the one token source), fonts.css next to fonts/
+copyFileSync(join(root, "..", "..", "brand", "tokens.css"), join(out, "tokens.css"));
+copyFileSync(join(root, "styles", "fonts.css"), join(out, "fonts.css"));
+cpSync(join(root, "fonts"), join(out, "fonts"), { recursive: true });
 copyFileSync(join(root, "styles", "panel.css"), join(out, "panel.css"));
 console.log(`dev harness: ${join(out, "index.html")}`);
