@@ -402,6 +402,83 @@ class TestFaceIndexIsMeasured(FontDirs):
         self.assertEqual(motion_animatic._font(str(ttc), 40).resolved, "Narrow-Regular")
 
 
+class TestNoArabicFontWarningsAreWired(FontDirs):
+    """G72 review round 2: a Latin-only brand on a computer without an Arabic font gets the warning in `reel ppro-build`
+    (out["warnings"], from the caption stills) and in `reel publish-thumbnail` (render_thumbnails), not only in `reel plan`."""
+    SAYS = "Arabic text cannot be drawn"
+
+    def latin_brand(self, db: Path) -> Path:
+        d = self.tmp / "fonts"
+        save_font(d / "latin.ttf", "Latin Only", "Regular", "LatinOnly-Regular")          # the computer: no Arabic font
+        latin = save_font(self.tmp / "client/Brand-Bold.ttf", "Brand", "Bold", "Brand-Bold", weight=700)
+        (db / "branding").mkdir(parents=True, exist_ok=True)
+        (db / "branding/typography.json").write_text(json.dumps({"families": {"Brand": {"supports_arabic": False, "weights": [
+            {"style": "Bold", "postscript_name": "Brand-Bold", "weight_class": 700, "file": str(latin)}]}}}),
+            encoding="utf-8")
+        return d
+
+    def test_ppro_build_reports_the_warning_for_arabic_captions(self):
+        from lib import hb_text, ppro_build, stamps
+        if not hb_text.AVAILABLE:
+            self.skipTest("HarfBuzz/FreeType not in this runtime")
+        root = self.tmp / "C"
+        (root / "assets").mkdir(parents=True)
+        (root / "data").mkdir()
+        paths = common.Paths(root, "V1")
+        paths.ensure_project()
+        common.set_context(root)
+        self.addCleanup(common.set_context, None)
+        fdir = self.latin_brand(paths.client_db)
+        common.write_json(paths.p("01_analysis/timeline-spec.json"), stamps.stamp(
+            {"events": [], "duration_frames": 240, "main_segments": [], "fps": 24, "caption_highlights": [],
+             "caption_source": "02_transcription/subtitles-seq.srt"}))
+        paths.p("02_transcription").mkdir(parents=True, exist_ok=True)
+        paths.p("02_transcription/subtitles-seq.srt").write_text(
+            "1\n00:00:00,000 --> 00:00:02,000\nمرحبا بكم في الحلقة\n\n", encoding="utf-8")
+        base = {"xml": str(self.tmp / "x.xml"), "sequence_name": "V1", "cutaways": None,
+                "tracks": {"audio": [{"name": "Dialogue (L/R mono pair)"}]}}
+
+        def submit(action, payload, timeout=0):
+            prj = paths.p(f"07_premiere/project/{paths.video_id}_{common.project_prefix()}_EDIT.prproj")
+            prj.parent.mkdir(parents=True, exist_ok=True)
+            prj.write_bytes(b"prproj")
+            return {"ok": True, "response": {"result": {"settings_after": {}, "placed": [], "tracks": {}}}}
+        with mock.patch.object(plat, "font_dirs", lambda: [fdir]),                 mock.patch("lib.premiere_xml.build_xml", return_value=base),                 mock.patch("lib.ppro_bridge.status", return_value={"alive": True}),                 mock.patch("lib.ppro_bridge.submit", side_effect=submit),                 mock.patch("lib.verify.editor_modified", return_value=None):
+            out = ppro_build.build(paths)
+        self.assertTrue(out["warnings"], out)
+        self.assertEqual(len(out["warnings"]), 1)
+        self.assertIn(self.SAYS, out["warnings"][0])
+
+    def test_publish_thumbnails_report_the_warning_for_arabic_text(self):
+        from PIL import Image
+        from lib import hb_text, publish
+        if not hb_text.AVAILABLE:
+            self.skipTest("HarfBuzz/FreeType not in this runtime")
+        ep_root = self.tmp / "EP"
+        db = ep_root / "db"
+        fdir = self.latin_brand(db)
+        files = {"publish/publish.json": {"thumbnail": {"designs": [
+            {"frame_ms": 1000, "text": "مرحبا بكم", "highlight": "بكم"}]}}}
+
+        class Ep:
+            client_db = db
+
+            def p(self, rel):
+                return ep_root / rel
+        for rel, doc in files.items():
+            common.write_json(ep_root / rel, doc)
+
+        def grab(src, t, out):
+            out.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (640, 360), (30, 30, 30)).save(out)
+            return out
+        with mock.patch.object(plat, "font_dirs", lambda: [fdir]),                 mock.patch("lib.episode.load_episode", return_value={"duration_ms": 20000}),                 mock.patch("lib.episode.episode_file", return_value=ep_root / "ep.mp4"),                 mock.patch("lib.media_util.grab_frame_file", grab):
+            r = publish.render_thumbnails(Ep())
+        self.assertTrue(r["ok"], r)
+        says = [w for w in r["warnings"] if self.SAYS in w]
+        self.assertEqual(len(says), 1, r["warnings"])
+
+
 class TestSandbox(unittest.TestCase):
     def test_discovery_reads_the_sandbox_folder_unless_a_test_injects_folders(self):
         import os
@@ -411,6 +488,22 @@ class TestSandbox(unittest.TestCase):
         self.assertNotIn(Path(sandbox), plat.font_dirs())               # font_dirs() still names the real folders
         with mock.patch.object(plat, "font_dirs", lambda: [Path("injected")]):
             self.assertEqual(plat.font_search_dirs(), [Path("injected")])
+
+
+    def test_the_variable_is_ignored_outside_the_test_sandbox(self):
+        """Review round 2: WHYNOT_FONT_DIRS is test-only. Without WHYNOT_TEST_SANDBOX a stray (even empty) value never
+        replaces the machine's font folders; with it, it still does."""
+        import os
+        with mock.patch.dict(os.environ, {plat.FONT_DIRS_ENV: ""}):               # the sandbox is set: honoured ("" = none)
+            self.assertTrue(os.environ.get(plat.SANDBOX_ENV))
+            self.assertEqual(plat.font_search_dirs(), [])
+        with mock.patch.dict(os.environ, {plat.FONT_DIRS_ENV: "elsewhere"}):
+            self.assertEqual(plat.font_search_dirs(), [Path("elsewhere")])
+        for value in ("", "elsewhere"):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {plat.FONT_DIRS_ENV: value}):
+                os.environ.pop(plat.SANDBOX_ENV)                                  # restored by patch.dict on exit
+                self.assertEqual(plat.font_search_dirs(), plat.font_dirs())
+                self.assertNotEqual(plat.font_search_dirs(), [])
 
 
 if __name__ == "__main__":

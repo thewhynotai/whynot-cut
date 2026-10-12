@@ -1418,6 +1418,12 @@ class TestMotionBuild(CompiledMotion):
         r = self.mb.build(self.reel)
         self.assertEqual(r["status"], "REFUSED")
         self.assertTrue(any("font" in x for x in r["reasons"]), r["reasons"])
+        import platform
+        from lib.motion_config import motion_cfg
+        from lib.motion_layout import find_font_face
+        fb = (motion_cfg().get("fallback_fonts") or {}).get("mac" if platform.system() == "Darwin" else "windows")
+        if not fb or find_font_face(fb) is None:
+            self.skipTest(f"the configured fallback font {fb!r} is not installed on this machine")
         r = self.mb.build(self.reel, allow_fallback_font=True)
         self.assertEqual(r["status"], "PROJECT_ASSEMBLED", r)
         self.assertTrue(r["fallback_font"])
@@ -2311,37 +2317,51 @@ class TestFallbackRefit(CompiledMotion):
         tf = test_font()
         import freetype
         ps = freetype.Face(str(tf)).postscript_name.decode()
+        if find_font_file(ps) is None:
+            self.skipTest(f"{tf.name} is not found by font discovery on this machine")
         self.assertEqual(Path(find_font_file(ps)).name.lower(), tf.name.lower())
         self.assertIsNone(find_font_file("NoSuchFont-Bold"))
 
-    def test_build_refits_with_fallback(self):
-        import freetype
-        from lib import ae_bridge, ae_probe, motion_build, plat
-        from lib.motion_plan import fingerprint
-        ps = freetype.Face(str(test_font())).postscript_name.decode()
+    def brand_plan_approved(self, fallback_ps: str):
+        """The reel compiled with brand fonts (Brand-Medium / Brand-Bold, test_font()'s file), the profile's fallback
+        fonts set to `fallback_ps`, and the plan approved."""
+        from lib.motion_plan import compile_motion, fingerprint
         write_json(self.root / common.CLIENT_PROFILE_REL / "motion.json",
-                   {"duration_s": {"hard_min": 1}, "fallback_fonts": {"windows": ps, "mac": ps}})
+                   {"duration_s": {"hard_min": 1}, "fallback_fonts": {"windows": fallback_ps, "mac": fallback_ps}})
         common.set_context(self.root)
         typ = self.reel.client_db / "branding/typography.json"
         keep_typ = typ.read_bytes()
         f = str(test_font())
         write_json(typ, {"families": {"Brand": {"weights": [{"style": st, "file": f, "postscript_name": "Brand-" + st}
                                                             for st in ("Medium", "Bold")]}}})
-        from lib.motion_plan import compile_motion
         self.assertTrue(compile_motion(self.reel)["ok"])
         self.assertTrue(read_json(self.reel.p("01_analysis/motion-plan.json"))["fonts"]["title"]["ps"].startswith("Brand-"))
         write_json(self.reel.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor",
                                                                    "plan_fingerprint": fingerprint(self.reel)})
         self.addCleanup(typ.write_bytes, keep_typ)
+
+    def build_with_missing_brand_fonts(self):
+        """motion_build.build(allow_fallback_font=True) against a fake After Effects that lacks the brand fonts."""
+        from lib import ae_bridge, ae_probe, motion_build, plat
         saved = (ae_bridge.submit, ae_bridge.status, ae_probe.verdict_ok, plat.newest_app)
         ae = FakeAE(fonts_ok=False)
         ae_bridge.submit, ae_bridge.status = ae.submit, ae.status
         ae_probe.verdict_ok = lambda v: True
         plat.newest_app = lambda key: {"name": "AE", "exe": "AfterFX.exe"}
         try:
-            r = motion_build.build(self.reel, allow_fallback_font=True)
+            return motion_build.build(self.reel, allow_fallback_font=True)
         finally:
             ae_bridge.submit, ae_bridge.status, ae_probe.verdict_ok, plat.newest_app = saved
+
+    def test_build_refits_with_fallback(self):
+        import freetype
+        from lib import motion_build, motion_layout
+        from lib.motion_plan import fingerprint
+        ps = freetype.Face(str(test_font())).postscript_name.decode()
+        if motion_layout.find_font_face(ps) is None:
+            self.skipTest(f"{test_font().name} is not found by font discovery on this machine")
+        self.brand_plan_approved(ps)
+        r = self.build_with_missing_brand_fonts()
         self.assertEqual(r["status"], "PROJECT_ASSEMBLED", r)
         # the job carries the layout re-fitted with the font After Effects draws ...
         job = json.loads(self.reel.p("04_after_effects/data/motion-job.json").read_text(encoding="ascii"))["plan"]
@@ -2358,6 +2378,32 @@ class TestFallbackRefit(CompiledMotion):
         txt = motion_readme(self.reel).read_text(encoding="utf-8")
         needs = txt.split("## Needs you", 1)[1]
         self.assertTrue(ps in needs and "Brand-" in needs, needs)
+
+    def test_fallback_at_face_1_of_a_collection_reaches_the_job_with_its_index(self):
+        """T2.10 review round 2: the approved fallback is face 1 of a .ttc (GeezaPro-Bold in GeezaPro.ttc): build()
+        hands compile_motion font_override with the face index, so the job's fonts carry it (fit() measured with it)."""
+        import os
+        from unittest import mock
+        from lib import fonts, hb_text, plat
+        from test_fonts import save_collection
+        if not hb_text.AVAILABLE:
+            self.skipTest("HarfBuzz/FreeType not in this runtime")
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        ttc = save_collection(d / "fonts/Fallback.ttc", [("Narrow", "Regular", "Narrow-Regular", True, 400, 300),
+                                                         ("Wide", "Bold", "Wide-Bold", True, 700, 450)])
+        p = mock.patch.dict(os.environ, {plat.FONT_DIRS_ENV: str(ttc.parent)})     # discovery sees only this collection
+        p.start()
+        self.addCleanup(fonts.clear_cache)
+        self.addCleanup(p.stop)
+        fonts.clear_cache()
+        self.brand_plan_approved("Wide-Bold")
+        r = self.build_with_missing_brand_fonts()
+        self.assertEqual(r["status"], "PROJECT_ASSEMBLED", r)
+        job = json.loads(self.reel.p("04_after_effects/data/motion-job.json").read_text(encoding="ascii"))["plan"]
+        self.assertEqual(job["fonts"]["title"]["index"], 1, job["fonts"])
+        self.assertEqual({(v["ps"], Path(v["file"]).name, v["index"]) for v in job["fonts"].values()},
+                         {("Wide-Bold", "Fallback.ttc", 1)})
 
     def test_readme_fallback_fonts_plural(self):
         """Final review: «…Bold, …Medium is not installed: install it» — several missing brand fonts read as plural."""

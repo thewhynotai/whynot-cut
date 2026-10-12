@@ -242,8 +242,10 @@ _font_dirs = font_dirs
 def font_search_dirs() -> list[Path]:
     """The folders font discovery (lib/fonts.py) reads: font_dirs(), or the folders WHYNOT_FONT_DIRS names
     (os.pathsep-separated; the test sandbox, tests/_isolation.py, points it at an empty folder so no test reads the
-    machine's fonts). A test that replaced font_dirs (mock.patch) still gets its own folders."""
-    v = os.environ.get(FONT_DIRS_ENV)
+    machine's fonts). The variable is honoured only inside the test sandbox (WHYNOT_TEST_SANDBOX set); anywhere else
+    it is ignored, so a stray or empty value can never hide the machine's fonts. A test that replaced font_dirs
+    (mock.patch) still gets its own folders."""
+    v = os.environ.get(FONT_DIRS_ENV) if os.environ.get(SANDBOX_ENV) else None
     if v is None or font_dirs is not _font_dirs:
         return font_dirs()
     return [Path(p) for p in v.split(os.pathsep) if p]
