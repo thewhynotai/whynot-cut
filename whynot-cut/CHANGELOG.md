@@ -129,6 +129,11 @@
   plugin or a clients folder, a warning for non-English letters on Windows) and remembered only through the plugin
   option `engine_home` in Claude Code's `settings.json` and `~/.whynot-cut/plugin-options.json`; uninstall finds it
   there and forgets it with `-RemoveEngine`.
+- `reel serve` is a `reel` command (Addendum C2.1): `reel serve ensure | status | stop | run` (or serve's own
+  `--ensure / --status / --stop / --foreground`, `--wait`, `--quiet`) runs the engine the Premiere panel talks to and
+  prints its JSON; no client folder, no writer lock. The SessionStart hook starts it in the background after the
+  session context (`serve --ensure --quiet`, fully detached, no console window, never waited for); a failure is one
+  line of context, never a failed hook. New preference `panel_link` (default `true`; `false` leaves it off).
 
 ### Changed
 - No real client ships in the product: the real client's profile folder was removed from `profiles/`. The plugin now

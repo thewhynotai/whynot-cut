@@ -192,6 +192,7 @@ whisper_model: large-v3 # large-v3 | large-v3-turbo | medium | small
 preview_video: true
 clients_root: "D:/WhyNot Clients"
 notify_done: true
+panel_link: true        # false: do not start the Premiere panel's engine at session start
 ---
 ```
 Edit with `/whynot-cut:preferences` or `reel settings`. Keep it out of git (`.claude/*.local.md`). The session hook reads

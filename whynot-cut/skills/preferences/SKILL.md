@@ -25,6 +25,7 @@ reel settings --root "<CLIENT>"        # or `reel settings` outside a client fol
 | `preview_video` | `true` · `false` | render the preview MP4 before approval |
 | `clients_root` | folder | used by `reel doctor`, the session-start message and bare `--root "<name>"` |
 | `notify_done` | `true` · `false` | start the final report of long runs with a clear "Finished" line |
+| `panel_link` | `true` · `false` | start the engine the Premiere panel talks to (`reel serve`) in the background at session start; `false` leaves the panel offline until `reel serve ensure` |
 
 Change values (keeps the others and the notes; unknown keys and invalid values are refused):
 ```bash

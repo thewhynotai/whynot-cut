@@ -19,6 +19,7 @@ DEFAULTS = {
     "preview_video": True,        # render a watchable MP4 of the plan before approval
     "clients_root": "",           # folder holding the client folders
     "notify_done": True,          # say clearly when a long run finishes
+    "panel_link": True,           # start the engine the Premiere panel talks to (`reel serve`) at session start
 }
 CHOICES = {"language": {"en", "ar"}, "approval": {"ask", "auto"},
            "whisper_model": {"large-v3", "large-v3-turbo", "medium", "small"}}

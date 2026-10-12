@@ -9,6 +9,7 @@ user-invocable: false
 ```bash
 reel ppro-status --root "<CLIENT>"                        # alive + ping. If not alive: Premiere running? restarted since install?
 reel ppro-probe  --root "<CLIENT>"                        # what the bridge's host reports back (version, project, API); for diagnosis
+reel serve status                                         # the engine the Premiere panel talks to (session start runs it; `reel serve ensure` starts it)
 reel status      --root "<CLIENT>" --video-id <ID>        # the project's status record (status, history, blockers, parked_previous)
 reel ppro-build  --root "<CLIENT>" --video-id <ID> [--force]   # needs the CURRENT plan approved (Gate 1)
 reel premiere    --root "<CLIENT>" --video-id <ID>        # fallback standalone XML when the bridge can't run

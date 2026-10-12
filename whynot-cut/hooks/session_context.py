@@ -7,10 +7,13 @@ Speaks up when the session opens
     new clips; first a warning when another session holds the client's lease (output/.whynot-lock, 3.0 T1.8);
   * in the clients folder (setting `clients_root`, or a folder whose preferences file says so): which clients it holds;
   * in a folder that has a WhyNot Cut preferences file but no clients yet: point to /whynot-cut:start.
+Then it starts the panel link: `reel serve --ensure --quiet` (the engine the Premiere panel talks to) as a fully
+detached child it never waits for (Addendum C2.1); skipped when the preference `panel_link` is off, under
+WHYNOT_TEST_SANDBOX or without an engine runtime; a failure is one short line of context, never a failed hook.
 Whenever it speaks, it first warns loudly if the guard heartbeat (${CLAUDE_PLUGIN_DATA}/guard-ok, written by
 guard.py) is missing or older than a guarded tool call the previous session's transcript records since it started:
 tools ran but the read-only guard did not (a session that only read or chatted is no alarm).
-Stdlib only; never fails the session (any error -> silent exit 0).
+Stdlib only; never fails the session (any error -> silent exit 0). One JSON document is printed, at the end.
 """
 import json
 import os
@@ -192,9 +195,72 @@ def heartbeat_warning() -> str:
             f"assets/ and data/ read-only may not be running. Run `reel doctor` and tell the editor before editing. ")
 
 
+PENDING: list = []      # the context main() decided on; printed once by run(), after the panel link was started
+LINK: list = []         # [(engine home, preferences)] once main() knows them: run() starts the panel link
+
+
 def emit(ctx: str):
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
-                                             "additionalContext": heartbeat_warning() + ctx}}))
+    PENDING.append(heartbeat_warning() + ctx)
+
+
+def flush(extra: str = ""):
+    text = "".join(PENDING) + extra
+    if text:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
+
+
+# ---------------------------------------------------------------------------------------- panel link (Addendum C2.1)
+WINDOWS = os.name == "nt"
+SERVE_MAIN = PLUGIN / "engine" / "reel" / "serve" / "__main__.py"
+# Windows creation flags (literal: the subprocess constants exist only on Windows)
+NO_WINDOW, DETACHED, NEW_GROUP, BREAKAWAY = 0x08000000, 0x00000008, 0x00000200, 0x01000000
+
+
+def _popen(cmd, **kw):
+    """subprocess.Popen for the panel-link child only (tests replace this)."""
+    import subprocess
+    return subprocess.Popen(cmd, **kw)
+
+
+def panel_link(home: Path, st: dict) -> str:
+    """Start `serve --ensure --quiet` with the engine interpreter, fully detached, and return at once (the child
+    finds a running daemon, or starts one and exits; `ensure` is idempotent and single-instance). Not waited for, its
+    output goes nowhere (never the hook's pipes, which Claude Code reads to EOF). Windows: no console window, its own
+    process group, out of the hook runner's job when the job allows it; macOS/Linux: a new session. "" when started
+    or skipped (preference `panel_link` off, the test sandbox, no engine runtime yet); otherwise one short line."""
+    try:
+        if os.environ.get("WHYNOT_TEST_SANDBOX"):
+            return ""
+        if str(st.get("panel_link", True)).strip().lower() in ("false", "off", "no", "0"):
+            return ""
+        py = plat.venv_python(home)
+        if not py.is_file():
+            return ""                  # nothing to start yet; the context already says how to install the engine
+        import subprocess
+        cmd = [str(py), "-s", "-B", "-P", str(SERVE_MAIN), "--ensure", "--quiet"]
+        kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+              "close_fds": True, "cwd": str(home)}
+        if WINDOWS:
+            flags = NO_WINDOW | DETACHED | NEW_GROUP
+            try:
+                _popen(cmd, creationflags=flags | BREAKAWAY, **kw)
+            except OSError:           # the hook runner's job forbids breakaway: start inside it
+                _popen(cmd, creationflags=flags, **kw)
+        else:
+            _popen(cmd, start_new_session=True, **kw)
+        return ""
+    except Exception as e:  # noqa: BLE001 — the session start must never fail on this
+        why = " ".join(str(e).split()) or type(e).__name__
+        return f"WhyNot Cut panel link not started: {why[:160]} (the Premiere panel stays offline; `reel serve ensure` retries). "
+
+
+def run():
+    """The hook: the context (main), then the panel link, then one print. Never raises."""
+    try:
+        main()
+    except Exception:  # noqa: BLE001 — as before: a context that failed says nothing
+        PENDING.clear()
+    flush(panel_link(*LINK[0]) if LINK else "")
 
 
 def bridge_state(home: Path) -> str:
@@ -343,6 +409,7 @@ def main():
     cwd = Path(plat.native_path(data.get("cwd") or os.getcwd()))
     st = settings.load(cwd)
     home = plat.engine_home()
+    LINK.append((home, st))
     env_ok = plat.venv_python(home).exists()
     root = client_root(cwd)
     if root:
@@ -391,7 +458,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        run()
     except Exception:
         pass
     sys.exit(0)
