@@ -128,6 +128,39 @@ Size: XL. Expect roughly 1–2 extra days of execution on top of the current est
 - **Test media:** test projects and copies under `whynot-test/` only. Never the editor's real projects or
   `D:\WhyNot Clients`.
 
+## A6b. Branding and gates (Yunus, 2026-10-12)
+His words: «دخلهم في البلاجن جو ويبقي كلهم ب اسم the why not ويعدوا علي جميع مراحل التيست و الكوالتي و السكيورتي و التشغيل»
+("put them inside the plugin, all under The Why Not name, and run them through every test, quality, security and
+operation stage").
+- **Names.** All three are tools inside WhyNot Cut, by The Why Not AI:
+  - **WhyNot Kalam** (captions);
+  - **WhyNot Hush** (silence and filler cut);
+  - **WhyNot Tidy** (organise + podcast sync).
+
+  Arabic UI: «كلام», «هَش», «تايدي» under the WhyNot Cut header. Each keeps its original short name, so the idea and
+  the tool are unchanged; the product brand is The Why Not.
+- **Remove "Hoka" from the product:**
+  - panel ids `com.hoka.*` become `ai.thewhynot.cut.<tool>`;
+  - ExtendScript namespaces `KALAM/HUSH/TIDY` become `WNC_KALAM/WNC_HUSH/WNC_TIDY`;
+  - data dirs move under `~/.whynot-cut/tools/<tool>/`;
+  - developer reports, sequence/backup suffixes ("(WhyNot Hush backup …)", "(WhyNot Tidy backup …)"), log names,
+    footer "Powered by thewhynot.ai", TWN brand tokens.
+
+  Tidy still recognises old "(Hush backup …)" / "(Hush cut …)" names, so existing projects keep working. Credit the
+  original author only in `THIRD_PARTY_NOTICES.md` if Yunus wants it; the default is no credit, since he owns the rights.
+- **Gates.** Every gate applies to all three, the same as the rest of WhyNot Cut:
+  1. **Tests:** the A5 tests in the Phase 6B gate and in Phase 9.
+  2. **Quality:** an independent code review per tool; the skill reviewer on their 3 skills; the simplify pass.
+  3. **Security review (Phase 8 T8.2), covering:**
+     - Kalam: the text sent to Claude; API key storage (owner-only file, never in argv, logs or reports); the
+       `claude -p --safe-mode` invocation; deleting the settings file at engine start.
+     - Hush and Tidy: project-editing ops, with backup-before-change, host-side re-checks, never deleting media from
+       disk, and the locked-track abort.
+     - All three: guard rules, routing through `reel serve` (token, Origin and Host checks), and process spawning.
+  4. **Operation (live):** run each tool end to end in Premiere on Windows: every Kalam output (track, MOGRT, SRT),
+     every Hush mode (cut, markers, undo), Tidy (clean, organise, undo, podcast sync). Then the combined flow. On
+     macOS too if H6. Frames and timelines are read back and viewed; nothing is called done without evidence.
+
 ## A6. New human items
 - **H12:** supply the source folders of Kalam, Hush and Tidy (and their design specs), and confirm WhyNot Cut may
   ship them (owner "Hoka"). Without them, use the A1 fallback.
