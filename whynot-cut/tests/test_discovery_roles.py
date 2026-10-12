@@ -107,9 +107,23 @@ class TestHintsOutsideKnownFolders(unittest.TestCase):
         self.assertEqual(role_of(r, "assets/Logo/logo2.png"), "logo")
         self.assertEqual(role_of(r, "assets/Logo/Logos.png"), "logo")
 
-    def test_asset_lookalikes_are_not_hints(self):
+    def test_glued_lowercase_asset_names_keep_their_2x_roles(self):
+        """Review I1: distinctive asset hints keep substring matching (old role == new role for every name)."""
         r = self.root
-        self.assertEqual(role_of(r, "assets/Misc/Colombia trip.jpg"), "client_image")
+        old = {"assets/mylogo.png": "logo", "assets/whitelogo.png": "logo", "assets/clientbrief.docx": "client_brief",
+               "assets/aboutus.docx": "client_brief", "assets/Biography.docx": "client_brief",
+               "assets/brandcolors.txt": "brand_colors", "assets/colorpalette.pdf": "brand_colors",
+               "assets/brandguidelines.pdf": "branding_doc", "assets/fontlist.txt": "typography",
+               "assets/drheadshot.jpg": "headshot", "assets/photoshoot1.jpg": "client_photo",
+               "assets/Photography1.jpg": "client_photo", "assets/Branded.jpg": "brand_image",
+               "assets/colorful.jpg": "brand_image", "assets/Biology.jpg": "client_image",
+               "assets/Logo/LogoMain.png": "logo", "assets/Brand/Profile.docx": "client_brief",
+               "assets/Misc/Colombia trip.jpg": "brand_image"}
+        for rel, want in old.items():
+            self.assertEqual(role_of(r, rel), want, rel)
+
+    def test_asset_lookalikes_in_named_folders(self):
+        r = self.root
         self.assertEqual(role_of(r, "assets/Photos/Biology.jpg"), "client_photo")      # "photo" is in the folder name
         self.assertEqual(role_of(r, "assets/Brand/Season promo S.jpg"), "brand_image")
 
@@ -157,6 +171,44 @@ class TestDiscoverWarnings(unittest.TestCase):
         self.assertTrue(any("Preface.md" in w for w in inv["warnings"]), inv["warnings"])
 
 
+class TestFolderVariantsAndWarnings(unittest.TestCase):
+    """Review round 1 minors: folders recognised by words; quieter conflicts; documents under Raw."""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.addCleanup(self._t.cleanup)
+        self.root = make_client(self._t.name)
+
+    def test_folder_variants_by_words(self):
+        r = self.root
+        for folder in ("Raw Footage", "RawClips", "Rushes", "raw_clips", "Footage"):
+            self.assertEqual(role_of(r, f"data/{folder}/Reference ranges.mp4"), "source_footage", folder)
+        for folder in ("Reference Edits", "refs", "Reference"):
+            self.assertEqual(role_of(r, f"data/{folder}/a.mp4"), "editing_reference_video", folder)
+        for folder in ("B-roll", "Stock", "Stocks", "Stock footage", "BRoll"):
+            self.assertEqual(role_of(r, f"data/{folder}/raw look.mp4"), "broll_video", folder)
+
+    def test_the_generic_word_footage_never_warns(self):
+        (self.root / "data/Raw/Footage of day 1.mp4").write_bytes(b"x")
+        (self.root / "data/Broll").mkdir()
+        (self.root / "data/Broll/raw take.mp4").write_bytes(b"x")
+        inv = discover(Paths(self.root), read_docs=False)["inventory"]
+        w = " ".join(x for x in inv["warnings"] if "disagree" in x)
+        self.assertNotIn("Footage of day 1", w)
+        self.assertIn("raw take.mp4", w)
+
+    def test_documents_under_raw_are_unclassified_and_warned(self):
+        r = self.root
+        self.assertEqual(role_of(r, "data/Raw/ref notes.md"), "unclassified")
+        self.assertEqual(role_of(r, "data/Raw/brief.md"), "unclassified")
+        inv = discover(Paths(r), read_docs=False)["inventory"]
+        self.assertNotIn("editing_reference_doc", inv["by_role"])
+        self.assertTrue(any("data/Raw/ref notes.md" in w for w in inv["warnings"]), inv["warnings"])
+
+    def test_stocks_plural_is_a_hint(self):
+        self.assertEqual(role_of(self.root, "data/Stocks clips/a.mp4"), "broll_video")
+
+
 class TestSessionContext(unittest.TestCase):
     def _new_line(self, root: Path) -> str:
         r = subprocess.run([sys.executable, "-B", str(CTX)], input=json.dumps({"cwd": str(root)}),
@@ -192,6 +244,26 @@ class TestSessionContext(unittest.TestCase):
             with mock.patch("lib.discover.classify", side_effect=RuntimeError("engine unavailable")):
                 got = sc.new_clips(root)                          # the engine classifier fails -> fallback scan
             self.assertEqual(got, ["REFERRAL"])
+
+    def test_fallback_agrees_with_classify(self):
+        sys.path.insert(0, str(SK / "hooks"))
+        import importlib
+        sc = importlib.import_module("session_context")
+        with tempfile.TemporaryDirectory() as t:
+            root = make_client(t)
+            files = ["data/Raw Footage/Reference ranges.mp4", "data/Refs/a.mp4", "data/Style ref1.mp4",
+                     "data/Loose/Stock clips.mp4", "data/Loose/Preface.mp4", "data/Loose/RawTake.mp4",
+                     "data/Stock footage/b.mp4", "data/Music/x.mp3"]
+            for rel in files:
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_bytes(b"x")
+            want = sorted(Path(r).stem for r in files if role_of(root, r) == "source_footage")
+            with mock.patch("lib.discover.classify", side_effect=RuntimeError("engine unavailable")):
+                got = sc.new_clips(root)
+            norm = lambda x: "".join(c if c.isascii() and c.isalnum() else "_" for c in x).strip("_").upper()
+            self.assertEqual(sorted(got), sorted(norm(w) for w in want))
+            self.assertIn("PREFACE", got)
+            self.assertNotIn("STOCK_CLIPS", got)
 
 
 if __name__ == "__main__":

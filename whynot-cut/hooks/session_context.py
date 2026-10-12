@@ -26,9 +26,26 @@ sys.path.insert(0, str(PLUGIN / "engine" / "reel" / "lib"))
 plat = settings = client_marker = None    # imported in main(), inside the never-fail guard
 
 VIDEO = {".mp4", ".mov", ".mxf", ".m4v", ".avi", ".mkv"}
-# the fallback scan of new_clips (engine unavailable) follows discovery's rule: the folder decides, hints are WORDS
-NOT_RAW_FOLDERS = {"references", "reference", "refs", "episodes", "broll", "b-roll", "b_roll", "music", "sfx"}
-REF_WORDS = {"ref", "refs", "reference", "references"}
+# the fallback scan of new_clips (engine unavailable) follows discovery's rule (lib/discover.py): the first folder under
+# data/ decides (by its words), file-name hints are WORDS (camelCase and digits are word breaks)
+FOLDER_WORDS = [("source", {"raw", "rushes"}), ("skip", {"ref", "refs", "reference", "references", "broll", "stock",
+                                                        "stocks", "episodes", "music", "sfx"}), ("source", {"footage"})]
+
+
+def _words(text: str) -> set:
+    words = {w for w in re.split(r"[^a-z]+", re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text).lower()) if w}
+    return words | ({"broll"} if re.search(r"b[-_ ]?roll", text.lower()) else set())
+
+
+def _is_source_clip(segs: list) -> bool:
+    """segs = path segments below the client root, e.g. ['data', 'Raw', 'a.mp4']."""
+    if len(segs) > 2:
+        w = _words(segs[1])
+        kind = next((k for k, ws in FOLDER_WORDS if ws & w), None)
+        if kind:
+            return kind == "source"
+    w = _words("/".join(segs[1:]))
+    return not (w & {"ref", "refs", "reference", "references", "broll", "stock", "stocks"})
 
 
 def is_client(p: Path, base=None) -> bool:
@@ -188,15 +205,9 @@ def new_clips(root: Path) -> list:
     except Exception:
         vids = []        # fallback when the engine cannot be imported: same rule, on path SEGMENTS (never substrings)
         for f in files:
-            segs = [x.lower() for x in f.relative_to(root).as_posix().split("/")]
-            if f.suffix.lower() not in VIDEO or f.name.startswith("."):
-                continue
-            if len(segs) > 2 and segs[1] != "raw":             # data/Raw is source; the other data folders are not
-                if segs[1] in NOT_RAW_FOLDERS or any(w in REF_WORDS for x in segs[1:] for w in re.split(r"[^a-z0-9]+", x)):
-                    continue                                    # (episodes are cut into reels: podcast mode)
-            elif len(segs) <= 2 and any(w in REF_WORDS for w in re.split(r"[^a-z0-9]+", segs[-1])):
-                continue
-            vids.append("".join(ch if ch.isascii() and ch.isalnum() else "_" for ch in f.stem).strip("_").upper() or "VIDEO")
+            segs = f.relative_to(root).as_posix().split("/")
+            if f.suffix.lower() in VIDEO and not f.name.startswith(".") and _is_source_clip(segs):
+                vids.append("".join(ch if ch.isascii() and ch.isalnum() else "_" for ch in f.stem).strip("_").upper() or "VIDEO")
     return [v for v in vids if not (root / "output/projects" / v / "02_transcription/transcript.json").exists()][:12]
 
 

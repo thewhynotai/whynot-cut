@@ -180,13 +180,15 @@
   the build saved no new project. `ppro-frames` first polls one frame until Premiere's media is online (up to
   30 s, `media_wait`), keeps the Media pending re-export, and reports `pending_frames` (never `ok: true` while one
   remains). The engine sends resolved script paths, and a heartbeat without a time no longer crashes `ppro-status`.
-- Discovery decides a file's role by its folder first (T2.5, review IM-8, structure 4.6): everything under `data/Raw`
-  is source footage, `data/References` references, `data/Broll` B-roll, `data/Music` music, `data/SFX` sound effects
-  (any case, any depth). Filename hints apply only outside those folders and only as whole words ("ref", "stock",
-  "brief"; camelCase and `_ - .` count as word breaks), so raw clips named "Refractive...", "Reflux...", "Preface..."
-  or "Stock market..." stay source clips instead of silently becoming reference edits or B-roll and dropping out of
-  `reel inbox` and autopilot. A file whose folder and name hint disagree keeps the folder's role and discovery warns.
-  The session-context "new clips" list matches path segments, not substrings.
+- Discovery decides a file's role by its folder first (T2.5, review IM-8, structure 4.6): everything under the first
+  folder of `data/` whose words say raw / rushes / footage is source footage, reference(s) / refs references, broll /
+  b-roll / stock(s) B-roll, plus `data/Music` and `data/SFX` (any case, any depth: "Raw Footage", "RawClips" work).
+  Filename hints apply only outside those folders. The ambiguous ones (ref, raw, stock, footage, about, bio) count only
+  as whole words ("Refractive", "Reflux", "Preface", "Strawberry" no longer turn raw clips into reference edits or
+  B-roll and out of `reel inbox` and autopilot); the distinctive asset hints (logo, brief, colo(u)r, palet, brand, font,
+  photo, headshot, ...) keep 2.x substring matching, so "whitelogo.png" and "brandcolors.txt" still resolve. A file whose
+  folder and a ref / raw / stock / b-roll name hint disagree keeps the folder's role and discovery warns; a document
+  under `data/Raw` stays unclassified and is warned about. The session-context "new clips" fallback follows the same rule.
 - The unit tests no longer reach the real engine home or a running Adobe app (G79): a test that mocked only the
   bridge status had queued real `build_project` jobs that an open Premiere ran. Every test process now runs in a temp
   sandbox (`tests/_isolation.py`, imported first by every test module: WHYNOT_HOME, HOME/USERPROFILE, APPDATA and
