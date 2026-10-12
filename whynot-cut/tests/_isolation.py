@@ -14,6 +14,9 @@ What it does, once per process:
     folder and sets WHYNOT_TEST_SANDBOX to it; drops the variables that would lead back to the real machine
     (CLAUDE_PLUGIN_DATA, CLAUDE_ENV_FILE, WHYNOT_OPTIONS_FILE, other engine-home / clients-root settings and plugin
     options). A test that sets its own (mock.patch.dict) still wins inside that test;
+  * points font discovery (lib/fonts.py, through plat.font_search_dirs) at an empty sandbox folder
+    (WHYNOT_FONT_DIRS): no test reads the machine's font folders by accident; a test that needs fonts injects them
+    (dirs=, or a patched plat.font_dirs). plat.font_dirs() itself still names the real folders;
   * keeps the pinned ffmpeg of the real engine home findable (NH_FFMPEG, read-only) so media tests behave as before;
   * puts every temp folder of the run inside the sandbox (tempfile.tempdir, and TMP/TEMP/TMPDIR for child processes)
     and makes TemporaryDirectory clean up robustly: Windows under load answers rmtree with WinError 145 ("directory is
@@ -132,6 +135,7 @@ def _sandbox() -> None:
     (user / ".claude").mkdir(parents=True)
     tmp = box / "tmp"
     tmp.mkdir()
+    (box / "fonts").mkdir()             # font discovery reads this empty folder: tests inject the fonts they need
     for k in list(os.environ):
         if k in _DROP or k.startswith("CLAUDE_PLUGIN_OPTION_"):
             del os.environ[k]
@@ -144,6 +148,7 @@ def _sandbox() -> None:
         "USERPROFILE": str(user),
         "CLAUDE_CONFIG_DIR": str(user / ".claude"),
         "TMP": str(tmp), "TEMP": str(tmp), "TMPDIR": str(tmp),
+        plat.FONT_DIRS_ENV: str(box / "fonts"),
     })
     if plat.IS_WIN:
         os.environ["APPDATA"] = str(user / "AppData" / "Roaming")

@@ -67,8 +67,8 @@ class Brand:
             return own
         fb = fontdb.arabic_fallback(bold=WEIGHT.get(face["wanted"], 400) >= 600)
         fb_font = self._font(fb, size) if fb else None
-        if fb_font is None:
-            return own if own is not None else _ArabicAware(None, None, self, None)
+        if fb_font is None:             # no Arabic font on this computer either: Arabic text is named in font_warnings()
+            return _ArabicAware(own, None, self, None)
         return _ArabicAware(own, fb_font, self, fb)
 
     def _font(self, face: dict, size: int):
@@ -98,16 +98,41 @@ class Brand:
         fam = ((self.typography or {}).get("families") or {}).get(face.get("family")) or {}
         if "supports_arabic" in fam:
             return bool(fam["supports_arabic"])
-        return fontdb.supports_arabic(face["file"]) if face.get("file") else True
+        return fontdb.supports_arabic(face["file"], face.get("index") or 0) if face.get("file") else True
 
     def font_warnings(self) -> list[str]:
-        """'client has no Arabic font — using <fallback>' for each fallback that drew Arabic text (G72)."""
+        """'client has no Arabic font — using <fallback>' for each fallback that drew Arabic text, or the "no Arabic
+        font at all" warning when Arabic text was drawn and neither the client nor the computer has one (G72)."""
         return [fontdb.fallback_warning(f) for f in self._fallbacks_used.values()]
+
+    def arabic_warnings(self) -> list[str]:
+        """The same warnings before anything is drawn (`reel plan`): one per fallback a role whose font has no Arabic
+        would use, or the "no Arabic font at all" one."""
+        out = []
+        for role in DEFAULT_ROLE_STYLE:
+            face = self.face(role)
+            if (face.get("file") or face.get("ps")) and self._has_arabic(face):
+                continue
+            w = fontdb.fallback_warning(fontdb.arabic_fallback(bold=WEIGHT.get(face["wanted"], 400) >= 600))
+            if w not in out:
+                out.append(w)
+        return out
+
+
+def arabic_font_warnings(db: Path, texts) -> list[str]:
+    """G72 for `reel plan`: when any of `texts` (on-screen strings, captions) has Arabic and the client's font for a
+    role has none, the warning naming the system fallback (or saying there is no Arabic font at all)."""
+    if not any(_ARABIC_TEXT.search(str(t or "")) for t in texts):
+        return []
+    return Brand(db).arabic_warnings()
 
 
 class _ArabicAware:
     """A role's font when the client's font has no Arabic (G72): _text_block asks for_text(), which gives the system
-    Arabic fallback for a block with Arabic (and for every block when the client has no font), else the brand font."""
+    Arabic fallback for a block with Arabic (and for every block when the client has no font), else the brand font.
+    The choice is per text block, not per run: a Latin brand name inside an Arabic line is drawn with the fallback too
+    (same size; the metrics come from the font actually used, so baselines stay consistent). No fallback on this
+    computer: the brand font (or Pillow's bitmap font) draws, and font_warnings() says Arabic cannot be drawn."""
 
     def __init__(self, own, fallback, brand: Brand, fb_face: dict | None):
         self.own, self.fallback, self.brand, self.fb_face = own, fallback, brand, fb_face
@@ -578,9 +603,11 @@ def caption_text(text: str, strip: str | None = None) -> str:
     return out
 
 
-def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) -> list[dict]:
+def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None,
+                    warnings: list | None = None) -> list[dict]:
     """Animated caption stills on the SEQUENCE clock: text (pop) + teal box (RTL sweep) on keyword cues.
-    Cues under a graphic that already shows the words are trimmed/dropped (reference behaviour)."""
+    Cues under a graphic that already shows the words are trimmed/dropped (reference behaviour). `warnings` (a list)
+    receives the G72 font warnings (Arabic captions drawn with a system fallback, or no Arabic font at all)."""
     from . import srt as srtlib
     from .plan import norm
     size = frame_size(paths)
@@ -640,4 +667,6 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None) ->
             item["bar"] = str(bar)
         res.append(item)
     write_json(out_dir / "captions-manifest.json", {"generated": now_iso(), "captions": res})
+    if warnings is not None:
+        warnings += [w for w in b.font_warnings() if w not in warnings]
     return res

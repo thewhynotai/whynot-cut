@@ -20,10 +20,10 @@ from pathlib import Path
 
 from . import plat
 
-VERSION = 1
+VERSION = 2                                                   # 2: `arabic` from the character map
 FONT_SUFFIXES = {".ttf", ".otf", ".ttc", ".otc"}
 _MAGIC = {b"\x00\x01\x00\x00", b"OTTO", b"true", b"ttcf"}     # sfnt / CFF / Apple TrueType / collection
-_ARABIC_BIT = 1 << 13                                         # OS/2 ulUnicodeRange1 bit 13: Arabic (U+0600-06FF)
+_ARABIC_CPS = (0x0627, 0x0644, 0x0645, 0x0646)               # alef, lam, meem, noon: a face that draws Arabic has all
 _MEM: dict = {}                                               # stamp key -> faces (most recent last)
 _MEM_MAX = 4
 _ARABIC_FILES: dict = {}                                      # (file, index, size, mtime) -> supports Arabic
@@ -45,7 +45,7 @@ def _system(system: str | None) -> str:
 def _roots(dirs) -> list[Path]:
     """The folders to scan, each once (a folder listed twice, or inside another listed one, is scanned once)."""
     cand = []
-    for d in (plat.font_dirs() if dirs is None else dirs):
+    for d in (plat.font_search_dirs() if dirs is None else dirs):
         n = os.path.normcase(os.path.abspath(str(d)))
         if n not in (c for c, _ in cand):
             cand.append((n, Path(d)))
@@ -90,13 +90,13 @@ def _is_font(path: str, name: str) -> bool:
 
 
 def _arabic(tt) -> bool:
-    """Does this face cover Arabic: the OS/2 Unicode range when the font fills it in, else its character map."""
-    os2 = tt["OS/2"] if "OS/2" in tt else None
-    ranges = [getattr(os2, f"ulUnicodeRange{i}", 0) for i in (1, 2, 3, 4)] if os2 is not None else []
-    if any(ranges):
-        return bool(ranges[0] & _ARABIC_BIT)
-    cmap = tt.getBestCmap() or {}
-    return sum(1 for c in (0x0627, 0x0628, 0x062A, 0x0645, 0x0646, 0x0647, 0x0648, 0x064A) if c in cmap) >= 6
+    """Does this face draw Arabic: its character map has the Arabic letters (alef, lam, meem, noon). The OS/2 Unicode
+    range bits are not trusted: fonts with Arabic glyphs often leave them unset, and Latin fonts sometimes set them."""
+    try:
+        cmap = tt.getBestCmap() or {}
+    except Exception:  # noqa: BLE001 — a damaged cmap: no Arabic we can rely on
+        return False
+    return all(c in cmap for c in _ARABIC_CPS)
 
 
 def _face(tt, path: str, index: int) -> dict | None:
@@ -207,7 +207,8 @@ def clear_cache(disk: bool = True) -> None:
 
 
 def faces(dirs=None) -> list[dict]:
-    """Every font face in the font folders (default plat.font_dirs()): {file, index, ps, family, style, full,
+    """Every font face in the font folders (default plat.font_search_dirs(): plat.font_dirs(), or the folders the
+    WHYNOT_FONT_DIRS variable names — the test sandbox's empty folder): {file, index, ps, family, style, full,
     typo_family, typo_style, weight, italic, arabic, source}, in folder order. Cached until a folder changes."""
     roots = _roots(dirs)
     stamp = _stamp(roots)
@@ -302,7 +303,8 @@ def fallback_name(face: dict) -> str:
 def fallback_warning(face: dict | None) -> str:
     """The plan / previews warning for a client without an Arabic font (G72)."""
     if not face:
-        return ("client has no Arabic font and this machine has none either — Arabic text cannot be drawn; install "
-                "the brand font")
+        return ("no Arabic font: the client has none and this computer has none either, so Arabic text cannot be "
+                "drawn (it shows as empty boxes) — install the client's Arabic brand font (assets/Fonts), or an "
+                "Arabic system font (Windows: Segoe UI, Arial or Tahoma; macOS: Geeza Pro), then run this step again")
     return (f"client has no Arabic font — using {fallback_name(face)} ({Path(face['file']).name}); install the brand "
             f"font")

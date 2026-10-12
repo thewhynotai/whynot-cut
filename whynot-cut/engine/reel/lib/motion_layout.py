@@ -42,21 +42,22 @@ def wrap(text: str, max_chars: int, max_lines: int) -> list[str]:
     return [ln.replace(NBSP, " ") for ln in lines]
 
 
-def fit(text: str, font_file: str, box_w: int, size_range: tuple[int, int], max_lines: int) -> dict:
-    """Largest size (4 px steps) at which the text fits box_w in ≤ max_lines balanced lines, measured with HarfBuzz."""
+def fit(text: str, font_file: str, box_w: int, size_range: tuple[int, int], max_lines: int, index: int = 0) -> dict:
+    """Largest size (4 px steps) at which the text fits box_w in ≤ max_lines balanced lines, measured with HarfBuzz
+    (face `index` of a .ttc/.otc collection: the face After Effects draws, e.g. GeezaPro-Bold is face 1)."""
     from . import hb_text
     words = glue(text)
     hi, lo = int(size_range[0]), int(size_range[1])
     size = hi
     while size >= lo:
-        font = hb_text.HBFontSpec(font_file, size)
+        font = hb_text.HBFontSpec(font_file, size, index=index)
         for n in range(1, min(max_lines, len(words)) + 1):
             lines = [ln.replace(NBSP, " ") for ln in _balance(words, n)]
             widths = [hb_text.measure(ln, font) for ln in lines]
             if max(widths) <= box_w:
                 return {"ok": True, "size": size, "lines": lines, "widths": [round(w, 1) for w in widths]}
         size -= 4
-    font = hb_text.HBFontSpec(font_file, lo)
+    font = hb_text.HBFontSpec(font_file, lo, index=index)
     lines = [ln.replace(NBSP, " ") for ln in _balance(words, min(max_lines, len(words)))]
     return {"ok": False, "size": lo, "lines": lines, "widths": [round(hb_text.measure(ln, font), 1) for ln in lines]}
 
@@ -137,9 +138,17 @@ def role_of(scene_type: str, element: str) -> str:
     return PRESETS[scene_type][element]["role"]
 
 
-def find_font_file(ps: str) -> str | None:
-    """The installed font file whose PostScript name is `ps` (system, user and Adobe Fonts folders, collections
-    included), or None. lib/fonts.py keeps the index and rebuilds it when a font folder changes (T2.17, T2.10)."""
+def find_font_face(ps: str) -> dict | None:
+    """{"file", "index"} of the installed face whose PostScript name is `ps` (system, user and Adobe Fonts folders;
+    in a .ttc/.otc collection `index` is the face, e.g. GeezaPro-Bold = GeezaPro.ttc face 1), or None. lib/fonts.py
+    keeps the index and rebuilds it when a font folder changes (T2.17, T2.10)."""
     from . import fonts
     hit = fonts.find(ps)
-    return hit["file"] if hit and hit["ps"] == ps else None
+    return {"file": hit["file"], "index": int(hit.get("index") or 0)} if hit and hit["ps"] == ps else None
+
+
+def find_font_file(ps: str) -> str | None:
+    """The file of find_font_face(ps), or None. A collection holds several faces: anything that measures or draws
+    with the font must use find_font_face (file AND face index)."""
+    face = find_font_face(ps)
+    return face["file"] if face else None

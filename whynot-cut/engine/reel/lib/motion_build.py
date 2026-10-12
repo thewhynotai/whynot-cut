@@ -237,16 +237,17 @@ def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeou
         shutil.copy2(aep, bdir / f"{aep.stem}.edited-{time.strftime('%Y%m%d-%H%M%S')}{aep.suffix}")
     fb, fb_plan, brand = None, None, []
     if ctx.get("missing_fonts") and allow_fallback_font:
-        from .motion_layout import find_font_file
+        from .motion_layout import find_font_face
         from .motion_plan import compile_motion
         fbs = motion_cfg().get("fallback_fonts") or {}
         fb = fbs.get("mac" if _pf.system() == "Darwin" else "windows")
-        ffile = find_font_file(fb) if fb else None
-        if not ffile:
+        fface = find_font_face(fb) if fb else None      # file AND face index: GeezaPro-Bold is face 1 of GeezaPro.ttc
+        if not fface:
             return dict(base, reasons=[f"the fallback font {fb!r} is not installed either: install the brand fonts"])
         # re-fit the layout with the font After Effects will draw (same words: the Gate 1 approval stays valid), for
         # this job only: the approved plan keeps the brand fonts, so a rebuild after installing them uses them
-        rc = compile_motion(paths, font_override={"ps": fb, "file": ffile}, write=False)
+        rc = compile_motion(paths, font_override={"ps": fb, "file": fface["file"], "index": fface["index"]},
+                            write=False)
         if not rc["ok"]:
             return _record(paths, dict(base, status="FAILED", reasons=["re-fit with the fallback font: " + e
                                                                         for e in rc["errors"]], fallback_font=fb))

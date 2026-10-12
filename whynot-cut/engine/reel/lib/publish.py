@@ -346,6 +346,7 @@ def render_thumbnails(ep) -> dict:
         else:
             out.write_bytes(buf.getvalue())
         files.append(str(out))
+    warnings += [w for w in b.font_warnings() if w not in warnings]       # G72: Arabic text without an Arabic font
     return {"ok": not errors and bool(files), "files": files, "errors": errors, "warnings": warnings,
             "highlights": highlights, "engines": sorted(b.engines)}
 

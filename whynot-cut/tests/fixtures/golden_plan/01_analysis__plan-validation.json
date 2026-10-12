@@ -5,5 +5,7 @@
  "events": 3,
  "main_segments": 5,
  "ok": true,
- "warnings": []
+ "warnings": [
+  "no Arabic font: the client has none and this computer has none either, so Arabic text cannot be drawn (it shows as empty boxes) — install the client's Arabic brand font (assets/Fonts), or an Arabic system font (Windows: Segoe UI, Arial or Tahoma; macOS: Geeza Pro), then run this step again"
+ ]
 }

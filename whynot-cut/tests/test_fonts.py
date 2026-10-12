@@ -4,9 +4,11 @@
     livetype) folders are searched; livetype files have obfuscated names, so faces are found by the names inside them;
   * the index is cached in the engine home and rebuilt when a font folder changes;
   * a client without an Arabic font gets a system Arabic fallback at the right size (never Pillow's bitmap font) and a
-    warning naming it.
+    warning naming it (previews, `reel plan`, caption stills, thumbnails), or one saying Arabic cannot be drawn when the
+    computer has no Arabic font either; Arabic support is read from the character map;
+  * a face of a collection is measured with that face (face index carried from discovery to fit() and the animatic).
 Every test builds its own synthetic fonts (fontTools FontBuilder) in a temp folder and injects the font folders: no
-real system font folder is scanned.
+real system font folder is scanned (tests/_isolation.py points discovery at an empty folder).
 Run: bash tools/test.sh -p test_fonts.py
 """
 import sys as _sys
@@ -28,14 +30,20 @@ from lib import common, fonts, plat  # noqa: E402
 ARABIC_RANGE = 1 << 13          # OS/2 ulUnicodeRange1 bit 13: Arabic
 
 
-def make_font(family: str, style: str, ps: str, arabic: bool = False, weight: int = 400):
-    """A tiny valid TrueType font (box glyphs) with the given names; Arabic cmap + OS/2 range when `arabic`."""
+ARABIC_GLYPHS = {0x0627: "alef", 0x0628: "beh", 0x0644: "lam", 0x0645: "meem", 0x0646: "noon"}
+
+
+def make_font(family: str, style: str, ps: str, arabic: bool = False, weight: int = 400, advance: int = 500,
+              os2_arabic: bool | None = None):
+    """A tiny valid TrueType font (box glyphs, every glyph `advance` units wide) with the given names; Arabic letters
+    in the cmap when `arabic`; the OS/2 Arabic range bit as `os2_arabic` says (default: same as `arabic`)."""
     from fontTools.fontBuilder import FontBuilder
     from fontTools.pens.ttGlyphPen import TTGlyphPen
-    order = [".notdef", "space", "A", "a"] + (["alef", "beh", "meem"] if arabic else [])
+    order = [".notdef", "space", "A", "a"] + (list(ARABIC_GLYPHS.values()) if arabic else [])
     cmap = {0x20: "space", 0x41: "A", 0x61: "a"}
     if arabic:
-        cmap.update({0x0627: "alef", 0x0628: "beh", 0x0645: "meem"})
+        cmap.update(ARABIC_GLYPHS)
+    os2_arabic = arabic if os2_arabic is None else os2_arabic
     fb = FontBuilder(1000, isTTF=True)
     fb.setupGlyphOrder(order)
     fb.setupCharacterMap(cmap)
@@ -47,11 +55,11 @@ def make_font(family: str, style: str, ps: str, arabic: bool = False, weight: in
     pen.closePath()
     box = pen.glyph()
     fb.setupGlyf({g: (TTGlyphPen(None).glyph() if g == "space" else box) for g in order})
-    fb.setupHorizontalMetrics({g: (500, 50) for g in order})
+    fb.setupHorizontalMetrics({g: (advance, 50) for g in order})
     fb.setupHorizontalHeader(ascent=800, descent=-200)
     fb.setupNameTable({"familyName": family, "styleName": style, "psName": ps, "fullName": f"{family} {style}",
                        "uniqueFontIdentifier": ps})
-    fb.setupOS2(usWeightClass=weight, ulUnicodeRange1=ARABIC_RANGE if arabic else 0, sTypoAscender=800,
+    fb.setupOS2(usWeightClass=weight, ulUnicodeRange1=ARABIC_RANGE if os2_arabic else 0, sTypoAscender=800,
                 sTypoDescender=-200, usWinAscent=800, usWinDescent=200)
     fb.setupPost()
     return fb.font
@@ -208,6 +216,13 @@ class TestCache(FontDirs):
 
 
 class TestArabicFallback(FontDirs):
+    def setUp(self):
+        super().setUp()
+        from lib import ct_text             # macOS: CoreText would draw the REAL installed Tahoma-Bold by name
+        p = mock.patch.object(ct_text, "AVAILABLE", False)
+        p.start()
+        self.addCleanup(p.stop)
+
     def system_dir(self) -> Path:
         d = self.tmp / "Windows/Fonts"
         save_font(d / "latin.ttf", "Latin Only", "Regular", "LatinOnly-Regular")
@@ -283,6 +298,119 @@ class TestArabicFallback(FontDirs):
             f = b.font("headline", 64)
             self.assertEqual(Path(getattr(f, "for_text", lambda t: f)("مرحبا").path).name, "Brand-Ar.ttf")
             self.assertEqual(b.font_warnings(), [])
+
+    def test_no_arabic_font_anywhere_is_named(self):
+        """G72: the client's font is Latin-only and the computer has no Arabic font: the brand font draws, and the
+        warning says Arabic text cannot be drawn (not the "using <fallback>" one)."""
+        from lib import hb_text
+        if not hb_text.AVAILABLE:
+            self.skipTest("HarfBuzz/FreeType not in this runtime")
+        d = self.tmp / "fonts"
+        save_font(d / "latin.ttf", "Latin Only", "Regular", "LatinOnly-Regular")
+        latin = save_font(self.tmp / "client/Brand-Bold.ttf", "Brand", "Bold", "Brand-Bold", weight=700)
+        with mock.patch.object(plat, "font_dirs", lambda: [d]):
+            b = self.brand({"Brand": {"supports_arabic": False, "weights": [
+                {"style": "Bold", "postscript_name": "Brand-Bold", "weight_class": 700, "file": str(latin)}]}})
+            f = b.font("headline", 64)
+            self.assertEqual(Path(f.for_text("Hello").path).name, "Brand-Bold.ttf")
+            self.assertEqual(b.font_warnings(), [])                 # nothing Arabic drawn yet
+            self.assertEqual(Path(f.for_text("مرحبا").path).name, "Brand-Bold.ttf")
+            warn = b.font_warnings()
+            self.assertEqual(len(warn), 1)
+            self.assertIn("Arabic text cannot be drawn", warn[0])
+            self.assertEqual(b.arabic_warnings(), warn)              # what `reel plan` says before drawing
+
+    def test_plan_warning_only_when_there_is_arabic_text(self):
+        from lib.previews import arabic_font_warnings
+        d = self.system_dir()
+        latin = save_font(self.tmp / "client/Brand-Bold.ttf", "Brand", "Bold", "Brand-Bold", weight=700)
+        self.brand({"Brand": {"weights": [
+            {"style": "Bold", "postscript_name": "Brand-Bold", "weight_class": 700, "file": str(latin)}]}})
+        with mock.patch.object(plat, "font_dirs", lambda: [d]):
+            self.assertEqual(arabic_font_warnings(self.tmp / "db", ["Hello", None]), [])
+            warn = arabic_font_warnings(self.tmp / "db", ["Hello", "نص عربي"])
+        self.assertTrue(warn and all(w.startswith("client has no Arabic font — using ") for w in warn), warn)
+
+
+class TestArabicFromTheCharacterMap(FontDirs):
+    """Arabic support is read from the cmap (alef, lam, meem, noon), never from the OS/2 Unicode range bits."""
+
+    def test_arabic_glyphs_without_the_range_bit(self):
+        d = self.tmp / "fonts"
+        f = save_font(d / "a.ttf", "Sloppy Arabic", "Regular", "SloppyArabic-Regular", arabic=True, os2_arabic=False)
+        self.assertTrue(fonts.find("SloppyArabic-Regular", dirs=[d])["arabic"])
+        self.assertTrue(fonts.supports_arabic(str(f)))
+
+    def test_range_bit_without_arabic_glyphs(self):
+        d = self.tmp / "fonts"
+        f = save_font(d / "b.ttf", "Liar Latin", "Regular", "LiarLatin-Regular", arabic=False, os2_arabic=True)
+        self.assertFalse(fonts.find("LiarLatin-Regular", dirs=[d])["arabic"])
+        self.assertFalse(fonts.supports_arabic(str(f)))
+
+    def test_supports_arabic_reads_the_face_of_a_collection(self):
+        ttc = save_collection(self.tmp / "Mixed.ttc", [("Latin", "Regular", "Latin-Regular", False, 400),
+                                                       ("Arabic", "Regular", "Arabic-Regular", True, 400)])
+        self.assertEqual((fonts.supports_arabic(str(ttc), 0), fonts.supports_arabic(str(ttc), 1)), (False, True))
+
+    def test_previews_ask_with_the_face_index(self):
+        from lib.previews import Brand
+        ttc = save_collection(self.tmp / "Mixed.ttc", [("Latin", "Regular", "Latin-Regular", False, 400),
+                                                       ("Arabic", "Regular", "Arabic-Regular", True, 400)])
+        b = Brand(self.tmp / "no-db")
+        self.assertFalse(b._has_arabic({"file": str(ttc), "index": 0}))
+        self.assertTrue(b._has_arabic({"file": str(ttc), "index": 1}))
+
+
+class TestFaceIndexIsMeasured(FontDirs):
+    """I1: the fallback face at index 1 of a .ttc (GeezaPro-Bold in GeezaPro.ttc) is measured with face 1, not face 0:
+    find_font_face / _system_font / the motion plan's fonts / fit() / the animatic all carry the index."""
+
+    def collection(self) -> Path:
+        # face 0 narrow (500 units), face 1 wide (900 units): measuring with the wrong face shows in the widths
+        return save_collection(self.tmp / "fonts/SegoeUI.ttc",
+                               [("Narrow", "Regular", "Narrow-Regular", True, 400, 500),
+                                ("Segoe UI", "Regular", "SegoeUI", True, 400, 900)])
+
+    def test_fallback_at_index_1_is_measured_with_face_1(self):
+        from lib import hb_text, motion_animatic, motion_layout, motion_plan
+        if not hb_text.AVAILABLE:
+            self.skipTest("HarfBuzz/FreeType not in this runtime")
+        ttc = self.collection()
+        with mock.patch.object(plat, "font_dirs", lambda: [ttc.parent]), \
+                mock.patch.object(fonts, "_system", lambda system: "windows"):
+            self.assertEqual(motion_layout.find_font_face("SegoeUI"), {"file": str(ttc), "index": 1})
+            self.assertEqual(motion_layout.find_font_file("SegoeUI"), str(ttc))
+            self.assertEqual(motion_plan._system_font(), {"file": str(ttc), "index": 1})
+            # the motion plan's fonts when the brand font files are missing: the fallback's file AND face
+            brand = mock.Mock()
+            brand.face.return_value = {"file": None, "ps": "Brand-Bold", "index": 0}
+            comp = mock.Mock(font_override=None, brand=brand, paths=mock.Mock(client_db=self.tmp / "no-db"),
+                             warnings=[])
+            got = motion_plan._Compiler._fonts(comp)
+        self.assertEqual({(v["ps"], v["file"], v["index"]) for v in got.values()}, {("Brand-Bold", str(ttc), 1)})
+        # fit() measures with face 1: 3 glyphs x 900 units at 100 px = 270 px (face 0 would give 150 px)
+        wide = motion_layout.fit("aaa", got["title"]["file"], 2000, (100, 100), 1, index=got["title"]["index"])
+        narrow = motion_layout.fit("aaa", str(ttc), 2000, (100, 100), 1)
+        self.assertEqual((wide["widths"], narrow["widths"]), ([270.0], [150.0]))
+        # an approved fallback (motion-build --allow-fallback-font) passes the index through font_override
+        over = motion_plan._Compiler._fonts(mock.Mock(font_override={"ps": "SegoeUI", "file": str(ttc), "index": 1}))
+        self.assertEqual({v["index"] for v in over.values()}, {1})
+        old = motion_plan._Compiler._fonts(mock.Mock(font_override={"ps": "SegoeUI", "file": str(ttc)}))
+        self.assertEqual({v["index"] for v in old.values()}, {0})
+        # the animatic draws the same face; a plan written before the index existed still loads (face 0)
+        self.assertEqual(motion_animatic._font(str(ttc), 40, 1).resolved, "SegoeUI")
+        self.assertEqual(motion_animatic._font(str(ttc), 40).resolved, "Narrow-Regular")
+
+
+class TestSandbox(unittest.TestCase):
+    def test_discovery_reads_the_sandbox_folder_unless_a_test_injects_folders(self):
+        import os
+        sandbox = os.environ.get(plat.FONT_DIRS_ENV)
+        self.assertTrue(sandbox, "tests/_isolation.py sets WHYNOT_FONT_DIRS")
+        self.assertEqual(plat.font_search_dirs(), [Path(sandbox)])
+        self.assertNotIn(Path(sandbox), plat.font_dirs())               # font_dirs() still names the real folders
+        with mock.patch.object(plat, "font_dirs", lambda: [Path("injected")]):
+            self.assertEqual(plat.font_search_dirs(), [Path("injected")])
 
 
 if __name__ == "__main__":

@@ -137,7 +137,8 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
                 if bb:
                     avoid.append((e["start_ms"], e["end_ms"], bb[1], bb[3]))
     avoid += cutaway_bands(paths, spec)
-    caps = render_captions(paths, hidden, avoid=avoid)
+    font_warns = []                     # G72: Arabic captions without an Arabic brand font
+    caps = render_captions(paths, hidden, avoid=avoid, warnings=font_warns)
     for c in caps:
         s, en = c["start_ms"] / 1000, c["end_ms"] / 1000
         if c.get("bar"):
@@ -165,7 +166,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
             "markers": markers, "track_names": {"video": vnames, "audio": anames}, "_missing": missing,
             "blur_v1_clips": (base.get("cutaways") or {}).get("blur_v1_clip_indices") or [],
             "sharpen_v1": sharpen_settings(spec),
-            "_lanes": lanes, "duration_s": spec["duration_frames"] * F}
+            "_lanes": lanes, "_warnings": font_warns, "duration_s": spec["duration_frames"] * F}
 
 
 def sharpen_settings(spec: dict) -> dict | None:
@@ -334,6 +335,8 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
            "result": res, "at": now_iso(), "prproj_mtime": prproj.stat().st_mtime if prproj.exists() else None}
     if r.get("how"):
         out["how"] = r["how"]
+    if data.get("_warnings"):           # G72: captions drawn with a system Arabic fallback, or no Arabic font at all
+        out["warnings"] = data["_warnings"]
     if parked:                          # --force over a parked project: it stays a backup; say where
         out["parked_previous"] = parked
     from .verify import prproj_signature

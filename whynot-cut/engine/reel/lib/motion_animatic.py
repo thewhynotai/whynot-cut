@@ -20,16 +20,17 @@ def _rgb(c) -> tuple:
     return tuple(int(round(v * 255)) for v in c[:3])
 
 
-def _font(file: str, size: float):
+def _font(file: str, size: float, index: int = 0):
+    """The plan's font for one role: file and face index (a .ttc/.otc collection holds several faces)."""
     from . import hb_text
     size = max(6, int(round(size)))
     if hb_text.AVAILABLE:
         try:
-            return hb_text.HBFontSpec(file, size)
+            return hb_text.HBFontSpec(file, size, index=index)
         except Exception:  # noqa: BLE001 — unreadable font: Pillow below
             pass
     try:
-        return ImageFont.truetype(file, size)
+        return ImageFont.truetype(file, size, index=index)
     except Exception:  # noqa: BLE001
         return ImageFont.load_default()
 
@@ -56,7 +57,8 @@ def _text(im, e: dict, plan: dict, s: float, text: str | None = None):
     lines = (text or e.get("text", "")).split("\r") if text is None else [text]
     if e.get("kind") == "counter":
         lines = [e.get("text", "").replace("\r", " ")]
-    f = _font(plan["fonts"][e["role"]]["file"], e["size"] * s)
+    pf = plan["fonts"][e["role"]]
+    f = _font(pf["file"], e["size"] * s, int(pf.get("index") or 0))       # plans before 3.0 T2.10 have no index
     lh = e["size"] * s * 1.25
     y = e["y"] * s - lh * len(lines) / 2
     for ln in lines:

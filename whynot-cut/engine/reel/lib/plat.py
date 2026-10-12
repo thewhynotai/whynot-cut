@@ -235,6 +235,20 @@ def font_dirs(system: str | None = None, env=None, home: Path | None = None) -> 
     return [home / ".local/share/fonts", home / ".fonts", Path("/usr/share/fonts"), Path("/usr/local/share/fonts")]
 
 
+FONT_DIRS_ENV = "WHYNOT_FONT_DIRS"
+_font_dirs = font_dirs
+
+
+def font_search_dirs() -> list[Path]:
+    """The folders font discovery (lib/fonts.py) reads: font_dirs(), or the folders WHYNOT_FONT_DIRS names
+    (os.pathsep-separated; the test sandbox, tests/_isolation.py, points it at an empty folder so no test reads the
+    machine's fonts). A test that replaced font_dirs (mock.patch) still gets its own folders."""
+    v = os.environ.get(FONT_DIRS_ENV)
+    if v is None or font_dirs is not _font_dirs:
+        return font_dirs()
+    return [Path(p) for p in v.split(os.pathsep) if p]
+
+
 def font_dirs_stamp(dirs: list[Path] | None = None) -> tuple:
     """Identity of the font folders' contents: (folder, mtime) of each folder and its direct sub-folders. A font
     installed or removed changes it, so caches keyed on it stay right in a long-lived process (3.0 T2.17)."""

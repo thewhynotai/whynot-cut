@@ -859,6 +859,17 @@ def test_font() -> Path | None:
                                        "ibmplexsansarabic-medium.ttf")), None)
 
 
+def use_machine_fonts(case):
+    """For a test that needs an installed font After Effects can draw (the configured fallback, test_font()): font
+    discovery reads the machine's font folders instead of the test sandbox's empty one (tests/_isolation.py)."""
+    import os
+    from unittest import mock
+    from lib import plat
+    p = mock.patch.dict(os.environ, {plat.FONT_DIRS_ENV: os.pathsep.join(str(d) for d in plat.font_dirs())})
+    p.start()
+    case.addCleanup(p.stop)
+
+
 class TestMotionLayout(unittest.TestCase):
     def test_wrap_glue(self):
         from lib.motion_layout import wrap
@@ -1360,6 +1371,7 @@ class FakeAE:
 class TestMotionBuild(CompiledMotion):
     def setUp(self):
         super().setUp()
+        use_machine_fonts(self)             # --allow-fallback-font needs the configured fallback installed
         from lib import ae_bridge, ae_probe, motion_build, plat
         self.mods = (ae_bridge, ae_probe, plat)
         self.saved = (ae_bridge.submit, ae_bridge.status, ae_probe.verdict_ok, plat.newest_app)
@@ -2290,6 +2302,10 @@ class TestFontRoles(unittest.TestCase):
 class TestFallbackRefit(CompiledMotion):
     """Live run: with --allow-fallback-font the layout was measured with the brand font file but After Effects drew
     the wider fallback font (S01 left the safe area by 9 px). The plan must be re-fitted with the fallback font."""
+    def setUp(self):
+        super().setUp()
+        use_machine_fonts(self)             # the fallback is test_font(), a font installed on this machine
+
     def test_find_font_file(self):
         from lib.motion_layout import find_font_file
         tf = test_font()

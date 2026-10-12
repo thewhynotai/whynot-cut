@@ -34,12 +34,13 @@ def _hash(frames: list[int]) -> str:
     return hashlib.sha1(json.dumps(frames).encode()).hexdigest()[:12]
 
 
-def _system_font() -> str | None:
-    """The system font text is measured with when the brand font files are missing: the Arabic fallback (lib/fonts.py:
-    Segoe UI / Arial / Tahoma on Windows, Geeza Pro / Arial on macOS)."""
+def _system_font() -> dict | None:
+    """{"file", "index"} of the system font text is measured with when the brand font files are missing: the Arabic
+    fallback (lib/fonts.py: Segoe UI / Arial / Tahoma on Windows, Geeza Pro / Arial on macOS; Geeza Pro is a .ttc,
+    so the face index travels with the file)."""
     from .fonts import arabic_fallback
     face = arabic_fallback()
-    return face["file"] if face else None
+    return {"file": face["file"], "index": int(face.get("index") or 0)} if face else None
 
 
 def fingerprint(paths) -> str:
@@ -92,7 +93,7 @@ class _Compiler:
     # ------------------------------------------------------------------ helpers
     def _fonts(self) -> dict:
         if self.font_override:               # the font After Effects will actually draw (e.g. an approved fallback)
-            return {role: dict(self.font_override) for role in ROLE_FONT}
+            return {role: {"index": 0, **self.font_override} for role in ROLE_FONT}
         from .ae_builder import fonts_map
         fm = fonts_map(self.paths.client_db)
         out, fallback = {}, None
@@ -100,7 +101,7 @@ class _Compiler:
             # the role's weight (typography.json roles, brand.json, default), else the nearest one the brand has: file and
             # PostScript name always from the SAME face
             face = self.brand.face(brole)
-            f = face["file"]
+            f, index = face["file"], int(face.get("index") or 0)
             ps = face["ps"] or fm.get(brole) or ""
             if not ps:
                 raise SystemExit(f"no PostScript font name for the {brole} role: run `reel client-db` (typography.json)")
@@ -108,10 +109,11 @@ class _Compiler:
                 fallback = fallback or _system_font()
                 if not fallback:
                     raise SystemExit("no brand font file (run `reel client-db`) and no system font to measure text with")
-                f = fallback
-            out[role] = {"ps": ps, "file": str(f)}
+                f, index = fallback["file"], fallback["index"]
+            out[role] = {"ps": ps, "file": str(f), "index": index}      # index: the face of a .ttc/.otc collection
         if fallback:
-            self.warnings.append(f"brand font files not found: text measured with {Path(fallback).name}; After Effects "
+            self.warnings.append(f"brand font files not found: text measured with {Path(fallback['file']).name}; "
+                                 "After Effects "
                                  "uses the brand font names (install them before motion-build)")
         return out
 
@@ -193,7 +195,8 @@ class _Compiler:
         role = role_of(scene_type, element)
         hi, lo = self.fmt["sizes"][role]
         box = int(box_w or self.fmt["text_box_w"])
-        f = fit(text, self.fonts[role]["file"], box, (hi, lo), MAX_LINES[role])
+        f = fit(text, self.fonts[role]["file"], box, (hi, lo), MAX_LINES[role],
+                index=self.fonts[role].get("index", 0))
         if not f["ok"]:
             self.err(f"{sid}: «{text[:40]}» is too long for the scene ({max(f['widths']):.0f} px > {box} px even at "
                      f"{lo} px): shorten it or split the scene")

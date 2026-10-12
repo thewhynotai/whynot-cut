@@ -830,6 +830,11 @@ def _write_outputs(paths: Paths, plan: dict) -> dict:
         srtlib.write_srt(paths.p(f"02_transcription/{name}-seq.srt"), cues_)
     ok, errors, warnings = plan["ok"], plan["errors"], plan["warnings"]
     spec, events, cues, merged = plan["spec"], plan["spec"]["events"], plan["cues"], plan["spec"]["main_segments"]
+    from .previews import arabic_font_warnings      # G72: Arabic on screen or in the captions, no Arabic brand font
+    cap = paths.p(spec.get("caption_source") or "02_transcription/captions-short.srt")
+    shown = [c["text"] for c in srtlib.read_srt(cap)] if cap.exists() else []
+    shown += [s for e in events for s in onscreen_strings(e.get("params"))]
+    warnings += [w for w in arabic_font_warnings(paths.client_db, shown) if w not in warnings]
     write_json(paths.p("01_analysis/plan-validation.json"), {"generated": now_iso(), "ok": ok,
                "errors": errors, "warnings": warnings, "decisions": plan["decisions"],
                "events": len(events), "cues": len(cues), "main_segments": len(merged)})
