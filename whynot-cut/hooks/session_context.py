@@ -26,6 +26,9 @@ sys.path.insert(0, str(PLUGIN / "engine" / "reel" / "lib"))
 plat = settings = client_marker = None    # imported in main(), inside the never-fail guard
 
 VIDEO = {".mp4", ".mov", ".mxf", ".m4v", ".avi", ".mkv"}
+# the fallback scan of new_clips (engine unavailable) follows discovery's rule: the folder decides, hints are WORDS
+NOT_RAW_FOLDERS = {"references", "reference", "refs", "episodes", "broll", "b-roll", "b_roll", "music", "sfx"}
+REF_WORDS = {"ref", "refs", "reference", "references"}
 
 
 def is_client(p: Path, base=None) -> bool:
@@ -183,13 +186,17 @@ def new_clips(root: Path) -> list:
         ids = clip_ids.assign(root, rels, clip_ids.load(root))
         vids = [clip_ids.id_of(ids, r) for r in rels]
     except Exception:
-        vids = []
+        vids = []        # fallback when the engine cannot be imported: same rule, on path SEGMENTS (never substrings)
         for f in files:
-            low = f.relative_to(root).as_posix().lower()
-            if f.suffix.lower() in VIDEO and not f.name.startswith(".") and "ref" not in low \
-                    and not low.startswith("data/episodes/"):       # episodes are cut into reels (podcast mode)
-                vids.append("".join(ch if ch.isascii() and ch.isalnum() else "_" for ch in f.stem).strip("_").upper()
-                            or "VIDEO")
+            segs = [x.lower() for x in f.relative_to(root).as_posix().split("/")]
+            if f.suffix.lower() not in VIDEO or f.name.startswith("."):
+                continue
+            if len(segs) > 2 and segs[1] != "raw":             # data/Raw is source; the other data folders are not
+                if segs[1] in NOT_RAW_FOLDERS or any(w in REF_WORDS for x in segs[1:] for w in re.split(r"[^a-z0-9]+", x)):
+                    continue                                    # (episodes are cut into reels: podcast mode)
+            elif len(segs) <= 2 and any(w in REF_WORDS for w in re.split(r"[^a-z0-9]+", segs[-1])):
+                continue
+            vids.append("".join(ch if ch.isascii() and ch.isalnum() else "_" for ch in f.stem).strip("_").upper() or "VIDEO")
     return [v for v in vids if not (root / "output/projects" / v / "02_transcription/transcript.json").exists()][:12]
 
 

@@ -163,6 +163,13 @@
   not proved (`ok` false, "inconclusive"). First unit tests for `detect_pauses` and `verify_cuts`.
 
 ### Fixed
+- Discovery decides a file's role by its folder first (T2.5, review IM-8, structure 4.6): everything under `data/Raw`
+  is source footage, `data/References` references, `data/Broll` B-roll, `data/Music` music, `data/SFX` sound effects
+  (any case, any depth). Filename hints apply only outside those folders and only as whole words ("ref", "stock",
+  "brief"; camelCase and `_ - .` count as word breaks), so raw clips named "Refractive...", "Reflux...", "Preface..."
+  or "Stock market..." stay source clips instead of silently becoming reference edits or B-roll and dropping out of
+  `reel inbox` and autopilot. A file whose folder and name hint disagree keeps the folder's role and discovery warns.
+  The session-context "new clips" list matches path segments, not substrings.
 - The unit tests no longer reach the real engine home or a running Adobe app (G79): a test that mocked only the
   bridge status had queued real `build_project` jobs that an open Premiere ran. Every test process now runs in a temp
   sandbox (`tests/_isolation.py`, imported first by every test module: WHYNOT_HOME, HOME/USERPROFILE, APPDATA and

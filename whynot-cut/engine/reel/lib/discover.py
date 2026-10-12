@@ -9,15 +9,69 @@ from pathlib import Path
 from .common import (AUDIO_EXT, DOC_EXT, FONT_EXT, IMAGE_EXT, RAW_IMAGE_EXT, SUB_EXT, VIDEO_EXT,
                      Paths, ffmpeg_exe, models_dir, is_junk, now_iso, run, sha1_head, write_json, write_text)
 
-ROLE_HINTS = [  # (substring in lowercase relative path, role)
-    ("brief", "client_brief"), ("profile", "client_brief"), ("about", "client_brief"), ("bio", "client_brief"),
-    ("color", "brand_colors"), ("colour", "brand_colors"), ("palat", "brand_colors"), ("palet", "brand_colors"),
-    ("brand", "branding_doc"), ("font", "typography"), ("typo", "typography"),
-    ("logo", "logo"), ("headshot", "headshot"), ("portrait", "portrait"), ("photo", "client_photo"),
-    ("broll", "broll_video"), ("b-roll", "broll_video"), ("b_roll", "broll_video"), ("stock", "broll_video"),
-    ("ref", "editing_reference"), ("raw", "source_footage"), ("footage", "source_footage"),
-    ("music", "music"), ("sfx", "sfx"), ("sound", "sfx"),
+# Role hints (3.0 T2.5, IM-8). A hint is a WORD in the path, never a substring: "Refractive", "Reflux", "Preface" are not
+# "ref", "Stock market" in data/Raw is not B-roll. A word is delimited by anything that is not a letter (space, _, -, /,
+# ., digits) or by a lowercase-to-uppercase step ("ClientBrief", "BrandColors"). Plurals are part of the pattern.
+_L = r"[^\W\d_]"                                 # one letter in any script
+_HINTS = [  # (regex of the word in the lowercase path, role); the first hint that fits the file kind wins
+    (r"briefs?", "client_brief"), (r"profiles?", "client_brief"), (r"about", "client_brief"), (r"bios?", "client_brief"),
+    (r"colou?rs?", "brand_colors"), (r"pal+[ae]tt?es?", "brand_colors"),
+    (r"brands?|branding", "branding_doc"), (r"fonts?", "typography"), (r"typo|typography", "typography"),
+    (r"logos?", "logo"), (r"head[-_ ]?shots?", "headshot"), (r"portraits?", "portrait"), (r"photos?", "client_photo"),
+    (r"b[-_ ]?rolls?", "broll_video"), (r"stock", "broll_video"),
+    (r"refs?|references?", "editing_reference"), (r"raw", "source_footage"), (r"footage", "source_footage"),
+    (r"music", "music"), (r"sfx", "sfx"), (r"sounds?", "sfx"),
 ]
+ROLE_HINTS = [(re.compile(rf"(?<!{_L})(?:{pat})(?!{_L})"), role) for pat, role in _HINTS]
+_BRAND_IMAGE = re.compile(rf"(?<!{_L})(?:brands?|branding|colou?rs?|pal+[ae]tt?es?)(?!{_L})")
+_BROLL_WORD = re.compile(rf"(?<!{_L})(?:b[-_ ]?rolls?|stock)(?!{_L})")
+_LOWER_UPPER = re.compile(r"(?<=[a-z])(?=[A-Z])")
+
+# The known data folders (the first folder under data/, any case): their files get the role of the folder; filename
+# hints only decide outside them. role per file kind; a kind not listed falls through to the hints.
+DATA_FOLDERS = {
+    "raw": {"video": "source_footage", "audio": "source_footage"},
+    "references": {"video": "editing_reference_video", "document": "editing_reference_doc"},
+    "reference": {"video": "editing_reference_video", "document": "editing_reference_doc"},
+    "refs": {"video": "editing_reference_video", "document": "editing_reference_doc"},
+    "broll": {"video": "broll_video", "document": "broll_license"},
+    "b-roll": {"video": "broll_video", "document": "broll_license"},
+    "b_roll": {"video": "broll_video", "document": "broll_license"},
+    "music": {"audio": "music"},
+    "sfx": {"audio": "sfx"},
+}
+_DOC_ROLES = {"editing_reference": "editing_reference_doc"}
+_VIDEO_ROLES = {"editing_reference": "editing_reference_video"}
+
+
+def _words(rel: str) -> str:
+    """The path as lowercase words: camelCase steps become boundaries."""
+    return _LOWER_UPPER.sub(" ", rel).lower()
+
+
+def hint_role(rel: str, kind: str | None = None) -> str | None:
+    """The first role hint whose WORD is in the path (and that makes sense for the file kind), else None."""
+    allowed = _ALLOWED.get(kind)
+    low = _words(rel)
+    return next((r for rx, r in ROLE_HINTS if rx.search(low) and (allowed is None or r in allowed)), None)
+
+
+# hints only apply to file kinds they make sense for: "Profile.jpg" is a photo, not a client brief (seen on a real
+# client folder); a poster in assets/Brand is a brand image whose colours can be measured
+_ALLOWED = {"document": {"client_brief", "brand_colors", "branding_doc", "typography", "editing_reference"},
+            "image": {"logo", "headshot", "portrait", "client_photo"},
+            "raw_image": {"logo", "headshot", "portrait", "client_photo"},
+            "video": {"editing_reference", "source_footage", "broll_video"},
+            "audio": {"music", "sfx", "source_footage"}}
+
+
+def _folder_role(parts: list[str], kind: str) -> tuple[str | None, str]:
+    """(role the known data folder gives this file, the path below that folder) or (None, whole path)."""
+    if len(parts) > 2 and parts[0] == "data":
+        role = DATA_FOLDERS.get(parts[1].lower(), {}).get(kind)
+        if role:
+            return role, "/".join(parts[2:])
+    return None, "/".join(parts)
 
 
 def classify(p: Path, rel: str) -> dict:
@@ -26,21 +80,24 @@ def classify(p: Path, rel: str) -> dict:
             "image" if ext in IMAGE_EXT else "raw_image" if ext in RAW_IMAGE_EXT else
             "font" if ext in FONT_EXT else "subtitle" if ext in SUB_EXT else
             "document" if ext in DOC_EXT else "other")
-    low = rel.lower()
-    # hints only apply to file kinds they make sense for: "Profile.jpg" is a photo, not a client brief (seen on a
-    # real client folder); a poster in assets/Brand is a brand image whose colours can be measured
-    allowed = {"document": {"client_brief", "brand_colors", "branding_doc", "typography", "editing_reference"},
-               "image": {"logo", "headshot", "portrait", "client_photo"},
-               "raw_image": {"logo", "headshot", "portrait", "client_photo"},
-               "video": {"editing_reference", "source_footage", "broll_video"},
-               "audio": {"music", "sfx", "source_footage"}}.get(kind)
-    role = next((r for k, r in ROLE_HINTS if k in low and (allowed is None or r in allowed)), None)
-    if kind in ("image", "raw_image") and role is None and ("brand" in low or "colo" in low or "palet" in low):
-        role = "brand_image"
-    if kind == "document" and any(k in low for k in ("broll", "b-roll", "b_roll", "stock")):
-        role = "broll_license"      # SOURCES.md / licence next to the B-roll clips (not an editing reference)
     top = rel.split("/")[0]
     parts = rel.split("/")
+    folder_role, below = _folder_role(parts, kind)
+    role = None
+    conflict = None
+    if folder_role is None:
+        role = hint_role(rel, kind)
+        low = _words(rel)
+        if kind in ("image", "raw_image") and role is None and _BRAND_IMAGE.search(low):
+            role = "brand_image"
+        if kind == "document" and _BROLL_WORD.search(low):
+            role = "broll_license"      # SOURCES.md / licence next to the B-roll clips (not an editing reference)
+    else:
+        # the folder decides; a filename hint that says something else is reported (discover warns), never obeyed
+        hint = hint_role(below, kind)
+        hint = (_VIDEO_ROLES if kind == "video" else _DOC_ROLES if kind == "document" else {}).get(hint, hint)
+        if hint and hint != folder_role and not (kind == "document" and folder_role == "broll_license"):
+            conflict = hint
     if top == "data" and len(parts) > 2 and parts[1].lower() == "episodes" and kind in ("video", "audio", "document"):
         # finished podcast episodes are cut into reels (podcast mode); never treated as a clip to edit whole.
         # An audio-only episode (an audio podcast) can only become motion videos (motion mode, 2.2).
@@ -49,10 +106,12 @@ def classify(p: Path, rel: str) -> dict:
                     "size_bytes": p.stat().st_size}
         return {"path": str(p), "rel": rel, "kind": kind, "ext": ext, "role": "episode", "media": kind,
                 "size_bytes": p.stat().st_size}
-    if kind == "video" and top == "data":
+    if folder_role:
+        role = folder_role
+    elif kind == "video" and top == "data":
         role = "editing_reference_video" if role == "editing_reference" else (role or "source_footage")
-    if kind == "document" and top == "data" and role != "broll_license":
-        # only a document whose path says it is a reference (data/References/...) is one; any other loose document in
+    elif kind == "document" and top == "data" and role != "broll_license":
+        # only a document whose path says it is a reference (a word: ref, reference) is one; any other loose document in
         # data/ (notes, a music.json, a stray export) stays unclassified instead of silently steering the edit style
         role = "editing_reference_doc" if role == "editing_reference" else role
     if kind == "font":
@@ -61,8 +120,11 @@ def classify(p: Path, rel: str) -> dict:
         role = "existing_transcript"
     if kind in ("image", "raw_image") and top == "assets" and role is None:
         role = "client_image"
-    return {"path": str(p), "rel": rel, "kind": kind, "ext": ext, "role": role or "unclassified",
+    item = {"path": str(p), "rel": rel, "kind": kind, "ext": ext, "role": role or "unclassified",
             "size_bytes": p.stat().st_size}
+    if conflict:
+        item["folder_hint_conflict"] = conflict       # the filename suggests this role; the folder said otherwise
+    return item
 
 
 def read_document(p: Path) -> str:
@@ -219,10 +281,17 @@ def discover(paths: Paths, read_docs: bool = True) -> dict:
     if by_role.get("editing_reference_video") and not by_role.get("editing_reference_doc"):
         warnings.append("Editing reference supplied as VIDEO only (no Markdown) — style spec is derived "
                         "from measured cuts + visual review of contact sheets.")
+    clash = [f for f in files if f.get("folder_hint_conflict")]
+    if clash:
+        warnings.append("Folder and file name disagree (the folder wins, so the file keeps the folder's role): "
+                        + "; ".join(f"{f['rel']} (folder: {f['role']}, name suggests {f['folder_hint_conflict']})"
+                                    for f in clash[:8])
+                        + (f"; and {len(clash) - 8} more" if len(clash) > 8 else "")
+                        + " - if the folder is wrong, the editor moves the file to the right data/ folder.")
     if len(by_role.get("client_brief", [])) > 1:
         warnings.append("Multiple client brief documents — check for conflicts.")
     loose = [f["rel"] for f in files if f["role"] == "unclassified" and f["kind"] == "document"
-             and f["rel"].startswith("data/") and not any(k in f["rel"].lower() for k, _ in ROLE_HINTS)]
+             and f["rel"].startswith("data/") and hint_role(f["rel"]) is None]
     if loose:
         warnings.append(f"Documents in data/ not used as editing references (no 'ref' in the path): {', '.join(loose[:8])}"
                         f" — if one is a reference edit or a reels plan, move it to data/References/.")

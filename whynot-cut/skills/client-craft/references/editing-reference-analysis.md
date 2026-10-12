@@ -1,7 +1,9 @@
 # Editing Reference Analysis (Stage 5)
 
 References in `data/` may be **Markdown** (role `editing_reference_doc`) and/or **videos** (`editing_reference_video`).
-Only files whose path names them as references count (`data/References/...`; any path containing "ref"). Another
+Only files whose path names them as references count: everything under `data/References/` (the folder decides first:
+`data/Raw/` is always source footage, `data/Broll/` B-roll), else a path with the WORD ref / reference (not
+"Refractive" or "Preface"; discovery warns when a folder and a file name disagree). Another
 loose document in `data/` stays `unclassified` and discovery warns about it: if it is a reels plan or a style note,
 the editor moves it to `data/References/`.
 
