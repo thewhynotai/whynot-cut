@@ -21,6 +21,7 @@ from contract import validator as V  # noqa: E402
 DRAFT = "https://json-schema.org/draft/2020-12/schema"
 ID_BASE = "https://thewhynot.ai/whynot-cut/contract/4/"
 ENVELOPES = {"request", "result", "progress"}
+SESSION = "session"           # the daemon-link WebSocket message schema: neither an action nor a host envelope
 V4_ACTIONS = ["ping", "status", "probe", "build_project", "export_frames", "close_project_path", "clip_components",
               "open_project", "set_player_position", "render_review", "ae_build_motion", "ae_readback", "ae_render",
               "ae_fonts", "ae_probe_text"]
@@ -149,12 +150,12 @@ class ContractFilesTests(unittest.TestCase):
 
     def test_protocol_lists_exactly_the_action_schema_files(self):
         proto = json.loads((contract.CONTRACT_DIR / "protocol.json").read_text(encoding="utf-8"))
-        files = {p.name[:-len(".schema.json")] for p in schema_files()} - ENVELOPES
+        files = {p.name[:-len(".schema.json")] for p in schema_files()} - ENVELOPES - {SESSION}
         self.assertEqual(set(proto["actions"]), files)
         self.assertEqual(set(contract.ACTIONS), files)
         self.assertEqual(sorted(contract.ACTIONS), sorted(V4_ACTIONS))
         self.assertEqual(len(contract.ACTIONS), 15)
-        self.assertTrue(ENVELOPES <= {p.name[:-len(".schema.json")] for p in schema_files()})
+        self.assertTrue(ENVELOPES | {SESSION} <= {p.name[:-len(".schema.json")] for p in schema_files()})
 
     def test_protocol_entries_have_host_cep_uxp(self):
         proto = json.loads((contract.CONTRACT_DIR / "protocol.json").read_text(encoding="utf-8"))
@@ -1844,6 +1845,334 @@ class EnginePremiereRequestTests(unittest.TestCase):
             cli.cmd_ppro_probe(None)
         self.check_calls(["ping", "probe"])
         self.assertEqual([d for _, d in self.calls], [{}, {}])
+
+
+
+# ------------------------------------------------------------------------------------------------ session (daemon link)
+TS_SOURCE = SK.parent / "adobe" / "panel-ui" / "src" / "source.ts"
+TOKEN = "ab" * 32
+SESSION_REQUEST = {"protocol": 4, "id": "r-1", "action": "ping", "data": {}, "expires_at": "2026-10-12T10:00:00Z"}
+SESSION_RESULT = {"ok": True, "action": "ping", "readback": {"version": "26.5.2", "project": None, "projects_open": 1}, "id": "r-1"}
+SESSION_PROGRESS = {"event": "progress", "id": "r-1", "action": "build_project", "step": "tracks", "n": 1, "of": 4}
+PANEL_STATE = {
+    "connection": {"engine": "connected", "claude": "idle", "host": {"state": "uxp", "detail": "Premiere Pro 26.5.2"}},
+    "client": "Dr Nour", "item": "C0239", "language": "ar", "editor_name": "Yunus",
+    "context": {"project_path": "D:/p/C0239.prproj", "sequence_name": "C0239", "folder": "D:/c", "out_dir": None, "review_mp4": None},
+    "pipeline": [{"id": "transcript", "state": "done"},
+                 {"id": "build", "state": "running", "progress": {"n": 1, "of": 4, "step": "tracks"}, "elapsed_s": 3.5,
+                  "request_id": "r-1"},
+                 {"id": "qc", "state": "pending", "progress": None, "elapsed_s": None, "request_id": None}],
+    "approval": {"summary": "plan", "preview_mp4": None, "flagged": [{"kind": "medical", "text": "x", "tc": "00:00:01:00"}],
+                 "fingerprint": "abc123"},
+    "qc": [{"t_s": 1.5, "tc": "00:00:01:15", "file": "D:/f.png", "label": "hook", "verdict": "pass", "w": 1080, "h": 1920,
+            "thumb": None}],
+    "log": [{"ts": "2026-10-12T10:00:00Z", "level": "info", "text": "hi"}],
+}
+MINIMAL_STATE = {"connection": {"engine": "offline", "claude": "unknown", "host": {"state": "offline"}}, "client": "", "item": "",
+                 "language": "en", "editor_name": "",
+                 "context": {"project_path": None, "sequence_name": None, "folder": None, "out_dir": None, "review_mp4": None},
+                 "pipeline": [], "approval": None, "qc": [], "log": []}
+SESSION_SAMPLES = {
+    "hello": {"type": "hello", "token": TOKEN,
+              "client": {"kind": "uxp", "version": "3.0.0", "host": "premiere", "hostVersion": "26.5.2", "protocol": 4,
+                         "capabilities": ["ping", "status", "build_project"]}},
+    "welcome": {"type": "welcome", "session_id": "s-1a2b", "protocol": 4, "daemon_version": "3.0.0"},
+    "command": {"type": "command", "request": SESSION_REQUEST, "context": {"root": "D:/c", "profile": "nour"}},
+    "result": {"type": "result", "result": SESSION_RESULT},
+    "progress": {"type": "progress", "progress": SESSION_PROGRESS},
+    "state": {"type": "state", "state": PANEL_STATE, "id": "p-1"},
+    "approve": {"type": "approve", "id": "p-2", "item": "C0239", "editor_name": "Yunus", "fingerprint": "abc123"},
+    "request_changes": {"type": "request_changes", "id": "p-3", "item": "C0239", "editor_name": "Yunus", "text": "shorter"},
+    "rebuild": {"type": "rebuild", "id": "p-4", "item": "C0239", "project_path": "D:/p/C0239.prproj", "replace_edited": False},
+    "snapshot": {"type": "snapshot", "id": "p-5"},
+    "cancel": {"type": "cancel", "id": "r-1"},
+    "reply": {"type": "reply", "id": "p-2", "intent": "approve", "ok": True},
+    "error": {"type": "error", "code": "schema", "message": "bad hello", "id": "r-9"},
+}
+
+
+def session_errors(instance, name=None):
+    return V.validate(instance, f"session#/$defs/{name}" if name else "session")
+
+
+def ts_text():
+    return TS_SOURCE.read_text(encoding="utf-8")
+
+
+def ts_interface(name):
+    """{key: required?} of a top-level `export interface name { ... }` in source.ts (one `key: type;` per 2-space line)."""
+    m = re.search(r"export interface " + name + r"\s*\{\n(.*?)\n\}", ts_text(), re.S)
+    assert m, name
+    out = {}
+    for line in m.group(1).splitlines():
+        k = re.match(r"  ([A-Za-z_][A-Za-z0-9_]*)(\?)?:", line)
+        if k:
+            out[k.group(1)] = k.group(2) is None
+    return out
+
+
+def ts_union(name):
+    m = re.search(r"export type " + name + r"\s*=\s*([^;]+);", ts_text())
+    assert m, name
+    return re.findall(r'"([^"]+)"', m.group(1))
+
+
+class SessionContractTests(unittest.TestCase):
+    """3.0 T6.2: every WebSocket message between `reel serve` and its clients (UXP panel, CEP panel, CLI)."""
+
+    def test_schema_file_header_and_messages(self):
+        doc = V.load(SESSION)
+        self.assertEqual(V.check_schema(doc), [])
+        self.assertEqual(doc["$id"], ID_BASE + "session.schema.json")
+        self.assertTrue((set(SESSION_SAMPLES) | {"message", "panel_state"}) <= set(doc["$defs"]))
+        self.assertTrue(session_errors(None))
+
+    def test_every_message_def_is_a_closed_typed_object(self):
+        defs = V.load(SESSION)["$defs"]
+        for name in SESSION_SAMPLES:
+            d = defs[name]
+            self.assertEqual(d["type"], "object", name)
+            self.assertIs(d["additionalProperties"], False, name)
+            self.assertEqual(d["properties"]["type"]["const"], name, name)
+            self.assertIn("type", d["required"], name)
+
+    def test_message_is_the_oneof_of_every_message_def(self):
+        doc = V.load(SESSION)
+        refs = [b["$ref"] for b in doc["$defs"]["message"]["oneOf"]]
+        self.assertEqual(refs, [f"#/$defs/{n}" for n in SESSION_SAMPLES])
+        self.assertEqual(doc["$ref"], "#/$defs/message")
+
+    def test_every_message_def_accepts_its_sample(self):
+        for name, sample in SESSION_SAMPLES.items():
+            self.assertEqual(session_errors(sample, name), [], name)
+            self.assertEqual(session_errors(sample), [], f"message/{name}")
+
+    def test_every_def_rejects_extra_properties_a_wrong_type_const_and_a_missing_required_key(self):
+        defs = V.load(SESSION)["$defs"]
+        for name, sample in SESSION_SAMPLES.items():
+            self.assertTrue(session_errors(dict(sample, extra=1), name), name)
+            self.assertTrue(session_errors(dict(sample, extra=1)), f"message/{name}")
+            self.assertTrue(session_errors(dict(sample, type="nope"), name), name)
+            self.assertTrue(session_errors(dict(sample, type="nope")), f"message/{name}")
+            for key in defs[name]["required"]:
+                self.assertTrue(session_errors({k: v for k, v in sample.items() if k != key}, name), f"{name}/{key}")
+
+    def test_a_message_matches_exactly_one_def(self):
+        for name, sample in SESSION_SAMPLES.items():
+            matching = [n for n in SESSION_SAMPLES if not session_errors(sample, n)]
+            self.assertEqual(matching, [name], name)
+        for bad in ([], "hello", 1, None, {}, {"type": 4}, {"type": "hello"}, {"type": "run_script", "code": "x"}):
+            self.assertTrue(session_errors(bad), repr(bad))
+
+    # ---- hello / welcome
+    def test_hello_wrong_protocol_or_missing_token_is_rejected(self):
+        h = SESSION_SAMPLES["hello"]
+        for proto in (3, 5, "4", 4.5, None, True):
+            bad = copy.deepcopy(h)
+            bad["client"]["protocol"] = proto
+            self.assertTrue(session_errors(bad, "hello"), repr(proto))
+            self.assertTrue(session_errors(bad), repr(proto))
+        no_proto = copy.deepcopy(h)
+        del no_proto["client"]["protocol"]
+        self.assertTrue(session_errors(no_proto, "hello"))
+        for bad in ({k: v for k, v in h.items() if k != "token"}, dict(h, token=""), dict(h, token=5), dict(h, token=None),
+                    dict(h, token="x" * 257)):
+            self.assertTrue(session_errors(bad, "hello"), repr(bad.get("token")))
+            self.assertTrue(session_errors(bad), repr(bad.get("token")))
+
+    def test_hello_client_fields(self):
+        h = SESSION_SAMPLES["hello"]
+        for kind in ("uxp", "cep", "cli", "panel"):
+            ok = copy.deepcopy(h)
+            ok["client"]["kind"] = kind
+            self.assertEqual(session_errors(ok, "hello"), [], kind)
+        for host in ("premiere", "aftereffects"):
+            ok = copy.deepcopy(h)
+            ok["client"]["host"] = host
+            self.assertEqual(session_errors(ok, "hello"), [], host)
+        minimal = {"type": "hello", "token": TOKEN, "client": {"kind": "cli", "version": "3.0.0", "protocol": 4, "capabilities": []}}
+        self.assertEqual(session_errors(minimal, "hello"), [])
+        cases = [("kind", "browser"), ("kind", None), ("version", ""), ("version", 3), ("host", "photoshop"),
+                 ("hostVersion", 26), ("capabilities", "ping"), ("capabilities", ["ping", "rm_rf"]),
+                 ("capabilities", ["ping"] * 16), ("capabilities", [3])]
+        for key, value in cases:
+            bad = copy.deepcopy(h)
+            bad["client"][key] = value
+            self.assertTrue(session_errors(bad, "hello"), f"{key}={value!r}")
+        for key in ("kind", "version", "protocol", "capabilities"):
+            bad = copy.deepcopy(h)
+            del bad["client"][key]
+            self.assertTrue(session_errors(bad, "hello"), key)
+        bad = copy.deepcopy(h)
+        bad["client"]["extra"] = 1
+        self.assertTrue(session_errors(bad, "hello"))
+        self.assertTrue(session_errors(dict(h, client="uxp"), "hello"))
+
+    def test_hello_capabilities_are_the_contract_actions(self):
+        caps = V.load(SESSION)["$defs"]["hello"]["properties"]["client"]["properties"]["capabilities"]
+        self.assertEqual(caps["items"], {"$ref": "request.schema.json#/properties/action"})
+        every = copy.deepcopy(SESSION_SAMPLES["hello"])
+        every["client"]["capabilities"] = list(contract.ACTIONS)
+        self.assertEqual(session_errors(every, "hello"), [])
+
+    def test_welcome(self):
+        w = SESSION_SAMPLES["welcome"]
+        for bad in (dict(w, protocol=3), dict(w, protocol="4"), dict(w, session_id=""), dict(w, session_id="a b"),
+                    dict(w, daemon_version=""), dict(w, daemon_version=3)):
+            self.assertTrue(session_errors(bad, "welcome"), repr(bad))
+
+    # ---- command / result / progress
+    def test_command_wraps_a_v4_request_and_validates_it(self):
+        c = SESSION_SAMPLES["command"]
+        self.assertEqual(session_errors({"type": "command", "request": SESSION_REQUEST}, "command"), [])
+        self.assertEqual(session_errors({"type": "command", "request": SESSION_REQUEST, "context": {}}, "command"), [])
+        for bad_req in (dict(SESSION_REQUEST, protocol=3), dict(SESSION_REQUEST, action="run_script"),
+                        dict(SESSION_REQUEST, id="has space"), {k: v for k, v in SESSION_REQUEST.items() if k != "expires_at"},
+                        dict(SESSION_REQUEST, extra=1), "ping", None):
+            self.assertTrue(session_errors(dict(c, request=bad_req), "command"), repr(bad_req))
+            self.assertTrue(session_errors(dict(c, request=bad_req)), repr(bad_req))
+        for bad_ctx in ({"root": 3}, {"profile": None}, {"extra": "x"}, "D:/c", {"root": "x" * 1025}):
+            self.assertTrue(session_errors(dict(c, context=bad_ctx), "command"), repr(bad_ctx))
+        self.assertTrue(session_errors({"type": "command"}, "command"))
+
+    def test_command_data_is_checked_by_the_action_schema_not_here(self):
+        """The message schema checks the envelope; the daemon then runs contract.validate_request for `data`."""
+        c = {"type": "command", "request": dict(SESSION_REQUEST, action="open_project", data={"path": "D:/x.prproj"})}
+        self.assertEqual(session_errors(c, "command"), [])
+        self.assertEqual(V.validate_request(c["request"]), [])
+        self.assertTrue(V.validate_request(dict(c["request"], data={})))
+
+    def test_result_wraps_a_v4_result(self):
+        r = SESSION_SAMPLES["result"]
+        failed = {"type": "result", "result": {"ok": False, "action": "ping", "error": "x", "how": "y", "id": "r-1"}}
+        self.assertEqual(session_errors(failed, "result"), [])
+        for bad in ({"ok": True, "action": "ping"}, {"ok": True, "action": "ping", "readback": {}, "error": "x"},
+                    {"ok": False, "action": "ping"}, {"ok": True, "action": "nope", "readback": {}}, [], None):
+            self.assertTrue(session_errors(dict(r, result=bad), "result"), repr(bad))
+            self.assertTrue(session_errors(dict(r, result=bad)), repr(bad))
+        self.assertTrue(session_errors({"type": "result"}, "result"))
+
+    def test_progress_wraps_a_v4_progress_event(self):
+        p = SESSION_SAMPLES["progress"]
+        for bad in (dict(SESSION_PROGRESS, event="done"), {k: v for k, v in SESSION_PROGRESS.items() if k != "step"},
+                    dict(SESSION_PROGRESS, action="nope"), dict(SESSION_PROGRESS, n=-1), dict(SESSION_PROGRESS, extra=1), 1):
+            self.assertTrue(session_errors(dict(p, progress=bad), "progress"), repr(bad))
+            self.assertTrue(session_errors(dict(p, progress=bad)), repr(bad))
+        self.assertTrue(session_errors({"type": "progress"}, "progress"))
+
+    # ---- panel state + intents
+    def test_state_accepts_a_full_and_a_minimal_panel_state(self):
+        self.assertEqual(session_errors(MINIMAL_STATE, "panel_state"), [])
+        self.assertEqual(session_errors({"type": "state", "state": MINIMAL_STATE}, "state"), [])
+        self.assertEqual(session_errors({"type": "state", "state": PANEL_STATE}), [])
+
+    def test_state_rejects_each_broken_part(self):
+        def broken(path, value):
+            s = copy.deepcopy(PANEL_STATE)
+            target = s
+            for k in path[:-1]:
+                target = target[k]
+            if value is KeyError:
+                del target[path[-1]]
+            else:
+                target[path[-1]] = value
+            return s
+
+        cases = [(("language",), "fr"), (("language",), KeyError), (("approval",), KeyError), (("approval", "fingerprint"), KeyError),
+                 (("approval", "flagged", 0, "kind"), "legal"), (("connection", "engine"), "up"), (("connection", "claude"), "maybe"),
+                 (("connection", "host", "state"), "photoshop"), (("pipeline", 0, "id"), "deliver"), (("pipeline", 0, "state"), "ok"),
+                 (("pipeline", 1, "progress", "of"), 0), (("pipeline", 1, "progress", "n"), -1), (("pipeline", 1, "progress"), 3),
+                 (("qc", 0, "verdict"), "maybe"), (("qc", 0, "t_s"), "1"), (("qc", 0, "file"), KeyError), (("log", 0, "level"), "debug"),
+                 (("context", "folder"), KeyError), (("context", "folder"), 3), (("client",), 4), (("pipeline",), {}), (("qc",), None)]
+        for path, value in cases:
+            self.assertTrue(session_errors(broken(path, value), "panel_state"), f"{path}={value!r}")
+        extra = copy.deepcopy(PANEL_STATE)
+        extra["extra"] = 1
+        self.assertTrue(session_errors(extra, "panel_state"))
+        extra = copy.deepcopy(PANEL_STATE)
+        extra["connection"]["host"]["extra"] = 1
+        self.assertTrue(session_errors(extra, "panel_state"))
+        self.assertTrue(session_errors({"type": "state"}, "state"))
+        self.assertTrue(session_errors({"type": "state", "state": {}}, "state"))
+
+    def test_intents(self):
+        for name in ("approve", "request_changes", "rebuild"):
+            self.assertTrue(session_errors(dict(SESSION_SAMPLES[name], id="has space"), name), name)
+            self.assertTrue(session_errors(dict(SESSION_SAMPLES[name], item=""), name), name)
+        for bad in (dict(SESSION_SAMPLES["approve"], fingerprint=""), dict(SESSION_SAMPLES["approve"], fingerprint=3),
+                    dict(SESSION_SAMPLES["approve"], editor_name=3)):
+            self.assertTrue(session_errors(bad, "approve"))
+        self.assertEqual(session_errors(dict(SESSION_SAMPLES["approve"], editor_name=""), "approve"), [])   # the panel asks, the engine decides
+        self.assertTrue(session_errors(dict(SESSION_SAMPLES["request_changes"], text=""), "request_changes"))
+        self.assertTrue(session_errors(dict(SESSION_SAMPLES["request_changes"], text="x" * 20001), "request_changes"))
+        self.assertTrue(session_errors(dict(SESSION_SAMPLES["rebuild"], replace_edited="yes"), "rebuild"))
+        self.assertTrue(session_errors(dict(SESSION_SAMPLES["rebuild"], project_path=None), "rebuild"))
+        self.assertEqual(session_errors({"type": "snapshot"}, "snapshot"), [])
+        self.assertTrue(session_errors({"type": "snapshot", "id": ""}, "snapshot"))
+        self.assertTrue(session_errors({"type": "cancel"}, "cancel"))
+        self.assertTrue(session_errors({"type": "cancel", "id": "x y"}, "cancel"))
+
+    def test_reply_answers_an_intent_like_the_panel_result_type(self):
+        ok = {"type": "reply", "id": "p-2", "intent": "approve", "ok": True}
+        self.assertEqual(session_errors(dict(ok, readback={"approved": True}), "reply"), [])
+        no = {"type": "reply", "id": "p-3", "intent": "rebuild", "ok": False, "error": "x", "how": "y"}
+        self.assertEqual(session_errors(no, "reply"), [])
+        for bad in (dict(ok, intent="run"), dict(ok, intent="snapshot"), dict(ok, ok="yes"), {k: v for k, v in ok.items() if k != "id"},
+                    dict(ok, error="x"), {k: v for k, v in no.items() if k != "error"}, dict(ok, readback=[])):
+            self.assertTrue(session_errors(bad, "reply"), repr(bad))
+        self.assertEqual(V.load(SESSION)["$defs"]["reply"]["properties"]["intent"]["enum"], ["approve", "request_changes", "rebuild"])
+
+    def test_error(self):
+        codes = ["auth", "origin", "host", "too_large", "rate", "schema", "unknown_type", "no_route", "timeout", "internal"]
+        self.assertEqual(V.load(SESSION)["$defs"]["error"]["properties"]["code"]["enum"], codes)
+        for code in codes:
+            self.assertEqual(session_errors({"type": "error", "code": code, "message": "m"}, "error"), [], code)
+        for bad in ({"type": "error", "code": "oops", "message": "m"}, {"type": "error", "code": "auth"},
+                    {"type": "error", "message": "m"}, {"type": "error", "code": "auth", "message": ""},
+                    {"type": "error", "code": "auth", "message": "m", "id": ""},
+                    {"type": "error", "code": "auth", "message": "m" * 2001}):
+            self.assertTrue(session_errors(bad, "error"), repr(bad))
+
+    # ---- source.ts parity
+    def test_panel_state_keys_equal_source_ts(self):
+        defs = V.load(SESSION)["$defs"]
+        pairs = {"PanelState": defs["panel_state"], "ConnectionState": defs["connection"], "PipelineStep": defs["pipeline_step"],
+                 "Approval": defs["approval"], "FlaggedItem": defs["flagged_item"], "QcFrame": defs["qc_frame"],
+                 "LogLine": defs["log_line"], "ItemContext": defs["item_context"]}
+        for ts_name, schema in pairs.items():
+            ts = ts_interface(ts_name)
+            self.assertEqual(set(schema["properties"]), set(ts), ts_name)
+            self.assertEqual(set(schema["required"]), {k for k, req in ts.items() if req}, ts_name)
+            self.assertIs(schema["additionalProperties"], False, ts_name)
+        self.assertRegex(ts_text(), r"host: \{ state: HostState; /\*\*[^*]*\*/ detail\?: string \}")
+        host = defs["connection"]["properties"]["host"]
+        self.assertEqual(set(host["properties"]), {"state", "detail"})
+        self.assertEqual(host["required"], ["state"])
+
+    def test_panel_state_enums_equal_source_ts(self):
+        defs = V.load(SESSION)["$defs"]
+        self.assertEqual(defs["panel_state"]["properties"]["language"]["enum"], ts_union("Language"))
+        self.assertEqual(defs["pipeline_step"]["properties"]["state"]["enum"], ts_union("StepStatus"))
+        self.assertEqual(defs["connection"]["properties"]["claude"]["enum"], ts_union("ClaudeState"))
+        self.assertEqual(defs["connection"]["properties"]["engine"]["enum"], ts_union("EngineState"))
+        self.assertEqual(defs["connection"]["properties"]["host"]["properties"]["state"]["enum"], ts_union("HostState"))
+        self.assertEqual(defs["qc_frame"]["properties"]["verdict"]["enum"], ts_union("QcVerdict"))
+        self.assertEqual(defs["flagged_item"]["properties"]["kind"]["enum"], ["medical", "religious"])
+        self.assertEqual(defs["log_line"]["properties"]["level"]["enum"], ["info", "warn", "error"])
+        steps = re.search(r"STEP_IDS = \[([^\]]+)\]", ts_text()).group(1)
+        self.assertEqual(defs["pipeline_step"]["properties"]["id"]["enum"], re.findall(r'"([^"]+)"', steps))
+
+    def test_intent_inputs_equal_the_panel_data_source_methods(self):
+        text = ts_text()
+        defs = V.load(SESSION)["$defs"]
+        for method, name in (("approve", "approve"), ("requestChanges", "request_changes"), ("rebuild", "rebuild")):
+            m = re.search(method + r"\(input: \{ ([^}]*) \}\)", text)
+            self.assertTrue(m, method)
+            keys = set(re.findall(r"([a-z_]+): ", m.group(1)))
+            self.assertEqual(set(defs[name]["properties"]) - {"type", "id"}, keys, name)
+            self.assertEqual(set(defs[name]["required"]) - {"type", "id"}, keys, name)
+        self.assertIn("cancel(id: string): Promise<void>;", text)
+        self.assertIn("snapshot(): Promise<PanelState>;", text)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,899 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/session.schema.json",
+  "title": "session",
+  "description": "Every WebSocket message between the local engine daemon (`reel serve`) and its clients (Premiere UXP panel, After Effects CEP panel, the `reel` CLI). One JSON object per text frame, tagged by `type`. The first client message must be hello. This file validates one message; the daemon runs it before routing anything, then checks command data with the action schema.",
+  "$ref": "#/$defs/message",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "description": "a correlation id: same rule as the v4 request id"
+    },
+    "connection": {
+      "type": "object",
+      "description": "ConnectionState",
+      "properties": {
+        "engine": {
+          "type": "string",
+          "enum": [
+            "connected",
+            "offline"
+          ]
+        },
+        "claude": {
+          "type": "string",
+          "enum": [
+            "active",
+            "idle",
+            "unknown"
+          ],
+          "description": "Claude activity from the engine's last signal; never a login state"
+        },
+        "host": {
+          "type": "object",
+          "description": "the Adobe host the daemon can reach",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "uxp",
+                "cep",
+                "offline"
+              ]
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 256,
+              "description": "e.g. Premiere Pro 26.5.2"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "engine",
+        "claude",
+        "host"
+      ],
+      "additionalProperties": false
+    },
+    "pipeline_step": {
+      "type": "object",
+      "description": "PipelineStep",
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "transcript",
+            "plan",
+            "approve",
+            "build",
+            "frames",
+            "qc",
+            "handoff"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "done",
+            "running",
+            "waiting",
+            "pending",
+            "failed"
+          ]
+        },
+        "progress": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "steps done of steps in all, while running",
+          "properties": {
+            "n": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "of": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "step": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "n",
+            "of"
+          ],
+          "additionalProperties": false
+        },
+        "elapsed_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "request_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64,
+          "description": "id of the running request; Cancel sends it back"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "flagged_item": {
+      "type": "object",
+      "description": "FlaggedItem",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "medical",
+            "religious"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "tc": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "timecode of the statement on the sequence"
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "tc"
+      ],
+      "additionalProperties": false
+    },
+    "approval": {
+      "type": "object",
+      "description": "Approval",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "maxLength": 20000
+        },
+        "preview_mp4": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "flagged": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/flagged_item"
+          }
+        },
+        "fingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "content fingerprint of the plan the editor is looking at; Approve sends it back"
+        }
+      },
+      "required": [
+        "summary",
+        "preview_mp4",
+        "flagged",
+        "fingerprint"
+      ],
+      "additionalProperties": false
+    },
+    "qc_frame": {
+      "type": "object",
+      "description": "QcFrame",
+      "properties": {
+        "t_s": {
+          "type": "number"
+        },
+        "tc": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "file": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "pending",
+            "media_pending"
+          ]
+        },
+        "w": {
+          "type": "number",
+          "description": "frame size in pixels; absent or invalid = 1080 x 1920"
+        },
+        "h": {
+          "type": "number"
+        },
+        "thumb": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096,
+          "description": "optional loadable image URL; the shell fills it"
+        }
+      },
+      "required": [
+        "t_s",
+        "tc",
+        "file",
+        "label",
+        "verdict"
+      ],
+      "additionalProperties": false
+    },
+    "log_line": {
+      "type": "object",
+      "description": "LogLine",
+      "properties": {
+        "ts": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 4000
+        }
+      },
+      "required": [
+        "ts",
+        "level",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "item_context": {
+      "type": "object",
+      "description": "ItemContext: where the current item lives",
+      "properties": {
+        "project_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "sequence_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "folder": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "out_dir": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "review_mp4": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "project_path",
+        "sequence_name",
+        "folder",
+        "out_dir",
+        "review_mp4"
+      ],
+      "additionalProperties": false
+    },
+    "panel_state": {
+      "type": "object",
+      "description": "PanelState: everything the panel shows (adobe/panel-ui/src/source.ts)",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/connection"
+        },
+        "client": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "item": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "language": {
+          "type": "string",
+          "enum": [
+            "en",
+            "ar"
+          ]
+        },
+        "editor_name": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "the editor's name for approvals; empty = the panel asks"
+        },
+        "context": {
+          "$ref": "#/$defs/item_context"
+        },
+        "pipeline": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/pipeline_step"
+          }
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/approval"
+            }
+          ]
+        },
+        "qc": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/qc_frame"
+          }
+        },
+        "log": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/log_line"
+          }
+        }
+      },
+      "required": [
+        "connection",
+        "client",
+        "item",
+        "language",
+        "editor_name",
+        "context",
+        "pipeline",
+        "approval",
+        "qc",
+        "log"
+      ],
+      "additionalProperties": false
+    },
+    "hello": {
+      "type": "object",
+      "description": "client -> daemon, the FIRST message of a connection. The daemon answers welcome or error (auth, schema).",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "hello"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "the engine token from <engine home>/bridge/engine.json (256-bit); never sent in a URL"
+        },
+        "client": {
+          "type": "object",
+          "description": "who is connecting",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "uxp",
+                "cep",
+                "cli",
+                "panel"
+              ]
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "host": {
+              "type": "string",
+              "enum": [
+                "premiere",
+                "aftereffects"
+              ],
+              "description": "the Adobe host the client runs in; absent for the CLI"
+            },
+            "hostVersion": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "protocol": {
+              "type": "integer",
+              "const": 4,
+              "description": "contract protocol number"
+            },
+            "capabilities": {
+              "type": "array",
+              "maxItems": 15,
+              "items": {
+                "$ref": "request.schema.json#/properties/action"
+              },
+              "description": "the actions this client implements; routing uses them"
+            }
+          },
+          "required": [
+            "kind",
+            "version",
+            "protocol",
+            "capabilities"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "token",
+        "client"
+      ],
+      "additionalProperties": false
+    },
+    "welcome": {
+      "type": "object",
+      "description": "daemon -> client, the answer to an accepted hello.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "welcome"
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "protocol": {
+          "type": "integer",
+          "const": 4
+        },
+        "daemon_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "type",
+        "session_id",
+        "protocol",
+        "daemon_version"
+      ],
+      "additionalProperties": false
+    },
+    "command": {
+      "type": "object",
+      "description": "a v4 request. Client -> daemon (CLI or panel run) or daemon -> host client. `request.data` is then checked by the action schema (contract.validate_request).",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "command"
+        },
+        "request": {
+          "$ref": "request.schema.json"
+        },
+        "context": {
+          "type": "object",
+          "description": "where the engine resolves the client from",
+          "properties": {
+            "root": {
+              "type": "string",
+              "maxLength": 1024,
+              "description": "clients root"
+            },
+            "profile": {
+              "type": "string",
+              "maxLength": 256,
+              "description": "client profile"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "request"
+      ],
+      "additionalProperties": false
+    },
+    "result": {
+      "type": "object",
+      "description": "a v4 result. Host client -> daemon, or daemon -> the client that sent the command.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "result"
+        },
+        "result": {
+          "$ref": "result.schema.json"
+        }
+      },
+      "required": [
+        "type",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "progress": {
+      "type": "object",
+      "description": "a v4 progress event for a running command.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "progress"
+        },
+        "progress": {
+          "$ref": "progress.schema.json"
+        }
+      },
+      "required": [
+        "type",
+        "progress"
+      ],
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "object",
+      "description": "daemon -> panel: the panel state, pushed on every change and as the answer to snapshot (`id` echoes it).",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "state"
+        },
+        "state": {
+          "$ref": "#/$defs/panel_state"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "type",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "approve": {
+      "type": "object",
+      "description": "panel intent (PanelDataSource.approve). Answered by a reply.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "approve"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "item": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "editor_name": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "fingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "item",
+        "editor_name",
+        "fingerprint"
+      ],
+      "additionalProperties": false
+    },
+    "request_changes": {
+      "type": "object",
+      "description": "panel intent (PanelDataSource.requestChanges). Answered by a reply.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "request_changes"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "item": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "editor_name": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "item",
+        "editor_name",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "rebuild": {
+      "type": "object",
+      "description": "panel intent (PanelDataSource.rebuild): the daemon expands it into a full engine rebuild plus the build_project request. Answered by a reply.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "rebuild"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "item": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "project_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "replace_edited": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "item",
+        "project_path",
+        "replace_edited"
+      ],
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "description": "panel intent (PanelDataSource.snapshot): asks for a state message.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "snapshot"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "cancel": {
+      "type": "object",
+      "description": "panel intent (PanelDataSource.cancel): `id` is the id of the running request to cancel. The cancelled command's own result answers it.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "cancel"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "reply": {
+      "type": "object",
+      "description": "daemon -> panel: the answer to approve / request_changes / rebuild (the panel's Result type). ok:true carries no error; ok:false requires one.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "reply"
+        },
+        "id": {
+          "$ref": "#/$defs/id",
+          "description": "the id of the intent this answers"
+        },
+        "intent": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "request_changes",
+            "rebuild"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "readback": {
+          "type": "object"
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "what went wrong, one plain sentence"
+        },
+        "how": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "what to do about it"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "intent",
+        "ok"
+      ],
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "error": false
+          }
+        },
+        {
+          "properties": {
+            "ok": {
+              "const": false
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "description": "daemon -> client: a refusal or failure that is not a command result. `id` is the offending message's id when it had one.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "error"
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "auth",
+            "origin",
+            "host",
+            "too_large",
+            "rate",
+            "schema",
+            "unknown_type",
+            "no_route",
+            "timeout",
+            "internal"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "required": [
+        "type",
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "message": {
+      "description": "any session message: exactly one of the closed, `type`-tagged objects above",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/hello"
+        },
+        {
+          "$ref": "#/$defs/welcome"
+        },
+        {
+          "$ref": "#/$defs/command"
+        },
+        {
+          "$ref": "#/$defs/result"
+        },
+        {
+          "$ref": "#/$defs/progress"
+        },
+        {
+          "$ref": "#/$defs/state"
+        },
+        {
+          "$ref": "#/$defs/approve"
+        },
+        {
+          "$ref": "#/$defs/request_changes"
+        },
+        {
+          "$ref": "#/$defs/rebuild"
+        },
+        {
+          "$ref": "#/$defs/snapshot"
+        },
+        {
+          "$ref": "#/$defs/cancel"
+        },
+        {
+          "$ref": "#/$defs/reply"
+        },
+        {
+          "$ref": "#/$defs/error"
+        }
+      ]
+    }
+  }
+}
