@@ -81,7 +81,8 @@ test("every action answers ok:false with a v4 result that says how to start the 
     assert.equal(r.readback, undefined, "never a readback: nothing was measured");
     assert.ok(resultSchema(r), `${a}: ${JSON.stringify(resultSchema.errors)}`);
   }
-  assert.match(OFFLINE_HOW, /reel serve/);
+  assert.equal(OFFLINE_HOW, "In your Claude session run `reel doctor`.");
+  assert.doesNotMatch(OFFLINE_HOW, /reel serve|coming in/);
 });
 
 test("approve, request changes and rebuild are refused too, and the rebuild result is a valid v4 result", async () => {
@@ -102,7 +103,8 @@ test("Arabic panel gets Arabic error and how text (the command stays Latin)", as
   const r = await new OfflineSource({ uiLocale: "ar" }).run("status");
   assert.match(r.error ?? "", /[؀-ۿ]/);
   assert.match(r.how ?? "", /[؀-ۿ]/);
-  assert.match(r.how ?? "", /reel serve/);
+  assert.match(r.how ?? "", /`reel doctor`/);
+  assert.doesNotMatch(r.how ?? "", /reel serve/);
 });
 
 test("cancel resolves and does nothing", async () => {
@@ -116,4 +118,17 @@ test("the panel renders the offline state: Engine pill 'not running', the Premie
   assert.match(html, /Premiere Pro 26\.5\.2/);
   assert.match(html, /The WhyNot Cut engine is not running\./);
   assert.doesNotMatch(html, /Claude Code/);
+});
+
+test("U3: the notice that carries the offline how shows the command in a left-to-right run, EN and AR", async () => {
+  for (const loc of ["en_US", "ar_AE"]) {
+    const src = new OfflineSource({ uiLocale: loc });
+    const s = await src.snapshot();
+    const r = await src.run("ping");
+    const ui = { ...initialUi(), notice: { kind: "error" as const, text: r.error ?? "", ...(r.how ? { how: r.how } : {}) } };
+    const html = render(s, stringsFor(s.language), ui);
+    assert.ok(html.slice(html.indexOf('role="status"')).includes('<bdi dir="ltr">reel doctor</bdi>'), loc);
+    assert.ok(!html.includes("reel serve"), loc);
+    assert.ok(!html.includes("`"), loc);
+  }
 });

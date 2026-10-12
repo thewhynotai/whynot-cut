@@ -4,7 +4,7 @@
 import { asMountRoot, mount } from "../../panel-ui/src/mount.ts";
 import type { MountHandle } from "../../panel-ui/src/mount.ts";
 import type { Language, PanelDataSource } from "../../panel-ui/src/source.ts";
-import type { UxpModule } from "../spike/src/uxp-types.ts";
+import type { UxpModule } from "./uxp-types.ts";
 import { showCopyText } from "./copy-fallback.ts";
 import type { FallbackDoc, FallbackEl } from "./copy-fallback.ts";
 import { languageOf } from "./offline-source.ts";

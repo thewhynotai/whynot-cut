@@ -1,6 +1,6 @@
-// Local, minimal UXP typings: only what the spike uses. No maintained UXP typings package covers Premiere
+// Local, minimal UXP typings: only what the plugin and the spike use. No maintained UXP typings package covers Premiere
 // (@adobe/cc-ext-uxp-types was last published 2023; @adobe-uxp-types/uxp is a third-party hobby package), so these
-// stay local and loose on purpose - the spike's job is to find out which of these really exist.
+// stay local and loose on purpose. They live under src/ because product code imports them (the spike imports from here).
 
 export interface UxpStats {
   size?: number;

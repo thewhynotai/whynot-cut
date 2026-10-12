@@ -19,7 +19,7 @@ npm run package        # both
 
 `@adobe/premierepro` (26.5.0) is types only; at runtime Premiere provides `require("premierepro")`. No maintained UXP typings
 package exists for Premiere, so the few UXP shapes we touch (`fs`, `os`, `uxp.host`) are typed locally in
-`premiere-uxp/spike/src/uxp-types.ts`.
+`premiere-uxp/src/uxp-types.ts` (the spike imports them from there).
 
 ## The spike (`premiere-uxp/spike/`)
 
@@ -81,8 +81,8 @@ spike. The manifest `version` must equal `whynot-cut/.claude-plugin/plugin.json`
 | `plugin/manifest.json`, `plugin/index.html`, `plugin/index.css` | package files; the page links `tokens.css`, `panel.css` (copied from `panel-ui/styles/`) then `index.css` (shell-only: page background, the copy box) |
 | `src/main.ts` | entry: builds the environment (`require` of `premierepro`/`uxp` with literal calls, `document`, `navigator`) and calls `startShell`; picks the data source at build time |
 | `src/shell.ts` | `startShell(env)`: theme, data source, `UxpHost`, `mount(root, source, host)`; testable with fakes |
-| `src/offline-source.ts` | `OfflineSource`: the placeholder `PanelDataSource` until the engine daemon exists (T6.2): engine "not running", Host pill from `uxp.host.version` (`Application.version` is empty), language from `uxp.host.uiLocale`, no pipeline data, every action `ok:false` with `how: "start the engine: reel serve (coming in 3.0)"` |
-| `src/uxp-host.ts` | `createUxpHost`: `setPlayerPosition` (active sequence, `TickTime.createWithSeconds`), `openInSourceMonitor` (`SourceMonitor.openFilePath`), `revealPath` (`uxp.shell.openPath`, best effort), `copyText` (`navigator.clipboard`, else a visible copy box) |
+| `src/offline-source.ts` | `OfflineSource`: the placeholder `PanelDataSource` until the engine daemon exists (T6.2): engine "not running", Host pill from `uxp.host.version` (`Application.version` is empty), language from `uxp.host.uiLocale`, no pipeline data, every action `ok:false` with `how: "In your Claude session run `reel doctor`."` (the panel renders a backticked command as a left-to-right run) |
+| `src/uxp-host.ts` | `createUxpHost`: `setPlayerPosition` (active sequence, `TickTime.createWithSeconds`), `openInSourceMonitor` (`SourceMonitor.openFilePath`), `revealPath` ("Show folder path": `uxp.shell.openPath` on the native path, else a visible, selected path box), `copyText` ("Show diagnostics": `navigator.clipboard`, else a visible, selected box). Both fallbacks are a normal outcome, not an error: the product manifest has no clipboard or launchProcess permission. Paths lose the `\\?\` prefix and use backslashes on Windows (`nativePath`) |
 | `src/copy-fallback.ts` | the "copy this" box shown when the clipboard (or opening a folder) is not available |
 | `src/theme.ts` | `uxp.host.getBackgroundColor()` -> `--twn-bg`; `{}` / missing / light colours keep the brand dark default |
 

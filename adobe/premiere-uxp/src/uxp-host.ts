@@ -1,7 +1,9 @@
 // The Premiere UXP implementation of the panel's host adapter (PanelHost): the four things only the host app can do.
 // Nothing here mutates the project, so none of it needs project.lockedAccess / executeTransaction: moving the playhead,
 // opening a file in the Source Monitor, opening a folder and the clipboard are not edits and do not enter the undo stack.
-// Every failure is thrown as a plain sentence; the panel shows it in its notice banner (never a blank panel).
+// Every real failure is thrown as a plain sentence; the panel shows it in its notice banner (never a blank panel).
+// The two "show it to me" helpers (folder path, diagnostics) never fail: the product manifest has no clipboard and no
+// launchProcess permission, so they try the clipboard / shell.openPath silently and fall back to a visible, selected box.
 import type { premierepro as Ppro } from "@adobe/premierepro";
 import type { PanelHost } from "../../panel-ui/src/host.ts";
 import type { Language } from "../../panel-ui/src/source.ts";
@@ -29,9 +31,7 @@ const EN = {
   notMoved: "Premiere did not move the playhead.",
   noMonitor: "Premiere could not open that file in the Source Monitor.",
   copyTitle: "Copy this text (it is selected: press Ctrl+C, or Cmd+C on a Mac)",
-  copyFailed: "The panel cannot use the clipboard here. The text is shown below: select it and copy.",
-  pathTitle: "Open this folder yourself (the path is selected: press Ctrl+C, or Cmd+C on a Mac)",
-  pathFailed: "The panel could not open the folder. Its path is shown below.",
+  pathTitle: "Folder path (it is selected: press Ctrl+C, or Cmd+C on a Mac, to copy it)",
   close: "Close",
 };
 const AR: typeof EN = {
@@ -41,9 +41,7 @@ const AR: typeof EN = {
   notMoved: "لم يحرّك Premiere مؤشر التشغيل.",
   noMonitor: "تعذّر على Premiere فتح هذا الملف في شاشة المصدر.",
   copyTitle: "انسخ هذا النص (محدّد الآن: اضغط Ctrl+C أو Cmd+C على Mac)",
-  copyFailed: "لا تستطيع اللوحة استخدام الحافظة هنا. النص ظاهر بالأسفل: حدّده وانسخه.",
-  pathTitle: "افتح هذا المجلد بنفسك (المسار محدّد الآن: اضغط Ctrl+C أو Cmd+C على Mac)",
-  pathFailed: "تعذّر على اللوحة فتح المجلد. مساره ظاهر بالأسفل.",
+  pathTitle: "مسار المجلد (محدّد الآن: اضغط Ctrl+C أو Cmd+C على Mac لنسخه)",
   close: "إغلاق",
 };
 
@@ -52,6 +50,15 @@ export function cleanPath(p: string): string {
   const unc = /^(?:\\\\\?\\|\/\/\?\/)UNC[\\/]/i;
   if (unc.test(p)) return "\\\\" + p.replace(unc, "");
   return p.replace(/^(?:\\\\\?\\|\/\/\?\/)/, "");
+}
+
+/**
+ * The path as the host APIs want it: no long-path prefix, and backslashes for a Windows path (a drive letter or a UNC
+ * share). Live parity: Project.open and exportSequenceFrame only work with backslash paths; macOS paths are left alone.
+ */
+export function nativePath(p: string): string {
+  const clean = cleanPath(p);
+  return /^(?:[A-Za-z]:[\\/]|\\\\)/.test(clean) ? clean.replace(/\//g, "\\") : clean;
 }
 
 /** PanelHost with every method async (the adapter always awaits Premiere), so callers and tests can await rejections. */
@@ -88,23 +95,22 @@ export function createUxpHost(deps: UxpHostDeps): UxpPanelHost {
     },
 
     async openInSourceMonitor(path: string): Promise<void> {
-      const ok = await deps.getPpro().SourceMonitor.openFilePath(path);
+      const ok = await deps.getPpro().SourceMonitor.openFilePath(nativePath(path));
       if (ok === false) throw new Error(t().noMonitor);
     },
 
     async revealPath(path: string): Promise<void> {
-      let failure: string | null = null;
+      const native = nativePath(path);
       try {
-        const open = deps.getShell()?.openPath;
+        const shell = deps.getShell();
+        const open = shell?.openPath;
         if (typeof open !== "function") throw new Error("shell.openPath is not available");
-        const answer = await open.call(deps.getShell(), path);
-        if (typeof answer === "string" && answer.trim() !== "") failure = answer;
-      } catch (e) {
-        failure = e instanceof Error ? e.message : String(e);
+        const answer = await open.call(shell, native);
+        if (typeof answer !== "string" || answer.trim() === "") return;   // "" = Premiere's host opened the folder
+      } catch {
+        // no launchProcess permission in the product manifest: fall through to the visible box
       }
-      if (failure === null) return;
-      deps.showText(cleanPath(path), t().pathTitle, t().close);
-      throw new Error(t().pathFailed);
+      deps.showText(native, t().pathTitle, t().close);
     },
 
     async copyText(text: string): Promise<void> {
@@ -116,7 +122,6 @@ export function createUxpHost(deps: UxpHostDeps): UxpPanelHost {
         // no clipboard permission in the product manifest: fall through to the visible box
       }
       deps.showText(text, t().copyTitle, t().close);
-      throw new Error(t().copyFailed);
     },
   };
 }

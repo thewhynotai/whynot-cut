@@ -341,3 +341,56 @@ test("markup: client/item, progress/elapsed and log rows put their parts in sepa
   const ar = render(sampleState("ar", "building"), AR, initialUi());
   assert.match(ar, /<span class="meta-item">[^<]*<bdi dir="ltr">31<\/bdi>[^<]*<bdi dir="ltr">47<\/bdi><\/span>/);
 });
+
+// ---- final review: how wording, thumbnails, the host-only button ----
+
+test("U3: a notice's how puts every backticked command in a left-to-right run, in EN and AR; the backticks are not shown", () => {
+  for (const [lang, t, how] of [
+    ["en", EN, "In your Claude session run `reel doctor`."],
+    ["ar", AR, "في جلسة Claude الخاصة بك، شغّل `reel doctor`."],
+  ] as const) {
+    const s = sampleState(lang, "idle");
+    const ui = initialUi();
+    ui.notice = { kind: "error", text: "x", how };
+    const html = render(s, t, ui);
+    assert.ok(html.includes('<bdi dir="ltr">reel doctor</bdi>'), lang);
+    assert.ok(!html.includes("`"), `${lang}: the backticks are markup, not text`);
+  }
+  const s = sampleState("en", "idle");
+  const ui = initialUi();
+  ui.notice = { kind: "error", text: "x", how: `run \`<img src=x onerror=1>\` now` };
+  assert.ok(!render(s, EN, ui).includes("<img src=x"), "the command is escaped too");
+  ui.notice = { kind: "error", text: "x", how: "no command here, a stray ` backtick" };
+  assert.ok(render(s, EN, ui).includes("no command here, a stray ` backtick"));
+});
+
+test("U5: a thumbnail is only drawn for data:image, file:, plugin: and relative URLs, never http(s):", () => {
+  const draw = (thumb: string | null) => {
+    const s = sampleState("en", "qc");
+    s.qc = [{ ...s.qc[0]!, thumb }];
+    return render(s, EN, initialUi());
+  };
+  for (const ok of ["data:image/png;base64,AAAA", "file:///C:/x/f.png", "plugin:/frames/a.png", "frames/a.png", "./a.png"]) {
+    assert.ok(draw(ok).includes('class="qc-img"'), ok);
+  }
+  for (const bad of ["http://evil.example/a.png", "https://evil.example/a.png", "HTTPS://evil.example/a.png", "//evil.example/a.png",
+    "javascript:alert(1)", "data:text/html,<b>x</b>", "ftp://x/a.png", " https://evil.example/a.png"]) {
+    assert.ok(!draw(bad).includes('class="qc-img"'), bad);
+  }
+});
+
+test("U2: the panel offers 'Show folder path' and 'Show diagnostics'; the folder button is host-only, so it works while the engine is offline", () => {
+  assert.equal(EN["actions.reveal"], "Show folder path");
+  assert.equal(EN["actions.diagnostics"], "Show diagnostics");
+  assert.equal(AR["actions.reveal"], "إظهار مسار المجلد");
+  assert.equal(AR["actions.diagnostics"], "عرض التشخيص");
+  const s = sampleState("en", "qc");
+  s.connection.engine = "offline";
+  assert.ok(s.context.folder);
+  const html = render(s, EN, initialUi());
+  assert.ok(/data-action="reveal"(?! disabled)/.test(html), "reveal stays enabled offline");
+  assert.ok(/data-action="open-project" disabled/.test(html), "engine actions are disabled offline");
+  const none = sampleState("en", "qc");
+  none.context.folder = null;
+  assert.ok(/data-action="reveal" disabled/.test(render(none, EN, initialUi())), "no folder, nothing to show");
+});

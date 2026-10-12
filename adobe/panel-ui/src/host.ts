@@ -5,8 +5,8 @@ export interface PanelHost {
   setPlayerPosition(t_s: number): void | Promise<void>;
   /** Open a media file (the plan preview MP4) in the Source Monitor. */
   openInSourceMonitor(path: string): void | Promise<void>;
-  /** Show a file or folder in Explorer / Finder. */
+  /** Open a folder in Explorer / Finder when the host may, else show its path in a visible, selected text box. Never an error. */
   revealPath(path: string): void | Promise<void>;
-  /** Put text on the clipboard. */
+  /** Show text the editor can copy: it goes to the clipboard when the host may, else into a visible, selected text box. Never an error. */
   copyText(text: string): void | Promise<void>;
 }

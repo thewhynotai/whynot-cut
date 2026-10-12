@@ -205,7 +205,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
         return;
       }
       case "copy-diagnostics":
-        void perform(() => host.copyText(diagnosticsText(s)), t["notice.copied"], false);
+        void perform(() => host.copyText(diagnosticsText(s)), undefined, false);
         return;
       case "cancel": {
         const id = el.getAttribute("data-id");

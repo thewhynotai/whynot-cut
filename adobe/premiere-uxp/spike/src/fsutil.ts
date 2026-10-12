@@ -1,6 +1,6 @@
 // Thin async helpers over UXP's `fs`: use the promise API when present, else the *Sync twin, else say so.
 import { toForwardSlashes } from "./home.ts";
-import type { UxpFs, UxpStats } from "./uxp-types.ts";
+import type { UxpFs, UxpStats } from "../../src/uxp-types.ts";
 
 async function fsCall<T>(fs: UxpFs, name: string, ...args: unknown[]): Promise<T> {
   const plain = fs[name];

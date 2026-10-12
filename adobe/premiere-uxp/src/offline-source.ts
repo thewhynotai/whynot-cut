@@ -12,10 +12,11 @@ export interface OfflineInfo {
   uiLocale?: string | undefined;
 }
 
-/** What to do, in the words the editor is told (the command stays Latin; the panel puts it in a left-to-right run). */
-export const OFFLINE_HOW = "start the engine: reel serve (coming in 3.0)";
+/** What to do, in the words the editor is told, the same as the panel's offline banner. The command sits in `backticks`:
+ *  the panel renders it as a left-to-right run (render.ts) so it stays intact inside an Arabic sentence. */
+export const OFFLINE_HOW = "In your Claude session run `reel doctor`.";
 const OFFLINE_ERROR = "The WhyNot Cut engine is not running.";
-const OFFLINE_HOW_AR = "شغّل المحرّك: reel serve (قادم في 3.0)";
+const OFFLINE_HOW_AR = "في جلسة Claude شغّل الأمر `reel doctor`.";
 const OFFLINE_ERROR_AR = "محرّك WhyNot Cut لا يعمل.";
 
 export function languageOf(uiLocale: string | null | undefined): Language {

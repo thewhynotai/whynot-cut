@@ -5,7 +5,7 @@ import { ensureDir, writeText } from "./fsutil.ts";
 import { resolveHome, spikeDir } from "./home.ts";
 import { buildProbes, errText, loadConfig, skipSaveCloseOpen, type Ctx } from "./probes.ts";
 import { jsonSafe, runAll, type OpResult } from "./runner.ts";
-import type { UxpFs, UxpModule, UxpOs } from "./uxp-types.ts";
+import type { UxpFs, UxpModule, UxpOs } from "../../src/uxp-types.ts";
 
 declare const require: (id: string) => unknown;
 

@@ -290,3 +290,19 @@ test("a snapshot that rejects shows an error view; a later pushed state replaces
   for (const cb of source.cbs) cb(good);
   assert.ok(root.innerHTML.includes(good.client));
 });
+
+test("U2: Show folder path / Show diagnostics leave no banner when the host resolves (the box is the outcome); a rejection is still shown", async () => {
+  const { root, state } = await setup();
+  root.click({ "data-action": "reveal" });
+  root.click({ "data-action": "copy-diagnostics" });
+  await tick();
+  assert.ok(!root.innerHTML.includes("banner-error") && !root.innerHTML.includes("banner-ok"));
+  const source = new RecSource();
+  const host: PanelHost = { ...hostRec().host, revealPath: () => { throw new Error("host broke"); } };
+  const r2 = new FakeRoot();
+  await mount(r2, source, host).ready;
+  r2.click({ "data-action": "reveal" });
+  await tick();
+  assert.ok(r2.innerHTML.includes("banner-error") && r2.innerHTML.includes("host broke"));
+  assert.ok(state.context.folder);
+});

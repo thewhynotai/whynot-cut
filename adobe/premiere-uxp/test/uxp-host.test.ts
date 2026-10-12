@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanPath, createUxpHost } from "../src/uxp-host.ts";
+import { cleanPath, createUxpHost, nativePath } from "../src/uxp-host.ts";
 import type { UxpHostDeps } from "../src/uxp-host.ts";
 import { showCopyText } from "../src/copy-fallback.ts";
 
@@ -62,7 +62,7 @@ test("setPlayerPosition: refuses a bad time, no project, no sequence and a false
 test("openInSourceMonitor: SourceMonitor.openFilePath(path); a false return is an error", async () => {
   const { deps, calls } = makeDeps();
   await createUxpHost(deps).openInSourceMonitor("E:/x/preview.mp4");
-  assert.deepEqual(calls, ["open E:/x/preview.mp4"]);
+  assert.deepEqual(calls, ["open E:\\x\\preview.mp4"]);
   const bad = makeDeps({ ppro: { SourceMonitor: { openFilePath: async () => false } } });
   await assert.rejects(() => createUxpHost(bad.deps).openInSourceMonitor("E:/x/preview.mp4"), /source monitor/i);
 });
@@ -74,21 +74,21 @@ test("copyText: uses the clipboard when the plugin may", async () => {
   assert.deepEqual(shown, []);
 });
 
-test("copyText: no clipboard permission (the call throws) -> the text is shown to copy by hand, and the panel is told", async () => {
+test("U2 copyText: no clipboard permission (the call throws or is missing) -> the text is shown to copy by hand, and that is a normal outcome, not an error", async () => {
   for (const clip of [
     async () => { throw new Error("clipboard permission is not granted"); },
     undefined,
   ]) {
     const { deps, shown } = makeDeps({ clip });
-    await assert.rejects(() => createUxpHost(deps).copyText("diagnostics text"), /copy/i);
+    await createUxpHost(deps).copyText("diagnostics text");
     assert.equal(shown.length, 1);
     assert.equal(shown[0]!.text, "diagnostics text");
   }
 });
 
-test("copyText: Arabic panel gets the Arabic explanation", async () => {
+test("copyText: Arabic panel gets the Arabic title on the box", async () => {
   const { deps, shown } = makeDeps({ clip: undefined, lang: "ar" });
-  await assert.rejects(() => createUxpHost(deps).copyText("t"), /[؀-ۿ]/);
+  await createUxpHost(deps).copyText("t");
   assert.match(shown[0]!.title, /[؀-ۿ]/);
 });
 
@@ -100,7 +100,7 @@ test("revealPath: shell.openPath on the folder; an empty answer is success", asy
   assert.deepEqual(shown, []);
 });
 
-test("revealPath: openPath that throws, answers with an error string or is missing -> the path is shown", async () => {
+test("U2 revealPath: openPath that throws, answers with an error string or is missing -> the path is shown, no error", async () => {
   for (const shell of [
     { openPath: async () => { throw new Error("denied"); } },
     { openPath: async () => "Permission denied" },
@@ -108,9 +108,39 @@ test("revealPath: openPath that throws, answers with an error string or is missi
     undefined,
   ]) {
     const { deps, shown } = makeDeps({ shell });
-    await assert.rejects(() => createUxpHost(deps).revealPath("\\\\?\\E:\\Clients\\X"), /path/i);
-    assert.equal(shown[0]!.text, "E:\\Clients\\X","the long-path prefix is not shown to the editor");
+    await createUxpHost(deps).revealPath("\\\\?\\E:\\Clients\\X");
+    assert.equal(shown.length, 1);
+    assert.equal(shown[0]!.text, "E:\\Clients\\X", "the long-path prefix is not shown to the editor");
   }
+});
+
+test("U1 revealPath: shell.openPath gets the native path, not the long-path form Premiere reports", async () => {
+  const opened: string[] = [];
+  const { deps, shown } = makeDeps({ shell: { openPath: async (p: string) => (opened.push(p), "") } });
+  const host = createUxpHost(deps);
+  await host.revealPath("\\\\?\\D:/Clients/Dr X/EP01");
+  await host.revealPath("//?/D:/Clients/Dr X");
+  await host.revealPath("\\\\?\\UNC\\srv/share/EP01");
+  await host.revealPath("/Users/yunus/Clients/EP01");
+  assert.deepEqual(opened, ["D:\\Clients\\Dr X\\EP01", "D:\\Clients\\Dr X", "\\\\srv\\share\\EP01", "/Users/yunus/Clients/EP01"]);
+  assert.deepEqual(shown, []);
+});
+
+test("U1 openInSourceMonitor: SourceMonitor.openFilePath gets the native path (live: Premiere reports a long-path D:/ string)", async () => {
+  const { deps, calls } = makeDeps();
+  const host = createUxpHost(deps);
+  await host.openInSourceMonitor("\\\\?\\D:/0 Work/Clients/EP01/preview.mp4");
+  await host.openInSourceMonitor("D:/x/preview.mp4");
+  await host.openInSourceMonitor("/Users/x/preview.mp4");
+  assert.deepEqual(calls, ["open D:\\0 Work\\Clients\\EP01\\preview.mp4", "open D:\\x\\preview.mp4", "open /Users/x/preview.mp4"]);
+});
+
+test("nativePath: strips every long-path prefix and uses backslashes for Windows paths only", () => {
+  assert.equal(nativePath("\\\\?\\D:/work/a.prproj"), "D:\\work\\a.prproj");
+  assert.equal(nativePath("D:\\work\\a"), "D:\\work\\a");
+  assert.equal(nativePath("//?/UNC/srv/share/a"), "\\\\srv\\share\\a");
+  assert.equal(nativePath("/Users/x/a b"), "/Users/x/a b");
+  assert.equal(nativePath("relative/a.png"), "relative/a.png");
 });
 
 test("cleanPath strips the Windows long-path prefixes Premiere returns", () => {

@@ -70,7 +70,8 @@ test("the shipped bundle: UXP host modules stay external, offline source only (n
   assert.doesNotMatch(js, /PODCAST-TEST|عيادة النور/, "MockSource data must not ship");
   assert.doesNotMatch(js, /Claude Code/);
   assert.match(js, /Powered by Claude/);
-  assert.match(js, /reel serve \(coming in 3\.0\)/);
+  assert.match(js, /In your Claude session run `reel doctor`\./);
+  assert.doesNotMatch(js, /reel serve/);
   const html = text(files["index.html"]);
   assert.match(html, /<script[^>]+src="index\.js"/);
   assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["tokens.css", "panel.css", "index.css"]);

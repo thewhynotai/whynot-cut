@@ -36,7 +36,10 @@ export function esc(value: unknown): string {
 
 const ltr = (text: unknown) => `<bdi dir="ltr">${esc(text)}</bdi>`;
 const auto = (text: unknown) => `<bdi>${esc(text)}</bdi>`;
-const SAFE_IMG = /^(data:image\/|file:|plugin:|https?:)/i;
+/** A sentence that may hold commands in `backticks`: each command becomes a left-to-right run (the backticks are markup). */
+const withCommands = (text: unknown) => esc(text).replace(/`([^`]+)`/g, (_m, cmd: string) => `<bdi dir="ltr">${cmd}</bdi>`);
+// data:image, file: and plugin: URLs and relative paths only: a thumbnail never makes the panel fetch from the network.
+const SAFE_IMG = /^(?:data:image\/|file:|plugin:|(?![a-z][a-z0-9+.-]*:|\/\/)\S)/i;
 
 const STEP_GLYPH: Record<string, string> = { done: "✓", failed: "✕" };
 const VERDICT_GLYPH: Record<string, string> = { pass: "✓", fail: "✕", pending: "…", media_pending: "…" };
@@ -85,7 +88,7 @@ function banners(s: PanelState, t: Strings, ui: UiState): string {
     const n = ui.notice;
     out +=
       `<div class="banner banner-${n.kind === "ok" ? "ok" : "error"}" role="status" aria-live="polite">` +
-      `<span class="banner-text">${esc(n.text)}${n.how ? ` ${esc(n.how)}` : ""}</span>` +
+      `<span class="banner-text">${esc(n.text)}${n.how ? ` ${withCommands(n.how)}` : ""}</span>` +
       `<button class="banner-x" data-action="dismiss-notice" title="${esc(t["notice.dismiss"])}" aria-label="${esc(t["notice.dismiss"])}">✕</button></div>`;
   }
   return out;
@@ -200,8 +203,8 @@ function qcSection(s: PanelState, t: Strings): string {
 
 function actionsSection(s: PanelState, t: Strings, ui: UiState): string {
   const off = s.connection.engine === "offline" || ui.working;
-  const btn = (action: string, label: StringKey, enabled: boolean) =>
-    `<button class="btn btn-secondary btn-act" data-action="${action}"${enabled && !off ? "" : " disabled"}>${esc(t[label])}</button>`;
+  const btn = (action: string, label: StringKey, enabled: boolean, hostOnly = false) =>
+    `<button class="btn btn-secondary btn-act" data-action="${action}"${enabled && (hostOnly || !off) ? "" : " disabled"}>${esc(t[label])}</button>`;
   const rebuildCard = ui.confirmRebuild
     ? `<div class="card card-warn" role="alertdialog" aria-label="${esc(t["rebuild.title"])}"><div class="lbl lbl-warn">${esc(t["rebuild.title"])}</div>` +
       `<p>${esc(t["rebuild.warning"])}</p><p>${esc(t["rebuild.backup"])} <span class="cmd">${ltr("name_prev_date-time.prproj")}</span></p>` +
@@ -216,7 +219,7 @@ function actionsSection(s: PanelState, t: Strings, ui: UiState): string {
     btn("rebuild", "actions.rebuild", rebuildInput(s) !== null) +
     btn("export-frames", "actions.export", exportFramesAction(s) !== null) +
     btn("render-review", "actions.render", renderReviewAction(s) !== null) +
-    btn("reveal", "actions.reveal", !!s.context.folder) +
+    btn("reveal", "actions.reveal", !!s.context.folder, true) +
     `<button class="btn btn-secondary btn-act" data-action="copy-diagnostics">${esc(t["actions.diagnostics"])}</button>` +
     `</div>${rebuildCard}</section>`
   );

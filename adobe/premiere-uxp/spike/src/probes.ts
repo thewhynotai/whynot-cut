@@ -16,7 +16,7 @@ import { baseName, ensureDir, readText, statOf, writeText } from "./fsutil.ts";
 import { toForwardSlashes } from "./home.ts";
 import { cleanPath, isUnder, normPath, scratchPathProblem } from "./safety.ts";
 import { jsonSafe, type ProbeDef, type ProbeOutcome } from "./runner.ts";
-import type { UxpFs, UxpModule, UxpOs } from "./uxp-types.ts";
+import type { UxpFs, UxpModule, UxpOs } from "../../src/uxp-types.ts";
 
 /** The product's undo label. In the spike ONLY undo_transaction uses it (see txLabel). */
 export const UNDO_LABEL = "WhyNot Cut build";
