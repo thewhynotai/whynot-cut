@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from . import plat
-from .common import Paths, engine_home, ffmpeg_exe, models_dir, load_status, now_iso, read_json, venv_python, write_json, write_text
+from .common import DONE_STATUSES, Paths, engine_home, ffmpeg_exe, models_dir, load_status, now_iso, read_json, venv_python, write_json, write_text
 
 MODULES = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "fontTools", "arabic_reshaper", "bidi",
            "uharfbuzz", "freetype", "pypdf"]
@@ -217,7 +217,9 @@ def doctor() -> dict:
                               f"missing, so Whisper runs on the CPU)",
                       "who": "editor decides", "optional": True,
                       "fix": "with the editor's OK: reel gpu-enable   (~550 MB from PyPI; transcription and the "
-                             "no-speech-cut check run about 5-10x faster). Everything works without it, just slower."})
+                             "no-speech-cut check run about 5-10x faster). Everything works without it, just slower. "
+                             "It was enabled before? An engine update (reel setup re-syncs the runtime) removes the "
+                             "cuBLAS wheels: run reel gpu-enable again."})
     prem_var_bad = any("WHYNOT_PREMIERE_APP" in pr["error"] for pr in found["problems"])
     if not apps["premiere"]:
         if not prem_var_bad:        # a bad WHYNOT_PREMIERE_APP hides a real install: the variable fix below is the fix
@@ -339,7 +341,7 @@ def inbox(root: Path, refresh: bool = True) -> dict:
         # discovery/preflight alone don't start an edit; the transcript does
         started = pp.project.exists() and pp.p("02_transcription/transcript.json").exists()
         st = load_status(pp) if started else {"status": "NEW"}
-        done = (pp.p("09_handoff/README.md").exists() and st.get("status") in ("QC_PASSED", "READY_FOR_HUMAN_EDITOR"))
+        done = pp.p("09_handoff/README.md").exists() and st.get("status") in DONE_STATUSES      # T2.15: + DELIVERED
         prev = pp.p(f"08_quality_control/preview/{vid}_preview.mp4") if started else None
         clips.append({"video_id": vid, "file": f["rel"], "size_mb": round(f["size_bytes"] / 1e6, 1),
                       "status": st.get("status"), "state": "done" if done else ("in progress" if started else "new"),

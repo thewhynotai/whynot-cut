@@ -31,7 +31,7 @@ from lib import common, errors, file_lock  # noqa: E402
 from lib.common import Paths, read_json, write_json  # noqa: E402
 
 WRITERS = 8
-UPDATES = 40
+UPDATES = 25            # 8 x 25 = 200: the whole run fits the capped status history (T2.15, STATUS_HISTORY_MAX)
 
 
 def _status_writer(root: str, video_id: str, writer: int, n: int, start) -> None:
@@ -344,7 +344,10 @@ class TestDiscoveryChecksTheRootFirst(TempDir):
 
 class TestSetStatusStress(TempDir):
     def test_eight_processes_lose_no_status_update(self):
-        """Acceptance (T2.4): 8 writer processes x N set_status calls on ONE project-status.json, no update lost."""
+        """Acceptance (T2.4): 8 writer processes x N set_status calls on ONE project-status.json, no update lost.
+        Every note must survive, so the run stays within the 200-entry history cap (T2.15); with a no-op lock the
+        same run loses updates (checked in T2.15 fix round 1)."""
+        self.assertLessEqual(WRITERS * UPDATES, common.STATUS_HISTORY_MAX)    # else the cap, not a race, drops notes
         p = Paths(self.tmp, "CLIP1")
         p.ensure_project()
         ctx = multiprocessing.get_context("spawn")

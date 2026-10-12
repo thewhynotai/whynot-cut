@@ -128,6 +128,137 @@ class TestFfmpegTimeouts(_Tmp):
             common.run(["ffmpeg", "-i", "x"], check=False, timeout=5)                    # an explicit one wins
             self.assertEqual(run.call_args.kwargs["timeout"], 5)
 
+    # ---- fix round 1 (review I-1, m-1, m-2)
+    def test_the_duration_probe_has_its_own_timeout(self):
+        import threading
+        import time
+        clip = self.tmp / "on-a-stalled-share.mp4"
+        clip.write_bytes(b"x")
+        release = threading.Event()
+        self.addCleanup(release.set)                      # the stuck probe thread ends with the test
+
+        def stuck(*a):
+            release.wait(30)
+            return 99.0
+        t0 = time.monotonic()
+        with mock.patch.object(media_util, "_duration_cached", side_effect=stuck), \
+                mock.patch.object(media_util, "FF_PROBE_TIMEOUT_S", 0.3):
+            self.assertEqual(media_util.ff_timeout(["ffmpeg", "-i", str(clip), "-f", "null", "-"]),
+                             media_util.FF_TIMEOUT_UNKNOWN_S)
+        self.assertLess(time.monotonic() - t0, 5)
+
+    def test_the_scale_variable_multiplies_every_timeout(self):
+        cmd = ["ffmpeg", "-t", "2", "-i", "x.wav", "-f", "null", "-"]                # 10 + 3 x 2 = 16
+        for v, want in (("2.5", 40), ("1", 16), ("0.5", 16), ("abc", 16), ("nan", 16), ("", 16)):
+            with self.subTest(scale=v), mock.patch.dict(os.environ, {media_util.FF_TIMEOUT_SCALE_ENV: v}):
+                self.assertEqual(media_util.ff_timeout(cmd), want)
+        with mock.patch.dict(os.environ, {media_util.FF_TIMEOUT_SCALE_ENV: "2"}):
+            self.assertEqual(media_util.ff_timeout(["ffmpeg", "-f", "lavfi", "-i", "sine"]),
+                             2 * media_util.FF_TIMEOUT_UNKNOWN_S)
+
+    def test_the_timeout_guidance_names_the_variable_not_a_missing_flag(self):
+        from lib import errors
+        ff = errors.describe(subprocess.TimeoutExpired(["C:/x/ffmpeg.exe", "-i", "a.mov"], 70))
+        self.assertIn("WHYNOT_FFMPEG_TIMEOUT_SCALE", ff["how"])
+        self.assertNotIn("--timeout", ff["how"])
+        ae = errors.describe(subprocess.TimeoutExpired(["aerender"], 70))
+        self.assertNotIn("--timeout", ae["how"])
+        self.assertIn("dialog", ae["how"])
+
+
+class _Hang:
+    """A stand-in ffmpeg that hangs: subprocess.Popen runs a Python child that sleeps (reads nothing, writes nothing)
+    whatever argv the engine built; ff_timeout is shortened so the watchdog fires within a second."""
+    HANG = [sys.executable, "-c", "import time; time.sleep(60)"]
+
+    def hang(self, timeout=0.5):
+        real = subprocess.Popen
+        argvs = []
+
+        def popen(cmd, *a, **kw):
+            argvs.append(list(map(str, cmd)))
+            return real(self.HANG, *a, **kw)
+        st = contextlib.ExitStack()
+        st.enter_context(mock.patch.object(media_util.subprocess, "Popen", side_effect=popen))
+        st.enter_context(mock.patch.object(media_util, "ff_timeout", return_value=timeout))
+        return st, argvs
+
+
+class TestFfmpegPipelinesNeverHang(_Tmp, _Hang):
+    """Review I-1: every direct ffmpeg pipeline is bounded (preview_video.py: T2.14's fixer)."""
+
+    def assert_killed(self, fn, argvs):
+        import time
+        t0 = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired) as cm:
+            fn()
+        self.assertLess(time.monotonic() - t0, 20)
+        self.assertEqual(cm.exception.timeout, 0.5)
+        self.assertTrue(argvs and media_util.is_ff(argvs[0]), argvs)       # the engine's own ffmpeg argv
+        return cm.exception
+
+    def test_ff_popen_kills_a_hung_reader_and_passes_a_finished_one(self):
+        st, _ = self.hang()
+        with st, self.assertRaises(subprocess.TimeoutExpired):
+            with media_util.ff_popen(["ffmpeg", "-i", "x"], stdout=subprocess.PIPE) as p:
+                p.stdout.read()
+        with mock.patch.object(media_util, "ff_timeout", return_value=30):
+            with media_util.ff_popen([sys.executable, "-c", "print('ok')"], stdout=subprocess.PIPE) as p:
+                self.assertEqual(p.stdout.read().strip(), b"ok")
+        self.assertEqual(p.returncode, 0)
+
+    def test_media_analyze_shots(self):
+        from lib import media
+        st, argvs = self.hang()
+        with st:
+            self.assert_killed(lambda: media.analyze_shots(self.tmp / "a.mp4", 30.0), argvs)
+
+    def test_shots_analyze_window(self):
+        from lib import shots
+        st, argvs = self.hang()
+        with st, mock.patch.object(shots, "detect_cuts", return_value=[]):
+            self.assert_killed(lambda: shots.analyze_window(self.tmp / "a.mp4", 0, 30000, faces_fn=lambda im: []),
+                               argvs)
+
+    def test_motion_animatic_encoder(self):
+        from PIL import Image
+        from lib import media_util as mu, motion_animatic, motion_audio, previews, stamps
+        plan = {"fps": 25, "duration_frames": 250, "scenes": [{"id": "S1", "type": "kinetic", "start_frame": 0}]}
+        p = Paths(self.tmp / "C", "V1_MO")
+        st, argvs = self.hang()
+        with st, mock.patch.object(stamps, "read_compiled", return_value=plan), \
+                mock.patch.object(previews, "Brand"), \
+                mock.patch.object(motion_audio, "mix", return_value=self.tmp / "mix.wav"), \
+                mock.patch.object(mu, "contact_sheet", return_value=self.tmp / "sheet.jpg"), \
+                mock.patch.object(motion_animatic, "scene_still", return_value=Image.new("RGB", (540, 960))):
+            self.assert_killed(lambda: motion_animatic.render(p), argvs)
+        self.assertFalse(p.p("08_quality_control/animatic/_animatic_ffmpeg.log").exists())
+
+    def run_timeout_of(self, fn):
+        """subprocess.run as a hung ffmpeg would end: TimeoutExpired after the timeout the engine passed."""
+        seen = []
+
+        def run(cmd, *a, **kw):
+            seen.append((list(map(str, cmd)), kw.get("timeout")))
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+        with mock.patch("subprocess.run", side_effect=run), self.assertRaises(subprocess.TimeoutExpired):
+            fn()
+        self.assertTrue(seen and media_util.is_ff(seen[0][0]), seen)
+        return seen[0]
+
+    def test_media_snap_range_points(self):
+        from lib import media
+        argv, timeout = self.run_timeout_of(lambda: media.snap_range_points(self.tmp / "a.mp4", 10000, 20000))
+        self.assertEqual(timeout, media_util.ff_timeout(argv))
+        self.assertIsNotNone(timeout)
+
+    def test_reels_audio_card(self):
+        from lib import episode, reels
+        cand = {"id": "R1", "in_ms": 0, "out_ms": 4000, "total": 9, "type": "advice"}
+        with mock.patch.object(episode, "episode_file", return_value=self.tmp / "ep.wav"):
+            argv, timeout = self.run_timeout_of(lambda: reels.audio_card(None, cand, self.tmp / "R1.mp4"))
+        self.assertEqual(timeout, 10 + 3 * 4)
+
 
 # ------------------------------------------------------------------------------------------- MI-18 ffmpeg choice
 class TestBundledFfmpegFirst(_Tmp):
@@ -155,6 +286,22 @@ class TestBundledFfmpegFirst(_Tmp):
             self.assertEqual(ch["path"], str(bundled))
             self.assertIn("WHYNOT_FFMPEG=", ch["bad_override"])
             self.assertTrue(any("WHYNOT_FFMPEG" in f["item"] for f in portability.ffmpeg_fix({}, ch["bad_override"])))
+
+    def test_an_override_may_name_the_folder_holding_ffmpeg(self):
+        """Review m-4: like state.json `ffmpeg.path`, WHYNOT_FFMPEG may be the binary's folder."""
+        folder = self.tmp / "ffmpeg-9"
+        exe = folder / ("ffmpeg.exe" if IS_WIN else "ffmpeg")
+        folder.mkdir()
+        with self.env(WHYNOT_FFMPEG=str(folder)), mock.patch.dict(sys.modules, {"imageio_ffmpeg": None}):
+            self.assertIsNotNone(common.ffmpeg_choice()["bad_override"])          # a folder without ffmpeg: bad
+            exe.write_bytes(b"")
+            ch = common.ffmpeg_choice()
+            self.assertEqual((ch["path"], ch["source"], ch["bad_override"]),
+                             (str(exe), "override WHYNOT_FFMPEG", None))
+
+    def test_the_sandbox_drops_a_developers_ffmpeg_variables(self):
+        self.assertIn("WHYNOT_FFMPEG", _isolation._DROP)
+        self.assertIn("WHYNOT_FFMPEG_TIMEOUT_SCALE", _isolation._DROP)
 
     def test_doctor_self_test_names_a_missing_filter(self):
         def runner(argv, **kw):
@@ -199,8 +346,18 @@ class TestAppleScriptArgv(unittest.TestCase):
                 scripts = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-e"]
                 self.assertIn("end run", scripts)
                 self.assertFalse(any("pwned" in s for s in scripts))                 # never inside the source
-                self.assertTrue(any('tell application "Adobe \\"Q\\" 2025"' in s and "item 1 of argv" in s
-                                    for s in scripts), scripts)
+                tell = [s for s in scripts if s.startswith('tell application "Adobe \\"Q\\" 2025"')]
+                self.assertEqual(len(tell), 1, scripts)
+                if key == "after_effects":                                          # unchanged form
+                    self.assertTrue(tell[0].endswith("to DoScriptFile (item 1 of argv)"), tell)
+                else:
+                    # T2.15 review I-2: no `POSIX file` inside Photoshop's tell (it would be sent to Photoshop as an
+                    # object specifier, -1728); the alias is made before the tell, by AppleScript (Mac run pending)
+                    self.assertTrue(tell[0].endswith("to do javascript jsxFile"), tell)
+                    self.assertNotIn("POSIX file", tell[0])
+                    pre = scripts.index("set jsxFile to ((item 1 of argv) as POSIX file) as alias")
+                    self.assertLess(pre, scripts.index(tell[0]))
+                    self.assertLess(scripts.index("on run argv"), pre)
 
 
 # ------------------------------------------------------------------------------------------- statuses
@@ -214,6 +371,29 @@ class TestStatus(_Tmp):
         p = self.project()
         self.assertIn("DELIVERED", common.STATUSES)
         self.assertEqual(common.set_status(p, "DELIVERED", "sent to the client")["status"], "DELIVERED")
+
+    def test_delivered_counts_as_done_on_the_board_and_in_the_stale_checks(self):
+        """Review m-5: the client board and the motion-QC / `reel next` stale marks treat DELIVERED as finished."""
+        import inspect
+        from lib import motion_qc, onboard
+        self.assertEqual(common.DONE_STATUSES, ("QC_PASSED", "READY_FOR_HUMAN_EDITOR", "DELIVERED"))
+        self.assertIn("stale and status in DONE_STATUSES", inspect.getsource(motion_qc))    # motion `reel next`
+        self.assertIn("stale and status in DONE_STATUSES", CLI.read_text(encoding="utf-8"))  # `reel next`
+        root = self.tmp / "C"
+        for d in ("assets", "data/Raw"):
+            (root / d).mkdir(parents=True)
+        (root / "data" / "Raw" / "a.mp4").write_bytes(b"")
+        inv = {"files": [{"path": str(root / "data/Raw/a.mp4"), "rel": "data/Raw/a.mp4", "role": "source_footage",
+                          "kind": "video", "size_bytes": 1}], "by_role": {}, "warnings": []}
+        common.write_json(root / "output" / "discovery" / "input-inventory.json", inv)
+        from lib.clip_ids import clip_ids, id_of
+        pp = Paths(root, id_of(clip_ids(root, inv), "data/Raw/a.mp4"))
+        pp.ensure_project()
+        common.write_json(pp.p("02_transcription/transcript.json"), {})
+        common.write_text(pp.p("09_handoff/README.md"), "x")
+        common.set_status(pp, "DELIVERED", "sent")
+        clip = onboard.inbox(root, refresh=False)["clips"][0]
+        self.assertEqual((clip["status"], clip["state"]), ("DELIVERED", "done"), clip)
 
     def test_history_keeps_the_last_200_and_is_trimmed_inside_the_lock(self):
         p = self.project()
@@ -249,11 +429,31 @@ class TestStableHostId(_Tmp):
         writer_lock.host_id.cache_clear()
 
     def test_mac_uses_the_hardware_uuid_not_the_hostname(self):
+        import hashlib
         writer_lock.host_id.cache_clear()
         out = '  "IOPlatformUUID" = "1234-ABCD"\n'
         with mock.patch.object(writer_lock, "IS_MAC", True), \
                 mock.patch.object(writer_lock.subprocess, "run", return_value=_done(out=out)):
-            self.assertEqual(writer_lock.host_id(), "mac:1234-ABCD")
+            hid = writer_lock.host_id()
+            # T2.15 review m-6: only a short hash of the hardware UUID goes into the (shared, synced) lease file
+            self.assertEqual(hid, "mac:" + hashlib.sha256(b"1234-ABCD").hexdigest()[:16])
+            self.assertNotIn("1234-ABCD", hid)
+            self.assertTrue(writer_lock.same_host({"host_id": hid}))
+            self.assertTrue(writer_lock.same_host({"host_id": "mac:1234-ABCD"}))      # a 3.0 beta lease, unhashed
+            self.assertFalse(writer_lock.same_host({"host_id": "mac:5678-EFGH"}))
+
+    def test_a_new_lease_never_holds_the_clear_uuid(self):
+        writer_lock.host_id.cache_clear()
+        root = self.tmp / "C"
+        root.mkdir()
+        out = '  "IOPlatformUUID" = "1234-ABCD"\n'
+        with mock.patch.object(writer_lock, "IS_MAC", True), \
+                mock.patch.object(writer_lock.subprocess, "run", return_value=_done(out=out)):
+            hid = writer_lock.host_id()                      # looked up once per process (cached)
+        with writer_lock.acquire(root, "plan", env={"WHYNOT_LOCK_SESSION": "t215b"}):
+            text = writer_lock.lock_path(root).read_text(encoding="utf-8")
+        self.assertNotIn("1234-ABCD", text)
+        self.assertEqual(json.loads(text)["host_id"], hid)
 
     def test_a_dead_holder_is_taken_over_after_the_hostname_changed(self):
         root = self.tmp / "C"
@@ -283,9 +483,11 @@ class TestStableHostId(_Tmp):
 
 # ------------------------------------------------------------------------------------------- gpu-enable via uv
 class TestGpuEnableUv(_Tmp):
-    def run_gpu_enable(self, home: Path, pip_ok: bool):
+    def run_gpu_enable(self, home: Path, pip_ok: bool, index_url=None):
+        from lib import runtime
         cli = cli_module()
         calls = []
+        comp = {"runtime": {"index_url": index_url}}
 
         def run(argv, *a, **kw):
             calls.append((list(map(str, argv)), kw))
@@ -300,6 +502,7 @@ class TestGpuEnableUv(_Tmp):
                 mock.patch.object(plat, "gpu_info", return_value=gpu), \
                 mock.patch.object(plat, "install_cuda_redist", side_effect=OSError("CDN down")), \
                 mock.patch.object(plat, "engine_runtime", return_value={"kind": "runtime", "python": rt_py}), \
+                mock.patch.object(runtime, "components", return_value=comp), \
                 mock.patch("subprocess.run", side_effect=run), contextlib.redirect_stdout(buf), \
                 contextlib.redirect_stderr(io.StringIO()):
             cli.cmd_gpu_enable(types.SimpleNamespace())
@@ -314,16 +517,57 @@ class TestGpuEnableUv(_Tmp):
         install = [c for c, _ in calls if c[0] == str(uv)]
         self.assertEqual(len(install), 1, calls)
         self.assertEqual(install[0][1:5], ["pip", "install", "--python", str(rt_py)])
-        self.assertIn("nvidia-cublas-cu12", install[0])
+        self.assertNotIn("--index-url", install[0])                       # components.json index_url: null
         env = next(kw["env"] for c, kw in calls if c[0] == str(uv))
         self.assertEqual(env["UV_NO_CONFIG"], "1")
         self.assertEqual(doc["via"], "uv pip")
+        # T2.15 review m-7: pinned and hash-checked, like the rest of the runtime
+        req = Path(install[0][install[0].index("-r") + 1])
+        self.assertIn("--require-hashes", install[0])
+        line = req.read_text(encoding="utf-8").strip()
+        self.assertTrue(line.startswith("nvidia-cublas-cu12==12.9.1.4 --hash=sha256:"), line)
+        self.assertEqual(line.count("--hash=sha256:"), 3)                  # win_amd64 + 2 manylinux wheels
+
+    def test_the_runtime_index_url_is_used(self):
+        home = self.tmp / "home"
+        uv = home / "bin" / ("uv.exe" if plat.IS_WIN else "uv")
+        uv.parent.mkdir(parents=True)
+        uv.write_bytes(b"")
+        calls, _, _ = self.run_gpu_enable(home, pip_ok=False, index_url="https://mirror.example/simple")
+        argv = next(c for c, _ in calls if c[0] == str(uv))
+        self.assertEqual(argv[argv.index("--index-url") + 1], "https://mirror.example/simple")
+
+    def test_the_cublas_pin_matches_the_nvidia_redist_and_the_locked_ctranslate2(self):
+        cli = cli_module()
+        ver = cli.CUDA_WHEEL_PINS["nvidia-cublas-cu12"][0]
+        self.assertEqual(plat.CUDA_REDIST_MANIFEST, f"redistrib_{'.'.join(ver.split('.')[:3])}.json")
+        lock = (SK / "setup" / "locks" / "runtime-win-x64.lock").read_text(encoding="utf-8")
+        self.assertIn("ctranslate2==4.", lock)                             # a CUDA 12 build: cuBLAS 12.x
+        self.assertTrue(ver.startswith("12."))
+
+    def test_pip_fallback_probe_has_a_timeout(self):
+        home = self.tmp / "home"
+        calls, doc, rt_py = self.run_gpu_enable(home, pip_ok=True)
+        probe = next(kw for c, kw in calls if c[1:4] == ["-m", "pip", "--version"])
+        self.assertEqual(probe.get("timeout"), 60)
+        argv = next(c for c, _ in calls if c[1:4] == ["-m", "pip", "install"])
+        self.assertIn("--require-hashes", argv)
+        self.assertEqual(doc["via"], "pip")
 
     def test_no_uv_and_no_pip_is_guidance_not_a_crash(self):
         from lib.errors import Guidance
         with self.assertRaises(Guidance) as cm:
             self.run_gpu_enable(self.tmp / "home", pip_ok=False)
         self.assertIn("reel setup", cm.exception.how)
+
+    def test_doctor_says_a_runtime_sync_removes_the_wheels(self):
+        from lib import onboard
+        gpu = {"cuda_devices": 1, "cuda_libs_missing": ["cublas64_12.dll"], "name": "RTX"}
+        with mock.patch.object(plat, "gpu_info", return_value=gpu), \
+                mock.patch.object(portability, "doctor_checks", return_value=({}, [])):
+            rep = onboard.doctor()
+        fix = next(f for f in rep["fixes"] if "GPU transcription" in f["item"])
+        self.assertIn("reel gpu-enable again", fix["fix"])
 
 
 # ------------------------------------------------------------------------------------------- plan main_footage
@@ -360,6 +604,57 @@ class TestDefaultFootageRelative(_Tmp):
         w = next(x for x in warnings if "main_footage not set" in x)
         self.assertIn("data/Raw/a.mp4", w)
         self.assertIn("only raw clip", w)
+
+
+def _link_dir(target: Path, link: Path) -> None:
+    if IS_WIN:
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        os.symlink(target, link)
+
+
+class TestRangeFootageRelative(_Tmp):
+    """Review m-8: `reel range` stores --footage by the plan's rule (realpath on both sides), not a bare
+    is_relative_to against the resolved client root."""
+
+    def test_footage_through_a_linked_client_folder_is_stored_relative(self):
+        from lib import media
+        real = self.tmp / "real" / "C"
+        for d in ("assets", "data/Raw"):
+            (real / d).mkdir(parents=True)
+        (real / "data" / "Raw" / "ep.mp4").write_bytes(b"")
+        link = self.tmp / "C-link"
+        _link_dir(real, link)
+        self.addCleanup(lambda: os.rmdir(link) if IS_WIN else os.unlink(link))
+        cli = cli_module()
+        a = types.SimpleNamespace(root=str(link), video_id="R1", episode=None, footage=str(link / "data/Raw/ep.mp4"),
+                                  start="1", end="5", snap=False, label="")
+        buf = io.StringIO()
+        with mock.patch.object(media, "probe", return_value={"duration_s": 60.0}), \
+                mock.patch.object(media, "snap_range_points", return_value={}), contextlib.redirect_stdout(buf):
+            cli.cmd_range(a)
+        self.assertEqual(json.loads(buf.getvalue())["footage"], "data/Raw/ep.mp4")
+        self.assertEqual(common.read_json(Paths(link, "R1").p("00_inputs/source.json"))["footage"], "data/Raw/ep.mp4")
+
+
+# ------------------------------------------------------------------------------------------- bridge "no reply"
+class TestBridgeNoReplyIsNotFinished(_Tmp):
+    """Review m-3: the bridge writes result.json for its own 20-min "no reply" timeout while the host may still run
+    the script: that job still counts as claimed (the old project is not restored under a running save)."""
+
+    def test_result_kinds(self):
+        from lib import cep_queue
+        q = self.tmp / "q"
+        q.mkdir()
+        res = q / "J1.result.json"
+        for body, claimed in ((json.dumps({"ok": True, "result": "{}"}), False),
+                              (json.dumps({"ok": False, "error": "expired"}), False),
+                              (json.dumps({"ok": False, "error": "no reply from PPRO within 20 min"}), True),
+                              ('{"ok": tr', True)):                                   # still being written
+            with self.subTest(body=body):
+                res.write_text(body, encoding="utf-8")
+                self.assertIs(cep_queue._bridge_has_job(q, "J1"), claimed)
 
 
 if __name__ == "__main__":

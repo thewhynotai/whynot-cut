@@ -230,7 +230,8 @@ def motion_next(paths) -> dict:
     names = [s.split(" (")[0] for s in stale]
     remaining = stale + [n for n in todo if n.split(" (")[0] not in names]
     status = load_status(paths)["status"]
-    if stale and status in ("QC_PASSED", "READY_FOR_HUMAN_EDITOR"):
+    from .common import DONE_STATUSES
+    if stale and status in DONE_STATUSES:                       # T2.15: DELIVERED too
         status = f"{status} (STALE: inputs changed since)"
     from .people import profile_notice
     return {"status": status, "profile": active_profile(paths.root), "kind": "motion",

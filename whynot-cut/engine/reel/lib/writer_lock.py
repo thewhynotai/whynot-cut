@@ -32,6 +32,7 @@ Stdlib only: imported by cli.py (`lib.writer_lock`) and by the hooks (`writer_lo
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 import os
 import re
@@ -54,27 +55,44 @@ IS_MAC = sys.platform == "darwin"
 
 
 @functools.lru_cache(maxsize=1)
-def host_id() -> str:
-    """This computer, stably (3.0 T2.15): a Mac's hostname changes with the network, which would make a dead holder
-    look like another computer's and disable the takeover. macOS: the hardware UUID (ioreg), else the Bonjour
-    LocalHostName (scutil); elsewhere the computer name."""
+def _host_ids() -> tuple:
+    """(host_id, the same id as 3.0 betas wrote it or None). macOS: the hardware UUID (ioreg), stored only as a short
+    sha256 (T2.15 review m-6: the lease sits in client folders that are shared and synced; the beta wrote it in
+    clear), else the Bonjour LocalHostName (scutil); elsewhere the computer name."""
     if IS_MAC:
-        for cmd, pat in ((["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], r'"IOPlatformUUID"\s*=\s*"([^"]+)"'),
-                         (["scutil", "--get", "LocalHostName"], r"^\s*(\S+)\s*$")):
+        for cmd, pat, hashed in (
+                (["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], r'"IOPlatformUUID"\s*=\s*"([^"]+)"', True),
+                (["scutil", "--get", "LocalHostName"], r"^\s*(\S+)\s*$", False)):
             try:
                 out = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout or ""
             except (OSError, subprocess.SubprocessError):
                 continue
             m = re.search(pat, out, re.M)
             if m:
-                return "mac:" + m.group(1)
-    return socket.gethostname()
+                v = m.group(1)
+                if hashed:
+                    return "mac:" + hashlib.sha256(v.encode("utf-8")).hexdigest()[:16], "mac:" + v
+                return "mac:" + v, None
+    return socket.gethostname(), None
+
+
+def host_id() -> str:
+    """This computer, stably (3.0 T2.15): a Mac's hostname changes with the network, which would make a dead holder
+    look like another computer's and disable the takeover (see _host_ids)."""
+    return _host_ids()[0]
+
+
+host_id.cache_clear = _host_ids.cache_clear       # type: ignore[attr-defined]   (tests clear the lookup)
 
 
 def same_host(rec: dict) -> bool:
-    """Was this lock record written on this computer? `host_id` when it has one, else (older records) `host`."""
+    """Was this lock record written on this computer? `host_id` when it has one (also the unhashed hardware UUID a
+    3.0 beta lease holds), else (older records) `host`."""
     hid = rec.get("host_id")
-    return hid == host_id() if hid else rec.get("host") == socket.gethostname()
+    if not hid:
+        return rec.get("host") == socket.gethostname()
+    legacy = _host_ids()[1]
+    return hid == host_id() or (legacy is not None and hid == legacy)
 
 
 def lock_path(root) -> Path:

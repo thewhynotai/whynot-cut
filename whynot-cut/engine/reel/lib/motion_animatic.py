@@ -11,6 +11,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from .common import ffmpeg_exe, fmt_ts, read_json
+from .media_util import ff_popen
 
 ANIM_FPS = 10
 LABEL = "layout approximation - After Effects frames are the truth"
@@ -188,9 +189,10 @@ def render(paths, width: int = 540) -> dict:
     cache = {}
     # stderr goes to a file, not a pipe: a pipe nobody reads while frames are written can fill and stall ffmpeg, and
     # the old pipe was never closed (MI-9 ResourceWarning). The `with` closes stdin and reaps the process.
+    # ff_popen (T2.15, MI-17): a watchdog kills an encoder that stops taking frames after 10 s + 3 x the animatic
     errf = d / "_animatic_ffmpeg.log"
     try:
-        with open(errf, "wb") as ef, subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=ef) as p:
+        with open(errf, "wb") as ef, ff_popen(cmd, stdin=subprocess.PIPE, stderr=ef) as p:
             for k in range(n):
                 t = k / ANIM_FPS * fps
                 i = max((j for j, sc in enumerate(plan["scenes"]) if sc["start_frame"] <= t), default=0)

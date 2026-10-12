@@ -209,12 +209,25 @@ def _bridge_has_job(queue: Path, jid: str) -> bool:
     bridge has (or had) it, so Premiere / After Effects may still act on it."""
     if _cancel(queue, jid):
         return False
-    if (queue / f"{jid}.result.json").exists():
-        return False              # the bridge finished it (T2.15): nothing more will happen, the old project goes back
+    res_p = queue / f"{jid}.result.json"
+    if res_p.exists():            # the bridge finished it (T2.15): nothing more will happen, the old project goes back,
+        return not _host_finished(res_p)    # unless that result is the bridge's own "no reply" timeout
     if any((queue / f"{jid}.{s}").exists() for s in ("job.json", "claimed", "running")):
         return True
     _unlink(queue / f"{jid}.tmp", queue / f"{jid}.data.json")      # interrupted before the job file was renamed in
     return False
+
+
+def _host_finished(res_p: Path) -> bool:
+    """A result.json the HOST answered. False for the bridge's own 20-min "no reply from <host>" timeout (bridge.js
+    writes it and frees the queue while ExtendScript may still be running and saving) and for a result still being
+    written (unreadable): the job may still act, so it counts as claimed (T2.15 review m-3)."""
+    try:
+        r = json.loads(res_p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    err = r.get("error") if isinstance(r, dict) else None
+    return isinstance(r, dict) and not (isinstance(err, str) and err.startswith("no reply"))
 
 
 CANCEL_TRIES, CANCEL_RETRY_S = 5, 0.1      # a Windows sharing lock on job.json passes within moments

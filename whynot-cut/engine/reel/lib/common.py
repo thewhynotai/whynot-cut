@@ -151,6 +151,8 @@ STATUSES = [
     "ASSETS_GENERATED", "PROJECT_ASSEMBLED", "QC_PASSED", "READY_FOR_HUMAN_EDITOR", "DELIVERED",
     "BLOCKED",
 ]
+# a clip whose edit is finished: the client board shows it done, `reel next` marks it STALE when inputs change after
+DONE_STATUSES = ("QC_PASSED", "READY_FOR_HUMAN_EDITOR", "DELIVERED")
 
 PROJECT_SUBDIRS = [
     "00_inputs", "01_analysis", "02_transcription",
@@ -360,15 +362,19 @@ FFMPEG_OVERRIDES = ("WHYNOT_FFMPEG", "NH_FFMPEG")
 
 def ffmpeg_choice() -> dict:
     """{path, source, bad_override}: which ffmpeg the engine runs (3.0 T2.15, MI-18). An override (WHYNOT_FFMPEG, or
-    the 2.x NH_FFMPEG) > the pinned ffmpeg in the engine home (state.json / ffmpeg/<ver>/, T2.1) > the 2.x
-    <home>/ffmpeg file > the engine runtime's imageio-ffmpeg binary > PATH last: an old system build (Chocolatey,
-    Homebrew) may lack filters the engine uses. bad_override names an override that is set but not a file."""
+    the 2.x NH_FFMPEG; the binary or, like state.json `ffmpeg.path`, its folder) > the pinned ffmpeg in the engine
+    home (state.json / ffmpeg/<ver>/, T2.1) > the 2.x <home>/ffmpeg file > the engine runtime's imageio-ffmpeg binary
+    > PATH last: an old system build (Chocolatey, Homebrew) may lack filters the engine uses. bad_override names an
+    override that is set but neither the binary nor a folder holding it."""
     from .plat import engine_ffmpeg
     bad = None
     for k in FFMPEG_OVERRIDES:
         v = os.environ.get(k)
-        if v and Path(native_path(v)).expanduser().is_file():
-            return {"path": str(Path(native_path(v)).expanduser()), "source": f"override {k}", "bad_override": None}
+        f = Path(native_path(v)).expanduser() if v else None
+        if f is not None and f.is_dir():
+            f = f / ("ffmpeg.exe" if IS_WIN else "ffmpeg")
+        if f is not None and f.is_file():
+            return {"path": str(f), "source": f"override {k}", "bad_override": None}
         if v and not bad:
             bad = f"{k}={v}"
     pinned = engine_ffmpeg(engine_home())

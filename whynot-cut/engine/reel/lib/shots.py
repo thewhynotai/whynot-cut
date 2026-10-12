@@ -159,24 +159,25 @@ def analyze_window(path: Path, offset_ms: int, duration_ms: int, faces_fn=face_b
     cuts = detect_cuts(path, offset_ms, duration_ms, cfg.get("scene_threshold", 0.3))
     hard = shots_from_cuts(cuts, duration_ms, cfg.get("min_shot_ms", 400))
     W, H, fps = 640, 360, float(cfg.get("sample_fps", 2.0))
-    p = subprocess.Popen([ffmpeg_exe(), "-loglevel", "error", "-ss", f"{offset_ms / 1000:.3f}", "-t",
-                          f"{duration_ms / 1000:.3f}", "-i", str(path), "-an", "-vf",
-                          f"fps={fps},scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2",
-                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     from .media import _hist, _similarity
+    from .media_util import ff_popen
     raw, n = [], 0
-    try:
-        while True:
-            buf = p.stdout.read(W * H * 3)
-            if len(buf) < W * H * 3:
-                break
-            im = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
-            raw.append((int((n + 0.5) * 1000 / fps), [[round(float(x), 4) for x in f] for f in faces_fn(im)], _hist(im)))
-            n += 1
-    finally:
-        p.stdout.close()
-        p.kill()
-        p.wait()
+    # ff_popen: a watchdog kills a decoder stuck on a corrupt file or a stalled share (T2.15, MI-17)
+    with ff_popen([ffmpeg_exe(), "-loglevel", "error", "-ss", f"{offset_ms / 1000:.3f}", "-t",
+                   f"{duration_ms / 1000:.3f}", "-i", str(path), "-an", "-vf",
+                   f"fps={fps},scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2",
+                   "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as p:
+        try:
+            while True:
+                buf = p.stdout.read(W * H * 3)
+                if len(buf) < W * H * 3:
+                    break
+                im = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
+                raw.append((int((n + 0.5) * 1000 / fps), [[round(float(x), 4) for x in f] for f in faces_fn(im)],
+                            _hist(im)))
+                n += 1
+        finally:
+            p.kill()
     # a frame without a detected face that looks like the frames WITH faces is still the speaker (head turned, hand
     # over the face): colour-histogram intersection, the same rule media.analyze_shots uses for cutaways
     ref = [h for _t, f, h in raw if f]

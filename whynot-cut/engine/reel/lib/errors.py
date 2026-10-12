@@ -132,10 +132,16 @@ def describe(exc: BaseException) -> dict:
                 "how": "Save the file as UTF-8 text (in Notepad: Save As, Encoding UTF-8), then run the command again"}
     if isinstance(exc, subprocess.TimeoutExpired):
         name = _cmd_name(exc.cmd)
+        if name.lower().startswith(("ffmpeg", "ffprobe")):       # T2.15: the ffmpeg timeouts are 10 s + 3 x the media
+            return {"ok": False, "error": f"{name} did not finish within {exc.timeout:g} s and was stopped",
+                    "where": where,
+                    "how": "Check that the media file plays and is fully copied or synced (a file on a network share or "
+                           "cloud folder that is still downloading stalls ffmpeg); then run the command again. For a "
+                           "very long file or a slow share, allow more time: set WHYNOT_FFMPEG_TIMEOUT_SCALE=3 (3x the "
+                           "normal time) and run it again"}
         return {"ok": False, "error": f"{name} did not finish within {exc.timeout:g} s and was stopped", "where": where,
                 "how": f"Check that {name} is not waiting on a dialog (close any open dialog in After Effects or "
-                       "Premiere) and that the media plays; then run the command again (for a very long clip, a larger "
-                       "--timeout where the command has one)"}
+                       "Premiere) and that the media plays; then run the command again"}
     if isinstance(exc, PermissionError):
         f = exc.filename or "a file"
         return {"ok": False, "error": f"no permission to use {f}", "where": str(exc.filename or where),

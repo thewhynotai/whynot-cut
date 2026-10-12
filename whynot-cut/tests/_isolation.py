@@ -17,7 +17,8 @@ What it does, once per process:
   * points font discovery (lib/fonts.py, through plat.font_search_dirs) at an empty sandbox folder
     (WHYNOT_FONT_DIRS): no test reads the machine's font folders by accident; a test that needs fonts injects them
     (dirs=, or a patched plat.font_dirs). plat.font_dirs() itself still names the real folders;
-  * keeps the pinned ffmpeg of the real engine home findable (NH_FFMPEG, read-only) so media tests behave as before;
+  * keeps the pinned ffmpeg of the real engine home findable (NH_FFMPEG, read-only) so media tests behave as before
+    (a developer's WHYNOT_FFMPEG / WHYNOT_FFMPEG_TIMEOUT_SCALE are dropped: they would win over it / scale timeouts);
   * puts every temp folder of the run inside the sandbox (tempfile.tempdir, and TMP/TEMP/TMPDIR for child processes)
     and makes TemporaryDirectory clean up robustly: Windows under load answers rmtree with WinError 145 ("directory is
     not empty") or a read-only / briefly locked file, so cleanup retries (chmod + short backoff) and whatever still
@@ -47,7 +48,8 @@ PREFIX = "whynot-test-sandbox-"
 MARKER = ".whynot-test-sandbox"          # written into every sandbox: only folders holding it are ever swept
 STALE_S = 24 * 3600
 _DROP = ("CLAUDE_PLUGIN_DATA", "CLAUDE_ENV_FILE", "WHYNOT_OPTIONS_FILE",
-         "WHYNOT_PREMIERE_APP", "WHYNOT_AE_APP", "WHYNOT_AERENDER") + plat.HOME_ENV + plat.CLIENTS_ENV
+         "WHYNOT_PREMIERE_APP", "WHYNOT_AE_APP", "WHYNOT_AERENDER",
+         "WHYNOT_FFMPEG", "WHYNOT_FFMPEG_TIMEOUT_SCALE") + plat.HOME_ENV + plat.CLIENTS_ENV   # T2.15: a dev's ffmpeg
 
 
 def _live_roots() -> list:

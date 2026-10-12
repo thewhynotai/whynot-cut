@@ -28,13 +28,21 @@ def _as_string(s: str) -> str:
     return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def osascript_argv(app: str, command: str, timeout: int, *args) -> list[str]:
+def osascript_argv(app: str, command: str, timeout: int, *args, pre: tuple = ()) -> list[str]:
     """osascript with the `on run argv` form (3.0 T2.15, review §10): the script file path travels as an argument,
     never inside the AppleScript source, so a `"` in a client folder name cannot end the string and run code. The app
-    name stays a literal (discovered by plat, escaped): AppleScript needs it at compile time for DoScriptFile."""
-    return ["osascript", "-e", "on run argv", "-e", f"with timeout of {int(timeout)} seconds",
-            "-e", f"tell application {_as_string(app)} to {command}", "-e", "end timeout", "-e", "end run",
+    name stays a literal (discovered by plat, escaped): AppleScript needs it at compile time for DoScriptFile.
+    `pre`: lines run before the `tell` block, outside the app's dictionary (a coercion the app must not see)."""
+    lines = [*pre, f"with timeout of {int(timeout)} seconds", f"tell application {_as_string(app)} to {command}",
+             "end timeout"]
+    return ["osascript", "-e", "on run argv", *[x for ln in lines for x in ("-e", ln)], "-e", "end run",
             *[str(a) for a in args]]
+
+
+# Photoshop: `POSIX file <variable>` inside `tell application "Photoshop"` is sent to Photoshop as an object specifier
+# ("Can't get POSIX file ...", -1728; the old literal form was resolved at compile time). The alias is made first, by
+# AppleScript itself, and only the finished alias goes to `do javascript` (T2.15 review I-2; not yet run on a Mac).
+PS_ALIAS = "set jsxFile to ((item 1 of argv) as POSIX file) as alias"
 
 
 def run_after_effects(jsx: Path, timeout: int, done: Callable[[], bool] | None = None) -> dict:
@@ -69,7 +77,7 @@ def run_photoshop(jsx: Path, timeout: int) -> dict:
         return {"status": "REFUSED", "msg": refused["error"], "how": refused["how"]}
     t0 = time.time()
     if plat.IS_MAC:
-        p = run(osascript_argv(app["name"], "do javascript (POSIX file (item 1 of argv) as alias)", timeout, jsx),
+        p = run(osascript_argv(app["name"], "do javascript jsxFile", timeout, jsx, pre=(PS_ALIAS,)),
                 check=False, timeout=timeout + 30)
     else:
         ps = ("$ErrorActionPreference='Stop'; $app = New-Object -ComObject Photoshop.Application; "

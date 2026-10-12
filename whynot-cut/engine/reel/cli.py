@@ -218,7 +218,8 @@ def cmd_range(a):
         o = snap["out"]["suggested_ms"] if "out" in snap else o
     p.ensure_project()
     old = read_json(f_src, {}) or {}
-    rel = str(f.relative_to(p.root)).replace("\\", "/") if f.is_relative_to(p.root) else str(f)
+    from lib.plan import _client_rel       # T2.15: the plan's main_footage rule (inventory rel, else realpath on both
+    rel = _client_rel(p, f, read_json(p.output / "discovery/input-inventory.json", {}) or {})    # sides: junction, 8.3)
     rec = {"footage": rel, "in_ms": i, "out_ms": min(o, dur_ms), "duration_ms": min(o, dur_ms) - i,
            "label": a.label or "", "set_at": now_iso()}
     write_json(f_src, rec)
@@ -713,7 +714,8 @@ def cmd_next(a):
         stale.insert(k, f"PLAYBACK edit-plan.md to editor, then approve-plan ({appr['message']})")
     todo = [s_ for s_ in stale] + [n for n in todo if n not in [s_.split(" (")[0] for s_ in stale]]
     status = load_status(p)["status"]
-    if stale and status in ("QC_PASSED", "DELIVERED"):
+    from lib.common import DONE_STATUSES
+    if stale and status in DONE_STATUSES:
         status = f"{status} (STALE: inputs changed since)"
     out({"status": status, "profile": active_profile(p.root), "next": todo[0] if todo else "done",
          "remaining": todo, "stale": stale,
@@ -933,24 +935,52 @@ def cmd_bench(a):
     out(cli_bench(a, P(a) if a.root and (a.video_id or a.episode) else None))
 
 
+# The cuBLAS wheel, pinned and hash-checked like the rest of the runtime (T2.15 review m-7): 12.9.1 is the library
+# plat.install_cuda_redist takes from NVIDIA (redistrib_12.9.1.json); the locked ctranslate2 4.8.2 (CUDA 12 build, no
+# torch in the runtime) loads cublas64_12 / libcublas.so.12 of any CUDA 12.x. Hashes: PyPI's win_amd64,
+# manylinux x86_64 and aarch64 wheels.
+CUDA_WHEEL_PINS = {"nvidia-cublas-cu12": ("12.9.1.4", (
+    "1e5fee10662e6e52bd71dec533fbbd4971bb70a5f24f3bc3793e5c2e9dc640bf",
+    "453611eb21a7c1f2c2156ed9f3a45b691deda0440ec550860290dc901af5b4c2",
+    "7a950dae01add3b415a5a5cdc4ec818fb5858263e9cca59004bb99fdbbd3a5d6"))}
+
+
 def cuda_wheel_install(pkgs: list[str], home: Path | None = None) -> tuple[list | None, dict | None, str]:
     """(argv, env, via) installing the cuBLAS wheels into the engine runtime (T2.15): uv-built runtimes have no pip,
     so the pinned uv of the engine home installs with `uv pip install --python <runtime python>`; a 2.x venv
-    (pip inside) uses pip. (None, None, "") when neither is possible."""
+    (pip inside) uses pip. (None, None, "") when neither is possible. Pinned packages (CUDA_WHEEL_PINS) go through a
+    hash-checked requirements file in <home>/cache when every package has hashes (Windows), else as `name==version`;
+    components.json `runtime.index_url` is the index when set (UV_NO_CONFIG hides any other uv config). A runtime
+    sync (`reel setup` after an update) removes these wheels again: doctor then names `reel gpu-enable` again."""
     import subprocess
     from lib import plat
     from lib.common import engine_home
+    from lib.runtime import components
     home = home or engine_home()
     rt = plat.engine_runtime(home)
     py = str(rt["python"]) if rt.get("kind") == "runtime" and rt.get("python") else sys.executable
+    specs = [f"{p}=={CUDA_WHEEL_PINS[p][0]}" if p in CUDA_WHEEL_PINS else p for p in pkgs]
+    if all(p in CUDA_WHEEL_PINS for p in pkgs):
+        req = home / "cache" / "gpu-enable-requirements.txt"
+        req.parent.mkdir(parents=True, exist_ok=True)
+        req.write_text("".join(f"{s} " + " ".join(f"--hash=sha256:{h}" for h in CUDA_WHEEL_PINS[p][1]) + "\n"
+                               for p, s in zip(pkgs, specs)), encoding="utf-8")
+        what = ["--require-hashes", "-r", str(req)]
+    else:
+        what = specs
+    idx = (components().get("runtime") or {}).get("index_url")
+    idx = ["--index-url", idx] if isinstance(idx, str) and idx and not idx.startswith("<") else []
     uv = home / "bin" / ("uv.exe" if plat.IS_WIN else "uv")
     if uv.is_file():
         env = dict(os.environ, UV_CACHE_DIR=str(home / "cache" / "uv"), UV_NO_CONFIG="1", UV_HTTP_TIMEOUT="60",
                    UV_HTTP_RETRIES="5")
-        return [str(uv), "pip", "install", "--python", py, *pkgs], env, "uv pip"
-    has_pip = subprocess.run([py, "-m", "pip", "--version"], capture_output=True).returncode == 0
+        return [str(uv), "pip", "install", "--python", py, *idx, *what], env, "uv pip"
+    try:
+        has_pip = subprocess.run([py, "-m", "pip", "--version"], capture_output=True, timeout=60).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        has_pip = False
     if has_pip:
-        return [py, "-m", "pip", "install", "--disable-pip-version-check", *pkgs], None, "pip"
+        return [py, "-m", "pip", "install", "--disable-pip-version-check", *idx, *what], None, "pip"
     return None, None, ""
 
 

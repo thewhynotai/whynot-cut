@@ -832,7 +832,7 @@ class TestPinnedFfmpeg(TempHome):
         ff = self.exe(self.home / "pinned")
         other = self.exe(self.t / "elsewhere")
         (self.home / "state.json").write_text(json.dumps({"ffmpeg": {"path": str(ff)}}), encoding="utf-8")
-        env = {k: v for k, v in os.environ.items() if k not in plat.HOME_ENV and k != "NH_FFMPEG"}
+        env = {k: v for k, v in os.environ.items() if k not in plat.HOME_ENV and k not in common.FFMPEG_OVERRIDES}
         env["WHYNOT_HOME"] = str(self.home)
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(common.shutil, "which", return_value=str(other)), \
@@ -845,7 +845,7 @@ class TestPinnedFfmpeg(TempHome):
         """The installer's ffmpeg/<ver>/ folder must not be mistaken for the 2.x <home>/ffmpeg symlink."""
         from lib import common
         (self.home / "ffmpeg" / "0.0").mkdir(parents=True)
-        env = {k: v for k, v in os.environ.items() if k not in plat.HOME_ENV and k != "NH_FFMPEG"}
+        env = {k: v for k, v in os.environ.items() if k not in plat.HOME_ENV and k not in common.FFMPEG_OVERRIDES}
         env["WHYNOT_HOME"] = str(self.home)
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(common.shutil, "which", return_value=None):
             self.assertNotEqual(common.ffmpeg_exe(), str(self.home / "ffmpeg"))

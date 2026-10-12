@@ -306,8 +306,10 @@ def audio_card(ep, cand: dict, out: Path) -> Path:
     src = episode_file(ep)
     a, dur = cand["in_ms"] / 1000, (cand["out_ms"] - cand["in_ms"]) / 1000
     import subprocess
-    pcm = subprocess.run([ffmpeg_exe(), "-loglevel", "error", "-ss", f"{a:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
-                          "-map", "0:a:0", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], capture_output=True).stdout or b""
+    from .media_util import ff_timeout
+    cmd = [ffmpeg_exe(), "-loglevel", "error", "-ss", f"{a:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
+           "-map", "0:a:0", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"]
+    pcm = subprocess.run(cmd, capture_output=True, timeout=ff_timeout(cmd)).stdout or b""      # T2.15: never hangs
     x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
     w, h, bars = 540, 960, 90
     im = Image.new("RGB", (w, h), (17, 17, 17))

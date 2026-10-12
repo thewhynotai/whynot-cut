@@ -6,9 +6,13 @@ closed at once by `open_rgb`); frames come through a pipe (rawvideo), never a te
 """
 from __future__ import annotations
 
+import contextlib
 import functools
+import math
+import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 # --------------------------------------------------------------------------- time
@@ -41,6 +45,8 @@ def parse_time(v, *, int_is_ms: bool = False) -> int:
 # --------------------------------------------------------------------------- ffmpeg timeouts (3.0 T2.15, MI-17)
 FF_TIMEOUT_BASE_S, FF_TIMEOUT_PER_MEDIA_S = 10, 3     # 10 s + 3 x the media duration
 FF_TIMEOUT_UNKNOWN_S = 3600                           # no -t and no probe-able input (a lavfi source): 1 h
+FF_PROBE_TIMEOUT_S = 30                               # the duration probe itself (a stalled network share)
+FF_TIMEOUT_SCALE_ENV = "WHYNOT_FFMPEG_TIMEOUT_SCALE"  # a float >= 1: every ffmpeg timeout x this (slow share, huge file)
 
 
 def is_ff(cmd) -> bool:
@@ -50,13 +56,23 @@ def is_ff(cmd) -> bool:
     return Path(str(cmd[0])).name.lower().startswith(("ffmpeg", "ffprobe"))
 
 
-def media_duration_s(path) -> float | None:
-    """A media file's duration in seconds (PyAV reads the header), None when it has none or cannot be opened."""
-    try:
-        st = Path(path).stat()
-    except (OSError, ValueError):
-        return None
-    return _duration_cached(str(path), st.st_size, st.st_mtime_ns)
+def media_duration_s(path, timeout: float | None = None) -> float | None:
+    """A media file's duration in seconds (PyAV reads the header), None when it has none, cannot be opened or does
+    not answer within FF_PROBE_TIMEOUT_S (T2.15 review: on a stalled share the stat / header read itself hangs, so
+    it runs in a daemon thread and the caller moves on with the unknown-duration timeout)."""
+    box: list = []
+
+    def probe():
+        try:
+            st = Path(path).stat()
+        except (OSError, ValueError):
+            box.append(None)
+            return
+        box.append(_duration_cached(str(path), st.st_size, st.st_mtime_ns))
+    t = threading.Thread(target=probe, name="whynot-ff-probe", daemon=True)
+    t.start()
+    t.join(FF_PROBE_TIMEOUT_S if timeout is None else timeout)
+    return box[0] if box else None
 
 
 @functools.lru_cache(maxsize=256)
@@ -69,9 +85,19 @@ def _duration_cached(path: str, size: int, mtime_ns: int) -> float | None:      
         return None
 
 
+def ff_timeout_scale() -> float:
+    """WHYNOT_FFMPEG_TIMEOUT_SCALE as a factor >= 1 (1 when unset or not a number >= 1)."""
+    try:
+        f = float(os.environ.get(FF_TIMEOUT_SCALE_ENV) or 1)
+    except ValueError:
+        return 1.0
+    return f if math.isfinite(f) and f >= 1 else 1.0
+
+
 def ff_timeout(cmd) -> float | None:
     """The timeout for an ffmpeg / ffprobe call: 10 s + 3 x the media duration (the largest `-t`, else the longest
-    `-i` input), FF_TIMEOUT_UNKNOWN_S when neither is known; None for any other command."""
+    `-i` input), FF_TIMEOUT_UNKNOWN_S when neither is known, times WHYNOT_FFMPEG_TIMEOUT_SCALE; None for any other
+    command."""
     if not is_ff(cmd):
         return None
     args = [str(a) for a in cmd[1:]]
@@ -85,13 +111,43 @@ def ff_timeout(cmd) -> float | None:
         elif k == "-i":
             ins.append(v)
     if ts:
-        dur = max(ts) / 1000
+        base = FF_TIMEOUT_BASE_S + FF_TIMEOUT_PER_MEDIA_S * max(ts) / 1000
     else:
         ds = [d for d in (media_duration_s(i) for i in ins if i not in ("-", "pipe:", "pipe:0")) if d]
-        if not ds:
-            return FF_TIMEOUT_UNKNOWN_S
-        dur = max(ds)
-    return FF_TIMEOUT_BASE_S + FF_TIMEOUT_PER_MEDIA_S * dur
+        base = FF_TIMEOUT_BASE_S + FF_TIMEOUT_PER_MEDIA_S * max(ds) if ds else FF_TIMEOUT_UNKNOWN_S
+    return base * ff_timeout_scale()
+
+
+@contextlib.contextmanager
+def ff_popen(cmd, **kw):
+    """subprocess.Popen for an ffmpeg pipeline (frames read from / written to its pipes) that never hangs (T2.15
+    review I-1): a watchdog kills the process after ff_timeout(cmd); the pipes are closed and the process reaped on
+    the way out (Popen's own `with`), and a kill raises subprocess.TimeoutExpired (errors.describe turns it into the
+    timeout guidance), also when the kill surfaced first as a short read or a broken pipe."""
+    timeout = ff_timeout(cmd)
+    p = subprocess.Popen(cmd, **kw)
+    fired = threading.Event()
+
+    def kill():
+        fired.set()
+        with contextlib.suppress(OSError):
+            p.kill()
+    timer = threading.Timer(timeout, kill) if timeout else None
+    if timer:
+        timer.daemon = True
+        timer.start()
+    try:
+        with p:
+            yield p
+    except BaseException as e:
+        if fired.is_set():
+            raise subprocess.TimeoutExpired(cmd, timeout) from e
+        raise
+    finally:
+        if timer:
+            timer.cancel()
+    if fired.is_set():
+        raise subprocess.TimeoutExpired(cmd, timeout)
 
 
 # --------------------------------------------------------------------------- frames

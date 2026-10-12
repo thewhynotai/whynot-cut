@@ -123,19 +123,17 @@ def analyze_shots(path: Path, duration_s: float, fps: float = 2.0, threshold: fl
     from .previews import _face_center
     W, H = 480, 270
     rng = ["-ss", f"{start_s:.3f}", "-t", f"{duration_s:.3f}"] if start_s else []
-    p = subprocess.Popen([ffmpeg_exe(), "-loglevel", "error", *rng, "-i", str(path), "-an", "-vf", f"fps={fps},scale={W}:{H}",
-                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+    from .media_util import ff_popen
     rows = []
-    try:
+    # ff_popen: a watchdog kills a decoder stuck on a corrupt file or a stalled share (T2.15, MI-17)
+    with ff_popen([ffmpeg_exe(), "-loglevel", "error", *rng, "-i", str(path), "-an", "-vf", f"fps={fps},scale={W}:{H}",
+                   "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE) as p:
         while True:
             b = p.stdout.read(W * H * 3)
             if len(b) < W * H * 3:
                 break
             im = Image.frombuffer("RGB", (W, H), b, "raw", "RGB", 0, 1)
             rows.append({"t": len(rows) / fps, "face": bool(_face_center(im)), "hist": _hist_np(im)})
-    finally:
-        p.stdout.close()
-        p.wait()
     face = np.array([r["face"] for r in rows], dtype=bool)
     if not face.any():
         return {"samples": len(rows), "cutaways_ms": [], "other_people_ms": [],
@@ -348,8 +346,10 @@ def snap_range_points(path: Path, in_ms: int, out_ms: int, search_ms: int = 2500
     def env(t0_ms, dur_ms):
         t0_ms = max(0, t0_ms)
         import subprocess
-        r = subprocess.run([ff, "-loglevel", "error", "-ss", f"{t0_ms / 1000:.3f}", "-t", f"{dur_ms / 1000:.3f}", "-i",
-                            str(path), "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"], capture_output=True)
+        from .media_util import ff_timeout
+        cmd = [ff, "-loglevel", "error", "-ss", f"{t0_ms / 1000:.3f}", "-t", f"{dur_ms / 1000:.3f}", "-i", str(path),
+               "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"]
+        r = subprocess.run(cmd, capture_output=True, timeout=ff_timeout(cmd))         # T2.15: never hangs
         x = np.frombuffer(r.stdout or b"", dtype="<i2").astype(np.float32) / 32768
         h = 160
         n = len(x) // h
