@@ -27,6 +27,34 @@
      "risks": []
     }
    ]
+  },
+  {
+   "episode_id": "EP12",
+   "candidates": [
+    {
+     "id": "R01",
+     "start": "\t٠٠:٠٠:١٦.١٥٠",
+     "end": "00:01:00.600",
+     "type": "success_story",
+     "title": "t",
+     "hook_quote": null,
+     "hook_text": null,
+     "evidence": "كلمه39 الشركه الكبري",
+     "end_evidence": "كلمه147 3 كلمه149",
+     "why": "w",
+     "score": {
+      "hook": 8,
+      "standalone": 7,
+      "payoff": 9,
+      "ending": 8
+     },
+     "needs_context": null,
+     "context_line": null,
+     "speakers": null,
+     "risks": null,
+     "secondary_type": null
+    }
+   ]
   }
  ],
  "invalid": [

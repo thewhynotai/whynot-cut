@@ -176,5 +176,41 @@ class TestApprovalStaleness(ApprovalFixture):
         self.assertNotIn("approved by editor", self.handoff_readme())
 
 
+class TestApproveReadsTheStamp(ApprovalFixture):
+    """T2.3 review: approve-plan reads the compiled spec through stamps.read_compiled."""
+
+    def test_a_2x_spec_without_a_stamp_is_approved_with_a_warning(self):
+        r = cli(self.root, "approve-plan", "--by", "editor")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        out = json.loads(r.stdout)
+        self.assertTrue(out["approved"])
+        self.assertIn("no engine_version", " ".join(out["version_warnings"]))
+        self.assertTrue(self.p.p("01_analysis/plan-approval.json").exists())
+
+    def test_the_current_engine_version_is_silent(self):
+        from lib.stamps import engine_version
+        self.save(dict(self.spec, engine_version=engine_version()))
+        r = cli(self.root, "approve-plan", "--by", "editor")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("version_warnings", json.loads(r.stdout))
+
+    def test_another_minor_version_warns_and_approves(self):
+        from lib.stamps import engine_version
+        major = engine_version().split(".")[0]
+        self.save(dict(self.spec, engine_version=f"{major}.99.0"))
+        r = cli(self.root, "approve-plan", "--by", "editor")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"{major}.99.0", " ".join(json.loads(r.stdout)["version_warnings"]))
+
+    def test_another_major_version_is_refused_with_a_rerun_hint(self):
+        self.save(dict(self.spec, engine_version="9.0.0"))
+        r = cli(self.root, "approve-plan", "--by", "editor")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("Re-run `reel plan`", r.stdout + r.stderr)
+        self.assertFalse(self.p.p("01_analysis/plan-approval.json").exists())
+        # the re-run itself must still be able to read the old spec's fingerprint (plan.py invalidates approvals)
+        self.assertEqual(len(plan_fingerprint(self.p)), 16)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -49,7 +49,7 @@
     "time": {
       "description": "seconds (40.5) or a clock: 00:40 / 1:02:03",
       "type": ["string", "number"],
-      "pattern": "^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+)?) *$"
+      "pattern": "^\\s*(\\d+(\\.\\d+)?|(\\d+:)?\\d+:\\d+([.,]\\d+)?)\\s*$"
     },
     "strings": {"type": "array", "items": {"type": "string"}},
     "caption": {"type": "object", "properties": {"caption": {"type": "string"}, "hashtags": {"$ref": "#/$defs/strings"}}},

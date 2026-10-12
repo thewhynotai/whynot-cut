@@ -12,14 +12,14 @@
     "global": {
       "type": "object",
       "properties": {
-        "main_footage": {"type": "string", "minLength": 1,
+        "main_footage": {"type": ["string", "null"], "minLength": 1,
                          "description": "the raw file, relative to the client folder; a podcast reel (source range) may leave it out"},
         "base_scale_percent": {"type": ["number", "string", "null"], "pattern": "^auto$"},
         "base_offset_x": {"type": ["number", "null"]},
         "base_offset_y": {"type": ["number", "null"]},
-        "framing": {"type": "string", "pattern": "^ *(full|[0-9]+(\\.[0-9]+)? *[:x] *[0-9]+(\\.[0-9]+)?)? *$",
+        "framing": {"type": ["string", "null"], "pattern": "^ *(full|[0-9]+(\\.[0-9]+)? *[:x] *[0-9]+(\\.[0-9]+)?)? *$",
                     "description": "9:16 (default) or a window such as 4:5"},
-        "framing_window_y": {"type": ["integer", "null"]},
+        "framing_window_y": {"type": ["number", "null"]},
         "caption_style": {"enum": ["keywords", "highlight_all"]},
         "captions_hidden_during": {"type": "array", "items": {"type": "string"}},
         "captions_hidden_ranges": {"type": "array", "items": {"$ref": "#/$defs/range"}},
@@ -49,7 +49,7 @@
     "caption_highlights": {
       "type": "array",
       "items": {"type": "object", "required": ["text"],
-                "properties": {"text": {"type": "string", "minLength": 1}, "at": {"$ref": "#/$defs/time"}}}
+                "properties": {"text": {"type": "string", "minLength": 1}, "at": {"anyOf": [{"$ref": "#/$defs/time"}, {"type": "null"}]}}}
     },
     "music": {
       "type": "object",
@@ -61,7 +61,7 @@
         "cue_points": {
           "type": "array",
           "items": {"type": "object",
-                    "properties": {"at": {"$ref": "#/$defs/time"}, "frame": {"type": "integer", "minimum": 0},
+                    "properties": {"at": {"anyOf": [{"$ref": "#/$defs/time"}, {"type": "null"}]}, "frame": {"type": "integer", "minimum": 0},
                                    "label": {"type": "string"}, "note": {"type": "string"}}}
         }
       }
@@ -71,9 +71,9 @@
   },
   "$defs": {
     "time": {
-      "description": "seconds (12.5), an integer of milliseconds, or a clock: 00:00:12.500 / 01:02.5",
+      "description": "seconds (12.5), an integer of milliseconds, or a clock: 00:00:12.500 / 01:02.5 (same grammar as the engine's parser, media_util.parse_time: surrounding whitespace and Arabic-Indic digits are accepted)",
       "type": ["string", "number"],
-      "pattern": "^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+)?) *$"
+      "pattern": "^\\s*(\\d+(\\.\\d+)?|(\\d+:)?\\d+:\\d+([.,]\\d+)?)\\s*$"
     },
     "sfx_kind": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
                  "description": "a procedural sound (whoosh, pop ...) or a kind of the client's 06_audio/sfx-map.json; `reel plan` checks it exists"},
@@ -91,17 +91,17 @@
         "semantic_intent": {"type": "string", "minLength": 1},
         "visual_treatment": {"type": "string", "minLength": 1},
         "confidence": {"enum": ["high", "medium", "low"]},
-        "approval_required": {"type": "boolean"},
-        "recipe_note": {"type": "string"},
+        "approval_required": {"type": ["boolean", "null"]},
+        "recipe_note": {"type": ["string", "null"]},
         "camera": {
-          "type": "object",
+          "type": ["object", "null"],
           "properties": {
             "type": {"enum": ["hold", "punch_in", "punch_out", "slow_push", "reframe"]},
             "at": {"$ref": "#/$defs/time"},
-            "until": {"$ref": "#/$defs/time"},
-            "scale_factor": {"type": "number"},
-            "offset_x": {"type": "number"},
-            "offset_y": {"type": "number"},
+            "until": {"anyOf": [{"$ref": "#/$defs/time"}, {"type": "null"}]},
+            "scale_factor": {"type": ["number", "null"]},
+            "offset_x": {"type": ["number", "null"]},
+            "offset_y": {"type": ["number", "null"]},
             "rationale": {"type": "string"}
           }
         },
@@ -128,13 +128,13 @@
         "items": {"type": "array",
                   "items": {"type": "object", "properties": {"text": {"type": "string"}, "at": {"$ref": "#/$defs/time"},
                                                              "latin": {"type": "boolean"}}}},
-        "image": {"type": "string"},
-        "video": {"type": "string"},
+        "image": {"type": ["string", "null"]},
+        "video": {"type": ["string", "null"]},
         "value": {"type": ["string", "number"]},
-        "sfx": {"anyOf": [{"$ref": "#/$defs/sfx_kind"}, {"type": "null"}], "description": "a sound kind, or none"},
+        "sfx": {"anyOf": [{"$ref": "#/$defs/sfx_kind"}, {"const": ""}, {"type": "null"}], "description": "a sound kind, or none (null or an empty string: no sound)"},
         "sfx_gain_db": {"type": "number"},
         "latin": {"type": "boolean"},
-        "approval_required": {"type": "boolean"}
+        "approval_required": {"type": ["boolean", "null"]}
       }
     }
   }

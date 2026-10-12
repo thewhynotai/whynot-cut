@@ -367,11 +367,122 @@
      }
     }
    ]
+  },
+  {
+   "note": "optional fields written as null: the engine falls back (plan.py: main_footage, framing, camera until/scale/offsets, caption_highlights at, graphics image/video/sfx, approval_required)",
+   "video_id": "CLIP1",
+   "global": {
+    "main_footage": null,
+    "framing": null,
+    "framing_window_y": null,
+    "base_scale_percent": null
+   },
+   "caption_highlights": [
+    {
+     "text": "التشخيص",
+     "at": null
+    }
+   ],
+   "music": {
+    "status": "NO_MUSIC_SUPPLIED",
+    "cue_points": [
+     {
+      "label": "drop",
+      "at": null,
+      "frame": 144
+     }
+    ]
+   },
+   "decisions": [
+    {
+     "decision_id": "EDIT_001",
+     "segment_id": "SEG_001",
+     "evidence": "هل في حاجات معينة",
+     "start": "00:00:00.200",
+     "end": "00:00:04.000",
+     "semantic_intent": "hook",
+     "visual_treatment": "hook",
+     "confidence": "high",
+     "approval_required": null,
+     "recipe_note": null,
+     "camera": {
+      "type": "punch_in",
+      "at": "00:00:01.000",
+      "until": null,
+      "scale_factor": null,
+      "offset_x": null,
+      "offset_y": null
+     },
+     "graphics": [
+      {
+       "id": "GFX_001",
+       "template": "hook_title",
+       "text": "هل في حاجات معينة",
+       "image": null,
+       "video": null,
+       "sfx": "",
+       "approval_required": null
+      },
+      {
+       "id": "GFX_002",
+       "template": "cta",
+       "text": "x",
+       "sfx": null,
+       "start": "00:00:01.000",
+       "end": "00:00:02.000"
+      }
+     ]
+    },
+    {
+     "decision_id": "EDIT_002",
+     "segment_id": "SEG_001",
+     "evidence": "هل في حاجات معينة",
+     "start": "00:00:05.000",
+     "end": "00:00:08.000",
+     "semantic_intent": "hook",
+     "visual_treatment": "hook",
+     "confidence": "high",
+     "camera": null
+    }
+   ]
+  },
+  {
+   "note": "times as the engine's parser (media_util.parse_time) reads them: a leading tab or trailing newline, Arabic-Indic digits; a float window y (int() in plan.window_rect)",
+   "global": {
+    "framing": "4:5",
+    "framing_window_y": 120.5
+   },
+   "decisions": [
+    {
+     "decision_id": "EDIT_001",
+     "segment_id": "SEG_001",
+     "evidence": "هل في حاجات معينة",
+     "start": "\t12",
+     "end": " 00:00:14.500\n",
+     "semantic_intent": "hook",
+     "visual_treatment": "hook",
+     "confidence": "high",
+     "camera": {
+      "type": "hold",
+      "at": "٠٠:٠٠:١٢"
+     }
+    },
+    {
+     "decision_id": "EDIT_002",
+     "segment_id": "SEG_001",
+     "evidence": "هل في حاجات معينة",
+     "start": "٢٠",
+     "end": "٢٥.٥",
+     "semantic_intent": "hook",
+     "visual_treatment": "hook",
+     "confidence": "high"
+    }
+   ]
   }
  ],
  "invalid": [
   {
-   "why": "authored wrong in an engine test: 'then' does not match the pattern ^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+",
+   "why": "authored wrong in an engine test: 'then' is not a time",
    "path": "/caption_highlights/0/at",
    "doc": {
     "video_id": "CLIP1",
@@ -593,6 +704,106 @@
    "doc": {
     "schema_version": 2,
     "decisions": []
+   }
+  },
+  {
+   "why": "framing 4X5: window_rect only knows a lower-case x, so the engine would silently skip the window",
+   "path": "/global/framing",
+   "doc": {
+    "global": {
+     "framing": "4X5"
+    },
+    "decisions": []
+   }
+  },
+  {
+   "why": "camera.at null is an error in the engine ('not a time'), unlike camera.until null",
+   "path": "/decisions/0/camera/at",
+   "doc": {
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "هل في حاجات معينة",
+      "start": "00:00:00.200",
+      "end": "00:00:04.000",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "high",
+      "camera": {
+       "type": "hold",
+       "at": null
+      }
+     }
+    ]
+   }
+  },
+  {
+   "why": "a graphic's start null is an error in the engine",
+   "path": "/decisions/0/graphics/0/start",
+   "doc": {
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "هل في حاجات معينة",
+      "start": "00:00:00.200",
+      "end": "00:00:04.000",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "high",
+      "graphics": [
+       {
+        "id": "G1",
+        "template": "cta",
+        "start": null
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "why": "a time with a unit is not a time",
+   "path": "/decisions/0/start",
+   "doc": {
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "هل في حاجات معينة",
+      "start": "12s",
+      "end": "00:00:04.000",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "high"
+     }
+    ]
+   }
+  },
+  {
+   "why": "an unsafe sound name that is not empty",
+   "path": "/decisions/0/graphics/0/sfx",
+   "doc": {
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "هل في حاجات معينة",
+      "start": "00:00:00.200",
+      "end": "00:00:04.000",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "high",
+      "graphics": [
+       {
+        "id": "G1",
+        "template": "cta",
+        "sfx": " "
+       }
+      ]
+     }
+    ]
    }
   }
  ]

@@ -14,7 +14,7 @@
     "time": {
       "description": "seconds (12.5) or a clock: 00:12:01.240 / 12:01.2",
       "type": ["string", "number"],
-      "pattern": "^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+)?) *$"
+      "pattern": "^\\s*(\\d+(\\.\\d+)?|(\\d+:)?\\d+:\\d+([.,]\\d+)?)\\s*$"
     },
     "score": {"type": "integer", "minimum": 1, "maximum": 10},
     "candidate": {
@@ -27,8 +27,8 @@
         "type": {"type": "string", "minLength": 1, "description": "a content type of recipes.json (storytelling, advice ...)"},
         "secondary_type": {"type": ["string", "null"]},
         "title": {"type": "string"},
-        "hook_quote": {"type": "string"},
-        "hook_text": {"type": "string"},
+        "hook_quote": {"type": ["string", "null"]},
+        "hook_text": {"type": ["string", "null"]},
         "evidence": {"type": "string", "minLength": 1, "description": "the first words, verbatim"},
         "end_evidence": {"type": "string", "minLength": 1, "description": "the last words, verbatim"},
         "why": {"type": "string"},
@@ -38,10 +38,10 @@
           "properties": {"hook": {"$ref": "#/$defs/score"}, "standalone": {"$ref": "#/$defs/score"},
                          "payoff": {"$ref": "#/$defs/score"}, "ending": {"$ref": "#/$defs/score"}}
         },
-        "needs_context": {"type": "boolean"},
-        "context_line": {"type": "string"},
-        "speakers": {"type": "array", "items": {"type": "string"}},
-        "risks": {"type": "array", "items": {"type": "string"}}
+        "needs_context": {"type": ["boolean", "null"]},
+        "context_line": {"type": ["string", "null"]},
+        "speakers": {"type": ["array", "null"], "items": {"type": "string"}},
+        "risks": {"type": ["array", "null"], "items": {"type": "string"}}
       }
     }
   }

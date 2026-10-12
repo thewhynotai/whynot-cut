@@ -13,7 +13,7 @@
     "time": {
       "description": "seconds (12.5), milliseconds as an integer in edit-decisions.json, or a clock: 00:00:12.500 / 01:02.5",
       "type": ["string", "number"],
-      "pattern": "^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+)?) *$"
+      "pattern": "^\\s*(\\d+(\\.\\d+)?|(\\d+:)?\\d+:\\d+([.,]\\d+)?)\\s*$"
     },
     "need": {
       "type": "object",

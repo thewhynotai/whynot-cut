@@ -130,6 +130,58 @@ class TestFixtures(unittest.TestCase):
         self.assertIn("/decisions/0/graphics/0/sfx", paths)
 
 
+    def test_optional_fields_the_engine_reads_as_missing_accept_null(self):
+        """T2.3 review: the engine treats null like a field left out (plan.py: main_footage, camera.until/scale/offsets,
+        caption_highlights.at, graphics image/video/sfx ""/null; reels.py: context_line ...); camera.at / graphics
+        start null are engine errors and stay invalid (fixtures edit-decisions.json / reels-plan.json)."""
+        fx = json.loads((FIX / "edit-decisions.json").read_text(encoding="utf-8"))
+        nulls = next(d for d in fx["valid"] if "written as null" in d.get("note", ""))
+        self.assertIsNone(nulls["global"]["main_footage"])
+        self.assertIsNone(nulls["decisions"][0]["camera"]["until"])
+        self.assertEqual(nulls["decisions"][0]["graphics"][0]["sfx"], "")
+        self.assertEqual(schemas.validate(nulls, "edit-decisions"), [])
+        rp = json.loads((FIX / "reels-plan.json").read_text(encoding="utf-8"))["valid"][-1]
+        self.assertIsNone(rp["candidates"][0]["context_line"])
+        self.assertEqual(schemas.validate(rp, "reels-plan"), [])
+
+    def test_framing_agrees_with_the_engine_window(self):
+        """schema and plan.window_rect: 4:5, 4x5, "4 : 5" give a window; 4X5 does not (the engine would skip it
+        silently, so the schema rejects it); framing_window_y may be a float (the engine int()s it)."""
+        from lib.plan import window_rect
+
+        def errs(framing, y=None):
+            g = {"framing": framing, **({"framing_window_y": y} if y is not None else {})}
+            return schemas.validate({"global": g, "decisions": []}, "edit-decisions")
+        for ok in ("4:5", "4x5", " 4 : 5 ", "4.5:5", "full", "9:16", ""):
+            self.assertEqual(errs(ok), [], ok)
+        for framing in ("4:5", "4x5", " 4 : 5 "):
+            self.assertIsNotNone(window_rect(framing))
+        self.assertIsNone(window_rect("4X5"))
+        self.assertEqual([e["path"] for e in errs("4X5")], ["/global/framing"])
+        self.assertEqual(errs("4:5", 120.5), [])
+        self.assertEqual(window_rect("4:5", 120.5)["y"], 120)
+        self.assertEqual([e["path"] for e in errs("4:5", "high")], ["/global/framing_window_y"])
+
+    def test_time_grammar_is_the_engines_parser(self):
+        """One pattern in every schema, and a string is a valid time exactly when media_util.parse_time reads it
+        (leading tab, trailing newline, Arabic-Indic digits, "," fractions)."""
+        from contract import validate as contract_validate
+        from lib.media_util import parse_time
+        names = ("edit-decisions", "reels-plan", "publish", "asset-needs")
+        pats = {schemas.bundled(n)["$defs"]["time"]["pattern"] for n in names}
+        self.assertEqual(len(pats), 1)
+        sch = {"$defs": {"time": schemas.bundled("reels-plan")["$defs"]["time"]}, "$ref": "#/$defs/time"}
+        cases = ["12", "12.5", "1:02", "1:02:03.500", "1:02,5", "00:00:12.500", "\t12", " 12 ", "12\n", "٤٠", "٠١:٣٠",
+                 "٠٠:٠٠:١٢.٥٠٠", " 12", "", " ", "12s", "1:2:3:4", "-5", "1e3", ".5", "5.", "1:", ":30", "a:b"]
+        for t in cases:
+            try:
+                parse_time(t)
+                engine = True
+            except ValueError:
+                engine = False
+            self.assertEqual(not contract_validate(t, sch), engine, repr(t))
+
+
 def _json_blocks(md: Path) -> list:
     return re.findall(r"```json\n(.*?)```", md.read_text(encoding="utf-8"), re.S)
 
@@ -191,6 +243,42 @@ class TestReelValidate(TempDir):
         code, doc, _ = reel("validate", str(f), "--kind", "publish_reel")
         self.assertEqual((code, doc["kind"]), (1, "publish-reel"))
         self.assertEqual([e["path"] for e in doc["errors"]], ["/instagram/hashtags"])
+
+    def test_relative_path_is_found_in_the_project_the_episode_then_the_root(self):
+        """T2.3 review I1: the story-editor runs `reel --root C --video-id CLIP1 validate 01_analysis/edit-decisions.json`."""
+        ed = json.loads((FIX / "edit-decisions.json").read_text(encoding="utf-8"))["valid"][0]
+        rp = json.loads((FIX / "reels-plan.json").read_text(encoding="utf-8"))["valid"][0]
+        proj = self.write("output/projects/CLIP1/01_analysis/edit-decisions.json", ed)
+        epi = self.write("output/episodes/EP12/01_analysis/reels-plan.json", rp)
+        code, doc, err = reel("--root", str(self.tmp), "--video-id", "CLIP1", "validate", "01_analysis/edit-decisions.json")
+        self.assertEqual((code, doc["ok"], doc["kind"]), (0, True, "edit-decisions"), (doc, err))
+        self.assertEqual(Path(doc["file"]), proj.resolve())
+        code, doc, err = reel("--root", str(self.tmp), "--episode", "EP12", "validate", "01_analysis/reels-plan.json")
+        self.assertEqual((code, doc["ok"], doc["kind"]), (0, True, "reels-plan"), (doc, err))
+        self.assertEqual(Path(doc["file"]), epi.resolve())
+        # a file in the current folder wins over the project's; a --root relative file still works without ids
+        here = self.write("here/01_analysis/edit-decisions.json", {"decisions": "no"})
+        code, doc, _ = reel("--root", str(self.tmp), "--video-id", "CLIP1", "validate", "01_analysis/edit-decisions.json",
+                            cwd=str(self.tmp / "here"))
+        self.assertEqual((code, doc["ok"]), (1, False))
+        self.assertEqual(Path(doc["file"]), Path("01_analysis/edit-decisions.json"))
+        self.write("publish/reels/EP12_R03.json", {"reel_id": "EP12_R03"})
+        code, doc, _ = reel("--root", str(self.tmp), "--video-id", "CLIP1", "validate", "publish/reels/EP12_R03.json")
+        self.assertEqual((code, doc["kind"], doc["ok"]), (0, "publish-reel", True))
+        self.assertTrue(here.exists())
+
+    def test_missing_relative_path_lists_the_places_tried(self):
+        code, doc, _ = reel("--root", str(self.tmp), "--video-id", "CLIP1", "--episode", "EP12", "validate",
+                            "01_analysis/edit-decisions.json")
+        self.assertEqual(code, 1)
+        self.assertIn("not found", doc["error"])
+        tried = [Path(x).as_posix() for x in doc["tried"]]
+        self.assertEqual(len(tried), 4)
+        self.assertEqual(tried[0], "01_analysis/edit-decisions.json")
+        self.assertTrue(tried[1].endswith("output/projects/CLIP1/01_analysis/edit-decisions.json"), tried)
+        self.assertTrue(tried[2].endswith("output/episodes/EP12/01_analysis/edit-decisions.json"), tried)
+        self.assertTrue(tried[3].endswith("/01_analysis/edit-decisions.json") and "output" not in tried[3], tried)
+        self.assertIn("output/projects/CLIP1", doc["how"].replace("\\", "/"))
 
     def test_unknown_kind_bad_json_missing_file(self):
         f = self.write("notes.json", {})
