@@ -463,6 +463,7 @@ test("spike.ts wires the auto-runner on boot and keeps the three buttons", () =>
   const spike = readFileSync(join(root, "spike", "src", "spike.ts"), "utf8");
   assert.match(spike, /import \{ createAutoRunner[^}]*\} from "\.\/autorun\.ts"/);
   assert.match(spike, /createAutoRunner\(/);
+  assert.match(spike, /tryLock:[\s\S]*unlock:/, "the auto-run lock is wired to the same flag the buttons use");
   for (const id of ["run", "run-keep", "copy"]) assert.match(spike, new RegExp(`\\$\\("${id}"\\)\\.addEventListener\\("click"`));
 });
 
