@@ -498,7 +498,7 @@
 ### Migration
 - Bridge 3.1.1 (T2.9): after updating, run `reel ppro-install` and restart Premiere and After Effects. Until they are
   restarted, bridge jobs are refused with "restart Premiere to load bridge 3.1.1".
-- The former `dr-nahla-hunter` shipped profile is kept as a private copy outside the product (not in the repo or the
+- The former shipped profile of a real client (the clinic client) is kept as a private copy outside the product (not in the repo or the
   zip). A client folder that relied on the folder-name match must now have its own profile: copy that private profile
   into `<client>/output/client_database/reel-profile/`, or run `reel client-init --from-profile example-clinic` and fill
   it from the client's own documents. Existing client `reel-profile/` folders keep working unchanged.
@@ -854,8 +854,7 @@ backup, and a full revision cycle (text change → re-plan → approval gate →
 - Dialogue tracks are named "camera, not cleaned" when cleanup hasn't run; `reel next` asks for reference analysis
   only when the client has reference videos; `setup_env.py --system-site-packages` reuses installed packages.
 
-**Field test on a real client clip** (Dr. Sherin Helmy, «وتزودوا بالتقوى» EP02 R02, a horizontal finished episode, religious
-content, Windows). Every gap found was analysed and fixed in the plugin:
+**Field test on a real client clip** (a religious-content client's EP02 R02, a horizontal finished episode, Windows). Every gap found was analysed and fixed in the plugin:
 - G1 Horizontal (16:9) sources were fitted tiny into the vertical frame → **face-centred auto-reframe** (`global.base_scale_percent:
   "auto"`; preflight measures cover scale + face offset; Premiere XML and preview use it).
 - G2 Whisper caches on the machine were 3 MB partial downloads, undetected → `reel doctor` reports complete vs partial models;
@@ -966,7 +965,7 @@ content, Windows). Every gap found was analysed and fixed in the plugin:
   mask increment in, or out above 1.2). QC check "Every jump cut changes the zoom". C0238 had 3 unmasked cuts.
 - Photo crops centre on the detected face (macOS Vision, `pyobjc-framework-Vision`); `crop_center` overrides.
   C0238 GFX_006 had cut through the eyes.
-- Hook titles: `bar_style` `underline` | `box`; the Nahla profile uses `box` (white text on full teal boxes).
+- Hook titles: `bar_style` `underline` | `box`; the first client's profile uses `box` (white text on full teal boxes).
 - QC check: every overlay still inside the safe area (C0238 name card crossed the bottom UI zone; moved up).
 - Captions lift above a card (name card / glass / CTA) instead of overlapping it.
 - `captions_hidden_ranges` (source time) are remapped to the sequence clock on the native caption track and the AE
@@ -998,8 +997,8 @@ content, Windows). Every gap found was analysed and fixed in the plugin:
 - Wrapper never writes `__pycache__` into the plugin folder. README, eval cases (6).
 
 ## 1.0.0 — 2026-10-10
-First plugin release. Ported from the `dr-nahla-hunter-editor` skill (v2).
-- Generic engine with client profiles; Dr. Nahla Hunter is the first profile (output for C0238 is byte-identical to v2).
+First plugin release. Ported from the original single-client editor skill (v2).
+- Generic engine with client profiles; the clinic client is the first profile (output for C0238 is byte-identical to v2).
 - 16 skills (lead-editor `edit`, `revise`, `status`, `fix-audio`, `new-client`, `setup`, `handoff`, `adobe-extras` + 8 craft skills).
 - 12 agents: 8 stage specialists + 4 parallel sub-agents (segment-proofreader, frame-inspector, graphic-checker, claim-checker).
 - Hooks: client `assets/` and `data/` read-only; AE/PS opt-in (`--extras`); subagents can't approve plans or record verdicts; client-folder session context.

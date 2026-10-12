@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 import warnings
 from pathlib import Path
@@ -216,6 +217,54 @@ class TestReelHelpFromTheCommandTable(unittest.TestCase):
         r = reel("transcribe", "--help")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("--model", r.stdout)
+
+
+class TestReleaseZipContents(unittest.TestCase):
+    """Gate 2 packaging: the release zip is the plugin (+ marketplace.json and README), never the repo-root adobe/ sources,
+    node_modules, vendored `_upstream` code, dist/, brand/, guide-ar/ or PROGRESS.md."""
+
+    @classmethod
+    def setUpClass(cls):
+        pk = SK.parent / "package.py"                         # not shipped inside the plugin zip
+        if not pk.exists():
+            raise unittest.SkipTest("package.py is not part of this layout")
+        spec = importlib.util.spec_from_file_location("whynot_package_hygiene", pk)
+        cls.pk = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.pk)
+
+    def make_tree(self, root: Path):
+        for rel in (".claude-plugin/marketplace.json", "README.md", "PROGRESS.md", "package.py",
+                    "whynot-cut/.claude-plugin/plugin.json", "whynot-cut/bin/reel", "whynot-cut/adobe/WhyNotCut.ccx",
+                    "whynot-cut/engine/reel/__pycache__/x.pyc", "whynot-cut/panel/node_modules/a/index.js",
+                    "adobe/panel-ui/src/a.ts", "adobe/node_modules/b/index.js", "adobe/tools/x/_upstream/c.js",
+                    "dist/uxp/WhyNotCut.ccx", "brand/logo.svg", "guide-ar/g.pdf", "installer/i.ps1", "tools/t.py",
+                    "whynot-cut/docs/dev.md", "whynot-cut/tests/._junk"):
+            f = root / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("x", encoding="utf-8")
+
+    def test_only_the_plugin_ships(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.make_tree(root)
+            got = sorted(p.relative_to(root).as_posix() for p in self.pk.package_files(root))
+        self.assertEqual(got, [".claude-plugin/marketplace.json", "README.md", "whynot-cut/.claude-plugin/plugin.json",
+                               "whynot-cut/adobe/WhyNotCut.ccx", "whynot-cut/bin/reel"])
+
+    def test_wanted_refuses_adobe_sources_even_when_asked_directly(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.make_tree(root)
+            for rel in ("adobe/panel-ui/src/a.ts", "adobe/node_modules/b/index.js", "adobe/tools/x/_upstream/c.js",
+                        "whynot-cut/panel/node_modules/a/index.js", "dist/uxp/WhyNotCut.ccx", "PROGRESS.md"):
+                self.assertFalse(self.pk.wanted(root / rel, root), rel)
+            self.assertTrue(self.pk.wanted(root / "whynot-cut/adobe/WhyNotCut.ccx", root))   # the built panel ships
+
+    def test_the_real_repo_zip_has_no_adobe_sources(self):
+        names = [p.relative_to(self.pk.ROOT).as_posix() for p in self.pk.package_files()]
+        self.assertTrue(names)
+        self.assertEqual([n for n in names if n.split("/")[0] not in self.pk.SHIP_TOP], [])
+        self.assertEqual([n for n in names if n.startswith("adobe/") or "node_modules" in n or "_upstream" in n], [])
 
 
 if __name__ == "__main__":

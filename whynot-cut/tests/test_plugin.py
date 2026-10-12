@@ -1303,12 +1303,15 @@ class TestShippedProfiles(unittest.TestCase):
         self.assertEqual(self.real_client_tokens("~/.dr-nahla-editor is a legacy home"), [])
         hits = [(str(p.relative_to(SK)), toks) for p in SK.rglob("*")
                 if p.is_file() and p.suffix in (".md", ".py", ".json", ".js", ".sh", ".txt", "")
-                and p.name != "CHANGELOG.md" and p.relative_to(SK).parts[0] != "tests"
+                and p.relative_to(SK).parts[0] != "tests"                              # (scanned below)
                 and (toks := self.real_client_tokens(p.read_text(encoding="utf-8", errors="ignore")))]
         hits += [(str(p.relative_to(SK)), toks) for p in (SK / "tests").rglob("*.py")      # gate G4: the tests
                  if p.name != "test_plugin.py"                                           # (holds the list)
                  and (toks := [t for t in self.real_client_tokens(p.read_text(encoding="utf-8"))
                               if t not in ("nahla", "hunter", "kasr al-ainy", "قصر العيني")])]
+        hits += [(str(p.relative_to(SK)), toks) for p in (SK / "tests/fixtures").rglob("*")     # gate 2: fixtures too
+                 if p.is_file() and p.suffix not in (".jpg", ".png")
+                 and (toks := self.real_client_tokens(p.read_text(encoding="utf-8", errors="ignore")))]
         self.assertEqual(hits, [])
 
 

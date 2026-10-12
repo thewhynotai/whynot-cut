@@ -34,7 +34,7 @@ reel profile --root "<CLIENT>"                          # client profile (NONE -
 | E3 Record intake | you | write `00_inputs/intake.json` (below) | layout and burned-in elements recorded |
 | E4 Analysis | `episode-analyst` (fans out `moment-scout`) | `reels-plan` until no errors | topics, speakers, validated plan |
 | E5 Previews | you | `reels-preview`; VIEW `03_candidates/_sheet.jpg` | a preview MP4 per candidate |
-| **Gate 0** | **you + the editor** | `reels-select --by editor` | the editor picked |
+| **Gate 0** | **you + the editor** | `reels-select --pick <ids> --by editor` | the editor picked |
 | Per reel | the edit pipeline (`edit/SKILL.md`), video id `<EP>_<RID>` | preflight, audio-clean, plan, previews, preview-video | reel plan + preview |
 | P Publish (∥ from E4) | `publish-writer` | `publish-check`, `publish-thumbnail` | package passes |
 | **Gate 1** (one, combined) | you + the editor | `approve-plan` per reel | approved reels |

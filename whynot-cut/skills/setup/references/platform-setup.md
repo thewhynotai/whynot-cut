@@ -20,6 +20,25 @@
 Set `WHYNOT_HOME` (or the plugin option `engine_home`) to move the engine home, e.g. to a bigger drive. The bridge
 finds a moved home through `bridge-config.json`, which `reel setup` writes into the panel folder.
 
+## Environment variables
+
+All are optional; WhyNot Cut finds everything by itself when they are unset. Set one only to point at a
+non-standard install or to move a folder. On Windows use `setx NAME value` (then open a new terminal and restart
+Claude Code); on macOS export it in your shell profile (`~/.zshrc`).
+
+| Variable | What it does | Default when unset |
+|---|---|---|
+| `WHYNOT_HOME` | The engine home: runtime, models, queue, logs. Same as the plugin option `engine_home`. Use an ASCII-only folder (e.g. `C:\whynot`) when your user name is not ASCII | `~/.whynot-cut` |
+| `WHYNOT_CLIENTS_ROOT` | The folder that holds your client folders, so `--root` can be a bare client name. Same as the plugin option `clients_root` (the option wins over the preferences file) | `clients_root` from your preferences file; none if not set |
+| `WHYNOT_OPTIONS_FILE` | Where the plugin options record is read from (the SessionStart hook writes it; the wrappers read it because PowerShell does not receive path variables) | `~/.whynot-cut/plugin-options.json` |
+| `WHYNOT_PREMIERE_APP` | Premiere Pro to use: the `.app` / `.exe` or its folder. A wrong value is reported by `reel doctor` with this name | Newest release install found (registry / Spotlight / standard folders) |
+| `WHYNOT_AE_APP` | After Effects to use: the `.app` / `.exe` or its folder | Newest release install found |
+| `WHYNOT_AERENDER` | The `aerender` executable (`aerender.exe` on Windows, in the After Effects folder) | The one beside the newest After Effects that has one |
+| `WHYNOT_FFMPEG` | The ffmpeg to run: the binary or the folder that holds it (needs ffmpeg 6 or newer) | The ffmpeg pinned in the engine home, then the runtime's bundled one, then `PATH` last |
+| `WHYNOT_FFMPEG_TIMEOUT_SCALE` | A number from 1 to 100 that multiplies every ffmpeg time limit. Raise it (e.g. `3`) for a very long file or a slow network share when a step reports "ffmpeg timed out". Below 1 or not a number is ignored; above 100 counts as 100 | `1` |
+| `WHYNOT_DEBUG` | `1` also prints the full Python traceback of an unexpected error on screen (it is always saved to the log). For developers and bug reports | off |
+| `WHYNOT_HF_XET` | `1` turns Hugging Face "Xet" transfers back on for model downloads. They are off by default because they failed on some Windows machines; leave it unset unless a download is too slow | off |
+
 ## Running your own Python against the engine
 
 Run engine-side Python with `reel py`: `reel py <script.py> [args]`, `reel py -m <module> [args]` or

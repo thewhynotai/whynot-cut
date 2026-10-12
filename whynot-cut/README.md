@@ -84,7 +84,7 @@ Say **"make reels from this episode"** (`/whynot-cut:podcast`):
 2. The episode-analyst writes the topic map (= YouTube chapters), speaker turns and **reel candidates** with exact
    timecodes snapped to sentences, a content type (storytelling, drama, success story, advice, bold opinion, emotional,
    comedy), a hook, a score and risks; `reels-plan` validates them and `reels-preview` renders a quick preview of each.
-3. **Gate 0: you pick** (`reels-select --by editor`). Each pick becomes a clip project (`EP12_R03`) cut from a window
+3. **Gate 0: you pick** (`reels-select --pick R01,R03 --by editor`). Each pick becomes a clip project (`EP12_R03`) cut from a window
    of the original episode file: framed **per shot** for 9:16 (wide shots follow the speaker; cards shown whole),
    edited by its **content-type recipe** (pauses, zooms, graphics, SFX, licensed music mood, copy tone).
 4. One combined Gate 1, Premiere builds, QC — as for any clip.
@@ -178,7 +178,8 @@ setup-doctor ─────── diagnoses machine/Premiere problems (read-onl
 | Face-aware photo crops | Vision | OpenCV |
 | Premiere bridge (CEP) | `~/Library/Application Support/Adobe/CEP/extensions` | `%APPDATA%\Adobe\CEP\extensions` |
 | AE / PS extras | AppleScript | `AfterFX.exe -r` / Photoshop COM |
-Details: `skills/setup/references/platform-setup.md`.
+Details: `skills/setup/references/platform-setup.md`. Optional environment variables (`WHYNOT_HOME`,
+`WHYNOT_FFMPEG`, `WHYNOT_PREMIERE_APP`, …) are listed there under "Environment variables".
 
 ## Preferences
 `.claude/whynot-cut.local.md` (YAML frontmatter) in the clients folder, a client folder or `~/.claude/`:
@@ -204,6 +205,11 @@ The engine is generic; each client's look and rules come from layered profiles (
 
 `reel profile --root "<client folder>"` shows which applies.
 
+## Upgrading from 2.x
+Update the plugin, then run `reel setup` (it moves the engine to the isolated 3.0 runtime, and `reel ppro-install` plus a
+restart of Premiere and After Effects loads the new bridge) and re-approve any plan that was approved before: approvals
+made by 2.x are asked again. The exact steps are in the **Migration** section of the 3.0.0 entry in `CHANGELOG.md`.
+
 ## Upgrading from reel-editor 1.x
 Install `whynot-cut`, then run `/whynot-cut:setup`. An existing `~/.reel-editor` engine (and its 3 GB of models) is reused
 automatically, the old "Reel Editor Bridge" panel is replaced by the WhyNot Cut Bridge, and existing client `output/`
@@ -211,8 +217,9 @@ folders keep working. Uninstall `reel-editor` afterwards so the two don't both a
 
 ## Develop
 ```bash
-<engine python> -m unittest discover -s whynot-cut/tests      # 72 tests (macOS and Windows)
-<engine python> whynot-cut/examples/make_demo.py <empty folder>  # end-to-end demo without footage, Whisper or Adobe
+bash tools/test.sh                      # the whole suite with the engine runtime (macOS and Windows); -p test_x.py for one file
+reel py -m unittest discover -s whynot-cut/tests   # the same, by hand (run from the repo root)
+reel py whynot-cut/examples/make_demo.py <empty folder>  # end-to-end demo without footage, Whisper or Adobe
 claude plugin validate whynot-cut --strict
 ```
 Bump `version` in `whynot-cut/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, then

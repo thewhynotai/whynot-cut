@@ -30,7 +30,7 @@ Premiere first).
 
 - **Podcast episodes** (`reel inbox` -> `episodes`): run `/whynot-cut:podcast` up to Gate 0 for each new episode and
   put its candidates table in the same message as the clips. Reels start only after the editor picks
-  (`reels-select --by editor`); a standing `approval: auto` never picks reels.
+  (`reels-select --pick <ids> --by editor`); a standing `approval: auto` never picks reels.
 
 ## 2. Make sure each client is ready
 - `reel profile --root "<CLIENT>"` → `active` null → run the `/whynot-cut:new-client` flow first (once per client).

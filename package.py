@@ -12,19 +12,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PROFILES_DIR = ROOT / "whynot-cut" / "profiles"
-SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", "docs", ".superpowers", "tools"}
+SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", "docs", ".superpowers", "tools", "node_modules", "_upstream"}
+# The zip is the marketplace: ONLY these top-level entries ship (an allowlist, so a new dev folder at the repo root can
+# never leak into a release). The repo-root adobe/ (panel sources, node_modules, vendored upstream code), dist/, brand/,
+# guide-ar/, installer/, tools/ and PROGRESS.md stay out; the built Adobe artefacts the installer needs live inside
+# the plugin (whynot-cut/adobe/*.ccx, *.zxp) and ship with it.
+SHIP_TOP = {".claude-plugin", "whynot-cut", "README.md"}
 SKIP_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 EXEC = {"bin/reel", "setup/setup_env.sh", "setup/setup_env.py", "hooks/run_python.sh", "hooks/guard.py",
         "hooks/session_context.py", "hooks/session_end.py", "examples/make_demo.py"}
 
 
-def wanted(p: Path) -> bool:
-    rel = p.relative_to(ROOT)
+def wanted(p: Path, root: Path = ROOT) -> bool:
+    rel = p.relative_to(root)
+    if rel.parts[0] not in SHIP_TOP:
+        return False
     if any(part in SKIP_DIRS for part in rel.parts) or p.name in SKIP_FILES or p.name.startswith("._"):
         return False
     if p.suffix in (".pyc", ".tmp") or rel.as_posix().endswith(".local.md") or p.name == "package.py":
         return False
     return p.is_file()
+
+
+def package_files(root: Path = ROOT) -> list[Path]:
+    """The files the release zip holds. Only the SHIP_TOP entries are walked (never adobe/node_modules)."""
+    out = []
+    for top in sorted(SHIP_TOP):
+        t = root / top
+        if t.is_file():
+            out.append(t)
+        elif t.is_dir():
+            out.extend(p for p in t.rglob("*") if wanted(p, root))
+    return sorted(q for q in out if wanted(q, root))
 
 
 def disallowed_profiles(profiles_dir: Path) -> list[str]:
@@ -47,7 +66,7 @@ def main():
         return 1
     version = json.loads((ROOT / "whynot-cut/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
     out = ROOT.parent / f"whynot-cut-{version}.zip"
-    files = sorted(p for p in ROOT.rglob("*") if wanted(p))
+    files = package_files()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for p in files:
             arc = Path("whynot-cut-marketplace") / p.relative_to(ROOT)

@@ -10,7 +10,7 @@ What it does, once per process:
   * records the machine's REAL locations first (plat.engine_home() as the environment gives it, ~/.whynot-cut and the
     legacy homes, the CEP extensions folder) in WHYNOT_TEST_LIVE_ROOTS; REAL_ENGINE_HOME is kept for the few tests that
     read the real runtime (never write to it);
-  * points WHYNOT_HOME, HOME, USERPROFILE, APPDATA (Windows: the CEP folder) and CLAUDE_CONFIG_DIR into a per-run temp
+  * points WHYNOT_HOME, HOME, USERPROFILE, APPDATA (Windows: the CEP folder), LOCALAPPDATA and CLAUDE_CONFIG_DIR into a per-run temp
     folder and sets WHYNOT_TEST_SANDBOX to it; drops the variables that would lead back to the real machine
     (CLAUDE_PLUGIN_DATA, CLAUDE_ENV_FILE, WHYNOT_OPTIONS_FILE, other engine-home / clients-root settings and plugin
     options). A test that sets its own (mock.patch.dict) still wins inside that test;
@@ -154,6 +154,7 @@ def _sandbox() -> None:
     })
     if plat.IS_WIN:
         os.environ["APPDATA"] = str(user / "AppData" / "Roaming")
+        os.environ["LOCALAPPDATA"] = str(user / "AppData" / "Local")           # per-user fonts, caches: not the real ones
     if pinned and not os.environ.get("NH_FFMPEG"):
         os.environ["NH_FFMPEG"] = str(pinned)
 
