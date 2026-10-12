@@ -1,6 +1,6 @@
 /*  whynot-cut — After Effects graphics library (ExtendScript, ES3).
     Loaded by the generated build script, which defines `NH_DATA` before including this file.
-    Builds editable, brand-linked comps (1080x1920, 24 fps, square pixels):
+    Builds editable, brand-linked comps (1080x1920, square pixels, the profile's frame rate: NH_DATA.fps):
       * BRAND_CONTROLS comp with a "BRAND" null holding Color Controls; every fill/stroke links to it.
       * One comp per timeline event (template driven) + an optional CAPTIONS comp.
       * Adds every comp to the Render Queue (ProRes 4444 + alpha template) and saves the .aep.
@@ -8,11 +8,19 @@
 */
 var NH = NH || {};
 
-NH.W = 1080; NH.H = 1920; NH.FPS = 24;
+NH.W = 1080; NH.H = 1920; NH.FPS = 24;   // NH.FPS is the default only: NH.applyFps() takes the profile rate from NH_DATA.fps
 NH.log = [];
 
 NH.rgb = function (a) { return [a[0], a[1], a[2]]; };
 NH.f2t = function (f) { return f / NH.FPS; };
+
+/* The comps' frame rate is the client's sequence rate, written into NH_DATA.fps by the generator (3.0 T2.18):
+   a 25 or 29.97 fps profile gets 25 / 29.97 fps comps. 24 only when the data carries none. */
+NH.applyFps = function () {
+    var f = (typeof NH_DATA !== "undefined" && NH_DATA) ? NH_DATA.fps : 0;
+    NH.FPS = (f > 0) ? f : 24;
+    return NH.FPS;
+};
 
 NH.folder = function (name) {
     for (var i = 1; i <= app.project.numItems; i++) {
@@ -466,6 +474,7 @@ NH.queue = function (comp, outPath) {
 };
 
 NH.build = function () {
+    NH.applyFps();
     app.beginUndoGroup("NH build");
     if (NH_DATA.new_project) { app.newProject(); }
     NH.buildBrand();
@@ -576,6 +585,7 @@ NH.buildChecklistMogrt = function (c, t, n) {
 };
 
 NH.buildMogrts = function () {
+    NH.applyFps();
     app.beginUndoGroup("NH mogrts");
     if (NH_DATA.new_project) { app.newProject(); }
     NH.BRAND_SCOPE = "local";

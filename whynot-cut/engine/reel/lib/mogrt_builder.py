@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from .common import TEMPLATES_DIR, Paths, load_config, now_iso, run, write_json, write_text
-from .ae_builder import brand_controls, fonts_map
+from .ae_builder import brand_controls, comp_fps, fonts_map
 
 MOGRTS = ["hook_title", "term_callout", "glass_card", "name_card", "cta", "checklist"]
 
@@ -23,7 +23,7 @@ def mogrt_dir(paths: Paths) -> Path:
 def generate(paths: Paths) -> Path:
     d = mogrt_dir(paths)
     d.mkdir(parents=True, exist_ok=True)
-    data = {"brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
+    data = {"fps": comp_fps(), "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
             "templates": load_config("graphics-templates.json")["templates"], "events": [], "captions": None,
             "mogrt_dir": str(d), "mogrt_frames": 96, "aep_path": str(d / "NH_MOGRT_TEMPLATES.aep"),
             "new_project": True, "render_template": "High Quality with Alpha", "render_dir": str(d), "logo": None}

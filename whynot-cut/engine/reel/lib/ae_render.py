@@ -47,6 +47,38 @@ def aerender_exe() -> str | None:
     return str(p) if p else None
 
 
+class StageError(Exception):
+    """The ASCII stage for aerender could not be made; str() is the message that says what to do."""
+
+
+def sandbox_refused(exe) -> dict | None:
+    """G79: a unit test never launches the real aerender (an engine error document), otherwise None."""
+    return plat.sandbox_refusal("run aerender") if Path(str(exe)).stem.lower() == "aerender" else None
+
+
+def stage_ascii(aep: Path, out: Path | None = None) -> tuple[Path | None, Path, Path | None]:
+    """(stage, aep to pass, output to pass). aerender on Windows reads its command line in the ANSI code page: a
+    non-ASCII path (an Arabic client folder) arrives as "???". Then an ASCII copy of the project is rendered (into an
+    ASCII file when out is given, for the caller to move into place) and the caller removes `stage` afterwards; After
+    Effects finds the footage and the project's own render-queue outputs through the project's Unicode paths. stage is
+    None when the paths go as they are (ASCII, or macOS, which passes UTF-8). Raises StageError."""
+    aep = Path(aep)
+    out = Path(out) if out is not None else None
+    if not (plat.IS_WIN and not (str(aep).isascii() and (out is None or str(out).isascii()))):
+        return None, aep, out
+    if not tempfile.gettempdir().isascii():
+        raise StageError(f"aerender needs ASCII paths, and the temp folder {tempfile.gettempdir()} is not one either: "
+                         "set TEMP to an ASCII folder, then render again")
+    stage = Path(tempfile.mkdtemp(prefix="whynot-aerender-"))
+    try:
+        r_aep = stage / "project.aep"
+        shutil.copy2(aep, r_aep)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    return stage, r_aep, (stage / ("render" + out.suffix) if out is not None else None)
+
+
 def render(aep: Path, comp: str, out: Path, rs: str, om: str, start_frame: int | None = None,
            end_frame: int | None = None, timeout: int = 3600, log: Path | None = None) -> dict:
     exe = aerender_exe()
@@ -54,24 +86,17 @@ def render(aep: Path, comp: str, out: Path, rs: str, om: str, start_frame: int |
     if not exe or not Path(exe).exists() or not aep.exists():
         return {"status": "SKIPPED", "returncode": None, "output": str(out), "elapsed_s": 0,
                 "log": None, "msg": f"aerender={exe} aep_exists={aep.exists()}"}
-    refused = Path(exe).stem.lower() == "aerender" and plat.sandbox_refusal("run aerender")   # G79: never in tests
+    refused = sandbox_refused(exe)
     if refused:
         return {"status": "REFUSED", "returncode": None, "output": str(out), "elapsed_s": 0, "log": None,
                 "msg": refused["error"], "how": refused["how"]}
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    stage, r_aep, r_out = None, aep, out
-    if plat.IS_WIN and not (str(aep).isascii() and str(out).isascii()):
-        # aerender on Windows reads its command line in the ANSI code page: a non-ASCII path (an Arabic client folder)
-        # arrives as "???". Render an ASCII copy of the project into an ASCII file and move that into place; After
-        # Effects finds the footage itself through the project's own (Unicode) paths. macOS passes UTF-8 as it is.
-        if not tempfile.gettempdir().isascii():
-            return {"status": "FAILED", "returncode": None, "output": str(out), "elapsed_s": 0, "log": None,
-                    "msg": f"aerender needs ASCII paths, and the temp folder {tempfile.gettempdir()} is not one either: "
-                           "set TEMP to an ASCII folder, then render again"}
-        stage = Path(tempfile.mkdtemp(prefix="whynot-aerender-"))
-        r_aep, r_out = stage / "project.aep", stage / ("render" + out.suffix)
-        shutil.copy2(aep, r_aep)
+    try:
+        # aerender on Windows reads its command line in the ANSI code page: see stage_ascii
+        stage, r_aep, r_out = stage_ascii(aep, out)
+    except StageError as e:
+        return {"status": "FAILED", "returncode": None, "output": str(out), "elapsed_s": 0, "log": None, "msg": str(e)}
     try:
         p = run(aerender_cmd(exe, r_aep, comp, r_out, rs, om, start_frame, end_frame), check=False, timeout=timeout)
     except subprocess.TimeoutExpired as e:      # 3.0 T2.2: a FAILED result that says what to do, not a traceback

@@ -7,14 +7,21 @@ if the file exists after execution; renders only if the .mov files exist and pro
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from pathlib import Path
 
-from .common import (caption_hide_default, TEMPLATES_DIR, Paths, brand_fallback, font_role_fallback, project_prefix, load_config, log, now_iso, read_json, run, write_json, write_text)
+from .common import (seq_fps, caption_hide_default, TEMPLATES_DIR, Paths, brand_fallback, font_role_fallback, project_prefix, load_config, log, now_iso, read_json, run, write_json, write_text)
 from . import srt as srtlib
 from .plan import norm, to_ms
 
 RENDER_TEMPLATE = "High Quality with Alpha"  # AE default output module: QuickTime ProRes 4444 + alpha
+
+
+def comp_fps() -> float:
+    """The frame rate of the extras' comps: the profile's sequence rate (29.97 and 23.976 as After Effects names them,
+    not 30000/1001 to six decimals), so the clip graphics line up with the Premiere sequence."""
+    return round(seq_fps(), 3)
 
 
 def wrap_lines(text: str, max_chars: int) -> str:
@@ -157,7 +164,12 @@ def generate(paths: Paths) -> dict:
         events.append(e)
     render_dir = paths.p("04_after_effects/compositions")
     aep = paths.p(f"04_after_effects/project/{paths.video_id}_{project_prefix()}_GFX.aep")
-    data = {"brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
+    fps = comp_fps()
+    warnings = []
+    if spec.get("fps") and abs(float(spec["fps"]) - fps) > 0.01:
+        warnings.append(f"the plan was compiled at {float(spec['fps']):.5g} fps but the profile is {fps:.5g} fps: the "
+                        "comps use the profile rate, so run plan again before building")
+    data = {"fps": fps, "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
             "templates": tpls, "events": events, "captions": caption_data(paths, spec, ed),
             "logo": logo.get("display_derivative") if logo else None,
             "render_dir": str(render_dir), "aep_path": str(aep), "render_template": RENDER_TEMPLATE,
@@ -169,7 +181,7 @@ def generate(paths: Paths) -> dict:
           "var NH_DATA = " + json.dumps(data, ensure_ascii=True, indent=1) + ";\n" + lib + "\nNH.build();\n")
     out = paths.p(f"04_after_effects/scripts/build_{paths.video_id}_graphics.jsx")
     write_text(out, js)
-    return {"jsx": str(out), "aep": str(aep), "events": len(events),
+    return {"jsx": str(out), "aep": str(aep), "events": len(events), "fps": fps, "warnings": warnings,
             "captions": len(data["captions"]["cues"]) if data["captions"] else 0}
 
 
@@ -194,7 +206,23 @@ def execute(paths: Paths, jsx: Path, timeout: int = 900) -> dict:
     return res
 
 
+def _movs(d: Path) -> dict[str, tuple[int, int]]:
+    """{path: (mtime_ns, size)} of the .mov files in d (AppleDouble ._ files left out)."""
+    out = {}
+    for x in d.glob("*.mov"):
+        if not x.name.startswith("._"):
+            try:
+                st = x.stat()
+            except OSError:
+                continue
+            out[str(x)] = (st.st_mtime_ns, st.st_size)
+    return out
+
+
 def render(paths: Paths, timeout: int = 3600) -> dict:
+    """Render the saved project's queue with aerender. RENDERED only for files THIS run wrote (changed since the
+    start, newer than it, not empty): a .mov left by an earlier run proves nothing (3.0 T2.18, MI-13)."""
+    from . import ae_render
     env = read_json(paths.output / "discovery/environment.json", {})
     aer = env.get("aerender")
     if not aer or not Path(aer).exists():
@@ -203,21 +231,47 @@ def render(paths: Paths, timeout: int = 3600) -> dict:
     aep = paths.p(f"04_after_effects/project/{paths.video_id}_{project_prefix()}_GFX.aep")
     if not aer or not Path(aer).exists() or not aep.exists():
         return {"status": "SKIPPED", "msg": f"aerender={aer} aep_exists={aep.exists()}"}
+    refused = ae_render.sandbox_refused(aer)
+    if refused:
+        return {"status": "REFUSED", "outputs": [], "msg": refused["error"], "how": refused["how"]}
+    comps = paths.p("04_after_effects/compositions")
+    comps.mkdir(parents=True, exist_ok=True)
+    before = _movs(comps)
     t0 = time.time()
     logp = paths.p("logs/aerender.log")
+    res_p = paths.p("04_after_effects/ae-render-result.json")
+    try:
+        # the queue's output paths live inside the project; only the command line needs ASCII (ae_render.stage_ascii)
+        stage, r_aep, _ = ae_render.stage_ascii(aep)
+    except ae_render.StageError as e:
+        res = {"status": "FAILED", "returncode": None, "outputs": [], "elapsed_s": 0, "log": None, "msg": str(e)}
+        write_json(res_p, dict(res, at=now_iso()))
+        return res
     import subprocess
     try:
-        p = run([aer, "-project", str(aep), "-sound", "OFF", "-continueOnMissingFootage"], check=False, timeout=timeout)
+        p = run([aer, "-project", str(r_aep), "-sound", "OFF", "-continueOnMissingFootage"], check=False, timeout=timeout)
     except subprocess.TimeoutExpired as e:      # 3.0 T2.2: a FAILED result that says what to do, not a traceback
-        from .ae_render import TIMEOUT_HOW, _text, timeout_message
-        write_text(logp, _text(e.stdout) + "\n" + _text(e.stderr))
+        write_text(logp, ae_render._text(e.stdout) + "\n" + ae_render._text(e.stderr))
         res = {"status": "FAILED", "returncode": None, "outputs": [], "elapsed_s": round(time.time() - t0, 1),
-               "log": str(logp), "msg": timeout_message(timeout), "how": TIMEOUT_HOW}
-        write_json(paths.p("04_after_effects/ae-render-result.json"), dict(res, at=now_iso()))
+               "log": str(logp), "msg": ae_render.timeout_message(timeout), "how": ae_render.TIMEOUT_HOW}
+        write_json(res_p, dict(res, at=now_iso()))
         return res
+    finally:
+        if stage is not None:
+            shutil.rmtree(stage, ignore_errors=True)
     write_text(logp, p.stdout + "\n" + p.stderr)
-    outs = sorted(x for x in paths.p("04_after_effects/compositions").glob("*.mov") if not x.name.startswith("._"))
-    res = {"status": "RENDERED" if outs else "FAILED", "returncode": p.returncode, "outputs": [str(o) for o in outs],
+    after = _movs(comps)
+    fresh = sorted(f for f, (mt, size) in after.items()
+                   if size > 0 and before.get(f) != (mt, size) and mt / 1e9 >= t0 - 1)
+    stale = sorted(f for f in after if f not in fresh and after[f][1] > 0)
+    res = {"status": "RENDERED" if fresh else ("STALE_OUTPUT_NOT_RENDERED" if stale else "FAILED"),
+           "returncode": p.returncode, "outputs": fresh, "stale_outputs": stale,
            "elapsed_s": round(time.time() - t0, 1), "log": str(logp)}
-    write_json(paths.p("04_after_effects/ae-render-result.json"), dict(res, at=now_iso()))
+    if not fresh:
+        res["msg"] = ("aerender wrote no new .mov this run; " + (
+            "these are from an earlier run, not this render: " + ", ".join(Path(f).name for f in stale)
+            if stale else "check the log") + f" ({logp})")
+        res["how"] = ("Open the project in After Effects, check the Render Queue has items and no dialog is waiting, "
+                      "then render again")
+    write_json(res_p, dict(res, at=now_iso()))
     return res
