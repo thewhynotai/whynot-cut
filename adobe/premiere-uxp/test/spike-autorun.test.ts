@@ -54,13 +54,22 @@ function harness(fsOpts: Parameters<typeof memFs>[0] = {}, over: Partial<AutoRun
   const clock = { t: T0 };
   const runs: Array<{ id: string; mode: RunMode }> = [];
   const statuses: string[] = [];
+  const lock = { held: false, taken: 0, heldDuringRun: [] as boolean[] };
   const summary: RunSummary = { results_file: `${DIR}/results-20261012-120000.json`, ok: true, pass: 20, fail: 2, na: 3 };
   const deps: AutoRunDeps = {
     fs: fs as AutoRunDeps["fs"],
     dir: DIR,
     now: () => clock.t,
     isBusy: () => false,
+    tryLock: () => {
+      if (lock.held) return false;
+      lock.held = true;
+      lock.taken++;
+      return true;
+    },
+    unlock: () => void (lock.held = false),
     run: async (mode, id) => {
+      lock.heldDuringRun.push(lock.held);
       runs.push({ id, mode });
       clock.t += 4000; // the run takes 4 s
       return summary;
@@ -69,7 +78,7 @@ function harness(fsOpts: Parameters<typeof memFs>[0] = {}, over: Partial<AutoRun
     schedule: () => () => {},
     ...over,
   };
-  return { fs, clock, runs, statuses, deps, runner: createAutoRunner(deps), summary };
+  return { fs, clock, runs, statuses, deps, lock, runner: createAutoRunner(deps), summary };
 }
 
 const names = (fs: { files: Map<string, string> }) => [...fs.files.keys()].map((k) => k.slice(DIR.length + 1)).sort();
@@ -345,6 +354,68 @@ test("the status line says Auto-run <id> ... while it claims, runs and when it e
   assert.match(h.statuses.at(-1) ?? "", /done: 20 pass, 2 fail, 3 n\/a/);
 });
 
+// ---- BOM (Windows PowerShell 5.1 writes UTF-8 with a BOM) -------------------------------------------------------
+
+test("a request file that starts with a UTF-8 BOM (PowerShell 5.1) parses and runs", async () => {
+  const h = harness({ initial: { [REQ]: "﻿" + request("bom1", "keep_open") } });
+  const out = await h.runner.poll();
+  assert.equal(out.kind, "ran");
+  assert.deepEqual(h.runs, [{ id: "bom1", mode: "keep_open" }]);
+});
+
+test("a BOM does not hide a real problem: BOM + bad shape is malformed, BOM + half a file waits then is malformed", async () => {
+  const h = harness({ initial: { [REQ]: "﻿" + JSON.stringify({ id: "b2", mode: "nope", requested_at: iso(T0) }) } });
+  assert.equal((await h.runner.poll()).kind, "malformed");
+  const h2 = harness({ initial: { [REQ]: "﻿{\"id\": " } });
+  assert.equal((await h2.runner.poll()).kind, "waiting");
+  assert.equal((await h2.runner.poll()).kind, "malformed");
+  assert.equal(h2.runs.length, 0);
+});
+
+// ---- the manual-click race ---------------------------------------------------------------------------------------
+
+test("the run lock is taken BEFORE the claim and held through the run and the done file, then released", async () => {
+  const h = harness({ initial: { [REQ]: request("lock1") } });
+  const heldAt: Record<string, boolean> = {};
+  const rename = h.fs.renameSync as (a: string, b: string) => void;
+  h.fs.renameSync = (a: string, b: string) => {
+    heldAt[b.slice(b.lastIndexOf("/") + 1)] = h.lock.held;
+    rename(a, b);
+  };
+  await h.runner.poll();
+  assert.equal(heldAt["run-request.lock1.claimed"], true, "locked while claiming");
+  assert.equal(heldAt["run-done-lock1.json"], true, "locked while writing the done file");
+  assert.deepEqual(h.lock.heldDuringRun, [true]);
+  assert.equal(h.lock.held, false, "released afterwards");
+});
+
+test("a manual run that holds the lock at claim time: the request is left untouched and runs on a later poll (never consumed as a failure)", async () => {
+  const h = harness({ initial: { [REQ]: request("race1") } });
+  h.lock.held = true; // the button was pressed between the early busy check and the claim
+  assert.deepEqual(await h.runner.poll(), { kind: "busy" });
+  assert.equal(h.fs.files.has(REQ), true);
+  assert.equal(h.runs.length, 0);
+  assert.deepEqual(names(h.fs).filter((n) => n.includes("race1")), []);
+  h.lock.held = false;
+  assert.equal((await h.runner.poll()).kind, "ran");
+});
+
+test("the lock is released on every exit: claim failure, a run() that throws", async () => {
+  const h = harness({ rename: false, initial: { [REQ]: request("rel1") } });
+  h.fs.writeFileSync = () => {
+    throw new Error("disk full");
+  };
+  assert.equal((await h.runner.poll()).kind, "claim_failed");
+  assert.equal(h.lock.held, false);
+  const h2 = harness({ initial: { [REQ]: request("rel2") } }, {
+    run: async () => {
+      throw new Error("kaput");
+    },
+  });
+  await h2.runner.poll();
+  assert.equal(h2.lock.held, false);
+});
+
 // ---- the loop ----------------------------------------------------------------------------------------------------
 
 test("start() polls at once (panel load) and again every 5 s; stop() ends it", async () => {
@@ -374,6 +445,16 @@ test("start() polls at once (panel load) and again every 5 s; stop() ends it", a
   scheduled[1]?.fn();
   await h.runner.idle();
   assert.equal(scheduled.length, 2, "stopped: no more polls");
+});
+
+test("a scheduler that throws cannot reject start() or leave an unhandled rejection", async () => {
+  const h = harness({}, {
+    schedule: () => {
+      throw new Error("no timers");
+    },
+  });
+  await assert.doesNotReject(h.runner.start());
+  await assert.doesNotReject(h.runner.idle());
 });
 
 // ---- wiring + 0.1.5 ----------------------------------------------------------------------------------------------

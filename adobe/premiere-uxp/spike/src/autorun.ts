@@ -29,6 +29,9 @@ export interface AutoRunDeps {
   now: () => number;
   /** a run (a button, or an earlier auto-run) is in progress */
   isBusy: () => boolean;
+  /** takes the run lock atomically (false = a run already holds it); held from before the claim until the done file is written */
+  tryLock: () => boolean;
+  unlock: () => void;
   run: (mode: RunMode, id: string) => Promise<RunSummary>;
   setStatus: (text: string) => void;
   /** arms one timer, returns its cancel function */
@@ -183,7 +186,8 @@ export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
     if (!(await statOf(fs, requestPath)).exists) return { kind: "none" };
     let text: string;
     try {
-      text = await readText(fs, requestPath);
+      // Windows PowerShell 5.1 writes UTF-8 with a BOM, which JSON.parse rejects
+      text = (await readText(fs, requestPath)).replace(/^﻿/, "");
     } catch (e) {
       return { kind: "error", error: `cannot read run-request.json: ${errText(e)}` };
     }
@@ -218,6 +222,15 @@ export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
       return { kind: "duplicate", id };
     }
 
+    if (!deps.tryLock()) return { kind: "busy" }; // a button run started meanwhile: the request stays for the next poll
+    try {
+      return await claimAndRun(id, mode);
+    } finally {
+      deps.unlock();
+    }
+  }
+
+  async function claimAndRun(id: string, mode: RunMode): Promise<PollOutcome> {
     const why = await claim(id);
     if (why !== null) {
       deps.setStatus(`Auto-run ${id} could not claim the request (${why}); not run`);
@@ -267,7 +280,7 @@ export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
     if (stopped) return;
     cancel = deps.schedule(() => {
       if (stopped) return;
-      current = poll().finally(arm);
+      current = poll().finally(arm).catch(() => {});
     }, POLL_MS);
   }
 
@@ -275,7 +288,7 @@ export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
     poll,
     async start() {
       stopped = false;
-      current = poll().finally(arm);
+      current = poll().finally(arm).catch(() => {});
       await current;
     },
     stop() {

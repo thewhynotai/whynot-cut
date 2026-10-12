@@ -93,6 +93,11 @@ async function copyResults(): Promise<void> {
 
 let running = false;
 
+function setRunning(on: boolean): void {
+  running = on;
+  for (const id of ["run", "run-keep"]) ($(id) as HTMLButtonElement).disabled = on;
+}
+
 function hostModules() {
   const uxp = (tryRequire<UxpModule>("uxp") ?? {}) as UxpModule;
   const fs = (tryRequire<UxpFs>("fs") ?? {}) as UxpFs;
@@ -106,10 +111,15 @@ function hostModules() {
 async function runSpike(keepOpen: boolean, autoId?: string): Promise<RunSummary> {
   const status = $("status");
   const say = (text: string) => void (status.textContent = autoId ? `Auto-run ${autoId} - ${text}` : text);
-  if (running) return { results_file: null, ok: false, pass: 0, fail: 0, na: 0, error: "another run is already in progress" };
-  running = true;
-  const buttons = ["run", "run-keep"].map((id) => $(id) as HTMLButtonElement);
-  buttons.forEach((b) => (b.disabled = true));
+  // an auto-run already holds the lock (taken before its claim, see startAutoRun); a button press takes it here
+  const owns = autoId === undefined;
+  if (owns) {
+    if (running) {
+      say("Another run is in progress - wait for it to finish.");
+      return { results_file: null, ok: false, pass: 0, fail: 0, na: 0, error: "another run is already in progress" };
+    }
+    setRunning(true);
+  }
   skipSaveCloseOpen.value = keepOpen;
   let resultsFile: string | null = null;
   let counts = { pass: 0, fail: 0, na: 0 };
@@ -174,8 +184,7 @@ async function runSpike(keepOpen: boolean, autoId?: string): Promise<RunSummary>
     problem = `Spike could not start: ${errText(e)}`;
     say(problem);
   } finally {
-    running = false;
-    buttons.forEach((b) => (b.disabled = false));
+    if (owns) setRunning(false);
   }
   return { results_file: resultsFile, ok: problem === null, ...counts, ...(problem === null ? {} : { error: problem }) };
 }
@@ -192,6 +201,12 @@ function startAutoRun(): void {
       dir,
       now: () => Date.now(),
       isBusy: () => running,
+      tryLock: () => {
+        if (running) return false;
+        setRunning(true);
+        return true;
+      },
+      unlock: () => setRunning(false),
       run: (mode: RunMode, id: string) => runSpike(mode === "keep_open", id),
       setStatus: (text) => void (status.textContent = text),
       schedule: (fn, ms) => {
