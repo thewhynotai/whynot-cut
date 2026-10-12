@@ -149,7 +149,8 @@ def preflight(ctx: base.Ctx) -> base.StepResult:
         f["nvidia"] = False if plat.startswith("mac") else None
     name = str(base.cget(ctx.components, "marketplace.name") or "thewhynot-ai")
     # an earlier install = state.json or `current` (the engine home itself exists already: the log lives there)
-    f["existing"] = {"engine": paths.state_file.is_file() or paths.current_file.is_file(), "legacy_reel_editor": (paths.home / ".reel-editor").exists(),
+    f["existing"] = {"engine": paths.state_file.is_file() or paths.current_file.is_file(),
+                     "legacy_reel_editor": (paths.home / ".reel-editor").exists(),
                      "marketplace_source": claude._known_source(paths, name)}
 
     notes, status = [], "ok"
@@ -277,11 +278,26 @@ def model_for(facts: dict, platform: str, components: dict) -> str:
     return m if m in MODELS else "large-v3-turbo"
 
 
+def saved_model(paths: base.Paths) -> Optional[str]:
+    """The editor's own whisper_model from the raw preferences file (not the engine's defaults); None when there is
+    none or it is not a model the engine knows."""
+    m = read_preferences(paths).get("whisper_model")
+    return m if m in MODELS else None
+
+
+def chosen_model(ctx: base.Ctx) -> str:
+    """The editor's saved choice wins (kept on re-install); else the model for this hardware."""
+    return saved_model(ctx.paths) or model_for(ctx.facts, ctx.platform, ctx.components)
+
+
 def step_settings(ctx: base.Ctx) -> base.StepResult:
     a = ctx.answers or resolve_answers(ctx)
-    model = model_for(ctx.facts, ctx.platform, ctx.components)
+    saved = saved_model(ctx.paths)
+    model = saved or model_for(ctx.facts, ctx.platform, ctx.components)
     args = ["settings", "--init", str(ctx.paths.home), "--force", "--set", f"clients_root={a['clients_root']}",
-            "--set", f"language={a['language']}", "--set", f"whisper_model={model}"]
+            "--set", f"language={a['language']}"]
+    if not saved:  # an existing choice is kept: only a first install (or an unusable value) gets the hardware pick
+        args += ["--set", f"whisper_model={model}"]
     if ctx.args.dry_run:
         return base.StepResult("settings", "skipped", "dry run: would run reel " + _shown(args))
     if _engine_missing(ctx):
@@ -340,7 +356,7 @@ def _spawn_detached(cmd: list, log_path: Path, env: dict, cwd: Optional[Path]) -
 
 
 def step_model(ctx: base.Ctx) -> base.StepResult:
-    model = model_for(ctx.facts, ctx.platform, ctx.components)
+    model = chosen_model(ctx)
     cmd = engine_cmd(ctx, "model-download", "--model", model)
     shown = _shown(cmd)
     if "model" in (getattr(ctx.args, "skip", None) or ()):

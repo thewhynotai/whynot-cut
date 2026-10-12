@@ -201,14 +201,15 @@ def step_fonts(ctx: base.Ctx) -> base.StepResult:
     installed, names, kept, theirs, added = [], [], [], [], []
     for f, src in got:
         dst = target / f["file"]
-        if dst.exists():
-            if base.file_sha256(dst) != f["sha256"]:
-                kept.append(dst.name)
-                continue
-            if str(dst) not in ours_before:  # the same font, put there by someone else: theirs to keep
+        ours = str(dst) in ours_before
+        if dst.exists() and base.file_sha256(dst) == f["sha256"]:
+            if not ours:  # the same font, put there by someone else: theirs to keep
                 theirs.append(dst.name)
                 continue
-        else:
+        elif dst.exists() and not ours:  # someone else's file with that name: never replaced
+            kept.append(dst.name)
+            continue
+        else:  # missing, or ours with other bytes (a font update): (re)placed with the pinned file
             target.mkdir(parents=True, exist_ok=True)
             tmp = dst.with_name(f".{dst.name}.wnc-tmp")
             shutil.copyfile(src, tmp)

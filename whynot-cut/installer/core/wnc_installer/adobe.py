@@ -143,7 +143,9 @@ def adobe_hosts(paths: base.Paths, platform: str, *, probe_processes: bool = Tru
 
 
 def _vt(v) -> tuple:
-    return tuple(int(x) for x in re.findall(r"\d+", str(v or ""))[:3]) or (0,)
+    """"26.5" -> (26, 5, 0): always three parts, so "26.5" >= "26.5.0"."""
+    parts = [int(x) for x in re.findall(r"\d+", str(v or ""))[:3]]
+    return tuple(parts + [0] * (3 - len(parts)))
 
 
 # --------------------------------------------------------------------------------------------- step
@@ -250,7 +252,21 @@ def _install_uxp(ctx: base.Ctx, ccx: Path, hosts: list, rec: dict) -> tuple:
     rec["uxp"].update(ran=True, exit=rc)
     if rc != 0:
         return "amber", f"UPIA could not install the UXP panel (exit {rc}: {base.tail(out)}): {double_click}"
+    rec["uxp"].update(installed=True, sha256=base.file_sha256(ccx))
     return "ok", "UXP panel installed for Premiere Pro"
+
+
+def _current(ctx: base.Ctx, zxp: Optional[Path], ccx: Optional[Path]) -> tuple:
+    """(cep record, uxp record) of the previous run when that part is already installed from these exact bytes
+    (the CEP bundle still on disk / UPIA succeeded); None for a part that needs work."""
+    prev = ctx.state.data.get("adobe") if isinstance(ctx.state.data.get("adobe"), dict) else {}
+    cep, uxp = prev.get("cep"), prev.get("uxp")
+    cep_ok = (zxp is not None and isinstance(cep, dict) and cep.get("signed") and cep.get("path")
+              and cep.get("sha256") == base.file_sha256(zxp) and Path(cep["path"]).is_dir()
+              and Path(cep["path"]) == cep_extensions_dir(ctx.paths, ctx.platform) / EXT_ID)
+    uxp_ok = (ccx is not None and isinstance(uxp, dict) and uxp.get("installed")
+              and uxp.get("sha256") == base.file_sha256(ccx))
+    return (cep if cep_ok else None), (uxp if uxp_ok else None)
 
 
 def step_adobe(ctx: base.Ctx) -> base.StepResult:
@@ -260,6 +276,10 @@ def step_adobe(ctx: base.Ctx) -> base.StepResult:
     if ctx.args.dry_run:
         what = " and ".join(x for x in ("the CEP panel" if zxp else "", "the UXP panel" if ccx else "") if x)
         return base.StepResult("adobe", "skipped", f"dry run: would install {what}")
+    cep_now, uxp_now = _current(ctx, zxp, ccx)
+    if (zxp is None or cep_now) and (ccx is None or uxp_now):  # nothing to do: no host check, no question
+        ctx.state.record("adobe", "ok", None, "the Adobe panel is installed and up to date")
+        return base.StepResult("adobe", "ok", "the Adobe panel is installed and up to date")
     running = _wait_for_hosts(ctx)
     if running:
         msg = f"close {', '.join(running)}, then run the installer again"
@@ -268,8 +288,17 @@ def step_adobe(ctx: base.Ctx) -> base.StepResult:
     if not isinstance(hosts, list):
         hosts = adobe_hosts(ctx.paths, ctx.platform)
     rec, parts = {"hosts": hosts}, []
-    parts.append(_install_cep(ctx, zxp, rec) if zxp else ("skipped", "the CEP panel is not in this build yet"))
-    parts.append(_install_uxp(ctx, ccx, hosts, rec) if ccx else ("skipped", "the UXP panel is not in this build yet"))
+    if cep_now:
+        rec["cep"] = cep_now
+        parts.append(("ok", "the CEP panel is up to date"))
+    else:
+        parts.append(_install_cep(ctx, zxp, rec) if zxp else ("skipped", "the CEP panel is not in this build yet"))
+    if uxp_now:
+        rec["uxp"] = uxp_now
+        parts.append(("ok", "the UXP panel is up to date"))
+    else:
+        parts.append(_install_uxp(ctx, ccx, hosts, rec) if ccx
+                     else ("skipped", "the UXP panel is not in this build yet"))
     # ~/.whynot-cut/bridge/config.json belongs to the bridge itself (Phase 6), not to this step.
     statuses = [s for s, _t in parts]
     status = next((s for s in ("red", "amber", "ok") if s in statuses), "skipped")

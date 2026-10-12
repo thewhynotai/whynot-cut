@@ -2280,7 +2280,11 @@ class TestAdobe(unittest.TestCase):
         self.assertIn("unsigned panel: not installed", r.detail)
         self.assertFalse(self.sy.cep_extensions_dir(ctx.paths, ctx.platform).exists())
 
-    def test_signed_zxp_is_extracted_and_a_second_run_keeps_one_prev(self):
+    def signed(self, version: bytes) -> bytes:
+        return ffmpeg_zip({"CSXS/manifest.xml": b"<ExtensionManifest/>", "index.html": b"<html>" + version + b"</html>",
+                           "META-INF/signatures.xml": b"<signatures/>"})
+
+    def test_signed_zxp_is_extracted_and_each_update_keeps_one_prev(self):
         self.zxp(self.SIGNED)
         ctx = self.ctx()
         r = self.sy.step_adobe(ctx)
@@ -2288,13 +2292,49 @@ class TestAdobe(unittest.TestCase):
         b = self.bundle(ctx)
         self.assertEqual((b / "META-INF" / "signatures.xml").read_bytes(), b"<signatures/>")
         self.assertEqual(ctx.state.data["adobe"]["cep"]["path"], str(b))
-        r2 = self.sy.step_adobe(self.ctx())
-        self.assertEqual(r2.status, "ok", r2.detail)
-        r3 = self.sy.step_adobe(self.ctx())
-        self.assertEqual(r3.status, "ok", r3.detail)
+        for version in (b"v2", b"v3"):
+            self.zxp(self.signed(version))
+            r = self.sy.step_adobe(self.ctx())
+            self.assertEqual(r.status, "ok", r.detail)
         names = sorted(p.name for p in b.parent.iterdir())
         self.assertEqual(names, ["ai.thewhynot.cut.bridge", "ai.thewhynot.cut.bridge.prev"])
-        self.assertEqual((b.parent / "ai.thewhynot.cut.bridge.prev" / "index.html").read_bytes(), b"<html>v1</html>")
+        self.assertEqual((b / "index.html").read_bytes(), b"<html>v3</html>")
+        self.assertEqual((b.parent / "ai.thewhynot.cut.bridge.prev" / "index.html").read_bytes(), b"<html>v2</html>")
+
+    def test_the_same_zxp_again_is_a_no_op_without_questions(self):
+        self.zxp(self.SIGNED)
+        self.assertEqual(self.sy.step_adobe(self.ctx()).status, "ok")
+        self.zxp(self.signed(b"v2"))
+        ctx = self.ctx()
+        self.assertEqual(self.sy.step_adobe(ctx).status, "ok")
+        prev = self.bundle(ctx).with_name("ai.thewhynot.cut.bridge.prev")
+        before = (prev / "index.html").stat().st_mtime_ns, (self.bundle(ctx) / "index.html").stat().st_mtime_ns
+        with mock.patch.dict(os.environ, {"WNC_TEST_HOSTS_RUNNING": "Adobe Premiere Pro.exe"}), \
+                mock.patch.object(base, "can_ask", return_value=True), \
+                mock.patch.object(base, "ask", side_effect=AssertionError("asked")), \
+                mock.patch.object(base, "extract", side_effect=AssertionError("extracted")):
+            r = self.sy.step_adobe(self.ctx())
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertIn("up to date", r.detail)
+        self.assertEqual(((prev / "index.html").stat().st_mtime_ns,
+                          (self.bundle(ctx) / "index.html").stat().st_mtime_ns), before)
+        self.assertEqual((prev / "index.html").read_bytes(), b"<html>v1</html>")
+
+    def test_a_removed_bundle_is_installed_again(self):
+        self.zxp(self.SIGNED)
+        ctx = self.ctx()
+        self.assertEqual(self.sy.step_adobe(ctx).status, "ok")
+        shutil.rmtree(self.bundle(ctx))
+        self.assertEqual(self.sy.step_adobe(self.ctx()).status, "ok")
+        self.assertTrue((self.bundle(ctx) / "index.html").is_file())
+
+    def test_version_compare_pads_to_three_parts(self):
+        from wnc_installer import adobe
+        self.assertGreaterEqual(adobe._vt("26.5"), adobe._vt("26.5.0"))
+        self.assertEqual(adobe._vt("26.5"), (26, 5, 0))
+        self.assertEqual(adobe._vt("26"), (26, 0, 0))
+        self.assertLess(adobe._vt("26.4.9"), adobe._vt("26.5.0"))
+        self.assertEqual(adobe._vt(None), (0, 0, 0))
 
     def test_mac_cep_dir_is_used(self):
         self.zxp(self.SIGNED)
@@ -2417,6 +2457,18 @@ class TestFonts(unittest.TestCase):
         self.assertEqual(list(self.registry(ctx)), ["Fix[wght] (TrueType)"])
         self.assertNotIn(str(mine), ctx.state.data["fonts"]["installed"])
 
+    def test_our_older_font_is_replaced(self):
+        ctx = self.ctx()
+        self.assertEqual(self.sy.step_fonts(ctx).status, "ok")
+        ours = self.sy.user_font_dir(ctx.paths, "win-x64") / "FixA-Regular.ttf"
+        ours.write_bytes(b"an older build of our font")  # what an earlier WhyNot Cut release installed
+        ctx2 = self.ctx()
+        r = self.sy.step_fonts(ctx2)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(ours.read_bytes(), FONT_A)
+        self.assertIn(str(ours), ctx2.state.data["fonts"]["installed"])
+        self.assertEqual(self.registry(ctx2)["FixA-Regular (TrueType)"], str(ours))
+
     def test_bad_sha_is_red_and_nothing_is_installed(self):
         self.comp["fonts"]["files"][1]["sha256"] = "0" * 64
         ctx = self.ctx()
@@ -2504,6 +2556,24 @@ class TestSettingsAndDoctor(unittest.TestCase):
         sets = [argv[i + 1] for i, a in enumerate(argv) if a == "--set"]
         self.assertEqual(sets, [f"clients_root={self.home / 'Documents' / 'WhyNot Clients'}", "language=ar",
                                 "whisper_model=large-v3-turbo"])
+
+    def test_a_saved_model_choice_is_kept(self):
+        touch(self.home / ".claude" / "whynot-cut.local.md",
+              b"---\nlanguage: en\nwhisper_model: medium\nclients_root: ''\n---\n")
+        ctx = self.ctx()
+        self.assertEqual(self.sy.step_settings(ctx).status, "ok")
+        [argv] = self.calls()
+        self.assertFalse([a for a in argv if a.startswith("whisper_model=")], argv)
+        self.assertIn("language=ar", argv)  # ctx.answers (flags / questions) still go in
+        r = self.sy.step_model(ctx)  # sandbox: skipped, but it names the command it would run
+        self.assertEqual(r.status, "skipped")
+        self.assertIn("model-download --model medium", r.detail)
+
+    def test_an_unusable_saved_model_gets_the_hardware_pick(self):
+        touch(self.home / ".claude" / "whynot-cut.local.md", b"---\nwhisper_model: tiny-xl\n---\n")
+        self.assertEqual(self.sy.step_settings(self.ctx()).status, "ok")
+        [argv] = self.calls()
+        self.assertIn("whisper_model=large-v3-turbo", argv)
 
     def test_settings_failure_is_amber(self):
         with mock.patch.dict(os.environ, {"WNC_TEST_ENGINE_EXIT": "2"}):
