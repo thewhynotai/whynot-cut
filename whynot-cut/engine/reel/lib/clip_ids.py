@@ -14,7 +14,7 @@ from __future__ import annotations
 import unicodedata
 from pathlib import Path
 
-from .common import Paths, read_json, short_hash, slug, stable_id, write_json
+from .common import Paths, file_locked, read_json, short_hash, slug, stable_id, write_json
 
 MAP_REL = "discovery/clip-ids.json"
 
@@ -99,10 +99,11 @@ def clip_ids(root, inv: dict | None = None) -> dict:
     """{id: relative path} for every raw clip in the inventory (default: the last discovery), new ones added and saved."""
     if inv is None:
         inv = read_json(Paths(root).output / "discovery/input-inventory.json", {})
-    old = load(root)
-    ids = assign(root, source_rels(inv), old)
-    if ids != old:
-        write_json(Paths(root).output / MAP_REL, ids)
+    with file_locked(Paths(root).output / MAP_REL):      # T2.4: parallel subagents add clips to one map
+        old = load(root)
+        ids = assign(root, source_rels(inv), old)
+        if ids != old:
+            write_json(Paths(root).output / MAP_REL, ids)
     return ids
 
 

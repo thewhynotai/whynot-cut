@@ -14,7 +14,7 @@ import re
 import statistics
 from pathlib import Path
 
-from .common import Paths, ffmpeg_exe, log, run, write_json
+from .common import Paths, ffmpeg_exe, file_locked, log, run, write_json
 
 SHOWINFO_T = re.compile(r"pts_time:([0-9.]+)")
 
@@ -126,7 +126,12 @@ def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
         r = analyze_reference(v, cache_dir, durations.get(str(v), 0))
         idx[key] = r
         results.append(r)
-    write_json(idx_f, idx)
+    with file_locked(idx_f):          # T2.4: reels of one episode share this cache: merge, keep what others added
+        try:
+            cur = json.loads(idx_f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cur = {}
+        write_json(idx_f, {**(cur if isinstance(cur, dict) else {}), **idx})
     agg_shots = [s for r in results for s in r["shot_durations_s"]]
     summary = {
         "references": [{k: r[k] for k in ("video", "duration_s", "cut_count", "cuts_per_minute",

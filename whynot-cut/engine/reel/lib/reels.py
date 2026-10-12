@@ -566,7 +566,18 @@ def select(ep, picks: list[str], adjust: list[str], by: str, note: str = "", con
     transcript and 16 kHz audio, the speaker turns and the recipe. --resync re-slices the transcripts of the reels
     already selected (after episode transcript corrections) without changing their windows.
     as_="motion" (2.2): the pick becomes a motion project <EP>_<ID>_MO built from the window's audio only; reel
-    candidates (R..) and topics (T.., with a content type from the topic or `type_`) are pickable."""
+    candidates (R..) and topics (T.., with a content type from the topic or `type_`) are pickable.
+    3.0 T2.4: one Gate 0 per episode at a time (the lock of 01_analysis/selection.json), and every pick is validated
+    before anything is written, so a refused pick leaves no half-made selection."""
+    from .common import file_locked
+    with file_locked(ep.p("01_analysis/selection.json"), SELECT_WAIT_S):
+        return _select(ep, picks, adjust, by, note, confirm_avoid, force, resync, as_, fmt, type_)
+
+
+SELECT_WAIT_S = 600.0                  # slicing a few reels' audio can take a while: a second Gate 0 waits for it
+
+
+def _select(ep, picks, adjust, by, note, confirm_avoid, force, resync, as_, fmt, type_) -> dict:
     from .common import Paths, load_status, set_status, sha1_head
     from .episode import episode_file, load_episode, podcast_cfg
     from .recipes import resolve, types as recipe_types
@@ -628,6 +639,7 @@ def select(ep, picks: list[str], adjust: list[str], by: str, note: str = "", con
         format_spec(fmt)                                   # unknown format -> SystemExit before anything is written
         mdur = motion_cfg().get("duration_s") or {"hard_min": 15, "hard_max": 180}
     intake = read_json(ep.p("00_inputs/intake.json"), {}) or {}
+    todo = []          # T2.4: every pick is validated first; nothing is written until all of them passed
     for rid in picks:
         c = byid[rid]
         is_topic = bool(re.fullmatch(r"T\d+", rid))
@@ -655,13 +667,19 @@ def select(ep, picks: list[str], adjust: list[str], by: str, note: str = "", con
         if old:
             same = (old.get("in_ms"), old.get("out_ms"), old.get("fingerprint")) == (in_ms, out_ms, fp)
             if same and (as_ == "video" or old.get("format") == fmt):
-                out.append({"reel_id": reel.video_id, "status": "unchanged", "in_ms": in_ms, "out_ms": out_ms})
+                todo.append({"reel_id": reel.video_id, "status": "unchanged", "in_ms": in_ms, "out_ms": out_ms})
                 continue
             if not force and not (same and as_ == "motion"):
                 raise SystemExit(f"{reel.video_id} already exists with {fmt_ts(old['in_ms'], '.')}–{fmt_ts(old['out_ms'], '.')}; "
                                  f"the new window {fmt_ts(in_ms, '.')}–{fmt_ts(out_ms, '.')} needs --force (the reel is "
                                  "re-sliced; its plan and build become stale)")
             status = "re-sliced" if not same else "format changed"
+        todo.append((rid, c, is_topic, ctype, in_ms, out_ms, reel, status))
+    for job in todo:
+        if isinstance(job, dict):                                          # unchanged
+            out.append(job)
+            continue
+        rid, c, is_topic, ctype, in_ms, out_ms, reel, status = job
         reel.ensure_project()
         cand = {k: v for k, v in c.items() if k not in ("warnings", "ok")}
         rec = {

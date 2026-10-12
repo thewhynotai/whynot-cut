@@ -166,6 +166,16 @@
   not proved (`ok` false, "inconclusive"). First unit tests for `detect_pauses` and `verify_cuts`.
 
 ### Fixed
+- The frame size comes from the client's profile everywhere (T2.8, review IM-16). One helper, `common.frame_size(paths)`, reads `general.frame_width` / `frame_height` from `sequence-settings.json` (the shipped default, the shipped profile, then the client's reel-profile; 1080x1920 when the settings carry no size, a plain-English error naming the file and key when it is not a whole number of pixels). `reel previews` (graphic and caption stills, the QC composites and contact sheet), `reel preview-video` (the proxy keeps the frame's aspect), `reel verify` (tiles, the overlay filter and the safe area follow the frame), the Premiere settings the bridge sets (`previewFrameWidth` / `previewFrameHeight`), the read-back check (`frame_<W>x<H>`, was always `frame_1080x1920`, so a 1080x1350 or 1920x1080 profile built `PRPROJ_BUILT_WITH_ISSUES`) and the handoff (sequence-settings steps and the export spec; the default export file name carries `{aspect}`: 9x16, 4x5, 16x9) all use it. Unchanged for 1080x1920 profiles. The layout of the graphics (style.json `y`, font sizes) is still in pixels, so a very different frame needs its own graphic styles.
+- Concurrency-safe writes (T2.4, review IM-11 / MI-23). Parallel subagents of one session no longer lose each
+  other's updates to a shared file: every read-modify-write holds an operating-system lock on `<file>.lock` next to
+  the file (`msvcrt.locking` on Windows, `fcntl.flock` on macOS/Linux; released by the system when a process exits,
+  so it is never stale) — `project-status.json` (`set_status`), `output/discovery/clip-ids.json`, the client's
+  reference-analysis cache (merged, never overwritten) and an episode's Gate 0 (`reels-select`, one at a time per
+  episode). Discovery runs one at a time per client. `reels-select` validates every pick before it writes anything,
+  so a refused pick (too short after `--adjust`, an existing reel without `--force`, …) leaves no half-made reels.
+  A lock still held after its wait is plain guidance ("… is busy"), not a traceback. New `common.update_json` for
+  locked read-modify-write. Proved by 8 processes × 40 status updates on one file with none lost.
 - SFX kinds are checked at plan time; the client's SFX map works (T2.7, review IM-10). `compile_plan` rejects a decision's `sound[].type` that is neither a procedural recipe nor a key of `06_audio/sfx-map.json`, and the plan error lists the valid kinds (before, an unknown kind passed the plan and crashed `reel sfx` with a KeyError). `reel sfx` now converts each mapped client library file to `06_audio/sfx/<kind>.wav` (48 kHz / 24-bit stereo, like the synthesised cues) with `<kind>.provenance.json` beside it (source path, sha256, converted_at, the map entry); an unchanged source is reused. A map entry whose file is missing or not audio, a malformed map, and an unmapped unknown kind are plain-English guidance, never a traceback. The client's `assets/` and `data/` are only read. Documented in audio-craft/references/sound-design.md.
 - Bridge queue robustness, bridge 3.1.1 (T2.9, review IM-4 / IM-5 / IM-6 / MI-22). A queued job carries `expires_at`
   and the bridge answers an expired job `{ok: false, error: "expired"}` without running it; a job the bridge has not

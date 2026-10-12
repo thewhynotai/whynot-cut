@@ -245,6 +245,27 @@ def write_json(path: Path, data) -> Path:
     return path
 
 
+# ---- 3.0 T2.4 (engine IM-11, MI-23): read-modify-write of a shared file under its per-file OS lock (lib/file_lock.py)
+from .file_lock import locked as file_locked  # noqa: E402  (stdlib + lib.errors only: no import cycle)
+
+
+def update_json(path: Path, fn, default=None, wait_s: float | None = None):
+    """Read-modify-write of a file other processes update too (parallel subagents of one session), holding
+    `<file>.lock` for the whole cycle so no update is lost. fn gets the current document (a deep copy of `default`
+    when the file does not exist) and returns the new one, or None after changing it in place. Returns what was
+    written."""
+    import copy
+    with file_locked(path, wait_s):
+        cur = read_json(path)
+        if cur is None:
+            cur = copy.deepcopy(default)
+        new = fn(cur)
+        doc = cur if new is None else new
+        write_json(path, doc)
+        return doc
+# ---- end T2.4
+
+
 def write_text(path: Path, text: str) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -358,16 +379,17 @@ def load_status(paths: Paths) -> dict:
 def set_status(paths: Paths, status: str, note: str = "", stage: str | None = None,
                outputs: list | None = None, blockers: list | None = None) -> dict:
     assert status in STATUSES, status
-    st = load_status(paths)
-    st["status"] = status
-    st["updated"] = now_iso()
-    st["history"].append({"status": status, "at": st["updated"], "note": note})
-    if stage:
-        st["stages"][stage] = {"done": status != "BLOCKED", "at": st["updated"],
-                               "note": note, "outputs": [str(o) for o in (outputs or [])]}
-    if blockers is not None:
-        st["blockers"] = blockers
-    write_json(status_path(paths), st)
+    with file_locked(status_path(paths)):          # T2.4: parallel subagents update one project's status
+        st = load_status(paths)
+        st["status"] = status
+        st["updated"] = now_iso()
+        st["history"].append({"status": status, "at": st["updated"], "note": note})
+        if stage:
+            st["stages"][stage] = {"done": status != "BLOCKED", "at": st["updated"],
+                                   "note": note, "outputs": [str(o) for o in (outputs or [])]}
+        if blockers is not None:
+            st["blockers"] = blockers
+        write_json(status_path(paths), st)
     return st
 
 
