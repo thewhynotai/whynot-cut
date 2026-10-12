@@ -19,8 +19,34 @@ export interface PipelineStep {
   request_id?: string | null;
 }
 
-/** Claude pill = Claude activity from the engine's last signal. Never a login state. */
-export type ClaudeState = "active" | "idle" | "unknown";
+/**
+ * The Claude pill (Addendum C1.6, ecosystem.md 3.5c): the engine's local probe of the editor's own Claude CLI and session
+ * (installed? signed in? WhyNot Cut plugin up to date? a session working on the item, or waiting for the editor?). It is
+ * a probe of the editor's own login, never a login WhyNot Cut offers. "unknown" = not probed yet: the daemon reports it
+ * until the T6.2b probe exists. "active" / "idle" are the round-1 values: no daemon sends them; they stay only until the
+ * renderer maps the new states.
+ */
+export type ClaudeState =
+  | "not_installed"
+  | "signed_out"
+  | "plugin_outdated"
+  | "ready"
+  | "working"
+  | "waiting"
+  | "unknown"
+  | "active"
+  | "idle";
+export const CLAUDE_STATES: readonly ClaudeState[] = [
+  "not_installed",
+  "signed_out",
+  "plugin_outdated",
+  "ready",
+  "working",
+  "waiting",
+  "unknown",
+  "active",
+  "idle",
+];
 export type EngineState = "connected" | "offline";
 export type HostState = "uxp" | "cep" | "offline";
 
@@ -106,10 +132,10 @@ export interface PanelDataSource {
   requestChanges(input: { item: string; editor_name: string; text: string }): Promise<Result>;
   run(action: ActionName, data: object): Promise<Result>;
   /**
-   * Rebuild the item's project. The daemon expands this into a full engine rebuild (`reel ppro-build --force`, plus
-   * `--replace-edited` when replace_edited is true: the editor confirmed the edited-project warning) and then the
-   * complete build_project request to the host. The panel never sends build_project itself.
+   * Rebuild the item's project. The engine expands this into a full rebuild (`--replace-edited` when replace_edited is
+   * true: the editor confirmed the edited-project warning) and then the complete build_project request to the host. The
+   * engine finds the project from the item; project_path is optional (C2.4). The panel never sends build_project itself.
    */
-  rebuild(input: { item: string; project_path: string; replace_edited: boolean }): Promise<Result>;
+  rebuild(input: { item: string; project_path?: string; replace_edited: boolean }): Promise<Result>;
   cancel(id: string): Promise<void>;
 }

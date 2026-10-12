@@ -11,14 +11,16 @@ import re
 from contract import validate
 from contract.validator import load
 
-__all__ = ["TYPES", "CLIENT_TYPES", "DAEMON_TYPES", "ID_RE", "MESSAGE_MAX", "validate_message", "message_id", "error",
-           "reply", "welcome", "state", "clip"]
+__all__ = ["TYPES", "CLIENT_TYPES", "DAEMON_TYPES", "ID_RE", "MESSAGE_MAX", "PANEL_UPDATES", "validate_message",
+           "message_id", "error", "reply", "welcome", "state", "clip", "compare_builds"]
 
 TYPES = tuple(ref["$ref"].rsplit("/", 1)[1] for ref in load("session")["$defs"]["message"]["oneOf"])
 DAEMON_TYPES = frozenset({"welcome", "state", "reply", "error"})            # only the daemon sends these
 CLIENT_TYPES = frozenset(TYPES) - DAEMON_TYPES
 ID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")                                 # session.schema.json $defs/id
 MESSAGE_MAX = 2000                                                          # error.message / reply.error maxLength
+PANEL_UPDATES = ("ok", "stale", "newer", "unknown")                         # welcome.update.panel
+_BUILD = re.compile(r"[0-9]{1,9}(?:\.[0-9]{1,9}){0,5}")                      # a build number: 142, 3.0.0.142
 
 
 def validate_message(msg) -> tuple[str, list[str]] | None:
@@ -68,13 +70,31 @@ def reply(intent: str, id: str, *, ok: bool, error: str | None = None, how: str 
     return out
 
 
-def welcome(session_id: str, daemon_version: str) -> dict:
-    return {"type": "welcome", "session_id": session_id, "protocol": 4, "daemon_version": daemon_version}
+def compare_builds(panel, expected) -> str:
+    """welcome.update.panel (C2.3): the hello's client.build against expected.json `build`. The same text is "ok";
+    otherwise both must be build numbers (dot-separated integers, compared part by part, missing parts = 0): older
+    is "stale", newer is "newer". Anything else (absent, empty, not a build number) is "unknown"."""
+    if not isinstance(panel, str) or not isinstance(expected, str) or not panel or not expected:
+        return "unknown"
+    if panel == expected:
+        return "ok"
+    if not _BUILD.fullmatch(panel) or not _BUILD.fullmatch(expected):
+        return "unknown"
+    a, b = [int(x) for x in panel.split(".")], [int(x) for x in expected.split(".")]
+    n = max(len(a), len(b))
+    a, b = a + [0] * (n - len(a)), b + [0] * (n - len(b))
+    return "ok" if a == b else "stale" if a < b else "newer"
 
 
-def state(host_state: str, host_detail: str | None = None, id: str | None = None) -> dict:
-    """The serve core's `state`: the connection only (engine connected, which host path is live); client, item,
-    pipeline, approval, QC and log stay empty until the engine-state task fills them."""
+def welcome(session_id: str, daemon_version: str, update: str = "unknown") -> dict:
+    return {"type": "welcome", "session_id": session_id, "protocol": 4, "daemon_version": daemon_version,
+            "update": {"panel": update if update in PANEL_UPDATES else "unknown"}}
+
+
+def state(host_state: str, host_detail: str | None = None, id: str | None = None, item: dict | None = None) -> dict:
+    """The daemon's `state`: the connection (engine connected, which host path is live; the Claude pill stays "unknown"
+    until the T6.2b probe exists) and, from engine_state.panel_fields, the item's client, item, pipeline, approval and
+    QC tiles. Language, editor name, context and log are the panel's own."""
     host: dict = {"state": host_state}
     if host_detail:
         host["detail"] = clip(host_detail, 256)
@@ -83,6 +103,9 @@ def state(host_state: str, host_detail: str | None = None, id: str | None = None
         "client": "", "item": "", "language": "en", "editor_name": "",
         "context": {"project_path": None, "sequence_name": None, "folder": None, "out_dir": None, "review_mp4": None},
         "pipeline": [], "approval": None, "qc": [], "log": []}}
+    for key in ("client", "item", "pipeline", "approval", "qc"):
+        if item and key in item:
+            out["state"][key] = item[key]
     if isinstance(id, str) and ID_RE.fullmatch(id):
         out["id"] = id
     return out

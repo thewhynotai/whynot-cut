@@ -23,6 +23,8 @@ DRAFT = "https://json-schema.org/draft/2020-12/schema"
 ID_BASE = "https://thewhynot.ai/whynot-cut/contract/4/"
 ENVELOPES = {"request", "result", "progress"}
 SESSION = "session"           # the daemon-link WebSocket message schema: neither an action nor a host envelope
+ENGINE_STATE = "engine_state"  # ~/.whynot-cut/state/active.json (C2.4): read by reel serve, neither an action nor an envelope
+NOT_ACTIONS = {SESSION, ENGINE_STATE}
 V4_ACTIONS = ["ping", "status", "probe", "build_project", "export_frames", "close_project_path", "clip_components",
               "open_project", "set_player_position", "render_review", "ae_build_motion", "ae_readback", "ae_render",
               "ae_fonts", "ae_probe_text"]
@@ -284,12 +286,12 @@ class ContractFilesTests(unittest.TestCase):
 
     def test_protocol_lists_exactly_the_action_schema_files(self):
         proto = json.loads((contract.CONTRACT_DIR / "protocol.json").read_text(encoding="utf-8"))
-        files = {p.name[:-len(".schema.json")] for p in schema_files()} - ENVELOPES - {SESSION}
+        files = {p.name[:-len(".schema.json")] for p in schema_files()} - ENVELOPES - NOT_ACTIONS
         self.assertEqual(set(proto["actions"]), files)
         self.assertEqual(set(contract.ACTIONS), files)
         self.assertEqual(list(contract.ACTIONS), ALL_ACTIONS)            # the 15 routed ones first, then the reservations
         self.assertEqual(len(contract.ACTIONS), 35)
-        self.assertTrue(ENVELOPES | {SESSION} <= {p.name[:-len(".schema.json")] for p in schema_files()})
+        self.assertTrue(ENVELOPES | NOT_ACTIONS <= {p.name[:-len(".schema.json")] for p in schema_files()})
 
     def test_protocol_entries_have_host_cep_uxp_status(self):
         proto = json.loads((contract.CONTRACT_DIR / "protocol.json").read_text(encoding="utf-8"))
@@ -2357,9 +2359,14 @@ class SessionContractTests(unittest.TestCase):
             self.assertEqual(session_errors(ok, "hello"), [], host)
         minimal = {"type": "hello", "token": TOKEN, "client": {"kind": "cli", "version": "3.0.0", "protocol": 4, "capabilities": []}}
         self.assertEqual(session_errors(minimal, "hello"), [])
+        for build in ("3.0.0.142", "142", "x" * 64, "abc1234 2026-10-13T10:00:00Z"):     # C2.3: optional, any text <= 64
+            ok = copy.deepcopy(h)
+            ok["client"]["build"] = build
+            self.assertEqual(session_errors(ok, "hello"), [], build)
         cases = [("kind", "browser"), ("kind", None), ("version", ""), ("version", 3), ("host", "photoshop"),
                  ("hostVersion", 26), ("capabilities", "ping"), ("capabilities", ["ping", "rm_rf"]),
-                 ("capabilities", ["ping"] * (len(contract.ACTIONS) + 1)), ("capabilities", [3])]
+                 ("capabilities", ["ping"] * (len(contract.ACTIONS) + 1)), ("capabilities", [3]),
+                 ("build", ""), ("build", "x" * 65), ("build", 142), ("build", None)]
         for key, value in cases:
             bad = copy.deepcopy(h)
             bad["client"][key] = value
@@ -2383,6 +2390,14 @@ class SessionContractTests(unittest.TestCase):
 
     def test_welcome(self):
         w = SESSION_SAMPLES["welcome"]
+        self.assertEqual(V.load(SESSION)["$defs"]["welcome"]["properties"]["update"]["properties"]["panel"]["enum"],
+                         ["ok", "stale", "newer", "unknown"])
+        for panel in ("ok", "stale", "newer", "unknown"):
+            self.assertEqual(session_errors(dict(w, update={"panel": panel}), "welcome"), [], panel)
+            self.assertEqual(session_errors(dict(w, update={"panel": panel})), [], panel)
+        self.assertEqual(session_errors({k: v for k, v in w.items() if k != "update"}, "welcome"), [])   # an older daemon
+        for bad in ({"panel": "maybe"}, {}, {"panel": "ok", "extra": 1}, "ok", None, {"panel": None}):
+            self.assertTrue(session_errors(dict(w, update=bad), "welcome"), repr(bad))
         for bad in (dict(w, protocol=3), dict(w, protocol="4"), dict(w, session_id=""), dict(w, session_id="a b"),
                     dict(w, daemon_version=""), dict(w, daemon_version=3)):
             self.assertTrue(session_errors(bad, "welcome"), repr(bad))
@@ -2473,6 +2488,14 @@ class SessionContractTests(unittest.TestCase):
         self.assertTrue(session_errors(dict(SESSION_SAMPLES["request_changes"], text="x" * 20001), "request_changes"))
         self.assertTrue(session_errors(dict(SESSION_SAMPLES["rebuild"], replace_edited="yes"), "rebuild"))
         self.assertTrue(session_errors(dict(SESSION_SAMPLES["rebuild"], project_path=None), "rebuild"))
+        self.assertTrue(session_errors(dict(SESSION_SAMPLES["rebuild"], project_path=""), "rebuild"))
+        # C2.4: the engine knows the project from the item; a panel that still sends project_path keeps working
+        no_path = {k: v for k, v in SESSION_SAMPLES["rebuild"].items() if k != "project_path"}
+        self.assertEqual(session_errors(no_path, "rebuild"), [])
+        self.assertEqual(session_errors(no_path), [])
+        self.assertNotIn("project_path", V.load(SESSION)["$defs"]["rebuild"]["required"])
+        for name in ("approve", "request_changes"):                  # unchanged: every field required
+            self.assertEqual(set(V.load(SESSION)["$defs"][name]["required"]), set(SESSION_SAMPLES[name]), name)
         self.assertEqual(session_errors({"type": "snapshot"}, "snapshot"), [])
         self.assertTrue(session_errors({"type": "snapshot", "id": ""}, "snapshot"))
         self.assertTrue(session_errors({"type": "cancel"}, "cancel"))
@@ -2520,6 +2543,10 @@ class SessionContractTests(unittest.TestCase):
         self.assertEqual(defs["panel_state"]["properties"]["language"]["enum"], ts_union("Language"))
         self.assertEqual(defs["pipeline_step"]["properties"]["state"]["enum"], ts_union("StepStatus"))
         self.assertEqual(defs["connection"]["properties"]["claude"]["enum"], ts_union("ClaudeState"))
+        # C2.4 Claude pill: the probe states (ecosystem.md 3.5c) + unknown ("not probed yet"); active / idle are the
+        # round-1 values, kept only until render.ts maps the new states
+        self.assertEqual(defs["connection"]["properties"]["claude"]["enum"][:7],
+                         ["not_installed", "signed_out", "plugin_outdated", "ready", "working", "waiting", "unknown"])
         self.assertEqual(defs["connection"]["properties"]["engine"]["enum"], ts_union("EngineState"))
         self.assertEqual(defs["connection"]["properties"]["host"]["properties"]["state"]["enum"], ts_union("HostState"))
         self.assertEqual(defs["qc_frame"]["properties"]["verdict"]["enum"], ts_union("QcVerdict"))
@@ -2534,11 +2561,52 @@ class SessionContractTests(unittest.TestCase):
         for method, name in (("approve", "approve"), ("requestChanges", "request_changes"), ("rebuild", "rebuild")):
             m = re.search(method + r"\(input: \{ ([^}]*) \}\)", text)
             self.assertTrue(m, method)
-            keys = set(re.findall(r"([a-z_]+): ", m.group(1)))
-            self.assertEqual(set(defs[name]["properties"]) - {"type", "id"}, keys, name)
-            self.assertEqual(set(defs[name]["required"]) - {"type", "id"}, keys, name)
+            fields = re.findall(r"([a-z_]+)(\??): ", m.group(1))
+            self.assertEqual(set(defs[name]["properties"]) - {"type", "id"}, {k for k, _ in fields}, name)
+            self.assertEqual(set(defs[name]["required"]) - {"type", "id"}, {k for k, opt in fields if not opt}, name)
         self.assertIn("cancel(id: string): Promise<void>;", text)
         self.assertIn("snapshot(): Promise<PanelState>;", text)
+
+
+
+# ------------------------------------------------------------------------------------------------ engine state (C2.4)
+ACTIVE = {"client_root": "D:/clients/Dr Nour", "item": "C0239", "stage": "approve-plan", "session_id": "0b7c-11",
+          "claude_pid": 4242, "at": "2026-10-13T14:02:00+03:00"}
+
+
+def active_errors(instance):
+    return V.validate(instance, ENGINE_STATE)
+
+
+class EngineStateContractTests(unittest.TestCase):
+    """~/.whynot-cut/state/active.json: written by the `reel` writer commands (T6.2b), read by reel serve (engine_state)."""
+
+    def test_schema_header(self):
+        doc = V.load(ENGINE_STATE)
+        self.assertEqual(V.check_schema(doc), [])
+        self.assertEqual(doc["$id"], ID_BASE + "engine_state.schema.json")
+        self.assertEqual(doc["$ref"], "#/$defs/active")
+        active = doc["$defs"]["active"]
+        self.assertEqual(set(active["properties"]), set(ACTIVE))
+        self.assertEqual(set(active["required"]), set(ACTIVE))
+        self.assertIs(active["additionalProperties"], False)
+        self.assertIn("T6.2b", doc["description"])
+
+    def test_sample_and_nullable_session_fields(self):
+        self.assertEqual(active_errors(ACTIVE), [])
+        self.assertEqual(active_errors(dict(ACTIVE, session_id=None, claude_pid=None)), [])
+        self.assertEqual(active_errors(dict(ACTIVE, client_root="D:/عملاء/د. نور", at="2026-10-13T11:02:00Z")), [])
+
+    def test_rejects(self):
+        for key in ACTIVE:
+            self.assertTrue(active_errors({k: v for k, v in ACTIVE.items() if k != key}), key)
+        for key, value in (("client_root", ""), ("client_root", "x" * 1025), ("item", ""), ("item", "x" * 257),
+                           ("stage", "x" * 65), ("stage", 3), ("session_id", 3), ("claude_pid", 0), ("claude_pid", "1"),
+                           ("claude_pid", True), ("at", "2026-10-13 14:02:00"), ("at", "2026-10-13T14:02:00"), ("at", 0),
+                           ("extra", 1)):
+            self.assertTrue(active_errors(dict(ACTIVE, **{key: value})), f"{key}={value!r}")
+        for bad in (None, [], "x", 1):
+            self.assertTrue(active_errors(bad), repr(bad))
 
 
 if __name__ == "__main__":

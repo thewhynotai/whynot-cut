@@ -27,11 +27,16 @@ expiry), an unmatched `result` is charged like any client message and only the f
 handed to the requester through a bounded queue (adapters.HostLink), so a requester that stops reading never stalls
 the host session. `command` runs in
 its own task through the Router (UXP panel or CEP file queue, a Context per request); `result` / `progress` from a host
-session answer the commands sent to it; the panel intents approve / request_changes / rebuild get a `reply` saying they
-are not implemented in the serve core yet; `snapshot` gets a `state` echoing its id; `cancel` is forwarded to the panel
-running the command. When a session ends, the commands waiting on it fail with a clear error and its own running
-commands are cancelled; a reconnect is a new hello.
+session answer the commands sent to it; the panel intents approve / request_changes / rebuild are accepted only from a
+`kind: "panel"` session (any other session gets `error{schema}`, audited) and get a `reply` ok:false in plain words
+saying the step is not available from the panel yet (NOT_YET; no command names: the engine side is T6.2b, and until
+it ships no `reel` writer runs for a panel intent); `snapshot` gets a `state` echoing its id, with the item the engine
+works on (serve/engine_state.py: <home>/state/active.json and the item's evidence files, read only); `cancel` is
+forwarded to the panel running the command. When a session ends, the commands waiting on it fail with a clear error
+and its own running commands are cancelled; a reconnect is a new hello.
 The token is never logged, never echoed and never read from a URL.
+`welcome.update.panel` answers the hello's optional client.build against <plugin>/adobe/expected.json (C2.3:
+ok / stale / newer / unknown; engine_state.panel_update).
 """
 from __future__ import annotations
 
@@ -45,7 +50,7 @@ import time
 
 from lib import common
 
-from . import messages, security, ws
+from . import engine_state, messages, security, ws
 from .adapters import FileQueueAdapter, HostLink
 from .router import Router
 
@@ -67,9 +72,12 @@ MAX_RUNNING = 16                   # commands one session may have running at on
 OFFLOAD_BYTES = 256 * 1024         # messages above this are parsed and validated in a worker thread
 AUTH_REFUSED = "The first message must be a hello with the engine token from engine.json."
 PROTOCOL_REQUIRED = "protocol 4 required"
-NOT_YET = "not implemented in the serve core yet"
-NOT_YET_HOW = ("Use the reel CLI for this step for now (e.g. `reel approve` / `reel build`); the panel will do it "
-               "once the engine-state part of reel serve ships.")
+# the panel intents until T6.2b ships their engine side: editor words, never a command (Addendum C1.4)
+NOT_YET = {"approve": "Approving is not available from the panel yet.",
+           "request_changes": "Requesting changes is not available from the panel yet.",
+           "rebuild": "Rebuilding is not available from the panel yet."}
+NOT_YET_HOW = "Do this step in your Claude session for now — it will work from the panel after the next update."
+INTENTS = frozenset(NOT_YET)
 
 
 def _dumps(msg: dict) -> str:
@@ -142,7 +150,7 @@ class App:
     def __init__(self, *, home, token: str, version: str, audit: security.AuditLog | None = None,
                  hello_timeout: float = HELLO_TIMEOUT, max_connections: int = MAX_CONNECTIONS,
                  rate: tuple = RATE, max_running: int = MAX_RUNNING,
-                 idle_timeout: float = ws.IDLE_TIMEOUT, file_queue=None):
+                 idle_timeout: float = ws.IDLE_TIMEOUT, file_queue=None, expected_path=None):
         if not security.token_shape_ok(token):
             raise ValueError("the engine token must be 64 lowercase hex characters (security.make_token)")
         self.home = home
@@ -154,6 +162,7 @@ class App:
         self.rate = rate
         self.max_running = max_running
         self.idle_timeout = idle_timeout
+        self.expected_path = expected_path if expected_path is not None else engine_state.expected_path()
         self.port: int | None = None
         self.sessions: dict[str, Session] = {}
         self.router = Router(home=home, sessions=lambda: list(self.sessions.values()),
@@ -384,9 +393,13 @@ class App:
         sid = "s-" + secrets.token_hex(8)
         session = Session(sid, sock, msg["client"], peer_s, security.RateLimiter(*self.rate))
         self.sessions[sid] = session
+        try:
+            update = await asyncio.to_thread(engine_state.panel_update, msg["client"].get("build"), self.expected_path)
+        except Exception:
+            update = "unknown"
         self._audit("auth", peer_s, session=sid, outcome="ok",
                     reason=f"{session.kind} {session.host or ''} {','.join(session.capabilities)}".strip())
-        await session.send(messages.welcome(sid, self.version))
+        await session.send(messages.welcome(sid, self.version, update))
         return session
 
     async def _run(self, s: Session) -> None:
@@ -447,8 +460,14 @@ class App:
                                 outcome="ignored", reason="no command waits for this id (later ones are not logged)")
         elif t == "snapshot":
             await s.send(await self._state(msg.get("id")))
-        elif t in ("approve", "request_changes", "rebuild"):
-            await s.send(messages.reply(t, msg["id"], ok=False, error=NOT_YET, how=NOT_YET_HOW))
+        elif t in INTENTS:
+            if s.kind != "panel":                    # only the WhyNot Cut panel speaks for the editor
+                self._audit("intent", s.peer, session=s.id, action=t, outcome="rejected",
+                            reason=f"from a {s.kind} session")
+                await s.send(messages.error("schema", f"{t} is a panel intent: only a panel session may send it.",
+                                            messages.message_id(msg)))
+                return
+            await s.send(messages.reply(t, msg["id"], ok=False, error=NOT_YET[t], how=NOT_YET_HOW))
         elif t == "cancel":
             answer = await self.router.cancel(msg["id"])
             if answer is not None:
@@ -471,14 +490,24 @@ class App:
                                  messages.message_id(msg))
         await s.send(out)
 
+    async def _item_fields(self) -> dict | None:
+        """The item part of the panel state (engine_state.panel_fields, read in a worker thread); None if it failed."""
+        try:
+            return await asyncio.to_thread(engine_state.panel_fields, self.home)
+        except Exception as e:
+            log.warning("reel serve: engine state failed (%s)", type(e).__name__)
+            return None
+
     async def _state(self, id) -> dict:
-        """The connection part of the panel state: a UXP Premiere panel connected, else the CEP heartbeat. Only a
-        session that implements something counts: a uxp session with no capabilities (spike 0.1.3, a probe) cannot run
-        a command, so it is not the Premiere host the pill means. Nor does a session whose socket has closed while its
-        removal (_end, async) is still pending."""
+        """The panel state: the connection (a UXP Premiere panel connected, else the CEP heartbeat) and the item the
+        engine works on. Only a session that implements something counts as the host: a uxp session with no
+        capabilities (spike 0.1.3, a probe) cannot run a command, so it is not the Premiere host the pill means. Nor
+        does a session whose socket has closed while its removal (_end, async) is still pending."""
+        item = await self._item_fields()
         for s in reversed(list(self.sessions.values())):
             if s.kind == "uxp" and s.host == "premiere" and s.capabilities and not s.sock.closed and not s.link.closed:
-                return messages.state("uxp", f"Premiere Pro {s.host_version}".strip() if s.host_version else None, id)
+                return messages.state("uxp", f"Premiere Pro {s.host_version}".strip() if s.host_version else None, id,
+                                      item)
         ctx = common.Context(home=self.home)
 
         def cep_alive() -> bool:
@@ -489,7 +518,7 @@ class App:
             alive = await asyncio.to_thread(cep_alive)
         except Exception:
             alive = False
-        return messages.state("cep" if alive else "offline", None, id)
+        return messages.state("cep" if alive else "offline", None, id, item)
 
     async def _end(self, s: Session) -> None:
         self.sessions.pop(s.id, None)

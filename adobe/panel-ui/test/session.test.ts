@@ -7,9 +7,10 @@ import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { PROTOCOL } from "../src/contract.ts";
-import { SESSION_ERROR_CODES, SESSION_MESSAGE_TYPES } from "../src/session.ts";
+import { PANEL_UPDATE_STATES, SESSION_ERROR_CODES, SESSION_MESSAGE_TYPES } from "../src/session.ts";
 import type { SessionMessage } from "../src/session.ts";
 import { SCENARIOS, sampleState } from "../src/mock.ts";
+import { CLAUDE_STATES } from "../src/source.ts";
 
 const CONTRACT = new URL("../../../whynot-cut/engine/reel/contract/", import.meta.url);
 const ajv = new Ajv2020({ strictSchema: true, strictTypes: false, strictRequired: false, strictTuples: false, allErrors: true });
@@ -29,7 +30,9 @@ const request = { protocol: PROTOCOL, id: "r-1", action: "ping", data: {}, expir
 const SAMPLES: SessionMessage[] = [
   { type: "hello", token: "ab".repeat(32), client: { kind: "uxp", version: "3.0.0", host: "premiere", hostVersion: "26.5.2", protocol: 4, capabilities: ["ping", "status"] } },
   { type: "hello", token: "ab".repeat(32), client: { kind: "cli", version: "3.0.0", protocol: 4, capabilities: [] } },
+  { type: "hello", token: "ab".repeat(32), client: { kind: "panel", version: "3.0.0", build: "3.0.0.142", protocol: 4, capabilities: [] } },
   { type: "welcome", session_id: "s-1", protocol: 4, daemon_version: "3.0.0" },
+  ...PANEL_UPDATE_STATES.map((panel) => ({ type: "welcome" as const, session_id: "s-1", protocol: 4 as const, daemon_version: "3.0.0", update: { panel } })),
   { type: "command", request, context: { root: "D:/c", profile: "nour" } },
   { type: "command", request },
   { type: "result", result: { ok: true, action: "ping", readback: { version: "26.5.2", project: null, projects_open: 1 }, id: "r-1" } },
@@ -39,6 +42,7 @@ const SAMPLES: SessionMessage[] = [
   { type: "approve", id: "p-2", item: "C0239", editor_name: "Yunus", fingerprint: "abc" },
   { type: "request_changes", id: "p-3", item: "C0239", editor_name: "Yunus", text: "shorter" },
   { type: "rebuild", id: "p-4", item: "C0239", project_path: "D:/p.prproj", replace_edited: false },
+  { type: "rebuild", id: "p-4b", item: "C0239", replace_edited: true },
   { type: "snapshot" },
   { type: "snapshot", id: "p-5" },
   { type: "cancel", id: "r-1" },
@@ -89,6 +93,11 @@ test("bad messages are rejected: wrong protocol or missing token in hello, unkno
     { type: "approve", id: "p", item: "x", editor_name: "y" },
     { type: "reply", id: "p", intent: "run", ok: true },
     { type: "reply", id: "p", intent: "approve", ok: true, error: "x" },
+    { ...hello, client: { ...hello.client, build: "" } },
+    { ...hello, client: { ...hello.client, build: "x".repeat(65) } },
+    { type: "welcome", session_id: "s", protocol: 4, daemon_version: "3", update: { panel: "maybe" } },
+    { type: "welcome", session_id: "s", protocol: 4, daemon_version: "3", update: {} },
+    { type: "rebuild", id: "p", item: "x", project_path: "", replace_edited: true },
     {},
     [],
     "hello",
@@ -107,4 +116,17 @@ test("the TS mirror is closed: a hello without a token, a state without a PanelS
   // @ts-expect-error reply ok:true carries no error
   const badReply: SessionMessage = { type: "reply", id: "p", intent: "approve", ok: true, error: "x" };
   assert.equal([noToken, oldProto, badCode, badReply].length, 4);
+});
+
+test("the build-stamp answer and the Claude pill states equal the schema (C2.3 / C2.4)", () => {
+  type Defs = Record<string, { properties: Record<string, { enum?: string[]; properties?: Record<string, { enum?: string[] }> }> }>;
+  const defs = session.$defs as unknown as Defs;
+  assert.deepEqual(defs["welcome"]!.properties["update"]!.properties!["panel"]!.enum, [...PANEL_UPDATE_STATES]);
+  assert.deepEqual(defs["connection"]!.properties["claude"]!.enum, [...CLAUDE_STATES]);
+  const v = def("panel_state");
+  for (const claude of CLAUDE_STATES) {
+    const st = { ...sampleState("en", "showcase") };
+    st.connection = { ...st.connection, claude };
+    assert.ok(v(st), `${claude}: ${JSON.stringify(v.errors)}`);
+  }
 });

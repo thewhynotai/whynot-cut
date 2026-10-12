@@ -320,16 +320,18 @@ export class MockSource implements PanelDataSource {
     }
   }
 
-  async rebuild(input: { item: string; project_path: string; replace_edited: boolean }): Promise<Result> {
+  async rebuild(input: { item: string; project_path?: string; replace_edited: boolean }): Promise<Result> {
+    // the engine finds the project from the item when the panel sends none (C2.4)
+    const project = input.project_path ?? this.state.context.project_path ?? "";
     this.state = {
       ...this.state,
       pipeline: this.state.pipeline.map((p) => (p.id === "build" ? { ...p, state: "running", progress: { n: 0, of: BUILD_TOTAL, step: "starting" }, elapsed_s: 0, request_id: "req-build-2" } : p)),
-      log: [...this.state.log, this.line("info", `rebuild ${input.item}${input.replace_edited ? " (replace edited)" : ""}: ${input.project_path}`)],
+      log: [...this.state.log, this.line("info", `rebuild ${input.item}${input.replace_edited ? " (replace edited)" : ""}: ${project}`)],
     };
     this.emit();
     // A schema-valid build_project readback (what the host reports when the rebuild finishes).
     const readback: BuildProjectReadback = {
-      project: input.project_path,
+      project,
       saved: true,
       settings_after: {
         previewCodec: "apcs", previewFrameWidth: 1080, previewFrameHeight: 1920, videoFrameWidth: 1080, videoFrameHeight: 1920,

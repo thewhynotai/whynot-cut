@@ -518,20 +518,55 @@ class SessionMessages(AppCase):
                       "client": {"kind": "cli", "version": "1", "protocol": 4, "capabilities": []}})
         self.assertEqual((await c.recv())["code"], "schema")
 
-    async def test_panel_intents_reply_not_implemented(self):
-        c = await self.cli()
-        intents = [
-            {"type": "approve", "id": "a1", "item": "C0239", "editor_name": "Y", "fingerprint": "f"},
-            {"type": "request_changes", "id": "a2", "item": "C0239", "editor_name": "Y", "text": "shorter"},
-            {"type": "rebuild", "id": "a3", "item": "C0239", "project_path": "x.prproj", "replace_edited": False},
-        ]
-        for msg in intents:
+    INTENTS = [
+        {"type": "approve", "id": "a1", "item": "C0239", "editor_name": "Y", "fingerprint": "f"},
+        {"type": "request_changes", "id": "a2", "item": "C0239", "editor_name": "Y", "text": "shorter"},
+        {"type": "rebuild", "id": "a3", "item": "C0239", "project_path": "x.prproj", "replace_edited": False},
+        {"type": "rebuild", "id": "a4", "item": "C0239", "replace_edited": True},        # C2.4: project_path optional
+    ]
+
+    async def panel_session(self):
+        c = await self.hello(kind="panel")
+        self.assertEqual((await c.recv())["type"], "welcome")
+        return c
+
+    async def test_panel_intents_reply_not_available_yet_in_editor_words(self):
+        c = await self.panel_session()
+        for msg in self.INTENTS:
             await c.send(msg)
             reply = await c.recv()
             self.assertEqual((reply["type"], reply["id"], reply["intent"], reply["ok"]),
                              ("reply", msg["id"], msg["type"], False))
-            self.assertEqual(reply["error"], "not implemented in the serve core yet")
-            self.assertTrue(reply["how"])
+            self.assertEqual(reply["error"], serve_app.NOT_YET[msg["type"]])
+            self.assertIn("not available from the panel yet", reply["error"])
+            self.assertEqual(reply["how"], serve_app.NOT_YET_HOW)
+
+    async def test_no_reply_text_names_a_command(self):
+        """Addendum C1.4: what the panel shows the editor never holds a command. Every reply's error / how, as sent."""
+        texts = list(serve_app.NOT_YET.values()) + [serve_app.NOT_YET_HOW]
+        c = await self.panel_session()
+        for msg in self.INTENTS:
+            await c.send(msg)
+            reply = await c.recv()
+            texts += [reply.get("error", ""), reply.get("how", "")]
+        for text in texts:
+            self.assertNotIn("reel ", text.lower())
+            self.assertNotIn("`", text)
+            self.assertNotRegex(text.lower(), r"claude\s*code")
+
+    async def test_intents_from_a_session_that_is_not_the_panel_are_refused(self):
+        """Only a `kind: "panel"` session speaks for the editor: the CLI and a host (uxp / cep) get error{schema}."""
+        for kind, host in (("cli", None), ("uxp", "premiere"), ("cep", "aftereffects")):
+            c = await self.hello(kind=kind, host=host)
+            self.assertEqual((await c.recv())["type"], "welcome")
+            for msg in self.INTENTS:
+                await c.send(msg)
+                err = await c.recv()
+                self.assertEqual((err["type"], err["code"], err.get("id")), ("error", "schema", msg["id"]), (kind, err))
+                self.assertIn("panel", err["message"])
+        rejected = [r for r in self.events("intent") if r["outcome"] == "rejected"]
+        self.assertEqual(len(rejected), 3 * len(self.INTENTS))
+        self.assertEqual({r["action"] for r in rejected}, {"approve", "request_changes", "rebuild"})
 
     async def test_snapshot_is_answered_by_state_echoing_id(self):
         c = await self.cli()
@@ -544,6 +579,30 @@ class SessionMessages(AppCase):
         st = await c.recv()
         self.assertNotIn("id", st)
         self.assertEqual(st["state"]["connection"]["host"]["state"], "uxp")
+
+    async def test_snapshot_carries_the_item_from_active_json(self):
+        """C2.4: <home>/state/active.json names the item; the state shows its client, item, pipeline and approval
+        card (serve/engine_state.py; its own tests cover the evidence files)."""
+        root = self.home / "clients" / "د. نور"
+        for d in ("assets", "data", "output/projects/C0239/01_analysis"):
+            (root / d).mkdir(parents=True)
+        (root / "output/projects/C0239/01_analysis/timeline-spec.json").write_text('{"fps": 30}', encoding="utf-8")
+        state_dir = self.home / "state"
+        state_dir.mkdir()
+        rec = {"client_root": str(root), "item": "C0239", "stage": "plan", "session_id": None, "claude_pid": None,
+               "at": datetime.now(timezone.utc).isoformat()}
+        (state_dir / "active.json").write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+        c = await self.cli()
+        await c.send({"type": "snapshot", "id": "item-1"})
+        st = (await c.recv())["state"]
+        self.assertEqual((st["client"], st["item"]), ("د. نور", "C0239"))
+        self.assertEqual({p["id"]: p["state"] for p in st["pipeline"]}["approve"], "waiting")
+        self.assertTrue(st["approval"]["fingerprint"])
+        self.assertEqual(st["connection"]["claude"], "unknown")             # no probe until T6.2b
+        (state_dir / "active.json").write_text(json.dumps(dict(rec, item="../C0239"), ensure_ascii=False), encoding="utf-8")
+        await c.send({"type": "snapshot", "id": "item-2"})
+        st = (await c.recv())["state"]
+        self.assertEqual((st["client"], st["item"], st["pipeline"], st["approval"]), ("", "", [], None))
 
     async def status_sessions(self) -> list:
         status, _, body = await http(self.port, f"GET /status HTTP/1.1\r\nHost: localhost:{self.port}\r\n"
@@ -1094,3 +1153,46 @@ class RouterUnit(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BuildStamp(AppCase):
+    """C2.3: hello.client.build against <plugin>/adobe/expected.json -> welcome.update.panel."""
+
+    async def asyncSetUp(self):
+        self.expected = Path(tempfile.mkdtemp(prefix="wnc-exp-")) / "expected.json"
+        self.app_options = {"expected_path": self.expected}
+        await super().asyncSetUp()
+
+    async def asyncTearDown(self):
+        await super().asyncTearDown()
+        shutil.rmtree(self.expected.parent, ignore_errors=True)
+
+    async def welcome_for(self, build):
+        c = await self.connect()
+        client = {"kind": "panel", "version": "3.0.0", "protocol": 4, "capabilities": []}
+        if build is not None:
+            client["build"] = build
+        await c.send({"type": "hello", "token": self.token, "client": client})
+        w = await c.recv()
+        self.assertEqual(w["type"], "welcome", w)
+        return w["update"]["panel"]
+
+    async def test_without_expected_json_every_panel_is_unknown(self):
+        self.assertEqual(await self.welcome_for("142"), "unknown")
+        self.assertEqual(await self.welcome_for(None), "unknown")
+
+    async def test_ok_stale_newer_unknown(self):
+        self.expected.write_text(json.dumps({"product": "3.0.0", "build": "142", "sha": "abc1234"}), encoding="utf-8")
+        for build, want in (("142", "ok"), ("141", "stale"), ("143", "newer"), ("not a build", "unknown"), (None, "unknown")):
+            self.assertEqual(await self.welcome_for(build), want, build)
+        self.expected.write_text("{broken", encoding="utf-8")
+        self.assertEqual(await self.welcome_for("142"), "unknown")
+
+    async def test_an_invalid_build_is_a_refused_hello(self):
+        for bad in ("", "x" * 65):
+            c = await self.connect()
+            await c.send({"type": "hello", "token": self.token,
+                          "client": {"kind": "panel", "version": "3.0.0", "build": bad, "protocol": 4, "capabilities": []}})
+            msg = await c.recv()
+            self.assertEqual((msg["type"], msg["code"]), ("error", "auth"), msg)
+

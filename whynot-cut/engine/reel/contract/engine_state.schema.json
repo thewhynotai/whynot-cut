@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thewhynot.ai/whynot-cut/contract/4/engine_state.schema.json",
+  "title": "engine_state",
+  "description": "<engine home>/state/active.json (default ~/.whynot-cut/state/active.json): the item the engine is working on. Written by the `reel` writer commands (T6.2b, the executor's part; nothing writes it before that), with one atomic write per command. Read by `reel serve` (serve/engine_state.py), defensively and only ever read: a missing file, one over 64 KiB, one that breaks this schema, a client_root or item that could leave the client folder, or an `at` more than 12 h old means no item. The daemon then fills PanelState (client, item, pipeline, approval, qc) from the item's own evidence files.",
+  "$ref": "#/$defs/active",
+  "$defs": {
+    "active": {
+      "type": "object",
+      "properties": {
+        "client_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "description": "absolute path of the client folder (the folder holding assets/ and data/, lib/common.py Paths); no '..' segment"
+        },
+        "item": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "the project id: one plain folder name under <client_root>/output/projects (lib/common.py check_project_id)"
+        },
+        "stage": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "the `reel` writer command that wrote this record (e.g. plan, approve-plan, ppro-build). Informational: the pipeline strip comes from the evidence files"
+        },
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128,
+          "description": "the Claude Code session the command ran in; null outside one"
+        },
+        "claude_pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "that session's Claude process id (the Claude pill's liveness check); null outside one"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64,
+          "description": "when the record was written, RFC 3339 with a time zone"
+        }
+      },
+      "required": [
+        "client_root",
+        "item",
+        "stage",
+        "session_id",
+        "claude_pid",
+        "at"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

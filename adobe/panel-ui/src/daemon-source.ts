@@ -13,13 +13,13 @@
 // PanelState, a diagnosis or an error text (every text the transport hands back is scrubbed of it).
 import { ACTION_NAMES, PROTOCOL } from "./contract.ts";
 import type { ActionName, RequestEnvelope } from "./contract.ts";
-import { SESSION_ERROR_CODES, SESSION_PROTOCOL } from "./session.ts";
+import { PANEL_UPDATE_STATES, SESSION_ERROR_CODES, SESSION_PROTOCOL } from "./session.ts";
 import type {
-  ApproveMessage, CancelMessage, CommandMessage, HelloMessage, RebuildMessage, ReplyIntent, RequestChangesMessage,
-  SessionErrorCode, SnapshotMessage,
+  ApproveMessage, CancelMessage, CommandMessage, HelloMessage, PanelUpdate, RebuildMessage, ReplyIntent,
+  RequestChangesMessage, SessionErrorCode, SnapshotMessage,
 } from "./session.ts";
-import { STEP_IDS } from "./source.ts";
-import type { ConnectionState, HostState, Language, LogLine, PanelDataSource, PanelState, PipelineStep, Result, StepId } from "./source.ts";
+import { CLAUDE_STATES, STEP_IDS } from "./source.ts";
+import type { ClaudeState, ConnectionState, HostState, Language, LogLine, PanelDataSource, PanelState, PipelineStep, Result, StepId } from "./source.ts";
 
 // ------------------------------------------------------------------------------------------------ injected transport
 
@@ -145,7 +145,7 @@ const BLOCKED: Omit<LinkDiagnosis, "retry_in_s"> = {
 // ------------------------------------------------------------------------------------------------ incoming messages
 
 type Incoming =
-  | { type: "welcome"; daemon_version: string }
+  | { type: "welcome"; daemon_version: string; update: PanelUpdate }
   | { type: "state"; connection: ConnectionState; id?: string }
   | { type: "reply"; id: string; intent: ReplyIntent; ok: boolean; readback?: object; error?: string; how?: string }
   | { type: "result"; id: string | undefined; action: ActionName; ok: boolean; readback?: object; error?: string; how?: string }
@@ -166,11 +166,11 @@ function parseConnection(c: unknown): ConnectionState | null {
   const { engine, claude } = c;
   const host = c["host"];
   if (engine !== "connected" && engine !== "offline") return null;
-  if (claude !== "active" && claude !== "idle" && claude !== "unknown") return null;
+  if (!CLAUDE_STATES.includes(claude as ClaudeState)) return null;
   const st = host["state"];
   if (st !== "uxp" && st !== "cep" && st !== "offline") return null;
   if (!optStr(host["detail"])) return null;
-  const out: ConnectionState = { engine, claude, host: { state: st } };
+  const out: ConnectionState = { engine, claude: claude as ClaudeState, host: { state: st } };
   if (isStr(host["detail"])) out.host.detail = host["detail"].slice(0, 256);
   return out;
 }
@@ -185,10 +185,13 @@ export function parseIncoming(text: string): Incoming | null {
   }
   if (!isObj(m)) return null;
   switch (m["type"]) {
-    case "welcome":
-      return isStr(m["session_id"]) && m["protocol"] === SESSION_PROTOCOL && isStr(m["daemon_version"])
-        ? { type: "welcome", daemon_version: m["daemon_version"] }
-        : null;
+    case "welcome": {
+      if (!isStr(m["session_id"]) || m["protocol"] !== SESSION_PROTOCOL || !isStr(m["daemon_version"])) return null;
+      // C2.3: absent from an older daemon; a value this panel does not know reads as unknown
+      const u = isObj(m["update"]) ? m["update"]["panel"] : undefined;
+      const update: PanelUpdate = (PANEL_UPDATE_STATES as readonly unknown[]).includes(u) ? (u as PanelUpdate) : "unknown";
+      return { type: "welcome", daemon_version: m["daemon_version"], update };
+    }
     case "state": {
       if (!isObj(m["state"]) || !(m["id"] === undefined || isId(m["id"]))) return null;
       const connection = parseConnection(m["state"]["connection"]);
@@ -260,6 +263,8 @@ export interface DaemonSourceOptions {
   transport: DaemonTransport;
   /** the panel's version, sent in hello (1-64 characters) */
   version?: string;
+  /** the panel package's build stamp, sent in hello as client.build (C2.3; 1-64 characters, empty = not sent) */
+  build?: string;
   /** local, never taken from the daemon's stub state */
   language?: Language;
   editor_name?: string;
@@ -325,6 +330,8 @@ function emptyState(language: Language, editor_name: string, host?: { state: Hos
 export class DaemonSource implements PanelDataSource {
   private readonly t: DaemonTransport;
   private readonly version: string;
+  private readonly build: string;
+  private panelUpdateState: PanelUpdate = "unknown";
   private readonly pollMs: number;
   private readonly helloTimeoutMs: number;
   private readonly intentTimeoutMs: number;
@@ -360,6 +367,7 @@ export class DaemonSource implements PanelDataSource {
   constructor(opts: DaemonSourceOptions) {
     this.t = opts.transport;
     this.version = (opts.version || "0.0.0").slice(0, 64);
+    this.build = (opts.build ?? "").slice(0, 64);
     this.pollMs = opts.pollMs ?? POLL_MS;
     this.helloTimeoutMs = opts.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
     this.intentTimeoutMs = opts.intentTimeoutMs ?? INTENT_TIMEOUT_MS;
@@ -378,6 +386,11 @@ export class DaemonSource implements PanelDataSource {
   /** The link's current diagnosis (what the engine pill and the log say, in more detail). */
   get diagnosis(): LinkDiagnosis {
     return { ...this.diag };
+  }
+
+  /** The daemon's answer to this panel's build stamp (welcome.update.panel); "unknown" until a welcome says otherwise. */
+  get panelUpdate(): PanelUpdate {
+    return this.panelUpdateState;
   }
 
   /** Starts the link (idempotent). snapshot() and subscribe() call it too. */
@@ -434,8 +447,10 @@ export class DaemonSource implements PanelDataSource {
     return this.intent("request_changes", { item: input.item, editor_name: input.editor_name, text: input.text });
   }
 
-  rebuild(input: { item: string; project_path: string; replace_edited: boolean }): Promise<Result> {
-    return this.intent("rebuild", { item: input.item, project_path: input.project_path, replace_edited: input.replace_edited });
+  rebuild(input: { item: string; project_path?: string; replace_edited: boolean }): Promise<Result> {
+    // the engine finds the project from the item (C2.4): project_path goes along only when the panel has one
+    const body = input.project_path ? { item: input.item, project_path: input.project_path, replace_edited: input.replace_edited } : { item: input.item, replace_edited: input.replace_edited };
+    return this.intent("rebuild", body);
   }
 
   run(action: ActionName, data: object): Promise<Result> {
@@ -531,7 +546,7 @@ export class DaemonSource implements PanelDataSource {
     sock.onopen = () => {
       if (this.sock !== sock) return;
       this.opened = true;
-      const hello: HelloMessage = { type: "hello", token: rec.token, client: { kind: "panel", version: this.version, protocol: SESSION_PROTOCOL, capabilities: [] } };
+      const hello: HelloMessage = { type: "hello", token: rec.token, client: { kind: "panel", version: this.version, ...(this.build ? { build: this.build } : {}), protocol: SESSION_PROTOCOL, capabilities: [] } };
       this.sendText(sock, JSON.stringify(hello));
     };
     sock.onmessage = (text) => {
@@ -627,7 +642,10 @@ export class DaemonSource implements PanelDataSource {
     const m = parseIncoming(String(text));
     if (!m) return this.malformed();
     if (!this.welcomed) {
-      if (m.type === "welcome") return this.onWelcome(sock, m.daemon_version);
+      if (m.type === "welcome") {
+        this.panelUpdateState = m.update;
+        return this.onWelcome(sock, m.daemon_version);
+      }
       if (m.type === "error") {
         this.lastError = { code: m.code, message: m.message };
         return;

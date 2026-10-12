@@ -38,6 +38,8 @@ export interface HelloMessage {
   client: {
     kind: ClientKind;
     version: string;
+    /** the panel package's build stamp (C2.3, 1-64 characters); the daemon compares it with the plugin's expected.json */
+    build?: string;
     /** the Adobe host the client runs in; absent for the CLI */
     host?: "premiere" | "aftereffects";
     hostVersion?: string;
@@ -47,12 +49,18 @@ export interface HelloMessage {
   };
 }
 
-/** daemon -> client, the answer to an accepted hello. */
+/** Is the connecting panel the build the plugin expects (welcome.update.panel): ok = equal, stale = older (restart
+ *  Premiere to load the update), newer = newer than the plugin, unknown = no build, no expected.json or not a build number. */
+export const PANEL_UPDATE_STATES = ["ok", "stale", "newer", "unknown"] as const;
+export type PanelUpdate = (typeof PANEL_UPDATE_STATES)[number];
+
+/** daemon -> client, the answer to an accepted hello. `update` is absent from a daemon older than C2.3. */
 export interface WelcomeMessage {
   type: "welcome";
   session_id: string;
   protocol: 4;
   daemon_version: string;
+  update?: { panel: PanelUpdate };
 }
 
 /** A v4 request (client -> daemon, or daemon -> host client). `request.data` is checked by the action's schema. */
@@ -96,11 +104,12 @@ export interface RequestChangesMessage {
   text: string;
 }
 
+/** The engine finds the project from the item; project_path is optional (C2.4), a panel that sends it keeps working. */
 export interface RebuildMessage {
   type: "rebuild";
   id: string;
   item: string;
-  project_path: string;
+  project_path?: string;
   replace_edited: boolean;
 }
 

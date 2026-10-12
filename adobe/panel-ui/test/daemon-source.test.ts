@@ -130,6 +130,8 @@ class FakeDaemon {
   hostDetail: string | undefined = "Premiere Pro 26.5.2";
   sockets: FakeSocket[] = [];
   invalid: string[] = [];
+  /** welcome.update (C2.3); undefined = an older daemon that sends none */
+  update: unknown = undefined;
   onCommand: (s: FakeSocket, m: Msg) => void = (s, m) => {
     const req = m["request"] as { id: string; action: string };
     s.deliver({ type: "result", result: { ok: true, action: req.action, readback: { position_s: 1 }, id: req.id } });
@@ -159,7 +161,7 @@ class FakeDaemon {
         s.deliver({ type: "error", code: "auth", message: "The first message must be a hello with the engine token from engine.json." });
         s.serverClose(1008, "authentication required");
       } else {
-        s.deliver({ type: "welcome", session_id: "s-0123456789abcdef", protocol: 4, daemon_version: "3.0.0" });
+        s.deliver({ type: "welcome", session_id: "s-0123456789abcdef", protocol: 4, daemon_version: "3.0.0", ...(this.update === undefined ? {} : { update: this.update }) });
       }
       return;
     }
@@ -198,7 +200,7 @@ interface Rig {
   states: PanelState[];
 }
 
-function rig(opts: { record?: unknown; noProbe?: boolean; openThrows?: boolean; probeThrows?: boolean } = {}): Rig {
+function rig(opts: { record?: unknown; noProbe?: boolean; openThrows?: boolean; probeThrows?: boolean; build?: string; update?: unknown } = {}): Rig {
   const r = {
     clock: new Clock(),
     daemon: new FakeDaemon(),
@@ -235,7 +237,8 @@ function rig(opts: { record?: unknown; noProbe?: boolean; openThrows?: boolean; 
     };
   }
   r.transport = transport;
-  r.src = new DaemonSource({ transport, version: "3.0.0", language: "ar", editor_name: "Yunus" });
+  if ("update" in opts) r.daemon.update = opts.update;
+  r.src = new DaemonSource({ transport, version: "3.0.0", ...(opts.build !== undefined ? { build: opts.build } : {}), language: "ar", editor_name: "Yunus" });
   r.src.subscribe((s) => r.states.push(s));
   return r;
 }
@@ -819,5 +822,50 @@ test("M2: the socket is refused but /status answers 200 with the token -> the Or
   await r.clock.advance(0);
   assert.equal(r.src.diagnosis.code, "refused_host");
   assert.match(r.src.diagnosis.text, /Origin/);
+  r.src.stop();
+});
+
+test("C2.3 build stamp: hello carries client.build when the panel has one (valid); welcome.update.panel is kept, an unknown or missing one reads unknown", async () => {
+  const r = await connected({ build: "3.0.0.142", update: { panel: "stale" } });
+  assert.deepEqual(r.daemon.last.sent[0], { type: "hello", token: TOKEN, client: { kind: "panel", version: "3.0.0", build: "3.0.0.142", protocol: 4, capabilities: [] } });
+  assert.ok(validMessage(r.daemon.last.sent[0]), JSON.stringify(validMessage.errors));
+  assert.equal(r.src.panelUpdate, "stale");
+  r.src.stop();
+  for (const [update, want] of [[undefined, "unknown"], [{ panel: "ok" }, "ok"], [{ panel: "newer" }, "newer"], [{ panel: "sideways" }, "unknown"], ["ok", "unknown"]] as const) {
+    const q = await connected({ build: "", update });
+    assert.equal((q.daemon.last.sent[0]!["client"] as Record<string, unknown>)["build"], undefined, "an empty build is not sent");
+    assert.equal(q.src.panelUpdate, want, JSON.stringify(update));
+    q.src.stop();
+  }
+  assert.deepEqual(r.daemon.invalid, []);
+});
+
+test("C2.4 Claude pill: every probe state from the daemon is merged (and validates); an unknown word is malformed", async () => {
+  const r = await connected();
+  for (const claude of ["not_installed", "signed_out", "plugin_outdated", "ready", "working", "waiting", "unknown"]) {
+    const st = stubState("uxp", "Premiere Pro 26.5.2");
+    (st["state"] as { connection: { claude: string } }).connection.claude = claude;
+    r.daemon.last.deliver(st);
+    await r.clock.advance(0);
+    const now = await r.src.snapshot();
+    assert.equal(now.connection.claude, claude);
+    assert.ok(validPanelState(now), JSON.stringify(validPanelState.errors));
+  }
+  const bad = stubState("uxp");
+  (bad["state"] as { connection: { claude: string } }).connection.claude = "maybe";
+  r.daemon.last.deliver(bad);
+  await r.clock.advance(0);
+  assert.equal((await r.src.snapshot()).connection.claude, "unknown");
+  r.src.stop();
+});
+
+test("C2.4 rebuild: without a project_path the message leaves it out (valid); with one it is sent as before", async () => {
+  const r = await connected();
+  const s = r.daemon.last;
+  await r.src.rebuild({ item: "C0239", replace_edited: false });
+  assert.deepEqual({ ...sentOf(s, "rebuild")[0]!, id: "x" }, { type: "rebuild", id: "x", item: "C0239", replace_edited: false });
+  await r.src.rebuild({ item: "C0239", project_path: "D:/عميل/C0239.prproj", replace_edited: true });
+  assert.deepEqual({ ...sentOf(s, "rebuild")[1]!, id: "x" }, { type: "rebuild", id: "x", item: "C0239", project_path: "D:/عميل/C0239.prproj", replace_edited: true });
+  assert.deepEqual(r.daemon.invalid, []);
   r.src.stop();
 });

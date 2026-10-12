@@ -26,11 +26,17 @@
         "claude": {
           "type": "string",
           "enum": [
+            "not_installed",
+            "signed_out",
+            "plugin_outdated",
+            "ready",
+            "working",
+            "waiting",
+            "unknown",
             "active",
-            "idle",
-            "unknown"
+            "idle"
           ],
-          "description": "Claude activity from the engine's last signal; never a login state"
+          "description": "the Claude pill (Addendum C1.6, ecosystem.md 3.5c): a local probe of the editor's own Claude CLI and session, never a login WhyNot Cut offers. unknown = not probed yet (the daemon reports it until the T6.2b probe exists). active / idle are the round-1 values: no daemon sends them; they stay only until the panel renderer maps the new states"
         },
         "host": {
           "type": "object",
@@ -440,6 +446,12 @@
               "minLength": 1,
               "maxLength": 64
             },
+            "build": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "the panel package's build stamp (Addendum C1.8); the daemon compares it with <plugin>/adobe/expected.json `build` and answers welcome.update"
+            },
             "host": {
               "type": "string",
               "enum": [
@@ -484,7 +496,7 @@
     },
     "welcome": {
       "type": "object",
-      "description": "daemon -> client, the answer to an accepted hello.",
+      "description": "daemon -> client, the answer to an accepted hello. `update.panel` compares the hello's client.build with <plugin>/adobe/expected.json `build`: ok (equal), stale (the panel is older: restart Premiere), newer (the panel is newer than the plugin), unknown (no build, no expected.json, or a value that is not a build number)",
       "properties": {
         "type": {
           "type": "string",
@@ -504,6 +516,25 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 64
+        },
+        "update": {
+          "type": "object",
+          "description": "is the connecting panel the build the plugin expects",
+          "properties": {
+            "panel": {
+              "type": "string",
+              "enum": [
+                "ok",
+                "stale",
+                "newer",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "panel"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -609,7 +640,7 @@
     },
     "approve": {
       "type": "object",
-      "description": "panel intent (PanelDataSource.approve). Answered by a reply.",
+      "description": "panel intent (PanelDataSource.approve): `fingerprint` is the approval card's (the current plan's). Answered by a reply.",
       "properties": {
         "type": {
           "type": "string",
@@ -679,7 +710,7 @@
     },
     "rebuild": {
       "type": "object",
-      "description": "panel intent (PanelDataSource.rebuild): the daemon expands it into a full engine rebuild plus the build_project request. Answered by a reply.",
+      "description": "panel intent (PanelDataSource.rebuild): the engine finds the project from the item (project_path is optional: a panel that sends it keeps working). Answered by a reply.",
       "properties": {
         "type": {
           "type": "string",
@@ -706,7 +737,6 @@
         "type",
         "id",
         "item",
-        "project_path",
         "replace_edited"
       ],
       "additionalProperties": false

@@ -81,6 +81,7 @@ const env: ShellEnv = {
     return new DaemonSource({
       transport,
       version: bundleVersion(),
+      build: __WNC_BUILD__,
       language: languageOf(info.uiLocale),
       localHost: { state: "uxp", detail: hostDetailOf(info.hostVersion) },
     });
