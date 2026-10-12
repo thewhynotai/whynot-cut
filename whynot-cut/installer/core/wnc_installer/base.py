@@ -199,29 +199,77 @@ def same_path(a, b) -> bool:
 # What WhyNot Cut itself puts in an engine home (installer.md R.1 + the engine's own folders, engine/reel/lib plat.py,
 # common.py, cep_queue / ae_* and serve/: 2.x venv, the Premiere / After Effects queues and scripts, the AE probe, the
 # Whisper bench, ae_render's tmp). Uninstall --remove-engine deletes ONLY these (plus models/ when asked); anything
-# else is the editor's and is kept and listed. The location check counts a folder holding nothing but these (and
-# models/, library/, the pointer) as an engine home or empty. bootstrap.ps1 $WncEngineLayout and bootstrap.sh
-# ENGINE_LAYOUT carry the same list (tests/test_installer.py keeps them in step).
+# else is the editor's and is kept and listed. Names compare exactly (`Bin` is the editor's). The location check does
+# NOT use this list (fix round 2: names can be anyone's): see occupied_entries and is_engine_home.
 ENGINE_LAYOUT = ("bin", "python", "runtimes", "current", "ffmpeg", "cuda", "bridge", "state.json", "logs", "cache",
                  "downloads", "fonts", "marketplace", "marketplace.new", "marketplace.prev", ".delete-after-exit",
                  "venv", "ppro-queue", "ppro-scripts", "ae-queue", "ae-scripts", "ae-probe", "ae-capabilities.json",
                  "bench", "tmp")
 ENGINE_LAYOUT_PREFIXES = ("state.json.corrupt-", ".state.json.", ".current.", ".plugin-options.json.",
-                          ".wnc-write-test")  # set-aside and atomic-write leftovers, the bootstraps' write probe
+                          "..delete-after-exit.", ".wnc-write-test")  # set-aside / atomic-write leftovers, the probe
 ENGINE_KEPT = ("models", "library")  # models/ unless --remove-models; library/ (licensed packs) always
-ENGINE_MARKS = ("state.json", "current", "bin/uv", "bin/uv.exe")  # only WhyNot Cut leaves these
+ENGINE_MARKS = ("state.json", "current")  # read by is_engine_home: their CONTENT must be WhyNot Cut's
+_RUNTIME_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")  # the engine's runtime id rule (lib/plat.py)
 HOME_ROOTS = ("Desktop", "Documents", "Downloads")  # with the user folder itself: never the engine home directly
 SUBFOLDER = "WhyNotCut"
 
 
 def is_engine_entry(name: str) -> bool:
-    """A top-level name WhyNot Cut puts in an engine home (ENGINE_LAYOUT / its prefixes); not models/, library/ or the
-    pointer, which have their own rules."""
+    """A top-level name WhyNot Cut puts in an engine home (ENGINE_LAYOUT / its prefixes), compared EXACTLY (case
+    too: `Bin` is the editor's, not ours); not models/, library/ or the pointer, which have their own rules."""
     return name in ENGINE_LAYOUT or name.startswith(ENGINE_LAYOUT_PREFIXES)
 
 
+def _json_file(path: Path):
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(1 << 20)
+        return json.loads(raw.decode("utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+
+
 def is_engine_home(path) -> bool:
-    return any(os.path.isfile(Path(path) / m) for m in ENGINE_MARKS)
+    """A GENUINE WhyNot Cut engine home (fix round 2; file names alone can be anyone's): state.json is a JSON object with
+    schema 1 and a `plugin` key (what the installer's State writes), or `current` names a valid runtime id whose
+    runtimes/<id>/WHYNOT_RUNTIME is a JSON object with that same id (what both runtime builders write). The bootstraps
+    apply the same rule (Test-WncEngineHomeMark / is_engine_home)."""
+    p = Path(path)
+    st = _json_file(p / "state.json")
+    if isinstance(st, dict) and type(st.get("schema")) is int and st.get("schema") == 1 and "plugin" in st:
+        return True
+    try:
+        with open(p / "current", "rb") as f:
+            rid = f.read(256).decode("utf-8").strip()
+    except (OSError, UnicodeError):
+        return False
+    if not _RUNTIME_ID.match(rid) or ".." in rid:
+        return False
+    stamp = _json_file(p / "runtimes" / rid / "WHYNOT_RUNTIME")
+    return isinstance(stamp, dict) and stamp.get("id") == rid
+
+
+def occupied_entries(path, *, pointer_ok: bool = False) -> list:
+    """What makes an existing folder the editor's for the placement rule (controller ruling, fix round 2): every entry
+    except the bootstraps' write probe (.wnc-write-test*), the -Source cache (a `downloads` folder holding only
+    `release-*` folders) and, at the pointer's own place (`pointer_ok`: ~/.whynot-cut), the pointer
+    plugin-options.json. Names compare exactly. [] when the folder is missing or empty of anything else."""
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return []
+    out = []
+    for n in names:
+        if n.startswith(".wnc-write-test") or (pointer_ok and n == OPTIONS_FILE):
+            continue
+        if n == "downloads" and not is_link(Path(path) / n) and os.path.isdir(Path(path) / n):
+            try:
+                if all(c.startswith("release-") for c in os.listdir(Path(path) / n)):
+                    continue
+            except OSError:
+                pass
+        out.append(n)
+    return sorted(out)
 
 
 def foreign_entries(path) -> list:
@@ -276,9 +324,10 @@ def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (),
     that is, holds or lies inside the plugin folder (the plugin may sit in <it>/downloads: the -Source cache); one that
     is, holds or lies inside the saved clients folder, lies inside a `.whynot-client` folder or holds one (3 levels
     deep) - unless it is already an engine home.
-    Moved into <it>/WhyNotCut (controller ruling, fix round 1): the user folder, Desktop, Documents and Downloads
-    themselves, and any existing folder holding something WhyNot Cut does not put there that is not already an engine
-    home - so uninstall can never empty a folder of the editor's own files. Then the final folder is checked again:
+    Moved into <it>/WhyNotCut (controller rulings, fix rounds 1 and 2): the user folder, Desktop, Documents and
+    Downloads themselves, and any existing folder with ANY entry (occupied_entries: only the write probe, the -Source
+    downloads/release-* cache and, in ~/.whynot-cut, the pointer do not count; names are not trusted) that is not a
+    GENUINE engine home (is_engine_home: by content) - so uninstall can never empty a folder of the editor's files. Then the final folder is checked again:
     not holding the user folder, not inside Claude's folder, not a WhyNotCut subfolder that holds other files, and in a
     sandbox strictly inside the sandbox home."""
     p = str(path or "").strip()
@@ -315,7 +364,8 @@ def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (),
                 return None, "", f"{p} holds a client folder ({below} holds {CLIENT_MARKER})"
     final, note = Path(p), ""
     roots = [Path(home)] + [Path(home) / r for r in HOME_ROOTS]
-    if not existing and (any(_norm(r) == n for r in roots) or foreign_entries(p)):
+    pointer_ok = _norm(Path(home) / ".whynot-cut") == n  # the SessionStart hook's pointer lives there
+    if not existing and (any(_norm(r) == n for r in roots) or occupied_entries(p, pointer_ok=pointer_ok)):
         final = Path(p) / SUBFOLDER
         note = (f"{p} already holds other files, so WhyNot Cut goes into its own folder {final} (uninstall then "
                 "never touches the rest)")
@@ -324,7 +374,7 @@ def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (),
         return None, "", f"{final} is your user folder or holds it; choose a folder of its own"
     if _within(f, _norm(Path(home) / ".claude"), strict=False):
         return None, "", f"{final} is inside Claude's folder {Path(home) / '.claude'}"
-    if final != Path(p) and not is_engine_home(final) and foreign_entries(final):
+    if final != Path(p) and not is_engine_home(final) and occupied_entries(final):
         return None, "", f"{final} already holds other files; choose an empty folder or one of its own"
     if sandbox_home is not None and not _within(f, _norm(sandbox_home), strict=True):
         return None, "", f"{final} is outside the sandbox home {sandbox_home} (--home: nothing outside it is used)"

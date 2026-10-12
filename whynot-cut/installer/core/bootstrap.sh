@@ -252,6 +252,20 @@ norm_path() { # lexical: \ (Git Bash), repeated /, . and .. resolved, no trailin
   case "$OS_NAME" in MINGW*|MSYS*|CYGWIN*) NORM="$(printf '%s' "$NORM" | tr '[:upper:]' '[:lower:]')" ;; esac
 }
 
+exact_child() { # dir name -> EXACT: "exact" (an entry named exactly so), "other" (only in another case), "none"
+  local e n low want
+  EXACT="none"
+  want="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    n="${e##*/}"
+    if [ "$n" = "$2" ]; then EXACT="exact"; return 0; fi
+    low="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')"
+    [ "$low" = "$want" ] && EXACT="other"
+  done
+  return 0
+}
+
 delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-exit may name ONLY python/, bin/, $ENGINE
   list="$ENGINE/.delete-after-exit"
   [ -f "$list" ] || return 0
@@ -277,6 +291,13 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
       printf "WARNING: refused '%s' in %s (only python/ and bin/ of %s may be listed)\n" "$p" "$list" "$root"
       continue
     fi
+    exact_child "$root" "${target##*/}"  # (fix round 2) never the editor's `Bin` on a case-insensitive disk
+    case "$EXACT" in
+      exact) ;;
+      other) printf "WARNING: refused '%s' in %s (the folder there is not named exactly %s: not WhyNot Cut's)\n" \
+               "$p" "$list" "${target##*/}"; continue ;;
+      *) continue ;;
+    esac
     if [ -L "$target" ]; then
       rm -f "$target"  # the link only, never its target
     else
@@ -470,32 +491,69 @@ typed_path() { # text -> TYPED: quotes trimmed, ~ is the home folder, no trailin
   TYPED="$t"
 }
 
-# What WhyNot Cut puts in an engine home: wnc_installer/base.py ENGINE_LAYOUT / ENGINE_LAYOUT_PREFIXES (the tests keep
-# the three copies in step). A folder holding only these (and models, library, the pointer) counts as an engine home
-# or empty for the location check.
-ENGINE_LAYOUT="bin python runtimes current ffmpeg cuda bridge state.json logs cache downloads fonts marketplace"
-ENGINE_LAYOUT="$ENGINE_LAYOUT marketplace.new marketplace.prev .delete-after-exit venv ppro-queue ppro-scripts ae-queue"
-ENGINE_LAYOUT="$ENGINE_LAYOUT ae-scripts ae-probe ae-capabilities.json bench tmp"
-ENGINE_LAYOUT_PREFIXES="state.json.corrupt- .state.json. .current. .plugin-options.json. .wnc-write-test"
+# A GENUINE engine home (fix round 2; file names alone can be anyone's), the core's base.is_engine_home: state.json is a
+# JSON object with schema 1 and a "plugin" key, or `current` names a valid runtime id whose runtimes/<id>/WHYNOT_RUNTIME
+# is a JSON object with that same id. The file arrives as a run() argument, never inside the script text.
+JXA_STATE_OK='function run(argv) {
+  ObjC.import("Foundation");
+  var t = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
+  if (t.isNil()) { return "no"; }
+  var v;
+  try { v = JSON.parse(ObjC.unwrap(t).replace(/^﻿/, "")); } catch (e) { return "no"; }
+  var ok = v !== null && typeof v === "object" && !Array.isArray(v) && v.schema === 1 &&
+           Object.prototype.hasOwnProperty.call(v, "plugin");
+  return ok ? "yes" : "no";
+}'
 
-is_engine_home() { # dir: WhyNot Cut is installed there (state.json, current or bin/uv(.exe): only WhyNot Cut leaves these)
-  [ -f "$1/state.json" ] || [ -f "$1/current" ] || [ -f "$1/bin/uv" ] || [ -f "$1/bin/uv.exe" ]
+state_is_ours() { # state.json: status 0 when WhyNot Cut wrote it (a JSON object, schema 1, a plugin key)
+  [ -f "$1" ] || return 1
+  if [ "$OS_NAME" = "Darwin" ]; then
+    [ "$(osascript -l JavaScript -e "$JXA_STATE_OK" "$1" 2>/dev/null </dev/null)" = "yes" ]
+    return $?
+  fi
+  [ -n "$JSON_PY" ] || return 1
+  "$JSON_PY" -I -c '
+import json, sys
+try:
+    v = json.loads(open(sys.argv[1], "rb").read(1 << 20).decode("utf-8-sig"))
+except (OSError, ValueError):
+    sys.exit(1)
+ok = isinstance(v, dict) and type(v.get("schema")) is int and v.get("schema") == 1 and "plugin" in v
+sys.exit(0 if ok else 1)' "$1" >/dev/null 2>&1 </dev/null
 }
 
-has_foreign() { # dir: status 0 when it holds something WhyNot Cut does not put there (base.foreign_entries)
-  local e n k ours
+is_engine_home() { # dir: status 0 when it is a GENUINE WhyNot Cut engine home (see above)
+  local rid
+  state_is_ours "$1/state.json" && return 0
+  [ -f "$1/current" ] || return 1
+  IFS= read -r rid < "$1/current" || [ -n "$rid" ] || return 1
+  rid="${rid%$'\r'}"
+  rid="${rid#$'\xef\xbb\xbf'}"
+  case "$rid" in ''|*[!A-Za-z0-9._-]*|[!A-Za-z0-9]*|*..*) return 1 ;; esac
+  [ "${#rid}" -le 80 ] || return 1
+  [ -f "$1/runtimes/$rid/WHYNOT_RUNTIME" ] || return 1
+  [ "$(json_get "$1/runtimes/$rid/WHYNOT_RUNTIME" id)" = "$rid" ]
+}
+
+has_occupied() { # dir [pointer-ok]: status 0 when it holds any entry except the write probe, the -Source cache (a
+  # downloads folder holding only release-* folders) and, with pointer-ok (~/.whynot-cut), the pointer; names compare
+  # exactly (the core's base.occupied_entries)
+  local e n k only
   [ -d "$1" ] || return 1
   for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
     [ -e "$e" ] || [ -L "$e" ] || continue
     n="${e##*/}"
-    ours=""
-    case " $ENGINE_LAYOUT models library plugin-options.json " in *" $n "*) ours=1 ;; esac
-    if [ -z "$ours" ]; then
-      for k in $ENGINE_LAYOUT_PREFIXES; do
-        case "$n" in "$k"*) ours=1 ;; esac
+    case "$n" in .wnc-write-test*) continue ;; esac
+    if [ -n "${2:-}" ] && [ "$n" = "plugin-options.json" ]; then continue; fi
+    if [ "$n" = "downloads" ] && [ -d "$e" ] && [ ! -L "$e" ]; then
+      only=1
+      for k in "$e"/* "$e"/.[!.]* "$e"/..?*; do
+        [ -e "$k" ] || [ -L "$k" ] || continue
+        case "${k##*/}" in release-*) ;; *) only="" ;; esac
       done
+      [ -n "$only" ] && continue
     fi
-    [ -n "$ours" ] || return 0
+    return 0
   done
   return 1
 }
@@ -513,7 +571,7 @@ is_mount() { # path: /Volumes/<name>, or an existing folder that df reports as i
 }
 
 engine_place() { # path -> PLACED, PLACE_NOTE, PROBLEM (empty: fine); the core's base.choose_engine_home, same order
-  local p="$1" n r c d up f nf d1 d2 lp root_like="" existing=""
+  local p="$1" n r c d up f nf d1 d2 lp root_like="" existing="" pointer_ok=""
   PLACED="" PLACE_NOTE="" PROBLEM=""
   case "$p" in
     /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
@@ -565,7 +623,9 @@ EOF
     [ "$NORM" = "$n" ] && root_like=1
   done
   f="$p"
-  if [ -z "$existing" ] && { [ -n "$root_like" ] || has_foreign "$p"; }; then
+  norm_path "$HOME/.whynot-cut"
+  [ "$NORM" = "$n" ] && pointer_ok=1  # the SessionStart hook's pointer lives there
+  if [ -z "$existing" ] && { [ -n "$root_like" ] || has_occupied "$p" "$pointer_ok"; }; then
     f="${p%/}/WhyNotCut"
     PLACE_NOTE="$p already holds other files, so WhyNot Cut goes into its own folder $f (uninstall then never touches the rest)"
   fi
@@ -574,7 +634,7 @@ EOF
   if within "$NORM" "$nf"; then PROBLEM="$f is your user folder or holds it; choose a folder of its own"; return 0; fi
   norm_path "$HOME/.claude"
   if within "$nf" "$NORM"; then PROBLEM="$f is inside Claude's folder $HOME/.claude"; return 0; fi
-  if [ "$f" != "$p" ] && ! is_engine_home "$f" && has_foreign "$f"; then
+  if [ "$f" != "$p" ] && ! is_engine_home "$f" && has_occupied "$f"; then
     PROBLEM="$f already holds other files; choose an empty folder or one of its own"; return 0
   fi
   if [ -n "$HOME_OVR" ]; then
@@ -654,6 +714,7 @@ select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no us
     if [ -z "$PROBLEM" ]; then
       if [ -n "$PLACE_NOTE" ]; then
         printf '%s\n' "$PLACE_NOTE"
+        CHOSEN=1  # not the resolved folder any more: the core uses it as it is (after its checks)
         printf '%s\n' "هذا المجلد فيه ملفات أخرى، لذلك سيُثبَّت WhyNot Cut في مجلد خاص به داخله (WhyNotCut)، ولن يلمس الإلغاء باقي الملفات."
       fi
       p="$PLACED"
@@ -670,6 +731,11 @@ select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no us
     if [ -z "$PROBLEM" ] && [ -z "$DRY" ]; then
       if ! { mkdir -p "$p" && : > "$p/.wnc-write-test.$$" && rm -f "$p/.wnc-write-test.$$"; } 2>/dev/null; then
         PROBLEM="it cannot be created or written"
+      elif [ ! -f "$p/state.json" ]; then
+        # claim the folder before anything lands in it (fix round 2): a run that stops before the core (a failed
+        # download) leaves a GENUINE engine home, so the next run uses it again directly
+        printf '{"schema": 1, "plugin": null, "updated_at": null, "steps": {}}\n' > "$p/state.json" 2>/dev/null \
+          || PROBLEM="it cannot be written"
       fi
     fi
     if [ -z "$PROBLEM" ]; then

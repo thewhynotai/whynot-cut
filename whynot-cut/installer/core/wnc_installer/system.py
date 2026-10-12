@@ -163,8 +163,9 @@ def preflight(ctx: base.Ctx) -> base.StepResult:
     else:
         f["nvidia"] = False if plat.startswith("mac") else None
     name = str(base.cget(ctx.components, "marketplace.name") or "thewhynot-ai")
-    # an earlier install = state.json or `current` (the engine home itself exists already: the log lives there)
-    f["existing"] = {"engine": paths.state_file.is_file() or paths.current_file.is_file(),
+    # an earlier install = steps recorded in state.json or a `current` (the engine home itself exists already: the log
+    # lives there; the bootstrap writes an empty state.json to claim a new folder, fix round 2)
+    f["existing"] = {"engine": bool(ctx.state.data.get("steps")) or paths.current_file.is_file(),
                      "legacy_reel_editor": (paths.home / ".reel-editor").exists(),
                      "marketplace_source": claude._known_source(paths, name)}
 

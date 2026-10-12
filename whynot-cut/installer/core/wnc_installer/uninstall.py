@@ -24,7 +24,7 @@ engine       only with --remove-engine: ONLY the children of the engine home tha
              ~/.whynot-cut/.delete-after-exit, which the bootstrap deletes after this process exits (and the engine
              home itself only when it is then empty). When adobe / fonts left something recorded (a running host, a
              font in use), a minimal state.json keeps those records for the next uninstall. Refused unless the folder
-             holds state.json, current or bin/uv(.exe). --remove-models alone deletes models/ only. Once nothing is
+             is a genuine engine home (base.is_engine_home: by content, not by file names). --remove-models alone deletes models/ only. Once nothing is
              left to retry, the saved engine home is forgotten (claude.forget_engine_home: the pointer's engine_home,
              our pluginConfigs option, then an empty ~/.whynot-cut), only while they name this folder.
 Never touched: a clients folder (preferences `clients_root`, any folder holding `.whynot-client`), the preferences file
@@ -367,8 +367,8 @@ def engine_home_problem(paths: base.Paths) -> Optional[str]:
     if base.is_link(paths.whynot):
         return f"{paths.whynot} is a link"
     if not base.is_engine_home(paths.whynot):
-        return (f"{paths.whynot} does not look like a WhyNot Cut engine home (none of "
-                f"{', '.join(base.ENGINE_MARKS)})")
+        return (f"{paths.whynot} does not look like a WhyNot Cut engine home (no state.json written by WhyNot Cut, no "
+                "`current` with its runtime stamp)")
     return None
 
 
@@ -406,7 +406,7 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
     protected = _protected(ctx)
     busy = _running_download(ctx)  # read now: state.json may be reduced below
     if not engine:  # --remove-models alone
-        if not os.path.lexists(paths.models_dir):
+        if "models" not in os.listdir(paths.whynot):  # exact name (`Models` on NTFS / APFS is the editor's)
             return _done("engine", "skipped", ["no Whisper models to delete"])
         if _dry(ctx):
             return _done("engine", "skipped", [f"dry run: would delete {paths.models_dir}"])
@@ -469,7 +469,8 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         _drop_git_bash_key(ctx, git, kept, failed)
     # nothing left to retry: WhyNot Cut no longer points at this folder (ID-10); before `rest` (the pointer may go)
     forgot = claude.forget_engine_home(paths, ctx.log) if not failed and not retry else []
-    later = [paths.whynot / n for n in DEFERRED if os.path.lexists(paths.whynot / n)]
+    names = set(os.listdir(paths.whynot))  # exact names: lexists would also match the editor's `Bin` on NTFS
+    later = [paths.whynot / n for n in DEFERRED if n in names]
     rest = [n for n in os.listdir(paths.whynot) if n not in DEFERRED and n != DEFER_LIST]
     defer_file = paths.whynot / DEFER_LIST
     try:

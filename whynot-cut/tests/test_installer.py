@@ -103,6 +103,9 @@ STEP_NAMES = ["preflight", "questions", "runtime", "ffmpeg", "gitbash", "gpu", "
               "settings", "model", "state", "doctor", "launch"]
 PLATFORMS = {"win-x64", "mac-arm64", "mac-x64"}
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+# what the installer's State writes (base.is_engine_home: a JSON object, schema 1, a "plugin" key); a bare {} is NOT an
+# engine home any more (fix round 2: file names alone can be anyone's)
+GENUINE_STATE = b'{"schema": 1, "plugin": "3.0.0", "updated_at": null, "steps": {}}\n'
 
 # Every dotted path in components.json that may hold a placeholder today. The release tool fills them; a pin that is
 # real today must never come back as a placeholder, so anything outside this list fails the test.
@@ -581,14 +584,30 @@ class TestEngineHome(unittest.TestCase):
         # an existing engine home (even with something foreign in it), an empty folder or one holding only WhyNot
         # Cut's own entries stays as chosen
         eng = self.tmp / "engine home"
-        touch(eng / "state.json", b"{}")
+        touch(eng / "state.json", GENUINE_STATE)
         touch(eng / "uxp-spike" / "x.txt", b"x")
         self.assertEqual(place(eng), (eng, "", None))
         only_ours = self.tmp / "only ours"
-        touch(only_ours / "downloads" / "release-1" / "a.zip", b"z")
-        touch(only_ours / "plugin-options.json", b"{}")
+        touch(only_ours / "downloads" / "release-1" / "a.zip", b"z")  # the -Source cache
+        touch(only_ours / ".wnc-write-test-123", b"x")  # the bootstraps' write probe
         self.assertEqual(place(only_ours)[0], only_ours)
         self.assertEqual(place(self.tmp / "new folder")[0], self.tmp / "new folder")
+        # fix round 2: entry NAMES are never trusted - anything else gets the subfolder (exact names, case too)
+        for name, rel in (("fonts", "fonts/MyBrand.ttf"), ("downloads", "downloads/raw-footage.mov"),
+                          ("logs", "logs/shoot-notes.txt"), ("Bin", "Bin/edit.prproj"), ("state", "state.json"),
+                          ("pointer", "plugin-options.json"), ("models", "models/my-model.bin")):
+            with self.subTest(name):
+                d = self.tmp / f"user {name}"
+                touch(d.joinpath(*rel.split("/")), b'{"my": "game save"}')
+                self.assertEqual(place(d)[0], d / "WhyNotCut")
+        # the pointer counts as ours only in ~/.whynot-cut, where the SessionStart hook keeps it
+        touch(home / ".whynot-cut" / "plugin-options.json", b'{"engine_home": ""}')
+        self.assertEqual(place(home / ".whynot-cut")[0], home / ".whynot-cut")
+        # a home a previous install claimed (state written by WhyNot Cut) is used directly again
+        prev = self.tmp / "previous install"
+        touch(prev / "state.json", GENUINE_STATE)
+        touch(prev / "logs" / "install-1.log", b"log")
+        self.assertEqual(place(prev), (prev, "", None))
         # the -Source cache: the plugin unpacked under <engine>/downloads is fine
         cached = only_ours / "downloads" / "release-1" / "x" / "whynot-cut-marketplace" / "whynot-cut"
         self.assertIsNone(base.engine_home_choice_problem(str(only_ours), home=home, plugin_root=cached))
@@ -3638,18 +3657,6 @@ class TestShellScripts(unittest.TestCase):
         self.assertEqual(shell_steps(ps, r"\$WncUninstallStepNames\s*=\s*@\(([^)]*)\)"), un)
         self.assertEqual(shell_steps(sh, r'UNINSTALL_STEP_NAMES="([^"]*)"'), un)
 
-    def test_the_three_engine_layout_lists_agree(self):
-        # what uninstall may delete and what the location check counts as ours: base.py and both bootstraps
-        ps = SHELL_FILES["bootstrap.ps1"].read_text(encoding="utf-8")
-        sh = SHELL_FILES["bootstrap.sh"].read_text(encoding="utf-8")
-        ps_names = re.findall(r"'([^']+)'", re.search(r"\$WncEngineLayout = @\((.*?)\)", ps, re.S).group(1))
-        ps_pre = re.findall(r"'([^']+)'", re.search(r"\$WncEngineLayoutPrefixes = @\((.*?)\)", ps, re.S).group(1))
-        sh_names = " ".join(re.findall(r'^ENGINE_LAYOUT="(?:\$ENGINE_LAYOUT )?([^"]*)"', sh, re.M)).split()
-        sh_pre = re.search(r'^ENGINE_LAYOUT_PREFIXES="([^"]*)"', sh, re.M).group(1).split()
-        self.assertEqual(ps_names, list(base.ENGINE_LAYOUT))
-        self.assertEqual(sh_names, list(base.ENGINE_LAYOUT))
-        self.assertEqual((ps_pre, sh_pre), (list(base.ENGINE_LAYOUT_PREFIXES), list(base.ENGINE_LAYOUT_PREFIXES)))
-
     def test_the_bootstraps_use_the_runtime_contract(self):
         for name in ("bootstrap.ps1", "bootstrap.sh"):
             text = SHELL_FILES[name].read_text(encoding="utf-8")
@@ -3796,6 +3803,7 @@ class TestPowerShellFrontEnd(_ShellCase):
     def test_uv_already_at_the_pinned_version_is_not_downloaded(self):
         uv = self.paths.bin_dir / "uv.exe"
         uv.parent.mkdir(parents=True)
+        touch(self.paths.state_file, GENUINE_STATE)  # an earlier run claimed the folder (a bare uv is not ours)
         src = ('public static class P { public static void Main() { '
                'System.Console.WriteLine("uv 0.13.0 (fixture)"); } }')
         built = self.tmp / "uv-fixture.exe"  # built in the ASCII temp root, then copied into the Arabic home
@@ -3990,6 +3998,7 @@ class TestBashFrontEnd(_ShellCase):
     def test_uv_already_at_the_pinned_version_is_not_downloaded(self):
         uv = self.paths.bin_dir / "uv"
         uv.parent.mkdir(parents=True)
+        touch(self.paths.state_file, GENUINE_STATE)  # an earlier run claimed the folder (a bare uv is not ours)
         uv.write_text("#!/bin/sh\necho 'uv 0.13.0 (fixture)'\n", encoding="utf-8", newline="\n")
         os.chmod(uv, 0o755)
         r = self.sh(self.front(), "--home", self.home_arg(), "--yes", "--skip", "model,launch")
@@ -4359,6 +4368,48 @@ class TestUninstall(_InstalledHome):
         self.assertEqual((thesis.read_bytes(), taxes.read_bytes()), (b"my thesis", b"my taxes"))
         self.assertEqual(sorted(os.listdir(engine)), sorted(["python", DEFER_LIST]))  # the bootstrap's, next
 
+    def install_into(self, folder: Path) -> Path:
+        r = self.core("install", "--skip", "model", "--engine-home", str(folder), "--engine-home-chosen")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return Path(json.loads(self.paths.options_file.read_text(encoding="utf-8"))["engine_home"])
+
+    def uninstall_all(self, engine: Path) -> None:
+        touch(engine / "python" / "cpython-3.12.15-x" / "python.exe", b"MZ")
+        r = self.core("uninstall", "--remove-engine", "--remove-models")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_folder_of_engine_named_user_folders_gets_its_own_subfolder(self):
+        # fix round 2, the reviewer's repro 1: names like fonts / downloads / logs are the editor's too
+        work = self.home / "Work"
+        files = {touch(work / "fonts" / "MyBrand.ttf", b"user font"): b"user font",
+                 touch(work / "downloads" / "raw-footage.mov", b"user video"): b"user video",
+                 touch(work / "logs" / "shoot-notes.txt", b"user notes"): b"user notes"}
+        engine = self.install_into(work)
+        self.assertEqual(norm(engine), norm(work / "WhyNotCut"))
+        self.uninstall_all(engine)
+        for f, data in files.items():
+            self.assertEqual(f.read_bytes(), data, f)
+        self.assertEqual(sorted(os.listdir(work)), ["WhyNotCut", "downloads", "fonts", "logs"])
+
+    def test_a_users_state_json_is_not_an_engine_home(self):
+        # fix round 2, the reviewer's repro 2: a state.json that WhyNot Cut did not write
+        proj = self.home / "Proj"
+        state = touch(proj / "state.json", b'{"my": "game save"}')
+        log = touch(proj / "logs" / "app.log", b"user log")
+        notes = touch(proj / "notes.txt", b"notes")
+        engine = self.install_into(proj)
+        self.assertEqual(norm(engine), norm(proj / "WhyNotCut"))
+        self.assertEqual(state.read_bytes(), b'{"my": "game save"}')  # never overwritten
+        self.uninstall_all(engine)
+        self.assertEqual((state.read_bytes(), log.read_bytes(), notes.read_bytes()),
+                         (b'{"my": "game save"}', b"user log", b"notes"))
+
+    def test_a_genuine_engine_home_is_used_directly_on_a_reinstall(self):
+        first = self.install_into(self.home / "Engine Here")
+        self.assertEqual(norm(first), norm(self.home / "Engine Here"))  # an empty / new folder: as chosen
+        again = self.install_into(self.home / "Engine Here")  # it holds our state.json, logs ... now
+        self.assertEqual(norm(again), norm(first))
+
     def test_unreadable_settings_runs_no_cli_and_stays_byte_identical(self):
         self.install()
         bad = b'{"theme": "dark",, "enabledPlugins": {"whynot-cut@thewhynot-ai": true}}'
@@ -4424,7 +4475,7 @@ class TestUninstallSteps(unittest.TestCase):
 
     def test_remove_models_alone_keeps_the_rest_of_the_engine(self):
         ctx = self.ctx(remove_models=True)
-        touch(ctx.paths.state_file, b"{}")
+        touch(ctx.paths.state_file, GENUINE_STATE)
         touch(ctx.paths.models_dir / "large-v3" / "model.bin", b"w")
         rt = touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
         r = self.un.step_engine(ctx)
@@ -4434,7 +4485,7 @@ class TestUninstallSteps(unittest.TestCase):
 
     def test_remove_engine_keeps_the_motion_library_even_with_remove_models(self):
         ctx = self.ctx(remove_engine=True, remove_models=True)
-        touch(ctx.paths.state_file, b"{}")
+        touch(ctx.paths.state_file, GENUINE_STATE)
         pack = touch(ctx.paths.whynot / "library" / "motion" / "licensed-pack" / "hand.png", b"paid illustration")
         touch(ctx.paths.models_dir / "large-v3" / "model.bin", b"w")
         touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
@@ -4448,7 +4499,7 @@ class TestUninstallSteps(unittest.TestCase):
 
     def test_locked_files_during_a_model_download_name_the_download(self):
         ctx = self.ctx(remove_engine=True)
-        touch(ctx.paths.state_file, b"{}")
+        touch(ctx.paths.state_file, GENUINE_STATE)
         touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
         mlog = ctx.paths.logs_dir / "model-download-20261012-100000.log"
         ctx.state.data["models"] = {"model": "large-v3", "pid": os.getpid(), "log": str(mlog)}  # a live pid
@@ -4466,7 +4517,7 @@ class TestUninstallSteps(unittest.TestCase):
         self.assertIn(str(mlog), said)
         # a download that is over is not blamed
         ctx = self.ctx(remove_engine=True)
-        touch(ctx.paths.state_file, b"{}")
+        touch(ctx.paths.state_file, GENUINE_STATE)
         touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
         gone = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.DEVNULL)
         gone.wait(30)
@@ -4487,7 +4538,7 @@ class TestUninstallSteps(unittest.TestCase):
                                        "updated": "x"})
         EngineHomeCases.settings(home, {PID: {"options": {"engine_home": str(ns.engine), "clients_root": "C"}},
                                         "x@y": {"options": {}}})
-        touch(ns.engine / "state.json", b"{}")
+        touch(ns.engine / "state.json", GENUINE_STATE)
         touch(ns.engine / "runtimes" / "r-1" / "pyvenv.cfg", b"x")
         ns.model = touch(ns.engine / "models" / "large-v3" / "model.bin", b"weights")
         ns.client = touch(ns.engine / "WhyNot Clients" / "Dr X" / ".whynot-client", b"{}")
@@ -4542,7 +4593,7 @@ class TestUninstallSteps(unittest.TestCase):
     def test_an_engine_home_that_is_the_user_home_is_refused(self):
         h = self.tmp / "profile"
         touch(h / "Documents" / "thesis.docx", b"mine")
-        touch(h / "state.json", b"{}")
+        touch(h / "state.json", GENUINE_STATE)
         paths = base.Paths(home=h, whynot=h, claude_dir=h / ".claude", appdata=h / "AppData" / "Roaming",
                            localappdata=h / "AppData" / "Local", sandbox=True)
         ns = argparse.Namespace(skip=[], dry_run=False, yes=True, remove_engine=True, remove_models=True)
@@ -4560,8 +4611,44 @@ class TestUninstallSteps(unittest.TestCase):
         r = self.un.step_engine(ctx)
         self.assertEqual(r.status, "red", r.detail)
         self.assertEqual(tree(ctx.paths.whynot), before)
-        touch(ctx.paths.bin_dir / "uv.exe", b"MZ")  # bin/uv(.exe), state.json or current: ours
+        # fix round 2: names can be anyone's - only WhyNot Cut's own CONTENT makes an engine home
+        w = ctx.paths.whynot
+        for fake in ((w / "bin" / "uv.exe", b"MZ"), (w / "state.json", b'{"my": "game save"}'),
+                     (w / "state.json", b'{"schema": 1}'), (w / "state.json", b'{"schema": true, "plugin": "x"}'),
+                     (w / "current", b"r-123\n"), (w / "runtimes" / "r-123" / "WHYNOT_RUNTIME", b'{"id": "r-999"}'),
+                     (w / "current", b"../evil\n")):
+            touch(*fake)
+            with self.subTest(str(fake)):
+                self.assertFalse(base.is_engine_home(w))
+                self.assertIsNotNone(self.un.engine_home_problem(ctx.paths))
+        touch(w / "current", b"r-123\n")
+        touch(w / "runtimes" / "r-123" / "WHYNOT_RUNTIME", b'{"id": "r-123", "python": "3.12.15"}')  # a builder's stamp
+        self.assertTrue(base.is_engine_home(w))
         self.assertIsNone(self.un.engine_home_problem(ctx.paths))
+        (w / "current").unlink()
+        touch(w / "state.json", GENUINE_STATE)  # what the installer's State writes
+        self.assertIsNone(self.un.engine_home_problem(ctx.paths))
+
+    def test_only_exact_names_are_ours(self):
+        # fix round 2: the editor's `Bin` / `Models` (case-insensitive disks) are never deleted nor deferred
+        ctx = self.ctx(remove_engine=True)
+        touch(ctx.paths.state_file, GENUINE_STATE)
+        theirs = touch(ctx.paths.whynot / "Bin" / "edit.prproj", b"mine")
+        models = touch(ctx.paths.whynot / "Models" / "rig.blend", b"mine")
+        tmp_leftover = touch(ctx.paths.whynot / "..delete-after-exit.123.tmp", b"x")
+        r = self.un.step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual((theirs.read_bytes(), models.read_bytes()), (b"mine", b"mine"))
+        self.assertFalse(tmp_leftover.exists())  # ours: an atomic-write leftover of the deferred list
+        self.assertFalse((ctx.paths.whynot / DEFER_LIST).exists())  # `Bin` is not bin/: nothing for the bootstrap
+        self.assertIn("Bin", r.detail)
+        self.assertTrue(base.is_engine_entry("..delete-after-exit.123.tmp"))
+        self.assertFalse(base.is_engine_entry("Bin"))
+        ctx = self.ctx(remove_models=True)  # --remove-models alone: `Models` is not models/
+        touch(ctx.paths.state_file, GENUINE_STATE)
+        r = self.un.step_engine(ctx)
+        self.assertEqual(r.status, "skipped", r.detail)  # "no Whisper models to delete"
+        self.assertEqual(models.read_bytes(), b"mine", r.detail)
 
     def test_uxp_remove_uses_the_id_recorded_at_install(self):
         ctx = self.ctx()
@@ -4579,7 +4666,7 @@ class TestUninstallSteps(unittest.TestCase):
         ctx.log = Quiet(None, dry_run=True)
         touch(ctx.paths.settings_file, json.dumps({"enabledPlugins": {PID: True}}).encode("utf-8"))
         touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
-        touch(ctx.paths.state_file, b"{}")
+        touch(ctx.paths.state_file, GENUINE_STATE)
         touch(ctx.paths.marketplace_dir / ".claude-plugin" / "marketplace.json", b"{}")
         touch(ctx.paths.models_dir / "m.bin", b"w")
         before = tree(ctx.paths.home)
@@ -4701,7 +4788,8 @@ class TestBashUninstall(TestBashFrontEnd):
         boot = INSTALLER / "core" / "bootstrap.sh"
         script = self.tmp / "functions.sh"
         script.write_bytes(('OS_NAME="$(uname -s)"\nENGINE="$1"\n' + shell_function(boot, "norm_path", False)
-                            + shell_function(boot, "delete_deferred", False) + "delete_deferred\n").encode("utf-8"))
+                            + shell_function(boot, "exact_child", False) + shell_function(boot, "delete_deferred", False)
+                            + "delete_deferred\n").encode("utf-8"))
         r = self.sh(script.as_posix(), root)
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
@@ -4761,6 +4849,7 @@ def assert_chosen_home_installed(test: "_ShellCase", r, engine: Path, plat: str)
 @unittest.skipUnless(find_powershell(), "Windows PowerShell is not available")
 class TestPowerShellEngineHome(TestPowerShellFrontEnd):
     """-EngineHome / the location question / -Model through install.ps1 and bootstrap.ps1, under the sandbox home."""
+    run_functions = TestPowerShellUninstall.run_functions  # one bootstrap function run alone
     test_install_in_an_arabic_home_touches_nothing_outside = None
     test_dry_run_leaves_the_home_empty = None
     test_dry_run_without_uv_names_the_remaining_steps = None
@@ -4860,9 +4949,48 @@ class TestPowerShellEngineHome(TestPowerShellFrontEnd):
         self.assertFalse(engine.exists(), out)  # only WhyNot Cut's own entries were in it
         self.assertEqual(sorted(os.listdir(docs)), ["Taxes", "thesis.docx"])
 
+    def test_a_folder_with_the_editors_bin_gets_its_own_subfolder(self):
+        # fix round 2: `Bin` is not bin/ (PowerShell's -contains ignored case; NTFS opens `bin` as `Bin`)
+        edit = self.home / "Edit"
+        project = touch(edit / "Bin" / "edit.prproj", b"my project")
+        r = self.ps(self.front(), "-Home", self.home, "-EngineHome", edit, "-Yes", "-Skip", "model,launch")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        engine = edit / "WhyNotCut"
+        self.assertTrue((engine / "bin" / "uv.exe").is_file(), out)
+        self.assertEqual(sorted(os.listdir(edit / "Bin")), ["edit.prproj"])
+        r = self.ps(self.front(), "-Home", self.home, "-Uninstall", "-RemoveEngine", "-Yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(project.read_bytes(), b"my project")
+        self.assertEqual(sorted(os.listdir(edit)), ["Bin"])
+
+    def test_the_deferred_delete_never_takes_a_case_variant(self):
+        root = self.home / ".whynot-cut"
+        theirs = touch(root / "Bin" / "edit.prproj", b"my project")
+        touch(root / "python" / "cpython-3.12.15-x" / "python.exe", b"MZ")
+        (root / DEFER_LIST).write_text(f"{root / 'python'}\n{root / 'bin'}\n{root}\n", encoding="utf-8")
+        r = self.run_functions(["Test-WncReparse", "Invoke-WncDeleteTree", "Invoke-WncDeferredDelete"],
+                               "Invoke-WncDeferredDelete $env:WNC_T_ENGINE", WNC_T_ENGINE=str(root))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(theirs.read_bytes(), b"my project", out)
+        self.assertFalse((root / "python").exists(), out)
+        self.assertIn("not named exactly bin", out)
+        self.assertTrue(root.is_dir())  # not empty: kept
+
+    def test_a_failed_download_leaves_a_claimed_engine_home(self):
+        # fix round 2: the bootstrap writes WhyNot Cut's state.json before any download, so a retry reuses the folder
+        fresh = self.home / "Fresh"
+        self.break_uv_sha()
+        r = self.ps(self.front(), "-Home", self.home, "-EngineHome", fresh, "-Yes", "-Skip", "model,launch")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertTrue(base.is_engine_home(fresh))
+        self.assertEqual(base.choose_engine_home(str(fresh), home=self.home, plugin_root=self.fx.plugin_root)[0],
+                         fresh)
+
     def test_enter_on_a_reinstall_keeps_the_existing_install(self):
         # fix round 1 (IMPORTANT 1): an Arabic-letter home with an install: no non-ASCII re-ask, no move
-        touch(self.home / ".whynot-cut" / "state.json", b"{}")
+        touch(self.home / ".whynot-cut" / "state.json", GENUINE_STATE)
         answers = self.tmp / "answers.txt"
         answers.write_text("\n", encoding="utf-8")  # Enter, once: a second question would end the answers (exit 2)
         r = self.ps(self.front(), "-Home", self.home, "-DryRun", env=self.env(WNC_TEST_ANSWERS=str(answers)))
@@ -4873,7 +5001,7 @@ class TestPowerShellEngineHome(TestPowerShellFrontEnd):
         self.assertNotIn("stays there and is no longer used", out)
 
     def test_another_folder_says_the_old_install_stays_behind(self):
-        touch(self.home / ".whynot-cut" / "state.json", b"{}")
+        touch(self.home / ".whynot-cut" / "state.json", GENUINE_STATE)
         r = self.ps(self.front(), "-Home", self.home, "-EngineHome", self.home / "Other", "-DryRun", "-Yes")
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
@@ -4960,6 +5088,40 @@ class TestBashEngineHome(TestBashFrontEnd):
         self.assertEqual(thesis.read_bytes(), b"my thesis")
         self.assertEqual(sorted(os.listdir(docs)), ["thesis.docx"], r.stdout + r.stderr)
 
+    def test_engine_named_user_folders_and_a_fake_state_get_a_subfolder(self):
+        # fix round 2: names and a foreign state.json never make a folder ours
+        for name, rel, data in (("Work", "logs/shoot-notes.txt", b"user notes"),
+                                ("Edit", "Bin/edit.prproj", b"my project"),
+                                ("Proj", "state.json", b'{"my": "game save"}')):
+            with self.subTest(name):
+                folder = self.home / name
+                f = touch(folder.joinpath(*rel.split("/")), data)
+                r = self.sh(self.front(), "--home", self.home_arg(), "--engine-home", folder.as_posix(), "--dry-run",
+                            "--yes")
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 0, out)
+                self.assertIn(f"engine home {folder.as_posix()}/WhyNotCut (chosen)", out)
+                self.assertEqual(f.read_bytes(), data)
+
+    def test_the_deferred_delete_never_takes_a_case_variant(self):
+        root = self.home / ".whynot-cut"
+        theirs = touch(root / "Bin" / "edit.prproj", b"my project")
+        touch(root / "python" / "x", b"x")
+        (root / DEFER_LIST).write_text(f"{root.as_posix()}/python\n{root.as_posix()}/bin\n{root.as_posix()}\n",
+                                       encoding="utf-8", newline="\n")
+        boot = INSTALLER / "core" / "bootstrap.sh"
+        script = self.tmp / "functions.sh"
+        script.write_bytes(('OS_NAME="$(uname -s)"\nENGINE="$1"\n' + shell_function(boot, "norm_path", False)
+                            + shell_function(boot, "exact_child", False) + shell_function(boot, "delete_deferred", False)
+                            + "delete_deferred\n").encode("utf-8"))
+        r = self.sh(script.as_posix(), root.as_posix())
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(theirs.read_bytes(), b"my project", out)
+        self.assertFalse((root / "python").exists(), out)
+        if (root / "bin").exists():  # a case-insensitive disk (NTFS, APFS) opens `Bin` as `bin`
+            self.assertIn("not named exactly bin", out)
+
     def test_piped_source_is_cached_under_the_chosen_engine_home(self):
         zf = self.tmp / "WhyNotCut-3.0.0.zip"
         zsha = release_zip(self.fx, zf)
@@ -4973,7 +5135,7 @@ class TestBashEngineHome(TestBashFrontEnd):
         self.assertFalse((self.home / ".whynot-cut" / "downloads").exists())
 
     def test_another_folder_says_the_old_install_stays_behind(self):
-        touch(self.home / ".whynot-cut" / "state.json", b"{}")
+        touch(self.home / ".whynot-cut" / "state.json", GENUINE_STATE)
         r = self.sh(self.front(), "--home", self.home_arg(), "--engine-home", (self.home / "Other").as_posix(),
                     "--dry-run", "--yes")
         out = r.stdout + r.stderr

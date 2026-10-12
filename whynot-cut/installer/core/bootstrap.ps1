@@ -104,15 +104,6 @@ param(
         LeftBehind = ('2KrZhtio2YrZhzog2KfZhNiq2KvYqNmK2Kog2KfZhNmC2K/ZitmFINiz2YrYqNmC2Ykg2YHZiiDZhdmD2KfZhtmHINmI2YTZhiDZitmP2LPY' +
             'qtiu2K/ZhSDYqNi52K8g2KfZhNii2YbYmyDYp9it2LDZgdmHINio2YbZgdiz2YMg2KXZhiDZhNmFINiq2LnYryDYqtit2KrYp9is2Yc6')
     }
-    # what WhyNot Cut puts in an engine home: wnc_installer/base.py ENGINE_LAYOUT / ENGINE_LAYOUT_PREFIXES (the tests
-    # keep the three copies in step); the location check counts a folder holding only these (and models, library,
-    # the pointer) as an engine home or empty
-    $WncEngineLayout = @('bin', 'python', 'runtimes', 'current', 'ffmpeg', 'cuda', 'bridge', 'state.json', 'logs',
-        'cache', 'downloads', 'fonts', 'marketplace', 'marketplace.new', 'marketplace.prev', '.delete-after-exit',
-        'venv', 'ppro-queue', 'ppro-scripts', 'ae-queue', 'ae-scripts', 'ae-probe', 'ae-capabilities.json', 'bench',
-        'tmp')
-    $WncEngineLayoutPrefixes = @('state.json.corrupt-', '.state.json.', '.current.', '.plugin-options.json.',
-        '.wnc-write-test')
     $EnvNames = @('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'CLAUDE_CONFIG_DIR', 'WHYNOT_HOME',
         'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_NO_CONFIG', 'UV_PYTHON_PREFERENCE', 'UV_NO_MODIFY_PATH')
 
@@ -361,6 +352,15 @@ param(
                     Write-Host "WARNING: refused '$p' in $list (only python\ and bin\ of $root may be listed)"
                     continue
                 }
+                # only an entry named EXACTLY python / bin (fix round 2): NTFS would also open the editor's `Bin`
+                $leaf = Split-Path $target -Leaf
+                $names = @([IO.Directory]::GetFileSystemEntries($root) | ForEach-Object { [IO.Path]::GetFileName($_) })
+                if ($names -cnotcontains $leaf) {
+                    if ($names -contains $leaf) {
+                        Write-Host "WARNING: refused '$p' in $list (the folder there is not named exactly $leaf`: not WhyNot Cut's)"
+                    }
+                    continue
+                }
                 $err = $null
                 for ($i = 1; $i -le 5; $i++) {
                     # the core has just exited: Windows may hold its files a moment longer
@@ -547,25 +547,55 @@ param(
         return ,@($out | ForEach-Object { ConvertTo-WncHomePath -Value $_ -UserHome $UserHome -Saved $true })
     }
 
-    function Test-WncEngineHomeMark([string]$Path) {
-        # WhyNot Cut is installed there (state.json, current or bin\uv(.exe): only WhyNot Cut leaves these)
-        foreach ($m in @('state.json', 'current', 'bin\uv', 'bin\uv.exe')) {
-            if ([IO.File]::Exists((Join-Path $Path $m))) { return $true }
+    function Read-WncJsonFile([string]$Path) {
+        # the file as a JSON value (UTF-8; a BOM is tolerated), or $null when it is missing, too big or not JSON
+        try {
+            if ((-not [IO.File]::Exists($Path)) -or ((New-Object IO.FileInfo $Path).Length -gt 1MB)) { return $null }
+            return ([IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8) | ConvertFrom-Json)
+        } catch {
+            return $null
         }
-        return $false
     }
 
-    function Get-WncForeignEntry([string]$Path) {
-        # the children of $Path that WhyNot Cut does not put there (wnc_installer.base.foreign_entries), sorted
+    function Test-WncEngineHomeMark([string]$Path) {
+        # a GENUINE WhyNot Cut engine home (fix round 2: file names alone can be anyone's), the core's
+        # base.is_engine_home: state.json is a JSON object with schema 1 and a "plugin" key, or `current` names a valid
+        # runtime id whose runtimes\<id>\WHYNOT_RUNTIME is a JSON object with that same id
+        $st = Read-WncJsonFile (Join-Path $Path 'state.json')
+        if ($st -is [System.Management.Automation.PSCustomObject]) {
+            $schema = Get-WncMember $st 'schema'
+            if ($schema.Found -and ($schema.Value -is [int] -or $schema.Value -is [long]) -and ($schema.Value -eq 1) -and
+                (Get-WncMember $st 'plugin').Found) {
+                return $true
+            }
+        }
+        $cur = Join-Path $Path 'current'
+        if (-not [IO.File]::Exists($cur)) { return $false }
+        try { $rid = [IO.File]::ReadAllText($cur, [Text.Encoding]::UTF8).Trim() } catch { return $false }
+        if (($rid -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') -or $rid.Contains('..')) { return $false }
+        $stamp = Read-WncJsonFile (Join-Path $Path "runtimes\$rid\WHYNOT_RUNTIME")
+        if (-not ($stamp -is [System.Management.Automation.PSCustomObject])) { return $false }
+        $id = Get-WncMember $stamp 'id'
+        return ($id.Found -and ($id.Value -is [string]) -and ($id.Value -ceq $rid))
+    }
+
+    function Get-WncOccupiedEntry([string]$Path, [bool]$PointerOk) {
+        # what makes an existing folder the editor's (the core's base.occupied_entries): every entry except the write
+        # probe (.wnc-write-test*), the -Source cache (a `downloads` folder holding only `release-*` folders) and, in
+        # ~\.whynot-cut, the pointer plugin-options.json. Names compare EXACTLY (case too).
         $out = @()
         if (-not [IO.Directory]::Exists($Path)) { return ,$out }
         foreach ($e in [IO.Directory]::GetFileSystemEntries($Path)) {
             $n = [IO.Path]::GetFileName($e)
-            $ours = ($WncEngineLayout -contains $n) -or (@('models', 'library', 'plugin-options.json') -contains $n)
-            foreach ($pre in $WncEngineLayoutPrefixes) {
-                if ($n.StartsWith($pre, [StringComparison]::OrdinalIgnoreCase)) { $ours = $true }
+            if ($n.StartsWith('.wnc-write-test', [StringComparison]::Ordinal)) { continue }
+            if ($PointerOk -and ($n -ceq 'plugin-options.json')) { continue }
+            if (($n -ceq 'downloads') -and [IO.Directory]::Exists($e) -and (-not (Test-WncReparse $e))) {
+                $kids = @([IO.Directory]::GetFileSystemEntries($e) | ForEach-Object { [IO.Path]::GetFileName($_) })
+                if (@($kids | Where-Object { -not $_.StartsWith('release-', [StringComparison]::Ordinal) }).Count -eq 0) {
+                    continue
+                }
             }
-            if (-not $ours) { $out += $n }
+            $out += $n
         }
         return ,@($out | Sort-Object)
     }
@@ -597,8 +627,9 @@ param(
         # mounted volume, a link / mount point, inside the plugin folder; unless it is already an engine home also
         # one that holds the plugin (except in its downloads\: the -Source cache), is / holds / lies inside the saved
         # clients folder, lies inside or holds (3 levels) a .whynot-client folder. Moved into <it>\WhyNotCut: the user
-        # folder, Desktop, Documents, Downloads, and any folder holding something WhyNot Cut does not put there
-        # that is not already an engine home. Then the final folder: not holding the user folder, not inside
+        # folder, Desktop, Documents, Downloads, and any existing folder with any entry (Get-WncOccupiedEntry: names
+        # are not trusted) that is not a GENUINE engine home (Test-WncEngineHomeMark: by content). Then the final
+        # folder: not holding the user folder, not inside
         # Claude's folder, not a WhyNotCut subfolder holding other files, in a sandbox inside it.
         if ((-not $Path) -or ($Path -notmatch '^([A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)')) {
             return @{ Problem = "$Path is not a full path (for example C:\WhyNotCut)" }
@@ -644,7 +675,8 @@ param(
         $note = ''
         $homeRoots = @($UserHome) + @('Desktop', 'Documents', 'Downloads' | ForEach-Object { Join-Path $UserHome $_ })
         $isRoot = @($homeRoots | Where-Object { (Get-WncNormPath $_) -ieq $n }).Count -gt 0
-        if ((-not $existing) -and ($isRoot -or ((Get-WncForeignEntry $n).Count -gt 0))) {
+        $pointerOk = (Get-WncNormPath (Join-Path $UserHome '.whynot-cut')) -ieq $n  # the hook's pointer lives there
+        if ((-not $existing) -and ($isRoot -or ((Get-WncOccupiedEntry -Path $n -PointerOk $pointerOk).Count -gt 0))) {
             $final = Join-Path $n 'WhyNotCut'
             $note = "$Path already holds other files, so WhyNot Cut goes into its own folder $final (uninstall then never touches the rest)"
         }
@@ -654,7 +686,8 @@ param(
         if (Test-WncWithin $final (Get-WncNormPath (Join-Path $UserHome '.claude'))) {
             return @{ Problem = "$final is inside Claude's folder $(Join-Path $UserHome '.claude')" }
         }
-        if (($final -ine $n) -and (-not (Test-WncEngineHomeMark $final)) -and ((Get-WncForeignEntry $final).Count -gt 0)) {
+        if (($final -ine $n) -and (-not (Test-WncEngineHomeMark $final)) -and
+            ((Get-WncOccupiedEntry -Path $final -PointerOk $false).Count -gt 0)) {
             return @{ Problem = "$final already holds other files; choose an empty folder or one of its own" }
         }
         if ($SandboxRoot -and (-not (Test-WncWithin $final (Get-WncNormPath $SandboxRoot) -Strict))) {
@@ -753,6 +786,7 @@ param(
                 if ($place.Note) {
                     Write-Host $place.Note
                     Write-Host (Get-WncArabic 'Subfolder')
+                    $chosen = $true  # not the resolved folder any more: the core uses it as it is (after its checks)
                 }
                 $p = $place.Path
             }
@@ -789,6 +823,13 @@ param(
                     $probe = Join-Path $p (".wnc-write-test-$PID")
                     [IO.File]::WriteAllText($probe, 'x')
                     [IO.File]::Delete($probe)
+                    # claim the folder before anything lands in it (fix round 2): a run that stops before the core
+                    # (a failed download) leaves a GENUINE engine home, so the next run uses it again directly
+                    $st = Join-Path $p 'state.json'
+                    if (-not [IO.File]::Exists($st)) {
+                        [IO.File]::WriteAllText($st, '{"schema": 1, "plugin": null, "updated_at": null, "steps": {}}' +
+                            "`n", $S.Utf8)
+                    }
                 } catch {
                     $problem = "it cannot be created or written ($($_.Exception.Message))"
                 }
