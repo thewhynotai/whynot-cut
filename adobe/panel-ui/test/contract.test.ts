@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import protocol from "../../../whynot-cut/engine/reel/contract/protocol.json" with { type: "json" };
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ACTION_NAMES, ACTIVE_ACTION_NAMES, PROTOCOL, RESERVED_ACTION_NAMES } from "../src/contract.ts";
 import type { ExportedFrame, PingPremiereReadback, ResultEnvelope } from "../src/contract.ts";
 
@@ -20,10 +22,16 @@ test("round 4: the active and reserved lists equal protocol.json's status, and t
   assert.deepEqual([...RESERVED_ACTION_NAMES], entries.filter(([, e]) => e.status === "reserved").map(([a]) => a));
   assert.equal(RESERVED_ACTION_NAMES.length, 20);
   assert.equal(ACTIVE_ACTION_NAMES.length + RESERVED_ACTION_NAMES.length, ACTION_NAMES.length);
-  const src = new URL("../src/", import.meta.url);
-  for (const f of readdirSync(src).filter((n) => n.endsWith(".ts") && n !== "contract.ts")) {
-    const text = readFileSync(new URL(f, src), "utf8");
-    for (const a of RESERVED_ACTION_NAMES) assert.ok(!text.includes(`"${a}"`), `${f} must not expose ${a} (Phase 6B)`);
+  // every file under panel-ui/src (recursively, any extension) except contract.ts; "x", 'x' and `x` all count
+  const src = fileURLToPath(new URL("../src/", import.meta.url));
+  const files = (readdirSync(src, { recursive: true }) as string[]).map((f) => join(src, f))
+    .filter((f) => statSync(f).isFile() && f !== join(src, "contract.ts"));
+  assert.ok(files.length > 5, "the scan sees the panel sources");
+  for (const f of files) {
+    const text = readFileSync(f, "utf8");
+    for (const a of RESERVED_ACTION_NAMES) {
+      for (const q of ['"', "'", "`"]) assert.ok(!text.includes(`${q}${a}${q}`), `${f} must not expose ${a} (Phase 6B)`);
+    }
   }
 });
 

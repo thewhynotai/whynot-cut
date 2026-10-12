@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/tidy_open.schema.json",
   "title": "tidy_open",
-  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_open, FR-15; not routed yet. CEP WNC_TIDY.open (signed bridge). Undo = open the backup copy '<name> (Tidy backup YYYY-MM-DD HHMMSS)'. uxp true: open an existing project with a native backslash path is green in docs/adobe/uxp-parity.md (O2).",
+  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_open, FR-15; not routed yet. Upstream: adobe/tools/tidy/_upstream/jsx/host.jsx:301 TIDY.open (entry tidy_open :311). CEP WNC_TIDY.open (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Undo = open the backup copy '<name> (Tidy backup YYYY-MM-DD HHMMSS)'; a missing file is an error. uxp true: opening an existing project is green in docs/adobe/uxp-parity.md (O2) with a native backslash path.",
   "$defs": {
     "data": {
       "type": "object",
@@ -10,26 +10,27 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "description": "the .prproj to open"
+          "description": "the .prproj to open; a native backslash path (UXP Project.open fails with forward slashes, O2)"
         }
       },
       "required": [
         "path"
       ],
       "additionalProperties": false,
-      "description": "tidy_open {path}."
+      "description": "{path}."
     },
     "readback": {
       "type": "object",
       "properties": {
         "opened": {
-          "description": "whether it opened: its type is not stated in the PRD, left open"
+          "type": "string",
+          "description": "the path that was opened (echoed)"
         }
       },
       "required": [
         "opened"
       ],
-      "description": "opened. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{opened}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

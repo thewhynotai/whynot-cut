@@ -2,15 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/kalam_remove_clips.schema.json",
   "title": "kalam_remove_clips",
-  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_removeClips, FR-22, FR-18; not routed yet. CEP WNC_KALAM.removeClips (signed bridge). Undo for MOGRT output: remove the clips Kalam placed on a video track within a range (also the all-or-nothing rollback of FR-18). uxp true: reading clips (R1) and removing a clip (T4) are green in docs/adobe/uxp-parity.md.",
+  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_removeClips, FR-22, FR-18; not routed yet. Upstream: adobe/tools/kalam/_upstream/jsx/host.jsx:192 KALAM.removeClips (entry kalam_removeClips :211). CEP WNC_KALAM.removeClips (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Undo for MOGRT output: remove the clips on a video track whose name starts with 'Kalam ' (the names kalam_mogrt gives) and whose start lies within [from, to]. uxp true: reading clip times (R1) and removing a clip (T4) are green in docs/adobe/uxp-parity.md; reading a track item's name in UXP is not measured yet (R1/T4 do not cover it), so the UXP adapter must confirm it before relying on the name filter.",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {
-        "videoTrack": {
+        "video_track": {
           "type": "integer",
           "minimum": 0,
-          "description": "track index (0-based, as Premiere's DOM numbers tracks)"
+          "description": "track index, 0-based (Premiere's DOM order; upstream error messages say V<index + 1>)"
         },
         "from": {
           "type": "number",
@@ -24,12 +24,12 @@
         }
       },
       "required": [
-        "videoTrack",
+        "video_track",
         "from",
         "to"
       ],
       "additionalProperties": false,
-      "description": "kalam_removeClips {videoTrack,from,to}."
+      "description": "{video_track,from,to}."
     },
     "readback": {
       "type": "object",
@@ -43,7 +43,7 @@
       "required": [
         "removed"
       ],
-      "description": "removed: clips removed. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{removed}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

@@ -2,15 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/audio_export_range.schema.json",
   "title": "audio_export_range",
-  "description": "RESERVED for Phase 6B (T6.11) \u2014 shape from hush-prd.md \u00a77.1 hush_exportAudio + kalam-prd.md \u00a77.1 kalam_exportAudio (Addendum A2: one shared host service), Hush FR-3, FR-4, Kalam FR-3; not routed yet. CEP WNC_AUDIO.exportRange (signed bridge). Export a sequence range's audio to a WAV (48 kHz mono 16-bit, Wave48mono16.epr, exportAsMediaDirect): only the ticked audio tracks are heard (the others are muted for the export and restored after), In/Out are set temporarily and restored.",
+  "description": "RESERVED for Phase 6B (T6.11) \u2014 shape from hush-prd.md \u00a77.1 hush_exportAudio + kalam-prd.md \u00a77.1 kalam_exportAudio (Addendum A2: one shared host service), Hush FR-3, FR-4, Kalam FR-3; not routed yet. Upstream: adobe/tools/hush/_upstream/jsx/host.jsx:101 HUSH.exportAudio (entry hush_exportAudio :331); adobe/tools/kalam/_upstream/jsx/host.jsx:92 KALAM.exportAudio (entry kalam_exportAudio :208). CEP WNC_AUDIO.exportRange (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Export a sequence range's audio to a WAV through exportAsMediaDirect with Premiere's own 48 kHz mono 16-bit preset (Wave48mono16.epr; the host finds it, Hush's extDir argument is dropped): every audio track not listed is muted for the export and its mute state restored after, In/Out are set to the range and restored, in finally. Premiere may append '.wav' to the file name; the readback names the file written.",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {
-        "outPath": {
+        "out_path": {
           "type": "string",
           "minLength": 1,
-          "description": "the WAV to write"
+          "description": "the WAV to write (upstream `outPath`)"
         },
         "start": {
           "type": "number",
@@ -22,29 +22,24 @@
           "minimum": 0,
           "description": "range end, sequence seconds"
         },
-        "audioTracks": {
+        "audio_tracks": {
           "type": "array",
           "items": {
             "type": "integer",
             "minimum": 0,
-            "description": "track index (0-based, as Premiere's DOM numbers tracks)"
+            "description": "track index, 0-based (Premiere's DOM order; upstream error messages say V<index + 1>)"
           },
-          "description": "the ticked audio tracks (Hush FR-3, Kalam FR-3); every other audio track is muted during the export, then restored"
-        },
-        "extDir": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Hush passes its extension folder (hush_exportAudio); optional because Kalam's kalam_exportAudio does not"
+          "description": "the ticked audio tracks (upstream `audioTracks`; Hush FR-3, Kalam FR-3); every other audio track is muted during the export, then restored"
         }
       },
       "required": [
-        "outPath",
+        "out_path",
         "start",
         "end",
-        "audioTracks"
+        "audio_tracks"
       ],
       "additionalProperties": false,
-      "description": "Union of hush_exportAudio {outPath,start,end,audioTracks,extDir} and kalam_exportAudio {outPath,start,end,audioTracks}; field names as the PRDs write them."
+      "description": "{out_path,start,end,audio_tracks} (Hush and Kalam send the same four; Hush's extDir is not kept)."
     },
     "readback": {
       "type": "object",
@@ -52,23 +47,30 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "description": "the WAV written"
+          "description": "the WAV written, native path (File.fsName); may end in an appended '.wav'"
         },
         "start": {
           "type": "number",
           "minimum": 0,
-          "description": "Kalam's kalam_exportAudio also returns the range start, sequence seconds"
+          "description": "the range start, echoed, sequence seconds"
         },
         "end": {
           "type": "number",
           "minimum": 0,
-          "description": "and its end, sequence seconds"
+          "description": "the range end, echoed, sequence seconds"
+        },
+        "preset": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the .epr used (Hush returns it; Kalam does not)"
         }
       },
       "required": [
-        "path"
+        "path",
+        "start",
+        "end"
       ],
-      "description": "path: the WAV written (both PRDs); start / end: what kalam_exportAudio returns as well. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{path,start,end,preset?}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

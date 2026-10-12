@@ -1055,6 +1055,14 @@ class FileQueue(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await adapters.FileQueueAdapter().run(request("open_project", {"path": "x"}, id="r4"))
 
+    async def test_reserved_actions_are_refused_by_the_queue_adapter_too(self):
+        """Defence in depth: even if something bypassed the router, the CEP queue never submits a reserved action."""
+        with mock.patch("lib.ppro_bridge.submit", side_effect=AssertionError("queued")):
+            for action in contract.RESERVED:
+                self.assertIn(action, adapters.CEP_NAME)                 # it has a (future) WNC_* name ...
+                with self.assertRaisesRegex(ValueError, "reserved for Phase 6B"):
+                    await adapters.FileQueueAdapter().run(request(action, {}, id="r5"))   # ... and is still refused
+
 
 class RouterUnit(unittest.TestCase):
     def test_router_has_no_eval_path(self):

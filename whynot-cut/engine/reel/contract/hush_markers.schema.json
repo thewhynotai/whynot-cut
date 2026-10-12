@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/hush_markers.schema.json",
   "title": "hush_markers",
-  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_markers, FR-22; not routed yet. CEP WNC_HUSH.markers (signed bridge). Mode Markers: one sequence marker per planned cut (name = kind/label), no edit. uxp true: adding markers with a name is green in docs/adobe/uxp-parity.md (MK1).",
+  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_markers, FR-22; not routed yet. Upstream: adobe/tools/hush/_upstream/jsx/host.jsx:288 HUSH.markers (entry hush_markers :334). CEP WNC_HUSH.markers (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Mode Markers: one sequence marker per planned cut, no edit. Name 'Hush filler' or 'Hush silence', the label as its comment, colour index 5 (filler) or 1. uxp true: adding named markers is green in docs/adobe/uxp-parity.md (MK1).",
   "$defs": {
     "data": {
       "type": "object",
@@ -24,21 +24,20 @@
               },
               "kind": {
                 "type": "string",
-                "description": "silence / filler / unclear"
+                "description": "'filler'; anything else is marked as silence"
               },
               "label": {
                 "type": "string",
-                "description": "the marker label"
+                "description": "the marker comment (optional, '' when absent)"
               }
             },
             "required": [
               "s",
               "e",
-              "kind",
-              "label"
+              "kind"
             ],
             "additionalProperties": false,
-            "description": "{s,e,kind,label}"
+            "description": "{s,e,kind,label?}"
           },
           "description": "one per planned cut"
         }
@@ -47,7 +46,7 @@
         "ranges"
       ],
       "additionalProperties": false,
-      "description": "hush_markers {ranges:[{s,e,kind,label}]}."
+      "description": "{ranges}."
     },
     "readback": {
       "type": "object",
@@ -61,7 +60,7 @@
       "required": [
         "added"
       ],
-      "description": "added: markers added. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{added}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

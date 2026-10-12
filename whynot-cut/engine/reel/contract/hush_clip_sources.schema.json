@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/hush_clip_sources.schema.json",
   "title": "hush_clip_sources",
-  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_clipSources, FR-1, FR-7; not routed yet. CEP WNC_HUSH.clipSources (signed bridge). The media files under the selected audio clips.",
+  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_clipSources, FR-1, FR-7; not routed yet. Upstream: adobe/tools/hush/_upstream/jsx/host.jsx:133 HUSH.clipSources (entry hush_clipSources :332). CEP WNC_HUSH.clipSources (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). The media under each selected audio clip (the source-media fallback for a scan).",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {},
       "additionalProperties": false,
-      "description": "No data (the PRD's host function takes no argument)."
+      "description": "No data (the upstream function reads no argument)."
     },
     "readback": {
       "type": "object",
@@ -20,8 +20,7 @@
             "properties": {
               "path": {
                 "type": "string",
-                "minLength": 1,
-                "description": "the media file"
+                "description": "projectItem.getMediaPath()"
               },
               "start": {
                 "type": "number",
@@ -33,27 +32,27 @@
                 "minimum": 0,
                 "description": "sequence seconds"
               },
-              "inPoint": {
+              "in_point": {
                 "type": "number",
                 "minimum": 0,
-                "description": "the clip's in point in the media, seconds"
+                "description": "the clip's in point in its media, seconds (upstream `inPoint`)"
               }
             },
             "required": [
               "path",
               "start",
               "end",
-              "inPoint"
+              "in_point"
             ],
-            "description": "{path,start,end,inPoint} of one selected audio clip. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+            "description": "{path,start,end,in_point}. The object stays open: keys the host adds are not rejected."
           },
-          "description": "one entry per selected audio clip"
+          "description": "one per selected audio clip with a project item"
         }
       },
       "required": [
         "clips"
       ],
-      "description": "clips: the selected audio clips' sources. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{clips}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

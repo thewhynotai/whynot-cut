@@ -2,28 +2,28 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/audio_export_clip.schema.json",
   "title": "audio_export_clip",
-  "description": "RESERVED for Phase 6B (T6.11) \u2014 shape from tidy-prd.md \u00a77 tidy_exportClipAudio, Tidy FR-20, FR-19; not routed yet. CEP WNC_AUDIO.exportClipAudio (signed bridge). Export one project item's sound to a WAV: a temporary sequence + the Wave48mono16 preset, the temporary sequence deleted after (in finally, tidy-prd.md \u00a78) and the active sequence restored. A clip that fails to export is left out by the caller with its name (FR-20).",
+  "description": "RESERVED for Phase 6B (T6.11) \u2014 shape from tidy-prd.md \u00a77 tidy_exportClipAudio, Tidy FR-19, FR-20; not routed yet. Upstream: adobe/tools/tidy/_upstream/jsx/host.jsx:221 TIDY.exportClipAudio (entry tidy_exportClipAudio :312). CEP WNC_AUDIO.exportClipAudio (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Export one project item's sound to a WAV: a temporary sequence 'Tidy sync temp' from the clip, exportAsMediaDirect (whole sequence, Wave48mono16 preset), the temporary sequence deleted and the previously active sequence reopened in finally (tidy-prd.md \u00a78). A clip that fails is left out by the caller with its name (FR-20).",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {
-        "nodeId": {
+        "node_id": {
           "type": "string",
           "minLength": 1,
-          "description": "the project item"
+          "description": "the clip's project item nodeId (upstream `nodeId`)"
         },
-        "outPath": {
+        "out_path": {
           "type": "string",
           "minLength": 1,
-          "description": "the WAV to write"
+          "description": "the WAV to write (upstream `outPath`)"
         }
       },
       "required": [
-        "nodeId",
-        "outPath"
+        "node_id",
+        "out_path"
       ],
       "additionalProperties": false,
-      "description": "tidy_exportClipAudio {nodeId,outPath}."
+      "description": "{node_id,out_path}."
     },
     "readback": {
       "type": "object",
@@ -31,13 +31,13 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "description": "the WAV written"
+          "description": "the WAV written, native path (File.fsName)"
         }
       },
       "required": [
         "path"
       ],
-      "description": "path: the WAV written. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{path}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

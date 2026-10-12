@@ -35,7 +35,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from contract import load
+from contract import RESERVED, load
 from contract.cep import CEP_NAME, from_cep
 from lib.common import current_context, use_context
 
@@ -145,6 +145,8 @@ class FileQueueAdapter:
 
     async def run(self, request: dict, on_progress=None) -> dict:
         action, rid = request["action"], request["id"]
+        if action in RESERVED:                       # defence in depth: the router already answers these itself
+            raise ValueError(f"{action!r} is reserved for Phase 6B and is never queued")
         if action not in CEP_NAME:
             raise ValueError(f"{action!r} has no CEP equivalent")
         name = CEP_NAME[action]

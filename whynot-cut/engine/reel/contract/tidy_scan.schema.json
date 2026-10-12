@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/tidy_scan.schema.json",
   "title": "tidy_scan",
-  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_scan, FR-1, FR-2, FR-9; not routed yet. CEP WNC_TIDY.scan (signed bridge). Read only: walk the project tree (items and bins), usage per sequence (clips of video + audio tracks) and up to 3 graphic Source Texts per sequence.",
+  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_scan, FR-1, FR-2, FR-9; not routed yet. Upstream: adobe/tools/tidy/_upstream/jsx/host.jsx:111 TIDY.scan (entry tidy_scan :308). CEP WNC_TIDY.scan (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Read only: walk the project tree (items and bins), usage per sequence (project items referenced by the clips of its video + audio tracks) and up to 3 graphic Source Texts per sequence.",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {},
       "additionalProperties": false,
-      "description": "No data (the PRD's host function takes no argument)."
+      "description": "No data (the upstream function reads no argument)."
     },
     "readback": {
       "type": "object",
@@ -18,10 +18,10 @@
           "items": {
             "type": "object",
             "properties": {
-              "nodeId": {
+              "node_id": {
                 "type": "string",
                 "minLength": 1,
-                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+                "description": "project item nodeId (upstream `nodeId`)"
               },
               "name": {
                 "type": "string",
@@ -29,37 +29,42 @@
               },
               "bin": {
                 "type": "string",
-                "description": "bin path"
+                "description": "parent bin path, '' at the project root"
               },
-              "isSequence": {
+              "is_sequence": {
                 "type": "boolean",
-                "description": "a sequence"
+                "description": "a sequence (upstream `isSequence`)"
               },
               "path": {
-                "description": "media path (a sequence has none): its type is not stated in the PRD, left open"
+                "type": "string",
+                "description": "media path, '' for a sequence or when unknown"
               },
               "offline": {
                 "type": "boolean",
-                "description": "Premiere's flag (FR-3: unreliable, the engine checks the file)"
+                "description": "Premiere's isOffline (FR-3: unreliable, the engine checks the file)"
               },
               "color": {
-                "description": "label colour: its type is not stated in the PRD, left open"
+                "type": "integer",
+                "minimum": -1,
+                "description": "label colour index (getColorLabel), -1 when unknown"
               },
               "duration": {
-                "description": "duration: its type is not stated in the PRD, left open"
+                "type": "number",
+                "minimum": 0,
+                "description": "out - in, seconds; 0 when unknown"
               }
             },
             "required": [
-              "nodeId",
+              "node_id",
               "name",
               "bin",
-              "isSequence",
+              "is_sequence",
               "path",
               "offline",
               "color",
               "duration"
             ],
-            "description": "{nodeId,name,bin,isSequence,path,offline,color,duration}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+            "description": "{node_id,name,bin,is_sequence,path,offline,color,duration}. The object stays open: keys the host adds are not rejected."
           },
           "description": "every project item"
         },
@@ -68,14 +73,14 @@
           "items": {
             "type": "object",
             "properties": {
-              "nodeId": {
+              "node_id": {
                 "type": "string",
                 "minLength": 1,
-                "description": "project item nodeId (bins are found by nodeId, never by path: tidy-prd.md \u00a78)"
+                "description": "bin nodeId (upstream `nodeId`)"
               },
               "path": {
                 "type": "string",
-                "description": "bin path"
+                "description": "bin path ('A/B')"
               },
               "name": {
                 "type": "string",
@@ -83,13 +88,13 @@
               }
             },
             "required": [
-              "nodeId",
+              "node_id",
               "path",
               "name"
             ],
-            "description": "{nodeId,path,name}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+            "description": "{node_id,path,name}. The object stays open: keys the host adds are not rejected."
           },
-          "description": "every bin"
+          "description": "every bin, parents first"
         },
         "usage": {
           "type": "object",
@@ -100,7 +105,7 @@
             },
             "description": "nodeIds used"
           },
-          "description": "{seqNodeId: [nodeIds]}: project items referenced by each sequence's clips"
+          "description": "{sequence item nodeId (sequenceID when it has none): [nodeIds]}"
         },
         "texts": {
           "type": "object",
@@ -109,16 +114,17 @@
             "items": {
               "type": "string"
             },
-            "description": "raw Source Text"
+            "description": "raw JSON pieces from '\"textEditValue\"', at most 4000 chars"
           },
-          "description": "{seqNodeId: [raw Source Text]} (FR-2, top video track first, at most 3)"
+          "description": "{sequence nodeId: [raw Source Text]} (FR-2, top video track first, at most 3); sequences without graphic text are absent"
         },
         "project": {
-          "description": "the project: its type is not stated in the PRD, left open"
+          "type": "string",
+          "description": "app.project.path"
         },
         "name": {
           "type": "string",
-          "description": "project name"
+          "description": "app.project.name"
         }
       },
       "required": [
@@ -129,7 +135,7 @@
         "project",
         "name"
       ],
-      "description": "{items,bins,usage,texts,project,name}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{items,bins,usage,texts,project,name}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

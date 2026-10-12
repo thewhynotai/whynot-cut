@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/hush_info.schema.json",
   "title": "hush_info",
-  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_info, FR-1, FR-2; not routed yet. CEP WNC_HUSH.info (signed bridge). The active sequence as Hush's target and track chips need it: name, id, fps, end, In/Out, tracks with their lock state, the selected clips.",
+  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_info, FR-1, FR-2; not routed yet. Upstream: adobe/tools/hush/_upstream/jsx/host.jsx:71 HUSH.info (entry hush_info :330). CEP WNC_HUSH.info (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). The active sequence for Hush's target and track chips: name, id, fps, end, In/Out, every track with its clip count, mute and lock state, the selected clips (nest flag), and the project path.",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {},
       "additionalProperties": false,
-      "description": "No data (the PRD's host function takes no argument)."
+      "description": "No data (the upstream function reads no argument)."
     },
     "readback": {
       "type": "object",
@@ -22,57 +22,72 @@
             },
             "id": {
               "type": "string",
-              "description": "sequence id"
+              "description": "sequenceID"
             },
             "fps": {
               "type": "number",
-              "description": "frame rate"
+              "description": "frame rate (ticks per second / timebase)"
             },
             "end": {
               "type": "number",
               "minimum": 0,
               "description": "sequence end, sequence seconds"
             },
-            "inPoint": {
-              "description": "In point (and how an unset In is reported): its type is not stated in the PRD, left open"
+            "in_point": {
+              "type": "number",
+              "minimum": 0,
+              "description": "In point, sequence seconds, as getInPointAsTime reports it (upstream `inPoint`; an unset In is not marked separately)"
             },
-            "outPoint": {
-              "description": "Out point (and how an unset Out is reported): its type is not stated in the PRD, left open"
+            "out_point": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Out point, sequence seconds, as getOutPointAsTime reports it (upstream `outPoint`)"
             },
             "video": {
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
-                  "kind": {
-                    "type": "string",
-                    "description": "video or audio"
-                  },
                   "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "track index"
+                    "description": "track index, 0-based"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "video",
+                      "audio"
+                    ],
+                    "description": "which list it is in"
                   },
                   "name": {
                     "type": "string",
                     "description": "track name"
                   },
                   "clips": {
-                    "description": "clips on the track (FR-2 turns tracks with clips on by default): its type is not stated in the PRD, left open"
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "number of clips on the track (FR-2: tracks with clips are on by default)"
+                  },
+                  "muted": {
+                    "type": "boolean",
+                    "description": "the track's mute state (isMuted)"
                   },
                   "locked": {
                     "type": "boolean",
-                    "description": "a locked ticked track aborts a cut (FR-21)"
+                    "description": "the track's lock state (isLocked); a locked ticked track aborts a cut"
                   }
                 },
                 "required": [
-                  "kind",
                   "index",
+                  "kind",
                   "name",
                   "clips",
+                  "muted",
                   "locked"
                 ],
-                "description": "One track chip (FR-2): {kind,index,name,clips,locked}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+                "description": "One track chip {index,kind,name,clips,muted,locked} (trackInfo). The object stays open: keys the host adds are not rejected."
               },
               "description": "video tracks"
             },
@@ -81,37 +96,48 @@
               "items": {
                 "type": "object",
                 "properties": {
-                  "kind": {
-                    "type": "string",
-                    "description": "video or audio"
-                  },
                   "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "track index"
+                    "description": "track index, 0-based"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "video",
+                      "audio"
+                    ],
+                    "description": "which list it is in"
                   },
                   "name": {
                     "type": "string",
                     "description": "track name"
                   },
                   "clips": {
-                    "description": "clips on the track (FR-2 turns tracks with clips on by default): its type is not stated in the PRD, left open"
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "number of clips on the track (FR-2: tracks with clips are on by default)"
+                  },
+                  "muted": {
+                    "type": "boolean",
+                    "description": "the track's mute state (isMuted)"
                   },
                   "locked": {
                     "type": "boolean",
-                    "description": "a locked ticked track aborts a cut (FR-21)"
+                    "description": "the track's lock state (isLocked); a locked ticked track aborts a cut"
                   }
                 },
                 "required": [
-                  "kind",
                   "index",
+                  "kind",
                   "name",
                   "clips",
+                  "muted",
                   "locked"
                 ],
-                "description": "One track chip (FR-2): {kind,index,name,clips,locked}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+                "description": "One track chip {index,kind,name,clips,muted,locked} (trackInfo). The object stays open: keys the host adds are not rejected."
               },
-              "description": "audio tracks (same chip shape, hush_info writes [...])"
+              "description": "audio tracks"
             },
             "selection": {
               "type": "array",
@@ -121,6 +147,14 @@
                   "name": {
                     "type": "string",
                     "description": "clip name"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "Video",
+                      "Audio"
+                    ],
+                    "description": "Premiere's mediaType, verbatim (other media types are left out)"
                   },
                   "start": {
                     "type": "number",
@@ -132,20 +166,21 @@
                     "minimum": 0,
                     "description": "sequence seconds"
                   },
-                  "type": {
-                    "type": "string",
-                    "description": "clip type"
+                  "nest": {
+                    "type": "boolean",
+                    "description": "the clip is a nested sequence"
                   }
                 },
                 "required": [
                   "name",
+                  "type",
                   "start",
                   "end",
-                  "type"
+                  "nest"
                 ],
-                "description": "A selected clip (FR-1 target = their union). The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+                "description": "A selected clip (FR-1 / FR-2: the range is their union). The object stays open: keys the host adds are not rejected."
               },
-              "description": "selected clips"
+              "description": "selected video / audio clips"
             }
           },
           "required": [
@@ -153,19 +188,24 @@
             "id",
             "fps",
             "end",
-            "inPoint",
-            "outPoint",
+            "in_point",
+            "out_point",
             "video",
             "audio",
             "selection"
           ],
-          "description": "{name,id,fps,end,inPoint,outPoint,video,audio,selection}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+          "description": "The active sequence. The object stays open: keys the host adds are not rejected."
+        },
+        "project_path": {
+          "type": "string",
+          "description": "app.project.path (upstream `projectPath`); '' for an unsaved project"
         }
       },
       "required": [
-        "sequence"
+        "sequence",
+        "project_path"
       ],
-      "description": "sequence: the active sequence. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{sequence,project_path}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

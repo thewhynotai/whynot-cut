@@ -2,46 +2,47 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/hush_restore.schema.json",
   "title": "hush_restore",
-  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_restore, FR-23, FR-20; not routed yet. CEP WNC_HUSH.restore (signed bridge). Undo: the backup becomes the open sequence under the original name; the cut version is kept, renamed '<name> (Hush cut HH:MM:SS)'.",
+  "description": "RESERVED for Phase 6B (T6.12) \u2014 shape from hush-prd.md \u00a77.1 hush_restore, FR-23, FR-20; not routed yet. Upstream: adobe/tools/hush/_upstream/jsx/host.jsx:314 HUSH.restore (entry hush_restore :337). CEP WNC_HUSH.restore (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Undo: the backup takes the cut sequence's name (original_name when the cut sequence is gone) and is opened; the cut version is kept, renamed '<name> (Hush cut HH:MM:SS)'. A missing backup is an error.",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {
-        "backupId": {
+        "backup_id": {
           "type": "string",
           "minLength": 1,
-          "description": "the backup sequence id (hush_cut readback backup.id)"
+          "description": "the backup sequenceID (hush_cut readback backup.id; upstream `backupId`)"
         },
-        "cutId": {
+        "cut_id": {
           "type": "string",
           "minLength": 1,
-          "description": "the cut sequence id"
+          "description": "the cut sequenceID (upstream `cutId`)"
         },
-        "originalName": {
+        "original_name": {
           "type": "string",
           "minLength": 1,
-          "description": "the name to give back to the backup"
+          "description": "the name used when the cut sequence is not found (upstream `originalName`)"
         }
       },
       "required": [
-        "backupId",
-        "cutId",
-        "originalName"
+        "backup_id",
+        "cut_id",
+        "original_name"
       ],
       "additionalProperties": false,
-      "description": "hush_restore {backupId,cutId,originalName}."
+      "description": "{backup_id,cut_id,original_name}."
     },
     "readback": {
       "type": "object",
       "properties": {
         "restored": {
-          "description": "whether the swap happened: its type is not stated in the PRD, left open"
+          "type": "string",
+          "description": "the restored sequence's name (the backup's new name)"
         }
       },
       "required": [
         "restored"
       ],
-      "description": "restored. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{restored}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

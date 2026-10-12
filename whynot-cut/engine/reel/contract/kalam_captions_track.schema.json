@@ -2,51 +2,50 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/kalam_captions_track.schema.json",
   "title": "kalam_captions_track",
-  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_captionsTrack, FR-17, FR-20, FR-22; not routed yet. CEP WNC_KALAM.captionsTrack (signed bridge). Import the SRT and place it with createCaptionTrack (subtitle format) at sequence time. The captions track cannot be read back or removed by script (kalam-prd.md \u00a712); UXP has no createCaptionTrack (C1 red).",
+  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_captionsTrack, FR-17, FR-20, FR-22; not routed yet. Upstream: adobe/tools/kalam/_upstream/jsx/host.jsx:135 KALAM.captionsTrack (entry kalam_captionsTrack :209). CEP WNC_KALAM.captionsTrack (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Import the SRT into the 'Kalam Captions' bin and place it with createCaptionTrack (subtitle format) at sequence time. The captions track cannot be read back or removed by script (kalam-prd.md \u00a712); UXP has no createCaptionTrack (C1 red).",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {
-        "srtPath": {
+        "srt_path": {
           "type": "string",
           "minLength": 1,
-          "description": "the SRT (always written, FR-21)"
+          "description": "the SRT (always written, FR-21; upstream `srtPath`)"
         },
         "start": {
           "type": "number",
           "minimum": 0,
-          "description": "where it starts, sequence seconds"
+          "description": "where it starts, sequence seconds; optional, default 0"
         },
         "name": {
           "type": "string",
           "minLength": 1,
-          "description": "the imported item's name"
+          "description": "rename the imported item; optional"
         }
       },
       "required": [
-        "srtPath",
-        "start",
-        "name"
+        "srt_path"
       ],
       "additionalProperties": false,
-      "description": "kalam_captionsTrack {srtPath,start,name}."
+      "description": "{srt_path,start?,name?}: start and name stay optional to mirror upstream."
     },
     "readback": {
       "type": "object",
       "properties": {
         "item": {
-          "description": "the imported SRT item: its type is not stated in the PRD, left open"
-        },
-        "nodeId": {
           "type": "string",
-          "description": "its project nodeId"
+          "description": "the imported SRT item's name"
+        },
+        "node_id": {
+          "type": "string",
+          "description": "its project nodeId (upstream `nodeId`)"
         }
       },
       "required": [
         "item",
-        "nodeId"
+        "node_id"
       ],
-      "description": "{item,nodeId}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{item,node_id}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

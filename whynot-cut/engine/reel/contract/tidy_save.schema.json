@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/tidy_save.schema.json",
   "title": "tidy_save",
-  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_save, FR-15; not routed yet. CEP WNC_TIDY.save (signed bridge). Save the project before the backup copy (the copy itself is engine-side: UXP and the engine may read and copy files). uxp true: save (O3) and the active project path (P3) are green in docs/adobe/uxp-parity.md.",
+  "description": "RESERVED for Phase 6B (T6.13) \u2014 shape from tidy-prd.md \u00a77 tidy_save, FR-15; not routed yet. Upstream: adobe/tools/tidy/_upstream/jsx/host.jsx:300 TIDY.save (entry tidy_save :310). CEP WNC_TIDY.save (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Save the project before the backup copy (the copy itself is engine-side). uxp true: save (O3) and the active project path (P3) are green in docs/adobe/uxp-parity.md.",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {},
       "additionalProperties": false,
-      "description": "No data (the PRD's host function takes no argument)."
+      "description": "No data (the upstream function reads no argument)."
     },
     "readback": {
       "type": "object",
@@ -16,13 +16,13 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "description": "the saved .prproj"
+          "description": "the saved .prproj (app.project.path); native OS path. UXP's project.path carries the Windows \\\\?\\ long-path prefix (P3): the adapter strips it"
         }
       },
       "required": [
         "path"
       ],
-      "description": "path: the saved project. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{path}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

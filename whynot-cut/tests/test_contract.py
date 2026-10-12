@@ -162,62 +162,110 @@ SAMPLES = {
                                 "rect": [1.0, 2.0, 3.0, 4.0]},
                                {"name": "icon", "ok": False, "error": "Error: x", "line": 3}]}},
 }
-TRACK_CHIP = {"kind": "audio", "index": 0, "name": "A1", "clips": 2, "locked": False}
-SAMPLES.update({                       # Phase 6B reservations: PRD-shaped samples (round 4)
-    "audio_export_range": {"data": {"outPath": "C:/t/range.wav", "start": 1.5, "end": 61.5, "audioTracks": [0, 2]},
-                           "readback": {"path": "C:/t/range.wav", "start": 1.5, "end": 61.5}},
-    "audio_export_clip": {"data": {"nodeId": "000f4243", "outPath": "C:/t/cam1.wav"}, "readback": {"path": "C:/t/cam1.wav"}},
+TRACK_CHIP = {"index": 0, "kind": "audio", "name": "A1", "clips": 2, "muted": False, "locked": False}
+SAMPLES.update({                       # Phase 6B reservations: shapes of the upstream host.jsx, snake_case keys
+    "audio_export_range": {"data": {"out_path": "C:/t/range.wav", "start": 1.5, "end": 61.5, "audio_tracks": [0, 2]},
+                           "readback": {"path": "C:\\t\\range.wav", "start": 1.5, "end": 61.5,
+                                        "preset": "C:/Premiere/Settings/EncoderPresets/Wave48mono16.epr"}},
+    "audio_export_clip": {"data": {"node_id": "000f4243", "out_path": "C:/t/cam1.wav"}, "readback": {"path": "C:\\t\\cam1.wav"}},
     "hush_info": {"data": {},
-                  "readback": {"sequence": {"name": "R01_EDIT", "id": "seq-1", "fps": 29.97, "end": 62.0, "inPoint": 1.5,
-                                            "outPoint": 61.5, "video": [dict(TRACK_CHIP, kind="video", name="V1")],
+                  "readback": {"sequence": {"name": "R01_EDIT", "id": "seq-1", "fps": 29.97, "end": 62.0, "in_point": 1.5,
+                                            "out_point": 61.5, "video": [dict(TRACK_CHIP, kind="video", name="V1")],
                                             "audio": [TRACK_CHIP],
-                                            "selection": [{"name": "C0239.MP4", "start": 0.0, "end": 12.0, "type": "video"}]}}},
+                                            "selection": [{"name": "C0239.MP4", "type": "Video", "start": 0.0, "end": 12.0,
+                                                           "nest": False}]},
+                               "project_path": "C:\\t\\test.prproj"}},
     "hush_clip_sources": {"data": {}, "readback": {"clips": [{"path": "C:/t/C0239.wav", "start": 0.0, "end": 12.0,
-                                                              "inPoint": 3.0}]}},
+                                                              "in_point": 3.0}]}},
     "hush_cut": {"data": {"cuts": [[1.2, 1.8], [4.0, 4.4]], "video": [0], "audio": [0, 1], "ripple": True, "backup": True,
                           "link": True},
                  "readback": {"removed": 6, "cuts": 2, "backup": {"id": "seq-2", "name": "R01_EDIT (Hush backup 12:00:00)"},
-                              "sequence": "R01_EDIT", "sequenceId": "seq-1", "linked": 2}},
+                              "sequence": "R01_EDIT", "sequence_id": "seq-1", "linked": {"groups": 2, "already_linked": 1}}},
     "hush_markers": {"data": {"ranges": [{"s": 1.2, "e": 1.8, "kind": "silence", "label": "0.6 s"}]},
                      "readback": {"added": 1}},
     "hush_clear_markers": {"data": {}, "readback": {"removed": 1}},
     "hush_set_playhead": {"data": {"t": 3.5}, "readback": {}},
-    "hush_restore": {"data": {"backupId": "seq-2", "cutId": "seq-1", "originalName": "R01_EDIT"},
-                     "readback": {"restored": True}},
+    "hush_restore": {"data": {"backup_id": "seq-2", "cut_id": "seq-1", "original_name": "R01_EDIT"},
+                     "readback": {"restored": "R01_EDIT"}},
     "tidy_scan": {"data": {},
-                  "readback": {"items": [{"nodeId": "000f4243", "name": "C0239.MP4", "bin": "Footage", "isSequence": False,
-                                          "path": "C:/t/C0239.MP4", "offline": False, "color": 5, "duration": 12.0}],
-                               "bins": [{"nodeId": "000f4240", "path": "Footage", "name": "Footage"}],
-                               "usage": {"000f4250": ["000f4243"]}, "texts": {"000f4250": ["hello"]},
-                               "project": "C:/t/test.prproj", "name": "test.prproj"}},
-    "tidy_apply": {"data": {"removals": [{"nodeId": "000f4244", "name": "old.mp4", "checked": True}],
-                            "moves": [{"nodeId": "000f4243", "to": "01 Footage"}],
-                            "emptyBins": [{"nodeId": "000f4240", "path": "Footage"}],
-                            "colors": [{"nodeId": "000f4243", "color": 5}],
-                            "renames": [{"nodeId": "000f4251", "to": "Intro", "checked": True}]},
-                   "readback": {"moved": 1, "removed": 1, "skipped": 0, "binsRemoved": 1, "colored": 1, "renamed": 1,
-                                "problems": []}},
-    "tidy_save": {"data": {}, "readback": {"path": "C:/t/test.prproj"}},
-    "tidy_open": {"data": {"path": "C:/t/test (Tidy backup 2026-10-12 120000).prproj"}, "readback": {"opened": True}},
+                  "readback": {"items": [{"node_id": "000f4243", "name": "C0239.MP4", "bin": "Footage", "is_sequence": False,
+                                          "path": "C:/t/C0239.MP4", "offline": False, "color": 5, "duration": 12.0},
+                                         {"node_id": "000f4250", "name": "R01_EDIT", "bin": "", "is_sequence": True,
+                                          "path": "", "offline": False, "color": -1, "duration": 0}],
+                               "bins": [{"node_id": "000f4240", "path": "Footage", "name": "Footage"}],
+                               "usage": {"000f4250": ["000f4243"]}, "texts": {"000f4250": ["\"textEditValue\":\"hi\""]},
+                               "project": "C:\\t\\test.prproj", "name": "test.prproj"}},
+    "tidy_apply": {"data": {"removals": [{"node_id": "000f4244", "name": "old.mp4", "checked": True}],
+                            "moves": [{"node_id": "000f4243", "to": "01 Footage"}],
+                            "empty_bins": [{"node_id": "000f4240", "path": "Footage"}],
+                            "colors": [{"node_id": "000f4243", "color": 5}],
+                            "renames": [{"node_id": "000f4251", "to": "Intro", "checked": True}]},
+                   "readback": {"moved": 1, "removed": 1, "skipped": 0, "bins_removed": 1, "colored": 1, "renamed": 1,
+                                "problems": ["kept (in use): R01_EDIT"]}},
+    "tidy_save": {"data": {}, "readback": {"path": "C:\\t\\test.prproj"}},
+    "tidy_open": {"data": {"path": "C:\\t\\test (Tidy backup 2026-10-12 120000).prproj"},
+                  "readback": {"opened": "C:\\t\\test (Tidy backup 2026-10-12 120000).prproj"}},
     "tidy_build_synced": {"data": {"name": "test - Synced", "bin": "06 Sequences", "first": "000f4243",
-                                   "cams": [{"nodeId": "000f4243", "start": 0.0, "track": 0}],
-                                   "mics": [{"nodeId": "000f4245", "start": 3.217}]},
-                          "readback": {"placed": 2, "sequence": "test - Synced", "videoTracks": 1, "audioTracks": 2,
-                                       "micTrack": 1, "problems": []}},
+                                   "cams": [{"node_id": "000f4243", "start": 0.0, "track": 0}],
+                                   "mics": [{"node_id": "000f4245", "start": 3.217}]},
+                          "readback": {"placed": 2, "sequence": "test - Synced", "video_tracks": 1, "audio_tracks": 3,
+                                       "mic_track": 3, "problems": []}},
     "kalam_info": {"data": {},
-                   "readback": {"sequence": {"name": "R01_EDIT", "id": "seq-1", "fps": 30, "end": 62.0, "inPoint": 0,
-                                             "outPoint": 62.0, "playhead": 3.5, "video": [{"index": 0}], "audio": [{"index": 0}],
-                                             "selection": [{"name": "C0239.MP4", "type": "video", "start": 0.0, "end": 12.0}]},
-                                "projectPath": "C:/t/test.prproj"}},
-    "kalam_captions_track": {"data": {"srtPath": "C:/t/Kalam Captions/R01_EDIT 120000.srt", "start": 0.0, "name": "Kalam"},
-                             "readback": {"item": "R01_EDIT 120000.srt", "nodeId": "000f4260"}},
-    "kalam_mogrt": {"data": {"mogrtPath": "C:/t/Comic.mogrt", "videoTrack": 2, "start": 0.0, "textParam": None,
+                   "readback": {"sequence": {"name": "R01_EDIT", "id": "seq-1", "fps": 30, "end": 62.0, "in_point": 0,
+                                             "out_point": 62.0, "playhead": 3.5, "video": [dict(TRACK_CHIP, kind="video")],
+                                             "audio": [TRACK_CHIP],
+                                             "selection": [{"name": "C0239.MP4", "type": "Audio", "start": 0.0, "end": 12.0}]},
+                                "project_path": "C:\\t\\test.prproj"}},
+    "kalam_captions_track": {"data": {"srt_path": "C:/t/Kalam Captions/R01_EDIT 120000.srt", "start": 0.0, "name": "Kalam"},
+                             "readback": {"item": "Kalam", "node_id": "000f4260"}},
+    "kalam_mogrt": {"data": {"mogrt_path": "C:/t/Comic.mogrt", "video_track": 2, "start": 0.0, "text_param": None,
                              "captions": [{"s": 0.4, "e": 1.9, "text": "hello"}]},
                     "readback": {"added": 1, "field": "Text"}},
-    "kalam_remove_clips": {"data": {"videoTrack": 2, "from": 0.0, "to": 62.0}, "readback": {"removed": 1}},
+    "kalam_remove_clips": {"data": {"video_track": 2, "from": 0.0, "to": 62.0}, "readback": {"removed": 1}},
     "kalam_set_playhead": {"data": {"t": 3.5}, "readback": {}},
-    "kalam_version": {"data": {}, "readback": {"version": "26.5.2", "os": "Windows 11", "panel": "3.0.0"}},
+    "kalam_version": {"data": {}, "readback": {"version": "26.5.2", "os": "Windows/64 10.0", "panel": "1.1.0"}},
 })
+# upstream camelCase key -> contract snake_case key (the T6.11+ port translates; docs/adobe/phase-6b-reservations.md)
+RENAMED = {"outPath": "out_path", "audioTracks": "audio_tracks", "nodeId": "node_id", "inPoint": "in_point",
+           "outPoint": "out_point", "projectPath": "project_path", "sequenceId": "sequence_id",
+           "alreadyLinked": "already_linked", "backupId": "backup_id", "cutId": "cut_id", "originalName": "original_name",
+           "isSequence": "is_sequence", "emptyBins": "empty_bins", "binsRemoved": "bins_removed",
+           "videoTracks": "video_tracks", "micTrack": "mic_track", "srtPath": "srt_path", "mogrtPath": "mogrt_path",
+           "videoTrack": "video_track", "textParam": "text_param"}
+# camelCase stays only for a value copied verbatim from a Premiere / AE API object (none in the reserved schemas)
+VERBATIM_API_KEYS: frozenset = frozenset()
+UPSTREAM = SK.parent / "adobe" / "tools"
+
+
+def property_names(schema):
+    """Every key under a `properties` anywhere in the schema."""
+    if isinstance(schema, dict):
+        for k, v in schema.items():
+            if k == "properties" and isinstance(v, dict):
+                for name, sub in v.items():
+                    yield name
+                    yield from property_names(sub)
+            else:
+                yield from property_names(v)
+    elif isinstance(schema, list):
+        for v in schema:
+            yield from property_names(v)
+
+
+def untyped(schema, path=""):
+    """Paths of property schemas with neither a type nor a const / anyOf / oneOf."""
+    if isinstance(schema, dict):
+        props = schema.get("properties", {})
+        for name, sub in props.items():
+            if isinstance(sub, dict) and not ({"type", "const", "anyOf", "oneOf", "$ref"} & set(sub)):
+                yield f"{path}/{name}"
+            yield from untyped(sub, f"{path}/{name}")
+        for k in ("items", "additionalProperties"):
+            if isinstance(schema.get(k), dict):
+                yield from untyped(schema[k], f"{path}/{k}")
+        for k in ("anyOf", "oneOf"):
+            for i, sub in enumerate(schema.get(k, [])):
+                yield from untyped(sub, f"{path}/{k}/{i}")
 AE_PING = {"ae_version": "26.5x89", "project": None, "project_path": None, "dirty": None, "num_items": 0,
            "fonts_api": True, "libs_loaded": True, "scripts_dir": "C:/x/ae-scripts"}
 
@@ -419,60 +467,118 @@ class Phase6BReservationTests(unittest.TestCase):
             for src in RESERVED[a][2].split(" + "):
                 self.assertIn(src, d, f"{a} names the PRD host function {src}")
 
-    def test_readbacks_stay_open_and_unstated_types_say_so(self):
-        """Addendum A0 + the brief: where a PRD does not state a field or its type, the object stays open."""
+    def test_readbacks_stay_open_and_every_field_is_typed_from_upstream(self):
+        """Readbacks stay open (keys a host adds are not rejected); the follow-up typed every field from the real
+        host.jsx, so no property is left without a type."""
         for a in RESERVED_ACTIONS:
             rb = V.load(a)["$defs"]["readback"]
             self.assertNotEqual(rb.get("additionalProperties"), False, f"{a}: a reserved readback stays open")
-            self.assertIn("open", rb["description"], a)
-        for a, key in (("hush_cut", "cuts"), ("hush_cut", "linked"), ("tidy_build_synced", "placed"),
-                       ("tidy_apply", "moved"), ("hush_restore", "restored")):
-            prop = V.load(a)["$defs"]["readback"]["properties"][key]
-            self.assertNotIn("type", prop, (a, key))
-            self.assertIn("not stated in the PRD", prop["description"], (a, key))
-        first = V.load("tidy_build_synced")["$defs"]["data"]["properties"]["first"]
-        self.assertNotIn("type", first)
-        self.assertIn("not stated in the PRD", first["description"])
+            self.assertIn("stays open", rb["description"], a)
+            defs = V.load(a)["$defs"]
+            self.assertEqual([p for part in ("data", "readback") for p in untyped(defs[part], part)], [], a)
 
-    def test_prd_host_contract_fields_are_kept_verbatim(self):
-        """The field names of each PRD's host function table (camelCase as the PRDs write them), nothing added."""
+    def test_property_names_are_snake_case(self):
+        """Contract keys are snake_case; camelCase only for a value copied verbatim from a Premiere / AE API object."""
+        for a in RESERVED_ACTIONS:
+            for name in property_names(V.load(a)["$defs"]):
+                if name in VERBATIM_API_KEYS:
+                    continue
+                self.assertRegex(name, r"^[a-z][a-z0-9_]*$", f"{a}: {name}")
+        every = {n for a in RESERVED_ACTIONS for n in property_names(V.load(a)["$defs"])}
+        self.assertTrue(VERBATIM_API_KEYS <= every, "the allow-list names only keys that exist")
+        self.assertTrue(set(RENAMED.values()) <= every)
+        self.assertFalse(set(RENAMED) & every, "no upstream camelCase key survives")
+
+    def test_descriptions_cite_the_upstream_host_function_and_line(self):
+        cite = re.compile(r"adobe/tools/(hush|kalam|tidy)/_upstream/jsx/host\.jsx:([0-9]+) ([A-Z]+\.[A-Za-z]+) "
+                          r"\(entry ([a-z]+_[A-Za-z]+) :([0-9]+)\)")
+        for a in RESERVED_ACTIONS:
+            found = cite.findall(V.load(a)["description"])
+            self.assertTrue(found, a)
+            self.assertIn(RESERVED[a][2].split(" + ")[0], [f[3] for f in found], a)
+        if not (UPSTREAM / "hush" / "_upstream" / "jsx" / "host.jsx").is_file():
+            self.skipTest("the upstream source is not in this checkout (adobe/tools/<tool>/_upstream)")
+        for a in RESERVED_ACTIONS:
+            for tool, line, fn, entry, entry_line in cite.findall(V.load(a)["description"]):
+                lines = (UPSTREAM / tool / "_upstream" / "jsx" / "host.jsx").read_text(encoding="utf-8").splitlines()
+                self.assertIn(f"{fn} = function", lines[int(line) - 1], (a, tool, line, fn))
+                self.assertIn(f"function {entry}(", lines[int(entry_line) - 1], (a, tool, entry_line, entry))
+
+    def test_fields_follow_the_upstream_host_functions(self):
+        """data: (required, optional); readback: (required, optional) - the keys upstream reads and returns."""
         expect = {
-            "audio_export_range": ({"outPath", "start", "end", "audioTracks"}, {"extDir"}, {"path"}),
-            "audio_export_clip": ({"nodeId", "outPath"}, set(), {"path"}),
-            "hush_info": (set(), set(), {"sequence"}),
-            "hush_clip_sources": (set(), set(), {"clips"}),
-            "hush_cut": ({"cuts", "video", "audio", "ripple", "backup", "link"}, set(),
-                         {"removed", "cuts", "backup", "sequence", "sequenceId", "linked"}),
-            "hush_markers": ({"ranges"}, set(), {"added"}),
-            "hush_clear_markers": (set(), set(), {"removed"}),
-            "hush_set_playhead": ({"t"}, set(), set()),
-            "hush_restore": ({"backupId", "cutId", "originalName"}, set(), {"restored"}),
-            "tidy_scan": (set(), set(), {"items", "bins", "usage", "texts", "project", "name"}),
-            "tidy_apply": ({"removals", "moves", "emptyBins", "colors", "renames"}, set(),
-                           {"moved", "removed", "skipped", "binsRemoved", "colored", "renamed", "problems"}),
-            "tidy_save": (set(), set(), {"path"}),
-            "tidy_open": ({"path"}, set(), {"opened"}),
-            "tidy_build_synced": ({"name", "bin", "first", "cams", "mics"}, set(),
-                                  {"placed", "sequence", "videoTracks", "audioTracks", "micTrack", "problems"}),
-            "kalam_info": (set(), set(), {"sequence", "projectPath"}),
-            "kalam_captions_track": ({"srtPath", "start", "name"}, set(), {"item", "nodeId"}),
-            "kalam_mogrt": ({"mogrtPath", "videoTrack", "start", "textParam", "captions"}, set(), {"added", "field"}),
-            "kalam_remove_clips": ({"videoTrack", "from", "to"}, set(), {"removed"}),
-            "kalam_set_playhead": ({"t"}, set(), set()),
-            "kalam_version": (set(), set(), {"version", "os", "panel"}),
+            "audio_export_range": (({"out_path", "start", "end", "audio_tracks"}, set()),
+                                   ({"path", "start", "end"}, {"preset"})),
+            "audio_export_clip": (({"node_id", "out_path"}, set()), ({"path"}, set())),
+            "hush_info": ((set(), set()), ({"sequence", "project_path"}, set())),
+            "hush_clip_sources": ((set(), set()), ({"clips"}, set())),
+            "hush_cut": (({"cuts", "video", "audio"}, {"ripple", "backup", "link"}),
+                         ({"removed", "cuts"}, {"backup", "sequence", "sequence_id", "linked"})),
+            "hush_markers": (({"ranges"}, set()), ({"added"}, set())),
+            "hush_clear_markers": ((set(), set()), ({"removed"}, set())),
+            "hush_set_playhead": (({"t"}, set()), (set(), set())),
+            "hush_restore": (({"backup_id", "cut_id", "original_name"}, set()), ({"restored"}, set())),
+            "tidy_scan": ((set(), set()), ({"items", "bins", "usage", "texts", "project", "name"}, set())),
+            "tidy_apply": ((set(), {"removals", "moves", "empty_bins", "colors", "renames"}),
+                           ({"moved", "removed", "skipped", "bins_removed", "colored", "renamed", "problems"}, set())),
+            "tidy_save": ((set(), set()), ({"path"}, set())),
+            "tidy_open": (({"path"}, set()), ({"opened"}, set())),
+            "tidy_build_synced": (({"name"}, {"bin", "first", "cams", "mics"}),
+                                  ({"placed", "sequence", "video_tracks", "audio_tracks", "mic_track", "problems"}, set())),
+            "kalam_info": ((set(), set()), ({"sequence", "project_path"}, set())),
+            "kalam_captions_track": (({"srt_path"}, {"start", "name"}), ({"item", "node_id"}, set())),
+            "kalam_mogrt": (({"mogrt_path", "video_track", "captions"}, {"start", "text_param"}), ({"added", "field"}, set())),
+            "kalam_remove_clips": (({"video_track", "from", "to"}, set()), ({"removed"}, set())),
+            "kalam_set_playhead": (({"t"}, set()), (set(), set())),
+            "kalam_version": ((set(), set()), ({"version", "os", "panel"}, set())),
         }
         self.assertEqual(set(expect), set(RESERVED_ACTIONS))
-        for a, (required, optional, readback) in expect.items():
+        for a, ((d_req, d_opt), (r_req, r_opt)) in expect.items():
             defs = V.load(a)["$defs"]
-            self.assertEqual(set(defs["data"]["required"]) if required else set(defs["data"].get("required", [])),
-                             required, a)
-            self.assertEqual(set(defs["data"]["properties"]), required | optional, a)
+            self.assertEqual(set(defs["data"].get("required", [])), d_req, a)
+            self.assertEqual(set(defs["data"]["properties"]), d_req | d_opt, a)
             self.assertIs(defs["data"]["additionalProperties"], False, a)
-            self.assertEqual(set(defs["readback"].get("required", [])), readback, a)
-            self.assertEqual(set(defs["readback"].get("properties", {})), readback | (
-                {"start", "end"} if a == "audio_export_range" else set()), a)
+            self.assertEqual(set(defs["readback"].get("required", [])), r_req, a)
+            self.assertEqual(set(defs["readback"].get("properties", {})), r_req | r_opt, a)
 
-    def test_prd_shapes_reject_what_the_prd_rules_out(self):
+    def test_upstream_shapes_found_in_review(self):
+        hc = SAMPLES["hush_cut"]["readback"]
+        self.assertEqual(V.validate({"removed": 0, "cuts": 0}, "hush_cut#/$defs/readback"), [])     # empty cut list
+        for linked in ({"groups": 2, "already_linked": 0}, {"groups": 0, "note": "linkSelection not available"}, None):
+            self.assertEqual(V.validate(dict(hc, linked=linked), "hush_cut#/$defs/readback"), [], linked)
+        for linked in (True, 3, {"groups": 1}, {"groups": 1, "note": "x"}):
+            self.assertTrue(V.validate(dict(hc, linked=linked), "hush_cut#/$defs/readback"), linked)
+        self.assertTrue(V.validate(dict(hc, cuts=[[1, 2]]), "hush_cut#/$defs/readback"))
+        self.assertTrue(V.validate({"restored": True}, "hush_restore#/$defs/readback"))
+        self.assertTrue(V.validate({"opened": True}, "tidy_open#/$defs/readback"))
+        self.assertEqual(V.validate({}, "tidy_apply#/$defs/data"), [])                               # every list optional
+        self.assertEqual(V.validate({"removals": [{"node_id": "x"}]}, "tidy_apply#/$defs/data"), [])  # name unused
+        self.assertEqual(V.validate({"name": "x - Synced", "mics": [{"node_id": "m", "start": 0}]},
+                                    "tidy_build_synced#/$defs/data"), [])
+        self.assertIn("1-based", V.load("tidy_build_synced")["$defs"]["readback"]["properties"]["mic_track"]["description"])
+        self.assertTrue(V.validate(dict(SAMPLES["tidy_build_synced"]["readback"], mic_track=0), "tidy_build_synced#/$defs/readback"))
+        self.assertIn("'06 Sequences'", V.load("tidy_build_synced")["$defs"]["data"]["properties"]["bin"]["description"])
+        self.assertEqual(V.validate({"srt_path": "a.srt"}, "kalam_captions_track#/$defs/data"), [])
+        self.assertEqual(V.validate({"mogrt_path": "a.mogrt", "video_track": 1, "captions": []}, "kalam_mogrt#/$defs/data"), [])
+        self.assertEqual(V.validate({"added": 0, "field": None}, "kalam_mogrt#/$defs/readback"), [])
+        self.assertEqual(V.validate({"cuts": [], "video": [], "audio": []}, "hush_cut#/$defs/data"), [])   # truthy flags
+        self.assertNotIn("ext_dir", V.load("audio_export_range")["$defs"]["data"]["properties"])
+        self.assertIn("preset", V.load("audio_export_range")["$defs"]["readback"]["properties"])
+        scan_item = V.load("tidy_scan")["$defs"]["readback"]["properties"]["items"]["items"]["properties"]
+        self.assertEqual((scan_item["color"]["type"], scan_item["color"]["minimum"]), ("integer", -1))
+        self.assertEqual(scan_item["path"]["type"], "string")
+        self.assertEqual(scan_item["duration"]["type"], "number")
+        info = V.load("hush_info")["$defs"]["readback"]["properties"]
+        self.assertIn("project_path", info)
+        self.assertIn("muted", info["sequence"]["properties"]["audio"]["items"]["properties"])
+        self.assertIn("nest", info["sequence"]["properties"]["selection"]["items"]["properties"])
+        self.assertEqual(info["sequence"]["properties"]["in_point"]["type"], "number")
+        self.assertIn("\\\\?\\", V.load("tidy_save")["$defs"]["readback"]["properties"]["path"]["description"])
+        self.assertIn("native backslash path", V.load("tidy_open")["$defs"]["data"]["properties"]["path"]["description"])
+        self.assertIn("track item's name in UXP is not measured", V.load("kalam_remove_clips")["description"])
+        self.assertIn("app.version", V.load("kalam_version")["$defs"]["readback"]["properties"]["version"]["description"])
+
+    def test_prd_shapes_reject_what_the_host_rules_out(self):
         bad = [
             ("hush_cut", "data", {"cuts": [[1.0]]}),                          # a cut is a [start, end] pair
             ("hush_cut", "data", {"cuts": [[1.0, 2.0, 3.0]]}),
@@ -480,21 +586,23 @@ class Phase6BReservationTests(unittest.TestCase):
             ("hush_cut", "data", {"audio": [-1]}),
             ("hush_cut", "readback", {"backup": "R01 (Hush backup)"}),        # {id, name} or null
             ("hush_cut", "readback", {"backup": {"id": "x"}}),
-            ("audio_export_range", "data", {"audioTracks": "A1"}),
-            ("audio_export_range", "data", {"outPath": ""}),
-            ("kalam_mogrt", "data", {"textParam": 3}),                        # a field name or null (= first text field)
+            ("audio_export_range", "data", {"audio_tracks": "A1"}),
+            ("audio_export_range", "data", {"out_path": ""}),
+            ("audio_export_range", "data", {"extDir": "C:/ext"}),             # dropped
+            ("kalam_mogrt", "data", {"text_param": 3}),                       # a field name or null (= first text field)
             ("kalam_mogrt", "data", {"captions": [{"s": 0, "e": 1}]}),
-            ("tidy_apply", "data", {"removals": [{"nodeId": "x", "name": "y"}]}),
-            ("tidy_apply", "data", {"moves": [{"nodeId": "x", "to": "y", "extra": 1}]}),
+            ("tidy_apply", "data", {"removals": [{"name": "y", "checked": True}]}),
+            ("tidy_apply", "data", {"moves": [{"node_id": "x", "to": "y", "extra": 1}]}),
             ("tidy_apply", "readback", {"problems": "none"}),
-            ("tidy_build_synced", "data", {"cams": [{"nodeId": "x", "start": 0}]}),
+            ("tidy_apply", "readback", {"problems": [{"x": 1}]}),
+            ("tidy_build_synced", "data", {"cams": [{"node_id": "x", "start": 0}]}),
+            ("tidy_scan", "readback", {"items": [dict(SAMPLES["tidy_scan"]["readback"]["items"][0], color=-2)]}),
         ]
         for a, part, change in bad:
             inst = dict(copy.deepcopy(SAMPLES[a][part]), **change)
             self.assertTrue(V.validate(inst, f"{a}#/$defs/{part}"), (a, part, change))
-        good = [("hush_cut", "readback", {"backup": None}), ("kalam_mogrt", "data", {"textParam": "Source Text"}),
-                ("audio_export_range", "data", {"extDir": "C:/ext"}), ("audio_export_range", "readback", {"extra": 1}),
-                ("hush_set_playhead", "readback", {"anything": True})]
+        good = [("hush_cut", "readback", {"backup": None}), ("kalam_mogrt", "data", {"text_param": "Source Text"}),
+                ("audio_export_range", "readback", {"extra": 1}), ("hush_set_playhead", "readback", {"anything": True})]
         for a, part, change in good:
             inst = dict(copy.deepcopy(SAMPLES[a][part]), **change)
             self.assertEqual(V.validate(inst, f"{a}#/$defs/{part}"), [], (a, part, change))
@@ -513,6 +621,9 @@ class Phase6BReservationTests(unittest.TestCase):
             self.assertIn(f"`{cep_fn}`", row.group(1), a)
             self.assertIn("true" if uxp else "false", row.group(1), a)
             self.assertIn(src.split(" + ")[0], row.group(1), a)
+        for up, key in RENAMED.items():
+            self.assertIn(f"| `{up}` | `{key}` |", doc, "the key mapping table lists every renamed key")
+        self.assertIn("| `extDir` | dropped |", doc)
         for cli in ("reel kalam run", "reel kalam doctor", "reel hush scan", "reel hush plan", "reel hush apply",
                     "reel tidy scan", "reel tidy plan", "reel tidy apply", "reel tidy undo", "reel tidy sync"):
             self.assertIn(cli, doc)

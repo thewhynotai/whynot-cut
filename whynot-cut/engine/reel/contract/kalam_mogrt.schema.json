@@ -2,32 +2,32 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/kalam_mogrt.schema.json",
   "title": "kalam_mogrt",
-  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_mogrt, FR-18, FR-19, \u00a78; not routed yet. CEP WNC_KALAM.mogrt (signed bridge). One MOGRT clip per caption on the chosen video track (importMGT), the text written into the template's text field. All-or-nothing (\u00a78): a template without editable text is a clear error and every clip placed so far is removed. MOGRT text is not available in UXP before 27.0 (M1), so uxp is false.",
+  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_mogrt, FR-18, FR-19, \u00a78; not routed yet. Upstream: adobe/tools/kalam/_upstream/jsx/host.jsx:166 KALAM.mogrt (entry kalam_mogrt :210). CEP WNC_KALAM.mogrt (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). One MOGRT clip per caption on the chosen video track (importMGT at start + s, end at start + e, named 'Kalam <n>'), the text written into the template's text field. All-or-nothing (\u00a78): any failure removes every clip placed so far and is an error. MOGRT text is not available in UXP before 27.0 (M1), so uxp is false.",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {
-        "mogrtPath": {
+        "mogrt_path": {
           "type": "string",
           "minLength": 1,
-          "description": "the .mogrt (FR-19 gallery or a file)"
+          "description": "the .mogrt (FR-19 gallery or a file; upstream `mogrtPath`)"
         },
-        "videoTrack": {
+        "video_track": {
           "type": "integer",
           "minimum": 0,
-          "description": "track index (0-based, as Premiere's DOM numbers tracks)"
+          "description": "track index, 0-based (Premiere's DOM order; upstream error messages say V<index + 1>)"
         },
         "start": {
           "type": "number",
           "minimum": 0,
-          "description": "range start, sequence seconds"
+          "description": "range start, sequence seconds; optional, default 0"
         },
-        "textParam": {
+        "text_param": {
           "type": [
             "string",
             "null"
           ],
-          "description": "the text field by name; null = the first real text field (FR-18)"
+          "description": "the text field's display name; null or absent = the first real text field (FR-18; upstream `textParam`)"
         },
         "captions": {
           "type": "array",
@@ -37,12 +37,12 @@
               "s": {
                 "type": "number",
                 "minimum": 0,
-                "description": "sequence seconds"
+                "description": "seconds from start"
               },
               "e": {
                 "type": "number",
                 "minimum": 0,
-                "description": "sequence seconds"
+                "description": "seconds from start"
               },
               "text": {
                 "type": "string",
@@ -61,14 +61,12 @@
         }
       },
       "required": [
-        "mogrtPath",
-        "videoTrack",
-        "start",
-        "textParam",
+        "mogrt_path",
+        "video_track",
         "captions"
       ],
       "additionalProperties": false,
-      "description": "kalam_mogrt {mogrtPath,videoTrack,start,textParam|null,captions:[{s,e,text}]}."
+      "description": "{mogrt_path,video_track,start?,text_param?,captions}: start and text_param stay optional to mirror upstream."
     },
     "readback": {
       "type": "object",
@@ -79,14 +77,18 @@
           "description": "clips placed"
         },
         "field": {
-          "description": "the text field written: its type is not stated in the PRD, left open"
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the text field written (its display name); null when no caption was placed"
         }
       },
       "required": [
         "added",
         "field"
       ],
-      "description": "{added,field}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{added,field}. The object stays open: keys the host adds are not rejected."
     }
   }
 }

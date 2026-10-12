@@ -2,28 +2,28 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/kalam_version.schema.json",
   "title": "kalam_version",
-  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_version, FR-24; not routed yet. CEP WNC_KALAM.version (signed bridge). Versions for 'Save a report for the developer' (OS, Premiere / panel versions; never settings or keys). uxp true: host version and OS are green in docs/adobe/uxp-parity.md (P1, uxp.host.version).",
+  "description": "RESERVED for Phase 6B (T6.14) \u2014 shape from kalam-prd.md \u00a77.1 kalam_version, FR-24; not routed yet. Upstream: adobe/tools/kalam/_upstream/jsx/host.jsx:205 KALAM.version (entry kalam_version :206). CEP WNC_KALAM.version (signed bridge). Contract keys are snake_case; the port translates the upstream camelCase keys (docs/adobe/phase-6b-reservations.md). Versions for 'Save a report for the developer' (never settings or keys). uxp true: host version and OS are green in docs/adobe/uxp-parity.md (P1, uxp.host.version).",
   "$defs": {
     "data": {
       "type": "object",
       "properties": {},
       "additionalProperties": false,
-      "description": "No data (the PRD's host function takes no argument)."
+      "description": "No data (the upstream function reads no argument)."
     },
     "readback": {
       "type": "object",
       "properties": {
         "version": {
           "type": "string",
-          "description": "version"
+          "description": "Premiere's version (app.version)"
         },
         "os": {
           "type": "string",
-          "description": "operating system"
+          "description": "the operating system ($.os)"
         },
         "panel": {
           "type": "string",
-          "description": "panel version"
+          "description": "the panel's version (upstream hard-codes '1.1.0')"
         }
       },
       "required": [
@@ -31,7 +31,7 @@
         "os",
         "panel"
       ],
-      "description": "{version,os,panel}. The object stays open: the PRD lists these keys, keys the host adds are not rejected."
+      "description": "{version,os,panel}. The object stays open: keys the host adds are not rejected."
     }
   }
 }
