@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { startShell } from "../src/shell.ts";
 import type { ShellDoc, ShellEnv } from "../src/shell.ts";
 import { OfflineSource } from "../src/offline-source.ts";
+import { DaemonSource } from "../../panel-ui/src/daemon-source.ts";
+import type { DaemonTransport } from "../../panel-ui/src/daemon-source.ts";
 
 class FakeRoot {
   innerHTML = "";
@@ -117,4 +119,105 @@ test("a QC tile click reaches the UXP host adapter, and a refused move shows as 
   // require("premierepro") is not available in the test env: the failure is a notice in the panel
   assert.match(root.innerHTML, /banner-error/);
   assert.match(root.innerHTML, /unexpected require\(premierepro\)/);
+});
+
+// ------------------------------------------------------------------------------------ Task 4: the engine link wiring
+
+/** A DaemonSource over a transport with no engine.json: short waits run at once, the backoff timers are only recorded. */
+function noEngineSource(info: { hostVersion?: string | undefined }) {
+  const held: Array<{ ms: number; live: boolean }> = [];
+  const transport: DaemonTransport = {
+    readEngineJson: () => null,
+    openSocket: () => {
+      throw new Error("not reached");
+    },
+    now: () => Date.parse("2026-10-12T10:00:00Z"),
+    setTimer: (fn, ms) => {
+      if (ms <= 100) {
+        const h = setImmediate(fn);
+        return () => clearImmediate(h);
+      }
+      const x = { ms, live: true };
+      held.push(x);
+      return () => void (x.live = false);
+    },
+  };
+  const src = new DaemonSource({ transport, localHost: { state: "uxp", detail: `Premiere Pro ${info.hostVersion ?? ""}`.trim() } });
+  return { src, held };
+}
+
+const settleShell = async () => {
+  for (let i = 0; i < 20; i++) await new Promise<void>((r) => setImmediate(r));
+};
+
+test("with a DaemonSource the offline banner names the diagnosis (no engine.json -> reel serve --ensure) and the host pill stays Premiere", async () => {
+  const { env, root } = makeEnv();
+  const made: ReturnType<typeof noEngineSource>[] = [];
+  env.createSource = (info) => {
+    const m = noEngineSource(info);
+    made.push(m);
+    return m.src;
+  };
+  const shell = startShell(env);
+  await shell.ready;
+  await settleShell();
+  assert.equal(made[0]!.src.diagnosis.code, "no_engine");
+  assert.match(root!.innerHTML, /data-link="no_engine"/);
+  assert.match(root!.innerHTML, /<bdi dir="ltr">reel serve --ensure<\/bdi>/);
+  assert.match(root!.innerHTML, /tries again by itself/);
+  assert.match(root!.innerHTML, /Premiere Pro 26\.5\.2/);
+  shell.unmount();
+  assert.equal(made[0]!.src.diagnosis.code, "stopped");
+  assert.ok(made[0]!.held.every((x) => !x.live), "no retry timer survives unmount");
+});
+
+test("hide() stops the source for good (stop() is permanent); show() mounts a new one; the host link lives until unmount", async () => {
+  const { env, root } = makeEnv();
+  const made: ReturnType<typeof noEngineSource>[] = [];
+  env.createSource = (info) => {
+    const m = noEngineSource(info);
+    made.push(m);
+    return m.src;
+  };
+  const hostLinks: Array<{ stopped: boolean }> = [];
+  env.startHostLink = () => {
+    const h = { stopped: false };
+    hostLinks.push(h);
+    return { stop: () => void (h.stopped = true) };
+  };
+  const reg: { lifecycle: { show(): void; hide(): void; destroy(): void } | null } = { lifecycle: null };
+  env.onLifecycle = (h) => void (reg.lifecycle = h);
+  const shell = startShell(env);
+  await shell.ready;
+  await settleShell();
+  assert.ok(reg.lifecycle, "show / hide / destroy were registered with the host");
+  assert.equal(hostLinks.length, 1);
+  reg.lifecycle!.hide();
+  assert.equal(made[0]!.src.diagnosis.code, "stopped");
+  assert.equal(root!.listeners["click"], undefined, "the hidden panel is unmounted");
+  assert.equal(hostLinks[0]!.stopped, false, "hiding the panel keeps Premiere reachable for the engine");
+  reg.lifecycle!.hide(); // twice is harmless
+  reg.lifecycle!.show();
+  await settleShell();
+  assert.equal(made.length, 2, "a new DaemonSource on show");
+  assert.equal(made[1]!.src.diagnosis.code, "no_engine");
+  assert.equal(typeof root!.listeners["click"], "function");
+  assert.match(root!.innerHTML, /data-link="no_engine"/);
+  reg.lifecycle!.show(); // already shown: nothing new
+  assert.equal(made.length, 2);
+  reg.lifecycle!.destroy();
+  assert.equal(made[1]!.src.diagnosis.code, "stopped");
+  assert.equal(hostLinks[0]!.stopped, true);
+  assert.equal(hostLinks.length, 1);
+});
+
+test("a failing host link start never blanks the panel", async () => {
+  const { env, root } = makeEnv();
+  env.startHostLink = () => {
+    throw new Error("no WebSocket here");
+  };
+  const shell = startShell(env);
+  await shell.ready;
+  assert.match(root!.innerHTML, /not running/);
+  shell.unmount();
 });

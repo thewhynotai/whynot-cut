@@ -61,7 +61,7 @@ test("the panel stylesheets in the package are the panel kit's own files", () =>
   assert.match(text(files["tokens.css"]), /--twn-primary:#5400FB/);
 });
 
-test("the shipped bundle: UXP host modules stay external, offline source only (no mock data), brand footer, no 'Claude Code'", () => {
+test("the shipped bundle: UXP host modules stay external, no mock data, the engine link wired in, brand footer, no 'Claude Code'", () => {
   const files = unzipSync(new Uint8Array(readFileSync(ccx)));
   const js = text(files["index.js"]);
   assert.match(js, /require\(\s*["']premierepro["']\s*\)/);
@@ -71,7 +71,13 @@ test("the shipped bundle: UXP host modules stay external, offline source only (n
   assert.doesNotMatch(js, /Claude Code/);
   assert.match(js, /Powered by thewhynot.ai/);
   assert.match(js, /In your Claude session run `reel doctor`\./);
-  assert.doesNotMatch(js, /reel serve/);
+  // T6.5: the panel is wired to `reel serve` (DaemonSource + the host link), offline banner per diagnosis
+  assert.match(js, /require\(\s*["']fs["']\s*\)/);
+  assert.match(js, /require\(\s*["']os["']\s*\)/);
+  assert.match(js, /\.whynot-cut\/bridge\/engine\.json/);
+  assert.match(js, /ws:\/\/127\.0\.0\.1:/);
+  assert.match(js, /reel serve --ensure/);
+  assert.match(js, /kind: "uxp"/);
   const html = text(files["index.html"]);
   assert.match(html, /<script[^>]+src="index\.js"/);
   assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["tokens.css", "panel.css", "index.css"]);
@@ -110,9 +116,59 @@ test("the shipped index.js boots like Premiere would run it: classic script, hos
   };
   runInNewContext(js, sandbox);
   await new Promise((r) => setTimeout(r, 20));
-  assert.deepEqual(required, ["uxp"], "only the uxp module is touched at startup; premierepro waits for a button press");
+  assert.ok(!required.includes("premierepro"), "premierepro waits for a button press or an engine command");
+  assert.deepEqual([...new Set(required)].sort(), ["fs", "os", "uxp"], "only uxp, and fs / os for engine.json, at startup");
   assert.deepEqual(listeners.sort(), ["click", "input"]);
   const html = painted[painted.length - 1] ?? "";
   assert.match(html, /not running/);
   assert.match(html, /Premiere Pro 26\.5\.2/);
+});
+
+test("the shipped index.js with a WebSocket and no engine.json: DaemonSource diagnoses it in the banner, the host link waits, entrypoints get show/hide", async () => {
+  const js = text(unzipSync(new Uint8Array(readFileSync(ccx)))["index.js"]);
+  const painted: string[] = [];
+  const rootEl = {
+    set innerHTML(v: string) {
+      painted.push(v);
+    },
+    get innerHTML() {
+      return painted[painted.length - 1] ?? "";
+    },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+  const reads: string[] = [];
+  const sockets: string[] = [];
+  let panels: Record<string, { show(): void; hide(): void; destroy(): void }> = {};
+  const sandbox: Record<string, unknown> = {
+    document: { getElementById: (id: string) => (id === "root" ? rootEl : null), documentElement: { style: { setProperty: () => {} } }, body: {} },
+    require: (id: string) => {
+      if (id === "uxp") return { host: { version: "26.5.2", uiLocale: "ar_AE" }, versions: { plugin: version }, entrypoints: { setup: (cfg: { panels: typeof panels }) => void (panels = cfg.panels) } };
+      if (id === "fs") return { readFile: async (p: string) => { reads.push(p); throw new Error("ENOENT"); } };
+      if (id === "os") return { homedir: () => "C:\\Users\\Ed" };
+      throw new Error(`not needed at startup: ${id}`);
+    },
+    WebSocket: class {
+      constructor(url: string) {
+        sockets.push(url);
+      }
+    },
+    // unref'd: the panel's retry timers must not keep this test process alive
+    setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms).unref(),
+    clearTimeout: (h: ReturnType<typeof setTimeout>) => clearTimeout(h),
+    Date,
+    console: { log: () => {} },
+  };
+  runInNewContext(js, sandbox);
+  await new Promise((r) => setTimeout(r, 600));
+  assert.ok(reads.length >= 2, "engine.json was read (the panel and the host link)");
+  assert.ok(reads.every((p) => p === "C:/Users/Ed/.whynot-cut/bridge/engine.json"), reads.join(", "));
+  assert.deepEqual(sockets, [], "no engine.json: no socket");
+  const html = painted[painted.length - 1] ?? "";
+  assert.match(html, /data-link="no_engine"/);
+  assert.match(html, /<bdi dir="ltr">reel serve --ensure<\/bdi>/);
+  assert.match(html, /dir="rtl"/, "Arabic UI locale: the banner is the Arabic one");
+  assert.match(html, /Premiere Pro 26\.5\.2/);
+  assert.deepEqual(Object.keys(panels), ["whynotCut"], "the manifest's panel id");
+  panels["whynotCut"]!.destroy();
 });
