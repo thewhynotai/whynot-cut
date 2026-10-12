@@ -238,7 +238,8 @@ class TestReleaseZipContents(unittest.TestCase):
                     "whynot-cut/engine/reel/__pycache__/x.pyc", "whynot-cut/panel/node_modules/a/index.js",
                     "adobe/panel-ui/src/a.ts", "adobe/node_modules/b/index.js", "adobe/tools/x/_upstream/c.js",
                     "dist/uxp/WhyNotCut.ccx", "brand/logo.svg", "guide-ar/g.pdf", "installer/i.ps1", "tools/t.py",
-                    "whynot-cut/docs/dev.md", "whynot-cut/tests/._junk"):
+                    "whynot-cut/docs/dev.md", "whynot-cut/docs/Guide-AR.pdf", "whynot-cut/docs/._Guide-AR.pdf",
+                    "whynot-cut/installer/install.ps1", "whynot-cut/tests/._junk"):
             f = root / rel
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text("x", encoding="utf-8")
@@ -249,7 +250,8 @@ class TestReleaseZipContents(unittest.TestCase):
             self.make_tree(root)
             got = sorted(p.relative_to(root).as_posix() for p in self.pk.package_files(root))
         self.assertEqual(got, [".claude-plugin/marketplace.json", "README.md", "whynot-cut/.claude-plugin/plugin.json",
-                               "whynot-cut/adobe/WhyNotCut.ccx", "whynot-cut/bin/reel"])
+                               "whynot-cut/adobe/WhyNotCut.ccx", "whynot-cut/bin/reel", "whynot-cut/docs/Guide-AR.pdf",
+                               "whynot-cut/installer/install.ps1"])
 
     def test_wanted_refuses_adobe_sources_even_when_asked_directly(self):
         with tempfile.TemporaryDirectory() as d:
@@ -265,6 +267,14 @@ class TestReleaseZipContents(unittest.TestCase):
         self.assertTrue(names)
         self.assertEqual([n for n in names if n.split("/")[0] not in self.pk.SHIP_TOP], [])
         self.assertEqual([n for n in names if n.startswith("adobe/") or "node_modules" in n or "_upstream" in n], [])
+        self.assertEqual([n for n in names if n.startswith("guide-ar/")], [])          # guide SOURCES stay out
+        # the built artefacts master plan D1 / T11.1 requires in the zip (when built in this checkout)
+        for built in ("whynot-cut/docs/WhyNot-Cut-Guide-AR.pdf", "whynot-cut/installer/install.ps1",
+                      "whynot-cut/installer/install.sh"):
+            if (self.pk.ROOT / built).exists():
+                self.assertIn(built, names)
+        for ccx in sorted((self.pk.ROOT / "whynot-cut" / "adobe").glob("*.ccx")):
+            self.assertIn(ccx.relative_to(self.pk.ROOT).as_posix(), names)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ def wanted(p: Path, root: Path = ROOT) -> bool:
     rel = p.relative_to(root)
     if rel.parts[0] not in SHIP_TOP:
         return False
+    if rel.parts[:2] == ("whynot-cut", "docs") and len(rel.parts) == 3 and p.suffix.lower() == ".pdf"             and not p.name.startswith("._"):
+        return p.is_file()                                    # the BUILT guide (master plan D1 / T11.1) ships
     if any(part in SKIP_DIRS for part in rel.parts) or p.name in SKIP_FILES or p.name.startswith("._"):
         return False
     if p.suffix in (".pyc", ".tmp") or rel.as_posix().endswith(".local.md") or p.name == "package.py":
