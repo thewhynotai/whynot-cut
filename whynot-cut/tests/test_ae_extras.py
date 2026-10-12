@@ -428,10 +428,11 @@ class TestAsciiStaging(AerenderCase):
         self.assertFalse(stages[0].exists())
 
     def test_a_non_ascii_temp_folder_is_named(self):
-        from lib import ae_builder
+        from lib import ae_builder, ae_render
         self.use_client(ARABIC)
         plat.IS_WIN = True
         with mock.patch.object(tempfile, "gettempdir", return_value=str(self.tmp / ARABIC)), \
+                mock.patch.object(ae_render, "ascii_stage_roots", return_value=[]), \
                 mock.patch.object(ae_builder, "run", side_effect=AssertionError("must not start")):
             r = ae_builder.render(self.paths)
         self.assertEqual(r["status"], "FAILED", r)

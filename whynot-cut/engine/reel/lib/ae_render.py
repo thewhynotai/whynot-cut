@@ -5,6 +5,7 @@ counts only when its output file exists and is newer than the call; frames are p
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -56,6 +57,42 @@ def sandbox_refused(exe) -> dict | None:
     return plat.sandbox_refusal("run aerender") if Path(str(exe)).stem.lower() == "aerender" else None
 
 
+def _short_path(p) -> str | None:
+    """The Windows 8.3 short form of an existing path (None when unavailable: 8.3 names are off on that volume)."""
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(32768)
+        n = ctypes.windll.kernel32.GetShortPathNameW(str(p), buf, len(buf))
+        return buf.value if 0 < n < len(buf) else None
+    except Exception:  # noqa: BLE001  (not Windows, or the call failed)
+        return None
+
+
+def ascii_stage_roots(temp=None, home=None, environ=None, short_path=_short_path) -> list[Path]:
+    """Folders where the aerender stage may go, ASCII only, in order: the temp folder when it is ASCII; else (an
+    Arabic Windows user name puts %TEMP% under C:/Users/<name>) the engine home's tmp/, %ProgramData%/WhyNotCut/tmp,
+    %SystemDrive%/WhyNotCut-tmp, then the 8.3 short form of %TEMP%. Each is created on use; one that cannot be is
+    skipped."""
+    temp = str(temp if temp is not None else tempfile.gettempdir())
+    if temp.isascii():
+        return [Path(temp)]
+    env = os.environ if environ is None else environ
+    if home is None:
+        try:
+            home = plat.engine_home()
+        except Exception:  # noqa: BLE001
+            home = None
+    roots = [Path(home) / "tmp"] if home is not None else []
+    if env.get("ProgramData"):
+        roots.append(Path(env["ProgramData"]) / "WhyNotCut" / "tmp")
+    drive = env.get("SystemDrive") or "C:"
+    roots.append(Path(drive + "\\" if drive.endswith(":") else drive) / "WhyNotCut-tmp")
+    sp = short_path(temp)
+    if sp:
+        roots.append(Path(sp))
+    return [r for r in roots if str(r).isascii()]
+
+
 def stage_ascii(aep: Path, out: Path | None = None) -> tuple[Path | None, Path, Path | None]:
     """(stage, aep to pass, output to pass). aerender on Windows reads its command line in the ANSI code page: a
     non-ASCII path (an Arabic client folder) arrives as "???". Then an ASCII copy of the project is rendered (into an
@@ -66,10 +103,20 @@ def stage_ascii(aep: Path, out: Path | None = None) -> tuple[Path | None, Path, 
     out = Path(out) if out is not None else None
     if not (plat.IS_WIN and not (str(aep).isascii() and (out is None or str(out).isascii()))):
         return None, aep, out
-    if not tempfile.gettempdir().isascii():
-        raise StageError(f"aerender needs ASCII paths, and the temp folder {tempfile.gettempdir()} is not one either: "
-                         "set TEMP to an ASCII folder, then render again")
-    stage = Path(tempfile.mkdtemp(prefix="whynot-aerender-"))
+    stage, tried = None, []
+    for root in ascii_stage_roots():
+        tried.append(str(root))
+        try:
+            Path(root).mkdir(parents=True, exist_ok=True)
+            stage = Path(tempfile.mkdtemp(prefix="whynot-aerender-", dir=str(root)))
+            break
+        except OSError:
+            continue
+    if stage is None:
+        raise StageError(f"aerender needs ASCII paths, and no ASCII folder could hold its stage (the temp folder "
+                         f"{tempfile.gettempdir()} is not ASCII; tried: {', '.join(tried) or 'none'}): run "
+                         "`setx WHYNOT_HOME C:\\whynot` (or `setx TEMP C:\\Temp` after creating that folder) in a "
+                         "terminal, open a new Claude Code session, then render again")
     try:
         r_aep = stage / "project.aep"
         shutil.copy2(aep, r_aep)

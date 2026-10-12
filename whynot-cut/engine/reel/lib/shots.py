@@ -43,12 +43,13 @@ def shots_from_cuts(cuts: list[int], duration_ms: int, min_shot_ms: int = 400) -
     return list(zip(edges, edges[1:]))
 
 
-def face_boxes(im) -> list[tuple[float, float, float, float]]:
+def face_boxes(im, notes: set | None = None) -> list[tuple[float, float, float, float]]:
     """Every face as (cx, cy, w, h), 0..1, top-left origin: macOS Vision, else OpenCV (frontal, then profile both
-    ways). Faces smaller than face_min_ratio of the largest (background people, posters) are dropped."""
+    ways). Faces smaller than face_min_ratio of the largest (background people, posters) are dropped. `notes` collects
+    why detection could not run (OpenCV's face model did not load)."""
     boxes = _boxes_vision(im)
     if boxes is None:
-        boxes = _boxes_opencv(im)
+        boxes = _boxes_opencv(im, notes)
     if not boxes:
         return []
     big = max(b[2] * b[3] for b in boxes)
@@ -80,11 +81,20 @@ def _boxes_vision(im):
         return None
 
 
-def _boxes_opencv(im) -> list:
+FACE_MODEL_OFF = ("OpenCV's face model did not load (often a non-ASCII engine home on Windows), so no faces were "
+                  "found and every shot is shown whole: run reel doctor")
+
+
+def _boxes_opencv(im, notes: set | None = None) -> list:
     try:
         import cv2
         import numpy as np
     except Exception:  # noqa: BLE001
+        return []
+    det = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    if det.empty():     # detectMultiScale would raise on an empty classifier: no faces, and say why
+        if notes is not None:
+            notes.add(FACE_MODEL_OFF)
         return []
     g = np.array(im.convert("L"))
     sc = min(1.0, 1200 / max(g.shape))
@@ -92,10 +102,11 @@ def _boxes_opencv(im) -> list:
         g = cv2.resize(g, (int(g.shape[1] * sc), int(g.shape[0] * sc)))
     H, W = g.shape
     mins = (int(0.05 * min(W, H)),) * 2
-    det = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     faces = list(det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=6, minSize=mins))
     if not faces:
         prof = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+        if prof.empty():
+            return []
         faces = list(prof.detectMultiScale(g, scaleFactor=1.1, minNeighbors=5, minSize=mins))
         faces += [(W - x - w, y, w, h) for (x, y, w, h) in prof.detectMultiScale(cv2.flip(g, 1), scaleFactor=1.1,
                                                                                     minNeighbors=5, minSize=mins)]
@@ -161,7 +172,9 @@ def analyze_window(path: Path, offset_ms: int, duration_ms: int, faces_fn=face_b
     W, H, fps = 640, 360, float(cfg.get("sample_fps", 2.0))
     from .media import _hist, _similarity
     from .media_util import ff_popen
-    raw, n = [], 0
+    raw, n, notes = [], 0, set()
+    real = faces_fn is face_boxes
+    detect = (lambda im: face_boxes(im, notes)) if real else faces_fn     # notes: why detection could not run
     # ff_popen: a watchdog kills a decoder stuck on a corrupt file or a stalled share (T2.15, MI-17)
     with ff_popen([ffmpeg_exe(), "-loglevel", "error", "-ss", f"{offset_ms / 1000:.3f}", "-t",
                    f"{duration_ms / 1000:.3f}", "-i", str(path), "-an", "-vf",
@@ -173,7 +186,7 @@ def analyze_window(path: Path, offset_ms: int, duration_ms: int, faces_fn=face_b
                 if len(buf) < W * H * 3:
                     break
                 im = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
-                raw.append((int((n + 0.5) * 1000 / fps), [[round(float(x), 4) for x in f] for f in faces_fn(im)],
+                raw.append((int((n + 0.5) * 1000 / fps), [[round(float(x), 4) for x in f] for f in detect(im)],
                             _hist(im)))
                 n += 1
         finally:
@@ -189,11 +202,13 @@ def analyze_window(path: Path, offset_ms: int, duration_ms: int, faces_fn=face_b
         for s, e, faces in split_by_presence(samples, a, b, int(cfg.get("min_presence_run_ms", 1000))):
             out.append({"start_ms": s, "end_ms": e, "faces": faces, "n_faces": len(faces)})
     note = ""
-    if out and not any(s["n_faces"] for s in out):
+    if notes:
+        note = "; ".join(sorted(notes))
+    elif out and not any(s["n_faces"] for s in out):
         note = ("no face found in any shot (audio-only or graphics-led episode): the reel is shown whole; "
                 "a motion/animation version (motion mode, phase 3) fits better")
     return {"window": {"offset_ms": offset_ms, "duration_ms": duration_ms}, "cuts_ms": cuts, "shots": out,
-            "method": "ffmpeg scene cuts + " + ("face detection (Vision / OpenCV)" if faces_fn is face_boxes else "injected faces"),
+            "method": "ffmpeg scene cuts + " + ("face detection (Vision / OpenCV)" if real else "injected faces"),
             "note": note}
 
 

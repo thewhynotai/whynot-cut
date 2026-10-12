@@ -16,6 +16,10 @@ if not defined WNC_HOME set "WNC_HOME=%CLAUDE_PLUGIN_OPTION_REEL_HOME%"
 if not defined WNC_HOME call :saved_home
 if not defined WNC_HOME call :default_home
 set "WHYNOT_HOME=%WNC_HOME%"
+rem no __pycache__ in the plugin; UTF-8 mode, set before setup_env.py runs too (its children inherit it)
+set "PYTHONDONTWRITEBYTECODE=1"
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 rem The engine interpreter (3.0 T2.1, same order as plat.engine_runtime()): the isolated runtime named by the one-line
 rem text file <home>\current (runtimes\<id>\, run with -s: no user site), else the 2.x venv\ (run as before). Never a
 rem system Python for the engine; `reel setup` with neither builds the runtime first.
@@ -32,9 +36,6 @@ if defined WNC_SETUP_RAN call :probe_setup
 if not defined WNC_PY if defined WNC_SETUP_RAN if defined WNC_SCHECK goto :setup_checked
 if not defined WNC_PY if defined WNC_SETUP_RAN goto :setup_failed
 if not defined WNC_PY goto :blocked
-set "PYTHONDONTWRITEBYTECODE=1"
-set "PYTHONUTF8=1"
-set "PYTHONIOENCODING=utf-8"
 rem the whole line is expanded before it runs, so the WNC_* values are used and already cleared for the engine
 set "WNC_HOME=" & set "WNC_PY=" & set "WNC_HERE=" & set "WNC_FLAG=" & set "WNC_SETUP_RAN=" & set "WNC_BROKEN=" & set "WNC_RTID=" & set "WNC_SKIP=" & set "WNC_SFLAGS=" & set "WNC_SCHECK=" & "%WNC_PY%" %WNC_FLAG% "%WNC_HERE%\engine\reel\cli.py" %*
 exit /b %ERRORLEVEL%

@@ -546,6 +546,52 @@ class TestCmdSetupPython(WrapperCase):
         self.assertIn("reel setup", blocked["how"])
 
 
+class TestSetupRunsInUtf8Mode(WrapperCase):
+    """Gate 2 D minor 4: setup_env.py (and every process it starts) runs with PYTHONUTF8=1 and
+    PYTHONIOENCODING=utf-8 from both wrappers, so an Arabic engine home or tool output never meets the ANSI code
+    page."""
+
+    def plug(self, record: Path) -> Path:
+        plug = self.t / "plug"
+        (plug / "bin").mkdir(parents=True)
+        shutil.copy2(CMD, plug / "bin" / "reel.cmd")
+        shutil.copy2(BASH_WRAPPER, plug / "bin" / "reel")
+        (plug / ".claude-plugin").mkdir()
+        shutil.copy2(SK / ".claude-plugin/plugin.json", plug / ".claude-plugin/plugin.json")
+        (plug / "setup").mkdir()
+        (plug / "setup" / "setup_env.py").write_text(
+            "import json, os, subprocess, sys\n"
+            "child = subprocess.run([sys.executable, '-c', 'import os, sys; print(os.environ.get(\"PYTHONUTF8\"), "
+            "sys.flags.utf8_mode)'], capture_output=True, text=True).stdout.split()\n"
+            "with open(os.environ['SETUP_RECORD'], 'a', encoding='utf-8') as f:\n"
+            "    f.write(json.dumps({'utf8': os.environ.get('PYTHONUTF8'), 'io': os.environ.get('PYTHONIOENCODING'),\n"
+            "                        'mode': sys.flags.utf8_mode, 'child': child}) + '\\n')\n"
+            "sys.exit(1)\n", encoding="utf-8")
+        return plug
+
+    def test_setup_env_runs_in_utf8_mode(self):
+        record = self.t / "setup-runs.txt"
+        plug = self.plug(record)
+        sys_py = make_engine(self.t / "sys python") / "venv" / ("Scripts" if IS_WIN else "bin")
+        runners = {"reel.cmd": (run_cmd, {"wrapper": plug / "bin" / "reel.cmd"}),
+                   "bin/reel": (lambda args, env: subprocess.run([git_bash(), str(plug / "bin" / "reel"), *args],
+                                                                   capture_output=True, env=env, timeout=120), {})}
+        for name, _r in self.shells():
+            with self.subTest(wrapper=name):
+                if record.exists():
+                    record.unlink()
+                env = clean_env(self.user, WHYNOT_HOME=self.t / "new home", SETUP_RECORD=record)
+                env.pop("PYTHONUTF8", None)
+                env.pop("PYTHONIOENCODING", None)
+                env["PATH"] = str(sys_py) + os.pathsep + env.get("PATH", "")
+                fn, kw = runners[name]
+                fn(["setup"], env, **kw)
+                self.assertTrue(record.exists(), f"{name}: setup_env.py did not run")
+                got = json.loads(record.read_text(encoding="utf-8").splitlines()[0])
+                self.assertEqual((got["utf8"], got["io"], got["mode"]), ("1", "utf-8", 1), got)
+                self.assertEqual(got["child"], ["1", "1"], got)
+
+
 # ===================================================================================================== hook runner
 class TestRunPythonLegacyHome(unittest.TestCase):
     def test_legacy_engine_when_default_holds_only_the_pointer(self):

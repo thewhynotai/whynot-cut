@@ -408,6 +408,7 @@ def run(cmd, check=True, capture=True, timeout=None, **kw) -> subprocess.Complet
     if timeout is None:              # T2.15 (MI-17): an ffmpeg call on a corrupt file or a stalled share never hangs
         from .media_util import ff_timeout
         timeout = ff_timeout(cmd)
+    kw.setdefault("errors", "replace")    # Gate 2: a tool's non-UTF-8 output (ANSI code page) never raises on decode
     return subprocess.run(cmd, check=check, capture_output=capture, text=True, timeout=timeout, **kw)
 
 

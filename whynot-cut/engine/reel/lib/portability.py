@@ -15,7 +15,10 @@ import re
 import subprocess
 from pathlib import Path
 
-from . import plat
+try:
+    from . import plat
+except ImportError:                       # setup/setup_env.py: lib/ is on sys.path, no package (home_path_fix only)
+    import plat  # type: ignore[no-redef]
 
 SUGGESTED_HOME = r"C:\whynot"
 # the filters the engine's ffmpeg command lines use (audio cleanup, loudness, QC, shots, SFX, previews)

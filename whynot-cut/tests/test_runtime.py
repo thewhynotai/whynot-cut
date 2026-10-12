@@ -1308,5 +1308,152 @@ class TestReviewRound3(TempHome):
         self.assertEqual(plat.engine_runtime(self.home)["broken"], "r-zero")
 
 
+
+# ===================================================================================================== Gate 2 G1 (D)
+class TestRosettaPlatformKey(unittest.TestCase):
+    """D2: a Python running under Rosetta on Apple Silicon reports x86_64; the runtime is still mac-arm64 (the
+    installer's bootstrap.sh rule), so the runtime id matches and MLX is used."""
+
+    def test_translated_or_arm64_hardware_is_arm64(self):
+        for answers in ({"sysctl.proc_translated": "1"}, {"hw.optional.arm64": "1"},
+                        {"sysctl.proc_translated": "1", "hw.optional.arm64": "1"}):
+            with self.subTest(answers=answers):
+                self.assertEqual(R.platform_key("Darwin", "x86_64", sysctl=answers.get), "mac-arm64")
+
+    def test_intel_mac_stays_x64(self):
+        for answers in ({}, {"sysctl.proc_translated": "0", "hw.optional.arm64": "0"}):
+            with self.subTest(answers=answers):
+                self.assertEqual(R.platform_key("Darwin", "x86_64", sysctl=answers.get), "mac-x64")
+
+    def test_windows_never_asks_sysctl(self):
+        def boom(name):
+            raise AssertionError("sysctl asked on Windows")
+        self.assertEqual(R.platform_key("Windows", "AMD64", sysctl=boom), "win-x64")
+        self.assertEqual(R.platform_key("Darwin", "arm64", sysctl=boom), "mac-arm64")
+
+
+class TestCertificateFailure(TempHome):
+    """D3: python.org Python on macOS ships without root certificates until 'Install Certificates.command' runs: the
+    download retries with /etc/ssl/cert.pem, then /usr/bin/curl, and otherwise names the real cause."""
+
+    @staticmethod
+    def cert_error():
+        import ssl
+        import urllib.error
+        return urllib.error.URLError(ssl.SSLCertVerificationError(
+            1, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate"))
+
+    def test_retry_with_the_system_cafile(self):
+        cafile = self.t / "cert.pem"
+        cafile.write_text("x", encoding="utf-8")
+        calls = []
+
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def urlopen(url, timeout=None, context=None):
+            calls.append(context)
+            if context is None:
+                raise self.cert_error()
+            return Resp(b"DATA")
+        with mock.patch("ssl.create_default_context", return_value="CTX") as cdc:
+            got = SETUP._fetch("https://x/uv.zip", urlopen=urlopen, cafile=str(cafile), curl=None,
+                               sleep=lambda s: None)
+        self.assertEqual(got, b"DATA")
+        cdc.assert_called_once_with(cafile=str(cafile))
+        self.assertEqual(calls[-1], "CTX")
+
+    def test_curl_when_no_cafile(self):
+        curl = self.t / "curl"
+        curl.write_text("", encoding="utf-8")
+        ran = []
+
+        def runner(cmd, **kw):
+            ran.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, b"CURLED", b"")
+
+        def urlopen(url, timeout=None, context=None):
+            raise self.cert_error()
+        got = SETUP._fetch("https://x/uv.zip", urlopen=urlopen, cafile=str(self.t / "none.pem"), curl=str(curl),
+                           runner=runner, sleep=lambda s: None)
+        self.assertEqual(got, b"CURLED")
+        self.assertEqual(ran[0][0], str(curl))
+        self.assertIn("-fsSL", ran[0])
+        self.assertEqual(ran[0][-1], "https://x/uv.zip")
+
+    def test_message_names_the_certificates(self):
+        def urlopen(url, timeout=None, context=None):
+            raise self.cert_error()
+        with self.assertRaises(SETUP.Failed) as cm:
+            SETUP._fetch("https://x/uv.zip", urlopen=urlopen, cafile=str(self.t / "none.pem"), curl=None,
+                         sleep=lambda s: None)
+        e = cm.exception
+        self.assertIn("Python certificates not installed", str(e) + e.how)
+        self.assertIn("Install Certificates.command", e.how)
+        self.assertNotIn("internet", e.how)
+
+    def test_network_error_still_says_internet(self):
+        import urllib.error
+
+        def urlopen(url, timeout=None, context=None):
+            raise urllib.error.URLError(OSError("no route to host"))
+        with self.assertRaises(SETUP.Failed) as cm:
+            SETUP._fetch("https://x/uv.zip", retries=2, urlopen=urlopen, curl=None, sleep=lambda s: None)
+        self.assertIn("internet", cm.exception.how)
+
+
+class TestAtomicWriteRetries(TempHome):
+    """D minor 6: os.replace refused for a moment (Windows: antivirus or a reader holding `current`) is retried."""
+
+    def test_permission_error_is_retried(self):
+        real = os.replace
+        seen = []
+
+        def flaky(a, b):
+            seen.append(a)
+            if len(seen) < 3:
+                raise PermissionError(13, "Access is denied")
+            return real(a, b)
+        with mock.patch.object(R.os, "replace", side_effect=flaky):
+            R.write_current(self.home, "r-abc")
+        self.assertEqual(len(seen), 3)
+        self.assertEqual((self.home / plat.CURRENT_FILE).read_text(encoding="utf-8"), "r-abc\n")
+        self.assertEqual([p.name for p in self.home.iterdir() if p.name.endswith(".tmp")], [])
+
+    def test_lasting_permission_error_raises_and_cleans_up(self):
+        with mock.patch.object(R.os, "replace", side_effect=PermissionError(13, "Access is denied")), \
+                mock.patch.object(R.time, "sleep"):
+            with self.assertRaises(PermissionError):
+                R.write_current(self.home, "r-abc")
+        self.assertEqual([p.name for p in self.home.iterdir() if p.name.endswith(".tmp")], [])
+
+
+class TestSetupWarnsNonAsciiHome(TempHome):
+    """D minor 9: `reel setup` (setup_env.py) warns about a non-ASCII engine home on Windows with doctor's text."""
+
+    def test_warning_is_doctors(self):
+        from lib import portability
+        home = Path(r"C:\Users\يونس\.whynot-cut")
+        self.assertEqual(SETUP.setup_warnings(home, is_win=True), [portability.home_path_fix(home, is_win=True)])
+        self.assertEqual(SETUP.setup_warnings(Path(r"C:\whynot"), is_win=True), [])
+        self.assertEqual(SETUP.setup_warnings(Path("/Users/يونس/.whynot-cut"), is_win=False), [])
+
+    @unittest.skipUnless(IS_WIN, "Windows only")
+    def test_check_report_carries_it(self):
+        home = self.t / "يونس" / "eng"
+        r = subprocess.run([sys.executable, "-B", str(SK / "setup" / "setup_env.py"), "--home", str(home), "--check"],
+                           capture_output=True, text=True, encoding="utf-8")
+        rep = json.loads(r.stdout)
+        self.assertEqual(len(rep["warnings"]), 1, rep)
+        self.assertIn("non-ASCII", rep["warnings"][0]["item"])
+        self.assertIn("setx WHYNOT_HOME", rep["warnings"][0]["fix"])
+        self.assertIn("non-ASCII", r.stderr)
+        self.assertFalse(home.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

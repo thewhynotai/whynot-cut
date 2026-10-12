@@ -24,6 +24,7 @@ import platform as _platform
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -57,8 +58,21 @@ def engine_modules() -> list[str]:
 
 
 # --------------------------------------------------------------------------- platform, components, lock
-def platform_key(system: str | None = None, machine: str | None = None) -> str | None:
-    """win-x64 | mac-arm64 | mac-x64 (the lock names), linux-x64 / linux-arm64 (no lock shipped), else None."""
+def _sysctl(name: str) -> str | None:
+    """`sysctl -n <name>` on macOS (None elsewhere, or when the key does not exist: Intel Macs lack these)."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        r = subprocess.run(["/usr/sbin/sysctl", "-n", name], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def platform_key(system: str | None = None, machine: str | None = None, sysctl=_sysctl) -> str | None:
+    """win-x64 | mac-arm64 | mac-x64 (the lock names), linux-x64 / linux-arm64 (no lock shipped), else None.
+    On macOS an x86_64 Python under Rosetta (sysctl.proc_translated = 1) or on Apple Silicon hardware
+    (hw.optional.arm64 = 1) still gives mac-arm64: the installer's bootstrap.sh rule, so both build one runtime id."""
     system = (system or _platform.system()).lower()
     m = (machine or _platform.machine()).lower()
     arch = "arm64" if m in ("arm64", "aarch64") else "x64" if m in ("x86_64", "amd64", "x64") else None
@@ -67,6 +81,8 @@ def platform_key(system: str | None = None, machine: str | None = None) -> str |
     if system.startswith("win"):
         return f"win-{arch}"
     if system == "darwin":
+        if arch == "x64" and (sysctl("sysctl.proc_translated") == "1" or sysctl("hw.optional.arm64") == "1"):
+            arch = "arm64"
         return f"mac-{arch}"
     if system == "linux":
         return f"linux-{arch}"
@@ -168,11 +184,21 @@ def read_stamp(rt_dir: Path) -> dict:
     return {"runtime": st, "lock_sha256": sha}
 
 
+IO_RETRIES = 50          # x ~10 ms, like common._retry: Windows briefly refuses to replace a file another process has open
+
+
 def _atomic_write(path: Path, text: str):
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         tmp.write_text(text, encoding="utf-8", newline="\n")
-        os.replace(tmp, path)
+        for k in range(IO_RETRIES):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:      # an antivirus scan or a reader holding `current` for a moment
+                if k == IO_RETRIES - 1:
+                    raise
+                time.sleep(0.005 + 0.005 * (k % 4))
     finally:
         if tmp.exists():
             tmp.unlink()

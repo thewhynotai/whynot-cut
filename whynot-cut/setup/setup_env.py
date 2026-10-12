@@ -80,18 +80,63 @@ def uv_env(home: Path) -> dict:
     return env
 
 
-def _fetch(url: str, timeout=60, retries=5) -> bytes:
+MAC_CAFILE = "/etc/ssl/cert.pem"
+MAC_CURL = "/usr/bin/curl"
+CERT_HOW = ("Python certificates not installed — run 'Install Certificates.command' (Finder > Applications > "
+            "Python 3.x), then run reel setup again")
+
+
+def _cert_failure(e: BaseException) -> bool:
+    """A TLS certificate verification failure (python.org Python on macOS before 'Install Certificates.command')."""
+    import ssl
+    reason = getattr(e, "reason", None)
+    return (isinstance(e, ssl.SSLCertVerificationError) or isinstance(reason, ssl.SSLCertVerificationError)
+            or "CERTIFICATE_VERIFY_FAILED" in str(e))
+
+
+def _fetch(url: str, timeout=60, retries=5, urlopen=None, cafile=MAC_CAFILE, curl=MAC_CURL, runner=subprocess.run,
+           sleep=time.sleep) -> bytes:
+    """The bytes at url. A certificate failure is not retried as a network error: the download is tried again with the
+    system's CA file (cafile), then with curl (which uses the system trust store), else it names the real cause."""
     import urllib.request
+    urlopen = urlopen or urllib.request.urlopen
     last = None
     for i in range(retries):
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as r:
+            with urlopen(url, timeout=timeout) as r:
                 return r.read()
         except OSError as e:
             last = e
-            time.sleep(min(2 ** i, 10))
-    raise Failed(f"download failed: {url}", how="check the internet connection, then run reel setup again",
-                 detail=str(last))
+            if _cert_failure(e):
+                break
+            sleep(min(2 ** i, 10))
+    if last is None or not _cert_failure(last):
+        raise Failed(f"download failed: {url}", how="check the internet connection, then run reel setup again",
+                     detail=str(last))
+    if cafile and Path(cafile).is_file():
+        import ssl
+        try:
+            with urlopen(url, timeout=timeout, context=ssl.create_default_context(cafile=cafile)) as r:
+                return r.read()
+        except OSError as e:
+            last = e
+    if curl and Path(curl).is_file():
+        try:
+            r = runner([curl, "-fsSL", "--retry", "3", "--max-time", str(timeout * 5), url], capture_output=True,
+                       timeout=timeout * 6)
+            if r.returncode == 0 and r.stdout:
+                return r.stdout
+            last = f"{last}; curl exit {r.returncode}: {(r.stderr or b'').decode('utf-8', 'replace')[-300:]}"
+        except (OSError, subprocess.SubprocessError) as e:
+            last = f"{last}; curl: {e}"
+    raise Failed(f"download failed: {url} (Python certificates not installed)", how=CERT_HOW, detail=str(last))
+
+
+def setup_warnings(home: Path, is_win: bool | None = None) -> list[dict]:
+    """Doctor's warnings that already matter while setting up (the same text): a non-ASCII engine home on Windows."""
+    import portability  # noqa: E402  (stdlib only for home_path_fix)
+    f = portability.home_path_fix(home, is_win=is_win)
+    return [f] if f else []
 
 
 def download_uv(asset: dict, dest: Path, fetch=_fetch) -> Path:
@@ -331,6 +376,11 @@ def main(argv=None):
                    how=("winget install Python.Python.3.12" if plat.IS_WIN else "xcode-select --install"))
         print(json.dumps(rep, indent=2))
         return 1
+    warns = setup_warnings(home)
+    if warns:
+        rep["warnings"] = warns
+        for w in warns:
+            say(f"warning: {w['item']}. Fix: {w['fix']}")
     ent = R.lock_entry(key, comp)
     try:
         if not ent["file"].is_file():

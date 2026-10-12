@@ -61,6 +61,8 @@ if [ -z "$HOME_DIR" ]; then
   fi
 fi
 export WHYNOT_HOME="$HOME_DIR"
+# no __pycache__ in the plugin; UTF-8 on Windows, set before setup_env.py runs too (its children inherit it)
+export PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 tag() {   # "WhyNot Cut 2.2.0": every blocked message names this plugin, so a wrong `reel` on PATH is recognisable
   local v; v="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$HERE/.claude-plugin/plugin.json" 2>/dev/null | head -n 1 || true)"
   echo "WhyNot Cut ${v:-?}"
@@ -171,5 +173,4 @@ if ! probe_setup "$@"; then
     exit 2
   fi
 fi
-export PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 PYTHONIOENCODING=utf-8   # no __pycache__ in the plugin; UTF-8 on Windows
 exec "$PY" $PYFLAG "$HERE/engine/reel/cli.py" "$@"

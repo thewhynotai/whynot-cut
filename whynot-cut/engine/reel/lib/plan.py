@@ -126,11 +126,22 @@ def window_rect(framing: str | None, y: int | None = None, seq_w: int = 1080, se
     return {"w": seq_w, "h": h, "y": max(0, min(seq_h - h, top)), "mode": f}
 
 
+def same_footage_name(a, b) -> bool:
+    """Two footage paths name the same file: file names compared in NFC (macOS writes NFD) and, on Windows,
+    case-insensitively (os.path.normcase)."""
+    import os
+    from .clip_ids import _nfc
+
+    def key(p):
+        return os.path.normcase(_nfc(Path(p).name))
+    return key(a) == key(b)
+
+
 def main_video(pre: dict, main: str | None) -> dict | None:
     """Preflight's video info for THIS video's footage (matched by file name); without a named footage, the first file."""
     vids = [f for f in (pre or {}).get("files", []) if f.get("video")]
     if main:
-        return next((f["video"] for f in vids if Path(f["path"]).name == Path(main).name), None)
+        return next((f["video"] for f in vids if same_footage_name(f["path"], main)), None)
     return vids[0]["video"] if vids else None
 
 
@@ -510,7 +521,7 @@ def build_camera(inp: PlanInputs, camera: list, events: list):
     if bsp in (None, "auto"):
         mf = main_file
         rf = next((r for k, r in (pre_all.get("reframe") or {}).items()
-                   if mf and (Path(k).name == Path(mf).name or Path(k) == inp.root / mf)), None)
+                   if mf and (same_footage_name(k, mf) or Path(k) == inp.root / mf)), None)
         if rf:
             bsp, framing = rf["base_scale_percent"], f"auto-reframe (face x {rf.get('face_x')}, {rf.get('faces')} faces)"
             box = rf["offset_x"] if box is None else box

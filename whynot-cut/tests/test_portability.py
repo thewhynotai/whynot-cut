@@ -657,5 +657,137 @@ class TestBridgeNoReplyIsNotFinished(_Tmp):
                 self.assertIs(cep_queue._bridge_has_job(q, "J1"), claimed)
 
 
+
+# ------------------------------------------------------------------------------------------- Gate 2 G1 (review D)
+class TestAsciiAeStage(_Tmp):
+    """D1: an Arabic Windows user name makes %TEMP% non-ASCII too: the aerender stage then goes to the engine home
+    (when ASCII), %ProgramData%/WhyNotCut/tmp, %SystemDrive%/WhyNotCut-tmp, or the 8.3 short form of %TEMP%."""
+
+    ARABIC_TEMP = r"C:\Users\يونس\AppData\Local\Temp"
+
+    def env(self, **kw):
+        d = {"ProgramData": str(self.tmp / "ProgramData"), "SystemDrive": str(self.tmp / "sysdrive")}
+        d.update(kw)
+        return d
+
+    def test_engine_home_first_when_ascii(self):
+        from lib import ae_render
+        roots = ae_render.ascii_stage_roots(temp=self.ARABIC_TEMP, home=self.tmp / "eng", environ=self.env(),
+                                            short_path=lambda p: None)
+        self.assertEqual(roots[0], self.tmp / "eng" / "tmp")
+        self.assertEqual(roots[1], self.tmp / "ProgramData" / "WhyNotCut" / "tmp")
+        self.assertEqual(roots[2], self.tmp / "sysdrive" / "WhyNotCut-tmp")
+
+    def test_non_ascii_home_skipped_short_path_last(self):
+        from lib import ae_render
+        roots = ae_render.ascii_stage_roots(temp=self.ARABIC_TEMP, home=r"C:\Users\يونس\.whynot-cut",
+                                            environ=self.env(), short_path=lambda p: r"C:\Users\D3C0~1\AppData\Local\Temp")
+        self.assertTrue(all(str(r).isascii() for r in roots), roots)
+        self.assertEqual(roots[0], self.tmp / "ProgramData" / "WhyNotCut" / "tmp")
+        self.assertEqual(str(roots[-1]), r"C:\Users\D3C0~1\AppData\Local\Temp")
+
+    def test_ascii_temp_is_used_as_before(self):
+        from lib import ae_render
+        self.assertEqual(ae_render.ascii_stage_roots(temp=str(self.tmp), home="x", environ={}), [self.tmp])
+
+    def test_stage_made_under_the_first_root_that_works(self):
+        from lib import ae_render
+        aep = self.tmp / "مشروع.aep"
+        aep.write_bytes(b"AEP")
+        blocked = self.tmp / "blocked"
+        blocked.write_text("a file, not a folder", encoding="utf-8")       # mkdir fails here -> next root
+        good = self.tmp / "ok-root"
+        with mock.patch.object(ae_render.plat, "IS_WIN", True), \
+                mock.patch.object(ae_render, "ascii_stage_roots", return_value=[blocked / "tmp", good]):
+            stage, r_aep, r_out = ae_render.stage_ascii(aep, self.tmp / "out" / "ريل.mov")
+        try:
+            self.assertEqual(stage.parent, good)
+            self.assertEqual(r_aep.read_bytes(), b"AEP")
+            self.assertEqual(r_out, stage / "render.mov")
+        finally:
+            import shutil
+            shutil.rmtree(stage, ignore_errors=True)
+
+    def test_no_root_gives_a_precise_how(self):
+        from lib import ae_render
+        aep = self.tmp / "مشروع.aep"
+        aep.write_bytes(b"AEP")
+        with mock.patch.object(ae_render.plat, "IS_WIN", True), \
+                mock.patch.object(ae_render.tempfile, "gettempdir", return_value=self.ARABIC_TEMP), \
+                mock.patch.object(ae_render, "ascii_stage_roots", return_value=[]):
+            with self.assertRaises(ae_render.StageError) as cm:
+                ae_render.stage_ascii(aep)
+        msg = str(cm.exception)
+        self.assertIn("setx WHYNOT_HOME", msg)
+        self.assertIn("TEMP", msg)
+
+
+class TestRunDecodesLeniently(unittest.TestCase):
+    """D minor 5: tool output that is not valid UTF-8 (a localised Windows tool, a file name in the ANSI code page)
+    never raises UnicodeDecodeError in common.run."""
+
+    def test_invalid_bytes_are_replaced(self):
+        p = common.run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(bytes([0x81, 0x8d]) + b' ok')"], timeout=60)
+        self.assertIn("ok", p.stdout)
+        self.assertIn("\ufffd", p.stdout)
+
+
+class TestFootageNameMatching(unittest.TestCase):
+    """D minor 7: the plan finds THIS video's preflight entry when the names differ only in Unicode form (macOS
+    writes NFD) or, on Windows, in case."""
+
+    def test_nfd_and_nfc_names_match(self):
+        import unicodedata
+        from lib import plan
+        nfd = unicodedata.normalize("NFD", "data/Raw/café مقابلة.mp4")
+        nfc = unicodedata.normalize("NFC", "data/Raw/café مقابلة.mp4")
+        self.assertNotEqual(nfd, nfc)
+        pre = {"files": [{"path": "data/Raw/other.mp4", "video": {"w": 1}}, {"path": nfd, "video": {"w": 2}}]}
+        self.assertEqual(plan.main_video(pre, nfc), {"w": 2})
+        self.assertTrue(plan.same_footage_name(nfd, nfc))
+        self.assertFalse(plan.same_footage_name("data/Raw/a.mp4", "data/Raw/b.mp4"))
+
+    @unittest.skipUnless(IS_WIN, "case-insensitive names: Windows")
+    def test_case_differs_on_windows(self):
+        from lib import plan
+        pre = {"files": [{"path": "data/Raw/C0239.MP4", "video": {"w": 3}}]}
+        self.assertEqual(plan.main_video(pre, "data/Raw/c0239.mp4"), {"w": 3})
+
+
+class TestEmptyFaceClassifier(unittest.TestCase):
+    """D minor 8: OpenCV's face model not loading (a non-ASCII path) gives no faces and a note, never a crash."""
+
+    def fake_cv2(self):
+        class Err(Exception):
+            pass
+
+        class Cascade:
+            def __init__(self, path):
+                self.path = path
+
+            def empty(self):
+                return True
+
+            def detectMultiScale(self, *a, **k):
+                raise Err("(-215:Assertion failed) !empty() in function 'detectMultiScale'")
+        return types.SimpleNamespace(CascadeClassifier=Cascade, error=Err,
+                                     data=types.SimpleNamespace(haarcascades="C:/يونس/cv2/data/"),
+                                     resize=lambda g, size: g, flip=lambda g, k: g)
+
+    def test_returns_no_faces_and_a_note(self):
+        try:
+            from PIL import Image
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("PIL / numpy not in this interpreter")
+        from lib import shots
+        notes = set()
+        with mock.patch.dict(sys.modules, {"cv2": self.fake_cv2()}):
+            self.assertEqual(shots._boxes_opencv(Image.new("RGB", (64, 64)), notes), [])
+            self.assertEqual(shots._boxes_opencv(Image.new("RGB", (64, 64))), [])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("face model", next(iter(notes)))
+
+
 if __name__ == "__main__":
     unittest.main()
