@@ -204,8 +204,17 @@ def render(paths: Paths, timeout: int = 3600) -> dict:
     if not aer or not Path(aer).exists() or not aep.exists():
         return {"status": "SKIPPED", "msg": f"aerender={aer} aep_exists={aep.exists()}"}
     t0 = time.time()
-    p = run([aer, "-project", str(aep), "-sound", "OFF", "-continueOnMissingFootage"], check=False, timeout=timeout)
     logp = paths.p("logs/aerender.log")
+    import subprocess
+    try:
+        p = run([aer, "-project", str(aep), "-sound", "OFF", "-continueOnMissingFootage"], check=False, timeout=timeout)
+    except subprocess.TimeoutExpired as e:      # 3.0 T2.2: a FAILED result that says what to do, not a traceback
+        from .ae_render import TIMEOUT_HOW, _text, timeout_message
+        write_text(logp, _text(e.stdout) + "\n" + _text(e.stderr))
+        res = {"status": "FAILED", "returncode": None, "outputs": [], "elapsed_s": round(time.time() - t0, 1),
+               "log": str(logp), "msg": timeout_message(timeout), "how": TIMEOUT_HOW}
+        write_json(paths.p("04_after_effects/ae-render-result.json"), dict(res, at=now_iso()))
+        return res
     write_text(logp, p.stdout + "\n" + p.stderr)
     outs = sorted(x for x in paths.p("04_after_effects/compositions").glob("*.mov") if not x.name.startswith("._"))
     res = {"status": "RENDERED" if outs else "FAILED", "returncode": p.returncode, "outputs": [str(o) for o in outs],

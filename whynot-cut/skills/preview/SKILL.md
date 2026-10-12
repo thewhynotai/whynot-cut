@@ -12,7 +12,7 @@ reel preview-video --root "<CLIENT>" --video-id <ID> [--width 720]
 ```
 It needs a compiled plan and the stills (`reel plan`, `reel previews`). It writes
 `<CLIENT>/output/projects/<ID>/08_quality_control/preview/<ID>_preview.mp4` (540×960 H.264 by default) plus
-`preview-result.json`. Failure comes back as `ok: false` with `error` (exit code 0), so check `ok`.
+`preview-result.json`. Failure comes back as `ok: false` with `error` and exit code 1, so read the JSON.
 
 What is in it, mirroring the Premiere build: the footage pieces after pause removal with the zoom change at every jump
 cut and the punch-ins (scale and position per piece), every graphic and caption layer with its Premiere animation

@@ -108,8 +108,8 @@ def build(paths: Paths) -> dict:
     spec = read_json(paths.p("01_analysis/timeline-spec.json"))
     if not spec:
         raise FileNotFoundError("timeline-spec.json missing — run plan first")
-    src = Path(spec["main_footage"])
-    src = src if src.is_absolute() else paths.root / src
+    from .common import spec_footage
+    src = spec_footage(paths, spec)
     vdir = paths.p("08_quality_control/verify")
     vdir.mkdir(parents=True, exist_ok=True)
     ff = ffmpeg_exe()

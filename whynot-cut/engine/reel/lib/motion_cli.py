@@ -5,8 +5,6 @@ A motion project is a clip-like project `<EP>_<ID>_MO` created by `reels-select 
 """
 from __future__ import annotations
 
-import json
-
 ARGS: dict = {
     "ae-status": [],
     "ae-probe": [
@@ -64,7 +62,9 @@ def add_args(name: str, sp) -> None:
 
 
 def out(obj):
-    print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+    """One JSON document; a failed result exits 1, a refusal 2 (3.0 T2.2: lib/errors.emit)."""
+    from .errors import emit
+    emit(obj)
 
 
 def P(a):

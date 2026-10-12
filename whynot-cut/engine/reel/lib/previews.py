@@ -434,14 +434,17 @@ def grab_frame(video: Path, ms: int) -> Image.Image | None:
 
 
 def render_all(paths: Paths, composite_preview: bool = True) -> dict:
+    from .common import spec_footage
     spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    if not spec:
+        from .errors import Guidance
+        raise Guidance("no compiled plan yet (01_analysis/timeline-spec.json)", "Run `reel plan` first")
+    main = spec_footage(paths, spec)
     tpls = load_config("graphics-templates.json")["templates"]
     b = Brand(paths.client_db)
     man = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
     assets = {a["rel"]: a for a in man["assets"]}
     logo = next((a["display_derivative"] for a in man["assets"] if a["category"] == "logo"), None)
-    main = Path(spec["main_footage"])
-    main = main if main.is_absolute() else paths.root / main
     outs, comps, warns = [], [], []
     for ev in spec["events"]:
         p = ev["params"]

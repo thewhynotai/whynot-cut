@@ -180,6 +180,19 @@
   the build saved no new project. `ppro-frames` first polls one frame until Premiere's media is online (up to
   30 s, `media_wait`), keeps the Media pending re-export, and reports `pending_frames` (never `ok: true` while one
   remains). The engine sends resolved script paths, and a heartbeat without a time no longer crashes `ppro-status`.
+- Guidance instead of tracebacks; failed results exit 1 (T2.2, review IM-7 / MI-24, gap G71). An error that reaches
+  the top of `reel` prints `{"ok": false, "error", "where", "how", "log"}` and exits 1; the traceback goes to
+  `logs/pipeline.log` (the project's, else the client's, else the engine home's), never to stdout or stderr. Exit
+  codes: 0 success, 1 an error or a failed result (`ok: false`, or a `FAILED` / `REFUSED` / `BLOCKED` /
+  `BRIDGE_NOT_RUNNING` status: `plan`, `qc`, `ppro-build`, `preview-video`, `motion-build` ...), 2 a refusal
+  (`blocked` / `refused`, the approval gate, the writer lease); `reel status` / `reel next` show a BLOCKED project
+  and exit 0. JSON files and the preferences file may start with a UTF-8 BOM (PowerShell 5.1 writes one); a broken
+  JSON file names itself and the line. `reel plan` reports a decision without `start`/`end` or with a time that is
+  not one (also camera, graphic, item, sound, caption-highlight and music cue times) as a plan error instead of
+  crashing; without `global.main_footage` it uses the raw clip the video id names (with a warning) or errors, and a
+  main footage that does not exist is an error, so `previews` / `preview-video` no longer crash on a null footage.
+  `ref-analyze` before `discover`, silent dialogue in `audio-clean` and an aerender that never returns (`ae-render`,
+  `motion-render`) give guidance.
 - Discovery decides a file's role by its folder first (T2.5, review IM-8, structure 4.6): everything under the first
   folder of `data/` whose words say raw / rushes / footage is source footage, reference(s) / refs references, broll /
   b-roll / stock(s) B-roll, plus `data/Music` and `data/SFX` (any case, any depth: "Raw Footage", "RawClips" work).

@@ -39,7 +39,9 @@ def _parse_scalar(v: str):
 
 
 def parse(text: str) -> tuple[dict, str]:
-    """Frontmatter (flat key: value) and body. Unknown keys are kept; bad values fall back to defaults."""
+    """Frontmatter (flat key: value) and body. Unknown keys are kept; bad values fall back to defaults. A leading BOM
+    (Notepad / PowerShell 5.1 "UTF-8") and Windows line ends are accepted (3.0 T2.2, engine MI-24)."""
+    text = text.lstrip("﻿").replace("\r\n", "\n")
     m = re.match(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)(.*)\Z", text, re.S)
     if not m:
         return {}, text
@@ -70,11 +72,15 @@ def load(start: Path | None = None) -> dict:
     out = dict(DEFAULTS)
     problems = []
     if f:
+        fm, body, data = {}, "", b""
         try:
-            fm, body = parse(f.read_text(encoding="utf-8"))
+            data = f.read_bytes()
+            fm, body = parse(data.decode("utf-8-sig"))
         except OSError as e:
-            fm, body = {}, ""
             problems.append(f"unreadable: {e}")
+        except UnicodeDecodeError as e:     # never a crash (the hooks read this file): the defaults, and say where
+            line = data[:e.start].count(b"\n") + 1
+            problems.append(f"{f}: line {line} is not UTF-8 text (save the file as UTF-8); using the defaults")
         for k, v in fm.items():
             if k in CHOICES and str(v) not in CHOICES[k]:
                 problems.append(f"{k}: {v!r} is not one of {sorted(CHOICES[k])}; using {DEFAULTS[k]!r}")

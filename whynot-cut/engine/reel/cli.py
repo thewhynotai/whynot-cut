@@ -46,8 +46,38 @@ def P(a) -> Paths:
     return Paths(a.root, a.video_id)
 
 
-def out(obj):
-    print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+def out(obj, check: bool = True):
+    """Print the command's one JSON document; a failed result (`ok: false`, a FAILED/REFUSED/BLOCKED status) exits 1,
+    a refusal (`blocked`/`refused`) exits 2 (3.0 T2.2, lib/errors.py). check=False when `status` is a project state
+    (`reel status`, `reel next`), not this command's result."""
+    from lib.errors import emit
+    emit(obj, check)
+
+
+def error_log(a) -> Path:
+    """Where the top-level handler appends a traceback: the project's (or episode's) logs/pipeline.log, else the
+    client's output/logs/pipeline.log, else the engine home's logs/pipeline.log (no client folder)."""
+    from lib.common import engine_home
+    try:
+        root = Path(a.root).expanduser() if getattr(a, "root", None) else None
+        if root and (root / "assets").is_dir() and (root / "data").is_dir():
+            if getattr(a, "video_id", None) or getattr(a, "episode", None):
+                p = P(a)
+                if p.project.is_dir():
+                    return p.p("logs/pipeline.log")
+            return root / "output" / "logs" / "pipeline.log"
+    except Exception:  # noqa: BLE001 — the log location must never raise in the handler
+        pass
+    return engine_home() / "logs" / "pipeline.log"
+
+
+def fail(a, exc: BaseException):
+    """An exception reached the top: guidance JSON on stdout ({"ok": false, "error", "where", "how", "log"}), the
+    traceback in the log (never on stdout or stderr), exit 1 (3.0 T2.2, engine IM-7)."""
+    from lib.errors import report
+    shown = ["reel", str(getattr(a, "cmd", ""))] + [f"{o} {v}" for o, v in (("--video-id", getattr(a, "video_id", None)),
+                                                                          ("--episode", getattr(a, "episode", None))) if v]
+    out(report(exc, error_log(a), " ".join(shown)))
 
 
 def main_footage(paths: Paths, explicit: str | None) -> list[Path]:
@@ -263,6 +293,11 @@ def cmd_ref_analyze(a):
     from lib.media import probe
     p = P(a)
     inv = read_json(p.output / "discovery/input-inventory.json")
+    if not inv:
+        from lib.errors import Guidance
+        raise Guidance("no discovery yet: the client's reference edits are found by `reel discover`",
+                       f'Run `reel discover --root "{p.root}"` first, then `reel ref-analyze` again',
+                       where=str(p.output / "discovery/input-inventory.json"))
     refs = [Path(f["path"]) for f in inv["files"] if f["role"] == "editing_reference_video"]
     docs = [f["rel"] for f in inv["files"] if f["role"] == "editing_reference_doc"]
     res = analyze_all(p, refs, {str(r): probe(r)["duration_s"] for r in refs}) if refs else {}
@@ -292,16 +327,16 @@ def cmd_ref_style(a):
     p = P(a)
     if a.record:
         r = ref_style.record(p.root, by=a.by or "claude")
-        out(r)
+        out(r, check=False)
         if not r["ok"]:
-            raise SystemExit(2)
+            raise SystemExit(2)           # a refusal: the client style files are not ready to record
         return
     if a.apply:
         if not p.video_id:
             raise SystemExit("--video-id required for --apply (the video that reuses the client style)")
         p.ensure_project()
         r = ref_style.apply(p)
-        out(r)
+        out(r, check=False)
         if not r["ok"]:
             raise SystemExit(2)
         return
@@ -561,7 +596,7 @@ def cmd_handoff(a):
 
 
 def cmd_status(a):
-    out(load_status(P(a)))
+    out(load_status(P(a)), check=False)      # "status": "BLOCKED" is the project's state, not a failed command
 
 
 def _has_reference_videos(p: Paths) -> bool:
@@ -580,7 +615,7 @@ def cmd_next(a):
     p = P(a)
     if is_motion(p):
         from lib.motion_qc import motion_next
-        out(motion_next(p))
+        out(motion_next(p), check=False)
         return
     from lib import ref_style
     from lib.people import profile_notice as people_notice
@@ -646,7 +681,7 @@ def cmd_next(a):
     out({"status": status, "profile": active_profile(p.root), "next": todo[0] if todo else "done",
          "remaining": todo, "stale": stale,
          "reference_style": {"state": rs["client"]["state"], "video": rs["video"]["state"], "message": rs["client"]["message"]},
-         "notices": rs["notices"] + [n for n in (people_notice(p.root),) if n]})
+         "notices": rs["notices"] + [n for n in (people_notice(p.root),) if n]}, check=False)
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
@@ -1062,7 +1097,8 @@ def registered_commands() -> list[str]:
     return [*CORE_COMMANDS, *podcast_cli.ARGS, *motion_cli.ARGS]
 
 
-def main():
+def main(argv: list[str] | None = None):
+    argv = sys.argv[1:] if argv is None else list(argv)
     _utf8_stdio()
     import os
     # Hugging Face "Xet" transfers died on a Windows test machine (WinError 10038) and left 3 MB partial model caches;
@@ -1192,11 +1228,19 @@ def main():
             g.add_argument("--status", action="store_true", help="who holds the lock, since when, stale or not (default)")
             g.add_argument("--release", action="store_true",
                            help="remove the lock (lead only, when the editor says the other session is finished)")
-    pyargs = py_argv(sys.argv[1:])
+    pyargs = py_argv(argv)
     if pyargs is not None:          # everything after `py` belongs to the script (argparse would read its -m / -c)
         cmd_py(argparse.Namespace(cmd="py", pyargs=pyargs))
         return
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
+    try:
+        start(a)
+    except Exception as e:  # noqa: BLE001 — 3.0 T2.2 (IM-7): guidance JSON and exit 1, never a traceback
+        fail(a, e)
+
+
+def start(a):
+    """Gates, the client folder, the writer lock, then the command (main() turns any exception into guidance)."""
     if a.cmd in EXTRAS and not a.extras:
         out({"blocked": f"`{a.cmd}` is an optional After Effects/Photoshop extra. The default pipeline is Premiere only.",
              "how": "Only if the editor explicitly asked for AE/PS in this conversation, re-run with --extras."})

@@ -28,6 +28,7 @@ Process (adapted from *systematic-debugging* in obra/superpowers, MIT):
 | `wave.Error: unknown format: 65534` | 24-bit WAVs use WAVE_FORMAT_EXTENSIBLE | Durations come from PyAV (`audio_duration`) |
 | Media path "not in preflight" / StopIteration | `/var` vs `/private/var` (symlinked paths) | Compare `Path.resolve()` |
 | Extra `._*.mov` / `._*.psd` files counted or probed | exFAT drives store macOS metadata as `._` files | Every output glob filters `._` |
+| A command prints `ok: false` with `error`, `where`, `how` and `log` (exit 1) | An input or step problem the engine caught (exit 1 = error or failed result, 2 = refusal) | Do what `how` says; the full traceback is in the `log` file (`logs/pipeline.log`), never in the chat |
 | `ae-build` / `ps-build` exits 2 "not approved" | Plan gate: current plan unapproved or changed after approval | Play back `edit-plan.md`, then `approve-plan` |
 | `verify --record` refused: sheet older than renders | You rendered after building the sheet | `reel verify` again, look again, then record |
 | Planner: "evidence not found verbatim" | Evidence paraphrased, or the transcript was corrected later | Quote the corrected transcript exactly; use `…` to join fragments |

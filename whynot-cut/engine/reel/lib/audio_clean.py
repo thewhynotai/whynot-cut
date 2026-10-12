@@ -331,9 +331,24 @@ def _splice(ch1: Path, ch2: Path | None, regions, out: Path) -> None:
 
 
 def _loudness(path: Path) -> tuple[float, float]:
-    """Integrated LUFS and true peak (dBTP)."""
+    """Integrated LUFS and true peak (dBTP). Silent or unreadable audio is guidance, not an IndexError (3.0 T2.2):
+    ebur128 reports silence as -70 LUFS (its absolute gate) with a peak of -inf, and nothing for a file it cannot read;
+    gaining silence up to the target would only amplify the noise floor."""
+    from .errors import Guidance
     e = run([ffmpeg_exe(), "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128=peak=true", "-f", "null", "-"], check=False).stderr
-    return float(re.findall(r"I:\s+(-?[0-9.]+) LUFS", e)[-1]), float(re.findall(r"Peak:\s+(-?[0-9.]+) dBFS", e)[-1])
+    i = re.findall(r"I:\s+(-?(?:[0-9.]+|inf)) LUFS", e)
+    pk = re.findall(r"Peak:\s+(-?(?:[0-9.]+|inf)) dBFS", e)
+    how = ("Play the clip: if the speaker's microphone was off or the audio track is empty, use another recording (or "
+           "the camera's other audio channel) and run `reel audio-clean` again; if you hear speech, check the clip's "
+           "audio with `reel preflight`")
+    if not i or not pk:
+        raise Guidance(f"could not measure the loudness of {Path(path).name}: ffmpeg found no audio it can read", how,
+                       where=str(path))
+    lufs, tp = float(i[-1]), float(pk[-1])
+    if lufs <= -69.5 or tp == float("-inf"):
+        raise Guidance(f"the dialogue in {Path(path).name} is silent (loudness {lufs:g} LUFS): there is nothing to clean",
+                       how, where=str(path))
+    return lufs, tp
 
 
 def clean(paths: Paths, src: Path, nr_db: float | None = None, target_lufs: float = -14.0,
@@ -362,6 +377,8 @@ def clean(paths: Paths, src: Path, nr_db: float | None = None, target_lufs: floa
     # denoise each channel fully (keeps noise tracking continuous), then splice regions with 40 ms crossfades
     # Measured on the first production clip (speaker mic, 7 s+): raw contrast 15.5 dB -> 23.4 dB with this chain. 89 % of the residual
     # noise was mains hum at 100 Hz (+31 dB) and harmonics, which afftdn alone cannot remove -> narrow notches.
+    # two 2-pole highpasses on purpose (engine MI-24): a 4-pole, 24 dB/octave slope under 90 Hz removes rumble and
+    # handling noise without thinning the voice the way a higher cutoff would
     stages = ["highpass=f=90", "highpass=f=90"] + [f"bandreject=f={f}:width_type=q:w=25" for f in hum_notches_hz]
     if nr_db and nr_db > 0:
         stages.append(f"afftdn=nr={nr_db}:nf=-32:tn=1")

@@ -54,6 +54,15 @@ def cli_module():
     return m
 
 
+def preflight_ran(tc, code, out, msg):
+    """The id was accepted and preflight ran on this clip's file. The fixtures are dummy bytes, so preflight reports
+    them unreadable: a failed result, exit 1 (3.0 T2.2), never a refusal or a crash."""
+    tc.assertEqual(code, 1, msg)
+    tc.assertIsInstance(out, dict, msg)
+    tc.assertIs(out["ok"], False, msg)
+    tc.assertTrue(out["issues"], msg)
+
+
 def reel(root: Path, *argv, video_id=None):
     cmd = [sys.executable, "-B", str(CLI), "--root", str(root)] + (["--video-id", video_id] if video_id else []) + list(argv)
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
@@ -184,7 +193,7 @@ class TestClipIdMap(unittest.TestCase):
         from lib.onboard import inbox
         for c in inbox(self.root)["clips"]:
             code, out, err = reel(self.root, "preflight", video_id=c["video_id"])
-            self.assertEqual(code, 0, (c, err))
+            preflight_ran(self, code, out, (c, err))
             self.assertTrue(out["issues"], out)                       # dummy bytes: "open failed" for THIS file
             self.assertEqual(Path(out["issues"][0]["file"]).name, Path(c["file"]).name, c)
             self.assertTrue((self.root / "output/projects" / c["video_id"]).is_dir())
@@ -208,7 +217,7 @@ class TestClipIdCompat(unittest.TestCase):
             root = make_client(t, [ARABIC_1])
             reel(root, "discover")
             code, out, err = reel(root, "preflight")                  # no --video-id: the only clip
-            self.assertEqual(code, 0, err)
+            preflight_ran(self, code, out, err)
             self.assertTrue((root / "output/projects" / ("CLIP_" + h6("مقابلة ١"))).is_dir())
             self.assertFalse((root / "output/projects/VIDEO").exists())
 
@@ -304,7 +313,7 @@ class TestClipIdReviewFixes(unittest.TestCase):
         outro = ids["data/Raw/Dr Sherif outro.mp4"]
         for given, want in (("Dr Sherif intro", spaced), ("مقابلة ١", arabic), (outro.lower(), outro)):
             code, out, err = reel(self.root, "preflight", video_id=given)
-            self.assertEqual(code, 0, err)
+            preflight_ran(self, code, out, err)
             self.assertIn(want, err)                                   # one note says which id was used
         self.assertEqual(self.projects(), sorted([spaced, arabic, outro]))    # no spaced/Arabic/lower-case folder
         for vid in (spaced, arabic):
@@ -318,7 +327,7 @@ class TestClipIdReviewFixes(unittest.TestCase):
         inbox(self.root)
         Paths(self.root, "Dr Sherif intro").ensure_project()          # made by hand after the ids were assigned
         code, out, err = reel(self.root, "preflight", video_id="Dr Sherif intro")
-        self.assertEqual(code, 0, err)
+        preflight_ran(self, code, out, err)
         self.assertEqual(self.projects(), ["Dr Sherif intro"])
 
     def test_2x_raw_stem_project_is_adopted(self):

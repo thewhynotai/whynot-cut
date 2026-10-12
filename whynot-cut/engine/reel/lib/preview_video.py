@@ -165,8 +165,8 @@ def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
     data = job_data(paths)
     if data["_missing"]:
         return {"ok": False, "error": "graphics stills missing - run `reel previews` first", "missing": data["_missing"][:10]}
-    src = Path(spec["main_footage"])
-    src = src if src.is_absolute() else paths.root / src
+    from .common import spec_footage
+    src = spec_footage(paths, spec)
     W = int(width) // 2 * 2
     H = int(round(W * 16 / 9)) // 2 * 2
     k = W / 1080

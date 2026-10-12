@@ -4,7 +4,6 @@ Episode commands take `--episode <EP>` (the id from `reel episodes`); when a cli
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from .whisper_backends import RUN_ARGS
@@ -73,7 +72,9 @@ def add_args(name: str, sp) -> None:
 
 
 def out(obj):
-    print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
+    """One JSON document; a failed result exits 1, a refusal 2 (3.0 T2.2: lib/errors.emit)."""
+    from .errors import emit
+    emit(obj)
 
 
 def EP(a):

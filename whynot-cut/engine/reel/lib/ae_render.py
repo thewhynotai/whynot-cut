@@ -6,12 +6,28 @@ counts only when its output file exists and is newer than the call; frames are p
 from __future__ import annotations
 
 import shutil
+import subprocess
 import tempfile
 import time
 from pathlib import Path
 
 from . import plat
 from .common import run, write_text
+
+TIMEOUT_HOW = ("Open After Effects and close any dialog it shows (a missing font, footage or plug-in message stops "
+               "aerender), check the project opens and plays, then render again; a long video may need a larger "
+               "--timeout")
+
+
+def timeout_message(timeout) -> str:
+    return f"aerender did not finish within {timeout} s and was stopped (After Effects' renderer hung or is too slow)"
+
+
+def _text(b) -> str:
+    """Partial output of a timed-out process: bytes, str or None."""
+    if b is None:
+        return ""
+    return b.decode("utf-8", "replace") if isinstance(b, bytes) else str(b)
 
 
 def aerender_cmd(aerender: str, aep: Path, comp: str, out: Path, rs: str, om: str,
@@ -58,6 +74,13 @@ def render(aep: Path, comp: str, out: Path, rs: str, om: str, start_frame: int |
         shutil.copy2(aep, r_aep)
     try:
         p = run(aerender_cmd(exe, r_aep, comp, r_out, rs, om, start_frame, end_frame), check=False, timeout=timeout)
+    except subprocess.TimeoutExpired as e:      # 3.0 T2.2: a FAILED result that says what to do, not a traceback
+        if stage is not None:
+            shutil.rmtree(stage, ignore_errors=True)
+        if log:
+            write_text(Path(log), _text(e.stdout) + "\n" + _text(e.stderr))
+        return {"status": "FAILED", "returncode": None, "output": str(out), "elapsed_s": round(time.time() - t0, 1),
+                "log": str(log) if log else None, "msg": timeout_message(timeout), "how": TIMEOUT_HOW}
     except BaseException:
         if stage is not None:
             shutil.rmtree(stage, ignore_errors=True)

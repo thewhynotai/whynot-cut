@@ -169,9 +169,8 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
     W, H = seq_cfg["general"]["frame_width"], seq_cfg["general"]["frame_height"]
     fps = seq_fps()          # 24, 25, 29.97 ... (frames below count real frames at this rate)
     TPF = ticks_per_frame(fps)
-    main = Path(spec["main_footage"])
-    if not main.is_absolute():
-        main = paths.root / main
+    from .common import spec_footage
+    main = spec_footage(paths, spec)
     mp = next((f for f in pre["files"] if Path(f["path"]).resolve() == main.resolve()), None)
     if mp is None:
         raise FileNotFoundError(f"{main} not in preflight — run `reel preflight` for it")

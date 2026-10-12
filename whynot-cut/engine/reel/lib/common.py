@@ -199,17 +199,29 @@ def _retry(fn):
 
 
 def read_json(path: Path, default=None):
+    """The JSON in path (default when it does not exist). A UTF-8 BOM is accepted (PowerShell 5.1 writes one); a file
+    that is not valid JSON or not UTF-8 raises errors.FileFormatError (a ValueError) naming the file and line (T2.2)."""
+    from .errors import FileFormatError, decode_position
     path = Path(path)
     if not path.exists():
         return default
 
     def load():
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
+        with open(path, "rb") as f:
+            return f.read()
     try:
-        return _retry(load)
+        data = _retry(load)
     except FileNotFoundError:
         return default
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as e:
+        line, col = decode_position(data, e)
+        raise FileFormatError(path, line, col, "not UTF-8 text (save it as UTF-8)") from None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise FileFormatError(path, e.lineno, e.colno, e.msg) from None
 
 
 def write_json(path: Path, data) -> Path:
@@ -536,6 +548,19 @@ def range_input_args(rng: dict) -> list:
     if rng.get("out_ms"):
         a += ["-t", f"{(rng['out_ms'] - rng.get('in_ms', 0)) / 1000:.3f}"]
     return a
+
+
+def spec_footage(paths, spec: dict) -> Path:
+    """The raw file a compiled timeline spec plays (its `main_footage`, relative to the client root), or guidance when
+    the spec has none: a plan compiled before 3.0 T2.2 (gap G71) could leave it null, and every later stage crashed."""
+    from .errors import Guidance
+    mf = (spec or {}).get("main_footage")
+    if not mf:
+        raise Guidance("01_analysis/timeline-spec.json has no main_footage (the raw file this video is cut from)",
+                       "Set \"main_footage\" in the \"global\" block of 01_analysis/edit-decisions.json (e.g. "
+                       "\"data/Raw/C0239.MP4\"), then run `reel plan` again", where=str(paths.p("01_analysis/timeline-spec.json")))
+    f = Path(mf)
+    return f if f.is_absolute() else Path(paths.root) / f
 
 
 def content_domain() -> str:

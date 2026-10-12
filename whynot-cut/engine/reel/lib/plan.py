@@ -216,13 +216,15 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
     pre_all = read_json(paths.p("00_inputs/preflight.json"), {}) or {}
     rng = source_range(paths)
     main_file = base.get("main_footage") or rng.get("footage")
+    main_default = None if main_file else _default_footage(paths)     # G71: never compile a plan without footage
+    main_file = main_file or main_default
     shots_on = bool((pre_all.get("shots") or {}).get("shots") and base.get("base_scale_percent") in (None, "auto")
                     and main_video(pre_all, main_file))
     flagged = transcript_flags(paths)
     return PlanInputs(
         ctx=ctx, paths=paths, root=paths.root, video_id=paths.video_id, ed=ed, base=base, tpl=tpl,
         known_assets={a["rel"]: a for a in manifest["assets"]}, ttext=ttext, dur_ms=dur_ms, fps=seq_fps(ctx),
-        recipe=for_paths(paths), pre_all=pre_all, rng=rng, main_file=main_file,
+        recipe=for_paths(paths), pre_all=pre_all, rng=rng, main_file=main_file, main_default=main_default,
         seq_cfg=load_config("sequence-settings.json", ctx), style=load_config("style.json", ctx),
         podcast=load_config("podcast.json", ctx) if shots_on else {},
         speakers=(read_json(paths.p("00_inputs/speakers.json"), {}) or {}) if shots_on else {},
@@ -230,6 +232,36 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
         subtitle_style=load_config("subtitle-style.json", ctx) if wcut and timemap_on else None,
         flagged=flagged, profile=load_config("profile.json", ctx),
         exists=lambda rel: (paths.root / rel).exists(), is_file=lambda rel: (paths.root / rel).is_file())
+
+
+def _default_footage(paths: Paths) -> str | None:
+    """global.main_footage left out of a whole-clip video (gap G71): the raw clip this video id names (`reel inbox`),
+    else the client's only raw clip, as a path relative to the client root; None when discovery cannot tell."""
+    from .clip_ids import resolve
+    inv = read_json(paths.output / "discovery/input-inventory.json")
+    if not inv or not paths.video_id:
+        return None
+    try:
+        f = resolve(paths.root, paths.video_id, inv)
+    except SystemExit:                    # an id whose clip left data/: no default (the plan error says what to do)
+        return None
+    raw = [x for x in inv.get("files", []) if x.get("role") == "source_footage"]
+    if f is None and len(raw) == 1:
+        f = Path(raw[0]["path"])
+    if f is None:
+        return None
+    try:
+        return Path(f).resolve().relative_to(paths.root).as_posix()
+    except ValueError:
+        return str(f)
+
+
+def _try_ms(v) -> int | None:
+    """to_ms, or None when v is not a time."""
+    try:
+        return to_ms(v)
+    except (TypeError, ValueError):
+        return None
 
 
 @_in_context
@@ -248,6 +280,24 @@ def validate_decisions(inp: PlanInputs):
         if a < 0 or b > dur_ms + 40:
             errors.append(f"{label}: outside media duration {fmt_ts(dur_ms)}")
 
+    def ms(label, v):
+        """A time field -> ms, or None with an error (T2.2: never a ValueError out of the plan)."""
+        t = _try_ms(v)
+        if t is None:
+            errors.append(f"{label} {v!r} is not a time (seconds such as 12.5, or a clock such as 00:00:12.500)")
+        return t
+
+    def num(label, v, default):
+        try:
+            return float(v if v is not None else default)
+        except (TypeError, ValueError):
+            errors.append(f"{label} {v!r} is not a number")
+            return float(default)
+
+    for h in ed.get("caption_highlights", []) or []:
+        if isinstance(h, dict) and h.get("at"):
+            ms(f"caption_highlights '{h.get('text', '')}': at", h["at"])
+
     for d in ed.get("decisions", []):
         did = d.get("decision_id")
         if not did or did in seen_ids:
@@ -264,7 +314,11 @@ def validate_decisions(inp: PlanInputs):
             frags = [norm(f) for f in re.split(r"…|\.\.\.", d.get("evidence", "")) if norm(f)]
             if not frags or not all(f in ttext for f in frags):
                 errors.append(f"{did}: evidence not found verbatim in transcript: {d.get('evidence')!r}")
-        s_ms, e_ms = to_ms(d["start"]), to_ms(d["end"])
+        if d.get("start") in (None, "") or d.get("end") in (None, ""):
+            continue                      # reported above; nothing below can be timed without both
+        s_ms, e_ms = ms(f"{did}: start", d["start"]), ms(f"{did}: end", d["end"])
+        if s_ms is None or e_ms is None:
+            continue
         chk_range(did, s_ms, e_ms)
         d["_start_ms"], d["_end_ms"] = s_ms, e_ms
 
@@ -273,12 +327,15 @@ def validate_decisions(inp: PlanInputs):
             ctype = cam.get("type", "hold")
             if ctype not in VALID_CAMERA:
                 errors.append(f"{did}: camera.type {ctype} invalid")
-            at = to_ms(cam.get("at", d["start"]))
-            camera.append({"decision_id": did, "type": ctype, "at_ms": at, "frame": ms_to_frame(at),
-                           "until_ms": to_ms(cam["until"]) if cam.get("until") else e_ms,
-                           "scale_factor": float(cam.get("scale_factor", 1.0)),
-                           "offset_y": float(cam.get("offset_y", 0.0)), "offset_x": float(cam.get("offset_x", 0.0)),
-                           "rationale": cam.get("rationale", "")})
+            at = ms(f"{did}: camera.at", cam.get("at", d["start"]))
+            until = ms(f"{did}: camera.until", cam["until"]) if cam.get("until") else e_ms
+            if at is not None and until is not None:
+                camera.append({"decision_id": did, "type": ctype, "at_ms": at, "frame": ms_to_frame(at),
+                               "until_ms": until,
+                               "scale_factor": num(f"{did}: camera.scale_factor", cam.get("scale_factor"), 1.0),
+                               "offset_y": num(f"{did}: camera.offset_y", cam.get("offset_y"), 0.0),
+                               "offset_x": num(f"{did}: camera.offset_x", cam.get("offset_x"), 0.0),
+                               "rationale": cam.get("rationale", "")})
 
         for g in d.get("graphics", []):
             gid = g.get("id")
@@ -289,12 +346,16 @@ def validate_decisions(inp: PlanInputs):
             if t not in tpl:
                 errors.append(f"{gid}: unknown template {t}")
                 continue
-            gs, ge = to_ms(g.get("start", d["start"])), to_ms(g.get("end", d["end"]))
+            gs, ge = ms(f"{gid}: start", g.get("start", d["start"])), ms(f"{gid}: end", g.get("end", d["end"]))
+            if gs is None or ge is None:
+                continue
             chk_range(gid, gs, ge)
             if not (s_ms - 40 <= gs and ge <= e_ms + 2000):
                 warnings.append(f"{gid}: graphic extends well beyond its decision window")
             for it in g.get("items", []):
-                it["_at_ms"] = to_ms(it["at"]) if "at" in it else gs
+                it["_at_ms"] = (ms(f"{gid}: item '{it.get('text')}' at", it["at"]) if "at" in it else gs)
+                if it["_at_ms"] is None:
+                    it["_at_ms"] = gs     # reported above
                 if not (gs <= it["_at_ms"] < ge):
                     errors.append(f"{gid}: item '{it.get('text')}' at outside graphic span")
             imgs = [g["image"]] if g.get("image") else []
@@ -350,7 +411,9 @@ def validate_decisions(inp: PlanInputs):
                                  "decision_id": did, "segment_id": d.get("segment_id"), "auto": True, "gain_db": -18})
 
         for s in d.get("sound", []):
-            at = to_ms(s.get("at", d["start"]))
+            at = ms(f"{did}: sound.at", s.get("at", d["start"]))
+            if at is None:
+                continue
             cues.append({"cue_id": s.get("cue_id") or f"SFX_{did}_{at}", "kind": s.get("type", "pop"),
                          "at_ms": at, "related_visual": s.get("related_visual"), "decision_id": did,
                          "segment_id": d.get("segment_id"), "auto": False, "gain_db": s.get("gain_db", -14),
@@ -633,7 +696,11 @@ def build_audio(inp: PlanInputs, cues: list, tmap, dur_f: int):
     music = dict(inp.ed.get("music", {"status": "NO_MUSIC_SUPPLIED"}))
     cps = []
     for cp in music.get("cue_points", []):
-        src_ms = to_ms(cp["at"]) if cp.get("at") is not None else int(cp.get("frame", 0)) * 1000 / FPS_
+        src_ms = _try_ms(cp["at"]) if cp.get("at") is not None else int(cp.get("frame", 0)) * 1000 / FPS_
+        if src_ms is None:
+            errors.append(f"music cue '{cp.get('label', '')}': at {cp['at']!r} is not a time (seconds such as 12.5, "
+                          "or a clock such as 00:00:12.500)")
+            continue
         f = tmap.frame(src_ms) if tmap else ms_to_frame(src_ms)
         if f >= dur_f:
             warnings.append(f"music cue '{cp.get('label', '')}' at source {src_ms / 1000:.2f}s falls after the end; placed on the last frame")
@@ -658,6 +725,17 @@ def final_checks(inp: PlanInputs, events: list):
     if rng and base.get("main_footage") and Path(base["main_footage"]).name != Path(rng["footage"]).name:
         errors.append(f"global.main_footage {base['main_footage']} is not this video's range file {rng['footage']} "
                       "(`reel range`)")
+    # G71: every later stage plays this file; a plan without it compiled "ok" and previews then crashed
+    if not inp.main_file:
+        errors.append("global.main_footage missing: set it in the \"global\" block of 01_analysis/edit-decisions.json "
+                      "(the raw file this video is cut from, e.g. data/Raw/C0239.MP4); with `reel discover` run, a video "
+                      "id that names one raw clip defaults to it")
+    elif not inp.exists(inp.main_file):
+        errors.append(f"global.main_footage {inp.main_file} not found in the client folder: give the raw file's path "
+                      "relative to the client folder (e.g. data/Raw/C0239.MP4)")
+    elif inp.main_default:
+        warnings.append(f"global.main_footage not set: using {inp.main_default} (the raw clip of {inp.video_id}); "
+                        "set it in edit-decisions.json to make it explicit")
     # words the transcript editor flagged as uncertain never go on a graphic until the editor has heard them
     flagged = inp.flagged
     for e in events:
@@ -684,14 +762,14 @@ def final_checks(inp: PlanInputs, events: list):
 @_in_context
 def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, recipe_info) -> dict:
     """The timeline spec (01_analysis/timeline-spec.json) from the steps' data."""
-    FPS_, rng, base = inp.fps, inp.rng, inp.base
-    caption_hl = [{"text": h["text"], "at_ms": to_ms(h["at"]) if h.get("at") else None}
+    FPS_, rng = inp.fps, inp.rng
+    caption_hl = [{"text": h["text"], "at_ms": _try_ms(h["at"]) if h.get("at") else None}   # bad "at": a plan error
                   for h in inp.ed.get("caption_highlights", [])]
     return {"generated": now_iso(), "video_id": inp.video_id, "fps": FPS_,
             "source_in_ms": int(rng.get("in_ms", 0)), "source_range": rng or None,
             "duration_ms": tm["dur_ms"], "duration_frames": tm["dur_f"],
             "rounding_policy": f"frame = round_half_up(ms*{FPS_:.5g}/1000) from absolute time (no accumulation)",
-            "main_footage": base.get("main_footage") or rng.get("footage"), "base_scale_percent": fr["bsp"],
+            "main_footage": inp.main_file, "base_scale_percent": fr["bsp"],
             "base_offset_x": float(cam["box"] or 0.0), "base_offset_y": float(cam["boy"] or 0.0), "framing": fr["framing"],
             "main_segments": tm["merged"], "events": sorted(tm["events"], key=lambda e: (e["start_frame"], e["track"])),
             "caption_source": "02_transcription/captions-short-seq.srt" if tm["tmap"] else "02_transcription/captions-short.srt",
