@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .common import Paths, fmt_ts, load_config, now_iso, read_json, sha1_head, stable_id, write_json
+from .common import Paths, check_project_id, fmt_ts, load_config, now_iso, read_json, sha1_head, stable_id, write_json
 
 EPISODE_SUBDIRS = ["00_inputs/intake", "01_analysis", "02_transcription/chunks", "03_candidates", "publish/reels",
                    "publish/thumbnail/candidates", "08_quality_control", "logs"]
@@ -20,6 +20,7 @@ class EpisodePaths(Paths):
     """Same helpers as a clip project (`p()`, `ensure_project()`), rooted at output/episodes/<EP>/."""
 
     def __init__(self, root: Path, episode_id: str):
+        check_project_id(episode_id, "episode id", strict=True)       # Gate 2 B4: never a path out of output/episodes
         super().__init__(root, episode_id)
         self.episode_id = episode_id
         self.project = self.output / "episodes" / episode_id

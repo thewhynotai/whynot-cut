@@ -76,7 +76,8 @@ def engine_home() -> Path:
     bin/reel and bin/reel.cmd resolve the same order."""
     for k in HOME_ENV:
         if os.environ.get(k):
-            return Path(os.environ[k]).expanduser()
+            # absolute (Gate 2 minor): a relative value would follow the current folder, e.g. into a client folder
+            return Path(os.path.abspath(Path(os.environ[k]).expanduser()))
     saved = saved_options()["engine_home"]
     if saved:
         return _saved_path(saved)

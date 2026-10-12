@@ -226,6 +226,11 @@ def _host_finished(res_p: Path) -> bool:
         r = json.loads(res_p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
+    return _host_finished_doc(r)
+
+
+def _host_finished_doc(r) -> bool:
+    """False for the bridge's own "no reply" timeout result (or anything that is not a result document)."""
     err = r.get("error") if isinstance(r, dict) else None
     return isinstance(r, dict) and not (isinstance(err, str) and err.startswith("no reply"))
 
@@ -276,6 +281,10 @@ def _wait(queue: Path, jid: str, t0: float, claim_s: float, timeout: float, poll
                    "bridge_ok": r.get("ok"), "response": inner, "elapsed_s": round(time.time() - t0, 1), "job": jid}
             if not r.get("ok") and r.get("error") and inner is None:
                 out["error"] = r["error"]           # the bridge's own refusal (script not whitelisted, no reply)
+            if not _host_finished_doc(r):
+                # Gate 2 B3: the bridge's own "no reply from <host>" timeout freed the queue while ExtendScript may
+                # still run and save: claimed, so ppro_build keeps the old project parked instead of restoring over it
+                out["claimed"] = True
             return out
         if claimed_at is None:
             if claim_p.exists() or run_p.exists() or not job_p.exists():

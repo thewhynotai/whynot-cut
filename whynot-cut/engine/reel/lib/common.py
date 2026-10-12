@@ -412,6 +412,26 @@ def run(cmd, check=True, capture=True, timeout=None, **kw) -> subprocess.Complet
 
 
 # --------------------------------------------------------------------------- paths
+STRICT_ID = re.compile(r"[A-Za-z0-9._-]+")        # every id the engine hands out (clip ids, episodes, reels)
+_BAD_ID = re.compile(r"[/\\:*?\"<>|\x00-\x1f]|\.\.")
+
+
+def check_project_id(vid, kind: str = "video id", strict: bool = False) -> str:
+    """A project id is ONE plain folder name under output/projects (or output/episodes): never a path that climbs out
+    into assets/ or data/ (Gate 2 B4). Engine ids are `[A-Za-z0-9._-]+` without `..`; a clip's raw file stem
+    ("Dr Sherif intro", a 2.x project folder kept as is) is also allowed for video ids (strict=False): no separators,
+    `..`, drive colon, Windows-reserved characters, control characters, or leading/trailing space or dot."""
+    v = str(vid)
+    ok = bool(v) and not _BAD_ID.search(v) and v == v.strip(" .") and \
+        (STRICT_ID.fullmatch(v) if strict else True)
+    if not ok:
+        from .errors import Guidance
+        raise Guidance(f"invalid {kind} {v!r}: it must be one plain folder name (letters, digits, '.', '_', '-'; "
+                       "no '/', '\\', ':' or '..')",
+                       "Use the id that `reel inbox` (clips) or `reel episodes` (episodes) lists, e.g. C0239 or EP12.")
+    return v
+
+
 class Paths:
     """Resolves every location from the main client folder (contains assets/ and data/)."""
 
@@ -423,6 +443,7 @@ class Paths:
         self.client_db = self.output / "client_database"
         self.video_id = video_id
         if video_id:
+            check_project_id(video_id)
             self.project = self.output / "projects" / video_id
 
     def p(self, rel: str) -> Path:

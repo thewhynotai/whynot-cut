@@ -881,13 +881,21 @@ def mark_legacy_client(root: Path):
 
 
 def take_writer_lock(a):
-    """Take or refresh the session's lease on the client for a writing command (None for readers and commands
-    without a client folder). Another session's live lease -> `{"blocked", "how"}` and exit 2."""
+    """Take or refresh the session's lease on the client for a writing command (None for readers and machine-level
+    commands; a writer whose --root is not a client folder -> Guidance, exit 1). Another session's live lease ->
+    `{"blocked", "how"}` and exit 2."""
     if not a.root or not writes(a):
         return None
     root = Path(a.root).expanduser()
     if not ((root / "assets").is_dir() and (root / "data").is_dir()):
-        return None                       # not a client folder: the command reports that itself
+        if a.cmd in NO_ROOT:              # machine-level (settings --init writes its own FOLDER): not the client's
+            return None
+        # Gate 2 B4: a writing command never creates output/ in a folder that is not a client (a wrong --root, or one
+        # pointing inside a client's assets/ or data/). Readers (status, next, lock, doctor, validate) stay lenient.
+        from lib.errors import Guidance
+        raise Guidance(f"{root} is not a client folder: it needs assets/ and data/ (nothing was written)",
+                       "Pass --root the client folder itself (the one that holds assets/ and data/), not a folder "
+                       "inside it; `reel scaffold --root <new folder>` creates a new client.", where=str(root))
     from lib import writer_lock
     mark_legacy_client(root)
     shown = ["reel", a.cmd] + [f"{o} {v}" for o, v in (("--video-id", a.video_id), ("--episode", a.episode)) if v]

@@ -233,7 +233,8 @@ def parked_previous(paths: Paths) -> dict | None:
     prproj = paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")
     if prproj.exists():
         return None
-    parked = sorted(prproj.parent.glob(f"{prproj.stem}_prev_*.prproj"))
+    import glob as _glob
+    parked = sorted(prproj.parent.glob(f"{_glob.escape(prproj.stem)}_prev_*.prproj"))      # a stem with [ ] * ?
     if not parked:
         return None
     last = parked[-1]
@@ -242,6 +243,21 @@ def parked_previous(paths: Paths) -> dict | None:
                    f"({prproj.name}). Make sure Premiere is not building this reel, then rename {last.name} back to "
                    f"{prproj.name} to keep working in it, or run with --force to build a new project (the parked file "
                    "stays as a backup)."}
+
+
+_PREV_SEQ = __import__("itertools").count()
+
+
+def prev_name(prproj: Path) -> Path:
+    """`<project>_prev_<YYYYmmdd-HHMMSS>-<microseconds><seq>.prproj`: unique below the second (two builds in one second
+    on macOS once produced the same name) and still sorted oldest -> newest (parked_previous takes the last)."""
+    import time
+    while True:
+        t = time.time()
+        name = prproj.with_name(f"{prproj.stem}_prev_{time.strftime('%Y%m%d-%H%M%S', time.localtime(t))}-"
+                                f"{int(t % 1 * 1e6):06d}{next(_PREV_SEQ) % 100:02d}.prproj")
+        if not name.exists():
+            return name
 
 
 def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: bool) -> dict:
@@ -267,19 +283,32 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
     backup = None
     closed = None
     if prproj.exists():
-        # close it in Premiere first (saved, nothing lost): on Windows an open project locks the stills it uses, and they
-        # are re-rendered below
+        from .verify import prproj_signature
+        rec_p = paths.p("07_premiere/ppro-build-result.json")
+        rec = read_json(rec_p, {}) or {}
+        # what the pipeline saved last (else, for a project it never signed, the file as it is before the close)
+        pipeline_sig = rec.get("content_signature") or prproj_signature(prproj)
+        # close it in Premiere first: on Windows an open project locks the stills it uses, and they are re-rendered
+        # below. The close SAVES the open project, so it may write the editor's unsaved work to disk (Gate 2 B2).
         closed = submit("close_project_path", {"path": str(prproj)}, timeout=60)
-        if ((closed.get("response") or {}).get("result") or {}).get("closed") and not em:
-            # that close saved the file: the save is the pipeline's own, not the editor's (else a failed rebuild would
-            # make the next one report EDITOR_CHANGES_PRESENT)
-            rec = read_json(paths.p("07_premiere/ppro-build-result.json"), {})
-            if rec:
-                rec["prproj_mtime"] = prproj.stat().st_mtime
-                rec["closed_by_pipeline_at"] = now_iso()
-                from .verify import prproj_signature
-                rec["content_signature"] = prproj_signature(prproj)
-                write_json(paths.p("07_premiere/ppro-build-result.json"), rec)
+        after_sig = prproj_signature(prproj) if prproj.exists() else pipeline_sig
+        if after_sig != pipeline_sig and not replace_edited:
+            # never recorded as the pipeline's: the record keeps the pipeline's signature, so the next run sees it too
+            return {"status": "EDITOR_CHANGES_PRESENT", "closed_previous": (closed or {}).get("response"),
+                    "detail": {"project": str(prproj), "content": "changed (saved by Premiere when the build closed "
+                                                                  "the open project)"},
+                    "blocked": "the project open in Premiere had changes that are not the pipeline's",
+                    "fix": "Premiere saved the editor's work in this project when the build closed it. A rebuild starts "
+                           "from the plan, so their manual edits would NOT carry over. Ask the editor; only with their "
+                           "OK re-run with --force --replace-edited (the old file is kept as *_prev_*.prproj)."}
+        if ((closed.get("response") or {}).get("result") or {}).get("closed") and not em and rec \
+                and after_sig == pipeline_sig and prproj.exists():
+            # that close saved the file without a change: the save is the pipeline's own, not the editor's (else a
+            # failed rebuild would make the next one report EDITOR_CHANGES_PRESENT)
+            rec["prproj_mtime"] = prproj.stat().st_mtime
+            rec["closed_by_pipeline_at"] = now_iso()
+            rec["content_signature"] = after_sig
+            write_json(rec_p, rec)
     data = job_data(paths, overwrite, stage_media=True)
     if data["_missing"]:
         return {"status": "MISSING_GRAPHICS", "ok": False, "missing": data["_missing"],      # T2.16: exit 1
@@ -293,7 +322,7 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
         if prproj.exists():
             # out of Premiere's way (it creates the new project at this path); it stays `_prev_` only if the build
             # saves a new project, else it is put back below
-            backup = prproj.with_name(f"{prproj.stem}_prev_{time.strftime('%Y%m%d-%H%M%S')}.prproj")
+            backup = prev_name(prproj)
             prproj.rename(backup)
         submitting = True       # from here an exception without cep_queue's verdict may come after the job was queued
         r = submit("build_project", {k: v for k, v in data.items() if not k.startswith("_")}, timeout=900)
@@ -349,6 +378,18 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
     # what the pipeline saved: a later save that only moves the file time (Premiere saving open projects, auto-save)
     # is not an editor change (verify.editor_modified)
     out["content_signature"] = prproj_signature(prproj) if prproj.exists() else None
+    if restored and not saved_now:
+        # Gate 2 B1: the project on disk is the PREVIOUS one again (maybe with the editor's work): the record keeps what
+        # the pipeline saved last, so verify.editor_modified still sees the editor's changes on the next --force
+        from .verify import prproj_build_time
+        prev = read_json(paths.p("07_premiere/ppro-build-result.json"), {}) or {}
+        out["prproj_mtime"] = prproj_build_time(paths, prproj)
+        out["content_signature"] = prev.get("content_signature")
+        if prev.get("closed_by_pipeline_at"):
+            out["closed_by_pipeline_at"] = prev["closed_by_pipeline_at"]
+        if prev.get("project"):
+            out["project"] = prev["project"]
+        # (a project the pipeline never built: no mtime/signature, so any later save of it counts as the editor's)
     write_json(paths.p("07_premiere/ppro-build-result.json"), out)
     return out
 
