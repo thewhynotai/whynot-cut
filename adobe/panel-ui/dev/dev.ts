@@ -10,6 +10,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 
 let lang: Language = q.get("lang") === "ar" ? "ar" : "en";
 let width = [280, 340, 480].includes(Number(q.get("w"))) ? Number(q.get("w")) : 340;
+let height = [470, 640, 900].includes(Number(q.get("h"))) ? Number(q.get("h")) : 640;
 const scenarioParam = q.get("scenario") as Scenario | null;
 const scenario: Scenario = scenarioParam && SCENARIOS.includes(scenarioParam) ? scenarioParam : "showcase";
 
@@ -43,6 +44,10 @@ function applyWidth(): void {
   $("col").style.width = `${width}px`;
   pressed("width", String(width));
 }
+function applyHeight(): void {
+  $("col").style.height = `${height}px`;
+  pressed("height", String(height));
+}
 function applyLang(): void {
   pressed("lang", lang);
   document.documentElement.lang = lang;
@@ -54,6 +59,13 @@ $("lang").addEventListener("click", (e) => {
     lang = v;
     source.setLanguage(lang);
     applyLang();
+  }
+});
+$("height").addEventListener("click", (e) => {
+  const v = Number((e.target as HTMLElement).getAttribute("data-v"));
+  if (v) {
+    height = v;
+    applyHeight();
   }
 });
 $("width").addEventListener("click", (e) => {
@@ -78,3 +90,4 @@ $("progress").addEventListener("change", (e) => {
 
 applyLang();
 applyWidth();
+applyHeight();

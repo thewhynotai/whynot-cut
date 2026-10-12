@@ -79,16 +79,32 @@ function header(s: PanelState, t: Strings): string {
   );
 }
 
+/** A command chip on its own row. The row is a flex container, so the chip is never laid out inside running text
+ *  (UXP draws inline-flex over the sentence). */
+const cmdRow = (cmd: string) => `<div class="cmd-row"><span class="cmd">${ltr(cmd)}</span></div>`;
+
+/** A sentence that may end in a `command`: the command moves to a chip row and the sentence leads into it with a colon.
+ *  Commands earlier in the sentence stay plain left-to-right runs (never chips in the text). */
+function sentenceWithCommand(text: string): { line: string; cmd: string | null } {
+  const m = /^([^]*?)\s*`([^`]+)`\s*[.!?]?\s*$/.exec(text);
+  if (!m) return { line: withCommands(text), cmd: null };
+  const lead = m[1]!.trimEnd();
+  return { line: withCommands(lead) + (/[:.!?]$/.test(lead) ? "" : ":"), cmd: m[2]! };
+}
+
 function banners(s: PanelState, t: Strings, ui: UiState): string {
   let out = "";
   if (s.connection.engine === "offline") {
-    out += `<div class="banner banner-error" role="alert"><span class="banner-text"><strong>${esc(t["offline.title"])}</strong> ${esc(t["offline.hint"])} <span class="cmd">${ltr("reel doctor")}</span></span></div>`;
+    out +=
+      `<div class="banner banner-error" role="alert"><div class="banner-text"><div class="banner-line"><strong>${esc(t["offline.title"])}</strong> ${esc(t["offline.hint"])}</div>` +
+      `${cmdRow("reel doctor")}</div></div>`;
   }
   if (ui.notice) {
     const n = ui.notice;
+    const how = n.how ? sentenceWithCommand(n.how) : null;
     out +=
       `<div class="banner banner-${n.kind === "ok" ? "ok" : "error"}" role="status" aria-live="polite">` +
-      `<span class="banner-text">${esc(n.text)}${n.how ? ` ${withCommands(n.how)}` : ""}</span>` +
+      `<div class="banner-text"><div class="banner-line">${esc(n.text)}${how ? ` ${how.line}` : ""}</div>${how?.cmd ? cmdRow(how.cmd) : ""}</div>` +
       `<button class="banner-x" data-action="dismiss-notice" title="${esc(t["notice.dismiss"])}" aria-label="${esc(t["notice.dismiss"])}">✕</button></div>`;
   }
   return out;
@@ -207,7 +223,7 @@ function actionsSection(s: PanelState, t: Strings, ui: UiState): string {
     `<button class="btn btn-secondary btn-act" data-action="${action}"${enabled && (hostOnly || !off) ? "" : " disabled"}>${esc(t[label])}</button>`;
   const rebuildCard = ui.confirmRebuild
     ? `<div class="card card-warn" role="alertdialog" aria-label="${esc(t["rebuild.title"])}"><div class="lbl lbl-warn">${esc(t["rebuild.title"])}</div>` +
-      `<p>${esc(t["rebuild.warning"])}</p><p>${esc(t["rebuild.backup"])} <span class="cmd">${ltr("name_prev_date-time.prproj")}</span></p>` +
+      `<p>${esc(t["rebuild.warning"])}</p><p>${esc(t["rebuild.backup"])}</p>${cmdRow("name_prev_date-time.prproj")}` +
       `<div class="btn-row"><button class="btn btn-primary" data-action="rebuild-confirm"${off ? " disabled" : ""}>${esc(t["rebuild.confirm"])}</button>` +
       `<button class="btn btn-secondary" data-action="rebuild-cancel">${esc(t["rebuild.cancel"])}</button></div></div>`
     : "";
@@ -244,6 +260,7 @@ export function render(state: PanelState, t: Strings, ui: UiState = initialUi())
   const rtl = state.language === "ar";
   return (
     `<div class="twn-panel ${rtl ? "twn-rtl" : "twn-ltr"}" dir="${rtl ? "rtl" : "ltr"}" lang="${rtl ? "ar" : "en"}">` +
+    `<div class="twn-scroll">` +
     header(state, t) +
     `<main class="body">` +
     banners(state, t, ui) +
@@ -254,13 +271,13 @@ export function render(state: PanelState, t: Strings, ui: UiState = initialUi())
     logSection(state, t, ui) +
     `</main>` +
     `<footer class="foot">${ltr(t["footer.powered"])}</footer>` +
-    `</div>`
+    `</div></div>`
   );
 }
 
 const shell = (t: Strings, rtl: boolean, inner: string) =>
-  `<div class="twn-panel ${rtl ? "twn-rtl" : "twn-ltr"}" dir="${rtl ? "rtl" : "ltr"}" lang="${rtl ? "ar" : "en"}"><main class="body">${inner}</main>` +
-  `<footer class="foot">${ltr(t["footer.powered"])}</footer></div>`;
+  `<div class="twn-panel ${rtl ? "twn-rtl" : "twn-ltr"}" dir="${rtl ? "rtl" : "ltr"}" lang="${rtl ? "ar" : "en"}"><div class="twn-scroll"><main class="body">${inner}</main>` +
+  `<footer class="foot">${ltr(t["footer.powered"])}</footer></div></div>`;
 
 /** Shown before the first snapshot arrives. */
 export function renderLoading(t: Strings, rtl = false): string {

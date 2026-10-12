@@ -301,20 +301,58 @@ test("CSS: brand line never wraps; header and pills are explicit flex; pills wra
   assert.match(rule(css, ".twn-rtl .pill"), /margin: 0 0 4px 6px/);
 });
 
-test("offline banner: reel doctor is a command chip with the bdi inside", () => {
+test("offline banner: the sentence is one block, then reel doctor as a chip on its own row (EN and AR)", () => {
   const s = sampleState("ar", "idle");
   s.connection.engine = "offline";
   for (const [lang, t] of [["ar", AR], ["en", EN]] as const) {
     s.language = lang;
     const html = render(s, t, initialUi());
-    assert.ok(html.includes('<span class="cmd"><bdi dir="ltr">reel doctor</bdi></span>'));
+    assert.ok(html.includes('<div class="cmd-row"><span class="cmd"><bdi dir="ltr">reel doctor</bdi></span></div>'), lang);
+    const line = /<div class="banner-line">([\s\S]*?)<\/div>/.exec(html)![1]!;
+    assert.ok(!line.includes("reel doctor") && !line.includes("cmd"), "the sentence holds no chip");
+    assert.ok(line.trimEnd().endsWith(":"), `${lang}: the sentence leads into the command`);
   }
   const css = panelCss();
   assert.match(rule(css, ".cmd"), /white-space: nowrap/);
   assert.match(rule(css, ".cmd"), /font-family: Consolas/);
 });
 
-// ---- UXP does not flow <bdi> inline by default: rows that hold bdi must not depend on it ----
+test("a notice's how ending in a command: sentence block + chip row; a command mid-sentence stays a plain ltr run", () => {
+  const s = sampleState("en", "idle");
+  const ui = initialUi();
+  ui.notice = { kind: "error", text: "Failed.", how: "In your Claude session run `reel doctor`." };
+  let html = render(s, EN, ui);
+  assert.ok(html.includes('<div class="banner-line">Failed. In your Claude session run:</div><div class="cmd-row"><span class="cmd"><bdi dir="ltr">reel doctor</bdi></span></div>'));
+  ui.notice = { kind: "error", text: "Failed.", how: "Run `reel setup` now, then retry." };
+  html = render(s, EN, ui);
+  assert.ok(html.includes('Run <bdi dir="ltr">reel setup</bdi> now, then retry.'));
+  assert.ok(!html.includes('class="cmd"'), "no chip inside running text");
+});
+
+test("every .cmd chip sits directly in a .cmd-row (a flex container), never in inline text", () => {
+  const ui = { ...initialUi(), confirmRebuild: true, logOpen: true };
+  ui.notice = { kind: "error", text: "x", how: "run `reel doctor`" };
+  let chips = 0;
+  for (const lang of ["en", "ar"] as const) {
+    for (const scenario of SCENARIOS) {
+      const st = sampleState(lang, scenario);
+      st.connection.engine = scenario === "idle" ? "offline" : "connected";
+      const html = render(st, stringsFor(lang), ui);
+      const all = (html.match(/class="cmd"/g) ?? []).length;
+      const inRow = (html.match(/<div class="cmd-row"><span class="cmd">/g) ?? []).length;
+      assert.equal(inRow, all, `${lang}/${scenario}: a chip outside a cmd-row`);
+      chips += all;
+    }
+  }
+  assert.ok(chips >= 6);
+  const css = panelCss();
+  const row = rule(css, ".cmd-row");
+  assert.match(row, /display: flex/);
+  assert.match(row, /flex-direction: row/);
+  assert.match(row, /flex-wrap: wrap/);
+  assert.match(rule(css, ".banner-text"), /display: flex/);
+  assert.match(rule(css, ".banner-text"), /flex-direction: column/);
+});
 
 test("CSS: bdi is inline inside the panel; rows with bdi children are explicit flex rows", () => {
   const css = panelCss();
@@ -326,7 +364,7 @@ test("CSS: bdi is inline inside the panel; rows with bdi children are explicit f
     assert.match(r, /align-items: baseline/, sel);
   }
   for (const sel of [".who", ".now-meta"]) assert.match(rule(css, sel), /flex-wrap: wrap/, sel);
-  assert.match(rule(css, ".cmd"), /display: inline-flex/);
+  assert.match(rule(css, ".cmd"), /display: flex/, "a flex item of .cmd-row");
   assert.match(rule(css, ".cmd"), /max-width: 100%/);
   assert.match(rule(css, ".sep"), /margin: 0 3px/, "symmetric, so it is right in RTL too");
 });
@@ -393,4 +431,34 @@ test("the panel offers 'Reveal folder' and 'Copy diagnostics' (the permissions a
   const none = sampleState("en", "qc");
   none.context.folder = null;
   assert.ok(/data-action="reveal" disabled/.test(render(none, EN, initialUi())), "no folder, nothing to show");
+});
+
+// ---- scrolling in UXP: explicit height chain, one inner scroll region, no reliance on the document scrolling ----
+
+test("CSS: html/body fixed to the viewport, panel root is a full-height flex column, ONE inner scroll region with min-height 0", () => {
+  const css = panelCss();
+  const hb = rule(css, "html, body");
+  assert.match(hb, /height: 100%/);
+  assert.match(hb, /margin: 0/);
+  assert.match(hb, /overflow: hidden/);
+  const root = rule(css, ".twn-panel");
+  assert.match(root, /height: 100%/);
+  assert.match(root, /display: flex/);
+  assert.match(root, /flex-direction: column/);
+  assert.match(root, /overflow: hidden/);
+  assert.ok(!/min-height: 100%/.test(root), "min-height:100% lets the root grow with its content, so nothing scrolls");
+  const sc = rule(css, ".twn-scroll");
+  assert.match(sc, /flex: 1 1 auto/);
+  assert.match(sc, /min-height: 0/);
+  assert.match(sc, /overflow-y: auto/);
+  assert.match(rule(css, ".twn-scroll > *"), /flex: 0 0 auto/);
+});
+
+test("markup: header, body and footer all sit inside the single .twn-scroll region (footer reachable by scrolling)", () => {
+  for (const lang of ["en", "ar"] as const) {
+    const html = render(sampleState(lang, "showcase"), stringsFor(lang), initialUi());
+    assert.equal((html.match(/class="twn-scroll"/g) ?? []).length, 1);
+    const inner = /<div class="twn-scroll">([\s\S]*)<\/div><\/div>$/.exec(html)![1]!;
+    assert.ok(inner.startsWith("<header") && inner.includes("<main") && inner.endsWith("</footer>"));
+  }
 });
