@@ -145,8 +145,8 @@ class TestFixtures(unittest.TestCase):
         self.assertEqual(schemas.validate(rp, "reels-plan"), [])
 
     def test_framing_agrees_with_the_engine_window(self):
-        """schema and plan.window_rect: 4:5, 4x5, "4 : 5" give a window; 4X5 does not (the engine would skip it
-        silently, so the schema rejects it); framing_window_y may be a float (the engine int()s it)."""
+        """schema and plan.window_rect: 4:5, 4x5, 4X5 (T2.16), "4 : 5" give a window; 4Y5 does not (the engine would
+        skip it silently, so the schema rejects it); framing_window_y may be a float (the engine int()s it)."""
         from lib.plan import window_rect
 
         def errs(framing, y=None):
@@ -154,10 +154,11 @@ class TestFixtures(unittest.TestCase):
             return schemas.validate({"global": g, "decisions": []}, "edit-decisions")
         for ok in ("4:5", "4x5", " 4 : 5 ", "4.5:5", "full", "9:16", ""):
             self.assertEqual(errs(ok), [], ok)
-        for framing in ("4:5", "4x5", " 4 : 5 "):
+        for framing in ("4:5", "4x5", "4X5", " 4 : 5 "):
             self.assertIsNotNone(window_rect(framing))
-        self.assertIsNone(window_rect("4X5"))
-        self.assertEqual([e["path"] for e in errs("4X5")], ["/global/framing"])
+            self.assertEqual(errs(framing), [], framing)
+        self.assertIsNone(window_rect("4Y5"))
+        self.assertEqual([e["path"] for e in errs("4Y5")], ["/global/framing"])
         self.assertEqual(errs("4:5", 120.5), [])
         self.assertEqual(window_rect("4:5", 120.5)["y"], 120)
         self.assertEqual([e["path"] for e in errs("4:5", "high")], ["/global/framing_window_y"])
@@ -256,12 +257,20 @@ class TestReelValidate(TempDir):
         code, doc, err = reel("--root", str(self.tmp), "--episode", "EP12", "validate", "01_analysis/reels-plan.json")
         self.assertEqual((code, doc["ok"], doc["kind"]), (0, True, "reels-plan"), (doc, err))
         self.assertEqual(Path(doc["file"]), epi.resolve())
-        # a file in the current folder wins over the project's; a --root relative file still works without ids
+        # T2.16: with --video-id the project's file wins over one in the current folder (listed in also_found);
+        # `file` is the absolute path checked; a --root relative file still works without ids
         here = self.write("here/01_analysis/edit-decisions.json", {"decisions": "no"})
         code, doc, _ = reel("--root", str(self.tmp), "--video-id", "CLIP1", "validate", "01_analysis/edit-decisions.json",
                             cwd=str(self.tmp / "here"))
+        self.assertEqual((code, doc["ok"]), (0, True))
+        self.assertEqual(Path(doc["file"]).resolve(), proj.resolve())
+        self.assertTrue(Path(doc["file"]).is_absolute())
+        self.assertEqual([Path(x).resolve() for x in doc["also_found"]], [here.resolve()])
+        code, doc, _ = reel("--root", str(self.tmp), "validate", "01_analysis/edit-decisions.json",
+                            cwd=str(self.tmp / "here"))                     # no id: the current folder's file
         self.assertEqual((code, doc["ok"]), (1, False))
-        self.assertEqual(Path(doc["file"]), Path("01_analysis/edit-decisions.json"))
+        self.assertEqual(Path(doc["file"]).resolve(), here.resolve())
+        self.assertNotIn("also_found", doc)
         self.write("publish/reels/EP12_R03.json", {"reel_id": "EP12_R03"})
         code, doc, _ = reel("--root", str(self.tmp), "--video-id", "CLIP1", "validate", "publish/reels/EP12_R03.json")
         self.assertEqual((code, doc["kind"], doc["ok"]), (0, "publish-reel", True))
@@ -273,10 +282,10 @@ class TestReelValidate(TempDir):
         self.assertEqual(code, 1)
         self.assertIn("not found", doc["error"])
         tried = [Path(x).as_posix() for x in doc["tried"]]
-        self.assertEqual(len(tried), 4)
-        self.assertEqual(tried[0], "01_analysis/edit-decisions.json")
-        self.assertTrue(tried[1].endswith("output/projects/CLIP1/01_analysis/edit-decisions.json"), tried)
-        self.assertTrue(tried[2].endswith("output/episodes/EP12/01_analysis/edit-decisions.json"), tried)
+        self.assertEqual(len(tried), 4)                     # T2.16: the project and the episode before the cwd
+        self.assertTrue(tried[0].endswith("output/projects/CLIP1/01_analysis/edit-decisions.json"), tried)
+        self.assertTrue(tried[1].endswith("output/episodes/EP12/01_analysis/edit-decisions.json"), tried)
+        self.assertTrue(all(Path(t).is_absolute() for t in tried), tried)
         self.assertTrue(tried[3].endswith("/01_analysis/edit-decisions.json") and "output" not in tried[3], tried)
         self.assertIn("output/projects/CLIP1", doc["how"].replace("\\", "/"))
 

@@ -184,8 +184,21 @@ def log_traceback(log_file: Path, exc: BaseException, command: str) -> Path | No
 
 
 def report(exc: BaseException, log_file: Path, command: str) -> dict:
-    """The guidance document for an exception that reached the top level, its traceback in log_file."""
+    """The guidance document for an exception that reached the top level, its traceback in log_file. A log that
+    cannot be written (a read-only folder, a cloud placeholder) falls back to the engine home's logs/pipeline.log, so
+    the traceback is never lost (3.0 T2.16). WHYNOT_DEBUG=1 also prints it on stderr, for developers."""
+    import os
     doc = describe(exc)
     written = log_traceback(log_file, exc, command)
+    if written is None:
+        try:
+            from .common import engine_home
+            fallback = engine_home() / "logs" / "pipeline.log"
+        except Exception:  # noqa: BLE001 — the handler itself must never raise
+            fallback = None
+        if fallback is not None and Path(fallback) != Path(log_file):
+            written = log_traceback(fallback, exc, command)
     doc["log"] = str(written) if written else None
+    if os.environ.get("WHYNOT_DEBUG") == "1":
+        sys.stderr.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
     return doc

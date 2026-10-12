@@ -144,10 +144,13 @@ def caption_data(paths: Paths, spec: dict, ed: dict) -> dict | None:
 
 
 def generate(paths: Paths) -> dict:
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     if not spec:
-        raise FileNotFoundError("timeline-spec.json missing — run plan first")
+        from .errors import Guidance
+        raise Guidance("no compiled plan yet (01_analysis/timeline-spec.json)", "Run `reel plan` first",
+                       where=str(paths.p("01_analysis/timeline-spec.json")))
     tpls = load_config("graphics-templates.json")["templates"]
     manifest = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
     by_rel = {a["rel"]: a for a in manifest["assets"]}
@@ -196,8 +199,8 @@ def execute(paths: Paths, jsx: Path, timeout: int = 900) -> dict:
     aep = paths.p(f"04_after_effects/project/{paths.video_id}_{project_prefix()}_GFX.aep")
     t0 = time.time()
     res = run_after_effects(jsx, timeout, done=lambda: aep.exists() and aep.stat().st_mtime >= t0 - 1)
-    if res.get("status") == "UNSUPPORTED":
-        return res
+    if res.get("status") in ("UNSUPPORTED", "REFUSED"):      # nothing ran: keep the precise status (T2.16)
+        return dict(res, ok=False)
     res["aep_exists"] = aep.exists()
     # existence is not evidence: a copied/older .aep must not count. Require a save during THIS run.
     fresh = aep.exists() and aep.stat().st_mtime >= t0 - 1
@@ -233,10 +236,13 @@ def render(paths: Paths, timeout: int = 3600) -> dict:
         aer = aerender()
     aep = paths.p(f"04_after_effects/project/{paths.video_id}_{project_prefix()}_GFX.aep")
     if not aer or not Path(aer).exists() or not aep.exists():
-        return {"status": "SKIPPED", "msg": f"aerender={aer} aep_exists={aep.exists()}"}
+        return {"status": "SKIPPED", "ok": False, "msg": f"aerender={aer} aep_exists={aep.exists()}",    # T2.16: exit 1
+                "how": "Build the project first (`reel ae-build --extras`)" if aer and Path(aer).exists() else
+                       "aerender (After Effects) was not found on this computer: install After Effects, or render "
+                       "the comps from After Effects yourself"}
     refused = ae_render.sandbox_refused(aer)
     if refused:
-        return {"status": "REFUSED", "outputs": [], "msg": refused["error"], "how": refused["how"]}
+        return {"status": "REFUSED", "ok": False, "outputs": [], "msg": refused["error"], "how": refused["how"]}
     comps = paths.p("04_after_effects/compositions")
     comps.mkdir(parents=True, exist_ok=True)
     before = _movs(comps)

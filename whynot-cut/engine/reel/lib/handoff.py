@@ -152,7 +152,8 @@ def build(paths: Paths) -> dict:
     exp = export_spec(paths)
     style = load_config("style.json")
     no_music = isinstance(style.get("music"), str) and style["music"].lower().startswith("none")
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"), {})
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"), {}) or {}
     ae = read_json(paths.p("04_after_effects/ae-build-result.json"), {})
     aer = read_json(paths.p("04_after_effects/ae-render-result.json"), {})
     ps = read_json(paths.p("05_photoshop/ps-build-result.json"), {})
@@ -205,7 +206,8 @@ def build(paths: Paths) -> dict:
              f"| Visual verification of renders/PSDs | {'PASS' if vs['ok'] else 'NOT PASSED'}: {vs['detail']} |"]
     if ae_used:
         table += [f"| After Effects comps (.aep, editable) | {ae.get('status', 'SCRIPT ONLY — run the JSX')} |",
-                  f"| AE renders (ProRes 4444 + alpha) | {aer.get('status', 'not rendered')} |"]
+                  f"| AE renders (ProRes 4444 + alpha) | {aer.get('status', 'not rendered')}"
+                  f"{' (partial)' if aer.get('partial') else ''} |"]                 # T2.16: never reads as all done
     if ps_used:
         table += [f"| Photoshop layered PSDs | {ps.get('status', 'SCRIPT ONLY — run the JSX')} |"]
     table += [f"| Premiere sequence | {prem_row} |", f"| Captions | {cap_row} |",
@@ -349,7 +351,8 @@ def motion_readme(paths: Paths) -> Path:
     """Handoff for a motion video (2.2): the After Effects project, how it is organised, what to edit, fonts, audio,
     renders, licenses and attributions, and what still needs the editor."""
     from .motion_build import aep_path, render_path
-    plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
+    from .stamps import read_compiled
+    plan = read_compiled(paths.p("01_analysis/motion-plan.json"), {}) or {}
     qc = read_json(paths.p("08_quality_control/qc-results.json"), {}) or {}
     rr = read_json(paths.p("04_after_effects/motion-render-result.json"), {}) or {}
     br = read_json(paths.p("04_after_effects/motion-build-result.json"), {}) or {}

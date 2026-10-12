@@ -612,7 +612,8 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None,
     from .plan import norm
     size = frame_size(paths)
     W, H = size
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     t = load_config("graphics-templates.json")["templates"]["highlight_caption"]
     b = Brand(paths.client_db)

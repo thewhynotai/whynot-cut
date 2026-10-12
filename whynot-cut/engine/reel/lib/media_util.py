@@ -47,6 +47,9 @@ FF_TIMEOUT_BASE_S, FF_TIMEOUT_PER_MEDIA_S = 10, 3     # 10 s + 3 x the media dur
 FF_TIMEOUT_UNKNOWN_S = 3600                           # no -t and no probe-able input (a lavfi source): 1 h
 FF_PROBE_TIMEOUT_S = 30                               # the duration probe itself (a stalled network share)
 FF_TIMEOUT_SCALE_ENV = "WHYNOT_FFMPEG_TIMEOUT_SCALE"  # a float >= 1: every ffmpeg timeout x this (slow share, huge file)
+FF_TIMEOUT_SCALE_MAX = 100                            # T2.16: a larger scale is taken as 100
+# every timeout stays below threading.TIMEOUT_MAX: above it subprocess / Timer raise OverflowError (T2.15 re-review m-1)
+FF_TIMEOUT_MAX_S = threading.TIMEOUT_MAX * 0.5
 
 
 def is_ff(cmd) -> bool:
@@ -86,12 +89,13 @@ def _duration_cached(path: str, size: int, mtime_ns: int) -> float | None:      
 
 
 def ff_timeout_scale() -> float:
-    """WHYNOT_FFMPEG_TIMEOUT_SCALE as a factor >= 1 (1 when unset or not a number >= 1)."""
+    """WHYNOT_FFMPEG_TIMEOUT_SCALE as a factor from 1 to FF_TIMEOUT_SCALE_MAX (1 when unset or not a number >= 1;
+    a larger one is capped)."""
     try:
         f = float(os.environ.get(FF_TIMEOUT_SCALE_ENV) or 1)
     except ValueError:
         return 1.0
-    return f if math.isfinite(f) and f >= 1 else 1.0
+    return min(f, float(FF_TIMEOUT_SCALE_MAX)) if math.isfinite(f) and f >= 1 else 1.0
 
 
 def ff_timeout(cmd) -> float | None:
@@ -115,7 +119,7 @@ def ff_timeout(cmd) -> float | None:
     else:
         ds = [d for d in (media_duration_s(i) for i in ins if i not in ("-", "pipe:", "pipe:0")) if d]
         base = FF_TIMEOUT_BASE_S + FF_TIMEOUT_PER_MEDIA_S * max(ds) if ds else FF_TIMEOUT_UNKNOWN_S
-    return base * ff_timeout_scale()
+    return min(base * ff_timeout_scale(), FF_TIMEOUT_MAX_S)      # never an OverflowError in subprocess / Timer
 
 
 @contextlib.contextmanager

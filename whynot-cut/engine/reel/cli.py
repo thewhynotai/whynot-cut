@@ -174,6 +174,16 @@ def refuse_stale_window(p: Paths):
         raise SystemExit(2)
 
 
+def refuse_unfinished_reel(p: Paths):
+    """A half-made reel folder (<EP>_R<nn> without 00_inputs/source.json) is never planned as a whole clip (T2.16)."""
+    from lib.reels import unfinished_reel
+    u = unfinished_reel(p.root, p.video_id) if p.video_id and not getattr(p, "episode_id", None) else None
+    if u:
+        out({"refused": f"{p.video_id} is an unfinished reel of episode {u['episode']} (no 00_inputs/source.json)",
+             "how": u["how"]})
+        raise SystemExit(2)
+
+
 def cmd_preflight(a):
     from lib.media import preflight
     p = P(a)
@@ -290,7 +300,8 @@ def cmd_transcript_verify(a):
 
 def cmd_transcript_relisten(a):
     from lib.transcribe import relisten
-    ids = [int(x) for x in a.words.split(",") if x.strip()] if a.words else None
+    from lib.arglists import int_items
+    ids = int_items(a.words, "--words") or None
     from lib import settings as S
     p = P(a)
     out(relisten(p, ids, model_size=a.model or S.load(p.root).get("whisper_model") or "large-v3"))
@@ -358,7 +369,8 @@ def cmd_plan(a):
     from lib.plan import compile_plan
     p = P(a)
     refuse_stale_window(p)
-    missing = [f for f in SEMANTIC_FILES if not p.p(f).exists()]
+    refuse_unfinished_reel(p)
+    missing =[f for f in SEMANTIC_FILES if not p.p(f).exists()]
     from lib import ref_style
     rs = ref_style.next_step(p)
     if missing:
@@ -386,13 +398,15 @@ def cmd_plan(a):
 
 
 def cmd_validate(a):
-    """3.0 T2.3: {ok, kind, file, errors[{path, msg}]}; the kind from the file name or --kind. A relative path that is
-    not in the current folder is looked up in the project (--video-id: output/projects/<ID>/), the episode (--episode:
-    output/episodes/<EP>/) and then --root, so `reel --root C --video-id CLIP1 validate 01_analysis/edit-decisions.json`
-    finds the clip's own file. When nothing exists the error lists every place tried."""
+    """3.0 T2.3: {ok, kind, file, errors[{path, msg}]}; the kind from the file name or --kind. A relative path is
+    looked up in the project first (--video-id: output/projects/<ID>/), then the episode (--episode:
+    output/episodes/<EP>/), then the current folder and --root, so `reel --root C --video-id CLIP1 validate
+    01_analysis/edit-decisions.json` checks the clip's own file even when the current folder has one too (T2.16).
+    `file` is the absolute path checked; `also_found` lists the other candidates that exist. When nothing exists the
+    error lists every place tried."""
     from lib.schemas import validate_file
     f = Path(a.file).expanduser()
-    tried = [f]
+    tried = []
     if not f.is_absolute() and a.root:
         root = Path(a.root).expanduser()
         if a.video_id:
@@ -400,13 +414,25 @@ def cmd_validate(a):
         if getattr(a, "episode", None):
             from lib.episode import EpisodePaths
             tried.append(EpisodePaths(root, a.episode).p(a.file))
-        tried.append(root / f)
-    found = next((c for c in tried if c.exists()), tried[0])
+        tried += [f, root / f]
+    else:
+        tried.append(f)
+    seen, cands = set(), []
+    for c in tried:
+        k = os.path.normcase(os.path.abspath(c))
+        if k not in seen:
+            seen.add(k)
+            cands.append(Path(os.path.abspath(c)))
+    hits = [c for c in cands if c.exists()]
+    found = hits[0] if hits else cands[0]
     res = validate_file(found, a.kind)
+    res["file"] = str(found)
+    if len(hits) > 1:
+        res["also_found"] = [str(c) for c in hits[1:]]
     if not found.exists() and res.get("error", "").startswith("not found"):
-        res["tried"] = [str(c) for c in tried]
+        res["tried"] = [str(c) for c in cands]
         res["error"] = f"not found: {a.file}"
-        res["how"] = "looked in: " + "; ".join(str(c) for c in tried)
+        res["how"] = "looked in: " + "; ".join(str(c) for c in cands)
     out(res)
 
 
@@ -478,14 +504,19 @@ def cmd_verify(a):
     from lib import verify
     from lib.motion_config import is_motion
     p = P(a)
+    if a.record and not a.verdict:        # T2.16 (MI-2): --record is a flag; the verdict is its own option
+        out({"refused": "--record needs --verdict pass|fail (what you saw on the sheet)",
+             "how": 'reel verify --record --verdict pass|fail --note "<what you checked>"'})
+        raise SystemExit(2)
     if is_motion(p):                      # motion video (2.2): the sheet of frames After Effects rendered
         from lib.motion_qc import record_visual
         if not a.record:
-            raise SystemExit("motion projects: `reel motion-frames` builds the sheet; then `verify --record`")
-        out(record_visual(p, a.verdict, a.notes or "", a.by or "claude"))
+            raise SystemExit("motion projects: `reel motion-frames` builds the sheet; then "
+                             "`verify --record --verdict pass|fail`")
+        out(record_visual(p, a.verdict, a.note or "", a.by or "claude"))
         return
     if a.record:
-        out(verify.record(p, a.verdict, a.notes or "", a.by or "claude", a.sheet))
+        out(verify.record(p, a.verdict, a.note or "", a.by or "claude", a.sheet))
     else:
         r = verify.build(p)
         r["next"] = "VIEW the sheet image and check every tile against the checklist, then record a verdict."
@@ -584,7 +615,12 @@ def cmd_ps_build(a):
     refuse_stale_window(p)
     require_plan_approval(p)
     g = generate(p)
-    out({"generate": g, "execute": execute(p, Path(g["jsx"])) if g["jobs"] else "no jobs"})
+    r = execute(p, Path(g["jsx"])) if g["jobs"] else "no jobs"
+    doc = {"generate": g, "execute": r}
+    if isinstance(r, dict) and r.get("ok") is False:     # T2.16: no Photoshop, refused or nothing saved -> exit 1
+        doc["ok"] = False
+        doc["status"] = r.get("status")
+    out(doc)
 
 
 def cmd_premiere(a):
@@ -618,10 +654,33 @@ def cmd_qc(a):
          "warnings": [c for c in r["checks"] if c["result"] in ("WARN", "MANUAL")]})
 
 
+def mark_delivered(p: Paths, note: str | None):
+    """`reel handoff --delivered` (3.0 T2.16): the editor says the finished video went to the client. Only a project
+    whose handoff is written and that passed QC (QC_PASSED / READY_FOR_HUMAN_EDITOR) moves to DELIVERED, which the
+    client board, the stale checks and `reel next` count as done; anything else is refused (exit 2)."""
+    from lib.common import DONE_STATUSES
+    st = load_status(p).get("status")
+    readme = p.p("09_handoff/README.md")
+    if st == "DELIVERED":
+        out({"status": "DELIVERED", "unchanged": True, "note": "already recorded as delivered"})
+        return
+    if st not in DONE_STATUSES or not readme.exists():
+        out({"refused": f"{p.video_id} is not ready to be marked delivered (status {st}"
+                        + ("" if readme.exists() else ", no handoff written") + ")",
+             "how": "Finish it first: `reel next` shows what is left (qc must pass, then `reel handoff`); record the "
+                    "delivery only after the editor says it went to the client"})
+        raise SystemExit(2)
+    set_status(p, "DELIVERED", "delivered to the client" + (f": {note}" if note else ""), "handoff", [readme])
+    out({"status": "DELIVERED", "previous": st, "note": note or "", "at": now_iso()})
+
+
 def cmd_handoff(a):
     from lib.handoff import build
     from lib.motion_config import is_motion
     p = P(a)
+    if a.delivered:
+        mark_delivered(p, a.note)
+        return
     if is_motion(p):
         from lib.handoff import motion_readme
         r = {"readme": str(motion_readme(p))}
@@ -633,8 +692,25 @@ def cmd_handoff(a):
     out(r)
 
 
+def project_notes(p: Paths) -> dict:
+    """What `reel status` and `reel next` add to the project's state (3.0 T2.16): a lone `_prev_` Premiere project
+    (a build hard-killed between parking the old project and saving the new one) with the rename-back hint, and the
+    compiled artefacts' version warnings (noted on the Context: they go out as `version_warnings`)."""
+    from lib import stamps
+    extra = {}
+    if p.video_id and not getattr(p, "episode_id", None):
+        from lib.ppro_build import parked_previous
+        parked = parked_previous(p)
+        if parked:
+            extra["parked_previous"] = parked
+        for rel in ("01_analysis/timeline-spec.json", "01_analysis/motion-plan.json"):
+            stamps.report_only(p.p(rel))
+    return extra
+
+
 def cmd_status(a):
-    out(load_status(P(a)), check=False)      # "status": "BLOCKED" is the project's state, not a failed command
+    p = P(a)
+    out(dict(load_status(p), **project_notes(p)), check=False)   # "status": "BLOCKED" is the state, not a failure
 
 
 def _has_reference_videos(p: Paths) -> bool:
@@ -653,7 +729,7 @@ def cmd_next(a):
     p = P(a)
     if is_motion(p):
         from lib.motion_qc import motion_next
-        out(motion_next(p), check=False)
+        out(dict(motion_next(p), **project_notes(p)), check=False)
         return
     from lib import ref_style
     from lib.people import profile_notice as people_notice
@@ -717,10 +793,13 @@ def cmd_next(a):
     from lib.common import DONE_STATUSES
     if stale and status in DONE_STATUSES:
         status = f"{status} (STALE: inputs changed since)"
+    extra = project_notes(p)
+    parked = extra.get("parked_previous")
     out({"status": status, "profile": active_profile(p.root), "next": todo[0] if todo else "done",
          "remaining": todo, "stale": stale,
          "reference_style": {"state": rs["client"]["state"], "video": rs["video"]["state"], "message": rs["client"]["message"]},
-         "notices": rs["notices"] + [n for n in (people_notice(p.root),) if n]}, check=False)
+         "notices": rs["notices"] + [n for n in (people_notice(p.root), parked and parked["how"]) if n], **extra},
+        check=False)
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
@@ -1074,7 +1153,8 @@ def cmd_settings(a):
         base = S.load(folder) if target.exists() else dict(S.DEFAULTS)   # never copy another folder's values
         vals = {k: v for k, v in base.items() if not k.startswith("_")}
         st = base
-        for kv in a.set or []:
+        from lib.arglists import SETTING_START, items
+        for kv in items(a.set, start=SETTING_START):     # --set a=1,b=2 or repeated (T2.16)
             k, _, v = kv.partition("=")
             k, val = k.strip(), S._parse_scalar(v)
             if k not in S.DEFAULTS:
@@ -1259,11 +1339,11 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--label", help="e.g. the reel's name in the client's plan")
             sp.add_argument("--snap", action="store_true", help="move in/out to the nearest pause (never mid-word)")
         if name == "transcript-relisten":
-            sp.add_argument("--words", help="word ids, e.g. 79,80 (default: every flagged word)")
+            sp.add_argument("--words", action="append", help="word ids, e.g. 79,80 or repeated (default: every flagged word)")
             sp.add_argument("--model", default=None)
         if name == "transcript-verify":
             sp.add_argument("--by")
-            sp.add_argument("--note")
+            sp.add_argument("--note", "--notes", dest="note")       # one spelling everywhere, the other an alias (T2.16)
         if name == "audio-clean":
             sp.add_argument("--min-pause", type=int, default=None,
                             help="ms (default: the reel's recipe, else the profile's style.json remove_pauses, else 250)")
@@ -1285,11 +1365,11 @@ def main(argv: list[str] | None = None):
                             help="seconds to wait before the first re-export (2x before the second, ...)")
         if name == "approve-plan":
             sp.add_argument("--by", required=True, choices=["editor", "delegated"])
-            sp.add_argument("--note")
+            sp.add_argument("--note", "--notes", dest="note")
         if name == "verify":
             sp.add_argument("--record", action="store_true")
-            sp.add_argument("--verdict", choices=["pass", "fail"])
-            sp.add_argument("--notes")
+            sp.add_argument("--verdict", choices=["pass", "fail"], help="with --record")
+            sp.add_argument("--note", "--notes", dest="note", help="what you checked")
             sp.add_argument("--by")
             sp.add_argument("--sheet", help="evidence image to record against (e.g. Premiere frame sheet)")
         if name in EXTRAS:
@@ -1320,6 +1400,11 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--by", help="who wrote the client style (e.g. client-researcher)")
         if name == "previews":
             sp.add_argument("--no-composite", action="store_true")
+        if name == "handoff":
+            sp.add_argument("--delivered", action="store_true",
+                            help="record that the finished video went to the client (status DELIVERED; only after "
+                                 "qc passed and the handoff was written)")
+            sp.add_argument("--note", "--notes", dest="note", help="with --delivered: e.g. where or when it was sent")
         if name == "validate":
             sp.add_argument("file", help="the JSON file, e.g. 01_analysis/edit-decisions.json")
             sp.add_argument("--kind", help="edit-decisions | reels-plan | motion-script | publish | publish-reel | "
@@ -1335,7 +1420,7 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--no-label", action="store_true")
         if name == "settings":
             sp.add_argument("--init", metavar="FOLDER", help="write FOLDER/.claude/whynot-cut.local.md")
-            sp.add_argument("--set", action="append", metavar="KEY=VALUE")
+            sp.add_argument("--set", action="append", metavar="KEY=VALUE", help="repeatable, or KEY=VALUE,KEY2=VALUE2")
             sp.add_argument("--force", action="store_true")
         if name == "lock":
             g = sp.add_mutually_exclusive_group()

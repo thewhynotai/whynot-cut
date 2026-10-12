@@ -449,13 +449,15 @@ class RealVersion(WindowsLayout):
         self.assertGreaterEqual(plat._vtuple(a["version"]), (26, 5))          # the registry key "26.0" would say CEP
 
     def test_unreadable_file_version_gives_none_and_the_registry_key_only_ranks(self):
-        old = touch(self.tmp / "tools" / "A" / "Adobe Premiere Pro.exe")
-        new = touch(self.tmp / "tools" / "B" / "Adobe Premiere Pro.exe")
-        reg = FakeRegistry({"SOFTWARE\\Adobe\\Premiere Pro\\25.6": {"InstallPath": str(old.parent)},
-                            "SOFTWARE\\Adobe\\Premiere Pro\\26.0": {"InstallPath": str(new.parent)}})
+        # T2.16 (T2.11 re-review M-a): the same year (26.x), and the OLDER registry version has the lexically larger
+        # path, so only reg_version can put the newer one first (year and the exe-path tiebreak would not)
+        old = touch(self.tmp / "tools" / "B" / "Adobe Premiere Pro.exe")
+        new = touch(self.tmp / "tools" / "A" / "Adobe Premiere Pro.exe")
+        reg = FakeRegistry({"SOFTWARE\\Adobe\\Premiere Pro\\26.0": {"InstallPath": str(old.parent)},
+                            "SOFTWARE\\Adobe\\Premiere Pro\\26.5": {"InstallPath": str(new.parent)}})
         apps = plat.find_adobe_apps("premiere", win_sources(registry=reg))
         self.assertEqual([Path(a["exe"]) for a in apps], [new, old])
-        self.assertEqual([(a["version"], a["reg_version"]) for a in apps], [(None, "26.0"), (None, "25.6")])
+        self.assertEqual([(a["version"], a["reg_version"]) for a in apps], [(None, "26.5"), (None, "26.0")])
 
     def test_a_failing_reader_is_none_not_a_crash(self):
         self.premiere()

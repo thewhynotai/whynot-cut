@@ -59,10 +59,12 @@ def execute(paths: Paths, jsx: Path, timeout: int = 900) -> dict:
     from .adobe_run import run_photoshop
     t0 = time.time()
     res = run_photoshop(jsx, timeout)
-    if res.get("status") == "UNSUPPORTED":
-        return res
+    if res.get("status") in ("UNSUPPORTED", "REFUSED"):      # nothing ran: keep the precise status (T2.16)
+        return dict(res, ok=False)
     outs = sorted(str(x) for x in paths.p("05_photoshop/layered-assets").glob("*.psd")
                   if not x.name.startswith("._") and x.stat().st_mtime >= t0 - 1)   # saved during THIS run
     res.update(psd=outs, status="PSD_CREATED" if outs else "FAILED")
+    if not outs:
+        res["ok"] = False             # T2.2 exit-code rule: nothing saved this run is a failure
     write_json(paths.p("05_photoshop/ps-build-result.json"), dict(res, at=now_iso()))
     return res

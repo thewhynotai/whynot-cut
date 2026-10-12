@@ -113,7 +113,9 @@ def build(paths: Paths) -> dict:
     from .stamps import read_compiled
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     if not spec:
-        raise FileNotFoundError("timeline-spec.json missing — run plan first")
+        from .errors import Guidance
+        raise Guidance("no compiled plan yet (01_analysis/timeline-spec.json)", "Run `reel plan` first",
+                       where=str(paths.p("01_analysis/timeline-spec.json")))
     from .common import spec_footage
     src = spec_footage(paths, spec)
     W, H = frame_size(paths)
@@ -223,10 +225,15 @@ def record(paths: Paths, verdict: str, notes: str, by: str = "claude", sheet_ove
         raise ValueError("verdict must be pass or fail")
     vb = read_json(paths.p("08_quality_control/verify/verify-build.json"))
     if not vb and not sheet_override:
-        raise FileNotFoundError("run `reel verify` (build the sheet) before recording a verdict")
+        from .errors import Guidance
+        raise Guidance("no verification sheet to record against (08_quality_control/verify/verify-build.json)",
+                       "Run `reel verify` (it builds the sheet), VIEW the sheet, then `reel verify --record --verdict "
+                       "pass|fail --note \"...\"`", where=str(paths.p("08_quality_control/verify/verify-build.json")))
     sheet = Path(sheet_override or vb["sheet"])
     if sheet.stat().st_mtime < newest_render_mtime(paths):
-        raise RuntimeError("verify sheet is older than the newest render/PSD — rebuild it with `reel verify` and look again")
+        from .errors import Guidance
+        raise Guidance("the verification sheet is older than the newest render/PSD",
+                       "Rebuild it with `reel verify`, look at it again, then record the verdict", where=str(sheet))
     rec = {"verdict": verdict, "notes": notes, "by": by, "at": now_iso(), "recorded_epoch": time.time(),
            "sheet": str(sheet), "sheet_mtime": sheet.stat().st_mtime}
     write_json(paths.p("08_quality_control/visual-verification.json"), rec)

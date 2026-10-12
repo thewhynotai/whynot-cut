@@ -116,7 +116,8 @@ def run(paths) -> dict:
     def add(check, ok, detail, warn=False):
         checks.append({"check": check, "result": "PASS" if ok else ("WARN" if warn else "FAIL"), "detail": detail})
     fp = fingerprint(paths)
-    plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
+    from .stamps import read_compiled
+    plan = read_compiled(paths.p("01_analysis/motion-plan.json"), {}) or {}
     val = read_json(paths.p("01_analysis/motion-validation.json"), {}) or {}
     add("plan_valid", bool(val.get("ok")) and val.get("fingerprint") == fp,
         "motion plan compiled without errors and current" if val.get("ok") else "motion plan missing, with errors or stale")

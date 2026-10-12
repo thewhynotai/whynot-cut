@@ -460,7 +460,8 @@ def check(ep) -> dict:
         approvals += [f"{rid}: {a}" for a in r.get("approval_required") or []]
         if str(rid).endswith("_MO"):           # motion video (2.2): CC-BY art must be credited where it is posted
             from .common import Paths
-            mplan = read_json(Paths(ep.root, rid).p("01_analysis/motion-plan.json"), {}) or {}
+            from .stamps import read_compiled
+            mplan = read_compiled(Paths(ep.root, rid).p("01_analysis/motion-plan.json"), {}) or {}
             posted = "\n".join([cap, tcap, str(sh.get("description") or "")])
             for a in mplan.get("assets") or []:
                 if a.get("license") == "CC-BY-4.0" and a.get("attribution") and a["attribution"] not in posted:

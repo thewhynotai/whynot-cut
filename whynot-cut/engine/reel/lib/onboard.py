@@ -405,10 +405,16 @@ def orphan_projects(p: Paths, ids: dict) -> dict:
         dirs = sorted(d for d in (p.output / "projects").iterdir() if d.is_dir())
     except OSError:
         dirs = []
-    orphans = [d.name for d in dirs if d.name.upper() not in known and not (d / "00_inputs/source.json").exists()]
+    from .reels import unfinished_reel
+    cand = [d.name for d in dirs if d.name.upper() not in known and not (d / "00_inputs/source.json").exists()]
+    half = [u for u in (unfinished_reel(p.root, n) for n in cand) if u]     # T2.16: a Gate 0 that stopped half-way
+    orphans = [n for n in cand if n not in {u["video_id"] for u in half}]
     hint = None
     if orphans:
         hint = (f"output/projects/{', '.join(orphans)} match no clip in data/ (an older or renamed project). Ask the "
                 "editor which clip it belongs to: continue it with `--video-id <folder> --footage <the raw file>`, or "
                 "leave it; never delete it yourself.")
-    return {"orphan_projects": orphans, "orphan_hint": hint}
+    res = {"orphan_projects": orphans, "orphan_hint": hint}
+    if half:
+        res["unfinished_reels"] = [{k: u[k] for k in ("video_id", "episode", "pick", "as", "how")} for u in half]
+    return res

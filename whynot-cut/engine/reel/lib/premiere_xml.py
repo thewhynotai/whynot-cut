@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import quote
 from xml.sax.saxutils import escape
 
-from .common import still_category, seq_fps, ticks_per_frame, Paths, project_prefix, load_config, now_iso, read_json, write_json, write_text, frame_to_tc
+from .common import still_category, seq_fps, ticks_per_frame, Paths, project_prefix, load_config, now_iso, read_json, write_json, write_text, frame_size, frame_to_tc
 
 TPS = 254016000000  # Premiere ticks per second
 
@@ -179,18 +179,22 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
     from .stamps import read_compiled
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     if not spec:
-        raise FileNotFoundError("timeline-spec.json missing — run `reel plan` first")
+        from .errors import Guidance
+        raise Guidance("no compiled plan yet (01_analysis/timeline-spec.json)", "Run `reel plan` first",
+                       where=str(paths.p("01_analysis/timeline-spec.json")))
     seq_cfg = load_config("sequence-settings.json")
     tpl = load_config("graphics-templates.json")
     pre = read_json(paths.p("00_inputs/preflight.json"))
-    W, H = seq_cfg["general"]["frame_width"], seq_cfg["general"]["frame_height"]
+    W, H = frame_size(paths)            # T2.16: validated (common.frame_size), not read raw
     fps = seq_fps()          # 24, 25, 29.97 ... (frames below count real frames at this rate)
     TPF = ticks_per_frame(fps)
     from .common import spec_footage
     main = spec_footage(paths, spec)
-    mp = next((f for f in pre["files"] if Path(f["path"]).resolve() == main.resolve()), None)
+    mp = next((f for f in (pre or {}).get("files", []) if Path(f["path"]).resolve() == main.resolve()), None)
     if mp is None:
-        raise FileNotFoundError(f"{main} not in preflight — run `reel preflight` for it")
+        from .errors import Guidance
+        raise Guidance(f"{main.name} is not in this video's preflight (00_inputs/preflight.json)",
+                       "Run `reel preflight` for this video, then run this command again", where=str(main))
     v = mp["video"]
     src_fps = v["fps"]
     src_dur_s = mp["duration_s"]

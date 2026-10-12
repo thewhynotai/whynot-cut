@@ -12,7 +12,7 @@ ARGS: dict = {
                          "help": "record YOUR verdict after viewing every probe frame"}),
         (("--word-order",), {"choices": ["logical", "visual"], "default": None,
                              "help": "what word_reveal_20 showed: logical = only the first spoken word (rightmost in RTL)"}),
-        (("--notes",), {"default": "", "help": "what the frames showed"}),
+        (("--note", "--notes"), {"dest": "note", "default": "", "help": "what the frames showed"}),
         (("--timeout",), {"type": int, "default": 600}),
     ],
     "motion-icons": [
@@ -31,7 +31,8 @@ ARGS: dict = {
         (("--timeout",), {"type": int, "default": 900}),
     ],
     "motion-render": [
-        (("--scenes",), {"default": None, "help": "e.g. S03,S05: re-render only these scenes into render/pieces/"}),
+        (("--scenes",), {"action": "append", "default": None,
+                         "help": "e.g. S03,S05 (or repeated): re-render only these scenes into render/pieces/"}),
         (("--timeout",), {"type": int, "default": 3600}),
     ],
     "motion-frames": [],
@@ -61,10 +62,11 @@ def add_args(name: str, sp) -> None:
         sp.add_argument(*flags, **kw)
 
 
-def out(obj):
-    """One JSON document; a failed result exits 1, a refusal 2 (3.0 T2.2: lib/errors.emit)."""
+def out(obj, check: bool = True):
+    """One JSON document; a failed result exits 1, a refusal 2 (3.0 T2.2: lib/errors.emit). check=False when the
+    document reports a state rather than this command's result, like cli.out."""
     from .errors import emit
-    emit(obj)
+    emit(obj, check)
 
 
 def P(a):
@@ -97,7 +99,7 @@ def cmd_ae_probe(a):
     if a.record:
         if not a.word_order:
             raise SystemExit("--record needs --word-order logical|visual (what the word_reveal frames showed)")
-        out(ae_probe.record(a.record, a.notes, a.word_order))
+        out(ae_probe.record(a.record, a.note, a.word_order))
         return
     fonts = None
     if getattr(a, "root", None):                 # probe with the client's brand fonts when a client is given
@@ -111,7 +113,8 @@ def cmd_ae_probe(a):
 def cmd_motion_icons(a):
     from .motion_icons import load_index, search
     hits = []
-    for part in [x for x in a.search.split(",") if x.strip()] or [a.search]:
+    from .arglists import items
+    for part in items(a.search) or [a.search]:
         hits += [dict(h, query=part.strip()) for h in search(part, a.limit)]
     out({"set": "lucide (ISC)", "icons": len(load_index()), "hits": hits,
          "how": "use the name in motion-script.json (\"icon\": \"<name>\"); arrows/chevrons are mirrored in RTL"})
@@ -163,7 +166,8 @@ def cmd_motion_build(a):
 
 def cmd_motion_render(a):
     from .motion_render import render
-    scenes = [x.strip() for x in a.scenes.split(",") if x.strip()] if a.scenes else None
+    from .arglists import items
+    scenes = items(a.scenes) or None
     r = render(P(a), scenes=scenes, timeout=a.timeout)
     r["next"] = ("reel motion-frames, then the qc-reviewer inspects them" if r["status"] == "RENDERED" else
                  "read the reasons and logs/aerender.log")
@@ -174,7 +178,7 @@ def cmd_motion_frames(a):
     from .motion_render import frames
     r = frames(P(a))
     r["next"] = ("qc-reviewer splits frames.json across frame-inspectors; the lead VIEWS _sheet.jpg and records "
-                 "`reel verify --record pass|fail --notes …`")
+                 "`reel verify --record --verdict pass|fail --note \"…\"`")         # T2.16 (MI-2): the real form
     out(r)
 
 

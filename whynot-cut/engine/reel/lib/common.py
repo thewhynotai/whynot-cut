@@ -124,7 +124,13 @@ def frame_size(paths: "Paths | None" = None, ctx: "Context | None" = None) -> tu
     if ctx is None:
         cur = current_context()
         ctx = Context(paths.root, cur.profile, cur.engine_home) if paths is not None else cur
-    general = (ctx.config("sequence-settings.json") or {}).get("general") or {}
+    return frame_size_of(ctx.config("sequence-settings.json"))
+
+
+def frame_size_of(seq_cfg: dict | None) -> tuple[int, int]:
+    """frame_size() of an already loaded sequence-settings.json (the plan reads it once with its inputs): the same
+    defaults and the same Guidance for a bad value (3.0 T2.16, T2.8 review minor 2)."""
+    general = (seq_cfg or {}).get("general") or {}
     out = []
     for key, default in zip(("frame_width", "frame_height"), DEFAULT_FRAME_SIZE):
         v = general.get(key)

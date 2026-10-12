@@ -57,7 +57,9 @@ def build(paths: Paths, timeout: int = 600) -> dict:
     d0 = mogrt_dir(paths)
     p = run_after_effects(jsx, timeout, done=lambda: all(valid_mogrt(d0 / f"NH_{k}.mogrt", t0) for k in MOGRTS))
     if p.get("status") == "UNSUPPORTED":
-        return {"status": "UNSUPPORTED", "msg": "After Effects not installed", "jsx": str(jsx)}
+        return {"status": "UNSUPPORTED", "ok": False, "msg": "After Effects not installed", "jsx": str(jsx)}   # T2.16
+    if p.get("status") == "REFUSED":
+        return dict(p, ok=False, jsx=str(jsx))
     d = mogrt_dir(paths)
     fresh = {k: valid_mogrt(d / f"NH_{k}.mogrt", t0) for k in MOGRTS}
     res = {"jsx": str(jsx), "returncode": p.get("returncode"), "stderr": (p.get("stderr") or "")[:500],

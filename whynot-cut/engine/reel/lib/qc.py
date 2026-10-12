@@ -26,9 +26,8 @@ FULL_SCREEN = {"broll_card", "broll_video", "logo_outro", "flash_transition", "p
 
 def run_qc(paths: Paths) -> dict:
     r = Report()
-    seq = load_config("sequence-settings.json")
-    from .common import seq_fps, seq_rate
-    W, H = seq["general"]["frame_width"], seq["general"]["frame_height"]
+    from .common import frame_size, seq_fps, seq_rate
+    W, H = frame_size(paths)             # T2.16: validated (common.frame_size), not read raw
     FPS, (TB, NTSC) = seq_fps(), seq_rate()
     from .stamps import read_compiled
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))

@@ -1285,6 +1285,9 @@ def check_reel(exe: str, argv: list[str], agent: str | None):
                       "message. Report the candidates instead.")
             if sub == "settings" and "--init" in argv:
                 block("only the lead editor changes the editor's preferences (e.g. approval mode), when the editor asks.")
+            if sub == "handoff" and "--delivered" in argv:         # 3.0 T2.16
+                block("only the lead editor records a delivery (`reel handoff --delivered`), when the editor says the "
+                      "video went to the client.")
             if sub == "verify" and "--record" in argv:
                 block("subagents report a verdict; the lead editor records it after viewing the evidence itself.")
             if sub == "transcript-verify" and (opt_value(argv, "--by") or "").strip("'\"").lower() == "editor":

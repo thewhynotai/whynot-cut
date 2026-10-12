@@ -41,7 +41,7 @@ def _parse_scalar(v: str):
 def parse(text: str) -> tuple[dict, str]:
     """Frontmatter (flat key: value) and body. Unknown keys are kept; bad values fall back to defaults. A leading BOM
     (Notepad / PowerShell 5.1 "UTF-8") and Windows line ends are accepted (3.0 T2.2, engine MI-24)."""
-    text = text.lstrip("﻿").replace("\r\n", "\n")
+    text = text.lstrip("\ufeff").replace("\r\n", "\n")      # an escape, never a literal invisible BOM (T2.16)
     m = re.match(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)(.*)\Z", text, re.S)
     if not m:
         return {}, text

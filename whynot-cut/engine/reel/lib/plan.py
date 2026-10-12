@@ -11,8 +11,8 @@ import re
 import unicodedata
 from pathlib import Path
 
-from .common import (still_category, seq_fps, Paths, fmt_ts, frame_to_tc, load_config, ms_to_frame, now_iso,
-                     read_json, write_json)
+from .common import (still_category, seq_fps, Paths, fmt_ts, frame_size_of, frame_to_tc, load_config, ms_to_frame,
+                     now_iso, read_json, write_json)
 
 SFX_TRACK = {"whoosh": "A04", "whoosh_soft": "A04", "riser_soft": "A04", "flash": "A04",
              "pop": "A05", "click": "A05", "tick": "A05", "hit_soft": "A03", "shimmer": "A05"}
@@ -114,7 +114,7 @@ def word_cut_ranges(words: list, cut_words: list, dur_ms: int, pad_ms: int = 30)
 def window_rect(framing: str | None, y: int | None = None, seq_w: int = 1080, seq_h: int = 1920) -> dict | None:
     """The picture window of a framing mode: "4:5" -> 1080x1350 (centred unless global.framing_window_y); "9:16" -> None
     (the picture fills the frame)."""
-    f = str(framing or "9:16").replace("x", ":").strip()
+    f = str(framing or "9:16").lower().replace("x", ":").replace(" ", "")      # "4X5", "4 x 5" too (T2.16)
     if f in ("9:16", "full", ""):
         return None
     try:
@@ -144,7 +144,9 @@ def to_ms(v) -> int:
 def _transcript_text(paths: Paths) -> tuple[str, int]:
     tj = read_json(paths.p("02_transcription/transcript.json"))
     if not tj:
-        raise FileNotFoundError("02_transcription/transcript.json missing — transcribe first")
+        from .errors import Guidance
+        raise Guidance("no transcript yet (02_transcription/transcript.json)", "Run `reel transcribe` first",
+                       where=str(paths.p("02_transcription/transcript.json")))
     from . import srt as srtlib
     srt_p = paths.p("02_transcription/subtitles.srt")
     text = " ".join(s["text"] for s in tj["segments"])
@@ -197,7 +199,10 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
     from .transcribe import transcript_flags
     ed = read_json(paths.p("01_analysis/edit-decisions.json"))
     if not ed:
-        raise FileNotFoundError("01_analysis/edit-decisions.json missing — author it (see references/edit-decision-engine.md)")
+        from .errors import Guidance
+        raise Guidance("no edit decisions yet (01_analysis/edit-decisions.json)",
+                       "The story editor authors it (story-craft references/edit-decision-engine.md), then run "
+                       "`reel plan` again", where=str(paths.p("01_analysis/edit-decisions.json")))
     tpl = load_config("graphics-templates.json", ctx)["templates"]
     manifest = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
     ttext, dur_ms = _transcript_text(paths)
@@ -518,8 +523,8 @@ def build_camera(inp: PlanInputs, camera: list, events: list):
     if cutaways and bsp:
         pre_v = main_v
         if pre_v:
-            seq_cfg = inp.seq_cfg["general"]
-            fit = min(seq_cfg["frame_width"] / pre_v["display_width"], seq_cfg["frame_height"] / pre_v["display_height"]) * 100
+            SW, SH = frame_size_of(inp.seq_cfg)
+            fit = min(SW / pre_v["display_width"], SH / pre_v["display_height"]) * 100
             for a, b in cutaways:
                 camera.append({"decision_id": "AUTO_CUTAWAY", "type": "reframe", "at_ms": a, "frame": ms_to_frame(a),
                                "until_ms": b, "scale_factor": round(fit / bsp, 5), "offset_x": -float(box or 0.0),
@@ -533,8 +538,7 @@ def build_camera(inp: PlanInputs, camera: list, events: list):
         pv = main_v
         if pv:
             from .shots import compose_camera, frame_shots
-            seq_g = inp.seq_cfg["general"]
-            SW, SH = seq_g["frame_width"], seq_g["frame_height"]
+            SW, SH = frame_size_of(inp.seq_cfg)
             dw, dh = pv["display_width"], pv["display_height"]
             pc = inp.podcast
             layer = frame_shots(shots_rep["shots"], inp.speakers, dw, dh, SW, SH,
@@ -569,8 +573,8 @@ def apply_framing(inp: PlanInputs, cam: dict):
     # captions below"): every speaker piece is drawn in a window; story moves and jump-cut zooms stay inside it (the
     # build crops the picture to the window); source cutaways stay whole
     framing_mode = str(base.get("framing") or inp.style.get("framing") or "9:16")
-    seq_g0 = inp.seq_cfg["general"]
-    win = window_rect(framing_mode, base.get("framing_window_y"), seq_g0["frame_width"], seq_g0["frame_height"])
+    SW, SH = frame_size_of(inp.seq_cfg)      # T2.16: validated like everywhere else (common.frame_size)
+    win = window_rect(framing_mode, base.get("framing_window_y"), SW, SH)
     if win and main_v is None:       # a 4:5 reel silently built as 9:16 would be the wrong deliverable
         errors.append(f"framing {framing_mode} needs this video's preflight: "
                       f"{Path(main_file).name if main_file else 'its footage'} is not in 00_inputs/preflight.json — run "
@@ -579,9 +583,8 @@ def apply_framing(inp: PlanInputs, cam: dict):
         warnings.append(f"{Path(main_file).name} is not in 00_inputs/preflight.json: per-shot framing is skipped (the "
                         "picture is fitted) — run `reel preflight` for this video")
     if win and main_v and not bsp:   # a source already in the sequence's shape (a phone clip) has no reframe: its fit
-        seq_g = inp.seq_cfg["general"]                             # scale is the base the window zooms from
-        bsp = round(min(seq_g["frame_width"] / main_v["display_width"],
-                        seq_g["frame_height"] / main_v["display_height"]) * 100, 3)
+        bsp = round(min(SW / main_v["display_width"],             # scale is the base the window zooms from
+                        SH / main_v["display_height"]) * 100, 3)
     if win and bsp:
         pv_ = main_v
         if pv_:
@@ -767,8 +770,11 @@ def final_checks(inp: PlanInputs, events: list):
                       "(the raw file this video is cut from, e.g. data/Raw/C0239.MP4); with `reel discover` run, a video "
                       "id that names one raw clip defaults to it")
     elif not inp.exists(inp.main_file):
-        errors.append(f"global.main_footage {inp.main_file} not found in the client folder: give the raw file's path "
-                      "relative to the client folder (e.g. data/Raw/C0239.MP4)")
+        found, _why = _default_footage(inp.paths)      # T2.16: the path the clip-id map resolves for this id, if any
+        hint = (f"the clip of {inp.video_id} is now at {found}: set \"main_footage\": \"{found}\""
+                if found and found != inp.main_file and inp.exists(found) else
+                "give the raw file's path relative to the client folder (e.g. data/Raw/C0239.MP4)")
+        errors.append(f"global.main_footage {inp.main_file} not found in the client folder: {hint}")
     elif inp.main_default:
         why = getattr(inp, "main_default_why", None) or f"the raw clip of {inp.video_id}"
         warnings.append(f"global.main_footage not set: using {inp.main_default} ({why}); "

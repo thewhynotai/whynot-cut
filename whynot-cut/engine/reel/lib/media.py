@@ -209,8 +209,8 @@ def preflight(paths: Paths, main_footage: list[Path]) -> dict:
     from .common import source_range
     rng = source_range(paths)
     seq = load_config("sequence-settings.json")
-    from .common import seq_fps
-    sw, sh, sfps = seq["general"]["frame_width"], seq["general"]["frame_height"], seq_fps()
+    from .common import frame_size, seq_fps
+    (sw, sh), sfps = frame_size(paths), seq_fps()        # T2.16: validated (common.frame_size), not read raw
     srate = seq["audio"]["sample_rate"]
     report = {"generated": now_iso(), "sequence": {"w": sw, "h": sh, "fps": round(sfps, 5), "audio_hz": srate},
               "files": [], "valid": [], "issues": [], "conversions": []}

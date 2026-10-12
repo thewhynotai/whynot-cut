@@ -181,7 +181,8 @@ def frame_points(plan: dict) -> list[dict]:
 def frames(paths) -> dict:
     from PIL import Image
     from . import ae_render
-    plan = read_json(paths.p("01_analysis/motion-plan.json"))
+    from .stamps import read_compiled
+    plan = read_compiled(paths.p("01_analysis/motion-plan.json"))
     res = read_json(paths.p(RESULT), {}) or {}
     main = res.get("main")
     if not plan or not main or not Path(main).exists():

@@ -542,6 +542,26 @@ def motion_id(episode_id: str, src_id: str) -> str:
     return f"{episode_id}_{src_id}_MO"
 
 
+_REEL_DIR = re.compile(r"^(?P<ep>.+)_(?P<rid>[RT]\d+)(?P<mo>_MO)?$")
+
+
+def unfinished_reel(root, name: str) -> dict | None:
+    """A half-made reel folder (3.0 T2.16, T2.4 re-review): output/projects/<EP>_R<nn> or <EP>_<ID>_MO of an episode
+    of this client, without its 00_inputs/source.json (a Gate 0 stopped before writing it). None for anything else.
+    Such a folder is neither an orphan clip project nor a whole clip: re-running the pick completes it."""
+    m = _REEL_DIR.match(str(name or ""))
+    if not m:
+        return None
+    out = Path(root).expanduser() / "output"
+    if not (out / "episodes" / m["ep"]).is_dir() or (out / "projects" / name / "00_inputs/source.json").exists():
+        return None
+    motion = bool(m["mo"])
+    return {"video_id": name, "episode": m["ep"], "pick": m["rid"], "as": "motion" if motion else "video",
+            "how": f"{name} is a reel of episode {m['ep']} whose selection did not finish (no 00_inputs/source.json): "
+                   f"re-run `reel reels-select --episode {m['ep']} --pick {m['rid']} --by editor"
+                   + (" --as motion" if motion else "") + " --force` (the editor's Gate 0 pick) to complete it"}
+
+
 def _avoid_list(ep) -> list:
     info = read_json(ep.p("00_inputs/episode.json"), {}) or {}
     raw_avoid = (info.get("sheet", {}) or {}).get("avoid") or []
@@ -599,7 +619,7 @@ def _select(ep, picks, adjust, by, note, confirm_avoid, force, resync, as_, fmt,
     from .common import Paths, load_status, set_status, sha1_head
     from .episode import episode_file, load_episode, podcast_cfg
     from .recipes import resolve, types as recipe_types
-    if by not in ("editor", "delegated"):
+    if by not in ("editor", "delegated") and not resync:         # --resync picks nothing: no `by` (T2.16, MI-1)
         raise SystemExit("--by must be editor or delegated")
     if as_ not in ("video", "motion"):
         raise SystemExit("--as must be video or motion")
@@ -644,11 +664,13 @@ def _select(ep, picks, adjust, by, note, confirm_avoid, force, resync, as_, fmt,
     unknown = [p for p in picks + list(adj) if p not in byid]
     if unknown:
         raise SystemExit(f"unknown candidate(s) {unknown}; the plan has {list(byid)}")
-    blocked = [p for p in picks if byid[p].get("avoid_hits") and p not in (confirm_avoid or ())]
+    from .arglists import items
+    ok_avoid = set(items(confirm_avoid))           # "R05,R06" or ["R05", "R06"] (T2.16, MI-5)
+    blocked = [p for p in picks if byid[p].get("avoid_hits") and p not in ok_avoid]
     if blocked:
         raise SystemExit(f"{blocked} mention topics the episode sheet says to avoid "
                          f"({ {p: byid[p]['avoid_hits'] for p in blocked} }): only with the editor's explicit OK, add "
-                         + " ".join(f"--confirm-avoid {p}" for p in blocked))
+                         + f"--confirm-avoid {','.join(blocked)}")
     dur_cfg = cfg["reel_duration_s"]
     lang = (info.get("sheet") or {}).get("language") or \
         ((read_json(ep.p("02_transcription/transcript.json"), {}) or {}).get("meta") or {}).get("language")

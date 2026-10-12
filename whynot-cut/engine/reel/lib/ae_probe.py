@@ -103,7 +103,7 @@ def run_probe(fonts: dict | None = None, timeout: int = 600) -> dict:
                        "selector diagnostics)"}
     write_json(caps_file(), rec)
     return dict(rec, ok=rend["status"] == "RENDERED" and bool(frames),
-                next="VIEW every frame, then `reel ae-probe --record ok|fail --word-order logical|visual --notes …`")
+                next="VIEW every frame, then `reel ae-probe --record ok|fail --word-order logical|visual --note \"…\"`")
 
 
 def record(verdict: str, notes: str, word_order: str) -> dict:

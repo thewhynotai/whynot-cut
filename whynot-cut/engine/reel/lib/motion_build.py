@@ -180,7 +180,8 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
         where = " in this reel's project" if same else f" in {ping.get('project_path') or 'an untitled project'}"
         what = "has unsaved changes" if dirty is True else "could not report whether it has unsaved changes"
         probs.append(f"After Effects {what}{where}: save or close it in After Effects first")
-    plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
+    from .stamps import read_compiled
+    plan = read_compiled(paths.p("01_analysis/motion-plan.json"), {}) or {}
     if plan:
         fonts = _inner(ae_bridge.submit("fonts", {"postscript_names": _plan_fonts(plan)}, timeout=60)).get("fonts") or {}
         miss = [n for n, f in fonts.items() if not f.get("found") or f.get("substitute")]

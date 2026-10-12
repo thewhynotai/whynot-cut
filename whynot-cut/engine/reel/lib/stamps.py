@@ -82,6 +82,26 @@ def read_compiled(path, default=None, rerun: str | None = None):
     return doc
 
 
+def report_only(path, rerun: str | None = None) -> str | None:
+    """check() for the commands that only report (`reel status`, `reel next`, 3.0 T2.16): another major version is a
+    warning there too, never a refusal; every message is noted on the Context, so it reaches `version_warnings`.
+    None when the file is missing, unreadable (the step that reads it says so) or current."""
+    from .common import read_json
+    from .errors import Guidance
+    try:
+        doc = read_json(path, None)
+    except Exception:  # noqa: BLE001 — a status report never fails on a bad artefact
+        return None
+    if not doc:
+        return None
+    try:
+        return check(doc, path, rerun)
+    except Guidance as e:
+        msg = f"{e.error}: {e.how}"
+        _note(msg)
+        return msg
+
+
 def stamp(doc: dict) -> dict:
     """A copy of doc with `engine_version` (this engine's version) set."""
     return dict(doc, engine_version=engine_version())

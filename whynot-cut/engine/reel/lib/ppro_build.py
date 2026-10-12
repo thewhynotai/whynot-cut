@@ -253,7 +253,10 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
         return {"status": "PREVIOUS_PARKED", "ok": False, "blocked": f"no {prproj.name}; a previous project is parked",
                 "parked_previous": parked, "how": parked["how"]}
     if prproj.exists() and not overwrite:
-        return {"status": "EXISTS", "project": str(prproj), "fix": "re-run with --force (previous version is kept as a backup)"}
+        # T2.16: nothing was built, so not exit 0: a refusal (exit 2) that says how to rebuild
+        return {"status": "EXISTS", "project": str(prproj), "refused": f"{prproj.name} already exists (nothing built)",
+                "how": "re-run with --force to rebuild it (the previous version is kept as a backup)",
+                "fix": "re-run with --force (previous version is kept as a backup)"}
     em = editor_modified(paths) if prproj.exists() else None
     if em and not replace_edited:
         return {"status": "EDITOR_CHANGES_PRESENT", "detail": em,
@@ -279,7 +282,10 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
                 write_json(paths.p("07_premiere/ppro-build-result.json"), rec)
     data = job_data(paths, overwrite, stage_media=True)
     if data["_missing"]:
-        return {"status": "MISSING_GRAPHICS", "missing": data["_missing"], "fix": "run `reel previews`"}
+        return {"status": "MISSING_GRAPHICS", "ok": False, "missing": data["_missing"],      # T2.16: exit 1
+                "error": f"{len(data['_missing'])} graphic still(s) missing: nothing was built",
+                "how": "run `reel previews` (it renders the stills), then `reel ppro-build` again",
+                "fix": "run `reel previews`"}
     import time
     t0 = time.time()
     r, claimed, restored, saved_now, submitting = {}, False, False, False, False
@@ -409,7 +415,8 @@ def _export_frames(paths: Paths, times, retries: int, wait_s: float, media_wait_
     from .ppro_bridge import submit
     from .common import frame_to_tc
     from .media_pending import is_media_pending
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     labels = {}
     if times is None:
         for e in spec["events"]:
@@ -487,7 +494,7 @@ def _export_frames(paths: Paths, times, retries: int, wait_s: float, media_wait_
                  f"loading) after {attempts} re-export{'s' if attempts != 1 else ''}")
         error = f"{error}; {slate}" if error else slate
     nxt = ("VIEW the sheet (qc-reviewer: fan out frame-inspectors over the PNGs), then the lead records "
-           "`reel verify --record --verdict pass|fail --sheet <sheet> --notes ...`")
+           "`reel verify --record --verdict pass|fail --sheet <sheet> --note \"...\"`")
     if media_pending:
         nxt = (f"{len(media_pending)} frame(s) are Premiere's 'Media pending' slate, listed under media_pending and left "
                "out of the sheet: a Media pending frame is neither a pass nor a fail. Wait until Premiere has finished "

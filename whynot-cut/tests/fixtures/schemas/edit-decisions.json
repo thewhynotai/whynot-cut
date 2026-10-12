@@ -707,11 +707,11 @@
    }
   },
   {
-   "why": "framing 4X5: window_rect only knows a lower-case x, so the engine would silently skip the window",
+   "why": "framing 4Y5 is no ratio: window_rect would silently skip the window (4X5 is fine since T2.16)",
    "path": "/global/framing",
    "doc": {
     "global": {
-     "framing": "4X5"
+     "framing": "4Y5"
     },
     "decisions": []
    }

@@ -18,14 +18,18 @@ ARGS: dict = {
         *RUN_ARGS,
     ],
     "reels-plan": [],
-    "reels-preview": [(("--ids",), {"default": None, "help": "e.g. R01,R03 (default: every candidate)"})],
+    "reels-preview": [(("--ids",), {"action": "append", "default": None,
+                                     "help": "e.g. R01,R03 or repeated (default: every candidate)"})],
     "reels-select": [
-        (("--pick",), {"default": "", "help": "the editor's choice, e.g. R01,R03"}),
-        (("--adjust",), {"action": "append", "default": [], "help": "R03:in=00:12:04.000 or R03:out=00:13:05 (repeatable; snaps to the nearest word)"}),
-        (("--by",), {"required": True, "choices": ["editor", "delegated"],
-                     "help": "editor = the editor picked in chat; delegated = they told you to choose"}),
-        (("--note",), {"default": "", "help": "the editor's words (required with --by delegated)"}),
-        (("--confirm-avoid",), {"action": "append", "default": [], "help": "a candidate id the editor OKs despite an avoid-topic hit"}),
+        (("--pick",), {"action": "append", "default": [], "help": "the editor's choice, e.g. R01,R03 (or repeated)"}),
+        (("--adjust",), {"action": "append", "default": [], "help": "R03:in=00:12:04.000 or R03:out=00:13:05 (repeatable "
+                                                                    "or a comma list; snaps to the nearest word)"}),
+        # T2.16 (MI-1): --by records who picked, so it is needed with --pick only (`--resync` picks nothing)
+        (("--by",), {"default": None, "choices": ["editor", "delegated"],
+                     "help": "with --pick: editor = the editor picked in chat; delegated = they told you to choose"}),
+        (("--note", "--notes"), {"dest": "note", "default": "", "help": "the editor's words (required with --by delegated)"}),
+        (("--confirm-avoid",), {"action": "append", "default": [],
+                                "help": "candidate ids the editor OKs despite an avoid-topic hit: R05,R06 or repeated"}),
         (("--force",), {"action": "store_true", "help": "re-slice a reel whose window changed"}),
         (("--resync",), {"action": "store_true", "help": "re-slice selected reels' transcripts after episode corrections"}),
         (("--as",), {"dest": "as_", "choices": ["video", "motion"], "default": "video",
@@ -34,7 +38,9 @@ ARGS: dict = {
         (("--format",), {"dest": "fmt", "choices": ["9x16", "16x9"], "default": "9x16", "help": "motion video format"}),
         (("--type",), {"dest": "type_", "default": None, "help": "content type for topic picks (T..) without one"}),
     ],
-    "music": [(("--list",), {"action": "store_true", "help": "list the licensed tracks in data/Music with mood tags"})],
+    # `music` always lists (it changes nothing); `--list` is the spelling the skills use (T2.16, MI-4)
+    "music": [(("--list",), {"action": "store_true", "help": "list the licensed tracks in data/Music with mood tags "
+                                                              "(the default; the flag is accepted for clarity)"})],
     "publish-check": [],
     "episode-next": [],
     "publish-thumbnail": [
@@ -71,10 +77,11 @@ def add_args(name: str, sp) -> None:
         sp.add_argument(*flags, **kw)
 
 
-def out(obj):
-    """One JSON document; a failed result exits 1, a refusal 2 (3.0 T2.2: lib/errors.emit)."""
+def out(obj, check: bool = True):
+    """One JSON document; a failed result exits 1, a refusal 2 (3.0 T2.2: lib/errors.emit). check=False when the
+    document reports a state rather than this command's result (`episode-next`), like cli.out."""
     from .errors import emit
-    emit(obj)
+    emit(obj, check)
 
 
 def EP(a):
@@ -133,7 +140,8 @@ def cmd_reels_plan(a):
 def cmd_reels_preview(a):
     from .reels import render_candidates
     ep = EP(a)
-    ids = [x.strip() for x in a.ids.split(",") if x.strip()] if a.ids else None
+    from .arglists import items
+    ids = items(a.ids) or None
     r = render_candidates(ep, ids)
     r["plan"] = str(ep.p("01_analysis/reels-plan.md"))
     r["next"] = "VIEW the sheet, then show the editor reels-plan.md + previews and wait for their pick (Gate 0)"
@@ -141,14 +149,19 @@ def cmd_reels_preview(a):
 
 
 def cmd_reels_select(a):
+    from .arglists import ADJUST_START, items
     from .reels import select
-    picks = [x.strip() for x in a.pick.split(",") if x.strip()]
+    picks = items(a.pick)
+    adjust = items(a.adjust, start=ADJUST_START)
     if not picks and not a.resync:
         raise SystemExit("--pick required (the editor's choice), or --resync")
+    if (picks or adjust) and not a.by:
+        raise SystemExit("--by editor|delegated required with --pick (who chose: the editor in chat, or you on their "
+                         "explicit delegation)")
     if a.by == "delegated" and not a.note.strip():
         raise SystemExit("--by delegated needs --note with the editor's own words")
-    out(select(EP(a), picks, a.adjust, a.by, note=a.note, confirm_avoid=a.confirm_avoid, force=a.force, resync=a.resync,
-               as_=a.as_, fmt=a.fmt, type_=a.type_))
+    out(select(EP(a), picks, adjust, a.by, note=a.note, confirm_avoid=items(a.confirm_avoid), force=a.force,
+               resync=a.resync, as_=a.as_, fmt=a.fmt, type_=a.type_))
 
 
 def cmd_music(a):
@@ -186,7 +199,7 @@ def cmd_publish_thumbnail(a):
 
 def cmd_episode_next(a):
     from .episode import episode_next
-    out(episode_next(EP(a)))
+    out(episode_next(EP(a)), check=False)       # the episode's state, not a failed command
 
 
 def _chunks_missing(ep) -> bool:

@@ -60,7 +60,8 @@ def _prune_dialogue(paths, keep: Path) -> None:
     run (Windows refuses to delete it)."""
     from pathlib import PureWindowsPath     # splits on / and \ alike
     from .common import read_json
-    plan = read_json(paths.p("01_analysis/motion-plan.json"), {}) or {}
+    from .stamps import read_compiled
+    plan = read_compiled(paths.p("01_analysis/motion-plan.json"), {}) or {}
     job = (read_json(paths.p("04_after_effects/data/motion-job.json"), {}) or {}).get("plan") or {}
     named = {keep.name} | {PureWindowsPath(p["audio"]["dialogue"]).name for p in (plan, job)
                            if (p.get("audio") or {}).get("dialogue")}
