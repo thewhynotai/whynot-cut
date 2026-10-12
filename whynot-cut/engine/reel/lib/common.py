@@ -438,9 +438,24 @@ _PROCESS_CTX = Context()                     # the one-shot CLI's context (set_c
 _BOUND_CTX: contextvars.ContextVar = contextvars.ContextVar("whynot_context", default=None)   # per request / thread
 
 
+_REQUIRE_BOUND = False                       # `reel serve` turns it on: no request may fall back to the process one
+
+
+def require_bound_context(on: bool = True) -> None:
+    """When on, current_context() raises unless a Context is bound (use_context): a long-lived process must never
+    serve a request with the process-wide Context (T2.17, T6.2)."""
+    global _REQUIRE_BOUND
+    _REQUIRE_BOUND = bool(on)
+
+
 def current_context() -> Context:
     """The Context bound by `use_context` (a long-lived process), else the process one from `set_context`."""
-    return _BOUND_CTX.get() or _PROCESS_CTX
+    ctx = _BOUND_CTX.get()
+    if ctx is not None:
+        return ctx
+    if _REQUIRE_BOUND:
+        raise RuntimeError("no request context bound — reel serve must bind one per request")
+    return _PROCESS_CTX
 
 
 def set_context(root: Path | None = None, profile: str | None = None) -> Context:
