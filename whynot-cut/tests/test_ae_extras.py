@@ -479,6 +479,16 @@ class TestExitCodes(AerenderCase):
         self.assertEqual((doc["execute"]["status"], code), ("AEP_CREATED", 0))
         self.assertNotIn("ok", doc)
 
+    def test_ae_build_with_a_busy_build_lock_exits_2(self):
+        """Gate 2 tail: the refusal's `blocked` reaches the top-level document, so the exit code is 2, not 1."""
+        from lib import adobe_run, ae_bridge, cep_queue
+        self.build_cmd(rebuilds=False)          # lays out the plan and the paths
+        with mock.patch.object(self.cli, "refuse_stale_window"), mock.patch.object(self.cli, "require_plan_approval"),                 mock.patch.object(plat, "newest_app", lambda key: {"name": "AE", "exe": "AfterFX.exe"}),                 mock.patch.object(plat, "sandbox_refusal", lambda what, *t: None),                 mock.patch.object(adobe_run.subprocess, "Popen", side_effect=AssertionError("must not launch")),                 mock.patch.object(cep_queue, "LOCK_WAIT_S", 0.2),                 common.use_context(common.Context(self.paths.root)),                 ae_bridge.build_lock("motion-build other"):
+            code, doc = run_cmd(self.cli.cmd_ae_build, self.args)
+        self.assertEqual(code, 2, doc)
+        self.assertIn("another build", doc["blocked"])
+        self.assertEqual((doc["ok"], doc["status"]), (False, "REFUSED"))
+
     def test_a_plan_rate_mismatch_is_in_the_build_result_warnings(self):
         code, doc = self.build_cmd(rebuilds=True, plan_fps=30.0)
         self.assertEqual(code, 0)                                   # a warning, never a block

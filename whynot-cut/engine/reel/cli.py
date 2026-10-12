@@ -602,6 +602,9 @@ def cmd_ae_build(a):
     if r.get("ok") is False:                    # T2.2: a build that saved no project this run exits 1, not 0
         doc["ok"] = False
         doc["status"] = r.get("status")
+        for k in ("blocked", "refused", "how"):   # a refusal (the bridge's build lock is busy) exits 2, as motion-build does
+            if r.get(k):
+                doc[k] = r[k]
     out(doc)
 
 

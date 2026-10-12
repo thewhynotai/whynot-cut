@@ -2922,6 +2922,7 @@ class TestArabicPaths(unittest.TestCase):
 
     def test_non_ascii_temp_folder_is_named(self):
         import tempfile as tf
+        from unittest import mock
         from lib import ae_render
         calls = self.fake_aerender()
         aep, out = self.project("مشروع")
@@ -2929,13 +2930,39 @@ class TestArabicPaths(unittest.TestCase):
         temp.mkdir()
         saved, tf.tempdir = tf.tempdir, str(temp)
         try:
-            r = ae_render.render(aep, "MAIN_EP02", out, "Best Settings", "High Quality")
+            with mock.patch.object(ae_render, "ascii_stage_roots", return_value=[]):     # no ASCII fallback folder
+                r = ae_render.render(aep, "MAIN_EP02", out, "Best Settings", "High Quality")
         finally:
             tf.tempdir = saved
         self.assertEqual(r["status"], "FAILED", r)
         self.assertIn("ASCII", r.get("msg", ""))
         self.assertIn("TEMP", r.get("msg", ""))
         self.assertEqual(calls, [])
+
+    def test_non_ascii_temp_folder_falls_back_to_an_ascii_stage(self):
+        """Gate 2 D1: a non-ASCII %TEMP% no longer fails the render; the stage goes to the first ASCII fallback root."""
+        import tempfile as tf
+        from unittest import mock
+        from lib import ae_render
+        calls = self.fake_aerender()
+        aep, out = self.project("مشروع")
+        temp = self.tmp / "مؤقت"
+        temp.mkdir()
+        home = self.tmp / "home"
+        home.mkdir()
+        saved, tf.tempdir = tf.tempdir, str(temp)
+        try:
+            real = ae_render.ascii_stage_roots
+            with mock.patch.object(ae_render, "ascii_stage_roots", lambda: real(home=home, environ={})):
+                r = ae_render.render(aep, "MAIN_EP02", out, "Best Settings", "High Quality")
+        finally:
+            tf.tempdir = saved
+        self.assertEqual(r["status"], "RENDERED", r)
+        cmd = calls[0]["cmd"]
+        staged = Path(cmd[cmd.index("-project") + 1])
+        self.assertTrue(str(staged).isascii(), staged)
+        self.assertEqual(staged.parent.parent, home / "tmp")                 # under the engine home's tmp/
+        self.assertEqual(out.read_bytes(), b"MOV AEP")
 
 
 class TestAudioSyncDetail(unittest.TestCase):
