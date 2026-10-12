@@ -525,6 +525,25 @@ class SessionMessages(AppCase):
         self.assertNotIn("id", st)
         self.assertEqual(st["state"]["connection"]["host"]["state"], "uxp")
 
+    async def test_host_pill_counts_only_a_uxp_premiere_session_with_capabilities(self):
+        """A uxp session that implements nothing (spike 0.1.3, an old probe) is not the product host: the pill falls
+        back to the CEP heartbeat instead of saying uxp while no Premiere host can run a command (review M7)."""
+        c = await self.cli()
+        await self.panel(caps=())
+        with mock.patch("lib.ppro_bridge.status", return_value={"alive": False}):
+            await c.send({"type": "snapshot", "id": "no-caps"})
+            st = await c.recv()
+        self.assertEqual(st["state"]["connection"]["host"]["state"], "offline", st)
+        await self.panel(caps=("ping",), host="aftereffects")      # an AE host is not the Premiere pill either
+        with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}):
+            await c.send({"type": "snapshot", "id": "cep"})
+            st = await c.recv()
+        self.assertEqual(st["state"]["connection"]["host"]["state"], "cep", st)
+        await self.panel(caps=("ping",))
+        await c.send({"type": "snapshot", "id": "product"})
+        st = await c.recv()
+        self.assertEqual(st["state"]["connection"]["host"], {"state": "uxp", "detail": "Premiere Pro 26.0"}, st)
+
 
 class Rate(AppCase):
     app_options = {"rate": (1.0, 3)}

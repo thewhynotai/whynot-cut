@@ -472,9 +472,11 @@ class App:
         await s.send(out)
 
     async def _state(self, id) -> dict:
-        """The connection part of the panel state: a UXP Premiere panel connected, else the CEP heartbeat."""
+        """The connection part of the panel state: a UXP Premiere panel connected, else the CEP heartbeat. Only a
+        session that implements something counts: a uxp session with no capabilities (spike 0.1.3, a probe) cannot run
+        a command, so it is not the Premiere host the pill means."""
         for s in reversed(list(self.sessions.values())):
-            if s.kind == "uxp" and s.host == "premiere":
+            if s.kind == "uxp" and s.host == "premiere" and s.capabilities:
                 return messages.state("uxp", f"Premiere Pro {s.host_version}".strip() if s.host_version else None, id)
         ctx = common.Context(home=self.home)
 
