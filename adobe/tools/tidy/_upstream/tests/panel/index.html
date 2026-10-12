@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Tidy</title>
+<link rel="stylesheet" href="../../css/tidy.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark">&#10022;</span>Tidy</div>
+  <div class="top-actions">
+    <button id="lang" class="ghost small">EN</button>
+    <button id="menu-btn" class="ghost small">&#8943;</button>
+    <div id="menu" class="menu" hidden>
+      <button data-act="open-logs" data-i18n="openLogs"></button>
+      <button data-act="open-folder" data-i18n="openFolder"></button>
+    </div>
+  </div>
+</header>
+
+<section class="card">
+  <div class="row between"><span class="muted" data-i18n="project"></span><b id="project-name">-</b></div>
+  <div id="mode" class="seg"><button data-mode="reels" data-i18n="modeReels"></button><button data-mode="podcast" data-i18n="modePodcast"></button></div>
+  <div class="tiny muted" data-i18n="modeHint"></div>
+  <button id="scan" class="primary wide" data-i18n="scan"></button>
+</section>
+
+<section class="card" id="summary" hidden>
+  <div class="stats">
+    <div><b id="st-items">-</b><span data-i18n="stItems"></span></div>
+    <div><b id="st-size">-</b><span data-i18n="stSize"></span></div>
+    <div class="warn"><b id="st-remove">-</b><span data-i18n="stRemove"></span></div>
+    <div class="good"><b id="st-free">-</b><span data-i18n="stFree"></span></div>
+  </div>
+  <div id="by-type" class="tiny muted"></div>
+</section>
+
+<section class="card" id="details" hidden>
+  <label class="toggle"><input type="checkbox" id="opt-remove" checked><span data-i18n="optRemove"></span></label>
+  <label class="toggle"><input type="checkbox" id="opt-organize" checked><span data-i18n="optOrganize"></span></label>
+  <label class="toggle"><input type="checkbox" id="opt-colors" checked><span data-i18n="optColors"></span></label>
+
+  <details open id="sec-remove"><summary><span data-i18n="secRemove"></span> <b id="n-remove"></b></summary><div id="list-remove" class="list"></div></details>
+  <details id="sec-move"><summary><span data-i18n="secMove"></span> <b id="n-move"></b></summary><div id="list-move" class="list"></div></details>
+  <details id="sec-ren"><summary><span data-i18n="secRename"></span> <b id="n-ren"></b></summary><div id="list-ren" class="list"></div></details>
+  <details id="sec-bins"><summary><span data-i18n="secBins"></span> <b id="n-bins"></b></summary><div id="list-bins" class="list"></div></details>
+  <details id="sec-dup"><summary><span data-i18n="secDup"></span> <b id="n-dup"></b></summary><div id="list-dup" class="list"></div></details>
+  <details id="sec-off"><summary><span data-i18n="secOffline"></span> <b id="n-off"></b></summary><div id="list-off" class="list"></div></details>
+</section>
+
+<section class="card" id="actions" hidden>
+  <button id="apply" class="primary wide" data-i18n="apply"></button>
+  <button id="sync" class="wide" data-i18n="sync" hidden></button>
+  <div id="confirm" class="confirm" hidden>
+    <div id="confirm-text" class="tiny"></div>
+    <div class="row between">
+      <button id="confirm-yes" class="danger small" data-i18n="confirmYes"></button>
+      <button id="confirm-no" class="ghost small" data-i18n="confirmNo"></button>
+    </div>
+  </div>
+  <div id="report" class="tiny" hidden></div>
+  <button id="undo" class="ghost small wide" hidden data-i18n="undo"></button>
+</section>
+<div id="status" class="tiny muted"></div>
+
+<script src="stub.js"></script><script src="../../js/cep.js"></script>
+<script src="../../js/i18n.js"></script>
+<script src="../../js/media.js"></script>
+<script src="../../js/classify.js"></script>
+<script src="../../js/plan.js"></script>
+<script src="../../js/sync.js"></script>
+<script src="../../js/engine.js"></script>
+<script src="../../js/main.js"></script>
+</body>
+</html>

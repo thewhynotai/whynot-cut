@@ -1,0 +1,2 @@
+# The upstream reference must check out byte-identical on every OS (no eol normalisation; see README.md).
+*/_upstream/** -text

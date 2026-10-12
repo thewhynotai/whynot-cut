@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kalam</title>
+<link rel="stylesheet" href="../../css/kalam.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark">ك</span>Kalam</div>
+  <div class="top-actions">
+    <button id="lang" class="ghost small" title="Language">ع</button>
+    <button id="menu-btn" class="ghost small">&#8943;</button>
+    <div id="menu" class="menu" hidden>
+      <button data-act="open-logs" data-i18n="openLogs"></button>
+      <button data-act="open-folder" data-i18n="openFolder"></button>
+      <button data-act="reset" data-i18n="resetSettings"></button>
+    </div>
+  </div>
+</header>
+
+<section class="card">
+  <div class="label" data-i18n="mode"></div>
+  <div class="seg" id="modes">
+    <button data-mode="ar" data-i18n="modeAr"></button>
+    <button data-mode="en" data-i18n="modeEn"></button>
+    <button data-mode="other" data-i18n="modeOther"></button>
+  </div>
+  <div id="mode-model" class="muted tiny"></div>
+</section>
+
+<section class="card">
+  <div class="label" data-i18n="rangeLabel"></div>
+  <div class="seg" id="ranges">
+    <button data-range="inout" data-i18n="rInOut"></button>
+    <button data-range="sequence" data-i18n="rSequence"></button>
+    <button data-range="playhead" data-i18n="rPlayhead"></button>
+    <button data-range="selection" data-i18n="rSelection"></button>
+  </div>
+  <div class="target tiny"><span class="muted" data-i18n="target"></span> <b id="target">-</b></div>
+  <div id="chips" class="chips"></div>
+</section>
+
+<section class="card">
+  <div class="label" data-i18n="output"></div>
+  <div class="seg" id="outputs">
+    <button data-out="track" data-i18n="outTrack"></button>
+    <button data-out="mogrt" data-i18n="outMogrt"></button>
+    <button data-out="srt" data-i18n="outSrt"></button>
+  </div>
+  <div id="mogrt-opts" class="sub" hidden>
+    <div class="row">
+      <button id="mogrt-pick" class="ghost small" data-i18n="pickMogrt"></button>
+      <span id="mogrt-name" class="muted tiny ellipsis"></span>
+    </div>
+    <div class="row">
+      <span class="muted tiny" data-i18n="videoTrack"></span>
+      <select id="mogrt-track"></select>
+      <input type="text" id="mogrt-field" data-i18n-ph="textField">
+    </div>
+  </div>
+  <div class="muted tiny" data-i18n="srtAlways"></div>
+</section>
+
+<section class="card">
+  <details id="caption-settings">
+    <summary data-i18n="captionSettings"></summary>
+    <div class="grid">
+      <label data-i18n="maxLine"></label><input type="number" id="max_line" min="12" max="60">
+      <label data-i18n="maxLines"></label><select id="max_lines"><option value="1">1</option><option value="2">2</option></select>
+      <label data-i18n="maxDur"></label><input type="number" id="max_dur" min="1" max="10" step="0.5">
+      <label data-i18n="minPause"></label><input type="number" id="min_pause" min="0.1" max="1" step="0.02">
+    </div>
+  </details>
+</section>
+
+<section class="card">
+  <label class="toggle"><input type="checkbox" id="correct"><span data-i18n="correctOn"></span></label>
+  <div id="correct-opts">
+    <div class="seg" id="backends" style="margin-top:8px">
+      <button data-backend="subscription" data-i18n="backendSub"></button>
+      <button data-backend="api" data-i18n="backendApi"></button>
+    </div>
+    <div id="backend-help" class="muted tiny"></div>
+    <div class="row" id="key-row">
+      <input type="password" id="api_key" data-i18n-ph="apiKey" autocomplete="off">
+      <button id="key-show" class="ghost small">&#128065;</button>
+    </div>
+    <details>
+      <summary data-i18n="rules"></summary>
+      <textarea id="rules" rows="8" dir="auto"></textarea>
+      <button id="rules-reset" class="ghost small" data-i18n="rulesReset"></button>
+    </details>
+    <details>
+      <summary data-i18n="glossary"></summary>
+      <div class="muted tiny" data-i18n="glossaryHelp"></div>
+      <textarea id="glossary" rows="5" dir="auto" placeholder="Granudacyn = graniodasin, granio dasin"></textarea>
+    </details>
+  </div>
+</section>
+
+<section class="card">
+  <button id="go" class="primary wide" data-i18n="go"></button>
+  <div id="progress" class="progress" hidden>
+    <div class="bar"><div id="progress-fill"></div></div>
+    <span id="progress-text" class="tiny"></span>
+    <button id="stop" class="ghost small" data-i18n="stop"></button>
+  </div>
+  <div id="result" hidden>
+    <div class="summary"><b id="res-count"></b> <span id="res-note" class="tiny"></span></div>
+    <div id="res-list" class="clist"></div>
+    <div class="row between">
+      <button id="undo" class="ghost small" data-i18n="undo"></button>
+      <button id="reveal" class="ghost small" data-i18n="reveal"></button>
+    </div>
+  </div>
+  <div id="status" class="tiny muted"></div>
+</section>
+
+<script src="stub.js"></script><script src="../../js/cep.js"></script>
+<script src="../../js/i18n.js"></script>
+<script src="../../js/range.js"></script>
+<script src="../../js/engine.js"></script>
+<script src="../../js/main.js"></script>
+</body>
+</html>

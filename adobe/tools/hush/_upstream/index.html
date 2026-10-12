@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hush</title>
+<link rel="stylesheet" href="css/hush.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="dot"></span>Hush</div>
+  <div class="top-actions">
+    <button id="lang" class="ghost small" title="Language">ع</button>
+    <button id="menu-btn" class="ghost small" aria-haspopup="true">&#8943;</button>
+    <div id="menu" class="menu" hidden>
+      <button data-act="clear-markers" data-i18n="clearMarkers"></button>
+      <button data-act="open-logs" data-i18n="openLogs"></button>
+      <button data-act="reset" data-i18n="resetSettings"></button>
+    </div>
+  </div>
+</header>
+
+<section class="card">
+  <label class="toggle"><input type="checkbox" id="ripple" checked><span data-i18n="ripple"></span></label>
+  <label class="toggle"><input type="checkbox" id="link" checked><span data-i18n="link"></span></label>
+  <label class="toggle"><input type="checkbox" id="backup" checked><span data-i18n="backup"></span></label>
+</section>
+
+<section class="card">
+  <div class="row between">
+    <div class="target"><span class="muted" data-i18n="target"></span> <b id="target">-</b></div>
+  </div>
+  <div id="chips" class="chips"></div>
+  <div id="track-warn" class="warn" hidden></div>
+  <button id="scan" class="primary wide" data-i18n="scan"></button>
+</section>
+
+<section class="card">
+  <div class="tabs">
+    <button class="tab active" data-tab="simple" data-i18n="simple"></button>
+    <button class="tab" data-tab="adv" data-i18n="advanced"></button>
+  </div>
+
+  <div id="pane-simple">
+    <div class="seg" id="levels">
+      <button data-level="soft" data-i18n="soft"></button>
+      <button data-level="medium" data-i18n="medium"></button>
+      <button data-level="strong" data-i18n="strong"></button>
+    </div>
+    <div class="row slider-row">
+      <button id="nudge-down" class="ghost small">&#8249;</button>
+      <input type="range" id="intensity" min="0" max="100" value="50">
+      <button id="nudge-up" class="ghost small">&#8250;</button>
+      <span class="num"><b id="intensity-val">50</b>/100</span>
+    </div>
+    <label class="toggle small"><input type="checkbox" id="tight" checked><span data-i18n="tight"></span></label>
+    <div id="simple-readout" class="muted tiny"></div>
+  </div>
+
+  <div id="pane-adv" hidden>
+    <div class="field">
+      <label data-i18n="threshold"></label>
+      <input type="range" id="adv-db" min="-80" max="-10" step="0.5">
+      <input type="number" id="adv-db-n" min="-80" max="-10" step="0.5"><span class="unit">dB</span>
+    </div>
+    <div class="field">
+      <label data-i18n="minSilence"></label>
+      <input type="range" id="adv-min" min="100" max="3000" step="10">
+      <input type="number" id="adv-min-n" min="100" max="3000" step="10"><span class="unit">ms</span>
+    </div>
+    <div class="field">
+      <label data-i18n="padBefore"></label>
+      <input type="range" id="adv-pb" min="0" max="1000" step="10">
+      <input type="number" id="adv-pb-n" min="0" max="1000" step="10"><span class="unit">ms</span>
+    </div>
+    <div class="field">
+      <label data-i18n="padAfter"></label>
+      <input type="range" id="adv-pa" min="0" max="1000" step="10">
+      <input type="number" id="adv-pa-n" min="0" max="1000" step="10"><span class="unit">ms</span>
+    </div>
+    <label class="toggle small"><input type="checkbox" id="pad-link" checked><span data-i18n="linkPads"></span></label>
+    <div class="row presets">
+      <select id="preset-select"></select>
+      <button id="preset-del" class="ghost small" title="Delete">&#10005;</button>
+    </div>
+    <div class="row presets">
+      <input type="text" id="preset-name" data-i18n-ph="presetName">
+      <button id="preset-add" class="ghost small" data-i18n="save"></button>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <label class="toggle"><input type="checkbox" id="fillers-on"><span data-i18n="fillersOn"></span></label>
+  <div id="filler-opts" hidden>
+    <div class="row">
+      <span class="muted tiny" data-i18n="speechLang"></span>
+      <select id="filler-lang">
+        <option value="auto" data-i18n="auto"></option>
+        <option value="ar">العربية</option>
+        <option value="en">English</option>
+      </select>
+      <label class="toggle small"><input type="checkbox" id="sounds-on"><span data-i18n="sounds"></span></label>
+    </div>
+    <details>
+      <summary data-i18n="editLists"></summary>
+      <label class="tiny muted" data-i18n="strongList"></label>
+      <textarea id="list-strong" rows="3" dir="auto"></textarea>
+      <label class="tiny muted" data-i18n="softList"></label>
+      <textarea id="list-soft" rows="2" dir="auto"></textarea>
+    </details>
+    <div id="filler-list" class="flist"></div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="wave-wrap">
+    <canvas id="wave" height="84"></canvas>
+    <div id="wave-ph" class="wave-ph" data-i18n="wavePlaceholder"></div>
+    <div id="wave-tip" class="wave-tip" hidden></div>
+  </div>
+  <div class="summary">
+    <div><span class="muted tiny" data-i18n="before"></span><b id="sum-before">-</b></div>
+    <div class="arrow">&#8594;</div>
+    <div><span class="muted tiny" data-i18n="after"></span><b id="sum-after">-</b></div>
+    <div><span class="muted tiny" data-i18n="saved"></span><b id="sum-saved">-</b></div>
+  </div>
+  <div id="recap" class="muted tiny center"></div>
+</section>
+
+<section class="card">
+  <div class="seg" id="modes">
+    <button data-mode="cut" class="active" data-i18n="modeCut"></button>
+    <button data-mode="markers" data-i18n="modeMarkers"></button>
+  </div>
+  <button id="go" class="primary wide" disabled data-i18n="goCut"></button>
+  <div id="progress" class="progress" hidden>
+    <div class="bar"><div id="progress-fill"></div></div>
+    <span id="progress-text" class="tiny"></span>
+    <button id="stop" class="ghost small" data-i18n="stop"></button>
+  </div>
+  <div class="row between">
+    <button id="undo" class="ghost small" disabled data-i18n="undo"></button>
+    <span id="status" class="tiny muted"></span>
+  </div>
+</section>
+
+<script src="js/cep.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/wav.js"></script>
+<script src="js/detect.js"></script>
+<script src="js/fillers.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+You receive caption lines from one video's speech transcript. Correct the text only:
+- Fix spelling and words that were clearly misheard, using the context (names, brands, medical and technical terms).
+- Keep the speaker's own words, order and style. Never rephrase, shorten, summarise or add anything.
+- Keep the original language of every word. Do not translate.
+- Write English normally (sentence case); proper nouns, brands and terms in their correct capitalisation; acronyms upper case (ESR, CRP).
+- Remove all punctuation and add none.
+- Never merge, split or move words between lines.
