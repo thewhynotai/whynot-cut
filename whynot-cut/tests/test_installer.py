@@ -2834,6 +2834,16 @@ class TestShellScripts(unittest.TestCase):
                            "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "UV_PYTHON_PREFERENCE", "utf8", "wnc_install.py"):
                 self.assertIn(needle, text, f"{name}: {needle}")
 
+    def test_macos_reads_json_with_javascript_not_plutil(self):
+        # plutil turns JSON into a plist, which has no null (components.json has nulls); the JXA scripts take the
+        # file / JSON text and the key path as run(argv) arguments, never spliced into the script text
+        for name in ("bootstrap.sh", "install.sh"):
+            text = SHELL_FILES[name].read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"(?m)^[^#\n]*\bplutil\b", name)  # (comments may say why not)
+            self.assertIn('osascript -l JavaScript -e "$', text, name)
+            self.assertIn("function run(argv)", text, name)
+            self.assertIn('"$1" "$2" 2>/dev/null </dev/null', text, name)
+
     def test_the_readme_names_every_flag(self):
         text = (INSTALLER / "README.md").read_text(encoding="utf-8")
         for flag in ("-Home", "-DryRun", "-Yes", "-ClientsFolder", "-Language", "-Channel", "-Components", "-Skip",
@@ -2922,6 +2932,54 @@ class TestPowerShellFrontEnd(_ShellCase):
         self.assertEqual(live_snapshot(), before)
         self.assertLessEqual(set(os.listdir(self.tmp)), {ARABIC_HOME, "zip root", "claude.jsonl", "engine.jsonl"})
 
+    def test_paths_ending_in_a_backslash_reach_the_core_intact(self):
+        # Windows PowerShell 5.1 passes 'C:\x y\' to a native program as "C:\x y\": the program reads \" as a quote,
+        # so that value is corrupted and every later flag swallowed. Tab completion produces exactly such paths.
+        clients = self.tmp / "WhyNot Clients"
+        r = self.ps(self.front(), "-Home", str(self.home) + "\\", "-Yes", "-Skip", "model,launch",
+                    "-ClientsFolder", str(clients) + "\\", "-Language", "en")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        st = json.loads(self.paths.state_file.read_text(encoding="utf-8"))
+        self.assertEqual(st["answers"]["clients_root"], str(clients), out)
+        self.assertEqual(st["answers"]["language"], "en", out)
+        self.assertFalse(clients.exists())
+
+    def test_the_bootstraps_quoting_guard_doubles_trailing_backslashes(self):
+        # the general guard for any native argument with whitespace and a trailing backslash (PS < 7.3)
+        boot = (INSTALLER / "core" / "bootstrap.ps1").read_text(encoding="utf-8")
+        m = re.search(r"(    function ConvertTo-WncNativeArgument.*?\n    }\n)", boot, re.S)
+        self.assertIsNotNone(m)
+        probe = self.tmp / "probe.py"
+        probe.write_text("import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8")
+        script = self.tmp / "guard.ps1"
+        script.write_text(m.group(1) + "\n$a = ConvertTo-WncNativeArgument @('C:\\x y\\', 'C:\\plain\\', 'a b', '--yes')\n"
+                          f"& '{sys.executable}' -I '{probe}' @a\n", encoding="ascii")
+        r = self.ps(script)
+        self.assertEqual(json.loads(r.stdout.strip().splitlines()[-1]),
+                         ["C:\\x y\\", "C:\\plain\\", "a b", "--yes"], r.stdout + r.stderr)
+
+    def test_uv_already_at_the_pinned_version_is_not_downloaded(self):
+        uv = self.paths.bin_dir / "uv.exe"
+        uv.parent.mkdir(parents=True)
+        src = ('public static class P { public static void Main() { '
+               'System.Console.WriteLine("uv 0.13.0 (fixture)"); } }')
+        built = self.tmp / "uv-fixture.exe"  # built in the ASCII temp root, then copied into the Arabic home
+        build = self.tmp / "build-uv.ps1"
+        build.write_text(f"Add-Type -TypeDefinition '{src}' -OutputAssembly '{built}' -OutputType ConsoleApplication\n",
+                         encoding="utf-8-sig")
+        b = self.ps(build)
+        if not built.is_file():
+            self.skipTest(f"cannot build a stand-in uv.exe here: {b.stdout}{b.stderr}")
+        shutil.copyfile(built, uv)
+        r = self.ps(self.front(), "-Home", self.home, "-Yes", "-Skip", "model,launch")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("uv 0.13.0 is installed", out)
+        self.assertEqual(self.uv_hits(), [])
+        self.assertFalse(self.uv_archive().exists())
+        self.assertTrue(self.paths.current_file.is_file())
+
     def test_dry_run_leaves_the_home_empty(self):
         self.home.mkdir()
         r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Yes")
@@ -2973,6 +3031,9 @@ class TestPowerShellOneLiner(TestPowerShellFrontEnd):
     test_dry_run_leaves_the_home_empty = None
     test_dry_run_without_uv_names_the_remaining_steps = None
     test_a_bad_uv_sha256_stops_with_3_and_names_the_file = None
+    test_paths_ending_in_a_backslash_reach_the_core_intact = None
+    test_the_bootstraps_quoting_guard_doubles_trailing_backslashes = None
+    test_uv_already_at_the_pinned_version_is_not_downloaded = None
 
     def test_installs_from_the_source_zip(self):
         r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Skip", "model,launch", "-Source", self.zip,
@@ -3053,11 +3114,13 @@ class TestBashFrontEnd(_ShellCase):
         env.update(extra)
         return {k: v for k, v in env.items() if v is not None}
 
-    def sh(self, *args, env=None, stdin=None):
-        kw = {"stdin": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
-        return subprocess.run([find_bash(), *[str(a) for a in args]], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", env=env or self.env(), timeout=600,
-                              cwd=str(self.tmp), **kw)
+    def sh(self, *args, env=None, script: bytes = None):
+        """bash with stdin = /dev/null, or (script) a REAL pipe carrying the script bytes, as `curl ... | bash` does."""
+        cmd = [find_bash(), *[str(a) for a in args]]
+        kw = {"input": script} if script is not None else {"stdin": subprocess.DEVNULL}
+        r = subprocess.run(cmd, capture_output=True, env=env or self.env(), timeout=600, cwd=str(self.tmp), **kw)
+        return subprocess.CompletedProcess(cmd, r.returncode, r.stdout.decode("utf-8", "replace"),
+                                           r.stderr.decode("utf-8", "replace"))
 
     def front(self) -> str:
         return (self.fx.plugin_root / "installer" / "install.sh").as_posix()
@@ -3086,6 +3149,17 @@ class TestBashFrontEnd(_ShellCase):
         self.assertFalse(self.uv_archive().exists())
         self.assertTrue(self.paths.current_file.is_file())
 
+    def test_uv_is_found_anywhere_in_its_archive(self):
+        data = tgz({"release/deeper/bin/uv": b"#!/bin/sh\necho uv nested\n"})  # not where `member` says
+        self.srv.srv.files["/uv/nested.tar.gz"] = data
+        comp = json.loads(self.fx.components_path.read_text(encoding="utf-8"))
+        comp["uv"]["assets"]["mac-arm64"].update(url=self.srv.base + "/uv/nested.tar.gz", sha256=sha(data),
+                                                 bytes=len(data), member="uv-aarch64-apple-darwin/uv")
+        self.fx.components_path.write_text(json.dumps(comp, indent=2), encoding="utf-8")
+        r = self.sh(self.front(), "--home", self.home_arg(), "--yes", "--skip", "model,launch")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((self.paths.bin_dir / "uv").read_bytes(), b"#!/bin/sh\necho uv nested\n")
+
     def test_dry_run_leaves_the_home_empty(self):
         self.home.mkdir()
         r = self.sh(self.front(), "--home", self.home_arg(), "--dry-run", "--yes")
@@ -3103,6 +3177,9 @@ class TestBashFrontEnd(_ShellCase):
         self.assertIn("uv-aarch64-apple-darwin.tar.gz", out)
         self.assertFalse(self.uv_archive().exists())
         self.assertFalse(self.paths.current_file.exists())
+        logs = list(self.paths.logs_dir.glob("install-*.log"))
+        self.assertEqual(len(logs), 1)
+        self.assertIn(f"Log: {self.home_arg()}/.whynot-cut/logs/{logs[0].name}", out)
 
     @unittest.skipUnless(IS_WIN, "Git Bash only")
     def test_git_bash_without_test_platform_says_use_install_ps1(self):
@@ -3114,16 +3191,15 @@ class TestBashFrontEnd(_ShellCase):
     def test_piped_script_with_yes_does_not_hang(self):
         zf = self.tmp / "WhyNotCut-3.0.0.zip"
         zsha = release_zip(self.fx, zf)
-        with open(INSTALLER / "install.sh", "rb") as script:  # `curl ... | bash` hands bash the script on stdin
-            r = self.sh("-s", "--", "--home", self.home_arg(), "--yes", "--skip", "model,launch",
-                        "--source", zf.as_posix(), "--source-sha256", zsha, stdin=script)
+        r = self.sh("-s", "--", "--home", self.home_arg(), "--yes", "--skip", "model,launch",  # `curl ... | bash`
+                    "--source", zf.as_posix(), "--source-sha256", zsha,
+                    script=(INSTALLER / "install.sh").read_bytes())
         self.assert_installed(r, "mac-arm64")
         rel = self.paths.downloads_dir / f"release-{zsha[:8]}"
         self.assertTrue((rel / "x" / "whynot-cut-marketplace" / "whynot-cut" / "setup" / "components.json").is_file())
 
     def test_piped_without_source_says_h3_in_arabic_too(self):
-        with open(INSTALLER / "install.sh", "rb") as script:
-            r = self.sh("-s", "--", "--home", self.home_arg(), "--yes", stdin=script)
+        r = self.sh("-s", "--", "--home", self.home_arg(), "--yes", script=(INSTALLER / "install.sh").read_bytes())
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 2, out)
         self.assertIn(H3_EN, out)

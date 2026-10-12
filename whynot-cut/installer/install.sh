@@ -92,16 +92,33 @@ wnc_unzip() { # zip dir
   "$py" -I -m zipfile -e "$1" "$2" </dev/null
 }
 
-wnc_index_get() { # json-text dotted.path (macOS: plutil; elsewhere python)
+# macOS: JavaScript for Automation (built in; plutil cannot hold JSON nulls). The JSON text and the key path arrive as
+# run() arguments, never inside the script text. Prints the value; null or a missing key prints nothing.
+WNC_JXA_INDEX_GET='function run(argv) {
+  var v;
+  try { v = JSON.parse(argv[0]); } catch (e) { return ""; }
+  var keys = argv[1].split(".");
+  for (var i = 0; i < keys.length; i++) {
+    if (v === null || typeof v !== "object" || !Object.prototype.hasOwnProperty.call(v, keys[i])) { return ""; }
+    v = v[keys[i]];
+  }
+  if (v === null || v === undefined) { return ""; }
+  return (typeof v === "object") ? JSON.stringify(v) : String(v);
+}'
+
+wnc_index_get() { # json-text dotted.path (macOS: osascript JavaScript; elsewhere python)
   local py
-  if [ "$(uname -s)" = "Darwin" ]; then printf '%s' "$1" | plutil -extract "$2" raw -o - - 2>/dev/null; return $?; fi
+  if [ "$(uname -s)" = "Darwin" ]; then
+    osascript -l JavaScript -e "$WNC_JXA_INDEX_GET" "$1" "$2" 2>/dev/null </dev/null
+    return $?
+  fi
   py="$(wnc_py)" || return 1
   printf '%s' "$1" | "$py" -I -c '
 import json, sys
 v = json.load(sys.stdin)
 for k in sys.argv[1].split("."):
-    v = v[k]
-print(v)' "$2" 2>/dev/null | tr -d '\r'
+    v = v.get(k) if isinstance(v, dict) else None
+print("" if v is None else v)' "$2" 2>/dev/null | tr -d '\r'
 }
 
 wnc_release() { # home dry channel source sha -> RELEASE_ROOT (empty after a dry run); status 2 / 3 on failure

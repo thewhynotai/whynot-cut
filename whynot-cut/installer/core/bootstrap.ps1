@@ -75,7 +75,25 @@ param(
     }
 
     function Get-WncFullPath([string]$Path) {
-        return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+        # absolute, without a trailing \ or / (a bare drive root keeps its \): Windows PowerShell hands a native
+        # program 'C:\x y\' as "C:\x y\", whose \" the program reads as a quote and swallows the next arguments
+        $full = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+        $trimmed = $full.TrimEnd([char[]]@([char]92, [char]47))
+        if ($trimmed -match '^[A-Za-z]:$') { return $trimmed + [char]92 }
+        if (-not $trimmed) { return $full }
+        return $trimmed
+    }
+
+    function ConvertTo-WncNativeArgument([string[]]$ArgList) {
+        # Windows PowerShell 5.1 and PowerShell 7.0-7.2 (legacy native quoting) put an argument with whitespace in
+        # quotes without doubling its trailing backslashes; double them here so the program gets the argument intact
+        $v = $PSVersionTable.PSVersion
+        $legacy = ($v.Major -lt 7) -or (($v.Major -eq 7) -and ($v.Minor -lt 3))
+        if (-not $legacy) { return ,$ArgList }
+        $out = @(foreach ($arg in $ArgList) {
+                if (($arg -match '\s') -and ($arg -match '(\\+)$')) { $arg + $Matches[1] } else { $arg }
+            })
+        return ,$out
     }
 
     function Invoke-WncNative([string]$Exe, [string[]]$ArgList) {
@@ -83,7 +101,8 @@ param(
         $old = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            $all = @(& $Exe @ArgList 2>&1)
+            $safe = ConvertTo-WncNativeArgument $ArgList
+            $all = @(& $Exe @safe 2>&1)
             $rc = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $old
@@ -323,7 +342,7 @@ param(
         $prep = Initialize-WncBootstrap
         if ($prep.Code -eq 0 -and $prep.ContainsKey('Run')) {
             $py = $prep.Py
-            $coreArgs = $prep.CoreArgs
+            $coreArgs = ConvertTo-WncNativeArgument $prep.CoreArgs
             & $py @coreArgs
             $S.Code = $LASTEXITCODE
         } else {

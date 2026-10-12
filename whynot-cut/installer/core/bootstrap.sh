@@ -51,18 +51,36 @@ pick_py() { # a python that can read JSON (non-macOS only: Git Bash in tests)
   return 1
 }
 
-json_get() { # file dotted.path -> the value (a string), status 1 when missing
+# macOS: JavaScript for Automation (built in). Not plutil: it turns JSON into a plist, which has no null, and
+# components.json holds nulls. The file and the key path arrive as run() arguments, never inside the script text.
+# Prints the value; null, a missing key or an unreadable file print nothing.
+JXA_JSON_GET='function run(argv) {
+  ObjC.import("Foundation");
+  var text = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
+  if (text.isNil()) { return ""; }
+  var v;
+  try { v = JSON.parse(ObjC.unwrap(text).replace(/^﻿/, "")); } catch (e) { return ""; }
+  var keys = argv[1].split(".");
+  for (var i = 0; i < keys.length; i++) {
+    if (v === null || typeof v !== "object" || !Object.prototype.hasOwnProperty.call(v, keys[i])) { return ""; }
+    v = v[keys[i]];
+  }
+  if (v === null || v === undefined) { return ""; }
+  return (typeof v === "object") ? JSON.stringify(v) : String(v);
+}'
+
+json_get() { # file dotted.path -> the value (a string; empty for null or missing)
   if [ "$OS_NAME" = "Darwin" ]; then
-    plutil -extract "$2" raw -o - "$1" 2>/dev/null
+    osascript -l JavaScript -e "$JXA_JSON_GET" "$1" "$2" 2>/dev/null </dev/null
     return $?
   fi
-  [ -n "$JSON_PY" ] || return 1
+  [ -n "$JSON_PY" ] || return 1  # non-macOS (Git Bash in tests) only
   "$JSON_PY" -I -c '
 import json, sys
 v = json.load(open(sys.argv[1], encoding="utf-8-sig"))
 for k in sys.argv[2].split("."):
-    v = v[k]
-print("null" if v is None else v)' "$1" "$2" 2>/dev/null </dev/null | tr -d '\r'
+    v = v.get(k) if isinstance(v, dict) else None
+print("" if v is None else v)' "$1" "$2" 2>/dev/null </dev/null | tr -d '\r'
 }
 
 file_sha() { # sha256 hex of a file (read on stdin: no path quirks)
@@ -266,9 +284,11 @@ else
     *) fail "uv archive type '$UV_KIND' is not tar.gz or zip" ;;
   esac
   FOUND=""
-  for f in "$STAGE/$UV_MEMBER" "$STAGE/$UV_NAME" "$STAGE"/*/"$UV_NAME"; do
-    if [ -f "$f" ]; then FOUND="$f"; break; fi
-  done
+  if [ -n "$UV_MEMBER" ] && [ -f "$STAGE/$UV_MEMBER" ]; then
+    FOUND="$STAGE/$UV_MEMBER"
+  else  # anywhere inside the archive, like the Windows side (the layout of uv's archives is not a contract)
+    FOUND="$(find "$STAGE" -type f -name "$UV_NAME" 2>/dev/null </dev/null | head -n 1)"
+  fi
   [ -n "$FOUND" ] || fail "${DL_PATH##*/} holds no $UV_NAME"
   mkdir -p "$ENGINE/bin" || fail "cannot create $ENGINE/bin"
   if ! { cp "$FOUND" "$UV_BIN.new" && chmod 755 "$UV_BIN.new" && mv -f "$UV_BIN.new" "$UV_BIN"; }; then
