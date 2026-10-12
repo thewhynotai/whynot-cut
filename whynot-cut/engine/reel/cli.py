@@ -377,6 +377,16 @@ def cmd_plan(a):
     out(r)
 
 
+def cmd_validate(a):
+    """3.0 T2.3: {ok, kind, file, errors[{path, msg}]}; the kind from the file name or --kind. A relative path that is
+    not in the current folder is looked up in --root."""
+    from lib.schemas import validate_file
+    f = Path(a.file).expanduser()
+    if not f.is_absolute() and not f.exists() and a.root:
+        f = Path(a.root).expanduser() / f
+    out(validate_file(f, a.kind))
+
+
 def cmd_previews(a):
     from lib.previews import render_all
     p = P(a)
@@ -691,7 +701,7 @@ def cmd_next(a):
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
 NO_ROOT = {"setup", "doctor", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
-           "ae-status", "ae-probe", "motion-icons", "motion-library"}
+           "ae-status", "ae-probe", "motion-icons", "motion-library", "validate"}
 NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
 
@@ -710,7 +720,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
 CORE_READS = {"setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
-              "status", "next", "lock", "doctor"}
+              "status", "next", "lock", "doctor", "validate"}
 WRITES_IF = {
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
                                                 / "output/discovery/input-inventory.json").exists(),
@@ -1064,6 +1074,7 @@ CORE_COMMANDS: dict[str, str] = {
     "transcript-relisten": "re-transcribe flagged words from the audio",
     "audio-clean": "clean the dialogue and remove pauses, with before/after measurements",
     "plan": "validate and compile edit-decisions.json into the build plan",
+    "validate": "check an authored JSON file (edit-decisions, reels-plan, motion-script, publish...) against its schema",
     "approve-plan": "record the approval of the compiled plan (editor or delegated)",
     "previews": "render PNG previews of the graphics and captions, with QC composites",
     "sfx": "prepare the sound effects the plan needs: the client's mapped library files (06_audio/sfx-map.json) "
@@ -1216,6 +1227,10 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--by", help="who wrote the client style (e.g. client-researcher)")
         if name == "previews":
             sp.add_argument("--no-composite", action="store_true")
+        if name == "validate":
+            sp.add_argument("file", help="the JSON file, e.g. 01_analysis/edit-decisions.json")
+            sp.add_argument("--kind", help="edit-decisions | reels-plan | motion-script | publish | publish-reel | "
+                                           "transcript-corrections | asset-needs (default: from the file name)")
         if name == "model-download":
             sp.add_argument("--model", default="large-v3", choices=["large-v3", "large-v3-turbo", "medium", "small"])
         if name == "scaffold":

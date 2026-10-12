@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whynot-cut:schema:transcript-corrections:1",
+  "title": "02_transcription/transcript-corrections.json (authored by the transcript-editor, applied by `reel transcript-correct`)",
+  "description": "Word-level fixes, uncertain words for the editor's ear and dropped words to restore (3.0 T2.3). Ids are word ids of words.json; an empty `to` merges the word into the previous one. Extra fields are allowed. Check with `reel validate <file>`.",
+  "type": "object",
+  "properties": {
+    "schema_version": {"const": 1, "description": "the version of this schema the file follows"},
+    "corrections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["word_id", "to"],
+        "properties": {
+          "word_id": {"type": "integer", "minimum": 0},
+          "from": {"type": "string"},
+          "to": {"type": "string"},
+          "reason": {"type": "string"},
+          "confidence": {"enum": ["high", "medium", "low"]}
+        }
+      }
+    },
+    "flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["word_id"],
+        "properties": {
+          "word_id": {"type": "integer", "minimum": 0},
+          "heard": {"type": "string"},
+          "note": {"type": "string"},
+          "reason": {"type": "string"},
+          "suggest": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "restore": {
+      "anyOf": [
+        {"const": "all"},
+        {"type": "null"},
+        {"type": "array",
+         "items": {"anyOf": [
+           {"type": "integer", "minimum": 0},
+           {"type": "object", "required": ["word_id"],
+            "properties": {"word_id": {"type": "integer", "minimum": 0}, "word": {"type": "string"}}}]}}
+      ]
+    }
+  }
+}

@@ -151,7 +151,8 @@ def _label(im: Image.Image, text: str) -> Image.Image:
 def render(paths, width: int = 540) -> dict:
     from .motion_audio import mix
     from .previews import Brand
-    plan = read_json(paths.p("01_analysis/motion-plan.json"))
+    from .stamps import read_compiled
+    plan = read_compiled(paths.p("01_analysis/motion-plan.json"))
     if not plan:
         raise SystemExit("01_analysis/motion-plan.json missing — run `reel motion-plan` first")
     brand = Brand(paths.client_db)

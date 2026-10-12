@@ -1,0 +1,47 @@
+{
+ "note": "3.0 T2.3: publish-reel documents; valid = shapes the engine's tests author and compile, invalid = must fail at path",
+ "valid": [
+  {
+   "reel_id": "EP12_R01",
+   "instagram": {
+    "caption": "«انا قلت ان الشركه» — سارة عن أول خسارة",
+    "hashtags": [
+     "#بودكاست"
+    ]
+   },
+   "tiktok": {
+    "caption": "سارة عن أول خسارة",
+    "hashtags": [
+     "#بودكاست"
+    ]
+   },
+   "shorts": {
+    "title": "سارة عن أول خسارة",
+    "description": "من الحلقة 12"
+   },
+   "approval_required": []
+  }
+ ],
+ "invalid": [
+  {
+   "why": "hashtags as one string",
+   "path": "/instagram/hashtags",
+   "doc": {
+    "reel_id": "EP12_R03",
+    "instagram": {
+     "caption": "x",
+     "hashtags": "#a #b"
+    }
+   }
+  },
+  {
+   "why": "shorts title as a number",
+   "path": "/shorts/title",
+   "doc": {
+    "shorts": {
+     "title": 3
+    }
+   }
+  }
+ ]
+}

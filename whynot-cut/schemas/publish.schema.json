@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whynot-cut:schema:publish:1",
+  "title": "output/episodes/<EP>/publish/publish.json and publish/reels/<REEL>.json (authored by the publish-writer, checked by `reel publish-check`)",
+  "description": "The episode's YouTube copy and thumbnail designs (this schema), and each reel's captions ($defs/reel, kind publish-reel) (3.0 T2.3). Structure only: `reel publish-check` still checks platform limits, links against the episode sheet, quotes against the transcript and honorifics. Extra fields are allowed. Check with `reel validate <file>`.",
+  "type": "object",
+  "properties": {
+    "schema_version": {"const": 1, "description": "the version of this schema the file follows"},
+    "episode_id": {"type": "string"},
+    "language": {"type": "string"},
+    "youtube": {
+      "type": "object",
+      "properties": {
+        "titles": {"$ref": "#/$defs/strings"},
+        "description": {
+          "type": "object",
+          "properties": {
+            "hook": {"type": "string"}, "summary": {"type": "string"}, "guest": {"type": "string"},
+            "links": {"type": "array",
+                      "items": {"type": "object", "required": ["url"],
+                                "properties": {"label": {"type": "string"}, "url": {"type": "string"}}}},
+            "sponsor": {"type": "string"}, "cta": {"type": "string"},
+            "hashtags": {"$ref": "#/$defs/strings"}
+          }
+        },
+        "chapters": {
+          "type": "array",
+          "items": {"type": "object", "required": ["at"],
+                    "properties": {"at": {"$ref": "#/$defs/time"}, "title": {"type": "string"}}}
+        },
+        "tags": {"$ref": "#/$defs/strings"}
+      }
+    },
+    "thumbnail": {
+      "type": "object",
+      "properties": {
+        "designs": {
+          "type": "array",
+          "items": {"type": "object",
+                    "properties": {"frame_ms": {"type": "integer", "minimum": 0}, "text": {"type": "string"},
+                                   "highlight": {"type": "string"}, "zoom": {"type": "number"},
+                                   "size": {"type": "integer", "minimum": 1}}}
+        }
+      }
+    },
+    "approval_required": {"$ref": "#/$defs/strings"}
+  },
+  "$defs": {
+    "time": {
+      "description": "seconds (40.5) or a clock: 00:40 / 1:02:03",
+      "type": ["string", "number"],
+      "pattern": "^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+)?) *$"
+    },
+    "strings": {"type": "array", "items": {"type": "string"}},
+    "caption": {"type": "object", "properties": {"caption": {"type": "string"}, "hashtags": {"$ref": "#/$defs/strings"}}},
+    "reel": {
+      "title": "publish/reels/<REEL>.json: one reel's captions",
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": 1},
+        "reel_id": {"type": "string"},
+        "instagram": {"$ref": "#/$defs/caption"},
+        "tiktok": {"$ref": "#/$defs/caption"},
+        "shorts": {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}}},
+        "approval_required": {"$ref": "#/$defs/strings"}
+      }
+    }
+  }
+}

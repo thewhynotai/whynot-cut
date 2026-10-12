@@ -1,0 +1,423 @@
+{
+ "note": "3.0 T2.3: motion-script documents; valid = shapes the engine's tests author and compile, invalid = must fail at path",
+ "valid": [
+  {
+   "reel_id": "EP12_R01_MO",
+   "beats": [
+    {
+     "id": "B1",
+     "role": "hook"
+    },
+    {
+     "id": "B2",
+     "role": "peak"
+    }
+   ],
+   "scenes": [
+    {
+     "id": "S01",
+     "type": "kinetic_quote",
+     "at": "@start",
+     "beat": "B1",
+     "text": "كلمه0 كلمه1 كلمه2 كلمه3 كلمه4 كلمه5 كلمه6 كلمه7 كلمه8 كلمه9",
+     "emphasis": [
+      "كلمه2"
+     ]
+    },
+    {
+     "id": "S02",
+     "type": "stat_counter",
+     "at": "كلمه10 كلمه11",
+     "beat": "B2",
+     "value": "10",
+     "evidence": "كلمه10 كلمه11",
+     "label": "عميل جديد",
+     "label_source": "editorial",
+     "captions": "off"
+    },
+    {
+     "id": "S03",
+     "type": "list_steps",
+     "at": "كلمه20",
+     "items": [
+      {
+       "text": "كلمه20 كلمه21",
+       "at": "كلمه20"
+      },
+      {
+       "text": "كلمه25",
+       "at": "كلمه25"
+      }
+     ]
+    },
+    {
+     "id": "S04",
+     "type": "outro",
+     "at": "@end",
+     "cta": "تابع {show}"
+    }
+   ],
+   "captions": "subtitles"
+  },
+  {
+   "reel_id": "EP12_R01_MO",
+   "beats": [
+    {
+     "id": "B1",
+     "role": "hook"
+    },
+    {
+     "id": "B2",
+     "role": "peak"
+    }
+   ],
+   "scenes": [
+    {
+     "id": "S01",
+     "type": "kinetic_quote",
+     "at": "@start",
+     "beat": "B1",
+     "text": "كلمه0 كلمه1 كلمه2 كلمه3 كلمه4 كلمه5 كلمه6 كلمه7 كلمه8 كلمه9",
+     "emphasis": [
+      "كلمه2"
+     ]
+    },
+    {
+     "id": "S02",
+     "type": "comparison",
+     "at": "كلمه10",
+     "first": {
+      "label": "كلمه11"
+     },
+     "second": {
+      "label": "كلمه13"
+     },
+     "verdict": "الافضل 100"
+    },
+    {
+     "id": "S03",
+     "type": "list_steps",
+     "at": "كلمه20",
+     "items": [
+      {
+       "text": "كلمه20 كلمه21",
+       "at": "كلمه20"
+      },
+      {
+       "text": "كلمه25",
+       "at": "كلمه25"
+      }
+     ]
+    },
+    {
+     "id": "S04",
+     "type": "outro",
+     "at": "@end",
+     "cta": "تابع {show}"
+    }
+   ]
+  },
+  {
+   "reel_id": "EP12_R01_MO",
+   "beats": [
+    {
+     "id": "B1",
+     "role": "hook"
+    },
+    {
+     "id": "B2",
+     "role": "peak"
+    }
+   ],
+   "scenes": [
+    {
+     "id": "S01",
+     "type": "kinetic_quote",
+     "at": "@start",
+     "beat": "B1",
+     "text": "كلمه0 كلمه1 كلمه2 كلمه3 كلمه4 كلمه5 كلمه6 كلمه7 كلمه8 كلمه9",
+     "emphasis": [
+      "كلمه2"
+     ]
+    },
+    {
+     "id": "S02",
+     "type": "stat_counter",
+     "at": "كلمه10 كلمه11",
+     "beat": "B2",
+     "value": "10",
+     "evidence": "كلمه10 كلمه11",
+     "label": "عميل جديد",
+     "label_source": "editorial"
+    },
+    {
+     "id": "S03",
+     "type": "timeline",
+     "at": "كلمه20",
+     "points": [
+      {
+       "label": "كلمه20 كلمه21",
+       "at": "كلمه20",
+       "when": "1999"
+      },
+      {
+       "label": "كلمه25",
+       "at": "كلمه25",
+       "when": "2005"
+      }
+     ]
+    },
+    {
+     "id": "S04",
+     "type": "outro",
+     "at": "@end",
+     "cta": "تابع {show}"
+    }
+   ]
+  },
+  {
+   "reel_id": "EP12_R01_MO",
+   "beats": [
+    {
+     "id": "B1",
+     "role": "hook"
+    },
+    {
+     "id": "B2",
+     "role": "peak"
+    }
+   ],
+   "scenes": [
+    {
+     "id": "S01",
+     "type": "kinetic_quote",
+     "at": "@start",
+     "text": "كلمه0 كلمه1 زياده"
+    },
+    {
+     "id": "S02",
+     "type": "icon_point",
+     "at": "كلمه8",
+     "icon": "trendingup",
+     "text": "كلمه8 كلمه9"
+    },
+    {
+     "id": "S03",
+     "type": "context_card",
+     "at": "كلمه14",
+     "text": "مع {guest}"
+    },
+    {
+     "id": "S04",
+     "type": "illustration_scene",
+     "at": "كلمه20",
+     "illustration": "free/doctor"
+    },
+    {
+     "id": "S05",
+     "type": "title_card",
+     "at": "كلمه26",
+     "title": "طططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططططط",
+     "title_source": "editorial"
+    }
+   ]
+  },
+  {
+   "reel_id": "EP12_R01_MO",
+   "beats": [
+    {
+     "id": "B1",
+     "role": "hook"
+    },
+    {
+     "id": "B2",
+     "role": "peak"
+    }
+   ],
+   "scenes": [
+    {
+     "id": "S01",
+     "type": "kinetic_quote",
+     "at": "@start",
+     "beat": "B1",
+     "text": "كلمه0 كلمه1 كلمه2 كلمه3 كلمه4 كلمه5 كلمه6 كلمه7 كلمه8 كلمه9",
+     "emphasis": [
+      "كلمه2"
+     ]
+    },
+    {
+     "id": "S02",
+     "type": "stat_counter",
+     "at": "كلمه10 كلمه11",
+     "beat": "B2",
+     "value": "10",
+     "evidence": "كلمه10 كلمه11",
+     "label": "عميل جديد",
+     "label_source": "editorial"
+    },
+    {
+     "id": "S03",
+     "type": "list_steps",
+     "at": "كلمه20",
+     "items": [
+      {
+       "text": "كلمه20 كلمه21",
+       "at": "كلمه20"
+      },
+      {
+       "text": "كلمه25",
+       "at": "كلمه25"
+      }
+     ]
+    },
+    {
+     "id": "S04",
+     "type": "outro",
+     "at": "@end",
+     "cta": "تابع {show}"
+    }
+   ],
+   "notes": "edited after approval"
+  },
+  {
+   "reel_id": "EP12_R01_MO",
+   "beats": [
+    {
+     "id": "B1",
+     "role": "hook"
+    },
+    {
+     "id": "B2",
+     "role": "peak"
+    }
+   ],
+   "scenes": [
+    {
+     "id": "S01",
+     "type": "kinetic_quote",
+     "at": "@start",
+     "beat": "B1",
+     "text": "كلمه0 كلمه1 كلمه2 كلمه3 كلمه4 كلمه5 كلمه6 كلمه7 كلمه8 كلمه9",
+     "emphasis": [
+      "كلمه2"
+     ]
+    },
+    {
+     "id": "S02",
+     "type": "stat_counter",
+     "at": "كلمه10 كلمه11",
+     "beat": "B2",
+     "value": "10",
+     "evidence": "كلمه10 كلمه11",
+     "label": "عميل جديد",
+     "label_source": "editorial"
+    },
+    {
+     "id": "S03",
+     "type": "list_steps",
+     "at": "كلمه20",
+     "items": [
+      {
+       "text": "كلمه20 كلمه21",
+       "at": "كلمه20"
+      },
+      {
+       "text": "كلمه25",
+       "at": "كلمه25"
+      }
+     ],
+     "recipe_note": "the speaker lists two steps"
+    },
+    {
+     "id": "S04",
+     "type": "outro",
+     "at": "@end",
+     "cta": "تابع {show}"
+    }
+   ]
+  }
+ ],
+ "invalid": [
+  {
+   "why": "no scenes",
+   "path": "/scenes",
+   "doc": {
+    "scenes": []
+   }
+  },
+  {
+   "why": "unknown scene type",
+   "path": "/scenes/0/type",
+   "doc": {
+    "scenes": [
+     {
+      "id": "S01",
+      "type": "bar_chart",
+      "at": "@start"
+     }
+    ]
+   }
+  },
+  {
+   "why": "scene id not like S01",
+   "path": "/scenes/0/id",
+   "doc": {
+    "scenes": [
+     {
+      "id": "scene1",
+      "type": "outro",
+      "at": "@end",
+      "cta": "x"
+     }
+    ]
+   }
+  },
+  {
+   "why": "captions value",
+   "path": "/captions",
+   "doc": {
+    "captions": "burned",
+    "scenes": [
+     {
+      "id": "S01",
+      "type": "outro",
+      "at": "@end",
+      "cta": "x"
+     }
+    ]
+   }
+  },
+  {
+   "why": "one list item",
+   "path": "/scenes/0/items",
+   "doc": {
+    "scenes": [
+     {
+      "id": "S01",
+      "type": "list_steps",
+      "at": "@start",
+      "items": [
+       {
+        "text": "a",
+        "at": "a"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "why": "a scene without at",
+   "path": "/scenes/0",
+   "doc": {
+    "scenes": [
+     {
+      "id": "S01",
+      "type": "kinetic_quote",
+      "text": "x"
+     }
+    ]
+   }
+  }
+ ]
+}

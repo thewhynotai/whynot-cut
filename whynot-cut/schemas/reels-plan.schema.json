@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whynot-cut:schema:reels-plan:1",
+  "title": "output/episodes/<EP>/01_analysis/reels-plan.json (authored by the episode-analyst, validated by `reel reels-plan`)",
+  "description": "The reel candidates of a podcast episode (3.0 T2.3). Structure only: `reel reels-plan` still checks the meaning (evidence verbatim near start/end, duration limits, content types of recipes.json, overlaps). Times are seconds or a clock (00:12:01.240). Extra fields are allowed. Check with `reel validate <file>`.",
+  "type": "object",
+  "required": ["candidates"],
+  "properties": {
+    "schema_version": {"const": 1, "description": "the version of this schema the file follows"},
+    "episode_id": {"type": "string"},
+    "candidates": {"type": "array", "items": {"$ref": "#/$defs/candidate"}}
+  },
+  "$defs": {
+    "time": {
+      "description": "seconds (12.5) or a clock: 00:12:01.240 / 12:01.2",
+      "type": ["string", "number"],
+      "pattern": "^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+)?) *$"
+    },
+    "score": {"type": "integer", "minimum": 1, "maximum": 10},
+    "candidate": {
+      "type": "object",
+      "required": ["id", "start", "end", "type", "evidence", "end_evidence", "score"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^R[0-9]+$", "description": "R01, R02 ... unique"},
+        "start": {"$ref": "#/$defs/time"},
+        "end": {"$ref": "#/$defs/time"},
+        "type": {"type": "string", "minLength": 1, "description": "a content type of recipes.json (storytelling, advice ...)"},
+        "secondary_type": {"type": ["string", "null"]},
+        "title": {"type": "string"},
+        "hook_quote": {"type": "string"},
+        "hook_text": {"type": "string"},
+        "evidence": {"type": "string", "minLength": 1, "description": "the first words, verbatim"},
+        "end_evidence": {"type": "string", "minLength": 1, "description": "the last words, verbatim"},
+        "why": {"type": "string"},
+        "score": {
+          "type": "object",
+          "required": ["hook", "standalone", "payoff", "ending"],
+          "properties": {"hook": {"$ref": "#/$defs/score"}, "standalone": {"$ref": "#/$defs/score"},
+                         "payoff": {"$ref": "#/$defs/score"}, "ending": {"$ref": "#/$defs/score"}}
+        },
+        "needs_context": {"type": "boolean"},
+        "context_line": {"type": "string"},
+        "speakers": {"type": "array", "items": {"type": "string"}},
+        "risks": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

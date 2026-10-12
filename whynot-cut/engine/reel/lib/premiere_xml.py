@@ -160,7 +160,8 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
               lanes: list | None = None) -> dict:
     """native_graphics=True (Premiere-only mode): the XML carries footage/punch-ins/dialogue/SFX and
     EMPTY graphic tracks; graphics + captions are placed inside Premiere by the WhyNot Cut Bridge (ppro-build)."""
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     if not spec:
         raise FileNotFoundError("timeline-spec.json missing — run `reel plan` first")
     seq_cfg = load_config("sequence-settings.json")

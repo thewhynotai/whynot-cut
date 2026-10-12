@@ -1,0 +1,119 @@
+{
+ "note": "3.0 T2.3: asset-needs documents; valid = shapes the engine's tests author and compile, invalid = must fail at path",
+ "valid": [
+  {
+   "schema_version": 1,
+   "asset_needs": [
+    {
+     "id": "N01",
+     "purpose": "the clinic logo, sharp at 1080 px",
+     "kind": "upscale",
+     "anchor": {
+      "segment": "SEG_001",
+      "start": "00:00:01.200",
+      "end": "00:00:03.000",
+      "phrase": "أهلا بيكم في العيادة"
+     },
+     "topic": "logo",
+     "constraints": {
+      "keep_colours": true
+     },
+     "max_credits": 10
+    },
+    {
+     "id": "N02",
+     "purpose": "skin layers icon",
+     "kind": "icon",
+     "anchor": {
+      "start": 12.5,
+      "end": 15,
+      "phrase": "طبقات الجلد"
+     },
+     "constraints": [
+      "line icon",
+      "no text"
+     ]
+    }
+   ]
+  }
+ ],
+ "invalid": [
+  {
+   "why": "no asset_needs",
+   "path": "",
+   "doc": {}
+  },
+  {
+   "why": "kind photo",
+   "path": "/asset_needs/0/kind",
+   "doc": {
+    "asset_needs": [
+     {
+      "id": "N01",
+      "purpose": "p",
+      "kind": "photo",
+      "anchor": {
+       "start": 1,
+       "end": 2,
+       "phrase": "x"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "why": "anchor without phrase",
+   "path": "/asset_needs/0/anchor",
+   "doc": {
+    "asset_needs": [
+     {
+      "id": "N01",
+      "purpose": "p",
+      "kind": "icon",
+      "anchor": {
+       "start": 1,
+       "end": 2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "why": "negative max_credits",
+   "path": "/asset_needs/0/max_credits",
+   "doc": {
+    "asset_needs": [
+     {
+      "id": "N01",
+      "purpose": "p",
+      "kind": "icon",
+      "anchor": {
+       "start": 1,
+       "end": 2,
+       "phrase": "x"
+      },
+      "max_credits": -5
+     }
+    ]
+   }
+  },
+  {
+   "why": "id with a space",
+   "path": "/asset_needs/0/id",
+   "doc": {
+    "asset_needs": [
+     {
+      "id": "N 01",
+      "purpose": "p",
+      "kind": "icon",
+      "anchor": {
+       "start": 1,
+       "end": 2,
+       "phrase": "x"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -436,7 +436,8 @@ def grab_frame(video: Path, ms: int, size: tuple | None = None) -> Image.Image |
 
 def render_all(paths: Paths, composite_preview: bool = True) -> dict:
     from .common import spec_footage
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     if not spec:
         from .errors import Guidance
         raise Guidance("no compiled plan yet (01_analysis/timeline-spec.json)", "Run `reel plan` first")

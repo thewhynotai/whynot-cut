@@ -48,7 +48,8 @@ def _line_cues(el: dict) -> list[int]:
 def job_data(paths, fallback_font: str | None = None, plan: dict | None = None) -> dict:
     """`plan` replaces the approved plan file for this job only (the layout re-fitted with a fallback font)."""
     from .motion_config import motion_cfg
-    plan = plan or read_json(paths.p("01_analysis/motion-plan.json"))
+    from .stamps import read_compiled
+    plan = plan or read_compiled(paths.p("01_analysis/motion-plan.json"))
     if not plan:
         raise SystemExit("01_analysis/motion-plan.json missing — run `reel motion-plan` first")
     caps, src = capabilities()

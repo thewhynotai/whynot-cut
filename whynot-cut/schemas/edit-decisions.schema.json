@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whynot-cut:schema:edit-decisions:1",
+  "title": "01_analysis/edit-decisions.json (authored by the story-editor, compiled by `reel plan`)",
+  "description": "The shape `reel plan` reads (3.0 T2.3). Structure only: `reel plan` still checks the meaning (evidence verbatim in the transcript, times inside the clip, templates of the profile, images in the asset manifest). Times are seconds (12.5), an integer of milliseconds, or a clock (00:00:12.500). Extra fields (notes, rationale) are allowed. Check with `reel validate <file>`.",
+  "type": "object",
+  "required": ["decisions"],
+  "properties": {
+    "schema_version": {"const": 1, "description": "the version of this schema the file follows"},
+    "video_id": {"type": "string"},
+    "version": {"type": "integer"},
+    "global": {
+      "type": "object",
+      "properties": {
+        "main_footage": {"type": "string", "minLength": 1,
+                         "description": "the raw file, relative to the client folder; a podcast reel (source range) may leave it out"},
+        "base_scale_percent": {"type": ["number", "string", "null"], "pattern": "^auto$"},
+        "base_offset_x": {"type": ["number", "null"]},
+        "base_offset_y": {"type": ["number", "null"]},
+        "framing": {"type": "string", "pattern": "^ *(full|[0-9]+(\\.[0-9]+)? *[:x] *[0-9]+(\\.[0-9]+)?)? *$",
+                    "description": "9:16 (default) or a window such as 4:5"},
+        "framing_window_y": {"type": ["integer", "null"]},
+        "caption_style": {"enum": ["keywords", "highlight_all"]},
+        "captions_hidden_during": {"type": "array", "items": {"type": "string"}},
+        "captions_hidden_ranges": {"type": "array", "items": {"$ref": "#/$defs/range"}},
+        "native_caption_track": {"type": "boolean"},
+        "remove_pauses": {
+          "type": ["object", "boolean", "null"],
+          "properties": {
+            "min_pause_ms": {"type": "integer", "minimum": 0},
+            "pad_ms": {"type": "integer", "minimum": 0},
+            "mask_scales": {"type": "array", "items": {"type": "number"}},
+            "protect": {"type": "array", "items": {"$ref": "#/$defs/range"}}
+          }
+        },
+        "cut_words": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {"type": "integer"},
+              {"type": "object", "required": ["word_ids"],
+               "properties": {"word_ids": {"type": "array", "items": {"type": "integer"}}, "reason": {"type": "string"}}}
+            ]
+          }
+        },
+        "photoshop_jobs": {"type": "array", "items": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}}
+      }
+    },
+    "caption_highlights": {
+      "type": "array",
+      "items": {"type": "object", "required": ["text"],
+                "properties": {"text": {"type": "string", "minLength": 1}, "at": {"$ref": "#/$defs/time"}}}
+    },
+    "music": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string"},
+        "file": {"type": "string", "description": "a licensed track (reel music --list)"},
+        "level_db": {"type": "number"},
+        "fade_out_s": {"type": "number", "minimum": 0},
+        "cue_points": {
+          "type": "array",
+          "items": {"type": "object",
+                    "properties": {"at": {"$ref": "#/$defs/time"}, "frame": {"type": "integer", "minimum": 0},
+                                   "label": {"type": "string"}, "note": {"type": "string"}}}
+        }
+      }
+    },
+    "decisions": {"type": "array", "items": {"$ref": "#/$defs/decision"}},
+    "asset_needs": {"$ref": "asset-needs.schema.json#/$defs/list"}
+  },
+  "$defs": {
+    "time": {
+      "description": "seconds (12.5), an integer of milliseconds, or a clock: 00:00:12.500 / 01:02.5",
+      "type": ["string", "number"],
+      "pattern": "^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+)?) *$"
+    },
+    "sfx_kind": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                 "description": "a procedural sound (whoosh, pop ...) or a kind of the client's 06_audio/sfx-map.json; `reel plan` checks it exists"},
+    "range": {"type": "array", "items": {"$ref": "#/$defs/time"}, "minItems": 2, "maxItems": 2},
+    "decision": {
+      "type": "object",
+      "required": ["decision_id", "segment_id", "evidence", "start", "end", "semantic_intent", "visual_treatment",
+                   "confidence"],
+      "properties": {
+        "decision_id": {"type": "string", "minLength": 1, "description": "unique, e.g. EDIT_001"},
+        "segment_id": {"type": "string", "minLength": 1},
+        "evidence": {"type": "string", "minLength": 1, "description": "the transcript's words, verbatim ('…' joins fragments)"},
+        "start": {"$ref": "#/$defs/time"},
+        "end": {"$ref": "#/$defs/time"},
+        "semantic_intent": {"type": "string", "minLength": 1},
+        "visual_treatment": {"type": "string", "minLength": 1},
+        "confidence": {"enum": ["high", "medium", "low"]},
+        "approval_required": {"type": "boolean"},
+        "recipe_note": {"type": "string"},
+        "camera": {
+          "type": "object",
+          "properties": {
+            "type": {"enum": ["hold", "punch_in", "punch_out", "slow_push", "reframe"]},
+            "at": {"$ref": "#/$defs/time"},
+            "until": {"$ref": "#/$defs/time"},
+            "scale_factor": {"type": "number"},
+            "offset_x": {"type": "number"},
+            "offset_y": {"type": "number"},
+            "rationale": {"type": "string"}
+          }
+        },
+        "graphics": {"type": "array", "items": {"$ref": "#/$defs/graphic"}},
+        "sound": {
+          "type": "array",
+          "items": {"type": "object",
+                    "properties": {"type": {"$ref": "#/$defs/sfx_kind"}, "at": {"$ref": "#/$defs/time"},
+                                   "gain_db": {"type": "number"}, "cue_id": {"type": "string"},
+                                   "related_visual": {"type": ["string", "null"]}, "note": {"type": "string"}}}
+        }
+      }
+    },
+    "graphic": {
+      "type": "object",
+      "required": ["id", "template"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "description": "unique, e.g. GFX_001"},
+        "template": {"type": "string", "minLength": 1, "description": "a template of graphics-templates.json (the profile may add some)"},
+        "start": {"$ref": "#/$defs/time"},
+        "end": {"$ref": "#/$defs/time"},
+        "text": {"type": "string"},
+        "headline": {"type": "string"},
+        "items": {"type": "array",
+                  "items": {"type": "object", "properties": {"text": {"type": "string"}, "at": {"$ref": "#/$defs/time"},
+                                                             "latin": {"type": "boolean"}}}},
+        "image": {"type": "string"},
+        "video": {"type": "string"},
+        "value": {"type": ["string", "number"]},
+        "sfx": {"anyOf": [{"$ref": "#/$defs/sfx_kind"}, {"type": "null"}], "description": "a sound kind, or none"},
+        "sfx_gain_db": {"type": "number"},
+        "latin": {"type": "boolean"},
+        "approval_required": {"type": "boolean"}
+      }
+    }
+  }
+}

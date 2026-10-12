@@ -256,6 +256,8 @@ def compile_reels_plan(ep) -> dict:
     ok = not errors
     res = {"generated": now_iso(), "episode_id": ep.episode_id, "ok": ok, "errors": errors, "warnings": warnings,
            "duration_ms": total, "fingerprint": reels_plan_fingerprint(ep), "candidates": out}
+    from .stamps import stamp
+    res = stamp(res)
     write_json(ep.p("01_analysis/reels-plan-validation.json"), {k: res[k] for k in ("generated", "ok", "errors", "warnings")})
     if ok:
         write_json(ep.p("01_analysis/reels-plan-validated.json"), res)
@@ -267,7 +269,8 @@ def compile_reels_plan(ep) -> dict:
 
 def fresh_validated(ep) -> dict:
     """The validated plan, refused when reels-plan.json or the transcript changed since `reels-plan` ran."""
-    res = read_json(ep.p("01_analysis/reels-plan-validated.json"))
+    from .stamps import read_compiled
+    res = read_compiled(ep.p("01_analysis/reels-plan-validated.json"), rerun=f"reel reels-plan --episode {ep.episode_id}")
     if not res:
         raise SystemExit(f"no validated reels plan — run `reel reels-plan --episode {ep.episode_id}`")
     if res.get("fingerprint") != reels_plan_fingerprint(ep):

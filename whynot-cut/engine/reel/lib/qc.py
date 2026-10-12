@@ -30,7 +30,8 @@ def run_qc(paths: Paths) -> dict:
     from .common import seq_fps, seq_rate
     W, H = seq["general"]["frame_width"], seq["general"]["frame_height"]
     FPS, (TB, NTSC) = seq_fps(), seq_rate()
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     from .premiere_xml import timeline_manifest
     tm = timeline_manifest(paths)       # ppro-build (base-manifest) or the XML-only build (timeline-manifest)
     missing_assets = []

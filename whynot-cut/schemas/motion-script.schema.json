@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whynot-cut:schema:motion-script:1",
+  "title": "01_analysis/motion-script.json of a motion project (authored by the motion-director, compiled by `reel motion-plan`)",
+  "description": "Beats and scenes of a motion video (3.0 T2.3). Structure only: `reel motion-plan` still checks each scene type's fields, that `at` is spoken, that speech fields are the speaker's words and the recipe's limits. Themes and transitions come from motion.json (a profile may add some). Extra fields are allowed. Check with `reel validate <file>`.",
+  "type": "object",
+  "required": ["scenes"],
+  "properties": {
+    "schema_version": {"const": 1, "description": "the version of this schema the file follows"},
+    "reel_id": {"type": "string"},
+    "theme": {"type": "string", "minLength": 1},
+    "captions": {"enum": ["on", "subtitles", "off"]},
+    "beats": {
+      "type": "array",
+      "items": {"type": "object", "required": ["id"],
+                "properties": {"id": {"type": "string", "minLength": 1}, "role": {"type": "string"},
+                               "summary": {"type": "string"}}}
+    },
+    "scenes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/scene"}},
+    "music": {"type": "object", "properties": {"file": {"type": "string"}, "level_db": {"type": "number"}}},
+    "asset_needs": {"$ref": "asset-needs.schema.json#/$defs/list"}
+  },
+  "$defs": {
+    "source": {"enum": ["speech", "editorial"]},
+    "strings": {"type": "array", "items": {"type": "string"}},
+    "side": {
+      "type": "object",
+      "properties": {"label": {"type": "string"}, "points": {"type": "array", "maxItems": 3, "items": {"type": "string"}}}
+    },
+    "scene": {
+      "type": "object",
+      "required": ["id", "type", "at"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^S[0-9]+$", "description": "S01, S02 ... unique"},
+        "type": {"enum": ["kinetic_quote", "title_card", "stat_counter", "icon_point", "list_steps", "comparison",
+                          "timeline", "quote_card", "context_card", "person_card", "illustration_scene", "outro"]},
+        "at": {"type": "string", "minLength": 1,
+               "description": "the first words spoken when the scene starts; @start for the first scene, @end for a last outro"},
+        "beat": {"type": "string"},
+        "theme": {"type": "string", "minLength": 1},
+        "captions": {"enum": ["on", "subtitles", "off"]},
+        "reveal": {"enum": ["word", "line"]},
+        "transition_in": {"type": "string", "minLength": 1},
+        "text": {"type": "string"},
+        "title": {"type": "string"},
+        "eyebrow": {"type": "string"},
+        "subtitle": {"type": "string"},
+        "label": {"type": "string"},
+        "value": {"type": ["string", "number"]},
+        "unit": {"type": "string"},
+        "evidence": {"type": "string"},
+        "icon": {"type": "string"},
+        "cta": {"type": "string"},
+        "verdict": {"type": "string"},
+        "attribution": {"type": "string"},
+        "who": {"type": "string"},
+        "illustration": {"type": ["string", "object"]},
+        "emphasis": {"$ref": "#/$defs/strings"},
+        "sfx": {"$ref": "#/$defs/strings"},
+        "items": {"type": "array", "minItems": 2, "maxItems": 5,
+                  "items": {"type": "object", "properties": {"text": {"type": "string"}, "at": {"type": "string"}}}},
+        "points": {"type": "array", "minItems": 2, "maxItems": 5,
+                   "items": {"type": "object", "properties": {"label": {"type": "string"}, "at": {"type": "string"},
+                                                              "when": {"type": "string"}}}},
+        "first": {"$ref": "#/$defs/side"},
+        "second": {"$ref": "#/$defs/side"},
+        "text_source": {"$ref": "#/$defs/source"},
+        "title_source": {"$ref": "#/$defs/source"},
+        "label_source": {"$ref": "#/$defs/source"},
+        "verdict_source": {"$ref": "#/$defs/source"},
+        "recipe_note": {"type": "string"}
+      }
+    }
+  }
+}

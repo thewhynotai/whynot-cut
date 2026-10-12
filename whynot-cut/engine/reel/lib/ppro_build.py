@@ -77,7 +77,8 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
     from .premiere_xml import build_xml
     from .previews import render_captions
     from .timemap import TimeMap
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     tpl = load_config("graphics-templates.json")["templates"]
     F = 1 / seq_fps()

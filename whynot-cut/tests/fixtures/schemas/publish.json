@@ -1,0 +1,117 @@
+{
+ "note": "3.0 T2.3: publish documents; valid = shapes the engine's tests author and compile, invalid = must fail at path",
+ "valid": [
+  {
+   "episode_id": "EP12",
+   "language": "ar",
+   "youtube": {
+    "titles": [
+     "قصة سارة مع أول شركة",
+     "ازاي خسرت كل حاجة وبدأت تاني",
+     "سارة: الفشل علمني"
+    ],
+    "description": {
+     "hook": "سارة بتحكي إزاي خسرت أول شركة.",
+     "summary": "حلقة عن الفشل والبداية من جديد.",
+     "guest": "ضيفة الحلقة: Sara — CEO",
+     "links": [
+      {
+       "label": "Sara",
+       "url": "https://www.x.com/a"
+      }
+     ],
+     "sponsor": "",
+     "cta": "اشترك في القناة",
+     "hashtags": [
+      "#بودكاست",
+      "#قصة_نجاح"
+     ]
+    },
+    "tags": [
+     "بودكاست",
+     "ريادة أعمال",
+     "قصة نجاح"
+    ],
+    "chapters": [
+     {
+      "at": "00:00",
+      "title": "a"
+     },
+     {
+      "at": "00:40",
+      "title": "b"
+     }
+    ]
+   },
+   "thumbnail": {
+    "designs": []
+   },
+   "approval_required": []
+  },
+  {
+   "thumbnail": {
+    "designs": [
+     {
+      "frame_ms": 12000,
+      "text": "أول خسارة",
+      "highlight": "نجاح"
+     }
+    ]
+   }
+  }
+ ],
+ "invalid": [
+  {
+   "why": "titles as one string",
+   "path": "/youtube/titles",
+   "doc": {
+    "youtube": {
+     "titles": "t"
+    }
+   }
+  },
+  {
+   "why": "a link without url",
+   "path": "/youtube/description/links/0",
+   "doc": {
+    "youtube": {
+     "description": {
+      "links": [
+       {
+        "label": "IG"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "why": "a chapter time that is not a time",
+   "path": "/youtube/chapters/0/at",
+   "doc": {
+    "youtube": {
+     "chapters": [
+      {
+       "at": "start",
+       "title": "x"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "why": "thumbnail frame_ms negative",
+   "path": "/thumbnail/designs/0/frame_ms",
+   "doc": {
+    "thumbnail": {
+     "designs": [
+      {
+       "frame_ms": -1,
+       "text": "x"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

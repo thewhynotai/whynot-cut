@@ -110,7 +110,8 @@ def _alpha_bbox(png: Path):
 def build(paths: Paths) -> dict:
     from PIL import Image
     from .media_util import contact_sheet, open_rgb
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     if not spec:
         raise FileNotFoundError("timeline-spec.json missing — run plan first")
     from .common import spec_footage

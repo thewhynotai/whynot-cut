@@ -1,0 +1,127 @@
+{
+ "note": "3.0 T2.3: transcript-corrections documents; valid = shapes the engine's tests author and compile, invalid = must fail at path",
+ "valid": [
+  {
+   "corrections": [
+    {
+     "word_id": 1,
+     "from": "الليزر",
+     "to": "الليزر",
+     "reason": "re-anchor test"
+    }
+   ],
+   "flags": [
+    {
+     "word_id": 3,
+     "note": "unclear"
+    }
+   ]
+  },
+  {
+   "corrections": [],
+   "restore": [
+    {
+     "word_id": 3,
+     "word": "شكرا"
+    }
+   ]
+  },
+  {
+   "corrections": [
+    {
+     "word_id": 41,
+     "from": "كلمه40",
+     "to": "الشركة الكبرى",
+     "reason": "misheard",
+     "confidence": "high"
+    },
+    {
+     "word_id": 149,
+     "from": "كلمه148",
+     "to": "٣",
+     "reason": "digit",
+     "confidence": "high"
+    }
+   ]
+  }
+ ],
+ "invalid": [
+  {
+   "why": "authored wrong in an engine test: does not match any anyOf alternative: [0] /restore: must be \"all\", got \"3\" | [1] /restore:",
+   "path": "/restore",
+   "doc": {
+    "corrections": [],
+    "restore": "3"
+   }
+  },
+  {
+   "why": "authored wrong in an engine test: does not match any anyOf alternative: [0] /restore: must be \"all\", got [true] | [1] /resto",
+   "path": "/restore",
+   "doc": {
+    "corrections": [],
+    "restore": [
+     true
+    ]
+   }
+  },
+  {
+   "why": "authored wrong in an engine test: does not match any anyOf alternative: [0] /restore: must be \"all\", got [\"three\"] | [1] /re",
+   "path": "/restore",
+   "doc": {
+    "corrections": [],
+    "restore": [
+     "three"
+    ]
+   }
+  },
+  {
+   "why": "authored wrong in an engine test: does not match any anyOf alternative: [0] /restore: must be \"all\", got {\"ids\": [3]} | [1] ",
+   "path": "/restore",
+   "doc": {
+    "corrections": [],
+    "restore": {
+     "ids": [
+      3
+     ]
+    }
+   }
+  },
+  {
+   "why": "a correction without to",
+   "path": "/corrections/0",
+   "doc": {
+    "corrections": [
+     {
+      "word_id": 4,
+      "from": "x"
+     }
+    ]
+   }
+  },
+  {
+   "why": "word_id as text",
+   "path": "/corrections/0/word_id",
+   "doc": {
+    "corrections": [
+     {
+      "word_id": "4",
+      "to": "y"
+     }
+    ]
+   }
+  },
+  {
+   "why": "confidence certain",
+   "path": "/corrections/0/confidence",
+   "doc": {
+    "corrections": [
+     {
+      "word_id": 4,
+      "to": "y",
+      "confidence": "certain"
+     }
+    ]
+   }
+  }
+ ]
+}

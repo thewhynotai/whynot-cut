@@ -159,7 +159,8 @@ def build_audio(paths: Paths, spec: dict, out: Path, src_video: Path) -> Path:
 def render(paths: Paths, width: int = 540, label: bool = True) -> dict:
     from .ppro_build import job_data
     t0 = time.time()
-    spec = read_json(paths.p("01_analysis/timeline-spec.json"))
+    from .stamps import read_compiled
+    spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     if not spec:
         return {"ok": False, "error": "timeline-spec.json missing - run `reel plan` first"}
     data = job_data(paths)

@@ -1,0 +1,599 @@
+{
+ "note": "3.0 T2.3: edit-decisions documents; valid = shapes the engine's tests author and compile, invalid = must fail at path",
+ "valid": [
+  {
+   "video_id": "CLIP1",
+   "global": {
+    "main_footage": "data/Raw/CLIP1.mov",
+    "framing": "4:5",
+    "remove_pauses": {
+     "protect": [
+      [
+       "00:00:08.000",
+       "00:00:08.600"
+      ]
+     ]
+    },
+    "cut_words": [
+     {
+      "word_ids": [
+       3
+      ],
+      "reason": "filler"
+     }
+    ]
+   },
+   "music": {
+    "status": "NO_MUSIC_SUPPLIED",
+    "cue_points": [
+     {
+      "label": "drop",
+      "at": "00:00:06.000"
+     }
+    ]
+   },
+   "caption_highlights": [
+    {
+     "text": "التشخيص الصحيح",
+     "at": "00:00:08.600"
+    }
+   ],
+   "decisions": [
+    {
+     "decision_id": "EDIT_001",
+     "segment_id": "SEG_001",
+     "evidence": "هل في حاجات معينة",
+     "start": "00:00:00.200",
+     "end": "00:00:04.000",
+     "semantic_intent": "hook",
+     "visual_treatment": "hook",
+     "confidence": "high",
+     "camera": {
+      "type": "punch_in",
+      "at": "00:00:01.000",
+      "until": "00:00:03.000",
+      "scale_factor": 1.1
+     },
+     "graphics": [
+      {
+       "id": "GFX_001",
+       "template": "hook_title",
+       "start": "00:00:00.200",
+       "end": "00:00:03.500",
+       "text": "هل في حاجات معينة"
+      }
+     ],
+     "sound": [
+      {
+       "type": "pop",
+       "at": "00:00:02.000"
+      }
+     ]
+    },
+    {
+     "decision_id": "EDIT_002",
+     "segment_id": "SEG_002",
+     "evidence": "أول حاجة التشخيص الصحيح",
+     "start": "00:00:05.000",
+     "end": "00:00:10.000",
+     "semantic_intent": "point",
+     "visual_treatment": "list",
+     "confidence": "high",
+     "graphics": [
+      {
+       "id": "GFX_002",
+       "template": "checklist",
+       "start": "00:00:05.000",
+       "end": "00:00:09.000",
+       "title": "خطوات",
+       "items": [
+        {
+         "text": "التشخيص",
+         "at": "00:00:06.000"
+        },
+        {
+         "text": "Isotretinoin",
+         "at": "00:00:07.500",
+         "latin": true
+        }
+       ]
+      },
+      {
+       "id": "GFX_003",
+       "template": "name_card",
+       "start": "00:00:09.000",
+       "end": "00:00:11.500",
+       "name": "د/ نهلة",
+       "lines": [
+        "كلية الطب"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "global": {},
+   "decisions": [
+    {
+     "decision_id": "EDIT_001",
+     "segment_id": "S1",
+     "evidence": "كلمه0 كلمه1",
+     "start": "00:00:00.000",
+     "end": "00:00:06.000",
+     "semantic_intent": "x",
+     "visual_treatment": "x",
+     "confidence": "high",
+     "graphics": [
+      {
+       "id": "GFX_001",
+       "template": "stat_card",
+       "start": "00:00:01.000",
+       "end": "00:00:03.000",
+       "value": "كلمه3",
+       "label": "x"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "video_id": "CLIP1",
+   "global": {
+    "main_footage": "data/Raw/CLIP1.mov"
+   },
+   "caption_highlights": [
+    {
+     "text": "التشخيص الصحيح",
+     "at": "00:00:08.600"
+    }
+   ],
+   "decisions": [
+    {
+     "decision_id": "EDIT_001",
+     "segment_id": "SEG_001",
+     "evidence": "هل في حاجات معينة",
+     "start": "00:00:00.200",
+     "end": "00:00:04.000",
+     "semantic_intent": "hook",
+     "visual_treatment": "hook",
+     "confidence": "high",
+     "camera": {
+      "type": "punch_in",
+      "at": "00:00:01.000",
+      "until": "00:00:03.000",
+      "scale_factor": 1.1
+     },
+     "graphics": [
+      {
+       "id": "GFX_001",
+       "template": "hook_title",
+       "start": "00:00:00.200",
+       "end": "00:00:03.500",
+       "text": "هل في حاجات معينة"
+      },
+      {
+       "id": "BR_001",
+       "template": "broll_video",
+       "start": "00:00:02.000",
+       "end": "00:00:03.900",
+       "video": "data/Broll/stock_red.mp4",
+       "in": 1.0
+      }
+     ]
+    },
+    {
+     "decision_id": "EDIT_002",
+     "segment_id": "SEG_002",
+     "evidence": "أول حاجة التشخيص الصحيح",
+     "start": "00:00:05.000",
+     "end": "00:00:10.000",
+     "semantic_intent": "point",
+     "visual_treatment": "list",
+     "confidence": "high",
+     "graphics": [
+      {
+       "id": "GFX_002",
+       "template": "checklist",
+       "start": "00:00:05.000",
+       "end": "00:00:09.000",
+       "text": "x",
+       "title": "خطوات",
+       "items": [
+        {
+         "text": "التشخيص",
+         "at": "00:00:06.000"
+        },
+        {
+         "text": "Isotretinoin",
+         "at": "00:00:07.500",
+         "latin": true
+        }
+       ]
+      },
+      {
+       "id": "GFX_003",
+       "template": "name_card",
+       "start": "00:00:09.000",
+       "end": "00:00:11.500",
+       "name": "د/ نهلة هنتر",
+       "lines": [
+        "كلية طب القصر العيني"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "global": {},
+   "music": {
+    "file": "data/Episodes/E.mp4"
+   },
+   "decisions": [
+    {
+     "decision_id": "EDIT_001",
+     "segment_id": "S1",
+     "evidence": "كلمه0 كلمه1",
+     "start": "00:00:00.000",
+     "end": "00:00:04.000",
+     "semantic_intent": "x",
+     "visual_treatment": "x",
+     "confidence": "high"
+    }
+   ]
+  },
+  {
+   "global": {},
+   "decisions": [
+    {
+     "decision_id": "EDIT_001",
+     "segment_id": "S1",
+     "evidence": "كلمه0 كلمه1",
+     "start": "00:00:00.000",
+     "end": "00:00:04.000",
+     "semantic_intent": "x",
+     "visual_treatment": "x",
+     "confidence": "high",
+     "recipe_note": "she pauses here; keep it calm",
+     "graphics": [
+      {
+       "id": "GFX_001",
+       "template": "hook_title",
+       "start": "00:00:00.000",
+       "end": "00:00:02.000",
+       "text": "كلمه0"
+      },
+      {
+       "id": "GFX_002",
+       "template": "term_callout",
+       "start": "00:00:02.500",
+       "end": "00:00:04.000",
+       "text": "كلمه1"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "video_id": "CLIP1",
+   "global": {
+    "main_footage": "data/Raw/CLIP1.mov",
+    "base_scale_percent": "auto"
+   },
+   "caption_highlights": [],
+   "decisions": [
+    {
+     "decision_id": "EDIT_001",
+     "segment_id": "SEG_001",
+     "evidence": "هل في حاجات معينة",
+     "start": "00:00:00.200",
+     "end": "00:00:04.000",
+     "semantic_intent": "hook",
+     "visual_treatment": "hook",
+     "confidence": "high",
+     "camera": {
+      "type": "punch_in",
+      "at": "00:00:01.000",
+      "until": "00:00:03.000",
+      "scale_factor": 1.1
+     },
+     "graphics": [
+      {
+       "id": "GFX_001",
+       "template": "hook_title",
+       "start": "00:00:00.200",
+       "end": "00:00:03.500",
+       "text": "هل في حاجات معينة"
+      }
+     ]
+    },
+    {
+     "decision_id": "EDIT_002",
+     "segment_id": "SEG_002",
+     "evidence": "أول حاجة التشخيص الصحيح",
+     "start": "00:00:05.000",
+     "end": "00:00:10.000",
+     "semantic_intent": "point",
+     "visual_treatment": "list",
+     "confidence": "high",
+     "graphics": [
+      {
+       "id": "GFX_002",
+       "template": "checklist",
+       "start": "00:00:05.000",
+       "end": "00:00:09.000",
+       "text": "x",
+       "title": "خطوات",
+       "items": [
+        {
+         "text": "التشخيص",
+         "at": "00:00:06.000"
+        },
+        {
+         "text": "Isotretinoin",
+         "at": "00:00:07.500",
+         "latin": true
+        }
+       ]
+      },
+      {
+       "id": "GFX_003",
+       "template": "name_card",
+       "start": "00:00:09.000",
+       "end": "00:00:11.500",
+       "name": "د/ نهلة هنتر",
+       "lines": [
+        "كلية طب القصر العيني"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "schema_version": 1,
+   "video_id": "CLIP1",
+   "decisions": [],
+   "asset_needs": [
+    {
+     "id": "N01",
+     "purpose": "background for the hook",
+     "kind": "background",
+     "anchor": {
+      "start": "00:00:00.200",
+      "end": "00:00:02.000",
+      "phrase": "هل في حاجات معينة"
+     }
+    }
+   ]
+  }
+ ],
+ "invalid": [
+  {
+   "why": "authored wrong in an engine test: 'then' does not match the pattern ^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+",
+   "path": "/caption_highlights/0/at",
+   "doc": {
+    "video_id": "CLIP1",
+    "global": {
+     "main_footage": "data/Raw/CLIP1.mov"
+    },
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "هل في حاجات معينة",
+      "end": "00:00:04.000",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "high",
+      "camera": {
+       "type": "punch_in",
+       "scale_factor": 1.1
+      },
+      "graphics": [
+       {
+        "id": "GFX_001",
+        "template": "hook_title",
+        "text": "حاجات"
+       }
+      ],
+      "sound": [
+       {
+        "type": "pop"
+       }
+      ]
+     },
+     {
+      "decision_id": "EDIT_002",
+      "segment_id": "SEG_002",
+      "evidence": "التشخيص الصحيح",
+      "start": "soon",
+      "end": "00:00:09.000",
+      "semantic_intent": "x",
+      "visual_treatment": "x",
+      "confidence": "high"
+     },
+     {
+      "decision_id": "EDIT_003",
+      "segment_id": "SEG_003",
+      "evidence": "التشخيص الصحيح",
+      "start": "00:00:05.000",
+      "end": "00:00:09.000",
+      "semantic_intent": "x",
+      "visual_treatment": "x",
+      "confidence": "high",
+      "camera": {
+       "type": "punch_in",
+       "scale_factor": "big"
+      },
+      "graphics": [
+       {
+        "id": "GFX_002",
+        "template": "hook_title",
+        "text": "x",
+        "start": "later"
+       }
+      ]
+     }
+    ],
+    "caption_highlights": [
+     {
+      "text": "التشخيص",
+      "at": "then"
+     }
+    ],
+    "music": {
+     "status": "NO_MUSIC_SUPPLIED",
+     "cue_points": [
+      {
+       "label": "drop",
+       "at": "drop"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "why": "decisions is not a list",
+   "path": "/decisions",
+   "doc": {
+    "decisions": {}
+   }
+  },
+  {
+   "why": "a decision without end",
+   "path": "/decisions/0",
+   "doc": {
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "x",
+      "start": "00:00:00.200",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "high"
+     }
+    ]
+   }
+  },
+  {
+   "why": "confidence outside high|medium|low",
+   "path": "/decisions/0/confidence",
+   "doc": {
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "x",
+      "start": "00:00:00.200",
+      "end": "00:00:04.000",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "sure"
+     }
+    ]
+   }
+  },
+  {
+   "why": "a camera move that does not exist",
+   "path": "/decisions/0/camera/type",
+   "doc": {
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "x",
+      "start": "00:00:00.200",
+      "end": "00:00:04.000",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "high",
+      "camera": {
+       "type": "zoom"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "why": "a graphic without template",
+   "path": "/decisions/0/graphics/0",
+   "doc": {
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "x",
+      "start": "00:00:00.200",
+      "end": "00:00:04.000",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "high",
+      "graphics": [
+       {
+        "id": "GFX_001"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "why": "a time that is not a time",
+   "path": "/decisions/0/start",
+   "doc": {
+    "decisions": [
+     {
+      "decision_id": "EDIT_001",
+      "segment_id": "SEG_001",
+      "evidence": "x",
+      "start": "soon",
+      "end": "00:00:04.000",
+      "semantic_intent": "hook",
+      "visual_treatment": "hook",
+      "confidence": "high"
+     }
+    ]
+   }
+  },
+  {
+   "why": "base_scale_percent text other than auto",
+   "path": "/global/base_scale_percent",
+   "doc": {
+    "global": {
+     "base_scale_percent": "big"
+    },
+    "decisions": []
+   }
+  },
+  {
+   "why": "an asset need of an unknown kind",
+   "path": "/asset_needs/0/kind",
+   "doc": {
+    "decisions": [],
+    "asset_needs": [
+     {
+      "id": "N01",
+      "purpose": "logo",
+      "kind": "photo",
+      "anchor": {
+       "start": 1,
+       "end": 2,
+       "phrase": "x"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "why": "schema_version 2",
+   "path": "/schema_version",
+   "doc": {
+    "schema_version": 2,
+    "decisions": []
+   }
+  }
+ ]
+}

@@ -64,9 +64,26 @@ def exit_code(doc) -> int:
     return 0
 
 
+def _with_version_warnings(doc):
+    """The warnings lib/stamps.py noted on the request's Context (a compiled artefact from another minor engine version
+    or without a stamp, 3.0 T2.3) go out once, as `version_warnings` of the command's document."""
+    try:
+        from .common import current_context
+        ctx = current_context()
+        notes = list(getattr(ctx, "version_warnings", None) or [])
+        if notes:
+            ctx.version_warnings = []
+    except Exception:  # noqa: BLE001 — printing the result must never fail on this
+        return doc
+    if notes and isinstance(doc, dict) and "version_warnings" not in doc:
+        return dict(doc, version_warnings=notes)
+    return doc
+
+
 def emit(doc, check: bool = True):
     """Print the command's one JSON document; then exit with its code when it is a failure or a refusal. check=False
     for documents whose `status` is a project state, not a result (`reel status`, `reel next`)."""
+    doc = _with_version_warnings(doc)
     print(json.dumps(doc, ensure_ascii=False, indent=2, default=str))
     code = exit_code(doc) if check else 0
     if code:

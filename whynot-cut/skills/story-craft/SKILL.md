@@ -52,4 +52,4 @@ pauses with `global.remove_pauses.protect: [[start, end]]`.
 - `references/semantic-analysis.md`
 - `references/edit-decision-engine.md`
 - `references/broll-and-graphics.md`
-- `references/edit-decisions.schema.json`
+- `${CLAUDE_PLUGIN_ROOT}/schemas/edit-decisions.schema.json` (check a draft with `reel validate 01_analysis/edit-decisions.json`)

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whynot-cut:schema:asset-needs:1",
+  "title": "asset_needs[]: assets a plan asks for (upscaled logo, icon, cut-out, background, B-roll)",
+  "description": "Optional `asset_needs` array of edit-decisions.json and motion-script.json (3.0 T2.3; used by Phase 5 `reel assets-plan`). Each need is anchored to the words spoken when it appears. A standalone file is {\"asset_needs\": [...]}. Check with `reel validate <file>`.",
+  "type": "object",
+  "required": ["asset_needs"],
+  "properties": {
+    "schema_version": {"const": 1, "description": "the version of this schema the file follows"},
+    "asset_needs": {"$ref": "#/$defs/list"}
+  },
+  "$defs": {
+    "time": {
+      "description": "seconds (12.5), milliseconds as an integer in edit-decisions.json, or a clock: 00:00:12.500 / 01:02.5",
+      "type": ["string", "number"],
+      "pattern": "^ *([0-9]+(\\.[0-9]+)?|([0-9]+:)?[0-9]+:[0-9]+([.,][0-9]+)?) *$"
+    },
+    "need": {
+      "type": "object",
+      "required": ["id", "purpose", "kind", "anchor"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "description": "e.g. N01; unique in the file"},
+        "purpose": {"type": "string", "minLength": 1, "description": "what the asset is for, in one line"},
+        "kind": {"enum": ["upscale", "vectorize", "cutout", "icon", "background", "broll_still", "broll_video"]},
+        "anchor": {
+          "type": "object",
+          "required": ["start", "end", "phrase"],
+          "properties": {
+            "segment": {"type": "string"},
+            "start": {"$ref": "#/$defs/time"},
+            "end": {"$ref": "#/$defs/time"},
+            "phrase": {"type": "string", "minLength": 1, "description": "words spoken in [start, end], verbatim"}
+          }
+        },
+        "topic": {"type": "string"},
+        "constraints": {"type": ["object", "array", "string"], "description": "orientation, people, style ..."},
+        "max_credits": {"type": "number", "minimum": 0}
+      }
+    },
+    "list": {"type": "array", "items": {"$ref": "#/$defs/need"}}
+  }
+}

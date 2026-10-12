@@ -816,7 +816,8 @@ def _write_outputs(paths: Paths, plan: dict) -> dict:
                "errors": errors, "warnings": warnings, "decisions": plan["decisions"],
                "events": len(events), "cues": len(cues), "main_segments": len(merged)})
     if ok:
-        write_json(paths.p("01_analysis/timeline-spec.json"), spec)
+        from .stamps import stamp
+        write_json(paths.p("01_analysis/timeline-spec.json"), stamp(spec))
         write_json(paths.p("03_broll/broll-manifest.json"), {"generated": now_iso(), "assets": plan["broll"]})
         sfx_dir = "06_audio/sfx"
         write_json(paths.p("06_audio/audio-cue-sheet.json"), {
@@ -876,7 +877,8 @@ def plan_fingerprint(paths: Paths) -> str:
     import hashlib
     import json
     spec = json.loads(paths.p("01_analysis/timeline-spec.json").read_text(encoding="utf-8"))
-    body = {k: v for k, v in spec.items() if k != "generated"}
+    body = {k: v for k, v in spec.items() if k not in ("generated", "engine_version")}   # T2.3: a re-compile by a newer
+    # engine that changes nothing stays approved
     if isinstance(body.get("source_range"), dict):        # `reel range` re-run with the same points: set_at etc. only
         body["source_range"] = {k: v for k, v in body["source_range"].items() if not _volatile(k)}
     text = json.dumps(body, sort_keys=True, ensure_ascii=False)

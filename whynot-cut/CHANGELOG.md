@@ -3,6 +3,19 @@
 ## 3.0.0 (unreleased)
 
 ### Added
+- Schemas and engine-version stamps (T2.3, review MI-11). `whynot-cut/schemas/*.schema.json` (draft 2020-12, versioned
+  by `$id` and an optional `schema_version`) for edit-decisions, reels-plan, motion-script, publish (and
+  `publish/reels/<REEL>.json`), transcript-corrections and the optional `asset_needs[]` of edit-decisions and
+  motion-script (Phase 5). New `reel validate <file> [--kind K]` (kind from the file name) prints
+  `{ok, kind, errors[{path, msg}]}` and exits 1 when not ok; it reuses the command contract's stdlib validator.
+  `reel plan`, `reel motion-plan` and `reel reels-plan` stamp `engine_version` into timeline-spec.json,
+  motion-plan.json and reels-plan-validated.json. The steps that read them (previews, preview-video, verify, qc,
+  premiere, ppro-build, motion-build/render/animatic, reels-select/preview) refuse a file from another major
+  version with "re-run `reel plan`" (or its compiler) and add `version_warnings` to their output for another
+  minor version or an unstamped 2.x file. The plan approval fingerprint ignores the stamp. The story-craft
+  reference schema moved to `schemas/edit-decisions.schema.json`; `global.main_footage` is optional there (a
+  podcast reel has a source range, and `reel plan` falls back to the clip's footage) and sound kinds are
+  safe names checked by `reel plan`, no longer the 8 procedural recipes.
 - Transcription performance and backends (T2.12, review IM-13 / IM-14 / MI-12, decision D9). New
   `lib/whisper_backends.py`: one runner interface and one output schema for `ct2` (faster-whisper / CTranslate2) and
   `mlx` (mlx-whisper on Apple Silicon, word timestamps; not verified on a Mac yet), chosen by `transcription.json`

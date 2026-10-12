@@ -49,7 +49,8 @@ def render(paths, scenes: list[str] | None = None, timeout: int = 3600) -> dict:
     from .common import load_status, set_status
     from .motion_audio import mix
     from .motion_build import aep_path, render_path
-    plan = read_json(paths.p("01_analysis/motion-plan.json"))
+    from .stamps import read_compiled
+    plan = read_compiled(paths.p("01_analysis/motion-plan.json"))
     aep = aep_path(paths)
     if not plan or not aep.exists():
         raise SystemExit("build the After Effects project first (`reel motion-build`)")

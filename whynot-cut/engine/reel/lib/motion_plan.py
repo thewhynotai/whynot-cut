@@ -736,6 +736,8 @@ def _finish(paths, C: _Compiler, script: dict, scenes: list[dict] | None, early:
     fp = fingerprint(paths)
     if plan is not None:
         plan["fingerprint"] = fp
+        from .stamps import stamp
+        plan = stamp(plan)
     if not getattr(C, "write", True):
         return {"ok": ok, "errors": C.errors, "warnings": C.warnings, "plan_data": plan}
     if plan is not None:
