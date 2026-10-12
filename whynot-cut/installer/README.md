@@ -137,11 +137,11 @@ Python only when that Python is gone. It runs these steps in order:
 
 | Step | What it removes |
 |---|---|
-| `plugin` | It checks `~/.claude/settings.json` first and backs up the original bytes. Then it runs `claude plugin uninstall whynot-cut@thewhynot-ai --scope user` and `claude plugin marketplace remove thewhynot-ai`. Last, it removes our entries from `settings.json`. The Git Bash entry is removed only when it points into `%LOCALAPPDATA%\WhyNotCut\git`. A plugin the install switched off (`reel-editor@*`) is switched back on. If `settings.json` is not valid JSON, nothing is changed and the Claude Code CLI does not run; the step shows what to remove by hand. |
+| `plugin` | It checks `~/.claude/settings.json` first and backs up the original bytes. Then it runs `claude plugin uninstall whynot-cut@thewhynot-ai --scope user` and `claude plugin marketplace remove thewhynot-ai`. Last, it removes our entries from `settings.json`. The Git Bash entry (`CLAUDE_CODE_GIT_BASH_PATH`) stays as long as the Git folder WhyNot Cut installed stays; both go together, with `-RemoveEngine`. A plugin the install switched off (`reel-editor@*`) is switched back on. If `settings.json` is not valid JSON, nothing is changed and the Claude Code CLI does not run; the step shows what to remove by hand. |
 | `adobe` | The CEP panel folder the install recorded, and the UXP panel through Adobe's plugin installer (`/remove <id>`). If Premiere Pro or After Effects is running, nothing is removed; close them and run uninstall again. |
 | `fonts` | Only the font files the install recorded, and only their own registry values. A font you had before stays. |
 | `marketplace` | `~/.whynot-cut/marketplace` (and its `.new` / `.prev` copies). |
-| `engine` | Only with `-RemoveEngine` / `--remove-engine`: everything in `~/.whynot-cut` except `models/`, plus `%LOCALAPPDATA%\WhyNotCut\git`. With `-RemoveModels` / `--remove-models` the models go too. `-RemoveModels` on its own deletes only `models/`. |
+| `engine` | Only with `-RemoveEngine` / `--remove-engine`: everything in `~/.whynot-cut` except `models/`, plus `%LOCALAPPDATA%\WhyNotCut\git` and then its Git Bash entry in `settings.json`. It refuses a folder that holds none of `state.json`, `current` or `bin/uv(.exe)`. If the `adobe` or `fonts` step could not remove something (a running Premiere Pro, a font in use), a small `state.json` keeps that record, so running uninstall again finishes it. With `-RemoveModels` / `--remove-models` the models go too. `-RemoveModels` on its own deletes only `models/`. |
 
 Uninstall never touches:
 
@@ -154,7 +154,8 @@ Uninstall never touches:
 
 With `-RemoveEngine`, the Python that runs the uninstall cannot delete itself, because Windows locks a running
 `python.exe`. So the core lists `python/` and `bin/` in `~/.whynot-cut/.delete-after-exit`, and the install script
-deletes exactly those once the core has finished. It also deletes `~/.whynot-cut` itself if nothing else is left.
+deletes them once the core has finished. The script accepts only `python/` and `bin/` from that list (and
+`~/.whynot-cut` itself, only once it is empty); any other line is refused and reported.
 The uninstall log is in `logs/`, so it is deleted with the engine home; the summary stays on the screen.
 
 ## Sandbox and test mode

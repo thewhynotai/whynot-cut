@@ -3,19 +3,22 @@
 plugin       settings.json is checked and its ORIGINAL bytes backed up first (unreadable JSON: no CLI call, the file
              stays byte-identical, amber with what to remove by hand). Then, with a Claude Code CLI:
              `claude plugin uninstall whynot-cut@thewhynot-ai --scope user` and `claude plugin marketplace remove
-             thewhynot-ai`; then our keys come out of settings.json (extraKnownMarketplaces / enabledPlugins entries,
-             the Git Bash env key only while it points into our own %LOCALAPPDATA%\\WhyNotCut\\git), and plugins the
-             install switched off (ID-5) are switched back on.
+             thewhynot-ai`; then our keys come out of settings.json (extraKnownMarketplaces / enabledPlugins entries),
+             and plugins the install switched off (ID-5) are switched back on. The Git Bash env key stays while the
+             managed Git folder stays: both go only with --remove-engine.
 adobe        a running Premiere Pro / After Effects: amber, nothing removed. Else the RECORDED CEP folder (only when it
              is <CEP extensions>/ai.thewhynot.cut.bridge, never a link) and its .prev / .new; the UXP panel through
-             UPIA `/remove <id>` (`--remove` on macOS); a sandbox only records that command.
+             UPIA `/remove <id>` (`--remove` on macOS; the id recorded at install); a sandbox only records it.
 fonts        only the files listed in state.fonts.installed that sit in the user font folder, and only the registry
              values listed in state.fonts.registry that still point at one of those files.
 marketplace  ~/.whynot-cut/marketplace (+ .new / .prev); a link (a development checkout) is left alone.
 engine       only with --remove-engine: every child of ~/.whynot-cut except models/ (unless --remove-models), plus
-             %LOCALAPPDATA%\\WhyNotCut\\git. python/ and bin/ (the interpreter running this code: Windows locks it) are
-             listed in ~/.whynot-cut/.delete-after-exit, which the bootstrap deletes after this process exits (and the
-             engine home itself when nothing else is left). --remove-models alone deletes models/ only.
+             %LOCALAPPDATA%\\WhyNotCut\\git, then the settings env CLAUDE_CODE_GIT_BASH_PATH that points into it.
+             python/ and bin/ (the interpreter running this code: Windows locks it) are listed in
+             ~/.whynot-cut/.delete-after-exit, which the bootstrap deletes after this process exits (and the engine
+             home itself when nothing else is left). When adobe / fonts left something recorded (a running host, a
+             font in use), a minimal state.json keeps those records for the next uninstall. Refused unless the folder
+             holds state.json, current or bin/uv(.exe). --remove-models alone deletes models/ only.
 Never touched: a clients folder (preferences `clients_root`, any folder holding `.whynot-client`), the preferences file
 ~/.claude/whynot-cut.local.md (kept and reported), fonts / registry values / CEP folders not recorded, anything outside
 the engine home, the recorded paths and the managed Git folder. Links are removed as links or left alone, never
@@ -34,7 +37,8 @@ from .system import PREFS, read_preferences, render_checklist
 
 DEFER_LIST = ".delete-after-exit"
 DEFERRED = ("python", "bin")  # the interpreter running this core, and uv: removed by the bootstrap after it exits
-_ENGINE_MARKS = ("state.json", "current", "runtimes", "python", "bin", "ffmpeg", "models", "marketplace")
+_ENGINE_MARKS = ("state.json", "current", "bin/uv", "bin/uv.exe")  # only WhyNot Cut leaves these
+RETRY_SECTIONS = ("adobe", "fonts")  # what an earlier step may leave recorded for the next uninstall
 
 
 # --------------------------------------------------------------------------------------------- helpers
@@ -127,13 +131,13 @@ def _cli_remove(ctx: base.Ctx, name: str, pid: str, problems: list) -> Optional[
 def step_plugin(ctx: base.Ctx) -> base.StepResult:
     paths = ctx.paths
     name, pid = _ids(ctx)
-    sfile, git = paths.settings_file, claude.managed_git_dir(paths)
+    sfile = paths.settings_file
     turned_off = [k for k in _section(ctx, "claude").get("disabled") or [] if isinstance(k, str)]
     if _dry(ctx):
         return _done("plugin", "skipped", [f"dry run: would run `claude plugin uninstall {pid} --scope user` and "
                                            f"`claude plugin marketplace remove {name}`, and take our entries out of "
                                            f"{sfile}"])
-    snippet = claude.unmerge_snippet(name, pid, [claude.GIT_BASH_KEY])
+    snippet = claude.unmerge_snippet(name, pid)
     by_hand = f"remove these from {sfile} by hand: {snippet}"
     # checked and backed up BEFORE the CLI runs: it writes settings.json too (same rule as the install, R3)
     try:
@@ -154,9 +158,8 @@ def step_plugin(ctx: base.Ctx) -> base.StepResult:
     try:
         via_cli = _cli_remove(ctx, name, pid, problems)
         try:
-            r = claude.unmerge_claude_settings(sfile, marketplace_name=name, plugin_id=pid,
-                                               env_keys_if_under={claude.GIT_BASH_KEY: git}, enable=turned_off,
-                                               make_backup=False)
+            r = claude.unmerge_claude_settings(sfile, marketplace_name=name, plugin_id=pid, env_keys_if_under={},
+                                               enable=turned_off, make_backup=False)
         except claude.SettingsUnreadable as e:  # only when the CLI left it unreadable
             fail = f"{sfile} is {e.reason} after the Claude Code CLI wrote it; it was not changed further"
         except (OSError, UnicodeError, ValueError) as e:
@@ -202,8 +205,10 @@ def _remove_cep(ctx: base.Ctx, rec: dict) -> tuple:
     return "ok", f"CEP panel removed from {p}", False
 
 
-def _remove_uxp(ctx: base.Ctx) -> tuple:
-    uid = base.cget(ctx.components, "bridge.uxp.id")
+def _remove_uxp(ctx: base.Ctx, rec: dict) -> tuple:
+    uid = rec.get("id")  # the id the install used; this build's components.json only when none was recorded
+    if not isinstance(uid, str) or not uid.strip() or base.is_placeholder(uid):
+        uid = base.cget(ctx.components, "bridge.uxp.id")
     by_hand = "remove the WhyNot Cut panel in the Creative Cloud app (Stock & Marketplace > Plugins)"
     if base.is_placeholder(uid) or not isinstance(uid, str) or not uid.strip():
         return "amber", f"the UXP panel id is not in this build: {by_hand}", True
@@ -241,7 +246,7 @@ def step_adobe(ctx: base.Ctx) -> base.StepResult:
         if keep:
             left["cep"] = cep
     if uxp:
-        status, note, keep = _remove_uxp(ctx)
+        status, note, keep = _remove_uxp(ctx, uxp)
         parts.append((status, note))
         if keep:
             left["uxp"] = uxp
@@ -353,7 +358,7 @@ def engine_home_problem(paths: base.Paths) -> Optional[str]:
         return f"{paths.whynot} is a drive root"
     if base.is_link(paths.whynot):
         return f"{paths.whynot} is a link"
-    if not any(os.path.lexists(paths.whynot / m) for m in _ENGINE_MARKS):
+    if not any(os.path.isfile(paths.whynot / m) for m in _ENGINE_MARKS):
         return (f"{paths.whynot} does not look like a WhyNot Cut engine home (none of "
                 f"{', '.join(_ENGINE_MARKS)})")
     return None
@@ -406,7 +411,14 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         return _done("engine", "skipped", [f"dry run: would delete everything in {paths.whynot}"
                                            + (" except models/" if keep_models else "")
                                            + f" and {claude.managed_git_dir(paths)}"])
-    ctx.state.dry_run = True  # state.json goes too: nothing may write it again in this run
+    # what an earlier step could not remove (a running Adobe host, a font in use) stays recorded in a minimal
+    # state.json, so the uninstall the editor is told to run again still knows about it
+    retry = {k: ctx.state.data[k] for k in RETRY_SECTIONS if isinstance(ctx.state.data.get(k), dict)}
+    if retry:
+        ctx.state.data = dict({"schema": 1, "plugin": ctx.state.data.get("plugin"), "updated_at": None, "steps": {},
+                               "answers": _section(ctx, "answers")}, **retry)
+    else:
+        ctx.state.dry_run = True  # state.json goes too: nothing may write it again in this run
     removed, kept, failed = [], [], []
     with os.scandir(paths.whynot) as it:
         children = sorted((e.name for e in it), key=lambda n: (n == "logs", n))  # logs last: the log goes with it
@@ -416,6 +428,8 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
             continue
         if name == "models" and keep_models:
             kept.append("models (the Whisper models; --remove-models deletes them)")
+            continue
+        if name == "state.json" and retry:
             continue
         if name == "logs":
             ctx.log.info("the uninstall log goes with the engine home; this summary stays on the screen only")
@@ -430,6 +444,8 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
             os.rmdir(git.parent)
     except OSError:
         pass
+    if not os.path.lexists(git):  # the Git Bash entry goes together with the managed Git folder, never before it
+        _drop_git_bash_key(ctx, git, kept, failed)
     later = [paths.whynot / n for n in DEFERRED if os.path.lexists(paths.whynot / n)]
     rest = [n for n in os.listdir(paths.whynot) if n not in DEFERRED and n != DEFER_LIST]
     defer_file = paths.whynot / DEFER_LIST
@@ -445,6 +461,9 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
     except OSError as e:
         failed.append(f"{DEFER_LIST} ({e})")
     notes = [f"deleted {len(removed)} items of {paths.whynot}"]
+    if retry:
+        notes.append(f"kept {paths.whynot} with a small state.json: {', '.join(retry)} could not be removed yet; run "
+                     "the uninstall again once that is fixed")
     if later:
         notes.append(", ".join(p.name + "/" for p in later) + " (the Python running this uninstall and uv) are "
                      "deleted by the installer right after it exits"
@@ -454,6 +473,26 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         return _done("engine", "amber", notes, "close Premiere Pro, After Effects and Claude, then run the uninstall "
                                                "again with --remove-engine")
     return _done("engine", "ok", notes)
+
+
+def _drop_git_bash_key(ctx: base.Ctx, git: Path, kept: list, failed: list) -> None:
+    """settings.json env CLAUDE_CODE_GIT_BASH_PATH, only while it points into the (now deleted) managed Git folder.
+    Same rules as every settings write: unreadable = untouched, a backup when it changes."""
+    sfile = ctx.paths.settings_file
+    if not sfile.is_file():
+        return
+    name, pid = _ids(ctx)
+    try:
+        r = claude.unmerge_claude_settings(sfile, marketplace_name=name, plugin_id=pid,
+                                           env_keys_if_under={claude.GIT_BASH_KEY: git})
+    except claude.SettingsUnreadable as e:
+        failed.append(f"the {claude.GIT_BASH_KEY} entry in {sfile} ({sfile.name} is {e.reason}; remove it by hand)")
+        return
+    except (OSError, UnicodeError, ValueError) as e:
+        failed.append(f"the {claude.GIT_BASH_KEY} entry in {sfile} ({type(e).__name__}: {e})")
+        return
+    if r["changed"]:
+        ctx.log.info(f"removed {claude.GIT_BASH_KEY} from {sfile} (backup {r['backup']})")
 
 
 def _delete_child_in(ctx: base.Ctx, p: Path, root: Path, protected: list, removed: list, failed: list) -> None:

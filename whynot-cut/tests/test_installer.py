@@ -45,7 +45,11 @@
     --remove-models; a running Adobe host keeps the panel; recorded paths outside their folders are left alone; an
     engine home that is the user folder is refused; a dry run changes nothing. install.ps1 -Uninstall -RemoveEngine
     and install.sh --uninstall --remove-engine after an install: no download, the bootstrap deletes python/ and bin/
-    after the core exits (a junction inside is removed as a link).
+    after the core exits (a junction inside is removed as a link). Fix round 1: a tampered .delete-after-exit
+    (`<root>//`, models/, `..` paths, an outside path, an illegal name) deletes nothing but python/ and bin/ in both
+    shells; a running host with --remove-engine keeps a small state.json so the next uninstall removes the panel; the
+    Git Bash entry stays until --remove-engine; the UXP id recorded at install wins; a strong engine-home mark is
+    required; the newest engine Python is chosen by version number in both shells.
 Never touches the real ~/.whynot-cut or ~/.claude: every Paths is a sandbox home in a temp folder, and no real
 network is used (artefacts come from a 127.0.0.1 http.server started here, or file://).
 Run (repo root):
@@ -3239,6 +3243,41 @@ UXP_ID = "ai.thewhynot.cut.uxp"
 PREMIERE_26_5 = json.dumps([{"app": "premiere", "version": "26.5.0"}])
 UNINSTALL_STEP_NAMES = ["plugin", "adobe", "fonts", "marketplace", "engine"]
 DEFER_LIST = ".delete-after-exit"
+GIT_BASH_KEY = "CLAUDE_CODE_GIT_BASH_PATH"
+
+
+def shell_function(path: Path, name: str, ps: bool) -> str:
+    """One function's text out of a bootstrap, to run it alone against a scratch folder."""
+    text = path.read_text(encoding="utf-8")
+    pat = (rf"(?ms)^(    function {re.escape(name)}\b.*?^    }}\n)" if ps
+           else rf"(?ms)^({re.escape(name)}\(\) \{{.*?^\}}\n)")
+    m = re.search(pat, text)
+    if m is None:
+        raise AssertionError(f"{name} not found in {path.name}")
+    return m.group(1)
+
+
+def tampered_engine(tmp: Path) -> types.SimpleNamespace:
+    """An engine home with python/, bin/, models/ and a client folder, plus a folder outside it."""
+    root = tmp / ARABIC_HOME / ".whynot-cut"
+    ns = types.SimpleNamespace(root=root, outside=tmp / "outside")
+    touch(root / "python" / "cpython-3.12.15-x" / "python.exe", b"MZ")
+    touch(root / "bin" / "uv.exe", b"MZ")
+    ns.model = touch(root / "models" / "large-v3" / "model.bin", b"weights")
+    ns.marker = touch(root / "WhyNot Clients" / "Dr X" / ".whynot-client", b"{}")
+    ns.footage = touch(root / "WhyNot Clients" / "Dr X" / "raw.mp4", b"precious")
+    ns.kept = touch(ns.outside / "keep.txt", b"precious")
+    return ns
+
+
+def assert_only_python_and_bin_went(test: unittest.TestCase, ns: types.SimpleNamespace, out: str) -> None:
+    test.assertFalse(os.path.lexists(ns.root / "python"), out)
+    test.assertFalse(os.path.lexists(ns.root / "bin"), out)
+    for f, data in ((ns.model, b"weights"), (ns.marker, b"{}"), (ns.footage, b"precious"), (ns.kept, b"precious")):
+        test.assertEqual(f.read_bytes(), data, out)
+    test.assertTrue(ns.root.is_dir(), out)  # listed, but not empty: kept
+    test.assertFalse((ns.root / DEFER_LIST).exists(), out)
+    test.assertIn("refused", out)
 
 
 def uninstall_module():
@@ -3316,6 +3355,9 @@ class _InstalledHome(unittest.TestCase):
         touch(self.paths.bin_dir / "uv.exe", b"MZ uv")
         return pbs, self.paths.bin_dir
 
+    def managed_bash(self) -> Path:
+        return self.paths.localappdata / "WhyNotCut" / "git" / "bin" / "bash.exe"
+
     def deferred(self) -> list:
         return (self.paths.whynot / DEFER_LIST).read_text(encoding="utf-8").splitlines()
 
@@ -3336,7 +3378,14 @@ class TestUninstall(_InstalledHome):
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
         # settings.json: only our keys gone, the editor's intact, the original bytes backed up
-        self.assertEqual(json.loads(self.paths.settings_file.read_text(encoding="utf-8")), self.EDITOR_SETTINGS)
+        settings = json.loads(self.paths.settings_file.read_text(encoding="utf-8"))
+        env = settings.pop("env", None)
+        self.assertEqual(settings, self.EDITOR_SETTINGS)
+        if IS_WIN:  # the Git Bash entry stays while the managed Git folder stays (it goes with --remove-engine)
+            self.assertEqual(env, {GIT_BASH_KEY: str(self.managed_bash())})
+        else:
+            self.assertIsNone(env)
+        self.assertEqual(st["adobe"]["uxp"]["id"], UXP_ID)  # the install records the id uninstall uses
         backups = [p.read_bytes() for p in self.paths.claude_dir.glob("settings.json.whynot-backup-*")]
         self.assertIn(before, backups)
         argv = self.claude_calls()[n_calls:]
@@ -3398,7 +3447,9 @@ class TestUninstall(_InstalledHome):
         if IS_WIN:
             self.assertFalse((self.paths.localappdata / "WhyNotCut").exists())
         self.assertIn("WhyNot Clients", out)  # reported as kept
-        self.assertTrue(self.paths.settings_file.is_file())
+        settings = json.loads(self.paths.settings_file.read_text(encoding="utf-8"))
+        self.assertNotIn("env", settings)  # the Git Bash entry went together with the managed Git folder
+        self.assertEqual(settings, self.EDITOR_SETTINGS)
 
     def test_remove_models_too(self):
         self.install()
@@ -3428,6 +3479,27 @@ class TestUninstall(_InstalledHome):
         r2 = self.core("uninstall")
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
         self.assertFalse(cep.exists())
+
+    def test_a_running_host_with_remove_engine_keeps_what_is_left_to_retry(self):
+        st = self.install()
+        cep = Path(st["adobe"]["cep"]["path"])
+        touch(self.paths.models_dir / "large-v3" / "model.bin", b"weights")
+        env = dict(self.env, WNC_TEST_HOSTS_RUNNING="Adobe Premiere Pro.exe")
+        r = self.core("uninstall", "--remove-engine", env=env)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertTrue((cep / "index.html").is_file())
+        st2 = json.loads(self.paths.state_file.read_text(encoding="utf-8"))  # a small state.json is kept
+        self.assertEqual(st2["adobe"]["cep"]["path"], str(cep))
+        self.assertNotIn("fonts", st2)
+        self.assertFalse(self.paths.runtimes_dir.exists())
+        self.assertIn("state.json", r.stdout)
+        # the host is closed: the next uninstall finds the panel and removes it, then the rest of the engine home
+        r2 = self.core("uninstall", "--remove-engine")
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertFalse(cep.exists())
+        self.assertFalse(self.paths.state_file.exists())
+        self.assertEqual(os.listdir(self.paths.whynot), ["models"])
 
     def test_unreadable_settings_runs_no_cli_and_stays_byte_identical(self):
         self.install()
@@ -3494,6 +3566,7 @@ class TestUninstallSteps(unittest.TestCase):
 
     def test_remove_models_alone_keeps_the_rest_of_the_engine(self):
         ctx = self.ctx(remove_models=True)
+        touch(ctx.paths.state_file, b"{}")
         touch(ctx.paths.models_dir / "large-v3" / "model.bin", b"w")
         rt = touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
         r = self.un.step_engine(ctx)
@@ -3514,11 +3587,34 @@ class TestUninstallSteps(unittest.TestCase):
         self.assertEqual(r.status, "red", r.detail)
         self.assertEqual((h / "Documents" / "thesis.docx").read_bytes(), b"mine")
 
+    def test_a_folder_without_a_strong_engine_mark_is_refused(self):
+        ctx = self.ctx(remove_engine=True, remove_models=True)
+        for name in ("bin", "python", "models", "runtimes", "ffmpeg", "marketplace"):  # common names only
+            touch(ctx.paths.whynot / name / "x.bin", b"x")
+        before = tree(ctx.paths.whynot)
+        r = self.un.step_engine(ctx)
+        self.assertEqual(r.status, "red", r.detail)
+        self.assertEqual(tree(ctx.paths.whynot), before)
+        touch(ctx.paths.bin_dir / "uv.exe", b"MZ")  # bin/uv(.exe), state.json or current: ours
+        self.assertIsNone(self.un.engine_home_problem(ctx.paths))
+
+    def test_uxp_remove_uses_the_id_recorded_at_install(self):
+        ctx = self.ctx()
+        ctx.components = {"schema": 1, "bridge": {"uxp": {"id": "ai.thewhynot.cut.newer"}}}
+        ctx.state.data["adobe"] = {"uxp": {"id": "ai.thewhynot.cut.recorded", "ran": False}}
+        r = self.un.step_adobe(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertIn("/remove ai.thewhynot.cut.recorded", r.detail)
+        self.assertNotIn("newer", r.detail)
+        ctx.state.data["adobe"] = {"uxp": {"ran": False}}  # an install from before the id was recorded
+        self.assertIn("/remove ai.thewhynot.cut.newer", self.un.step_adobe(ctx).detail)
+
     def test_dry_run_changes_nothing_and_runs_nothing(self):
         ctx = self.ctx(dry_run=True, remove_engine=True, remove_models=True)
         ctx.log = Quiet(None, dry_run=True)
         touch(ctx.paths.settings_file, json.dumps({"enabledPlugins": {PID: True}}).encode("utf-8"))
         touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
+        touch(ctx.paths.state_file, b"{}")
         touch(ctx.paths.marketplace_dir / ".claude-plugin" / "marketplace.json", b"{}")
         touch(ctx.paths.models_dir / "m.bin", b"w")
         before = tree(ctx.paths.home)
@@ -3544,6 +3640,38 @@ class TestPowerShellUninstall(TestPowerShellFrontEnd):
     test_paths_ending_in_a_backslash_reach_the_core_intact = None
     test_the_bootstraps_quoting_guard_doubles_trailing_backslashes = None
     test_uv_already_at_the_pinned_version_is_not_downloaded = None
+
+    def run_functions(self, names: list, call: str, **env):
+        boot = INSTALLER / "core" / "bootstrap.ps1"
+        body = ("$S = @{ Utf8 = (New-Object System.Text.UTF8Encoding $false) }\n"
+                + "".join(shell_function(boot, n, True) for n in names) + call + "\n")
+        script = self.tmp / "functions.ps1"
+        script.write_text(body, encoding="utf-8-sig")
+        return self.ps(script, env=self.env(**env))
+
+    def test_a_tampered_list_deletes_only_python_and_bin(self):
+        ns = tampered_engine(self.tmp)
+        root = str(ns.root)
+        lines = [root + "\\\\", root + "\\models", root + "\\python\\..\\WhyNot Clients",
+                 root + "\\python\\..\\..\\..\\outside", str(ns.outside), root + "\\bad|name", "",
+                 root + "/python/", root + "\\\\bin"]
+        (ns.root / DEFER_LIST).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        r = self.run_functions(["Test-WncReparse", "Invoke-WncDeleteTree", "Invoke-WncDeferredDelete"],
+                               "Invoke-WncDeferredDelete $env:WNC_T_ENGINE", WNC_T_ENGINE=root)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        assert_only_python_and_bin_went(self, ns, out)
+        self.assertEqual(out.count("refused"), 5, out)  # models, the two `..` paths, outside, the illegal name
+
+    def test_the_newest_engine_python_is_chosen_by_version_number(self):
+        d = self.tmp / "py"
+        for v in ("3.12.9", "3.12.15", "3.11.20"):
+            (d / f"cpython-{v}-windows-x86_64-none").mkdir(parents=True)
+        r = self.run_functions(["Get-WncPythonDirNewestFirst"], "(Get-WncPythonDirNewestFirst -Dirs @(Get-ChildItem -LiteralPath "
+                               "$env:WNC_T_DIR -Directory) | ForEach-Object { $_.Name }) -join ','", WNC_T_DIR=str(d))
+        self.assertEqual(r.stdout.strip().splitlines()[-1],
+                         "cpython-3.12.15-windows-x86_64-none,cpython-3.12.9-windows-x86_64-none,"
+                         "cpython-3.11.20-windows-x86_64-none", r.stdout + r.stderr)
 
     def test_dry_run_uninstall_without_python_names_the_uninstall_steps(self):
         self.home.mkdir()
@@ -3593,14 +3721,36 @@ class TestBashUninstall(TestBashFrontEnd):
     test_piped_script_with_yes_does_not_hang = None
     test_piped_without_source_says_h3_in_arabic_too = None
 
+    def test_a_tampered_list_deletes_only_python_and_bin(self):
+        ns = tampered_engine(self.tmp)
+        root = ns.root.as_posix()
+        lines = [root + "//", root + "/models", root + "/python/../WhyNot Clients", root + "/python/../../../outside",
+                 ns.outside.as_posix(), root + "/./models/", "", root + "/python/.", root + "//bin/"]
+        (ns.root / DEFER_LIST).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+        boot = INSTALLER / "core" / "bootstrap.sh"
+        script = self.tmp / "functions.sh"
+        script.write_bytes(('OS_NAME="$(uname -s)"\nENGINE="$1"\n' + shell_function(boot, "norm_path", False)
+                            + shell_function(boot, "delete_deferred", False) + "delete_deferred\n").encode("utf-8"))
+        r = self.sh(script.as_posix(), root)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        assert_only_python_and_bin_went(self, ns, out)
+        self.assertEqual(out.count("refused"), 5, out)  # models twice, the two `..` paths, outside
+
     def test_uninstall_remove_engine_on_the_engine_python(self):
         r = self.sh(self.front(), "--home", self.home_arg(), "--yes", "--skip", "model,launch")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         hits = len(self.srv.srv.hits)
-        pbs = self.paths.python_dir / "cpython-3.12.15-macos-aarch64-none" / "bin" / "python3"
-        pbs.parent.mkdir(parents=True)
-        pbs.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n', encoding="utf-8", newline="\n")
-        os.chmod(pbs, 0o755)
+        # two engine Pythons: the newer version number must win (3.12.15 after 3.12.9; text order says otherwise)
+        comp = json.loads(self.fx.components_path.read_text(encoding="utf-8"))
+        comp["runtime"]["python"] = "3.12"
+        self.fx.components_path.write_text(json.dumps(comp, indent=2), encoding="utf-8")
+        for v in ("3.12.9", "3.12.15"):
+            pbs = self.paths.python_dir / f"cpython-{v}-macos-aarch64-none" / "bin" / "python3"
+            pbs.parent.mkdir(parents=True)
+            pbs.write_text(f'#!/bin/sh\nexec "{Path(sys.executable).as_posix()}" "$@"\n', encoding="utf-8",
+                           newline="\n")
+            os.chmod(pbs, 0o755)
         model = touch(self.paths.models_dir / "large-v3" / "model.bin", b"weights")
         r = self.sh(self.front(), "--home", self.home_arg(), "--uninstall", "--remove-engine", "--yes",
                     env=self.env(WNC_TEST_UV=None))

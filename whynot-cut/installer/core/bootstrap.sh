@@ -13,8 +13,10 @@
 # else python/cpython-<ver>*/bin/python3): nothing is downloaded; only without one are uv and Python fetched as above.
 # --uninstall --remove-engine: the core leaves python/ and bin/ (the Python it runs on, and uv) and lists them, plus the
 # engine home itself when nothing else is left, in <engine>/.delete-after-exit. Once the core has exited, this script
-# deletes exactly those paths: only inside the engine home, never through a link (a link is removed as a link), the
-# engine home only when empty; then the list file. The log went with logs/, so the summary is on the console only.
+# deletes what that list names, but ONLY <engine>/python and <engine>/bin (every line normalised first; anything else
+# is refused and reported), never through a link (a link is removed as a link), and the engine home itself only when
+# it is then empty; then the list file. The log went with logs/, so the summary is on the console only. The newest
+# engine Python is chosen by version number (3.12.15 before 3.12.9).
 # Log: ~/.whynot-cut/logs/install-YYYYmmdd-HHMMSS.log (uninstall-... for --uninstall), shared with the core (--log).
 # Exit code: the core's; 2 = cannot start (not macOS, Git Bash/MSYS, unreadable components.json, missing core);
 # 3 = a bootstrap step failed (download, sha256, uv, python), with a one-line message and the log path.
@@ -177,6 +179,17 @@ EOF
   PY="$last"
 }
 
+ver_key() { # "3.12.15" -> "000030001200015": versions compare as text, numerically (3.12.15 after 3.12.9)
+  local IFS=. a b c
+  set -f
+  # shellcheck disable=SC2086  # split on dots on purpose
+  set -- $1
+  set +f
+  a="${1:-0}" b="${2:-0}" c="${3:-0}"
+  case "$a$b$c" in *[!0-9]*) printf '0'; return 0 ;; esac
+  printf '%05d%05d%05d' "$((10#$a))" "$((10#$b))" "$((10#$c))"
+}
+
 engine_python() { # uninstall: the python-build-standalone already in the engine home -> PY (nothing is downloaded)
   PY=""
   if [ -n "$TEST_UV" ] || [ -f "$UV_BIN" ]; then
@@ -185,49 +198,70 @@ engine_python() { # uninstall: the python-build-standalone already in the engine
     if find_python; then return 0; fi
   fi
   PY=""
-  for cand in "$ENGINE"/python/cpython-"$PY_VER"*/bin/python3; do  # glob order: the newest last
+  best=""
+  for cand in "$ENGINE"/python/cpython-"$PY_VER"*/bin/python3; do  # the newest version number that starts
     [ -f "$cand" ] || continue
-    if "$cand" -I -B -c pass >/dev/null 2>&1 </dev/null; then PY="$cand"; fi
+    v="${cand#"$ENGINE"/python/cpython-}"
+    k="$(ver_key "${v%%-*}")"
+    if [ -n "$best" ] && ! [ "$k" \> "$best" ]; then continue; fi
+    if "$cand" -I -B -c pass >/dev/null 2>&1 </dev/null; then PY="$cand"; best="$k"; fi
   done
   [ -n "$PY" ]
 }
 
-delete_deferred() { # after `uninstall --remove-engine`: the paths the core listed in $ENGINE/.delete-after-exit
+norm_path() { # lexical: \ (Git Bash), repeated /, . and .. resolved, no trailing / -> NORM; lower case on Windows
+  local p="$1" out="" part lead=""
+  case "$OS_NAME" in MINGW*|MSYS*|CYGWIN*) p="${p//\\//}" ;; esac
+  case "$p" in /*) lead="/" ;; esac
+  local IFS=/
+  set -f
+  for part in $p; do
+    case "$part" in
+      ''|.) ;;
+      ..) out="${out%/*}" ;;
+      *) out="$out/$part" ;;
+    esac
+  done
+  set +f
+  if [ -n "$lead" ]; then NORM="${out:-/}"; else NORM="${out#/}"; fi
+  case "$OS_NAME" in MINGW*|MSYS*|CYGWIN*) NORM="$(printf '%s' "$NORM" | tr '[:upper:]' '[:lower:]')" ;; esac
+}
+
+delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-exit may name ONLY python/, bin/, $ENGINE
   list="$ENGINE/.delete-after-exit"
   [ -f "$list" ] || return 0
-  root="${ENGINE%/}"
+  root="$ENGINE"
+  while [ "${root%/}" != "$root" ] && [ "$root" != "/" ]; do root="${root%/}"; done
   if [ -L "$root" ]; then
     printf 'WARNING: %s is a link; the paths in %s were left alone\n' "$root" "$list"
     return 0
   fi
+  norm_path "$root"; nroot="$NORM"
   home_too="" failed=""
   while IFS= read -r p || [ -n "$p" ]; do
     p="${p%$'\r'}"
     [ -n "$p" ] || continue
-    case "$OS_NAME" in MINGW*|MSYS*|CYGWIN*) p="${p//\\//}" ;; esac  # the core wrote C:\...
-    p="${p%/}"
-    if [ "$p" = "$root" ]; then home_too=1; continue; fi
-    case "$p" in
-      */../*|*/..|*/./*) printf 'WARNING: %s is not a plain path; left alone\n' "$p"; continue ;;
-      "$root"/*) ;;
-      *) printf 'WARNING: %s is outside %s; left alone\n' "$p" "$root"; continue ;;
+    norm_path "$p"
+    target=""
+    case "$NORM" in
+      "$nroot") home_too=1; continue ;;
+      "$nroot/python") target="$root/python" ;;
+      "$nroot/bin") target="$root/bin" ;;
     esac
-    linked="" a="${p%/*}"
-    while [ "${#a}" -gt "${#root}" ]; do
-      if [ -L "$a" ]; then linked=1; break; fi
-      a="${a%/*}"
-    done
-    if [ -n "$linked" ]; then printf 'WARNING: %s lies behind a link; left alone\n' "$p"; continue; fi
-    if [ -L "$p" ]; then
-      rm -f "$p"  # the link only, never its target
-    else
-      rm -rf "$p"  # rm removes a link inside as a link; it never follows one
+    if [ -z "$target" ]; then
+      printf "WARNING: refused '%s' in %s (only python/ and bin/ of %s may be listed)\n" "$p" "$list" "$root"
+      continue
     fi
-    if [ -e "$p" ] || [ -L "$p" ]; then
-      failed=1
-      printf 'WARNING: could not delete %s; delete it by hand\n' "$p"
+    if [ -L "$target" ]; then
+      rm -f "$target"  # the link only, never its target
     else
-      printf 'deleted %s\n' "$p"
+      rm -rf "$target"  # rm removes a link inside as a link; it never follows one
+    fi
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      failed=1
+      printf 'WARNING: could not delete %s; delete it by hand\n' "$target"
+    else
+      printf 'deleted %s\n' "$target"
     fi
   done < "$list"
   rm -f "$list"

@@ -14,9 +14,10 @@
 # python\cpython-<ver>*\python.exe): nothing is downloaded; only without one are uv and Python fetched as above.
 # -Uninstall -RemoveEngine: the core cannot delete the Python it runs on (Windows locks python.exe and its DLLs), so it
 # lists python\ and bin\ (and the engine home itself when nothing else is left) in <engine>\.delete-after-exit. Once
-# the core has exited, this script deletes exactly those paths: only inside the engine home, never through a link or
-# junction (a link is removed as a link), the engine home only when empty; then the list file. The log went with
-# logs\, so the summary is on the console only.
+# the core has exited, this script deletes what that list names, but ONLY <engine>\python and <engine>\bin (every line
+# normalised first; anything else is refused and reported), never through a link or junction (a link is removed as a
+# link), and the engine home itself only when it is then empty; then the list file. The log went with logs\, so the
+# summary is on the console only. The newest engine Python is chosen by version number (3.12.15 before 3.12.9).
 # Log: ~\.whynot-cut\logs\install-YYYYmmdd-HHMMSS.log (uninstall-... for -Uninstall), shared with the core (--log).
 # Exit code (in $LASTEXITCODE): the core's; 2 = cannot start (not Windows x64, unreadable components.json, missing
 # core); 3 = a bootstrap step failed (download, sha256, uv, python), with a one-line message and the log path.
@@ -213,6 +214,18 @@ param(
         return $null
     }
 
+    function Get-WncPythonDirNewestFirst([object[]]$Dirs) {
+        # cpython-<x.y.z>-... folders, newest version first, compared as numbers (3.12.15 before 3.12.9)
+        $keyed = foreach ($d in @($Dirs | Where-Object { $_ })) {
+            $v = New-Object Version 0, 0, 0
+            if ($d.Name -match '^cpython-(\d+)\.(\d+)\.(\d+)') {
+                $v = New-Object Version ([int]$Matches[1]), ([int]$Matches[2]), ([int]$Matches[3])
+            }
+            New-Object PSObject -Property @{ Dir = $d; Ver = $v }
+        }
+        return ,@($keyed | Sort-Object -Property Ver -Descending | ForEach-Object { $_.Dir })
+    }
+
     function Find-WncEnginePython([string]$Uv, [string]$Version, [string]$Engine) {
         # uninstall: the python-build-standalone already in the engine home, or $null (nothing is downloaded here)
         if ($Uv -and (Test-Path -LiteralPath $Uv -PathType Leaf)) {
@@ -222,8 +235,8 @@ param(
         }
         $dir = Join-Path $Engine 'python'
         if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return $null }
-        $dirs = @(Get-ChildItem -LiteralPath $dir -Directory -Filter "cpython-$Version*" -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending)
+        $dirs = Get-WncPythonDirNewestFirst -Dirs @(Get-ChildItem -LiteralPath $dir -Directory -Filter "cpython-$Version*" `
+                -ErrorAction SilentlyContinue)
         foreach ($d in $dirs) {
             $exe = Join-Path $d.FullName 'python.exe'
             if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { continue }
@@ -272,51 +285,60 @@ param(
             Write-Host "WARNING: $root is a link; the paths in $list were left alone"
             return
         }
+        # the ONLY paths it may name: <engine>\python, <engine>\bin and <engine> itself (that one only once empty);
+        # every line is normalised first (GetFullPath: \ and / alike, repeated separators, . and ..; case ignored)
+        $allowed = @((Join-Path $root 'python'), (Join-Path $root 'bin'))
         $homeToo = $false
         $failed = $false
-        foreach ($line in [IO.File]::ReadAllLines($list, $S.Utf8)) {
-            $p = $line.Trim()
-            if (-not $p) { continue }
-            $full = [IO.Path]::GetFullPath($p).TrimEnd([char]92)
-            if ($full -ieq $root) { $homeToo = $true; continue }
-            if (-not $full.StartsWith($root + [char]92, [StringComparison]::OrdinalIgnoreCase)) {
-                Write-Host "WARNING: $full is outside $root; left alone"
-                continue
-            }
-            $linked = $false
-            $parent = [IO.Path]::GetDirectoryName($full)
-            while ($parent -and ($parent.Length -gt $root.Length)) {
-                if (Test-WncReparse $parent) { $linked = $true; break }
-                $parent = [IO.Path]::GetDirectoryName($parent)
-            }
-            if ($linked) {
-                Write-Host "WARNING: $full lies behind a link; left alone"
-                continue
-            }
-            $err = $null
-            for ($i = 1; $i -le 5; $i++) {
-                # the core has just exited: Windows may hold its files a moment longer
-                try {
-                    Invoke-WncDeleteTree $full
-                    $err = $null
-                    break
-                } catch {
-                    $err = $_.Exception.Message
-                    Start-Sleep -Milliseconds (200 * $i)
+        $lines = @()
+        try {
+            $lines = [IO.File]::ReadAllLines($list, $S.Utf8)
+        } catch {
+            Write-Host "WARNING: cannot read $list ($($_.Exception.Message)); nothing was deleted"
+        }
+        foreach ($line in $lines) {
+            try {
+                $p = $line.Trim()
+                if (-not $p) { continue }
+                $full = [IO.Path]::GetFullPath($p).TrimEnd([char[]]@([char]92, [char]47))
+                if ($full -ieq $root) { $homeToo = $true; continue }
+                $target = $null
+                foreach ($a in $allowed) { if ($full -ieq $a) { $target = $a } }
+                if (-not $target) {
+                    Write-Host "WARNING: refused '$p' in $list (only python\ and bin\ of $root may be listed)"
+                    continue
                 }
-            }
-            if ($null -ne $err) {
-                Write-Host "WARNING: could not delete $full ($err); delete it by hand"
-                $failed = $true
-            } else {
-                Write-Host "deleted $full"
+                $err = $null
+                for ($i = 1; $i -le 5; $i++) {
+                    # the core has just exited: Windows may hold its files a moment longer
+                    try {
+                        Invoke-WncDeleteTree $target
+                        $err = $null
+                        break
+                    } catch {
+                        $err = $_.Exception.Message
+                        Start-Sleep -Milliseconds (200 * $i)
+                    }
+                }
+                if ($null -ne $err) {
+                    Write-Host "WARNING: could not delete $target ($err); delete it by hand"
+                    $failed = $true
+                } else {
+                    Write-Host "deleted $target"
+                }
+            } catch {
+                Write-Host "WARNING: refused '$line' in $list ($($_.Exception.Message))"
             }
         }
-        [IO.File]::Delete($list)
-        if ($homeToo -and (-not $failed) -and [IO.Directory]::Exists($root) -and
-            (@([IO.Directory]::GetFileSystemEntries($root)).Count -eq 0)) {
-            [IO.Directory]::Delete($root, $false)
-            Write-Host "deleted $root"
+        try {
+            [IO.File]::Delete($list)
+            if ($homeToo -and (-not $failed) -and [IO.Directory]::Exists($root) -and
+                (@([IO.Directory]::GetFileSystemEntries($root)).Count -eq 0)) {
+                [IO.Directory]::Delete($root, $false)
+                Write-Host "deleted $root"
+            }
+        } catch {
+            Write-Host "WARNING: could not finish the clean-up of $root ($($_.Exception.Message))"
         }
     }
 

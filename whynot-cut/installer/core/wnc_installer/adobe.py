@@ -242,7 +242,9 @@ def _install_uxp(ctx: base.Ctx, ccx: Path, hosts: list, rec: dict) -> tuple:
         return "skipped", f"UXP panel not installed: it needs Premiere Pro {need} or newer ({have})"
     upia = upia_path(ctx.platform)
     cmd = [str(upia), "/install" if ctx.platform.startswith("win") else "--install", str(ccx)]
-    rec["uxp"] = {"command": cmd, "ran": False, "file": str(ccx)}
+    uid = base.cget(ctx.components, "bridge.uxp.id")  # kept for uninstall (UPIA /remove <id>)
+    rec["uxp"] = {"command": cmd, "ran": False, "file": str(ccx),
+                  "id": None if base.is_placeholder(uid) or not isinstance(uid, str) else uid}
     if ctx.paths.sandbox:
         return "ok", "sandbox: the UXP install command was recorded, not run"
     double_click = f"double-click {ccx} (Creative Cloud installs it), then restart Premiere Pro"
