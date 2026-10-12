@@ -19,9 +19,10 @@ RENDER_TEMPLATE = "High Quality with Alpha"  # AE default output module: QuickTi
 
 
 def comp_fps() -> float:
-    """The frame rate of the extras' comps: the profile's sequence rate (29.97 and 23.976 as After Effects names them,
-    not 30000/1001 to six decimals), so the clip graphics line up with the Premiere sequence."""
-    return round(seq_fps(), 3)
+    """The frame rate of the extras' comps: the profile's sequence rate, unrounded (30000/1001 = 29.97002997...), so the
+    clip graphics line up frame for frame with the Premiere sequence. If After Effects snaps the value to its own
+    29.97 the result is the same; if it does not, the comp is exact instead of 0.003 fps off."""
+    return seq_fps()
 
 
 def wrap_lines(text: str, max_chars: int) -> str:
@@ -202,6 +203,8 @@ def execute(paths: Paths, jsx: Path, timeout: int = 900) -> dict:
     fresh = aep.exists() and aep.stat().st_mtime >= t0 - 1
     res["aep_saved_this_run"] = fresh
     res["status"] = "AEP_CREATED" if fresh else ("STALE_AEP_NOT_REBUILT" if aep.exists() else "FAILED")
+    if not fresh:
+        res["ok"] = False     # T2.2 exit-code rule: a build that saved nothing this run is a failure, not exit 0
     write_json(paths.p("04_after_effects/ae-build-result.json"), dict(res, at=now_iso()))
     return res
 
@@ -261,13 +264,29 @@ def render(paths: Paths, timeout: int = 3600) -> dict:
             shutil.rmtree(stage, ignore_errors=True)
     write_text(logp, p.stdout + "\n" + p.stderr)
     after = _movs(comps)
+    # A file that existed before is fresh only if aerender changed it ((mtime, size) differs): that proof needs no clock,
+    # so a NAS or FAT clock skew cannot reject a real render. A file that is NEW since the snapshot could still carry an
+    # old preserved mtime (a copy): for those only, the mtime must be within 3 s of the start (clock skew, 2 s FAT).
     fresh = sorted(f for f, (mt, size) in after.items()
-                   if size > 0 and before.get(f) != (mt, size) and mt / 1e9 >= t0 - 1)
+                   if size > 0 and (before[f] != (mt, size) if f in before else mt / 1e9 >= t0 - 3))
     stale = sorted(f for f in after if f not in fresh and after[f][1] > 0)
     res = {"status": "RENDERED" if fresh else ("STALE_OUTPUT_NOT_RENDERED" if stale else "FAILED"),
            "returncode": p.returncode, "outputs": fresh, "stale_outputs": stale,
            "elapsed_s": round(time.time() - t0, 1), "log": str(logp)}
-    if not fresh:
+    if fresh:
+        warnings = []
+        if stale:
+            res["partial"] = True       # some comps rendered, others are last run's: never present that as all done
+            warnings.append("aerender did not rewrite these .mov files, they are from an earlier run: "
+                            + ", ".join(Path(f).name for f in stale))
+        if p.returncode:
+            res["partial"] = True
+            warnings.append(f"aerender exited with code {p.returncode}: some of the queue may not have rendered "
+                            f"({logp})")
+        if warnings:
+            res["warnings"] = warnings
+    else:
+        res["ok"] = False               # T2.2 exit-code rule: nothing rendered this run is a failure (exit 1)
         res["msg"] = ("aerender wrote no new .mov this run; " + (
             "these are from an earlier run, not this render: " + ", ".join(Path(f).name for f in stale)
             if stale else "check the log") + f" ({logp})")

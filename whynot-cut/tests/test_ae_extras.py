@@ -5,10 +5,14 @@ Run:  bash tools/test.sh -p test_ae_extras.py
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import argparse
+import importlib.util
+import io
 import json
 import os
 import shutil
 import subprocess
+import contextlib
 import tempfile
 import time
 import unittest
@@ -76,6 +80,29 @@ class TestExtrasFps(TempDir):
                 jsx = mogrt_builder.generate(p)
             self.assertAlmostEqual(nh_data(jsx)["fps"], want, places=3, msg=(tb, ntsc))
 
+    def test_the_rate_is_exact_not_rounded(self):
+        """30000/1001, not 29.97: After Effects gets the unrounded double (the Premiere sequence rate, frame for frame)."""
+        from lib import ae_builder
+        for tb, ntsc in ((30, True), (24, True), (60, True), (25, False)):
+            p = self.paths(tb, ntsc)
+            with common.use_context(common.Context(p.root)):
+                want = common.seq_fps()
+                res = ae_builder.generate(p)
+            self.assertEqual(nh_data(Path(res["jsx"]))["fps"], want, (tb, ntsc))
+        with common.use_context(common.Context(self.paths(30, True).root)):
+            self.assertAlmostEqual(ae_builder.comp_fps(), 30000 / 1001, places=12)
+
+    def test_mogrt_length_is_four_seconds_at_any_rate(self):
+        from lib import mogrt_builder
+        for tb, ntsc, frames in ((24, False, 96), (30, False, 120), (30, True, 120), (60, False, 240), (25, False, 100)):
+            p = self.paths(tb, ntsc)
+            with common.use_context(common.Context(p.root)):
+                jsx = mogrt_builder.generate(p)
+            data = nh_data(jsx)
+            self.assertEqual(data["mogrt_frames"], frames, (tb, ntsc))
+            self.assertAlmostEqual(data["mogrt_frames"] / data["fps"], 4.0, delta=0.02, msg=(tb, ntsc))
+        self.assertIn("Math.round(4 * NH.FPS)", LIB_JSX.read_text(encoding="utf-8"))   # the library's own default
+
     def test_a_plan_made_at_another_rate_is_flagged(self):
         from lib import ae_builder
         p = self.paths(25, False)
@@ -141,8 +168,9 @@ class AerenderCase(TempDir):
             os.utime(f, (t, t))
         return f
 
-    def render(self, writes=(), **kw):
-        """Render with a fake aerender that writes `writes` ((name, bytes) pairs) into compositions/."""
+    def render(self, writes=(), returncode: int = 0, **kw):
+        """Render with a fake aerender that writes `writes` ((name, bytes[, age_s]) tuples) into compositions/; age_s
+        sets that file's mtime that many seconds into the past (a copy, or a file server whose clock runs behind)."""
         from lib import ae_builder
         self.calls = []
 
@@ -150,9 +178,12 @@ class AerenderCase(TempDir):
             proj = Path(cmd[cmd.index("-project") + 1])
             self.calls.append({"cmd": list(cmd), "project": str(proj),
                                "project_bytes": proj.read_bytes() if proj.exists() else None})
-            for name, data in writes:
+            for name, data, *age in writes:
                 (self.comps / name).write_bytes(data)
-            return subprocess.CompletedProcess(cmd, 0, "", "")
+                if age:
+                    t = time.time() - age[0]
+                    os.utime(self.comps / name, (t, t))
+            return subprocess.CompletedProcess(cmd, returncode, "", "")
         with mock.patch.object(ae_builder, "run", run):
             return ae_builder.render(self.paths, **kw)
 
@@ -187,6 +218,50 @@ class TestFreshRenderOnly(AerenderCase):
         r = self.render()
         self.assertEqual(r["status"], "STALE_OUTPUT_NOT_RENDERED", r)
 
+    def test_a_stale_output_is_a_failed_result(self):
+        """T2.2: nothing rendered this run must not exit 0 (MI-13)."""
+        self.mov("GFX_001.mov", age_s=3600)
+        self.assertIs(self.render()["ok"], False)
+        self.assertIs(self.render([("GFX_009.mov", b"")])["ok"], False)
+
+    def test_a_clock_that_runs_behind_does_not_hide_a_changed_file(self):
+        """A file that existed before and was rewritten is fresh on the snapshot alone, whatever its mtime says."""
+        self.mov("GFX_001.mov", b"OLD", age_s=3600)
+        r = self.render([("GFX_001.mov", b"NEWER", 600)])        # server clock 10 minutes behind
+        self.assertEqual(r["status"], "RENDERED", r)
+        self.assertEqual([Path(x).name for x in r["outputs"]], ["GFX_001.mov"])
+
+    def test_a_new_file_within_the_clock_slack_counts(self):
+        r = self.render([("GFX_002.mov", b"x", 2)])               # 2 s behind: FAT granularity, NAS skew
+        self.assertEqual(r["status"], "RENDERED", r)
+
+    def test_a_new_file_with_an_old_mtime_is_a_copy_not_a_render(self):
+        r = self.render([("GFX_002.mov", b"x", 3600)])
+        self.assertEqual(r["status"], "STALE_OUTPUT_NOT_RENDERED", r)
+        self.assertEqual(r["outputs"], [])
+
+    def test_a_complete_render_is_not_partial(self):
+        r = self.render([("GFX_001.mov", b"x"), ("GFX_002.mov", b"y")])
+        self.assertEqual(r["status"], "RENDERED", r)
+        self.assertNotIn("partial", r)
+        self.assertNotIn("warnings", r)
+
+    def test_stale_siblings_make_it_partial(self):
+        self.mov("GFX_001.mov", age_s=3600)
+        r = self.render([("GFX_002.mov", b"new")])
+        self.assertEqual(r["status"], "RENDERED", r)
+        self.assertIs(r["partial"], True)
+        self.assertTrue(any("GFX_001.mov" in w for w in r["warnings"]), r["warnings"])
+
+    def test_a_nonzero_aerender_code_is_reflected(self):
+        r = self.render([("GFX_001.mov", b"x")], returncode=3)
+        self.assertEqual(r["status"], "RENDERED", r)
+        self.assertEqual(r["returncode"], 3)
+        self.assertIs(r["partial"], True)
+        self.assertTrue(any("code 3" in w for w in r["warnings"]), r["warnings"])
+        saved = json.loads(self.paths.p("04_after_effects/ae-render-result.json").read_text(encoding="utf-8"))
+        self.assertIn("warnings", saved)
+
     def test_an_empty_output_is_not_a_render(self):
         r = self.render([("GFX_001.mov", b"")])
         self.assertEqual(r["status"], "FAILED", r)
@@ -212,6 +287,107 @@ class TestFreshRenderOnly(AerenderCase):
         r = self.render([("GFX_001.mov", b"x")])
         self.assertEqual(r["status"], "REFUSED", r)
         self.assertEqual(self.calls, [])
+
+
+def cli_module():
+    spec = importlib.util.spec_from_file_location("reel_cli_t218", SK / "engine/reel/cli.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def run_cmd(fn, args):
+    """A cmd_* function in this process: (exit code, the JSON document it printed)."""
+    so, code = io.StringIO(), 0
+    with contextlib.redirect_stdout(so), contextlib.redirect_stderr(io.StringIO()):
+        try:
+            fn(args)
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+    return code, json.loads(so.getvalue())
+
+
+class TestExitCodes(AerenderCase):
+    """3.0 T2.2: `reel ae-render` / `reel ae-build` exit 1 when nothing was rendered or saved this run."""
+
+    def setUp(self):
+        super().setUp()
+        self.cli = cli_module()
+        self.args = argparse.Namespace(root=str(self.paths.root), video_id="V1", episode=None)
+        patcher = mock.patch.object(self.cli, "P", return_value=self.paths)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def render_cmd(self, writes=(), returncode=0):
+        from lib import ae_builder
+
+        def run(cmd, **_):
+            for n, d in writes:
+                (self.comps / n).write_bytes(d)
+            return subprocess.CompletedProcess(cmd, returncode, "", "")
+        with mock.patch.object(ae_builder, "run", run):
+            return run_cmd(self.cli.cmd_ae_render, self.args)
+
+    def test_ae_render_exits_1_when_only_stale_outputs_exist(self):
+        self.mov("GFX_001.mov", age_s=3600)
+        code, doc = self.render_cmd()
+        self.assertEqual(doc["status"], "STALE_OUTPUT_NOT_RENDERED")
+        self.assertEqual(code, 1)
+
+    def test_ae_render_exits_1_when_nothing_rendered(self):
+        code, doc = self.render_cmd()
+        self.assertEqual((doc["status"], code), ("FAILED", 1))
+
+    def test_ae_render_exits_0_when_rendered(self):
+        code, doc = self.render_cmd([("GFX_001.mov", b"x")])
+        self.assertEqual((doc["status"], code), ("RENDERED", 0))
+
+    def test_ae_render_partial_exits_0_but_says_so(self):
+        self.mov("GFX_001.mov", age_s=3600)
+        code, doc = self.render_cmd([("GFX_002.mov", b"x")])
+        self.assertEqual((code, doc["partial"]), (0, True))
+
+    def build_cmd(self, aep_age_s=None, rebuilds=False, plan_fps=None):
+        """cmd_ae_build with After Effects replaced: the .aep is `aep_age_s` old (None: absent), and `rebuilds` saves it."""
+        from lib import adobe_run
+        spec = {"fps": plan_fps or common.seq_fps(common.Context(self.paths.root)), "duration_frames": 240,
+                "events": [], "main_segments": []}
+        write_json(self.paths.p("01_analysis/timeline-spec.json"), spec)
+        self.aep.unlink()
+        if aep_age_s is not None:
+            self.aep.write_bytes(b"AEP")
+            t = time.time() - aep_age_s
+            os.utime(self.aep, (t, t))
+
+        def fake_ae(jsx, timeout, done=None):
+            if rebuilds:
+                self.aep.write_bytes(b"NEW")
+            return {"status": "DONE"}
+        with mock.patch.object(self.cli, "refuse_stale_window"), mock.patch.object(self.cli, "require_plan_approval"), \
+                mock.patch.object(adobe_run, "run_after_effects", fake_ae), \
+                common.use_context(common.Context(self.paths.root)):
+            return run_cmd(self.cli.cmd_ae_build, self.args)
+
+    def test_ae_build_exits_1_when_the_project_was_not_rebuilt(self):
+        code, doc = self.build_cmd(aep_age_s=3600)
+        self.assertEqual(doc["execute"]["status"], "STALE_AEP_NOT_REBUILT")
+        self.assertEqual((code, doc["ok"], doc["status"]), (1, False, "STALE_AEP_NOT_REBUILT"))
+
+    def test_ae_build_exits_1_when_no_project_exists(self):
+        code, doc = self.build_cmd()
+        self.assertEqual((doc["execute"]["status"], code), ("FAILED", 1))
+
+    def test_ae_build_exits_0_when_the_project_was_saved(self):
+        code, doc = self.build_cmd(rebuilds=True)
+        self.assertEqual((doc["execute"]["status"], code), ("AEP_CREATED", 0))
+        self.assertNotIn("ok", doc)
+
+    def test_a_plan_rate_mismatch_is_in_the_build_result_warnings(self):
+        code, doc = self.build_cmd(rebuilds=True, plan_fps=30.0)
+        self.assertEqual(code, 0)                                   # a warning, never a block
+        self.assertTrue(any("30" in w and "24" in w for w in doc["warnings"]), doc["warnings"])
+        code, doc = self.build_cmd(rebuilds=True)
+        self.assertEqual(doc["warnings"], [])
 
 
 class TestAsciiStaging(AerenderCase):

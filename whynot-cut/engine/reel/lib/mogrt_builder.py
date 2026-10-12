@@ -23,9 +23,11 @@ def mogrt_dir(paths: Paths) -> Path:
 def generate(paths: Paths) -> Path:
     d = mogrt_dir(paths)
     d.mkdir(parents=True, exist_ok=True)
-    data = {"fps": comp_fps(), "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
+    fps = comp_fps()
+    data = {"fps": fps, "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
             "templates": load_config("graphics-templates.json")["templates"], "events": [], "captions": None,
-            "mogrt_dir": str(d), "mogrt_frames": 96, "aep_path": str(d / "NH_MOGRT_TEMPLATES.aep"),
+            "mogrt_dir": str(d), "mogrt_frames": round(4 * fps),   # 4.0 s at any rate (96 only at 24 fps)
+            "aep_path": str(d / "NH_MOGRT_TEMPLATES.aep"),
             "new_project": True, "render_template": "High Quality with Alpha", "render_dir": str(d), "logo": None}
     lib = (TEMPLATES_DIR / "after_effects/nh_ae_lib.jsx").read_text(encoding="utf-8")
     js = ("// AUTO-GENERATED MOGRT build — " + now_iso() + "\nvar NH_DATA = " + json.dumps(data, ensure_ascii=True) +

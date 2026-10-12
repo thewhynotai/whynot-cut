@@ -528,7 +528,11 @@ def cmd_ae_build(a):
     require_plan_approval(p)
     g = generate(p)
     r = execute(p, Path(g["jsx"]))
-    out({"generate": g, "execute": r})
+    doc = {"generate": g, "execute": r, "warnings": list(g.get("warnings") or [])}
+    if r.get("ok") is False:                    # T2.2: a build that saved no project this run exits 1, not 0
+        doc["ok"] = False
+        doc["status"] = r.get("status")
+    out(doc)
 
 
 def cmd_ae_render(a):

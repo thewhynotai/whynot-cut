@@ -589,7 +589,7 @@ NH.buildMogrts = function () {
     app.beginUndoGroup("NH mogrts");
     if (NH_DATA.new_project) { app.newProject(); }
     NH.BRAND_SCOPE = "local";
-    var made = [], tpls = NH_DATA.templates, dur = NH_DATA.mogrt_frames || 96;
+    var made = [], tpls = NH_DATA.templates, dur = NH_DATA.mogrt_frames || Math.round(4 * NH.FPS);   // 4 s at the profile rate
     var names = ["hook_title", "term_callout", "glass_card", "name_card", "cta", "checklist"];
     for (var i = 0; i < names.length; i++) {
         var key = names[i], t = tpls[key];
