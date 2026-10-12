@@ -1179,5 +1179,92 @@ class TestBenchHint(_Home):
         self.assertEqual(r["key"], "ct2/large-v3/cuda/batch4/hint")
 
 
+# --------------------------------------------------------------------------- review round 3: reels carry their own drops
+class TestReelDrops(unittest.TestCase):
+    """A reel sliced from an episode lists only the drops inside its window, on reel ids and the reel clock, and
+    `"restore"` on the reel brings back exactly those words."""
+
+    def setUp(self):
+        from lib.episode import EpisodePaths
+        from lib.reels import slice_transcript
+        from lib.transcribe import finalize
+        self.tmp = Path(tempfile.mkdtemp(prefix="whynot-t212-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        root = self.tmp / "C"
+        (root / "assets").mkdir(parents=True)
+        (root / "data").mkdir()
+        self.ep = EpisodePaths(root, "EP12")
+        self.ep.ensure_project()
+        rows = [(1, "طيب", 0, 400), (1, "اشتركوا", 1000, 1100), (1, "في", 1100, 1200), (1, "القناة", 1200, 1300),
+                (2, "كلام", 10200, 10600), (2, "تاني", 11000, 11400), (2, "شكرا", 12000, 12100),
+                (2, "على", 12100, 12200), (2, "المشاهدة", 12200, 12300), (2, "خلاص", 13000, 13400),
+                (3, "بعدين", 25000, 25400)]
+        words = [{"id": i + 1, "segment_id": sid, "word": w, "start_ms": a, "end_ms": b, "probability": 0.9}
+                 for i, (sid, w, a, b) in enumerate(rows)]
+        segs = []
+        for sid in (1, 2, 3):
+            ws = [w for w in words if w["segment_id"] == sid]
+            segs.append({"id": sid, "start_ms": ws[0]["start_ms"], "end_ms": ws[-1]["end_ms"],
+                         "text": " ".join(w["word"] for w in ws), "avg_logprob": -0.2, "no_speech_prob": 0.1,
+                         "compression_ratio": 1.2, "words": [w["id"] for w in ws]})
+        finalize(self.ep, {"source_video": "EP12.mp4", "backend": "test", "model": "none", "language": "ar",
+                           "language_probability": 1.0, "duration_ms": 30000}, segs, words)
+        self.assertEqual(len(read_json(self.ep.p("02_transcription/transcript.json"))["meta"]["dropped_hallucinations"]), 2)
+        self.reel = Paths(root, "EP12_R01")
+        self.reel.ensure_project()
+        slice_transcript(self.ep, self.reel, 10000, 20000)
+
+    def words(self):
+        return [(w["id"], w["word"], w["start_ms"]) for w in read_json(self.reel.p("02_transcription/words.json"))["words"]]
+
+    def restore(self, value):
+        from lib.transcribe import apply_corrections
+        write_json(self.reel.p("02_transcription/transcript-corrections.json"), {"corrections": [], "restore": value})
+        return apply_corrections(self.reel)
+
+    def test_reel_lists_only_its_own_drops_on_reel_ids_and_clock(self):
+        dh = read_json(self.reel.p("02_transcription/transcript.json"))["meta"]["dropped_hallucinations"]
+        self.assertEqual(len(dh), 1)
+        self.assertEqual(dh[0]["text"], "شكرا على المشاهدة")
+        self.assertEqual([(w["id"], w["start_ms"], w["episode_word_id"]) for w in dh[0]["words"]],
+                         [(3, 2000, 7), (4, 2100, 8), (5, 2200, 9)])
+        self.assertEqual((dh[0]["start_ms"], dh[0]["end_ms"]), (2000, 2300))
+        self.assertEqual(self.words(), [(1, "كلام", 200), (2, "تاني", 1000), (6, "خلاص", 3000)])
+        review = self.reel.p("02_transcription/subtitle-review.md").read_text(encoding="utf-8")
+        self.assertIn("Dropped Whisper hallucinations — 1", review)
+        self.assertNotIn("اشتركوا", review)
+
+    def test_restore_on_the_reel_brings_back_the_right_words(self):
+        r = self.restore([3])
+        self.assertEqual(r["restored"], [3, 4, 5])
+        self.assertEqual(r["problems"], [])
+        self.assertEqual(self.words(), [(1, "كلام", 200), (2, "تاني", 1000), (3, "شكرا", 2000), (4, "على", 2100),
+                                        (5, "المشاهدة", 2200), (6, "خلاص", 3000)])
+        tj = read_json(self.reel.p("02_transcription/transcript.json"))
+        self.assertEqual(tj["segments"][0]["text"], "كلام تاني شكرا على المشاهدة خلاص")
+
+    def test_an_episode_id_or_kept_word_is_not_restored(self):
+        r = self.restore([2, 9])
+        self.assertEqual(r["restored"], [])
+        self.assertEqual(len(r["problems"]), 2)
+        self.assertIn("not a dropped word of this transcript", r["problems"][0])
+        self.assertEqual(self.words(), [(1, "كلام", 200), (2, "تاني", 1000), (6, "خلاص", 3000)])
+
+    def test_a_stale_word_is_reported_not_applied(self):
+        r = self.restore([{"word_id": 3, "word": "اشتركوا"}])
+        self.assertEqual(r["restored"], [])
+        self.assertIn("not «اشتركوا»", r["problems"][0])
+        self.assertEqual(self.restore([{"word_id": 3, "word": "شكرا"}])["restored"], [3, 4, 5])
+
+    def test_a_malformed_restore_is_a_clear_error(self):
+        for bad in ("3", {"ids": [3]}, ["three"], [True]):
+            with self.assertRaises(ValueError) as cm:
+                self.restore(bad)
+            self.assertIn("restore", str(cm.exception))
+
+    def test_large_alias_needs_the_128_mel_config(self):
+        self.assertIn("preprocessor_config.json", WB._ct2_needs("large"))
+
+
 if __name__ == "__main__":
     unittest.main()

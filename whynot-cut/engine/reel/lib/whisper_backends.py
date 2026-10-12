@@ -183,9 +183,9 @@ def _snapshot(repo: str | None, need: list, min_bytes: int, any_of: list | None 
 
 
 def _ct2_needs(model: str) -> list:
-    # the 128-mel models (large-v3, large-v3-turbo / turbo, distil-large-v3 and later): without
+    # the 128-mel models (large / large-v3, large-v3-turbo / turbo, distil-large-v3 and later): without
     # preprocessor_config.json faster-whisper silently falls back to 80 mel bins and transcribes garbage
-    mel128 = "large-v3" in model or model == "turbo"
+    mel128 = "large-v3" in model or model in ("turbo", "large")       # faster-whisper's "large" = large-v3
     return ["config.json", "tokenizer.json"] + (["preprocessor_config.json"] if mel128 else [])
 
 

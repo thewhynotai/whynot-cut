@@ -522,7 +522,7 @@ def apply_corrections(paths: Paths) -> dict:
     wj = read_json(out / "words.machine.json")
     words = {w["id"]: dict(w) for w in wj["words"]}
     applied, problems, reanchored = [], [], []
-    restored = _restore_dropped(tj, words, corr.get("restore") or [])
+    restored, problems = _restore_dropped(tj, words, corr.get("restore") or [])
 
     def anchor(item, key="from"):
         """The correction's word: by id when it still says `from`; after a re-transcription (new range, new model) the
@@ -595,16 +595,45 @@ def apply_corrections(paths: Paths) -> dict:
                 restored=restored)
 
 
-def _restore_dropped(tj: dict, words: dict, restore) -> list:
+def _restore_dropped(tj: dict, words: dict, restore) -> tuple[list, list]:
     """Bring back words the hallucination filter dropped (G53) that the editor heard as real speech: `"restore":
-    [word ids]` or `"all"` in transcript-corrections.json. They return with `restored: true`, so finalize never
-    drops them again; a whole dropped segment comes back as it was."""
+    [word ids]` (or `[{"word_id": N, "word": "..."}]`, which also checks the word) or `"all"` in
+    transcript-corrections.json. Only ids of THIS transcript's drop list count (a reel lists its own drops, on its own
+    ids and clock). They return with `restored: true`, so finalize never drops them again; a whole dropped segment
+    comes back as it was. Returns (restored ids, problems): an unknown or stale id, a word that no longer reads as
+    written (after a re-transcription) or a drop whose ids are now used by other words is reported, not applied."""
     if not restore:
-        return []
+        return [], []
+    if restore != "all" and not isinstance(restore, list):
+        raise ValueError('transcript-corrections.json "restore" must be a list of word ids (or "all"), got '
+                         f"{type(restore).__name__}")
+    entries = tj["meta"].get("dropped_hallucinations") or []
+    by_id = {w["id"]: (e, w) for e in entries for w in e.get("words") or []}
+    want, problems = set(), []
+    for item in ([] if restore == "all" else restore):
+        wid = item.get("word_id") if isinstance(item, dict) else item
+        if isinstance(wid, bool) or not isinstance(wid, int):
+            raise ValueError(f'transcript-corrections.json "restore": {item!r} is not a word id (a number, or '
+                             '{"word_id": N, "word": "..."})')
+        hit = by_id.get(wid)
+        if hit is None:
+            problems.append(f"restore: word {wid} is not a dropped word of this transcript (dropped ids: "
+                            f"{sorted(by_id) or 'none'}); not applied")
+            continue
+        said = item.get("word") if isinstance(item, dict) else None
+        if said is not None and said != hit[1]["word"]:
+            problems.append(f"restore: word {wid} is now «{hit[1]['word']}», not «{said}» (re-transcribed?); not applied")
+            continue
+        want.add(wid)
     back = []
-    for e in tj["meta"].get("dropped_hallucinations") or []:
+    for e in entries:
         ids = [w["id"] for w in e.get("words") or []]
-        if not ids or not (restore == "all" or any(i in restore for i in ids)):
+        if not ids or not (restore == "all" or want & set(ids)):
+            continue
+        taken = [i for i in ids if i in words]
+        if taken:
+            problems.append(f"restore: «{e.get('text')}» cannot come back: its word ids {taken} now belong to other "
+                            "words (re-transcribed?); not applied")
             continue
         for w in e["words"]:
             words[w["id"]] = dict(w, restored=True)
@@ -619,7 +648,7 @@ def _restore_dropped(tj: dict, words: dict, restore) -> list:
         e["restored"] = True
         back += ids
     tj["segments"].sort(key=lambda x: x["start_ms"])
-    return back
+    return back, problems
 
 
 def words_fingerprint(paths: Paths) -> str:

@@ -27,6 +27,9 @@
   in `02_transcription/dropped-hallucinations.json`) come back with `"restore": [ids]` in
   transcript-corrections.json; a re-decoded batched segment is padded into the silence around it so its first
   and last words are not clipped.
+  Review round 3: a reel cut from an episode lists only the dropped phrases inside its window, on the reel's
+  own word ids and clock; `"restore"` accepts only ids of that list (unknown or stale ids are reported, not
+  applied; a malformed value is a clear error).
 - Positive client-folder marker (structure 4.1): `reel scaffold` and `reel client-init` write `.whynot-client`
   (`{"whynot_client": 1, "created": ...}`) at the client root; `reel doctor --fix` writes it for an existing client that
   lacks it (only at the client root, never in `assets/` or `data/`). New `lib/client_marker.py` (stdlib only) is shared

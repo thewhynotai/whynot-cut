@@ -416,13 +416,27 @@ def slice_transcript(ep, reel, in_ms: int, out_ms: int) -> dict:
     from .transcribe import finalize, transcript_verified, words_fingerprint
     wj, tj = read_json(ep.p("02_transcription/words.json")), read_json(ep.p("02_transcription/transcript.json"))
     dur = out_ms - in_ms
-    words, seg_of = [], {}
-    for w in wj["words"]:
-        if w["start_ms"] >= in_ms - 50 and w["end_ms"] <= out_ms + 50:
-            nw = dict(w, id=len(words) + 1, episode_word_id=w["id"], start_ms=max(0, w["start_ms"] - in_ms),
-                      end_ms=min(dur, w["end_ms"] - in_ms))
+
+    def inside(w):
+        return w["start_ms"] >= in_ms - 50 and w["end_ms"] <= out_ms + 50
+
+    def on_reel(w, wid):
+        return dict(w, id=wid, episode_word_id=w["id"], start_ms=max(0, w["start_ms"] - in_ms),
+                    end_ms=min(dur, w["end_ms"] - in_ms))
+    # G53 drops of the episode that lie wholly inside this window (not those the editor already restored): they are
+    # renumbered with the kept words in time order, so a reel's `"restore": [ids]` names reel ids on the reel clock
+    drops = [e for e in tj["meta"].get("dropped_hallucinations") or []
+             if not e.get("restored") and e.get("words") and all(inside(w) for w in e["words"])]
+    timeline = [(w["start_ms"], w["id"], w, None) for w in wj["words"] if inside(w)]
+    timeline += [(w["start_ms"], w["id"], w, k) for k, e in enumerate(drops) for w in e["words"]]
+    words, seg_of, dropped_words = [], {}, {}
+    for n, (_t, _i, w, k) in enumerate(sorted(timeline, key=lambda x: (x[0], x[1])), 1):
+        nw = on_reel(w, n)
+        if k is None:
             words.append(nw)
             seg_of.setdefault(w.get("segment_id"), []).append(nw)
+        else:
+            dropped_words.setdefault(k, []).append(nw)
     src_segs = {s["id"]: s for s in tj["segments"]}
     segs = []
     for sid, ws in seg_of.items():
@@ -434,7 +448,26 @@ def slice_transcript(ep, reel, in_ms: int, out_ms: int) -> dict:
         for w in ws:
             w["segment_id"] = seg["id"]
         segs.append(seg)
-    meta = {k: v for k, v in tj["meta"].items() if k not in ("chunks", "scripts", "corrections_applied", "corrections_file")}
+    reel_seg = {s["episode_segment_id"]: s["id"] for s in segs}
+    next_seg = len(segs)
+    reel_drops = []
+    for k, e in enumerate(drops):
+        ws, sid = dropped_words.get(k, []), e.get("segment_id")
+        if sid not in reel_seg:            # its episode segment has no kept word here: restore re-creates it
+            next_seg += 1
+            reel_seg[sid] = next_seg
+        for w in ws:
+            w["segment_id"] = reel_seg[sid]
+        src = e.get("segment") or {}
+        seg = dict(src, id=reel_seg[sid], episode_segment_id=sid, words=[w["id"] for w in ws],
+                   start_ms=max(0, src.get("start_ms", ws[0]["start_ms"] + in_ms) - in_ms),
+                   end_ms=min(dur, src.get("end_ms", ws[-1]["end_ms"] + in_ms) - in_ms))
+        reel_drops.append(dict(e, words=ws, segment_id=reel_seg[sid], segment=seg, start_ms=ws[0]["start_ms"],
+                               end_ms=ws[-1]["end_ms"]))
+    meta = {k: v for k, v in tj["meta"].items()
+            if k not in ("chunks", "scripts", "corrections_applied", "corrections_file", "dropped_hallucinations")}
+    if reel_drops:
+        meta["dropped_hallucinations"] = reel_drops
     meta.update({"duration_ms": dur, "offset_ms": in_ms, "sliced_from": f"episode {ep.episode_id}",
                  "episode_transcript": str(ep.p("02_transcription/transcript.json"))})
     out = reel.p("02_transcription")

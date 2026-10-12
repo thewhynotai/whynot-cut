@@ -74,7 +74,9 @@ evidence: more than 6 words a second, or a short run (≤ 1.5 s) the model was u
 both sides. A real outro said at a normal pace stays, even under music.
 If the speaker really said a dropped phrase (check by ear): put its word ids (listed in the review and in
 `02_transcription/dropped-hallucinations.json`) in transcript-corrections.json as `"restore": [ids]` (or `"all"`) and
-run `reel transcript-correct`; restored words are never dropped again. For a phrase this client really uses (a host who
+run `reel transcript-correct`; restored words are never dropped again. Only ids from this transcript's own drop list
+count (a reel cut from an episode lists only the drops inside its window, on its own ids); an unknown or stale id is
+reported under PROBLEM and not applied (`{"word_id": N, "word": "..."}` also checks the word). For a phrase this client really uses (a host who
 always says «اشتركوا في القناة»), add it to `keep_phrases` in the client's reel-profile `transcription.json`.
 
 ## Cues and RTL
