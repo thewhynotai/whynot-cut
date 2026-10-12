@@ -15,6 +15,19 @@ export async function readText(fs: UxpFs, path: string): Promise<string> {
   return typeof data === "string" ? data : new TextDecoder().decode(data);
 }
 
+/** Binary read: no encoding, so UXP answers an ArrayBuffer (a Node Buffer in tests). */
+export async function readBytes(fs: UxpFs, path: string): Promise<ArrayBuffer> {
+  const data = await fsCall<ArrayBuffer | ArrayBufferView | string>(fs, "readFile", path);
+  if (typeof data === "string") throw new Error("fs.readFile without an encoding returned text, not bytes");
+  if (data instanceof ArrayBuffer) return data;
+  const v = data as ArrayBufferView;
+  return v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) as ArrayBuffer;
+}
+
+export async function writeBytes(fs: UxpFs, path: string, data: ArrayBuffer): Promise<void> {
+  await fsCall(fs, "writeFile", path, data);
+}
+
 export async function writeText(fs: UxpFs, path: string, text: string): Promise<void> {
   await fsCall(fs, "writeFile", path, text, { encoding: "utf-8" });
 }

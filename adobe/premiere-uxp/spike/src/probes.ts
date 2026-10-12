@@ -12,10 +12,13 @@ import type {
   VideoComponentChain,
   premierepro as Ppro,
 } from "@adobe/premierepro";
-import { baseName, ensureDir, readText, statOf, writeText } from "./fsutil.ts";
+import { baseName, ensureDir, readBytes, readText, statOf, writeBytes, writeText } from "./fsutil.ts";
 import { toForwardSlashes } from "./home.ts";
 import { cleanPath, isUnder, normPath, scratchPathProblem } from "./safety.ts";
 import { jsonSafe, type ProbeDef, type ProbeOutcome } from "./runner.ts";
+import { SPIKE_VERSION } from "./version.ts";
+import { redact, sleepMs, WsSession, type WsCtor } from "./ws-link.ts";
+import { nativePath } from "../../src/uxp-host.ts";
 import type { UxpFs, UxpModule, UxpOs } from "../../src/uxp-types.ts";
 
 /** The product's undo label. In the spike ONLY undo_transaction uses it (see txLabel). */
@@ -33,8 +36,11 @@ export const skipSaveCloseOpen = { value: false };
 export interface SpikeConfig {
   xml_path: string;
   work_dir: string;
-  ws_url?: string;
+  /** 0.1.3: no longer used - ws_loopback reads the port and token from ~/.whynot-cut/bridge/engine.json (still validated as loopback) */
+  ws_url?: string | null;
   still_png?: string;
+  /** 0.1.3: a short mp4/mov under whynot-test/ that host_calls copies into work_dir (SourceMonitor / shell.openPath targets) */
+  mp4_source?: string;
   /** opt-in: try EncoderManager.exportSequence (may start Media Encoder) */
   encoder_export?: boolean;
 }
@@ -61,7 +67,7 @@ export interface Ctx {
   target?: TargetClip;
   /** set by export_frame when a form worked: exports one frame at a sequence time (used by keyframe_time_basis) */
   /** test hook: shorter polling for export_frame (defaults 1.5 s after a `false` return, 10 s after `true` / the d.ts forms) */
-  timing?: { shortPollMs?: number; longPollMs?: number };
+  timing?: { shortPollMs?: number; longPollMs?: number; wsIdleMs?: number; wsRetryMs?: number; wsReplyMs?: number; shellTimeoutMs?: number };
   exportFrameTo?: (t: number, base: string) => Promise<{ path: string; found: boolean; bytes: number | null; returned: unknown }>;
   /** what later probes expect to find again after save/close/open */
   expect: { videoTrackName?: string; renamedVideoTrackName?: string; markerCount?: number; sequenceName?: string };
@@ -90,9 +96,36 @@ interface StepRecord {
   error?: string;
 }
 
+/** One host call with its own ms clock: lets a modal dialog ("Project Modified") be attributed to the call that raised it. */
+interface CallRecord {
+  call: string;
+  /** ISO start time with milliseconds */
+  at: string;
+  /** the same instant as epoch ms (sortable, comparable with the clock time Yunus notes) */
+  at_ms: number;
+  ms: number;
+  ok: boolean;
+  returned?: boolean | string | number;
+  error?: string;
+}
+
 /** Sub-steps inside one probe: each in its own try/catch so one failure still shows what the rest did. */
 class Steps {
   readonly steps: StepRecord[] = [];
+  readonly calls: CallRecord[] = [];
+  /** Time one call (sync or async); the record is kept whether it returns or throws, and a throw still propagates. */
+  async stamp<T>(call: string, fn: () => T | Promise<T>): Promise<T> {
+    const t0 = Date.now();
+    const base = { call, at: new Date(t0).toISOString(), at_ms: t0 };
+    try {
+      const v = await fn();
+      this.calls.push({ ...base, ms: Date.now() - t0, ok: true, ...(typeof v === "boolean" || typeof v === "string" || typeof v === "number" ? { returned: v } : {}) });
+      return v;
+    } catch (e) {
+      this.calls.push({ ...base, ms: Date.now() - t0, ok: false, error: errText(e) });
+      throw e;
+    }
+  }
   async run<T>(step: string, fn: () => Promise<T>): Promise<T | undefined> {
     const t0 = Date.now();
     try {
@@ -107,7 +140,7 @@ class Steps {
     }
   }
   outcome(extra: Record<string, unknown> = {}): ProbeOutcome {
-    return { ok: this.steps.length > 0 && this.steps.every((s) => s.ok), detail: { ...extra, steps: this.steps } };
+    return { ok: this.steps.length > 0 && this.steps.every((s) => s.ok), detail: { ...extra, steps: this.steps, ...(this.calls.length ? { calls: this.calls } : {}) } };
   }
 }
 
@@ -393,53 +426,194 @@ const hostInfo: ProbeDef<Ctx> = {
   },
 };
 
+/** The daemon's own idle rule (reel serve, ws.py IDLE_TIMEOUT): a ping after 30 s of silence, a close after 60 s without an answer. */
+const DAEMON_IDLE_TIMEOUT_S = 60;
+
 const wsLoopback: ProbeDef<Ctx> = {
   op: "ws_loopback",
-  timeoutMs: 20_000,
+  // engine.json retries (0.5 s) + http + connect + hello + snapshot + 70 s idle + a second snapshot + close
+  timeoutMs: 150_000,
   run: async (ctx) => {
-    const url = ctx.config?.ws_url;
-    if (!url) return { ok: null, detail: "pending reel serve (T6.2)" };
-    const WS = (globalThis as { WebSocket?: new (url: string) => WebSocket }).WebSocket;
-    expect(WS, "no WebSocket global in this UXP runtime");
-    const t0 = Date.now();
-    return await new Promise<ProbeOutcome>((resolve) => {
-      const detail: Record<string, unknown> = { url };
-      let settled = false;
-      const done = (ok: boolean, extra: Record<string, unknown>) => {
-        if (settled) return;
-        settled = true;
+    const steps = new Steps();
+    const replyMs = ctx.timing?.wsReplyMs ?? 5000;
+    const idleMs = ctx.timing?.wsIdleMs ?? 70_000;
+    const startedMs = Date.now();
+    const head: Record<string, unknown> = { started_at: new Date(startedMs).toISOString(), started_epoch_ms: startedMs };
+
+    // 1. engine.json: where the daemon says it listens. Only its length is recorded for the token.
+    let token = "";
+    const eng = await steps.run("engine.json (read; the token's length only)", async () => {
+      expect(ctx.home, "no home folder: cannot locate ~/.whynot-cut/bridge/engine.json");
+      const path = `${ctx.home}/.whynot-cut/bridge/engine.json`;
+      const retryMs = ctx.timing?.wsRetryMs ?? 100;
+      let last = "";
+      for (let attempt = 1; attempt <= 5; attempt++) {
         try {
-          ws.close();
-        } catch {
-          // ignore
+          const parsed = JSON.parse(await readText(ctx.fs, path)) as Record<string, unknown>;
+          const port = parsed.port;
+          const tok = parsed.token;
+          if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`engine.json has no valid port (keys: ${Object.keys(parsed).join(", ")})`);
+          if (typeof tok !== "string" || tok === "") throw new Error(`engine.json has no token (keys: ${Object.keys(parsed).join(", ")})`);
+          token = tok;
+          return {
+            path,
+            attempts: attempt,
+            keys: Object.keys(parsed),
+            port,
+            pid: parsed.pid ?? null,
+            version: parsed.version ?? null,
+            protocol: parsed.protocol ?? null,
+            engine_home: typeof parsed.home === "string" ? parsed.home : null,
+            token_read: true,
+            token_length: tok.length,
+            token_shape_ok: /^[0-9a-f]{64}$/.test(tok),
+          };
+        } catch (e) {
+          last = errText(e);
+          if (attempt < 5) await sleepMs(retryMs);
         }
-        resolve({ ok, detail: { ...detail, ...extra, total_ms: Date.now() - t0 } });
-      };
-      const ws = new WS(url);
-      const timer = setTimeout(() => done(false, { error: "no open/reply within 8 s", opened: detail.opened === true }), 8000);
-      ws.onopen = () => {
-        detail.opened = true;
-        detail.connect_ms = Date.now() - t0;
-        ws.send(JSON.stringify({ protocol: 4, id: "spike-ping", action: "ping", data: {}, expires_at: Date.now() / 1000 + 30 }));
-        // a reply is a bonus; opening the loopback socket is the thing under test
-        setTimeout(() => {
-          clearTimeout(timer);
-          done(true, { reply: null, note: "opened, no reply within 2 s (server may not echo)" });
-        }, 2000);
-      };
-      ws.onmessage = (ev) => {
-        clearTimeout(timer);
-        done(true, { reply: String((ev as MessageEvent).data).slice(0, 500), round_trip_ms: Date.now() - t0 });
-      };
-      ws.onerror = (ev) => {
-        clearTimeout(timer);
-        done(false, { error: "websocket error", event: String((ev as { message?: string }).message ?? "error") });
-      };
-      ws.onclose = (ev) => {
-        clearTimeout(timer);
-        done(detail.opened === true, { closed: true, code: (ev as CloseEvent).code, reason: (ev as CloseEvent).reason });
-      };
+      }
+      return failWith(`engine.json not found or unusable after 5 attempts: ${redact(last, token)} (is reel serve running? start it with: reel serve --ensure)`, { path, attempts: 5 });
     });
+    const audit = eng?.engine_home ? `${eng.engine_home}/logs/serve-audit.log` : `${ctx.home}/.whynot-cut/logs/serve-audit.log`;
+    Object.assign(head, { audit_log: audit, how_to_read_origin: `find the "origin" row of ${audit} whose time is within a second of the connect step's started_at: its "reason" is the exact Origin header UXP sent` });
+    if (!eng) return steps.outcome(head);
+    const base = `127.0.0.1:${eng.port}`;
+    head.url = `ws://${base}/session`;
+
+    // 2. HTTP side (informational): the Origin of a UXP fetch is audited the same way
+    await steps.run("http: fetch /status with the bearer token (informational)", async () => {
+      const f = (globalThis as { fetch?: (url: string, init?: unknown) => Promise<{ status: number; json: () => Promise<unknown> }> }).fetch;
+      if (typeof f !== "function") return { fetch: typeof f, note: "no fetch in this runtime" };
+      const out: Record<string, unknown> = { url: `http://${base}/status`, started_at: new Date().toISOString() };
+      try {
+        const res = await Promise.race([
+          f(`http://${base}/status`, { headers: { Authorization: `Bearer ${token}` } }),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error("fetch timed out after 5 s")), 5000)),
+        ]);
+        out.status = res.status;
+        try {
+          const body = (await res.json()) as unknown;
+          out.body_keys = body && typeof body === "object" ? Object.keys(body) : [];
+        } catch (e) {
+          out.body_error = redact(errText(e), token);
+        }
+      } catch (e) {
+        out.error = redact(errText(e), token);
+      }
+      return out;
+    });
+
+    // 3. the WebSocket
+    const WS = (globalThis as { WebSocket?: WsCtor }).WebSocket;
+    const link: { session?: WsSession } = {};
+    try {
+      await (async () => {
+      const connected = await steps.run("connect: ws://127.0.0.1:<port>/session (the daemon audits the Origin now)", async () => {
+        expect(WS, "no WebSocket global in this UXP runtime");
+        const connectStartedAt = new Date().toISOString();
+        head.connect_started_at = connectStartedAt;
+        const s = new WsSession(`ws://${base}/session`, WS);
+        link.session = s;
+        const r = await s.wait(() => (s.opened ? "open" : s.closed ? "closed" : undefined), 8000);
+        const info = {
+          started_at: connectStartedAt,
+          opened: s.opened,
+          connect_ms: s.openAtMs,
+          error_events: s.errorEvents,
+          close_code: s.closed?.code ?? null,
+          close_reason: s.closed?.reason ?? null,
+          ready_state: s.ws.readyState,
+          ws_protocol: s.ws.protocol ?? null,
+          ws_extensions: s.ws.extensions ?? null,
+          ws_url: s.ws.url ?? null,
+        };
+        if (r !== "open") {
+          const why = r === "closed" ? "the socket closed before it opened" : "no open within 8 s";
+          failWith(`WebSocket did not open: ${why}. A refused upgrade (for example HTTP 403 for an Origin the daemon rejects) shows here only as an error event and close 1006: read the daemon's audit log for the Origin it saw`, info);
+        }
+        return info;
+      });
+      const s = link.session;
+      if (!connected || !s) return;
+
+      // 4. hello -> welcome
+      const welcome = await steps.run("hello -> welcome (first message, kind uxp, protocol 4)", async () => {
+        const t0 = Date.now();
+        const host = ctx.uxp.host;
+        s.send({ type: "hello", token, client: { kind: "uxp", version: SPIKE_VERSION, host: "premiere", ...(host?.version ? { hostVersion: host.version } : {}), protocol: 4, capabilities: [] } });
+        const m = await s.next(["welcome", "error"], replyMs);
+        if (m === "timeout" || m === "closed") {
+          return failWith(m === "closed" ? "the daemon closed the socket after hello" : `no welcome or error within ${replyMs} ms`, { welcome_type: m, ...(s.closed ? { close_code: s.closed.code, close_reason: redact(s.closed.reason, token) } : {}) });
+        }
+        const d = (m.data ?? {}) as Record<string, unknown>;
+        if (m.type === "error") {
+          return failWith(`the daemon answered the hello with an error (${String(d.code)})`, { welcome_type: "error", error_code: String(d.code), error_message: redact(String(d.message ?? ""), token), round_trip_ms: Date.now() - t0 });
+        }
+        return { welcome_type: "welcome", session_id: d.session_id ?? null, protocol: d.protocol ?? null, daemon_version: d.daemon_version ?? null, round_trip_ms: Date.now() - t0 };
+      });
+      if (!welcome) return;
+
+      // 5. snapshot -> state
+      const snapshot = async (id: string, label: string) => {
+        const t0 = Date.now();
+        s.send({ type: "snapshot", id });
+        const m = await s.next(["state", "error"], replyMs);
+        if (m === "timeout" || m === "closed") {
+          return failWith(m === "closed" ? `the daemon closed the socket after ${label}` : `no state within ${replyMs} ms of ${label}`, { state_type: m, ...(s.closed ? { close_code: s.closed.code, close_reason: redact(s.closed.reason, token) } : {}) });
+        }
+        const d = (m.data ?? {}) as Record<string, unknown>;
+        if (m.type === "error") {
+          return failWith(`the daemon answered ${label} with an error (${String(d.code)})`, { state_type: "error", error_code: String(d.code), error_message: redact(String(d.message ?? ""), token) });
+        }
+        const state = (d.state ?? {}) as Record<string, unknown>;
+        return { state_type: "state", round_trip_ms: Date.now() - t0, id_echoed: d.id === id, state_keys: Object.keys(state), state_connection: state.connection ?? null, state_bytes: m.raw_length };
+      };
+      const snap = await steps.run("snapshot -> state", () => snapshot("spike-snap-1", "the snapshot"));
+      if (!snap) return;
+
+      // 6. 70 s of silence: the daemon pings after 30 s and closes after 60 s. JS cannot see ping frames; the socket
+      // still being open after the daemon's idle timeout proves the host answered with a pong.
+      await steps.run("idle: stay silent (daemon pings after 30 s, closes after 60 s) -> keepalive", async () => {
+        const idleStart = Date.now();
+        const sinceMs = idleStart - s.created;
+        await s.wait(() => (s.closed ? true : undefined), idleMs);
+        const heldMs = Date.now() - idleStart;
+        const common = {
+          idle_ms_planned: idleMs,
+          held_ms: heldMs,
+          daemon_idle_timeout_s: DAEMON_IDLE_TIMEOUT_S,
+          longer_than_daemon_idle_timeout: heldMs / 1000 > DAEMON_IDLE_TIMEOUT_S,
+          messages_during_idle: s.typesSince(sinceMs),
+          note: "protocol ping frames are invisible to JS; staying open past the daemon's idle timeout means the UXP socket answered them with pongs",
+        };
+        if (s.closed) {
+          return failWith(`the daemon closed the socket ${heldMs} ms into the idle (code ${s.closed.code})`, { ...common, closed: true, closed_after_idle_ms: heldMs, close_code: s.closed.code, close_reason: redact(s.closed.reason, token) });
+        }
+        const after = await snapshot("spike-snap-2", "the post-idle snapshot").then(
+          (i) => ({ ...i, post_idle_state_ok: true as const }),
+          (e: unknown) => ({ post_idle_state_ok: false as const, post_idle_error: redact(errText(e), token), ...((e as { info?: object }).info ?? {}) }),
+        );
+        const info = { ...common, closed: false, open_at_end: s.ws.readyState === 1, ...after };
+        if (!after.post_idle_state_ok) failWith("the socket was open after the idle but the daemon did not answer a snapshot", info);
+        return info;
+      });
+      })();
+    } finally {
+      // 7. close (also on every early return above)
+      const s = link.session;
+      if (s) {
+        await steps.run("close (1000)", async () => {
+          const wasOpen = s.ws.readyState === 1;
+          if (!wasOpen && s.closed) return { already_closed: true, close_code: s.closed.code, close_reason: redact(s.closed.reason, token) };
+          s.close(1000, "spike done");
+          const r = await s.wait(() => (s.closed ? true : undefined), 3000);
+          if (r === "timeout") failWith("no close event within 3 s of close()", { was_open: wasOpen });
+          return { was_open: wasOpen, close_code: s.closed?.code ?? null, close_reason: s.closed?.reason ?? null, was_clean: s.closed?.wasClean ?? null };
+        });
+      }
+    }
+    return steps.outcome(head);
   },
 };
 
@@ -646,7 +820,7 @@ const CODEC_CANDIDATES = ["Apple ProRes 422 LT", "ProRes 422 LT", "Apple ProRes 
  * returns ("Animation" on the imported sequence). So: discover what the runtime exposes, prove the setter works by
  * round-tripping the value the API returned, then try display names. Setter return values are always kept.
  */
-async function previewCodecProbe(ctx: Ctx, project: Project, seq: Sequence): Promise<Record<string, unknown>> {
+async function previewCodecProbe(ctx: Ctx, project: Project, seq: Sequence, steps: Steps): Promise<Record<string, unknown>> {
   const { ppro } = ctx;
   const s0 = await seq.getSettings();
   const orig = await s0.getPreviewCodec();
@@ -660,14 +834,14 @@ async function previewCodecProbe(ctx: Ctx, project: Project, seq: Sequence): Pro
     ppro_members_matching: names(ppro, /codec|preset|format/i),
     constants_members_matching: names(ppro.Constants, /codec|preview|format/i),
   };
-  const attempt = async (label: string, change: (s: Settings) => Promise<unknown>) => {
-    const rec: Record<string, unknown> = { label };
+  const attempt = async (label: string, api: string, change: (s: Settings) => Promise<unknown>) => {
+    const rec: Record<string, unknown> = { label, at: new Date().toISOString() };
     const t0 = Date.now();
     try {
-      const s = await seq.getSettings();
-      rec.setter_returned = await change(s);
-      rec.transaction_returned = tx(project, (ca) => add(ca, seq.createSetSettingsAction(s)));
-      const after = await seq.getSettings();
+      const s = await steps.stamp(`getSettings (${label})`, () => seq.getSettings());
+      rec.setter_returned = await steps.stamp(`${api} (${label})`, () => change(s));
+      rec.transaction_returned = await steps.stamp(`createSetSettingsAction transaction (${label})`, () => tx(project, (ca) => add(ca, seq.createSetSettingsAction(s))));
+      const after = await steps.stamp(`getSettings read-back (${label})`, () => seq.getSettings());
       rec.read_codec = await after.getPreviewCodec();
       rec.read_file_format = await after.getPreviewFileFormat();
     } catch (e) {
@@ -677,19 +851,19 @@ async function previewCodecProbe(ctx: Ctx, project: Project, seq: Sequence): Pro
     return rec;
   };
   const attempts: Array<Record<string, unknown>> = [];
-  attempts.push(await attempt(`file format round trip "${origFormat}"`, (s) => s.setPreviewFileFormat(origFormat)));
-  const round = await attempt(`codec round trip "${orig}" (the value the API returned)`, (s) => s.setPreviewCodec(orig));
+  attempts.push(await attempt(`file format round trip "${origFormat}"`, "setPreviewFileFormat", (s) => s.setPreviewFileFormat(origFormat)));
+  const round = await attempt(`codec round trip "${orig}" (the value the API returned)`, "setPreviewCodec", (s) => s.setPreviewCodec(orig));
   attempts.push(round);
   let accepted: string | null = null;
   for (const candidate of CODEC_CANDIDATES) {
     if (candidate === orig) continue;
-    const rec = await attempt(`codec -> "${candidate}"`, (s) => s.setPreviewCodec(candidate));
+    const rec = await attempt(`codec -> "${candidate}"`, "setPreviewCodec", (s) => s.setPreviewCodec(candidate));
     rec.wanted = candidate;
     rec.took = rec.read_codec === candidate;
     attempts.push(rec);
     if (rec.took) {
       accepted = candidate;
-      attempts.push(await attempt(`restore "${orig}"`, (s) => s.setPreviewCodec(orig)));
+      attempts.push(await attempt(`restore "${orig}"`, "setPreviewCodec", (s) => s.setPreviewCodec(orig)));
       break;
     }
   }
@@ -707,7 +881,7 @@ const sequenceSettings: ProbeDef<Ctx> = {
     const seq = await getSequence(ctx);
     const steps = new Steps();
 
-    const initial = await steps.run("read_all", async () => {
+    const initial = await steps.run("read_all", () => steps.stamp("read_all (getSettings + the getters)", async () => {
       const s = await seq.getSettings();
       const frame = await s.getVideoFrameRect();
       const preview = await s.getPreviewFrameRect();
@@ -726,17 +900,18 @@ const sequenceSettings: ProbeDef<Ctx> = {
         audio_channel_type: await s.getAudioChannelType(),
         audio_channel_count: await s.getAudioChannelCount(),
       };
-    });
+    }));
 
-    await steps.run("preview_codec: discover, round trip, try display names", () => previewCodecProbe(ctx, project, seq));
+    await steps.run("preview_codec: discover, round trip, try display names", () => previewCodecProbe(ctx, project, seq, steps));
 
     // The engine's targets (ppro_build.py): linear colour on, 8-bit, no max render quality.
     const apply = async (label: string, change: (s: Settings) => Promise<unknown>, read: (s: Settings) => Promise<unknown>, want: unknown) => {
-      const before = await read(await seq.getSettings());
+      const api = `set${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+      const before = await steps.stamp(`getSettings read before (${api})`, async () => read(await seq.getSettings()));
       const s = await seq.getSettings();
-      const setterResult = await change(s);
-      expect(tx(project, (ca) => add(ca, seq.createSetSettingsAction(s))), `${label}: createSetSettingsAction transaction returned false`);
-      const after = await read(await seq.getSettings());
+      const setterResult = await steps.stamp(api, () => change(s));
+      expect(await steps.stamp(`createSetSettingsAction transaction (${api})`, () => tx(project, (ca) => add(ca, seq.createSetSettingsAction(s)))), `${label}: createSetSettingsAction transaction returned false`);
+      const after = await steps.stamp(`getSettings read-back (${api})`, async () => read(await seq.getSettings()));
       const info = { before, wanted: want, after, setter_returned: setterResult };
       if (JSON.stringify(after) !== JSON.stringify(want)) failWith(`${label}: read back ${JSON.stringify(after)} but wanted ${JSON.stringify(want)} (before ${JSON.stringify(before)})`, info);
       return info;
@@ -754,13 +929,13 @@ const sequenceSettings: ProbeDef<Ctx> = {
         const orig = await get(await seq.getSettings());
         const flipped = !orig;
         const s1 = await seq.getSettings();
-        await set(s1, flipped);
-        tx(project, (ca) => add(ca, seq.createSetSettingsAction(s1)));
-        const afterFlip = await get(await seq.getSettings());
+        await steps.stamp(`toggle ${name}: setter (flip)`, () => set(s1, flipped));
+        await steps.stamp(`toggle ${name}: createSetSettingsAction transaction (flip)`, () => tx(project, (ca) => add(ca, seq.createSetSettingsAction(s1))));
+        const afterFlip = await steps.stamp(`toggle ${name}: getSettings read-back (flip)`, async () => get(await seq.getSettings()));
         const s2 = await seq.getSettings();
-        await set(s2, orig);
-        tx(project, (ca) => add(ca, seq.createSetSettingsAction(s2)));
-        const afterBack = await get(await seq.getSettings());
+        await steps.stamp(`toggle ${name}: setter (restore)`, () => set(s2, orig));
+        await steps.stamp(`toggle ${name}: createSetSettingsAction transaction (restore)`, () => tx(project, (ca) => add(ca, seq.createSetSettingsAction(s2))));
+        const afterBack = await steps.stamp(`toggle ${name}: getSettings read-back (restore)`, async () => get(await seq.getSettings()));
         out[name] = { orig, flipped_to: flipped, read_after_flip: afterFlip, read_after_restore: afterBack, ok: afterFlip === flipped && afterBack === orig };
         expect(afterFlip === flipped && afterBack === orig, `${name}: toggle did not round-trip`);
       }
@@ -772,9 +947,9 @@ const sequenceSettings: ProbeDef<Ctx> = {
       const rect = new ppro.RectF();
       rect.width = frame.width;
       rect.height = frame.height;
-      const setterResult = await s.setPreviewFrameRect(rect);
-      expect(tx(project, (ca) => add(ca, seq.createSetSettingsAction(s))), "createSetSettingsAction transaction returned false");
-      const after = await (await seq.getSettings()).getPreviewFrameRect();
+      const setterResult = await steps.stamp("setPreviewFrameRect", () => s.setPreviewFrameRect(rect));
+      expect(await steps.stamp("createSetSettingsAction transaction (setPreviewFrameRect)", () => tx(project, (ca) => add(ca, seq.createSetSettingsAction(s)))), "createSetSettingsAction transaction returned false");
+      const after = await steps.stamp("getSettings read-back (getPreviewFrameRect)", async () => (await seq.getSettings()).getPreviewFrameRect());
       expect(after.width === frame.width && after.height === frame.height, `preview rect read back ${after.width}x${after.height}, wanted ${frame.width}x${frame.height}`);
       return { wanted: { width: frame.width, height: frame.height }, after: { width: after.width, height: after.height }, setter_returned: setterResult };
     });
@@ -846,33 +1021,37 @@ const exportFrame: ProbeDef<Ctx> = {
         ["setActiveSequence", () => project.setActiveSequence(seq)],
       ] as const) {
         try {
-          info[k] = await fn();
+          info[k] = await steps.stamp(k, fn);
         } catch (e) {
           info[`${k}_error`] = errText(e);
         }
       }
       try {
-        info.done_analyzing_for_video_effects = await seq.isDoneAnalyzingForVideoEffects();
+        info.done_analyzing_for_video_effects = await steps.stamp("isDoneAnalyzingForVideoEffects", () => seq.isDoneAnalyzingForVideoEffects());
       } catch (e) {
         info.done_analyzing_error = errText(e);
       }
-      const frame = await seq.getFrameSize();
-      const endS = (await seq.getEndTime()).seconds;
+      const frame = await steps.stamp("getFrameSize", () => seq.getFrameSize());
+      const endS = (await steps.stamp("getEndTime", () => seq.getEndTime())).seconds;
       let firstStart = Infinity;
-      const track0 = await seq.getVideoTrack(0);
-      for (const c of track0.getTrackItems(ppro.Constants.TrackItemType.CLIP, false)) firstStart = Math.min(firstStart, (await c.getStartTime()).seconds);
+      await steps.stamp("getVideoTrack(0) + clip start times", async () => {
+        const track0 = await seq.getVideoTrack(0);
+        for (const c of track0.getTrackItems(ppro.Constants.TrackItemType.CLIP, false)) firstStart = Math.min(firstStart, (await c.getStartTime()).seconds);
+      });
       const t1 = Math.min(endS - 0.1, (Number.isFinite(firstStart) ? firstStart : 0) + 0.5);
       const t2 = Math.max(0, Math.min(endS - 0.1, endS * 0.4));
       const offline: string[] = [];
       try {
-        const items = await (await project.getRootItem()).getItems();
-        for (const item of items) {
-          try {
-            if (await ppro.ClipProjectItem.cast(item).isOffline()) offline.push(item.name);
-          } catch {
-            // bins and sequences have no offline state
+        await steps.stamp("isOffline scan (every root item)", async () => {
+          const items = await (await project.getRootItem()).getItems();
+          for (const item of items) {
+            try {
+              if (await ppro.ClipProjectItem.cast(item).isOffline()) offline.push(item.name);
+            } catch {
+              // bins and sequences have no offline state
+            }
           }
-        }
+        });
       } catch (e) {
         info.media_state_error = errText(e);
       }
@@ -896,14 +1075,15 @@ const exportFrame: ProbeDef<Ctx> = {
       const rec: Record<string, unknown> = { form: a.id, filename: a.filename(name), filepath: a.filepath, t_s: t, move_playhead: movePlayhead };
       if (movePlayhead) {
         try {
-          rec.setPlayerPosition = await seq.setPlayerPosition(tickSeconds(ctx, t));
+          rec.setPlayerPosition = await steps.stamp(`setPlayerPosition (${tag})`, () => seq.setPlayerPosition(tickSeconds(ctx, t)));
         } catch (e) {
           rec.setPlayerPosition_error = errText(e);
         }
       }
       const t0 = Date.now();
+      rec.at = new Date(t0).toISOString();
       try {
-        rec.returned = await ppro.Exporter.exportSequenceFrame(seq, tickSeconds(ctx, t), a.filename(name), a.filepath, width, height);
+        rec.returned = await steps.stamp(`exportSequenceFrame (${tag}: ${a.id})`, () => ppro.Exporter.exportSequenceFrame(seq, tickSeconds(ctx, t), a.filename(name), a.filepath, width, height));
       } catch (e) {
         rec.error = errDetail(e);
       }
@@ -913,7 +1093,7 @@ const exportFrame: ProbeDef<Ctx> = {
       const joined = `${a.dir}${name}`;
       const parentJoined = `${a.dir.slice(0, slash)}/${a.dir.slice(slash + 1)}${name}`;
       const candidates = [...new Set([expected, joined, parentJoined])];
-      const poll = await pollAny(ctx.fs, candidates, a.longPoll || rec.returned === true ? (ctx.timing?.longPollMs ?? 10_000) : (ctx.timing?.shortPollMs ?? 1_500), 50);
+      const poll = await steps.stamp(`poll for the file (${tag})`, () => pollAny(ctx.fs, candidates, a.longPoll || rec.returned === true ? (ctx.timing?.longPollMs ?? 10_000) : (ctx.timing?.shortPollMs ?? 1_500), 50));
       rec.expected_path = expected;
       rec.polled_paths = candidates;
       rec.found = poll.found;
@@ -1822,6 +2002,172 @@ const projectViews: ProbeDef<Ctx> = {
   },
 };
 
+// ---------------------------------------------------------------------------------------------- host_calls (0.1.3)
+
+/** What Adobe's one-time consent dialog shows for shell.openPath (the same kind of sentence the product passes). */
+const OPEN_PATH_WHY = "WhyNot Cut spike 0.1.3 is measuring whether it may open this location on your computer.";
+/** A call that takes at least this long was probably waiting for a click (the consent dialog). */
+const CONSENT_SUSPECT_MS = 1500;
+
+const hostCalls: ProbeDef<Ctx> = {
+  op: "host_calls",
+  timeoutMs: 420_000,
+  run: async (ctx) => {
+    const cfg = needConfig(ctx);
+    const { ppro } = ctx;
+    // the guards first: nothing below runs unless the scratch project from THIS run exists
+    const project = await getProject(ctx);
+    const seq = await getSequence(ctx);
+    const steps = new Steps();
+    const workDir = cleanPath(cfg.work_dir);
+
+    // 1. a scratch media file under work_dir: a byte copy of mp4_source (read-only access to whynot-test/)
+    const media = await steps.run("scratch media: copy mp4_source into work_dir", async () => {
+      const src = cfg.mp4_source;
+      expect(src, "config.json has no mp4_source (a short .mp4 under whynot-test/ to copy into work_dir)");
+      const srcProblem = scratchPathProblem(src);
+      expect(!srcProblem, `mp4_source rejected: ${srcProblem}`);
+      const srcStat = await statOf(ctx.fs, toForwardSlashes(src));
+      expect(srcStat.exists, `mp4_source does not exist: ${src}`);
+      const ext = /\.(mp4|mov)$/i.exec(src)?.[0].toLowerCase() ?? ".mp4";
+      const dest = `${workDir}/spike-${ctx.stamp}-source${ext}`;
+      expect(isUnder(dest, cfg.work_dir) && !scratchPathProblem(dest), `refusing to write outside work_dir: ${dest}`);
+      await ensureDir(ctx.fs, workDir);
+      const t0 = Date.now();
+      const bytes = await readBytes(ctx.fs, toForwardSlashes(src));
+      await writeBytes(ctx.fs, dest, bytes);
+      const st = await statOf(ctx.fs, dest);
+      expect(st.exists && st.bytes === bytes.byteLength, `copy is ${st.bytes} bytes, source is ${bytes.byteLength}`);
+      return { source: cleanPath(src), path: dest, bytes: st.bytes, source_bytes: srcStat.bytes ?? bytes.byteLength, copy_ms: Date.now() - t0 };
+    });
+
+    // 2. SourceMonitor.openFilePath (the product host passes the native backslash path)
+    if (media) {
+      await steps.run("SourceMonitor.openFilePath (native backslash path)", async () => {
+        const native = nativePath(media.path);
+        const countItems = async () => (await (await project.getRootItem()).getItems()).length;
+        const before = await countItems();
+        const returned = await steps.stamp("SourceMonitor.openFilePath", () => ppro.SourceMonitor.openFilePath(native));
+        const info: Record<string, unknown> = { path_used: native, returned, items_before: before };
+        try {
+          info.items_after = await countItems();
+        } catch (e) {
+          info.items_after_error = errText(e);
+        }
+        try {
+          const item = await steps.stamp("SourceMonitor.getProjectItem", () => ppro.SourceMonitor.getProjectItem());
+          info.source_item_name = item?.name ?? null;
+        } catch (e) {
+          info.source_item_error = errText(e);
+        }
+        try {
+          info.source_position_s = (await steps.stamp("SourceMonitor.getPosition", () => ppro.SourceMonitor.getPosition())).seconds;
+        } catch (e) {
+          info.source_position_error = errText(e);
+        }
+        if (returned === false) failWith("SourceMonitor.openFilePath returned false", info);
+        return info;
+      });
+      await steps.run("SourceMonitor.closeClip (cleanup, informational)", async () => {
+        try {
+          return { returned: await steps.stamp("SourceMonitor.closeClip", () => ppro.SourceMonitor.closeClip()) };
+        } catch (e) {
+          return { error: errText(e) };
+        }
+      });
+    }
+
+    // 3. Sequence.setPlayerPosition with a read-back (the product host: active project -> active sequence)
+    const player = async (t: number) => {
+      const returned = await steps.stamp(`Sequence.setPlayerPosition(${t})`, () => seq.setPlayerPosition(tickSeconds(ctx, t)));
+      const back = (await steps.stamp("Sequence.getPlayerPosition", () => seq.getPlayerPosition())).seconds;
+      return { returned, read_back_s: back, delta_s: back - t };
+    };
+    await steps.run("Sequence.setPlayerPosition (TickTime) read back", async () => {
+      for (const [k, fn] of [
+        ["openSequence", () => project.openSequence(seq)],
+        ["setActiveSequence", () => project.setActiveSequence(seq)],
+      ] as const) {
+        try {
+          await steps.stamp(k, fn);
+        } catch {
+          // recorded in calls
+        }
+      }
+      let activeIsScratch: boolean | null = null;
+      try {
+        const active = await ppro.Project.getActiveProject();
+        const activeSeq = active ? await active.getActiveSequence() : undefined;
+        const same = (a: Sequence | undefined, b: Sequence) => a === b || (a !== undefined && a.guid?.toString() !== undefined && a.guid.toString() === b.guid?.toString());
+        activeIsScratch = same(activeSeq, seq);
+      } catch {
+        activeIsScratch = null;
+      }
+      const endS = (await seq.getEndTime()).seconds;
+      const initial = (await steps.stamp("Sequence.getPlayerPosition (initial)", () => seq.getPlayerPosition())).seconds;
+      const wanted = [0.25, 0.5, 0.75].map((f) => Math.round(endS * f * 1000) / 1000);
+      const points: Array<Record<string, unknown>> = [];
+      for (const t of wanted) points.push({ wanted_s: t, ...(await player(t)) });
+      let restored: number | null = null;
+      try {
+        await player(initial);
+        restored = (await seq.getPlayerPosition()).seconds;
+      } catch {
+        restored = null;
+      }
+      const info = { sequence_end_s: endS, initial_s: initial, active_sequence_is_scratch: activeIsScratch, tolerance_s: 0.05, points, restored_s: restored };
+      const bad = points.filter((p) => p.returned === false || Math.abs(Number(p.delta_s)) > 0.05);
+      if (bad.length) failWith(`setPlayerPosition did not land: ${bad.map((p) => `wanted ${String(p.wanted_s)} s, read back ${String(p.read_back_s)} s, returned ${String(p.returned)}`).join("; ")}`, info);
+      return info;
+    });
+    await steps.run("setPlayerPosition beyond the end / negative (informational)", async () => {
+      const endS = (await seq.getEndTime()).seconds;
+      const probeAt = async (t: number) => {
+        try {
+          return { wanted_s: t, ...(await player(t)) };
+        } catch (e) {
+          return { wanted_s: t, error: errText(e) };
+        }
+      };
+      return { beyond_end: await probeAt(endS + 10), negative: await probeAt(-1) };
+    });
+
+    // 4. shell.openPath: the work_dir folder, the mp4, the folder again (is the consent remembered?)
+    const shell = ctx.uxp.shell as { openPath?: (p: string, text?: string) => Promise<string | undefined> | string | undefined } | undefined;
+    const timeoutMs = ctx.timing?.shellTimeoutMs ?? 100_000;
+    const openAt = (label: string, path: string) =>
+      steps.run(`shell.openPath ${label}`, async () => {
+        expect(typeof shell?.openPath === "function", "uxp.shell.openPath is not available in this UXP runtime");
+        const native = nativePath(path);
+        const t0 = Date.now();
+        const startedAt = new Date(t0).toISOString();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const result = await Promise.race([
+          Promise.resolve()
+            .then(() => shell.openPath?.(native, OPEN_PATH_WHY))
+            .then((v) => ({ done: true as const, v }), (e: unknown) => ({ done: true as const, error: errText(e) })),
+          new Promise<{ done: false }>((res) => {
+            timer = setTimeout(() => res({ done: false }), timeoutMs);
+          }),
+        ]);
+        if (timer !== undefined) clearTimeout(timer);
+        const ms = Date.now() - t0;
+        const info: Record<string, unknown> = { path_used: native, developer_text: OPEN_PATH_WHY, started_at: startedAt, ms, consent_dialog_suspected: ms >= CONSENT_SUSPECT_MS, timed_out: !result.done };
+        if (!result.done) failWith(`openPath did not answer within ${timeoutMs} ms (a consent dialog nobody answered?)`, info);
+        if ("error" in result) failWith(`openPath threw: ${result.error}`, info);
+        info.returned = result.v ?? null;
+        info.returned_type = typeof result.v;
+        if (typeof result.v === "string" && result.v.trim() !== "") failWith(`openPath answered with an error text: ${result.v}`, info);
+        return info;
+      });
+    await openAt("folder (work_dir)", workDir);
+    if (media) await openAt("mp4 (the scratch copy)", media.path);
+    await openAt("folder again (is the consent remembered?)", workDir);
+
+    return steps.outcome({ scratch_media: media ?? null });
+  },
+};
+
 /** X1: Premiere's encoder as the frame-export fallback. Off unless config.json has "encoder_export": true (may open AME). */
 const encoderExport: ProbeDef<Ctx> = {
   op: "encoder_export",
@@ -1857,7 +2203,7 @@ const READ_ONLY_OPS = new Set(["host_info", "ws_loopback"]);
  * With keepOpen the run stops right after it (nothing closes the project or adds history).
  */
 export function buildProbes(opts: { keepOpen?: boolean } = {}): ProbeDef<Ctx>[] {
-  const all = [hostInfo, wsLoopback, createProject, scratchDisk, importXml, sequenceSettings, exportFrame, keyframes, keyframeTimeBasis, effects, clipEdits, trackRename, markers, projectViews, undoTransaction, saveCloseOpen, saveAs, encoderExport];
+  const all = [hostInfo, wsLoopback, createProject, scratchDisk, importXml, sequenceSettings, exportFrame, keyframes, keyframeTimeBasis, effects, clipEdits, trackRename, markers, projectViews, hostCalls, undoTransaction, saveCloseOpen, saveAs, encoderExport];
   const list = opts.keepOpen ? all.slice(0, all.indexOf(undoTransaction) + 1) : all;
   return list.map((def) => ({
     ...def,
@@ -1879,7 +2225,7 @@ export async function loadConfig(fs: UxpFs, dir: string): Promise<{ config: Spik
     if (missing.length) return { config: null, error: `config.json is missing: ${missing.join(", ")}` };
     // Everything the spike reads or writes must live under .../Editing Plugin/whynot-test/ (never WhyNot Clients).
     // A config that fails is treated as missing, so only the read-only probes run.
-    for (const key of ["work_dir", "xml_path", "still_png"] as const) {
+    for (const key of ["work_dir", "xml_path", "still_png", "mp4_source"] as const) {
       const value = parsed[key];
       if (typeof value !== "string" || value === "") continue;
       const problem = scratchPathProblem(value);

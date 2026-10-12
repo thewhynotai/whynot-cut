@@ -34,6 +34,7 @@ const OPS = [
   "track_rename",
   "markers",
   "project_views",
+  "host_calls",
   "undo_transaction",
   "save_close_open",
   "save_as",
@@ -50,7 +51,11 @@ test("without a config only the read-only probes run; every other probe is skipp
     assert.equal(o.ok, null, `${o.op} -> ${o.ok}`);
     assert.match(String(o.detail), /^no config/);
   }
-  assert.equal(ops.find((o) => o.op === "ws_loopback")?.detail, "pending reel serve (T6.2)");
+  // 0.1.3: the link probe is real. It needs no config, so with no engine.json (no `reel serve`) it fails on its first step
+  // and opens no socket (spike-013.test.ts covers the live-link behaviour against a fake daemon).
+  const ws = ops.find((o) => o.op === "ws_loopback");
+  assert.equal(ws?.ok, false);
+  assert.match(JSON.stringify(ws?.detail), /engine\.json/);
 });
 
 // ---- a tiny fake Premiere: enough to exercise tx(), Steps and the transaction label -------------------------------
@@ -177,55 +182,4 @@ test("save_close_open is n/a (not a failure) when 'keep project open' is selecte
   }
 });
 
-// ---- ws_loopback against a fake WebSocket -----------------------------------------------------------------------
-
-type G = { WebSocket?: unknown };
-
-function withFakeWebSocket<T>(factory: (url: string) => Record<string, unknown>, fn: () => Promise<T>): Promise<T> {
-  const g = globalThis as G;
-  const saved = g.WebSocket;
-  g.WebSocket = function (this: unknown, url: string) {
-    const ws = factory(url);
-    queueMicrotask(() => (ws.__start as () => void)());
-    return ws;
-  };
-  return fn().finally(() => {
-    g.WebSocket = saved;
-  });
-}
-
-test("ws_loopback: connects to ws_url, sends a protocol-4 ping, ok on a reply", async () => {
-  const sent: string[] = [];
-  const ctx = baseCtx({});
-  ctx.config = { xml_path: "x", work_dir: "w", ws_url: "ws://127.0.0.1:9999/panel" };
-  const r = await withFakeWebSocket(
-    () => {
-      const ws: Record<string, unknown> = {
-        send: (m: string) => {
-          sent.push(m);
-          queueMicrotask(() => (ws.onmessage as (e: unknown) => void)({ data: '{"ok":true}' }));
-        },
-        close: () => {},
-        __start: () => (ws.onopen as () => void)(),
-      };
-      return ws;
-    },
-    () => runProbe(probe("ws_loopback"), ctx),
-  );
-  assert.equal(r.ok, true, JSON.stringify(r));
-  assert.equal(JSON.parse(sent[0] ?? "{}").protocol, 4);
-  assert.equal((r.detail as { reply: string }).reply, '{"ok":true}');
-});
-
-test("ws_loopback: a socket error is ok:false", async () => {
-  const ctx = baseCtx({});
-  ctx.config = { xml_path: "x", work_dir: "w", ws_url: "ws://127.0.0.1:1/none" };
-  const r = await withFakeWebSocket(
-    () => {
-      const ws: Record<string, unknown> = { send: () => {}, close: () => {}, __start: () => (ws.onerror as (e: unknown) => void)({ message: "ECONNREFUSED" }) };
-      return ws;
-    },
-    () => runProbe(probe("ws_loopback"), ctx),
-  );
-  assert.equal(r.ok, false);
-});
+// ws_loopback (the real link: engine.json, hello/welcome, snapshot, idle keepalive) is tested in spike-013.test.ts.

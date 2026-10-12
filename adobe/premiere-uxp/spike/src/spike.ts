@@ -5,11 +5,10 @@ import { ensureDir, writeText } from "./fsutil.ts";
 import { resolveHome, spikeDir } from "./home.ts";
 import { buildProbes, errText, loadConfig, skipSaveCloseOpen, type Ctx } from "./probes.ts";
 import { jsonSafe, runAll, type OpResult } from "./runner.ts";
+import { SPIKE_VERSION } from "./version.ts";
 import type { UxpFs, UxpModule, UxpOs } from "../../src/uxp-types.ts";
 
 declare const require: (id: string) => unknown;
-
-const SPIKE_VERSION = "0.1.2";
 
 function $(id: string): HTMLElement {
   const el = document.getElementById(id);
