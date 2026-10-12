@@ -87,12 +87,12 @@ test("AR render carries dir=rtl lang=ar on the container; EN carries ltr/en", ()
   assert.ok(!/sp-theme/.test(ar), "RTL must never go through sp-theme");
 });
 
-test('"Claude Code" never appears in any rendered state; "Powered by Claude" does', () => {
+test('"Claude Code" never appears in any rendered state; "Powered by thewhynot.ai" does', () => {
   for (const lang of ["en", "ar"] as const) {
     for (const scenario of SCENARIOS) {
       const html = render(sampleState(lang, scenario), stringsFor(lang), { ...initialUi(), logOpen: true, confirmRebuild: true });
       assert.ok(!/claude\s*code/i.test(html), `${lang}/${scenario}`);
-      assert.ok(html.includes("Powered by Claude"), `${lang}/${scenario}`);
+      assert.ok(html.includes("Powered by thewhynot.ai"), `${lang}/${scenario}`);
       assert.ok(html.includes("WhyNot Cut"));
     }
   }
@@ -460,5 +460,35 @@ test("markup: header, body and footer all sit inside the single .twn-scroll regi
     assert.equal((html.match(/class="twn-scroll"/g) ?? []).length, 1);
     const inner = /<div class="twn-scroll">([\s\S]*)<\/div><\/div>$/.exec(html)![1]!;
     assert.ok(inner.startsWith("<header") && inner.includes("<main") && inner.endsWith("</footer>"));
+  }
+});
+
+// ---- owner decision 2026-10-12: footer "Powered by thewhynot.ai" ----
+
+test('footer: plain text "Powered by thewhynot.ai", domain isolated LTR, identical in EN and AR, no link, never "Claude Code"', () => {
+  for (const lang of ["en", "ar"] as const) {
+    const html = render(sampleState(lang, "showcase"), stringsFor(lang), initialUi());
+    const foot = /<footer class="foot">([\s\S]*?)<\/footer>/.exec(html)![1]!;
+    assert.equal(foot, '<bdi dir="ltr">Powered by thewhynot.ai</bdi>', lang);
+    assert.ok(!/<a[\s>]/.test(foot) && !/href/.test(foot));
+    assert.ok(!html.includes("Powered by Claude"), "the old footer is gone");
+  }
+});
+
+// ---- UXP drops whitespace between inline children: the log summary is an explicit flex row ----
+
+test("log summary: caret, title and count are separate flex items inside .log-row, separated by margins", () => {
+  const s = sampleState("en", "showcase");
+  for (const open of [false, true]) {
+    const html = render(s, EN, { ...initialUi(), logOpen: open });
+    assert.match(html, /<button class="log-toggle"[^>]*><span class="log-row"><span class="caret">[^<]+<\/span><span class="log-title">Log<\/span><span class="log-count">4 lines<\/span><\/span><\/button>/);
+  }
+  const css = panelCss();
+  const row = rule(css, ".log-row");
+  assert.match(row, /display: flex/);
+  assert.match(row, /flex-direction: row/);
+  assert.match(row, /align-items: baseline/);
+  for (const sel of [".caret", ".log-title", ".log-count"]) {
+    assert.match(rule(css, sel), /margin: 0 [1-9]/, `${sel} needs a horizontal margin (no whitespace survives in UXP)`);
   }
 });

@@ -51,7 +51,7 @@ test("startShell mounts the panel into #root with the offline source: Engine not
   await shell.ready;
   assert.match(root!.innerHTML, /not running/);
   assert.match(root!.innerHTML, /Premiere Pro 26\.5\.2/);
-  assert.match(root!.innerHTML, /Powered by Claude/);
+  assert.match(root!.innerHTML, /Powered by thewhynot.ai/);
   assert.doesNotMatch(root!.innerHTML, /Claude Code/);
   assert.equal(typeof root!.listeners["click"], "function", "buttons are wired by event delegation on the root");
   shell.unmount();

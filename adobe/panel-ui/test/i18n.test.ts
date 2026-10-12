@@ -17,11 +17,11 @@ test("the string 'Claude Code' never appears in a string table", () => {
   for (const table of [EN, AR]) for (const v of Object.values(table)) assert.ok(!/claude\s*code/i.test(v), v);
 });
 
-test("product name is WhyNot Cut in both languages and the footer says Powered by Claude", () => {
+test("product name is WhyNot Cut in both languages and the footer says Powered by thewhynot.ai", () => {
   assert.equal(EN["product.name"], "WhyNot Cut");
   assert.equal(AR["product.name"], "WhyNot Cut");
-  assert.equal(EN["footer.powered"], "Powered by Claude");
-  assert.equal(AR["footer.powered"], "Powered by Claude");
+  assert.equal(EN["footer.powered"], "Powered by thewhynot.ai");
+  assert.equal(AR["footer.powered"], "Powered by thewhynot.ai");
 });
 
 test("stringsFor picks the table; fmt fills placeholders", () => {

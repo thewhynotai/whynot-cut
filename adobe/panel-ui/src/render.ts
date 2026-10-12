@@ -244,8 +244,9 @@ function actionsSection(s: PanelState, t: Strings, ui: UiState): string {
 function logSection(s: PanelState, t: Strings, ui: UiState): string {
   const toggle =
     `<button class="log-toggle" data-action="toggle-log" aria-expanded="${ui.logOpen ? "true" : "false"}">` +
-    `<span class="caret">${ui.logOpen ? "▾" : "▸"}</span><span class="log-title">${esc(t["log.toggle"])}</span>` +
-    `<span class="log-count">${esc(fmt(t["log.lines"], { n: s.log.length }))}</span></button>`;
+    // UXP drops the whitespace between inline children: one explicit flex row, items separated by margins
+    `<span class="log-row"><span class="caret">${ui.logOpen ? "▾" : "▸"}</span><span class="log-title">${esc(t["log.toggle"])}</span>` +
+    `<span class="log-count">${esc(fmt(t["log.lines"], { n: s.log.length }))}</span></span></button>`;
   if (!ui.logOpen) return `<section class="sec sec-log">${toggle}</section>`;
   const lines = s.log.length
     ? `<ul class="log-lines">${s.log

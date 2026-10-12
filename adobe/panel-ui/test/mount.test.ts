@@ -245,7 +245,7 @@ test("a slightly-off snapshot (pipeline: null, no context) shows the error view 
   assert.ok(root.innerHTML.includes('class="banner banner-error"'));
   assert.ok(root.innerHTML.includes(EN["error.render"]));
   assert.match(root.innerHTML, /Cannot read|undefined|null/i, "the message is shown");
-  assert.ok(root.innerHTML.includes("Powered by Claude") || root.innerHTML.includes("WhyNot Cut"));
+  assert.ok(root.innerHTML.includes("Powered by thewhynot.ai") || root.innerHTML.includes("WhyNot Cut"));
 });
 
 test("the error view follows the state's language when it is known (AR)", async () => {

@@ -1,7 +1,7 @@
 import type { Language } from "./source.ts";
 
 // English is the source table; Arabic is typed against its keys, so a missing key does not compile.
-// The product name stays "WhyNot Cut" and the footer keeps the English phrase in both languages.
+// The product name stays "WhyNot Cut". The footer is "Powered by thewhynot.ai" (owner decision 2026-10-12), identical in both languages.
 export const EN = {
   "product.name": "WhyNot Cut",
   "status.connecting": "Connecting to the WhyNot Cut engine...",
@@ -83,7 +83,7 @@ export const EN = {
   "log.toggle": "Log",
   "log.lines": "{n} lines",
   "log.empty": "No log lines yet.",
-  "footer.powered": "Powered by Claude",
+  "footer.powered": "Powered by thewhynot.ai",
 } as const;
 
 export type StringKey = keyof typeof EN;
@@ -170,7 +170,7 @@ export const AR: Strings = {
   "log.toggle": "السجل",
   "log.lines": "{n} سطر",
   "log.empty": "لا توجد أسطر في السجل بعد.",
-  "footer.powered": "Powered by Claude",
+  "footer.powered": "Powered by thewhynot.ai",
 };
 
 export function stringsFor(lang: Language): Strings {

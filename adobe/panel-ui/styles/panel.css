@@ -305,8 +305,10 @@ textarea.input { resize: vertical; min-height: 56px; }
   text-align: inherit;
   cursor: pointer;
 }
-.caret { width: 12px; margin: 0 4px; }
-.log-count { margin: 0 8px; font-weight: 400; }
+.log-row { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: baseline; }
+.caret { flex: 0 0 auto; width: 12px; margin: 0 4px; }
+.log-title { flex: 0 0 auto; margin: 0 4px; }
+.log-count { flex: 0 0 auto; margin: 0 8px; font-weight: 400; }
 .log-lines { list-style: none; margin: 4px 0 0 0; padding: 6px 8px; max-height: 180px; overflow: auto; background: var(--twn-surface); border: 1px solid var(--twn-border); border-radius: 6px; font-family: Consolas, "SF Mono", Menlo, monospace; font-size: 10.5px; }
 .log-line { display: flex; flex-direction: row; align-items: baseline; margin: 0 0 3px 0; }
 .log-line bdi { flex: 1 1 0; min-width: 0; word-wrap: break-word; }
