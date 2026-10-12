@@ -23,18 +23,18 @@ _FACES: dict = {}
 _FACES_MAX = 32          # a long-lived process renders many clients' fonts: keep the most recent few
 
 
-def _face(path: str):
-    """(HarfBuzz face, FreeType face) of a font file, cached by (path, size, mtime): a font file replaced in place
-    (a client's corrected brand font) is read again, never served stale (3.0 T2.17)."""
+def _face(path: str, index: int = 0):
+    """(HarfBuzz face, FreeType face) of a font file (face `index` of a .ttc/.otc collection), cached by (path, size,
+    mtime): a font file replaced in place (a client's corrected brand font) is read again, never served stale (T2.17)."""
     import io
     import os
     from pathlib import Path
     st = os.stat(path)
-    key = (path, st.st_size, st.st_mtime_ns)
+    key = (path, st.st_size, st.st_mtime_ns) + ((index,) if index else ())
     hit = _FACES.pop(key, None)
     if hit is None:
         data = Path(path).read_bytes()      # FreeType cannot open a non-ANSI path on Windows (an Arabic client folder)
-        hit = (hb.Face(hb.Blob(data), 0), freetype.Face(io.BytesIO(data)))
+        hit = (hb.Face(hb.Blob(data), index), freetype.Face(io.BytesIO(data), index))
     _FACES[key] = hit                       # re-inserted last: dict order = least recently used first
     while len(_FACES) > _FACES_MAX:
         del _FACES[next(iter(_FACES))]
@@ -44,9 +44,9 @@ def _face(path: str):
 class HBFontSpec:
     engine = "harfbuzz"
 
-    def __init__(self, path: str, size: float):
-        self.path, self.size = str(path), float(size)
-        self.hb_face, self.ft = _face(self.path)
+    def __init__(self, path: str, size: float, index: int = 0):
+        self.path, self.size, self.index = str(path), float(size), int(index or 0)
+        self.hb_face, self.ft = _face(self.path, self.index)
         self.hb_font = hb.Font(self.hb_face)
         self.upem = self.hb_face.upem
         self.ft.set_char_size(int(round(self.size * 64)), 0, 72, 72)

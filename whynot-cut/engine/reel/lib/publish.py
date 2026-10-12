@@ -222,6 +222,7 @@ def highlight_spans(text: str, phrase: str, boxes: list, font, max_chars: int) -
     several Latin words inside an Arabic line is laid out LTR, so their boxes would swap; one Latin word is fine)."""
     from .ae_builder import wrap_lines
     from .plan import norm
+    font = font.for_text(text) if hasattr(font, "for_text") else font     # the font _text_block drew with (G72)
     want = set(norm(phrase).split())
     spans = []
     for line, (x0, y0, x1, y1) in zip(wrap_lines(text, max_chars).split("\r"), boxes):

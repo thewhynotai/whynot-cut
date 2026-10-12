@@ -24,7 +24,6 @@ MAX_LINES = {"quote": 3, "title": 2, "body": 3, "label": 2, "stat": 1, "caption"
 ROLE_FONT = {"title": "headline", "quote": "headline", "stat": "headline", "body": "body", "label": "body",
              "caption": "caption"}
 NUM_IN = re.compile(r"[0-9٠-٩][0-9٠-٩.,٬٫]*")
-SYSTEM_FONTS = ("arial.ttf", "segoeui.ttf", "tahoma.ttf", "dejavusans.ttf", "notosansarabic-regular.ttf")
 
 
 def _f01(rgb) -> list:
@@ -36,13 +35,11 @@ def _hash(frames: list[int]) -> str:
 
 
 def _system_font() -> str | None:
-    from .plat import font_dirs
-    for d in font_dirs():
-        if d.exists():
-            for f in sorted(d.glob("*.ttf")):
-                if f.name.lower() in SYSTEM_FONTS:
-                    return str(f)
-    return None
+    """The system font text is measured with when the brand font files are missing: the Arabic fallback (lib/fonts.py:
+    Segoe UI / Arial / Tahoma on Windows, Geeza Pro / Arial on macOS)."""
+    from .fonts import arabic_fallback
+    face = arabic_fallback()
+    return face["file"] if face else None
 
 
 def fingerprint(paths) -> str:

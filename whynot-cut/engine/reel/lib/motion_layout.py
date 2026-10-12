@@ -4,7 +4,6 @@ per-scene-type placement presets that read the reading direction instead of hard
 """
 from __future__ import annotations
 
-import io
 import re
 
 from .ae_builder import _balance, wrap_lines
@@ -138,42 +137,9 @@ def role_of(scene_type: str, element: str) -> str:
     return PRESETS[scene_type][element]["role"]
 
 
-_FONT_FILES: dict = {}     # PostScript name -> file (or None), valid while the font folders keep _FONT_FILES_STAMP
-_FONT_FILES_STAMP: list = [None]
-
-
 def find_font_file(ps: str) -> str | None:
-    """The installed font file whose PostScript name is `ps` (system and user font folders), or None. The cache is
-    dropped when the font folders change (a font installed while a long-lived process runs is found: T2.17)."""
-    from .plat import font_dirs, font_dirs_stamp
-    stamp = font_dirs_stamp(font_dirs())
-    if _FONT_FILES_STAMP[0] != stamp:
-        _FONT_FILES.clear()
-        _FONT_FILES_STAMP[0] = stamp
-    if ps in _FONT_FILES:
-        return _FONT_FILES[ps]
-    hit = None
-    try:
-        import freetype
-    except Exception:  # noqa: BLE001 — no FreeType: cannot look fonts up by name
-        return None
-    for d in font_dirs():
-        if not d.exists():
-            continue
-        for f in sorted(d.rglob("*")):
-            if f.suffix.lower() not in (".ttf", ".otf"):
-                continue
-            try:                # FreeType cannot open a non-ANSI path on Windows: read only those into memory
-                face = freetype.Face(str(f)) if str(f).isascii() else freetype.Face(io.BytesIO(f.read_bytes()))
-                name = face.postscript_name
-            except Exception:  # noqa: BLE001 — unreadable font file
-                continue
-            name = name.decode() if isinstance(name, bytes) else str(name)
-            _FONT_FILES.setdefault(name, str(f))
-            if name == ps:
-                hit = str(f)
-                break
-        if hit:
-            break
-    _FONT_FILES[ps] = hit
-    return hit
+    """The installed font file whose PostScript name is `ps` (system, user and Adobe Fonts folders, collections
+    included), or None. lib/fonts.py keeps the index and rebuilds it when a font folder changes (T2.17, T2.10)."""
+    from . import fonts
+    hit = fonts.find(ps)
+    return hit["file"] if hit and hit["ps"] == ps else None

@@ -14,7 +14,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from .common import still_category, Paths, brand_fallback, font_role_fallback, frame_size, load_config, read_json, write_json, now_iso, ms_to_frame
-from .font_roles import DEFAULT_ROLE_STYLE, resolve
+from .font_roles import DEFAULT_ROLE_STYLE, WEIGHT, resolve
+from . import fonts as fontdb
+
+_ARABIC_TEXT = __import__("re").compile("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
 
 
 def _shape(s: str) -> str:
@@ -44,7 +47,7 @@ class Brand:
                 self.files[wgt["style"].lower()] = wgt["file"]
                 self.ps_names[wgt["style"].lower()] = wgt["postscript_name"]
         self.engines = set()
-        self.typography, self._faces = typ, {}
+        self.typography, self._faces, self._fallbacks_used = typ, {}, {}
         # the weight each role wants (typography.json roles, then brand.json, then the house default)
         self.role_style = {r: self.face(r)["wanted"] for r in DEFAULT_ROLE_STYLE}
 
@@ -55,9 +58,22 @@ class Brand:
         return self._faces[role]
 
     def font(self, role: str, size: int):
-        """Shaping text engine for this role. The chosen engine is recorded in self.engines (QC shows it)."""
-        from . import ct_text, hb_text
+        """Shaping text engine for this role. The chosen engine is recorded in self.engines (QC shows it).
+        G72: when the client's font for the role has no Arabic, a text block with Arabic is drawn with the system
+        Arabic fallback (lib/fonts.py) at the same size, never Pillow's bitmap font; font_warnings() names it."""
         face = self.face(role)
+        own = self._font(face, size)
+        if own is not None and self._has_arabic(face):
+            return own
+        fb = fontdb.arabic_fallback(bold=WEIGHT.get(face["wanted"], 400) >= 600)
+        fb_font = self._font(fb, size) if fb else None
+        if fb_font is None:
+            return own if own is not None else _ArabicAware(None, None, self, None)
+        return _ArabicAware(own, fb_font, self, fb)
+
+    def _font(self, face: dict, size: int):
+        """The engine for one face {file, ps[, index]}: CoreText, HarfBuzz, else Pillow; None when it has neither."""
+        from . import ct_text, hb_text
         if ct_text.AVAILABLE:
             ps = face["ps"]
             if ps:
@@ -65,21 +81,56 @@ class Brand:
                 if spec.is_exact:  # font installed -> exact brand font, full shaping (verified on macOS)
                     self.engines.add("coretext")
                     return spec
-        f = face["file"]
+        f, index = face["file"], face.get("index") or 0
         if f and hb_text.AVAILABLE:
             try:
-                spec = hb_text.HBFontSpec(f, size)
+                spec = hb_text.HBFontSpec(f, size, index=index)
                 self.engines.add("harfbuzz")
                 return spec
             except Exception:  # unreadable font file -> fallback below
                 pass
+        if not f:
+            return None
         self.engines.add("pillow-fallback")
-        return ImageFont.truetype(f, size) if f else ImageFont.load_default()
+        return ImageFont.truetype(f, size, index=index)
+
+    def _has_arabic(self, face: dict) -> bool:
+        fam = ((self.typography or {}).get("families") or {}).get(face.get("family")) or {}
+        if "supports_arabic" in fam:
+            return bool(fam["supports_arabic"])
+        return fontdb.supports_arabic(face["file"]) if face.get("file") else True
+
+    def font_warnings(self) -> list[str]:
+        """'client has no Arabic font — using <fallback>' for each fallback that drew Arabic text (G72)."""
+        return [fontdb.fallback_warning(f) for f in self._fallbacks_used.values()]
+
+
+class _ArabicAware:
+    """A role's font when the client's font has no Arabic (G72): _text_block asks for_text(), which gives the system
+    Arabic fallback for a block with Arabic (and for every block when the client has no font), else the brand font."""
+
+    def __init__(self, own, fallback, brand: Brand, fb_face: dict | None):
+        self.own, self.fallback, self.brand, self.fb_face = own, fallback, brand, fb_face
+
+    def for_text(self, text: str):
+        arabic = bool(_ARABIC_TEXT.search(str(text or "")))
+        if arabic:
+            key = self.fb_face["ps"] if self.fb_face else ""
+            self.brand._fallbacks_used.setdefault(key, self.fb_face)
+        if self.fallback is None:
+            return self.own if self.own is not None else ImageFont.load_default()
+        return self.fallback if arabic or self.own is None else self.own
+
+    def __getattr__(self, k):
+        if k.startswith("__") or k in ("own", "fallback", "brand", "fb_face"):
+            raise AttributeError(k)
+        return getattr(self.for_text(""), k)
 
 
 def _text_block(d: ImageDraw.ImageDraw, text: str, font, cx: int, cy: int, fill, line_gap=1.3, max_chars=24,
                 shadow=True):
     from .ae_builder import wrap_lines
+    font = font.for_text(text) if hasattr(font, "for_text") else font     # G72: Arabic without an Arabic brand font
     lines = wrap_lines(text, max_chars).split("\r")
     if getattr(font, "engine", None) in ("coretext", "harfbuzz"):
         im = d._image
@@ -510,6 +561,7 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
         from .media_util import contact_sheet
         contact_sheet([(c, "") for c in comps], paths.p("08_quality_control/previews/_contact_sheet.jpg"),
                       cols=6, tile_w=270, tile_h=round(270 * H / W))
+    warns += [w for w in b.font_warnings() if w not in warns]
     return {"previews": outs, "composites": comps, "warnings": warns}
 
 

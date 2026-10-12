@@ -214,15 +214,25 @@ def native_path(s: str) -> str:
 
 
 # --------------------------------------------------------------------------- fonts
-def font_dirs() -> list[Path]:
-    if IS_WIN:
-        dirs = [Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"]
-        if os.environ.get("LOCALAPPDATA"):
-            dirs.append(Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "Windows" / "Fonts")
+def font_dirs(system: str | None = None, env=None, home: Path | None = None) -> list[Path]:
+    """The installed-font folders (lib/fonts.py reads them recursively), including the Adobe Fonts (Creative Cloud)
+    livetype folder, whose files have obfuscated names. system ("windows" | "darwin" | "linux"), env and home are
+    injectable for tests (default: this machine)."""
+    system = system or ("windows" if IS_WIN else "darwin" if IS_MAC else "linux")
+    env = os.environ if env is None else env
+    home = Path(home) if home else Path.home()
+    if system == "windows":
+        dirs = [Path(env.get("WINDIR", r"C:\Windows")) / "Fonts"]
+        if env.get("LOCALAPPDATA"):
+            dirs.append(Path(env["LOCALAPPDATA"]) / "Microsoft" / "Windows" / "Fonts")
+        if env.get("APPDATA"):
+            dirs.append(Path(env["APPDATA"]) / "Adobe" / "CoreSync" / "plugins" / "livetype")
         return dirs
-    if IS_MAC:
-        return [Path.home() / "Library/Fonts", Path("/Library/Fonts"), Path("/System/Library/Fonts")]
-    return [Path.home() / ".local/share/fonts", Path.home() / ".fonts", Path("/usr/share/fonts"), Path("/usr/local/share/fonts")]
+    if system == "darwin":
+        return [home / "Library/Fonts", Path("/Library/Fonts"), Path("/System/Library/Fonts"),
+                Path("/System/Library/Fonts/Supplemental"),
+                home / "Library/Application Support/Adobe/CoreSync/plugins/livetype"]
+    return [home / ".local/share/fonts", home / ".fonts", Path("/usr/share/fonts"), Path("/usr/local/share/fonts")]
 
 
 def font_dirs_stamp(dirs: list[Path] | None = None) -> tuple:

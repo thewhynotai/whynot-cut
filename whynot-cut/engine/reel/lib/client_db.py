@@ -18,33 +18,12 @@ from .discover import read_document
 HEX = re.compile(r"#([0-9A-Fa-f]{6})\b")
 from . import plat
 
-_INSTALLED_PS: dict = {}       # {"stamp": font-folder stamp, "names": {ps: file}}
-
-
 def installed_postscript_names() -> dict:
-    """PostScript name -> installed file, for every font in the OS font folders (an installed copy may be renamed,
-    e.g. Windows per-user installs). Rebuilt only when the font folders change (plat.font_dirs_stamp), so a font
-    installed while a long-lived process runs is found; unreadable files are skipped."""
-    dirs = plat.font_dirs()
-    stamp = plat.font_dirs_stamp(dirs)
-    if _INSTALLED_PS.get("stamp") != stamp:
-        from fontTools.ttLib import TTFont
-        names = {}
-        for d in dirs:
-            if not d.is_dir():
-                continue
-            for f in d.rglob("*"):
-                if f.suffix.lower() not in (".otf", ".ttf"):
-                    continue
-                try:
-                    with TTFont(str(f), lazy=True, fontNumber=0) as tt:
-                        n = tt["name"].getName(6, 3, 1, 0x409)
-                    if n:
-                        names.setdefault(str(n), str(f))
-                except Exception:
-                    continue
-        _INSTALLED_PS.update(stamp=stamp, names=names)
-    return _INSTALLED_PS["names"]
+    """PostScript name -> installed file, for every face in the OS font folders, collections and Adobe Fonts included
+    (an installed copy may be renamed: Windows per-user installs, Adobe Fonts' obfuscated names). lib/fonts.py keeps
+    the index and rebuilds it when a font folder changes (a font installed while a long-lived process runs is found)."""
+    from . import fonts
+    return fonts.postscript_names()
 
 
 def hex_to_rgb(h: str) -> list[int]:

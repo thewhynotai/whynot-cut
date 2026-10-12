@@ -2667,15 +2667,12 @@ class TestArabicPaths(unittest.TestCase):
         from lib import motion_layout, plat
         font, copy = self.font_copy()
         ps = freetype.Face(str(font)).postscript_name.decode()
-        saved = (plat.font_dirs, dict(motion_layout._FONT_FILES))
+        saved = plat.font_dirs
         plat.font_dirs = lambda: [copy.parent]
-        motion_layout._FONT_FILES.clear()
         try:
             self.assertEqual(motion_layout.find_font_file(ps), str(copy))
         finally:
-            plat.font_dirs = saved[0]
-            motion_layout._FONT_FILES.clear()
-            motion_layout._FONT_FILES.update(saved[1])
+            plat.font_dirs = saved
 
     def fake_aerender(self, windows: bool = True):
         """aerender's process call replaced: records the command and what -project held, writes the -output file.
