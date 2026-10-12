@@ -22,6 +22,8 @@ calls, Invoke-Expression), and what they start: `cmd /c|//c` (with its own & && 
 Paths are expanded first: globs (against the real folder), $PWD, $(pwd), $HOME, $env:USERPROFILE, ~, and variables
 assigned from a client source within the same command (`for f in data/Raw/*`, `$f = Get-ChildItem data`,
 `foreach ($f in ...)`, `$_` in a block fed by such a pipeline).
+Fails closed on the guarded tools (Gate 2 G1): a check that crashes or runs past DEADLINE (8 s) blocks; only
+unparsable JSON input is let through (exit 0).
 Limits (a guardrail against mistakes, not a sandbox; it errs on the side of allowing reads), not inspected:
   * writes made from inside an interpreter (`python -c`, a script file, `node -e`);
   * variables set in an earlier tool call or outside the command ($env:X set before; `export` in another call);
@@ -34,11 +36,13 @@ Limits (a guardrail against mistakes, not a sandbox; it errs on the side of allo
 """
 from __future__ import annotations
 
+import _thread
 import base64
 import fnmatch
 import glob
 import json
 import os
+import posixpath
 import re
 import shlex
 import sys
@@ -232,15 +236,40 @@ def expand(s: str, cwd: Path) -> str:
     return s
 
 
+BRACE_CAP = 64                             # more alternatives than this in one word: blocked, not truncated
+_BRACE = re.compile(r"(?<!\$)\{([^{}]*,[^{}]*)\}")
+
+
+def _brace_over(s: str):
+    block(f"a word with more than {BRACE_CAP} brace-expansion alternatives ({s[:60]}...) cannot be checked. "
+          f"Write the paths out, or use a glob.")
+
+
 def brace_expand(s: str) -> list[str]:
-    """Bash brace expansion: {assets,data} -> assets data, dat{a,} -> data dat (not ${var})."""
-    m = re.search(r"(?<!\$)\{([^{}]*,[^{}]*)\}", s)
-    if not m:
+    """Bash brace expansion: {assets,data} -> assets data, dat{a,} -> data dat (not ${var}). Over BRACE_CAP
+    alternatives blocks (G1 C4: was materialised in full then cut to 64, 2^24 words took 44 s and hid the rest):
+    the disjoint innermost groups give a lower bound without expanding, and the expansion itself stops at the cap."""
+    if "{" not in s:
         return [s]
-    out = []
-    for part in m.group(1).split(","):
-        out += brace_expand(s[:m.start()] + part + s[m.end():])
-    return out[:64]
+    n = 1
+    for g in _BRACE.finditer(s):           # each disjoint group multiplies the count by its alternatives
+        n *= g.group(1).count(",") + 1
+        if n > BRACE_CAP:
+            _brace_over(s)
+    out, stack, steps = [], [s], 0
+    while stack:                           # depth first, no recursion (nested groups appear as they are substituted)
+        w = stack.pop()
+        steps += 1
+        if steps > 8 * BRACE_CAP:
+            _brace_over(s)
+        m = _BRACE.search(w)
+        if not m:
+            out.append(w)
+            if len(out) > BRACE_CAP:
+                _brace_over(s)
+            continue
+        stack.extend(w[:m.start()] + part + w[m.end():] for part in reversed(m.group(1).split(",")))
+    return out
 
 
 def paths_of(tok: str, cwd: Path) -> list[Path]:
@@ -1245,7 +1274,7 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
                     is_client(Path(os.path.abspath(p.parent.parent.parent))):
                 block(f"deleting the whole project folder {p.name} is not allowed — ask the editor to do it.")
     # engine-level rules
-    check_reel(exe, argv, agent)
+    check_reel(exe, argv, agent, cwd)
     return cwd
 
 
@@ -1284,13 +1313,87 @@ def opt_value(argv: list[str], name: str) -> str | None:
     return vals[-1] if vals else None
 
 
-def check_reel(exe: str, argv: list[str], agent: str | None):
-    # `python -B .../engine/reel/cli.py ...` / `py -3 .../cli.py` (interpreter flags before the script) is `reel`
-    is_reel = exe == "reel" or ((exe.startswith("python") or exe == "py") and
-                                any(a.strip("'\"").replace("\\", "/").endswith("engine/reel/cli.py") for a in argv[1:4]))
-    if is_reel:
-        sub = next((a for a in argv[1:] if not a.startswith("-") and not a.endswith("cli.py")
-                    and argv[argv.index(a) - 1] not in GLOBAL_VALUE_OPTS), None)
+PY_VALUE_FLAGS = "XWcmQ"                    # python short options that take a value (`-X utf8`, `-Xutf8`, `-BX utf8`)
+PY_LONG_VALUE = {"--check-hash-based-pycs"}
+
+
+def _slash(s: str) -> str:
+    return s.strip("'\"").replace("\\", "/")
+
+
+def is_reel_script(word: str, cwd: Path) -> bool:
+    """The word names the engine CLI: any path ending in engine/reel/cli.py (either slash, `.`/`..` segments
+    normalised, variables kept as written: `$root\\engine\\reel\\cli.py`); a relative one joined to the tracked cwd
+    (`cd .../engine/reel && python cli.py`)."""
+    w = _slash(word)
+    if not w.lower().endswith("cli.py"):
+        return False
+    if not (w.startswith(("/", "$", "%", "~")) or re.match(r"^[A-Za-z]:/", w)):
+        w = _slash(str(cwd)).rstrip("/") + "/" + w
+    return posixpath.normpath(w).lower().endswith("/engine/reel/cli.py")
+
+
+def reel_args(exe: str, argv: list[str], cwd: Path) -> list[str] | None:
+    """The engine's own arguments when this command starts the reel CLI, else None: `reel ...`, the script run
+    directly, or an interpreter (python*, py, a variable such as `$py` / `%PY%`) with any number of its own options
+    (G1 C1/C2: `-X utf8`, `-W ignore`, `-s -B -E -I`) before the script, or `-m reel.cli` (`-m cli` from
+    engine/reel). `-c` code and other modules are not the CLI."""
+    if exe == "reel":
+        return argv[1:]
+    if is_reel_script(argv[0], cwd):
+        return argv[1:]
+    if not (exe.startswith("python") or exe == "py" or exe[:1] in ("$", "%")):
+        return None
+    i = 1
+    while i < len(argv):
+        a = argv[i].strip("'\"")
+        if a == "--":
+            i += 1
+            break
+        if a.startswith("--"):
+            i += 2 if a in PY_LONG_VALUE else 1
+            continue
+        if not a.startswith("-") or a == "-":
+            break
+        used = 1
+        for k, ch in enumerate(a[1:], 1):
+            if ch in PY_VALUE_FLAGS:
+                inline = a[k + 1:]
+                val = inline or (argv[i + 1].strip("'\"") if i + 1 < len(argv) else "")
+                used = 1 if inline else 2
+                if ch == "c":
+                    return None
+                if ch == "m":
+                    mod = val.lower()
+                    here = _slash(str(cwd)).rstrip("/").lower()
+                    if mod == "reel.cli" or mod.endswith(".reel.cli") or (mod == "cli" and here.endswith("/engine/reel")):
+                        return argv[i + used:]
+                    return None
+                break
+        i += used
+    if i < len(argv) and is_reel_script(argv[i], cwd):
+        return argv[i + 1:]
+    return None
+
+
+def reel_sub(args: list[str]) -> str | None:
+    """The subcommand: the first word that is neither an option nor the value of a global option (by position, G1 C3:
+    `reel --root handoff handoff --delivered`)."""
+    i = 0
+    while i < len(args):
+        a = args[i].strip("'\"")
+        if a.startswith("-"):
+            i += 2 if a in GLOBAL_VALUE_OPTS else 1
+            continue
+        return a
+    return None
+
+
+def check_reel(exe: str, argv: list[str], agent: str | None, cwd: Path | None = None):
+    rest = reel_args(exe, argv, cwd if cwd is not None else Path.cwd())
+    if rest is not None:
+        argv = ["reel"] + rest
+        sub = reel_sub(rest)
         if sub in EXTRAS and "--extras" not in argv:
             block(f"`reel {sub}` is an optional After Effects/Photoshop extra. The pipeline is Premiere-only "
                   f"unless the editor explicitly asked for AE/PS; then add --extras.")
@@ -1636,8 +1739,35 @@ def main():
         data = json.load(sys.stdin)
     except Exception:
         sys.exit(0)
+    tool = data.get("tool_name", "") if isinstance(data, dict) else ""
+    guarded = tool in WRITE_TOOLS or tool in ("Bash", "PowerShell")
+    if guarded:                         # G1 C4: never let the 10 s hook timeout decide (a timeout lets the call run)
+        _thread.start_new_thread(_watchdog, (DEADLINE,))       # built in (no import cost); ends with the process
+    try:
+        check_call(data, tool)
+    except SystemExit:
+        raise
+    except Exception as e:              # G1 C6: a crash exits 1, which Claude Code treats as "allow"
+        if guarded:
+            block(f"could not check this {tool} call ({type(e).__name__}: {str(e)[:200]}), so it is blocked. "
+                  f"Simplify the command or split it; report it if a plain command is refused.")
+    sys.exit(0)
+
+
+DEADLINE = 8.0                          # seconds; the hook's own timeout is 10 s
+
+
+def _watchdog(seconds: float):
+    time.sleep(seconds)
+    sys.stderr.write(f"WhyNot Cut guard: checking this command took longer than {seconds:g} s, so it is blocked. "
+                     f"Simplify it (fewer brace alternatives, a narrower glob or folder).\n")
+    sys.stderr.flush()
+    os._exit(2)
+
+
+def check_call(data: dict, tool: str):
+    """One PreToolUse call; returns to allow, block() exits 2."""
     heartbeat()
-    tool = data.get("tool_name", "")
     ti = data.get("tool_input") or {}
     cwd = Path(native(data.get("cwd") or os.getcwd()))
     agent = data.get("agent_type") or None          # full name: `whynot-cut:qc-reviewer` (structure review 4.7)
@@ -1659,7 +1789,6 @@ def main():
         check_bash(ti.get("command", ""), cwd, agent)
     elif tool == "PowerShell":
         check_powershell(ti.get("command", ""), cwd, agent)
-    sys.exit(0)
 
 
 if __name__ == "__main__":

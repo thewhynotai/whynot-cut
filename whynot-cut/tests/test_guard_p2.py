@@ -122,6 +122,181 @@ class TestGuardPhase2Minors(ClientFixture):
         self.assertNotIn("81613d", (SK / "CHANGELOG.md").read_text(encoding="utf-8").lower())
 
 
+def _load_guard():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_g1", GUARD)
+    g = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g)
+    return g
+
+
+class TestGuardSeesEveryEngineLaunch(ClientFixture):
+    """Gate 2 fix round G1 (C1-C4, C6): the guard finds the reel subcommand whatever way the engine is started
+    (interpreter flags, -m, a bare cli.py after cd, normalised paths, PowerShell `& $py`), reads it by position, keeps
+    brace expansion bounded and blocks when checking a guarded call fails."""
+    SUB = "whynot-cut:premiere-builder"
+
+    def setUp(self):
+        super().setUp()
+        self.cli = (SK / "engine" / "reel" / "cli.py").as_posix()
+        self.reel_dir = (SK / "engine" / "reel").as_posix()
+
+    def call(self, cmd, agent=SUB, tool="Bash"):
+        payload = {"tool_name": tool, "tool_input": {"command": cmd}, "cwd": str(self.root)}
+        if agent:
+            payload["agent_type"] = agent
+        return hook(GUARD, payload)
+
+    def blocked(self, cmds, agent=SUB, tool="Bash"):
+        for c in cmds:
+            with self.subTest(blocked=c, agent=agent, tool=tool):
+                self.assertEqual(self.call(c, agent, tool)[0], 2, c)
+
+    def allowed(self, cmds, agent=SUB, tool="Bash"):
+        for c in cmds:
+            with self.subTest(allowed=c, agent=agent, tool=tool):
+                code, _, err = self.call(c, agent, tool)
+                self.assertEqual(code, 0, f"{c}: {err}")
+
+    def test_c1_interpreter_flags_before_the_script(self):
+        cli = self.cli
+        self.blocked([f'python -X utf8 "{cli}" handoff --delivered',
+                      f'python -W ignore "{cli}" transcript-verify --by editor',
+                      f'python -Xutf8 -W ignore::DeprecationWarning "{cli}" handoff --delivered',
+                      f'python -BX utf8 "{cli}" verify --record --verdict pass',
+                      f'py -3 -X utf8 "{cli}" approve-plan',
+                      f'python "{cli}" --root "{self.root}" --video-id C1 handoff --delivered'])
+        self.blocked([f'python -X utf8 "{cli}" ppro-build'], agent="whynot-cut:qc-reviewer")
+        self.blocked([f'python -X utf8 "{cli}" ae-build', f'python -W ignore "{cli}" --video-id C1 mogrt-build'],
+                     agent=None)
+        self.allowed([f'python -X utf8 "{cli}" ae-build --extras'], agent=None)
+        self.allowed([f'python -X utf8 "{cli}" handoff --video-id C1',
+                      f'python -W ignore "{cli}" transcript-verify --by agent',
+                      f'python -X utf8 "{cli}" range --in 00:01 --out 00:05 --label "x --delivered"'])
+
+    def test_c2_other_launch_forms_are_reel(self):
+        cli, rd = self.cli, self.reel_dir
+        self.blocked([f'cd "{self.root}" && python -m reel.cli handoff --delivered',
+                      f'cd "{rd}" && python -m cli handoff --delivered',
+                      f'cd "{rd}" && python cli.py handoff --delivered',
+                      f'cd "{rd}" && python ./cli.py verify --record --verdict pass',
+                      f'cd "{rd}/lib" && python ../cli.py handoff --delivered',
+                      f'python "{rd}/./cli.py" handoff --delivered',
+                      f'python "{rd}/lib/../cli.py" handoff --delivered',
+                      f'python -s -B -E -I "{cli}" handoff --delivered',
+                      f'python -s -B -E -I -X utf8 -W ignore "{cli}" approve-plan',
+                      'PY=python; "$PY" "$ROOT/engine/reel/cli.py" handoff --delivered',
+                      f'"{cli}" handoff --delivered'])
+        win = cli.replace("/", "\\")
+        self.blocked(['& $py "$root\\engine\\reel\\cli.py" handoff --delivered',
+                      '& "C:\\Py\\python.exe" -X utf8 "$root\\engine\\reel\\cli.py" verify --record --verdict pass',
+                      f"& python '{win}' approve-plan",
+                      f"Set-Location '{rd}'; python cli.py handoff --delivered"], tool="PowerShell")
+        self.allowed([f'cd "{rd}" && python cli.py next', "python -m reel.cli next",
+                      f'cd "{rd}" && python -m pytest cli.py handoff --delivered',
+                      f'cd "{self.root}" && python -m cli handoff --delivered',       # not the engine folder
+                      f'python -c "import sys" "{cli}" handoff --delivered',
+                      "python other/cli.py handoff --delivered",
+                      f'cat "{cli}" | grep -n delivered', f'grep -n "handoff --delivered" "{cli}"',
+                      'echo "python -X utf8 cli.py handoff --delivered" && echo done',
+                      f'git log --oneline -- "{cli}"'])
+        self.allowed(['& $py "$root\\engine\\reel\\cli.py" next',
+                      'Write-Output "python -m reel.cli handoff --delivered"'], tool="PowerShell")
+
+    def test_c3_subcommand_found_by_position(self):
+        self.blocked(["reel --root handoff handoff --delivered", "reel --video-id verify verify --record",
+                      "reel --episode approve-plan --root x approve-plan"])
+        self.allowed(["reel --root handoff next", "reel --video-id verify status"])
+
+    def test_c3_global_value_options_match_the_real_parser(self):
+        """GLOBAL_VALUE_OPTS is the reel parser's own top-level options that take a value (derived here from the
+        parser cli.main builds, so a new global option fails this test until the guard knows it)."""
+        import argparse
+        from unittest import mock
+        import cli
+
+        class Built(Exception):
+            pass
+
+        def capture(self, *a, **kw):
+            raise Built(self)
+
+        with mock.patch.object(argparse.ArgumentParser, "parse_args", capture):
+            with self.assertRaises(Built) as cm:
+                cli.main(["next"])
+        ap = cm.exception.args[0]
+        opts = {s for act in ap._actions if act.option_strings and act.nargs != 0
+                and not isinstance(act, (argparse._HelpAction, argparse._VersionAction))
+                for s in act.option_strings}
+        self.assertEqual(opts, set(_load_guard().GLOBAL_VALUE_OPTS))
+
+    def test_c4_brace_expansion_is_bounded(self):
+        g = _load_guard()
+        word = "{a,b}" * 24 + "/x"
+        t0 = time.perf_counter()
+        with self.assertRaises(SystemExit) as cm:
+            g.brace_expand(word)
+        self.assertEqual(cm.exception.code, 2)
+        self.assertLess(time.perf_counter() - t0, 1.0)
+        deep = "{a," * 400 + "b" + "}" * 400                # nested: each level adds a group after substitution
+        t0 = time.perf_counter()
+        with self.assertRaises(SystemExit):
+            g.brace_expand(deep)
+        self.assertLess(time.perf_counter() - t0, 1.0)
+        self.assertEqual(sorted(g.brace_expand("{assets,data}/x")), ["assets/x", "data/x"])
+        self.assertEqual(len(g.brace_expand("{a,b}" * 6)), 64)
+        t0 = time.perf_counter()
+        code, _, err = self.call("rm -rf " + word)
+        self.assertEqual(code, 2, err)
+        self.assertIn("brace", err)
+        self.assertLess(time.perf_counter() - t0, 5.0)
+        self.blocked(["rm -rf {output,da}{ta,x}", "rm -rf {x,{y,data}}"])
+        self.allowed(["ls {output,assets}", "echo {1,2}{3,4}"])
+
+    def test_c6_a_crash_while_checking_blocks(self):
+        import subprocess
+        for p in ({"tool_name": "Bash", "tool_input": "rm -rf data", "cwd": str(self.root)},
+                  {"tool_name": "Bash", "tool_input": {"command": ["rm", "-rf", "data"]}, "cwd": str(self.root)},
+                  {"tool_name": "PowerShell", "tool_input": {"command": 7}, "cwd": str(self.root)},
+                  {"tool_name": "Write", "tool_input": {"file_path": ["data/x"]}, "cwd": str(self.root)},
+                  {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": 12}):
+            with self.subTest(payload=p):
+                code, _, err = hook(GUARD, p)
+                self.assertEqual(code, 2, err)
+                self.assertIn("could not check", err)
+        for raw in ("not json", "[1, 2]"):                   # bad JSON: documented fail-open (exit 0)
+            r = subprocess.run([_sys.executable, str(GUARD)], input=raw, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, raw)
+        self.assertEqual(hook(GUARD, {"tool_name": "Read", "tool_input": "x", "cwd": 3})[0], 0)   # not guarded
+
+    def test_c6_the_guard_blocks_past_its_deadline(self):
+        """A check that runs past DEADLINE blocks (exit 2) instead of letting the 10 s hook timeout pass the call."""
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            drv = Path(d) / "drv.py"
+            drv.write_text(
+                "import importlib.util, io, json, sys, time\n"
+                f"spec = importlib.util.spec_from_file_location('g', {str(GUARD)!r})\n"
+                "g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)\n"
+                "g.DEADLINE = 0.3\n"
+                "g.check_bash = lambda *a: time.sleep(5)\n"
+                "sys.stdin = io.StringIO(json.dumps({'tool_name': 'Bash', 'tool_input': {'command': 'ls'}}))\n"
+                "g.main()\n", encoding="utf-8")
+            t0 = time.perf_counter()
+            r = subprocess.run([_sys.executable, str(drv)], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertIn("longer than", r.stderr)
+            self.assertLess(time.perf_counter() - t0, 4.0)
+
+    def test_no_false_positives_for_ordinary_commands(self):
+        self.allowed(['reel handoff --note "remember --delivered later" --video-id C1',
+                      "echo --delivered && grep -rn -- --record output | head",
+                      "reel range --in 00:01 --out 00:03 --footage data/Raw/C0001.MP4",
+                      "reel verify --video-id C1", "reel transcript-verify --by agent",
+                      "reel --root . --video-id C1 next", "python -m pip --version"])
+
+
 def _stamp(at: float) -> str:
     return datetime.fromtimestamp(at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
@@ -235,6 +410,18 @@ class TestHeartbeatAfterReadOnlySessions(ClientFixture):
         self.assertIn("protection may be OFF", self.start("s2"))
         (self.tdir / "s2.jsonl").write_text("", encoding="utf-8")
         self.assertNotIn("protection may be OFF", self.start("s3"))
+
+    def test_g1_unreadable_transcript_keeps_the_old_rule(self):
+        """Gate 2 G1 (C5): a transcript that cannot be read (a directory, or its folder is gone: a moved transcript
+        location) is no evidence of a quiet session -> the old rule (guard-ok missing or older than the previous
+        start), never silence. A transcript file simply not written yet in an existing folder stays silent (T2.19)."""
+        self.start("s1")
+        (self.tdir / "s1.jsonl").mkdir()
+        self.assertIn("protection may be OFF", self.start("s2"))
+        mod = self.module()
+        self.assertIsNone(mod.guarded_calls_since(str(self.tdir / "s1.jsonl"), time.time() - 5, 0, None))
+        self.assertIsNone(mod.guarded_calls_since(str(self.tdir / "gone" / "x.jsonl"), time.time() - 5, 0, None))
+        self.assertIs(mod.guarded_calls_since(str(self.tdir / "never.jsonl"), time.time() - 5, 0, None), False)
 
     def test_guarded_tools_match_the_hook_matcher(self):
         mod = self.module()

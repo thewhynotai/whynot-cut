@@ -111,8 +111,10 @@ def guarded_calls_since(transcript: str, since: float, offset: int = 0, beat=Non
     file shrank) and its subagents' transcripts (<transcript stem>/subagents/*.jsonl) changed since then. A call counts
     when it was made at or after `since` (the session's start) and more than 2 s after the guard's last heartbeat
     `beat` (None: missing), so a guard that stopped in the middle of a session is caught too (M2).
-    -> True: such a call; False: none (also: no transcript, or nothing written after `offset`); None: lines were
-    written but none is a record this code recognises (a changed transcript format: the caller keeps the old rule, M4).
+    -> True: such a call; False: none (also: the transcript file was never written in its existing folder, or nothing
+    was written after `offset`); None: lines were written but none is a record this code recognises (a changed
+    transcript format: the caller keeps the old rule, M4), or the transcript cannot be read (a directory, no
+    permission, its folder gone: Gate 2 G1 C5, also the old rule, never silence).
     Line by line, stops at the first hit; only lines naming a guarded tool are parsed."""
     after = since if beat is None else max(since, beat)
     t = Path(transcript)
@@ -120,9 +122,12 @@ def guarded_calls_since(transcript: str, since: float, offset: int = 0, beat=Non
         subs = [s for s in sorted((t.parent / t.stem / "subagents").glob("*.jsonl")) if s.stat().st_mtime >= after - 2]
     except OSError:
         subs = []
-    lines_seen = known = False
+    lines_seen = known = unreadable = False
     for f, start in [(t, offset), *((s, 0) for s in subs)]:
         try:
+            if f is t and not t.is_file() and (t.exists() or not t.parent.is_dir()):
+                unreadable = True           # G1 C5: a directory, or the transcripts folder is gone (moved location)
+                continue
             with open(f, "rb") as fh:
                 if start > os.fstat(fh.fileno()).st_size:
                     start = 0
@@ -147,9 +152,12 @@ def guarded_calls_since(transcript: str, since: float, offset: int = 0, beat=Non
                     when = _epoch(rec.get("timestamp"))
                     if calls and (when is None or _counts(when, since, beat)):
                         return True
-        except OSError:
+        except FileNotFoundError:               # not written (a session closed before its first turn): nothing to see
             continue
-    return None if lines_seen and not known else False
+        except OSError:
+            unreadable = unreadable or f is t       # the session's own transcript could not be read
+            continue
+    return None if unreadable or (lines_seen and not known) else False
 
 
 def _counts(when: float, since: float, beat) -> bool:
