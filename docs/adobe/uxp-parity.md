@@ -7,14 +7,14 @@ nothing is green from reading code or `premierepro.d.ts` alone. **Spike 0.1.2 is
 
 | | |
 |---|---|
-| Date | 2026-10-12. Spike 0.1.0 / 0.1.1 runs 00:26 - 00:42 local (UTC+3), spike 0.1.2 runs 01:38 and 01:40 local; the `at` fields in the JSON are UTC |
+| Date | 2026-10-12. Spike 0.1.0 / 0.1.1 runs 00:26 - 00:42 local (UTC+3), spike 0.1.2 runs 01:38 and 01:40 local, spike 0.1.3 run 21:19 local (18:19Z); the `at` fields in the JSON are UTC |
 | Machine | Windows 11 Pro (build 10.0.26300; UXP `os.release()` reports the compat string `6.2.9200`), x64 |
 | Premiere Pro | 26.5.2 (`uxp.host.version`; `ppro.Application.version` returns undefined, see P2) |
 | UXP | `uxp-9.3.0-local` (results key `uxp`; `host_info` key `uxp_version`) |
-| Spike | `ai.thewhynot.cut.spike` **0.1.2** (current; source commits `18db177` and `1181eaa`), 0.1.1 and 0.1.0 before it |
+| Spike | `ai.thewhynot.cut.spike` **0.1.3** (current verdict; it adds the engine-daemon connection and the host calls), 0.1.2 (source commits `18db177` and `1181eaa`), 0.1.1 and 0.1.0 before it |
 | Types | `@adobe/premierepro` 26.5.0 (`adobe/node_modules/@adobe/premierepro/src/premierepro.d.ts`) |
 | Install method | **UPIA `/install` of `dist/uxp/WhyNotCut-Spike.ccx`**, no Developer Mode, no PlayerDebugMode, no UDT. Confirmed working with 0.1.1: the UPIA list output reads "Enabled WhyNot Cut Spike 0.1.1"; the panel appears under Window > UXP Plugins and runs. Premiere was restarted once after the install. This is the install path the installer can use. 0.1.2 (commits `18db177` and `1181eaa`) was installed by the controller the same way: UPIA `/install` exit 0, `/list` shows "Enabled WhyNot Cut Spike 0.1.2", with Premiere closed; the product panel 3.0.0 likewise ("Enabled WhyNot Cut 3.0.0"). `host_info` reports `plugin_version: 0.1.2`. |
-| Manifest | v5, `host {app: premierepro, minVersion: 26.5.0}`, `localFileSystem: fullAccess`, `clipboard: readAndWrite`, `network.domains: [ws://127.0.0.1, http://127.0.0.1]` |
+| Manifest | v5, `host {app: premierepro, minVersion: 26.5.0}`, `localFileSystem: fullAccess`, `clipboard: readAndWrite`, `network.domains: [ws://127.0.0.1, http://127.0.0.1]`. **These entries do not match a URL with a port, so UXP blocked the 0.1.3 connection** (W1). Ruling: `network.domains: "all"` in the product and spike manifests (spec fallback rule); another implementer is changing it |
 | Test data | only under `Editing Plugin/whynot-test/` (fictional PODCAST-TEST: one base FCP7 XML + one PNG still); nothing in `D:\WhyNot Clients` |
 
 Result files are on this PC in `C:\Users\LOQ\.whynot-cut\uxp-spike\` (`results-20261012-HHMMSS.json`), plus
@@ -31,6 +31,8 @@ Result files are on this PC in `C:\Users\LOQ\.whynot-cut\uxp-spike\` (`results-2
 | `004058`, `004108`, `004145` | 0.1.1 | Run spike (`kept_project_open: false`) | Full run including save / close / reopen. Identical outcome per step in all three runs. The reopen failed in all three (`Failed to open the project`); position, crop, Gaussian Blur, preview codec and frame export were red. |
 | **`013838`** | **0.1.2** | **Run spike** (full, `kept_project_open: false`) | **18 probes: 14 pass, 2 fail, 2 n/a** (counted from the file: `effects_by_match_name` fails only on the Repeat Edge Pixels lookup; `save_close_open` fails because open attempts 1 - 3 failed although attempt 4 succeeded; `ws_loopback` and `encoder_export` are n/a). All of save / close / reopen / save-as ran. 26 PNGs in `frames/` per 0.1.2 run (52 with the next run). |
 | **`014010`** | **0.1.2** | **Run, keep project open** (`kept_project_open: true`), stops after `undo_transaction` | 15 probes: 13 pass, 1 fail (the same effects step), 1 n/a (`ws_loopback`). This is the run the panel shows ("Done: 13 pass, 1 fail, 1 n/a"; screenshot below) and the project the History screenshot belongs to. All the measurements of 013838 repeat here (same PNG checksums for the time-basis frames). |
+| `204411`, `204511` | 0.1.2 | normal runs at 17:44Z and 17:45Z (between the 0.1.2 and 0.1.3 runs) | Both failed early and are not used as evidence: `204411` (1 pass, 13 fail, 1 n/a) stopped at `create_project` ("createProject returned nothing" after 15 050 ms, so every later probe was refused); `204511` (5 pass, 11 fail, 2 n/a) created the project but `import_fcp7_xml` found no new sequence after 22 823 ms ("importFiles returned true but it created no new sequence"). Cause not recorded; createProject and the XML import can fail in a bad state, so the adapter needs a verify-and-retry. |
+| **`211920`** | **0.1.3** | **Run spike** (full, `kept_project_open: false`; Premiere 26.5.2) | **19 probes: 15 pass, 3 fail, 1 n/a** (counted from the file; the spike panel in the screenshot reads "Done: 15 pass, 3 fail, 1 n/a"). The 3 fails: `ws_loopback` (new in 0.1.3: **UXP refused the connection**, W1), `effects_by_match_name` (**same single reason as 0.1.2**: only the "Repeat Edge Pixels" lookup by name, Blurriness 90 reads back; Sharpen, Noise, Lumetri ok) and `save_close_open` (**same as 0.1.2**: open attempts 1 - 3 failed in 1 376 / 2 / 755 ms, attempt 4 with the backslash path opened in 957 ms and persistence verified; save 2 634 ms, close 396 ms). n/a: `encoder_export` (off). New probe `host_calls` ok (H1 - H3). Everything else of 0.1.2 repeats: the time-basis and frame-export PNGs have the same checksums as in `013838`; the winning export form is again `name + dir\`. `create_project` took 14 717 ms, `import_fcp7_xml` 1 023 ms, `export_frame` 13 679 ms. 26 more PNGs in `frames/` (`exp_20261012-211920_*`). Screenshot: `docs/adobe/evidence/2026-10-12-premiere-run4-panel-blocked.webp`. |
 
 Status legend: 🟢 works, verified live. 🔴 did not work (the cause column says API gap or spike defect). 🟡 partly works
 or works with a condition. ⚪ pending: not probed, or blocked. Decision rule: green -> UXP adapter; red -> CEP compat
@@ -111,16 +113,23 @@ sub-step named `y` in `detail.steps`. Times are ms unless marked s. "0.1.1:" in 
 | U1 | Mutation pattern (every write undoable in one step) | 🟢 | `project.lockedAccess(() => project.executeTransaction(ca => ca.addAction(a), label))` | every write in R/013838 returned `true` through this pattern | - | UXP adapter |
 | U2 | Transaction label shows as a named undo step | 🟢 | `executeTransaction(build, "WhyNot Cut build")` | **History panel screenshots.** 0.1.2 (`docs/adobe/evidence/2026-10-12-premiere-run3-panel-history.png`, project `spike-20261012-014010` kept open): the History panel lists per-probe entries `WNC spike: clip_edits_transitions...` (x3), `WNC spike: track_rename` (x2), `WNC spike: markers` (x2) and, **last, `WhyNot Cut build`**; footer "32 Undos" (it reads the same in both screenshots, so it may be Premiere's history cap; do not read it as a step count). 0.1.1 (`docs/adobe/evidence/2026-10-12-history-undo-label.png`, kept-open project, per the controller's reading of Yunus's screenshot about 8 entries labelled "WhyNot Cut build"): the footer reads "32 Undos" too, and after one Ctrl+Z the last "WhyNot Cut build" entry is greyed out, i.e. exactly one step was undone. The Edit menu only shows "Undo", so the label is visible only in Window > History | **several transactions give several history steps**: wrap a whole build in ONE `executeTransaction` if the editor should undo it in one step | UXP adapter: one `lockedAccess` + one `executeTransaction("WhyNot Cut build")` per build |
 | U3 | One Ctrl+Z reverts all three mutations of the `undo_transaction` probe (V1 name + A1 name + marker) | ⚪ | - | R/013838 and R/014010 `steps[one_transaction_three_actions]` record `state_before` (V1 `Video 1`, A1 `Audio 1`, no `WNC undo marker`) and `state_after` (V1 `WNC Undo Test`, A1 `WNC Undo Test A1`, `WNC undo marker` present). The 0.1.2 screenshot was taken **before** pressing Ctrl+Z (the last entry is not greyed), so the revert is still unchecked | - | press Ctrl+Z once on the kept-open project and compare against `state_before` |
-| W1 | WebSocket client to the engine daemon, Origin header | ⚪ | `new WebSocket("ws://127.0.0.1:<port>")` | `ops[ws_loopback]`: `ok: null`, "pending reel serve (T6.2)"; `config.ws_url` is `null`. Only known: `WebSocket` and `fetch` exist as functions (P1) | - | measured in T6.2, see "Origin header" |
+| W1 | WebSocket client to the engine daemon (`ws://127.0.0.1:<port>/session`) | 🔴 | `new WebSocket(url)` | R/211920 `ops[ws_loopback]` (3 steps): `steps[engine.json ...]` read `~/.whynot-cut/bridge/engine.json` (keys port, token, pid, version, protocol, pid_created, started_at; port 53672, pid 83576, version `3.0.0`, protocol 4, token 64 characters, shape ok); `steps[connect ...]` failed after 0 ms with **"Permission denied to the url ws://127.0.0.1:53672/session. Manifest entry not found."** | **UXP permission rule, not a daemon problem**: the manifest `network.domains` entries `ws://127.0.0.1` and `http://127.0.0.1` do not match a URL that has a port, so the request never left Premiere | **`network.domains: "all"` in the product and spike manifests** (ruling, spec fallback rule; another implementer is changing it); re-measure after that |
+| W2 | HTTP `fetch` to the daemon (`http://127.0.0.1:<port>/status`, bearer token) | 🔴 | `fetch(url, {headers})` | R/211920 `steps[http: fetch /status ...]`: refused in 12 ms with **"Permission denied to the url http://127.0.0.1:53672/status. Manifest entry not found."** | same cause as W1 | same fix as W1 |
+| W3 | Origin header and keepalive of the daemon connection | ⚪ | - | **Unmeasured.** The request never left Premiere, so the daemon has no `origin` row in `~/.whynot-cut/logs/serve-audit.log` for the run and there was no connection to keep alive | blocked by W1 / W2 | re-measure with the `"all"` manifest; see "Origin header" |
+| H1 | Open a file in the Source Monitor | 🟡 | `SourceMonitor.openFilePath(<native backslash path>)` | R/211920 `ops[host_calls]`: `steps[SourceMonitor.openFilePath ...]` returned `true` in 44 ms for a scratch copy of the preview mp4 (2 485 388 bytes); **but** project items stayed 6 -> 6, `getProjectItem` gave no name and `getPosition` read `-400000` s straight after, so the effect on the monitor was not confirmed; `closeClip` returned `true`; the later screenshot shows "Source: (no clips)" | the call accepts a native path and returns true; whether the clip really loaded is unverified | partial: stays as is (panel use only) until a run reads the monitor state or Yunus confirms it on screen |
+| H2 | Move the playhead | 🟢 | `Sequence.setPlayerPosition(TickTime)`, read with `Sequence.getPlayerPosition()` | R/211920 `steps[Sequence.setPlayerPosition (TickTime) read back]`: scratch sequence end 41.0833 s; set 10.271 / 20.542 / 30.813 s (25 / 50 / 75 %): each returned `true` and read back **exactly** (delta 0); `steps[setPlayerPosition beyond the end / negative]`: **beyond the end (51.083 s) is accepted and read back as 51.083**; **a negative time (-1) returned `true` but is ignored** (the position stayed at 51.083; that call took 415 ms) | clamp negatives and the end yourself | UXP adapter (`set_player_position`) |
+| H3 | Open a folder or file with the system | 🟡 | `uxp.shell.openPath(path, developerText)` with native backslash paths | R/211920 `steps[shell.openPath ...]`: the three calls completed and returned the empty string `""`: folder `work_dir` in **4 650 ms**, the mp4 in **1 808 ms**, the folder again in **32 102 ms**; all three carry `consent_dialog_suspected: true` (the probe infers it from the time; it cannot see a dialog) and Premiere's own text "WhyNot Cut spike 0.1.3 is measuring whether it may open this location on your computer."; the controller reports that the folder and the mp4 did open (relayed, not in the file) | **a consent dialog is probably shown**; the third call took 32 s, so the consent was apparently **not remembered** (or the person was slow: the results do not say whether anyone answered) | partial: the adapter may use it only as a user-visible, long-timeout action (about 2 - 35 s); the product manifest grants `launchProcess` |
 
 ## Counts
 
-50 rows: **38 green, 3 red, 4 partial, 5 pending.** (After spike 0.1.1 the same matrix, 46 rows then, stood at 21 / 7 / 6 / 12.)
+55 rows: **39 green, 5 red, 6 partial, 5 pending** (spike 0.1.3). (After spike 0.1.2 the matrix had 50 rows: 38 / 3 / 4 / 5; after 0.1.1, 46 rows: 21 / 7 / 6 / 12.)
 
-- Green (38): P1, P3, P4, SD1, O2, O3, O4, O5, D1, I1, I2, S1, S2, S3, T1, T2, T3a, T4, K0, K1, K2, K3, K4, K5, K6, K7, K8, E1, E2, E3, E5, V1, N1, MK1, Q1, R1, U1, U2.
-- Red (3): P2 (Application.version undefined, workaround green), T3b (audio channel mapping / audio track types, API gap, static evidence), C1 (native caption track, API gap, static evidence).
-- Partial (4): O1 (createProject: dialog and cold-start time unresolved), S4 (other setters never set to a different value), T2b (in-point probe could not change anything), E4 (Gaussian Blur: Repeat Edge Pixels param).
-- Pending (5): S5, M1, X1, U3, W1.
+- Green (39): H2, P1, P3, P4, SD1, O2, O3, O4, O5, D1, I1, I2, S1, S2, S3, T1, T2, T3a, T4, K0, K1, K2, K3, K4, K5, K6, K7, K8, E1, E2, E3, E5, V1, N1, MK1, Q1, R1, U1, U2.
+- Red (5): P2 (Application.version undefined, workaround green), T3b (audio channel mapping / audio track types, API gap, static evidence), C1 (native caption track, API gap, static evidence), **W1 and W2 (UXP refused the WebSocket and the fetch to `127.0.0.1:<port>`: manifest entry not found)**.
+- Partial (6): O1 (createProject: dialog and cold-start time unresolved), S4 (other setters never set to a different value), T2b (in-point probe could not change anything), E4 (Gaussian Blur: Repeat Edge Pixels param), **H1 (SourceMonitor.openFilePath returned true, effect unverified), H3 (shell.openPath: consent dialog suspected)**.
+- Pending (5): S5, M1, X1, U3, W3 (Origin header and keepalive).
+
+Changes in 0.1.3: W1 went from pending to **red** (a permission refusal), W2 and W3 were split out of it, and H1 - H3 are new rows (the host calls the panel uses, never measured before). Nothing that was green in 0.1.2 changed: the time-basis and frame-export PNGs, the reopen with a backslash path, the effects and every settings value repeat.
 
 Rows that turned from red or partial in 0.1.1 to green in 0.1.2 and why: O2 (backslash path), S3 (display name), K4 (PointF built from an array), K5 (the right param / match name), K7 (frames rendered), Q1 (backslash folder), K8, E5, O3, O4, O5, D1, P4, V1, T2, T3a, T4, SD1 (probes that did not exist in 0.1.1).
 
@@ -140,6 +149,9 @@ Rows that turned from red or partial in 0.1.1 to green in 0.1.2 and why: O2 (bac
 12. **New projects**: scratch disks default to `MyDocuments` for all six folder types; set them to `SameAsProject` (SD1). A project written by `saveAs` becomes the open project.
 13. **Frame export**: the PNG file appears before it is fully written; poll the size until stable.
 14. **Install**: UPIA `/install` of the `.ccx` is enough (no Developer Mode, no PlayerDebugMode, no UDT); one Premiere restart; listed as "Enabled WhyNot Cut Spike 0.1.1" (0.1.2 replaces it).
+15. **Network permission**: a UXP manifest `network.domains` entry such as `ws://127.0.0.1` or `http://127.0.0.1` does **not** cover `127.0.0.1:<port>`; both `new WebSocket(...)` and `fetch(...)` throw "Permission denied to the url ... Manifest entry not found." before anything is sent (R/211920). Ruling: `"all"` for the product and the spike. A refused request leaves nothing in the daemon's audit log.
+16. **Host calls**: `Sequence.setPlayerPosition(TickTime)` reads back exactly (also past the end of the sequence; negative times are ignored); `SourceMonitor.openFilePath(<native backslash path>)` returns `true`, but `getPosition()` then reads `-400000` s and `getProjectItem()` has no name (a sentinel, not a time); `uxp.shell.openPath` returns `""` and is slow (1.8 - 32 s per call, consent dialog suspected, not remembered).
+17. **Failed starts**: twice (runs `204411`, `204511`) `createProject` returned nothing, or `importFiles(xml)` returned `true` without a new sequence; the spike refused to go on. Treat both as retriable failures.
 
 ## UXP adapter checklist (contract <-> UXP differences)
 
@@ -165,9 +177,14 @@ Each line is a difference the adapter owns, with where the contract says it.
   time. A placed still reports an in-point near 3600 s.
 - **One `executeTransaction` per build** (U1/U2): `project.lockedAccess(() => project.executeTransaction(build, "WhyNot
   Cut build"))`, so the whole build is one undo step with one label. Reads and the playhead stay outside it.
-- **Three host calls were never measured**: `SourceMonitor.openFilePath`, `Sequence.setPlayerPosition` and
-  `shell.openPath` are used by the panel host from the types and unit tests only. They are item (h) of the spike 0.1.3
-  list below; until then they are not green.
+- **Host calls, measured in 0.1.3** (rows H1 - H3): `Sequence.setPlayerPosition` is green (exact read-back, negatives
+  ignored, beyond the end accepted); `SourceMonitor.openFilePath` returns `true` but its effect is unverified (partial);
+  `shell.openPath` completes with `""` but takes 1.8 - 32 s and a consent dialog is suspected on every call (partial), so the
+  host calls it asynchronously with a long timeout.
+- **Network permission** (W1, W2): the product and spike manifests must use `network.domains: "all"`. The entries
+  `ws://127.0.0.1` / `http://127.0.0.1` do not match a URL with a port, so UXP refused the WebSocket and the `fetch` to
+  `127.0.0.1:<port>` ("Manifest entry not found") before they left Premiere. Until that manifest change lands and is
+  re-measured, the panel shows its "blocked" diagnosis (see "Product panel").
 - **The product manifest now grants `clipboard: readAndWrite` and `launchProcess`** (owner decision, 2026-10-12): `launchProcess {schemes: ["file"], extensions: [".mp4", ".mov", ".prproj", ""]}` (the `""` is what Adobe's external-process recipe says allows folders; dotted vs undotted extensions is documented inconsistently). The panel host tries `navigator.clipboard.writeText` / `shell.openPath` first ("Copied." / "Opened.") and falls back to the copyable box. `openPath` behaviour (consent dialog, folder via `""`, dot form of the extensions, whether `file` is needed in `schemes`) is unmeasured -> spike 0.1.3.
 - **`set_player_position` needs `sequence_name`, but `PanelHost.setPlayerPosition(t_s)` cannot pass it yet**: the host
   moves the playhead of the active sequence. T6.5 widens the host method to take the sequence name.
@@ -182,6 +199,9 @@ For the 0.1.2 run `013838` the only relayed dialog is a **Project Modified** one
 (1-second resolution). In the step log that second holds the end of `sequence_settings` (22:39:17.922Z, which includes its
 `createSetSettingsAction` transactions) and the start of `export_frame` (prepare began 22:39:17.933Z). Nothing relayed says
 whether Scratch Disk Error appeared in the 0.1.2 runs.
+For the 0.1.3 run `211920` Yunus reported **no dialog times** (none relayed), so nothing new is attributed. Every step carries
+its `at` stamp (e.g. `sequence_settings` 18:19:36.101 - .118Z, `export_frame` prepare 18:19:36.127Z, 333 ms; save 2 634 ms,
+close 396 ms, open attempts 1 376 / 2 / 755 / 957 ms) and none shows a stall, which fits a run without a modal wait.
 
 | Dialog | Text (relayed from Yunus's screenshots) | What the 0.1.2 data shows | Hypothesis (not measured) |
 |---|---|---|---|
@@ -205,12 +225,23 @@ Build, Frames, QC, Handoff) and "Nothing is running." Observed problems: the **h
 **fonts appear to be system fallbacks** (Syne and the other brand fonts are not available in UXP). The CEP Bridge panel and the
 UXP panels coexist in one Premiere.
 
+**Run 4 (spike 0.1.3), screenshot `docs/adobe/evidence/2026-10-12-premiere-run4-panel-blocked.webp`.** The product panel showed the new
+"blocked" diagnosis correctly: the chips read "Engine not running" (red), "Claude unknown" and "Host Premiere Pro 26.5.2"
+(green), and the notice reads "The panel could not reach the engine on its port. In your Claude session run: reel serve
+--status. The panel tries again by itself." The header is one line at this width (no wrapping). The spike panel (v0.1.3)
+shows "Done: 15 pass, 3 fail, 1 n/a", the Source monitor reads "Source: (no clips)", the History panel "0 Undos" for the
+reopened copy `spike-20261012-211920-copy`.
+
 ## Origin header
 
-Pending. `ws_loopback` needs `config.ws_url`, which needs `reel serve` (T6.2). When the daemon exists, record here: the
-exact `Origin` header the UXP `WebSocket` sends to `ws://127.0.0.1:<port>` (and for `http://127.0.0.1` `fetch`), whether
-the manifest `network.domains` entries `ws://127.0.0.1` / `http://127.0.0.1` accept any port, and the round trip of a
-protocol-4 `ping`. The daemon must not hard-code an allowed Origin until this is measured.
+**Still unmeasured: blocked before leaving Premiere.** In run `211920` the spike read `engine.json` (port 53672, protocol 4,
+version 3.0.0, a 64-character token) and tried `new WebSocket("ws://127.0.0.1:53672/session")` and `fetch("http://127.0.0.1:53672/status")`;
+UXP refused both with "Permission denied to the url ... Manifest entry not found" (W1, W2). The request never left
+Premiere, so the daemon has no `origin` row in `~/.whynot-cut/logs/serve-audit.log` and the keepalive could not be
+observed. After the manifest uses `network.domains: "all"`, record here: the exact `Origin` header the UXP `WebSocket`
+sends (the daemon writes an `origin` audit row only when the header is present; a `session` row without an `origin` row
+means UXP sent none), whether any port is accepted, the round trip of a protocol-4 `ping`, and how long an idle socket
+stays open. The daemon must not hard-code an allowed Origin until this is measured.
 
 ## Spike defects: status after 0.1.2
 
@@ -228,7 +259,7 @@ The 12 defects listed after 0.1.1, and where they stand.
 | 8 | `Application.version` counted as a failure | Fixed (informational step, `uxp.host.version`) |
 | 9 | Static values never set | Fixed (K8 green) |
 | 10 | Undo check pointed at the wrong menu | Fixed: per-probe labels, one `WhyNot Cut build` entry last; the Ctrl+Z revert still has to be pressed and checked (U3) |
-| 11 | Missing probes | Mostly added: save-as, project views, set end / start / move / out, transition, add track, remove clip, Lumetri. Still missing: MOGRT, `createSequence*`, audio track add, encoder export (off), `ws_loopback` |
+| 11 | Missing probes | Mostly added (0.1.3 added `host_calls` and `ws_loopback` against the real daemon): save-as, project views, set end / start / move / out, transition, add track, remove clip, Lumetri. Still missing: MOGRT, `createSequence*`, audio track add, encoder export (off), `ws_loopback` |
 | 12 | Report cleanliness | Fixed (`uxp_version`, `plugin_version`) |
 
 For a spike 0.1.3 (small): (a) the in-point probe must read the clip's current in-point before computing the target (T2b);
@@ -237,12 +268,14 @@ For a spike 0.1.3 (small): (a) the in-point probe must read the clip's current i
 actually change (the 0.1.2 XML variant rendered a frozen picture); (e) wait for the exported file to stop growing before
 recording its size; (f) the temp-folder export forms were never needed (the work-folder backslash form won first), so
 that remains untested; (g) press Ctrl+Z once and check the three mutations (U3);
-(h) measure the three host calls the panel host uses and the spike never ran: `SourceMonitor.openFilePath` (native path), `Sequence.setPlayerPosition(TickTime)` and `uxp.shell.openPath`.
+(h) measure the three host calls the panel host uses and the spike never ran: `SourceMonitor.openFilePath` (native path), `Sequence.setPlayerPosition(TickTime)` and `uxp.shell.openPath` **(done in 0.1.3, rows H1 - H3; left: confirm the source monitor really loaded the clip, and whether the `shell.openPath` consent is remembered)**. **0.1.3 itself added the daemon connection (W1 - W3); it failed on the manifest permission. Of items (a) - (g) the 0.1.3 run repeated the 0.1.2 results for (b) (Repeat Edge Pixels lookup still fails), and the Project Modified attribution (c) got no new data.**
 
 ## Decisions summary
 
 - **UXP adapter now** (green): project create (see the O1 condition), save, close, open with a backslash path, save-as, scratch-disk set, persistence, active project, project views, still import, FCP7 XML import, sequence read-back, the four settings that were probed including the preview codec by display name, still placement, clip end / start / move / out / rename / disable, add a video track, remove a clip, Scale / Rotation / Opacity / Position / Crop keyframes with bezier interpolation **keyed in media time (`clip.getInPoint() + t`)**, static param values, the filter list, Sharpen, Noise, Lumetri, transitions, track rename, markers, single-frame export (backslash form), the `lockedAccess` + `executeTransaction` pattern with its "WhyNot Cut build" History label (one transaction per build if the editor should undo the build in one step).
 - **Partial rows stay on CEP until re-measured** (decision rule above): `createProject` unattended (O1: Scratch Disk dialog and cold-start time), clip in-point action (T2b), Gaussian Blur Repeat Edge Pixels (E4), other settings setters (S4).
 - **CEP compat op through the daemon permanently**: audio channel mapping and audio track types (the base FCP7 XML carries them), native caption track.
-- **Pending**: Ctrl+Z revert of the three-mutation transaction (U3), MOGRT, `createSequence*`, encoder export, `ws_loopback` and the Origin header (T6.2).
+- **UXP network permission**: `network.domains: "all"` in the product and spike manifests (W1, W2); until it is in and re-measured, the daemon link is red and the panel stays on its "blocked" diagnosis.
+- **Host calls**: `Sequence.setPlayerPosition` goes to the adapter (H2); `SourceMonitor.openFilePath` and `shell.openPath` are partial (H1, H3): asynchronous, long timeouts, a possible consent dialog.
+- **Pending**: Ctrl+Z revert of the three-mutation transaction (U3), MOGRT, `createSequence*`, encoder export, and the Origin header and keepalive (W3, blocked by the network permission).
 - **Open question for the controller**: which call raises Project Modified (it appeared between the end of `sequence_settings` and the first calls of `export_frame`, indistinguishable at 1 s resolution), and whether Scratch Disk Error still appears. A modal appeared during a settings / export step, so an unattended UXP build run is not assumed safe until this is answered.
