@@ -9,12 +9,16 @@ _sys.dont_write_bytecode = True
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import multiprocessing
 import os
+import contextlib
+import errno
+import io
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -134,6 +138,208 @@ class TestLock(TempDir):
         f = self.tmp / "new.json"
         doc = common.update_json(f, lambda d: d["history"].append(1), default)
         self.assertEqual((doc, read_json(f), default), ({"history": [1]}, {"history": [1]}, {"history": []}))
+
+
+class TestVolumeWithoutLocks(TempDir):
+    """T2.4 review I1: a volume that refuses OS file locks (macOS SMB/AFP/File Provider: ENOTSUP/ENOLCK; a Windows
+    virtual drive: EINVAL) must not fail every locked write. The folder is noted once in the engine log and goes on
+    with the in-process lock only. Both platforms' code paths are driven with a mocked lock call."""
+    UNSUPPORTED = [errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOLCK, errno.ENOSYS, errno.EINVAL]
+
+    def refusing(self, win: bool, err: int):
+        """A context: the platform's lock call (msvcrt.locking / fcntl.flock) fails with `err`, the engine home and the
+        once-per-folder memory are the test's own. Yields the mocked call."""
+        call = mock.Mock(side_effect=OSError(err, os.strerror(err)))
+        if win:
+            mod = types.SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=call)
+        else:
+            mod = types.SimpleNamespace(LOCK_EX=2, LOCK_NB=4, LOCK_UN=8, flock=call)
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(common, "engine_home", lambda: self.tmp / "home"))
+        stack.enter_context(mock.patch.object(file_lock, "_unsupported_noted", set()))
+        stack.enter_context(mock.patch.object(file_lock, "IS_WIN", win))
+        stack.enter_context(mock.patch.object(file_lock, "msvcrt" if win else "fcntl", mod, create=True))
+        self.addCleanup(stack.close)
+        return stack, call
+
+    def log_lines(self):
+        log = self.tmp / "home" / "logs" / "pipeline.log"
+        return log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
+
+    def scenario(self, win: bool, err: int):
+        stack, call = self.refusing(win, err)
+        with stack:
+            f = self.tmp / "client" / "project-status.json"
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                with file_lock.locked(f, wait_s=1):
+                    common.write_json(f, {"n": 1})
+                    with file_lock.locked(f, wait_s=1):              # still re-entrant
+                        pass
+                    got = []
+                    t = threading.Thread(target=lambda: got.append(_try_lock(f)))
+                    t.start()
+                    t.join(10)
+                    self.assertEqual(got, [False], "another thread must still be excluded (in-process lock)")
+                with file_lock.locked(f, wait_s=1):                   # a second cycle: noted once, not twice
+                    pass
+            self.assertEqual(out.getvalue(), "", "nothing on stdout/stderr")
+            self.assertTrue(call.called)
+            self.assertEqual(read_json(f), {"n": 1})
+            lines = self.log_lines()
+            self.assertEqual(len(lines), 1, lines)
+            self.assertIn("file_lock:", lines[0])
+            self.assertIn(str(f.parent), lines[0])
+            self.assertIn("inside this process only", lines[0])
+        shutil.rmtree(self.tmp / "home", True)
+
+    def test_posix_flock_refused_is_noted_once_and_work_goes_on(self):
+        for err in self.UNSUPPORTED:
+            with self.subTest(errno=errno.errorcode.get(err, err)):
+                self.scenario(False, err)
+
+    def test_windows_byte_range_lock_refused_is_noted_once_and_work_goes_on(self):
+        for err in self.UNSUPPORTED:
+            with self.subTest(errno=errno.errorcode.get(err, err)):
+                self.scenario(True, err)
+
+    def test_each_folder_is_noted_once(self):
+        stack, _ = self.refusing(False, errno.ENOTSUP)
+        with stack:
+            for d in ("a", "b", "a"):
+                with file_lock.locked(self.tmp / d / "x.json", wait_s=1):
+                    pass
+            self.assertEqual(len(self.log_lines()), 2)
+
+    def test_other_os_errors_are_still_errors(self):
+        for win in (False, True):
+            with self.subTest(win=win):
+                stack, _ = self.refusing(win, errno.EIO)
+                with stack, self.assertRaises(OSError) as cm:
+                    with file_lock.locked(self.tmp / "x.json", wait_s=1):
+                        pass
+                self.assertEqual(cm.exception.errno, errno.EIO)
+
+    def test_a_busy_file_is_still_waited_for_not_mistaken_for_no_support(self):
+        stack, _ = self.refusing(True, errno.EACCES)       # the Windows "someone else holds it" answer
+        with stack, self.assertRaises(file_lock.LockTimeout):
+            with file_lock.locked(self.tmp / "x.json", wait_s=0.1):
+                pass
+        self.assertEqual(self.log_lines(), [])
+
+
+class TestLockFileCannotBeOpened(TempDir):
+    """T2.4 review minor 4: a lock file that cannot be created is not waited for for 120 s."""
+
+    def test_permission_error_retries_briefly_then_names_the_folder(self):
+        f = self.tmp / "ro" / "project-status.json"
+        denied = mock.Mock(side_effect=PermissionError(errno.EACCES, "Permission denied"))
+        t0 = time.monotonic()
+        with mock.patch.object(file_lock, "OPEN_RETRY_S", 0.2), mock.patch.object(file_lock.os, "open", denied):
+            with self.assertRaises(errors.Guidance) as cm:
+                with file_lock.locked(f, wait_s=60):
+                    self.fail("must not lock")
+        self.assertLess(time.monotonic() - t0, 10)
+        self.assertGreater(denied.call_count, 1, "retried for a moment (a scanner holds the file briefly)")
+        self.assertNotIsInstance(cm.exception, file_lock.LockTimeout)
+        self.assertIn("project-status.json.lock", cm.exception.error)
+        self.assertIn(str(f.parent), cm.exception.error)
+        self.assertIn(str(f.parent), cm.exception.how)
+        d = errors.describe(cm.exception)
+        self.assertEqual((d["ok"], errors.exit_code(d)), (False, 1))
+
+    def test_a_transient_permission_error_still_gets_the_lock(self):
+        f = self.tmp / "x.json"
+        real = os.open
+        calls = []
+
+        def flaky(*a, **kw):
+            calls.append(1)
+            if len(calls) < 4:
+                raise PermissionError(errno.EACCES, "Permission denied")
+            return real(*a, **kw)
+        with mock.patch.object(file_lock.os, "open", flaky):
+            with file_lock.locked(f, wait_s=5):
+                pass
+        self.assertEqual(len(calls), 4)
+
+    def test_any_other_open_failure_is_guidance_at_once(self):
+        f = self.tmp / "x.json"
+        full = mock.Mock(side_effect=OSError(errno.ENOSPC, "No space left on device"))
+        with mock.patch.object(file_lock.os, "open", full):
+            with self.assertRaises(errors.Guidance) as cm:
+                with file_lock.locked(f, wait_s=60):
+                    pass
+        self.assertEqual(full.call_count, 1)
+        self.assertIn(str(self.tmp), cm.exception.error)
+
+
+class TestTimeoutIsARefusal(TempDir):
+    """T2.4 review minor 5: a busy-file timeout exits 2 like the writer-lease refusal ("wait, run again")."""
+
+    def test_document_has_blocked_and_exits_2(self):
+        exc = file_lock.LockTimeout(self.tmp / "project-status.json", 120)
+        d = errors.describe(exc)
+        self.assertFalse(d["ok"])
+        self.assertIn("project-status.json is busy", d["blocked"])
+        self.assertIn("run this command again", d["how"])
+        self.assertEqual(errors.exit_code(d), 2)
+
+    def test_other_guidance_still_exits_1(self):
+        d = errors.describe(errors.Guidance("x", "y"))
+        self.assertNotIn("blocked", d)
+        self.assertEqual(errors.exit_code(d), 1)
+
+    def test_a_real_timeout_through_the_cli_handler_exits_2(self):
+        f = self.tmp / "x.json"
+        holder = []
+
+        def other():
+            try:
+                with file_lock.locked(f, wait_s=0.1):
+                    pass
+            except file_lock.LockTimeout as e:
+                holder.append(e)
+        with file_lock.locked(f):
+            t = threading.Thread(target=other)
+            t.start()
+            t.join(10)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as cm:
+            errors.emit(errors.report(holder[0], self.tmp / "pipeline.log", "reel discover"))
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn('"blocked"', out.getvalue())
+
+
+class TestDiscoveryChecksTheRootFirst(TempDir):
+    """T2.4 review minor 3: a wrong --root must not get `output/discovery/*.lock` files."""
+
+    def run_it(self, root: Path):
+        from lib import discover
+        with self.assertRaises(FileNotFoundError) as cm:
+            discover.run_discovery(Paths(root))
+        self.assertIn("Expected assets/ and data/", str(cm.exception))
+
+    def test_a_folder_that_is_not_a_client_gets_no_files(self):
+        wrong = self.tmp / "Downloads"
+        wrong.mkdir()
+        self.run_it(wrong)
+        self.assertEqual(list(wrong.iterdir()), [])
+
+    def test_a_root_inside_assets_or_data_gets_no_files(self):
+        client = self.tmp / "Client"
+        (client / "assets" / "Logos").mkdir(parents=True)
+        (client / "data" / "Raw").mkdir(parents=True)
+        before = sorted(p.relative_to(client).as_posix() for p in client.rglob("*"))
+        for inner in (client / "assets", client / "data", client / "data" / "Raw"):
+            self.run_it(inner)
+        self.assertEqual(sorted(p.relative_to(client).as_posix() for p in client.rglob("*")), before)
+
+    def test_a_client_folder_missing_only_data_is_refused_too(self):
+        client = self.tmp / "Half"
+        (client / "assets").mkdir(parents=True)
+        self.run_it(client)
+        self.assertFalse((client / "output").exists())
 
 
 class TestSetStatusStress(TempDir):
@@ -296,6 +502,30 @@ class TestReelsSelectAtomic(unittest.TestCase):
         self.assertEqual([x["status"] for x in r["reels"]], ["created", "created"])
         sel = read_json(self.ep.p("01_analysis/selection.json"))
         self.assertEqual(sel["history"][-1]["picked"], ["R02", "R01"])
+
+    def test_a_write_failure_on_pick_2_leaves_it_to_be_redone(self):
+        """T2.4 review minor 2: source.json is written LAST per pick, so a pick that failed half way has none (it
+        is not "unchanged" on the re-run) and the re-run makes it."""
+        from lib import reels
+        real = reels.slice_transcript
+        calls = []
+
+        def flaky(*a, **kw):
+            calls.append(1)
+            if len(calls) == 2:
+                raise OSError(28, "No space left on device")
+            return real(*a, **kw)
+        with mock.patch.object(reels, "slice_transcript", flaky):
+            with self.assertRaises(OSError):
+                self.select("R01", "R02", confirm_avoid=["R02"])
+        self.assertTrue(Paths(self.root, "EP12_R01").p("00_inputs/source.json").is_file())
+        self.assertFalse(Paths(self.root, "EP12_R02").p("00_inputs/source.json").exists())
+        self.assertFalse(self.ep.p("01_analysis/selection.json").exists())
+        r = self.select("R01", "R02", confirm_avoid=["R02"])
+        self.assertEqual([(x["reel_id"], x["status"]) for x in r["reels"]],
+                         [("EP12_R01", "unchanged"), ("EP12_R02", "created")])
+        self.assertTrue(Paths(self.root, "EP12_R02").p("00_inputs/source.json").is_file())
+        self.assertEqual(read_json(self.ep.p("01_analysis/selection.json"))["history"][-1]["picked"], ["R01", "R02"])
 
     def test_select_holds_the_selection_lock(self):
         from lib import reels

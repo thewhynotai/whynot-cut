@@ -695,13 +695,15 @@ def _select(ep, picks, adjust, by, note, confirm_avoid, force, resync, as_, fmt,
             if is_topic:
                 rec.pop("candidate")
                 rec["topic"] = cand
-        write_json(reel.p("00_inputs/source.json"), rec)
         write_json(reel.p("00_inputs/speakers.json"), slice_speakers(ep, in_ms, out_ms))
         slice_transcript(ep, reel, in_ms, out_ms)
         st = load_status(reel)
         if st.get("status") in (None, "NOT_STARTED", "TRANSCRIBED") or status == "re-sliced":
             set_status(reel, "TRANSCRIBED", f"sliced from episode {ep.episode_id} ({rid}, "
                                             f"{fmt_ts(in_ms, '.')}–{fmt_ts(out_ms, '.')})", "transcribe")
+        # source.json LAST: it is what marks the reel as made ("unchanged" on a re-run), so a pick whose write failed
+        # above has none and is redone by the next run (3.0 T2.4 review)
+        write_json(reel.p("00_inputs/source.json"), rec)
         out.append({"reel_id": reel.video_id, "status": status, "in_ms": in_ms, "out_ms": out_ms,
                     "type": ctype, "project": str(reel.project)})
     sel["history"].append({"picked": picks, "adjust": adjust or [], "confirm_avoid": list(confirm_avoid or ()),

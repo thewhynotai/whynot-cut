@@ -368,6 +368,11 @@ DISCOVERY_WAIT_S = 600.0              # a second discovery of the same client wa
 def run_discovery(paths: Paths) -> dict:
     """Discovery of one client runs one at a time (3.0 T2.4): parallel subagents never interleave its writes."""
     from .file_lock import locked
+    if not paths.assets.is_dir() or not paths.data.is_dir():
+        # before the lock: taking it creates `<folder>/output/discovery/*.lock`, which a wrong --root (or one inside
+        # assets/ or data/, the read-only source folders) must never get. Same error as discover() raises.
+        missing = [d.name for d in (paths.assets, paths.data) if not d.is_dir()]
+        raise FileNotFoundError(f"Expected assets/ and data/ under {paths.root}; missing: {missing}")
     with locked(paths.output / "discovery" / "input-inventory.json", DISCOVERY_WAIT_S):
         return _run_discovery(paths)
 

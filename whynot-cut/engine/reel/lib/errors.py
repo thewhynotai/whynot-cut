@@ -96,7 +96,10 @@ def describe(exc: BaseException) -> dict:
     """{"ok": False, "error", "where", "how"} for an exception, in plain English."""
     where = _engine_frame(exc) or "engine"
     if isinstance(exc, Guidance):
-        return {"ok": False, "error": exc.error, "where": exc.where or where, "how": exc.how}
+        doc = {"ok": False, "error": exc.error, "where": exc.where or where, "how": exc.how}
+        if getattr(exc, "blocked", False):      # a "busy, try again" refusal (lib/file_lock.LockTimeout): exit 2
+            doc["blocked"] = exc.error
+        return doc
     if isinstance(exc, FileFormatError):
         return {"ok": False, "error": f"{Path(exc.path).name} cannot be read: {exc.reason} (line {exc.line}, "
                                       f"column {exc.column})",
