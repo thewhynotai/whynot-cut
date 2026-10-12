@@ -44,3 +44,5 @@ the platform UI zones, readable contrast, brand colours.
 exits 1 even when the .aep was saved (status BUILT_UNVERIFIED: built, not verified; not a crash). Like the bridge,
 the script refuses (an alert in AE) while the open project has unsaved changes: the editor saves or closes it first.
 `--run-script` checks first and returns REFUSED at once, naming the project; tell the editor, do not retry.
+The exception is a busy build lock (`BRIDGE_BUSY`, another build holds the lock): wait for that build to finish,
+then run the command again.

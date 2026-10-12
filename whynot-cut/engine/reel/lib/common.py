@@ -414,21 +414,22 @@ def run(cmd, check=True, capture=True, timeout=None, **kw) -> subprocess.Complet
 
 # --------------------------------------------------------------------------- paths
 STRICT_ID = re.compile(r"[A-Za-z0-9._-]+")        # every id the engine hands out (clip ids, episodes, reels)
-_BAD_ID = re.compile(r"[/\\:*?\"<>|\x00-\x1f]|\.\.")
+_BAD_ID = re.compile(r"[/\\:*?\"<>|\x00-\x1f]")        # `..` is refused as a whole id (the strip rule below), not inside a name
 
 
 def check_project_id(vid, kind: str = "video id", strict: bool = False) -> str:
     """A project id is ONE plain folder name under output/projects (or output/episodes): never a path that climbs out
-    into assets/ or data/ (Gate 2 B4). Engine ids are `[A-Za-z0-9._-]+` without `..`; a clip's raw file stem
-    ("Dr Sherif intro", a 2.x project folder kept as is) is also allowed for video ids (strict=False): no separators,
-    `..`, drive colon, Windows-reserved characters, control characters, or leading/trailing space or dot."""
+    into assets/ or data/ (Gate 2 B4). Engine ids are `[A-Za-z0-9._-]+`; a clip's raw file stem ("Dr Sherif intro",
+    "Interview... part 2", a 2.x project folder kept as is) is also allowed for video ids (strict=False): no separators,
+    drive colon, Windows-reserved characters, control characters, leading/trailing space or dot (so never `.` or `..`).
+    `..` inside a name is fine: with no separator it cannot climb out."""
     v = str(vid)
     ok = bool(v) and not _BAD_ID.search(v) and v == v.strip(" .") and \
         (STRICT_ID.fullmatch(v) if strict else True)
     if not ok:
         from .errors import Guidance
         raise Guidance(f"invalid {kind} {v!r}: it must be one plain folder name (letters, digits, '.', '_', '-'; "
-                       "no '/', '\\', ':' or '..')",
+                       "no '/', '\\', ':'; not just dots)",
                        "Use the id that `reel inbox` (clips) or `reel episodes` (episodes) lists, e.g. C0239 or EP12.")
     return v
 

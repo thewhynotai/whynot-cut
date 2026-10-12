@@ -173,7 +173,7 @@ class TestB4Ids(unittest.TestCase):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
         for vid in ("C0239", "CLIP_6EB37C", "EP02TEST_R02_MO", "EP12_R01", "C0239_MOV", "DR_SHERIF_INTRO_1A2B3C",
-                    "Dr Sherif intro", "V1", "clip.v2"):
+                    "Dr Sherif intro", "V1", "clip.v2", "Interview... part 2", "x..y"):
             self.assertEqual(Paths(root, vid).project.name, vid)
         for eid in ("EP12", "EP_1A2B3C", "POD3", "EP02TEST"):
             self.assertEqual(EpisodePaths(root, eid).project.name, eid)
@@ -182,7 +182,7 @@ class TestB4Ids(unittest.TestCase):
         from lib.episode import EpisodePaths
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
-        for bad in ("../../assets/X", "..", ".", "a/b", "a\\b", "C:X", "x..y", " V1", "V1.", "a\x00b"):
+        for bad in ("../../assets/X", "..", ".", "a/b", "a\\b", "C:X", "a/../b", "...", " V1", "V1.", "a\x00b"):
             with self.subTest(bad=bad), self.assertRaises(errors.Guidance):
                 Paths(root, bad)
         for bad in ("../x", "EP 1", "a/b", "..", "EP1/../../data"):

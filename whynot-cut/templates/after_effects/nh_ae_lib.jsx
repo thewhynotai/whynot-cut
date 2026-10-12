@@ -9,7 +9,7 @@
 */
 var NH = NH || {};
 
-NH.W = 1080; NH.H = 1920; NH.FPS = 24;   // defaults only: NH.applyFrameSize() / NH.applyFps() take NH_DATA.w/h/fps: NH.applyFps() takes the profile rate from NH_DATA.fps
+NH.W = 1080; NH.H = 1920; NH.FPS = 24;   // defaults only: NH.applyFrameSize() / NH.applyFps() take NH_DATA.w/h/fps
 NH.log = [];
 
 NH.rgb = function (a) { return [a[0], a[1], a[2]]; };
