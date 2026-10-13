@@ -1177,6 +1177,21 @@ class ActionShapeTests(unittest.TestCase):
         self.assertTrue(V.validate({"closed": "yes"}, "close_project_path#/$defs/readback"))
         self.assertEqual(V.validate({"closed": False, "reason": "not open"}, "close_project_path#/$defs/readback"), [])
         self.assertTrue(V.validate({"path": ""}, "close_project_path#/$defs/data"))
+        # T6.3: save "always" | "if_clean" (optional); the readback's dirty is true / false / null (unknown, never clean)
+        for save in ("always", "if_clean"):
+            self.assertEqual(V.validate({"path": "C:/p.prproj", "save": save}, "close_project_path#/$defs/data"), [])
+        for save in ("never", True, None, "IF_CLEAN"):
+            self.assertTrue(V.validate({"path": "C:/p.prproj", "save": save}, "close_project_path#/$defs/data"), save)
+        cp = "close_project_path#/$defs/readback"
+        for dirty, api in ((True, "dirty"), (False, "isDirty()"), (None, None)):
+            self.assertEqual(V.validate({"closed": dirty is not True, "dirty": dirty, "saved": dirty is None,
+                                         "dirty_api": api}, cp), [], dirty)
+        self.assertTrue(V.validate({"closed": True, "dirty": "no"}, cp))
+        self.assertTrue(V.validate({"closed": True, "dirty": 0}, cp))
+        self.assertTrue(V.validate({"closed": True, "saved": None}, cp))
+        self.assertTrue(V.validate({"closed": True, "dirty_api": 1}, cp))
+        self.assertIn("never treat null as clean",
+                      V.load("close_project_path")["$defs"]["readback"]["properties"]["dirty"]["description"])
         self.assertTrue(V.validate({"sequence_name": "a", "track": -1}, "clip_components#/$defs/data"))
         self.assertTrue(V.validate({"sequence_name": "a", "audio": "x"}, "clip_components#/$defs/data"))
         self.assertEqual(V.validate({"sequence_name": "a"}, "clip_components#/$defs/data"), [])
@@ -1571,6 +1586,20 @@ class GoldenFixtureValidationTests(unittest.TestCase):
         self.assertNotIn("ok", res["readback"])
         self.assertEqual(V.validate_result(res), [])
         self.assertTrue(V.validate_result(edited(res, ("readback", "reason"), 5)))     # readback_failure checks the types
+
+    def test_the_close_dirty_report_keeps_what_ppro_build_decides_on(self):
+        """T6.3: close_project_path with save "if_clean" while Premiere reports unsaved changes saves and closes nothing;
+        it is still ok:true, and ppro_build.build refuses on readback.dirty is True."""
+        req = fixture_json("close_project_path", "dirty.request.json")
+        self.assertEqual(req["data"]["save"], "if_clean")
+        res = fixture_json("close_project_path", "dirty.result.json")
+        self.assertIs(res["ok"], True)
+        rb = res["readback"]
+        self.assertEqual((rb["closed"], rb["dirty"], rb["saved"]), (False, True, False))
+        self.assertIn("dirty_api", rb)
+        self.assertEqual(V.validate_result(res), [])
+        self.assertTrue(V.validate_result(edited(res, ("readback", "dirty"), "yes")))
+        self.assertTrue(V.validate_request(edited(req, ("data", "save"), "never")))
 
     def test_build_project_that_exists_is_a_failure_not_an_ok_with_a_lone_error(self):
         raw = parse_cep_result(fixture_json("build_project", "exists.cep-result.json"))

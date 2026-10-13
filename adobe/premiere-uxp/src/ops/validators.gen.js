@@ -1118,7 +1118,7 @@ function validate34(data, { instancePath = "", parentData, parentDataProperty, r
 }
 validate34.evaluated = { "props": { "frames": true }, "dynamicProps": false, "dynamicItems": false };
 const close_project_path_data = validate36;
-const schema49 = { "type": "object", "properties": { "path": { "type": "string", "minLength": 1, "description": "the .prproj to close" } }, "required": ["path"], "additionalProperties": false, "description": "The project to close (ppro_build.build)." };
+const schema49 = { "type": "object", "properties": { "path": { "type": "string", "minLength": 1, "description": "the .prproj to close" }, "save": { "enum": ["always", "if_clean"], "description": '"always" (default): save, then close. "if_clean": dirty true -> nothing saved or closed; dirty false -> closed without a save; dirty null (unknown) -> saved, then closed' } }, "required": ["path"], "additionalProperties": false, "description": "The project to close (ppro_build.build)." };
 function validate36(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -1138,7 +1138,7 @@ function validate36(data, { instancePath = "", parentData, parentDataProperty, r
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === "path")) {
+          if (!(key0 === "path" || key0 === "save")) {
             validate36.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 } }];
             return false;
             break;
@@ -1159,6 +1159,22 @@ function validate36(data, { instancePath = "", parentData, parentDataProperty, r
                 return false;
               }
             }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.save !== void 0) {
+              let data1 = data.save;
+              const _errs4 = errors;
+              if (!(data1 === "always" || data1 === "if_clean")) {
+                validate36.errors = [{ instancePath: instancePath + "/save", schemaPath: "#/properties/save/enum", keyword: "enum", params: { allowedValues: schema49.properties.save.enum } }];
+                return false;
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
           }
         }
       }
@@ -1172,7 +1188,7 @@ function validate36(data, { instancePath = "", parentData, parentDataProperty, r
 }
 validate36.evaluated = { "props": true, "dynamicProps": false, "dynamicItems": false };
 const close_project_path_readback = validate37;
-const schema50 = { "type": "object", "properties": { "closed": { "type": "boolean", "description": "closeDocument result; read by ppro_build.build" }, "path": { "type": "string" }, "reason": { "type": "string", "description": "why nothing was closed, e.g. 'not open'" } }, "required": ["closed"], "description": "Whether the project was closed." };
+const schema50 = { "type": "object", "properties": { "closed": { "type": "boolean", "description": "closeDocument result; read by ppro_build.build" }, "path": { "type": "string" }, "reason": { "type": "string", "description": "why nothing was closed, e.g. 'not open'" }, "dirty": { "type": ["boolean", "null"], "description": "the host's unsaved-changes flag; null = this host has none (unknown): never treat null as clean; read by ppro_build.build" }, "saved": { "type": "boolean", "description": "whether this call saved the project" }, "dirty_api": { "type": ["string", "null"], "description": "the host member that gave dirty (e.g. 'dirty', 'isDirty()'); null = none (Gate 6 records it)" } }, "required": ["closed"], "description": "Whether the project was closed." };
 function validate37(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -1222,6 +1238,44 @@ function validate37(data, { instancePath = "", parentData, parentDataProperty, r
             } else {
               var valid0 = true;
             }
+            if (valid0) {
+              if (data.dirty !== void 0) {
+                let data3 = data.dirty;
+                const _errs7 = errors;
+                if (typeof data3 !== "boolean" && data3 !== null) {
+                  validate37.errors = [{ instancePath: instancePath + "/dirty", schemaPath: "#/properties/dirty/type", keyword: "type", params: { type: schema50.properties.dirty.type } }];
+                  return false;
+                }
+                var valid0 = _errs7 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.saved !== void 0) {
+                  const _errs9 = errors;
+                  if (typeof data.saved !== "boolean") {
+                    validate37.errors = [{ instancePath: instancePath + "/saved", schemaPath: "#/properties/saved/type", keyword: "type", params: { type: "boolean" } }];
+                    return false;
+                  }
+                  var valid0 = _errs9 === errors;
+                } else {
+                  var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.dirty_api !== void 0) {
+                    let data5 = data.dirty_api;
+                    const _errs11 = errors;
+                    if (typeof data5 !== "string" && data5 !== null) {
+                      validate37.errors = [{ instancePath: instancePath + "/dirty_api", schemaPath: "#/properties/dirty_api/type", keyword: "type", params: { type: schema50.properties.dirty_api.type } }];
+                      return false;
+                    }
+                    var valid0 = _errs11 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1233,7 +1287,7 @@ function validate37(data, { instancePath = "", parentData, parentDataProperty, r
   validate37.errors = vErrors;
   return errors === 0;
 }
-validate37.evaluated = { "props": { "closed": true, "path": true, "reason": true }, "dynamicProps": false, "dynamicItems": false };
+validate37.evaluated = { "props": { "closed": true, "path": true, "reason": true, "dirty": true, "saved": true, "dirty_api": true }, "dynamicProps": false, "dynamicItems": false };
 const clip_components_data = validate39;
 const schema52 = { "type": "object", "properties": { "sequence_name": { "type": "string", "minLength": 1, "description": "sequence holding the clip" }, "track": { "type": "integer", "minimum": 0, "description": "0-based track, default 0" }, "clip": { "type": "integer", "minimum": 0, "description": "0-based clip index on the track, default 0" }, "audio": { "type": "boolean", "description": "look on an audio track instead of a video track" } }, "required": ["sequence_name"], "additionalProperties": false, "description": "Which clip to read (WNCPP.actions.clip_components)." };
 function validate39(data, { instancePath = "", parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {}) {

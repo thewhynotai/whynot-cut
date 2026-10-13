@@ -291,7 +291,19 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
         # close it in Premiere first: on Windows an open project locks the stills it uses, and they are re-rendered
         # below. The close SAVES the open project, so it may write the editor's unsaved work to disk (Gate 2 B2).
         # The signature leaves out what Premiere itself adds after the build's save (verify._VOLATILE_TAG).
-        closed = submit("close_project_path", {"path": str(prproj)}, timeout=60)
+        # save "if_clean": a Premiere that reports unsaved changes (dirty true) saves and closes nothing, and the build
+        # stops before any write; dirty false / null (unknown, never taken as clean) keep the signature check below.
+        closed = submit("close_project_path", {"path": str(prproj), "save": "if_clean"}, timeout=60)
+        if (((closed or {}).get("response") or {}).get("result") or {}).get("dirty") is True:
+            if not replace_edited:
+                return {"status": "EDITOR_CHANGES_PRESENT", "closed_previous": (closed or {}).get("response"),
+                        "detail": "unsaved changes in Premiere (nothing was saved or closed)",
+                        "blocked": "the project open in Premiere has unsaved changes",
+                        "fix": "The project is open in Premiere with unsaved changes (nothing was saved or closed). A "
+                               "rebuild starts from the plan, so the editor's work would NOT carry over. Ask the "
+                               "editor; only with their OK re-run with --force --replace-edited (the old file is kept "
+                               "as *_prev_*.prproj)."}
+            closed = submit("close_project_path", {"path": str(prproj), "save": "always"}, timeout=60)
         if not prproj.exists():
             after_sig, unchanged = pipeline_sig, True
         else:

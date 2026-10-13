@@ -59,6 +59,11 @@
         "recorded": true,
         "source": "ppro-queue/20261011-015038-5fc567 (test project, paths rewritten to the PODCAST-TEST layout)",
         "host_version": "Premiere Pro 26.5.2 (bridge 3.1.0)"
+      },
+      "dirty": {
+        "recorded": false,
+        "source": "written from templates/premiere/wnc_ppro_lib.jsx close_project_path (save \"if_clean\" while Premiere reports unsaved changes: nothing saved or closed; dirty_api is a stand-in until Gate 6 records the real member)",
+        "host_version": ""
       }
     }
   },

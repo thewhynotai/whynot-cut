@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { OPS } from "../src/ops/index.ts";
 import { OpError } from "../src/ops/types.ts";
-import { validateReadback } from "../src/ops/validate.ts";
+import { validateData, validateReadback } from "../src/ops/validate.ts";
 import { SEQ, WIN_OTHER, WIN_PROJECT, makeEnv, opCtx } from "./host-adapter.fakes.ts";
 
 const fwd = (p: string) => p.replace(/\\/g, "/");
@@ -70,11 +70,25 @@ test("close_project_path: saves, then closes without prompts; any path form matc
   const p = pp.addOpen(WIN_PROJECT, [{ name: SEQ }]);
   pp.addOpen(WIN_OTHER, [{ name: "A" }]);
   const rb = await OPS.close_project_path.run({ path: `\\\\?\\${fwd(WIN_PROJECT).replace("D:", "d:")}` }, opCtx(env).ctx);
-  assert.deepEqual(rb, { closed: true, path: WIN_PROJECT });
+  assert.deepEqual(rb, { closed: true, path: WIN_PROJECT, dirty: null, saved: true, dirty_api: null });
   assert.deepEqual(pp.calls, [`save ${p.name}`, `close ${p.name}`]);
   assert.deepEqual((p.closeOptions as { opts: unknown }).opts, { promptIfDirty: false, saveWorkspace: false, showCancelButton: false });
   assert.equal(pp.projects.length, 1);
   assert.equal(validateReadback("close_project_path", rb), null);
+});
+
+test("close_project_path: save 'if_clean' is accepted; with no dirty flag in UXP it saves, closes and says dirty null", async () => {
+  for (const save of ["if_clean", "always"] as const) {
+    const { env, pp } = makeEnv();
+    const p = pp.addOpen(WIN_PROJECT, [{ name: SEQ }]);
+    const data = { path: WIN_PROJECT, save };
+    assert.equal(validateData("close_project_path", data), null, save);
+    const rb = await OPS.close_project_path.run(data, opCtx(env).ctx);
+    assert.deepEqual(rb, { closed: true, path: WIN_PROJECT, dirty: null, saved: true, dirty_api: null }, save);
+    assert.deepEqual(pp.calls, [`save ${p.name}`, `close ${p.name}`], save);
+    assert.equal(validateReadback("close_project_path", rb), null, save);
+  }
+  assert.notEqual(validateData("close_project_path", { path: WIN_PROJECT, save: "never" }), null);
 });
 
 test("close_project_path: a failed save leaves the project open (nothing is lost); a refused close is reported", async () => {

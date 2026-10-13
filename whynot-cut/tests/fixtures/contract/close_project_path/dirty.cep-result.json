@@ -1,0 +1,5 @@
+{
+  "ok": true,
+  "result": "{\"ok\":true,\"action\":\"close_project_path\",\"result\":{\"path\":\"D:\\\\whynot-test\\\\PODCAST-TEST\\\\output\\\\projects\\\\EP02TEST_R02\\\\07_premiere\\\\project\\\\EP02TEST_R02_RE_EDIT.prproj\",\"dirty\":true,\"saved\":false,\"dirty_api\":\"dirty\",\"closed\":false,\"reason\":\"unsaved changes in Premiere\"}}",
+  "at": 1791882000000
+}

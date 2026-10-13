@@ -76,11 +76,14 @@ class _Client(unittest.TestCase):
                                 "content_signature": prproj_signature(self.prj), "checks": {}})
         return bt
 
-    def build(self, answer, close=None, at_job_data=None, **kw):
+    def build(self, answer, close=None, at_job_data=None, close_result=None, **kw):
         """ppro_build.build with a fake bridge: `close(prj)` plays Premiere's save-and-close, `answer(prj)` the build;
-        `at_job_data()` runs when the build gets past the close check."""
+        `at_job_data()` runs when the build gets past the close check. `close_result(data)` (T6.3) gives the close's
+        readback for the data it was sent (a close that answers closed false saved nothing: `close` is not played);
+        default {"closed": True}. Every (action, data) sent is kept in self.sent_data."""
         from lib import ppro_build
         sent = []
+        self.sent_data = []
 
         def job_data(*a, **k):
             if at_job_data:
@@ -89,10 +92,12 @@ class _Client(unittest.TestCase):
 
         def submit(action, data=None, timeout=0, **k):
             sent.append(action)
+            self.sent_data.append((action, data))
             if action == "close_project_path":
-                if close:
+                res = close_result(data) if close_result else {"closed": True}
+                if close and res.get("closed") is not False:
                     close(self.prj)
-                return {"ok": True, "response": {"ok": True, "result": {"closed": True}}}
+                return {"ok": True, "response": {"ok": True, "action": action, "result": res}}
             return answer(self.prj)
 
         with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), \
@@ -158,6 +163,95 @@ class TestB2CloseSaveIsNotThePipelines(_Client):
         self.assertIn("build_project", sent)
         rec = read_json(self.rec_p)
         self.assertGreater(rec["prproj_mtime"], time.time() - 120)
+
+
+class TestB2DirtyReportBeforeTheClose(_Client):
+    """T6.3: the close asks Premiere to save only if clean (save "if_clean"). dirty true -> EDITOR_CHANGES_PRESENT before
+    anything is written; with --replace-edited a second close saves ("always"). dirty false still runs the signature
+    check (belt and braces); dirty null (no dirty API in this Premiere) is the signature path of today."""
+
+    @staticmethod
+    def dirty(value, api="dirty"):
+        def result(data):
+            if data.get("save") == "if_clean" and value is True:
+                return {"path": data["path"], "dirty": True, "saved": False, "dirty_api": api, "closed": False,
+                        "reason": "unsaved changes in Premiere"}
+            saved = data.get("save") == "always" or value is not False
+            return {"path": data["path"], "dirty": value, "saved": saved,
+                    "dirty_api": api if value is not None else None, "closed": True}
+        return result
+
+    def saves(self):
+        return [d.get("save") for a, d in self.sent_data if a == "close_project_path"]
+
+    def test_dirty_true_is_refused_before_anything_is_written(self):
+        self.pipeline_built()
+        rec0 = self.rec_p.read_bytes()
+        before = (self.prj.read_bytes(), self.prj.stat().st_mtime_ns)
+        written = []
+        r, sent = self.build(failed, close=lambda prj: gz(prj, "UNSAVED EDITOR WORK"), overwrite=True,
+                             close_result=self.dirty(True), at_job_data=lambda: written.append("job_data"))
+        self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+        self.assertEqual(r["detail"], "unsaved changes in Premiere (nothing was saved or closed)")
+        self.assertTrue(r["blocked"])
+        self.assertIn("--replace-edited", r["fix"])
+        self.assertEqual(errors.exit_code(r), 2)
+        self.assertEqual(sent, ["close_project_path"])
+        self.assertEqual(self.saves(), ["if_clean"])
+        self.assertEqual((self.prj.read_bytes(), self.prj.stat().st_mtime_ns), before)     # bytes and mtime unchanged
+        self.assertEqual(self.rec_p.read_bytes(), rec0)                                    # the record too
+        self.assertEqual(written, [])
+        self.assertEqual(list(self.prj.parent.glob("*_prev_*")), [])                       # nothing parked
+        self.assertIs(r["closed_previous"]["result"]["dirty"], True)
+
+    def test_replace_edited_closes_again_with_save_always(self):
+        self.pipeline_built()
+        r, sent = self.build(failed, close=lambda prj: gz(prj, "UNSAVED EDITOR WORK"), overwrite=True,
+                             replace_edited=True, close_result=self.dirty(True))
+        self.assertEqual(sent, ["close_project_path", "close_project_path", "build_project"])
+        self.assertEqual(self.saves(), ["if_clean", "always"])
+        self.assertEqual(r["status"], "FAILED", r)
+        self.assertIs(r["closed_previous"]["result"]["saved"], True)                      # the second close's answer
+        self.assertIn("UNSAVED EDITOR WORK", ungz(self.prj))                                 # restored, not lost
+
+    def test_dirty_false_still_checks_the_signature(self):
+        self.pipeline_built()
+        sig0 = read_json(self.rec_p)["content_signature"]
+        r, sent = self.build(failed, close=lambda prj: gz(prj, "EDITED ANYWAY"), overwrite=True,
+                             close_result=self.dirty(False, "isDirty()"))
+        self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)                         # the file changed: refused
+        self.assertTrue(r["detail"]["content"].startswith("changed"), r)
+        self.assertEqual(sent, ["close_project_path"])
+        self.assertEqual(self.saves(), ["if_clean"])
+        self.assertEqual(read_json(self.rec_p)["content_signature"], sig0)
+        self.pipeline_built()
+        r, sent = self.build(failed, close=lambda prj: gz(prj, "BUILT"), overwrite=True,
+                             close_result=self.dirty(False, "isDirty()"))
+        self.assertIn("build_project", sent)                                               # unchanged: goes ahead
+        self.assertEqual(self.saves(), ["if_clean"])
+
+    def test_dirty_null_is_todays_signature_path(self):
+        self.pipeline_built()
+        r, sent = self.build(failed, close=lambda prj: gz(prj, "UNSAVED EDITOR WORK"), overwrite=True,
+                             close_result=self.dirty(None))
+        self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+        self.assertIn("saved by Premiere when the build closed", r["detail"]["content"])
+        self.assertEqual(sent, ["close_project_path"])
+        self.assertEqual(self.saves(), ["if_clean"])                                       # never a second close
+        self.assertIn("UNSAVED EDITOR WORK", ungz(self.prj))
+        self.pipeline_built()
+        r, sent = self.build(failed, close=lambda prj: gz(prj, "BUILT"), overwrite=True, close_result=self.dirty(None))
+        self.assertIn("build_project", sent)
+        self.assertEqual(self.saves(), ["if_clean"])
+        self.assertGreater(read_json(self.rec_p)["prproj_mtime"], time.time() - 120)
+
+    def test_a_legacy_answer_without_dirty_is_todays_path(self):
+        """A library from before T6.3 answers {closed, path} only: the signature decides, as before."""
+        self.pipeline_built()
+        r, sent = self.build(failed, close=lambda prj: gz(prj, "UNSAVED EDITOR WORK"), overwrite=True,
+                             close_result=lambda data: {"closed": True, "path": data["path"]})
+        self.assertEqual(r["status"], "EDITOR_CHANGES_PRESENT", r)
+        self.assertEqual(sent, ["close_project_path"])
 
 
 def prproj_xml(*, cc="scanned", patching=None, bag_order=False, saved="2:16:19 AM", next_id=1000001, change=390,

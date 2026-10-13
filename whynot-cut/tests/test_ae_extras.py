@@ -10,6 +10,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import contextlib
@@ -183,6 +184,144 @@ class TestExtrasFrameSize(TempDir):
             r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(json.loads(r.stdout), want, data)
+
+
+FRAME_LITERAL = re.compile(r"(?<![\w.])(1080|1920|540|960)(?![\w.])")
+
+
+def frame_literals(path: Path) -> list:
+    """(line number, code) of every line whose CODE (comments removed) has a 1080x1920 literal or its half."""
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), path.read_text(encoding="utf-8"), flags=re.S)
+    out = []
+    for n, line in enumerate(text.splitlines(), 1):
+        code = line.split("//", 1)[0]
+        if FRAME_LITERAL.search(code):
+            out.append((n, code.strip()))
+    return out
+
+
+class TestFrameSizeLiteralGuard(unittest.TestCase):
+    """T6.3 Task 3: the After Effects and Photoshop libraries take the frame size from their data (WNC_DATA.w/h,
+    WNC_PS.w/h); 1080x1920 is written only as the defaults (and, in Photoshop, the 1080x1920 the layout was drawn on)."""
+    ALLOWED = {
+        "after_effects/wnc_ae_lib.jsx": {"WNC.W = 1080; WNC.H = 1920; WNC.FPS = 24;", "WNC.W = ok ? d.w : 1080;",
+                                         "WNC.H = ok ? d.h : 1920;"},
+        "after_effects/wnc_motion_lib.jsx": set(),
+        "photoshop/wnc_ps_lib.jsx": {"WNCPS.W = 1080; WNCPS.H = 1920;", "WNCPS.W = ok ? d.w : 1080;",
+                                     "WNCPS.H = ok ? d.h : 1920;",
+                                     "WNCPS.sx = function (v) { return v * WNCPS.W / 1080; };",
+                                     "WNCPS.sy = function (v) { return v * WNCPS.H / 1920; };"},
+    }
+
+    def test_no_frame_size_literal_outside_the_defaults(self):
+        for rel, allowed in self.ALLOWED.items():
+            found = frame_literals(SK / "templates" / rel)
+            self.assertEqual([f for f in found if f[1] not in allowed], [], rel)
+            self.assertEqual({f[1] for f in found}, allowed, rel)         # the defaults are still there
+
+    def test_the_guard_sees_a_literal(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        f = tmp / "x.jsx"
+        f.write_text("// 1080 in a comment\n/* 1920\n 540 */ var a = 1;\nvar c = comp(1080, 1920);\nvar b = 10800;\n"
+                     "x.position = [540, y]; // 960\n", encoding="utf-8")
+        self.assertEqual([n for n, _ in frame_literals(f)], [4, 6])
+
+
+PS_LIB = SK / "templates/photoshop/wnc_ps_lib.jsx"
+
+# A fake Photoshop: the DOM parts wnc_ps_lib.jsx touches; every document, layer and selection is recorded in PS.
+FAKE_PS = r"""
+var PS = {docs: []};
+function UnitValue(v, u) { this.v = v; this.u = u; }
+UnitValue.prototype.as = function () { return this.v; };
+function SolidColor() { this.rgb = {}; }
+function PhotoshopSaveOptions() {} function PNGSaveOptions() {}
+var LayerKind = {TEXT: 'text'}, Justification = {CENTER: 'c'}, Units = {PIXELS: 'px'}, DialogModes = {NO: 'no'},
+    NewDocumentMode = {RGB: 'rgb'}, DocumentFill = {WHITE: 'white'}, SaveOptions = {DONOTSAVECHANGES: 0},
+    ElementPlacement = {INSIDE: 'in', PLACEATBEGINNING: 'pb'}, AnchorPosition = {MIDDLECENTER: 'mc'}, DocumentMode = {RGB: 'rgb'};
+function File(p) { this.fsName = p; this.exists = false; }
+function Doc(w, h, id) {
+    var d = this; this.w = w; this.h = h; this.id = id; this.layers = []; this.selections = [];
+    this.width = new UnitValue(w, 'px');
+    this.artLayers = [{name: ''}];
+    this.artLayers.add = function () { var L = {textItem: {}, move: function () {}}; d.layers.push(L); return L; };
+    this.layerSets = {add: function () { return {}; }};
+    this.selection = {select: function (pts) { d.selections.push(pts); }, fill: function () {}, deselect: function () {}};
+    this.saveAs = function () {}; this.close = function () {};
+}
+var app = {preferences: {rulerUnits: 'cm'}, displayDialogs: null,
+           documents: {add: function (w, h, res, id) { var d = new Doc(w, h, id); PS.docs.push(d); return d; }}};
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "needs node to run the Photoshop library with a fake Photoshop")
+class TestPhotoshopFrameSize(TempDir):
+    """T6.3 Task 3: the Photoshop documents take the profile's frame size (WNC_PS.w x WNC_PS.h, 1080x1920 default)."""
+
+    def run_ps(self, data: dict) -> dict:
+        lib = PS_LIB.read_text(encoding="utf-8").replace("#target photoshop\n", "")
+        js = self.tmp / "ps.js"
+        js.write_text(FAKE_PS + "var WNC_PS = " + json.dumps(data) + ";\n" + lib + "\nvar r = WNCPS.build();\n"
+                      "console.log(JSON.stringify({r: r, docs: PS.docs.map(function (d) { return {w: d.w, h: d.h, "
+                      "sel: d.selections, layers: d.layers.map(function (L) { return {name: L.name, "
+                      "size: L.textItem.size ? L.textItem.size.v : null, pos: L.textItem.position ? "
+                      "L.textItem.position.map(function (u) { return u.v; }) : null}; })}; })}));\n", encoding="utf-8")
+        r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def job_data(self, **size) -> dict:
+        white = [255, 255, 255]
+        return dict({"jobs": [{"id": "PS_COVER", "background": "paper", "headline": "Title", "subline": "Sub",
+                               "logo": False}],
+                     "brand": {"teal": [0, 128, 128], "white": white, "paper": white, "ink": [0, 0, 0]},
+                     "fonts": {"headline": "H", "body": "B"}, "logo": None, "out_dir": "C:/o"}, **size)
+
+    def test_a_1080x1350_document(self):
+        out = self.run_ps(self.job_data(w=1080, h=1350))
+        self.assertIn("made=1|PS_COVER", out["r"])
+        doc = out["docs"][0]
+        self.assertEqual((doc["w"], doc["h"]), (1080, 1350))
+        self.assertEqual(doc["sel"][0], [[0, 0], [1080, 0], [1080, 1350], [0, 1350]])     # the paper tint fills it
+        text = {L["name"]: L for L in doc["layers"] if L["pos"]}
+        self.assertAlmostEqual(text["Headline (editable)"]["pos"][1], 1450 * 1350 / 1920)
+        self.assertEqual(text["Headline (editable)"]["pos"][0], 540)
+        self.assertEqual(text["Headline (editable)"]["size"], 92)
+        self.assertAlmostEqual(text["Subline (editable)"]["pos"][1], 1600 * 1350 / 1920)
+
+    def test_the_default_is_1080x1920_and_unchanged(self):
+        for size in ({}, {"w": 0, "h": -5}, {"w": "1080", "h": "1350"}):
+            doc = self.run_ps(self.job_data(**size))["docs"][0]
+            self.assertEqual((doc["w"], doc["h"]), (1080, 1920), size)
+            text = {L["name"]: L for L in doc["layers"] if L["pos"]}
+            self.assertEqual(text["Headline (editable)"]["pos"], [540, 1450])
+            self.assertEqual(text["Subline (editable)"]["pos"], [540, 1600])
+            self.assertEqual((text["Headline (editable)"]["size"], text["Subline (editable)"]["size"]), (92, 46))
+
+    def test_a_landscape_document_scales_x_and_sizes_with_the_width(self):
+        doc = self.run_ps(self.job_data(w=1920, h=1080))["docs"][0]
+        self.assertEqual((doc["w"], doc["h"]), (1920, 1080))
+        head = next(L for L in doc["layers"] if L["name"] == "Headline (editable)")
+        self.assertEqual(head["pos"][0], 960)
+        self.assertAlmostEqual(head["size"], 92 * 1920 / 1080)
+
+    def test_the_generated_script_carries_the_profile_size(self):
+        from lib import ps_builder
+        for size, want in (((1080, 1350), [1080, 1350]), ((1920, 1080), [1920, 1080]), (None, [1080, 1920])):
+            root = client(self.tmp, 25, False, f"P{size[1] if size else 0}")
+            if size:
+                write_json(root / common.CLIENT_PROFILE_REL / "sequence-settings.json",
+                           {"general": {"timebase": 25, "ntsc": False, "frame_width": size[0], "frame_height": size[1]}})
+            p = Paths(root, "V1")
+            p.ensure_project()
+            with common.use_context(common.Context(p.root)):
+                res = ps_builder.generate(p)
+            text = Path(res["jsx"]).read_text(encoding="utf-8")
+            start = text.index("var WNC_PS = ") + len("var WNC_PS = ")
+            d = json.JSONDecoder().raw_decode(text[start:])[0]
+            self.assertEqual([d["w"], d["h"]], want, size)
+            self.assertIn("WNCPS.applyFrameSize();", text[text.index("WNCPS.build = function"):])
 
 
 class TestScriptDriverLock(TempDir):

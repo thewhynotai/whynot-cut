@@ -134,6 +134,25 @@ WNCPP.comp = function (item, name) {
     for (var i = 0; i < item.components.numItems; i++) { var c = item.components[i]; if (c.displayName === name) { return c; } }
     return null;
 };
+/* Effects by match name: a display name can mean another effect in a newer Premiere (26.x: "Gaussian Blur" is the new
+   AE.Impact_Blur_FX, the classic one is "Gaussian Blur (Legacy)"). Match names verified live: docs/adobe/uxp-parity.md. */
+WNCPP.MATCH = {motion: "AE.ADBE Motion", opacity: "AE.ADBE Opacity", blur: "AE.ADBE Gaussian Blur 2",
+               sharpen: "AE.ADBE Sharpen", noise: ["AE.ADBE_Noise_FX", "AE.ADBE Noise2"], crop: "AE.ADBE AECrop"};
+WNCPP.FX_NAMES = {blur: ["Gaussian Blur (Legacy)", "Gaussian Blur"], sharpen: ["Sharpen"], noise: ["Noise"],
+                  crop: ["Crop"]};      // the QE display names addEffect tries, in this order
+WNCPP.isMatch = function (got, want) {
+    if (want instanceof Array) { for (var i = 0; i < want.length; i++) { if (got === want[i]) { return true; } } return false; }
+    return got === want;
+};
+WNCPP.compByMatch = function (item, match) {   // the LAST component with that match name (an added effect is appended)
+    var found = null;
+    for (var i = 0; i < item.components.numItems; i++) {
+        var c = item.components[i], m = null;
+        try { m = c.matchName; } catch (e) { m = null; }
+        if (WNCPP.isMatch(m, match)) { found = c; }
+    }
+    return found;
+};
 WNCPP.prop = function (comp, name) {
     if (!comp) { return null; }
     for (var i = 0; i < comp.properties.numItems; i++) { var p = comp.properties[i]; if (p.displayName === name) { return p; } }
@@ -155,7 +174,19 @@ WNCPP.itemAt = function (track, startSec) {
 };
 WNCPP.secTime = function (sec) { var t = new Time(); t.seconds = sec; return t; };
 
-WNCPP.F = 1 / 24;
+WNCPP.seqWidth = function (seq) {   // the sequence's frame width in pixels (pixel offsets scale with it)
+    var w = 0;
+    try { w = Number(seq.frameSizeHorizontal) || 0; } catch (e) { w = 0; }
+    if (!(w > 0)) { try { w = Number(seq.getSettings().videoFrameWidth) || 0; } catch (e2) { w = 0; } }
+    return w > 0 ? w : 1080;
+};
+WNCPP.frameSeconds = function (seq) {   // one frame of the sequence in seconds (the animation timings count frames)
+    var s = 0;
+    try { var r = seq.getSettings().videoFrameRate; s = Number(r && r.seconds) || 0; } catch (e) { s = 0; }
+    return (s > 0 && s <= 1) ? s : 1 / 24;
+};
+
+WNCPP.F = 1 / 24;   // a default only: build_project sets it from the sequence (WNCPP.frameSeconds)
 WNCPP.placeStill = function (seq, trackIdx, projItem, g, log) {
     var track = seq.videoTracks[trackIdx];
     track.overwriteClip(projItem, g.start_s);
@@ -163,8 +194,8 @@ WNCPP.placeStill = function (seq, trackIdx, projItem, g, log) {
     if (!it) { log.push("placement not found: " + g.id); return null; }
     it.end = WNCPP.secTime(g.end_s);
     var base = it.inPoint.seconds, dur = g.end_s - g.start_s, F = WNCPP.F;
-    var motion = WNCPP.comp(it, "Motion");
-    var op = WNCPP.prop(WNCPP.comp(it, "Opacity"), "Opacity");
+    var motion = WNCPP.compByMatch(it, WNCPP.MATCH.motion) || WNCPP.comp(it, "Motion");
+    var op = WNCPP.prop(WNCPP.compByMatch(it, WNCPP.MATCH.opacity) || WNCPP.comp(it, "Opacity"), "Opacity");
     var fo = Math.min(g.fade_out_s || 0, dur / 3);
     var outKeys = fo > 0 ? [[dur - fo, 100], [dur, 0]] : [];
     var a = g.anim;
@@ -177,9 +208,9 @@ WNCPP.placeStill = function (seq, trackIdx, projItem, g, log) {
         var d0 = (g.delay_f || 1) * F, sw = (g.sweep_f || 6) * F;
         WNCPP.keyframes(WNCPP.prop(motion, "Crop Left"), base, [[0, 100], [d0, 100], [d0 + sw, 0]]);
         if (outKeys.length) { WNCPP.keyframes(op, base, [[0, 100]].concat(outKeys)); }
-    } else if (a === "slide") {               // checklist item slides in from the right
+    } else if (a === "slide") {               // checklist item slides in from the right, 60 sequence pixels
         var pos = WNCPP.prop(motion, "Position"), v = pos.getValue();
-        var dx = (v[0] <= 2) ? 60 / 1080 : 60;   // normalised or pixel coordinates, whichever this build uses
+        var dx = (v[0] <= 2) ? 60 / WNCPP.seqWidth(seq) : 60;   // normalised or pixel coordinates, whichever this build uses
         WNCPP.keyframes(pos, base, [[0, [v[0] + dx, v[1]]], [5 * F, [v[0], v[1]]]]);
         WNCPP.keyframes(op, base, [[0, 0], [4 * F, 100]].concat(outKeys));
     } else if (a === "push") {                // full-screen card: fade + slow push
@@ -215,6 +246,9 @@ WNCPP.actions.build_project = function (d) {
     for (var k in d.settings) { if (d.settings.hasOwnProperty(k)) { try { st[k] = d.settings[k]; } catch (e1) { log.push("setting " + k + ": " + e1); } } }
     ev.setSettings = seq.setSettings(st);
     ev.settings_after = WNCPP.settingsDump(seq);
+    WNCPP.F = WNCPP.frameSeconds(seq);   // the keyframe timings count frames of THIS sequence
+    ev.frame_s = WNCPP.F;
+    ev.effects = [];                     // every effect added, with the match name Premiere really applied
     // 4. graphics: import stills, place with Premiere keyframes
     var gpaths = [];
     for (var i = 0; i < d.graphics.length; i++) { gpaths.push(d.graphics[i].png); }
@@ -232,13 +266,13 @@ WNCPP.actions.build_project = function (d) {
     for (var bi = 0; d.blur_v1_clips && bi < d.blur_v1_clips.length; bi++) {
         var ci = d.blur_v1_clips[bi];
         try {
-            if (WNCPP.addEffect(seq, 0, ci, "Gaussian Blur")) {
-                var bc = WNCPP.comp(seq.videoTracks[0].clips[ci], "Gaussian Blur");
+            if (WNCPP.addEffect(seq, 0, ci, "blur", ev.effects).ok) {
+                var bc = WNCPP.compByMatch(seq.videoTracks[0].clips[ci], WNCPP.MATCH.blur);
                 var pb = WNCPP.prop(bc, "Blurriness"), pe = WNCPP.prop(bc, "Repeat Edge Pixels");
                 if (pb) { pb.setValue(90, true); }
                 if (pe) { pe.setValue(true, true); }
                 ev.blurred.push({clip: ci, blurriness: pb ? pb.getValue() : null});
-            } else { log.push("Gaussian Blur effect not found"); }
+            } else { log.push("Gaussian Blur (Legacy) effect not found"); }
         } catch (eb) { log.push("blur clip " + ci + ": " + eb); }
     }
     // 4c. strong reframe upscale: light Sharpen (+ optional Noise as grain) on the speaker clips of V1, not on the
@@ -252,15 +286,15 @@ WNCPP.actions.build_project = function (d) {
             if (isBlur) { continue; }
             try {
                 var rec = {clip: si, ok: false};
-                if (WNCPP.addEffect(seq, 0, si, "Sharpen")) {
-                    var sa = WNCPP.prop(WNCPP.comp(v1.clips[si], "Sharpen"), "Sharpen Amount");
+                if (WNCPP.addEffect(seq, 0, si, "sharpen", ev.effects).ok) {
+                    var sa = WNCPP.prop(WNCPP.compByMatch(v1.clips[si], WNCPP.MATCH.sharpen), "Sharpen Amount");
                     if (sa) { sa.setValue(d.sharpen_v1.amount, true); rec.ok = true; rec.amount = d.sharpen_v1.amount; }
                     else { log.push("Sharpen Amount property not found"); }
                 } else { log.push("Sharpen effect not found"); ev.sharpened.push(rec); break; }
-                if (d.sharpen_v1.grain && WNCPP.addEffect(seq, 0, si, "Noise")) {
+                if (d.sharpen_v1.grain && WNCPP.addEffect(seq, 0, si, "noise", ev.effects).ok) {
                     // Premiere 26 resolves "Noise" to its grain effect (ADBE_Noise_FX: Intensity, default 50 = heavy);
                     // older versions to the classic Noise ("Amount of Noise" %). Set whichever exists.
-                    var nc = WNCPP.comp(v1.clips[si], "Noise");
+                    var nc = WNCPP.compByMatch(v1.clips[si], WNCPP.MATCH.noise);
                     var na = WNCPP.prop(nc, "Intensity") || WNCPP.prop(nc, "Amount of Noise");
                     if (na) { na.setValue(d.sharpen_v1.grain, true); rec.grain = na.getValue(); }
                     else { log.push("Noise: no Intensity / Amount of Noise property"); rec.ok = false; }
@@ -407,15 +441,32 @@ WNCPP.actions.probe_frame_paths = function (d) {
     return r;
 };
 
-WNCPP.addEffect = function (seq, trackIdx, clipIdx, effectName) {
-    // Effects can only be ADDED via the QE DOM; their parameters are then keyframed through the normal DOM.
+WNCPP.addEffect = function (seq, trackIdx, clipIdx, kind, rec) {
+    // Effects can only be ADDED via the QE DOM (by display name); their parameters are then set through the normal DOM.
+    // `kind` is a WNCPP.MATCH key: its QE display names are tried in order and the first one found is added, then the
+    // match name of the component it appended is checked, so a display name that means another effect in this
+    // Premiere is reported {ok: false, got: <match name>} instead of being used. The answer is pushed onto `rec`.
     app.enableQE();
     var qs = qe.project.getActiveSequence();
     var qi = qs.getVideoTrackAt(trackIdx).getItemAt(clipIdx);
-    var fx = qe.project.getVideoEffectByName(effectName);
-    if (!fx) { return false; }
-    qi.addVideoEffect(fx);
-    return true;
+    var names = WNCPP.FX_NAMES[kind] || [kind], want = WNCPP.MATCH[kind];
+    var r = {track: trackIdx, clip: clipIdx, kind: kind, ok: false};
+    for (var i = 0; i < names.length; i++) {
+        var fx = qe.project.getVideoEffectByName(names[i]);
+        if (!fx) { continue; }
+        qi.addVideoEffect(fx);
+        r.name = names[i];
+        r.got = null;
+        try {
+            var item = seq.videoTracks[trackIdx].clips[clipIdx];
+            r.got = item.components[item.components.numItems - 1].matchName;
+        } catch (e) { r.got = null; }
+        r.ok = want === undefined || WNCPP.isMatch(r.got, want);
+        break;                          // one effect added: never a second one on the clip
+    }
+    if (!r.name) { r.error = "not found"; r.tried = names; }
+    if (rec) { rec.push(r); }
+    return r;
 };
 
 WNCPP.clipIndex = function (track, item) {   // QE indexes include empty gaps; find by start time
@@ -432,7 +483,7 @@ WNCPP.actions.test_crop = function (d) {
     app.project.openSequence(seq.sequenceID);
     var clip = seq.videoTracks[0].clips[0];
     clip.end = WNCPP.secTime(2);
-    r.added = WNCPP.addEffect(seq, 0, 0, "Crop");
+    r.added = WNCPP.addEffect(seq, 0, 0, "crop");
     clip = seq.videoTracks[0].clips[0];
     var comps = [];
     for (var i = 0; i < clip.components.numItems; i++) {
@@ -441,7 +492,7 @@ WNCPP.actions.test_crop = function (d) {
         comps.push({name: c.displayName, props: props});
     }
     r.components = comps;
-    var left = WNCPP.prop(WNCPP.comp(clip, "Crop"), "Left");
+    var left = WNCPP.prop(WNCPP.compByMatch(clip, WNCPP.MATCH.crop) || WNCPP.comp(clip, "Crop"), "Left");
     r.left_found = !!left;
     if (left) { r.keyed = WNCPP.keyframes(left, clip.inPoint.seconds, [[0, 100], [0.5, 0]]); }
     // render two frames to SEE the sweep
@@ -459,14 +510,42 @@ WNCPP.actions.test_crop = function (d) {
     return r;
 };
 
+WNCPP.DIRTY_API = ["dirty", "isDirty"];   // Premiere's ExtendScript documents no dirty flag: these members are probed
+WNCPP.dirtyProbe = function (pr) {
+    // {dirty: true|false, api: <member>} from the first member that answers a boolean, else {dirty: null, api: null}
+    for (var i = 0; i < WNCPP.DIRTY_API.length; i++) {
+        var k = WNCPP.DIRTY_API[i], v;
+        try { v = pr[k]; if (typeof v === "function") { v = pr[k](); k = k + "()"; } } catch (e) { continue; }
+        if (v === true || v === false) { return {dirty: v, api: k}; }
+    }
+    return {dirty: null, api: null};
+};
+WNCPP.projectDirty = function (pr) { return WNCPP.dirtyProbe(pr).dirty; };   // true / false / null (unknown: never clean)
+
 WNCPP.actions.close_project_path = function (d) {
-    // close a specific project if it is open (saved first so nothing is lost)
-    if (!app.projects) { return {closed: false, reason: "no projects collection"}; }
+    // close a specific project if it is open. save "always" (the default): saved first so nothing is lost.
+    // save "if_clean" (ppro_build, Gate 2 B2): unsaved changes (dirty true) -> nothing is saved or closed; a clean
+    // project (dirty false) is closed without a save; unknown (dirty null) -> saved, then closed, as "always".
+    // The readback always says dirty, saved and dirty_api (the member that answered; null = this Premiere has none).
+    var mode = d.save === "if_clean" ? "if_clean" : "always";
+    if (!app.projects) { return {closed: false, reason: "no projects collection", dirty: null, saved: false, dirty_api: null}; }
     for (var i = 0; i < app.projects.numProjects; i++) {
         var pr = app.projects[i];
-        if (pr.path === d.path) { pr.save(); return {closed: pr.closeDocument(1, 0), path: d.path}; }
+        if (pr.path === d.path) {
+            var p = WNCPP.dirtyProbe(pr), out = {path: d.path, dirty: p.dirty, saved: false, dirty_api: p.api};
+            if (mode === "if_clean" && p.dirty === true) {
+                out.closed = false;
+                out.reason = "unsaved changes in Premiere";
+                return out;
+            }
+            if (mode === "if_clean" && p.dirty === false) { out.closed = pr.closeDocument(0, 0); return out; }
+            pr.save();
+            out.saved = true;
+            out.closed = pr.closeDocument(1, 0);
+            return out;
+        }
     }
-    return {closed: false, reason: "not open"};
+    return {closed: false, reason: "not open", dirty: null, saved: false, dirty_api: null};
 };
 
 WNCPP.actions.close_project = function (d) {

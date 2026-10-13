@@ -1,0 +1,10 @@
+{
+  "protocol": 4,
+  "id": "fixture-close-dirty-0001",
+  "action": "close_project_path",
+  "data": {
+    "path": "D:\\whynot-test\\PODCAST-TEST\\output\\projects\\EP02TEST_R02\\07_premiere\\project\\EP02TEST_R02_RE_EDIT.prproj",
+    "save": "if_clean"
+  },
+  "expires_at": "2026-10-13T09:15:00Z"
+}

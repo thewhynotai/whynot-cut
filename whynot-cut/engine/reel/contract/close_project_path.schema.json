@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/close_project_path.schema.json",
   "title": "close_project_path",
-  "description": "Save and close the project at a path if it is open (ppro_build.build closes a project before rebuilding it).",
+  "description": "Close the project at a path if it is open: saved first (save \"always\", the default), or with save \"if_clean\" nothing is saved or closed when the host reports unsaved changes (ppro_build.build closes a project before rebuilding it; Gate 2 B2).",
   "$defs": {
     "data": {
       "type": "object",
@@ -11,6 +11,13 @@
           "type": "string",
           "minLength": 1,
           "description": "the .prproj to close"
+        },
+        "save": {
+          "enum": [
+            "always",
+            "if_clean"
+          ],
+          "description": "\"always\" (default): save, then close. \"if_clean\": dirty true -> nothing saved or closed; dirty false -> closed without a save; dirty null (unknown) -> saved, then closed"
         }
       },
       "required": [
@@ -32,6 +39,24 @@
         "reason": {
           "type": "string",
           "description": "why nothing was closed, e.g. 'not open'"
+        },
+        "dirty": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "the host's unsaved-changes flag; null = this host has none (unknown): never treat null as clean; read by ppro_build.build"
+        },
+        "saved": {
+          "type": "boolean",
+          "description": "whether this call saved the project"
+        },
+        "dirty_api": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the host member that gave dirty (e.g. 'dirty', 'isDirty()'); null = none (Gate 6 records it)"
         }
       },
       "required": [
