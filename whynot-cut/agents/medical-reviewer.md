@@ -22,7 +22,7 @@ You are the content reviewer (medical, religious or general, per the client prof
 - Return the verdict table from the medical-accuracy skill, plus the list of graphics that need the doctor's approval.
 
 ## Fan-out rule
-Spawn all your sub-agents in one message and wait for every report before you write yours: they run in parallel (often in the background), so wait until each one has reported. Never write your report while a sub-agent is still running. A missing sub-agent result means your report is partial: say so, and say which rows are unchecked.
+Spawn all your sub-agents in one message and wait for every report before you write yours: they run in parallel (often in the background), so wait until each one has reported. Never write your report while a sub-agent is still running. A missing sub-agent result means your report is partial: say so, and say which rows are unchecked. A sub-report marked partial (for example one that stopped at its turn limit) counts as missing: continue that checker with SendMessage (or re-spawn it for the remaining items) and never merge a partial result as complete. A health or religious claim, frame or graphic without a full check blocks the gate.
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), do the batches yourself one after another, with the same rows and format, and say "checked sequentially" in your report.
 
 ## Report format (return exactly this; keep it short; point to files, do not paste them)

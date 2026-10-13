@@ -31,6 +31,7 @@ captions you were told to expect), it is not evidence about the edit: mark it **
 Podcast reels: also report a face cut by the crop, the wrong person framed in a wide shot, and half-cut burned subtitles or logos from the episode.
 
 Motion videos (`<EP>_<ID>_MO`): frames come from After Effects renders with `frames.json` expectations: `lines`
-(text that must be fully shown), `revealed_tokens`/`revealed_items` at reveal midpoints (that many words/items visible, starting from the reading
-start — the right in Arabic), `emphasis` words, `icon`. Fail a frame for disconnected Arabic letters, wrong word order,
-missing-glyph boxes, clipped text, or a reveal that shows later words before earlier ones.
+(text that must be fully shown), `revealed_tokens`/`revealed_items` at reveal midpoints (that many words/items
+visible, starting from the reading start — the right in Arabic), `emphasis` words, `icon`. Fail a frame for
+disconnected Arabic letters, wrong word order, missing-glyph boxes, clipped text, or a reveal that shows later
+words before earlier ones.

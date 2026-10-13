@@ -34,6 +34,8 @@ A human editor finishes, mixes and renders.
    - asks three preferences (where clients live, approval mode, transcription speed)
    - creates your first client folder and tells you exactly what to drop where
 
+**Claude Code version.** Agent fields `omitClaudeMd` need Claude Code 2.1.271 or newer and `mcp__*` entries in an agent's `disallowedTools` need 2.1.178 or newer. Older versions ignore these fields; nothing breaks, the safeguards are just weaker.
+
 ## Use
 Drop files into the client folder that `/whynot-cut:start` (or `reel scaffold`) created:
 

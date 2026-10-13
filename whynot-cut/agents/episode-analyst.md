@@ -58,7 +58,7 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 ## Fan-out rule
 Spawn all your sub-agents in one message and wait for every report before you write yours: they run in parallel
 (often in the background), so wait until each one has reported. Never merge or write `reels-plan.json` while a
-moment-scout is still running. A missing result means part of the episode is unscanned: say which chunk.
+whynot-cut:moment-scout is still running. A missing result means part of the episode is unscanned: say which chunk. A sub-report marked partial (for example one that stopped at its turn limit) counts as missing: continue that scout with SendMessage (or re-spawn it for the remaining items) and never merge a partial result as complete. A chunk without a full scan stays unscanned: say which.
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), scan the chunks
 yourself one after another with the same rubric and format, and say "scanned sequentially" in your report.
 

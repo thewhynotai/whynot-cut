@@ -5,7 +5,7 @@ tools: Read, Grep
 disallowedTools: mcp__magnific, mcp__plugin_whynot-cut_magnific, mcp__*
 model: sonnet
 color: red
-maxTurns: 15
+maxTurns: 20
 omitClaudeMd: true
 ---
 
