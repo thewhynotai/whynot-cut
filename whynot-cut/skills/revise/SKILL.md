@@ -52,20 +52,25 @@ A motion video is built in After Effects from the motion plan, never with `ppro-
 |---|---|---|
 | on-screen words, scenes, beats, timing, icons, illustrations, music | `motion-director` | revise `01_analysis/motion-script.json`, then `reel motion-plan` until no errors, then `reel motion-animatic` |
 | noise, hum, pauses | `audio-engineer`, then `motion-director` | `reel audio-clean`, then `reel motion-plan` again (the scenes follow the new timing) and `reel motion-animatic` |
-| how a scene looks in the After Effects project only (no plan change) | `ae-builder` | rebuild from the same approved plan (step 3) |
+| how a scene looks or moves (layout, style, colours, animation) | `motion-director` | change the scene choices and style in `01_analysis/motion-script.json` (a standing rule: the client's `output/client_database/reel-profile/motion.json`), then `reel motion-plan` and `reel motion-animatic`; a rebuild of the unchanged plan gives the same look |
+| the `.aep` is missing, broken or older than the approved plan | `ae-builder` | rebuild from the same approved plan (step 4) |
+| any change above that re-plans | `whynot-cut:medical-reviewer` (read-only) | reviews the new `01_analysis/motion-plan.md`: health claims; verses, hadith, attributed stories and rulings for a religious client |
 
-1. VIEW the new `_storyboard.jpg` yourself; then show the editor the changed scenes (time, words, editorial lines
+1. After every re-plan, `whynot-cut:medical-reviewer` reviews the new `motion-plan.md` (every motion video, whatever
+   the client's `domain`; the religious checks when the profile `domain` is `religious`). Approval waits for its review;
+   its approval list goes into what you show the editor.
+2. VIEW the new `_storyboard.jpg` yourself; then show the editor the changed scenes (time, words, editorial lines
    marked as such) and the animatic path, for them to approve. Record `reel approve-plan --by editor` only with their
    words (a standing `approval: auto` or a "just do it" in chat → `--by delegated --note "…"`, as in step 4 above).
-2. Ask the editor to save in After Effects first: `motion-build` refuses while After Effects holds unsaved work.
-3. `ae-builder` runs `reel motion-build`. If the editor changed the `.aep` in After Effects, the build refuses: tell
+3. Ask the editor to save in After Effects first: `motion-build` refuses while After Effects holds unsaved work.
+4. `ae-builder` runs `reel motion-build`. If the editor changed the `.aep` in After Effects, the build refuses: tell
    them their changes would not carry over, and only with their explicit OK run `reel motion-build --replace-edited`
    (it keeps a backup of their file in `backups/`).
-4. `ae-builder` runs `reel motion-render`, then `reel motion-frames`.
-5. `qc-reviewer` checks the frames sheet (fan-out of frame-inspectors). You VIEW the sheet, record
+5. `ae-builder` runs `reel motion-render`, then `reel motion-frames`.
+6. `qc-reviewer` checks the frames sheet (fan-out of frame-inspectors). You VIEW the sheet, record
    `reel verify --record --verdict pass|fail --notes "<what you checked>"`, run `reel qc` in the same message, and
    update the handoff and the reel's publish captions (`publish-writer`) if the on-screen words changed.
-6. Report per comment, as above. A build without read-back (`--script-only`) is Not verified.
+7. Report per comment, as above. A build without read-back (`--script-only`) is Not verified.
 
 - In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
   `profile.json`). Until a person's gender is known write «د.» or the name.

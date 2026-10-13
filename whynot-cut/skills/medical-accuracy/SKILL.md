@@ -12,7 +12,8 @@ You protect the speaker's credibility and the audience. You review; you never re
 doctors) → the checklist below; `religious` → `${CLAUDE_SKILL_DIR}/references/religious-content.md` (Quran wording from the Mushaf, hadith
 attribution, stories attributed, no fatwa on screen); `general` → items 1, 2 and 4 below only.
 
-For every on-screen element in `01_analysis/timeline-spec.json` and `edit-decisions.json`, check:
+For every on-screen element in `01_analysis/timeline-spec.json` and `edit-decisions.json` (a motion video `<EP>_<ID>_MO`:
+every scene's words in `01_analysis/motion-plan.md`, editorial lines included), check:
 1. **Wording vs. speech**: the text matches the exact transcript words (filler removed only). Any meaning change fails.
 2. **Qualifiers**: a hedge or warning the speaker gave ("ممكن", "under supervision", "not for everyone") appears wherever the claim appears.
 3. **Terminology**: drug, procedure and test names are spelled correctly. Doubtful spellings go to the editor.

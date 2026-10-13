@@ -14,7 +14,7 @@ reel ref-style   --root "<CLIENT>"                 # client reference style: mis
 reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after writing reference_style/ (below)
 ```
 - **View** every image contact sheet and every reference contact sheet (Read the JPGs). Many facts are only visible this way.
-- Write the semantic layer listed in `${CLAUDE_SKILL_DIR}/references/client-intelligence.md`:
+- Write the semantic layer listed in `${CLAUDE_PLUGIN_ROOT}/skills/client-craft/references/client-intelligence.md`:
   - the profile docs
   - `asset-classification.json` (after viewing)
   - `brand-roles.json`
@@ -23,7 +23,7 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
   Then run `client-db` again so the roles merge.
 - **Reference style is written once per client**, not per video: `output/client_database/reference_style/`
   `editing-style-analysis.md`, `editing-style.json` and `editing-rules.json`, with measured and inferred items clearly
-  marked (see `${CLAUDE_SKILL_DIR}/references/editing-reference-analysis.md`). Then `reel ref-style --record`: it stores the fingerprint of
+  marked (see `${CLAUDE_PLUGIN_ROOT}/skills/client-craft/references/editing-reference-analysis.md`). Then `reel ref-style --record`: it stores the fingerprint of
   the reference set (every reference file's path, size and modification time).
   - `reel ref-style` says **current**: don't re-author. Each video reuses it (`reel ref-style --apply --video-id <ID>`;
     `ref-analyze` with a video id does it automatically). What only one video needs goes in that video's

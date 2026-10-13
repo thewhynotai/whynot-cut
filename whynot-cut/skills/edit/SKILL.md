@@ -103,7 +103,7 @@ After `plan` and previews, tell the editor what the edit will do, in about 200â€
 - each graphic with its timecode and on-screen words
 - the cuts and pause removal
 - what you left out and why
-- what needs medical approval (from medical-reviewer)
+- what needs medical or religious approval (from medical-reviewer; it runs on every clip, whatever the client's domain)
 
 When `preview_video` is on, point them to `<CLIENT_FOLDER>/output/projects/<ID>/08_quality_control/preview/<ID>_preview.mp4`
 (offer to open it: `open` on macOS, `explorer.exe "<path with backslashes>"` on Windows), `01_analysis/edit-plan.md`

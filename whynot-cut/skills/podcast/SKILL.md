@@ -97,10 +97,11 @@ It is an ordinary clip project; resume it with `reel next --root "<CLIENT>" --vi
   `context_line` in a `context_card` at the start when the reel needs context, uses `stat_card` for a number the
   speaker says, and picks music only from `reel music --list` (licensed, mood-tagged). No fitting track → leave music
   for the editor.
-- The medical-reviewer runs for `domain: medical` **and** `domain: religious` clients (the profile's `domain`):
-  health claims, and for a religious client every verse, hadith, attributed story or ruling on screen, checked
-  against `${CLAUDE_PLUGIN_ROOT}/skills/medical-accuracy/references/religious-content.md`. Its approval list goes into
-  the plan you show the editor. Other domains skip it.
+- The medical-reviewer runs on every reel, whatever the client's `domain` (as on every clip; it returns quickly when
+  nothing sensitive is on screen): health claims, and for a client whose profile has `domain: religious` every verse,
+  hadith, attributed story or ruling on screen, checked against
+  `${CLAUDE_PLUGIN_ROOT}/skills/medical-accuracy/references/religious-content.md`. Its approval list goes into the plan
+  you show the editor. Motion videos get the same review (`/whynot-cut:motion`).
 
 ## 4. Publish package
 - After E4: `publish-writer` writes the episode package (titles, description, chapters from the topic map, tags,
@@ -128,4 +129,5 @@ a reel done unless its `qc` passed in this message.
 - `assets/` and `data/` are read-only; everything goes to `output/`. Ask before deleting anything.
 - If a reel command answers `blocked` because another session holds the client, stop and tell the editor; never
   release another session's lock yourself.
-- Premiere is the deliverable; After Effects/Photoshop only when the editor asks (`/whynot-cut:adobe-extras`).
+- Which app: Clip edits → Premiere. Motion videos → After Effects. AE/PS for clip graphics → only on request
+  (`/whynot-cut:adobe-extras`).

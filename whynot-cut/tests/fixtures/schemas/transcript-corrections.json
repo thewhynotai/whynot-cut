@@ -43,6 +43,10 @@
      "confidence": "high"
     }
    ]
+  },
+  {
+   "corrections": [],
+   "restore": []
   }
  ],
  "invalid": [
@@ -84,6 +88,14 @@
       3
      ]
     }
+   }
+  },
+  {
+   "why": "restore null: the engine refuses a falsy restore (use [] or leave it out)",
+   "path": "/restore",
+   "doc": {
+    "corrections": [],
+    "restore": null
    }
   },
   {

@@ -37,7 +37,6 @@
     "restore": {
       "anyOf": [
         {"const": "all"},
-        {"type": "null"},
         {"type": "array",
          "items": {"anyOf": [
            {"type": "integer", "minimum": 0},

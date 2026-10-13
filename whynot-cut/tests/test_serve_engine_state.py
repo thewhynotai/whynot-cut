@@ -438,7 +438,7 @@ EDIT_MD = "\n".join([
     "Run `reel plan --root X` again after changes.", "Claude Code records the approval.",
     "", "Music: PLACED — bed.mp3 at -24 dB, 2 s fade-out", "", EDIT_FOOTER, ""])
 MOTION_MD = "\n".join([
-    "# Motion plan — EP02_R03_MO (Gate 1: approve before After Effects)", "", "story · 9x16 · RTL · 30.0 s · 4 scenes",
+    "# Motion plan — EP02_R03_MO (approve the plan before After Effects)", "", "story · 9x16 · RTL · 30.0 s · 4 scenes",
     "", "## Editorial lines (Claude's words, not the speaker's)", "", "- s1 headline: الخلاصة", "",
     f"Animatic: {MOTION_ANIMATIC}", "", MOTION_FOOTER, ""])
 

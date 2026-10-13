@@ -12,6 +12,8 @@
 - Edit stages are numbered 1…12 in execution order (no 3b/7b/8b, no 13).
 - T3.2: revise has the motion route (motion-director → motion-plan → motion-animatic → approval → ae-builder
   motion-build --replace-edited → render/frames → qc-reviewer); podcast runs the medical-reviewer for religious clients.
+- T3.1 review: the medical-reviewer runs on every clip, podcast reel and motion video (motion: after the script, before
+  the plan is approved; revise motion route too); skills Read as files use the plugin-root form.
 Run:  bash tools/test.sh -p test_skill_text.py
 """
 import sys as _sys
@@ -100,8 +102,11 @@ class TestRouting(unittest.TestCase):
     RULE = "Clip edits → Premiere. Motion videos → After Effects. AE/PS for clip graphics →"
 
     def test_app_rule_stated_in_edit_motion_adobe_extras(self):
-        for n in ("edit", "motion", "adobe-extras"):
+        for n in ("edit", "motion", "adobe-extras", "podcast"):
             self.assertTrue(self.RULE in " ".join(text(n).split()), f"{n}: the app rule is missing")
+
+    def test_podcast_does_not_say_premiere_is_the_only_deliverable(self):
+        self.assertNotIn("Premiere is the deliverable", " ".join(text("podcast").split()))
 
     def test_fix_audio_and_revise_point_at_each_other(self):
         fa, rv = text("fix-audio"), text("revise")
@@ -132,10 +137,48 @@ class TestMotionAndReligiousRoutes(unittest.TestCase):
                                          "reel motion-render", "qc-reviewer` checks")]
         self.assertEqual(order, sorted(order))
 
-    def test_podcast_runs_the_medical_reviewer_for_religious_clients(self):
+    def test_podcast_runs_the_medical_reviewer_on_every_reel(self):
+        """T3.1 review: one rule for clips, podcast reels and motion videos — the medical-reviewer runs on every one,
+        whatever the client's domain; the religious checklist applies when the profile domain is religious."""
         s = " ".join(text("podcast").split())
-        self.assertRegex(s, r"medical-reviewer runs for `domain: medical` \*\*and\*\* `domain: religious`")
+        self.assertRegex(s, r"medical-reviewer runs on every reel")
+        self.assertRegex(s, r"(?i)whatever the client's `domain`")
+        self.assertRegex(s, r"`domain: religious`")
+        self.assertNotIn("Other domains skip it", s)
         self.assertNotIn("runs only for a medical client", s)
+
+    def test_motion_reviews_claims_after_the_script_before_approval(self):
+        s = text("motion")
+        rows = [ln for ln in s[s.index("## 2. Stages"):].splitlines() if ln.startswith("| ")][1:]
+        first = [ln.split("|")[1].strip().strip("*").lower() for ln in rows]
+        claims = next(i for i, c in enumerate(first) if c.startswith("claims"))
+        self.assertLess(first.index("script"), claims)
+        self.assertLess(claims, next(i for i, c in enumerate(first) if c.startswith("approve the plan")))
+        row = rows[claims]
+        self.assertIn("whynot-cut:medical-reviewer", row)
+        self.assertIn("motion-plan.md", row)
+        flat = " ".join(s.split())
+        self.assertRegex(flat, r"(?i)religious")
+        self.assertRegex(flat, r"(?i)never ask for approval .{0,80}before the medical-reviewer")
+
+    def test_revise_motion_route_reviews_changed_words_before_approval(self):
+        s = text("revise")
+        sec = s[s.index("## Motion videos"):]
+        table = [ln for ln in sec.splitlines() if ln.startswith("| ")]
+        self.assertTrue(any("whynot-cut:medical-reviewer" in ln for ln in table))
+        self.assertLess(sec.index("whynot-cut:medical-reviewer` reviews"), sec.index("reel approve-plan"))
+
+    def test_revise_motion_look_row_changes_the_script_not_a_rebuild_of_the_same_plan(self):
+        s = text("revise")
+        sec = s[s.index("## Motion videos"):]
+        row = next(ln for ln in sec.splitlines() if ln.startswith("| how a scene looks"))
+        self.assertNotIn("same approved plan", row)
+        self.assertIn("motion-director", row)
+        self.assertIn("reel motion-plan", row)
+
+    def test_autopilot_lists_medical_and_religious_approvals(self):
+        s = " ".join(text("autopilot").split())
+        self.assertRegex(s, r"medical and religious approvals needed")
 
 
 class TestPathsAndShells(unittest.TestCase):
@@ -156,6 +199,15 @@ class TestPathsAndShells(unittest.TestCase):
                if re.search(r"(?<![\w/}])references/", line)
                or re.search(r"`(?:skills/)?[a-z-]+-craft/references/", line)]
         self.assertEqual(bad, [])
+
+    def test_skills_read_as_files_use_the_plugin_root_form(self):
+        """A Read of another skill's SKILL.md substitutes no variable, so ${CLAUDE_SKILL_DIR} would be ambiguous there:
+        a skill that another skill tells Claude to Read uses ${CLAUDE_PLUGIN_ROOT}/skills/<itself>/… instead."""
+        read = {m.group(1) for p in SKILLS.glob("*/SKILL.md")
+                for m in re.finditer(r"\$\{CLAUDE_PLUGIN_ROOT\}/skills/([a-z-]+)/SKILL\.md", p.read_text(encoding="utf-8"))
+                if m.group(1) != p.parent.name}
+        self.assertTrue({"edit", "podcast", "audio-craft", "client-craft"} <= read, read)
+        self.assertEqual({n: True for n in sorted(read) if "${CLAUDE_SKILL_DIR}" in text(n)}, {})
 
     def test_skill_dir_references_exist(self):
         for p in sorted(SKILLS.glob("*/SKILL.md")):
@@ -196,8 +248,10 @@ class TestGuardAndStages(unittest.TestCase):
 
     def test_fix_audio_matches_the_audio_engineer_report(self):
         s = text("fix-audio")
+        agent = (SK / "agents" / "audio-engineer.md").read_text(encoding="utf-8")
         for word in ("decisions", "speech-to-noise", "loudness", "cut-verification.json", "missing words"):
             self.assertIn(word, s)
+            self.assertIn(word, agent, f"agents/audio-engineer.md no longer reports {word!r}")
 
 
 if __name__ == "__main__":

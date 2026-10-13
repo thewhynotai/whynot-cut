@@ -767,7 +767,7 @@ def _dedupe(assets: list[dict]) -> list[dict]:
 
 def write_motion_md(paths, plan: dict | None, val: dict, C: _Compiler) -> Path:
     fps = C.fps
-    L = [f"# Motion plan — {paths.video_id} (Gate 1: approve before After Effects)", "",
+    L = [f"# Motion plan — {paths.video_id} (approve the plan before After Effects)", "",
          f"{C.recipe_type} · {C.fmt['name']} · {C.direction.upper()} · " +
          (f"{plan['duration_frames'] / fps:.1f} s · {len(plan['scenes'])} scenes" if plan else "not compiled"), ""]
     if val["errors"]:

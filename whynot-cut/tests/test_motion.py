@@ -1002,6 +1002,8 @@ class TestMotionPlan(unittest.TestCase):
         for sid in ("S01", "S02", "S03", "S04"):
             self.assertIn(sid, md)
         self.assertIn("editorial", md)
+        self.assertIn("approve the plan", md.splitlines()[0])         # editor-visible: no "Gate 1"
+        self.assertNotIn("Gate", md)
         self.assertIn("تابع بودكاست التجربة", md)                     # {show} filled from the sheet
         self.assertEqual(common.load_status(self.reel)["status"], "ANALYZED")
         self.assertTrue(Path(plan["audio"]["dialogue"]).exists())
