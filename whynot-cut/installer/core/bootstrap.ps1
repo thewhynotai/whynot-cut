@@ -764,8 +764,7 @@ param(
             Write-Host ('Where should WhyNot Cut keep its engine (Python, ffmpeg, the Whisper model)? It needs about ' +
                 "$WncNeedGb GB, $($WncNeedGb + $WncModelGb) GB with the model. Enter keeps the folder in brackets.")
             Write-Host (Get-WncArabic 'Intro')
-            if ([IO.File]::Exists((Join-Path $Default 'state.json')) -or
-                [IO.File]::Exists((Join-Path $Default 'current'))) {
+            if (Test-WncEngineHomeMark $Default) {
                 Write-Host "WhyNot Cut is already installed in $Default; Enter keeps it there."
                 Write-Host (Get-WncArabic 'Existing')
             }
@@ -776,19 +775,33 @@ param(
             }
         }
         $warned = $false  # warned once about non-ASCII letters: the next answer is taken as it is
-        $oldInstall = Test-WncEngineHomeMark $Default  # WhyNot Cut already lives in the default folder
+        # WhyNot Cut already lives in the default folder: a 3.0 install, or a 2.x one (venv, models ... without a
+        # 3.0 state.json) - leaving either behind is said
+        $oldInstall = (Test-WncEngineHomeMark $Default) -or ((Get-WncOccupiedEntry -Path $Default -PointerOk $true).Count -gt 0)
         for ($try = 1; $try -le 8; $try++) {
             $p = ConvertFrom-WncTyped -Text $text -UserHome $UserHome
-            $place = Get-WncEnginePlace -Path $p -UserHome $UserHome -Root $Root -Clients $clients `
-                -SandboxRoot $SandboxRoot
-            $problem = $place.Problem
-            if (-not $problem) {
-                if ($place.Note) {
-                    Write-Host $place.Note
-                    Write-Host (Get-WncArabic 'Subfolder')
-                    $chosen = $true  # not the resolved folder any more: the core uses it as it is (after its checks)
+            $isDefault = ($p -match '^([A-Za-z]:[\\/]|\\\\)') -and ((Get-WncNormPath $p) -ieq (Get-WncNormPath $Default))
+            if ($isDefault) {
+                # the resolved home (default ~\.whynot-cut, or saved in the pointer / settings.json / a variable) is
+                # used as it is (fix round 3): a 2.x home (venv, models, ...) is upgraded in place, never moved
+                $chosen = $false
+                $p = Get-WncNormPath $p
+                $problem = $null
+                if ($SandboxRoot -and (-not (Test-WncWithin $p (Get-WncNormPath $SandboxRoot) -Strict))) {
+                    $problem = "$p is outside the sandbox home $SandboxRoot (-Home: nothing outside it is used)"
                 }
-                $p = $place.Path
+            } else {
+                # a folder the editor chose: placed (its own WhyNotCut subfolder when it holds anything) and checked
+                $place = Get-WncEnginePlace -Path $p -UserHome $UserHome -Root $Root -Clients $clients `
+                    -SandboxRoot $SandboxRoot
+                $problem = $place.Problem
+                if (-not $problem) {
+                    if ($place.Note) {
+                        Write-Host $place.Note
+                        Write-Host (Get-WncArabic 'Subfolder')
+                    }
+                    $p = $place.Path
+                }
             }
             $existing = (-not $problem) -and (Test-WncEngineHomeMark $p)
             if ((-not $problem) -and ($p -match '[^\x00-\x7F]') -and $existing) {

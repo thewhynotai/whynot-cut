@@ -500,7 +500,7 @@ JXA_STATE_OK='function run(argv) {
   if (t.isNil()) { return "no"; }
   var v;
   try { v = JSON.parse(ObjC.unwrap(t).replace(/^﻿/, "")); } catch (e) { return "no"; }
-  var ok = v !== null && typeof v === "object" && !Array.isArray(v) && v.schema === 1 &&
+  var ok = v !== null && typeof v === "object" && !Array.isArray(v) && Number.isInteger(v.schema) && v.schema === 1 &&
            Object.prototype.hasOwnProperty.call(v, "plugin");
   return ok ? "yes" : "no";
 }'
@@ -699,22 +699,35 @@ select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no us
       "Where should WhyNot Cut keep its engine (Python, ffmpeg, the Whisper model)? It needs about" \
       "$NEED_GB" "$((NEED_GB + MODEL_GB))"
     printf '%s\n' "أين يحفظ WhyNot Cut ملفات التشغيل (بايثون و ffmpeg ونموذج Whisper)؟ تحتاج حوالي 6 جيجابايت، و9 مع النموذج. اضغط Enter لاختيار المجلد بين القوسين."
-    if [ -f "$default/state.json" ] || [ -f "$default/current" ]; then
+    if is_engine_home "$default"; then
       printf 'WhyNot Cut is already installed in %s; Enter keeps it there.\n' "$default"
       printf '%s\n' "WhyNot Cut مثبّت بالفعل في هذا المجلد؛ اضغط Enter لإبقائه."
     fi
     if ask_line "$default" && [ -n "$ANSWER" ]; then text="$ANSWER"; CHOSEN=1; fi
   fi
-  old_install=""
-  is_engine_home "$default" && old_install=1  # WhyNot Cut already lives in the default folder
+  old_install=""  # WhyNot Cut already lives in the default folder (3.0, or a 2.x home: venv, models ...)
+  if is_engine_home "$default" || has_occupied "$default" 1; then old_install=1; fi
   while [ "$tries" -lt 8 ]; do
     tries=$((tries + 1))
     typed_path "$text"; p="$TYPED"
-    engine_place "$p"
+    norm_path "$p"; n_new="$NORM"
+    norm_path "$default"
+    if [ "$n_new" = "$NORM" ]; then
+      # the resolved home (default ~/.whynot-cut, or saved in the pointer / settings.json / a variable) is used as it
+      # is (fix round 3): a 2.x home (venv, models, ...) is upgraded in place, never moved
+      CHOSEN="" PROBLEM="" PLACE_NOTE="" PLACED="$p"
+      if [ -n "$HOME_OVR" ]; then
+        norm_path "$H"
+        if [ "$n_new" = "$NORM" ] || ! within "$n_new" "$NORM"; then
+          PROBLEM="$p is outside the sandbox home $H (--home: nothing outside it is used)"
+        fi
+      fi
+    else
+      engine_place "$p"  # a folder the editor chose: placed (its own WhyNotCut subfolder when it holds anything)
+    fi
     if [ -z "$PROBLEM" ]; then
       if [ -n "$PLACE_NOTE" ]; then
         printf '%s\n' "$PLACE_NOTE"
-        CHOSEN=1  # not the resolved folder any more: the core uses it as it is (after its checks)
         printf '%s\n' "هذا المجلد فيه ملفات أخرى، لذلك سيُثبَّت WhyNot Cut في مجلد خاص به داخله (WhyNotCut)، ولن يلمس الإلغاء باقي الملفات."
       fi
       p="$PLACED"

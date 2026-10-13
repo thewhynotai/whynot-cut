@@ -4404,6 +4404,20 @@ class TestUninstall(_InstalledHome):
         self.assertEqual((state.read_bytes(), log.read_bytes(), notes.read_bytes()),
                          (b'{"my": "game save"}', b"user log", b"notes"))
 
+    def test_a_2x_home_is_upgraded_in_place(self):
+        # fix round 3: the core uses a resolved home (default or pointer-saved) directly, like both shells
+        for engine in (self.home / ".whynot-cut", self.home / "Old Engine"):
+            with self.subTest(str(engine)):
+                model = make_2x_home(self.home, engine)
+                r = self.core("install", "--skip", "model")
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 0, out)
+                assert_2x_home_upgraded_in_place(self, self.home, engine, model, out)
+        # while an explicitly chosen folder with something in it still gets its own subfolder
+        chosen = self.home / "Chosen"
+        touch(chosen / "notes.txt", b"mine")
+        self.assertEqual(norm(self.install_into(chosen)), norm(chosen / "WhyNotCut"))
+
     def test_a_genuine_engine_home_is_used_directly_on_a_reinstall(self):
         first = self.install_into(self.home / "Engine Here")
         self.assertEqual(norm(first), norm(self.home / "Engine Here"))  # an empty / new folder: as chosen
@@ -4824,6 +4838,30 @@ class TestBashUninstall(TestBashFrontEnd):
 
 
 # --------------------------------------------------------------------------------------------- task 8: the location
+def make_2x_home(home: Path, engine: Path) -> Path:
+    """A WhyNot Cut 2.2.1 engine home (no 3.0 state.json: not a genuine 3.0 home by content) at `engine`, with the
+    pointer the 2.x SessionStart hook wrote (engine_home "" for ~/.whynot-cut, else the folder). Returns its model."""
+    model = touch(engine / "models" / "large-v3" / "model.bin", b"2.x weights")
+    for d in ("venv/Scripts/python.exe", "marketplace/.claude-plugin/marketplace.json", "cuda/bin/cublas.dll",
+              "ppro-queue/job-1.json"):
+        touch(engine.joinpath(*d.split("/")), b"2.x")
+    value = "" if norm(engine) == norm(home / ".whynot-cut") else str(engine)
+    EngineHomeCases.pointer(home, {"clients_root": "", "engine_home": value, "updated": "2026-10-11T10:00:00+0300"})
+    return model
+
+
+def assert_2x_home_upgraded_in_place(test: unittest.TestCase, home: Path, engine: Path, model: Path, out: str) -> None:
+    """Fix round 3: the resolved 2.x home is used directly - no WhyNotCut subfolder, models kept, the pointer still
+    names it (or "" for ~/.whynot-cut)."""
+    test.assertFalse((engine / "WhyNotCut").exists(), out)
+    test.assertTrue((engine / "current").is_file(), out)
+    test.assertTrue(base.is_engine_home(engine), out)
+    test.assertEqual(model.read_bytes(), b"2.x weights")
+    p = json.loads((home / ".whynot-cut" / "plugin-options.json").read_text(encoding="utf-8"))
+    want = "" if norm(engine) == norm(home / ".whynot-cut") else str(engine)
+    test.assertEqual(norm(p["engine_home"]) if p["engine_home"] else "", norm(want) if want else "", out)
+
+
 def assert_chosen_home_installed(test: "_ShellCase", r, engine: Path, plat: str) -> None:
     """Everything of a chosen engine home landed there (uv, the runtime, state, the one log); ~/.whynot-cut keeps only
     the pointer; settings.json and the pointer name the folder."""
@@ -4988,6 +5026,25 @@ class TestPowerShellEngineHome(TestPowerShellFrontEnd):
         self.assertEqual(base.choose_engine_home(str(fresh), home=self.home, plugin_root=self.fx.plugin_root)[0],
                          fresh)
 
+    def test_a_2x_home_is_upgraded_in_place(self):
+        # fix round 3: the resolved home (default, or saved in the pointer) is never moved into a subfolder
+        for engine in (self.home / ".whynot-cut", self.home / "Old Engine"):
+            with self.subTest(str(engine)):
+                model = make_2x_home(self.home, engine)
+                r = self.ps(self.front(), "-Home", self.home, "-Yes", "-Skip", "model,launch")
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 0, out)
+                self.assertNotIn("goes into its own folder", out)
+                self.assertNotIn("(chosen)", out)
+                assert_2x_home_upgraded_in_place(self, self.home, engine, model, out)
+
+    def test_choosing_away_from_a_2x_home_says_it_stays_behind(self):
+        make_2x_home(self.home, self.home / ".whynot-cut")
+        r = self.ps(self.front(), "-Home", self.home, "-EngineHome", self.home / "Other", "-DryRun", "-Yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("stays there and is no longer used", out)
+
     def test_enter_on_a_reinstall_keeps_the_existing_install(self):
         # fix round 1 (IMPORTANT 1): an Arabic-letter home with an install: no non-ASCII re-ask, no move
         touch(self.home / ".whynot-cut" / "state.json", GENUINE_STATE)
@@ -5087,6 +5144,23 @@ class TestBashEngineHome(TestBashFrontEnd):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(thesis.read_bytes(), b"my thesis")
         self.assertEqual(sorted(os.listdir(docs)), ["thesis.docx"], r.stdout + r.stderr)
+
+    def test_a_2x_home_is_upgraded_in_place(self):
+        # fix round 3: the resolved home (default, or saved in the pointer) is never moved into a subfolder
+        for engine in (self.home / ".whynot-cut", self.home / "Old Engine"):
+            with self.subTest(str(engine)):
+                model = make_2x_home(self.home, engine)
+                r = self.sh(self.front(), "--home", self.home_arg(), "--yes", "--skip", "model,launch")
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 0, out)
+                self.assertNotIn("goes into its own folder", out)
+                self.assertNotIn("(chosen)", out)
+                assert_2x_home_upgraded_in_place(self, self.home, engine, model, out)
+        make_2x_home(self.home, self.home / ".whynot-cut")
+        r = self.sh(self.front(), "--home", self.home_arg(), "--engine-home", (self.home / "Other").as_posix(),
+                    "--dry-run", "--yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("stays there and is no longer used", r.stdout + r.stderr)
 
     def test_engine_named_user_folders_and_a_fake_state_get_a_subfolder(self):
         # fix round 2: names and a foreign state.json never make a folder ours

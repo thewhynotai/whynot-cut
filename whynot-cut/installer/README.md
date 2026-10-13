@@ -126,7 +126,10 @@ The folder is checked before anything is downloaded (the same rules in both boot
   `downloads/`, where the one-line mode caches the release); one that is, holds or lies inside your clients folder
   (`clients_root` in your preferences or in `plugin-options.json`); one inside a folder marked `.whynot-client`, or
   holding one (three levels down);
-- **moved into its own `WhyNotCut` subfolder**: your user folder, Desktop, Documents and Downloads themselves, and any
+- **moved into its own `WhyNotCut` subfolder** - only for a folder you choose (`-EngineHome` or a typed answer)
+  that is not the folder WhyNot Cut already uses: the resolved engine home (`~/.whynot-cut`, or the one saved in
+  `plugin-options.json` / `settings.json` / a variable) is always used as it is, so a 2.x install there is upgraded
+  in place with its models. Moved: your user folder, Desktop, Documents and Downloads themselves, and any
   existing folder with anything in it that is not already a WhyNot Cut engine home. Names are never trusted: a
   folder holding your own `fonts`, `logs`, `downloads` or `Bin` counts as yours. Only the installer's own write test,
   the one-line mode's `downloads/release-*` cache and, in `~/.whynot-cut`, the plugin's `plugin-options.json` do not
