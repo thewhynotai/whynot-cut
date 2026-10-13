@@ -559,7 +559,7 @@ def unfinished_reel(root, name: str) -> dict | None:
     return {"video_id": name, "episode": m["ep"], "pick": m["rid"], "as": "motion" if motion else "video",
             "how": f"{name} is a reel of episode {m['ep']} whose selection did not finish (no 00_inputs/source.json): "
                    f"re-run `reel reels-select --episode {m['ep']} --pick {m['rid']} --by editor"
-                   + (" --as motion" if motion else "") + " --force` (the editor's Gate 0 pick) to complete it"}
+                   + (" --as motion" if motion else "") + " --force` (the reels the editor picked) to complete it"}
 
 
 def _avoid_list(ep) -> list:
@@ -751,14 +751,14 @@ def _select(ep, picks, adjust, by, note, confirm_avoid, force, resync, as_, fmt,
                            "as": as_, "format": fmt if as_ == "motion" else None})
     write_json(sel_f, sel)
     nxt = ("per motion project: reel audio-clean, motion-director writes 01_analysis/motion-script.json, "
-           "reel motion-plan, reel motion-animatic, then ONE combined Gate 1 (see /whynot-cut:motion)") if as_ == "motion" else \
+           "reel motion-plan, reel motion-animatic, then ONE combined plan approval (see /whynot-cut:motion)") if as_ == "motion" else \
         ("per reel: reel preflight, audio-clean, story-editor (recipe in 00_inputs/source.json), "
-         "plan, previews, preview-video, then ONE combined Gate 1")
+         "plan, previews, preview-video, then ONE combined plan approval")
     return {"reels": out, "next": nxt}
 
 
 def write_reels_plan_md(ep, res: dict) -> Path:
-    L = [f"# Reels plan — {ep.episode_id} (Gate 0: the editor picks)", "",
+    L = [f"# Reels plan — {ep.episode_id} (the editor picks the reels)", "",
          f"Episode {fmt_ts(res['duration_ms'], '.')} · {len(res['candidates'])} candidates · validated {res.get('generated', '')}", "",
          "| # | Score | Type | In → Out | Dur | Title | Hook | Flags | Preview |", "|---|---|---|---|---|---|---|---|---|"]
     for c in res["candidates"]:

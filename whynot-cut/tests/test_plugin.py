@@ -1066,7 +1066,7 @@ class TestProfiles(ClientFixture):
     def test_shipped_profile_only_by_name_and_merge(self):
         common.set_context(self.root)                                  # folder "example clinic": NOT matched by name
         self.assertIsNone(common.active_profile())
-        self.assertEqual(common.project_prefix(), "RE")
+        self.assertEqual(common.project_prefix(), "EC")                 # T3.10: the folder's initials, not RE
         common.set_context(self.root, "example-clinic")                # applied only when named (--profile)
         self.assertEqual(common.active_profile(), "example-clinic")
         self.assertEqual(common.project_prefix(), "EC")
@@ -1091,7 +1091,7 @@ class TestProfiles(ClientFixture):
         with mock.patch.object(common, "PROFILES_DIR", shipped):
             common.set_context(self.root)                              # folder name contains "example"
             self.assertIsNone(common.active_profile())
-            self.assertEqual(common.project_prefix(), "RE")
+            self.assertEqual(common.project_prefix(), "EC")             # T3.10: the folder's initials
             common.set_context(self.root, "old-seed")                  # but naming it works
             self.assertEqual(common.project_prefix(), "OS")
 
@@ -1110,7 +1110,7 @@ class TestProfiles(ClientFixture):
         (other / "data").mkdir()
         common.set_context(other)
         self.assertIsNone(common.active_profile())
-        self.assertEqual(common.project_prefix(), "RE")
+        self.assertEqual(common.project_prefix(), "SH")                 # T3.10: "dr sherif" -> the title skipped -> SH
         self.assertIsNone(common.load_config("transcription.json")["initial_prompt"])
         r = subprocess.run([sys.executable, str(SK / "engine/reel/cli.py"), "--root", str(other), "client-init",
                             "--id", "dr-sherif", "--prefix", "SH"], capture_output=True, text=True)

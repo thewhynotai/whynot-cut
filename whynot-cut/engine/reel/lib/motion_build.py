@@ -150,9 +150,9 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     gate = None
     if not appr.get("approved"):
-        gate = "no Gate 1 approval: the editor approves motion-plan.md and the animatic (`reel approve-plan`)"
+        gate = "the plan is not approved yet: the editor approves motion-plan.md and the animatic (`reel approve-plan`)"
     elif appr.get("plan_fingerprint") != fp:
-        gate = "the Gate 1 approval is stale (the plan changed after approval): show the editor again"
+        gate = "the plan approval is stale (the plan changed after approval): show the editor again"
     if gate:                    # an approval gate is a refusal (exit 2), like ppro-build's (Gate 2 A2)
         probs.append(gate)
         ctx["refusal"] = {"blocked": gate, "how": "Show the editor motion-plan.md and the animatic; only with their "

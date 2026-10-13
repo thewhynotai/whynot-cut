@@ -392,6 +392,8 @@ class AerenderCase(TempDir):
         self.paths = Paths(client(self.tmp, 24, False, folder), "V1")
         self.paths.ensure_project()
         write_json(self.paths.output / "discovery/environment.json", {"aerender": str(self.exe)})
+        common.set_context(self.paths.root)        # T3.10: the prefix is the client's (its folder), in every context
+        self.addCleanup(common.set_context, None, None)
         self.aep = self.paths.p(f"04_after_effects/project/V1_{common.project_prefix()}_GFX.aep")
         self.aep.write_bytes(b"AEP")
         self.comps = self.paths.p("04_after_effects/compositions")

@@ -307,7 +307,7 @@ def episode_next(ep: EpisodePaths) -> dict:
         ("AUTHOR 01_analysis/reels-plan.json", "01_analysis/reels-plan.json"),
         ("reels-plan", "01_analysis/reels-plan-validated.json"),
         ("reels-preview", "03_candidates/_sheet.jpg"),
-        ("SELECT reels (Gate 0: the editor picks; reels-select --by editor)", "01_analysis/selection.json"),
+        ("SELECT reels (the editor picks the reels; reels-select --by editor)", "01_analysis/selection.json"),
         ("AUTHOR publish/publish.json", "publish/publish.json"),
         ("publish-check", "publish/publish-validation.json"),
         ("publish-thumbnail --candidates", "publish/thumbnail/candidates.json"),

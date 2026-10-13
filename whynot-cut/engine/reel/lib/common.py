@@ -639,9 +639,70 @@ def load_config(name: str, ctx: Context | None = None) -> dict:
     return (ctx or current_context()).config(name)
 
 
+DEFAULT_PREFIX = "WN"          # 3.0 T3.10 (structure 8.3): no ASCII initials -> WN (the 2.x default was RE)
+LEGACY_PREFIX = "RE"           # 2.x clients without a stored prefix built <id>_RE_EDIT.prproj: they keep it
+_PREFIX_OK = re.compile(r"[A-Za-z0-9]{1,8}")
+_HONORIFICS = {"dr", "doctor", "prof", "eng", "mr", "mrs", "ms", "miss", "sheikh", "the"}
+
+
+def valid_prefix(value) -> bool:
+    """A stored prefix used in file names: 1-8 ASCII letters/digits (the template's "<2-3 letters>" is not one)."""
+    return bool(_PREFIX_OK.fullmatch(str(value or "").strip()))
+
+
+def initials_prefix(name: str) -> str:
+    """The file-name tag derived from a client folder's name (3.0 T3.10): the initials of its ASCII words (up to 3,
+    a leading title such as Dr/Prof/Eng skipped when other words follow), the first two letters of a single word, else
+    WN (an Arabic-only name). "Dr Mona Adel" -> MA, "Nour Hospital" -> NH, "Acme" -> AC, «عميل تجربة» -> WN."""
+    words = re.findall(r"[A-Za-z][A-Za-z0-9]*", unicodedata.normalize("NFKD", str(name or "")))
+    while len(words) > 1 and words[0].lower() in _HONORIFICS:
+        words = words[1:]
+    if not words:
+        return DEFAULT_PREFIX
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return "".join(w[0] for w in words[:3]).upper()
+
+
+def _uses_legacy_prefix(root: Path) -> bool:
+    """A 2.x client without a stored prefix: a project already built as <id>_RE_EDIT.prproj / _RE_*.aep (bounded:
+    one listing of output/projects, one glob per project)."""
+    try:
+        projects = sorted(d for d in (Path(root) / "output" / "projects").iterdir() if d.is_dir())[:300]
+    except OSError:
+        return False
+    tag = f"_{LEGACY_PREFIX}_"
+    for d in projects:
+        for sub, pat in (("07_premiere/project", "*.prproj"), ("04_after_effects/project", "*.aep")):
+            try:
+                if any(tag in f.name for f in (d / sub).glob(pat)):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def derived_prefix(root: Path | None) -> str:
+    """The prefix of a client that stores none: RE for a 2.x client that already has RE-named projects, else the
+    initials of its folder name (initials_prefix), WN without a client folder."""
+    if not root:
+        return DEFAULT_PREFIX
+    return LEGACY_PREFIX if _uses_legacy_prefix(Path(root)) else initials_prefix(Path(root).name)
+
+
 def project_prefix() -> str:
-    """File-name tag, e.g. C0238_NH_EDIT.prproj. From profile.json 'prefix' (default RE)."""
-    return load_config("profile.json").get("prefix") or "RE"
+    """File-name tag, e.g. C0238_NH_EDIT.prproj: profile.json 'prefix' (the client's stored one wins; `client-init`
+    stores it), else derived from the client folder (derived_prefix: RE kept for 2.x clients, else the folder's ASCII
+    initials, else WN). Cached on the request's Context (the legacy check lists output/projects)."""
+    stored = str(load_config("profile.json").get("prefix") or "").strip()
+    if valid_prefix(stored):
+        return stored
+    ctx = current_context()
+    cache = ctx.__dict__.setdefault("_prefix_cache", {})
+    key = str(ctx.root) if ctx.root else ""
+    if key not in cache:
+        cache[key] = derived_prefix(ctx.root)
+    return cache[key]
 
 
 def source_range(paths) -> dict:

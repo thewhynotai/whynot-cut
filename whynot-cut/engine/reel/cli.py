@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.common import (Paths, load_status, log, read_json, set_status, write_json, now_iso,  # noqa: E402
                         set_context, active_profile, profile_dirs, project_prefix, models_dir, PROFILES_DIR, CLIENT_PROFILE_REL,
-                        clients_root, client_folders, resolve_root)
+                        clients_root, client_folders, resolve_root, valid_prefix, derived_prefix)
 
 # 01_analysis/editing-style.json is the video's copy of the client reference style (`reel ref-style --apply`), not
 # authored per video; the other files are written by the story editor (+ medical reviewer) for each video
@@ -804,12 +804,15 @@ def stale_steps(p: Paths, missing=()) -> list[str]:
 
 def cmd_next(a):
     """Tell Claude/the user what the next step is (resumable workflow)."""
+    out(next_doc(P(a)), check=False)
+
+
+def next_doc(p: Paths) -> dict:
+    """The `reel next` document of one clip, reel or motion project (also read by `reel board`, T3.10)."""
     from lib.motion_config import is_motion
-    p = P(a)
     if is_motion(p):
         from lib.motion_qc import motion_next
-        out(dict(motion_next(p), **project_notes(p)), check=False)
-        return
+        return dict(motion_next(p), **project_notes(p))
     from lib import ref_style
     from lib.people import profile_notice as people_notice
     rs = ref_style.next_step(p)     # Stage 4 is client-level: author once, reuse, flag when the references change
@@ -843,15 +846,14 @@ def cmd_next(a):
         status = f"{status} (STALE: inputs changed since)"
     extra = project_notes(p)
     parked = extra.get("parked_previous")
-    out({"status": status, "profile": active_profile(p.root), "next": todo[0] if todo else "done",
-         "remaining": todo, "stale": stale,
-         "reference_style": {"state": rs["client"]["state"], "video": rs["video"]["state"], "message": rs["client"]["message"]},
-         "notices": rs["notices"] + [n for n in (people_notice(p.root), parked and parked["how"]) if n], **extra},
-        check=False)
+    return {"status": status, "profile": active_profile(p.root), "next": todo[0] if todo else "done",
+            "remaining": todo, "stale": stale,
+            "reference_style": {"state": rs["client"]["state"], "video": rs["video"]["state"], "message": rs["client"]["message"]},
+            "notices": rs["notices"] + [n for n in (people_notice(p.root), parked and parked["how"]) if n], **extra}
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
-NO_ROOT = {"serve", "setup", "doctor", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
+NO_ROOT = {"board", "serve", "setup", "doctor", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
            "ae-status", "ae-probe", "motion-icons", "motion-library", "validate"}
 NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
@@ -870,7 +872,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
-CORE_READS = {"serve", "setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
+CORE_READS = {"board", "serve", "setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
               "status", "next", "lock", "doctor", "validate"}
 WRITES_IF = {
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
@@ -933,6 +935,35 @@ def take_writer_lock(a):
     except writer_lock.Busy as e:
         out(e.refusal())
         raise SystemExit(2)
+
+
+def cmd_board(a):
+    """Every client's videos with their state and next step (T3.10): read-only, bounded (lib/board.py). The plain
+    table by default, the JSON document with --json; exit 1 with guidance when there is no clients folder."""
+    from lib import board as B
+    from lib.errors import Guidance
+    from lib.plat import native_path
+    only = None
+    if a.root:
+        r = Path(a.root).expanduser()
+        if not ((r / "assets").is_dir() and (r / "data").is_dir()):
+            raise Guidance(f"{r} is not a client folder (it needs assets/ and data/)",
+                           "Pass --root a client folder, or leave it out to see every client.", where=str(r))
+        only = r.resolve()
+    base = Path(native_path(a.clients_root)).expanduser() if a.clients_root else clients_root()
+    if only is None:
+        if base is None:
+            raise Guidance("no clients folder is set", "Run /whynot-cut:start (it sets the clients folder), or pass "
+                           "--clients-root <the folder that holds the client folders>.")
+        if not base.is_dir():
+            raise Guidance(f"the clients folder {base} does not exist or cannot be reached",
+                           "Check the drive is connected, or set the clients folder again with /whynot-cut:preferences.",
+                           where=str(base))
+    doc = B.board(base, only=only, next_fn=next_doc, budget=a.budget)
+    if a.json:
+        out(doc)
+    else:
+        print(B.table(doc))
 
 
 def cmd_lock(a):
@@ -1282,6 +1313,8 @@ def cmd_client_init(a):
     pj["id"] = a.id
     if a.prefix:
         pj["prefix"] = a.prefix
+    elif not valid_prefix(pj.get("prefix")):     # T3.10: the folder's initials (RE for a 2.x client), else WN; stored
+        pj["prefix"] = derived_prefix(p)
     write_json(dst / "profile.json", pj)
     from lib.client_marker import MARKER, write_marker
     try:
@@ -1290,7 +1323,7 @@ def cmd_client_init(a):
         print(f"note: {e}", file=sys.stderr)
     from lib.claude_perms import inherit_for_new_client
     perms = inherit_for_new_client(p)     # T3.9: the clients folder's `reel *` rules, when the editor accepted them
-    out({"profile_dir": str(dst), "id": a.id, "from": src.name, "files": written, "marker": str(p / MARKER),
+    out({"profile_dir": str(dst), "id": a.id, "from": src.name, "prefix": pj["prefix"], "files": written, "marker": str(p / MARKER),
          **({"allow_reel": perms} if perms else {}),
          "next": "Fill brand.json / transcription.json / glossary / notes.md from the client's own documents (never invent)."})
 
@@ -1348,6 +1381,7 @@ CORE_COMMANDS: dict[str, str] = {
     "qc": "run the QC checks on the build and write the report",
     "handoff": "write the editor handoff for a finished or paused edit",
     "status": "show the project status record",
+    "board": "one table of every client in the clients folder: each video's state and next step (--json for the panel)",
     "next": "what the next step is (resumable workflow), with stale-input warnings",
     "lock": "one writer per client folder: show (--status) or release (--release, lead only) output/.whynot-lock",
     "mogrt-build": "build MOGRT templates (extra: needs --extras and an explicit editor request)",
@@ -1533,6 +1567,14 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--client", metavar="DIR", help="with --allow-reel: only this client folder (not the clients "
                             "folder, not the other clients)")
             sp.add_argument("--json", action="store_true", help="accepted for scripts; the output is always one JSON document")
+        if name == "board":
+            sp.add_argument("--json", action="store_true",
+                            help="print the JSON document (stable, `board: 1`; the same data the WhyNot Cut panel shows; "
+                                 "fields in lib/board.py) instead of the plain table")
+            sp.add_argument("--clients-root", metavar="DIR", help="the folder that holds the client folders (default: "
+                            "the configured clients folder); --root <client> shows one client")
+            sp.add_argument("--budget", type=float, default=5.0, metavar="SECONDS",
+                            help="time budget; items read after it show their recorded status only (partial)")
         if name == "lock":
             g = sp.add_mutually_exclusive_group()
             g.add_argument("--status", action="store_true", help="who holds the lock, since when, stale or not (default)")

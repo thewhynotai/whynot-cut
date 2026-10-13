@@ -18,7 +18,7 @@ from pathlib import Path
 SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
-from lib.common import Paths, write_json  # noqa: E402
+from lib.common import Paths, set_context, write_json  # noqa: E402
 from lib.handoff import build, motion_readme  # noqa: E402
 from lib.plan import APPROVAL_FORMAT, plan_fingerprint  # noqa: E402
 
@@ -48,6 +48,14 @@ def spec() -> dict:
             "framing": {"aspect": "9:16", "mode": "center"}, "events": ev, "main_segments": [], "time_map": None}
 
 
+def stored_prefix(test, root: Path, prefix: str = "RE"):
+    """The goldens name files <id>_RE_…: the client stores that prefix (T3.10: a stored prefix is kept; without one the
+    folder's initials apply), and the engine reads it through the client's Context."""
+    write_json(root / "output/client_database/reel-profile/profile.json", {"prefix": prefix})
+    set_context(root)
+    test.addCleanup(set_context, None, None)
+
+
 class HandoffFixture(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -55,6 +63,7 @@ class HandoffFixture(unittest.TestCase):
         self.root = Path(self._tmp.name) / "CLIENT"
         (self.root / "assets").mkdir(parents=True)
         (self.root / "data/Raw").mkdir(parents=True)
+        stored_prefix(self, self.root)
         self.p = Paths(self.root, "CLIP1")
         self.p.ensure_project()
         write_json(self.p.p("01_analysis/timeline-spec.json"), spec())
@@ -367,6 +376,7 @@ class TestMotionHandoff(unittest.TestCase):
         self.root = Path(self._tmp.name) / "CLIENT"
         (self.root / "assets").mkdir(parents=True)
         (self.root / "data").mkdir(parents=True)
+        stored_prefix(self, self.root)
         self.p = Paths(self.root, "EP12_R01_MO")
         self.p.ensure_project()
         write_json(self.p.p("08_quality_control/qc-results.json"), {"ok": True})

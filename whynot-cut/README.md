@@ -20,6 +20,32 @@ Premiere Pro project**:
 
 A human editor finishes, mixes and renders.
 
+## ابدأ في ٣ خطوات (Quick start بالعربي)
+إنت بتعمل ٣ حاجات بس: **حط الملفات · قول عايز إيه · وافق على الخطة**. الباقي كله شغل WhyNot Cut.
+
+١. **ثبّت وابدأ:** ضيف الإضافة من مجلد `whynot-cut-marketplace` (أو من الـ installer)، افتح سيشن جديدة واكتب:
+```
+/whynot-cut:start
+```
+هيجهز الجهاز ويربط Premiere Pro ويعملك مجلد للعميل خطوة بخطوة، ويتخطى أي حاجة جاهزة أصلاً.
+لما Claude يتفتح في مجلد العملاء أول مرة هيسألك «تثق في الملفات اللي في المجلد ده؟» (workspace trust): وافق، عشان
+WhyNot Cut يشتغل من غير ما يستأذن في كل أمر.
+
+٢. **حط الملفات:** اللوجو والخطوط والصور وملف الألوان في `assets/`، والفيديوهات الخام في `data/Raw/`،
+والحلقات الكاملة في `data/Episodes/`.
+
+٣. **قول عايز إيه، ووافق على الخطة:**
+- «عدّل الفيديوهات الجديدة» ← خطة وفيديو معاينة، توافق عليهم، وبعدها مشروع Premiere كامل وتقرير جودة.
+- «طلّع ريلز من الحلقة» ← خطة ريلز بالتايم كود ونوع المحتوى (حكاية، دراما، قصة نجاح…) ومعاينة لكل ريل؛ تختار
+  الريلز، وكل ريل يتعمل مشروع Premiere، ومعاه العناوين والديسكربشن والشابترز والتاجز والكابشن والثمبنيل.
+- «اعمل موشن من الجزء ده» ← فيديو موشن جرافيك من **صوت** الجزء (كلام بيظهر كلمة بكلمة، أرقام، خطوات، أيقونات):
+  توافق على الخطة والـ animatic، وبعدها مشروع After Effects جاهز ومتراجع من فريماته.
+- «جاهز؟» أو «إيه اللي مستنيني؟» ← جدول واحد بكل العملاء وكل فيديو: حالته والخطوة الجاية.
+
+**لوحة WhyNot Cut في Premiere** (Window › UXP Plugins › WhyNot Cut) بتعرض نفس الفيديوهات والخطة اللي مستنية موافقتك
+وفريمات المراجعة؛ بتضغط على الزراير بس، ومش محتاج تكتب أي أمر فيها.
+ملفاتك الأصلية مبتتعدلش أبداً؛ كل النتايج في مجلد `output/`.
+
 ## Install (2 minutes)
 1. Get the marketplace folder `whynot-cut-marketplace` (from the zip, a shared drive or a git repo).
 2. In Claude Code:
@@ -32,7 +58,14 @@ A human editor finishes, mixes and renders.
    - installs the engine in `~/.whynot-cut` (a private Python environment, ~400 MB, on Python 3.12 (installed by WhyNot Cut))
    - connects Premiere Pro (installs the WhyNot Cut Bridge panel; gives you the one command for Adobe's PlayerDebugMode)
    - asks three preferences (where clients live, approval mode, transcription speed)
+   - lets WhyNot Cut run without a prompt per command (`reel settings --allow-reel`: the clients folder and every client
+     folder; Claude Code applies these rules only in the folder it is started in, after you accept that folder's
+     workspace-trust dialog)
    - creates your first client folder and tells you exactly what to drop where
+
+You do three things: **drop files** · **say what you want** · **approve the plan** (in chat, or in the **WhyNot Cut
+panel in Premiere**: Window › UXP Plugins › WhyNot Cut, which shows each video's state, the plan and the proof frames;
+you click, you never type commands there).
 
 **Claude Code version.** Agent fields `omitClaudeMd` need Claude Code 2.1.271 or newer and `mcp__*` entries in an agent's `disallowedTools` need 2.1.178 or newer. Older versions ignore these fields; nothing breaks, the safeguards are just weaker.
 
@@ -58,13 +91,13 @@ Then say **"edit the new videos"**. Or use the commands:
 | `/whynot-cut:motion EP12 R03` | an episode window's audio → animated motion video built in After Effects |
 | `/whynot-cut:preview` | watchable MP4 of the planned edit, no Premiere needed |
 | `/whynot-cut:revise "1- … 2- …"` | applies your comments, rebuilds, re-verifies, reports per comment |
-| `/whynot-cut:status` | "is it ready?", with fresh evidence: Verified / Not verified / Needs you |
+| `/whynot-cut:status` | "is it ready?", with fresh evidence: Verified / Not verified / Needs you; with no clip named, `reel board`: one table of every client's videos, state and next step |
 | `/whynot-cut:fix-audio` | dialogue cleanup and pause removal only |
 | `/whynot-cut:new-client` | a new client's profile from their brand files and references |
 | `/whynot-cut:handoff` | handoff package for the editor or another computer |
 | `/whynot-cut:preferences` | approval mode, language, transcription model, clients folder |
 | `/whynot-cut:setup` | install or repair the engine and Premiere bridge |
-| `/whynot-cut:help` | cheat sheet |
+| `/whynot-cut:help` | what to do next where you are, plus the cheat sheet |
 | `/whynot-cut:adobe-extras` | After Effects / Photoshop output, only when you ask |
 
 ## Podcast mode
@@ -127,19 +160,6 @@ audio only — no camera picture needed, so audio-only podcasts work too (`data/
 
 Results in `output/projects/EP12_R03_MO/`: `04_after_effects/project/*.aep`, `04_after_effects/render/*_motion.mp4`,
 `08_quality_control/ae_frames/`, `09_handoff/README.md`.
-
-## Quick start بالعربي
-١. ثبّت الإضافة من مجلد `whynot-cut-marketplace` ثم اكتب في Claude Code: **`/whynot-cut:start`**.
-٢. سيتم تجهيز الجهاز وربط Premiere Pro وإنشاء مجلد للعميل خطوة بخطوة.
-٣. ضع الشعار والخطوط والصور وملف الألوان في `assets/`، والفيديوهات الخام في `data/Raw/`.
-٤. قل: **"عدّل الفيديوهات الجديدة"** — ستحصل على مشروع Premiere كامل وفيديو معاينة وتقرير جودة.
-٥. **البودكاست:** حط الحلقة الكاملة في `data/Episodes/` (ومعاها ملف `.md` بالضيف واللينكات) وقول **"طلّع ريلز من الحلقة"**:
-توصلك خطة ريلز بالتايم كود ونوع المحتوى (حكاية، دراما، قصة نجاح…) ومعاينة لكل ريل، تختار منها، وكل ريل يتعمل
-مشروع Premiere بإيقاع نوعه، ومعاه العناوين والديسكربشن والشابترز والتاجز والكابشن والثمبنيل.
-٦. **الموشن:** في Gate 0 قول «R03 موشن» (`--as motion`): بيتعمل فيديو موشن جرافيك من **صوت** الجزء ده بس (كلام
-بيظهر كلمة بكلمة، أرقام، خطوات، تايم لاين، أيقونات)، بتوافق على الخطة والـ animatic، وبعدها مشروع After Effects جاهز
-ومتراجع من فريمات After Effects نفسه.
-لا يتم تعديل ملفاتك الأصلية أبداً؛ كل النتائج في مجلد `output/`.
 
 ## How it works
 The **lead editor** is the main conversation: it runs the pipeline, talks to you, and is the only one allowed to approve
@@ -211,6 +231,15 @@ The engine is generic; each client's look and rules come from layered profiles (
 3. `<client>/output/client_database/reel-profile/` (the client's own copy, created by `reel client-init`)
 
 `reel profile --root "<client folder>"` shows which applies.
+
+File names carry the client's tag (`profile.json` `prefix`, e.g. `C0239_NH_EDIT.prproj`). `reel client-init` stores it:
+`--prefix`, else the initials of the client folder's ASCII words (a leading Dr/Prof/Eng skipped: "Nour Hospital" → NH),
+else `WN` (an Arabic-only name). A client that already has a stored prefix keeps it; a 2.x client without one whose
+projects are named `_RE_` keeps `RE`.
+
+`reel board` prints one table of every client under the clients folder (each video: state, next step);
+`reel board --json` prints the same as a stable document (`board: 1`; documented in `engine/reel/lib/board.py`), the
+data the Premiere panel shows.
 
 ## Upgrading from 2.x
 Update the plugin, then run `reel setup` (it moves the engine to the isolated 3.0 runtime, and `reel ppro-install` plus a

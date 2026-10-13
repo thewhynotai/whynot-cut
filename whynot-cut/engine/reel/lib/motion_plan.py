@@ -74,7 +74,7 @@ class _Compiler:
         self.assets, self.sfx = [], []
         self.words = (read_json(paths.p("02_transcription/words.json"), {}) or {}).get("words", [])
         if not self.words:
-            raise SystemExit("02_transcription/words.json missing — the motion project's transcript is sliced at Gate 0")
+            raise SystemExit("02_transcription/words.json missing — the motion project's transcript is sliced when the editor picks the reels")
         self.total_ms = int(self.src.get("duration_ms") or self.words[-1]["end_ms"])
         pz = read_json(paths.p("06_audio/dialogue/pauses.json"))
         if not pz:

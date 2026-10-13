@@ -1624,7 +1624,7 @@ class TestMotionBuild(CompiledMotion):
         self.reel.p("01_analysis/plan-approval.json").unlink()
         code, doc = self.cli()
         self.assertEqual((code, doc["status"]), (2, "REFUSED"), doc)
-        self.assertIn("Gate 1", doc["blocked"])
+        self.assertIn("not approved", doc["blocked"])         # T3.10: no "Gate 1" to the editor
         write_json(self.reel.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor",
                                                                    "plan_fingerprint": "an-older-plan"})
         code, doc = self.cli()

@@ -133,7 +133,7 @@ def cmd_reels_plan(a):
     out({"ok": r["ok"], "errors": r["errors"], "warnings": r["warnings"], "candidates": len(r["candidates"]),
          "top": [{k: c.get(k) for k in ("id", "total", "type", "in_ms", "out_ms", "title")} for c in r["candidates"][:5]],
          "plan": str(ep.p("01_analysis/reels-plan.md")) if r["ok"] else None,
-         "next": (f"reel reels-preview --episode {ep.episode_id}, then show reels-plan.md to the editor (Gate 0)"
+         "next": (f"reel reels-preview --episode {ep.episode_id}, then show reels-plan.md to the editor to pick the reels"
                   if r["ok"] else "fix the errors in 01_analysis/reels-plan.json and run reels-plan again")})
 
 
@@ -144,7 +144,7 @@ def cmd_reels_preview(a):
     ids = items(a.ids) or None
     r = render_candidates(ep, ids)
     r["plan"] = str(ep.p("01_analysis/reels-plan.md"))
-    r["next"] = "VIEW the sheet, then show the editor reels-plan.md + previews and wait for their pick (Gate 0)"
+    r["next"] = "VIEW the sheet, then show the editor reels-plan.md + previews and wait for them to pick the reels"
     out(r)
 
 

@@ -123,7 +123,7 @@ def run(paths) -> dict:
         "motion plan compiled without errors and current" if val.get("ok") else "motion plan missing, with errors or stale")
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     add("approval_current", bool(appr.get("approved")) and appr.get("plan_fingerprint") == fp,
-        f"Gate 1 by {appr.get('by')}" if appr.get("plan_fingerprint") == fp else "Gate 1 approval missing or older than the plan")
+        f"plan approved by {appr.get('by')}" if appr.get("plan_fingerprint") == fp else "plan approval missing or older than the plan")
     b = read_json(paths.p(BUILD), {}) or {}
     aep = aep_path(paths)
     fresh = b.get("status") in ("PROJECT_ASSEMBLED", "BUILT_UNVERIFIED") and aep.exists() and _sha1(aep) == b.get("aep_sha1")

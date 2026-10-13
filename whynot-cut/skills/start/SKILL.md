@@ -9,15 +9,23 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 
 WhyNot Cut (by The Why Not AI) turns raw talking-head footage into a native Premiere Pro project: transcript, cleaned
 dialogue with pauses removed, story-driven animated graphics and captions in the client's brand, a watchable preview,
-and evidence-based QC. This wizard gets a new user to the point where they only drop files into a folder.
+and evidence-based QC. This wizard ends when the editor knows the only three things they ever do:
+
+1. **drop files** into the client folder (raw clips, logo, fonts, reference edits);
+2. **say what you want** ("edit the new videos", "make reels from this episode");
+3. **approve the plan** (here in chat, or with one click in the WhyNot Cut panel in Premiere).
+
+In Arabic: «حط الملفات · قول عايز إيه · وافق على الخطة». Everything else is WhyNot Cut's job; don't teach the rest
+(stages, profiles, ids) unless asked.
 
 Talk to the person in their language (Arabic if they write Arabic). Put every command and path on its own line or in a
 code block (mixed right-to-left text garbles paths). One step per message: what was checked, what happens next.
 Show progress as a checklist (✅ done · ⚠️ needs them · ⏳ running). If an argument was given, use it as the clients
-folder and skip that question in Step 3.
+folder and skip that question in Step 3. **Skip what is already green:** the installer may have done Steps 1–4; when
+`reel doctor` (and `reel settings`) show a step is done, tick it ✅ and move on without asking.
 
 Installing from inside Claude (the plugin, the engine and the Adobe parts in one go): when
-`${CLAUDE_SKILL_DIR}/references/install-from-claude.md` is present, read it and follow it for Steps 1–2; if it is
+`${CLAUDE_SKILL_DIR}/references/install-from-claude.md` is present, read it and follow it for Steps 1–2; when it is
 not there, the steps below cover the install.
 
 ## Step 1: Check the machine
@@ -58,16 +66,19 @@ reel doctor
 - Anything else failing: spawn `whynot-cut:setup-doctor` with the exact output and relay its fix list. Never guess.
 - Report `verdict`, the GPU line (an NVIDIA GPU makes transcription several times faster) and the Adobe apps found.
 
-## Step 2: Connect Premiere Pro
-Read `adobe_apps.premiere` and `premiere_bridge` from the doctor report.
+## Step 2: Premiere and the WhyNot Cut panel
+Premiere is where the editor sees the result. The **WhyNot Cut panel in Premiere** (Window › UXP Plugins › WhyNot Cut)
+shows each video's state, the plan to approve and the proof frames; the editor only clicks its buttons and never types
+commands into the panel (commands are Claude's job, here in chat). Read `adobe_apps.premiere` and `premiere_bridge`
+from the doctor report.
 - **No Premiere:** say so plainly. WhyNot Cut still produces an importable XML project and a preview MP4; the native
   build starts working once Premiere Pro 2022+ is installed. Continue.
 - **Bridge not installed:** ask them to quit Premiere first (Windows locks the panel folder while it runs), then
   `reel setup` installs the WhyNot Cut Bridge panel.
-- **`debug_mode_ok` false:** Premiere loads the panel only when Adobe's `PlayerDebugMode` is 1, which lets Premiere load
-  extensions that aren't signed by Adobe. Say that plainly; they may skip it and import the XML by hand instead. This
-  setting is theirs to change (a hook blocks Claude from changing it). Show the commands from the doctor's `fixes` in one
-  code block for their OS. On Windows they run them in **PowerShell** (Git Bash mangles the `/v /d /f` switches).
+- **`debug_mode_ok` false:** Premiere loads the bridge only when Adobe's `PlayerDebugMode` is 1, which lets Premiere
+  load extensions that aren't signed by Adobe. Say that plainly; they may skip it and import the XML by hand instead.
+  This setting is theirs to change (a hook blocks Claude from changing it). Show the commands from the doctor's `fixes`
+  in one code block for their OS. On Windows they run them in **PowerShell** (Git Bash mangles the `/v /d /f` switches).
 - Ask them to open Premiere once, then run `reel ppro-status`. If `alive` is false, ask them to open
   Window › Extensions › WhyNot Cut Bridge and check once more; still false → spawn `whynot-cut:setup-doctor`.
   Don't loop, and don't claim the bridge works without `alive: true` and a `ping` result.
@@ -91,24 +102,43 @@ This writes `~/.claude/whynot-cut.local.md`; a client folder can still override 
 `settings_file`, show its values, change only what they ask, and add `--force` (other values are kept). Check that
 `_problems` comes back empty.
 
-## Step 4: The first client folder
-Ask for the client's name (e.g. "Dr Sherif"). For the folder name drop characters Windows forbids
+## Step 4: Let WhyNot Cut work without asking each time
+Ask once ("allow WhyNot Cut to run its engine without asking each time?", recommended yes). On yes:
+```bash
+reel settings --allow-reel
+```
+It adds the `reel` allow rules to `.claude/settings.json` of the clients folder **and** of every client folder in it
+(one client only: `reel settings --allow-reel --client "<CLIENT_FOLDER>"`); new clients made later by `reel scaffold`
+or `reel client-init` inherit them. Check `ok: true`. Tell the editor two things plainly:
+- Claude Code reads these rules only from the folder it is started in (never from a parent folder): start Claude in
+  the clients folder or in a client folder.
+- The rules apply only after the editor accepts the folder's **workspace-trust dialog** ("Do you trust the files in
+  this folder?") the first time Claude is started there. Until then Claude still asks before each `reel` command.
+
+Next to `settings.json` it keeps a lock file, `.claude/settings.json.lock` (by design; a run that finds the rules
+already there writes neither). If a client folder is a git repository, the lock shows as untracked: suggest adding
+`.claude/*.lock` to that client's `.gitignore`.
+
+## Step 5: The first client folder
+Ask for the client's name (e.g. "Dr Karim"). For the folder name drop characters Windows forbids
 (`\ / : * ? " < > |`) and any trailing dot or space; keep the name as typed for `--name`.
 ```bash
 reel scaffold --root "<CLIENTS_FOLDER>/<Client Name>" --name "<Client Name>"
 ```
-- `status: EXISTS` means the folder already has material: go to Step 5.
+- `status: EXISTS` means the folder already has material: go to Step 6.
 - Show the table from `START_HERE.md`: logo → `assets/Logo`, fonts → `assets/Fonts`, photos → `assets/Photos`,
   brief + colour HEX codes → `assets/Brand`, raw clips → `data/Raw`, reference edits → `data/References`.
 - Offer to open the folder: `open "<folder>"` on macOS; `explorer.exe "<folder with backslashes>"` on Windows (explorer
   ignores forward-slash paths and returns exit code 1 even when it works). If macOS asks whether the terminal may access
   Documents/Desktop/an external drive, they click Allow (or later: System Settings › Privacy & Security › Files and Folders).
 - Remind them to install the client's fonts on the computer too (Premiere needs them installed).
-
 - Podcast clients: finished episodes go in `data/Episodes/` (16:9), each with an optional `<name>.md` sheet (host,
   guest, links, sponsor, topics to avoid). Then "make reels from this episode" (`/whynot-cut:podcast`).
 
-## Step 5: Check what they dropped
+File names in the client's projects carry a short tag, e.g. `C0239_KA_EDIT.prproj`: the initials of the client folder's
+name (`WN` for an Arabic-only name); `reel client-init --prefix` sets another.
+
+## Step 6: Drop files
 When they say the files are in (and any copy or cloud download has finished):
 ```bash
 reel inbox --root "<CLIENT_FOLDER>"
@@ -117,16 +147,18 @@ For a closer look (formats, orientation, audio, misplaced files), spawn `whynot-
 found and `missing_material`. A missing logo, fonts or colours is fine to start with, but say what will look generic
 without them. Never invent brand facts to fill a gap.
 
-## Step 6: Hand over to the pipeline
+## Step 7: Say what you want, approve the plan
 - `reel profile --root "<CLIENT_FOLDER>"` → `active` null: run the `/whynot-cut:new-client` flow (the client-researcher
   reads their brand and references).
 - If `reel inbox` listed new clips, ask whether to start editing now; on yes, run `/whynot-cut:autopilot`. Tell them what
   to expect: transcription (the first run needs the Whisper model, about 3 GB for large-v3; ask, then
   `reel model-download --model <whisper_model>` in the background while the client profile is built),
-  a plan and a preview video to approve, the Premiere build, QC.
+  then a plan and a preview video for them to **approve** (in chat or in the WhyNot Cut panel), the Premiere build and
+  a proof check.
 
-Finish with two lines from `/whynot-cut:help` and their next step: "drop more clips into data/Raw any time, then say
-'edit the new videos'".
+Finish with the three verbs in their language and where to look: "drop more clips into data/Raw any time, then say
+'edit the new videos'"; "is it ready?" (`/whynot-cut:status`) shows every client's videos in one table; the WhyNot Cut
+panel in Premiere shows the same.
 
 ## Rules
 - One step at a time; verify each step with a command before calling it done.
