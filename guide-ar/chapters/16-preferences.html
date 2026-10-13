@@ -18,12 +18,14 @@
 <tr><td><bdi dir="ltr"><code>clients_root</code></bdi></td><td>فولدر</td><td>فولدر العملاء. يُستخدم في فحص الجهاز، وفي رسالة بداية المحادثة، وعندما تذكر العميل باسم فولدره فقط.</td></tr>
 <tr><td><bdi dir="ltr"><code>notify_done</code></bdi></td><td><bdi dir="ltr"><code>true</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>false</code></bdi></td><td>يبدأ التقرير النهائي للمهام الطويلة بسطر واضح يقول إنها انتهت (Finished).</td></tr>
 <tr><td><bdi dir="ltr"><code>panel_link</code></bdi></td><td><bdi dir="ltr"><code>true</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>false</code></bdi></td><td>في الإصدار <bdi dir="ltr">3.0</bdi>: يشغّل في الخلفية، عند بدء كل محادثة، المحرك الذي تتصل به لوحة WhyNot&nbsp;Cut في Premiere. مع <bdi dir="ltr"><code>false</code></bdi> تبقى اللوحة غير متصلة حتى يشغّله Claude (<a href="#ch07-title">الفصل&nbsp;7</a>).</td></tr>
+<tr><td><bdi dir="ltr"><code>evidence_gate</code></bdi></td><td><bdi dir="ltr"><code>true</code></bdi> · <bdi dir="ltr"><code>false</code></bdi> (الافتراضي)</td><td>مع <bdi dir="ltr"><code>true</code></bdi>: إذا قال Claude إن المونتاج جاهز أو انتهى دون أن يشغّل فحص الجودة أو التحقق، يُعاد إليه مرة واحدة ليفحص أولًا. لا يعمل مع الموافقة <bdi dir="ltr"><code>auto</code></bdi>.</td></tr>
 <tr><td><bdi dir="ltr"><code>magnific_budget_credits</code></bdi></td><td>رقم، 0 أو أكثر (الافتراضي 300)</td><td>في الإصدار <bdi dir="ltr">3.0</bdi>: أكبر عدد من رصيد Magnific يصرفه مونتاج واحد. القيمة 0 تعني ألا يُستخدم Magnific أبدًا (<a href="#ch15-title">الفصل&nbsp;15</a>).</td></tr>
 </tbody>
 </table>
 
 <aside class="todo" data-phase="6">
-<p>الإعداد <bdi dir="ltr"><code>panel_link</code></bdi> يخص لوحة WhyNot Cut الجديدة في Premiere (<a href="#ch07-title">الفصل&nbsp;7</a>)، ويُتحقَّق منه مع اللوحة في المرحلة 6. وحد رصيد Magnific يعمل مع مواد Magnific في المرحلة 5. وزر اللغة في اللوحة («ع» / «EN») يُحفظ لكل مونتير على جهازه، وفي أول تشغيل للوحة تبدأ بقيمة الإعداد <bdi dir="ltr"><code>language</code></bdi>.</p>
+<p>الإعدادان <bdi dir="ltr"><code>panel_link</code></bdi> و<bdi dir="ltr"><code>magnific_budget_credits</code></bdi> لا أثر لهما حتى تصلك لوحة WhyNot Cut الجديدة ومواد Magnific.</p>
+<!-- فريق: الإعداد panel_link يخص لوحة WhyNot Cut الجديدة في Premiere (الفصل 7)، ويُتحقَّق منه مع اللوحة في المرحلة 6. وحد رصيد Magnific يعمل مع مواد Magnific في المرحلة 5. وزر اللغة في اللوحة («ع» / «EN») يُحفظ لكل مونتير على جهازه، وفي أول تشغيل للوحة تبدأ بقيمة الإعداد language (مذكور للقارئ في الفصل 7، رأس اللوحة). -->
 </aside>
 
 <p>معاني القيم في الجدول: <bdi dir="ltr"><code>true</code></bdi>&nbsp;=&nbsp;نعم، و<bdi dir="ltr"><code>false</code></bdi>&nbsp;=&nbsp;لا؛ <bdi dir="ltr"><code>ar</code></bdi>&nbsp;=&nbsp;عربي، و<bdi dir="ltr"><code>en</code></bdi>&nbsp;=&nbsp;إنجليزي؛ <bdi dir="ltr"><code>ask</code></bdi>&nbsp;=&nbsp;اسألني، و<bdi dir="ltr"><code>auto</code></bdi>&nbsp;=&nbsp;تلقائي. ولا تحتاج إلى كتابة هذه القيم بنفسك: قل ما تريد بكلامك كما في الجزء التالي.</p>
@@ -58,7 +60,7 @@
 </ul>
 
 <aside class="warn">
-<p>حتى مع <bdi dir="ltr"><code>auto</code></bdi> هناك ما لا يُوافَق عليه تلقائيًا أبدًا: الجرافيك الذي يحتاج إلى موافقة الطبيب، أو موافقة المتحدث أو صاحب المحتوى عند عملاء المحتوى الديني، يبقى في «محتاجك (Needs&nbsp;you)»، واختيار الريلز من الحلقة يبقى قرارك أنت دائمًا (<a href="#ch08-pick">اختر الريلز</a>).</p>
+<p>حتى مع <bdi dir="ltr"><code>auto</code></bdi> هناك ما لا يُوافَق عليه تلقائيًا أبدًا: الجرافيك الذي يحتاج إلى موافقة الطبيب، أو موافقة المتحدث أو صاحب المحتوى عند عملاء المحتوى الديني، يبقى في «مطلوب منك (Needs&nbsp;you)»، واختيار الريلز من الحلقة يبقى قرارك أنت دائمًا (<a href="#ch08-pick">اختر الريلز</a>).</p>
 </aside>
 
 <h2 id="ch16-file">أين يُحفظ ملف الإعدادات</h2>
@@ -94,6 +96,7 @@ clients_root: "D:/WhyNot Clients"
 <p>الإعداد الذي لا يذكره ملف العميل يُؤخذ من المكان التالي في الترتيب، فلا تضيع إعداداتك العامة. والقيمة غير الصحيحة في أي ملف تُتجاهل، ويخبرك بها Claude. وعند أي تغيير، يغيّر Claude القيمة في المكان الذي جاءت منه فعلًا، ملفًا كان أو خيار إضافة، حتى لا يغطّي عليها ملف أقرب. ويُستثنى من هذا الترتيب مكان فولدر العملاء: إذا حُدّد في خيارات الإضافة، يتغلّب على أي ملف.</p>
 
 <aside class="todo" data-phase="3">
-<p>خيارات الإضافة داخل تطبيق Claude (plugin options) تتوسّع في الإصدار <bdi dir="ltr">3.0</bdi>: مكان فولدر العملاء، ومكان بيانات المحرك، واللغة، والموافقة، ونموذج التفريغ، وحد رصيد Magnific ومفتاحه (<a href="#ch15-title">الفصل&nbsp;15</a>). يُشرح هنا مكان الخيارات في التطبيق بالصور بعد التحقق منها على جهاز حقيقي.</p>
+<p>خيارات الإضافة داخل تطبيق Claude تزيد في الإصدار <bdi dir="ltr">3.0</bdi>، فتضم أيضًا مكان فولدر العملاء ومكان بيانات المحرك ومفتاح Magnific، ويُشرح مكانها في التطبيق هنا بالصور.</p>
+<!-- فريق: خيارات الإضافة داخل تطبيق Claude (plugin options) تتوسّع في الإصدار 3.0: مكان فولدر العملاء، ومكان بيانات المحرك، واللغة، والموافقة، ونموذج التفريغ، وحد رصيد Magnific ومفتاحه (الفصل 15). يُشرح هنا مكان الخيارات في التطبيق بالصور بعد التحقق منها على جهاز حقيقي. -->
 </aside>
 </section>

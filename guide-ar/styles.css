@@ -21,11 +21,23 @@
    COMPONENTS (use exactly this markup in chapters/*.html)
      <aside class="tip"><p>…</p></aside>            نصيحة  (violet rule, right)
      <aside class="warn"><p>…</p></aside>           تنبيه  (orchid rule, right)
-     <aside class="todo" data-phase="11"><p>…</p></aside>  placeholder that names
-                                                     the phase that finalises it
-                                                     (data-phase is required:
-                                                     the lint fails without it;
-                                                     --release fails on any)
+     <aside class="todo" data-phase="11"><p>…</p>
+       <!-- فريق: … --></aside>                       a 3.0 box (ruling R2-9).
+                                                     The visible label is
+                                                     «في الإصدار 3.0 — لم يُتحقَّق
+                                                     منه بعد» (CSS ::before, NO
+                                                     phase number). data-phase
+                                                     names the phase that
+                                                     finalises it (required: the
+                                                     lint fails without it;
+                                                     --release fails on any).
+                                                     Visible text: ONE plain
+                                                     reader sentence. Team notes
+                                                     (H-items, phase numbers,
+                                                     label matching, test setup)
+                                                     go in the HTML comment
+                                                     «<!-- فريق: … -->» inside the
+                                                     aside: never printed.
      <figure class="shot"><div class="shot-frame">لقطة شاشة: فولدر
          <bdi dir="ltr"><code>example-clinic</code></bdi> بعد الإنشاء</div>
        <figcaption>…</figcaption></figure>           screenshot placeholder,
@@ -295,7 +307,7 @@ h1.ch-title::after {
 }
 .tip::before  { content: "نصيحة";  color: var(--accent); }
 .warn::before { content: "تنبيه";  color: var(--important); }
-.todo::before { content: "قيد الإعداد · يكتمل في المرحلة " attr(data-phase); color: var(--muted); }
+.todo::before { content: "في الإصدار 3.0 — لم يُتحقَّق منه بعد"; color: var(--muted); }
 .tip > :last-child, .warn > :last-child, .todo > :last-child { margin-bottom: 0; }
 
 /* ---------- screenshot placeholder ---------- */

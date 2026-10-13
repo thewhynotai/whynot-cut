@@ -21,6 +21,7 @@ transcript-verify
 transcript-relisten
 audio-clean
 plan
+validate
 approve-plan
 previews
 sfx
@@ -28,6 +29,7 @@ preview-video
 ppro-install
 ppro-status
 ppro-probe
+serve
 ppro-build
 ppro-frames
 premiere
@@ -35,6 +37,7 @@ verify
 qc
 handoff
 status
+board
 next
 lock
 mogrt-build

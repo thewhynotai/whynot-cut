@@ -470,6 +470,14 @@ class CmdAndShotTests(unittest.TestCase):
                     boxes.append(f"{path.name}: {code[:40]}")
         self.assertEqual(boxes, [], 'every `reel …` .cmd box needs data-who="claude"')
 
+    def test_css_todo_label_is_reader_facing(self):
+        """Ruling R2-9: the .todo label tells the reader «في الإصدار 3.0 — لم يُتحقَّق منه بعد», with no phase number
+        (data-phase stays an attribute for the lint and the release gate)."""
+        rule = self._rule(".todo::before")
+        self.assertIn('content: "في الإصدار 3.0 — لم يُتحقَّق منه بعد"', rule)
+        self.assertNotIn("attr(data-phase)", rule)
+        self.assertNotIn("المرحلة", rule)
+
 
 class PrintTests(unittest.TestCase):
     def test_print_timeout_stops_browser_and_cleans_profile(self):
@@ -543,6 +551,26 @@ class ChapterTests(unittest.TestCase):
                     problems.append(f"{path.name}: id for chapter {other} inside chapter {nn}")
         self.assertEqual(seen, list(range(1, len(seen) + 1)), "chapter file numbers must be consecutive from 01")
         self.assertEqual(problems, [])
+
+    def test_chapter_link_text_matches_target(self):
+        """A link that names a chapter number points at that chapter: <a href="#chNN-…">الفصل N</a> (also with
+        &nbsp;) and the listed form <a href="#chNN-…">N</a> («الفصلان 2 و3») need N == NN."""
+        paths = sorted((GUIDE / "chapters").glob("*.html"))
+        self.assertTrue(paths, "no chapters")
+        wrong = []
+        checked = 0
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            for m in re.finditer(r'<a\b[^>]*\bhref="#ch(\d\d)(?:-[^"]*)?"[^>]*>(.*?)</a>', text, flags=re.S):
+                label = build.plain_text(m.group(2)).replace(" ", " ").strip()
+                n = re.fullmatch(r"(?:الفصل\s+)?(\d+)", label)
+                if not n:
+                    continue
+                checked += 1
+                if int(n.group(1)) != int(m.group(1)):
+                    wrong.append(f"{path.name}: «{label}» links to #ch{m.group(1)}")
+        self.assertGreater(checked, 0, "no chapter links found")
+        self.assertEqual(wrong, [])
 
 
 @unittest.skipUnless(_pdf_ready(), "no guide-ar/.build/test.pdf yet (run build.py) or pypdf missing")

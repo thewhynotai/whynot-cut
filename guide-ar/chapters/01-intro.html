@@ -23,16 +23,18 @@
 <li><strong>وضع الموشن</strong>: من صوت جزء من الحلقة إلى فيديو موشن جرافيك يُبنى مشروعًا أصليًا في After Effects (<a href="#ch09-title">الفصل&nbsp;9</a>).</li>
 </ul>
 
+<p>ويأتي الإصدار <bdi dir="ltr">3.0</bdi> بثلاث أدوات للمونتير داخل لوحة WhyNot Cut في Premiere: «تايدي» ترتّب المشروع، و«هَش» تحذف السكتات، و«كلام» تكتب الكابشن (الفصول <a href="#ch11-title">11</a> و<a href="#ch12-title">12</a> و<a href="#ch13-title">13</a>).</p>
+
 <h2 id="ch01-not">ما الذي لا يفعله WhyNot Cut</h2>
 
 <p>الأداة تجهّز لك مشروعًا قويًا، لكنها لا تحلّ محلّ المونتير. هذه حدودها بوضوح:</p>
 <ul>
 <li><strong>لا تصدّر الفيديو النهائي.</strong> المونتير هو من يُنهي المونتاج، ويضبط الصوت النهائي (mix)، ويصدّر الفيديو (render). لا يوجد فيديو نهائي مُصدَّر إلا إذا صدّرته أنت. الاستثناء الوحيد وضع الموشن: يُصدَّر منه فيديو MP4 من After Effects، لكن الشكل النهائي والتصدير النهائي يبقيان عليك (<a href="#ch09-results">الفصل&nbsp;9</a>).</li>
-<li><strong>لا تغيّر ملفات العميل الأصلية.</strong> الفولدران <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> للقراءة فقط؛ لا يُكتب فيهما ولا يُنقل منهما ولا يُحذف شيء. نتائج WhyNot Cut كلها تُكتب في <bdi dir="ltr"><code>output/</code></bdi>، ما عدا ملف التسليم <bdi dir="ltr"><code>HANDOFF.md</code></bdi> الذي يُكتب في جذر فولدر العميل (طريقة فتح هذا النوع من الملفات في <a href="#ch01-reading">كيف تقرأ هذا الدليل</a>).</li>
+<li><strong>لا تغيّر ملفات العميل الأصلية.</strong> الفولدران <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> للقراءة فقط؛ لا يُكتب فيهما ولا يُنقل منهما ولا يُحذف شيء. نتائج المونتاج كلها تُكتب في <bdi dir="ltr"><code>output/</code></bdi>، أما ملف التسليم <bdi dir="ltr"><code>HANDOFF.md</code></bdi> فيُكتب في جذر فولدر العميل (طريقة فتح هذا النوع من الملفات في <a href="#ch01-reading">كيف تقرأ هذا الدليل</a>).</li>
 <li><strong>لا تخترع معلومات.</strong> لا تؤلّف حقائق عن العميل ولا قواعد هوية ولا كلامًا لم يُقل ولا توقيتات ولا معلومات طبية ولا موسيقى ولا تراخيص. ما لا تجده في ملفات العميل يُكتب «غير متوفر».</li>
 <li><strong>لا تنشر شيئًا.</strong> نصوص النشر في وضع البودكاست تُكتب في ملفات، ولا يُرفع أي شيء على المنصات.</li>
 <li><strong>لا تغيّر إعدادات النظام ولا إعدادات Adobe الأمنية.</strong> إذا احتاج الأمر تغييرًا من هذا النوع، يعطيك Claude الأمر لتنفّذه بنفسك (طريقة تشغيله في <a href="#ch02-run-command">الفصل&nbsp;2</a>).</li>
-<li><strong>لا تقول «جاهز» بلا دليل.</strong> لا يُوصف فيديو بأنه جاهز إلا إذا نجح فحص الجودة في الرسالة نفسها، ولم يبقَ ما يمنع ذلك في قائمة «محتاجك (Needs&nbsp;you)»، وهي قائمة ما ينتظر قرارك أو عملك أنت.</li>
+<li><strong>لا تقول «جاهز» بلا دليل.</strong> لا يُوصف فيديو بأنه جاهز إلا إذا نجح فحص الجودة في الرسالة نفسها، ولم يبقَ ما يمنع ذلك في قائمة «مطلوب منك (Needs&nbsp;you)»، وهي قائمة ما ينتظر قرارك أو عملك أنت.</li>
 </ul>
 
 <h2 id="ch01-verbs">ثلاث كلمات تلخّص العمل</h2>
@@ -57,7 +59,7 @@
 
 <h2 id="ch01-requirements">متطلبات الإصدار <bdi dir="ltr">3.0</bdi></h2>
 
-<p>هذه متطلبات الإصدار <bdi dir="ltr">3.0</bdi> المستهدفة، لا متطلبات النسخة الحالية. لتعرف رقم نسختك، اكتب لـ Claude «أنهي نسخة WhyNot Cut عندي؟»، فيفحص النسخة المثبّتة ويخبرك برقمها.</p>
+<p>هذه متطلبات الإصدار <bdi dir="ltr">3.0</bdi>. أما اليوم، فالنسخة التي معك تعمل مع <bdi dir="ltr">Premiere Pro 2022</bdi> أو أحدث من خلال لوحة WhyNot Cut Bridge، وتحتاج إلى نحو <bdi dir="ltr">4&nbsp;GB</bdi> للمحرك ونموذج التفريغ. لتعرف رقم نسختك، اكتب لـ Claude «إيه رقم نسخة WhyNot Cut؟»، فيفحص النسخة المثبّتة ويخبرك برقمها.</p>
 <p class="lead-in">المتطلبات:</p>
 <table>
 <thead>
@@ -65,24 +67,28 @@
 </thead>
 <tbody>
 <tr><td>نظام التشغيل</td><td><bdi dir="ltr">Windows 10/11</bdi>، أو <bdi dir="ltr">macOS 14</bdi> أو أحدث</td></tr>
-<tr><td>Premiere Pro</td><td><bdi dir="ltr">26.5</bdi> أو أحدث للوحة WhyNot Cut الجديدة، والإصدارات الأقدم عبر لوحة WhyNot Cut Bridge (انظر الجزء التالي)</td></tr>
+<tr><td>Premiere Pro</td><td><bdi dir="ltr">26.5</bdi> أو أحدث للوحة WhyNot Cut الجديدة وأدواتها</td></tr>
 <tr><td>After Effects</td><td>الإصدار <bdi dir="ltr">25</bdi> أو أحدث، لوضع الموشن ولمخرجات After Effects عند طلبها فقط</td></tr>
 <tr><td>Claude</td><td>تطبيق Claude على الجهاز، واشتراك Claude</td></tr>
-<tr><td>المساحة على القرص</td><td>نحو <bdi dir="ltr">4&nbsp;GB</bdi> للمحرك (engine)، وهو البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية، ولنموذج التفريغ؛ ثم بضعة <bdi dir="ltr">GB</bdi> لكل عميل</td></tr>
+<tr><td>المساحة على القرص</td><td>نحو <bdi dir="ltr">9&nbsp;GB</bdi> على الأقل للمحرك (engine)، وهو البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية، ولنموذج التفريغ، وأكثر مع باقي النماذج؛ ثم بضعة <bdi dir="ltr">GB</bdi> لكل عميل</td></tr>
 <tr><td>كارت الشاشة</td><td>اختياري: كارت NVIDIA، مع مكتبة NVIDIA التي تُثبَّت بموافقتك، يجعل التفريغ النصي أسرع بنحو 8&nbsp;مرات</td></tr>
 </tbody>
 </table>
 
 <aside class="todo" data-phase="7">
-<p>القائمة النهائية تُعتمد مع برنامج التثبيت (installer). حتى ذلك الحين، تعمل النسخة الحالية مع <bdi dir="ltr">Premiere Pro 2022</bdi> أو أحدث من خلال لوحة WhyNot Cut Bridge.</p>
+<p>لم يُحسم بعد هل يعمل الإصدار <bdi dir="ltr">3.0</bdi> مع إصدارات Premiere Pro الأقدم من <bdi dir="ltr">26.5</bdi>.</p>
+<!-- فريق: القائمة النهائية تُعتمد مع برنامج التثبيت (installer). حتى ذلك الحين، تعمل النسخة الحالية مع Premiere Pro 2022 أو أحدث من خلال لوحة WhyNot Cut Bridge (السطر الظاهر فوق الجدول، المصدر: start SKILL). دعم Premiere الأقدم من 26.5 في 3.0 لم يُحسم: الخطة الرئيسية D4 تقول CEP لـ Premiere < 26.5، والإضافة C1.3 تقول Premiere = لوحة UXP فقط (factcheck2 W4). المساحة 9 GB من الخطة الرئيسية T7.1 الخطوة 1 (≥ 6 GB + 3 GB للنموذج). -->
 </aside>
 
 <h2 id="ch01-panels">لوحة WhyNot Cut داخل برامج Adobe</h2>
 
 <p>يبني Claude مشاريع Premiere Pro وAfter Effects من خلال لوحة صغيرة (panel) داخل كل برنامج. اسمها اليوم «WhyNot Cut Bridge»، وتجدها في البرنامجين في هذه القائمة:<br><bdi dir="ltr">Window&nbsp;›&nbsp;Extensions&nbsp;›&nbsp;WhyNot&nbsp;Cut&nbsp;Bridge</bdi><br>لا تحتاج إلى الضغط على أي شيء فيها، فهي تعرض حالة العمل فقط. وإذا قال لك Claude إن البرنامج لا يستجيب، افتح اللوحة من هذه القائمة. يسمّيها هذا الدليل دائمًا «لوحة WhyNot Cut Bridge».</p>
 
-<aside class="todo" data-phase="6">
 <p>في الإصدار <bdi dir="ltr">3.0</bdi> تحل محلها في Premiere Pro لوحة جديدة اسمها «لوحة WhyNot Cut»، تفتحها من <bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>، ومنها تتابع العمل وتوافق على الخطة (<a href="#ch07-title">الفصل&nbsp;7</a>). وفي After Effects تكون لوحة WhyNot Cut في <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>. وحيثما يقول الدليل «لوحة WhyNot Cut» فهو يقصد اللوحة الجديدة في البرنامجين.</p>
+
+<aside class="todo" data-phase="6">
+<p>اللوحة الجديدة ليست في النسخة التي معك اليوم؛ استخدم لوحة WhyNot Cut Bridge حتى تصلك.</p>
+<!-- فريق: يُتحقَّق من مكان اللوحة الجديدة في البرنامجين مع لوحة WhyNot Cut في المرحلة 6 (اسم قائمة After Effects: Extensions أو Extensions (Legacy)، انظر الفصل 7). -->
 </aside>
 
 <h2 id="ch01-reading">كيف تقرأ هذا الدليل</h2>
@@ -103,7 +109,7 @@
 
 <p>الملفات التي ينتهي اسمها بـ <bdi dir="ltr"><code>.md</code></bdi>، مثل <bdi dir="ltr"><code>HANDOFF.md</code></bdi>، ملفات نصية عادية. افتحها بالزر الأيمن ثم <bdi dir="ltr">Open&nbsp;with&nbsp;›&nbsp;Notepad</bdi> على Windows، أو <bdi dir="ltr">Open&nbsp;With&nbsp;›&nbsp;TextEdit</bdi> على Mac. أو اطلب من Claude أن يعرض لك محتواها في المحادثة، مثل «اعرضلي ملف التسليم».</p>
 
-<p>وستجد في الفصول ثلاثة أنواع من المربعات: <strong>نصيحة</strong> تختصر عليك الطريق، و<strong>تنبيه</strong> يحميك من خطأ شائع، و<strong>قيد الإعداد</strong> لجزء يكتمل في مرحلة لاحقة من الإصدار <bdi dir="ltr">3.0</bdi>. كل الأمثلة ولقطات الشاشة مأخوذة من عميل وهمي اسمه «عيادة مثال»، والطبيب فيه «د. سامبل إكزامبل».</p>
+<p>وستجد في الفصول ثلاثة أنواع من المربعات: <strong>نصيحة</strong> تختصر عليك الطريق، و<strong>تنبيه</strong> يحميك من خطأ شائع، وإطار رمادي عنوانه <strong>«في الإصدار <bdi dir="ltr">3.0</bdi> — لم يُتحقَّق منه بعد»</strong> لجزء من الإصدار <bdi dir="ltr">3.0</bdi> لم يصدر أو لم يُختبر بعد، فلا تعتمد عليه اليوم. كل الأمثلة ولقطات الشاشة مأخوذة من عميل وهمي اسمه «عيادة مثال»، والطبيب فيه «د. سامبل إكزامبل».</p>
 
 <aside class="tip">
 <p>الفصلان <a href="#ch02-title">2</a> و<a href="#ch03-title">3</a> للتثبيت وأول مشروع. الفصول <a href="#ch04-title">4</a> و<a href="#ch05-title">5</a> و<a href="#ch06-title">6</a> هي العمل اليومي: فولدر العميل، وإعداد عميل جديد، ومونتاج فيديو واحد. وفي <a href="#ch19-title">الفصل&nbsp;19</a> قاموس للمصطلحات وكل الأوامر في صفحة واحدة.</p>

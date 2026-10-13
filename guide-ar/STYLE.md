@@ -42,7 +42,7 @@ Reader: a video editor in Egypt (also KSA/UAE), comfortable with Premiere, not a
 | motion mode | وضع الموشن |
 | podcast mode | وضع البودكاست |
 | Claude | Claude (no article), «تطبيق Claude» for the desktop app |
-| Needs you | «محتاجك (Needs you)» — one label everywhere |
+| Needs you | «مطلوب منك (Needs you)» — one label everywhere, the panel's own label (`needs.label` in `ar.json`); «(Needs you)» at first use per chapter, then «مطلوب منك» alone (ruling R2-8 replaced the round-1 «محتاجك») |
 | Verified / Not verified | «تم التحقق (Verified)» / «لم يُتحقَّق منه (Not verified)» |
 | example ids | clip `C0001`, client «عيادة مثال», client folder `Example Clinic`, profile id `example-clinic`, prefix `EC`, episode `EP01`, reel `EP01_R03` |
 
@@ -60,3 +60,19 @@ Reader: a video editor in Egypt (also KSA/UAE), comfortable with Premiere, not a
 - Truth rule: today's verified behaviour needs no box; spec-bound 3.0 behaviour may be written in the present tense
   only in a section that has a `.todo data-phase="N"` naming the phase that verifies it live; undecided items only
   inside `.todo`. Facts only from the named sources.
+
+## 3.0 boxes are written for the reader (ruling R2-9)
+- The `.todo` box prints the label «في الإصدار 3.0 — لم يُتحقَّق منه بعد» (CSS, no phase number). `data-phase="N"`
+  stays on every box: the lint needs it and a release build fails on any `.todo`.
+- Visible text in a box: ONE plain sentence that says what this means for the reader (e.g. «أسماء الأزرار قد تتغيّر
+  قليلًا في اللوحة النهائية.»). An undecided item the reader must know about is said in that sentence in plain words.
+- Everything for the team goes into an HTML comment inside the same aside, starting «فريق:», with the exact wording
+  kept: `<aside class="todo" data-phase="6"><p>…</p><!-- فريق: … --></aside>`. Team notes are: H-item codes (H12,
+  H14 …), phase numbers and «6B», «حسب الإضافة A», hosting, certificates, test projects and test machines, label-
+  matching notes, spec conflicts. Comments are never printed.
+- Never move a safety rule or a fact the reader needs out of visible text: put it in the section's body (the
+  section has the box, so present tense is allowed) and keep the box to its one sentence.
+- Chapters that are mostly 3.0 (7, 11, 12, 13, 15; 2, 3, 17, 18 in their own way) open with a `.tip` before the
+  first h2: what works today, with a link to it, and «باقي هذا الفصل يصف الإصدار 3.0».
+- Today's wording never says «النسخة الحالية» (a draft phrase the release lint rejects): write «اليوم» or «النسخة
+  التي معك اليوم».
