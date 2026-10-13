@@ -1,178 +1,77 @@
 <section class="chapter" id="ch02">
 <h1 class="ch-title" id="ch02-title">2 · التثبيت خطوة بخطوة</h1>
 
-<p>في الإصدار <bdi dir="ltr">3.0</bdi> لك طريقان يصلان إلى النتيجة نفسها: <strong>برنامج التثبيت</strong> الذي تفتحه بنقرتين، أو <strong>طلب واحد تكتبه في تطبيق Claude</strong>، ولكل اختيار فيهما قيمة جاهزة هي الأقوى التي يتحملها جهازك. أما مع نسخة المطوّرين الحالية، فابدأ من قسم <a href="#ch02-first-run">«قبل برنامج التثبيت»</a> في آخر هذا الفصل. بعد التثبيت ينقلك <a href="#ch03-title">الفصل&nbsp;3</a> إلى أول مشروع.</p>
+<p>يشرح هذا الفصل كيف تثبّت WhyNot Cut على جهازك. نبدأ بما تفعله اليوم، ثم نشرح التثبيت في الإصدار <bdi dir="ltr">3.0</bdi>: سطر واحد تلصقه في PowerShell على Windows أو في Terminal على Mac، أو طلب واحد تكتبه في تطبيق Claude. بعد التثبيت ينقلك <a href="#ch03-title">الفصل&nbsp;3</a> إلى أول مشروع.</p>
 
-<h2 id="ch02-before">قبل أن تبدأ</h2>
+<aside class="tip">
+<p>اليوم (قبل الإصدار <bdi dir="ltr">3.0</bdi>): اتبع القسمين <a href="#ch02-claude-first">«أول مرة في تطبيق Claude»</a> و<a href="#ch02-first-run">«اليوم: التثبيت مع معالج البداية»</a> فقط، ثم انتقل إلى <a href="#ch03-title">الفصل&nbsp;3</a>. باقي هذا الفصل يصف التثبيت في الإصدار <bdi dir="ltr">3.0</bdi>.</p>
+</aside>
 
+<h2 id="ch02-claude-first" data-today>أول مرة في تطبيق Claude</h2>
+
+<p class="lead-in">كل ما تطلبه من WhyNot Cut تكتبه لـ Claude في تطبيق Claude على جهازك. إذا لم تستخدمه من قبل، فهذا كل ما تحتاج إلى معرفته:</p>
 <ul>
-<li><strong>تطبيق Claude</strong> وحسابك مسجَّل الدخول فيه. إذا لم يكن مثبَّتًا، يثبّته لك برنامج التثبيت، لكن تسجيل الدخول تقوم به أنت.</li>
-<li><strong>Premiere Pro</strong>، و<strong>After Effects</strong> إذا كنت تستخدمه، مثبَّتين برخصتك أنت، و<strong>تطبيق Creative Cloud</strong> مسجَّل الدخول بحسابك في Adobe.</li>
-<li><strong>مساحة فارغة</strong>: نحو <bdi dir="ltr">9&nbsp;GB</bdi> على الأقل للمحرك ونموذج التفريغ النصي، وأكثر مع باقي النماذج، ثم عدة GB لكل عميل. يعرض برنامج التثبيت الحجم الكلي قبل أن يبدأ.</li>
-<li><strong>الجهاز</strong>: <bdi dir="ltr">Windows 10/11</bdi>، أو Mac بمعالج Apple Silicon أو Intel. لا تحتاج إلى صلاحيات مسؤول الجهاز (admin)، ولا إلى تثبيت Python أو أي أداة أخرى بنفسك.</li>
+<li><strong>مربع الرسالة</strong> في أسفل النافذة: اكتب فيه طلبك أو الأمر، ثم اضغط Enter.</li>
+<li><strong>المحادثة الجديدة</strong>: زر في أعلى القائمة الجانبية يفتح محادثة فارغة. افتح محادثة جديدة كلما طلب منك هذا الدليل ذلك، مثل بعد كل تثبيت أو تحديث.</li>
+<li><strong>الفولدر</strong>: عند فتح محادثة جديدة تختار الفولدر الذي يعمل فيه Claude. اختر فولدر العملاء، أو فولدر العميل الذي تعمل عليه.</li>
+<li><strong>زر +</strong> بجانب مربع الرسالة: منه تضيف WhyNot Cut إلى التطبيق، كما في القسم التالي.</li>
+<li><strong>إغلاق التطبيق تمامًا</strong>: إغلاق النافذة وحده قد يترك Claude يعمل في الخلفية. على Windows اضغط بالزر الأيمن على أيقونة Claude بجوار الساعة واختر Quit، وعلى Mac اضغط <bdi dir="ltr">Cmd+Q</bdi>.</li>
 </ul>
 
-<aside class="todo" data-phase="7">
-<p>متطلبات الإصدار <bdi dir="ltr">3.0</bdi> كما في مواصفات التثبيت. تُراجَع المساحة بعد تحديد أحجام كل النماذج، ويُتحقَّق منها على جهاز Windows نظيف في المرحلة 7. وعلى macOS تبقى كل هذه الخطوات «لم يُتحقَّق منه» (<bdi dir="ltr">Not&nbsp;verified</bdi>) حتى يتوفر جهاز Mac للاختبار.</p>
-</aside>
-
-<h2 id="ch02-installer">أسهل طريقة: برنامج التثبيت</h2>
-
-<p>برنامج التثبيت ملف واحد: <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi> على Windows، و<bdi dir="ltr"><code>WhyNotCut.dmg</code></bdi> على macOS. تجد الزرين في صفحة التنزيل على موقع <bdi dir="ltr">thewhynot.ai</bdi>.</p>
-
-<ol class="steps">
-<li><strong>افتح الملف بنقرتين.</strong> على macOS افتح <bdi dir="ltr"><code>WhyNotCut.dmg</code></bdi>، ثم التطبيق <bdi dir="ltr">Install WhyNot Cut</bdi> الذي بداخله.</li>
-<li><strong>إذا لم يكن تطبيق Claude على جهازك</strong>، اضغط «ثبّت Claude لي» (<bdi dir="ltr">Install Claude for me</bdi>). ينزّل البرنامج ملف التثبيت الرسمي من Anthropic ويتحقق من توقيعه ويفتحه. سجّل الدخول بحسابك، ثم يكمل برنامج التثبيت وحده.</li>
-<li><strong>اضغط «تثبيت كل شيء (موصى به)»</strong> (<bdi dir="ltr">Install everything</bdi>). زر «تخصيص» (<bdi dir="ltr">Customise</bdi>) اختياري: يفتح الأسئلة بإجاباتها الجاهزة (مكان التثبيت، والنماذج، واللغة، وفولدر العملاء).</li>
-<li><strong>تابع قائمة الفحص.</strong> يتحول كل بند إلى اللون الأخضر عند اكتماله. النماذج الكبيرة تكمل التنزيل في الخلفية، ويمكنك أن تبدأ العمل قبل أن تنتهي.</li>
-<li><strong>في النهاية</strong> يُعاد تشغيل Premiere Pro وAfter Effects مرة واحدة إذا كانا مفتوحين ولم يكن فيهما عمل غير محفوظ (وإلا يطلب منك ذلك بزر)، ثم يفتح تطبيق Claude في محادثة جديدة داخل فولدر العملاء. إذا لم يُفتح وحده، اضغط زر «افتح Claude» (<bdi dir="ltr">Open&nbsp;Claude</bdi>).</li>
-</ol>
-
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: شاشة برنامج التثبيت على Windows، وفيها زر «تثبيت كل شيء (موصى به)» وزر «تخصيص»</span></div>
-<figcaption>الشاشة الأولى في برنامج التثبيت: زر واحد يكفي.</figcaption>
+<div class="shot-frame"><span>لقطة شاشة: تطبيق Claude، وعليه أسهم إلى مربع الرسالة وزر المحادثة الجديدة واختيار الفولدر وزر +</span></div>
+<figcaption>أجزاء تطبيق Claude التي يذكرها هذا الدليل.</figcaption>
 </figure>
-
-<aside class="todo" data-phase="7">
-<p>برنامج التثبيت بصيغتيه وزر «ثبّت Claude لي» من مواصفات الإصدار <bdi dir="ltr">3.0</bdi>. يُتحقَّق منها على جهاز نظيف في المرحلة 7، وتُلتقط صورها وتُطابَق أسماء الأزرار العربية في المرحلة 9. لم يُحسم بعد: توقيع ملفات التثبيت (وبه يتحدد هل يظهر تحذير Windows في القسم التالي مع التنزيل العام)؛ وعلى macOS، إلى أن تصل شهادة Apple، يُثبَّت WhyNot Cut بسطر واحد يُلصق في Terminal (بالطريقة نفسها الموضّحة في قسم «تشغيل أمر أعطاك إياه Claude»)، ولم يُختبر بعد على جهاز Mac حقيقي؛ وهل تُفتح محادثة Claude الجديدة وحدها أم بالزر (يُقاس في المرحلة 7). وصفحة التنزيل تعتمد على استضافة الملفات (لم تُحسم).</p>
-</aside>
-
-<h2 id="ch02-unsigned">تحذير Windows مع النسخ الداخلية</h2>
-
-<p>نسخ الاختبار من <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi> التي يرسلها لك فريقنا مباشرة غير موقَّعة بشهادة، فيعرض Windows عند فتحها نافذة زرقاء تقول إن Windows حمى جهازك (<bdi dir="ltr">Windows&nbsp;protected&nbsp;your&nbsp;PC</bdi>):</p>
-
-<ol class="steps">
-<li>اضغط «مزيد من المعلومات» (<bdi dir="ltr">More info</bdi>) تحت النص.</li>
-<li>تأكد أن اسم الملف هو <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi>، ثم اضغط «تشغيل على أي حال» (<bdi dir="ltr">Run anyway</bdi>).</li>
-</ol>
-
-<figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: نافذة Windows الزرقاء بعد الضغط على «مزيد من المعلومات»، وفيها اسم الملف <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi> وزر «تشغيل على أي حال»</span></div>
-<figcaption>تحذير Windows مع نسخة داخلية: تأكد من اسم الملف، ثم «تشغيل على أي حال».</figcaption>
-</figure>
-
-<aside class="warn">
-<p>افعل هذا فقط مع ملف وصلك منا مباشرة. إذا ظهر التحذير مع ملف نزّلته من مكان آخر، فلا تشغّله وراسلنا.</p>
-</aside>
-
-<aside class="todo" data-phase="7">
-<p>النسخ الداخلية غير الموقَّعة مسموح بها في مواصفات الإصدار <bdi dir="ltr">3.0</bdi>، أما النشر العام فلا يتم بملف غير موقَّع، وشهادة التوقيع لم تُحسم بعد. تُطابَق أسماء الأزرار في Windows العربي بصورة حقيقية في المرحلة 9. وإذا كان Smart App Control مفعّلًا في Windows فلا يظهر زر «تشغيل على أي حال»؛ يُشرح بعد اختبار المرحلة 7.</p>
-</aside>
-
-<h2 id="ch02-from-claude">من داخل Claude: «ثبّت WhyNot Cut»</h2>
-
-<p>إذا كنت تبدأ من تطبيق Claude، فلا تحتاج إلى تنزيل أي ملف:</p>
-
-<ol class="steps">
-<li>افتح تطبيق Claude وتأكد أنك مسجَّل الدخول.</li>
-<li>أضف WhyNot Cut إلى تطبيق Claude: اضغط <bdi dir="ltr">+&nbsp;›&nbsp;Plugins&nbsp;›&nbsp;Add&nbsp;plugin</bdi>، والصق عنوان WhyNot Cut الذي تجده في صفحة التنزيل.</li>
-<li>افتح محادثة جديدة واكتب «ثبّت WhyNot Cut»، أو اكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>، ثم اضغط Enter.</li>
-<li>تظهر بطاقة اختيار واحدة. اختر «تثبيت كل شيء (موصى به)»، وهو المحدَّد مسبقًا. الاختيار الآخر يعرض النماذج والحزم في قائمة، وكلها محدَّدة.</li>
-<li>تابع التقدم في المحادثة مرحلة بعد مرحلة. في النهاية يخبرك Claude بما بقي، مثل إعادة تشغيل Premiere أو فتح محادثة جديدة، وينفّذ بنفسه ما هو مسموح له به.</li>
-</ol>
-
-<figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: نافذة <bdi dir="ltr">Add&nbsp;plugin</bdi> في تطبيق Claude، وفيها عنوان WhyNot Cut ملصوقًا</span></div>
-<figcaption>إضافة WhyNot Cut إلى تطبيق Claude قبل «ثبّت WhyNot Cut».</figcaption>
-</figure>
-
-<p>هذا الطريق يشغّل البرنامج نفسه الذي يشغّله برنامج التثبيت، فالنتيجة واحدة. وتشغيل أي من الطريقين مرة أخرى يُصلح التثبيت ويحدّثه (<a href="#ch18-title">الفصل&nbsp;18</a>).</p>
-
-<aside class="todo" data-phase="7">
-<p>التثبيت من داخل Claude من مواصفات الإصدار <bdi dir="ltr">3.0</bdi>، ويُتحقَّق منه في المرحلة 7 وتُلتقط صوره في المرحلة 9. يُضاف عند النشر عنوان WhyNot Cut الذي يُلصق في الخطوة 2 (يتوقف على استضافة الملفات)، ويُطابَق مسار القائمة مع تطبيق Claude كما يظهر وقتها.</p>
-</aside>
-
-<h2 id="ch02-what-happens">ما الذي يُثبَّت تلقائيًا</h2>
-
-<p class="lead-in">في الطريقين ينهي التثبيت هذه القائمة وحده، بالإجابات الجاهزة، دون أسئلة:</p>
-<ol>
-<li><strong>المحرك (engine)</strong>: البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية، ومعه نسخة Python خاصة به (لغة برمجة يحتاجها المحرك، ولا تتعامل معها أنت)، وأداة ffmpeg لمعالجة الفيديو والصوت، وخطوط الواجهة. وهو يعمل دائمًا: يبدأ مع تشغيل الجهاز، ومع فتح Premiere، ومع فتح Claude.</li>
-<li><strong>إضافة WhyNot Cut في تطبيق Claude</strong>، مفعّلة، ومعها إذن يسمح لـ Claude بتشغيل محرك WhyNot Cut دون أن يستأذنك كل مرة (الإجابة الجاهزة: نعم).</li>
-<li><strong>على Windows</strong>: أداة صغيرة من Git يحتاجها Claude ليشغّل أوامر WhyNot Cut وقواعد الحماية الخاصة به.</li>
-<li><strong>لوحة WhyNot Cut</strong> في Premiere Pro (من <bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>) وفي After Effects (من <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>): لوحة واحدة في كل برنامج، وتُزال اللوحات القديمة، مثل WhyNot Cut Bridge، واللوحات التجريبية.</li>
-<li><strong>النماذج</strong> كلها (القسم التالي) في الخلفية. وإذا كان في جهازك كارت NVIDIA، تُثبَّت معها مكتبات التسريع، فيصبح التفريغ النصي أسرع بنحو 8 مرات.</li>
-<li><strong>أول فولدر عميل</strong> داخل فولدر العملاء: على Windows <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> إذا كان في جهازك قرص D، وإلا <bdi dir="ltr"><code>WhyNot Clients</code></bdi> داخل Documents، وكذلك على macOS. وإذا كان Documents يُزامَن مع OneDrive أو iCloud، يوضع فولدر العملاء خارجه حتى لا يُرفع الخام إلى السحابة.</li>
-<li><strong>محادثة جديدة في تطبيق Claude</strong> داخل فولدر العملاء.</li>
-<li><strong>فحص أخير</strong>: كل بند أخضر، أو أصفر ومعه زر إصلاح بضغطة واحدة (القسم «التأكد من النتيجة»).</li>
-</ol>
-
-<p>ولا يطلب التثبيت أبدًا صلاحيات مسؤول الجهاز، ولا يفعّل إعداد Adobe الخاص بالإضافات غير الموقَّعة، ولا ينقل أو يحذف فولدرات العملاء، ولا يستبدل ملف إعدادات تطبيق Claude: يضيف إليه ما يخص WhyNot Cut فقط، بعد نسخة احتياطية.</p>
-
-<aside class="todo" data-phase="7">
-<p>قائمة التثبيت التلقائي من مواصفات الإصدار <bdi dir="ltr">3.0</bdi>. جزء كبير منها مبني ومختبَر في بيئة اختبار معزولة، ويُتحقَّق منها كلها على جهاز Windows نظيف في المرحلة 7. تشغيل المحرك مع بدء الجهاز ولوحتا Adobe الموقَّعتان تكتمل مع المرحلتين 6 و7، ويُطابَق في المرحلة 6 اسم القائمة التي تجد فيها اللوحة داخل After Effects، وهو أحد اسمين: <bdi dir="ltr">Extensions</bdi> أو <bdi dir="ltr">Extensions&nbsp;(Legacy)</bdi>. لم يُحسم بعد: هل يظهر سؤال إذن التشغيل في التثبيت العادي أم في «تخصيص» فقط، وهل تتحدّث الإضافة في Claude وحدها (يتوقف على استضافة الملفات).</p>
-</aside>
-
-<h2 id="ch02-models">النماذج (models)</h2>
-
-<p>النموذج (model) ملف كبير فيه خبرة جاهزة في فهم الكلام، يستخدمه المحرك ليحوّل الصوت إلى نص. يُثبَّت ما يحتاجه WhyNot Cut تلقائيًا، والباقي متاح بضغطة:</p>
-
-<table>
-<thead>
-<tr><th>الحزمة</th><th>لماذا</th><th>الحالة الجاهزة</th></tr>
-</thead>
-<tbody>
-<tr><td>التفريغ الأساسي: <bdi dir="ltr"><code>large-v3</code></bdi></td><td>أدق تفريغ نصي (نحو <bdi dir="ltr">2.9&nbsp;GB</bdi>).</td><td>مثبَّتة</td></tr>
-<tr><td>التفريغ السريع: <bdi dir="ltr"><code>large-v3-turbo</code></bdi></td><td>المرور الأول السريع، والحلقات الطويلة.</td><td>مثبَّتة</td></tr>
-<tr><td>النماذج الصغيرة: <bdi dir="ltr"><code>medium</code></bdi> و<bdi dir="ltr"><code>small</code></bdi></td><td>تُستخدم تلقائيًا فقط إذا لم تكفِ المساحة أو الذاكرة للنماذج الكبيرة.</td><td>متاحة عند الطلب</td></tr>
-<tr><td>حزمة «كلام» (WhyNot&nbsp;Kalam)</td><td>الكابشن: نموذج للهجة المصرية، ونموذج للإنجليزية، وأداة لضبط توقيت كل كلمة (<a href="#ch13-title">الفصل&nbsp;13</a>).</td><td>مثبَّتة</td></tr>
-<tr><td>«هَش» (WhyNot&nbsp;Hush)</td><td>يستخدم نماذج «كلام» أو التفريغ الأساسي.</td><td>لا شيء إضافي</td></tr>
-<tr><td>الخطوط</td><td>خطوط الواجهة والدليل الأربعة.</td><td>مثبَّتة</td></tr>
-</tbody>
-</table>
-
-<ul>
-<li><strong>حسب جهازك</strong>: يقرأ التثبيت كارت الشاشة (NVIDIA أو Apple Silicon) والذاكرة والمساحة الفارغة، ويثبّت كل ما يتسع له الجهاز. إذا لم تكفِ المساحة، يحتفظ بأقوى ما يتسع، ويخبرك بما تخطّاه وكيف تضيفه لاحقًا.</li>
-<li><strong>في الخلفية</strong>: إذا انقطع التنزيل، يكمل من حيث توقف.</li>
-<li><strong>لا انتظار عند أول ضغطة</strong>: إذا طلبت عملًا ونموذجه ما زال يُنزَّل، يخبرك المحرك كم دقيقة بقيت، ثم ينتظر أو يعرض عليك نموذجًا أصغر جاهزًا على الجهاز.</li>
-<li><strong>صفحة «النماذج» (Models)</strong> في لوحة WhyNot Cut: لكل نموذج حالته (مثبَّت، أو يُنزَّل مع النسبة، أو متاح)، وحجمه، وفيمَ يُستخدم، وزر تثبيت وزر حذف، وزر لتنزيل الكل. ويمكنك أيضًا أن تطلب من Claude أن يعرض لك قائمة النماذج.</li>
-</ul>
-
-<aside class="todo" data-phase="7">
-<p>حزم النماذج والاختيار حسب الجهاز من مواصفات الإصدار <bdi dir="ltr">3.0</bdi>، ويُتحقَّق منها في المرحلة 7؛ وصفحة «النماذج» في اللوحة يُتحقَّق منها في المرحلة 6، وتُنقل أسماء أزرارها حرفيًا من نصوص اللوحة بعد إضافتها. تُضاف أحجام حزمة «كلام» وباقي الحزم بعد تثبيتها.</p>
-</aside>
-
-<h2 id="ch02-only-you">خمسة أشياء لا يقوم بها أحد غيرك</h2>
-
-<p class="lead-in">هذه حدود يضعها نظام التشغيل أو الشركات الأخرى، ولكل منها خطوة واحدة:</p>
-<ol class="steps">
-<li><strong>تثبيت تطبيق Claude وتسجيل الدخول.</strong> نزّله من <bdi dir="ltr">claude.ai/download</bdi> (أو اضغط «ثبّت Claude لي» في برنامج التثبيت)، ثم سجّل الدخول بحسابك. WhyNot Cut لا يعرض عليك أبدًا صفحة تسجيل دخول خاصة به.</li>
-<li><strong>برامج Adobe برخصتك.</strong> ثبّت Premiere Pro وAfter Effects من تطبيق Creative Cloud، وسجّل الدخول فيه.</li>
-<li><strong>التنزيلات الكبيرة.</strong> اترك الجهاز يعمل ومتصلًا بالإنترنت حتى تكتمل النماذج. يمكنك أن تعمل في الأثناء.</li>
-<li><strong>إذن الفولدرات على macOS.</strong> أول مرة يفتح فيها Claude ملفات في Documents أو على قرص خارجي، يطلب macOS إذنك: اضغط Allow. وإذا رفضت بالخطأ، فعّله من <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Files&nbsp;and&nbsp;Folders</bdi>.</li>
-<li><strong>إعادة تشغيل Premiere وAfter Effects مرة واحدة</strong> بعد تثبيت اللوحات. يفعلها Claude أو برنامج التثبيت بنفسه إذا لم يكن فيهما عمل غير محفوظ، وإلا يطلبها منك بزر واحد: احفظ عملك أولًا، ثم اضغط الزر.</li>
-</ol>
 
 <aside class="tip">
 <p>أول مرة يفتح فيها تطبيق Claude محادثة داخل فولدر جديد (فولدر العملاء أو فولدر عميل)، يسألك هل تثق في هذا الفولدر. وافق مرة واحدة لكل فولدر، فلا يستأذنك WhyNot Cut بعدها عند كل خطوة.</p>
 </aside>
 
-<aside class="todo" data-phase="7">
-<p>هذه الحدود من مواصفات الإصدار <bdi dir="ltr">3.0</bdi>، وتُراجَع رسائلها وصورها في المرحلة 9. لم يُحسم بعد: حزمة تثبيت كاملة بدون إنترنت (offline bundle) فيها كل النماذج، للاستوديوهات ذات الإنترنت البطيء؛ تُشرح هنا إذا صدرت مع الإصدار <bdi dir="ltr">3.0</bdi>.</p>
+<aside class="todo" data-phase="9">
+<p>أسماء الأزرار وأماكنها في تطبيق Claude قد تختلف قليلًا حسب نسخة التطبيق.</p>
+<!-- فريق: قسم جديد (reader2 #3، #4). تُطابَق أسماء الأزرار وأماكنها (المحادثة الجديدة، اختيار الفولدر، زر +، Quit من أيقونة شريط المهام) مع تطبيق Claude كما يظهر وقت التقاط الصور في المرحلة 9. سؤال الثقة في الفولدر (workspace trust) من whynot-cut/README.md. -->
 </aside>
 
-<h2 id="ch02-check">التأكد من النتيجة</h2>
+<h2 id="ch02-first-run" data-today>اليوم: التثبيت مع معالج البداية</h2>
 
-<p>علامة النجاح أن كل بنود قائمة الفحص في نهاية التثبيت خضراء. وتجد القائمة نفسها في لوحة WhyNot Cut داخل Premiere باسم «قائمة الإعداد»، وفيها أربعة بنود: «المحرّك»، و«الربط مع Premiere»، و«Claude»، و«مجلد العملاء». البند الأصفر معه زر يصلحه بضغطة واحدة.</p>
+<p>اليوم يرسل لك فريقنا فولدر <bdi dir="ltr"><code>whynot-cut-marketplace</code></bdi>. ضعه في مكان ثابت على جهازك، لأن تطبيق Claude يقرأ WhyNot Cut من مكانه هذا.</p>
 
-<figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: «قائمة الإعداد» في لوحة WhyNot Cut داخل Premiere، وكل بنودها خضراء</span></div>
-<figcaption>كل البنود خضراء: الجهاز جاهز لأول عميل.</figcaption>
-</figure>
-
-<p>الفحص التفصيلي اختياري، وتحتاج إليه غالبًا مع الدعم فقط. اكتب لـ Claude «افحص الجهاز»، فيشغّل هذين الأمرين بنفسه، ولا يغيّر الفحص شيئًا في الجهاز:</p>
-<div class="cmd" data-who="claude"><bdi dir="ltr"><code>reel --version
-reel doctor</code></bdi></div>
-
-<p>يعرض الفحص هل الجهاز جاهز، وقائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت، وكارت الشاشة وبرامج Adobe الموجودة، ونسخ WhyNot Cut على الجهاز إن كانت أكثر من واحدة. وفي أول سطر من الفحص اسم WhyNot Cut ورقم إصداره، مثل <bdi dir="ltr"><code>WhyNot Cut 3.0.0</code></bdi>؛ إذا ذكر Claude اسمًا آخر أو رقمًا قديمًا، فانظر <a href="#ch17-title">الفصل&nbsp;17</a>.</p>
+<ol class="steps">
+<li><strong>انسخ مسار الفولدر.</strong> على Windows: اضغط Shift مع زر الماوس الأيمن على الفولدر، واختر «نسخ كمسار» (<bdi dir="ltr">Copy as path</bdi>). على Mac: اضغط Option مع زر الماوس الأيمن على الفولدر، واختر «نسخ … كاسم مسار» (<bdi dir="ltr">Copy … as Pathname</bdi>).</li>
+<li><strong>أضف WhyNot Cut إلى تطبيق Claude.</strong> افتح محادثة جديدة، واكتب السطر الأول في مربع الرسالة ثم Enter، ثم السطر الثاني ثم Enter. ضع المسار الذي نسخته مكان <bdi dir="ltr"><code>"&lt;path&gt;"</code></bdi> كله: على Windows يأتي المسار المنسوخ بين علامتي تنصيص، وعلى Mac اكتب علامتي التنصيص حوله بنفسك.
+<div class="cmd"><bdi dir="ltr"><code>/plugin marketplace add "&lt;path&gt;"
+/plugin install whynot-cut@thewhynot-ai</code></bdi></div>
+أو اضغط <bdi dir="ltr">+&nbsp;›&nbsp;Plugins&nbsp;›&nbsp;Add&nbsp;plugin</bdi> (بالترتيب: + أولًا، ثم Plugins، ثم Add plugin)، واختر الفولدر نفسه.</li>
+<li><strong>أغلق تطبيق Claude تمامًا</strong> (<a href="#ch02-claude-first">أول مرة في تطبيق Claude</a>)، ثم افتحه من جديد.</li>
+<li><strong>ابدأ معالج البداية.</strong> افتح محادثة جديدة، واكتب «أول مرة أستخدمه» أو الأمر التالي، ثم اضغط Enter:
+<div class="cmd"><bdi dir="ltr"><code>/whynot-cut:start</code></bdi></div></li>
+</ol>
 
 <aside class="todo" data-phase="7">
-<p>قائمة الفحص الخضراء في نهاية التثبيت وفي لوحة Premiere من مواصفات الإصدار <bdi dir="ltr">3.0</bdi> (أسماء البنود الأربعة منقولة من نصوص اللوحة). يُتحقَّق منها في المرحلة 7، وتُلتقط صورها في المرحلة 9.</p>
+<p>هذا القسم يصف النسخة التي معك اليوم، ويتغيّر مع الإصدار <bdi dir="ltr">3.0</bdi>.</p>
+<!-- فريق: هذا القسم يصف نسخة المطوّرين اليوم، قبل صدور برنامج التثبيت، ويُحذف عند صدوره. في الإصدار 3.0 يبقى معالج البداية، لكنه يكتفي بإعداداتك وأول فولدر عميل، ويتخطى كل ما جهّزه التثبيت. ويُتحقَّق من أن الأمر /plugin يعمل في تطبيق Claude نفسه (factcheck2 W19؛ ملاحظة Task 4). خطوات إضافة الفولدر من whynot-cut/README.md «Install»؛ نسخ المسار بالماوس من reader2 #2، ويُتحقَّق من أسماء القوائم في Windows وmacOS بالعربية. -->
 </aside>
 
-<h2 id="ch02-magnific">تفعيل Magnific (اختياري)</h2>
+<p class="lead-in">يأخذك معالج البداية خطوة واحدة في كل رسالة، ويتأكد من كل خطوة قبل التالية:</p>
+<ol class="steps">
+<li>يفحص الجهاز. إذا لم يكن المحرك مثبَّتًا، يشرح لك ما سيُثبَّت ويسألك مرة واحدة.</li>
+<li>يربط Premiere Pro. إذا لم يكن Premiere على هذا الجهاز، يكمل العمل: تحصل على فيديو المعاينة، وعلى ملف مشروع XML تفتحه لاحقًا على جهاز عليه Premiere من <bdi dir="ltr">File&nbsp;›&nbsp;Import</bdi>.</li>
+<li>يسألك عن الإعدادات (preferences): مكان فولدر العملاء، وهل يتوقف لتوافق على كل خطة، وسرعة التفريغ النصي، وبأي اسم يناديك (<a href="#ch16-title">الفصل&nbsp;16</a>).</li>
+<li>ينشئ أول فولدر عميل (client folder)، ويعرض لك أين تضع كل ملف (<a href="#ch04-title">الفصل&nbsp;4</a>).</li>
+<li>بعد أن تضع الملفات، يفحص ما وضعته ويخبرك بما ينقص، ثم يبدأ إعداد العميل الجديد (<a href="#ch05-title">الفصل&nbsp;5</a>).</li>
+</ol>
 
-<aside class="todo" data-phase="5">
-<p>خطوة اختيارية لربط حسابك في Magnific بتطبيق Claude، تُشرح هنا بالصور بعد اكتمالها. WhyNot Cut يعمل كاملًا بدون Magnific. التفاصيل في <a href="#ch15-title">الفصل&nbsp;15</a>.</p>
+<p class="lead-in">ما يثبّته المعالج بموافقتك، ويحتاج في المجموع إلى نحو <bdi dir="ltr">4&nbsp;GB</bdi> فارغة:</p>
+<ul>
+<li><strong>المحرك</strong> (engine)، وهو البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية: نحو <bdi dir="ltr">400&nbsp;MB</bdi>، في بضع دقائق، داخل الفولدر <bdi dir="ltr"><code>~/.whynot-cut</code></bdi>. العلامة <bdi dir="ltr"><code>~</code></bdi> تعني فولدر المستخدم على جهازك، مثل <bdi dir="ltr"><code>C:\Users\Sample</code></bdi>.</li>
+<li><strong>نموذج التفريغ</strong> <bdi dir="ltr"><code>large-v3</code></bdi>: نحو <bdi dir="ltr">3&nbsp;GB</bdi>، مرة واحدة، ويكمل من حيث توقف إذا انقطع.</li>
+<li><strong>لوحة WhyNot Cut Bridge</strong> (<a href="#ch01-panels">الفصل&nbsp;1</a>): أغلق Premiere قبل تثبيتها ثم افتحه.</li>
+<li><strong>مع كارت NVIDIA</strong>: مكتبة تسريع اختيارية (نحو <bdi dir="ltr">520&nbsp;MB</bdi>) تجعل التفريغ أسرع بنحو 8 مرات.</li>
+<li><strong>فولدر العملاء</strong>: لا تضعه داخل فولدر يُزامَن مع OneDrive أو iCloud أو Dropbox، لأن الملفات المحفوظة على السحابة فقط تُفشل التفريغ النصي.</li>
+</ul>
+
+<aside class="warn">
+<p>اللوحة WhyNot Cut Bridge غير موقَّعة من Adobe. والتوقيع ختم رقمي من الشركة يثبت أن الملف أصلي ولم يُعدَّل. لذلك لا يفتحها Premiere إلا إذا كان إعداد Adobe المسمّى <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> مفعّلًا، وهو إعداد يسمح بتحميل إضافات غير موقَّعة. تغيّره أنت بنفسك بالأمر الذي يعطيك إياه Claude (انظر <a href="#ch02-run-command">تشغيل أمر أعطاك إياه Claude</a>)، ولا يغيّره Claude أبدًا. ويمكنك أن تتخطاه وتستورد ملف XML في Premiere يدويًا من <bdi dir="ltr">File&nbsp;›&nbsp;Import</bdi>.</p>
 </aside>
 
 <h2 id="ch02-run-command" data-today>تشغيل أمر أعطاك إياه Claude</h2>
@@ -191,38 +90,205 @@ reel doctor</code></bdi></div>
 <figcaption>الأمر يُلصق في PowerShell (أو Terminal على macOS)، لا في محادثة Claude.</figcaption>
 </figure>
 
-<h2 id="ch02-first-run">قبل برنامج التثبيت: أول تشغيل مع معالج البداية</h2>
+<h2 id="ch02-before">ما تحتاجه قبل التثبيت في الإصدار <bdi dir="ltr">3.0</bdi></h2>
 
-<aside class="todo" data-phase="7">
-<p>هذا القسم يصف نسخة المطوّرين اليوم، قبل صدور برنامج التثبيت، ويُحذف عند صدوره. في الإصدار <bdi dir="ltr">3.0</bdi> يبقى معالج البداية، لكنه يكتفي بإعداداتك وأول فولدر عميل، ويتخطى كل ما جهّزه التثبيت.</p>
-</aside>
-
-<p>إذا لم تكن قد أضفت WhyNot Cut إلى تطبيق Claude بعد، فاكتب هذين السطرين في مربع الرسالة، كلًّا على حدة ثم Enter، وضع مكان <bdi dir="ltr"><code>&lt;path&gt;</code></bdi> مسار فولدر WhyNot Cut الذي أرسله لك فريقنا (أو اضغط <bdi dir="ltr">+&nbsp;›&nbsp;Plugins&nbsp;›&nbsp;Add&nbsp;plugin</bdi> واختر الفولدر نفسه). ثم أغلق تطبيق Claude تمامًا وافتحه:</p>
-<div class="cmd"><bdi dir="ltr"><code>/plugin marketplace add "&lt;path&gt;"
-/plugin install whynot-cut@thewhynot-ai</code></bdi></div>
-
-<p>افتح محادثة جديدة في تطبيق Claude، واكتب «أول مرة أستخدمه» أو الأمر التالي، ثم اضغط Enter:</p>
-<div class="cmd"><bdi dir="ltr"><code>/whynot-cut:start</code></bdi></div>
-
-<p class="lead-in">يأخذك معالج البداية خطوة واحدة في كل رسالة، ويتأكد من كل خطوة قبل التالية:</p>
-<ol class="steps">
-<li>يفحص الجهاز. إذا لم يكن المحرك مثبَّتًا، يشرح لك ما سيُثبَّت ويسألك مرة واحدة.</li>
-<li>يربط Premiere Pro. إذا لم يكن Premiere على هذا الجهاز، يكمل العمل: تحصل على فيديو المعاينة، وعلى ملف مشروع XML تفتحه لاحقًا على جهاز عليه Premiere من <bdi dir="ltr">File&nbsp;›&nbsp;Import</bdi>.</li>
-<li>يسألك عن الإعدادات (preferences): مكان فولدر العملاء، وهل يتوقف لتوافق على كل خطة، وسرعة التفريغ النصي، وبأي اسم يناديك (<a href="#ch16-title">الفصل&nbsp;16</a>).</li>
-<li>ينشئ أول فولدر عميل (client folder)، ويعرض لك أين تضع كل ملف (<a href="#ch04-title">الفصل&nbsp;4</a>).</li>
-<li>بعد أن تضع الملفات، يفحص ما وضعته ويخبرك بما ينقص، ثم يبدأ إعداد العميل الجديد (<a href="#ch05-title">الفصل&nbsp;5</a>).</li>
-</ol>
-
-<p class="lead-in">ما يثبّته المعالج بموافقتك:</p>
 <ul>
-<li><strong>المحرك</strong>: نحو <bdi dir="ltr">400&nbsp;MB</bdi>، في بضع دقائق، داخل الفولدر <bdi dir="ltr"><code>~/.whynot-cut</code></bdi>. العلامة <bdi dir="ltr"><code>~</code></bdi> تعني فولدر المستخدم على جهازك، مثل <bdi dir="ltr"><code>C:\Users\Sample</code></bdi>.</li>
-<li><strong>نموذج التفريغ</strong> <bdi dir="ltr"><code>large-v3</code></bdi>: نحو <bdi dir="ltr">3&nbsp;GB</bdi>، مرة واحدة، ويكمل من حيث توقف إذا انقطع.</li>
-<li><strong>لوحة WhyNot Cut Bridge</strong> (<a href="#ch01-panels">الفصل&nbsp;1</a>): أغلق Premiere قبل تثبيتها ثم افتحه.</li>
-<li><strong>مع كارت NVIDIA</strong>: مكتبة تسريع اختيارية (نحو <bdi dir="ltr">520&nbsp;MB</bdi>) تجعل التفريغ أسرع بنحو 8 مرات.</li>
-<li><strong>فولدر العملاء</strong>: لا تضعه داخل فولدر يُزامَن مع OneDrive أو iCloud أو Dropbox، لأن الملفات المحفوظة على السحابة فقط تُفشل التفريغ النصي.</li>
+<li><strong>تطبيق Claude</strong> مثبَّتًا وحسابك مسجَّل الدخول فيه. نزّله من <bdi dir="ltr">claude.ai/download</bdi> وسجّل الدخول بنفسك قبل أن تبدأ.</li>
+<li><strong>Premiere Pro</strong>، و<strong>After Effects</strong> إذا كنت تستخدمه، مثبَّتين برخصتك أنت، و<strong>تطبيق Creative Cloud</strong> مسجَّل الدخول بحسابك في Adobe.</li>
+<li><strong>مساحة فارغة</strong>: نحو <bdi dir="ltr">9&nbsp;GB</bdi> على الأقل للمحرك ونموذج التفريغ النصي، وأكثر مع باقي النماذج، ثم عدة <bdi dir="ltr">GB</bdi> لكل عميل. أول سطر يكتبه التثبيت هو الحجم الكلي الذي سينزّله.</li>
+<li><strong>الجهاز</strong>: <bdi dir="ltr">Windows 10/11</bdi>، أو Mac بمعالج Apple Silicon أو Intel. لا تحتاج إلى صلاحيات مسؤول الجهاز (admin)، ولا إلى تثبيت Python أو أي أداة أخرى بنفسك.</li>
+<li><strong>اتصال بالإنترنت</strong> حتى تكتمل التنزيلات.</li>
 </ul>
 
+<aside class="todo" data-phase="7">
+<p>التثبيت على Mac لم يُجرَّب بعد على جهاز حقيقي، فيبقى «لم يُتحقَّق منه» (<bdi dir="ltr">Not&nbsp;verified</bdi>) حتى يُجرَّب.</p>
+<!-- فريق: متطلبات الإصدار 3.0 كما في مواصفات التثبيت. تُراجَع المساحة بعد تحديد أحجام كل النماذج، ويُتحقَّق منها على جهاز Windows نظيف في المرحلة 7. وعلى macOS تبقى كل هذه الخطوات «لم يُتحقَّق منه» حتى يتوفر جهاز Mac للاختبار (H6). المساحة: installer/README.md (6 GB، و9 GB مع النموذج). السطر الواحد لا يثبّت تطبيق Claude (زر «ثبّت Claude لي» في برنامج WhyNot Cut Setup الداخلي فقط، E-T4). -->
+</aside>
+
+<h2 id="ch02-one-line">التثبيت بسطر واحد</h2>
+
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> تثبّت WhyNot Cut بسطر واحد تنسخه من صفحة التنزيل على موقع <bdi dir="ltr">thewhynot.ai</bdi>: سطر لـ Windows وسطر لـ Mac. لا تنزّل أي ملف ولا تفتحه بنفسك، ولا يظهر تحذير من Windows أو macOS.</p>
+
+<ol class="steps">
+<li><strong>انسخ السطر الخاص بجهازك</strong> من صفحة التنزيل.</li>
+<li><strong>افتح PowerShell أو Terminal.</strong> على Windows: افتح قائمة Start، واكتب PowerShell، ثم اضغط عليه لفتحه كالمعتاد، ولا تختر «تشغيل كمسؤول» (<bdi dir="ltr">Run as administrator</bdi>). على Mac: اضغط <bdi dir="ltr">Cmd+Space</bdi>، واكتب Terminal، ثم Enter.</li>
+<li><strong>الصق السطر واضغط Enter.</strong> للّصق اضغط <bdi dir="ltr">Ctrl+V</bdi> على Windows (أو زر الماوس الأيمن)، و<bdi dir="ltr">Cmd+V</bdi> على Mac. هذا شكل السطرين:
+<div class="cmd"><bdi dir="ltr"><code>irm &lt;install-link&gt; | iex</code></bdi></div>
+<div class="cmd"><bdi dir="ltr"><code>curl -fsSL &lt;install-link&gt; | bash</code></bdi></div>
+الأول لـ PowerShell على Windows، والثاني لـ Terminal على Mac.
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: PowerShell بعد لصق سطر التثبيت والضغط على Enter، وفيها «جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي … جيجابايت)» و«اضغط C للتخصيص»</span></div>
+<figcaption>أول ما يظهر: الحجم الكلي، ثم عدّ تنازلي من 10 ثوانٍ.</figcaption>
+</figure>
+</li>
+<li><strong>لا تضغط شيئًا، واترك النافذة مفتوحة.</strong> أول سطر يقول «جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي … جيجابايت)»، ثم يظهر «اضغط C للتخصيص» مع عدّ تنازلي من 10 ثوانٍ. إذا لم تضغط شيئًا، يُثبَّت كل شيء بالإجابات الجاهزة، وهي الأقوى التي يتحملها جهازك. وإذا ضغطت C، يسألك عن مكان المحرك، ونموذج التفريغ، واللغة، وفولدر العملاء، ولكل سؤال إجابة جاهزة يحتفظ بها Enter.</li>
+<li><strong>انتظر حتى تنتهي السطور.</strong> تظهر الخطوات سطرًا بعد سطر. تعتمد المدة على سرعة الإنترنت، لأن أغلب الحجم تنزيلات. ونموذج التفريغ يكمل التنزيل في الخلفية بعد أن تنتهي النافذة، ويمكنك أن تبدأ العمل في الأثناء.</li>
+<li><strong>علامة النجاح.</strong> في النهاية تظهر قائمة الفحص: سطر لكل خطوة، يبدأ بـ <bdi dir="ltr"><code>[OK]</code></bdi> إذا اكتملت، أو <bdi dir="ltr"><code>[!!]</code></bdi> إذا كانت تحتاج إلى انتباه ومعها سببها، وتحتها سطر يبدأ بـ <bdi dir="ltr"><code>you:</code></bdi> إذا كان المطلوب منك شيئًا. ثم سطر يطلب منك أن تفتح Claude وتكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>، ويُفتح تطبيق Claude وحده على معالج البداية. إذا لم يُفتح، افتحه أنت، وافتح محادثة جديدة، واكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>.
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: قائمة الفحص في آخر نافذة التثبيت، وكل سطورها تبدأ بـ <bdi dir="ltr"><code>[OK]</code></bdi>، وتحتها السطر الذي يطلب فتح Claude وكتابة <bdi dir="ltr"><code>/whynot-cut:start</code></bdi></span></div>
+<figcaption>انتهى التثبيت: كل السطور <bdi dir="ltr"><code>[OK]</code></bdi>.</figcaption>
+</figure>
+</li>
+<li><strong>إذا ظهر خطأ</strong>، مثل سطر يبدأ بـ <bdi dir="ltr"><code>[XX]</code></bdi> أو رسالة تبدأ بـ <bdi dir="ltr"><code>ERROR</code></bdi>، فالصق السطر نفسه مرة أخرى واضغط Enter: تشغيل التثبيت مرة ثانية آمن، ويكمل ما لم يكتمل. وإذا تكرر الخطأ، انظر <a href="#ch17-v3">الفصل&nbsp;17</a>.</li>
+</ol>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: Terminal على Mac بعد لصق سطر التثبيت، وفيه السطر الأول والعد التنازلي</span></div>
+<figcaption>على Mac: الخطوات نفسها في Terminal.</figcaption>
+</figure>
+
+<aside class="todo" data-phase="7">
+<p>الرابط الحقيقي يُكتب في السطرين وفي صفحة التنزيل عند صدور الإصدار <bdi dir="ltr">3.0</bdi>، ولم يُجرَّب السطر بعد على جهاز Mac حقيقي.</p>
+<!-- فريق: الإضافة F (F1): التثبيت العام = السطر الواحد (irm … | iex من dl.thewhynot.ai، وcurl … | bash على macOS)؛ لا SmartScreen ولا Gatekeeper. installer/README.md وinstall.ps1 يكتبان https://thewhynot.ai/install.ps1 وhttps://thewhynot.ai/install.sh («future: needs hosting, H3»)، والإضافة F تقول dl.thewhynot.ai: الرابط لم يُحسم، فالمعروض شكل السطر فقط (<install-link>). يُكتب الرابط النهائي بعد H3 (release.index_url في tools/release.py). ما يطبعه السطر منقول من core/bootstrap.sh وbootstrap.ps1 (السطر الأول بالإنجليزية والعربية، العد التنازلي 10 ثوانٍ، C للتخصيص وأسئلته الأربعة) ومن core/wnc_installer/system.py وcli.py ([OK] / [!!] / [XX]، «you:»، START_MESSAGE_AR، فتح Claude على /whynot-cut:start إذا كان التطبيق مثبَّتًا، رموز الخروج 0/1/2/3). صفحة التنزيل D-T14. يُتحقَّق على جهاز Windows نظيف بحساب عادي (المرحلة 7، H10) وعلى Mac عند توفره (H6)، وتُلتقط الصور في المرحلة 9. -->
+</aside>
+
+<h2 id="ch02-from-claude">من داخل Claude: «ثبّت WhyNot Cut»</h2>
+
+<p>إذا كنت تبدأ من تطبيق Claude، فلا تحتاج إلى PowerShell أو Terminal:</p>
+
+<ol class="steps">
+<li>افتح تطبيق Claude وتأكد أنك مسجَّل الدخول.</li>
+<li>أضف WhyNot Cut إلى تطبيق Claude: اضغط <bdi dir="ltr">+&nbsp;›&nbsp;Plugins&nbsp;›&nbsp;Add&nbsp;plugin</bdi> (بالترتيب: + أولًا، ثم Plugins، ثم Add plugin)، والصق عنوان WhyNot Cut الذي تجده في صفحة التنزيل.</li>
+<li>افتح محادثة جديدة واكتب «ثبّت WhyNot Cut»، أو اكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>، ثم اضغط Enter.</li>
+<li>تظهر بطاقة اختيار واحدة. اختر «تثبيت كل شيء (موصى به)»، وهو المحدَّد مسبقًا. الاختيار الآخر يعرض النماذج والحزم في قائمة، وكلها محدَّدة.</li>
+<li>تابع التقدم في المحادثة مرحلة بعد مرحلة. في النهاية يخبرك Claude بما بقي، مثل إعادة تشغيل Premiere أو فتح محادثة جديدة، وينفّذ بنفسه ما هو مسموح له به.</li>
+</ol>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: نافذة <bdi dir="ltr">Add&nbsp;plugin</bdi> في تطبيق Claude، وفيها عنوان WhyNot Cut ملصوقًا</span></div>
+<figcaption>إضافة WhyNot Cut إلى تطبيق Claude قبل «ثبّت WhyNot Cut».</figcaption>
+</figure>
+
+<p>هذا الطريق يشغّل البرنامج نفسه الذي يشغّله السطر الواحد، فالنتيجة واحدة. وتشغيل أي من الطريقين مرة أخرى يُصلح التثبيت ويحدّثه (<a href="#ch18-title">الفصل&nbsp;18</a>).</p>
+
+<aside class="todo" data-phase="7">
+<p>عنوان WhyNot Cut الذي تلصقه في الخطوة 2 يظهر في صفحة التنزيل عند صدور الإصدار <bdi dir="ltr">3.0</bdi>.</p>
+<!-- فريق: التثبيت من داخل Claude من مواصفات الإصدار 3.0 (الإضافة D، D1 الباب 2، D-T2)، ويُتحقَّق منه في المرحلة 7 وتُلتقط صوره في المرحلة 9. يُضاف عند النشر عنوان WhyNot Cut الذي يُلصق في الخطوة 2 (يتوقف على استضافة الملفات، H3)، ويُطابَق مسار القائمة مع تطبيق Claude كما يظهر وقتها. skills/start/references/install-from-claude.md لم يُكتب بعد في HEAD. -->
+</aside>
+
+<h2 id="ch02-what-happens">ما الذي يُثبَّت تلقائيًا</h2>
+
+<p class="lead-in">في الطريقين ينهي التثبيت هذه القائمة وحده، بالإجابات الجاهزة، دون أسئلة:</p>
+<ol>
+<li><strong>المحرك (engine)</strong>: البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية، ومعه نسخة Python خاصة به (لغة برمجة يحتاجها المحرك، ولا تتعامل معها أنت)، وأداة ffmpeg لمعالجة الفيديو والصوت، وخطوط الواجهة. وهو يعمل دائمًا: يبدأ مع تشغيل الجهاز، ومع فتح Premiere، ومع فتح Claude.</li>
+<li><strong>إضافة WhyNot Cut في تطبيق Claude</strong>، مفعّلة، ومعها إذن يسمح لـ Claude بتشغيل محرك WhyNot Cut دون أن يستأذنك كل مرة (الإجابة الجاهزة: نعم).</li>
+<li><strong>على Windows</strong>: أداة صغيرة (<bdi dir="ltr">Git for Windows</bdi>) يحتاجها Claude ليشغّل أوامر WhyNot Cut على Windows؛ لا تتعامل معها أنت.</li>
+<li><strong>لوحة WhyNot Cut</strong> في Premiere Pro (من <bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>) وفي After Effects (من <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>): لوحة واحدة في كل برنامج، وتُزال اللوحات القديمة، مثل WhyNot Cut Bridge، واللوحات التجريبية.</li>
+<li><strong>النماذج</strong> (القسم التالي) في الخلفية. وإذا كان في جهازك كارت NVIDIA، تُثبَّت معها مكتبات التسريع، فيصبح التفريغ النصي أسرع بنحو 8 مرات.</li>
+<li><strong>مكان فولدر العملاء</strong>: على Windows <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> إذا كان في جهازك قرص D، وإلا <bdi dir="ltr"><code>WhyNot Clients</code></bdi> داخل Documents، وكذلك على Mac. وإذا كان Documents يُزامَن مع OneDrive أو iCloud، يوضع فولدر العملاء في فولدر المستخدم خارجه، لأن الملفات المحفوظة على السحابة فقط تُفشل التفريغ النصي.</li>
+<li><strong>تطبيق Claude يُفتح على معالج البداية</strong>، فيسألك عن إعداداتك ويجهّز أول فولدر عميل، ثم يعرض لك أين تضع كل ملف.</li>
+<li><strong>فحص أخير</strong>: كل بند أخضر، أو أصفر ومعه سببه وطريقة إصلاحه (القسم «التأكد من النتيجة»).</li>
+</ol>
+
+<p>ولا يطلب التثبيت أبدًا صلاحيات مسؤول الجهاز، ولا يفعّل إعداد Adobe الخاص بالإضافات غير الموقَّعة، ولا ينقل أو يحذف فولدرات العملاء، ولا يستبدل ملف إعدادات تطبيق Claude: يضيف إليه ما يخص WhyNot Cut فقط، بعد نسخة احتياطية.</p>
+
+<aside class="todo" data-phase="7">
+<p>بعض ما في هذه القائمة، مثل تشغيل المحرك مع بدء الجهاز ولوحة After Effects الجديدة، لم يُجرَّب بعد على جهاز نظيف.</p>
+<!-- فريق: قائمة التثبيت التلقائي من مواصفات الإصدار 3.0. جزء كبير منها مبني ومختبَر في بيئة اختبار معزولة (installer/README.md «Verified»)، ويُتحقَّق منها كلها على جهاز Windows نظيف في المرحلة 7. تشغيل المحرك مع بدء الجهاز ولوحتا Adobe الموقَّعتان تكتمل مع المرحلتين 6 و7، ويُطابَق في المرحلة 6 اسم القائمة التي تجد فيها اللوحة داخل After Effects، وهو أحد اسمين: Extensions أو Extensions (Legacy). لم يُحسم بعد: هل يظهر سؤال إذن التشغيل في التثبيت العادي أم في «تخصيص» فقط، وهل تتحدّث الإضافة في Claude وحدها (يتوقف على استضافة الملفات). أول فولدر عميل: الإضافة D (D2.7، D-T6) تقول إن التثبيت ينشئه؛ النواة المرفوعة لا تنشئ فولدر العملاء أبدًا (system.py: «The clients folder is never created here») وتنتهي بفتح Claude على /whynot-cut:start الذي ينشئه، فالنص الظاهر يتبع النواة؛ يُراجَع إذا نُفّذ D-T6. -->
+</aside>
+
+<h2 id="ch02-models">النماذج (models)</h2>
+
+<p>النموذج (model) ملف كبير فيه خبرة جاهزة في فهم الكلام، يستخدمه المحرك ليحوّل الصوت إلى نص. يُثبَّت ما يحتاجه WhyNot Cut تلقائيًا، والباقي متاح بضغطة:</p>
+
+<table>
+<thead>
+<tr><th>الحزمة</th><th>لماذا</th><th>عند التثبيت</th></tr>
+</thead>
+<tbody>
+<tr><td>التفريغ الأساسي: <bdi dir="ltr"><code>large-v3</code></bdi></td><td>أدق تفريغ نصي (نحو <bdi dir="ltr">2.9&nbsp;GB</bdi>).</td><td>مثبَّتة</td></tr>
+<tr><td>التفريغ السريع: <bdi dir="ltr"><code>large-v3-turbo</code></bdi></td><td>تفريغ أسرع للحلقات الطويلة.</td><td>مثبَّتة</td></tr>
+<tr><td>النماذج الصغيرة: <bdi dir="ltr"><code>medium</code></bdi> و<bdi dir="ltr"><code>small</code></bdi></td><td>نماذج أصغر، تُستخدم فقط إذا لم تكفِ المساحة أو الذاكرة للنماذج الكبيرة.</td><td>تُنزَّل عند الحاجة</td></tr>
+<tr><td>حزمة «كلام» (WhyNot&nbsp;Kalam)</td><td>أداة الكابشن: نموذج للهجة المصرية، ونموذج للإنجليزية، وأداة لضبط توقيت كل كلمة (<a href="#ch13-title">الفصل&nbsp;13</a>).</td><td>مثبَّتة</td></tr>
+<tr><td>«هَش» (WhyNot&nbsp;Hush)</td><td>أداة حذف السكتات، وتستخدم نماذج «كلام» أو التفريغ الأساسي (<a href="#ch12-title">الفصل&nbsp;12</a>).</td><td>لا شيء إضافي</td></tr>
+<tr><td>الخطوط</td><td>خطوط الواجهة والدليل الأربعة.</td><td>مثبَّتة</td></tr>
+</tbody>
+</table>
+
+<ul>
+<li><strong>حسب جهازك</strong>: يقرأ التثبيت كارت الشاشة (NVIDIA أو Apple Silicon) والذاكرة والمساحة الفارغة، ويثبّت كل ما يتسع له الجهاز. إذا لم تكفِ المساحة، يحتفظ بأقوى ما يتسع، ويخبرك بما تخطّاه وكيف تضيفه لاحقًا.</li>
+<li><strong>في الخلفية</strong>: إذا انقطع التنزيل، يكمل من حيث توقف.</li>
+<li><strong>لا انتظار عند أول ضغطة</strong>: إذا طلبت عملًا ونموذجه ما زال يُنزَّل، يخبرك المحرك كم دقيقة بقيت، ثم ينتظر أو يعرض عليك نموذجًا أصغر جاهزًا على الجهاز.</li>
+<li><strong>صفحة «النماذج» (Models)</strong> في لوحة WhyNot Cut: لكل نموذج حالته (مثبَّت، أو يُنزَّل مع النسبة، أو متاح)، وحجمه، وفيمَ يُستخدم، وزر تثبيت وزر حذف، وزر لتنزيل الكل. ويمكنك أيضًا أن تطلب من Claude أن يعرض لك قائمة النماذج.</li>
+</ul>
+
+<aside class="todo" data-phase="7">
+<p>أحجام بعض الحزم وأسماء أزرار صفحة «النماذج» تُضاف هنا عند صدورها.</p>
+<!-- فريق: حزم النماذج والاختيار حسب الجهاز من مواصفات الإصدار 3.0 (الإضافة D، D3، D-T3/D-T4)، ويُتحقَّق منها في المرحلة 7؛ وصفحة «النماذج» في اللوحة يُتحقَّق منها في المرحلة 6، وتُنقل أسماء أزرارها حرفيًا من نصوص اللوحة بعد إضافتها. تُضاف أحجام حزمة «كلام» وباقي الحزم بعد تثبيتها. النواة المرفوعة تثبّت نموذج Whisper واحدًا (large-v3 افتراضيًا، أو ما يختاره -Model / سؤال التخصيص)؛ الحزم الأخرى D-T3. «المرور الأول» صار «تفريغ أسرع للحلقات الطويلة»، والعمود «الحالة الجاهزة» صار «عند التثبيت» (reader2 #33). -->
+</aside>
+
+<h2 id="ch02-only-you">خمس خطوات تقوم بها أنت بنفسك</h2>
+
+<p class="lead-in">هذه حدود يضعها نظام التشغيل أو الشركات الأخرى، ولكل منها خطوة واحدة:</p>
+<ol class="steps">
+<li><strong>تثبيت تطبيق Claude وتسجيل الدخول.</strong> نزّله من <bdi dir="ltr">claude.ai/download</bdi>، ثم سجّل الدخول بحسابك. WhyNot Cut لا يعرض عليك أبدًا صفحة تسجيل دخول خاصة به.</li>
+<li><strong>برامج Adobe برخصتك.</strong> ثبّت Premiere Pro وAfter Effects من تطبيق Creative Cloud، وسجّل الدخول فيه.</li>
+<li><strong>التنزيلات الكبيرة.</strong> اترك الجهاز يعمل ومتصلًا بالإنترنت حتى تكتمل النماذج. يمكنك أن تعمل في الأثناء.</li>
+<li><strong>إذن الفولدرات على Mac.</strong> أول مرة يفتح فيها Claude ملفات في Documents أو على قرص خارجي، يطلب macOS إذنك: اضغط Allow. وإذا رفضت بالخطأ، فعّله من <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Files&nbsp;and&nbsp;Folders</bdi>.</li>
+<li><strong>إعادة تشغيل Premiere وAfter Effects مرة واحدة</strong> بعد تثبيت اللوحات. يفعلها Claude أو التثبيت بنفسه إذا لم يكن فيهما عمل غير محفوظ. وإذا كان فيهما عمل غير محفوظ، لا يُغلق أي شيء: يُطلب منك أن تحفظ عملك، ثم تضغط زر إعادة التشغيل.</li>
+</ol>
+
+<aside class="todo" data-phase="7">
+<p>رسائل هذه الخطوات وصورها تُراجَع عند صدور الإصدار <bdi dir="ltr">3.0</bdi>.</p>
+<!-- فريق: هذه الحدود من مواصفات الإصدار 3.0 (الإضافة D، D0)، وتُراجَع رسائلها وصورها في المرحلة 9. لم يُحسم بعد: حزمة تثبيت كاملة بدون إنترنت (offline bundle، D5، P1) فيها كل النماذج، للاستوديوهات ذات الإنترنت البطيء؛ تُشرح هنا إذا صدرت مع الإصدار 3.0. رسالة macOS (Allow) منقولة من system.py MAC_ALLOW_MESSAGE_AR. -->
+</aside>
+
+<h2 id="ch02-check">التأكد من النتيجة</h2>
+
+<p>علامة النجاح أن كل سطور قائمة الفحص في نهاية التثبيت <bdi dir="ltr"><code>[OK]</code></bdi>. وتجد القائمة نفسها في لوحة WhyNot Cut داخل Premiere باسم «قائمة الإعداد»، وفيها أربعة بنود: «المحرّك»، و«الربط مع Premiere»، و«Claude»، و«مجلد العملاء». البند الأصفر معه زر يصلحه بضغطة واحدة.</p>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: «قائمة الإعداد» في لوحة WhyNot Cut داخل Premiere، وكل بنودها خضراء</span></div>
+<figcaption>كل البنود خضراء: الجهاز جاهز لأول عميل.</figcaption>
+</figure>
+
+<p>الفحص التفصيلي اختياري، وتحتاج إليه غالبًا مع الدعم فقط. اكتب لـ Claude «افحص الجهاز»، فيشغّل هذين الأمرين بنفسه، ولا يغيّر الفحص شيئًا في الجهاز:</p>
+<div class="cmd" data-who="claude"><bdi dir="ltr"><code>reel --version
+reel doctor</code></bdi></div>
+
+<p>يعرض الفحص هل الجهاز جاهز، وقائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت، وكارت الشاشة وبرامج Adobe الموجودة، ونسخ WhyNot Cut على الجهاز إن كانت أكثر من واحدة. وفي أول سطر من الفحص اسم WhyNot Cut ورقم إصداره، مثل <bdi dir="ltr"><code>WhyNot Cut 3.0.0</code></bdi>؛ إذا ذكر Claude اسمًا آخر أو رقمًا قديمًا، فانظر <a href="#ch17-title">الفصل&nbsp;17</a>.</p>
+
+<aside class="todo" data-phase="7">
+<p>صور قائمة الفحص و«قائمة الإعداد» تُلتقط عند صدور الإصدار <bdi dir="ltr">3.0</bdi>.</p>
+<!-- فريق: قائمة الفحص في نهاية التثبيت ([OK] / [!!] / [XX]، system.py render_checklist) وفي لوحة Premiere من مواصفات الإصدار 3.0 (أسماء البنود الأربعة منقولة من نصوص اللوحة: checklist.*). يُتحقَّق منها في المرحلة 7، وتُلتقط صورها في المرحلة 9. -->
+</aside>
+
+<h2 id="ch02-setup-app">برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> لأجهزة فريقنا</h2>
+
+<p>برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> يفعل ما يفعله السطر الواحد، لكنه تطبيق تفتحه بنقرتين ويعرض قائمة الفحص في نافذة. نسخه داخلية: يستخدمها فريقنا على أجهزة الوكالة، ولا تُنشر للتنزيل العام لأنها غير موقَّعة. إذا لم تصلك منا مباشرة، فثبّت بالسطر الواحد.</p>
+
+<ol class="steps">
+<li><strong>افتح الملف بنقرتين.</strong> على Windows <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi>. وعلى Mac افتح <bdi dir="ltr"><code>WhyNotCut.dmg</code></bdi>، ثم التطبيق <bdi dir="ltr">WhyNot Cut Setup</bdi> الذي بداخله.</li>
+<li><strong>إذا لم يكن تطبيق Claude على جهازك</strong>، اضغط «ثبّت Claude لي» (<bdi dir="ltr">Install Claude for me</bdi>). ينزّل البرنامج ملف التثبيت الرسمي من Anthropic ويتحقق من توقيعه ويفتحه. سجّل الدخول بحسابك، ثم يكمل البرنامج وحده.</li>
+<li><strong>اضغط «تثبيت كل شيء (موصى به)»</strong> (<bdi dir="ltr">Install everything</bdi>)، وتابع قائمة الفحص حتى تصبح كل بنودها خضراء. زر «تخصيص» (<bdi dir="ltr">Customise</bdi>) اختياري، ويفتح الأسئلة نفسها بإجاباتها الجاهزة.</li>
+</ol>
+
+<p class="lead-in">لأن النسخة غير موقَّعة، يعرض Windows عند فتحها نافذة زرقاء تقول إن Windows حمى جهازك (<bdi dir="ltr">Windows&nbsp;protected&nbsp;your&nbsp;PC</bdi>):</p>
+<ol class="steps">
+<li>اضغط «مزيد من المعلومات» (<bdi dir="ltr">More info</bdi>) تحت النص.</li>
+<li>تأكد أن اسم الملف هو <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi>، ثم اضغط «تشغيل على أي حال» (<bdi dir="ltr">Run anyway</bdi>).</li>
+</ol>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: نافذة Windows الزرقاء بعد الضغط على «مزيد من المعلومات»، وفيها اسم الملف <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi> وزر «تشغيل على أي حال»</span></div>
+<figcaption>تحذير Windows مع نسخة داخلية: تأكد من اسم الملف، ثم «تشغيل على أي حال».</figcaption>
+</figure>
+
 <aside class="warn">
-<p>اللوحة WhyNot Cut Bridge غير موقَّعة من Adobe، فلا يفتحها Premiere إلا إذا كان إعداد Adobe المسمّى <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> مفعّلًا، وهو إعداد يسمح بتحميل إضافات غير موقَّعة. تغيّره أنت بنفسك بالأمر الذي يعطيك إياه Claude (انظر <a href="#ch02-run-command">تشغيل أمر أعطاك إياه Claude</a>)، ولا يغيّره Claude أبدًا. ويمكنك أن تتخطاه وتستورد ملف XML في Premiere يدويًا من <bdi dir="ltr">File&nbsp;›&nbsp;Import</bdi>.</p>
+<p>افعل هذا فقط مع ملف وصلك من فريقنا مباشرة. إذا ظهر التحذير مع ملف نزّلته من مكان آخر، فلا تشغّله وراسلنا. وعلى Mac يمنع macOS فتح النسخة الداخلية لأنها غير موثَّقة من Apple، فاستخدم السطر الواحد.</p>
+</aside>
+
+<aside class="todo" data-phase="7">
+<p>شكل هذا البرنامج وأسماء أزراره قد تتغيّر، فهو للاختبار داخل فريقنا.</p>
+<!-- فريق: الإضافة E (E2): برنامج واحد بـ Tauri 2 اسمه «WhyNot Cut Setup» لـ Windows (NSIS، لكل مستخدم) وmacOS (.app داخل .dmg)، بدل Inno Setup وSwiftUI في D7 (factcheck2 E2). الإضافة F (F1): exe/dmg غير الموقَّعين داخليان فقط (أجهزة الوكالة، معلَّمان «internal»)؛ النشر العام = السطر الواحد + zip الإضافة + الدليل؛ H4 أُلغي. اسم ملف Windows WhyNotCut-Setup.exe من D7 (الإضافة E لم تغيّره)؛ يُطابَق مع E-T5. متجر Microsoft (MSIX) تحقيق P1 في الإضافة F: هل يناسب قواعد المتجر لتثبيت بيئات التشغيل والخطوط ولوحات Adobe لكل مستخدم؛ إذا لم يناسب يُلغى — لا يُذكر للقارئ قبل حسمه. Smart App Control: إذا كان مفعّلًا لا يظهر زر «تشغيل على أي حال»؛ يُشرح بعد اختبار المرحلة 7. خطوة فتح النسخة الداخلية على Mac (Gatekeeper) لا تُشرح للقارئ: الإضافة F تجعلها لاختبار المطوّرين فقط. «ثبّت Claude لي» E-T4. أسماء الأزرار العربية تُطابَق مع نصوص البرنامج في المرحلة 9. -->
+</aside>
+
+<h2 id="ch02-magnific">تفعيل Magnific (اختياري)</h2>
+
+<p>ربط حسابك في Magnific بتطبيق Claude خطوة اختيارية، وWhyNot Cut يعمل كاملًا بدونها. التفاصيل في <a href="#ch15-title">الفصل&nbsp;15</a>.</p>
+
+<aside class="todo" data-phase="5">
+<p>خطوات الربط بالصور تُكتب هنا عند صدورها.</p>
+<!-- فريق: خطوة اختيارية لربط حسابك في Magnific بتطبيق Claude، تُشرح هنا بالصور بعد اكتمالها (المرحلة 5). -->
 </aside>
 </section>
