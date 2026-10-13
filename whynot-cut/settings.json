@@ -1,0 +1,6 @@
+{
+  "subagentStatusLine": {
+    "type": "command",
+    "command": "r=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$r\" ] || r=$(sed -n -e 's/[\\][\\]/\\//g' -e 's/^ *\"root\": *\"\\(.*\\)\",\\{0,1\\} *$/\\1/p' \"$HOME/.whynot-cut/plugin-root.json\" 2>/dev/null); [ -f \"$r/hooks/run_python.sh\" ] && exec bash \"$r/hooks/run_python.sh\" \"$r/hooks/subagent_status.py\"; exit 0"
+  }
+}

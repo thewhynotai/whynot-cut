@@ -16,6 +16,14 @@
   commands and says ready/done without `reel qc`. After /clear the same Claude Code process keeps its client lease
   under the new session id (a SessionEnd cut short by its 1.5 s budget no longer locks the session out). The
   engine-less fallback of "new clips" reads words in any script (an Arabic name glued to `ref` is a clip).
+- Visibility (T3.6). The plugin ships `settings.json` with `subagentStatusLine`: while WhyNot Cut subagents run, each
+  one gets a row in Claude Code's agent panel, `agent | stage | clip | state | time` (e.g. `story-editor | story and
+  plan | C0239 | 2m15s`; plain ASCII stage words, never gate or stage numbers; other agents keep Claude Code's own
+  row), written by `hooks/subagent_status.py` (stdlib only, fast, never fails). Claude Code reads only `agent` and
+  `subagentStatusLine` from a plugin's `settings.json` (2.1.295) and does not expand `${CLAUDE_PLUGIN_ROOT}` there, so
+  the command falls back to the root in `~/.whynot-cut/plugin-root.json`. An optional output style
+  `whynot-cut-editor` (`output-styles/`, picked by the editor in the output-style picker of `/config`, never forced):
+  Arabic-first, each command alone in its own code block, every report ends with Verified / Not verified / Needs you.
 - userConfig and layered preferences (T3.5). `plugin.json` userConfig gains `language` (ar | en, default ar), `approval`
   (ask | auto), `whisper_model` (large-v3 default | large-v3-turbo | medium | small), `magnific_budget_credits`
   (number, default 300) and `magnific_api_key` (sensitive, optional; kept by Claude Code in the keychain). Engine

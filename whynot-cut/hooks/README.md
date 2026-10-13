@@ -13,6 +13,7 @@ exit 0, except the guard, which blocks a guarded call it cannot check.
 | CwdChanged | `session_context.py` | The same context for the new folder, once per place. CwdChanged output reaches Claude only as `systemMessage` (a note to the editor), so the context waits in `${CLAUDE_PLUGIN_DATA}/pending-context/<session>` and the guard adds it to Claude's next Bash/PowerShell call. Leaving for an unrelated folder drops a context still waiting; the evidence-gate flag follows the new folder. |
 | Stop | `stop_gate.sh` → `stop_gate.py` | Evidence gate, **off by default**. On with the preference `evidence_gate: on` (not with `approval: auto`): a turn that ran `reel` commands and says ready/done without `reel qc`/`reel verify` is sent back once. Off: one bash start per turn end, builtins only. |
 | SessionEnd | `session_end.py` | Releases the ending session's own writer lease; removes its files in `${CLAUDE_PLUGIN_DATA}`. |
+| (settings.json) `subagentStatusLine` | `subagent_status.py` | Not a hook: the plugin's `settings.json` names it as the subagent status line. One row per `whynot-cut:*` subagent in the agent panel: `agent \| stage \| clip \| state \| time`. Claude Code reads only `agent` and `subagentStatusLine` from a plugin `settings.json` and does not expand `${CLAUDE_PLUGIN_ROOT}` there, so the command reads the root from `~/.whynot-cut/plugin-root.json` when the variable is empty. Stdlib only; any error prints nothing. |
 
 ## `if` filter rules (checked live, CLI 2.1.295, Windows)
 
