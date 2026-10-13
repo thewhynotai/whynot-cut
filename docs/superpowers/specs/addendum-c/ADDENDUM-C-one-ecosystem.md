@@ -52,7 +52,7 @@ Setup also happens in three places, and three panels are visible. Details and ev
    confirms in writing that a third-party tool may do it (new **H14**). The docs say third-party products may not
    route requests through Free/Pro/Max credentials on behalf of users. Kalam's FR-6 runs through the same runner and
    rules: its idea is unchanged, only the default backend moves. WhyNot Cut never shows a claude.ai login. Branding
-   is "WhyNot Cut · Powered by Claude".
+   is "WhyNot Cut · Powered by thewhynot.ai (owner decision 2026-10-12)".
 8. **Self-healing:**
    - a build stamp in every panel package, checked against `expected.json` by the daemon, so a stale panel shows
      "Restart Premiere" as one card;
