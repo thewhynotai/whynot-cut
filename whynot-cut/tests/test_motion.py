@@ -1127,6 +1127,35 @@ class TestMotionPlan(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- animatic
+class TestMotionMdFullText(unittest.TestCase):
+    """T3.1 round 2 (m2): the reviewer reads motion-plan.md, so the md must carry every scene's complete on-screen text
+    (the table column is short; the full text is in its own section)."""
+    def test_long_verse_appears_in_full_in_the_md(self):
+        from types import SimpleNamespace
+        from lib.motion_plan import write_motion_md
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        root, ep, _ = motion_episode_fixture(tmp)
+        from lib.reels import select
+        select(ep, ["R01"], [], "editor", as_="motion")
+        reel = Paths(root, "EP12_R01_MO")
+        verse = " ".join(f"آية{i}" for i in range(60))[:300]
+        self.assertEqual(len(verse), 300)
+        plan = {"duration_frames": 300, "assets": [], "audio": {"dialogue": "d.wav", "music": None, "sfx": []},
+                "scenes": [{"id": "S01", "start_frame": 0, "end_frame": 150, "type": "kinetic_quote", "beat_role": "hook",
+                            "elements": [{"kind": "text", "text": verse}]},
+                           {"id": "S02", "start_frame": 150, "end_frame": 300, "type": "stat_counter", "beat_role": None,
+                            "elements": [{"kind": "counter", "text": "10"}, {"kind": "text", "text": "عميل جديد"}]}]}
+        val = {"errors": [], "warnings": [], "approvals": [], "recipe_notes": [],
+               "editorial_lines": [{"scene": "S02", "field": "label", "text": "عميل جديد"}]}
+        C = SimpleNamespace(fps=30, recipe_type="drama", fmt={"name": "9x16"}, direction="rtl")
+        md = write_motion_md(reel, plan, val, C).read_text(encoding="utf-8")
+        self.assertIn(verse, md)                               # the whole verse, not cut at 120
+        sec = md[md.index("## On-screen text (full)"):]
+        self.assertIn(verse, sec)
+        self.assertTrue(any("S02" in ln and "editorial" in ln and "عميل جديد" in ln for ln in sec.splitlines()), sec)
+
+
 class CompiledMotion(unittest.TestCase):
     """A compiled good_script() motion project, shared by the animatic, JSX, build, render and QC tests."""
     @classmethod

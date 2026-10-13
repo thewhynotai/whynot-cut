@@ -20,12 +20,16 @@ Premiere steps.
    | Comment is about | Agent | Typical change |
    |---|---|---|
    | noise, hum, loudness, pauses, breaths | `audio-engineer` | `reel audio-clean` options; evidence |
-   | wording, which moments get graphics, timing, cuts, glass/statement style | `story-editor` | `edit-decisions.json` (+ client `reel-profile/style.json` if it is a standing rule) |
+   | wording, which moments get graphics, timing, cuts, glass/statement style | `story-editor`, then `medical-reviewer` for any wording change (below) | `edit-decisions.json` (+ client `reel-profile/style.json` if it is a standing rule) |
    | how graphics or captions look or animate | `motion-designer` | template params or profile `graphics-templates.json`; previews |
    | transcript words | `transcript-editor` | `transcript-corrections.json` → `transcript-correct` |
    | medical or religious wording | `medical-reviewer` (read-only) | approval list |
 
    Independent changes go out in parallel in one message.
+   **Any change to on-screen wording** (the story-editor's edits to graphics, captions or statements, whatever the
+   topic) gets a `whynot-cut:medical-reviewer` re-review of the changed items (it re-reads the changed elements of
+   `01_analysis/timeline-spec.json` against the transcript) after `reel plan` compiles and **before** step 4 shows the
+   changed plan for approval; it re-reviews the changed items only. Its approval list goes into what you show the editor.
 3. If the comment is a **standing preference** ("always glass only at the end"), record it in the client's
    `output/client_database/reel-profile/style.json` and `notes.md`, so the next video follows it.
 4. `reel plan` must compile, then previews, then `reel preview-video` (preferences `preview_video`) so the editor can
@@ -56,7 +60,7 @@ A motion video is built in After Effects from the motion plan, never with `ppro-
 | the `.aep` is missing, broken or older than the approved plan | `ae-builder` | rebuild from the same approved plan (step 4) |
 | any change above that re-plans | `whynot-cut:medical-reviewer` (read-only) | reviews the new `01_analysis/motion-plan.md`: health claims; verses, hadith, attributed stories and rulings for a religious client |
 
-1. After every re-plan, `whynot-cut:medical-reviewer` reviews the new `motion-plan.md` (every motion video, whatever
+1. After every re-plan, `whynot-cut:medical-reviewer` reviews the new `motion-plan.md`, reading the `On-screen text (full)` section (every motion video, whatever
    the client's `domain`; the religious checks when the profile `domain` is `religious`). Approval waits for its review;
    its approval list goes into what you show the editor.
 2. VIEW the new `_storyboard.jpg` yourself; then show the editor the changed scenes (time, words, editorial lines

@@ -776,13 +776,23 @@ def write_motion_md(paths, plan: dict | None, val: dict, C: _Compiler) -> Path:
         L += ["| Scene | Time | Beat | Type | On screen | Source |", "|---|---|---|---|---|---|"]
         eds = {(e["scene"], e["text"]) for e in val["editorial_lines"]}
         for s in plan["scenes"]:
-            texts = [e.get("text", "").replace("\r", " ") for e in s["elements"] if e.get("kind") in ("text", "counter")]
+            texts = [" ".join(e.get("text", "").split()) for e in s["elements"] if e.get("kind") in ("text", "counter")]
             icons = [e.get("icon") for e in s["elements"] if e.get("kind") == "icon"]
             srcs = ["editorial" if (s["id"], t) in eds else "speech" for t in texts]
             t0 = fmt_ts(int(s["start_frame"] * 1000 / fps), ".")[3:11]
             L.append(f"| {s['id']} | {t0} | {s.get('beat_role') or '—'} | {s['type']}"
                      f"{' (' + ', '.join(icons) + ')' if icons else ''} | {' / '.join(texts)[:120] or '—'} | "
                      f"{', '.join(sorted(set(srcs))) or '—'} |")
+        # the table column is short; the reviewer (claims / religious content) reads the complete words here
+        L += ["", "## On-screen text (full)", "",
+              "Every scene's complete on-screen words, uncut (the table above shortens long lines).", ""]
+        full = []
+        for s in plan["scenes"]:
+            for e in s["elements"]:
+                if e.get("kind") in ("text", "counter") and e.get("text"):
+                    who = "editorial" if (s["id"], e["text"]) in eds else "speech"
+                    full.append(f"- {s['id']} · {who} · {' '.join(e['text'].split())}")
+        L += full or ["- none"]
         L += ["", "## Editorial lines (Claude's words, not the speaker's)", ""]
         L += [f"- {e['scene']} {e['field']}: {e['text']}" for e in val["editorial_lines"]] or ["- none"]
         a = plan["audio"]

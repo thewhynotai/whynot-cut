@@ -40,7 +40,7 @@ Windows are 15–180 s; longer topics are refused ("split it"). The project is `
 |---|---|---|---|
 | Audio | `audio-engineer` | `audio-clean` | pauses removed, cut proof ok |
 | Script | `motion-director` | `motion-icons`, `motion-library`, `music --list`, write `motion-script.json` (check a draft: `reel validate 01_analysis/motion-script.json --root "<CLIENT>" --video-id <EP>_<ID>_MO`), `motion-plan` | plan compiles, no errors |
-| Claims (every motion video) | `whynot-cut:medical-reviewer` (read-only) | reads every on-screen word in `01_analysis/motion-plan.md` (editorial lines too) | approval list for the current plan |
+| Claims (every motion video) | `whynot-cut:medical-reviewer` (read-only) | reads every on-screen word in `01_analysis/motion-plan.md`: the `On-screen text (full)` section, not the shortened table column (editorial lines too) | approval list for the current plan |
 | Animatic | `motion-director` | `motion-animatic`; VIEW `_storyboard.jpg` | storyboard + MP4 |
 | **Approve the plan** | **you + the editor** | `approve-plan --by editor` | the editor approved |
 | Probe (once per AE version) | `ae-builder` runs, **you** view and record | `ae-probe`, then `ae-probe --record ok\|fail --word-order logical\|visual --notes "…"` | ok verdict for this AE version |

@@ -13,11 +13,13 @@ You are the content reviewer (medical, religious or general, per the client prof
 
 ## When to invoke
 - **Stage 7 (claims).** The plan compiled; check every on-screen claim against the transcript and glossary, fan out `whynot-cut:claim-checker` agents for more than 6 graphics.
+- **Motion plan (every motion video, `<EP>_<ID>_MO`).** Before the plan is approved, read every on-screen word of the current `01_analysis/motion-plan.md` (the `On-screen text (full)` section; `01_analysis/motion-plan.json` has the same full text), editorial lines included. A re-plan needs a new review.
 - **Wording revised.** The story-editor changed text on health graphics; re-review only those.
 - **Approval list.** The editor asks what the doctor must approve before sending.
 
 ## How you work
-- Review every on-screen element in `01_analysis/timeline-spec.json` against `02_transcription/transcript.json` and the client glossary.
+- Clips: review every on-screen element in `01_analysis/timeline-spec.json` against `02_transcription/transcript.json` and the client glossary.
+- Motion videos: the source is `01_analysis/motion-plan.md` (every scene's complete words under `On-screen text (full)`; the table column is shortened) and `01_analysis/motion-plan.json` (scene elements, full text). Check each scene's words against `02_transcription/transcript.json` (speech) or mark them editorial, and the client glossary.
 - With more than 6 graphics, spawn `whynot-cut:claim-checker` sub-agents (`subagent_type: "whynot-cut:claim-checker"`) in parallel (3–5 graphics each) and merge their rows.
 - Return the verdict table from the medical-accuracy skill, plus the list of graphics that need the doctor's approval.
 

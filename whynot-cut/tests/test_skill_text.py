@@ -168,6 +168,24 @@ class TestMotionAndReligiousRoutes(unittest.TestCase):
         self.assertTrue(any("whynot-cut:medical-reviewer" in ln for ln in table))
         self.assertLess(sec.index("whynot-cut:medical-reviewer` reviews"), sec.index("reel approve-plan"))
 
+    def test_revise_clip_route_re_reviews_changed_wording_before_approval(self):
+        """T3.1 round 2 (m1): any change to on-screen wording (story-editor edits to graphics, captions, statements)
+        gets a medical-reviewer re-review of the changed items before the changed plan is shown for approval."""
+        s = text("revise")
+        clip = s[:s.index("## Motion videos")]
+        flat = " ".join(clip.split())
+        self.assertRegex(flat, r"(?i)any change to on-screen wording")
+        self.assertRegex(flat, r"(?i)whynot-cut:medical-reviewer.{0,200}changed (items|elements)")
+        route = next(ln for ln in clip.splitlines() if ln.lstrip().startswith("| wording"))
+        self.assertIn("medical-reviewer", route)
+        step4 = clip.index("\n4. ")
+        self.assertLess(clip.index("re-reviews"), step4)
+        self.assertRegex(" ".join(clip[:step4].split()), r"(?i)before\W+step 4 shows the changed plan for approval")
+
+    def test_motion_reviewer_reads_the_full_text_section(self):
+        for name in ("motion", "revise", "medical-accuracy"):
+            self.assertIn("On-screen text (full)", " ".join(text(name).split()), name)
+
     def test_revise_motion_look_row_changes_the_script_not_a_rebuild_of_the_same_plan(self):
         s = text("revise")
         sec = s[s.index("## Motion videos"):]
