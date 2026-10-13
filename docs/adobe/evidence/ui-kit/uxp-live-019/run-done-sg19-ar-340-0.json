@@ -1,0 +1,22 @@
+{
+  "id": "sg19-ar-340-0",
+  "mode": "style_guide",
+  "view": {
+    "lang": "ar",
+    "width": 340,
+    "scroll": 0
+  },
+  "results_file": "C:/Users/LOQ/.whynot-cut/uxp-spike/results-20261013-120739.json",
+  "ok": true,
+  "pass": 6,
+  "fail": 1,
+  "na": 2,
+  "scroll": {
+    "requested": 0,
+    "top": 0,
+    "scroll_height": 3406,
+    "client_height": 911
+  },
+  "started_at": "2026-10-13T09:07:39.697Z",
+  "finished_at": "2026-10-13T09:07:43.160Z"
+}

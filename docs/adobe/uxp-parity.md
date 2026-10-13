@@ -290,6 +290,19 @@ Seen live in the spike 0.1.8 style guide (`docs/adobe/evidence/ui-kit/uxp-live-0
 | Progress fill in Arabic (a flex row, mirrored through `direction` only) | Fills from the **left** (`uxp-ar-280-02.png`, `uxp-ar-340-02.png`), although the step strip and the progress head mirror correctly | Placed physically under `.kit-rtl`: the track is `direction: ltr; justify-content: flex-end` and the fill has `margin-left: auto`, so it fills from the right in UXP and Chromium alike |
 | Gap margins, ink fills, disabled colours, `<div role="button">` controls | Right across the whole kit | Kept |
 
+## Spike 0.1.9 + product panel live (2026-10-13 ~09:10Z) — Phase 6 gate evidence `evidence/ui-kit/uxp-live-019/`
+
+- **Style guide, full length, all six views** (AR/EN × 280/340/480), captured page by page via the `scroll` run option:
+  header, tabs, card, buttons, chips, step strip, progress, toasts, checklist, dialog, empty state, log drawer,
+  frame grid, waveform frame and footer all paint correctly in Premiere 26.5.2 UXP.
+- **RTL progress** now fills from the right (physical `margin-left: auto` fix, 3746f04). ✔
+- **`box-shadow` does not paint in UXP.** The 1 px CTA ring (`--twn-cta-ring`) is invisible, like the 0.1.8 blur
+  glow. The 0.1.6 "box-shadow ok" row only proved the computed value. Consequence: the focus ring
+  (`--twn-focus`, a box-shadow) is almost certainly invisible too, so B4.8 needs a border-based focus ring (borders
+  paint). The CTA stays a plain primary fill (deviation from Addendum B recorded). → B-T2 first item.
+- **Product panel** "WhyNot Cut (dev)" with the port-less localhost manifest: Engine connected and Premiere Pro 26.5.2
+  linked at once (`panel-connected.png`; audit: peer `::1`, origin `file://`, uxp + panel sessions authenticated).
+
 ## Product panel in real UXP
 
 The WhyNot Cut product panel was loaded in Premiere as real UXP (screenshot
