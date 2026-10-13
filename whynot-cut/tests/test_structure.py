@@ -62,6 +62,73 @@ def frontmatter(text: str) -> dict:
         raise ValueError("frontmatter is not a YAML mapping")
     return data
 
+# ------------------------------------------------------------------------------------------------- frontmatter schema
+# Closed key sets with types, from the Claude Code docs read 2026-10-13: https://code.claude.com/docs/en/sub-agents.md
+# (agent fields), https://code.claude.com/docs/en/skills.md (skill fields) and the plugin-dev agent-development skill
+# (model: inherit | sonnet | opus | haiku). Claude Code ignores an unknown or misspelt key without any error, so a typo
+# (`maxTurn`, `disallowedtools`) or a wrong type (`maxTurns: "8"`) silently does nothing: that is what these catch.
+def _str(v):
+    return None if isinstance(v, str) and v.strip() else "a non-empty string"
+
+
+def _bool(v):
+    return None if isinstance(v, bool) else "true or false"
+
+
+def _posint(v):
+    return None if isinstance(v, int) and not isinstance(v, bool) and v > 0 else "an integer greater than 0"
+
+
+def _strs(v):                      # tools / allowed-tools / paths: a comma or space string, or a list of strings
+    ok = (isinstance(v, str) and v.strip()) or (isinstance(v, list) and v and all(isinstance(x, str) for x in v))
+    return None if ok else "a string or a list of strings"
+
+
+def _one_of(*values):
+    return lambda v: None if v in values else "one of " + ", ".join(values)
+
+
+def _model(v):                     # an alias, `inherit`, or a full model id
+    ok = isinstance(v, str) and (v in {"inherit", "sonnet", "opus", "haiku", "fable"} or v.startswith("claude-"))
+    return None if ok else "inherit, sonnet, opus, haiku, fable or a full model id (claude-…)"
+
+
+def _any(v):                       # checked elsewhere (colour, skills:) or free-form
+    return None
+
+
+EFFORT = _one_of("low", "medium", "high", "xhigh", "max")
+KNOWN_KEYS: dict[str, dict] = {
+    "agent": {"name": _str, "description": _str, "tools": _strs, "disallowedTools": _strs, "model": _model,
+              "color": _any, "skills": _any, "maxTurns": _posint, "effort": EFFORT,
+              "memory": _one_of("user", "project", "local"), "background": _bool, "isolation": _one_of("worktree"),
+              "omitClaudeMd": _bool, "experimental": lambda v: None if isinstance(v, dict) else "a mapping"},
+    "skill": {"name": _str, "description": _str, "when_to_use": _str, "argument-hint": _str,
+              "arguments": _strs, "disable-model-invocation": _bool, "user-invocable": _bool,
+              "allowed-tools": _strs, "disallowed-tools": _strs, "model": _str, "effort": EFFORT,
+              "context": _one_of("fork"), "agent": _str, "background": _bool,
+              "hooks": lambda v: None if isinstance(v, dict) else "a mapping", "paths": _strs,
+              "shell": _one_of("bash", "powershell"), "metadata": lambda v: None if isinstance(v, dict) else "a mapping",
+              "license": _str, "compatibility": _str},
+}
+# keys Claude Code documents but does not honour in plugin agents (security): they do nothing, so they fail too
+IGNORED_IN_PLUGIN_AGENTS = {"permissionMode", "hooks", "mcpServers", "initialPrompt"}
+
+
+def schema_issues(kind: str, fm: dict) -> list[tuple[str, str]]:
+    """(key, message) for every unknown key and every value of the wrong type or outside its closed set."""
+    out = []
+    for k, v in fm.items():
+        if kind == "agent" and k in IGNORED_IN_PLUGIN_AGENTS:
+            out.append((k, f"frontmatter key {k!r} is ignored in plugin agents (Claude Code does not honour it there)"))
+        elif k not in KNOWN_KEYS[kind]:
+            out.append((k, f"unknown {kind} frontmatter key {k!r}: add it to KNOWN_KEYS if Claude Code supports it"))
+        else:
+            want = KNOWN_KEYS[kind][k](v)
+            if want:
+                out.append((k, f"{kind} frontmatter {k}: expected {want}, got {v!r}"))
+    return out
+
 
 def names(plugin: Path) -> tuple[set[str], set[str]]:
     """(skill names, agent names) of a plugin folder."""
@@ -87,6 +154,7 @@ def frontmatter_issues(plugin: Path) -> list[tuple[Path, int, str]]:
             out.append((f, at.get("name", 1), f"name {fm.get('name')!r} is not {want!r}"))
         if not isinstance(fm.get("description"), str) or not fm["description"].strip():
             out.append((f, at.get("description", 1), "description missing or not a string"))
+        out += [(f, at.get(k, 1), m) for k, m in schema_issues("agent" if is_agent else "skill", fm)]
         if not is_agent:
             continue
         colour = fm.get("color")
@@ -110,10 +178,12 @@ def text_files(plugin: Path) -> list[Path]:
 
 
 REF = re.compile(r"(?<![\w-])whynot-cut:([a-z0-9][a-z0-9-]*)")
+SUBAGENT = re.compile(r"subagent_type\W{0,6}whynot-cut:([a-z0-9][a-z0-9-]*)")     # must be an agent, a skill cannot run
 
 
 def reference_issues(plugin: Path) -> list[tuple[Path, int, str]]:
-    """Every `whynot-cut:<name>` (a subagent type or a /skill) names an agent or skill that exists."""
+    """Every `whynot-cut:<name>` (a subagent type or a /skill) names an agent or skill that exists; a `subagent_type`
+    names an agent."""
     skills, agents = names(plugin)
     out = []
     for f in text_files(plugin):
@@ -121,6 +191,9 @@ def reference_issues(plugin: Path) -> list[tuple[Path, int, str]]:
             for m in REF.finditer(line):
                 if m.group(1) not in agents | skills:
                     out.append((f, n, f"whynot-cut:{m.group(1)} is no agent or skill"))
+            for m in SUBAGENT.finditer(line):
+                if m.group(1) in skills and m.group(1) not in agents:
+                    out.append((f, n, f"whynot-cut:{m.group(1)} is a skill, not an agent: it cannot be a subagent_type"))
     return out
 
 
@@ -149,6 +222,12 @@ def real_parser() -> argparse.ArgumentParser:
     return got["ap"]
 
 
+def _choices(ap: argparse.ArgumentParser) -> dict[str, set[str]]:
+    """option string (every alias) -> its allowed values, for options that take one value from a closed set."""
+    return {o: {str(c) for c in a.choices} for o, a in ap._option_string_actions.items()
+            if a.choices and a.nargs is None and a.option_strings}
+
+
 class CLI:
     """What the parser accepts: top-level options, each command (aliases included) with its options and the choices
     of its first positional (serve's verb); commands that pass the rest through (py)."""
@@ -156,10 +235,12 @@ class CLI:
         self.top = set(ap._option_string_actions)
         sub = next(a for a in ap._actions if isinstance(a, argparse._SubParsersAction))
         self.commands: dict[str, set[str]] = {}
+        self.choices: dict[str, dict[str, set[str]]] = {"": _choices(ap)}   # command ("" = top level) -> option -> values
         self.verbs: dict[str, set[str]] = {}
         self.passthrough: set[str] = set()
         for name, sp in sub.choices.items():
             self.commands[name] = set(sp._option_string_actions)
+            self.choices[name] = _choices(sp)
             pos = [a for a in sp._actions if not a.option_strings and a.dest != "help"]
             if pos and pos[0].nargs == argparse.REMAINDER:
                 self.passthrough.add(name)
@@ -167,26 +248,57 @@ class CLI:
                 self.verbs[name] = set(pos[0].choices)
 
 
-REEL = re.compile(r"(?<![\w-])reel(?:\.cmd)?\"?(?=[ \t])")
+REEL = re.compile(r"(?<![\w-])reel(?:\.cmd)?[\"']?(?=[ \t])")
 STOP = re.compile(r"`|\s\|\s|;|&&|\|\||\s[—→]\s")
 FLAG = re.compile(r"--[A-Za-z0-9][A-Za-z0-9-]*")
 WORD = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
-SHELLS = {"", "bash", "sh", "shell", "console", "powershell", "pwsh", "ps1", "cmd", "bat"}  # json/markdown: prose
+# fenced shell languages (json/markdown/text: data or prose) and the character that continues a line in each
+CONT_BASH, CONT_PS, CONT_CMD = "\\", "`", "^"
+SHELL_CONT = {"bash": (CONT_BASH,), "sh": (CONT_BASH,), "zsh": (CONT_BASH,),
+              "powershell": (CONT_PS,), "pwsh": (CONT_PS,), "ps1": (CONT_PS,),
+              "cmd": (CONT_CMD,), "bat": (CONT_CMD,), "batch": (CONT_CMD,),
+              "": (CONT_BASH, CONT_PS, CONT_CMD), "shell": (CONT_BASH, CONT_PS, CONT_CMD),
+              "console": (CONT_BASH, CONT_PS, CONT_CMD), "shell-session": (CONT_BASH, CONT_PS, CONT_CMD)}
+SHELLS = set(SHELL_CONT)
 
 
 def _clean(tok: str) -> str:
     return tok.lstrip("[(\"'").rstrip(".,:;)]\"'")
 
 
-def reel_issues_in(text: str, cli: CLI) -> list[tuple[int, str]]:
-    """Each `reel …` written in the text: the command exists (when written as code), and every --flag up to the end of
-    that command (a backtick, a pipe, ;, &&, an arrow) is an option of that command (or a global one before it)."""
-    out = []
-    fence = None                                    # the open fenced block's language, "" when it has none
-    for n, line in enumerate(text.splitlines(), 1):
+VALUE = re.compile(r"[a-z0-9][a-z0-9.-]*")        # a bare option value; <x>, a|b, NAME, … are placeholders
+
+
+def logical_lines(text: str) -> list[tuple[int, str, str | None]]:
+    r"""(first line number, text, fenced language or None) with a shell fence's continued lines joined: a line ending in
+    a backslash (bash), a backtick (PowerShell) or ^ (cmd) continues on the next line, so "reel plan \" followed by
+    "--bogus" is one command."""
+    src = text.splitlines()
+    out, fence, i = [], None, 0
+    while i < len(src):
+        line, n = src[i], i + 1
+        i += 1
         if line.lstrip().startswith("```"):
-            fence = line.lstrip()[3:].strip().lower() if fence is None else None
+            if fence is None:
+                info = line.lstrip()[3:].split()
+                fence = info[0].lower() if info else ""                 # "bash title=x" is a bash fence
+            else:
+                fence = None
             continue
+        conts = SHELL_CONT.get(fence, ()) if fence is not None else ()
+        while conts and line.rstrip().endswith(conts) and i < len(src) and not src[i].lstrip().startswith("```"):
+            line = line.rstrip()[:-1] + " " + src[i]
+            i += 1
+        out.append((n, line, fence))
+    return out
+
+
+def reel_issues_in(text: str, cli: CLI) -> list[tuple[int, str]]:
+    """Each `reel …` written in the text: the command exists (when written as code), every --flag up to the end of that
+    command (a backtick, a pipe, ;, &&, an arrow) is an option of that command (or a global one before it), and a bare
+    value after an option with closed choices (--by, --verdict, --hum, --model …) is one of them."""
+    out = []
+    for n, line, fence in logical_lines(text):
         for m in REEL.finditer(line):
             code = fence in SHELLS or (fence is None and line[:m.start()].count("`") % 2 == 1)
             rest = line[m.end():]
@@ -210,10 +322,18 @@ def reel_issues_in(text: str, cli: CLI) -> list[tuple[int, str]]:
             args = toks[i + 1:]
             if code and cmd in cli.verbs and args and WORD.fullmatch(args[0]) and args[0] not in cli.verbs[cmd]:
                 out.append((n, f"reel {cmd} {args[0]}: not one of {', '.join(sorted(cli.verbs[cmd]))}"))
-            for t in args:
+            for k, t in enumerate(args):
                 f = FLAG.match(t)
-                if f and f.group(0) not in cli.commands[cmd]:
+                if not f:
+                    continue
+                if f.group(0) not in cli.commands[cmd]:
                     out.append((n, f"reel {cmd} {f.group(0)}: no such option"))
+                    continue
+                allowed = cli.choices[cmd].get(f.group(0))
+                if allowed:
+                    val = _clean(t.split("=", 1)[1]) if "=" in t else (args[k + 1] if k + 1 < len(args) else "")
+                    if VALUE.fullmatch(val) and val not in allowed:
+                        out.append((n, f"reel {cmd} {f.group(0)} {val}: not one of {', '.join(sorted(allowed))}"))
     return out
 
 
@@ -285,6 +405,55 @@ class TestFrontmatter(YamlRequired):
         self.assertIn("skills: entry 'missing-craft' is not a whynot-cut skill", msgs)
         self.assertEqual(len(msgs), 3, msgs)                         # the good skill and both good entries pass
 
+    def test_seeded_unknown_keys_and_wrong_types_fail(self):
+        def run(kind, body):
+            with tempfile.TemporaryDirectory() as t:
+                p = Path(t)
+                (p / "skills/s").mkdir(parents=True)
+                (p / "agents").mkdir()
+                if kind == "agent":
+                    (p / "agents/a.md").write_text(f"---\nname: a\ndescription: x\ncolor: red\n{body}---\n",
+                                                   encoding="utf-8")
+                else:
+                    (p / "skills/s/SKILL.md").write_text(f"---\nname: s\ndescription: x\n{body}---\n",
+                                                         encoding="utf-8")
+                return sorted(m for _, _, m in frontmatter_issues(p))
+        add = "add it to KNOWN_KEYS if Claude Code supports it"
+        # a good agent and a good skill using the newer keys pass
+        self.assertEqual(run("agent", "tools: Read, Grep\ndisallowedTools: [Bash]\nmodel: inherit\nmaxTurns: 8\n"
+                                      "effort: high\nomitClaudeMd: true\n"), [])
+        self.assertEqual(run("skill", "user-invocable: false\nallowed-tools: Bash(reel *)\nargument-hint: x\n"), [])
+        # typos: Claude Code would ignore them silently
+        self.assertEqual(run("agent", "maxTurn: 8\ndisallowedtools: Bash\n"),
+                         [f"unknown agent frontmatter key 'disallowedtools': {add}",
+                          f"unknown agent frontmatter key 'maxTurn': {add}"])
+        self.assertEqual(run("skill", "user-invokable: false\n"),
+                         [f"unknown skill frontmatter key 'user-invokable': {add}"])
+        # a skill key is not an agent key and the other way round
+        self.assertEqual(run("agent", "allowed-tools: Read\n"),
+                         [f"unknown agent frontmatter key 'allowed-tools': {add}"])
+        self.assertEqual(run("skill", "tools: Read\n"), [f"unknown skill frontmatter key 'tools': {add}"])
+        # documented but ignored in plugin agents
+        self.assertEqual(run("agent", "permissionMode: plan\n"),
+                         ["frontmatter key 'permissionMode' is ignored in plugin agents (Claude Code does not honour "
+                          "it there)"])
+        # wrong types and values
+        self.assertEqual(run("agent", 'maxTurns: "8"\n'),
+                         ["agent frontmatter maxTurns: expected an integer greater than 0, got '8'"])
+        self.assertEqual(run("agent", "maxTurns: 0\n"),
+                         ["agent frontmatter maxTurns: expected an integer greater than 0, got 0"])
+        self.assertEqual(run("agent", "omitClaudeMd: yes please\n"),
+                         ["agent frontmatter omitClaudeMd: expected true or false, got 'yes please'"])
+        self.assertEqual(run("agent", "model: gpt-5\n"),
+                         ["agent frontmatter model: expected inherit, sonnet, opus, haiku, fable or a full model id "
+                          "(claude-…), got 'gpt-5'"])
+        self.assertEqual(run("agent", "effort: huge\n"),
+                         ["agent frontmatter effort: expected one of low, medium, high, xhigh, max, got 'huge'"])
+        self.assertEqual(run("agent", "tools: [Read, 3]\n"),
+                         ["agent frontmatter tools: expected a string or a list of strings, got ['Read', 3]"])
+        self.assertEqual(run("skill", 'user-invocable: "false"\n'),
+                         ["skill frontmatter user-invocable: expected true or false, got 'false'"])
+
 
 class TestReferences(YamlRequired):
     def test_repo_references_exist(self):
@@ -302,6 +471,20 @@ class TestReferences(YamlRequired):
             msgs = sorted(m for _, _, m in reference_issues(p))
         self.assertEqual(msgs, ["whynot-cut:frame-inspectr is no agent or skill",
                                 "whynot-cut:qc-reviewer is no agent or skill"])
+
+    def test_seeded_skill_used_as_subagent_type_fails(self):
+        with tempfile.TemporaryDirectory() as t:
+            p = Path(t)
+            (p / "skills/edit").mkdir(parents=True)
+            (p / "agents").mkdir()
+            (p / "agents/qc-reviewer.md").write_text("x\n", encoding="utf-8")
+            (p / "skills/edit/SKILL.md").write_text("\n".join([
+                'Agent(subagent_type="whynot-cut:edit", prompt="x")',            # a skill: cannot run as a subagent
+                "subagent_type: whynot-cut:qc-reviewer",                          # an agent: fine
+                "Run /whynot-cut:edit, or whynot-cut:qc-reviewer.",              # a skill by name: fine
+            ]) + "\n", encoding="utf-8")
+            msgs = [(n, m) for _, n, m in reference_issues(p)]
+        self.assertEqual(msgs, [(1, "whynot-cut:edit is a skill, not an agent: it cannot be a subagent_type")])
 
 
 class TestReelFlags(YamlRequired):
@@ -333,6 +516,74 @@ class TestReelFlags(YamlRequired):
                                 "9: reel --rooot: no such global option",
                                 "11: reel plan --nope: no such option",
                                 "13: reel next --oops: no such option"])
+
+
+    def test_seeded_continuation_lines_are_joined(self):
+        text = "\n".join([
+            "```bash",
+            "reel plan \\",                        # 2: bash continuation, the bad flag is on line 4
+            "  --root X \\",
+            "  --bogus",
+            "reel verify --record \\",             # 5: fine when joined
+            "  --verdict pass",
+            "```",
+            "```powershell",
+            "reel plan `",                         # 9: PowerShell backtick
+            "  --bogus2",
+            "reel `",                              # 11: the command is on the next line
+            "  plan --bogus3",
+            "```",
+            "```cmd",
+            "reel plan ^",                         # 15: cmd caret
+            "  --bogus4",
+            "```",
+            "```zsh",
+            "reel plan \\",                        # 19: zsh is a shell fence too
+            "  --bogus5",
+            "```",
+            "```bash",
+            "reel plan",                           # 23: no continuation: the next line is not part of it
+            "--bogus6",
+            "```",
+            "```bash",
+            "echo done \\",                        # a continuation never runs into the fence close
+            "```",
+            "reel next --prose",                   # 29: prose after the fence
+        ])
+        msgs = [f"{n}: {m}" for n, m in reel_issues_in(text, cli())]
+        self.assertEqual(msgs, ["2: reel plan --bogus: no such option",
+                                "9: reel plan --bogus2: no such option",
+                                "11: reel plan --bogus3: no such option",
+                                "15: reel plan --bogus4: no such option",
+                                "19: reel plan --bogus5: no such option",
+                                "29: reel next --prose: no such option"])
+
+    def test_seeded_option_values_quoting_and_fence_labels(self):
+        text = "\n".join([
+            "Run `reel approve-plan --by robot` and `reel approve-plan --by=editor`.",      # 1: --by robot
+            "```bash title=run.sh",
+            "reel verify --record --verdict maybe",                                       # 3: bad value
+            "reel transcribe --model large-v3 --hum 55",                                    # 4: --hum is not transcribe's
+            "reel approve-plan --by <editor|delegated>",                                    # 5: placeholder: skipped
+            "reel approve-plan --by editor|delegated",                                      # 6: placeholder: skipped
+            "```",
+            "```shell-session",
+            "$ reel frobnicate",                                                           # 9: no such command
+            "```",
+            "```batch",
+            "reel frobnicate2",                                                           # 12: no such command
+            "```",
+            "& '${CLAUDE_PLUGIN_ROOT}/bin/reel.cmd' plan --bogus",                          # 14: single-quoted path
+            "& '${CLAUDE_PLUGIN_ROOT}/bin/reel' plan --bogus2",                             # 15
+        ])
+        msgs = [f"{n}: {m}" for n, m in reel_issues_in(text, cli())]
+        self.assertEqual(msgs, ["1: reel approve-plan --by robot: not one of delegated, editor",
+                                "3: reel verify --verdict maybe: not one of fail, pass",
+                                "4: reel transcribe --hum: no such option",
+                                "9: reel frobnicate: no such command",
+                                "12: reel frobnicate2: no such command",
+                                "14: reel plan --bogus: no such option",
+                                "15: reel plan --bogus2: no such option"])
 
 
 class TestAllowList(YamlRequired):
