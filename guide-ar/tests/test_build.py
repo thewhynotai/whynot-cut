@@ -572,6 +572,30 @@ class ChapterTests(unittest.TestCase):
         self.assertGreater(checked, 0, "no chapter links found")
         self.assertEqual(wrong, [])
 
+    TEAM_NOTE = re.compile(r"المرحلة\s*\d|\b6B\b|\bH\d{1,2}\b|حسب الإضافة|الإضافة [A-F]\b|factcheck|reader2")
+
+    def test_todo_visible_text_has_no_team_notes(self):
+        """Ruling R2-9: the visible text of a .todo box is for the reader. Team notes (phase numbers, 6B, H-items,
+        «حسب الإضافة A», review file names) live only in an HTML comment inside the box that starts «فريق:»."""
+        paths = sorted((GUIDE / "chapters").glob("*.html"))
+        self.assertTrue(paths, "no chapters")
+        problems = []
+        boxes = 0
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            for m in re.finditer(r'<aside\b[^>]*\bclass="todo"[^>]*>(.*?)</aside>', text, flags=re.S):
+                boxes += 1
+                inner = m.group(1)
+                for comment in re.findall(r"<!--(.*?)-->", inner, flags=re.S):
+                    if not comment.strip().startswith("فريق:"):
+                        problems.append(f"{path.name}: comment in a .todo box does not start «فريق:»: {comment.strip()[:40]}")
+                visible = build.plain_text(re.sub(r"<!--.*?-->", "", inner, flags=re.S))
+                hit = self.TEAM_NOTE.search(visible)
+                if hit:
+                    problems.append(f"{path.name}: team note «{hit.group(0)}» in visible .todo text: {visible.strip()[:60]}")
+        self.assertGreater(boxes, 0, "no .todo boxes found")
+        self.assertEqual(problems, [])
+
 
 @unittest.skipUnless(_pdf_ready(), "no guide-ar/.build/test.pdf yet (run build.py) or pypdf missing")
 class PdfTests(unittest.TestCase):

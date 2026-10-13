@@ -242,6 +242,13 @@ h4 { font-size: 11.5pt; font-weight: 600; margin: 0.7em 0 0.3em; padding-top: 0.
 h2, h3, h4, .lead-in { break-after: avoid; page-break-after: avoid; }
 p:has(+ .cmd, + ol, + ul, + table, + figure.shot) { break-after: avoid; page-break-after: avoid; }
 .lead-in + * { break-before: avoid; page-break-before: avoid; }
+/* a 3.0 box closes the section it belongs to: never let it open a page alone.
+   Only splittable blocks (text, lists) are kept with it, so the last lines or the
+   last list item move along; a figure or table before a box may still break. */
+p:has(+ .todo), ul:has(+ .todo), ol:has(+ .todo) { break-after: avoid; page-break-after: avoid; }
+/* …and a short paragraph before a box may split 2+2, so its last lines go along
+   instead of the whole paragraph leaving a hole at the bottom of the page */
+p:has(+ .todo) { orphans: 2; widows: 2; }
 
 /* inline commands, paths, file names: <bdi dir="ltr"><code>…</code></bdi> */
 bdi { unicode-bidi: isolate; }
@@ -437,6 +444,9 @@ ol.steps > li::before {
    path (and copying from the PDF never gets a break inside a token). The lint
    rejects a single token too long for one line. */
 .cmd .nw { white-space: nowrap; }
+/* a command that must never wrap at all (a line break pasted into PowerShell would
+   run the first half on its own): smaller type, one line */
+.cmd.one-line code { font-size: 8.5pt; white-space: nowrap; }
 /* A box with a command Claude runs itself (ruling R2-4): a small muted caption on its
    own right-aligned Arabic line above the command, outside the <code>. */
 .cmd[data-who="claude"]::before {
@@ -465,6 +475,8 @@ table {
 }
 thead { display: table-header-group; }
 tr { break-inside: avoid; page-break-inside: avoid; }
+/* the last row never moves to a new page alone (under a repeated header) */
+tbody tr:last-child:not(:first-child) { break-before: avoid; page-break-before: avoid; }
 th {
   background: var(--heading);
   color: #FFFFFF;

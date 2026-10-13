@@ -28,9 +28,24 @@ State: **written** = describes today's verified behaviour (may still carry a few
 | 18 | `18-update-uninstall.html` | التحديث وإلغاء التثبيت | `skills/setup`; `whynot-cut/README.md`, `CHANGELOG.md` (Migration); Addenda D, E, F; `installer/` (`uninstall.py`) | written (today first) + 3.0-spec | 7 (round 2, task 7B: banner, today section, one-liner / Setup-app split) |
 | 19 | `19-glossary.html` | قاموس المصطلحات والتواصل | all skills; `skills/help`; `guide-ar/STYLE.md` terms table | written | 6 |
 
+## PDF pages (draft build, round 2, task 8a)
+
+119 pages: cover p. 1, table of contents pp. 2–6, back cover p. 119. Every page was rendered and viewed in task 8a; links, TOC numbers and the 19-chapter outline were checked against the PDF. `build.py --release` still reports 129 problems (75 `.todo` boxes, 54 screenshot slots without an image, 0 draft phrases) — expected until the phases in the table above verify the 3.0 behaviour and the screenshots are taken.
+
+| # | Pages | | # | Pages | | # | Pages |
+|---|---|---|---|---|---|---|---|
+| 1 | 7–11 | | 8 | 56–60 | | 15 | 98–99 |
+| 2 | 12–24 | | 9 | 61–65 | | 16 | 100–103 |
+| 3 | 25–28 | | 10 | 66–69 | | 17 | 104–108 |
+| 4 | 29–34 | | 11 | 70–77 | | 18 | 109–112 |
+| 5 | 35–38 | | 12 | 78–84 | | 19 | 113–118 |
+| 6 | 39–45 | | 13 | 85–93 | | | |
+| 7 | 46–55 | | 14 | 94–97 | | | |
+
 Notes
 
 - The three tool chapters (11–13) sit after «التعديلات» (10) so the editor learns the main pipeline first, then the three Premiere tools, then autopilot, Magnific, preferences, troubleshooting, update, glossary.
 - Chapters 14–19 were numbered 11–16 before round 2 (renumbered in round 2, task 1). The internal-gate-name lint allows those names only in the glossary, `#ch19`.
 - Everything in `STYLE.md` binds every chapter. The truth rule applies: spec-bound 3.0 behaviour is written in the present tense only inside a section with a `.todo data-phase="N"` box.
 - Round 2, task 7A (ruling R2-9): every `.todo` box prints «في الإصدار 3.0 — لم يُتحقَّق منه بعد» and keeps one plain reader sentence; team notes sit in `<!-- فريق: … -->` inside the box. Chapters 7, 11, 12, 13 and 15 open with a `.tip` banner saying what works today. The Needs-you label is «مطلوب منك» everywhere (ruling R2-8). Chapters 2, 3, 17, 18 got the same treatment in task 7B: banners in 2, 3 and 18; today's sections first in 2 and 18; the 3.0 public install is the one-line installer (Addendum F), the «WhyNot Cut Setup» app (Addendum E) is for internal builds only.
+- Round 2, task 8a (final QC): chapters 11 and 12 no longer name an installer program (the tools are installed with the panel when WhyNot Cut is installed, as in 7 and 13); layout fixes only elsewhere (a `.todo` box is kept with the paragraph or list before it, a table's last row never moves alone, the uninstall line of chapter 18 prints on one line, three screenshot slots moved so no page is half empty). New test `test_todo_visible_text_has_no_team_notes` (review M-11).
