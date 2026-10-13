@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="loading,normal,focus,error,offline,stale,success,long">
+<title>P-01 First-run checklist</title>
+<link rel="stylesheet" href="../mockup.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../mockup.js"></script>
+</head>
+<body>
+<script>
+/* P-01 First-run checklist (screen-inventory.md §3 P-01; E-D3 round 1 fixes).
+   - The engine is "the WhyNot Cut app" and is explained once, on its row; Claude is introduced once, on its row.
+   - A row's fix button sits under its sentence (start-aligned), with a one-line hint for when the fix fails again.
+   - Primary: the first red row's fix; when the app, the link and Claude are green, "Set up my first client".
+   - Tabs are hidden while the checklist shows (G4). Empty is not applicable (the checklist is the empty state).
+   - focus: keyboard focus on the primary. long: a long client name and a 99+ badge (header test at 300 px). */
+(function () {
+  var t = M.t, D = M.D;
+
+  function row(kind, label, o) {
+    o = o || {};
+    return '<div class="m-check">' + M.status(kind) +
+      '<div class="m-check-text"><div class="t-label">' + label + '</div>' +
+      (o.explain ? '<div class="t-meta tx-muted">' + o.explain + '</div>' : '') +
+      '<div class="t-meta ' + (kind === "error" ? "tx-text" : "tx-muted") + (o.explain ? " mt-1" : "") + '">' + o.detail + '</div>' +
+      (o.act ? '<div class="m-row mt-2">' + o.act + '</div>' : '') +
+      (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + '</div>' : '') +
+      (o.under || '') + '</div></div>';
+  }
+  function engineRow(kind, detail, o) {
+    o = o || {}; o.explain = t("checklist.engine.explain"); o.detail = detail;
+    return row(kind, t("checklist.engine"), o);
+  }
+  function claudeRow(kind, detail) {
+    return row(kind, t("checklist.claude"), { explain: t("checklist.claude.explain"), detail: detail });
+  }
+  function clientPrimary(focus) {
+    return '<div class="m-col mt-3">' + M.btn(t("firstrun.client"), { kind: "primary", block: true, icon: "folder-input", focus: focus }) +
+      '<div class="t-meta tx-muted mt-2">' + t("firstrun.client_hint") + '</div></div>';
+  }
+  function intro(extra) {
+    return '<div class="t-title">' + t("firstrun.title") + '</div>' +
+      '<div class="t-body tx-muted mt-1">' + t("firstrun.sub") + '</div>' + (extra || '');
+  }
+  function report() {
+    return '<div class="m-row mt-3">' + M.btn(t("action.report"), { kind: "ghost", icon: "copy", flush: true }) + '</div>';
+  }
+  function allGreen(focus) {
+    return engineRow("ok", t("checklist.engine.ok")) +
+      row("ok", t("checklist.premiere"), { detail: t("checklist.premiere.ok") }) +
+      claudeRow("ok", t("checklist.claude.ok")) +
+      row("pending", t("checklist.clients"), { detail: t("checklist.clients.none"), under: clientPrimary(focus) });
+  }
+
+  var STATES = {
+    loading: function () {
+      return {
+        pills: { engine: "starting", claude: "unchecked", host: "checking" },
+        body: intro('<div class="m-row mt-4">' + M.status("busy") + '<div class="t-body ms-2">' + t("firstrun.starting") + '</div></div>') +
+          M.card(engineRow("pending", t("status.pending")) +
+            row("pending", t("checklist.premiere"), { detail: t("status.pending") }) +
+            claudeRow("pending", t("status.pending")) +
+            row("pending", t("checklist.clients"), { detail: t("status.pending") }), "m-card-flush mt-3")
+      };
+    },
+    normal: function () { return { body: intro() + M.card(allGreen(false), "m-card-flush mt-4") }; },
+    focus: function () { return { body: intro() + M.card(allGreen(true), "m-card-flush mt-4") }; },
+    error: function () {
+      return {
+        pills: { host: "unlinked" },
+        body: intro() + M.card(
+          engineRow("ok", t("checklist.engine.ok")) +
+          row("error", t("checklist.premiere"), { detail: t("link.off"),
+            act: M.btn(t("action.retry"), { kind: "primary", icon: "refresh-cw" }), hint: t("retry.hint") }) +
+          claudeRow("ok", t("checklist.claude.ok")) +
+          row("pending", t("checklist.clients"), { detail: t("firstrun.waiting_link") }), "m-card-flush mt-4") + report()
+      };
+    },
+    offline: function () {
+      return {
+        pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: intro() + M.card(
+          engineRow("error", t("engine.off"), { act: M.btn(t("action.start_app"), { kind: "primary", icon: "power" }), hint: t("engine.off.hint") }) +
+          row("pending", t("checklist.premiere"), { detail: t("firstrun.waiting_engine") }) +
+          claudeRow("pending", t("firstrun.waiting_engine")) +
+          row("pending", t("checklist.clients"), { detail: t("firstrun.waiting_engine") }), "m-card-flush mt-4") + report()
+      };
+    },
+    stale: function () {
+      return {
+        body: M.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw" } }) +
+          '<div class="mt-4"></div>' + intro() + M.card(allGreen(false), "m-card-flush mt-4")
+      };
+    },
+    success: function () {
+      return {
+        body: M.notice("ok", t("firstrun.ready")) + '<div class="mt-4"></div>' + intro() + M.card(
+          engineRow("ok", t("checklist.engine.ok")) +
+          row("ok", t("checklist.premiere"), { detail: t("checklist.premiere.ok") }) +
+          claudeRow("ok", t("checklist.claude.ok")) +
+          row("ok", t("checklist.clients"), { detail: t("checklist.clients.ok", { client: D.client }) }), "m-card-flush mt-4")
+      };
+    },
+    long: function () { var v = STATES.success(); return v; }
+  };
+
+  M.mount({
+    id: "P-01", name: "First-run checklist",
+    states: ["loading", "normal", "focus", "error", "offline", "stale", "success", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.noclient = true; v.needs = 0; v.tab = null;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

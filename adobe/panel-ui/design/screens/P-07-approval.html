@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,noname,flagged-unchecked,flagged-checked,focus,error,offline,stale,success-live,success-later,success-changes,long">
+<title>P-07 Approval</title>
+<link rel="stylesheet" href="../mockup.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../mockup.js"></script>
+</head>
+<body>
+<script>
+/* P-07 Approval, flagged lines, request changes (screen-inventory.md §3 P-07; E-D3 round 1 fixes). Edit tab.
+   - Approve lives in the pinned action bar ("Approving as …" + a 40 px Approve), above the log row.
+   - Flagged lines are shown in full, never cut; collapsing hides whole items. Each line says who confirms it (the
+     doctor for medical, the sheikh or the speaker for religious). The "I've checked these lines" box appears once every
+     line is shown, and Approve stays disabled until it is ticked.
+   - No plan fingerprint on screen; a changed plan shows a one-line "what changed".
+   - Timecodes and the step indicator are plain text in this release.
+   States: normal = lines collapsed, box not shown, Approve off; flagged-unchecked = all lines, box empty, Approve off;
+   flagged-checked = box ticked, Approve on; noname = name field in the bar; focus = keyboard focus on Approve;
+   long = long client, editor and item, 99+ badge. */
+(function () {
+  var t = M.t, D = M.D;
+  function item() { return M.html(M.ltr(D.item, "lat code")); }
+  var STEPS_APPROVE = ["done", "done", "wait", "pend", "pend", "pend", "pend"];
+
+  function heading() {
+    return M.steps(STEPS_APPROVE, 2, "warn") +
+      M.eyebrow(t("approval.summary"), "mt-5") +
+      '<div class="t-title mt-1">' + t("approval.title", { item: item() }) + '</div>';
+  }
+  function summary(o) {
+    o = o || {};
+    return M.card('<div class="t-body">' + t(o.text || "demo.summary") + '</div>' +
+      '<div class="m-row mt-3">' + M.btn(t("approval.preview"), { icon: "play", disabled: o.disabled }) + '</div>', "mt-3");
+  }
+  function flagRow(f) {
+    var kind = f.kind === "medical"
+      ? M.chip("neutral", t("approval.flagged.medical"), "stethoscope")
+      : M.chip("neutral", t("approval.flagged.religious"), "book-open");
+    return '<div class="m-flag"><div class="m-row">' + kind + '<span class="m-spacer"></span>' +
+      '<span class="t-mono tx-muted">' + M.mono(f.tc) + '</span></div>' +
+      '<div class="m-quote m-quote-ar mt-2" dir="rtl" lang="ar"><span class="ar-run">«' + M.esc(f.text) + '»</span></div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("approval.confirm." + f.kind) + '</div></div>';
+  }
+  /* mode: "collapsed" | "unchecked" | "checked" */
+  function flagged(mode, o) {
+    o = o || {};
+    var all = mode !== "collapsed";
+    var list = all ? D.flagged : D.flagged.slice(0, 2);
+    var foot = all
+      ? '<div class="m-col mt-2">' + M.checkbox(t("approval.checked"), mode === "checked") + '</div>' +
+        '<div class="m-row mt-2">' + M.btn(t("approval.show_less"), { kind: "ghost", icon: "chevron-up", flush: true }) + '</div>'
+      : '<div class="t-meta tx-muted mt-1">' + t("approval.show_hint", { n: D.flagged.length }) + '</div>' +
+        '<div class="m-row mt-1">' + M.btn(t("approval.show_all", { n: D.flagged.length }), { kind: "ghost", icon: "chevron-down", flush: true }) + '</div>';
+    return M.card(
+      '<div class="m-row">' + M.status("warn") + '<div class="t-label ms-2 m-grow">' + t("approval.flagged") + '</div>' +
+        M.chip("warn", M.ltr(String(D.flagged.length))) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("approval.flagged.hint") + '</div>' +
+      '<div class="m-col mt-1">' + list.map(flagRow).join('<span class="m-divider"></span>') + '</div>' +
+      '<span class="m-divider"></span>' + foot, "mt-4");
+  }
+  function changesCard(o) {
+    o = o || {};
+    return M.card('<div class="t-label">' + t("approval.changes.label") + '</div>' +
+      '<div class="mt-2">' + M.input(t("approval.changes.placeholder"), { textarea: true }) + '</div>' +
+      '<div class="m-row mt-3">' + M.btn(t("approval.changes"), { icon: "message-square", disabled: o.disabled }) + '</div>', "mt-4");
+  }
+  /* the pinned action bar. why: "ok" | "unticked" | "noname" | "off" */
+  function bar(why, focus) {
+    var on = why === "ok";
+    var top = why === "noname"
+      ? '<div class="t-label">' + t("approval.editor") + '</div><div class="mt-2">' + M.input(t("approval.editor.placeholder"), { focus: true }) + '</div>'
+      : '<div class="m-row">' + M.status("info", 12) + '<div class="t-meta tx-muted ms-1 m-grow">' + t("approval.as", { name: D.editor }) + '</div></div>';
+    var hint = why === "unticked" ? t("approval.tick_first") : why === "noname" ? t("approval.need_name") : "";
+    return top + '<div class="m-col mt-2">' +
+      M.btn(t("approval.approve"), { kind: "primary", block: true, icon: "circle-check-big", disabled: !on, focus: focus }) + '</div>' +
+      (hint ? '<div class="t-meta tx-muted mt-2">' + hint + '</div>' : '');
+  }
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+  function doneRecord() {
+    return M.card('<div class="m-row">' + M.status("ok") + '<div class="t-label ms-2 m-grow">' +
+      t("approval.done_by", { name: D.editor, time: M.html(M.mono(D.time)) }) + '</div></div>', "mt-4");
+  }
+
+  var STATES = {
+    empty: function () {
+      return {
+        needs: 0,
+        body: M.steps(["pend", "pend", "pend", "pend", "pend", "pend", "pend"], 0, "pending") +
+          '<div class="mt-4"></div>' +
+          M.empty({ icon: "circle-check-big", title: t("approval.empty"), text: t("approval.empty.text"),
+            btn: M.btn(t("home.edit"), { kind: "primary", icon: "clapperboard" }) })
+      };
+    },
+    loading: function () {
+      return {
+        body: heading() +
+          M.card(M.skel(95) + M.skel(90) + M.skel(55) +
+            '<div class="m-row mt-3"><span class="m-skel-block" style="width:132px;height:32px"></span></div>', "mt-3") +
+          M.card(M.skel(50) + M.skel(80, 16) + '<div class="mt-3"></div>' + M.skel(30) + M.skel(85) + '<div class="mt-3"></div>' + M.skel(30) + M.skel(70), "mt-4"),
+        bar: '<div class="m-col">' + M.skel(45, 16) + '<div class="mt-2"></div><span class="m-skel-block" style="height:40px"></span></div>'
+      };
+    },
+    normal: function () { return { body: heading() + summary() + flagged("collapsed") + changesCard(), bar: bar("unticked") }; },
+    "flagged-unchecked": function () { return { body: heading() + summary() + flagged("unchecked") + changesCard(), bar: bar("unticked") }; },
+    "flagged-checked": function () { return { body: heading() + summary() + flagged("checked") + changesCard(), bar: bar("ok") }; },
+    noname: function () { return { body: heading() + summary() + flagged("checked") + changesCard(), bar: bar("noname") }; },
+    focus: function () { return { body: heading() + summary() + flagged("checked") + changesCard(), bar: bar("ok", true) }; },
+    error: function () {
+      return {
+        body: slot(M.notice("error", t("approval.failed"), { sub: t("approval.failed.hint"), btn: { label: t("action.retry"), icon: "refresh-cw" } })) +
+          heading() + summary() + flagged("checked") + changesCard(),
+        bar: bar("ok")
+      };
+    },
+    offline: function () {
+      return {
+        pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(M.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
+          heading() + summary({ disabled: true }) + flagged("checked") + changesCard({ disabled: true }),
+        bar: bar("off")
+      };
+    },
+    stale: function () {
+      return {
+        body: slot(M.notice("info", t("notice.plan_changed"), { sub: t("demo.diff") })) +
+          heading() + summary({ text: "demo.summary2" }) + flagged("unchecked") + changesCard(),
+        bar: bar("unticked")
+      };
+    },
+    "success-live": function () {
+      return {
+        needs: 0,
+        body: slot(M.notice("ok", t("approval.done_live"))) +
+          M.steps(["done", "done", "done", "run", "pend", "pend", "pend"], 3, "busy") + doneRecord() + summary()
+      };
+    },
+    "success-later": function () {
+      return {
+        needs: 0,
+        body: M.notice("ok", t("approval.done"), { sub: t("approval.claude_later") }) +
+          '<div class="m-col mt-3">' + M.btn(t("action.open_claude"), { kind: "primary", block: true, icon: "external-link" }) + '</div>' +
+          '<div class="mt-4"></div>' +
+          M.steps(["done", "done", "done", "pend", "pend", "pend", "pend"], 3, "pending") + doneRecord() + summary()
+      };
+    },
+    "success-changes": function () {
+      return {
+        needs: 0,
+        body: slot(M.notice("ok", t("notice.changes"), { sub: t("approval.changes_next") })) +
+          M.steps(["done", "run", "pend", "pend", "pend", "pend", "pend"], 1, "busy") +
+          M.card('<div class="m-row"><div class="t-label m-grow">' + t("approval.changes.label") + '</div>' +
+            M.chip("ok", t("approval.sent"), "circle-check") + '</div>' +
+            '<div class="m-inset mt-2"><div class="t-body">' + t("demo.changes") + '</div></div>', "mt-4")
+      };
+    },
+    long: function () { return { body: heading() + summary() + flagged("checked") + changesCard(), bar: bar("ok") }; }
+  };
+
+  M.mount({
+    id: "P-07", name: "Approval",
+    states: ["empty", "loading", "normal", "noname", "flagged-unchecked", "flagged-checked", "focus", "error", "offline", "stale",
+      "success-live", "success-later", "success-changes", "long"],
+    defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "edit";
+      if (v.needs === undefined) v.needs = 1;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

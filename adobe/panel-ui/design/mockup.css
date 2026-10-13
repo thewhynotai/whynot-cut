@@ -1,0 +1,398 @@
+/* WhyNot Cut 3.0 E-D2 high-fidelity mockups: the shared foundation every screen mockup loads.
+   Binding source: docs/design/direction.md (option B "Studio pro, branded", §3 to §14) and docs/design/screen-inventory.md.
+   Built inside the measured UXP limits so the product can be built to match it:
+   - flexbox only, every element has an explicit display;
+   - controls are <div role="button">, never the native element;
+   - SVG colour only through CSS fill (.ink-* classes), never an attribute;
+   - no shadows, no blur effects, no opacity for disabled (explicit colour tokens instead);
+   - spacing by PHYSICAL margins only (left/right, swapped under .m-rtl); no flex spacing property;
+   - no attribute selectors (state is a class: .m-btn-disabled, .m-tab-on ...);
+   - radius 8 on controls, 16 on cards, 999 on <span> chips and the badge only.
+   @font-face is used here because the installer installs these families per user; every stack keeps its system
+   fallbacks (tokens.css), and the layout is drawn for Syne, the widest face. Only Syne Bold is vendored, so Syne 600
+   renders with the Bold file in these mockups. */
+
+@import url("../../../brand/tokens.css");
+
+@font-face { font-family: "Syne"; src: url("../fonts/syne/Syne-Bold.ttf") format("truetype"); font-weight: 600 800; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("../fonts/inter/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("../fonts/inter/Inter-SemiBold.ttf") format("truetype"); font-weight: 600; font-style: normal; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("../fonts/ibmplexsansarabic/IBMPlexSansArabic-Light.ttf") format("truetype"); font-weight: 300; font-style: normal; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("../fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("../fonts/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf") format("truetype"); font-weight: 600 700; font-style: normal; }
+@font-face { font-family: "IBM Plex Mono"; src: url("../fonts/ibmplexmono/IBMPlexMono-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+
+/* ==== PROPOSED TOKENS (direction §15) ====================================================================
+   Additive and NOT yet in brand/tokens.css, which stays the one place that defines --twn-* tokens
+   (adobe/panel-ui/test/tokens.test.ts). Here each proposed token carries the mockup prefix --mk-*; the name it is
+   proposed under is the same with --twn-*:  --mk-<name>  ->  --twn-<name>  (e.g. --mk-space-1 -> --twn-space-1,
+   --mk-control -> --twn-control, --mk-type-ar-body -> --twn-type-ar-body, --mk-card-solid -> --twn-card-solid).
+   Values verbatim from direction.md §15 (plus --mk-card-solid from E-D3 r1 designer #3). When the mockups are
+   approved the build worker adds them to brand/tokens.css under the --twn-* names and renames the uses. */
+:root {
+  --mk-space-1:4px; --mk-space-2:8px; --mk-space-3:12px; --mk-space-4:16px; --mk-space-5:24px; --mk-space-6:32px; --mk-space-7:48px;
+  --mk-radius-bar:2px; --mk-radius-s:4px;
+  --mk-h-control:32px; --mk-h-control-lg:40px; --mk-h-row:40px; --mk-h-verb:56px; --mk-h-chip:24px; --mk-h-tabs:36px;
+  --mk-control:#242424; --mk-control-hover:#2E2E2E; --mk-control-pressed:#383838;
+  --mk-control-disabled:#1A1A1A; --mk-text-disabled:#6E6E6E;
+  --mk-primary-pressed:#4800D8; --mk-on-primary-muted:#E8E0FF; --mk-danger-hover:#FF7A7A;
+  --mk-divider:rgba(255,255,255,.08); --mk-border-input:#7A7A7A;
+  --mk-focus-border:#9D6BFF; --mk-focus-border-strong:#FFFFFF; --mk-focus-width:2px;
+  --mk-ok-tint:#06150E; --mk-warn-tint:#1A1203; --mk-error-tint:#1A0909; --mk-info-tint:#100B1A; --mk-accent-tint:#160910;
+  --mk-ok-line:#154B31; --mk-warn-line:#593E0B; --mk-error-line:#592020; --mk-info-line:#372559;
+  --mk-skeleton:#242424; --mk-skeleton-shine:#2E2E2E;
+  --mk-gradient-rtl:linear-gradient(270deg,#D95C9B,#5400FB);
+  --mk-dur-fast:150ms; --mk-dur-base:200ms; --mk-dur-slow:250ms; --mk-dur-shimmer:1200ms; --mk-ease:cubic-bezier(.2,0,0,1);
+  --mk-type-display:22px/28px; --mk-type-title:17px/24px; --mk-type-verb:15px/20px; --mk-type-label:13px/20px;
+  --mk-type-body:13px/20px; --mk-type-meta:12px/16px; --mk-type-caption:11px/16px; --mk-type-eyebrow:11px/16px; --mk-type-mono:12px/16px;
+  --mk-type-ar-display:24px/36px; --mk-type-ar-title:18px/28px; --mk-type-ar-verb:16px/24px; --mk-type-ar-label:14px/24px;
+  --mk-type-ar-body:14px/24px; --mk-type-ar-meta:13px/20px; --mk-type-ar-caption:12px/20px; --mk-type-ar-eyebrow:12px/20px;
+  --mk-tracking-eyebrow:.08em;
+  /* proposed (E-D3 r1 designer #3): the solid equivalent of glass over black, for cards that act (tool cards), so a
+     2 px rest border can match the fill exactly */
+  --mk-card-solid:#141414;
+}
+/* ==== end of proposed tokens ============================================================================ */
+
+/* ---- page (outside the panel; not part of the product) ---- */
+html, body { margin: 0; padding: 0; background: #2B2B2B; }
+body { display: flex; flex-direction: column; align-items: flex-start; direction: ltr; } /* the page stays LTR; the panel carries dir */
+html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel: cropped away by _build/render_all.py */
+
+/* ---- panel root ---- */
+.m-panel, .m-panel * { box-sizing: border-box; }
+.m-panel {
+  display: flex; flex-direction: column; flex: 0 0 auto;
+  width: 360px; min-height: 640px;
+  background: var(--twn-bg); color: var(--twn-text);
+  font: 400 var(--mk-type-body) var(--twn-font-ui);
+  text-align: left;
+}
+.m-panel.m-rtl { direction: rtl; text-align: right; font: 400 var(--mk-type-ar-body) var(--twn-font-ar); }
+.m-panel bdi { display: inline; }
+.m-col { display: flex; flex-direction: column; }
+.m-row { display: flex; flex-direction: row; align-items: center; }
+.m-row-top { display: flex; flex-direction: row; align-items: flex-start; }
+.m-grow { flex: 1 1 auto; min-width: 0; }
+.m-spacer { display: block; flex: 1 1 auto; min-width: 8px; }
+.m-block { display: block; }
+.m-gut { padding-left: 16px; padding-right: 16px; }
+.m-w300 .m-gut { padding-left: 12px; padding-right: 12px; }
+
+/* spacing helpers: vertical margins, and START / END margins that are physical and swap under .m-rtl */
+.mt-1 { margin-top: 4px; } .mt-2 { margin-top: 8px; } .mt-3 { margin-top: 12px; } .mt-4 { margin-top: 16px; } .mt-5 { margin-top: 24px; } .mt-6 { margin-top: 32px; }
+.ms-1 { margin-left: 4px; } .ms-2 { margin-left: 8px; } .ms-3 { margin-left: 12px; } .ms-4 { margin-left: 16px; }
+.me-1 { margin-right: 4px; } .me-2 { margin-right: 8px; } .me-3 { margin-right: 12px; }
+.m-rtl .ms-1 { margin-left: 0; margin-right: 4px; } .m-rtl .ms-2 { margin-left: 0; margin-right: 8px; }
+.m-rtl .ms-3 { margin-left: 0; margin-right: 12px; } .m-rtl .ms-4 { margin-left: 0; margin-right: 16px; }
+.m-rtl .me-1 { margin-right: 0; margin-left: 4px; } .m-rtl .me-2 { margin-right: 0; margin-left: 8px; } .m-rtl .me-3 { margin-right: 0; margin-left: 12px; }
+
+/* ---- type roles (direction §4): Latin, then the Arabic override ---- */
+.t-display, .t-title, .t-verb, .t-label, .t-body, .t-meta, .t-caption, .t-eyebrow, .t-mono { display: block; }
+.t-display { font: 700 var(--mk-type-display) var(--twn-font-display); }
+.t-title { font: 600 var(--mk-type-title) var(--twn-font-display); }
+.t-verb { font: 600 var(--mk-type-verb) var(--twn-font-display); }
+.t-label { font: 600 var(--mk-type-label) var(--twn-font-ui); }
+.t-body { font: 400 var(--mk-type-body) var(--twn-font-ui); }
+.t-meta { font: 400 var(--mk-type-meta) var(--twn-font-ui); }
+.t-caption { font: 600 var(--mk-type-caption) var(--twn-font-ui); }
+.t-eyebrow { font: 600 var(--mk-type-eyebrow) var(--twn-font-display); letter-spacing: var(--mk-tracking-eyebrow); text-transform: uppercase; color: var(--twn-accent); }
+.t-mono, .m-panel .mono { font: 400 var(--mk-type-mono) var(--twn-font-mono); font-variant-numeric: tabular-nums; direction: ltr; }
+.m-rtl .t-display { font: 600 var(--mk-type-ar-display) var(--twn-font-ar); }
+.m-rtl .t-title { font: 600 var(--mk-type-ar-title) var(--twn-font-ar); }
+.m-rtl .t-verb { font: 600 var(--mk-type-ar-verb) var(--twn-font-ar); }
+.m-rtl .t-label { font: 600 var(--mk-type-ar-label) var(--twn-font-ar); }
+.m-rtl .t-body { font: 400 var(--mk-type-ar-body) var(--twn-font-ar); }
+.m-rtl .t-meta { font: 400 var(--mk-type-ar-meta) var(--twn-font-ar); }
+.m-rtl .t-caption { font: 600 var(--mk-type-ar-caption) var(--twn-font-ar); }
+.m-rtl .t-eyebrow { font: 600 var(--mk-type-ar-eyebrow) var(--twn-font-ar); letter-spacing: 0; text-transform: none; }
+/* a Latin run inside Arabic keeps the Latin role font at the Arabic size (<bdi dir="ltr" class="lat">) */
+.m-rtl .lat { font-family: var(--twn-font-ui); }
+/* E-D3 r1 #13: Latin inside Arabic titles uses Inter 600, not Syne (Syne overpowered the Arabic) */
+.m-rtl .t-display .lat, .m-rtl .t-title .lat, .m-rtl .t-verb .lat, .m-rtl .t-eyebrow .lat { font-family: var(--twn-font-ui); font-weight: 600; }
+.m-rtl .t-label .lat, .m-rtl .t-caption .lat { font-weight: 600; }
+.m-rtl .mono, .m-rtl .t-mono { font-family: var(--twn-font-mono); }
+/* an Arabic run inside the English UI (transcript lines as said) */
+.m-panel .ar-run { font-family: var(--twn-font-ar); font-size: 14px; line-height: 24px; }
+.tx-muted { color: var(--twn-text-muted); }
+.tx-text { color: var(--twn-text); }
+.tx-ok { color: var(--twn-ok); } .tx-warn { color: var(--twn-warn); } .tx-error { color: var(--twn-error); }
+.tx-link { color: var(--twn-primary-text); }
+.tx-disabled { color: var(--mk-text-disabled); }
+.tx-center { text-align: center; }
+.nowrap { white-space: nowrap; }
+
+/* ---- icons: Lucide outlined to fills (icons.js); colour by fill class only ---- */
+.m-ico { display: block; flex: 0 0 auto; }
+.m-ico path { fill-rule: evenodd; }
+.m-ico-12 { width: 12px; height: 12px; }
+.m-ico-16 { width: 16px; height: 16px; }
+.m-ico-20 { width: 20px; height: 20px; }
+.ink-text { fill: var(--twn-text); }
+.ink-muted { fill: var(--twn-text-muted); }
+.ink-ok { fill: var(--twn-ok); }
+.ink-warn { fill: var(--twn-warn); }
+.ink-error { fill: var(--twn-error); }
+.ink-info { fill: var(--twn-primary-text); }
+.ink-accent { fill: var(--twn-accent); }
+.ink-on-primary { fill: var(--twn-on-primary); }
+.ink-on-error { fill: var(--twn-on-error); }
+.ink-disabled { fill: var(--mk-text-disabled); }
+.ink-on-accent { fill: var(--twn-on-accent); }
+.ink-on-light { fill: var(--twn-bg); }
+.m-spin { animation: m-spin 900ms linear infinite; }
+@keyframes m-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* ---- header (G1, G2, G3) ---- */
+.m-hdr { display: flex; flex-direction: column; flex: 0 0 auto; padding-bottom: 8px; }
+.m-hdr-r1 { display: flex; flex-direction: row; align-items: center; height: 40px; }
+.m-mono { display: block; flex: 0 0 20px; width: 20px; height: 20px; }
+.m-wordmark { display: block; flex: 0 0 auto; white-space: nowrap; font: 700 15px/20px var(--twn-font-display); letter-spacing: .01em; }
+.m-hdr-r2 { display: flex; flex-direction: row; align-items: center; height: 20px; }
+/* row 3 holds the pills at every width; it may wrap to a second line when a pill fails (names always shown) */
+.m-hdr-r3 { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
+.m-ctx { display: block; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-hairline { display: block; flex: 0 0 2px; height: 2px; background: var(--twn-gradient); } /* never mirrors (brand mark) */
+
+.m-badge-hit {
+  display: flex; flex-direction: row; align-items: center; justify-content: center;
+  height: 32px; padding: 0 2px; border: 2px solid transparent; border-radius: 8px; cursor: pointer;
+}
+.m-badge {
+  display: flex; flex-direction: row; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px;
+  background: var(--twn-accent); color: var(--twn-on-accent); white-space: nowrap;
+  font: 600 var(--mk-type-caption) var(--twn-font-ui);
+}
+.m-rtl .m-badge { font: 600 12px/20px var(--twn-font-ar); }
+.m-badge-count { display: block; }
+.m-badge-solo { min-width: 20px; padding: 0 4px; justify-content: center; }
+.m-badge .m-ico { margin-left: 4px; }
+.m-rtl .m-badge .m-ico { margin-left: 0; margin-right: 4px; }
+
+.m-lang { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; height: 32px; background: var(--mk-control); border-radius: 8px; }
+.m-seg {
+  display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border: 2px solid var(--mk-control); border-radius: 8px; background: var(--mk-control); color: var(--twn-text-muted);
+  font: 600 12px/16px var(--twn-font-ui); cursor: pointer;
+  transition: background-color var(--mk-dur-fast) var(--mk-ease), border-color var(--mk-dur-fast) var(--mk-ease);
+}
+.m-seg-ar { font: 600 15px/20px var(--twn-font-ar); }
+/* E-D3 r1 #1: the selected language is #383838, so the screen keeps one violet fill */
+.m-seg-on { background: var(--mk-control-pressed); border-color: var(--mk-control-pressed); color: var(--twn-text); }
+
+.m-pills { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; flex: 1 1 auto; min-width: 0; }
+.m-pill { display: flex; flex-direction: row; align-items: center; height: 20px; flex: 0 0 auto; white-space: nowrap; margin: 4px 12px 0 0; }
+.m-rtl .m-pill { margin: 4px 0 0 12px; }
+.m-pill-txt { display: block; margin-left: 4px; font: 400 var(--mk-type-caption) var(--twn-font-ui); color: var(--twn-text); }
+.m-rtl .m-pill-txt { margin-left: 0; margin-right: 4px; font: 400 var(--mk-type-ar-caption) var(--twn-font-ar); }
+.m-pill-key { color: var(--twn-text-muted); }
+
+/* ---- tabs (G4) ---- */
+.m-tabs { display: flex; flex-direction: row; flex: 0 0 auto; height: 36px; border-bottom: 1px solid var(--mk-divider); }
+.m-tab { display: flex;
+  display: flex; flex: 1 1 0; flex-direction: row; align-items: center; justify-content: center; min-width: 0;
+  border: 2px solid transparent; color: var(--twn-text-muted); cursor: pointer;
+  font: 600 var(--mk-type-label) var(--twn-font-ui);
+  transition: color var(--mk-dur-base) var(--mk-ease), border-color var(--mk-dur-base) var(--mk-ease);
+}
+.m-rtl .m-tab { font: 600 var(--mk-type-ar-label) var(--twn-font-ar); }
+.m-tab-on { color: var(--twn-text); border-bottom-color: var(--twn-accent); } /* same weight; colour and underline only */
+.m-tab-count {
+  display: flex; align-items: center; justify-content: center; height: 16px; min-width: 16px; padding: 0 4px; margin-left: 4px;
+  border-radius: 999px; background: var(--twn-accent); color: var(--twn-on-accent); font: 600 11px/16px var(--twn-font-ui);
+}
+.m-rtl .m-tab-count { margin-left: 0; margin-right: 4px; }
+
+/* ---- scroll area, log row, footer (G7, G8) ---- */
+.m-scroll { display: flex; flex-direction: column; flex: 1 1 auto; padding-top: 16px; padding-bottom: 24px; }
+.m-divider { display: block; flex: 0 0 1px; height: 1px; background: var(--mk-divider); }
+.m-logwrap { display: flex; flex-direction: column; flex: 0 0 auto; }
+.m-logrow { display: flex; flex-direction: row; align-items: center; height: 32px; padding: 0 2px; border: 2px solid transparent; border-radius: 8px; color: var(--twn-text-muted); cursor: pointer; }
+.m-footer { display: flex; flex-direction: row; align-items: center; justify-content: center; flex: 0 0 32px; height: 32px; }
+.m-footer-txt { display: block; direction: ltr; font: 400 var(--mk-type-caption) var(--twn-font-ui); color: var(--twn-text-muted); }
+
+/* ---- card ---- */
+/* paddings count the border: 1 px border + 15 px = 16 (11 + 1 = 12 at 300 px) */
+.m-card { display: flex; flex-direction: column; background: var(--twn-glass); border: 1px solid var(--twn-border); border-radius: 16px; padding: 15px; }
+.m-w300 .m-card { padding: 11px; }
+.m-card-flush { padding-top: 3px; padding-bottom: 3px; }
+.m-w300 .m-card-flush { padding-top: 3px; padding-bottom: 3px; }
+.m-card-act { cursor: pointer; transition: border-color var(--mk-dur-fast) var(--mk-ease); }
+.m-inset { display: flex; flex-direction: column; background: var(--twn-frame-bg); border-radius: 8px; padding: 8px 12px; }
+
+/* ---- buttons (direction §8, §12) ---- */
+.m-btn {
+  display: flex; flex-direction: row; align-items: center; justify-content: center; flex: 0 0 auto;
+  height: 32px; padding: 0 10px; border: 2px solid var(--mk-control); border-radius: 8px;
+  background: var(--mk-control); color: var(--twn-text); white-space: nowrap; cursor: pointer;
+  font: 600 var(--mk-type-label) var(--twn-font-ui);
+  transition: background-color var(--mk-dur-fast) var(--mk-ease), border-color var(--mk-dur-fast) var(--mk-ease), color var(--mk-dur-fast) var(--mk-ease);
+}
+.m-rtl .m-btn { font: 600 var(--mk-type-ar-label) var(--twn-font-ar); }
+.m-btn .m-ico { margin-right: 8px; fill: var(--twn-text); }
+.m-rtl .m-btn .m-ico { margin-right: 0; margin-left: 8px; }
+.m-btn-block { height: 40px; padding: 0 14px; align-self: stretch; }
+/* E-D3 r1 #7: a start-aligned ghost button lines its label up with the text above (padding 10 + border 2) */
+.m-btn-flush { margin-left: -12px; }
+.m-rtl .m-btn-flush { margin-left: 0; margin-right: -12px; }
+.m-btn-start { align-self: flex-start; }
+.m-btn-primary { background: var(--twn-primary); border-color: var(--twn-primary); color: var(--twn-on-primary); }
+.m-btn-primary .m-ico { fill: var(--twn-on-primary); }
+.m-btn-secondary { background: var(--mk-control); border-color: var(--mk-control); }
+.m-btn-ghost { background: transparent; border-color: transparent; color: var(--twn-text-muted); }
+.m-btn-ghost .m-ico { fill: var(--twn-text-muted); }
+.m-btn-danger { background: var(--twn-error); border-color: var(--twn-error); color: var(--twn-on-error); }
+.m-btn-danger .m-ico { fill: var(--twn-on-error); }
+.m-btn-disabled, .m-btn-primary.m-btn-disabled { background: var(--mk-control-disabled); border-color: var(--mk-control-disabled); color: var(--mk-text-disabled); cursor: default; }
+.m-btn-disabled .m-ico { fill: var(--mk-text-disabled); }
+.m-btn-focus { border-color: var(--mk-focus-border); }
+.m-btn-primary.m-btn-focus, .m-btn-danger.m-btn-focus { border-color: var(--mk-focus-border-strong); }
+.m-x { display: flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; margin: -6px -8px -6px 4px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.m-rtl .m-x { margin: -6px 4px -6px -8px; }
+
+/* ---- chips (<span>, never act) ---- */
+.m-chip {
+  display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; height: 24px; padding: 0 8px; border-radius: 999px;
+  white-space: nowrap; font: 600 var(--mk-type-caption) var(--twn-font-ui);
+}
+.m-rtl .m-chip { font: 600 var(--mk-type-ar-caption) var(--twn-font-ar); }
+.m-chip .m-ico { margin-right: 4px; }
+.m-rtl .m-chip .m-ico { margin-right: 0; margin-left: 4px; }
+.m-chip-ok { background: var(--mk-ok-tint); color: var(--twn-ok); }
+.m-chip-warn { background: var(--mk-warn-tint); color: var(--twn-warn); }
+.m-chip-error { background: var(--mk-error-tint); color: var(--twn-error); }
+.m-chip-info { background: var(--mk-info-tint); color: var(--twn-primary-text); }
+.m-chip-neutral { background: var(--mk-control); color: var(--twn-text-muted); }
+.m-chip-neutral .m-ico { fill: var(--twn-text-muted); }
+.m-chip-mono { height: 24px; padding: 0 8px; border-radius: 4px; background: var(--twn-frame-bg); color: var(--twn-text); font: 400 var(--mk-type-mono) var(--twn-font-mono); direction: ltr; }
+.m-rtl .m-chip-mono { font: 400 var(--mk-type-mono) var(--twn-font-mono); }
+
+/* ---- notice and error card (G5) ---- */
+.m-notice { display: flex; flex-direction: row; align-items: flex-start; padding: 11px; border: 1px solid; border-radius: 16px; }
+.m-notice > .m-ico { margin-top: 2px; }
+.m-rtl .m-notice > .m-ico { margin-top: 4px; }
+.m-notice-ok { background: var(--mk-ok-tint); border-color: var(--mk-ok-line); }
+.m-notice-warn { background: var(--mk-warn-tint); border-color: var(--mk-warn-line); }
+.m-notice-error { background: var(--mk-error-tint); border-color: var(--mk-error-line); }
+.m-notice-info { background: var(--mk-info-tint); border-color: var(--mk-info-line); }
+.m-notice-body { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 8px; }
+.m-rtl .m-notice-body { margin-left: 0; margin-right: 8px; }
+
+/* ---- empty state ---- */
+.m-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 160px; text-align: center; }
+.m-well { display: flex; align-items: center; justify-content: center; flex: 0 0 40px; width: 40px; height: 40px; border-radius: 8px; background: var(--twn-frame-bg); }
+
+/* ---- loading skeleton (G9): same boxes as the content, 8 px bars centred on each line box ---- */
+.m-skel-line { display: flex; flex-direction: row; align-items: center; height: 20px; }
+.m-skel-line-28 { height: 28px; }
+.m-skel-line-16 { height: 16px; }
+.m-skel-bar {
+  display: block; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--mk-skeleton) 0%, var(--mk-skeleton) 40%, var(--mk-skeleton-shine) 50%, var(--mk-skeleton) 60%, var(--mk-skeleton) 100%);
+  background-size: 300% 100%; background-position: 100% 0;
+  animation: m-shimmer var(--mk-dur-shimmer) linear infinite;
+}
+.m-skel-block { display: block; border-radius: 8px; background: var(--mk-skeleton); }
+.m-skel-box { display: flex; flex-direction: row; align-items: center; min-height: 56px; padding: 0 12px; border: 2px solid var(--mk-control-disabled); border-radius: 8px; background: var(--mk-control-disabled); }
+@keyframes m-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* ---- verb rows (Home, direction §13) ---- */
+.m-verb { display: flex;
+  display: flex; flex-direction: row; align-items: center; min-height: 56px; padding: 6px 10px; border: 2px solid var(--mk-control);
+  border-radius: 8px; background: var(--mk-control); cursor: pointer;
+  transition: background-color var(--mk-dur-fast) var(--mk-ease), border-color var(--mk-dur-fast) var(--mk-ease);
+}
+.m-verb-well { display: flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; border-radius: 8px; background: var(--twn-frame-bg); }
+.m-verb-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 12px; }
+.m-rtl .m-verb-text { margin-left: 0; margin-right: 12px; }
+.m-verb .m-verb-sub { color: var(--twn-text-muted); }
+.m-verb-primary { background: var(--twn-primary); border-color: var(--twn-primary); }
+.m-verb-primary .m-verb-well { background: var(--mk-primary-pressed); }
+.m-verb-primary .m-verb-sub { color: var(--mk-on-primary-muted); }
+.m-verb-disabled { background: var(--mk-control-disabled); border-color: var(--mk-control-disabled); cursor: default; }
+.m-verb-disabled .m-verb-title, .m-verb-disabled .m-verb-sub { color: var(--mk-text-disabled); }
+
+/* ---- list rows ---- */
+/* E-D3 r1 #3: every control has a 2 px rest border equal to its fill (transparent on a card), so focus never shifts */
+.m-li { display: flex; flex-direction: row; align-items: center; min-height: 40px; padding: 0 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.m-check { display: flex; flex-direction: row; align-items: flex-start; padding: 12px 0; }
+.m-check + .m-check { border-top: 1px solid var(--mk-divider); }
+.m-check > .m-ico { margin-top: 2px; }
+.m-rtl .m-check > .m-ico { margin-top: 4px; }
+.m-check-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 8px; }
+.m-rtl .m-check-text { margin-left: 0; margin-right: 8px; }
+.m-check-act { flex: 0 0 auto; margin-left: 8px; }
+.m-rtl .m-check-act { margin-left: 0; margin-right: 8px; }
+
+/* ---- step strip (7 segments, never wraps) and progress ---- */
+/* the step indicator is plain text in this release (not a control) */
+.m-steps { display: flex; flex-direction: column; padding: 4px 0; }
+.m-stepbar { display: flex; flex-direction: row; height: 4px; }
+.m-stepseg { display: block; flex: 1 1 0; height: 4px; border-radius: 2px; background: var(--twn-track); }
+.m-stepseg + .m-stepseg { margin-left: 2px; }
+.m-rtl .m-stepseg + .m-stepseg { margin-left: 0; margin-right: 2px; }
+.m-stepseg-done { background: var(--twn-primary-text); }
+.m-stepseg-run { background: var(--twn-gradient); }
+.m-rtl .m-stepseg-run { background: var(--mk-gradient-rtl); }
+.m-stepseg-wait { background: var(--twn-warn); }
+.m-stepseg-fail { background: var(--twn-error); }
+.m-track { display: flex; flex-direction: row; height: 4px; border-radius: 2px; background: var(--twn-track); }
+.m-fill { display: block; height: 4px; border-radius: 2px; background: var(--twn-gradient); transition: width var(--mk-dur-slow) var(--mk-ease); }
+.m-rtl .m-track { direction: ltr; justify-content: flex-end; }
+.m-rtl .m-fill { background: var(--mk-gradient-rtl); margin-left: auto; }
+
+/* ---- inputs ---- */
+.m-input {
+  display: flex; flex-direction: row; align-items: center; height: 32px; padding: 0 11px;
+  border: 1px solid var(--mk-border-input); border-radius: 8px; background: transparent; color: var(--twn-text-muted);
+}
+.m-textarea { align-items: flex-start; height: 72px; padding: 7px 11px; }
+.m-input-focus { border: 2px solid var(--mk-focus-border); padding: 0 10px; }
+.m-textarea.m-input-focus { padding: 6px 10px; }
+
+/* ---- approval: flagged statements ---- */
+.m-flag { display: flex; flex-direction: column; padding: 12px 0; }
+.m-flag + .m-flag { border-top: 1px solid var(--mk-divider); }
+.m-quote { display: block; }
+.m-quote-ar { direction: rtl; text-align: right; }
+
+/* ---- width classes ---- */
+.m-w300 { width: 300px; }
+.m-w360 { width: 360px; }
+.m-w480 { width: 480px; }
+
+/* ---- tool card details (Home, direction §13) ---- */
+.m-last-ico { display: flex; flex: 0 0 auto; margin-top: 2px; } /* centres the 12 px icon on the 16 px meta line */
+.m-rtl .m-last-ico { margin-top: 4px; } /* Arabic meta line is 20 px */
+
+/* item codes (C0239) in the Syne roles: Syne's round zero reads as "o", so a code keeps the UI face at the role's size */
+.m-panel .t-display .code, .m-panel .t-title .code, .m-panel .t-verb .code { font-family: var(--twn-font-ui); font-weight: 600; }
+/* a short Latin run inside Arabic (24 characters or fewer, class nb) never breaks across lines ("WhyNot Cut");
+   a longer one (a long client name) may wrap */
+.m-rtl .nb { white-space: nowrap; }
+
+/* ---- E-D3 round 1 additions ---- */
+/* focus demo on a verb row (white on the violet fill, violet elsewhere) */
+.m-verb-focus { border-color: var(--mk-focus-border); }
+.m-verb-primary.m-verb-focus { border-color: var(--mk-focus-border-strong); }
+
+/* tool card: a control, so solid #141414 with a matching 2 px rest border and radius 8 (padding 10 + 2 = 12) */
+.m-tool { display: flex; flex-direction: row; align-items: flex-start; padding: 10px; border: 2px solid var(--mk-card-solid); border-radius: 8px; background: var(--mk-card-solid); cursor: pointer; transition: border-color var(--mk-dur-fast) var(--mk-ease); }
+.m-tool-disabled { background: var(--mk-control-disabled); border-color: var(--mk-control-disabled); cursor: default; }
+.m-tool-disabled .m-tool-title, .m-tool-disabled .m-tool-brand { color: var(--mk-text-disabled); }
+.m-tool-brand { color: var(--twn-text-muted); }
+
+/* checkbox row: a 32 px control row with a 20 px box */
+.m-checkrow { display: flex; flex-direction: row; align-items: center; min-height: 32px; padding: 0 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.m-box { display: flex; align-items: center; justify-content: center; flex: 0 0 20px; width: 20px; height: 20px; border: 2px solid var(--mk-border-input); border-radius: 4px; background: transparent; }
+.m-box-on { background: var(--twn-text); border-color: var(--twn-text); }
+
+/* pinned action bar: the form-ending primary sits here, above the log row (UXP scroll behaviour not proven) */
+.m-actionbar { display: flex; flex-direction: column; flex: 0 0 auto; padding-top: 12px; padding-bottom: 12px; border-top: 1px solid var(--mk-divider); background: var(--twn-bg); }
+/* a long item code may break anywhere rather than run out of the panel */
+.m-panel .code { white-space: normal; overflow-wrap: anywhere; word-break: break-all; }
+/* header row 2: the client name shrinks with an ellipsis; the item code always stays whole */
+.m-ctxrow { display: flex; flex-direction: row; align-items: center; flex: 1 1 auto; min-width: 0; }
+.m-ctxrow .m-ctx { flex: 0 1 auto; }
+.m-ctx-sep { display: block; flex: 0 0 auto; margin: 0 4px; }
+.m-ctx-item { display: block; flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

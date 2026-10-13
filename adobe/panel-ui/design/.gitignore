@@ -1,0 +1,2 @@
+# Renders are reproducible (python _build/render_all.py) and large (~17 MB per screen); manifest.csv keeps their sha1.
+renders/

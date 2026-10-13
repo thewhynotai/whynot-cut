@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,focus,error,offline,stale,success,long">
+<title>P-03 Home</title>
+<link rel="stylesheet" href="../mockup.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../mockup.js"></script>
+</head>
+<body>
+<script>
+/* P-03 Home (screen-inventory.md §3 P-03, direction §13; E-D3 round 1 fixes).
+   - Hero is neutral in every state: "Current video" + the item code + the client (nothing says "Ready").
+   - Three verb rows in fixed order (Add footage, Make my edit, Approve); only the fill moves to the next verb.
+   - Tools: plain-language label first, the brand name (Tidy, Hush, Kalam) as the small line. Models moved to Settings.
+   - Offline and error: everything that needs the WhyNot Cut app is disabled (verbs, tool cards, chevrons); last results
+     stay; the status pills agree with the notice; the notice's fix takes the violet fill (the verbs are disabled).
+   - focus: keyboard focus on the primary verb. long: long client name and item code, 99+ badge. */
+(function () {
+  var t = M.t, D = M.D;
+  function item() { return M.html(M.ltr(D.item, "lat code")); }
+
+  function hero() {
+    return '<div class="t-meta tx-muted">' + t("home.current") + '</div>' +
+      '<div class="t-display">' + M.ltr(D.item, "lat code") + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + M.txt(D.client) + '</div>';
+  }
+  /* next: "drop" | "edit" | "approve" */
+  function verbs(next, o) {
+    o = o || {};
+    var v = function (k, icon) {
+      var primary = !o.disabled && next === k;
+      return M.verb({ icon: icon, title: t("home." + k), sub: t("home." + k + ".sub"), primary: primary, disabled: o.disabled, focus: primary && o.focus });
+    };
+    return '<div class="m-col mt-4">' + v("drop", "folder-input") + '<div class="mt-2"></div>' + v("edit", "clapperboard") +
+      '<div class="mt-2"></div>' + v("approve", "circle-check-big") + '</div>';
+  }
+  function last(textKey, agoKey) { return t("home.last", { text: M.raw(textKey), ago: M.raw(agoKey) }); }
+  function tools(disabled) {
+    var one = function (icon, key, brand, lastHtml, kind) {
+      return M.tool({ icon: icon, name: t("home.tool." + key), brand: M.ltr(brand), last: lastHtml, lastKind: kind, disabled: disabled });
+    };
+    return M.eyebrow(t("home.tools"), "mt-5") +
+      '<div class="m-col mt-2">' +
+      one("folder-tree", "tidy", "Tidy", last("demo.tidy.last", "demo.tidy.ago"), "ok") + '<div class="mt-2"></div>' +
+      one("audio-waveform", "hush", "Hush", last("demo.hush.last", "demo.hush.ago"), "ok") + '<div class="mt-2"></div>' +
+      one("captions", "kalam", "Kalam", t("home.last.none"), "pending") +
+      '</div>';
+  }
+  function settings() { return M.card(M.li("settings", t("home.settings")), "m-card-flush mt-5"); }
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+
+  var STATES = {
+    empty: function () {
+      var text = t("empty.noclient.text", { assets: M.html(M.mono("assets")), data: M.html(M.mono("data")) });
+      return {
+        noclient: true, needs: 0,
+        body: M.empty({ icon: "folder-open", title: t("empty.noclient.title"), text: text,
+          btn: M.btn(t("empty.noclient.action"), { kind: "primary", icon: "folder-open" }) }) + settings()
+      };
+    },
+    loading: function () {
+      var box = function () {
+        return '<div class="m-skel-box"><span class="m-skel-block" style="width:32px;height:32px"></span>' +
+          '<div class="m-col m-grow ms-3">' + M.skel(45) + M.skel(75, 16) + '</div></div>';
+      };
+      var tcard = function () {
+        return '<div class="m-tool m-tool-disabled"><span class="m-skel-block" style="width:20px;height:20px"></span><div class="m-col m-grow ms-3">' +
+          M.skel(40) + M.skel(25, 16) + '<div class="mt-2"></div>' + M.skel(65, 16) + '</div></div>';
+      };
+      return {
+        needs: 0,
+        body: M.skel(25, 16) + M.skel(40, 28) + '<div class="mt-1"></div>' + M.skel(30, 16) +
+          '<div class="m-col mt-4">' + box() + '<div class="mt-2"></div>' + box() + '<div class="mt-2"></div>' + box() + '</div>' +
+          M.eyebrow(t("home.tools"), "mt-5") + '<div class="m-col mt-2">' + tcard() + '<div class="mt-2"></div>' + tcard() + '<div class="mt-2"></div>' + tcard() + '</div>' +
+          settings()
+      };
+    },
+    normal: function () { return { needs: 0, body: hero() + verbs("edit") + tools() + settings() }; },
+    focus: function () { return { needs: 0, body: hero() + verbs("edit", { focus: true }) + tools() + settings() }; },
+    error: function () {
+      return {
+        needs: 0, pills: { engine: "noanswer" },
+        body: slot(M.notice("error", t("engine.noanswer"), { sub: t("retry.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
+          hero() + verbs("edit", { disabled: true }) + tools(true) + settings()
+      };
+    },
+    offline: function () {
+      return {
+        needs: 0, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(M.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
+          hero() + verbs("edit", { disabled: true }) + tools(true) + settings()
+      };
+    },
+    stale: function () {
+      return {
+        needs: 0,
+        body: slot(M.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw" } })) +
+          hero() + verbs("edit") + tools() + settings()
+      };
+    },
+    success: function () {
+      return {
+        needs: 1,
+        body: slot(M.notice("ok", t("home.waiting_approval", { item: item() }))) + hero() + verbs("approve") + tools() + settings()
+      };
+    },
+    long: function () {
+      return { body: slot(M.notice("ok", t("home.waiting_approval", { item: item() }))) + hero() + verbs("approve") + tools() + settings() };
+    }
+  };
+
+  M.mount({
+    id: "P-03", name: "Home",
+    states: ["empty", "loading", "normal", "focus", "error", "offline", "stale", "success", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "home";
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>
