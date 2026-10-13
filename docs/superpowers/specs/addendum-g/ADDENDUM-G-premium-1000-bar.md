@@ -295,6 +295,42 @@ any problem in downloading or installing").
 - The beta path is the Terminal one-liner, with an Arabic step-by-step page and screenshots: copy, paste, Enter, done.
 - **Strong recommendation (H4-Mac):** Apple Developer Program ($99/year) before the beta, because 90% of testers are on Mac. It gives a notarized `.dmg`: double-click to install, no Terminal, no warnings. It is the single paid item most worth it. Yunus decides; until then the one-liner path stays.
 
+## G12. Final hand-off: a Windows folder and a Mac folder; the agency Mac finishes and tests the Mac side (update 2026-10-14, refines G11's live-Mac route)
+Yunus: «عندنا ماك في الإيجنسي … وحط بعد ما تخلص فولدر فيه حاجه الويندز كلها وفولدر فيه حاجات الماك كلها هاخد الفولدر احطها
+علي الماك وهربطه بكلود كود واختار الفولدر دا … دا بعد ما تخلص كل حاجه دي اخر مرحله خالص والماك هناك هو اللي يخلص حاجته
+ويجرب كل حاجه ويعمل التست" ("we have a Mac at the agency… after you finish, make one folder with all the Windows things and one
+with all the Mac things; I'll put the folder on the Mac, connect Claude Code, choose that folder… this is the very last
+stage, and the Mac there finishes its part, tries everything and does the testing").
+
+**When:** the very last stage, after everything else passes on Windows. It becomes **Phase 12, "Mac finish & test"**, before the 50-person beta (Phase 11 release-day items move after it).
+
+**Output** (built by `release.py handoff`, never edited by hand) in `Editing Plugin\WhyNot-Cut-Final\`:
+- **`Windows\`**:
+  - the final Windows deliverables: installer/one-liner script, plugin zip, `.ccx` (Premiere), signed `.zxp` (AE), the Arabic PDF guide;
+  - `README-AR.md` (install steps with screenshots);
+  - `checksums.txt`.
+- **`Mac\`**: self-contained, so a fresh Claude Code on the Mac can finish the Mac side alone.
+  - `START-HERE.md` (English, for the Mac Claude): the mission, the rules and the exact checklist. In order:
+    1. Set up the Mac build toolchain locally inside the folder or user home (no admin, no system changes).
+    2. Build the Mac artefacts (arm64): installer, `.app`/`.dmg` (unsigned unless H4-Mac), `.ccx`, `.zxp`.
+    3. Install from scratch exactly as a tester would (the Terminal one-liner, pointed at the local files).
+    4. Run the full G10 list with real Premiere/AE: end-to-end runs of every core job, fault injection, a soak run, install/update/uninstall.
+    5. Verify the G-T12 Mac-native items.
+    6. Fix any Mac bug with tests, by the same TDD + review rules.
+    7. Write `mac-test-report.md` (pass/fail table + evidence).
+    8. Commit and push the fixes and the report to the private repo, so the Windows side gets them.
+  - `دليل-الماك.md` (Arabic, for Yunus): the few steps he does by hand.
+  - The full repo **with `.git` history**, so the Mac Claude can commit and push. Secrets, renders, caches and `.venv`s are excluded.
+  - The same standing rules as here:
+    - never touch client folders;
+    - the private repo stays private;
+    - Adobe restarts only on test projects;
+    - nothing paid;
+    - the sample clip is our own footage.
+  - The bundled **sample client folder** and its test projects.
+
+**Gate:** the beta ships only after `mac-test-report.md` shows zero failures in core jobs and the Windows suite still passes after the Mac fixes are merged.
+
 ## G7. Human items (new)
 - **H16:** the billing provider and the business entity that receives money. Stripe isn't available to Egyptian businesses. The candidates are Paddle or Lemon Squeezy (merchant of record, they handle VAT, with fees taken from revenue and no upfront cost). Yunus picks once he knows his company/payout setup.
 - **H17:** approve the EULA/Terms/Privacy/Refund drafts (a lawyer is recommended).
