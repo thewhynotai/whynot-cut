@@ -1,7 +1,7 @@
 <section class="chapter" id="ch02">
 <h1 class="ch-title" id="ch02-title">2 · التثبيت خطوة بخطوة</h1>
 
-<p>يشرح هذا الفصل كيف تثبّت WhyNot Cut على جهازك. نبدأ بما تفعله اليوم، ثم نشرح التثبيت في الإصدار <bdi dir="ltr">3.0</bdi>: سطر واحد تلصقه في PowerShell على Windows أو في Terminal على Mac، أو طلب واحد تكتبه في تطبيق Claude. بعد التثبيت ينقلك <a href="#ch03-title">الفصل&nbsp;3</a> إلى أول مشروع.</p>
+<p>يشرح هذا الفصل كيف تثبّت WhyNot Cut على جهازك. نبدأ بما تفعله اليوم، ثم نشرح التثبيت في الإصدار <bdi dir="ltr">3.0</bdi>: سطر واحد تلصقه في PowerShell على Windows أو في Terminal على Mac، أو من داخل تطبيق Claude: تضيف WhyNot Cut إليه، ثم تكتب طلبًا واحدًا. بعد التثبيت ينقلك <a href="#ch03-title">الفصل&nbsp;3</a> إلى أول مشروع.</p>
 
 <aside class="tip">
 <p>اليوم (قبل الإصدار <bdi dir="ltr">3.0</bdi>): اتبع القسمين <a href="#ch02-claude-first">«أول مرة في تطبيق Claude»</a> و<a href="#ch02-first-run">«اليوم: التثبيت مع معالج البداية»</a> فقط، ثم انتقل إلى <a href="#ch03-title">الفصل&nbsp;3</a>. باقي هذا الفصل يصف التثبيت في الإصدار <bdi dir="ltr">3.0</bdi>.</p>
@@ -96,7 +96,7 @@
 <li><strong>تطبيق Claude</strong> مثبَّتًا وحسابك مسجَّل الدخول فيه. نزّله من <bdi dir="ltr">claude.ai/download</bdi> وسجّل الدخول بنفسك قبل أن تبدأ.</li>
 <li><strong>Premiere Pro</strong>، و<strong>After Effects</strong> إذا كنت تستخدمه، مثبَّتين برخصتك أنت، و<strong>تطبيق Creative Cloud</strong> مسجَّل الدخول بحسابك في Adobe.</li>
 <li><strong>مساحة فارغة</strong>: نحو <bdi dir="ltr">9&nbsp;GB</bdi> على الأقل للمحرك ونموذج التفريغ النصي، وأكثر مع باقي النماذج، ثم عدة <bdi dir="ltr">GB</bdi> لكل عميل. أول سطر يكتبه التثبيت هو الحجم الكلي الذي سينزّله.</li>
-<li><strong>الجهاز</strong>: <bdi dir="ltr">Windows 10/11</bdi>، أو Mac بمعالج Apple Silicon أو Intel. لا تحتاج إلى صلاحيات مسؤول الجهاز (admin)، ولا إلى تثبيت Python أو أي أداة أخرى بنفسك.</li>
+<li><strong>الجهاز</strong>: <bdi dir="ltr">Windows 10/11</bdi>، أو Mac بمعالج Apple Silicon أو Intel (أداة الكابشن «كلام» وحدها تحتاج إلى Apple Silicon، <a href="#ch13-pack">الفصل&nbsp;13</a>). لا تحتاج إلى صلاحيات مسؤول الجهاز (admin)، ولا إلى تثبيت Python أو أي أداة أخرى بنفسك.</li>
 <li><strong>اتصال بالإنترنت</strong> حتى تكتمل التنزيلات.</li>
 </ul>
 
@@ -177,7 +177,7 @@
 <li><strong>النماذج</strong> (القسم التالي) في الخلفية. وإذا كان في جهازك كارت NVIDIA، تُثبَّت معها مكتبات التسريع، فيصبح التفريغ النصي أسرع بنحو 8 مرات.</li>
 <li><strong>مكان فولدر العملاء</strong>: على Windows <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> إذا كان في جهازك قرص D، وإلا <bdi dir="ltr"><code>WhyNot Clients</code></bdi> داخل Documents، وكذلك على Mac. وإذا كان Documents يُزامَن مع OneDrive أو iCloud، يوضع فولدر العملاء في فولدر المستخدم خارجه، لأن الملفات المحفوظة على السحابة فقط تُفشل التفريغ النصي.</li>
 <li><strong>تطبيق Claude يُفتح على معالج البداية</strong>، والمعالج يسألك عن إعداداتك وينشئ أول فولدر عميل، ثم يعرض لك أين تضع كل ملف.</li>
-<li><strong>فحص أخير</strong>: كل بند أخضر، أو أصفر ومعه سببه وطريقة إصلاحه (القسم «التأكد من النتيجة»).</li>
+<li><strong>فحص أخير</strong>: قائمة الفحص، وكل سطر فيها <bdi dir="ltr"><code>[OK]</code></bdi>، أو <bdi dir="ltr"><code>[!!]</code></bdi> ومعه سببه وطريقة إصلاحه (القسم «التأكد من النتيجة»). وفي اللوحة تظهر القائمة نفسها بالأخضر والأصفر.</li>
 </ol>
 
 <p>ولا يطلب التثبيت أبدًا صلاحيات مسؤول الجهاز، ولا يفعّل إعداد Adobe الخاص بالإضافات غير الموقَّعة، ولا ينقل أو يحذف فولدرات العملاء، ولا يستبدل ملف إعدادات تطبيق Claude: يضيف إليه ما يخص WhyNot Cut فقط، بعد نسخة احتياطية.</p>
