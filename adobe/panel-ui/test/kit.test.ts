@@ -1,7 +1,8 @@
 // B-T1 component kit tests (src/kit/*, styles/kit.css): markup structure, escaping, RTL (dir and order), <bdi dir="ltr">
 // on left-to-right tokens, accessibility (labels, aria-*, the focus-ring class, 32 px hit targets), UXP CSS limits
 // (flexbox only, an explicit display on every element the kit emits) and no hard-coded strings (all copy from the
-// i18n table; i18n.test.ts scans the kit sources too).
+// i18n table; i18n.test.ts scans the kit sources too). Since the spike 0.1.7 CSS lab a kit control is a
+// <div role="button" tabindex="0"> (role="tab" for a tab), never a <button>; test/kit-uxp.test.ts holds the lab's rules.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -10,6 +11,7 @@ import { AR, EN, fmt, stringsFor } from "../src/i18n.ts";
 import type { Strings } from "../src/i18n.ts";
 import {
   aspectPct,
+  auto,
   button,
   buttonRow,
   card,
@@ -59,15 +61,19 @@ const noScript = (html: string) => {
 const tags = (html: string, name: string) => [...html.matchAll(new RegExp(`<${name}\\b([^>]*)>`, "g"))].map((m) => m[1]!);
 const attr = (attrs: string, name: string) => new RegExp(`\\s${name}="([^"]*)"`).exec(attrs)?.[1];
 const classesOf = (attrs: string) => (attr(attrs, "class") ?? "").split(/\s+/).filter(Boolean);
-/** the inner text of each <button> (tags stripped) */
-const buttons = (html: string) => [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map((m) => ({ attrs: m[1]!, text: m[2]!.replace(/<[^>]*>/g, "").trim() }));
+/** every kit control (<div role="button"> / <div role="tab">: no nested <div> inside one) with its inner text (tags stripped) */
+const buttons = (html: string) =>
+  [...html.matchAll(/<div\b([^>]*\srole="(?:button|tab)"[^>]*)>([\s\S]*?)<\/div>/g)].map((m) => ({ attrs: m[1]!, text: m[2]!.replace(/<[^>]*>/g, "").trim() }));
 
-/** Every interactive element carries the focus-ring class and a label (visible text or aria-label). */
+/** No <button> (UXP paints it as Premiere's native control); every control carries the focus-ring class, is in the tab
+ *  order (tabindex 0) unless disabled (aria-disabled + tabindex -1), and has a label (visible text or aria-label). */
 function assertControlsAccessible(html: string): void {
+  assert.doesNotMatch(html, /<button\b/, "the kit never emits <button>");
   for (const b of buttons(html)) {
-    assert.ok(classesOf(b.attrs).includes("kit-focus"), `button without the focus-ring class: ${b.attrs}`);
-    assert.equal(attr(b.attrs, "type"), "button", `button without type="button": ${b.attrs}`);
-    assert.ok(b.text !== "" || (attr(b.attrs, "aria-label") ?? "").trim() !== "", `button without a label: ${b.attrs}`);
+    assert.ok(classesOf(b.attrs).includes("kit-focus"), `control without the focus-ring class: ${b.attrs}`);
+    const off = attr(b.attrs, "aria-disabled") === "true";
+    assert.equal(attr(b.attrs, "tabindex"), off ? "-1" : "0", `control tabindex: ${b.attrs}`);
+    assert.ok(b.text !== "" || (attr(b.attrs, "aria-label") ?? "").trim() !== "", `control without a label: ${b.attrs}`);
   }
 }
 
@@ -81,10 +87,10 @@ test("kit esc is the panel's esc (same five characters); ltr runs are <bdi dir=\
 
 // ---- icons ----
 
-test("icons: inline SVG in currentColor, hidden from screen readers unless labelled; directional chevrons mirror in RTL", () => {
+test("icons: inline SVG filled by an ink class (no fill attribute), hidden from screen readers unless labelled; directional chevrons mirror in RTL", () => {
   for (const name of ["ok", "warn", "error", "info", "chevron-down", "close"] as const) {
     const svg = icon(name);
-    assert.match(svg, /^<svg class="kit-icon kit-icon-[a-z-]+" data-icon="[a-z-]+" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" focusable="false" aria-hidden="true"><path fill-rule="evenodd" d="[^"]+"\/><\/svg>$/);
+    assert.match(svg, /^<svg class="kit-icon kit-icon-[a-z-]+ kit-ink-[a-z-]+" data-icon="[a-z-]+" viewBox="0 0 16 16" width="16" height="16" focusable="false" aria-hidden="true"><path fill-rule="evenodd" d="[^"]+"\/><\/svg>$/);
     assert.equal(icon(name, { rtl: true }), svg, `${name} has no direction: the same in RTL`);
   }
   assert.match(icon("chevron-end"), /kit-icon-chevron-right/);
@@ -110,8 +116,8 @@ test("header: monogram + WhyNot Cut + Needs-you badge + ع/EN switch + gradient 
   assert.match(html, /<span class="kit-wordmark"><bdi dir="ltr">WhyNot Cut<\/bdi><\/span>/);
   assert.match(html, /<div class="kit-hairline" aria-hidden="true"><\/div><\/header>$/);
   // badge: label + count in a left-to-right run, opens NEEDS-YOU, labelled with the count
-  assert.match(html, /<button type="button" class="kit-badge kit-focus" data-action="open-needs-you" aria-label="[^"]*3[^"]*">/);
-  assert.match(html, /<span class="kit-badge-count"><bdi dir="ltr">3<\/bdi><\/span>/);
+  assert.match(html, /<div class="kit-badge kit-focus" role="button" tabindex="0" data-action="open-needs-you" aria-label="[^"]*3[^"]*">/);
+  assert.match(html, /<span class="kit-badge-count kit-gap-s"><bdi dir="ltr">3<\/bdi><\/span>/);
   assert.ok(html.includes(esc(EN["needs.label"])));
   // WCAG 2.5.3: the accessible name starts with the visible label (and says the count)
   for (const lang of ["en", "ar"] as const) {
@@ -159,7 +165,7 @@ test("tabs: a tablist; the active tab is selected (pink underline class); DOM or
   assert.deepEqual(bs.map((b) => attr(b.attrs, "aria-selected")), ["false", "true", "false"]);
   assert.deepEqual(bs.map((b) => attr(b.attrs, "role")), ["tab", "tab", "tab"]);
   assert.ok(classesOf(bs[1]!.attrs).includes("kit-tab-on"));
-  assert.match(html, /<span class="kit-tab-count"><bdi dir="ltr">2<\/bdi><\/span>/);
+  assert.match(html, /<span class="kit-tab-count kit-gap-s"><bdi dir="ltr">2<\/bdi><\/span>/);
   // review minor (dd9cbba): the label may be cut with an ellipsis, so its title holds the full label (escaped)
   assert.match(html, /<span class="kit-tab-label" title="Edit">Edit<\/span>/);
   assert.match(tabs({ t: EN, items: [{ id: "x", label: `A "long" <label>` }], active: "x" }), /<span class="kit-tab-label" title="A &quot;long&quot; &lt;label&gt;">A &quot;long&quot; &lt;label&gt;<\/span>/);
@@ -200,15 +206,15 @@ test("card: glass section with an optional eyebrow, title and status tone; body 
 
 // ---- buttons ----
 
-test("buttons: primary / secondary-glass / danger, type=button, data-action + data-*, disabled, optional gradient glow", () => {
+test("buttons: primary / secondary-glass / danger, a <div role=button>, data-action + data-*, disabled, optional shadow glow", () => {
   assert.equal(
     button({ label: "Go", action: "go", variant: "primary", data: { t: 1.5, id: "a" } }),
-    '<button type="button" class="kit-btn kit-btn-primary kit-focus" data-action="go" data-t="1.5" data-id="a"><span class="kit-btn-label">Go</span></button>',
+    '<div class="kit-btn kit-btn-primary kit-focus" role="button" tabindex="0" data-action="go" data-t="1.5" data-id="a"><span class="kit-btn-label">Go</span></div>',
   );
   assert.match(button({ label: "x", action: "a" }), /kit-btn kit-btn-secondary kit-focus/, "secondary is the default");
   assert.match(button({ label: "x", action: "a", variant: "danger" }), /kit-btn kit-btn-danger kit-focus/);
   // danger is never colour alone: it carries the warn icon unless the caller names another
-  assert.match(button({ label: "x", action: "a", variant: "danger" }), /<button [^>]*kit-btn-danger[^>]*><svg [^>]*kit-icon-warn[^>]*aria-hidden="true"/);
+  assert.match(button({ label: "x", action: "a", variant: "danger" }), /<div [^>]*kit-btn-danger[^>]*><svg [^>]*kit-icon-warn[^>]*aria-hidden="true"/);
   assert.match(button({ label: "x", action: "a", variant: "danger", icon: "close" }), /kit-icon-close/);
   assert.doesNotMatch(button({ label: "x", action: "a", variant: "secondary" }), /<svg/);
   // a directional icon needs the panel direction (type + runtime), so a chevron never points the wrong way
@@ -218,17 +224,20 @@ test("buttons: primary / secondary-glass / danger, type=button, data-action + da
   assert.throws(() => button({ label: "x", action: "a", icon: "chevron-start" }), /kit\.button\.rtl-required/);
   assert.match(button({ label: "x", action: "a", icon: "chevron-end", rtl: false }), /kit-icon-chevron-right/);
   assert.match(button({ label: "x", action: "a", variant: "nope" as never }), /kit-btn-secondary/);
-  assert.match(button({ label: "x", action: "a", disabled: true }), /<button [^>]* disabled>/);
+  assert.equal(
+    button({ label: "x", action: "a", disabled: true }),
+    '<div class="kit-btn kit-btn-secondary kit-focus kit-btn-disabled" role="button" tabindex="-1" data-action="a" aria-disabled="true"><span class="kit-btn-label">x</span></div>',
+  );
   assert.match(button({ label: "x", action: "a", block: true }), /class="kit-btn kit-btn-secondary kit-focus kit-btn-block"/);
-  assert.match(button({ label: "x", action: "a", variant: "primary", glow: true }), /^<span class="kit-glow"><button [^>]*kit-btn-primary[^>]*>.*<\/button><\/span>$/);
-  assert.match(button({ label: "x", action: "a", variant: "primary", glow: true, block: true }), /^<span class="kit-glow kit-glow-block">/);
-  assert.doesNotMatch(button({ label: "x", action: "a", variant: "secondary", glow: true }), /kit-glow/, "the glow is for the main (primary) CTA only");
+  assert.match(button({ label: "x", action: "a", variant: "primary", glow: true }), /^<div class="kit-btn kit-btn-primary kit-focus kit-btn-glow" role="button" tabindex="0" [^>]*>.*<\/div>$/);
+  assert.match(button({ label: "x", action: "a", variant: "primary", glow: true, block: true }), /^<div class="kit-btn kit-btn-primary kit-focus kit-btn-block kit-btn-glow"/);
+  assert.doesNotMatch(button({ label: "x", action: "a", variant: "secondary", glow: true }), /glow/, "the glow is for the main (primary) CTA only");
   assert.match(button({ label: "x", action: "a", icon: "chevron-end", rtl: true }), /kit-icon-chevron-left/);
   assert.match(button({ label: "", action: "a", icon: "close", ariaLabel: "Close" }), /aria-label="Close"/);
   assert.throws(() => button({ label: "x", action: "a", data: { "bad key": 1 } }), /kit\.data-attribute="bad key"/);
   noScript(button({ label: EVIL, action: EVIL, data: { x: EVIL }, ariaLabel: EVIL }));
   const row = buttonRow([button({ label: "a", action: "a", variant: "primary" }), button({ label: "b", action: "b" })]);
-  assert.match(row, /^<div class="kit-btn-row"><button/);
+  assert.match(row, /^<div class="kit-btn-row"><div class="kit-btn /);
   assertControlsAccessible(row);
 });
 
@@ -291,7 +300,7 @@ test("progress: plain-language status, n of N as LTR runs, gradient bar with ari
   // no count: an indeterminate bar without aria-valuenow; no cancel, no elapsed
   const ind = progress({ t: EN, status: "x" });
   assert.match(ind, /<div class="kit-track kit-track-indeterminate" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div class="kit-fill" style="width:30%"><\/div><\/div>/);
-  assert.doesNotMatch(ind, /<button|kit-meta|kit-progress-count/);
+  assert.doesNotMatch(ind, /role="button"|kit-meta|kit-progress-count/);
   // clamped
   assert.match(progress({ t: EN, status: "x", n: 99, of: 10 }), /aria-valuenow="100"/);
   assert.match(progress({ t: EN, status: "x", n: -3, of: 10 }), /aria-valuenow="0"/);
@@ -408,7 +417,7 @@ test("checklist: RTL through CSS direction only (same DOM order in AR), Arabic l
   assert.doesNotMatch(ar, /dir="rtl"/, "the component sets no direction itself");
   for (const k of ["checklist.engine", "checklist.premiere", "checklist.clients"] as const) {
     assert.match(AR[k], /[\u0600-\u06FF]/, `${k} is Arabic`);
-    assert.ok(ar.includes(`<bdi>${esc(AR[k])}</bdi>`), k);
+    assert.ok(ar.includes(auto(AR[k])), k);
   }
   assert.match(ar, new RegExp(`aria-label="${AR["checklist.label"]}"`));
   assert.match(kitRoot({ lang: "ar", body: ar }), /^<div class="kit-root kit-rtl" dir="rtl" lang="ar">/);
@@ -506,8 +515,8 @@ test("log drawer: toggle with aria-expanded/controls and a direction-aware chevr
   ] as const;
   const closed = logDrawer({ t: EN, open: false, lines: lines as never, rtl: false });
   // closed: nothing to control yet, so no aria-controls pointing at a missing element
-  assert.match(closed, /^<section class="kit-log" aria-label="Log"><button type="button" class="kit-log-toggle kit-focus" data-action="toggle-log" aria-expanded="false"><svg [^>]*kit-icon-chevron-right/);
-  assert.match(closed, /<span class="kit-log-count"><bdi dir="ltr">4<\/bdi> lines<\/span>/);
+  assert.match(closed, /^<section class="kit-log" aria-label="Log"><div class="kit-log-toggle kit-focus" role="button" tabindex="0" data-action="toggle-log" aria-expanded="false"><svg [^>]*kit-icon-chevron-right/);
+  assert.match(closed, /<span class="kit-log-count kit-gap-s"><bdi dir="ltr">4<\/bdi> lines<\/span>/);
   assert.doesNotMatch(closed, /<ul class="kit-log-lines"/);
   assert.match(logDrawer({ t: EN, open: false, lines: [], rtl: true }), /kit-icon-chevron-left/);
   const open = logDrawer({ t: EN, open: true, lines: lines as never, rtl: false, build: { version: "3.0.0", build: "c0112b5" } });
@@ -521,17 +530,18 @@ test("log drawer: toggle with aria-expanded/controls and a direction-aware chevr
   assert.match(open, /<li class="kit-log-line kit-log-info"><span class="kit-log-ts"><bdi dir="ltr">14:12:03<\/bdi><\/span><span class="kit-log-text"><bdi dir="ltr">reel build --video-id C0239<\/bdi><\/span><\/li>/);
   assert.match(open, /<li class="kit-log-line kit-log-warn"><span class="kit-log-ts"><bdi dir="ltr">14:12:09<\/bdi><\/span><span class="kit-log-icon"><svg [^>]*kit-icon-warn/);
   assert.equal((open.match(/kit-log-line kit-log-info/g) ?? []).length, 2, "an unknown level is info");
-  // the build stamp wraps only between tokens: each token is its own nowrap run ("WhyNot Cut" is one token)
+  // the build stamp wraps only between tokens: a left-to-right flex row of nowrap runs ("WhyNot Cut" is one token), each
+  // after the first spaced by kit-gap-s (flex drops a literal space between them)
   const stamp = logDrawer({ t: AR, open: true, lines: [], rtl: true, build: { version: "3.0.0", build: "c589a67 2026-10-12T22:37Z" } });
-  const tok = (w: string) => `<span class="kit-nowrap">${w}</span>`;
+  const tok = (w: string, gap = true) => `<span class="kit-nowrap${gap ? " kit-gap-s" : ""}">${w}</span>`;
   assert.ok(
-    stamp.includes(`<span class="kit-log-build"><bdi dir="ltr">${[tok("WhyNot\u00a0Cut"), tok("3.0.0"), tok("·"), tok("build"), tok("c589a67"), tok("2026-10-12T22:37Z")].join(" ")}</bdi></span>`),
+    stamp.includes(`<span class="kit-log-build"><span class="kit-stamp" dir="ltr">${[tok("WhyNot\u00a0Cut", false), tok("3.0.0"), tok("·"), tok("build"), tok("c589a67"), tok("2026-10-12T22:37Z")].join("")}</span></span>`),
     stamp,
   );
   assert.match(cssRule(".kit-nowrap"), /white-space: nowrap/);
   assert.match(cssRule(".kit-nowrap"), /display: inline(?!-)/);
   assert.doesNotMatch(cssRule(".kit-log-build"), /break-all/, "never breaks inside a token");
-  assert.ok(open.includes(`<bdi dir="ltr">${tok("WhyNot\u00a0Cut")} ${tok("3.0.0")} ${tok("·")} ${tok("build")} ${tok("c0112b5")}</bdi>`));
+  assert.ok(open.includes(`<span class="kit-stamp" dir="ltr">${tok("WhyNot\u00a0Cut", false)}${tok("3.0.0")}${tok("·")}${tok("build")}${tok("c0112b5")}</span>`));
   assert.match(open, /data-action="copy-diagnostics"/);
   noScript(open);
   const empty = logDrawer({ t: EN, open: true, lines: [], rtl: false });
@@ -629,7 +639,7 @@ test("kit root: dir/lang/class per language (RTL via CSS direction), one scroll 
 const GALLERY = { en: kitGallery("en"), ar: kitGallery("ar") };
 
 test("gallery renders every component in EN and AR, in the same DOM order, with no 'Claude Code' and the footer", () => {
-  const parts = ["kit-hdr", "kit-lang", "kit-badge", "kit-tabs", "kit-card", "kit-btn-primary", "kit-btn-secondary", "kit-btn-danger", "kit-glow", "kit-chip-ok", "kit-chip-warn", "kit-chip-error", "kit-chip-info", "kit-steps", "kit-progress", "kit-toast-error", "kit-toast-ok", "kit-dialog", "kit-empty", "kit-log", "kit-frames", "kit-wave", "kit-foot"];
+  const parts = ["kit-hdr", "kit-lang", "kit-badge", "kit-tabs", "kit-card", "kit-btn-primary", "kit-btn-secondary", "kit-btn-danger", "kit-btn-glow", "kit-chip-ok", "kit-chip-warn", "kit-chip-error", "kit-chip-info", "kit-steps", "kit-progress", "kit-toast-error", "kit-toast-ok", "kit-dialog", "kit-empty", "kit-log", "kit-frames", "kit-wave", "kit-foot"];
   for (const lang of ["en", "ar"] as const) {
     const html = GALLERY[lang];
     for (const p of parts) assert.ok(html.includes(`"${p}"`) || html.includes(`${p} `) || html.includes(` ${p}"`), `${lang} gallery lacks ${p}`);
@@ -693,15 +703,18 @@ test("kit.css: every button class is a 32 px hit target; the focus ring is the #
   assert.match(cssRule(".kit-focus:focus"), /box-shadow: var\(--twn-focus\)/);
 });
 
-test("kit.css: the card is glass + border + 16 px radius; pills 999 px; the gradient only on the hairline, progress fill and CTA glow", () => {
+test("kit.css: the card is glass + border + 16 px radius; chips 999 px, controls 16 px; the gradient only on the hairline and progress fill; the CTA glow is a shadow", () => {
   const cardRule = cssRule(".kit-card");
   assert.match(cardRule, /background: var\(--twn-glass\)/);
   assert.match(cardRule, /border: 1px solid var\(--twn-border\)/);
   assert.match(cardRule, /border-radius: var\(--twn-radius-card\)/);
   assert.doesNotMatch(FLAT_CSS, /var\(--twn-surface\)/, "the kit never paints the solid #121212 surface (cards are glass over black)");
-  for (const c of [".kit-chip", ".kit-btn", ".kit-badge", ".kit-lang"]) assert.match(cssRule(c), /border-radius: var\(--twn-radius-pill\)/, c);
+  // 999 px stays on <span> chips; a control (<div role="button">) has the explicit half-height radius (spike 0.1.7)
+  assert.match(cssRule(".kit-chip"), /border-radius: var\(--twn-radius-pill\)/);
+  for (const c of [".kit-btn", ".kit-badge", ".kit-lang-btn", ".kit-x"]) assert.match(cssRule(c), /border-radius: var\(--twn-radius-control\)/, c);
   const gradientUsers = cssRules().filter((r) => /var\(--twn-gradient\)/.test(r.body)).flatMap((r) => r.selectors).sort();
-  assert.deepEqual(gradientUsers, [".kit-fill", ".kit-glow", ".kit-hairline"]);
+  assert.deepEqual(gradientUsers, [".kit-fill", ".kit-hairline"], "the gradient is the hairline and the progress fill only");
+  assert.match(cssRule(".kit-btn-glow"), /box-shadow: var\(--twn-cta-glow\)/, "the main CTA's glow is a shadow (UXP cannot clip a gradient ring)");
   assert.match(cssRule(".kit-tab-on"), /border-bottom-color: var\(--twn-accent\)/, "pink active-tab underline");
   assert.match(cssRule(".kit-btn-primary"), /background: var\(--twn-primary\)/);
   assert.match(cssRule(".kit-btn-primary"), /color: var\(--twn-on-primary\)/);
@@ -769,7 +782,7 @@ test("Html is a branded string: kit functions return markup the next function ac
 
 // ---- B4: one primary button per screen ----
 
-test("primaryCount counts primary buttons (a glow wraps one, it is not a second)", () => {
+test("primaryCount counts primary buttons (the glow is a class on the one button, not a second)", () => {
   assert.equal(primaryCount(""), 0);
   assert.equal(primaryCount(button({ label: "a", action: "a", variant: "primary" })), 1);
   assert.equal(primaryCount(button({ label: "a", action: "a", variant: "primary", glow: true })), 1);
@@ -804,10 +817,11 @@ test("B4: every gallery section (a screen's worth) and every component's default
   for (const [name, html] of Object.entries(defaults)) assert.ok(primaryCount(html) <= 1, `${name}() renders ${primaryCount(html)} primary buttons`);
 });
 
-test("kit.css header comment states the attribute-selector rule as it is (valueless [disabled] is allowed, no [attr=value])", () => {
+test("kit.css header comment states the attribute-selector rule as it is: none at all (a disabled control is a class)", () => {
   const head = /^\/\*[\s\S]*?\*\//.exec(KIT_CSS)![0];
-  if (/\[[a-z-]+\]/.test(FLAT_CSS)) assert.doesNotMatch(head, /no attribute selectors(?! with)/, "the comment says 'no attribute selectors' but kit.css uses one");
-  assert.match(head, /\[disabled\]/);
+  assert.doesNotMatch(FLAT_CSS, /\[[a-z-]+[\]=~|^$*]/, "kit.css uses no attribute selector");
+  assert.match(head, /no attribute selectors at all/);
+  assert.match(head, /kit-btn-disabled/);
 });
 
 test("C2.2 r2: toast: a Copy diagnostics fix says what to do with the copy; a text that holds a command is not shown (never cut up)", () => {

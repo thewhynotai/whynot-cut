@@ -6,7 +6,7 @@
 // empty one (an empty bullet would read as "nothing changes here").
 import type { Strings } from "../i18n.ts";
 import { button, buttonRow } from "./button.ts";
-import { cmdRow, esc, safeId, trusted, withCommands } from "./html.ts";
+import { cmdRow, esc, prose, safeId, trusted, withCommands } from "./html.ts";
 import type { Act, Html } from "./html.ts";
 import { icon } from "./icons.ts";
 
@@ -35,7 +35,7 @@ export function dialog(o: DialogOpts): Html {
   const destructive = o.destructive !== false;
   return trusted(
     `<div class="kit-dialog" id="${id}" role="alertdialog" aria-labelledby="${id}-title" aria-describedby="${id}-changes">` +
-      `<div class="kit-dialog-head"><span class="kit-dialog-icon">${icon("warn")}</span><h3 class="kit-dialog-title" id="${id}-title">${esc(o.title)}</h3></div>` +
+      `<div class="kit-dialog-head"><span class="kit-dialog-icon">${icon("warn")}</span><h3 class="kit-dialog-title" id="${id}-title">${prose(o.title)}</h3></div>` +
       `<div class="kit-label">${esc(o.t["dialog.changes"])}</div><ul class="kit-dialog-changes" id="${id}-changes">${changes}</ul>` +
       backup +
       buttonRow([button({ ...o.confirm, variant: destructive ? "danger" : "primary" }), button({ ...o.cancel, variant: "secondary" })]) +

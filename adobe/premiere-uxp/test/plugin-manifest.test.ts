@@ -80,10 +80,10 @@ test("plugin manifest: icons 23 (panel) and 24 (plugin list) at scale [1,2], dar
   assert.ok(lightThemes.includes("light") && lightThemes.includes("lightest"));
 });
 
-test("plugin page: loads the bundled fonts, the brand tokens, the panel kit css, then the shell css, one script, a #root to mount into", () => {
+test("plugin page: loads the brand tokens, the panel kit css, then the shell css (no fonts.css: UXP loads no @font-face), one script, a #root to mount into", () => {
   const html = readFileSync(join(root, "plugin", "index.html"), "utf8");
   const hrefs = [...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(hrefs, ["fonts.css", "tokens.css", "panel.css", "kit.css", "index.css"]);
+  assert.deepEqual(hrefs, ["tokens.css", "panel.css", "kit.css", "index.css"]);
   assert.match(html, /<div id="root"><\/div>/);
   assert.equal([...html.matchAll(/<script/g)].length, 1);
   assert.match(html, /<script[^>]+src="index\.js"/);

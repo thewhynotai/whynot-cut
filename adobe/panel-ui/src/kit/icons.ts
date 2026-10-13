@@ -1,4 +1,8 @@
-// Icons: inline SVG drawn in currentColor (so an icon takes its text colour from CSS tokens), one 16x16 path each.
+// Icons: inline SVG, one 16x16 path each. UXP (spike 0.1.7 CSS lab, docs/adobe/uxp-parity.md) paints NOTHING for
+// fill="currentColor", for an explicit fill attribute or for an <img> of the svg: only a CSS fill on the svg (or its
+// path) paints. So an icon carries NO fill attribute; it carries an ink class (kit-ink-<tone>) and kit.css sets the
+// fill from the tokens. The ink is the icon's own status colour by default (ok / warn / error / info; pending and the
+// non-status shapes are muted); whoever puts an icon on a coloured fill (a button, a step dot) names the ink.
 // Status icons (ok / warn / error / info) go with every status colour (Addendum B: never colour alone). Directional
 // icons have logical names (chevron-start / chevron-end) and are resolved to a physical direction for the language,
 // so they point the way the text reads in RTL without relying on a CSS transform.
@@ -26,11 +30,22 @@ const PATHS: Readonly<Record<string, string>> = {
   close: "M3.8 2.6L8 6.8l4.2-4.2 1.2 1.2L9.2 8l4.2 4.2-1.2 1.2L8 9.2l-4.2 4.2-1.2-1.2L6.8 8 2.6 3.8z",
 };
 
+/** The colour an icon is filled with (kit.css .kit-ink-<tone>, each a token). */
+export type IconInk = "ok" | "warn" | "error" | "info" | "accent" | "text" | "muted" | "on-primary" | "on-ok" | "on-error" | "on-accent";
+export const ICON_INKS: readonly IconInk[] = ["ok", "warn", "error", "info", "accent", "text", "muted", "on-primary", "on-ok", "on-error", "on-accent"];
+
+/** The default ink: a status shape in its own status colour; pending and the other shapes muted. */
+export function defaultInk(name: IconName): IconInk {
+  return name === "ok" || name === "warn" || name === "error" || name === "info" ? name : "muted";
+}
+
 export interface IconOpts {
   /** the panel is right-to-left: chevron-start / chevron-end are mirrored */
   rtl?: boolean;
   /** a standalone icon that means something: role="img" with this label; otherwise aria-hidden (text sits next to it) */
   label?: string;
+  /** the fill colour (default: defaultInk(name)) */
+  ink?: IconInk;
 }
 
 function physical(name: IconName, rtl: boolean): string {
@@ -44,15 +59,16 @@ export function icon(name: IconName, opts: IconOpts = {}): Html {
   const d = PATHS[shape] ?? PATHS.info!;
   const role = opts.label ? ` role="img"` : "";
   const a11y = opts.label ? ` aria-label="${esc(opts.label)}"` : ` aria-hidden="true"`;
+  const ink: IconInk = opts.ink && ICON_INKS.includes(opts.ink) ? opts.ink : defaultInk(name);
   return trusted(
-    `<svg class="kit-icon kit-icon-${esc(shape)}" data-icon="${esc(name)}" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" focusable="false"${role}${a11y}>` +
+    `<svg class="kit-icon kit-icon-${esc(shape)} kit-ink-${ink}" data-icon="${esc(name)}" viewBox="0 0 16 16" width="16" height="16" focusable="false"${role}${a11y}>` +
       `<path fill-rule="evenodd" d="${d}"/></svg>`,
   );
 }
 
 /** A status icon labelled for screen readers ("Error", "Warning", ...). */
-export function statusIcon(kind: StatusKind, t: Strings): Html {
-  return icon(kind, { label: t[`status.${kind}`] });
+export function statusIcon(kind: StatusKind, t: Strings, ink?: IconInk): Html {
+  return icon(kind, { label: t[`status.${kind}`], ...(ink ? { ink } : {}) });
 }
 
 export const STATUS_KINDS: readonly StatusKind[] = ["ok", "warn", "error", "info"];

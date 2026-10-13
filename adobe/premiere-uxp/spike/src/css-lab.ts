@@ -206,7 +206,7 @@ export interface SvgVariant {
   img: boolean;
 }
 export const SVG_VARIANTS: readonly SvgVariant[] = [
-  { id: "S1", desc: 'fill="currentColor" (= kit icon)', img: false },
+  { id: "S1", desc: 'fill="currentColor" (= 0.1.7 kit icon)', img: false },
   { id: "S2", desc: `fill="${OK_HEX}" attribute`, img: false },
   { id: "S3", desc: "CSS .x path { fill: var(--twn-ok) }", img: false },
   { id: "S4", desc: "CSS fill on the svg element", img: false },
@@ -221,8 +221,10 @@ function svgMarkup(v: SvgVariant, ctx: SvgContext): string {
   const size = ctx === "inline" ? "lab-icon-inline" : "kit-icon";
   if (v.id === "S5") return `<img id="${id}" class="lab-img ${ctx === "inline" ? "lab-img-inline" : ""}" alt="" src="data:image/svg+xml;utf8,${encodeURIComponent(okSvgFile().trim())}" />`;
   if (v.id === "S6") return `<img id="${id}" class="lab-img ${ctx === "inline" ? "lab-img-inline" : ""}" alt="" src="${OK_IMG_FILE}" />`;
-  // S1 is the kit's own markup (adobe/panel-ui/src/kit/icons.ts), with the lab's id and size class
-  const kit = String(icon("ok")).replace(/^<svg class="kit-icon /, `<svg id="${id}" class="${size} `);
+  // S1 is the 0.1.7 kit icon's markup (fill="currentColor"), frozen here with the lab's id and size class: since 0.1.8
+  // the kit fills its icons through a CSS class (adobe/panel-ui/src/kit/icons.ts), so only the path comes from it
+  const d = / d="([^"]+)"/.exec(String(icon("ok")))?.[1] ?? "";
+  const kit = `<svg id="${id}" class="${size} kit-icon-ok" data-icon="ok" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" focusable="false" aria-hidden="true"><path fill-rule="evenodd" d="${d}"/></svg>`;
   if (v.id === "S1") return kit;
   if (v.id === "S2") return kit.replace('fill="currentColor"', `fill="${OK_HEX}"`);
   if (v.id === "S3") return kit.replace(' fill="currentColor"', "").replace(`class="${size} `, `class="${size} lab-svg-path `);

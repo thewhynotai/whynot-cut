@@ -6,7 +6,9 @@
    - #5400FB is a FILL only (white text on it is about 7.6:1). Violet TEXT, links and the focus ring use #9D6BFF;
      raw #5400FB as text is 2.77:1 and must not be used.
    - #D95C9B is for eyebrow labels and the active tab underline.
-   - The gradient is for the header hairline, progress bars and the main CTA border glow only.
+   - The gradient is for the header hairline and progress bars only. The main CTA's glow is a box-shadow,
+     --twn-cta-glow (a deviation from Addendum B's gradient ring: UXP cannot clip a gradient ring to a radius, spike
+     0.1.7 CSS lab, docs/adobe/uxp-parity.md). One shadow only: a multi-shadow value is unproven in UXP.
    - Status colours always come with an icon, never colour alone.
    Cards (controller ruling, 2026-10-13, per Addendum B §B2 and docs/review/2026-10-11/magnific-brand.md §2.2):
    - A card is glass, rgba(255,255,255,.08), over the black background (it reads as about #141414), exactly as on
@@ -14,8 +16,12 @@
    - Glass is never stacked on #121212. --twn-surface (#121212) stays the solid surface for non-glass panels.
    - adobe/panel-ui/test/contrast.test.ts checks every text token on glass-over-black (all at least 4.5:1) and fails
      if any panel CSS rule or rendered screen puts glass on a --twn-surface background.
-   Fonts: the families are declared in fonts.css from bundled OFL files; every stack ends in a generic family, so the
-   panel degrades to it if a host ignores @font-face. */
+   Shape: a control (the kit's <div role="button">) has the explicit half-height radius --twn-radius-control (16 px for
+   32 px); 999 px (--twn-radius-pill) is for <span> chips only (UXP, spike 0.1.7).
+   Fonts: Premiere UXP loads NO @font-face (spike 0.1.7: relative, plugin:/, .woff, runtime <style>, FontFace, data
+   URI all fail), so each stack names the brand family first (installed per user by the WhyNot Cut installer, or loaded
+   by fonts.css in CEP / Chromium) and then good Windows and macOS system fallbacks, ending in a generic family. The
+   panel must look right with the system fonts alone. */
 :root{
 /* surfaces */
 --twn-bg:#000000;
@@ -48,12 +54,14 @@
 --twn-radius:8px;
 --twn-radius-card:16px;
 --twn-radius-pill:999px;
+--twn-radius-control:16px;
 --twn-focus:0 0 0 2px #9D6BFF;
+--twn-cta-glow:0 0 10px rgba(217,92,155,.6);
 /* type: Syne 600/700 titles and uppercase eyebrows, Inter 300/400/600 UI, IBM Plex Sans Arabic for Arabic,
    IBM Plex Mono for commands and timecodes */
---twn-font-display:"Syne","Inter",system-ui,sans-serif;
---twn-font-ui:"Inter",system-ui,"Segoe UI",sans-serif;
---twn-font-ar:"IBM Plex Sans Arabic","Noto Sans Arabic","Segoe UI",sans-serif;
+--twn-font-display:"Syne","Segoe UI","Helvetica Neue",Helvetica,Arial,sans-serif;
+--twn-font-ui:"Inter","Segoe UI","Helvetica Neue",Helvetica,Arial,sans-serif;
+--twn-font-ar:"IBM Plex Sans Arabic","Segoe UI",Tahoma,"Geeza Pro",sans-serif;
 --twn-font-mono:"IBM Plex Mono",Consolas,"SF Mono",Menlo,monospace;
 --twn-weight-light:300;
 --twn-weight-regular:400;

@@ -1,6 +1,6 @@
 // Empty states teach (Addendum B4.5): no client, no clip, no engine -> what to do next, with exactly ONE button.
 import { button } from "./button.ts";
-import { esc, trusted, withCommands } from "./html.ts";
+import { prose, trusted, withCommands } from "./html.ts";
 import type { Act, Html } from "./html.ts";
 import { icon } from "./icons.ts";
 import type { IconName } from "./icons.ts";
@@ -19,7 +19,7 @@ export interface EmptyOpts {
 export function emptyState(o: EmptyOpts): Html {
   return trusted(
     `<div class="kit-empty" role="status"><span class="kit-empty-icon">${icon(o.icon ?? "info")}</span>` +
-      `<h3 class="kit-empty-title">${esc(o.title)}</h3><p class="kit-empty-text">${withCommands(o.text)}</p>` +
+      `<h3 class="kit-empty-title">${prose(o.title)}</h3><p class="kit-empty-text">${withCommands(o.text)}</p>` +
       button({ ...o.action, variant: o.primary === false ? "secondary" : "primary" }) +
       `</div>`,
   );

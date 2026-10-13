@@ -2,9 +2,9 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <!-- the brand kit (scripts/build.mjs copies them into the bundle): bundled fonts, the ONE token source
-         (brand/tokens.css), the panel kit's stylesheet, then the spike's own layout -->
-    <link rel="stylesheet" href="fonts.css" />
+    <!-- the brand kit (scripts/build.mjs copies them into the bundle): the ONE token source (brand/tokens.css), the panel
+         kit's stylesheet, then the spike's own layout. 0.1.8: no fonts.css (UXP loads no @font-face, spike 0.1.7), so
+         the style guide shows the kit as the plugin draws it: installed brand fonts or the system fallbacks. -->
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="kit.css" />
     <link rel="stylesheet" href="index.css" />

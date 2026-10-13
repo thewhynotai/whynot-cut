@@ -3,7 +3,7 @@
 // Arabic it fills from the right. Without a count the bar is indeterminate (no aria-valuenow).
 import type { Strings } from "../i18n.ts";
 import { button } from "./button.ts";
-import { clockOf, esc, fmtHtml, ltr, trusted } from "./html.ts";
+import { clockOf, esc, fmtHtml, ltr, prose, trusted } from "./html.ts";
 import type { DataAttrs, Html } from "./html.ts";
 
 export interface ProgressOpts {
@@ -36,7 +36,7 @@ export function progress(o: ProgressOpts): Html {
   const foot = elapsed || cancel ? `<div class="kit-progress-foot">${elapsed}<span class="kit-spacer"></span>${cancel}</div>` : "";
   return trusted(
     `<div class="kit-progress" role="group" aria-label="${esc(o.status)}">` +
-      `<div class="kit-progress-head"><span class="kit-progress-status">${esc(o.status)}</span>${count}</div>` +
+      `<div class="kit-progress-head"><span class="kit-progress-status">${prose(o.status)}</span>${count}</div>` +
       bar +
       foot +
       `</div>`,

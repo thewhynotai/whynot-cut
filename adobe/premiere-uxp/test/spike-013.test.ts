@@ -178,7 +178,7 @@ test("ws_loopback: reads engine.json, hellos as uxp/protocol 4 with the token, g
   const hello = JSON.parse(ws.sent[0] ?? "{}") as { type: string; token: string; client: Record<string, unknown> };
   assert.equal(hello.type, "hello");
   assert.equal(hello.token, TOKEN);
-  assert.deepEqual(hello.client, { kind: "uxp", version: "0.1.7", host: "premiere", hostVersion: "26.5.2", protocol: 4, capabilities: [] });
+  assert.deepEqual(hello.client, { kind: "uxp", version: "0.1.8", host: "premiere", hostVersion: "26.5.2", protocol: 4, capabilities: [] });
   assert.equal(JSON.parse(ws.sent[1] ?? "{}").type, "snapshot");
 
   const eng = stepNamed(r, "engine.json").info as Record<string, unknown>;
@@ -559,10 +559,10 @@ test("probe order: host_calls runs after project_views and before undo_transacti
 
 // ---- 0.1.3 packaging --------------------------------------------------------------------------------------------------
 
-test("spike 0.1.7 (the 0.1.3 probes + C2.7): manifest version + launchProcess (the product's entry plus the whynotcut scheme), SPIKE_VERSION, example config", () => {
+test("spike 0.1.8 (the 0.1.3 probes + C2.7): manifest version + launchProcess (the product's entry plus the whynotcut scheme), SPIKE_VERSION, example config", () => {
   const manifest = JSON.parse(readFileSync(join(root, "spike", "manifest.json"), "utf8"));
   const product = JSON.parse(readFileSync(join(root, "plugin", "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "0.1.7");
+  assert.equal(manifest.version, "0.1.8");
   // C2.7: openExternal("whynotcut://engine/start") needs its scheme in launchProcess; everything else is the product's entry
   assert.deepEqual(manifest.requiredPermissions.launchProcess, { schemes: ["file", "whynotcut"], extensions: [".mp4", ".mov", ".prproj", ""] });
   assert.deepEqual(manifest.requiredPermissions.launchProcess.extensions, product.requiredPermissions.launchProcess.extensions);
@@ -573,7 +573,7 @@ test("spike 0.1.7 (the 0.1.3 probes + C2.7): manifest version + launchProcess (t
   // list is shown to work live (round-1 evidence for "all": results-20261012-211920, parity W1/W2)
   assert.ok(Array.isArray(manifest.requiredPermissions.network.domains));
   assert.equal(product.requiredPermissions.network.domains, "all");
-  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0.1.7"/);
+  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0.1.8"/);
   const spike = readFileSync(join(root, "spike", "src", "spike.ts"), "utf8");
   assert.match(spike, /import \{ SPIKE_VERSION \} from "\.\/version\.ts"/);
   assert.doesNotMatch(spike, /SPIKE_VERSION = "/, "one source of truth for the version");

@@ -1,6 +1,10 @@
 // B-T1 font-bundle test (source side): styles/fonts.css declares the four brand families from files bundled under
 // panel-ui/fonts/ (byte copies of the OFL files vendored in guide-ar/fonts/, each folder with its OFL licence). No
 // network URL anywhere. The plugin package test checks the same files are inside the built .ccx.
+// Note (spike 0.1.7 CSS lab): Premiere UXP loads NO @font-face in any form, so no UXP page links fonts.css and the
+// panel is drawn with the token stacks' installed brand fonts or system fallbacks (tokens.test.ts, kit-uxp.test.ts).
+// These files still ship in the .ccx and serve CEP / Chromium (the dev harness, the After Effects panel); the
+// WhyNot Cut installer installs the brand fonts for the user.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";

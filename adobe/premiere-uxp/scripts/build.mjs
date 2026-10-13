@@ -13,7 +13,9 @@ export const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const EXTERNAL = ["premierepro", "uxp", "fs", "os", "path", "process"];
 
 /** The brand kit every bundle carries (Addendum B): the ONE token source (brand/tokens.css, copied as-is), the font
- *  faces and the bundled OFL font files (fonts.css sits next to fonts/, so its relative URLs resolve). The string table
+ *  faces and the bundled OFL font files (fonts.css sits next to fonts/, so its relative URLs resolve). Premiere UXP
+ *  loads no @font-face (spike 0.1.7), so no UXP page links fonts.css (0.1.8): it ships for CEP / Chromium and for the
+ *  font-bundle test; in Premiere the token stacks use the installed brand fonts or the system fallbacks. The string table
  *  (panel-ui/i18n/{en,ar}.json) needs no copy: esbuild bundles it into index.js wherever the panel kit is imported. */
 const BRAND_KIT = {
   "../../brand/tokens.css": "tokens.css",
@@ -24,8 +26,8 @@ const BRAND_KIT = {
 export const TARGETS = {
   spike: {
     entry: "spike/src/spike.ts",
-    // 0.1.6: the style guide renders the panel kit, so the spike carries kit.css too (index.html links fonts.css,
-    // tokens.css, kit.css, index.css in that order). 0.1.7: the CSS lab's lab.css (at the root, next to fonts.css, so
+    // 0.1.6: the style guide renders the panel kit, so the spike carries kit.css too (index.html links tokens.css,
+    // kit.css, index.css in that order; 0.1.8 dropped fonts.css, which UXP never loads). 0.1.7: the CSS lab's lab.css (at the root, next to fonts.css, so
     // its relative font URLs resolve alike) and lab/ (the .woff test fonts with their OFL texts, the bundled test icon)
     files: {
       "spike/manifest.json": "manifest.json",
@@ -43,8 +45,8 @@ export const TARGETS = {
       "plugin/manifest.json": "manifest.json",
       "plugin/index.html": "index.html",
       "plugin/index.css": "index.css",
-      // the brand kit, then the shared panel stylesheets, ship as-is (the page links fonts.css, tokens.css,
-      // panel.css, kit.css, index.css in that order; kit.css is scoped to .kit-root, so it changes nothing until B-T2
+      // the brand kit, then the shared panel stylesheets, ship as-is (the page links tokens.css, panel.css,
+      // kit.css, index.css in that order - no fonts.css, UXP loads no @font-face; kit.css is scoped to .kit-root, so it changes nothing until B-T2
       // screens use the kit)
       ...BRAND_KIT,
       "../panel-ui/styles/panel.css": "panel.css",

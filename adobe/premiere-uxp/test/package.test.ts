@@ -60,7 +60,8 @@ test("spike 0.1.6+: the bundle carries kit.css (as-is), the string table (EN + A
   const files = unzipSync(new Uint8Array(readFileSync(ccx)));
   assert.equal(new TextDecoder().decode(files["kit.css"]), readFileSync(join(root, "..", "panel-ui", "styles", "kit.css"), "utf8"));
   const html = new TextDecoder().decode(files["index.html"]);
-  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "kit.css", "index.css", "lab.css"]);
+  // 0.1.8: no fonts.css link (UXP loads no @font-face); the style guide shows the system-font fallbacks like the plugin
+  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["tokens.css", "kit.css", "index.css", "lab.css"]);
   // esbuild writes non-ASCII as \uXXXX escapes: read them back before looking for the Arabic strings
   const js = new TextDecoder().decode(files["index.js"]).replace(/\\u([0-9a-fA-F]{4})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
   const ar = JSON.parse(readFileSync(join(root, "..", "panel-ui", "i18n", "ar.json"), "utf8")) as Record<string, string>;
@@ -72,7 +73,7 @@ test("spike 0.1.6+: the bundle carries kit.css (as-is), the string table (EN + A
   assert.match(js, /kit-root/);
   assert.match(js, /whynotcut:\/\/engine\/start/);
   const manifest = JSON.parse(new TextDecoder().decode(files["manifest.json"]));
-  assert.equal(manifest.version, "0.1.7");
+  assert.equal(manifest.version, "0.1.8");
   assert.ok(Array.isArray(manifest.requiredPermissions.network.domains));
 });
 
@@ -90,5 +91,5 @@ test("spike 0.1.7: the bundle carries the CSS lab - lab.css at the root, every f
   const js = new TextDecoder().decode(files["index.js"]);
   assert.match(js, /lab-root/);
   assert.match(js, /css_lab/);
-  assert.equal(JSON.parse(new TextDecoder().decode(files["manifest.json"])).version, "0.1.7");
+  assert.equal(JSON.parse(new TextDecoder().decode(files["manifest.json"])).version, "0.1.8");
 });

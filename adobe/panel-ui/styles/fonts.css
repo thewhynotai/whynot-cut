@@ -2,7 +2,8 @@
    The files are byte copies of the OFL fonts vendored in guide-ar/fonts/ (each family folder carries its OFL.txt).
    Every bundle puts this file next to its fonts/ folder, so the URLs are relative to the bundle root.
    Only @font-face rules live here; the families are used through the token stacks in brand/tokens.css, which all end
-   in a generic family. If a host (Premiere UXP: unverified) ignores @font-face, the panel falls back to the stack.
+   in a generic family. Premiere UXP loads no @font-face at all (spike 0.1.7 CSS lab), so no UXP page links this file:
+   it serves CEP / Chromium, and in Premiere the stacks use the installed brand fonts or the system fallbacks.
    Weights shipped are the static files vendored today: Syne 700 (a 600 request resolves to it), Inter 400/600
    (a 300 request resolves to 400), IBM Plex Sans Arabic 300/400/600, IBM Plex Mono 400. */
 @font-face {

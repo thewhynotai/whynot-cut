@@ -1,9 +1,17 @@
-/* WhyNot Cut component kit (Addendum B, B-T1): the website's look for every panel screen. Loaded after fonts.css and
-   brand/tokens.css; every colour is a var(--twn-*) token (test/tokens.test.ts, test/contrast.test.ts).
-   UXP rules, from the live renders:
-   - flexbox only: no grid, no gap (margins instead), no sticky, no :has(); no [attr=value] selectors (state is a
-     class) - the valueless [disabled] on buttons is the one attribute selector;
+/* WhyNot Cut component kit (Addendum B, B-T1): the website's look for every panel screen. Loaded after brand/tokens.css
+   (and after fonts.css where the host loads @font-face: CEP, Chromium; never in Premiere UXP); every colour is a var(--twn-*) token (test/tokens.test.ts, test/contrast.test.ts).
+   UXP rules, from the live renders (Premiere 26.5.2; the spike 0.1.7 CSS lab, docs/adobe/uxp-parity.md):
+   - flexbox only: no grid, no gap (margins instead), no sticky, no :has(); no attribute selectors at all (state is a
+     class: a disabled control is .kit-btn-disabled);
    - every element the kit emits has an explicit display (UXP does not apply browser defaults to unknown elements);
+   - no <button>: UXP paints every <button> as Premiere's native grey control, so every control is a
+     <div role="button" tabindex="0"> (html.ts control()); its radius is the explicit half-height 16 px
+     (--twn-radius-control), never 999 px (999 px is for <span> chips only);
+   - icons: no fill attribute and no currentColor (UXP paints nothing); the fill is set here through .kit-ink-* classes;
+   - the whitespace between two flex children is dropped: a gap is .kit-gap-s, a PHYSICAL margin (margin-left in LTR,
+     margin-right under .kit-rtl); margin-inline-start does nothing in UXP;
+   - the main CTA's glow is a box-shadow (--twn-cta-glow): UXP cannot clip a gradient ring to a radius;
+   - @font-face loads nothing in UXP: the token stacks fall back to system fonts (brand family first);
    - no inline-flex / inline-block inside running text: chips and command chips sit on their own flex rows;
    - <bdi> is set inline here; an explicit height chain (root > scroll) for the one scroll region;
    - hit targets at least 32 px; the focus ring is #9D6BFF (--twn-focus);
@@ -45,8 +53,19 @@
 .kit-spacer { display: block; flex: 1 1 auto; min-width: 8px; }
 .kit-text { display: block; margin: 0 0 8px 0; }
 
-/* ---- icons (inline SVG in currentColor) ---- */
+/* ---- icons (inline SVG; the fill comes from an ink class, never an attribute or currentColor) ---- */
 .kit-icon { display: block; flex: 0 0 auto; width: 16px; height: 16px; }
+.kit-ink-ok { fill: var(--twn-ok); }
+.kit-ink-warn { fill: var(--twn-warn); }
+.kit-ink-error { fill: var(--twn-error); }
+.kit-ink-info { fill: var(--twn-primary-text); }
+.kit-ink-accent { fill: var(--twn-accent); }
+.kit-ink-text { fill: var(--twn-text); }
+.kit-ink-muted { fill: var(--twn-text-muted); }
+.kit-ink-on-primary { fill: var(--twn-on-primary); }
+.kit-ink-on-ok { fill: var(--twn-on-ok); }
+.kit-ink-on-error { fill: var(--twn-on-error); }
+.kit-ink-on-accent { fill: var(--twn-on-accent); }
 
 /* ---- header ---- */
 .kit-hdr { display: flex; flex-direction: column; align-items: stretch; width: 100%; padding: 8px 8px 0 8px; }
@@ -75,7 +94,7 @@
   padding: 0 6px 0 10px;
   background: transparent;
   border: 1px solid var(--twn-accent);
-  border-radius: var(--twn-radius-pill);
+  border-radius: var(--twn-radius-control);
   color: var(--twn-text);
   font-family: inherit;
   font-size: 11px;
@@ -107,7 +126,8 @@
   margin: 0 4px;
   padding: 2px;
   border: 1px solid var(--twn-border);
-  border-radius: var(--twn-radius-pill);
+  /* half its 38 px height (32 px controls + 2 px padding + 1 px border): a <div>, so an explicit radius, never 999 */
+  border-radius: 19px;
 }
 .kit-lang-btn {
   display: flex;
@@ -119,7 +139,7 @@
   padding: 0 8px;
   background: transparent;
   border: 0;
-  border-radius: var(--twn-radius-pill);
+  border-radius: var(--twn-radius-control);
   color: var(--twn-text-muted);
   font-family: var(--twn-font-ui);
   font-size: 12px;
@@ -212,7 +232,7 @@
 .kit-rtl .kit-card-title { font-family: var(--twn-font-ar); }
 .kit-card-body { display: flex; flex-direction: column; align-items: stretch; }
 
-/* ---- buttons: primary (violet fill), secondary (glass), danger; 32 px; pill ---- */
+/* ---- buttons (<div role="button">): primary (violet fill), secondary (glass), danger; 32 px; 16 px radius ---- */
 .kit-btn {
   display: flex;
   flex-direction: row;
@@ -225,7 +245,7 @@
   margin: 0;
   padding: 6px 14px;
   border: 1px solid transparent;
-  border-radius: var(--twn-radius-pill);
+  border-radius: var(--twn-radius-control);
   font-family: inherit;
   font-size: 12px;
   font-weight: var(--twn-weight-semibold);
@@ -241,16 +261,21 @@
 .kit-btn-secondary:hover { border-color: var(--twn-primary-text); }
 .kit-btn-danger { background: var(--twn-error); color: var(--twn-on-error); }
 .kit-btn-block { width: 100%; }
-.kit-btn[disabled] { opacity: .45; cursor: default; }
-/* the main CTA's gradient border glow: a 1 px gradient ring around the primary button */
-.kit-glow { display: flex; flex-direction: row; flex: 0 0 auto; max-width: 100%; padding: 1px; background: var(--twn-gradient); border-radius: var(--twn-radius-pill); }
-.kit-glow-block { width: 100%; }
-.kit-glow .kit-btn { flex: 1 1 auto; }
+/* the main CTA's glow: a box-shadow (UXP cannot clip a gradient ring to a radius; spike 0.1.7) */
+.kit-btn-glow { box-shadow: var(--twn-cta-glow); }
+/* disabled: explicit muted colours (the lab's opacity on a div computed .45 but painted at full strength) */
+.kit-btn.kit-btn-disabled, .kit-btn.kit-btn-disabled:hover {
+  background: var(--twn-surface-2);
+  color: var(--twn-text-muted);
+  border-color: var(--twn-border);
+  box-shadow: none;
+  cursor: default;
+}
 .kit-btn-row { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin: 6px -3px 0 -3px; }
-.kit-btn-row .kit-btn, .kit-btn-row .kit-glow { margin: 3px; }
+.kit-btn-row .kit-btn { margin: 3px; }
 .kit-focus:focus { outline: none; box-shadow: var(--twn-focus); }
 
-/* ---- chips (999 px pills); status chips carry their icon ---- */
+/* ---- chips (999 px pills: a <span>, not a control); status chips carry their icon ---- */
 .kit-chips { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin: 0 -3px; }
 .kit-chip {
   display: flex;
@@ -396,7 +421,7 @@
   padding: 0;
   background: transparent;
   border: 0;
-  border-radius: var(--twn-radius-pill);
+  border-radius: var(--twn-radius-control);
   color: var(--twn-text-muted);
   cursor: pointer;
 }
@@ -505,6 +530,10 @@
 .kit-log-empty { display: block; margin: 4px 2px; color: var(--twn-text-muted); }
 .kit-log-foot { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin: 6px 0 0 0; }
 .kit-log-build { display: block; flex: 1 1 auto; min-width: 0; margin: 0 2px; color: var(--twn-text-muted); font-family: var(--twn-font-mono); font-size: 10.5px; }
+/* the build stamp: a left-to-right row of nowrap tokens that wraps only between them (log.ts buildStamp) */
+.kit-stamp { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: flex-start; direction: ltr; }
+.kit-rtl .kit-stamp { justify-content: flex-end; }
+.kit-stamp .kit-nowrap { display: block; }
 
 /* ---- frame grid (aspect from w/h via inline padding-top); two tiles a row from 280 px ---- */
 .kit-frames { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; margin: 0 -4px; }
@@ -569,3 +598,11 @@
 
 /* ---- footer ---- */
 .kit-foot { display: block; margin: 8px 0 0 0; padding: 10px 12px; border-top: 1px solid var(--twn-border); text-align: center; color: var(--twn-text-muted); font-size: 10.5px; }
+
+/* ---- gaps: the whitespace between two flex children is dropped (UXP and Chromium alike), and UXP ignores
+   margin-inline-*: the second of two side-by-side runs carries .kit-gap-s, a PHYSICAL margin on its start side
+   (left in LTR, right in RTL). A left-to-right island inside an Arabic panel (the build stamp) keeps margin-left.
+   Last in the file so it wins over each component's own margin. ---- */
+.kit-gap-s { margin-left: 6px; }
+.kit-rtl .kit-gap-s { margin-left: 0; margin-right: 6px; }
+.kit-rtl .kit-stamp .kit-gap-s { margin-left: 6px; margin-right: 0; }

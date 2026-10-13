@@ -131,7 +131,8 @@ test("the shipped bundle: UXP host modules stay external, no mock data, the engi
   assert.match(js, /build: `\$\{"\d{8}T\d{6}Z"\} \$\{"(?:[0-9a-f]{4,40}(?:-dirty)?|unknown)"\}`/);
   const html = text(files["index.html"]);
   assert.match(html, /<script[^>]+src="index\.js"/);
-  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "panel.css", "kit.css", "index.css"]);
+  // no fonts.css link (UXP loads no @font-face, spike 0.1.7); fonts.css + fonts/ still ship for CEP / Chromium
+  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["tokens.css", "panel.css", "kit.css", "index.css"]);
   assert.ok(!js.includes("sourceMappingURL"), "no source map reference in a shipped file");
 });
 
@@ -169,7 +170,8 @@ test("the shipped index.js boots like Premiere would run it: classic script, hos
   await new Promise((r) => setTimeout(r, 20));
   assert.ok(!required.includes("premierepro"), "premierepro waits for a button press or an engine command");
   assert.deepEqual([...new Set(required)].sort(), ["fs", "os", "uxp"], "only uxp, and fs / os for engine.json, at startup");
-  assert.deepEqual(listeners.sort(), ["click", "input"]);
+  // click, input, and keydown (Enter / Space on a kit control, panel-ui/src/kit/activate.ts)
+  assert.deepEqual(listeners.sort(), ["click", "input", "keydown"]);
   const html = painted[painted.length - 1] ?? "";
   assert.match(html, /not running/);
   assert.match(html, /Premiere Pro 26\.5\.2/);

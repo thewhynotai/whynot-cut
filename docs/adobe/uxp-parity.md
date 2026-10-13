@@ -235,6 +235,33 @@ The results files contain no token; this was checked against the live `engine.js
 Automation note: Adobe's dialogs ignore posted keyboard and mouse messages. Answering one needs a brief real foreground
 with a real click or key, at the coordinates of the process's DPI-virtualised window rect.
 
+## Spike 0.1.7 CSS lab (2026-10-13, run `065447`, mode `css_lab`)
+
+The lab view (`adobe/premiere-uxp/spike/src/css-lab.ts`) drew labelled variants of each kit technique that the 0.1.6
+style guide showed failing. It ran in Premiere Pro 26.5.2 (UXP 9.3.0), in a panel 582 px wide. The evidence is in
+`docs/adobe/evidence/ui-kit/uxp-lab-017/`: `lab-01.png` to `lab-04.png` (the lab top to bottom) and
+`results-20261013-065447.json` (`lab`: the computed values per variant; the summary is 44 pass, 54 fail, 4 n/a). Computed
+values alone do not prove paint, so the screenshots decide each row. The earlier failures are in
+`docs/adobe/evidence/ui-kit/uxp-live-016/`.
+
+| Technique | Measured (screenshot + computed) | Decision (kit, spike 0.1.8) |
+|---|---|---|
+| `<button>` with a background (rows A–D, G, H: flex or inline-block, radius 999 or 16, `background-color` longhand, `appearance:none`) | Every one paints as Premiere's **native grey control** with a lens-shaped outline. The computed background (#5400FB, #FF5C5C, glass) is correct but is not painted | The kit **never emits `<button>`** |
+| `<div role="button" tabindex="0">`, flex, radius 16 (row E) | Paints **exactly right**: primary #5400FB, danger, glass secondary. Disabled computed `opacity: .45`, but row E shows it at **full strength** | Every kit control is this `div` (`html.ts control()`): buttons, tabs (`role="tab"`), the ع/EN switch, the Needs-you badge, toast close, log toggle, frame tiles and checklist actions. Disabled is `aria-disabled="true"` + `.kit-btn-disabled` + `tabindex="-1"`, drawn with explicit muted colours (surface-2 / text-muted), not opacity. Enter and Space activate it (`kit/activate.ts`, wired in `mount.ts`) |
+| `sp-button` (row F) | Spectrum-styled: blue CTA and outlined variants, not the brand | Not used |
+| Radius on controls | 16 px (half the 32 px height) is clean on the `div`; 999 px is only proven on `<span>` chips | Controls use `--twn-radius-control` (16 px); `<span>` chips keep 999 px |
+| Gradient ring around the CTA (GA wrapper r999 + 1 px padding; GB wrapper r16; GC `border-image`; GD a gradient layer behind) | None is clean. With a radius, the wrapper's gradient corners show **square** (GA, GB, GD); `border-image` shows **nothing** (GC) | `.kit-glow` is dropped. The main CTA gets a **box-shadow** glow, `--twn-cta-glow: 0 0 10px rgba(217,92,155,.6)`. It is **one shadow**, because only a single spread shadow (the focus ring) is proven and a multi-shadow value is not. The gradient is now used only for the hairline and progress. This is a deviation from Addendum B ("CTA glow = shadow; UXP cannot clip a gradient ring"), recorded in the phase 6 plan, Task 2 |
+| SVG fill (S1 `fill="currentColor"`, S2 `fill="#3DD68C"` attribute, S5 `<img>` data URL, S6 `<img>` bundled file) | **Nothing** paints, in a chip, inline, in a row or as a block | Icons carry **no fill attribute** |
+| SVG fill from CSS (S3 `.x path { fill }`, S4 `fill` on the svg element) | Paints in every context | Each icon carries one ink class (`kit-ink-ok`, `-warn`, `-error`, `-info`, `-accent`, `-text`, `-muted`, `-on-primary`, `-on-ok`, `-on-error`, `-on-accent`), and kit.css fills it from a token. The default ink is the status colour; buttons and step dots pass the text colour of their fill |
+| `@font-face` (relative `fonts/..ttf` with or without `format()`, `plugin:/`, `./`, `.woff`, a runtime `<style>`, the FontFace API, bytes read from the plugin folder, a data: URI) | **None loads**: every row measures like the fallback-only reference. `FontFace` and `document.fonts` are undefined | The token stacks put the brand family first, then Windows / macOS system fonts: Arabic `"IBM Plex Sans Arabic","Segoe UI",Tahoma,"Geeza Pro",sans-serif`; mono `"IBM Plex Mono",Consolas,"SF Mono",Menlo,monospace`; display / UI `"Syne"` / `"Inter"` then `"Segoe UI","Helvetica Neue",Helvetica,Arial,sans-serif`. The installer installs the brand fonts for the user (request filed). No UXP page links `fonts.css` any more; it still ships in the bundles for CEP / Chromium and for the font-bundle test |
+| Whitespace between two flex children (W1–W4: literal space, space inside the span, `&nbsp;` between or inside) | **Dropped**, in Chromium too: this is how flexbox works | Each pair of side-by-side runs gets the gap class `.kit-gap-s` on its second run: badge label + count, log chevron + label + count, chip icon + text, button icon + label, step dot + name, tab label + count, build-stamp tokens |
+| Logical spacing (W5 `margin-inline-start`, W7 `padding-inline-start`) | Does **nothing** in UXP | Not used (a test forbids `*-inline-*`) |
+| Physical spacing (W6 `margin-left`, or `margin-right` under `.lab-rtl`; W8 the padding form) | Works, in LTR and RTL | `.kit-gap-s { margin-left: 6px }`, `.kit-rtl .kit-gap-s { margin-left: 0; margin-right: 6px }`. The build stamp is a left-to-right flex row, so it keeps `margin-left` inside an Arabic panel |
+| Arabic and a Latin word in one run (the font rows) | The run's shaping breaks when a Latin word shares the span | Latin words inside Arabic copy become `<bdi dir="ltr">` runs (`html.ts isolateLatin()` / `prose()`, applied in `withCommands`, `auto`, progress status, dialog and empty-state titles). An English term in parentheses stays as it is. A test checks that the Arabic gallery has no bare Latin word outside a left-to-right run |
+
+Still to see live (spike 0.1.8 style guide): whether the `box-shadow` blur paints, and whether the gap margins, the ink
+fills and the disabled colours look right across the whole kit.
+
 ## Product panel in real UXP
 
 The WhyNot Cut product panel was loaded in Premiere as real UXP (screenshot

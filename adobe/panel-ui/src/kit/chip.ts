@@ -1,6 +1,8 @@
-// Pills / chips: small 999 px labels. Status tones (ok, warn, error, info) always carry their icon. LTR chips
-// (timecodes, file names, commands) are mono <bdi dir="ltr"> runs. Chips sit in a .kit-chips flex row, never inside a
-// sentence (UXP draws inline-flex over running text).
+// Pills / chips: small 999 px labels (a <span>, not a control: the 999 px radius paints fine on it in UXP). Status
+// tones (ok, warn, error, info) always carry their icon (filled through its ink class, icons.ts), and the text after
+// the icon carries kit-gap-s (the whitespace between flex children is dropped). LTR chips (timecodes, file names,
+// commands) are mono <bdi dir="ltr"> runs. Chips sit in a .kit-chips flex row, never inside a sentence (UXP draws
+// inline-flex over running text).
 import { esc, join, ltr, trusted } from "./html.ts";
 import type { Html } from "./html.ts";
 import { icon, isStatus } from "./icons.ts";
@@ -19,7 +21,7 @@ export function chip(o: ChipOpts): Html {
   const tone: ChipTone = o.tone && TONES.includes(o.tone) ? o.tone : "neutral";
   const ic = isStatus(tone) ? icon(tone) : "";
   const text = o.ltr ? ltr(o.label) : esc(o.label);
-  return trusted(`<span class="kit-chip kit-chip-${tone}${o.ltr ? " kit-chip-mono" : ""}">${ic}<span class="kit-chip-text">${text}</span></span>`);
+  return trusted(`<span class="kit-chip kit-chip-${tone}${o.ltr ? " kit-chip-mono" : ""}">${ic}<span class="kit-chip-text${ic ? " kit-gap-s" : ""}">${text}</span></span>`);
 }
 
 export const chips = (list: readonly Html[]): Html => trusted(`<div class="kit-chips">${join(list)}</div>`);

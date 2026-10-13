@@ -7,7 +7,7 @@
 // Results go to the results file under `ui_probes`:
 //   fonts        - does @font-face (fonts.css, bundled OFL files) load? computed font-family + the text width of a sample
 //                  in Syne / Inter / IBM Plex Sans Arabic / IBM Plex Mono vs the same text in a fallback family
-//   svg          - inline <svg> status icon: box > 0, computed fill / color (fill="currentColor")
+//   svg          - inline <svg> status icon: box > 0, computed fill / color (0.1.8: no fill attribute, the kit-ink-ok class)
 //   box_shadow   - the focus ring (box-shadow: var(--twn-focus)) and a literal shadow: computed values
 //   gradient     - the header hairline / progress fill (var(--twn-gradient)) and a literal gradient: computed values
 //   kit_code     - the inline <bdi class="kit-code"> run inside a sentence: computed display / background / font / box
@@ -227,7 +227,8 @@ export const svgProbe: ProbeDef<UiCtx> = {
   run: async (ctx) => {
     const { stage } = ctx;
     const t = stringsFor("en");
-    // the status icon in the ok colour, the way a toast / chip draws it (fill="currentColor")
+    // the status icon in the ok colour, the way a toast / chip draws it (0.1.8: its kit-ink-ok class sets the CSS fill;
+    // 0.1.7 drew it with fill="currentColor", which UXP does not paint)
     await mountAndSettle(ctx, `<div id="wnc-svg-wrap" style="display:flex; flex-direction:row; color:var(--twn-ok);">${statusIcon("ok", t)}</div>`);
     try {
       const svg = stage.query("#wnc-svg-wrap svg");

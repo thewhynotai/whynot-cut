@@ -18,3 +18,4 @@ export * from "./log.ts";
 export * from "./frames.ts";
 export * from "./waveform.ts";
 export * from "./root.ts";
+export * from "./activate.ts";

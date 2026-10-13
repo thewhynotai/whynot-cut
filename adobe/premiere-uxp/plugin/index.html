@@ -2,7 +2,8 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <link rel="stylesheet" href="fonts.css" />
+    <!-- no fonts.css: Premiere UXP loads no @font-face (spike 0.1.7); the token stacks use the installed brand fonts or the
+         system fallbacks. fonts.css + fonts/ stay in the bundle for CEP / Chromium (adobe/panel-ui/styles/fonts.css). -->
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="panel.css" />
     <link rel="stylesheet" href="kit.css" />

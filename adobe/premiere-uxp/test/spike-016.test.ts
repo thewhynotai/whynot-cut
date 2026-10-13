@@ -139,8 +139,8 @@ test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback netw
   const product = JSON.parse(read("plugin/manifest.json"));
   assert.equal(m.name, "WhyNot Cut Spike");
   assert.equal(m.entrypoints[0].label.default, "WhyNot Cut Spike");
-  assert.equal(m.version, "0.1.7");
-  assert.match(read("spike/src/version.ts"), /SPIKE_VERSION = "0\.1\.7"/);
+  assert.equal(m.version, "0.1.8");
+  assert.match(read("spike/src/version.ts"), /SPIKE_VERSION = "0.1.8"/);
   assert.deepEqual(m.requiredPermissions.network.domains, [...LOOPBACK_DOMAINS]);
   // the port-wildcard forms, plus the exact port-less forms (two of which failed in round 1: parity W1/W2)
   for (const d of ["ws://127.0.0.1:*", "ws://localhost:*", "http://127.0.0.1:*", "http://localhost:*", "ws://127.0.0.1", "http://127.0.0.1"]) assert.ok(LOOPBACK_DOMAINS.includes(d), d);
@@ -149,10 +149,10 @@ test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback netw
   assert.equal(product.requiredPermissions.network.domains, "all", "the product manifest stays at \"all\"");
 });
 
-test("spike page: links fonts.css, tokens.css, kit.css, index.css; has the style guide view and its toggles; no Claude Code", () => {
+test("spike page: links tokens.css, kit.css, index.css; has the style guide view and its toggles; no Claude Code", () => {
   const html = read("spike/index.html");
-  // 0.1.7 adds lab.css (the CSS lab) last
-  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "kit.css", "index.css", "lab.css"]);
+  // 0.1.7 adds lab.css (the CSS lab) last; 0.1.8 drops fonts.css (UXP loads no @font-face)
+  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["tokens.css", "kit.css", "index.css", "lab.css"]);
   for (const id of ["main-view", "guide-view", "guide-frame", "guide-host", "guide-caption", "guide-open", "guide-back", "guide-en", "guide-ar", "guide-w280", "guide-w340", "guide-w480", "run", "run-keep", "copy", "status", "out", "lab-open", "lab-view", "lab-host", "lab-caption", "lab-back"]) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
@@ -219,7 +219,7 @@ test("style guide view: shows the kit gallery for the chosen language in a 280 /
   assert.equal(e.frame!.style.width, "480px");
   assert.match(e.host!.innerHTML, /class="kit-root kit-rtl" dir="rtl" lang="ar"/);
   assert.equal(e.caption!.textContent, guideCaption({ lang: "ar", width: 480 }));
-  assert.match(e.caption!.textContent, /AR - 480 px - spike 0\.1\.7/);
+  assert.match(e.caption!.textContent, /AR - 480 px - spike 0\.1\.8/);
   assert.equal(e.ar!.className, "seg on");
   assert.equal(e.w480!.className, "seg on");
   e.en!.click();
@@ -307,7 +307,9 @@ test("ui svg: the status icon's box > 0 passes and its computed fill / colour ar
   assert.deepEqual(d.svg_box, { width: 16, height: 16 });
   assert.equal(d.svg_fill, "rgb(61, 214, 140)");
   assert.equal(d.path_fill, "rgb(61, 214, 140)");
-  assert.match(mounted[0]!, /<svg class="kit-icon kit-icon-ok"[^>]*fill="currentColor"/);
+  // 0.1.8: the kit's icon has no fill attribute; its ink class sets the CSS fill (fill="currentColor" painted nothing)
+  assert.match(mounted[0]!, /<svg class="kit-icon kit-icon-ok kit-ink-ok"/);
+  assert.doesNotMatch(mounted[0]!, /<svg[^>]*\sfill=/);
   assert.equal((await uiRun("svg", fakeStage({ width: () => 0 }).stage)).ok, false);
   const gone = await uiRun("svg", fakeStage({ missing: /svg/ }).stage);
   assert.equal(gone.ok, false);
@@ -507,7 +509,7 @@ test("openExternal: called once with whynotcut://engine/start; resolved value, e
   const r = await runProbe(openExternalProbe, { uxp, ppro: {}, fs: {}, home: HOME, now: () => t });
   assert.deepEqual(calls.map((c) => c.url), [ENGINE_START_URL]);
   assert.equal(ENGINE_START_URL, "whynotcut://engine/start");
-  assert.match(String(calls[0]!.why), /WhyNot Cut spike 0\.1\.7/);
+  assert.match(String(calls[0]!.why), /WhyNot Cut spike 0\.1\.8/);
   assert.equal(r.ok, true);
   const d = r.detail as Record<string, unknown>;
   assert.equal(d.settled, "resolved");

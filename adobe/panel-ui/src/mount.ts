@@ -18,6 +18,7 @@ import { initialUi, render, renderError, renderLoading } from "./render.ts";
 import type { FixAction, Notice, UiState } from "./render.ts";
 import type { StringKey } from "./i18n.ts";
 import type { LogLine, PanelDataSource, PanelState, Result } from "./source.ts";
+import { kitDisabled, kitKeyHandler } from "./kit/activate.ts";
 
 /** the panel's own log lines kept (the source keeps its own) */
 const LOCAL_LOG_MAX = 50;
@@ -275,7 +276,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
 
   function handleClick(e: PanelEvent): void {
     const el = e.target?.closest("[data-action]") ?? null;
-    if (!el) return;
+    if (!el || kitDisabled(el)) return;
     dispatch(el.getAttribute("data-action"), el, false);
   }
 
@@ -425,6 +426,8 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
 
   root.addEventListener("click", onClick);
   root.addEventListener("input", onInput);
+  const onKey = kitKeyHandler(onClick); // Enter / Space on a kit control = its click (src/kit/activate.ts)
+  root.addEventListener("keydown", onKey);
 
   // Subscribe first, then ask for the snapshot: a change that lands in between is not lost, and a pushed
   // state that arrives before the snapshot answers wins (it is newer).
@@ -460,6 +463,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       off = null;
       root.removeEventListener("click", onClick);
       root.removeEventListener("input", onInput);
+      root.removeEventListener("keydown", onKey);
     },
   };
 }

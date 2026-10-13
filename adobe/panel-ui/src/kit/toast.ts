@@ -9,7 +9,7 @@
 import type { Strings } from "../i18n.ts";
 import { runtimeText } from "../commands.ts";
 import { button, buttonRow } from "./button.ts";
-import { esc, trusted, withCommands } from "./html.ts";
+import { control, esc, trusted, withCommands } from "./html.ts";
 import type { Act, Html } from "./html.ts";
 import { icon, isStatus, statusIcon } from "./icons.ts";
 import type { StatusKind } from "./icons.ts";
@@ -42,7 +42,11 @@ export function toast(o: ToastOpts): Html {
   const close =
     o.dismiss === false
       ? ""
-      : `<button type="button" class="kit-x kit-focus" data-action="dismiss-toast" aria-label="${esc(o.t["notice.dismiss"])}" title="${esc(o.t["notice.dismiss"])}">${icon("close")}</button>`;
+      : control({
+          cls: ["kit-x", "kit-focus"],
+          attrs: { "data-action": "dismiss-toast", "aria-label": o.t["notice.dismiss"], title: o.t["notice.dismiss"] },
+          body: icon("close"),
+        });
   const alert = kind === "error";
   return trusted(
     `<div class="kit-toast kit-toast-${kind}" role="${alert ? "alert" : "status"}" aria-live="${alert ? "assertive" : "polite"}">` +
