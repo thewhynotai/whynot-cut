@@ -36,18 +36,21 @@ CORE_NAMESPACES = {
     "wnc_ae_bridge.jsx": "WNCAE",
     "wnc_ae_lib.jsx": "WNC",
     "wnc_motion_lib.jsx": "WNCM",
-    # today's names (pre-D18 rename), so the report-only run over nh_*.jsx judges them by their own namespace
-    "nh_ppro_lib.jsx": "NHPP",
-    "nh_ae_bridge.jsx": "NHAE",
-    "nh_ae_lib.jsx": "NH",
-    "nh_motion_lib.jsx": "NHM",
-    "nh_ps_lib.jsx": "NHPS",
+    "wnc_ps_lib.jsx": "WNCPS",
 }
 
-# Top-level helpers the existing libraries need besides their namespace object. Everything else is reported.
-# NHAE_HERE / WNCAE_HERE: the bridge's own folder, read at TOP LEVEL because the libraries it $.evalFile()s must run at
-# top level too (inside a function their globals would stay local: "NHM is undefined", seen live in AE 26.5).
-ALLOWED_GLOBALS = frozenset({"NHAE_HERE", "WNCAE_HERE"})
+# D18 (3.0 only, removed in 3.1): the legacy 3.1.1 bridge evaluates `NHPP.run(...)` / `NHAE.run(...)` after the
+# library, so these two files may also declare that one old name, as `var NHPP = WNCPP;` / `var NHAE = WNCAE;`.
+LEGACY_ALIASES = {
+    "wnc_ppro_lib.jsx": frozenset({"NHPP"}),
+    "wnc_ae_bridge.jsx": frozenset({"NHAE"}),
+}
+
+# Top-level helpers a library needs besides its namespace object (none today). Everything else is reported.
+# The AE bridge's own folder is WNCAE_HERE (inside the WNCAE namespace), read at TOP LEVEL because the libraries it
+# $.evalFile()s must run at top level too (inside a function their globals would stay local: "NHM is undefined", seen
+# live in AE 26.5 with the pre-D18 names).
+ALLOWED_GLOBALS = frozenset()
 
 RULES = ("ascii", "es3", "namespace", "ternary")
 
@@ -326,6 +329,7 @@ def lint_file(path, namespace=None, overrides=None, allowed=(), display=None):
     path = Path(path)
     text = path.read_bytes().decode("utf-8", errors="replace")
     ns = namespace or namespace_for(path, overrides)
+    allowed = frozenset(allowed) | LEGACY_ALIASES.get(path.name, frozenset())
     return lint_source(text, ns, display or str(path), allowed)
 
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://thewhynot.ai/whynot-cut/contract/4/open_project.schema.json",
   "title": "open_project",
-  "description": "UXP-only. Open (or activate) the project at a path. Replaces the CEP-era NHPP.activateProject that export_frames did implicitly.",
+  "description": "UXP-only. Open (or activate) the project at a path. Replaces the CEP-era WNCPP.activateProject that export_frames did implicitly.",
   "$defs": {
     "data": {
       "type": "object",

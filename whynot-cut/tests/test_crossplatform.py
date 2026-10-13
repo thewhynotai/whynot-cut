@@ -283,8 +283,8 @@ class TestPremiereWindowsFixes(unittest.TestCase):
     job where every frame failed was reported with error None."""
 
     def test_frame_export_paths_are_native(self):
-        jsx = (SK / "templates/premiere/nh_ppro_lib.jsx").read_text(encoding="utf-8")
-        self.assertIn("NHPP.outPath = function", jsx)
+        jsx = (SK / "templates/premiere/wnc_ppro_lib.jsx").read_text(encoding="utf-8")
+        self.assertIn("WNCPP.outPath = function", jsx)
         self.assertNotIn('d.out_dir + "/', jsx)
 
     def test_failed_frames_are_reported(self):
@@ -1086,9 +1086,9 @@ class TestClientPlanRules(unittest.TestCase):
             self.assertEqual(em["content"], "changed")
 
     def test_bridge_sets_grain_by_intensity_or_amount(self):
-        jsx = (SK / "templates/premiere/nh_ppro_lib.jsx").read_text(encoding="utf-8")
-        self.assertIn('NHPP.prop(nc, "Intensity") || NHPP.prop(nc, "Amount of Noise")', jsx)   # Premiere 26 default is 50
-        self.assertIn("NHPP.actions.clip_components", jsx)
+        jsx = (SK / "templates/premiere/wnc_ppro_lib.jsx").read_text(encoding="utf-8")
+        self.assertIn('WNCPP.prop(nc, "Intensity") || WNCPP.prop(nc, "Amount of Noise")', jsx)   # Premiere 26 default is 50
+        self.assertIn("WNCPP.actions.clip_components", jsx)
 
 
 class TestMainFootageFraming(unittest.TestCase):

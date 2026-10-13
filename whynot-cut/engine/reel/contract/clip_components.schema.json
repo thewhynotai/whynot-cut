@@ -31,7 +31,7 @@
         "sequence_name"
       ],
       "additionalProperties": false,
-      "description": "Which clip to read (NHPP.actions.clip_components)."
+      "description": "Which clip to read (WNCPP.actions.clip_components)."
     },
     "readback": {
       "type": "object",

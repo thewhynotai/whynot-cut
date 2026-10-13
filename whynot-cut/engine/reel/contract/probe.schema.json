@@ -55,7 +55,7 @@
         "project",
         "sequences"
       ],
-      "description": "Premiere version, project and one entry per sequence (NHPP.actions.probe)."
+      "description": "Premiere version, project and one entry per sequence (WNCPP.actions.probe)."
     }
   }
 }

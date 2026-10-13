@@ -125,7 +125,7 @@ class _Home(unittest.TestCase):
         self._ctx = common.use_context(common.Context(home=self.home))
         self._ctx.__enter__()
         self.q = ppro_bridge.queue_dir()
-        self.script = self.home / "ppro-scripts" / "nh_ppro_lib.jsx"
+        self.script = self.home / "ppro-scripts" / "wnc_ppro_lib.jsx"
         self.script.parent.mkdir(parents=True)
         self.script.write_text("// x", encoding="utf-8")
 

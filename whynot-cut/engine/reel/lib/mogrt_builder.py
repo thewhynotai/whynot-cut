@@ -30,9 +30,9 @@ def generate(paths: Paths) -> Path:
             "mogrt_dir": str(d), "mogrt_frames": round(4 * fps),   # 4.0 s at any rate (96 only at 24 fps)
             "aep_path": str(d / "NH_MOGRT_TEMPLATES.aep"),
             "new_project": True, "render_template": "High Quality with Alpha", "render_dir": str(d), "logo": None}
-    lib = (TEMPLATES_DIR / "after_effects/nh_ae_lib.jsx").read_text(encoding="utf-8")
-    js = ("// AUTO-GENERATED MOGRT build — " + now_iso() + "\nvar NH_DATA = " + json.dumps(data, ensure_ascii=True) +
-          ";\n" + lib + "\nNH.buildMogrts();\n")
+    lib = (TEMPLATES_DIR / "after_effects/wnc_ae_lib.jsx").read_text(encoding="utf-8")
+    js = ("// AUTO-GENERATED MOGRT build — " + now_iso() + "\nvar WNC_DATA = " + json.dumps(data, ensure_ascii=True) +
+          ";\n" + lib + "\nWNC.buildMogrts();\n")
     p = d / "build_mogrts.jsx"
     write_text(p, js)
     return p

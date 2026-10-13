@@ -52,7 +52,7 @@
         "project",
         "projects_open"
       ],
-      "description": "Premiere ping (NHPP.actions.ping). The UXP plugin has no build number and omits `build`."
+      "description": "Premiere ping (WNCPP.actions.ping). The UXP plugin has no build number and omits `build`."
     },
     "aftereffects": {
       "type": "object",
@@ -110,7 +110,7 @@
         "libs_loaded",
         "scripts_dir"
       ],
-      "description": "After Effects ping (NHAE.actions.ping)."
+      "description": "After Effects ping (WNCAE.actions.ping)."
     }
   }
 }

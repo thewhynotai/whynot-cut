@@ -76,7 +76,7 @@
         "family",
         "style"
       ],
-      "description": "NHAE.fontInfo: found/substitute read by motion_build.preconditions (a font that is not found or is a substitute blocks the build)."
+      "description": "WNCAE.fontInfo: found/substitute read by motion_build.preconditions (a font that is not found or is a substitute blocks the build)."
     }
   }
 }

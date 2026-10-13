@@ -1,5 +1,5 @@
 """3.0 T2.18 - the After Effects extras (clip graphics, MOGRTs) take their frame rate from the profile, and a render
-counts only when this run wrote it (spec: nh_ae_lib.jsx hard-coded NH.FPS = 24; MI-13).
+counts only when this run wrote it (spec: wnc_ae_lib.jsx hard-coded WNC.FPS = 24; MI-13).
 Run:  bash tools/test.sh -p test_ae_extras.py
 """
 import sys as _sys
@@ -26,7 +26,7 @@ sys.path.insert(0, str(SK / "engine" / "reel"))
 from lib import common, plat  # noqa: E402
 from lib.common import Paths, write_json  # noqa: E402
 
-LIB_JSX = SK / "templates/after_effects/nh_ae_lib.jsx"
+LIB_JSX = SK / "templates/after_effects/wnc_ae_lib.jsx"
 ARABIC = "عميل"          # a client folder named in Arabic
 
 
@@ -40,9 +40,9 @@ def client(tmp: Path, timebase: int, ntsc: bool, name: str = "Client") -> Path:
 
 
 def nh_data(jsx: Path) -> dict:
-    """The NH_DATA object a generated build script defines."""
+    """The WNC_DATA object a generated build script defines."""
     text = jsx.read_text(encoding="utf-8")
-    start = text.index("var NH_DATA = ") + len("var NH_DATA = ")
+    start = text.index("var WNC_DATA = ") + len("var WNC_DATA = ")
     return json.JSONDecoder().raw_decode(text[start:])[0]
 
 
@@ -101,7 +101,7 @@ class TestExtrasFps(TempDir):
             data = nh_data(jsx)
             self.assertEqual(data["mogrt_frames"], frames, (tb, ntsc))
             self.assertAlmostEqual(data["mogrt_frames"] / data["fps"], 4.0, delta=0.02, msg=(tb, ntsc))
-        self.assertIn("Math.round(4 * NH.FPS)", LIB_JSX.read_text(encoding="utf-8"))   # the library's own default
+        self.assertIn("Math.round(4 * WNC.FPS)", LIB_JSX.read_text(encoding="utf-8"))   # the library's own default
 
     def test_a_plan_made_at_another_rate_is_flagged(self):
         from lib import ae_builder
@@ -123,10 +123,10 @@ class TestExtrasFps(TempDir):
 
     def test_library_sets_the_rate_from_the_data_before_building(self):
         text = LIB_JSX.read_text(encoding="utf-8")
-        self.assertIn("NH.applyFps = function", text)
-        for fn in ("NH.build = function", "NH.buildMogrts = function"):
+        self.assertIn("WNC.applyFps = function", text)
+        for fn in ("WNC.build = function", "WNC.buildMogrts = function"):
             body = text[text.index(fn):]
-            self.assertIn("NH.applyFps();", body[:body.index("app.beginUndoGroup") + 80], fn)
+            self.assertIn("WNC.applyFps();", body[:body.index("app.beginUndoGroup") + 80], fn)
 
     @unittest.skipUnless(shutil.which("node"), "needs node to run the library's plain-JS part")
     def test_apply_fps_runs(self):
@@ -134,9 +134,9 @@ class TestExtrasFps(TempDir):
         for data, want in (({"fps": 29.97}, [29.97, 24]), ({"fps": 25}, [25, 24]), ({"fps": 0}, [24, 24]),
                            ({}, [24, 24])):
             js = self.tmp / "t.js"
-            js.write_text(f"var NH_DATA = {json.dumps(data)};\n{lib}\nNH.applyFps(); var a = NH.FPS; "
-                          "NH_DATA = {}; NH.FPS = 1; NH.applyFps();\n"
-                          "console.log(JSON.stringify([a, NH.FPS]));", encoding="utf-8")
+            js.write_text(f"var WNC_DATA = {json.dumps(data)};\n{lib}\nWNC.applyFps(); var a = WNC.FPS; "
+                          "WNC_DATA = {}; WNC.FPS = 1; WNC.applyFps();\n"
+                          "console.log(JSON.stringify([a, WNC.FPS]));", encoding="utf-8")
             r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(json.loads(r.stdout), want, data)
@@ -168,9 +168,9 @@ class TestExtrasFrameSize(TempDir):
 
     def test_library_sets_the_size_from_the_data_before_building(self):
         text = LIB_JSX.read_text(encoding="utf-8")
-        for fn in ("NH.build = function", "NH.buildMogrts = function"):
+        for fn in ("WNC.build = function", "WNC.buildMogrts = function"):
             body = text[text.index(fn):]
-            self.assertIn("NH.applyFrameSize();", body[:body.index("app.beginUndoGroup") + 80], fn)
+            self.assertIn("WNC.applyFrameSize();", body[:body.index("app.beginUndoGroup") + 80], fn)
 
     @unittest.skipUnless(shutil.which("node"), "needs node to run the library's plain-JS part")
     def test_apply_frame_size_runs(self):
@@ -178,8 +178,8 @@ class TestExtrasFrameSize(TempDir):
         for data, want in (({"w": 1080, "h": 1350}, [1080, 1350]), ({"w": 1920, "h": 1080}, [1920, 1080]),
                            ({}, [1080, 1920]), ({"w": 0, "h": -5}, [1080, 1920])):
             js = self.tmp / "t.js"
-            js.write_text(f"var NH_DATA = {json.dumps(data)};\n{lib}\nNH.applyFrameSize();\n"
-                          "console.log(JSON.stringify([NH.W, NH.H]));", encoding="utf-8")
+            js.write_text(f"var WNC_DATA = {json.dumps(data)};\n{lib}\nWNC.applyFrameSize();\n"
+                          "console.log(JSON.stringify([WNC.W, WNC.H]));", encoding="utf-8")
             r = subprocess.run(["node", str(js)], capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(json.loads(r.stdout), want, data)

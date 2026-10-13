@@ -44,7 +44,7 @@ class TestEngineHomeAfterImport(TempDir):
                 self.assertEqual(common.current_context().engine_home, home)
                 self.assertEqual(ppro_bridge.queue_dir(), home / "ppro-queue")
                 self.assertEqual(ppro_bridge.scripts_dir(), home / "ppro-scripts")
-                self.assertEqual(ppro_bridge.lib_path(), home / "ppro-scripts" / "nh_ppro_lib.jsx")
+                self.assertEqual(ppro_bridge.lib_path(), home / "ppro-scripts" / "wnc_ppro_lib.jsx")
                 self.assertEqual(ae_bridge.queue_dir(), home / "ae-queue")
                 self.assertEqual(ae_bridge.entry_path(), home / "ae-scripts" / ae_bridge.ENTRY_NAME)
                 self.assertEqual(ae_probe.caps_file(), home / "ae-capabilities.json")
@@ -60,7 +60,7 @@ class TestEngineHomeAfterImport(TempDir):
         with mock.patch.dict(os.environ, {"WHYNOT_HOME": str(self.tmp / "h")}):
             r = ppro_bridge.sync_scripts()
             self.assertEqual(r["scripts_dir"], str(self.tmp / "h" / "ppro-scripts"))
-            self.assertTrue((self.tmp / "h" / "ppro-scripts" / "nh_ppro_lib.jsx").is_file())
+            self.assertTrue((self.tmp / "h" / "ppro-scripts" / "wnc_ppro_lib.jsx").is_file())
             self.assertEqual(ae_bridge.sync_scripts()["scripts_dir"], str(self.tmp / "h" / "ae-scripts"))
 
     def test_no_module_level_home_constants(self):

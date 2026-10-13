@@ -352,18 +352,18 @@ class ContractFilesTests(unittest.TestCase):
     def test_cep_names_are_the_real_extendscript_actions(self):
         """No drift between protocol.json and what the CEP libraries actually register."""
         proto = json.loads((contract.CONTRACT_DIR / "protocol.json").read_text(encoding="utf-8"))
-        pp = (SK / "templates/premiere/nh_ppro_lib.jsx").read_text(encoding="utf-8")
-        ae = (SK / "templates/after_effects/nh_ae_bridge.jsx").read_text(encoding="utf-8")
+        pp = (SK / "templates/premiere/wnc_ppro_lib.jsx").read_text(encoding="utf-8")
+        ae = (SK / "templates/after_effects/wnc_ae_bridge.jsx").read_text(encoding="utf-8")
         for name, e in proto["actions"].items():
             if not e["cep"] or e["status"] == "reserved":        # WNC_* functions arrive with Phase 6B (T6.11-T6.14)
                 continue
             if e["host"] == "aftereffects":
-                self.assertIn(f"NHAE.actions.{e['cep']} =", ae, name)
+                self.assertIn(f"WNCAE.actions.{e['cep']} =", ae, name)
             elif e["host"] == "premiere":
-                self.assertIn(f"NHPP.actions.{e['cep']} =", pp, name)
+                self.assertIn(f"WNCPP.actions.{e['cep']} =", pp, name)
             else:                                   # any: both hosts register it
-                self.assertIn(f"NHPP.actions.{e['cep']} =", pp, name)
-                self.assertIn(f"NHAE.actions.{e['cep']} =", ae, name)
+                self.assertIn(f"WNCPP.actions.{e['cep']} =", pp, name)
+                self.assertIn(f"WNCAE.actions.{e['cep']} =", ae, name)
 
     def test_every_schema_is_valid_json_with_the_right_header_and_checks(self):
         self.assertGreaterEqual(len(schema_files()), 18)
@@ -1702,7 +1702,7 @@ class CepAdapterTests(unittest.TestCase):
         self.assertEqual(V.validate_result(other), [])
 
     def test_the_second_build_project_failure_return_is_a_failure_too(self):
-        """nh_ppro_lib.jsx build_project returns {error, log} when the XML import made no sequence (ok:true on the wire)."""
+        """wnc_ppro_lib.jsx build_project returns {error, log} when the XML import made no sequence (ok:true on the wire)."""
         inner = {"ok": True, "action": "build_project", "result": {"error": "sequence not found after XML import", "log": ["a"]}}
         res = cep.from_cep("build_project", inner, id="b-2")
         self.assertEqual(res, {"ok": False, "action": "build_project", "id": "b-2", "error": "sequence not found after XML import",

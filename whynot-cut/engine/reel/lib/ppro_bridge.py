@@ -19,7 +19,7 @@ from . import cep_bundle, plat
 EXT_ID = "ai.thewhynot.cut.bridge"
 LEGACY_EXT_IDS = ("com.nh.bridge",)          # reel-editor 1.x bridge; replaced on install
 BRIDGE_VERSION = "3.1.1"          # the CEP bundle (manifest + bridge.js); the running one must match
-LIB_SRC = TEMPLATES_DIR / "premiere/nh_ppro_lib.jsx"
+LIB_SRC = TEMPLATES_DIR / "premiere/wnc_ppro_lib.jsx"
 
 
 # Locations resolve on every call (3.0 T2.17, engine MI-8): an engine home changed after import is honoured.
@@ -146,7 +146,7 @@ def status(max_age_s: float = 5.0) -> dict:
 
 
 def submit(action: str, data: dict | None = None, timeout: float = 600, script: Path | None = None) -> dict:
-    """Run `action` in Premiere through the bridge; `script` defaults to the synced nh_ppro_lib.jsx. `timeout` runs from
+    """Run `action` in Premiere through the bridge; `script` defaults to the synced wnc_ppro_lib.jsx. `timeout` runs from
     the moment the bridge claims the job (cep_queue.submit); a running bridge of another version is refused."""
     from . import cep_queue
     refused = plat.sandbox_refusal(f"queue the {action} job", queue_dir(), scripts_dir())   # G79: never in tests

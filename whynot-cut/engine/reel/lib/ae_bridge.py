@@ -14,8 +14,8 @@ from .common import TEMPLATES_DIR, current_context
 from . import cep_queue, plat
 
 SRC = TEMPLATES_DIR / "after_effects"
-LIBS = ("nh_ae_lib.jsx", "nh_motion_lib.jsx", "nh_ae_bridge.jsx")
-ENTRY_NAME = "nh_ae_bridge.jsx"
+LIBS = ("wnc_ae_lib.jsx", "wnc_motion_lib.jsx", "wnc_ae_bridge.jsx")
+ENTRY_NAME = "wnc_ae_bridge.jsx"
 
 
 # Locations resolve on every call (3.0 T2.17, engine MI-8): an engine home changed after import is honoured.

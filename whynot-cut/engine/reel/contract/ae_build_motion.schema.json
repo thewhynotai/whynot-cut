@@ -57,7 +57,7 @@
         "saved",
         "main"
       ],
-      "description": "NHM.report. failed is read by motion_build.build; ok:false results carry the partial readback_failure."
+      "description": "WNCM.report. failed is read by motion_build.build; ok:false results carry the partial readback_failure."
     },
     "readback_failure": {
       "type": "object",
@@ -219,7 +219,7 @@
         "brand",
         "scenes"
       ],
-      "description": "The compiled motion plan (01_analysis/motion-plan.json). Open: the engine owns it and passes it through; only what nh_motion_lib.jsx reads is required here."
+      "description": "The compiled motion plan (01_analysis/motion-plan.json). Open: the engine owns it and passes it through; only what wnc_motion_lib.jsx reads is required here."
     },
     "scene": {
       "type": "object",

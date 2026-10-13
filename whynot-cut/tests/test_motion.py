@@ -82,7 +82,7 @@ class TestBridge(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.q = self.tmp / "ae-queue"
-        self.script = self.tmp / "ae-scripts" / "nh_ae_bridge.jsx"
+        self.script = self.tmp / "ae-scripts" / "wnc_ae_bridge.jsx"
         self.script.parent.mkdir(parents=True)
         self.script.write_text("// x", encoding="utf-8")
 
@@ -195,7 +195,7 @@ class TestBridge(unittest.TestCase):
             self.assertEqual(ae_bridge.sync_scripts()["synced"], [])
 
     def test_ae_bridge_jsx_syntax(self):
-        for name in ("nh_ae_bridge.jsx", "nh_motion_lib.jsx"):
+        for name in ("wnc_ae_bridge.jsx", "wnc_motion_lib.jsx"):
             assert_js_syntax(self, AE_TPL / name)
 
 
@@ -1181,13 +1181,13 @@ class TestAnimatic(CompiledMotion):
 
 # --------------------------------------------------------------------------- AE motion library + job
 def nhm_code() -> str:
-    src = (AE_TPL / "nh_motion_lib.jsx").read_text(encoding="utf-8")
+    src = (AE_TPL / "wnc_motion_lib.jsx").read_text(encoding="utf-8")
     return src
 
 
 class TestMotionJSX(CompiledMotion):
     def test_lib_syntax(self):
-        for name in ("nh_motion_lib.jsx", "nh_ae_bridge.jsx"):
+        for name in ("wnc_motion_lib.jsx", "wnc_ae_bridge.jsx"):
             assert_js_syntax(self, AE_TPL / name)
 
     def test_fallback_script(self):
@@ -1195,8 +1195,8 @@ class TestMotionJSX(CompiledMotion):
         p = write_fallback_script(self.reel)
         assert_js_syntax(self, p)
         src = p.read_text(encoding="utf-8")
-        self.assertIn("NHM.build(", src)
-        self.assertTrue(all(ord(c) < 128 for c in src.split("var NH_JOB = ", 1)[1].split(";\n", 1)[0]))
+        self.assertIn("WNCM.build(", src)
+        self.assertTrue(all(ord(c) < 128 for c in src.split("var WNC_JOB = ", 1)[1].split(";\n", 1)[0]))
 
     def test_job_ascii_paths(self):
         from lib import motion_build
@@ -1227,18 +1227,18 @@ class TestMotionJSX(CompiledMotion):
 
     def test_lib_defines_core(self):
         src = nhm_code()
-        for fn in ("NHM.build = function", "NHM.S.kinetic_quote = function", "NHM.S.title_card = function",
-                   "NHM.P.background = function", "NHM.P.captions = function", "NHM.P.speaker_badge = function",
-                   "NHM.P.progress = function", "NHM.P.voice_pulse = function", "NHM.transition = function",
-                   "NHM.textEl = function", "setValuesAtTimes"):
+        for fn in ("WNCM.build = function", "WNCM.S.kinetic_quote = function", "WNCM.S.title_card = function",
+                   "WNCM.P.background = function", "WNCM.P.captions = function", "WNCM.P.speaker_badge = function",
+                   "WNCM.P.progress = function", "WNCM.P.voice_pulse = function", "WNCM.transition = function",
+                   "WNCM.textEl = function", "setValuesAtTimes"):
             self.assertTrue(fn in src, fn)
-        bridge = (AE_TPL / "nh_ae_bridge.jsx").read_text(encoding="utf-8")
-        self.assertIn("NHAE.actions.build_motion = function", bridge)
+        bridge = (AE_TPL / "wnc_ae_bridge.jsx").read_text(encoding="utf-8")
+        self.assertIn("WNCAE.actions.build_motion = function", bridge)
         self.assertIn('reason: "dirty"', bridge)
 
     def test_fallback_refuses_unsaved_project(self):
         """Final review: the --script-only/--run-script fallback called app.newProject() with no dirty check. It must
-        refuse exactly like the bridge (NHAE.mayDiscard): unsaved or unknown state in a saved/non-empty project."""
+        refuse exactly like the bridge (WNCAE.mayDiscard): unsaved or unknown state in a saved/non-empty project."""
         from lib.motion_build import write_fallback_script
         script = write_fallback_script(self.reel).read_text(encoding="utf-8")
         saved = {"name": "work.aep", "fsName": "D:/their/work.aep"}
@@ -1266,9 +1266,9 @@ class TestMotionJSX(CompiledMotion):
 
 
 def jsx_fn(src: str, name: str) -> str:
-    """Body of `name = function` in the JSX source (up to the next top-level `NHM.` assignment)."""
+    """Body of `name = function` in the JSX source (up to the next top-level `WNCM.` assignment)."""
     a = src.index(name + " = function")
-    b = src.find("\nNHM.", a + 1)
+    b = src.find("\nWNCM.", a + 1)
     return src[a:b if b > 0 else len(src)]
 
 
@@ -1277,45 +1277,45 @@ class TestMotionScenesJSX(unittest.TestCase):
         from lib.motion_script import SCENE_TYPES
         src = nhm_code()
         for t in SCENE_TYPES:
-            self.assertTrue(f"NHM.S.{t} = function" in src, t)
+            self.assertTrue(f"WNCM.S.{t} = function" in src, t)
 
     def test_persistent_text_direction_follows_text(self):
         """Review: captions and the speaker badge were always RTL; Latin captions in an English (ltr) window got RTL
         paragraph direction (punctuation at the wrong end)."""
         src = nhm_code()
-        self.assertTrue("NHM.isArabic = function" in src)
-        for fn, var in (("NHM.P.captions", "q.text"), ("NHM.P.speaker_badge", "g.name")):
+        self.assertTrue("WNCM.isArabic = function" in src)
+        for fn, var in (("WNCM.P.captions", "q.text"), ("WNCM.P.speaker_badge", "g.name")):
             body = jsx_fn(src, fn)
             self.assertFalse("rtl: true" in body, fn)
-            self.assertTrue(f"rtl: NHM.isArabic({var})" in body, fn)
+            self.assertTrue(f"rtl: WNCM.isArabic({var})" in body, fn)
         import re
-        rx = re.search(r"NHM\.isArabic = function \(s\) \{\s*return (/\[.*?\]/)\.test", src).group(1)
+        rx = re.search(r"WNCM\.isArabic = function \(s\) \{\s*return (/\[.*?\]/)\.test", src).group(1)
         py = re.compile(rx.strip("/"))
         self.assertTrue(py.search("كلمه") and py.search("ﻻ") and not py.search("Hello, world!"))
 
     def test_comparison_divider_above_scene_bg(self):
         """Review: moveToEnd() put the divider under the scene's own _bg solid on themed scenes."""
-        body = jsx_fn(nhm_code(), "NHM.S.comparison")
+        body = jsx_fn(nhm_code(), "WNCM.S.comparison")
         self.assertTrue('scene.id + "_bg"' in body and "moveBefore(" in body, body)
 
     def test_icons_draw_on_and_round_caps(self):
         src = nhm_code()
         self.assertTrue("ADBE Vector Filter - Trim" in src)
         self.assertTrue("ADBE Vector Stroke Line Cap" in src)
-        self.assertTrue("ADBE Vector Trim End" in jsx_fn(src, "NHM.iconEl"))
+        self.assertTrue("ADBE Vector Trim End" in jsx_fn(src, "WNCM.iconEl"))
 
     def test_counter_expression(self):
-        body = jsx_fn(nhm_code(), "NHM.counterEl")
+        body = jsx_fn(nhm_code(), "WNCM.counterEl")
         self.assertTrue('"ADBE Text Document").expression' in body)
         self.assertTrue("linear(time" in body)
 
     def test_direction_from_plan(self):
         src = nhm_code()
-        for fn in ("NHM.appear", "NHM.transition", "NHM.S.timeline"):
-            self.assertTrue("NHM.plan.dir" in jsx_fn(src, fn), fn)
+        for fn in ("WNCM.appear", "WNCM.transition", "WNCM.S.timeline"):
+            self.assertTrue("WNCM.plan.dir" in jsx_fn(src, fn), fn)
 
     def test_syntax(self):
-        assert_js_syntax(self, AE_TPL / "nh_motion_lib.jsx")
+        assert_js_syntax(self, AE_TPL / "wnc_motion_lib.jsx")
 
 
 # --------------------------------------------------------------------------- build, read-back, protection
@@ -1462,9 +1462,9 @@ class TestMotionBuild(CompiledMotion):
         self.assertEqual(len(self.ae.jobs), n)
         self.ae.project_path, self.ae.num_items = None, 0          # an empty untitled project has nothing to lose
         self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
-        bridge = (AE_TPL / "nh_ae_bridge.jsx").read_text(encoding="utf-8")
+        bridge = (AE_TPL / "wnc_ae_bridge.jsx").read_text(encoding="utf-8")
         self.assertNotIn("info.dirty === true", bridge)
-        self.assertEqual(bridge.count("NHAE.mayDiscard(info)"), 2)
+        self.assertEqual(bridge.count("WNCAE.mayDiscard(info)"), 2)
 
     def test_rebuild_protection(self):
         self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
@@ -1669,13 +1669,13 @@ class TestMotionBuild(CompiledMotion):
 
 
 class TestBridgeLibLoading(unittest.TestCase):
-    """Live AE 26.5 showed `NHM is undefined`: $.evalFile inside a function keeps the libraries' globals local."""
+    """Live AE 26.5 showed `NHM is undefined` (pre-D18 names): $.evalFile inside a function keeps the libraries' globals local."""
     def test_libs_loaded_at_top_level(self):
-        src = (AE_TPL / "nh_ae_bridge.jsx").read_text(encoding="utf-8")
-        head = src.split("NHAE.q = function", 1)[0]
+        src = (AE_TPL / "wnc_ae_bridge.jsx").read_text(encoding="utf-8")
+        head = src.split("WNCAE.q = function", 1)[0]
         self.assertNotIn("(function", head)
-        self.assertIn('$.evalFile(new File(NHAE_HERE + "/nh_ae_lib.jsx"))', head)
-        self.assertIn('$.evalFile(new File(NHAE_HERE + "/nh_motion_lib.jsx"))', head)
+        self.assertIn('$.evalFile(new File(WNCAE_HERE + "/wnc_ae_lib.jsx"))', head)
+        self.assertIn('$.evalFile(new File(WNCAE_HERE + "/wnc_motion_lib.jsx"))', head)
         self.assertIn("libs_loaded", src)
 
 
@@ -1799,17 +1799,17 @@ class TestWordLayers(unittest.TestCase):
     (indexes 1, 2 and 4 all lit the first word). Word/line reveals therefore use one text layer per word."""
     def test_word_layers_defined_and_used(self):
         src = nhm_code()
-        self.assertTrue("NHM.wordLayers = function" in src)
-        body = jsx_fn(src, "NHM.textEl")
-        self.assertTrue("NHM.wordLayers(" in body)
-        self.assertNotIn("NHM.revealWords(", body)
-        wl = jsx_fn(src, "NHM.wordLayers")
+        self.assertTrue("WNCM.wordLayers = function" in src)
+        body = jsx_fn(src, "WNCM.textEl")
+        self.assertTrue("WNCM.wordLayers(" in body)
+        self.assertNotIn("WNCM.revealWords(", body)
+        wl = jsx_fn(src, "WNCM.wordLayers")
         self.assertTrue("sourceRectAtTime" in wl)
         self.assertTrue("guideLayer" in wl)
         self.assertTrue("transform.scale[0]" in wl)        # an emphasised (scaled) word keeps its space (live frame)
 
     def test_shape_layer_reacquires_trim(self):
-        body = jsx_fn(nhm_code(), "NHM.shapeLayer")
+        body = jsx_fn(nhm_code(), "WNCM.shapeLayer")
         stroke_at = body.index('addProperty("ADBE Vector Graphic - Stroke")')
         self.assertGreater(body.find('property("ADBE Vector Filter - Trim")', stroke_at), stroke_at)
 
@@ -2711,7 +2711,7 @@ class TestAEHostBehaviour(unittest.TestCase):
     def test_progress_grows_in_reading_direction(self):
         """Final review: in LTR the progress bar grew from the centre. It fills from the reading-start edge: the bar's
         group is anchored (and positioned, so it does not move) at the left edge in LTR, the right edge in RTL."""
-        libs = (AE_TPL / "nh_ae_lib.jsx").read_text(encoding="utf-8") + "\n" + nhm_code()
+        libs = (AE_TPL / "wnc_ae_lib.jsx").read_text(encoding="utf-8") + "\n" + nhm_code()
         js = libs + r"""
 function F() { this.kids = {}; this.added = []; }
 F.prototype.property = function (k) { return typeof k === "number" ? this.added[k - 1] : (this.kids[k] = this.kids[k] || new F()); };
@@ -2720,7 +2720,7 @@ F.prototype.setValue = function (v) { this.value = v; };
 F.prototype.setValueAtTime = function (t, v) { (this.keys = this.keys || []).push(v); };
 function bar(dir) {
   var main = {width: 1080, height: 1920, frameDuration: 1 / 24, layers: {addShape: function () { return new F(); }}};
-  var L = NHM.P.progress(main, {persistent: {progress: true}, safe: {top: 250}, theme: {accent: [1, 0, 0]},
+  var L = WNCM.P.progress(main, {persistent: {progress: true}, safe: {top: 250}, theme: {accent: [1, 0, 0]},
                                 direction: dir < 0 ? "rtl" : "ltr", dir: dir, duration_frames: 240});
   var g = L.property("ADBE Root Vectors Group").property(1);
   var size = g.property("ADBE Vectors Group").property(1).property("ADBE Vector Rect Size").value;
@@ -2757,16 +2757,16 @@ console.log(JSON.stringify({ltr: bar(1), rtl: bar(-1)}));
         self.assertTrue((base / "ae-queue").is_dir())                 # it is the After Effects bridge
 
     def test_bridge_escaper_ascii_under_any_decoding(self):
-        """Final review: NHAE.q's regex held a raw U+FFFF character. Read with another encoding than UTF-8 that one
+        """Final review: WNCAE.q's regex held a raw U+FFFF character. Read with another encoding than UTF-8 that one
         character becomes three, the class stops at U+00EF and Arabic leaks unescaped into the result JSON. The
         escaper gives pure ASCII however the file is decoded."""
-        raw = (AE_TPL / "nh_ae_bridge.jsx").read_bytes()
+        raw = (AE_TPL / "wnc_ae_bridge.jsx").read_bytes()
         s = chr(0x628) + chr(0x627) + chr(1) + 'x"'
         for enc in ("utf-8", "latin-1"):
             src = raw.decode(enc)
-            a = src.index("NHAE.q = function")
+            a = src.index("WNCAE.q = function")
             b = src.index("\n};", a) + 3
-            js = ("var NHAE = {};\n" + src[a:b] + "\nvar s = " + json.dumps(s) + ", out = NHAE.q(s);\n"
+            js = ("var WNCAE = {};\n" + src[a:b] + "\nvar s = " + json.dumps(s) + ", out = WNCAE.q(s);\n"
                   "console.log(JSON.stringify({ascii: out.split('').every(function (c) { return c.charCodeAt(0) < 128; }),"
                   " back: JSON.parse(out) === s}));\n")
             self.assertEqual(json.loads(node_run(self, js)), {"ascii": True, "back": True}, enc)

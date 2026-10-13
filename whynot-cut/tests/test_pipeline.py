@@ -353,10 +353,10 @@ def assert_js_syntax(tc, jsx: Path):
 
 class TestTemplatesSyntax(unittest.TestCase):
     def test_ae_lib(self):
-        assert_js_syntax(self, SK / "templates/after_effects/nh_ae_lib.jsx")
+        assert_js_syntax(self, SK / "templates/after_effects/wnc_ae_lib.jsx")
 
     def test_ps_lib(self):
-        assert_js_syntax(self, SK / "templates/photoshop/nh_ps_lib.jsx")
+        assert_js_syntax(self, SK / "templates/photoshop/wnc_ps_lib.jsx")
 
 
 class TestSFX(unittest.TestCase):

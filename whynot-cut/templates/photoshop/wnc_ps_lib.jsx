@@ -1,19 +1,19 @@
-/*  whynot-cut — Photoshop layered asset builder (ExtendScript).
-    The generated script defines NH_PS before including this file.
+/*  whynot-cut - Photoshop layered asset builder (ExtendScript).
+    The generated script defines WNC_PS before including this file.
     Each job -> one 1080x1920 RGB PSD with named, non-destructive layers:
       BG photo (smart-object-free placed copy, original untouched) / brand band / text layers / logo.
     Text layers stay editable. Arabic needs Photoshop's "Middle Eastern and South Asian"
     text engine (Preferences > Type) for correct shaping in the editable layer.
 */
 #target photoshop
-var NHPS = {};
-NHPS.log = [];
+var WNCPS = {};
+WNCPS.log = [];
 
-NHPS.color = function (rgb) { var c = new SolidColor(); c.rgb.red = rgb[0]; c.rgb.green = rgb[1]; c.rgb.blue = rgb[2]; return c; };
+WNCPS.color = function (rgb) { var c = new SolidColor(); c.rgb.red = rgb[0]; c.rgb.green = rgb[1]; c.rgb.blue = rgb[2]; return c; };
 
-NHPS.placeImage = function (doc, path, name, fitW, fitH, cx, cy) {
+WNCPS.placeImage = function (doc, path, name, fitW, fitH, cx, cy) {
     var f = new File(path);
-    if (!f.exists) { NHPS.log.push("missing " + path); return null; }
+    if (!f.exists) { WNCPS.log.push("missing " + path); return null; }
     var src = app.open(f);
     if (src.mode !== DocumentMode.RGB) { src.changeMode(ChangeMode.RGB); }
     if (src.layers.length > 1) { src.mergeVisibleLayers(); }   // keep transparency (no flatten)
@@ -30,47 +30,47 @@ NHPS.placeImage = function (doc, path, name, fitW, fitH, cx, cy) {
     return L;
 };
 
-NHPS.rectLayer = function (doc, name, x0, y0, x1, y1, rgb, opacity) {
+WNCPS.rectLayer = function (doc, name, x0, y0, x1, y1, rgb, opacity) {
     var L = doc.artLayers.add();
     L.name = name;
     doc.selection.select([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
-    doc.selection.fill(NHPS.color(rgb));
+    doc.selection.fill(WNCPS.color(rgb));
     doc.selection.deselect();
     L.opacity = opacity === undefined ? 100 : opacity;
     return L;
 };
 
-NHPS.gradientBand = function (doc, name, y0, y1, rgb) {
+WNCPS.gradientBand = function (doc, name, y0, y1, rgb) {
     // vertical fade band built from stacked strips (keeps it scriptable without ActionManager)
     var set = doc.layerSets.add(); set.name = name;
     var steps = 24, h = (y1 - y0) / steps;
     for (var i = 0; i < steps; i++) {
-        var L = NHPS.rectLayer(doc, name + "_" + i, 0, y0 + i * h, doc.width.as("px"), y0 + (i + 1) * h + 1, rgb, Math.round(100 * i / (steps - 1)));
+        var L = WNCPS.rectLayer(doc, name + "_" + i, 0, y0 + i * h, doc.width.as("px"), y0 + (i + 1) * h + 1, rgb, Math.round(100 * i / (steps - 1)));
         L.move(set, ElementPlacement.INSIDE);
     }
     return set;
 };
 
-NHPS.text = function (doc, name, str, font, size, rgb, cx, cy) {
+WNCPS.text = function (doc, name, str, font, size, rgb, cx, cy) {
     var L = doc.artLayers.add();
     L.kind = LayerKind.TEXT;
     L.name = name;
     var t = L.textItem;
     t.contents = str;
-    try { t.font = font; } catch (e) { NHPS.log.push("font " + font + " not set"); }
+    try { t.font = font; } catch (e) { WNCPS.log.push("font " + font + " not set"); }
     t.size = new UnitValue(size, "px");
-    t.color = NHPS.color(rgb);
+    t.color = WNCPS.color(rgb);
     t.justification = Justification.CENTER;
     t.position = [new UnitValue(cx, "px"), new UnitValue(cy, "px")];
-    if (NHPS.isArabic(str)) { NHPS.setRTL(); }
+    if (WNCPS.isArabic(str)) { WNCPS.setRTL(); }
     return L;
 };
 
-NHPS.isArabic = function (s) { return /[\u0600-\u06FF]/.test(s); };
+WNCPS.isArabic = function (s) { return /[\u0600-\u06FF]/.test(s); };
 
 /* Paragraph direction RTL + World-Ready (Middle Eastern) composer on the active text layer.
    The DOM has no API for this; ActionManager edits the layer's textKey paragraph styles. */
-NHPS.setRTL = function () {
+WNCPS.setRTL = function () {
     try {
         var s2t = stringIDToTypeID, c2t = charIDToTypeID;
         var ref = new ActionReference();
@@ -93,37 +93,37 @@ NHPS.setRTL = function () {
         d.putReference(c2t("null"), r2);
         d.putObject(c2t("T   "), c2t("TxLr"), textKey);
         executeAction(c2t("setd"), d, DialogModes.NO);
-    } catch (e) { NHPS.log.push("RTL not set: " + e); }
+    } catch (e) { WNCPS.log.push("RTL not set: " + e); }
 };
 
-NHPS.build = function () {
+WNCPS.build = function () {
     var made = [];
     var prevUnits = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
     app.displayDialogs = DialogModes.NO;
-    for (var i = 0; i < NH_PS.jobs.length; i++) {
-        var j = NH_PS.jobs[i];
+    for (var i = 0; i < WNC_PS.jobs.length; i++) {
+        var j = WNC_PS.jobs[i];
         try {
             var doc = app.documents.add(1080, 1920, 72, j.id, NewDocumentMode.RGB, DocumentFill.WHITE);
             doc.artLayers[0].name = "Base (white)";
-            if (j.background === "paper") { NHPS.rectLayer(doc, "Paper tint", 0, 0, 1080, 1920, NH_PS.brand.paper, 100); }
-            if (j.image) { NHPS.placeImage(doc, j.image, "Client photo — " + j.image_name, j.image_fit_w || 1080, j.image_fit_h || 1920, 540, j.image_cy || 960); }
-            if (j.band) { NHPS.gradientBand(doc, "Brand band", j.band[0], j.band[1], NH_PS.brand.teal); }
-            if (j.headline) { NHPS.text(doc, "Headline (editable)", j.headline, NH_PS.fonts.headline, j.headline_size || 92, j.headline_color || NH_PS.brand.white, 540, j.headline_y || 1450); }
-            if (j.subline) { NHPS.text(doc, "Subline (editable)", j.subline, NH_PS.fonts.body, j.subline_size || 46, j.subline_color || NH_PS.brand.white, 540, j.subline_y || 1600); }
-            if (NH_PS.logo && j.logo !== false) {
-                var lg = NHPS.placeImage(doc, NH_PS.logo, "Logo", j.logo_size || 200, j.logo_size || 200, 540, j.logo_y || 1780);
+            if (j.background === "paper") { WNCPS.rectLayer(doc, "Paper tint", 0, 0, 1080, 1920, WNC_PS.brand.paper, 100); }
+            if (j.image) { WNCPS.placeImage(doc, j.image, "Client photo \u2014 " + j.image_name, j.image_fit_w || 1080, j.image_fit_h || 1920, 540, j.image_cy || 960); }
+            if (j.band) { WNCPS.gradientBand(doc, "Brand band", j.band[0], j.band[1], WNC_PS.brand.teal); }
+            if (j.headline) { WNCPS.text(doc, "Headline (editable)", j.headline, WNC_PS.fonts.headline, j.headline_size || 92, j.headline_color || WNC_PS.brand.white, 540, j.headline_y || 1450); }
+            if (j.subline) { WNCPS.text(doc, "Subline (editable)", j.subline, WNC_PS.fonts.body, j.subline_size || 46, j.subline_color || WNC_PS.brand.white, 540, j.subline_y || 1600); }
+            if (WNC_PS.logo && j.logo !== false) {
+                var lg = WNCPS.placeImage(doc, WNC_PS.logo, "Logo", j.logo_size || 200, j.logo_size || 200, 540, j.logo_y || 1780);
             }
-            var psd = new File(NH_PS.out_dir + "/" + j.id + ".psd");
+            var psd = new File(WNC_PS.out_dir + "/" + j.id + ".psd");
             var o = new PhotoshopSaveOptions(); o.layers = true; o.embedColorProfile = true;
             doc.saveAs(psd, o, true);
-            var png = new File(NH_PS.out_dir + "/" + j.id + "_preview.png");
+            var png = new File(WNC_PS.out_dir + "/" + j.id + "_preview.png");
             var po = new PNGSaveOptions();
             doc.saveAs(png, po, true);
             doc.close(SaveOptions.DONOTSAVECHANGES);
             made.push(j.id);
-        } catch (err) { NHPS.log.push("FAILED " + j.id + ": " + err + " line " + err.line); }
+        } catch (err) { WNCPS.log.push("FAILED " + j.id + ": " + err + " line " + err.line); }
     }
     app.preferences.rulerUnits = prevUnits;
-    return "NHPS_RESULT|made=" + made.length + "|" + made.join(",") + "|log=" + NHPS.log.join(" ; ");
+    return "NHPS_RESULT|made=" + made.length + "|" + made.join(",") + "|log=" + WNCPS.log.join(" ; ");
 };

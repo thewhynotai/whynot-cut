@@ -18,7 +18,7 @@
   },
   "probe": {
     "recorded": false,
-    "source": "written from templates/premiere/nh_ppro_lib.jsx NHPP.actions.probe (settings and tracks taken from the recorded build_project)",
+    "source": "written from templates/premiere/wnc_ppro_lib.jsx WNCPP.actions.probe (settings and tracks taken from the recorded build_project)",
     "host_version": ""
   },
   "build_project": {
@@ -33,7 +33,7 @@
       },
       "no_sequence": {
         "recorded": false,
-        "source": "written from templates/premiere/nh_ppro_lib.jsx build_project (the second failure return: {error, log} when the XML import made no sequence); request = the main request",
+        "source": "written from templates/premiere/wnc_ppro_lib.jsx build_project (the second failure return: {error, log} when the XML import made no sequence); request = the main request",
         "host_version": ""
       }
     }
@@ -94,7 +94,7 @@
       },
       "dirty": {
         "recorded": false,
-        "source": "written from templates/after_effects/nh_ae_bridge.jsx build_motion (the refusal when After Effects holds unsaved changes); request = the main request",
+        "source": "written from templates/after_effects/wnc_ae_bridge.jsx build_motion (the refusal when After Effects holds unsaved changes); request = the main request",
         "host_version": ""
       }
     }

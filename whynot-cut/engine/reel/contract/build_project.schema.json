@@ -310,7 +310,7 @@
         "sharpened",
         "tracks"
       ],
-      "description": "What Premiere reports after the build (NHPP.actions.build_project). Open at the top: the host may add evidence."
+      "description": "What Premiere reports after the build (WNCPP.actions.build_project). Open at the top: the host may add evidence."
     },
     "graphic": {
       "type": "object",
@@ -339,7 +339,7 @@
             "card",
             "fade"
           ],
-          "description": "keyframe recipe (NHPP.placeStill); 'fade' and any other value use the default fade-in"
+          "description": "keyframe recipe (WNCPP.placeStill); 'fade' and any other value use the default fade-in"
         },
         "start_s": {
           "type": "number",
@@ -386,12 +386,12 @@
     "settings_dump": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Open dump of Sequence.getSettings() (NHPP.settingsDump): every key Premiere reports, so new Premiere versions may add keys. Tick-like values are {seconds, ticks}."
+      "description": "Open dump of Sequence.getSettings() (WNCPP.settingsDump): every key Premiere reports, so new Premiere versions may add keys. Tick-like values are {seconds, ticks}."
     },
     "settings_after": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Sequence settings read back from Premiere after setSettings (NHPP.settingsDump). Open: any other getSettings() key may appear. The required keys are the ones ppro_build.build checks.",
+      "description": "Sequence settings read back from Premiere after setSettings (WNCPP.settingsDump). Open: any other getSettings() key may appear. The required keys are the ones ppro_build.build checks.",
       "required": [
         "previewCodec",
         "videoFrameWidth",
@@ -474,7 +474,7 @@
         "clips"
       ],
       "additionalProperties": false,
-      "description": "One track of a sequence (NHPP.tracksDump)."
+      "description": "One track of a sequence (WNCPP.tracksDump)."
     },
     "tracks": {
       "type": "object",

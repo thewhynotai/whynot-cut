@@ -1,14 +1,15 @@
 """3.0 T6.11 prep: the ExtendScript lint for `wnc_*.jsx` (Addendum A2, last paragraph; the three tool PRDs).
 
 Rules: ASCII-only source, ES3 only, namespaced globals, every nested conditional parenthesised. Strings, regex literals
-and comments are stripped before the code rules run (false-positive cases below). The repo-wide test passes vacuously
-until T6.3 / Phase 6B add the first `wnc_*.jsx`; from then on it enforces them.
+and comments are stripped before the code rules run (false-positive cases below). The repo-wide test enforces the five
+core libraries (T6.3 Task 2, D18: nh_*.jsx became wnc_*.jsx) and every later `wnc_*.jsx`.
 Run:  tools/test.sh -p test_jsx_lint.py
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home before anything else (see tests/_isolation.py)
 import io
+import re
 import subprocess
 import sys
 import tempfile
@@ -131,9 +132,24 @@ class NamespaceRule(unittest.TestCase):
         self.assertEqual(rules(lint("var WNC_HUSHER = 1;\n")), ["namespace"])   # same letters, not NS or NS_...
 
     def test_allow_list_and_extra_allowed(self):
-        self.assertEqual(lint("var NHAE_HERE = 1;\n", "WNCAE"), [])       # the documented allow-list
+        self.assertEqual(lint("var WNCAE_HERE = 1;\n", "WNCAE"), [])      # the bridge's folder is in its namespace
+        self.assertEqual(rules(lint("var NHAE_HERE = 1;\n", "WNCAE")), ["namespace"])   # D18: no longer allowed
         self.assertEqual(lint("var helper = 1;\n", "WNC_HUSH", allowed={"helper"}), [])
-        self.assertIn("NHAE_HERE", jsx_lint.ALLOWED_GLOBALS)
+        self.assertNotIn("NHAE_HERE", jsx_lint.ALLOWED_GLOBALS)
+
+    def test_legacy_aliases_only_in_their_own_file(self):
+        self.assertEqual(jsx_lint.LEGACY_ALIASES, {"wnc_ppro_lib.jsx": {"NHPP"}, "wnc_ae_bridge.jsx": {"NHAE"}})
+        cases = (("wnc_ppro_lib.jsx", "var WNCPP = WNCPP || {};\nvar NHPP = WNCPP;\n", []),
+                 ("wnc_ae_bridge.jsx", "var WNCAE = WNCAE || {};\nvar NHAE = WNCAE;\n", []),
+                 ("wnc_ppro_lib.jsx", "var WNCPP = WNCPP || {};\nvar NHAE = WNCPP;\n", [(2, "namespace")]),
+                 ("wnc_ae_lib.jsx", "var WNC = WNC || {};\nvar NHPP = WNC;\n", [(2, "namespace")]),
+                 ("wnc_tidy.jsx", "var WNC_TIDY = WNC_TIDY || {};\nvar NHPP = WNC_TIDY;\n", [(2, "namespace")]))
+        with tempfile.TemporaryDirectory() as d:
+            for name, src, want in cases:
+                with self.subTest(name=name, src=src):
+                    p = Path(d) / name
+                    p.write_text(src, encoding="utf-8")
+                    self.assertEqual([(x.line, x.rule) for x in jsx_lint.lint_file(p)], want)
 
     def test_names_inside_strings_and_comments_are_ignored(self):
         self.assertEqual(lint("// var helper = 1;\nWNC_HUSH.s = 'var helper = 1;';\n/* function x() {} */\n"), [])
@@ -151,7 +167,8 @@ class NamespaceRule(unittest.TestCase):
         self.assertEqual(ns("wnc_ae_bridge.jsx"), "WNCAE")
         self.assertEqual(ns("wnc_ae_lib.jsx"), "WNC")
         self.assertEqual(ns("wnc_motion_lib.jsx"), "WNCM")
-        self.assertEqual(ns("nh_ppro_lib.jsx"), "NHPP")       # today's names, for the report-only run
+        self.assertEqual(ns("wnc_ps_lib.jsx"), "WNCPS")
+        self.assertEqual(ns("nh_ppro_lib.jsx"), "NH_PPRO_LIB")   # D18: the pre-3.0 names are no longer special
         self.assertEqual(ns("wnc_hush.jsx", {"wnc_hush.jsx": "HUSHX"}), "HUSHX")
 
     def test_lint_file_uses_the_file_name_namespace(self):
@@ -270,20 +287,50 @@ class Cli(unittest.TestCase):
             self.assertEqual(got, ["adobe/premiere-uxp/host/wnc_hush.jsx", "whynot-cut/templates/premiere/wnc_ppro_lib.jsx"])
 
 
+CORE_LIBS = ("whynot-cut/templates/premiere/wnc_ppro_lib.jsx", "whynot-cut/templates/after_effects/wnc_ae_bridge.jsx",
+             "whynot-cut/templates/after_effects/wnc_ae_lib.jsx", "whynot-cut/templates/after_effects/wnc_motion_lib.jsx",
+             "whynot-cut/templates/photoshop/wnc_ps_lib.jsx")
+
+
 class RepoWide(unittest.TestCase):
     def test_every_wnc_jsx_in_the_repo_is_clean(self):
-        """Passes vacuously today (no wnc_*.jsx yet); enforced once T6.3 / Phase 6B add them."""
+        """Enforced since T6.3 Task 2: the five core libraries (and every later wnc_*.jsx) lint clean."""
+        files = jsx_lint.default_files(ROOT)
+        shown = {p.relative_to(ROOT).as_posix() for p in files}
+        self.assertTrue(set(CORE_LIBS) <= shown, sorted(set(CORE_LIBS) - shown))
         bad = []
-        for p in jsx_lint.default_files(ROOT):
+        for p in files:
             bad += [str(f) for f in jsx_lint.lint_file(p)]
         self.assertEqual(bad, [])
 
-    def test_report_only_over_the_current_nh_files_runs(self):
-        """Not enforced: the size of the T6.3 cleanup. Only proves the lint survives real ExtendScript."""
-        files = sorted((ROOT / "whynot-cut" / "templates").rglob("nh_*.jsx"))
-        for p in files:
-            for f in jsx_lint.lint_file(p):
-                self.assertIn(f.rule, ("ascii", "es3", "namespace", "ternary"))
+    def test_the_lint_command_exits_zero_over_the_repo(self):
+        with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            code = jsx_lint.main([])
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        self.assertNotIn("nothing to lint", out.getvalue())
+
+    def test_no_nh_jsx_is_left(self):
+        """D18: every nh_*.jsx became wnc_*.jsx (node_modules excluded)."""
+        left = []
+        for sub in ("whynot-cut", "adobe", "tools"):
+            left += [p.relative_to(ROOT).as_posix() for p in (ROOT / sub).rglob("nh_*.jsx")
+                     if "node_modules" not in p.parts]
+        self.assertEqual(left, [])
+
+    def test_nhpp_and_nhae_exist_only_as_the_legacy_aliases(self):
+        """In code (comments and strings blanked) NHPP / NHAE appear only as `var NHPP = WNCPP;` /
+        `var NHAE = WNCAE;`, the last code line of their own library (the 3.1.1 bridge's eval tail needs them)."""
+        want = {"wnc_ppro_lib.jsx": "var NHPP = WNCPP;", "wnc_ae_bridge.jsx": "var NHAE = WNCAE;"}
+        for p in jsx_lint.default_files(ROOT):
+            code, _ = jsx_lint.strip(p.read_text(encoding="utf-8"))
+            lines = [ln.strip() for ln in code.split("\n") if ln.strip()]
+            hits = [ln for ln in lines if re.search(r"\bNH(PP|AE)\b", ln)]
+            with self.subTest(p.name):
+                if p.name in want:
+                    self.assertEqual(hits, [want[p.name]])
+                    self.assertEqual(lines[-1], want[p.name])
+                else:
+                    self.assertEqual(hits, [])
 
 
 if __name__ == "__main__":
