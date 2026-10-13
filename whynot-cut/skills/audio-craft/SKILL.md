@@ -44,4 +44,4 @@ It needs `02_transcription/transcript.json` with word times, so transcribe first
 
 You can't hear the result. Say so, and give the editor the knobs for a gentler result: `nr`, `--min-pause`, `--pad`.
 
-Details: `references/sound-design.md`.
+Details: `${CLAUDE_SKILL_DIR}/references/sound-design.md`.

@@ -28,7 +28,7 @@ Premiere first).
 - When several clients or more than ~3 new clips would start, or on the first run on this machine, show the table and
   ask once before starting. One named client plus "edit the new videos" needs no extra question.
 
-- **Podcast episodes** (`reel inbox` -> `episodes`): run `/whynot-cut:podcast` up to Gate 0 for each new episode and
+- **Podcast episodes** (`reel inbox` -> `episodes`): run `/whynot-cut:podcast` up to picking the reels for each new episode and
   put its candidates table in the same message as the clips. Reels start only after the editor picks
   (`reels-select --pick <ids> --by editor`); a standing `approval: auto` never picks reels.
 
@@ -40,11 +40,11 @@ Premiere first).
 
 ## 3. Run the pipeline for all clips
 Follow the playbook stages, fanning out **one agent per clip per stage in a single message** (clips are independent):
-transcript ∥ references → audio → story → claims ∥ graphics → preview video → Gate 1 → build → QC.
+transcript ∥ references → audio → story → claims ∥ graphics → preview video → approve the plan → build → QC.
 Concurrency: transcription one clip at a time on a GPU (`gpu.cuda_devices` > 0; parallel jobs share its memory) and at
 most 2 at once on CPU; audio cleanup at most 2 at once. Story, graphics and reviews can all run in parallel.
 
-## 4. Gate 1 for many clips at once
+## 4. Approve the plan for many clips at once
 After `previews` (and `reel preview-video` where that client's `preview_video` is true) for every clip, present **one**
 combined approval message: per clip, the hook, graphics with timecodes, cuts removed, medical approvals needed, and the
 preview MP4 path. Approval comes only from the editor's own messages here or from `approval` in that client's

@@ -1,11 +1,16 @@
 ---
 name: revise
-description: "Editor feedback on an existing edit, two or more comments including a non-audio one, or any non-audio comment: \"make it punchier\", \"move the name card\", «ملاحظات على الفيديو». Rebuilds, re-verifies."
+description: "Editor feedback on an edit or motion video: a list of 2+ comments, or any non-audio one: \"make it punchier\", \"move the name card\", «ملاحظات على الفيديو», «عدّل ده». Rebuilds, re-verifies."
 argument-hint: "\"<editor feedback>\" [clip id]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---
 
 # Revise from editor feedback
+
+**Which skill:** this one for a list of two or more comments, or any comment about graphics, wording, timing, cuts or
+scenes. A single request that is only about the dialogue audio ("clean the audio", "remove all pauses") is
+`/whynot-cut:fix-audio`. A project whose id ends in `_MO` is a motion video: follow **Motion videos** below, not the
+Premiere steps.
 
 1. **Restate each comment** as a concrete, checkable change. "Remove all pauses" becomes `global.remove_pauses` (min 250 ms, pad 80 ms) plus re-verification that no words are lost.
    If a comment is a question ("did you make the text like the ref?"), answer it honestly first, with evidence, before changing anything.
@@ -18,25 +23,49 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    | wording, which moments get graphics, timing, cuts, glass/statement style | `story-editor` | `edit-decisions.json` (+ client `reel-profile/style.json` if it is a standing rule) |
    | how graphics or captions look or animate | `motion-designer` | template params or profile `graphics-templates.json`; previews |
    | transcript words | `transcript-editor` | `transcript-corrections.json` → `transcript-correct` |
-   | medical wording | `medical-reviewer` (read-only) | approval list |
+   | medical or religious wording | `medical-reviewer` (read-only) | approval list |
 
    Independent changes go out in parallel in one message.
 3. If the comment is a **standing preference** ("always glass only at the end"), record it in the client's
    `output/client_database/reel-profile/style.json` and `notes.md`, so the next video follows it.
 4. `reel plan` must compile, then previews, then `reel preview-video` (preferences `preview_video`) so the editor can
-   watch the change. Summarise the changed plan for the editor (Gate 1); with preferences `approval: auto`, record the
-   delegated approval citing the preferences file.
-   If they already said "just do it", record the approval with `approve-plan --by delegated --note "<their words>"`.
+   watch the change. Summarise the changed plan for the editor to approve; with preferences `approval: auto`, record
+   the delegated approval citing `_where.approval` from `reel settings`.
+   If they already said "just do it", record the approval with `reel approve-plan --by delegated --note "<their words>"`.
 5. **Protect the editor's own work in Premiere.** If `reel qc` shows "Premiere project unchanged since the pipeline build" as WARN,
    or `ppro-build` returns `EDITOR_CHANGES_PRESENT`, the editor has edited the project by hand. A rebuild starts from the plan, so those
    manual edits would not carry over. The old file is kept as `*_prev_<time>.prproj`. Tell them exactly that and let them choose:
-   - rebuild anyway: `--force --replace-edited`, only with their explicit OK
+   - rebuild anyway: `reel ppro-build --force --replace-edited`, only with their explicit OK
    - or apply your change by hand in their project (give precise timecodes and values)
    - or rebuild and they redo their tweaks
 
    Also ask them to save before any rebuild, because `--force` closes the open project.
-6. `premiere-builder` runs `ppro-build --force`, then `qc-reviewer` checks the frames, then you record the verdict, run `qc` and update the handoff.
+6. `premiere-builder` runs `reel ppro-build --force`, then `qc-reviewer` checks the frames, then you view the frame
+   sheet, record the verdict, run `reel qc` and update the handoff.
 7. Report **per comment**: what changed, the evidence (numbers, frames), and caveats. Use the report format from `/whynot-cut:edit`.
+
+## Motion videos (`<EP>_<ID>_MO`)
+A motion video is built in After Effects from the motion plan, never with `ppro-build`. Route its comments like this
+(the full playbook is `/whynot-cut:motion`):
+
+| Comment is about | Who | Commands |
+|---|---|---|
+| on-screen words, scenes, beats, timing, icons, illustrations, music | `motion-director` | revise `01_analysis/motion-script.json`, then `reel motion-plan` until no errors, then `reel motion-animatic` |
+| noise, hum, pauses | `audio-engineer`, then `motion-director` | `reel audio-clean`, then `reel motion-plan` again (the scenes follow the new timing) and `reel motion-animatic` |
+| how a scene looks in the After Effects project only (no plan change) | `ae-builder` | rebuild from the same approved plan (step 3) |
+
+1. VIEW the new `_storyboard.jpg` yourself; then show the editor the changed scenes (time, words, editorial lines
+   marked as such) and the animatic path, for them to approve. Record `reel approve-plan --by editor` only with their
+   words (a standing `approval: auto` or a "just do it" in chat → `--by delegated --note "…"`, as in step 4 above).
+2. Ask the editor to save in After Effects first: `motion-build` refuses while After Effects holds unsaved work.
+3. `ae-builder` runs `reel motion-build`. If the editor changed the `.aep` in After Effects, the build refuses: tell
+   them their changes would not carry over, and only with their explicit OK run `reel motion-build --replace-edited`
+   (it keeps a backup of their file in `backups/`).
+4. `ae-builder` runs `reel motion-render`, then `reel motion-frames`.
+5. `qc-reviewer` checks the frames sheet (fan-out of frame-inspectors). You VIEW the sheet, record
+   `reel verify --record --verdict pass|fail --notes "<what you checked>"`, run `reel qc` in the same message, and
+   update the handoff and the reel's publish captions (`publish-writer`) if the on-screen words changed.
+6. Report per comment, as above. A build without read-back (`--script-only`) is Not verified.
 
 - In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
   `profile.json`). Until a person's gender is known write «د.» or the name.

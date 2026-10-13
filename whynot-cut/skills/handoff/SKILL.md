@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: "Write the editor handoff for a finished or paused edit: \"write the handoff\", \"package it for the editor\", \"summarise what's left\", «سلّم الشغل»."
+description: "Write the editor handoff for a finished or paused edit: \"write the handoff\", \"package it for the editor\", \"summarise what's left\", «سلّم الشغل», «جهّز التسليم»."
 argument-hint: "[clip id]"
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---

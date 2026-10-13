@@ -16,6 +16,10 @@ code block (mixed right-to-left text garbles paths). One step per message: what 
 Show progress as a checklist (✅ done · ⚠️ needs them · ⏳ running). If an argument was given, use it as the clients
 folder and skip that question in Step 3.
 
+Installing from inside Claude (the plugin, the engine and the Adobe parts in one go): when
+`${CLAUDE_SKILL_DIR}/references/install-from-claude.md` is present, read it and follow it for Steps 1–2; if it is
+not there, the steps below cover the install.
+
 ## Step 1: Check the machine
 ```bash
 reel --version
@@ -23,14 +27,26 @@ reel doctor
 ```
 `reel --version` must print `WhyNot Cut <version>`; every WhyNot Cut message starts with that name and version.
 - **`reel: command not found` / "not recognized":** the plugin's `bin/` is on PATH only in sessions started after the
-  install. Ask the person to fully quit and reopen Claude Code, then retry. Until then call it by full path:
-  `"${CLAUDE_PLUGIN_ROOT}/bin/reel" doctor`.
+  install. Ask the person to fully quit and reopen Claude Code, then retry. Until then call it by full path, in the
+  shell you are using:
+  ```bash
+  "${CLAUDE_PLUGIN_ROOT}/bin/reel" doctor
+  ```
+  ```powershell
+  & "${CLAUDE_PLUGIN_ROOT}/bin/reel.cmd" doctor
+  ```
 - **`reel` answers, but not as WhyNot Cut** (`reel --version` fails or prints something else, or an error says
   `reel-editor environment not installed`): a session started before the install keeps the OLD plugin's `bin/` first
   on PATH, so `reel` is the old reel-editor (or a previous WhyNot Cut). Subagents inherit that PATH. Say so, ask the
-  person to restart Claude Code, and until then use the full path `"${CLAUDE_PLUGIN_ROOT}/bin/reel"` in every command
-  and in every subagent prompt. `"${CLAUDE_PLUGIN_ROOT}/bin/reel" doctor` lists every `reel` on PATH
-  (`reel_command`) and says which plugin each belongs to. Never run the old plugin's `reel setup`.
+  person to restart Claude Code, and until then use the full path in every command and in every subagent prompt:
+  `"${CLAUDE_PLUGIN_ROOT}/bin/reel"` (bash) or `& "${CLAUDE_PLUGIN_ROOT}/bin/reel.cmd"` (PowerShell). Its `doctor`
+  lists every `reel` on PATH (`reel_command`) and says which plugin each belongs to. Never run the old plugin's
+  `reel setup`.
+- **`guard_active: false` — stop here.** Say "WhyNot Cut protection is OFF": the guard hook that keeps the client's
+  `assets/` and `data/` read-only and keeps approvals the editor's own is not running. Give `guard_heartbeat.fix` from
+  the report (Windows: install Git for Windows, then restart Claude Code; then `/hooks` should list WhyNot Cut).
+  Don't go on to editing until `reel doctor` shows `guard_active: true`. `null` means an older guard that writes no
+  heartbeat: ask them to check `/hooks`.
 - **Engine missing** (`blocked: engine not installed`): explain it is a private Python environment in `~/.whynot-cut`
   (about 400 MB, a few minutes, nothing else on the computer changes) and ask once. On yes, run `reel setup` in the
   background and ask the Step 3 questions while it runs; write preferences and re-run `reel doctor` after it finishes.
@@ -123,6 +139,6 @@ Finish with two lines from `/whynot-cut:help` and their next step: "drop more cl
 
 Troubleshooting: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
 
-## Motion mode (2.2)
-For motion videos the same WhyNot Cut Bridge also loads in After Effects: after `reel ppro-install`, the editor
-restarts After Effects once; `reel ae-status` must show `host: AEFT`. Brand fonts must be installed for After Effects.
+Motion videos (animated, from a podcast's audio) are built in After Effects through the same WhyNot Cut Bridge: after
+`reel ppro-install` the editor restarts After Effects once; `reel ae-status` must show `host: AEFT`. Brand fonts must
+be installed for After Effects too. Set this up only when they want motion videos.

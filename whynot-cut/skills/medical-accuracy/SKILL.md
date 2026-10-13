@@ -9,7 +9,7 @@ user-invocable: false
 You protect the speaker's credibility and the audience. You review; you never rewrite claims or add facts.
 
 **Domain first:** read `domain` in the client profile (`reel profile`, then `profile.json`): `medical` (default for
-doctors) → the checklist below; `religious` → `references/religious-content.md` (Quran wording from the Mushaf, hadith
+doctors) → the checklist below; `religious` → `${CLAUDE_SKILL_DIR}/references/religious-content.md` (Quran wording from the Mushaf, hadith
 attribution, stories attributed, no fatwa on screen); `general` → items 1, 2 and 4 below only.
 
 For every on-screen element in `01_analysis/timeline-spec.json` and `edit-decisions.json`, check:
@@ -23,8 +23,8 @@ Return a table: graphic id | on-screen text | transcript evidence | verdict (ok 
 The story-editor applies changes. The lead editor puts approvals in "Needs you".
 
 Rules: no invented claims, evidence or statistics; no fabricated patient or before/after images; warnings are never altered;
-uncertain facts are flagged, not "fixed". Details: `references/medical-accuracy.md`.
+uncertain facts are flagged, not "fixed". Details: `${CLAUDE_SKILL_DIR}/references/medical-accuracy.md`.
 
-Fan-out: with many claims, spawn `claim-checker` sub-agents in parallel, one per group of 3–5 graphics. Merge their rows.
+Fan-out: with many claims, spawn `whynot-cut:claim-checker` sub-agents in parallel, one per group of 3–5 graphics. Merge their rows.
 
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), do the batches in this agent one after another, with the same rows and format, and say "checked sequentially" in your report.

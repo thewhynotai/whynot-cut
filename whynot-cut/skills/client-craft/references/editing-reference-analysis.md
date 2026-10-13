@@ -1,4 +1,4 @@
-# Editing Reference Analysis (Stage 5)
+# Editing Reference Analysis (Stage 4)
 
 References in `data/` may be **Markdown** (role `editing_reference_doc`) and/or **videos** (`editing_reference_video`).
 Only files whose path names them as references count: everything under `data/References/` (the folder decides first:

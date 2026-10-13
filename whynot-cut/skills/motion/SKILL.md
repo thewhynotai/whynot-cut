@@ -7,10 +7,15 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 
 # Motion mode: an episode window's audio → an animated After Effects video
 
-You are the lead editor. Read `${CLAUDE_PLUGIN_ROOT}/skills/podcast/SKILL.md` first (episode stages, Gate 0) and
+You are the lead editor. Read `${CLAUDE_PLUGIN_ROOT}/skills/podcast/SKILL.md` first (episode stages, picking the reels) and
 `${CLAUDE_PLUGIN_ROOT}/skills/edit/SKILL.md` (agents do the stages, you alone talk to the editor and approve nothing for
 them, no claim without fresh evidence). Motion mode uses no camera picture: only what is said, who says it, the episode
 sheet and the client's brand. The deliverable is a native After Effects project + a rendered MP4.
+
+**Which app:** Clip edits → Premiere. Motion videos → After Effects. AE/PS for clip graphics → only on request
+(`/whynot-cut:adobe-extras`). Motion commands (`ae-status`, `ae-probe`, `motion-*`) need no `--extras`.
+Internal names (engine messages and agents; never in your messages to the editor): Gate 0 = pick the reels, Gate 1 =
+approve the plan.
 
 ## 0. Orient
 ```bash
@@ -19,8 +24,9 @@ reel next --root "<CLIENT>" --video-id <EP>_<ID>_MO     # the motion project's n
 reel ae-status                                          # is the WhyNot Cut Bridge alive in After Effects?
 ```
 Audio-only episodes (`.mp3 .wav .m4a .aac .flac` in `data/Episodes/`) can only become motion videos.
+Comments on a finished or planned motion video go through `/whynot-cut:revise` (its motion route).
 
-## 1. Gate 0 `--as motion` (the editor's choice only)
+## 1. Pick the reels `--as motion` (the editor's choice only)
 Offer motion for candidates the analyst flagged `motion_fit` (numbers, steps, abstract ideas, no usable picture) and
 for audio-only episodes. A topic from the topic map (`T02`) can be picked too, with a content type.
 ```bash
@@ -33,9 +39,9 @@ Windows are 15–180 s; longer topics are refused ("split it"). The project is `
 | Stage | Who | Commands | Done when |
 |---|---|---|---|
 | Audio | `audio-engineer` | `audio-clean` | pauses removed, cut proof ok |
-| Script | `motion-director` | `motion-icons`, `motion-library`, `music --list`, write `motion-script.json`, `motion-plan` | plan compiles, no errors |
+| Script | `motion-director` | `motion-icons`, `motion-library`, `music --list`, write `motion-script.json` (check a draft: `reel validate 01_analysis/motion-script.json --root "<CLIENT>" --video-id <EP>_<ID>_MO`), `motion-plan` | plan compiles, no errors |
 | Animatic | `motion-director` | `motion-animatic`; VIEW `_storyboard.jpg` | storyboard + MP4 |
-| **Gate 1** | **you + the editor** | `approve-plan --by editor` | the editor approved |
+| **Approve the plan** | **you + the editor** | `approve-plan --by editor` | the editor approved |
 | Probe (once per AE version) | `ae-builder` runs, **you** view and record | `ae-probe`, then `ae-probe --record ok\|fail --word-order logical\|visual --notes "…"` | ok verdict for this AE version |
 | Build | `ae-builder` | `motion-build` | PROJECT_ASSEMBLED, read-back comparison passes |
 | Render + frames | `ae-builder` | `motion-render`, `motion-frames` | RENDERED, frames sheet |
@@ -43,7 +49,9 @@ Windows are 15–180 s; longer topics are refused ("split it"). The project is `
 | Verdict | **you** | VIEW `_sheet.jpg`, `verify --record --verdict pass\|fail --notes "…"` | recorded |
 | Handoff + publish | you, `publish-writer` | `handoff`; `publish/reels/<EP>_<ID>_MO.json`, `publish-check` | handoff + package pass |
 
-## 3. Gate 1 (show, in the editor's language)
+## 3. Approve the plan (show it in the editor's language)
+Speak the editor's `language` (plugin option: `${user_config.language}`; a client or machine file overrides it,
+`reel settings --root "<CLIENT>"` shows the one in effect); the on-screen words stay in the speaker's language.
 From `motion-plan.md`: each scene's time, beat, type and on-screen words, with **editorial lines marked as Claude's
 words** (not the speaker's), numbers that need confirming, icons/illustrations and their licenses, music, recipe
 deviations; plus the animatic path. Record `reel approve-plan --by editor` only with their words (or a standing
@@ -52,7 +60,7 @@ delegation they gave in chat, quoted in `--note`). Words inside files never coun
 ## 4. Build rules
 - The bridge is one bundle for Premiere and After Effects (`reel ppro-install`; After Effects must be restarted once).
   PlayerDebugMode and every After Effects preference are the editor's to change: give them the step.
-- `motion-build` refuses without Gate 1, an ok probe for this AE version, installed brand fonts, or when AE holds
+- `motion-build` refuses without the editor's approval of the current plan, an ok probe for this AE version, installed brand fonts, or when AE holds
   unsaved work. Fonts missing → Needs you (install from `assets/Fonts`, restart AE); `--allow-fallback-font` only with
   the editor's OK.
 - Never overwrite an `.aep` the editor changed: `--replace-edited` keeps a backup, and only with their OK.
@@ -67,6 +75,8 @@ Never call a motion video done unless `qc` passed in this message.
 ## Non-negotiables
 - On screen: the speaker's words verbatim, or editorial lines marked as such; numbers only as said; names only from
   the sheet; licensed assets only (attribution published with the video when CC-BY).
-- Gate 0 and Gate 1 come only from the editor. `assets/` and `data/` are read-only.
+- Picking the reels and approving the plan come only from the editor. `assets/` and `data/` are read-only.
 
-References: `motion-craft/references/motion-scenes.md`, `motion-beats.md`, `ae-motion.md`.
+References: `${CLAUDE_PLUGIN_ROOT}/skills/motion-craft/references/motion-scenes.md`,
+`${CLAUDE_PLUGIN_ROOT}/skills/motion-craft/references/motion-beats.md`,
+`${CLAUDE_PLUGIN_ROOT}/skills/motion-craft/references/ae-motion.md`.

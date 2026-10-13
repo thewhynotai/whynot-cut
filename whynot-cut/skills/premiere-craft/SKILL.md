@@ -33,5 +33,5 @@ reel premiere    --root "<CLIENT>" --video-id <ID>        # fallback standalone 
 - If `ppro-build` returns `MISSING_GRAPHICS`, run previews. If it returns `BRIDGE_NOT_RUNNING`, the editor must start Premiere.
   Don't try to start or quit Premiere yourself unless the editor asked. It may hold their unsaved work.
 
-Full details, verified API facts and animation presets: `references/premiere-assembly.md`.
+Full details, verified API facts and animation presets: `${CLAUDE_SKILL_DIR}/references/premiere-assembly.md`.
 Known failures: `${CLAUDE_PLUGIN_ROOT}/skills/edit/references/troubleshooting.md`.

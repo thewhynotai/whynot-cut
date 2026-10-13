@@ -35,12 +35,13 @@ reel settings --root "<CLIENT>"        # or `reel settings` outside a client fol
 |---|---|---|
 | `editor_name` | text | how to address the editor (empty = don't use a name) |
 | `language` | `en` · `ar` | language for talking to the editor (on-screen text always follows the speaker) |
-| `approval` | `ask` · `auto` | `ask` stops at Gate 1 for every plan; `auto` shows the plan + preview, then builds (recorded as delegated approval citing this file) |
+| `approval` | `ask` · `auto` | `ask` stops for the editor to approve every plan; `auto` shows the plan + preview, then builds (recorded as delegated approval citing this file) |
 | `whisper_model` | `large-v3` · `large-v3-turbo` · `medium` · `small` | accuracy vs. speed; `medium`/`small` are noticeably weaker on Arabic medical terms |
 | `preview_video` | `true` · `false` | render the preview MP4 before approval |
 | `clients_root` | folder | used by `reel doctor`, the session-start message and bare `--root "<name>"` |
 | `notify_done` | `true` · `false` | start the final report of long runs with a clear "Finished" line |
 | `panel_link` | `true` · `false` | start the engine the Premiere panel talks to (`reel serve`) in the background at session start; `false` leaves the panel offline until `reel serve ensure` |
+| `evidence_gate` | `true` · `false` | `true`: a turn that ran `reel` and says the edit is ready/done without `reel qc`/`reel verify` is sent back once (never with `approval: auto`; default `false`) |
 | `magnific_budget_credits` | number, 0 or more | the most Magnific credits one edit may spend (0 = never use Magnific; default 300) |
 
 `language`, `approval`, `whisper_model` and `magnific_budget_credits` are also plugin options (layer 3).

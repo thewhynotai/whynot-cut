@@ -1,4 +1,4 @@
-"""Stage 8: automatic quality control. A mandatory failure blocks QC_PASSED."""
+"""Stages 11-12 (verify, record): automatic quality control. A mandatory failure blocks QC_PASSED."""
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET

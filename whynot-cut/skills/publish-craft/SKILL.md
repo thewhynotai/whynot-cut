@@ -34,8 +34,11 @@ and the quotes (`reel publish-check`); you make it worth reading.
  "shorts": {"title": "…", "description": "…"},
  "approval_required": []}
 ```
-Then `reel publish-check --root "<CLIENT>" --episode <EP>` → it writes `youtube.md`, `chapters.txt`, `tags.txt`,
-`<EP>.srt` and `reels/<REEL>.md`. Limits: `references/platform-rules.md`.
+Check a draft's shape with `reel validate publish/publish.json --root "<CLIENT>" --episode <EP>` (or
+`publish/reels/<REEL>.json`). Then `reel publish-check --root "<CLIENT>" --episode <EP>` → it writes `youtube.md`, `chapters.txt`, `tags.txt`,
+`<EP>.srt` and `reels/<REEL>.md`. Limits: `${CLAUDE_SKILL_DIR}/references/platform-rules.md`.
+Motion reels (`<EP>_<ID>_MO`) publish like other reels; the CC-BY illustration attributions from their motion plan
+must appear in the captions (publish-check errors otherwise).
 
 ## Writing
 - **Titles** (3–5 options): the strongest promise the episode keeps; ≤ 60–70 characters reads fully on phones; the
@@ -63,7 +66,3 @@ person and a verb that disagrees are warnings.
 - A quote that isn't verbatim, a number the speaker didn't say, a stronger claim than the speaker made.
 - Medical/financial/legal/religious claims without an `approval_required` entry.
 - Posting anything. The editor posts.
-
-## Motion mode (2.2)
-Motion reels publish like other reels; CC-BY illustration attributions from the motion plan must appear in the
-captions (publish-check errors otherwise).

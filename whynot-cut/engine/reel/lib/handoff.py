@@ -1,4 +1,4 @@
-"""Stage 9: human-editor handoff package (README + checklist) generated from real state."""
+"""Stage 12 (record + hand off): human-editor handoff package (README + checklist) generated from real state."""
 from __future__ import annotations
 
 from pathlib import Path

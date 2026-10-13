@@ -33,9 +33,14 @@ changes; leave a gap rather than guess.
   "evidence": "<first 4–12 words, verbatim>", "end_evidence": "<last 4–12 words, verbatim>",
   "why": "<one line: why a stranger would watch to the end>",
   "score": {"hook": 8, "standalone": 7, "payoff": 9, "ending": 8},
-  "needs_context": false, "context_line": "", "speakers": ["guest"], "risks": []}]}
+  "needs_context": false, "context_line": "", "speakers": ["guest"], "risks": [],
+  "motion_fit": false, "motion_why": ""}]}
 ```
-Then `reel reels-plan --root "<CLIENT>" --episode <EP>` until it compiles. The engine snaps start/end to the nearest
+`motion_fit` / `motion_why` (optional): mark candidates that suit an animated motion video (numbers, steps, abstract
+ideas, no usable picture); the editor can then pick them `--as motion`. Topics may carry a recipe `type` so a topic
+can be animated too.
+Check a draft's shape any time with `reel validate 01_analysis/reels-plan.json --root "<CLIENT>" --episode <EP>`
+(schema errors with their JSON path). Then `reel reels-plan --root "<CLIENT>" --episode <EP>` until it compiles. The engine snaps start/end to the nearest
 sentence-like boundary (lead-in 120 ms, tail 250 ms), checks evidence near those times (±3 s, Arabic-normalised),
 checks 30–90 s (15–180 hard), overlaps, the sheet's avoid list, and computes the total score.
 An evidence error ends with `did you mean: «…»`: those are the words the CURRENT transcript (after `transcript-correct`)
@@ -52,7 +57,8 @@ says at that time. Copy them into `evidence` / `end_evidence`; do not re-guess f
    `context_line` written from the transcript (one line, ≤ 34 characters works best on screen).
 6. 8–15 per hour, a spread of types (don't return 12 pieces of advice), no two candidates covering the same moment.
 
-Types and their signals: `references/content-types.md`. Scoring anchors and red flags: `references/moment-scoring.md`.
+Types and their signals: `${CLAUDE_SKILL_DIR}/references/content-types.md`. Scoring anchors and red flags:
+`${CLAUDE_SKILL_DIR}/references/moment-scoring.md`.
 
 ## Rules
 - Evidence is copied, never paraphrased. Hooks shorten the speaker's words; they never add claims.
@@ -60,7 +66,3 @@ Types and their signals: `references/content-types.md`. Scoring anchors and red 
 - Sensitive claims (medical, financial, legal, religious) → `risks: ["claim needs approval: …"]`.
 - Topics in the sheet's `avoid` list → still allowed in the plan only with a `risks` note; the editor decides.
 - You never pick the reels. Gate 0 is the editor's.
-
-## Motion mode (2.2)
-Mark `motion_fit`/`motion_why` on candidates that suit animation (numbers, steps, abstract ideas, no usable picture);
-topics may carry a recipe `type` so they can be animated. See `/whynot-cut:motion`.

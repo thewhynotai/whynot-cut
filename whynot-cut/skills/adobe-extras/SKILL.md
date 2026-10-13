@@ -4,14 +4,19 @@ description: "After Effects or Photoshop output for a clip edit, only when expli
 argument-hint: "[ae|ps|mogrt] [clip id]"
 ---
 
-# After Effects / Photoshop extras (opt-in)
+# After Effects / Photoshop extras for clip edits (opt-in)
 
-The editor works in Premiere, so these tools are extras. The engine and a hook both block `reel ae-*`, `ps-*` and
-`mogrt-build` unless you pass `--extras`. Pass it only when the editor asked for AE or PS **in this conversation**.
+**Which app:** Clip edits → Premiere. Motion videos → After Effects. AE/PS for clip graphics → only on request.
+
+The editor works in Premiere, so these tools are extras for a clip edit. The engine and a hook both block `reel ae-*`,
+`ps-*` and `mogrt-build` unless you pass `--extras`. Pass it only when the editor asked for AE or PS **in this
+conversation**. An animated video made from a podcast window's audio is not an extra: that is motion mode
+(`/whynot-cut:motion`, picked `--as motion` when the editor picks the reels), built in After Effects by design; its
+commands (`ae-status`, `ae-probe`, `motion-*`) need no `--extras`.
 
 | Request | Commands | Output |
 |---|---|---|
-| Editable AE graphics project | `reel ae-script --extras`, then `reel ae-build --extras` (approval gate), then `reel ae-render --extras` | `04_after_effects/project/<ID>_<PREFIX>_GFX.aep` plus ProRes 4444 alpha renders |
+| Editable AE graphics project | `reel ae-script --extras`, then `reel ae-build --extras` (needs the approved plan), then `reel ae-render --extras` | `04_after_effects/project/<ID>_<PREFIX>_GFX.aep` plus ProRes 4444 alpha renders |
 | MOGRT templates for Premiere | `reel mogrt-build --extras` | `.mogrt` files (validated zips) |
 | Cover / thumbnail PSD | `global.photoshop_jobs` in decisions, then `reel ps-build --extras` | layered PSD + preview PNG |
 
@@ -20,9 +25,4 @@ The editor works in Premiere, so these tools are extras. The engine and a hook b
 - View every render or PSD preview: RTL order, joined Arabic, no white box around the logo.
 - If AE or PS isn't installed, deliver the JSX (SCRIPT_ONLY) and say so.
 
-References: `references/adobe-automation.md`, `references/automation-matrix.md`.
-
-## Motion mode (2.2)
-Motion videos (`/whynot-cut:motion`, picked `--as motion` at Gate 0) are built in After Effects by design: their
-commands (`ae-status`, `ae-probe`, `motion-*`) are not extras and need no `--extras`. The `ae-*`/`ps-*`/`mogrt-build`
-graphics extras for clips keep their opt-in rule.
+References: `${CLAUDE_SKILL_DIR}/references/adobe-automation.md`, `${CLAUDE_SKILL_DIR}/references/automation-matrix.md`.

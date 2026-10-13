@@ -7,11 +7,18 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 # Machine setup and repair (macOS and Windows)
 
 1. **`reel: command not found` / "not recognized":** the plugin's `bin/` isn't on PATH. Check the plugin is enabled
-   (`/plugin`), then fully restart Claude Code; meanwhile use `"${CLAUDE_PLUGIN_ROOT}/bin/reel"`.
+   (`/plugin`), then fully restart Claude Code; meanwhile call it by its full path, in the shell you are using:
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/bin/reel" doctor
+   ```
+   ```powershell
+   & "${CLAUDE_PLUGIN_ROOT}/bin/reel.cmd" doctor
+   ```
    **`reel` answers as something else** (`reel --version` is not `WhyNot Cut <version>`, or the error says
    `reel-editor environment not installed`): the session started before the install and another plugin's `bin/` (the
    old reel-editor, or the previous WhyNot Cut) is first on PATH; subagents inherit it. Restart Claude Code; until
-   then call `"${CLAUDE_PLUGIN_ROOT}/bin/reel"` by its full path everywhere, subagent prompts included.
+   then call it by its full path everywhere, subagent prompts included: `"${CLAUDE_PLUGIN_ROOT}/bin/reel"` (bash) or
+   `& "${CLAUDE_PLUGIN_ROOT}/bin/reel.cmd"` (PowerShell).
 2. Check first, change second:
    ```bash
    reel --version
@@ -19,11 +26,16 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    ```
    It is read-only and returns `verdict`, `ready`, and a `fixes` list (each fix says who does it: claude / editor).
    `reel_command` lists every `reel` on PATH; if the first is not this plugin's, a fix says so.
+   **`guard_active: false` is a stop item:** say "WhyNot Cut protection is OFF" (the guard hook that keeps client
+   `assets/` and `data/` read-only and the approvals the editor's own is not running), give `guard_heartbeat.fix`
+   (Windows: Git for Windows, then restart Claude Code), and don't start any edit until `reel doctor` shows
+   `guard_active: true`. `null` = an older guard that writes no heartbeat: ask them to check `/hooks`.
 3. `reel setup` repairs everything WhyNot Cut owns. It's idempotent:
    - the engine runtime `~/.whynot-cut/runtimes/<id>` (Windows: `%USERPROFILE%\.whynot-cut\runtimes\<id>`), built or
      re-synced from the hash lock, with the one-line `current` file naming it; ffmpeg. `reel doctor` → `isolated:
      true` when every engine module loads from it. Engine-side scripts run with `reel py`
-   - the WhyNot Cut Bridge panel in Premiere's CEP folder (replacing the old "Reel Editor Bridge" if present)
+   - the WhyNot Cut Bridge panel in Premiere's CEP folder (replacing the old "Reel Editor Bridge" if present); the same
+     bundle loads in After Effects for motion videos (`reel ppro-install`)
    - a fresh doctor report
 
    If the engine is missing, say it's about 400 MB and a few minutes and confirm first, unless the person just asked to
@@ -45,16 +57,15 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
      fenced block for their OS: macOS Terminal `defaults write …`; Windows **PowerShell** `reg add …` (not Git Bash,
      which mangles the `/v /d /f` switches).
    - `reel ppro-status` must show `alive: true` and a ping result before claiming the bridge works.
-6. **Fonts:** each client's fonts come from their `assets/` folder. The editor installs them (macOS: double-click →
+   - If the installed bridge is newer than this plugin's, `ppro-install`/`setup` keep it and report `skipped`; replace
+     it only on the editor's word (`reel ppro-install --force`).
+6. **After Effects (motion videos only):** after `reel ppro-install`, the editor restarts After Effects once;
+   `reel ae-status` must show `host: AEFT`. Then `reel ae-probe` once per After Effects version (the lead views the
+   frames and records the verdict). The plugin never changes After Effects preferences.
+7. **Fonts:** each client's fonts come from their `assets/` folder. The editor installs them (macOS: double-click →
    Install Font; Windows: right-click → Install). `reel inbox --root "<CLIENT>"` then `reel client-db --root "<CLIENT>"`
-   report any that are missing.
-7. Report what is ready and what needs the editor. If something fails twice, spawn `whynot-cut:setup-doctor` with the
+   report any that are missing. After Effects needs the brand fonts installed too.
+8. Report what is ready and what needs the editor. If something fails twice, spawn `whynot-cut:setup-doctor` with the
    exact output instead of trying variations.
 
-Platform details and fixes: `references/platform-setup.md`. Pipeline failures: `${CLAUDE_PLUGIN_ROOT}/skills/edit/references/troubleshooting.md`.
-
-## Motion mode (2.2)
-`reel ppro-install` installs one bundle for Premiere and After Effects (bridge 3.1.1). Check After Effects with
-`reel ae-status`; then `reel ae-probe` once per After Effects version (the lead views the frames and records the
-verdict). The plugin never changes After Effects preferences. If the installed bridge is newer than this plugin's,
-`ppro-install`/`setup` keep it and report `skipped`; replace it only on the editor's word (`reel ppro-install --force`).
+Platform details and fixes: `${CLAUDE_SKILL_DIR}/references/platform-setup.md`. Pipeline failures: `${CLAUDE_PLUGIN_ROOT}/skills/edit/references/troubleshooting.md`.

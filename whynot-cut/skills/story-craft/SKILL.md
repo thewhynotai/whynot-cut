@@ -13,7 +13,7 @@ Work from complete statements in context, never from isolated keywords.
 1. `01_analysis/main-topic.md`
 2. `01_analysis/narrative-segments.json`, segments that tile the speech, on word boundaries
 3. `01_analysis/transcript-semantic-analysis.json`, statement-level, including the B-roll options you rejected
-4. `01_analysis/edit-decisions.json`, see `references/edit-decision-engine.md` and the schema
+4. `01_analysis/edit-decisions.json`, see `${CLAUDE_SKILL_DIR}/references/edit-decision-engine.md` and the schema
 
 `01_analysis/editing-style.json` + `editing-rules.json` are this video's copy of the client reference style (written once per
 client by client-researcher in `output/client_database/reference_style/`, copied by `reel ref-style --apply`). Read them and
@@ -49,7 +49,7 @@ short and factual). Music only from `reel music --list` (licensed tracks with mo
 pauses with `global.remove_pauses.protect: [[start, end]]`.
 
 **References:**
-- `references/semantic-analysis.md`
-- `references/edit-decision-engine.md`
-- `references/broll-and-graphics.md`
+- `${CLAUDE_SKILL_DIR}/references/semantic-analysis.md`
+- `${CLAUDE_SKILL_DIR}/references/edit-decision-engine.md`
+- `${CLAUDE_SKILL_DIR}/references/broll-and-graphics.md`
 - `${CLAUDE_PLUGIN_ROOT}/schemas/edit-decisions.schema.json` (check a draft with `reel validate 01_analysis/edit-decisions.json`)

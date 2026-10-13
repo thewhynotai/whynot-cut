@@ -1,4 +1,4 @@
-"""Client-level reference style (Stage 5): authored once per client, reused by every video, flagged when stale.
+"""Client-level reference style (Stage 4): authored once per client, reused by every video, flagged when stale.
 
 The reference edits in data/ (role editing_reference_video / editing_reference_doc) belong to the CLIENT, so their
 interpretation does too:
@@ -232,7 +232,7 @@ def video_state(paths) -> dict:
 
 
 def next_step(paths) -> dict:
-    """What `reel next` lists for Stage 5 of this video: one step (or none) plus notices."""
+    """What `reel next` lists for Stage 4 of this video: one step (or none) plus notices."""
     cs = state(paths.root)
     vs = video_state(paths)
     planned = paths.p("01_analysis/timeline-spec.json").exists()

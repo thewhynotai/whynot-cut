@@ -28,6 +28,9 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
    - `08_quality_control/preview/preview-result.json` (a preview newer than the plan, for the editor to watch)
    - Podcast episode: `reel episode-next --root "<CLIENT>" --episode <EP>` (episode steps, stale steps, its reels'
      status) and `publish/publish-validation.json` (publish package checked?).
+   - Motion video (`<EP>_<ID>_MO`): `reel next` lists the motion steps and stale steps; read the build result's
+     read-back comparison, the render result, and the newest After Effects frames sheet with its recorded verdict.
+     A build without read-back (`--script-only`/`--run-script`) is Not verified.
 3. Answer in the report format:
    - **Verified**: only what the commands you just ran or the files you just read prove. Name the evidence.
    - **Not verified**: anything stale or unchecked, and why.
@@ -41,8 +44,3 @@ Say "ready to send" only if `qc` passed just now **and** nothing in "Needs you" 
 broken, say what and offer `/whynot-cut:revise` or `/whynot-cut:edit`.
 In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
 `profile.json`). Until a person's gender is known write «د.» or the name.
-
-## Motion mode (2.2)
-For `<EP>_<ID>_MO` projects: `reel next` (motion steps and stale steps), the build result's read-back comparison, the
-render result, the newest frames sheet and its recorded verdict, and `reel qc` run now. A build without read-back
-(`--script-only`/`--run-script`) is Not verified.

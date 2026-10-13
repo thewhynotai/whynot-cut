@@ -812,7 +812,7 @@ def cmd_next(a):
         return
     from lib import ref_style
     from lib.people import profile_notice as people_notice
-    rs = ref_style.next_step(p)     # Stage 5 is client-level: author once, reuse, flag when the references change
+    rs = ref_style.next_step(p)     # Stage 4 is client-level: author once, reuse, flag when the references change
     # references are measured per client: a video that already holds its copy of the style needs no ref-analyze
     need_ref = _has_reference_videos(p) and rs["video"]["state"] not in ("current", "legacy")
     chk = [

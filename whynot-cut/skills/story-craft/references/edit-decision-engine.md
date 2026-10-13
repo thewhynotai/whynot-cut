@@ -1,4 +1,4 @@
-# Edit Decision Engine (Stage 7) — authoring `01_analysis/edit-decisions.json`
+# Edit Decision Engine (Stage 6) — authoring `01_analysis/edit-decisions.json`
 
 Combine **SRT meaning + editing-style/rules + client brand** (`01_analysis/editing-style.json` + `editing-rules.json` =
 the client reference style copied for this video, with its overrides). One decision per meaningful segment that

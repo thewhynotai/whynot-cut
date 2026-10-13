@@ -1,4 +1,4 @@
-"""Stage 5 compiler: validates Claude-authored edit decisions against the real transcript and
+"""Stage 6 compiler: validates Claude-authored edit decisions against the real transcript and
 compiles a frame-accurate timeline spec, B-roll manifest, and audio cue sheet.
 
 Input  : 01_analysis/edit-decisions.json  (authored per references/edit-decision-engine.md)
