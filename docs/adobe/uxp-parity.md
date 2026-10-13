@@ -235,6 +235,29 @@ The results files contain no token; this was checked against the live `engine.js
 Automation note: Adobe's dialogs ignore posted keyboard and mouse messages. Answering one needs a brief real foreground
 with a real click or key, at the coordinates of the process's DPI-virtualised window rect.
 
+### Network `"all"` closed (2026-10-13)
+
+The open security item from the plan session (`network.domains: "all"`) is closed by the commit that adds this note.
+
+- **Decision:**
+  - The product manifest lists exactly `["ws://localhost:*", "http://localhost:*"]`.
+  - The panel and the host link connect to `ws://localhost:<port>/session` and `http://localhost:<port>/status`.
+  - The daemon binds the same port on both loopback addresses, `127.0.0.1` and `::1`, and on nothing else.
+  - If `::1` is unavailable (IPv6 disabled), the daemon logs it once and serves on 127.0.0.1 alone.
+  - If `::1` is in use by another process, the daemon does not fall back: it picks another free port, or fails on a
+    fixed port. Otherwise that process would receive the panel's `localhost` connects.
+  - The Host check also accepts `[::1]:<port>`. Origin, token and caps are unchanged.
+- **Evidence:** the table above (run `024944`).
+  - The localhost entries are allowed; the 127.0.0.1 entries are denied.
+  - Each localhost connect took about 2.0 s. Windows tries `::1` first, and the daemon then listened only on
+    127.0.0.1.
+- **Superseded acceptance line:** the Phase 6 line "IPv6 `::1` not bound" no longer applies.
+  - The requirement is now **loopback only**: never `0.0.0.0`, `::` or a LAN address.
+  - `test_serve_security_e2e.py` asserts this against the real daemon. `::1` is bound and token-gated, and no
+    non-loopback IPv4 or IPv6 address answers.
+- **Not yet re-measured live:** that the ~2 s connect delay is gone in Premiere with the new daemon. The integration
+  test `premiere-uxp/test/daemon-e2e.test.ts` passes against the real daemon through `localhost`.
+
 ## Spike 0.1.7 CSS lab (2026-10-13, run `065447`, mode `css_lab`)
 
 The lab view (`adobe/premiere-uxp/spike/src/css-lab.ts`) drew labelled variants of each kit technique that the 0.1.6
@@ -371,7 +394,7 @@ that remains untested; (g) press Ctrl+Z once and check the three mutations (U3);
 - **UXP adapter now** (green): project create (see the O1 condition), save, close, open with a backslash path, save-as, scratch-disk set, persistence, active project, project views, still import, FCP7 XML import, sequence read-back, the four settings that were probed including the preview codec by display name, still placement, clip end / start / move / out / rename / disable, add a video track, remove a clip, Scale / Rotation / Opacity / Position / Crop keyframes with bezier interpolation **keyed in media time (`clip.getInPoint() + t`)**, static param values, the filter list, Sharpen, Noise, Lumetri, transitions, track rename, markers, single-frame export (backslash form), the `lockedAccess` + `executeTransaction` pattern with its "WhyNot Cut build" History label (one transaction per build if the editor should undo the build in one step).
 - **Partial rows stay on CEP until re-measured** (decision rule above): `createProject` unattended (O1: Scratch Disk dialog and cold-start time), clip in-point action (T2b), Gaussian Blur Repeat Edge Pixels (E4), other settings setters (S4).
 - **CEP compat op through the daemon permanently**: audio channel mapping and audio track types (the base FCP7 XML carries them), native caption track.
-- **UXP network permission**: `network.domains: "all"` in the product and spike manifests (W1, W2); until it is in and re-measured, the daemon link is red and the panel stays on its "blocked" diagnosis.
+- **UXP network permission**: ~~`network.domains: "all"` in the product and spike manifests (W1, W2)~~. Superseded on 2026-10-13. The product now lists exactly `ws://localhost:*` + `http://localhost:*` (measured in spike 0.1.6), the panel dials `localhost`, and the daemon binds 127.0.0.1 + ::1. See "Network `"all"` closed" above.
 - **Host calls**: `Sequence.setPlayerPosition` goes to the adapter (H2); `SourceMonitor.openFilePath` and `shell.openPath` are partial (H1, H3): asynchronous, long timeouts, a possible consent dialog.
 - **Pending**: Ctrl+Z revert of the three-mutation transaction (U3), MOGRT, `createSequence*`, encoder export, and the Origin header and keepalive (W3, blocked by the network permission).
 - **Open question for the controller**: which call raises Project Modified (it appeared between the end of `sequence_settings` and the first calls of `export_frame`, indistinguishable at 1 s resolution), and whether Scratch Disk Error still appears. A modal appeared during a settings / export step, so an unattended UXP build run is not assumed safe until this is answered.

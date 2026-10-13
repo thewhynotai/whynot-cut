@@ -199,11 +199,11 @@ function hostRig(engine: { value: unknown }) {
 
 const welcome = { type: "welcome", session_id: "s-0123456789abcdef", protocol: 4, daemon_version: "3.0.0" };
 
-test("host link: engine.json -> ws://127.0.0.1:<port>/session -> hello kind uxp with the capabilities -> welcome = connected", async () => {
+test("host link: engine.json -> ws://localhost:<port>/session -> hello kind uxp with the capabilities -> welcome = connected", async () => {
   const r = hostRig({ value: REC });
   await flush();
   const ws = FakeWs.all[0]!;
-  assert.equal(ws.url, "ws://127.0.0.1:51234/session");
+  assert.equal(ws.url, "ws://localhost:51234/session");
   assert.equal(r.link.state, "connecting");
   ws.open();
   const hello = ws.sent[0] as { type: string; token: string; client: Record<string, unknown> };
@@ -242,7 +242,7 @@ test("host link: no engine.json / a refused socket / a closed session -> back of
   engine.value = { ...REC, port: 50001, token: "d4".repeat(32) };
   await r.timers.advance(4000);
   const second = FakeWs.all[1]!;
-  assert.equal(second.url, "ws://127.0.0.1:50001/session", "engine.json is read again on every attempt");
+  assert.equal(second.url, "ws://localhost:50001/session", "engine.json is read again on every attempt");
   second.open();
   assert.equal((second.sent[0] as { token: string }).token, "d4".repeat(32));
   second.deliver(welcome);

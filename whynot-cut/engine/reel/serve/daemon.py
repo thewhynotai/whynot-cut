@@ -1,7 +1,8 @@
 """`reel serve` lifecycle (3.0 T6.2): run the daemon, start it once in the background, ask how it is, stop it.
 
     run(home)     the daemon itself (foreground). Takes the per-home instance lock <home>/bridge/serve.lock (a second
-                  daemon on the same home exits with EXIT_LOCKED and touches nothing), binds 127.0.0.1:<free port>,
+                  daemon on the same home exits with EXIT_LOCKED and touches nothing), binds one free port on both
+                  loopbacks, 127.0.0.1 and ::1 (127.0.0.1 alone when IPv6 is unavailable; never anything else),
                   writes <home>/bridge/engine.json {port, token, pid, pid_created, version, protocol, started_at}
                   (atomic, user-only: security.write_engine_json), audits start and stop, turns require_bound_context
                   on (App.start), serves until an authenticated POST /shutdown (or Ctrl+C / SIGTERM), then closes the
@@ -167,7 +168,7 @@ async def _serve(home: Path, *, port, version, ready, app_options, install_signa
             audit.log("daemon", outcome="failed", reason=f"engine.json could not be written ({type(e).__name__})")
             return EXIT_FAILED
         started = True
-        audit.log("daemon", outcome="started", reason=f"127.0.0.1:{port} pid {pid} version {version}")
+        audit.log("daemon", outcome="started", reason=f"{' '.join(app.listening)} pid {pid} version {version}")
         discovery = _write_discovery(home, record, audit)
         loop = asyncio.get_running_loop()
         if install_signals and os.name != "nt":

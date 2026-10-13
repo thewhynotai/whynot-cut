@@ -1,6 +1,6 @@
 """`reel serve` transport (3.0 T6.2): the stdlib HTTP/1.1 + RFC 6455 WebSocket server in serve/ws.py. Run:
     bash tools/test.sh -p test_serve_ws.py
-Every test talks to a real server on 127.0.0.1 through real loopback sockets with a hand-written client (it masks its
+Every test talks to a real server on the loopback pair (127.0.0.1 and ::1) through real loopback sockets with a hand-written client (it masks its
 frames, fragments, pings, sends bad frames on purpose). Every socket, writer and server is closed: the suite runs with
 -W error::ResourceWarning.
 """
@@ -9,14 +9,17 @@ _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home before anything else (see tests/_isolation.py)
 import asyncio
 import base64
+import errno
 import hashlib
 import json
 import os
+import socket
 import struct
 import sys
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
@@ -60,6 +63,18 @@ def upgrade_request(path: str = "/ws", drop: tuple = (), **override: str) -> byt
     return ("\r\n".join(lines) + "\r\n\r\n").encode()
 
 
+def ipv6_loopback() -> bool:
+    """Can this machine bind ::1 at all (IPv6 on, the loopback address configured)?"""
+    if not socket.has_ipv6:
+        return False
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            s.bind(("::1", 0))
+        return True
+    except OSError:
+        return False
+
+
 class Client:
     """A minimal WebSocket client: raw bytes in, frames out."""
 
@@ -67,8 +82,8 @@ class Client:
         self.r, self.w = reader, writer
 
     @classmethod
-    async def open(cls, port):
-        r, w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), T)
+    async def open(cls, port, addr="127.0.0.1"):
+        r, w = await asyncio.wait_for(asyncio.open_connection(addr, port), T)
         return cls(r, w)
 
     async def send_raw(self, data: bytes):
@@ -196,10 +211,99 @@ class ServeCase(unittest.IsolatedAsyncioTestCase):
 
 # ------------------------------------------------------------------------------------------------------- server
 class TestStartServer(ServeCase):
-    async def test_binds_127_0_0_1_on_a_free_port(self):
+    async def test_binds_both_loopbacks_on_one_free_port(self):
         self.assertGreater(self.port, 0)
-        addrs = [s.getsockname() for s in self.server.sockets]
-        self.assertEqual(addrs, [("127.0.0.1", self.port)])
+        addrs = [s.getsockname()[:2] for s in self.server.sockets]
+        if ipv6_loopback():
+            self.assertEqual(addrs, [("127.0.0.1", self.port), ("::1", self.port)])
+            self.assertEqual(self.server.addresses, ("127.0.0.1", "::1"))
+        else:
+            self.assertEqual(addrs, [("127.0.0.1", self.port)])
+        self.assertTrue(self.server.is_serving())
+
+    async def test_never_binds_a_non_loopback_address(self):
+        self.assertEqual(ws.LOOPBACK, ("127.0.0.1", "::1"))
+        for sock in self.server.sockets:
+            host = sock.getsockname()[0]
+            self.assertIn(host, ws.LOOPBACK)
+            self.assertNotIn(host, ("0.0.0.0", "::", ""))
+
+    async def test_answers_over_ipv6_loopback(self):
+        if not ipv6_loopback():
+            self.skipTest("no IPv6 loopback on this machine")
+        c = await Client.open(self.port, "::1")
+        self.clients.append(c)
+        status, _, body = await c.http(b"GET /json HTTP/1.1\r\nHost: x\r\n\r\n")
+        self.assertEqual((status, json.loads(body)["ok"]), (200, True))
+        c = await Client.open(self.port, "::1")
+        self.clients.append(c)
+        status, _ = await c.handshake()
+        self.assertEqual(status, 101)
+        await c.send(TEXT, b"hi")
+        self.assertEqual((await c.read_frame())[2], b"echo:hi")
+
+    async def test_ipv6_unavailable_falls_back_to_127_0_0_1_and_says_so_once(self):
+        real = ws._bind
+
+        def no_v6(family, host, port):
+            if family == socket.AF_INET6:
+                raise OSError(errno.EADDRNOTAVAIL, "simulated: IPv6 disabled")
+            return real(family, host, port)
+
+        async def h(r, w):
+            pass
+        with mock.patch.object(ws, "_bind", no_v6), mock.patch.object(ws, "_v6_noted", False), \
+                self.assertLogs("serve.ws", "WARNING") as logs:
+            for _ in range(2):
+                server, port = await ws.start_server(h)
+                try:
+                    self.assertEqual([s.getsockname()[:2] for s in server.sockets], [("127.0.0.1", port)])
+                finally:
+                    server.close()
+                    await server.wait_closed()
+        self.assertEqual(len(logs.output), 1, logs.output)          # once per process, not once per start
+        self.assertIn("::1 is unavailable", logs.output[0])
+        with mock.patch.object(ws.socket, "has_ipv6", False), mock.patch.object(ws, "_v6_noted", True):
+            server, port = await ws.start_server(h)                  # no AF_INET6 at all
+            try:
+                self.assertEqual(server.addresses, ("127.0.0.1",))
+            finally:
+                server.close()
+                await server.wait_closed()
+
+    async def test_ipv6_in_use_is_never_treated_as_unavailable(self):
+        if not ipv6_loopback():
+            self.skipTest("no IPv6 loopback on this machine")
+
+        async def h(r, w):
+            pass
+        # a fixed port whose ::1 side another socket holds: refused (that socket would get the panel's localhost
+        # connects), and the 127.0.0.1 side is released again
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as squat:
+            squat.bind(("::1", 0))
+            squat.listen()
+            port = squat.getsockname()[1]
+            with self.assertRaises(OSError):
+                await ws.start_server(h, port=port)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as again:
+                again.bind(("127.0.0.1", port))                       # nothing of the failed start is left bound
+        # a free port whose ::1 side turns out taken: another port is picked, both loopbacks bound, no fallback
+        real, calls = ws._bind, []
+
+        def first_v6_taken(family, host, port):
+            calls.append((family, port))
+            if family == socket.AF_INET6 and sum(f == socket.AF_INET6 for f, _ in calls) == 1:
+                raise OSError(errno.EADDRINUSE, "simulated: ::1 port taken")
+            return real(family, host, port)
+        with mock.patch.object(ws, "_bind", first_v6_taken):
+            server, port = await ws.start_server(h)
+        try:
+            self.assertEqual(server.addresses, ("127.0.0.1", "::1"))
+            self.assertEqual([f for f, _ in calls], [socket.AF_INET, socket.AF_INET6] * 2)
+            self.assertNotEqual(calls[1][1], port, "the taken port was given up")
+        finally:
+            server.close()
+            await server.wait_closed()
 
     async def test_refuses_any_other_host(self):
         async def h(r, w):

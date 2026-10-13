@@ -4,7 +4,7 @@
 // fetch itself: the shell (UXP / CEP, Task 4) injects a DaemonTransport, and node tests inject fakes.
 //
 // Link: read ~/.whynot-cut/bridge/engine.json ({port, token, pid, version, protocol, home?}; re-read on every
-// attempt, retried briefly while the daemon swaps it) -> ws://127.0.0.1:<port>/session -> `hello` (kind "panel",
+// attempt, retried briefly while the daemon swaps it) -> ws://localhost:<port>/session -> `hello` (kind "panel",
 // protocol 4, no capabilities) -> `welcome` -> `snapshot` now and every POLL_MS (the daemon pushes nothing yet, and
 // the poll is also the keepalive: the daemon pings after 30 s of silence and closes after 60 s). The daemon's state
 // is a stub: only its `connection` is merged; everything else stays local. Reconnects back off 1-2-4-8-15 s.
@@ -49,9 +49,9 @@ export interface DaemonTransport {
   /** The parsed JSON of ~/.whynot-cut/bridge/engine.json, or null when it is missing / unreadable. Called on every
    *  connection attempt (the port and token change on every daemon start). May throw: treated as missing. */
   readEngineJson(): unknown | Promise<unknown>;
-  /** Open a WebSocket to `url` (always ws://127.0.0.1:<port>/session). May throw: treated as a refused connection. */
+  /** Open a WebSocket to `url` (always ws://localhost:<port>/session). May throw: treated as a refused connection. */
   openSocket(url: string): DaemonSocket;
-  /** GET `url` (http://127.0.0.1:<port>/status) with these headers; resolves the HTTP status code, null when nothing
+  /** GET `url` (http://localhost:<port>/status) with these headers; resolves the HTTP status code, null when nothing
    *  answers in time, and THROWS when the request cannot be made at all (a network permission refusing the port, a
    *  refused connection): that is the "blocked" diagnosis. Optional: without it a failed upgrade is "unreachable". */
   httpGetStatus?(url: string, headers: { Authorization: string }): Promise<number | null>;
@@ -99,11 +99,14 @@ const ACTION_STEP: Partial<Record<ActionName, StepId>> = {
 export function backoffMs(failures: number): number {
   return Math.min(1000 * 2 ** Math.max(0, failures - 1), BACKOFF_MAX_MS);
 }
+// `localhost`, never 127.0.0.1: Premiere 26.5.2's UXP allows exactly `ws://localhost:*` / `http://localhost:*` and
+// denies the 127.0.0.1 forms ("Manifest entry not found"; spike 0.1.6, docs/adobe/uxp-parity.md). The daemon binds
+// both 127.0.0.1 and ::1, so the name answers at once whichever address Windows tries first.
 export function sessionUrl(port: number): string {
-  return `ws://127.0.0.1:${port}/session`;
+  return `ws://localhost:${port}/session`;
 }
 export function statusUrl(port: number): string {
-  return `http://127.0.0.1:${port}/status`;
+  return `http://localhost:${port}/status`;
 }
 
 // ------------------------------------------------------------------------------------------------ diagnosis

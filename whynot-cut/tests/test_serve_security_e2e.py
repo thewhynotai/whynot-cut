@@ -90,6 +90,20 @@ def port_open(port: int, host: str = "127.0.0.1", family=socket.AF_INET) -> bool
             return False
 
 
+def non_loopback_ipv6() -> list:
+    """This machine's IPv6 addresses that are not ::1 (link-local ones without a scope are skipped)."""
+    out = []
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET6, socket.SOCK_STREAM)
+    except OSError:
+        return out
+    for info in infos:
+        a = info[4][0]
+        if a and a not in ("::1", "::") and not a.lower().startswith("fe80") and a not in out:
+            out.append(a)
+    return out[:4]
+
+
 def non_loopback_ipv4() -> str | None:
     """A local IPv4 address that is not loopback (the route to a TEST-NET address; no packet is sent)."""
     cands = []
@@ -270,21 +284,47 @@ class Attacks(LiveCase):
         st = await b.recv()
         self.assertEqual((st["type"], st.get("id")), ("state", "again"))
 
-    def test_ipv6_loopback_is_not_bound(self):
+    # The Phase 6 acceptance line "IPv6 ::1 not bound" is superseded (network-"all" closure, docs/adobe/uxp-parity.md):
+    # UXP may only dial `localhost`, which Windows resolves to ::1 first, so the daemon binds BOTH loopbacks. The
+    # requirement that stays is loopback only: never 0.0.0.0, ::, or a LAN address.
+    async def test_ipv6_loopback_is_bound_and_token_gated(self):
         if not socket.has_ipv6:
-            self.skipTest("no IPv6 on this machine (so ::1 cannot be bound either)")
+            self.skipTest("no IPv6 on this machine (the daemon serves 127.0.0.1 alone)")
         try:
-            socket.socket(socket.AF_INET6, socket.SOCK_STREAM).close()
+            with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+                s.bind(("::1", 0))
         except OSError:
-            self.skipTest("IPv6 sockets are not available here")
-        self.assertFalse(port_open(self.port, "::1", socket.AF_INET6))
+            self.skipTest("IPv6 loopback is not available here")
+        self.assertTrue(port_open(self.port, "::1", socket.AF_INET6))
         self.assertTrue(port_open(self.port))
+        ok = await http(self.port, f"GET /status HTTP/1.1\r\nHost: localhost:{self.port}\r\n"
+                                   f"Authorization: Bearer {self.token}\r\n\r\n".encode(), addr="::1")
+        no = await http(self.port, f"GET /status HTTP/1.1\r\nHost: [::1]:{self.port}\r\n\r\n".encode(), addr="::1")
+        host = await http(self.port, f"GET /status HTTP/1.1\r\nHost: evil.example:{self.port}\r\n"
+                                     f"Authorization: Bearer {self.token}\r\n\r\n".encode(), addr="::1")
+        self.assertEqual((ok[0], no[0], host[0]), (200, 401, 403))
+        client = {"kind": "cli", "version": "3.0.0", "protocol": 4, "capabilities": []}
+        good = await self.connect(addr="::1", host=f"localhost:{self.port}")
+        self.assertEqual(good.status, 101)
+        await good.send({"type": "hello", "token": self.token, "client": client})
+        self.assertEqual((await good.recv())["type"], "welcome")
+        bad = await self.connect(addr="::1", host=f"localhost:{self.port}")
+        await bad.send({"type": "hello", "token": security.make_token(), "client": client})
+        msg = await bad.recv()
+        self.assertEqual((msg["type"], msg["code"]), ("error", "auth"), msg)
 
     def test_wildcard_is_not_bound(self):
         addr = non_loopback_ipv4()
         if addr is None:
             self.skipTest("this machine has no non-loopback IPv4 address to try")
-        self.assertFalse(port_open(self.port, addr), f"{addr}:{self.port} answered: the daemon is not 127.0.0.1-only")
+        self.assertFalse(port_open(self.port, addr), f"{addr}:{self.port} answered: the daemon is not loopback-only")
+
+    def test_no_non_loopback_ipv6_is_bound(self):
+        addrs = non_loopback_ipv6()
+        if not addrs:
+            self.skipTest("this machine has no non-loopback IPv6 address to try")
+        for a in addrs:
+            self.assertFalse(port_open(self.port, a, socket.AF_INET6), f"[{a}]:{self.port} answered: not loopback-only")
 
     def test_ensure_twice_is_the_same_daemon(self):
         pids = []

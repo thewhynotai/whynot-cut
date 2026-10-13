@@ -23,16 +23,25 @@ test("plugin manifest: version is the product version (plugin.json), so a releas
   assert.equal(manifest.version, productVersion);
 });
 
-test("plugin manifest: full file access + network \"all\" (127.0.0.1 entries failed live) + clipboard readAndWrite + launchProcess for file/folder open (owner decision 2026-10-12), and NOTHING else", () => {
+test("plugin manifest: full file access + network ws/http://localhost:* only (measured, spike 0.1.6) + clipboard readAndWrite + launchProcess for file/folder open (owner decision 2026-10-12), and NOTHING else", () => {
   assert.deepEqual(manifest.requiredPermissions, {
     localFileSystem: "fullAccess",
     clipboard: "readAndWrite",
     launchProcess: { schemes: ["file"], extensions: [".mp4", ".mov", ".prproj", ""] },
-    // live evidence: Premiere 26.5.2, spike 0.1.3 run results-20261012-211920 - "Permission denied to the url ws://127.0.0.1:53672/session. Manifest entry not found." (and the same for http://127.0.0.1:53672/status): the explicit ws://127.0.0.1 / http://127.0.0.1 entries do not match a URL with a port, so the spec's fallback applies (docs/adobe/evidence/2026-10-12-premiere-run4-panel-blocked.webp).
-    // The code still only ever connects to 127.0.0.1 (guarded by the bundle test in plugin-package.test.ts).
-    network: { domains: "all" },
+    // live evidence: Premiere 26.5.2, spike 0.1.6 run 024944 (docs/adobe/uxp-parity.md, "Spike 0.1.6 live run"):
+    // `ws://localhost:*` and `http://localhost:*` are allowed; `ws://127.0.0.1:*` / `http://127.0.0.1:*` are denied
+    // ("Manifest entry not found"). This closes the network "all" security item: the code connects to localhost
+    // only (guarded by the bundle test in plugin-package.test.ts), and the daemon binds 127.0.0.1 and ::1.
+    network: { domains: ["ws://localhost:*", "http://localhost:*"] },
   });
   assert.deepEqual(Object.keys(manifest.requiredPermissions).sort(), ["clipboard", "launchProcess", "localFileSystem", "network"]);
+});
+
+test("plugin manifest: network.domains is exactly the two measured localhost entries - never \"all\", never 127.0.0.1, no other host or scheme", () => {
+  const domains = manifest.requiredPermissions.network.domains;
+  assert.ok(Array.isArray(domains), "an explicit list, not \"all\"");
+  assert.deepEqual(domains, ["ws://localhost:*", "http://localhost:*"]);
+  assert.equal(JSON.stringify(manifest).includes("127.0.0.1"), false);
 });
 
 test("plugin manifest: launchProcess is as narrow as it works - only the file scheme, only the types the panel opens, and \"\" (Adobe's recipe: folders need an empty extension); never a web scheme", () => {

@@ -134,7 +134,7 @@ test("a bad style_guide view (or a view on another mode) is malformed: moved asi
 
 // ---- manifest, version, page --------------------------------------------------------------------------------------
 
-test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback network list (= LOOPBACK_DOMAINS), whynotcut scheme; product stays \"all\"", () => {
+test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback network list (= LOOPBACK_DOMAINS), whynotcut scheme; the product lists the two measured localhost entries", () => {
   const m = JSON.parse(read("spike/manifest.json"));
   const product = JSON.parse(read("plugin/manifest.json"));
   assert.equal(m.name, "WhyNot Cut Spike");
@@ -146,7 +146,9 @@ test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback netw
   for (const d of ["ws://127.0.0.1:*", "ws://localhost:*", "http://127.0.0.1:*", "http://localhost:*", "ws://127.0.0.1", "http://127.0.0.1"]) assert.ok(LOOPBACK_DOMAINS.includes(d), d);
   assert.ok(!LOOPBACK_DOMAINS.includes("all"));
   assert.ok(m.requiredPermissions.launchProcess.schemes.includes("whynotcut"), "openExternal(whynotcut://) needs its scheme");
-  assert.equal(product.requiredPermissions.network.domains, "all", "the product manifest stays at \"all\"");
+  // run 024944 measured these two allowed (the 127.0.0.1 forms denied): the product keeps exactly them, never "all"
+  assert.deepEqual(product.requiredPermissions.network.domains, ["ws://localhost:*", "http://localhost:*"]);
+  for (const d of product.requiredPermissions.network.domains) assert.ok(LOOPBACK_DOMAINS.includes(d), d);
 });
 
 test("spike page: links tokens.css, kit.css, index.css; has the style guide view and its toggles; no Claude Code", () => {

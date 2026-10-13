@@ -5,8 +5,14 @@ kept behind a narrow interface (start_server, parse_http, Request, Response, jso
 WebSocket) so it can be swapped for `websockets` later in this one module.
 
 Rules it enforces, all bounded:
-  * listens on 127.0.0.1 only (any other host is a ValueError), on a free port; on Windows the port is bound with
-    SO_EXCLUSIVEADDRUSE so no other local process can bind the same port;
+  * listens on the loopback pair only, the same port on 127.0.0.1 AND ::1 (3.0 network-"all" closure: Premiere's UXP
+    allows only `ws://localhost:*` / `http://localhost:*`, and Windows resolves `localhost` to ::1 first, so a
+    127.0.0.1-only daemon cost every panel connect a ~2 s fallback; docs/adobe/uxp-parity.md, spike 0.1.6). Never
+    0.0.0.0, ::, or a LAN address; any `host` argument other than HOST is a ValueError. When IPv6 is unavailable
+    (no AF_INET6, or ::1 not configured) it says so once in the log and serves on 127.0.0.1 alone; ::1 being IN USE
+    is never that case (another process would get the panel's localhost connects), so it picks another free port or,
+    for a fixed port, fails. On Windows both sockets are bound with SO_EXCLUSIVEADDRUSE so no other local process
+    can bind the same address and port; the ::1 socket is IPV6_V6ONLY;
   * request head: one request line `METHOD SP /origin-form SP HTTP/1.x`, CRLF line ends, header names are tokens, no
     obs-fold, no control characters, security-relevant headers (Host, Origin, Authorization, Sec-WebSocket-*, ...)
     may not repeat, HTTP/1.1 needs Host, at most `limit` bytes and MAX_HEADERS lines within HEADER_TIMEOUT seconds;
@@ -33,6 +39,7 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import errno
 import hashlib
 import http
 import json
@@ -42,12 +49,15 @@ import socket
 import struct
 from dataclasses import dataclass, field
 
-__all__ = ["HOST", "MAX_MESSAGE", "IDLE_TIMEOUT", "HttpError", "ConnectionClosed", "Request", "Response",
-           "json_response", "parse_http", "write_response", "upgrade", "accept_key", "WebSocket", "start_server"]
+__all__ = ["HOST", "HOST6", "LOOPBACK", "MAX_MESSAGE", "IDLE_TIMEOUT", "HttpError", "ConnectionClosed", "Request", "Response",
+           "json_response", "parse_http", "write_response", "upgrade", "accept_key", "WebSocket", "LoopbackServer", "start_server"]
 
 log = logging.getLogger(__name__)
 
 HOST = "127.0.0.1"
+HOST6 = "::1"
+LOOPBACK = (HOST, HOST6)       # every address reel serve may listen on; nothing else, ever
+BIND_TRIES = 20                # free-port picks tried when ::1 of the picked port is taken
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 HEADER_LIMIT = 8192            # bytes of request line + headers
 HEADER_TIMEOUT = 10.0          # seconds to receive the whole request head
@@ -561,26 +571,124 @@ async def _serve_connection(handler, reader: asyncio.StreamReader, writer: async
         await _linger_close(reader, writer, CLOSE_TIMEOUT)
 
 
-async def start_server(handler, host: str = HOST, port: int = 0) -> tuple[asyncio.Server, int]:
-    """Listen on 127.0.0.1:`port` (0 = a free port); `handler(reader, writer)` runs per connection. A HttpError it
-    raises is answered with its status; the connection is always closed afterwards. Returns (server, port)."""
+def _errnos(*names: str) -> frozenset:
+    return frozenset(v for v in (getattr(errno, n, None) for n in names) if isinstance(v, int))
+
+
+# ::1 cannot exist here: IPv6 is off, or the loopback address is not configured. Anything else (in use, access
+# denied) is NOT "unavailable" and never falls back to 127.0.0.1 alone.
+_V6_UNAVAILABLE = _errnos("EAFNOSUPPORT", "EPFNOSUPPORT", "EPROTONOSUPPORT", "EADDRNOTAVAIL",
+                          "WSAEAFNOSUPPORT", "WSAEPFNOSUPPORT", "WSAEPROTONOSUPPORT", "WSAEADDRNOTAVAIL")
+_IN_USE = _errnos("EADDRINUSE", "EACCES", "WSAEADDRINUSE", "WSAEACCES")
+_v6_noted = False              # the "IPv6 unavailable" line is logged once per process
+
+
+def _bind(family: int, host: str, port: int) -> socket.socket:
+    """A TCP socket bound to (host, port), exclusive on Windows, IPV6_V6ONLY for IPv6. Closed again on any error."""
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        if family == socket.AF_INET6 and hasattr(socket, "IPV6_V6ONLY"):
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        sock.bind((host, port))
+    except BaseException:
+        sock.close()
+        raise
+    return sock
+
+
+def _v6_unavailable(e: OSError) -> bool:
+    return e.errno in _V6_UNAVAILABLE or getattr(e, "winerror", None) in _V6_UNAVAILABLE
+
+
+def _note_v6_unavailable(why: str) -> None:
+    global _v6_noted
+    if not _v6_noted:
+        _v6_noted = True
+        log.warning("reel serve: IPv6 loopback ::1 is unavailable (%s); listening on 127.0.0.1 only", why)
+
+
+def _bind_loopback(port: int) -> list:
+    """[127.0.0.1 socket, ::1 socket] on one port (just the first when IPv6 is unavailable). Port 0 picks a free
+    port on 127.0.0.1 and retries (BIND_TRIES) when ::1 of that port is taken; a fixed port taken on ::1 raises."""
+    tries = BIND_TRIES if port == 0 else 1
+    for attempt in range(tries):
+        s4 = _bind(socket.AF_INET, HOST, port)
+        picked = s4.getsockname()[1]
+        if not socket.has_ipv6:
+            _note_v6_unavailable("no IPv6 support in this Python")
+            return [s4]
+        try:
+            s6 = _bind(socket.AF_INET6, HOST6, picked)
+        except OSError as e:
+            if _v6_unavailable(e):
+                _note_v6_unavailable(type(e).__name__ + (f" {e.errno}" if e.errno is not None else ""))
+                return [s4]
+            s4.close()
+            if attempt + 1 < tries and (e.errno in _IN_USE or getattr(e, "winerror", None) in _IN_USE):
+                continue                               # ::1 of this free port is someone else's: pick another
+            raise
+        except BaseException:
+            s4.close()
+            raise
+        return [s4, s6]
+    raise OSError(errno.EADDRINUSE, "no free port on both 127.0.0.1 and ::1")   # unreachable: the loop raises
+
+
+class LoopbackServer:
+    """The one listener of reel serve: one asyncio.Server per loopback socket (asyncio takes one socket per server),
+    behaving as one server: `sockets`, `close()`, `wait_closed()`, `is_serving()`."""
+
+    def __init__(self, servers):
+        self._servers = tuple(servers)
+
+    @property
+    def sockets(self) -> tuple:
+        return tuple(sock for srv in self._servers for sock in srv.sockets)
+
+    @property
+    def addresses(self) -> tuple:
+        """("127.0.0.1", "::1") or ("127.0.0.1",): the hosts actually listened on."""
+        return tuple(sock.getsockname()[0] for sock in self.sockets)
+
+    def is_serving(self) -> bool:
+        return any(srv.is_serving() for srv in self._servers)
+
+    def close(self) -> None:
+        for srv in self._servers:
+            srv.close()
+
+    async def wait_closed(self) -> None:
+        for srv in self._servers:
+            await srv.wait_closed()
+
+
+async def start_server(handler, host: str = HOST, port: int = 0) -> tuple[LoopbackServer, int]:
+    """Listen on `port` (0 = a free port) on 127.0.0.1 and ::1 (127.0.0.1 alone when IPv6 is unavailable; see the
+    module doc); `handler(reader, writer)` runs per connection. `host` exists only to be refused: anything but HOST is
+    a ValueError. A HttpError the handler raises is answered with its status; the connection is always closed
+    afterwards. Returns (server, port)."""
     if host != HOST:
-        raise ValueError(f"reel serve listens on {HOST} only, not {host!r}")
+        raise ValueError(f"reel serve listens on the loopback pair {LOOPBACK} only, not {host!r}")
     if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
         raise ValueError(f"bad port {port!r}")
     if not callable(handler):
         raise TypeError("handler must be a coroutine function (reader, writer)")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    socks = _bind_loopback(port)
+
+    async def on_connect(reader, writer):
+        await _serve_connection(handler, reader, writer)
+
+    servers = []
     try:
-        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        sock.bind((HOST, port))
-
-        async def on_connect(reader, writer):
-            await _serve_connection(handler, reader, writer)
-
-        server = await asyncio.start_server(on_connect, sock=sock, limit=STREAM_LIMIT)
+        for sock in socks:
+            servers.append(await asyncio.start_server(on_connect, sock=sock, limit=STREAM_LIMIT))
     except BaseException:
-        sock.close()
+        for srv in servers:
+            srv.close()
+        for sock in socks[len(servers):]:
+            sock.close()
         raise
+    server = LoopbackServer(servers)
     return server, server.sockets[0].getsockname()[1]

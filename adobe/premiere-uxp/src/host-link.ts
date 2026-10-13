@@ -1,6 +1,6 @@
 // The host link: keeps the Premiere host adapter (src/host-adapter.ts) connected to the engine daemon for as long as
 // the plugin runs, so `reel` commands (and the panel's own commands) reach Premiere. Each attempt reads engine.json
-// afresh (the port and token change on every daemon start), opens ws://127.0.0.1:<port>/session and, once the socket
+// afresh (the port and token change on every daemon start), opens ws://localhost:<port>/session and, once the socket
 // is open, hands it to startHostAdapter (which says hello as kind "uxp" with its capabilities). When the socket closes,
 // fails to open or opens but never gets a welcome, the link waits and tries again: 1-2-4-8-15 s, the panel's backoff,
 // reset by a welcome. It is independent of the panel's own (requester) session: hiding the panel does not stop it.

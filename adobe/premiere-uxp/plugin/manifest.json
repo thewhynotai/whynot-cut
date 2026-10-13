@@ -23,7 +23,10 @@
       ]
     },
     "network": {
-      "domains": "all"
+      "domains": [
+        "ws://localhost:*",
+        "http://localhost:*"
+      ]
     }
   },
   "entrypoints": [

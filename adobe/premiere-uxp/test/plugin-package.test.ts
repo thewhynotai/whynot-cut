@@ -122,7 +122,8 @@ test("the shipped bundle: UXP host modules stay external, no mock data, the engi
   assert.match(js, /require\(\s*["']fs["']\s*\)/);
   assert.match(js, /require\(\s*["']os["']\s*\)/);
   assert.match(js, /\.whynot-cut\/bridge\/engine\.json/);
-  assert.match(js, /ws:\/\/127\.0\.0\.1:/);
+  assert.match(js, /ws:\/\/localhost:/);
+  assert.doesNotMatch(js, /(?:wss?|https?):\/\/127\.0\.0\.1/, "the 127.0.0.1 forms are denied by UXP (spike 0.1.6)");
   assert.match(js, /reel serve --ensure/);
   assert.match(js, /kind: "uxp"/);
   // M8 / C1.8: the build id (UTC YYYYMMDDTHHMMSSZ) is baked in as hello client.build, and with the git sha next to it
@@ -227,22 +228,22 @@ test("the shipped index.js with a WebSocket and no engine.json: DaemonSource dia
   panels["whynotCut"]!.destroy();
 });
 
-test("network \"all\" guard: the shipped code only ever builds ws://127.0.0.1:<port> and http://127.0.0.1:<port> URLs", () => {
-  // The manifest grants network "all" because Premiere 26.5.2 refused the explicit 127.0.0.1 entries for a URL with a
-  // port (spike 0.1.3, results-20261012-211920). The code stays loopback-only: every URL literal in the bundle is the
-  // daemon's session or status URL, nothing else (no other host, no https, no wss).
+test("network guard: the shipped code only ever builds ws://localhost:<port> and http://localhost:<port> URLs, and the manifest allows exactly those", () => {
+  // Premiere 26.5.2 allows `ws://localhost:*` / `http://localhost:*` and denies the 127.0.0.1 forms (spike 0.1.6,
+  // docs/adobe/uxp-parity.md), so the manifest lists exactly those two and the code dials localhost: every URL
+  // literal in the bundle is the daemon's session or status URL, nothing else (no other host, no https, no wss).
   const js = text(unzipSync(new Uint8Array(readFileSync(ccx)))["index.js"]);
   const urls = [...js.matchAll(/\b(?:wss?|https?):\/\/[^\s"'`)<>\\]*/gi)].map((m) => m[0]);
-  assert.deepEqual([...new Set(urls)].sort(), ["http://127.0.0.1:${port}/status", "ws://127.0.0.1:${port}/session"], urls.join(", "));
+  assert.deepEqual([...new Set(urls)].sort(), ["http://localhost:${port}/status", "ws://localhost:${port}/session"], urls.join(", "));
   // the two builders, as written in the panel kit
   const src = readFileSync(join(root, "..", "panel-ui", "src", "daemon-source.ts"), "utf8");
-  assert.match(src, /return `ws:\/\/127\.0\.0\.1:\$\{port\}\/session`;/);
-  assert.match(src, /return `http:\/\/127\.0\.0\.1:\$\{port\}\/status`;/);
+  assert.match(src, /return `ws:\/\/localhost:\$\{port\}\/session`;/);
+  assert.match(src, /return `http:\/\/localhost:\$\{port\}\/status`;/);
   // every socket and fetch in the plugin's own code goes through them (or through the URL handed in by DaemonSource)
   for (const f of ["host-link.ts", "uxp-transport.ts", "main.ts"]) {
     const code = readFileSync(join(root, "src", f), "utf8").replace(/^\s*\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
     assert.doesNotMatch(code, /(?:wss?|https?):\/\//i, `${f} has its own URL literal`);
   }
   const manifest = JSON.parse(text(unzipSync(new Uint8Array(readFileSync(ccx)))["manifest.json"]));
-  assert.equal(manifest.requiredPermissions.network.domains, "all");
+  assert.deepEqual(manifest.requiredPermissions.network.domains, ["ws://localhost:*", "http://localhost:*"]);
 });

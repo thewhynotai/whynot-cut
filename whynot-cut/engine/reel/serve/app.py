@@ -1,11 +1,11 @@
 """The `reel serve` application (3.0 T6.2): the per-connection handler on top of serve/ws.py.
 
 HTTP (every request): the connection cap first (one global cap, MAX_CONNECTIONS; excess -> 503 + audit. There is no
-per-address cap: on loopback every peer is 127.0.0.1, so it would only be a second, smaller global cap), then the
+per-address cap: on loopback every peer is 127.0.0.1 or ::1, so it would only be a second, smaller global cap), then the
 request head (ws.parse_http; a refused head is answered 400/408 by ws's connection wrapper), then every Origin seen is
 audit-logged with its raw value (before any other check, so a rebinding attempt's Origin is on record too), then the
-Host gate (missing -> 400, anything but 127.0.0.1:<port> / localhost:<port> -> 403 + audit) and the Origin gate (a
-browser Origin -> 403 + audit). Then:
+Host gate (missing -> 400, anything but 127.0.0.1:<port> / localhost:<port> / [::1]:<port> -> 403 + audit) and the
+Origin gate (a browser Origin -> 403 + audit). Then:
     GET /status    needs `Authorization: Bearer <token>` (401 otherwise); answers {protocol, daemon_version, pid, port,
                    sessions: [{kind, host, hostVersion, capabilities}], uptime_s}
     POST /shutdown needs the same bearer token (401 otherwise; other methods 405): 202 {ok, stopping}, then
@@ -166,7 +166,8 @@ class Session:
 
 
 class App:
-    """`handler` is the ws.start_server connection handler; start()/close() run it on 127.0.0.1."""
+    """`handler` is the ws.start_server connection handler; start()/close() run it on the loopback pair (127.0.0.1 and
+    ::1, the same port; 127.0.0.1 alone when IPv6 is unavailable)."""
 
     def __init__(self, *, home, token: str, version: str, audit: security.AuditLog | None = None,
                  hello_timeout: float = HELLO_TIMEOUT, max_connections: int = MAX_CONNECTIONS,
@@ -204,20 +205,29 @@ class App:
                              file_queue=file_queue if file_queue is not None else FileQueueAdapter(), audit=self.audit)
         self._conns = 0
         self._handlers: dict[asyncio.Task, asyncio.StreamWriter] = {}
-        self._server: asyncio.Server | None = None
+        self._server: ws.LoopbackServer | None = None
         self._strict = False
         self._t0 = time.monotonic()
         self.stop_requested = asyncio.Event()        # set by an authenticated POST /shutdown
 
     # ------------------------------------------------------------------------------------------------ lifecycle
     async def start(self, port: int = 0, *, strict_context: bool = True) -> int:
-        """Listen on 127.0.0.1:`port` (0 = free). strict_context: from now on an unbound current_context() raises."""
+        """Listen on `port` (0 = free) on 127.0.0.1 and ::1 (ws.start_server). strict_context: from now on an unbound
+        current_context() raises."""
         self._server, self.port = await ws.start_server(self.handler, port=port)
         self._t0 = time.monotonic()
         if strict_context:
             common.require_bound_context(True)
             self._strict = True
         return self.port
+
+    @property
+    def listening(self) -> list[str]:
+        """The addresses served, e.g. ["127.0.0.1:51234", "[::1]:51234"] (empty when not started)."""
+        if self._server is None:
+            return []
+        return [f"[{a[0]}]:{a[1]}" if ":" in a[0] else f"{a[0]}:{a[1]}"
+                for a in (s.getsockname() for s in self._server.sockets)]
 
     async def close(self) -> None:
         """Stop listening, close every session (1001), end every connection, restore the context switch. Bounded by

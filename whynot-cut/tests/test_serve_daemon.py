@@ -12,6 +12,7 @@ _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home before anything else (see tests/_isolation.py)
 import asyncio
 import contextlib
+import errno
 import io
 import json
 import os
@@ -32,7 +33,8 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import common  # noqa: E402
-from serve import adapters, app as serve_app, cli as serve_cli, daemon, security  # noqa: E402
+from serve import adapters, app as serve_app, cli as serve_cli, daemon, security, ws  # noqa: E402
+import test_serve_app  # noqa: E402
 from test_serve_app import PING_READBACK, AppCase, cep_ok, command, http, request  # noqa: E402
 
 T = 10.0
@@ -307,6 +309,62 @@ class Run(_Home):
     def test_defaults(self):
         self.assertEqual(daemon.PROBE_TIMEOUT, 0.3)
         self.assertEqual(daemon.ENSURE_WAIT, 1.0)
+
+
+# ------------------------------------------------------------------------------------------------ loopback pair
+def port_open6(port: int) -> bool:
+    try:
+        with socket.create_connection(("::1", port), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
+class LoopbackPair(_Home):
+    """The daemon listens on 127.0.0.1 AND ::1 on one port (UXP may only dial `localhost`, which Windows resolves to
+    ::1 first; docs/adobe/uxp-parity.md, spike 0.1.6), on nothing else, and on 127.0.0.1 alone when IPv6 is off."""
+
+    def test_both_loopbacks_are_bound_on_the_engine_json_port(self):
+        if not test_serve_app.ipv6_loopback():
+            self.skipTest("no IPv6 loopback on this machine")
+        d = self.start_daemon()
+        info = security.read_engine_json(self.home)
+        port = info["port"]
+        self.assertTrue(port_open(port))
+        self.assertTrue(port_open6(port))
+        # engine.json still names one port and nothing about addresses (and no new secret)
+        self.assertEqual(set(info), {"port", "token", "pid", "pid_created", "version", "protocol", "started_at"})
+        started = [r for r in self.audit() if r["event"] == "daemon" and r["outcome"] == "started"]
+        self.assertEqual(len(started), 1)
+        self.assertTrue(started[0]["reason"].startswith(f"127.0.0.1:{port} [::1]:{port} pid "), started[0])
+        st = daemon.status(self.home)
+        self.assertEqual((st["running"], st["port"]), (True, port))
+        d.kill()
+        self.assertFalse(port_open(port))
+        self.assertFalse(port_open6(port))
+
+    def test_ipv6_unavailable_serves_on_127_0_0_1_only_and_says_so(self):
+        real = ws._bind
+
+        def no_v6(family, host, port):
+            if family == socket.AF_INET6:
+                raise OSError(errno.EAFNOSUPPORT, "simulated: IPv6 disabled")
+            return real(family, host, port)
+        with mock.patch.object(ws, "_bind", no_v6), mock.patch.object(ws, "_v6_noted", False), \
+                self.assertLogs("serve.ws", "WARNING") as logs:
+            d = self.start_daemon()
+            info = security.read_engine_json(self.home)
+            port = info["port"]
+            self.assertTrue(port_open(port))
+            if test_serve_app.ipv6_loopback():
+                self.assertFalse(port_open6(port))
+            st = daemon.status(self.home)
+            self.assertEqual((st["ok"], st["running"], st["port"]), (True, True, port))
+            d.kill()
+        self.assertIn("::1 is unavailable", "\n".join(logs.output))
+        started = [r for r in self.audit() if r["event"] == "daemon" and r["outcome"] == "started"]
+        self.assertTrue(started[0]["reason"].startswith(f"127.0.0.1:{port} pid "), started[0])
+        self.assertNotIn("::1", started[0]["reason"])
 
 
 # ---------------------------------------------------------------------------------------------- ensure / status

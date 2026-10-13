@@ -246,8 +246,12 @@ class HostOrigin(unittest.TestCase):
 
     def test_host_table(self):
         P = self.PORT
-        ok = [f"127.0.0.1:{P}", f"localhost:{P}", f"LOCALHOST:{P}"]
-        bad = [None, "", "127.0.0.1", "localhost", f"127.0.0.1:{P + 1}", f"localhost:{P + 1}", f"[::1]:{P}", "[::1]",
+        # [::1]:<port>: the daemon listens on ::1 too (UXP may only reach it as `localhost`, which Windows resolves
+        # to ::1 first); a client using the IPv6 literal sends the bracketed form. Any other IPv6 form stays refused.
+        ok = [f"127.0.0.1:{P}", f"localhost:{P}", f"LOCALHOST:{P}", f"[::1]:{P}"]
+        bad = [None, "", "127.0.0.1", "localhost", f"127.0.0.1:{P + 1}", f"localhost:{P + 1}", f"[::1]:{P + 1}", "[::1]",
+               f"[::1]:", f"[::1]:{P} ", f"[::2]:{P}", f"[::]:{P}", f"[0:0:0:0:0:0:0:1]:{P}", f"[::ffff:127.0.0.1]:{P}",
+               f"[::1]:{P}.evil.com", f"::1:{P}:", f"[::1]:0{P}",
                f"0.0.0.0:{P}", f"127.0.0.2:{P}", f"evil.com:{P}", f"127.0.0.1.evil.com:{P}", f"localhost.evil.com:{P}",
                f"evil.com:{P}@127.0.0.1:{P}", f"127.0.0.1:{P} ", f" 127.0.0.1:{P}", f"127.0.0.1:{P}:{P}",
                f"127.0.0.1:0{P}", f"127.0.0.1:{P}.0", f"127.0.0.1:{P}, evil.com", f"::1:{P}", f"127.0.0.1:"]

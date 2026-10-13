@@ -257,10 +257,10 @@ const sentOf = (s: FakeSocket, type: string) => s.sent.filter((m) => m.type === 
 const ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 // ---------------------------------------------------------------------------------------------------- tests
-test("discovery and hello: engine.json -> ws://127.0.0.1:<port>/session exactly, hello first (panel, protocol 4, no capabilities)", async () => {
+test("discovery and hello: engine.json -> ws://localhost:<port>/session exactly, hello first (panel, protocol 4, no capabilities)", async () => {
   const r = await connected();
-  assert.deepEqual(r.opened, ["ws://127.0.0.1:51234/session"]);
-  assert.equal(sessionUrl(51234), "ws://127.0.0.1:51234/session");
+  assert.deepEqual(r.opened, ["ws://localhost:51234/session"]);
+  assert.equal(sessionUrl(51234), "ws://localhost:51234/session");
   const s = r.daemon.last;
   assert.deepEqual(s.sent[0], { type: "hello", token: TOKEN, client: { kind: "panel", version: "3.0.0", protocol: 4, capabilities: [] } });
   assert.equal(s.sent[1]!.type, "snapshot", "a snapshot right after welcome");
@@ -336,7 +336,7 @@ test("engine.json missing: offline + no_engine diagnosis, backoff 1-2-4-8-15-15 
   r.engine.value = { port: 50001, token: TOKEN2, pid: 1, version: "3.0.0", protocol: 4 };
   r.daemon.token = TOKEN2;
   await r.clock.advance(15000);
-  assert.deepEqual(r.opened, ["ws://127.0.0.1:50001/session"]);
+  assert.deepEqual(r.opened, ["ws://localhost:50001/session"]);
   assert.equal(r.src.diagnosis.code, "connected");
   assert.equal(r.daemon.last.sent[0]!["token"], TOKEN2);
 });
@@ -581,8 +581,8 @@ test("diagnosis: refused before the upgrade -> GET /status with the bearer heade
     r.src.start();
     await r.clock.advance(0);
     assert.equal(r.src.diagnosis.code, code, `status ${status}`);
-    assert.deepEqual(r.probes, [{ url: "http://127.0.0.1:51234/status", headers: { Authorization: `Bearer ${TOKEN}` } }]);
-    assert.equal(statusUrl(51234), "http://127.0.0.1:51234/status");
+    assert.deepEqual(r.probes, [{ url: "http://localhost:51234/status", headers: { Authorization: `Bearer ${TOKEN}` } }]);
+    assert.equal(statusUrl(51234), "http://localhost:51234/status");
     r.src.stop();
   }
   const r = rig({ noProbe: true });

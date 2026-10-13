@@ -159,7 +159,7 @@ class Daemon {
 
   /** The authenticated POST /shutdown, then wait for the process to exit. */
   async shutdown(): Promise<void> {
-    const r = await fetch(`http://127.0.0.1:${this.port}/shutdown`, { method: "POST", headers: { Authorization: `Bearer ${this.token}` } });
+    const r = await fetch(`http://localhost:${this.port}/shutdown`, { method: "POST", headers: { Authorization: `Bearer ${this.token}` } });
     assert.equal(r.status, 202);
     await this.waitExit(15_000);
   }
@@ -201,7 +201,7 @@ class CliClient {
   private inbox: Msg[] = [];
   closed: { code: number; reason: string } | null = null;
   constructor(port: number) {
-    this.ws = new WebSocket(`ws://127.0.0.1:${port}/session`);
+    this.ws = new WebSocket(`ws://localhost:${port}/session`);
     this.ws.onmessage = (ev) => void this.inbox.push(JSON.parse(String(ev.data)) as Msg);
     this.ws.onclose = (ev) => void (this.closed = { code: ev.code, reason: ev.reason });
   }
@@ -301,7 +301,7 @@ test("Python <-> TS: reel serve with DaemonSource (requester) and the host adapt
   await until("DaemonSource to connect", () => src!.diagnosis.code === "connected");
 
   await t.test("hello / welcome on both sessions; /status lists the uxp host with its capabilities and the panel", async () => {
-    const r = await fetch(`http://127.0.0.1:${a.port}/status`, { headers: { Authorization: `Bearer ${a.token}` } });
+    const r = await fetch(`http://localhost:${a.port}/status`, { headers: { Authorization: `Bearer ${a.token}` } });
     assert.equal(r.status, 200);
     const st = (await r.json()) as { protocol: number; sessions: Array<{ kind: string; host: string | null; hostVersion: string | null; capabilities: string[] }> };
     assert.equal(st.protocol, 4);

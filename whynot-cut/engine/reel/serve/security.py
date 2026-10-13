@@ -27,8 +27,9 @@ user's SID) and which no web page can read, and a hello or HTTP request without 
 page in a context with file-URL access enabled can also read the user's local files, engine.json included, so for
 it the token is no barrier. That needs the user to run such a browser or embedder AND open a hostile local HTML file,
 which already holds the user's files (the same trust as the user's own processes, below); the Origin gate refused it
-before T6.2 allowed `file://`. The Host check (`127.0.0.1:<port>` / `localhost:<port>` only) stops DNS rebinding,
-and the daemon binds 127.0.0.1 only, so nothing off the machine reaches it. A process running as the user that can
+before T6.2 allowed `file://`. The Host check (`127.0.0.1:<port>` / `localhost:<port>` / `[::1]:<port>` only) stops
+DNS rebinding, and the daemon binds the loopback addresses 127.0.0.1 and ::1 only (never 0.0.0.0, :: or a LAN
+address), so nothing off the machine reaches it. A process running as the user that can
 read engine.json is already past every defence here (the same trust as the user's own shell).
 """
 from __future__ import annotations
@@ -502,12 +503,14 @@ def _header(headers, name: str):
 
 
 def check_host(headers, port: int) -> bool:
-    """Only `127.0.0.1:<port>` or `localhost:<port>` (any case): anything else is a rebinding or misrouted request.
-    A missing, repeated, port-less, other-port or IPv6 Host is rejected."""
+    """Only `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>` (any case): anything else is a rebinding or
+    misrouted request. The daemon also listens on ::1 (Windows resolves `localhost` there first), and a client that
+    connects by the IPv6 literal sends the bracketed form. A missing, repeated, port-less, other-port, unbracketed or
+    other IPv6 Host is rejected."""
     host = _header(headers, "Host")
     if not isinstance(host, str):
         return False
-    return host.lower() in (f"127.0.0.1:{int(port)}", f"localhost:{int(port)}")
+    return host.lower() in (f"127.0.0.1:{int(port)}", f"localhost:{int(port)}", f"[::1]:{int(port)}")
 
 
 def origin_rejection(headers) -> str | None:

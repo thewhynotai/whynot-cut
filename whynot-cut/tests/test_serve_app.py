@@ -2,7 +2,7 @@
 messages, routing to a connected UXP panel or to the CEP file queue, result validation, progress relay and a Context per
 request. Run:
     bash tools/test.sh -p test_serve_app.py
-Every test runs a real in-process server on 127.0.0.1 with a temp engine home and talks to it through real loopback
+Every test runs a real in-process server on the loopback pair (127.0.0.1 and ::1) with a temp engine home and talks to it through real loopback
 sockets: a hand-written WebSocket client plays the CLI and a fake UXP panel. The CEP file queue is never reached
 (lib.ppro_bridge.submit / lib.ae_bridge.submit are patched). Every socket, task and server is closed: the suite runs
 with -W error::ResourceWarning.
@@ -72,9 +72,22 @@ async def close_writer(w):
         pass
 
 
-async def http(port, raw: bytes):
-    """Send a raw HTTP request; return (status, headers, body) once the server has closed."""
-    r, w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), T)
+def ipv6_loopback() -> bool:
+    """Can this machine bind ::1 at all (IPv6 on, the loopback address configured)?"""
+    import socket
+    if not socket.has_ipv6:
+        return False
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            s.bind(("::1", 0))
+        return True
+    except OSError:
+        return False
+
+
+async def http(port, raw: bytes, addr: str = "127.0.0.1"):
+    """Send a raw HTTP request to addr:port; return (status, headers, body) once the server has closed."""
+    r, w = await asyncio.wait_for(asyncio.open_connection(addr, port), T)
     try:
         w.write(raw)
         await w.drain()
@@ -94,8 +107,9 @@ class WsClient:
         self.close_code = None
 
     @classmethod
-    async def connect(cls, port, *, path="/session", host=None, origin=None, drop_host=False, version="HTTP/1.1"):
-        r, w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), T)
+    async def connect(cls, port, *, path="/session", host=None, origin=None, drop_host=False, version="HTTP/1.1",
+                      addr="127.0.0.1"):
+        r, w = await asyncio.wait_for(asyncio.open_connection(addr, port), T)
         c = cls(r, w)
         h = {"Host": host or f"127.0.0.1:{port}", "Upgrade": "websocket", "Connection": "Upgrade",
              "Sec-WebSocket-Key": base64.b64encode(os.urandom(16)).decode(), "Sec-WebSocket-Version": "13"}
@@ -334,12 +348,39 @@ class Status(AppCase):
                 self.assertEqual(status, 404)
 
     async def test_wrong_host_is_403_and_audited(self):
-        for host in ("evil.example:%d" % self.port, "127.0.0.1:1", "127.0.0.1", "[::1]:%d" % self.port):
+        for host in ("evil.example:%d" % self.port, "127.0.0.1:1", "127.0.0.1", "[::1]:1", "[::2]:%d" % self.port,
+                     "::1:%d" % self.port):
             with self.subTest(host=host):
                 status, _, _ = await http(self.port, f"GET /status HTTP/1.1\r\nHost: {host}\r\n"
                                                      f"Authorization: Bearer {self.token}\r\n\r\n".encode())
                 self.assertEqual(status, 403)
         self.assertTrue(any(r["outcome"] == "rejected" and r["reason"] == "host" for r in self.events("http")))
+
+    async def test_ipv6_loopback_host_is_accepted(self):
+        """Host `[::1]:<port>` passes the Host gate (a client that dials the IPv6 literal sends it); the token decides."""
+        for host in (f"[::1]:{self.port}", f"localhost:{self.port}", f"127.0.0.1:{self.port}"):
+            with self.subTest(host=host):
+                status, _, _ = await http(self.port, f"GET /status HTTP/1.1\r\nHost: {host}\r\n"
+                                                     f"Authorization: Bearer {self.token}\r\n\r\n".encode())
+                self.assertEqual(status, 200)
+                status, _, _ = await http(self.port, f"GET /status HTTP/1.1\r\nHost: {host}\r\n\r\n".encode())
+                self.assertEqual(status, 401)
+
+    async def test_status_over_ipv6_loopback_needs_the_token(self):
+        if not ipv6_loopback():
+            self.skipTest("no IPv6 loopback on this machine")
+        for host in (f"localhost:{self.port}", f"[::1]:{self.port}"):
+            with self.subTest(host=host):
+                status, _, body = await http(self.port, f"GET /status HTTP/1.1\r\nHost: {host}\r\n"
+                                                        f"Authorization: Bearer {self.token}\r\n\r\n".encode(), addr="::1")
+                self.assertEqual((status, json.loads(body)["port"]), (200, self.port))
+                status, _, body = await http(self.port, f"GET /status HTTP/1.1\r\nHost: {host}\r\n"
+                                                        f"Authorization: Bearer {'0' * 64}\r\n\r\n".encode(), addr="::1")
+                self.assertEqual(status, 401)
+                self.assertNotIn(self.token.encode(), body)
+        status, _, _ = await http(self.port, f"GET /status HTTP/1.1\r\nHost: evil.example:{self.port}\r\n"
+                                             f"Authorization: Bearer {self.token}\r\n\r\n".encode(), addr="::1")
+        self.assertEqual(status, 403)
 
     async def test_origin_is_audited_even_when_the_host_is_wrong(self):
         status, _, _ = await http(self.port, f"GET /session HTTP/1.1\r\nHost: evil.example:{self.port}\r\n"
@@ -426,6 +467,29 @@ class Handshake(AppCase):
     async def test_wrong_host_on_session_is_403(self):
         c = await self.connect(host="attacker.example:%d" % self.port)
         self.assertEqual(c.status, 403)
+
+    async def test_session_over_ipv6_loopback_needs_the_token(self):
+        """What the UXP panel does: dial `localhost` (Windows: ::1 first) with `Origin: file://`, Host localhost:<port>."""
+        if not ipv6_loopback():
+            self.skipTest("no IPv6 loopback on this machine")
+        client = {"kind": "uxp", "version": "3.0.0", "protocol": 4, "capabilities": [], "host": "premiere",
+                  "hostVersion": "26.5.2"}
+        for host in (f"localhost:{self.port}", f"[::1]:{self.port}"):
+            with self.subTest(host=host):
+                c = await self.connect(addr="::1", host=host, origin="file://")
+                self.assertEqual(c.status, 101)
+                await c.send({"type": "hello", "token": self.token, "client": client})
+                self.assertEqual((await c.recv())["type"], "welcome")
+                await c.aclose()
+                await self._refused_hello(addr="::1", host=host, token=security.make_token(), client=client)
+        bad = await self.connect(addr="::1", host=f"attacker.example:{self.port}")
+        self.assertEqual(bad.status, 403)
+
+    async def _refused_hello(self, *, token, client, **kw):
+        c = await self.connect(**kw)
+        self.assertEqual(c.status, 101)
+        await c.send({"type": "hello", "token": token, "client": client})
+        await self._refused(c)
 
     async def test_good_hello_gets_welcome(self):
         c = await self.hello()
