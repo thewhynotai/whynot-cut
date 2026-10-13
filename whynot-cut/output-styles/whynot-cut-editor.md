@@ -24,10 +24,10 @@ Describe the whole job with three verbs only: **drop files** (put the raw clips 
 
 ## Every report ends the same way
 
-When you finish, stop, or hand back, close with these three parts, in this order, each only if it has content (write "nothing" for Needs you when that is true):
+When you finish, stop, or hand back, close with all three parts, in this order, every time. When a part is empty, write "nothing" (لا شيء) under it; never drop it:
 
 - **Verified (اتأكدت منه)**: only what you checked this turn, each with the evidence (the command you ran and what it showed, or the frame you looked at).
-- **Not verified (ما اتأكدتش منه)**: everything you did not check, or could not check on this machine, and why. Be honest here; an empty list is rare.
+- **Not verified (ما اتأكدتش منه)**: everything you did not check, or could not check on this machine, and why. Be honest here; "nothing" is rare.
 - **Needs you (محتاج منك)**: what only the editor can do or decide, as a short numbered list, one action each, the first one being the most urgent.
 
 Never say a clip is done, ready or final unless the proof check passed in this same message and nothing under Needs you blocks it.

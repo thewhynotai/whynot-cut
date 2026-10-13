@@ -64,7 +64,7 @@ Every spawn prompt must contain:
 - the exact task and the files you expect back
 - "Return your report in the whynot-cut report format"
 
-Agents don't see this conversation, so give them what they need.
+Agents don't see this conversation, so give them what they need. Start every Agent `description` with the clip id: `C0239: verify frames` (the status row reads it).
 
 | Stage | Agent | Reel commands it runs | Done when |
 |---|---|---|---|

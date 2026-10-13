@@ -95,6 +95,58 @@ class TestPluginSettings(unittest.TestCase):
             self.assertIn("story-editor", row["content"])
             self.assertIn("C0239", row["content"])
 
+    def _bash(self, home, extra=None):
+        cmd = self.cfg["subagentStatusLine"]["command"]
+        payload = json.dumps({"columns": 100, "tasks": [_task()]})
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
+        env.update(HOME=home, USERPROFILE=home, WHYNOT_HOME=str(Path(home) / "eng"))
+        env.update(extra or {})
+        return subprocess.run(["bash", "-c", cmd], input=payload, capture_output=True, text=True, encoding="utf-8",
+                              env=env, timeout=60)
+
+    @unittest.skipUnless(shutil.which("bash"), "bash not found")
+    def test_command_uses_the_variable_when_it_is_set(self):
+        with tempfile.TemporaryDirectory() as home:         # no pointer at all: the variable alone is enough
+            r = self._bash(home, {"CLAUDE_PLUGIN_ROOT": str(SK)})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("story-editor", json.loads(r.stdout.splitlines()[0])["content"])
+            r = self._bash(home, {"CLAUDE_PLUGIN_ROOT": str(Path(home) / "gone")})   # a folder without the script
+            self.assertEqual((r.returncode, r.stdout), (0, ""))
+
+    @unittest.skipUnless(shutil.which("bash"), "bash not found")
+    def test_command_stale_pointer_is_silent(self):
+        """The plugin was updated or removed and the old cache folder is gone: no rows, no error, exit 0."""
+        with tempfile.TemporaryDirectory() as home:
+            (Path(home) / ".whynot-cut").mkdir()
+            ptr = {"root": str(Path(home) / "cache" / "whynot-cut" / "2.0.0"), "version": "2.0.0", "at": "x"}
+            (Path(home) / ".whynot-cut" / "plugin-root.json").write_text(json.dumps(ptr, indent=1), encoding="utf-8")
+            r = self._bash(home)
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+    @unittest.skipUnless(shutil.which("bash"), "bash not found")
+    def test_command_reads_compact_and_reordered_pointer_json(self):
+        """Not only session_context's indent=1 layout: one line, other keys first, no trailing newline."""
+        for text in (json.dumps({"version": "x", "at": "y", "root": str(SK)}, separators=(",", ":")),
+                     json.dumps({"root": str(SK), "version": "x"}),
+                     json.dumps({"version": "x", "root": str(SK)}, indent=1) + "\n"):
+            with self.subTest(text=text[:40]), tempfile.TemporaryDirectory() as home:
+                (Path(home) / ".whynot-cut").mkdir()
+                (Path(home) / ".whynot-cut" / "plugin-root.json").write_text(text, encoding="utf-8")
+                r = self._bash(home)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("story-editor", json.loads(r.stdout.splitlines()[0])["content"])
+
+    @unittest.skipUnless(shutil.which("bash"), "bash not found")
+    def test_command_follows_whynot_options_file(self):
+        """The pointer sits next to the options file, which WHYNOT_OPTIONS_FILE can move (plat.options_file)."""
+        with tempfile.TemporaryDirectory() as home:
+            other = Path(home) / "elsewhere"
+            other.mkdir()
+            (other / "plugin-root.json").write_text(json.dumps({"root": str(SK)}), encoding="utf-8")
+            r = self._bash(home, {"WHYNOT_OPTIONS_FILE": str(other / "plugin-options.json")})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("story-editor", json.loads(r.stdout.splitlines()[0])["content"])
+
 
 class TestStatusScript(unittest.TestCase):
     def test_row_has_agent_stage_clip(self):
@@ -130,11 +182,54 @@ class TestStatusScript(unittest.TestCase):
         row = mod.row(_task(description="تحليل المقطع"), time.time())
         self.assertIn("| - |", row)
 
+    def test_clip_id_convention_and_fallback(self):
+        mod = _load_script()
+        clip = lambda d, **kw: mod._clip({"description": d, **kw})
+        self.assertEqual(clip("C0239: verify frames"), "C0239")                      # the convention wins
+        self.assertEqual(clip("  FOO_BAR_INTRO: transcript H264 C0777"), "FOO_BAR_INTRO")
+        self.assertEqual(clip("EP02_R02_MO: build"), "EP02_R02_MO")                  # reel / motion ids
+        self.assertEqual(clip("Edit FOO_BAR_INTRO"), "FOO_BAR_INTRO")                # no digit, has an underscore
+        self.assertEqual(clip("build H264 export for C0239"), "C0239")               # the last id-like token
+        self.assertEqual(clip("check UTF8 then C0239"), "C0239")
+        self.assertEqual(clip("verify C0239 H264 export"), "C0239")                  # a codec word is never the clip
+        self.assertEqual(clip("convert to H264"), "")
+        self.assertEqual(clip("build the H265 and UTF8 file"), "")
+        self.assertEqual(clip("QC: frames of the intro"), "")                        # a short generic prefix is no id
+        self.assertEqual(clip("Verify: frames"), "")                                 # lower-case prefix is no id
+        self.assertEqual(clip("plan the work", label="C0239: audio"), "C0239")       # other fields count too
+        self.assertEqual(clip("Edit C0239 and C0240"), "C0240")                      # last wins without the prefix
+        row = mod.row(_task(description="FOO_BAR_INTRO: frames"), time.time())
+        self.assertEqual(row.split(" | ")[2], "FOO_BAR_INTRO")
+
+    def test_time_only_while_running(self):
+        mod = _load_script()
+        now = time.time()
+        old = int((now - 3600) * 1000)                          # started an hour ago
+        self.assertRegex(mod.row(_task(startTime=old), now), r"\| 60m00s$")
+        for status, word in (("completed", "done"), ("failed", "failed"), ("killed", "stopped")):
+            text = mod.row(_task(startTime=old, status=status), now)
+            self.assertTrue(text.endswith(f"| {word}"), text)    # no timer after the state: it would grow for ever
+            self.assertNotRegex(text, r"\d+m\d\ds|\d+s$")
+
+    def test_arabic_stdin_through_the_subprocess(self):
+        """Task text in Arabic (UTF-8 bytes on stdin, as Claude Code writes it): rows still come out, ASCII only."""
+        payload = {"columns": 100, "tasks": [
+            _task(id="ar1", description="C0239: مراجعة الإطارات الطبية", label="ريلز"),
+            _task(id="ar2", description="تحليل المقطع", status="completed")]}
+        r = subprocess.run([_sys.executable, "-I", str(SCRIPT)], input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                           capture_output=True, timeout=60)
+        self.assertEqual((r.returncode, r.stderr), (0, b""))
+        self.assertTrue(r.stdout.isascii())
+        rows = [json.loads(line) for line in r.stdout.decode("ascii").splitlines()]
+        self.assertEqual([x["id"] for x in rows], ["ar1", "ar2"])
+        self.assertIn("| C0239 |", rows[0]["content"])
+        self.assertIn("| - | done", rows[1]["content"])
+
     def test_states_and_truncation(self):
         out = _run_script({"columns": 24, "tasks": [_task(status="completed")]})[1]
         self.assertLessEqual(len(json.loads(out)["content"]), 24)
         out = _run_script({"columns": 200, "tasks": [_task(status="failed")]})[1]
-        self.assertIn("| failed |", json.loads(out)["content"])
+        self.assertTrue(json.loads(out)["content"].endswith("| failed"))
 
     def test_never_fails(self):
         for raw in ("", "not json", "[]", "null", '{"tasks": 5}', '{"tasks": [1, "x", {"id": 3}]}',
@@ -178,6 +273,12 @@ class TestOutputStyle(unittest.TestCase):
             self.assertIn(part, self.body)
         self.assertRegex(self.body, r"(?i)own fenced code block")
         self.assertIn("Arabic", self.body)
+
+    def test_all_three_parts_every_time_nothing_when_empty(self):
+        self.assertRegex(self.body, r"all three parts")
+        self.assertIn("nothing", self.body)
+        self.assertIn("لا شيء", self.body)
+        self.assertNotRegex(self.body, r"only if it has content")
 
     def test_three_verbs_and_no_internal_words(self):
         for verb in ("drop files", "say what you want", "approve the plan"):

@@ -39,7 +39,7 @@ Premiere first).
   large-v3-turbo about 1.6 GB), then transcribe one clip alone first so it downloads once.
 
 ## 3. Run the pipeline for all clips
-Follow the playbook stages, fanning out **one agent per clip per stage in a single message** (clips are independent):
+Follow the playbook stages, fanning out **one agent per clip per stage in a single message** (clips are independent; start every Agent `description` with the clip id: `C0239: verify frames`):
 transcript ∥ references → audio → story → claims ∥ graphics → preview video → approve the plan → build → QC.
 Concurrency: transcription one clip at a time on a GPU (`gpu.cuda_devices` > 0; parallel jobs share its memory) and at
 most 2 at once on CPU; audio cleanup at most 2 at once. Story, graphics and reviews can all run in parallel.
