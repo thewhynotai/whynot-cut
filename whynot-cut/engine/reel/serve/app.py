@@ -32,10 +32,13 @@ session answer the commands sent to it; the panel intents approve / request_chan
 saying the step is not available from the panel yet (NOT_YET; no command names: the engine side is T6.2b, and until
 it ships no `reel` writer runs for a panel intent; each such reply is audited: event intent, outcome not_available);
 `snapshot` gets a `state` echoing its id, with the item the engine works on (serve/engine_state.py: <home>/state/
-active.json and the item's evidence files, read only, cached by their mtimes). That read runs on the app's own engine-
-state worker (one daemon thread, adapters.QueueWorker; never the default executor) under FIELDS_TIMEOUT (3 s): past it
-the state carries the last good item (else no item) and the timeout is logged once; while that read is still stuck,
-later snapshots do not queue behind it, so a stuck read (a dead network share) costs one thread, never one per poll;
+active.json and the item's evidence files, read only, cached by their files' state). That read runs on the app's own
+engine-state worker (a daemon thread, adapters.QueueWorker; never the default executor) under FIELDS_TIMEOUT (3 s);
+snapshots that arrive while it runs share it (asyncio.shield). Past its deadline the state carries the last good item
+(else no item) and the timeout is logged once; after FIELDS_RETIRE_AFTER (2) consecutive timeouts the stuck worker is
+abandoned and a fresh one reads again (a recovered share or a new active.json item shows), at most
+FIELDS_ABANDONED_MAX (4) stuck at once (then no new worker, logged once), so a dead network share costs a few threads,
+never one per poll, and a snapshot never queues behind a stuck read;
 `cancel` is
 forwarded to the panel running the command. When a session ends, the commands waiting on it fail with a clear error
 and its own running commands are cancelled; a reconnect is a new hello.
@@ -78,6 +81,8 @@ RATE = (20.0, 60)                  # messages per second per session, burst
 MAX_RUNNING = 16                   # commands one session may have running at once
 OFFLOAD_BYTES = 256 * 1024         # messages above this are parsed and validated in a worker thread
 FIELDS_TIMEOUT = 3.0               # the engine state read (engine_state.PanelFields) for one snapshot
+FIELDS_RETIRE_AFTER = 2            # consecutive timeouts of one read before its worker is abandoned for a fresh one
+FIELDS_ABANDONED_MAX = 4           # abandoned workers whose read is still stuck: past this no new worker is made
 AUTH_REFUSED = "The first message must be a hello with the engine token from engine.json."
 PROTOCOL_REQUIRED = "protocol 4 required"
 # the panel intents until T6.2b ships their engine side: editor words, never a command (Addendum C1.4)
@@ -181,9 +186,16 @@ class App:
         self.idle_timeout = idle_timeout
         self.expected_path = expected_path if expected_path is not None else engine_state.expected_path()
         self.fields_timeout = fields_timeout
-        self._fields = engine_state.PanelFields()               # the item's fields, cached by their files' mtimes
+        self._fields = engine_state.PanelFields()               # the item's fields, cached by their files' state
         self._state_worker = QueueWorker("reel-serve-engine-state")   # one daemon thread: a stuck read costs one
+        self._state_workers_made = 1
         self._fields_running = None                             # the read in flight (concurrent.futures.Future)
+        self._fields_shared: asyncio.Future | None = None       # ... as the asyncio future every snapshot awaits
+        self._fields_deadline = 0.0                             # loop time when that read counts as timed out
+        self._fields_read_counted = False                       # that read's timeout is counted (once per read)
+        self._fields_timeouts = 0                               # consecutive timeouts (reset by an answered read)
+        self._fields_abandoned: list = []                       # (future, shared) of retired workers' stuck reads
+        self._fields_cap_logged = False
         self._last_fields: dict | None = None                   # the last good read: shown while a read is stuck
         self._fields_timed_out = False                          # logged once per stuck episode
         self.port: int | None = None
@@ -223,6 +235,9 @@ class App:
         if self._server is not None:
             self._server.close()
         self._state_worker.cancel_pending()
+        for shared in [self._fields_shared, *(a for _, a in self._fields_abandoned)]:
+            if shared is not None:
+                shared.cancel()                        # a stuck read finishing later never calls into a closed loop
         sessions = list(self.sessions.values())
         if sessions:                                   # concurrently: N silent peers cost one timeout, not N
             closing = [asyncio.ensure_future(self._close_session(s)) for s in sessions]
@@ -519,28 +534,78 @@ class App:
     def _fields_fallback(self) -> dict:
         return dict(self._last_fields) if self._last_fields is not None else dict(engine_state.EMPTY, pipeline=[], qc=[])
 
-    async def _item_fields(self) -> dict | None:
-        """The item part of the panel state: engine_state.PanelFields on the app's one engine-state worker, bounded by
-        fields_timeout. A timeout (or a read still stuck from before) gives the last good fields, else no item; None
-        if the read failed."""
-        running = self._fields_running
-        if running is not None and not running.done():
-            return self._fields_fallback()                   # never queue behind a stuck read
+    def _start_read(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Submit one PanelFields read to the current engine-state worker; every snapshot until it answers shares it."""
         home = self.home
         fut = self._state_worker.submit(lambda: self._fields(home))
-        self._fields_running = fut
+        shared = asyncio.wrap_future(fut, loop=loop)
+        shared.add_done_callback(lambda f: f.cancelled() or f.exception())   # retrieved even when nobody waits
+        self._fields_running, self._fields_shared = fut, shared
+        self._fields_deadline = loop.time() + self.fields_timeout
+        self._fields_read_counted = False
+
+    def _count_timeout(self) -> None:
+        self._fields_timeouts += 1
+        if not self._fields_timed_out:
+            self._fields_timed_out = True
+            log.warning("reel serve: reading the engine state timed out after %gs; the panel shows the last known item "
+                        "until it answers", self.fields_timeout)
+
+    def _retire_worker(self) -> bool:
+        """Abandon the worker stuck in the current read (its daemon thread finishes or dies with the process) and make
+        a fresh one, so a recovered share or a new active.json item is read. False when FIELDS_ABANDONED_MAX retired
+        reads are still stuck (logged once): no more threads are spent on a dead share."""
+        self._fields_abandoned = [(f, a) for f, a in self._fields_abandoned if not f.done()]
+        if len(self._fields_abandoned) >= FIELDS_ABANDONED_MAX:
+            if not self._fields_cap_logged:
+                self._fields_cap_logged = True
+                log.warning("reel serve: %d engine-state reads are stuck; no new reader is started until one answers",
+                            len(self._fields_abandoned))
+            return False
+        self._fields_abandoned.append((self._fields_running, self._fields_shared))
+        self._state_workers_made += 1
+        self._state_worker = QueueWorker(f"reel-serve-engine-state-{self._state_workers_made}")
+        self._fields_timeouts = 0
+        log.info("reel serve: the engine-state read is stuck; reading again on a fresh worker")
+        return True
+
+    async def _item_fields(self) -> dict | None:
+        """The item part of the panel state: engine_state.PanelFields on the app's engine-state worker, bounded by
+        fields_timeout. A snapshot that arrives while a read is running awaits that same read (asyncio.shield: one
+        waiter going away never cancels it). Past the read's deadline the snapshot gets the last good fields (else no
+        item). After FIELDS_RETIRE_AFTER consecutive timeouts the stuck worker is abandoned and a fresh one reads
+        again (at most FIELDS_ABANDONED_MAX stuck at once); otherwise a snapshot never queues behind a stuck read.
+        None if the read failed."""
+        loop = asyncio.get_running_loop()
+        shared = self._fields_shared
+        if shared is not None and not shared.done():
+            if loop.time() >= self._fields_deadline:         # still running past its deadline: stuck
+                self._count_timeout()
+                self._fields_read_counted = True
+                if self._fields_timeouts < FIELDS_RETIRE_AFTER or not self._retire_worker():
+                    return self._fields_fallback()
+                self._start_read(loop)
+        else:
+            self._start_read(loop)
+        shared = self._fields_shared
         try:
-            out = await asyncio.wait_for(asyncio.wrap_future(fut), self.fields_timeout)
+            out = await asyncio.wait_for(asyncio.shield(shared), max(0.0, self._fields_deadline - loop.time()))
         except TimeoutError:
-            if not self._fields_timed_out:
-                self._fields_timed_out = True
-                log.warning("reel serve: reading the engine state timed out after %gs; the panel shows the last "
-                            "known item until it answers", self.fields_timeout)
+            if shared is self._fields_shared and not self._fields_read_counted:
+                self._fields_read_counted = True             # concurrent waiters of one read count one timeout
+                self._count_timeout()
             return self._fields_fallback()
+        except asyncio.CancelledError:
+            if shared.cancelled() and not asyncio.current_task().cancelling():
+                return self._fields_fallback()               # the daemon is stopping (close() cancelled the read)
+            raise
         except Exception as e:
+            self._fields_timeouts = 0
             log.warning("reel serve: engine state failed (%s)", type(e).__name__)
             return None
+        self._fields_timeouts = 0
         self._fields_timed_out = False
+        self._fields_cap_logged = False
         self._last_fields = out
         return out
 

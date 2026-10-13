@@ -12,6 +12,7 @@ _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home before anything else (see tests/_isolation.py)
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import shutil
@@ -631,9 +632,10 @@ class SessionMessages(AppCase):
 
     async def test_a_stuck_engine_state_read_times_out_on_one_bounded_worker(self):
         """A read that never returns (a dead network share, a FIFO swapped in) cannot stall a snapshot or leak a thread
-        per poll: panel_fields runs on the app's one engine-state worker with FIELDS_TIMEOUT; past it the snapshot
-        gets the last good item (else no item), the timeout is logged once, and while the read is still stuck later
-        snapshots do not queue behind it."""
+        per poll: panel_fields runs on the app's engine-state worker with FIELDS_TIMEOUT; past it the snapshot gets the
+        last good item (else no item) and the timeout is logged once. A stuck worker is replaced after
+        FIELDS_RETIRE_AFTER timeouts, at most FIELDS_ABANDONED_MAX times while the old reads are still stuck; past
+        that cap a snapshot never queues behind a stuck read."""
         self.app.fields_timeout = 0.2
         good = {"client": "Dr Nour", "item": "C0239", "pipeline": [], "approval": None, "qc": []}
         release = threading.Event()
@@ -652,14 +654,20 @@ class SessionMessages(AppCase):
                 st = (await c.recv())["state"]
                 self.assertLess(time.monotonic() - t0, 0.2 + 2.0)
                 self.assertEqual((st["client"], st["item"]), ("", ""))          # nothing good yet: no item
-                self.app.fields_timeout = 3.0           # a snapshot that queued behind the stuck read would wait this
+                n = 4 * (serve_app.FIELDS_ABANDONED_MAX + 2)
                 t1 = time.monotonic()
-                for i in range(3):
+                for i in range(n):
                     await c.send({"type": "snapshot", "id": f"s{i + 2}"})
                     self.assertEqual((await c.recv())["state"]["item"], "")
-                self.assertLess(time.monotonic() - t1, 1.5, "a snapshot waited behind the stuck read")
-                self.assertEqual(len(calls), 1, "one read at a time")
-                self.app.fields_timeout = 0.2
+                self.assertLess(time.monotonic() - t1, (serve_app.FIELDS_ABANDONED_MAX + 1) * 0.2 + 2.0,
+                                "a snapshot waited behind a stuck read")
+                self.assertEqual(len(calls), 1 + serve_app.FIELDS_ABANDONED_MAX, "stuck workers are capped")
+                self.assertEqual(len(set(calls)), len(calls), "each replacement is a fresh worker thread")
+                t2 = time.monotonic()
+                for i in range(3):                                              # past the cap: answered at once
+                    await c.send({"type": "snapshot", "id": f"c{i}"})
+                    self.assertEqual((await c.recv())["state"]["item"], "")
+                self.assertLess(time.monotonic() - t2, 0.5)
                 release.set()
                 deadline = time.monotonic() + T
                 while self.app._fields_running is not None and not self.app._fields_running.done() \
@@ -668,12 +676,116 @@ class SessionMessages(AppCase):
                 await c.send({"type": "snapshot", "id": "s9"})
                 self.assertEqual((await c.recv())["state"]["item"], "C0239")
             self.assertEqual(len([x for x in logs.output if "timed out" in x]), 1, logs.output)
+            self.assertEqual(len([x for x in logs.output if "stuck" in x and "no new" in x]), 1, logs.output)
             self.assertTrue(all(n.startswith("reel-serve-engine-state") for n in calls), calls)
             # stuck again: now the last good item is shown
             release.clear()
             with mock.patch.object(self.app, "_fields", side_effect=stuck), self.assertLogs("serve.app", "WARNING"):
                 await c.send({"type": "snapshot", "id": "s10"})
                 self.assertEqual((await c.recv())["state"]["item"], "C0239")
+        finally:
+            release.set()
+
+    async def test_overlapping_snapshots_share_the_read_in_flight(self):
+        """Round 2: a snapshot that arrives while a read is running awaits that same read (asyncio.shield), so both
+        get the real item instead of one getting the fallback."""
+        self.app.fields_timeout = 3.0
+        good = {"client": "Dr Nour", "item": "C0239", "pipeline": [], "approval": None, "qc": []}
+        calls = []
+
+        def slow(home):
+            calls.append(1)
+            time.sleep(0.4)
+            return good
+        a, b = await self.cli(), await self.cli()
+        with mock.patch.object(self.app, "_fields", side_effect=slow):
+            await a.send({"type": "snapshot", "id": "a1"})
+            await asyncio.sleep(0.1)                                           # a's read is running now
+            await b.send({"type": "snapshot", "id": "b1"})
+            sa, sb = await a.recv(), await b.recv()
+        self.assertEqual((sa["id"], sa["state"]["item"]), ("a1", "C0239"))
+        self.assertEqual((sb["id"], sb["state"]["item"]), ("b1", "C0239"))
+        self.assertEqual(len(calls), 1, "one read for both snapshots")
+
+    async def test_a_waiter_that_goes_away_does_not_cancel_the_shared_read(self):
+        self.app.fields_timeout = 3.0
+        good = {"client": "Dr Nour", "item": "C0239", "pipeline": [], "approval": None, "qc": []}
+        calls = []
+
+        def slow(home):
+            calls.append(1)
+            time.sleep(0.4)
+            return good
+        with mock.patch.object(self.app, "_fields", side_effect=slow):
+            first = asyncio.ensure_future(self.app._item_fields())
+            await asyncio.sleep(0.1)
+            second = asyncio.ensure_future(self.app._item_fields())
+            await asyncio.sleep(0.05)
+            first.cancel()
+            self.assertEqual((await second)["item"], "C0239")
+        self.assertEqual(len(calls), 1)
+
+    async def test_a_permanently_stuck_read_is_replaced_and_a_new_active_item_shows(self):
+        """Round 2: the read of the old item never returns (a dead share); after FIELDS_RETIRE_AFTER timeouts the
+        worker is abandoned (a daemon thread) and a fresh one reads the new active.json item."""
+        self.app.fields_timeout = 0.2
+        root = self.home / "clients" / "Dr Nour"
+        for d in ("assets", "data", "output/projects/C0240/02_transcription"):
+            (root / d).mkdir(parents=True)
+        (root / "output/projects/C0240/02_transcription/transcript.json").write_text("{}", encoding="utf-8")
+        (self.home / "state").mkdir()
+        (self.home / "state" / "active.json").write_text(json.dumps(
+            {"client_root": str(root), "item": "C0240", "stage": "transcribe", "session_id": None, "claude_pid": None,
+             "at": datetime.now(timezone.utc).isoformat()}), encoding="utf-8")
+        real = self.app._fields
+        release = threading.Event()
+        threads = []
+
+        def first_stuck(home):
+            threads.append(threading.current_thread().name)
+            if len(threads) == 1:
+                release.wait(T)                                                 # the old item's dead share
+                return {"client": "Old", "item": "C0001", "pipeline": [], "approval": None, "qc": []}
+            return real(home)
+        c = await self.cli()
+        try:
+            with mock.patch.object(self.app, "_fields", side_effect=first_stuck), \
+                    self.assertLogs("serve.app", "WARNING"):
+                items = []
+                for i in range(2 * serve_app.FIELDS_RETIRE_AFTER + 2):
+                    await c.send({"type": "snapshot", "id": f"n{i}"})
+                    items.append((await c.recv())["state"]["item"])
+                    if items[-1] == "C0240":
+                        break
+            self.assertEqual(items[-1], "C0240", items)
+            self.assertEqual(items[0], "")
+            self.assertGreaterEqual(len(threads), 2)
+            self.assertNotEqual(threads[0], threads[-1], "the new item was read on a fresh worker")
+            self.assertTrue(all(n.startswith("reel-serve-engine-state") for n in threads), threads)
+        finally:
+            release.set()
+
+    async def test_close_is_prompt_with_stuck_reads(self):
+        """Stuck engine-state reads (the abandoned workers and the current one) never hold up close()."""
+        self.app.fields_timeout = 0.1
+        release = threading.Event()
+
+        def stuck(home):
+            release.wait(T)
+            return {"client": "", "item": "", "pipeline": [], "approval": None, "qc": []}
+        c = await self.cli()
+        try:
+            with mock.patch.object(self.app, "_fields", side_effect=stuck), self.assertLogs("serve.app", "WARNING"):
+                for i in range(2 * serve_app.FIELDS_RETIRE_AFTER + 1):
+                    await c.send({"type": "snapshot", "id": f"x{i}"})
+                    await c.recv()
+                pending = asyncio.ensure_future(self.app._item_fields())       # a waiter while the daemon stops
+                await asyncio.sleep(0)
+                t0 = time.monotonic()
+                await self.app.close()
+                self.assertLess(time.monotonic() - t0, serve_app.CLOSE_BUDGET + 0.5)
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.wait_for(pending, 1.0)
         finally:
             release.set()
 

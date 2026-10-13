@@ -43,6 +43,8 @@ PanelState from the item's evidence files (panel_fields)
                   (verify.py:306-308, motion_qc.py:41-43)
       qc          08_quality_control/qc-results.json `ok`: true -> done, false -> failed (qc.py:291-292,
                   motion_qc.py:175)
+      approval inputs (_approval_inputs): plan-approval.json, plus the motion fingerprint's inputs only for a motion
+                  item or a record of kind "motion", plus timeline-spec.json unless the record is of kind "motion"
       handoff     09_handoff/README.md exists (cli.py:835)
     Approval card (only while the approve step is waiting):
       fingerprint the current plan's, what approve-plan records: lib/plan.py plan_fingerprint (plan.py:912,
@@ -50,12 +52,17 @@ PanelState from the item's evidence files (panel_fields)
                   fingerprint() now (cli.py:480-488). No current fingerprint -> no card.
       summary     01_analysis/edit-plan.md (plan.py:1042); motion: 01_analysis/motion-plan.md (motion_plan.py:804),
                   made for the editor by editor_summary: those files end with chat instructions and commands
-                  ("**To approve:** reply 'approved' ... `reel approve-plan`", plan.py:1041; "Animatic: not rendered
-                  yet (`reel motion-animatic`)" and "the lead records `reel approve-plan --by editor`",
-                  motion_plan.py:802-803). Lines naming `reel ` / `claude ` / "Claude Code", lines with a backtick
-                  and the approval footer ("To approve" to the end of its paragraph or section, any "reply" line)
-                  are dropped; headings, bold, links and table rules are collapsed to plain text (a table row reads
-                  "a · b · c"); clipped to SUMMARY_MAX characters
+                  ("**To approve:** reply 'approved' ... `reel approve-plan`", plan.py:1041; "Animatic: <path> | not
+                  rendered yet (`reel motion-animatic`)" and "**To approve:** ... the lead records `reel approve-plan
+                  --by editor`", motion_plan.py:802-803). Those footers are removed by structure (the "**To
+                  approve:**" paragraph, the "Animatic: " line). Everything else keeps every line and table row (the
+                  editor approves those rows: "Watch this reel", "Reply to the doctor", "Ask Claude" stay); commands
+                  are removed token by token: a code span that looks like a command (it has a space, or starts with
+                  reel / claude / npm / npx / python / py) goes, a one-word span stays as its plain word; `reel` +
+                  a registered subcommand (cli.registered_commands) or a flag goes with its flags; `claude --flag`
+                  goes; "Claude Code" reads "Claude"; no backtick is left. Headings, bold and links are collapsed to
+                  plain text (a table row reads "a · b · c"; "__" is left alone: My_reel__v2 is a file name);
+                  clipped to SUMMARY_MAX characters
       preview_mp4 08_quality_control/preview/<item>_preview.mp4 (cli.py:828); motion:
                   08_quality_control/animatic/<item>_animatic.mp4 (motion_qc.py:190); null when absent
       flagged     []: no evidence file carries the medical / religious flags (the reviewers report to the lead)
@@ -66,19 +73,22 @@ PanelState from the item's evidence files (panel_fields)
       no per-frame label). Motion: the newest 08_quality_control/ae_frames/run-*/frames.json {frames: [{frame, scene,
       kind, file}]} (motion_render.py:151, 208), t_s = frame / motion-plan.json `fps` (motion_render.py:190), label
       "<scene> <kind>". A run folder or frame that resolves outside the item folder is left out. Only finite numbers
-      reach the state (a non-finite fps or t_s drops the tile; the daemon's JSON refuses NaN / Infinity) and tc is
-      clamped to TC_MAX (32) characters. The verdict is visual-verification.json's when its `sheet` is that run's
-      _sheet.jpg and its `sheet_mtime` is not older than the sheet (verify.py:306-307, ppro_build.py:528,
-      motion_qc.py:26-30), else "pending".
+      reach the state (a non-finite fps or t_s drops the tile; the daemon's JSON refuses NaN / Infinity) and a tile
+      whose tc is longer than TC_MAX (32) characters is dropped (never cut: a cut timecode names another time). The
+      verdict is visual-verification.json's when its `sheet` is that run's _sheet.jpg and its `sheet_mtime` is not
+      older than the sheet (verify.py:306-307, ppro_build.py:528, motion_qc.py:26-30), else "pending".
     Left out on purpose: `context` (project path, sequence name, ...), staleness of a done step other than the approval
     (cli.py stale_steps), media-pending slates among the frames, per-frame labels and thumbnails.
 
 Cost (PanelFields)
-    The panel polls a snapshot every 2 s. PanelFields caches the item's fields by the size / mtime / mode of every file
-    and folder they are read from (the evidence files, the run folders, the helpers' inputs and configs); active.json
-    itself is read on every call, so staleness and a changed item are seen at once. An unchanged item is never
-    re-read or re-hashed. Blocking (file reads, hashing): the daemon runs it on its own bounded worker with a timeout
-    (serve/app.py App._item_fields), never on the event loop or the default executor.
+    The panel polls a snapshot every 2 s. PanelFields caches the item's fields by the mtime / size / mode / links /
+    inode / ctime of every file and folder they are read from (the evidence files, the run folders, the helpers'
+    inputs and configs) and a sha256 of the small gate files (GATE_FILES, at most GATE_HASH_MAX each): an approval or
+    verdict rewritten in place with the same size and a kept mtime still changes the key. A result built while any
+    read failed for a reason other than "not found" (a sharing violation, a permission flip, a share that dropped)
+    is never cached. active.json itself is read on every call, so staleness and a changed item are seen at once. An
+    unchanged item is never re-read or re-fingerprinted. Blocking (file reads, hashing): the daemon runs it on its own
+    bounded worker with a timeout (serve/app.py App._item_fields), never on the event loop or the default executor.
 
 The build stamp (C1.8 / C2.3)
     <plugin>/adobe/expected.json {product, build, sha} is written by release.py (the executor's part) with `build` =
@@ -90,6 +100,7 @@ from __future__ import annotations
 
 import copy
 import datetime as _dt
+import hashlib
 import json
 import logging
 import math
@@ -118,6 +129,11 @@ QC_MAX = 500                          # session.schema.json panel_state.qc maxIt
 SUMMARY_MAX = 20000                   # approval.summary maxLength
 PATH_MAX = 4096                       # qc_frame.file / approval.preview_mp4 maxLength
 TC_MAX = 32                           # qc_frame.tc maxLength
+GATE_HASH_MAX = 64 * 1024             # the gate files' content hash covers at most this much of each
+# The small files whose content decides a gate or a verdict: their hash is part of PanelFields' cache key
+GATE_FILES = ("01_analysis/plan-approval.json", "08_quality_control/qc-results.json",
+              "08_quality_control/visual-verification.json", "07_premiere/ppro-build-result.json",
+              "04_after_effects/motion-build-result.json", "01_analysis/motion-validation.json")
 UNC_PROBE_S = 1.0                     # a network client folder slower than this to answer is skipped ...
 UNC_RETRY_S = 60.0                    # ... and not touched again for this long
 STEP_IDS = ("transcript", "plan", "approve", "build", "frames", "qc", "handoff")    # pipeline_step.id, in order
@@ -144,6 +160,17 @@ def _empty(**over) -> dict:
 
 
 # ------------------------------------------------------------------------------------------------ reading files
+_FAILS = threading.local()            # .n: reads on this thread that failed for a reason other than "not found"
+
+
+def _failed(e: BaseException | None = None) -> None:
+    """Count a read that failed for a reason other than "not found" (an OSError such as a sharing violation, a
+    permission flip or a share that dropped; None: any failure): PanelFields never caches a result built on one. A
+    ValueError / RuntimeError (a bad path, a link loop) is a property of the files, not a transient failure."""
+    if e is None or (isinstance(e, OSError) and not isinstance(e, (FileNotFoundError, NotADirectoryError))):
+        _FAILS.n = getattr(_FAILS, "n", 0) + 1
+
+
 def _regular(st: os.stat_result, cap: int | None, links: bool) -> bool:
     return stat.S_ISREG(st.st_mode) and (cap is None or st.st_size <= cap) and (not links or st.st_nlink <= 1)
 
@@ -156,16 +183,35 @@ def _check(path, base: Path | None, cap: int | None = None, *, links: bool = Tru
         os.stat(path)
     except (FileNotFoundError, NotADirectoryError):
         return _MISSING
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        _failed(e)
         return None
     try:
         r = Path(path).resolve(strict=True)
         if base is not None and not r.is_relative_to(base):
             return None
         st = os.stat(r)
-    except (OSError, RuntimeError, ValueError):
+    except (OSError, RuntimeError, ValueError) as e:
+        _failed(e)
         return None
     return r if _regular(st, cap, links) else None
+
+
+def _open_checked(r: Path, cap: int | None, links: bool, limit: int) -> bytes | None:
+    """At most `limit` bytes of the checked file `r`: non-blocking open, fstat again on the handle; None otherwise."""
+    try:
+        fd = os.open(r, _OPEN_FLAGS)
+    except (OSError, ValueError) as e:
+        _failed(e)
+        return None
+    try:
+        with open(fd, "rb") as f:
+            if not _regular(os.fstat(f.fileno()), cap, links):   # swapped between the check and the open
+                return None
+            return f.read(limit)
+    except OSError as e:
+        _failed(e)
+        return None
 
 
 def _read_capped(path, cap: int, base: Path | None = None, *, links: bool = True) -> bytes | None:
@@ -174,18 +220,8 @@ def _read_capped(path, cap: int, base: Path | None = None, *, links: bool = True
     r = _check(path, base, cap, links=links)
     if not isinstance(r, Path):
         return None
-    try:
-        fd = os.open(r, _OPEN_FLAGS)
-    except (OSError, ValueError):
-        return None
-    try:
-        with open(fd, "rb") as f:
-            if not _regular(os.fstat(f.fileno()), cap, links):   # swapped between the check and the open
-                return None
-            data = f.read(cap + 1)
-    except OSError:
-        return None
-    return data if len(data) <= cap else None
+    data = _open_checked(r, cap, links, cap + 1)
+    return data if data is not None and len(data) <= cap else None
 
 
 def _parse(data: bytes | None) -> dict | None:
@@ -304,14 +340,82 @@ def read_active(home, now: _dt.datetime | None = None) -> dict | None:
 _HEADING = re.compile(r"^\s{0,3}(#{1,6})(?:\s+|$)")
 _TABLE_RULE = re.compile(r"^[\s|:-]*-[\s|:-]*$")
 _LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
-_COMMAND = re.compile(r"(?:reel|claude)\s|claude\s*code|`")            # matched on the lowercased line
-_REPLY = re.compile(r"\breply\b")
+# The engine's own footers, matched by structure (lib/plan.py:1041 write_edit_plan; lib/motion_plan.py:802-803
+# write_motion_md): the "**To approve:** ..." paragraph and the motion plan's "Animatic: <path or note>" line.
+_FOOTER = re.compile(r"^\s*\*\*To approve:\*\*")
+_ANIMATIC = re.compile(r"^\s*Animatic:\s")
+_CODE_SPAN = re.compile(r"(`+)(.*?)\1")                                   # a markdown code span on one line
+_CODE_COMMAND = re.compile(r"(?:reel|claude|npm|npx|python[\d.]*|py)(?!\w)", re.I)
+_REEL_AT = re.compile(r"(?<![\w-])reel[ \t]+(-{1,2}[A-Za-z][\w-]*(?:=\S*)?|[A-Za-z][\w-]*)(?![\w-])", re.I)
+_CLAUDE_FLAG = re.compile(r"(?<![\w-])claude(?:[ \t]+-{1,2}[A-Za-z][\w-]*(?:=\S*)?)+(?![\w-])", re.I)
+_FLAGS = re.compile(r"(?:[ \t]+-{1,2}[A-Za-z][\w-]*(?:=\S*)?)*")
+_CLAUDE_CODE = re.compile(r"\bclaude[ \t]*code\b", re.I)
+_EMPTY_PARENS = re.compile(r"\([ \t]*\)")
+_SPACE_BEFORE = re.compile(r"[ \t]+([.,;:!?)])")
+_SPACES = re.compile(r"(?<=\S)[ \t]{2,}")
+# Used when the engine's command table (cli.registered_commands) cannot be loaded: the commands its footers name.
+_FALLBACK_COMMANDS = frozenset({"approve-plan", "motion-animatic", "plan", "motion-plan", "ppro-build", "serve"})
+_commands: frozenset | None = None
+
+
+def _subcommands() -> frozenset:
+    """The `reel` subcommand names (lowercase): the engine's command table, read once."""
+    global _commands
+    if _commands is None:
+        try:
+            import cli                                           # engine/reel/cli.py: imports lib.common only
+            names = frozenset(str(n).lower() for n in cli.registered_commands())
+        except Exception as e:                                   # noqa: BLE001 — the fallback covers the footers
+            log.debug("engine state: no command table (%s)", type(e).__name__)
+            names = frozenset()
+        _commands = names | _FALLBACK_COMMANDS
+    return _commands
+
+
+def _code_span(m: re.Match) -> str:
+    """A code span: nothing when it looks like a command (it has a space, or starts with reel / claude / npm / npx /
+    python / py), else its one word as plain text."""
+    body = m.group(2)
+    if not body.strip() or any(c.isspace() for c in body) or _CODE_COMMAND.match(body):
+        return ""
+    return body
+
+
+def _drop_reel_commands(s: str) -> str:
+    """Remove each `reel <subcommand> [--flags]` and `reel --flag` token run; `reel` before any other word stays."""
+    names = _subcommands()
+    out, pos = [], 0
+    while True:
+        m = _REEL_AT.search(s, pos)
+        if m is None:
+            break
+        tok = m.group(1)
+        if tok.startswith("-") or tok.lower() in names:
+            out.append(s[pos:m.start()])
+            pos = _FLAGS.match(s, m.end()).end()
+        else:                                                    # an ordinary "reel": look again from the next word
+            out.append(s[pos:m.start(1)])
+            pos = m.start(1)
+    out.append(s[pos:])
+    return "".join(out)
+
+
+def _redact(line: str) -> str:
+    """One line with its commands removed token by token (C1.4 / C2.2); every other word stays."""
+    s = _CODE_SPAN.sub(_code_span, line).replace("`", "")
+    s = _drop_reel_commands(s)
+    s = _CLAUDE_FLAG.sub("", s)
+    s = _CLAUDE_CODE.sub("Claude", s)
+    if s == line:
+        return line                                              # nothing removed: the line exactly as written
+    s = _SPACES.sub(" ", _SPACE_BEFORE.sub(r"\1", _EMPTY_PARENS.sub("", s)))   # tidy where a token was taken out
+    return s if line[:1].isspace() else s.lstrip()
 
 
 def _plain(line: str) -> str:
     """One markdown line as plain text: no heading marks, bold, links; a table row as "a · b"."""
     line = _HEADING.sub("", line)
-    line = _LINK.sub(r"\1", line).replace("**", "").replace("__", "")
+    line = _LINK.sub(r"\1", line).replace("**", "")
     s = line.strip()
     if s.startswith("|"):
         cells = [c.strip() for c in s.strip("|").split("|")]
@@ -320,28 +424,22 @@ def _plain(line: str) -> str:
 
 
 def editor_summary(md: str) -> str:
-    """The approval card's summary from edit-plan.md / motion-plan.md, for the editor: no command, no chat instruction
-    (C1.4 / C2.2), markdown collapsed to plain text, at most SUMMARY_MAX characters."""
+    """The approval card's summary from edit-plan.md / motion-plan.md, for the editor (C1.4 / C2.2): the engine's
+    footers removed by structure, commands removed token by token (every line and table row of the plan stays),
+    markdown collapsed to plain text, at most SUMMARY_MAX characters."""
     out: list[str] = []
-    skip_to: int | None = None              # inside the approval footer: until a heading this level or higher (0: a blank)
+    in_footer = False                       # inside the "**To approve:**" paragraph: until a blank line or a heading
     for raw in md.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        h = _HEADING.match(raw)
-        level = len(h.group(1)) if h else None
-        if skip_to is not None:
-            if (skip_to == 0 and not raw.strip()) or (level is not None and skip_to and level <= skip_to):
-                skip_to = None
-            else:
+        if in_footer:
+            if raw.strip() and not _HEADING.match(raw):
                 continue
-        if _TABLE_RULE.match(raw) and "|" in raw:
+            in_footer = False
+        if _FOOTER.match(raw):
+            in_footer = True
             continue
-        text = _plain(raw)
-        low = text.lower()
-        if low.lstrip(" -*").startswith("to approve"):
-            skip_to = level or 0
+        if _ANIMATIC.match(raw) or (_TABLE_RULE.match(raw) and "|" in raw):
             continue
-        if _COMMAND.search(raw.lower()) or _COMMAND.search(low) or _REPLY.search(low):
-            continue
-        out.append(text)
+        out.append(_plain(_redact(raw)))
     lines: list[str] = []
     for line in out:
         if line.strip() or (lines and lines[-1].strip()):
@@ -384,7 +482,8 @@ class _Item:
         """A run folder or frame (listed, not read) that does not resolve outside the item folder."""
         try:
             return path.resolve().is_relative_to(self.base)
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError) as e:
+            _failed(e)
             return False
 
     # -------------------------------------------------- what the engine helpers read (files, base, one link?)
@@ -414,14 +513,20 @@ class _Item:
             "06_audio/dialogue/pauses.json")] + [
             (self.paths.client_db / "branding/brand-tokens.json", self.root, True)] + cfg
 
-    def _approval_inputs(self) -> list | None:
+    def _approval_inputs(self, motion: bool) -> list | None:
         """lib/plan.py approval_state (:945): plan-approval.json, then the motion fingerprint's inputs (a record with
-        kind "motion") or timeline-spec.json (plan_fingerprint, :912)."""
-        motion = self._motion_inputs()
-        if motion is None:
-            return None
-        return [(self.p("01_analysis/plan-approval.json"), self.base, True),
-                (self.p("01_analysis/timeline-spec.json"), self.base, True)] + motion
+        kind "motion") or timeline-spec.json (plan_fingerprint, :912). The motion inputs only for a motion item (or a
+        record that says kind "motion": that is the branch approval_state takes); an edit item never depends on them."""
+        rec = self.json("01_analysis/plan-approval.json") or {}
+        files = [(self.p("01_analysis/plan-approval.json"), self.base, True)]
+        if motion or rec.get("kind") == "motion":
+            extra = self._motion_inputs()
+            if extra is None:
+                return None
+            files += extra
+        if rec.get("kind") != "motion":
+            files.append((self.p("01_analysis/timeline-spec.json"), self.base, True))
+        return files
 
     def inputs_ok(self, files: list | None) -> bool:
         return files is not None and all(_check(f, base, EVIDENCE_MAX, links=links) is not None
@@ -446,7 +551,8 @@ class _Item:
             out.append(folder)
             try:
                 runs = sorted(folder.glob("run-*"))
-            except OSError:
+            except OSError as e:
+                _failed(e)
                 runs = []
             for run in runs:
                 out += [run, run / "_sheet.jpg", run / "frames.json"]
@@ -473,17 +579,19 @@ def _plan_fingerprint(it: _Item, motion: bool) -> str | None:
         from lib.plan import plan_fingerprint
         return plan_fingerprint(it.paths)
     except Exception as e:                       # the engine's own readers: a broken file is "no plan", never a crash
+        _failed(e)
         log.debug("engine state: no plan fingerprint (%s)", type(e).__name__)
         return None
 
 
-def _approval_current(it: _Item) -> bool:
+def _approval_current(it: _Item, motion: bool) -> bool:
     try:
-        if not it.inputs_ok(it._approval_inputs()):
+        if not it.inputs_ok(it._approval_inputs(motion)):
             return False
         from lib.plan import approval_state
         return approval_state(it.paths)["state"] == "current"
     except Exception as e:
+        _failed(e)
         log.debug("engine state: approval unreadable (%s)", type(e).__name__)
         return False
 
@@ -496,6 +604,7 @@ def _seq_fps(it: _Item) -> float:
             if math.isfinite(fps) and fps >= 1:
                 return fps
         except Exception as e:
+            _failed(e)
             log.debug("engine state: no sequence rate (%s)", type(e).__name__)
     return float(common.SEQ_FPS)
 
@@ -509,7 +618,8 @@ def _newest_run(it: _Item, folder: Path, need: str) -> Path | None:
     try:
         runs = sorted(d for d in folder.glob("run-*") if d.is_dir() and it.inside(d)
                       and (not need or isinstance(_check(d / need, it.base, EVIDENCE_MAX), Path)))
-    except OSError:
+    except OSError as e:
+        _failed(e)
         return None
     return runs[-1] if runs else None            # run-YYYYmmdd-HHMMSS: the name order is the time order
 
@@ -529,7 +639,8 @@ def _run_verdict(it: _Item, vv: dict | None, run: Path) -> str:
         recorded = float(vv.get("sheet_mtime"))
         if not math.isfinite(recorded) or not it.is_file(sheet) or sheet.stat().st_mtime > recorded + 1:
             return "pending"                     # the sheet was rebuilt after the verdict (or is not a plain file)
-    except (OSError, TypeError, ValueError, OverflowError):
+    except (OSError, TypeError, ValueError, OverflowError) as e:
+        _failed(e)
         return "pending"
     return vv["verdict"]
 
@@ -539,10 +650,11 @@ def _ms_of(name: str) -> int | None:
 
 
 def _tile(t_s, tc: str, file: str, label: str, verdict: str) -> dict | None:
-    """One qc_frame, or None when its time is not a finite number (the daemon's JSON refuses NaN / Infinity)."""
-    if not isinstance(t_s, (int, float)) or not math.isfinite(t_s):
+    """One qc_frame, or None when its time is not a finite number (the daemon's JSON refuses NaN / Infinity) or its
+    timecode is longer than TC_MAX (a cut timecode would name another time: the tile is dropped instead)."""
+    if not isinstance(t_s, (int, float)) or not math.isfinite(t_s) or len(tc) > TC_MAX:
         return None
-    return {"t_s": t_s, "tc": tc[:TC_MAX], "file": file, "label": label, "verdict": verdict}
+    return {"t_s": t_s, "tc": tc, "file": file, "label": label, "verdict": verdict}
 
 
 def _edit_tiles(it: _Item, vv: dict | None) -> list:
@@ -554,7 +666,8 @@ def _edit_tiles(it: _Item, vv: dict | None) -> list:
     frames = []
     try:
         pngs = sorted(f for f in run.glob("*.png") if not f.name.startswith("._"))
-    except OSError:
+    except OSError as e:
+        _failed(e)
         return []
     for f in pngs:
         ms = _ms_of(f.name)
@@ -624,7 +737,7 @@ def _evidence(it: _Item) -> dict:
     elif it.is_file("01_analysis/timeline-spec.json"):
         st["plan"] = "done"
     if st["plan"] == "done":
-        if _approval_current(it):
+        if _approval_current(it, motion):
             st["approve"] = "done"
         else:
             fp = _plan_fingerprint(it, motion)
@@ -654,6 +767,7 @@ def _evidence(it: _Item) -> dict:
     try:
         qc = _motion_tiles(it, vv) if motion else _edit_tiles(it, vv)
     except Exception as e:
+        _failed(e)
         log.debug("engine state: no QC tiles (%s)", type(e).__name__)
         qc = []
     return {"pipeline": [{"id": s, "state": st[s]} for s in STEP_IDS], "approval": approval, "qc": qc}
@@ -666,6 +780,7 @@ def _fields(act: dict, home) -> dict:
         with common.use_context(common.Context(root=root, home=home)):
             out.update(_evidence(_Item(common.Paths(root, item))))
     except Exception as e:                        # never fail a snapshot over an evidence file
+        _failed()                                 # ... and never cache one built this way
         log.warning("reel serve: engine state for %s unreadable (%s)", item, type(e).__name__)
         out["pipeline"] = [{"id": s, "state": "pending"} for s in STEP_IDS]
     return out
@@ -679,17 +794,34 @@ def panel_fields(home, now: _dt.datetime | None = None) -> dict:
 
 
 def _stat_key(p: Path):
+    """What identifies a file's or folder's state without reading it: mtime, size, mode, links, inode (file index on
+    Windows) and ctime (inode change; creation time on Windows). None when there is nothing to stat."""
     try:
         st = os.stat(p)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        _failed(e)
         return None
-    return (st.st_mtime_ns, st.st_size, st.st_mode, st.st_nlink)
+    return (st.st_mtime_ns, st.st_size, st.st_mode, st.st_nlink, st.st_ino, st.st_ctime_ns)
+
+
+def _gate_hash(path: Path, base: Path) -> str | None:
+    """sha256 of the first GATE_HASH_MAX bytes of a gate file (checked like every read here; "-" when it is absent,
+    None when it is refused or unreadable): a same-size rewrite that keeps the mtime still changes the key."""
+    r = _check(path, base)
+    if r is _MISSING:
+        return "-"
+    if not isinstance(r, Path):
+        return None
+    data = _open_checked(r, None, True, GATE_HASH_MAX)
+    return None if data is None else hashlib.sha256(data).hexdigest()
 
 
 class PanelFields:
     """panel_fields with a cache: the item's fields are computed again only when a file or folder they come from
-    changed (size, mtime, mode, links; see _Item.watched). active.json is read on every call. Thread-safe; every call
-    returns its own copy."""
+    changed (_stat_key of every path in _Item.watched, plus a content hash of the small gate files in GATE_FILES:
+    an approval or verdict rewritten in place with the same size and a kept mtime is still seen). active.json is read
+    on every call. A result built while any read failed for a reason other than "not found" is never cached (the next
+    call reads again). Thread-safe; every call returns its own copy."""
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -701,8 +833,10 @@ class PanelFields:
             with common.use_context(common.Context(root=act["client_root"], home=home)):
                 it = _Item(common.Paths(act["client_root"], act["item"]))
                 watched = it.watched()
-            return (str(act["client_root"]), act["item"], tuple((str(p), _stat_key(p)) for p in watched))
+                gates = tuple(_gate_hash(it.p(rel), it.base) for rel in GATE_FILES)
+            return (str(act["client_root"]), act["item"], tuple((str(p), _stat_key(p)) for p in watched), gates)
         except Exception as e:                    # no key: compute without the cache
+            _failed(e)
             log.debug("engine state: no cache key (%s)", type(e).__name__)
             return None
 
@@ -710,11 +844,18 @@ class PanelFields:
         act = read_active(home, now)
         if act is None:
             return _empty()
+        _FAILS.n = 0
         key = self._signature(act, home)
+        if _FAILS.n:                              # a stat or hash failed: the key cannot be trusted
+            key = None
         with self._lock:
             if key is not None and key == self._key and self._val is not None:
                 return copy.deepcopy(self._val)
         val = _fields(act, home)
+        clean = not _FAILS.n
         with self._lock:
-            self._key, self._val = key, copy.deepcopy(val)
+            if key is not None and clean:
+                self._key, self._val = key, copy.deepcopy(val)
+            else:                                 # never serve a result built over a failed read
+                self._key, self._val = None, None
         return val

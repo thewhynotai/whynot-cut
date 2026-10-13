@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -28,6 +29,11 @@ from contract import validate  # noqa: E402
 from lib import common  # noqa: E402
 from lib.plan import APPROVAL_FORMAT, plan_fingerprint  # noqa: E402
 from serve import engine_state as ES, messages  # noqa: E402
+import cli as reel_cli  # noqa: E402
+
+# `reel` + one of its registered subcommands, or `reel` + a flag: a command the editor must never see
+REEL_COMMAND = re.compile(r"(?<![\w-])reel\s+(?:-|(?:%s)(?![\w-]))" % "|".join(
+    re.escape(c) for c in sorted(reel_cli.registered_commands(), key=len, reverse=True)), re.I)
 
 NOW = datetime(2026, 10, 13, 12, 0, 0, tzinfo=timezone.utc)
 SPEC = {"fps": 30, "duration_frames": 900, "events": [], "main_segments": [], "generated": "2026-10-13T11:00:00+00:00"}
@@ -459,13 +465,15 @@ class EngineSummary(Base):
         self.activate()
 
     def assert_editor_safe(self, f):
+        """No `reel <subcommand>` / `reel --flag`, no backtick, no "Claude Code", no footer in any PanelState string
+        (ordinary words such as "reel", "reply" and "Claude" are the editor's content and stay)."""
         st = self.assert_valid_state(f)
         for s in strings(st["state"]):
-            self.assertNotIn("reel ", s.lower(), s)
+            self.assertIsNone(REEL_COMMAND.search(s), s)
             self.assertNotIn("`", s, s)
             self.assertNotRegex(s.lower(), r"claude\s*code", s)
-            self.assertNotRegex(s.lower(), r"\breply\b", s)
-            self.assertNotIn("to approve", s.lower(), s)
+            self.assertNotIn("To approve:", s, s)
+            self.assertNotIn("Animatic:", s, s)
 
     def test_the_footers_are_the_engines_own(self):
         lib = SK / "engine" / "reel" / "lib"
@@ -488,6 +496,8 @@ class EngineSummary(Base):
         self.assertNotIn("**", summary)
         self.assertNotIn("|", summary)
         self.assertNotIn("\n\n\n", summary)
+        self.assertIn("Run again after changes.", summary)            # the command token goes, the sentence stays
+        self.assertIn("Claude records the approval.", summary)
         self.assert_editor_safe(f)
 
     def test_motion_plan_summary_has_no_commands(self):
@@ -512,9 +522,10 @@ class EngineSummary(Base):
     def test_the_editor_summary_function(self):
         self.assertEqual(ES.editor_summary(EDIT_FOOTER), "")
         self.assertEqual(ES.editor_summary("A\n\n\n\nB\n**To approve:** reply 'approved'\nstill footer\n\nC"), "A\n\nB\n\nC")
-        self.assertEqual(ES.editor_summary("## To approve\nreply here\n## Next\nD"), "Next\nD")
+        self.assertEqual(ES.editor_summary("## To approve\nreply here\n## Next\nD"),     # not the engine's footer
+                         "To approve\nreply here\nNext\nD")
         self.assertEqual(ES.editor_summary("| a | b |\n|:--|--:|\n| **c** | [d](http://x) |"), "a · b\nc · d")
-        self.assertEqual(ES.editor_summary("Use claude to ask\nkeep"), "keep")
+        self.assertEqual(ES.editor_summary("Use claude to ask\nkeep"), "Use claude to ask\nkeep")
         self.assertEqual(ES.editor_summary("\r\n\r\nA\r\n"), "A")
         self.assertLessEqual(len(ES.editor_summary("x" * 30000)), ES.SUMMARY_MAX)
 
@@ -657,12 +668,14 @@ class Numbers(Base):
         self.assertIsNone(ES._ms_of("frame_²5.png"))
         self.assertEqual(ES._ms_of("frame_002500.png"), 2500)
 
-    def test_a_huge_frame_name_is_clamped_and_finite(self):
+    def test_a_huge_frame_name_is_dropped_and_finite(self):
         run = self.p("08_quality_control/premiere_frames/run-20261013-110000")
         write(run / ("frame_" + "9" * 200 + ".png"), b"")
         write(run / "frame_001000.png", b"")
         f = self.fields()
-        self.assertEqual(len(f["qc"]), 2)
+        self.assertEqual([q["t_s"] for q in f["qc"]], [1.0])           # a timecode over TC_MAX: dropped, never cut
+        self.assertIsNone(ES._tile(1.0, "1" * (ES.TC_MAX + 1), "f.png", "", "pending"))
+        self.assertEqual(ES._tile(1.0, "1" * ES.TC_MAX, "f.png", "", "pending")["tc"], "1" * ES.TC_MAX)
         for q in f["qc"]:
             self.assertLessEqual(len(q["tc"]), 32)
             self.assertTrue(math.isfinite(q["t_s"]))
@@ -759,6 +772,169 @@ class NetworkClientRoot(Base):
             self.assertTrue(ES._is_unc(raw), raw)
         for raw in ("C:\\clients\\Dr Nour", "/Users/x/clients"):
             self.assertFalse(ES._is_unc(raw), raw)
+
+
+# ------------------------------------------------------------------------------------------------------ review round 2
+# A realistic edit plan whose decision rows hold the words "reel", "reply" and "Claude" and backticked words: the editor
+# approves these rows, so every one of them must reach the card; only the command tokens and the footer go.
+ROWS = [
+    ("| D1 | 00:00:01:00 | statement_bar | Watch this reel till the end | the reel starts here | YES |",
+     "D1 · 00:00:01:00 · statement_bar · Watch this reel till the end · the reel starts here · YES"),
+    ("| D2 | 00:00:04:12 | +8% punch-in; statement_bar | Reply to the doctor | reply in the comments |  |",
+     "D2 · 00:00:04:12 · +8% punch-in; statement_bar · Reply to the doctor · reply in the comments"),
+    ("| D3 | 00:00:07:00 | lower_third | Ask Claude, not Google | the word `insulin` twice |  |",
+     "D3 · 00:00:07:00 · lower_third · Ask Claude, not Google · the word insulin twice"),
+    ("| D4 | 00:00:09:00 | camera only | — | fixed with `reel plan --root X` today |  |",
+     "D4 · 00:00:09:00 · camera only · — · fixed with today"),
+    ("| D5 | 00:00:12:00 | broll_card | My_reel__v2 | reel approve-plan was run | YES |",
+     "D5 · 00:00:12:00 · broll_card · My_reel__v2 · was run · YES"),
+    ("| D6 | 00:00:15:00 | statement_bar | `Claude Code` and `npx tsc` | `python3 x.py` / `py` / `reel` |  |",
+     "D6 · 00:00:15:00 · statement_bar · and · / /"),
+    ("| D7 | 00:00:18:00 | statement_bar | reel reel status works | the `pyramid` of reel --version |  |",
+     "D7 · 00:00:18:00 · statement_bar · reel works · the pyramid of"),
+]
+ROWS_MD = "\n".join([
+    "# Edit Plan — C0239 (for editor approval)", "",
+    "Runtime 00:00:30:00 at 30 fps · 7 graphics · 1 camera moves (+0 automatic jump-cut zooms) · 0 SFX cues", "",
+    "## Decisions", "", "| # | Time | Treatment | On-screen text | Why (speaker's words) | Approval |",
+    "|---|---|---|---|---|---|", *[raw for raw, _ in ROWS], "",
+    "## Words cut (1): picture, sound and captions", "", "- 00:00:03.200 «reply» (word 12)", "",
+    "## Not included (and why)", "", "- the reel intro: Claude suggested it, the editor said no", "",
+    "Music: PLACED — My_reel__v2.mp3 at -24 dB, 2 s fade-out", "", EDIT_FOOTER, ""])
+
+
+class EditorSummaryRows(Base):
+    """Round 2: the summary redacts commands token by token; it never drops a line or a row the editor approves."""
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+
+    def test_every_decision_row_is_kept_and_every_command_is_gone(self):
+        self.compiled_plan()
+        write(self.p("01_analysis/edit-plan.md"), ROWS_MD)
+        f = self.fields()
+        lines = f["approval"]["summary"].split("\n")
+        for _, want in ROWS:
+            self.assertIn(want, lines)
+        self.assertIn("Decisions", lines)                                  # headings keep their rows under them
+        self.assertIn("- 00:00:03.200 «reply» (word 12)", lines)
+        self.assertIn("- the reel intro: Claude suggested it, the editor said no", lines)
+        self.assertIn("Music: PLACED — My_reel__v2.mp3 at -24 dB, 2 s fade-out", lines)
+        self.assertEqual(lines[-1], "Music: PLACED — My_reel__v2.mp3 at -24 dB, 2 s fade-out")   # the footer is gone
+        EngineSummary.assert_editor_safe(self, f)
+
+    def test_the_real_footers_are_removed(self):
+        self.assertEqual(ES.editor_summary("Body\n\n" + EDIT_FOOTER + "\n"), "Body")
+        anim = str(self.p("08_quality_control/animatic/EP02_R03_MO_animatic.mp4"))
+        for animatic in (anim, MOTION_ANIMATIC):
+            md = f"Body\n\n## Warnings\n\n- none\n\nAnimatic: {animatic}\n\n{MOTION_FOOTER}\n"
+            self.assertEqual(ES.editor_summary(md), "Body\n\nWarnings\n\n- none", animatic)
+
+    def test_a_double_underscore_name_and_plain_words_survive(self):
+        self.assertEqual(ES.editor_summary("File My_reel__v2.mp4 and __init__"), "File My_reel__v2.mp4 and __init__")
+        self.assertEqual(ES.editor_summary("Reply to the doctor\nWatch this reel\nAsk Claude"),
+                         "Reply to the doctor\nWatch this reel\nAsk Claude")
+        self.assertEqual(ES.editor_summary("Use claude --resume to go on"), "Use to go on")
+        self.assertEqual(ES.editor_summary("Made in Claude Code."), "Made in Claude.")
+
+    def test_backtick_spans(self):
+        cases = [("say `insulin` now", "say insulin now"), ("`reel` alone", "alone"), ("`reel-x`", ""),
+                 ("`reel_v2` stays", "reel_v2 stays"), ("``code``", "code"), ("a ` stray", "a stray"),
+                 ("`npm` `npx` `python` `python3.12` `py` `py.exe` `claude`", ""), ("`pyramid`", "pyramid"),
+                 ("run (`reel motion-animatic`) now", "run now"), ("`two words`", ""), ("` `", "")]
+        for md, want in cases:
+            self.assertEqual(ES.editor_summary(md), want, md)
+
+
+class CacheRound2(Base):
+    """Round 2: the cache key has the inode and ctime of every watched path and a content hash of the small gate files;
+    a read that failed for any reason other than "not found" is never cached."""
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+        self.cache = ES.PanelFields()
+
+    def rewrite_same_size_keep_mtime(self, path: Path, data: bytes):
+        st = path.stat()
+        self.assertEqual(len(data), st.st_size)
+        with open(path, "r+b") as fh:                                   # in place: the same inode / creation time
+            fh.write(data)
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual((path.stat().st_size, path.stat().st_mtime_ns), (st.st_size, st.st_mtime_ns))
+
+    def test_a_same_size_change_with_the_mtime_kept_is_seen(self):
+        qc = write(self.p("08_quality_control/qc-results.json"), b'{"ok": true}')
+        self.assertEqual(self.steps(self.cache(self.home, now=NOW))["qc"], "done")
+        self.rewrite_same_size_keep_mtime(qc, b'{"ok":false}')
+        self.assertEqual(self.steps(self.cache(self.home, now=NOW))["qc"], "failed")
+
+    def test_a_same_size_approval_change_with_the_mtime_kept_is_seen(self):
+        self.compiled_plan()
+        self.approve()
+        p = self.p("01_analysis/plan-approval.json")
+        self.assertEqual(self.steps(self.cache(self.home, now=NOW))["approve"], "done")
+        raw = p.read_bytes()
+        self.assertIn(b'"approved": true,', raw)
+        self.rewrite_same_size_keep_mtime(p, raw.replace(b'"approved": true,', b'"approved":false,'))
+        f = self.cache(self.home, now=NOW)
+        self.assertEqual(self.steps(f)["approve"], "waiting")
+        self.assertIsNotNone(f["approval"])
+
+    def test_the_key_has_the_inode_and_ctime(self):
+        st = os.stat(self.home)
+        key = ES._stat_key(self.home)
+        self.assertIn(st.st_ino, key)
+        self.assertIn(st.st_ctime_ns, key)
+
+    def test_a_transient_read_failure_is_not_cached(self):
+        write(self.p("08_quality_control/qc-results.json"), {"ok": True})
+        real_open = os.open
+        locked = {"on": True}                                            # another process holds the file for a moment
+
+        def flaky(path, *a, **kw):
+            if str(path).endswith("qc-results.json") and locked["on"]:
+                raise PermissionError(13, "sharing violation", str(path))
+            return real_open(path, *a, **kw)
+        with mock.patch.object(ES.os, "open", side_effect=flaky):
+            self.assertEqual(self.steps(self.cache(self.home, now=NOW))["qc"], "pending")    # this read failed
+            locked["on"] = False                                         # nothing on disk changed
+            self.assertEqual(self.steps(self.cache(self.home, now=NOW))["qc"], "done")       # not cached: read again
+
+    def test_a_not_found_read_is_still_cached(self):
+        import lib.plan as plan
+        self.compiled_plan()
+        with mock.patch("lib.plan.plan_fingerprint", side_effect=plan.plan_fingerprint) as fp:
+            self.cache(self.home, now=NOW)
+            n = fp.call_count
+            self.cache(self.home, now=NOW)
+            self.assertEqual(fp.call_count, n)
+
+
+class ApprovalInputsByKind(Base):
+    """Round 2: an edit item's approval does not depend on the motion fingerprint's inputs."""
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+
+    def test_an_edit_item_ignores_a_refused_motion_input(self):
+        self.compiled_plan()
+        self.approve()
+        write(self.root / "output/client_database/branding/brand-tokens.json", b" " * (ES.EVIDENCE_MAX + 1))
+        self.p("02_transcription/words.json").mkdir(parents=True)
+        self.assertEqual(self.steps(self.fields())["approve"], "done")
+
+    def test_a_motion_record_still_checks_the_motion_inputs(self):
+        self.compiled_plan()
+        write(self.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor", "at": iso(NOW),
+                                                          "plan_fingerprint": "f", "kind": "motion",
+                                                          "format": APPROVAL_FORMAT})
+        self.p("02_transcription/words.json").mkdir(parents=True)
+        with mock.patch("lib.plan.approval_state", side_effect=AssertionError("called")) as a:
+            self.fields()
+        self.assertEqual(a.call_count, 0)
 
 
 # ------------------------------------------------------------------------------------------------------ build stamp
