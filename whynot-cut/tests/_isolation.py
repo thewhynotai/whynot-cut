@@ -49,7 +49,7 @@ MARKER = ".whynot-test-sandbox"          # written into every sandbox: only fold
 STALE_S = 24 * 3600
 _DROP = ("CLAUDE_PLUGIN_DATA", "CLAUDE_ENV_FILE", "WHYNOT_OPTIONS_FILE",
          "WHYNOT_PREMIERE_APP", "WHYNOT_AE_APP", "WHYNOT_AERENDER",
-         "WHYNOT_FFMPEG", "WHYNOT_FFMPEG_TIMEOUT_SCALE") + plat.HOME_ENV + plat.CLIENTS_ENV   # T2.15: a dev's ffmpeg
+         "WHYNOT_FFMPEG", "WHYNOT_FFMPEG_TIMEOUT_SCALE") + plat.HOME_ENV + plat.CLIENTS_ENV + plat.USER_OPTION_ENV   # T2.15: a dev's ffmpeg
 
 
 def _live_roots() -> list:

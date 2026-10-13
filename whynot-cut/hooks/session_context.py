@@ -329,14 +329,19 @@ def writer_line(root: Path, session) -> str:
 
 
 def prefs_line(st: dict) -> str:
-    if not st.get("_file"):
+    """The values in effect: from the preferences files, or (no file) from the plugin options (3.0 T3.5)."""
+    opts = "userConfig" in set((st.get("_sources") or {}).values())
+    if not st.get("_file") and not opts:
         return "Preferences: none yet (/whynot-cut:preferences)."
     who = f" Editor: {st['editor_name']}." if st.get("editor_name") else ""
     lang = " Talk to the editor in Arabic." if st.get("language") == "ar" else ""
+    src = (st.get("_where") or {}).get("approval")
+    src = src if src and src != "default" else (st.get("_file") or "plugin option")
     appr = (" Approval: auto (show the plan and preview, then record `approve-plan --by delegated --note "
-            "\"standing preference in " + st["_file"] + "\"` without waiting)." if st.get("approval") == "auto"
+            "\"standing preference in " + src + "\"` without waiting)." if st.get("approval") == "auto"
             else " Approval: ask (stop at Gate 1).")
-    return f"Preferences: {st['_file']}.{who}{lang}{appr} Whisper: {st.get('whisper_model')}."
+    return (f"Preferences: {st['_file'] or 'the WhyNot Cut plugin options'}.{who}{lang}{appr} "
+            f"Whisper: {st.get('whisper_model')}.")
 
 
 def export_options():
@@ -349,6 +354,9 @@ def export_options():
         UTF-8, so reel.cmd can read it without Python."""
     opts = {"engine_home": os.environ.get("CLAUDE_PLUGIN_OPTION_ENGINE_HOME") or "",
             "clients_root": os.environ.get("CLAUDE_PLUGIN_OPTION_CLIENTS_ROOT") or ""}
+    pointer = dict(opts)      # + the other non-secret options (language, approval, ...): the engine's preference layer
+    for k in plat.USER_OPTION_KEYS:     # (never the sensitive ones: the API key is not written to any file)
+        pointer[k] = os.environ.get("CLAUDE_PLUGIN_OPTION_" + k.upper()) or ""
     env_file = os.environ.get("CLAUDE_ENV_FILE")
     if env_file:
         import shlex
@@ -358,7 +366,7 @@ def export_options():
             with open(env_file, "a", encoding="utf-8", newline="\n") as f:
                 f.writelines(lines)
     if env_file and os.environ.get("CLAUDE_PLUGIN_DATA"):
-        write_pointer(opts)
+        write_pointer(pointer)
 
 
 def write_pointer(opts: dict):
@@ -371,6 +379,7 @@ def write_pointer(opts: dict):
         pass
     f.parent.mkdir(parents=True, exist_ok=True)
     body = {"clients_root": opts["clients_root"], "engine_home": opts["engine_home"],
+            **{k: v for k, v in opts.items() if k not in ("clients_root", "engine_home")},
             "updated": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     tmp = f.with_name(f.name + f".{os.getpid()}.tmp")
     try:

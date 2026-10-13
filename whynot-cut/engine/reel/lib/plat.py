@@ -65,6 +65,46 @@ def saved_options() -> dict:
     return {k: d.get(k) if isinstance(d.get(k), str) else "" for k in ("engine_home", "clients_root")}
 
 
+USER_OPTION_KEYS = ("language", "approval", "whisper_model", "magnific_budget_credits")   # userConfig keys the engine reads
+SECRET_OPTION_KEYS = ("magnific_api_key",)    # sensitive userConfig keys: environment only, never copied anywhere
+USER_OPTION_ENV = tuple("CLAUDE_PLUGIN_OPTION_" + k.upper() for k in USER_OPTION_KEYS + SECRET_OPTION_KEYS)
+
+
+def _option_text(v) -> str:
+    """A plugin option as text: strings and numbers count, anything else (bool, list, null) and blanks are "" (unset)."""
+    if isinstance(v, bool) or not isinstance(v, (str, int, float)):
+        return ""
+    return str(v).strip()
+
+
+def plugin_options(keys=USER_OPTION_KEYS) -> dict:
+    """The non-secret userConfig values (language, approval, whisper_model, magnific_budget_credits) as text, "" when
+    unset (3.0 T3.5). Per key: the CLAUDE_PLUGIN_OPTION_<KEY> variable (hooks and MCP servers get it), else the
+    pointer file the SessionStart hook writes, else Claude Code's settings.json pluginConfigs (the same order as
+    saved_options). Defaults are not applied here: the engine's own defaults sit below this layer."""
+    try:
+        ptr = json.loads(options_file().read_text(encoding="utf-8"))
+        ptr = ptr if isinstance(ptr, dict) else {}
+    except (OSError, ValueError):
+        ptr = {}
+    cfg = None
+    out = {}
+    for k in keys:
+        v = _option_text(os.environ.get("CLAUDE_PLUGIN_OPTION_" + k.upper())) or _option_text(ptr.get(k))
+        if not v:
+            cfg = _claude_settings_options() if cfg is None else cfg
+            v = _option_text(cfg.get(k))
+        out[k] = v
+    return out
+
+
+def secret_option(key: str) -> str:
+    """A sensitive userConfig value (magnific_api_key). Claude Code keeps it in the system keychain and gives it only to
+    the processes the plugin starts, as CLAUDE_PLUGIN_OPTION_<KEY>; so the environment is the only source here. The
+    engine never writes it to a file, the pointer, a log or a report: ask for it at the moment of use."""
+    return os.environ.get("CLAUDE_PLUGIN_OPTION_" + key.upper(), "")
+
+
 def _saved_path(v: str) -> Path:
     return Path(native_path(v)).expanduser()
 

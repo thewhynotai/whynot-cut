@@ -1231,21 +1231,20 @@ def cmd_settings(a):
         target = folder / ".claude" / S.FILE
         if target.exists() and not a.force:
             raise SystemExit(f"{target} exists (use --force to rewrite it; your values are kept unless overridden)")
-        base = S.load(folder) if target.exists() else dict(S.DEFAULTS)   # never copy another folder's values
-        vals = {k: v for k, v in base.items() if not k.startswith("_")}
-        st = base
+        # only what this one file already holds (never another layer's values: they would be pinned here and shadow
+        # the plugin options and the machine file, T3.5)
+        vals, notes, _ = S.read_file(target) if target.exists() else ({}, "", [])
         from lib.arglists import SETTING_START, items
         for kv in items(a.set, start=SETTING_START):     # --set a=1,b=2 or repeated (T2.16)
             k, _, v = kv.partition("=")
             k, val = k.strip(), S._parse_scalar(v)
             if k not in S.DEFAULTS:
                 raise SystemExit(f"unknown preference {k!r}; known: {', '.join(S.DEFAULTS)}")
-            if k in S.CHOICES and str(val) not in S.CHOICES[k]:
-                raise SystemExit(f"{k}={val!r} is not one of {sorted(S.CHOICES[k])}")
-            if isinstance(S.DEFAULTS[k], bool) and not isinstance(val, bool):
-                raise SystemExit(f"{k} must be true or false")
+            val, why = S.check(k, val)
+            if why:
+                raise SystemExit(f"{k}={v.strip()!r} {why}")
             vals[k] = val
-        S.save(target, vals, st.get("_notes", ""))
+        S.save(target, vals, notes)
         st = S.load(folder)
     out(st)
 

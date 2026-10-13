@@ -18,7 +18,8 @@ reel profile --root "<CLIENT_FOLDER>"                   # which profile applies 
 reel settings --root "<CLIENT_FOLDER>"                  # preferences in effect for THIS client (_file = which file)
 ```
 - `reel` is on PATH while the plugin is enabled (bash and PowerShell). If it says the engine is missing, run `/whynot-cut:start`.
-- Speak the editor's `language` from preferences. Address them by `editor_name` if set.
+- Speak the editor's `language` from preferences (plugin option: `${user_config.language}`; a client or machine file overrides it,
+  `reel settings` shows the one in effect). Address them by `editor_name` if set.
 - Unsure what's in the folder, or the user just dropped new files? Spawn `whynot-cut:intake-inspector` first; it returns
   the clips, the missing brand material and footage problems without changing anything.
 - `<ID>` is the clip id `reel inbox` lists: the file stem for plain names (`C0238`), a short hash for Arabic names

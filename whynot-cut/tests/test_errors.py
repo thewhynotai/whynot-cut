@@ -162,7 +162,7 @@ class TestJsonFiles(TempDir):
         d.mkdir(parents=True)
         (d / S.FILE).write_bytes(b"---\nlanguage: ar\neditor_name: Ren\xe9\n---\n")
         st = S.load(d.parent)                                     # the hooks read it: never a crash
-        self.assertEqual(st["language"], "en")
+        self.assertEqual(st["language"], S.DEFAULTS["language"])
         self.assertEqual(len(st["_problems"]), 1)
         self.assertIn("line 3", st["_problems"][0])
         self.assertIn(str(d / S.FILE), st["_problems"][0])

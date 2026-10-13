@@ -43,6 +43,45 @@
       "title": "Engine data folder",
       "description": "Where the Python environment, Whisper models (~3 GB) and the Premiere job queue live. Leave empty for ~/.whynot-cut (an existing ~/.reel-editor install is reused).",
       "required": false
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "The language WhyNot Cut talks to you in: ar (Arabic, Egyptian-friendly) or en (English). A client or machine preferences file overrides it.",
+      "options": ["ar", "en"],
+      "default": "ar",
+      "required": false
+    },
+    "approval": {
+      "type": "string",
+      "title": "Plan approval",
+      "description": "ask = always stop and wait for your approval of the plan before building. auto = show the plan and preview, then go on (you delegate the approval). A client or machine preferences file overrides it.",
+      "options": ["ask", "auto"],
+      "default": "ask",
+      "required": false
+    },
+    "whisper_model": {
+      "type": "string",
+      "title": "Transcription model",
+      "description": "large-v3 = the most accurate (default). large-v3-turbo = faster. medium and small = lightest, for weak machines. Whisper models are downloaded once into the engine data folder.",
+      "options": ["large-v3", "large-v3-turbo", "medium", "small"],
+      "default": "large-v3",
+      "required": false
+    },
+    "magnific_budget_credits": {
+      "type": "number",
+      "title": "Magnific credit budget",
+      "description": "The most Magnific credits one edit may spend on generated B-roll and upscales; the plan shows the cost before anything is spent. 0 = never use Magnific.",
+      "default": 300,
+      "min": 0,
+      "required": false
+    },
+    "magnific_api_key": {
+      "type": "string",
+      "title": "Magnific API key",
+      "description": "Optional. Lets WhyNot Cut generate stock-style B-roll with Magnific. Stored by Claude Code in your system keychain, never written to a project or engine file. Leave empty to skip Magnific.",
+      "sensitive": true,
+      "required": false
     }
   }
 }

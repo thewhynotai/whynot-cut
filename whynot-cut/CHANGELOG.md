@@ -3,6 +3,15 @@
 ## 3.0.0 (unreleased)
 
 ### Added
+- userConfig and layered preferences (T3.5). `plugin.json` userConfig gains `language` (ar | en, default ar), `approval`
+  (ask | auto), `whisper_model` (large-v3 default | large-v3-turbo | medium | small), `magnific_budget_credits`
+  (number, default 300) and `magnific_api_key` (sensitive, optional; kept by Claude Code in the keychain). Engine
+  settings are layered, highest wins key by key: client `.local.md` > machine `.local.md` (clients folder, then `~`)
+  > the plugin options (`CLAUDE_PLUGIN_OPTION_*`, else the pointer file, else settings.json pluginConfigs) > defaults;
+  `reel settings` adds `_sources`/`_where`; an invalid value is ignored with a warning. Preferences files now hold only
+  the keys that were set (`reel settings --init` no longer pins every default, which would shadow the plugin options),
+  `language` defaults to ar like the plugin option, and the SessionStart pointer carries the non-secret options. The
+  API key never reaches a file, the pointer or a report.
 - Schemas and engine-version stamps (T2.3, review MI-11). `whynot-cut/schemas/*.schema.json` (draft 2020-12, versioned
   by `$id` and an optional `schema_version`) for edit-decisions, reels-plan, motion-script, publish (and
   `publish/reels/<REEL>.json`), transcript-corrections and the optional `asset_needs[]` of edit-decisions and
