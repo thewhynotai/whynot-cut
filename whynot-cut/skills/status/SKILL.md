@@ -12,7 +12,9 @@ Answer in the editor's language. The editor only ever does three things: **drop 
 
 ## No clip named: every client at once
 With no clip id (no arguments, or "what's waiting?" / «إيه اللي مستنيني؟»): run `reel board` in this message and
-show its table as it is (one row per video: client, video, state, next step; Arabic client names stay as they are).
+show its table as it is (one row per video: client, video, state, next step; Arabic client names stay as they are). It
+is already in the editor's language (settings `language`, Arabic unless set; `--lang en|ar` overrides), and finished
+videos are folded into one "+N done" row per client (`reel board --all` lists them one by one).
 ```bash
 reel board
 ```
@@ -39,7 +41,7 @@ video.
    - `08_quality_control/qc-results.json` and `validation-report.md`
    - `08_quality_control/visual-verification.json` (verdict and date)
    - `07_premiere/ppro-build-result.json` (read-back checks)
-   - `01_analysis/plan-approval.json` (still matches the current plan? `via: panel` = approved in the WhyNot Cut panel)
+   - `01_analysis/plan-approval.json` (still matches the current plan? `via: panel` = approved from the panel, once it offers that)
    - `02_transcription/subtitle-review.md` (unconfirmed words)
    - `01_analysis/medical-content-review.md` (approvals pending)
    - `06_audio/dialogue/dialogue-clean-report.json` and `cut-verification.json`

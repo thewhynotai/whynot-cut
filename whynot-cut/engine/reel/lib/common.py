@@ -640,14 +640,23 @@ def load_config(name: str, ctx: Context | None = None) -> dict:
 
 
 DEFAULT_PREFIX = "WN"          # 3.0 T3.10 (structure 8.3): no ASCII initials -> WN (the 2.x default was RE)
-LEGACY_PREFIX = "RE"           # 2.x clients without a stored prefix built <id>_RE_EDIT.prproj: they keep it
-_PREFIX_OK = re.compile(r"[A-Za-z0-9]{1,8}")
+LEGACY_PREFIX = "RE"           # the 2.x default: 2.x clients without a stored prefix built <id>_RE_EDIT.prproj
+# A stored prefix is honoured whenever it is safe in a file name (2.x stored free text: "N-H", "Dr_M", longer than 8):
+# letters, digits, "_", "-", "." (not first, not last, no ".."), at most 24. Spaces, path separators, Windows-reserved
+# characters (<>:"|?*) and control characters are refused, so the template's "<2-3 letters>" is not a prefix.
+_PREFIX_OK = re.compile(r"\w[\w.-]{0,23}")
 _HONORIFICS = {"dr", "doctor", "prof", "eng", "mr", "mrs", "ms", "miss", "sheikh", "the"}
+# where a project's file names carry the tag: <id>_<TAG>_EDIT.prproj, the XML fallback <id>_<TAG>_EDIT[_base].xml,
+# <id>_<TAG>_GFX.aep / <id>_<TAG>_MOTION.aep
+_TAGGED_DIRS = ("07_premiere/project", "07_premiere/interchange", "04_after_effects/project")
+_TAGGED_MAX_PROJECTS = 300
 
 
 def valid_prefix(value) -> bool:
-    """A stored prefix used in file names: 1-8 ASCII letters/digits (the template's "<2-3 letters>" is not one)."""
-    return bool(_PREFIX_OK.fullmatch(str(value or "").strip()))
+    """A prefix that is safe in a file name (see _PREFIX_OK): "SH", "N-H", "Dr_M" yes; "N H", "N/H", "<2-3 letters>"
+    no."""
+    v = str(value or "").strip()
+    return bool(_PREFIX_OK.fullmatch(v)) and not v.endswith(".") and ".." not in v
 
 
 def initials_prefix(name: str) -> str:
@@ -664,38 +673,91 @@ def initials_prefix(name: str) -> str:
     return "".join(w[0] for w in words[:3]).upper()
 
 
-def _uses_legacy_prefix(root: Path) -> bool:
-    """A 2.x client without a stored prefix: a project already built as <id>_RE_EDIT.prproj / _RE_*.aep (bounded:
-    one listing of output/projects, one glob per project)."""
+def marker_prefix(root: Path | None) -> str | None:
+    """The prefix `reel scaffold` stored in the client's .whynot-client marker at creation (it survives a renamed
+    folder), when it is file-name-safe."""
+    if not root:
+        return None
     try:
-        projects = sorted(d for d in (Path(root) / "output" / "projects").iterdir() if d.is_dir())[:300]
+        v = json.loads((Path(root) / ".whynot-client").read_text(encoding="utf-8")).get("prefix")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return str(v).strip() if valid_prefix(v) else None
+
+
+class _OutOfTime(Exception):
+    pass
+
+
+def existing_prefix(root: Path | None, deadline: float | None = None) -> str | None:
+    """The tag the client's existing projects already use (so the engine finds them instead of building a second
+    project next to them): <id>_<TAG>_EDIT.prproj, the XML fallback <id>_<TAG>_EDIT[_base].xml, <id>_<TAG>_GFX.aep,
+    <id>_<TAG>_MOTION.aep. The most used tag wins, a tie goes to the most recent file. Bounded: one listing of
+    output/projects (at most 300 projects) and one listing per tagged folder. Raises _OutOfTime past `deadline`
+    (time.monotonic())."""
+    import time as _time
+    if not root:
+        return None
+    try:
+        with os.scandir(Path(root) / "output" / "projects") as it:
+            projects = sorted(e.name for e in it if e.is_dir())[:_TAGGED_MAX_PROJECTS]
     except OSError:
-        return False
-    tag = f"_{LEGACY_PREFIX}_"
-    for d in projects:
-        for sub, pat in (("07_premiere/project", "*.prproj"), ("04_after_effects/project", "*.aep")):
+        return None
+    seen: dict[str, list] = {}                        # tag -> [count, newest mtime]
+    for pid in projects:
+        if deadline is not None and _time.monotonic() >= deadline:
+            raise _OutOfTime
+        pat = re.compile(rf"{re.escape(pid)}_(.+?)_(?:EDIT|GFX|MOTION)(?:_base)?\.(?:prproj|xml|aep)", re.I)
+        for sub in _TAGGED_DIRS:
             try:
-                if any(tag in f.name for f in (d / sub).glob(pat)):
-                    return True
+                with os.scandir(Path(root) / "output" / "projects" / pid / sub) as it:
+                    for e in it:
+                        m = pat.fullmatch(e.name)
+                        if not m or not valid_prefix(m.group(1)):
+                            continue
+                        try:
+                            mt = e.stat().st_mtime
+                        except OSError:
+                            mt = 0.0
+                        rec = seen.setdefault(m.group(1), [0, 0.0])
+                        rec[0] += 1
+                        rec[1] = max(rec[1], mt)
             except OSError:
                 continue
-    return False
+    if not seen:
+        return None
+    return max(seen.items(), key=lambda kv: (kv[1][0], kv[1][1]))[0]
 
 
-def derived_prefix(root: Path | None) -> str:
-    """The prefix of a client that stores none: RE for a 2.x client that already has RE-named projects, else the
-    initials of its folder name (initials_prefix), WN without a client folder."""
+def derived_prefix(root: Path | None, deadline: float | None = None) -> str | None:
+    """The prefix of a client whose reel-profile stores none, in this order (3.0 T3.10 review I2: never orphan an
+    existing project): the one `reel scaffold` stored in the marker, else the tag its existing projects already use
+    (existing_prefix: RE for most 2.x clients), else the initials of its folder name (initials_prefix), else WN.
+    None only when `deadline` passed during the project scan."""
     if not root:
         return DEFAULT_PREFIX
-    return LEGACY_PREFIX if _uses_legacy_prefix(Path(root)) else initials_prefix(Path(root).name)
+    stored = marker_prefix(root)
+    if stored:
+        return stored
+    try:
+        found = existing_prefix(root, deadline)
+    except _OutOfTime:
+        return None
+    return found or initials_prefix(Path(root).name)
+
+
+def stored_prefix() -> str | None:
+    """The client's reel-profile 'prefix' (profile.json), when it is file-name-safe."""
+    v = str(load_config("profile.json").get("prefix") or "").strip()
+    return v if valid_prefix(v) else None
 
 
 def project_prefix() -> str:
     """File-name tag, e.g. C0238_NH_EDIT.prproj: profile.json 'prefix' (the client's stored one wins; `client-init`
-    stores it), else derived from the client folder (derived_prefix: RE kept for 2.x clients, else the folder's ASCII
-    initials, else WN). Cached on the request's Context (the legacy check lists output/projects)."""
-    stored = str(load_config("profile.json").get("prefix") or "").strip()
-    if valid_prefix(stored):
+    stores it), else derived_prefix (the marker's, the tag of the existing projects, the folder's initials, WN).
+    Cached on the request's Context (the project scan lists output/projects)."""
+    stored = stored_prefix()
+    if stored:
         return stored
     ctx = current_context()
     cache = ctx.__dict__.setdefault("_prefix_cache", {})

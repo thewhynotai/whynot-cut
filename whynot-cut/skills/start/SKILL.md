@@ -13,7 +13,8 @@ and evidence-based QC. This wizard ends when the editor knows the only three thi
 
 1. **drop files** into the client folder (raw clips, logo, fonts, reference edits);
 2. **say what you want** ("edit the new videos", "make reels from this episode");
-3. **approve the plan** (here in chat, or with one click in the WhyNot Cut panel in Premiere).
+3. **approve the plan** (here in the chat; the approve button in the WhyNot Cut panel in Premiere is coming in a
+   next update).
 
 In Arabic: «حط الملفات · قول عايز إيه · وافق على الخطة». Everything else is WhyNot Cut's job; don't teach the rest
 (stages, profiles, ids) unless asked.
@@ -68,8 +69,9 @@ reel doctor
 
 ## Step 2: Premiere and the WhyNot Cut panel
 Premiere is where the editor sees the result. The **WhyNot Cut panel in Premiere** (Window › UXP Plugins › WhyNot Cut)
-shows each video's state, the plan to approve and the proof frames; the editor only clicks its buttons and never types
-commands into the panel (commands are Claude's job, here in chat). Read `adobe_apps.premiere` and `premiere_bridge`
+shows each video's state; approving the plan from the panel is coming in a next update, so for now the editor approves
+here in the chat («وافق هنا في الشات»). The editor never types commands into the panel (commands are Claude's job, here
+in chat). Read `adobe_apps.premiere` and `premiere_bridge`
 from the doctor report.
 - **No Premiere:** say so plainly. WhyNot Cut still produces an importable XML project and a preview MP4; the native
   build starts working once Premiere Pro 2022+ is installed. Continue.
@@ -153,7 +155,7 @@ without them. Never invent brand facts to fill a gap.
 - If `reel inbox` listed new clips, ask whether to start editing now; on yes, run `/whynot-cut:autopilot`. Tell them what
   to expect: transcription (the first run needs the Whisper model, about 3 GB for large-v3; ask, then
   `reel model-download --model <whisper_model>` in the background while the client profile is built),
-  then a plan and a preview video for them to **approve** (in chat or in the WhyNot Cut panel), the Premiere build and
+  then a plan and a preview video for them to **approve** (here in the chat), the Premiere build and
   a proof check.
 
 Finish with the three verbs in their language and where to look: "drop more clips into data/Raw any time, then say

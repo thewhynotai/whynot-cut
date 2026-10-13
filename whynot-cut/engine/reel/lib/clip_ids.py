@@ -30,6 +30,11 @@ def clip_id_for(path, taken=None) -> str:
     taken = taken or {}
     held = {str(k).upper(): (v if isinstance(taken, dict) else None) for k, v in
             (taken.items() if isinstance(taken, dict) else ((t, None) for t in taken))}
+    return _clip_id(path, held)
+
+
+def _clip_id(path, held: dict) -> str:
+    """clip_id_for with the taken ids already as {ID (upper case): relative path or None} (assign keeps one)."""
     p = Path(_nfc(Path(path).as_posix()))
     stem = p.stem
     base = stable_id(stem, "CLIP")
@@ -63,31 +68,44 @@ def _key(rel) -> str:
     return _nfc(Path(str(rel)).as_posix()).casefold()
 
 
+key = _key
+
+
+def index(ids: dict) -> dict:
+    """{key(relative path): id} for a map {id: relative path}: build it once, then look clips up by key(rel) (dict
+    lookups; id_of per clip is a scan of the whole map)."""
+    return {_key(v): k for k, v in ids.items()}
+
+
 def assign(root, rels, ids: dict) -> dict:
     """A copy of `ids` with an id for every clip in `rels` that has none yet (pure: writes nothing)."""
+    from collections import Counter
     ids = dict(ids)
     have = {_key(v) for v in ids.values()}
     new = {}
     for r in rels:
         if _key(r) not in have:
             new.setdefault(_key(r), _nfc(r))
+    if not new:
+        return ids
     projects = Paths(root).output / "projects"
     every = [Path(_nfc(r)).stem for r in {_key(r): r for r in list(rels) + list(ids.values())}.values()]
-    old_slugs = [slug(st) for st in every]
-    stems = [st.casefold() for st in every]
+    old_slugs = Counter(slug(st) for st in every)            # counted once: the loop below stays linear (review I1)
+    stems = Counter(st.casefold() for st in every)
+    held = {str(k).upper(): v for k, v in ids.items()}       # kept up to date as ids are handed out
     for rel in sorted(new.values()):                         # C0239.MP4 before C0239.mov, as in 3.0.0
-        i = clip_id_for(rel, ids)
+        i = _clip_id(rel, held)
         # a 2.x project of this clip keeps its folder when it is unambiguous (no other clip slugs/is named the same way)
         # and free: output/projects/<raw stem> (an agent passed the file name as --video-id) or
         # output/projects/<slug(stem)> (VIDEO for a lone Arabic clip, auto-filled by 2.x). When both exist the raw-stem
         # folder wins, for ASCII and Arabic names alike (3.0 T11; CHANGELOG Migration): the other folder is left as it is
         stem = Path(rel).stem
-        taken = {k.upper() for k in ids}
-        for old, ok in ((stem, stems.count(stem.casefold()) == 1), (slug(stem), old_slugs.count(slug(stem)) == 1)):
-            if old.upper() != i.upper() and ok and old.upper() not in taken and (projects / old).is_dir():
+        for old, ok in ((stem, stems[stem.casefold()] == 1), (slug(stem), old_slugs[slug(stem)] == 1)):
+            if old.upper() != i.upper() and ok and old.upper() not in held and (projects / old).is_dir():
                 i = old
                 break
         ids[i] = rel
+        held[i.upper()] = rel
     return ids
 
 

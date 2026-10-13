@@ -23,8 +23,9 @@ Then answer in this order, short:
   never show the internal step names (AUTHOR, PLAYBACK, stage numbers, "Gate 0/1/2") to the editor.
 - **The three things you do:** **drop files** into the client folder · **say what you want** ("edit the new videos")
   · **approve the plan** before anything is built. «حط الملفات · قول عايز إيه · وافق على الخطة».
-- **The WhyNot Cut panel in Premiere** (Window › UXP Plugins › WhyNot Cut) shows the same videos, the plan to approve
-  and the proof frames; the editor clicks there and never types commands into it.
+- **The WhyNot Cut panel in Premiere** (Window › UXP Plugins › WhyNot Cut) shows the same videos and their state;
+  the editor never types commands into it. Approving from the panel is coming in a next update: for now they approve
+  here in the chat («وافق هنا في الشات»).
 - Then this table, the one or two rows that fit right now marked:
 
 | Say / run (قول أو شغّل) | What happens (اللي بيحصل) |

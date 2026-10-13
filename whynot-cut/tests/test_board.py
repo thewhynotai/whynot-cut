@@ -30,8 +30,9 @@ from lib import board as B, common  # noqa: E402
 CLI = SK / "engine/reel/cli.py"
 SKILLS = SK / "skills"
 ARABIC = unicodedata.normalize("NFC", "عميل تجربة")
-ITEM_KEYS = {"id", "kind", "state", "status", "next", "next_step", "stale", "updated", "file", "partial"}
-CLIENT_KEYS = {"name", "path", "prefix", "profile", "counts", "truncated", "error", "items"}
+ITEM_KEYS = {"id", "kind", "state", "status", "next", "next_step", "step", "stale", "updated", "file", "partial",
+             "error"}
+CLIENT_KEYS = {"name", "path", "prefix", "profile", "counts", "truncated", "error", "skipped", "items"}
 TOP_KEYS = {"ok", "board", "clients_root", "generated", "elapsed_ms", "truncated", "totals", "clients"}
 
 
@@ -115,7 +116,7 @@ class BoardFixture(unittest.TestCase):
         self.assertRegex(bitems["episode"]["id"], r"^EP_[0-9A-F]+$")
         self.assertEqual(bitems["episode"]["file"], "data/Episodes/حلقة ١.mp4")
         self.assertEqual(doc["totals"], {"clients": 2, "items": 4, "new": 2, "working": 0, "waiting_for_you": 1,
-                                         "blocked": 1, "done": 0})
+                                         "blocked": 1, "done": 0, "not_scanned": 0})
         for c in doc["clients"]:
             self.assertEqual(set(c), CLIENT_KEYS)
             self.assertEqual(sum(c["counts"].values()), len(c["items"]))
@@ -132,7 +133,7 @@ class BoardFixture(unittest.TestCase):
         self.assertEqual(snapshot(self.base), before)
 
     def test_plain_table(self):
-        code, text, err = reel("board", "--clients-root", str(self.base))
+        code, text, err = reel("board", "--clients-root", str(self.base), "--lang", "en")
         self.assertEqual(code, 0, err)
         self.assertIsInstance(text, str)
         lines = text.splitlines()
@@ -148,12 +149,76 @@ class BoardFixture(unittest.TestCase):
         self.assertEqual([c["name"] for c in doc["clients"]], [ARABIC])
 
     def test_time_budget_keeps_it_bounded(self):
-        doc = self.board("--budget", "0")
+        doc = self.board("--budget", "0")           # past the deadline: every client listed, none scanned
         self.assertTrue(doc["truncated"])
-        known = [it for c in doc["clients"] for it in c["items"] if it["state"] != "new"]
-        self.assertTrue(known and all(it["partial"] and it["next"] is None for it in known), known)
-        blocked = next(it for it in known if it["id"] == "C0100")
-        self.assertEqual(blocked["state"], "blocked")             # the recorded status still shows
+        self.assertEqual(doc["totals"]["not_scanned"], 2)
+        for c in doc["clients"]:
+            self.assertEqual((c["skipped"], c["items"], c["prefix"]), ("time budget", [], None), c)
+        code, text, _ = reel("board", "--clients-root", str(self.base), "--budget", "0", "--lang", "en")
+        self.assertTrue(any(ARABIC in ln and "not scanned (time budget)" in ln for ln in text.splitlines()), text)
+        code, text, _ = reel("board", "--clients-root", str(self.base), "--budget", "0", "--lang", "ar")
+        self.assertTrue(any(ARABIC in ln and "متفحصش" in ln for ln in text.splitlines()), text)
+
+    def test_budget_running_out_inside_a_client(self):
+        import time as _time
+
+        def slow(p):
+            _time.sleep(0.3)
+            return {"next": "transcribe", "stale": []}
+        for i in (1, 2):
+            common.write_json(self.b / f"output/projects/C010{i}/08_quality_control/project-status.json",
+                              {"video_id": f"C010{i}", "status": "TRANSCRIBED"})
+        card, over = B.client_card(self.b, slow, _time.monotonic() + 0.15)
+        self.assertTrue(over and card["truncated"])
+        items = {it["id"]: it for it in card["items"]}
+        self.assertFalse(items["C0100"]["partial"])                 # read before the deadline
+        self.assertEqual(items["C0100"]["next"], "transcribe")
+        self.assertTrue(items["C0101"]["partial"] and items["C0102"]["partial"])
+        self.assertEqual(items["C0101"]["status"], "TRANSCRIBED")  # the recorded status still shows
+        self.assertNotIn("new", {it["state"] for it in card["items"]}, "the data/ scan is skipped after the deadline")
+
+    def test_one_failing_project_keeps_the_card(self):
+        common.write_json(self.b / "output/projects/C0101/08_quality_control/project-status.json",
+                          {"video_id": "C0101", "status": "TRANSCRIBED"})
+
+        def flaky(p):
+            if p.video_id == "C0101":
+                raise ValueError("broken plan file")
+            return {"next": "transcribe", "stale": []}
+        card, _ = B.client_card(self.b, flaky, None)
+        self.assertIsNone(card["error"])
+        items = {it["id"]: it for it in card["items"]}
+        self.assertEqual((items["C0101"]["state"], items["C0101"]["status"]), ("blocked", "TRANSCRIBED"))
+        self.assertIn("broken plan file", items["C0101"]["error"])
+        self.assertEqual(items["C0100"]["next"], "transcribe")
+        self.assertIn("episode", {it["kind"] for it in card["items"]})
+        text = B.table({"clients": [card], "totals": {}}, lang="en")
+        self.assertTrue(any("C0101" in ln and "could not be read" in ln for ln in text.splitlines()), text)
+
+    def test_table_in_arabic_by_default_done_folded(self):
+        for i in range(3):
+            common.write_json(self.b / f"output/projects/D000{i}/08_quality_control/project-status.json",
+                              {"video_id": f"D000{i}", "status": "VERIFIED"})
+        doc = B.board(self.base, next_fn=lambda p: {"next": "done" if p.video_id.startswith("D") else "transcribe"})
+        self.assertEqual(self.card(doc, ARABIC)["counts"]["done"], 3)
+        ar = B.table(doc)                                           # the editor's language: ar unless set
+        self.assertIn("واقف", ar)
+        self.assertIn("اختار الريلز", ar)
+        self.assertNotIn("D0001", ar)
+        self.assertTrue(any(ARABIC in ln and "+3" in ln for ln in ar.splitlines()), ar)
+        self.assertIn("D0001", B.table(doc, show_all=True))
+        en = B.table(doc, lang="en")
+        self.assertIn("pick the reels", en)
+        self.assertTrue(any("+3 done" in ln for ln in en.splitlines()), en)
+        st = {it["id"]: it["state"] for c in doc["clients"] for it in c["items"]}
+        self.assertEqual(st["C0100"], "blocked")                    # JSON keeps machine values
+        code, text, err = reel("board", "--clients-root", str(self.base))
+        self.assertEqual(code, 0, err)
+        self.assertIn("اختار الريلز", text)
+        code, text, err = reel("board", "--clients-root", str(self.base), "--lang", "en", "--all")
+        self.assertEqual(code, 0, err)
+        self.assertIn("pick the reels", text)
+
 
     def test_configured_clients_folder_is_the_default(self):
         code, doc, err = reel("board", "--json", env={"WHYNOT_CLIENTS_ROOT": str(self.base)})
@@ -180,6 +245,74 @@ class BoardFixture(unittest.TestCase):
         self.assertEqual(B.plain_step("PLAYBACK x", "C1", "clip", "waiting_for_you"), "approve the plan")
 
 
+class BoardScale(unittest.TestCase):
+    """Review I1: 200 clients plus one with 2,000 raw clips stay within the time budget (no quadratic id lookups,
+    the budget covers every per-client step)."""
+    BUDGET = 1.0
+    MARGIN = 1.0
+
+    @classmethod
+    def setUpClass(cls):
+        cls._t = tempfile.TemporaryDirectory()
+        cls.base = Path(cls._t.name) / "Clients"
+        cls.big = client(cls.base, "Aaa Big Client")               # sorted first: scanned before the deadline
+        for i in range(2000):
+            touch(cls.big / f"data/Raw/C{i:05d}.MP4")
+        for c in range(200):
+            root = client(cls.base, f"Client {c:03d}")
+            for i in range(3):
+                touch(root / f"data/Raw/C{i:04d}.MP4")
+            for i in range(2):
+                common.write_json(root / f"output/projects/P{i:04d}/08_quality_control/project-status.json",
+                                  {"video_id": f"P{i:04d}", "status": "TRANSCRIBED"})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._t.cleanup()
+
+    @staticmethod
+    def nxt(p):
+        return {"next": "transcribe", "stale": []}
+
+    def test_clip_ids_are_linear(self):
+        import time as _time
+        from lib import clip_ids
+        rels = [f"data/Raw/C{i:05d}.MP4" for i in range(2000)]
+        t = _time.monotonic()
+        ids = clip_ids.assign(self.big, rels, {})
+        index = clip_ids.index(ids)
+        found = [index.get(clip_ids.key(r)) for r in rels]
+        self.assertLess(_time.monotonic() - t, 1.0)
+        self.assertEqual(found[:2], ["C00000", "C00001"])
+        self.assertEqual(len(set(found)), 2000)
+
+    def test_big_client_alone(self):
+        import time as _time
+        t = _time.monotonic()
+        card, over = B.client_card(self.big, self.nxt, _time.monotonic() + 30)
+        self.assertLess(_time.monotonic() - t, 2.5)
+        self.assertFalse(over)
+        self.assertEqual(len(card["items"]), B.MAX_ITEMS)
+
+    def test_whole_board_within_budget(self):
+        import time as _time
+        t = _time.monotonic()
+        doc = B.board(self.base, next_fn=self.nxt, budget=self.BUDGET)
+        took = _time.monotonic() - t
+        self.assertLess(took, self.BUDGET + self.MARGIN, took)
+        self.assertEqual(doc["totals"]["clients"], B.MAX_CLIENTS)          # 201 folders: the cap still applies
+        self.assertTrue(doc["truncated"])
+        for c in doc["clients"]:
+            if c["skipped"]:
+                self.assertEqual((c["items"], c["prefix"]), ([], None))
+
+    def test_budget_zero_does_no_work(self):
+        import time as _time
+        t = _time.monotonic()
+        doc = B.board(self.base, next_fn=self.nxt, budget=0)
+        self.assertLess(_time.monotonic() - t, 0.5)
+        self.assertEqual(doc["totals"]["not_scanned"], B.MAX_CLIENTS)
+
 class Prefix(unittest.TestCase):
     def test_initials(self):
         for name, want in (("Dr Mona Adel", "MA"), ("Nour Hospital", "NH"), ("Acme", "AC"), ("Dr Karim", "KA"),
@@ -188,8 +321,9 @@ class Prefix(unittest.TestCase):
             self.assertEqual(common.initials_prefix(name), want, name)
 
     def test_valid_prefix(self):
-        self.assertTrue(common.valid_prefix("SH"))
-        for bad in ("<2-3 letters>", "", None, "A B", "شي", "TOOLONGPREFIX"):
+        for ok in ("SH", "N-H", "Dr_M", "TOOLONGPREFIX", "RE2"):    # any file-name-safe 2.x value is honoured
+            self.assertTrue(common.valid_prefix(ok), ok)
+        for bad in ("<2-3 letters>", "", None, "A B", "N/H", "a:b", "x\\y", "..", "-", "a" * 40, "Q?", "A\tB", "a."):
             self.assertFalse(common.valid_prefix(bad), bad)
 
     def _root(self, name):
@@ -217,6 +351,51 @@ class Prefix(unittest.TestCase):
         placeholder = self._root("Hany Saad")                    # the template's placeholder is not a prefix
         common.write_json(placeholder / common.CLIENT_PROFILE_REL / "profile.json", {"prefix": "<2-3 letters>"})
         self.assertEqual(self.prefix_of(placeholder), "HS")
+
+    def test_stored_2x_prefix_is_kept(self):                  # review I2 (c)
+        for value in ("N-H", "Dr_M", "LONGERTHAN8"):
+            root = self._root("Nour Hospital")
+            common.write_json(root / common.CLIENT_PROFILE_REL / "profile.json", {"prefix": value})
+            self.assertEqual(self.prefix_of(root), value)
+
+    def test_xml_only_2x_client_keeps_its_tag(self):             # review I2 (a)
+        root = self._root("Old Client")
+        touch(root / "output/projects/C0001/07_premiere/interchange/C0001_RE_EDIT.xml")
+        self.assertEqual(self.prefix_of(root), "RE")
+        other = self._root("Nour Hospital")                      # any tag, not only RE: XML, prproj, AE projects
+        touch(other / "output/projects/DR_X_1/07_premiere/interchange/DR_X_1_N-H_EDIT_base.xml")
+        self.assertEqual(self.prefix_of(other), "N-H")
+        ae = self._root("Mona Adel")
+        touch(ae / "output/projects/EP01_R03_MO/04_after_effects/project/EP01_R03_MO_ZQ_MOTION.aep")
+        self.assertEqual(self.prefix_of(ae), "ZQ")
+        unsafe = self._root("Hany Saad")                         # a tag that is not file-name-safe is not adopted
+        touch(unsafe / "output/projects/C0001/07_premiere/project/C0001_a b_EDIT.prproj")
+        self.assertEqual(self.prefix_of(unsafe), "HS")
+
+    def test_scaffold_stores_the_prefix_and_a_renamed_folder_keeps_it(self):    # review I2 (b)
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        root = Path(t.name) / "Mona Adel"
+        code, doc, err = reel("scaffold", "--root", str(root))
+        self.assertEqual(code, 0, (doc, err))
+        self.assertEqual(json.loads((root / ".whynot-client").read_text(encoding="utf-8"))["prefix"], "MA")
+        renamed = root.rename(Path(t.name) / "Dr Mona Adel Clinic")
+        self.assertEqual(self.prefix_of(renamed), "MA")
+        code, doc, err = reel("client-init", "--root", str(renamed), "--id", "mona")
+        self.assertEqual((code, doc["prefix"]), (0, "MA"), err)
+
+    def test_client_init_validates_and_force_keeps_the_prefix(self):           # review M2
+        root = self._root("Hany Saad")
+        code, doc, _ = reel("client-init", "--root", str(root), "--id", "hany", "--prefix", "N H")
+        self.assertEqual((code, doc["ok"]), (1, False), doc)
+        self.assertIn("how", doc)
+        self.assertFalse((root / common.CLIENT_PROFILE_REL / "profile.json").exists())
+        code, doc, err = reel("client-init", "--root", str(root), "--id", "hany", "--prefix", "N-H")
+        self.assertEqual((code, doc["prefix"]), (0, "N-H"), err)
+        code, doc, err = reel("client-init", "--root", str(root), "--id", "hany", "--force")
+        self.assertEqual((code, doc["prefix"]), (0, "N-H"), err)
+        code, doc, err = reel("client-init", "--root", str(root), "--id", "hany", "--force", "--prefix", "HS")
+        self.assertEqual((code, doc["prefix"]), (0, "HS"), err)
 
     def test_defaults_no_longer_say_re(self):
         self.assertIsNone(json.loads((SK / "config/defaults/profile.json").read_text(encoding="utf-8"))["prefix"])
@@ -279,6 +458,26 @@ class SkillTexts(unittest.TestCase):
     def test_no_re_default_left_in_user_text(self):
         for p in [SK / "README.md"] + sorted(SKILLS.glob("*/SKILL.md")):
             self.assertNotRegex(p.read_text(encoding="utf-8"), r"_RE_EDIT|default RE\b", p)
+
+    def test_no_one_click_panel_approval_yet(self):             # review M1: the panel says "not available yet" (T6.2b)
+        for p in [SK / "README.md"] + [SKILLS / n / "SKILL.md" for n in ("start", "help", "status")]:
+            s = " ".join(p.read_text(encoding="utf-8").split())
+            for bad in (r"(?i)one click|with a click|in chat,? or [^.]{0,30}(in )?the WhyNot Cut panel|approved? (it )?in the WhyNot Cut panel",
+                        r"(?i)the plan to approve|بتعرض[^.]{0,60}الخطة اللي مستنية موافقتك"):
+                m = re.search(bad, s)
+                self.assertIsNone(m, f"{p.parent.name}/{p.name}: {m and m.group(0)}")
+        for n in ("start", "help"):
+            self.assertRegex(skill(n), r"(?i)panel[^.]*(coming|next update|not yet)", n)
+        self.assertIn("وافق هنا في الشات", (SK / "README.md").read_text(encoding="utf-8"))
+
+    def test_readme_has_no_gate_words_for_the_editor(self):     # review M4
+        from test_skill_text import gate_word_issues
+        self.assertEqual(gate_word_issues((SK / "README.md").read_text(encoding="utf-8")), [])
+
+    def test_arabic_quick_start_names_the_launch_folder(self):  # review M5
+        s = (SK / "README.md").read_text(encoding="utf-8")
+        quick = s[s.find("## ابدأ"):s.find("## Install")]
+        self.assertTrue(re.search(r"افتح Claude (جوه|في) مجلد العملاء", quick), "the launch folder in the Arabic quick start")
 
     def test_readme_quick_start_is_arabic_first(self):
         s = (SK / "README.md").read_text(encoding="utf-8")

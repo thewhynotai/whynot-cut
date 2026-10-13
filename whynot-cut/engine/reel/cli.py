@@ -963,7 +963,11 @@ def cmd_board(a):
     if a.json:
         out(doc)
     else:
-        print(B.table(doc))
+        lang = a.lang
+        if not lang:                      # the editor's language (settings `language`, ar by default)
+            from lib import settings
+            lang = settings.load(only or base).get("language") or "ar"
+        print(B.table(doc, lang=lang, show_all=a.all))
 
 
 def cmd_lock(a):
@@ -1299,6 +1303,11 @@ def cmd_client_init(a):
     src = PROFILES_DIR / (a.from_profile or "_template")
     if not src.is_dir():
         raise SystemExit(f"unknown profile {a.from_profile!r}; shipped: {[d.name for d in PROFILES_DIR.iterdir() if d.is_dir()]}")
+    if a.prefix is not None and not valid_prefix(a.prefix):
+        from lib.errors import Guidance
+        raise Guidance(f"--prefix {a.prefix!r} cannot be used in file names",
+                       "Use letters, digits, '-' or '_' only (no spaces, no / \\ : * ? \" < > |), e.g. --prefix NH.")
+    old_prefix = (read_json(dst / "profile.json", {}) or {}).get("prefix") if dst.is_dir() else None
     dst.mkdir(parents=True, exist_ok=True)
     written = []
     for f in src.iterdir():
@@ -1306,14 +1315,16 @@ def cmd_client_init(a):
             continue
         t = dst / f.name
         if t.exists():
-            t.rename(t.with_suffix(t.suffix + ".bak"))
+            t.replace(t.with_suffix(t.suffix + ".bak"))    # replace: a second --force on Windows (a .bak exists)
         shutil.copy2(f, t)
         written.append(str(t))
     pj = read_json(dst / "profile.json", {})
     pj["id"] = a.id
     if a.prefix:
-        pj["prefix"] = a.prefix
-    elif not valid_prefix(pj.get("prefix")):     # T3.10: the folder's initials (RE for a 2.x client), else WN; stored
+        pj["prefix"] = a.prefix.strip()
+    elif valid_prefix(old_prefix):               # --force refreshes the files, never the client's stored tag
+        pj["prefix"] = str(old_prefix).strip()
+    elif not valid_prefix(pj.get("prefix")):     # T3.10: the marker's, the existing projects' tag, the initials, WN
         pj["prefix"] = derived_prefix(p)
     write_json(dst / "profile.json", pj)
     from lib.client_marker import MARKER, write_marker
@@ -1574,7 +1585,12 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--clients-root", metavar="DIR", help="the folder that holds the client folders (default: "
                             "the configured clients folder); --root <client> shows one client")
             sp.add_argument("--budget", type=float, default=5.0, metavar="SECONDS",
-                            help="time budget; items read after it show their recorded status only (partial)")
+                            help="time budget for the whole board (every per-client step); items read after it show "
+                                 "their recorded status only (partial), clients reached after it are listed unread")
+            sp.add_argument("--lang", choices=("ar", "en"), help="the table's language (default: the editor's "
+                            "`language` setting, ar unless set); the JSON is the same in both")
+            sp.add_argument("--all", action="store_true", help="list finished videos one by one in the table "
+                            "(default: one '+N done' row per client)")
         if name == "lock":
             g = sp.add_mutually_exclusive_group()
             g.add_argument("--status", action="store_true", help="who holds the lock, since when, stale or not (default)")

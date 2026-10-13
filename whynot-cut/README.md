@@ -28,6 +28,8 @@ A human editor finishes, mixes and renders.
 /whynot-cut:start
 ```
 هيجهز الجهاز ويربط Premiere Pro ويعملك مجلد للعميل خطوة بخطوة، ويتخطى أي حاجة جاهزة أصلاً.
+بعد كده دايماً افتح Claude جوه مجلد العملاء (أو جوه مجلد عميل واحد)، مش في أي مجلد تاني: صلاحيات WhyNot Cut
+بتشتغل بس في المجلد اللي Claude اتفتح فيه.
 لما Claude يتفتح في مجلد العملاء أول مرة هيسألك «تثق في الملفات اللي في المجلد ده؟» (workspace trust): وافق، عشان
 WhyNot Cut يشتغل من غير ما يستأذن في كل أمر.
 
@@ -42,8 +44,8 @@ WhyNot Cut يشتغل من غير ما يستأذن في كل أمر.
   توافق على الخطة والـ animatic، وبعدها مشروع After Effects جاهز ومتراجع من فريماته.
 - «جاهز؟» أو «إيه اللي مستنيني؟» ← جدول واحد بكل العملاء وكل فيديو: حالته والخطوة الجاية.
 
-**لوحة WhyNot Cut في Premiere** (Window › UXP Plugins › WhyNot Cut) بتعرض نفس الفيديوهات والخطة اللي مستنية موافقتك
-وفريمات المراجعة؛ بتضغط على الزراير بس، ومش محتاج تكتب أي أمر فيها.
+**لوحة WhyNot Cut في Premiere** (Window › UXP Plugins › WhyNot Cut) بتعرض نفس الفيديوهات وحالة كل واحد، ومش محتاج
+تكتب أي أمر فيها. الموافقة على الخطة: وافق هنا في الشات مع Claude (زرار الموافقة في اللوحة جاي في تحديث قريب).
 ملفاتك الأصلية مبتتعدلش أبداً؛ كل النتايج في مجلد `output/`.
 
 ## Install (2 minutes)
@@ -63,9 +65,9 @@ WhyNot Cut يشتغل من غير ما يستأذن في كل أمر.
      workspace-trust dialog)
    - creates your first client folder and tells you exactly what to drop where
 
-You do three things: **drop files** · **say what you want** · **approve the plan** (in chat, or in the **WhyNot Cut
-panel in Premiere**: Window › UXP Plugins › WhyNot Cut, which shows each video's state, the plan and the proof frames;
-you click, you never type commands there).
+You do three things: **drop files** · **say what you want** · **approve the plan** (here in the chat; the approve
+button in the **WhyNot Cut panel in Premiere** is coming in a next update). The panel (Window › UXP Plugins › WhyNot
+Cut) shows each video's state; you never type commands there.
 
 **Claude Code version.** Agent fields `omitClaudeMd` need Claude Code 2.1.271 or newer and `mcp__*` entries in an agent's `disallowedTools` need 2.1.178 or newer. Older versions ignore these fields; nothing breaks, the safeguards are just weaker.
 
@@ -119,10 +121,10 @@ Say **"make reels from this episode"** (`/whynot-cut:podcast`):
 2. The episode-analyst writes the topic map (= YouTube chapters), speaker turns and **reel candidates** with exact
    timecodes snapped to sentences, a content type (storytelling, drama, success story, advice, bold opinion, emotional,
    comedy), a hook, a score and risks; `reels-plan` validates them and `reels-preview` renders a quick preview of each.
-3. **Gate 0: you pick** (`reels-select --pick R01,R03 --by editor`). Each pick becomes a clip project (`EP12_R03`) cut from a window
+3. **You pick the reels** (`reels-select --pick R01,R03 --by editor`). Each pick becomes a clip project (`EP12_R03`) cut from a window
    of the original episode file: framed **per shot** for 9:16 (wide shots follow the speaker; cards shown whole),
    edited by its **content-type recipe** (pauses, zooms, graphics, SFX, licensed music mood, copy tone).
-4. One combined Gate 1, Premiere builds, QC — as for any clip.
+4. You approve one combined plan, then the Premiere builds and the proof check, as for any clip.
 5. The **publish package**: `publish/youtube.md` (titles, description, chapters, tags), `EP12.srt`, per-reel captions
    for Instagram/TikTok/Shorts and thumbnail designs, checked by `publish-check` (platform limits, links only from the
    sheet, quotes only the speaker's words). Nothing is uploaded.
@@ -132,7 +134,7 @@ Say **"make reels from this episode"** (`/whynot-cut:podcast`):
 | `reel episodes` / `reel episode-next --episode EP12` | episodes and what each needs next |
 | `reel episode-prep` · `episode-transcribe` | probe, intake frames, time estimate · chunked Whisper with checkpoints |
 | `reel reels-plan` · `reels-preview` | validate the analyst's plan · preview MP4 per candidate |
-| `reel reels-select --pick R01,R03 --by editor` | Gate 0 (the editor's choice only; subagents are blocked) |
+| `reel reels-select --pick R01,R03 --by editor` | pick the reels (the editor's choice only; subagents are blocked) |
 | `reel publish-check` · `publish-thumbnail --candidates/--render` | check + render the publish package · thumbnails |
 | `reel music --list` | licensed tracks in `data/Music` with mood tags |
 
@@ -140,13 +142,13 @@ Results: `output/episodes/EP12/` (transcript, `01_analysis/reels-plan.md`, `03_c
 `output/projects/EP12_Rxx/` per reel.
 
 ## Motion mode
-Pick a reel candidate (or a topic from the topic map) **as motion** at Gate 0 and get an animated video built from the
+Pick a reel candidate (or a topic from the topic map) **as motion** when you pick the reels and get an animated video built from the
 audio only — no camera picture needed, so audio-only podcasts work too (`data/Episodes/*.m4a|mp3|wav`).
 1. `reel reels-select --episode EP12 --pick R03 --as motion --by editor` → project `EP12_R03_MO` (15–180 s).
 2. `audio-clean`, then the **motion-director** turns what is said into beats and scenes following the content-type
    recipe (kinetic quote synced word by word, stat counter, steps, comparison, timeline, quote/context/person cards,
    licensed illustrations, outro) → `reel motion-plan` checks every word, number and name → `reel motion-animatic`.
-3. **Gate 1**: you approve `motion-plan.md` + the animatic (editorial lines are marked as Claude's words).
+3. **You approve the plan**: `motion-plan.md` + the animatic (editorial lines are marked as Claude's words).
 4. After Effects: `reel ae-status` (the same bridge; restart After Effects once after `reel ppro-install`),
    `reel ae-probe` once per AE version, `reel motion-build` (native .aep, read back), `reel motion-render`,
    `reel motion-frames`, `qc`, `handoff`. Brand fonts must be installed for After Effects.
@@ -169,7 +171,7 @@ the plan or record a verdict. Specialist agents do the stages; some fan out para
 intake-inspector ─── what was dropped, what's missing (read-only)
 client-researcher ── discover, client DB, reference style            (sub: —)
 episode-analyst ──── podcast: topics, speakers, reels plan           (sub: moment-scout ×N)
-        ▼  Gate 0 (podcast): you pick the reels
+        ▼  podcast: you pick the reels
 publish-writer ───── podcast: YouTube/social copy, thumbnails, publish-check
 motion-director ──── motion: beats → scenes → motion-script.json, plan, animatic
 ae-builder ───────── motion: After Effects build through the bridge, read-back, render, frames
@@ -178,17 +180,19 @@ audio-engineer ───── mic choice, hum/noise cleanup, pause removal + pr
 story-editor ─────── meaning → edit-decisions.json → plan
 medical-reviewer ─── on-screen claims vs. transcript (read-only)      (sub: claim-checker ×N)
 motion-designer ──── brand stills, captions, SFX, visual checks       (sub: graphic-checker ×N)
-        ▼  preview MP4 → Gate 1: you approve the plan (or approval: auto)
+        ▼  preview MP4 → you approve the plan (or approval: auto)
 premiere-builder ─── native .prproj through the bridge, settings read back
 qc-reviewer ──────── Premiere's own frames inspected (independent)    (sub: frame-inspector ×N)
-        ▼  Gate 2: lead views the evidence, records the verdict, qc must pass
+        ▼  proof check: lead views the evidence, records the verdict, qc must pass
 setup-doctor ─────── diagnoses machine/Premiere problems (read-only)
 ```
+Internal note (for developers reading engine logs and status codes): Gate 0 = pick the reels, Gate 1 = approve the
+plan, Gate 2 = proof check. The editor only ever hears the plain words.
 
 **Guardrails** (hooks, enforced in code for Bash, PowerShell and file edits):
 - `assets/` and `data/` can't be written, moved or deleted. Whole project folders can't be deleted by the agent.
 - After Effects / Photoshop commands need `--extras`.
-- Subagents can't approve plans, pick reels (Gate 0), record verdicts or change preferences; reviewers are read-only.
+- Subagents can't approve plans, pick reels, record verdicts or change preferences; reviewers are read-only.
 - Adobe preferences (PlayerDebugMode) are never written by Claude: you get the command to run yourself.
 
 ## macOS and Windows
@@ -232,12 +236,16 @@ The engine is generic; each client's look and rules come from layered profiles (
 
 `reel profile --root "<client folder>"` shows which applies.
 
-File names carry the client's tag (`profile.json` `prefix`, e.g. `C0239_NH_EDIT.prproj`). `reel client-init` stores it:
-`--prefix`, else the initials of the client folder's ASCII words (a leading Dr/Prof/Eng skipped: "Nour Hospital" → NH),
-else `WN` (an Arabic-only name). A client that already has a stored prefix keeps it; a 2.x client without one whose
-projects are named `_RE_` keeps `RE`.
+File names carry the client's tag (`profile.json` `prefix`, e.g. `C0239_NH_EDIT.prproj`). It never changes under an
+existing project: a stored prefix wins whenever it is safe in a file name (2.x values such as `N-H` included); else the
+tag the client's existing projects already use (`.prproj`, the XML fallback in `07_premiere/interchange/`, `.aep`; a
+2.x client keeps `RE`); else the initials of the client folder's ASCII words (a leading Dr/Prof/Eng skipped:
+"Nour Hospital" → NH); else `WN` (an Arabic-only name). `reel scaffold` stores it when it creates the folder (renaming
+the folder later keeps it) and `reel client-init` stores it in the profile (`--prefix` sets it: letters, digits, `-`,
+`_`; `--force` keeps the stored one).
 
-`reel board` prints one table of every client under the clients folder (each video: state, next step);
+`reel board` prints one table of every client under the clients folder (each video: state, next step), in the
+editor's language (finished videos folded into one "+N done" row per client; `--all` lists them);
 `reel board --json` prints the same as a stable document (`board: 1`; documented in `engine/reel/lib/board.py`), the
 data the Premiere panel shows.
 

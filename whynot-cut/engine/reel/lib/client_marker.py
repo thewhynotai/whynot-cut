@@ -63,15 +63,29 @@ def in_sources(p: Path) -> bool:
     return any(a.name in ("assets", "data") and has_layout(a.parent) for a in [p, *p.parents])
 
 
-def write_marker(root: Path) -> Path | None:
+def write_marker(root: Path, prefix: str | None = None) -> Path | None:
     """Write <root>/.whynot-client (small JSON) unless it is there. Never inside assets/ or data/. Returns the path
-    when it was written, None when it already existed."""
+    when it was written, None when it already existed. `prefix` (`reel scaffold`, T3.10 review I2): the client's
+    file-name tag, stored so that renaming the folder later keeps it; added to an existing marker that has none, never
+    replacing one it has."""
     root = Path(root)
     if in_sources(root):
         raise ValueError(f"{root} is inside a client's assets/ or data/; the marker belongs at the client root")
     m = root / MARKER
     if m.exists():
-        return None
-    m.write_text(json.dumps({"whynot_client": 1, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z")}) + "\n",
-                 encoding="utf-8")
+        if not prefix:
+            return None
+        try:
+            doc = json.loads(m.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(doc, dict) or doc.get("prefix"):
+            return None
+        doc["prefix"] = prefix
+        m.write_text(json.dumps(doc, ensure_ascii=False) + "\n", encoding="utf-8")
+        return m
+    doc = {"whynot_client": 1, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    if prefix:
+        doc["prefix"] = prefix
+    m.write_text(json.dumps(doc, ensure_ascii=False) + "\n", encoding="utf-8")
     return m

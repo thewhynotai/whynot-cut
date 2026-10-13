@@ -391,10 +391,13 @@ def scaffold(root: Path, name: str | None = None) -> dict:
     if not guide.exists():
         write_text(guide, start_here(name))
     from .client_marker import MARKER, write_marker
-    write_marker(root)                    # the guard and the session hook recognise the folder by it
+    from .common import derived_prefix
+    prefix = derived_prefix(root)         # stored now (T3.10 review I2): renaming the folder later never changes it
+    write_marker(root, prefix)            # the guard and the session hook recognise the folder by it
     from .claude_perms import inherit_for_new_client
     perms = inherit_for_new_client(root)  # T3.9: the clients folder's `reel *` rules, when the editor accepted them
     return {"status": "CREATED", "root": str(root), "folders": made, "guide": str(guide), "marker": str(root / MARKER),
+            "prefix": prefix,
             **({"allow_reel": perms} if perms else {}),
             "next": "Add the files (see START_HERE.md), then run `reel inbox --root \"<this folder>\"`."}
 
@@ -408,12 +411,13 @@ def inbox(root: Path, refresh: bool = True) -> dict:
     inv = read_json(p.output / "discovery/input-inventory.json", {"files": [], "warnings": []})
     by = inv.get("by_role", {})
     clips = []
-    from .clip_ids import clip_ids, id_of
+    from .clip_ids import clip_ids, index, key
     ids = clip_ids(p.root, inv)
+    by_rel = index(ids)                       # one reverse map, dict lookups (T3.10 review I1)
     for f in inv["files"]:
         if f["role"] != "source_footage":
             continue
-        vid = id_of(ids, f["rel"])
+        vid = by_rel.get(key(f["rel"]))
         pp = Paths(root, vid)
         # discovery/preflight alone don't start an edit; the transcript does
         started = pp.project.exists() and pp.p("02_transcription/transcript.json").exists()
