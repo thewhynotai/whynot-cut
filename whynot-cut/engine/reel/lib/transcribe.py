@@ -5,6 +5,7 @@ Nothing is translated; the spoken language is kept as-is (Arabic, English or mix
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 from pathlib import Path
@@ -558,7 +559,7 @@ def apply_corrections(paths: Paths) -> dict:
     wj = read_json(out / "words.machine.json")
     words = {w["id"]: dict(w) for w in wj["words"]}
     applied, problems, reanchored = [], [], []
-    restored, problems = _restore_dropped(tj, words, corr.get("restore") or [])
+    restored, problems = _restore_dropped(tj, words, corr["restore"] if "restore" in corr else [])
 
     def anchor(item, key="from"):
         """The correction's word: by id when it still says `from`; after a re-transcription (new range, new model) the
@@ -637,12 +638,13 @@ def _restore_dropped(tj: dict, words: dict, restore) -> tuple[list, list]:
     transcript-corrections.json. Only ids of THIS transcript's drop list count (a reel lists its own drops, on its own
     ids and clock). They return with `restored: true`, so finalize never drops them again; a whole dropped segment
     comes back as it was. Returns (restored ids, problems): an unknown or stale id, a word that no longer reads as
-    written (after a re-transcription) or a drop whose ids are now used by other words is reported, not applied."""
-    if not restore:
-        return [], []
+    written (after a re-transcription) or a drop whose ids are now used by other words is reported, not applied.
+    Anything but a list or "all" (false, "", 0, {}, null too: never skipped silently, 3.0 T3.1) is a ValueError."""
     if restore != "all" and not isinstance(restore, list):
         raise ValueError('transcript-corrections.json "restore" must be a list of word ids (or "all"), got '
-                         f"{type(restore).__name__}")
+                         f"{json.dumps(restore, ensure_ascii=False)}: use [] (or leave it out) to restore nothing")
+    if not restore:
+        return [], []
     entries = tj["meta"].get("dropped_hallucinations") or []
     by_id = {w["id"]: (e, w) for e in entries for w in e.get("words") or []}
     want, problems = set(), []

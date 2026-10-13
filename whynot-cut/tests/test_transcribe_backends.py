@@ -966,6 +966,35 @@ class TestWordLevelHallucinations(unittest.TestCase):
         self.assertIn("Dropped Whisper hallucinations — 1", p.p("02_transcription/subtitle-review.md").read_text(
             encoding="utf-8"))
 
+    def test_t31_a_phrase_straddling_two_segments_is_never_dropped(self):
+        """3.0 T3.1 (T2.12 review): the word-level filter looks inside one segment at a time, so a phrase whose words
+        fall in two segments is never found: kept whole (nothing to restore, no keep_phrases entry needed)."""
+        from lib.transcribe import drop_hallucinations
+        ws = [{"id": i + 1, "segment_id": 1 if i < 2 else 2, "word": w, "start_ms": a, "end_ms": b, "probability": 0.9}
+              for i, (w, a, b) in enumerate([("طيب", 0, 400), ("اشتركوا", 1000, 1100), ("في", 1100, 1200),
+                                             ("القناة", 1200, 1300)])]
+        segs = [{"id": 1, "start_ms": 0, "end_ms": 1100, "text": "طيب اشتركوا", "no_speech_prob": 0.1, "words": [1, 2]},
+                {"id": 2, "start_ms": 1100, "end_ms": 1300, "text": "في القناة", "no_speech_prob": 0.1, "words": [3, 4]}]
+        kept_segs, kept, dropped = drop_hallucinations(segs, ws, keep_phrases=[])
+        self.assertEqual((len(kept_segs), len(kept), dropped), (2, 4, []))
+
+    def test_t31_a_falsy_restore_is_an_error_not_ignored(self):
+        """3.0 T3.1 (T2.12 review): `"restore": false` / "" / 0 / {} / null used to be skipped silently (`or []`);
+        it is a clear error now. An empty list still means "nothing to restore"."""
+        from lib.transcribe import apply_corrections, finalize
+        p = self.project()
+        segs, words = transcript([("طيب", 0, 400, 0.9), ("اشتركوا", 1000, 1100, 0.9), ("في", 1100, 1200, 0.9),
+                                  ("القناة", 1200, 1300, 0.9)])
+        finalize(p, dict(self.META), segs, words)
+        for bad in (False, "", 0, {}, None, True, "some"):
+            with self.subTest(restore=bad):
+                write_json(p.p("02_transcription/transcript-corrections.json"), {"corrections": [], "restore": bad})
+                with self.assertRaises(ValueError) as cm:
+                    apply_corrections(p)
+                self.assertIn('"restore"', str(cm.exception))
+        write_json(p.p("02_transcription/transcript-corrections.json"), {"corrections": [], "restore": []})
+        self.assertEqual(apply_corrections(p)["restored"], [])
+
 
 # --------------------------------------------------------------------------- review round 1: decoder in checkpoints (I2)
 class SigRunner:

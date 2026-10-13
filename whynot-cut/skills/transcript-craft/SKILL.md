@@ -39,6 +39,8 @@ Write `02_transcription/transcript-corrections.json`, then run `reel transcript-
   {"word_id": 43, "from": "ك", "to": "", "reason": "split artefact, merged into previous word", "confidence": "high"}
 ]}
 ```
+- Check the file's shape any time with `reel validate 02_transcription/transcript-corrections.json --root "<CLIENT>" --video-id <ID>`
+  (schema errors with their JSON path; episodes: `--episode <EP>` instead of `--video-id`).
 - `from` must equal the current machine word, or the correction is refused. An empty `to` merges the word's timing into the previous word.
 - Correct only what the audio or the context makes clear (misheard terms, split words, Latin terms written in Arabic letters).
   **Never** add words the speaker didn't say, smooth their grammar, or "fix" a medical claim.
@@ -72,9 +74,13 @@ matches one and cannot be speech (no-speech probability ≥ 0.5, or more than 6 
 the review under "Dropped Whisper hallucinations". The same phrase inside a longer segment is dropped only on its own
 evidence: more than 6 words a second, or a short run (≤ 1.5 s) the model was unsure of (mean p < 0.4) with silence on
 both sides. A real outro said at a normal pace stays, even under music.
+The filter looks inside one segment at a time: a phrase whose words fall in two segments (the boundary in the middle
+of «اشتركوا | في القناة») is never dropped, so it needs neither `restore` nor a `keep_phrases` entry.
 If the speaker really said a dropped phrase (check by ear): put its word ids (listed in the review and in
 `02_transcription/dropped-hallucinations.json`) in transcript-corrections.json as `"restore": [ids]` (or `"all"`) and
-run `reel transcript-correct`; restored words are never dropped again. Only ids from this transcript's own drop list
+run `reel transcript-correct`; restored words are never dropped again. `"restore"` must be a list (or `"all"`):
+`false`, `""`, `0`, `{}` or `null` stop `transcript-correct` with an error instead of being skipped; `[]` (or no
+`"restore"` key) restores nothing. Only ids from this transcript's own drop list
 count (a reel cut from an episode lists only the drops inside its window, on its own ids); an unknown or stale id is
 reported under PROBLEM and not applied (`{"word_id": N, "word": "..."}` also checks the word). For a phrase this client really uses (a host who
 always says «اشتركوا في القناة»), add it to `keep_phrases` in the client's reel-profile `transcription.json`.
@@ -95,7 +101,7 @@ Same files and correction flow as a clip, with `--episode <EP>`. Reels are slice
 correct the episode and let the lead `reels-select --resync`.
 
 ## Fan-out
-For long clips, spawn `segment-proofreader` sub-agents in parallel, one per ~20 s chunk. Give each the chunk's word ids, times and text, plus the glossary.
+For long clips, spawn `whynot-cut:segment-proofreader` sub-agents in parallel, one per ~20 s chunk. Give each the chunk's word ids, times and text, plus the glossary.
 Merge their proposals and resolve conflicts yourself. They propose; you write the corrections file.
 
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), do the batches in this agent one after another, with the same rows and format, and say "checked sequentially" in your report.
