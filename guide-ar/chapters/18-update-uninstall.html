@@ -32,7 +32,7 @@
 <h2 id="ch18-update">التحديث في الإصدار <bdi dir="ltr">3.0</bdi></h2>
 
 <ul>
-<li><strong>لتحديث WhyNot Cut كله</strong> (الإضافة في تطبيق Claude، والمحرك، واللوحات، والنماذج)، ثبّته مرة أخرى بالطريقة نفسها: الصق سطر التثبيت في PowerShell أو Terminal، أو اكتب في Claude «ثبّت WhyNot Cut». تشغيل التثبيت مرة ثانية يحدّث ما تغيّر ويُصلح ما تعطّل، ويحتفظ بمكان المحرك ونماذجك وإعداداتك، ولا يلمس ملفات عملائك (<a href="#ch02-one-line">الفصل&nbsp;2</a>).</li>
+<li><strong>لتحديث WhyNot Cut كله</strong> (الإضافة في تطبيق Claude، والمحرك، واللوحات، والنماذج)، ثبّته مرة أخرى بالطريقة نفسها: الصق سطر التثبيت في PowerShell أو Terminal، أو اكتب في Claude «ثبّت WhyNot&nbsp;Cut». تشغيل التثبيت مرة ثانية يحدّث ما تغيّر ويُصلح ما تعطّل، ويحتفظ بمكان المحرك ونماذجك وإعداداتك، ولا يلمس ملفات عملائك (<a href="#ch02-one-line">الفصل&nbsp;2</a>).</li>
 <li><strong>على أجهزة فريقنا</strong>: افتح أحدث نسخة من برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> (<a href="#ch02-setup-app">الفصل&nbsp;2</a>).</li>
 <li><strong>إذا كان Premiere أو After Effects مفتوحًا</strong>، تنتظر اللوحة الجديدة حتى يُغلق البرنامج، ثم تُثبَّت وحدها. وتعرض اللوحة القديمة في الأثناء بطاقة تطلب إعادة تشغيل Premiere (<a href="#ch17-v3">الفصل&nbsp;17</a>).</li>
 <li><strong>إذا كانت إضافة Claude أقدم من باقي WhyNot Cut</strong>، تعرض شارة Claude (المؤشر الصغير في اللوحة الذي يعرض حالة Claude) زر تحديث (<bdi dir="ltr">Update</bdi>). اضغطه، ثم افتح محادثة جديدة.</li>
@@ -47,7 +47,11 @@
 
 <ol class="steps">
 <li>أغلق Premiere Pro وAfter Effects. إذا كان أحدهما مفتوحًا، لا تُزال لوحاته، فأغلقه وأعد إلغاء التثبيت.</li>
-<li><strong>إذا ثبّت بالسطر الواحد أو من داخل Claude</strong>: اطلب من Claude «ألغِ تثبيت WhyNot Cut»، فيعطيك أمر الإزالة المناسب لجهازك. شغّله كما في <a href="#ch02-run-command">«تشغيل أمر أعطاك إياه Claude»</a>.</li>
+<li><strong>إذا ثبّت بالسطر الواحد أو من داخل Claude</strong>: افتح PowerShell أو Terminal كما في <a href="#ch02-run-command">«تشغيل أمر أعطاك إياه Claude»</a>، والصق سطر الإزالة الخاص بجهازك، ثم اضغط Enter.
+<p class="lead-in">على Windows، في PowerShell:</p>
+<div class="cmd"><bdi dir="ltr"><code>&amp; ([scriptblock]::Create((irm https://dl.thewhynot.ai/install.ps1))) -Uninstall</code></bdi></div>
+<p class="lead-in">على Mac، في Terminal:</p>
+<div class="cmd"><bdi dir="ltr"><code>curl -fsSL https://dl.thewhynot.ai/install.sh | bash -s -- --uninstall</code></bdi></div></li>
 <li><strong>على أجهزة فريقنا</strong> (برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi>): على Windows افتح <bdi dir="ltr">Settings&nbsp;›&nbsp;Apps</bdi>، وابحث عن WhyNot Cut في قائمة التطبيقات، ثم اضغط «إلغاء التثبيت» (<bdi dir="ltr">Uninstall</bdi>). وعلى Mac افتح التطبيق <bdi dir="ltr">WhyNot Cut Setup</bdi> وألغِ التثبيت منه.</li>
 <li>في آخر الإزالة يعرض لك ملخصًا بما أُزيل وما بقي.</li>
 </ol>
@@ -70,6 +74,8 @@
 <li>النماذج المنزّلة، وتبقى حتى إذا حذفت فولدر المحرك، إلا إذا طلبت حذفها هي أيضًا.</li>
 </ul>
 
+<p>لتحذفهما مع الإزالة، أضف في آخر سطر الإزالة على Windows <bdi dir="ltr"><code>-RemoveEngine</code></bdi> لفولدر المحرك و<bdi dir="ltr"><code>-RemoveModels</code></bdi> للنماذج، وعلى Mac <bdi dir="ltr"><code>--remove-engine</code></bdi> و<bdi dir="ltr"><code>--remove-models</code></bdi>، بعد مسافة.</p>
+
 <p class="lead-in">ما يبقى دائمًا:</p>
 <ul>
 <li>مكتبة مواد الموشن والرسوم التي اشتريت رخصتها.</li>
@@ -78,18 +84,18 @@
 </ul>
 
 <aside class="todo" data-phase="7">
-<p>أسماء الأزرار في شاشة الإزالة، ومكان طلب حذف فولدر المحرك والنماذج، تُكتب هنا عند صدورها.</p>
-<!-- فريق: ما يُزال وما يبقى من النواة المرفوعة (installer/core/wnc_installer/uninstall.py وinstaller/README.md «Uninstall»): plugin وadobe (لا شيء إذا كان Premiere/AE مفتوحًا) وfonts المسجَّلة فقط وmarketplace؛ engine فقط مع -RemoveEngine؛ models/ فقط مع -RemoveModels؛ library/ دائمًا يبقى؛ ملف الإعدادات ~/.claude/whynot-cut.local.md يبقى ويُذكر في الملخص؛ فولدرات العملاء لا تُمس. الدليل يتبع النواة في بقاء فولدر المحرك، والإضافة E (E2.1.5) تقول إن الإزالة تحذف المحرك (والنماذج إذا اختيرت) — factcheck2 W18، للمنفّذ. الأمر للسطر الواحد: النواة تعرف install.ps1 مع -Uninstall وinstall.sh مع الخيار uninstall من فولدر الإضافة؛ سطر إزالة عام لم يُحدَّد، فيعطيه Claude. برنامج WhyNot Cut Setup داخلي فقط (الإضافة F)؛ Windows: مُزيل NSIS في Settings › Apps (E-T5)؛ macOS: من التطبيق WhyNot Cut Setup (الإضافة E، factcheck2 W14) — اسم الزر يُنقل حرفيًا بعد بنائه. خطوات الإزالة يُتحقَّق منها مع التثبيت على جهاز حقيقي في المرحلة 7، وتُلتقط الصور في المرحلة 9. -->
+<p>سطرا الإزالة يعملان من يوم صدور الإصدار <bdi dir="ltr">3.0</bdi>، ولم يُجرَّبا بعد على جهاز حقيقي.</p>
+<!-- فريق: ما يُزال وما يبقى من النواة المرفوعة (installer/core/wnc_installer/uninstall.py وinstaller/README.md «Uninstall»): plugin وadobe (لا شيء إذا كان Premiere/AE مفتوحًا) وfonts المسجَّلة فقط وmarketplace؛ engine فقط مع -RemoveEngine؛ models/ فقط مع -RemoveModels؛ library/ دائمًا يبقى؛ ملف الإعدادات ~/.claude/whynot-cut.local.md يبقى ويُذكر في الملخص؛ فولدرات العملاء لا تُمس. إجابة المنفّذ (10): سطرا الإزالة العامّان هما المكتوبان في الخطوة 2 (Windows: scriptblock مع -Uninstall؛ macOS: bash -s مع الخيار uninstall)، وبعد T7.8 يفعل الأمر reel uninstall الشيء نفسه (لا يُكتب كأمر هنا قبل أن يظهر في reel help). فولدر المحرك يبقى إلا مع -RemoveEngine أو الخيار remove-engine على macOS: الكود يغلب الإضافة E (E2.1.5)، فـ W18 مغلق. يبقى هذا الصندوق حتى فحص المرحلة 7 الحي. برنامج WhyNot Cut Setup داخلي فقط (الإضافة F)؛ Windows: مُزيل NSIS في Settings › Apps (E-T5)؛ macOS: من التطبيق WhyNot Cut Setup (الإضافة E، factcheck2 W14) — اسم الزر يُنقل حرفيًا بعد بنائه. خطوات الإزالة يُتحقَّق منها مع التثبيت على جهاز حقيقي في المرحلة 7، وتُلتقط الصور في المرحلة 9. -->
 </aside>
 
 <h2 id="ch18-client-files">ملفات عملائك عند التحديث والإلغاء</h2>
 
 <p>أثناء العمل، لا يغيّر WhyNot Cut أبدًا ما في الفولدرين <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> لأي عميل: لا يكتب فيهما، ولا ينقل منهما، ولا يحذف شيئًا.</p>
 
-<p>والتحديث وإلغاء التثبيت لا ينقلان ولا يحذفان أي فولدر عميل ولا أي ملف فيه، بما فيه فولدر النتائج <bdi dir="ltr"><code>output/</code></bdi>. الشيء الوحيد الذي قد يضيفه التثبيت هو ملف إعدادات صغير داخل فولدر العملاء وفي كل فولدر عميل، يسمح لـ Claude بالعمل فيه دون استئذان؛ لا يمس ملفاتك.</p>
+<p>والتحديث وإلغاء التثبيت لا ينقلان ولا يحذفان أي فولدر عميل ولا أي ملف فيه، بما فيه فولدر النتائج <bdi dir="ltr"><code>output/</code></bdi>. الشيء الوحيد الذي قد يضيفه التثبيت أو معالج البداية هو ملف إعدادات صغير داخل فولدر العملاء وفي كل فولدر عميل، يسمح لـ Claude بالعمل فيه دون استئذان؛ لا يمس ملفاتك.</p>
 
 <aside class="todo" data-phase="7">
 <p>حماية فولدرات العملاء عند التحديث والإزالة تُجرَّب على جهاز حقيقي قبل صدور الإصدار <bdi dir="ltr">3.0</bdi>.</p>
-<!-- فريق: حماية فولدرات العملاء عند التحديث وإلغاء التثبيت من مواصفات الإصدار 3.0، ومختبَرة في بيئة اختبار معزولة (installer/README.md: uninstall never touches clients_root أو أي فولدر فيه .whynot-client). تؤكّدها اختبارات التثبيت والإزالة على جهاز حقيقي في المرحلة 7. ملف الإعدادات الصغير = .claude/settings.json في فولدر العملاء وفي كل فولدر عميل (reel settings مع allow-reel، start SKILL الخطوة 4؛ factcheck2 W12، reader2 #38). -->
+<!-- فريق: حماية فولدرات العملاء عند التحديث وإلغاء التثبيت من مواصفات الإصدار 3.0، ومختبَرة في بيئة اختبار معزولة (installer/README.md: uninstall never touches clients_root أو أي فولدر فيه .whynot-client). تؤكّدها اختبارات التثبيت والإزالة على جهاز حقيقي في المرحلة 7. ملف الإعدادات الصغير = .claude/settings.json في فولدر العملاء وفي كل فولدر عميل (reel settings مع allow-reel، start SKILL الخطوة 4؛ factcheck2 W12، reader2 #38). النواة لا تكتبه؛ معالج البداية يكتبه، والسطر الواحد ينتهي عليه (مراجعة 7B M-10). -->
 </aside>
 </section>

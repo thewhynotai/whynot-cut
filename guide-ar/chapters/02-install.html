@@ -12,10 +12,10 @@
 <p class="lead-in">كل ما تطلبه من WhyNot Cut تكتبه لـ Claude في تطبيق Claude على جهازك. إذا لم تستخدمه من قبل، فهذا كل ما تحتاج إلى معرفته:</p>
 <ul>
 <li><strong>مربع الرسالة</strong> في أسفل النافذة: اكتب فيه طلبك أو الأمر، ثم اضغط Enter.</li>
-<li><strong>المحادثة الجديدة</strong>: زر في أعلى القائمة الجانبية يفتح محادثة فارغة. افتح محادثة جديدة كلما طلب منك هذا الدليل ذلك، مثل بعد كل تثبيت أو تحديث.</li>
-<li><strong>الفولدر</strong>: عند فتح محادثة جديدة تختار الفولدر الذي يعمل فيه Claude. اختر فولدر العملاء، أو فولدر العميل الذي تعمل عليه.</li>
+<li><strong>المحادثة الجديدة</strong>: زر في أعلى القائمة الجانبية. افتح محادثة جديدة بعد كل تثبيت أو تحديث.</li>
+<li><strong>الفولدر</strong>: مع كل محادثة جديدة تختار الفولدر الذي يعمل فيه Claude: فولدر العملاء، أو فولدر العميل.</li>
 <li><strong>زر +</strong> بجانب مربع الرسالة: منه تضيف WhyNot Cut إلى التطبيق، كما في القسم التالي.</li>
-<li><strong>إغلاق التطبيق تمامًا</strong>: إغلاق النافذة وحده قد يترك Claude يعمل في الخلفية. على Windows اضغط بالزر الأيمن على أيقونة Claude بجوار الساعة واختر Quit، وعلى Mac اضغط <bdi dir="ltr">Cmd+Q</bdi>.</li>
+<li><strong>إغلاق التطبيق تمامًا</strong>: إغلاق النافذة وحده قد يترك Claude يعمل في الخلفية. على Windows اضغط بالزر الأيمن على أيقونة Claude بجوار الساعة (وقد تكون مخفية تحت السهم ^) واختر Quit، وعلى Mac اضغط <bdi dir="ltr">Cmd+Q</bdi>.</li>
 </ul>
 
 <figure class="shot">
@@ -48,7 +48,7 @@
 </ol>
 
 <aside class="todo" data-phase="7">
-<p>هذا القسم يصف النسخة التي معك اليوم، ويتغيّر مع الإصدار <bdi dir="ltr">3.0</bdi>.</p>
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> يحل محل هذا القسم التثبيت بسطر واحد (القسم «التثبيت بسطر واحد»).</p>
 <!-- فريق: هذا القسم يصف نسخة المطوّرين اليوم، قبل صدور برنامج التثبيت، ويُحذف عند صدوره. في الإصدار 3.0 يبقى معالج البداية، لكنه يكتفي بإعداداتك وأول فولدر عميل، ويتخطى كل ما جهّزه التثبيت. ويُتحقَّق من أن الأمر /plugin يعمل في تطبيق Claude نفسه (factcheck2 W19؛ ملاحظة Task 4). خطوات إضافة الفولدر من whynot-cut/README.md «Install»؛ نسخ المسار بالماوس من reader2 #2، ويُتحقَّق من أسماء القوائم في Windows وmacOS بالعربية. -->
 </aside>
 
@@ -107,23 +107,23 @@
 
 <h2 id="ch02-one-line">التثبيت بسطر واحد</h2>
 
-<p>في الإصدار <bdi dir="ltr">3.0</bdi> تثبّت WhyNot Cut بسطر واحد تنسخه من صفحة التنزيل على موقع <bdi dir="ltr">thewhynot.ai</bdi>: سطر لـ Windows وسطر لـ Mac. لا تنزّل أي ملف ولا تفتحه بنفسك، ولا يظهر تحذير من Windows أو macOS.</p>
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> تثبّت WhyNot Cut بسطر واحد: سطر لـ Windows وسطر لـ Mac. لا تنزّل أي ملف ولا تفتحه بنفسك، ولا يظهر تحذير من Windows أو macOS.</p>
 
 <ol class="steps">
-<li><strong>انسخ السطر الخاص بجهازك</strong> من صفحة التنزيل.</li>
-<li><strong>افتح PowerShell أو Terminal.</strong> على Windows: افتح قائمة Start، واكتب PowerShell، ثم اضغط عليه لفتحه كالمعتاد، ولا تختر «تشغيل كمسؤول» (<bdi dir="ltr">Run as administrator</bdi>). على Mac: اضغط <bdi dir="ltr">Cmd+Space</bdi>، واكتب Terminal، ثم Enter.</li>
-<li><strong>الصق السطر واضغط Enter.</strong> للّصق اضغط <bdi dir="ltr">Ctrl+V</bdi> على Windows (أو زر الماوس الأيمن)، و<bdi dir="ltr">Cmd+V</bdi> على Mac. هذا شكل السطرين:
-<div class="cmd"><bdi dir="ltr"><code>irm &lt;install-link&gt; | iex</code></bdi></div>
-<div class="cmd"><bdi dir="ltr"><code>curl -fsSL &lt;install-link&gt; | bash</code></bdi></div>
-الأول لـ PowerShell على Windows، والثاني لـ Terminal على Mac.
+<li><strong>افتح PowerShell أو Terminal.</strong> على Windows: افتح قائمة Start، واكتب PowerShell، ثم اضغط عليه لفتحه كالمعتاد، ولا تختر «تشغيل كمسؤول» (<bdi dir="ltr">Run as administrator</bdi>). على Mac: اضغط <bdi dir="ltr">Cmd+Space</bdi>، واكتب Terminal، ثم Enter. وقبل أن تلصق السطر، احفظ عملك وأغلق Premiere Pro وAfter Effects إذا كانا مفتوحين.</li>
+<li><strong>انسخ السطر الخاص بجهازك والصقه، ثم اضغط Enter.</strong> تجد السطرين أيضًا في صفحة التنزيل على موقع <bdi dir="ltr">thewhynot.ai</bdi>. للّصق اضغط <bdi dir="ltr">Ctrl+V</bdi> على Windows (أو زر الماوس الأيمن)، و<bdi dir="ltr">Cmd+V</bdi> على Mac.
+<p class="lead-in">على Windows، في PowerShell:</p>
+<div class="cmd"><bdi dir="ltr"><code>irm https://dl.thewhynot.ai/install.ps1 | iex</code></bdi></div>
+<p class="lead-in">على Mac، في Terminal:</p>
+<div class="cmd"><bdi dir="ltr"><code>curl -fsSL https://dl.thewhynot.ai/install.sh | bash</code></bdi></div>
 <figure class="shot">
 <div class="shot-frame"><span>لقطة شاشة: PowerShell بعد لصق سطر التثبيت والضغط على Enter، وفيها «جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي … جيجابايت)» و«اضغط C للتخصيص»</span></div>
 <figcaption>أول ما يظهر: الحجم الكلي، ثم عدّ تنازلي من 10 ثوانٍ.</figcaption>
 </figure>
 </li>
-<li><strong>لا تضغط شيئًا، واترك النافذة مفتوحة.</strong> أول سطر يقول «جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي … جيجابايت)»، ثم يظهر «اضغط C للتخصيص» مع عدّ تنازلي من 10 ثوانٍ. إذا لم تضغط شيئًا، يُثبَّت كل شيء بالإجابات الجاهزة، وهي الأقوى التي يتحملها جهازك. وإذا ضغطت C، يسألك عن مكان المحرك، ونموذج التفريغ، واللغة، وفولدر العملاء، ولكل سؤال إجابة جاهزة يحتفظ بها Enter.</li>
+<li><strong>لا تضغط شيئًا، واترك النافذة مفتوحة.</strong> أول ما يظهر سطران يذكران الحجم الكلي، بالإنجليزية <bdi dir="ltr">Installing&nbsp;everything&nbsp;WhyNot&nbsp;Cut&nbsp;needs</bdi> ثم بالعربية «جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي … جيجابايت)». بعدهما يظهر سطر <bdi dir="ltr">Press&nbsp;C&nbsp;to&nbsp;customise</bdi> («اضغط C للتخصيص») مع عدّ تنازلي من 10 ثوانٍ. إذا لم تضغط شيئًا، يُثبَّت كل شيء بالإجابات الجاهزة، وهي الأقوى التي يتحملها جهازك. وإذا ضغطت C، يسألك عن مكان المحرك، ونموذج التفريغ، واللغة، وفولدر العملاء، ولكل سؤال إجابة جاهزة، واضغط Enter لتقبلها.</li>
 <li><strong>انتظر حتى تنتهي السطور.</strong> تظهر الخطوات سطرًا بعد سطر. تعتمد المدة على سرعة الإنترنت، لأن أغلب الحجم تنزيلات. ونموذج التفريغ يكمل التنزيل في الخلفية بعد أن تنتهي النافذة، ويمكنك أن تبدأ العمل في الأثناء.</li>
-<li><strong>علامة النجاح.</strong> في النهاية تظهر قائمة الفحص: سطر لكل خطوة، يبدأ بـ <bdi dir="ltr"><code>[OK]</code></bdi> إذا اكتملت، أو <bdi dir="ltr"><code>[!!]</code></bdi> إذا كانت تحتاج إلى انتباه ومعها سببها، وتحتها سطر يبدأ بـ <bdi dir="ltr"><code>you:</code></bdi> إذا كان المطلوب منك شيئًا. ثم سطر يطلب منك أن تفتح Claude وتكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>، ويُفتح تطبيق Claude وحده على معالج البداية. إذا لم يُفتح، افتحه أنت، وافتح محادثة جديدة، واكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>.
+<li><strong>علامة النجاح.</strong> في النهاية تظهر قائمة الفحص: سطر لكل خطوة، يبدأ بـ <bdi dir="ltr"><code>[OK]</code></bdi> إذا اكتملت، أو <bdi dir="ltr"><code>[!!]</code></bdi> إذا كانت تحتاج إلى انتباه ومعها سببها، وتحتها سطر يبدأ بـ <bdi dir="ltr"><code>you:</code></bdi> إذا كان المطلوب منك شيئًا. ثم سطر يطلب منك أن تفتح Claude وتكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>. وقد يكون تطبيق Claude قد فُتح وحده قبل ذلك على معالج البداية والأمر مكتوب في مربع الرسالة: اضغط Enter. إذا لم يُفتح، افتحه أنت، وافتح محادثة جديدة، واكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>.
 <figure class="shot">
 <div class="shot-frame"><span>لقطة شاشة: قائمة الفحص في آخر نافذة التثبيت، وكل سطورها تبدأ بـ <bdi dir="ltr"><code>[OK]</code></bdi>، وتحتها السطر الذي يطلب فتح Claude وكتابة <bdi dir="ltr"><code>/whynot-cut:start</code></bdi></span></div>
 <figcaption>انتهى التثبيت: كل السطور <bdi dir="ltr"><code>[OK]</code></bdi>.</figcaption>
@@ -138,8 +138,8 @@
 </figure>
 
 <aside class="todo" data-phase="7">
-<p>الرابط الحقيقي يُكتب في السطرين وفي صفحة التنزيل عند صدور الإصدار <bdi dir="ltr">3.0</bdi>، ولم يُجرَّب السطر بعد على جهاز Mac حقيقي.</p>
-<!-- فريق: الإضافة F (F1): التثبيت العام = السطر الواحد (irm … | iex من dl.thewhynot.ai، وcurl … | bash على macOS)؛ لا SmartScreen ولا Gatekeeper. installer/README.md وinstall.ps1 يكتبان https://thewhynot.ai/install.ps1 وhttps://thewhynot.ai/install.sh («future: needs hosting, H3»)، والإضافة F تقول dl.thewhynot.ai: الرابط لم يُحسم، فالمعروض شكل السطر فقط (<install-link>). يُكتب الرابط النهائي بعد H3 (release.index_url في tools/release.py). ما يطبعه السطر منقول من core/bootstrap.sh وbootstrap.ps1 (السطر الأول بالإنجليزية والعربية، العد التنازلي 10 ثوانٍ، C للتخصيص وأسئلته الأربعة) ومن core/wnc_installer/system.py وcli.py ([OK] / [!!] / [XX]، «you:»، START_MESSAGE_AR، فتح Claude على /whynot-cut:start إذا كان التطبيق مثبَّتًا، رموز الخروج 0/1/2/3). صفحة التنزيل D-T14. يُتحقَّق على جهاز Windows نظيف بحساب عادي (المرحلة 7، H10) وعلى Mac عند توفره (H6)، وتُلتقط الصور في المرحلة 9. -->
+<p>السطران يعملان من يوم صدور الإصدار <bdi dir="ltr">3.0</bdi>، ولم يُجرَّبا بعد على جهاز نظيف ولا على جهاز Mac حقيقي.</p>
+<!-- فريق: الإضافة F (F1): التثبيت العام = السطر الواحد؛ لا SmartScreen ولا Gatekeeper. إجابة المنفّذ (8): السطران نهائيان، على dl.thewhynot.ai، والنطاق الرئيسي thewhynot.ai هو الموقع ولا يُستخدم للتثبيت أبدًا؛ عنوان dl يعمل يوم الصدور (H3)، ويبقى هذا الصندوق حتى الصدور. (installer/README.md وinstall.ps1 ما زالا يكتبان thewhynot.ai/install.* «future: needs hosting, H3» وقت كتابة هذا؛ اختبار حارس أوامر اللوحة d28553e يستخدم dl.thewhynot.ai.) تُراجَع في صور المرحلة 9 طريقة ظهور السطر العربي في PowerShell 5.1 وWindows Terminal. step_launch يعمل قبل طباعة قائمة الفحص، ويفتح claude://code/new?q=… : يُتحقَّق هل يُرسل الأمر أم يُكتب فقط، وهل يسأل عن الفولدر. ما يطبعه السطر منقول من core/bootstrap.sh وbootstrap.ps1 (السطر الأول بالإنجليزية والعربية، العد التنازلي 10 ثوانٍ، C للتخصيص وأسئلته الأربعة) ومن core/wnc_installer/system.py وcli.py ([OK] / [!!] / [XX]، «you:»، START_MESSAGE_AR، فتح Claude على /whynot-cut:start إذا كان التطبيق مثبَّتًا، رموز الخروج 0/1/2/3). صفحة التنزيل D-T14. يُتحقَّق على جهاز Windows نظيف بحساب عادي (المرحلة 7، H10) وعلى Mac عند توفره (H6)، وتُلتقط الصور في المرحلة 9. -->
 </aside>
 
 <h2 id="ch02-from-claude">من داخل Claude: «ثبّت WhyNot Cut»</h2>
@@ -176,7 +176,7 @@
 <li><strong>لوحة WhyNot Cut</strong> في Premiere Pro (من <bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>) وفي After Effects (من <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>): لوحة واحدة في كل برنامج، وتُزال اللوحات القديمة، مثل WhyNot Cut Bridge، واللوحات التجريبية.</li>
 <li><strong>النماذج</strong> (القسم التالي) في الخلفية. وإذا كان في جهازك كارت NVIDIA، تُثبَّت معها مكتبات التسريع، فيصبح التفريغ النصي أسرع بنحو 8 مرات.</li>
 <li><strong>مكان فولدر العملاء</strong>: على Windows <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> إذا كان في جهازك قرص D، وإلا <bdi dir="ltr"><code>WhyNot Clients</code></bdi> داخل Documents، وكذلك على Mac. وإذا كان Documents يُزامَن مع OneDrive أو iCloud، يوضع فولدر العملاء في فولدر المستخدم خارجه، لأن الملفات المحفوظة على السحابة فقط تُفشل التفريغ النصي.</li>
-<li><strong>تطبيق Claude يُفتح على معالج البداية</strong>، فيسألك عن إعداداتك ويجهّز أول فولدر عميل، ثم يعرض لك أين تضع كل ملف.</li>
+<li><strong>تطبيق Claude يُفتح على معالج البداية</strong>، والمعالج يسألك عن إعداداتك وينشئ أول فولدر عميل، ثم يعرض لك أين تضع كل ملف.</li>
 <li><strong>فحص أخير</strong>: كل بند أخضر، أو أصفر ومعه سببه وطريقة إصلاحه (القسم «التأكد من النتيجة»).</li>
 </ol>
 
@@ -184,7 +184,7 @@
 
 <aside class="todo" data-phase="7">
 <p>بعض ما في هذه القائمة، مثل تشغيل المحرك مع بدء الجهاز ولوحة After Effects الجديدة، لم يُجرَّب بعد على جهاز نظيف.</p>
-<!-- فريق: قائمة التثبيت التلقائي من مواصفات الإصدار 3.0. جزء كبير منها مبني ومختبَر في بيئة اختبار معزولة (installer/README.md «Verified»)، ويُتحقَّق منها كلها على جهاز Windows نظيف في المرحلة 7. تشغيل المحرك مع بدء الجهاز ولوحتا Adobe الموقَّعتان تكتمل مع المرحلتين 6 و7، ويُطابَق في المرحلة 6 اسم القائمة التي تجد فيها اللوحة داخل After Effects، وهو أحد اسمين: Extensions أو Extensions (Legacy). لم يُحسم بعد: هل يظهر سؤال إذن التشغيل في التثبيت العادي أم في «تخصيص» فقط، وهل تتحدّث الإضافة في Claude وحدها (يتوقف على استضافة الملفات). أول فولدر عميل: الإضافة D (D2.7، D-T6) تقول إن التثبيت ينشئه؛ النواة المرفوعة لا تنشئ فولدر العملاء أبدًا (system.py: «The clients folder is never created here») وتنتهي بفتح Claude على /whynot-cut:start الذي ينشئه، فالنص الظاهر يتبع النواة؛ يُراجَع إذا نُفّذ D-T6. -->
+<!-- فريق: قائمة التثبيت التلقائي من مواصفات الإصدار 3.0. جزء كبير منها مبني ومختبَر في بيئة اختبار معزولة (installer/README.md «Verified»)، ويُتحقَّق منها كلها على جهاز Windows نظيف في المرحلة 7. تشغيل المحرك مع بدء الجهاز ولوحتا Adobe الموقَّعتان تكتمل مع المرحلتين 6 و7، ويُطابَق في المرحلة 6 اسم القائمة التي تجد فيها اللوحة داخل After Effects، وهو أحد اسمين: Extensions أو Extensions (Legacy). لم يُحسم بعد: هل يظهر سؤال إذن التشغيل في التثبيت العادي أم في «تخصيص» فقط، وهل تتحدّث الإضافة في Claude وحدها (يتوقف على استضافة الملفات). أول فولدر عميل: إجابة المنفّذ (9): الكود هو الصحيح، فالتثبيت يفتح Claude على معالج البداية، والمعالج ينشئ أول فولدر عميل (system.py: «The clients folder is never created here»)؛ D2.7 في الإضافة D لا يُتّبع هنا. -->
 </aside>
 
 <h2 id="ch02-models">النماذج (models)</h2>
@@ -230,12 +230,12 @@
 
 <aside class="todo" data-phase="7">
 <p>رسائل هذه الخطوات وصورها تُراجَع عند صدور الإصدار <bdi dir="ltr">3.0</bdi>.</p>
-<!-- فريق: هذه الحدود من مواصفات الإصدار 3.0 (الإضافة D، D0)، وتُراجَع رسائلها وصورها في المرحلة 9. لم يُحسم بعد: حزمة تثبيت كاملة بدون إنترنت (offline bundle، D5، P1) فيها كل النماذج، للاستوديوهات ذات الإنترنت البطيء؛ تُشرح هنا إذا صدرت مع الإصدار 3.0. رسالة macOS (Allow) منقولة من system.py MAC_ALLOW_MESSAGE_AR. -->
+<!-- فريق: هذه الحدود من مواصفات الإصدار 3.0 (الإضافة D، D0)، وتُراجَع رسائلها وصورها في المرحلة 9. لم يُحسم بعد: حزمة تثبيت كاملة بدون إنترنت (offline bundle، D5، P1) فيها كل النماذج، للاستوديوهات ذات الإنترنت البطيء؛ تُشرح هنا إذا صدرت مع الإصدار 3.0. رسالة macOS (Allow) منقولة من system.py MAC_ALLOW_MESSAGE_AR. النواة المرفوعة اليوم لا تعيد التشغيل: إذا كان Premiere/AE مفتوحًا تصبح خطوة adobe [!!] مع «close …, then run the installer again» (adobe.py)؛ النص الظاهر يتبع D0.5 وC1.8. -->
 </aside>
 
 <h2 id="ch02-check">التأكد من النتيجة</h2>
 
-<p>علامة النجاح أن كل سطور قائمة الفحص في نهاية التثبيت <bdi dir="ltr"><code>[OK]</code></bdi>. وتجد القائمة نفسها في لوحة WhyNot Cut داخل Premiere باسم «قائمة الإعداد»، وفيها أربعة بنود: «المحرّك»، و«الربط مع Premiere»، و«Claude»، و«مجلد العملاء». البند الأصفر معه زر يصلحه بضغطة واحدة.</p>
+<p>علامة النجاح ألا يكون في قائمة الفحص في نهاية التثبيت أي سطر يبدأ بـ <bdi dir="ltr"><code>[XX]</code></bdi>. أفضل نتيجة أن تكون كل السطور <bdi dir="ltr"><code>[OK]</code></bdi>، ومع كل سطر <bdi dir="ltr"><code>[!!]</code></bdi> سببه وما تفعله (<a href="#ch17-v3">الفصل&nbsp;17</a>). وتجد القائمة نفسها في لوحة WhyNot Cut داخل Premiere باسم «قائمة الإعداد»، وفيها أربعة بنود: «المحرّك»، و«الربط مع Premiere»، و«Claude»، و«مجلد العملاء». البند الأصفر معه زر يصلحه بضغطة واحدة.</p>
 
 <figure class="shot">
 <div class="shot-frame"><span>لقطة شاشة: «قائمة الإعداد» في لوحة WhyNot Cut داخل Premiere، وكل بنودها خضراء</span></div>
@@ -255,7 +255,7 @@ reel doctor</code></bdi></div>
 
 <h2 id="ch02-setup-app">برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> لأجهزة فريقنا</h2>
 
-<p>برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> يفعل ما يفعله السطر الواحد، لكنه تطبيق تفتحه بنقرتين ويعرض قائمة الفحص في نافذة. نسخه داخلية: يستخدمها فريقنا على أجهزة الوكالة، ولا تُنشر للتنزيل العام لأنها غير موقَّعة. إذا لم تصلك منا مباشرة، فثبّت بالسطر الواحد.</p>
+<p>برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> يفعل ما يفعله السطر الواحد، لكنه تطبيق تفتحه بنقرتين ويعرض قائمة الفحص في نافذة. وهو نسخة داخلية: يستخدمها فريقنا على أجهزة الوكالة، ولا تُنشر للتنزيل العام لأنها غير موقَّعة. إذا لم تصلك منا مباشرة، فثبّت بالسطر الواحد.</p>
 
 <ol class="steps">
 <li><strong>افتح الملف بنقرتين.</strong> على Windows <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi>. وعلى Mac افتح <bdi dir="ltr"><code>WhyNotCut.dmg</code></bdi>، ثم التطبيق <bdi dir="ltr">WhyNot Cut Setup</bdi> الذي بداخله.</li>
@@ -275,7 +275,7 @@ reel doctor</code></bdi></div>
 </figure>
 
 <aside class="warn">
-<p>افعل هذا فقط مع ملف وصلك من فريقنا مباشرة. إذا ظهر التحذير مع ملف نزّلته من مكان آخر، فلا تشغّله وراسلنا. وعلى Mac يمنع macOS فتح النسخة الداخلية لأنها غير موثَّقة من Apple، فاستخدم السطر الواحد.</p>
+<p>افعل هذا فقط مع ملف وصلك من فريقنا مباشرة. إذا ظهر التحذير مع ملف نزّلته من مكان آخر، فلا تشغّله وراسلنا. وعلى Mac، النسخة الداخلية لاختبار فريقنا فقط، لأنها غير موثَّقة من Apple فيمنع macOS فتحها؛ إذا لم تكن من فريقنا، فثبّت بالسطر الواحد.</p>
 </aside>
 
 <aside class="todo" data-phase="7">
