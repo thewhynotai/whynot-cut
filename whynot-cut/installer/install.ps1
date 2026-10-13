@@ -15,6 +15,9 @@
 # Then installer\core\bootstrap.ps1 (uv + Python) runs and hands over to the Python installer core. Every option is
 # described in installer\README.md. Exit code: the installer's (0 done, 1 a step failed, 2 cannot start, 3 a download
 # or bootstrap step failed).
+# It asks no question by default (D-T1): it says how much it installs and counts down 10 seconds ("Press C to
+# customise"); C or -Customise asks the questions (location, model, language, clients folder), every answer
+# preselected; -Yes skips the countdown too.
 # ASCII only: Windows PowerShell 5.1 reads a file without a BOM as ANSI (the Arabic line is decoded from base64).
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '',
     Justification = 'The parameters are read inside the & { } block below, which the analyzer does not follow.')]
@@ -36,7 +39,8 @@ param(
     [string]$EngineHome,
     [string]$Model,
     [string]$Source,
-    [string]$SourceSha256
+    [string]$SourceSha256,
+    [Alias('Customize')][switch]$Customise
 )
 
 # Filled by the release tool once the files are hosted (H3). The index is JSON:
@@ -236,6 +240,7 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
             if ($RemoveModels) { $bootArgs.RemoveModels = $true }
             if ($EngineHome) { $bootArgs.EngineHome = $EngineHome }
             if ($Model) { $bootArgs.Model = $Model }
+            if ($Customise) { $bootArgs.Customise = $true }
             & $block @bootArgs
             $code = $LASTEXITCODE
         }

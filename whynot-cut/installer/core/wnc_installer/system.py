@@ -5,10 +5,12 @@ preflight  read-only facts (ctx.facts): OS, free space on the engine drive (< 6 
            download; < 9 GB amber), a home path with non-ASCII letters or a space, Documents in OneDrive / iCloud,
            Claude Code, Adobe hosts, NVIDIA, an earlier install, Windows Smart App Control. A sandbox (--home) never
            reads the registry or probes processes; a dry run starts no process.
-questions  the clients folder, the chat language and the Whisper model, asked right after preflight (ID-6) so the long
-           downloads run unattended: --clients-folder / --language / --model, else the editor's preferences file,
-           else the defaults (language `ar`, ID-4; the model large-v3, the strongest, on every machine: ID-8 / ID-9).
-           The clients folder is never created here.
+questions  the Whisper model, the chat language and the clients folder: --model / --language / --clients-folder, else
+           the editor's preferences file, else the defaults (language `ar`, ID-4; the model large-v3, the strongest,
+           on every machine: ID-8 / ID-9). D-T1 (task 9): asked only on the Customise path (--customise, from the
+           bootstrap's -Customise or C during its countdown), right after preflight (ID-6) so the long downloads run
+           unattended, each answer preselected; otherwise nothing is asked. state.json answers.mode = "default" or
+           "customise". The clients folder is never created here.
 location   not a registered step: cli.install runs step_location after every step (fix round 1). It remembers the
            engine home (claude.remember_engine_home, ID-10: settings.json pluginConfigs + the pointer file, only when it
            is not ~/.whynot-cut or one of them names another folder) - only when no step was red; otherwise the saved
@@ -24,6 +26,7 @@ Engine calls: <runtime python> -s -B <plugin>/engine/reel/cli.py <cmd> with the 
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform as _platform
 import re
@@ -49,6 +52,9 @@ MODEL_NOTES = {"large-v3": ("best accuracy (recommended)", "أعلى دقة (م�
                "large-v3-turbo": ("faster, a little less accurate", "أسرع، ودقته أقل قليلًا"),
                "medium": ("smaller, less accurate", "أصغر، ودقته أقل"),
                "small": ("smallest, least accurate", "الأصغر، والأقل دقة")}
+# D-T1: "Installing everything WhyNot Cut needs (about N GB)". The bootstraps print it before any download with the
+# same rule (Get-WncInstallGb / install_size); these are the sizes used where components.json has no `bytes`.
+RUNTIME_GB, FFMPEG_GB, FONTS_GB, GIT_GB = 0.5, 0.1, 0.01, 0.4
 CLIENTS_FOLDER = "WhyNot Clients"
 START_URL = "claude://code/new?q=%2Fwhynot-cut%3Astart"
 START_MESSAGE = "Open Claude and type /whynot-cut:start"
@@ -134,6 +140,44 @@ def _os_version() -> str:
         v = sys.getwindowsversion()
         return f"Windows {v.major}.{v.minor}.{v.build}"
     return f"macOS {_platform.mac_ver()[0]}".strip()
+
+
+def _sized_gb(items, fallback: float) -> float:
+    """The sum of the `bytes` of the entries that have one (in GB), or `fallback` when none has."""
+    sizes = [i["bytes"] for i in (items if isinstance(items, list) else [])
+             if isinstance(i, dict) and type(i.get("bytes")) is int]
+    return sum(sizes) / GB if sizes else fallback
+
+
+def install_size_gb(components: dict, platform: str, *, model: str = DEFAULT_MODEL, skip=(),
+                    git_missing: bool = False) -> float:
+    """D-T1: about how many GB the install brings, rounded UP to one decimal: the runtime (about 0.5), ffmpeg and the
+    fonts (their `bytes` in components.json, else 0.1 / 0.01), the Whisper model (components models.<m>.bytes, else
+    MODEL_SIZES: large-v3 2.9) and, on Windows when Git Bash is missing, PortableGit (its `bytes`, else 0.4). A step
+    in `skip` is not counted. The bootstraps compute the same number."""
+    c = components if isinstance(components, dict) else {}
+    total = 0.0
+    if "runtime" not in skip:
+        total += RUNTIME_GB
+    if "ffmpeg" not in skip:
+        total += _sized_gb(base.cget(c, f"ffmpeg.assets.{platform}.files"), FFMPEG_GB)
+    if "fonts" not in skip:
+        files = base.cget(c, "fonts.files")
+        lics = base.cget(c, "fonts.licenses")
+        total += _sized_gb((files if isinstance(files, list) else []) + (lics if isinstance(lics, list) else []),
+                           FONTS_GB)
+    if "model" not in skip:
+        b = base.cget(c, f"models.{model}.bytes")
+        total += b / GB if type(b) is int else float(MODEL_SIZES.get(model, MODEL_SIZES[DEFAULT_MODEL]).split()[0])
+    if platform.startswith("win") and git_missing and "gitbash" not in skip:
+        b = base.cget(c, f"git.assets.{platform}.bytes")
+        total += b / GB if type(b) is int else GIT_GB
+    return math.ceil(round(total * 10, 6)) / 10
+
+
+def format_gb(value: float) -> str:
+    """One decimal, a dot whatever the locale (3.6)."""
+    return f"{value:.1f}"
 
 
 def free_gb(path: Path) -> float:
@@ -304,9 +348,28 @@ def _ask_model(ctx: base.Ctx, a: dict) -> None:
         ctx.log.info(f"'{got}' is not one of the choices / ليس من الاختيارات: {', '.join(MODELS)}")
 
 
+def answer_mode(ctx: base.Ctx) -> str:
+    """D-T1: "customise" when the editor chose Customise (--customise: the bootstrap's -Customise flag or C during
+    its countdown), else "default" - the no-question install, the same with --yes (state.json answers.mode)."""
+    a = ctx.args
+    return "customise" if getattr(a, "customise", False) and not getattr(a, "yes", False) else "default"
+
+
 def step_questions(ctx: base.Ctx) -> base.StepResult:
+    """D-T1: no question by default (the strongest defaults, exactly the --yes path). Only on the Customise path,
+    with a keyboard: the Whisper model, the language, then the clients folder, every answer preselected (Enter keeps
+    it). The engine location was asked by the bootstrap before any download."""
     a = resolve_answers(ctx)
-    if base.can_ask(ctx.args):
+    a["mode"] = answer_mode(ctx)
+    if a["mode"] == "customise" and base.can_ask(ctx.args):
+        _ask_model(ctx, a)
+        while True:
+            lang = base.ask(f"Language / اللغة: ar = العربية, en = English [{a['language']}]: ", "").lower()
+            if not lang:
+                break
+            if lang in LANGUAGES:
+                a["language"], a["from"]["language"] = lang, "you"
+                break
         cloud = cloud_documents(ctx.facts)
         if cloud and a["from"]["clients_root"].startswith("default:"):
             ctx.log.info(f"Your Documents folder is synced to {cloud}; the suggested clients folder is outside it, so "
@@ -316,20 +379,14 @@ def step_questions(ctx: base.Ctx) -> base.StepResult:
         root = base.ask(f"Folder for your client folders / مجلد العملاء [{a['clients_root']}]: ", "")
         if root:
             a["clients_root"], a["from"]["clients_root"] = _norm_folder(root), "you"
-        while True:
-            lang = base.ask(f"Language / اللغة: ar = العربية, en = English [{a['language']}]: ", "").lower()
-            if not lang:
-                break
-            if lang in LANGUAGES:
-                a["language"], a["from"]["language"] = lang, "you"
-                break
-        _ask_model(ctx, a)
     ctx.answers = a
     m = a["whisper_model"]
     return base.StepResult("questions", "ok", f"clients folder {a['clients_root']} ({a['from']['clients_root']}; "
                                               "created when you add your first client); language "
                                               f"{a['language']} ({a['from']['language']}); Whisper {m} (about "
-                                              f"{MODEL_SIZES[m]}; {a['from']['whisper_model']})")
+                                              f"{MODEL_SIZES[m]}; {a['from']['whisper_model']}); "
+                                              + ("customised" if a["mode"] == "customise" else
+                                                 "no questions (the defaults)"))
 
 
 def step_location(ctx: base.Ctx, results: list) -> base.StepResult:
@@ -477,7 +534,7 @@ def step_state(ctx: base.Ctx) -> base.StepResult:
              installed_at=base.now_iso(), platform=ctx.platform,
              uv={"version": _uv_version(ctx) or base.cget(ctx.components, "uv.version")}, python=py_ver,
              answers={"clients_root": a["clients_root"], "language": a["language"],
-                      "whisper_model": chosen_model(ctx)},
+                      "whisper_model": chosen_model(ctx), "mode": answer_mode(ctx)},
              engine_home={"path": str(ctx.paths.whynot), "source": ctx.paths.engine_home_source})
     d["runtime"] = dict(rt, id=rid, lock_sha256=lock_sha) if rid else rt
     return _record(ctx, "state", "ok", f"{ctx.paths.state_file} written")

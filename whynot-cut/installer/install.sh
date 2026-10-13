@@ -17,6 +17,9 @@
 # described in installer/README.md. Exit code: the installer's (0 done, 1 a step failed, 2 cannot start, 3 a download
 # or bootstrap step failed). On Windows use install.ps1 (Git Bash is refused unless the WNC_TEST_PLATFORM test hook is
 # set together with --home).
+# It asks no question by default (D-T1): it says how much it installs and counts down 10 seconds ("Press C to
+# customise", read from the terminal, never from the piped script); C or --customise asks the questions (location,
+# model, language, clients folder), every answer preselected; --yes skips the countdown too.
 # Everything sits inside main(), called on the last line: under `curl | bash` nothing runs before the whole script has
 # arrived, and no child reads the rest of the script from stdin. bash 3.2 compatible.
 
@@ -36,7 +39,7 @@ main() {
       --engine-home) engine_home="$2"; pass+=("$1" "$2"); shift ;;
       --clients-folder|--language|--components|--skip|--model) pass+=("$1" "$2"); shift ;;
       --dry-run) dry=1; pass+=("$1") ;;
-      --yes|-y|--uninstall|--remove-engine|--remove-models) pass+=("$1") ;;
+      --yes|-y|--uninstall|--remove-engine|--remove-models|--customise|--customize) pass+=("$1") ;;
       -h|--help) sed -n '2,22p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null || echo "see installer/README.md"; return 0 ;;
       *) echo "ERROR: unknown option $1 (see installer/README.md)" >&2; return 2 ;;
     esac

@@ -386,6 +386,41 @@ def engine_home_choice_problem(path, **kw) -> Optional[str]:
     return choose_engine_home(path, **kw)[2]
 
 
+# the way out of a refused RESOLVED engine home, in the editor's words (both front ends' flags; task 9)
+SELF_FIX = "run the installer again with -EngineHome <folder> / --engine-home <folder>"
+SELF_FIX_AR = ("لن يستخدم WhyNot Cut هذا المجلد لملفات التشغيل. لإصلاح ذلك شغّل المثبّت مرة أخرى مع "
+               "-EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به.")
+
+
+def resolved_home_problem(path, *, home, clients_roots: Iterable = ()) -> Optional[str]:
+    """Why a RESOLVED engine home (named by a variable, the pointer or settings.json pluginConfigs; never chosen in
+    this run) may not be used, else None (task 9, carried from the Task 8 review: controller ruling). ~/.whynot-cut
+    itself is never refused here. Refused: a drive root or mount point; the user folder itself, or Desktop, Documents,
+    Downloads themselves (not a folder inside them); a folder holding client data - the saved clients folder (it is
+    or holds it) or a `.whynot-client` marker in it or up to 3 levels below (bounded). A genuine 2.x / 3.0 home
+    anywhere else is used as it is. The bootstraps apply the same rule (Get-WncResolvedHomeProblem /
+    resolved_home_problem) before anything is downloaded."""
+    p, h = str(path), Path(home)
+    n = _norm(p)
+    if n == _norm(h / ".whynot-cut"):
+        return None
+    if _is_drive_root(p):
+        return "a drive root or a mount point"
+    if n == _norm(h):
+        return "your user folder itself"
+    for r in HOME_ROOTS:
+        if n == _norm(h / r):
+            return f"your {r} folder itself"
+    for c in clients_roots:
+        if c and _within(_norm(c), n, strict=False):
+            return f"your clients folder {c}, or it holds it"
+    if os.path.isdir(p):
+        below = _marker_below(p)
+        if below:
+            return f"holding a client folder ({below} holds {CLIENT_MARKER})"
+    return None
+
+
 # --------------------------------------------------------------------------------------------- the pointer file
 def pointer_file(env: Mapping, home) -> Path:
     """The SessionStart hook's record of the plugin options (engine plat.options_file): WHYNOT_OPTIONS_FILE, else
@@ -563,31 +598,52 @@ def _terminal():
     return None
 
 
+_TEST_ANSWERS: Optional[list] = None  # sandbox only: WNC_TEST_ANSWERS lines read instead of the keyboard (cli)
+
+
+def set_test_answers(lines) -> None:
+    """cli.main: the answer lines of the sandbox-only test hook (None = the keyboard), used in order by ask()."""
+    global _TEST_ANSWERS
+    _TEST_ANSWERS = list(lines) if lines is not None else None
+
+
 def can_ask(args) -> bool:
-    """Questions only without --yes / --quiet and with a terminal to read the answer from (never in tests)."""
+    """Questions only without --yes / --quiet and with a terminal to read the answer from (or the sandbox-only
+    WNC_TEST_ANSWERS lines)."""
     if getattr(args, "yes", False) or getattr(args, "quiet", False):
         return False
+    if _TEST_ANSWERS is not None:
+        return True
     t = _terminal()
     if t is not None and t[1]:
         t[0].close()
     return t is not None
 
 
+def _write_prompt(text: str) -> None:
+    out = sys.stdout
+    if out is None:
+        return
+    try:
+        out.write(text)
+    except UnicodeEncodeError:
+        enc = out.encoding or "ascii"
+        out.write(text.encode(enc, "backslashreplace").decode(enc, "replace"))
+    out.flush()
+
+
 def ask(prompt: str, default: str = "") -> str:
     """One line from the editor; Enter, end of input or no terminal keeps `default`."""
+    if _TEST_ANSWERS is not None:  # (sandbox test hook: the line is shown as if typed)
+        line = _TEST_ANSWERS.pop(0) if _TEST_ANSWERS else ""
+        _write_prompt(prompt + line + "\n")
+        return line.strip() or default
     t = _terminal()
     if t is None:
         return default
     reader, close = t
     try:
-        out = sys.stdout
-        if out is not None:
-            try:
-                out.write(prompt)
-            except UnicodeEncodeError:
-                enc = out.encoding or "ascii"
-                out.write(prompt.encode(enc, "backslashreplace").decode(enc, "replace"))
-            out.flush()
+        _write_prompt(prompt)
         line = reader.readline()
     except (OSError, ValueError, KeyboardInterrupt):
         line = ""

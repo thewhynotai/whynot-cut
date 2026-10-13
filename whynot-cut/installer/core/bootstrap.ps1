@@ -48,6 +48,21 @@
 # downloaded and verified), WNC_TEST_ANSWERS (a file: one answer per line for the location question) and
 # WNC_TEST_FREE_GB (the free space the check sees). Every environment variable it sets is restored when it ends (the
 # script may run inside the editor's own PowerShell session through `irm | iex`), so is the console encoding.
+# No questions by default (Addendum D, D-T1, task 9): an install prints "Installing everything WhyNot Cut needs (about N
+# GB)" (English + Arabic; N from components.json `bytes` where present, the core's system.install_size_gb rule) and,
+# with a person at the console, a 10-second line "Press C to customise (10)... / <Arabic>" that counts down in place
+# ([Console]::KeyAvailable). C opens the Customise path; any other key or the end of the countdown installs with the
+# strongest defaults, exactly like -Yes (the core gets --yes: the same state.json, answers.mode "default").
+# -Customise (or C) asks the location question here and passes --customise, so the core asks the model, the language
+# and the clients folder, every answer preselected. -Yes: no countdown, no question. No keyboard (input redirected,
+# -NonInteractive, Door 2, Setup.exe, CI): like -Yes, never waiting for a key. -Yes with -Customise: exit 2.
+# A RESOLVED engine home other than ~\.whynot-cut (a variable, the pointer or settings.json named it) that is a drive
+# root, the user folder itself, Desktop / Documents / Downloads themselves, or holds client data (the saved clients
+# folder, or .whynot-client up to 3 levels below) is refused with exit 2 before any download, with the self-fix
+# "run the installer again with -EngineHome <folder> / --engine-home <folder>" (English + Arabic); the core applies the
+# same rule (base.resolved_home_problem). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another key, or
+# "none" = nobody presses), WNC_TEST_COUNTDOWN_S (the seconds the countdown waits with the hook; 0 = none), and the
+# core reads the WNC_TEST_ANSWERS lines after the ones used here (WNC_TEST_ANSWERS_AT).
 # ASCII only: Windows PowerShell 5.1 reads a file without a BOM as ANSI.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '',
     Justification = 'The parameters are read inside the & { } block below, which the analyzer does not follow.')]
@@ -68,7 +83,8 @@ param(
     [switch]$RemoveEngine,
     [switch]$RemoveModels,
     [string]$EngineHome,
-    [string]$Model
+    [string]$Model,
+    [Alias('Customize')][switch]$Customise
 )
 
 & {
@@ -82,10 +98,13 @@ param(
     # and its uninstall steps (wnc_installer/uninstall.py STEP_NAMES)
     $WncUninstallStepNames = @('plugin', 'adobe', 'fonts', 'marketplace', 'engine')
     $S = @{ Log = $null; Step = 'start'; Code = 0; Utf8 = (New-Object System.Text.UTF8Encoding $false);
-        Answers = $null; AnswerAt = 0; FreeGb = $null }
+        Answers = $null; AnswerAt = 0; FreeGb = $null; Mode = 'yes'; TestKeys = $null; CountdownS = 10 }
     $WncModels = @('large-v3', 'large-v3-turbo', 'medium', 'small')  # wnc_installer/system.py MODELS
     $WncNeedGb = 6  # free space for the engine; + $WncModelGb with the Whisper model (system.py RED_GB / AMBER_GB)
     $WncModelGb = 3
+    # the install size estimate (system.py RUNTIME_GB, FFMPEG_GB, FONTS_GB, GIT_GB and MODEL_SIZES)
+    $WncSizes = @{ runtime = 0.5; ffmpeg = 0.1; fonts = 0.01; git = 0.4 }
+    $WncModelSizes = @{ 'large-v3' = 2.9; 'large-v3-turbo' = 1.6; 'medium' = 1.5; 'small' = 0.5 }
     # the Arabic lines, UTF-8 in base64 (this file stays ASCII)
     $WncAr = @{
         Intro = ('2KPZitmGINmK2K3Zgdi4IFdoeU5vdCBDdXQg2YXZhNmB2KfYqiDYp9mE2KrYtNi62YrZhCAo2KjYp9mK2KvZiNmGINmIIGZmbXBlZyDZiNmG' +
@@ -101,11 +120,20 @@ param(
         Subfolder = ('2YfYsNinINin2YTZhdis2YTYryDZgdmK2Ycg2YXZhNmB2KfYqiDYo9iu2LHZidiMINmE2LDZhNmDINiz2YrZj9ir2KjZjtmR2KogV2h5Tm90' +
             'IEN1dCDZgdmKINmF2KzZhNivINiu2KfYtSDYqNmHINiv2KfYrtmE2YcgKFdoeU5vdEN1dCnYjCDZiNmE2YYg2YrZhNmF2LMg2KfZhNil2YTYutin' +
             '2KEg2KjYp9mC2Yog2KfZhNmF2YTZgdin2Kou')
+        Size = ('2KzYp9ix2Y0g2KrYq9io2YrYqiDZg9mEINmF2Kcg2YrYrdiq2KfYrNmHIFdoeU5vdCBDdXQgKNit2YjYp9mE2YogezB9INis2YrY' +
+            'rNin2KjYp9mK2Kop')
+        Countdown = '2KfYtti62LcgQyDZhNmE2KrYrti12YrYtQ=='
+        Customising = ('2KfZhNiq2K7YtdmK2LU6INij2KzYqCDYudmGINin2YTYo9iz2KbZhNipINin2YTYqtin2YTZitip2Jsg2KfYtti62LcgRW50ZXIg' +
+            '2YTYpdio2YLYp9ihINin2YTYpdis2KfYqNipINin2YTZhdmC2KrYsdit2Kku')
+        Guard = ('2YTZhiDZitiz2KrYrtiv2YUgV2h5Tm90IEN1dCDZh9iw2Kcg2KfZhNmF2KzZhNivINmE2YXZhNmB2KfYqiDYp9mE2KrYtNi62YrZhC4g' +
+            '2YTYpdi12YTYp9itINiw2YTZgyDYtNi62ZHZhCDYp9mE2YXYq9io2ZHYqiDZhdix2Kkg2KPYrtix2Ykg2YXYuSAtRW5naW5lSG9tZSA8Zm9s' +
+            'ZGVyPiAo2LnZhNmJIG1hY09TOiAtLWVuZ2luZS1ob21lIDxmb2xkZXI+KSDZiNin2K7YqtixINmF2KzZhNiv2YvYpyDYrtin2LXZi9inINio2Ycu')
         LeftBehind = ('2KrZhtio2YrZhzog2KfZhNiq2KvYqNmK2Kog2KfZhNmC2K/ZitmFINiz2YrYqNmC2Ykg2YHZiiDZhdmD2KfZhtmHINmI2YTZhiDZitmP2LPY' +
             'qtiu2K/ZhSDYqNi52K8g2KfZhNii2YbYmyDYp9it2LDZgdmHINio2YbZgdiz2YMg2KXZhiDZhNmFINiq2LnYryDYqtit2KrYp9is2Yc6')
     }
     $EnvNames = @('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'CLAUDE_CONFIG_DIR', 'WHYNOT_HOME',
-        'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_NO_CONFIG', 'UV_PYTHON_PREFERENCE', 'UV_NO_MODIFY_PATH')
+        'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_NO_CONFIG', 'UV_PYTHON_PREFERENCE', 'UV_NO_MODIFY_PATH',
+        'WNC_TEST_ANSWERS_AT')
 
     function Write-WncLog([string]$Level, [string]$Text) {
         if (-not $S.Log) { return }
@@ -710,15 +738,175 @@ param(
         return $null
     }
 
-    function Test-WncCanAsk {
-        # the location question: never with -Yes, never for -Uninstall; the test hook (sandbox only); else only
-        # with a keyboard (an interactive session whose input is not redirected, not -NonInteractive)
-        if ($Yes -or $Uninstall) { return $false }
-        if ($null -ne $S.Answers) { return $true }
+    function Test-WncKeyboard {
+        # a person at the console: an interactive session whose input is not redirected, not -NonInteractive
         try { if ([Console]::IsInputRedirected) { return $false } } catch { return $false }
         if (-not [Environment]::UserInteractive) { return $false }
         if (@([Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^-noni' }).Count -gt 0) { return $false }
         return $true
+    }
+
+    function Test-WncCanAsk {
+        # the location question: only on the Customise path (D-T1), never with -Yes, never for -Uninstall; the test
+        # hook (sandbox only); else only with a keyboard
+        if ($Yes -or $Uninstall -or ($S.Mode -ne 'customise')) { return $false }
+        if ($null -ne $S.Answers) { return $true }
+        return (Test-WncKeyboard)
+    }
+
+    function Get-WncValue($Object, [string[]]$Keys) {
+        # the JSON value at that key path (exact names), or $null
+        $v = $Object
+        foreach ($k in $Keys) {
+            $m = Get-WncMember $v $k
+            if (-not $m.Found) { return $null }
+            $v = $m.Value
+        }
+        return $v
+    }
+
+    function Get-WncSizedGb($Items, [double]$Fallback) {
+        # the sum of the `bytes` of the entries that have one, in GB; $Fallback when none has (system.py _sized_gb)
+        $sum = [double]0
+        $any = $false
+        foreach ($i in @($Items)) {
+            $b = (Get-WncMember $i 'bytes').Value
+            if (($b -is [int]) -or ($b -is [long])) {
+                $sum += [double]$b
+                $any = $true
+            }
+        }
+        if ($any) { return $sum / 1GB }
+        return $Fallback
+    }
+
+    function Test-WncGitMissing([bool]$Sandbox) {
+        # no Git Bash where the core's gitbash step looks (claude.find_git_bash; a sandbox: its LOCALAPPDATA only)
+        $c = @()
+        if ($env:LOCALAPPDATA) {
+            $c += Join-Path $env:LOCALAPPDATA 'Programs\Git\bin\bash.exe'
+            $c += Join-Path $env:LOCALAPPDATA 'WhyNotCut\git\bin\bash.exe'
+        }
+        if (-not $Sandbox) {
+            $git = @(Get-Command git -CommandType Application -ErrorAction SilentlyContinue)
+            if ($git.Count -gt 0) { $c += Join-Path (Split-Path (Split-Path $git[0].Source -Parent) -Parent) 'bin\bash.exe' }
+            foreach ($v in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) { if ($v) { $c += Join-Path $v 'Git\bin\bash.exe' } }
+        }
+        return (@($c | Where-Object { [IO.File]::Exists($_) }).Count -eq 0)
+    }
+
+    function Get-WncInstallGb([string]$CompPath, [string[]]$SkipList, [bool]$Sandbox) {
+        # D-T1: about how many GB the install brings, rounded up to one decimal (the core's system.install_size_gb):
+        # the runtime 0.5, ffmpeg and the fonts (their `bytes`, else 0.1 / 0.01), the Whisper model (-Model or
+        # large-v3: models.<m>.bytes, else its size) and PortableGit when Git Bash is missing (its `bytes`, else 0.4)
+        $c = $null
+        try { $c = [IO.File]::ReadAllText($CompPath, [Text.Encoding]::UTF8) | ConvertFrom-Json } catch { $c = $null }
+        $m = 'large-v3'
+        if ($Model) { $m = $Model }
+        $total = [double]0
+        if ($SkipList -notcontains 'runtime') { $total += $WncSizes.runtime }
+        if ($SkipList -notcontains 'ffmpeg') {
+            $total += Get-WncSizedGb (Get-WncValue $c @('ffmpeg', 'assets', 'win-x64', 'files')) $WncSizes.ffmpeg
+        }
+        if ($SkipList -notcontains 'fonts') {
+            $items = @(Get-WncValue $c @('fonts', 'files')) + @(Get-WncValue $c @('fonts', 'licenses'))
+            $total += Get-WncSizedGb $items $WncSizes.fonts
+        }
+        if ($SkipList -notcontains 'model') {
+            $b = Get-WncValue $c @('models', $m, 'bytes')
+            if (($b -is [int]) -or ($b -is [long])) { $total += [double]$b / 1GB } else { $total += $WncModelSizes[$m] }
+        }
+        if (($SkipList -notcontains 'gitbash') -and (Test-WncGitMissing $Sandbox)) {
+            $b = Get-WncValue $c @('git', 'assets', 'win-x64', 'bytes')
+            if (($b -is [int]) -or ($b -is [long])) { $total += [double]$b / 1GB } else { $total += $WncSizes.git }
+        }
+        $gb = [Math]::Ceiling([Math]::Round($total * 10, 6)) / 10
+        return $gb.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)
+    }
+
+    function Read-WncCountdown {
+        # D-T1: "Press C to customise (10)..." on one line that counts down in place, 10 s. Returns 'customise' (C),
+        # 'key' (any other key: go on at once) or 'timeout'. The sandbox-only hook WNC_TEST_KEYS stands in for the
+        # keyboard ("C", another key, "none" = nobody presses; it waits WNC_TEST_COUNTDOWN_S seconds in all). Any
+        # console error ends it as a timeout: it never blocks.
+        $line = (Get-WncArabic 'Countdown')
+        $ell = [string][char]0x2026
+        $hook = $null -ne $S.TestKeys
+        $result = 'timeout'
+        if (-not $hook) {
+            try {
+                while ([Console]::KeyAvailable) { $null = [Console]::ReadKey($true) }  # typed ahead: not an answer
+            } catch {
+                return 'timeout'
+            }
+        }
+        for ($sec = 10; ($sec -ge 1) -and ($result -eq 'timeout'); $sec--) {  # (not $s: that is $S)
+            Write-Host -NoNewline ("`rPress C to customise ($sec)$ell / $line ")
+            if ($hook) {
+                $k = ([string]$S.TestKeys).Trim()
+                if ($k -and ($k -ne 'none')) {
+                    if ($k.Substring(0, 1) -ieq 'c') { $result = 'customise' } else { $result = 'key' }
+                } elseif ($S.CountdownS -gt 0) {
+                    Start-Sleep -Milliseconds (100 * $S.CountdownS)
+                }
+                continue
+            }
+            $until = [DateTime]::UtcNow.AddSeconds(1)
+            while (($result -eq 'timeout') -and ([DateTime]::UtcNow -lt $until)) {
+                try {
+                    if ([Console]::KeyAvailable) {
+                        $key = [Console]::ReadKey($true)
+                        if (([string]$key.KeyChar) -ieq 'c') { $result = 'customise' } else { $result = 'key' }
+                    } else {
+                        Start-Sleep -Milliseconds 50
+                    }
+                } catch {
+                    Write-Host ''
+                    return 'timeout'
+                }
+            }
+        }
+        Write-Host ''
+        return $result
+    }
+
+    function Select-WncMode([string]$CompPath, [string[]]$SkipList, [bool]$Sandbox) {
+        # D-T1: 'customise' (-Customise, or C during the countdown), 'default' (a person at the console who did not
+        # customise) or 'yes' (-Yes, -Uninstall, or nobody at a keyboard). The core gets --customise for the first,
+        # --yes for the other two: the same strongest defaults and the same state.json.
+        if ($Uninstall) { return 'yes' }
+        if ($Customise) { return 'customise' }
+        $gb = Get-WncInstallGb -CompPath $CompPath -SkipList $SkipList -Sandbox $Sandbox
+        Write-Host "Installing everything WhyNot Cut needs (about $gb GB)"
+        Write-Host ((Get-WncArabic 'Size') -f $gb)
+        if ($Yes) { return 'yes' }
+        if (($null -eq $S.TestKeys) -and (-not (Test-WncKeyboard))) { return 'yes' }
+        if ((Read-WncCountdown) -ne 'customise') { return 'default' }
+        Write-Host 'Customise: answer the questions below; Enter keeps the suggested answer.'
+        Write-Host (Get-WncArabic 'Customising')
+        return 'customise'
+    }
+
+    function Get-WncResolvedHomeProblem([string]$Path, [string]$UserHome, [string[]]$Clients) {
+        # task 9 (the core's base.resolved_home_problem): why a RESOLVED engine home other than ~\.whynot-cut may not
+        # be used - a drive root, the user folder or Desktop / Documents / Downloads themselves, the saved clients
+        # folder or a folder holding it, a folder with .whynot-client in it or up to 3 levels below; else $null
+        $n = Get-WncNormPath $Path
+        if ($n -ieq (Get-WncNormPath (Join-Path $UserHome '.whynot-cut'))) { return $null }
+        if (($n -match '^[A-Za-z]:\\$') -or ($n -match '^\\\\[^\\]+\\[^\\]+$')) { return 'a drive root or a mount point' }
+        if ($n -ieq (Get-WncNormPath $UserHome)) { return 'your user folder itself' }
+        foreach ($r in @('Desktop', 'Documents', 'Downloads')) {
+            if ($n -ieq (Get-WncNormPath (Join-Path $UserHome $r))) { return "your $r folder itself" }
+        }
+        foreach ($c in @($Clients | Where-Object { $_ })) {
+            try { $cn = Get-WncNormPath $c } catch { continue }
+            if (Test-WncWithin $cn $n) { return "your clients folder $c, or it holds it" }
+        }
+        if ([IO.Directory]::Exists($n)) {
+            $below = Find-WncMarkerBelow $n
+            if ($below) { return "holding a client folder ($below holds .whynot-client)" }
+        }
+        return $null
     }
 
     function Read-WncAnswer([string]$Default) {
@@ -749,7 +937,7 @@ param(
     }
 
     function Select-WncEngineHome([string]$Default, [string]$UserHome, [string]$Root, [string]$Pointer,
-        [string]$SandboxRoot, [bool]$WithModel) {
+        [string]$SandboxRoot, [bool]$WithModel, [string]$Source) {
         # the location question (see the header): @{ Code = 0; Path; Chosen } or @{ Code = 2 }
         $ask = Test-WncCanAsk
         $clients = Get-WncClientRootList -UserHome $UserHome -Pointer $Pointer
@@ -787,6 +975,15 @@ param(
                 $chosen = $false
                 $p = Get-WncNormPath $p
                 $problem = $null
+                $why = Get-WncResolvedHomeProblem -Path $p -UserHome $UserHome -Clients $clients
+                if ($why) {
+                    # task 9: a home saved somewhere (not chosen now) in a place it must never be: stop, say the fix
+                    Write-Host ("ERROR: WhyNot Cut will not use $p as its engine home (from $Source): it is $why. " +
+                        'Nothing was downloaded. To fix it, run the installer again with -EngineHome <folder> / ' +
+                        '--engine-home <folder> (a folder of its own, for example C:\WhyNotCut).')
+                    Write-Host (Get-WncArabic 'Guard')
+                    return @{ Code = 2 }
+                }
                 if ($SandboxRoot -and (-not (Test-WncWithin $p (Get-WncNormPath $SandboxRoot) -Strict))) {
                     $problem = "$p is outside the sandbox home $SandboxRoot (-Home: nothing outside it is used)"
                 }
@@ -887,6 +1084,10 @@ param(
             Write-Host "ERROR: -Model $Model is not one of $($WncModels -join ', ')"
             return @{ Code = 2 }
         }
+        if ($Customise -and $Yes -and (-not $Uninstall)) {
+            Write-Host 'ERROR: -Yes and -Customise cannot be used together (-Yes asks nothing; -Customise asks the questions)'
+            return @{ Code = 2 }
+        }
         $skipList = @($Skip | Where-Object { $_ } | ForEach-Object { $_ -split ',' } | Where-Object { $_.Trim() } |
             ForEach-Object { $_.Trim() })
         $sandbox = [bool]$SandboxHome
@@ -901,6 +1102,8 @@ param(
             $pointer = Join-Path $h '.whynot-cut\plugin-options.json'
             if ($env:WNC_TEST_ANSWERS) { $S.Answers = @([IO.File]::ReadAllLines($env:WNC_TEST_ANSWERS, $S.Utf8)) }
             if ($env:WNC_TEST_FREE_GB) { $S.FreeGb = $env:WNC_TEST_FREE_GB }
+            if ($null -ne $env:WNC_TEST_KEYS) { $S.TestKeys = $env:WNC_TEST_KEYS }
+            if ($env:WNC_TEST_COUNTDOWN_S) { $S.CountdownS = [int]$env:WNC_TEST_COUNTDOWN_S }
         } else {
             $h = $env:USERPROFILE
             if (-not $h) { $h = $env:HOME }
@@ -914,6 +1117,10 @@ param(
         $chosen = $false
         $sandboxRoot = $null
         if ($sandbox) { $sandboxRoot = $h }
+        $compPath = Join-Path $root 'setup\components.json'
+        if ($Components) { $compPath = Get-WncFullPath $Components }
+        # D-T1: no question unless the editor customises (the -Customise flag, or C during the countdown)
+        $S.Mode = Select-WncMode -CompPath $compPath -SkipList $skipList -Sandbox $sandbox
         if ($Uninstall) {
             # no question: the folder the engine uses (or -EngineHome); the core checks a chosen one
             $engine = $default
@@ -923,7 +1130,7 @@ param(
             }
         } else {
             $sel = Select-WncEngineHome -Default $default -UserHome $h -Root $root -Pointer $pointer `
-                -SandboxRoot $sandboxRoot -WithModel ($skipList -notcontains 'model')
+                -SandboxRoot $sandboxRoot -WithModel ($skipList -notcontains 'model') -Source $resolved.Source
             if ($sel.Code -ne 0) { return @{ Code = 2 } }
             $engine = $sel.Path
             $chosen = $sel.Chosen
@@ -931,9 +1138,9 @@ param(
         if ($sandbox) { $env:WHYNOT_HOME = $engine }
         $testUv = $null
         if ($sandbox -and $env:WNC_TEST_UV) { $testUv = $env:WNC_TEST_UV }
+        # the core reads the test answers after the ones the location question used
+        if ($null -ne $S.Answers) { $env:WNC_TEST_ANSWERS_AT = [string]$S.AnswerAt }
 
-        $compPath = Join-Path $root 'setup\components.json'
-        if ($Components) { $compPath = Get-WncFullPath $Components }
         try {
             $c = [IO.File]::ReadAllText($compPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
             $uvVer = [string]$c.uv.version
@@ -1041,7 +1248,13 @@ param(
         if ($Model) { $a += @('--model', $Model) }
         if ($Components) { $a += @('--components', $compPath) }
         if ($DryRun) { $a += '--dry-run' }
-        if ($Yes) { $a += '--yes' }
+        if ($Uninstall) {
+            if ($Yes) { $a += '--yes' }
+        } elseif ($S.Mode -eq 'customise') {
+            $a += '--customise'
+        } else {
+            $a += '--yes'  # the default install is exactly the -Yes path (D-T1)
+        }
         if ($skipList.Count -gt 0) { $a += @('--skip', ($skipList -join ',')) }
         if ($ClientsFolder) { $a += @('--clients-folder', (Get-WncFullPath $ClientsFolder)) }
         if ($Language) { $a += @('--language', $Language) }

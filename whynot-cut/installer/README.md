@@ -30,6 +30,33 @@ rights, no Homebrew, no Xcode tools, and no Python on the machine.
 The installer uses the plugin folder it sits in. That is the folder above `installer/` that holds
 `setup/components.json`.
 
+### No questions by default
+
+The installer asks nothing unless you want to choose (Addendum D, D-T1). It starts with one line, in English and
+Arabic:
+
+> Installing everything WhyNot Cut needs (about N GB)
+
+N is the runtime (about 0.5 GB), ffmpeg and the fonts (their sizes from `components.json`), the Whisper model
+(`large-v3`, about 2.9 GB, or the one `-Model` names) and, on Windows when Git Bash is missing, PortableGit; a step
+you skip with `-Skip` is not counted, and N is rounded up to one decimal. When a person is at the terminal, a
+10-second countdown follows on one line that updates in place:
+
+> Press C to customise (10)... / اضغط C للتخصيص
+
+- nobody presses a key, or any key other than C: everything installs with the strongest defaults, exactly as with
+  `-Yes` (the same steps, the same `state.json`; `answers.mode` is `"default"`);
+- **C**: the Customise path - the questions below, every answer preselected (Enter keeps it):
+  the location of the engine (asked by the bootstrap before any download), then the Whisper model, the language and
+  the clients folder (asked by the core). `answers.mode` in `state.json` is then `"customise"`.
+
+`-Customise` / `--customise` goes straight to the Customise path, without the countdown. `-Yes` / `--yes` shows no
+countdown and asks nothing; `-Yes` together with `-Customise` stops with exit code 2. Without a keyboard (input
+redirected or piped, `-NonInteractive`, a CI run, the install from inside Claude, Setup.exe) the installer behaves
+like `-Yes` and never waits for a key. On Windows the key is read from the console (`[Console]::KeyAvailable`); on
+macOS from the terminal, or from `/dev/tty` under `curl | bash` when it can be opened, never from the piped script
+(without `/dev/tty`: no countdown).
+
 ### One line (future: needs hosting, H3)
 
 ```powershell
@@ -65,7 +92,8 @@ and `x/whynot-cut-marketplace/whynot-cut` becomes the plugin folder.
 |---|---|---|
 | `-Home <dir>` | `--home <dir>` | Sandbox or test mode. Everything goes under `<dir>` (see below). |
 | `-DryRun` | `--dry-run` | Says what would happen and writes nothing: no log, no folder. |
-| `-Yes` | `--yes` | Asks no questions and takes the defaults (the strongest choice everywhere). |
+| `-Yes` | `--yes` | Asks no questions and takes the defaults (the strongest choice everywhere), without the 10-second countdown. Without `-Yes` the installer asks nothing either; it only counts down 10 seconds so you can press C (see [No questions by default](#no-questions-by-default)). |
+| `-Customise` | `--customise` | The Customise path: asks the location, the Whisper model, the language and the clients folder, every answer preselected. Also reached by pressing C during the countdown. Not together with `-Yes`. (`-Customize` / `--customize` work too.) |
 | `-EngineHome <dir>` | `--engine-home <dir>` | Where the engine goes (uv, Python, runtimes, ffmpeg, the Whisper model, logs, `state.json`): answers the location question. Default: the folder found as described in [Where the engine home is](#where-the-engine-home-is), normally `~/.whynot-cut`. With `-Uninstall`: the engine home to remove. |
 | `-Model <name>` | `--model <name>` | The Whisper model to install: `large-v3` (about 2.9 GB, the default: best accuracy), `large-v3-turbo` (about 1.6 GB: faster, a little less accurate), `medium` (about 1.5 GB) or `small` (about 0.5 GB). Answers the model question. |
 | `-ClientsFolder <dir>` | `--clients-folder <dir>` | The folder that holds the client folders. The folder itself is never created. |
@@ -85,7 +113,7 @@ Exit codes:
 |---|---|
 | 0 | Done. Some rows may be amber or skipped; the checklist says why. |
 | 1 | At least one step failed (red). |
-| 2 | Cannot start, for one of these reasons: wrong OS or CPU, Git Bash on Windows, no hosting yet, a bad option, an unreadable `components.json`, too little free space, or an engine home that cannot be used (see the location question). Nothing was downloaded. |
+| 2 | Cannot start, for one of these reasons: wrong OS or CPU, Git Bash on Windows, no hosting yet, a bad option (or `-Yes` with `-Customise`), an unreadable `components.json`, too little free space, or an engine home that cannot be used (see the location question, and [A saved engine home in the wrong place](#a-saved-engine-home-in-the-wrong-place)). Nothing was downloaded. |
 | 3 | A download or a bootstrap step failed: uv, Python, or a sha256 mismatch. The message names the file and the log. |
 
 ## Where the engine home is
@@ -114,8 +142,9 @@ The bootstrap works this folder out before it downloads anything and offers it a
 > Where should WhyNot Cut keep its engine (Python, ffmpeg, the Whisper model)? It needs about 6 GB, 9 GB with the
 > model. Enter keeps the folder in brackets.
 
-`-EngineHome <dir>` / `--engine-home <dir>` answers it; `-Yes` / `--yes` takes the default; without a terminal the
-default is used. On macOS the answer is read from the terminal, or from `/dev/tty` under `curl | bash` (never from
+The question is asked only on the Customise path (`-Customise`, or C during the countdown); otherwise the default
+is used, as with `-Yes`. `-EngineHome <dir>` / `--engine-home <dir>` answers it; `-Yes` / `--yes` takes the default;
+without a terminal the default is used. On macOS the answer is read from the terminal, or from `/dev/tty` under `curl | bash` (never from
 the piped script). When WhyNot Cut is already installed there, the question says so: Enter keeps it.
 
 The folder is checked before anything is downloaded (the same rules in both bootstraps and the core):
@@ -190,6 +219,23 @@ A sandbox (`--home`) finds its engine home the same way, but only from its own `
 and `<dir>/.claude/settings.json`, never from the variables of the machine running it, and a chosen folder must be
 inside `<dir>`.
 
+### A saved engine home in the wrong place
+
+An engine home that was not chosen in this run but found as described above (a variable, `plugin-options.json` or
+`settings.json` names it) is used as it is - except `~/.whynot-cut` itself - unless it is:
+
+- a drive root or a mount point (`D:\`, `/Volumes/<name>`);
+- your user folder itself, or Desktop, Documents or Downloads themselves (a folder inside them is fine);
+- a folder holding client data: your saved clients folder (`clients_root` in your preferences or in
+  `plugin-options.json`), or a folder that holds it, or a folder with a `.whynot-client` marker in it or up to three
+  levels below.
+
+Then the install stops with exit code 2 before anything is downloaded, both bootstraps and the core alike, and says
+how to fix it (in English and Arabic): **run the installer again with -EngineHome <folder> / --engine-home <folder>**,
+naming a folder of its own (for example `C:\WhyNotCut` or `~/WhyNotCut`); that folder is then saved in place of the
+old one. A genuine 2.x or 3.0 engine home anywhere else is upgraded in place, with its models. Uninstall is not
+stopped by this rule (it deletes only WhyNot Cut's own entries).
+
 ## What happens
 
 1. **uv.** The pinned uv from `components.json` (`uv.assets.<platform>`) is downloaded into `~/.whynot-cut/downloads/`,
@@ -201,7 +247,9 @@ inside `<dir>`.
    `uv python find` names the interpreter.
 3. **The core.** The bootstrap runs `<python> -I -B -X utf8 installer/core/wnc_install.py install ...`, which runs
    these steps:
-   - preflight, then the questions: clients folder, language and the Whisper (transcription) model. The suggested
+   - preflight, then the questions, only on the Customise path (`--customise`; see [No questions by
+     default](#no-questions-by-default)): the Whisper (transcription) model, the language and the clients folder,
+     each preselected; without Customise the answers below are taken as they are. The suggested
      clients folder is `D:\WhyNot Clients` when a `D:` drive exists, else `Documents/WhyNot Clients`; when Documents
      is synced to OneDrive or iCloud Drive it is `~/WhyNot Clients` instead (raw footage should not go to the cloud),
      and the question says why. A folder you saved in your preferences, or `--clients-folder`, always wins. The model
@@ -319,7 +367,9 @@ Test hooks, honoured only together with `--home`:
 | `WNC_TEST_UV` | A uv stand-in, such as `tests/fixtures/installer/fake_uv.cmd`, `.sh` or `.py`. It is used for `uv python install/find` and by the core. The real uv archive is still downloaded and verified first. |
 | `WNC_TEST_PLATFORM` | `win-x64`, `mac-arm64` or `mac-x64`. It lets Git Bash run the macOS path in tests; without it, `install.sh` on Git Bash says "use install.ps1" and exits 2. |
 | `WNC_CLAUDE_CLI` | A Claude Code CLI stand-in (`tests/fixtures/installer/fake_claude.*`). |
-| `WNC_TEST_ANSWERS` | A text file with one answer per line for the bootstrap's location question (read instead of the keyboard). |
+| `WNC_TEST_ANSWERS` | A text file with one answer per line, read instead of the keyboard: first the bootstrap's location question, then (from the line after the bootstrap's last one, which the bootstrap passes on as `WNC_TEST_ANSWERS_AT`) the core's Customise questions. |
+| `WNC_TEST_KEYS` | Stands in for the keyboard during the countdown, as if a person were at the console: `C` (Customise), another key (go on at once), or `none` (nobody presses). |
+| `WNC_TEST_COUNTDOWN_S` | With `WNC_TEST_KEYS`: the seconds the countdown waits in all (`0` = none). |
 | `WNC_TEST_FREE_GB` | The free space (GB) the bootstrap's location check sees. |
 
 The installer's own tests are in `tests/test_installer.py` (run with `bash tools/test.sh -p test_installer.py`). They
@@ -370,7 +420,10 @@ track. The docstring of `tools/release.py` describes the release index that the 
 ### Not verified
 
 - A real Mac run. Not yet checked there: reading JSON through JXA (`osascript -l JavaScript`), `shasum` and `tar`
-  from macOS, and questions asked through `/dev/tty`.
+  from macOS, and questions asked through `/dev/tty`, including the countdown's `read -t 1 -n 1` (and its install
+  size, computed with JXA).
+- The countdown with a real keyboard: the tests drive it through `WNC_TEST_KEYS`; `[Console]::KeyAvailable` in a
+  real PowerShell console window (and in hosts such as ISE or VS Code) was not pressed by hand.
 - Real per-user font registration on Windows (`HKCU\...\Fonts` values and the font-change broadcast). The tests use a
   fake `LOCALAPPDATA` and a JSON stand-in for the registry.
 - Adobe's plugin installer (UPIA) installing or removing the UXP panel.

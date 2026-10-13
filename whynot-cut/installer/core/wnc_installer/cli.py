@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -65,6 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--log", help="log file shared with the bootstrap (default: logs/<command>-<time>.log)")
     common.add_argument("--dry-run", action="store_true", help="say what would happen; write nothing")
     common.add_argument("--yes", "-y", action="store_true", help="no questions: take the defaults")
+    common.add_argument("--customise", "--customize", action="store_true",
+                        help="ask the questions (model, language, clients folder), every answer preselected; without "
+                             "it the install asks nothing (D-T1)")
     common.add_argument("--skip", type=_csv, default=[], help="comma-separated step names to skip")
     common.add_argument("--clients-folder", help="folder that holds the client folders")
     common.add_argument("--language", choices=("ar", "en"))
@@ -96,17 +100,40 @@ def _utf8_console() -> None:
             pass
 
 
+def test_answers(args, env=None) -> "list | None":
+    """The sandbox-only test hook WNC_TEST_ANSWERS (honoured only with --home): its lines after the first
+    WNC_TEST_ANSWERS_AT, which the bootstrap's location question already used; None = the keyboard."""
+    env = os.environ if env is None else env
+    f = env.get("WNC_TEST_ANSWERS")
+    if not getattr(args, "home", None) or not f:
+        return None
+    try:
+        lines = Path(f).read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return None
+    try:
+        at = max(int(env.get("WNC_TEST_ANSWERS_AT") or 0), 0)
+    except ValueError:
+        at = 0
+    return lines[at:]
+
+
+def _client_roots(paths: base.Paths) -> list:
+    """The saved clients folders: clients_root of the preferences file and of the pointer."""
+    from .system import read_preferences
+    roots = [read_preferences(paths).get("clients_root")]
+    ptr = base.read_pointer(paths.options_file)
+    roots.append(ptr.get("clients_root") if ptr is not None else None)
+    return [base.saved_path(r, paths.home) for r in roots if isinstance(r, str) and r.strip()]
+
+
 def _engine_home_check(paths: base.Paths, plugin_root: Path, chosen) -> tuple:
     """(problem, final folder, note). A chosen engine home is placed and checked like the bootstraps do it
     (base.choose_engine_home: the clients folder from the preferences and the pointer counts; a folder holding the
     editor's own files becomes <it>/WhyNotCut); a sandbox's resolved engine home must stay inside the sandbox."""
     if not chosen and not paths.sandbox:
         return "", paths.whynot, ""
-    from .system import read_preferences
-    roots = [read_preferences(paths).get("clients_root")]
-    ptr = base.read_pointer(paths.options_file)
-    roots.append(ptr.get("clients_root") if ptr is not None else None)
-    roots = [base.saved_path(r, paths.home) for r in roots if isinstance(r, str) and r.strip()]
+    roots = _client_roots(paths)
     if not chosen:  # a sandbox's own pointer / settings.json named it: only the sandbox rule
         inside = base._within(base._norm(paths.whynot), base._norm(paths.home), strict=True)
         return ("" if inside else f"it is outside the sandbox home {paths.home} (--home: nothing outside it is "
@@ -125,6 +152,10 @@ def main(argv=None) -> int:
     unknown = [s for s in args.skip if s not in names]
     if unknown:
         parser.error(f"--skip: unknown step(s) {', '.join(unknown)}; steps are {', '.join(names)}")
+    if args.yes and args.customise:
+        parser.error("--yes and --customise cannot be used together (--yes asks nothing; --customise asks the "
+                     "questions)")
+    base.set_test_answers(test_answers(args))
     plugin_root = Path(args.plugin_root).resolve() if args.plugin_root else default_plugin_root()
     chosen = args.engine_home if args.engine_home and args.engine_home_chosen else None
     paths = base.Paths.from_env(args.home, engine_home=chosen)
@@ -143,6 +174,17 @@ def main(argv=None) -> int:
     if chosen and not base.same_path(final, paths.whynot):  # the editor's own files are there: its own subfolder
         paths = base.Paths.from_env(args.home, engine_home=str(final))
         print(note, file=sys.stderr)  # (plan prints JSON on stdout)
+    if not chosen and args.command in ("install", "plan"):
+        # task 9: a RESOLVED engine home other than ~/.whynot-cut in a place it must never be (uninstall is not
+        # stopped: it deletes only WhyNot Cut's own entries)
+        why = base.resolved_home_problem(paths.whynot, home=paths.home, clients_roots=_client_roots(paths))
+        if why:
+            print(f"ERROR: WhyNot Cut will not use {paths.whynot} as its engine home "
+                  f"({base.describe_engine_home_source(paths.engine_home_source)}): it is {why}. Nothing was changed. "
+                  f"To fix it, {base.SELF_FIX} (a folder of its own, for example C:\\WhyNotCut or ~/WhyNotCut).",
+                  file=sys.stderr)
+            print(base.SELF_FIX_AR, file=sys.stderr)
+            return 2
 
     if args.command == "plan":
         try:

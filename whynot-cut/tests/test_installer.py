@@ -74,6 +74,7 @@ import hashlib
 import http.server
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -3322,15 +3323,15 @@ class TestModelChoice(unittest.TestCase):
         for replies, want in (([""], "medium"), (["2"], "large-v3-turbo"), (["small"], "small"),
                               (["huge", "9", "1"], "large-v3")):
             with self.subTest(replies=list(replies)):
-                ctx = self.ctx()
+                ctx = self.ctx(yes=False, customise=True)  # (D-T1: questions only on the Customise path)
                 prompts.clear()
-                # clients folder and language keep their defaults; then the model answers
+                # the model first (task 9 order: model, language, clients folder); the other two keep their defaults
                 with mock.patch.object(base, "can_ask", return_value=True), \
-                        mock.patch.object(base, "ask", side_effect=answer(["", ""] + list(replies))):
+                        mock.patch.object(base, "ask", side_effect=answer(list(replies) + ["", ""])):
                     r = self.sy.step_questions(ctx)
                 self.assertEqual(ctx.answers["whisper_model"], want, r.detail)
                 self.assertIn("Whisper " + want, r.detail)
-                self.assertIn("[medium]", prompts[2])  # the saved preference is the default on a re-install
+                self.assertIn("[medium]", prompts[0])  # the saved preference is the default on a re-install
         text = ctx.paths.logs_dir.joinpath("install-test.log").read_text(encoding="utf-8")
         for needle in ("large-v3", "2.9 GB", "large-v3-turbo", "1.6 GB", "medium", "1.5 GB", "small", "0.5 GB",
                        "best accuracy", "faster", "أعلى دقة", "أسرع"):
@@ -3681,8 +3682,13 @@ class TestShellScripts(unittest.TestCase):
                      "--home", "--dry-run", "--yes", "--clients-folder", "--language", "--channel", "--components",
                      "--skip", "--uninstall", "--remove-engine", "--remove-models", "--source", "--source-sha256",
                      "WNC_TEST_UV", "WNC_TEST_PLATFORM", "logs", "-Model", "--model", "-EngineHome",
-                     "WNC_TEST_ANSWERS", "WNC_TEST_FREE_GB"):
+                     "WNC_TEST_ANSWERS", "WNC_TEST_FREE_GB", "-Customise", "--customise", "WNC_TEST_KEYS",
+                     "WNC_TEST_COUNTDOWN_S", "WNC_TEST_ANSWERS_AT"):
             self.assertIn(flag, text)
+        # task 9 (D-T1): no questions by default, the countdown, and the resolved-home guard with its self-fix
+        for needle in ("Installing everything WhyNot Cut needs (about N GB)", "Press C to customise", "answers.mode",
+                       SELF_FIX):
+            self.assertIn(needle, text)
         # what -RemoveEngine keeps, and where the engine home comes from
         for needle in ("library/", "plugin-options.json", "pluginConfigs", "WHYNOT_HOME", "--engine-home"):
             self.assertIn(needle, text)
@@ -4923,11 +4929,12 @@ class TestPowerShellEngineHome(TestPowerShellFrontEnd):
         self.assertEqual(live_snapshot(), before)
 
     def test_the_location_question(self):
-        # no -Yes: the bootstrap asks (answers from the sandbox-only test hook WNC_TEST_ANSWERS, one per line)
+        # -Customise: the bootstrap asks (answers from the sandbox-only test hook WNC_TEST_ANSWERS, one per line)
         answers = self.tmp / "answers.txt"
         answers.write_text("\n".join(["engine", str(self.home / "Engine Y"), ""]) + "\n", encoding="utf-8")
         self.home.mkdir()
-        r = self.ps(self.front(), "-Home", self.home, "-DryRun", env=self.env(WNC_TEST_ANSWERS=str(answers)))
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Customise",
+                    env=self.env(WNC_TEST_ANSWERS=str(answers)))
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
         self.assertIn(str(self.home / ".whynot-cut"), out)  # the default offered first
@@ -5050,7 +5057,8 @@ class TestPowerShellEngineHome(TestPowerShellFrontEnd):
         touch(self.home / ".whynot-cut" / "state.json", GENUINE_STATE)
         answers = self.tmp / "answers.txt"
         answers.write_text("\n", encoding="utf-8")  # Enter, once: a second question would end the answers (exit 2)
-        r = self.ps(self.front(), "-Home", self.home, "-DryRun", env=self.env(WNC_TEST_ANSWERS=str(answers)))
+        r = self.ps(self.front(), "-Home", self.home, "-DryRun", "-Customise",
+                    env=self.env(WNC_TEST_ANSWERS=str(answers)))
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
         self.assertIn("already installed there, so it stays there", out)
@@ -5121,7 +5129,7 @@ class TestBashEngineHome(TestBashFrontEnd):
         answers = self.tmp / "answers.txt"
         answers.write_text("engine\n" + (self.home / "Engine Z").as_posix() + "\n", encoding="utf-8", newline="\n")
         self.home.mkdir()
-        r = self.sh(self.front(), "--home", self.home_arg(), "--dry-run",
+        r = self.sh(self.front(), "--home", self.home_arg(), "--dry-run", "--customise",
                     env=self.env(WNC_TEST_ANSWERS=answers.as_posix()))
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
@@ -5231,6 +5239,386 @@ class TestBashEngineHome(TestBashFrontEnd):
         r = self.sh(self.front(), "--home", self.home_arg(), "--dry-run", "--yes", "--model", "huge")
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertEqual(self.srv.srv.hits, [])
+
+
+# --------------------------------------------------------------------------------------------- task 9 (Addendum D, D-T1)
+SIZE_EN = "Installing everything WhyNot Cut needs (about {} GB)"
+SIZE_AR = "جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي {} جيجابايت)"
+COUNTDOWN_EN = "Press C to customise (10)" + chr(0x2026)
+COUNTDOWN_AR = "اضغط C للتخصيص"
+SELF_FIX = "run the installer again with -EngineHome <folder> / --engine-home <folder>"
+SELF_FIX_AR = "شغّل المثبّت مرة أخرى"
+QUESTION_NEEDLES = ("Folder / ", "Model / ", "Language / ", "client folders / ")  # bootstrap location + the core's
+
+
+def comparable_state(path: Path, home: Path) -> dict:
+    """state.json without what differs between two equal runs in two sandbox homes: timestamps, free space, the home."""
+    homes = sorted({str(home), home.as_posix(), json.dumps(str(home))[1:-1]}, key=len, reverse=True)
+
+    def walk(v):
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items() if not (k == "at" or k.endswith("_at") or k == "free_gb")}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if isinstance(v, str):
+            for h in homes:
+                v = v.replace(h, "<HOME>")
+            v = re.sub(r"\d{8}-\d{6}", "<T>", v)
+            return re.sub(r"[\d.]+ GB free", "<N> GB free", v)
+        return v
+    return walk(json.loads(path.read_text(encoding="utf-8")))
+
+
+class TestNoQuestionsByDefault(unittest.TestCase):
+    """D-T1: the core asks nothing unless --customise; answers.mode records which; the install size estimate."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.sy = system_module()
+
+    def ctx(self, **args):
+        a = {"clients_folder": None, "language": None, "model": None, "yes": False, "customise": False}
+        a.update(args)
+        return make_ctx(self.home, {"schema": 1}, SK, "win-x64", **a)
+
+    def test_the_default_mode_asks_nothing_even_with_a_terminal(self):
+        ctx = self.ctx()
+        with mock.patch.object(base, "can_ask", return_value=True), \
+                mock.patch.object(base, "ask", side_effect=AssertionError("asked without --customise")):
+            r = self.sy.step_questions(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(ctx.answers["mode"], "default")
+        self.assertEqual(self.sy.answer_mode(ctx), "default")
+        self.assertEqual(self.sy.answer_mode(self.ctx(yes=True)), "default")
+
+    def test_customise_asks_model_language_then_clients_folder_each_preselected(self):
+        prompts = []
+        replies = ["2", "en", str(self.home.parent / "My Clients")]
+
+        def ask(prompt, default=""):
+            prompts.append(prompt)
+            return replies.pop(0) if replies else default
+        ctx = self.ctx(customise=True)
+        with mock.patch.object(base, "can_ask", return_value=True), mock.patch.object(base, "ask", side_effect=ask):
+            self.sy.step_questions(ctx)
+        self.assertEqual(len(prompts), 3, prompts)
+        self.assertIn("Model / ", prompts[0])
+        self.assertIn("[large-v3]", prompts[0])
+        self.assertIn("Language / ", prompts[1])
+        self.assertIn("[ar]", prompts[1])
+        self.assertIn("client folders / ", prompts[2])
+        self.assertIn(str(self.home / "Documents" / "WhyNot Clients"), prompts[2])
+        a = ctx.answers
+        self.assertEqual((a["whisper_model"], a["language"], a["clients_root"], a["mode"]),
+                         ("large-v3-turbo", "en", str(self.home.parent / "My Clients"), "customise"))
+
+    def test_customise_without_a_terminal_keeps_every_default(self):
+        ctx = self.ctx(customise=True)
+        with mock.patch.object(base, "can_ask", return_value=False), \
+                mock.patch.object(base, "ask", side_effect=AssertionError("asked")):
+            self.sy.step_questions(ctx)
+        self.assertEqual((ctx.answers["whisper_model"], ctx.answers["mode"]), ("large-v3", "customise"))
+
+    def test_state_records_the_mode(self):
+        for customise, want in ((False, "default"), (True, "customise")):
+            with self.subTest(customise=customise):
+                ctx = self.ctx(customise=customise, channel=None)
+                with mock.patch.object(base, "can_ask", return_value=False):
+                    self.sy.step_questions(ctx)
+                self.sy.step_state(ctx)
+                st = json.loads(ctx.paths.state_file.read_text(encoding="utf-8"))
+                self.assertEqual(st["answers"]["mode"], want)
+
+    def test_yes_and_customise_cannot_be_used_together(self):
+        err = io.StringIO()
+        with self.assertRaises(SystemExit) as cm, contextlib.redirect_stderr(err):
+            cli.main(["install", "--home", str(self.home), "--yes", "--customise"])
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("--customise", err.getvalue())
+        self.assertFalse(self.home.exists())
+
+    def test_the_answers_hook_is_honoured_only_in_a_sandbox_and_after_the_bootstraps_lines(self):
+        answers = touch(self.home.parent / "answers.txt", "\n".join(["loc", "2", "en"]).encode("utf-8"))
+        env = {"WNC_TEST_ANSWERS": str(answers), "WNC_TEST_ANSWERS_AT": "1"}
+        self.assertEqual(cli.test_answers(argparse.Namespace(home=str(self.home)), env), ["2", "en"])
+        self.assertIsNone(cli.test_answers(argparse.Namespace(home=None), env))
+        self.assertIsNone(cli.test_answers(argparse.Namespace(home=str(self.home)), {}))
+        try:
+            base.set_test_answers(["medium"])
+            self.assertTrue(base.can_ask(argparse.Namespace(yes=False)))
+            self.assertFalse(base.can_ask(argparse.Namespace(yes=True)))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(base.ask("Model / النموذج [large-v3]: ", ""), "medium")
+                self.assertEqual(base.ask("Language [ar]: ", "ar"), "ar")  # no lines left: the default
+            self.assertIn("Model / ", out.getvalue())
+        finally:
+            base.set_test_answers(None)
+
+    def test_the_install_size(self):
+        sy = self.sy
+        comp = base.load_components(COMPONENTS)
+        g = 1024 ** 3
+        ff = sum(f["bytes"] for f in comp["ffmpeg"]["assets"]["win-x64"]["files"]) / g
+        fonts = sum(f["bytes"] for f in comp["fonts"]["files"] + comp["fonts"].get("licenses", [])) / g
+        git = comp["git"]["assets"]["win-x64"]["bytes"] / g
+
+        def up(x):
+            return math.ceil(round(x * 10, 6)) / 10
+        self.assertEqual(sy.install_size_gb(comp, "win-x64", git_missing=True), up(0.5 + ff + fonts + 2.9 + git))
+        self.assertEqual(sy.install_size_gb(comp, "win-x64", git_missing=False), up(0.5 + ff + fonts + 2.9))
+        mac_ff = sum(f["bytes"] for f in comp["ffmpeg"]["assets"]["mac-arm64"]["files"]) / g
+        self.assertEqual(sy.install_size_gb(comp, "mac-arm64", git_missing=True), up(0.5 + mac_ff + fonts + 2.9))
+        self.assertEqual(sy.install_size_gb(comp, "win-x64", model="small", skip=("ffmpeg", "fonts")),
+                         up(0.5 + 0.5))
+        self.assertEqual(sy.install_size_gb(comp, "win-x64", skip=("model",)), up(0.5 + ff + fonts))
+        # without sizes in components.json: the constants (runtime 0.5, ffmpeg 0.1, fonts 0.01, Git 0.4)
+        self.assertEqual(sy.install_size_gb({"schema": 1}, "win-x64", git_missing=True), up(0.5 + 0.1 + 0.01 + 2.9 + 0.4))
+        self.assertEqual(sy.format_gb(3.5), "3.5")
+        self.assertEqual(sy.format_gb(4.0), "4.0")
+
+
+class TestResolvedHomeGuard(unittest.TestCase):
+    """Task 8 review carry (controller ruling): a RESOLVED engine home other than ~/.whynot-cut that is a drive root /
+    mount point, the user folder, Desktop / Documents / Downloads themselves, or holds client data is refused."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.home.mkdir()
+
+    def problem(self, path, clients=()):
+        return base.resolved_home_problem(path, home=self.home, clients_roots=clients)
+
+    def test_the_refused_places(self):
+        h = self.home
+        touch(h / "Work" / "Clinic" / "Dr X" / ".whynot-client", b"{}")  # 3 levels below Work
+        touch(h / "Deep" / "a" / "b" / "c" / "d" / ".whynot-client", b"{}")  # 4 levels: not looked at
+        touch(h / "Shoot" / ".whynot-client", b"{}")  # the folder itself is a client folder
+        for bad, needle in ((Path(h.anchor), "drive root"), (h, "your user folder"), (h / "Desktop", "Desktop"),
+                            (h / "Documents", "Documents"), (h / "Downloads", "Downloads"),
+                            (h / "Work", "client folder"), (h / "Shoot", "client folder"),
+                            (h / "Clients Base", "clients folder")):
+            with self.subTest(str(bad)):
+                p = self.problem(bad, clients=[h / "Clients Base" / "WhyNot Clients"])
+                self.assertIsNotNone(p)
+                self.assertIn(needle, p)
+        with mock.patch.object(base.os.path, "ismount", side_effect=lambda p: norm(p) == norm(h / "USB")):
+            self.assertIn("mount point", self.problem(h / "USB"))
+        for fine in (h / ".whynot-cut", h / "Documents" / "WhyNot Engine", h / "Deep", h / "Old Engine"):
+            with self.subTest(fine=str(fine)):
+                self.assertIsNone(self.problem(fine, clients=[h / "Clients Base" / "WhyNot Clients"]))
+        # ~/.whynot-cut itself is never refused by this rule, whatever it holds
+        touch(h / ".whynot-cut" / "Clients" / ".whynot-client", b"{}")
+        self.assertIsNone(self.problem(h / ".whynot-cut"))
+
+    def run_core(self, *args):
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            rc = cli.main(list(args))
+        return rc, out.getvalue() + err.getvalue()
+
+    def test_the_core_refuses_a_resolved_home_with_the_self_fix(self):
+        mine = touch(self.home / "Documents" / "thesis.docx", b"mine")
+        EngineHomeCases.pointer(self.home, {"clients_root": "", "engine_home": str(self.home / "Documents")})
+        rc, out = self.run_core("install", "--home", str(self.home), "--yes", "--quiet")
+        self.assertEqual(rc, 2, out)
+        self.assertIn(SELF_FIX, out)
+        self.assertIn(SELF_FIX_AR, out)
+        self.assertEqual(os.listdir(self.home / "Documents"), ["thesis.docx"])
+        self.assertEqual(mine.read_bytes(), b"mine")
+        # the clients folder saved in the pointer counts too
+        EngineHomeCases.pointer(self.home, {"clients_root": str(self.home / "Media" / "Clients"),
+                                            "engine_home": str(self.home / "Media")})
+        rc, out = self.run_core("install", "--home", str(self.home), "--yes", "--quiet")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("clients folder", out)
+        # plan says the same; a chosen folder is placed by the Task 8 rules instead (Documents -> its subfolder)
+        rc, out = self.run_core("plan", "--home", str(self.home))
+        self.assertEqual(rc, 2, out)
+        rc, out = self.run_core("plan", "--home", str(self.home), "--engine-home", str(self.home / "Documents"),
+                                "--engine-home-chosen")
+        self.assertEqual(rc, 0, out)
+
+
+def _install_size_text(fx, plat: str, skip=("model", "launch"), git_missing=None) -> str:
+    sy = system_module()
+    gm = plat.startswith("win") if git_missing is None else git_missing
+    return SIZE_EN.format(sy.format_gb(sy.install_size_gb(fx.components, plat, skip=skip, git_missing=gm)))
+
+
+class _CountdownCases:
+    """The same D-T1 cases for both shells: inst(home, *flags, env=) -> CompletedProcess, PLAT, flag(name)."""
+
+    def keys_env(self, keys, **extra):
+        return self.env(WNC_TEST_KEYS=keys, WNC_TEST_COUNTDOWN_S="0", **extra)
+
+    def assert_no_question(self, out: str) -> None:
+        for needle in QUESTION_NEEDLES:
+            self.assertNotIn(needle, out)
+
+    def test_the_default_run_asks_nothing_and_writes_the_same_state_as_yes(self):
+        r = self.inst(self.home, "skip", env=self.keys_env("none"))  # a fake console; nobody presses a key
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn(_install_size_text(self.fx, self.PLAT), out)
+        self.assertIn(SIZE_AR.split("(")[0].strip(), out)
+        self.assertIn(COUNTDOWN_EN, out)
+        self.assertIn(COUNTDOWN_AR, out)
+        self.assert_no_question(out)
+        default_state = comparable_state(self.paths.state_file, self.home)
+        self.assertEqual(default_state["answers"]["mode"], "default")
+        yes_home = self.tmp / "y" / ARABIC_HOME  # the same name: the same preflight facts
+        r2 = self.inst(yes_home, "yes", "skip")
+        out2 = r2.stdout + r2.stderr
+        self.assertEqual(r2.returncode, 0, out2)
+        self.assertNotIn("Press C", out2)  # -Yes: no countdown
+        yes_paths = base.Paths.from_env(str(yes_home), env={})
+        self.assertEqual(comparable_state(yes_paths.state_file, yes_home), default_state)
+
+    def test_any_other_key_continues_at_once(self):
+        r = self.inst(self.home, "dry", env=self.keys_env("x"))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn(COUNTDOWN_EN, out)
+        self.assert_no_question(out)
+
+    def customise_answers(self, location: list) -> Path:
+        clients = self.tmp / "My Clients"
+        answers = self.tmp / "answers.txt"
+        answers.write_text("\n".join(location + ["2", "en", str(clients) if self.PLAT.startswith("win")
+                                                  else clients.as_posix()]) + "\n", encoding="utf-8", newline="\n")
+        return answers
+
+    def assert_customised(self, r) -> None:
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        for needle in QUESTION_NEEDLES:
+            self.assertIn(needle, out)
+        st = json.loads(self.paths.state_file.read_text(encoding="utf-8"))
+        a = st["answers"]
+        self.assertEqual((a["whisper_model"], a["language"], a["mode"]), ("large-v3-turbo", "en", "customise"), out)
+        self.assertEqual(norm(a["clients_root"]), norm(self.tmp / "My Clients"))
+        self.assertFalse((self.tmp / "My Clients").exists())
+
+    def test_c_opens_the_customise_questions(self):
+        answers = self.customise_answers(self.LOCATION_ENTER)
+        r = self.inst(self.home, "skip", env=self.keys_env("C", WNC_TEST_ANSWERS=self.answers_path(answers)))
+        self.assertIn(COUNTDOWN_EN, r.stdout + r.stderr)
+        self.assert_customised(r)
+
+    def test_the_customise_flag_opens_them_without_a_countdown(self):
+        answers = self.customise_answers(self.LOCATION_ENTER)
+        r = self.inst(self.home, "customise", "skip", env=self.env(WNC_TEST_ANSWERS=self.answers_path(answers)))
+        self.assertNotIn("Press C", r.stdout + r.stderr)
+        self.assert_customised(r)
+        r = self.inst(self.tmp / "both", "customise", "yes", "dry")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("cannot be used together", r.stdout + r.stderr)
+
+    def test_without_a_keyboard_there_is_no_countdown_and_no_wait(self):
+        t0 = time.monotonic()
+        r = self.inst(self.home, "skip")  # stdin redirected, no test hook: like -Yes
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertNotIn("Press C", out)
+        self.assert_no_question(out)
+        self.assertIn(_install_size_text(self.fx, self.PLAT), out)
+        st = json.loads(self.paths.state_file.read_text(encoding="utf-8"))
+        self.assertEqual(st["answers"]["mode"], "default")
+        self.assertLess(time.monotonic() - t0, 300)
+
+    def test_a_resolved_home_in_an_unsafe_place_is_refused_before_any_download(self):
+        h = self.home
+        mine = touch(h / "Documents" / "thesis.docx", b"mine")
+        touch(h / "Work" / "Clinic" / "Dr X" / ".whynot-client", b"{}")
+        drive = Path(self.tmp.anchor)
+        before = (drive / "state.json").exists(), (drive / "logs").exists()
+        for bad, needle in ((h / "Documents", "Documents"), (h / "Work", "client folder"),
+                            (drive, "drive root")):
+            with self.subTest(str(bad)):
+                EngineHomeCases.pointer(h, {"clients_root": "", "engine_home": str(bad)})
+                r = self.inst(h, "yes", "skip")
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 2, out)
+                self.assertIn(needle, out)
+                self.assertIn(SELF_FIX, out)
+                self.assertIn(SELF_FIX_AR, out)
+        self.assertEqual(self.srv.srv.hits, [])
+        self.assertEqual(os.listdir(h / "Documents"), ["thesis.docx"])
+        self.assertEqual(mine.read_bytes(), b"mine")
+        self.assertEqual(sorted(os.listdir(h / "Work")), ["Clinic"])
+        self.assertEqual(((drive / "state.json").exists(), (drive / "logs").exists()), before)
+        self.assertEqual([n for n in os.listdir(drive) if n.startswith(".wnc-write-test")], [])
+
+
+@unittest.skipUnless(find_powershell(), "Windows PowerShell is not available")
+class TestPowerShellCountdown(_CountdownCases, _ShellCase):
+    PLAT = "win-x64"
+    # Enter keeps the default; the Arabic sandbox home is warned about and asked once more: its path again keeps it
+    env = TestPowerShellFrontEnd.env
+    ps = TestPowerShellFrontEnd.ps
+    front = TestPowerShellFrontEnd.front
+
+    @property
+    def LOCATION_ENTER(self):
+        return ["", str(self.home / ".whynot-cut")]
+
+    def answers_path(self, p: Path) -> str:
+        return str(p)
+
+    def inst(self, home: Path, *flags, env=None):
+        args = ["-Home", home]
+        names = {"yes": ["-Yes"], "customise": ["-Customise"], "dry": ["-DryRun"], "skip": ["-Skip", "model,launch"]}
+        for f in flags:
+            args += names[f]
+        return self.ps(self.front(), *args, env=env)
+
+    def test_the_size_line_counts_git_only_when_it_is_missing(self):
+        touch(self.home / "AppData" / "Local" / "WhyNotCut" / "git" / "bin" / "bash.exe", b"MZ bash")
+        r = self.inst(self.home, "dry", "skip", env=self.keys_env("x"))
+        self.assertIn(_install_size_text(self.fx, self.PLAT, git_missing=False), r.stdout + r.stderr)
+
+
+@unittest.skipUnless(find_bash(), "bash is not available")
+class TestBashCountdown(_CountdownCases, _ShellCase):
+    PLAT = "mac-arm64"
+    LOCATION_ENTER = [""]
+    env = TestBashFrontEnd.env
+    sh = TestBashFrontEnd.sh
+    front = TestBashFrontEnd.front
+    home_arg = TestBashFrontEnd.home_arg
+
+    def answers_path(self, p: Path) -> str:
+        return p.as_posix()
+
+    def inst(self, home: Path, *flags, env=None):
+        args = ["--home", home.as_posix()]
+        names = {"yes": ["--yes"], "customise": ["--customise"], "dry": ["--dry-run"],
+                 "skip": ["--skip", "model,launch"]}
+        for f in flags:
+            args += names[f]
+        return self.sh(self.front(), *args, env=env)
+
+    def test_piped_without_a_terminal_has_no_countdown(self):
+        zf = self.tmp / "WhyNotCut-3.0.0.zip"
+        zsha = release_zip(self.fx, zf)
+        r = self.sh("-s", "--", "--home", self.home_arg(), "--skip", "model,launch", "--source", zf.as_posix(),
+                    "--source-sha256", zsha, script=(INSTALLER / "install.sh").read_bytes())
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertNotIn("Press C", out)
+        self.assert_no_question(out)
+
+    def test_the_countdown_reads_only_the_terminal(self):
+        text = (INSTALLER / "core" / "bootstrap.sh").read_text(encoding="utf-8")
+        body = shell_function(INSTALLER / "core" / "bootstrap.sh", "countdown", ps=False)
+        self.assertIn("read -r -s -n 1 -t 1", body)
+        self.assertIn("</dev/tty", body)
+        self.assertIn("countdown", text)
 
 
 # --------------------------------------------------------------------------------------------- task 7: release stub

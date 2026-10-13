@@ -48,6 +48,22 @@
 # for `python install/find` after the real archive was still downloaded and verified; a .sh runs with bash, a .py
 # with the JSON-reading python), WNC_TEST_ANSWERS (a file: one answer per line for the location question) and
 # WNC_TEST_FREE_GB (the free space the check sees).
+# No questions by default (Addendum D, D-T1, task 9): an install prints "Installing everything WhyNot Cut needs (about N
+# GB)" (English + Arabic; N from components.json `bytes` where present, the core's system.install_size_gb rule) and,
+# with a person at the terminal, a 10-second line "Press C to customise (10)... / <Arabic>" that counts down in place
+# (`read -t 1 -n 1` from the terminal: stdin when it is one, else /dev/tty when it can be opened - never the piped
+# script). C opens the Customise path; any other key or the end of the countdown installs with the strongest defaults,
+# exactly like --yes (the core gets --yes: the same state.json, answers.mode "default"). --customise (or C) asks the
+# location question here and passes --customise, so the core asks the model, the language and the clients folder,
+# every answer preselected. --yes: no countdown, no question. No terminal (curl | bash without /dev/tty, CI, Door 2):
+# like --yes, never waiting. --yes with --customise: exit 2.
+# A RESOLVED engine home other than ~/.whynot-cut (a variable, the pointer or settings.json named it) that is a drive
+# root or mount point, the home folder itself, Desktop / Documents / Downloads themselves, or holds client data (the
+# saved clients folder, or .whynot-client up to 3 levels below) is refused with exit 2 before any download, with the
+# self-fix "run the installer again with -EngineHome <folder> / --engine-home <folder>" (English + Arabic); the core
+# applies the same rule (base.resolved_home_problem). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another
+# key, or "none" = nobody presses), WNC_TEST_COUNTDOWN_S (the seconds the countdown waits with the hook; 0 = none); the
+# core reads the WNC_TEST_ANSWERS lines after the ones used here (WNC_TEST_ANSWERS_AT).
 # bash 3.2 (the macOS default): no associative arrays, no ${var,,}, no mapfile. No `set -e`: every failure is handled.
 
 STEP_NAMES="preflight questions runtime ffmpeg gitbash gpu claude adobe fonts settings model state doctor launch"
@@ -317,7 +333,7 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
 
 # ------------------------------------------------------------------------------------------- arguments
 PLUGIN_ROOT="" HOME_OVR="" DRY="" YES="" CLIENTS="" LANG_OPT="" CHANNEL="" COMPONENTS="" SKIP=""
-UNINSTALL="" REMOVE_ENGINE="" REMOVE_MODELS="" ENGINE_OPT="" MODEL_OPT=""
+UNINSTALL="" REMOVE_ENGINE="" REMOVE_MODELS="" ENGINE_OPT="" MODEL_OPT="" CUSTOMISE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --plugin-root) PLUGIN_ROOT="$2"; shift ;;
@@ -326,6 +342,7 @@ while [ $# -gt 0 ]; do
     --model) MODEL_OPT="$2"; shift ;;
     --dry-run) DRY=1 ;;
     --yes|-y) YES=1 ;;
+    --customise|--customize) CUSTOMISE=1 ;;
     --clients-folder) CLIENTS="$2"; shift ;;
     --language) LANG_OPT="$2"; shift ;;
     --channel) CHANNEL="$2"; shift ;;
@@ -343,6 +360,9 @@ case "$MODEL_OPT" in
   ""|large-v3|large-v3-turbo|medium|small) ;;  # wnc_installer/system.py MODELS
   *) stop2 "--model $MODEL_OPT is not one of large-v3, large-v3-turbo, medium, small" ;;
 esac
+if [ -n "$CUSTOMISE" ] && [ -n "$YES" ] && [ -z "$UNINSTALL" ]; then
+  stop2 "--yes and --customise cannot be used together (--yes asks nothing; --customise asks the questions)"
+fi
 
 abs_path() { # an absolute path (POSIX /x or Windows C:/x stays as it is)
   case "$1" in
@@ -662,11 +682,182 @@ free_gb() { # path -> FREE: whole GB free on its drive (empty when unknown)
   FREE=$((kb / 1048576))
 }
 
-can_ask() { # the location question: never with --yes or --uninstall; the test hook; else a terminal (or /dev/tty)
-  [ -z "$YES" ] && [ -z "$UNINSTALL" ] || return 1
-  [ -n "$ANSWERS" ] && return 0
+has_keyboard() { # a person at a terminal: stdin is one, or /dev/tty can be opened (curl | bash)
   [ -t 0 ] && return 0
   { : </dev/tty; } 2>/dev/null
+}
+
+can_ask() { # the location question: only on the Customise path (D-T1), never with --yes or --uninstall; the test
+  # hook; else a terminal (or /dev/tty)
+  [ -z "$YES" ] && [ -z "$UNINSTALL" ] && [ "$RUN_MODE" = "customise" ] || return 1
+  [ -n "$ANSWERS" ] && return 0
+  has_keyboard
+}
+
+# D-T1: the install size, the core's system.install_size_gb (argv: components.json, platform, model, skip list,
+# git missing 1/0). macOS: JXA; elsewhere (Git Bash in tests) the same rule in Python.
+JXA_SIZE='function run(argv) {
+  ObjC.import("Foundation");
+  var c = null;
+  var t = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
+  if (!t.isNil()) { try { c = JSON.parse(ObjC.unwrap(t).replace(/^\uFEFF/, "")); } catch (e) { c = null; } }
+  function get(o, keys) {
+    for (var i = 0; i < keys.length; i++) {
+      if (o === null || typeof o !== "object" || Array.isArray(o) ||
+          !Object.prototype.hasOwnProperty.call(o, keys[i])) { return null; }
+      o = o[keys[i]];
+    }
+    return o;
+  }
+  function isInt(b) { return typeof b === "number" && Math.floor(b) === b; }
+  function list(v) { return Array.isArray(v) ? v : []; }
+  function sized(items, fb) {
+    var s = 0, any = false;
+    items.forEach(function (i) { if (i !== null && typeof i === "object" && isInt(i.bytes)) { s += i.bytes; any = true; } });
+    return any ? s / 1073741824 : fb;
+  }
+  var plat = argv[1], model = argv[2], skip = "," + argv[3] + ",", git = argv[4] === "1";
+  var sizes = {"large-v3": 2.9, "large-v3-turbo": 1.6, "medium": 1.5, "small": 0.5};
+  var total = 0, b;
+  if (skip.indexOf(",runtime,") < 0) { total += 0.5; }
+  if (skip.indexOf(",ffmpeg,") < 0) { total += sized(list(get(c, ["ffmpeg", "assets", plat, "files"])), 0.1); }
+  if (skip.indexOf(",fonts,") < 0) {
+    total += sized(list(get(c, ["fonts", "files"])).concat(list(get(c, ["fonts", "licenses"]))), 0.01);
+  }
+  if (skip.indexOf(",model,") < 0) { b = get(c, ["models", model, "bytes"]); total += isInt(b) ? b / 1073741824 : (sizes[model] || 2.9); }
+  if (plat.indexOf("win") === 0 && git && skip.indexOf(",gitbash,") < 0) {
+    b = get(c, ["git", "assets", plat, "bytes"]); total += isInt(b) ? b / 1073741824 : 0.4;
+  }
+  return (Math.ceil(Math.round(total * 10 * 1e6) / 1e6) / 10).toFixed(1);
+}'
+PY_SIZE='import json, math, sys
+try:
+    c = json.loads(open(sys.argv[1], encoding="utf-8-sig").read())
+except (OSError, ValueError):
+    c = None
+def get(o, keys):
+    for k in keys:
+        if not isinstance(o, dict) or k not in o:
+            return None
+        o = o[k]
+    return o
+def lst(v):
+    return v if isinstance(v, list) else []
+def sized(items, fb):
+    s = [i["bytes"] for i in items if isinstance(i, dict) and type(i.get("bytes")) is int]
+    return sum(s) / 1073741824 if s else fb
+plat, model, skip, git = sys.argv[2], sys.argv[3], sys.argv[4].split(","), sys.argv[5] == "1"
+sizes = {"large-v3": 2.9, "large-v3-turbo": 1.6, "medium": 1.5, "small": 0.5}
+total = 0.0
+if "runtime" not in skip:
+    total += 0.5
+if "ffmpeg" not in skip:
+    total += sized(lst(get(c, ["ffmpeg", "assets", plat, "files"])), 0.1)
+if "fonts" not in skip:
+    total += sized(lst(get(c, ["fonts", "files"])) + lst(get(c, ["fonts", "licenses"])), 0.01)
+if "model" not in skip:
+    b = get(c, ["models", model, "bytes"])
+    total += b / 1073741824 if type(b) is int else sizes.get(model, 2.9)
+if plat.startswith("win") and git and "gitbash" not in skip:
+    b = get(c, ["git", "assets", plat, "bytes"])
+    total += b / 1073741824 if type(b) is int else 0.4
+print("%.1f" % (math.ceil(round(total * 10, 6)) / 10))'
+
+install_size() { # -> SIZE_GB, the core's system.install_size_gb (see JXA_SIZE)
+  local git=0 la="${LOCALAPPDATA:-}"
+  case "$PLAT" in
+    win-*) if [ ! -f "$la/Programs/Git/bin/bash.exe" ] && [ ! -f "$la/WhyNotCut/git/bin/bash.exe" ]; then git=1; fi ;;
+  esac
+  SIZE_GB=""
+  if [ "$OS_NAME" = "Darwin" ]; then
+    SIZE_GB="$(osascript -l JavaScript -e "$JXA_SIZE" "$COMP" "$PLAT" "${MODEL_OPT:-large-v3}" "$SKIP" "$git" \
+      2>/dev/null </dev/null)"
+  elif [ -n "$JSON_PY" ]; then
+    SIZE_GB="$("$JSON_PY" -I -c "$PY_SIZE" "$COMP" "$PLAT" "${MODEL_OPT:-large-v3}" "$SKIP" "$git" 2>/dev/null \
+      </dev/null | tr -d '\r')"
+  fi
+  case "$SIZE_GB" in [0-9]*.[0-9]) ;; *) SIZE_GB="3.5" ;; esac  # (no reader: the usual size)
+}
+
+countdown() { # -> KEY: customise (C), key (any other key: go on at once) or timeout. "Press C to customise (10)..."
+  # counts down in place for 10 s, reading one key a second from the terminal (stdin when it is one, else /dev/tty;
+  # never the piped script), or the sandbox-only hook WNC_TEST_KEYS (waits WNC_TEST_COUNTDOWN_S seconds in all)
+  local s=10 k
+  KEY="timeout"
+  while [ "$s" -ge 1 ] && [ "$KEY" = "timeout" ]; do
+    printf '\rPress C to customise (%s)%s / %s ' "$s" "…" "اضغط C للتخصيص"
+    if [ -n "$TEST_KEYS_SET" ]; then
+      case "$TEST_KEYS" in
+        ""|none) ;;
+        [cC]*) KEY="customise" ;;
+        *) KEY="key" ;;
+      esac
+    else
+      k=""
+      if [ -t 0 ]; then
+        if IFS= read -r -s -n 1 -t 1 k; then KEY="key"; else k=""; fi
+      elif IFS= read -r -s -n 1 -t 1 k </dev/tty 2>/dev/null; then
+        KEY="key"
+      fi
+      case "$k" in [cC]) KEY="customise" ;; esac
+    fi
+    s=$((s - 1))
+  done
+  printf '\n'
+  if [ -n "$TEST_KEYS_SET" ] && [ "$KEY" = "timeout" ] && [ "$TEST_COUNTDOWN" -gt 0 ]; then sleep "$TEST_COUNTDOWN"; fi
+  return 0
+}
+
+select_mode() { # -> RUN_MODE: customise (--customise, or C during the countdown), default (a person at the
+  # terminal who did not customise) or yes (--yes, --uninstall, or nobody at a terminal). The core gets --customise
+  # for the first, --yes for the other two: the same strongest defaults and the same state.json.
+  RUN_MODE="yes"
+  [ -z "$UNINSTALL" ] || return 0
+  if [ -n "$CUSTOMISE" ]; then RUN_MODE="customise"; return 0; fi
+  install_size
+  printf 'Installing everything WhyNot Cut needs (about %s GB)\n' "$SIZE_GB"
+  printf 'جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي %s جيجابايت)\n' "$SIZE_GB"
+  [ -z "$YES" ] || return 0
+  if [ -z "$TEST_KEYS_SET" ] && ! has_keyboard; then return 0; fi
+  RUN_MODE="default"
+  countdown
+  if [ "$KEY" = "customise" ]; then
+    RUN_MODE="customise"
+    printf '%s\n' "Customise: answer the questions below; Enter keeps the suggested answer."
+    printf '%s\n' "التخصيص: أجب عن الأسئلة التالية؛ اضغط Enter لإبقاء الإجابة المقترحة."
+  fi
+  return 0
+}
+
+resolved_home_problem() { # path -> WHY (empty: fine), the core's base.resolved_home_problem: a RESOLVED engine home
+  # other than ~/.whynot-cut must not be a drive root or mount point, the home folder or Desktop / Documents /
+  # Downloads themselves, the saved clients folder or a folder holding it, or a folder with .whynot-client in it or up
+  # to 3 levels below
+  local p="$1" n d c lp
+  WHY=""
+  norm_path "$p"; n="$NORM"
+  norm_path "$HOME/.whynot-cut"
+  [ "$n" = "$NORM" ] && return 0
+  case "$n" in /|[A-Za-z]:|[A-Za-z]:/) WHY="a drive root or a mount point"; return 0 ;; esac
+  if is_mount "$p"; then WHY="a drive root or a mount point"; return 0; fi
+  norm_path "$HOME"
+  if [ "$n" = "$NORM" ]; then WHY="your user folder itself"; return 0; fi
+  for d in Desktop Documents Downloads; do
+    norm_path "$HOME/$d"
+    if [ "$n" = "$NORM" ]; then WHY="your $d folder itself"; return 0; fi
+  done
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    norm_path "$c"
+    if within "$NORM" "$n"; then WHY="your clients folder $c, or it holds it"; return 0; fi
+  done <<EOF
+$CLIENT_ROOTS
+EOF
+  if [ -d "$p" ]; then
+    lp="$(find "$p" -maxdepth 4 -name .whynot-client 2>/dev/null </dev/null | head -n 1)"
+    if [ -n "$lp" ]; then WHY="holding a client folder (${lp%/*} holds .whynot-client)"; fi
+  fi
+  return 0
 }
 
 ask_line() { # default -> ANSWER (trimmed; empty = the default); status 1 when there is no more input
@@ -674,6 +865,7 @@ ask_line() { # default -> ANSWER (trimmed; empty = the default); status 1 when t
   ANSWER=""
   if [ -n "$ANSWERS" ]; then
     if ! IFS= read -r ANSWER <&3 && [ -z "$ANSWER" ]; then printf '\n'; return 1; fi
+    ANSWER_AT=$((ANSWER_AT + 1))
     printf '%s\n' "$ANSWER"
   elif [ -t 0 ]; then
     IFS= read -r ANSWER || [ -n "$ANSWER" ] || return 1
@@ -716,6 +908,13 @@ select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no us
       # the resolved home (default ~/.whynot-cut, or saved in the pointer / settings.json / a variable) is used as it
       # is (fix round 3): a 2.x home (venv, models, ...) is upgraded in place, never moved
       CHOSEN="" PROBLEM="" PLACE_NOTE="" PLACED="$p"
+      resolved_home_problem "$p"
+      if [ -n "$WHY" ]; then  # task 9: a home saved somewhere, in a place it must never be: stop, say the fix
+        printf 'ERROR: WhyNot Cut will not use %s as its engine home (from %s): it is %s. Nothing was downloaded. To fix it, run the installer again with -EngineHome <folder> / --engine-home <folder> (a folder of its own, for example ~/WhyNotCut).\n' \
+          "$p" "$ENGINE_SRC" "$WHY"
+        printf '%s\n' "لن يستخدم WhyNot Cut هذا المجلد لملفات التشغيل. لإصلاح ذلك شغّل المثبّت مرة أخرى مع -EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به."
+        exit 2
+      fi
       if [ -n "$HOME_OVR" ]; then
         norm_path "$H"
         if [ "$n_new" = "$NORM" ] || ! within "$n_new" "$NORM"; then
@@ -798,9 +997,12 @@ ROOT="$(abs_path "$PLUGIN_ROOT")"
 case "$OS_NAME" in  # Git Bash: `pwd` may say /tmp/... for %TEMP%; the location checks compare Windows paths
   MINGW*|MSYS*|CYGWIN*) if command -v cygpath >/dev/null 2>&1; then ROOT="$(cygpath -m "$ROOT")"; fi ;;
 esac
-TEST_UV="" ANSWERS="" TEST_FREE=""
+TEST_UV="" ANSWERS="" TEST_FREE="" TEST_KEYS="" TEST_KEYS_SET="" TEST_COUNTDOWN=10 ANSWER_AT=0 RUN_MODE="yes"
 if [ -n "$HOME_OVR" ]; then
   TEST_UV="${WNC_TEST_UV:-}" ANSWERS="${WNC_TEST_ANSWERS:-}" TEST_FREE="${WNC_TEST_FREE_GB:-}"
+  if [ -n "${WNC_TEST_KEYS+x}" ]; then TEST_KEYS_SET=1 TEST_KEYS="$WNC_TEST_KEYS"; fi
+  TEST_COUNTDOWN="${WNC_TEST_COUNTDOWN_S:-10}"
+  case "$TEST_COUNTDOWN" in ''|*[!0-9]*) TEST_COUNTDOWN=10 ;; esac
 fi
 JSON_PY=""
 if [ "$OS_NAME" != "Darwin" ] || [ "${TEST_UV%.py}" != "$TEST_UV" ]; then JSON_PY="$(pick_py)"; fi
@@ -817,6 +1019,9 @@ else
   if [ -n "${WHYNOT_OPTIONS_FILE:-}" ]; then POINTER="$(home_path "$WHYNOT_OPTIONS_FILE")"; fi
 fi
 DEFAULT_ENGINE="$ENGINE"
+COMP="$ROOT/setup/components.json"
+[ -n "$COMPONENTS" ] && COMP="$(abs_path "$COMPONENTS")"
+select_mode  # D-T1: no question unless the editor customises (--customise, or C during the countdown)
 if [ -n "$UNINSTALL" ]; then  # no question: the folder the engine uses (or --engine-home; the core checks it)
   if [ -n "$ENGINE_OPT" ]; then typed_path "$ENGINE_OPT"; ENGINE="$TYPED"; CHOSEN=1; fi
 else
@@ -825,9 +1030,8 @@ else
   select_engine_home "$DEFAULT_ENGINE" "$WITH_MODEL"
 fi
 [ -n "$HOME_OVR" ] && export WHYNOT_HOME="$ENGINE"
+[ -n "$ANSWERS" ] && export WNC_TEST_ANSWERS_AT="$ANSWER_AT"  # the core reads the test answers after these
 
-COMP="$ROOT/setup/components.json"
-[ -n "$COMPONENTS" ] && COMP="$(abs_path "$COMPONENTS")"
 [ -f "$COMP" ] || stop2 "cannot read $COMP"
 UV_VER="$(json_get "$COMP" uv.version)"
 UV_URL="$(json_get "$COMP" "uv.assets.$PLAT.url")"
@@ -944,7 +1148,13 @@ fi
 [ -n "$MODEL_OPT" ] && set -- "$@" --model "$MODEL_OPT"
 [ -n "$COMPONENTS" ] && set -- "$@" --components "$COMP"
 [ -n "$DRY" ] && set -- "$@" --dry-run
-[ -n "$YES" ] && set -- "$@" --yes
+if [ -n "$UNINSTALL" ]; then
+  [ -n "$YES" ] && set -- "$@" --yes
+elif [ "$RUN_MODE" = "customise" ]; then
+  set -- "$@" --customise
+else
+  set -- "$@" --yes  # the default install is exactly the --yes path (D-T1)
+fi
 [ -n "$SKIP" ] && set -- "$@" --skip "$SKIP"
 [ -n "$CLIENTS" ] && set -- "$@" --clients-folder "$(abs_path "$CLIENTS")"
 [ -n "$LANG_OPT" ] && set -- "$@" --language "$LANG_OPT"
