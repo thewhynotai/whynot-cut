@@ -471,12 +471,13 @@ export class DaemonSource implements PanelDataSource {
         action,
         error: "This request is too large for the engine (over 8 MB).",
         how: "Send fewer items at once.",
+        code: "too_large",
       });
     }
     return new Promise<Result>((resolve) => {
       const step = ACTION_STEP[action] ?? null;
       const stop = this.t.setTimer(() => {
-        this.settleCommand(id, { ok: false, action, error: "The engine did not answer this request in time.", how: "Check that Premiere and the WhyNot Cut panel are open, then press Try again." });
+        this.settleCommand(id, { ok: false, action, error: "The engine did not answer this request in time.", how: "Check that Premiere and the WhyNot Cut panel are open, then press Try again.", code: "timeout" });
       }, seconds * 1000 + RESULT_GRACE_MS);
       this.commands.set(id, { action, step, stop, resolve });
       if (step) this.setStep(step, { state: "running", request_id: id, progress: null, elapsed_s: null });
@@ -616,16 +617,16 @@ export class DaemonSource implements PanelDataSource {
     if (status === null) return this.retry({ code: "down", text: "The WhyNot Cut engine is not running.", how: START_HOW });
     if (status === 200) {
       // /status accepts the token, so the daemon is up and the key is right: only the WebSocket's Origin was refused
-      return this.retry({ code: "refused_host", text: "The engine is running, but it refused the panel's connection (Origin check).", how: "Reinstall the WhyNot Cut panel; if this repeats, send the engine log (serve-audit.log names the Origin)." });
+      return this.retry({ code: "refused_host", text: "The engine is running, but it refused the panel's connection (Origin check).", how: "Copy the diagnostics and send them to support." });
     }
     if (status === 403) {
-      return this.retry({ code: "refused_host", text: "The engine refused the panel's connection (Host / Origin check).", how: "Reinstall the WhyNot Cut panel; if this repeats, send the engine log." });
+      return this.retry({ code: "refused_host", text: "The engine refused the panel's connection (Host / Origin check).", how: "Copy the diagnostics and send them to support." });
     }
     if (status === 503) return this.retry({ code: "refused_busy", text: "The engine has too many connections open.", how: "Close other WhyNot Cut panels or restart the engine." });
     if (status === 401) {
       return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel tries again by itself; if this repeats, start the engine again from your Claude session." });
     }
-    return this.retry({ code: "refused", text: `The engine is running but refused the panel's session (HTTP ${status}).`, how: "Start the engine again from your Claude session; if this repeats, send the engine log." });
+    return this.retry({ code: "refused", text: `The engine is running but refused the panel's session (HTTP ${status}).`, how: "Copy the diagnostics and send them to support." });
   }
 
   private retry(d: LinkDiagnosis): void {
@@ -742,9 +743,9 @@ export class DaemonSource implements PanelDataSource {
         return c.reject(new Error(m.code === "no_route" ? `This command can't be cancelled: ${why}` : `The cancel was refused: ${text}`));
       }
       const cmd = this.commands.get(m.id);
-      if (cmd) return this.settleCommand(m.id, { ok: false, action: cmd.action, error: text, how: HOW_BY_CODE[m.code] });
+      if (cmd) return this.settleCommand(m.id, { ok: false, action: cmd.action, error: text, how: HOW_BY_CODE[m.code], code: m.code });
       const intent = this.intents.get(m.id);
-      if (intent) return this.settleIntent(m.id, { ok: false, action: intent.intent, error: text, how: HOW_BY_CODE[m.code] });
+      if (intent) return this.settleIntent(m.id, { ok: false, action: intent.intent, error: text, how: HOW_BY_CODE[m.code], code: m.code });
       if (m.id.startsWith("snap-")) return; // a snapshot over the rate limit: the next poll asks again
     }
     this.logLine(m.code === "rate" ? "warn" : "error", `Engine: ${text}`);
@@ -765,7 +766,7 @@ export class DaemonSource implements PanelDataSource {
     const msg = { type: intent, id, ...body } as ApproveMessage | RequestChangesMessage | RebuildMessage;
     return new Promise<Result>((resolve) => {
       const stop = this.t.setTimer(() => {
-        this.settleIntent(id, { ok: false, action: intent, error: "The engine did not answer in time.", how: "Check the engine is running, then press Try again." });
+        this.settleIntent(id, { ok: false, action: intent, error: "The engine did not answer in time.", how: "Check the engine is running, then press Try again.", code: "timeout" });
       }, this.intentTimeoutMs);
       this.intents.set(id, { intent, stop, resolve });
       this.sendText(sock, JSON.stringify(msg));
@@ -795,11 +796,11 @@ export class DaemonSource implements PanelDataSource {
   private failAll(error: string): void {
     for (const id of [...this.commands.keys()]) {
       const action = this.commands.get(id)!.action;
-      this.settleCommand(id, { ok: false, action, error, how: "The panel reconnects by itself; once the engine pill says connected, do it again." });
+      this.settleCommand(id, { ok: false, action, error, how: "The panel reconnects by itself; once the engine pill says connected, do it again.", code: "lost" });
     }
     for (const id of [...this.intents.keys()]) {
       const intent = this.intents.get(id)!.intent;
-      this.settleIntent(id, { ok: false, action: intent, error, how: "The panel reconnects by itself; once the engine pill says connected, do it again." });
+      this.settleIntent(id, { ok: false, action: intent, error, how: "The panel reconnects by itself; once the engine pill says connected, do it again.", code: "lost" });
     }
     for (const [id, c] of [...this.cancels]) {
       this.cancels.delete(id);
@@ -809,7 +810,7 @@ export class DaemonSource implements PanelDataSource {
   }
 
   private notConnected(action: string): Result {
-    return { ok: false, action, error: "The WhyNot Cut engine is not connected.", how: this.diag.how ?? START_HOW };
+    return { ok: false, action, error: "The WhyNot Cut engine is not connected.", how: this.diag.how ?? START_HOW, code: this.diag.code };
   }
 
   // ---------------------------------------------------------------------------------------------- helpers

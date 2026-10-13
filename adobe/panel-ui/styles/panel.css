@@ -138,6 +138,8 @@ p { margin: 0 0 8px 0; }
 .banner-line { display: block; }
 .banner-error { border-color: var(--twn-error); }
 .banner-ok { border-color: var(--twn-ok); }
+/* a short note with no fix button ("the plan changed") */
+.banner-info { border-color: var(--twn-warn); }
 .banner-x { flex: 0 0 auto; margin: 0 0 0 8px; padding: 0 4px; background: transparent; border: 0; color: var(--twn-text-muted); cursor: pointer; font-size: 12px; }
 .twn-rtl .banner-x { margin: 0 8px 0 0; }
 /* a problem's one fix button (Start engine / Try again / Copy diagnostics) under its sentence */

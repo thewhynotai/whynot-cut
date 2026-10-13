@@ -3,21 +3,26 @@
 // things only the host app can do (playhead, Source Monitor, reveal, clipboard).
 // Every problem on screen is one plain sentence and one fix button (Addendum C1.4): Start engine, Try again or Copy
 // diagnostics. Try again belongs to the notice it is on: the notice keeps the click that led to it, and Try again
-// dispatches that click again with the state as it is now. A command inside an engine or host text is not shown (render
-// neutralises the span, src/commands.ts); the full words go to the log drawer, through the panel's own log lines
-// (token-scrubbed like DaemonSource's, and merged with the source's by time, newest last).
+// dispatches that click again with the state as it is now; a click that cannot run any more says why (the normal
+// validation notice), and an Approve is replayed only while the plan on screen is the one that was approved. An engine
+// or host text that holds a command is not shown (render swaps in the panel's own sentence, src/commands.ts
+// runtimeText; never a cut-up sentence). Every failure and every held-back text goes to the log drawer, through the
+// panel's own log lines (token-scrubbed like DaemonSource's, and merged with the source's by time, newest last).
 import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction } from "./actions.ts";
 import type { BuiltAction } from "./actions.ts";
-import { neutralise } from "./commands.ts";
+import { runtimeText } from "./commands.ts";
 import { diagnosticsText, NOT_YET_CODE, scrubToken, START_ENGINE_COMMAND } from "./diagnostics.ts";
 import type { HostOutcome, PanelHost } from "./host.ts";
 import { EN, fmt, stringsFor } from "./i18n.ts";
 import { initialUi, render, renderError, renderLoading } from "./render.ts";
 import type { FixAction, Notice, UiState } from "./render.ts";
+import type { StringKey } from "./i18n.ts";
 import type { LogLine, PanelDataSource, PanelState, Result } from "./source.ts";
 
 /** the panel's own log lines kept (the source keeps its own) */
 const LOCAL_LOG_MAX = 50;
+/** the held-back state texts already logged (each is logged once) */
+const HELD_MAX = 200;
 /** the data-* values a click carries that its handler reads (Try again dispatches them again) */
 const CLICK_ATTRS = ["data-t", "data-id", "data-fingerprint"] as const;
 
@@ -80,8 +85,10 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
   let state: PanelState | null = null;
   let off: (() => void) | null = null;
   let live = true;
-  /** the panel's own log lines: button presses the engine cannot log yet, the full words of a text held back */
+  /** the panel's own log lines: button presses the engine cannot log yet, failures, the raw words of a text held back */
   const localLog: TimedLine[] = [];
+  /** state texts (summary, label, step, host detail) already logged as held back */
+  const heldLogged = new Set<string>();
 
   /** The state as shown: the source's log lines and the panel's own, merged by the full time they were written (epoch
    *  ms, not the "HH:MM:SS" text, so a line from before midnight sorts before one after it; a stable sort keeps lines of
@@ -117,9 +124,21 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
 
   const isRtl = () => state?.language === "ar";
 
+  /** The engine or host texts of a state that render holds back (they hold a command): each goes to the log once. */
+  function logHeld(s: PanelState): void {
+    const texts: unknown[] = [s.connection.host.detail, s.approval?.summary, ...(s.approval?.flagged ?? []).map((f) => f.text), ...s.qc.map((q) => q.label), ...s.pipeline.map((p) => p.progress?.step)];
+    for (const raw of texts) {
+      if (typeof raw !== "string" || !raw || runtimeText(raw) !== null || heldLogged.has(raw)) continue;
+      if (heldLogged.size >= HELD_MAX) heldLogged.clear();
+      heldLogged.add(raw);
+      addLog("warn", fmt(EN["log.held"], { text: raw }));
+    }
+  }
+
   /** Shows an error view in place of the panel. Never throws. */
   function showError(titleKey: "error.render" | "error.snapshot", e: unknown): void {
     const message = e instanceof Error ? e.message : String(e);
+    addLog("error", `${EN[titleKey]} ${message}`);
     try {
       root.innerHTML = renderError(strings(), isRtl(), strings()[titleKey], message);
     } catch {
@@ -137,6 +156,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       const field = active?.getAttribute ? active.getAttribute("data-field") : null;
       const selStart = active?.selectionStart ?? null;
       const selEnd = active?.selectionEnd ?? null;
+      logHeld(state);
       root.innerHTML = render(view(state), strings(), ui);
       if (field && root.querySelector) {
         const el = root.querySelector(`[data-field="${field}"]`);
@@ -163,10 +183,11 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       ui.notice = okText ? { kind: "ok", text: okText } : null;
       return;
     }
-    // render shows a text or how without its command span: the full words go to the log drawer
-    if (neutralise(text) !== text || (how !== undefined && neutralise(how) !== how)) addLog("error", how ? `${text} ${how}` : text);
+    // every failure goes to the log drawer with its raw words (render may show the panel's own sentence instead)
+    addLog("error", how ? `${text} ${how}` : text);
     const fix = fixFor(engine, r, again);
-    ui.notice = { kind: "error", text, ...(how ? { how } : {}), fix, ...(fix === "retry" && again ? { again } : {}) };
+    const code = r && typeof r.code === "string" ? r.code : undefined;
+    ui.notice = { kind: "error", text, ...(how ? { how } : {}), ...(code ? { code } : {}), fix, ...(fix === "retry" && again ? { again } : {}) };
   }
 
   /** Runs one command and shows its outcome. lock = disable the action buttons meanwhile (engine commands, not host
@@ -205,7 +226,16 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
   }
 
   function missing(): void {
+    addLog("error", EN["notice.missing"]);
     ui.notice = { kind: "error", text: strings()["notice.missing"] };
+    paint();
+  }
+
+  /** A click that cannot run as it is (no name, an empty box, a bad frame time, a changed plan): a short note that says
+   *  why, never a silent nothing. */
+  function note(key: StringKey): void {
+    addLog("info", EN[key]);
+    ui.notice = { kind: "info", text: strings()[key] };
     paint();
   }
 
@@ -257,9 +287,12 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
     const again = clickOf(action, el);
     switch (action) {
       case "approve": {
-        const fingerprint = (replay ? s.approval?.fingerprint : el.getAttribute("data-fingerprint")) ?? "";
+        // the plan the editor approved: Try again replays it only while that plan is still the one on screen
+        const fingerprint = el.getAttribute("data-fingerprint") ?? "";
+        const shown = s.approval?.fingerprint ?? "";
+        if (!fingerprint || fingerprint !== shown) return note("notice.plan_changed");
         const name = (s.editor_name || ui.editorName).trim();
-        if (!name || !fingerprint) return;
+        if (!name) return note("notice.need_name");
         void perform(() => source.approve({ item: s.item, editor_name: name, fingerprint }), t["notice.approved"], true, again).then((ok) => {
           if (ok) {
             ui.changeText = "";
@@ -271,7 +304,8 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       case "request-changes": {
         const text = ui.changeText.trim();
         const name = (s.editor_name || ui.editorName).trim();
-        if (!text || !name) return;
+        if (!text) return note("notice.need_changes");
+        if (!name) return note("notice.need_name");
         void perform(() => source.requestChanges({ item: s.item, editor_name: name, text }), t["notice.changes"], true, again).then((ok) => {
           if (ok) {
             ui.changeText = "";
@@ -281,20 +315,21 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
         return;
       }
       case "seek": {
-        const t_s = Number(el.getAttribute("data-t"));
-        if (!Number.isFinite(t_s)) return;
+        const t_s = Number(el.getAttribute("data-t") ?? "");
+        if (el.getAttribute("data-t") === null || !Number.isFinite(t_s)) return note("notice.bad_frame");
         void perform(() => host.setPlayerPosition(t_s), undefined, false, again);
         return;
       }
       case "reexport": {
-        const t_s = Number(el.getAttribute("data-t"));
-        if (!Number.isFinite(t_s)) return;
+        const t_s = Number(el.getAttribute("data-t") ?? "");
+        if (el.getAttribute("data-t") === null || !Number.isFinite(t_s)) return note("notice.bad_frame");
         void runBuilt(exportFramesAction(s, [t_s]), again);
         return;
       }
       case "preview": {
         const mp4 = s.approval?.preview_mp4;
-        if (mp4) void perform(() => host.openInSourceMonitor(mp4), undefined, false, again);
+        if (!mp4) return missing();
+        void perform(() => host.openInSourceMonitor(mp4), undefined, false, again);
         return;
       }
       case "open-project":
@@ -344,7 +379,8 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
         return;
       case "cancel": {
         const id = el.getAttribute("data-id");
-        if (id) void perform(() => source.cancel(id), undefined, true, again);
+        if (!id) return missing();
+        void perform(() => source.cancel(id), undefined, true, again);
         return;
       }
       case "toggle-log":
@@ -394,17 +430,21 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
   // state that arrives before the snapshot answers wins (it is newer).
   root.innerHTML = renderLoading(stringsFor("en"));
   let pushed = false;
+  /** A new state. A Start engine notice clears itself once the engine is connected (its fix is done). */
+  function setState(next: PanelState): void {
+    state = next;
+    if (next.connection.engine === "connected" && ui.notice?.fix === "start-engine") ui.notice = null;
+    paint();
+  }
   off = source.subscribe((next) => {
     pushed = true;
-    state = next;
-    paint();
+    setState(next);
   });
   const ready = source
     .snapshot()
     .then((s) => {
       if (!live || pushed) return;
-      state = s;
-      paint();
+      setState(s);
     })
     .catch((e: unknown) => {
       // paint() cannot throw, so this is only a snapshot() that failed; a state pushed meanwhile stays on screen.

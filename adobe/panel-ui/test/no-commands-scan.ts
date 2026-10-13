@@ -1,14 +1,17 @@
 // The "no command text on the editor's screen" scanner (Addendum C1.4, C2.2), not a test file itself: test/
-// no-commands.test.ts runs it over the string table, the panel sources and the Premiere plugin's sources. Commands live
-// only in the log drawer (src/kit/log.ts and the log lines it shows) and in the Copy diagnostics payload
-// (src/diagnostics.ts). What counts as a command is src/commands.ts: the SAME detector the panel uses at runtime.
+// no-commands.test.ts runs it over the string table, the panel sources, the Premiere plugin's sources and its
+// index.html / manifest.json. Commands live only in the log drawer (src/kit/log.ts and the log lines it shows) and in
+// the Copy diagnostics payload (src/diagnostics.ts). What counts as a command is src/commands.ts's BROAD detector
+// (commandIn / looksLikeCommand: high recall, for our own strings; the panel's runtime uses the precise one).
 //
 // String literals come from the TypeScript compiler's own parser (typescript/unstable/sync: the tsgo API that ships with
 // the typescript devDependency), so a regular expression after `=>` or `)`, a nested template or an escape can never
-// desynchronise a hand-written lexer. The parser also decodes escapes ("reel\x20serve", " "). On top of single
-// literals the scan folds what builds one text at runtime: a `+` chain ("reel" + " serve"), an array joined with a
-// literal separator (["reel", "serve"].join(" ")) and a template literal, where each ${...} reads as a space
-// (`reel${" "}doctor`). A non-literal part of a `+` chain or a joined array reads as a space too.
+// desynchronise a hand-written lexer. The parser also decodes escapes ("reel\x20serve", " "). On top of single
+// literals the scan folds what builds one text at runtime: a `+` chain, parentheses included (("reel" + " ") +
+// "serve"), "reel".concat(" serve"), an array joined with a literal separator (["reel", "serve"].join(" "), also after
+// .concat), `x += " serve"` on a variable declared with a literal, and a template literal, where ${"literal"} reads as
+// its text and any other ${...} as a space. A non-literal part of a chain, a concat or a joined array reads as a space.
+// The broad detector applies NFKC before matching, so full-width text is caught too.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { API } from "typescript/unstable/sync";
@@ -22,7 +25,7 @@ export { commandIn };
 /** panel-ui sources that may hold commands: the log drawer and the diagnostics payload. */
 export const COMMAND_FILES: readonly string[] = ["kit/log.ts", "diagnostics.ts"];
 
-/** The only file whose [level, text] tuples are log drawer data (the mock's sample log). */
+/** The only file with an exempt log-lines array (the mock's sample log: a `log` array of [level, text] tuples). */
 export const LOG_TUPLE_FILE = "mock.ts";
 
 /** Parses TS sources with the compiler (one tsgo process for the batch). Keys are names, values the source text. */
@@ -50,61 +53,115 @@ export function parseSources(files: Readonly<Record<string, string>>): Map<strin
 
 type AnyNode = Node & Record<string, unknown>;
 const kindOf = (n: Node) => n.kind;
+const prop = (n: Node, k: string) => (n as AnyNode)[k] as AnyNode;
 const isStr = (n: Node) => kindOf(n) === SyntaxKind.StringLiteral || kindOf(n) === SyntaxKind.NoSubstitutionTemplateLiteral;
 const LEVELS = new Set(["info", "warn", "error"]);
 
-/** The static text of an expression, or null when it is not a text literal; ${...} reads as a space. */
-function staticText(n: Node): string | null {
-  const a = n as AnyNode;
-  if (isStr(n)) return String(a["text"]);
-  if (kindOf(n) === SyntaxKind.TemplateExpression) {
-    const head = a["head"] as AnyNode;
-    const spans = a["templateSpans"] as readonly AnyNode[];
-    return String(head["text"]) + spans.map((s) => " " + String((s["literal"] as AnyNode)["text"])).join("");
-  }
-  if (kindOf(n) === SyntaxKind.ParenthesizedExpression) return staticText(a["expression"] as Node);
-  return null;
-}
+const isPlus = (n: Node) => kindOf(n) === SyntaxKind.BinaryExpression && kindOf(prop(n, "operatorToken")) === SyntaxKind.PlusToken;
+const unparen = (n: Node): Node => (kindOf(n) === SyntaxKind.ParenthesizedExpression ? unparen(prop(n, "expression")) : n);
+/** The method name of a call like x.concat(...) / x.join(...), or "". */
+const methodOf = (n: Node): string => {
+  if (kindOf(n) !== SyntaxKind.CallExpression) return "";
+  const callee = prop(n, "expression");
+  return kindOf(callee) === SyntaxKind.PropertyAccessExpression ? String(prop(callee, "name")["text"]) : "";
+};
+const argsOf = (n: Node) => (prop(n, "arguments") as unknown as readonly Node[]) ?? [];
+const targetOf = (n: Node) => unparen(prop(prop(n, "expression"), "expression"));
 
-const isPlus = (n: Node) =>
-  kindOf(n) === SyntaxKind.BinaryExpression && kindOf((n as AnyNode)["operatorToken"] as Node) === SyntaxKind.PlusToken;
-
-/** The operands of a + chain, left to right. */
+/** The operands of a + chain, left to right, through parentheses. */
 function plusOperands(n: Node, out: Node[] = []): Node[] {
-  const a = n as AnyNode;
-  for (const side of [a["left"] as Node, a["right"] as Node]) {
-    if (isPlus(side)) plusOperands(side, out);
-    else out.push(side);
+  for (const side of [prop(n, "left"), prop(n, "right")]) {
+    const s = unparen(side);
+    if (isPlus(s)) plusOperands(s, out);
+    else out.push(s);
   }
   return out;
 }
 
-/** Every text a source builds: each literal, each template (expressions as spaces), each + chain and each joined
- *  array literal, folded. In LOG_TUPLE_FILE the text of a [level, text] tuple is skipped (log drawer data). */
+/** The parts of an array an expression builds: an array literal, or one with .concat(...) after it; null otherwise. */
+function arrayParts(n0: Node): Node[] | null {
+  const n = unparen(n0);
+  if (kindOf(n) === SyntaxKind.ArrayLiteralExpression) return [...(prop(n, "elements") as unknown as readonly Node[])];
+  if (methodOf(n) === "concat") {
+    const head = arrayParts(targetOf(n));
+    if (!head) return null;
+    for (const a of argsOf(n)) head.push(...(arrayParts(a) ?? [a]));
+    return head;
+  }
+  return null;
+}
+
+/** The static text an expression builds, or null when it builds none; a non-literal part reads as a space. */
+function fold(n0: Node): string | null {
+  const n = unparen(n0);
+  if (isStr(n)) return String((n as AnyNode)["text"]);
+  if (kindOf(n) === SyntaxKind.TemplateExpression) {
+    const spans = prop(n, "templateSpans") as unknown as readonly Node[];
+    return String(prop(n, "head")["text"]) + spans.map((s) => (fold(prop(s, "expression")) ?? " ") + String(prop(s, "literal")["text"])).join("");
+  }
+  if (isPlus(n)) {
+    const parts = plusOperands(n).map((p) => fold(p));
+    return parts.some((p) => p !== null) ? parts.map((p) => p ?? " ").join("") : null;
+  }
+  const method = methodOf(n);
+  if (method === "concat") {
+    const head = fold(targetOf(n));
+    if (head !== null) return head + argsOf(n).map((a) => fold(a) ?? " ").join("");
+  }
+  if (method === "join") {
+    const parts = arrayParts(targetOf(n));
+    const args = argsOf(n);
+    const sepText = args.length ? fold(args[0]!) : ",";
+    if (parts && sepText !== null) {
+      const texts = parts.map((p) => fold(p));
+      if (texts.some((p) => p !== null)) return texts.map((p) => p ?? " ").join(sepText);
+    }
+  }
+  return null;
+}
+
+/** The name a node is bound to when it is a declaration's initializer or a property's value ("" otherwise). */
+function boundName(n: Node): string {
+  const p = n.parent;
+  if (!p) return "";
+  if ((kindOf(p) === SyntaxKind.PropertyAssignment || kindOf(p) === SyntaxKind.VariableDeclaration) && prop(p, "name")) {
+    return String(prop(p, "name")["text"] ?? "");
+  }
+  return "";
+}
+
+/** A [level, text] tuple of the mock's log-lines array (a `log` array): log drawer data. */
+function isLogTuple(n: Node): boolean {
+  if (kindOf(n) !== SyntaxKind.ArrayLiteralExpression) return false;
+  const els = prop(n, "elements") as unknown as readonly Node[];
+  if (els.length !== 2 || !isStr(els[0]!) || !LEVELS.has(String((els[0] as AnyNode)["text"]))) return false;
+  const list = n.parent;
+  return !!list && kindOf(list) === SyntaxKind.ArrayLiteralExpression && boundName(list) === "log";
+}
+
+/** Every text a source builds: each literal, each template, each + chain, concat and joined array, folded, and each
+ *  `+=` on a variable declared with a literal. In LOG_TUPLE_FILE the tuples of its `log` array are skipped. */
 export function textsOf(sf: Node, file: string): string[] {
   const out: string[] = [];
+  const vars = new Map<string, string>();
   const visit = (n: Node): void => {
-    const a = n as AnyNode;
-    if (file === LOG_TUPLE_FILE && kindOf(n) === SyntaxKind.ArrayLiteralExpression) {
-      const els = a["elements"] as readonly Node[];
-      if (els.length === 2 && isStr(els[0]!) && LEVELS.has(String((els[0] as AnyNode)["text"]))) return;
+    if (file === LOG_TUPLE_FILE && isLogTuple(n)) return;
+    const k = kindOf(n);
+    if (k !== SyntaxKind.ParenthesizedExpression) {
+      const own = fold(n);
+      if (own !== null) out.push(own);
     }
-    const own = staticText(n);
-    if (own !== null && kindOf(n) !== SyntaxKind.ParenthesizedExpression) out.push(own);
-    if (isPlus(n) && !(n.parent && isPlus(n.parent))) {
-      const parts = plusOperands(n).map((p) => staticText(p));
-      if (parts.filter((p) => p !== null).length >= 2) out.push(parts.map((p) => p ?? " ").join(""));
+    if (k === SyntaxKind.VariableDeclaration && prop(n, "initializer")) {
+      const init = fold(prop(n, "initializer"));
+      if (init !== null) vars.set(String(prop(n, "name")["text"] ?? ""), init);
     }
-    if (kindOf(n) === SyntaxKind.CallExpression) {
-      const callee = a["expression"] as AnyNode;
-      if (kindOf(callee as Node) === SyntaxKind.PropertyAccessExpression && String((callee["name"] as AnyNode)["text"]) === "join") {
-        const target = callee["expression"] as AnyNode;
-        if (kindOf(target as Node) === SyntaxKind.ArrayLiteralExpression) {
-          const args = a["arguments"] as readonly Node[];
-          const sepText = args.length ? staticText(args[0]!) : ",";
-          const parts = (target["elements"] as readonly Node[]).map((e) => staticText(e));
-          if (sepText !== null && parts.some((p) => p !== null)) out.push(parts.map((p) => p ?? " ").join(sepText));
-        }
+    if (k === SyntaxKind.BinaryExpression && kindOf(prop(n, "operatorToken")) === SyntaxKind.PlusEqualsToken) {
+      const left = unparen(prop(n, "left"));
+      const name = kindOf(left) === SyntaxKind.Identifier ? String((left as AnyNode)["text"]) : "";
+      if (vars.has(name)) {
+        const acc = vars.get(name)! + (fold(prop(n, "right")) ?? " ");
+        vars.set(name, acc);
+        out.push(acc);
       }
     }
     n.forEachChild(visit);
@@ -116,7 +173,7 @@ export function textsOf(sf: Node, file: string): string[] {
 /** Every text a TS source builds that holds a command, as "rule: text". */
 export function commandTexts(sf: Node, file: string): string[] {
   const found: string[] = [];
-  for (const text of textsOf(sf, file)) {
+  for (const text of new Set(textsOf(sf, file))) {
     const rule = commandIn(text);
     if (rule) found.push(`${rule}: ${text}`);
   }
@@ -142,21 +199,49 @@ export function tsFiles(dir: string): string[] {
   return out.sort();
 }
 
-/** What a rendered panel puts in front of the editor, outside the log drawer: the text between tags and the values of
- *  the attributes a person reads or hears (title, aria-label, placeholder, alt, aria-valuetext), entities decoded. */
+/** The attributes a person reads or hears. */
+const SCREEN_ATTRS = /\s(?:title|aria-label|aria-description|placeholder|alt|aria-valuetext|value)=(?:"([^"]*)"|'([^']*)')/g;
+
+/** What a rendered panel (or a plugin page) puts in front of the editor, outside the log drawer: the text between tags
+ *  and the values of the attributes a person reads or hears (title, aria-label, aria-description, placeholder, alt,
+ *  aria-valuetext, value; double- or single-quoted), entities decoded. Script and style bodies are not screen text. */
 export function screenText(html: string): string {
   const visible = html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
     .replace(/<section class="sec sec-log">[\s\S]*?<\/section>/g, " ")
     .replace(/<ul class="kit-log-lines"[\s\S]*?<\/ul>/g, " ");
-  const attrs = [...visible.matchAll(/\s(?:title|aria-label|placeholder|alt|aria-valuetext)="([^"]*)"/g)].map((m) => m[1]!);
+  const attrs = [...visible.matchAll(SCREEN_ATTRS)].map((m) => m[1] ?? m[2] ?? "");
   const decode = (s: string) =>
-    s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+    s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
   return decode([visible.replace(/<[^>]*>/g, " "), ...attrs].join(" \n "));
 }
 
-/** Every command the panel can show: panel-ui/src/** except COMMAND_FILES, every i18n value, and the Premiere plugin's
- *  sources (premiere-uxp/src/**: its offline source, shell and host adapter hand texts to the panel). As
- *  "where: rule: text". */
+/** The texts of a Premiere plugin file the editor can see: every string value of manifest.json (labels, names), or the
+ *  screen text of index.html. */
+export function pluginTexts(content: string, name: string): string[] {
+  if (name.endsWith(".json")) {
+    const out: string[] = [];
+    const walk = (v: unknown): void => {
+      if (typeof v === "string") out.push(v);
+      else if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === "object") Object.values(v).forEach(walk);
+    };
+    walk(JSON.parse(content));
+    return out;
+  }
+  return [screenText(content)];
+}
+
+/** The Premiere plugin's own page and manifest (premiere-uxp/plugin/). */
+export function scannedPluginFiles(panelUi: string): string[] {
+  const dir = join(panelUi, "..", "premiere-uxp", "plugin");
+  return [join(dir, "index.html"), join(dir, "manifest.json")];
+}
+
+/** Every command the panel can show: panel-ui/src/** except COMMAND_FILES, every i18n value, the Premiere plugin's
+ *  sources (premiere-uxp/src/**: its offline source, shell and host adapter hand texts to the panel) and its
+ *  index.html / manifest.json. As "where: rule: text". */
 export function commandsOnScreen(panelUi: string): string[] {
   const found: string[] = [];
   const sources: Record<string, string> = {};
@@ -173,6 +258,12 @@ export function commandsOnScreen(panelUi: string): string[] {
     for (const [k, v] of Object.entries(table)) {
       const rule = commandIn(String(v));
       if (rule) found.push(`i18n/${lang}.json ${k}: ${rule}: ${v}`);
+    }
+  }
+  for (const f of scannedPluginFiles(panelUi)) {
+    for (const text of pluginTexts(readFileSync(f, "utf8"), f)) {
+      const rule = commandIn(text);
+      if (rule) found.push(`premiere-uxp/plugin/${f.split(/[\\/]/).pop()}: ${rule}: ${text}`);
     }
   }
   return found;

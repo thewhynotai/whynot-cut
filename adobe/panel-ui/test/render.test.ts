@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { esc, initialUi, render } from "../src/render.ts";
+import { esc, initialUi, render, renderError } from "../src/render.ts";
 import { AR, EN, stringsFor } from "../src/i18n.ts";
 import { sampleState } from "../src/mock.ts";
 import type { PanelState } from "../src/source.ts";
@@ -307,13 +307,14 @@ test("offline banner (no diagnosis): one plain sentence and ONE fix button, Star
   assert.match(rule(css, ".btn-row"), /display: flex/);
 });
 
-test("an error notice: its sentence and ONE fix button (default Copy diagnostics); only the command span of a how is held back", () => {
+test("an error notice: its sentence and ONE fix button (default Copy diagnostics); a how that holds a command is not shown at all", () => {
   const s = sampleState("en", "idle");
   const ui = initialUi();
   ui.notice = { kind: "error", text: "Failed.", how: "In your Claude session run `reel doctor`." };
   let html = render(s, EN, ui);
-  // the how keeps its words, without the command and the verb that led into it; it says what to do, so no send line
-  assert.ok(html.includes('<div class="banner-line">Failed. In your Claude session.</div><div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="copy-diagnostics">Copy diagnostics</button></div>'), html);
+  // round 2: no sentence surgery. The how is held back whole (mount put it in the log); the Copy diagnostics fix then
+  // says what to do with the copy
+  assert.ok(html.includes(`<div class="banner-line">Failed.</div><div class="banner-line">${esc(EN["notice.send_diagnostics"])}</div><div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="copy-diagnostics">Copy diagnostics</button></div>`), html);
   assert.ok(!html.includes("reel doctor") && !html.includes('class="cmd"'));
   for (const fix of ["start-engine", "retry", "copy-diagnostics"] as const) {
     ui.notice = { kind: "error", text: "Failed.", how: "Wait and retry.", fix };
@@ -610,9 +611,99 @@ test("C2.2 r1: one Start engine on a screen: the offline banner carries it, a no
   assert.equal((h.match(/data-action="start-engine"/g) ?? []).length, 1);
 });
 
-test("C2.2 r1: a notice shows the engine's words without the command span (span-level, not all-or-nothing)", () => {
+
+// ---- C2.2 review round 2: no sentence surgery. An engine or host text that holds a command is not shown at all: the
+// panel's own localized sentence takes its place (mount puts the raw text in the log); "Claude Code" reads "Claude".
+
+const noticeLine = (h: string) => /<div class="banner banner-(?:error|ok|info)" role="status"[\s\S]*?<div class="banner-line">([\s\S]*?)<\/div>/.exec(h)?.[1] ?? "";
+
+test("C2.2 r2: a notice whose text holds a command shows the localized sentence for its code (generic when there is none); the fix button stays", () => {
+  for (const [lang, t] of [["en", EN], ["ar", AR]] as const) {
+    const s = sampleState(lang, "idle");
+    const cases: Array<[string | undefined, string]> = [
+      ["no_route", t["notice.code.no_route"]],
+      ["timeout", t["notice.code.timeout"]],
+      ["NOT_YET", t["notice.code.not_yet"]],
+      ["no_engine", t["offline.no_engine"]],
+      ["lost", t["offline.lost"]],
+      ["something_new", t["notice.failed"]],
+      ["../../evil", t["notice.failed"]],
+      [undefined, t["notice.failed"]],
+    ];
+    for (const [code, want] of cases) {
+      const h = render(s, t, { ...initialUi(), notice: { kind: "error", text: "Premiere is not responding. Run reel doctor and press Try again.", ...(code ? { code } : {}), fix: "retry" } });
+      assert.equal(noticeLine(h), esc(want), `${lang}/${code}`);
+      assert.ok(!h.includes("reel doctor") && !h.includes(". and press"), `${lang}/${code}: never a cut-up sentence`);
+      assert.match(h, /data-action="retry"/, `${lang}/${code}: the fix button stays`);
+    }
+  }
+});
+
+test("C2.2 r2: a normal engine sentence is shown whole; 'Claude Code' becomes 'Claude' in place, in the text and the how", () => {
   const s = sampleState("en", "idle");
-  const ui = { ...initialUi(), notice: { kind: "error" as const, text: "Premiere is busy (reel status --watch).", how: "Open Claude Code, then press Try again.", fix: "retry" as const } };
-  const h = render(s, EN, ui);
-  assert.ok(h.includes('<div class="banner-line">Premiere is busy. Open Claude, then press Try again.</div>'), h.slice(h.indexOf("banner-line"), h.indexOf("banner-line") + 200));
+  for (const text of ["The reel plan is ready", "reel build failed", "Python 3.9 is required", "Claude login expired"]) {
+    assert.equal(noticeLine(render(s, EN, { ...initialUi(), notice: { kind: "error", text } })), esc(text), text);
+  }
+  const h = render(s, EN, { ...initialUi(), notice: { kind: "error", text: "Open Claude Code.", how: "Open Claude Code, then press Try again.", fix: "retry" } });
+  assert.equal(noticeLine(h), "Open Claude. Open Claude, then press Try again.");
+  // a how that holds a command is not shown; the text stays
+  const h2 = render(s, EN, { ...initialUi(), notice: { kind: "error", text: "Premiere is busy.", how: "Open your Claude session, run reel serve --ensure.", fix: "retry" } });
+  assert.equal(noticeLine(h2), "Premiere is busy.");
+  assert.ok(!h2.includes("reel serve") && !h2.includes("session,."));
+});
+
+test("C2.2 r2: every engine or host text that reaches the screen gets the same handling: step, summary, flagged text, QC label, host detail, renderError", () => {
+  const CMD = "Run reel previews --video-id C0239 now";
+  for (const [lang, t] of [["en", EN], ["ar", AR]] as const) {
+    const s = sampleState(lang, "showcase");
+    s.pipeline = s.pipeline.map((p) => (p.id === "build" ? { ...p, progress: { n: 1, of: 4, step: CMD } } : p));
+    s.approval!.summary = CMD;
+    s.approval!.flagged[0]!.text = CMD;
+    s.qc[0]!.label = CMD;
+    s.connection.host.detail = "Premiere Pro (claude -p)";
+    const h = render(s, t, initialUi());
+    assert.ok(!h.includes("reel previews") && !h.includes("claude -p"), lang);
+    assert.ok(h.includes(`<p class="summary"><bdi>${esc(t["text.held"])}</bdi></p>`), `${lang}: summary`);
+    assert.ok(h.includes(`<div class="qc-label"><bdi>${esc(t["text.held"])}</bdi></div>`), `${lang}: label`);
+    assert.ok(!h.includes('class="now-step"'), `${lang}: the step line is left out`);
+    assert.ok(h.includes(`<span class="pill-v">${esc(t["pill.host.uxp"])}</span>`), `${lang}: host pill falls back to its own words`);
+    // normal texts are shown whole
+    const ok = sampleState(lang, "showcase");
+    ok.approval!.summary = "The reel plan is ready";
+    ok.connection.host.detail = "Premiere Pro 26.5.2";
+    const h2 = render(ok, t, initialUi());
+    assert.ok(h2.includes("<bdi>The reel plan is ready</bdi>") && h2.includes("Premiere Pro 26.5.2") && h2.includes("graphics placed"), lang);
+  }
+  const e = renderError(EN, false, EN["error.render"], "Cannot read x: run `reel doctor`");
+  assert.ok(!e.includes("reel doctor") && e.includes(esc(EN["error.render"])));
+  assert.ok(renderError(EN, false, EN["error.render"], "Claude Code broke").includes("Claude broke"));
+  assert.ok(renderError(EN, false, EN["error.render"], "Cannot read properties of undefined").includes("Cannot read properties of undefined"));
+});
+
+test("C2.2 r2: an info notice (the plan changed) has its own colour and no fix button", () => {
+  const h = render(sampleState("en", "approval"), EN, { ...initialUi(), notice: { kind: "info", text: EN["notice.plan_changed"] } });
+  assert.match(h, /<div class="banner banner-info" role="status"/);
+  assert.ok(!/banner-fix/.test(h));
+  assert.match(rule(panelCss(), ".banner-info"), /border-color: var\(--twn-warn\)/);
+  assert.equal(EN["notice.plan_changed"], "The plan changed. Review it and approve again.");
+  assert.match(AR["notice.plan_changed"], /[؀-ۿ]/);
+});
+
+test("C2.2 r2: the host pill uses editor words: Premiere / linked / linked (compat), never UXP, CEP or Host (EN and AR)", () => {
+  for (const [lang, t] of [["en", EN], ["ar", AR]] as const) {
+    for (const k of ["pill.host", "pill.host.uxp", "pill.host.cep", "pill.host.offline"] as const) {
+      assert.doesNotMatch(t[k], /\bUXP\b|\bCEP\b|\bHost\b|المضيف/, `${lang} ${k}`);
+    }
+    assert.match(t["pill.host"], /Premiere/, lang);
+    for (const st of ["uxp", "cep", "offline"] as const) {
+      const s = sampleState(lang, "showcase");
+      s.connection.host = { state: st };
+      const h = render(s, t, initialUi());
+      const pillHtml = /<span class="pill [^"]*" data-pill="host">[\s\S]*?<\/span><\/span>/.exec(h)![0];
+      assert.doesNotMatch(pillHtml, /UXP|CEP|Host/, `${lang}/${st}`);
+    }
+  }
+  assert.equal(EN["pill.host"], "Premiere");
+  assert.equal(EN["pill.host.uxp"], "linked");
+  assert.equal(EN["pill.host.cep"], "linked (compat)");
 });

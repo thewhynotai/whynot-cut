@@ -481,16 +481,31 @@ test("C2.2 r1: Try again on a failed Request changes sends the text in the box N
   assert.equal(handle.ui.notice?.kind, "ok");
 });
 
-test("C2.2 r1: Try again on a failed Approve sends the fingerprint on screen now, not the one clicked earlier", async () => {
-  const { root, source, state } = await setup();
-  source.nextResult = { ok: false, error: "The engine did not answer in time." };
-  root.click({ "data-action": "approve", "data-fingerprint": state.approval!.fingerprint });
+test("C2.2 r2: Try again on a failed Approve replays only while the plan on screen is the one approved; a changed plan is never approved unread", async () => {
+  // unchanged: the same approval again
+  const a = await setup();
+  a.source.nextResult = { ok: false, error: "The engine did not answer in time." };
+  a.root.click({ "data-action": "approve", "data-fingerprint": a.state.approval!.fingerprint });
   await tick();
-  for (const cb of source.cbs) cb({ ...state, approval: { ...state.approval!, fingerprint: "sha256:new-plan" } });
-  source.nextResult = { ok: true };
-  root.click({ "data-action": "retry" });
+  a.source.nextResult = { ok: true };
+  a.root.click({ "data-action": "retry" });
   await tick();
-  assert.deepEqual(source.calls.approve.map((a) => (a as { fingerprint: string }).fingerprint), [state.approval!.fingerprint, "sha256:new-plan"]);
+  assert.deepEqual(a.source.calls.approve.map((x) => (x as { fingerprint: string }).fingerprint), [a.state.approval!.fingerprint, a.state.approval!.fingerprint]);
+  // changed, or gone: no approval; a short notice says to review it
+  for (const next of [{ ...a.state.approval!, fingerprint: "sha256:new-plan" }, null]) {
+    const { root, source, state, handle } = await setup();
+    source.nextResult = { ok: false, error: "The engine did not answer in time." };
+    root.click({ "data-action": "approve", "data-fingerprint": state.approval!.fingerprint });
+    await tick();
+    for (const cb of source.cbs) cb({ ...state, approval: next });
+    source.nextResult = { ok: true };
+    root.click({ "data-action": "retry" });
+    await tick();
+    assert.equal(source.calls.approve.length, 1, "not approved again");
+    assert.equal(handle.ui.notice?.kind, "info");
+    assert.equal(handle.ui.notice?.text, EN["notice.plan_changed"]);
+    assert.ok(root.innerHTML.includes(EN["notice.plan_changed"]), "repainted with the notice");
+  }
 });
 
 test("C2.2 r1: Try again only runs the notice on screen: after a seek cleared the failed notice, it runs nothing", async () => {
@@ -522,13 +537,14 @@ test("C2.2 r1: an answer that is the same every time (NOT_YET: not available fro
   }
 });
 
-test("C2.2 r1: a notice keeps the cause and the remedy around a command span; the raw words go to the log, token-scrubbed", async () => {
+test("C2.2 r2: a how that holds a command is not shown (never cut up); the raw words go to the log, token-scrubbed", async () => {
   const { root, source } = await setup();
   const token = "ab12".repeat(16);
   source.nextResult = { ok: false, error: "Engine refused the key.", how: `Start it with reel serve --ensure --key ${token}, then press Try again.` };
   root.click({ "data-action": "open-project" });
   await tick();
-  assert.ok(root.innerHTML.includes("Engine refused the key. Start it, then press Try again."), "the cause and the remedy stay on screen");
+  assert.ok(root.innerHTML.includes('<div class="banner-line">Engine refused the key.</div>'), "the text stays, the how is held back whole");
+  assert.ok(!root.innerHTML.includes("Start it, then"), "no cut-up sentence");
   assert.ok(!root.innerHTML.includes("reel serve"));
   root.click({ "data-action": "toggle-log" });
   assert.ok(root.innerHTML.includes("Engine refused the key. Start it with reel serve --ensure --key [token], then press Try again."), "the full words, in the log drawer");
@@ -581,4 +597,106 @@ test("C2.2 r1: the Start engine log line is English in the Arabic panel too", as
   root.click({ "data-action": "start-engine" });
   assert.ok(root.innerHTML.includes("Start engine pressed."));
   assert.equal(AR["log.start_engine"], EN["log.start_engine"], "log lines are English in both tables");
+});
+
+// ------------------------------------------------- C2.2 review round 2
+
+test("C2.2 r2: an engine text that holds a command shows the localized sentence for its code; the raw text goes to the log", async () => {
+  const { root, source, handle } = await setup();
+  source.nextResult = { ok: false, error: "Premiere is not responding. Run reel doctor and press Try again.", code: "no_route" };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  assert.ok(root.innerHTML.includes(EN["notice.code.no_route"]));
+  assert.ok(!root.innerHTML.includes("Premiere is not responding."), "never a cut-up sentence");
+  assert.equal(handle.ui.notice?.fix, "retry", "the fix button stays");
+  root.click({ "data-action": "toggle-log" });
+  assert.ok(root.innerHTML.includes("Premiere is not responding. Run reel doctor and press Try again."), "the raw words, in the log drawer");
+});
+
+test("C2.2 r2: every plain failure gets a log line too (Copy diagnostics carries it)", async () => {
+  const { root, source, calls } = await setup();
+  source.nextResult = { ok: false, error: "Premiere is busy.", how: "Wait and retry." };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  root.click({ "data-action": "copy-diagnostics" });
+  const d = JSON.parse(calls.copy[0]!) as { log: { text: string; level: string }[] };
+  assert.ok(d.log.some((l) => l.text === "Premiere is busy. Wait and retry." && l.level === "error"), JSON.stringify(d.log));
+});
+
+test("C2.2 r2: an engine or host text held back from the state (summary, label, step, host detail) is logged once", async () => {
+  const { root, source, state } = await setup();
+  const raw = "Plan summary: run reel previews --video-id C0239 first.";
+  const next: PanelState = { ...state, approval: { ...state.approval!, summary: raw } };
+  for (const cb of source.cbs) cb(next);
+  for (const cb of source.cbs) cb({ ...next });
+  root.click({ "data-action": "toggle-log" });
+  const html = root.innerHTML;
+  assert.equal(html.split(raw).length - 1, 1, "logged once, in the log drawer only");
+  assert.ok(html.includes(EN["text.held"]), "the summary reads the panel's own sentence");
+});
+
+test("C2.2 r2: a replay that cannot run says so: missing name, empty box, bad frame time are the normal validation notices, never a silent disappearance", async () => {
+  // missing name
+  {
+    const root = new FakeRoot();
+    const source = new RecSource();
+    const s = await source.snapshot();
+    source.snapshot = async () => ({ ...s, editor_name: "" });
+    const h = mount(root, source, hostRec().host);
+    await h.ready;
+    root.input("editor_name", "Layla");
+    source.nextResult = { ok: false, error: "The engine did not answer in time." };
+    root.click({ "data-action": "approve", "data-fingerprint": s.approval!.fingerprint });
+    await tick();
+    root.input("editor_name", "  ");
+    root.click({ "data-action": "retry" });
+    await tick();
+    assert.equal(source.calls.approve.length, 1);
+    assert.equal(h.ui.notice?.text, EN["notice.need_name"]);
+    assert.ok(root.innerHTML.includes(EN["notice.need_name"]));
+  }
+  // empty box
+  {
+    const { root, source, handle } = await setup();
+    root.input("changes", "shorter hook");
+    source.nextResult = { ok: false, error: "The engine did not answer in time." };
+    root.click({ "data-action": "request-changes" });
+    await tick();
+    root.input("changes", "");
+    root.click({ "data-action": "retry" });
+    await tick();
+    assert.equal(source.calls.requestChanges.length, 1);
+    assert.equal(handle.ui.notice?.text, EN["notice.need_changes"]);
+  }
+  // bad data-t, on a click and on a replay
+  {
+    const { root, calls, handle } = await setup();
+    root.click({ "data-action": "seek", "data-t": "abc" });
+    await tick();
+    assert.deepEqual(calls.seek, []);
+    assert.equal(handle.ui.notice?.text, EN["notice.bad_frame"]);
+    handle.ui.notice = { kind: "error", text: "x", fix: "retry", again: { action: "reexport", attrs: { "data-t": "NaN" } } };
+    root.click({ "data-action": "retry" });
+    await tick();
+    assert.equal(handle.ui.notice?.text, EN["notice.bad_frame"]);
+  }
+});
+
+test("C2.2 r2: a Start engine notice clears itself once the engine connects", async () => {
+  const { root, source, state, handle } = await setup();
+  const off = { ...state, connection: { ...state.connection, engine: "offline" as const } };
+  for (const cb of source.cbs) cb(off);
+  source.nextResult = { ok: false, error: "The WhyNot Cut engine is not connected.", code: "no_engine" };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  assert.equal(handle.ui.notice?.fix, "start-engine");
+  for (const cb of source.cbs) cb({ ...off, connection: { ...off.connection, engine: "connected" } });
+  assert.equal(handle.ui.notice, null);
+  assert.ok(!root.innerHTML.includes('role="status"'), "repainted without it");
+  // another notice stays
+  source.nextResult = { ok: false, error: "Premiere is busy." };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  for (const cb of source.cbs) cb({ ...off, connection: { ...off.connection, engine: "connected" } });
+  assert.equal((handle.ui.notice as { text: string } | null)?.text, "Premiere is busy.");
 });

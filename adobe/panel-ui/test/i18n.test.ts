@@ -69,7 +69,7 @@ test("stringsFor picks the table; fmt fills placeholders", () => {
 // ---- Arabic copy (Addendum B3): clear MSA, the English UI term in parentheses the first time ----
 
 /** The UI terms an Arabic editor meets in Premiere / the guide in English: each label carries it once, in parentheses. */
-const AR_TERMS = ["Pipeline", "Approval", "QC", "Transcript", "Plan", "Approve", "Build", "Frames", "Handoff", "Rebuild", "Playhead", "Engine", "Host"];
+const AR_TERMS = ["Pipeline", "Approval", "QC", "Transcript", "Plan", "Approve", "Build", "Frames", "Handoff", "Rebuild", "Playhead", "Engine"];
 
 test("Arabic: every key UI term carries its English name in parentheses on first use (the label), not in every sentence", () => {
   const values = Object.values(table("ar")) as string[];

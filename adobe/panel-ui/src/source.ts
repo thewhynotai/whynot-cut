@@ -122,6 +122,9 @@ export interface Result {
   readback?: object;
   error?: string;
   how?: string;
+  /** why it failed, as a code the panel can localize (a session error code, timeout, lost, too_large, NOT_YET, or the
+   *  link's diagnosis code): the panel shows its own sentence for it when the engine's words hold a command */
+  code?: string;
 }
 
 export interface PanelDataSource {

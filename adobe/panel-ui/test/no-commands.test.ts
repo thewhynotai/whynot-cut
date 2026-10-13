@@ -10,7 +10,7 @@ import { AR, EN } from "../src/i18n.ts";
 import { initialUi, render } from "../src/render.ts";
 import { sampleState, SCENARIOS } from "../src/mock.ts";
 import { kitGallery } from "../src/kit/gallery.ts";
-import { COMMAND_FILES, LOG_TUPLE_FILE, commandIn, commandLiterals, commandsOnScreen, parseSources, screenText, textsOf, tsFiles } from "./no-commands-scan.ts";
+import { COMMAND_FILES, LOG_TUPLE_FILE, commandIn, commandLiterals, commandsOnScreen, parseSources, pluginTexts, scannedPluginFiles, screenText, textsOf, tsFiles } from "./no-commands-scan.ts";
 import { PANEL_UI } from "./tokens-util.ts";
 
 const stripRule = (hits: string[]) => hits.map((s) => s.replace(/^[a-z-]+: /, ""));
@@ -194,4 +194,59 @@ test("rendered panel: no command and no backtick anywhere outside the log drawer
 
 test("kit gallery: no command anywhere outside the log drawer, text and attributes (EN and AR)", () => {
   for (const lang of ["en", "ar"] as const) assert.equal(commandIn(screenText(kitGallery(lang))), null, lang);
+});
+
+// ---------------------------------------------------------------------------------- C2.2 review round 2: the guard folds more
+
+test("C2.2 r2 guard: + chains with parentheses, .concat(), += on a declared literal and ${\"literal\"} inside a template fold into one text", () => {
+  const src = [
+    'const a = ("reel" + " ") + "doctor";',
+    'const b = "re" + ("el" + " serve --ensure");',
+    'const c = "reel".concat(" previews");',
+    'const d = "reel ".concat("serve", " --ensure");',
+    'const e = ["npx"].concat(["x"]).join(" ");',
+    'let f = "reel"; f += " transcribe";',
+    'const g = "claude"; g += " auth login";',
+    'const h = `${"reel"} doctor`;',
+    'const i = `${"re" + "el"} setup`;',
+    'const j = `${("reel")} build`;',
+    'const k = "safe".concat(flag);',
+  ].join("\n");
+  const hits = stripRule(commandLiterals(src));
+  for (const want of ["reel doctor", "reel serve --ensure", "reel previews", "reel transcribe", "claude auth login", "reel setup", "reel build"]) {
+    assert.ok(hits.some((h) => h.replace(/\s+/g, " ").trim() === want), `not caught: ${want} in ${JSON.stringify(hits)}`);
+  }
+  assert.ok(hits.some((h) => h.replace(/\s+/g, " ").trim() === "npx x"), `not caught: npx x in ${JSON.stringify(hits)}`);
+  assert.ok(!hits.some((h) => h.startsWith("safe")), "a non-literal part reads as a space");
+});
+
+test("C2.2 r2 guard: full-width text is caught (NFKC before matching), in literals and in the string table check", () => {
+  assert.ok(stripRule(commandLiterals('const a = "ｒｅｅｌ ｄｏｃｔｏｒ";')).length === 1);
+  assert.ok(commandIn("Ｒｕｎ ｒｅｅｌ　ｓｅｒｖｅ －－ｅｎｓｕｒｅ"));
+});
+
+test("C2.2 r2 guard: the mock.ts exemption covers only its log-lines array (a `log` array of [level, text] tuples)", () => {
+  const src = [
+    'const flavor = { log: [["info", "reel plan --root X"]], qc: [["info", "reel doctor"]] };',
+    'const log = [["warn", "reel build C0239"]];',
+    'const other = [["error", "npx whynot"]];',
+  ].join("\n");
+  assert.deepEqual(stripRule(commandLiterals(src, LOG_TUPLE_FILE)).sort(), ["npx whynot", "reel doctor"]);
+  assert.equal(stripRule(commandLiterals(src, "render.ts")).length, 4, "no exemption outside mock.ts");
+});
+
+test("C2.2 r2 guard: screenText also reads value, aria-description and single-quoted attributes", () => {
+  assert.ok(commandIn(screenText('<input value="reel doctor">')), "value");
+  assert.ok(commandIn(screenText('<div aria-description="Run reel serve --ensure">x</div>')), "aria-description");
+  assert.ok(commandIn(screenText("<span title='reel serve --ensure'>i</span>")), "single-quoted");
+  assert.ok(commandIn(screenText("<input placeholder='npx whynot'>")), "single-quoted placeholder");
+  assert.equal(commandIn(screenText('<div data-value="reel doctor">ok</div>')), null, "a data-* attribute is not read");
+});
+
+test("C2.2 r2 guard: the Premiere plugin's index.html and manifest.json are scanned (labels, text and attributes)", () => {
+  assert.deepEqual(pluginTexts('{"name":"WhyNot Cut","entrypoints":[{"label":{"default":"Run reel doctor"}}],"main":"index.html"}', "manifest.json").filter((t) => commandIn(t)), ["Run reel doctor"]);
+  assert.ok(pluginTexts('<!doctype html><body><p title="x">Type: reel doctor</p></body>', "index.html").some((t) => commandIn(t)));
+  assert.ok(pluginTexts('<script>var a = "reel doctor";</script><style>.x{}</style><p>Fine.</p>', "index.html").every((t) => !commandIn(t)), "script and style bodies are not screen text");
+  const files = scannedPluginFiles(PANEL_UI);
+  assert.deepEqual(files.map((f) => f.replace(/\\/g, "/").replace(/^.*premiere-uxp\//, "")).sort(), ["plugin/index.html", "plugin/manifest.json"]);
 });

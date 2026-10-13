@@ -810,7 +810,7 @@ test("kit.css header comment states the attribute-selector rule as it is (valuel
   assert.match(head, /\[disabled\]/);
 });
 
-test("C2.2 r1: toast: a Copy diagnostics fix says what to do with the copy; a command in the text is neutralised (the rest stays)", () => {
+test("C2.2 r2: toast: a Copy diagnostics fix says what to do with the copy; a text that holds a command is not shown (never cut up)", () => {
   for (const t of [EN, AR]) {
     const err = toast({ t, kind: "error", text: t["offline.refused_host"] });
     assert.ok(err.includes(`<div class="kit-toast-text">${esc(t["notice.send_diagnostics"])}</div>`));
@@ -818,7 +818,9 @@ test("C2.2 r1: toast: a Copy diagnostics fix says what to do with the copy; a co
     assert.ok(!retry.includes(esc(t["notice.send_diagnostics"])));
   }
   const cmd = toast({ t: EN, kind: "warn", text: "Engine down: start it with reel serve --ensure, then press Try again." });
-  assert.ok(cmd.includes("Engine down: start it, then press Try again.") && !cmd.includes("reel serve"));
+  assert.ok(cmd.includes(`<div class="kit-toast-text">${esc(EN["notice.failed"])}</div>`) && !cmd.includes("reel serve") && !cmd.includes("start it, then"));
+  assert.ok(toast({ t: EN, kind: "info", text: "Open Claude Code, then wait." }).includes("Open Claude, then wait."), "the product name swap is in place");
+  assert.ok(toast({ t: EN, kind: "ok", text: "The reel plan is ready" }).includes("The reel plan is ready"), "a normal sentence is shown whole");
   const only = toast({ t: EN, kind: "warn", text: "reel doctor" });
   assert.ok(only.includes(`<div class="kit-toast-text">${esc(EN["notice.failed"])}</div>`));
 });

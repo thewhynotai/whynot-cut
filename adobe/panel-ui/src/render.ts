@@ -1,8 +1,11 @@
 // Pure rendering: render(state, strings, ui) -> HTML string. Every dynamic value goes through esc().
 // Paths and timecodes are wrapped in <bdi dir="ltr"> so they stay left-to-right inside Arabic text. Commands are never
-// shown (Addendum C1.4): a text from the engine or a host goes through neutralise() (src/commands.ts) first.
+// shown (Addendum C1.4): every text from the engine or a host (a notice and its how, the running step, the plan
+// summary, a flagged statement, a QC label, the host detail, an error view's message) goes through runtimeText()
+// (src/commands.ts) first. It is never cut up (C2.2 review round 2): "Claude Code" reads "Claude", and a text that
+// holds a command is replaced whole by the panel's own localized sentence (mount puts the raw words in the log).
 // Markup is flexbox-friendly and uses only simple classes (UXP and CEP render the same CSS).
-import { neutralise } from "./commands.ts";
+import { runtimeText } from "./commands.ts";
 import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction } from "./actions.ts";
 import type { BuildInfo } from "./diagnostics.ts";
 import { fmt } from "./i18n.ts";
@@ -23,9 +26,12 @@ const FIX_LABEL: Record<FixAction, StringKey> = {
 };
 
 export interface Notice {
-  kind: "ok" | "error";
+  /** ok (green), info (amber: a short note, no fix button, e.g. "the plan changed") or error (red, one fix button) */
+  kind: "ok" | "info" | "error";
   text: string;
   how?: string;
+  /** why it failed (Result.code): the localized sentence shown when the text holds a command */
+  code?: string;
   /** an error's one fix button; default Copy diagnostics */
   fix?: FixAction;
   /** what Try again runs: the click that led to this notice (its data-action and data-* values). mount sets it when it
@@ -72,6 +78,20 @@ const withCommands = (text: unknown) => esc(text).replace(/`([^`]+)`/g, (_m, cmd
 const STEP_GLYPH: Record<string, string> = { done: "✓", failed: "✕" };
 const VERDICT_GLYPH: Record<string, string> = { pass: "✓", fail: "✕", pending: "…", media_pending: "…" };
 
+/** The panel's own sentence for a failure code: notice.code.<code>, else the link diagnosis offline.<code>, else the
+ *  generic "That did not work." Only a plain lowercase code is looked up. */
+function codeSentence(code: unknown, t: Strings): string {
+  if (typeof code === "string" && /^[a-z_]{1,32}$/i.test(code)) {
+    for (const k of [`notice.code.${code.toLowerCase()}`, `offline.${code}`]) {
+      if (Object.prototype.hasOwnProperty.call(t, k)) return t[k as StringKey];
+    }
+  }
+  return t["notice.failed"];
+}
+
+/** An engine or host text, or the panel's own sentence when it holds a command (runtimeText). */
+const engineText = (text: unknown, t: Strings, fallback: StringKey = "text.held"): string => runtimeText(text) ?? t[fallback];
+
 function clockOf(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -90,7 +110,8 @@ function pill(kind: "engine" | "claude" | "host", c: ConnectionState, t: Strings
   } else {
     const st = c.host.state === "uxp" || c.host.state === "cep" ? c.host.state : "offline";
     cls = st === "uxp" ? "ok" : st === "cep" ? "warn" : "offline";
-    value = c.host.detail && st !== "offline" ? c.host.detail : t[`pill.host.${st}` as StringKey];
+    const detail = c.host.detail ? runtimeText(c.host.detail) : null;
+    value = detail && st !== "offline" ? detail : t[`pill.host.${st}` as StringKey];
   }
   return `<span class="pill pill-${cls}" data-pill="${kind}"><span class="pill-k">${esc(t[`pill.${kind}` as StringKey])}</span><span class="pill-v">${esc(value)}</span></span>`;
 }
@@ -173,15 +194,17 @@ function banners(s: PanelState, t: Strings, ui: UiState): string {
   }
   if (ui.notice) {
     const n = ui.notice;
-    const error = n.kind !== "ok";
-    // only the command span of an engine or host text is held back (mount has put the full words in the log): the cause
-    // and the remedy stay; a text with nothing else left reads "That did not work."
-    const text = neutralise(n.text) ?? t["notice.failed"];
-    const how = n.how ? neutralise(n.how) : null;
+    const kind = n.kind === "ok" || n.kind === "info" ? n.kind : "error";
+    const error = kind === "error";
+    // an engine or host text is never cut up (mount has put the raw words in the log): one that holds a command is
+    // replaced whole by the panel's sentence for its code ("That did not work." when there is none); a how that holds
+    // one is left out (the fix button still says what to do)
+    const text = runtimeText(n.text) ?? codeSentence(n.code, t);
+    const how = n.how ? runtimeText(n.how) : null;
     const fix: FixAction = n.fix ?? "copy-diagnostics";
     const button = error && fix !== bannerFix ? fixButton(fix, t, !how) : "";
     out +=
-      `<div class="banner banner-${error ? "error" : "ok"}" role="status" aria-live="polite">` +
+      `<div class="banner banner-${kind}" role="status" aria-live="polite">` +
       `<div class="banner-text"><div class="banner-line">${esc(text)}${how ? ` ${withCommands(how)}` : ""}</div>${button}</div>` +
       `<button class="banner-x" data-action="dismiss-notice" title="${esc(t["notice.dismiss"])}" aria-label="${esc(t["notice.dismiss"])}">✕</button></div>`;
   }
@@ -224,7 +247,7 @@ function pipelineSection(s: PanelState, t: Strings): string {
     now =
       `<div class="now now-${cur.state}"><div class="now-row"><span class="now-name">${esc(t[`step.${cur.id}` as StringKey])}</span>` +
       `<span class="now-state">${esc(t[`step.state.${cur.state}` as StringKey])}</span>${cancel}</div>` +
-      (pr && pr.step ? `<div class="now-step">${auto(pr.step)}</div>` : "") +
+      (pr && pr.step && runtimeText(pr.step) ? `<div class="now-step">${auto(runtimeText(pr.step))}</div>` : "") +
       (pct !== null ? `<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="progress-fill" style="width:${pct}%"></div></div>` : "") +
       (meta.length ? `<div class="now-meta">${meta.join('<span class="sep">·</span>')}</div>` : "") +
       `</div>`;
@@ -241,7 +264,7 @@ function approvalSection(s: PanelState, t: Strings, ui: UiState): string {
   const flagged = a.flagged
     .map((f) => {
       const kind = f.kind === "religious" ? "religious" : "medical";
-      return `<li class="flag flag-${kind}"><span class="flag-kind">${esc(t[`approval.flagged.${kind}` as StringKey])}</span><span class="flag-text">${auto(f.text)}</span><span class="flag-tc">${ltr(f.tc)}</span></li>`;
+      return `<li class="flag flag-${kind}"><span class="flag-kind">${esc(t[`approval.flagged.${kind}` as StringKey])}</span><span class="flag-text">${auto(engineText(f.text, t))}</span><span class="flag-tc">${ltr(f.tc)}</span></li>`;
     })
     .join("");
   const nameField = s.editor_name
@@ -251,7 +274,7 @@ function approvalSection(s: PanelState, t: Strings, ui: UiState): string {
   const changesOff = offline || ui.working || ui.changeText.trim() === "";
   return (
     `<section class="sec" aria-label="${esc(t["section.approval"])}">${head}<div class="card">` +
-    `<div class="lbl">${esc(t["approval.summary"])}</div><p class="summary">${auto(a.summary)}</p>` +
+    `<div class="lbl">${esc(t["approval.summary"])}</div><p class="summary">${auto(engineText(a.summary, t))}</p>` +
     `<button class="btn btn-secondary" data-action="preview"${a.preview_mp4 ? "" : " disabled"}>${esc(t["approval.preview"])}</button>` +
     (a.flagged.length ? `<div class="lbl lbl-flag">${esc(t["approval.flagged"])}</div><ul class="flags">${flagged}</ul>` : "") +
     nameField +
@@ -276,7 +299,7 @@ function tile(q: QcFrame, t: Strings): string {
     `<div class="qc-tile qc-${verdict}" data-t="${esc(q.t_s)}">` +
     `<button class="qc-thumb" data-action="seek" data-t="${esc(q.t_s)}" title="${esc(q.tc)}"><span class="qc-frame" style="padding-top:${aspectPct(q.w, q.h)}%">${img}</span></button>` +
     `<div class="qc-meta"><span class="qc-tc">${ltr(q.tc)}</span><span class="qc-verdict">${VERDICT_GLYPH[verdict]} ${esc(t[`qc.${verdict}` as StringKey])}</span></div>` +
-    `<div class="qc-label">${auto(q.label)}</div>${reexport}</div>`
+    `<div class="qc-label">${auto(engineText(q.label, t))}</div>${reexport}</div>`
   );
 }
 
@@ -357,11 +380,13 @@ export function renderLoading(t: Strings, rtl = false): string {
   return shell(t, rtl, `<p class="muted">${esc(t["status.connecting"])}</p>`);
 }
 
-/** Shown when the panel cannot render or read its state: the message is visible, never a blank panel. */
+/** Shown when the panel cannot render or read its state: the message is visible, never a blank panel. A message that
+ *  holds a command is left out (the title says what happened; mount logs the raw message). */
 export function renderError(t: Strings, rtl: boolean, title: string, message: string): string {
+  const shown = runtimeText(message);
   return shell(
     t,
     rtl,
-    `<div class="banner banner-error" role="alert"><span class="banner-text"><strong>${esc(title)}</strong> ${ltr(message)}</span></div>`,
+    `<div class="banner banner-error" role="alert"><span class="banner-text"><strong>${esc(title)}</strong>${shown ? ` ${ltr(shown)}` : ""}</span></div>`,
   );
 }

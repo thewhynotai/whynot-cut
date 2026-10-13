@@ -903,3 +903,25 @@ test("C2.2 r1: no how or error the editor reads names engine.json or a raw actio
     assert.match(new RegExp(`^ {2}${code}: "([^"]*)",$`, "m").exec(src)![1]!, /press Try again/i, code);
   }
 });
+
+// ---------------------------------------------------------------------------------- C2.2 review round 2
+
+test("C2.2 r2: no how names serve-audit.log or 'send the engine log': it says to copy the diagnostics and send them to support", () => {
+  const src = readFileSync(new URL("../src/daemon-source.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /serve-audit\.log|send the engine log/);
+  assert.ok((src.match(/how: "Copy the diagnostics and send them to support\."/g) ?? []).length >= 3);
+});
+
+test("C2.2 r2: a failed answer carries a code the panel can localize: the session error code, timeout, lost, too_large, or the link's code when not connected", async () => {
+  const r = await connected();
+  r.daemon.onCommand = (s, m) => {
+    const req = m["request"] as { id: string };
+    s.deliver({ type: "error", code: "no_route", message: "No Premiere panel is connected (run reel doctor).", id: req.id });
+  };
+  const res = await r.src.run("open_project", { path: "D:/x.prproj" });
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "no_route");
+  r.src.stop();
+  const off = await r.src.run("open_project", { path: "D:/x.prproj" });
+  assert.equal(off.code, "stopped");
+});

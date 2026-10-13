@@ -183,3 +183,29 @@ test("MockSource.run refuses a hand-built partial build_project with a plain err
   assert.equal(r.ok, false);
   assert.ok(r.error && r.how);
 });
+
+test("C2.2 r2: the dev harness shows thumbnails again: the mock's frames are raster PNG data URLs, and the showcase renders at least one qc-img", async () => {
+  const { render, initialUi } = await import("../src/render.ts");
+  const { EN, AR } = await import("../src/i18n.ts");
+  const { isSafeImg } = await import("../src/media.ts");
+  for (const [lang, t] of [["en", EN], ["ar", AR]] as const) {
+    const s = sampleState(lang, "showcase");
+    const thumbs = s.qc.map((q) => q.thumb).filter((x): x is string => typeof x === "string");
+    assert.ok(thumbs.length >= 4, lang);
+    for (const th of thumbs) {
+      assert.match(th, /^data:image\/png;base64,iVBORw0KGgo/, lang);
+      assert.ok(isSafeImg(th), lang);
+      const bytes = Buffer.from(th.slice(th.indexOf(",") + 1), "base64");
+      assert.equal(bytes.subarray(1, 4).toString("latin1"), "PNG");
+    }
+    const html = render(s, t, initialUi());
+    assert.ok((html.match(/class="qc-img"/g) ?? []).length >= 1, `${lang}: no qc-img`);
+  }
+  // a re-exported frame gets a PNG too
+  const m = new MockSource({ scenario: "qc" });
+  const before = await m.snapshot();
+  const pending = before.qc.find((q) => q.verdict === "media_pending")!;
+  await m.run("export_frames", { times: [pending.t_s], out_dir: "x" });
+  const after = (await m.snapshot()).qc.find((q) => q.t_s === pending.t_s)!;
+  assert.match(after.thumb ?? "", /^data:image\/png;base64,/);
+});

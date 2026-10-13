@@ -98,16 +98,25 @@ function tcOf(t: number): string {
   return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}:${p(f)}`;
 }
 
-/** A small neutral frame as an SVG data URI so tiles look like tiles without any media on disk. */
-function thumbFor(i: number, w = 108, h = 192): string {
-  const hues = ["#121212", "#390796", "#1E1E1E", "#000000"];
-  const bg = hues[i % hues.length]!;
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
-    `<rect width="${w}" height="${h}" fill="${bg}"/><rect x="10" y="${h - 60}" width="88" height="14" rx="3" fill="#5400FB" opacity=".85"/>` +
-    `<rect x="10" y="${h - 40}" width="60" height="8" rx="3" fill="#FFFFFF" opacity=".6"/>` +
-    `<circle cx="54" cy="${Math.round(h / 3)}" r="22" fill="#FFFFFF" opacity=".18"/></svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+/** Small neutral frames (a dark ground, a purple statement bar, a caption line, a soft circle) as PNG data URLs, so
+ *  tiles look like tiles without any media on disk. Raster on purpose: the panel draws only raster data URLs
+ *  (media.ts SAFE_IMG refuses svg+xml), so an SVG thumbnail would never show in the dev harness. 9:16 and 4:5. */
+const THUMB_916: readonly string[] = [
+  "iVBORw0KGgoAAAANSUhEUgAAADYAAABgCAIAAADZ8BZgAAAAmUlEQVR42u3XgQmAIBBAUaEN2ucWaMrGapwmCNIwPXyfBngg6V3Zp68gIiIiIiIiIiIiIiIuSYyIGYnx3HhivGsYMWoaQIz6fiVGa4iffW1KRMQuvgalg0bMTPQArjPp5JgXc0zdOXaXNBugVR8RERERERERERERETEf8diu4R8iIuJCRFf3IsSzW4iI/mhERERERERERMT2bki86xAAeYD4AAAAAElFTkSuQmCC",
+  "iVBORw0KGgoAAAANSUhEUgAAADYAAABgCAIAAADZ8BZgAAAArklEQVR42u3XsRGDMBAEwHfkhkjcBQ3QliMaIHMz7sJFUIEdPCB4a2eugJ3RSLqLx/158QQiIiIiIiIiIiIiImKXxGlYrkichuVbzif+wO0FjQa+jcpo49uijGa+tPJPiWlfTomIeIgvoXTQiJWJPsB+mk6NvlijddfYLmUWoKmPiIiIiIiIiIiIiIhYjzjePqcHERGxI6KnuxPia34fFERENxoRERERERERETGfFS6kmOe6J5dFAAAAAElFTkSuQmCC",
+  "iVBORw0KGgoAAAANSUhEUgAAADYAAABgCAIAAADZ8BZgAAAAmklEQVR42u3X0Q2AIAxAQX5cw3X645ou5TROYCIYhIZ7cYBLiNCWffoKIiIiIiIiIiIiIiLiksSImJEYz40nxruGEaOmAcSo71ditIb42demRETs4mtQOmjEzEQP4DqTTo55McfUnWN3SbMBWvURERERERERERERERHzEY/tGv4hIiIuRHR1L0I8u4WI6I9GRERERERERERs7wZc3Y138447hgAAAABJRU5ErkJggg==",
+  "iVBORw0KGgoAAAANSUhEUgAAADYAAABgCAIAAADZ8BZgAAAAcklEQVR42u3XyxGAMAhAwVREG9ZoYfZjBR6Mn8CwOyngzXAIjAEAAEBKEZE060rquBShcUf2vgWVMUvi477/KiV2SIw3GLTENok+wD6bTo19scbWXeN2KXMBAgAAUM82juVPokSJjRJpYv+MRIkAADDvBMi3+DGR8O+JAAAAAElFTkSuQmCC",
+];
+const THUMB_45: readonly string[] = [
+  "iVBORw0KGgoAAAANSUhEUgAAADYAAABECAIAAABFzVFAAAAAg0lEQVR42u3XwQ2AIBAAQRM7sJ9rwCoty3J8+1GBKCCzoYD5AHfT0nwTIiIiIiIiYllxriFi3FWZGM+qRoyUKhAjvU+JkRtisS9PiYiIiIg4ygfYwRjRB7GDebGbxeAaaklF/DVxnffqBxERcSCip3sQ4vZaiIhuNCIiIiIiIiIiYn4H6ECqjrRnZ8sAAAAASUVORK5CYII=",
+  "iVBORw0KGgoAAAANSUhEUgAAADYAAABECAIAAABFzVFAAAAAl0lEQVR42u3XsQ2AMAwAQVOxEA1bsABrUbEAHcuwBUPQoiCBZIskjl/6Aa6JY8vYL5UnECFChAgRIkRb87Ddq4iYyJ4VJn767ErJ4DMqJY/PopRsPrWyUaLap1NChAgRIsQoH6CDNcIH0cG+6OYweIdypEJsmjh1Z/EgQoQYiMjoDkLc1+OnIELkRUOECBEiRIgQIULUdwG0KqeAkOBXnQAAAABJRU5ErkJggg==",
+  "iVBORw0KGgoAAAANSUhEUgAAADYAAABECAIAAABFzVFAAAAAg0lEQVR42u3XsRGAIBAAQRPbsJ1PbNOmrMbYRAVGAdkbCtgE+J+W5psQERERERERy4pzDRHjrsrEeFY1YqRUgRjpfUqM3BCLfXlKRERERMRRPsAOxog+iB3Mi90sBtdQSyrir4nrvFc/iIiIAxE93YMQt9dCRHSjERERERERERER8zsAI5l4WMEBwnoAAAAASUVORK5CYII=",
+  "iVBORw0KGgoAAAANSUhEUgAAADYAAABECAIAAABFzVFAAAAAa0lEQVR42u3X0QmAMAxAwU7UNZzRwdzHbykIVrRJe0cGeH9JSgEAZlev4pa1ovcNrqxPRO8bUFl7SXzd91+lRIkSJUrMuAATnBE5EhPci2keg/tQLydT28oxfCRKlLhQIovYPyNRIgAA9DsBrYX2kwyJJ7gAAAAASUVORK5CYII=",
+];
+
+function thumbFor(i: number, feed = false): string {
+  const list = feed ? THUMB_45 : THUMB_916;
+  return `data:image/png;base64,${list[i % list.length]!}`;
 }
 
 export function sampleState(language: Language, scenario: Scenario): PanelState {
@@ -135,7 +144,7 @@ export function sampleState(language: Language, scenario: Scenario): PanelState 
   }));
   // One feed-format (4:5) frame among the 9:16 ones, so the harness shows tiles following their own aspect.
   const four5 = qcAll[6];
-  if (four5) Object.assign(four5, { w: 1080, h: 1350, thumb: thumbFor(6, 108, 135) });
+  if (four5) Object.assign(four5, { w: 1080, h: 1350, thumb: thumbFor(6, true) });
 
   const approval = {
     summary: f.summary,
