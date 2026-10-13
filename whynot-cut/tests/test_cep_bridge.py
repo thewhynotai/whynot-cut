@@ -37,7 +37,8 @@ LIVE_3_1_1 = {
 }
 SHELL = ["CSXS/manifest.xml", "daemon.html", "js/bridge.js", "jsx/wnc_host.jsx", "ui/index.html", "ui/js/panel.js"]
 LIBS = ["wnc_ae_bridge.jsx", "wnc_ae_lib.jsx", "wnc_motion_lib.jsx", "wnc_ppro_lib.jsx"]
-BUNDLE_FILES = sorted(SHELL + [f"jsx/{n}" for n in LIBS] + ["build.json"])
+BUNDLE_FILES = sorted(SHELL + [f"jsx/{n}" for n in LIBS] + ["build.json", "ui/tokens.css"])
+BRAND_TOKENS = SK.parent / "brand" / "tokens.css"
 PANEL, DAEMON = "ai.thewhynot.cut.bridge.panel", "ai.thewhynot.cut.bridge.daemon"
 
 
@@ -189,6 +190,15 @@ class TestAssemble(unittest.TestCase):
             self.assertEqual(got[f"jsx/{name}"], _sha(src), name)                    # the libraries from templates
         self.assertEqual(sorted(cep_bundle.lib_sources()), LIBS)
         self.assertTrue(all(p.parent.parent.name == "templates" for p in cep_bundle.lib_sources().values()))
+        self.assertEqual(got["ui/tokens.css"], _sha(BRAND_TOKENS))                    # the one brand token source
+        self.assertEqual(cep_bundle.BRAND_TOKENS, BRAND_TOKENS)
+        self.assertFalse((SRC / "ui" / "tokens.css").exists())                        # an artefact, never a source
+
+    def test_assemble_refuses_without_the_brand_tokens(self):
+        with mock.patch.object(cep_bundle, "BRAND_TOKENS", self.tmp / "no-tokens.css"):
+            with self.assertRaises(FileNotFoundError):
+                cep_bundle.assemble(self.tmp / "bundle")
+        self.assertFalse((self.tmp / "bundle").exists())
 
     def test_build_json(self):
         out = cep_bundle.assemble(self.tmp / "bundle")
@@ -269,16 +279,54 @@ class TestInstalled(unittest.TestCase):
         self.assertTrue(cep_bundle.installed(b)["signed"])
 
     def test_the_legacy_family(self):
-        for version in ("3.1.1", "3.1.0", "3.0.0", "1.2.0"):
-            ext = _legacy(self.tmp / version, version)
-            got = cep_bundle.installed(ext)
-            self.assertEqual((got["family"], got["version"], got["build"]), ("legacy", version, None), version)
+        """Legacy is exactly 3.1.1 (or the reel-editor com.nh.bridge), unsigned; any other version without build.json
+        is unknown (kept unless forced)."""
+        ext = _legacy(self.tmp / "3.1.1", "3.1.1")
+        got = cep_bundle.installed(ext)
+        self.assertEqual((got["family"], got["version"], got["build"]), ("legacy", "3.1.1", None))
+        for version in ("3.1.0", "3.0.0", "1.2.0"):
+            got = cep_bundle.installed(_legacy(self.tmp / version, version))
+            self.assertEqual((got["family"], got["version"]), ("unknown", version), version)
         got = cep_bundle.installed(_legacy(self.tmp / "nh" / "com.nh.bridge", "9.0.0", "com.nh.bridge", cfg=False))
         self.assertEqual((got["family"], got["id"]), ("legacy", "com.nh.bridge"))
+
+    def test_a_signed_extension_without_a_readable_build_json_is_never_legacy(self):
+        """Review T6.3 1-4: a signed bundle whose build.json is missing or unreadable was classed legacy and replaced
+        without force. Signed is checked first: such an extension is unknown, and the install rule keeps it."""
+        def signed(ext: Path) -> Path:
+            (ext / "META-INF").mkdir(parents=True)
+            (ext / "META-INF" / "signatures.xml").write_text("<signatures/>", encoding="utf-8")
+            return ext
+        missing = cep_bundle.assemble(self.tmp / "missing")
+        (missing / "build.json").unlink()
+        broken = cep_bundle.assemble(self.tmp / "broken")
+        (broken / "build.json").write_text("{not json", encoding="utf-8")
+        cases = {"no build.json": signed(missing), "unreadable build.json": signed(broken),
+                 "signed 3.1.1": signed(_legacy(self.tmp / "s311", "3.1.1")),
+                 "signed com.nh.bridge": signed(_legacy(self.tmp / "nh2" / "com.nh.bridge", "1.0.0", "com.nh.bridge"))}
+        new = cep_bundle.installed(cep_bundle.assemble(self.tmp / "new"))
+        for name, ext in cases.items():
+            with self.subTest(name):
+                got = cep_bundle.installed(ext)
+                self.assertEqual((got["family"], got["signed"]), ("unknown", True))
+                self.assertEqual(cep_bundle.decide_install(got, new)["action"], "keep")
+                self.assertEqual(cep_bundle.decide_install(got, new, force=True)["action"], "replace")
 
     def test_an_unknown_layout(self):
         got = cep_bundle.installed(_legacy(self.tmp / "u", "9.1.0", cfg=False))
         self.assertEqual((got["family"], got["version"]), ("unknown", "9.1.0"))
+
+    def test_bridge_config_json_is_never_read(self):
+        """Task 5 dropped the last bridge-config.json read: the version is the manifest's (or build.json's)."""
+        ext = _legacy(self.tmp / "l", "3.1.1")
+        (ext / "bridge-config.json").write_text(json.dumps({"base": "x", "version": "9.9.9"}), encoding="utf-8")
+        self.assertEqual(cep_bundle.installed(ext)["version"], "3.1.1")
+        alone = self.tmp / "alone"
+        alone.mkdir()
+        (alone / "bridge-config.json").write_text(json.dumps({"version": "3.1.1"}), encoding="utf-8")
+        self.assertIsNone(cep_bundle.installed(alone))
+        self.assertNotIn("bridge-config.json", Path(cep_bundle.__file__).read_text(encoding="utf-8")
+                         .split('"""', 2)[2].replace("# a 3.1.x bridge-config.json alone", ""))
 
 
 class TestDecideInstall(unittest.TestCase):
@@ -357,12 +405,41 @@ class TestWriteConfig(_Sandbox):
             self.assertEqual(p.parent.stat().st_mode & 0o777, 0o700)
 
     def test_installer_and_launcher(self):
-        launcher = self.tmp / "home" / "bin" / "wnc-engine.cmd"
+        launcher = self.tmp / "home" / "bin" / cep_bundle.LAUNCHER_NAME
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("@rem shim\n", encoding="utf-8")
         doc = json.loads(cep_bundle.write_config(self.tmp / "home", launcher=launcher, written_by="installer")
                          .read_text(encoding="utf-8"))
         self.assertEqual((doc["launcher"], doc["written_by"]), (str(launcher.resolve()), "installer"))
         with self.assertRaises(ValueError):
             cep_bundle.write_config(self.tmp / "home", written_by="someone")
+
+    def test_the_launcher_is_filled_only_when_the_file_exists(self):
+        home = self.tmp / "home"
+        shim = home / "bin" / cep_bundle.LAUNCHER_NAME
+        self.assertEqual(cep_bundle.LAUNCHER_NAME, "wnc-engine.cmd" if os.name == "nt" else "wnc-engine")
+        self.assertEqual(cep_bundle.launcher_path(home), shim)
+        read = lambda: json.loads(self.cfg.read_text(encoding="utf-8"))["launcher"]  # noqa: E731
+        cep_bundle.write_config(home)                                     # no shim yet: null
+        self.assertIsNone(read())
+        cep_bundle.write_config(home, launcher=shim)                      # named, still missing: null
+        self.assertIsNone(read())
+        shim.parent.mkdir(parents=True)
+        (home / "bin" / "other.cmd").mkdir()
+        cep_bundle.write_config(home, launcher=home / "bin" / "other.cmd")  # a folder is not a launcher
+        self.assertIsNone(read())
+        shim.write_text("shim\n", encoding="utf-8")
+        cep_bundle.write_config(home)                                     # the default, now present
+        self.assertEqual(read(), str(shim.resolve()))
+        cep_bundle.write_config(home, written_by="installer")
+        self.assertEqual(read(), str(shim.resolve()))
+
+    def test_install_fills_the_launcher_when_the_shim_exists(self):
+        shim = cep_bundle.launcher_path(self.tmp / "home")
+        shim.parent.mkdir(parents=True)
+        shim.write_text("shim\n", encoding="utf-8")
+        ppro_bridge.install(force=True)
+        self.assertEqual(json.loads(self.cfg.read_text(encoding="utf-8"))["launcher"], str(shim.resolve()))
 
     def test_the_real_path_is_under_the_user_home(self):
         self._p[-1].stop()                    # only reads the path (Path.home() is the sandbox's here anyway)
@@ -459,6 +536,402 @@ class TestInstall(_Sandbox):
             r = ppro_bridge.install(force=True)
         self.assertEqual(r.get("refused"), "test-sandbox", r)
         self.assertFalse(self.ext.exists())
+
+
+# ===================================================================================================== Task 5: engine start
+NODE = shutil.which("node")
+# Runs the real js/bridge.js in node with a stubbed CEP, a fake child_process (records every spawn), a fake clock and
+# fake timers (the harness steps virtual seconds), a fake process.kill (only the scenario's pids are alive) and, when
+# the scenario says so, os.platform() and fs.statSync uid / mode overrides (POSIX checks on any host). The scenario is
+# a JSON file; HOME / USERPROFILE of the node process are a temp folder.
+SPAWN_HARNESS = r"""
+const vm = require('vm'), fs = require('fs'), path = require('path'), os = require('os');
+const sc = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+let now = 1000000000000;
+class FakeDate extends Date {
+  constructor(...a) { if (a.length) { super(...a); } else { super(now); } }
+  static now() { return now; }
+}
+const alive = new Set(sc.alive || []), timers = [], spawns = [], pending = [];
+const norm = (p) => { const r = path.resolve(p); return process.platform === 'win32' ? r.toLowerCase() : r; };
+const statOv = {};
+for (const k of Object.keys(sc.stat || {})) { statOv[norm(k)] = sc.stat[k]; }
+const fakeFs = Object.assign({}, fs, {
+  statSync(p, o) {
+    const s = fs.statSync(p, o), ov = statOv[norm(p)];
+    return ov ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, ov) : s;
+  }
+});
+const fakeOs = Object.assign({}, os, { platform: () => sc.platform || os.platform() });
+let died = false;
+function engineUp() {
+  if (!sc.startEngine || died || spawns.length < (sc.startOnSpawn || 1)) { return; }
+  fs.mkdirSync(path.dirname(sc.engineJson), { recursive: true });
+  fs.writeFileSync(sc.engineJson, JSON.stringify({ port: 4321, token: sc.token, pid: sc.startEngine, version: '3.0.0' }));
+  alive.add(sc.startEngine);
+}
+const fakeCp = {
+  spawn(file, args, opts) {
+    const rec = { file, args, opts: Object.assign({}, opts), at: now, unref: false };
+    spawns.push(rec);
+    if (sc.spawn === 'throw') { throw new Error('spawn EACCES'); }
+    const ls = {};
+    const child = { on(ev, f) { (ls[ev] = ls[ev] || []).push(f); return child; }, unref() { rec.unref = true; } };
+    const fire = (ev, v) => (ls[ev] || []).forEach((f) => f(v));
+    if (sc.spawn === 'error') { pending.push(() => fire('error', new Error('spawn ENOENT'))); }
+    else if (sc.spawn === 'exit1') { pending.push(() => fire('exit', 1)); }
+    else { pending.push(() => { engineUp(); fire('exit', 0); }); }
+    return child;
+  }
+};
+if (sc.realSpawn) { fakeCp.spawn = require('child_process').spawn; }
+const fakeRequire = (n) => n === 'child_process' ? fakeCp : n === 'os' ? fakeOs : n === 'fs' ? fakeFs : require(n);
+const fakeProcess = {
+  env: Object.assign({}, process.env, sc.env || {}),
+  kill(pid, sig) { if (alive.has(pid)) { return true; } const e = new Error('kill ESRCH'); e.code = 'ESRCH'; throw e; },
+  getuid: () => (sc.uid === undefined ? 501 : sc.uid)
+};
+const state = { textContent: '' }, logEl = { textContent: '' };
+const cep = {
+  getExtensionId: () => 'ai.thewhynot.cut.bridge.' + sc.role,
+  getHostEnvironment: () => JSON.stringify({ appName: sc.host || 'PPRO', appVersion: '26.5.2' }),
+  getSystemPath: () => 'file:///' + sc.ext.replace(/\\/g, '/'),
+  evalScript: (code, cb) => cb('{}')
+};
+const ctx = { window: { __adobe_cep__: cep, cep_node: { require: fakeRequire } },
+              document: { getElementById: (id) => id === 'state' ? state : logEl },
+              setInterval: (f) => { timers.push(f); }, process: fakeProcess, console, Date: FakeDate };
+vm.runInNewContext(fs.readFileSync(sc.bridge, 'utf8'), ctx);
+const flush = () => { while (pending.length) { pending.shift()(); } };
+const beat = () => { try { return JSON.parse(fs.readFileSync(sc.heartbeat, 'utf8')); } catch (e) { return null; } };
+const outcomes = [];
+flush();
+for (let s = 0; s < (sc.seconds || 0); s++) {
+  now += 1000;
+  if (sc.dieAt && s + 1 === sc.dieAt) { died = true; alive.delete(sc.startEngine); fs.unlinkSync(sc.engineJson); }
+  timers.forEach((f) => f());
+  flush();
+  const b = beat();
+  outcomes.push(b && b.engine_start ? b.engine_start.outcome : null);
+}
+const queueFiles = {};
+try {
+  for (const f of fs.readdirSync(path.dirname(sc.heartbeat))) {
+    queueFiles[f] = fs.readFileSync(path.join(path.dirname(sc.heartbeat), f), 'utf8');
+  }
+} catch (e) {}
+fs.writeFileSync(sc.out, JSON.stringify({ spawns, beat: beat(), outcomes, log: logEl.textContent, state: state.textContent,
+  panel: ctx.window.WNC_BRIDGE ? { role: ctx.window.WNC_BRIDGE.role } : null, start: 1000000000000, queueFiles }));
+"""
+TOKEN = "7f" * 32          # what engine.json's token looks like (64 hex): must never leave the file
+
+
+@unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
+class TestEngineStart(unittest.TestCase):
+    """The hidden daemon starts the engine only through config.json `launcher`, only when it is the fixed
+    <engine home>/bin/wnc-engine(.cmd), never from the panel, at most once per 30 s and never after 5 failures."""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._t.name)
+        self.user = self.tmp / "user"
+        self.user.mkdir()
+        self.ext = cep_bundle.assemble(self.tmp / "ext" / cep_bundle.EXT_ID)
+        self.home = self.tmp / "engine home"            # a space: the Windows quoting must survive it
+        self.harness = self.tmp / "harness.js"
+        self.harness.write_text(SPAWN_HARNESS, encoding="utf-8")
+        self.engine_json = self.user / ".whynot-cut" / "bridge" / "engine.json"
+
+    def tearDown(self):
+        self._t.cleanup()
+
+    def launcher(self, home: Path = None, name: str = None, platform: str = None) -> Path:
+        home = home or self.home
+        name = name or ("wnc-engine.cmd" if (platform or ("win32" if os.name == "nt" else "darwin")) == "win32"
+                        else "wnc-engine")
+        f = home / "bin" / name
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("@echo off\r\n", encoding="utf-8")
+        return f
+
+    def config(self, launcher, home: Path = None):
+        home = home or self.home
+        home.mkdir(parents=True, exist_ok=True)
+        cfg = self.user / ".whynot-cut" / "bridge" / "config.json"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text(json.dumps({"schema": 1, "engine_home": str(home),
+                                   "launcher": None if launcher is None else str(launcher),
+                                   "written_by": "installer", "at": "2026-10-13T00:00:00+00:00"}), encoding="utf-8")
+        return cfg
+
+    def engine(self, pid: int, raw: str = None):
+        self.engine_json.parent.mkdir(parents=True, exist_ok=True)
+        self.engine_json.write_text(raw if raw is not None else
+                                    json.dumps({"port": 4321, "token": TOKEN, "pid": pid, "pid_created": 1.0,
+                                                "version": "3.0.0", "protocol": 4}), encoding="utf-8")
+
+    def run_bridge(self, role="daemon", seconds=5, home: Path = None, **sc) -> dict:
+        import subprocess
+        home = home or self.home
+        out = self.tmp / f"out-{role}.json"
+        doc = dict({"bridge": str(SRC / "js" / "bridge.js"), "ext": str(self.ext), "role": role, "host": "PPRO",
+                    "seconds": seconds, "out": str(out), "token": TOKEN, "engineJson": str(self.engine_json),
+                    "heartbeat": str(home / "ppro-queue" / "bridge.heartbeat")}, **sc)
+        scen = self.tmp / "scenario.json"
+        scen.write_text(json.dumps(doc), encoding="utf-8")
+        env = dict(os.environ, HOME=str(self.user), USERPROFILE=str(self.user))
+        r = subprocess.run([NODE, str(self.harness), str(scen)], capture_output=True, text=True, encoding="utf-8",
+                           env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr[-3000:])
+        res = json.loads(out.read_text(encoding="utf-8"))
+        self.assertNotIn(TOKEN, json.dumps(res))                    # the token never leaves engine.json
+        self.assertNotIn(TOKEN[:24], r.stdout + r.stderr)
+        return res
+
+    def platform(self):
+        return "win32" if os.name == "nt" else "darwin"
+
+    def expected_spawn(self, launcher: Path, platform: str, home: Path = None):
+        home = home or self.home
+        opts = {"detached": True, "windowsHide": True, "stdio": "ignore", "cwd": str(home)}
+        if platform == "win32":
+            return {"file": "C:\\Windows\\System32\\cmd.exe", "args": ["/d", "/s", "/c", '""' + str(launcher) + '""'],
+                    "opts": dict(opts, windowsVerbatimArguments=True)}
+        return {"file": str(launcher), "args": [], "opts": opts}
+
+    # ---------------------------------------------------------------- no spawn
+    def test_no_config_or_no_launcher_never_spawns(self):
+        out = self.run_bridge(seconds=65, home=self.user / ".whynot-cut")   # no config: the fallback engine home
+        self.assertEqual(out["spawns"], [])
+        self.assertEqual(out["beat"]["engine_start"]["outcome"], "no_launcher")
+        self.config(None)
+        out = self.run_bridge(seconds=65)
+        self.assertEqual((out["spawns"], out["beat"]["engine_start"]["outcome"]), ([], "no_launcher"))
+
+    def test_a_launcher_that_is_not_the_fixed_file_is_refused(self):
+        evil = self.tmp / "evil"
+        evil.mkdir()
+        good = self.launcher()
+        cases = {
+            "outside bin": self.home / good.name,
+            "wrong name": self.launcher(name="evil.cmd"),
+            "relative": Path("bin") / good.name,
+            "elsewhere": evil / good.name,
+            "missing": self.home / "bin" / ("nothere" + good.suffix),
+        }
+        cases["outside bin"].write_text("x", encoding="utf-8")
+        cases["elsewhere"].write_text("x", encoding="utf-8")
+        dirhome = self.tmp / "dir home"
+        (dirhome / "bin" / good.name).mkdir(parents=True)
+        for name, launcher in cases.items():
+            with self.subTest(name):
+                self.config(launcher)
+                out = self.run_bridge(seconds=35)
+                self.assertEqual(out["spawns"], [])
+                self.assertEqual(out["beat"]["engine_start"]["outcome"], "refused")
+        with self.subTest("a folder"):
+            self.config(dirhome / "bin" / good.name, home=dirhome)
+            out = self.run_bridge(seconds=35, home=dirhome)
+            self.assertEqual((out["spawns"], out["beat"]["engine_start"]["outcome"]), ([], "refused"))
+            self.assertIn("not a regular file", out["log"])
+
+    def test_a_launcher_linked_elsewhere_is_refused(self):
+        evil = self.tmp / "evil" / "wnc-engine.cmd"
+        evil.parent.mkdir()
+        evil.write_text("x", encoding="utf-8")
+        link = self.home / "bin" / ("wnc-engine.cmd" if os.name == "nt" else "wnc-engine")
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to(evil)
+        except OSError as e:
+            self.skipTest(f"no symlinks here: {e}")
+        self.config(link)
+        out = self.run_bridge(seconds=35)
+        self.assertEqual((out["spawns"], out["beat"]["engine_start"]["outcome"]), ([], "refused"))
+
+    def test_metacharacters_are_refused(self):
+        for ch in "%^&!":                     # " < > | cannot be in a Windows file name; the check covers them too
+            with self.subTest(ch):
+                home = self.tmp / f"home {ch} x"
+                self.config(self.launcher(home=home), home=home)
+                out = self.run_bridge(seconds=35, home=home)
+                self.assertEqual(out["spawns"], [])
+                self.assertEqual(out["beat"]["engine_start"]["outcome"], "refused")
+        js = (SRC / "js" / "bridge.js").read_text(encoding="utf-8")
+        self.assertIn("var LAUNCHER_META = /[\"%^&|<>!]/;", js)
+
+    def test_the_panel_never_spawns(self):
+        self.config(self.launcher())
+        out = self.run_bridge(role="panel", seconds=65)
+        self.assertEqual(out["spawns"], [])
+        self.assertIsNone(out["beat"])
+        self.assertEqual(out["panel"], {"role": "panel"})
+
+    def test_a_live_engine_is_left_alone(self):
+        self.config(self.launcher())
+        self.engine(4242)
+        out = self.run_bridge(seconds=95, alive=[4242])
+        self.assertEqual(out["spawns"], [])
+        self.assertEqual(out["beat"]["engine_start"]["outcome"], "running")
+
+    # ---------------------------------------------------------------- spawn
+    def test_a_missing_engine_json_spawns_exactly_once_with_the_exact_argv(self):
+        for platform in ("win32", "darwin"):
+            with self.subTest(platform):
+                launcher = self.launcher(platform=platform)
+                self.config(launcher)
+                if self.engine_json.exists():
+                    self.engine_json.unlink()
+                stat = {} if platform == "win32" else {str(Path(os.path.realpath(launcher))): {"uid": 501,
+                                                                                               "mode": 0o100755}}
+                out = self.run_bridge(seconds=95, platform=platform, startEngine=31337, stat=stat,
+                                      env={"ComSpec": "C:\\Windows\\System32\\cmd.exe"})
+                (sp,) = out["spawns"]
+                want = self.expected_spawn(launcher, platform)
+                self.assertEqual((sp["file"], sp["args"], sp["opts"]), (want["file"], want["args"], want["opts"]))
+                self.assertTrue(sp["unref"])
+                self.assertEqual(sp["at"], out["start"])                     # at start, not 30 s later
+                self.assertEqual(out["beat"]["engine_start"]["outcome"], "running")
+                self.assertIn("spawned", out["log"])
+
+    def test_a_dead_pid_is_restarted(self):
+        self.config(self.launcher())
+        self.engine(999999)                                                  # not alive
+        out = self.run_bridge(seconds=5, startEngine=4343)
+        self.assertEqual(len(out["spawns"]), 1)
+
+    def test_a_comspec_that_is_not_cmd_exe_is_ignored(self):
+        launcher = self.launcher(platform="win32")
+        self.config(launcher)
+        for comspec in ("C:\\evil\\evil.exe", "cmd.exe", ""):
+            with self.subTest(comspec):
+                out = self.run_bridge(seconds=1, platform="win32", startEngine=1, env={"ComSpec": comspec})
+                self.assertEqual(out["spawns"][0]["file"], "C:\\Windows\\System32\\cmd.exe")
+
+    def test_posix_owner_and_mode(self):
+        launcher = self.launcher(platform="darwin")
+        self.config(launcher)
+        real = str(Path(os.path.realpath(launcher)))
+        for name, st, want in (("another user", {"uid": 0, "mode": 0o100755}, "refused"),
+                               ("group-writable", {"uid": 501, "mode": 0o100775}, "refused"),
+                               ("world-writable", {"uid": 501, "mode": 0o100757}, "refused"),
+                               ("owned, 0755", {"uid": 501, "mode": 0o100755}, "running")):
+            with self.subTest(name):
+                if self.engine_json.exists():
+                    self.engine_json.unlink()
+                out = self.run_bridge(seconds=35, platform="darwin", stat={real: st}, startEngine=77)
+                self.assertEqual(out["beat"]["engine_start"]["outcome"], want)
+                self.assertEqual(len(out["spawns"]), 0 if want == "refused" else 1)
+
+    # ---------------------------------------------------------------- limits
+    def test_one_attempt_per_30_s_and_it_stops_after_5_failures(self):
+        self.config(self.launcher())
+        for mode in ("ok", "error", "exit1", "throw"):             # ok = the launcher ran but no engine came up
+            with self.subTest(mode):
+                out = self.run_bridge(seconds=400, spawn=mode)
+                at = [s["at"] - out["start"] for s in out["spawns"]]
+                self.assertEqual(at, [0, 30000, 60000, 90000, 120000])
+                self.assertEqual(out["beat"]["engine_start"]["outcome"], "gave_up")
+                self.assertEqual(out["outcomes"][-1], "gave_up")
+                self.assertIn("gave_up", out["log"])
+
+    def test_a_success_resets_the_failures(self):
+        """Two failures, the third attempt starts the engine, it dies at 100 s: five fresh attempts follow."""
+        self.config(self.launcher())
+        out = self.run_bridge(seconds=400, startEngine=5150, startOnSpawn=3, dieAt=100)
+        at = [s["at"] - out["start"] for s in out["spawns"]]
+        self.assertEqual(at, [0, 30000, 60000, 120000, 150000, 180000, 210000, 240000])
+        self.assertIn("running", out["outcomes"])
+        self.assertEqual(out["beat"]["engine_start"]["outcome"], "gave_up")
+
+    def test_the_token_never_appears(self):
+        """engine.json is read for its pid only: not in the heartbeat, the log, the queue, the state or a spawn."""
+        self.config(self.launcher())
+        for raw in (None, '{"token": "%s", "pid": 4242' % TOKEN, '{"token": "%s"}' % TOKEN,
+                    '{"pid": "4242", "token": "%s"}' % TOKEN):
+            with self.subTest(raw=raw and raw[:12]):
+                self.engine(4242, raw)
+                out = self.run_bridge(seconds=35, alive=[4242], startEngine=4242)   # run_bridge checks the token
+                self.assertNotIn(TOKEN[:16], json.dumps(out["queueFiles"]))
+                if raw is None:
+                    self.assertEqual(out["spawns"], [])
+                else:                                                        # unreadable pid: counted as not running
+                    self.assertEqual(len(out["spawns"]), 1)
+
+    @unittest.skipUnless(os.name == "nt", "the real cmd.exe quoting is a Windows check")
+    def test_the_real_cmd_runs_a_launcher_in_a_folder_with_spaces(self):
+        """The argv above, through the real child_process and cmd.exe: the quoted path survives a space."""
+        import time
+        launcher = self.launcher()
+        marker = self.home / "started.txt"
+        launcher.write_text('@echo off\r\necho started> "%~dp0..\\started.txt"\r\n', encoding="utf-8")
+        self.config(launcher)
+        self.run_bridge(seconds=0, realSpawn=True)
+        deadline = time.time() + 20
+        while not marker.exists() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(marker.exists(), "the launcher did not run")
+        self.assertEqual(marker.read_text(encoding="utf-8").strip(), "started")
+
+
+def _ui_strings() -> list:
+    """Every string an editor can see in the After Effects panel: the text of ui/**/*.html and every string literal of
+    ui/**/*.js (comments removed)."""
+    out = []
+    for f in sorted((SRC / "ui").rglob("*")):
+        if f.suffix == ".html":
+            html = re.sub(r"<!--.*?-->|<style>.*?</style>|<script.*?</script>", " ", f.read_text(encoding="utf-8"),
+                          flags=re.S)
+            out += [t for t in (s.strip() for s in re.split(r"<[^>]+>", html)) if t]
+        elif f.suffix == ".js":
+            js = re.sub(r"/\*.*?\*/|//[^\n]*", " ", f.read_text(encoding="utf-8"), flags=re.S)
+            out += [m.group(2) for m in re.finditer(r"(['\"`])((?:(?!\1)[^\\]|\\.)*)\1", js)]
+    return out
+
+
+class TestPanelStates(unittest.TestCase):
+    """The After Effects panel: one sentence per state, Copy diagnostics, brand tokens, no command (C2.2)."""
+
+    def test_one_sentence_per_state_and_copy_diagnostics(self):
+        js = (SRC / "ui" / "js" / "panel.js").read_text(encoding="utf-8")
+        for sentence in ("'WhyNot Cut is running in ' + app + '.'", "'WhyNot Cut is working in ' + app + '.'",
+                         "'Starting WhyNot Cut…'", "'WhyNot Cut isn’t running in ' + app + ': restart ' + app"):
+            self.assertIn(sentence, js)
+        html = (SRC / "ui" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<button id="copy" type="button">Copy diagnostics</button>', html)
+        self.assertIn("'Copy diagnostics'", js)
+
+    def test_the_panel_uses_the_brand_tokens_only(self):
+        html = (SRC / "ui" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<link rel="stylesheet" href="tokens.css">', html)
+        style = re.search(r"<style>(.*?)</style>", html, re.S).group(1)
+        self.assertEqual(re.findall(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", style), [])   # every colour is a token
+        used = set(re.findall(r"var\((--twn-[\w-]+)\)", style))
+        defined = set(re.findall(r"(--twn-[\w-]+):", BRAND_TOKENS.read_text(encoding="utf-8")))
+        self.assertTrue(used)
+        self.assertEqual(used - defined, set())
+
+    @unittest.skipUnless(NODE, "needs node to run the panel's own command detector (adobe/panel-ui/src/commands.ts)")
+    def test_ui_shows_no_command(self):
+        """Every ui/** string through the SAME detector the panel kit uses, plus the Task 4 word list."""
+        import subprocess
+        strings = _ui_strings()
+        self.assertIn("Copy diagnostics", strings)
+        self.assertGreater(len(strings), 10)
+        probe = ("import {commandIn} from %s; const xs = JSON.parse(process.argv[1]);"
+                 "console.log(JSON.stringify(xs.map((x) => commandIn(x))));"
+                 % json.dumps((SK.parent / "adobe" / "panel-ui" / "src" / "commands.ts").as_uri()))
+        r = subprocess.run([NODE, "--input-type=module", "-e", probe, json.dumps(strings)], capture_output=True,
+                           text=True, encoding="utf-8", timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        hits = [(s, rule) for s, rule in zip(strings, json.loads(r.stdout)) if rule]
+        self.assertEqual(hits, [])
+        r = subprocess.run([NODE, "--input-type=module", "-e", probe, json.dumps(["run reel doctor", "claude -p x"])],
+                           capture_output=True, text=True, encoding="utf-8", timeout=60)
+        self.assertTrue(all(json.loads(r.stdout)), r.stdout)                 # the detector is live
+        for s in strings:
+            for bad in ("Bridge", "reel ", "`", "Claude Code", "--", "whynotcut://"):
+                self.assertNotIn(bad, s, s)
 
 
 if __name__ == "__main__":

@@ -804,7 +804,7 @@ class SetupAndDoctor(unittest.TestCase):
         items = [f["item"] for f in rep["fixes"]]
         self.assertTrue(any("WHYNOT_PREMIERE_APP" in i for i in items), items)
         if not rep["premiere_bridge"]["installed"]:                        # After Effects alone still gets the bridge
-            self.assertIn("WhyNot Cut Bridge (After Effects)", items)
+            self.assertIn("WhyNot Cut extension (After Effects)", items)
 
     def stale_premiere_variable(self, ae=None):
         err = "WHYNOT_PREMIERE_APP is set to X, but nothing is there."
@@ -864,7 +864,7 @@ class SetupAndDoctor(unittest.TestCase):
         items = [f["item"] for f in rep["fixes"]]
         self.assertNotIn("Adobe Premiere Pro", items)
         if not rep["premiere_bridge"]["installed"]:
-            self.assertIn("WhyNot Cut Bridge (After Effects)", items)
+            self.assertIn("WhyNot Cut extension (After Effects)", items)
 
     def test_the_sandbox_drops_the_adobe_override_variables(self):
         import _isolation
@@ -876,6 +876,136 @@ class SetupAndDoctor(unittest.TestCase):
         installs, rep = self.run_setup({})
         self.assertEqual(installs, [])
         self.assertIn("Premiere Pro or After Effects", rep["bridge_install"])
+
+class BridgeInfoAndDoctor(unittest.TestCase):
+    """3.0 T6.3 Task 5: doctor's bridge_info reads ~/.whynot-cut/bridge/config.json and the installed build.json
+    (family, product, build, signed), never bridge-config.json; the fix texts follow (signed needs no PlayerDebugMode,
+    the legacy 3.1.1 is amber, the extension comes from the installer when the plugin carries no source)."""
+
+    def setUp(self):
+        import json
+        import shutil
+        from lib import cep_bundle, ppro_bridge
+        self.json, self.cep_bundle, self.ppro_bridge = json, cep_bundle, ppro_bridge
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.ext = self.tmp / "cep" / cep_bundle.EXT_ID
+        self.cfg = self.tmp / "user" / ".whynot-cut" / "bridge" / "config.json"
+        self.q = self.tmp / "home" / "ppro-queue"
+        self.debug = {}
+        self.alive = False
+        for p in (mock.patch.object(plat, "cep_extensions_dir", lambda: self.tmp / "cep"),
+                  mock.patch.object(cep_bundle, "config_path", lambda: self.cfg),
+                  mock.patch.object(plat, "player_debug_mode", lambda: dict(self.debug)),
+                  mock.patch.object(plat, "debug_mode_ok", lambda modes=None: bool((modes or {}).get("ok"))),
+                  mock.patch.object(ppro_bridge, "queue_dir", lambda: self.q),
+                  mock.patch.object(ppro_bridge, "status", lambda *a, **k: {"alive": self.alive, "detail": "x"})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def bundle(self, signed=False):
+        b = self.cep_bundle.assemble(self.ext)
+        if signed:
+            (b / "META-INF").mkdir()
+            (b / "META-INF" / "signatures.xml").write_text("<signatures/>", encoding="utf-8")
+        return self.json.loads((b / "build.json").read_text(encoding="utf-8"))
+
+    def legacy(self):
+        (self.ext / "CSXS").mkdir(parents=True)
+        (self.ext / "CSXS" / "manifest.xml").write_text(
+            '<ExtensionManifest ExtensionBundleId="ai.thewhynot.cut.bridge" ExtensionBundleVersion="3.1.1">',
+            encoding="utf-8")
+        (self.ext / "bridge-config.json").write_text(self.json.dumps({"base": "D:/x", "version": "9.9.9"}),
+                                                     encoding="utf-8")
+
+    def doctor(self, premiere=True, ae=False):
+        from lib import onboard
+        found = {"premiere": {"name": "Adobe Premiere Pro 2026"} if premiere else None, "photoshop": None,
+                 "media_encoder": None, "after_effects": {"name": "Adobe After Effects 2026"} if ae else None}
+        report = {"found": found, "names": {k: (v or {}).get("name") for k, v in found.items()}, "all": [],
+                  "aerender": None, "problems": []}
+        with mock.patch.object(plat, "adobe_report", lambda *a, **k: report):
+            return onboard.doctor()
+
+    def test_nothing_installed(self):
+        from lib import onboard
+        br = onboard.bridge_info()
+        self.assertEqual((br["installed"], br["family"], br["product"], br["build"], br["signed"], br["config"]),
+                         (False, None, None, None, False, None))
+        self.assertFalse(br["loads"])
+        fix = [f for f in self.doctor()["fixes"] if f["item"] == "WhyNot Cut extension (Premiere)"]
+        self.assertEqual(len(fix), 1)
+        self.assertIn("reel setup", fix[0]["fix"])                       # this checkout carries the source
+        with mock.patch.object(self.cep_bundle, "source_dir", lambda: self.tmp / "none"):
+            fix = [f for f in self.doctor()["fixes"] if f["item"] == "WhyNot Cut extension (Premiere)"][0]
+        self.assertEqual((fix["who"], fix["fix"]),
+                         ("editor", "install WhyNot Cut with its installer (the signed extension comes with it)"))
+
+    def test_config_json_and_build_json(self):
+        from lib import onboard
+        build = self.bundle(signed=True)
+        shim = self.tmp / "home" / "bin" / self.cep_bundle.LAUNCHER_NAME
+        shim.parent.mkdir(parents=True)
+        shim.write_text("x", encoding="utf-8")
+        self.cep_bundle.write_config(self.tmp / "home", written_by="installer")
+        self.q.mkdir(parents=True)
+        beat = {"at": 1, "engine_start": {"at": 1, "outcome": "running"}}
+        (self.q / "bridge.heartbeat").write_text(self.json.dumps(beat), encoding="utf-8")
+        br = onboard.bridge_info()
+        self.assertEqual((br["installed"], br["family"], br["product"], br["version"], br["build"], br["signed"]),
+                         (True, "bundle", "3.0.0", "3.0.0", build["build"], True))
+        self.assertEqual(br["config"]["written_by"], "installer")
+        self.assertEqual(br["queue_base"], str((self.tmp / "home").resolve()))
+        self.assertEqual(br["launcher"], str(shim.resolve()))
+        self.assertEqual(br["config_file"], str(self.cfg))
+        self.assertEqual(br["engine_start"], {"at": 1, "outcome": "running"})
+        self.assertEqual((br["debug_mode_ok"], br["debug_mode_needed"], br["loads"]), (False, False, True))
+
+    def test_a_signed_bundle_needs_no_player_debug_mode(self):
+        self.bundle(signed=True)
+        items = [f["item"] for f in self.doctor()["fixes"]]
+        self.assertFalse(any("PlayerDebugMode" in i for i in items), items)
+        self.assertIn("WhyNot Cut is not running in Premiere", items)
+        self.alive = True
+        rep = self.doctor()
+        self.assertTrue(rep["ready"]["premiere_build"])
+        self.assertFalse(any("WhyNot Cut extension" in f["item"] for f in rep["fixes"]), rep["fixes"])
+
+    def test_an_unsigned_bundle_needs_player_debug_mode(self):
+        self.bundle(signed=False)
+        items = [f["item"] for f in self.doctor()["fixes"]]
+        self.assertIn("Adobe PlayerDebugMode (lets Premiere load this unsigned WhyNot Cut extension)", items)
+        self.assertNotIn("WhyNot Cut is not running in Premiere", items)  # it cannot load yet: that fix comes first
+        self.assertFalse(self.doctor()["ready"]["premiere_build"])
+        self.debug = {"ok": True}
+        self.alive = True
+        self.assertTrue(self.doctor()["ready"]["premiere_build"])
+
+    def test_an_unsigned_bundle_without_a_source_is_flagged_amber(self):
+        self.bundle(signed=False)
+        with mock.patch.object(self.cep_bundle, "source_dir", lambda: self.tmp / "none"):
+            fixes = self.doctor()["fixes"]
+        (f,) = [f for f in fixes if f["item"] == "the installed WhyNot Cut extension is an unsigned build"]
+        self.assertEqual((f["level"], f["optional"]), ("amber", True))
+
+    def test_the_legacy_family_is_amber_and_bridge_config_json_is_never_read(self):
+        from lib import onboard
+        self.legacy()
+        br = onboard.bridge_info()
+        self.assertEqual((br["family"], br["product"], br["build"]), ("legacy", "3.1.1", None))   # not 9.9.9
+        self.assertIsNone(br["queue_base"])                                                    # not D:/x
+        (f,) = [f for f in self.doctor()["fixes"] if "older bridge" in f["item"]]
+        self.assertEqual((f["level"], f["optional"]), ("amber", True))
+        self.assertIn("3.1.1", f["item"])
+        import inspect
+        self.assertNotIn("bridge-config", inspect.getsource(onboard))
+
+    def test_after_effects_alone_gets_the_extension_fix(self):
+        items = [f["item"] for f in self.doctor(premiere=False, ae=True)["fixes"]]
+        self.assertIn("WhyNot Cut extension (After Effects)", items)
+        self.assertFalse(any("Bridge" in i for i in items), items)
+        items = [f["item"] for f in self.doctor(premiere=False, ae=False)["fixes"]]
+        self.assertNotIn("WhyNot Cut extension (After Effects)", items)
 
 
 if __name__ == "__main__":

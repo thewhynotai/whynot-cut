@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import plat
+from . import cep_bundle, plat
 from .common import DONE_STATUSES, Paths, engine_home, ffmpeg_exe, models_dir, load_status, now_iso, read_json, venv_python, write_json, write_text
 
 MODULES = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "fontTools", "arabic_reshaper", "bidi",
@@ -16,14 +16,35 @@ MODULES = ["faster_whisper", "ctranslate2", "av", "numpy", "PIL", "fontTools", "
 
 # --------------------------------------------------------------------------- doctor
 def bridge_info() -> dict:
-    from .ppro_bridge import ext_dir, status
-    EXT_DIR = ext_dir()
-    cfg = read_json(EXT_DIR / "bridge-config.json", {}) if EXT_DIR.exists() else {}
+    """The WhyNot Cut CEP extension (3.0 T6.3): the installed bundle (its build.json: family, product, build, signed),
+    ~/.whynot-cut/bridge/config.json (engine home, launcher) and the Premiere daemon's heartbeat. A signed bundle
+    loads without PlayerDebugMode; an unsigned one (a dev build, the legacy 3.1.1) needs it."""
+    from .ppro_bridge import ext_dir, queue_dir, status
+    ext = ext_dir()
+    inst = cep_bundle.installed(ext) or {}
+    cfg = cep_bundle.read_config()
     modes = plat.player_debug_mode()
+    dbg_ok = plat.debug_mode_ok(modes)
     st = status()
-    return {"installed": EXT_DIR.exists(), "folder": str(EXT_DIR), "version": cfg.get("version"),
-            "queue_base": cfg.get("base"), "debug_mode": modes, "debug_mode_ok": plat.debug_mode_ok(modes),
+    beat = read_json(queue_dir() / "bridge.heartbeat", {})
+    signed = bool(inst.get("signed"))
+    return {"installed": bool(inst), "folder": str(ext), "family": inst.get("family"), "product": inst.get("version"),
+            "version": inst.get("version"), "build": inst.get("build"), "signed": signed,
+            "config": cfg, "config_file": str(cep_bundle.config_path()),
+            "queue_base": (cfg or {}).get("engine_home"), "launcher": (cfg or {}).get("launcher"),
+            "debug_mode": modes, "debug_mode_ok": dbg_ok, "debug_mode_needed": bool(inst) and not signed,
+            "loads": bool(inst) and (signed or dbg_ok),
+            "engine_start": beat.get("engine_start") if isinstance(beat, dict) else None,
             "alive": st["alive"], "detail": st["detail"]}
+
+
+def _extension_fix(app: str) -> dict:
+    """How the WhyNot Cut extension gets installed: from this plugin's source (a dev checkout), else the installer."""
+    if cep_bundle.has_source():
+        return {"item": f"WhyNot Cut extension ({app})", "who": "claude",
+                "fix": "reel setup   (installs the WhyNot Cut extension; Premiere and After Effects share it)"}
+    return {"item": f"WhyNot Cut extension ({app})", "who": "editor",
+            "fix": "install WhyNot Cut with its installer (the signed extension comes with it)"}
 
 
 def whisper_model_state() -> dict:
@@ -264,17 +285,29 @@ def doctor() -> dict:
                           "fix": "install Premiere Pro (2022 or newer) from Creative Cloud; until then WhyNot Cut "
                                  "builds an importable XML and a preview MP4"})
         if apps["after_effects"] and not br["installed"]:      # T2.11: the same bundle serves After Effects
-            fixes.append({"item": "WhyNot Cut Bridge (After Effects)", "who": "claude",
-                          "fix": "reel setup   (installs the bridge panel; After Effects uses it too)"})
+            fixes.append(_extension_fix("After Effects"))
     else:
         if not br["installed"]:
-            fixes.append({"item": "Premiere bridge panel", "who": "claude", "fix": "reel setup   (installs the panel)"})
-        if not br["debug_mode_ok"]:
-            fixes.append({"item": "Adobe PlayerDebugMode (lets Premiere load the bridge panel)", "who": "editor",
+            fixes.append(_extension_fix("Premiere"))
+        if br["debug_mode_needed"] and not br["debug_mode_ok"]:  # a signed extension loads without it
+            fixes.append({"item": "Adobe PlayerDebugMode (lets Premiere load this unsigned WhyNot Cut extension)",
+                          "who": "editor",
                           "fix": "run these yourself, then restart Premiere:\n" + "\n".join(plat.debug_mode_commands())})
-        if br["installed"] and br["debug_mode_ok"] and not br["alive"]:
-            fixes.append({"item": "Premiere bridge not running", "who": "editor",
-                          "fix": "open Premiere Pro (quit and reopen it once after setup); the bridge starts by itself"})
+        if br["loads"] and not br["alive"]:
+            fixes.append({"item": "WhyNot Cut is not running in Premiere", "who": "editor",
+                          "fix": "open Premiere Pro (quit and reopen it once after installing); WhyNot Cut starts by "
+                                 "itself"})
+    if br["family"] == "legacy":                                # decision 15: works during 3.0, shown amber
+        fixes.append(dict(_extension_fix("Premiere"), optional=True, level="amber",
+                          item=f"WhyNot Cut extension {br['product'] or '?'} is the older bridge (it still works in "
+                               "3.0; the update replaces it)"))
+    elif br["family"] == "unknown":
+        fixes.append({"item": f"WhyNot Cut extension {br['product'] or '?'} is a version this engine does not know",
+                      "who": "editor", "fix": "install WhyNot Cut with its installer (the signed extension comes with it)"})
+    elif br["installed"] and not br["signed"] and not cep_bundle.has_source():   # decision 8
+        fixes.append({"item": "the installed WhyNot Cut extension is an unsigned build", "who": "editor",
+                      "optional": True, "level": "amber",
+                      "fix": "install WhyNot Cut with its installer (the signed extension comes with it)"})
     for pr in found["problems"]:                                # a WHYNOT_PREMIERE_APP / _AE_APP / _AERENDER that points nowhere
         fixes.append({"item": pr["error"], "who": "editor", "fix": pr["how"]})
     if st["_problems"]:
@@ -287,7 +320,7 @@ def doctor() -> dict:
         fixes.append({"item": "WhyNot Cut guard hooks not confirmed running (no guard-ok heartbeat in the last 24 h): "
                               "assets/ and data/ may not be protected", "who": "editor", "fix": gh["fix"]})
     rep["ready"] = {"engine": rep["venv_ok"] and all(v is True for v in mods.values()) and bool(rep["ffmpeg"]),
-                    "premiere_build": bool(apps["premiere"]) and br["installed"] and br["debug_mode_ok"] and br["alive"],
+                    "premiere_build": bool(apps["premiere"]) and br["loads"] and br["alive"],
                     "preview_and_xml": rep["venv_ok"] and bool(rep["ffmpeg"]), "reel_command": rc["ok"]}
     rep["fixes"] = fixes
     rep["verdict"] = ("READY" if rep["ready"]["engine"] and rep["ready"]["premiere_build"] else

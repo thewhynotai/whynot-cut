@@ -1205,7 +1205,8 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         self.run_bridge(ms=800)
         hb = self.beat()
         self.assertEqual(sorted(hb), sorted(["at", "busy", "role", "host", "hostVersion", "bundle", "version", "protocol",
-                                             "build", "libs", "current", "action"]))
+                                             "build", "libs", "current", "action", "engine_start"]))
+        self.assertEqual(hb["engine_start"]["outcome"], "no_launcher")       # config.json launcher null (Task 5)
         build = json.loads((self.ext / "build.json").read_text(encoding="utf-8"))
         self.assertEqual((hb["bundle"], hb["version"], hb["protocol"], hb["build"], hb["hostVersion"], hb["role"]),
                          ("3.0.0", "3.0.0", 4, build["build"], "26.5.2", "daemon"))
@@ -1261,6 +1262,22 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         self.assertTrue(self.result("a")["ok"])
         for jid in "bcd":
             self.assertEqual(self.result(jid)["error"], "script not allowed", jid)
+
+    def test_a_hostile_job_id_never_writes_outside_the_queue(self):
+        """Review T6.3 1-4: the result and claim paths came from the JSON `id`, so "../../x" wrote outside the queue.
+        The id is the job file's name; a JSON id that differs (or does not match ^[\\w.-]+$) is refused, in the queue."""
+        for jid, hostile in (("h1", "../../escaped"), ("h2", "..\\..\\escaped2"), ("h3", "a b"), ("h4", "")):
+            self.job(jid, "ping", 60)
+            f = self.q / f"{jid}.job.json"
+            f.write_text(json.dumps(dict(json.loads(f.read_text(encoding="utf-8")), id=hostile)), encoding="utf-8")
+        out = self.run_bridge(ms=2500)
+        self.assertEqual(out["evals"], [])
+        for jid in ("h1", "h2", "h3", "h4"):
+            r = self.result(jid)
+            self.assertEqual((r["ok"], r["error"]), (False, "bad job id"), jid)
+        for root in (self.tmp, self.home, self.q.parent.parent):
+            self.assertEqual(sorted(p.name for p in root.rglob("escaped*")), [], root)
+        self.assertEqual(sorted(p.name for p in self.q.glob("*.running")), [])
 
     def test_a_missing_library_is_not_found(self):
         (self.ext / "jsx" / "wnc_ppro_lib.jsx").unlink()

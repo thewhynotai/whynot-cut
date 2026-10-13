@@ -158,6 +158,14 @@ WNCPP.prop = function (comp, name) {
     for (var i = 0; i < comp.properties.numItems; i++) { var p = comp.properties[i]; if (p.displayName === name) { return p; } }
     return null;
 };
+// the parameter at `index` when its display name is blank: Premiere 26 shows the legacy Gaussian Blur's third parameter
+// (Repeat Edge Pixels) with a blank name (docs/adobe/uxp-parity.md row E4), so it is found by index instead
+WNCPP.blankPropAt = function (comp, index) {
+    if (!comp || index >= comp.properties.numItems) { return null; }
+    var p = comp.properties[index], n = "";
+    try { n = String(p.displayName === undefined || p.displayName === null ? "" : p.displayName); } catch (e) { n = ""; }
+    return n.replace(/\s+/g, "") === "" ? p : null;
+};
 WNCPP.keyframes = function (prop, base, pairs) {   // pairs: [[offsetSeconds, value], ...] relative to clip in-point
     if (!prop) { return false; }
     prop.setTimeVarying(true);
@@ -268,10 +276,12 @@ WNCPP.actions.build_project = function (d) {
         try {
             if (WNCPP.addEffect(seq, 0, ci, "blur", ev.effects).ok) {
                 var bc = WNCPP.compByMatch(seq.videoTracks[0].clips[ci], WNCPP.MATCH.blur);
-                var pb = WNCPP.prop(bc, "Blurriness"), pe = WNCPP.prop(bc, "Repeat Edge Pixels");
+                var pb = WNCPP.prop(bc, "Blurriness"), pe = WNCPP.prop(bc, "Repeat Edge Pixels"), edgeBy = "name";
+                if (!pe) { pe = WNCPP.blankPropAt(bc, 2); edgeBy = pe ? "index" : null; }   // Premiere 26: blank name
                 if (pb) { pb.setValue(90, true); }
-                if (pe) { pe.setValue(true, true); }
-                ev.blurred.push({clip: ci, blurriness: pb ? pb.getValue() : null});
+                if (pe) { pe.setValue(true, true); } else { log.push("Gaussian Blur (Legacy): Repeat Edge Pixels not found"); }
+                ev.blurred.push({clip: ci, blurriness: pb ? pb.getValue() : null, edge: pe ? pe.getValue() : null,
+                                 edge_by: edgeBy});
             } else { log.push("Gaussian Blur (Legacy) effect not found"); }
         } catch (eb) { log.push("blur clip " + ci + ": " + eb); }
     }
@@ -445,7 +455,9 @@ WNCPP.addEffect = function (seq, trackIdx, clipIdx, kind, rec) {
     // Effects can only be ADDED via the QE DOM (by display name); their parameters are then set through the normal DOM.
     // `kind` is a WNCPP.MATCH key: its QE display names are tried in order and the first one found is added, then the
     // match name of the component it appended is checked, so a display name that means another effect in this
-    // Premiere is reported {ok: false, got: <match name>} instead of being used. The answer is pushed onto `rec`.
+    // Premiere is reported {ok: false, got: <match name>} instead of being used. That wrong component is then removed
+    // through QE when this Premiere allows it (removed: true, checked through the DOM); otherwise it is reported as
+    // left on the clip (removed: false, left_in_place: true). The answer is pushed onto `rec`.
     app.enableQE();
     var qs = qe.project.getActiveSequence();
     var qi = qs.getVideoTrackAt(trackIdx).getItemAt(clipIdx);
@@ -462,11 +474,33 @@ WNCPP.addEffect = function (seq, trackIdx, clipIdx, kind, rec) {
             r.got = item.components[item.components.numItems - 1].matchName;
         } catch (e) { r.got = null; }
         r.ok = want === undefined || WNCPP.isMatch(r.got, want);
+        if (!r.ok) { WNCPP.removeAppended(seq, qi, trackIdx, clipIdx, r); }
         break;                          // one effect added: never a second one on the clip
     }
     if (!r.name) { r.error = "not found"; r.tried = names; }
     if (rec) { rec.push(r); }
     return r;
+};
+
+WNCPP.removeAppended = function (seq, qi, trackIdx, clipIdx, r) {
+    // remove the component addEffect just appended (the last one) when its match name was wrong. Premiere's DOM has no
+    // remove; QE's component may: try it, then trust only the DOM (one component fewer, and the last one not `got`)
+    var item = seq.videoTracks[trackIdx].clips[clipIdx], before = item.components.numItems;
+    r.removed = false;
+    try {
+        var n = typeof qi.numComponents === "number" ? qi.numComponents : before;
+        var qc = typeof qi.getComponentAt === "function" ? qi.getComponentAt(n - 1) : null;
+        if (qc && typeof qc.remove === "function") { qc.remove(); }
+        item = seq.videoTracks[trackIdx].clips[clipIdx];
+        var count = item.components.numItems, last = null;
+        try { last = item.components[count - 1].matchName; } catch (e2) { last = null; }
+        r.removed = count === before - 1 && last !== r.got;
+    } catch (e) { r.remove_error = String(e); }
+    if (!r.removed) {
+        r.left_in_place = true;
+        r.note = "the wrong effect (" + r.got + ") could not be removed: it is still on the clip";
+    }
+    return r.removed;
 };
 
 WNCPP.clipIndex = function (track, item) {   // QE indexes include empty gaps; find by start time
@@ -483,7 +517,8 @@ WNCPP.actions.test_crop = function (d) {
     app.project.openSequence(seq.sequenceID);
     var clip = seq.videoTracks[0].clips[0];
     clip.end = WNCPP.secTime(2);
-    r.added = WNCPP.addEffect(seq, 0, 0, "crop");
+    r.effect = WNCPP.addEffect(seq, 0, 0, "crop");
+    r.added = r.effect.ok === true;
     clip = seq.videoTracks[0].clips[0];
     var comps = [];
     for (var i = 0; i < clip.components.numItems; i++) {

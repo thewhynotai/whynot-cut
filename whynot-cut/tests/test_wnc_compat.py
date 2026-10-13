@@ -178,6 +178,14 @@ class TestD18Scan(unittest.TestCase):
                     bad.append(f"{f.relative_to(SK).as_posix()}:{node.lineno} {OLD.search(node.value).group(0)}")
         self.assertEqual(bad, [])
 
+    def test_engine_comments_name_no_old_library_file(self):
+        """Review T6.3 1-4: comments count too for the library FILE names (preview_video.py still said nh_ppro_lib)."""
+        files = re.compile(r"\bnh_(ppro_lib|ae_bridge|ae_lib|motion_lib|ps_lib)\b")
+        bad = [f"{f.relative_to(SK).as_posix()}:{n}" for f in sorted((SK / "engine" / "reel").rglob("*.py"))
+               if "__pycache__" not in f.parts
+               for n, ln in enumerate(f.read_text(encoding="utf-8").split("\n"), 1) if files.search(ln)]
+        self.assertEqual(bad, [])
+
     def test_contract_texts_are_clean(self):
         files = sorted((SK / "engine" / "reel" / "contract").glob("*.json"))
         files += [SK / "tests" / "fixtures" / "contract" / "index.json", SK / "tests" / "fixtures" / "contract" / "README.md"]

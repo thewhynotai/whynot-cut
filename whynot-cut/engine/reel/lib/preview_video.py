@@ -25,7 +25,7 @@ SR = 48000
 F = 1 / 24   # animation time unit (the Premiere JSX presets use the same 1/24 s), not the sequence rate
 
 
-# --------------------------------------------------------------------------- animation (same presets as nh_ppro_lib.jsx)
+# --------------------------------------------------------------------------- animation (same presets as wnc_ppro_lib.jsx)
 def anim_state(g: dict, u: float) -> dict:
     """Opacity 0-1, scale, crop_left 0-1 (fraction hidden from the left) and x shift (px of the sequence frame) at local time u."""
     dur = g["end_s"] - g["start_s"]

@@ -6,6 +6,7 @@ Layout of bundle 3.0.0 (3.0 T6.3 Task 4):
     CSXS/manifest.xml   bundle "WhyNot Cut" 3.0.0: the visible panel (After Effects only, ./ui/index.html) and the
                         hidden daemon (./daemon.html, Premiere and After Effects); the only copy that works the queue
     daemon.html, ui/index.html, ui/js/panel.js, js/bridge.js, jsx/wnc_host.jsx      the shell, from <repo>/adobe/cep-bridge
+    ui/tokens.css       <repo>/brand/tokens.css as-is (the one brand token source; the After Effects panel links it)
     jsx/wnc_*.jsx       the libraries the daemon runs, copied from whynot-cut/templates/** (their single source, design
                         decision 1); the copy is an artefact of `assemble`, never a second source
     build.json          {"product": "3.0.0", "build": <16 hex: sha256 over the sorted (path, sha256) of every other
@@ -20,6 +21,8 @@ exactly 3.1.1 (no protocol; the engine syncs the libraries and sends `script`). 
 `~/.whynot-cut/bridge/config.json` (`config_path`, `write_config`) tells the daemon where the engine home is: always under
 the user's home, user-only, no secret, never inside the extension:
     {"schema": 1, "engine_home": "<abs>", "launcher": "<abs>" | null, "written_by": "installer" | "engine", "at": "<iso>"}
+`launcher` is <engine home>/bin/wnc-engine.cmd (Windows) or wnc-engine (macOS), the installer's shim, filled only when
+that file exists: the daemon starts the engine through it and nothing else (js/bridge.js; docs/adobe/cep-bridge.md).
 
 Adobe-track owned (3.0 T6.3). Task 6 adds `install_zxp` (the signed path).
 """
@@ -43,10 +46,12 @@ PROTOCOL = 4
 LEGACY_VERSION = "3.1.1"                  # the one legacy bridge the engine still drives in 3.0 (removed in 3.1)
 SHELL_FILES = ("CSXS/manifest.xml", "daemon.html", "ui/index.html", "ui/js/panel.js", "js/bridge.js",
                "jsx/wnc_host.jsx")
+BRAND_TOKENS = PLUGIN_DIR.parent / "brand" / "tokens.css"     # copied to ui/tokens.css (an artefact, like the libs)
 # the libraries the daemon runs, bundled into jsx/ (Photoshop scripts are standalone: not bundled)
 LIBS = {"wnc_ppro_lib.jsx": "premiere", "wnc_ae_bridge.jsx": "after_effects", "wnc_ae_lib.jsx": "after_effects",
         "wnc_motion_lib.jsx": "after_effects"}
 CONFIG_SCHEMA = 1
+LAUNCHER_NAME = "wnc-engine.cmd" if os.name == "nt" else "wnc-engine"     # <engine home>/bin/<this>, the shim
 
 
 def source_dir() -> Path:
@@ -94,6 +99,7 @@ def assemble(dst: Path) -> Path:
     src, dst = source_dir(), Path(dst)
     missing = [f for f in SHELL_FILES if not (src / f).is_file()]
     missing += [str(p) for p in lib_sources().values() if not p.is_file()]
+    missing += [] if BRAND_TOKENS.is_file() else [str(BRAND_TOKENS)]
     if missing:
         raise FileNotFoundError(f"CEP bundle source incomplete in {src}: missing {', '.join(missing)}")
     dst.mkdir(parents=True)
@@ -103,6 +109,7 @@ def assemble(dst: Path) -> Path:
         shutil.copy2(src / f, out)
     for name, lib in lib_sources().items():
         shutil.copy2(lib, dst / "jsx" / name)
+    shutil.copy2(BRAND_TOKENS, dst / "ui" / "tokens.css")
     files = {p.relative_to(dst).as_posix(): _sha(p) for p in sorted(dst.rglob("*")) if p.is_file()}
     build = {"product": PRODUCT, "build": build_id(files), "sha": _git_sha(), "protocol": PROTOCOL,
              "libs": {name: files[f"jsx/{name}"] for name in LIBS}}
@@ -124,8 +131,9 @@ def family(version, protocol=None) -> str | None:
 
 def installed(ext: Path) -> dict | None:
     """The bundle installed in `ext` (None when there is none): {path, id, family, version, build, libs, signed}.
-    family "bundle" = it carries build.json; "legacy" = an older bridge (no build.json, 3.1.1 or older, or the
-    reel-editor `com.nh.bridge`); "unknown" = no build.json and a version this engine does not know (kept)."""
+    family "bundle" = it carries a readable build.json; "legacy" = UNSIGNED and exactly 3.1.1, or the reel-editor
+    `com.nh.bridge`; "unknown" = everything else, a signed extension without a readable build.json included (checked
+    first: the install rule never replaces it without force)."""
     ext = Path(ext)
     manifest = ext / "CSXS" / "manifest.xml"
     try:
@@ -138,37 +146,35 @@ def installed(ext: Path) -> dict | None:
         build = None
     if not isinstance(build, dict) or not isinstance(build.get("product"), str):
         build = None
-    try:      # the 3.1.x engine wrote the version here as well
-        old_cfg = json.loads((ext / "bridge-config.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        old_cfg = None
-    if text is None and build is None and not isinstance(old_cfg, dict):
+    if text is None and build is None:      # a 3.1.x bridge-config.json alone is not an installation (never read)
         return None
     m = re.search(r'ExtensionBundleId="([^"]+)"', text or "")
     bid = m.group(1) if m else (ext.name if ext.name in (EXT_ID, *LEGACY_EXT_IDS) else None)
     m = re.search(r'ExtensionBundleVersion="([^"]+)"', text or "")
-    version = (build or {}).get("product") or (old_cfg or {}).get("version") or (m.group(1) if m else None)
+    version = (build or {}).get("product") or (m.group(1) if m else None)
+    signed = (ext / "META-INF" / "signatures.xml").is_file()
     if build is not None:
         fam = "bundle"
-    elif bid in LEGACY_EXT_IDS or not version or _ver(version) <= _ver(LEGACY_VERSION):
+    elif signed:
+        fam = "unknown"
+    elif bid in LEGACY_EXT_IDS or version == LEGACY_VERSION:
         fam = "legacy"
     else:
         fam = "unknown"
     return {"path": str(ext), "id": bid, "family": fam, "version": version,
-            "build": (build or {}).get("build"), "libs": (build or {}).get("libs"),
-            "signed": (ext / "META-INF" / "signatures.xml").is_file()}
+            "build": (build or {}).get("build"), "libs": (build or {}).get("libs"), "signed": signed}
 
 
 def decide_install(cur: dict | None, new: dict, *, force: bool = False) -> dict:
     """The install rule: {"action": "install" | "replace" | "skip" | "keep", "reason"}.
-      nothing installed -> install;  force -> replace;  legacy (3.1.1 and older, com.nh.bridge) -> replace;
+      nothing installed -> install;  force -> replace;  legacy (unsigned 3.1.1, com.nh.bridge) -> replace;
       the same build -> skip;  a newer product, or an unknown layout -> keep;
       a signed installation is never replaced by an unsigned build -> keep;  otherwise -> replace."""
     if not cur:
         return {"action": "install", "reason": "nothing installed"}
     if force:
         return {"action": "replace", "reason": "forced"}
-    if cur.get("family") == "legacy" or cur.get("id") in LEGACY_EXT_IDS:
+    if cur.get("family") == "legacy" or (cur.get("id") in LEGACY_EXT_IDS and not cur.get("signed")):
         return {"action": "replace", "reason": f"the installed bridge {cur.get('version') or '?'} is the legacy family"}
     if cur.get("family") != "bundle":
         return {"action": "keep", "reason": f"the installed extension ({cur.get('version') or 'unknown version'}) is "
@@ -212,13 +218,22 @@ def read_config() -> dict | None:
     return cfg if isinstance(cfg, dict) else None
 
 
+def launcher_path(engine_home: Path) -> Path:
+    """<engine home>/bin/wnc-engine.cmd (Windows) or wnc-engine (macOS): the only file the daemon ever starts."""
+    return Path(engine_home) / "bin" / LAUNCHER_NAME
+
+
 def write_config(engine_home: Path, *, launcher: Path | None = None, written_by: str = "engine") -> Path:
-    """Write config.json atomically, user-only (folder 0700, file 0600 on POSIX). Returns its path."""
+    """Write config.json atomically, user-only (folder 0700, file 0600 on POSIX). Returns its path.
+    `launcher` (default: `launcher_path(engine_home)`) is filled only when that file exists, else null: the daemon
+    re-reads config.json every 30 s, so whoever writes the shim later writes config.json again."""
     if written_by not in ("installer", "engine"):
         raise ValueError(f"written_by must be installer or engine, not {written_by!r}")
     path = config_path()
-    doc = {"schema": CONFIG_SCHEMA, "engine_home": str(Path(engine_home).resolve()),
-           "launcher": str(Path(launcher).resolve()) if launcher else None, "written_by": written_by, "at": now_iso()}
+    home = Path(engine_home).resolve()
+    cand = Path(launcher) if launcher else launcher_path(home)
+    doc = {"schema": CONFIG_SCHEMA, "engine_home": str(home),
+           "launcher": str(cand.resolve()) if cand.is_file() else None, "written_by": written_by, "at": now_iso()}
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         path.parent.chmod(0o700)

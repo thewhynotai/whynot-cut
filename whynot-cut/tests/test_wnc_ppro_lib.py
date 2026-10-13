@@ -34,7 +34,8 @@ LIB = SK / "templates" / "premiere" / "wnc_ppro_lib.jsx"
 # Premiere 26.5's effect names (docs/adobe/uxp-parity.md "Match names (verified live)"): display -> match name, params
 P26_EFFECTS = {
     "Gaussian Blur": ["AE.Impact_Blur_FX", ["Blur Amount"]],
-    "Gaussian Blur (Legacy)": ["AE.ADBE Gaussian Blur 2", ["Blurriness", "Blur Dimensions", "Repeat Edge Pixels"]],
+    # the third parameter (Repeat Edge Pixels) has a blank display name in Premiere 26 (uxp-parity.md row E4)
+    "Gaussian Blur (Legacy)": ["AE.ADBE Gaussian Blur 2", ["Blurriness", "Blur Dimensions", " "]],
     "Sharpen": ["AE.ADBE Sharpen", ["Sharpen Amount"]],
     "Noise": ["AE.ADBE_Noise_FX", ["Intensity"]],
     "Crop": ["AE.ADBE AECrop", ["Left", "Top", "Right", "Bottom"]],
@@ -117,10 +118,16 @@ globalThis.$ = {os: 'Windows', sleep: function () {}};
 globalThis.qe = {project: {
     getVideoEffectByName: function (n) { return FAKE.effects[n] ? {name: n} : null; },
     getActiveSequence: function () { return {getVideoTrackAt: function (t) { return {getItemAt: function (i) {
-        return {addVideoEffect: function (fx) {
+        var comps = function () { return FAKE.seq.videoTracks[t].clips[i].components; };
+        var qi = {addVideoEffect: function (fx) {
             var e = FAKE.effects[fx.name];
-            FAKE.seq.videoTracks[t].clips[i].components.push(new Comp(fx.name, e[0], e[1]));
+            comps().push(new Comp(fx.name, e[0], e[1]));
         }};
+        if (FAKE.qeRemove !== false) {      // QE's component remove (FAKE.qeRemove = false: a Premiere without it)
+            Object.defineProperty(qi, 'numComponents', {get: function () { return comps().length; }});
+            qi.getComponentAt = function (k) { return {remove: function () { comps().splice(k, 1); return true; }}; };
+        }
+        return qi;
     }}; }}; }}};
 globalThis.File = File; globalThis.Folder = Folder; globalThis.Time = Time;
 """
@@ -265,13 +272,27 @@ class TestBuildProject(unittest.TestCase):
         self.assertEqual(fx, [("blur", 0, True, "Gaussian Blur (Legacy)", "AE.ADBE Gaussian Blur 2"),
                               ("sharpen", 1, True, "Sharpen", "AE.ADBE Sharpen"),
                               ("noise", 1, True, "Noise", "AE.ADBE_Noise_FX")])
-        self.assertEqual(rb["blurred"], [{"clip": 0, "blurriness": 90}])
+        self.assertEqual(rb["blurred"], [{"clip": 0, "blurriness": 90, "edge": True, "edge_by": "index"}])
         self.assertEqual(rb["sharpened"], [{"clip": 1, "ok": True, "amount": 20, "grain": 30}])
         self.assertEqual(rb["log"], [])
         clip0 = dict(out["v1"][0])
         self.assertNotIn("AE.Impact_Blur_FX", clip0)                     # the new blur was never added
-        self.assertIn(["Blurriness", 90], clip0["AE.ADBE Gaussian Blur 2"])
-        self.assertIn(["Repeat Edge Pixels", True], clip0["AE.ADBE Gaussian Blur 2"])
+        self.assertEqual(clip0["AE.ADBE Gaussian Blur 2"], [["Blurriness", 90], ["Blur Dimensions", 0], [" ", True]])
+
+    def test_repeat_edge_pixels_by_name_when_premiere_names_it(self):
+        effects = dict(P26_EFFECTS, **{"Gaussian Blur (Legacy)": ["AE.ADBE Gaussian Blur 2",
+                                                                  ["Blurriness", "Blur Dimensions", "Repeat Edge Pixels"]]})
+        out = self.build(effects=effects)
+        self.assertEqual(out["res"]["result"]["blurred"], [{"clip": 0, "blurriness": 90, "edge": True, "edge_by": "name"}])
+        self.assertIn(["Repeat Edge Pixels", True], dict(out["v1"][0])["AE.ADBE Gaussian Blur 2"])
+
+    def test_index_2_is_used_only_when_its_name_is_blank(self):
+        """A named third parameter that is not Repeat Edge Pixels is never set by index: reported, not guessed."""
+        effects = dict(P26_EFFECTS, **{"Gaussian Blur (Legacy)": ["AE.ADBE Gaussian Blur 2",
+                                                                  ["Blurriness", "Blur Dimensions", "Something Else"]]})
+        rb = self.build(effects=effects)["res"]["result"]
+        self.assertEqual(rb["blurred"], [{"clip": 0, "blurriness": 90, "edge": None, "edge_by": None}])
+        self.assertIn("Gaussian Blur (Legacy): Repeat Edge Pixels not found", rb["log"])
 
     def test_an_impact_blur_is_reported_not_ok(self):
         """A Premiere whose only "Gaussian Blur" is the new effect: the blur is reported {ok: false, got}, not used."""
@@ -284,6 +305,22 @@ class TestBuildProject(unittest.TestCase):
         self.assertEqual(rb["blurred"], [])
         self.assertIn("Gaussian Blur (Legacy) effect not found", rb["log"])
         self.assertTrue(all(e["ok"] for e in rb["effects"][1:]), rb["effects"])
+        self.assertIs(blur["removed"], True)                              # the wrong effect is taken off again
+        self.assertNotIn("left_in_place", blur)
+        self.assertNotIn("AE.Impact_Blur_FX", dict(out["v1"][0]))
+
+    def test_a_wrong_effect_that_cannot_be_removed_is_reported_left_in_place(self):
+        effects = {k: v for k, v in P26_EFFECTS.items() if k != "Gaussian Blur (Legacy)"}
+        tmp = Path(tempfile.mkdtemp(prefix="wnc_build_")).as_posix()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        js = "FAKE.qeRemove = false;\n" + BUILD % {"settings": json.dumps(settings(24)), "fsh": "1080",
+                                                   "data": json.dumps(build_data(tmp))}
+        out = node(self, js, effects=effects)
+        blur = out["res"]["result"]["effects"][0]
+        self.assertEqual((blur["ok"], blur["removed"], blur["left_in_place"]), (False, False, True))
+        self.assertIn("AE.Impact_Blur_FX", blur["note"])
+        self.assertIn("still on the clip", blur["note"])
+        self.assertIn("AE.Impact_Blur_FX", dict(out["v1"][0]))           # honest: it is there
 
     def test_a_missing_effect_is_not_found(self):
         effects = {k: v for k, v in P26_EFFECTS.items() if k != "Sharpen"}
@@ -327,6 +364,39 @@ class TestMatchNames(unittest.TestCase):
         self.assertEqual(out["match"], {"motion": "AE.ADBE Motion", "opacity": "AE.ADBE Opacity",
                                         "blur": "AE.ADBE Gaussian Blur 2", "sharpen": "AE.ADBE Sharpen",
                                         "noise": ["AE.ADBE_Noise_FX", "AE.ADBE Noise2"], "crop": "AE.ADBE AECrop"})
+
+
+CROP_JS = r"""
+FAKE.seq = new Sequence_('CROP_TEST', {}, 1080);
+var newProject = app.newProject;
+app.newProject = function (p) {
+    newProject(p);
+    app.project.createNewSequenceFromClips = function () { return FAKE.seq; };
+    app.project.closeDocument = function () { return true; };
+    return true;
+};
+FAKE.seq.setPlayerPosition = function () {};
+var qeSeq = qe.project.getActiveSequence;
+qe.project.getActiveSequence = function () {
+    var q = qeSeq(); q.CTI = {timecode: '00:00:00:00'}; q.exportFramePNG = function () { return true; }; return q;
+};
+fs.writeFileSync(TMP + '/png.png', 'x');
+fs.writeFileSync(TMP + '/crop.json', JSON.stringify({action: 'test_crop', project_path: TMP + '/C.prproj',
+                                                     png: TMP + '/png.png', out_dir: TMP}));
+console.log(JSON.stringify(JSON.parse(WNCPP.run(TMP + '/crop.json')).result));
+"""
+
+
+@unittest.skipUnless(NODE, "needs node to run the ExtendScript library with a fake Premiere")
+class TestCropProbe(unittest.TestCase):
+    def test_added_is_a_boolean(self):
+        r = node(self, CROP_JS)
+        self.assertIs(r["added"], True)
+        self.assertEqual((r["effect"]["kind"], r["effect"]["got"]), ("crop", "AE.ADBE AECrop"))
+        self.assertTrue(r["left_found"])
+        r = node(self, CROP_JS, effects={k: v for k, v in P26_EFFECTS.items() if k != "Crop"})
+        self.assertIs(r["added"], False)
+        self.assertEqual(r["effect"]["error"], "not found")
 
 
 CLOSE_JS = r"""
