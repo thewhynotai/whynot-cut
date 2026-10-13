@@ -295,8 +295,12 @@ def _is_drive_root(p: str) -> bool:
         return False
 
 
-def _marker_below(top: str, depth: int = 3, limit: int = 5000) -> Optional[str]:
-    """A `.whynot-client` marker up to `depth` levels below `top` (bounded: a huge folder is not walked whole)."""
+MARKER_SCAN_LIMIT = 5000  # entries looked at within 3 levels (bootstrap.ps1 / bootstrap.sh use the same number)
+
+
+def _marker_scan(top: str, depth: int = 3, limit: int = MARKER_SCAN_LIMIT) -> tuple:
+    """(folder holding a `.whynot-client` marker up to `depth` levels below `top`, or None; True when more than
+    `limit` entries were met before the walk ended - a huge folder is not walked whole). Links are never entered."""
     seen, stack = 0, [(top, 0)]
     while stack:
         d, lvl = stack.pop()
@@ -305,14 +309,19 @@ def _marker_below(top: str, depth: int = 3, limit: int = 5000) -> Optional[str]:
                 for e in it:
                     seen += 1
                     if seen > limit:
-                        return None
+                        return None, True
                     if e.name == CLIENT_MARKER:
-                        return d
+                        return d, False
                     if lvl < depth and not is_link(e.path) and e.is_dir(follow_symlinks=False):
                         stack.append((e.path, lvl + 1))
         except OSError:
             continue
-    return None
+    return None, False
+
+
+def _marker_below(top: str, depth: int = 3, limit: int = MARKER_SCAN_LIMIT) -> Optional[str]:
+    """A `.whynot-client` marker up to `depth` levels below `top` (the chosen-folder rule: past the limit, None)."""
+    return _marker_scan(top, depth, limit)[0]
 
 
 def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (), sandbox_home=None) -> tuple:
@@ -392,32 +401,82 @@ SELF_FIX_AR = ("لن يستخدم WhyNot Cut هذا المجلد لملفات ا
                "-EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به.")
 
 
-def resolved_home_problem(path, *, home, clients_roots: Iterable = ()) -> Optional[str]:
+# Windows shell folders that Known Folder Move (OneDrive) or the user may have moved: (name, User Shell Folders value)
+SHELL_FOLDERS = (("Desktop", "Desktop"), ("Documents", "Personal"),
+                 ("Downloads", "{374DE290-123F-4565-9164-39C4925E467B}"))
+
+
+def shell_folders(home, sandbox: bool) -> list:
+    """(name, folder) of the user's Desktop / Documents / Downloads: <home>/<name>, and on real Windows (never in a
+    sandbox) also where HKCU User Shell Folders puts them (OneDrive Known Folder Move, a moved Documents)."""
+    out = [(n, Path(home) / n) for n in HOME_ROOTS]
+    if sandbox or os.name != "nt":
+        return out
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+            for name, value in SHELL_FOLDERS:
+                try:
+                    v = winreg.QueryValueEx(k, value)[0]
+                except OSError:
+                    continue
+                if isinstance(v, str) and v.strip():
+                    out.append((name, Path(os.path.expandvars(v.strip()))))
+    except OSError:
+        pass
+    return out
+
+
+def _fold(key: str) -> str:
+    """macOS disks (APFS / HFS+) compare names case-insensitively, but normcase does not fold there: fold it here."""
+    return key.lower() if sys.platform == "darwin" else key
+
+
+def _place_keys(p) -> set:
+    """The ways one folder is named: as written (normalised) and with every link on the way resolved."""
+    keys = {_fold(_norm(p))}
+    try:
+        keys.add(_fold(_real(p)))
+    except (OSError, ValueError):
+        pass
+    return keys
+
+
+def resolved_home_problem(path, *, home, clients_roots: Iterable = (), known: Iterable = ()) -> Optional[str]:
     """Why a RESOLVED engine home (named by a variable, the pointer or settings.json pluginConfigs; never chosen in
-    this run) may not be used, else None (task 9, carried from the Task 8 review: controller ruling). ~/.whynot-cut
-    itself is never refused here. Refused: a drive root or mount point; the user folder itself, or Desktop, Documents,
-    Downloads themselves (not a folder inside them); a folder holding client data - the saved clients folder (it is
-    or holds it) or a `.whynot-client` marker in it or up to 3 levels below (bounded). A genuine 2.x / 3.0 home
-    anywhere else is used as it is. The bootstraps apply the same rule (Get-WncResolvedHomeProblem /
-    resolved_home_problem) before anything is downloaded."""
+    this run) may not be used, else None (task 9, carried from the Task 8 review: controller rulings). ~/.whynot-cut
+    itself is never refused here. Refused: a link or reparse point itself (a junction, symlink or folder mount point);
+    a drive root or mount point; the user folder itself, or Desktop, Documents, Downloads themselves (`known`: also
+    where Windows' shell folders put them; a folder inside them is fine); a folder holding client data - the saved
+    clients folder (it is or holds it) or a `.whynot-client` marker in it or up to 3 levels below - and a folder too
+    big to check for that (more than MARKER_SCAN_LIMIT entries within 3 levels). Every comparison is made both as
+    written and with links resolved (realpath), and case-insensitively on macOS too. A genuine 2.x / 3.0 home anywhere
+    else is used as it is. The bootstraps apply the same rule (Get-WncResolvedHomeProblem / resolved_home_problem)
+    before anything is downloaded."""
     p, h = str(path), Path(home)
-    n = _norm(p)
-    if n == _norm(h / ".whynot-cut"):
+    if _fold(_norm(p)) == _fold(_norm(h / ".whynot-cut")):
         return None
-    if _is_drive_root(p):
+    if is_link(p):
+        return "a link or mount point (a junction, symlink or mounted folder); name the real folder instead"
+    keys = _place_keys(p)
+    if _is_drive_root(p) or any(_is_drive_root(k) for k in keys):
         return "a drive root or a mount point"
-    if n == _norm(h):
+    if keys & _place_keys(h):
         return "your user folder itself"
-    for r in HOME_ROOTS:
-        if n == _norm(h / r):
-            return f"your {r} folder itself"
+    for name, folder in list(shell_folders(h, True)) + list(known):
+        if keys & _place_keys(folder):
+            return f"your {name} folder itself"
     for c in clients_roots:
-        if c and _within(_norm(c), n, strict=False):
+        if c and any(_within(ck, k, strict=False) for ck in _place_keys(c) for k in keys):
             return f"your clients folder {c}, or it holds it"
     if os.path.isdir(p):
-        below = _marker_below(p)
+        below, too_big = _marker_scan(os.path.realpath(p))
         if below:
             return f"holding a client folder ({below} holds {CLIENT_MARKER})"
+        if too_big:
+            return (f"too big to check for client folders (more than {MARKER_SCAN_LIMIT} entries within 3 levels); "
+                    "choose an engine folder of its own with -EngineHome / --engine-home")
     return None
 
 

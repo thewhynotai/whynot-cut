@@ -38,8 +38,9 @@ Arabic:
 > Installing everything WhyNot Cut needs (about N GB)
 
 N is the runtime (about 0.5 GB), ffmpeg and the fonts (their sizes from `components.json`), the Whisper model
-(`large-v3`, about 2.9 GB, or the one `-Model` names) and, on Windows when Git Bash is missing, PortableGit; a step
-you skip with `-Skip` is not counted, and N is rounded up to one decimal. When a person is at the terminal, a
+(`large-v3`, about 2.9 GB, or the one `-Model` names) and, on Windows, PortableGit unpacked (about 0.4 GB) when Git
+Bash is missing and the NVIDIA CUDA libraries (about 1 GB) when an NVIDIA GPU is there; a step you skip with `-Skip`
+is not counted, and N is rounded up to one decimal. When a person is at the terminal, a
 10-second countdown follows on one line that updates in place:
 
 > Press C to customise (10)... / اضغط C للتخصيص
@@ -54,8 +55,11 @@ you skip with `-Skip` is not counted, and N is rounded up to one decimal. When a
 countdown and asks nothing; `-Yes` together with `-Customise` stops with exit code 2. Without a keyboard (input
 redirected or piped, `-NonInteractive`, a CI run, the install from inside Claude, Setup.exe) the installer behaves
 like `-Yes` and never waits for a key. On Windows the key is read from the console (`[Console]::KeyAvailable`); on
-macOS from the terminal, or from `/dev/tty` under `curl | bash` when it can be opened, never from the piped script
-(without `/dev/tty`: no countdown).
+macOS from the terminal, or from `/dev/tty` under `curl | bash` when it can be opened and the output goes to a
+terminal too, never from the piped script, and only when the installer runs in the foreground (without that: no
+countdown). Keys typed before the countdown appears (the Enter after the command) are not taken as an answer; with
+macOS's own bash 3.2 the first second of the countdown is spent clearing them. A saved engine home in the wrong place
+(below) is refused before the countdown, so you never wait 10 seconds for an error.
 
 ### One line (future: needs hosting, H3)
 
@@ -224,11 +228,17 @@ inside `<dir>`.
 An engine home that was not chosen in this run but found as described above (a variable, `plugin-options.json` or
 `settings.json` names it) is used as it is - except `~/.whynot-cut` itself - unless it is:
 
+- a link itself (a junction, symlink, or a drive mounted into a folder): name the real folder;
 - a drive root or a mount point (`D:\`, `/Volumes/<name>`);
-- your user folder itself, or Desktop, Documents or Downloads themselves (a folder inside them is fine);
+- your user folder itself, or Desktop, Documents or Downloads themselves (a folder inside them is fine); on Windows
+  also where Windows keeps them (OneDrive Known Folder Move, a moved Documents);
 - a folder holding client data: your saved clients folder (`clients_root` in your preferences or in
   `plugin-options.json`), or a folder that holds it, or a folder with a `.whynot-client` marker in it or up to three
-  levels below.
+  levels below;
+- a folder too big to check for that: more than 5000 files and folders within three levels (a footage folder).
+
+Every comparison is made both as the folder is written and with every link on the way resolved (a link to Documents
+is Documents), and without regard to upper / lower case on Windows and macOS.
 
 Then the install stops with exit code 2 before anything is downloaded, both bootstraps and the core alike, and says
 how to fix it (in English and Arabic): **run the installer again with -EngineHome <folder> / --engine-home <folder>**,

@@ -5315,19 +5315,23 @@ class TestNoQuestionsByDefault(unittest.TestCase):
                          ("large-v3-turbo", "en", str(self.home.parent / "My Clients"), "customise"))
 
     def test_customise_without_a_terminal_keeps_every_default(self):
+        # fix round 1: nothing could be asked, so the mode is "default" (the state then equals a --yes run's)
         ctx = self.ctx(customise=True)
         with mock.patch.object(base, "can_ask", return_value=False), \
                 mock.patch.object(base, "ask", side_effect=AssertionError("asked")):
             self.sy.step_questions(ctx)
-        self.assertEqual((ctx.answers["whisper_model"], ctx.answers["mode"]), ("large-v3", "customise"))
+        self.assertEqual((ctx.answers["whisper_model"], ctx.answers["mode"]), ("large-v3", "default"))
+        with mock.patch.object(base, "can_ask", return_value=False):
+            self.assertEqual(self.sy.answer_mode(self.ctx(customise=True)), "default")
 
     def test_state_records_the_mode(self):
         for customise, want in ((False, "default"), (True, "customise")):
             with self.subTest(customise=customise):
                 ctx = self.ctx(customise=customise, channel=None)
-                with mock.patch.object(base, "can_ask", return_value=False):
+                with mock.patch.object(base, "can_ask", return_value=True), \
+                        mock.patch.object(base, "ask", side_effect=lambda prompt, default="": default):
                     self.sy.step_questions(ctx)
-                self.sy.step_state(ctx)
+                    self.sy.step_state(ctx)
                 st = json.loads(ctx.paths.state_file.read_text(encoding="utf-8"))
                 self.assertEqual(st["answers"]["mode"], want)
 
@@ -5363,7 +5367,7 @@ class TestNoQuestionsByDefault(unittest.TestCase):
         g = 1024 ** 3
         ff = sum(f["bytes"] for f in comp["ffmpeg"]["assets"]["win-x64"]["files"]) / g
         fonts = sum(f["bytes"] for f in comp["fonts"]["files"] + comp["fonts"].get("licenses", [])) / g
-        git = comp["git"]["assets"]["win-x64"]["bytes"] / g
+        git = 0.4  # fix round 1: PortableGit unpacked, not its 60 MB self-extractor
 
         def up(x):
             return math.ceil(round(x * 10, 6)) / 10
@@ -5376,6 +5380,10 @@ class TestNoQuestionsByDefault(unittest.TestCase):
         self.assertEqual(sy.install_size_gb(comp, "win-x64", skip=("model",)), up(0.5 + ff + fonts))
         # without sizes in components.json: the constants (runtime 0.5, ffmpeg 0.1, fonts 0.01, Git 0.4)
         self.assertEqual(sy.install_size_gb({"schema": 1}, "win-x64", git_missing=True), up(0.5 + 0.1 + 0.01 + 2.9 + 0.4))
+        # an NVIDIA GPU on Windows adds the CUDA libraries (about 1 GB); never on a Mac; not with --skip gpu
+        self.assertEqual(sy.install_size_gb(comp, "win-x64", nvidia=True), up(0.5 + ff + fonts + 2.9 + 1.0))
+        self.assertEqual(sy.install_size_gb(comp, "mac-arm64", nvidia=True), up(0.5 + mac_ff + fonts + 2.9))
+        self.assertEqual(sy.install_size_gb(comp, "win-x64", nvidia=True, skip=("gpu",)), up(0.5 + ff + fonts + 2.9))
         self.assertEqual(sy.format_gb(3.5), "3.5")
         self.assertEqual(sy.format_gb(4.0), "4.0")
 
@@ -5414,6 +5422,76 @@ class TestResolvedHomeGuard(unittest.TestCase):
         # ~/.whynot-cut itself is never refused by this rule, whatever it holds
         touch(h / ".whynot-cut" / "Clients" / ".whynot-client", b"{}")
         self.assertIsNone(self.problem(h / ".whynot-cut"))
+
+    def test_spelling_variants_of_a_refused_place(self):
+        # fix round 1: a trailing separator, `..` and (where the disk ignores case) another case are the same folder
+        h = self.home
+        (h / "Documents").mkdir()
+        variants = [str(h / "Documents") + os.sep, str(h / "x" / ".." / "Documents"), h / "Documents" / "."]
+        if IS_WIN:
+            variants.append(str(h / "Documents").upper())
+        for v in variants:
+            with self.subTest(str(v)):
+                self.assertIn("Documents", self.problem(v) or "")
+
+    def test_links_are_refused_and_resolved(self):
+        # fix round 1 (controller ruling): a link itself is refused; through a linked parent the real folder counts
+        h = self.home
+        (h / "Documents").mkdir()
+        cases = []
+        if make_dir_link(h / "lnk", h / "Documents"):
+            cases.append((h / "lnk", "link or mount point"))
+        if make_dir_link(h / "eng", h):
+            cases.append((h / "eng" / "Documents", "Documents"))
+        stand_in = h.parent / "drive stand-in"  # (never a link to a real drive root: cleanup must stay in temp)
+        stand_in.mkdir()
+        if make_dir_link(h / "root", stand_in):
+            cases.append((h / "root", "link or mount point"))
+        if not cases:
+            self.skipTest("cannot make a directory link here")
+        for path, needle in cases:
+            with self.subTest(str(path)):
+                self.assertIn(needle, self.problem(path) or "")
+        # a real folder inside Documents is still fine, also reached through the linked parent
+        (h / "Documents" / "Engine").mkdir()
+        self.assertIsNone(self.problem(h / "Documents" / "Engine"))
+        if (h / "eng").exists():
+            self.assertIsNone(self.problem(h / "eng" / "Documents" / "Engine"))
+
+    def test_a_folder_too_big_to_check_is_refused(self):
+        # fix round 1: past MARKER_SCAN_LIMIT entries within 3 levels the scan stops - and the guard refuses
+        big = self.home / "Footage"
+        big.mkdir()
+        for i in range(base.MARKER_SCAN_LIMIT + 1):
+            open(big / f"clip{i:05d}.mov", "wb").close()
+        touch(big / "a" / "b" / "c" / "d" / ".whynot-client", b"{}")  # deeper than 3 levels: never seen
+        p = self.problem(big)
+        self.assertIn("too big to check", p or "")
+        self.assertIn("-EngineHome", p)
+        # the chosen-folder rule of Task 8 is unchanged: past the limit it finds no marker
+        self.assertIsNone(base._marker_below(str(big)))
+
+    def test_macos_compares_names_case_insensitively(self):
+        # fix round 1: normcase does not fold case on Darwin, but APFS / HFS+ do; the guard folds it there
+        h = self.home
+        (h / "Documents").mkdir()
+        lower = str(h / "documents")
+        with mock.patch("os.path.normcase", side_effect=lambda s: s), \
+                mock.patch("os.path.realpath", side_effect=lambda s, **kw: os.path.abspath(s)):
+            with mock.patch.object(base.sys, "platform", "darwin"):
+                self.assertIn("Documents", self.problem(lower) or "")
+            with mock.patch.object(base.sys, "platform", "linux"):  # a case-sensitive disk: another folder
+                self.assertIsNone(self.problem(lower))
+
+    def test_windows_shell_folders_count(self):
+        # fix round 1: Known Folder Move (OneDrive) puts Documents elsewhere; the core and the bootstrap both read it
+        moved = self.home.parent / "OneDrive" / "Documents"
+        moved.mkdir(parents=True)
+        self.assertIn("Documents", base.resolved_home_problem(moved, home=self.home,
+                                                              known=[("Documents", moved)]) or "")
+        self.assertIsNone(base.resolved_home_problem(moved, home=self.home))
+        names = [n for n, _f in base.shell_folders(self.home, sandbox=True)]
+        self.assertEqual(names, ["Desktop", "Documents", "Downloads"])  # a sandbox never reads the registry
 
     def run_core(self, *args):
         err, out = io.StringIO(), io.StringIO()
@@ -5535,24 +5613,57 @@ class _CountdownCases:
         h = self.home
         mine = touch(h / "Documents" / "thesis.docx", b"mine")
         touch(h / "Work" / "Clinic" / "Dr X" / ".whynot-client", b"{}")
+        big = h / "Footage"  # more than 5000 entries within 3 levels (and a marker deeper than that): too big to check
+        big.mkdir()
+        for i in range(5001):
+            open(big / f"clip{i:05d}.mov", "wb").close()
+        touch(big / "a" / "b" / "c" / "d" / ".whynot-client", b"{}")
         drive = Path(self.tmp.anchor)
         before = (drive / "state.json").exists(), (drive / "logs").exists()
-        for bad, needle in ((h / "Documents", "Documents"), (h / "Work", "client folder"),
-                            (drive, "drive root")):
+        docs = h / "Documents"
+        cases = [(docs, "Documents"), (h / "Work", "client folder"), (drive, "drive root"),
+                 (big, "too big to check"),
+                 # fix round 1: spelling variants of the same folder
+                 (self.native(docs) + self.SEP, "Documents"), (self.native(h / "x") + self.SEP + ".." + self.SEP +
+                                                               "Documents", "Documents")]
+        if IS_WIN:  # NTFS ignores case (macOS: see the Darwin case of the guard)
+            cases.append((self.native(docs).upper(), "Documents"))
+        stand_in = self.tmp / "drive stand-in"  # (a link to a real drive root would be unsafe to clean up)
+        stand_in.mkdir()
+        if make_dir_link(h / "lnk", docs):  # fix round 1: a link itself, and a linked parent (real path compared)
+            cases.append((h / "lnk", "link or mount point"))
+        if make_dir_link(h / "eng", h):
+            cases.append((h / "eng" / "Documents", "Documents"))
+        if make_dir_link(h / "root", stand_in):
+            cases.append((h / "root", "link or mount point"))
+        for bad, needle in cases:
             with self.subTest(str(bad)):
-                EngineHomeCases.pointer(h, {"clients_root": "", "engine_home": str(bad)})
-                r = self.inst(h, "yes", "skip")
+                EngineHomeCases.pointer(h, {"clients_root": "", "engine_home": self.native(bad)})
+                r = self.inst(h, "skip", env=self.keys_env("none"))  # a fake console: the guard comes first
                 out = r.stdout + r.stderr
                 self.assertEqual(r.returncode, 2, out)
                 self.assertIn(needle, out)
                 self.assertIn(SELF_FIX, out)
                 self.assertIn(SELF_FIX_AR, out)
+                self.assertNotIn("Press C", out)  # refused before the countdown (no 10 s wait)
         self.assertEqual(self.srv.srv.hits, [])
         self.assertEqual(os.listdir(h / "Documents"), ["thesis.docx"])
         self.assertEqual(mine.read_bytes(), b"mine")
         self.assertEqual(sorted(os.listdir(h / "Work")), ["Clinic"])
+        self.assertEqual(os.listdir(stand_in), [])
         self.assertEqual(((drive / "state.json").exists(), (drive / "logs").exists()), before)
         self.assertEqual([n for n in os.listdir(drive) if n.startswith(".wnc-write-test")], [])
+        # a genuine home elsewhere, also reached through a link on the way, is used (dry run)
+        if (h / "eng").exists():
+            touch(h / "Engine" / "state.json", GENUINE_STATE)
+            EngineHomeCases.pointer(h, {"clients_root": "", "engine_home": self.native(h / "eng" / "Engine")})
+            r = self.inst(h, "yes", "dry")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_bad_countdown_hook_value_is_ignored(self):
+        r = self.inst(self.home, "dry", env=self.env(WNC_TEST_KEYS="x", WNC_TEST_COUNTDOWN_S="soon"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(COUNTDOWN_EN, r.stdout + r.stderr)
 
 
 @unittest.skipUnless(find_powershell(), "Windows PowerShell is not available")
@@ -5567,7 +5678,12 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
     def LOCATION_ENTER(self):
         return ["", str(self.home / ".whynot-cut")]
 
+    SEP = "\\"
+
     def answers_path(self, p: Path) -> str:
+        return str(p)
+
+    def native(self, p) -> str:
         return str(p)
 
     def inst(self, home: Path, *flags, env=None):
@@ -5592,8 +5708,13 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
     front = TestBashFrontEnd.front
     home_arg = TestBashFrontEnd.home_arg
 
+    SEP = "/"
+
     def answers_path(self, p: Path) -> str:
         return p.as_posix()
+
+    def native(self, p) -> str:
+        return Path(p).as_posix() if not isinstance(p, str) else p.replace("\\", "/")
 
     def inst(self, home: Path, *flags, env=None):
         args = ["--home", home.as_posix()]
@@ -5614,11 +5735,31 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
         self.assert_no_question(out)
 
     def test_the_countdown_reads_only_the_terminal(self):
-        text = (INSTALLER / "core" / "bootstrap.sh").read_text(encoding="utf-8")
-        body = shell_function(INSTALLER / "core" / "bootstrap.sh", "countdown", ps=False)
-        self.assertIn("read -r -s -n 1 -t 1", body)
+        boot = INSTALLER / "core" / "bootstrap.sh"
+        body = shell_function(boot, "read_key", ps=False)
+        self.assertIn('read -r -s -n 1 -t "$1"', body)
         self.assertIn("</dev/tty", body)
-        self.assertIn("countdown", text)
+        self.assertIn("read_key", shell_function(boot, "countdown", ps=False))
+        # fix round 1: /dev/tty only when stdout or stderr is a terminal too, and only in the foreground
+        kb = shell_function(boot, "has_keyboard", ps=False)
+        self.assertIn("[ -t 1 ] || [ -t 2 ]", kb)
+        self.assertIn("in_foreground", kb)
+        self.assertIn("ps -o stat=", shell_function(boot, "in_foreground", ps=False))
+
+    def test_the_guard_folds_case_on_macos(self):
+        # fix round 1: APFS / HFS+ ignore case; the bash guard folds it on Darwin (run alone, OS_NAME=Darwin)
+        boot = INSTALLER / "core" / "bootstrap.sh"
+        funcs = "".join(shell_function(boot, n, ps=False) for n in (
+            "norm_path", "within", "is_mount", "guard_norm", "real_path", "place_keys", "resolved_home_problem"))
+        (self.home / "Documents").mkdir(parents=True)
+        script = self.tmp / "guard.sh"
+        script.write_text(funcs + 'OS_NAME="$2"; HOME="$(cygpath -u "$1" 2>/dev/null || printf %s "$1")"\n'
+                          'CLIENT_ROOTS=""\nresolved_home_problem "$HOME/documents"\nprintf "WHY=%s\\n" "$WHY"\n',
+                          encoding="utf-8", newline="\n")
+        r = subprocess.run([find_bash(), str(script), str(self.home), "Darwin"], capture_output=True,
+                           env=self.env(), timeout=60)
+        out = r.stdout.decode("utf-8", "replace") + r.stderr.decode("utf-8", "replace")
+        self.assertIn("WHY=your Documents folder itself", out)
 
 
 # --------------------------------------------------------------------------------------------- task 7: release stub

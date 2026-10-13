@@ -56,9 +56,12 @@
 # -Customise (or C) asks the location question here and passes --customise, so the core asks the model, the language
 # and the clients folder, every answer preselected. -Yes: no countdown, no question. No keyboard (input redirected,
 # -NonInteractive, Door 2, Setup.exe, CI): like -Yes, never waiting for a key. -Yes with -Customise: exit 2.
-# A RESOLVED engine home other than ~\.whynot-cut (a variable, the pointer or settings.json named it) that is a drive
-# root, the user folder itself, Desktop / Documents / Downloads themselves, or holds client data (the saved clients
-# folder, or .whynot-client up to 3 levels below) is refused with exit 2 before any download, with the self-fix
+# A RESOLVED engine home other than ~\.whynot-cut (a variable, the pointer or settings.json named it) that is itself a
+# link / reparse point (junction, symlink, a volume mounted into a folder), a drive root, the user folder itself,
+# Desktop / Documents / Downloads themselves (also where Windows' User Shell Folders put them: OneDrive Known Folder
+# Move), or holds client data (the saved clients folder, or .whynot-client up to 3 levels below), or is too big to
+# check for that (more than 5000 entries within 3 levels) - compared as written and with links resolved - is refused
+# with exit 2 before the countdown and any download (fix round 1), with the self-fix
 # "run the installer again with -EngineHome <folder> / --engine-home <folder>" (English + Arabic); the core applies the
 # same rule (base.resolved_home_problem). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another key, or
 # "none" = nobody presses), WNC_TEST_COUNTDOWN_S (the seconds the countdown waits with the hook; 0 = none), and the
@@ -103,7 +106,7 @@ param(
     $WncNeedGb = 6  # free space for the engine; + $WncModelGb with the Whisper model (system.py RED_GB / AMBER_GB)
     $WncModelGb = 3
     # the install size estimate (system.py RUNTIME_GB, FFMPEG_GB, FONTS_GB, GIT_GB and MODEL_SIZES)
-    $WncSizes = @{ runtime = 0.5; ffmpeg = 0.1; fonts = 0.01; git = 0.4 }
+    $WncSizes = @{ runtime = 0.5; ffmpeg = 0.1; fonts = 0.01; git = 0.4; cuda = 1.0 }  # Git unpacked; CUDA (NVIDIA)
     $WncModelSizes = @{ 'large-v3' = 2.9; 'large-v3-turbo' = 1.6; 'medium' = 1.5; 'small' = 0.5 }
     # the Arabic lines, UTF-8 in base64 (this file stays ASCII)
     $WncAr = @{
@@ -628,8 +631,9 @@ param(
         return ,@($out | Sort-Object)
     }
 
-    function Find-WncMarkerBelow([string]$Path) {
-        # a folder up to 3 levels below $Path holding .whynot-client (bounded, links never entered), or $null
+    function Find-WncMarkerScan([string]$Path) {
+        # @{ Found; TooBig }: a folder up to 3 levels below $Path holding .whynot-client (links never entered), and
+        # whether more than 5000 entries were met first (the core's base._marker_scan, MARKER_SCAN_LIMIT)
         $seen = 0
         $stack = New-Object System.Collections.Stack
         $stack.Push(@($Path, 0))
@@ -638,14 +642,20 @@ param(
             try { $entries = [IO.Directory]::GetFileSystemEntries($item[0]) } catch { continue }
             foreach ($e in $entries) {
                 $seen++
-                if ($seen -gt 5000) { return $null }
-                if ([IO.Path]::GetFileName($e) -eq '.whynot-client') { return $item[0] }
+                if ($seen -gt 5000) { return @{ Found = $null; TooBig = $true } }
+                if ([IO.Path]::GetFileName($e) -eq '.whynot-client') { return @{ Found = $item[0]; TooBig = $false } }
                 if (($item[1] -lt 3) -and [IO.Directory]::Exists($e) -and (-not (Test-WncReparse $e))) {
                     $stack.Push(@($e, ($item[1] + 1)))
                 }
             }
         }
-        return $null
+        return @{ Found = $null; TooBig = $false }
+    }
+
+    function Find-WncMarkerBelow([string]$Path) {
+        # a folder up to 3 levels below $Path holding .whynot-client, or $null (the chosen-folder rule: past the
+        # limit, $null)
+        return (Find-WncMarkerScan $Path).Found
     }
 
     function Get-WncEnginePlace([string]$Path, [string]$UserHome, [string]$Root, [string[]]$Clients,
@@ -798,7 +808,8 @@ param(
     function Get-WncInstallGb([string]$CompPath, [string[]]$SkipList, [bool]$Sandbox) {
         # D-T1: about how many GB the install brings, rounded up to one decimal (the core's system.install_size_gb):
         # the runtime 0.5, ffmpeg and the fonts (their `bytes`, else 0.1 / 0.01), the Whisper model (-Model or
-        # large-v3: models.<m>.bytes, else its size) and PortableGit when Git Bash is missing (its `bytes`, else 0.4)
+        # large-v3: models.<m>.bytes, else its size), PortableGit unpacked (0.4) when Git Bash is missing and the CUDA
+        # libraries (1.0) when an NVIDIA GPU is there
         $c = $null
         try { $c = [IO.File]::ReadAllText($CompPath, [Text.Encoding]::UTF8) | ConvertFrom-Json } catch { $c = $null }
         $m = 'large-v3'
@@ -816,10 +827,8 @@ param(
             $b = Get-WncValue $c @('models', $m, 'bytes')
             if (($b -is [int]) -or ($b -is [long])) { $total += [double]$b / 1GB } else { $total += $WncModelSizes[$m] }
         }
-        if (($SkipList -notcontains 'gitbash') -and (Test-WncGitMissing $Sandbox)) {
-            $b = Get-WncValue $c @('git', 'assets', 'win-x64', 'bytes')
-            if (($b -is [int]) -or ($b -is [long])) { $total += [double]$b / 1GB } else { $total += $WncSizes.git }
-        }
+        if (($SkipList -notcontains 'gitbash') -and (Test-WncGitMissing $Sandbox)) { $total += $WncSizes.git }
+        if (($SkipList -notcontains 'gpu') -and (Test-WncNvidia $Sandbox)) { $total += $WncSizes.cuda }
         $gb = [Math]::Ceiling([Math]::Round($total * 10, 6)) / 10
         return $gb.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)
     }
@@ -887,26 +896,117 @@ param(
         return 'customise'
     }
 
-    function Get-WncResolvedHomeProblem([string]$Path, [string]$UserHome, [string[]]$Clients) {
-        # task 9 (the core's base.resolved_home_problem): why a RESOLVED engine home other than ~\.whynot-cut may not
-        # be used - a drive root, the user folder or Desktop / Documents / Downloads themselves, the saved clients
-        # folder or a folder holding it, a folder with .whynot-client in it or up to 3 levels below; else $null
-        $n = Get-WncNormPath $Path
-        if ($n -ieq (Get-WncNormPath (Join-Path $UserHome '.whynot-cut'))) { return $null }
-        if (($n -match '^[A-Za-z]:\\$') -or ($n -match '^\\\\[^\\]+\\[^\\]+$')) { return 'a drive root or a mount point' }
-        if ($n -ieq (Get-WncNormPath $UserHome)) { return 'your user folder itself' }
-        foreach ($r in @('Desktop', 'Documents', 'Downloads')) {
-            if ($n -ieq (Get-WncNormPath (Join-Path $UserHome $r))) { return "your $r folder itself" }
+    function Get-WncLinkTarget([string]$Path) {
+        # where a junction / symlink points (full path), or $null (a volume mount point, an unreadable link)
+        try {
+            $item = Get-Item -LiteralPath $Path -Force
+            $target = @($item.Target | Where-Object { $_ })
+            if ($target.Count -eq 0) { return $null }
+            $t = [string]$target[0]
+            if ($t -match '^\\\\\?\\') { $t = $t.Substring(4) }
+            if ($t -match '^Volume\{' -or $t -match '^\\\\\?\\Volume') { return $null }
+            if (-not ($t -match '^([A-Za-z]:[\\/]|\\\\)')) { $t = Join-Path (Split-Path $Path -Parent) $t }
+            return (Get-WncNormPath $t)
+        } catch {
+            return $null
         }
-        foreach ($c in @($Clients | Where-Object { $_ })) {
-            try { $cn = Get-WncNormPath $c } catch { continue }
-            if (Test-WncWithin $cn $n) { return "your clients folder $c, or it holds it" }
-        }
-        if ([IO.Directory]::Exists($n)) {
-            $below = Find-WncMarkerBelow $n
-            if ($below) { return "holding a client folder ($below holds .whynot-client)" }
+    }
+
+    function Get-WncRealPath([string]$Path) {
+        # $Path with every junction / symlink on the way resolved (the core's os.path.realpath), or $null when a link
+        # cannot be followed (a folder mount point); a part that does not exist yet is kept as written
+        $cur = Get-WncNormPath $Path
+        for ($hop = 0; $hop -lt 40; $hop++) {
+            $rootDir = [IO.Path]::GetPathRoot($cur)
+            $parts = @($cur.Substring($rootDir.Length).Split([char[]]@([char]92), [StringSplitOptions]::RemoveEmptyEntries))
+            $built = $rootDir
+            $changed = $false
+            for ($i = 0; $i -lt $parts.Count; $i++) {
+                $next = Join-Path $built $parts[$i]
+                if (Test-WncReparse $next) {
+                    $target = Get-WncLinkTarget $next
+                    if (-not $target) { return $null }
+                    $rest = @($parts | Select-Object -Skip ($i + 1))
+                    $cur = $target
+                    if ($rest.Count -gt 0) { $cur = Get-WncNormPath (Join-Path $target ($rest -join [string][char]92)) }
+                    $changed = $true
+                    break
+                }
+                $built = $next
+            }
+            if (-not $changed) { return (Get-WncNormPath $built) }
         }
         return $null
+    }
+
+    function Get-WncKnownFolderList([string]$UserHome, [bool]$Sandbox) {
+        # @(name, folder) pairs of Desktop / Documents / Downloads: under the user folder and, outside a sandbox, where
+        # Windows puts them (OneDrive Known Folder Move; the core's base.shell_folders reads the same registry values)
+        $out = @(foreach ($r in @('Desktop', 'Documents', 'Downloads')) { ,@($r, (Join-Path $UserHome $r)) })
+        if (-not $Sandbox) {
+            $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
+            foreach ($pair in @(@('Desktop', 'Desktop'), @('Documents', 'Personal'),
+                    @('Downloads', '{374DE290-123F-4565-9164-39C4925E467B}'))) {
+                try {
+                    $v = (Get-ItemProperty -LiteralPath $key -Name $pair[1] -ErrorAction Stop).($pair[1])
+                    if ($v) { $out += ,@($pair[0], [Environment]::ExpandEnvironmentVariables([string]$v)) }
+                } catch {
+                    Write-Verbose "no shell folder $($pair[1])"
+                }
+            }
+        }
+        return ,$out
+    }
+
+    function Get-WncResolvedHomeProblem([string]$Path, [string]$UserHome, [string[]]$Clients, [bool]$Sandbox) {
+        # task 9 (the core's base.resolved_home_problem): why a RESOLVED engine home other than ~\.whynot-cut may not
+        # be used - a link / reparse point itself (junction, symlink, a volume mounted into a folder), a drive root,
+        # the user folder or Desktop / Documents / Downloads themselves (also where Windows' shell folders put them),
+        # the saved clients folder or a folder holding it, a folder with .whynot-client in it or up to 3 levels
+        # below, or one too big to check for that (more than 5000 entries); compared as written and with links
+        # resolved; else $null
+        $n = Get-WncNormPath $Path
+        if ($n -ieq (Get-WncNormPath (Join-Path $UserHome '.whynot-cut'))) { return $null }
+        $rootLike = '^([A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)$'
+        if ($n -match $rootLike) { return 'a drive root or a mount point' }
+        if (Test-WncReparse $n) {
+            return 'a link or mount point (a junction, symlink or mounted folder); name the real folder instead'
+        }
+        $real = Get-WncRealPath $n
+        if (-not $real) { return 'reached through a link or mount point that cannot be followed; name the real folder' }
+        $keys = @($n, $real)
+        if ($real -match $rootLike) { return 'a drive root or a mount point' }
+        $homes = @((Get-WncNormPath $UserHome), (Get-WncRealPath $UserHome)) | Where-Object { $_ }
+        if (@($keys | Where-Object { $homes -contains $_ }).Count -gt 0) { return 'your user folder itself' }
+        foreach ($pair in (Get-WncKnownFolderList -UserHome $UserHome -Sandbox $Sandbox)) {
+            try { $f = @((Get-WncNormPath $pair[1]), (Get-WncRealPath $pair[1])) | Where-Object { $_ } } catch { continue }
+            if (@($keys | Where-Object { $f -contains $_ }).Count -gt 0) { return "your $($pair[0]) folder itself" }
+        }
+        foreach ($c in @($Clients | Where-Object { $_ })) {
+            try { $cs = @((Get-WncNormPath $c), (Get-WncRealPath $c)) | Where-Object { $_ } } catch { continue }
+            foreach ($ck in $cs) {
+                foreach ($k in $keys) { if (Test-WncWithin $ck $k) { return "your clients folder $c, or it holds it" } }
+            }
+        }
+        if ([IO.Directory]::Exists($real)) {
+            $scan = Find-WncMarkerScan $real
+            if ($scan.Found) { return "holding a client folder ($($scan.Found) holds .whynot-client)" }
+            if ($scan.TooBig) {
+                return ('too big to check for client folders (more than 5000 entries within 3 levels); choose an ' +
+                    'engine folder of its own with -EngineHome / --engine-home')
+            }
+        }
+        return $null
+    }
+
+    function Test-WncNvidia([bool]$Sandbox) {
+        # an NVIDIA GPU for the size estimate (the gpu step installs the CUDA libraries, about 1 GB): nvidia-smi is
+        # there; a sandbox only WNC_TEST_NVIDIA=1 (the core's runtime._nvidia_present, without running it)
+        if ($Sandbox) { return ($env:WNC_TEST_NVIDIA -eq '1') }
+        if (@(Get-Command nvidia-smi -CommandType Application -ErrorAction SilentlyContinue).Count -gt 0) { return $true }
+        $windir = $env:SystemRoot
+        if (-not $windir) { $windir = 'C:\Windows' }
+        return [IO.File]::Exists((Join-Path $windir 'System32\nvidia-smi.exe'))
     }
 
     function Read-WncAnswer([string]$Default) {
@@ -937,7 +1037,7 @@ param(
     }
 
     function Select-WncEngineHome([string]$Default, [string]$UserHome, [string]$Root, [string]$Pointer,
-        [string]$SandboxRoot, [bool]$WithModel, [string]$Source) {
+        [string]$SandboxRoot, [bool]$WithModel) {
         # the location question (see the header): @{ Code = 0; Path; Chosen } or @{ Code = 2 }
         $ask = Test-WncCanAsk
         $clients = Get-WncClientRootList -UserHome $UserHome -Pointer $Pointer
@@ -975,15 +1075,6 @@ param(
                 $chosen = $false
                 $p = Get-WncNormPath $p
                 $problem = $null
-                $why = Get-WncResolvedHomeProblem -Path $p -UserHome $UserHome -Clients $clients
-                if ($why) {
-                    # task 9: a home saved somewhere (not chosen now) in a place it must never be: stop, say the fix
-                    Write-Host ("ERROR: WhyNot Cut will not use $p as its engine home (from $Source): it is $why. " +
-                        'Nothing was downloaded. To fix it, run the installer again with -EngineHome <folder> / ' +
-                        '--engine-home <folder> (a folder of its own, for example C:\WhyNotCut).')
-                    Write-Host (Get-WncArabic 'Guard')
-                    return @{ Code = 2 }
-                }
                 if ($SandboxRoot -and (-not (Test-WncWithin $p (Get-WncNormPath $SandboxRoot) -Strict))) {
                     $problem = "$p is outside the sandbox home $SandboxRoot (-Home: nothing outside it is used)"
                 }
@@ -1103,7 +1194,8 @@ param(
             if ($env:WNC_TEST_ANSWERS) { $S.Answers = @([IO.File]::ReadAllLines($env:WNC_TEST_ANSWERS, $S.Utf8)) }
             if ($env:WNC_TEST_FREE_GB) { $S.FreeGb = $env:WNC_TEST_FREE_GB }
             if ($null -ne $env:WNC_TEST_KEYS) { $S.TestKeys = $env:WNC_TEST_KEYS }
-            if ($env:WNC_TEST_COUNTDOWN_S) { $S.CountdownS = [int]$env:WNC_TEST_COUNTDOWN_S }
+            $cd = 0
+            if ([int]::TryParse([string]$env:WNC_TEST_COUNTDOWN_S, [ref]$cd) -and ($cd -ge 0)) { $S.CountdownS = $cd }
         } else {
             $h = $env:USERPROFILE
             if (-not $h) { $h = $env:HOME }
@@ -1119,6 +1211,19 @@ param(
         if ($sandbox) { $sandboxRoot = $h }
         $compPath = Join-Path $root 'setup\components.json'
         if ($Components) { $compPath = Get-WncFullPath $Components }
+        if ((-not $Uninstall) -and (-not $EngineHome)) {
+            # task 9: a home saved somewhere (not chosen now) in a place it must never be: stop and say the fix, before
+            # the countdown and any download (fix round 1)
+            $clients = Get-WncClientRootList -UserHome $h -Pointer $pointer
+            $why = Get-WncResolvedHomeProblem -Path $default -UserHome $h -Clients $clients -Sandbox $sandbox
+            if ($why) {
+                Write-Host ("ERROR: WhyNot Cut will not use $default as its engine home (from $($resolved.Source)): it " +
+                    "is $why. Nothing was downloaded. To fix it, run the installer again with -EngineHome <folder> / " +
+                    '--engine-home <folder> (a folder of its own, for example C:\WhyNotCut).')
+                Write-Host (Get-WncArabic 'Guard')
+                return @{ Code = 2 }
+            }
+        }
         # D-T1: no question unless the editor customises (the -Customise flag, or C during the countdown)
         $S.Mode = Select-WncMode -CompPath $compPath -SkipList $skipList -Sandbox $sandbox
         if ($Uninstall) {
@@ -1130,7 +1235,7 @@ param(
             }
         } else {
             $sel = Select-WncEngineHome -Default $default -UserHome $h -Root $root -Pointer $pointer `
-                -SandboxRoot $sandboxRoot -WithModel ($skipList -notcontains 'model') -Source $resolved.Source
+                -SandboxRoot $sandboxRoot -WithModel ($skipList -notcontains 'model')
             if ($sel.Code -ne 0) { return @{ Code = 2 } }
             $engine = $sel.Path
             $chosen = $sel.Chosen

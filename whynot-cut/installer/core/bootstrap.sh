@@ -51,15 +51,18 @@
 # No questions by default (Addendum D, D-T1, task 9): an install prints "Installing everything WhyNot Cut needs (about N
 # GB)" (English + Arabic; N from components.json `bytes` where present, the core's system.install_size_gb rule) and,
 # with a person at the terminal, a 10-second line "Press C to customise (10)... / <Arabic>" that counts down in place
-# (`read -t 1 -n 1` from the terminal: stdin when it is one, else /dev/tty when it can be opened - never the piped
-# script). C opens the Customise path; any other key or the end of the countdown installs with the strongest defaults,
+# (`read -t 1 -n 1` from the terminal: stdin when it is one, else /dev/tty when it can be opened and stdout or stderr
+# is a terminal too - never the piped script - and only in the terminal's foreground process group; keys typed before
+# the line appeared are drained first). C opens the Customise path; any other key or the end of the countdown installs with the strongest defaults,
 # exactly like --yes (the core gets --yes: the same state.json, answers.mode "default"). --customise (or C) asks the
 # location question here and passes --customise, so the core asks the model, the language and the clients folder,
 # every answer preselected. --yes: no countdown, no question. No terminal (curl | bash without /dev/tty, CI, Door 2):
 # like --yes, never waiting. --yes with --customise: exit 2.
-# A RESOLVED engine home other than ~/.whynot-cut (a variable, the pointer or settings.json named it) that is a drive
-# root or mount point, the home folder itself, Desktop / Documents / Downloads themselves, or holds client data (the
-# saved clients folder, or .whynot-client up to 3 levels below) is refused with exit 2 before any download, with the
+# A RESOLVED engine home other than ~/.whynot-cut (a variable, the pointer or settings.json named it) that is itself a
+# link, a drive root or mount point, the home folder itself, Desktop / Documents / Downloads themselves, holds client
+# data (the saved clients folder, or .whynot-client up to 3 levels below) or is too big to check for that (more than
+# 5000 entries within 3 levels) - compared as written and with links resolved (cd -P), case folded on macOS - is
+# refused with exit 2 before the countdown and any download (fix round 1), with the
 # self-fix "run the installer again with -EngineHome <folder> / --engine-home <folder>" (English + Arabic); the core
 # applies the same rule (base.resolved_home_problem). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another
 # key, or "none" = nobody presses), WNC_TEST_COUNTDOWN_S (the seconds the countdown waits with the hook; 0 = none); the
@@ -682,9 +685,20 @@ free_gb() { # path -> FREE: whole GB free on its drive (empty when unknown)
   FREE=$((kb / 1048576))
 }
 
-has_keyboard() { # a person at a terminal: stdin is one, or /dev/tty can be opened (curl | bash)
-  [ -t 0 ] && return 0
-  { : </dev/tty; } 2>/dev/null
+in_foreground() { # our process group owns the terminal: reading it from the background would stop us (SIGTTIN)
+  local st
+  st="$(ps -o stat= -p $$ 2>/dev/null)"
+  case "$st" in *+*) return 0 ;; esac
+  return 1
+}
+
+has_keyboard() { # a person at OUR terminal, in the foreground: stdin is the terminal, or (curl | bash) stdout or
+  # stderr is one and /dev/tty can be opened. A child of a tool (Claude's Bash tool, CI) without a terminal on stdin,
+  # stdout and stderr never reads /dev/tty (fix round 1)
+  if [ -t 0 ]; then in_foreground; return $?; fi
+  { [ -t 1 ] || [ -t 2 ]; } || return 1
+  { : </dev/tty; } 2>/dev/null || return 1
+  in_foreground
 }
 
 can_ask() { # the location question: only on the Customise path (D-T1), never with --yes or --uninstall; the test
@@ -716,7 +730,7 @@ JXA_SIZE='function run(argv) {
     items.forEach(function (i) { if (i !== null && typeof i === "object" && isInt(i.bytes)) { s += i.bytes; any = true; } });
     return any ? s / 1073741824 : fb;
   }
-  var plat = argv[1], model = argv[2], skip = "," + argv[3] + ",", git = argv[4] === "1";
+  var plat = argv[1], model = argv[2], skip = "," + argv[3] + ",", git = argv[4] === "1", nvidia = argv[5] === "1";
   var sizes = {"large-v3": 2.9, "large-v3-turbo": 1.6, "medium": 1.5, "small": 0.5};
   var total = 0, b;
   if (skip.indexOf(",runtime,") < 0) { total += 0.5; }
@@ -725,9 +739,8 @@ JXA_SIZE='function run(argv) {
     total += sized(list(get(c, ["fonts", "files"])).concat(list(get(c, ["fonts", "licenses"]))), 0.01);
   }
   if (skip.indexOf(",model,") < 0) { b = get(c, ["models", model, "bytes"]); total += isInt(b) ? b / 1073741824 : (sizes[model] || 2.9); }
-  if (plat.indexOf("win") === 0 && git && skip.indexOf(",gitbash,") < 0) {
-    b = get(c, ["git", "assets", plat, "bytes"]); total += isInt(b) ? b / 1073741824 : 0.4;
-  }
+  if (plat.indexOf("win") === 0 && git && skip.indexOf(",gitbash,") < 0) { total += 0.4; }
+  if (plat.indexOf("win") === 0 && nvidia && skip.indexOf(",gpu,") < 0) { total += 1.0; }
   return (Math.ceil(Math.round(total * 10 * 1e6) / 1e6) / 10).toFixed(1);
 }'
 PY_SIZE='import json, math, sys
@@ -746,7 +759,8 @@ def lst(v):
 def sized(items, fb):
     s = [i["bytes"] for i in items if isinstance(i, dict) and type(i.get("bytes")) is int]
     return sum(s) / 1073741824 if s else fb
-plat, model, skip, git = sys.argv[2], sys.argv[3], sys.argv[4].split(","), sys.argv[5] == "1"
+plat, model, skip, git, nvidia = sys.argv[2], sys.argv[3], sys.argv[4].split(","), sys.argv[5] == "1", \
+    sys.argv[6] == "1"
 sizes = {"large-v3": 2.9, "large-v3-turbo": 1.6, "medium": 1.5, "small": 0.5}
 total = 0.0
 if "runtime" not in skip:
@@ -759,31 +773,65 @@ if "model" not in skip:
     b = get(c, ["models", model, "bytes"])
     total += b / 1073741824 if type(b) is int else sizes.get(model, 2.9)
 if plat.startswith("win") and git and "gitbash" not in skip:
-    b = get(c, ["git", "assets", plat, "bytes"])
-    total += b / 1073741824 if type(b) is int else 0.4
+    total += 0.4
+if plat.startswith("win") and nvidia and "gpu" not in skip:
+    total += 1.0
 print("%.1f" % (math.ceil(round(total * 10, 6)) / 10))'
 
 install_size() { # -> SIZE_GB, the core's system.install_size_gb (see JXA_SIZE)
-  local git=0 la="${LOCALAPPDATA:-}"
+  local git=0 nvidia=0 la="${LOCALAPPDATA:-}" c=0 m
   case "$PLAT" in
-    win-*) if [ ! -f "$la/Programs/Git/bin/bash.exe" ] && [ ! -f "$la/WhyNotCut/git/bin/bash.exe" ]; then git=1; fi ;;
+    win-*)  # (Git Bash in tests only: macOS has no Git or CUDA step)
+      if [ ! -f "$la/Programs/Git/bin/bash.exe" ] && [ ! -f "$la/WhyNotCut/git/bin/bash.exe" ]; then git=1; fi
+      if [ -n "$HOME_OVR" ] && [ "${WNC_TEST_NVIDIA:-}" = "1" ]; then nvidia=1; fi ;;
   esac
   SIZE_GB=""
   if [ "$OS_NAME" = "Darwin" ]; then
     SIZE_GB="$(osascript -l JavaScript -e "$JXA_SIZE" "$COMP" "$PLAT" "${MODEL_OPT:-large-v3}" "$SKIP" "$git" \
-      2>/dev/null </dev/null)"
+      "$nvidia" 2>/dev/null </dev/null)"
   elif [ -n "$JSON_PY" ]; then
-    SIZE_GB="$("$JSON_PY" -I -c "$PY_SIZE" "$COMP" "$PLAT" "${MODEL_OPT:-large-v3}" "$SKIP" "$git" 2>/dev/null \
-      </dev/null | tr -d '\r')"
+    SIZE_GB="$("$JSON_PY" -I -c "$PY_SIZE" "$COMP" "$PLAT" "${MODEL_OPT:-large-v3}" "$SKIP" "$git" "$nvidia" \
+      2>/dev/null </dev/null | tr -d '\r')"
   fi
-  case "$SIZE_GB" in [0-9]*.[0-9]) ;; *) SIZE_GB="3.5" ;; esac  # (no reader: the usual size)
+  case "$SIZE_GB" in [0-9]*.[0-9]) return 0 ;; esac
+  # no JSON reader: the same rule from the constants alone, in hundredths of a GB (runtime 0.5, ffmpeg 0.1, fonts
+  # 0.01, the model, Git 0.4, CUDA 1.0), rounded up to one decimal
+  case ",$SKIP," in *,runtime,*) ;; *) c=$((c + 50)) ;; esac
+  case ",$SKIP," in *,ffmpeg,*) ;; *) c=$((c + 10)) ;; esac
+  case ",$SKIP," in *,fonts,*) ;; *) c=$((c + 1)) ;; esac
+  case "${MODEL_OPT:-large-v3}" in large-v3-turbo) m=160 ;; medium) m=150 ;; small) m=50 ;; *) m=290 ;; esac
+  case ",$SKIP," in *,model,*) ;; *) c=$((c + m)) ;; esac
+  case ",$SKIP," in *,gitbash,*) ;; *) [ "$git" = 1 ] && c=$((c + 40)) ;; esac
+  case ",$SKIP," in *,gpu,*) ;; *) [ "$nvidia" = 1 ] && c=$((c + 100)) ;; esac
+  c=$(((c + 9) / 10))
+  SIZE_GB="$((c / 10)).$((c % 10))"
+}
+
+read_key() { # seconds -> K; status 0 when a key came. Only from the terminal: stdin when it is one, else /dev/tty
+  K=""
+  if [ -t 0 ]; then
+    IFS= read -r -s -n 1 -t "$1" K
+  else
+    IFS= read -r -s -n 1 -t "$1" K </dev/tty 2>/dev/null
+  fi
 }
 
 countdown() { # -> KEY: customise (C), key (any other key: go on at once) or timeout. "Press C to customise (10)..."
-  # counts down in place for 10 s, reading one key a second from the terminal (stdin when it is one, else /dev/tty;
-  # never the piped script), or the sandbox-only hook WNC_TEST_KEYS (waits WNC_TEST_COUNTDOWN_S seconds in all)
-  local s=10 k
+  # counts down in place for 10 s, reading one key a second from the terminal (read_key), or the sandbox-only hook
+  # WNC_TEST_KEYS (waits WNC_TEST_COUNTDOWN_S seconds in all). Keys typed before the line appeared (the Enter after
+  # the command) are not answers: bash 4+ drains them at once; bash 3.2 (no fractional timeout) spends the first
+  # second draining them.
+  local s=10 n=0
   KEY="timeout"
+  printf '\rPress C to customise (%s)%s / %s ' "$s" "…" "اضغط C للتخصيص"
+  if [ -z "$TEST_KEYS_SET" ]; then
+    if [ "${BASH_VERSINFO[0]:-3}" -ge 4 ]; then
+      while [ "$n" -lt 100 ] && read_key 0.05; do n=$((n + 1)); done
+    else
+      while [ "$n" -lt 100 ] && read_key 1; do n=$((n + 1)); done
+      s=9
+    fi
+  fi
   while [ "$s" -ge 1 ] && [ "$KEY" = "timeout" ]; do
     printf '\rPress C to customise (%s)%s / %s ' "$s" "…" "اضغط C للتخصيص"
     if [ -n "$TEST_KEYS_SET" ]; then
@@ -792,14 +840,9 @@ countdown() { # -> KEY: customise (C), key (any other key: go on at once) or tim
         [cC]*) KEY="customise" ;;
         *) KEY="key" ;;
       esac
-    else
-      k=""
-      if [ -t 0 ]; then
-        if IFS= read -r -s -n 1 -t 1 k; then KEY="key"; else k=""; fi
-      elif IFS= read -r -s -n 1 -t 1 k </dev/tty 2>/dev/null; then
-        KEY="key"
-      fi
-      case "$k" in [cC]) KEY="customise" ;; esac
+    elif read_key 1; then
+      KEY="key"
+      case "$K" in [cC]) KEY="customise" ;; esac
     fi
     s=$((s - 1))
   done
@@ -829,33 +872,77 @@ select_mode() { # -> RUN_MODE: customise (--customise, or C during the countdown
   return 0
 }
 
+guard_norm() { # path -> NORM (norm_path), case folded on macOS too: APFS / HFS+ ignore case (fix round 1)
+  norm_path "$1"
+  if [ "$OS_NAME" = "Darwin" ]; then NORM="$(printf '%s' "$NORM" | tr '[:upper:]' '[:lower:]')"; fi
+}
+
+real_path() { # path -> REAL: every link on the way resolved (cd -P on the part that exists), "" when it cannot be
+  local d="$1" rest="" up r
+  while [ "${d%/}" != "$d" ] && [ "${d%/}" != "" ]; do d="${d%/}"; done
+  while [ -n "$d" ] && [ ! -d "$d" ]; do
+    rest="/${d##*/}$rest"
+    up="${d%/*}"
+    [ "$up" = "$d" ] && break
+    d="$up"
+  done
+  [ -n "$d" ] || d="/"
+  r="$(cd -P "$d" 2>/dev/null && pwd -P)" || { REAL=""; return 0; }
+  case "$OS_NAME" in MINGW*|MSYS*|CYGWIN*) if command -v cygpath >/dev/null 2>&1; then r="$(cygpath -m "$r")"; fi ;; esac
+  REAL="${r%/}$rest"
+}
+
+place_keys() { # path -> KEY1 (as written), KEY2 (links resolved), both from guard_norm
+  guard_norm "$1"; KEY1="$NORM"
+  real_path "$1"
+  if [ -n "$REAL" ]; then guard_norm "$REAL"; KEY2="$NORM"; else KEY2="$KEY1"; fi
+}
+
 resolved_home_problem() { # path -> WHY (empty: fine), the core's base.resolved_home_problem: a RESOLVED engine home
-  # other than ~/.whynot-cut must not be a drive root or mount point, the home folder or Desktop / Documents /
-  # Downloads themselves, the saved clients folder or a folder holding it, or a folder with .whynot-client in it or up
-  # to 3 levels below
-  local p="$1" n d c lp
+  # other than ~/.whynot-cut must not be a link itself, a drive root or mount point, the home folder or Desktop /
+  # Documents / Downloads themselves, the saved clients folder or a folder holding it, a folder with .whynot-client in
+  # it or up to 3 levels below, or one too big to check for that (more than 5000 entries within 3 levels); every
+  # comparison as written and with links resolved, case folded on macOS
+  local p="$1" a b d c lp cnt
   WHY=""
-  norm_path "$p"; n="$NORM"
-  norm_path "$HOME/.whynot-cut"
-  [ "$n" = "$NORM" ] && return 0
-  case "$n" in /|[A-Za-z]:|[A-Za-z]:/) WHY="a drive root or a mount point"; return 0 ;; esac
+  while [ "${p%/}" != "$p" ] && [ "${p%/}" != "" ] && [ "${p%/}" != "${p%%:*}:" ]; do p="${p%/}"; done
+  guard_norm "$p"; a="$NORM"
+  guard_norm "$HOME/.whynot-cut"
+  [ "$a" = "$NORM" ] && return 0
+  case "$a" in /|[A-Za-z]:|[A-Za-z]:/) WHY="a drive root or a mount point"; return 0 ;; esac
+  if [ -L "$p" ]; then
+    WHY="a link or mount point (a junction, symlink or mounted folder); name the real folder instead"; return 0
+  fi
   if is_mount "$p"; then WHY="a drive root or a mount point"; return 0; fi
-  norm_path "$HOME"
-  if [ "$n" = "$NORM" ]; then WHY="your user folder itself"; return 0; fi
+  place_keys "$p"; a="$KEY1" b="$KEY2"
+  case "$b" in /|[A-Za-z]:|[A-Za-z]:/) WHY="a drive root or a mount point"; return 0 ;; esac
+  place_keys "$HOME"
+  if [ "$a" = "$KEY1" ] || [ "$a" = "$KEY2" ] || [ "$b" = "$KEY1" ] || [ "$b" = "$KEY2" ]; then
+    WHY="your user folder itself"; return 0
+  fi
   for d in Desktop Documents Downloads; do
-    norm_path "$HOME/$d"
-    if [ "$n" = "$NORM" ]; then WHY="your $d folder itself"; return 0; fi
+    place_keys "$HOME/$d"
+    if [ "$a" = "$KEY1" ] || [ "$a" = "$KEY2" ] || [ "$b" = "$KEY1" ] || [ "$b" = "$KEY2" ]; then
+      WHY="your $d folder itself"; return 0
+    fi
   done
   while IFS= read -r c; do
     [ -n "$c" ] || continue
-    norm_path "$c"
-    if within "$NORM" "$n"; then WHY="your clients folder $c, or it holds it"; return 0; fi
+    place_keys "$c"
+    if within "$KEY1" "$a" || within "$KEY1" "$b" || within "$KEY2" "$a" || within "$KEY2" "$b"; then
+      WHY="your clients folder $c, or it holds it"; return 0
+    fi
   done <<EOF
 $CLIENT_ROOTS
 EOF
   if [ -d "$p" ]; then
     lp="$(find "$p" -maxdepth 4 -name .whynot-client 2>/dev/null </dev/null | head -n 1)"
-    if [ -n "$lp" ]; then WHY="holding a client folder (${lp%/*} holds .whynot-client)"; fi
+    if [ -n "$lp" ]; then WHY="holding a client folder (${lp%/*} holds .whynot-client)"; return 0; fi
+    cnt="$(find "$p" -mindepth 1 -maxdepth 4 2>/dev/null </dev/null | head -n 5001 | wc -l | tr -d ' ')"
+    if [ "${cnt:-0}" -gt 5000 ]; then
+      WHY="too big to check for client folders (more than 5000 entries within 3 levels); choose an engine folder"
+      WHY="$WHY of its own with -EngineHome / --engine-home"
+    fi
   fi
   return 0
 }
@@ -908,13 +995,6 @@ select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no us
       # the resolved home (default ~/.whynot-cut, or saved in the pointer / settings.json / a variable) is used as it
       # is (fix round 3): a 2.x home (venv, models, ...) is upgraded in place, never moved
       CHOSEN="" PROBLEM="" PLACE_NOTE="" PLACED="$p"
-      resolved_home_problem "$p"
-      if [ -n "$WHY" ]; then  # task 9: a home saved somewhere, in a place it must never be: stop, say the fix
-        printf 'ERROR: WhyNot Cut will not use %s as its engine home (from %s): it is %s. Nothing was downloaded. To fix it, run the installer again with -EngineHome <folder> / --engine-home <folder> (a folder of its own, for example ~/WhyNotCut).\n' \
-          "$p" "$ENGINE_SRC" "$WHY"
-        printf '%s\n' "لن يستخدم WhyNot Cut هذا المجلد لملفات التشغيل. لإصلاح ذلك شغّل المثبّت مرة أخرى مع -EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به."
-        exit 2
-      fi
       if [ -n "$HOME_OVR" ]; then
         norm_path "$H"
         if [ "$n_new" = "$NORM" ] || ! within "$n_new" "$NORM"; then
@@ -1021,6 +1101,18 @@ fi
 DEFAULT_ENGINE="$ENGINE"
 COMP="$ROOT/setup/components.json"
 [ -n "$COMPONENTS" ] && COMP="$(abs_path "$COMPONENTS")"
+if [ -z "$UNINSTALL" ] && [ -z "$ENGINE_OPT" ]; then
+  # task 9: a home saved somewhere (not chosen now) in a place it must never be: stop and say the fix, before the
+  # countdown and any download (fix round 1)
+  client_roots
+  resolved_home_problem "$DEFAULT_ENGINE"
+  if [ -n "$WHY" ]; then
+    printf 'ERROR: WhyNot Cut will not use %s as its engine home (from %s): it is %s. Nothing was downloaded. To fix it, run the installer again with -EngineHome <folder> / --engine-home <folder> (a folder of its own, for example ~/WhyNotCut).\n' \
+      "$DEFAULT_ENGINE" "$ENGINE_SRC" "$WHY"
+    printf '%s\n' "لن يستخدم WhyNot Cut هذا المجلد لملفات التشغيل. لإصلاح ذلك شغّل المثبّت مرة أخرى مع -EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به."
+    exit 2
+  fi
+fi
 select_mode  # D-T1: no question unless the editor customises (--customise, or C during the countdown)
 if [ -n "$UNINSTALL" ]; then  # no question: the folder the engine uses (or --engine-home; the core checks it)
   if [ -n "$ENGINE_OPT" ]; then typed_path "$ENGINE_OPT"; ENGINE="$TYPED"; CHOSEN=1; fi

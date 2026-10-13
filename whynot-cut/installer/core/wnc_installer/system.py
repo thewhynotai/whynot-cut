@@ -54,7 +54,9 @@ MODEL_NOTES = {"large-v3": ("best accuracy (recommended)", "أعلى دقة (م�
                "small": ("smallest, least accurate", "الأصغر، والأقل دقة")}
 # D-T1: "Installing everything WhyNot Cut needs (about N GB)". The bootstraps print it before any download with the
 # same rule (Get-WncInstallGb / install_size); these are the sizes used where components.json has no `bytes`.
-RUNTIME_GB, FFMPEG_GB, FONTS_GB, GIT_GB = 0.5, 0.1, 0.01, 0.4
+# PortableGit counts unpacked (about 0.4 GB; its 60 MB self-extractor is not what lands on disk) and the NVIDIA CUDA
+# libraries (gpu step, Windows with an NVIDIA GPU) about 1 GB.
+RUNTIME_GB, FFMPEG_GB, FONTS_GB, GIT_GB, CUDA_GB = 0.5, 0.1, 0.01, 0.4, 1.0
 CLIENTS_FOLDER = "WhyNot Clients"
 START_URL = "claude://code/new?q=%2Fwhynot-cut%3Astart"
 START_MESSAGE = "Open Claude and type /whynot-cut:start"
@@ -150,11 +152,11 @@ def _sized_gb(items, fallback: float) -> float:
 
 
 def install_size_gb(components: dict, platform: str, *, model: str = DEFAULT_MODEL, skip=(),
-                    git_missing: bool = False) -> float:
+                    git_missing: bool = False, nvidia: bool = False) -> float:
     """D-T1: about how many GB the install brings, rounded UP to one decimal: the runtime (about 0.5), ffmpeg and the
     fonts (their `bytes` in components.json, else 0.1 / 0.01), the Whisper model (components models.<m>.bytes, else
-    MODEL_SIZES: large-v3 2.9) and, on Windows when Git Bash is missing, PortableGit (its `bytes`, else 0.4). A step
-    in `skip` is not counted. The bootstraps compute the same number."""
+    MODEL_SIZES: large-v3 2.9) and, on Windows, PortableGit unpacked (0.4) when Git Bash is missing and the CUDA
+    libraries (1.0) when an NVIDIA GPU is there. A step in `skip` is not counted. The bootstraps compute the same."""
     c = components if isinstance(components, dict) else {}
     total = 0.0
     if "runtime" not in skip:
@@ -170,8 +172,9 @@ def install_size_gb(components: dict, platform: str, *, model: str = DEFAULT_MOD
         b = base.cget(c, f"models.{model}.bytes")
         total += b / GB if type(b) is int else float(MODEL_SIZES.get(model, MODEL_SIZES[DEFAULT_MODEL]).split()[0])
     if platform.startswith("win") and git_missing and "gitbash" not in skip:
-        b = base.cget(c, f"git.assets.{platform}.bytes")
-        total += b / GB if type(b) is int else GIT_GB
+        total += GIT_GB
+    if platform.startswith("win") and nvidia and "gpu" not in skip:
+        total += CUDA_GB
     return math.ceil(round(total * 10, 6)) / 10
 
 
@@ -350,9 +353,13 @@ def _ask_model(ctx: base.Ctx, a: dict) -> None:
 
 def answer_mode(ctx: base.Ctx) -> str:
     """D-T1: "customise" when the editor chose Customise (--customise: the bootstrap's -Customise flag or C during
-    its countdown), else "default" - the no-question install, the same with --yes (state.json answers.mode)."""
+    its countdown) AND the questions could be asked (a keyboard); else "default" - the no-question install, the same
+    with --yes (state.json answers.mode). The questions step's own answer wins once it ran."""
+    if isinstance(ctx.answers, dict) and ctx.answers.get("mode") in ("default", "customise"):
+        return ctx.answers["mode"]
     a = ctx.args
-    return "customise" if getattr(a, "customise", False) and not getattr(a, "yes", False) else "default"
+    wants = getattr(a, "customise", False) and not getattr(a, "yes", False)
+    return "customise" if wants and base.can_ask(a) else "default"
 
 
 def step_questions(ctx: base.Ctx) -> base.StepResult:
@@ -361,7 +368,7 @@ def step_questions(ctx: base.Ctx) -> base.StepResult:
     it). The engine location was asked by the bootstrap before any download."""
     a = resolve_answers(ctx)
     a["mode"] = answer_mode(ctx)
-    if a["mode"] == "customise" and base.can_ask(ctx.args):
+    if a["mode"] == "customise":
         _ask_model(ctx, a)
         while True:
             lang = base.ask(f"Language / اللغة: ar = العربية, en = English [{a['language']}]: ", "").lower()

@@ -177,7 +177,8 @@ def main(argv=None) -> int:
     if not chosen and args.command in ("install", "plan"):
         # task 9: a RESOLVED engine home other than ~/.whynot-cut in a place it must never be (uninstall is not
         # stopped: it deletes only WhyNot Cut's own entries)
-        why = base.resolved_home_problem(paths.whynot, home=paths.home, clients_roots=_client_roots(paths))
+        why = base.resolved_home_problem(paths.whynot, home=paths.home, clients_roots=_client_roots(paths),
+                                         known=base.shell_folders(paths.home, paths.sandbox))
         if why:
             print(f"ERROR: WhyNot Cut will not use {paths.whynot} as its engine home "
                   f"({base.describe_engine_home_source(paths.engine_home_source)}): it is {why}. Nothing was changed. "
