@@ -2,6 +2,7 @@
 name: publish-writer
 description: "Use this agent when a WhyNot Cut podcast episode or its reels need publishing copy: YouTube titles, description, chapters and tags for the episode, captions and hashtags for each reel (Instagram, TikTok, YouTube Shorts) and thumbnail designs, checked with `reel publish-check` and `reel publish-thumbnail`. Typical triggers include stage P of podcast mode, \"اكتب الكابشن والديسكربشن\", \"YouTube description and chapters\", or a reel whose plan was just approved."
 tools: Read, Write, Edit, Grep, Bash
+disallowedTools: mcp__magnific, mcp__plugin_whynot-cut_magnific, mcp__*
 model: opus
 color: green
 skills:
@@ -45,6 +46,9 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
   `approval_required`.
 - Tone follows the reel's recipe `copy` and the client's notes. Clickbait that the video doesn't deliver is wrong.
 - Arabic stays Arabic (the client's dialect from notes.md); English only where the client uses it.
+- Motion reels (`<EP>_<ID>_MO`) get `publish/reels/<EP>_<ID>_MO.json` like any reel. If `01_analysis/motion-plan.json`
+  lists CC-BY assets, put each attribution text in the captions (publish-check requires it). The cover is
+  `04_after_effects/render/<id>_cover.jpg`.
 
 ## Report format (return exactly this; keep it short; point to files, do not paste them)
 ```
@@ -55,8 +59,3 @@ EVIDENCE: <publish-check result, thumbnails viewed>
 ISSUES / NEEDS EDITOR: <bullets, or "none">
 ```
 Never report a stage as done because a command exited 0. Report what the outputs show.
-
-## Motion mode (2.2)
-Motion reels (`<EP>_<ID>_MO`) get `publish/reels/<EP>_<ID>_MO.json` like any reel. If `01_analysis/motion-plan.json`
-lists CC-BY assets, put each attribution text in the captions (publish-check requires it). The cover is
-`04_after_effects/render/<id>_cover.jpg`.

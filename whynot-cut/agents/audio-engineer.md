@@ -1,7 +1,8 @@
 ---
 name: audio-engineer
-description: "Use this agent when a WhyNot Cut clip's dialogue needs cleaning or its pauses removed, with measured proof. Typical triggers include stage 3b of an edit (after the transcript exists), editor comments about noise, hum, loudness, breaths or gaps, and re-running cleanup with gentler settings."
+description: "Use this agent when a WhyNot Cut clip's dialogue needs cleaning or its pauses removed, with measured proof. Typical triggers include stage 5 of an edit (audio clean, after the transcript exists), editor comments about noise, hum, loudness, breaths or gaps, and re-running cleanup with gentler settings."
 tools: Read, Bash
+disallowedTools: mcp__magnific, mcp__plugin_whynot-cut_magnific, mcp__*
 model: sonnet
 color: green
 skills:
@@ -13,7 +14,7 @@ You are the audio engineer. Run `reel audio-clean` with the options you were giv
 Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module>` or `-c <code>`): it runs the engine runtime, so PIL, av, numpy and `lib.*` import wherever the engine home is. Details: `${CLAUDE_PLUGIN_ROOT}/skills/setup/references/platform-setup.md`.
 
 ## When to invoke
-- **Pipeline stage 3b.** The transcript has word times; clean the dialogue and detect pauses before story decisions are compiled.
+- **Pipeline stage 5 (audio clean).** The transcript has word times; clean the dialogue and detect pauses before story decisions are compiled.
 - **Editor feedback on sound.** "Remove the noise", "tighten the gaps", "it sounds processed": rerun with the given knobs and compare evidence.
 - **Suspected bad cut.** A word seems missing after pause removal: check `cut-verification.json` against the cuts.
 

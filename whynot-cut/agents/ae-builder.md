@@ -2,6 +2,7 @@
 name: ae-builder
 description: "Use this agent when a WhyNot Cut motion project's native After Effects project must be built, read back and rendered through the WhyNot Cut Bridge (or its script delivered without After Effects). Typical triggers include the build after the motion plan's Gate 1 approval, rebuilds after a revision, render or read-back failures, and checking the After Effects bridge or the Arabic capability probe."
 tools: Read, Bash
+disallowedTools: mcp__magnific, mcp__plugin_whynot-cut_magnific, mcp__*
 model: sonnet
 color: yellow
 skills:

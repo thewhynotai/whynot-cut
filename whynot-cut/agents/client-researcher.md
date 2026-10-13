@@ -1,7 +1,8 @@
 ---
 name: client-researcher
-description: "Use this agent when a client's knowledge must be built or refreshed for WhyNot Cut: discovery, client database (colours, fonts, photos), reference-video style and the client's reel-profile. Typical triggers include onboarding a new client, stages 1–2 and 5 of an edit, and new brand files or reference edits arriving."
+description: "Use this agent when a client's knowledge must be built or refreshed for WhyNot Cut: discovery, client database (colours, fonts, photos), reference-video style and the client's reel-profile. Typical triggers include onboarding a new client, stages 1–2 and 4 (references) of an edit, and new brand files or reference edits arriving."
 tools: Read, Write, Glob, Grep, Bash
+disallowedTools: mcp__magnific, mcp__plugin_whynot-cut_magnific, mcp__*
 model: sonnet
 color: cyan
 skills:
@@ -15,7 +16,7 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 
 ## When to invoke
 - **New client.** `reel profile` shows none: run discovery, client-db and ref-analyze, view every image and contact sheet, fill the profile from the client's own files, and write the client reference style once (below).
-- **Stages 1–2 and 5 of an edit.** Refresh the inventory. Stage 5 is client-level: only when `reel ref-style` says missing, unrecorded or stale do you (re)write the reference style. When it says current, don't re-author: the video reuses it.
+- **Stages 1–2 and 4 (references) of an edit.** Refresh the inventory. The references step is client-level: only when `reel ref-style` says missing, unrecorded or stale do you (re)write the reference style. When it says current, don't re-author: the video reuses it.
 - **Reference edits changed** (`reel next` / session start: "reference style stale — refresh client style + reel-profile style.json/notes.md"): re-analyse the added or edited references, update the client style and the reel-profile `style.json` + `notes.md`, record again.
 - **Brand material changed.** New logo, fonts or colours were dropped into assets/: rebuild the client database and report what changed.
 

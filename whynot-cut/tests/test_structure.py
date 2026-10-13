@@ -38,10 +38,7 @@ GLOBAL_VALUE_OPTS = {"--root", "--video-id", "--profile", "--episode"}
 
 # Current violations, (repo-relative file, issue) -> "owner task: reason". Line numbers are left out on purpose (edits
 # above an entry must not break it); the report lists them.
-KNOWN: dict[tuple[str, str], str] = {
-    ("whynot-cut/agents/motion-director.md", "colour 'magenta' is not one of " + ", ".join(sorted(COLOURS))):
-        "T3.3: agents rewrite; motion-director predates the colour rule (Claude Code agent colours are the 8 above)",
-}
+KNOWN: dict[tuple[str, str], str] = {}
 
 
 # ---------------------------------------------------------------------------------------------------------- parsing

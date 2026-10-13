@@ -1,0 +1,4 @@
+{
+  "note": "Client overrides of config/defaults/graphics-templates.json (deep-merged, key by key): add only what this client changes, e.g. {\"templates\": {\"hook_title\": {\"bar_style\": \"box\"}}}. Measure positions and colour roles from the client's reference reels; never guess.",
+  "templates": {}
+}
