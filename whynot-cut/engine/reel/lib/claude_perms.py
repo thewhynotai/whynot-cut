@@ -7,7 +7,7 @@ Why every client folder: Claude Code reads a project's `.claude/settings.json` O
 (no parent-folder fallback, docs "Claude Code discovers..."). The editor launches Claude in a client folder, so a rule
 that lives only in the clients folder would silently do nothing there; it applies when Claude is started in the clients
 folder itself. So the command writes the same merge into the clients folder and into each existing client folder (a
-`.whynot-client` marker, or the assets/ + data/ layout); `--client <dir>` targets one client folder only. New clients
+`.whynot-client` marker, or assets/ + data/ with WhyNot Cut output in it: output/client_database or output/projects); `--client <dir>` targets one client folder only. New clients
 inherit it: `reel client-init` / `reel scaffold` add it to the new folder when the clients folder already holds the rules
 (the editor opted in: a permission they declined is never added behind their back).
 
@@ -102,14 +102,24 @@ def check_client_folder(p: Path) -> Path:
 
 
 def client_dirs(root: Path) -> list[Path]:
-    """The existing client folders directly under the clients folder: a `.whynot-client` marker or the assets/ + data/
-    layout (lib.common.client_folders' rule plus the marker)."""
+    """The existing client folders directly under the clients folder, by a POSITIVE sign only (client_marker's rule):
+    a `.whynot-client` marker, or the assets/ + data/ layout together with WhyNot Cut output already in it
+    (`output/client_database` or `output/projects`). A bare assets/ + data/ layout is not enough: a Hugo site and many
+    web/ML repos have it, and this command must not write `.claude/` into them (`--client <dir>` still names one)."""
     from .client_marker import MARKER, has_layout
     try:
         kids = sorted(e for e in Path(root).iterdir() if e.is_dir())
     except OSError:
         return []
-    return [k for k in kids if has_layout(k) or (k / MARKER).is_file()]
+
+    def positive(k: Path) -> bool:
+        try:
+            if (k / MARKER).is_file():
+                return True
+            return has_layout(k) and any((k / "output" / sub).is_dir() for sub in ("client_database", "projects"))
+        except OSError:
+            return False
+    return [k for k in kids if positive(k)]
 
 
 def read_settings(path: Path):
@@ -160,6 +170,8 @@ def apply_file(path: Path) -> dict:
     done (the file is left as it was and no backup is left behind)."""
     from .common import write_json
     path = Path(path)
+    if holds_rules(path):                 # a no-op run creates neither `.claude/` nor the lock file
+        return {"file": str(path), "added": [], "backup": None, "changed": False}
     with locked(path):
         doc, existed = read_settings(path)
         added = merge_allow(doc, where=str(path))
@@ -243,6 +255,11 @@ def allow_reel(clients_root: Path | None, configured: Path | None = None, client
                           "error": g.error, "how": g.how})
             if getattr(g, "blocked", False):
                 blocked = g.error
+        except OSError as e:              # settings.json is a folder, an ACL / antivirus lock, ...: this file only
+            files.append({"ok": False, "file": str(path), "added": [], "backup": None, "changed": False,
+                          "error": f"cannot read or change {path}: {e.strerror or e} (nothing was changed)",
+                          "how": "Check that settings.json is a normal file this user may read and write (not a folder, "
+                                 "not locked by another program), then run this again."})
     first = files[0]
     doc = {"ok": all(f["ok"] for f in files), "file": first["file"], "added": first["added"], "backup": first["backup"],
            "changed": any(f["changed"] for f in files), "files": files}

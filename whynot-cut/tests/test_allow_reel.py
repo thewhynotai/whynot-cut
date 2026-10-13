@@ -46,6 +46,7 @@ class AllowReel(unittest.TestCase):
         self.client = self.root / "Dr A"
         (self.client / "assets").mkdir(parents=True)
         (self.client / "data").mkdir()
+        (self.client / ".whynot-client").write_text("{}", encoding="utf-8")   # the positive client sign
         self.file = self.root / ".claude" / "settings.json"
 
     def write(self, text, bom=False):
@@ -301,6 +302,152 @@ with locked(f):
         self.assertEqual(self.load()["model"], "opus")
         self.assertEqual(len(allow), len(set(allow)))
 
+    # ---- fix round 2 (T3.9 re-review) -----------------------------------------------------------------------
+    def _client(self, d, marker=True):
+        (d / "assets").mkdir(parents=True)
+        (d / "data").mkdir()
+        if marker:
+            (d / ".whynot-client").write_text("{}", encoding="utf-8")
+        return d
+
+    def test_r2_a_settings_json_that_is_a_folder_stops_only_that_client(self):
+        """A raw OSError from one file (settings.json is a directory) is that client's row, not a crashed run."""
+        b = self._client(self.root / "Dr B")
+        c = self._client(self.root / "Dr C")
+        (b / ".claude" / "settings.json").mkdir(parents=True)                 # settings.json is a directory
+        code, doc, err = run("--clients-root", str(self.root))
+        self.assertEqual(code, 1, (doc, err))
+        self.assertNotIn("Traceback", err)
+        rows = {f["file"]: f for f in doc["files"]}
+        bad = rows[str(b / ".claude" / "settings.json")]
+        self.assertIs(bad["ok"], False)
+        self.assertTrue(bad["error"] and bad["how"])
+        self.assertIs(doc["ok"], False)
+        self.assertNotIn("blocked", doc)                                      # not a busy lock: exit 1, not 2
+        for ok in (self.file, self.client / ".claude" / "settings.json", c / ".claude" / "settings.json"):
+            self.assertIs(rows[str(ok)]["ok"], True, ok)
+            self.assertEqual(json.loads(ok.read_text(encoding="utf-8")), {"permissions": {"allow": RULES}})
+
+    def test_r2_a_permission_error_on_one_file_does_not_stop_the_others(self):
+        b = self._client(self.root / "Dr B")
+        real = claude_perms.apply_file
+        target = str(self.client / ".claude" / "settings.json")
+
+        def flaky(path):
+            if str(path) == target:
+                raise PermissionError(13, "Access is denied")
+            return real(path)
+        with mock.patch.object(claude_perms, "apply_file", side_effect=flaky):
+            doc = claude_perms.allow_reel(self.root, self.root)
+        self.assertIs(doc["ok"], False)
+        rows = {f["file"]: f for f in doc["files"]}
+        self.assertIs(rows[target]["ok"], False)
+        self.assertIn("Access is denied", rows[target]["error"])
+        self.assertTrue(rows[target]["how"])
+        self.assertIs(rows[str(self.file)]["ok"], True)
+        self.assertIs(rows[str(b / ".claude" / "settings.json")]["ok"], True)  # the client after the bad one ran
+        self.assertEqual(doc["where"], target)
+        self.assertIn("Access is denied", doc["error"])
+        # the same through the read: read_json raising PermissionError for the one file
+        import lib.common as C
+        real_read = C.read_json
+
+        def deny(path, *a, **k):
+            if str(path) == target:
+                raise PermissionError(13, "Access is denied")
+            return real_read(path, *a, **k)
+        with mock.patch.object(C, "read_json", side_effect=deny):
+            doc = claude_perms.allow_reel(self.root, self.root)
+        self.assertEqual([f["ok"] for f in doc["files"] if f["file"] == target], [False])
+        self.assertIs([f for f in doc["files"] if f["file"] == str(b / ".claude" / "settings.json")][0]["ok"], True)
+
+    def test_r2_only_positive_client_folders_get_the_rule(self):
+        """A Hugo site has assets/ + data/ too: the bare layout is not a client. Marker, or layout + WhyNot Cut output is."""
+        hugo = self._client(self.root / "my-hugo-site", marker=False)
+        (hugo / "config.toml").write_text('baseURL = "/"\n', encoding="utf-8")
+        onboarded = self._client(self.root / "Onboarded", marker=False)
+        (onboarded / "output" / "client_database").mkdir(parents=True)
+        has_projects = self._client(self.root / "HasProjects", marker=False)
+        (has_projects / "output" / "projects").mkdir(parents=True)
+        out_only = self.root / "OutputOnly"                                  # output/ alone: no layout, no marker
+        (out_only / "output" / "projects").mkdir(parents=True)
+        self.assertEqual(claude_perms.client_dirs(self.root), sorted([self.client, onboarded, has_projects]))
+        code, doc, _ = run("--clients-root", str(self.root), "--json")
+        self.assertEqual(code, 0, doc)
+        for d in (self.client, onboarded, has_projects):
+            self.assertTrue((d / ".claude" / "settings.json").is_file(), d)
+        for d in (hugo, out_only):
+            self.assertFalse((d / ".claude").exists(), d)
+        code, doc, _ = run("--client", str(hugo))                            # --client: the editor named the folder
+        self.assertEqual(code, 0, doc)
+
+    def test_r2_a_busy_lock_exits_2_and_the_other_clients_are_still_done(self):
+        """The clients folder's settings.json is locked by another process for longer than the wait: that file is
+        listed ok:false with `blocked`, exit 2 (a refusal: run again); the client folder is still written."""
+        ready = Path(self._t.name) / "ready"
+        done = Path(self._t.name) / "done"
+        holder = Path(self._t.name) / "holder.py"
+        holder.write_text(f"""
+import sys, time
+sys.path.insert(0, {str(SK / "engine" / "reel")!r})
+from pathlib import Path
+from lib.file_lock import locked
+with locked(Path({str(self.file)!r})):
+    Path({str(ready)!r}).write_text("x")
+    t0 = time.time()
+    while not Path({str(done)!r}).exists() and time.time() - t0 < 60:
+        time.sleep(0.05)
+""", encoding="utf-8")
+        runner = Path(self._t.name) / "runner.py"
+        runner.write_text(f"""
+import sys, runpy
+sys.path.insert(0, {str(SK / "engine" / "reel")!r})
+from lib import file_lock
+file_lock.WAIT_S = 0.4
+sys.argv = ["reel", "settings", "--allow-reel", "--clients-root", {str(self.root)!r}, "--json"]
+runpy.run_path({str(CLI)!r}, run_name="__main__")
+""", encoding="utf-8")
+        from test_plugin import isolated_env
+        p = subprocess.Popen([sys.executable, "-B", str(holder)], env=isolated_env(), stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True)
+        try:
+            t0 = time.time()
+            while not ready.exists() and time.time() - t0 < 30 and p.poll() is None:
+                time.sleep(0.05)
+            if not ready.exists():
+                self.fail(p.communicate())
+            r = subprocess.run([sys.executable, "-B", str(runner)], capture_output=True, text=True, encoding="utf-8",
+                               stdin=subprocess.DEVNULL, env=isolated_env(), timeout=120)
+        finally:
+            done.write_text("x")
+            p.communicate(timeout=60)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        doc = json.loads(r.stdout)
+        self.assertIs(doc["ok"], False)
+        self.assertTrue(doc["blocked"])
+        rows = {f["file"]: f for f in doc["files"]}
+        self.assertIs(rows[str(self.file)]["ok"], False)
+        self.assertIs(rows[str(self.client / ".claude" / "settings.json")]["ok"], True)
+        self.assertEqual(json.loads((self.client / ".claude" / "settings.json").read_text(encoding="utf-8")),
+                         {"permissions": {"allow": RULES}})
+
+    def test_r2_the_lock_sits_inside_claude_and_a_no_op_run_leaves_none_behind(self):
+        run("--clients-root", str(self.root))
+        for f in (self.file, self.client / ".claude" / "settings.json"):       # next to settings.json, inside .claude/
+            self.assertEqual(sorted(x.name for x in f.parent.iterdir() if x.name.endswith(".lock")),
+                             ["settings.json.lock"])
+        other = Path(self._t.name) / "Clients2"
+        c2 = self._client(other / "C")
+        allowed = json.dumps({"permissions": {"allow": RULES}})
+        for d in (other, c2):
+            (d / ".claude").mkdir()
+            (d / ".claude" / "settings.json").write_text(allowed, encoding="utf-8")
+        code, doc, _ = run("--clients-root", str(other))
+        self.assertEqual(code, 0, doc)
+        self.assertFalse(doc["changed"])
+        for d in (other, c2):
+            self.assertEqual(list((d / ".claude").glob("*.lock")), [])
+
     def test_read_only_file_is_refused_with_the_right_hint_and_no_backup_pile_up(self):
         self.write('{"model": "opus"}')
         raw = self.file.read_bytes()
@@ -347,6 +494,7 @@ with locked(f):
         client = root / "د أحمد"
         (client / "assets").mkdir(parents=True)
         (client / "data").mkdir()
+        (client / ".whynot-client").write_text("{}", encoding="utf-8")
         code, doc, err = run("--clients-root", str(root), "--json")
         self.assertEqual(code, 0, (doc, err))
         f = client / ".claude" / "settings.json"
