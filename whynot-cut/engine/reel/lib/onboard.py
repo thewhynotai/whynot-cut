@@ -359,7 +359,10 @@ def scaffold(root: Path, name: str | None = None) -> dict:
         write_text(guide, start_here(name))
     from .client_marker import MARKER, write_marker
     write_marker(root)                    # the guard and the session hook recognise the folder by it
+    from .claude_perms import inherit_for_new_client
+    perms = inherit_for_new_client(root)  # T3.9: the clients folder's `reel *` rules, when the editor accepted them
     return {"status": "CREATED", "root": str(root), "folders": made, "guide": str(guide), "marker": str(root / MARKER),
+            **({"allow_reel": perms} if perms else {}),
             "next": "Add the files (see START_HERE.md), then run `reel inbox --root \"<this folder>\"`."}
 
 

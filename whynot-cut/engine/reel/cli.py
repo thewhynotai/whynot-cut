@@ -1212,6 +1212,12 @@ def cmd_settings(a):
             from lib.errors import Guidance
             raise Guidance("--allow-reel and --init cannot be combined", "Run them as two separate commands.")
         from lib.common import clients_root
+        if a.client:                       # one client folder only (Claude Code reads settings from the launch folder)
+            if a.clients_root:
+                from lib.errors import Guidance
+                raise Guidance("--client and --clients-root cannot be combined", "Pass one of them.")
+            out(claude_perms.allow_reel(None, clients_root(), client=Path(native_path(a.client))))
+            return
         base = Path(native_path(a.clients_root)).expanduser() if a.clients_root else clients_root()
         if base is None:
             from lib.errors import Guidance
@@ -1283,7 +1289,10 @@ def cmd_client_init(a):
         write_marker(p)                   # the guard and the session hook recognise the client folder by it
     except ValueError as e:
         print(f"note: {e}", file=sys.stderr)
+    from lib.claude_perms import inherit_for_new_client
+    perms = inherit_for_new_client(p)     # T3.9: the clients folder's `reel *` rules, when the editor accepted them
     out({"profile_dir": str(dst), "id": a.id, "from": src.name, "files": written, "marker": str(p / MARKER),
+         **({"allow_reel": perms} if perms else {}),
          "next": "Fill brand.json / transcription.json / glossary / notes.md from the client's own documents (never invent)."})
 
 
@@ -1510,12 +1519,20 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--force", action="store_true")
             sp.add_argument("--allow-reel", action="store_true",
                             help="let `reel` run without a prompt: merge Bash(reel *) and PowerShell(reel *) into "
-                                 "<clients folder>/.claude/settings.json (other keys kept, idempotent, a timestamped "
-                                 "backup before a change, never asks). Prints {ok, file, added, backup, changed}; "
-                                 "exit 1 with guidance for a file that is not valid JSON or a folder that is not a "
-                                 "clients folder. The installer runs: reel settings --allow-reel --clients-root <dir> --json")
+                                 ".claude/settings.json of the clients folder AND of every client folder under it (Claude "
+                                 "Code reads a project's settings only from the folder it was launched in, and the editor "
+                                 "launches it in a client folder). Other keys kept, idempotent, a timestamped backup "
+                                 "before a change, never asks. Prints {ok, file, added, backup, changed, files: [{ok, "
+                                 "file, added, backup, changed}]} (file/added/backup = the clients folder, or the one "
+                                 "--client; changed = any file changed; files = every file written or checked); exit 1 "
+                                 "with guidance for a file that is not valid JSON or read-only, or a folder that is not "
+                                 "a clients folder. New clients (reel scaffold / client-init) inherit the rules when the "
+                                 "clients folder already has them. The installer runs: reel settings --allow-reel "
+                                 "--clients-root <dir> --json")
             sp.add_argument("--clients-root", metavar="DIR", help="with --allow-reel: the folder that holds the client "
                             "folders (default: the configured clients folder)")
+            sp.add_argument("--client", metavar="DIR", help="with --allow-reel: only this client folder (not the clients "
+                            "folder, not the other clients)")
             sp.add_argument("--json", action="store_true", help="accepted for scripts; the output is always one JSON document")
         if name == "lock":
             g = sp.add_mutually_exclusive_group()
