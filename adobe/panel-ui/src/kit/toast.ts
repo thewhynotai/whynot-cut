@@ -1,9 +1,12 @@
 // Toasts: the "status line + one fix button" pattern (Addendum C1.4, ecosystem §3.4). A status message with its colour
 // AND icon, one plain sentence, and at most ONE fix button: Start engine, Try again or Copy diagnostics. Never a
-// command: commands live only in the log drawer and the Copy diagnostics payload. An error always says what to do: its
-// one button is the fix, or Copy diagnostics when there is no other fix (Addendum B4.4; the log drawer foot carries Copy
-// diagnostics on every screen). A toast never adds a primary button (one primary per screen).
+// command: commands live only in the log drawer and the Copy diagnostics payload, and a text that holds one anyway is
+// neutralised (src/commands.ts: the command span is dropped, the rest of the sentence stays). An error always says what
+// to do: its one button is the fix, or Copy diagnostics when there is no other fix (Addendum B4.4), and then the toast
+// says what to do with the copy. (The log drawer has its own Copy diagnostics button, but only while it is open.) A
+// toast never adds a primary button (one primary per screen).
 import type { Strings } from "../i18n.ts";
+import { neutralise } from "../commands.ts";
 import { button, buttonRow } from "./button.ts";
 import { esc, trusted, withCommands } from "./html.ts";
 import type { Act, Html } from "./html.ts";
@@ -43,7 +46,8 @@ export function toast(o: ToastOpts): Html {
   return trusted(
     `<div class="kit-toast kit-toast-${kind}" role="${alert ? "alert" : "status"}" aria-live="${alert ? "assertive" : "polite"}">` +
       `<span class="kit-toast-icon">${statusIcon(kind, o.t)}</span>` +
-      `<div class="kit-toast-body"><div class="kit-toast-text">${withCommands(o.text)}</div>` +
+      `<div class="kit-toast-body"><div class="kit-toast-text">${withCommands(neutralise(o.text) ?? o.t["notice.failed"])}</div>` +
+      (fix?.action === "copy-diagnostics" ? `<div class="kit-toast-text">${esc(o.t["notice.send_diagnostics"])}</div>` : "") +
       (fix ? buttonRow([button({ ...fix, variant: "secondary" })]) : "") +
       `</div>${close}</div>`,
   );

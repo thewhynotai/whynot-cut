@@ -130,6 +130,8 @@ class FakeDaemon {
   hostDetail: string | undefined = "Premiere Pro 26.5.2";
   sockets: FakeSocket[] = [];
   invalid: string[] = [];
+  /** the error text of an intent reply (an older serve core said "not implemented"; serve/app.py NOT_YET now) */
+  notYet = NOT_YET;
   /** welcome.update (C2.3); undefined = an older daemon that sends none */
   update: unknown = undefined;
   onCommand: (s: FakeSocket, m: Msg) => void = (s, m) => {
@@ -172,7 +174,7 @@ class FakeDaemon {
       case "approve":
       case "request_changes":
       case "rebuild":
-        s.deliver({ type: "reply", id: m["id"], intent: m.type, ok: false, error: NOT_YET, how: NOT_YET_HOW });
+        s.deliver({ type: "reply", id: m["id"], intent: m.type, ok: false, error: this.notYet, how: NOT_YET_HOW });
         return;
       case "command":
         this.onCommand(s, m);
@@ -374,6 +376,7 @@ test("intents: approve / request_changes / rebuild send their messages and resol
     assert.match(res.error!, /not available from the panel/i);
     assert.match(res.error!, /yet/);
     assert.equal(res.how, NOT_YET_HOW);
+    assert.equal((res as Result & { code?: string }).code, "NOT_YET", "the same answer every time: the panel offers no Try again");
   }
   assert.deepEqual(r.daemon.invalid, []);
 });
@@ -871,4 +874,32 @@ test("C2.4 rebuild: without a project_path the message leaves it out (valid); wi
   assert.deepEqual({ ...sentOf(s, "rebuild")[1]!, id: "x" }, { type: "rebuild", id: "x", item: "C0239", project_path: "D:/عميل/C0239.prproj", replace_edited: true });
   assert.deepEqual(r.daemon.invalid, []);
   r.src.stop();
+});
+
+// ---------------------------------------------------------------------------------- C2.2 review round 1
+
+test("C2.2 r1: the serve core's own NOT_YET text ('... is not available from the panel yet.') is kept and carries code NOT_YET", async () => {
+  const r = await connected();
+  r.daemon.notYet = "Approving is not available from the panel yet.";
+  const res = await r.src.approve({ item: "C0239", editor_name: "Yunus", fingerprint: "sha256:abc" });
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "Approving is not available from the panel yet.");
+  assert.equal((res as Result & { code?: string }).code, "NOT_YET");
+  r.daemon.notYet = "The project file is locked.";
+  const other = await r.src.approve({ item: "C0239", editor_name: "Yunus", fingerprint: "sha256:abc" });
+  assert.equal((other as Result & { code?: string }).code, undefined, "any other refusal can be tried again");
+});
+
+test("C2.2 r1: no how or error the editor reads names engine.json or a raw action id; host-op hows say 'press Try again'", () => {
+  const src = readFileSync(new URL("../src/daemon-source.ts", import.meta.url), "utf8");
+  const hows = [...src.matchAll(/\bhow: "([^"]*)"/g)].map((m) => m[1]!);
+  hows.push(...[...src.matchAll(/^const (?:START|RESTART)_HOW = "([^"]*)"/gm)].map((m) => m[1]!));
+  const byCode = src.slice(src.indexOf("const HOW_BY_CODE"));
+  hows.push(...[...byCode.matchAll(/^ {2}[a-z_]+: "([^"]*)",$/gm)].map((m) => m[1]!));
+  assert.ok(hows.length >= 20, `found ${hows.length} hows`);
+  for (const h of hows) assert.doesNotMatch(h, /engine\.json|\$\{/, h);
+  assert.doesNotMatch(src, /error: `[^`]*\$\{action\}[^`]*`/, "a raw action id in an error");
+  for (const code of ["no_route", "timeout", "rate"]) {
+    assert.match(new RegExp(`^ {2}${code}: "([^"]*)",$`, "m").exec(src)![1]!, /press Try again/i, code);
+  }
 });

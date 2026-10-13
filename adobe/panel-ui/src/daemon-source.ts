@@ -13,7 +13,7 @@
 // PanelState, a diagnosis or an error text (every text the transport hands back is scrubbed of it).
 import { ACTION_NAMES, PROTOCOL } from "./contract.ts";
 import type { ActionName, RequestEnvelope } from "./contract.ts";
-import { linkFixCommand } from "./diagnostics.ts";
+import { linkFixCommand, NOT_YET_CODE, scrubToken } from "./diagnostics.ts";
 import { PANEL_UPDATE_STATES, SESSION_ERROR_CODES, SESSION_PROTOCOL } from "./session.ts";
 import type {
   ApproveMessage, CancelMessage, CommandMessage, HelloMessage, PanelUpdate, RebuildMessage, ReplyIntent,
@@ -469,14 +469,14 @@ export class DaemonSource implements PanelDataSource {
       return Promise.resolve({
         ok: false,
         action,
-        error: `The ${action} request is too large for the engine (over 8 MB).`,
+        error: "This request is too large for the engine (over 8 MB).",
         how: "Send fewer items at once.",
       });
     }
     return new Promise<Result>((resolve) => {
       const step = ACTION_STEP[action] ?? null;
       const stop = this.t.setTimer(() => {
-        this.settleCommand(id, { ok: false, action, error: `The engine did not answer the ${action} request in time.`, how: "Check that Premiere and the WhyNot Cut panel are open, then try again." });
+        this.settleCommand(id, { ok: false, action, error: "The engine did not answer this request in time.", how: "Check that Premiere and the WhyNot Cut panel are open, then press Try again." });
       }, seconds * 1000 + RESULT_GRACE_MS);
       this.commands.set(id, { action, step, stop, resolve });
       if (step) this.setStep(step, { state: "running", request_id: id, progress: null, elapsed_s: null });
@@ -585,7 +585,7 @@ export class DaemonSource implements PanelDataSource {
     }
     // UXP may report the daemon's 1008 as 1006: the error{auth} that came before it says the same
     if (code === 1008 || err?.code === "auth") {
-      return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel reads engine.json again on the next try; if this repeats, start the engine again from your Claude session." });
+      return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel tries again by itself; if this repeats, start the engine again from your Claude session." });
     }
     if (code === 1009) {
       return this.retry({ code: "too_large", text: "The engine closed the connection: a message was larger than it accepts.", how: "Send fewer items at once; the panel reconnects by itself." });
@@ -623,7 +623,7 @@ export class DaemonSource implements PanelDataSource {
     }
     if (status === 503) return this.retry({ code: "refused_busy", text: "The engine has too many connections open.", how: "Close other WhyNot Cut panels or restart the engine." });
     if (status === 401) {
-      return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel reads engine.json again on the next try; if this repeats, start the engine again from your Claude session." });
+      return this.retry({ code: "auth", text: "The engine refused the panel's key (engine.json is out of date or from another engine).", how: "The panel tries again by itself; if this repeats, start the engine again from your Claude session." });
     }
     return this.retry({ code: "refused", text: `The engine is running but refused the panel's session (HTTP ${status}).`, how: "Start the engine again from your Claude session; if this repeats, send the engine log." });
   }
@@ -699,9 +699,14 @@ export class DaemonSource implements PanelDataSource {
     const p = this.intents.get(m.id);
     if (!p || p.intent !== m.intent) return;
     if (m.ok) return this.settleIntent(m.id, { ok: true, action: m.intent, ...(m.readback ? { readback: m.readback } : {}), ...(m.how ? { how: m.how } : {}) });
-    const notYet = /not implemented/i.test(m.error ?? "");
-    const error = notYet ? `${INTENT_LABEL[m.intent]} is not available from the panel in this engine yet.` : (m.error ?? "The engine refused this.");
-    this.settleIntent(m.id, { ok: false, action: m.intent, error, ...(m.how ? { how: m.how } : {}), ...(m.readback ? { readback: m.readback } : {}) });
+    // the engine has no panel side for this intent yet (serve/app.py NOT_YET): the same answer every time, so the
+    // panel offers no Try again (code NOT_YET, read by mount)
+    const notImplemented = /not implemented/i.test(m.error ?? "");
+    const notYet = notImplemented || /not available from the panel/i.test(m.error ?? "");
+    const error = notImplemented ? `${INTENT_LABEL[m.intent]} is not available from the panel in this engine yet.` : (m.error ?? "The engine refused this.");
+    const r: Result & { code?: string } = { ok: false, action: m.intent, error, ...(m.how ? { how: m.how } : {}), ...(m.readback ? { readback: m.readback } : {}) };
+    if (notYet) r.code = NOT_YET_CODE;
+    this.settleIntent(m.id, r);
   }
 
   private onResult(m: Extract<Incoming, { type: "result" }>): void {
@@ -760,7 +765,7 @@ export class DaemonSource implements PanelDataSource {
     const msg = { type: intent, id, ...body } as ApproveMessage | RequestChangesMessage | RebuildMessage;
     return new Promise<Result>((resolve) => {
       const stop = this.t.setTimer(() => {
-        this.settleIntent(id, { ok: false, action: intent, error: "The engine did not answer in time.", how: "Check the engine is running, then try again." });
+        this.settleIntent(id, { ok: false, action: intent, error: "The engine did not answer in time.", how: "Check the engine is running, then press Try again." });
       }, this.intentTimeoutMs);
       this.intents.set(id, { intent, stop, resolve });
       this.sendText(sock, JSON.stringify(msg));
@@ -790,11 +795,11 @@ export class DaemonSource implements PanelDataSource {
   private failAll(error: string): void {
     for (const id of [...this.commands.keys()]) {
       const action = this.commands.get(id)!.action;
-      this.settleCommand(id, { ok: false, action, error, how: "The panel reconnects by itself; run it again once the engine pill says connected." });
+      this.settleCommand(id, { ok: false, action, error, how: "The panel reconnects by itself; once the engine pill says connected, do it again." });
     }
     for (const id of [...this.intents.keys()]) {
       const intent = this.intents.get(id)!.intent;
-      this.settleIntent(id, { ok: false, action: intent, error, how: "The panel reconnects by itself; try again once the engine pill says connected." });
+      this.settleIntent(id, { ok: false, action: intent, error, how: "The panel reconnects by itself; once the engine pill says connected, do it again." });
     }
     for (const [id, c] of [...this.cancels]) {
       this.cancels.delete(id);
@@ -830,8 +835,7 @@ export class DaemonSource implements PanelDataSource {
 
   /** The token never leaves in a text. */
   private scrub(text: string): string {
-    const tok = this.token;
-    return tok ? text.split(tok).join("[token]") : text;
+    return scrubToken(text, this.token);
   }
 
   private setDiag(d: LinkDiagnosis, log: boolean): void {
@@ -876,10 +880,10 @@ const HOW_BY_CODE: Record<SessionErrorCode, string> = {
   origin: "Reinstall the WhyNot Cut panel.",
   host: "Reinstall the WhyNot Cut panel.",
   too_large: "Send fewer items at once.",
-  rate: "Wait a moment, then try again.",
+  rate: "Wait a moment, then press Try again.",
   schema: "Update the WhyNot Cut panel and engine to the same version.",
   unknown_type: "Update the WhyNot Cut panel and engine to the same version.",
-  no_route: "Open Premiere with the WhyNot Cut panel (or start the bridge), then try again.",
-  timeout: "Try again.",
-  internal: "Try again; if it repeats, restart the engine and send its log.",
+  no_route: "Open Premiere with the WhyNot Cut panel, then press Try again.",
+  timeout: "Press Try again.",
+  internal: "Press Try again; if it repeats, copy the diagnostics and send them to support.",
 };

@@ -7,10 +7,13 @@ import { join } from "node:path";
 import { SAFE_IMG, aspectPct, isSafeImg } from "../src/media.ts";
 import { PANEL_UI } from "./tokens-util.ts";
 
-test("isSafeImg: data:image, file:/// (empty host), plugin: and local paths only; never the network or a UNC share", () => {
+test("isSafeImg: raster data:image (png/jpeg/gif/webp), file:/// (empty host), plugin: and local paths only; never the network or a UNC share", () => {
   for (const ok of [
     "data:image/png;base64,AAAA",
-    "data:image/svg+xml;utf8,%3Csvg%3E",
+    "data:image/jpeg;base64,/9j/4AAQ",
+    "data:image/gif;base64,R0lGOD",
+    "data:image/webp;base64,UklGR",
+    "DATA:IMAGE/PNG;base64,AAAA",
     "file:///C:/x.png",
     "FILE:///C:/x/f.png",
     "file:///Users/ed/frames/a.png",
@@ -20,8 +23,6 @@ test("isSafeImg: data:image, file:/// (empty host), plugin: and local paths only
     "../out/a.png",
     "/Users/ed/a.png",
     "my frames/a b.png",
-    // a data URL names no host: percent-encoded SVG keeps its "%2F" closing tags
-    "data:image/svg+xml;utf8,%3Csvg%3E%3C%2Fsvg%3E",
     "file:///C:/frames/100%25.png",
   ]) {
     assert.ok(isSafeImg(ok), `refused a local thumbnail: ${ok}`);
@@ -43,6 +44,14 @@ test("isSafeImg: data:image, file:/// (empty host), plugin: and local paths only
     "file:C:/x.png",
     "javascript:alert(1)",
     "data:text/html,<b>x</b>",
+    // C2.2 review: raster only. An SVG is markup (it can load other URLs), so never an svg+xml data URL, in any case
+    "data:image/svg+xml;utf8,%3Csvg%3E",
+    "data:image/svg+xml;utf8,%3Csvg%3E%3C%2Fsvg%3E",
+    "data:image/SVG+XML;base64,PHN2Zz4=",
+    "data:image/png+svg,x",
+    "data:image/pngx;base64,AAAA",
+    "data:image/,x",
+    "data:image/x-icon;base64,AAAA",
     "ftp://x/a.png",
     "C:\\x.png",
     " https://evil.example/a.png",

@@ -32,6 +32,18 @@ export function linkFixCommand(code: unknown): string | null {
   return typeof code === "string" && Object.prototype.hasOwnProperty.call(LINK_FIX_COMMAND, code) ? LINK_FIX_COMMAND[code]! : null;
 }
 
+/** A Result code (an extra field on the Result) for an answer that is the same every time it is asked, e.g. an intent the
+ *  engine has no panel side for yet (serve/app.py NOT_YET): the panel offers Copy diagnostics, never Try again. */
+export const NOT_YET_CODE = "NOT_YET";
+
+/** The token scrub for every log line (DaemonSource's and the panel's own): the engine's token, when known, and any
+ *  token-looking run (64 hex digits, the engine.json token's shape) become "[token]", so a text that quotes a token
+ *  never puts it in the log drawer or the Copy diagnostics payload. */
+export function scrubToken(text: string, token?: string | null): string {
+  const known = token ? text.split(token).join("[token]") : text;
+  return known.replace(/(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/gi, "[token]");
+}
+
 /** Only these fields are copied: a whitelist, so a daemon that adds a port, token or URL to its state never leaks it. */
 function pick(from: unknown, keys: readonly string[]): Record<string, unknown> {
   const src = (from && typeof from === "object" ? from : {}) as Record<string, unknown>;

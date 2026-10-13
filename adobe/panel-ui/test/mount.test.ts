@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mount } from "../src/mount.ts";
+import { logEpoch, mount } from "../src/mount.ts";
 import type { MountRoot, PanelElement } from "../src/mount.ts";
 import type { PanelHost } from "../src/host.ts";
-import type { PanelDataSource, PanelState, Result } from "../src/source.ts";
+import type { LogLine, PanelDataSource, PanelState, Result } from "../src/source.ts";
 import { MockSource } from "../src/mock.ts";
 import type { ActionName } from "../src/contract.ts";
 import { AR, EN } from "../src/i18n.ts";
@@ -338,14 +338,14 @@ test("M8: Copy diagnostics carries ui.build (the plugin version and build stamp 
 
 // ---------------------------------------------------------------------------- C2.2: one sentence + one fix button
 
-test("C2.2 Start engine: only a log line that names what will run (the launcher ships later); no throw, no engine call, no notice", async () => {
+test("C2.2 Start engine: a log line (English, in both languages) that names what will run, and the log drawer opens; no throw, no engine call, no notice", async () => {
   const { root, source, handle } = await setup();
   const before = (await source.snapshot()).log.length;
   assert.doesNotThrow(() => root.click({ "data-action": "start-engine" }));
   await tick();
   assert.deepEqual(source.calls, { approve: [], requestChanges: [], run: [], rebuild: [], cancel: [] });
   assert.equal(handle.ui.notice, null);
-  root.click({ "data-action": "toggle-log" });
+  assert.equal(handle.ui.logOpen, true, "the press visibly does something: the log drawer opens");
   const lines = [...root.innerHTML.matchAll(/<li class="log-line[^"]*">([\s\S]*?)<\/li>/g)].map((m) => m[1]!);
   assert.equal(lines.length, before + 1, "one more log line");
   const expected = EN["log.start_engine"].replace("{command}", "reel serve --ensure");
@@ -396,12 +396,16 @@ test("C2.2 Try again after a failed rebuild shows the confirm card again (a rebu
 });
 
 test("C2.2 the fix button follows the problem: engine offline -> Start engine; a host-only failure -> Try again, never Start engine", async () => {
-  const { root, source, state } = await setup();
+  const { root, source, state, handle: h0 } = await setup();
   for (const cb of source.cbs) cb({ ...state, connection: { ...state.connection, engine: "offline" } });
   source.nextResult = { ok: false, error: "The WhyNot Cut engine is not connected." };
   root.click({ "data-action": "open-project" });
   await tick();
-  assert.match(root.innerHTML, /role="status"[\s\S]*?data-action="start-engine"/);
+  assert.equal(h0.ui.notice?.fix, "start-engine");
+  // the offline banner already carries Start engine: the notice does not repeat it (one Start engine on the screen)
+  assert.equal((root.innerHTML.match(/data-action="start-engine"/g) ?? []).length, 1);
+  assert.match(root.innerHTML, /role="alert"[\s\S]*?data-action="start-engine"/);
+  assert.doesNotMatch(/<div class="banner banner-error" role="status"[\s\S]*?data-action="dismiss-notice"/.exec(root.innerHTML)![0], /start-engine/);
   const host: PanelHost = { ...hostRec().host, revealPath: () => { throw new Error("host broke"); } };
   const r2 = new FakeRoot();
   const s2 = new RecSource();
@@ -432,4 +436,149 @@ test("C2.2 Copy diagnostics names the link diagnosis and the command that fixes 
   root.click({ "data-action": "copy-diagnostics" });
   const d = JSON.parse(calls.copy[0]!) as Record<string, unknown>;
   assert.deepEqual(d["link"], { code: "no_engine", fix: "reel serve --ensure" });
+});
+
+// ------------------------------------------------- C2.2 review round 1: Try again belongs to the notice it is on
+
+test("C2.2 r1: a seek during an in-flight rebuild, then Try again on the rebuild's notice, opens the confirm card again (never the seek, never a rebuild)", async () => {
+  const { root, source, calls, handle } = await setup();
+  let finish!: (r: Result) => void;
+  source.rebuild = async (i) => {
+    source.calls.rebuild.push(i);
+    return new Promise<Result>((r) => { finish = r; });
+  };
+  root.click({ "data-action": "rebuild" });
+  root.click({ "data-action": "rebuild-confirm" });
+  await tick();
+  root.click({ "data-action": "seek", "data-t": "3" });
+  await tick();
+  assert.deepEqual(calls.seek, [3]);
+  finish({ ok: false, error: "The engine did not answer in time." });
+  await tick();
+  assert.equal(handle.ui.notice?.fix, "retry");
+  assert.deepEqual(handle.ui.notice?.again, { action: "rebuild-confirm", attrs: {} });
+  root.click({ "data-action": "retry" });
+  await tick();
+  assert.deepEqual(calls.seek, [3], "the seek is not run again");
+  assert.equal(source.calls.rebuild.length, 1, "no rebuild without the confirm");
+  assert.ok(root.innerHTML.includes('data-action="rebuild-confirm"'), "the confirm card is back");
+});
+
+test("C2.2 r1: Try again on a failed Request changes sends the text in the box NOW, and its success follow-up runs (the box empties)", async () => {
+  const { root, source, state, handle } = await setup();
+  root.input("changes", "shorter hook");
+  source.nextResult = { ok: false, error: "The engine did not answer in time." };
+  root.click({ "data-action": "request-changes" });
+  await tick();
+  assert.ok(root.innerHTML.includes('data-action="retry"'));
+  root.input("changes", "shorter hook, and keep the last line");
+  source.nextResult = { ok: true };
+  root.click({ "data-action": "retry" });
+  await tick();
+  assert.deepEqual(source.calls.requestChanges.map((c) => (c as { text: string }).text), ["shorter hook", "shorter hook, and keep the last line"]);
+  assert.equal((source.calls.requestChanges[1] as { editor_name: string }).editor_name, state.editor_name);
+  assert.equal(handle.ui.changeText, "", "the normal success path ran");
+  assert.equal(handle.ui.notice?.kind, "ok");
+});
+
+test("C2.2 r1: Try again on a failed Approve sends the fingerprint on screen now, not the one clicked earlier", async () => {
+  const { root, source, state } = await setup();
+  source.nextResult = { ok: false, error: "The engine did not answer in time." };
+  root.click({ "data-action": "approve", "data-fingerprint": state.approval!.fingerprint });
+  await tick();
+  for (const cb of source.cbs) cb({ ...state, approval: { ...state.approval!, fingerprint: "sha256:new-plan" } });
+  source.nextResult = { ok: true };
+  root.click({ "data-action": "retry" });
+  await tick();
+  assert.deepEqual(source.calls.approve.map((a) => (a as { fingerprint: string }).fingerprint), [state.approval!.fingerprint, "sha256:new-plan"]);
+});
+
+test("C2.2 r1: Try again only runs the notice on screen: after a seek cleared the failed notice, it runs nothing", async () => {
+  const { root, source, calls } = await setup();
+  source.nextResult = { ok: false, error: "Premiere is busy." };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  root.click({ "data-action": "seek", "data-t": "1" });
+  await tick();
+  root.click({ "data-action": "retry" });
+  await tick();
+  assert.deepEqual(calls.seek, [1], "the seek is not run again");
+  assert.equal(source.calls.run.length, 1, "open-project is not run again");
+});
+
+test("C2.2 r1: an answer that is the same every time (NOT_YET: not available from the panel yet) offers Copy diagnostics, never Try again", async () => {
+  for (const r of [
+    { ok: false, action: "approve", error: "Approving is not available from the panel yet.", how: "Do this step in your Claude session for now — it will work from the panel after the next update." },
+    { ok: false, action: "approve", error: "The engine refused this.", code: "NOT_YET" },
+  ] as Result[]) {
+    const { root, source, state, handle } = await setup();
+    source.nextResult = r;
+    root.click({ "data-action": "approve", "data-fingerprint": state.approval!.fingerprint });
+    await tick();
+    assert.equal(handle.ui.notice?.fix, "copy-diagnostics", String(r.error));
+    assert.equal(handle.ui.notice?.again, undefined);
+    assert.ok(!root.innerHTML.includes('data-action="retry"'), String(r.error));
+    assert.ok(root.innerHTML.includes('class="btn-row banner-fix"><button class="btn btn-secondary" data-action="copy-diagnostics"'), String(r.error));
+  }
+});
+
+test("C2.2 r1: a notice keeps the cause and the remedy around a command span; the raw words go to the log, token-scrubbed", async () => {
+  const { root, source } = await setup();
+  const token = "ab12".repeat(16);
+  source.nextResult = { ok: false, error: "Engine refused the key.", how: `Start it with reel serve --ensure --key ${token}, then press Try again.` };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  assert.ok(root.innerHTML.includes("Engine refused the key. Start it, then press Try again."), "the cause and the remedy stay on screen");
+  assert.ok(!root.innerHTML.includes("reel serve"));
+  root.click({ "data-action": "toggle-log" });
+  assert.ok(root.innerHTML.includes("Engine refused the key. Start it with reel serve --ensure --key [token], then press Try again."), "the full words, in the log drawer");
+  assert.ok(!root.innerHTML.includes(token), "no token anywhere");
+});
+
+test("C2.2 r1: the panel's own log lines scrub a token-looking 64-hex run (as DaemonSource's do), also in Copy diagnostics", async () => {
+  const { root, source, calls } = await setup();
+  const token = "0123456789abcdef".repeat(4);
+  source.nextResult = { ok: false, error: "Bridge not ready.", how: `Run \`reel doctor --token ${token}\` in your session.` };
+  root.click({ "data-action": "open-project" });
+  await tick();
+  root.click({ "data-action": "copy-diagnostics" });
+  const d = JSON.parse(calls.copy[0]!) as { log: { text: string }[] };
+  const line = d.log.find((l) => l.text.includes("Bridge not ready."));
+  assert.ok(line, "the raw words are in the log");
+  assert.ok(line!.text.includes("[token]") && !line!.text.includes(token), line!.text);
+  assert.ok(!calls.copy[0]!.includes(token));
+});
+
+test("C2.2 r1: log merge order is by the full time (epoch ms), not the HH:MM:SS text: a line from before midnight sorts before one after it", () => {
+  const now = Date.UTC(2026, 9, 13, 0, 0, 5); // 00:00:05 UTC
+  const before = logEpoch({ ts: "23:59:59", level: "info", text: "a" }, now);
+  const after = logEpoch({ ts: "00:00:02", level: "info", text: "b" }, now);
+  assert.equal(before, Date.UTC(2026, 9, 12, 23, 59, 59), "yesterday, not later today");
+  assert.equal(after, Date.UTC(2026, 9, 13, 0, 0, 2));
+  assert.ok(before < after && after < now);
+  assert.equal(logEpoch({ ts: "x", level: "info", text: "c", at: 42 } as LogLine, now), 42, "a line's own epoch wins");
+  assert.equal(logEpoch({ ts: "garbage", level: "info", text: "d" }, now), now);
+});
+
+test("C2.2 r1: the panel's own lines sort after older source lines and before newer ones", async () => {
+  const { root, source, state } = await setup();
+  const earlier = new Date(Date.now() - 30_000).toISOString().slice(11, 19);
+  const later = new Date(Date.now() + 30_000).toISOString().slice(11, 19);
+  root.click({ "data-action": "start-engine" });
+  for (const cb of source.cbs) cb({ ...state, log: [{ ts: later, level: "info", text: "new source line" }, { ts: earlier, level: "info", text: "old source line" }].reverse() as LogLine[] });
+  const texts = [...root.innerHTML.matchAll(/<li class="log-line[^"]*"><span class="log-ts">[^<]*<\/span><bdi dir="ltr">([^<]*)<\/bdi><\/li>/g)].map((m) => m[1]!);
+  const iOld = texts.indexOf("old source line");
+  const iOwn = texts.findIndex((t) => t.startsWith("Start engine pressed."));
+  const iNew = texts.indexOf("new source line");
+  assert.ok(iOld >= 0 && iOwn > iOld && iNew > iOwn, JSON.stringify(texts));
+});
+
+test("C2.2 r1: the Start engine log line is English in the Arabic panel too", async () => {
+  const source = new RecSource();
+  source.inner = new MockSource({ language: "ar", scenario: "approval" });
+  const root = new FakeRoot();
+  await mount(root, source, hostRec().host).ready;
+  root.click({ "data-action": "start-engine" });
+  assert.ok(root.innerHTML.includes("Start engine pressed."));
+  assert.equal(AR["log.start_engine"], EN["log.start_engine"], "log lines are English in both tables");
 });

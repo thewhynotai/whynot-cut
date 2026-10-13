@@ -809,3 +809,16 @@ test("kit.css header comment states the attribute-selector rule as it is (valuel
   if (/\[[a-z-]+\]/.test(FLAT_CSS)) assert.doesNotMatch(head, /no attribute selectors(?! with)/, "the comment says 'no attribute selectors' but kit.css uses one");
   assert.match(head, /\[disabled\]/);
 });
+
+test("C2.2 r1: toast: a Copy diagnostics fix says what to do with the copy; a command in the text is neutralised (the rest stays)", () => {
+  for (const t of [EN, AR]) {
+    const err = toast({ t, kind: "error", text: t["offline.refused_host"] });
+    assert.ok(err.includes(`<div class="kit-toast-text">${esc(t["notice.send_diagnostics"])}</div>`));
+    const retry = toast({ t, kind: "error", text: t["offline.lost"], fix: fixAction(t, "retry") });
+    assert.ok(!retry.includes(esc(t["notice.send_diagnostics"])));
+  }
+  const cmd = toast({ t: EN, kind: "warn", text: "Engine down: start it with reel serve --ensure, then press Try again." });
+  assert.ok(cmd.includes("Engine down: start it, then press Try again.") && !cmd.includes("reel serve"));
+  const only = toast({ t: EN, kind: "warn", text: "reel doctor" });
+  assert.ok(only.includes(`<div class="kit-toast-text">${esc(EN["notice.failed"])}</div>`));
+});

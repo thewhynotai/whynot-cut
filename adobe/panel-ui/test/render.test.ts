@@ -307,12 +307,13 @@ test("offline banner (no diagnosis): one plain sentence and ONE fix button, Star
   assert.match(rule(css, ".btn-row"), /display: flex/);
 });
 
-test("an error notice: its sentence and ONE fix button (default Copy diagnostics); a how that holds a command is not shown", () => {
+test("an error notice: its sentence and ONE fix button (default Copy diagnostics); only the command span of a how is held back", () => {
   const s = sampleState("en", "idle");
   const ui = initialUi();
   ui.notice = { kind: "error", text: "Failed.", how: "In your Claude session run `reel doctor`." };
   let html = render(s, EN, ui);
-  assert.ok(html.includes('<div class="banner-line">Failed.</div><div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="copy-diagnostics">Copy diagnostics</button></div>'), html);
+  // the how keeps its words, without the command and the verb that led into it; it says what to do, so no send line
+  assert.ok(html.includes('<div class="banner-line">Failed. In your Claude session.</div><div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="copy-diagnostics">Copy diagnostics</button></div>'), html);
   assert.ok(!html.includes("reel doctor") && !html.includes('class="cmd"'));
   for (const fix of ["start-engine", "retry", "copy-diagnostics"] as const) {
     ui.notice = { kind: "error", text: "Failed.", how: "Wait and retry.", fix };
@@ -329,6 +330,8 @@ test("an error notice: its sentence and ONE fix button (default Copy diagnostics
   ui.notice = { kind: "error", text: "Run reel serve --ensure" };
   html = render(s, EN, ui);
   assert.ok(html.includes(`<div class="banner-line">${esc(EN["notice.failed"])}</div>`) && !html.includes("reel serve"));
+  // Copy diagnostics with no how: the notice says what to do with the copy
+  assert.ok(html.includes(`<div class="banner-line">${esc(EN["notice.send_diagnostics"])}</div><div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="copy-diagnostics">`), html);
 });
 
 test("every .cmd chip sits directly in a .cmd-row (a flex container), never in inline text", () => {
@@ -539,7 +542,7 @@ test("offline banner names the link diagnosis (EN and AR): its own plain sentenc
   }
 });
 
-test("link banner: the sentences are plain (no file names, no Host / Origin jargon); connecting / stopped show no fix button and no retry line", () => {
+test("link banner: the sentences are plain (no file names, no Host / Origin jargon); connecting shows no fix button; stopped offers Start engine; neither has a retry line", () => {
   for (const [code] of LINK_CASES) {
     for (const t of [EN, AR]) assert.doesNotMatch(t[`offline.${code}` as keyof typeof EN], /engine\.json|Origin|`/, code);
   }
@@ -548,7 +551,11 @@ test("link banner: the sentences are plain (no file names, no Host / Origin jarg
   for (const code of ["connecting", "idle", "stopped"]) {
     const h = render(s, AR, { ...initialUi(), link: { code } });
     assert.ok(h.includes(esc(AR[code === "stopped" ? "offline.stopped" : "status.connecting"])), code);
-    assert.ok(!h.includes("banner-fix"), `${code}: nothing to fix while connecting`);
+    if (code === "stopped") {
+      // the panel stopped its link: Start engine brings it back (C2.2 review round 1)
+      const fixes = [...h.matchAll(/class="btn-row banner-fix"><button class="btn btn-secondary" data-action="([^"]+)"/g)].map((m) => m[1]);
+      assert.deepEqual(fixes, ["start-engine"], code);
+    } else assert.ok(!h.includes("banner-fix"), `${code}: nothing to fix while connecting`);
     assert.ok(!h.includes(esc(AR["offline.retry"])), code);
   }
 });
@@ -574,4 +581,38 @@ test("M8: the open log drawer shows the plugin version and build stamp as one le
   const closed = render(s, AR, { ...initialUi(), logOpen: false, build });
   assert.ok(!closed.includes("log-build"));
   assert.ok(!render(s, AR, { ...initialUi(), logOpen: true }).includes("log-build"));
+});
+
+// ---------------------------------------------------------------------------------- C2.2 review round 1
+
+test("C2.2 r1: a Copy diagnostics fix says what to do with the copy (link banners and notices without a how), EN and AR", () => {
+  const s = sampleState("en", "idle");
+  s.connection.engine = "offline";
+  for (const t of [EN, AR]) {
+    for (const code of ["refused_host", "refused_busy", "refused", "protocol", "too_large", "blocked"]) {
+      const h = render(s, t, { ...initialUi(), link: { code } });
+      assert.ok(h.includes(`<div class="banner-line">${esc(t["notice.send_diagnostics"])}</div><div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="copy-diagnostics">`), code);
+    }
+    // Start engine needs no such line
+    assert.ok(!render(s, t, { ...initialUi(), link: { code: "no_engine" } }).includes(esc(t["notice.send_diagnostics"])));
+  }
+});
+
+test("C2.2 r1: one Start engine on a screen: the offline banner carries it, a notice whose fix is the same does not repeat it; another fix still shows", () => {
+  const s = sampleState("en", "approval");
+  s.connection.engine = "offline";
+  for (const link of [null, { code: "no_engine", retry_in_s: 2 }, { code: "stopped" }]) {
+    const h = render(s, EN, { ...initialUi(), link, notice: { kind: "error", text: "The WhyNot Cut engine is not connected.", fix: "start-engine" } });
+    assert.equal((h.match(/data-action="start-engine"/g) ?? []).length, 1, JSON.stringify(link));
+  }
+  const h = render(s, EN, { ...initialUi(), notice: { kind: "error", text: "Premiere is busy.", fix: "retry" } });
+  assert.equal((h.match(/data-action="retry"/g) ?? []).length, 1);
+  assert.equal((h.match(/data-action="start-engine"/g) ?? []).length, 1);
+});
+
+test("C2.2 r1: a notice shows the engine's words without the command span (span-level, not all-or-nothing)", () => {
+  const s = sampleState("en", "idle");
+  const ui = { ...initialUi(), notice: { kind: "error" as const, text: "Premiere is busy (reel status --watch).", how: "Open Claude Code, then press Try again.", fix: "retry" as const } };
+  const h = render(s, EN, ui);
+  assert.ok(h.includes('<div class="banner-line">Premiere is busy. Open Claude, then press Try again.</div>'), h.slice(h.indexOf("banner-line"), h.indexOf("banner-line") + 200));
 });

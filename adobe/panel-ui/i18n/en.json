@@ -87,6 +87,7 @@
   "notice.approved": "Approved. The build can start.",
   "notice.changes": "Your changes were sent.",
   "notice.failed": "That did not work.",
+  "notice.send_diagnostics": "Copy the diagnostics and send them to support.",
   "notice.missing": "This needs a project that is not set yet.",
   "notice.copied": "Copied.",
   "notice.opened": "Opened.",

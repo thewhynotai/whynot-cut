@@ -1,6 +1,8 @@
 // Pure rendering: render(state, strings, ui) -> HTML string. Every dynamic value goes through esc().
-// Commands, paths and timecodes are wrapped in <bdi dir="ltr"> so they stay left-to-right inside Arabic text.
+// Paths and timecodes are wrapped in <bdi dir="ltr"> so they stay left-to-right inside Arabic text. Commands are never
+// shown (Addendum C1.4): a text from the engine or a host goes through neutralise() (src/commands.ts) first.
 // Markup is flexbox-friendly and uses only simple classes (UXP and CEP render the same CSS).
+import { neutralise } from "./commands.ts";
 import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction } from "./actions.ts";
 import type { BuildInfo } from "./diagnostics.ts";
 import { fmt } from "./i18n.ts";
@@ -26,6 +28,9 @@ export interface Notice {
   how?: string;
   /** an error's one fix button; default Copy diagnostics */
   fix?: FixAction;
+  /** what Try again runs: the click that led to this notice (its data-action and data-* values). mount sets it when it
+   *  shows the notice and dispatches it again with fresh state (the text typed now, the fingerprint on screen now) */
+  again?: { action: string; attrs: Readonly<Record<string, string>> };
 }
 
 /** Why the engine link is down (DaemonSource.diagnosis code), set by the shell: the offline banner names it. */
@@ -106,25 +111,13 @@ function header(s: PanelState, t: Strings): string {
  *  out inside running text (UXP draws inline-flex over the sentence). Never a command: commands are not shown. */
 const cmdRow = (text: string) => `<div class="cmd-row"><span class="cmd">${ltr(text)}</span></div>`;
 
-/** Text that holds a command (Addendum C1.4: commands live only in the log drawer and the diagnostics): a `backticked`
- *  run with a space in it (a verb and its arguments); a reel / claude / npm / python invocation with a flag
- *  ("reel serve --ensure", "claude -p") or a known reel subcommand ("reel doctor"); or "Claude Code". A backticked
- *  single token (a folder or file name) is not a command, and neither is the word "reel" in a sentence ("a 58 s reel").
- *  Text from the engine or a host that holds one is not shown: mount moves it to the log. */
-export function hasCommand(text: unknown): boolean {
-  if (typeof text !== "string") return false;
-  return (
-    /`[^`\s]+\s[^`]*`/.test(text) ||
-    /(?:^|[^\w-])(?:reel|claude|npm|npx|python3?)\s+(?:[a-z][\w-]*\s+)?--?[a-z]/i.test(text) ||
-    /(?:^|[^\w-])reel\s+(?:doctor|setup|serve|next|status|update|watch)\b/i.test(text) ||
-    /claude\s*code/i.test(text)
-  );
-}
-
-/** The one fix button of a problem (a secondary button: the screen's primary is the main action, Addendum B4). */
-function fixButton(fix: FixAction, t: Strings): string {
+/** The one fix button of a problem (a secondary button: the screen's primary is the main action, Addendum B4). Copy
+ *  diagnostics comes with the sentence that says what to do with the copy, unless the problem's own words already say
+ *  what to do (withSend = false). */
+function fixButton(fix: FixAction, t: Strings, withSend = true): string {
   const a = FIX_ACTIONS.includes(fix) ? fix : "copy-diagnostics";
-  return `<div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="${a}">${esc(t[FIX_LABEL[a]])}</button></div>`;
+  const send = a === "copy-diagnostics" && withSend ? `<div class="banner-line">${esc(t["notice.send_diagnostics"])}</div>` : "";
+  return `${send}<div class="btn-row banner-fix"><button class="btn btn-secondary" data-action="${a}">${esc(t[FIX_LABEL[a]])}</button></div>`;
 }
 
 /** The fix for each link diagnosis: the engine is not there (or must start again) -> Start engine; it is there but
@@ -145,43 +138,51 @@ const LINK_FIX: Readonly<Record<string, FixAction>> = {
   blocked: "copy-diagnostics",
 };
 
-/** The offline banner for a known link diagnosis, or null (unknown code: the generic banner). One plain sentence (plus
- *  "tries again by itself" while it does) and one fix button; never a command. */
-function linkBanner(link: LinkInfo, t: Strings): string | null {
+/** The offline banner for a known link diagnosis, or null (unknown code: the generic banner), and the fix button it
+ *  carries. One plain sentence (plus "tries again by itself" while it does) and one fix button; never a command. */
+function linkBanner(link: LinkInfo, t: Strings): { html: string; fix: FixAction | null } | null {
   const code = String(link.code);
-  const plain = (key: StringKey) =>
-    `<div class="banner banner-error" role="alert" data-link="${esc(code)}"><div class="banner-text"><div class="banner-line"><strong>${esc(t[key])}</strong></div></div></div>`;
-  if (code === "connecting" || code === "idle") return plain("status.connecting");
-  if (code === "stopped") return plain("offline.stopped");
+  const banner = (key: StringKey, fix: FixAction | null, extra = "") => ({
+    html:
+      `<div class="banner banner-error" role="alert" data-link="${esc(code)}"><div class="banner-text">` +
+      `<div class="banner-line"><strong>${withCommands(t[key])}</strong></div>${extra}${fix ? fixButton(fix, t) : ""}</div></div>`,
+    fix,
+  });
+  if (code === "connecting" || code === "idle") return banner("status.connecting", null);
+  // the panel stopped its link (stop()): starting the engine is what brings it back
+  if (code === "stopped") return banner("offline.stopped", "start-engine");
   const fix = Object.prototype.hasOwnProperty.call(LINK_FIX, code) ? LINK_FIX[code] : undefined;
   if (!fix) return null;
-  const title = t[`offline.${code}` as StringKey];
   const retry = typeof link.retry_in_s === "number" ? `<div class="banner-line">${esc(t["offline.retry"])}</div>` : "";
-  return (
-    `<div class="banner banner-error" role="alert" data-link="${esc(code)}"><div class="banner-text">` +
-    `<div class="banner-line"><strong>${withCommands(title)}</strong></div>${retry}${fixButton(fix, t)}</div></div>`
-  );
+  return banner(`offline.${code}` as StringKey, fix, retry);
 }
 
 function banners(s: PanelState, t: Strings, ui: UiState): string {
   let out = "";
+  /** the fix button the offline banner carries: a notice never repeats it (two identical buttons on one screen) */
+  let bannerFix: FixAction | null = null;
   const linked = s.connection.engine === "offline" && ui.link ? linkBanner(ui.link, t) : null;
   if (linked) {
-    out += linked;
+    out += linked.html;
+    bannerFix = linked.fix;
   } else if (s.connection.engine === "offline") {
     out +=
       `<div class="banner banner-error" role="alert"><div class="banner-text"><div class="banner-line"><strong>${esc(t["offline.title"])}</strong></div>` +
       `${fixButton("start-engine", t)}</div></div>`;
+    bannerFix = "start-engine";
   }
   if (ui.notice) {
     const n = ui.notice;
     const error = n.kind !== "ok";
-    // a text or how that holds a command is never shown (mount has put it in the log): the editor reads a plain line
-    const text = hasCommand(n.text) ? t["notice.failed"] : n.text;
-    const how = n.how && !hasCommand(n.how) ? ` ${withCommands(n.how)}` : "";
+    // only the command span of an engine or host text is held back (mount has put the full words in the log): the cause
+    // and the remedy stay; a text with nothing else left reads "That did not work."
+    const text = neutralise(n.text) ?? t["notice.failed"];
+    const how = n.how ? neutralise(n.how) : null;
+    const fix: FixAction = n.fix ?? "copy-diagnostics";
+    const button = error && fix !== bannerFix ? fixButton(fix, t, !how) : "";
     out +=
       `<div class="banner banner-${error ? "error" : "ok"}" role="status" aria-live="polite">` +
-      `<div class="banner-text"><div class="banner-line">${esc(text)}${how}</div>${error ? fixButton(n.fix ?? "copy-diagnostics", t) : ""}</div>` +
+      `<div class="banner-text"><div class="banner-line">${esc(text)}${how ? ` ${withCommands(how)}` : ""}</div>${button}</div>` +
       `<button class="banner-x" data-action="dismiss-notice" title="${esc(t["notice.dismiss"])}" aria-label="${esc(t["notice.dismiss"])}">✕</button></div>`;
   }
   return out;
