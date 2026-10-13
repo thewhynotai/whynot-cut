@@ -1206,6 +1206,19 @@ def cmd_preview_video(a):
 def cmd_settings(a):
     from lib import settings as S
     from lib.plat import native_path
+    if a.allow_reel:                       # T3.9: the installer's non-interactive call (never prompts)
+        from lib import claude_perms
+        if a.init:
+            from lib.errors import Guidance
+            raise Guidance("--allow-reel and --init cannot be combined", "Run them as two separate commands.")
+        from lib.common import clients_root
+        base = Path(native_path(a.clients_root)).expanduser() if a.clients_root else clients_root()
+        if base is None:
+            from lib.errors import Guidance
+            raise Guidance("no clients folder is set (nothing was written)",
+                           "Pass --clients-root <the folder that holds the client folders>.")
+        out(claude_perms.allow_reel(base, clients_root()))
+        return
     st = S.load(Path(a.root) if a.root else None)
     if a.init:
         folder = Path(native_path(a.init)).expanduser().resolve()
@@ -1495,6 +1508,15 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--init", metavar="FOLDER", help="write FOLDER/.claude/whynot-cut.local.md")
             sp.add_argument("--set", action="append", metavar="KEY=VALUE", help="repeatable, or KEY=VALUE,KEY2=VALUE2")
             sp.add_argument("--force", action="store_true")
+            sp.add_argument("--allow-reel", action="store_true",
+                            help="let `reel` run without a prompt: merge Bash(reel *) and PowerShell(reel *) into "
+                                 "<clients folder>/.claude/settings.json (other keys kept, idempotent, a timestamped "
+                                 "backup before a change, never asks). Prints {ok, file, added, backup, changed}; "
+                                 "exit 1 with guidance for a file that is not valid JSON or a folder that is not a "
+                                 "clients folder. The installer runs: reel settings --allow-reel --clients-root <dir> --json")
+            sp.add_argument("--clients-root", metavar="DIR", help="with --allow-reel: the folder that holds the client "
+                            "folders (default: the configured clients folder)")
+            sp.add_argument("--json", action="store_true", help="accepted for scripts; the output is always one JSON document")
         if name == "lock":
             g = sp.add_mutually_exclusive_group()
             g.add_argument("--status", action="store_true", help="who holds the lock, since when, stale or not (default)")
