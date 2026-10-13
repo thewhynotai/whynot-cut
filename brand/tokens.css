@@ -6,9 +6,12 @@
    - #5400FB is a FILL only (white text on it is about 7.6:1). Violet TEXT, links and the focus ring use #9D6BFF;
      raw #5400FB as text is 2.77:1 and must not be used.
    - #D95C9B is for eyebrow labels and the active tab underline.
-   - The gradient is for the header hairline and progress bars only. The main CTA's glow is a box-shadow,
-     --twn-cta-glow (a deviation from Addendum B's gradient ring: UXP cannot clip a gradient ring to a radius, spike
-     0.1.7 CSS lab, docs/adobe/uxp-parity.md). One shadow only: a multi-shadow value is unproven in UXP.
+   - The gradient is for the header hairline and progress bars only. The main CTA's mark is a box-shadow (a deviation
+     from Addendum B's gradient ring: UXP cannot clip a gradient ring to a radius, spike 0.1.7 CSS lab,
+     docs/adobe/uxp-parity.md). --twn-cta-glow (a 10 px blur) painted NO visible glow in the live 0.1.8 shots
+     (docs/adobe/evidence/ui-kit/uxp-live-018/), so the CTA uses --twn-cta-ring: a solid 1 px pink ring, a spread with
+     no blur, the form the focus ring proves paints. --twn-cta-glow stays defined for Chromium / CEP. One shadow per
+     rule: a multi-shadow value is unproven in UXP.
    - Status colours always come with an icon, never colour alone.
    Cards (controller ruling, 2026-10-13, per Addendum B §B2 and docs/review/2026-10-11/magnific-brand.md §2.2):
    - A card is glass, rgba(255,255,255,.08), over the black background (it reads as about #141414), exactly as on
@@ -57,6 +60,7 @@
 --twn-radius-control:16px;
 --twn-focus:0 0 0 2px #9D6BFF;
 --twn-cta-glow:0 0 10px rgba(217,92,155,.6);
+--twn-cta-ring:0 0 0 1px #D95C9B;
 /* type: Syne 600/700 titles and uppercase eyebrows, Inter 300/400/600 UI, IBM Plex Sans Arabic for Arabic,
    IBM Plex Mono for commands and timecodes */
 --twn-font-display:"Syne","Segoe UI","Helvetica Neue",Helvetica,Arial,sans-serif;

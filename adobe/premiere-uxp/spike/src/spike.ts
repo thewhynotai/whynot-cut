@@ -4,8 +4,10 @@
 // 0.1.6: a "Style guide" view (style-guide.ts; run-request mode "style_guide" opens it and leaves it open), live UXP UI
 // measurements (ui-probes.ts -> `ui_probes`) and the C2.7 ecosystem probes (eco-probes.ts -> `eco_probes`).
 // 0.1.7: a "CSS lab" view (css-lab.ts; run-request mode "css_lab" opens it, leaves it open and writes `lab`).
+// 0.1.9: a style_guide request's "scroll" scrolls the guide to that offset at the end of the run; the done file records
+// where its scroll region stands (`scroll`: scrollTop, scrollHeight, clientHeight).
 import type { premierepro as Ppro } from "@adobe/premierepro";
-import { createAutoRunner, type GuideView, type RunMode, type RunSummary } from "./autorun.ts";
+import { createAutoRunner, type GuideScroll, type GuideView, type RunMode, type RunSummary } from "./autorun.ts";
 import { createLabView, runCssLab, type LabResults, type LabView } from "./css-lab.ts";
 import { realLabDom, realLabEnv } from "./lab-dom.ts";
 import { createLifecycle, lifecycleWriter, setupLifecycle, type EcoCtx, type LifecycleEvent, type LifecycleSetup } from "./eco-probes.ts";
@@ -167,6 +169,7 @@ async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promi
   let resultsFile: string | null = null;
   let counts = { pass: 0, fail: 0, na: 0 };
   let problem: string | null = null;
+  let guideScroll: GuideScroll | undefined;
   try {
     // a literal require, so the bundle keeps it external (test/package.test.ts); the style guide works without it
     let ppro: Ppro | undefined;
@@ -270,6 +273,8 @@ async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promi
     await write(ops);
     if (mode === "style_guide") {
       counts = sectionCounts(sections);
+      // 0.1.9: last, so the probes' stages are gone and the screenshot that follows the done file sees this offset
+      guideScroll = guide?.scrollTo(view?.scroll);
     } else if (mode === "css_lab") {
       const c = sectionCounts(sections);
       const l = labResults?.summary ?? { pass: 0, fail: 0, na: 0 };
@@ -289,7 +294,7 @@ async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promi
   } finally {
     if (owns) setRunning(false);
   }
-  return { results_file: resultsFile, ok: problem === null, ...counts, ...(problem === null ? {} : { error: problem }) };
+  return { results_file: resultsFile, ok: problem === null, ...counts, ...(problem === null ? {} : { error: problem }), ...(guideScroll ? { scroll: guideScroll } : {}) };
 }
 
 /** 0.1.5: poll ~/.whynot-cut/uxp-spike/run-request.json (on load, then every 5 s) and run what it asks for. */

@@ -1,6 +1,10 @@
 // Progress you can read (Addendum B4.3): a plain-language status ("Building your sequence…"), "23 of 47" as
-// left-to-right numbers, the gradient bar, elapsed m:ss and Cancel (a secondary button). The bar is a flex row, so in
-// Arabic it fills from the right. Without a count the bar is indeterminate (no aria-valuenow).
+// left-to-right numbers, the gradient bar, elapsed m:ss and Cancel (a secondary button). The bar fills from the start
+// side: the left in English, the right in Arabic. The right is set PHYSICALLY in kit.css (.kit-rtl .kit-track /
+// .kit-fill): live UXP did not mirror this row through direction and filled Arabic from the left (0.1.8 shots). Without
+// a count the bar is indeterminate (no aria-valuenow). The status is an engine text: it goes through runtimeText
+// (src/commands.ts, C2.2), so a status that holds a command shows the panel's own sentence instead (the shell logs it).
+import { runtimeText } from "../commands.ts";
 import type { Strings } from "../i18n.ts";
 import { button } from "./button.ts";
 import { clockOf, esc, fmtHtml, ltr, prose, trusted } from "./html.ts";
@@ -32,11 +36,12 @@ export function progress(o: ProgressOpts): Html {
   const elapsed = num(o.elapsedS)
     ? `<span class="kit-meta"><span class="kit-meta-k">${esc(o.t["pipeline.elapsed"])}</span><span class="kit-meta-v">${ltr(clockOf(o.elapsedS))}</span></span>`
     : "";
+  const status = runtimeText(o.status) ?? o.t["text.held"];
   const cancel = o.cancel ? button({ label: o.t["pipeline.cancel"], action: o.cancel.action, data: o.cancel.data, variant: "secondary" }) : "";
   const foot = elapsed || cancel ? `<div class="kit-progress-foot">${elapsed}<span class="kit-spacer"></span>${cancel}</div>` : "";
   return trusted(
-    `<div class="kit-progress" role="group" aria-label="${esc(o.status)}">` +
-      `<div class="kit-progress-head"><span class="kit-progress-status">${prose(o.status)}</span>${count}</div>` +
+    `<div class="kit-progress" role="group" aria-label="${esc(status)}">` +
+      `<div class="kit-progress-head"><span class="kit-progress-status">${prose(status)}</span>${count}</div>` +
       bar +
       foot +
       `</div>`,

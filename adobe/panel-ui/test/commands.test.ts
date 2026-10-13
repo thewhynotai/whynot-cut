@@ -177,8 +177,8 @@ test("runtimeText: 'Claude Code' becomes 'Claude' in place; a text with a comman
   assert.equal(containsRuntimeCommand(long), false);
 });
 
-test("ONE module, two detectors: render.ts, mount.ts and kit/toast.ts use src/commands.ts's runtime handling and keep no command regex of their own; neutralise() is gone; the guard imports the broad one", () => {
-  for (const f of ["render.ts", "mount.ts", "kit/toast.ts"]) {
+test("ONE module, two detectors: render.ts, mount.ts and kit/toast.ts, kit/progress.ts, kit/frames.ts use src/commands.ts's runtime handling and keep no command regex of their own; neutralise() is gone; the guard imports the broad one", () => {
+  for (const f of ["render.ts", "mount.ts", "kit/toast.ts", "kit/progress.ts", "kit/frames.ts"]) {
     const src = readFileSync(join(PANEL_UI, "src", f), "utf8");
     assert.match(src, /from "\.\.?\/(?:\.\.\/)?commands\.ts"/, f);
     assert.match(src, /runtimeText/, f);

@@ -2,7 +2,9 @@
 // absent or invalid; clamped). A thumbnail is shown only from a local URL (src/media.ts, shared with the panel:
 // data:image, file:/// with an empty host, plugin: or a local path), never from the network or a UNC share. Each
 // tile is a seek control (<div role="button">, html.ts control()) labelled with its timecode, then the timecode (LTR)
-// and a verdict chip with its icon.
+// and a verdict chip with its icon. The label under it is an engine text: it goes through runtimeText (src/commands.ts,
+// C2.2), so a label that holds a command shows the panel's own sentence instead (the shell logs the raw words).
+import { runtimeText } from "../commands.ts";
 import { fmt } from "../i18n.ts";
 import type { StringKey, Strings } from "../i18n.ts";
 import { aspectPct, isSafeImg } from "../media.ts";
@@ -35,7 +37,7 @@ function tile(q: QcFrame, t: Strings): string {
       body: `<span class="kit-frame-box" style="padding-top:${aspectPct(q.w, q.h)}%">${img}</span>`,
     }) +
     `<div class="kit-frame-meta"><span class="kit-frame-tc">${ltr(q.tc)}</span>${chip({ label, tone: TONE[verdict] })}</div>` +
-    `<div class="kit-frame-label">${auto(q.label)}</div></div>`
+    `<div class="kit-frame-label">${auto(runtimeText(q.label) ?? t["text.held"])}</div></div>`
   );
 }
 

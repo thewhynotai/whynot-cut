@@ -468,10 +468,10 @@ test("spike.ts wires the auto-runner on boot and keeps the three buttons", () =>
   for (const id of ["run", "run-keep", "copy"]) assert.match(spike, new RegExp(`\\$\\("${id}"\\)\\.addEventListener\\("click"`));
 });
 
-test("spike 0.1.8: manifest version, SPIKE_VERSION and the safety guards are unchanged", () => {
+test("spike 0.1.9: manifest version, SPIKE_VERSION and the safety guards are unchanged", () => {
   const manifest = JSON.parse(readFileSync(join(root, "spike", "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "0.1.8");
-  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0.1.8"/);
+  assert.equal(manifest.version, "0.1.9");
+  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0.1.9"/);
   const autorun = readFileSync(join(root, "spike", "src", "autorun.ts"), "utf8");
   assert.doesNotMatch(autorun, /scratchPathProblem|whynot-test/, "auto-run must not touch the safety rules");
 });

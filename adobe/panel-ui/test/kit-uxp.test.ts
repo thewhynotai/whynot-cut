@@ -3,7 +3,8 @@
 //   1 every <button> paints as Premiere's native grey control -> the kit emits <div role="button" tabindex="0">; Enter
 //     and Space activate it (src/kit/activate.ts, wired by mount.ts); disabled = aria-disabled + class + tabindex -1;
 //     a control's radius is the explicit half-height 16 px, never 999 (999 stays on <span> chips);
-//   2 no gradient ring is clean -> the main CTA's glow is ONE box-shadow token; the gradient is hairline + progress only;
+//   2 no gradient ring is clean, and a blurred shadow painted nothing live (0.1.8) -> the main CTA wears ONE solid ring
+//     shadow (--twn-cta-ring); the gradient is hairline + progress only; the Arabic progress fill is placed physically;
 //   3 fill="currentColor", a fill attribute and <img> paint nothing; a CSS fill does -> no fill attribute, ink classes;
 //   4 no @font-face loads -> brand family first, then Windows / macOS system fonts (tokens.test.ts, this file);
 //   5 whitespace between flex children is dropped and margin-inline does nothing -> a physical-margin gap class;
@@ -13,13 +14,14 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { AR, EN } from "../src/i18n.ts";
-import { button, chip, header, icon, isolateLatin, kitDisabled, kitKeyHandler, logDrawer, prose, stepStrip, tabs, withCommands } from "../src/kit/index.ts";
+import { button, chip, header, icon, isolateLatin, kitControlSelector, kitDisabled, kitKeyHandler, kitPointerGuard, logDrawer, prose, stepStrip, tabs, withCommands } from "../src/kit/index.ts";
 import type { KitElement } from "../src/kit/index.ts";
 import { kitGallery } from "../src/kit/gallery.ts";
 import { mount } from "../src/mount.ts";
 import type { MountRoot, PanelElement } from "../src/mount.ts";
 import { MockSource } from "../src/mock.ts";
 import { PANEL_UI, TOKENS, tokenMap } from "./tokens-util.ts";
+import { buttonCount, RENDER_BUTTONS_TO_MIGRATE_IN_B_T2 } from "./btn-debt.ts";
 
 const KIT_CSS = readFileSync(join(PANEL_UI, "styles", "kit.css"), "utf8");
 const FLAT_CSS = KIT_CSS.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -45,6 +47,15 @@ test("lab 1: the kit never emits <button>: not in the gallery (EN, AR), not in a
     const src = readFileSync(join(PANEL_UI, "src", "kit", f), "utf8").replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, "");
     assert.doesNotMatch(src, /<button\b/, `${f} emits a <button>`);
   }
+});
+
+test("lab 1: the <button> debt in render.ts (B-T2) is pinned in test/btn-debt.ts: the count can only go down, to 0", () => {
+  const n = buttonCount(readFileSync(join(PANEL_UI, "src", "render.ts"), "utf8"));
+  assert.ok(n <= RENDER_BUTTONS_TO_MIGRATE_IN_B_T2, `render.ts gained a <button> (${n} > ${RENDER_BUTTONS_TO_MIGRATE_IN_B_T2}): use the kit's control (src/kit/html.ts control())`);
+  assert.equal(n, RENDER_BUTTONS_TO_MIGRATE_IN_B_T2, `render.ts has ${n} <button> left: lower RENDER_BUTTONS_TO_MIGRATE_IN_B_T2 in test/btn-debt.ts to ${n}`);
+  assert.ok(Number.isInteger(RENDER_BUTTONS_TO_MIGRATE_IN_B_T2) && RENDER_BUTTONS_TO_MIGRATE_IN_B_T2 >= 0);
+  assert.equal(buttonCount("<button><button class=x><buttons>"), 2, "the unit is a <button tag");
+  assert.ok(readFileSync(join(PANEL_UI, "test", "btn-debt.ts"), "utf8").includes("to pay in B-T2"));
 });
 
 test("lab 1: every control in the gallery is a <div role=button|tab> with tabindex, the focus ring and a data-action; every component that has one uses it", () => {
@@ -113,34 +124,91 @@ class El implements KitElement {
   }
 }
 
-test("kitKeyHandler: Enter, Space and Spacebar on a control call the click handler with it and stop the default; nothing else does", () => {
+test("kitKeyHandler: Enter activates on keydown; Space on keyup after a Space keydown on the same control (keydown only stops the scroll); auto-repeat never activates; nothing else does", () => {
   const hits: (KitElement | null)[] = [];
   const onKey = kitKeyHandler((e: { target: KitElement | null }) => void hits.push(e.target));
   const ctl = new El({ "data-action": "approve", role: "button" });
   let prevented = 0;
-  for (const key of ["Enter", " ", "Spacebar"]) onKey({ target: ctl, key, preventDefault: () => void prevented++ });
-  assert.deepEqual(hits, [ctl, ctl, ctl]);
-  assert.equal(prevented, 3, "Space would scroll the panel");
-  // a tab control too; a key on a child of the control finds the control
-  onKey({ target: new El({}, new El({ "data-action": "tab", role: "tab" })), key: "Enter" });
+  const pd = () => void prevented++;
+  onKey({ target: ctl, key: "Enter", type: "keydown", preventDefault: pd });
+  assert.deepEqual(hits, [ctl], "Enter: on keydown, like a native button");
+  onKey({ target: ctl, key: "Enter", type: "keyup", preventDefault: pd });
+  assert.equal(hits.length, 1, "Enter's keyup does nothing");
+  for (const key of [" ", "Spacebar"]) {
+    const before: number = hits.length;
+    onKey({ target: ctl, key, type: "keydown", preventDefault: pd });
+    assert.equal(hits.length, before, `${JSON.stringify(key)} keydown only stops the scroll`);
+    onKey({ target: ctl, key, type: "keydown", repeat: true, preventDefault: pd });
+    onKey({ target: ctl, key, type: "keyup", preventDefault: pd });
+  }
+  assert.deepEqual(hits, [ctl, ctl, ctl], "Space and Spacebar activate on keyup, once each");
+  assert.equal(prevented, 7, "every Enter keydown and every Space event on a control stops its default (Space would scroll the panel)");
+  // held keys: an auto-repeated keydown never activates again (a held Enter must not approve twice)
+  onKey({ target: ctl, key: "Enter", type: "keydown", repeat: true });
+  onKey({ target: ctl, key: " ", type: "keydown", repeat: true });
+  onKey({ target: ctl, key: " ", type: "keyup" });
+  assert.equal(hits.length, 3, "a repeat-only Space press (no fresh keydown) does not activate on keyup");
+  // a Space keyup with no Space keydown on that control does nothing (the press started elsewhere)
+  const other = new El({ "data-action": "request-changes", role: "button" });
+  onKey({ target: other, key: " ", type: "keydown" });
+  onKey({ target: ctl, key: " ", type: "keyup" });
+  assert.equal(hits.length, 3, "Space went down on another control");
+  onKey({ target: new El({ "data-field": "changes" }), key: " ", type: "keydown" });
+  onKey({ target: ctl, key: " ", type: "keyup" });
+  assert.equal(hits.length, 3, "Space went down in a text box");
+  // the same control re-rendered between keydown and keyup (a new element, same data-action + key attributes) counts
+  onKey({ target: new El({ "data-action": "seek", "data-t": "4", role: "button" }), key: " ", type: "keydown" });
+  onKey({ target: new El({ "data-action": "seek", "data-t": "4", role: "button" }), key: " ", type: "keyup" });
   assert.equal(hits.length, 4);
-  assert.equal(hits[3]!.getAttribute("data-action"), "tab");
+  onKey({ target: new El({ "data-action": "seek", "data-t": "4", role: "button" }), key: " ", type: "keydown" });
+  onKey({ target: new El({ "data-action": "seek", "data-t": "5", role: "button" }), key: " ", type: "keyup" });
+  assert.equal(hits.length, 4, "another frame tile is another control");
+  // a tab control too; a key on a child of the control finds the control; no type = keydown
+  onKey({ target: new El({}, new El({ "data-action": "tab", role: "tab" })), key: "Enter" });
+  assert.equal(hits.length, 5);
+  assert.equal(hits[4]!.getAttribute("data-action"), "tab");
   // not: another key, a disabled control, an element with no data-action, a data-action with no control role (a text box)
   onKey({ target: ctl, key: "a" });
   onKey({ target: ctl, key: "Tab" });
   onKey({ target: ctl });
-  onKey({ target: new El({ "data-action": "x", role: "button", "aria-disabled": "true" }), key: "Enter" });
-  onKey({ target: new El({ "data-field": "changes" }), key: " " });
+  const off = new El({ "data-action": "x", role: "button", "aria-disabled": "true" });
+  onKey({ target: off, key: "Enter" });
+  onKey({ target: off, key: " ", type: "keydown" });
+  onKey({ target: off, key: " ", type: "keyup" });
+  onKey({ target: new El({ "data-field": "changes" }), key: " ", type: "keyup" });
   onKey({ target: new El({ "data-action": "x" }), key: "Enter" });
   onKey({ target: null, key: "Enter" });
-  assert.equal(hits.length, 4);
+  assert.equal(hits.length, 5);
   assert.equal(kitDisabled(new El({ "aria-disabled": "true" })), true);
   assert.equal(kitDisabled(new El({ "aria-disabled": "false" })), false);
   assert.equal(kitDisabled(null), false);
 });
 
+test("kitPointerGuard: a mouse press on a disabled control (or inside one) does not move the focus to it; an enabled control keeps the default", () => {
+  let prevented = 0;
+  const pd = () => void prevented++;
+  kitPointerGuard({ target: new El({ "data-action": "approve", role: "button", "aria-disabled": "true" }), preventDefault: pd });
+  kitPointerGuard({ target: new El({}, new El({ "data-action": "approve", role: "button", "aria-disabled": "true" })), preventDefault: pd });
+  assert.equal(prevented, 2);
+  kitPointerGuard({ target: new El({ "data-action": "approve", role: "button" }), preventDefault: pd });
+  kitPointerGuard({ target: new El({ "data-field": "changes" }), preventDefault: pd });
+  kitPointerGuard({ target: null, preventDefault: pd });
+  assert.equal(prevented, 2, "an enabled control and a text box take the focus as usual");
+});
+
+test("kitControlSelector: data-action plus the key attributes the control carries, quoted safely; null without a data-action", () => {
+  assert.equal(kitControlSelector(new El({ "data-action": "approve", role: "button", "data-fingerprint": "ab12" })), '[data-action="approve"][data-fingerprint="ab12"]');
+  assert.equal(kitControlSelector(new El({ "data-action": "seek", "data-t": "12.5", class: "x" })), '[data-action="seek"][data-t="12.5"]');
+  assert.equal(kitControlSelector(new El({ "data-action": "tab", "data-tab": "edit" })), '[data-action="tab"][data-tab="edit"]');
+  assert.equal(kitControlSelector(new El({ "data-action": "set-language", "data-lang": "ar" })), '[data-action="set-language"][data-lang="ar"]');
+  assert.equal(kitControlSelector(new El({ "data-action": 'a"b\\c' })), '[data-action="a\\"b\\\\c"]');
+  assert.equal(kitControlSelector(new El({ "data-field": "changes" })), null);
+  assert.equal(kitControlSelector(null), null);
+});
+
 class FakeEl implements PanelElement {
   attrs: Record<string, string>;
+  focused = 0;
   constructor(attrs: Record<string, string>) {
     this.attrs = attrs;
   }
@@ -149,49 +217,116 @@ class FakeEl implements PanelElement {
     const m = /^\[([\w-]+)\]$/.exec(sel);
     return m && m[1]! in this.attrs ? this : null;
   }
+  focus() { this.focused++; }
 }
-type Fn = (e: { target: PanelElement | null; key?: string; preventDefault?(): void }) => void;
+type Fn = (e: { target: PanelElement | null; key?: string; type?: string; preventDefault?(): void }) => void;
 class FakeRoot implements MountRoot {
   innerHTML = "";
   listeners: Record<string, Fn[]> = {};
   addEventListener(t: string, fn: Fn) { (this.listeners[t] ??= []).push(fn); }
   removeEventListener(t: string, fn: Fn) { this.listeners[t] = (this.listeners[t] ?? []).filter((f) => f !== fn); }
-  fire(type: string, attrs: Record<string, string>, key?: string) { for (const fn of this.listeners[type] ?? []) fn({ target: new FakeEl(attrs), key, preventDefault: () => {} }); }
+  fire(type: string, attrs: Record<string, string>, key?: string) { for (const fn of this.listeners[type] ?? []) fn({ target: new FakeEl(attrs), key, type, preventDefault: () => {} }); }
+  /** a key press: keydown then keyup on the same control */
+  press(attrs: Record<string, string>, key: string) { this.fire("keydown", attrs, key); this.fire("keyup", attrs, key); }
 }
 const host = { setPlayerPosition() {}, openInSourceMonitor() {}, revealPath() {}, copyText() {} };
 
-test("mount: Enter / Space on a kit control does what its click does; a disabled control ignores clicks and keys; unmount drops the key listener", async () => {
+test("mount: Enter / Space on a kit control does what its click does; a disabled control ignores clicks and keys; unmount drops the key listeners", async () => {
   const root = new FakeRoot();
   const handle = mount(root, new MockSource({ language: "en", scenario: "approval" }), host);
   await handle.ready;
   assert.equal(handle.ui.logOpen, false);
-  root.fire("keydown", { "data-action": "toggle-log", role: "button" }, "Enter");
-  assert.equal(handle.ui.logOpen, true, "Enter toggled the log drawer");
+  root.press({ "data-action": "toggle-log", role: "button" }, "Enter");
+  assert.equal(handle.ui.logOpen, true, "Enter toggled the log drawer (once: its keyup does nothing)");
   root.fire("keydown", { "data-action": "toggle-log", role: "button" }, " ");
-  assert.equal(handle.ui.logOpen, false, "Space toggled it back");
-  root.fire("keydown", { "data-action": "toggle-log", role: "button" }, "x");
+  assert.equal(handle.ui.logOpen, true, "Space's keydown alone does nothing");
+  root.fire("keyup", { "data-action": "toggle-log", role: "button" }, " ");
+  assert.equal(handle.ui.logOpen, false, "Space toggled it back on keyup");
+  root.press({ "data-action": "toggle-log", role: "button" }, "x");
   assert.equal(handle.ui.logOpen, false, "another key does nothing");
   const off = { "data-action": "toggle-log", role: "button", "aria-disabled": "true" };
   root.fire("click", off);
-  root.fire("keydown", off, "Enter");
+  root.press(off, "Enter");
+  root.press(off, " ");
   assert.equal(handle.ui.logOpen, false, "a disabled control does nothing");
   root.fire("click", { "data-action": "toggle-log", role: "button" });
   assert.equal(handle.ui.logOpen, true, "a click still works");
+  assert.equal((root.listeners.mousedown ?? []).length, 1, "the mousedown guard is wired");
+  let prevented = 0;
+  for (const fn of root.listeners.mousedown ?? []) fn({ target: new FakeEl(off), preventDefault: () => void prevented++ });
+  assert.equal(prevented, 1, "a press on a disabled control does not take the focus");
   handle.unmount();
-  assert.equal((root.listeners.keydown ?? []).length, 0);
+  for (const t of ["keydown", "keyup", "mousedown", "click"]) assert.equal((root.listeners[t] ?? []).length, 0, t);
 });
 
-// ---- 2. the CTA glow is a shadow ----
+class FocusRoot extends FakeRoot {
+  asked: string[] = [];
+  found = new Map<string, FakeEl>();
+  ownerDocument: { activeElement: PanelElement | null } = { activeElement: null };
+  querySelector(sel: string): PanelElement | null {
+    this.asked.push(sel);
+    const el = new FakeEl({});
+    this.found.set(sel, el);
+    return el;
+  }
+}
 
-test("lab 2: the main CTA's glow is ONE box-shadow token (multi-shadow is unproven in UXP); no gradient ring anywhere", () => {
+test("mount: after a repaint the focus returns to the control the editor used (its data-action + key attributes), not only to a text box", async () => {
+  const root = new FocusRoot();
+  const handle = mount(root, new MockSource({ language: "en", scenario: "qc" }), host);
+  await handle.ready;
+  // the editor pressed a frame tile: it has the focus while the panel repaints
+  root.ownerDocument.activeElement = new FakeEl({ "data-action": "seek", "data-t": "12.5", role: "button", class: "kit-frame" });
+  root.asked.length = 0;
+  root.fire("click", { "data-action": "toggle-log", role: "button" });
+  assert.deepEqual(root.asked, ['[data-action="seek"][data-t="12.5"]'], "the same tile is looked up after the repaint");
+  assert.equal(root.found.get(root.asked[0]!)!.focused, 1, "and focused");
+  // a text box keeps its own restore (data-field), never the control lookup
+  root.ownerDocument.activeElement = new FakeEl({ "data-field": "changes" });
+  root.asked.length = 0;
+  root.fire("click", { "data-action": "toggle-log", role: "button" });
+  assert.deepEqual(root.asked, ['[data-field="changes"]']);
+  // the focus on no control: nothing is looked up
+  root.ownerDocument.activeElement = new FakeEl({ class: "kit-card" });
+  root.asked.length = 0;
+  root.fire("click", { "data-action": "toggle-log", role: "button" });
+  assert.deepEqual(root.asked, []);
+  handle.unmount();
+});
+
+// ---- 2. the CTA mark is a solid ring (the blur glow paints nothing) ----
+
+test("lab 2: the main CTA wears ONE solid 1 px pink ring (--twn-cta-ring, no blur: the live 0.1.8 shots show the blur glow paints nothing); --twn-cta-glow stays defined; no gradient ring anywhere", () => {
   const glow = TOK.get("--twn-cta-glow") ?? "";
-  assert.equal(glow, "0 0 10px rgba(217,92,155,.6)");
-  assert.doesNotMatch(glow.replace(/\([^)]*\)/g, ""), /,/, "a single shadow");
+  assert.equal(glow, "0 0 10px rgba(217,92,155,.6)", "the blur glow token stays (Chromium / CEP)");
+  const ring = TOK.get("--twn-cta-ring") ?? "";
+  assert.equal(ring, "0 0 0 1px #D95C9B", "a spread with no blur: the focus ring's proven form, in the accent pink");
+  for (const v of [glow, ring]) assert.doesNotMatch(v.replace(/\([^)]*\)/g, ""), /,/, "a single shadow (multi-shadow is unproven in UXP)");
+  const glowRule = cssRules().find((r) => r.selectors.includes(".kit-btn-glow"))!.body;
+  assert.match(glowRule, /^\s*box-shadow: var\(--twn-cta-ring\);\s*$/, "the CTA uses the ring alone (no multi-shadow with the glow)");
+  assert.doesNotMatch(FLAT_CSS, /var\(--twn-cta-glow\)/, "nothing paints the blur glow in the kit");
   assert.match(GALLERY.en, /class="kit-btn kit-btn-primary kit-focus[^"]*kit-btn-glow"/);
   assert.doesNotMatch(ALL + FLAT_CSS, /kit-glow\b/, "the gradient wrapper is gone");
   assert.doesNotMatch(FLAT_CSS, /border-image/);
   const users = cssRules().filter((r) => /var\(--twn-gradient\)/.test(r.body)).flatMap((r) => r.selectors).sort();
   assert.deepEqual(users, [".kit-fill", ".kit-hairline"]);
+});
+
+// ---- 2b. the Arabic progress fill is placed physically ----
+
+test("live 0.1.8: the Arabic progress bar fills from the RIGHT through physical rules (UXP filled it from the left through direction)", () => {
+  const rule = (sel: string) => cssRules().find((r) => r.selectors.includes(sel))?.body ?? "";
+  const track = rule(".kit-rtl .kit-track");
+  assert.match(track, /direction: ltr;/, "the track is an LTR row in Arabic too, so flex-end is the right edge everywhere");
+  assert.match(track, /justify-content: flex-end;/, "packed to the right");
+  assert.match(rule(".kit-rtl .kit-fill"), /margin-left: auto;/, "the fill's left margin takes the free space");
+  assert.doesNotMatch(rule(".kit-track"), /justify-content: flex-end|row-reverse/, "English still fills from the left");
+  assert.doesNotMatch(rule(".kit-fill"), /margin-left: auto/);
+  // the bar itself is the same in both languages: a track with one fill whose width is the percentage
+  const ar = GALLERY.ar.match(/<div class="kit-track"[^>]*><div class="kit-fill" style="width:\d+%"><\/div><\/div>/g) ?? [];
+  assert.ok(ar.length >= 1, "the Arabic gallery shows a counted bar");
+  const src = readFileSync(join(PANEL_UI, "src", "kit", "progress.ts"), "utf8");
+  assert.doesNotMatch(src, /in Arabic it fills from the right/, "the old comment claimed direction mirrors the bar");
 });
 
 // ---- 3. svg fills come from CSS classes ----

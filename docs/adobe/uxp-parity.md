@@ -282,8 +282,13 @@ values alone do not prove paint, so the screenshots decide each row. The earlier
 | Physical spacing (W6 `margin-left`, or `margin-right` under `.lab-rtl`; W8 the padding form) | Works, in LTR and RTL | `.kit-gap-s { margin-left: 6px }`, `.kit-rtl .kit-gap-s { margin-left: 0; margin-right: 6px }`. The build stamp is a left-to-right flex row, so it keeps `margin-left` inside an Arabic panel |
 | Arabic and a Latin word in one run (the font rows) | The run's shaping breaks when a Latin word shares the span | Latin words inside Arabic copy become `<bdi dir="ltr">` runs (`html.ts isolateLatin()` / `prose()`, applied in `withCommands`, `auto`, progress status, dialog and empty-state titles). An English term in parentheses stays as it is. A test checks that the Arabic gallery has no bare Latin word outside a left-to-right run |
 
-Still to see live (spike 0.1.8 style guide): whether the `box-shadow` blur paints, and whether the gap margins, the ink
-fills and the disabled colours look right across the whole kit.
+Seen live in the spike 0.1.8 style guide (`docs/adobe/evidence/ui-kit/uxp-live-018/`, AR 280 / 340 and EN 480):
+
+| Technique | Seen | Decision (kit, spike 0.1.9) |
+|---|---|---|
+| `box-shadow` blur (`--twn-cta-glow`, `0 0 10px`) on the main CTA | **No visible glow** around Approve | The CTA wears `--twn-cta-ring` (`0 0 0 1px #D95C9B`): a spread with no blur, the focus ring's proven form, used **alone** (a multi-shadow is unproven). `--twn-cta-glow` stays defined. To confirm in the next live shot. Recorded in the phase 6 plan, Task 2 |
+| Progress fill in Arabic (a flex row, mirrored through `direction` only) | Fills from the **left** (`uxp-ar-280-02.png`, `uxp-ar-340-02.png`), although the step strip and the progress head mirror correctly | Placed physically under `.kit-rtl`: the track is `direction: ltr; justify-content: flex-end` and the fill has `margin-left: auto`, so it fills from the right in UXP and Chromium alike |
+| Gap margins, ink fills, disabled colours, `<div role="button">` controls | Right across the whole kit | Kept |
 
 ## Product panel in real UXP
 

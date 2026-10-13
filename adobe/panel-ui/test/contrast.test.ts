@@ -27,8 +27,8 @@ function colour(spec: string): Rgb {
 function value(name: string): string {
   const v = tokens.get(name);
   assert.ok(v, `token ${name} is not in brand/tokens.css`);
-  // the focus token is a box-shadow: its colour is the last part
-  return name === "--twn-focus" ? v.split(/\s+/).pop()! : v;
+  // the focus ring and the CTA ring are box-shadows: the colour is the last part
+  return name === "--twn-focus" || name === "--twn-cta-ring" ? v.split(/\s+/).pop()! : v;
 }
 
 /** The card: glass over the black background (about #141414), as on thewhynot.ai (Addendum B §B2, magnific-brand
@@ -67,6 +67,7 @@ const PAIRS: readonly [string, string, number, string][] = [
   ["--twn-on-error", "--twn-error", TEXT, "failed step dot"],
   ["--twn-focus", "--twn-bg", NON_TEXT, "focus ring"],
   ["--twn-focus", "--twn-surface", NON_TEXT, "focus ring on a solid panel"],
+  ["--twn-cta-ring", "--twn-bg", NON_TEXT, "the main CTA's 1 px ring (live 0.1.8: the blur glow painted nothing)"],
   // the glass card (glass over black): every text token reads at 4.5:1 or better on it, icons at 3:1
   ["--twn-text", GLASS, TEXT, "glass card: text"],
   ["--twn-text-muted", GLASS, TEXT, "glass card: secondary text"],
@@ -76,6 +77,7 @@ const PAIRS: readonly [string, string, number, string][] = [
   ["--twn-warn", GLASS, TEXT, "glass card: warn text"],
   ["--twn-error", GLASS, TEXT, "glass card: error text"],
   ["--twn-focus", GLASS, NON_TEXT, "glass card: focus ring"],
+  ["--twn-cta-ring", GLASS, NON_TEXT, "glass card: the main CTA's ring"],
   ["--twn-ok", GLASS, NON_TEXT, "glass card: ok icon"],
   ["--twn-warn", GLASS, NON_TEXT, "glass card: warn icon"],
   ["--twn-error", GLASS, NON_TEXT, "glass card: error icon"],

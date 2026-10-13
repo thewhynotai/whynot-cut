@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAutoRunner, DEFAULT_VIEW, type AutoRunDeps, type GuideView, type RunMode, type RunSummary } from "../spike/src/autorun.ts";
+import { createAutoRunner, DEFAULT_VIEW, MAX_SCROLL, type AutoRunDeps, type GuideScroll, type GuideView, type RunMode, type RunSummary } from "../spike/src/autorun.ts";
 import {
   CONSENT_SUSPECT_MS,
   createLifecycle,
@@ -65,11 +65,11 @@ function memFs(initial: Record<string, string> = {}) {
   return fs as Record<string, unknown> & { files: Map<string, string> };
 }
 
-function autorun(request: Record<string, unknown>) {
+function autorun(request: Record<string, unknown>, scroll?: GuideScroll) {
   const fs = memFs({ [`${DIR}/run-request.json`]: JSON.stringify({ requested_at: iso(T0 - 1000), ...request }) });
   const runs: Array<{ id: string; mode: RunMode; view?: GuideView; args: number }> = [];
   let held = false;
-  const summary: RunSummary = { results_file: `${DIR}/results-x.json`, ok: true, pass: 7, fail: 1, na: 1 };
+  const summary: RunSummary = { results_file: `${DIR}/results-x.json`, ok: true, pass: 7, fail: 1, na: 1, ...(scroll ? { scroll } : {}) };
   const deps: AutoRunDeps = {
     fs: fs as AutoRunDeps["fs"],
     dir: DIR,
@@ -132,6 +132,75 @@ test("a bad style_guide view (or a view on another mode) is malformed: moved asi
   }
 });
 
+// ---- 0.1.9: the style guide's "scroll" (a full-page capture without a mouse wheel) ---------------------------------
+
+test("0.1.9 run-request style_guide with \"scroll\": run with it in the view; the done file records the guide's scroll region (top, scrollHeight, clientHeight)", async () => {
+  const h = autorun({ id: "sg-ar-340-s1200", mode: "style_guide", lang: "ar", width: 340, scroll: 1200 });
+  const scroll = { requested: 1200, top: 1200, scroll_height: 4321, client_height: 780 };
+  const out = await h.runner.poll();
+  assert.equal(out.kind, "ran");
+  assert.deepEqual(h.runs, [{ id: "sg-ar-340-s1200", mode: "style_guide", view: { lang: "ar", width: 340, scroll: 1200 }, args: 3 }]);
+  const done = JSON.parse(h.fs.files.get(`${DIR}/run-done-sg-ar-340-s1200.json`)!);
+  assert.deepEqual(done.view, { lang: "ar", width: 340, scroll: 1200 });
+  assert.equal(done.scroll, undefined, "this fake run reports no scroll, so the done file has none");
+  const h2 = autorun({ id: "sg-s0", mode: "style_guide", scroll: 0 }, scroll);
+  await h2.runner.poll();
+  assert.deepEqual(h2.runs[0]?.view, { ...DEFAULT_VIEW, scroll: 0 }, "0 is a valid offset (back to the top)");
+  assert.deepEqual(JSON.parse(h2.fs.files.get(`${DIR}/run-done-sg-s0.json`)!).scroll, scroll, "the done file records the region's scrollHeight");
+  // no scroll: the view carries none (the region is left where it is)
+  const h3 = autorun({ id: "sg-none", mode: "style_guide" });
+  await h3.runner.poll();
+  assert.equal("scroll" in (h3.runs[0]?.view ?? {}), false);
+});
+
+test("0.1.9: a bad \"scroll\" (negative, fractional, a string, too large) or a scroll on another mode is malformed: nothing runs", async () => {
+  for (const [i, bad] of [
+    { mode: "style_guide", scroll: -1 },
+    { mode: "style_guide", scroll: 12.5 },
+    { mode: "style_guide", scroll: "600" },
+    { mode: "style_guide", scroll: MAX_SCROLL + 1 },
+    { mode: "style_guide", scroll: null },
+    { mode: "full", scroll: 600 },
+    { mode: "css_lab", scroll: 600 },
+  ].entries()) {
+    const h = autorun({ id: `bad-scroll-${i}`, ...bad });
+    const out = await h.runner.poll();
+    assert.equal(out.kind, "malformed", JSON.stringify(bad));
+    assert.equal(h.runs.length, 0);
+  }
+});
+
+test("0.1.9 style guide scrollTo: scrolls the gallery's .kit-scroll region and reports scrollTop / scrollHeight / clientHeight; without a region or properties it reports nulls, never throws", () => {
+  const region = { scrollTop: 0, scrollHeight: 5000, clientHeight: 700 };
+  const asked: string[] = [];
+  const els = Object.fromEntries(["main", "guide", "frame", "host", "caption", "en", "ar", "w280", "w340", "w480", "back"].map((k) => [k, fakeEl()]));
+  const e = els as Record<string, ReturnType<typeof fakeEl> & { querySelector?: (s: string) => unknown }>;
+  e.host!.querySelector = (sel: string) => (asked.push(sel), region);
+  const dom = (k: string) => e[k] as unknown as HTMLElement;
+  const g = createStyleGuide({
+    main: dom("main"), guide: dom("guide"), frame: dom("frame"), host: dom("host"), caption: dom("caption"),
+    buttons: { lang: { en: dom("en"), ar: dom("ar") }, width: { 280: dom("w280"), 340: dom("w340"), 480: dom("w480") }, back: dom("back") },
+  });
+  g.show({ lang: "ar", width: 340 });
+  assert.deepEqual(g.scrollTo(1800), { requested: 1800, top: 1800, scroll_height: 5000, client_height: 700 });
+  assert.deepEqual(asked, [".kit-scroll"], "the gallery's own scroll region");
+  assert.equal(region.scrollTop, 1800);
+  assert.deepEqual(g.scrollTo(), { requested: null, top: 1800, scroll_height: 5000, client_height: 700 }, "no offset: measured, not moved");
+  assert.deepEqual(g.scrollTo(-5).requested, 0);
+  // a host without querySelector or scroll properties (the plain fake): nulls, no throw
+  const plain = Object.fromEntries(["main", "guide", "frame", "host", "caption", "en", "ar", "w280", "w340", "w480", "back"].map((k) => [k, fakeEl()]));
+  const p = (k: string) => plain[k] as unknown as HTMLElement;
+  const g2 = createStyleGuide({
+    main: p("main"), guide: p("guide"), frame: p("frame"), host: p("host"), caption: p("caption"),
+    buttons: { lang: { en: p("en"), ar: p("ar") }, width: { 280: p("w280"), 340: p("w340"), 480: p("w480") }, back: p("back") },
+  });
+  assert.deepEqual(g2.scrollTo(), { requested: null, top: null, scroll_height: null, client_height: null });
+  // the spike scrolls at the END of a style_guide run (after the probes' stages are gone) and returns it to the runner
+  const spike = read("spike/src/spike.ts");
+  assert.match(spike, /counts = sectionCounts\(sections\);\s*\/\/[^\n]*\n\s*guideScroll = guide\?\.scrollTo\(view\?\.scroll\);/);
+  assert.match(spike, /\.\.\.\(guideScroll \? \{ scroll: guideScroll \} : \{\}\)/);
+});
+
 // ---- manifest, version, page --------------------------------------------------------------------------------------
 
 test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback network list (= LOOPBACK_DOMAINS), whynotcut scheme; the product lists the two measured localhost entries", () => {
@@ -139,8 +208,8 @@ test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback netw
   const product = JSON.parse(read("plugin/manifest.json"));
   assert.equal(m.name, "WhyNot Cut Spike");
   assert.equal(m.entrypoints[0].label.default, "WhyNot Cut Spike");
-  assert.equal(m.version, "0.1.8");
-  assert.match(read("spike/src/version.ts"), /SPIKE_VERSION = "0.1.8"/);
+  assert.equal(m.version, "0.1.9");
+  assert.match(read("spike/src/version.ts"), /SPIKE_VERSION = "0.1.9"/);
   assert.deepEqual(m.requiredPermissions.network.domains, [...LOOPBACK_DOMAINS]);
   // the port-wildcard forms, plus the exact port-less forms (two of which failed in round 1: parity W1/W2)
   for (const d of ["ws://127.0.0.1:*", "ws://localhost:*", "http://127.0.0.1:*", "http://localhost:*", "ws://127.0.0.1", "http://127.0.0.1"]) assert.ok(LOOPBACK_DOMAINS.includes(d), d);
@@ -221,7 +290,7 @@ test("style guide view: shows the kit gallery for the chosen language in a 280 /
   assert.equal(e.frame!.style.width, "480px");
   assert.match(e.host!.innerHTML, /class="kit-root kit-rtl" dir="rtl" lang="ar"/);
   assert.equal(e.caption!.textContent, guideCaption({ lang: "ar", width: 480 }));
-  assert.match(e.caption!.textContent, /AR - 480 px - spike 0\.1\.8/);
+  assert.match(e.caption!.textContent, /AR - 480 px - spike 0\.1\.9/);
   assert.equal(e.ar!.className, "seg on");
   assert.equal(e.w480!.className, "seg on");
   e.en!.click();
@@ -511,7 +580,7 @@ test("openExternal: called once with whynotcut://engine/start; resolved value, e
   const r = await runProbe(openExternalProbe, { uxp, ppro: {}, fs: {}, home: HOME, now: () => t });
   assert.deepEqual(calls.map((c) => c.url), [ENGINE_START_URL]);
   assert.equal(ENGINE_START_URL, "whynotcut://engine/start");
-  assert.match(String(calls[0]!.why), /WhyNot Cut spike 0\.1\.8/);
+  assert.match(String(calls[0]!.why), /WhyNot Cut spike 0\.1\.9/);
   assert.equal(r.ok, true);
   const d = r.detail as Record<string, unknown>;
   assert.equal(d.settled, "resolved");

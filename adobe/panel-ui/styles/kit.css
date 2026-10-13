@@ -10,13 +10,16 @@
    - icons: no fill attribute and no currentColor (UXP paints nothing); the fill is set here through .kit-ink-* classes;
    - the whitespace between two flex children is dropped: a gap is .kit-gap-s, a PHYSICAL margin (margin-left in LTR,
      margin-right under .kit-rtl); margin-inline-start does nothing in UXP;
-   - the main CTA's glow is a box-shadow (--twn-cta-glow): UXP cannot clip a gradient ring to a radius;
+   - the main CTA's mark is a solid 1 px ring (--twn-cta-ring, a box-shadow spread with no blur): UXP cannot clip a
+     gradient ring to a radius, and the 10 px blur of --twn-cta-glow painted no visible glow (live 0.1.8 shots);
    - @font-face loads nothing in UXP: the token stacks fall back to system fonts (brand family first);
    - no inline-flex / inline-block inside running text: chips and command chips sit on their own flex rows;
    - <bdi> is set inline here; an explicit height chain (root > scroll) for the one scroll region;
    - hit targets at least 32 px; the focus ring is #9D6BFF (--twn-focus);
    - Arabic: CSS direction on the root (.kit-rtl), never sp-theme dir. The DOM order is the reading order, so flex rows
-     mirror once through direction (no row-reverse anywhere); directional icons are mirrored by the renderer.
+     mirror once through direction (no row-reverse anywhere); directional icons are mirrored by the renderer. One
+     exception, from the live 0.1.8 shots: the progress fill did NOT mirror in UXP (it filled from the left), so under
+     .kit-rtl the track is pinned physically (direction ltr + justify-content flex-end + margin-left auto on the fill).
    Cards are glass over the black background (the ruling in brand/tokens.css); the kit never paints --twn-surface. */
 
 .kit-root, .kit-root * { box-sizing: border-box; }
@@ -261,8 +264,10 @@
 .kit-btn-secondary:hover { border-color: var(--twn-primary-text); }
 .kit-btn-danger { background: var(--twn-error); color: var(--twn-on-error); }
 .kit-btn-block { width: 100%; }
-/* the main CTA's glow: a box-shadow (UXP cannot clip a gradient ring to a radius; spike 0.1.7) */
-.kit-btn-glow { box-shadow: var(--twn-cta-glow); }
+/* the main CTA's mark: a solid 1 px pink ring (a spread, no blur: the focus ring's proven form). UXP cannot clip a
+   gradient ring to a radius (spike 0.1.7), and --twn-cta-glow's 10 px blur painted nothing visible (live 0.1.8 shots).
+   One shadow only (a multi-shadow is unproven in UXP); the focus ring replaces it while focused. */
+.kit-btn-glow { box-shadow: var(--twn-cta-ring); }
 /* disabled: explicit muted colours (the lab's opacity on a div computed .45 but painted at full strength) */
 .kit-btn.kit-btn-disabled, .kit-btn.kit-btn-disabled:hover {
   background: var(--twn-surface-2);
@@ -363,7 +368,7 @@
 .kit-step-failed { color: var(--twn-text); }
 .kit-step-failed .kit-step-dot { background: var(--twn-error); color: var(--twn-on-error); }
 
-/* ---- progress (gradient fill, a flex row so it fills from the start side) ---- */
+/* ---- progress (gradient fill from the start side: the left in English, the right in Arabic) ---- */
 .kit-progress { display: flex; flex-direction: column; align-items: stretch; width: 100%; margin: 0 0 10px 0; }
 .kit-progress-head { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; }
 .kit-progress-status { display: block; flex: 1 1 auto; min-width: 0; margin: 0 2px; font-weight: var(--twn-weight-semibold); }
@@ -371,6 +376,11 @@
 .kit-track { display: flex; flex-direction: row; width: 100%; height: 6px; margin: 8px 0 0 0; border-radius: 3px; background: var(--twn-track); overflow: hidden; }
 .kit-fill { display: block; flex: 0 0 auto; height: 100%; background: var(--twn-gradient); border-radius: 3px; }
 .kit-track-indeterminate .kit-fill { opacity: .6; }
+/* Arabic fills from the RIGHT. Live UXP (0.1.8 shots, AR 280 / 340) did not mirror this row through direction and
+   filled from the left, so the fill is placed physically: the track is an LTR row packed to its end (the right), and the
+   fill's left margin takes the free space. Both are physical, so UXP and Chromium agree. */
+.kit-rtl .kit-track { direction: ltr; justify-content: flex-end; }
+.kit-rtl .kit-fill { margin-left: auto; margin-right: 0; }
 .kit-progress-foot { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin: 6px 0 0 0; }
 .kit-meta { display: flex; flex-direction: row; align-items: baseline; color: var(--twn-text-muted); font-size: 11px; }
 .kit-meta-k { display: block; margin: 0 2px; }

@@ -171,8 +171,9 @@ test("the shipped index.js boots like Premiere would run it: classic script, hos
   await new Promise((r) => setTimeout(r, 20));
   assert.ok(!required.includes("premierepro"), "premierepro waits for a button press or an engine command");
   assert.deepEqual([...new Set(required)].sort(), ["fs", "os", "uxp"], "only uxp, and fs / os for engine.json, at startup");
-  // click, input, and keydown (Enter / Space on a kit control, panel-ui/src/kit/activate.ts)
-  assert.deepEqual(listeners.sort(), ["click", "input", "keydown"]);
+  // click, input, keydown + keyup (Enter on keydown, Space on keyup on a kit control, panel-ui/src/kit/activate.ts) and
+  // mousedown (a press on a disabled control does not take the focus)
+  assert.deepEqual(listeners.sort(), ["click", "input", "keydown", "keyup", "mousedown"]);
   const html = painted[painted.length - 1] ?? "";
   assert.match(html, /not running/);
   assert.match(html, /Premiere Pro 26\.5\.2/);

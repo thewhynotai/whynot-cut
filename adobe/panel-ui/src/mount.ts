@@ -18,7 +18,7 @@ import { initialUi, render, renderError, renderLoading } from "./render.ts";
 import type { FixAction, Notice, UiState } from "./render.ts";
 import type { StringKey } from "./i18n.ts";
 import type { LogLine, PanelDataSource, PanelState, Result } from "./source.ts";
-import { kitDisabled, kitKeyHandler } from "./kit/activate.ts";
+import { kitControlSelector, kitDisabled, kitKeyHandler, kitPointerGuard } from "./kit/activate.ts";
 
 /** the panel's own log lines kept (the source keeps its own) */
 const LOCAL_LOG_MAX = 50;
@@ -155,6 +155,8 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       const doc = root.ownerDocument;
       const active = doc?.activeElement ?? null;
       const field = active?.getAttribute ? active.getAttribute("data-field") : null;
+      // the control the editor just used (a click or a key focuses it): found again by its data-action + key attributes
+      const control = !field && active?.getAttribute ? kitControlSelector(active) : null;
       const selStart = active?.selectionStart ?? null;
       const selEnd = active?.selectionEnd ?? null;
       logHeld(state);
@@ -165,6 +167,8 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
           el.focus();
           if (selStart !== null && selEnd !== null && el.setSelectionRange) el.setSelectionRange(selStart, selEnd);
         }
+      } else if (control && root.querySelector) {
+        root.querySelector(control)?.focus?.();
       }
     } catch (e) {
       showError("error.render", e);
@@ -426,8 +430,10 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
 
   root.addEventListener("click", onClick);
   root.addEventListener("input", onInput);
-  const onKey = kitKeyHandler(onClick); // Enter / Space on a kit control = its click (src/kit/activate.ts)
+  const onKey = kitKeyHandler(onClick); // Enter (keydown) / Space (keyup) on a kit control = its click (src/kit/activate.ts)
   root.addEventListener("keydown", onKey);
+  root.addEventListener("keyup", onKey);
+  root.addEventListener("mousedown", kitPointerGuard); // a disabled control does not take the focus
 
   // Subscribe first, then ask for the snapshot: a change that lands in between is not lost, and a pushed
   // state that arrives before the snapshot answers wins (it is newer).
@@ -464,6 +470,8 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       root.removeEventListener("click", onClick);
       root.removeEventListener("input", onInput);
       root.removeEventListener("keydown", onKey);
+      root.removeEventListener("keyup", onKey);
+      root.removeEventListener("mousedown", kitPointerGuard);
     },
   };
 }

@@ -1,8 +1,11 @@
-// Hands-free auto-run (spike 0.1.5; 0.1.6 adds "style_guide", 0.1.7 "css_lab"). On panel load and then every POLL_MS
-// while the panel is open, look for <spike dir>/run-request.json =
+// Hands-free auto-run (spike 0.1.5; 0.1.6 adds "style_guide", 0.1.7 "css_lab", 0.1.9 the style guide's "scroll"). On
+// panel load and then every POLL_MS while the panel is open, look for <spike dir>/run-request.json =
 //   {"id": "<string>", "mode": "full" | "keep_open" | "style_guide" | "css_lab", "requested_at": "<iso>"}
-// and, for "style_guide" only, the optional view {"lang": "en" | "ar", "width": 280 | 340 | 480}. "css_lab" takes no
-// view: the lab uses the panel's own width (the controller sizes the panel, ~560 css px).
+// and, for "style_guide" only, the optional view {"lang": "en" | "ar", "width": 280 | 340 | 480, "scroll": <px>}.
+// "scroll" (0.1.9, a whole number of px, 0..MAX_SCROLL) scrolls the guide's scroll region to that offset once the run
+// is done, so the controller captures the lower components without a mouse wheel; the done file then records `scroll`
+// {requested, top, scroll_height, client_height}. "css_lab" takes no view: the lab uses the panel's own width (the
+// controller sizes the panel, ~560 css px).
 // A fresh request with an unseen id is claimed, run once, and answered with run-done-<id>.json. Claude writes the
 // request and reads the done file + results file; nobody clicks. Pure logic over injected fs / clock / run, so the
 // tests drive it with fakes. Nothing in here may throw out of poll(): a bad request must never crash the panel.
@@ -22,8 +25,21 @@ export type GuideWidth = (typeof GUIDE_WIDTHS)[number];
 export interface GuideView {
   lang: GuideLang;
   width: GuideWidth;
+  /** 0.1.9: the offset (px) the guide's scroll region is scrolled to after the run; absent = left where it is */
+  scroll?: number;
 }
 export const DEFAULT_VIEW: GuideView = { lang: "en", width: 340 };
+/** the largest "scroll" a request may ask for (the guide is a few thousand px tall; the region clamps it anyway) */
+export const MAX_SCROLL = 100_000;
+
+/** Where the style guide's scroll region stands after a run (0.1.9): scrollTop, scrollHeight and clientHeight in px
+ *  (null when the region could not be measured), and the offset the request asked for (null = none). */
+export interface GuideScroll {
+  requested: number | null;
+  top: number | null;
+  scroll_height: number | null;
+  client_height: number | null;
+}
 
 export interface RunSummary {
   results_file: string | null;
@@ -34,6 +50,8 @@ export interface RunSummary {
   na: number;
   /** only when ok is false */
   error?: string;
+  /** style_guide only (0.1.9): the guide's scroll region after the run */
+  scroll?: GuideScroll;
 }
 
 export interface AutoRunDeps {
@@ -98,12 +116,19 @@ function validate(value: unknown): ParsedRequest | string {
   const requestedMs = Date.parse(r.requested_at);
   if (!Number.isFinite(requestedMs)) return '"requested_at" is not a valid ISO time';
   if (mode !== "style_guide") {
-    if (r.lang !== undefined || r.width !== undefined) return '"lang" and "width" belong to mode "style_guide" only';
+    if (r.lang !== undefined || r.width !== undefined || r.scroll !== undefined) return '"lang", "width" and "scroll" belong to mode "style_guide" only';
     return { id: r.id, mode, requested_at: r.requested_at, requestedMs };
   }
   if (r.lang !== undefined && r.lang !== "en" && r.lang !== "ar") return '"lang" must be "en" or "ar"';
   if (r.width !== undefined && !(GUIDE_WIDTHS as readonly unknown[]).includes(r.width)) return '"width" must be 280, 340 or 480';
-  const view: GuideView = { lang: (r.lang as GuideLang | undefined) ?? DEFAULT_VIEW.lang, width: (r.width as GuideWidth | undefined) ?? DEFAULT_VIEW.width };
+  if (r.scroll !== undefined && !(typeof r.scroll === "number" && Number.isInteger(r.scroll) && r.scroll >= 0 && r.scroll <= MAX_SCROLL)) {
+    return `"scroll" must be a whole number of px from 0 to ${MAX_SCROLL}`;
+  }
+  const view: GuideView = {
+    lang: (r.lang as GuideLang | undefined) ?? DEFAULT_VIEW.lang,
+    width: (r.width as GuideWidth | undefined) ?? DEFAULT_VIEW.width,
+    ...(typeof r.scroll === "number" ? { scroll: r.scroll } : {}),
+  };
   return { id: r.id, mode, requested_at: r.requested_at, requestedMs, view };
 }
 
@@ -262,7 +287,7 @@ export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
     }
     ran.add(id);
     const startedAt = iso(deps.now());
-    deps.setStatus(`Auto-run ${id} claimed - running ${mode}${view ? ` (${view.lang}, ${view.width} px)` : ""}`);
+    deps.setStatus(`Auto-run ${id} claimed - running ${mode}${view ? ` (${view.lang}, ${view.width} px${view.scroll !== undefined ? `, scroll ${view.scroll} px` : ""})` : ""}`);
     let summary: RunSummary;
     try {
       summary = await (view ? deps.run(mode, id, view) : deps.run(mode, id));
@@ -278,6 +303,7 @@ export function createAutoRunner(deps: AutoRunDeps): AutoRunner {
       pass: summary.pass,
       fail: summary.fail,
       na: summary.na,
+      ...(summary.scroll ? { scroll: summary.scroll } : {}),
       started_at: startedAt,
       finished_at: iso(deps.now()),
       ...(summary.ok || !summary.error ? {} : { error: summary.error }),

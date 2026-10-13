@@ -7,7 +7,8 @@ import type { IconName } from "./icons.ts";
 
 export interface EmptyOpts {
   title: string;
-  /** what to do next; `paths` and `commands` stay left-to-right */
+  /** what to do next, in plain words (never a command: those live in the log drawer and Copy diagnostics, C1.4);
+   *  a `path` or a backticked `name` stays left-to-right */
   text: string;
   action: Act;
   /** default true: the one action is the screen's primary button */

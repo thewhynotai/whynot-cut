@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { startShell } from "../src/shell.ts";
 import type { ShellDoc, ShellEnv } from "../src/shell.ts";
 import { OfflineSource } from "../src/offline-source.ts";
@@ -69,13 +72,17 @@ test("startShell hands the host's version and UI locale to the source factory", 
   assert.match(root!.innerHTML, /dir="rtl"/);
 });
 
-test("startShell applies the host background to --twn-bg only when it is a usable dark colour", async () => {
+test("startShell never takes the host background: Addendum B is always #000 (--twn-bg from brand/tokens.css); no host theme module", async () => {
+  // even a usable dark host colour is ignored: the panel is the website's black, not Premiere's grey
   const a = makeEnv({ uxp: { host: { version: "1", getBackgroundColor: () => "#2b2b2b" } } });
   await startShell(a.env).ready;
-  assert.equal(a.vars["--twn-bg"], "#2b2b2b");
+  assert.deepEqual(a.vars, {}, "the shell sets no colour variable");
   const b = makeEnv(); // returns {}
   await startShell(b.env).ready;
   assert.deepEqual(b.vars, {});
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "shell.ts"), "utf8");
+  assert.doesNotMatch(src, /applyHostTheme|theme\.ts|getBackgroundColor|setProperty/, "the old host-theme override is gone");
+  assert.equal(existsSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "theme.ts")), false, "src/theme.ts is removed");
 });
 
 test("startShell copes with require('uxp') missing: still mounts, host version unknown", async () => {

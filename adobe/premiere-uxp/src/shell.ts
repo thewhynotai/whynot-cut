@@ -20,13 +20,13 @@ import { showCopyText } from "./copy-fallback.ts";
 import type { FallbackDoc, FallbackEl } from "./copy-fallback.ts";
 import { languageOf } from "./offline-source.ts";
 import type { OfflineInfo } from "./offline-source.ts";
-import { applyHostTheme } from "./theme.ts";
-import type { ThemeDoc } from "./theme.ts";
 import { createUxpHost } from "./uxp-host.ts";
 import type { UxpShell } from "./uxp-host.ts";
 import type { premierepro as Ppro } from "@adobe/premierepro";
 
-export interface ShellDoc extends FallbackDoc, ThemeDoc {}
+/** The page the shell writes into. The background is never the host's: Addendum B is always #000 (brand/tokens.css
+ *  --twn-bg), so the shell reads no host theme and sets no colour variable. */
+export interface ShellDoc extends FallbackDoc {}
 
 /** The panel's show / hide / destroy, as UXP's entrypoints.setup reports them. */
 export interface PanelLifecycle {
@@ -104,7 +104,6 @@ export function startShell(env: ShellEnv): Shell {
   }
   try {
     const uxp = tryRequire<UxpModule & { shell?: UxpShell }>(env, "uxp");
-    applyHostTheme(doc, uxp?.host);
     const info: OfflineInfo = { hostVersion: uxp?.host?.version, uiLocale: uxp?.host?.uiLocale };
 
     // The adapter reports errors in the panel's language; the source decides it, the locale is the first guess.

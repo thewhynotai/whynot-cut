@@ -56,9 +56,9 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 // ---- version + run-request mode "css_lab" -------------------------------------------------------------------------
 
-test("spike 0.1.7: manifest and SPIKE_VERSION say the current version (0.1.8); css_lab is a run mode", () => {
-  assert.equal(JSON.parse(read("spike/manifest.json")).version, "0.1.8");
-  assert.match(read("spike/src/version.ts"), /SPIKE_VERSION = "0.1.8"/);
+test("spike 0.1.7: manifest and SPIKE_VERSION say the current version (0.1.9); css_lab is a run mode", () => {
+  assert.equal(JSON.parse(read("spike/manifest.json")).version, "0.1.9");
+  assert.match(read("spike/src/version.ts"), /SPIKE_VERSION = "0.1.9"/);
   assert.deepEqual([...RUN_MODES], ["full", "keep_open", "style_guide", "css_lab"]);
 });
 
@@ -282,10 +282,10 @@ test("lab view: show hides the probe view and the style guide and renders the la
   assert.equal(v.isOpen(), true);
   assert.deepEqual([e.main!.style.display, e.guide!.style.display, e.lab!.style.display], ["none", "none", "flex"]);
   assert.equal(e.host!.innerHTML, labHtml());
-  assert.equal(e.caption!.textContent, "CSS lab - spike 0.1.8");
+  assert.equal(e.caption!.textContent, "CSS lab - spike 0.1.9");
   v.caption(561.4);
   assert.equal(e.caption!.textContent, labCaption(561.4));
-  assert.match(e.caption!.textContent, /CSS lab - spike 0\.1\.8 - 561 px/);
+  assert.match(e.caption!.textContent, /CSS lab - spike 0\.1\.9 - 561 px/);
   v.hide(false);
   assert.equal(e.lab!.style.display, "none");
   assert.equal(e.main!.style.display, "none", "hide(false): the style guide takes over");
@@ -362,7 +362,7 @@ test("runCssLab: results.lab carries every section and variant, settles layout +
   const r = await runCssLab(dom, env, { layoutSettleMs: 7, fontSettleMs: 9 });
   assert.deepEqual(waits, [7, 9], "a layout pass, then the fonts settle, before anything is measured");
   assert.equal(r.lab, "css_lab");
-  assert.equal(r.spike, "0.1.8");
+  assert.equal(r.spike, "0.1.9");
   assert.equal(r.host_width_px, 560);
   assert.deepEqual(Object.keys(r.facts), ["typeof_FontFace", "sp_button_defined"]);
   for (const s of LAB_SECTIONS) assert.ok(s in r, s);
@@ -641,6 +641,6 @@ test("lifecycleWriter: makes the spike folder before writing lifecycle.json (a f
   await new Promise((r) => setTimeout(r, 20));
   assert.ok(fs.dirs.has(DIR), "ensureDir made the folder");
   const body = JSON.parse(fs.files.get(`${DIR}/lifecycle.json`)!);
-  assert.equal(body.spike, "0.1.8");
+  assert.equal(body.spike, "0.1.9");
   assert.equal(body.events[0].event, "script.loaded");
 });

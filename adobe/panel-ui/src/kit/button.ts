@@ -3,8 +3,9 @@
 // <div role="button" tabindex="0"> (html.ts control(): UXP paints a <button> as Premiere's native grey control), at
 // least 32 px with a 16 px (half-height) radius, never 999 (kit.css), carries the focus-ring class and a data-action
 // the shell reads by event delegation; Enter and Space activate it (activate.ts). Disabled is aria-disabled + the
-// kit-btn-disabled class + tabindex -1. The main CTA may get the glow: a box-shadow (--twn-cta-glow), because UXP
-// cannot clip a gradient ring to a radius (spike 0.1.7). A directional icon (chevron-start / chevron-end) needs the
+// kit-btn-disabled class + tabindex -1. The main CTA may get the glow class: a solid 1 px pink ring (--twn-cta-ring, a
+// box-shadow), because UXP cannot clip a gradient ring to a radius (spike 0.1.7) and the 10 px blur of --twn-cta-glow
+// painted nothing visible (live 0.1.8 shots). A directional icon (chevron-start / chevron-end) needs the
 // panel's direction (rtl), required by the type and checked at run time, so a chevron never points the wrong way. An
 // icon next to a label: the label carries kit-gap-s (UXP and flexbox drop the whitespace between flex children).
 import { control, esc, join, trusted } from "./html.ts";

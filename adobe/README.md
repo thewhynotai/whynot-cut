@@ -63,7 +63,25 @@ Match names are discovered at runtime (component chain and filter lists are dump
 The spike manifest (only the spike, not the product plugin) also requests `clipboard: readAndWrite` so **Copy results** works;
 without it `navigator.clipboard` throws. Nothing but the Copy handler touches the clipboard API. Premiere returns
 `project.path` as `\\?\D:/...` (long-path prefix, mixed slashes); the safety checks strip `\\?\`, `//?/` and `\\?\UNC\` first.
-Bump `version` in `spike/manifest.json` (and `SPIKE_VERSION` in `spike/src/spike.ts`) for every rebuild: UPIA replaces only a newer version.
+Bump `version` in `spike/manifest.json` (and `SPIKE_VERSION` in `spike/src/version.ts`, the one source the page, the results
+file and the link probe read) for every rebuild: UPIA replaces only a newer version.
+
+### Hands-free runs (`run-request.json`) and the spike's views
+
+The spike polls `~/.whynot-cut/uxp-spike/run-request.json` on load and every 5 s while its panel is open, so the controller
+runs it without a click: write the request, wait for `run-done-<id>.json`, read it and the results file it names. A request
+is `{"id": "<letters, digits, . _ ->", "mode": "<mode>", "requested_at": "<ISO time>"}`; it is claimed once (an id never
+runs twice), ignored after 30 minutes, and a malformed one is moved aside with a `run-error-<stamp>.json` saying why.
+
+| `mode` | What it runs | Stays on screen |
+|---|---|---|
+| `full` | `ui_probes` + `eco_probes`, every Premiere probe, then `openExternal` last | the main view |
+| `keep_open` | the same without save/close/open and without `openExternal`: the scratch project stays open | the main view |
+| `style_guide` | opens the **Style guide** (every `panel-ui` kit component, `kit/gallery.ts`), then `ui_probes` + `eco_probes`; no Premiere probe. Optional `"lang": "en" \| "ar"`, `"width": 280 \| 340 \| 480`, and (0.1.9) `"scroll": <px>`: after the run the guide's scroll region is scrolled to that offset, so the lower components (dialog, empty state, log drawer, frame grid, waveform, footer) can be captured without a mouse wheel. The done file records `scroll` `{requested, top, scroll_height, client_height}` (the region's `scrollTop` after the scroll, `scrollHeight`, `clientHeight`) | the style guide, until **Back** |
+| `css_lab` | opens the **CSS lab** (the UXP CSS measurements behind the kit's rules, `docs/adobe/uxp-parity.md`), writes `lab`, then `ui_probes`; takes no view (it uses the panel's own width) | the CSS lab, until **Back** |
+
+To page through the style guide, send one request per offset (0, then about one panel height more each time, up to the
+`scroll.scroll_height` the first done file reports) and capture the screen after each done file.
 
 ### Where the home folder comes from
 
@@ -79,13 +97,12 @@ spike. The manifest `version` must equal `whynot-cut/.claude-plugin/plugin.json`
 
 | File | What |
 |---|---|
-| `plugin/manifest.json`, `plugin/index.html`, `plugin/index.css` | package files; the page links `fonts.css`, `tokens.css` (copied from `brand/tokens.css`, the one token source), `panel.css` (from `panel-ui/styles/`) then `index.css` (shell-only: page background, the copy box); the build also copies `panel-ui/fonts/` (bundled OFL fonts) into the plugin and the spike |
+| `plugin/manifest.json`, `plugin/index.html`, `plugin/index.css` | package files; the page links, in this order, `tokens.css` (copied from `brand/tokens.css`, the one token source), `panel.css` and `kit.css` (from `panel-ui/styles/`; `kit.css` after `panel.css`, scoped to `.kit-root`) then `index.css` (shell-only: page background, the copy box). No `fonts.css` link: Premiere UXP loads no `@font-face` (see Fonts below); the build still copies `fonts.css` + `panel-ui/fonts/` (bundled OFL fonts) into the plugin and the spike for CEP / Chromium and the font-bundle test |
 | `src/main.ts` | entry: builds the environment (`require` of `premierepro`/`uxp` with literal calls, `document`, `navigator`) and calls `startShell`; picks the data source at build time |
-| `src/shell.ts` | `startShell(env)`: theme, data source, `UxpHost`, `mount(root, source, host)`; testable with fakes |
-| `src/offline-source.ts` | `OfflineSource`: the placeholder `PanelDataSource` until the engine daemon exists (T6.2): engine "not running", Host pill from `uxp.host.version` (`Application.version` is empty), language from `uxp.host.uiLocale`, no pipeline data, every action `ok:false` with `how: "In your Claude session run `reel doctor`."` (the panel renders a backticked command as a left-to-right run) |
+| `src/shell.ts` | `startShell(env)`: data source, `UxpHost`, `mount(root, source, host)`; testable with fakes. It reads no host theme: the panel is always the website's black (`--twn-bg` `#000000`, Addendum B), never Premiere's grey |
+| `src/offline-source.ts` | `OfflineSource`: the placeholder `PanelDataSource` until the engine daemon exists (T6.2): engine "not running", Host pill from `uxp.host.version` (`Application.version` is empty), language from `uxp.host.uiLocale`, no pipeline data, every action `ok:false` with a plain-words `how` ("Open your Claude session to start the engine, then wait a moment.", in Arabic for an Arabic UI). Never a command: the editor's screen shows sentences and one fix button; commands live in the log drawer and Copy diagnostics (Addendum C1.4) |
 | `src/uxp-host.ts` | `createUxpHost`: `setPlayerPosition` (active sequence, `TickTime.createWithSeconds`), `openInSourceMonitor` (`SourceMonitor.openFilePath`), `revealPath` ("Reveal folder": `uxp.shell.openPath` on the native path, returns `"done"` -> "Opened." notice, else a visible, selected path box and `"shown"`), `copyText` ("Copy diagnostics": `navigator.clipboard`, `"done"` -> "Copied." notice, else a visible, selected box). The box is a normal outcome, not an error (permission or consent refused). Paths lose the `\\?\` prefix and use backslashes on Windows (`nativePath`) |
 | `src/copy-fallback.ts` | the "copy this" box shown when the clipboard (or opening a folder) is not available |
-| `src/theme.ts` | `uxp.host.getBackgroundColor()` -> `--twn-bg`; `{}` / missing / light colours keep the brand dark default |
 
 None of the host adapter's calls edit the project, so none runs inside `lockedAccess`/`executeTransaction`; the build (T6.3) does.
 
@@ -149,7 +166,39 @@ Open the dev harness over http (a `file://` page works too in most browsers):
 | `src/actions.ts` | the host requests the buttons send (checked against the v4 action schemas in tests) and the `rebuild` intent (`PanelDataSource.rebuild`: the daemon expands it into a full engine rebuild; the panel never sends `build_project`) |
 | `i18n/en.json`, `i18n/ar.json`, `src/i18n.ts` | the ONE string table (identical keys; tests fail on a missing key or a hard-coded string in the render code); `i18n.ts` only loads and types it (AR is typed against EN's keys) |
 | `src/monogram.ts` | header monogram = `premiere-uxp/icons/dark/icon-48.png` inlined as a data URI (a test fails on drift) |
-| `../brand/tokens.css`, `styles/fonts.css`, `fonts/`, `styles/panel.css` | Addendum B brand tokens (always dark; copied at build time, never duplicated), `@font-face` for Syne / Inter / IBM Plex Sans Arabic / IBM Plex Mono from bundled OFL files (stacks fall back if a host ignores them), the panel styles (colours only via tokens; flexbox only; RTL by `direction` on `.twn-rtl`) |
+| `../brand/tokens.css`, `styles/fonts.css`, `fonts/`, `styles/panel.css`, `styles/kit.css` | Addendum B brand tokens (always dark; copied at build time, never duplicated), `@font-face` for the bundled OFL fonts (CEP / Chromium only, see Fonts), the panel styles (colours only via tokens; flexbox only; RTL by `direction` on `.twn-rtl`), the component kit's styles (below) |
+| `src/kit/` | the component kit (below) |
+| `src/commands.ts` | the command detectors (below) |
 
-Shell contract: put `fonts.css`, `tokens.css` then `panel.css` on the page, give `mount()` an element (`asMountRoot(el)`), a data source and a
-`PanelHost { setPlayerPosition, openInSourceMonitor, revealPath, copyText }`. The panel never touches a host API itself.
+Shell contract: put `tokens.css`, `panel.css`, then `kit.css` on the page (a CEP / Chromium page puts `fonts.css` first), give
+`mount()` an element (`asMountRoot(el)`), a data source and a `PanelHost { setPlayerPosition, openInSourceMonitor, revealPath,
+copyText }`. The panel never touches a host API itself.
+
+### Fonts
+
+Premiere UXP loads **no** `@font-face` in any form (spike 0.1.7 CSS lab: relative, `plugin:/`, `.woff`, a runtime `<style>`,
+`FontFace`, a data URI). So every token stack in `brand/tokens.css` names the brand family first (Syne, Inter, IBM Plex Sans
+Arabic, IBM Plex Mono), then Windows / macOS system fonts, then a generic family; the panel must look right with the system
+fonts alone. The WhyNot Cut installer installs the brand fonts for the user, and then the same stacks pick them up. `fonts.css`
+(with `fonts/` and each OFL licence) is linked only by CEP / Chromium pages (the dev harness); no UXP page links it, though
+the bundles still carry it.
+
+### The component kit (`src/kit/`, `styles/kit.css`; B-T1)
+
+Pure functions that return escaped HTML, like `render.ts`: header, tabs, card, button, chip, step strip, progress, toast,
+dialog, empty state, checklist, log drawer, frame grid, waveform frame, root + footer. `kit/gallery.ts` renders all of them
+(the dev harness's `?scenario=kit` and the spike's Style guide). The UXP rules come from live Premiere renders and are tested
+in `test/kit-uxp.test.ts`: no `<button>` (a control is `<div role="button" tabindex="0">`; Enter on keydown and Space on
+keyup activate it, `kit/activate.ts`, wired by `mount.ts`), flexbox with physical margins (no `gap`, no `margin-inline`),
+icons filled by `.kit-ink-*` classes, the main CTA marked by a solid 1 px ring (`--twn-cta-ring`), and the Arabic progress
+fill pinned to the right physically. B-T2 moves `render.ts` onto the kit; `test/btn-debt.ts` pins the `<button` count in
+`render.ts`, which may only go down, to 0.
+
+### Commands never reach the editor's screen (`src/commands.ts`)
+
+One module, two detectors (Addendum C1.4, C2.2). `looksLikeCommand` / `commandIn` is high recall: the guard tests run it over
+our own strings (the string table, every source literal, the rendered panel; `test/no-commands-scan.ts`), where a false
+alarm only means rewording a sentence. `containsRuntimeCommand` is high precision: `runtimeText()` runs it on engine and host
+texts at run time (in `render.ts`, `mount.ts` and the kit's toast, progress and frame grid); "Claude Code" reads "Claude", and
+a text that still holds a command is never cut up: the panel shows its own sentence ("The details are in the log.") and the
+raw words go to the log drawer, token-scrubbed.

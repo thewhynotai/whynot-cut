@@ -73,7 +73,7 @@ test("spike 0.1.6+: the bundle carries kit.css (as-is), the string table (EN + A
   assert.match(js, /kit-root/);
   assert.match(js, /whynotcut:\/\/engine\/start/);
   const manifest = JSON.parse(new TextDecoder().decode(files["manifest.json"]));
-  assert.equal(manifest.version, "0.1.8");
+  assert.equal(manifest.version, "0.1.9");
   assert.ok(Array.isArray(manifest.requiredPermissions.network.domains));
 });
 
@@ -91,5 +91,5 @@ test("spike 0.1.7: the bundle carries the CSS lab - lab.css at the root, every f
   const js = new TextDecoder().decode(files["index.js"]);
   assert.match(js, /lab-root/);
   assert.match(js, /css_lab/);
-  assert.equal(JSON.parse(new TextDecoder().decode(files["manifest.json"])).version, "0.1.8");
+  assert.equal(JSON.parse(new TextDecoder().decode(files["manifest.json"])).version, "0.1.9");
 });

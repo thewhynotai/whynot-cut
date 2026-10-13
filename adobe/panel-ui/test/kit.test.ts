@@ -36,6 +36,7 @@ import {
   paragraph,
   primaryCount,
   progress,
+  prose,
   section,
   statusIcon,
   stepStrip,
@@ -306,6 +307,23 @@ test("progress: plain-language status, n of N as LTR runs, gradient bar with ari
   assert.match(progress({ t: EN, status: "x", n: -3, of: 10 }), /aria-valuenow="0"/);
   noScript(progress({ t: EN, status: EVIL, n: 1, of: 2, cancel: { action: EVIL, data: { id: EVIL } } }));
   assertControlsAccessible(html);
+});
+
+test("progress + frame grid: an engine status or frame label that holds a command is never shown (runtimeText, C2.2); 'Claude Code' reads 'Claude'; a plain sentence is shown whole", () => {
+  for (const [t, lang] of [[EN, "en"], [AR, "ar"]] as const) {
+    const held = progress({ t, status: "Premiere is slow. Run reel doctor --fix and press Try again.", n: 1, of: 4 });
+    assert.doesNotMatch(held, /reel doctor|--fix/, `${lang}: the command is not on screen, not even in aria-label`);
+    assert.match(held, new RegExp(`aria-label="${esc(t["text.held"])}"`), `${lang}: the panel's own sentence instead`);
+    assert.ok(held.includes(`<span class="kit-progress-status">${prose(t["text.held"])}</span>`), lang);
+    const frames = frameGrid({ t, frames: [{ t_s: 1, tc: "00:00:01:00", file: "f.png", label: "caption off-safe: run `reel previews C0239`", verdict: "fail" }] });
+    assert.doesNotMatch(frames, /reel previews|C0239/, `${lang}: the frame label's command is not on screen`);
+    assert.ok(frames.includes(`<div class="kit-frame-label">${auto(t["text.held"])}</div>`), lang);
+  }
+  assert.match(progress({ t: EN, status: "Waiting for Claude Code" }), /Waiting for Claude</);
+  assert.doesNotMatch(progress({ t: EN, status: "Waiting for Claude Code" }), /Claude Code/);
+  const plain = "The reel plan is ready";
+  assert.ok(progress({ t: EN, status: plain }).includes(`<span class="kit-progress-status">${prose(plain)}</span>`), "a normal sentence is never cut");
+  assert.ok(frameGrid({ t: EN, frames: [{ t_s: 1, tc: "x", file: "y", label: plain, verdict: "pass" }] }).includes(`<div class="kit-frame-label">${auto(plain)}</div>`));
 });
 
 // ---- toast ----
@@ -703,7 +721,7 @@ test("kit.css: every button class is a 32 px hit target; the focus ring is the #
   assert.match(cssRule(".kit-focus:focus"), /box-shadow: var\(--twn-focus\)/);
 });
 
-test("kit.css: the card is glass + border + 16 px radius; chips 999 px, controls 16 px; the gradient only on the hairline and progress fill; the CTA glow is a shadow", () => {
+test("kit.css: the card is glass + border + 16 px radius; chips 999 px, controls 16 px; the gradient only on the hairline and progress fill; the CTA mark is a solid ring shadow", () => {
   const cardRule = cssRule(".kit-card");
   assert.match(cardRule, /background: var\(--twn-glass\)/);
   assert.match(cardRule, /border: 1px solid var\(--twn-border\)/);
@@ -714,7 +732,7 @@ test("kit.css: the card is glass + border + 16 px radius; chips 999 px, controls
   for (const c of [".kit-btn", ".kit-badge", ".kit-lang-btn", ".kit-x"]) assert.match(cssRule(c), /border-radius: var\(--twn-radius-control\)/, c);
   const gradientUsers = cssRules().filter((r) => /var\(--twn-gradient\)/.test(r.body)).flatMap((r) => r.selectors).sort();
   assert.deepEqual(gradientUsers, [".kit-fill", ".kit-hairline"], "the gradient is the hairline and the progress fill only");
-  assert.match(cssRule(".kit-btn-glow"), /box-shadow: var\(--twn-cta-glow\)/, "the main CTA's glow is a shadow (UXP cannot clip a gradient ring)");
+  assert.match(cssRule(".kit-btn-glow"), /box-shadow: var\(--twn-cta-ring\)/, "the main CTA's mark is a solid ring shadow (UXP cannot clip a gradient ring; the blur glow paints nothing)");
   assert.match(cssRule(".kit-tab-on"), /border-bottom-color: var\(--twn-accent\)/, "pink active-tab underline");
   assert.match(cssRule(".kit-btn-primary"), /background: var\(--twn-primary\)/);
   assert.match(cssRule(".kit-btn-primary"), /color: var\(--twn-on-primary\)/);
