@@ -142,6 +142,14 @@ def version_refusal(st: dict, expect: str, app: str) -> dict | None:
         return None                                   # the legacy family (3.0 only)
     if proto == cep_bundle.PROTOCOL and have == expect:
         return None if libs_match(st) or _dev() else libs_refusal(app, st)
+    if proto is None and have and _ver(have) and _ver(have) < _ver(cep_bundle.LEGACY_VERSION):
+        # an older bridge of ours (before 3.1.1): the install replaces it without --force (T6.3 Task 6), and until
+        # then nothing is queued to it
+        error = (f"the WhyNot Cut extension running in {app} is the older {have}: update it (this engine needs "
+                 f"WhyNot Cut {expect})")
+        how = (f"Update the WhyNot Cut extension: run `reel ppro-install` (it replaces {have}), or install WhyNot Cut "
+               f"with its installer. Restart {app} to load WhyNot Cut {expect}.")
+        return {"ok": False, "error": error, "blocked": error, "how": how, "status": st}
     if proto is not None and proto != cep_bundle.PROTOCOL:
         error = (f"the WhyNot Cut extension running in {app} speaks protocol {proto}; this engine needs protocol "
                  f"{cep_bundle.PROTOCOL} (WhyNot Cut {expect})")

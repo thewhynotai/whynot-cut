@@ -5946,6 +5946,42 @@ class TestReleaseStub(unittest.TestCase):
         ctx = make_ctx(Path(self._td.name) / "home", base.load_components(self.comp), self.plugin)
         self.assertEqual(adobe._artefact(ctx, "bridge.cep.zxp"), zxp)
 
+    def test_the_zxp_sign_zxp_builds_is_pinned_and_installed_as_the_signed_bundle(self):
+        """3.0 T6.3 Task 6: the ZXP tools/sign_zxp.py builds (here with its test fakes: no real ZXPSignCmd) lands in
+        <plugin>/adobe under the name --fill-artefacts pins; the installer's adobe step extracts it, and the engine reads
+        that as the signed bundle 3.0.0, file for file what cep_bundle.install_zxp makes of the same ZXP."""
+        if str(SK.parent / "tools") not in sys.path:
+            sys.path.insert(0, str(SK.parent / "tools"))
+        import sign_zxp
+        from lib import cep_bundle
+        from test_sign_zxp import TEST_PIN, TOOL_BYTES, FakeStore, FakeZXPSignCmd
+        tmp = Path(self._td.name)
+        tool = tmp / "downloads" / "ZXPSignCmd.exe"
+        tool.parent.mkdir()
+        tool.write_bytes(TOOL_BYTES)
+        store, runner, quiet = FakeStore(), FakeZXPSignCmd(), (lambda m: None)
+        with mock.patch.dict(sign_zxp.PINS, {"test-x64": TEST_PIN}):
+            sign_zxp.setup(src=tool, home=tmp / "signing", runner=runner, store=store, key="test-x64", log=quiet)
+            built = sign_zxp.build(home=tmp / "signing", out_dir=self.adobe, runner=runner, store=store,
+                                   key="test-x64", log=quiet)
+        self.assertEqual([p.name for p in self.adobe.iterdir()], ["WhyNotCut-Bridge-3.0.0.zxp"])
+        r = self.fill()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        c = json.loads(self.comp.read_text(encoding="utf-8"))
+        self.assertEqual((c["bridge"]["cep"]["zxp"], c["bridge"]["cep"]["sha256"]),
+                         ("adobe/WhyNotCut-Bridge-3.0.0.zxp", built["sha256"]))
+        ctx = make_ctx(tmp / "home", base.load_components(self.comp), self.plugin)
+        res = system_module().step_adobe(ctx)
+        self.assertEqual(res.status, "ok", res.detail)
+        ext = Path(ctx.state.data["adobe"]["cep"]["path"])
+        got = cep_bundle.installed(ext)
+        self.assertEqual((got["id"], got["family"], got["version"], got["signed"]),
+                         ("ai.thewhynot.cut.bridge", "bundle", "3.0.0", True))
+        engine = cep_bundle.install_zxp(Path(built["zxp"]), tmp / "engine" / "cep" / cep_bundle.EXT_ID)["installed"]
+        files = lambda root: {p.relative_to(root).as_posix(): sha(p.read_bytes())  # noqa: E731
+                              for p in Path(root).rglob("*") if p.is_file()}
+        self.assertEqual(files(engine["path"]), files(ext))
+
     def test_fill_both_panels_keeps_the_other_placeholders(self):
         (self.adobe / "WhyNotCut-Bridge-3.0.0.zxp").write_bytes(b"zxp")
         (self.adobe / "WhyNotCut-Premiere-3.0.0.ccx").write_bytes(b"ccx")

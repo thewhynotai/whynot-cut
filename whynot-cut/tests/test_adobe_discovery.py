@@ -1000,6 +1000,18 @@ class BridgeInfoAndDoctor(unittest.TestCase):
         import inspect
         self.assertNotIn("bridge-config", inspect.getsource(onboard))
 
+    def test_an_older_bridge_of_ours_must_be_updated(self):
+        """T6.3 Task 6: an unsigned 3.1.0 of ours is replaced by the install (family legacy) but the queue no longer
+        drives it, so the doctor asks to update it (not the optional amber of 3.1.1)."""
+        self.legacy()
+        manifest = self.ext / "CSXS" / "manifest.xml"
+        manifest.write_text(manifest.read_text(encoding="utf-8").replace("3.1.1", "3.1.0"), encoding="utf-8")
+        fixes = self.doctor()["fixes"]
+        (f,) = [f for f in fixes if "WhyNot Cut extension 3.1.0" in f["item"]]
+        self.assertIn("update it", f["item"])
+        self.assertNotIn("optional", f)
+        self.assertFalse(any("older bridge" in x["item"] for x in fixes))
+
     def test_after_effects_alone_gets_the_extension_fix(self):
         items = [f["item"] for f in self.doctor(premiere=False, ae=True)["fixes"]]
         self.assertIn("WhyNot Cut extension (After Effects)", items)

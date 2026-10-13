@@ -24,7 +24,13 @@ the user's home, user-only, no secret, never inside the extension:
 `launcher` is <engine home>/bin/wnc-engine.cmd (Windows) or wnc-engine (macOS), the installer's shim, filled only when
 that file exists: the daemon starts the engine through it and nothing else (js/bridge.js; docs/adobe/cep-bridge.md).
 
-Adobe-track owned (3.0 T6.3). Task 6 adds `install_zxp` (the signed path).
+The signed path (Task 6): `tools/sign_zxp.py build` signs the assembled bundle into
+whynot-cut/adobe/WhyNotCut-Bridge-3.0.0.zxp (`zxp_path`; a build artefact, git-ignored, shipped with the plugin) and
+`install_zxp` puts it in place: signed only, every entry checked (no absolute path, `..`, link), CRC-checked extraction
+into `<ext>.new`, then a swap that keeps the previous copy as `<ext>.prev`. The unsigned dev build (`install_source`) is
+used only with WHYNOT_BRIDGE_DEV=1 (`dev_build_allowed`, plan decision 9).
+
+Adobe-track owned (3.0 T6.3).
 """
 from __future__ import annotations
 
@@ -33,8 +39,11 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
+import zipfile
+import zlib
 from pathlib import Path
 
 from .common import PLUGIN_DIR, TEMPLATES_DIR, now_iso
@@ -52,6 +61,9 @@ LIBS = {"wnc_ppro_lib.jsx": "premiere", "wnc_ae_bridge.jsx": "after_effects", "w
         "wnc_motion_lib.jsx": "after_effects"}
 CONFIG_SCHEMA = 1
 LAUNCHER_NAME = "wnc-engine.cmd" if os.name == "nt" else "wnc-engine"     # <engine home>/bin/<this>, the shim
+ZXP_NAME = f"WhyNotCut-Bridge-{PRODUCT}.zxp"     # tools/sign_zxp.py build writes it; tools/release.py pins it
+SIGNATURES = "META-INF/signatures.xml"
+DEV_ENV = "WHYNOT_BRIDGE_DEV"                   # =1: the unsigned dev build may be installed / driven (until 3.1)
 
 
 def source_dir() -> Path:
@@ -61,6 +73,16 @@ def source_dir() -> Path:
 
 def has_source() -> bool:
     return all((source_dir() / f).is_file() for f in SHELL_FILES)
+
+
+def zxp_path() -> Path:
+    """The signed bundle this plugin carries: whynot-cut/adobe/WhyNotCut-Bridge-<product>.zxp (absent until signed)."""
+    return PLUGIN_DIR / "adobe" / ZXP_NAME
+
+
+def dev_build_allowed() -> bool:
+    """WHYNOT_BRIDGE_DEV=1 (off by default, 3.0 only): the unsigned build from the source may be installed."""
+    return os.environ.get(DEV_ENV) == "1"
 
 
 def lib_sources() -> dict[str, Path]:
@@ -131,9 +153,11 @@ def family(version, protocol=None) -> str | None:
 
 def installed(ext: Path) -> dict | None:
     """The bundle installed in `ext` (None when there is none): {path, id, family, version, build, libs, signed}.
-    family "bundle" = it carries a readable build.json; "legacy" = UNSIGNED and exactly 3.1.1, or the reel-editor
-    `com.nh.bridge`; "unknown" = everything else, a signed extension without a readable build.json included (checked
-    first: the install rule never replaces it without force)."""
+    family "bundle" = it carries a readable build.json; "legacy" = UNSIGNED, without build.json, and ours: the id
+    ai.thewhynot.cut.bridge at a version up to 3.1.1, or the reel-editor `com.nh.bridge` (the install rule replaces it
+    without force; the queue still drives exactly 3.1.1 only, see `family`); "unknown" = everything else, a signed
+    extension without a readable build.json included (checked first: the install rule never replaces it without
+    force)."""
     ext = Path(ext)
     manifest = ext / "CSXS" / "manifest.xml"
     try:
@@ -157,7 +181,7 @@ def installed(ext: Path) -> dict | None:
         fam = "bundle"
     elif signed:
         fam = "unknown"
-    elif bid in LEGACY_EXT_IDS or version == LEGACY_VERSION:
+    elif bid in LEGACY_EXT_IDS or (bid == EXT_ID and _ver(version) and _ver(version) <= _ver(LEGACY_VERSION)):
         fam = "legacy"
     else:
         fam = "unknown"
@@ -167,8 +191,10 @@ def installed(ext: Path) -> dict | None:
 
 def decide_install(cur: dict | None, new: dict, *, force: bool = False) -> dict:
     """The install rule: {"action": "install" | "replace" | "skip" | "keep", "reason"}.
-      nothing installed -> install;  force -> replace;  legacy (unsigned 3.1.1, com.nh.bridge) -> replace;
-      the same build -> skip;  a newer product, or an unknown layout -> keep;
+      nothing installed -> install;  force -> replace;
+      legacy (unsigned, ours, up to 3.1.1; com.nh.bridge) -> replace;
+      the same build -> skip, except a signed build over the unsigned copy of the same sources -> replace;
+      a newer product, or an unknown layout -> keep;
       a signed installation is never replaced by an unsigned build -> keep;  otherwise -> replace."""
     if not cur:
         return {"action": "install", "reason": "nothing installed"}
@@ -179,7 +205,7 @@ def decide_install(cur: dict | None, new: dict, *, force: bool = False) -> dict:
     if cur.get("family") != "bundle":
         return {"action": "keep", "reason": f"the installed extension ({cur.get('version') or 'unknown version'}) is "
                                             "not one this engine knows"}
-    if cur.get("build") and cur.get("build") == new.get("build"):
+    if cur.get("build") and cur.get("build") == new.get("build") and (cur.get("signed") or not new.get("signed")):
         return {"action": "skip", "reason": f"build {cur['build']} is already installed"}
     if _ver(cur.get("version")) > _ver(new.get("version")):
         return {"action": "keep", "reason": f"the installed WhyNot Cut {cur.get('version')} is newer than "
@@ -203,6 +229,125 @@ def install_source(ext: Path, *, force: bool = False) -> dict:
                 shutil.rmtree(ext)
             shutil.copytree(Path(t) / EXT_ID, ext)
     return dict(decision, installed=installed(ext), new=new)
+
+
+class ZxpError(ValueError):
+    """A ZXP that is never installed: unsigned, unreadable, an unsafe entry, a CRC mismatch, another bundle id."""
+
+
+def _is_link(p: Path) -> bool:
+    """A symlink, or any Windows reparse point (a junction)."""
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return False
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & 0x400)   # REPARSE_POINT
+
+
+def _remove(p: Path) -> None:
+    """Remove a leftover folder of ours; a link is unlinked, never followed."""
+    if _is_link(p):
+        try:
+            os.unlink(p)
+        except OSError:
+            os.rmdir(p)        # a Windows junction
+    elif p.is_dir():
+        shutil.rmtree(p)
+    elif os.path.lexists(p):
+        p.unlink()
+
+
+def _zxp_members(zf: zipfile.ZipFile, name: str) -> list:
+    """The file entries of the archive as (posix relative path, ZipInfo), every entry checked first: an absolute path,
+    a drive, a backslash, an empty / `.` / `..` part, a link or a duplicate refuses the whole archive."""
+    files, seen = [], set()
+    for zi in zf.infolist():
+        raw = zi.filename
+        rel = raw[:-1] if zi.is_dir() else raw
+        parts = rel.split("/")
+        mode = (zi.external_attr >> 16) & 0o177777 if zi.create_system == 3 else 0     # 3 = made on unix
+        if (not rel or raw.startswith("/") or "\\" in raw or ":" in raw or "\0" in raw
+                or any(p in ("", ".", "..") for p in parts) or stat.S_ISLNK(mode)):
+            raise ZxpError(f"{name} holds an unsafe entry {raw!r}: it was not installed")
+        key = rel.casefold()
+        if key in seen:
+            raise ZxpError(f"{name} holds {raw!r} twice: it was not installed")
+        seen.add(key)
+        if not zi.is_dir():
+            files.append((rel, zi))
+    return files
+
+
+def _extract_checked(zf: zipfile.ZipFile, files: list, dst: Path, name: str) -> None:
+    """Write every file under dst, checking each one's CRC-32 and size against the archive."""
+    dst.mkdir(parents=True)
+    root = os.path.abspath(dst)
+    for rel, zi in files:
+        out = dst.joinpath(*rel.split("/"))
+        if not os.path.abspath(out).startswith(root + os.sep):
+            raise ZxpError(f"{name}: {rel!r} escapes the extension folder")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        crc, size = 0, 0
+        try:
+            with zf.open(zi) as src, open(out, "wb") as f:
+                while True:
+                    chunk = src.read(1 << 20)
+                    if not chunk:
+                        break
+                    crc, size = zlib.crc32(chunk, crc), size + len(chunk)
+                    f.write(chunk)
+        except (zipfile.BadZipFile, zlib.error, EOFError) as e:
+            raise ZxpError(f"{name}: {rel!r} is damaged ({e}): it was not installed") from None
+        if crc & 0xFFFFFFFF != zi.CRC or size != zi.file_size:
+            raise ZxpError(f"{name}: {rel!r} fails its CRC check: it was not installed")
+
+
+def install_zxp(zxp: Path, ext: Path, *, force: bool = False) -> dict:
+    """Install the SIGNED bundle `zxp` in `ext` when `decide_install` says so (the signed path, plan Task 6).
+    Every entry is checked before anything is written (`_zxp_members`); the files are extracted, CRC-checked, into
+    `<ext>.new`; the manifest must name ai.thewhynot.cut.bridge. Then `ext` becomes `<ext>.prev` (one previous copy
+    is kept) and `<ext>.new` becomes `ext`; a failed swap puts the previous copy back. ZxpError when the ZXP is never
+    installed (`ext` is untouched then). Returns the decision plus {"installed", "new", "prev"}."""
+    zxp, ext = Path(zxp), Path(ext)
+    new, prev = ext.with_name(ext.name + ".new"), ext.with_name(ext.name + ".prev")
+    if _is_link(ext):
+        raise ZxpError(f"{ext} is a link (a development extension): it was left alone")
+    try:
+        zf = zipfile.ZipFile(zxp)
+    except (zipfile.BadZipFile, OSError) as e:
+        raise ZxpError(f"{zxp.name} is not a readable ZXP ({e})") from None
+    with zf:
+        files = _zxp_members(zf, zxp.name)
+        if SIGNATURES not in {rel for rel, _ in files}:
+            raise ZxpError(f"{zxp.name} is not signed (no {SIGNATURES}): an unsigned extension is never installed "
+                           "from a ZXP")
+        ext.parent.mkdir(parents=True, exist_ok=True)
+        _remove(new)
+        try:
+            _extract_checked(zf, files, new, zxp.name)
+            got = installed(new)
+            if not got or got.get("id") != EXT_ID or not got.get("signed"):
+                raise ZxpError(f"{zxp.name} is not the WhyNot Cut extension ({EXT_ID}): it was not installed")
+        except BaseException:
+            _remove(new)
+            raise
+    got["path"] = str(ext)
+    decision = decide_install(installed(ext), got, force=force)
+    if decision["action"] not in ("install", "replace"):
+        _remove(new)
+        return dict(decision, installed=installed(ext), new=got, prev=str(prev) if prev.exists() else None)
+    had = os.path.lexists(ext)
+    if had:
+        _remove(prev)
+        os.replace(ext, prev)
+    try:
+        os.replace(new, ext)
+    except OSError:
+        if had and not os.path.lexists(ext):
+            os.replace(prev, ext)
+        _remove(new)
+        raise
+    return dict(decision, installed=installed(ext), new=got, prev=str(prev) if prev.exists() else None)
 
 
 def config_path() -> Path:

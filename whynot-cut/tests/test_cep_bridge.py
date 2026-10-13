@@ -1,6 +1,7 @@
 """The WhyNot Cut CEP bundle (3.0 T6.3): the shell in <repo>/adobe/cep-bridge, bundle 3.0.0 "WhyNot Cut" (Task 4): an
 After Effects-only visible panel, a hidden daemon, the libraries bundled from whynot-cut/templates with a build.json,
-the install rule by family and build, and ~/.whynot-cut/bridge/config.json. The legacy 3.1.1 bridge is frozen in
+the install rule by family and build, and ~/.whynot-cut/bridge/config.json; the signed path (Task 6: install_zxp, the
+ZXP preferred by ppro_bridge.install, the dev source only with WHYNOT_BRIDGE_DEV=1). The legacy 3.1.1 bridge is frozen in
 tests/fixtures/cep-bridge-3.1.1. Every install here runs in temp folders (WHYNOT_HOME, plat.cep_extensions_dir,
 cep_bundle.config_path and, where needed, cep_bundle.source_dir patched). Run:
     tools/test.sh -p test_cep_bridge.py
@@ -279,14 +280,19 @@ class TestInstalled(unittest.TestCase):
         self.assertTrue(cep_bundle.installed(b)["signed"])
 
     def test_the_legacy_family(self):
-        """Legacy is exactly 3.1.1 (or the reel-editor com.nh.bridge), unsigned; any other version without build.json
-        is unknown (kept unless forced)."""
+        """Legacy (replaced without force) = unsigned, no build.json, and ours: ai.thewhynot.cut.bridge up to 3.1.1
+        (T6.3 Task 6 widened it from exactly 3.1.1), or the reel-editor com.nh.bridge. A later version or another id
+        without build.json is unknown (kept unless forced). The queue still drives exactly 3.1.1 (`family`)."""
         ext = _legacy(self.tmp / "3.1.1", "3.1.1")
         got = cep_bundle.installed(ext)
         self.assertEqual((got["family"], got["version"], got["build"]), ("legacy", "3.1.1", None))
-        for version in ("3.1.0", "3.0.0", "1.2.0"):
+        for version in ("3.1.0", "3.0.0", "1.2.0", "3.1"):
             got = cep_bundle.installed(_legacy(self.tmp / version, version))
-            self.assertEqual((got["family"], got["version"]), ("unknown", version), version)
+            self.assertEqual((got["family"], got["version"]), ("legacy", version), version)
+        for version, bid in (("3.1.2", "ai.thewhynot.cut.bridge"), ("4.0.0", "ai.thewhynot.cut.bridge"),
+                             ("3.1.0", "com.someone.else"), ("", "ai.thewhynot.cut.bridge")):
+            got = cep_bundle.installed(_legacy(self.tmp / "u" / f"{bid}-{version}", version, bid))
+            self.assertEqual(got["family"], "unknown", (version, bid))
         got = cep_bundle.installed(_legacy(self.tmp / "nh" / "com.nh.bridge", "9.0.0", "com.nh.bridge", cfg=False))
         self.assertEqual((got["family"], got["id"]), ("legacy", "com.nh.bridge"))
 
@@ -342,6 +348,7 @@ class TestDecideInstall(unittest.TestCase):
         cases = [
             ("nothing installed", None, False, "install"),
             ("legacy 3.1.1", legacy, False, "replace"),
+            ("unsigned 3.1.0 (ours)", dict(legacy, version="3.1.0"), False, "replace"),
             ("com.nh.bridge", nh, False, "replace"),
             ("the same build", self.bundle(build="b" * 16), False, "skip"),
             ("a newer product", self.bundle(version="3.1.0"), False, "keep"),
@@ -364,6 +371,15 @@ class TestDecideInstall(unittest.TestCase):
         d = cep_bundle.decide_install(self.bundle(signed=True), dict(self.NEW, signed=True))
         self.assertEqual(d["action"], "replace")
 
+    def test_the_signed_build_replaces_the_unsigned_copy_of_the_same_sources(self):
+        """The build id covers the bundle without META-INF: a dev install of the same sources has the same build, and
+        the signed ZXP still replaces it (the reverse is skipped)."""
+        same = self.bundle(build="b" * 16)
+        self.assertEqual(cep_bundle.decide_install(same, dict(self.NEW, signed=True))["action"], "replace")
+        self.assertEqual(cep_bundle.decide_install(dict(same, signed=True), dict(self.NEW, signed=True))["action"],
+                         "skip")
+        self.assertEqual(cep_bundle.decide_install(dict(same, signed=True), self.NEW)["action"], "skip")
+
 
 class _Sandbox(unittest.TestCase):
     """The engine home, the CEP folder and config.json are temp paths (resolved per call)."""
@@ -373,7 +389,9 @@ class _Sandbox(unittest.TestCase):
         self.tmp = Path(self._t.name)
         self.ext_root = self.tmp / "ext"
         self.cfg = self.tmp / "user" / ".whynot-cut" / "bridge" / "config.json"
-        self._p = [mock.patch.dict(os.environ, {"WHYNOT_HOME": str(self.tmp / "home")}),
+        self.zxp = self.tmp / "plugin" / "adobe" / cep_bundle.ZXP_NAME        # absent unless a test makes it
+        self._p = [mock.patch.dict(os.environ, {"WHYNOT_HOME": str(self.tmp / "home"), "WHYNOT_BRIDGE_DEV": "1"}),
+                   mock.patch.object(cep_bundle, "zxp_path", lambda: self.zxp),
                    mock.patch.object(plat, "cep_extensions_dir", lambda: self.ext_root),
                    mock.patch.object(plat, "player_debug_mode", lambda: {}),
                    mock.patch.object(cep_bundle, "config_path", lambda: self.cfg)]
@@ -536,6 +554,216 @@ class TestInstall(_Sandbox):
             r = ppro_bridge.install(force=True)
         self.assertEqual(r.get("refused"), "test-sandbox", r)
         self.assertFalse(self.ext.exists())
+
+
+# ===================================================================================================== Task 6: the signed path
+SIGNED_FILES = sorted(BUNDLE_FILES + ["META-INF/signatures.xml", "mimetype"])
+
+
+def _make_zxp(out: Path, src: Path, *, signed=True, extra=None, drop=(), product=None) -> Path:
+    """A ZXP like ZXPSignCmd writes one: mimetype, the bundle, META-INF/signatures.xml (when signed). `extra` adds
+    raw entries {name: bytes | ZipInfo-with-data}; `product` rewrites build.json's product and build."""
+    import zipfile
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zf:
+        zf.writestr("mimetype", "application/vnd.adobe.air-ucf-package+zip")
+        for p in sorted(src.rglob("*")):
+            rel = p.relative_to(src).as_posix()
+            if p.is_file() and rel not in drop:
+                data = p.read_bytes()
+                if rel == "build.json" and product:
+                    doc = json.loads(data)
+                    data = json.dumps(dict(doc, product=product, build="9" * 16)).encode()
+                zf.writestr(rel, data)
+        if signed:
+            zf.writestr("META-INF/signatures.xml", "<signatures/>")
+        for name, data in (extra or {}).items():
+            if isinstance(name, tuple):          # (ZipInfo, data)
+                zf.writestr(name[0], data)
+            else:
+                zf.writestr(name, data)
+    return out
+
+
+class TestInstallZxp(unittest.TestCase):
+    """cep_bundle.install_zxp: signed only, every entry checked before anything is written, CRC-checked extraction to
+    <ext>.new, then the swap with <ext>.prev kept (one previous copy)."""
+
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._t.name)
+        self.src = cep_bundle.assemble(self.tmp / "src" / cep_bundle.EXT_ID)
+        self.ext = self.tmp / "cep" / cep_bundle.EXT_ID
+        self.new, self.prev = self.ext.with_name(self.ext.name + ".new"), self.ext.with_name(self.ext.name + ".prev")
+
+    def tearDown(self):
+        self._t.cleanup()
+
+    def zxp(self, name="a.zxp", **kw) -> Path:
+        return _make_zxp(self.tmp / "zxp" / name, self.src, **kw)
+
+    def refused(self, zxp, needle):
+        before = _files(self.ext) if self.ext.exists() else None
+        with self.assertRaises(cep_bundle.ZxpError) as cm:
+            cep_bundle.install_zxp(zxp, self.ext)
+        self.assertIn(needle, str(cm.exception))
+        self.assertEqual(_files(self.ext) if self.ext.exists() else None, before)       # untouched
+        self.assertFalse(self.new.exists())
+        return str(cm.exception)
+
+    def test_a_signed_zxp_installs_byte_identical(self):
+        r = cep_bundle.install_zxp(self.zxp(), self.ext)
+        self.assertEqual((r["action"], r["installed"]["family"], r["installed"]["signed"]), ("install", "bundle", True))
+        self.assertEqual(sorted(_files(self.ext)), SIGNED_FILES)
+        for rel, h in _files(self.src).items():
+            self.assertEqual(_files(self.ext)[rel], h, rel)
+        self.assertEqual((self.new.exists(), self.prev.exists(), r["prev"]), (False, False, None))
+        again = cep_bundle.install_zxp(self.zxp(), self.ext)
+        self.assertEqual(again["action"], "skip", again)
+        self.assertFalse(self.new.exists())
+
+    def test_an_update_keeps_exactly_one_prev(self):
+        cep_bundle.install_zxp(self.zxp(), self.ext)
+        first = _files(self.ext)
+        (self.src / "ui" / "tokens.css").write_text("/* v2 */", encoding="utf-8")
+        b2 = json.loads((self.src / "build.json").read_text(encoding="utf-8"))
+        (self.src / "build.json").write_text(json.dumps(dict(b2, build="2" * 16)), encoding="utf-8")
+        r = cep_bundle.install_zxp(self.zxp("b.zxp"), self.ext)
+        self.assertEqual(r["action"], "replace", r)
+        self.assertEqual(_files(self.prev), first)
+        self.assertEqual(r["prev"], str(self.prev))
+        (self.src / "build.json").write_text(json.dumps(dict(b2, build="3" * 16)), encoding="utf-8")
+        second = _files(self.ext)
+        cep_bundle.install_zxp(self.zxp("c.zxp"), self.ext)
+        self.assertEqual(_files(self.prev), second)                                     # one .prev, the latest
+        self.assertEqual(sorted(p.name for p in self.ext.parent.iterdir()), [self.ext.name, self.prev.name])
+
+    def test_an_unsigned_zxp_is_never_installed(self):
+        _legacy(self.ext)
+        self.refused(self.zxp(signed=False), "not signed")
+
+    def test_unsafe_entries_refuse_the_whole_archive_before_anything_is_written(self):
+        import stat
+        import zipfile
+        link = zipfile.ZipInfo("js/link.js")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        cases = {"../evil.js": b"x", "/abs.js": b"x", "C:/drive.js": b"x", "ui\\..\\..\\evil.js": b"x",
+                 "jsx/../../evil.js": b"x", "a//b.js": b"x", "./dot.js": b"x", (link, ): b"/etc/passwd"}
+        _legacy(self.ext)
+        for i, (name, data) in enumerate(cases.items()):
+            with self.subTest(name=name if isinstance(name, str) else "a symlink entry"):
+                key = name if isinstance(name, str) else (name[0],)
+                self.refused(self.zxp(f"u{i}.zxp", extra={key: data}), "unsafe entry")
+        self.assertEqual([p.name for p in self.tmp.rglob("evil.js")], [])
+        self.assertEqual([p.name for p in self.tmp.rglob("abs.js")], [])
+
+    def test_a_duplicate_entry_is_refused(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")                     # zipfile warns about the duplicate name
+            self.refused(self.zxp(extra={"ui/index.html": b"<html>2</html>"}), "twice")
+
+    def test_a_crc_mismatch_is_refused_and_nothing_is_swapped(self):
+        _legacy(self.ext)
+        z = self.zxp()
+        data = bytearray(z.read_bytes())
+        marker = (self.src / "js" / "bridge.js").read_bytes()[:64]
+        at = data.find(marker)
+        self.assertGreater(at, 0)
+        data[at + 10] ^= 0x01                                    # one bit of a stored file
+        z.write_bytes(bytes(data))
+        self.refused(z, "js/bridge.js")
+
+    def test_another_bundle_id_is_refused(self):
+        (self.src / "CSXS" / "manifest.xml").write_text(
+            '<ExtensionManifest ExtensionBundleId="com.someone.else" ExtensionBundleVersion="3.0.0">', encoding="utf-8")
+        self.refused(self.zxp(), "is not the WhyNot Cut extension")
+
+    def test_not_a_zip(self):
+        bad = self.tmp / "zxp" / "bad.zxp"
+        bad.parent.mkdir(parents=True)
+        bad.write_bytes(b"not a zip")
+        self.refused(bad, "not a readable ZXP")
+
+    def test_the_install_rule_applies(self):
+        """An unsigned 3.1.0 of ours is replaced without force; a newer bundle is kept unless forced; the signed ZXP
+        replaces the unsigned dev copy of the same sources."""
+        _legacy(self.ext, "3.1.0")
+        r = cep_bundle.install_zxp(self.zxp(), self.ext)
+        self.assertEqual(r["action"], "replace", r)
+        self.assertEqual(_files(self.prev)["CSXS/manifest.xml"], _sha(self.prev / "CSXS" / "manifest.xml"))
+        shutil.rmtree(self.ext)
+        shutil.rmtree(self.prev)
+        shutil.copytree(self.src, self.ext)                                           # the unsigned dev copy
+        r = cep_bundle.install_zxp(self.zxp("same.zxp"), self.ext)
+        self.assertEqual((r["action"], r["installed"]["signed"]), ("replace", True))
+        r = cep_bundle.install_zxp(self.zxp("newer.zxp", product="9.0.0"), self.ext, force=True)
+        self.assertEqual(r["installed"]["version"], "9.0.0")
+        r = cep_bundle.install_zxp(self.zxp("older.zxp"), self.ext)
+        self.assertEqual(r["action"], "keep", r)
+        self.assertEqual(cep_bundle.installed(self.ext)["version"], "9.0.0")
+        self.assertFalse(self.new.exists())
+
+    @unittest.skipUnless(os.name == "nt", "a Windows junction")
+    def test_a_linked_extension_folder_is_left_alone(self):
+        import _winapi
+        dev = self.tmp / "dev-checkout"
+        dev.mkdir()
+        self.ext.parent.mkdir(parents=True)
+        _winapi.CreateJunction(str(dev), str(self.ext))
+        with self.assertRaises(cep_bundle.ZxpError) as cm:
+            cep_bundle.install_zxp(self.zxp(), self.ext)
+        self.assertIn("is a link", str(cm.exception))
+        self.assertEqual(list(dev.iterdir()), [])
+
+
+class TestInstallPrefersTheSignedZxp(_Sandbox):
+    """ppro_bridge.install (Task 6): the signed ZXP first, then the dev source with WHYNOT_BRIDGE_DEV=1, else ok:false."""
+
+    def test_the_signed_zxp_is_installed_and_needs_no_debug_mode(self):
+        _make_zxp(self.zxp, cep_bundle.assemble(self.tmp / "src" / cep_bundle.EXT_ID))
+        _legacy(self.ext, "3.1.0")                                                    # an older bridge of ours
+        r = ppro_bridge.install()
+        self.assertNotIn("error", r, r)
+        self.assertEqual((r["action"], r["source"], r["signed"], r["version"]), ("replace", "zxp", True, "3.0.0"))
+        self.assertEqual(sorted(_files(self.ext)), SIGNED_FILES)
+        self.assertEqual((r["debug_mode_ok"], r["editor_must_run"]), (True, []))       # PlayerDebugMode is off here
+        self.assertTrue(self.cfg.is_file())
+        with mock.patch.dict(os.environ, {"WHYNOT_BRIDGE_DEV": "0"}):                  # the ZXP wins either way
+            self.assertEqual(ppro_bridge.install()["action"], "skip")
+
+    def test_the_signed_zxp_replaces_a_dev_install_of_the_same_sources(self):
+        ppro_bridge.install()                                                         # the dev source (env = 1)
+        self.assertFalse(cep_bundle.installed(self.ext)["signed"])
+        _make_zxp(self.zxp, cep_bundle.assemble(self.tmp / "src" / cep_bundle.EXT_ID))
+        r = ppro_bridge.install()
+        self.assertEqual((r["action"], r["signed"]), ("replace", True), r)
+
+    def test_without_a_zxp_the_dev_source_needs_whynot_bridge_dev(self):
+        _legacy(self.ext, "3.1.0")
+        before = _files(self.ext)
+        with mock.patch.dict(os.environ, {"WHYNOT_BRIDGE_DEV": ""}):
+            r = ppro_bridge.install(force=True)
+        self.assertIs(r["ok"], False)
+        self.assertIn(cep_bundle.ZXP_NAME, r["error"])
+        self.assertIn("python tools/sign_zxp.py build", r["how"])
+        self.assertIn("WHYNOT_BRIDGE_DEV=1", r["how"])
+        self.assertEqual(_files(self.ext), before)
+        self.assertFalse(self.cfg.exists())
+        r = ppro_bridge.install()                                                     # env = 1 (the sandbox)
+        self.assertEqual((r["action"], r["source"], r["signed"]), ("replace", "source", False), r)
+
+    def test_a_bad_zxp_is_ok_false_and_touches_nothing(self):
+        _legacy(self.ext)
+        before = _files(self.ext)
+        _make_zxp(self.zxp, cep_bundle.assemble(self.tmp / "src" / cep_bundle.EXT_ID), signed=False)
+        r = ppro_bridge.install(force=True)
+        self.assertIs(r["ok"], False)
+        self.assertIn("not signed", r["error"])
+        self.assertIn("how", r)
+        self.assertEqual(_files(self.ext), before)
+        self.assertFalse(self.cfg.exists())
 
 
 # ===================================================================================================== Task 5: engine start

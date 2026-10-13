@@ -1,2 +1,6 @@
 # Dev builds of the Premiere UXP plugin (adobe/premiere-uxp: npm run package:plugin). Not committed until a release.
 *.ccx
+# The signed CEP bundle (tools/sign_zxp.py build -> WhyNotCut-Bridge-<version>.zxp). A build artefact: never committed.
+*.zxp
+# sign_zxp.py's working folder (removed after every build)
+.wnc-zxp-*/

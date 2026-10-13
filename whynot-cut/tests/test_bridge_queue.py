@@ -385,6 +385,25 @@ class TestVersionHandshake(_Home):
         self.assertEqual(fb.claimed, [])
         self.assertEqual(self.leftovers(), [])                     # nothing was queued
 
+    def test_an_older_bridge_of_ours_is_refused_until_it_is_updated(self):
+        """T6.3 Task 6: an unsigned bridge of ours before 3.1.1 is replaced by the install without --force; until then
+        the queue refuses it (compatibility stays exactly 3.1.1, decision 15) and says to update it."""
+        for have in ("3.1.0", "3.0.0", "2.2.1"):
+            with self.subTest(have=have), FakeBridge(self.q, family="legacy", version=have) as fb:
+                r = ppro_bridge.submit("ping", timeout=5)
+                self.assertFalse(r["ok"])
+                self.assertEqual(errors.exit_code(r), 2)
+                self.assertEqual(fb.claimed, [])
+                self.assertIn(f"is the older {have}: update it", r["error"])
+                self.assertIn("Update the WhyNot Cut extension", r["how"])
+                self.assertIn(f"`reel ppro-install` (it replaces {have})", r["how"])
+                self.assertNotIn("--force", r["how"])
+                self.assertNotIn("Bridge", r["error"] + r["how"])
+        self.assertEqual(self.leftovers(), [])
+        self.assertIsNone(cep_queue.version_refusal({"bridge_version": "3.1.1"}, "3.0.0", "Premiere"))
+        later = cep_queue.version_refusal({"bridge_version": "3.1.2"}, "3.0.0", "Premiere")   # not ours to judge
+        self.assertNotIn("update it", later["error"])
+
     def test_a_newer_running_bridge_asks_to_update_the_plugin(self):
         """`reel ppro-install` skips a newer installed bundle, so telling the editor to run it would loop (Minor 5)."""
         for st in ({"bridge_version": "3.2.0", "protocol": 4}, {"bridge_version": "3.0.0", "protocol": 5}):

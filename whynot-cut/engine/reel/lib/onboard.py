@@ -297,7 +297,11 @@ def doctor() -> dict:
             fixes.append({"item": "WhyNot Cut is not running in Premiere", "who": "editor",
                           "fix": "open Premiere Pro (quit and reopen it once after installing); WhyNot Cut starts by "
                                  "itself"})
-    if br["family"] == "legacy":                                # decision 15: works during 3.0, shown amber
+    if br["family"] == "legacy" and br["product"] != cep_bundle.LEGACY_VERSION:   # T6.3 Task 6: older than 3.1.1
+        fixes.append(dict(_extension_fix("Premiere"),
+                          item=f"WhyNot Cut extension {br['product'] or '?'} is older than this engine runs: update it "
+                               "(the update replaces it)"))
+    elif br["family"] == "legacy":                              # decision 15: works during 3.0, shown amber
         fixes.append(dict(_extension_fix("Premiere"), optional=True, level="amber",
                           item=f"WhyNot Cut extension {br['product'] or '?'} is the older bridge (it still works in "
                                "3.0; the update replaces it)"))

@@ -3,7 +3,8 @@
 **Audience:** the installer track, the engine and anyone reviewing the extension. This page describes what is on disk,
 every file shape the extension reads or writes, the install rule, the engine-start allowlist and the legacy family.
 Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bundle.py` (assembly, install rule,
-`config.json`), `whynot-cut/engine/reel/lib/cep_queue.py` (the queue protocol) and the plan
+`config.json`, the signed install), `whynot-cut/engine/reel/lib/cep_queue.py` (the queue protocol), `tools/sign_zxp.py`
+(signing) and the plan
 `docs/superpowers/plans/2026-10-13-3.0-phase-6-t63-bridge.md` (3.0 T6.3).
 
 ## 1. Ids and names
@@ -32,7 +33,8 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
   jsx/wnc_ae_lib.jsx
   jsx/wnc_motion_lib.jsx
   build.json               see section 3.2
-  META-INF/signatures.xml  present only in a signed install (the ZXP, Task 6)
+  META-INF/signatures.xml  present only in a signed install (the ZXP, section 10)
+  mimetype                 present only in a signed install (ZXPSignCmd adds it)
 ```
 - `<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows and `~/Library/Application Support/Adobe/CEP/extensions`
   on macOS.
@@ -122,8 +124,12 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 |---|---|
 | `bundle` | It carries a readable `build.json`. |
 | `unknown` | It is **signed** (`META-INF/signatures.xml`) but has no readable `build.json`. Signed is checked before legacy. |
-| `legacy` | It is **unsigned** and its manifest says exactly 3.1.1, or its id is the reel-editor `com.nh.bridge`. |
-| `unknown` | Anything else (for example an unsigned 3.1.0). |
+| `legacy` | It is **unsigned**, has no `build.json`, and is ours: the id `ai.thewhynot.cut.bridge` at a version up to and including 3.1.1 (3.1.1, 3.1.0, 3.0.0 before the bundle, 2.x), or the reel-editor `com.nh.bridge`. |
+| `unknown` | Anything else (for example an unsigned 3.1.2, or another id). |
+
+- **`legacy` here is the install rule's word: "ours and older, replace it without `--force`".** The queue is stricter:
+  it still drives exactly 3.1.1 (section 7, decision 15). An unsigned 3.1.0 is therefore replaced by the next install,
+  and until then the queue refuses it and says to update it.
 
 ### 4.2 What `decide_install` does with the new build
 | Case | Action |
@@ -133,6 +139,7 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 | `legacy` | replace |
 | `unknown` | keep |
 | The same `build` | skip |
+| The same `build`, unsigned, and this build is signed | replace (the ZXP replaces the dev copy of the same sources: the `build` id does not cover `META-INF/`) |
 | The installed `product` is newer | keep |
 | A signed install, and this build is unsigned | keep |
 | Otherwise | replace |
@@ -209,8 +216,12 @@ There are no arguments, and nothing comes from the queue, the network or the job
   - it sends `script:` jobs;
   - the libraries keep `var NHPP = WNCPP;` and `var NHAE = WNCAE;` for its eval tail.
 - **Refusals:** every other version without `protocol`, and every protocol other than 4.
+  - **An older bridge of ours** (no `protocol`, a version below 3.1.1, such as 3.1.0): "the WhyNot Cut extension
+    running in <app> is the older 3.1.0: update it (this engine needs WhyNot Cut 3.0.0)". The `how` says to run
+    `reel ppro-install` (it replaces it without `--force`) or the installer, then restart the app. Nothing is queued.
 - **Doctor:**
-  - shows a legacy install as an amber, optional fix (it still works in 3.0; the update replaces it);
+  - shows a legacy 3.1.1 install as an amber, optional fix (it still works in 3.0; the update replaces it);
+  - shows an older one of ours (such as 3.1.0) as a fix that is not optional: "update it (the update replaces it)";
   - flags an unsigned bundle in a plugin build without the source (a dev build over a signed install) in amber.
 
 ## 8. Doctor (`onboard.bridge_info`)
@@ -236,3 +247,58 @@ There are no arguments, and nothing comes from the queue, the network or the job
     no engine; `engine_home` must already exist for `config.json` to be used at all, so this happens only through the
     fallback `~/.whynot-cut`.
   - Accepted for 3.0. The installer writes `config.json` after the engine home exists.
+
+## 10. The signed extension (Task 6)
+
+### 10.1 Signing: `tools/sign_zxp.py` (stdlib only; run by hand, never by tests or the engine)
+- **`setup`** (once per machine; everything lives in `~/.whynot-cut/signing/`, never in the repo):
+  - **ZXPSignCmd** from `Adobe-CEP/CEP-Resources` at commit `8897cfaf9801b0ad5321951199dd831a82964583`, path
+    `ZXPSignCMD/4.1.3/x64/ZXPSignCmd.exe` (Windows x64), 4542464 bytes, sha256
+    `ffc2223167225ce61d024eb463fc5ad1a1be16133f99ef334a646f7311916c98`. The exe is not Authenticode-signed: the size and
+    sha256 are the check, before the copy and before every use.
+  - `setup --from <file>` copies a file that is already downloaded, after the same check. Without `--from` the pinned
+    `raw.githubusercontent.com` URL is fetched into a temp folder and checked the same way. A mismatch is refused and
+    nothing is written.
+  - **macOS:** the pin is not set yet (`ZXPSignCMD/4.1.3/macOS` at the same commit, decision 10). `setup` and `build`
+    refuse with "macOS pin not set".
+  - **The certificate** is self-signed and made once: `EG Cairo "The Why Not AI" "WhyNot Cut"`, valid 3650 days, in
+    `whynot-cut.p12`. An existing certificate is never replaced.
+  - **Its password** is `secrets.token_urlsafe(32)` (never starting with `-`). It lives only in the OS credential store,
+    target `WhyNotCut/zxp-signing`: the Windows Credential Manager (`CredWriteW`/`CredReadW` through ctypes) or the macOS
+    keychain (`security`).
+- **`build`:**
+  1. assembles the bundle (section 2) in a temp staging folder;
+  2. refuses the staging tree when it holds any symlink, junction, `.DS_Store` or `__MACOSX` (Adobe's KnownIssue2024: a
+     ZXP that holds links fails its signature check after a UPIA install);
+  3. `ZXPSignCmd -sign <staging> <zxp> <p12> <password> -tsa <url>`. `-tsa` is always passed (default
+     `http://timestamp.digicert.com`), and a failed timestamp fails the build (decision 11);
+  4. `ZXPSignCmd -verify <zxp> -certinfo` must report a verified signature and a valid timestamp. The archive must hold
+     `META-INF/signatures.xml` and exactly the staged files with the same CRC; only `META-INF/*` and `mimetype` may be
+     added;
+  5. an atomic rename to `whynot-cut/adobe/WhyNotCut-Bridge-3.0.0.zxp`, then every other `*.zxp` there is removed:
+     exactly one is left (`tools/release.py --fill-artefacts` refuses two). A failed build leaves the folder as it was.
+- **`verify`** repeats step 4 on the built ZXP.
+- **The password is never printed, logged or put in an error.** Every command shown has it as `***`, and the tool's
+  output is scrubbed of it. ZXPSignCmd itself takes it as an argument, so it is visible to the user's own processes
+  while signing runs.
+- The ZXP is a build artefact: `whynot-cut/adobe/.gitignore` has `*.zxp`, and `package.py` ships it with the plugin.
+
+### 10.2 Installing: `cep_bundle.install_zxp` and `ppro_bridge.install`
+- **`ppro_bridge.install()` (`reel ppro-install`, `reel setup`) picks its source in this order:**
+  1. the signed ZXP the plugin carries (`cep_bundle.zxp_path()`);
+  2. the unsigned dev build from `adobe/cep-bridge`, only with `WHYNOT_BRIDGE_DEV=1` (decision 9);
+  3. otherwise `ok: false`. A checkout with the source says to sign it (`python tools/sign_zxp.py build`) or to set
+     `WHYNOT_BRIDGE_DEV=1`; a plugin without either says "install WhyNot Cut with its installer".
+  - A signed install needs no PlayerDebugMode, so `editor_must_run` is empty for it.
+- **`install_zxp(zxp, ext)`:**
+  - **Signed only:** a ZXP without `META-INF/signatures.xml` is never installed.
+  - **Every entry is checked before anything is written.** An absolute path, a drive, a backslash, an empty, `.` or
+    `..` part, a link entry or a duplicate refuses the whole archive.
+  - The files are extracted into `<ext>.new`, each one checked against its CRC-32 and size. The manifest must name
+    `ai.thewhynot.cut.bridge`.
+  - The install rule (section 4) decides. To install, `ext` becomes `<ext>.prev` (one previous copy is kept; the next
+    install replaces it) and `<ext>.new` becomes `ext`. A failed swap puts the previous copy back.
+  - A refused ZXP leaves `ext` untouched and no `.new` behind. An `ext` that is a link (a development checkout) is left
+    alone.
+- **Gate 6 check:** CEP must not load `<ext>.prev` beside `ext` (both hold the same bundle id). The installer track
+  keeps `.prev` the same way.

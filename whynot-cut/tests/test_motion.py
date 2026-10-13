@@ -107,7 +107,8 @@ class TestBridge(unittest.TestCase):
         from unittest import mock
         from lib import cep_bundle, plat, ppro_bridge as pb
         # the engine home and CEP folder are resolved per call (T2.17): point them at the temp folder AFTER import
-        with mock.patch.dict(os.environ, {"WHYNOT_HOME": str(self.tmp / "home")}), \
+        with mock.patch.dict(os.environ, {"WHYNOT_HOME": str(self.tmp / "home"), "WHYNOT_BRIDGE_DEV": "1"}), \
+                mock.patch.object(cep_bundle, "zxp_path", lambda: self.tmp / "no.zxp"), \
                 mock.patch.object(plat, "cep_extensions_dir", lambda: self.tmp / "ext"), \
                 mock.patch.object(plat, "player_debug_mode", lambda: {}), \
                 mock.patch.object(cep_bundle, "config_path", lambda: self.tmp / "user" / "config.json"):

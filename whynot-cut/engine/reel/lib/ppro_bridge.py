@@ -78,17 +78,32 @@ def installed_version() -> str | None:
 
 
 def install(force: bool = False) -> dict:
-    """Install the CEP bundle from `cep_bundle.source_dir()` by the install rule (cep_bundle.decide_install) and write
-    ~/.whynot-cut/bridge/config.json (never a file inside the extension). A plugin build without that source (a shipped
-    plugin) returns ok:false with a `how` and leaves the installed extension as it is."""
+    """Install the CEP bundle by the install rule (cep_bundle.decide_install) and write ~/.whynot-cut/bridge/config.json
+    (never a file inside the extension). The source, in this order (3.0 T6.3 Task 6):
+      1. the signed ZXP this plugin carries (cep_bundle.zxp_path(), cep_bundle.install_zxp);
+      2. the unsigned dev build from cep_bundle.source_dir(), only with WHYNOT_BRIDGE_DEV=1 (plan decision 9);
+      3. otherwise ok:false with a `how`, and the installed extension is left as it is."""
     EXT_DIR, QUEUE = ext_dir(), queue_dir()
     refused = plat.sandbox_refusal("install the bridge", EXT_DIR, QUEUE, cep_bundle.config_path())   # G79: never in tests
     if refused:
         return refused
-    if not cep_bundle.has_source():                                    # before anything is removed
+    zxp = cep_bundle.zxp_path()
+    if zxp.is_file():
+        try:
+            done = cep_bundle.install_zxp(zxp, EXT_DIR, force=force)
+        except (cep_bundle.ZxpError, OSError) as e:                     # nothing was swapped in
+            return {"ok": False, "error": f"the signed WhyNot Cut extension was not installed: {e}",
+                    "how": "close Premiere Pro and After Effects, then try again; if it persists, install WhyNot Cut "
+                           "with its installer"}
+    elif cep_bundle.has_source() and cep_bundle.dev_build_allowed():  # before anything is removed
+        done = cep_bundle.install_source(EXT_DIR, force=force)
+    elif cep_bundle.has_source():
+        return {"ok": False, "error": f"this checkout has no signed WhyNot Cut extension ({zxp.name})",
+                "how": "sign it with `python tools/sign_zxp.py build`, or set WHYNOT_BRIDGE_DEV=1 to install the "
+                       "unsigned development build from adobe/cep-bridge"}
+    else:
         return {"ok": False, "error": "this plugin build carries no WhyNot Cut extension",
                 "how": "install WhyNot Cut with its installer (the signed extension comes with it)"}
-    done = cep_bundle.install_source(EXT_DIR, force=force)
     cfg = cep_bundle.write_config(current_context().engine_home, written_by="engine")
     if done["action"] == "keep":
         # an older plugin (e.g. `reel setup` from 2.2.1) must not put its extension back over a newer or signed one
@@ -109,10 +124,11 @@ def install(force: bool = False) -> dict:
     except OSError:
         pass
     dbg = plat.player_debug_mode()
-    ok = plat.debug_mode_ok(dbg)
     inst = done["installed"] or {}
+    ok = bool(inst.get("signed")) or plat.debug_mode_ok(dbg)          # a signed extension loads without debug mode
     return {"installed": str(EXT_DIR), "action": done["action"], "reason": done["reason"],
-            "version": inst.get("version"), "build": inst.get("build"), "config": str(cfg), "queue": str(QUEUE),
+            "version": inst.get("version"), "build": inst.get("build"), "signed": bool(inst.get("signed")),
+            "source": "zxp" if zxp.is_file() else "source", "config": str(cfg), "queue": str(QUEUE),
             "legacy_bridges_removed": removed, "PlayerDebugMode": dbg, "debug_mode_ok": ok,
             "editor_must_run": [] if ok else plat.debug_mode_commands(),
             "next": ("Restart Premiere and After Effects if they were running during install (WhyNot Cut starts by itself "
