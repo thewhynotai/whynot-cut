@@ -3,17 +3,17 @@
 
 <p>معظم المشاكل لها سبب معروف وحل قصير. ابدأ دائمًا بالفحص، ثم ابحث عن العرَض في الجدول.</p>
 
-<h2 id="ch17-first">أول خطوة عند أي مشكلة</h2>
+<h2 id="ch17-first" data-today>أول خطوة عند أي مشكلة</h2>
 
 <ol class="steps">
-<li>اطلب من Claude أن يفحص الجهاز. يشغّل الأمر <bdi dir="ltr"><code>reel doctor</code></bdi>، وهو فحص للقراءة فقط (من دون <bdi dir="ltr"><code>--fix</code></bdi>) لا يغيّر شيئًا، ويعرض قائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت (<a href="#ch02-title">الفصل&nbsp;2</a>).</li>
-<li>لإصلاح المحرك أو لوحة Premiere، استخدم الأمر التالي. يصلح كل ما يخص WhyNot Cut، ويمكن تكراره بأمان. أغلق Premiere قبل تشغيله:
+<li>اكتب لـ Claude: «افحص الجهاز». يشغّل الفحص بنفسه، وهو فحص للقراءة فقط لا يغيّر شيئًا، ويعرض قائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت (<a href="#ch02-check">الفصل&nbsp;2</a>).</li>
+<li>لإصلاح المحرك أو لوحة Premiere، أغلق Premiere، ثم اكتب في تطبيق Claude الأمر التالي واضغط Enter. يصلح كل ما يخص WhyNot Cut، ويمكن تكراره بأمان:
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:setup</code></bdi></div></li>
-<li>نفّذ أنت الإصلاحات المكتوب أنها لك، مثل تثبيت الخطوط أو تغيير إعداد في Adobe، ثم اطلب الفحص مرة أخرى.</li>
+<li>نفّذ أنت الإصلاحات المكتوب أنها لك، مثل تثبيت الخطوط أو أمر يعطيك إياه Claude (طريقة تشغيله في <a href="#ch02-run-command">الفصل&nbsp;2</a>)، ثم اطلب الفحص مرة أخرى.</li>
 </ol>
 
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: نتيجة الفحص <bdi dir="ltr"><code>reel doctor</code></bdi> في المحادثة، وقائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت</span></div>
+<div class="shot-frame"><span>لقطة شاشة: نتيجة الفحص في المحادثة، وقائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت</span></div>
 <figcaption>نتيجة الفحص: كل إصلاح مكتوب بجانبه من يقوم به.</figcaption>
 </figure>
 
@@ -21,22 +21,22 @@
 <p>لا يجرّب Claude حلولًا عشوائية: إذا فشل الإصلاح مرتين يستعين بمساعد متخصص في تشخيص الجهاز، وبعد ثلاث محاولات فاشلة للمشكلة نفسها يتوقف ويشرح لك ما جرّبه وما عرفه.</p>
 </aside>
 
-<h2 id="ch17-table">جدول المشاكل الشائعة</h2>
+<h2 id="ch17-table" data-today>جدول المشاكل الشائعة</h2>
 
 <table>
 <thead>
 <tr><th>العرَض</th><th>السبب</th><th>الحل</th></tr>
 </thead>
 <tbody>
-<tr><td>الأمر <bdi dir="ltr"><code>reel</code></bdi> غير معروف على الجهاز.</td><td>الجلسة بدأت قبل تثبيت WhyNot Cut، فلا تعرف مكان الأمر بعد.</td><td>أغلق تطبيق Claude تمامًا وافتحه من جديد، وتأكد أن إضافة WhyNot Cut مفعّلة في تطبيق Claude. حتى ذلك الحين يستخدم Claude المسار الكامل للأمر.</td></tr>
-<tr><td>الرسائل لا تبدأ بـ <bdi dir="ltr"><code>WhyNot Cut &lt;version&gt;</code></bdi>، أو يظهر خطأ عن <bdi dir="ltr"><code>reel-editor</code></bdi>.</td><td>الجلسة بدأت قبل التثبيت أو التحديث، فما زالت تستخدم نسخة قديمة من الأمر.</td><td>أغلق تطبيق Claude تمامًا وافتحه من جديد.</td></tr>
-<tr><td>رسالة <bdi dir="ltr">engine not installed</bdi>.</td><td>المحرك لم يُثبَّت بعد.</td><td>شغّل <bdi dir="ltr"><code>/whynot-cut:start</code></bdi> أو <bdi dir="ltr"><code>/whynot-cut:setup</code></bdi>. يسألك Claude قبل تثبيت المحرك (نحو 400 MB).</td></tr>
-<tr><td>رسالة تقول إنه لا يوجد Python مناسب على الجهاز.</td><td>جهاز جديد ليس عليه Python.</td><td>ثبّته أنت، ثم أغلق تطبيق Claude وافتحه.<br>على Windows في PowerShell:<br><bdi dir="ltr"><code>winget install Python.Python.3.12</code></bdi><br>على macOS:<br><bdi dir="ltr"><code>xcode-select --install</code></bdi></td></tr>
-<tr><td>لوحة WhyNot Cut Bridge لا تظهر في <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>.</td><td>كان Premiere مفتوحًا أثناء التثبيت، أو إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> غير مفعّل.</td><td>أغلق Premiere وافتحه. وإذا كان <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> غير مفعّل، ففعّله بنفسك بالأوامر التي يعطيك إياها Claude من الفحص (على Windows في PowerShell، لا في Git Bash)، ثم أعد فتح Premiere.</td></tr>
-<tr><td>فعّلت <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> لكن اللوحة لا تعمل.</td><td>الأمر نُفّذ في حساب مستخدم آخر، أو في نافذة خاطئة.</td><td>نفّذ الأمر في حسابك أنت على الجهاز، واطلب من Claude أمر التحقق من القيمة، ثم أعد فتح Premiere.</td></tr>
+<tr><td>Claude يقول إن الأمر <bdi dir="ltr"><code>reel</code></bdi> غير معروف على الجهاز.</td><td>المحادثة بدأت قبل تثبيت WhyNot Cut، فلا تعرف مكان الأداة بعد.</td><td>اكتب <bdi dir="ltr"><code>/plugin</code></bdi> في مربع الرسالة، وتأكد أن WhyNot Cut مفعّل في قائمة الإضافات. ثم أغلق تطبيق Claude تمامًا وافتحه من جديد. Claude يكمل العمل في الأثناء، ولا تحتاج إلى فعل شيء آخر.</td></tr>
+<tr><td>الرسائل لا تبدأ بـ <bdi dir="ltr"><code>WhyNot Cut &lt;version&gt;</code></bdi>، أو يظهر خطأ عن <bdi dir="ltr"><code>reel-editor</code></bdi>.</td><td>المحادثة بدأت قبل التثبيت أو التحديث، فما زالت تستخدم نسخة قديمة.</td><td>أغلق تطبيق Claude تمامًا وافتحه من جديد.</td></tr>
+<tr><td>رسالة <bdi dir="ltr">engine not installed</bdi>.</td><td>المحرك لم يُثبَّت بعد.</td><td>اكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi> أو <bdi dir="ltr"><code>/whynot-cut:setup</code></bdi>. يسألك Claude قبل تثبيت المحرك (نحو <bdi dir="ltr">400&nbsp;MB</bdi>).</td></tr>
+<tr><td>رسالة تقول إنه لا يوجد Python مناسب على الجهاز.</td><td>جهاز جديد ليس عليه Python، وهو برنامج يحتاجه المحرك.</td><td>ثبّته أنت بالأمر الذي يعطيك إياه Claude (طريقة التشغيل في <a href="#ch02-run-command">الفصل&nbsp;2</a>)، ثم أغلق تطبيق Claude وافتحه.<br>على Windows:<br><bdi dir="ltr"><code>winget install Python.Python.3.12</code></bdi><br>على macOS:<br><bdi dir="ltr"><code>xcode-select --install</code></bdi></td></tr>
+<tr><td>لوحة WhyNot Cut Bridge لا تظهر في <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>.</td><td>كان Premiere مفتوحًا أثناء التثبيت، أو إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> (الذي يسمح لـ Premiere بفتح لوحات غير موقَّعة من Adobe) غير مفعّل.</td><td>أغلق Premiere وافتحه. وإذا كان الإعداد غير مفعّل، شغّل الأمر الذي يعطيك إياه Claude من الفحص بالطريقة الموضّحة في <a href="#ch02-run-command">الفصل&nbsp;2</a>، ثم أعد فتح Premiere.</td></tr>
+<tr><td>فعّلت <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> لكن اللوحة لا تعمل.</td><td>الأمر نُفّذ في حساب مستخدم آخر، أو لُصق في نافذة خاطئة.</td><td>شغّل الأمر في حسابك أنت على الجهاز، في PowerShell كما في <a href="#ch02-run-command">الفصل&nbsp;2</a>. ثم اطلب من Claude أن يتحقق من الإعداد، وأعد فتح Premiere.</td></tr>
 <tr><td>Claude يقول إن Premiere لا يستجيب.</td><td>اللوحة مغلقة، أو في Premiere نافذة حوار مفتوحة.</td><td>اجعل نافذة Premiere في المقدمة وأغلق أي نافذة حوار، ثم افتح <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions&nbsp;› WhyNot&nbsp;Cut&nbsp;Bridge</bdi>.</td></tr>
-<tr><td>التفريغ النصي بطيء جدًا.</td><td>يعمل على المعالج (CPU) فقط.</td><td>مع كارت NVIDIA: وافق على تنزيل مكتبة التسريع حين يعرضها Claude (نحو 520 MB). بدونه: غيّر نموذج التفريغ إلى <bdi dir="ltr"><code>large-v3-turbo</code></bdi> (<a href="#ch16-title">الفصل&nbsp;16</a>).</td></tr>
-<tr><td>توقف تنزيل نموذج Whisper في منتصفه.</td><td>انقطع الاتصال أو أُغلق الجهاز.</td><td>اطلب من Claude إكمال التنزيل؛ الفحص يُظهر التنزيل الناقص، والأمر نفسه يكمله.</td></tr>
+<tr><td>التفريغ النصي بطيء جدًا.</td><td>يعمل على المعالج (CPU) فقط.</td><td>مع كارت NVIDIA: وافق على تنزيل مكتبة التسريع حين يعرضها Claude (نحو <bdi dir="ltr">520&nbsp;MB</bdi>)، فيصبح التفريغ أسرع بنحو 8 مرات. بدونه: غيّر نموذج التفريغ إلى <bdi dir="ltr"><code>large-v3-turbo</code></bdi> (<a href="#ch16-title">الفصل&nbsp;16</a>).</td></tr>
+<tr><td>توقف تنزيل نموذج التفريغ في منتصفه.</td><td>انقطع الاتصال أو أُغلق الجهاز.</td><td>اطلب من Claude إكمال التنزيل؛ يكمل من حيث توقف.</td></tr>
 <tr><td>التفريغ يفشل لملفات في OneDrive أو iCloud أو Dropbox.</td><td>الملفات محفوظة على السحابة فقط، وليست على الجهاز.</td><td>انتظر حتى ينتهي تنزيل الملفات ونسخها، والأفضل أن يكون فولدر العملاء خارج الفولدرات المتزامنة.</td></tr>
 <tr><td>خطوط العميل لا تظهر في Premiere، أو تظهر رسالة <bdi dir="ltr">Fonts not installed</bdi>.</td><td>الخطوط موجودة في <bdi dir="ltr"><code>assets/Fonts</code></bdi> فقط، وليست مثبَّتة على الجهاز.</td><td>ثبّتها أنت: على Windows زر الماوس الأيمن ثم Install، وعلى macOS نقرتان ثم Install Font. فيديو المعاينة يستخدم ملفات الخطوط مباشرة، لكن Premiere يحتاج إليها مثبَّتة.</td></tr>
 <tr><td>الحروف العربية منفصلة في صور الجرافيك.</td><td>مكتبات تشكيل الحروف ناقصة في المحرك.</td><td>اطلب إصلاح المحرك بالأمر <bdi dir="ltr"><code>/whynot-cut:setup</code></bdi>.</td></tr>
@@ -45,22 +45,46 @@
 </table>
 
 <aside class="todo" data-phase="9">
-<p>يُراجَع هذا الجدول ويُستكمل من المشاكل التي تظهر في التشغيل الحقيقي الكامل على أجهزة نظيفة، مع صورة لكل رسالة خطأ شائعة.</p>
+<p>يُراجَع هذا الجدول ويُستكمل من المشاكل التي تظهر في التشغيل الحقيقي الكامل على أجهزة نظيفة، مع صورة لكل رسالة خطأ شائعة. صفوف اللوحة القديمة WhyNot Cut Bridge وإعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> تُحذف عندما تحل محلها لوحة WhyNot Cut الموقَّعة.</p>
+</aside>
+
+<h2 id="ch17-v3">رسائل اللوحة والتثبيت في الإصدار <bdi dir="ltr">3.0</bdi></h2>
+
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> تعرض كل مشكلة جملة واحدة وزرًا واحدًا يصلحها، في لوحة WhyNot Cut أو في برنامج التثبيت. لا تحتاج إلى كتابة أي أمر.</p>
+
+<table>
+<thead>
+<tr><th>ما تراه</th><th>السبب</th><th>ما تفعله</th></tr>
+</thead>
+<tbody>
+<tr><td>بطاقة في اللوحة تطلب إعادة تشغيل Premiere (<bdi dir="ltr">Restart&nbsp;Premiere</bdi>) بعد تحديث.</td><td>تحدّث WhyNot Cut وPremiere مفتوح، فما زالت اللوحة القديمة محمَّلة.</td><td>احفظ عملك، ثم أغلق Premiere وافتحه. وإذا قالت اللوحة إن التحديث جاهز، فهو يُثبَّت وحده في المرة التالية التي يُغلق فيها Premiere.</td></tr>
+<tr><td>اللوحة تقول «محرّك WhyNot Cut لا يعمل.»</td><td>المحرك متوقف.</td><td>المحرك يبدأ وحده مع تشغيل الجهاز، ومع فتح Premiere، ومع فتح Claude، واللوحة تعيد المحاولة تلقائيًا. إذا بقيت الرسالة، اضغط «تشغيل المحرّك».</td></tr>
+<tr><td>شارة Claude في اللوحة تقول إن Claude غير مثبَّت (<bdi dir="ltr">Claude&nbsp;not&nbsp;installed</bdi>).</td><td>تطبيق Claude ليس على الجهاز.</td><td>ثبّته وسجّل الدخول (<a href="#ch02-before">الفصل&nbsp;2</a>)، أو شغّل برنامج التثبيت مرة أخرى واضغط «ثبّت Claude لي».</td></tr>
+<tr><td>شارة Claude تطلب تسجيل الدخول (<bdi dir="ltr">Sign&nbsp;in&nbsp;to&nbsp;Claude</bdi>).</td><td>خرجت من حسابك في تطبيق Claude.</td><td>اضغط زر فتح Claude في الشارة، وسجّل الدخول بحسابك.</td></tr>
+<tr><td>شارة Claude تقول إن إضافة WhyNot Cut في Claude قديمة، ومعها زر تحديث (<bdi dir="ltr">Update</bdi>).</td><td>إصدار الإضافة داخل تطبيق Claude أقدم من باقي WhyNot Cut.</td><td>اضغط زر التحديث، ثم افتح محادثة جديدة في Claude.</td></tr>
+<tr><td>طلبت عملًا، فقال المحرك إن النموذج ما زال يُنزَّل، وكم دقيقة بقيت.</td><td>نموذج كبير لم يكتمل تنزيله بعد.</td><td>انتظر حتى يكتمل، أو وافق على استخدام النموذج الأصغر الجاهز على الجهاز.</td></tr>
+<tr><td>برنامج التثبيت يقول إنه تخطّى بعض النماذج.</td><td>مساحة القرص لم تكفِ لكل الحزم.</td><td>لا شيء عاجل: البرنامج ثبّت أقوى ما يتسع له القرص، وكتب ما تخطّاه وكيف تضيفه. عندما توفّر مساحة، ثم ثبّت الباقي من صفحة «النماذج» في اللوحة أو بتشغيل برنامج التثبيت مرة أخرى.</td></tr>
+<tr><td>بند أصفر في قائمة الفحص أو في «قائمة الإعداد».</td><td>خطوة لم تكتمل، وسببها مكتوب بجانبها.</td><td>اضغط زر الإصلاح الذي بجانب البند.</td></tr>
+</tbody>
+</table>
+
+<aside class="todo" data-phase="7">
+<p>هذه الرسائل من مواصفات الإصدار <bdi dir="ltr">3.0</bdi>، ويُتحقَّق منها في المرحلة 7 (التثبيت والمحرك) والمرحلة 6 (اللوحة)، وتُلتقط صورها في المرحلة 9. الرسالة «محرّك WhyNot Cut لا يعمل.» والزر «تشغيل المحرّك» منقولان من نصوص اللوحة؛ أما بطاقة إعادة تشغيل Premiere وحالات شارة Claude الجديدة وصفحة «النماذج» فتُنقل أسماؤها حرفيًا بعد إضافتها إلى نصوص اللوحة.</p>
 </aside>
 
 <h2 id="ch17-fix">الإصلاح التلقائي بأمر <bdi dir="ltr"><code>reel doctor --fix</code></bdi></h2>
 
 <aside class="todo" data-phase="7">
-<p>الخيار <bdi dir="ltr"><code>--fix</code></bdi> موجود اليوم، لكنه يكتفي بوضع ملف العلامة <bdi dir="ltr"><code>.whynot-client</code></bdi> في فولدر العميل. في الإصدار <bdi dir="ltr">3.0</bdi> سيتوسّع <bdi dir="ltr"><code>reel doctor --fix</code></bdi> ليُصلح تلقائيًا ما يمكن إصلاحه دون تدخّل منك، ويسجّل كل ما فعله، ويمكن تكراره بأمان. يُشرح هنا ما يصلحه وما يبقى لك بعد اكتماله.</p>
+<p>الخيار <bdi dir="ltr"><code>--fix</code></bdi> موجود اليوم، لكنه يكتفي بوضع ملف صغير يعرّف الفولدر كفولدر عميل. في الإصدار <bdi dir="ltr">3.0</bdi> يتوسّع ليُصلح تلقائيًا ما يمكن إصلاحه دون تدخّل منك، مثل إزالة اللوحات التجريبية القديمة وإعادة تشغيل المحرك، ويسجّل كل ما فعله، ويمكن تكراره بأمان. يشغّله Claude أو زر الإصلاح في اللوحة، لا أنت. يُشرح هنا ما يصلحه وما يبقى لك بعد اكتماله.</p>
 </aside>
 
 <h2 id="ch17-bundle">حزمة التشخيص</h2>
 
 <aside class="todo" data-phase="7">
-<p>في الإصدار <bdi dir="ltr">3.0</bdi> يجهّز الفحص ملفًا مضغوطًا (zip) على سطح المكتب فيه معلومات الجهاز والسجلات، بعد إخفاء البيانات الخاصة، ولا يضم أي فيديو أو تفريغ نصي إلا إذا اخترت ذلك. ترسله إلى الدعم عند الحاجة. تُشرح خطواته هنا بعد اكتماله.</p>
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> يجهّز الفحص ملفًا مضغوطًا (zip) على سطح المكتب فيه معلومات الجهاز والسجلات، بعد إخفاء البيانات الخاصة، ولا يضم أي فيديو أو تفريغ نصي إلا إذا اخترت ذلك. وفي اللوحة زر «نسخ التشخيص» ينسخ ملخص الحالة لترسله إلى الدعم. تُشرح خطواتهما هنا بعد اكتمالهما.</p>
 </aside>
 
-<h2 id="ch17-support">عندما لا تُحل المشكلة</h2>
+<h2 id="ch17-support" data-today>عندما لا تُحل المشكلة</h2>
 
 <p>إذا لم تجد العرَض في الجدول، أو لم ينجح الحل، اطلب من Claude أن يلخّص ما جرّبه وما عرفه، ثم راسلنا على <bdi dir="ltr"><a href="mailto:info@thewhynot.ai">info@thewhynot.ai</a></bdi> ومعك هذا الملخص ونتيجة الفحص.</p>
 </section>
