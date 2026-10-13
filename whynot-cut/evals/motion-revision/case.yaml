@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: motion-revision
+description: 'Comments on a motion video (_MO) route to the motion-director and motion-plan, never ppro-build.'
+tags: [motion, revise]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

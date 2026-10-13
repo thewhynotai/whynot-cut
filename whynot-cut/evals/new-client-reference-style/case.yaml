@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: new-client-reference-style
+description: 'New client with reference edits: the client-level reference style is written once and recorded (ref-style --record).'
+tags: [new-client, reference-style]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

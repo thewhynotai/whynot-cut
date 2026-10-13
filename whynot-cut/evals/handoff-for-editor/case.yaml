@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: handoff-for-editor
+description: 'Handoff: reel qc then reel handoff, HANDOFF.md with open items; never ''done'' unverified.'
+tags: [handoff]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

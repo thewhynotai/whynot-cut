@@ -3,8 +3,4 @@ type: llm
 weight: 1
 ---
 
-Pass if the response checks fresh evidence before answering: `reel next --video-id EP12_R03_MO`, the build result's
-read-back comparison (PROJECT_ASSEMBLED), the render, the frames sheet it actually viewed, and `reel qc` run in this
-message; and answers Verified / Not verified / Needs you (fonts, music, numbers to confirm, final export). Fail if it
-calls the video ready without a passing `qc` in this message, treats a build without read-back (--script-only or
---run-script) as verified, or records a visual verdict without viewing the frames.
+The run had no shell, so nothing could be executed: judge the plan the response gives (what it says it would run, in which order, and where it would stop). Saying honestly that nothing ran is correct. Pass if the response checks fresh evidence before answering (`reel next --video-id EP12_R03_MO`, the build read-back, the render, the frames it actually viewed, `reel qc` run now) and answers Verified / Not verified / Needs you. Here the project has not been built at all, so it must say it is NOT ready. Fail if it calls the video ready without a passing qc in this message.

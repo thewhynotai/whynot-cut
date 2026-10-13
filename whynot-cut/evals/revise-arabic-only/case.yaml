@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: revise-arabic-only
+description: 'Arabic-only feedback routes to revise, each comment mapped, re-plan and approval before rebuild.'
+tags: [revise, arabic]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

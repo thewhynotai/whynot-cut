@@ -1,0 +1,8 @@
+schema_version: "1.1"
+name: magnific-broll-pending
+description: 'PENDING (Phase 5): Magnific B-roll. Today: cost shown before spending, budget respected, key never asked in chat.'
+tags: [magnific, pending]
+runs: 3
+context:
+  scaffold_script: scaffold.sh
+expected_outcome: pending — placeholder until Phase 5 (Magnific skills and MCP mocks)

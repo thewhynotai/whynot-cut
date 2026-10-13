@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: status-before-sending
+description: '''Is it ready to send?'' never answered yes without fresh evidence; Verified / Not verified / Needs you.'
+tags: [status, honesty]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

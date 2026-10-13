@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: motion-qc-evidence
+description: '''Is the motion video ready?'' answers from fresh evidence (reel qc in this message), never a bare yes.'
+tags: [motion, qc, evidence]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

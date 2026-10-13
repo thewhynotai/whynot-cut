@@ -1,7 +1,8 @@
 ---
-max_turns: 6
+max_turns: 10
+timeout_seconds: 300
 allowed_tools: [Read, Glob, Grep, Skill]
-tags: [new-client, profiles]
+append_system_prompt: 'Evaluation note: this session cannot run shell commands, so the WhyNot Cut engine cannot run here. Still answer the editor fully: the exact plan you would carry out (the steps, the concrete reel commands in order, each in a code block, and where you would stop for the editor), and say plainly that nothing has run yet.'
 ---
 
-I have a new client, Dr. Sherif. His folder has assets/ (logo, fonts, photos, a brief) and data/ (raw clips and two reference edits). Set him up so we can start editing.
+I have a new client, Dr. Sherif. His folder is dr-sherif: assets/ (logo, brief, a font note) and data/ (raw clips and two reference edits). Set him up so we can start editing.

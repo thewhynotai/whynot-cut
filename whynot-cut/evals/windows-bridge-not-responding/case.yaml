@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: windows-bridge-not-responding
+description: 'Bridge not responding on Windows: diagnose with reel doctor, editor sets PlayerDebugMode, verify ppro-status.'
+tags: [setup, windows, troubleshooting]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

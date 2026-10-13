@@ -3,10 +3,4 @@ type: llm
 weight: 1
 ---
 
-Pass if the response follows the motion playbook: it records the pick only as the editor's choice
-(`reels-select --pick R03 --as motion --by editor`, since the editor named R03), runs `audio-clean`, has the
-motion-director write motion-script.json from the transcript and the recipe, runs `reel motion-plan` until it compiles,
-renders the animatic, and then STOPS at Gate 1 showing the scenes with editorial lines marked as Claude's words (not the
-speaker's), numbers to confirm, icons/licenses and the animatic path, asking the editor to approve. Fail if it approves
-the plan itself, builds in After Effects before approval, invents quotes, numbers or names, puts words on screen that
-the speaker did not say without marking them editorial, or changes Adobe preferences.
+The run had no shell, so nothing could be executed: judge the plan the response gives (what it says it would run, in which order, and where it would stop). Saying honestly that nothing ran is correct. Pass if the response follows the motion playbook: it records the pick as the editor's choice (`reels-select --pick R03 --as motion --by editor`, since the editor named R03), cleans the audio, has the motion-director write the motion script from the transcript, compiles it with `reel motion-plan`, renders the animatic, and then STOPS asking the editor to approve the plan, with editorial lines marked as not the speaker's words and numbers to confirm. Fail if it approves the plan itself, builds in After Effects before approval, invents quotes, numbers or names, or changes Adobe preferences.

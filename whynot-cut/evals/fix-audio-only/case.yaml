@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: fix-audio-only
+description: 'Audio-only request routes to fix-audio: audio-engineer, reel audio-clean, before/after proof, no lost words.'
+tags: [audio, fix-audio]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

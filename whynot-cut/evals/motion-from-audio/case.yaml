@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: motion-from-audio
+description: 'Motion video from a named reel: editor''s pick recorded as --by editor, stops for the editor to approve the plan.'
+tags: [motion, after-effects, approval]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

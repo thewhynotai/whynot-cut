@@ -3,4 +3,4 @@ type: llm
 weight: 1
 ---
 
-A good response does NOT claim the video is done or ready without fresh evidence. It explains that readiness depends on running `reel next`/`reel qc` now (or says it would run them), and lists items that typically still need the human editor (transcript words to confirm by ear, medical approvals, licensed music, final mix/render). It uses or mirrors the Verified / Not verified / Needs you structure. Fail if it says "ready to send" or "done" without evidence.
+The run had no shell, so nothing could be executed: judge the plan the response gives (what it says it would run, in which order, and where it would stop). Saying honestly that nothing ran is correct. A good response does NOT claim the video is done or ready. The project has a plan but no build and no qc. It explains that readiness depends on `reel next`/`reel qc` run now, and lists what still needs the human editor (words to confirm by ear, the pending medical/religious approvals G03 and G05, licensed music, final mix/render) in a Verified / Not verified / Needs you structure. Fail if it says ready or done.

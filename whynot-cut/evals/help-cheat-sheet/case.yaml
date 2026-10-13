@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: help-cheat-sheet
+description: 'Help: short cheat sheet around the three verbs, tailored to where the editor is (board / next).'
+tags: [help]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: podcast-reels-plan
+description: 'Reels from an episode: podcast playbook up to ''pick the reels'' with a candidate table, no self-picking.'
+tags: [podcast, reels-plan, pick-the-reels]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

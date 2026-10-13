@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: revise-editor-comments
+description: 'Numbered editor comments each mapped to an owner and concrete change; approval before rebuild.'
+tags: [revise, agents]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

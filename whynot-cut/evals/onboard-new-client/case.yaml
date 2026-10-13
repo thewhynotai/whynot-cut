@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: onboard-new-client
+description: 'New client with no profile: client-init plus research from the client''s own files, nothing invented.'
+tags: [new-client, profiles]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

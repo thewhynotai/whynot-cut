@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: autopilot-new-clips
+description: '''Edit the new videos'' finds the clips with reel inbox and stops at one combined plan approval (approval: ask).'
+tags: [autopilot, batch]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

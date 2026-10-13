@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: status-arabic-only
+description: 'Arabic-only ''is it ready?'' routes to status, answers in Arabic with evidence, never a bare yes.'
+tags: [status, arabic, honesty]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

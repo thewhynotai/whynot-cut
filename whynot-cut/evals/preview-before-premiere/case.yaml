@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: preview-before-premiere
+description: 'No Premiere today: offers reel preview-video as a proxy, not the deliverable.'
+tags: [preview]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

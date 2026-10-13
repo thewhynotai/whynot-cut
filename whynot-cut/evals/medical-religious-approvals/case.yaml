@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: medical-religious-approvals
+description: 'Which graphics need the doctor''s / speaker''s sign-off: from the medical review; never self-approved.'
+tags: [medical, religious, approval]
+runs: 3
+context:
+  scaffold_script: scaffold.sh
