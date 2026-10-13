@@ -57,6 +57,11 @@ test("package-ccx plugin writes whynot-cut/adobe/WhyNotCut-Premiere-<version>.cc
   assert.equal(build.product, version);
   assert.match(build.build, /^\d{8}T\d{6}Z$/);
   assert.match(build.sha, /^(?:[0-9a-f]{4,40}(?:-dirty)?|unknown)$/);
+  // C1.8: the bundle's __WNC_BUILD__ (sent as hello client.build) is this very id, and its __WNC_SHA__ this sha, so the
+  // daemon's compare with expected.json (release.py writes build.json's id there) can say "stale"
+  const js = text(files["index.js"]);
+  assert.ok(js.includes(JSON.stringify(build.build)), `index.js does not carry build.json's id ${build.build}`);
+  assert.ok(js.includes(JSON.stringify(build.sha)), `index.js does not carry build.json's sha ${build.sha}`);
   const icons = names.filter((n) => n.startsWith("icons/") && n.endsWith(".png"));
   assert.ok(icons.length >= 12, `expected the icon set, got ${icons.length}`);
   // every icon the manifest names is in the package
@@ -120,8 +125,10 @@ test("the shipped bundle: UXP host modules stay external, no mock data, the engi
   assert.match(js, /ws:\/\/127\.0\.0\.1:/);
   assert.match(js, /reel serve --ensure/);
   assert.match(js, /kind: "uxp"/);
-  // M8: the build stamp (short git hash [+dirty] + UTC build time) is baked in for the log drawer and the diagnostics
-  assert.match(js, /build: "(?:[0-9a-f]{7,}|nogit)(?:\+dirty)? \d{4}-\d\d-\d\dT\d\d:\d\dZ"/);
+  // M8 / C1.8: the build id (UTC YYYYMMDDTHHMMSSZ) is baked in as hello client.build, and with the git sha next to it
+  // for the log drawer and the diagnostics
+  assert.match(js, /build: "\d{8}T\d{6}Z"/);
+  assert.match(js, /build: `\$\{"\d{8}T\d{6}Z"\} \$\{"(?:[0-9a-f]{4,40}(?:-dirty)?|unknown)"\}`/);
   const html = text(files["index.html"]);
   assert.match(html, /<script[^>]+src="index\.js"/);
   assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "panel.css", "kit.css", "index.css"]);

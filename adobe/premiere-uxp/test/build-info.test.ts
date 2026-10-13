@@ -17,6 +17,12 @@ type PackageCcx = {
   stampDevName(manifest: Manifest): Manifest;
 };
 const pc = (await import(pathToFileURL(join(root, "scripts", "package-ccx.mjs")).href)) as PackageCcx;
+type BuildMjs = {
+  buildId(now?: Date): string;
+  buildDefines(o: { target: string; mock: boolean; now: Date; sha: string }): Record<string, string>;
+  localSha(): string;
+};
+const bm = (await import(pathToFileURL(join(root, "scripts", "build.mjs")).href)) as BuildMjs;
 const read = (p: string) => JSON.parse(readFileSync(join(root, p), "utf8")) as Manifest;
 const product = read("plugin/manifest.json");
 const spike = read("spike/manifest.json");
@@ -24,6 +30,18 @@ const spike = read("spike/manifest.json");
 test("buildId: a UTC timestamp id, seconds precision, no separators", () => {
   assert.equal(pc.buildId(new Date(Date.UTC(2026, 9, 13, 14, 25, 30, 123))), "20261013T142530Z");
   assert.match(pc.buildId(), /^\d{8}T\d{6}Z$/);
+});
+
+test("C1.8: one id per build - the panel's __WNC_BUILD__ is build.json's `build`; the git sha rides separately as __WNC_SHA__", () => {
+  assert.equal(bm.buildId, pc.buildId, "package-ccx uses build.mjs's buildId: one function, one format");
+  const now = new Date(Date.UTC(2026, 9, 13, 14, 25, 30, 123));
+  const d = bm.buildDefines({ target: "plugin", mock: false, now, sha: "57d3211-dirty" });
+  assert.deepEqual(d, { __WNC_MOCK__: "false", __WNC_BUILD__: JSON.stringify("20261013T142530Z"), __WNC_SHA__: JSON.stringify("57d3211-dirty") });
+  assert.equal(JSON.parse(d.__WNC_BUILD__!), pc.buildInfo(product, { now, sha: "x" }).build, "the same id build.json gets for the same build");
+  assert.match(JSON.parse(d.__WNC_BUILD__!), /^\d{8}T\d{6}Z$/, "sortable: text order is time order (the daemon compares ids as text)");
+  assert.equal(bm.buildDefines({ target: "plugin", mock: true, now, sha: "x" }).__WNC_MOCK__, "true");
+  assert.equal(bm.buildDefines({ target: "spike", mock: true, now, sha: "x" }).__WNC_MOCK__, "false", "only the plugin bundles MockSource");
+  assert.match(bm.localSha(), /^(?:[0-9a-f]{4,40}(?:-dirty)?|unknown)$/);
 });
 
 test("gitSha: short HEAD, \"-dirty\" when adobe/ or brand/ has changes, \"unknown\" without git", () => {

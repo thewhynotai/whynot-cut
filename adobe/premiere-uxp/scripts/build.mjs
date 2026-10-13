@@ -48,10 +48,18 @@ export function outDir(target) {
   return join(root, "build", target);
 }
 
-/** The build stamp shown in the panel's log drawer and copied with its diagnostics: the short git hash of HEAD (with
- *  "+dirty" when adobe/ has uncommitted changes) and the build time in UTC to the minute, e.g.
- *  "61b12aa 2026-10-12T18:40Z". It tells two builds of the same plugin version apart on a live machine. */
-export function buildStamp(now = new Date()) {
+/** The build id (C1.8): UTC time to the second, YYYYMMDDTHHMMSSZ, e.g. 2026-10-13T14:25:30.123Z -> "20261013T142530Z".
+ *  ONE id per build: the panel bundle's `__WNC_BUILD__` (sent as hello client.build) and the .ccx's build.json `build`
+ *  (package-ccx.mjs passes the same `now` to both), and release.py writes the shipped ccx's id into expected.json. The
+ *  daemon compares two ids as text, which is time order (serve/messages.py compare_builds), so an older panel is
+ *  "stale" (restart Premiere). */
+export function buildId(now = new Date()) {
+  return now.toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
+}
+
+/** The git short hash of HEAD with "-dirty" when adobe/ has uncommitted changes, "unknown" without git: info only (the
+ *  log drawer and diagnostics show it next to the build id). A packaged build gets package-ccx's gitSha instead. */
+export function localSha() {
   const git = (args) => {
     try {
       return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
@@ -59,9 +67,19 @@ export function buildStamp(now = new Date()) {
       return "";
     }
   };
-  const hash = git(["rev-parse", "--short", "HEAD"]) || "nogit";
-  const dirty = git(["status", "--porcelain", "--", ".."]) ? "+dirty" : "";
-  return `${hash}${dirty} ${now.toISOString().slice(0, 16)}Z`;
+  const hash = git(["rev-parse", "--short", "HEAD"]);
+  if (!/^[0-9a-f]{4,40}$/.test(hash)) return "unknown";
+  return `${hash}${git(["status", "--porcelain", "--", ".."]) ? "-dirty" : ""}`;
+}
+
+/** esbuild `define`s read by src/main.ts: __WNC_MOCK__ (true only for a mock plugin build), __WNC_BUILD__ (the build id)
+ *  and __WNC_SHA__ (the git sha, info only). */
+export function buildDefines({ target, mock, now, sha }) {
+  return {
+    __WNC_MOCK__: target === "plugin" && mock ? "true" : "false",
+    __WNC_BUILD__: JSON.stringify(buildId(now)),
+    __WNC_SHA__: JSON.stringify(sha),
+  };
 }
 
 /** True for `WNC_MOCK=1` / `--mock`: the plugin bundles the panel kit's MockSource instead of the offline source. */
@@ -69,7 +87,8 @@ export function mockRequested(argv = process.argv, env = process.env) {
   return argv.includes("--mock") || ["1", "true"].includes(String(env.WNC_MOCK ?? "").toLowerCase());
 }
 
-export async function buildTarget(target, { mock = mockRequested() } = {}) {
+/** `now` / `sha`: package-ccx passes the ones it writes into build.json, so the bundle carries the same id. */
+export async function buildTarget(target, { mock = mockRequested(), now = new Date(), sha } = {}) {
   const t = TARGETS[target];
   if (!t) throw new Error(`unknown target "${target}" (expected: ${Object.keys(TARGETS).join(", ")})`);
   const missing = [t.entry, ...Object.keys(t.files)].filter((p) => !existsSync(join(root, p)));
@@ -89,8 +108,8 @@ export async function buildTarget(target, { mock = mockRequested() } = {}) {
     target: "es2022",
     external: EXTERNAL,
     legalComments: "none",
-    // build-time flag read by src/main.ts; false in every normal build, so esbuild drops MockSource from the bundle
-    define: { __WNC_MOCK__: target === "plugin" && mock ? "true" : "false", __WNC_BUILD__: JSON.stringify(buildStamp()) },
+    // build-time constants read by src/main.ts; __WNC_MOCK__ is false in every normal build, so esbuild drops MockSource
+    define: buildDefines({ target, mock, now, sha: sha ?? localSha() }),
     logLevel: "warning",
   });
   for (const [from, to] of Object.entries(t.files)) cpSync(join(root, from), join(out, to), { recursive: true });

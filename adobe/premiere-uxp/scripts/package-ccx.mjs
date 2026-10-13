@@ -8,7 +8,9 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildTarget, mockRequested, root } from "./build.mjs";
+import { buildId, buildTarget, mockRequested, root } from "./build.mjs";
+
+export { buildId };
 
 const repo = join(root, "..", "..");
 // 2026-01-01: a fixed timestamp makes the zip entries' dates reproducible (build.json's own `build` id still changes per run).
@@ -60,11 +62,6 @@ export function gitSha(git = defaultGit) {
   return `${hash}${dirty}`;
 }
 
-/** UTC timestamp id, e.g. 2026-10-13T14:25:30.123Z -> "20261013T142530Z". */
-export function buildId(now = new Date()) {
-  return now.toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
-}
-
 /** The build.json written into every .ccx: product = the manifest version, build = UTC timestamp id, sha = git. */
 export function buildInfo(manifest, { now = new Date(), sha = gitSha() } = {}) {
   return { product: manifest.version, build: buildId(now), sha };
@@ -90,7 +87,9 @@ export async function packageTarget(target, { now = new Date(), sha } = {}) {
   if (!outFile) throw new Error(`unknown target "${target}" (expected: ${Object.keys(OUTPUTS).join(", ")})`);
   // A .ccx is what gets installed; it must never carry the mock data source.
   if (target === "plugin" && mockRequested()) throw new Error("refusing to package the plugin from a mock build (WNC_MOCK / --mock): unset it and run again");
-  const dir = await buildTarget(target, { mock: false });
+  // one id per build (C1.8): the bundle's __WNC_BUILD__ / __WNC_SHA__ and build.json come from the same now and sha
+  const stampSha = sha ?? gitSha();
+  const dir = await buildTarget(target, { mock: false, now, sha: stampSha });
   const entries = {};
   // manifest.json first, then everything else in sorted order; forward slashes, rooted at the plugin folder
   const rel = (f) => relative(dir, f).split(sep).join("/");
@@ -101,7 +100,7 @@ export async function packageTarget(target, { now = new Date(), sha } = {}) {
   if (!("manifest.json" in entries)) throw new Error("manifest.json missing from the build output");
   if ("build.json" in entries) throw new Error("build.json is written by package-ccx; the build output must not carry one");
   const manifest = stampDevName(JSON.parse(new TextDecoder().decode(entries["manifest.json"][0])));
-  const info = buildInfo(manifest, { now, sha: sha ?? gitSha() });
+  const info = buildInfo(manifest, { now, sha: stampSha });
   const json = (o) => new TextEncoder().encode(`${JSON.stringify(o, null, 2)}\n`);
   entries["manifest.json"] = [json(manifest), { mtime: FIXED_MTIME, level: 6 }];
   entries["build.json"] = [json(info), { mtime: FIXED_MTIME, level: 6 }];

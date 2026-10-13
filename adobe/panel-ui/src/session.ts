@@ -38,7 +38,8 @@ export interface HelloMessage {
   client: {
     kind: ClientKind;
     version: string;
-    /** the panel package's build stamp (C2.3, 1-64 characters); the daemon compares it with the plugin's expected.json */
+    /** the panel package's build id (C1.8 / C2.3): UTC YYYYMMDDTHHMMSSZ, the same id as the .ccx's build.json `build`;
+     *  the daemon compares it with the plugin's expected.json (1-64 characters) */
     build?: string;
     /** the Adobe host the client runs in; absent for the CLI */
     host?: "premiere" | "aftereffects";
@@ -49,8 +50,9 @@ export interface HelloMessage {
   };
 }
 
-/** Is the connecting panel the build the plugin expects (welcome.update.panel): ok = equal, stale = older (restart
- *  Premiere to load the update), newer = newer than the plugin, unknown = no build, no expected.json or not a build number. */
+/** Is the connecting panel the build the plugin expects (welcome.update.panel): ok = the same id, stale = an older id or
+ *  any other differing value (restart Premiere to load the update), newer = a newer id than the plugin's, unknown = no
+ *  build, no expected.json or a malformed value. */
 export const PANEL_UPDATE_STATES = ["ok", "stale", "newer", "unknown"] as const;
 export type PanelUpdate = (typeof PANEL_UPDATE_STATES)[number];
 

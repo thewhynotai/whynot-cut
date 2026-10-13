@@ -604,6 +604,79 @@ class SessionMessages(AppCase):
         st = (await c.recv())["state"]
         self.assertEqual((st["client"], st["item"], st["pipeline"], st["approval"]), ("", "", [], None))
 
+    async def test_panel_intent_replies_are_audited(self):
+        """Every answered panel intent leaves an audit row (event intent, outcome not_available), like the refused ones."""
+        c = await self.panel_session()
+        for msg in self.INTENTS:
+            await c.send(msg)
+            self.assertEqual((await c.recv())["type"], "reply")
+        rows = [r for r in self.events("intent") if r["outcome"] == "not_available"]
+        self.assertEqual([r["action"] for r in rows], [m["type"] for m in self.INTENTS])
+        self.assertTrue(all(r.get("session") for r in rows))
+
+    async def test_a_state_that_cannot_be_encoded_does_not_end_the_session(self):
+        """_dumps refuses NaN / Infinity (allow_nan=False: not JSON); a message it cannot encode is logged and answered
+        with error{internal} carrying the id, and the session goes on."""
+        bad = {"client": "", "item": "x", "pipeline": [], "approval": None,
+               "qc": [{"t_s": float("nan"), "tc": "00:00:00:00", "file": "f.png", "label": "", "verdict": "pending"}]}
+        self.assertRaises(ValueError, serve_app._dumps, {"x": float("inf")})
+        c = await self.cli()
+        with mock.patch.object(self.app, "_fields", return_value=bad), self.assertLogs("serve.app", "WARNING") as logs:
+            await c.send({"type": "snapshot", "id": "nan-1"})
+            err = await c.recv()
+        self.assertEqual((err["type"], err["code"], err.get("id")), ("error", "internal", "nan-1"), err)
+        self.assertTrue(any("could not be encoded" in line for line in logs.output), logs.output)
+        await c.send({"type": "snapshot", "id": "ok-1"})
+        self.assertEqual((await c.recv())["id"], "ok-1")
+
+    async def test_a_stuck_engine_state_read_times_out_on_one_bounded_worker(self):
+        """A read that never returns (a dead network share, a FIFO swapped in) cannot stall a snapshot or leak a thread
+        per poll: panel_fields runs on the app's one engine-state worker with FIELDS_TIMEOUT; past it the snapshot
+        gets the last good item (else no item), the timeout is logged once, and while the read is still stuck later
+        snapshots do not queue behind it."""
+        self.app.fields_timeout = 0.2
+        good = {"client": "Dr Nour", "item": "C0239", "pipeline": [], "approval": None, "qc": []}
+        release = threading.Event()
+        calls = []
+
+        def stuck(home):
+            calls.append(threading.current_thread().name)
+            release.wait(T)
+            return good
+        c = await self.cli()
+        try:
+            with mock.patch.object(self.app, "_fields", side_effect=stuck), \
+                    self.assertLogs("serve.app", "WARNING") as logs:
+                t0 = time.monotonic()
+                await c.send({"type": "snapshot", "id": "s1"})
+                st = (await c.recv())["state"]
+                self.assertLess(time.monotonic() - t0, 0.2 + 2.0)
+                self.assertEqual((st["client"], st["item"]), ("", ""))          # nothing good yet: no item
+                self.app.fields_timeout = 3.0           # a snapshot that queued behind the stuck read would wait this
+                t1 = time.monotonic()
+                for i in range(3):
+                    await c.send({"type": "snapshot", "id": f"s{i + 2}"})
+                    self.assertEqual((await c.recv())["state"]["item"], "")
+                self.assertLess(time.monotonic() - t1, 1.5, "a snapshot waited behind the stuck read")
+                self.assertEqual(len(calls), 1, "one read at a time")
+                self.app.fields_timeout = 0.2
+                release.set()
+                deadline = time.monotonic() + T
+                while self.app._fields_running is not None and not self.app._fields_running.done() \
+                        and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                await c.send({"type": "snapshot", "id": "s9"})
+                self.assertEqual((await c.recv())["state"]["item"], "C0239")
+            self.assertEqual(len([x for x in logs.output if "timed out" in x]), 1, logs.output)
+            self.assertTrue(all(n.startswith("reel-serve-engine-state") for n in calls), calls)
+            # stuck again: now the last good item is shown
+            release.clear()
+            with mock.patch.object(self.app, "_fields", side_effect=stuck), self.assertLogs("serve.app", "WARNING"):
+                await c.send({"type": "snapshot", "id": "s10"})
+                self.assertEqual((await c.recv())["state"]["item"], "C0239")
+        finally:
+            release.set()
+
     async def status_sessions(self) -> list:
         status, _, body = await http(self.port, f"GET /status HTTP/1.1\r\nHost: localhost:{self.port}\r\n"
                                                 f"Authorization: Bearer {self.token}\r\n\r\n".encode())
@@ -1182,11 +1255,15 @@ class BuildStamp(AppCase):
         self.assertEqual(await self.welcome_for(None), "unknown")
 
     async def test_ok_stale_newer_unknown(self):
-        self.expected.write_text(json.dumps({"product": "3.0.0", "build": "142", "sha": "abc1234"}), encoding="utf-8")
-        for build, want in (("142", "ok"), ("141", "stale"), ("143", "newer"), ("not a build", "unknown"), (None, "unknown")):
+        """C1.8: both are the build id YYYYMMDDTHHMMSSZ (build.json's); an older panel is stale (restart Premiere), any
+        other differing value too (expected.json is the authority); no build or no expected.json is unknown."""
+        a = "20261013T142530Z"
+        self.expected.write_text(json.dumps({"product": "3.0.0", "build": a, "sha": "abc1234"}), encoding="utf-8")
+        for build, want in ((a, "ok"), ("20261013T142529Z", "stale"), ("20261013T142531Z", "newer"),
+                            ("abc1234 2026-10-13T10:00Z", "stale"), (None, "unknown")):
             self.assertEqual(await self.welcome_for(build), want, build)
         self.expected.write_text("{broken", encoding="utf-8")
-        self.assertEqual(await self.welcome_for("142"), "unknown")
+        self.assertEqual(await self.welcome_for(a), "unknown")
 
     async def test_an_invalid_build_is_a_refused_hello(self):
         for bad in ("", "x" * 65):

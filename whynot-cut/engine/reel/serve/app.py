@@ -30,11 +30,18 @@ its own task through the Router (UXP panel or CEP file queue, a Context per requ
 session answer the commands sent to it; the panel intents approve / request_changes / rebuild are accepted only from a
 `kind: "panel"` session (any other session gets `error{schema}`, audited) and get a `reply` ok:false in plain words
 saying the step is not available from the panel yet (NOT_YET; no command names: the engine side is T6.2b, and until
-it ships no `reel` writer runs for a panel intent); `snapshot` gets a `state` echoing its id, with the item the engine
-works on (serve/engine_state.py: <home>/state/active.json and the item's evidence files, read only); `cancel` is
+it ships no `reel` writer runs for a panel intent; each such reply is audited: event intent, outcome not_available);
+`snapshot` gets a `state` echoing its id, with the item the engine works on (serve/engine_state.py: <home>/state/
+active.json and the item's evidence files, read only, cached by their mtimes). That read runs on the app's own engine-
+state worker (one daemon thread, adapters.QueueWorker; never the default executor) under FIELDS_TIMEOUT (3 s): past it
+the state carries the last good item (else no item) and the timeout is logged once; while that read is still stuck,
+later snapshots do not queue behind it, so a stuck read (a dead network share) costs one thread, never one per poll;
+`cancel` is
 forwarded to the panel running the command. When a session ends, the commands waiting on it fail with a clear error
 and its own running commands are cancelled; a reconnect is a new hello.
-The token is never logged, never echoed and never read from a URL.
+The token is never logged, never echoed and never read from a URL. Messages are encoded with allow_nan=False (NaN /
+Infinity are not JSON); a message that cannot be encoded is logged and answered with error{internal}, never ending the
+session.
 `welcome.update.panel` answers the hello's optional client.build against <plugin>/adobe/expected.json (C2.3:
 ok / stale / newer / unknown; engine_state.panel_update).
 """
@@ -51,7 +58,7 @@ import time
 from lib import common
 
 from . import engine_state, messages, security, ws
-from .adapters import FileQueueAdapter, HostLink
+from .adapters import FileQueueAdapter, HostLink, QueueWorker
 from .router import Router
 
 __all__ = ["App", "Session", "PRE_AUTH_MAX", "POST_AUTH_MAX", "HELLO_TIMEOUT"]
@@ -70,6 +77,7 @@ CLOSE_ROUND_S = 0.2               # close(): the wait after each abort round, an
 RATE = (20.0, 60)                  # messages per second per session, burst
 MAX_RUNNING = 16                   # commands one session may have running at once
 OFFLOAD_BYTES = 256 * 1024         # messages above this are parsed and validated in a worker thread
+FIELDS_TIMEOUT = 3.0               # the engine state read (engine_state.PanelFields) for one snapshot
 AUTH_REFUSED = "The first message must be a hello with the engine token from engine.json."
 PROTOCOL_REQUIRED = "protocol 4 required"
 # the panel intents until T6.2b ships their engine side: editor words, never a command (Addendum C1.4)
@@ -81,7 +89,8 @@ INTENTS = frozenset(NOT_YET)
 
 
 def _dumps(msg: dict) -> str:
-    return json.dumps(msg, ensure_ascii=False, separators=(",", ":"))
+    """Strict JSON: NaN / Infinity raise ValueError instead of reaching a peer as invalid JSON."""
+    return json.dumps(msg, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
 _NO_PROTOCOL = object()
@@ -134,7 +143,14 @@ class Session:
 
     async def send(self, msg: dict) -> bool:
         try:
-            await self.sock.send(_dumps(msg))
+            text = _dumps(msg)
+        except (ValueError, TypeError) as e:          # not JSON (NaN, Infinity, ...): say so, keep the session
+            log.warning("reel serve: a %s message could not be encoded (%s); sent error{internal} instead",
+                        msg.get("type") if isinstance(msg, dict) else "?", type(e).__name__)
+            text = _dumps(messages.error("internal", "The daemon could not encode its answer.",
+                                         msg.get("id") if isinstance(msg, dict) else None))
+        try:
+            await self.sock.send(text)
             return True
         except (ConnectionError, OSError):
             return False
@@ -150,7 +166,8 @@ class App:
     def __init__(self, *, home, token: str, version: str, audit: security.AuditLog | None = None,
                  hello_timeout: float = HELLO_TIMEOUT, max_connections: int = MAX_CONNECTIONS,
                  rate: tuple = RATE, max_running: int = MAX_RUNNING,
-                 idle_timeout: float = ws.IDLE_TIMEOUT, file_queue=None, expected_path=None):
+                 idle_timeout: float = ws.IDLE_TIMEOUT, file_queue=None, expected_path=None,
+                 fields_timeout: float = FIELDS_TIMEOUT):
         if not security.token_shape_ok(token):
             raise ValueError("the engine token must be 64 lowercase hex characters (security.make_token)")
         self.home = home
@@ -163,6 +180,12 @@ class App:
         self.max_running = max_running
         self.idle_timeout = idle_timeout
         self.expected_path = expected_path if expected_path is not None else engine_state.expected_path()
+        self.fields_timeout = fields_timeout
+        self._fields = engine_state.PanelFields()               # the item's fields, cached by their files' mtimes
+        self._state_worker = QueueWorker("reel-serve-engine-state")   # one daemon thread: a stuck read costs one
+        self._fields_running = None                             # the read in flight (concurrent.futures.Future)
+        self._last_fields: dict | None = None                   # the last good read: shown while a read is stuck
+        self._fields_timed_out = False                          # logged once per stuck episode
         self.port: int | None = None
         self.sessions: dict[str, Session] = {}
         self.router = Router(home=home, sessions=lambda: list(self.sessions.values()),
@@ -199,6 +222,7 @@ class App:
 
         if self._server is not None:
             self._server.close()
+        self._state_worker.cancel_pending()
         sessions = list(self.sessions.values())
         if sessions:                                   # concurrently: N silent peers cost one timeout, not N
             closing = [asyncio.ensure_future(self._close_session(s)) for s in sessions]
@@ -467,6 +491,8 @@ class App:
                 await s.send(messages.error("schema", f"{t} is a panel intent: only a panel session may send it.",
                                             messages.message_id(msg)))
                 return
+            self._audit("intent", s.peer, session=s.id, action=t, outcome="not_available",
+                        reason="not available from the panel yet (T6.2b)")
             await s.send(messages.reply(t, msg["id"], ok=False, error=NOT_YET[t], how=NOT_YET_HOW))
         elif t == "cancel":
             answer = await self.router.cancel(msg["id"])
@@ -490,13 +516,33 @@ class App:
                                  messages.message_id(msg))
         await s.send(out)
 
+    def _fields_fallback(self) -> dict:
+        return dict(self._last_fields) if self._last_fields is not None else dict(engine_state.EMPTY, pipeline=[], qc=[])
+
     async def _item_fields(self) -> dict | None:
-        """The item part of the panel state (engine_state.panel_fields, read in a worker thread); None if it failed."""
+        """The item part of the panel state: engine_state.PanelFields on the app's one engine-state worker, bounded by
+        fields_timeout. A timeout (or a read still stuck from before) gives the last good fields, else no item; None
+        if the read failed."""
+        running = self._fields_running
+        if running is not None and not running.done():
+            return self._fields_fallback()                   # never queue behind a stuck read
+        home = self.home
+        fut = self._state_worker.submit(lambda: self._fields(home))
+        self._fields_running = fut
         try:
-            return await asyncio.to_thread(engine_state.panel_fields, self.home)
+            out = await asyncio.wait_for(asyncio.wrap_future(fut), self.fields_timeout)
+        except TimeoutError:
+            if not self._fields_timed_out:
+                self._fields_timed_out = True
+                log.warning("reel serve: reading the engine state timed out after %gs; the panel shows the last "
+                            "known item until it answers", self.fields_timeout)
+            return self._fields_fallback()
         except Exception as e:
             log.warning("reel serve: engine state failed (%s)", type(e).__name__)
             return None
+        self._fields_timed_out = False
+        self._last_fields = out
+        return out
 
     async def _state(self, id) -> dict:
         """The panel state: the connection (a UXP Premiere panel connected, else the CEP heartbeat) and the item the

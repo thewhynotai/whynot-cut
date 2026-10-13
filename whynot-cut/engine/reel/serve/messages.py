@@ -12,7 +12,7 @@ from contract import validate
 from contract.validator import load
 
 __all__ = ["TYPES", "CLIENT_TYPES", "DAEMON_TYPES", "ID_RE", "MESSAGE_MAX", "PANEL_UPDATES", "validate_message",
-           "message_id", "error", "reply", "welcome", "state", "clip", "compare_builds"]
+           "message_id", "error", "reply", "welcome", "state", "clip", "compare_builds", "BUILD_ID_RE"]
 
 TYPES = tuple(ref["$ref"].rsplit("/", 1)[1] for ref in load("session")["$defs"]["message"]["oneOf"])
 DAEMON_TYPES = frozenset({"welcome", "state", "reply", "error"})            # only the daemon sends these
@@ -20,7 +20,8 @@ CLIENT_TYPES = frozenset(TYPES) - DAEMON_TYPES
 ID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")                                 # session.schema.json $defs/id
 MESSAGE_MAX = 2000                                                          # error.message / reply.error maxLength
 PANEL_UPDATES = ("ok", "stale", "newer", "unknown")                         # welcome.update.panel
-_BUILD = re.compile(r"[0-9]{1,9}(?:\.[0-9]{1,9}){0,5}")                      # a build number: 142, 3.0.0.142
+BUILD_ID_RE = re.compile(r"[0-9]{8}T[0-9]{6}Z")                             # the build id: 20261013T142530Z (UTC)
+BUILD_MAX = 64                                                              # hello client.build maxLength
 
 
 def validate_message(msg) -> tuple[str, list[str]] | None:
@@ -70,20 +71,27 @@ def reply(intent: str, id: str, *, ok: bool, error: str | None = None, how: str 
     return out
 
 
+def _build_ok(b) -> bool:
+    """A usable build value: a string of 1-64 characters with no control character."""
+    return isinstance(b, str) and 0 < len(b) <= BUILD_MAX and not any(ord(c) < 32 or ord(c) == 127 for c in b)
+
+
 def compare_builds(panel, expected) -> str:
-    """welcome.update.panel (C2.3): the hello's client.build against expected.json `build`. The same text is "ok";
-    otherwise both must be build numbers (dot-separated integers, compared part by part, missing parts = 0): older
-    is "stale", newer is "newer". Anything else (absent, empty, not a build number) is "unknown"."""
-    if not isinstance(panel, str) or not isinstance(expected, str) or not panel or not expected:
+    """welcome.update.panel (C1.8 / C2.3): the hello's client.build against expected.json `build`.
+    The build id is the UTC time of the build, YYYYMMDDTHHMMSSZ (premiere-uxp/scripts/build.mjs buildId): the panel's
+    __WNC_BUILD__ and the .ccx's build.json `build` are one id, and release.py writes the shipped ccx's id into
+    expected.json. Two ids compare as text, which is time order: equal "ok", older "stale" (restart Premiere), newer
+    "newer". Two usable values that differ in any other way (a panel stamped before the shared id, a hand-written
+    expected.json) are "stale": expected.json is the authority, so the editor is told to restart. The same text is
+    "ok" whatever its shape. Missing or malformed (not a string, empty, over 64 characters, a control character) is
+    "unknown"."""
+    if not _build_ok(panel) or not _build_ok(expected):
         return "unknown"
     if panel == expected:
         return "ok"
-    if not _BUILD.fullmatch(panel) or not _BUILD.fullmatch(expected):
-        return "unknown"
-    a, b = [int(x) for x in panel.split(".")], [int(x) for x in expected.split(".")]
-    n = max(len(a), len(b))
-    a, b = a + [0] * (n - len(a)), b + [0] * (n - len(b))
-    return "ok" if a == b else "stale" if a < b else "newer"
+    if BUILD_ID_RE.fullmatch(panel) and BUILD_ID_RE.fullmatch(expected):
+        return "stale" if panel < expected else "newer"
+    return "stale"
 
 
 def welcome(session_id: str, daemon_version: str, update: str = "unknown") -> dict:

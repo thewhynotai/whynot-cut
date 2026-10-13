@@ -450,7 +450,7 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 64,
-              "description": "the panel package's build stamp (Addendum C1.8); the daemon compares it with <plugin>/adobe/expected.json `build` and answers welcome.update"
+              "description": "the panel package's build id (Addendum C1.8): the UTC build time YYYYMMDDTHHMMSSZ (e.g. 20261013T142530Z), the same id the .ccx's build.json `build` carries (premiere-uxp/scripts/build.mjs buildId; release.py writes the shipped ccx's id into <plugin>/adobe/expected.json `build`). The daemon compares it with expected.json and answers welcome.update"
             },
             "host": {
               "type": "string",
@@ -496,7 +496,7 @@
     },
     "welcome": {
       "type": "object",
-      "description": "daemon -> client, the answer to an accepted hello. `update.panel` compares the hello's client.build with <plugin>/adobe/expected.json `build`: ok (equal), stale (the panel is older: restart Premiere), newer (the panel is newer than the plugin), unknown (no build, no expected.json, or a value that is not a build number)",
+      "description": "daemon -> client, the answer to an accepted hello. `update.panel` compares the hello's client.build with <plugin>/adobe/expected.json `build` (both the build id YYYYMMDDTHHMMSSZ that build.json carries): ok (the same text), stale (an older id, or two values that differ in any other shape: expected.json is the authority; restart Premiere), newer (a newer id than the plugin's), unknown (no build, no expected.json, or a malformed value: empty, over 64 characters, a control character)",
       "properties": {
         "type": {
           "type": "string",

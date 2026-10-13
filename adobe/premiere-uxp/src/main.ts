@@ -20,8 +20,11 @@ import { version as manifestVersion } from "../plugin/manifest.json";
 declare const require: (id: string) => unknown;
 /** replaced by esbuild `define` (scripts/build.mjs): true only for `WNC_MOCK=1` builds */
 declare const __WNC_MOCK__: boolean;
-/** replaced by esbuild `define`: "<short git hash>[+dirty] <UTC build time>" (scripts/build.mjs buildStamp) */
+/** replaced by esbuild `define`: the build id YYYYMMDDTHHMMSSZ (UTC), the same id the .ccx's build.json carries
+ *  (scripts/build.mjs buildId; C1.8). Sent as hello client.build: the daemon compares it with expected.json. */
 declare const __WNC_BUILD__: string;
+/** replaced by esbuild `define`: the git short hash ("-dirty", or "unknown"); info only, shown next to the id */
+declare const __WNC_SHA__: string;
 
 // literal require() calls, exactly as the spike proved them in Premiere: only the host modules the plugin uses
 function hostModule(id: string): unknown {
@@ -107,7 +110,7 @@ const env: ShellEnv = {
       log: (level, text) => (level === "info" ? g.console?.log?.(text) : g.console?.log?.(`[${level}] ${text}`)),
     });
   },
-  build: { version: bundleVersion(), build: __WNC_BUILD__ },
+  build: { version: bundleVersion(), build: `${__WNC_BUILD__} ${__WNC_SHA__}` },
   onLifecycle: (handlers: PanelLifecycle) => {
     // the manifest's one panel. show / hide are no-ops in the shell (the sessions outlive a hidden panel; Premiere's
     // events are unmeasured); destroy ends both sessions.

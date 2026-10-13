@@ -7,8 +7,10 @@ Every test builds a fixture client tree under a temp folder (Arabic names includ
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home before anything else (see tests/_isolation.py)
+import contextlib
 import hashlib
 import json
+import math
 import os
 import shutil
 import sys
@@ -17,6 +19,7 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
@@ -270,7 +273,7 @@ class Approval(Base):
         f = self.fields()
         a = f["approval"]
         self.assertEqual(a["fingerprint"], self.fingerprint())
-        self.assertTrue(a["summary"].startswith("# Edit plan — C0239"))
+        self.assertTrue(a["summary"].startswith("Edit plan — C0239"), a["summary"])   # markdown collapsed
         self.assertIsNone(a["preview_mp4"])
         self.assertEqual(a["flagged"], [])
         pv = write(self.p("08_quality_control/preview/C0239_preview.mp4"), b"\x00\x00")
@@ -414,6 +417,350 @@ class ReadOnly(Base):
         self.assertEqual((tree(self.tmp), sorted(str(p) for p in self.tmp.rglob("*"))), before)
 
 
+# ------------------------------------------------------------------------------------------------------ review round 1
+# The approval footers exactly as the engine writes them (lib/plan.py write_edit_plan, lib/motion_plan.py
+# write_motion_md); EngineSummary checks they are still in those files, so a changed footer re-runs this review.
+EDIT_FOOTER = "**To approve:** reply 'approved' (or list changes). Adobe builds wait for `reel approve-plan`."
+MOTION_ANIMATIC = "not rendered yet (`reel motion-animatic`)"
+MOTION_FOOTER = "**To approve:** the editor says so; the lead records `reel approve-plan --by editor`."
+EDIT_MD = "\n".join([
+    "# Edit Plan — C0239 (for editor approval)", "",
+    "Runtime 00:00:30:00 at 30 fps · 3 graphics · 1 camera moves (+0 automatic jump-cut zooms) · 2 SFX cues",
+    "", "Times are on the reel's timeline (after pause removal and word cuts).", "",
+    "## Decisions", "", "| # | Time | Treatment | On-screen text | Why (speaker's words) | Approval |",
+    "|---|---|---|---|---|---|", "| D1 | 00:00:01:00 | statement_bar | «الصحة أولاً» | health first | YES |", "",
+    "Run `reel plan --root X` again after changes.", "Claude Code records the approval.",
+    "", "Music: PLACED — bed.mp3 at -24 dB, 2 s fade-out", "", EDIT_FOOTER, ""])
+MOTION_MD = "\n".join([
+    "# Motion plan — EP02_R03_MO (Gate 1: approve before After Effects)", "", "story · 9x16 · RTL · 30.0 s · 4 scenes",
+    "", "## Editorial lines (Claude's words, not the speaker's)", "", "- s1 headline: الخلاصة", "",
+    f"Animatic: {MOTION_ANIMATIC}", "", MOTION_FOOTER, ""])
+
+
+def strings(obj):
+    """Every string inside a JSON value (keys too)."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k
+            yield from strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from strings(v)
+
+
+class EngineSummary(Base):
+    """C1.4 / C2.2: the approval card is for the editor. No `reel ` command, no backtick, no "Claude Code", no
+    "reply 'approved'" chat instruction reaches any PanelState string."""
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+
+    def assert_editor_safe(self, f):
+        st = self.assert_valid_state(f)
+        for s in strings(st["state"]):
+            self.assertNotIn("reel ", s.lower(), s)
+            self.assertNotIn("`", s, s)
+            self.assertNotRegex(s.lower(), r"claude\s*code", s)
+            self.assertNotRegex(s.lower(), r"\breply\b", s)
+            self.assertNotIn("to approve", s.lower(), s)
+
+    def test_the_footers_are_the_engines_own(self):
+        lib = SK / "engine" / "reel" / "lib"
+        self.assertIn(EDIT_FOOTER, (lib / "plan.py").read_text(encoding="utf-8"))
+        motion = (lib / "motion_plan.py").read_text(encoding="utf-8")
+        self.assertIn(MOTION_FOOTER, motion)
+        self.assertIn(MOTION_ANIMATIC, motion)
+
+    def test_edit_plan_summary_has_no_commands_and_no_markdown(self):
+        self.compiled_plan()
+        write(self.p("01_analysis/edit-plan.md"), EDIT_MD)
+        f = self.fields()
+        summary = f["approval"]["summary"]
+        self.assertTrue(summary.startswith("Edit Plan — C0239 (for editor approval)"), summary)
+        self.assertIn("«الصحة أولاً»", summary)
+        self.assertIn("Times are on the reel's timeline", summary)    # "reel's" is a word, not a command
+        self.assertIn("Music: PLACED", summary)
+        self.assertIn("D1 · 00:00:01:00 · statement_bar", summary)     # a table row reads as one line
+        self.assertNotIn("#", summary)
+        self.assertNotIn("**", summary)
+        self.assertNotIn("|", summary)
+        self.assertNotIn("\n\n\n", summary)
+        self.assert_editor_safe(f)
+
+    def test_motion_plan_summary_has_no_commands(self):
+        self.item = "EP02_R03_MO"
+        self.project = self.root / "output" / "projects" / self.item
+        self.activate(item=self.item)
+        write(self.p("00_inputs/source.json"), {"kind": "motion_reel"})
+        write(self.p("01_analysis/motion-script.json"), {"scenes": []})
+        write(self.p("01_analysis/motion-plan.json"), {"fps": 25, "scenes": []})
+        write(self.p("01_analysis/motion-plan.md"), MOTION_MD)
+        from lib.motion_plan import fingerprint
+        with common.use_context(common.Context(root=self.root, home=self.home)):
+            fp = fingerprint(common.Paths(self.root, self.item))
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp})
+        f = self.fields()
+        summary = f["approval"]["summary"]
+        self.assertTrue(summary.startswith("Motion plan — EP02_R03_MO"), summary)
+        self.assertIn("Claude's words", summary)                     # an engine heading, not the product name
+        self.assertNotIn("Animatic", summary)
+        self.assert_editor_safe(f)
+
+    def test_the_editor_summary_function(self):
+        self.assertEqual(ES.editor_summary(EDIT_FOOTER), "")
+        self.assertEqual(ES.editor_summary("A\n\n\n\nB\n**To approve:** reply 'approved'\nstill footer\n\nC"), "A\n\nB\n\nC")
+        self.assertEqual(ES.editor_summary("## To approve\nreply here\n## Next\nD"), "Next\nD")
+        self.assertEqual(ES.editor_summary("| a | b |\n|:--|--:|\n| **c** | [d](http://x) |"), "a · b\nc · d")
+        self.assertEqual(ES.editor_summary("Use claude to ask\nkeep"), "keep")
+        self.assertEqual(ES.editor_summary("\r\n\r\nA\r\n"), "A")
+        self.assertLessEqual(len(ES.editor_summary("x" * 30000)), ES.SUMMARY_MAX)
+
+
+class HelperInputs(Base):
+    """The engine helpers (approval_state, plan_fingerprint, motion_plan.fingerprint, seq_fps) read files with no cap:
+    every file they would read is checked first (a regular file under the cap, inside its folder, one link); any other
+    means the helper is not called at all."""
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+
+    @contextlib.contextmanager
+    def never(self, *targets):
+        """Patch the helpers; none may be called (a raise inside would be swallowed as "unreadable", so count)."""
+        with contextlib.ExitStack() as stack:
+            mocks = [stack.enter_context(mock.patch(t, side_effect=AssertionError(t))) for t in targets]
+            yield
+        for t, m in zip(targets, mocks):
+            self.assertEqual(m.call_count, 0, f"{t} was called over a refused input")
+
+    def test_the_helpers_are_called_when_their_inputs_are_fine(self):
+        """The control for the tests below: the patch targets are the ones engine_state really calls."""
+        import lib.plan as plan
+        self.compiled_plan()
+        self.approve()
+        write(self.p("08_quality_control/premiere_frames/run-20261013-110000/frame_001000.png"), b"")
+        with mock.patch("lib.plan.approval_state", side_effect=plan.approval_state) as a,                 mock.patch("lib.common.seq_fps", side_effect=common.seq_fps) as fps:
+            self.assertEqual(self.steps(self.fields())["approve"], "done")
+        self.assertGreater(a.call_count, 0)
+        self.assertGreater(fps.call_count, 0)
+
+    def test_an_oversized_approval_record_is_not_handed_to_approval_state(self):
+        self.compiled_plan()
+        write(self.p("01_analysis/plan-approval.json"), b"{" + b" " * (ES.EVIDENCE_MAX + 1) + b"}")
+        with self.never("lib.plan.approval_state"):
+            f = self.fields()
+        self.assertNotEqual(self.steps(f)["approve"], "done")
+
+    def test_a_folder_in_place_of_a_motion_fingerprint_input_skips_the_helper(self):
+        write(self.p("00_inputs/source.json"), {"kind": "motion_reel"})
+        write(self.p("01_analysis/motion-plan.json"), {"fps": 25, "scenes": []})
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": "f"})
+        self.p("02_transcription/words.json").mkdir(parents=True)
+        with self.never("lib.motion_plan.fingerprint", "lib.plan.approval_state"):
+            f = self.fields()
+        self.assertIsNone(f["approval"])
+        self.assertEqual(self.steps(f)["approve"], "pending")
+
+    def test_an_oversized_brand_token_file_skips_the_motion_fingerprint(self):
+        write(self.p("00_inputs/source.json"), {"kind": "motion_reel"})
+        write(self.p("01_analysis/motion-plan.json"), {"fps": 25, "scenes": []})
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": "f"})
+        write(self.root / "output/client_database/branding/brand-tokens.json", b" " * (ES.EVIDENCE_MAX + 1))
+        with self.never("lib.motion_plan.fingerprint"):
+            self.assertIsNone(self.fields()["approval"])
+
+    def test_a_refused_sequence_config_falls_back_to_the_default_rate_without_seq_fps(self):
+        run = self.p("08_quality_control/premiere_frames/run-20261013-110000")
+        write(run / "frame_015000.png", b"")
+        (self.root / common.CLIENT_PROFILE_REL / "sequence-settings.json").mkdir(parents=True)
+        with self.never("lib.common.seq_fps"):
+            qc = self.fields()["qc"]
+        self.assertEqual([(q["t_s"], q["tc"]) for q in qc],
+                         [(15.0, common.frame_to_tc(15 * common.SEQ_FPS, common.SEQ_FPS))])
+
+    def test_a_profile_id_that_is_a_path_is_refused(self):
+        write(self.root / common.CLIENT_PROFILE_REL / "profile.json", {"id": "../../../elsewhere"})
+        run = self.p("08_quality_control/premiere_frames/run-20261013-110000")
+        write(run / "frame_001000.png", b"")
+        with self.never("lib.common.seq_fps"):
+            self.assertEqual(len(self.fields()["qc"]), 1)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFOs are POSIX")
+    def test_a_fifo_is_never_opened(self):
+        self.compiled_plan()
+        os.unlink(self.p("01_analysis/edit-plan.md"))
+        os.mkfifo(self.p("01_analysis/edit-plan.md"))
+        os.mkfifo(self.p("01_analysis/plan-approval.json"))
+        t0 = time.monotonic()
+        f = self.fields()
+        self.assertLess(time.monotonic() - t0, 2.0)
+        self.assertNotEqual(self.steps(f)["approve"], "done")
+        self.assertEqual((f["approval"] or {}).get("summary", ""), "")
+
+
+class Confinement(Base):
+    """Every evidence file must resolve inside the item folder and have one link (a hard link on Windows needs no
+    privilege and would show another file's text or verdict)."""
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+        self.outside = write(self.tmp / "secret" / "notes.md", "SECRET TEXT\n")
+
+    def test_a_hard_linked_evidence_file_is_refused(self):
+        self.compiled_plan()
+        os.unlink(self.p("01_analysis/edit-plan.md"))
+        os.link(self.outside, self.p("01_analysis/edit-plan.md"))
+        self.assertEqual(self.fields()["approval"]["summary"], "")
+        ok = write(self.tmp / "secret" / "qc.json", {"ok": True})
+        self.p("08_quality_control").mkdir(parents=True, exist_ok=True)
+        os.link(ok, self.p("08_quality_control/qc-results.json"))
+        self.assertEqual(self.steps(self.fields())["qc"], "pending")
+
+    def test_a_symlinked_evidence_file_that_leaves_the_item_is_refused(self):
+        self.compiled_plan()
+        os.unlink(self.p("01_analysis/edit-plan.md"))
+        try:
+            os.symlink(self.outside, self.p("01_analysis/edit-plan.md"))
+        except OSError:
+            self.skipTest("creating a symlink needs a privilege here")
+        self.assertEqual(self.fields()["approval"]["summary"], "")
+
+    def test_a_symlinked_run_folder_that_leaves_the_item_gives_no_tiles(self):
+        elsewhere = self.tmp / "elsewhere-run"
+        write(elsewhere / "frame_001000.png", b"")
+        self.p("08_quality_control/premiere_frames").mkdir(parents=True)
+        try:
+            os.symlink(elsewhere, self.p("08_quality_control/premiere_frames/run-20261013-110000"),
+                       target_is_directory=True)
+        except OSError:
+            self.skipTest("creating a symlink needs a privilege here")
+        self.assertEqual(self.fields()["qc"], [])
+
+
+class Numbers(Base):
+    def setUp(self):
+        super().setUp()
+        self.activate()
+
+    def test_ms_tokens_are_ascii_digits_only(self):
+        run = self.p("08_quality_control/premiere_frames/run-20261013-110000")
+        write(run / "frame_٢٥٠٠.png", b"")                              # Arabic-Indic digits: int() would take them
+        write(run / "frame_²5.png", b"")                                 # isdigit() but int() raises
+        write(run / "frame_001000.png", b"")
+        self.assertEqual([q["t_s"] for q in self.fields()["qc"]], [1.0])
+        self.assertIsNone(ES._ms_of("frame_٢٥٠٠.png"))
+        self.assertIsNone(ES._ms_of("frame_²5.png"))
+        self.assertEqual(ES._ms_of("frame_002500.png"), 2500)
+
+    def test_a_huge_frame_name_is_clamped_and_finite(self):
+        run = self.p("08_quality_control/premiere_frames/run-20261013-110000")
+        write(run / ("frame_" + "9" * 200 + ".png"), b"")
+        write(run / "frame_001000.png", b"")
+        f = self.fields()
+        self.assertEqual(len(f["qc"]), 2)
+        for q in f["qc"]:
+            self.assertLessEqual(len(q["tc"]), 32)
+            self.assertTrue(math.isfinite(q["t_s"]))
+        json.dumps(self.assert_valid_state(f), allow_nan=False)
+
+    def test_non_finite_motion_numbers_are_dropped(self):
+        write(self.p("00_inputs/source.json"), {"kind": "motion_reel"})
+        run = self.p("08_quality_control/ae_frames/run-20261013-120000")
+        write(run / "a.png", b"")
+        write(run / "b.png", b"")
+        write(run / "frames.json", '{"frames": [{"frame": 50, "scene": "s1", "kind": "hero", "file": "a.png"},'
+                                   ' {"frame": 1' + "0" * 400 + ', "scene": "s2", "kind": "x", "file": "b.png"}]}')
+        for fps in ("Infinity", "NaN", "-Infinity", "1e400"):
+            write(self.p("01_analysis/motion-plan.json"), '{"fps": %s, "scenes": []}' % fps)
+            self.assertEqual(self.fields()["qc"], [], fps)
+        write(self.p("01_analysis/motion-plan.json"), {"fps": 25, "scenes": []})
+        f = self.fields()
+        self.assertEqual([(q["t_s"], q["label"]) for q in f["qc"]], [(2.0, "s1 hero")])
+        json.dumps(self.assert_valid_state(f), allow_nan=False)
+
+
+class Cache(Base):
+    """The panel polls a snapshot every 2 s: an unchanged item must not be re-hashed."""
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+        self.compiled_plan()
+        self.cache = ES.PanelFields()
+
+    def test_unchanged_files_are_not_read_again(self):
+        import lib.plan as plan
+        with mock.patch("lib.plan.plan_fingerprint", side_effect=plan.plan_fingerprint) as fp:
+            a = self.cache(self.home, now=NOW)
+            n = fp.call_count
+            self.assertGreater(n, 0)
+            b = self.cache(self.home, now=NOW)
+            self.assertEqual(fp.call_count, n)
+        self.assertEqual(a, b)
+        b["pipeline"].clear()                                          # a caller cannot spoil the cached value
+        self.assertEqual(self.cache(self.home, now=NOW), a)
+
+    def test_a_changed_evidence_file_or_active_json_is_read_again(self):
+        first = self.cache(self.home, now=NOW)
+        self.approve()
+        self.assertEqual(self.steps(self.cache(self.home, now=NOW))["approve"], "done")
+        write(self.p("09_handoff/README.md"), "# Handoff\n")
+        self.assertEqual(self.steps(self.cache(self.home, now=NOW))["handoff"], "done")
+        run = self.p("08_quality_control/premiere_frames/run-20261013-110000")
+        write(run / "frame_001000.png", b"")
+        self.assertEqual(len(self.cache(self.home, now=NOW)["qc"]), 1)
+        write(run / "frame_002000.png", b"")
+        self.assertEqual(len(self.cache(self.home, now=NOW)["qc"]), 2)
+        self.activate(item="../x")
+        self.assertEqual(self.cache(self.home, now=NOW)["item"], "")
+        self.activate()
+        self.assertEqual(self.cache(self.home, now=NOW)["item"], "C0239")
+        self.assertNotEqual(first, self.cache(self.home, now=NOW))
+
+    def test_staleness_is_checked_on_every_call(self):
+        self.assertEqual(self.cache(self.home, now=NOW)["item"], "C0239")
+        self.assertEqual(self.cache(self.home, now=NOW + timedelta(hours=13))["item"], "")
+
+
+class NetworkClientRoot(Base):
+    """A UNC client_root (a NAS) is accepted, but one whose existence check takes longer than UNC_PROBE_S is skipped
+    (no item) and not touched again for UNC_RETRY_S."""
+
+    def tearDown(self):
+        ES._SLOW_ROOTS.clear()
+        super().tearDown()
+
+    def test_a_slow_network_root_is_skipped_then_left_alone(self):
+        self.activate()
+        calls = []
+
+        def slow(p):
+            calls.append(p)
+            time.sleep(0.2)
+            return p.resolve(strict=True)
+        with mock.patch.object(ES, "_is_unc", return_value=True), mock.patch.object(ES, "UNC_PROBE_S", 0.05), \
+                mock.patch.object(ES, "_probe_root", side_effect=slow):
+            self.assertEqual(self.fields()["item"], "")
+            self.assertEqual(self.fields()["item"], "")
+        self.assertEqual(len(calls), 1, "a slow root is not probed again within UNC_RETRY_S")
+
+    def test_a_quick_network_root_is_accepted(self):
+        self.activate()
+        with mock.patch.object(ES, "_is_unc", return_value=True):
+            self.assertEqual(self.fields()["item"], "C0239")
+
+    def test_unc_detection(self):
+        for raw in ("\\\\nas\\clients\\Dr Nour", "//nas/clients/Dr Nour"):
+            self.assertTrue(ES._is_unc(raw), raw)
+        for raw in ("C:\\clients\\Dr Nour", "/Users/x/clients"):
+            self.assertFalse(ES._is_unc(raw), raw)
+
+
 # ------------------------------------------------------------------------------------------------------ build stamp
 class BuildStamp(unittest.TestCase):
     def setUp(self):
@@ -424,24 +771,43 @@ class BuildStamp(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_compare_builds(self):
-        cases = [("142", "142", "ok"), ("3.0.0.142", "3.0.0.142", "ok"), ("141", "142", "stale"), ("143", "142", "newer"),
-                 ("3.0.0.9", "3.0.0.10", "stale"), ("3.0.1", "3.0.0.99", "newer"), ("3.0", "3.0.0", "ok"),
-                 ("abc1234 2026-10-13T10:00:00Z", "abc1234 2026-10-13T10:00:00Z", "ok"),   # same stamp: the same build
-                 ("abc1234", "def5678", "unknown"), ("142", "abc", "unknown"), ("v142", "142", "unknown"),
-                 (None, "142", "unknown"), ("142", None, "unknown"), ("", "", "unknown"), (142, 142, "unknown"),
-                 ("1." * 10 + "1", "1", "unknown"), ("9" * 20, "1", "unknown")]
+        """C1.8: the panel's __WNC_BUILD__ and build.json `build` are one UTC id, YYYYMMDDTHHMMSSZ (package-ccx.mjs
+        buildId). Two ids compare as text (= time order). Two present values of any other, differing shape: stale
+        (expected.json is the authority, so an old-format panel is told to restart Premiere). Missing or malformed
+        (not a string, empty, over 64 characters, a control character): unknown."""
+        a, b = "20261013T142530Z", "20261013T142531Z"
+        cases = [(a, a, "ok"), (a, b, "stale"), (b, a, "newer"),
+                 ("20261012T235959Z", "20261013T000000Z", "stale"), ("20271231T000000Z", "20261231T235959Z", "newer"),
+                 ("abc1234", "def5678", "stale"),                       # was "unknown": stale had to be reachable
+                 ("abc1234 2026-10-13T10:00Z", a, "stale"),            # a panel from before the shared id
+                 (a, "142", "stale"), ("142", a, "stale"), ("143", "142", "stale"), ("v142", "142", "stale"),
+                 ("٢٠٢٦١٠١٣T142530Z", a, "stale"),                     # not ASCII digits: not an id
+                 ("abc1234 2026-10-13T10:00Z", "abc1234 2026-10-13T10:00Z", "ok"),   # the same text: the same build
+                 (None, a, "unknown"), (a, None, "unknown"), ("", a, "unknown"), (a, "", "unknown"), ("", "", "unknown"),
+                 (142, 142, "unknown"), ("x" * 65, a, "unknown"), (a, "x" * 65, "unknown"), ("2026\n", a, "unknown"),
+                 (a, "a\x00b", "unknown")]
         for panel, expected, want in cases:
             self.assertEqual(messages.compare_builds(panel, expected), want, (panel, expected))
 
     def test_panel_update_reads_expected_json(self):
-        self.assertEqual(ES.panel_update("142", self.expected), "unknown")                    # no expected.json
-        write(self.expected, {"product": "3.0.0", "build": "142", "sha": "abc1234"})
-        for build, want in (("142", "ok"), ("141", "stale"), ("143", "newer"), ("junk", "unknown"), (None, "unknown")):
+        a = "20261013T142530Z"
+        self.assertEqual(ES.panel_update(a, self.expected), "unknown")                       # no expected.json
+        write(self.expected, {"product": "3.0.0", "build": a, "sha": "abc1234"})
+        for build, want in ((a, "ok"), ("20261013T142529Z", "stale"), ("20261013T142531Z", "newer"),
+                            ("abc1234 2026-10-13T10:00Z", "stale"), (None, "unknown"), ("", "unknown")):
             self.assertEqual(ES.panel_update(build, self.expected), want, build)
         for bad in ("{broken", "[]", json.dumps({"product": "3.0.0"}), json.dumps({"build": 142}),
-                    json.dumps({"build": "142", "pad": "x" * ES.EXPECTED_MAX})):
+                    json.dumps({"build": a, "pad": "x" * ES.EXPECTED_MAX})):
             write(self.expected, bad)
-            self.assertEqual(ES.panel_update("142", self.expected), "unknown", bad[:40])
+            self.assertEqual(ES.panel_update(a, self.expected), "unknown", bad[:40])
+
+    def test_the_schema_documents_the_build_id(self):
+        from contract.validator import load
+        s = load("session")["$defs"]
+        for text in (s["hello"]["properties"]["client"]["properties"]["build"]["description"],
+                     s["welcome"]["description"]):
+            self.assertIn("YYYYMMDDTHHMMSSZ", text)
+            self.assertIn("build.json", text)
 
     def test_the_default_location_is_the_plugin_adobe_folder(self):
         self.assertEqual(ES.expected_path(), common.PLUGIN_DIR / "adobe" / "expected.json")
