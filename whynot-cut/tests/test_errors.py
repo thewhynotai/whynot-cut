@@ -151,18 +151,18 @@ class TestJsonFiles(TempDir):
         self.assertEqual((fm, body.strip()), ({"language": "ar", "approval": "auto"}, "notes"))
         d = self.tmp / "client" / ".claude"
         d.mkdir(parents=True)
-        (d / S.FILE).write_bytes(b"\xef\xbb\xbf---\r\nlanguage: ar\r\n---\r\n")
+        (d / S.FILE).write_bytes(b"\xef\xbb\xbf---\r\nlanguage: en\r\n---\r\n")
         st = S.load(d.parent)
-        self.assertEqual(st["language"], "ar")
+        self.assertEqual(st["language"], "en")              # not the default (ar): the file was read
         self.assertEqual(st["_problems"], [])
 
     def test_settings_not_utf8_is_a_problem_with_file_and_line(self):
         from lib import settings as S
         d = self.tmp / "client" / ".claude"
         d.mkdir(parents=True)
-        (d / S.FILE).write_bytes(b"---\nlanguage: ar\neditor_name: Ren\xe9\n---\n")
+        (d / S.FILE).write_bytes(b"---\nlanguage: en\neditor_name: Ren\xe9\n---\n")
         st = S.load(d.parent)                                     # the hooks read it: never a crash
-        self.assertEqual(st["language"], S.DEFAULTS["language"])
+        self.assertEqual(st["language"], S.DEFAULTS["language"])     # "en" would mean the broken file was applied
         self.assertEqual(len(st["_problems"]), 1)
         self.assertIn("line 3", st["_problems"][0])
         self.assertIn(str(d / S.FILE), st["_problems"][0])

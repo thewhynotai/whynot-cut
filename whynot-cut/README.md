@@ -195,8 +195,12 @@ notify_done: true
 panel_link: true        # false: do not start the Premiere panel's engine at session start
 ---
 ```
-Edit with `/whynot-cut:preferences` or `reel settings`. Keep it out of git (`.claude/*.local.md`). The session hook reads
-it at session start; engine commands read it every time.
+A file holds only the keys someone set. Each key is decided by the strongest layer that sets it: the client folder's
+file, then the machine's (clients folder, then `~/.claude/`), then the plugin options (`/plugin` > WhyNot Cut: language
+`ar`|`en` (default `ar`), approval, whisper model, Magnific credit budget `magnific_budget_credits` (default 300; 0 = never
+use Magnific) and the Magnific key, which lives only there), then the defaults. `reel settings` shows the result and where
+each value came from; a bad value is ignored with a warning. Edit with `/whynot-cut:preferences` or `reel settings`.
+Keep files out of git (`.claude/*.local.md`). The session hook reads them at session start; engine commands every time.
 
 ## Client profiles
 The engine is generic; each client's look and rules come from layered profiles (later wins):

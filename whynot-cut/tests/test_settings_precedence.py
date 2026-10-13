@@ -258,6 +258,17 @@ class TestSecrets(Base):
         os.environ.pop("CLAUDE_PLUGIN_OPTION_MAGNIFIC_API_KEY")
         self.assertIs(self.load()["magnific_api_key_set"], False)
 
+    def test_a_key_typed_into_a_preferences_file_is_dropped_and_never_echoed(self):
+        prefs(self.client, magnific_api_key=SECRET, language="en")
+        st = self.load()
+        self.assertEqual(st["language"], "en")                       # the rest of the file still applies
+        self.assertIs(st["magnific_api_key_set"], False)             # a file never provides the key
+        self.assertNotIn("magnific_api_key", {k for k in st if k != "magnific_api_key_set"})
+        self.assertNotIn(SECRET, json.dumps(st, ensure_ascii=False, default=str))
+        self.assertTrue(any("keep the Magnific key in the plugin options" in p for p in st["_problems"]))
+        _, _, problems = S.read_file(self.client / ".claude" / S.FILE)
+        self.assertNotIn(SECRET, " ".join(problems))
+
     def test_plugin_options_never_returns_secrets_and_secret_option_reads_only_the_environment(self):
         self.opt(magnific_api_key=SECRET)
         write(self.pointer, json.dumps({"magnific_api_key": "from-the-pointer", "engine_home": ""}))

@@ -144,6 +144,9 @@ def read_file(f: Path) -> tuple[dict, str, list]:
         problems.append(f"{f}: line {line} is not UTF-8 text (save the file as UTF-8); using the defaults")
     vals = {}
     for k, v in fm.items():
+        if k.lower().endswith("_key"):          # a secret typed by hand: never kept, never echoed (the value is not in the warning)
+            problems.append(f"{f}: {k} is ignored; keep the Magnific key in the plugin options, not in a preferences file")
+            continue
         ok, why = check(k, v)
         if why:
             problems.append(f"{f}: {k}: {v!r} {why}; ignored (the next layer or the default applies)")

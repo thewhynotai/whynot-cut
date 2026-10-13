@@ -523,6 +523,12 @@
   (`~/.whynot-cut/runtimes/<id>` + `current`, `reel setup` repairs it); `reel status` and `ppro-probe` are documented.
 
 ### Migration
+- Preferences (T3.5). The default `language` is now `ar` (Arabic-first, matching the plugin option); set `language: en`
+  (in /plugin, or in a preferences file) to keep English. Files are merged key by key now (client file > machine file >
+  plugin options > defaults) instead of "the first file wins". A file written by the old `reel settings --init` pins
+  every default, so it shadows the new plugin options: changing language, approval or whisper_model in /plugin would do
+  nothing. Clean it up by deleting the keys you did not choose on purpose, or re-run `reel settings --init <folder> --force`
+  (it now writes only the `--set` keys). Keep the Magnific key in the plugin options, never in a preferences file.
 - Bridge 3.1.1 (T2.9): after updating, run `reel ppro-install` and restart Premiere and After Effects. Until they are
   restarted, bridge jobs are refused with "restart Premiere to load bridge 3.1.1".
 - The former shipped profile of a real client (the clinic client) is kept as a private copy outside the product (not in the repo or the
