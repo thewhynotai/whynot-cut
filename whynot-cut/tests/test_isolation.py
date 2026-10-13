@@ -202,7 +202,7 @@ class TestBridgeSubmitRefusesTheRealHome(LiveRootCase):
         from lib import cep_queue, ppro_bridge
         os.environ["WHYNOT_HOME"] = str(self.t / "elsewhere")
         sent = []
-        with mock.patch.object(ppro_bridge, "status", return_value={"alive": True}), \
+        with mock.patch.object(ppro_bridge, "status", return_value={"alive": True, "bridge_version": "3.1.1"}), \
                 mock.patch.object(ppro_bridge, "sync_scripts", lambda: {}), \
                 mock.patch.object(cep_queue, "submit", lambda *a, **k: sent.append(a) or {"ok": True}):
             self.assertEqual(ppro_bridge.submit("ping"), {"ok": True})
@@ -212,7 +212,7 @@ class TestBridgeSubmitRefusesTheRealHome(LiveRootCase):
         from lib import cep_queue, ppro_bridge
         os.environ[plat.ALLOW_LIVE_ENV] = "1"
         sent = []
-        with mock.patch.object(ppro_bridge, "status", return_value={"alive": True}), \
+        with mock.patch.object(ppro_bridge, "status", return_value={"alive": True, "bridge_version": "3.1.1"}), \
                 mock.patch.object(ppro_bridge, "sync_scripts", lambda: {}), \
                 mock.patch.object(cep_queue, "submit", lambda *a, **k: sent.append(a) or {"ok": True}):
             self.assertEqual(ppro_bridge.submit("ping"), {"ok": True})

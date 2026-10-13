@@ -115,11 +115,12 @@ def from_cep(action_v4: str, cep_response, *, id: str | None = None) -> dict:
         return _script_failed(action_v4, id, cep_response)
     if not isinstance(cep_response, dict):
         return _fail(action_v4, id, "The bridge did not send an answer the engine can read.",
-                     "Check that the WhyNot Cut Bridge panel is open in the app and run the command again.")
+                     "Check that WhyNot Cut runs in the app (restart the app if it does not answer) and run the "
+                     "command again.")
     said = cep_response.get("action")
     if isinstance(said, str) and said != name:
         return _fail(action_v4, id, f"The bridge answered {said!r} to {name!r}.",
-                     "Run the command again; if it repeats, restart the app and the bridge panel.")
+                     "Run the command again; if it repeats, restart the app.")
     result = cep_response.get("result")
     ok = cep_response.get("ok") is True
     if not ok and isinstance(result, str) and result.strip():          # the same string inside an {ok:false, result} dict
@@ -137,7 +138,7 @@ def from_cep(action_v4: str, cep_response, *, id: str | None = None) -> dict:
     if ok:
         if not isinstance(result, dict):
             return _fail(action_v4, id, "The host answered ok without a result.",
-                         "Run the command again; if it repeats, restart the app and the bridge panel.")
+                         "Run the command again; if it repeats, restart the app.")
         out: dict = {"ok": True, "action": action_v4}
         if id is not None:
             out["id"] = id

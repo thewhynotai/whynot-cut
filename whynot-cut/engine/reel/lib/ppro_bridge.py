@@ -1,15 +1,14 @@
 """Python side of the WhyNot Cut Bridge (one CEP bundle for Premiere and After Effects; this module is the Premiere side): install, status, submit jobs, wait for results.
 
 Premiere has no scripting entry point from outside (macOS AppleScript exposes only capture/editoriginal; Windows has
-no COM API), so scripts can't be sent to Premiere directly. The bridge panel (adobe/cep-bridge) runs
-inside Premiere on macOS and Windows and executes ONLY scripts from <engine home>/ppro-scripts. The plugin's install path changes on every
-update, so `install()`/`sync_scripts()` copy the plugin's JSX there (hash-checked before every job).
+no COM API), so scripts can't be sent to Premiere directly. The CEP bundle (adobe/cep-bridge, assembled by
+lib/cep_bundle.py) runs a hidden daemon inside Premiere on macOS and Windows. Bundle 3.0.0 carries the libraries itself
+(jobs name `lib`); the legacy 3.1.1 bridge executes ONLY scripts from <engine home>/ppro-scripts, so for it
+`sync_scripts()` copies the plugin's JSX there before every job (removed with the legacy family in 3.1).
 """
 from __future__ import annotations
 
 import hashlib
-import json
-import re
 import shutil
 from pathlib import Path
 
@@ -18,7 +17,7 @@ from . import cep_bundle, plat
 
 EXT_ID = "ai.thewhynot.cut.bridge"
 LEGACY_EXT_IDS = ("com.nh.bridge",)          # reel-editor 1.x bridge; replaced on install
-BRIDGE_VERSION = "3.1.1"          # the CEP bundle (manifest + bridge.js); the running one must match
+BRIDGE_VERSION = cep_bundle.PRODUCT   # "3.0.0": the CEP bundle (manifest + bridge.js BUNDLE + build.json product)
 LIB_SRC = TEMPLATES_DIR / "premiere/wnc_ppro_lib.jsx"
 
 
@@ -74,48 +73,29 @@ def sync_scripts() -> dict:
 
 
 def installed_version() -> str | None:
-    """The installed bundle's version: bridge-config.json "version", else the manifest's ExtensionBundleVersion."""
-    ext = ext_dir()
-    try:
-        v = json.loads((ext / "bridge-config.json").read_text(encoding="utf-8")).get("version")
-    except (OSError, ValueError):
-        v = None
-    if not v:
-        try:
-            m = re.search(r'ExtensionBundleVersion="([^"]+)"', (ext / "CSXS/manifest.xml").read_text(encoding="utf-8"))
-            v = m.group(1) if m else None
-        except OSError:
-            v = None
-    return v
-
-
-def _ver(v: str) -> tuple:
-    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3])
+    """The installed bundle's version (either family): cep_bundle.installed()."""
+    return (cep_bundle.installed(ext_dir()) or {}).get("version")
 
 
 def install(force: bool = False) -> dict:
-    """Install the CEP bundle from `cep_bundle.source_dir()`. A plugin build without that source (a shipped plugin)
-    returns ok:false with a `how` and leaves the installed extension as it is."""
+    """Install the CEP bundle from `cep_bundle.source_dir()` by the install rule (cep_bundle.decide_install) and write
+    ~/.whynot-cut/bridge/config.json (never a file inside the extension). A plugin build without that source (a shipped
+    plugin) returns ok:false with a `how` and leaves the installed extension as it is."""
     EXT_DIR, QUEUE = ext_dir(), queue_dir()
-    refused = plat.sandbox_refusal("install the bridge", EXT_DIR, QUEUE, scripts_dir())     # G79: never in tests
+    refused = plat.sandbox_refusal("install the bridge", EXT_DIR, QUEUE, cep_bundle.config_path())   # G79: never in tests
     if refused:
         return refused
-    cur = installed_version()
-    if cur and not force and _ver(cur) > _ver(BRIDGE_VERSION):
-        # an older plugin (e.g. `reel setup` from 2.1.1) must not put its bridge back over a newer one
-        return {"installed": str(EXT_DIR), "skipped": True, "installed_version": cur, "version": BRIDGE_VERSION,
-                "detail": f"installed bridge {cur} is newer than {BRIDGE_VERSION} (this plugin's): kept it. "
-                          "`reel ppro-install --force` replaces it."}
-    if not all((cep_bundle.source_dir() / f).is_file() for f in cep_bundle.SHELL_FILES):     # before anything is removed
+    if not cep_bundle.has_source():                                    # before anything is removed
         return {"ok": False, "error": "this plugin build carries no WhyNot Cut extension",
                 "how": "install WhyNot Cut with its installer (the signed extension comes with it)"}
-    EXT_DIR.parent.mkdir(parents=True, exist_ok=True)
-    if EXT_DIR.exists():
-        shutil.rmtree(EXT_DIR)
-    cep_bundle.assemble(EXT_DIR)
-    # tells the panel where the queue lives (the engine home can be a custom folder; Premiere doesn't see our env)
-    base = str(current_context().engine_home.resolve())
-    (EXT_DIR / "bridge-config.json").write_text(json.dumps({"base": base, "version": BRIDGE_VERSION}), encoding="utf-8")
+    done = cep_bundle.install_source(EXT_DIR, force=force)
+    cfg = cep_bundle.write_config(current_context().engine_home, written_by="engine")
+    if done["action"] == "keep":
+        # an older plugin (e.g. `reel setup` from 2.2.1) must not put its extension back over a newer or signed one
+        cur = done["installed"] or {}
+        return {"installed": str(EXT_DIR), "skipped": True, "installed_version": cur.get("version"),
+                "version": BRIDGE_VERSION, "config": str(cfg),
+                "detail": f"{done['reason']}: kept it. `reel ppro-install --force` replaces it."}
     removed = []
     for old in LEGACY_EXT_IDS:          # only our own earlier bridge, never anything else in the CEP folder
         od = EXT_DIR.parent / old
@@ -128,15 +108,16 @@ def install(force: bool = False) -> dict:
         QUEUE.chmod(0o700)
     except OSError:
         pass
-    sync = sync_scripts()
     dbg = plat.player_debug_mode()
     ok = plat.debug_mode_ok(dbg)
-    return {"installed": str(EXT_DIR), "queue": str(QUEUE), "scripts": sync, "legacy_bridges_removed": removed,
-            "PlayerDebugMode": dbg, "debug_mode_ok": ok,
+    inst = done["installed"] or {}
+    return {"installed": str(EXT_DIR), "action": done["action"], "reason": done["reason"],
+            "version": inst.get("version"), "build": inst.get("build"), "config": str(cfg), "queue": str(QUEUE),
+            "legacy_bridges_removed": removed, "PlayerDebugMode": dbg, "debug_mode_ok": ok,
             "editor_must_run": [] if ok else plat.debug_mode_commands(),
-            "next": ("Restart Premiere and After Effects if they were running during install (the bridge starts by itself "
-                     "in both; the visible panel is Window > Extensions > WhyNot Cut Bridge).") if ok else
-                    ("PlayerDebugMode is off, so Premiere will not load the bridge. The editor runs the commands in "
+            "next": ("Restart Premiere and After Effects if they were running during install (WhyNot Cut starts by itself "
+                     "in both; in After Effects its panel is Window > Extensions (Legacy) > WhyNot Cut).") if ok else
+                    ("PlayerDebugMode is off, so Premiere will not load WhyNot Cut. The editor runs the commands in "
                      "'editor_must_run' themselves (an Adobe preference; WhyNot Cut never changes it), then restarts Premiere.")}
 
 
@@ -146,24 +127,34 @@ def status(max_age_s: float = 5.0) -> dict:
 
 
 def submit(action: str, data: dict | None = None, timeout: float = 600, script: Path | None = None) -> dict:
-    """Run `action` in Premiere through the bridge; `script` defaults to the synced wnc_ppro_lib.jsx. `timeout` runs from
-    the moment the bridge claims the job (cep_queue.submit); a running bridge of another version is refused."""
+    """Run `action` in Premiere through the bridge. `timeout` runs from the moment the bridge claims the job
+    (cep_queue.submit). The mode follows the running bridge (cep_queue.job_mode): the bundle with this engine's
+    libraries runs its own `lib=wnc_ppro_lib.jsx`; the legacy 3.1.1 (and a dev bundle of another build with
+    WHYNOT_BRIDGE_DEV=1) gets the synced library as `script=`; anything else is refused. A `script` other than the
+    library is always sent as `script=`."""
     from . import cep_queue
     refused = plat.sandbox_refusal(f"queue the {action} job", queue_dir(), scripts_dir())   # G79: never in tests
     if refused:
         return refused
+    lib = None
     try:
         st = status()      # through this module, so callers/tests that patch ppro_bridge.status keep working
         if not st["alive"]:
             return {"ok": False, "error": "bridge not running", "status": st}
+        mode = cep_queue.job_mode(st, BRIDGE_VERSION, "Premiere")
+        if isinstance(mode, dict):
+            return mode                                         # refused: nothing is queued
         if script is None or Path(script) == lib_path():
-            sync_scripts()
-            script = lib_path()
+            if mode == "lib":
+                lib, script = LIB_SRC.name, None
+            else:
+                sync_scripts()
+                script = lib_path()
     except BaseException as e:      # nothing is queued yet: the job cannot run (T2.15; ppro_build reads the flag)
         cep_queue._flag_claimed(e, False)
         raise
     return cep_queue.submit(queue_dir(), script, action, data, timeout, st=st, app="Premiere",
-                            expect_version=BRIDGE_VERSION)
+                            expect_version=BRIDGE_VERSION, lib=lib)
 
 
 def build_lock(what: str, **kw):

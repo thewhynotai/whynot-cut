@@ -1,7 +1,8 @@
 """After Effects side of the WhyNot Cut Bridge (the same CEP bundle as Premiere; in AE it watches <engine home>/ae-queue).
 
-The panel evaluates only scripts inside <engine home>/ae-scripts, so `sync_scripts()` copies the plugin's AE libraries
-there (hash-checked before every job). ExtendScript in these libraries never writes files: the panel's Node side writes
+Bundle 3.0.0 carries the AE libraries in its own jsx/ folder (jobs name `lib`). The legacy 3.1.1 bridge evaluates only
+scripts inside <engine home>/ae-scripts, so for it `sync_scripts()` copies the plugin's AE libraries there (hash-checked
+before every job; removed with the legacy family in 3.1). ExtendScript in these libraries never writes files: the panel's Node side writes
 each job's result, so AE's "Allow Scripts to Write Files and Access Network" preference is never needed.
 """
 from __future__ import annotations
@@ -83,8 +84,15 @@ def submit(action: str, data: dict | None = None, timeout: float = 900) -> dict:
     st = status()
     if not st["alive"]:
         return {"ok": False, "error": "bridge not running", "status": st}
-    sync_scripts()
     from .ppro_bridge import BRIDGE_VERSION          # one bundle for both hosts
+    # the same modes as ppro_bridge.submit: the bundle runs its own `lib`, the legacy 3.1.1 the synced `script`
+    mode = cep_queue.job_mode(st, BRIDGE_VERSION, "After Effects")
+    if isinstance(mode, dict):
+        return mode                                   # refused: nothing is queued
+    if mode == "lib":
+        return cep_queue.submit(queue_dir(), None, action, data, timeout, st=st, app="After Effects",
+                                expect_version=BRIDGE_VERSION, lib=ENTRY_NAME)
+    sync_scripts()
     return cep_queue.submit(queue_dir(), entry_path(), action, data, timeout, st=st, app="After Effects",
                             expect_version=BRIDGE_VERSION)
 

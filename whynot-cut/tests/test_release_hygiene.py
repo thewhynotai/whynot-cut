@@ -1,6 +1,7 @@
 """3.0 T1.10 version and release hygiene (structure 1.1-1.4):
   * one plugin version everywhere (plugin.json, both marketplace.json fields, the newest CHANGELOG heading)
-  * the bridge has its own version, identical in its three places (ppro_bridge.py, CEP manifest, bridge.js)
+  * the CEP bundle is 3.0.0 = the plugin version (T6.3 Task 4), identical everywhere: the manifest (bundle and both
+    extensions), bridge.js BUNDLE, ppro_bridge.BRIDGE_VERSION, plugin.json and the assembled build.json product
   * `reel --version` names the plugin version and root; `reel --help` lists every subcommand, generated from the
     command table (core + podcast + motion), so a new command cannot be forgotten
   * 3.0 T2.17 (engine MI-9): a ResourceWarning (unclosed file, pipe or process) anywhere in the suite fails the run
@@ -137,25 +138,34 @@ class TestPluginVersionConsistency(unittest.TestCase):
 
 
 class TestBridgeVersionTriple(unittest.TestCase):
-    def test_python_manifest_and_js_agree(self):
-        from lib import ppro_bridge
-        manifest = (SK.parent / "adobe/cep-bridge/CSXS/manifest.xml").read_text(encoding="utf-8")
-        m = re.search(rf'ExtensionBundleVersion="({SEMVER})"', manifest)
-        self.assertIsNotNone(m, "manifest.xml has no ExtensionBundleVersion")
+    def test_every_place_agrees(self):
+        """manifest bundle == both extensions == bridge.js BUNDLE == BRIDGE_VERSION == plugin.json == build.json."""
+        import tempfile
+        import xml.etree.ElementTree as ET
+        from lib import cep_bundle, ppro_bridge
+        root = ET.parse(SK.parent / "adobe/cep-bridge/CSXS/manifest.xml").getroot()
         js = (SK.parent / "adobe/cep-bridge/js/bridge.js").read_text(encoding="utf-8")
-        j = re.search(rf"var VERSION = '({SEMVER})'", js)
-        self.assertIsNotNone(j, "bridge.js has no `var VERSION = 'x.y.z'`")
-        self.assertRegex(ppro_bridge.BRIDGE_VERSION, rf"^{SEMVER}$")
-        self.assertEqual(m.group(1), ppro_bridge.BRIDGE_VERSION, "CSXS ExtensionBundleVersion")
-        self.assertEqual(j.group(1), ppro_bridge.BRIDGE_VERSION, "bridge.js VERSION")
+        j = re.search(rf"var BUNDLE = '({SEMVER})', PROTOCOL = (\d+);", js)
+        self.assertIsNotNone(j, "bridge.js has no `var BUNDLE = 'x.y.z', PROTOCOL = n;`")
+        pj = json.loads((SK / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as t:
+            build = json.loads((cep_bundle.assemble(Path(t) / "b") / "build.json").read_text(encoding="utf-8"))
+        v = ppro_bridge.BRIDGE_VERSION
+        self.assertRegex(v, rf"^{SEMVER}$")
+        self.assertEqual(root.get("ExtensionBundleVersion"), v, "CSXS ExtensionBundleVersion")
+        self.assertEqual({e.get("Version") for e in root.find("ExtensionList")}, {v}, "CSXS extension versions")
+        self.assertEqual(j.group(1), v, "bridge.js BUNDLE")
+        self.assertEqual(int(j.group(2)), cep_bundle.PROTOCOL, "bridge.js PROTOCOL")
+        self.assertEqual(pj["version"], v, "plugin.json")
+        self.assertEqual((build["product"], build["protocol"]), (v, cep_bundle.PROTOCOL), "build.json")
 
-    def test_bridge_version_is_independent_of_the_plugin_version(self):
-        """The bridge only changes when the CEP panel changes: 3.1.1 since T2.9 (queue protocol: expiry, claim marker,
-        daemon-only worker; it also carries T2.1's runtime engine home). Pinned on purpose, like the plugin version: a
-        bridge bump forces an update of the installed panel (the engine refuses a running bridge of another version),
-        so it must be a decision."""
-        from lib import ppro_bridge
-        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.1.1")
+    def test_the_bundle_is_3_0_0(self):
+        """Pinned on purpose, like the plugin version: a bundle bump forces an update of the installed extension (the
+        engine refuses a running bundle of another version), so it must be a decision. 3.0.0 since T6.3 Task 4 (it
+        was the independent bridge 3.1.1 before; that one is the legacy family now)."""
+        from lib import cep_bundle, ppro_bridge
+        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.0.0")
+        self.assertEqual(cep_bundle.LEGACY_VERSION, "3.1.1")
 
 
 class TestReelVersionFlag(unittest.TestCase):

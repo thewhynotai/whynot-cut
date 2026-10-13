@@ -1,17 +1,25 @@
-"""The file-queue protocol of the WhyNot Cut Bridge (one CEP bundle; Premiere uses ppro-queue, After Effects ae-queue).
+"""The file-queue protocol of the WhyNot Cut CEP bundle (one bundle; Premiere uses ppro-queue, After Effects ae-queue).
 
-The bridge's hidden daemon writes `bridge.heartbeat` every second, claims `<id>.job.json` by renaming it, evaluates the
-whitelisted script named in the job with the job's data file, and writes `<id>.result.json`. These helpers are
-host-neutral: ppro_bridge and ae_bridge pass their own queue folder and script.
+The bundle's hidden daemon writes `bridge.heartbeat` every second, claims `<id>.job.json` by renaming it, evaluates the
+library named in the job with the job's data file, and writes `<id>.result.json`. These helpers are host-neutral:
+ppro_bridge and ae_bridge pass their own queue folder and library.
 
-Queue files (bridge 3.1.1; the contract v4 adapter, engine/reel/contract/, mirrors these fields):
-    bridge.heartbeat     {at: ms epoch, busy, version, host, role: "daemon"|"panel", current: job id|null}. Only one copy
-                         of the bridge works the queue: the hidden daemon; the visible panel shows its state and works
-                         the queue itself only while no daemon heartbeat is fresh (the daemon did not load).
+Two families answer during 3.0 (lib/cep_bundle.py `family`; every other version is refused, `version_refusal`):
+  * bundle 3.0.0, protocol 4: jobs carry `lib` (a library bundled in <extension>/jsx/); `job_mode` -> "lib" when the
+    heartbeat's `libs` equal this engine's (cep_bundle.expected_libs), else a refusal (WHYNOT_BRIDGE_DEV=1: "script");
+  * legacy 3.1.1 (no `protocol`): the engine syncs the libraries into <engine home>/{ppro,ae}-scripts and sends
+    `script`; the libraries keep the 3.1.1 entry names as aliases for it. Removed in 3.1.
+
+Queue files (protocol 4; the contract v4 adapter, engine/reel/contract/, mirrors these fields):
+    bridge.heartbeat     {at: ms epoch, busy, role: "daemon", host, hostVersion, bundle, version (= bundle), protocol: 4,
+                         build, libs: {name: sha256}, current: job id|null, action}. 3.1.1 writes {at, busy, version,
+                         host, role, current, action}. Only the hidden daemon works the queue (the 3.1.1 visible panel
+                         still takes over when no daemon beats; the 3.0.0 panel never does).
     <id>.data.json       the job's data (ASCII JSON): {...data, action, job_id, submitted}. Unchanged since 3.0.
-    <id>.job.json        {id, action, script, data_file, submitted, expires_at}. `script` and `data_file` are resolved
-                         absolute paths. `expires_at` (RFC 3339 with a zone) is the last instant the job may START: the
-                         bridge claims an expired job and answers {ok: false, error: "expired"} without running it.
+    <id>.job.json        {id, action, lib | script, data_file, submitted, expires_at}. `lib` is a bundled library's file
+                         name; `script` (the legacy and compatibility path) and `data_file` are resolved absolute paths.
+                         `expires_at` (RFC 3339 with a zone) is the last instant the job may START: the bridge claims an
+                         expired job and answers {ok: false, error: "expired"} without running it.
     <id>.running         the job, renamed by the bridge: the atomic claim (only one rename succeeds).
     <id>.claimed         {at, by}: written by the bridge right after the claim. The caller's result timeout starts here,
                          so time spent waiting behind another job never counts against it.
@@ -59,7 +67,7 @@ def status(queue: Path, max_age_s: float = 5.0, app: str = "the Adobe app") -> d
     hb = queue / "bridge.heartbeat"
     if not hb.exists():
         return {"alive": False, "host": None,
-                "detail": f"no heartbeat: start {app} (bridge auto-starts) or open Window > Extensions > WhyNot Cut Bridge"}
+                "detail": f"no heartbeat: start {app} (WhyNot Cut starts by itself with it)"}
     d = None
     for _ in range(4):          # a bridge older than 3.1.1 rewrites the file in place every second: retry a torn read
         try:
@@ -77,7 +85,10 @@ def status(queue: Path, max_age_s: float = 5.0, app: str = "the Adobe app") -> d
                           "(`reel ppro-install`) and restart the app"}
     out = {"alive": age < max_age_s, "age_s": round(age, 1), "busy": d.get("busy"), "bridge_version": d.get("version"),
            "host": d.get("host"), "role": d.get("role"), "current": d.get("current"),
-           "detail": "ok" if age < max_age_s else f"heartbeat {age:.0f}s old: panel closed or {app} busy/quit"}
+           # protocol 4 (bundle 3.0.0); absent from a 3.1.1 heartbeat
+           "protocol": d.get("protocol"), "bundle": d.get("bundle"), "build": d.get("build"), "libs": d.get("libs"),
+           "host_version": d.get("hostVersion"),
+           "detail": "ok" if age < max_age_s else f"heartbeat {age:.0f}s old: {app} busy or quit"}
     orphans = _orphans(queue, d.get("current"))
     if orphans:
         out["orphans"] = orphans
@@ -122,21 +133,67 @@ def _ver(v) -> tuple:
 
 
 def version_refusal(st: dict, expect: str, app: str) -> dict | None:
-    """The running bridge must be the one this engine ships: a host that was not restarted after a plugin update
-    still runs the old panel against the new scripts. A refusal (`blocked`: exit 2)."""
-    have = st.get("bridge_version")
-    if have == expect:
-        return None
-    error = f"the WhyNot Cut Bridge running in {app} is {have or 'an unknown version'}; this engine needs bridge {expect}"
-    if have and _ver(have) > _ver(expect):
-        # a newer plugin installed it; `reel ppro-install` keeps a newer bridge, so it would not help
-        how = (f"The running bridge {have} is newer than this engine's {expect}: update the WhyNot Cut plugin to the "
-               f"version that ships bridge {have}. Only to go back to {expect} on purpose: `reel ppro-install --force`, "
-               f"then restart {app}.")
+    """The running bridge must be one this engine drives: bundle `expect` speaking protocol 4 with this engine's
+    libraries (`libs_match`), or the legacy 3.1.1 (no protocol). A host that was not restarted after a plugin update
+    still runs another one. A refusal (`blocked`: exit 2); None = accepted."""
+    from . import cep_bundle
+    have, proto = st.get("bridge_version"), st.get("protocol")
+    if proto is None and have == cep_bundle.LEGACY_VERSION:
+        return None                                   # the legacy family (3.0 only)
+    if proto == cep_bundle.PROTOCOL and have == expect:
+        return None if libs_match(st) or _dev() else libs_refusal(app, st)
+    if proto is not None and proto != cep_bundle.PROTOCOL:
+        error = (f"the WhyNot Cut extension running in {app} speaks protocol {proto}; this engine needs protocol "
+                 f"{cep_bundle.PROTOCOL} (WhyNot Cut {expect})")
+        newer = _ver(proto) > _ver(cep_bundle.PROTOCOL)
     else:
-        how = (f"Restart {app} to load bridge {expect}. If it still reports {have or 'another version'}, run "
+        error = (f"the WhyNot Cut extension running in {app} is {have or 'an unknown version'}; this engine needs "
+                 f"WhyNot Cut {expect}")
+        # a legacy bridge (no protocol) is never newer, whatever its number says (3.1.0 is older than bundle 3.0.0)
+        newer = proto is not None and _ver(have) > _ver(expect)
+    if newer:
+        # a newer plugin installed it; `reel ppro-install` keeps a newer extension, so it would not help
+        how = (f"The running extension is newer than this engine's {expect}: update the WhyNot Cut plugin to the "
+               f"version that ships it. Only to go back to {expect} on purpose: `reel ppro-install --force`, then "
+               f"restart {app}.")
+    else:
+        how = (f"Restart {app} to load WhyNot Cut {expect}. If it still reports {have or 'another version'}, run "
                "`reel ppro-install` first, then restart it.")
     return {"ok": False, "error": error, "blocked": error, "how": how, "status": st}
+
+
+def libs_match(st: dict) -> bool:
+    """The running bundle carries this engine's libraries (heartbeat `libs` vs cep_bundle.expected_libs)."""
+    from . import cep_bundle
+    libs = st.get("libs")
+    return isinstance(libs, dict) and all(libs.get(k) == v for k, v in cep_bundle.expected_libs().items())
+
+
+def _dev() -> bool:
+    """WHYNOT_BRIDGE_DEV=1 (off by default, 3.0 only): a bundle of another build runs the synced library by path."""
+    return os.environ.get("WHYNOT_BRIDGE_DEV") == "1"
+
+
+def libs_refusal(app: str, st: dict) -> dict:
+    """A bundle whose libraries are not this engine's (another build): a refusal (`blocked`: exit 2)."""
+    error = (f"the WhyNot Cut extension in {app} is from another build: restart {app}; if it persists, reinstall "
+             "WhyNot Cut")
+    return {"ok": False, "error": error, "blocked": error,
+            "how": f"Restart {app}. If it persists, reinstall WhyNot Cut (`reel ppro-install`), then restart {app}.",
+            "status": st}
+
+
+def job_mode(st: dict, expect: str, app: str):
+    """How to send a job to the running bridge: "lib" (bundle `expect` with this engine's libraries), "script" (the
+    legacy 3.1.1, or a bundle of another build with WHYNOT_BRIDGE_DEV=1: the synced library by path), or a refusal
+    document (`version_refusal`, `libs_refusal`)."""
+    from . import cep_bundle
+    refused = version_refusal(st, expect, app)        # also the libs check (another build, unless the dev loop)
+    if refused:
+        return refused
+    if cep_bundle.family(st.get("bridge_version"), st.get("protocol")) == "legacy":
+        return "script"
+    return "lib" if libs_match(st) else "script"      # "script": the dev loop, the synced library by path
 
 
 def _unlink(*paths: Path) -> None:
@@ -147,16 +204,19 @@ def _unlink(*paths: Path) -> None:
             pass
 
 
-def submit(queue: Path, script: Path, action: str, data: dict | None = None, timeout: float = 600,
+def submit(queue: Path, script: Path | None, action: str, data: dict | None = None, timeout: float = 600,
            poll_s: float = 0.5, st: dict | None = None, app: str = "the Adobe app", *,
-           claim_timeout: float | None = None, expect_version: str | None = None) -> dict:
+           claim_timeout: float | None = None, expect_version: str | None = None, lib: str | None = None) -> dict:
     """Queue one job and wait for its result. `st` = a status already checked by the caller (else checked here).
 
     Two clocks: the bridge must CLAIM the job within `claim_timeout` (default: `timeout`), else the job is cancelled
     and never runs; once claimed, the result must come within `timeout`. `expect_version`: refuse unless the running
-    bridge reports exactly this version."""
+    bridge is one this engine drives (`version_refusal`). `lib`: the job names this bundled library instead of a
+    `script` path (bundle 3.0.0)."""
     queue = Path(queue)
-    refused = plat.sandbox_refusal(f"queue the {action} job", queue, script)          # G79: never in tests
+    if (lib is None) == (script is None):
+        raise ValueError("cep_queue.submit needs exactly one of script and lib")
+    refused = plat.sandbox_refusal(f"queue the {action} job", queue, *([script] if script is not None else []))
     if refused:
         return refused
     st = st if st is not None else status(queue, app=app)
@@ -181,8 +241,12 @@ def submit(queue: Path, script: Path, action: str, data: dict | None = None, tim
         t0 = time.time()
         # resolved paths: the bridge compares realpath(script) with its whitelisted folder (a custom WHYNOT_HOME whose
         # drive-letter case or symlinks differ must not be rejected)
-        job = {"id": jid, "action": action, "script": str(Path(script).resolve()), "data_file": str(data_file.resolve()),
+        job = {"id": jid, "action": action, "data_file": str(data_file.resolve()),
                "submitted": payload["submitted"], "expires_at": _iso_utc(t0 + claim_s)}
+        if lib is not None:
+            job["lib"] = lib
+        else:
+            job["script"] = str(Path(script).resolve())
         tmp.write_text(json.dumps(job), encoding="utf-8")
         tmp.rename(job_p)      # atomic: the bridge never sees a half-written job
         return _wait(queue, jid, t0, claim_s, timeout, poll_s, app)
@@ -280,7 +344,7 @@ def _wait(queue: Path, jid: str, t0: float, claim_s: float, timeout: float, poll
             out = {"ok": bool(r.get("ok")) and isinstance(inner, dict) and inner.get("ok", False),
                    "bridge_ok": r.get("ok"), "response": inner, "elapsed_s": round(time.time() - t0, 1), "job": jid}
             if not r.get("ok") and r.get("error") and inner is None:
-                out["error"] = r["error"]           # the bridge's own refusal (script not whitelisted, no reply)
+                out["error"] = r["error"]           # the bridge's own refusal (script not allowed, no reply)
             if not _host_finished_doc(r):
                 # Gate 2 B3: the bridge's own "no reply from <host>" timeout freed the queue while ExtendScript may
                 # still run and save: claimed, so ppro_build keeps the old project parked instead of restoring over it

@@ -181,8 +181,8 @@ class FileQueueAdapter:
             res = from_cep(action, _queue_failure(r), id=rid)
         if not res.get("ok") and not res.get("how"):
             app = APP_NAMES.get(host, "Premiere")
-            res["how"] = (f"Check that the WhyNot Cut Bridge runs in {app} (Window > Extensions > WhyNot Cut Bridge), "
-                          "then run the command again.")
+            res["how"] = (f"Check that WhyNot Cut runs in {app} (it starts by itself with {app}; restart {app} if "
+                          "it does not answer), then run the command again.")
         return res
 
 

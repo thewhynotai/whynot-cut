@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="7.0" ExtensionBundleId="ai.thewhynot.cut.bridge" ExtensionBundleVersion="3.1.1"
-                   ExtensionBundleName="WhyNot Cut Bridge" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<!-- WhyNot Cut 3.0.0 (3.0 T6.3 Task 4). The ids stay ai.thewhynot.cut.bridge(.panel/.daemon): a new id would leave the
+     3.1.1 bundle loaded beside this one. Only the visible names say "WhyNot Cut". -->
+<ExtensionManifest Version="7.0" ExtensionBundleId="ai.thewhynot.cut.bridge" ExtensionBundleVersion="3.0.0"
+                   ExtensionBundleName="WhyNot Cut" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="ai.thewhynot.cut.bridge.panel" Version="1.0.0"/>
-    <Extension Id="ai.thewhynot.cut.bridge.daemon" Version="1.0.0"/>
+    <Extension Id="ai.thewhynot.cut.bridge.panel" Version="3.0.0"/>
+    <Extension Id="ai.thewhynot.cut.bridge.daemon" Version="3.0.0"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -14,11 +16,16 @@
     <RequiredRuntimeList><RequiredRuntime Name="CSXS" Version="11.0"/></RequiredRuntimeList>
   </ExecutionEnvironment>
   <DispatchInfoList>
+    <!-- the visible panel: After Effects only (Premiere has the UXP panel). It shows the daemon's state and never works
+         the job queue -->
     <Extension Id="ai.thewhynot.cut.bridge.panel">
-      <DispatchInfo>
+      <HostList>
+        <Host Name="AEFT" Version="[24.0,99.9]"/>
+      </HostList>
+      <DispatchInfo Host="AEFT">
         <Resources>
-          <MainPath>./index.html</MainPath>
-          <ScriptPath>./jsx/host.jsx</ScriptPath>
+          <MainPath>./ui/index.html</MainPath>
+          <ScriptPath>./jsx/wnc_host.jsx</ScriptPath>
           <CEFCommandLine>
             <Parameter>--enable-nodejs</Parameter>
             <Parameter>--mixed-context</Parameter>
@@ -27,18 +34,21 @@
         <Lifecycle><AutoVisible>true</AutoVisible></Lifecycle>
         <UI>
           <Type>Panel</Type>
-          <Menu>WhyNot Cut Bridge</Menu>
-          <Geometry><Size><Height>260</Height><Width>360</Width></Size></Geometry>
+          <Menu>WhyNot Cut</Menu>
+          <Geometry>
+            <Size><Height>640</Height><Width>340</Width></Size>
+            <MinSize><Height>320</Height><Width>280</Width></MinSize>
+          </Geometry>
         </UI>
       </DispatchInfo>
     </Extension>
-    <!-- hidden background copy: loads automatically when the app starts/activates, no menu click needed; the only copy
-         that works the job queue (the visible panel shows its state; js/bridge.js) -->
+    <!-- the hidden daemon, in Premiere and After Effects: loads by itself when the app starts or activates, no menu
+         click needed; the only copy that works the job queue (js/bridge.js) -->
     <Extension Id="ai.thewhynot.cut.bridge.daemon">
       <DispatchInfo>
         <Resources>
-          <MainPath>./index.html</MainPath>
-          <ScriptPath>./jsx/host.jsx</ScriptPath>
+          <MainPath>./daemon.html</MainPath>
+          <ScriptPath>./jsx/wnc_host.jsx</ScriptPath>
           <CEFCommandLine>
             <Parameter>--enable-nodejs</Parameter>
             <Parameter>--mixed-context</Parameter>

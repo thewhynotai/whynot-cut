@@ -28,10 +28,11 @@ sys_path = str(SK / "engine" / "reel")
 if sys_path not in _sys.path:
     _sys.path.insert(0, sys_path)
 
-from lib import cep_queue, common, ppro_bridge  # noqa: E402
+from lib import cep_bundle, cep_queue, common, errors, ppro_bridge  # noqa: E402
 from test_round4_intake import slate_gradient_left  # noqa: E402  (a function only: no test class is imported)
 
 CEP = SK.parent / "adobe" / "cep-bridge"
+FROZEN_311 = SK / "tests" / "fixtures" / "cep-bridge-3.1.1"
 
 
 def _iso(t: float) -> str:
@@ -39,13 +40,20 @@ def _iso(t: float) -> str:
 
 
 class FakeBridge:
-    """Plays the 3.1.1 bridge daemon on `queue`: heartbeat (version, role, busy, current), claim by rename, an expired
-    job answered {ok:false, error:"expired"} without running, `<id>.claimed`, a result written atomically.
+    """Plays the bridge daemon on `queue`: heartbeat, claim by rename, an expired job answered {ok:false,
+    error:"expired"} without running, `<id>.claimed`, a result written atomically. Family-aware (3.0 T6.3 Task 4):
+    "bundle" beats {..., bundle, version, protocol 4, build, libs (default: this engine's)}; "legacy" beats the 3.1.1
+    shape {at, busy, version 3.1.1, host, role, current}. `protocol` / `libs` / `version` override the beat.
     `delays[action]` = seconds the host 'works'; `mute` = never claims; `ran` = (job id, action, start, end)."""
 
-    def __init__(self, queue: Path, host="PPRO", version=None, mute=False, delays=None, beat=True):
+    def __init__(self, queue: Path, host="PPRO", version=None, mute=False, delays=None, beat=True, family="bundle",
+                 protocol=..., libs=...):
         self.q, self.host, self.mute, self.delays, self.do_beat = Path(queue), host, mute, dict(delays or {}), beat
-        self.version = version or ppro_bridge.BRIDGE_VERSION
+        self.family = family
+        legacy = family == "legacy"
+        self.version = version or (cep_bundle.LEGACY_VERSION if legacy else ppro_bridge.BRIDGE_VERSION)
+        self.protocol = (None if legacy else cep_bundle.PROTOCOL) if protocol is ... else protocol
+        self.libs = (None if legacy else cep_bundle.expected_libs()) if libs is ... else libs
         self.busy, self.current = False, None
         self.ran, self.claimed, self.first_seen = [], [], {}
         self.stop = threading.Event()
@@ -64,8 +72,11 @@ class FakeBridge:
 
     def beat(self):
         tmp = self.q / "bridge.heartbeat.fake.tmp"
-        tmp.write_text(json.dumps({"at": time.time() * 1000, "busy": self.busy, "version": self.version,
-                                   "host": self.host, "role": "daemon", "current": self.current}), encoding="utf-8")
+        hb = {"at": time.time() * 1000, "busy": self.busy, "version": self.version, "host": self.host,
+              "role": "daemon", "current": self.current}
+        if self.protocol is not None:
+            hb.update(protocol=self.protocol, bundle=self.version, hostVersion="26.5.2", build="f" * 16, libs=self.libs)
+        tmp.write_text(json.dumps(hb), encoding="utf-8")
         try:
             tmp.replace(self.q / "bridge.heartbeat")
         except PermissionError:          # Windows: the reader has the file open this instant; next beat wins
@@ -134,7 +145,7 @@ class _Home(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def leftovers(self):
-        return sorted(f.name for f in self.q.iterdir() if f.name != "bridge.heartbeat")
+        return sorted(f.name for f in self.q.iterdir() if not f.name.startswith("bridge.heartbeat"))   # + a fake's tmp
 
 
 # ===================================================================================================== IM-4
@@ -364,25 +375,64 @@ class TestExpiryCancelCleanup(_Home):
 # ===================================================================================================== IM-5
 class TestVersionHandshake(_Home):
     def test_an_old_running_bridge_is_refused_with_a_restart_hint(self):
-        with FakeBridge(self.q, version="3.1.0") as fb:
+        with FakeBridge(self.q, family="legacy", version="3.1.0") as fb:
             r = ppro_bridge.submit("ping", timeout=5)
         self.assertFalse(r["ok"])
         self.assertIn("3.1.0", r["error"])
         self.assertIn(ppro_bridge.BRIDGE_VERSION, r["error"])
-        self.assertIn(f"Restart Premiere to load bridge {ppro_bridge.BRIDGE_VERSION}", r["how"])
+        self.assertIn(f"Restart Premiere to load WhyNot Cut {ppro_bridge.BRIDGE_VERSION}", r["how"])
+        self.assertEqual(errors.exit_code(r), 2)
         self.assertEqual(fb.claimed, [])
         self.assertEqual(self.leftovers(), [])                     # nothing was queued
 
     def test_a_newer_running_bridge_asks_to_update_the_plugin(self):
-        """`reel ppro-install` skips a newer installed bridge, so telling the editor to run it would loop (Minor 5)."""
-        r = cep_queue.version_refusal({"bridge_version": "3.2.0"}, "3.1.1", "Premiere")
-        self.assertIn("newer", r["how"])
-        self.assertIn("update", r["how"].lower())
-        self.assertIn("reel ppro-install --force", r["how"])
-        old = cep_queue.version_refusal({"bridge_version": "3.1.0"}, "3.1.1", "Premiere")
+        """`reel ppro-install` skips a newer installed bundle, so telling the editor to run it would loop (Minor 5)."""
+        for st in ({"bridge_version": "3.2.0", "protocol": 4}, {"bridge_version": "3.0.0", "protocol": 5}):
+            r = cep_queue.version_refusal(st, "3.0.0", "Premiere")
+            self.assertIn("newer", r["how"])
+            self.assertIn("update", r["how"].lower())
+            self.assertIn("reel ppro-install --force", r["how"])
+        # a legacy number above the bundle's (3.1.0 > 3.0.0) is still older: restart / reinstall, never --force
+        old = cep_queue.version_refusal({"bridge_version": "3.1.0"}, "3.0.0", "Premiere")
         self.assertIn("`reel ppro-install`", old["how"])
         self.assertNotIn("--force", old["how"])
         self.assertTrue(old["blocked"] and old["ok"] is False)
+
+    def test_the_two_families_are_accepted_and_everything_else_refused(self):
+        libs = cep_bundle.expected_libs()
+        ok = [{"bridge_version": "3.1.1"},                                             # legacy: no protocol
+              {"bridge_version": "3.0.0", "protocol": 4, "libs": libs}]                # the bundle
+        for st in ok:
+            self.assertIsNone(cep_queue.version_refusal(st, "3.0.0", "Premiere"), st)
+        bad = [{"bridge_version": "3.1.0"}, {"bridge_version": "3.0.0"},              # old legacy (3.0.0 = pre-bundle)
+               {"bridge_version": "3.1.1", "protocol": 4, "libs": libs},              # 3.1.1 is never protocol 4
+               {"bridge_version": "3.0.0", "protocol": 5, "libs": libs},              # protocol 5
+               {"bridge_version": "3.0.0", "protocol": 3, "libs": libs},
+               {"bridge_version": "3.0.1", "protocol": 4, "libs": libs}, {"bridge_version": None}]
+        for st in bad:
+            r = cep_queue.version_refusal(st, "3.0.0", "Premiere")
+            self.assertTrue(r and r["blocked"] and r["ok"] is False, st)
+            self.assertEqual(errors.exit_code(r), 2)
+            self.assertNotIn("Window > Extensions", r["error"] + r["how"])
+            self.assertNotIn("Bridge", r["error"] + r["how"])
+        self.assertIn("protocol 5", cep_queue.version_refusal(bad[3], "3.0.0", "Premiere")["error"])
+
+    def test_the_heartbeat_fields_reach_the_status(self):
+        with FakeBridge(self.q, mute=True):
+            st = ppro_bridge.status()
+        self.assertTrue(st["alive"], st)
+        self.assertEqual((st["bridge_version"], st["protocol"], st["bundle"], st["build"], st["host_version"]),
+                         ("3.0.0", 4, "3.0.0", "f" * 16, "26.5.2"))
+        self.assertEqual(st["libs"], cep_bundle.expected_libs())
+        with FakeBridge(self.q, family="legacy", mute=True):
+            st = ppro_bridge.status()
+        self.assertEqual((st["bridge_version"], st["protocol"], st["libs"]), ("3.1.1", None, None))
+
+    def test_no_heartbeat_names_no_bridge_menu(self):
+        st = cep_queue.status(self.q, app="Premiere")
+        self.assertFalse(st["alive"])
+        self.assertNotIn("Window > Extensions", st["detail"])
+        self.assertNotIn("Bridge", st["detail"])
 
     def test_ppro_build_refuses_a_version_mismatch_with_a_failing_exit(self):
         from lib import errors, ppro_build
@@ -418,18 +468,19 @@ class TestVersionHandshake(_Home):
 
     def test_after_effects_checks_the_same_bundle_version(self):
         from lib import ae_bridge
-        with FakeBridge(ae_bridge.queue_dir(), host="AEFT", version="3.0.0") as fb:
+        with FakeBridge(ae_bridge.queue_dir(), host="AEFT", family="legacy", version="3.0.0") as fb:   # pre-bundle 3.0.0
             r = ae_bridge.submit("ping", timeout=5)
         self.assertFalse(r["ok"])
         self.assertIn("Restart After Effects", r["how"])
         self.assertEqual(fb.claimed, [])
 
-    def test_the_bridge_version_is_311_everywhere(self):
+    def test_the_bundle_version_is_300_everywhere(self):
         import re
         js = (CEP / "js/bridge.js").read_text(encoding="utf-8")
-        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.1.1")
-        self.assertIn("var VERSION = '3.1.1'", js)
-        self.assertRegex((CEP / "CSXS/manifest.xml").read_text(encoding="utf-8"), re.escape('ExtensionBundleVersion="3.1.1"'))
+        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.0.0")
+        self.assertIn("var BUNDLE = '3.0.0', PROTOCOL = 4;", js)
+        self.assertRegex((CEP / "CSXS/manifest.xml").read_text(encoding="utf-8"), re.escape('ExtensionBundleVersion="3.0.0"'))
+        self.assertEqual((cep_bundle.PRODUCT, cep_bundle.PROTOCOL, cep_bundle.LEGACY_VERSION), ("3.0.0", 4, "3.1.1"))
 
     def test_submit_signatures_are_stable(self):
         """reel serve's FileQueueAdapter calls these: positional parameters never change (keyword-only may be added)."""
@@ -437,6 +488,126 @@ class TestVersionHandshake(_Home):
         from lib import ae_bridge
         self.assertEqual(list(inspect.signature(ppro_bridge.submit).parameters)[:4], ["action", "data", "timeout", "script"])
         self.assertEqual(list(inspect.signature(ae_bridge.submit).parameters)[:3], ["action", "data", "timeout"])
+
+
+class TestJobModes(_Home):
+    """3.0 T6.3 Task 4: ppro_bridge.submit / ae_bridge.submit send what the running bridge needs: bundle 3.0.0 with this
+    engine's libraries -> `lib`; legacy 3.1.1 -> the synced library as `script`; a bundle of another build -> refused
+    (WHYNOT_BRIDGE_DEV=1: the synced library as `script`); anything else -> refused. Nothing is queued on a refusal."""
+    ANOTHER_BUILD = ("the WhyNot Cut extension in Premiere is from another build: restart Premiere; if it persists, "
+                     "reinstall WhyNot Cut")
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.dict(os.environ, {"WHYNOT_BRIDGE_DEV": ""})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_the_bundle_with_this_engines_libraries_runs_its_own_lib(self):
+        before = self.script.read_text(encoding="utf-8")
+        with FakeBridge(self.q) as fb:
+            r = ppro_bridge.submit("ping", {"echo": "x"}, timeout=10)
+        self.assertTrue(r["ok"], r)
+        (job,) = fb.claimed
+        self.assertEqual(job["lib"], "wnc_ppro_lib.jsx")
+        self.assertNotIn("script", job)
+        self.assertEqual(self.script.read_text(encoding="utf-8"), before)             # nothing synced for the bundle
+
+    def test_the_legacy_311_gets_the_synced_library_by_path(self):
+        with FakeBridge(self.q, family="legacy") as fb:
+            r = ppro_bridge.submit("ping", timeout=10)
+        self.assertTrue(r["ok"], r)
+        (job,) = fb.claimed
+        self.assertNotIn("lib", job)
+        self.assertEqual(job["script"], str(ppro_bridge.lib_path().resolve()))
+        self.assertEqual(ppro_bridge.lib_path().read_bytes(), ppro_bridge.LIB_SRC.read_bytes())
+
+    def test_another_build_is_refused_and_nothing_is_queued(self):
+        other = dict(cep_bundle.expected_libs(), **{"wnc_ppro_lib.jsx": "0" * 64})
+        for libs in (other, None, {}):
+            with self.subTest(libs=libs), FakeBridge(self.q, libs=libs) as fb:
+                r = ppro_bridge.submit("ping", timeout=5)
+                self.assertEqual((r["ok"], r["blocked"], r["error"]), (False, self.ANOTHER_BUILD, self.ANOTHER_BUILD))
+                self.assertIn("Restart Premiere", r["how"])
+                self.assertEqual(errors.exit_code(r), 2)
+                self.assertEqual(fb.claimed, [])
+                self.assertEqual(self.leftovers(), [])
+
+    def test_the_dev_loop_sends_the_synced_library_for_another_build(self):
+        with mock.patch.dict(os.environ, {"WHYNOT_BRIDGE_DEV": "1"}), FakeBridge(self.q, libs={}) as fb:
+            r = ppro_bridge.submit("ping", timeout=10)
+        self.assertTrue(r["ok"], r)
+        (job,) = fb.claimed
+        self.assertEqual(job["script"], str(ppro_bridge.lib_path().resolve()))
+        self.assertNotIn("lib", job)
+
+    def test_protocol_5_and_old_legacy_versions_are_refused(self):
+        for kw in ({"protocol": 5}, {"protocol": 3}, {"family": "legacy", "version": "3.1.0"},
+                   {"family": "legacy", "version": "3.0.0"}, {"version": "3.0.1"}):
+            with self.subTest(**kw), FakeBridge(self.q, **kw) as fb:
+                r = ppro_bridge.submit("ping", timeout=5)
+                self.assertFalse(r["ok"])
+                self.assertEqual(errors.exit_code(r), 2)
+                self.assertEqual(fb.claimed, [])
+                if kw.get("protocol") == 5:
+                    self.assertIn("protocol 5", r["error"])
+
+    def test_after_effects_modes(self):
+        from lib import ae_bridge
+        q = ae_bridge.queue_dir()
+        with FakeBridge(q, host="AEFT") as fb:
+            r = ae_bridge.submit("ping", timeout=10)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(fb.claimed[0]["lib"], "wnc_ae_bridge.jsx")
+        self.assertFalse(ae_bridge.scripts_dir().exists())                             # nothing synced
+        with FakeBridge(q, host="AEFT", family="legacy") as fb:
+            r = ae_bridge.submit("ping", timeout=10)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(fb.claimed[0]["script"], str(ae_bridge.entry_path().resolve()))
+        self.assertEqual(sorted(p.name for p in ae_bridge.scripts_dir().iterdir()), sorted(ae_bridge.LIBS))
+        with FakeBridge(q, host="AEFT", libs={}) as fb:
+            r = ae_bridge.submit("ping", timeout=5)
+        self.assertEqual(r["blocked"], self.ANOTHER_BUILD.replace("Premiere", "After Effects"))
+        self.assertEqual(fb.claimed, [])
+
+    def test_job_mode(self):
+        libs = cep_bundle.expected_libs()
+        self.assertEqual(cep_queue.job_mode({"bridge_version": "3.1.1"}, "3.0.0", "Premiere"), "script")
+        self.assertEqual(cep_queue.job_mode({"bridge_version": "3.0.0", "protocol": 4, "libs": libs}, "3.0.0",
+                                            "Premiere"), "lib")
+        st = {"bridge_version": "3.0.0", "protocol": 4, "libs": dict(libs, extra="x")}       # extra names are fine
+        self.assertEqual(cep_queue.job_mode(st, "3.0.0", "Premiere"), "lib")
+        st = {"bridge_version": "3.0.0", "protocol": 4, "libs": {}}
+        self.assertEqual(cep_queue.job_mode(st, "3.0.0", "Premiere")["blocked"], self.ANOTHER_BUILD)
+        with mock.patch.dict(os.environ, {"WHYNOT_BRIDGE_DEV": "1"}):
+            self.assertEqual(cep_queue.job_mode(st, "3.0.0", "Premiere"), "script")
+        self.assertTrue(cep_queue.job_mode({"bridge_version": "3.0.0", "protocol": 5, "libs": libs}, "3.0.0",
+                                           "Premiere")["blocked"])
+
+    def test_the_build_gates_refuse_another_build_before_anything(self):
+        """ppro_build / motion_build read version_refusal: a bundle of another build stops there (exit 2)."""
+        from lib import motion_build, ppro_build
+        p = _reel(self.tmp)
+        st = {"alive": True, "bridge_version": "3.0.0", "protocol": 4, "libs": {}}
+        with mock.patch("lib.ppro_bridge.status", return_value=st), mock.patch("lib.ppro_bridge.submit") as sub:
+            r = ppro_build.build(p)
+        self.assertEqual(r["blocked"], self.ANOTHER_BUILD)
+        self.assertNotEqual(errors.exit_code(r), 0)
+        sub.assert_not_called()
+        with mock.patch("lib.plat.newest_app", return_value={"version": "26"}), \
+                mock.patch("lib.motion_plan.fingerprint", return_value="fp"), \
+                mock.patch("lib.ae_bridge.status", return_value=st), mock.patch("lib.ae_bridge.submit") as sub:
+            r = motion_build.build(p, lock_wait_s=0)
+        self.assertIn("from another build", r["blocked"])
+        self.assertEqual(errors.exit_code(r), 2)
+        sub.assert_not_called()
+
+    def test_submit_needs_exactly_one_of_script_and_lib(self):
+        st = {"alive": True}
+        with self.assertRaises(ValueError):
+            cep_queue.submit(self.q, None, "ping", st=st)
+        with self.assertRaises(ValueError):
+            cep_queue.submit(self.q, self.script, "ping", st=st, lib="wnc_ppro_lib.jsx")
 
 
 class TestBuildLock(_Home):
@@ -688,8 +859,8 @@ class TestPreviousProjectKept(_Home):
     def test_a_failure_before_anything_is_queued_says_not_claimed(self):
         """T2.15: ppro_bridge.submit (status, script sync) and cep_queue.submit (queue folder, sweep) flag their own
         early failures `wnc_claimed = False`, so the previous project still goes back."""
-        with mock.patch.object(ppro_bridge, "status", return_value={"alive": True}), \
-                mock.patch.object(ppro_bridge, "sync_scripts", side_effect=OSError("disk full")):
+        with mock.patch.object(ppro_bridge, "status", return_value={"alive": True, "bridge_version": "3.1.1"}), \
+                mock.patch.object(ppro_bridge, "sync_scripts", side_effect=OSError("disk full")):   # legacy: syncs
             with self.assertRaises(OSError) as cm:
                 ppro_bridge.submit("build_project", {})
         self.assertIs(cm.exception.wnc_claimed, False)
@@ -841,83 +1012,142 @@ class TestWaitForMedia(_Home):
 NODE = shutil.which("node")
 HARNESS = r"""
 const vm = require('vm'), fs = require('fs'), path = require('path');
-const [bridgeJs, extDir, role, runMs, outFile] = process.argv.slice(2);
+const [bridgeJs, extDir, role, runMs, outFile, host] = process.argv.slice(2);
 const evals = [], state = { textContent: '' }, logEl = { textContent: '' };
 const cep = {
   getExtensionId: () => 'ai.thewhynot.cut.bridge.' + role,
-  getHostEnvironment: () => JSON.stringify({ appName: 'PPRO' }),
+  getHostEnvironment: () => JSON.stringify({ appName: host, appVersion: '26.5.2' }),
   getSystemPath: () => 'file:///' + extDir.replace(/\\/g, '/'),
   evalScript: (code, cb) => {
-    const m = /\.run\(("(?:[^"\\]|\\.)*")\);$/.exec(code);
-    const data = JSON.parse(fs.readFileSync(JSON.parse(m[1]), 'ascii'));
-    evals.push(data.action);
+    const m = /^\$\.evalFile\(new File\(("(?:[^"\\]|\\.)*")\)\); (\w+)\.run\(("(?:[^"\\]|\\.)*")\);$/.exec(code);
+    const data = JSON.parse(fs.readFileSync(JSON.parse(m[3]), 'ascii'));
+    evals.push({ action: data.action, file: JSON.parse(m[1]), entry: m[2] });
     setTimeout(() => cb(JSON.stringify({ ok: true, action: data.action, result: { echo: data.echo } })), 30);
   }
 };
 const ctx = { window: { __adobe_cep__: cep, cep_node: { require } }, document: { getElementById: (id) => id === 'state' ? state : logEl },
               setInterval: (f) => setInterval(f, 50), process, console };
 vm.runInNewContext(fs.readFileSync(bridgeJs, 'utf8'), ctx);
-setTimeout(() => { fs.writeFileSync(outFile, JSON.stringify({ evals, state: state.textContent, log: logEl.textContent })); process.exit(0); }, +runMs);
+setTimeout(() => {
+  const b = ctx.window.WNC_BRIDGE;
+  fs.writeFileSync(outFile, JSON.stringify({ evals, state: state.textContent, log: logEl.textContent,
+    panel: b ? { role: b.role, host: b.host, bundle: b.bundle, queue: b.queue, beat: b.readBeat() } : null }));
+  process.exit(0);
+}, +runMs);
 """
 
 
-@unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
-class TestBridgeJs(_Home):
+class _BridgeJs(_Home):
+    """Runs a real bridge.js in node with a stubbed CEP. HOME and USERPROFILE of the node process are a temp folder,
+    so the bridge never reads or writes the real ~/.whynot-cut. Subclasses name the file and build the extension."""
+    BRIDGE: Path
+    FAMILY: str
+    REFUSED: str                            # the bridge's answer to a script outside the allowed folder
+
     def setUp(self):
         super().setUp()
-        self.ext = self.tmp / "ext"
-        self.ext.mkdir()
-        (self.ext / "bridge-config.json").write_text(json.dumps({"base": str(self.home)}), encoding="utf-8")
+        self.user = self.tmp / "user"
+        self.user.mkdir()
+        self.ext = self.make_ext()
         self.harness = self.tmp / "harness.js"
         self.harness.write_text(HARNESS, encoding="utf-8")
         self.q.mkdir(parents=True)
 
-    def run_bridge(self, role="daemon", ms=1500, during=None):
-        out = self.tmp / f"out-{role}.json"
-        p = subprocess.Popen([NODE, str(self.harness), str(CEP / "js/bridge.js"), str(self.ext), role, str(ms), str(out)],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+    def make_ext(self) -> Path:
+        raise NotImplementedError
+
+    def run_bridge(self, role="daemon", ms=1500, during=None, host="PPRO"):
+        out = self.tmp / f"out-{role}-{host}.json"
+        env = dict(os.environ, HOME=str(self.user), USERPROFILE=str(self.user))
+        p = subprocess.Popen([NODE, str(self.harness), str(self.BRIDGE), str(self.ext), role, str(ms), str(out), host],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env)
         if during:
-            during(p)
+            try:
+                during(p)
+            except BaseException:
+                p.kill()
+                p.communicate(timeout=30)
+                raise
         so, se = p.communicate(timeout=60)
         self.assertEqual(p.returncode, 0, se)
         return json.loads(out.read_text(encoding="utf-8"))
 
-    def job(self, jid, action, expires_in):
+    def job(self, jid, action, expires_in, **ref):
+        """A job file; `ref` = lib=... or script=... (default: what this family's engine sends)."""
         data = self.q / f"{jid}.data.json"
         data.write_text(json.dumps({"action": action, "echo": jid}), encoding="ascii")
-        (self.q / f"{jid}.job.json").write_text(json.dumps({
-            "id": jid, "action": action, "script": str(self.script.resolve()), "data_file": str(data.resolve()),
-            "expires_at": _iso(time.time() + expires_in)}), encoding="utf-8")
+        if not ref:
+            ref = {"lib": "wnc_ppro_lib.jsx"} if self.FAMILY == "bundle" else {"script": str(self.script.resolve())}
+        (self.q / f"{jid}.job.json").write_text(json.dumps(dict({
+            "id": jid, "action": action, "data_file": str(data.resolve()),
+            "expires_at": _iso(time.time() + expires_in)}, **ref)), encoding="utf-8")
 
     def result(self, jid):
         return json.loads((self.q / f"{jid}.result.json").read_text(encoding="utf-8"))
+
+    def beat(self, q=None):
+        return json.loads(((q or self.q) / "bridge.heartbeat").read_text(encoding="utf-8"))
+
+    def wait_beat(self, q):
+        deadline = time.time() + 10
+        while not (q / "bridge.heartbeat").exists() and time.time() < deadline:
+            time.sleep(0.05)
+
+
+class _SharedBridgeJsTests:
+    """The same suite against bundle 3.0.0 (adobe/cep-bridge/js/bridge.js) and the frozen legacy 3.1.1."""
 
     def test_the_daemon_runs_a_live_job_and_discards_an_expired_one(self):
         self.job("a-old", "build_project", -60)
         self.job("b-new", "ping", 60)
         out = self.run_bridge()
-        self.assertEqual(out["evals"], ["ping"])                          # the expired build never reached the host
+        self.assertEqual([e["action"] for e in out["evals"]], ["ping"])       # the expired build never reached the host
         self.assertEqual(self.result("a-old")["error"], "expired")
         self.assertFalse(self.result("a-old")["ok"])
         self.assertTrue(self.result("b-new")["ok"])
         self.assertEqual(json.loads(self.result("b-new")["result"])["result"]["echo"], "b-new")
         self.assertEqual(json.loads((self.q / "b-new.claimed").read_text(encoding="utf-8"))["by"], "daemon")
         self.assertEqual(sorted(f.name for f in self.q.glob("*.running")) + sorted(f.name for f in self.q.glob("*.tmp")), [])
-        hb = json.loads((self.q / "bridge.heartbeat").read_text(encoding="utf-8"))
-        self.assertEqual((hb["version"], hb["role"], hb["host"], hb["busy"]), ("3.1.1", "daemon", "PPRO", False))
+        hb = self.beat()
+        self.assertEqual((hb["role"], hb["host"], hb["busy"]), ("daemon", "PPRO", False))
 
     def test_the_engine_and_the_real_bridge_agree(self):
-        """cep_queue.submit against js/bridge.js: claim, result, cleanup."""
+        """ppro_bridge.submit against the real bridge.js: the mode this family needs, claim, result, cleanup."""
         def during(_p):
-            deadline = time.time() + 10
-            while not (self.q / "bridge.heartbeat").exists() and time.time() < deadline:
-                time.sleep(0.05)
-            self.r = cep_queue.submit(self.q, self.script, "ping", {"echo": "x"}, timeout=10,
-                                      expect_version=ppro_bridge.BRIDGE_VERSION)
-        self.run_bridge(ms=2500, during=during)
+            self.wait_beat(self.q)
+            self.r = ppro_bridge.submit("ping", {"echo": "x"}, timeout=10)
+        out = self.run_bridge(ms=2500, during=during)
         self.assertTrue(self.r["ok"], self.r)
         self.assertEqual(self.r["response"]["result"]["echo"], "x")
         self.assertEqual(self.leftovers(), [])
+        (ev,) = out["evals"]
+        self.assertEqual((ev["action"], ev["entry"]), ("ping", self.ENTRY["PPRO"]))
+        self.assertEqual(norm(ev["file"]), norm(self.ran_from("PPRO")))
+
+    def test_after_effects_runs_its_entry(self):
+        from lib import ae_bridge
+        q = ae_bridge.queue_dir()
+
+        def during(_p):
+            self.wait_beat(q)
+            self.r = ae_bridge.submit("ping", {"echo": "ae"}, timeout=10)
+        out = self.run_bridge(ms=2500, during=during, host="AEFT")
+        self.assertTrue(self.r["ok"], self.r)
+        (ev,) = out["evals"]
+        self.assertEqual((ev["action"], ev["entry"]), ("ping", self.ENTRY["AEFT"]))
+        self.assertEqual(norm(ev["file"]), norm(self.ran_from("AEFT")))
+        self.assertEqual(self.beat(q)["host"], "AEFT")
+
+    def test_a_script_outside_the_scripts_folder_is_refused(self):
+        evil = self.tmp / "evil" / "wnc_ppro_lib.jsx"
+        evil.parent.mkdir()
+        evil.write_text("// evil", encoding="utf-8")
+        self.job("e", "ping", 60, script=str(evil.resolve()))
+        out = self.run_bridge()
+        self.assertEqual(out["evals"], [])
+        r = self.result("e")
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["error"], self.REFUSED)
 
     def test_the_panel_leaves_the_queue_to_a_live_daemon(self):
         self.job("c", "ping", 60)
@@ -937,24 +1167,202 @@ class TestBridgeJs(_Home):
             t.join(2)
         self.assertEqual(out["evals"], [])
         self.assertTrue((self.q / "c.job.json").exists())
-        self.assertIn("background bridge", out["state"])
 
     def test_the_panel_waits_longer_than_the_engine_heartbeat_window(self):
-        """The panel must not take over while the engine still counts the daemon alive (cep_queue.status max_age_s)."""
+        """The panel must not count the daemon gone while the engine still counts it alive (cep_queue.status)."""
         import inspect
         import re
-        js = (CEP / "js/bridge.js").read_text(encoding="utf-8")
-        ms = int(re.search(r"var DAEMON_STALE_MS = (\d+);", js).group(1))
+        ms = int(re.search(r"var DAEMON_STALE_MS = (\d+);", self.BRIDGE.read_text(encoding="utf-8")).group(1))
         engine_s = inspect.signature(cep_queue.status).parameters["max_age_s"].default
         self.assertGreaterEqual(ms, 6000)
         self.assertGreater(ms, engine_s * 1000)
 
+
+@unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
+class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
+    """Bundle 3.0.0: daemon-only worker, bundled libraries (`lib` jobs, confined), the protocol 4 heartbeat."""
+    BRIDGE = CEP / "js" / "bridge.js"
+    FAMILY = "bundle"
+    REFUSED = "script not allowed"
+    ENTRY = {"PPRO": "WNCPP", "AEFT": "WNCAE"}
+
+    def make_ext(self) -> Path:
+        ext = cep_bundle.assemble(self.tmp / "ext" / cep_bundle.EXT_ID)
+        self.write_config(self.home)
+        return ext
+
+    def write_config(self, engine_home: Path):
+        cfg = self.user / ".whynot-cut" / "bridge" / "config.json"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text(json.dumps({"schema": 1, "engine_home": str(engine_home), "launcher": None,
+                                   "written_by": "engine", "at": "2026-10-13T00:00:00+00:00"}), encoding="utf-8")
+        return cfg
+
+    def ran_from(self, host):
+        return self.ext / "jsx" / ("wnc_ppro_lib.jsx" if host == "PPRO" else "wnc_ae_bridge.jsx")
+
+    def test_the_heartbeat_fields(self):
+        self.run_bridge(ms=800)
+        hb = self.beat()
+        self.assertEqual(sorted(hb), sorted(["at", "busy", "role", "host", "hostVersion", "bundle", "version", "protocol",
+                                             "build", "libs", "current", "action"]))
+        build = json.loads((self.ext / "build.json").read_text(encoding="utf-8"))
+        self.assertEqual((hb["bundle"], hb["version"], hb["protocol"], hb["build"], hb["hostVersion"], hb["role"]),
+                         ("3.0.0", "3.0.0", 4, build["build"], "26.5.2", "daemon"))
+        self.assertEqual(hb["libs"], cep_bundle.expected_libs())
+        self.assertEqual(hb["libs"], build["libs"])
+        st = cep_queue.status(self.q, app="Premiere")
+        self.assertEqual(cep_queue.job_mode(st, ppro_bridge.BRIDGE_VERSION, "Premiere"), "lib")
+
+    def test_lib_jobs_run_from_the_bundle(self):
+        self.job("l", "ping", 60, lib="wnc_ppro_lib.jsx")
+        out = self.run_bridge()
+        self.assertTrue(self.result("l")["ok"], self.result("l"))
+        (ev,) = out["evals"]
+        self.assertEqual(norm(ev["file"]), norm(self.ext / "jsx" / "wnc_ppro_lib.jsx"))
+        self.assertEqual(ev["entry"], "WNCPP")
+
+    def test_a_bad_lib_is_refused(self):
+        bad = {"other-host": {"lib": "wnc_ae_bridge.jsx"}, "a-path": {"lib": "../js/bridge.js"},
+               "host-script": {"lib": "wnc_host.jsx"}, "absolute": {"lib": str(self.ext / "jsx" / "wnc_ppro_lib.jsx")},
+               "empty": {"lib": ""}, "number": {"lib": 5}, "nothing": {"data": 1}}
+        for jid, ref in bad.items():
+            self.job(jid, "ping", 60, **ref)
+        out = self.run_bridge(ms=2500)
+        self.assertEqual(out["evals"], [])
+        for jid in bad:
+            r = self.result(jid)
+            self.assertEqual((r["ok"], r["error"]), (False, "script not allowed"), jid)
+
+    def test_a_lib_linked_out_of_the_bundle_is_refused(self):
+        evil = self.tmp / "evil" / "wnc_ppro_lib.jsx"
+        evil.parent.mkdir()
+        evil.write_text("// evil", encoding="utf-8")
+        lib = self.ext / "jsx" / "wnc_ppro_lib.jsx"
+        lib.unlink()
+        try:
+            lib.symlink_to(evil)
+        except OSError as e:                      # Windows without the symlink privilege
+            self.skipTest(f"no symlinks here: {e}")
+        self.job("s", "ping", 60, lib="wnc_ppro_lib.jsx")
+        out = self.run_bridge()
+        self.assertEqual(out["evals"], [])
+        self.assertEqual(self.result("s")["error"], "script not allowed")
+
+    def test_the_compatibility_script_runs_only_from_the_scripts_folder_with_an_allowlisted_name(self):
+        other = self.script.with_name("other.jsx")
+        other.write_text("// x", encoding="utf-8")
+        self.job("a", "ping", 60, script=str(self.script.resolve()))                          # runs
+        self.job("b", "ping", 60, script=str(other.resolve()))                                # not allowlisted
+        self.job("c", "ping", 60, script=str(self.script.with_name("wnc_ae_bridge.jsx")))     # another host's
+        self.job("d", "ping", 60, script=str(self.home / "ae-scripts" / "wnc_ppro_lib.jsx"))  # another folder
+        out = self.run_bridge(ms=2500)
+        self.assertEqual([norm(e["file"]) for e in out["evals"]], [norm(self.script)])
+        self.assertTrue(self.result("a")["ok"])
+        for jid in "bcd":
+            self.assertEqual(self.result(jid)["error"], "script not allowed", jid)
+
+    def test_a_missing_library_is_not_found(self):
+        (self.ext / "jsx" / "wnc_ppro_lib.jsx").unlink()
+        self.script.unlink()
+        self.job("m", "ping", 60)
+        self.job("n", "ping", 60, script=str(self.script))
+        self.run_bridge()
+        for jid in "mn":
+            self.assertTrue(self.result(jid)["error"].startswith("script not found"), self.result(jid))
+
+    def test_the_panel_never_claims(self):
+        """Not even when no daemon beats (the 3.1.1 panel took over then): no claim, no heartbeat, no folder."""
+        self.job("d", "ping", 60)
+        out = self.run_bridge(role="panel", ms=2500)
+        self.assertEqual(out["evals"], [])
+        self.assertTrue((self.q / "d.job.json").exists())
+        self.assertFalse((self.q / "d.claimed").exists())
+        self.assertFalse((self.q / "bridge.heartbeat").exists())
+        self.assertEqual(out["panel"]["role"], "panel")
+        self.assertEqual(norm(out["panel"]["queue"]), norm(self.q))
+        self.assertIsNone(out["panel"]["beat"])
+        self.assertNotIn("WNC_BRIDGE", (CEP / "daemon.html").read_text(encoding="utf-8"))
+
+    def test_the_panel_reads_the_daemons_beat(self):
+        hb = {"at": time.time() * 1000, "role": "daemon", "busy": True, "current": "j", "version": "3.0.0"}
+        (self.home / "ae-queue").mkdir()
+        (self.home / "ae-queue" / "bridge.heartbeat").write_text(json.dumps(hb), encoding="utf-8")
+        out = self.run_bridge(role="panel", ms=600, host="AEFT")
+        self.assertEqual((out["panel"]["host"], out["panel"]["bundle"]), ("AEFT", "3.0.0"))
+        self.assertEqual(norm(out["panel"]["queue"]), norm(self.home / "ae-queue"))
+        self.assertEqual(out["panel"]["beat"], hb)
+        self.assertEqual(json.loads((self.home / "ae-queue" / "bridge.heartbeat").read_text(encoding="utf-8")), hb)
+
+    def test_the_engine_home_comes_from_config_json_else_the_fallback(self):
+        other = self.tmp / "other-home"
+        other.mkdir()
+        self.write_config(other)
+        self.run_bridge(ms=800)
+        self.assertTrue((other / "ppro-queue" / "bridge.heartbeat").exists())
+        cfg = self.user / ".whynot-cut" / "bridge" / "config.json"
+        for bad in ({"schema": 2, "engine_home": str(other)}, {"schema": 1, "engine_home": "relative/home"},
+                    {"schema": 1, "engine_home": str(self.tmp / "missing")}):
+            shutil.rmtree(self.user / ".whynot-cut" / "ppro-queue", ignore_errors=True)
+            cfg.write_text(json.dumps(bad), encoding="utf-8")
+            self.run_bridge(ms=800)
+            self.assertTrue((self.user / ".whynot-cut" / "ppro-queue" / "bridge.heartbeat").exists(), bad)
+
+    def test_a_linked_config_json_is_ignored(self):
+        other = self.tmp / "other-home"
+        other.mkdir()
+        real = self.tmp / "elsewhere.json"
+        real.write_text(json.dumps({"schema": 1, "engine_home": str(other)}), encoding="utf-8")
+        cfg = self.user / ".whynot-cut" / "bridge" / "config.json"
+        cfg.unlink()
+        try:
+            cfg.symlink_to(real)
+        except OSError as e:
+            self.skipTest(f"no symlinks here: {e}")
+        self.run_bridge(ms=800)
+        self.assertFalse((other / "ppro-queue").exists())
+        self.assertTrue((self.user / ".whynot-cut" / "ppro-queue" / "bridge.heartbeat").exists())
+
+
+@unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
+class TestBridgeJsLegacy311(_SharedBridgeJsTests, _BridgeJs):
+    """The frozen 3.1.1 (tests/fixtures/cep-bridge-3.1.1), live on the owner's PC until Gate 6: the engine still drives
+    it (synced libraries, `script` jobs, the NHPP / NHAE aliases)."""
+    BRIDGE = FROZEN_311 / "bridge.js"
+    FAMILY = "legacy"
+    REFUSED = "script not in whitelisted folder"
+    ENTRY = {"PPRO": "NHPP", "AEFT": "NHAE"}
+
+    def make_ext(self) -> Path:
+        ext = self.tmp / "ext" / cep_bundle.EXT_ID
+        ext.mkdir(parents=True)
+        # what the 3.1.x engine wrote at install (3.1.1 reads its engine home from here)
+        (ext / "bridge-config.json").write_text(json.dumps({"base": str(self.home)}), encoding="utf-8")
+        return ext
+
+    def ran_from(self, host):
+        from lib import ae_bridge
+        return ppro_bridge.lib_path() if host == "PPRO" else ae_bridge.entry_path()
+
+    def test_the_heartbeat_is_the_311_shape(self):
+        self.run_bridge(ms=800)
+        hb = self.beat()
+        self.assertEqual((hb["version"], hb["role"], hb["host"]), ("3.1.1", "daemon", "PPRO"))
+        self.assertNotIn("protocol", hb)
+        st = cep_queue.status(self.q, app="Premiere")
+        self.assertIsNone(cep_queue.version_refusal(st, ppro_bridge.BRIDGE_VERSION, "Premiere"))
+        self.assertEqual(cep_queue.job_mode(st, ppro_bridge.BRIDGE_VERSION, "Premiere"), "script")
+
     def test_the_panel_works_the_queue_when_no_daemon_beats(self):
         self.job("d", "ping", 60)
         out = self.run_bridge(role="panel", ms=8000)
-        self.assertEqual(out["evals"], ["ping"])
+        self.assertEqual([e["action"] for e in out["evals"]], ["ping"])
         self.assertIn("this panel works the queue", out["log"])
-        self.assertEqual(json.loads((self.q / "bridge.heartbeat").read_text(encoding="utf-8"))["role"], "panel")
+        self.assertEqual(self.beat()["role"], "panel")
+
+
+def norm(p) -> str:
+    return os.path.normcase(os.path.realpath(str(p)))
 
 
 if __name__ == "__main__":

@@ -100,40 +100,49 @@ class TestBridge(unittest.TestCase):
         self.assertEqual(list(self.q.glob("*.data.json")), [])          # cleaned up once the result was read (T2.9)
 
     def test_install_never_downgrades(self):
-        """Peer request: `reel setup`/`ppro-install` from an older plugin silently put bridge 3.0.0 back over 3.1.0 (and
-        dropped the After Effects host). A newer installed bundle is kept unless --force."""
+        """Peer request: `reel setup`/`ppro-install` from an older plugin silently put an older bridge back over a newer
+        one. 3.0 T6.3 Task 4: the install rule (cep_bundle.decide_install) keeps a newer bundle or an unknown layout
+        unless --force, and replaces the legacy family; config.json is written, never a file in the extension."""
         import os
         from unittest import mock
-        from lib import plat, ppro_bridge as pb
+        from lib import cep_bundle, plat, ppro_bridge as pb
         # the engine home and CEP folder are resolved per call (T2.17): point them at the temp folder AFTER import
         with mock.patch.dict(os.environ, {"WHYNOT_HOME": str(self.tmp / "home")}), \
                 mock.patch.object(plat, "cep_extensions_dir", lambda: self.tmp / "ext"), \
-                mock.patch.object(plat, "player_debug_mode", lambda: {}):
+                mock.patch.object(plat, "player_debug_mode", lambda: {}), \
+                mock.patch.object(cep_bundle, "config_path", lambda: self.tmp / "user" / "config.json"):
             self.assertEqual(pb.ext_dir(), self.tmp / "ext" / pb.EXT_ID)
             self.assertEqual(pb.lib_path(), self.tmp / "home" / "ppro-scripts" / pb.LIB_SRC.name)   # never the real home
-            self._install_never_downgrades(pb)
+            self._install_never_downgrades(pb, cep_bundle)
 
-    def _install_never_downgrades(self, pb):
+    def _install_never_downgrades(self, pb, cep_bundle):
         EXT_DIR = pb.ext_dir()
-        cfg = EXT_DIR / "bridge-config.json"
+        build = EXT_DIR / "build.json"
         EXT_DIR.mkdir(parents=True)
-        cfg.write_text(json.dumps({"version": "9.0.0"}), encoding="utf-8")
+        build.write_text(json.dumps({"product": "9.0.0", "build": "9" * 16}), encoding="utf-8")   # a newer bundle
         r = pb.install()
         self.assertTrue(r.get("skipped"), r)
         self.assertTrue("9.0.0" in r["detail"] and pb.BRIDGE_VERSION in r["detail"] and "--force" in r["detail"], r)
-        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], "9.0.0")
-        cfg.unlink()                                                    # manifest only (no bridge-config.json)
+        self.assertEqual(json.loads(build.read_text(encoding="utf-8"))["product"], "9.0.0")
+        build.unlink()                                                  # manifest only, a layout this engine does not know
         (EXT_DIR / "CSXS").mkdir()
         (EXT_DIR / "CSXS/manifest.xml").write_text('<ExtensionManifest ExtensionBundleVersion="9.1.0">',
                                                      encoding="utf-8")
         self.assertTrue(pb.install().get("skipped"))
         r = pb.install(force=True)
         self.assertFalse(r.get("skipped"), r)
-        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], pb.BRIDGE_VERSION)
-        cfg.write_text(json.dumps({"version": "3.0.0"}), encoding="utf-8")        # older: replaced without --force
-        self.assertFalse(pb.install().get("skipped"))
-        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["version"], pb.BRIDGE_VERSION)
-        self.assertEqual(json.loads(cfg.read_text(encoding="utf-8"))["base"], str((self.tmp / "home").resolve()))
+        self.assertEqual(json.loads(build.read_text(encoding="utf-8"))["product"], pb.BRIDGE_VERSION)
+        shutil.rmtree(EXT_DIR)                                          # the legacy 3.1.1: replaced without --force
+        (EXT_DIR / "CSXS").mkdir(parents=True)
+        (EXT_DIR / "CSXS/manifest.xml").write_text('<ExtensionManifest ExtensionBundleVersion="3.1.1">',
+                                                     encoding="utf-8")
+        (EXT_DIR / "bridge-config.json").write_text(json.dumps({"version": "3.1.1"}), encoding="utf-8")
+        r = pb.install()
+        self.assertEqual(r.get("action"), "replace", r)
+        self.assertEqual(json.loads(build.read_text(encoding="utf-8"))["product"], pb.BRIDGE_VERSION)
+        self.assertFalse((EXT_DIR / "bridge-config.json").exists())
+        self.assertEqual(json.loads(cep_bundle.config_path().read_text(encoding="utf-8"))["engine_home"],
+                         str((self.tmp / "home").resolve()))
 
     def test_queue_timeout(self):
         from lib import cep_queue
@@ -155,7 +164,7 @@ class TestBridge(unittest.TestCase):
         from lib import ppro_bridge
         self.assertEqual(list(inspect.signature(ppro_bridge.submit).parameters), ["action", "data", "timeout", "script"])
         self.assertEqual(ppro_bridge.QUEUE.name, "ppro-queue")
-        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.1.1")
+        self.assertEqual(ppro_bridge.BRIDGE_VERSION, "3.0.0")
 
     def test_ae_status_needs_aeft(self):
         from unittest import mock
@@ -171,17 +180,20 @@ class TestBridge(unittest.TestCase):
 
     def test_bridge_js_hosts(self):
         js = (CEP / "js/bridge.js").read_text(encoding="utf-8")
-        self.assertIn("PPRO: { queue: 'ppro-queue', scripts: 'ppro-scripts', entry: 'NHPP' }", js)
-        self.assertIn("AEFT: { queue: 'ae-queue', scripts: 'ae-scripts', entry: 'NHAE' }", js)
+        self.assertIn("PPRO: { queue: 'ppro-queue', scripts: 'ppro-scripts', entry: 'WNCPP', lib: 'wnc_ppro_lib.jsx' }", js)
+        self.assertIn("AEFT: { queue: 'ae-queue', scripts: 'ae-scripts', entry: 'WNCAE', lib: 'wnc_ae_bridge.jsx' }", js)
         self.assertIn("getHostEnvironment", js)
-        self.assertIn("VERSION = '3.1.1'", js)
+        self.assertIn("var BUNDLE = '3.0.0', PROTOCOL = 4;", js)
         assert_js_syntax(self, CEP / "js/bridge.js")
+        assert_js_syntax(self, CEP / "ui/js/panel.js")
 
     def test_manifest_hosts(self):
         root = ET.parse(CEP / "CSXS/manifest.xml").getroot()
-        hosts = {h.get("Name"): h.get("Version") for h in root.iter("Host")}
-        self.assertEqual(hosts, {"PPRO": "[22.0,99.9]", "AEFT": "[24.0,99.9]"})
-        self.assertEqual(root.get("ExtensionBundleVersion"), "3.1.1")
+        hosts = {h.get("Name"): h.get("Version") for h in root.find("ExecutionEnvironment/HostList")}
+        self.assertEqual(hosts, {"PPRO": "[22.0,99.9]", "AEFT": "[24.0,99.9]"})       # the daemon runs in both
+        self.assertEqual((root.get("ExtensionBundleVersion"), root.get("ExtensionBundleName")), ("3.0.0", "WhyNot Cut"))
+        panel = [e for e in root.find("DispatchInfoList") if e.get("Id").endswith(".panel")][0]
+        self.assertEqual([h.get("Name") for h in panel.find("HostList")], ["AEFT"])  # the visible panel: AE only
 
     def test_ae_sync_scripts(self):
         from unittest import mock
@@ -2775,7 +2787,9 @@ console.log(JSON.stringify({ltr: bar(1), rtl: bar(-1)}));
         ext, base = tmp / "ext", tmp / "home"
         ext.mkdir()
         base.mkdir()
-        (ext / "bridge-config.json").write_text(json.dumps({"base": str(base)}), encoding="utf-8")
+        cfg = tmp / ".whynot-cut" / "bridge" / "config.json"         # the 3.0.0 bundle reads ~/.whynot-cut/bridge
+        cfg.parent.mkdir(parents=True)
+        cfg.write_text(json.dumps({"schema": 1, "engine_home": str(base)}), encoding="utf-8")
         js = ("var EXT = " + json.dumps(str(ext)) + ", HOMEDIR = " + json.dumps(str(tmp)) + ", n = 0, nodeRequire = require;\n"
               "globalThis.window = {require: function (m) { return m === 'os' ? {homedir: function () { return HOMEDIR; },"
               " platform: function () { return process.platform; }} : nodeRequire(m); },\n"
