@@ -4,8 +4,8 @@
 Looks at the client folder the session ran in (the cwd or a folder above it) and at the client folders right below
 the cwd (a session opened in the clients folder works with --root "<name>"). Removes a lease only when its
 session_id is the ending session's; another session's lease is never touched. Without this hook a lease still ends
-when the session's Claude Code process exits (stale) or after 2 h without a writing command; after /clear the same
-Claude Code process takes its old lease over at its next writing command (writer_lock.same_process, T3.4), so a
+when the session's Claude Code process exits (stale) or after 2 h without a writing command; after /clear or /resume
+the next session's SessionStart re-keys a lease its own Claude Code process still holds (writer_lock.rekey, T3.4), so a
 SessionEnd cut short by its 1.5 s budget never locks the session out of its own client.
 It also removes the session's own files in ${CLAUDE_PLUGIN_DATA} (scope, pending context, evidence gate; T3.4).
 Stdlib only, fast; never fails the session (any error -> silent exit 0).

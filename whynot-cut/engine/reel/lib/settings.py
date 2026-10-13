@@ -30,6 +30,7 @@ DEFAULTS = {
     "notify_done": True,          # say clearly when a long run finishes
     "panel_link": True,           # start the engine the Premiere panel talks to (`reel serve`) at session start
     "magnific_budget_credits": 300,  # most Magnific credits one edit may spend (0 = never use Magnific)
+    "evidence_gate": False,       # Stop hook: send back a turn that says "ready" without `reel qc` (hooks/README.md)
 }
 CHOICES = {"language": {"en", "ar"}, "approval": {"ask", "auto"},
            "whisper_model": {"large-v3", "large-v3-turbo", "medium", "small"}}

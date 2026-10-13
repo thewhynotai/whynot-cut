@@ -285,10 +285,11 @@ def flush_cwd():
     if old == new or not scope_f:
         return
     if not new:
-        try:
-            scope_f.unlink()
-        except OSError:
-            pass
+        for f in (scope_f, session_file("pending-context", sid)):    # a context for the folder left is stale now
+            try:
+                f.unlink()
+            except OSError:
+                pass
         return
     _write(scope_f, new)
     if not text:
@@ -425,7 +426,8 @@ def _read_json(f: Path):
         return None
 
 
-REQUEST_GLOBS = ("output/*/panel-requests.json", "output/*/*/panel-requests.json", "output/*/*/*/panel-requests.json")
+# the panel writes change requests next to the item only (Addendum C ecosystem §234: `<item>/panel-requests.json`)
+REQUEST_GLOBS = ("output/projects/*/panel-requests.json",)
 _DONE = ("done", "resolved", "handled", "closed")
 
 
@@ -433,7 +435,8 @@ def panel_line(root: Path) -> str:
     """What the editor did in the Premiere panel and Claude has not acted on yet (Addendum C §5.2, T6.6 text): plan
     approvals given in the panel (01_analysis/plan-approval.json `via: panel`) of items not built since, and change
     requests (<item>/panel-requests.json: a list, or {"requests": [...]}, entries {text, at, editor_name} not marked
-    done/resolved/handled). Read only when present (Phase 6 writes them); depth-bounded globs, never a tree walk."""
+    done/resolved/handled). Read only when present (Phase 6 writes them); one listing of output/projects, never a
+    tree walk."""
     approvals, requests = [], []
     for f in sorted(root.glob("output/projects/*/01_analysis/plan-approval.json"))[:300]:
         rec = _read_json(f)
@@ -471,19 +474,6 @@ def panel_line(root: Path) -> str:
     return out
 
 
-def panel_clients_line(base: Path, names: list) -> str:
-    """Clients folder: the clients with panel approvals or change requests waiting (panel_line per client)."""
-    hits = []
-    for n in names[:60]:
-        try:
-            line = panel_line(base / n)
-        except Exception:
-            line = ""
-        if line:
-            hits.append(f"[{n}] {line.strip()}")
-    return ("Premiere panel: " + " ".join(hits[:8]) + " ") if hits else ""
-
-
 def _platform_key() -> str:
     import platform
     if os.name == "nt":
@@ -515,22 +505,44 @@ def updates_line(home: Path) -> str:
             f"running it. ") if pend else ""
 
 
-def busy_line(base: Path, names: list) -> str:
-    """Clients folder: which clients another session is writing in right now (their live writer lease, T1.8)."""
+CLIENT_SCAN_BUDGET_S = 1.0      # the clients-folder lists share this (a NAS with many clients must not eat the 10 s)
+
+
+def clients_lists(base: Path, names: list, budget: float = CLIENT_SCAN_BUDGET_S) -> str:
+    """Clients folder: which clients another session is writing in right now (their live writer lease, T1.8), and
+    the clients with panel approvals or change requests waiting (panel_line per client). One time budget for both
+    (fix round 1): when it runs out, the rest is not checked and the line says so."""
     try:
         import writer_lock
     except Exception:
-        return ""
-    sid = writer_lock.session_id()
-    busy = []
-    for n in names[:60]:
+        writer_lock = None
+    deadline = time.monotonic() + budget
+    names = names[:60]
+    busy, hits, checked = [], [], 0
+    for n in names:
+        if checked and time.monotonic() >= deadline:
+            break
+        checked += 1
+        if writer_lock is not None:
+            try:
+                continue_lease(base / n)
+                rec = writer_lock.other_writer(base / n, DATA.get("session_id") or writer_lock.session_id())
+            except Exception:
+                rec = None
+            if rec:
+                busy.append(f"{n} ({writer_lock.describe(rec)})")
         try:
-            rec = writer_lock.other_writer(base / n, DATA.get("session_id") or sid)
+            line = panel_line(base / n)
         except Exception:
-            rec = None
-        if rec:
-            busy.append(f"{n} ({writer_lock.describe(rec)})")
-    return (f"Busy (another session holds the client, do not write there): {'; '.join(busy[:8])}. ") if busy else ""
+            line = ""
+        if line:
+            hits.append(f"[{n}] {line.strip()}")
+    out = (f"Busy (another session holds the client, do not write there): {'; '.join(busy[:8])}. " if busy else "")
+    out += ("Premiere panel: " + " ".join(hits[:8]) + " ") if hits else ""
+    if checked < len(names):
+        out += (f"(scan cut short: {len(names) - checked} of {len(names)} clients not checked for busy leases or "
+                f"panel items) ")
+    return out
 
 
 # ------------------------------------------------- per-session state in ${CLAUDE_PLUGIN_DATA} (T3.4; SessionEnd cleans)
@@ -574,9 +586,10 @@ def plugin_root_file() -> Path:
 
 def write_plugin_root():
     """Addendum C §3.2: {root, version, at} for the daemon shim and the panel, which must not depend on PATH or the
-    versioned plugin cache path. Written by a real hook run only (CLAUDE_PLUGIN_ROOT and CLAUDE_PLUGIN_DATA set) and
-    only when the root or version changed."""
-    if not (os.environ.get("CLAUDE_PLUGIN_ROOT") and os.environ.get("CLAUDE_PLUGIN_DATA")):
+    versioned plugin cache path. Written by a real SessionStart only (CLAUDE_PLUGIN_ROOT, CLAUDE_ENV_FILE and
+    CLAUDE_PLUGIN_DATA set, the rule of export_options: a bare run never creates ~/.whynot-cut) and only when the root
+    or version changed."""
+    if not all(os.environ.get(k) for k in ("CLAUDE_PLUGIN_ROOT", "CLAUDE_ENV_FILE", "CLAUDE_PLUGIN_DATA")):
         return
     version = str((_read_json(PLUGIN / ".claude-plugin" / "plugin.json") or {}).get("version") or "")
     f = plugin_root_file()
@@ -587,10 +600,23 @@ def write_plugin_root():
     _write(f, json.dumps(body, ensure_ascii=False, indent=1) + "\n")
 
 
+def continue_lease(root: Path):
+    """SessionStart after /clear or /resume (fix round 1, M3): the lease this Claude Code process (CLAUDE_PID) held
+    under the previous session id is this session's now (SessionEnd's 1.5 s may have missed releasing it). The only
+    takeover of a live lease: a new session id at any other time is another writer (T1.8)."""
+    if DATA.get("hook_event_name") != "SessionStart" or DATA.get("source") not in ("clear", "resume"):
+        return
+    sid = DATA.get("session_id")
+    if sid:
+        import writer_lock
+        writer_lock.rekey(root, str(sid))
+
+
 def writer_line(root: Path, session) -> str:
     """One writer per client folder (3.0 T1.8): warn when another session holds the client's lease."""
     try:
         import writer_lock
+        continue_lease(root)
         rec = writer_lock.other_writer(root, session or writer_lock.session_id())
     except Exception:
         return ""
@@ -705,12 +731,10 @@ def main():
         LINK.append((home, st))
     env_ok = plat.venv_python(home).exists()
     speak(cwd, st, home, env_ok, data)
-    if cwd_event:
-        return
     sid = data.get("session_id")
-    for kind, on in (("scope", bool(SCOPE)),
-                     ("evidence-gate", bool(SCOPE) and st.get("evidence_gate") in (True, "on")
-                      and st.get("approval") != "auto")):
+    gate = ("evidence-gate", bool(SCOPE) and st.get("evidence_gate") in (True, "on") and st.get("approval") != "auto")
+    # CwdChanged: flush_cwd keeps the scope file; the evidence-gate flag follows the new folder (fix round 1, M4)
+    for kind, on in ((gate,) if cwd_event else (("scope", bool(SCOPE)), gate)):
         f = session_file(kind, sid)
         if f is not None and on:
             _write(f, SCOPE[0] if kind == "scope" else "on\n")
@@ -719,6 +743,8 @@ def main():
                 f.unlink()          # an unrelated folder leaves nothing behind
             except OSError:
                 pass
+    if cwd_event:
+        return
     if first and not PENDING and not (env_ok and st.get("_file")):
         emit("WhyNot Cut was just installed and is not set up yet. Say so once, briefly, in the editor's language, and "
              "offer /whynot-cut:start (it sets everything up step by step); then carry on with what they asked.")
@@ -770,7 +796,7 @@ def speak(cwd: Path, st: dict, home: Path, env_ok: bool, data: dict):
         emit(f"WhyNot Cut: this is the clients folder ({cwd}). Client folders: {', '.join(names) or 'none yet'}. "
              f"Pass one to reel as --root \"<name>\", or say 'edit the new videos' (/whynot-cut:autopilot). "
              f"New client: /whynot-cut:new-client. Engine: {'ok' if env_ok else 'not installed (/whynot-cut:start)'}. "
-             + busy_line(cwd, names) + panel_clients_line(cwd, names) + updates_line(home)
+             + clients_lists(cwd, names) + updates_line(home)
              + f"{prefs_line(st)}")
     elif st.get("_file") and Path(st["_file"]).parent.parent == cwd.resolve():
         SCOPE[:] = [str(cwd), "set up here, no client folder open"]

@@ -20,9 +20,11 @@ A lease ends only by staleness, by `reel lock --release` (the lead, on the edito
 (hooks/session_end.py), which removes the ending session's own lease only. A single command never removes a lease.
 Same Claude Code process, new session id (3.0 T3.4, seen live with CLI 2.1.295): /clear ends session A (SessionEnd,
 reason clear) and starts session B in the SAME process (CLAUDE_PID unchanged); Bash then sees CLAUDE_CODE_SESSION_ID=B.
-SessionEnd hooks share a 1.5 s budget, so A's lease may survive /clear with a live holder. A lease whose holder is
-this command's own Claude Code process (same pid, same start time, this computer) is therefore this session's: the
-next writing command takes it over under the new id (a log line says so) and SessionStart does not warn about it.
+SessionEnd hooks share a 1.5 s budget, so A's lease may survive /clear with a live holder. So B's SessionStart (source
+clear or resume, 10 s budget) re-keys a lease whose holder is its own Claude Code process (same pid, same start time,
+this computer) to B, with a log line (`rekey`, hooks/session_context.py). That is the only takeover of a live lease
+(fix round 1): a writing command under a new session id at any other time is another writer and is refused (T1.8),
+even in the same process (agent-team teammates must not pass the lease back and forth).
 
 Session id (who "one writer" is), first match wins:
   WHYNOT_LOCK_SESSION    set by a writing `reel` for the processes it starts (a nested reel is the same writer)
@@ -127,7 +129,7 @@ def holder_pid(env=None) -> int:
 
 def same_process(rec: dict, env=None) -> bool:
     """Is this lease held by the Claude Code process this command runs under (CLAUDE_PID: alive, same start time, this
-    computer)? Then it is the same conversation under an earlier session id (/clear, /resume), never another writer."""
+    computer)? Used by `rekey` only, at SessionStart after /clear or /resume."""
     env = os.environ if env is None else env
     v = (env.get("CLAUDE_PID") or "").strip()
     if not v.isdigit() or not isinstance(rec, dict) or str(rec.get("pid")) != v or not same_host(rec):
@@ -429,11 +431,6 @@ def acquire(root, command: str, env=None) -> Lock:
         if not why and cur.get("session_id") == sid:
             _refresh(root, cur, command)               # re-entrant: this session already holds the client
             return Lock(root, sid, per_command=False)
-        if not why and same_process(cur, env):         # /clear or /resume in the same Claude Code process (T3.4)
-            client_log(root, f"writer lock: session {sid} continues the lease of session {cur.get('session_id') or '?'}"
-                             f" (same Claude Code process {cur.get('pid')}: /clear or /resume)")
-            _refresh(root, dict(cur, session_id=sid), command)
-            return Lock(root, sid, per_command=False)
         if not why:
             raise Busy(root, cur)
         if not _remove_stale(path, cur, why, root):
@@ -456,7 +453,7 @@ def status(root, env=None) -> dict:
     sid = session_id(env)
     idle = _age_s(root) if rec is not None else None
     return {"lock": str(lock_path(root)), "held": rec is not None, "holder": rec, "stale": stale_reason(root, rec),
-            "mine": bool(rec) and (rec.get("session_id") == sid or same_process(rec, env)), "session_id": sid,
+            "mine": bool(rec) and rec.get("session_id") == sid, "session_id": sid,
             "age_min": _minutes_since((rec or {}).get("started_at")) if rec else None,
             "idle_min": round(idle / 60) if idle is not None else None,
             "how": f"ends when the holding session closes or after {STALE_AFTER_S // 3600} h idle; the lead may run "
@@ -495,4 +492,19 @@ def other_writer(root, own_session: str | None) -> dict | None:
     rec = read(root)
     if not rec or stale_reason(root, rec) or (own_session and rec.get("session_id") == own_session):
         return None
-    return None if same_process(rec) else rec
+    return rec
+
+
+def rekey(root, new_sid: str, env=None) -> bool:
+    """SessionStart after /clear or /resume (3.0 T3.4, fix round 1): a live lease held by this Claude Code process
+    (same_process) under an earlier session id becomes `new_sid`'s, with a pipeline.log line. Anything else: False."""
+    rec = read(root)
+    if (not rec or not new_sid or rec.get("session_id") == new_sid or stale_reason(root, rec)
+            or not same_process(rec, env)):
+        return False
+    _refresh(root, dict(rec, session_id=new_sid), str(rec.get("command") or ""))
+    if (read(root) or {}).get("session_id") != new_sid:
+        return False
+    client_log(root, f"writer lock: session {new_sid} continues the lease of session {rec.get('session_id') or '?'} "
+                     f"(same Claude Code process {rec.get('pid')}: /clear or /resume, at SessionStart)")
+    return True

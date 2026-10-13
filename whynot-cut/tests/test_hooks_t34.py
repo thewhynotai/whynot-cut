@@ -212,6 +212,28 @@ class TestCwdChanged(HookFixture):
         self.assertIsNotNone(self.cwd_changed(outside, self.root / "data"))   # back in: said again
         self.assertTrue(self.pending().exists())
 
+    def test_leaving_clears_the_waiting_context_and_follows_the_evidence_gate(self):
+        """Fix round 1 (M4): a context for a client the session already left is never handed over later, and the
+        evidence-gate flag follows the folder (it was written only at SessionStart)."""
+        outside = Path(self.tmp.name) / "elsewhere"
+        outside.mkdir()
+        prefs = self.root / ".claude" / "whynot-cut.local.md"
+        prefs.parent.mkdir()
+        prefs.write_text("---\nevidence_gate: on\n---\n", encoding="utf-8")
+        gate = self.data / "evidence-gate" / "s1"
+        self.start(outside)
+        self.assertFalse(gate.exists())
+        self.cwd_changed(outside, self.root)                    # into a client with the gate on
+        self.assertTrue(self.pending().exists())
+        self.assertTrue(gate.is_file())
+        self.assertIsNone(self.cwd_changed(self.root, outside))  # left before any Bash call
+        self.assertFalse(self.pending().exists(), "a stale context for the old client would be handed over later")
+        self.assertFalse(gate.exists())
+        self.cwd_changed(outside, self.root)
+        prefs.write_text("---\nevidence_gate: on\napproval: auto\n---\n", encoding="utf-8")
+        self.cwd_changed(self.root, self.root / "output")        # same client, preferences changed: flag follows
+        self.assertFalse(gate.exists())
+
     def test_unrelated_folders_stay_silent_and_session_end_cleans_up(self):
         a, b = Path(self.tmp.name) / "a", Path(self.tmp.name) / "b"
         a.mkdir()
@@ -325,20 +347,72 @@ class TestPendingLists(HookFixture):
         self.assertNotIn("example clinic (", ctx.split("Busy", 1)[1].split(". ", 1)[0])
         self.assertIn("[example clinic] Change requests from the Premiere panel waiting: C0001", ctx)
 
+    # fix round 1 (I1): the panel's only location, and one time budget for the clients-folder lists
+    def test_change_requests_are_read_at_the_item_level_only(self):
+        (self.item("C0001") / "panel-requests.json").write_text(json.dumps([{"text": "here"}]), encoding="utf-8")
+        for rel in ("output/projects/C0002/01_analysis/panel-requests.json", "output/other/panel-requests.json",
+                    "output/projects/panel-requests.json"):
+            f = self.root / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(json.dumps([{"text": "not here"}]), encoding="utf-8")
+        ctx = self.start(self.root)
+        self.assertIn("Change requests from the Premiere panel waiting: C0001 (1, latest: “here”)", ctx)
+        self.assertNotIn("not here", ctx)
+        self.assertEqual(SC.REQUEST_GLOBS, ("output/projects/*/panel-requests.json",))
+
+    def test_clients_folder_lists_share_one_time_budget(self):
+        names = [f"client {i:02d}" for i in range(60)]
+        calls = []
+
+        def slow(root):
+            calls.append(root.name)
+            time.sleep(0.02)
+            return "Change requests from the Premiere panel waiting: C0001 (1). "
+        t0 = time.monotonic()
+        with mock.patch.object(SC, "panel_line", slow):
+            line = SC.clients_lists(Path(self.tmp.name), names, budget=0.2)
+        took = time.monotonic() - t0
+        self.assertLess(took, 0.6, "the budget must bound the whole scan")
+        self.assertLess(len(calls), 60)
+        self.assertIn(f"(scan cut short: {60 - len(calls)} of 60 clients not checked for busy leases or panel items)",
+                      line)
+        self.assertIn("[client 00] Change requests", line)
+        with mock.patch.object(SC, "panel_line", lambda root: ""):
+            self.assertNotIn("cut short", SC.clients_lists(Path(self.tmp.name), names))
+
+    def test_clients_folder_scan_on_a_big_tree(self):
+        """60 clients x 30 items with stage folders (the old depth-3 glob walked every stage folder of every item)."""
+        base = Path(self.tmp.name) / "big"
+        names = [f"c{i:02d}" for i in range(60)]
+        for n in names:
+            for j in range(30):
+                for stage in ("01_analysis/x", "07_premiere/frames", "08_qc/sheets"):
+                    (base / n / "output/projects" / f"C{j:04d}" / stage).mkdir(parents=True)
+        (base / "c59/output/projects/C0007/panel-requests.json").write_text(json.dumps([{"text": "late"}]),
+                                                                            encoding="utf-8")
+        t0 = time.monotonic()
+        line = SC.clients_lists(base, names)
+        took = time.monotonic() - t0
+        self.assertLess(took, SC.CLIENT_SCAN_BUDGET_S + 0.5, f"{took:.2f}s")
+        self.assertTrue("[c59] Change requests" in line or "scan cut short" in line, line)
+
 
 class TestPluginRootFile(HookFixture):
     def test_written_by_a_real_hook_run_only_when_changed(self):
         f = Path(self.tmp.name) / "wnc" / "plugin-root.json"
         self.start(self.root)                                   # no CLAUDE_PLUGIN_ROOT: a bare run writes nothing
+        self.start(self.root, sid="s1b", CLAUDE_PLUGIN_ROOT=str(SK))    # no CLAUDE_ENV_FILE: not a real SessionStart
         self.assertFalse(f.exists())
-        self.start(self.root, sid="s2", CLAUDE_PLUGIN_ROOT=str(SK))
+        self.assertFalse(f.parent.exists(), "a bare run must not create the engine home's folder")
+        real = {"CLAUDE_PLUGIN_ROOT": str(SK), "CLAUDE_ENV_FILE": str(Path(self.tmp.name) / "env.sh")}
+        self.start(self.root, sid="s2", **real)
         rec = json.loads(f.read_text(encoding="utf-8"))
         version = json.loads((SK / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
         self.assertEqual((rec["root"], rec["version"]), (str(SK), version))
         self.assertRegex(rec["at"], r"^\d{4}-\d\d-\d\dT")
         before = f.read_bytes()
         os.utime(f, (1, 1))
-        self.start(self.root, sid="s3", CLAUDE_PLUGIN_ROOT=str(SK))
+        self.start(self.root, sid="s3", **real)
         self.assertEqual((f.read_bytes(), f.stat().st_mtime), (before, 1))      # unchanged: not rewritten
 
 
@@ -372,9 +446,11 @@ class TestFallbackWordSplit(ClientFixture):
 class TestEvidenceGate(HookFixture):
     def turn(self, *cmds, user="make the reel") -> str:
         t = Path(self.tmp.name) / "turn.jsonl"
-        lines = [json.dumps({"type": "user", "message": {"role": "user", "content": "earlier"}}),
+        lines = [json.dumps({"type": "user", "timestamp": _stamp(time.time() - 60),
+                             "message": {"role": "user", "content": "earlier"}}),
                  _call("Bash", time.time(), command="reel qc --video-id OLD"),       # an earlier turn's qc
-                 json.dumps({"type": "user", "message": {"role": "user", "content": user}})]
+                 json.dumps({"type": "user", "timestamp": _stamp(time.time()),
+                             "message": {"role": "user", "content": user}})]
         lines += [_call("Bash", time.time(), command=c) for c in cmds]
         lines.append(json.dumps({"type": "user", "message": {"role": "user", "content": [
             {"type": "tool_result", "tool_use_id": "toolu_x", "content": "ok"}]}}))
@@ -440,12 +516,76 @@ class TestEvidenceGate(HookFixture):
         self.assertEqual((h["type"], h["timeout"]), ("command", 30))
         self.assertIn("hooks/stop_gate.sh", h["command"])
 
+    # fix round 1 (M1): the subcommand by shlex, skipping only the global options that take a value
+    def test_reel_subcommand_parsing(self):
+        SG = load(STOP_PY, "stop_gate_t34")
+        cases = {
+            'reel --root "Test Clinic" qc --video-id C1': [("qc", "C1")],
+            "reel --root 'عيادة تجربة' ppro-build --video-id C0001": [("ppro-build", "C0001")],
+            "reel --json qc C1": [("qc", None)],
+            '"$WHYNOT_HOME/bin/reel" qc --video-id=C7': [("qc", "C7")],
+            '& "C:\\Users\\x\\.whynot-cut\\bin\\reel.cmd" --root "D:\\Clients\\A B" verify --video-id C2': [("verify", "C2")],
+            "cd out && reel --video-id C3 status; reel qc": [("status", "C3"), ("qc", None)],
+            "reel": [], "echo reel qc": [], "git status": [], "preel qc": [],
+        }
+        for cmd, want in cases.items():
+            with self.subTest(cmd=cmd):
+                self.assertEqual(SG.reel_calls(cmd), want)
+
+    def test_quoted_and_wrapped_reel_commands_are_judged(self):
+        t = self.turn('reel --root "Test Clinic" ppro-build --video-id C0001')
+        self.assertIsNotNone(self.gate("It is ready.", t))
+        self.assertIsNone(self.gate("It is ready.", self.turn('reel --root "Test Clinic" ppro-build --video-id C0001',
+                                                              'reel --root "Test Clinic" qc --video-id C0001')))
+        t = self.turn('"$WHYNOT_HOME/bin/reel" ppro-build --video-id C0001')
+        self.assertIsNotNone(self.gate("It is ready.", t))                 # was never seen: the gate did not fire
+        self.assertIsNone(self.gate("It is ready.", self.turn('"$WHYNOT_HOME/bin/reel" ppro-build',
+                                                              "reel --json qc C0001")))
+
+    # fix round 1 (M2): proof from this turn's subagents, and from earlier turns for the same item
+    def test_qc_run_by_a_subagent_this_turn_counts(self):
+        t = Path(self.turn("reel ppro-build --video-id C0001"))
+        sub = t.with_suffix("") / "subagents"
+        sub.mkdir(parents=True)
+        (sub / "agent-q.jsonl").write_text("\n".join([
+            json.dumps({"type": "user", "isSidechain": True, "message": {"role": "user", "content": "check C0001"}}),
+            _call("Bash", time.time(), command="reel --root . qc --video-id C0001")]) + "\n", encoding="utf-8")
+        self.assertIsNone(self.gate("The reel is ready for review.", str(t)))
+        old = time.time() - 3600                                       # a subagent of an earlier turn: no proof
+        os.utime(sub / "agent-q.jsonl", (old, old))
+        self.assertIsNotNone(self.gate("The reel is ready for review.", str(t)))
+
+    def test_earlier_turn_proof_for_the_same_item(self):
+        def session(*turns):
+            t = Path(self.tmp.name) / "multi.jsonl"
+            lines = []
+            for i, cmds in enumerate(turns):
+                lines.append(json.dumps({"type": "user", "timestamp": _stamp(time.time() - 100 + i),
+                                         "message": {"role": "user", "content": f"turn {i}"}}))
+                lines += [_call("Bash", time.time() - 100 + i, command=c) for c in cmds]
+            t.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return str(t)
+        built = ["reel ppro-build --video-id C0001", "reel qc --video-id C0001"]
+        self.assertIsNone(self.gate("Yes, it is ready.", session(built, ["reel status --video-id C0001"])))
+        self.assertIsNone(self.gate("Yes, it is ready.", session(built, ["reel next"])))
+        self.assertIsNotNone(self.gate("It is ready.", session(built, ["reel status --video-id C0002"])))   # other item
+        self.assertIsNotNone(self.gate("It is ready.", session(built, ["reel ppro-build --video-id C0001"])))  # rebuilt
+        self.assertIsNotNone(self.gate("It is ready.", session(built + ["reel plan --video-id C0001"],
+                                                                ["reel status --video-id C0001"])))     # changed since
+
+    def test_evidence_gate_is_a_known_preference(self):
+        sys.path.insert(0, str(SK / "engine" / "reel" / "lib"))
+        import settings as S
+        self.assertIs(S.DEFAULTS["evidence_gate"], False)
+        self.assertIn("| `evidence_gate` |", (SK / "skills/preferences/SKILL.md").read_text(encoding="utf-8"))
+
 
 # ------------------------------------------------------------------------------------------------------ /clear lease
 class TestLeaseAcrossClear(unittest.TestCase):
     """Seen live (docs/superpowers/evidence/2026-10-13-t3.4-session-ids.md): /clear ends session A and starts B in the
     same Claude Code process (CLAUDE_PID unchanged); Bash then sees CLAUDE_CODE_SESSION_ID=B. A's lease must never
-    lock B out of its own client, even when SessionEnd did not get to release it."""
+    lock B out of its own client, even when SessionEnd did not get to release it: SessionStart (source clear or resume,
+    same CLAUDE_PID) re-keys it to B (fix round 1, M3); nothing else does."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -468,26 +608,64 @@ class TestLeaseAcrossClear(unittest.TestCase):
     def env(self, sid, pid):
         return {"WHYNOT_LOCK_SESSION": sid, "CLAUDE_PID": str(pid)}
 
-    def test_same_claude_process_continues_its_lease(self):
+    def start(self, source, sid, cwd=None, pid=None, **extra):
+        payload = {"hook_event_name": "SessionStart", "source": source, "session_id": sid,
+                   "cwd": str(cwd or self.root)}
+        code, out, err = hook(CTX, payload, no_session_env(CLAUDE_PID=str(pid or self.claude), **extra))
+        self.assertEqual(code, 0, err)
+        return ctx_of(out)
+
+    def test_a_new_session_id_in_the_same_process_is_refused_until_session_start(self):
+        """Fix round 1 (M3): the takeover is no longer "any new session id in the same process" (teammates of an agent
+        team could pass the lease back and forth); between SessionStarts the T1.8 refusal stands."""
         me = self.claude
         writer_lock.acquire(self.root, "reel transcribe", self.env("A", me)).release()
+        with self.assertRaises(writer_lock.Busy):
+            writer_lock.acquire(self.root, "reel plan", self.env("B", me))
+        self.assertFalse(writer_lock.status(self.root, self.env("B", me))["mine"])
+        with mock.patch.dict(os.environ, {"CLAUDE_PID": str(me)}):
+            self.assertIsNotNone(writer_lock.other_writer(self.root, "B"))
         self.assertEqual(writer_lock.read(self.root)["session_id"], "A")
-        with contextlib.redirect_stderr(io.StringIO()) as err:                             # after /clear: no Busy
-            writer_lock.acquire(self.root, "reel plan", self.env("B", me)).release()
-        self.assertIn("continues the lease", err.getvalue())
+
+    def test_session_start_after_clear_or_resume_continues_the_lease(self):
+        me = self.claude
+        writer_lock.acquire(self.root, "reel transcribe", self.env("A", me)).release()
+        self.assertNotIn("another session is working in this client", self.start("clear", "B"))
         rec = writer_lock.read(self.root)
-        self.assertEqual((rec["session_id"], rec["command"], rec["pid"]), ("B", "reel plan", me))
+        self.assertEqual((rec["session_id"], rec["command"], rec["pid"]), ("B", "reel transcribe", me))
         log = (self.root / "output/logs/pipeline.log").read_text(encoding="utf-8")
         self.assertIn("session B continues the lease of session A (same Claude Code process", log)
-        self.assertTrue(writer_lock.status(self.root, self.env("C", me))["mine"])
-        with mock.patch.dict(os.environ, {"CLAUDE_PID": str(me)}):
-            self.assertIsNone(writer_lock.other_writer(self.root, "C"))       # SessionStart: no warning
+        writer_lock.acquire(self.root, "reel plan", self.env("B", me)).release()          # B writes on
+        self.assertEqual(writer_lock.read(self.root)["command"], "reel plan")
+        self.assertTrue(writer_lock.status(self.root, self.env("B", me))["mine"])
+        self.start("resume", "C")
+        self.assertEqual(writer_lock.read(self.root)["session_id"], "C")
+
+    def test_other_session_starts_never_take_the_lease(self):
+        me = self.claude
+        writer_lock.acquire(self.root, "reel transcribe", self.env("A", me)).release()
+        for source in ("startup", "compact", "fork"):
+            with self.subTest(source=source):
+                self.assertIn("another session is working in this client", self.start(source, "B"))
+                self.assertEqual(writer_lock.read(self.root)["session_id"], "A")
+        self.assertIn("another session is working in this client", self.start("clear", "B", pid=self.other.pid))
+        self.assertEqual(writer_lock.read(self.root)["session_id"], "A")                  # another process
+
+    def test_session_start_after_clear_in_the_clients_folder(self):
+        me = self.claude
+        writer_lock.acquire(self.root, "reel transcribe", self.env("A", me)).release()
+        base = self.root.parent
+        ctx = self.start("clear", "B", cwd=base, WHYNOT_CLIENTS_ROOT=str(base))
+        self.assertIn("this is the clients folder", ctx)
+        self.assertNotIn("Busy", ctx)
+        self.assertEqual(writer_lock.read(self.root)["session_id"], "B")
 
     def test_another_claude_process_is_still_another_writer(self):
         writer_lock.acquire(self.root, "reel transcribe", self.env("A", self.claude)).release()
         other = self.other.pid                                   # alive, but not the lease holder
         with self.assertRaises(writer_lock.Busy):
             writer_lock.acquire(self.root, "reel plan", self.env("B", other))
+        self.assertFalse(writer_lock.rekey(self.root, "B", self.env("B", other)))         # never another process
         self.assertFalse(writer_lock.status(self.root, self.env("B", other))["mine"])
         with mock.patch.dict(os.environ, {"CLAUDE_PID": str(other)}):
             self.assertIsNotNone(writer_lock.other_writer(self.root, "B"))
@@ -498,10 +676,10 @@ class TestLeaseAcrossClear(unittest.TestCase):
     def test_session_start_after_clear_does_not_warn(self):
         writer_lock.acquire(self.root, "reel transcribe", self.env("A", self.claude)).release()
         payload = {"hook_event_name": "SessionStart", "source": "clear", "session_id": "B", "cwd": str(self.root)}
+        _, out, _ = hook(CTX, payload, no_session_env())                    # no CLAUDE_PID: not provably ours
+        self.assertIn("another session is working in this client", ctx_of(out))
         _, out, _ = hook(CTX, payload, no_session_env(CLAUDE_PID=str(self.claude)))
         self.assertNotIn("another session is working in this client", ctx_of(out))
-        _, out, _ = hook(CTX, payload, no_session_env())
-        self.assertIn("another session is working in this client", ctx_of(out))
 
 
 if __name__ == "__main__":
