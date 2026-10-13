@@ -1,0 +1,649 @@
+{
+  "spike": "0.1.6",
+  "premiere": "26.5.2",
+  "uxp": "uxp-9.3.0-local",
+  "at": "2026-10-13T03:25:49.653Z",
+  "home": "C:/Users/LOQ",
+  "home_via": "os.homedir",
+  "results_file": "C:/Users/LOQ/.whynot-cut/uxp-spike/results-20261013-062543.json",
+  "config": {
+    "xml_path": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/PODCAST-TEST/output/projects/EP02TEST_R02/07_premiere/interchange/EP02TEST_R02_RE_EDIT_base.xml",
+    "work_dir": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/_uxp-spike",
+    "still_png": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/PODCAST-TEST/output/projects/EP02TEST_R02/03_broll/typography/GFX_002.png",
+    "mp4_source": "D:/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/whynot-test/PODCAST-TEST/output/projects/EP02TEST_R02/08_quality_control/preview/EP02TEST_R02_preview.mp4"
+  },
+  "config_error": null,
+  "mode": "style_guide",
+  "kept_project_open": false,
+  "notes": [],
+  "auto_run_id": "sg-ar-340",
+  "style_guide_view": {
+    "lang": "ar",
+    "width": 340
+  },
+  "ops": [],
+  "ui_probes": {
+    "fonts": {
+      "op": "fonts",
+      "ok": null,
+      "ms": 1515,
+      "detail": {
+        "rule": "loaded = the brand-family span's width differs from the same text in BOTH fallbacks (monospace, serif); not loaded = differs from neither; else inconclusive",
+        "loaded_count": 1,
+        "not_loaded_count": 3,
+        "document_fonts": false,
+        "settle_ms": 1500,
+        "families": {
+          "syne": {
+            "family": "Syne",
+            "weight": 700,
+            "sample": "WhyNot Cut Style Guide MWQ",
+            "font_size_px": 20,
+            "computed_family": "\"Syne\",",
+            "loaded": false,
+            "widths": {
+              "monospace": {
+                "brand_width": 289,
+                "fallback_width": 289,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 289,
+                "fallback_width": 289,
+                "differs": false
+              }
+            },
+            "widths_before_settle": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "document_fonts_check": null
+          },
+          "inter": {
+            "family": "Inter",
+            "weight": 400,
+            "sample": "Quick brown fox jumps 0123456789",
+            "font_size_px": 20,
+            "computed_family": "\"Inter\",",
+            "loaded": true,
+            "widths": {
+              "monospace": {
+                "brand_width": 341,
+                "fallback_width": 318,
+                "differs": true
+              },
+              "serif": {
+                "brand_width": 341,
+                "fallback_width": 318,
+                "differs": true
+              }
+            },
+            "widths_before_settle": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "document_fonts_check": null
+          },
+          "plex_arabic": {
+            "family": "IBM Plex Sans Arabic",
+            "weight": 400,
+            "sample": "مراجعة المونتاج قبل التصدير",
+            "font_size_px": 20,
+            "computed_family": "\"IBM Plex Sans Arabic\",",
+            "loaded": false,
+            "widths": {
+              "monospace": {
+                "brand_width": 231,
+                "fallback_width": 231,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 231,
+                "fallback_width": 231,
+                "differs": false
+              }
+            },
+            "widths_before_settle": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "document_fonts_check": null
+          },
+          "plex_mono": {
+            "family": "IBM Plex Mono",
+            "weight": 400,
+            "sample": "00:00:12:04 C0239_prev.prproj",
+            "font_size_px": 20,
+            "computed_family": "\"IBM Plex Mono\",",
+            "loaded": false,
+            "widths": {
+              "monospace": {
+                "brand_width": 266,
+                "fallback_width": 266,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 266,
+                "fallback_width": 266,
+                "differs": false
+              }
+            },
+            "widths_before_settle": {
+              "monospace": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              },
+              "serif": {
+                "brand_width": 0,
+                "fallback_width": 0,
+                "differs": false
+              }
+            },
+            "document_fonts_check": null
+          }
+        }
+      },
+      "error": null
+    },
+    "svg": {
+      "op": "svg",
+      "ok": false,
+      "ms": 6,
+      "detail": {
+        "svg_box": {
+          "width": 0,
+          "height": 0
+        },
+        "svg_fill": "currentcolor",
+        "svg_color": "#3DD68C",
+        "svg_display": "block",
+        "wrapper_color": "#3DD68C",
+        "path_present": true,
+        "path_box": {
+          "width": 0,
+          "height": 0
+        },
+        "path_fill": "black",
+        "expected_color": "the --twn-ok token, #3DD68C = rgb(61, 214, 140)"
+      },
+      "error": null
+    },
+    "box_shadow": {
+      "op": "box_shadow",
+      "ok": true,
+      "ms": 6,
+      "detail": {
+        "via_token": "#9D6BFF 0px 0px 0px 2px",
+        "literal": "#9D6BFF 0px 0px 0px 2px",
+        "root_custom_property_twn_focus": "",
+        "kit_use": ".kit-focus:focus { box-shadow: var(--twn-focus) } (the focus ring)"
+      },
+      "error": null
+    },
+    "gradient": {
+      "op": "gradient",
+      "ok": true,
+      "ms": 8,
+      "detail": {
+        "hairline (.kit-hairline)": {
+          "background_image": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background_color": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          }
+        },
+        "progress fill (.kit-fill)": {
+          "background_image": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background_color": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          }
+        },
+        "literal": {
+          "background_image": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background": "linear-gradient(90deg,#D95C9B,#5400FB)",
+          "background_color": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          }
+        },
+        "root_custom_property_twn_gradient": "",
+        "root_custom_property_twn_bg": ""
+      },
+      "error": null
+    },
+    "kit_code": {
+      "op": "kit_code",
+      "ok": true,
+      "ms": 7,
+      "detail": {
+        "en": {
+          "present": true,
+          "display": "inline",
+          "background_color": "#1E1E1E",
+          "font_family": "\"IBM Plex Mono\",Consolas,\"SF Mono\",Menlo,",
+          "font_size": "0.92em",
+          "padding_left": "3px",
+          "border_radius": "4px",
+          "direction": "",
+          "unicode_bidi": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          },
+          "paragraph_box": {
+            "width": 0,
+            "height": 0
+          },
+          "client_rects": null,
+          "expected": "display inline; background the --twn-surface-2 token #1E1E1E = rgb(30, 30, 30); font IBM Plex Mono"
+        },
+        "ar": {
+          "present": true,
+          "display": "inline",
+          "background_color": "#1E1E1E",
+          "font_family": "\"IBM Plex Mono\",Consolas,\"SF Mono\",Menlo,",
+          "font_size": "0.92em",
+          "padding_left": "3px",
+          "border_radius": "4px",
+          "direction": "",
+          "unicode_bidi": "",
+          "box": {
+            "width": 0,
+            "height": 0
+          },
+          "paragraph_box": {
+            "width": 0,
+            "height": 0
+          },
+          "client_rects": null,
+          "expected": "display inline; background the --twn-surface-2 token #1E1E1E = rgb(30, 30, 30); font IBM Plex Mono"
+        }
+      },
+      "error": null
+    }
+  },
+  "eco_probes": {
+    "quit_restart_names": {
+      "op": "quit_restart_names",
+      "ok": true,
+      "ms": 1,
+      "detail": {
+        "pattern": "/quit|exit|restart|relaunch|close/i",
+        "matches_total": 2,
+        "called": false,
+        "rule": "names only: no matching member was read or called",
+        "scanned": [
+          {
+            "path": "premierepro",
+            "present": true,
+            "type": "object",
+            "names_count": 72,
+            "names": [
+              "AAFExportOptions",
+              "Action",
+              "AddTransitionOptions",
+              "AppPreference",
+              "Application",
+              "AudioClipTrackItem",
+              "AudioComponentChain",
+              "AudioFilterComponent",
+              "AudioFilterFactory",
+              "AudioTrack",
+              "C2PAService",
+              "CaptionTrack",
+              "ClipProjectItem",
+              "CloseProjectOptions",
+              "Color",
+              "Component",
+              "CompoundAction",
+              "Constants",
+              "EncoderManager",
+              "EventManager",
+              "Exporter",
+              "FolderItem",
+              "FootageInterpretation",
+              "FrameRate",
+              "Guid",
+              "IngestSettings",
+              "Keyframe",
+              "Marker",
+              "Markers",
+              "Media",
+              "MediaManager",
+              "Metadata",
+              "ObjectMaskUtils",
+              "OpenProjectOptions",
+              "OperationCompleteEvent",
+              "PRProduction",
+              "PointF",
+              "PointKeyframe",
+              "Project",
+              "ProjectClosedEvent",
+              "ProjectConverter",
+              "ProjectEvent",
+              "ProjectItem",
+              "ProjectItemSelection",
+              "ProjectSettings",
+              "ProjectUtils",
+              "Properties",
+              "RectF",
+              "ScratchDiskSettings",
+              "Sequence",
+              "SequenceEditor",
+              "SequenceEvent",
+              "SequenceSettings",
+              "SequenceUtils",
+              "SnapEvent",
+              "SourceMonitor",
+              "TextSegments",
+              "TickTime",
+              "TrackItemSelection",
+              "Transcript",
+              "TransitionFactory",
+              "UniqueSerializeable",
+              "Utils",
+              "VideoClipTrackItem",
+              "VideoComponentChain",
+              "VideoFilterComponent",
+              "VideoFilterFactory",
+              "VideoTrack",
+              "VideoTransition",
+              "WorkAreaUtils",
+              "constructor",
+              "eventRoot"
+            ],
+            "matches": [
+              {
+                "name": "CloseProjectOptions",
+                "kind": "function"
+              },
+              {
+                "name": "ProjectClosedEvent",
+                "kind": "function"
+              }
+            ]
+          },
+          {
+            "path": "premierepro.Application",
+            "present": true,
+            "type": "function",
+            "names_count": 5,
+            "names": [
+              "arguments",
+              "caller",
+              "length",
+              "name",
+              "prototype"
+            ],
+            "matches": []
+          },
+          {
+            "path": "premierepro.Application.prototype",
+            "present": true,
+            "type": "object",
+            "names_count": 5,
+            "names": [
+              "addEventListener",
+              "constructor",
+              "dispatchEvent",
+              "removeEventListener",
+              "version"
+            ],
+            "matches": []
+          },
+          {
+            "path": "uxp",
+            "present": true,
+            "type": "object",
+            "names_count": 11,
+            "names": [
+              "dialog",
+              "entrypoints",
+              "host",
+              "hostPluginMessaging",
+              "pluginLoader",
+              "pluginManager",
+              "secureStorage",
+              "shell",
+              "storage",
+              "versions",
+              "xmp"
+            ],
+            "matches": []
+          },
+          {
+            "path": "uxp.host",
+            "present": true,
+            "type": "object",
+            "names_count": 6,
+            "names": [
+              "applicationPath",
+              "constructor",
+              "getBackgroundColor",
+              "name",
+              "uiLocale",
+              "version"
+            ],
+            "matches": []
+          }
+        ]
+      },
+      "error": null
+    },
+    "loopback": {
+      "op": "loopback",
+      "ok": false,
+      "ms": 4121,
+      "detail": {
+        "manifest_domains": [
+          "ws://127.0.0.1:*",
+          "ws://localhost:*",
+          "http://127.0.0.1:*",
+          "http://localhost:*",
+          "ws://127.0.0.1",
+          "ws://localhost",
+          "http://127.0.0.1",
+          "http://localhost"
+        ],
+        "denied_pattern": "/permission denied|manifest entry not found/i",
+        "token_sent": false,
+        "engine_json": "C:/Users/LOQ/.whynot-cut/bridge/engine.json",
+        "port": 60276,
+        "forms": [
+          {
+            "form": "ws://127.0.0.1:<port>/session",
+            "url": "ws://127.0.0.1:60276/session",
+            "kind": "ws",
+            "host": "127.0.0.1",
+            "allowed": false,
+            "outcome": "constructor threw",
+            "error": "Permission denied to the url ws://127.0.0.1:60276/session. Manifest entry not found.",
+            "ms": 3
+          },
+          {
+            "form": "ws://localhost:<port>/session",
+            "url": "ws://localhost:60276/session",
+            "kind": "ws",
+            "host": "localhost",
+            "allowed": true,
+            "outcome": "open",
+            "error": null,
+            "ms": 2052
+          },
+          {
+            "form": "http://127.0.0.1:<port>/status",
+            "url": "http://127.0.0.1:60276/status",
+            "kind": "http",
+            "host": "127.0.0.1",
+            "allowed": false,
+            "outcome": "rejected",
+            "error": "Permission denied to the url http://127.0.0.1:60276/status. Manifest entry not found.",
+            "ms": 19
+          },
+          {
+            "form": "http://localhost:<port>/status",
+            "url": "http://localhost:60276/status",
+            "kind": "http",
+            "host": "localhost",
+            "allowed": true,
+            "outcome": "response",
+            "status": 401,
+            "status_text": "Unauthorized",
+            "error": null,
+            "ms": 2046
+          }
+        ]
+      },
+      "error": null
+    },
+    "hide_show": {
+      "op": "hide_show",
+      "ok": true,
+      "ms": 0,
+      "detail": {
+        "setup": {
+          "entrypoints_setup": "called",
+          "panel_id": "whynotCutSpike",
+          "listeners": [
+            "panel.create",
+            "panel.show",
+            "panel.hide",
+            "panel.destroy",
+            "document.visibilitychange"
+          ]
+        },
+        "events": [
+          {
+            "seq": 1,
+            "event": "script.loaded",
+            "at": "2026-10-13T03:23:38.545Z",
+            "t_ms": 1,
+            "detail": {
+              "listeners": [
+                "panel.create",
+                "panel.show",
+                "panel.hide",
+                "panel.destroy",
+                "document.visibilitychange"
+              ],
+              "entrypoints_setup": "called"
+            }
+          },
+          {
+            "seq": 2,
+            "event": "panel.create",
+            "at": "2026-10-13T03:24:49.954Z",
+            "t_ms": 71410,
+            "detail": [
+              {
+                "keys": [
+                  "_ownerDocument",
+                  "_parentNode",
+                  "_firstChild",
+                  "_lastChild",
+                  "_nextSibling",
+                  "_previousSibling",
+                  "_registeredObservers",
+                  "_transientObservers",
+                  "_nodeName",
+                  "_namespaceURI",
+                  "_elementState",
+                  "_layoutInfo",
+                  "_scrollInfo",
+                  "_properties",
+                  "_style",
+                  "_selEngineId",
+                  "_siblingIndex",
+                  "_siblingIndexMutation",
+                  "_typeIndex",
+                  "_lastTypeIndex"
+                ],
+                "tag": "BODY"
+              }
+            ]
+          },
+          {
+            "seq": 3,
+            "event": "panel.show",
+            "at": "2026-10-13T03:24:49.954Z",
+            "t_ms": 71410,
+            "detail": [
+              {
+                "keys": [
+                  "_ownerDocument",
+                  "_parentNode",
+                  "_firstChild",
+                  "_lastChild",
+                  "_nextSibling",
+                  "_previousSibling",
+                  "_registeredObservers",
+                  "_transientObservers",
+                  "_nodeName",
+                  "_namespaceURI",
+                  "_elementState",
+                  "_layoutInfo",
+                  "_scrollInfo",
+                  "_properties",
+                  "_style",
+                  "_selEngineId",
+                  "_siblingIndex",
+                  "_siblingIndexMutation",
+                  "_typeIndex",
+                  "_lastTypeIndex"
+                ],
+                "tag": "BODY"
+              },
+              "undefined"
+            ]
+          }
+        ],
+        "order": [
+          "script.loaded",
+          "panel.create",
+          "panel.show"
+        ],
+        "file": "lifecycle.json next to the results (updated on every event, so hiding and showing the panel after the run is recorded too)",
+        "how": "dock the panel in a tab group, switch to another tab and back (hide/show), or close and reopen it from Window > UXP Plugins; then read lifecycle.json"
+      },
+      "error": null
+    },
+    "open_external": {
+      "op": "open_external",
+      "ok": null,
+      "ms": 0,
+      "detail": "not run: mode \"full\" only",
+      "error": null
+    }
+  }
+}

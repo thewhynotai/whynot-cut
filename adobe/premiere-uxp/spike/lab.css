@@ -1,0 +1,95 @@
+/* Spike 0.1.7: the CSS lab (spike/src/css-lab.ts renders it; run-request mode "css_lab" opens it and leaves it open).
+   It sits at the bundle root next to fonts.css, so its relative font URLs resolve exactly like fonts.css's.
+   Colours are brand tokens (brand/tokens.css). UXP limits kept: flexbox only, no gap / grid / :has / sticky, no
+   [attr=value] selectors (direction is a class: .lab-ltr / .lab-rtl), explicit display on every element. */
+
+/* ---- the view: an explicit height chain body > view > scroll; the lab content is not its own scroller ---- */
+.lab-view { display: none; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.lab-scroll { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+.lab-host { display: flex; flex-direction: column; flex: 0 0 auto; }
+.kit-root.lab-root { display: flex; flex-direction: column; flex: 0 0 auto; height: auto; min-width: 0; overflow: visible; }
+
+/* ---- rows: one labelled flex row per variant ---- */
+.lab-sec { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; padding: 6px 6px 2px 6px; border-top: 1px solid var(--twn-primary-text); }
+.lab-sec-title { display: block; margin-right: 8px; color: var(--twn-accent); font-weight: var(--twn-weight-bold); font-size: 12px; }
+.lab-sec-note { display: block; color: var(--twn-text-muted); font-size: 10px; }
+.lab-row { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; padding: 2px 6px; border-bottom: 1px solid var(--twn-border); }
+.lab-tag { display: block; flex: 0 0 24px; color: var(--twn-accent); font-weight: var(--twn-weight-bold); font-size: 11px; }
+.lab-desc { display: block; flex: 0 0 148px; margin-right: 6px; color: var(--twn-text-muted); font-size: 9.5px; line-height: 1.25; }
+.lab-items { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; flex: 1 1 auto; min-width: 0; }
+.lab-end { display: block; padding: 8px 6px 16px 6px; color: var(--twn-text-muted); font-size: 10px; }
+
+/* ---- 1. buttons: the kit's .kit-btn rules, split so each variant changes one thing ---- */
+.lab-b { min-width: 32px; min-height: 32px; margin: 2px 3px; padding: 6px 12px; border: 1px solid transparent; font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1.2; text-align: center; cursor: pointer; }
+.lab-flex { display: flex; flex-direction: row; align-items: center; justify-content: center; flex: 0 0 auto; }
+.lab-ib { display: inline-block; }
+.lab-r999 { border-radius: 999px; }
+.lab-r16 { border-radius: 16px; }
+.lab-r15 { border-radius: 15px; }
+.lab-noapp { appearance: none; -webkit-appearance: none; }
+.lab-off { opacity: .45; cursor: default; }
+/* the background shorthand (as kit.css) ... */
+.lab-bg-primary { background: var(--twn-primary); color: var(--twn-on-primary); }
+.lab-bg-danger { background: var(--twn-error); color: var(--twn-on-error); }
+.lab-bg-glass { background: var(--twn-glass); color: var(--twn-text); border-color: var(--twn-border); }
+/* ... and the longhand (variant G) */
+.lab-bgc-primary { background-color: var(--twn-primary); color: var(--twn-on-primary); }
+.lab-bgc-danger { background-color: var(--twn-error); color: var(--twn-on-error); }
+.lab-bgc-glass { background-color: var(--twn-glass); color: var(--twn-text); border-color: var(--twn-border); }
+
+/* ---- 2. glow ---- */
+.lab-glowcell { display: flex; flex-direction: row; flex: 0 0 auto; margin: 2px 4px; }
+.lab-glow { display: flex; flex-direction: row; flex: 0 0 auto; padding: 1px; background: var(--twn-gradient); }
+.lab-glow .lab-b { margin: 0; }
+.lab-grow { flex: 1 1 auto; }
+.lab-glow-none { display: flex; flex-direction: row; flex: 0 0 auto; }
+.lab-glow-none .lab-b { margin: 0; }
+.lab-bimg { border: 1px solid var(--twn-primary); border-image: var(--twn-gradient) 1; }
+.lab-glow-abs { display: flex; flex-direction: row; flex: 0 0 auto; position: relative; padding: 1px; }
+.lab-glow-layer { display: block; position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: var(--twn-gradient); }
+.lab-glow-abs .lab-b { margin: 0; }
+.lab-glow-top { position: relative; }
+
+/* ---- 3. svg ---- */
+.lab-cell { margin: 2px 4px; }
+.lab-ok { color: var(--twn-ok); }
+.lab-svg-path path { fill: var(--twn-ok); }
+.lab-svg-self { fill: var(--twn-ok); }
+.lab-icon-inline { display: inline; width: 16px; height: 16px; vertical-align: middle; }
+.lab-img { display: block; flex: 0 0 auto; width: 16px; height: 16px; }
+.kit-chip .lab-img { width: 12px; height: 12px; margin: 0 2px; }
+.lab-img-inline { display: inline; vertical-align: middle; }
+.lab-inline { display: block; margin: 2px 4px; color: var(--twn-ok); font-size: 11px; }
+.lab-svgrow { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; }
+.lab-svgrow-text { display: block; margin: 0 3px; font-size: 11px; }
+.lab-svgblock { display: block; flex: 0 0 auto; width: 20px; }
+
+/* ---- 4. @font-face: one unique family per variant and font (css-lab.ts staticFontFaceCss(); the test pins it) ---- */
+@font-face { font-family: "LabSyne_ctrl"; font-weight: 700; font-style: normal; src: url("fonts/syne/Syne-Bold.ttf") format("truetype"); }
+@font-face { font-family: "LabPlex_ctrl"; font-weight: 400; font-style: normal; src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf") format("truetype"); }
+@font-face { font-family: "LabSyne_A"; font-weight: 700; font-style: normal; src: url("fonts/syne/Syne-Bold.ttf"); }
+@font-face { font-family: "LabPlex_A"; font-weight: 400; font-style: normal; src: url("fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf"); }
+@font-face { font-family: "LabSyne_B"; font-weight: 700; font-style: normal; src: url("plugin:/fonts/syne/Syne-Bold.ttf"); }
+@font-face { font-family: "LabPlex_B"; font-weight: 400; font-style: normal; src: url("plugin:/fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf"); }
+@font-face { font-family: "LabSyne_B2"; font-weight: 700; font-style: normal; src: url("plugin:/fonts/syne/Syne-Bold.ttf") format("truetype"); }
+@font-face { font-family: "LabPlex_B2"; font-weight: 400; font-style: normal; src: url("plugin:/fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf") format("truetype"); }
+@font-face { font-family: "LabSyne_C"; font-weight: 700; font-style: normal; src: url("./fonts/syne/Syne-Bold.ttf"); }
+@font-face { font-family: "LabPlex_C"; font-weight: 400; font-style: normal; src: url("./fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf"); }
+@font-face { font-family: "LabSyne_D"; font-weight: 700; font-style: normal; src: url("lab/fonts/syne/Syne-Bold.woff"); }
+@font-face { font-family: "LabPlex_D"; font-weight: 400; font-style: normal; src: url("lab/fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.woff"); }
+
+.lab-fspan { display: block; flex: 0 0 auto; margin: 0 10px 0 0; white-space: nowrap; color: var(--twn-text); line-height: 1.3; }
+
+/* ---- 5. flex whitespace: "label + count" ---- */
+.lab-ws { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; margin: 2px 8px 2px 0; padding: 1px 4px; border: 1px dashed var(--twn-border); }
+.lab-ltr { direction: ltr; }
+.lab-rtl { direction: rtl; font-family: var(--twn-font-ar); }
+.lab-ws-label { display: block; flex: 0 0 auto; }
+.lab-ws-pre { white-space: pre; }
+.lab-ws-count { display: block; flex: 0 0 auto; min-width: 14px; padding: 0; background: var(--twn-primary); color: var(--twn-on-primary); border-radius: 4px; font-size: 11px; text-align: center; }
+.lab-ws-mis { margin-inline-start: 6px; }
+.lab-ltr .lab-ws-mlr { margin-left: 6px; }
+.lab-rtl .lab-ws-mlr { margin-right: 6px; }
+.lab-ws-count.lab-ws-pis { padding-inline-start: 6px; }
+.lab-ltr .lab-ws-count.lab-ws-plr { padding-left: 6px; }
+.lab-rtl .lab-ws-count.lab-ws-plr { padding-right: 6px; }

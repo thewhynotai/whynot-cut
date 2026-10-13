@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "ai.thewhynot.cut.spike",
   "name": "WhyNot Cut Spike",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "main": "index.html",
   "host": {
     "app": "premierepro",

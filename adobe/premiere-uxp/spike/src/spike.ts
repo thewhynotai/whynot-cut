@@ -3,8 +3,11 @@
 // 0.1.5: the panel also watches ~/.whynot-cut/uxp-spike/run-request.json (autorun.ts) and runs the spike by itself.
 // 0.1.6: a "Style guide" view (style-guide.ts; run-request mode "style_guide" opens it and leaves it open), live UXP UI
 // measurements (ui-probes.ts -> `ui_probes`) and the C2.7 ecosystem probes (eco-probes.ts -> `eco_probes`).
+// 0.1.7: a "CSS lab" view (css-lab.ts; run-request mode "css_lab" opens it, leaves it open and writes `lab`).
 import type { premierepro as Ppro } from "@adobe/premierepro";
 import { createAutoRunner, type GuideView, type RunMode, type RunSummary } from "./autorun.ts";
+import { createLabView, runCssLab, type LabResults, type LabView } from "./css-lab.ts";
+import { realLabDom, realLabEnv } from "./lab-dom.ts";
 import { createLifecycle, lifecycleWriter, setupLifecycle, type EcoCtx, type LifecycleEvent, type LifecycleSetup } from "./eco-probes.ts";
 import { ensureDir, writeText } from "./fsutil.ts";
 import { resolveHome, spikeDir } from "./home.ts";
@@ -101,7 +104,7 @@ let running = false;
 
 function setRunning(on: boolean): void {
   running = on;
-  for (const id of ["run", "run-keep", "guide-open"]) ($(id) as HTMLButtonElement).disabled = on;
+  for (const id of ["run", "run-keep", "guide-open", "lab-open"]) ($(id) as HTMLButtonElement).disabled = on;
 }
 
 function hostModules() {
@@ -118,6 +121,7 @@ const PANEL_ID = "whynotCutSpike";
 let lifecycle = createLifecycle(() => Date.now());
 let lifecycleSetup: LifecycleSetup | undefined;
 let guide: StyleGuide | undefined;
+let lab: LabView | undefined;
 
 function ecoCtx(uxp: UxpModule, ppro: unknown, fs: UxpFs, home: string | null): EcoCtx {
   const g = globalThis as { WebSocket?: EcoCtx["WebSocket"]; fetch?: (url: string, init?: unknown) => Promise<{ status: number; statusText?: string }> };
@@ -144,6 +148,7 @@ function uiCtx(): UiCtx {
  *   full        - ui_probes + eco_probes (names, loopback, hide/show), every Premiere probe, then openExternal last
  *   keep_open   - the same without save/close/open and without openExternal: the scratch project stays open
  *   style_guide - opens the style guide (it stays open), ui_probes + eco_probes (no openExternal), no Premiere probe
+ *   css_lab     - opens the CSS lab (it stays open), measures it into `lab`, then ui_probes; no eco / Premiere probe
  */
 async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promise<RunSummary> {
   const keepOpen = mode === "keep_open";
@@ -168,7 +173,7 @@ async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promi
     try {
       ppro = require("premierepro") as Ppro;
     } catch (e) {
-      if (mode !== "style_guide") throw e;
+      if (mode !== "style_guide" && mode !== "css_lab") throw e;
     }
     const { uxp, fs, os, home, via } = hostModules();
     if (!home) throw new Error("cannot resolve the home folder (os.homedir() and USERPROFILE/HOME all unavailable)");
@@ -177,10 +182,20 @@ async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promi
     const { config, error } = await loadConfig(fs, dir);
     const ts = stamp();
     const ctx: Ctx = { ppro: ppro as Ppro, fs, uxp, os, home, homeVia: via, stamp: ts, config, configError: error, expect: {}, notes: [] };
-    const probes = mode === "style_guide" ? [] : buildProbes({ keepOpen });
+    const noPremiere = mode === "style_guide" || mode === "css_lab";
+    const probes = noPremiere ? [] : buildProbes({ keepOpen });
     const sections: Sections = { ui_probes: {}, eco_probes: {} };
-    if (mode === "style_guide") guide?.show(view ?? {});
-    say(mode === "style_guide" ? "Style guide open - measuring" : config ? `Running ${probes.length} probes (config: ${dir}/config.json)` : `Running without config - ${error}`);
+    if (mode === "style_guide") {
+      lab?.hide(false);
+      guide?.show(view ?? {});
+    }
+    if (mode === "css_lab") {
+      guide?.hide();
+      lab?.show();
+    }
+    let labResults: LabResults | null = null;
+    let labError: string | null = null;
+    say(mode === "style_guide" ? "Style guide open - measuring" : mode === "css_lab" ? "CSS lab open - measuring" : config ? `Running ${probes.length} probes (config: ${dir}/config.json)` : `Running without config - ${error}`);
     let premiere = "unknown";
     try {
       // Application.version resolves empty on 26.5.2; uxp.host.version is the reliable source
@@ -205,6 +220,7 @@ async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promi
       ...(autoId ? { auto_run_id: autoId } : {}),
       ...(guide?.isOpen() ? { style_guide_view: guide.view() } : {}),
       ops,
+      ...(mode === "css_lab" ? { lab: labResults, ...(labError ? { lab_error: labError } : {}) } : {}),
       ui_probes: sections.ui_probes,
       eco_probes: sections.eco_probes,
     });
@@ -221,12 +237,28 @@ async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promi
       }
     };
     renderOps([], probes.length);
+    // 0. css_lab: measure the lab while it is the only view on screen (it stays open for the screenshots)
+    if (mode === "css_lab") {
+      try {
+        labResults = await runCssLab(realLabDom($("lab-host")), realLabEnv(document, fs, uxp));
+        lab?.caption(labResults.host_width_px);
+      } catch (e) {
+        labError = errText(e);
+      }
+      await write([]);
+    }
     // 1. the UI measurements (a visible kit stage, removed after each probe) and the quick ecosystem probes
     const eco = ecoCtx(uxp, ppro, fs, home);
-    await runPreSections(sections, uiCtx(), eco, async (label) => {
-      say(label);
-      await write([]);
-    });
+    await runPreSections(
+      sections,
+      uiCtx(),
+      eco,
+      async (label) => {
+        say(label);
+        await write([]);
+      },
+      { eco: mode !== "css_lab" },
+    );
     // 2. the Premiere probes (none in style_guide mode)
     let ops: OpResult[] = [];
     if (probes.length) {
@@ -238,12 +270,16 @@ async function runSpike(mode: RunMode, autoId?: string, view?: GuideView): Promi
     await write(ops);
     if (mode === "style_guide") {
       counts = sectionCounts(sections);
+    } else if (mode === "css_lab") {
+      const c = sectionCounts(sections);
+      const l = labResults?.summary ?? { pass: 0, fail: 0, na: 0 };
+      counts = { pass: c.pass + l.pass, fail: c.fail + l.fail, na: c.na + l.na };
     } else {
       const pass = ops.filter((o) => o.ok === true).length;
       const fail = ops.filter((o) => o.ok === false).length;
       counts = { pass, fail, na: ops.length - pass - fail };
     }
-    const text = `${counts.pass} pass, ${counts.fail} fail, ${counts.na} n/a${mode === "style_guide" ? " (ui + eco probes)" : ""}`;
+    const text = `${counts.pass} pass, ${counts.fail} fail, ${counts.na} n/a${mode === "style_guide" ? " (ui + eco probes)" : mode === "css_lab" ? ` (lab + ui probes${labError ? `; lab failed: ${labError}` : ""})` : ""}`;
     resultsFile = resultsPath;
     if (writeError) problem = `COULD NOT WRITE ${resultsPath}: ${writeError}`;
     say(writeError ? `Done: ${text}. ${problem} - use Copy results or select the text below.` : `Done: ${text}. Results: ${resultsPath}`);
@@ -316,6 +352,12 @@ function startGuide(): void {
   $("guide-open").addEventListener("click", () => void guide?.show());
 }
 
+function startLab(): void {
+  lab = createLabView({ main: $("main-view"), guide: $("guide-view"), lab: $("lab-view"), host: $("lab-host"), caption: $("lab-caption"), back: $("lab-back") });
+  // the button opens the lab and measures it, exactly like a css_lab run-request
+  $("lab-open").addEventListener("click", () => void runSpike("css_lab"));
+}
+
 function boot(): void {
   // the lifecycle first: entrypoints.setup has to run while the plugin loads
   startLifecycle();
@@ -324,6 +366,7 @@ function boot(): void {
   $("run-keep").addEventListener("click", () => void runSpike("keep_open"));
   $("copy").addEventListener("click", () => void copyResults());
   startGuide();
+  startLab();
   startAutoRun();
 }
 

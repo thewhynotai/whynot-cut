@@ -1,5 +1,9 @@
 // Spike 0.1.6: live UXP measurements of what the panel kit (adobe/panel-ui/styles/kit.css) relies on. Each probe mounts
 // a small visible stage of kit markup, reads computed styles and boxes, and records what it saw; nothing is assumed.
+// 0.1.7 (the 0.1.6 review + live run): every probe waits for layout after mounting (0.1.6 measured every box 0 x 0 right
+// after the mount); "ok" needs RESOLVED values (no var( left, a real hex / rgb colour, the expected one where the kit
+// fixes it); the fonts fallbacks have unlike metrics (0.1.6: monospace and serif measured the same width in UXP); svg and
+// kit_code say that paint is only confirmed by a screenshot.
 // Results go to the results file under `ui_probes`:
 //   fonts        - does @font-face (fonts.css, bundled OFL files) load? computed font-family + the text width of a sample
 //                  in Syne / Inter / IBM Plex Sans Arabic / IBM Plex Mono vs the same text in a fallback family
@@ -11,6 +15,7 @@
 import { stringsFor } from "../../../panel-ui/src/i18n.ts";
 import { statusIcon } from "../../../panel-ui/src/kit/icons.ts";
 import { withCommands } from "../../../panel-ui/src/kit/html.ts";
+import { colorsIn, isResolved, normColor } from "./css-lab.ts";
 import type { ProbeDef } from "./runner.ts";
 
 /** What the probes read from a computed style (a CSSStyleDeclaration, or a fake). */
@@ -44,7 +49,20 @@ export interface UiCtx {
   stage: UiStage;
   /** how long to let lazily loaded fonts settle before the second measurement (ms) */
   fontSettleMs?: number;
+  /** how long to let UXP lay a freshly mounted stage out before measuring boxes (ms; 0.1.6 measured 0 x 0 without) */
+  layoutSettleMs?: number;
 }
+
+export const LAYOUT_SETTLE_MS = 300;
+
+/** mount, then give UXP a layout pass before anything is measured */
+async function mountAndSettle(ctx: UiCtx, html: string, opts?: { rtl?: boolean }): Promise<void> {
+  ctx.stage.mount(html, opts);
+  await ctx.stage.wait(ctx.layoutSettleMs ?? LAYOUT_SETTLE_MS);
+}
+
+/** Where paint is confirmed: computed values are what the runtime resolved, not what it drew. */
+export const PAINT_BY_SCREENSHOT = "computed values only; paint is confirmed by a screenshot (style guide, CSS lab)";
 
 const read = (s: StyleLike, prop: string, css: string): string => {
   const direct = s[prop];
@@ -76,8 +94,16 @@ export const FONT_SAMPLES: readonly FontSample[] = [
   { key: "plex_mono", family: "IBM Plex Mono", weight: 400, text: "00:00:12:04 C0239_prev.prproj" },
 ];
 
-/** Two generic families with different metrics: a font that loaded changes the width against both. */
-export const FALLBACKS = ["monospace", "serif"] as const;
+/** A family no machine has (0.1.7). */
+export const NO_SUCH_FAMILY = "WncNoSuchFamily7f3a";
+/** Two fallbacks with unlike metrics, so a font that loaded changes the width against both. 0.1.6 used the generic
+ *  monospace and serif, and UXP measured them the SAME (both resolve to one default face): a unique nonexistent family
+ *  (= the runtime default) and an installed proportional serif instead. */
+export const FALLBACKS = [
+  { key: "none", family: `"${NO_SUCH_FAMILY}"` },
+  { key: "tnr", family: `"Times New Roman", "${NO_SUCH_FAMILY}"` },
+] as const;
+export type FallbackKey = (typeof FALLBACKS)[number]["key"];
 const FONT_PX = 20;
 
 export const fontId = (key: string, fallback: string, branded: boolean) => `wnc-font-${key}-${fallback}-${branded ? "brand" : "plain"}`;
@@ -87,11 +113,11 @@ export function fontStageHtml(): string {
   for (const s of FONT_SAMPLES) {
     for (const fb of FALLBACKS) {
       for (const branded of [true, false]) {
-        const family = branded ? `"${s.family}", ${fb}` : fb;
+        const family = branded ? `"${s.family}", ${fb.family}` : fb.family;
         // a flex row with a non-growing child: the child's box is the text's own width
         rows.push(
           `<div style="display:flex; flex-direction:row; direction:${s.rtl ? "rtl" : "ltr"};">` +
-            `<span id="${fontId(s.key, fb, branded)}" style="display:block; flex:0 0 auto; white-space:nowrap; font-family:${family.replace(/"/g, "&quot;")}; font-weight:${s.weight}; font-size:${FONT_PX}px;">${s.text}</span>` +
+            `<span id="${fontId(s.key, fb.key, branded)}" style="display:block; flex:0 0 auto; white-space:nowrap; font-family:${family.replace(/"/g, "&quot;")}; font-weight:${s.weight}; font-size:${FONT_PX}px;">${s.text}</span>` +
             `</div>`,
         );
       }
@@ -104,28 +130,29 @@ interface FontMeasure {
   [fallback: string]: { brand_width: number; fallback_width: number; differs: boolean };
 }
 
-function measureFonts(stage: UiStage): Record<string, { computed_family: string; per_fallback: FontMeasure }> {
-  const out: Record<string, { computed_family: string; per_fallback: FontMeasure }> = {};
+function measureFonts(stage: UiStage): Record<string, { computed_family: string; per_fallback: FontMeasure; fallbacks_differ: boolean }> {
+  const out: Record<string, { computed_family: string; per_fallback: FontMeasure; fallbacks_differ: boolean }> = {};
   for (const s of FONT_SAMPLES) {
     const per: FontMeasure = {};
     let computed = "";
     for (const fb of FALLBACKS) {
-      const brand = stage.query(`#${fontId(s.key, fb, true)}`);
-      const plain = stage.query(`#${fontId(s.key, fb, false)}`);
-      if (!brand || !plain) throw new Error(`font stage is missing the ${s.key} / ${fb} spans`);
+      const brand = stage.query(`#${fontId(s.key, fb.key, true)}`);
+      const plain = stage.query(`#${fontId(s.key, fb.key, false)}`);
+      if (!brand || !plain) throw new Error(`font stage is missing the ${s.key} / ${fb.key} spans`);
       if (!computed) computed = read(stage.style(brand), "fontFamily", "font-family");
       const bw = round(stage.box(brand).width);
       const pw = round(stage.box(plain).width);
-      per[fb] = { brand_width: bw, fallback_width: pw, differs: Math.abs(bw - pw) > 0.5 };
+      per[fb.key] = { brand_width: bw, fallback_width: pw, differs: Math.abs(bw - pw) > 0.5 };
     }
-    out[s.key] = { computed_family: computed, per_fallback: per };
+    const widths = FALLBACKS.map((fb) => per[fb.key]!.fallback_width);
+    out[s.key] = { computed_family: computed, per_fallback: per, fallbacks_differ: widths.some((w) => Math.abs(w - widths[0]!) > 0.5) };
   }
   return out;
 }
 
 /** loaded: the brand width differs from BOTH fallbacks; not loaded: from neither; anything else is inconclusive. */
 export function fontVerdict(per: FontMeasure): boolean | null {
-  const d = FALLBACKS.map((fb) => per[fb]?.differs);
+  const d = FALLBACKS.map((fb) => per[fb.key]?.differs);
   if (d.every((x) => x === true)) return true;
   if (d.every((x) => x === false)) return false;
   return null;
@@ -134,8 +161,9 @@ export function fontVerdict(per: FontMeasure): boolean | null {
 export const fontsProbe: ProbeDef<UiCtx> = {
   op: "fonts",
   timeoutMs: 15_000,
-  run: async ({ stage, fontSettleMs = 1500 }) => {
-    stage.mount(fontStageHtml());
+  run: async (ctx) => {
+    const { stage, fontSettleMs = 1500 } = ctx;
+    await mountAndSettle(ctx, fontStageHtml());
     try {
       const first = measureFonts(stage);
       const f = stage.fonts();
@@ -167,6 +195,7 @@ export const fontsProbe: ProbeDef<UiCtx> = {
           computed_family: m.computed_family,
           loaded: verdict,
           widths: m.per_fallback,
+          fallbacks_differ: m.fallbacks_differ,
           widths_before_settle: first[s.key]!.per_fallback,
           document_fonts_check: check,
         };
@@ -175,7 +204,7 @@ export const fontsProbe: ProbeDef<UiCtx> = {
       return {
         ok,
         detail: {
-          rule: "loaded = the brand-family span's width differs from the same text in BOTH fallbacks (monospace, serif); not loaded = differs from neither; else inconclusive",
+          rule: `loaded = the brand-family span's width differs from the same text in BOTH fallbacks (${FALLBACKS.map((f) => f.family).join(" | ")}); not loaded = differs from neither; else inconclusive. fallbacks_differ false = the two fallbacks measured alike (a weaker test)`,
           loaded_count: loaded,
           not_loaded_count: notLoaded,
           document_fonts: f.present,
@@ -191,12 +220,15 @@ export const fontsProbe: ProbeDef<UiCtx> = {
 
 // ---------------------------------------------------------------------------------------------- svg
 
+const SVG_EXPECTED = "#3DD68C";
+
 export const svgProbe: ProbeDef<UiCtx> = {
   op: "svg",
-  run: async ({ stage }) => {
+  run: async (ctx) => {
+    const { stage } = ctx;
     const t = stringsFor("en");
     // the status icon in the ok colour, the way a toast / chip draws it (fill="currentColor")
-    stage.mount(`<div id="wnc-svg-wrap" style="display:flex; flex-direction:row; color:var(--twn-ok);">${statusIcon("ok", t)}</div>`);
+    await mountAndSettle(ctx, `<div id="wnc-svg-wrap" style="display:flex; flex-direction:row; color:var(--twn-ok);">${statusIcon("ok", t)}</div>`);
     try {
       const svg = stage.query("#wnc-svg-wrap svg");
       if (!svg) throw new Error("the status icon <svg> is not in the DOM (inline svg markup dropped?)");
@@ -204,18 +236,29 @@ export const svgProbe: ProbeDef<UiCtx> = {
       const s = stage.style(svg);
       const box = stage.box(svg);
       const wrap = stage.query("#wnc-svg-wrap");
+      const pathFill = path ? read(stage.style(path), "fill", "fill") : null;
+      const svgFill = read(s, "fill", "fill");
+      // what the path paints with: its own computed fill (it inherits the svg's), else the svg's
+      const painted = pathFill ?? svgFill;
+      const fillMatches = normColor(painted) === normColor(SVG_EXPECTED);
+      const boxOk = box.width > 0 && box.height > 0;
       const detail = {
         svg_box: { width: round(box.width), height: round(box.height) },
-        svg_fill: read(s, "fill", "fill"),
+        svg_fill: svgFill,
         svg_color: read(s, "color", "color"),
         svg_display: read(s, "display", "display"),
         wrapper_color: wrap ? read(stage.style(wrap), "color", "color") : null,
         path_present: path !== null,
         path_box: path ? (({ width, height }) => ({ width: round(width), height: round(height) }))(stage.box(path)) : null,
-        path_fill: path ? read(stage.style(path), "fill", "fill") : null,
+        path_fill: pathFill,
         expected_color: "the --twn-ok token, #3DD68C = rgb(61, 214, 140)",
+        fill_resolved: isResolved(painted) && normColor(painted) !== null,
+        fill_matches_expected: fillMatches,
+        box_ok: boxOk,
+        rule: 'ok = a box > 0 AND the path\'s computed fill is the expected colour (0.1.6: path fill "black" = not ok)',
+        paint_confirmed_by: PAINT_BY_SCREENSHOT,
       };
-      return { ok: box.width > 0 && box.height > 0, detail };
+      return { ok: boxOk && fillMatches, detail };
     } finally {
       stage.unmount();
     }
@@ -224,12 +267,17 @@ export const svgProbe: ProbeDef<UiCtx> = {
 
 // ---------------------------------------------------------------------------------------------- box-shadow + gradient
 
-const hasValue = (v: string) => v !== "" && v !== "none";
+/** A resolved shadow / colour value: no var( left in it and at least one real hex / rgb colour. */
+const resolvedColourValue = (v: string) => isResolved(v) && colorsIn(v).length > 0;
+const FOCUS_COLOUR = "#9d6bff";
+const GRADIENT_COLOURS = ["#d95c9b", "#5400fb"];
 
 export const boxShadowProbe: ProbeDef<UiCtx> = {
   op: "box_shadow",
-  run: async ({ stage }) => {
-    stage.mount(
+  run: async (ctx) => {
+    const { stage } = ctx;
+    await mountAndSettle(
+      ctx,
       `<div id="wnc-shadow-token" style="display:block; width:40px; height:20px; margin:4px; box-shadow:var(--twn-focus);"></div>` +
         `<div id="wnc-shadow-literal" style="display:block; width:40px; height:20px; margin:4px; box-shadow:0 0 0 2px #9D6BFF;"></div>`,
     );
@@ -240,9 +288,19 @@ export const boxShadowProbe: ProbeDef<UiCtx> = {
       const tv = read(stage.style(token), "boxShadow", "box-shadow");
       const lv = read(stage.style(literal), "boxShadow", "box-shadow");
       const rootVar = read(stage.rootStyle(), "--twn-focus", "--twn-focus").trim();
+      // resolved AND the focus-ring colour (#9D6BFF) in it
+      const good = (v: string) => resolvedColourValue(v) && colorsIn(v).includes(FOCUS_COLOUR);
       return {
-        ok: hasValue(tv) && hasValue(lv) ? true : !hasValue(tv) && !hasValue(lv) ? false : null,
-        detail: { via_token: tv, literal: lv, root_custom_property_twn_focus: rootVar, kit_use: ".kit-focus:focus { box-shadow: var(--twn-focus) } (the focus ring)" },
+        ok: good(tv) && good(lv) ? true : !good(tv) && !good(lv) ? false : null,
+        detail: {
+          via_token: tv,
+          literal: lv,
+          via_token_resolved: good(tv),
+          literal_resolved: good(lv),
+          rule: "ok = both computed shadows have no var( left and carry the focus colour #9D6BFF (hex or rgb)",
+          root_custom_property_twn_focus: rootVar,
+          kit_use: ".kit-focus:focus { box-shadow: var(--twn-focus) } (the focus ring)",
+        },
       };
     } finally {
       stage.unmount();
@@ -252,8 +310,10 @@ export const boxShadowProbe: ProbeDef<UiCtx> = {
 
 export const gradientProbe: ProbeDef<UiCtx> = {
   op: "gradient",
-  run: async ({ stage }) => {
-    stage.mount(
+  run: async (ctx) => {
+    const { stage } = ctx;
+    await mountAndSettle(
+      ctx,
       `<div id="wnc-grad-hairline" class="kit-hairline"></div>` +
         `<div class="kit-track" style="display:flex; flex-direction:row; height:6px;"><div id="wnc-grad-fill" class="kit-fill" style="width:50%;"></div></div>` +
         `<div id="wnc-grad-literal" style="display:block; height:6px; margin-top:4px; background:linear-gradient(90deg,#D95C9B,#5400FB);"></div>`,
@@ -271,12 +331,22 @@ export const gradientProbe: ProbeDef<UiCtx> = {
         }
         const s = stage.style(el);
         const image = read(s, "backgroundImage", "background-image");
-        if (/gradient/i.test(image)) seen++;
+        const colours = colorsIn(image);
+        const resolved = isResolved(image) && /gradient/i.test(image) && colours.join(",") === GRADIENT_COLOURS.join(",");
+        if (resolved) seen++;
         const b = stage.box(el);
-        out[key] = { background_image: image, background: read(s, "background", "background"), background_color: read(s, "backgroundColor", "background-color"), box: { width: round(b.width), height: round(b.height) } };
+        out[key] = {
+          background_image: image,
+          background: read(s, "background", "background"),
+          background_color: read(s, "backgroundColor", "background-color"),
+          colours,
+          resolved,
+          box: { width: round(b.width), height: round(b.height) },
+        };
       }
       out.root_custom_property_twn_gradient = read(stage.rootStyle(), "--twn-gradient", "--twn-gradient").trim();
       out.root_custom_property_twn_bg = read(stage.rootStyle(), "--twn-bg", "--twn-bg").trim();
+      out.rule = "ok = every background-image is a gradient with no var( left whose colours are #D95C9B then #5400FB (hex or rgb)";
       return { ok: seen === total ? true : seen === 0 ? false : null, detail: out };
     } finally {
       stage.unmount();
@@ -290,7 +360,8 @@ export const KIT_CODE_SENTENCE = "Saved a copy as `C0239_prev_2026-10-13-1412.pr
 
 export const kitCodeProbe: ProbeDef<UiCtx> = {
   op: "kit_code",
-  run: async ({ stage }) => {
+  run: async (ctx) => {
+    const { stage } = ctx;
     const sentences = [
       { key: "en", rtl: false, text: KIT_CODE_SENTENCE },
       { key: "ar", rtl: true, text: "حُفظت نسخة باسم `C0239_prev_2026-10-13-1412.prproj` بجوار المشروع." },
@@ -298,7 +369,7 @@ export const kitCodeProbe: ProbeDef<UiCtx> = {
     const out: Record<string, unknown> = {};
     let good = 0;
     for (const s of sentences) {
-      stage.mount(`<p id="wnc-code-p" class="kit-text">${withCommands(s.text)}</p>`, { rtl: s.rtl });
+      await mountAndSettle(ctx, `<p id="wnc-code-p" class="kit-text">${withCommands(s.text)}</p>`, { rtl: s.rtl });
       try {
         const el = stage.query("#wnc-code-p bdi.kit-code");
         if (!el) {
@@ -312,7 +383,8 @@ export const kitCodeProbe: ProbeDef<UiCtx> = {
         const display = read(st, "display", "display");
         const bg = read(st, "backgroundColor", "background-color");
         const rects = (el as { getClientRects?: () => { length: number } }).getClientRects?.().length ?? null;
-        if (display === "inline" && bg !== "" && !/^(transparent|rgba\(0,\s*0,\s*0,\s*0\))$/i.test(bg)) good++;
+        const bgMatches = isResolved(bg) && normColor(bg) === "#1e1e1e";
+        if (display === "inline" && bgMatches) good++;
         out[s.key] = {
           present: true,
           display,
@@ -327,6 +399,8 @@ export const kitCodeProbe: ProbeDef<UiCtx> = {
           paragraph_box: pb ? { width: round(pb.width), height: round(pb.height) } : null,
           client_rects: rects,
           expected: "display inline; background the --twn-surface-2 token #1E1E1E = rgb(30, 30, 30); font IBM Plex Mono",
+          background_matches_expected: bgMatches,
+          paint_confirmed_by: PAINT_BY_SCREENSHOT,
         };
       } finally {
         stage.unmount();

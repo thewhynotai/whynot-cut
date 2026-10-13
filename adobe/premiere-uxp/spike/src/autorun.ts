@@ -1,7 +1,8 @@
-// Hands-free auto-run (spike 0.1.5; 0.1.6 adds "style_guide"). On panel load and then every POLL_MS while the panel is
-// open, look for <spike dir>/run-request.json =
-//   {"id": "<string>", "mode": "full" | "keep_open" | "style_guide", "requested_at": "<iso>"}
-// and, for "style_guide" only, the optional view {"lang": "en" | "ar", "width": 280 | 340 | 480}.
+// Hands-free auto-run (spike 0.1.5; 0.1.6 adds "style_guide", 0.1.7 "css_lab"). On panel load and then every POLL_MS
+// while the panel is open, look for <spike dir>/run-request.json =
+//   {"id": "<string>", "mode": "full" | "keep_open" | "style_guide" | "css_lab", "requested_at": "<iso>"}
+// and, for "style_guide" only, the optional view {"lang": "en" | "ar", "width": 280 | 340 | 480}. "css_lab" takes no
+// view: the lab uses the panel's own width (the controller sizes the panel, ~560 css px).
 // A fresh request with an unseen id is claimed, run once, and answered with run-done-<id>.json. Claude writes the
 // request and reads the done file + results file; nobody clicks. Pure logic over injected fs / clock / run, so the
 // tests drive it with fakes. Nothing in here may throw out of poll(): a bad request must never crash the panel.
@@ -11,8 +12,8 @@ import type { UxpFs } from "../../src/uxp-types.ts";
 export const POLL_MS = 5000;
 export const STALE_MS = 30 * 60 * 1000;
 
-export type RunMode = "full" | "keep_open" | "style_guide";
-export const RUN_MODES: readonly RunMode[] = ["full", "keep_open", "style_guide"];
+export type RunMode = "full" | "keep_open" | "style_guide" | "css_lab";
+export const RUN_MODES: readonly RunMode[] = ["full", "keep_open", "style_guide", "css_lab"];
 
 /** The style guide's view: one language and one panel width at a time (the controller screenshots each). */
 export type GuideLang = "en" | "ar";
@@ -91,7 +92,7 @@ function validate(value: unknown): ParsedRequest | string {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return "the request is not a JSON object";
   const r = value as Record<string, unknown>;
   if (typeof r.id !== "string" || !SAFE_ID.test(r.id)) return '"id" must be a string of letters, digits, ".", "_" or "-" (max 64, starting with a letter or digit)';
-  if (typeof r.mode !== "string" || !(RUN_MODES as readonly string[]).includes(r.mode)) return '"mode" must be "full", "keep_open" or "style_guide"';
+  if (typeof r.mode !== "string" || !(RUN_MODES as readonly string[]).includes(r.mode)) return '"mode" must be "full", "keep_open", "style_guide" or "css_lab"';
   const mode = r.mode as RunMode;
   if (typeof r.requested_at !== "string") return '"requested_at" must be an ISO time string';
   const requestedMs = Date.parse(r.requested_at);

@@ -195,10 +195,10 @@ test("spike sources never read navigator.clipboard outside the Copy results hand
   assert.doesNotMatch(outside.replace(/\/\/.*$/gm, ""), /navigator|clipboard/);
 });
 
-test("spike manifest asks for clipboard readAndWrite and the version is the current one (0.1.6) everywhere", () => {
+test("spike manifest asks for clipboard readAndWrite and the version is the current one (0.1.7) everywhere", () => {
   const manifest = JSON.parse(readFileSync(join(root, "spike", "manifest.json"), "utf8"));
   assert.equal(manifest.requiredPermissions.clipboard, "readAndWrite");
   assert.equal(manifest.requiredPermissions.localFileSystem, "fullAccess");
-  assert.equal(manifest.version, "0.1.6");
-  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0.1.6"/);
+  assert.equal(manifest.version, "0.1.7");
+  assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0.1.7"/);
 });

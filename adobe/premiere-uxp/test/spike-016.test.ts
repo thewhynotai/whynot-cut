@@ -139,8 +139,8 @@ test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback netw
   const product = JSON.parse(read("plugin/manifest.json"));
   assert.equal(m.name, "WhyNot Cut Spike");
   assert.equal(m.entrypoints[0].label.default, "WhyNot Cut Spike");
-  assert.equal(m.version, "0.1.6");
-  assert.match(read("spike/src/version.ts"), /SPIKE_VERSION = "0\.1\.6"/);
+  assert.equal(m.version, "0.1.7");
+  assert.match(read("spike/src/version.ts"), /SPIKE_VERSION = "0\.1\.7"/);
   assert.deepEqual(m.requiredPermissions.network.domains, [...LOOPBACK_DOMAINS]);
   // the port-wildcard forms, plus the exact port-less forms (two of which failed in round 1: parity W1/W2)
   for (const d of ["ws://127.0.0.1:*", "ws://localhost:*", "http://127.0.0.1:*", "http://localhost:*", "ws://127.0.0.1", "http://127.0.0.1"]) assert.ok(LOOPBACK_DOMAINS.includes(d), d);
@@ -151,8 +151,9 @@ test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback netw
 
 test("spike page: links fonts.css, tokens.css, kit.css, index.css; has the style guide view and its toggles; no Claude Code", () => {
   const html = read("spike/index.html");
-  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "kit.css", "index.css"]);
-  for (const id of ["main-view", "guide-view", "guide-frame", "guide-host", "guide-caption", "guide-open", "guide-back", "guide-en", "guide-ar", "guide-w280", "guide-w340", "guide-w480", "run", "run-keep", "copy", "status", "out"]) {
+  // 0.1.7 adds lab.css (the CSS lab) last
+  assert.deepEqual([...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]), ["fonts.css", "tokens.css", "kit.css", "index.css", "lab.css"]);
+  for (const id of ["main-view", "guide-view", "guide-frame", "guide-host", "guide-caption", "guide-open", "guide-back", "guide-en", "guide-ar", "guide-w280", "guide-w340", "guide-w480", "run", "run-keep", "copy", "status", "out", "lab-open", "lab-view", "lab-host", "lab-caption", "lab-back"]) {
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
   assert.doesNotMatch(html, /Claude Code/);
@@ -218,7 +219,7 @@ test("style guide view: shows the kit gallery for the chosen language in a 280 /
   assert.equal(e.frame!.style.width, "480px");
   assert.match(e.host!.innerHTML, /class="kit-root kit-rtl" dir="rtl" lang="ar"/);
   assert.equal(e.caption!.textContent, guideCaption({ lang: "ar", width: 480 }));
-  assert.match(e.caption!.textContent, /AR - 480 px - spike 0\.1\.6/);
+  assert.match(e.caption!.textContent, /AR - 480 px - spike 0\.1\.7/);
   assert.equal(e.ar!.className, "seg on");
   assert.equal(e.w480!.className, "seg on");
   e.en!.click();
@@ -274,27 +275,27 @@ const uiRun = (op: string, stage: UiStage) => runProbe(UI_PROBES.find((p) => p.o
 
 test("ui fonts: loaded when each brand span differs from BOTH fallbacks; computed family + widths recorded per family", async () => {
   const { stage, mounted } = fakeStage({
-    width: (sel) => (sel.endsWith("-brand") ? 123.456 : sel.includes("-serif-") ? 100 : 110),
-    styles: Object.fromEntries(FONT_SAMPLES.flatMap((s) => FALLBACKS.map((fb) => [`#${fontId(s.key, fb, true)}`, { fontFamily: `"${s.family}", ${fb}` }]))),
+    width: (sel) => (sel.endsWith("-brand") ? 123.456 : sel.includes("-tnr-") ? 100 : 110),
+    styles: Object.fromEntries(FONT_SAMPLES.flatMap((s) => FALLBACKS.map((fb) => [`#${fontId(s.key, fb.key, true)}`, { fontFamily: `"${s.family}", ${fb.family}` }]))),
     fonts: { present: true, check: () => true },
   });
   const r = await uiRun("fonts", stage);
   assert.equal(r.ok, true, JSON.stringify(r));
   const d = r.detail as { families: Record<string, { computed_family: string; loaded: boolean; widths: Record<string, { brand_width: number; fallback_width: number }>; document_fonts_check: unknown }> };
   assert.deepEqual(Object.keys(d.families), ["syne", "inter", "plex_arabic", "plex_mono"]);
-  assert.equal(d.families.syne!.computed_family, '"Syne", monospace');
-  assert.deepEqual(d.families.plex_mono!.widths.serif, { brand_width: 123.46, fallback_width: 100, differs: true });
+  assert.equal(d.families.syne!.computed_family, '"Syne", "WncNoSuchFamily7f3a"');
+  assert.deepEqual(d.families.plex_mono!.widths.tnr, { brand_width: 123.46, fallback_width: 100, differs: true });
   assert.equal(d.families.inter!.document_fonts_check, true);
   // the stage was mounted once, with every sample in both fallbacks, then removed
   assert.equal(mounted.length, 1);
-  for (const s of FONT_SAMPLES) for (const fb of FALLBACKS) assert.ok(mounted[0]!.includes(fontId(s.key, fb, true)) && mounted[0]!.includes(fontId(s.key, fb, false)));
-  assert.match(mounted[0]!, /font-family:&quot;IBM Plex Sans Arabic&quot;, serif/);
+  for (const s of FONT_SAMPLES) for (const fb of FALLBACKS) assert.ok(mounted[0]!.includes(fontId(s.key, fb.key, true)) && mounted[0]!.includes(fontId(s.key, fb.key, false)));
+  assert.match(mounted[0]!, /font-family:&quot;IBM Plex Sans Arabic&quot;, &quot;Times New Roman&quot;, &quot;WncNoSuchFamily7f3a&quot;/);
 });
 
 test("ui fonts: not loaded when the brand spans measure like the fallback; inconclusive when only one fallback differs", async () => {
   const same = await uiRun("fonts", fakeStage({ width: () => 100 }).stage);
   assert.equal(same.ok, false);
-  assert.equal(fontVerdict({ monospace: { brand_width: 1, fallback_width: 2, differs: true }, serif: { brand_width: 1, fallback_width: 1, differs: false } }), null);
+  assert.equal(fontVerdict({ none: { brand_width: 1, fallback_width: 2, differs: true }, tnr: { brand_width: 1, fallback_width: 1, differs: false } }), null);
 });
 
 test("ui svg: the status icon's box > 0 passes and its computed fill / colour are recorded; a zero box fails", async () => {
@@ -506,7 +507,7 @@ test("openExternal: called once with whynotcut://engine/start; resolved value, e
   const r = await runProbe(openExternalProbe, { uxp, ppro: {}, fs: {}, home: HOME, now: () => t });
   assert.deepEqual(calls.map((c) => c.url), [ENGINE_START_URL]);
   assert.equal(ENGINE_START_URL, "whynotcut://engine/start");
-  assert.match(String(calls[0]!.why), /WhyNot Cut spike 0\.1\.6/);
+  assert.match(String(calls[0]!.why), /WhyNot Cut spike 0\.1\.7/);
   assert.equal(r.ok, true);
   const d = r.detail as Record<string, unknown>;
   assert.equal(d.settled, "resolved");
@@ -573,12 +574,13 @@ function fullStage(): UiStage {
   return fakeStage({
     width: (sel) => (sel.endsWith("-brand") ? 120 : sel.includes("-serif-") ? 100 : 110),
     styles: {
-      "#wnc-shadow-token": { boxShadow: "x" },
-      "#wnc-shadow-literal": { boxShadow: "x" },
-      "#wnc-grad-hairline": { backgroundImage: "linear-gradient(x)" },
-      "#wnc-grad-fill": { backgroundImage: "linear-gradient(x)" },
-      "#wnc-grad-literal": { backgroundImage: "linear-gradient(x)" },
-      "#wnc-code-p bdi.kit-code": { display: "inline", backgroundColor: "rgb(30, 30, 30)" },
+      "#wnc-shadow-token": { boxShadow: "#9D6BFF 0px 0px 0px 2px" },
+      "#wnc-shadow-literal": { boxShadow: "#9D6BFF 0px 0px 0px 2px" },
+      "#wnc-grad-hairline": { backgroundImage: "linear-gradient(90deg,#D95C9B,#5400FB)" },
+      "#wnc-grad-fill": { backgroundImage: "linear-gradient(90deg,#D95C9B,#5400FB)" },
+      "#wnc-grad-literal": { backgroundImage: "linear-gradient(90deg,#D95C9B,#5400FB)" },
+      "#wnc-svg-wrap svg path": { fill: "#3DD68C" },
+      "#wnc-code-p bdi.kit-code": { display: "inline", backgroundColor: "#1E1E1E" },
     },
   }).stage;
 }
@@ -624,14 +626,14 @@ for (const mode of ["full", "keep_open", "style_guide"] as const) {
 test("spike.ts: the three modes are wired (style guide opened for style_guide, sections written into the results, lifecycle at boot)", () => {
   const spike = read("spike/src/spike.ts");
   assert.match(spike, /run: \(mode: RunMode, id: string, view\?: GuideView\) => runSpike\(mode, id, view\)/);
-  assert.match(spike, /if \(mode === "style_guide"\) guide\?\.show\(view \?\? \{\}\)/);
-  assert.match(spike, /mode === "style_guide" \? \[\] : buildProbes/);
+  assert.match(spike, /if \(mode === "style_guide"\) \{\s*lab\?\.hide\(false\);\s*guide\?\.show\(view \?\? \{\}\);/);
+  assert.match(spike, /const noPremiere = mode === "style_guide" \|\| mode === "css_lab";\s*const probes = noPremiere \? \[\] : buildProbes/);
   assert.match(spike, /ui_probes: sections\.ui_probes,\s*eco_probes: sections\.eco_probes/);
   assert.match(spike, /runPreSections\(/);
   assert.match(spike, /runPostSections\(mode,/);
   assert.match(spike, /function boot\(\): void \{\s*\/\/[^\n]*\n\s*startLifecycle\(\);/);
   // never a call to a quit / restart API anywhere in the spike sources
-  for (const f of ["spike.ts", "eco-probes.ts", "sections.ts", "ui-probes.ts", "style-guide.ts", "probes.ts"]) {
+  for (const f of ["spike.ts", "eco-probes.ts", "sections.ts", "ui-probes.ts", "style-guide.ts", "probes.ts", "css-lab.ts", "lab-dom.ts"]) {
     assert.doesNotMatch(read(`spike/src/${f}`).replace(/\/\/.*$/gm, ""), /\.(quit|exit|restart|relaunch)\s*\(/, f);
   }
 });

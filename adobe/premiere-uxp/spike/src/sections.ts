@@ -1,6 +1,8 @@
 // Spike 0.1.6: the results file's two new sections and the results-document shape (one place, so the panel and the
 // tests agree). `ops` keeps the Premiere probes exactly as 0.1.5 wrote them; `ui_probes` and `eco_probes` are maps of
 // probe name -> the runner's OpResult ({op, ok, ms, detail, error}).
+// 0.1.7: mode "css_lab" adds `lab` (css-lab.ts) and runs the UI probes only (the ecosystem probes are recorded n/a).
+import type { LabResults } from "./css-lab.ts";
 import { runProbe, type OpResult } from "./runner.ts";
 import type { GuideView, RunMode, RunSummary } from "./autorun.ts";
 import { ENGINE_START_URL, hideShowProbe, loopbackProbe, openExternalProbe, quitRestartNamesProbe, type EcoCtx } from "./eco-probes.ts";
@@ -30,6 +32,9 @@ export interface ResultsDoc {
   auto_run_id?: string;
   style_guide_view?: GuideView;
   ops: OpResult[];
+  /** mode "css_lab" only: every lab variant's computed values and boxes (null when the lab itself failed) */
+  lab?: LabResults | null;
+  lab_error?: string;
   ui_probes: Record<string, OpResult>;
   eco_probes: Record<string, OpResult>;
 }
@@ -45,22 +50,28 @@ export function sectionCounts(s: Sections): Pick<RunSummary, "pass" | "fail" | "
 /** The probe a mode does not run, recorded as n/a with the reason (so every results file has the same keys). */
 export const notRun = (op: string, why: string): OpResult => ({ op, ok: null, ms: 0, detail: `not run: ${why}`, error: null });
 
-/** Before the Premiere probes: every UI probe, then the quick ecosystem probes (names, loopback, hide/show so far). */
+/** Before the Premiere probes: every UI probe, then the quick ecosystem probes (names, loopback, hide/show so far).
+ *  `eco: false` (mode "css_lab") records the ecosystem probes as n/a instead of running them. */
 export async function runPreSections(
   sections: Sections,
   ui: UiCtx,
   eco: EcoCtx,
   onStep: (label: string) => void | Promise<void> = () => {},
+  opts: { eco?: boolean } = {},
 ): Promise<void> {
   for (const def of UI_PROBES) {
     await onStep(`UI probe ${def.op}`);
     sections.ui_probes[def.op] = await runProbe(def, ui);
   }
   for (const def of [quitRestartNamesProbe, loopbackProbe, hideShowProbe]) {
+    if (opts.eco === false) {
+      sections.eco_probes[def.op] = notRun(def.op, 'mode "css_lab" runs the UI probes and the lab only');
+      continue;
+    }
     await onStep(`Ecosystem probe ${def.op}`);
     sections.eco_probes[def.op] = await runProbe(def, eco);
   }
-  await onStep("ui + eco probes done");
+  await onStep(opts.eco === false ? "ui probes done" : "ui + eco probes done");
 }
 
 /** After the Premiere probes: openExternal in mode "full" only (last, so a consent dialog blocks nothing else), and the

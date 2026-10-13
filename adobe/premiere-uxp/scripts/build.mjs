@@ -25,8 +25,17 @@ export const TARGETS = {
   spike: {
     entry: "spike/src/spike.ts",
     // 0.1.6: the style guide renders the panel kit, so the spike carries kit.css too (index.html links fonts.css,
-    // tokens.css, kit.css, index.css in that order)
-    files: { "spike/manifest.json": "manifest.json", "spike/index.html": "index.html", "spike/index.css": "index.css", ...BRAND_KIT, "../panel-ui/styles/kit.css": "kit.css" },
+    // tokens.css, kit.css, index.css in that order). 0.1.7: the CSS lab's lab.css (at the root, next to fonts.css, so
+    // its relative font URLs resolve alike) and lab/ (the .woff test fonts with their OFL texts, the bundled test icon)
+    files: {
+      "spike/manifest.json": "manifest.json",
+      "spike/index.html": "index.html",
+      "spike/index.css": "index.css",
+      ...BRAND_KIT,
+      "../panel-ui/styles/kit.css": "kit.css",
+      "spike/lab.css": "lab.css",
+      "spike/lab": "lab",
+    },
   },
   plugin: {
     entry: "src/main.ts",

@@ -13,7 +13,7 @@
 //                          visibilitychange) with timestamps, also kept in <spike dir>/lifecycle.json as they happen.
 // The engine token is never recorded or logged: only the port is taken from engine.json, and every recorded text is
 // passed through redact() with the token first.
-import { readText, writeText } from "./fsutil.ts";
+import { ensureDir, readText, writeText } from "./fsutil.ts";
 import type { ProbeDef } from "./runner.ts";
 import { redact, type WsCtor, type WsLike } from "./ws-link.ts";
 import { SPIKE_VERSION } from "./version.ts";
@@ -431,12 +431,18 @@ export function setupLifecycle(uxp: unknown, panelId: string, rec: LifecycleReco
   return out;
 }
 
-/** Writes lifecycle.json (best effort, never throws). */
+/** Writes lifecycle.json (best effort, never throws). 0.1.7: makes the spike folder first (the panel loads, and
+ *  script.loaded is recorded, before any run has created ~/.whynot-cut/uxp-spike on a fresh machine). */
 export function lifecycleWriter(fs: UxpFs, dir: string): (events: LifecycleEvent[]) => void {
   let chain: Promise<void> = Promise.resolve();
   return (events) => {
     const body = JSON.stringify({ spike: SPIKE_VERSION, updated_at: new Date().toISOString(), events }, null, 2);
-    chain = chain.then(() => writeText(fs, `${dir}/lifecycle.json`, body)).catch(() => {});
+    chain = chain
+      .then(async () => {
+        await ensureDir(fs, dir);
+        await writeText(fs, `${dir}/lifecycle.json`, body);
+      })
+      .catch(() => {});
   };
 }
 
