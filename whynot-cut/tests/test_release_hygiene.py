@@ -139,10 +139,10 @@ class TestPluginVersionConsistency(unittest.TestCase):
 class TestBridgeVersionTriple(unittest.TestCase):
     def test_python_manifest_and_js_agree(self):
         from lib import ppro_bridge
-        manifest = (SK / "templates/premiere/cep_bridge/CSXS/manifest.xml").read_text(encoding="utf-8")
+        manifest = (SK.parent / "adobe/cep-bridge/CSXS/manifest.xml").read_text(encoding="utf-8")
         m = re.search(rf'ExtensionBundleVersion="({SEMVER})"', manifest)
         self.assertIsNotNone(m, "manifest.xml has no ExtensionBundleVersion")
-        js = (SK / "templates/premiere/cep_bridge/js/bridge.js").read_text(encoding="utf-8")
+        js = (SK.parent / "adobe/cep-bridge/js/bridge.js").read_text(encoding="utf-8")
         j = re.search(rf"var VERSION = '({SEMVER})'", js)
         self.assertIsNotNone(j, "bridge.js has no `var VERSION = 'x.y.z'`")
         self.assertRegex(ppro_bridge.BRIDGE_VERSION, rf"^{SEMVER}$")

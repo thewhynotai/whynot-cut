@@ -1265,7 +1265,7 @@ class TestBridgeSync(unittest.TestCase):
             self.assertEqual(r.stdout.split(), ["True", "False", "True", "True"], r.stderr)
 
     def test_bridge_js_whitelists_stable_folder(self):
-        js = (SK / "templates/premiere/cep_bridge/js/bridge.js").read_text(encoding="utf-8")
+        js = (SK.parent / "adobe/cep-bridge/js/bridge.js").read_text(encoding="utf-8")
         self.assertIn("'ppro-scripts'", js)
         self.assertNotIn(".claude", js)
 

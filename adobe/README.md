@@ -4,6 +4,7 @@
 |---|---|---|
 | `premiere-uxp/` | Premiere Pro UXP: the **spike** plugin (measures which UXP APIs work) and, later, the WhyNot Cut panel plugin | spike: 4a; panel plugin: 4b (this table is current) |
 | `panel-ui/` | Shared panel UI (Spectrum-free, brand tokens) hosted by the Premiere plugin and later After Effects | built (T6.5); mounted by the plugin (`premiere-uxp/src/shell.ts`) |
+| `cep-bridge/` | The CEP shell of the WhyNot Cut bundle `ai.thewhynot.cut.bridge` (`CSXS/manifest.xml`, `index.html`, `js/bridge.js`, `jsx/host.jsx`): the one source; the JSX libraries stay in `whynot-cut/templates/`. `whynot-cut/engine/reel/lib/cep_bundle.py` (`source_dir`, `assemble`) builds a bundle folder from it; not an npm workspace, and a shipped plugin does not carry it | T6.3 Task 1: moved here byte-identical to the installed 3.1.1 |
 
 Node v26 / npm 11. Everything is TypeScript, bundled with esbuild, tested with `node --test` (Node runs `.ts` natively).
 

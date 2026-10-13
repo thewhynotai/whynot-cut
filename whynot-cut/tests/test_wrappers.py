@@ -463,7 +463,7 @@ class TestBridgeEngineHome(unittest.TestCase):
             "if (!m) { throw new Error('engineHome() not found'); }"
             "const f = new Function('fs', 'path', 'HOME', 'extensionDir', m[0] + '; return engineHome();');"
             "process.stdout.write(f(fs, path, process.argv[2], () => path.join(process.argv[2], 'no-extension')));")
-        r = subprocess.run([node, "-e", script, str(SK / "templates/premiere/cep_bridge/js/bridge.js"), str(home)],
+        r = subprocess.run([node, "-e", script, str(SK.parent / "adobe/cep-bridge/js/bridge.js"), str(home)],
                            capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout

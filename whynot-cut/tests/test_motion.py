@@ -27,7 +27,7 @@ from test_pipeline import assert_js_syntax  # noqa: E402  (functions only: impor
 from test_podcast import SHEET, ff, make_episode_client, run_guard, validated_plan  # noqa: E402,F401
 
 AE_TPL = SK / "templates" / "after_effects"
-CEP = SK / "templates" / "premiere" / "cep_bridge"
+CEP = SK.parent / "adobe" / "cep-bridge"
 
 
 # --------------------------------------------------------------------------- fake CEP panel

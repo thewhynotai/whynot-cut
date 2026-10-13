@@ -31,7 +31,7 @@ if sys_path not in _sys.path:
 from lib import cep_queue, common, ppro_bridge  # noqa: E402
 from test_round4_intake import slate_gradient_left  # noqa: E402  (a function only: no test class is imported)
 
-CEP = SK / "templates" / "premiere" / "cep_bridge"
+CEP = SK.parent / "adobe" / "cep-bridge"
 
 
 def _iso(t: float) -> str:

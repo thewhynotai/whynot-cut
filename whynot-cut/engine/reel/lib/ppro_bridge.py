@@ -1,7 +1,7 @@
 """Python side of the WhyNot Cut Bridge (one CEP bundle for Premiere and After Effects; this module is the Premiere side): install, status, submit jobs, wait for results.
 
 Premiere has no scripting entry point from outside (macOS AppleScript exposes only capture/editoriginal; Windows has
-no COM API), so scripts can't be sent to Premiere directly. The bridge panel (templates/premiere/cep_bridge) runs
+no COM API), so scripts can't be sent to Premiere directly. The bridge panel (adobe/cep-bridge) runs
 inside Premiere on macOS and Windows and executes ONLY scripts from <engine home>/ppro-scripts. The plugin's install path changes on every
 update, so `install()`/`sync_scripts()` copy the plugin's JSX there (hash-checked before every job).
 """
@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 
 from .common import TEMPLATES_DIR, current_context
-from . import plat
+from . import cep_bundle, plat
 
 EXT_ID = "ai.thewhynot.cut.bridge"
 LEGACY_EXT_IDS = ("com.nh.bridge",)          # reel-editor 1.x bridge; replaced on install
@@ -94,6 +94,8 @@ def _ver(v: str) -> tuple:
 
 
 def install(force: bool = False) -> dict:
+    """Install the CEP bundle from `cep_bundle.source_dir()`. A plugin build without that source (a shipped plugin)
+    returns ok:false with a `how` and leaves the installed extension as it is."""
     EXT_DIR, QUEUE = ext_dir(), queue_dir()
     refused = plat.sandbox_refusal("install the bridge", EXT_DIR, QUEUE, scripts_dir())     # G79: never in tests
     if refused:
@@ -104,11 +106,13 @@ def install(force: bool = False) -> dict:
         return {"installed": str(EXT_DIR), "skipped": True, "installed_version": cur, "version": BRIDGE_VERSION,
                 "detail": f"installed bridge {cur} is newer than {BRIDGE_VERSION} (this plugin's): kept it. "
                           "`reel ppro-install --force` replaces it."}
-    src = TEMPLATES_DIR / "premiere/cep_bridge"
+    if not all((cep_bundle.source_dir() / f).is_file() for f in cep_bundle.SHELL_FILES):     # before anything is removed
+        return {"ok": False, "error": "this plugin build carries no WhyNot Cut extension",
+                "how": "install WhyNot Cut with its installer (the signed extension comes with it)"}
     EXT_DIR.parent.mkdir(parents=True, exist_ok=True)
     if EXT_DIR.exists():
         shutil.rmtree(EXT_DIR)
-    shutil.copytree(src, EXT_DIR)
+    cep_bundle.assemble(EXT_DIR)
     # tells the panel where the queue lives (the engine home can be a custom folder; Premiere doesn't see our env)
     base = str(current_context().engine_home.resolve())
     (EXT_DIR / "bridge-config.json").write_text(json.dumps({"base": base, "version": BRIDGE_VERSION}), encoding="utf-8")

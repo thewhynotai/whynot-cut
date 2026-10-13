@@ -1002,7 +1002,7 @@ class TestReviewRound1(TempHome):
         (user / ".whynot-cut" / "plugin-options.json").write_text("{}", encoding="utf-8")
 
         def home():
-            r = subprocess.run([node, "-e", script, str(SK / "templates/premiere/cep_bridge/js/bridge.js"), str(user)],
+            r = subprocess.run([node, "-e", script, str(SK.parent / "adobe/cep-bridge/js/bridge.js"), str(user)],
                                capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(r.returncode, 0, r.stderr)
             return norm(r.stdout)
