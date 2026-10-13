@@ -4,11 +4,15 @@
 Looks at the client folder the session ran in (the cwd or a folder above it) and at the client folders right below
 the cwd (a session opened in the clients folder works with --root "<name>"). Removes a lease only when its
 session_id is the ending session's; another session's lease is never touched. Without this hook a lease still ends
-when the session's Claude Code process exits (stale) or after 2 h without a writing command.
+when the session's Claude Code process exits (stale) or after 2 h without a writing command; after /clear the same
+Claude Code process takes its old lease over at its next writing command (writer_lock.same_process, T3.4), so a
+SessionEnd cut short by its 1.5 s budget never locks the session out of its own client.
+It also removes the session's own files in ${CLAUDE_PLUGIN_DATA} (scope, pending context, evidence gate; T3.4).
 Stdlib only, fast; never fails the session (any error -> silent exit 0).
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -35,6 +39,20 @@ def main():
     sid = data.get("session_id") or writer_lock.session_id()
     for root in candidates(Path(data.get("cwd") or os.getcwd())):
         writer_lock.release_own(root, sid)
+    forget(data.get("session_id"))
+
+
+def forget(sid):
+    """The ending session's own files in ${CLAUDE_PLUGIN_DATA} (session_context.session_file, T3.4)."""
+    d = os.environ.get("CLAUDE_PLUGIN_DATA")
+    sid = re.sub(r"[^A-Za-z0-9_-]", "_", str(sid or ""))[:100]
+    if not d or not sid:
+        return
+    for kind in ("scope", "pending-context", "evidence-gate"):
+        try:
+            Path(d, kind, sid).unlink()
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

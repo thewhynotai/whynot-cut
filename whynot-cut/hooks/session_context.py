@@ -7,6 +7,12 @@ Speaks up when the session opens
     new clips; first a warning when another session holds the client's lease (output/.whynot-lock, 3.0 T1.8);
   * in the clients folder (setting `clients_root`, or a folder whose preferences file says so): which clients it holds;
   * in a folder that has a WhyNot Cut preferences file but no clients yet: point to /whynot-cut:start.
+With it (3.0 T3.4): what the editor did in the Premiere panel and Claude has not acted on (approvals not built yet,
+change requests), updates the installer would bring (setup/components.json vs <engine home>/state.json), and in the
+clients folder the clients another session is writing in. Once per install (${CLAUDE_PLUGIN_DATA}/first-run-done) an
+otherwise silent start of a machine that is not set up yet says to offer /whynot-cut:start. It writes
+~/.whynot-cut/plugin-root.json {root, version, at} for the daemon shim and the panel.
+CwdChanged runs this file too: the same context for the new folder, once per place (see flush_cwd).
 Then it starts the panel link: `reel serve --ensure --quiet` (the engine the Premiere panel talks to) as a fully
 detached child it never waits for (Addendum C2.1); skipped when the preference `panel_link` is off, under
 WHYNOT_TEST_SANDBOX or without an engine runtime; a failure is one short line of context, never a failed hook.
@@ -39,8 +45,20 @@ _L = r"[^\W\d_]"
 _BROLL = rf"broll|(?<!{_L})b[-_ ]rolls?(?!{_L})"       # as discover._BROLL: "Jacob rolls", "Bob rolling" are not B-roll
 
 
+def _camel(text: str) -> str:
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text).lower()
+
+
+def _folder_words(text: str) -> set:
+    """A data folder's words, as discover.folder_kind reads them (Latin letters; camelCase is a break)."""
+    words = {w for w in re.split(r"[^a-z]+", _camel(text)) if w}
+    return words | ({"broll"} if re.search(_BROLL, text.lower()) else set())
+
+
 def _words(text: str) -> set:
-    words = {w for w in re.split(r"[^a-z]+", re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text).lower()) if w}
+    """A path's file-name hint words, as discover's word-bounded hints read them: runs of letters in ANY script, so an
+    Arabic word glued to a Latin hint (`مقابلةref`) is one word and no hint (3.0 T3.4, T2.5 carry-over)."""
+    words = set(re.findall(rf"{_L}+", _camel(text)))
     return words | ({"broll"} if re.search(_BROLL, text.lower()) else set())
 
 
@@ -49,7 +67,7 @@ def _is_source_clip(segs: list) -> bool:
     if len(segs) > 2:
         if segs[1].lower() == "episodes":
             return False                       # finished episodes are cut into reels, never edited whole
-        w = _words(segs[1])
+        w = _folder_words(segs[1])
         kind = next((k for k, ws in FOLDER_WORDS if ws & w), None)
         if kind:
             return kind == "source"
@@ -66,8 +84,43 @@ def client_root(start: Path):
 
 
 PREV_START: list = []   # [(time, transcript or None, its size then) of the previous SessionStart, or None]; main()
-# the tools the PreToolUse guard inspects (hooks.json matcher; a test keeps the two equal)
+# the tools the PreToolUse guard inspects (hooks.json matchers; a test keeps the two equal)
 GUARDED_TOOLS = ("Bash", "PowerShell", "Write", "Edit", "MultiEdit", "NotebookEdit")
+# 3.0 T3.4: the file tools run the guard only for a path one of these permission-rule patterns matches (hooks.json
+# `if`, one handler per tool and pattern; a test keeps both equal): a client's sources (assets/, data/ at any depth, any
+# case), the marker and the writer lock (`*.whynot-*`), After Effects preferences. Everything else the guard would
+# allow anyway, so a Write outside them starts no process. `X/**` also matches X itself (seen live, CLI 2.1.295).
+FILE_IF_TOOLS = ("Write", "Edit", "NotebookEdit")
+FILE_IF_PATTERNS = ("//**/[Aa][Ss][Ss][Ee][Tt][Ss]/**", "//**/[Dd][Aa][Tt][Aa]/**", "//**/*.whynot-*/**",
+                    "//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**")
+
+
+def _glob_rx(pattern: str) -> str:
+    """One `if` path pattern as a regex over a /-separated path (this code's mirror of Claude Code's matcher)."""
+    p, out, i = pattern[2:] if pattern.startswith("//") else pattern, "", 0
+    while i < len(p):
+        if p.startswith("**/", i):
+            out, i = out + "(?:.*/)?", i + 3
+        elif p.startswith("/**", i) and i + 3 == len(p):
+            out, i = out + "(?:/.*)?", i + 3
+        elif p[i] == "*":
+            out, i = out + "[^/]*", i + 1
+        elif p[i] == "[":
+            j = p.index("]", i)
+            out, i = out + p[i:j + 1], j + 1
+        else:
+            out, i = out + re.escape(p[i]), i + 1
+    return out
+
+
+_FILE_IF = re.compile("|".join(f"(?:{_glob_rx(p)})" for p in FILE_IF_PATTERNS), re.I)
+
+
+def file_guarded(path) -> bool:
+    """Does a Write/Edit/NotebookEdit of `path` start the guard (the hooks.json `if` filter)? Unknown path: yes."""
+    if not path or not isinstance(path, str):
+        return True
+    return bool(_FILE_IF.fullmatch(path.replace("\\", "/").lstrip("/")))
 _GUARDED_NAME = re.compile(rb'"name"\s*:\s*"(?:' + "|".join(GUARDED_TOOLS).encode() + rb')"')
 _RECORD = re.compile(rb'"type"\s*:\s*"(?:assistant|user)"')      # a transcript record this code knows
 _STAMP = re.compile(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)")
@@ -149,7 +202,8 @@ def guarded_calls_since(transcript: str, since: float, offset: int = 0, beat=Non
                     try:
                         rec = json.loads(line)
                         calls = [c for c in rec["message"]["content"] if isinstance(c, dict)
-                                 and c.get("type") == "tool_use" and c.get("name") in GUARDED_TOOLS]
+                                 and c.get("type") == "tool_use" and c.get("name") in GUARDED_TOOLS
+                                 and _reaches_guard(c)]
                     except (ValueError, KeyError, TypeError):
                         continue
                     when = _epoch(rec.get("timestamp"))
@@ -161,6 +215,14 @@ def guarded_calls_since(transcript: str, since: float, offset: int = 0, beat=Non
             unreadable = unreadable or f is t       # the session's own transcript could not be read
             continue
     return None if unreadable or (lines_seen and not known) else False
+
+
+def _reaches_guard(call: dict) -> bool:
+    """A file tool call outside the `if` patterns never starts the guard: no heartbeat is expected for it."""
+    if call.get("name") not in FILE_IF_TOOLS:
+        return True
+    ti = call.get("input") if isinstance(call.get("input"), dict) else {}
+    return file_guarded(ti.get("file_path") or ti.get("notebook_path"))
 
 
 def _counts(when: float, since: float, beat) -> bool:
@@ -197,10 +259,42 @@ def heartbeat_warning() -> str:
 
 PENDING: list = []      # the context main() decided on; printed once by run(), after the panel link was started
 LINK: list = []         # [(engine home, preferences)] once main() knows them: run() starts the panel link
+DATA: dict = {}         # the hook input (session_id, hook_event_name, ...), once main() has read it
+SCOPE: list = []        # [where the context speaks about: a client root, the clients folder, a set-up folder]
+CWD_EVENT = "CwdChanged"
 
 
 def emit(ctx: str):
     PENDING.append(heartbeat_warning() + ctx)
+
+
+def flush_cwd():
+    """CwdChanged (T3.4): the same context as SessionStart for the new folder, said once per place. Claude Code reads
+    only `systemMessage` (a short note to the editor) and `watchPaths` from this event, so the context itself waits in
+    ${CLAUDE_PLUGIN_DATA}/pending-context/<session> and the guard hands it to Claude with its next Bash/PowerShell call
+    (PreToolUse additionalContext: no extra process). Moving inside the same client says nothing; leaving WhyNot Cut's
+    folders only forgets the place."""
+    sid = DATA.get("session_id")
+    scope_f = session_file("scope", sid)
+    new = SCOPE[0] if SCOPE else ""
+    try:
+        old = scope_f.read_text(encoding="utf-8") if scope_f else ""
+    except OSError:
+        old = ""
+    text = "".join(PENDING)
+    if old == new or not scope_f:
+        return
+    if not new:
+        try:
+            scope_f.unlink()
+        except OSError:
+            pass
+        return
+    _write(scope_f, new)
+    if not text:
+        return
+    _write(session_file("pending-context", sid), text)
+    print(json.dumps({"systemMessage": f"WhyNot Cut: {SCOPE[1] if len(SCOPE) > 1 else new}"}, ensure_ascii=False))
 
 
 def flush(extra: str = ""):
@@ -260,6 +354,9 @@ def run():
         main()
     except Exception:  # noqa: BLE001 — as before: a context that failed says nothing
         PENDING.clear()
+    if DATA.get("hook_event_name") == CWD_EVENT:
+        flush_cwd()
+        return
     flush(panel_link(*LINK[0]) if LINK else "")
 
 
@@ -311,6 +408,183 @@ def reference_style_line(root: Path, has_profile: bool) -> str:
     if st["state"] == "stale" or (has_profile and st["references"] and st["state"] in ("missing", "unrecorded")):
         return f"Reference style: {st['message']}. "
     return ""
+
+
+def _when(at) -> str:
+    """ISO time -> "14:02" today, else "2026-10-12 14:02"."""
+    at = str(at or "")
+    if len(at) < 16:
+        return at or "?"
+    return at[11:16] if at[:10] == time.strftime("%Y-%m-%d") else f"{at[:10]} {at[11:16]}"
+
+
+def _read_json(f: Path):
+    try:
+        return json.loads(f.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+
+
+REQUEST_GLOBS = ("output/*/panel-requests.json", "output/*/*/panel-requests.json", "output/*/*/*/panel-requests.json")
+_DONE = ("done", "resolved", "handled", "closed")
+
+
+def panel_line(root: Path) -> str:
+    """What the editor did in the Premiere panel and Claude has not acted on yet (Addendum C §5.2, T6.6 text): plan
+    approvals given in the panel (01_analysis/plan-approval.json `via: panel`) of items not built since, and change
+    requests (<item>/panel-requests.json: a list, or {"requests": [...]}, entries {text, at, editor_name} not marked
+    done/resolved/handled). Read only when present (Phase 6 writes them); depth-bounded globs, never a tree walk."""
+    approvals, requests = [], []
+    for f in sorted(root.glob("output/projects/*/01_analysis/plan-approval.json"))[:300]:
+        rec = _read_json(f)
+        if not isinstance(rec, dict) or rec.get("via") != "panel" or rec.get("approved") is False or rec.get("stale"):
+            continue
+        item = f.parents[1]
+        try:
+            at = f.stat().st_mtime
+            if any((item / b).stat().st_mtime >= at for b in ("07_premiere/ppro-build-result.json",
+                                                             "04_after_effects/ae-build-result.json")
+                   if (item / b).is_file()):
+                continue                                    # built after the approval: nothing pending
+        except OSError:
+            pass
+        approvals.append(f"{rec.get('editor_name') or 'the editor'} approved {item.name} in Premiere at {_when(rec.get('at'))}")
+    seen = set()
+    for pat in REQUEST_GLOBS:
+        for f in sorted(root.glob(pat))[:100]:
+            if f in seen:
+                continue
+            seen.add(f)
+            rec = _read_json(f)
+            items = rec.get("requests") if isinstance(rec, dict) else rec
+            todo = [e for e in items if isinstance(e, dict) and not any(e.get(k) for k in _DONE)
+                    and str(e.get("status") or "").lower() not in _DONE] if isinstance(items, list) else []
+            if todo:
+                last = " ".join(str(todo[-1].get("text") or "").split())[:120]
+                requests.append(f"{f.parent.name} ({len(todo)}{', latest: “' + last + '”' if last else ''})")
+    out = ""
+    if approvals:
+        out += "Panel approvals not built yet: " + "; ".join(approvals[:6]) + ". "
+    if requests:
+        out += ("Change requests from the Premiere panel waiting: " + "; ".join(requests[:6])
+                + " (/whynot-cut:revise; `reel next` shows them). ")
+    return out
+
+
+def panel_clients_line(base: Path, names: list) -> str:
+    """Clients folder: the clients with panel approvals or change requests waiting (panel_line per client)."""
+    hits = []
+    for n in names[:60]:
+        try:
+            line = panel_line(base / n)
+        except Exception:
+            line = ""
+        if line:
+            hits.append(f"[{n}] {line.strip()}")
+    return ("Premiere panel: " + " ".join(hits[:8]) + " ") if hits else ""
+
+
+def _platform_key() -> str:
+    import platform
+    if os.name == "nt":
+        return "win-x64"
+    return "mac-arm64" if platform.machine().lower() in ("arm64", "aarch64") else "mac-x64"
+
+
+def updates_line(home: Path) -> str:
+    """Pending updates (Phase 7): what this plugin's setup/components.json pins versus what the installer recorded in
+    <engine home>/state.json. Silent without state.json (2.x / `reel setup` installs) or for "<release>" values."""
+    st = _read_json(home / "state.json")
+    comp = _read_json(PLUGIN / "setup" / "components.json")
+    if not isinstance(st, dict) or not isinstance(comp, dict):
+        return ""
+
+    def ver(d, *keys):
+        for k in keys:
+            d = d.get(k) if isinstance(d, dict) else None
+        return str(d) if isinstance(d, (str, int)) and str(d) and str(d) != "<release>" else None
+    pend = []
+    for name, have, want in (("plugin", ver(st, "plugin"), ver(comp, "plugin")),
+                             ("engine runtime", ver(st, "runtime", "id"),
+                              ver(comp, "runtime", "locks", _platform_key(), "id")),
+                             ("ffmpeg", ver(st, "ffmpeg", "version"), ver(comp, "ffmpeg", "version")),
+                             ("fonts", ver(st, "fonts", "version"), ver(comp, "fonts", "version"))):
+        if have and want and have != want:
+            pend.append(f"{name} {have} → {want}")
+    return (f"Updates pending ({', '.join(pend)}): the WhyNot Cut installer brings them; ask the editor before "
+            f"running it. ") if pend else ""
+
+
+def busy_line(base: Path, names: list) -> str:
+    """Clients folder: which clients another session is writing in right now (their live writer lease, T1.8)."""
+    try:
+        import writer_lock
+    except Exception:
+        return ""
+    sid = writer_lock.session_id()
+    busy = []
+    for n in names[:60]:
+        try:
+            rec = writer_lock.other_writer(base / n, DATA.get("session_id") or sid)
+        except Exception:
+            rec = None
+        if rec:
+            busy.append(f"{n} ({writer_lock.describe(rec)})")
+    return (f"Busy (another session holds the client, do not write there): {'; '.join(busy[:8])}. ") if busy else ""
+
+
+# ------------------------------------------------- per-session state in ${CLAUDE_PLUGIN_DATA} (T3.4; SessionEnd cleans)
+def session_file(kind: str, sid):
+    """${CLAUDE_PLUGIN_DATA}/<kind>/<session id>: scope (where this session was last told it is), pending-context (a
+    CwdChanged context the guard hands Claude at its next Bash/PowerShell call), evidence-gate (the Stop gate is on)."""
+    d = os.environ.get("CLAUDE_PLUGIN_DATA")
+    sid = re.sub(r"[^A-Za-z0-9_-]", "_", str(sid or ""))[:100]
+    return Path(d) / kind / sid if d and sid else None
+
+
+def _write(f, text: str):
+    if f is None:
+        return
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, f)
+    except OSError:
+        pass
+
+
+def first_run() -> bool:
+    """True once per install: ${CLAUDE_PLUGIN_DATA}/first-run-done did not exist (it does now). No data folder: False
+    (nothing to remember with, so never nudge)."""
+    d = os.environ.get("CLAUDE_PLUGIN_DATA")
+    if not d:
+        return False
+    f = Path(d) / "first-run-done"
+    if f.exists():
+        return False
+    _write(f, time.strftime("%Y-%m-%dT%H:%M:%S%z") + "\n")
+    return True
+
+
+def plugin_root_file() -> Path:
+    """~/.whynot-cut/plugin-root.json, next to the options pointer (WHYNOT_OPTIONS_FILE moves both)."""
+    return plat.options_file().with_name("plugin-root.json")
+
+
+def write_plugin_root():
+    """Addendum C §3.2: {root, version, at} for the daemon shim and the panel, which must not depend on PATH or the
+    versioned plugin cache path. Written by a real hook run only (CLAUDE_PLUGIN_ROOT and CLAUDE_PLUGIN_DATA set) and
+    only when the root or version changed."""
+    if not (os.environ.get("CLAUDE_PLUGIN_ROOT") and os.environ.get("CLAUDE_PLUGIN_DATA")):
+        return
+    version = str((_read_json(PLUGIN / ".claude-plugin" / "plugin.json") or {}).get("version") or "")
+    f = plugin_root_file()
+    old = _read_json(f)
+    if isinstance(old, dict) and old.get("root") == str(PLUGIN) and old.get("version") == version:
+        return
+    body = {"root": str(PLUGIN), "version": version, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    _write(f, json.dumps(body, ensure_ascii=False, indent=1) + "\n")
 
 
 def writer_line(root: Path, session) -> str:
@@ -410,18 +684,51 @@ def main():
         data = {}
     if not isinstance(data, dict):
         data = {}
-    PREV_START.append(note_session_start(str(data.get("transcript_path") or "")))
+    DATA.update(data)
+    cwd_event = data.get("hook_event_name") == CWD_EVENT
+    if not cwd_event:
+        PREV_START.append(note_session_start(str(data.get("transcript_path") or "")))
     try:
         export_options()
     except OSError:
         pass
-    cwd = Path(plat.native_path(data.get("cwd") or os.getcwd()))
+    if not cwd_event:
+        try:
+            write_plugin_root()
+        except Exception:  # noqa: BLE001 — the daemon falls back to installed_plugins.json
+            pass
+    first = first_run() if not cwd_event else False
+    cwd = Path(plat.native_path((data.get("new_cwd") if cwd_event else None) or data.get("cwd") or os.getcwd()))
     st = settings.load(cwd)
     home = plat.engine_home()
-    LINK.append((home, st))
+    if not cwd_event:
+        LINK.append((home, st))
     env_ok = plat.venv_python(home).exists()
+    speak(cwd, st, home, env_ok, data)
+    if cwd_event:
+        return
+    sid = data.get("session_id")
+    for kind, on in (("scope", bool(SCOPE)),
+                     ("evidence-gate", bool(SCOPE) and st.get("evidence_gate") in (True, "on")
+                      and st.get("approval") != "auto")):
+        f = session_file(kind, sid)
+        if f is not None and on:
+            _write(f, SCOPE[0] if kind == "scope" else "on\n")
+        elif f is not None:
+            try:
+                f.unlink()          # an unrelated folder leaves nothing behind
+            except OSError:
+                pass
+    if first and not PENDING and not (env_ok and st.get("_file")):
+        emit("WhyNot Cut was just installed and is not set up yet. Say so once, briefly, in the editor's language, and "
+             "offer /whynot-cut:start (it sets everything up step by step); then carry on with what they asked.")
+
+
+def speak(cwd: Path, st: dict, home: Path, env_ok: bool, data: dict):
+    """The context for a folder (SessionStart and CwdChanged): emit() it and record the place in SCOPE."""
     root = client_root(cwd)
     if root:
+        SCOPE[:] = [str(root), f"client folder {root.name}"]
         prof = None
         try:
             prof = json.loads((root / "output/client_database/reel-profile/profile.json").read_text(encoding="utf-8")).get("id")
@@ -437,7 +744,9 @@ def main():
              + (f"Podcast episodes in data/Episodes: {', '.join(eps)} (reels plan + publish package: /whynot-cut:podcast; "
                 f"animated motion videos from a window's audio, built in After Effects: /whynot-cut:motion; "
                 f"`reel episodes` shows their state). " if eps else "")
+             + panel_line(root)
              + reference_style_line(root, bool(prof))
+             + updates_line(home)
              + f"{prefs_line(st)} "
              f"Use /whynot-cut:autopilot (edit every new clip), /whynot-cut:edit <clip>, /whynot-cut:revise, "
              f"/whynot-cut:status. assets/ and data/ are read-only.")
@@ -445,6 +754,7 @@ def main():
     legacy = cwd if client_marker.has_layout(cwd) and (cwd / "output").is_dir() and any(
         (cwd / x).exists() for x in ("START_HERE.md", "output/projects", "output/discovery")) else None
     if legacy:            # an unmarked 2.x client opened at its root (WhyNot Cut output there), not under clients_root
+        SCOPE[:] = [str(legacy), f"{legacy.name} looks like a client folder without a marker"]
         emit(f"WhyNot Cut: {legacy} looks like a WhyNot Cut client without a marker (no .whynot-client), so its "
              f"assets/ and data/ are NOT protected by the guard yet. Run `reel doctor --fix --root \"{legacy}\"` "
              f"(it only writes the marker at the client root), then continue.")
@@ -456,13 +766,17 @@ def main():
     except OSError:
         at_base, names = False, []
     if at_base:
+        SCOPE[:] = [str(cwd), "the clients folder"]
         emit(f"WhyNot Cut: this is the clients folder ({cwd}). Client folders: {', '.join(names) or 'none yet'}. "
              f"Pass one to reel as --root \"<name>\", or say 'edit the new videos' (/whynot-cut:autopilot). "
              f"New client: /whynot-cut:new-client. Engine: {'ok' if env_ok else 'not installed (/whynot-cut:start)'}. "
-             f"{prefs_line(st)}")
+             + busy_line(cwd, names) + panel_clients_line(cwd, names) + updates_line(home)
+             + f"{prefs_line(st)}")
     elif st.get("_file") and Path(st["_file"]).parent.parent == cwd.resolve():
+        SCOPE[:] = [str(cwd), "set up here, no client folder open"]
         emit(f"WhyNot Cut is set up here ({prefs_line(st)}) but no client folder is open. "
-             f"Run /whynot-cut:start to continue onboarding or /whynot-cut:new-client to add a client.")
+             + updates_line(home)
+             + f"Run /whynot-cut:start to continue onboarding or /whynot-cut:new-client to add a client.")
 
 
 if __name__ == "__main__":

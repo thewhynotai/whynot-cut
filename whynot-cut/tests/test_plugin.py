@@ -1419,7 +1419,8 @@ def _git_index_modes(root: Path) -> dict[str, str]:
 
 def _expected_exec_paths() -> set[str]:
     """Repo-relative paths that must be 100755 in git: the plugin's executables, every hooks/*.py, and tools/test.sh."""
-    plugin = {"whynot-cut/bin/reel", "whynot-cut/hooks/run_python.sh", "whynot-cut/setup/setup_env.sh",
+    plugin = {"whynot-cut/bin/reel", "whynot-cut/hooks/run_python.sh", "whynot-cut/hooks/stop_gate.sh",
+              "whynot-cut/setup/setup_env.sh",
               "whynot-cut/setup/setup_env.py", "whynot-cut/examples/make_demo.py"}
     hooks = {f"whynot-cut/hooks/{p.name}" for p in (SK / "hooks").glob("*.py")}
     return plugin | hooks | {"tools/test.sh"}

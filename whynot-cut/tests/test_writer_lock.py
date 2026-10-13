@@ -285,13 +285,16 @@ class TestSessionLease(LockFixture):
         lease = self.rec()
         self.assertEqual((lease["session_id"], lease["pid"]), ("session-A", os.getpid()), "holder = CLAUDE_PID")
         self.assertTrue(lease.get("pid_created"), "the holder's creation time is recorded")
-        r = self.b("client-init", "--id", "lock-clinic", "--force")
+        other = sleeper()                    # B runs in its own Claude Code process (T3.4: the same process after
+        self.addCleanup(other.wait)          # /clear is the same writer, see test_hooks_t34.TestLeaseAcrossClear)
+        self.addCleanup(other.kill)
+        r = self.b("client-init", "--id", "lock-clinic", "--force", claude=other.pid)
         self.assertEqual(r.returncode, 2, "B is blocked between A's commands")
         self.assertIn("never release another session's lock yourself", json.loads(r.stdout)["how"])
         self.assertEqual(self.a("client-init", "--id", "lock-clinic", "--force").returncode, 0, "A goes on")
         self.assertEqual(self.rec()["started_at"], lease["started_at"])
-        self.assertEqual(self.b("client-init", "--id", "lock-clinic", "--force").returncode, 2)
-        self.assertEqual(self.b("lock", "--status").returncode, 0, "B can still read")
+        self.assertEqual(self.b("client-init", "--id", "lock-clinic", "--force", claude=other.pid).returncode, 2)
+        self.assertEqual(self.b("lock", "--status", claude=other.pid).returncode, 0, "B can still read")
 
     def test_same_session_parallel_and_sequential_never_blocked(self):
         code = ("import sys, time; sys.path.insert(0, sys.argv[1]); from lib import writer_lock as w; "

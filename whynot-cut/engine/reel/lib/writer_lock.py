@@ -18,6 +18,11 @@ It is stale, and the next writer takes it over with a line in output/logs/pipeli
     drive). A long command touches it every 10 min while it runs.
 A lease ends only by staleness, by `reel lock --release` (the lead, on the editor's word), or by the SessionEnd hook
 (hooks/session_end.py), which removes the ending session's own lease only. A single command never removes a lease.
+Same Claude Code process, new session id (3.0 T3.4, seen live with CLI 2.1.295): /clear ends session A (SessionEnd,
+reason clear) and starts session B in the SAME process (CLAUDE_PID unchanged); Bash then sees CLAUDE_CODE_SESSION_ID=B.
+SessionEnd hooks share a 1.5 s budget, so A's lease may survive /clear with a live holder. A lease whose holder is
+this command's own Claude Code process (same pid, same start time, this computer) is therefore this session's: the
+next writing command takes it over under the new id (a log line says so) and SessionStart does not warn about it.
 
 Session id (who "one writer" is), first match wins:
   WHYNOT_LOCK_SESSION    set by a writing `reel` for the processes it starts (a nested reel is the same writer)
@@ -118,6 +123,16 @@ def holder_pid(env=None) -> int:
     env = os.environ if env is None else env
     v = (env.get("CLAUDE_PID") or "").strip()
     return int(v) if v.isdigit() and pid_alive(int(v)) else os.getpid()
+
+
+def same_process(rec: dict, env=None) -> bool:
+    """Is this lease held by the Claude Code process this command runs under (CLAUDE_PID: alive, same start time, this
+    computer)? Then it is the same conversation under an earlier session id (/clear, /resume), never another writer."""
+    env = os.environ if env is None else env
+    v = (env.get("CLAUDE_PID") or "").strip()
+    if not v.isdigit() or not isinstance(rec, dict) or str(rec.get("pid")) != v or not same_host(rec):
+        return False
+    return pid_alive(int(v), rec.get("pid_created"))
 
 
 # --------------------------------------------------------------------------- processes (Windows has no kill(pid, 0))
@@ -414,6 +429,11 @@ def acquire(root, command: str, env=None) -> Lock:
         if not why and cur.get("session_id") == sid:
             _refresh(root, cur, command)               # re-entrant: this session already holds the client
             return Lock(root, sid, per_command=False)
+        if not why and same_process(cur, env):         # /clear or /resume in the same Claude Code process (T3.4)
+            client_log(root, f"writer lock: session {sid} continues the lease of session {cur.get('session_id') or '?'}"
+                             f" (same Claude Code process {cur.get('pid')}: /clear or /resume)")
+            _refresh(root, dict(cur, session_id=sid), command)
+            return Lock(root, sid, per_command=False)
         if not why:
             raise Busy(root, cur)
         if not _remove_stale(path, cur, why, root):
@@ -436,7 +456,7 @@ def status(root, env=None) -> dict:
     sid = session_id(env)
     idle = _age_s(root) if rec is not None else None
     return {"lock": str(lock_path(root)), "held": rec is not None, "holder": rec, "stale": stale_reason(root, rec),
-            "mine": bool(rec) and rec.get("session_id") == sid, "session_id": sid,
+            "mine": bool(rec) and (rec.get("session_id") == sid or same_process(rec, env)), "session_id": sid,
             "age_min": _minutes_since((rec or {}).get("started_at")) if rec else None,
             "idle_min": round(idle / 60) if idle is not None else None,
             "how": f"ends when the holding session closes or after {STALE_AFTER_S // 3600} h idle; the lead may run "
@@ -475,4 +495,4 @@ def other_writer(root, own_session: str | None) -> dict | None:
     rec = read(root)
     if not rec or stale_reason(root, rec) or (own_session and rec.get("session_id") == own_session):
         return None
-    return rec
+    return None if same_process(rec) else rec

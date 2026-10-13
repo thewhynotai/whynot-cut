@@ -20,7 +20,8 @@ SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", "docs", ".superpowers", "to
 SHIP_TOP = {".claude-plugin", "whynot-cut", "README.md"}
 SKIP_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 EXEC = {"bin/reel", "setup/setup_env.sh", "setup/setup_env.py", "hooks/run_python.sh", "hooks/guard.py",
-        "hooks/session_context.py", "hooks/session_end.py", "examples/make_demo.py"}
+        "hooks/session_context.py", "hooks/session_end.py", "hooks/stop_gate.py", "hooks/stop_gate.sh",
+        "examples/make_demo.py"}
 
 
 def wanted(p: Path, root: Path = ROOT) -> bool:

@@ -426,5 +426,6 @@ class TestHeartbeatAfterReadOnlySessions(ClientFixture):
     def test_guarded_tools_match_the_hook_matcher(self):
         mod = self.module()
         hooks = json.loads((SK / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
-        guard = next(h for h in hooks if "guard.py" in h["hooks"][0]["command"])
-        self.assertEqual(set(mod.GUARDED_TOOLS), set(re.split(r"\|", guard["matcher"])))
+        guarded = {t for h in hooks if any("guard.py" in x["command"] for x in h["hooks"])
+                   for t in re.split(r"\|", h["matcher"])}            # T3.4: one group per filter kind
+        self.assertEqual(set(mod.GUARDED_TOOLS), guarded)

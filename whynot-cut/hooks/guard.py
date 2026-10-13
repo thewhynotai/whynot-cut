@@ -1699,6 +1699,24 @@ def heartbeat():
             pass
 
 
+def deliver_pending(data: dict):
+    """3.0 T3.4: a CwdChanged context waiting for this session (session_context.flush_cwd wrote it to
+    ${CLAUDE_PLUGIN_DATA}/pending-context/<session id>) goes to Claude now, as this allowed call's PreToolUse
+    additionalContext: CwdChanged itself cannot add context, and this costs one stat, no process. The lead only."""
+    d = os.environ.get("CLAUDE_PLUGIN_DATA")
+    sid = re.sub(r"[^A-Za-z0-9_-]", "_", str(data.get("session_id") or ""))[:100]
+    if not d or not sid or data.get("agent_type"):
+        return
+    f = Path(d, "pending-context", sid)
+    try:
+        text = f.read_text(encoding="utf-8")
+        f.unlink()
+    except OSError:
+        return
+    if text.strip():
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": text}}))
+
+
 # a shell command naming output/.whynot-lock that could change it (subagents only read it; `reel lock --status`)
 LOCK_NAME = ".whynot-lock"
 LOCK_WRITE = re.compile(r">|(?<![\w-])-delete\b|\b(rm|del|erase|rd|rmdir|unlink|mv|move|ren|rename|cp|copy|touch|"
@@ -1751,6 +1769,10 @@ def main():
         if guarded:
             block(f"could not check this {tool} call ({type(e).__name__}: {str(e)[:200]}), so it is blocked. "
                   f"Simplify the command or split it; report it if a plain command is refused.")
+    try:
+        deliver_pending(data)           # allowed: hand over a waiting CwdChanged context (never blocks)
+    except Exception:  # noqa: BLE001
+        pass
     sys.exit(0)
 
 

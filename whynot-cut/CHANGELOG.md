@@ -3,6 +3,19 @@
 ## 3.0.0 (unreleased)
 
 ### Added
+- Hooks (T3.4; reference in `hooks/README.md`, live evidence in docs/superpowers/evidence/2026-10-13-t3.4-session-ids.md).
+  Write/Edit/NotebookEdit run the guard only behind `if` filters (client `assets/` and `data/` at any depth and case,
+  `*.whynot-*`, After Effects preferences): any other write starts no process (the guard cost ~260 ms per write on
+  Windows). A CwdChanged hook gives the same context as SessionStart for the new folder, once per place (the guard hands
+  it to Claude with the next Bash/PowerShell call, since CwdChanged cannot add context). SessionStart also lists panel
+  approvals not built yet and change requests from the Premiere panel (`<item>/panel-requests.json`), updates the
+  installer would bring (`setup/components.json` vs `<engine home>/state.json`) and, in the clients folder, the
+  clients another session is writing in; it nudges once per install to /whynot-cut:start on a machine not set up yet,
+  writes `~/.whynot-cut/plugin-root.json` `{root, version, at}` and also runs for `fork`. An optional Stop evidence
+  gate (preference `evidence_gate: on`, off by default and with `approval: auto`) sends back a turn that ran `reel`
+  commands and says ready/done without `reel qc`. After /clear the same Claude Code process keeps its client lease
+  under the new session id (a SessionEnd cut short by its 1.5 s budget no longer locks the session out). The
+  engine-less fallback of "new clips" reads words in any script (an Arabic name glued to `ref` is a clip).
 - userConfig and layered preferences (T3.5). `plugin.json` userConfig gains `language` (ar | en, default ar), `approval`
   (ask | auto), `whisper_model` (large-v3 default | large-v3-turbo | medium | small), `magnific_budget_credits`
   (number, default 300) and `magnific_api_key` (sensitive, optional; kept by Claude Code in the keychain). Engine

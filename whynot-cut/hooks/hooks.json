@@ -1,26 +1,63 @@
 {
-  "description": "WhyNot Cut guardrails (read-only client sources, Premiere-first, role limits) for Bash, PowerShell and file tools; session context for client folders and the clients workspace",
+  "description": "WhyNot Cut guardrails (read-only client sources, Premiere-first, role limits) for Bash, PowerShell and file tools (file tools only for paths in client sources, the marker/lock and After Effects prefs: no process for any other write); session context for client folders and the clients workspace, also after a cd; optional evidence gate at turn end (off unless evidence_gate: on). See hooks/README.md",
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit",
+        "matcher": "Bash|PowerShell",
         "hooks": [
-          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10 }
+          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10}
+        ]
+      },
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {"type": "command", "if": "Write(//**/[Aa][Ss][Ss][Ee][Tt][Ss]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Write(//**/[Dd][Aa][Tt][Aa]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Write(//**/*.whynot-*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Write(//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Edit(//**/[Aa][Ss][Ss][Ee][Tt][Ss]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Edit(//**/[Dd][Aa][Tt][Aa]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Edit(//**/*.whynot-*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Edit(//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "NotebookEdit(//**/[Aa][Ss][Ss][Ee][Tt][Ss]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "NotebookEdit(//**/[Dd][Aa][Tt][Aa]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "NotebookEdit(//**/*.whynot-*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "NotebookEdit(//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10}
+        ]
+      },
+      {
+        "matcher": "MultiEdit",
+        "hooks": [
+          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10}
         ]
       }
     ],
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear|compact",
+        "matcher": "startup|resume|clear|compact|fork",
         "hooks": [
-          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_context.py\"", "timeout": 10 }
+          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_context.py\"", "timeout": 10}
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_context.py\"", "timeout": 10}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_gate.sh\"", "timeout": 30}
         ]
       }
     ],
     "SessionEnd": [
       {
         "hooks": [
-          { "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py\"", "timeout": 10 }
+          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py\"", "timeout": 10}
         ]
       }
     ]
