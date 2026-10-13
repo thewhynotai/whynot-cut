@@ -24,8 +24,8 @@
     },
     "network": {
       "domains": [
-        "ws://localhost:*",
-        "http://localhost:*"
+        "ws://localhost",
+        "http://localhost"
       ]
     }
   },

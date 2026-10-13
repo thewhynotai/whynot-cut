@@ -572,7 +572,7 @@ test("spike 0.1.8 (the 0.1.3 probes + C2.7): manifest version + launchProcess (t
   // C2.7: the spike measured an explicit loopback list (test/spike-016.test.ts); spike 0.1.6 showed the localhost
   // entries work live, so the product lists exactly those two (network "all" closed; docs/adobe/uxp-parity.md)
   assert.ok(Array.isArray(manifest.requiredPermissions.network.domains));
-  assert.deepEqual(product.requiredPermissions.network.domains, ["ws://localhost:*", "http://localhost:*"]);
+  assert.deepEqual(product.requiredPermissions.network.domains, ["ws://localhost", "http://localhost"]);
   assert.match(readFileSync(join(root, "spike", "src", "version.ts"), "utf8"), /SPIKE_VERSION = "0.1.9"/);
   const spike = readFileSync(join(root, "spike", "src", "spike.ts"), "utf8");
   assert.match(spike, /import \{ SPIKE_VERSION \} from "\.\/version\.ts"/);

@@ -216,7 +216,7 @@ test("spike 0.1.6 manifest: name kept, version bumped, an explicit loopback netw
   assert.ok(!LOOPBACK_DOMAINS.includes("all"));
   assert.ok(m.requiredPermissions.launchProcess.schemes.includes("whynotcut"), "openExternal(whynotcut://) needs its scheme");
   // run 024944 measured these two allowed (the 127.0.0.1 forms denied): the product keeps exactly them, never "all"
-  assert.deepEqual(product.requiredPermissions.network.domains, ["ws://localhost:*", "http://localhost:*"]);
+  assert.deepEqual(product.requiredPermissions.network.domains, ["ws://localhost", "http://localhost"]);
   for (const d of product.requiredPermissions.network.domains) assert.ok(LOOPBACK_DOMAINS.includes(d), d);
 });
 

@@ -23,16 +23,16 @@ test("plugin manifest: version is the product version (plugin.json), so a releas
   assert.equal(manifest.version, productVersion);
 });
 
-test("plugin manifest: full file access + network ws/http://localhost:* only (measured, spike 0.1.6) + clipboard readAndWrite + launchProcess for file/folder open (owner decision 2026-10-12), and NOTHING else", () => {
+test("plugin manifest: full file access + network ws/http://localhost only (host entry, any port; measured live 2026-10-13) + clipboard readAndWrite + launchProcess for file/folder open (owner decision 2026-10-12), and NOTHING else", () => {
   assert.deepEqual(manifest.requiredPermissions, {
     localFileSystem: "fullAccess",
     clipboard: "readAndWrite",
     launchProcess: { schemes: ["file"], extensions: [".mp4", ".mov", ".prproj", ""] },
     // live evidence: Premiere 26.5.2, spike 0.1.6 run 024944 (docs/adobe/uxp-parity.md, "Spike 0.1.6 live run"):
-    // `ws://localhost:*` and `http://localhost:*` are allowed; `ws://127.0.0.1:*` / `http://127.0.0.1:*` are denied
+    // live 2026-10-13: the port-less host entries `ws://localhost` / `http://localhost` allow any port; the `:*` forms alone and every 127.0.0.1 form are denied
     // ("Manifest entry not found"). This closes the network "all" security item: the code connects to localhost
     // only (guarded by the bundle test in plugin-package.test.ts), and the daemon binds 127.0.0.1 and ::1.
-    network: { domains: ["ws://localhost:*", "http://localhost:*"] },
+    network: { domains: ["ws://localhost", "http://localhost"] },
   });
   assert.deepEqual(Object.keys(manifest.requiredPermissions).sort(), ["clipboard", "launchProcess", "localFileSystem", "network"]);
 });
@@ -40,7 +40,7 @@ test("plugin manifest: full file access + network ws/http://localhost:* only (me
 test("plugin manifest: network.domains is exactly the two measured localhost entries - never \"all\", never 127.0.0.1, no other host or scheme", () => {
   const domains = manifest.requiredPermissions.network.domains;
   assert.ok(Array.isArray(domains), "an explicit list, not \"all\"");
-  assert.deepEqual(domains, ["ws://localhost:*", "http://localhost:*"]);
+  assert.deepEqual(domains, ["ws://localhost", "http://localhost"]);
   assert.equal(JSON.stringify(manifest).includes("127.0.0.1"), false);
 });
 

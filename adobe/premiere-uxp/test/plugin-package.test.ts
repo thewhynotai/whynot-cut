@@ -230,7 +230,7 @@ test("the shipped index.js with a WebSocket and no engine.json: DaemonSource dia
 });
 
 test("network guard: the shipped code only ever builds ws://localhost:<port> and http://localhost:<port> URLs, and the manifest allows exactly those", () => {
-  // Premiere 26.5.2 allows `ws://localhost:*` / `http://localhost:*` and denies the 127.0.0.1 forms (spike 0.1.6,
+  // Premiere 26.5.2 allows the port-less `ws://localhost` / `http://localhost` (any port; the `:*` forms alone are denied, live 2026-10-13) and denies the 127.0.0.1 forms (spike 0.1.6,
   // docs/adobe/uxp-parity.md), so the manifest lists exactly those two and the code dials localhost: every URL
   // literal in the bundle is the daemon's session or status URL, nothing else (no other host, no https, no wss).
   const js = text(unzipSync(new Uint8Array(readFileSync(ccx)))["index.js"]);
@@ -246,5 +246,5 @@ test("network guard: the shipped code only ever builds ws://localhost:<port> and
     assert.doesNotMatch(code, /(?:wss?|https?):\/\//i, `${f} has its own URL literal`);
   }
   const manifest = JSON.parse(text(unzipSync(new Uint8Array(readFileSync(ccx)))["manifest.json"]));
-  assert.deepEqual(manifest.requiredPermissions.network.domains, ["ws://localhost:*", "http://localhost:*"]);
+  assert.deepEqual(manifest.requiredPermissions.network.domains, ["ws://localhost", "http://localhost"]);
 });
