@@ -374,11 +374,43 @@ class TestPendingLists(HookFixture):
         took = time.monotonic() - t0
         self.assertLess(took, 0.6, "the budget must bound the whole scan")
         self.assertLess(len(calls), 60)
-        self.assertIn(f"(scan cut short: {60 - len(calls)} of 60 clients not checked for busy leases or panel items)",
-                      line)
+        self.assertIn(f"(scan cut short: {60 - len(calls)} of 60 clients not checked for panel approvals or change "
+                      f"requests)", line)
         self.assertIn("[client 00] Change requests", line)
         with mock.patch.object(SC, "panel_line", lambda root: ""):
             self.assertNotIn("cut short", SC.clients_lists(Path(self.tmp.name), names))
+
+    # fix round 2 (m1, m2): leases and the re-key for every client first, the panel scan under the budget after;
+    # the note counts all clients
+    def test_leases_and_rekey_are_never_skipped_by_the_time_budget(self):
+        base = Path(self.tmp.name) / "many"
+        names = [f"c{i:03d}" for i in range(80)]                 # more than 60, the own lease in the very last one
+        for n in names:
+            for d in ("assets", "data", "output"):
+                (base / n / d).mkdir(parents=True)
+            mark_client(base / n)
+        me = os.getppid()
+        env = {"WHYNOT_LOCK_SESSION": "A", "CLAUDE_PID": str(me)}
+        with mock.patch.dict(os.environ, {}):
+            for k in SESSION_ENV:
+                os.environ.pop(k, None)
+            writer_lock.acquire(base / names[-1], "reel transcribe", env).release()
+            other = dict(writer_lock.read(base / names[-1]), session_id="someone-else", pid=os.getpid(),
+                         pid_created=writer_lock.process_created(os.getpid()), host=socket.gethostname(),
+                         host_id=writer_lock.host_id())
+            (base / names[-2] / "output/.whynot-lock").write_text(json.dumps(other), encoding="utf-8")
+
+        def slow(root):
+            time.sleep(0.02)
+            return ""
+        payload = {"hook_event_name": "SessionStart", "source": "clear", "session_id": "B", "cwd": str(base)}
+        with mock.patch.object(SC, "panel_line", slow),                 mock.patch.dict(SC.DATA, payload), mock.patch.dict(os.environ, {"CLAUDE_PID": str(me)}):
+            line = SC.clients_lists(base, names, budget=0.1)
+        self.assertEqual(writer_lock.read(base / names[-1])["session_id"], "B")      # re-keyed after the cut-off
+        self.assertIn(f"{names[-2]} (", line)                                          # busy list covers every client
+        self.assertNotIn(f"{names[-1]} (", line)
+        m = re.search(r"scan cut short: (\d+) of 80 clients", line)                   # m2: all 80 counted
+        self.assertTrue(m and 0 < int(m.group(1)) < 80, line)
 
     def test_clients_folder_scan_on_a_big_tree(self):
         """60 clients x 30 items with stage folders (the old depth-3 glob walked every stage folder of every item)."""
@@ -527,6 +559,18 @@ class TestEvidenceGate(HookFixture):
             '& "C:\\Users\\x\\.whynot-cut\\bin\\reel.cmd" --root "D:\\Clients\\A B" verify --video-id C2': [("verify", "C2")],
             "cd out && reel --video-id C3 status; reel qc": [("status", "C3"), ("qc", None)],
             "reel": [], "echo reel qc": [], "git status": [], "preel qc": [],
+            # fix round 2 (m3): one level of shell / launcher
+            "bash -lc \"reel --root 'D:/A B' qc --video-id C5\"": [("qc", "C5")],
+            "sh -c 'reel qc'": [("qc", None)],
+            "cmd /c reel --video-id C6 qc": [("qc", "C6")],
+            'cmd.exe /d /s /c "reel.cmd qc --video-id C8"': [("qc", "C8")],
+            'powershell -Command "reel verify --video-id C9"': [("verify", "C9")],
+            "powershell.exe -NoProfile -Command \"& 'C:\\x\\reel.cmd' qc\"": [("qc", None)],
+            'pwsh -c "reel qc; reel status"': [("qc", None), ("status", None)],
+            "timeout 60 reel qc": [("qc", None)],
+            "timeout -s KILL 2.5m reel --video-id C4 qc": [("qc", "C4")],
+            'bash -lc "echo reel qc"': [], "bash script.sh --check reel qc": [],
+            "bash -c \"bash -c 'reel qc'\"": [],                     # one level only
         }
         for cmd, want in cases.items():
             with self.subTest(cmd=cmd):
@@ -541,6 +585,14 @@ class TestEvidenceGate(HookFixture):
         self.assertIsNotNone(self.gate("It is ready.", t))                 # was never seen: the gate did not fire
         self.assertIsNone(self.gate("It is ready.", self.turn('"$WHYNOT_HOME/bin/reel" ppro-build',
                                                               "reel --json qc C0001")))
+
+    def test_wrapped_commands_fire_the_gate_and_count_as_proof(self):
+        t = self.turn("bash -lc \"reel ppro-build --video-id C0001\"")
+        self.assertIsNotNone(self.gate("It is ready.", t))
+        for qc in ("bash -lc \"reel qc --video-id C0001\"", "cmd /c reel qc --video-id C0001",
+                   "powershell -Command \"reel qc --video-id C0001\"", "timeout 60 reel qc --video-id C0001"):
+            with self.subTest(qc=qc):
+                self.assertIsNone(self.gate("It is ready.", self.turn("reel ppro-build --video-id C0001", qc)))
 
     # fix round 1 (M2): proof from this turn's subagents, and from earlier turns for the same item
     def test_qc_run_by_a_subagent_this_turn_counts(self):

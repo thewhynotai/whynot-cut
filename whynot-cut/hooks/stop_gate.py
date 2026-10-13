@@ -27,6 +27,8 @@ PROOF = {"qc", "verify"}
 REEL_NAMES = {"reel", "reel.cmd", "reel.exe", "reel.ps1", "reel.bat"}
 VALUE_OPTS = {"--root", "--video-id", "--profile", "--episode"}          # reel's global options that take a value
 PREFIX = {"exec", "time", "command", "nohup", "call", "&", "."}            # words before a command name
+TIMEOUT_VALUE_OPTS = {"-s", "--signal", "-k", "--kill-after"}
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh"}                              # <shell> -c / -lc "<command>"
 SEPARATORS = set(";&|()\n") | {"&&", "||", ";;", "|&"}
 # commands that only look: alone they need no fresh proof, and they do not make an earlier proof stale
 LOOK = {"status", "next", "lock", "doctor", "validate", "ppro-status", "ppro-probe", "ae-status", "ae-probe", "settings",
@@ -45,24 +47,61 @@ def _tokens(cmd: str) -> list:
         return cmd.replace("\\", "/").split()
 
 
-def reel_calls(cmd: str) -> list:
-    """[(subcommand, video id or None)] of every `reel` the command runs (at a command position)."""
+def reel_calls(cmd: str, depth: int = 0) -> list:
+    """[(subcommand, video id or None)] of every `reel` the command runs (at a command position). One level of
+    launcher is unwrapped (fix round 2, m3): `bash -lc "reel ... qc"`, `cmd /c reel ...`, `powershell -Command "..."`,
+    `timeout 60 reel qc`."""
     out, seg = [], []
     for tok in _tokens(cmd) + [";"]:
         if tok in SEPARATORS or (tok and set(tok) <= set(";&|()")):
             if seg:
-                out += _one(seg)
+                out += _one(seg, depth)
             seg = []
         else:
             seg.append(tok)
     return out
 
 
-def _one(seg: list) -> list:
+def _unwrap(name: str, args: list):
+    """The command string a shell / cmd / PowerShell launcher runs, or None."""
+    if name in SHELLS:
+        for k, a in enumerate(args):
+            if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", a):
+                return args[k + 1] if k + 1 < len(args) else None
+    elif name == "cmd":
+        for k, a in enumerate(args):
+            if a.lower() in ("/c", "/k"):
+                return " ".join(args[k + 1:])
+    elif name in ("powershell", "pwsh"):
+        for k, a in enumerate(args):
+            if re.fullmatch(r"-c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?", a, re.I):
+                return " ".join(args[k + 1:])
+    return None
+
+
+def _one(seg: list, depth: int = 0) -> list:
     i = 0
-    while i < len(seg) and (seg[i] in PREFIX or re.fullmatch(r"[A-Za-z_]\w*=.*", seg[i])):
-        i += 1
-    if i >= len(seg) or seg[i].rsplit("/", 1)[-1].lower() not in REEL_NAMES:
+    while i < len(seg):
+        if seg[i] == "timeout":                         # timeout [-s SIG] [-k DUR] [--opt] DURATION command
+            i += 1
+            while i < len(seg) and seg[i].startswith("-"):
+                i += 2 if seg[i] in TIMEOUT_VALUE_OPTS else 1
+            if i < len(seg) and re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", seg[i]):
+                i += 1
+        elif seg[i] in PREFIX or re.fullmatch(r"[A-Za-z_]\w*=.*", seg[i]):
+            i += 1
+        else:
+            break
+    if i >= len(seg):
+        return []
+    name = seg[i].rsplit("/", 1)[-1].lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if depth < 1:
+        inner = _unwrap(name, seg[i + 1:])
+        if inner:
+            return reel_calls(inner, depth + 1)
+    if seg[i].rsplit("/", 1)[-1].lower() not in REEL_NAMES:
         return []
     sub, item, args = None, None, seg[i + 1:]
     j = 0

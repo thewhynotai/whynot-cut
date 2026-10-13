@@ -510,20 +510,18 @@ CLIENT_SCAN_BUDGET_S = 1.0      # the clients-folder lists share this (a NAS wit
 
 def clients_lists(base: Path, names: list, budget: float = CLIENT_SCAN_BUDGET_S) -> str:
     """Clients folder: which clients another session is writing in right now (their live writer lease, T1.8), and
-    the clients with panel approvals or change requests waiting (panel_line per client). One time budget for both
-    (fix round 1): when it runs out, the rest is not checked and the line says so."""
+    the clients with panel approvals or change requests waiting (panel_line per client).
+    Fix round 2 (m1): two passes. First every client's lease (the SessionStart clear/resume re-key and the busy list:
+    one small file per client, cheap, never skipped: a session must not be locked out of its own client by a time
+    budget). Then the panel scan under one time budget (a NAS with many clients must not eat the 10 s); when it runs
+    out the rest is not checked and the line says so, counting all clients."""
     try:
         import writer_lock
     except Exception:
         writer_lock = None
-    deadline = time.monotonic() + budget
-    names = names[:60]
     busy, hits, checked = [], [], 0
-    for n in names:
-        if checked and time.monotonic() >= deadline:
-            break
-        checked += 1
-        if writer_lock is not None:
+    if writer_lock is not None:
+        for n in names:
             try:
                 continue_lease(base / n)
                 rec = writer_lock.other_writer(base / n, DATA.get("session_id") or writer_lock.session_id())
@@ -531,6 +529,11 @@ def clients_lists(base: Path, names: list, budget: float = CLIENT_SCAN_BUDGET_S)
                 rec = None
             if rec:
                 busy.append(f"{n} ({writer_lock.describe(rec)})")
+    deadline = time.monotonic() + budget
+    for n in names:
+        if checked and time.monotonic() >= deadline:
+            break
+        checked += 1
         try:
             line = panel_line(base / n)
         except Exception:
@@ -540,8 +543,8 @@ def clients_lists(base: Path, names: list, budget: float = CLIENT_SCAN_BUDGET_S)
     out = (f"Busy (another session holds the client, do not write there): {'; '.join(busy[:8])}. " if busy else "")
     out += ("Premiere panel: " + " ".join(hits[:8]) + " ") if hits else ""
     if checked < len(names):
-        out += (f"(scan cut short: {len(names) - checked} of {len(names)} clients not checked for busy leases or "
-                f"panel items) ")
+        out += (f"(scan cut short: {len(names) - checked} of {len(names)} clients not checked for panel approvals "
+                f"or change requests) ")
     return out
 
 
@@ -603,7 +606,9 @@ def write_plugin_root():
 def continue_lease(root: Path):
     """SessionStart after /clear or /resume (fix round 1, M3): the lease this Claude Code process (CLAUDE_PID) held
     under the previous session id is this session's now (SessionEnd's 1.5 s may have missed releasing it). The only
-    takeover of a live lease: a new session id at any other time is another writer (T1.8)."""
+    takeover of a live lease: a new session id at any other time is another writer (T1.8).
+    `fork` (a branched conversation) deliberately does not rekey: a fork is a different conversation, not the same
+    one continued (fix round 2, m4)."""
     if DATA.get("hook_event_name") != "SessionStart" or DATA.get("source") not in ("clear", "resume"):
         return
     sid = DATA.get("session_id")
