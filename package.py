@@ -33,6 +33,8 @@ def wanted(p: Path, root: Path = ROOT) -> bool:
         return p.is_file()                                    # the BUILT guide (master plan D1 / T11.1) ships
     if any(part in SKIP_DIRS for part in rel.parts) or p.name in SKIP_FILES or p.name.startswith("._"):
         return False
+    if rel.parts[:3] == ("whynot-cut", "evals", "results"):   # local `claude plugin eval` runs (T3.7, review 6.3)
+        return False
     if p.suffix in (".pyc", ".tmp") or rel.as_posix().endswith(".local.md") or p.name == "package.py":
         return False
     return p.is_file()
