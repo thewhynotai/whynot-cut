@@ -1298,26 +1298,35 @@ def cmd_client_init(a):
     import shutil
     p = Path(a.root).expanduser().resolve()
     dst = p / CLIENT_PROFILE_REL
-    if dst.exists() and any(dst.iterdir()) and not a.force:
-        raise SystemExit(f"{dst} already exists (use --force to refresh from the template; existing files are kept as *.bak)")
-    src = PROFILES_DIR / (a.from_profile or "_template")
-    if not src.is_dir():
-        raise SystemExit(f"unknown profile {a.from_profile!r}; shipped: {[d.name for d in PROFILES_DIR.iterdir() if d.is_dir()]}")
     if a.prefix is not None and not valid_prefix(a.prefix):
         from lib.errors import Guidance
         raise Guidance(f"--prefix {a.prefix!r} cannot be used in file names",
-                       "Use letters, digits, '-' or '_' only (no spaces, no / \\ : * ? \" < > |), e.g. --prefix NH.")
+                       "Use up to 24 letters (Arabic too), digits, '.', '-' or '_', starting with a letter, digit or "
+                       "'_' and not ending with '.' (no spaces, no '..', no / \\ : * ? \" < > |), e.g. --prefix NH.")
+    if dst.exists() and any(dst.iterdir()) and not a.force:
+        raise SystemExit(f"{dst} already exists (use --force to refresh from the template; existing files are kept as "
+                         "*.bak, or *.bak.1, *.bak.2, ... when a backup is already there)")
+    src = PROFILES_DIR / (a.from_profile or "_template")
+    if not src.is_dir():
+        raise SystemExit(f"unknown profile {a.from_profile!r}; shipped: {[d.name for d in PROFILES_DIR.iterdir() if d.is_dir()]}")
     old_prefix = (read_json(dst / "profile.json", {}) or {}).get("prefix") if dst.is_dir() else None
     dst.mkdir(parents=True, exist_ok=True)
-    written = []
+    written, backups = [], []
     for f in src.iterdir():
         if f.name.startswith(".") or not f.is_file():
             continue
         t = dst / f.name
-        if t.exists():
-            t.replace(t.with_suffix(t.suffix + ".bak"))    # replace: a second --force on Windows (a .bak exists)
+        if t.exists():                    # never overwrite a backup: <name>.bak, else the first free <name>.bak.N
+            bak, n = t.with_name(t.name + ".bak"), 0
+            while bak.exists():
+                n += 1
+                bak = t.with_name(f"{t.name}.bak.{n}")
+            t.rename(bak)
+            backups.append(str(bak))
         shutil.copy2(f, t)
         written.append(str(t))
+    if backups:
+        print("kept the previous files as: " + ", ".join(Path(b).name for b in backups), file=sys.stderr)
     pj = read_json(dst / "profile.json", {})
     pj["id"] = a.id
     if a.prefix:
@@ -1334,7 +1343,8 @@ def cmd_client_init(a):
         print(f"note: {e}", file=sys.stderr)
     from lib.claude_perms import inherit_for_new_client
     perms = inherit_for_new_client(p)     # T3.9: the clients folder's `reel *` rules, when the editor accepted them
-    out({"profile_dir": str(dst), "id": a.id, "from": src.name, "prefix": pj["prefix"], "files": written, "marker": str(p / MARKER),
+    out({"profile_dir": str(dst), "id": a.id, "from": src.name, "prefix": pj["prefix"], "files": written,
+         "backups": backups, "marker": str(p / MARKER),
          **({"allow_reel": perms} if perms else {}),
          "next": "Fill brand.json / transcription.json / glossary / notes.md from the client's own documents (never invent)."})
 
@@ -1581,7 +1591,7 @@ def main(argv: list[str] | None = None):
         if name == "board":
             sp.add_argument("--json", action="store_true",
                             help="print the JSON document (stable, `board: 1`; the same data the WhyNot Cut panel shows; "
-                                 "fields in lib/board.py) instead of the plain table")
+                                 "fields in lib/board.py; a client's `prefix` may be null) instead of the plain table")
             sp.add_argument("--clients-root", metavar="DIR", help="the folder that holds the client folders (default: "
                             "the configured clients folder); --root <client> shows one client")
             sp.add_argument("--budget", type=float, default=5.0, metavar="SECONDS",

@@ -17,7 +17,10 @@ in the editor's language (settings `language`, ar by default; `--lang`):
      "totals": {"clients": 2, "items": 3, "new": 1, "working": 1, "waiting_for_you": 1, "blocked": 0, "done": 0,
                 "not_scanned": 0},            # not_scanned: clients the time budget skipped
      "clients": [
-       {"name": "Dr Mona Adel", "path": "<folder>", "prefix": "MA" | null, "profile": "dr-mona" | null,
+       {"name": "Dr Mona Adel", "path": "<folder>",
+        "prefix": "MA" | null,                 # null when skipped, or when the time budget ran out during the prefix
+                                               # check: an optional field for the panel (a string otherwise)
+        "profile": "dr-mona" | null,
         "counts": {"new": 1, "working": 0, "waiting_for_you": 1, "blocked": 0, "done": 0},
         "truncated": false, "error": null,     # error: the client could not be read (the others still are)
         "skipped": null | "time budget",       # reached after the deadline: listed, not read
@@ -45,7 +48,7 @@ import unicodedata
 from pathlib import Path
 
 from .common import (DONE_STATUSES, Context, Paths, client_folders, derived_prefix, is_junk, load_status, now_iso,
-                     read_json, stored_prefix, use_context)
+                     current_context, read_json, stored_prefix, use_context)
 
 BOARD_VERSION = 1
 MAX_CLIENTS = 200
@@ -277,8 +280,12 @@ def client_card(root: Path, next_fn=None, deadline: float | None = None) -> tupl
     over = False
     with use_context(Context(root)):
         try:
-            card["prefix"] = stored_prefix() or derived_prefix(root, deadline)
+            stored = stored_prefix()
+            card["prefix"] = stored or derived_prefix(root, deadline)
             over = card["prefix"] is None       # the project scan for the prefix ran out of time
+            if not stored and card["prefix"]:   # next_doc's project_prefix() reuses it: one scan per card (m2)
+                ctx = current_context()
+                ctx.__dict__.setdefault("_prefix_cache", {})[str(ctx.root) if ctx.root else ""] = card["prefix"]
             card["profile"] = (read_json(root / "output/client_database/reel-profile/profile.json", {}) or {}).get("id")
             projects = _dirs(root / "output" / "projects")
             episodes = _dirs(root / "output" / "episodes")

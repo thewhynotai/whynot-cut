@@ -195,6 +195,18 @@ class BoardFixture(unittest.TestCase):
         text = B.table({"clients": [card], "totals": {}}, lang="en")
         self.assertTrue(any("C0101" in ln and "could not be read" in ln for ln in text.splitlines()), text)
 
+    def test_prefix_is_scanned_once_per_card(self):              # fix-1 review m2: next_doc reuses the card's prefix
+        from unittest import mock
+        touch(self.b / "output/projects/C0100/07_premiere/project/C0100_RE_EDIT.prproj")
+
+        def nxt(p):                                                 # like cli.next_doc: names the project file
+            return {"next": f"ppro-build {p.video_id}_{common.project_prefix()}_EDIT", "stale": []}
+        with mock.patch.object(common, "existing_prefix", wraps=common.existing_prefix) as spy:
+            card, _ = B.client_card(self.b, nxt, None)
+        self.assertEqual(card["prefix"], "RE")
+        self.assertEqual(spy.call_count, 1)
+        self.assertIn("C0100_RE_EDIT", {it["id"]: it for it in card["items"]}["C0100"]["next"])
+
     def test_table_in_arabic_by_default_done_folded(self):
         for i in range(3):
             common.write_json(self.b / f"output/projects/D000{i}/08_quality_control/project-status.json",
@@ -396,6 +408,26 @@ class Prefix(unittest.TestCase):
         self.assertEqual((code, doc["prefix"]), (0, "N-H"), err)
         code, doc, err = reel("client-init", "--root", str(root), "--id", "hany", "--force", "--prefix", "HS")
         self.assertEqual((code, doc["prefix"]), (0, "HS"), err)
+        code, doc, _ = reel("client-init", "--root", str(root), "--id", "hany", "--prefix", "a b")
+        self.assertRegex(doc["how"], r"(?i)arabic")                # the message says what is accepted
+        self.assertIn("'.'", doc["how"])
+
+    def test_force_twice_never_loses_the_original_profile(self):  # fix-1 review N1
+        root = self._root("Hany Saad")
+        code, _, err = reel("client-init", "--root", str(root), "--id", "hany")
+        self.assertEqual(code, 0, err)
+        prof = root / common.CLIENT_PROFILE_REL
+        (prof / "brand.json").write_text('{"ORIGINAL": "the editor\'s brand"}', encoding="utf-8")
+        backups = []
+        for _ in range(2):
+            code, doc, err = reel("client-init", "--root", str(root), "--id", "hany", "--force")
+            self.assertEqual(code, 0, err)
+            backups += doc["backups"]
+        originals = [f for f in prof.iterdir() if f.name.startswith("brand.json.bak")
+                     and "ORIGINAL" in f.read_text(encoding="utf-8")]
+        self.assertEqual(len(originals), 1, sorted(f.name for f in prof.iterdir()))
+        self.assertEqual(sorted(f.name for f in prof.glob("brand.json.bak*")), ["brand.json.bak", "brand.json.bak.1"])
+        self.assertIn("brand.json.bak.1", {Path(b).name for b in backups})
 
     def test_defaults_no_longer_say_re(self):
         self.assertIsNone(json.loads((SK / "config/defaults/profile.json").read_text(encoding="utf-8"))["prefix"])

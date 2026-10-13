@@ -74,7 +74,10 @@ key = _key
 def index(ids: dict) -> dict:
     """{key(relative path): id} for a map {id: relative path}: build it once, then look clips up by key(rel) (dict
     lookups; id_of per clip is a scan of the whole map)."""
-    return {_key(v): k for k, v in ids.items()}
+    out: dict = {}
+    for k, v in ids.items():
+        out.setdefault(_key(v), k)       # the first id of a file, as id_of (a hand-edited map may list a file twice)
+    return out
 
 
 def assign(root, rels, ids: dict) -> dict:

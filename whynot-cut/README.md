@@ -241,7 +241,7 @@ existing project: a stored prefix wins whenever it is safe in a file name (2.x v
 tag the client's existing projects already use (`.prproj`, the XML fallback in `07_premiere/interchange/`, `.aep`; a
 2.x client keeps `RE`); else the initials of the client folder's ASCII words (a leading Dr/Prof/Eng skipped:
 "Nour Hospital" → NH); else `WN` (an Arabic-only name). `reel scaffold` stores it when it creates the folder (renaming
-the folder later keeps it) and `reel client-init` stores it in the profile (`--prefix` sets it: letters, digits, `-`,
+the folder later keeps it) and `reel client-init` stores it in the profile (`--prefix` sets it: letters (Arabic too), digits, `.`, `-`,
 `_`; `--force` keeps the stored one).
 
 `reel board` prints one table of every client under the clients folder (each video: state, next step), in the
