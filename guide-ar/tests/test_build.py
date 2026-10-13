@@ -454,6 +454,22 @@ class CmdAndShotTests(unittest.TestCase):
         self.assertRegex(img, r"max-height:\s*150mm")
         self.assertRegex(self._rule(".tip code"), r"background:\s*#FFFFFF")
 
+    def test_css_claude_run_command_caption(self):
+        """Ruling R2-4: a .cmd box Claude runs (data-who="claude") shows «يشغّله Claude — لا تكتبه أنت» on its own
+        RTL line, drawn by CSS outside the <code> (the source text stays just the command)."""
+        rule = self._rule('.cmd[data-who="claude"]::before')
+        self.assertIn('content: "يشغّله Claude — لا تكتبه أنت"', rule)
+        self.assertRegex(rule, r"display:\s*block")
+        self.assertRegex(rule, r"direction:\s*rtl")
+        boxes = []
+        for path in sorted((GUIDE / "chapters").glob("*.html")):
+            for m in re.finditer(r"<div\b([^>]*)\bclass=\"cmd\"([^>]*)>(.*?)</div>",
+                                 path.read_text(encoding="utf-8"), flags=re.S):
+                code = re.sub(r"<[^>]+>", "", m.group(3)).strip()
+                if code.startswith("reel ") and 'data-who="claude"' not in m.group(1) + m.group(2):
+                    boxes.append(f"{path.name}: {code[:40]}")
+        self.assertEqual(boxes, [], 'every `reel …` .cmd box needs data-who="claude"')
+
 
 class PrintTests(unittest.TestCase):
     def test_print_timeout_stops_browser_and_cleans_profile(self):

@@ -10,7 +10,7 @@
 <p>يبدأ الموشن من الحلقة كما في <a href="#ch08-title">الفصل&nbsp;8</a>. في خطة الريلز يعلّم Claude الريلز التي تناسب الموشن، ويقترحه عليك عند الاختيار. والاختيار منك وحدك.</p>
 
 <ol class="steps">
-<li>عند اختيار الريلز، اكتب رقم الريل ومعه كلمة «موشن»، مثل «<bdi dir="ltr">R03</bdi> موشن». ويمكنك أيضًا اختيار موضوع كامل من خريطة الموضوعات، مثل «<bdi dir="ltr">T02</bdi> موشن»، مع نوع المحتوى الذي تريده، مثل نصيحة.</li>
+<li>عند اختيار الريلز، اكتب رقم الريل ومعه كلمة «موشن»، مثل «<bdi dir="ltr">R03</bdi> موشن». ويمكنك أيضًا اختيار موضوع كامل برقمه في خريطة الموضوعات (<a href="#ch08-plan">خطة الريلز</a>)، مثل «<bdi dir="ltr">T02</bdi> موشن»، مع نوع المحتوى الذي تريده، مثل نصيحة.</li>
 <li>حدّد المقاس: رأسي <bdi dir="ltr">9:16</bdi> أو أفقي <bdi dir="ltr">16:9</bdi>.</li>
 </ol>
 
@@ -53,7 +53,7 @@
 <ul>
 <li>كلام المتحدث حرفيًا، أو سطر تحريري معلَّم بأنه كذلك.</li>
 <li>الأرقام كما قيلت فقط، والأسماء من ورقة الحلقة فقط.</li>
-<li>الرسومات والأيقونات المرخّصة فقط. وإذا كانت الرخصة تشترط ذكر المصدر (<bdi dir="ltr">CC-BY</bdi>)، يُذكر في الكابشن المنشور مع الفيديو.</li>
+<li>الرسومات والأيقونات المرخّصة فقط. وإذا كانت الرخصة من نوع <bdi dir="ltr">CC-BY</bdi>، وهي رخصة تسمح بالاستخدام بشرط ذكر صاحب العمل، يُذكر صاحبه في الكابشن المنشور مع الفيديو.</li>
 </ul>
 
 <figure class="shot">
@@ -63,10 +63,10 @@
 
 <h2 id="ch09-ae">تجهيز After Effects</h2>
 
-<p>بعد الموافقة يُبنى المشروع داخل After Effects عبر WhyNot Cut Bridge، وهو الجسر نفسه الذي يربط Premiere Pro. جهّز جهازك هكذا:</p>
+<p>بعد الموافقة يُبنى المشروع داخل After Effects من خلال لوحة WhyNot Cut Bridge، وهي اللوحة نفسها التي يبني بها Claude مشاريع Premiere Pro (<a href="#ch01-panels">الفصل&nbsp;1</a>). جهّز جهازك هكذا:</p>
 
 <ol class="steps">
-<li>بعد تثبيت الجسر، أعد تشغيل After Effects مرة واحدة.</li>
+<li>بعد تثبيت لوحة WhyNot Cut Bridge، أعد تشغيل After Effects مرة واحدة.</li>
 <li>ثبّت خطوط هوية العميل من <bdi dir="ltr"><code>assets/Fonts/</code></bdi> على الجهاز نفسه، ثم أعد تشغيل After Effects. بدون الخطوط لا يبدأ البناء، وتظهر الخطوط الناقصة في قائمة «محتاجك (Needs&nbsp;you)». ولا يُستخدم خط بديل إلا بموافقتك.</li>
 <li>احفظ أي عمل مفتوح في After Effects قبل البناء. البناء يرفض أن يبدأ ما دام هناك عمل غير محفوظ.</li>
 </ol>
@@ -77,16 +77,29 @@
 </figure>
 
 <aside class="todo" data-phase="6">
-<p>طريقة تثبيت جسر After Effects وشكل لوحة WhyNot Cut داخله تتغير في مرحلة لاحقة من الإصدار <bdi dir="ltr">3.0</bdi>، وتُشرح هنا بعد اكتمالها. حتى ذلك الحين يثبّت Claude الجسر ويخبرك بالخطوة الباقية عليك.</p>
+<p>طريقة تثبيت اللوحة في After Effects وشكل لوحة WhyNot Cut داخله تتغير في مرحلة لاحقة من الإصدار <bdi dir="ltr">3.0</bdi>، وتُشرح هنا بعد اكتمالها. حتى ذلك الحين يثبّت Claude لوحة WhyNot Cut Bridge ويخبرك بالخطوة الباقية عليك.</p>
 </aside>
 
-<p>أول مرة على كل إصدار من After Effects يُجرى اختبار قصير للكتابة العربية، ويشاهد Claude نتيجته بنفسه قبل أن يسجّلها. وأي إعداد داخل After Effects، أو إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi>، تغيّره أنت بنفسك، ويعطيك Claude الخطوة.</p>
+<p>أول مرة على كل إصدار من After Effects يُجرى اختبار قصير للكتابة العربية، ويشاهد Claude نتيجته بنفسه قبل أن يسجّلها. وأي إعداد داخل After Effects، أو إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi>، تغيّره أنت بنفسك، ويعطيك Claude الخطوة. وإذا كانت الخطوة أمرًا تشغّله، فطريقة تشغيله في <a href="#ch02-run-command">الفصل&nbsp;2</a>.</p>
 
 <aside class="warn">
 <p>إذا عدّلت مشروع After Effects بيدك، لا يكتب WhyNot Cut فوقه إلا بموافقتك، وبعد أن يحتفظ بنسخة احتياطية منه.</p>
 </aside>
 
-<p>إذا لم يكن على الجهاز After Effects، أو كان الجسر لا يعمل، يُسلَّم المشروع على شكل سكريبت فقط، ويُعلَّم «لم&nbsp;يُتحقَّق منه (Not&nbsp;verified)»، لأن فحص الجودة لا ينجح بدون قراءة المشروع مرة أخرى من After Effects. ويقول لك Claude ذلك صراحة.</p>
+<p>إذا لم يكن على الجهاز After Effects، أو كانت لوحة WhyNot Cut Bridge لا تعمل، يُسلَّم المشروع على شكل سكريبت فقط: ملف يبني المشروع داخل After Effects عندما تشغّله. تجده في <bdi dir="ltr"><code>04_after_effects/scripts/</code></bdi> داخل فولدر المشروع، واسمه ينتهي بـ <bdi dir="ltr"><code>_motion.jsx</code></bdi>. قد يشغّله Claude لك في After Effects، أو تشغّله أنت على جهاز عليه After Effects:</p>
+
+<ol class="steps">
+<li>احفظ أي مشروع مفتوح في After Effects أو أغلقه. السكريبت يرفض أن يعمل ما دام هناك عمل غير محفوظ، وتظهر لك رسالة بذلك.</li>
+<li>من After Effects اختر <bdi dir="ltr">File&nbsp;›&nbsp;Scripts&nbsp;›&nbsp;Run&nbsp;Script&nbsp;File…</bdi> ثم اختر ملف السكريبت.</li>
+<li>انتظر حتى يُبنى المشروع، ثم أخبر Claude.</li>
+</ol>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: After Effects وقائمة <bdi dir="ltr">File&nbsp;›&nbsp;Scripts&nbsp;›&nbsp;Run&nbsp;Script&nbsp;File…</bdi>، والملف <bdi dir="ltr"><code>build_EP01_R03_MO_motion.jsx</code></bdi> من فولدر «عيادة مثال» مختارًا</span></div>
+<figcaption>تشغيل سكريبت الموشن يدويًا عندما لا تعمل اللوحة.</figcaption>
+</figure>
+
+<p>المشروع المبني بهذه الطريقة يبقى «لم&nbsp;يُتحقَّق منه (Not&nbsp;verified)»، لأن فحص الجودة لا ينجح بدون قراءة المشروع مرة أخرى من After Effects. ويقول لك Claude ذلك صراحة.</p>
 
 <h2 id="ch09-results">نتائج الموشن وفحص الجودة</h2>
 

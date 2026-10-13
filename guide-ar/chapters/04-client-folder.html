@@ -16,14 +16,13 @@
 
 <h2 id="ch04-create">إنشاء فولدر لعميل</h2>
 
-<p>أول فولدر عميل يُنشأ لك أثناء الإعداد الأول بالأمر <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>. ولأي عميل بعد ذلك، اكتب لـ Claude «عميل جديد» (<a href="#ch05-title">الفصل&nbsp;5</a>)، أو أنشئ الفولدر بنفسك:</p>
+<p class="lead-in">أول فولدر عميل يُنشأ لك أثناء الإعداد الأول بالأمر <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>. ولأي عميل بعد ذلك يُنشئ Claude الفولدر لك داخل فولدر العملاء (clients folder)، وهو الفولدر الذي اخترته في الإعداد الأول لتُحفظ فيه كل فولدرات العملاء، مثل <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> على Windows أو <bdi dir="ltr"><code>~/Documents/WhyNot Clients</code></bdi> على Mac:</p>
 
 <ol class="steps">
-<li>اختر مكان فولدرات العملاء، مثل <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> على Windows أو <bdi dir="ltr"><code>~/Documents/WhyNot Clients</code></bdi> على Mac.</li>
-<li>اكتب الأمر التالي مع اسم العميل، فيُنشئ الفولدر بكل الفولدرات الفرعية:
-<div class="cmd"><bdi dir="ltr"><code>reel scaffold --root "D:/WhyNot Clients/Example Clinic" --name "Example Clinic"</code></bdi></div></li>
-<li>افتح الملف <bdi dir="ltr"><code>START_HERE.md</code></bdi> داخل الفولدر الجديد: فيه جدول بما يوضع في كل فولدر، وملخص بالعربية.</li>
-<li>ضع ملفات العميل في أماكنها كما في الجدول التالي.</li>
+<li>اكتب لـ Claude طلبًا فيه اسم العميل، مثل «اعمل فولدر عميل جديد اسمه Example Clinic».</li>
+<li>يُنشئ Claude الفولدر بكل الفولدرات الفرعية، ويعرض لك ما يوضع في كل فولدر.</li>
+<li>تجد الجدول نفسه في الملف <bdi dir="ltr"><code>START_HERE.md</code></bdi> داخل الفولدر الجديد، ومعه ملخص بالعربية. افتحه بالزر الأيمن ثم <bdi dir="ltr">Open&nbsp;with&nbsp;›&nbsp;Notepad</bdi> (على Mac: <bdi dir="ltr">Open&nbsp;With&nbsp;›&nbsp;TextEdit</bdi>).</li>
+<li>ضع ملفات العميل في أماكنها كما في الجدول التالي، ثم أخبر Claude. وإذا أردت أن يبني الملف التعريفي للعميل بعدها، اكتب «عميل جديد» (<a href="#ch05-title">الفصل&nbsp;5</a>).</li>
 </ol>
 
 <figure class="shot">
@@ -55,7 +54,7 @@
 </tbody>
 </table>
 
-<p><strong>الاسم المختصر للكليب.</strong> كل فيديو خام يأخذ اسمًا مختصرًا (clip id) تستخدمه في طلباتك. إذا كان اسم الملف لاتينيًا بسيطًا فالاسم المختصر هو اسم الملف نفسه بلا امتداد: الملف <bdi dir="ltr"><code>C0001.MP4</code></bdi> اسمه المختصر <bdi dir="ltr"><code>C0001</code></bdi>. وإذا كان اسم الملف عربيًا يُعطى اسمًا مختصرًا مثل <bdi dir="ltr"><code>CLIP_1A2B3C</code></bdi>، وتجد قائمة الأسماء المختصرة في <bdi dir="ltr"><code>output/discovery/clip-ids.json</code></bdi>.</p>
+<p><strong>الاسم المختصر للكليب.</strong> كل فيديو خام يأخذ اسمًا مختصرًا (clip id) تستخدمه في طلباتك. إذا كان اسم الملف لاتينيًا بسيطًا فالاسم المختصر هو اسم الملف نفسه بلا امتداد: الملف <bdi dir="ltr"><code>C0001.MP4</code></bdi> اسمه المختصر <bdi dir="ltr"><code>C0001</code></bdi>. وإذا كان اسم الملف عربيًا يُعطى اسمًا مختصرًا مثل <bdi dir="ltr"><code>CLIP_1A2B3C</code></bdi>، وتُحفظ قائمة الأسماء المختصرة في <bdi dir="ltr"><code>output/discovery/clip-ids.json</code></bdi>، وهو ملف بيانات يقرؤه WhyNot Cut ولا تحتاج إلى فتحه: اسأل Claude عن الاسم المختصر لأي فيديو.</p>
 
 <p><strong>ماذا لو نقصت ملفات الهوية؟</strong> يمكن البدء بدون الشعار أو الخطوط أو الألوان، لكن سيقول لك Claude ما الذي سيبدو عامًّا بدونها، ولن يخترع بديلًا من عنده.</p>
 
@@ -69,8 +68,8 @@
 <li>أكمل ما ينقص، أو ابدأ المونتاج إذا كان الموجود كافيًا.</li>
 </ol>
 
-<p class="lead-in">الأمر الذي يُشغَّل في الخلفية لهذا الفحص هو:</p>
-<div class="cmd"><bdi dir="ltr"><code>reel inbox --root "D:/WhyNot Clients/Example Clinic"</code></bdi></div>
+<p class="lead-in">ستجد في رسائل Claude الأمر الذي يشغّله بنفسه لهذا الفحص، ولا تحتاج إلى كتابته:</p>
+<div class="cmd" data-who="claude"><bdi dir="ltr"><code>reel inbox --root "D:/WhyNot Clients/Example Clinic"</code></bdi></div>
 
 <figure class="shot">
 <div class="shot-frame"><span>لقطة شاشة: رد Claude بعد فحص فولدر <bdi dir="ltr"><code>Example Clinic</code></bdi>: كليب جديد واحد <bdi dir="ltr">C0001</bdi>، وتنبيه بأن ملف الألوان غير موجود</span></div>
@@ -79,7 +78,26 @@
 
 <h2 id="ch04-episode-sheet">ورقة الحلقة (episode sheet)</h2>
 
-<p>لكل حلقة في <bdi dir="ltr"><code>data/Episodes</code></bdi> يمكنك أن تضع ورقة نصية قصيرة بنفس اسم الحلقة وامتداد <bdi dir="ltr"><code>.md</code></bdi>. مثلًا الحلقة <bdi dir="ltr"><code>EP01.mp4</code></bdi> ورقتها <bdi dir="ltr"><code>EP01.md</code></bdi>. الورقة اختيارية، لكنها تحسّن النتيجة كثيرًا، لأن روابط النشر لا تؤخذ إلا منها. شكلها:</p>
+<p>لكل حلقة في <bdi dir="ltr"><code>data/Episodes</code></bdi> يمكنك أن تضع ورقة نصية قصيرة بنفس اسم الحلقة وامتداد <bdi dir="ltr"><code>.md</code></bdi>. مثلًا الحلقة <bdi dir="ltr"><code>EP01.mp4</code></bdi> ورقتها <bdi dir="ltr"><code>EP01.md</code></bdi>. الورقة اختيارية، لكنها تحسّن النتيجة كثيرًا، لأن روابط النشر لا تؤخذ إلا منها. ولا يكتبها WhyNot Cut في <bdi dir="ltr"><code>data/</code></bdi> بنفسه، فأنت من يحفظها هناك، بإحدى طريقتين:</p>
+
+<ul>
+<li><strong>الأسهل: اطلب نصها من Claude.</strong> اكتب مثلًا «اكتبلي ورقة الحلقة <bdi dir="ltr">EP01</bdi>» ومعها اسم البرنامج والمقدّم والضيف والروابط. يكتب لك Claude النص كاملًا في المحادثة، فتنسخه وتحفظه بالخطوات التالية.</li>
+<li><strong>أو اكتبها بنفسك</strong> من القالب الذي بعد الخطوات.</li>
+</ul>
+
+<ol class="steps">
+<li>افتح Notepad: من قائمة Start اكتب Notepad وافتحه. على Mac افتح TextEdit، ثم اختر <bdi dir="ltr">Format&nbsp;›&nbsp;Make&nbsp;Plain&nbsp;Text</bdi> ليصبح الملف نصًّا عاديًا.</li>
+<li>الصق النص الذي كتبه Claude، أو انسخ القالب التالي وضع بدل كل «…» القيمة الصحيحة. اترك السطرين <bdi dir="ltr"><code>---</code></bdi> في أول الورقة وآخرها كما هما: ما بينهما بيانات الحلقة، وكل قيمة تُكتب بعد النقطتين.</li>
+<li>احفظ الملف: <bdi dir="ltr">File&nbsp;›&nbsp;Save&nbsp;As</bdi>. في Notepad اختر من «Save as type» القيمة <bdi dir="ltr">All files</bdi>، حتى لا يُحفظ الملف بامتداد <bdi dir="ltr"><code>.txt</code></bdi>. واكتب الاسم <bdi dir="ltr"><code>EP01.md</code></bdi>، واحفظه في <bdi dir="ltr"><code>data/Episodes</code></bdi> بجانب الحلقة. على Mac، إذا سألك TextEdit عن الامتداد اختر <bdi dir="ltr">Use&nbsp;.md</bdi>.</li>
+<li>اكتب لـ Claude أنك أضفت الورقة.</li>
+</ol>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: نافذة <bdi dir="ltr">Save As</bdi> في Notepad داخل <bdi dir="ltr"><code>Example Clinic/data/Episodes</code></bdi>، وفيها <bdi dir="ltr">Save as type: All files</bdi> واسم الملف <bdi dir="ltr">EP01.md</bdi></span></div>
+<figcaption>احفظ الورقة بامتداد <bdi dir="ltr"><code>.md</code></bdi>، لا بامتداد <bdi dir="ltr"><code>.txt</code></bdi> الذي يختاره Notepad تلقائيًا.</figcaption>
+</figure>
+
+<p class="lead-in">قالب الورقة:</p>
 
 <div class="cmd"><bdi dir="ltr"><code>---
 show: …
@@ -101,7 +119,7 @@ avoid: [topics not to cut]
 <tr><td><bdi dir="ltr"><code>episode</code></bdi></td><td>رقم الحلقة.</td></tr>
 <tr><td><bdi dir="ltr"><code>host</code></bdi></td><td>مقدّم البرنامج.</td></tr>
 <tr><td><bdi dir="ltr"><code>guest</code></bdi></td><td>الضيف ودوره، بالصيغة: الاسم — الدور.</td></tr>
-<tr><td><bdi dir="ltr"><code>links</code></bdi></td><td>الروابط التي تُذكر في نصوص النشر، كل رابط في سطر.</td></tr>
+<tr><td><bdi dir="ltr"><code>links</code></bdi></td><td>الروابط التي تُذكر في نصوص النشر، كل رابط في سطر يبدأ بمسافتين ثم شرطة، كما في القالب.</td></tr>
 <tr><td><bdi dir="ltr"><code>sponsor</code></bdi></td><td>الراعي إن وُجد، أو يُترك فارغًا.</td></tr>
 <tr><td><bdi dir="ltr"><code>avoid</code></bdi></td><td>موضوعات لا يُقطع منها أي ريل.</td></tr>
 </tbody>

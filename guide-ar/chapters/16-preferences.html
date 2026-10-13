@@ -15,10 +15,12 @@
 <tr><td><bdi dir="ltr"><code>approval</code></bdi></td><td><bdi dir="ltr"><code>ask</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>auto</code></bdi></td><td><bdi dir="ltr"><code>ask</code></bdi>: يتوقف عند كل خطة حتى توافق. <bdi dir="ltr"><code>auto</code></bdi>: يعرض الخطة وفيديو المعاينة ثم يبني، وتُسجَّل الموافقة مفوَّضة مع ذكر ملف الإعدادات.</td></tr>
 <tr><td><bdi dir="ltr"><code>whisper_model</code></bdi></td><td><bdi dir="ltr"><code>large-v3</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>large-v3-turbo</code></bdi> · <bdi dir="ltr"><code>medium</code></bdi> · <bdi dir="ltr"><code>small</code></bdi></td><td>الموازنة بين دقة التفريغ وسرعته. النموذجان <bdi dir="ltr"><code>medium</code></bdi> و<bdi dir="ltr"><code>small</code></bdi> أضعف بوضوح في المصطلحات الطبية العربية.</td></tr>
 <tr><td><bdi dir="ltr"><code>preview_video</code></bdi></td><td><bdi dir="ltr"><code>true</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>false</code></bdi></td><td>تصدير فيديو المعاينة قبل الموافقة.</td></tr>
-<tr><td><bdi dir="ltr"><code>clients_root</code></bdi></td><td>فولدر</td><td>فولدر العملاء. يُستخدم في فحص الجهاز، وفي رسالة بداية الجلسة، وعندما تذكر العميل باسم فولدره فقط.</td></tr>
+<tr><td><bdi dir="ltr"><code>clients_root</code></bdi></td><td>فولدر</td><td>فولدر العملاء. يُستخدم في فحص الجهاز، وفي رسالة بداية المحادثة، وعندما تذكر العميل باسم فولدره فقط.</td></tr>
 <tr><td><bdi dir="ltr"><code>notify_done</code></bdi></td><td><bdi dir="ltr"><code>true</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>false</code></bdi></td><td>يبدأ التقرير النهائي للمهام الطويلة بسطر واضح يقول إنها انتهت (Finished).</td></tr>
 </tbody>
 </table>
+
+<p>معاني القيم في الجدول: <bdi dir="ltr"><code>true</code></bdi>&nbsp;=&nbsp;نعم، و<bdi dir="ltr"><code>false</code></bdi>&nbsp;=&nbsp;لا؛ <bdi dir="ltr"><code>ar</code></bdi>&nbsp;=&nbsp;عربي، و<bdi dir="ltr"><code>en</code></bdi>&nbsp;=&nbsp;إنجليزي؛ <bdi dir="ltr"><code>ask</code></bdi>&nbsp;=&nbsp;اسألني، و<bdi dir="ltr"><code>auto</code></bdi>&nbsp;=&nbsp;تلقائي. ولا تحتاج إلى كتابة هذه القيم بنفسك: قل ما تريد بكلامك كما في الجزء التالي.</p>
 
 <h2 id="ch16-change">غيّر إعدادًا</h2>
 
@@ -35,10 +37,10 @@
 <figcaption>تغيير إعداد، ثم عرض القيم الحالية للتأكيد.</figcaption>
 </figure>
 
-<p>لمعرفة الإعدادات الحالية في أي وقت، اسأل Claude عنها. يعرض لك كل القيم، واسم الملف الذي جاءت منه. وإذا كانت في الملف قيمة غير صحيحة، يُستخدم بدلًا منها الافتراضي، ويذكرها لك Claude.</p>
+<p>لمعرفة الإعدادات الحالية في أي وقت، اسأل Claude عنها. يعرض لك كل القيم، واسم الملف الذي جاءت منه. وإذا كانت في الملف قيمة غير صحيحة، تُتجاهل ويذكرها لك Claude.</p>
 
 <aside class="tip">
-<p>أوامر WhyNot Cut ترى التغيير فورًا. أما رسالة بداية الجلسة فتقرأ الإعدادات عند بدء جلسة جديدة فقط.</p>
+<p>أوامر WhyNot Cut ترى التغيير فورًا. أما رسالة بداية المحادثة فتقرأ الإعدادات عند بدء محادثة جديدة فقط.</p>
 </aside>
 
 <h2 id="ch16-stop-asking">طلب «متسألنيش»</h2>
@@ -55,34 +57,37 @@
 
 <h2 id="ch16-file">أين يُحفظ ملف الإعدادات</h2>
 
-<p>الإعدادات محفوظة في ملف نصي اسمه <bdi dir="ltr"><code>whynot-cut.local.md</code></bdi> داخل فولدر <bdi dir="ltr"><code>.claude</code></bdi>. شكله:</p>
+<p>لا تحتاج إلى فتح ملف الإعدادات ولا إلى كتابته بيدك. قل لـ Claude ما تريد، وهو يكتب في الملف الصحيح ويعرض لك النتيجة. وإذا أردت إعدادًا لعميل واحد فقط، اذكر العميل في طلبك، مثل «خلّي الموافقة auto لعيادة مثال بس»، فيكتب Claude ملف إعدادات خاصًا بفولدر هذا العميل وحده، وتبقى إعدادات باقي العملاء كما هي.</p>
+
+<h3 id="ch16-file-details">للمهتمين: الملف وترتيب قراءته</h3>
+
+<p>الإعدادات محفوظة في ملف نصي اسمه <bdi dir="ltr"><code>whynot-cut.local.md</code></bdi> داخل فولدر <bdi dir="ltr"><code>.claude</code></bdi>. الملف لا يحتوي إلا الإعدادات التي ضُبطت فيه. مثلًا الملف الذي يكتبه معالج البداية:</p>
 
 <div class="cmd"><bdi dir="ltr"><code>---
 editor_name: ""
 language: ar
 approval: ask
 whisper_model: large-v3
-preview_video: true
 clients_root: "D:/WhyNot Clients"
-notify_done: true
 ---</code></bdi></div>
 
-<p class="lead-in">يمكن أن يوجد هذا الملف في أكثر من مكان، ويُستخدم أول ملف يُعثر عليه بهذا الترتيب:</p>
+<p class="lead-in">تُقرأ قيمة كل إعداد من أول مكان يحددها، بهذا الترتيب:</p>
 
 <table>
 <thead>
-<tr><th>الترتيب</th><th>المكان</th><th>متى تستخدمه</th></tr>
+<tr><th>الترتيب</th><th>المكان</th><th>متى يُستخدم</th></tr>
 </thead>
 <tbody>
-<tr><td>1</td><td>فولدر العميل الذي تعمل فيه (أو الفولدر الحالي)، ثم الفولدرات الأعلى منه</td><td>لإعدادات خاصة بعميل واحد.</td></tr>
-<tr><td>2</td><td>فولدر العملاء المحدد في خيار الإضافة <bdi dir="ltr"><code>clients_root</code></bdi> أو في متغير البيئة <bdi dir="ltr"><code>WHYNOT_CLIENTS_ROOT</code></bdi></td><td>لإعدادات مشتركة بين كل العملاء في هذا الفولدر.</td></tr>
-<tr><td>3</td><td><bdi dir="ltr"><code>~/.claude/whynot-cut.local.md</code></bdi> في فولدر المستخدم على الجهاز</td><td>الإعدادات العامة للجهاز كله. هذا هو الملف الذي يكتبه معالج البداية.</td></tr>
+<tr><td>1</td><td>ملف في فولدر العميل الذي تعمل فيه (أو الفولدر الحالي)، ثم الفولدرات الأعلى منه</td><td>لإعدادات خاصة بعميل واحد.</td></tr>
+<tr><td>2</td><td>ملف الجهاز: ملف في فولدر العملاء، ثم <bdi dir="ltr"><code>~/.claude/whynot-cut.local.md</code></bdi> في فولدر المستخدم على الجهاز</td><td>الإعدادات العامة لكل العملاء. الملف الثاني هو الذي يكتبه معالج البداية.</td></tr>
+<tr><td>3</td><td>خيارات الإضافة داخل تطبيق Claude (plugin options)</td><td>اللغة، والموافقة، ونموذج التفريغ، وحد رصيد Magnific، إذا لم يحددها ملف.</td></tr>
+<tr><td>4</td><td>القيم الافتراضية</td><td>كل إعداد لم يحدده أي مكان قبله.</td></tr>
 </tbody>
 </table>
 
-<p>الملف الأول الذي يُعثر عليه يُستخدم كله، ولا تُكمَّل قيمه الناقصة من ملف آخر، بل تأخذ القيم الافتراضية. لذلك لا تنشئ ملفًا جديدًا إلا لإعداد خاص بعميل واحد. وعند أي تغيير، يكتب Claude في الملف المستخدم فعلًا، حتى لا يغطّي عليه ملف أقرب.</p>
+<p>الإعداد الذي لا يذكره ملف العميل يُؤخذ من المكان التالي في الترتيب، فلا تضيع إعداداتك العامة. والقيمة غير الصحيحة في أي ملف تُتجاهل، ويخبرك بها Claude. وعند أي تغيير، يكتب Claude في المكان الذي جاءت منه القيمة فعلًا، حتى لا يغطّي عليه ملف أقرب.</p>
 
 <aside class="todo" data-phase="3">
-<p>تتوسّع خيارات الإضافة داخل تطبيق Claude (plugin options) في الإصدار <bdi dir="ltr">3.0</bdi>. يوجد منها اليوم خياران: مكان فولدر العملاء <bdi dir="ltr"><code>clients_root</code></bdi>، ومكان بيانات المحرك <bdi dir="ltr"><code>engine_home</code></bdi>. يُشرح هنا مكانها في التطبيق بالصور بعد اكتمالها.</p>
+<p>خيارات الإضافة داخل تطبيق Claude (plugin options) تتوسّع في الإصدار <bdi dir="ltr">3.0</bdi>: مكان فولدر العملاء، ومكان بيانات المحرك، واللغة، والموافقة، ونموذج التفريغ، وحد رصيد Magnific ومفتاحه (<a href="#ch15-title">الفصل&nbsp;15</a>). وفيه تصبح العربية هي لغة الحديث الافتراضية. يُشرح هنا مكان الخيارات في التطبيق بالصور بعد التحقق منها على جهاز حقيقي.</p>
 </aside>
 </section>

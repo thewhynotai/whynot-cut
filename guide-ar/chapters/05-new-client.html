@@ -42,9 +42,7 @@
 </tbody>
 </table>
 
-<p>تظهر البادئة في أسماء الملفات الناتجة، فمشروع Premiere للكليب <bdi dir="ltr"><code>C0001</code></bdi> يصبح اسمه <bdi dir="ltr"><code>C0001_EC_EDIT.prproj</code></bdi>. إذا لم تحدّد الاسمين يشتقّهما Claude من اسم الفولدر ويخبرك بهما. وفي الخلفية، يُنشئ الأمر التالي الملف التعريفي الفارغ داخل <bdi dir="ltr"><code>output/client_database/reel-profile/</code></bdi>:</p>
-
-<div class="cmd"><bdi dir="ltr"><code>reel client-init --root "D:/WhyNot Clients/Example Clinic" --id example-clinic --prefix EC</code></bdi></div>
+<p>تظهر البادئة في أسماء الملفات الناتجة، فمشروع Premiere للكليب <bdi dir="ltr"><code>C0001</code></bdi> يصبح اسمه <bdi dir="ltr"><code>C0001_EC_EDIT.prproj</code></bdi>. إذا لم تحدّد الاسمين يشتقّهما Claude من اسم الفولدر ويخبرك بهما. وإذا أردت اسمين آخرين، اكتبهما له قبل أن يبدأ، مثل «خلّي البادئة EC». ويحفظ Claude الملف التعريفي داخل <bdi dir="ltr"><code>output/client_database/reel-profile/</code></bdi> في فولدر العميل.</p>
 
 <h2 id="ch05-research">ما الذي يقرؤه Claude من ملفات العميل</h2>
 
@@ -104,13 +102,9 @@
 
 <h2 id="ch05-layers">أي ملف تعريفي يُطبَّق على العميل</h2>
 
-<p>إعدادات العميل تأتي من ثلاث طبقات، وكل طبقة تتغلّب على التي قبلها في هذه القائمة:</p>
-<ol>
-<li>الإعدادات العامة للبرنامج، مثل مواصفات تسلسل Premiere (sequence).</li>
-<li>ملفات تعريفية جاهزة مع البرنامج: قالب فارغ، والمثال الوهمي <bdi dir="ltr"><code>example-clinic</code></bdi>. لا يُطبَّق أي منهما إلا إذا سُمّي صراحة، ولا يُطبَّق أبدًا لمجرد تشابه اسم الفولدر.</li>
-<li>نسخة العميل الخاصة في <bdi dir="ltr"><code>output/client_database/reel-profile/</code></bdi>.</li>
-</ol>
+<p>الملف التعريفي للعميل يبدأ من إعدادات عامة للبرنامج، مثل مواصفات تسلسل Premiere (sequence)، ثم يغيّر منها ما يخص هذا العميل. ونسخة العميل الخاصة محفوظة في فولدره، في <bdi dir="ltr"><code>output/client_database/reel-profile/</code></bdi>.</p>
 
-<p class="lead-in">لمعرفة الملف المطبَّق على عميل ومصدر كل قيمة فيه:</p>
-<div class="cmd"><bdi dir="ltr"><code>reel profile --root "D:/WhyNot Clients/Example Clinic"</code></bdi></div>
+<p>ومع البرنامج ملف تعريفي وهمي للمثال <bdi dir="ltr"><code>example-clinic</code></bdi>. لا يُطبَّق على أي عميل إلا إذا طلبته بالاسم، ولا يُطبَّق أبدًا لمجرد تشابه اسم الفولدر.</p>
+
+<p>لتعرف من أين جاءت أي قيمة، مثل لون أو خط أو مقاس، اسأل Claude مثلًا «اللون ده جاي منين في ملف عيادة مثال؟». يعرض لك الملف المطبَّق ومصدر كل قيمة فيه.</p>
 </section>

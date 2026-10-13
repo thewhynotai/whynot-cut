@@ -47,6 +47,18 @@
      <div class="cmd"><bdi dir="ltr"><code>reel doctor</code></bdi></div>
                                                      LTR command block; wraps
                                                      only at spaces
+     <div class="cmd" data-who="claude"><bdi dir="ltr"><code>reel doctor</code></bdi></div>
+                                                     a command CLAUDE runs (every
+                                                     `reel …` box): CSS draws the
+                                                     caption «يشغّله Claude — لا
+                                                     تكتبه أنت» on its own RTL line
+                                                     above the <code> (::before,
+                                                     not in the source text), so
+                                                     selecting the command line
+                                                     copies only the command.
+                                                     Boxes the editor types (/…),
+                                                     paths and templates get no
+                                                     data-who.
      <table>…</table>                                plain tables
      <p class="lead-in">اكتب الأمر ده:</p>          a line ending in «:» that
                                                      introduces the next list /
@@ -413,6 +425,22 @@ ol.steps > li::before {
    path (and copying from the PDF never gets a break inside a token). The lint
    rejects a single token too long for one line. */
 .cmd .nw { white-space: nowrap; }
+/* A box with a command Claude runs itself (ruling R2-4): a small muted caption on its
+   own right-aligned Arabic line above the command, outside the <code>. */
+.cmd[data-who="claude"]::before {
+  content: "يشغّله Claude — لا تكتبه أنت";
+  display: block;
+  direction: rtl;
+  unicode-bidi: isolate;
+  text-align: right;
+  margin-bottom: 0.35em;
+  font-family: "WNC Latin", "IBM Plex Sans Arabic", sans-serif;
+  font-size: 8.5pt;
+  font-weight: 400;
+  color: #C9B8FF;
+  user-select: none;
+  -webkit-user-select: none;
+}
 
 /* ---------- tables ---------- */
 table {

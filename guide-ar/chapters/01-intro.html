@@ -10,7 +10,7 @@
 <p class="lead-in">لكل فيديو خام تطلب مونتاجه، تحصل على:</p>
 <ul>
 <li><strong>مشروع Premiere Pro كامل</strong> بإعدادات التسلسل (sequence settings) الصحيحة، فيه الجرافيك المتحرك والكلام المكتوب على الشاشة بخطوط العميل وألوانه، مع تشكيل عربي سليم واتجاه صحيح من اليمين إلى اليسار.</li>
-<li><strong>تفريغ نصي (transcript)</strong> بتوقيت كل كلمة، يُنتَج بنموذج <bdi dir="ltr">Whisper <code>large-v3</code></bdi>. وإذا كان في جهازك كارت شاشة NVIDIA، يصبح التفريغ أسرع بكثير بعد تثبيت مكتبة NVIDIA اللازمة بموافقتك (<a href="#ch02-what-happens">الفصل&nbsp;2</a>).</li>
+<li><strong>تفريغ نصي (transcript)</strong> بتوقيت كل كلمة، يُنتَج بنموذج <bdi dir="ltr">Whisper <code>large-v3</code></bdi>، وهو نموذج التفريغ النصي الذي يعمل على جهازك. وإذا كان في جهازك كارت شاشة NVIDIA، يصبح التفريغ أسرع بنحو 8&nbsp;مرات بعد تثبيت مكتبة NVIDIA بموافقتك، وهي ملف إضافي من NVIDIA يجعل كارت الشاشة يسرّع التفريغ (<a href="#ch02-what-happens">الفصل&nbsp;2</a>).</li>
 <li><strong>صوت حوار منظَّف</strong> مع حذف السكتات، ومعه إثبات أنه لم تُحذف أي كلمة.</li>
 <li><strong>قرارات مونتاج مبنية على القصة</strong>: البداية الجاذبة (hook)، والعبارات المهمة على الشاشة، والقوائم، وبطاقات اللقطات المساعدة (B-roll)، والتقريب (<bdi dir="ltr">punch-in</bdi>)، والمؤثرات الصوتية (SFX).</li>
 <li><strong>فيديو معاينة (preview)</strong> بصيغة MP4 تشاهد فيه المونتاج المخطَّط قبل بناء أي شيء.</li>
@@ -28,11 +28,11 @@
 <p>الأداة تجهّز لك مشروعًا قويًا، لكنها لا تحلّ محلّ المونتير. هذه حدودها بوضوح:</p>
 <ul>
 <li><strong>لا تصدّر الفيديو النهائي.</strong> المونتير هو من يُنهي المونتاج، ويضبط الصوت النهائي (mix)، ويصدّر الفيديو (render). لا يوجد فيديو نهائي مُصدَّر إلا إذا صدّرته أنت. الاستثناء الوحيد وضع الموشن: يُصدَّر منه فيديو MP4 من After Effects، لكن الشكل النهائي والتصدير النهائي يبقيان عليك (<a href="#ch09-results">الفصل&nbsp;9</a>).</li>
-<li><strong>لا تغيّر ملفات العميل الأصلية.</strong> الفولدران <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> للقراءة فقط؛ لا يُكتب فيهما ولا يُنقل منهما ولا يُحذف شيء. نتائج WhyNot Cut كلها تُكتب في <bdi dir="ltr"><code>output/</code></bdi>، ما عدا ملف التسليم <bdi dir="ltr"><code>HANDOFF.md</code></bdi> الذي يُكتب في جذر فولدر العميل.</li>
+<li><strong>لا تغيّر ملفات العميل الأصلية.</strong> الفولدران <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> للقراءة فقط؛ لا يُكتب فيهما ولا يُنقل منهما ولا يُحذف شيء. نتائج WhyNot Cut كلها تُكتب في <bdi dir="ltr"><code>output/</code></bdi>، ما عدا ملف التسليم <bdi dir="ltr"><code>HANDOFF.md</code></bdi> الذي يُكتب في جذر فولدر العميل (طريقة فتح هذا النوع من الملفات في <a href="#ch01-reading">كيف تقرأ هذا الدليل</a>).</li>
 <li><strong>لا تخترع معلومات.</strong> لا تؤلّف حقائق عن العميل ولا قواعد هوية ولا كلامًا لم يُقل ولا توقيتات ولا معلومات طبية ولا موسيقى ولا تراخيص. ما لا تجده في ملفات العميل يُكتب «غير متوفر».</li>
 <li><strong>لا تنشر شيئًا.</strong> نصوص النشر في وضع البودكاست تُكتب في ملفات، ولا يُرفع أي شيء على المنصات.</li>
-<li><strong>لا تغيّر إعدادات النظام ولا إعدادات Adobe الأمنية.</strong> إذا احتاج الأمر تغييرًا من هذا النوع، يعطيك Claude الأمر لتنفّذه بنفسك.</li>
-<li><strong>لا تقول «جاهز» بلا دليل.</strong> لا يُوصف فيديو بأنه جاهز إلا إذا نجح فحص الجودة في الرسالة نفسها، ولم يبقَ في قائمة «محتاجك (Needs&nbsp;you)» ما يمنع ذلك.</li>
+<li><strong>لا تغيّر إعدادات النظام ولا إعدادات Adobe الأمنية.</strong> إذا احتاج الأمر تغييرًا من هذا النوع، يعطيك Claude الأمر لتنفّذه بنفسك (طريقة تشغيله في <a href="#ch02-run-command">الفصل&nbsp;2</a>).</li>
+<li><strong>لا تقول «جاهز» بلا دليل.</strong> لا يُوصف فيديو بأنه جاهز إلا إذا نجح فحص الجودة في الرسالة نفسها، ولم يبقَ في قائمة «محتاجك (Needs&nbsp;you)»، وهي قائمة ما ينتظر قرارك أو عملك أنت، ما يمنع ذلك.</li>
 </ul>
 
 <h2 id="ch01-verbs">ثلاث كلمات تلخّص العمل</h2>
@@ -57,18 +57,19 @@
 
 <h2 id="ch01-requirements">متطلبات الإصدار <bdi dir="ltr">3.0</bdi></h2>
 
-<p class="lead-in">هذه متطلبات الإصدار <bdi dir="ltr">3.0</bdi> المستهدفة، لا متطلبات النسخة الحالية:</p>
+<p>هذه متطلبات الإصدار <bdi dir="ltr">3.0</bdi> المستهدفة، لا متطلبات النسخة الحالية. لتعرف رقم نسختك، اكتب لـ Claude «أنهي نسخة WhyNot Cut عندي؟»، فيفحص النسخة المثبّتة ويخبرك برقمها.</p>
+<p class="lead-in">المتطلبات:</p>
 <table>
 <thead>
 <tr><th>البند</th><th>المطلوب</th></tr>
 </thead>
 <tbody>
 <tr><td>نظام التشغيل</td><td><bdi dir="ltr">Windows 10/11</bdi>، أو <bdi dir="ltr">macOS 14</bdi> أو أحدث</td></tr>
-<tr><td>Premiere Pro</td><td><bdi dir="ltr">26.5</bdi> أو أحدث للوحة الجديدة، والإصدارات الأقدم عبر WhyNot Cut Bridge</td></tr>
+<tr><td>Premiere Pro</td><td><bdi dir="ltr">26.5</bdi> أو أحدث للوحة WhyNot Cut الجديدة، والإصدارات الأقدم عبر لوحة WhyNot Cut Bridge (انظر الجزء التالي)</td></tr>
 <tr><td>After Effects</td><td>الإصدار <bdi dir="ltr">25</bdi> أو أحدث، لوضع الموشن ولمخرجات After Effects عند طلبها فقط</td></tr>
 <tr><td>Claude</td><td>تطبيق Claude على الجهاز، واشتراك Claude</td></tr>
-<tr><td>المساحة على القرص</td><td>نحو 4 GB للمحرك ونموذج التفريغ، ثم عدة GB لكل عميل</td></tr>
-<tr><td>كارت الشاشة</td><td>اختياري: كارت NVIDIA، مع مكتبة NVIDIA التي تُثبَّت بموافقتك، يجعل التفريغ النصي أسرع عدة مرات</td></tr>
+<tr><td>المساحة على القرص</td><td>نحو <bdi dir="ltr">4&nbsp;GB</bdi> للمحرك (engine)، وهو البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية، ولنموذج التفريغ؛ ثم بضعة <bdi dir="ltr">GB</bdi> لكل عميل</td></tr>
+<tr><td>كارت الشاشة</td><td>اختياري: كارت NVIDIA، مع مكتبة NVIDIA التي تُثبَّت بموافقتك، يجعل التفريغ النصي أسرع بنحو 8&nbsp;مرات</td></tr>
 </tbody>
 </table>
 
@@ -76,13 +77,31 @@
 <p>القائمة النهائية تُعتمد مع برنامج التثبيت (installer). حتى ذلك الحين، تعمل النسخة الحالية مع <bdi dir="ltr">Premiere Pro 2022</bdi> أو أحدث من خلال لوحة WhyNot Cut Bridge.</p>
 </aside>
 
+<h2 id="ch01-panels">اللوحة داخل Premiere Pro وAfter Effects</h2>
+
+<p>يبني Claude مشاريع Premiere Pro وAfter Effects من خلال لوحة صغيرة (panel) داخل كل برنامج. اسمها اليوم «WhyNot Cut Bridge»، وتجدها في البرنامجين من <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions&nbsp;›&nbsp;WhyNot&nbsp;Cut&nbsp;Bridge</bdi>. لا تحتاج إلى الضغط على أي شيء فيها، فهي تعرض حالة العمل فقط. وإذا قال لك Claude إن البرنامج لا يستجيب، افتح اللوحة من هذه القائمة. يسمّيها هذا الدليل دائمًا «لوحة WhyNot Cut Bridge».</p>
+
+<aside class="todo" data-phase="6">
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> تحل محلها في Premiere Pro لوحة جديدة اسمها «لوحة WhyNot Cut»، تفتحها من <bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>، ومنها تتابع العمل وتوافق على الخطة (<a href="#ch07-title">الفصل&nbsp;7</a>). وفي After Effects تبقى لوحة WhyNot Cut في <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>. حيثما يقول الدليل «لوحة WhyNot Cut» فهو يقصد هذه اللوحة الجديدة.</p>
+</aside>
+
 <h2 id="ch01-reading">كيف تقرأ هذا الدليل</h2>
 
-<p>الأوامر والمسارات وأسماء الملفات مكتوبة دائمًا من اليسار إلى اليمين بخط مختلف، مثل <bdi dir="ltr"><code>data/Raw/</code></bdi>. الأمر الذي قد تكتبه بنفسك يظهر في مربع مستقل لتنسخه كما هو:</p>
+<p>الأوامر والمسارات وأسماء الملفات مكتوبة دائمًا من اليسار إلى اليمين بخط مختلف، مثل <bdi dir="ltr"><code>data/Raw/</code></bdi>. لا يلزمك حفظ أي أمر: يكفي أن تكتب طلبك لـ Claude بكلامك العادي. وستجد في الفصول نوعين من المربعات الداكنة.</p>
+
+<p class="lead-in"><strong>مربع يبدأ بالعلامة <bdi dir="ltr"><code>/</code></bdi>:</strong> أمر تكتبه أنت في مربع الرسالة في تطبيق Claude، ثم تضغط Enter. مثلًا:</p>
 
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:help</code></bdi></div>
 
 <p>هذا الأمر يعرض ورقة مختصرة بأوامر WhyNot Cut، ويُبرز لك الأمر المناسب لموقفك الآن.</p>
+
+<p class="lead-in"><strong>مربع فوقه «يشغّله Claude — لا تكتبه أنت»:</strong> أمر يشغّله Claude بنفسه في الخلفية. هذه الأوامر تبدأ بكلمة <bdi dir="ltr"><code>reel</code></bdi>، وهي اسم أداة المحرك. نعرضها لتتعرّف عليها في رسائل Claude فقط، ولا تكتبها أنت أبدًا. مثلًا أمر فحص الجهاز:</p>
+
+<div class="cmd" data-who="claude"><bdi dir="ltr"><code>reel doctor</code></bdi></div>
+
+<p>وبعض المربعات تعرض مسار ملف لتعرف مكانه، أو نصًّا جاهزًا لتنسخه، ويقول لك النص قبلها ما الذي تفعله به.</p>
+
+<p>الملفات التي ينتهي اسمها بـ <bdi dir="ltr"><code>.md</code></bdi>، مثل <bdi dir="ltr"><code>HANDOFF.md</code></bdi>، ملفات نصية عادية. افتحها بالزر الأيمن ثم <bdi dir="ltr">Open&nbsp;with&nbsp;›&nbsp;Notepad</bdi> على Windows، أو <bdi dir="ltr">Open&nbsp;With&nbsp;›&nbsp;TextEdit</bdi> على Mac. أو اطلب من Claude أن يعرض لك محتواها في المحادثة، مثل «اعرضلي ملف التسليم».</p>
 
 <p>وستجد في الفصول ثلاثة أنواع من المربعات: <strong>نصيحة</strong> تختصر عليك الطريق، و<strong>تنبيه</strong> يحميك من خطأ شائع، و<strong>قيد الإعداد</strong> لجزء يكتمل في مرحلة لاحقة من الإصدار <bdi dir="ltr">3.0</bdi>. كل الأمثلة ولقطات الشاشة مأخوذة من عميل وهمي اسمه «عيادة مثال»، والطبيب فيه «د. سامبل إكزامبل».</p>
 
