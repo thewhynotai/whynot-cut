@@ -15,7 +15,8 @@
 # engine home itself when nothing else is left, in <engine>/.delete-after-exit. Once the core has exited, this script
 # deletes what that list names, but ONLY <engine>/python and <engine>/bin (every line normalised first; anything else
 # is refused and reported), never through a link (a link is removed as a link), and the engine home itself only when
-# it is then empty; then the list file. The log went with logs/, so the summary is on the console only. The newest
+# it is then empty; then the list file. The DEFAULT ~/.whynot-cut may be a symlink to a folder (Addendum F): python/
+# and bin/ are deleted through it, never the link or its target. The log went with logs/, so the summary is on the console only. The newest
 # engine Python is chosen by version number (3.12.15 before 3.12.9).
 # Log: ~/.whynot-cut/logs/install-YYYYmmdd-HHMMSS.log (uninstall-... for --uninstall), shared with the core (--log).
 # Exit code: the core's; 2 = cannot start (not macOS, Git Bash/MSYS, unreadable components.json, missing core);
@@ -61,8 +62,9 @@
 # A RESOLVED engine home other than ~/.whynot-cut (a variable, the pointer or settings.json named it) that is itself a
 # link, a drive root or mount point, the home folder itself, Desktop / Documents / Downloads themselves, holds client
 # data (the saved clients folder, or .whynot-client up to 3 levels below) or is too big to check for that (more than
-# 5000 entries within 3 levels) - compared as written and with links resolved (cd -P), case folded on macOS - is
-# refused with exit 2 before the countdown and any download (fix round 1), with the
+# 5000 entries within 3 levels), or a network share / device path (//server/share) - compared as written and with
+# links resolved (cd -P), case folded on macOS - is refused with exit 2 before the countdown and any download (fix
+# round 1), also when --engine-home names that same folder (fix round 2), with the
 # self-fix "run the installer again with -EngineHome <folder> / --engine-home <folder>" (English + Arabic); the core
 # applies the same rule (base.resolved_home_problem). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another
 # key, or "none" = nobody presses), WNC_TEST_COUNTDOWN_S (the seconds the countdown waits with the hook; 0 = none); the
@@ -290,7 +292,13 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
   [ -f "$list" ] || return 0
   root="$ENGINE"
   while [ "${root%/}" != "$root" ] && [ "$root" != "/" ]; do root="${root%/}"; done
-  if [ -L "$root" ]; then
+  linked=""  # Addendum F: the DEFAULT ~/.whynot-cut may be a link to a folder: emptied through it, never removed
+  if [ -L "$root" ] && [ -d "$root" ]; then
+    norm_path "$root"; nroot="$NORM"
+    norm_path "$HOME/.whynot-cut"
+    [ "$nroot" = "$NORM" ] && linked=1
+  fi
+  if [ -L "$root" ] && [ -z "$linked" ]; then
     printf 'WARNING: %s is a link; the paths in %s were left alone\n' "$root" "$list"
     return 0
   fi
@@ -330,7 +338,9 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
     fi
   done < "$list"
   rm -f "$list"
-  if [ -n "$home_too" ] && [ -z "$failed" ] && rmdir "$root" 2>/dev/null; then printf 'deleted %s\n' "$root"; fi
+  if [ -n "$home_too" ] && [ -z "$failed" ] && [ -z "$linked" ] && rmdir "$root" 2>/dev/null; then
+    printf 'deleted %s\n' "$root"
+  fi
   return 0
 }
 
@@ -905,6 +915,9 @@ resolved_home_problem() { # path -> WHY (empty: fine), the core's base.resolved_
   # comparison as written and with links resolved, case folded on macOS
   local p="$1" a b d c lp cnt
   WHY=""
+  case "$p" in
+    \\\\*|//*) WHY="a network share or device path; name a folder on a local drive"; return 0 ;;  # (fix round 2)
+  esac
   while [ "${p%/}" != "$p" ] && [ "${p%/}" != "" ] && [ "${p%/}" != "${p%%:*}:" ]; do p="${p%/}"; done
   guard_norm "$p"; a="$NORM"
   guard_norm "$HOME/.whynot-cut"
@@ -1101,9 +1114,16 @@ fi
 DEFAULT_ENGINE="$ENGINE"
 COMP="$ROOT/setup/components.json"
 [ -n "$COMPONENTS" ] && COMP="$(abs_path "$COMPONENTS")"
-if [ -z "$UNINSTALL" ] && [ -z "$ENGINE_OPT" ]; then
-  # task 9: a home saved somewhere (not chosen now) in a place it must never be: stop and say the fix, before the
-  # countdown and any download (fix round 1)
+IS_RESOLVED=1
+if [ -n "$ENGINE_OPT" ]; then  # --engine-home naming the saved home itself is that home, used as it is (fix round 2)
+  IS_RESOLVED=""
+  typed_path "$ENGINE_OPT"; norm_path "$TYPED"; n_opt="$NORM"
+  norm_path "$DEFAULT_ENGINE"
+  case "$TYPED" in /*|[A-Za-z]:*) [ "$n_opt" = "$NORM" ] && IS_RESOLVED=1 ;; esac
+fi
+if [ -z "$UNINSTALL" ] && [ -n "$IS_RESOLVED" ]; then
+  # task 9: a home saved somewhere in a place it must never be: stop and say the fix, before the countdown and any
+  # download (fix round 1), also when --engine-home names that same folder (fix round 2)
   client_roots
   resolved_home_problem "$DEFAULT_ENGINE"
   if [ -n "$WHY" ]; then

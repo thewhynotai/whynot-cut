@@ -5483,6 +5483,49 @@ class TestResolvedHomeGuard(unittest.TestCase):
             with mock.patch.object(base.sys, "platform", "linux"):  # a case-sensitive disk: another folder
                 self.assertIsNone(self.problem(lower))
 
+    def test_device_and_network_paths(self):
+        # fix round 2: \\?\C:\x is C:\x; any other device path and every network share (also \\localhost\C$) is refused
+        docs = self.home / "Documents"
+        docs.mkdir()
+        if IS_WIN:
+            self.assertIn("Documents", self.problem("\\\\?\\" + str(docs)) or "")
+        for bad in ("\\\\localhost\\C$\\Users\\x", "\\\\?\\UNC\\server\\share\\x", "\\\\.\\pipe\\x",
+                    "//server/share/x"):
+            with self.subTest(bad):
+                self.assertIn("network share or device path", self.problem(bad) or "")
+        self.assertEqual(base.strip_long_prefix("\\\\?\\C:\\x"), "C:\\x")
+        self.assertEqual(base.strip_long_prefix("\\\\?\\UNC\\s\\x"), "\\\\?\\UNC\\s\\x")
+
+    def test_a_linked_default_home_is_accepted_any_other_link_is_not(self):
+        # Addendum F (owner 2026-10-13): ~/.whynot-cut may be a junction / symlink to a folder (D:\ClaudeData\...)
+        target = self.home.parent / "data drive" / "whynot-cut-home"
+        target.mkdir(parents=True)
+        if not make_dir_link(self.home / ".whynot-cut", target):
+            self.skipTest("cannot make a directory link here")
+        make_dir_link(self.home / "Other", target)
+        self.assertTrue(base.linked_default_home(self.home / ".whynot-cut", self.home))
+        self.assertFalse(base.linked_default_home(self.home / "Other", self.home))
+        self.assertIsNone(self.problem(self.home / ".whynot-cut"))
+        self.assertIn("link", self.problem(self.home / "Other") or "")
+        touch(target / "state.json", GENUINE_STATE)
+        un = uninstall_module()
+        self.assertIsNone(un.engine_home_problem(base.Paths.from_env(str(self.home), env={})))
+        other = base.Paths.from_env(str(self.home), env={}, engine_home=str(self.home / "Other"))
+        self.assertIn("is a link", un.engine_home_problem(other) or "")
+
+    def test_the_core_says_what_the_bootstrap_left(self):
+        # fix round 2: the exit-2 message is true - "No install step ran", and names bin/ / python/ when they are there
+        docs = self.home / "Documents"
+        EngineHomeCases.pointer(self.home, {"clients_root": "", "engine_home": str(docs)})
+        rc, out = self.run_core("install", "--home", str(self.home), "--yes", "--quiet")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("No install step ran.", out)
+        self.assertNotIn("Nothing was changed", out)
+        touch(docs / "bin" / "uv.exe", b"MZ")
+        rc, out = self.run_core("install", "--home", str(self.home), "--yes", "--quiet")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("bin/ already in that folder came from the bootstrap", out)
+
     def test_windows_shell_folders_count(self):
         # fix round 1: Known Folder Move (OneDrive) puts Documents elsewhere; the core and the bootstrap both read it
         moved = self.home.parent / "OneDrive" / "Documents"
@@ -5660,6 +5703,64 @@ class _CountdownCases:
             r = self.inst(h, "yes", "dry")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_engine_home_naming_the_saved_home_is_guarded_too(self):
+        # fix round 2 (the reviewer's repro): -EngineHome equal to the saved home is that home: refused before any
+        # download, nothing written under Documents
+        h = self.home
+        docs = h / "Documents"
+        mine = touch(docs / "thesis.docx", b"mine")
+        EngineHomeCases.pointer(h, {"clients_root": "", "engine_home": self.native(docs)})
+        for value in (self.native(docs), self.native(docs) + self.SEP):
+            with self.subTest(value):
+                r = self.inst(h, "yes", "skip", extra=(self.ENGINE_FLAG, value))
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 2, out)
+                self.assertIn("Documents", out)
+                self.assertIn(SELF_FIX, out)
+        self.assertEqual(self.srv.srv.hits, [])
+        self.assertEqual(os.listdir(docs), ["thesis.docx"])
+        self.assertEqual(mine.read_bytes(), b"mine")
+
+    def test_device_and_network_paths_are_refused_cleanly(self):
+        h = self.home
+        h.mkdir()
+        for value, needle in self.device_paths():
+            with self.subTest(value):
+                EngineHomeCases.pointer(h, {"clients_root": "", "engine_home": value})
+                r = self.inst(h, "yes", "skip")
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 2, out)  # never 3 (a PowerShell exception)
+                self.assertIn(needle, out)
+                self.assertIn(SELF_FIX, out)
+        self.assertEqual(self.srv.srv.hits, [])
+
+    def test_a_linked_default_home_installs_and_uninstalls_through_the_link(self):
+        # Addendum F (owner 2026-10-13): ~/.whynot-cut as a junction / symlink to a folder on another drive
+        target = self.tmp / "data drive" / "whynot-cut-home"
+        target.mkdir(parents=True)
+        self.home.mkdir()
+        link = self.home / ".whynot-cut"
+        if not make_dir_link(link, target):
+            self.skipTest("cannot make a directory link here")
+        r = self.inst(self.home, "yes", "skip")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        for name in ("current", "state.json", "bin", "runtimes"):
+            self.assertTrue((target / name).exists(), (name, sorted(os.listdir(target)), out))
+        self.assertTrue(base.is_link(link))
+        mine = touch(target / "my notes.txt", b"mine")
+        r = self.inst(self.home, "uninstall", "remove-engine", "yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        for _ in range(50):  # (the bootstrap deletes python/ and bin/ right after the core exits)
+            if not (target / "bin").exists():
+                break
+            time.sleep(0.1)
+        self.assertEqual(sorted(os.listdir(target)), ["my notes.txt"], out)
+        self.assertEqual(mine.read_bytes(), b"mine")
+        self.assertTrue(base.is_link(link), out)  # the link and its target folder stay
+        self.assertTrue(target.is_dir())
+
     def test_a_bad_countdown_hook_value_is_ignored(self):
         r = self.inst(self.home, "dry", env=self.env(WNC_TEST_KEYS="x", WNC_TEST_COUNTDOWN_S="soon"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -5686,12 +5787,20 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
     def native(self, p) -> str:
         return str(p)
 
-    def inst(self, home: Path, *flags, env=None):
+    ENGINE_FLAG = "-EngineHome"
+
+    def device_paths(self) -> list:
+        return [("\\\\?\\" + str(self.home / "Documents"), "Documents"),
+                ("\\\\localhost\\C$\\Users\\x", "network share"), ("\\\\.\\pipe\\x", "network share"),
+                ("\\\\?\\UNC\\server\\share\\x", "network share")]
+
+    def inst(self, home: Path, *flags, env=None, extra=()):
         args = ["-Home", home]
-        names = {"yes": ["-Yes"], "customise": ["-Customise"], "dry": ["-DryRun"], "skip": ["-Skip", "model,launch"]}
+        names = {"yes": ["-Yes"], "customise": ["-Customise"], "dry": ["-DryRun"], "skip": ["-Skip", "model,launch"],
+                 "uninstall": ["-Uninstall"], "remove-engine": ["-RemoveEngine"]}
         for f in flags:
             args += names[f]
-        return self.ps(self.front(), *args, env=env)
+        return self.ps(self.front(), *args, *extra, env=env)
 
     def test_the_size_line_counts_git_only_when_it_is_missing(self):
         touch(self.home / "AppData" / "Local" / "WhyNotCut" / "git" / "bin" / "bash.exe", b"MZ bash")
@@ -5716,13 +5825,18 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
     def native(self, p) -> str:
         return Path(p).as_posix() if not isinstance(p, str) else p.replace("\\", "/")
 
-    def inst(self, home: Path, *flags, env=None):
+    ENGINE_FLAG = "--engine-home"
+
+    def device_paths(self) -> list:
+        return [("//server/share/x", "network share")]
+
+    def inst(self, home: Path, *flags, env=None, extra=()):
         args = ["--home", home.as_posix()]
         names = {"yes": ["--yes"], "customise": ["--customise"], "dry": ["--dry-run"],
-                 "skip": ["--skip", "model,launch"]}
+                 "skip": ["--skip", "model,launch"], "uninstall": ["--uninstall"], "remove-engine": ["--remove-engine"]}
         for f in flags:
             args += names[f]
-        return self.sh(self.front(), *args, env=env)
+        return self.sh(self.front(), *args, *extra, env=env)
 
     def test_piped_without_a_terminal_has_no_countdown(self):
         zf = self.tmp / "WhyNotCut-3.0.0.zip"

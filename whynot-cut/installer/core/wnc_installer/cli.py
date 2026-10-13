@@ -180,8 +180,14 @@ def main(argv=None) -> int:
         why = base.resolved_home_problem(paths.whynot, home=paths.home, clients_roots=_client_roots(paths),
                                          known=base.shell_folders(paths.home, paths.sandbox))
         if why:
+            # (the bootstraps refuse it before any download; only a bootstrap run around them can have put uv and
+            # Python there already: say so instead of "nothing was changed", fix round 2)
+            left = [n for n in ("bin", "python", "downloads") if (paths.whynot / n).exists()]
+            done = ("No install step ran." if not left else
+                    f"No install step ran, but {', '.join(n + '/' for n in left)} already in that folder came from the "
+                    "bootstrap: delete them if you do not use that folder.")
             print(f"ERROR: WhyNot Cut will not use {paths.whynot} as its engine home "
-                  f"({base.describe_engine_home_source(paths.engine_home_source)}): it is {why}. Nothing was changed. "
+                  f"({base.describe_engine_home_source(paths.engine_home_source)}): it is {why}. {done} "
                   f"To fix it, {base.SELF_FIX} (a folder of its own, for example C:\\WhyNotCut or ~/WhyNotCut).",
                   file=sys.stderr)
             print(base.SELF_FIX_AR, file=sys.stderr)

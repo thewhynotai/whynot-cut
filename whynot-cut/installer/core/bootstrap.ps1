@@ -16,7 +16,8 @@
 # lists python\ and bin\ (and the engine home itself when nothing else is left) in <engine>\.delete-after-exit. Once
 # the core has exited, this script deletes what that list names, but ONLY <engine>\python and <engine>\bin (every line
 # normalised first; anything else is refused and reported), never through a link or junction (a link is removed as a
-# link), and the engine home itself only when it is then empty; then the list file. The log went with logs\, so the
+# link), and the engine home itself only when it is then empty; then the list file. The DEFAULT ~\.whynot-cut may be a
+# junction / symlink to a folder (Addendum F): python\ and bin\ are deleted through it, never the link or its target. The log went with logs\, so the
 # summary is on the console only. The newest engine Python is chosen by version number (3.12.15 before 3.12.9).
 # Log: ~\.whynot-cut\logs\install-YYYYmmdd-HHMMSS.log (uninstall-... for -Uninstall), shared with the core (--log).
 # Exit code (in $LASTEXITCODE): the core's; 2 = cannot start (not Windows x64, unreadable components.json, missing
@@ -60,8 +61,10 @@
 # link / reparse point (junction, symlink, a volume mounted into a folder), a drive root, the user folder itself,
 # Desktop / Documents / Downloads themselves (also where Windows' User Shell Folders put them: OneDrive Known Folder
 # Move), or holds client data (the saved clients folder, or .whynot-client up to 3 levels below), or is too big to
-# check for that (more than 5000 entries within 3 levels) - compared as written and with links resolved - is refused
-# with exit 2 before the countdown and any download (fix round 1), with the self-fix
+# check for that (more than 5000 entries within 3 levels), or a network share / device path (\\server\share,
+# \\localhost\C$, \\.\...; \\?\C:\x counts as C:\x) - compared as written and with links resolved - is refused with
+# exit 2 before the countdown and any download (fix round 1), also when -EngineHome names that same folder (fix round
+# 2), with the self-fix
 # "run the installer again with -EngineHome <folder> / --engine-home <folder>" (English + Arabic); the core applies the
 # same rule (base.resolved_home_problem). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another key, or
 # "none" = nobody presses), WNC_TEST_COUNTDOWN_S (the seconds the countdown waits with the hook; 0 = none), and the
@@ -351,12 +354,16 @@ param(
         }
     }
 
-    function Invoke-WncDeferredDelete([string]$Engine) {
+    function Invoke-WncDeferredDelete([string]$Engine, [string]$UserHome) {
         # after `uninstall --remove-engine`: the paths the core listed in <engine>\.delete-after-exit (see the header)
         $list = Join-Path $Engine '.delete-after-exit'
         if (-not [IO.File]::Exists($list)) { return }
         $root = [IO.Path]::GetFullPath($Engine).TrimEnd([char]92)
-        if (Test-WncReparse $root) {
+        # Addendum F: the DEFAULT ~\.whynot-cut may be a junction / symlink to a folder (D:\ClaudeData\...): its
+        # python\ and bin\ are deleted through it, never the link itself nor its target folder
+        $linked = (Test-WncReparse $root) -and [IO.Directory]::Exists($root) -and $UserHome -and
+            ($root -ieq [IO.Path]::GetFullPath((Join-Path $UserHome '.whynot-cut')).TrimEnd([char]92))
+        if ((Test-WncReparse $root) -and (-not $linked)) {
             Write-Host "WARNING: $root is a link; the paths in $list were left alone"
             return
         }
@@ -416,7 +423,7 @@ param(
         }
         try {
             [IO.File]::Delete($list)
-            if ($homeToo -and (-not $failed) -and [IO.Directory]::Exists($root) -and
+            if ($homeToo -and (-not $failed) -and (-not $linked) -and [IO.Directory]::Exists($root) -and
                 (@([IO.Directory]::GetFileSystemEntries($root)).Count -eq 0)) {
                 [IO.Directory]::Delete($root, $false)
                 # a program that still has the folder open (an antivirus or indexer scanning what was just deleted)
@@ -896,6 +903,12 @@ param(
         return 'customise'
     }
 
+    function ConvertFrom-WncDevicePath([string]$Path) {
+        # \\?\C:\x (a long-path prefix) is C:\x; any other \\?\ or \\.\ form is left as it is (refused by the guard)
+        if ($Path -match '^[\\/]{2}[?.][\\/]([A-Za-z]:([\\/].*)?)$') { return $Matches[1] }
+        return $Path
+    }
+
     function Get-WncLinkTarget([string]$Path) {
         # where a junction / symlink points (full path), or $null (a volume mount point, an unreadable link)
         try {
@@ -915,8 +928,10 @@ param(
     function Get-WncRealPath([string]$Path) {
         # $Path with every junction / symlink on the way resolved (the core's os.path.realpath), or $null when a link
         # cannot be followed (a folder mount point); a part that does not exist yet is kept as written
-        $cur = Get-WncNormPath $Path
+        if ($Path -match '^[\\/]{2}') { return $null }  # network / device paths: not followed (fix round 2)
+        try { $cur = Get-WncNormPath $Path } catch { return $null }
         for ($hop = 0; $hop -lt 40; $hop++) {
+            if ($cur -match '^[\\/]{2}') { return $null }
             $rootDir = [IO.Path]::GetPathRoot($cur)
             $parts = @($cur.Substring($rootDir.Length).Split([char[]]@([char]92), [StringSplitOptions]::RemoveEmptyEntries))
             $built = $rootDir
@@ -965,6 +980,11 @@ param(
         # the saved clients folder or a folder holding it, a folder with .whynot-client in it or up to 3 levels
         # below, or one too big to check for that (more than 5000 entries); compared as written and with links
         # resolved; else $null
+        if ($Path -match '^[\\/]{2}') {
+            # (after ConvertFrom-WncDevicePath) \\.\..., \\?\UNC\..., \\server\share\... (also \\localhost\C$):
+            # a network or device path is never a resolved engine home (fix round 2)
+            return 'a network share or device path; name a folder on a local drive'
+        }
         $n = Get-WncNormPath $Path
         if ($n -ieq (Get-WncNormPath (Join-Path $UserHome '.whynot-cut'))) { return $null }
         $rootLike = '^([A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)$'
@@ -1205,17 +1225,36 @@ param(
                 $pointer = ConvertTo-WncHomePath -Value $env:WHYNOT_OPTIONS_FILE -UserHome $h -Saved $false
             }
         }
-        $default = Get-WncFullPath $resolved.Path
+        try {
+            $default = Get-WncFullPath (ConvertFrom-WncDevicePath $resolved.Path)
+        } catch {
+            $default = [string]$resolved.Path  # (a path PowerShell cannot even read: the guard below refuses it)
+        }
         $chosen = $false
         $sandboxRoot = $null
         if ($sandbox) { $sandboxRoot = $h }
         $compPath = Join-Path $root 'setup\components.json'
         if ($Components) { $compPath = Get-WncFullPath $Components }
-        if ((-not $Uninstall) -and (-not $EngineHome)) {
-            # task 9: a home saved somewhere (not chosen now) in a place it must never be: stop and say the fix, before
-            # the countdown and any download (fix round 1)
+        $isResolved = -not $EngineHome
+        if ($EngineHome) {
+            # -EngineHome naming the saved home itself is that home, used as it is (not placed): guard it too (fix round 2)
+            try {
+                $typed = ConvertFrom-WncTyped -Text (ConvertFrom-WncDevicePath $EngineHome) -UserHome $h
+                $isResolved = ($typed -match '^([A-Za-z]:[\\/]|\\\\)') -and
+                    ((Get-WncNormPath $typed) -ieq (Get-WncNormPath $default))
+            } catch {
+                $isResolved = $false  # (the chosen-folder rules refuse it)
+            }
+        }
+        if ((-not $Uninstall) -and $isResolved) {
+            # task 9: a home saved somewhere in a place it must never be: stop and say the fix, before the countdown
+            # and any download (fix round 1), also when -EngineHome names that same folder (fix round 2)
             $clients = Get-WncClientRootList -UserHome $h -Pointer $pointer
-            $why = Get-WncResolvedHomeProblem -Path $default -UserHome $h -Clients $clients -Sandbox $sandbox
+            try {
+                $why = Get-WncResolvedHomeProblem -Path $default -UserHome $h -Clients $clients -Sandbox $sandbox
+            } catch {
+                $why = "a path that cannot be checked ($($_.Exception.Message))"
+            }
             if ($why) {
                 Write-Host ("ERROR: WhyNot Cut will not use $default as its engine home (from $($resolved.Source)): it " +
                     "is $why. Nothing was downloaded. To fix it, run the installer again with -EngineHome <folder> / " +
@@ -1367,7 +1406,7 @@ param(
         if ($Uninstall -and $RemoveEngine) { $a += '--remove-engine' }
         if ($Uninstall -and $RemoveModels) { $a += '--remove-models' }
         Write-WncLog 'INFO' ("bootstrap: running the installer core: $py " + ($a -join ' '))
-        return @{ Code = 0; Run = $true; Py = $py; CoreArgs = $a; Engine = $engine }
+        return @{ Code = 0; Run = $true; Py = $py; CoreArgs = $a; Engine = $engine; UserHome = $h }
     }
 
     $saved = @{}
@@ -1390,7 +1429,7 @@ param(
             $S.Code = $LASTEXITCODE
             if ($Uninstall -and $RemoveEngine -and (-not $DryRun)) {
                 $S.Log = $null  # it went with logs\
-                Invoke-WncDeferredDelete $prep.Engine
+                Invoke-WncDeferredDelete -Engine $prep.Engine -UserHome $prep.UserHome
             }
         } else {
             $S.Code = $prep.Code

@@ -196,6 +196,14 @@ def same_path(a, b) -> bool:
     return _norm(a) == _norm(b)
 
 
+def linked_default_home(whynot, home) -> bool:
+    """Addendum F (owner 2026-10-13): the DEFAULT engine home <home>/.whynot-cut may be a directory link (a junction or
+    symlink, e.g. to D:\\ClaudeData\\whynot-cut-home). It is used through the link at install and uninstall; the
+    link and its target folder are never removed, only WhyNot Cut's own entries inside. Any other home that is a link
+    stays refused."""
+    return same_path(whynot, Path(home) / ".whynot-cut") and is_link(whynot) and os.path.isdir(whynot)
+
+
 # What WhyNot Cut itself puts in an engine home (installer.md R.1 + the engine's own folders, engine/reel/lib plat.py,
 # common.py, cep_queue / ae_* and serve/: 2.x venv, the Premiere / After Effects queues and scripts, the AE probe, the
 # Whisper bench, ae_render's tmp). Uninstall --remove-engine deletes ONLY these (plus models/ when asked); anything
@@ -428,6 +436,12 @@ def shell_folders(home, sandbox: bool) -> list:
     return out
 
 
+def strip_long_prefix(p: str) -> str:
+    """\\\\?\\C:\\x (the long-path prefix) is C:\\x; any other \\\\?\\ / \\\\.\\ form is kept (and refused)."""
+    m = re.match(r"^[\\/]{2}[?.][\\/]([A-Za-z]:([\\/].*)?)$", p)
+    return m.group(1) if m else p
+
+
 def _fold(key: str) -> str:
     """macOS disks (APFS / HFS+) compare names case-insensitively, but normcase does not fold there: fold it here."""
     return key.lower() if sys.platform == "darwin" else key
@@ -454,7 +468,9 @@ def resolved_home_problem(path, *, home, clients_roots: Iterable = (), known: It
     written and with links resolved (realpath), and case-insensitively on macOS too. A genuine 2.x / 3.0 home anywhere
     else is used as it is. The bootstraps apply the same rule (Get-WncResolvedHomeProblem / resolved_home_problem)
     before anything is downloaded."""
-    p, h = str(path), Path(home)
+    p, h = strip_long_prefix(str(path)), Path(home)
+    if re.match(r"^[\\/]{2}", p):  # \\.\..., \\?\UNC\..., \\server\share, \\localhost\C$ (fix round 2)
+        return "a network share or device path; name a folder on a local drive"
     if _fold(_norm(p)) == _fold(_norm(h / ".whynot-cut")):
         return None
     if is_link(p):

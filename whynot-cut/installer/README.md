@@ -229,6 +229,8 @@ An engine home that was not chosen in this run but found as described above (a v
 `settings.json` names it) is used as it is - except `~/.whynot-cut` itself - unless it is:
 
 - a link itself (a junction, symlink, or a drive mounted into a folder): name the real folder;
+- a network share or device path (`\\server\share\...`, `\\localhost\C$\...`, `\\.\...`; the long-path form
+  `\\?\C:\...` counts as `C:\...`);
 - a drive root or a mount point (`D:\`, `/Volumes/<name>`);
 - your user folder itself, or Desktop, Documents or Downloads themselves (a folder inside them is fine); on Windows
   also where Windows keeps them (OneDrive Known Folder Move, a moved Documents);
@@ -238,7 +240,13 @@ An engine home that was not chosen in this run but found as described above (a v
 - a folder too big to check for that: more than 5000 files and folders within three levels (a footage folder).
 
 Every comparison is made both as the folder is written and with every link on the way resolved (a link to Documents
-is Documents), and without regard to upper / lower case on Windows and macOS.
+is Documents), and without regard to upper / lower case on Windows and macOS. `-EngineHome` / `--engine-home` naming
+that same saved folder is checked the same way (it is that folder, used as it is), also before any download.
+
+`~/.whynot-cut` itself is never refused by these rules, and it may be a link (a junction or symlink) to a folder on
+another drive, for example `D:\ClaudeData\whynot-cut-home` (Addendum F): the installer uses it through the link, and
+`-Uninstall -RemoveEngine` deletes only WhyNot Cut's own entries inside it; the link and the folder it points to
+always stay, with anything else in them.
 
 Then the install stops with exit code 2 before anything is downloaded, both bootstraps and the core alike, and says
 how to fix it (in English and Arabic): **run the installer again with -EngineHome <folder> / --engine-home <folder>**,

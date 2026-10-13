@@ -364,8 +364,8 @@ def engine_home_problem(paths: base.Paths) -> Optional[str]:
             return f"{paths.whynot} is (or holds) {other}"
     if base._is_drive_root(str(paths.whynot)):
         return f"{paths.whynot} is a drive root or a mounted volume"
-    if base.is_link(paths.whynot):
-        return f"{paths.whynot} is a link"
+    if base.is_link(paths.whynot) and not base.linked_default_home(paths.whynot, paths.home):
+        return f"{paths.whynot} is a link"  # (the default ~/.whynot-cut linked to a folder is fine: Addendum F)
     if not base.is_engine_home(paths.whynot):
         return (f"{paths.whynot} does not look like a WhyNot Cut engine home (no state.json written by WhyNot Cut, no "
                 "`current` with its runtime stamp)")
@@ -472,15 +472,16 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
     names = set(os.listdir(paths.whynot))  # exact names: lexists would also match the editor's `Bin` on NTFS
     later = [paths.whynot / n for n in DEFERRED if n in names]
     rest = [n for n in os.listdir(paths.whynot) if n not in DEFERRED and n != DEFER_LIST]
+    linked = base.linked_default_home(paths.whynot, paths.home)  # the link and its target folder always stay
     defer_file = paths.whynot / DEFER_LIST
     try:
         if later:
-            lines = [str(p) for p in later] + ([str(paths.whynot)] if not rest else [])
+            lines = [str(p) for p in later] + ([str(paths.whynot)] if not rest and not linked else [])
             base.atomic_write_text(defer_file, "\n".join(lines) + "\n")
         else:
             if os.path.lexists(defer_file):
                 base._unlink(str(defer_file))
-            if not rest:
+            if not rest and not linked:
                 os.rmdir(paths.whynot)
     except OSError as e:
         failed.append(f"{DEFER_LIST} ({e})")
@@ -491,7 +492,9 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
     if later:
         notes.append(", ".join(p.name + "/" for p in later) + " (the Python running this uninstall and uv) are "
                      "deleted by the installer right after it exits"
-                     + (", then the engine home itself" if not rest else ""))
+                     + (", then the engine home itself" if not rest and not linked else ""))
+    if linked:
+        notes.append(f"kept {paths.whynot} (a link to {os.path.realpath(paths.whynot)}): the link and that folder stay")
     notes += [f"kept {k}" for k in kept] + [f"could not delete {f}" for f in failed]
     if foreign:
         notes.append(f"kept (not WhyNot Cut's, left alone): {', '.join(foreign)}")
