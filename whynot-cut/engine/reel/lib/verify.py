@@ -104,14 +104,41 @@ _VOLATILE_TAG = re.compile(
     r"|HSL\.TimelinePatchingAndTargeting\..*|MZ\.SourceTrackState|MZ\.SourceTrackNumber"
     r"|TL\.SQ(?:VisibleBaseTime|TimePerPixel|VideoVisibleBase|AudioVisibleBase|DataVisibleBase)"
     r"|Monitor\.ProgramZoom(?:In|Out)|list\.view\.expanded\.state\..*")
+# Gate 2 recheck (13-Oct, §8.2): which effect is selected in Effect Controls (MZ.ComponentChain.ActiveComponentID /
+# ActiveComponentParamIndex, written on a chain once it is shown or selected there, e.g. when the panel switches
+# projects) is UI selection, not editor work. The first time it appears, a chain that was an empty <ComponentChain>
+# gains <Node><Properties>..keys..</Properties></Node>: the wrapper is left out too when only selection keys (and
+# other drift above) are in it, so that the chain signs the same with or without them. Real component and effect
+# parameter values, and the order of the effects, are not touched.
+_SELECTION_TAG = re.compile(r"MZ\.ComponentChain\.Active.*")
 SIGNATURE_PREFIX = "c2:"
+
+
+_WRAPPER_TAG = ("Node", "Properties")        # the property-bag wrappers Premiere puts around a chain's keys
+
+
+def _droppable(el) -> bool:
+    """True when `el` is a selection key or an earlier-listed drift key, or a Node / Properties wrapper that holds
+    only those (at any depth) and no text of its own. Any other element (the chain itself, a component) is content."""
+    if _SELECTION_TAG.fullmatch(el.tag) or _VOLATILE_TAG.fullmatch(el.tag):
+        return True
+    return el.tag in _WRAPPER_TAG and len(el) > 0 and not (el.text or "").strip() and all(_droppable(c) for c in el)
+
+
+def _has_selection(el) -> bool:
+    return bool(_SELECTION_TAG.fullmatch(el.tag)) or any(_has_selection(c) for c in el)
+
+
+def _selection_only(el) -> bool:
+    """A selection key, or a Node / Properties wrapper that the selection keys are the only content of."""
+    return _has_selection(el) and _droppable(el)
 
 
 def _canonical(el, out: list) -> None:
     """Element -> text: attributes sorted, whitespace trimmed, Premiere's own drift (above) left out. Children whose
     names are all different and that have no children of their own (property bags, param records) are sorted by name:
     their order carries nothing. Lists (repeated names) keep their order."""
-    kids = [k for k in el if not _VOLATILE_TAG.fullmatch(k.tag)
+    kids = [k for k in el if not _VOLATILE_TAG.fullmatch(k.tag) and not _selection_only(k)
             and not (k.tag == "Node" and [c.tag for c in k] == ["ID"] and not k.attrib.keys() - {"Version"})]
     if kids and all(len(k) == 0 for k in kids) and len({k.tag for k in kids}) == len(kids):
         kids.sort(key=lambda k: k.tag)

@@ -354,6 +354,78 @@ class TestB2SignatureIgnoresPremieresOwnDrift(unittest.TestCase):
                 self.assertNotEqual(self.sig(bag_order=True, **kw), base)
 
 
+def _selection(comp_id=1, param=4294967295, extra=""):
+    """What Premiere writes on a component chain once it is shown or selected in Effect Controls (13-Oct recheck)."""
+    return ('<Node Version="1"><Properties Version="1">'
+            f"<MZ.ComponentChain.ActiveComponentID>{comp_id}</MZ.ComponentChain.ActiveComponentID>"
+            f"<MZ.ComponentChain.ActiveComponentParamIndex>{param}</MZ.ComponentChain.ActiveComponentParamIndex>"
+            f"{extra}</Properties></Node>")
+
+
+def _with_chains(xml: str, empty_sel: str = "", used_sel: str = "") -> str:
+    """The sample project plus an empty sequence chain (as ObjectID 139 in the capture), `empty_sel` inside it, and
+    `used_sel` inside the chain that holds the two effects."""
+    xml = xml.replace('<ComponentChain Version="3"><Components', f'<ComponentChain Version="3">{used_sel}<Components')
+    return xml.replace("</PremiereData>", '<VideoComponentChain ObjectID="139" Version="3"><ComponentChain '
+                       f'Version="3">{empty_sel}</ComponentChain></VideoComponentChain>\n</PremiereData>')
+
+
+class TestB2EffectControlsSelectionIsViewState(unittest.TestCase):
+    """Gate 2 recheck 13-Oct §8.2: Premiere re-saved a project when the panel switched projects; the only difference
+    was which effect is selected in Effect Controls. That is UI selection, not editor work."""
+
+    def sig(self, empty_sel="", used_sel="", **kw):
+        from lib.verify import prproj_signature
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        write_prproj(tmp / "p.prproj", _with_chains(prproj_xml(**kw), empty_sel, used_sel))
+        return prproj_signature(tmp / "p.prproj")
+
+    def test_the_selection_keys_added_changed_or_removed_keep_the_signature(self):
+        base = self.sig()
+        self.assertTrue(base.startswith("c2:"), base)
+        cases = {
+            "added to an empty chain (the capture)": dict(empty_sel=_selection()),
+            "changed to another effect": dict(empty_sel=_selection(2, 0)),
+            "added to the chain with the effects": dict(used_sel=_selection(1, 4)),
+            "on both chains, changed": dict(empty_sel=_selection(3, 1), used_sel=_selection(2, 4294967295)),
+            "wrapper with another save-time key beside them": dict(
+                empty_sel=_selection(extra="<MZ.EditLine>5</MZ.EditLine>")),
+        }
+        for what, kw in cases.items():
+            with self.subTest(what):
+                self.assertEqual(self.sig(**kw), base)
+        self.assertEqual(self.sig(empty_sel=_selection(1, 4)), self.sig(empty_sel=_selection(9, 0), used_sel=_selection()))
+
+    def test_the_wrapper_is_dropped_with_the_keys(self):
+        """Presence or absence of the emptied Node/Properties must not change the hash, at any nesting depth."""
+        nested = ('<Node Version="1"><Properties Version="1">' + _selection() + "</Properties></Node>")
+        bare = _selection().removeprefix('<Node Version="1">').removesuffix("</Node>")      # Properties without a Node
+        self.assertEqual(self.sig(empty_sel=_selection()), self.sig())
+        self.assertEqual(self.sig(empty_sel=nested), self.sig())
+        self.assertEqual(self.sig(empty_sel=bare), self.sig())
+
+    def test_real_chain_content_still_counts_next_to_the_selection(self):
+        base = self.sig(empty_sel=_selection(), used_sel=_selection(1, 4))
+        edits = {
+            "effect parameter value": dict(opacity=80.0),
+            "graphic text": dict(text="A different statement"),
+            "effect order": dict(effects_swapped=True),
+        }
+        for what, kw in edits.items():
+            with self.subTest(what):
+                self.assertNotEqual(self.sig(empty_sel=_selection(), used_sel=_selection(1, 4), **kw), base)
+                self.assertNotEqual(self.sig(empty_sel=_selection(2, 0), used_sel=_selection(), **kw), self.sig())
+                self.assertEqual(self.sig(empty_sel=_selection(2, 0), used_sel=_selection(), **kw), self.sig(**kw))
+        # a different value kept in the same bag as the selection keys is editor content
+        self.assertNotEqual(self.sig(empty_sel=_selection(extra="<Sample.Setting>7</Sample.Setting>")), self.sig())
+        self.assertNotEqual(self.sig(empty_sel=_selection(extra="<Sample.Setting>7</Sample.Setting>")),
+                            self.sig(empty_sel=_selection(extra="<Sample.Setting>8</Sample.Setting>")))
+        # a chain that holds a real component is not an emptied wrapper
+        self.assertNotEqual(self.sig(empty_sel='<Components Version="1"><Component Index="0" ObjectRef="9"/></Components>'),
+                            self.sig())
+
+
 class TestB2RebuildAfterPremieresDrift(_Client):
     def built_real(self, age_s=3600, **kw):
         from lib.verify import prproj_signature
