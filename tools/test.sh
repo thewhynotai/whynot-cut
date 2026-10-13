@@ -37,6 +37,16 @@ fi
 [ -n "$PY" ] || { echo "engine runtime not found under $HOME_DIR (run reel setup)" >&2; exit 2; }
 if [ "${1:-}" = "--which" ]; then echo "$PY $FLAG"; exit 0; fi
 cd "$ROOT"
+# Test temp files away from the system drive when this machine has a data drive (Addendum F2-T2): WHYNOT_TEST_TMP wins,
+# else D:/ClaudeData/Temp/wnc-tests when D:/ClaudeData exists; otherwise the normal TEMP. Only this process.
+TT="${WHYNOT_TEST_TMP:-}"
+if [ -z "$TT" ] && [ -d "/d/ClaudeData" ]; then TT="/d/ClaudeData/Temp/wnc-tests"; fi
+if [ -z "$TT" ] && [ -d "D:/ClaudeData" ]; then TT="D:/ClaudeData/Temp/wnc-tests"; fi
+if [ -n "$TT" ]; then
+  mkdir -p "$TT"
+  if command -v cygpath >/dev/null 2>&1; then TTW="$(cygpath -w "$TT")"; else TTW="$TT"; fi
+  export TEMP="$TTW" TMP="$TTW" TMPDIR="$TT"
+fi
 # -W error::ResourceWarning: an unclosed file / pipe / process anywhere fails the run (T2.17, MI-9;
 # collected by tests/test_release_hygiene.py)
 PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 exec "$PY" $FLAG -B -W error::ResourceWarning -m unittest discover -s whynot-cut/tests "$@"

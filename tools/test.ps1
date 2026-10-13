@@ -26,5 +26,10 @@ if (-not $py) {
 if (-not $py) { Write-Error "engine runtime not found under $homeDir (run reel setup)"; exit 2 }
 if ($args.Count -gt 0 -and $args[0] -eq '--which') { Write-Output ((@($py) + $flags) -join ' '); exit 0 }
 $env:PYTHONDONTWRITEBYTECODE = '1'; $env:PYTHONUTF8 = '1'
+# Test temp files away from the system drive when this machine has a data drive (Addendum F2-T2): WHYNOT_TEST_TMP wins,
+# else D:\ClaudeData\Temp\wnc-tests when D:\ClaudeData exists; otherwise the normal TEMP. Only this process.
+$tt = $env:WHYNOT_TEST_TMP
+if (-not $tt -and (Test-Path -LiteralPath 'D:\ClaudeData' -PathType Container)) { $tt = 'D:\ClaudeData\Temp\wnc-tests' }
+if ($tt) { New-Item -ItemType Directory -Force -Path $tt | Out-Null; $env:TEMP = $tt; $env:TMP = $tt }
 Push-Location $root
 try { & $py @flags -B -W error::ResourceWarning -m unittest discover -s whynot-cut/tests @args; exit $LASTEXITCODE } finally { Pop-Location }
