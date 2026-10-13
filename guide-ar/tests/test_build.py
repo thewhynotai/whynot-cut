@@ -155,7 +155,7 @@ class LintTests(unittest.TestCase):
         self.assertEqual(len(build.lint(_wrap('<h2 id="x">أ</h2><h2 id="x">ب</h2>'))), 1)
         self.assertEqual(len(build.lint(_wrap("<p>بعد Gate 1 مباشرة</p>"))), 1)
         self.assertEqual(
-            build.lint(_wrap('<section id="ch16"><p>في السجلات: Gate 1 = الموافقة</p></section>')), [])
+            build.lint(_wrap('<section id="ch19"><p>في السجلات: Gate 1 = الموافقة</p></section>')), [])
         # logo-dark.svg does not exist either: 2 problems (dark logo + missing file)
         dark = build.lint(_wrap('<img src="img/logo-dark.svg" alt="">'))
         self.assertTrue(any("logo-dark" in p for p in dark), dark)
@@ -499,6 +499,34 @@ class ChapterTests(unittest.TestCase):
                     if word not in known:
                         missing.append(f"{path.name}: reel {word}")
         self.assertEqual(missing, [], "commands not in reel --help (tests/reel-commands.txt)")
+
+
+    def test_chapter_numbers_match_files(self):
+        """chapters/NN-*.html: section id chNN, h1 id chNN-title, h1 text «N · …» (Western digits, no leading zero)."""
+        paths = sorted((GUIDE / "chapters").glob("*.html"))
+        self.assertTrue(paths, "no chapters")
+        problems = []
+        seen = []
+        for path in paths:
+            m = re.match(r"(\d\d)-", path.name)
+            if not m:
+                problems.append(f"{path.name}: file name must start with NN-")
+                continue
+            nn = m.group(1)
+            seen.append(int(nn))
+            text = path.read_text(encoding="utf-8")
+            if not re.search(rf'<section\b[^>]*\bid="ch{nn}"', text):
+                problems.append(f'{path.name}: no <section id="ch{nn}">')
+            h1 = re.search(rf'<h1\b[^>]*\bid="ch{nn}-title"[^>]*>(.*?)</h1>', text, flags=re.S)
+            if not h1:
+                problems.append(f'{path.name}: no <h1 id="ch{nn}-title">')
+            elif not re.match(rf"{int(nn)} · \S", build.plain_text(h1.group(1))):
+                problems.append(f"{path.name}: h1 «{build.plain_text(h1.group(1))}» must start with «{int(nn)} · »")
+            for other in re.findall(r'\bid="ch(\d\d)(?:-[^"]*)?"', text):
+                if other != nn:
+                    problems.append(f"{path.name}: id for chapter {other} inside chapter {nn}")
+        self.assertEqual(seen, list(range(1, len(seen) + 1)), "chapter file numbers must be consecutive from 01")
+        self.assertEqual(problems, [])
 
 
 @unittest.skipUnless(_pdf_ready(), "no guide-ar/.build/test.pdf yet (run build.py) or pypdf missing")

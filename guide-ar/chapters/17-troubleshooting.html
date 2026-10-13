@@ -1,9 +1,9 @@
-<section class="chapter" id="ch14">
-<h1 class="ch-title" id="ch14-title">14 · حل المشاكل</h1>
+<section class="chapter" id="ch17">
+<h1 class="ch-title" id="ch17-title">17 · حل المشاكل</h1>
 
 <p>معظم المشاكل لها سبب معروف وحل قصير. ابدأ دائمًا بالفحص، ثم ابحث عن العرَض في الجدول.</p>
 
-<h2 id="ch14-first">أول خطوة عند أي مشكلة</h2>
+<h2 id="ch17-first">أول خطوة عند أي مشكلة</h2>
 
 <ol class="steps">
 <li>اطلب من Claude أن يفحص الجهاز. يشغّل الأمر <bdi dir="ltr"><code>reel doctor</code></bdi>، وهو فحص للقراءة فقط (من دون <bdi dir="ltr"><code>--fix</code></bdi>) لا يغيّر شيئًا، ويعرض قائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت (<a href="#ch02-title">الفصل&nbsp;2</a>).</li>
@@ -21,7 +21,7 @@
 <p>لا يجرّب Claude حلولًا عشوائية: إذا فشل الإصلاح مرتين يستعين بمساعد متخصص في تشخيص الجهاز، وبعد ثلاث محاولات فاشلة للمشكلة نفسها يتوقف ويشرح لك ما جرّبه وما عرفه.</p>
 </aside>
 
-<h2 id="ch14-table">جدول المشاكل الشائعة</h2>
+<h2 id="ch17-table">جدول المشاكل الشائعة</h2>
 
 <table>
 <thead>
@@ -35,7 +35,7 @@
 <tr><td>لوحة WhyNot Cut Bridge لا تظهر في <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>.</td><td>كان Premiere مفتوحًا أثناء التثبيت، أو إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> غير مفعّل.</td><td>أغلق Premiere وافتحه. وإذا كان <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> غير مفعّل، ففعّله بنفسك بالأوامر التي يعطيك إياها Claude من الفحص (على Windows في PowerShell، لا في Git Bash)، ثم أعد فتح Premiere.</td></tr>
 <tr><td>فعّلت <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> لكن اللوحة لا تعمل.</td><td>الأمر نُفّذ في حساب مستخدم آخر، أو في نافذة خاطئة.</td><td>نفّذ الأمر في حسابك أنت على الجهاز، واطلب من Claude أمر التحقق من القيمة، ثم أعد فتح Premiere.</td></tr>
 <tr><td>Claude يقول إن Premiere لا يستجيب.</td><td>اللوحة مغلقة، أو في Premiere نافذة حوار مفتوحة.</td><td>اجعل نافذة Premiere في المقدمة وأغلق أي نافذة حوار، ثم افتح <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions&nbsp;› WhyNot&nbsp;Cut&nbsp;Bridge</bdi>.</td></tr>
-<tr><td>التفريغ النصي بطيء جدًا.</td><td>يعمل على المعالج (CPU) فقط.</td><td>مع كارت NVIDIA: وافق على تنزيل مكتبة التسريع حين يعرضها Claude (نحو 520 MB). بدونه: غيّر نموذج التفريغ إلى <bdi dir="ltr"><code>large-v3-turbo</code></bdi> (<a href="#ch13-title">الفصل&nbsp;13</a>).</td></tr>
+<tr><td>التفريغ النصي بطيء جدًا.</td><td>يعمل على المعالج (CPU) فقط.</td><td>مع كارت NVIDIA: وافق على تنزيل مكتبة التسريع حين يعرضها Claude (نحو 520 MB). بدونه: غيّر نموذج التفريغ إلى <bdi dir="ltr"><code>large-v3-turbo</code></bdi> (<a href="#ch16-title">الفصل&nbsp;16</a>).</td></tr>
 <tr><td>توقف تنزيل نموذج Whisper في منتصفه.</td><td>انقطع الاتصال أو أُغلق الجهاز.</td><td>اطلب من Claude إكمال التنزيل؛ الفحص يُظهر التنزيل الناقص، والأمر نفسه يكمله.</td></tr>
 <tr><td>التفريغ يفشل لملفات في OneDrive أو iCloud أو Dropbox.</td><td>الملفات محفوظة على السحابة فقط، وليست على الجهاز.</td><td>انتظر حتى ينتهي تنزيل الملفات ونسخها، والأفضل أن يكون فولدر العملاء خارج الفولدرات المتزامنة.</td></tr>
 <tr><td>خطوط العميل لا تظهر في Premiere، أو تظهر رسالة <bdi dir="ltr">Fonts not installed</bdi>.</td><td>الخطوط موجودة في <bdi dir="ltr"><code>assets/Fonts</code></bdi> فقط، وليست مثبَّتة على الجهاز.</td><td>ثبّتها أنت: على Windows زر الماوس الأيمن ثم Install، وعلى macOS نقرتان ثم Install Font. فيديو المعاينة يستخدم ملفات الخطوط مباشرة، لكن Premiere يحتاج إليها مثبَّتة.</td></tr>
@@ -48,19 +48,19 @@
 <p>يُراجَع هذا الجدول ويُستكمل من المشاكل التي تظهر في التشغيل الحقيقي الكامل على أجهزة نظيفة، مع صورة لكل رسالة خطأ شائعة.</p>
 </aside>
 
-<h2 id="ch14-fix">الإصلاح التلقائي بأمر <bdi dir="ltr"><code>reel doctor --fix</code></bdi></h2>
+<h2 id="ch17-fix">الإصلاح التلقائي بأمر <bdi dir="ltr"><code>reel doctor --fix</code></bdi></h2>
 
 <aside class="todo" data-phase="7">
 <p>الخيار <bdi dir="ltr"><code>--fix</code></bdi> موجود اليوم، لكنه يكتفي بوضع ملف العلامة <bdi dir="ltr"><code>.whynot-client</code></bdi> في فولدر العميل. في الإصدار <bdi dir="ltr">3.0</bdi> سيتوسّع <bdi dir="ltr"><code>reel doctor --fix</code></bdi> ليُصلح تلقائيًا ما يمكن إصلاحه دون تدخّل منك، ويسجّل كل ما فعله، ويمكن تكراره بأمان. يُشرح هنا ما يصلحه وما يبقى لك بعد اكتماله.</p>
 </aside>
 
-<h2 id="ch14-bundle">حزمة التشخيص</h2>
+<h2 id="ch17-bundle">حزمة التشخيص</h2>
 
 <aside class="todo" data-phase="7">
 <p>في الإصدار <bdi dir="ltr">3.0</bdi> يجهّز الفحص ملفًا مضغوطًا (zip) على سطح المكتب فيه معلومات الجهاز والسجلات، بعد إخفاء البيانات الخاصة، ولا يضم أي فيديو أو تفريغ نصي إلا إذا اخترت ذلك. ترسله إلى الدعم عند الحاجة. تُشرح خطواته هنا بعد اكتماله.</p>
 </aside>
 
-<h2 id="ch14-support">عندما لا تُحل المشكلة</h2>
+<h2 id="ch17-support">عندما لا تُحل المشكلة</h2>
 
 <p>إذا لم تجد العرَض في الجدول، أو لم ينجح الحل، اطلب من Claude أن يلخّص ما جرّبه وما عرفه، ثم راسلنا على <bdi dir="ltr"><a href="mailto:info@thewhynot.ai">info@thewhynot.ai</a></bdi> ومعك هذا الملخص ونتيجة الفحص.</p>
 </section>

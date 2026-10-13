@@ -315,7 +315,7 @@ class _Linter(HTMLParser):
             ltr = a["dir"].lower() == "ltr"
         if tag == "bdi":
             bdi = True
-        if a.get("id") == "ch16":
+        if a.get("id") == "ch19":
             ch16 = True
         if tag in ("style", "script"):
             skip = True
@@ -396,7 +396,7 @@ class _Linter(HTMLParser):
         if bdi and _ARABIC_DIGIT.search(data):
             self.problems.append(f"Arabic-Indic digit inside <bdi> (use 0-9): «{snippet}»")
         if not ch16 and _GATE.search(data):
-            self.problems.append(f"internal gate name outside the glossary chapter (#ch16): «{snippet}»")
+            self.problems.append(f"internal gate name outside the glossary chapter (#ch19): «{snippet}»")
         if self.release and not todo:
             bare = _DIACRITICS.sub("", data)
             for label, pattern in DRAFT_PHRASES:
