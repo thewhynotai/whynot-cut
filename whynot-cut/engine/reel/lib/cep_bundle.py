@@ -26,9 +26,16 @@ that file exists: the daemon starts the engine through it and nothing else (js/b
 
 The signed path (Task 6): `tools/sign_zxp.py build` signs the assembled bundle into
 whynot-cut/adobe/WhyNotCut-Bridge-3.0.0.zxp (`zxp_path`; a build artefact, git-ignored, shipped with the plugin) and
-`install_zxp` puts it in place: signed only, every entry checked (no absolute path, `..`, link), CRC-checked extraction
-into `<ext>.new`, then a swap that keeps the previous copy as `<ext>.prev`. The unsigned dev build (`install_source`) is
-used only with WHYNOT_BRIDGE_DEV=1 (`dev_build_allowed`, plan decision 9).
+`install_zxp` puts it in place: signed only, every entry checked (no absolute path, `..`, link, name ending in `.` or a
+space; at most 2,000 entries and 64 MB uncompressed), CRC-checked extraction into `<CEP root>/.wnc-staging/new`, then a
+swap that keeps the previous copy as `<CEP root>/.wnc-staging/prev` (`staging_dir`: beside the extensions folder, on
+the same volume, never inside it: CEP loads every folder there by its manifest). Every install first runs `recover`.
+The unsigned dev build (`install_source`) is used only with WHYNOT_BRIDGE_DEV=1 (`dev_build_allowed`, plan
+decision 9).
+
+"Signed" here means the archive carries META-INF/signatures.xml: the engine does not check the signature itself. The
+real check is CEP's, when the app loads the extension with PlayerDebugMode off (an extension whose signature fails
+does not load).
 
 Adobe-track owned (3.0 T6.3).
 """
@@ -63,7 +70,10 @@ CONFIG_SCHEMA = 1
 LAUNCHER_NAME = "wnc-engine.cmd" if os.name == "nt" else "wnc-engine"     # <engine home>/bin/<this>, the shim
 ZXP_NAME = f"WhyNotCut-Bridge-{PRODUCT}.zxp"     # tools/sign_zxp.py build writes it; tools/release.py pins it
 SIGNATURES = "META-INF/signatures.xml"
-DEV_ENV = "WHYNOT_BRIDGE_DEV"                   # =1: the unsigned dev build may be installed / driven (until 3.1)
+STAGING = ".wnc-staging"                        # <CEP root>/.wnc-staging/{new,prev}: beside extensions/, never in it
+ZXP_MAX_ENTRIES = 2000                          # a ZXP with more entries is refused (the bundle has ~20)
+ZXP_MAX_BYTES = 64 * 1024 * 1024                # ... or more uncompressed bytes in total (the bundle is < 1 MB)
+DEV_ENV ="WHYNOT_BRIDGE_DEV"                   # =1: the unsigned dev build may be installed / driven (until 3.1)
 
 
 def source_dir() -> Path:
@@ -217,9 +227,10 @@ def decide_install(cur: dict | None, new: dict, *, force: bool = False) -> dict:
 
 def install_source(ext: Path, *, force: bool = False) -> dict:
     """Assemble the bundle from the source (an unsigned dev build) and put it in `ext` when `decide_install` says so.
-    Returns the decision plus {"installed": <the bundle now in ext>}. Nothing in `ext` is touched before the new
-    bundle is complete (it is assembled in a temp folder first)."""
+    Returns the decision plus {"installed": <the bundle now in ext>, "recovered"}. Nothing in `ext` is touched before
+    the new bundle is complete (it is assembled in a temp folder first); `recover` runs first."""
     ext = Path(ext)
+    recovered = None if _is_link(ext) else recover(ext)
     with tempfile.TemporaryDirectory(prefix="wnc-cep-") as t:
         new = installed(assemble(Path(t) / EXT_ID))
         decision = decide_install(installed(ext), new, force=force)
@@ -228,7 +239,7 @@ def install_source(ext: Path, *, force: bool = False) -> dict:
             if ext.exists():
                 shutil.rmtree(ext)
             shutil.copytree(Path(t) / EXT_ID, ext)
-    return dict(decision, installed=installed(ext), new=new)
+    return dict(decision, installed=installed(ext), new=new, recovered=recovered)
 
 
 class ZxpError(ValueError):
@@ -257,17 +268,63 @@ def _remove(p: Path) -> None:
         p.unlink()
 
 
+def staging_dir(ext: Path | None = None) -> Path:
+    """<CEP root>/.wnc-staging: %APPDATA%\\Adobe\\CEP\\.wnc-staging (Windows) or ~/Library/Application Support/Adobe/
+    CEP/.wnc-staging (macOS), the parent of the extensions folder (`plat.cep_extensions_dir()`, or `ext`'s). It holds
+    `new` (the extraction) and `prev` (the one previous copy): beside the extensions folder, so on the same volume (the
+    renames are atomic) and never scanned by CEP, which loads every folder of the extensions folder by its manifest."""
+    from . import plat
+    root = Path(ext).parent if ext is not None else plat.cep_extensions_dir()
+    return root.parent / STAGING
+
+
+def recover(ext: Path) -> str | None:
+    """Run at the start of every install or update. Moves the Task 6 leftovers `<ext>.new` (removed) and `<ext>.prev`
+    (it becomes the staged prev) out of the extensions folder, then, when `ext` is missing and a previous copy exists
+    (a crash between the two renames of the swap), puts that copy back. Returns what was put back, else None."""
+    ext = Path(ext)
+    st = staging_dir(ext)
+    prev = st / "prev"
+    old_new, old_prev = ext.with_name(ext.name + ".new"), ext.with_name(ext.name + ".prev")
+    _remove(old_new)
+    note = None
+    if os.path.lexists(old_prev):
+        if _is_link(old_prev) or not old_prev.is_dir():
+            _remove(old_prev)
+        elif not os.path.lexists(ext):
+            os.replace(old_prev, ext)
+            note = f"the previous WhyNot Cut extension was put back from {old_prev}"
+        else:
+            st.mkdir(parents=True, exist_ok=True)
+            _remove(prev)
+            os.replace(old_prev, prev)
+    if not os.path.lexists(ext) and prev.is_dir() and not _is_link(prev):
+        ext.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(prev, ext)
+        note = f"the previous WhyNot Cut extension was put back from {prev} (an earlier update stopped half-way)"
+    return note
+
+
 def _zxp_members(zf: zipfile.ZipFile, name: str) -> list:
     """The file entries of the archive as (posix relative path, ZipInfo), every entry checked first: an absolute path,
-    a drive, a backslash, an empty / `.` / `..` part, a link or a duplicate refuses the whole archive."""
+    a drive, a backslash, an empty / `.` / `..` part, a part ending in `.` or a space (Windows drops those: `a.` and
+    `a` would be the same file), a link or a duplicate refuses the whole archive; so do more than ZXP_MAX_ENTRIES
+    entries or more than ZXP_MAX_BYTES uncompressed in total."""
+    infos = zf.infolist()
+    if len(infos) > ZXP_MAX_ENTRIES:
+        raise ZxpError(f"{name} holds {len(infos)} entries (at most {ZXP_MAX_ENTRIES}): it was not installed")
+    total = sum(zi.file_size for zi in infos)
+    if total > ZXP_MAX_BYTES:
+        raise ZxpError(f"{name} unpacks to {total / 1048576:.0f} MB (at most {ZXP_MAX_BYTES // 1048576} MB): it was "
+                       "not installed")
     files, seen = [], set()
-    for zi in zf.infolist():
+    for zi in infos:
         raw = zi.filename
         rel = raw[:-1] if zi.is_dir() else raw
         parts = rel.split("/")
         mode = (zi.external_attr >> 16) & 0o177777 if zi.create_system == 3 else 0     # 3 = made on unix
         if (not rel or raw.startswith("/") or "\\" in raw or ":" in raw or "\0" in raw
-                or any(p in ("", ".", "..") for p in parts) or stat.S_ISLNK(mode)):
+                or any(p in ("", ".", "..") or p.endswith((".", " ")) for p in parts) or stat.S_ISLNK(mode)):
             raise ZxpError(f"{name} holds an unsafe entry {raw!r}: it was not installed")
         key = rel.casefold()
         if key in seen:
@@ -295,6 +352,8 @@ def _extract_checked(zf: zipfile.ZipFile, files: list, dst: Path, name: str) -> 
                     if not chunk:
                         break
                     crc, size = zlib.crc32(chunk, crc), size + len(chunk)
+                    if size > zi.file_size:              # more data than the entry declares: never written
+                        raise ZxpError(f"{name}: {rel!r} is larger than it declares: it was not installed")
                     f.write(chunk)
         except (zipfile.BadZipFile, zlib.error, EOFError) as e:
             raise ZxpError(f"{name}: {rel!r} is damaged ({e}): it was not installed") from None
@@ -305,13 +364,18 @@ def _extract_checked(zf: zipfile.ZipFile, files: list, dst: Path, name: str) -> 
 def install_zxp(zxp: Path, ext: Path, *, force: bool = False) -> dict:
     """Install the SIGNED bundle `zxp` in `ext` when `decide_install` says so (the signed path, plan Task 6).
     Every entry is checked before anything is written (`_zxp_members`); the files are extracted, CRC-checked, into
-    `<ext>.new`; the manifest must name ai.thewhynot.cut.bridge. Then `ext` becomes `<ext>.prev` (one previous copy
-    is kept) and `<ext>.new` becomes `ext`; a failed swap puts the previous copy back. ZxpError when the ZXP is never
-    installed (`ext` is untouched then). Returns the decision plus {"installed", "new", "prev"}."""
+    `<CEP root>/.wnc-staging/new` (`staging_dir`); the manifest must name ai.thewhynot.cut.bridge. Then `ext` becomes
+    `.wnc-staging/prev` (one previous copy is kept) and `new` becomes `ext`. `recover` runs first, so a run that
+    stopped between the two renames is put right before anything else.
+    ZxpError when the ZXP is not installed, with what happened to `ext`: left as it was, or the previous copy put
+    back, or (only when even that rename fails) where the previous copy is, which the next install puts back. A
+    staged `new` never survives a failure. Returns the decision plus {"installed", "new", "prev", "recovered"}."""
     zxp, ext = Path(zxp), Path(ext)
-    new, prev = ext.with_name(ext.name + ".new"), ext.with_name(ext.name + ".prev")
+    st = staging_dir(ext)
+    new, prev = st / "new", st / "prev"
     if _is_link(ext):
         raise ZxpError(f"{ext} is a link (a development extension): it was left alone")
+    recovered = recover(ext)
     try:
         zf = zipfile.ZipFile(zxp)
     except (zipfile.BadZipFile, OSError) as e:
@@ -322,6 +386,7 @@ def install_zxp(zxp: Path, ext: Path, *, force: bool = False) -> dict:
             raise ZxpError(f"{zxp.name} is not signed (no {SIGNATURES}): an unsigned extension is never installed "
                            "from a ZXP")
         ext.parent.mkdir(parents=True, exist_ok=True)
+        st.mkdir(parents=True, exist_ok=True)
         _remove(new)
         try:
             _extract_checked(zf, files, new, zxp.name)
@@ -333,21 +398,35 @@ def install_zxp(zxp: Path, ext: Path, *, force: bool = False) -> dict:
             raise
     got["path"] = str(ext)
     decision = decide_install(installed(ext), got, force=force)
+    done = lambda: dict(decision, installed=installed(ext), new=got,  # noqa: E731
+                        prev=str(prev) if prev.is_dir() else None, recovered=recovered)
     if decision["action"] not in ("install", "replace"):
         _remove(new)
-        return dict(decision, installed=installed(ext), new=got, prev=str(prev) if prev.exists() else None)
-    had = os.path.lexists(ext)
-    if had:
-        _remove(prev)
-        os.replace(ext, prev)
+        return done()
+    had, moved = os.path.lexists(ext), False
     try:
+        if had:
+            _remove(prev)
+            os.replace(ext, prev)
+            moved = True
         os.replace(new, ext)
-    except OSError:
-        if had and not os.path.lexists(ext):
-            os.replace(prev, ext)
+    except OSError as e:
+        why = e.strerror or type(e).__name__
+        if not moved:
+            msg = f"the WhyNot Cut extension could not be moved aside ({why}): the installed one was left as it was"
+        elif os.path.lexists(ext):
+            msg = f"the new WhyNot Cut extension could not be put in place ({why})"
+        else:
+            try:
+                os.replace(prev, ext)
+                msg = (f"the new WhyNot Cut extension could not be put in place ({why}): the previous one was put "
+                       "back")
+            except OSError:
+                msg = (f"the new WhyNot Cut extension could not be put in place ({why}) and the previous one is in "
+                       f"{prev}: the next install (reel setup) puts it back")
         _remove(new)
-        raise
-    return dict(decision, installed=installed(ext), new=got, prev=str(prev) if prev.exists() else None)
+        raise ZxpError(msg) from e
+    return done()
 
 
 def config_path() -> Path:

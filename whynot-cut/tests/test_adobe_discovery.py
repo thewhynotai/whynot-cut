@@ -7,6 +7,8 @@ Every test injects the registry reader, the mdfind runner and the folders: nothi
 import sys as _sys
 _sys.dont_write_bytecode = True
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import contextlib
+import os
 import plistlib
 import sys
 import tempfile
@@ -933,13 +935,76 @@ class BridgeInfoAndDoctor(unittest.TestCase):
         self.assertEqual((br["installed"], br["family"], br["product"], br["build"], br["signed"], br["config"]),
                          (False, None, None, None, False, None))
         self.assertFalse(br["loads"])
-        fix = [f for f in self.doctor()["fixes"] if f["item"] == "WhyNot Cut extension (Premiere)"]
+        zxp = self.tmp / "plugin" / "adobe" / self.cep_bundle.ZXP_NAME
+        with mock.patch.object(self.cep_bundle, "zxp_path", lambda: zxp), \
+                mock.patch.dict(os.environ, {"WHYNOT_BRIDGE_DEV": "1"}):
+            fix = [f for f in self.doctor()["fixes"] if f["item"] == "WhyNot Cut extension (Premiere)"]
         self.assertEqual(len(fix), 1)
-        self.assertIn("reel setup", fix[0]["fix"])                       # this checkout carries the source
-        with mock.patch.object(self.cep_bundle, "source_dir", lambda: self.tmp / "none"):
+        self.assertIn("reel setup", fix[0]["fix"])                       # the dev source with WHYNOT_BRIDGE_DEV=1
+        with mock.patch.object(self.cep_bundle, "source_dir", lambda: self.tmp / "none"),                 mock.patch.object(self.cep_bundle, "zxp_path", lambda: zxp):
             fix = [f for f in self.doctor()["fixes"] if f["item"] == "WhyNot Cut extension (Premiere)"][0]
         self.assertEqual((fix["who"], fix["fix"]),
                          ("editor", "install WhyNot Cut with its installer (the signed extension comes with it)"))
+
+    def extension_fix(self, zxp: bool, dev: bool, source: bool) -> dict:
+        from lib import onboard
+        z = self.tmp / "plugin" / "adobe" / self.cep_bundle.ZXP_NAME
+        if zxp:
+            z.parent.mkdir(parents=True, exist_ok=True)
+            z.write_bytes(b"PK")
+        elif z.exists():
+            z.unlink()
+        patches = [mock.patch.object(self.cep_bundle, "zxp_path", lambda: z),
+                   mock.patch.dict(os.environ, {"WHYNOT_BRIDGE_DEV": "1" if dev else ""})]
+        if not source:
+            patches.append(mock.patch.object(self.cep_bundle, "source_dir", lambda: self.tmp / "none"))
+        with contextlib.ExitStack() as st:
+            for p in patches:
+                st.enter_context(p)
+            return onboard._extension_fix("Premiere")
+
+    def test_reel_setup_is_offered_only_when_it_can_install_something(self):
+        """reel setup installs the signed ZXP the plugin carries, or the dev source with WHYNOT_BRIDGE_DEV=1: only
+        then is it the fix; otherwise (a checkout without a signed ZXP and without the variable) the installer."""
+        installer = "install WhyNot Cut with its installer (the signed extension comes with it)"
+        for zxp, dev, source, want in ((True, False, False, "reel setup"), (True, False, True, "reel setup"),
+                                       (False, True, True, "reel setup"), (False, False, True, installer),
+                                       (False, True, False, installer), (False, False, False, installer)):
+            with self.subTest(zxp=zxp, dev=dev, source=source):
+                f = self.extension_fix(zxp, dev, source)
+                self.assertIn(want, f["fix"])
+                self.assertEqual(f["who"], "claude" if want == "reel setup" else "editor")
+
+    def test_a_refused_or_given_up_engine_start_is_a_plain_fix(self):
+        """The daemon's engine_start {outcome, reason}: `refused` and `gave_up` become one plain sentence for the
+        editor (no reason code, no jargon); every other outcome adds nothing."""
+        self.bundle(signed=True)
+        self.alive = True
+        self.q.mkdir(parents=True)
+        cases = {("refused", "outside_profile"): "your user folder",
+                 ("refused", "metachar_in_path"): "character",
+                 ("refused", "not_found"): "missing",
+                 ("refused", "something_new"): "reinstall WhyNot Cut",
+                 ("gave_up", "gave_up"): "quit and reopen Premiere Pro"}
+        for (outcome, reason), needle in cases.items():
+            with self.subTest(outcome=outcome, reason=reason):
+                beat = {"at": 1, "engine_start": {"at": 1, "outcome": outcome, "reason": reason}}
+                (self.q / "bridge.heartbeat").write_text(self.json.dumps(beat), encoding="utf-8")
+                (f,) = [f for f in self.doctor()["fixes"] if f["item"].startswith("WhyNot Cut could not start")]
+                self.assertIn(needle, f["fix"])
+                self.assertEqual(f["who"], "editor")
+                self.assertNotIn(reason, f["item"] + f["fix"])
+                self.assertNotIn("_", f["item"] + f["fix"])
+        for outcome in ("running", "spawned", "no_launcher", "failed"):
+            with self.subTest(outcome=outcome):
+                beat = {"at": 1, "engine_start": {"at": 1, "outcome": outcome, "reason": None}}
+                (self.q / "bridge.heartbeat").write_text(self.json.dumps(beat), encoding="utf-8")
+                self.assertFalse(any(f["item"].startswith("WhyNot Cut could not start")
+                                     for f in self.doctor()["fixes"]))
+        self.alive = False                                   # a stale heartbeat: the daemon fix comes first
+        beat = {"at": 1, "engine_start": {"at": 1, "outcome": "gave_up", "reason": "gave_up"}}
+        (self.q / "bridge.heartbeat").write_text(self.json.dumps(beat), encoding="utf-8")
+        self.assertFalse(any(f["item"].startswith("WhyNot Cut could not start") for f in self.doctor()["fixes"]))
 
     def test_config_json_and_build_json(self):
         from lib import onboard

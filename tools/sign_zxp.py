@@ -10,27 +10,32 @@ setup   (once per machine; everything lives in ~/.whynot-cut/signing/, never in 
     `--from <file>` copies a file that is already downloaded after checking it against the same pin; without it the
     pinned raw.githubusercontent.com URL is fetched into a temp folder and checked the same way. A mismatch is
     refused and nothing is written. The tool already in place is checked against the pin before every use.
-    Windows x64 only for now (plan decision 10); the macOS pin is not set and is refused, never guessed.
+    Windows x64 and macOS. The macOS tool (its own commit) is Mach-O x86_64 only: on Apple Silicon it runs through
+    Rosetta 2. It is not notarized; it is fetched by urllib (never a browser), so it has no quarantine attribute, and
+    setup makes it 0755 after the pin check. It is a build-time tool on the signing machine: it never ships.
   * The certificate: a self-signed one, made once: `EG Cairo "The Why Not AI" "WhyNot Cut"`, valid 3650 days, in
     signing/whynot-cut.p12. An existing certificate is never replaced.
   * Its password: secrets.token_urlsafe(32), kept in the OS credential store (target `WhyNotCut/zxp-signing`):
     the Windows Credential Manager (ctypes CredWriteW / CredReadW; no `keyring` dependency, plan decision 12) or the
-    macOS keychain (`security`).
+    macOS keychain (`security -i`, the password on stdin: never on an argv, which `ps` shows; read back to check).
 build
   * assembles the bundle (engine lib/cep_bundle.assemble) in a temp staging folder and refuses it when it holds any
     symlink, junction, `.DS_Store` or `__MACOSX` (Adobe's KnownIssue2024: UPIA-installed ZXPs that hold links fail
     their signature check);
   * `ZXPSignCmd -sign <staging> <zxp> <p12> <password> -tsa <url>`: `-tsa` is ALWAYS passed (default
     http://timestamp.digicert.com); a failed timestamp fails the build (plan decision 11);
-  * `ZXPSignCmd -verify <zxp> -certinfo` must report a verified signature and a valid timestamp, and the archive must
-    hold META-INF/signatures.xml plus exactly the staged files (only META-INF/* and `mimetype` may be added);
+  * `ZXPSignCmd -verify <zxp> -certinfo` (VERIFY_TIMEOUT s; a timeout is retried once, a second failure fails the
+    build) must report a verified signature and a `Timestamp: Valid ...` line (`Timestamp: None` = signed without
+    -tsa: refused), and the archive must hold META-INF/signatures.xml plus exactly the staged files (only META-INF/*
+    and `mimetype` may be added);
   * an atomic rename to whynot-cut/adobe/WhyNotCut-Bridge-3.0.0.zxp, and every other *.zxp there is removed: exactly
     one .zxp is left (tools/release.py --fill-artefacts refuses two). A failed build leaves the folder as it was.
 verify  the -verify -certinfo and archive checks on the built ZXP (no password needed).
 
 The password is never printed, logged or put in an error: every command shown is redacted (`shown`), every output of
 ZXPSignCmd is scrubbed of it (`scrub`), and failures are raised as SignError built from the redacted command only.
-(ZXPSignCmd itself takes the password as an argument; that cannot be avoided.)
+(ZXPSignCmd itself takes the password as an argument; that cannot be avoided.) ZXPSignCmd's stdout and stderr go to
+temp files, never pipes (a timeout kill on Windows cannot block on a pipe a child inherited).
 Exit codes: 0 ok, 2 refused / failed (one line on stderr says why and what to do).
 """
 from __future__ import annotations
@@ -67,19 +72,25 @@ CERT_NAME = "whynot-cut.p12"
 CERT_SUBJECT = ("EG", "Cairo", "The Why Not AI", "WhyNot Cut")   # country, state, organisation, common name
 CERT_DAYS = 3650
 SIGN_TIMEOUT = 600
+VERIFY_TIMEOUT = 120                                # -verify -certinfo: retried once on a timeout (exit 124) only
 FORBIDDEN_NAMES = {".ds_store", "__macosx"}
+IS_WIN = os.name == "nt"
 
 # ZXPSignCmd, pinned (plan decision 10). Version 4.1.3 is Adobe's 2025 build ("added new Windows version with SHA2
 # fix"); the controller downloaded it once and checked it (2026-10-13). The exe is not Authenticode-signed: the
-# pinned size + sha256 is the check.
+# pinned size + sha256 is the check. Each pin names its own commit (`commit`, default PIN_COMMIT).
 PIN_REPO = "Adobe-CEP/CEP-Resources"
 PIN_COMMIT = "8897cfaf9801b0ad5321951199dd831a82964583"
 PINS = {
     "windows-x64": {"version": "4.1.3", "path": "ZXPSignCMD/4.1.3/x64/ZXPSignCmd.exe", "file": "ZXPSignCmd.exe",
                     "size": 4542464, "git_blob": "f5df2ed805e04a4d3c6adc722f602d4df6c762f7",
                     "sha256": "ffc2223167225ce61d024eb463fc5ad1a1be16133f99ef334a646f7311916c98"},
-    # TODO (after Windows, decision 10): ZXPSignCMD/4.1.3/macOS at PIN_COMMIT. Not set: setup / build refuse it.
-    "macos": None,
+    # Mach-O x86_64 only (Rosetta 2 on Apple Silicon) and not notarized; fetched by urllib, so no quarantine
+    # attribute. A build-time tool on the signing machine: it never ships with the plugin or the installer.
+    "macos": {"version": "4.1.3", "path": "ZXPSignCMD/4.1.3/macOS/ZXPSignCmd", "file": "ZXPSignCmd",
+              "size": 6391280, "git_blob": "38b958508c5a249d12418845dd07ad43e4f34a92",
+              "sha256": "bc773fae0b97416fc7a462e7dadcc00270428a9913480c9b78b5606ff1cfb095",
+              "commit": "fcee8de5537d2dd2ed3d91d5a495b7041155b280", "arch": "x86_64", "notarized": False},
 }
 
 
@@ -135,6 +146,16 @@ class WinCredStore:
         self._read.restype = wintypes.BOOL
         self._free = adv.CredFree
         self._free.argtypes, self._free.restype = [ctypes.c_void_p], None
+        self._delete = adv.CredDeleteW
+        self._delete.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD]
+        self._delete.restype = wintypes.BOOL
+
+    def delete(self, target: str) -> None:
+        """Remove the credential; a missing one is no error."""
+        if not self._delete(target, self.CRED_TYPE_GENERIC, 0):
+            err = ctypes.get_last_error()
+            if err != self.ERROR_NOT_FOUND:
+                raise SignError(f"the Windows Credential Manager could not remove {target} (error {err})")
 
     def read(self, target: str) -> str | None:
         p = ctypes.POINTER(self.CREDENTIALW)()
@@ -161,19 +182,27 @@ class WinCredStore:
 
 
 class MacKeychain:
-    """The macOS login keychain through /usr/bin/security (generic password, service = the target)."""
+    """The macOS login keychain through /usr/bin/security (generic password, service = the target). The password is
+    written through `security -i` on stdin, never on an argv (`ps` shows every argv to every user of the machine)."""
     SECURITY = "/usr/bin/security"
+    ACCOUNT = "WhyNot Cut"
+    _SAFE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")         # what `security -i`'s line parser takes as-is
 
     def read(self, target: str) -> str | None:
-        r = subprocess.run([self.SECURITY, "find-generic-password", "-s", target, "-a", "WhyNot Cut", "-w"],
+        r = subprocess.run([self.SECURITY, "find-generic-password", "-s", target, "-a", self.ACCOUNT, "-w"],
                            capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)
         return r.stdout.rstrip("\n") if r.returncode == 0 and r.stdout.strip() else None
 
     def write(self, target: str, secret: str) -> None:
-        r = subprocess.run([self.SECURITY, "add-generic-password", "-U", "-s", target, "-a", "WhyNot Cut",
-                            "-w", secret], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)
+        if not (self._SAFE.fullmatch(secret or "") and self._SAFE.fullmatch(target)):
+            raise SignError("the password or target holds characters `security -i` could misread: not written")
+        line = f'add-generic-password -U -s "{target}" -a "{self.ACCOUNT}" -w "{secret}"\n'
+        r = subprocess.run([self.SECURITY, "-i"], input=line, capture_output=True, text=True, timeout=60)
         if r.returncode != 0:
             raise SignError(f"the macOS keychain refused the password (exit {r.returncode})")
+        if self.read(target) != secret:          # `security -i` can exit 0 after a failed command: check the write
+            raise SignError("the macOS keychain did not keep the password",
+                            "unlock the login keychain (Keychain Access) and run setup again")
 
 
 def default_store():
@@ -194,16 +223,20 @@ def platform_key() -> str:
 def pin_for(key: str) -> dict:
     pin = PINS.get(key)
     if pin is None:
-        if key == "macos":
-            raise SignError("macOS pin not set: ZXPSignCmd for macOS (ZXPSignCMD/4.1.3/macOS at commit "
-                            f"{PIN_COMMIT}) is not pinned yet",
-                            "sign on Windows x64 for now (plan decision 10); the macOS pin is a later step")
-        raise SignError(f"no ZXPSignCmd pin for this system ({key})", "sign on Windows x64")
+        raise SignError(f"no ZXPSignCmd pin for this system ({key})", "sign on Windows x64 or macOS")
     return pin
 
 
 def pin_url(pin: dict) -> str:
-    return f"https://raw.githubusercontent.com/{PIN_REPO}/{PIN_COMMIT}/{pin['path']}"
+    return f"https://raw.githubusercontent.com/{PIN_REPO}/{pin.get('commit', PIN_COMMIT)}/{pin['path']}"
+
+
+def pin_note(pin: dict) -> str | None:
+    """A note for this machine: the macOS tool is x86_64 only, so Apple Silicon runs it through Rosetta 2."""
+    if pin.get("arch") == "x86_64" and platform.machine().lower() in ("arm64", "aarch64"):
+        return ("ZXPSignCmd for macOS is x86_64 only: on Apple Silicon it runs through Rosetta 2 (install it once "
+                "with `softwareupdate --install-rosetta`)")
+    return None
 
 
 def signing_dir(home: Path | None = None) -> Path:
@@ -244,17 +277,27 @@ def _refuse_live(what: str, *targets) -> None:
         raise SignError(f"test sandbox: refused to {what} in the repo's {_REPO_OUT}", "pass a temp out_dir")
 
 
-def run_tool(argv: list, timeout: float = SIGN_TIMEOUT) -> tuple:
-    """(exit code, stdout+stderr) of one ZXPSignCmd run. Never raises CalledProcessError (its text holds the argv)."""
-    try:
-        r = subprocess.run([str(a) for a in argv], capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", stdin=subprocess.DEVNULL, timeout=timeout,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except subprocess.TimeoutExpired:
-        return 124, f"timed out after {timeout:.0f} s"
-    except OSError as e:
-        return 127, f"could not start ({e.strerror or type(e).__name__})"
-    return r.returncode, (r.stdout or "") + (r.stderr or "")
+def run_tool(argv: list, timeout: float = SIGN_TIMEOUT, secret: str | None = None) -> tuple:
+    """(exit code, stdout+stderr) of one ZXPSignCmd run: 124 on a timeout, 127 when it cannot start. stdout and stderr
+    go to temp files, never pipes: after a timeout kill, Windows would wait on a pipe that a child of the tool
+    inherited. The files are read back and scrubbed of `secret`. Never raises CalledProcessError (its text holds the
+    argv)."""
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        try:
+            rc = subprocess.run([str(a) for a in argv], stdout=out, stderr=err, stdin=subprocess.DEVNULL,
+                                timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).returncode
+            note = ""
+        except subprocess.TimeoutExpired:
+            rc, note = 124, f"timed out after {timeout:.0f} s"
+        except OSError as e:
+            return 127, f"could not start ({e.strerror or type(e).__name__})"
+        text = ""
+        for f in (out, err):
+            f.seek(0)
+            text += f.read().decode("utf-8", errors="replace")
+    if note:
+        text = (text.rstrip("\n") + "\n" + note).lstrip("\n")
+    return rc, scrub(text, secret)
 
 
 def fetch_url(url: str, dest: Path) -> None:
@@ -262,10 +305,17 @@ def fetch_url(url: str, dest: Path) -> None:
         shutil.copyfileobj(r, f, 1 << 20)
 
 
-def _call(runner, argv: list, secret: str | None, what: str, log) -> str:
-    log("$ " + " ".join(shown(argv, secret)))
-    rc, out = runner(list(argv))
-    out = scrub(str(out), secret)
+def _call(runner, argv: list, secret: str | None, what: str, log, timeout: float = SIGN_TIMEOUT,
+          retry_timeout: bool = False) -> str:
+    """Run one ZXPSignCmd command; with `retry_timeout`, a timeout (exit 124) is tried once more, nothing else is."""
+    for attempt in (1, 2):
+        log("$ " + " ".join(shown(argv, secret)))
+        rc, out = runner(list(argv), timeout=timeout, secret=secret)
+        out = scrub(str(out), secret)
+        if rc == 124 and retry_timeout and attempt == 1:
+            log(f"{what} timed out after {timeout:.0f} s: trying once more")
+            continue
+        break
     if rc != 0:
         raise SignError(f"{what} failed (exit {rc}): {_tail(out)}")
     return out
@@ -312,10 +362,13 @@ def setup(*, src: Path | None = None, home: Path | None = None, runner=None, sto
             if bad:
                 part.unlink()
                 raise SignError(f"refused: the copy changed ({bad})")
-            if os.name != "nt":
-                os.chmod(part, 0o700)
+            if not IS_WIN:                              # after the pin check only (macOS: never a quarantine
+                os.chmod(part, 0o755)                   # attribute to strip: urllib, not a browser)
             os.replace(part, tool)
         tool_state = "installed"
+    note = pin_note(pin)
+    if note:
+        log(note)
     try:
         sdir.chmod(0o700)
     except OSError:
@@ -357,9 +410,13 @@ def staging_problems(root: Path) -> list:
 
 
 def _timestamp_ok(out: str) -> bool:
-    lines = [ln for ln in out.splitlines() if re.search(r"time\s*stamp", ln, re.I)]
+    """`-verify -certinfo` of ZXPSignCmd 4.1.3 prints `Timestamp: Valid and within certificate validity dates at time
+    of signing` for a timestamped signature and `Timestamp: None` without -tsa (tests/fixtures/zxpsigncmd). Every
+    `Timestamp:` line must say Valid, with no negative word; at least one must be there."""
+    lines = [ln.strip() for ln in out.splitlines() if re.match(r"\s*time\s*stamp\s*:", ln, re.I)]
     neg = re.compile(r"\b(invalid|not|no|none|fail\w*|error|missing|expired|untrusted)\b", re.I)
-    return bool(lines) and not any(neg.search(ln) for ln in lines)
+    return bool(lines) and all(re.match(r"time\s*stamp\s*:\s*valid\b", ln, re.I) and not neg.search(ln)
+                               for ln in lines)
 
 
 def check_zxp(zxp: Path, staged: Path | None = None) -> None:
@@ -388,7 +445,8 @@ def check_zxp(zxp: Path, staged: Path | None = None) -> None:
 
 
 def _verify(runner, tool: Path, zxp: Path, log, staged: Path | None = None, secret: str | None = None) -> str:
-    out = _call(runner, [tool, "-verify", zxp, "-certinfo"], secret, "verifying the signature", log)
+    out = _call(runner, [tool, "-verify", zxp, "-certinfo"], secret, "verifying the signature", log,
+                timeout=VERIFY_TIMEOUT, retry_timeout=True)
     if not re.search(r"signature verified", out, re.I):
         raise SignError(f"ZXPSignCmd did not report a verified signature: {_tail(out)}")
     if not _timestamp_ok(out):

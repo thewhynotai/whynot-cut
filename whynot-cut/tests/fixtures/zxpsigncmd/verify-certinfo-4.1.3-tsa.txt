@@ -1,0 +1,10 @@
+*********** Certificate Information ***********
+CN: Lab
+OU: 
+DN: /C=EG/ST=Cairo/O=Lab/CN=Lab
+OS Trusted: false
+Revoked: false
+Timestamp: Valid and within certificate validity dates at time of signing
+Signing Certificate: Valid (from 2026-10-13 until 2026-11-12)
+***********************************************
+Signature verified successfully

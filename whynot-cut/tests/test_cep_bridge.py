@@ -587,14 +587,18 @@ def _make_zxp(out: Path, src: Path, *, signed=True, extra=None, drop=(), product
 
 class TestInstallZxp(unittest.TestCase):
     """cep_bundle.install_zxp: signed only, every entry checked before anything is written, CRC-checked extraction to
-    <ext>.new, then the swap with <ext>.prev kept (one previous copy)."""
+    <CEP root>/.wnc-staging/new, then the swap with <CEP root>/.wnc-staging/prev kept (one previous copy): never a
+    second folder inside the extensions folder CEP scans."""
 
     def setUp(self):
         self._t = tempfile.TemporaryDirectory()
         self.tmp = Path(self._t.name)
         self.src = cep_bundle.assemble(self.tmp / "src" / cep_bundle.EXT_ID)
-        self.ext = self.tmp / "cep" / cep_bundle.EXT_ID
-        self.new, self.prev = self.ext.with_name(self.ext.name + ".new"), self.ext.with_name(self.ext.name + ".prev")
+        self.ext = self.tmp / "CEP" / "extensions" / cep_bundle.EXT_ID
+        self.staging = self.tmp / "CEP" / ".wnc-staging"
+        self.new, self.prev = self.staging / "new", self.staging / "prev"
+        self.old_new = self.ext.with_name(self.ext.name + ".new")              # the Task 6 layout (migrated)
+        self.old_prev = self.ext.with_name(self.ext.name + ".prev")
 
     def tearDown(self):
         self._t.cleanup()
@@ -636,7 +640,132 @@ class TestInstallZxp(unittest.TestCase):
         second = _files(self.ext)
         cep_bundle.install_zxp(self.zxp("c.zxp"), self.ext)
         self.assertEqual(_files(self.prev), second)                                     # one .prev, the latest
-        self.assertEqual(sorted(p.name for p in self.ext.parent.iterdir()), [self.ext.name, self.prev.name])
+        self.assertEqual(sorted(p.name for p in self.staging.iterdir()), ["prev"])
+
+    def test_after_an_update_the_extensions_folder_holds_only_the_live_extension(self):
+        """CEP loads every folder of the extensions folder by its manifest: the staged new copy and the previous
+        copy live in <CEP root>/.wnc-staging (same volume, never scanned)."""
+        self.assertEqual(cep_bundle.staging_dir(self.ext), self.staging)
+        cep_bundle.install_zxp(self.zxp(), self.ext)
+        b2 = json.loads((self.src / "build.json").read_text(encoding="utf-8"))
+        (self.src / "build.json").write_text(json.dumps(dict(b2, build="2" * 16)), encoding="utf-8")
+        r = cep_bundle.install_zxp(self.zxp("b.zxp"), self.ext)
+        self.assertEqual(r["action"], "replace", r)
+        self.assertEqual([p.name for p in self.ext.parent.iterdir()], [self.ext.name])
+        self.assertEqual(r["prev"], str(self.prev))
+        self.assertTrue((self.prev / "CSXS" / "manifest.xml").is_file())
+
+    def test_the_real_staging_folder_is_beside_the_extensions_folder(self):
+        with mock.patch.object(plat, "cep_extensions_dir", lambda: self.tmp / "CEP" / "extensions"):
+            self.assertEqual(cep_bundle.staging_dir(), self.staging)
+        self.assertEqual(cep_bundle.staging_dir(self.ext), self.staging)
+
+    def test_an_old_new_and_prev_in_the_extensions_folder_are_moved_out(self):
+        cep_bundle.install_zxp(self.zxp(), self.ext)
+        shutil.copytree(self.ext, self.old_prev)
+        shutil.copytree(self.ext, self.old_new)
+        r = cep_bundle.install_zxp(self.zxp(), self.ext)                               # the same build: skip
+        self.assertEqual(r["action"], "skip", r)
+        self.assertEqual([p.name for p in self.ext.parent.iterdir()], [self.ext.name])
+        self.assertTrue((self.prev / "CSXS" / "manifest.xml").is_file())               # kept as the previous copy
+        self.assertFalse(self.new.exists())
+
+    def test_an_old_prev_without_the_extension_is_put_back(self):
+        cep_bundle.install_zxp(self.zxp(), self.ext)
+        first = _files(self.ext)
+        os.replace(self.ext, self.old_prev)                                         # a Task 6 crash between renames
+        r = cep_bundle.install_zxp(self.zxp(), self.ext)
+        self.assertEqual(r["action"], "skip", r)
+        self.assertEqual(_files(self.ext), first)
+        self.assertIn("put back", r["recovered"])
+        self.assertEqual([p.name for p in self.ext.parent.iterdir()], [self.ext.name])
+
+    # ------------------------------------------------------------------ the swap is crash-safe
+    def _update_zxp(self) -> Path:
+        cep_bundle.install_zxp(self.zxp(), self.ext)
+        b2 = json.loads((self.src / "build.json").read_text(encoding="utf-8"))
+        (self.src / "build.json").write_text(json.dumps(dict(b2, build="2" * 16)), encoding="utf-8")
+        return self.zxp("b.zxp")
+
+    def _failing_replace(self, fail):
+        """os.replace that raises for the renames `fail(src, dst)` picks; every other rename is real."""
+        real = os.replace
+
+        def fake(src, dst, *a, **k):
+            if fail(Path(src), Path(dst)):
+                raise PermissionError(13, "in use (test)")
+            return real(src, dst, *a, **k)
+        return mock.patch.object(cep_bundle.os, "replace", fake)
+
+    def test_a_failed_first_rename_leaves_the_extension_as_it_was(self):
+        z = self._update_zxp()
+        before = _files(self.ext)
+        with self._failing_replace(lambda s, d: s == self.ext and d == self.prev):
+            with self.assertRaises(cep_bundle.ZxpError) as cm:
+                cep_bundle.install_zxp(z, self.ext)
+        self.assertIn("left as it was", str(cm.exception))
+        self.assertEqual(_files(self.ext), before)
+        self.assertFalse(self.new.exists())
+
+    def test_a_failed_second_rename_puts_the_previous_copy_back(self):
+        z = self._update_zxp()
+        before = _files(self.ext)
+        with self._failing_replace(lambda s, d: s == self.new):
+            with self.assertRaises(cep_bundle.ZxpError) as cm:
+                cep_bundle.install_zxp(z, self.ext)
+        self.assertIn("put back", str(cm.exception))
+        self.assertEqual(_files(self.ext), before)
+        self.assertFalse(self.new.exists())
+        self.assertEqual([p.name for p in self.ext.parent.iterdir()], [self.ext.name])
+
+    def test_a_crash_between_the_renames_recovers_on_the_next_run(self):
+        """The second rename fails and so does the way back (a crash leaves the same state): the message says where
+        the previous copy is, and the next install puts it back before anything else."""
+        z = self._update_zxp()
+        before = _files(self.ext)
+        with self._failing_replace(lambda s, d: s in (self.new, self.prev)):
+            with self.assertRaises(cep_bundle.ZxpError) as cm:
+                cep_bundle.install_zxp(z, self.ext)
+        self.assertIn(str(self.prev), str(cm.exception))
+        self.assertFalse(self.ext.exists())
+        self.assertEqual(_files(self.prev), before)
+        self.assertFalse(self.new.exists())
+        (self.new / "junk").mkdir(parents=True)                                      # a crash mid-extraction too
+        r = cep_bundle.install_zxp(z, self.ext)
+        self.assertIn("put back", r["recovered"])
+        self.assertEqual(r["action"], "replace", r)
+        self.assertEqual(_files(self.prev), before)                                  # the recovered copy is the prev
+        self.assertEqual(json.loads((self.ext / "build.json").read_text(encoding="utf-8"))["build"], "2" * 16)
+        self.assertFalse(self.new.exists())
+
+    def test_install_source_recovers_a_missing_extension_first(self):
+        cep_bundle.install_zxp(self.zxp(), self.ext)
+        first = _files(self.ext)
+        self.staging.mkdir(exist_ok=True)
+        os.replace(self.ext, self.prev)
+        r = cep_bundle.install_source(self.ext)
+        self.assertIn("put back", r["recovered"])
+        self.assertEqual(r["action"], "skip", r)                    # the same build, signed: never replaced unsigned
+        self.assertEqual(_files(self.ext), first)
+
+    # ------------------------------------------------------------------ archive limits
+    def test_too_many_entries_are_refused(self):
+        extra = {f"pad/{i}.txt": b"" for i in range(cep_bundle.ZXP_MAX_ENTRIES)}
+        self.refused(self.zxp(extra=extra), "entries")
+
+    def test_too_large_an_archive_is_refused(self):
+        import zipfile
+        z = self.zxp()
+        with zipfile.ZipFile(z, "a", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("pad/big.bin", b"\0" * (cep_bundle.ZXP_MAX_BYTES + 1))       # deflates to a few KB
+        self.assertLess(z.stat().st_size, 1 << 20)
+        self.refused(z, "MB")
+
+    def test_names_ending_in_a_dot_or_a_space_are_refused(self):
+        _legacy(self.ext)
+        for i, name in enumerate(("jsx/evil.jsx.", "jsx/evil.jsx ", "jsx./x.jsx", "ui /x.js", "CSXS./manifest.xml")):
+            with self.subTest(name=name):
+                self.refused(self.zxp(f"d{i}.zxp", extra={name: b"x"}), "unsafe entry")
 
     def test_an_unsigned_zxp_is_never_installed(self):
         _legacy(self.ext)
@@ -865,7 +994,8 @@ class TestEngineStart(unittest.TestCase):
         self.user = self.tmp / "user"
         self.user.mkdir()
         self.ext = cep_bundle.assemble(self.tmp / "ext" / cep_bundle.EXT_ID)
-        self.home = self.tmp / "engine home"            # a space: the Windows quoting must survive it
+        self.home = self.user / "engine home"           # a space: the Windows quoting must survive it; inside the
+                                                         # profile (Windows refuses a launcher outside %USERPROFILE%)
         self.harness = self.tmp / "harness.js"
         self.harness.write_text(SPAWN_HARNESS, encoding="utf-8")
         self.engine_json = self.user / ".whynot-cut" / "bridge" / "engine.json"
@@ -977,6 +1107,79 @@ class TestEngineStart(unittest.TestCase):
         out = self.run_bridge(seconds=35)
         self.assertEqual((out["spawns"], out["beat"]["engine_start"]["outcome"]), ([], "refused"))
 
+    def test_every_refusal_carries_a_static_reason(self):
+        """engine_start {at, outcome, reason}: a fixed code per refusal (the doctor turns it into a sentence); never
+        a path or any text from the file system."""
+        evil = self.tmp / "evil"
+        evil.mkdir()
+        good = self.launcher()
+        (evil / good.name).write_text("x", encoding="utf-8")
+        dirhome = self.user / "dir home"
+        (dirhome / "bin" / good.name).mkdir(parents=True)
+        cases = {"not_absolute": (Path("bin") / good.name, None),
+                 "not_found": (self.home / "bin" / ("nothere" + good.suffix), None),
+                 "not_the_launcher": (evil / good.name, None),
+                 "not_a_file": (dirhome / "bin" / good.name, dirhome)}
+        for reason, (launcher, home) in cases.items():
+            with self.subTest(reason):
+                self.config(launcher, home=home)
+                out = self.run_bridge(seconds=1, home=home)
+                self.assertEqual(out["beat"]["engine_start"]["outcome"], "refused")
+                self.assertEqual(out["beat"]["engine_start"]["reason"], reason)
+        self.config(None)
+        out = self.run_bridge(seconds=1)
+        self.assertEqual(out["beat"]["engine_start"], {"at": out["start"], "outcome": "no_launcher", "reason": None})
+        js = (SRC / "js" / "bridge.js").read_text(encoding="utf-8")
+        for reason in ("not_absolute", "metachar_in_path", "not_found", "not_a_file", "unresolvable",
+                       "not_the_launcher", "outside_profile", "not_owner", "writable_by_others", "gave_up"):
+            self.assertIn("'" + reason + "'", js)
+
+    def test_windows_refuses_a_launcher_outside_the_user_profile(self):
+        home = self.tmp / "outside home"
+        launcher = self.launcher(home=home, platform="win32")
+        self.config(launcher, home=home)
+        out = self.run_bridge(seconds=35, home=home, platform="win32", startEngine=1,
+                              env={"USERPROFILE": str(self.user)})
+        self.assertEqual(out["spawns"], [])
+        self.assertEqual((out["beat"]["engine_start"]["outcome"], out["beat"]["engine_start"]["reason"]),
+                         ("refused", "outside_profile"))
+        launcher = self.launcher(platform="win32")                          # inside the profile: started
+        self.config(launcher)
+        out = self.run_bridge(seconds=1, platform="win32", startEngine=1, env={"USERPROFILE": str(self.user)})
+        self.assertEqual(len(out["spawns"]), 1)
+
+    def test_the_spawned_file_is_the_checked_realpath(self):
+        """config.json names the launcher through a linked engine home: what is spawned is the realpath that passed
+        the checks, never the configured string (a link swapped after the check cannot redirect the spawn)."""
+        real_home = self.user / "real home"
+        real_home.mkdir()
+        link_home = self.user / "linked home"
+        try:
+            if os.name == "nt":
+                import _winapi
+                _winapi.CreateJunction(str(real_home), str(link_home))
+            else:
+                link_home.symlink_to(real_home, target_is_directory=True)
+        except OSError as e:
+            self.skipTest(f"no links here: {e}")
+        for platform in ("win32", "darwin"):
+            with self.subTest(platform):
+                real = self.launcher(home=real_home, platform=platform)
+                configured = link_home / "bin" / real.name
+                self.config(configured, home=link_home)
+                if self.engine_json.exists():
+                    self.engine_json.unlink()
+                rp = str(Path(os.path.realpath(real)))
+                stat = {} if platform == "win32" else {rp: {"uid": 501, "mode": 0o100755}}
+                out = self.run_bridge(seconds=1, home=link_home, platform=platform, startEngine=9, stat=stat,
+                                      env={"ComSpec": "C:\\Windows\\System32\\cmd.exe"})
+                (sp,) = out["spawns"]
+                if platform == "win32":
+                    self.assertEqual(sp["args"][-1], '""' + rp + '""')
+                else:
+                    self.assertEqual(sp["file"], rp)
+                self.assertNotIn("linked home", json.dumps(sp))
+
     def test_metacharacters_are_refused(self):
         for ch in "%^&!":                     # " < > | cannot be in a Windows file name; the check covers them too
             with self.subTest(ch):
@@ -985,6 +1188,7 @@ class TestEngineStart(unittest.TestCase):
                 out = self.run_bridge(seconds=35, home=home)
                 self.assertEqual(out["spawns"], [])
                 self.assertEqual(out["beat"]["engine_start"]["outcome"], "refused")
+                self.assertEqual(out["beat"]["engine_start"]["reason"], "metachar_in_path")
         js = (SRC / "js" / "bridge.js").read_text(encoding="utf-8")
         self.assertIn("var LAUNCHER_META = /[\"%^&|<>!]/;", js)
 
@@ -1060,6 +1264,7 @@ class TestEngineStart(unittest.TestCase):
                 at = [s["at"] - out["start"] for s in out["spawns"]]
                 self.assertEqual(at, [0, 30000, 60000, 90000, 120000])
                 self.assertEqual(out["beat"]["engine_start"]["outcome"], "gave_up")
+                self.assertEqual(out["beat"]["engine_start"]["reason"], "gave_up")
                 self.assertEqual(out["outcomes"][-1], "gave_up")
                 self.assertIn("gave_up", out["log"])
 

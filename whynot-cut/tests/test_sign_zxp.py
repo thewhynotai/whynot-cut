@@ -1,5 +1,5 @@
 """tools/sign_zxp.py (3.0 T6.3 Task 6): ZXPSignCmd pinned by commit + size + sha256 (Windows x64; the macOS pin is
-refused until it is set), `setup --from`, the self-signed certificate made once, its password only in the credential
+Adobe's x86_64 build, pinned by its own commit), `setup --from`, the self-signed certificate made once, its password only in the credential
 store (never printed, logged, raised or shown in a command), `-tsa` on every signing with a failed timestamp failing
 the build, the staging checks (no link, junction, .DS_Store or __MACOSX), the archive checks, and exactly one .zxp
 left. Everything runs with fakes: a fake ZXPSignCmd runner, a fake credential store, a fake fetch, temp folders. No
@@ -55,13 +55,21 @@ class FakeZXPSignCmd:
     META-INF/signatures.xml (or fails like an unreachable timestamp server, echoing its arguments); -verify prints
     `verify_out`. `echo` makes every answer quote the whole argv (the password included)."""
 
-    def __init__(self, tsa_fail=False, verify_out=GOOD_VERIFY, extra=None, echo=False, write_zxp=True):
+    def __init__(self, tsa_fail=False, verify_out=GOOD_VERIFY, extra=None, echo=False, write_zxp=True,
+                 verify_timeouts=0, verify_rc=0):
         self.calls, self.tsa_fail, self.verify_out, self.extra = [], tsa_fail, verify_out, extra or {}
         self.echo, self.write_zxp = echo, write_zxp
+        self.verify_timeouts, self.verify_rc, self.timeouts = verify_timeouts, verify_rc, []
 
-    def __call__(self, argv):
+    def __call__(self, argv, timeout=None, secret=None):
         argv = [str(a) for a in argv]
         self.calls.append(argv)
+        self.timeouts.append(timeout)
+        if argv[1] == "-verify" and self.verify_timeouts:
+            self.verify_timeouts -= 1
+            return 124, f"timed out after {timeout} s"
+        if argv[1] == "-verify" and self.verify_rc:
+            return self.verify_rc, "Error: could not read the archive"
         said = (" ".join(argv) + "\n") if self.echo else ""
         op = argv[1]
         if op == "-selfSignedCert":
@@ -134,16 +142,48 @@ class TestPin(_Base):
                                                 "ZXPSignCmd.exe")
         self.assertNotIn("PIN_UNVERIFIED", (REPO / "tools" / "sign_zxp.py").read_text(encoding="utf-8"))
 
-    def test_the_macos_pin_is_refused_not_guessed(self):
-        self.assertIsNone(sign_zxp.PINS["macos"])
-        for call in (lambda: sign_zxp.setup(src=self.src, home=self.sdir, store=FakeStore(), key="macos"),
-                     lambda: sign_zxp.build(home=self.sdir, out_dir=self.out, store=FakeStore(), key="macos")):
-            with self.assertRaises(sign_zxp.SignError) as cm:
-                call()
-            self.assertIn("macOS pin not set", cm.exception.error)
-        self.assertFalse(self.sdir.exists())
+    def test_the_macos_pin_is_adobes_4_1_3_x86_64_build(self):
+        """Its own commit (the macOS file was added after the Windows one), size, sha256 and git blob; x86_64 only
+        (Rosetta 2 on Apple Silicon), not notarized; a build-time tool that never ships."""
+        pin = sign_zxp.pin_for("macos")
+        self.assertEqual((pin["version"], pin["path"], pin["file"], pin["size"], pin["sha256"], pin["git_blob"],
+                          pin["commit"], pin["arch"], pin["notarized"]),
+                         ("4.1.3", "ZXPSignCMD/4.1.3/macOS/ZXPSignCmd", "ZXPSignCmd", 6391280,
+                          "bc773fae0b97416fc7a462e7dadcc00270428a9913480c9b78b5606ff1cfb095",
+                          "38b958508c5a249d12418845dd07ad43e4f34a92", "fcee8de5537d2dd2ed3d91d5a495b7041155b280",
+                          "x86_64", False))
+        self.assertEqual(sign_zxp.pin_url(pin), "https://raw.githubusercontent.com/Adobe-CEP/CEP-Resources/"
+                                                "fcee8de5537d2dd2ed3d91d5a495b7041155b280/ZXPSignCMD/4.1.3/macOS/"
+                                                "ZXPSignCmd")
+        self.assertNotIn("PIN_UNVERIFIED", (REPO / "tools" / "sign_zxp.py").read_text(encoding="utf-8"))
         with self.assertRaises(sign_zxp.SignError):
             sign_zxp.pin_for("linux")
+        with mock.patch.object(sign_zxp.platform, "machine", lambda: "arm64"):
+            self.assertIn("Rosetta", sign_zxp.pin_note(pin))
+        with mock.patch.object(sign_zxp.platform, "machine", lambda: "x86_64"):
+            self.assertIsNone(sign_zxp.pin_note(pin))
+        self.assertIsNone(sign_zxp.pin_note(sign_zxp.PINS["windows-x64"]))
+        text = (REPO / "tools" / "sign_zxp.py").read_text(encoding="utf-8").lower()
+        self.assertNotIn("spctl", text)                                       # never tell anyone to turn off
+        self.assertNotIn("xattr", text)                                       # Gatekeeper or strip quarantine
+
+    def test_setup_on_posix_makes_the_tool_0755_after_the_pin_check(self):
+        calls = []
+        with mock.patch.object(sign_zxp, "IS_WIN", False), \
+                mock.patch.object(sign_zxp.os, "chmod", lambda p, m, *a, **k: calls.append((Path(p), m))):
+            self.setup_ok()
+        (part,) = [(p, m) for p, m in calls if p.name.endswith(".part")]
+        self.assertEqual(part[1], 0o755)
+        self.assertTrue((self.sdir / "ZXPSignCmd.exe").is_file())
+
+    def test_a_tool_that_fails_the_pin_is_never_made_executable(self):
+        calls = []
+        self.src.write_bytes(TOOL_BYTES + b"x")
+        with mock.patch.object(sign_zxp, "IS_WIN", False), \
+                mock.patch.object(sign_zxp.os, "chmod", lambda p, m, *a, **k: calls.append((Path(p), m))):
+            with self.assertRaises(sign_zxp.SignError):
+                self.setup_ok()
+        self.assertEqual(calls, [])
 
     def test_a_mismatch_from_a_local_file_is_refused_and_nothing_is_written(self):
         for data in (TOOL_BYTES + b"x", TOOL_BYTES[:-1] + b"?"):          # wrong size; same size, wrong sha256
@@ -228,8 +268,189 @@ class TestSetup(_Base):
 
     @unittest.skipUnless(os.name == "nt", "the Windows Credential Manager")
     def test_the_windows_credential_store_reads_a_missing_target_as_none(self):
-        """Read-only: a target that does not exist (nothing is ever written to the real store in tests)."""
+        """Read-only: a target that does not exist (nothing is written to the real store unless opted in below)."""
         self.assertIsNone(sign_zxp.WinCredStore().read("WhyNotCut/zxp-signing-test-does-not-exist-" + os.urandom(8).hex()))
+
+    @unittest.skipUnless(os.name == "nt" and os.environ.get("WNC_TEST_REAL_CREDSTORE") == "1",
+                         "opt-in: WNC_TEST_REAL_CREDSTORE=1 writes one throwaway credential (and deletes it)")
+    def test_a_real_windows_credential_round_trip(self):
+        """CredWriteW, CredReadW, CredDeleteW against the real Credential Manager with a random target
+        WhyNotCut/test-<uuid>; the delete runs in a finally."""
+        import uuid
+        store = sign_zxp.WinCredStore()
+        target, secret = f"WhyNotCut/test-{uuid.uuid4()}", sign_zxp.new_password()
+        try:
+            self.assertIsNone(store.read(target))
+            store.write(target, secret)
+            self.assertEqual(store.read(target), secret)
+            store.write(target, secret + "2")                                     # -U style: replaced in place
+            self.assertEqual(store.read(target), secret + "2")
+        finally:
+            store.delete(target)
+        self.assertIsNone(store.read(target))
+        store.delete(target)                                                      # a missing target is no error
+
+
+class TestMacKeychain(unittest.TestCase):
+    """The macOS keychain gets the password on `security -i`'s stdin: never on any argv (`ps` shows argv to every
+    user of the machine)."""
+
+    def run_fake(self, found=None, rc=0):
+        calls = []
+
+        def run(argv, **kw):
+            calls.append((list(argv), kw.get("input")))
+            if "find-generic-password" in argv:
+                return subprocess.CompletedProcess(argv, 0 if found else 44, stdout=(found or "") + "\n", stderr="")
+            return subprocess.CompletedProcess(argv, rc, stdout="", stderr="")
+        return calls, mock.patch.object(sign_zxp.subprocess, "run", run)
+
+    def test_the_secret_goes_on_stdin_never_on_argv(self):
+        secret = sign_zxp.new_password()
+        calls, p = self.run_fake(found=secret)
+        with p:
+            sign_zxp.MacKeychain().write(sign_zxp.CRED_TARGET, secret)
+        (argv, stdin), check = calls[0], calls[1]
+        self.assertEqual(argv, ["/usr/bin/security", "-i"])
+        self.assertIn(secret, stdin)
+        self.assertTrue(stdin.startswith("add-generic-password -U -s "), stdin)
+        self.assertIn('-a "WhyNot Cut"', stdin)
+        for a, _ in calls:
+            self.assertFalse(any(secret in str(x) for x in a), a)
+        self.assertIn("find-generic-password", check[0])                         # read back: the write is checked
+
+    def test_a_write_that_does_not_read_back_fails_without_the_secret(self):
+        secret = sign_zxp.new_password()
+        calls, p = self.run_fake(found="something else")
+        with p, self.assertRaises(sign_zxp.SignError) as cm:
+            sign_zxp.MacKeychain().write(sign_zxp.CRED_TARGET, secret)
+        self.assertNotIn(secret, str(cm.exception) + cm.exception.how)
+        calls, p = self.run_fake(found=secret, rc=1)
+        with p, self.assertRaises(sign_zxp.SignError):
+            sign_zxp.MacKeychain().write(sign_zxp.CRED_TARGET, secret)
+
+    def test_a_secret_security_could_misparse_is_refused(self):
+        calls, p = self.run_fake()
+        for bad in ('a"b', "a b", "a\nb", "-x", ""):
+            with self.subTest(bad=bad), p, self.assertRaises(sign_zxp.SignError):
+                sign_zxp.MacKeychain().write(sign_zxp.CRED_TARGET, bad)
+        self.assertEqual(calls, [])
+
+
+class TestRunTool(unittest.TestCase):
+    """run_tool sends stdout and stderr to temp files, never pipes: a timeout kill on Windows cannot block on a pipe a
+    grandchild inherited. The output is read back and scrubbed of the secret."""
+
+    def test_output_and_exit_code_come_back_scrubbed(self):
+        code = "import sys; print('out SECRET-1'); print('err', file=sys.stderr); sys.exit(3)"
+        rc, out = sign_zxp.run_tool([_sys.executable, "-c", code], timeout=60, secret="SECRET-1")
+        self.assertEqual(rc, 3)
+        self.assertIn("out ***", out)
+        self.assertIn("err", out)
+        self.assertNotIn("SECRET-1", out)
+
+    def test_a_timeout_returns_124_even_when_a_grandchild_holds_the_output(self):
+        import time
+        with tempfile.TemporaryDirectory() as t:
+            pidf = Path(t) / "grandchild.pid"
+            grand = "import time; time.sleep(25)"
+            code = ("import subprocess, sys, time; "
+                    f"p = subprocess.Popen([sys.executable, '-c', {grand!r}], stdout=sys.stdout, stderr=sys.stderr); "
+                    f"open({str(pidf)!r}, 'w').write(str(p.pid)); print('started', flush=True); time.sleep(25)")
+            t0 = time.monotonic()
+            try:
+                rc, out = sign_zxp.run_tool([_sys.executable, "-c", code], timeout=3)
+                took = time.monotonic() - t0
+            finally:
+                deadline = time.monotonic() + 10
+                while not pidf.exists() and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                if pidf.exists():
+                    pid = int(pidf.read_text() or 0)
+                    try:
+                        if os.name == "nt":
+                            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=30)
+                        else:
+                            os.kill(pid, 9)
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+        self.assertEqual(rc, 124)
+        self.assertIn("timed out after 3 s", out)
+        self.assertLess(took, 15, "run_tool waited for the grandchild's pipe")
+
+    def test_a_tool_that_cannot_start_is_127(self):
+        rc, out = sign_zxp.run_tool([str(Path(tempfile.gettempdir()) / "no-such-tool-xyz.exe")], timeout=10)
+        self.assertEqual(rc, 127)
+        self.assertIn("could not start", out)
+
+
+class TestVerify(_Base):
+    """-verify -certinfo: VERIFY_TIMEOUT, one retry on a timeout only; the timestamp check against the real output of
+    ZXPSignCmd 4.1.3 (tests/fixtures/zxpsigncmd)."""
+    FIXTURE = SK / "tests" / "fixtures" / "zxpsigncmd" / "verify-certinfo-4.1.3-tsa.txt"
+
+    def ready(self, **kw):
+        _, store, _ = self.setup_ok()
+        return store, FakeZXPSignCmd(**kw)
+
+    def test_the_real_certinfo_output_passes_and_without_tsa_fails(self):
+        real = self.FIXTURE.read_text(encoding="utf-8")
+        self.assertIn("Timestamp: Valid and within certificate validity dates at time of signing", real)
+        self.assertTrue(sign_zxp._timestamp_ok(real))
+        no_tsa = real.replace("Timestamp: Valid and within certificate validity dates at time of signing",
+                              "Timestamp: None")
+        self.assertFalse(sign_zxp._timestamp_ok(no_tsa))
+        for line in ("Timestamp: Unknown", "Timestamp:", "Timestamp: Present", "Timestamp: Valid, but not trusted",
+                     "Timestamp: Invalid"):
+            with self.subTest(line=line):
+                self.assertFalse(sign_zxp._timestamp_ok(real.replace(
+                    "Timestamp: Valid and within certificate validity dates at time of signing", line)))
+        self.assertFalse(sign_zxp._timestamp_ok("Signature verified successfully\nTimestamp server: ok\n"))
+
+    def test_a_build_with_the_real_output_is_kept_and_without_tsa_is_not(self):
+        real = self.FIXTURE.read_text(encoding="utf-8")
+        store, runner = self.ready(verify_out=real)
+        r = self.build(store, runner)
+        self.assertTrue(Path(r["zxp"]).is_file())
+        store, runner = FakeStore(store.data[sign_zxp.CRED_TARGET]), FakeZXPSignCmd(
+            verify_out=real.replace("Valid and within certificate validity dates at time of signing", "None"))
+        Path(r["zxp"]).unlink()
+        with self.assertRaises(sign_zxp.SignError) as cm:
+            self.build(store, runner)
+        self.assertIn("timestamp", cm.exception.error)
+        self.assertEqual(list(self.out.glob("*.zxp")), [])
+
+    def test_verify_runs_with_its_timeout_and_one_timeout_is_retried(self):
+        store, runner = self.ready(verify_timeouts=1)
+        r = self.build(store, runner)
+        self.assertEqual(runner.ops(), ["-sign", "-verify", "-verify"])
+        self.assertEqual(runner.timeouts[1:], [sign_zxp.VERIFY_TIMEOUT] * 2)
+        self.assertEqual(sign_zxp.VERIFY_TIMEOUT, 120)
+        self.assertTrue(Path(r["zxp"]).is_file())
+        self.assertTrue(any("timed out" in m and "once more" in m for m in self.logs), self.logs)
+
+    def test_two_timeouts_fail_the_build_and_keep_no_zxp(self):
+        store, runner = self.ready(verify_timeouts=2)
+        with self.assertRaises(sign_zxp.SignError) as cm:
+            self.build(store, runner)
+        self.assertIn("exit 124", cm.exception.error)
+        self.assertEqual(runner.ops(), ["-sign", "-verify", "-verify"])
+        self.assertEqual([p.name for p in self.out.iterdir()], [])
+
+    def test_another_failure_is_not_retried(self):
+        store, runner = self.ready(verify_rc=1)
+        with self.assertRaises(sign_zxp.SignError):
+            self.build(store, runner)
+        self.assertEqual(runner.ops(), ["-sign", "-verify"])
+        self.assertEqual([p.name for p in self.out.iterdir()], [])
+
+    def test_verify_alone_retries_a_timeout_too(self):
+        store, runner = self.ready()
+        r = self.build(store, runner)
+        runner = FakeZXPSignCmd(verify_timeouts=1)
+        v = sign_zxp.verify(Path(r["zxp"]), home=self.sdir, runner=runner, key="test-x64", log=self.log)
+        self.assertTrue(v["ok"])
+        self.assertEqual(runner.ops(), ["-verify", "-verify"])
 
 
 class TestBuild(_Base):
@@ -442,7 +663,8 @@ class TestArtefact(unittest.TestCase):
         import ast
         doc = ast.get_docstring(ast.parse((REPO / "tools" / "sign_zxp.py").read_text(encoding="utf-8")))
         for needle in ("-tsa", "timestamp.digicert.com", "WhyNotCut/zxp-signing", "3650", "--from", "KnownIssue2024",
-                       "exactly", "never printed", "Stdlib only", "macOS pin is not set"):
+                       "exactly", "never printed", "Stdlib only", "Rosetta", "not notarized", "never ships",
+                       "VERIFY_TIMEOUT", "security -i"):
             self.assertIn(needle, doc)
 
 

@@ -22,11 +22,13 @@
    Engine start (daemon only; docs/adobe/cep-bridge.md "Spawn allowlist"): at start and every 30 s, when
    ~/.whynot-cut/bridge/engine.json is missing or its pid is dead, the daemon starts the engine through ONE fixed file:
    config.json `launcher`, accepted only when it is an absolute path to a regular file whose realpath is
-   realpath(engine_home)/bin/wnc-engine.cmd (Windows) or wnc-engine (macOS), with none of " % ^ & | < > ! in it, and on
-   macOS owned by this user and not group- or world-writable. No arguments, no shell string built from anything else.
+   realpath(engine_home)/bin/wnc-engine.cmd (Windows) or wnc-engine (macOS), with none of " % ^ & | < > ! in it, on
+   Windows inside %USERPROFILE%, and on macOS owned by this user and not group- or world-writable. What is spawned is
+   that checked realpath, never the configured string. No arguments, no shell string built from anything else.
    At most one attempt per 30 s; after 5 failed attempts it stops until the app restarts. Of engine.json only the pid
-   is parsed: the token in it is never kept or logged. The heartbeat's `engine_start` {at, outcome} says what happened:
-   running | no_launcher | refused | spawned | spawn_error | failed | gave_up. */
+   is parsed: the token in it is never kept or logged. The heartbeat's `engine_start` {at, outcome, reason} says what
+   happened: running | no_launcher | refused | spawned | spawn_error | failed | gave_up; `reason` is a fixed code
+   (refused: which check; gave_up: 'gave_up'; else null), never a path. */
 (function () {
   var req = (window.cep_node && window.cep_node.require) || window.require;
   var fs = req('fs'), path = req('path'), os = req('os'), crypto = req('crypto');
@@ -198,29 +200,48 @@
     if (pid === null) { return false; }
     try { process.kill(pid, 0); return true; } catch (e) { return !!e && e.code === 'EPERM'; }
   }
-  // {file, cwd} when config.json names an acceptable launcher, else {outcome: 'no_launcher' | 'refused', reason}
+  // the user's profile folder (Windows: %USERPROFILE%), resolved; null when it cannot be resolved
+  function profileDir() {
+    var p = IS_WIN && typeof process.env.USERPROFILE === 'string' && path.isAbsolute(process.env.USERPROFILE)
+      ? process.env.USERPROFILE : HOME;
+    try { return fs.realpathSync(p); } catch (e) { return null; }
+  }
+  function inside(child, parent) {
+    var rel = path.relative(IS_WIN ? parent.toLowerCase() : parent, IS_WIN ? child.toLowerCase() : child);
+    return !!rel && rel.split(path.sep)[0] !== '..' && !path.isAbsolute(rel);
+  }
+  // {file, cwd} when config.json names an acceptable launcher (file, cwd = the checked realpaths), else
+  // {outcome: 'no_launcher' | 'refused', reason: <fixed code>, why: <log text>}
   function launcherFrom(cfg) {
-    if (!cfg || cfg.launcher === null || cfg.launcher === undefined) { return { outcome: 'no_launcher' }; }
-    var refuse = function (why) { return { outcome: 'refused', reason: why }; };
+    if (!cfg || cfg.launcher === null || cfg.launcher === undefined) { return { outcome: 'no_launcher', reason: null }; }
+    var refuse = function (code, why) { return { outcome: 'refused', reason: code, why: why }; };
     var l = cfg.launcher;
-    if (typeof l !== 'string' || !path.isAbsolute(l)) { return refuse('not an absolute path'); }
-    if (LAUNCHER_META.test(l) || LAUNCHER_META.test(cfg.engine_home)) { return refuse('a refused character in the path'); }
-    var st, real, want;
-    try { st = fs.statSync(l); } catch (e) { return refuse('missing'); }
-    if (!st.isFile()) { return refuse('not a regular file'); }
+    if (typeof l !== 'string' || !path.isAbsolute(l)) { return refuse('not_absolute', 'not an absolute path'); }
+    if (LAUNCHER_META.test(l) || LAUNCHER_META.test(cfg.engine_home)) {
+      return refuse('metachar_in_path', 'a refused character in the path');
+    }
+    var st, real, home, want;
+    try { st = fs.statSync(l); } catch (e) { return refuse('not_found', 'missing'); }
+    if (!st.isFile()) { return refuse('not_a_file', 'not a regular file'); }
     try {
       real = fs.realpathSync(l);
-      want = path.join(fs.realpathSync(cfg.engine_home), 'bin', LAUNCHER_NAME);
-    } catch (e) { return refuse('cannot be resolved'); }
-    if (!samePath(real, want)) { return refuse('not <engine home>/bin/' + LAUNCHER_NAME); }
-    if (LAUNCHER_META.test(real)) { return refuse('a refused character in the path'); }
-    if (!IS_WIN) {
+      home = fs.realpathSync(cfg.engine_home);
+      want = path.join(home, 'bin', LAUNCHER_NAME);
+    } catch (e) { return refuse('unresolvable', 'cannot be resolved'); }
+    if (!samePath(real, want)) { return refuse('not_the_launcher', 'not <engine home>/bin/' + LAUNCHER_NAME); }
+    if (LAUNCHER_META.test(real)) { return refuse('metachar_in_path', 'a refused character in the path'); }
+    if (IS_WIN) {
+      var prof = profileDir();
+      if (!prof || !inside(real, prof)) { return refuse('outside_profile', 'outside the user profile folder'); }
+    } else {
       var rs;
-      try { rs = fs.statSync(real); } catch (e) { return refuse('missing'); }
-      if (typeof process.getuid !== 'function' || rs.uid !== process.getuid()) { return refuse('not owned by this user'); }
-      if (rs.mode & 18) { return refuse('group- or world-writable'); }      // 18 = 0o022
+      try { rs = fs.statSync(real); } catch (e) { return refuse('not_found', 'missing'); }
+      if (typeof process.getuid !== 'function' || rs.uid !== process.getuid()) {
+        return refuse('not_owner', 'not owned by this user');
+      }
+      if (rs.mode & 18) { return refuse('writable_by_others', 'group- or world-writable'); }      // 18 = 0o022
     }
-    return { file: l, cwd: cfg.engine_home };
+    return { file: real, cwd: home };                       // both resolved: what was checked
   }
   function spawnLauncher(l) {
     var cp = req('child_process');
@@ -238,15 +259,17 @@
     }
     return cp.spawn(l.file, [], opts);
   }
-  function setEngineStart(outcome, why) {
+  // engine_start {at, outcome, reason}: `reason` is a fixed code (never a path); `why` goes to the log only
+  function setEngineStart(outcome, why, reason) {
     if (!engineStart || engineStart.outcome !== outcome) { log('engine start: ' + outcome + (why ? ' (' + why + ')' : '')); }
-    engineStart = { at: Date.now(), outcome: outcome };
+    engineStart = { at: Date.now(), outcome: outcome, reason: reason || null };
   }
   function engineFailed(outcome) {
     engineFailures += 1;
     if (engineFailures >= ENGINE_MAX_FAILURES) {
       engineGaveUp = true;
-      return setEngineStart('gave_up', engineFailures + ' failed attempts; it tries again when the app restarts');
+      return setEngineStart('gave_up', engineFailures + ' failed attempts; it tries again when the app restarts',
+                            'gave_up');
     }
     setEngineStart(outcome);
   }
@@ -259,7 +282,7 @@
     }
     if (alive) { engineFailures = 0; return setEngineStart('running'); }
     var l = launcherFrom(readConfig());
-    if (!l.file) { return setEngineStart(l.outcome, l.reason); }
+    if (!l.file) { return setEngineStart(l.outcome, l.why, l.reason); }
     var child;
     try { child = spawnLauncher(l); } catch (e) { return engineFailed('spawn_error'); }
     enginePending = true;

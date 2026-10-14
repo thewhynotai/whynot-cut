@@ -38,6 +38,11 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 ```
 - `<CEP extensions>` is `%APPDATA%\Adobe\CEP\extensions` on Windows and `~/Library/Application Support/Adobe/CEP/extensions`
   on macOS.
+- **Only the live extension folder is ever in `<CEP extensions>`.** CEP loads every folder there by its manifest, so a
+  second copy of the bundle (a staged new one, a kept previous one) would load beside it. Those live in
+  `<CEP root>/.wnc-staging/{new,prev}` instead: `%APPDATA%\Adobe\CEP\.wnc-staging` on Windows and
+  `~/Library/Application Support/Adobe/CEP/.wnc-staging` on macOS (`cep_bundle.staging_dir()`, the parent of the
+  extensions folder: the same volume, so the swap is two atomic renames).
 - `cep_bundle.assemble(dst)` builds exactly this layout from the repo. The copies of `ui/tokens.css` and `jsx/wnc_*.jsx`
   are build artefacts, never a second source.
 - Nothing inside the extension is ever written after install. In particular there is no `bridge-config.json` (the
@@ -83,7 +88,7 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 {"at": 1760000000000, "busy": false, "role": "daemon", "host": "PPRO" | "AEFT", "hostVersion": "26.5.2",
  "bundle": "3.0.0", "version": "3.0.0", "protocol": 4, "build": "<16 hex>", "libs": {"<name>": "<sha256>"},
  "current": "<job id>" | null, "action": "<action>" | null,
- "engine_start": {"at": 1760000000000, "outcome": "<outcome>"} | null}
+ "engine_start": {"at": 1760000000000, "outcome": "<outcome>", "reason": "<reason>" | null} | null}
 ```
 - `version` equals `bundle`. It is what engines before protocol 4 read.
 - `libs` is hashed from `<extension>/jsx/` when the daemon starts.
@@ -93,11 +98,29 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 |---|---|
 | `running` | `engine.json` names a live pid. |
 | `no_launcher` | There is no `config.json`, or its `launcher` is null. |
-| `refused` | The launcher failed the allowlist. The reason is in the daemon's log only. |
+| `refused` | The launcher failed the allowlist. `reason` says which check (table below). |
 | `spawned` | An attempt was made. The next check, 30 s later, decides whether it worked. |
 | `spawn_error` | The spawn threw or emitted `error`. |
 | `failed` | The launcher exited non-zero, or the engine was still down at the next check. |
-| `gave_up` | 5 failures in a row. There are no more attempts until the app restarts. |
+| `gave_up` | 5 failures in a row. There are no more attempts until the app restarts. `reason` is `gave_up`. |
+
+- **`reason`** is a fixed code, never a path or any text read from disk (`null` for the other outcomes):
+
+| Reason | The check that failed (section 5.2) |
+|---|---|
+| `not_absolute` | `launcher` is not an absolute path. |
+| `metachar_in_path` | The launcher, its realpath or `engine_home` holds one of `" % ^ & \| < > !`. |
+| `not_found` | The launcher does not exist. |
+| `not_a_file` | It is not a regular file. |
+| `unresolvable` | Its realpath or `engine_home`'s cannot be resolved. |
+| `not_the_launcher` | Its realpath is not `realpath(engine_home)/bin/wnc-engine(.cmd)`. |
+| `outside_profile` | Windows: its realpath is outside `%USERPROFILE%`. |
+| `not_owner` | POSIX: it is not owned by this user. |
+| `writable_by_others` | POSIX: it is group- or world-writable. |
+| `gave_up` | Outcome `gave_up` (5 failed attempts). |
+
+- **Doctor:** with the daemon alive, `refused` and `gave_up` become one plain fix sentence for the editor
+  (`onboard.ENGINE_START_FIXES`): no code, no path.
 
 ### 3.4 Jobs and results (protocol 4; `cep_queue.py` documents every queue file)
 - **`<id>.data.json`:** the job's data, as ASCII JSON.
@@ -164,15 +187,20 @@ It may start only `config.json` `launcher`, and only when **all** of these hold:
    `.../bin/wnc-engine` on macOS. A link that resolves elsewhere, another name, or another folder is refused.
 3. Neither the launcher, its realpath nor `engine_home` contains any of `" % ^ & | < > !`. cmd.exe acts on these even
    inside quotes.
-4. **On POSIX:** it is owned by the user (`uid === process.getuid()`) and not group- or world-writable (`mode & 0o022`
+4. **On Windows:** its realpath is inside `%USERPROFILE%` (the installer puts the engine home there; a launcher
+   anywhere else is refused, `outside_profile`).
+5. **On POSIX:** it is owned by the user (`uid === process.getuid()`) and not group- or world-writable (`mode & 0o022`
    is 0).
+
+**What is spawned is the checked realpath** (and its `cwd` is `realpath(engine_home)`), never the configured string:
+a link swapped after the checks cannot redirect the spawn.
 
 ### 5.3 How it starts it
 There are no arguments, and nothing comes from the queue, the network or the job files.
 - **Windows:**
   ```js
-  spawn(ComSpec, ["/d", "/s", "/c", '""' + launcher + '""'],
-        {detached: true, windowsHide: true, stdio: "ignore", cwd: engine_home, windowsVerbatimArguments: true}).unref()
+  spawn(ComSpec, ["/d", "/s", "/c", '""' + realpath(launcher) + '""'],
+        {detached: true, windowsHide: true, stdio: "ignore", cwd: realpath(engine_home), windowsVerbatimArguments: true}).unref()
   ```
   - `ComSpec` is used only when it is an absolute path to a file named `cmd.exe`. Otherwise
     `C:\Windows\System32\cmd.exe` is used.
@@ -182,7 +210,7 @@ There are no arguments, and nothing comes from the queue, the network or the job
     - the plan's single pair (`'"' + launcher + '"'`) exits 1, with or without verbatim;
     - the double pair runs the launcher.
   - `test_cep_bridge.py` checks this with the real cmd.exe.
-- **macOS:** `spawn(launcher, [], {detached: true, windowsHide: true, stdio: "ignore", cwd: engine_home}).unref()`.
+- **macOS:** `spawn(realpath(launcher), [], {detached: true, windowsHide: true, stdio: "ignore", cwd: realpath(engine_home)}).unref()`.
 
 ### 5.4 Limits
 - At most one attempt per 30 s.
@@ -231,9 +259,13 @@ There are no arguments, and nothing comes from the queue, the network or the job
   - the Premiere heartbeat's `engine_start`.
 - **PlayerDebugMode:** `debug_mode_needed` is true only for an unsigned install. A signed one loads without it.
   `loads` = installed and (signed or PlayerDebugMode on).
-- **When the extension is missing, the fix depends on the plugin build:**
-  - with the source in this checkout, it is `reel setup`;
-  - otherwise, "install WhyNot Cut with its installer (the signed extension comes with it)".
+- **When the extension is missing, the fix depends on what `reel setup` can install:**
+  - the signed ZXP the plugin carries (`cep_bundle.zxp_path()`), or the dev source with `WHYNOT_BRIDGE_DEV=1`: it is
+    `reel setup`;
+  - otherwise (a plugin without either, or a checkout without a signed ZXP and without the variable), "install WhyNot
+    Cut with its installer (the signed extension comes with it)".
+- **Engine start:** with the daemon alive, a heartbeat `engine_start` of `refused` or `gave_up` is one plain fix
+  sentence (section 3.3).
 
 ## 9. Known notes (accepted, review of Tasks 1–4)
 - **The `config.json` lstat/read race.** The daemon checks `lstat(config.json).isFile()` and then reads the file. A
@@ -259,25 +291,40 @@ There are no arguments, and nothing comes from the queue, the network or the job
   - `setup --from <file>` copies a file that is already downloaded, after the same check. Without `--from` the pinned
     `raw.githubusercontent.com` URL is fetched into a temp folder and checked the same way. A mismatch is refused and
     nothing is written.
-  - **macOS:** the pin is not set yet (`ZXPSignCMD/4.1.3/macOS` at the same commit, decision 10). `setup` and `build`
-    refuse with "macOS pin not set".
+  - **macOS:** `ZXPSignCMD/4.1.3/macOS/ZXPSignCmd` at its own commit `fcee8de5537d2dd2ed3d91d5a495b7041155b280` (the
+    macOS file came after the Windows one), 6391280 bytes, sha256
+    `bc773fae0b97416fc7a462e7dadcc00270428a9913480c9b78b5606ff1cfb095`, git blob
+    `38b958508c5a249d12418845dd07ad43e4f34a92`.
+    - It is **Mach-O x86_64 only**: on Apple Silicon it runs through Rosetta 2 (`softwareupdate --install-rosetta`
+      once; `setup` says so on arm64).
+    - It is **not notarized**. `setup` fetches it with `urllib` (or copies `--from`), never through a browser, so it
+      carries no quarantine attribute and Gatekeeper does not stop it. Never tell anyone to disable Gatekeeper.
+    - After the pin check `setup` makes it `0755`.
+    - It is a **build-time tool** on the signing machine only: it never ships with the plugin or the installer.
   - **The certificate** is self-signed and made once: `EG Cairo "The Why Not AI" "WhyNot Cut"`, valid 3650 days, in
     `whynot-cut.p12`. An existing certificate is never replaced.
   - **Its password** is `secrets.token_urlsafe(32)` (never starting with `-`). It lives only in the OS credential store,
     target `WhyNotCut/zxp-signing`: the Windows Credential Manager (`CredWriteW`/`CredReadW` through ctypes) or the macOS
-    keychain (`security`).
+    keychain. On macOS the password goes to `security -i` on **stdin** (never on an argv, which `ps` shows to every
+    user), and is read back to check the write.
 - **`build`:**
   1. assembles the bundle (section 2) in a temp staging folder;
   2. refuses the staging tree when it holds any symlink, junction, `.DS_Store` or `__MACOSX` (Adobe's KnownIssue2024: a
      ZXP that holds links fails its signature check after a UPIA install);
   3. `ZXPSignCmd -sign <staging> <zxp> <p12> <password> -tsa <url>`. `-tsa` is always passed (default
      `http://timestamp.digicert.com`), and a failed timestamp fails the build (decision 11);
-  4. `ZXPSignCmd -verify <zxp> -certinfo` must report a verified signature and a valid timestamp. The archive must hold
+  4. `ZXPSignCmd -verify <zxp> -certinfo` (timeout `VERIFY_TIMEOUT` = 120 s; a timeout, exit 124, is retried once,
+     any second failure fails the build and keeps no ZXP) must report a verified signature and a
+     `Timestamp: Valid ...` line. ZXPSignCmd 4.1.3 prints
+     `Timestamp: Valid and within certificate validity dates at time of signing` for a timestamped signature and
+     `Timestamp: None` without `-tsa` (that fails; `tests/fixtures/zxpsigncmd/` holds the real output). The archive must hold
      `META-INF/signatures.xml` and exactly the staged files with the same CRC; only `META-INF/*` and `mimetype` may be
      added;
   5. an atomic rename to `whynot-cut/adobe/WhyNotCut-Bridge-3.0.0.zxp`, then every other `*.zxp` there is removed:
      exactly one is left (`tools/release.py --fill-artefacts` refuses two). A failed build leaves the folder as it was.
 - **`verify`** repeats step 4 on the built ZXP.
+- **ZXPSignCmd's output** goes to temp files, never pipes: a timeout kill on Windows cannot block on a pipe a child of
+  the tool inherited. The files are read back and scrubbed of the password.
 - **The password is never printed, logged or put in an error.** Every command shown has it as `***`, and the tool's
   output is scrubbed of it. ZXPSignCmd itself takes it as an argument, so it is visible to the user's own processes
   while signing runs.
@@ -291,14 +338,28 @@ There are no arguments, and nothing comes from the queue, the network or the job
      `WHYNOT_BRIDGE_DEV=1`; a plugin without either says "install WhyNot Cut with its installer".
   - A signed install needs no PlayerDebugMode, so `editor_must_run` is empty for it.
 - **`install_zxp(zxp, ext)`:**
-  - **Signed only:** a ZXP without `META-INF/signatures.xml` is never installed.
+  - **Signed only:** a ZXP without `META-INF/signatures.xml` is never installed. "Signed" here means that file is
+    present: the engine does not check the signature itself. The real check is CEP's, when the app loads the
+    extension with PlayerDebugMode off (0): an extension whose signature fails does not load.
+  - **Size limits:** at most 2,000 entries and 64 MB uncompressed in total (the bundle is about 20 files and under
+    1 MB); a file that holds more data than its entry declares is refused while it is written.
   - **Every entry is checked before anything is written.** An absolute path, a drive, a backslash, an empty, `.` or
-    `..` part, a link entry or a duplicate refuses the whole archive.
-  - The files are extracted into `<ext>.new`, each one checked against its CRC-32 and size. The manifest must name
-    `ai.thewhynot.cut.bridge`.
-  - The install rule (section 4) decides. To install, `ext` becomes `<ext>.prev` (one previous copy is kept; the next
-    install replaces it) and `<ext>.new` becomes `ext`. A failed swap puts the previous copy back.
-  - A refused ZXP leaves `ext` untouched and no `.new` behind. An `ext` that is a link (a development checkout) is left
-    alone.
-- **Gate 6 check:** CEP must not load `<ext>.prev` beside `ext` (both hold the same bundle id). The installer track
-  keeps `.prev` the same way.
+    `..` part, a part ending in `.` or a space (Windows drops those, so `a.` and `a` are one file), a link entry or a
+    duplicate refuses the whole archive.
+  - The files are extracted into `<CEP root>/.wnc-staging/new` (section 2), each one checked against its CRC-32 and
+    size. The manifest must name `ai.thewhynot.cut.bridge`.
+  - The install rule (section 4) decides. To install, `ext` becomes `.wnc-staging/prev` (one previous copy is kept;
+    the next install replaces it) and `.wnc-staging/new` becomes `ext`. Both renames are inside one `try`:
+    - the first fails: "the installed one was left as it was";
+    - the second fails: the previous copy is renamed back, "the previous one was put back";
+    - that fails too: the message names `.wnc-staging/prev`, and the next install puts it back (below).
+    - A staged `new` never survives a failure.
+  - **Recovery (`cep_bundle.recover`) runs at the start of every install or update** (`install_zxp`,
+    `install_source`): when `ext` is missing and `.wnc-staging/prev` exists (a crash between the two renames), the
+    previous copy is put back first. It also migrates the Task 6 layout: an `<ext>.new` left in the extensions folder
+    is removed, an `<ext>.prev` becomes `.wnc-staging/prev` (or `ext` itself, when `ext` is missing).
+  - A refused ZXP leaves `ext` untouched and no staged `new` behind. An `ext` that is a link (a development checkout)
+    is left alone.
+- **Gate 6 check:** after an update the extensions folder holds only `ai.thewhynot.cut.bridge` (a test checks it).
+  The installer track is asked to keep its previous copy outside the extensions folder too: `.wnc-staging/prev`, the
+  same recovery at the start of install and update, and the uninstaller removes `.wnc-staging`.
