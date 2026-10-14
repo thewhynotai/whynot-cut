@@ -4,4 +4,4 @@ target: last_message
 match: contains
 ---
 
-reel(?:\.cmd)?\s+(?:next|transcript-verify)
+reel(?:\.cmd)?\s+transcript-verify

@@ -267,6 +267,9 @@ reel py whynot-cut/examples/make_demo.py <empty folder>  # end-to-end demo witho
 claude plugin validate whynot-cut --strict
 ```
 Bump `version` in `whynot-cut/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, then
-`/plugin marketplace update thewhynot-ai`. Eval cases: `evals/` (`claude plugin eval whynot-cut`).
+`/plugin marketplace update thewhynot-ai`. Eval cases: `evals/`. From the repo root, with ffmpeg on PATH:
+`claude plugin eval ./whynot-cut --scaffold --ablation none --judge-model sonnet --allow-tools Write Edit --runs 3`
+(a path, so this tree is tested, not an installed copy), then `python tools/eval_summary.py <aggregate-result.json>`
+for the per-case table (a case passes at 2 of 3 runs).
 
 © 2026 The Why Not AI. All rights reserved. See `LICENSE`.

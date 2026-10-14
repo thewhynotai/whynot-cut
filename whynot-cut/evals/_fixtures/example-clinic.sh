@@ -158,6 +158,28 @@ add_panel_approval() {
     > "$p/plan-approval.json"
 }
 
+# add_motion_project <client dir> <id>: a motion video (e.g. EP12_R03_MO) whose motion script exists: three scenes,
+# the second one long (9 s), its icons in the amber theme (#E07A1F, not the client's teal)
+add_motion_project() {
+  local p="$1/output/projects/$2/01_analysis"
+  mkdir -p "$p"
+  cat > "$p/motion-script.json" <<'EOF'
+{
+  "schema_version": 1,
+  "reel_id": "R03",
+  "theme": "clinic-teal",
+  "captions": "on",
+  "beats": [{"id": "B1", "role": "hook"}, {"id": "B2", "role": "point"}, {"id": "B3", "role": "close"}],
+  "scenes": [
+    {"id": "S01", "type": "title_card", "at": "00:00.0", "beat": "B1", "title": "The patient who came back"},
+    {"id": "S02", "type": "icon_point", "at": "00:04.0", "beat": "B2", "theme": "amber", "icon": "laser",
+     "text": "Ten years later, the same question", "recipe_note": "icons in amber #E07A1F; scene runs 9 s"},
+    {"id": "S03", "type": "outro", "at": "00:13.0", "beat": "B3", "cta": "Ask before any session"}
+  ]
+}
+EOF
+}
+
 # make_hugo_site [dir]: a small Hugo website (no client layout: no data/, no marker) for the should-not-trigger case
 make_hugo_site() {
   local dir="${1:-.}"

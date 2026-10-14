@@ -3,8 +3,8 @@ run every case: each case has a case.yaml (schema_version, name = folder, runs >
 case), a prompt.md whose frontmatter uses only keys the runner accepts, a `tool_used: Skill` grader
 (graders/skill-fired.md) that names real whynot-cut skills (or forbids them, for should-not-trigger cases), regex graders
 that compile and whose `reel <cmd> --flag` names a real command and option of the REAL parser (test_structure), a
-scaffold that only sources the shared fictional fixture. (No real client name: test_plugin's
-TestShippedProfiles scans the whole plugin, evals/ included.)
+scaffold that only sources the shared fictional fixture, a "Gate 0/1/2" jargon check in every editor-facing case, and
+no real client name in the case files (test_plugin's TestShippedProfiles token list; its own scan skips .yaml/.sh).
 
 Key sets mirror the runner's schema in CLI 2.1.295 (`claude plugin eval`; checked against the bundled binary, T3.7
 evidence doc). The cases themselves are run with the CLI (needs login), not here.
@@ -36,7 +36,7 @@ GRADER_KEYS = {"regex": {"type", "target", "pattern", "flags", "match", "weight"
                "llm": {"type", "criteria", "focus", "weight", "arm"},
                "baseline": {"type", "baseline_file", "criteria", "weight", "arm"}}
 FIXTURE_FUNCS = {"make_clinic", "add_references", "add_project", "add_episode_plan", "add_panel_approval", "add_approved_reels",
-                 "make_hugo_site"}
+                 "add_motion_project", "make_hugo_site"}
 SOURCE_LINE = '. "${here%/*}/../_fixtures/example-clinic.sh"'
 # a reel command written in a regex grader: reel, reel.cmd or reel(?:\.cmd)?, whitespace, then a word or (?:a|b)
 REEL_IN_REGEX = re.compile(r"reel(?:\(\?:\\\.cmd\)\?|\.cmd)?(?:\\s\+|\\s\*| )(?:\(\?:([a-z|-]+)\)|([a-z][a-z0-9-]*))")
@@ -86,7 +86,9 @@ def case_issues(plugin: Path, cli: "ts.CLI") -> list[tuple[str, str]]:
             if SOURCE_LINE not in body:
                 out.append((n, "scaffold.sh does not source ../_fixtures/example-clinic.sh"))
             for ln in body:
-                if ln and not ln.startswith(("#", "here=", ". ")) and ln.split()[0] not in FIXTURE_FUNCS:
+                if ln.startswith(". ") and ln != SOURCE_LINE:
+                    out.append((n, f"scaffold.sh sources something other than the fixture: {ln!r}"))
+                elif ln and not ln.startswith(("#", "here=", ". ")) and ln.split()[0] not in FIXTURE_FUNCS:
                     out.append((n, f"scaffold.sh: {ln.split()[0]!r} is not a fixture function"))
         pm = d / "prompt.md"
         if not pm.is_file():
@@ -102,6 +104,8 @@ def case_issues(plugin: Path, cli: "ts.CLI") -> list[tuple[str, str]]:
         gs = {g.stem: g for g in sorted((d / "graders").glob("*.md"))} if (d / "graders").is_dir() else {}
         if "skill-fired" not in gs:
             out.append((n, "no graders/skill-fired.md"))
+        elif split_md(gs["skill-fired"].read_text(encoding="utf-8"))[0].get("max") != 0 and "no-gate-jargon" not in gs:
+            out.append((n, "no graders/no-gate-jargon.md (every editor-facing case checks for Gate 0/1/2)"))
         if not any(split_md(g.read_text(encoding="utf-8"))[0].get("type") == "llm" for g in gs.values()):
             out.append((n, "no outcome (llm) grader"))
         for gname, g in gs.items():
@@ -164,6 +168,13 @@ class TestEvalSuite(unittest.TestCase):
     def test_every_case_is_well_formed(self):
         self.assertEqual(case_issues(SK, self.cli), [])
 
+    def test_no_real_client_name_in_any_case_file(self):
+        from test_plugin import TestShippedProfiles
+        tokens = TestShippedProfiles("test_no_real_client_name_in_the_product").real_client_tokens
+        hits = [(f.relative_to(SK).as_posix(), tokens(f.read_text(encoding="utf-8")))
+                for f in sorted((SK / "evals").rglob("*")) if f.is_file() and "results" not in f.parts]
+        self.assertEqual([h for h in hits if h[1]], [])
+
     def test_suite_has_the_6_2_cases(self):
         have = {d.name for d in cases(SK)}
         for want in ("negative-hugo-assets", "edit-arabic-only", "revise-arabic-only", "status-arabic-only",
@@ -217,6 +228,9 @@ class TestEvalSuite(unittest.TestCase):
             (p / "evals/fix-audio-only/prompt.md").write_text("---\nmax_turns: 3\nturns: 2\n---\n\nhi\n",
                                                               encoding="utf-8")
             (p / "evals/handoff-for-editor/scaffold.sh").write_text("#!/usr/bin/env bash\nrm -rf /\n", encoding="utf-8")
+            sc = p / "evals/status-arabic-only/scaffold.sh"
+            sc.write_text(sc.read_text(encoding="utf-8") + ". ../../evil.sh\n", encoding="utf-8")
+            (p / "evals/preview-before-premiere/graders/no-gate-jargon.md").unlink()
             got = {m for _, m in case_issues(p, self.cli)}
             for want in ("delegated-pick: reel reels-select --by boss: not one of delegated, editor",
                          "delegated-pick: reel reels-select --bogus: no such option",
@@ -224,7 +238,10 @@ class TestEvalSuite(unittest.TestCase):
                          "case.yaml: name 'other' is not the folder name", "case.yaml: runs must be >= 3",
                          "context.scaffold_script must be scaffold.sh inside the case",
                          "prompt.md: unknown frontmatter key 'turns'", "prompt.md: allowed_tools lacks Skill",
-                         "scaffold.sh does not source ../_fixtures/example-clinic.sh"):
+                         "scaffold.sh does not source ../_fixtures/example-clinic.sh",
+                         "scaffold.sh: 'rm' is not a fixture function",
+                         "scaffold.sh sources something other than the fixture: '. ../../evil.sh'",
+                         "no graders/no-gate-jargon.md (every editor-facing case checks for Gate 0/1/2)"):
                 self.assertIn(want, got)
 
 

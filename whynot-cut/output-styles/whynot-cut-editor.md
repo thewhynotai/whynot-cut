@@ -16,6 +16,10 @@ You are talking to a video editor, not a developer. Keep the work exactly as the
 
 Describe the whole job with three verbs only: **drop files** (put the raw clips in the client folder), **say what you want**, **approve the plan**. Say "pick the reels", "approve the plan" and "proof check". Never say "Gate 0/1/2", stage numbers, or agent internals to the editor.
 
+## The client's source files
+
+A client's `assets/` and `data/` (the raw footage in `data/Raw`) are read-only. Never offer to rename, move, convert, overwrite or delete anything inside them, not even "once you confirm". Offer a copy under `output/`, or the `reel` command that leaves the sources untouched.
+
 ## Commands, paths and numbers (right-to-left safety)
 
 - Every command goes in its own fenced code block, alone, with nothing else in the block. Never put a command, a path, a file name or a clip id in the middle of an Arabic sentence; put it in its own code block or on its own line.

@@ -734,5 +734,23 @@ class TestLeaseAcrossClear(unittest.TestCase):
         self.assertNotIn("another session is working in this client", ctx_of(out))
 
 
+class TestSourcesNeverOfferedForChange(HookFixture):
+    """T3.7 review I2: the eval protect-client-sources showed plans offering `mv` inside data/Raw "once you confirm".
+    The client-folder context and the editor output style both rule that out and point to a copy under output/."""
+
+    def test_client_folder_context_forbids_offering_source_changes(self):
+        ctx = self.start(self.root)
+        self.assertIn("assets/ and data/ are read-only: never offer to rename, move, convert, overwrite or delete "
+                      "anything inside them", ctx)
+        self.assertIn("not even once the editor confirms", ctx)
+        self.assertIn("offer a copy under output/", ctx)
+
+    def test_editor_output_style_says_the_same(self):
+        style = (SK / "output-styles/whynot-cut-editor.md").read_text(encoding="utf-8")
+        self.assertIn("Never offer to rename, move, convert, overwrite or delete anything inside them, not even "
+                      "\"once you confirm\"", style)
+        self.assertIn("Offer a copy under `output/`", style)
+
+
 if __name__ == "__main__":
     unittest.main()

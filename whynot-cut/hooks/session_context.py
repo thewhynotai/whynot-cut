@@ -780,7 +780,9 @@ def speak(cwd: Path, st: dict, home: Path, env_ok: bool, data: dict):
              + updates_line(home)
              + f"{prefs_line(st)} "
              f"Use /whynot-cut:autopilot (edit every new clip), /whynot-cut:edit <clip>, /whynot-cut:revise, "
-             f"/whynot-cut:status. assets/ and data/ are read-only.")
+             f"/whynot-cut:status. assets/ and data/ are read-only: never offer to rename, move, convert, overwrite "
+             f"or delete anything inside them (e.g. the footage in data/Raw), not even once the editor confirms; "
+             f"offer a copy under output/ or the reel command that leaves the sources untouched.")
         return
     legacy = cwd if client_marker.has_layout(cwd) and (cwd / "output").is_dir() and any(
         (cwd / x).exists() for x in ("START_HERE.md", "output/projects", "output/discovery")) else None

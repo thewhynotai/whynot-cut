@@ -56,7 +56,8 @@ video.
    - **Not verified**: anything stale or unchecked, and why.
    - **Needs you**:
      - approve the plan / pick the reels, when that is the next step
-     - words to confirm by ear
+     - words to confirm by ear (the editor records the check with `reel transcript-verify --by editor --note "…"`;
+       until then those words stay off graphics)
      - medical approvals
      - music
      - final mix and render
