@@ -152,25 +152,28 @@ def _call(name: str, at: float, **inp) -> str:
 class TestHeartbeatFollowsTheFilter(HookFixture):
     """A Write the `if` filter skips never reaches the guard, so no heartbeat is expected for it: no false alarm."""
 
-    def run_session(self, *lines):
+    def run_session(self, *calls):
+        """calls: (tool name, input) pairs, stamped AFTER session a's SessionStart ran: a call stamped before it (more
+        than the 2 s slack, e.g. a slow hook start on a loaded machine) belongs to an earlier session and never counts."""
         tdir = Path(self.tmp.name) / "t"
         tdir.mkdir(exist_ok=True)
         start = {"hook_event_name": "SessionStart", "source": "startup", "cwd": str(self.root)}
         hook(CTX, dict(start, session_id="a", transcript_path=str(tdir / "a.jsonl")), self.env())
-        user = json.dumps({"type": "user", "timestamp": _stamp(time.time()), "message": {"role": "user", "content": "x"}})
+        now = time.time()
+        user = json.dumps({"type": "user", "timestamp": _stamp(now), "message": {"role": "user", "content": "x"}})
+        lines = [_call(name, now, **inp) for name, inp in calls]
         (tdir / "a.jsonl").write_text("\n".join([user, *lines]) + "\n", encoding="utf-8")
         _, out, _ = hook(CTX, dict(start, session_id="b", transcript_path=str(tdir / "b.jsonl")), self.env())
         return ctx_of(out)
 
     def test_write_outside_sources_is_no_alarm(self):
-        now = time.time()
         self.assertNotIn("protection may be OFF",
-                         self.run_session(_call("Write", now, file_path=str(self.root / "output/x.md")),
-                                          _call("Edit", now, file_path="C:\\work\\repo\\src\\a.py")))
+                         self.run_session(("Write", {"file_path": str(self.root / "output/x.md")}),
+                                          ("Edit", {"file_path": "C:\\work\\repo\\src\\a.py"})))
 
     def test_write_into_sources_without_a_heartbeat_warns(self):
         self.assertIn("protection may be OFF",
-                      self.run_session(_call("Write", time.time(), file_path=str(self.root / "data/Raw/x.txt"))))
+                      self.run_session(("Write", {"file_path": str(self.root / "data/Raw/x.txt")})))
 
 
 # ------------------------------------------------------------------------------------------------------ CwdChanged
