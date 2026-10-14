@@ -306,7 +306,7 @@ def scan_secrets(root: Path) -> list:
         keep = []
         for d in sorted(dirnames):
             rel = (rel_dir / d).as_posix()
-            if d == ".git":
+            if d == ".git" or is_link(Path(dirpath) / d):
                 continue
             if d in SECRET_DIRS or rel.endswith("evals/results") or rel == "evals/results":
                 found.append(rel)
@@ -427,20 +427,63 @@ def _template(name: str) -> str:
     return (HANDOFF_DIR / name).read_text(encoding="utf-8")
 
 
+def is_link(p) -> bool:
+    """A symlink, a Windows junction or any other reparse point: never followed, never deleted through."""
+    p = Path(p)
+    try:
+        if p.is_symlink():
+            return True
+        isj = getattr(os.path, "isjunction", None)
+        if isj is not None and isj(p):
+            return True
+        return bool(getattr(os.lstat(p), "st_reparse_tag", 0))
+    except OSError:
+        return False
+
+
+def scan_links(root: Path) -> list:
+    """Posix paths (relative to root) of every link / junction under root; a linked folder is never walked."""
+    root = Path(root)
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        rel_dir = Path(dirpath).relative_to(root)
+        keep = []
+        for d in sorted(dirnames):
+            if is_link(Path(dirpath) / d):
+                found.append((rel_dir / d).as_posix())
+            else:
+                keep.append(d)
+        dirnames[:] = keep
+        found += [(rel_dir / f).as_posix() for f in sorted(filenames) if is_link(Path(dirpath) / f)]
+    return found
+
+
 def _rmtree(path: Path):
+    """Delete a folder this tool made, never through a link (COORDINATION rule 15): a link given as `path` is refused;
+    a link inside is removed as an entry (its target is untouched) before the rest is deleted."""
+    path = Path(path)
+    if is_link(path):
+        raise HandoffError(f"refusing to delete {path}: it is a link/junction (its target would be at risk)")
+    if not path.exists():
+        return
+    for rel in sorted(scan_links(path), key=len, reverse=True):
+        entry = path / rel
+        try:
+            os.rmdir(entry) if entry.is_dir() else os.unlink(entry)
+        except OSError:
+            os.unlink(entry)
+
     def fix(func, p, _exc):
         try:
             os.chmod(p, stat.S_IWRITE | stat.S_IREAD)
             func(p)
         except OSError:
             pass
-    if not Path(path).exists():
-        return
     if sys.version_info >= (3, 12):
         shutil.rmtree(path, onexc=fix)
     else:
         shutil.rmtree(path, onerror=fix)
-    if Path(path).exists():
+    if path.exists():
         raise HandoffError(f"could not remove {path} (a file in it is open?)")
 
 
@@ -499,7 +542,7 @@ def make_sample_client(repo_dir: Path, dest: Path):
     ff = find_ffmpeg()
     if not ff:
         raise HandoffError("ffmpeg not found (engine home, engine runtime or PATH): the sample client needs it")
-    script = ('set -eu; . "$1"; find_ffmpeg() { printf "%s\\n" "$3"; }; '
+    script = ('set -eu; WNC_FF="$3"; . "$1"; find_ffmpeg() { printf "%s\\n" "$WNC_FF"; }; '
               'make_clinic "$2" profile; add_references "$2"; add_project "$2" C0239; add_episode_plan "$2"')
     r = subprocess.run([find_bash(), "-c", script, "handoff", fixture.as_posix(), Path(dest).as_posix(),
                         Path(ff).as_posix()], cwd=str(Path(dest).parent), capture_output=True, text=True,
@@ -600,15 +643,20 @@ def handoff(repo, out, label=None, preview=False, dry_run=False, sample_maker=No
             now=None) -> dict:
     """Build <out>/Windows and <out>/Mac (Addendum G12) from the commit at HEAD of `repo`: into <out>.new, then swap,
     keeping <out>.prev until the new one is in place. Raises HandoffError; nothing is swapped in on any failure."""
-    repo, out = Path(repo).resolve(), Path(out).resolve()
+    repo = Path(repo).resolve()
+    out = Path(os.path.abspath(out))           # never resolve() the output itself: that would follow a link/junction
     sample_maker = sample_maker or make_sample_client
     now = now or datetime.datetime.now(datetime.timezone.utc)
     if not (repo / ".git").exists():
         raise HandoffError(f"not a git repo: {repo}")
-    if out == repo or repo in out.parents:
+    real_out = out.parent.resolve() / out.name
+    if real_out == repo or repo in real_out.parents:
         raise HandoffError(f"--out must be outside the repo: {out}")
     if any(part.lower() in CLIENT_PATH_WORDS for part in out.parts):
         raise HandoffError(f"--out must not be in a client or whynot-test folder: {out}")
+    for p in (out, out.with_name(out.name + ".new"), out.with_name(out.name + ".prev")):
+        if is_link(p):
+            raise HandoffError(f"{p} is a link/junction: the hand-off never writes, swaps or deletes through a link")
     head, branch = (_git(repo, "rev-parse", "HEAD", "--abbrev-ref", "HEAD").splitlines() + ["", ""])[:2]
     if not branch or branch == "HEAD":
         raise HandoffError("HEAD is detached: check out the release branch first")
@@ -704,6 +752,10 @@ def _build(repo, new, ctx, ship, locked, zip_name, sample_maker, summary, log):
         if r.returncode != 0:
             raise HandoffError("could not drop the clone's remote-tracking refs: "
                                + r.stderr.decode("utf-8", "replace").strip())
+    links = scan_links(clone)
+    if links:
+        raise HandoffError("the clone holds links/junctions (rule 15: never a link into the live repo): "
+                           + ", ".join(links))
     bad = scan_secrets(clone)
     if bad:
         raise HandoffError("the clone's working tree holds secrets, caches, renders or venvs (remove them from git "

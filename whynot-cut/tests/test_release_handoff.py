@@ -460,6 +460,82 @@ class TestSecretScan(HandoffCase):
                                                 "whynot-cut/evals/results"]))
 
 
+class TestSampleClientMaker(HandoffCase):
+    def test_the_fixture_gets_the_engine_ffmpeg_and_the_four_steps(self):
+        """The real maker sources the fixture and overrides its find_ffmpeg with the engine's ffmpeg (no real run)."""
+        try:
+            rel.find_bash()
+        except rel.HandoffError:
+            self.skipTest("no bash")
+        repo = self.tmp / "clone"
+        fx = repo / "whynot-cut" / "evals" / "_fixtures" / "example-clinic.sh"
+        fx.parent.mkdir(parents=True)
+        fx.write_text('make_clinic() { mkdir -p "$1"; echo "ff=$(find_ffmpeg) prof=$2" > "$1/calls.txt"; }\n'
+                      'add_references() { echo refs >> "$1/calls.txt"; }\n'
+                      'add_project() { echo "project $2" >> "$1/calls.txt"; }\n'
+                      'add_episode_plan() { echo plan >> "$1/calls.txt"; }\n', encoding="utf-8")
+        ff = self.tmp / "tools dir" / "ffmpeg-fake.exe"
+        ff.parent.mkdir()
+        ff.write_bytes(b"x")
+        dest = self.tmp / "Mac" / "sample-client"
+        dest.parent.mkdir()
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"WHYNOT_FFMPEG": str(ff)}):
+            rel.make_sample_client(repo, dest)
+        calls = (dest / "calls.txt").read_text(encoding="utf-8").split("\n")
+        self.assertEqual(calls[0], f"ff={ff.as_posix()} prof=profile")
+        self.assertEqual(calls[1:4], ["refs", "project C0239", "plan"])
+
+
+def make_dir_link(link: Path, target: Path) -> bool:
+    """A directory junction (Windows, no admin needed) or symlink (elsewhere); False when the OS refuses."""
+    try:
+        if os.name == "nt":
+            r = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True)
+            return r.returncode == 0 and link.exists()
+        os.symlink(target, link, target_is_directory=True)
+        return True
+    except OSError:
+        return False
+
+
+class TestLinks(HandoffCase):
+    """COORDINATION rule 15: no junction/symlink in the clone; the swap and every delete never follow a link."""
+
+    def test_scan_finds_a_junction_and_does_not_walk_into_it(self):
+        live = self.tmp / "live"
+        (live / "inner").mkdir(parents=True)
+        (live / "inner" / "x.env").write_text("x", encoding="utf-8")
+        tree = self.tmp / "tree"
+        tree.mkdir()
+        if not make_dir_link(tree / "linked", live):
+            self.skipTest("cannot create a directory link here")
+        self.assertEqual(rel.scan_links(tree), ["linked"])
+        self.assertEqual(rel.scan_secrets(tree), [])          # never walked through the link
+
+    def test_rmtree_refuses_a_link_and_leaves_the_target(self):
+        live = self.tmp / "live"
+        live.mkdir()
+        (live / "keep.txt").write_text("keep", encoding="utf-8")
+        link = self.tmp / "out.prev"
+        if not make_dir_link(link, live):
+            self.skipTest("cannot create a directory link here")
+        with self.assertRaises(rel.HandoffError):
+            rel._rmtree(link)
+        self.assertTrue((live / "keep.txt").is_file())
+
+    def test_a_linked_output_folder_is_refused(self):
+        repo = make_repo(self.tmp / "src")
+        live = self.tmp / "live"
+        live.mkdir()
+        (live / "keep.txt").write_text("keep", encoding="utf-8")
+        if not make_dir_link(self.out, live):
+            self.skipTest("cannot create a directory link here")
+        with self.assertRaises(rel.HandoffError):
+            self.run_handoff(repo)
+        self.assertTrue((live / "keep.txt").is_file())
+
+
 class TestRepoCoordinationFiles(unittest.TestCase):
     """The two-machine loop: LOCKED-AREAS.md and MAC-INBOX.md exist at the repo root and parse."""
 
