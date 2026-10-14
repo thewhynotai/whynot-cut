@@ -173,7 +173,11 @@ class TempDir:
     retries and finally ignores what Windows still refuses to delete (a leftover in %TEMP% must not fail a test)."""
 
     def __init__(self):
-        self.name = tempfile.mkdtemp(prefix="wnc-")
+        # WHYNOT_TEST_TMP (Addendum F2-T2, as tools/test.sh) keeps test files off the system drive; else %TEMP%
+        root = os.environ.get("WHYNOT_TEST_TMP") or None
+        if root:
+            os.makedirs(root, exist_ok=True)
+        self.name = tempfile.mkdtemp(prefix="wnc-", dir=root)
 
     def cleanup(self) -> None:
         rmtree_retry(self.name)
