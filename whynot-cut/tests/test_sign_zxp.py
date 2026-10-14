@@ -642,7 +642,11 @@ class TestArtefact(unittest.TestCase):
         lines = (SK / "adobe" / ".gitignore").read_text(encoding="utf-8").splitlines()
         self.assertIn("*.zxp", lines)
         if shutil.which("git"):
-            names = ["whynot-cut/adobe/WhyNotCut-Bridge-3.0.0.zxp", "whynot-cut/adobe/.wnc-zxp-123/x.zxp"]
+            inside = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--is-inside-work-tree"],
+                                    capture_output=True, text=True, timeout=60)
+            if inside.returncode != 0 or inside.stdout.strip() != "true":
+                self.skipTest("not inside a git work tree (a git-archive snapshot): .gitignore checked as text only")
+            names =["whynot-cut/adobe/WhyNotCut-Bridge-3.0.0.zxp", "whynot-cut/adobe/.wnc-zxp-123/x.zxp"]
             r = subprocess.run(["git", "-C", str(REPO), "check-ignore", *names], capture_output=True, text=True,
                                timeout=60)
             self.assertEqual((r.returncode, r.stdout.split()), (0, names), r.stderr)

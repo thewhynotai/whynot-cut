@@ -76,8 +76,10 @@
     } catch (e) {}
     return null;
   }
+  // config.json first, else the fallback below. Self-contained: tests lift this function out of the file on its own
+  // (test_wrappers, test_runtime), where readConfig does not exist and only the fallback runs
   function engineHome() {
-    var cfg = readConfig();
+    var cfg = typeof readConfig === 'function' ? readConfig() : null;
     if (cfg) { return cfg.engine_home; }
     // same rule as bin/reel, reel.cmd and plat.engine_home(): a home counts only with an engine inside, the runtime's
     // `current` file (3.0) or a venv folder (WhyNot Cut's SessionStart hook creates ~/.whynot-cut for
