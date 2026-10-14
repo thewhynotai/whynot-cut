@@ -61,6 +61,39 @@ Reader: a video editor in Egypt (also KSA/UAE), comfortable with Premiere, not a
   only in a section that has a `.todo data-phase="N"` naming the phase that verifies it live; undecided items only
   inside `.todo`. Facts only from the named sources.
 
+## Explained once
+No developer words anywhere a reader sees (Addendum G2). The build lint (`build.py` `DEV_WORDS`, `dev_word_problems`)
+reads the visible prose of the chapters (no `<code>`, `.cmd` boxes, comments or `›` menu paths) and fails on:
+- a word from `DEV_WORDS` (token, daemon, JSON, CLI, API, venv, Python, MCP, PATH, XML, CEP, …, and Arabic forms such
+  as «مسار»، «امتداد»، «جذر»، «برمجيًا»، «سطر أوامر»، «للمطوّر») that this table does not list;
+- a term this table lists whose FIRST use in reading order is not inside an element with `data-term-first="<key>"`
+  (the key is the first backticked form in the row). That first use carries the explanation in the same sentence;
+  later uses are free. Wrap it as `<span data-term-first="مسار">…</span>` (or put the attribute on the element).
+
+Everywhere else use the plain Arabic replacement: «مكان» for where a file is, «داخل فولدر العميل مباشرة» for "root",
+«ثابت داخل البرنامج نفسه» for "programmatic", «للدعم» for "for the developer". One word means one thing: «إضافة» is only
+the WhyNot Cut plugin in Claude, Adobe's add-ons are «لوحات»; «مسار» is only a file path, Premiere's are «تراكات».
+«hook» is not a developer word here: it is the editing term «البداية الجاذبة (hook)».
+
+| Term (forms the lint matches) | First-use explanation (Arabic) | Where (after round 3) |
+|---|---|---|
+| `محرك` (engine) | «وهو البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية» | ch01, requirements lead |
+| `نموذج` `نماذج` (model) | «ملف كبير فيه خبرة جاهزة في فهم الكلام، يستخدمه WhyNot Cut ليحوّل الصوت إلى نص» | ch01, «ما الذي يقدّمه» |
+| `مكتبة` `مكتبات` (NVIDIA library) | «ملف إضافي من NVIDIA يجعل كارت الشاشة يسرّع التفريغ» | ch01, «ما الذي يقدّمه» |
+| `مسار` (path) | «والمسار عنوان الملف على جهازك: أسماء الفولدرات التي توصل إليه بالترتيب» | ch01, «كيف تقرأ هذا الدليل» |
+| `Terminal` `PowerShell` | «نافذة نصية تأتي مع نظام التشغيل: تلصق فيها أمرًا وتضغط Enter فيُنفَّذ» | ch02, chapter lead |
+| `إضافة` `إضافات` (plugin in Claude) | «الجزء الذي يعرّف Claude بأوامر WhyNot Cut وطريقة عمله» | ch02, «اليوم: التثبيت» step 2 |
+| `XML` | «ملف مشروع بصيغة عامة يستورده Premiere من File › Import، بدل مشروع Premiere الأصلي» | ch02, setup wizard step 2 |
+| `توقيع` (signed) | «ختم رقمي من الشركة يثبت أن الملف أصلي ولم يُعدَّل» | ch02, Bridge warning |
+| `حزمة` `حزم` (bundle) | «مجموعة نماذج وأدوات تُنزَّل معًا، مثل حزمة «كلام»» | ch02, «من داخل Claude» step 4 |
+| `Python` | «لغة برمجة يحتاجها المحرك، ولا تتعامل معها أنت» | ch02, «ما الذي يُثبَّت تلقائيًا» |
+| `امتداد` (file extension) | «ما بعد النقطة في اسم الملف، مثل .mp4 أو .md» | ch04, short clip names |
+| `API` (Anthropic API key) | «رمز سري من حساب مطوّر في Anthropic؛ لا تحتاج إليه» | ch07, AI buttons |
+| `سكريبت` (AE script) | «ملف يبني المشروع داخل After Effects عندما تشغّله» | ch09, script fallback |
+| `تعريف الكارت` (driver) | «برنامج تشغيل الكارت من NVIDIA» | ch13, Kalam on Windows |
+| `PATH` (installer checkbox) | «يجعل الجهاز يجد Python عندما يطلبه المحرك» | ch17 (only while the Python row exists) |
+| admin, ffmpeg, Git for Windows, CPU, zip, السجل | explained in place, Arabic first, English in parentheses (not linted) | ch02, ch07, ch08, ch17 |
+
 ## 3.0 boxes are written for the reader (ruling R2-9)
 - The `.todo` box prints the label «في الإصدار 3.0 — لم يُتحقَّق منه بعد» (CSS, no phase number). `data-phase="N"`
   stays on every box: the lint needs it and a release build fails on any `.todo`.

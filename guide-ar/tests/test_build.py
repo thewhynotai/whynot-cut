@@ -226,6 +226,60 @@ class LintTests(unittest.TestCase):
         self.assertEqual(build.lint(_wrap('<aside class="todo" data-phase="7"><p>نص</p></aside>')), [])
 
 
+class DevWordTests(unittest.TestCase):
+    """Addendum G2: no developer words anywhere a reader sees, unless STYLE.md's «explained once» table lists the term
+    and its first use in reading order carries data-term-first="<term>"."""
+
+    TERMS = {"Python": ("Python",), "مسار": ("مسار",)}
+
+    def test_visible_prose_drops_code_commands_comments_and_menu_paths(self):
+        html = _wrap('<p>افتح <bdi dir="ltr"><code>prefs.json</code></bdi> من '
+                     '<bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>.</p>'
+                     '<div class="cmd" dir="ltr"><code>reel doctor --json</code></div>'
+                     '<aside class="todo" data-phase="7"><p>جملة للقارئ.</p><!-- فريق: JSON token CLI --></aside>'
+                     '<p>رسالة <bdi dir="ltr">engine not installed</bdi>.</p>'
+                     '<style>p::before{content:"API"}</style>')
+        prose = build.visible_prose(html)
+        for gone in ("prefs.json", "UXP", "reel doctor", "JSON", "token", "API"):
+            self.assertNotIn(gone, prose)
+        for kept in ("افتح", "جملة للقارئ.", "engine not installed"):
+            self.assertIn(kept, prose)
+
+    def test_no_dev_words_in_prose(self):
+        # a developer word in a paragraph fails
+        bad = build.dev_word_problems(_wrap("<p>ملف JSON</p>"), terms={})
+        self.assertEqual(len(bad), 1, bad)
+        self.assertIn("JSON", bad[0])
+        # the same word inside code, a command box or a team comment passes
+        self.assertEqual(build.dev_word_problems(_wrap("<p>افتح <code>prefs.json</code></p>"), terms={}), [])
+        self.assertEqual(build.dev_word_problems(
+            _wrap('<div class="cmd"><code>reel doctor --json</code></div><!-- فريق: JSON -->'), terms={}), [])
+        # Arabic forms match with prefixes and without diacritics; «hook» (the editing term) is not a developer word
+        self.assertEqual(len(build.dev_word_problems(_wrap("<p>والمسارات كلها</p>"), terms={})), 1)
+        self.assertEqual(len(build.dev_word_problems(_wrap("<p>تقرير للمطوّر</p>"), terms={})), 1)
+        self.assertEqual(build.dev_word_problems(_wrap("<p>البداية الجاذبة (hook) بالتايم كود</p>"), terms={}), [])
+        # an «explained once» term passes when its FIRST use carries data-term-first, later uses are free
+        ok = ('<p><span data-term-first="Python">Python (لغة برمجة يحتاجها المحرك)</span></p>'
+              "<p>رسالة عن Python.</p>")
+        self.assertEqual(build.dev_word_problems(_wrap(ok), terms=self.TERMS), [])
+        late = '<p>Python أولًا.</p><p><span data-term-first="Python">Python (لغة برمجة)</span></p>'
+        self.assertEqual(len(build.dev_word_problems(_wrap(late), terms=self.TERMS)), 1)
+        unmarked = "<p>المسار عنوان الملف.</p>"
+        self.assertEqual(len(build.dev_word_problems(_wrap(unmarked), terms=self.TERMS)), 1)
+        # data-term-first naming a term the table does not list is an error
+        self.assertEqual(len(build.dev_word_problems(_wrap('<p data-term-first="JSON">ملف JSON</p>'), terms={})), 2)
+        # the real guide: clean against the real STYLE.md table
+        terms = build.explained_once_terms()
+        for key in ("Python", "مسار", "XML", "محرك", "نموذج"):
+            self.assertIn(key, terms)
+        self.assertEqual(build.dev_word_problems(build.chapter_sources(GUIDE)), [])
+
+    def test_hook_is_not_a_dev_word(self):
+        self.assertNotIn("hook", build.DEV_WORDS)
+        for word in ("token", "daemon", "JSON", "CLI", "API", "venv", "Python", "MCP"):
+            self.assertIn(word, build.DEV_WORDS)
+
+
 SHOT_IMG = ('<figure class="shot"><div class="shot-frame"><img src="{src}" alt="لقطة"></div>'
             "<figcaption>تعليق</figcaption></figure>")
 
@@ -566,6 +620,15 @@ class CmdAndShotTests(unittest.TestCase):
 
 
 class PrintTests(unittest.TestCase):
+    def test_wait_for_file_waits_for_a_detached_browser(self):
+        """Edge 155+: the launcher exits 0 before the detached browser writes the PDF; the build waits for it."""
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = Path(tmp) / "late.pdf"
+            threading.Timer(0.6, lambda: pdf.write_bytes(b"%PDF-1.7 x")).start()
+            self.assertTrue(build.wait_for_file(pdf, timeout=10, settle=0.3, poll=0.1))
+            self.assertFalse(build.wait_for_file(Path(tmp) / "never.pdf", timeout=0.5, settle=0.1, poll=0.1))
+
     def test_print_timeout_stops_browser_and_cleans_profile(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)

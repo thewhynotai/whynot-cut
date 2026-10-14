@@ -7,11 +7,11 @@
 <ul>
 <li><bdi dir="ltr"><code>assets/</code></bdi>: هوية العميل (الشعار، الخطوط، الصور، ملف التعريف والألوان).</li>
 <li><bdi dir="ltr"><code>data/</code></bdi>: المادة التي يُعمل عليها (الفيديوهات الخام، الحلقات، المراجع، الموسيقى، المؤثرات).</li>
-<li><bdi dir="ltr"><code>output/</code></bdi>: نتائج المونتاج. يُنشأ تلقائيًا، وفيه يكتب WhyNot Cut كل نتائج المونتاج، أما ملف التسليم <bdi dir="ltr"><code>HANDOFF.md</code></bdi> فيُكتب في جذر فولدر العميل.</li>
+<li><bdi dir="ltr"><code>output/</code></bdi>: نتائج المونتاج. يُنشأ تلقائيًا، وفيه يكتب WhyNot Cut كل نتائج المونتاج، أما ملف التسليم <bdi dir="ltr"><code>HANDOFF.md</code></bdi> فيُكتب داخل فولدر العميل مباشرة، بجانب <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi>.</li>
 </ul>
 
 <aside class="warn">
-<p>الفولدران <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> ملك للعميل. WhyNot Cut لا يكتب فيهما ولا ينقل منهما ولا يحذف منهما أي ملف، وهذه الحماية مطبَّقة برمجيًا. أنت من يضيف الملفات إليهما.</p>
+<p>الفولدران <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> ملك للعميل. WhyNot Cut لا يكتب فيهما ولا ينقل منهما ولا يحذف منهما أي ملف، وهذه الحماية ثابتة داخل البرنامج نفسه، لا مجرد تعليمات. أنت من يضيف الملفات إليهما.</p>
 </aside>
 
 <h2 id="ch04-create">إنشاء فولدر لعميل</h2>
@@ -54,7 +54,7 @@
 </tbody>
 </table>
 
-<p><strong>الاسم المختصر للكليب.</strong> كل فيديو خام يأخذ اسمًا مختصرًا (clip id) تستخدمه في طلباتك. إذا كان اسم الملف لاتينيًا فالاسم المختصر هو اسم الملف نفسه بلا امتداد، مكتوبًا بحروف كبيرة، وبشرطة سفلية مكان المسافات والرموز: الملف <bdi dir="ltr"><code>C0001.MP4</code></bdi> اسمه المختصر <bdi dir="ltr"><code>C0001</code></bdi>، والملف <bdi dir="ltr"><code>Dr intro.mp4</code></bdi> اسمه المختصر <bdi dir="ltr"><code>DR_INTRO</code></bdi>. وإذا كان اسم الملف عربيًا يُعطى اسمًا مختصرًا مثل <bdi dir="ltr"><code>CLIP_1A2B3C</code></bdi>، وتُحفظ قائمة الأسماء المختصرة في <bdi dir="ltr"><code>output/discovery/clip-ids.json</code></bdi>، وهو ملف بيانات يقرؤه WhyNot Cut ولا تحتاج إلى فتحه: اسأل Claude عن الاسم المختصر لأي فيديو.</p>
+<p><strong>الاسم المختصر للكليب.</strong> كل فيديو خام يأخذ اسمًا مختصرًا (clip id) تستخدمه في طلباتك. إذا كان اسم الملف لاتينيًا فالاسم المختصر هو اسم الملف نفسه <span data-term-first="امتداد">بلا امتداد (والامتداد ما بعد النقطة في اسم الملف، مثل <bdi dir="ltr"><code>.mp4</code></bdi> أو <bdi dir="ltr"><code>.md</code></bdi>)</span>، مكتوبًا بحروف كبيرة، وبشرطة سفلية مكان المسافات والرموز: الملف <bdi dir="ltr"><code>C0001.MP4</code></bdi> اسمه المختصر <bdi dir="ltr"><code>C0001</code></bdi>، والملف <bdi dir="ltr"><code>Dr intro.mp4</code></bdi> اسمه المختصر <bdi dir="ltr"><code>DR_INTRO</code></bdi>. وإذا كان اسم الملف عربيًا يُعطى اسمًا مختصرًا مثل <bdi dir="ltr"><code>CLIP_1A2B3C</code></bdi>، وتُحفظ قائمة الأسماء المختصرة في <bdi dir="ltr"><code>output/discovery/clip-ids.json</code></bdi>، وهو ملف بيانات يقرؤه WhyNot Cut ولا تحتاج إلى فتحه: اسأل Claude عن الاسم المختصر لأي فيديو.</p>
 
 <p><strong>ماذا لو نقصت ملفات الهوية؟</strong> يمكن البدء بدون الشعار أو الخطوط أو الألوان، لكن سيقول لك Claude ما الذي سيبدو عامًّا بدونها، ولن يخترع بديلًا من عنده.</p>
 
@@ -133,7 +133,7 @@ avoid: [topics not to cut]
 
 <table>
 <thead>
-<tr><th>المسار (للكليب <bdi dir="ltr">C0001</bdi>)</th><th>ما فيه</th></tr>
+<tr><th>المكان (للكليب <bdi dir="ltr">C0001</bdi>)</th><th>ما فيه</th></tr>
 </thead>
 <tbody>
 <tr><td><bdi dir="ltr"><code>output/projects/C0001/01_analysis/edit-plan.md</code></bdi></td><td>خطة المونتاج التي توافق عليها.</td></tr>

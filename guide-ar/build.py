@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -521,6 +522,145 @@ def lint(html: str, release: bool = False, root: Path | None = None) -> list[str
     return problems
 
 
+# ---------------------------------------------------------------- developer words (Addendum G2)
+# "No developer words anywhere a user sees." A word here fails the build in visible prose unless STYLE.md's
+# «explained once» table lists it and its first use carries data-term-first. «hook» is NOT here: the guide uses it
+# only as the editing term «البداية الجاذبة (hook)» (round 3 ruling). Matched as whole words; all-caps words
+# case-sensitively, the others in any case; Arabic forms with any prefix (و ف ب ل ك ال) and suffix, diacritics ignored.
+DEV_WORDS: tuple[str, ...] = (
+    "token", "daemon", "JSON", "CLI", "API", "venv", "Python", "MCP", "PATH", "XML", "CEP",
+    "repo", "commit", "cache", "flag", "session", "localhost", "stdout", "traceback",
+    "توكن", "بايثون", "سكريبت", "سكربت", "سطر أوامر", "سطر الأوامر", "خطاف", "جلسة", "كاش",
+    "جذر", "برمجيًا", "برمجي", "للمطوّر", "المطوّر", "مكتبات", "مسار", "امتداد", "كود", "أكواد",
+)
+# visible phrases that contain a listed word but are plain editor vocabulary
+DEV_ALLOWED = ("التايم كود", "تايم كود", "بأكواد HEX", "أكواد ألوان HEX")  # timecode; designers' colour codes
+STYLE_MD = ROOT / "STYLE.md"
+_ARABIC_LETTER = "ء-ي"
+_ARABIC_MARKS = re.compile("[ً-ْٰـ]")  # harakat, superscript alef, tatweel
+
+
+def _word_regex(word: str) -> re.Pattern:
+    word = _ARABIC_MARKS.sub("", word)
+    if re.search(f"[{_ARABIC_LETTER}]", word):
+        return re.compile(rf"(?<![{_ARABIC_LETTER}])[وفبلكا]{{0,4}}(?P<w>{re.escape(word)})")
+    flags = 0 if word.isupper() else re.I
+    return re.compile(rf"(?<![A-Za-z])(?P<w>{re.escape(word)})(?:e?s)?(?![A-Za-z])", flags)
+
+
+_DEV_RES = [(w, _word_regex(w)) for w in DEV_WORDS]
+_MENU_PATH_BDI = re.compile(r"<bdi\b[^>]*>[^<]*›[^<]*</bdi>")
+
+
+class _ProseParser(HTMLParser):
+    """Visible text runs, each with the data-term-first keys of its open elements.
+
+    Dropped: <code>, .cmd blocks, <style>/<script>, comments (team notes), and an LTR <bdi> holding only a menu
+    path («Window › UXP Plugins»), which is a UI label the reader must match. Kept: headings, table cells,
+    captions, plain <bdi> text («engine not installed») and the one-line .todo sentence."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[tuple[str, bool, frozenset]] = [("#root", False, frozenset())]
+        self.runs: list[tuple[str, frozenset]] = []
+
+    def handle_starttag(self, tag, attrs):
+        a = {k.lower(): (v or "") for k, v in attrs}
+        _, skip, keys = self.stack[-1]
+        if tag in ("code", "style", "script") or "cmd" in a.get("class", "").split():
+            skip = True
+        if a.get("data-term-first", "").strip():
+            keys = keys | {a["data-term-first"].strip()}
+        if tag not in _VOID:
+            self.stack.append((tag, skip, keys))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, 0, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                break
+
+    def handle_data(self, data):
+        _, skip, keys = self.stack[-1]
+        if not skip:
+            self.runs.append((data, keys))
+
+
+def _prose_runs(html: str) -> list[tuple[str, frozenset]]:
+    p = _ProseParser()
+    p.feed(_MENU_PATH_BDI.sub("", html))
+    p.close()
+    return [(_ARABIC_MARKS.sub("", text.replace("\xa0", " ")), keys) for text, keys in p.runs]
+
+
+def visible_prose(html: str) -> str:
+    """The text a reader sees, without code, command boxes, comments and menu-path labels (whitespace collapsed)."""
+    return re.sub(r"\s+", " ", "".join(text for text, _ in _prose_runs(html))).strip()
+
+
+def explained_once_terms(style: Path = STYLE_MD) -> dict[str, tuple[str, ...]]:
+    """STYLE.md «Explained once» table: term key (first backticked form of the first cell) -> every backticked form."""
+    text = Path(style).read_text(encoding="utf-8")
+    m = re.search(r"^## Explained once.*?(?=^## |\Z)", text, flags=re.S | re.M)
+    terms: dict[str, tuple[str, ...]] = {}
+    for line in (m.group(0).splitlines() if m else []):
+        cells = line.strip().strip("|").split("|")
+        forms = tuple(re.findall(r"`([^`]+)`", cells[0])) if line.lstrip().startswith("|") else ()
+        if forms:
+            terms[forms[0]] = forms
+    return terms
+
+
+def chapter_sources(root: Path = ROOT) -> str:
+    """Every chapter source in reading order (the TOC and chapter maps would repeat headings ahead of their text)."""
+    return "\n\n".join(p.read_text(encoding="utf-8") for p in sorted((Path(root) / "chapters").glob("*.html")))
+
+
+def dev_word_problems(html: str, terms: dict[str, tuple[str, ...]] | None = None) -> list[str]:
+    """Developer words in visible prose, and explained-once terms whose first use lacks data-term-first."""
+    terms = explained_once_terms() if terms is None else terms
+    runs = _prose_runs(html)
+    text, starts, pos = "", [], 0
+    for chunk, _ in runs:
+        starts.append(pos)
+        text += chunk
+        pos += len(chunk)
+    for phrase in DEV_ALLOWED:
+        text = text.replace(phrase, " " * len(phrase))
+
+    def keys_at(i: int) -> frozenset:
+        lo, hi = 0, len(starts) - 1
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if starts[mid] <= i:
+                lo = mid
+            else:
+                hi = mid - 1
+        return runs[lo][1] if runs else frozenset()
+
+    def around(i: int, j: int) -> str:
+        return re.sub(r"\s+", " ", text[max(0, i - 30):j + 30]).strip()
+
+    problems, covered = [], []
+    for key, forms in terms.items():
+        hits = sorted((m.start("w"), m.end()) for f in forms for m in _word_regex(f).finditer(text))
+        covered.extend(hits)
+        if hits and key not in keys_at(hits[0][0]):
+            problems.append(f"«{key}» is in STYLE.md's explained-once table: its first use needs "
+                            f'data-term-first="{key}" and the explanation: «{around(*hits[0])}»')
+    known = set(terms)
+    for _, keys in runs:
+        for key in keys - known:
+            problems.append(f'data-term-first="{key}" names a term that is not in STYLE.md\'s explained-once table')
+            known.add(key)
+    for word, rx in _DEV_RES:
+        for m in rx.finditer(text):
+            if not any(s <= m.start("w") < e for s, e in covered):
+                problems.append(f"developer word «{word}» in visible text (replace it, or add it to STYLE.md's "
+                                f"explained-once table): «{around(m.start(), m.end())}»")
+    return problems
+
+
 # ---------------------------------------------------------------- TOC numbers
 _PG = re.compile(r'(<span class="pg" data-for="([^"]+)">)([^<]*)(</span>)')          # TOC page
 _MAP_PG = re.compile(r'(<span class="map-pg" data-for="([^"]+)">)([^<]*)(</span>)')  # chapter maps
@@ -623,6 +763,7 @@ def print_pdf(html_path: Path, pdf_path: Path, browser: Path) -> None:
     # own process group, so a hung browser and all its child processes can be killed
     group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
              else {"start_new_session": True})
+    started = time.monotonic()
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                 encoding="utf-8", errors="replace", **group)
@@ -634,10 +775,39 @@ def print_pdf(html_path: Path, pdf_path: Path, browser: Path) -> None:
                 f"the browser did not finish printing within {PRINT_TIMEOUT} s and was stopped "
                 f"({browser}). Close other Edge/Chrome windows started for printing and run the build "
                 "again, or point WNC_BROWSER to another Edge/Chrome.") from None
+        # Edge 155+ (new headless): the launcher exits 0 at once and a detached browser writes the PDF later
+        if proc.returncode == 0:
+            wait_for_file(pdf_path, max(1.0, PRINT_TIMEOUT - (time.monotonic() - started)))
     finally:
-        shutil.rmtree(profile, ignore_errors=True)
+        _remove_profile(profile)
     if not pdf_path.exists() or pdf_path.stat().st_size == 0:
         raise SystemExit(f"browser did not write {pdf_path} (exit {proc.returncode}):\n{(stderr or '')[-2000:]}")
+
+
+def wait_for_file(path: Path, timeout: float, settle: float = 2.0, poll: float = 0.5) -> bool:
+    """True once `path` exists, is not empty and its size has not changed for `settle` seconds; False after
+    `timeout` seconds. A detached browser writes the PDF after its launcher has exited."""
+    path, deadline = Path(path), time.monotonic() + timeout
+    last, since = -1, None
+    while time.monotonic() < deadline:
+        size = path.stat().st_size if path.exists() else -1
+        if size > 0 and size == last:
+            since = since or time.monotonic()
+            if time.monotonic() - since >= settle:
+                return True
+        else:
+            last, since = size, None
+        time.sleep(poll)
+    return False
+
+
+def _remove_profile(profile: str, tries: int = 20) -> None:
+    """Delete the throwaway browser profile; a detached browser may hold it for a few seconds after printing."""
+    for _ in range(tries):
+        shutil.rmtree(profile, ignore_errors=True)
+        if not os.path.exists(profile):
+            return
+        time.sleep(0.5)
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
@@ -857,7 +1027,7 @@ def main(argv: list[str] | None = None) -> int:
         (build_dir / stale).unlink(missing_ok=True)
 
     html = assemble(ROOT)
-    problems = lint(html, release=release)
+    problems = lint(html, release=release) + dev_word_problems(chapter_sources(ROOT))
     if problems:
         print(f"LINT{' (release)' if release else ''}: {len(problems)} problem(s):")
         for p in problems:
