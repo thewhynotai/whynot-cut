@@ -370,3 +370,36 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
 10. **Links allowlist.** Which hosts are allowed for `support_url` and `claude_howto_url`
     (proposed: `thewhynot.ai`, `claude.ai`, `docs.anthropic.com`)?
 11. **Tool results (`tools_last`).** These ride on the Phase 6B journals; confirm the shape now so 6B writes it.
+
+## 7. Executor answers (2026-10-14): binding, and they replace §6 where they differ
+1. **`claude`**
+   - Source: `claude auth status`, run with stdin closed, a 3 s timeout and no shell. It is read-only and never opens a browser.
+   - Parse `loggedIn`. A non-zero exit, a timeout or a parse failure means `unknown`, never `signed_out`.
+   - Cached for 60 s.
+   - The signed-out exit code is confirmed on this PC with a sandboxed `CLAUDE_CONFIG_DIR`, never by signing the owner out.
+2. **Poster**
+   - The engine writes `<item>/poster.jpg` at the preview step (stage 8), from the frame 0.5 s into the first kept segment.
+   - Before a preview exists, intake writes a fallback frame at 10 % of the duration.
+   - Episode reels get theirs at reels-select, at each reel's start + 0.5 s.
+   - Owner: executor, Phase 6 engine.
+3. **Time saved**
+   - The formula in §2 is the default, labelled «تقدير» / "estimate".
+   - The editor can change the rate in Settings (preference `time_saved_rate`). It is not an owner number.
+4. **Week:** starts on Sunday.
+5. **Plan versions:** they live with `reel plan` / `reel motion-plan`. `plan.diff` is always against the last APPROVED plan.
+6. **Flags:** `reel review-flags` (Phase 4) writes `<item>/review-flags.json`, each line keyed by plan event id. Until then `flag` is absent.
+7. **Edit map:** `reel plan` writes `edit-map.json`, and `reel motion-plan` writes the motion equivalent (Phase 6 engine).
+8. **Weekly log**
+   - `reel handoff` appends one line per item to `<home>/logs/time-saved.jsonl`, keyed by item id.
+   - A rebuild replaces the item's line: dedupe on read, the last line wins.
+   - Lines are kept for 1 year.
+9. **Add-on version:** read from `~/.whynot-cut/plugin-root.json` (written by T3.4). Reading it is allowed.
+10. **Link allowlist:** https only, on these hosts and nothing else (no other thewhynot.ai subdomains):
+    - `thewhynot.ai`
+    - `dl.thewhynot.ai`
+    - `claude.ai`
+    - `support.claude.com`
+    - `code.claude.com`
+11. **`tools_last[]`:** the shape in §2.4 is FROZEN now. Phase 6B writes it.
+
+The panel mocks against this contract until the G-ENG-DATA engine subtasks land (tracked in PROGRESS by the executor).
