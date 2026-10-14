@@ -4,9 +4,9 @@
 # From the extracted WhyNot Cut zip (Terminal, in the extracted folder):
 #     bash whynot-cut/installer/install.sh
 # One line (once the files are hosted, H3):
-#     curl -fsSL https://thewhynot.ai/install.sh | bash
+#     curl -fsSL https://dl.thewhynot.ai/install.sh | bash
 # With options, one line:
-#     curl -fsSL https://thewhynot.ai/install.sh | bash -s -- --source <zip or https url> --source-sha256 <hex>
+#     curl -fsSL https://dl.thewhynot.ai/install.sh | bash -s -- --source <zip or https url> --source-sha256 <hex>
 #
 # Where the plugin comes from: this script's folder's parent when it holds setup/components.json (the zip layout
 # whynot-cut/installer/install.sh). Otherwise (curl | bash: the script arrives on stdin and $0 is "bash") the release

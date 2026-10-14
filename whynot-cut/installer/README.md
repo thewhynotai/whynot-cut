@@ -64,10 +64,10 @@ macOS's own bash 3.2 the first second of the countdown is spent clearing them. A
 ### One line (future: needs hosting, H3)
 
 ```powershell
-irm https://thewhynot.ai/install.ps1 | iex
+irm https://dl.thewhynot.ai/install.ps1 | iex
 ```
 ```bash
-curl -fsSL https://thewhynot.ai/install.sh | bash
+curl -fsSL https://dl.thewhynot.ai/install.sh | bash
 ```
 
 In this mode the script has no folder of its own. It fetches the release named by the release index (`release.index_url`,
@@ -79,10 +79,10 @@ exits with code 2:
 You can point a one-liner at a specific release zip, either a file or an https URL, together with its sha256:
 
 ```powershell
-& ([scriptblock]::Create((irm https://thewhynot.ai/install.ps1))) -Source https://.../WhyNotCut-3.0.0.zip -SourceSha256 <64 hex>
+& ([scriptblock]::Create((irm https://dl.thewhynot.ai/install.ps1))) -Source https://.../WhyNotCut-3.0.0.zip -SourceSha256 <64 hex>
 ```
 ```bash
-curl -fsSL https://thewhynot.ai/install.sh | bash -s -- --source https://.../WhyNotCut-3.0.0.zip --source-sha256 <64 hex>
+curl -fsSL https://dl.thewhynot.ai/install.sh | bash -s -- --source https://.../WhyNotCut-3.0.0.zip --source-sha256 <64 hex>
 ```
 
 The installer copies or downloads the zip into `downloads/release-<first 8 of the sha256>/` of the engine home (normally

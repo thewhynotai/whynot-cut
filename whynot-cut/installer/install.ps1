@@ -3,9 +3,9 @@
 # From the extracted WhyNot Cut zip (PowerShell, in the extracted folder):
 #     powershell -ExecutionPolicy Bypass -File whynot-cut\installer\install.ps1
 # One line (once the files are hosted, H3):
-#     irm https://thewhynot.ai/install.ps1 | iex
+#     irm https://dl.thewhynot.ai/install.ps1 | iex
 # With options, one line:
-#     & ([scriptblock]::Create((irm https://thewhynot.ai/install.ps1))) -Source <zip or https url> -SourceSha256 <hex>
+#     & ([scriptblock]::Create((irm https://dl.thewhynot.ai/install.ps1))) -Source <zip or https url> -SourceSha256 <hex>
 #
 # Where the plugin comes from: this script's folder's parent when it holds setup\components.json (the zip layout
 # whynot-cut\installer\install.ps1). Otherwise (irm | iex, or this file copied alone) the release zip given by -Source

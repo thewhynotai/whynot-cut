@@ -6218,6 +6218,15 @@ class TestStaticChecks(unittest.TestCase):
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
 
+    def test_the_one_liners_use_the_dl_host(self):
+        # Addendum F: the scripts are served from dl.thewhynot.ai, never from the root site
+        files = PS1_FILES + SH_FILES + [INSTALLER / "README.md", SK / "CHANGELOG.md"]
+        for f in files:
+            text = f.read_text(encoding="utf-8")
+            self.assertNotIn("https://thewhynot.ai/install", text, f)
+        for f in (INSTALLER / "install.ps1", INSTALLER / "install.sh", INSTALLER / "README.md"):
+            self.assertIn("https://dl.thewhynot.ai/install.", f.read_text(encoding="utf-8"), f)
+
     def test_the_file_lists(self):
         self.assertEqual([p.name for p in PS1_FILES], ["bootstrap.ps1", "install.ps1"])
         self.assertEqual([p.name for p in SH_FILES], ["bootstrap.sh", "install.sh"])
