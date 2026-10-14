@@ -39,16 +39,37 @@ def _iso(t: float) -> str:
     return dt.datetime.fromtimestamp(t, dt.timezone.utc).isoformat(timespec="milliseconds")   # what the engine writes
 
 
+# Every wait in this file polls a condition up to WAIT_S, then fails saying what it waited for. A passing run never
+# comes near it: it only bounds a broken or starved run (a loaded machine stretches every step, never the outcome).
+WAIT_S = 60.0
+
+
+def wait_until(cond, what: str, timeout: float = WAIT_S, poll: float = 0.05, proc=None, detail=None) -> None:
+    """Poll `cond()` until it holds; AssertionError after `timeout` s (or as soon as `proc` exited) naming `what`."""
+    deadline = time.monotonic() + timeout
+    while not cond():
+        if proc is not None and proc.poll() is not None:
+            raise AssertionError(f"{what}: the node child exited (code {proc.returncode}) before it happened"
+                                 + (f"\n{detail()}" if detail else ""))
+        if time.monotonic() > deadline:
+            raise AssertionError(f"{what}: not within {timeout:g}s" + (f"\n{detail()}" if detail else ""))
+        time.sleep(poll)
+
+
 class FakeBridge:
     """Plays the bridge daemon on `queue`: heartbeat, claim by rename, an expired job answered {ok:false,
     error:"expired"} without running, `<id>.claimed`, a result written atomically. Family-aware (3.0 T6.3 Task 4):
     "bundle" beats {..., bundle, version, protocol 4, build, libs (default: this engine's)}; "legacy" beats the 3.1.1
     shape {at, busy, version 3.1.1, host, role, current}. `protocol` / `libs` / `version` override the beat.
-    `delays[action]` = seconds the host 'works'; `mute` = never claims; `ran` = (job id, action, start, end)."""
+    `delays[action]` = seconds the host 'works'; `until[action]` = a condition the host works until (WAIT_S at most):
+    a test states what must have happened meanwhile instead of guessing a duration; `mute` = never claims;
+    `ran` = (job id, action, start, end); `first_seen[id]` = when a job file was first seen (also while the host works);
+    `loops` = finished polling rounds."""
 
     def __init__(self, queue: Path, host="PPRO", version=None, mute=False, delays=None, beat=True, family="bundle",
-                 protocol=..., libs=...):
+                 protocol=..., libs=..., until=None):
         self.q, self.host, self.mute, self.delays, self.do_beat = Path(queue), host, mute, dict(delays or {}), beat
+        self.until = dict(until or {})
         self.family = family
         legacy = family == "legacy"
         self.version = version or (cep_bundle.LEGACY_VERSION if legacy else ppro_bridge.BRIDGE_VERSION)
@@ -56,6 +77,7 @@ class FakeBridge:
         self.libs = (None if legacy else cep_bundle.expected_libs()) if libs is ... else libs
         self.busy, self.current = False, None
         self.ran, self.claimed, self.first_seen = [], [], {}
+        self.loops = 0
         self.stop = threading.Event()
         self.t = threading.Thread(target=self.loop, daemon=True)
 
@@ -68,7 +90,7 @@ class FakeBridge:
 
     def __exit__(self, *a):
         self.stop.set()
-        self.t.join(5)
+        self.t.join(WAIT_S)
 
     def beat(self):
         tmp = self.q / "bridge.heartbeat.fake.tmp"
@@ -82,15 +104,20 @@ class FakeBridge:
         except PermissionError:          # Windows: the reader has the file open this instant; next beat wins
             pass
 
+    def see(self):
+        jobs = sorted(self.q.glob("*.job.json"))
+        for jf in jobs:
+            self.first_seen.setdefault(jf.name[:-len(".job.json")], time.time())
+        return jobs
+
     def loop(self):
         while not self.stop.is_set():
             if self.do_beat:
                 self.beat()
-            jobs = sorted(self.q.glob("*.job.json"))
-            for jf in jobs:
-                self.first_seen.setdefault(jf.name[:-len(".job.json")], time.time())
+            jobs = self.see()
             if jobs and not self.mute:
                 self.run(jobs[0])
+            self.loops += 1
             time.sleep(0.03)
 
     def run(self, jf: Path):
@@ -110,8 +137,11 @@ class FakeBridge:
         self.busy, self.current = True, job["id"]
         start = time.time()
         end = start + self.delays.get(data["action"], 0)
-        while time.time() < end and not self.stop.is_set():
+        until = self.until.get(data["action"], lambda: True)
+        bound = time.monotonic() + WAIT_S
+        while (time.time() < end or not until()) and not self.stop.is_set() and time.monotonic() < bound:
             self.beat()
+            self.see()
             time.sleep(0.05)
         self.ran.append((job["id"], data["action"], start, time.time()))
         self.finish(job, run, {"ok": True, "result": json.dumps({"ok": True, "action": data["action"],
@@ -153,22 +183,33 @@ class TestExpiryCancelCleanup(_Home):
     def test_the_job_carries_expires_at_and_resolved_paths(self):
         with FakeBridge(self.q) as fb:
             t0 = time.time()
-            r = cep_queue.submit(self.q, self.script, "ping", {"echo": 1}, timeout=10, claim_timeout=30)
+            r = cep_queue.submit(self.q, self.script, "ping", {"echo": 1}, timeout=WAIT_S, claim_timeout=30)
+            t1 = time.time()
         self.assertTrue(r["ok"], r)
         job = fb.claimed[0]
         exp = dt.datetime.fromisoformat(job["expires_at"]).timestamp()
-        self.assertTrue(t0 + 29 <= exp <= t0 + 32, (t0, job["expires_at"]))
+        # the claim timeout from the moment of submitting (somewhere in [t0, t1]; the ISO text keeps milliseconds)
+        self.assertTrue(t0 + 30 - 0.002 <= exp <= t1 + 30, (t0, t1, job["expires_at"]))
         self.assertRegex(job["expires_at"], r"T\d\d:\d\d:\d\d\.\d{3}\+00:00$")    # milliseconds, not whole seconds
         self.assertEqual(job["script"], str(self.script.resolve()))
         self.assertEqual(job["data_file"], str(Path(job["data_file"]).resolve()))
 
     def test_an_unclaimed_job_is_cancelled_on_timeout_and_never_runs(self):
+        main, naps, real_sleep = threading.current_thread(), [], time.sleep
+
+        def sleep(s):                               # the engine's poll naps (this thread only; the fake has its own)
+            if threading.current_thread() is main:
+                naps.append(s)
+            real_sleep(s)
         with FakeBridge(self.q, mute=True) as fb:
-            t0 = time.time()
-            r = cep_queue.submit(self.q, self.script, "build_project", timeout=1)
-            self.assertLess(time.time() - t0, 4)
+            with mock.patch("time.sleep", sleep):
+                r = cep_queue.submit(self.q, self.script, "build_project", timeout=1, poll_s=0.5)
+            # it gave up at its 1 s claim timeout, not later: the naps before the last look at the clock add up to
+            # less than the timeout plus one poll (counted, not timed: a slow machine only means fewer naps)
+            self.assertLess(sum(naps), 1 + 0.5 + 0.25, naps)
             fb.mute = False                         # Premiere frees up later: the job must not run then
-            time.sleep(0.4)
+            seen = fb.loops
+            wait_until(lambda: fb.loops >= seen + 5, "the fake bridge polling five more rounds after it freed up")
         self.assertFalse(r["ok"])
         self.assertTrue(r["error"].startswith("timeout"), r)
         self.assertTrue(r.get("cancelled"), r)
@@ -185,29 +226,48 @@ class TestExpiryCancelCleanup(_Home):
             "id": "old", "action": "build_project", "script": str(self.script), "data_file": str(data),
             "expires_at": _iso(time.time() - 3600)}), encoding="utf-8")
         with FakeBridge(self.q) as fb:
-            deadline = time.time() + 5
-            while not (self.q / "old.result.json").exists() and time.time() < deadline:
-                time.sleep(0.05)
+            wait_until((self.q / "old.result.json").exists, "the fake bridge answering the expired job")
         self.assertEqual(fb.ran, [])
         self.assertEqual(json.loads((self.q / "old.result.json").read_text(encoding="utf-8"))["error"], "expired")
 
     def test_the_engine_reports_an_expired_answer_as_a_timeout(self):
+        def expired_job_queued():                   # Premiere frees up only once the queued job is past its expiry
+            for jf in self.q.glob("*.job.json"):
+                try:
+                    exp = dt.datetime.fromisoformat(json.loads(jf.read_text(encoding="utf-8"))["expires_at"])
+                except (OSError, ValueError, KeyError):
+                    continue
+                if time.time() > exp.timestamp():
+                    return True
+            return False
+
+        def unmute():
+            try:
+                wait_until(expired_job_queued, "the queued job expiring")
+            finally:
+                fb.mute = False
         with FakeBridge(self.q, mute=True) as fb:
             with mock.patch.object(cep_queue, "_cancel", return_value=False):     # the claim races the cancel
-                threading.Timer(0.6, lambda: setattr(fb, "mute", False)).start()
-                r = cep_queue.submit(self.q, self.script, "ping", timeout=5, claim_timeout=0.2)
+                t = threading.Thread(target=unmute, daemon=True)
+                t.start()
+                r = cep_queue.submit(self.q, self.script, "ping", timeout=WAIT_S, claim_timeout=0.2)
+                t.join(WAIT_S)
         self.assertFalse(r["ok"])
         self.assertTrue(r.get("expired") and r["error"].startswith("timeout"), r)
         self.assertEqual(fb.ran, [])
 
     def test_the_result_timeout_starts_at_the_claim(self):
         """Queue wait behind another job does not count against the caller's timeout (IM-5)."""
-        with FakeBridge(self.q, delays={"slow": 1.5}) as fb:
-            other = threading.Thread(target=cep_queue.submit, args=(self.q, self.script, "slow"), kwargs={"timeout": 10})
+        def ping_waited_past_its_timeout():         # the host finishes "slow" only after "ping" queued > 1.2 s
+            return any(jid != fb.current and time.time() - t > 1.2 for jid, t in fb.first_seen.items())
+        with FakeBridge(self.q, until={"slow": ping_waited_past_its_timeout}) as fb:
+            other = threading.Thread(target=contextvars.copy_context().run,
+                                     args=(cep_queue.submit, self.q, self.script, "slow"), kwargs={"timeout": WAIT_S})
             other.start()
-            time.sleep(0.2)
-            r = cep_queue.submit(self.q, self.script, "ping", {"echo": 2}, timeout=1.0, claim_timeout=10)
-            other.join()
+            wait_until(lambda: fb.current is not None, "the bridge claiming the slow job")     # ping queues behind it
+            r = cep_queue.submit(self.q, self.script, "ping", {"echo": 2}, timeout=1.0, claim_timeout=WAIT_S)
+            other.join(WAIT_S)
+            self.assertFalse(other.is_alive(), "the slow job's submit never returned")
         self.assertTrue(r["ok"], r)
         self.assertGreater(r["elapsed_s"], 1.0)                       # it waited longer than its own timeout
         self.assertEqual([a for _, a, *_ in fb.ran], ["slow", "ping"])
@@ -318,7 +378,7 @@ class TestExpiryCancelCleanup(_Home):
 
     def test_data_result_and_claim_files_are_removed_after_reading(self):
         with FakeBridge(self.q):
-            r = cep_queue.submit(self.q, self.script, "ping", {"echo": "عربي"}, timeout=10)
+            r = cep_queue.submit(self.q, self.script, "ping", {"echo": "عربي"}, timeout=WAIT_S)
         self.assertTrue(r["ok"], r)
         self.assertEqual(r["response"]["result"]["echo"], "عربي")
         self.assertEqual(self.leftovers(), [])
@@ -351,7 +411,7 @@ class TestExpiryCancelCleanup(_Home):
         stale.write_text("{}", encoding="utf-8")
         os.utime(stale, (time.time() - 2 * 86400,) * 2)
         with FakeBridge(self.q):
-            self.assertTrue(cep_queue.submit(self.q, self.script, "ping", timeout=10)["ok"])
+            self.assertTrue(cep_queue.submit(self.q, self.script, "ping", timeout=WAIT_S)["ok"])
         self.assertFalse(stale.exists())
 
     def test_status_tolerates_a_heartbeat_without_at(self):
@@ -482,7 +542,7 @@ class TestVersionHandshake(_Home):
 
     def test_the_matching_bridge_runs_the_job(self):
         with FakeBridge(self.q):
-            r = ppro_bridge.submit("ping", timeout=10)
+            r = ppro_bridge.submit("ping", timeout=WAIT_S)
         self.assertTrue(r["ok"], r)
 
     def test_after_effects_checks_the_same_bundle_version(self):
@@ -525,7 +585,7 @@ class TestJobModes(_Home):
     def test_the_bundle_with_this_engines_libraries_runs_its_own_lib(self):
         before = self.script.read_text(encoding="utf-8")
         with FakeBridge(self.q) as fb:
-            r = ppro_bridge.submit("ping", {"echo": "x"}, timeout=10)
+            r = ppro_bridge.submit("ping", {"echo": "x"}, timeout=WAIT_S)
         self.assertTrue(r["ok"], r)
         (job,) = fb.claimed
         self.assertEqual(job["lib"], "wnc_ppro_lib.jsx")
@@ -534,7 +594,7 @@ class TestJobModes(_Home):
 
     def test_the_legacy_311_gets_the_synced_library_by_path(self):
         with FakeBridge(self.q, family="legacy") as fb:
-            r = ppro_bridge.submit("ping", timeout=10)
+            r = ppro_bridge.submit("ping", timeout=WAIT_S)
         self.assertTrue(r["ok"], r)
         (job,) = fb.claimed
         self.assertNotIn("lib", job)
@@ -554,7 +614,7 @@ class TestJobModes(_Home):
 
     def test_the_dev_loop_sends_the_synced_library_for_another_build(self):
         with mock.patch.dict(os.environ, {"WHYNOT_BRIDGE_DEV": "1"}), FakeBridge(self.q, libs={}) as fb:
-            r = ppro_bridge.submit("ping", timeout=10)
+            r = ppro_bridge.submit("ping", timeout=WAIT_S)
         self.assertTrue(r["ok"], r)
         (job,) = fb.claimed
         self.assertEqual(job["script"], str(ppro_bridge.lib_path().resolve()))
@@ -575,12 +635,12 @@ class TestJobModes(_Home):
         from lib import ae_bridge
         q = ae_bridge.queue_dir()
         with FakeBridge(q, host="AEFT") as fb:
-            r = ae_bridge.submit("ping", timeout=10)
+            r = ae_bridge.submit("ping", timeout=WAIT_S)
         self.assertTrue(r["ok"], r)
         self.assertEqual(fb.claimed[0]["lib"], "wnc_ae_bridge.jsx")
         self.assertFalse(ae_bridge.scripts_dir().exists())                             # nothing synced
         with FakeBridge(q, host="AEFT", family="legacy") as fb:
-            r = ae_bridge.submit("ping", timeout=10)
+            r = ae_bridge.submit("ping", timeout=WAIT_S)
         self.assertTrue(r["ok"], r)
         self.assertEqual(fb.claimed[0]["script"], str(ae_bridge.entry_path().resolve()))
         self.assertEqual(sorted(p.name for p in ae_bridge.scripts_dir().iterdir()), sorted(ae_bridge.LIBS))
@@ -636,17 +696,31 @@ class TestBuildLock(_Home):
         out = {}
 
         def build(name):
-            with ppro_bridge.build_lock(f"ppro-build {name}", wait_s=20, poll_s=0.05):
-                out[name] = ppro_bridge.submit("build_project", {"echo": name}, timeout=5)
+            with ppro_bridge.build_lock(f"ppro-build {name}", wait_s=WAIT_S, poll_s=0.05):
+                out[name] = ppro_bridge.submit("build_project", {"echo": name}, timeout=WAIT_S)
 
-        with FakeBridge(self.q, delays={"build_project": 0.8}) as fb:
+        # Windows refuses to delete a file that is open this instant (PermissionError 13, measured), and the release
+        # (cep_queue.build_lock: read_lock, then _unlink, which swallows the error) can meet the other waiter's
+        # read_lock: the lock then stays, held by this live process, never stale, and B waits it out. That is the
+        # engine's (reported, not this test's subject): here a reader and the release never overlap.
+        gate, real_read, real_unlink = threading.Lock(), cep_queue.read_lock, cep_queue._unlink
+
+        def read_lock(q):
+            with gate:
+                return real_read(q)
+
+        def unlink(*paths):
+            with gate:
+                return real_unlink(*paths)
+        with mock.patch.object(cep_queue, "read_lock", read_lock), mock.patch.object(cep_queue, "_unlink", unlink), \
+                FakeBridge(self.q, delays={"build_project": 0.8}) as fb:
             # each session's thread runs in a copy of this test's context (the bound engine home)
             ts = [threading.Thread(target=contextvars.copy_context().run, args=(build, n)) for n in ("A", "B")]
             for t in ts:
                 t.start()
-                time.sleep(0.05)
             for t in ts:
-                t.join(30)
+                t.join(2 * WAIT_S)
+            self.assertFalse(any(t.is_alive() for t in ts), "a build thread never finished")
         self.assertTrue(out["A"]["ok"] and out["B"]["ok"], out)
         (j1, _, s1, e1), (j2, _, s2, e2) = fb.ran
         self.assertGreaterEqual(fb.first_seen[j2], e1 - 0.05)       # queued only after the first build ended
@@ -755,19 +829,32 @@ class TestBuildLock(_Home):
         prj = p.p(f"07_premiere/project/{p.video_id}_{common.project_prefix()}_EDIT.prproj")
         prj.parent.mkdir(parents=True, exist_ok=True)
         prj.write_text("BUILT", encoding="utf-8")
-        edited = threading.Event()
+        edited, waiting, released = threading.Event(), threading.Event(), threading.Event()
         out = {}
+        real_read_lock = cep_queue.read_lock
+
+        def read_lock(q):
+            rec = real_read_lock(q)
+            if threading.current_thread() is t and not waiting.is_set():
+                waiting.set()                         # the build thread read the held lock: it waits on it now
+                released.wait(WAIT_S)                 # (and stays off the file until the holder has let go)
+            return rec
+        t = threading.Thread(target=contextvars.copy_context().run,
+                             args=(lambda: out.update(r=ppro_build.build(p, overwrite=True, lock_wait_s=WAIT_S)),))
         with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), \
                 mock.patch("lib.ppro_bridge.submit") as sub, \
+                mock.patch.object(cep_queue, "read_lock", side_effect=read_lock), \
                 mock.patch("lib.verify.editor_modified",
                            side_effect=lambda _p: {"project": str(prj)} if edited.is_set() else None):
-            with ppro_bridge.build_lock("ppro-build other"):
-                t = threading.Thread(target=contextvars.copy_context().run,
-                                     args=(lambda: out.update(r=ppro_build.build(p, overwrite=True, lock_wait_s=20)),))
-                t.start()
-                time.sleep(0.5)                       # the build is waiting on the lock now
-                edited.set()                          # ... and the editor saves their work in Premiere
-            t.join(30)
+            try:
+                with ppro_bridge.build_lock("ppro-build other"):
+                    t.start()
+                    self.assertTrue(waiting.wait(WAIT_S), "the build never waited on the lock")
+                    edited.set()                      # ... and the editor saves their work in Premiere meanwhile
+            finally:
+                released.set()
+            t.join(WAIT_S)
+            self.assertFalse(t.is_alive(), "the build never finished")
         self.assertEqual(out["r"]["status"], "EDITOR_CHANGES_PRESENT", out)
         from lib import errors
         self.assertEqual(errors.exit_code(out["r"]), 2)                    # a stop for a decision, never read as success
@@ -1029,10 +1116,31 @@ class TestWaitForMedia(_Home):
 
 # ===================================================================================================== bridge.js
 NODE = shutil.which("node")
+# The bridge runs on its own clock (its 1 s setInterval, 50 ms here), and the run ends on that clock, never on wall
+# time: a loaded machine stretches every tick, so a fixed lifetime ended the bridge before it had done its work (jobs
+# left unanswered, a claimed job never finished, an engine submit finding the bridge already gone). The test closes
+# this process's stdin to ask for the end (once the outcome it waits for is on disk, or at once); the harness then
+# lets the bridge tick until it has ticked `minTicks` times in all and SETTLE times since the request with no
+# evalScript in flight (a result written, then a heartbeat after it), writes what it saw and exits. A bridge that
+# starts no clock (the bundle's panel) has nothing left to do: it ends at the request. A test process that dies
+# closes the pipe too, so the child never outlives it.
 HARNESS = r"""
-const vm = require('vm'), fs = require('fs'), path = require('path');
-const [bridgeJs, extDir, role, runMs, outFile, host] = process.argv.slice(2);
+const vm = require('vm'), fs = require('fs');
+const [bridgeJs, extDir, role, minTicks, outFile, host] = process.argv.slice(2);
+const SETTLE = 2;
 const evals = [], state = { textContent: '' }, logEl = { textContent: '' };
+let clocks = 0, ticks = 0, inFlight = 0, stopAsked = false, settled = 0, ended = false;
+function end() {
+  if (ended) { return; }
+  ended = true;
+  const b = ctx.window.WNC_BRIDGE;
+  fs.writeFileSync(outFile, JSON.stringify({ evals, ticks, state: state.textContent, log: logEl.textContent,
+    panel: b ? { role: b.role, host: b.host, bundle: b.bundle, queue: b.queue, beat: b.readBeat() } : null }));
+  process.exit(0);
+}
+function maybeEnd() {
+  if (stopAsked && (clocks === 0 || (inFlight === 0 && ticks >= +minTicks && settled >= SETTLE))) { end(); }
+}
 const cep = {
   getExtensionId: () => 'ai.thewhynot.cut.bridge.' + role,
   getHostEnvironment: () => JSON.stringify({ appName: host, appVersion: '26.5.2' }),
@@ -1041,18 +1149,25 @@ const cep = {
     const m = /^\$\.evalFile\(new File\(("(?:[^"\\]|\\.)*")\)\); (\w+)\.run\(("(?:[^"\\]|\\.)*")\);$/.exec(code);
     const data = JSON.parse(fs.readFileSync(JSON.parse(m[3]), 'ascii'));
     evals.push({ action: data.action, file: JSON.parse(m[1]), entry: m[2] });
-    setTimeout(() => cb(JSON.stringify({ ok: true, action: data.action, result: { echo: data.echo } })), 30);
+    inFlight += 1;
+    setTimeout(() => {
+      inFlight -= 1; settled = 0;
+      cb(JSON.stringify({ ok: true, action: data.action, result: { echo: data.echo } }));
+    }, 30);
   }
 };
 const ctx = { window: { __adobe_cep__: cep, cep_node: { require } }, document: { getElementById: (id) => id === 'state' ? state : logEl },
-              setInterval: (f) => setInterval(f, 50), process, console };
+              setInterval: (f) => { clocks += 1; return setInterval(() => {
+                f(); ticks += 1;
+                if (stopAsked && inFlight === 0) { settled += 1; }
+                maybeEnd();
+              }, 50); },
+              process, console };
 vm.runInNewContext(fs.readFileSync(bridgeJs, 'utf8'), ctx);
-setTimeout(() => {
-  const b = ctx.window.WNC_BRIDGE;
-  fs.writeFileSync(outFile, JSON.stringify({ evals, state: state.textContent, log: logEl.textContent,
-    panel: b ? { role: b.role, host: b.host, bundle: b.bundle, queue: b.queue, beat: b.readBeat() } : null }));
-  process.exit(0);
-}, +runMs);
+const stop = () => { stopAsked = true; maybeEnd(); };
+process.stdin.on('end', stop);
+process.stdin.on('error', stop);
+process.stdin.resume();
 """
 
 
@@ -1075,21 +1190,53 @@ class _BridgeJs(_Home):
     def make_ext(self) -> Path:
         raise NotImplementedError
 
-    def run_bridge(self, role="daemon", ms=1500, during=None, host="PPRO"):
+    def run_bridge(self, role="daemon", host="PPRO", *, until=None, what="", during=None, ticks=3):
+        """Run the bridge in node until `until()` holds (the outcome the test needs is on disk) or `during(p)` returned,
+        then ask it to end (stdin closed): it ends after `ticks` ticks in all and a settled tick or two (HARNESS).
+        Every wait is bounded (WAIT_S); the child is always waited for, killed if it is still there, and its output
+        goes to a file (no pipe to fill)."""
         out = self.tmp / f"out-{role}-{host}.json"
+        with contextlib.suppress(FileNotFoundError):
+            out.unlink()                                      # a test may run the bridge more than once
+        log = self.tmp / f"node-{role}-{host}.log"
         env = dict(os.environ, HOME=str(self.user), USERPROFILE=str(self.user))
-        p = subprocess.Popen([NODE, str(self.harness), str(self.BRIDGE), str(self.ext), role, str(ms), str(out), host],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env)
-        if during:
+        with open(log, "wb") as logf:
+            p = subprocess.Popen([NODE, str(self.harness), str(self.BRIDGE), str(self.ext), role, str(ticks), str(out),
+                                  host], stdin=subprocess.PIPE, stdout=logf, stderr=subprocess.STDOUT, env=env)
             try:
-                during(p)
-            except BaseException:
-                p.kill()
-                p.communicate(timeout=30)
-                raise
-        so, se = p.communicate(timeout=60)
-        self.assertEqual(p.returncode, 0, se)
+                if during:
+                    during(p)
+                if until:
+                    self.wait_for(until, what or "the bridge's outcome", p)
+                p.stdin.close()
+                try:
+                    p.wait(timeout=WAIT_S)
+                except subprocess.TimeoutExpired:
+                    self.fail(f"the bridge did not end within {WAIT_S:g}s of the stop request\n{self.state(log)}")
+            finally:
+                if p.poll() is None:
+                    p.kill()
+                    p.wait(timeout=WAIT_S)
+                p.stdin.close()
+        self.assertEqual(p.returncode, 0, self.state(log))
         return json.loads(out.read_text(encoding="utf-8"))
+
+    def state(self, log: Path | None = None) -> str:
+        """What a failed wait reports: the queue folders and the node output."""
+        qs = sorted({self.q, self.home / "ae-queue"})
+        text = "; ".join(f"{q.name}: {sorted(f.name for f in q.iterdir()) if q.is_dir() else 'missing'}" for q in qs)
+        if log is None:
+            log = next(iter(sorted(self.tmp.glob("node-*.log"))), None)
+        if log is not None and log.exists():
+            text += "\nnode: " + log.read_text(encoding="utf-8", errors="replace")[-2000:]
+        return text
+
+    def wait_for(self, cond, what: str, p=None):
+        wait_until(cond, what, proc=p, detail=self.state)
+
+    def results(self, *jids, q=None):
+        """until= for run_bridge: every one of these jobs has its result file."""
+        return lambda: all(((q or self.q) / f"{j}.result.json").exists() for j in jids)
 
     def job(self, jid, action, expires_in, **ref):
         """A job file; `ref` = lib=... or script=... (default: what this family's engine sends)."""
@@ -1107,10 +1254,8 @@ class _BridgeJs(_Home):
     def beat(self, q=None):
         return json.loads(((q or self.q) / "bridge.heartbeat").read_text(encoding="utf-8"))
 
-    def wait_beat(self, q):
-        deadline = time.time() + 10
-        while not (q / "bridge.heartbeat").exists() and time.time() < deadline:
-            time.sleep(0.05)
+    def wait_beat(self, q, p):
+        self.wait_for((q / "bridge.heartbeat").exists, "the bridge's first heartbeat", p)
 
 
 class _SharedBridgeJsTests:
@@ -1119,7 +1264,7 @@ class _SharedBridgeJsTests:
     def test_the_daemon_runs_a_live_job_and_discards_an_expired_one(self):
         self.job("a-old", "build_project", -60)
         self.job("b-new", "ping", 60)
-        out = self.run_bridge()
+        out = self.run_bridge(until=self.results("a-old", "b-new"), what="both jobs answered")
         self.assertEqual([e["action"] for e in out["evals"]], ["ping"])       # the expired build never reached the host
         self.assertEqual(self.result("a-old")["error"], "expired")
         self.assertFalse(self.result("a-old")["ok"])
@@ -1132,10 +1277,10 @@ class _SharedBridgeJsTests:
 
     def test_the_engine_and_the_real_bridge_agree(self):
         """ppro_bridge.submit against the real bridge.js: the mode this family needs, claim, result, cleanup."""
-        def during(_p):
-            self.wait_beat(self.q)
-            self.r = ppro_bridge.submit("ping", {"echo": "x"}, timeout=10)
-        out = self.run_bridge(ms=2500, during=during)
+        def during(p):
+            self.wait_beat(self.q, p)
+            self.r = ppro_bridge.submit("ping", {"echo": "x"}, timeout=WAIT_S)
+        out = self.run_bridge(during=during)
         self.assertTrue(self.r["ok"], self.r)
         self.assertEqual(self.r["response"]["result"]["echo"], "x")
         self.assertEqual(self.leftovers(), [])
@@ -1147,10 +1292,10 @@ class _SharedBridgeJsTests:
         from lib import ae_bridge
         q = ae_bridge.queue_dir()
 
-        def during(_p):
-            self.wait_beat(q)
-            self.r = ae_bridge.submit("ping", {"echo": "ae"}, timeout=10)
-        out = self.run_bridge(ms=2500, during=during, host="AEFT")
+        def during(p):
+            self.wait_beat(q, p)
+            self.r = ae_bridge.submit("ping", {"echo": "ae"}, timeout=WAIT_S)
+        out = self.run_bridge(during=during, host="AEFT")
         self.assertTrue(self.r["ok"], self.r)
         (ev,) = out["evals"]
         self.assertEqual((ev["action"], ev["entry"]), ("ping", self.ENTRY["AEFT"]))
@@ -1162,7 +1307,7 @@ class _SharedBridgeJsTests:
         evil.parent.mkdir()
         evil.write_text("// evil", encoding="utf-8")
         self.job("e", "ping", 60, script=str(evil.resolve()))
-        out = self.run_bridge()
+        out = self.run_bridge(until=self.results("e"), what="the job answered")
         self.assertEqual(out["evals"], [])
         r = self.result("e")
         self.assertFalse(r["ok"])
@@ -1180,7 +1325,7 @@ class _SharedBridgeJsTests:
         t = threading.Thread(target=daemon_beats, daemon=True)
         t.start()
         try:
-            out = self.run_bridge(role="panel", ms=1200)
+            out = self.run_bridge(role="panel", ticks=24)     # every tick a chance to take the job
         finally:
             stop.set()
             t.join(2)
@@ -1221,7 +1366,7 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         return self.ext / "jsx" / ("wnc_ppro_lib.jsx" if host == "PPRO" else "wnc_ae_bridge.jsx")
 
     def test_the_heartbeat_fields(self):
-        self.run_bridge(ms=800)
+        self.run_bridge()
         hb = self.beat()
         self.assertEqual(sorted(hb), sorted(["at", "busy", "role", "host", "hostVersion", "bundle", "version", "protocol",
                                              "build", "libs", "current", "action", "engine_start"]))
@@ -1236,7 +1381,7 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
 
     def test_lib_jobs_run_from_the_bundle(self):
         self.job("l", "ping", 60, lib="wnc_ppro_lib.jsx")
-        out = self.run_bridge()
+        out = self.run_bridge(until=self.results("l"), what="the job answered")
         self.assertTrue(self.result("l")["ok"], self.result("l"))
         (ev,) = out["evals"]
         self.assertEqual(norm(ev["file"]), norm(self.ext / "jsx" / "wnc_ppro_lib.jsx"))
@@ -1248,7 +1393,7 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
                "empty": {"lib": ""}, "number": {"lib": 5}, "nothing": {"data": 1}}
         for jid, ref in bad.items():
             self.job(jid, "ping", 60, **ref)
-        out = self.run_bridge(ms=2500)
+        out = self.run_bridge(until=self.results(*bad), what="every bad job answered")
         self.assertEqual(out["evals"], [])
         for jid in bad:
             r = self.result(jid)
@@ -1265,7 +1410,7 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         except OSError as e:                      # Windows without the symlink privilege
             self.skipTest(f"no symlinks here: {e}")
         self.job("s", "ping", 60, lib="wnc_ppro_lib.jsx")
-        out = self.run_bridge()
+        out = self.run_bridge(until=self.results("s"), what="the job answered")
         self.assertEqual(out["evals"], [])
         self.assertEqual(self.result("s")["error"], "script not allowed")
 
@@ -1276,7 +1421,7 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         self.job("b", "ping", 60, script=str(other.resolve()))                                # not allowlisted
         self.job("c", "ping", 60, script=str(self.script.with_name("wnc_ae_bridge.jsx")))     # another host's
         self.job("d", "ping", 60, script=str(self.home / "ae-scripts" / "wnc_ppro_lib.jsx"))  # another folder
-        out = self.run_bridge(ms=2500)
+        out = self.run_bridge(until=self.results(*"abcd"), what="the four jobs answered")
         self.assertEqual([norm(e["file"]) for e in out["evals"]], [norm(self.script)])
         self.assertTrue(self.result("a")["ok"])
         for jid in "bcd":
@@ -1289,7 +1434,7 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
             self.job(jid, "ping", 60)
             f = self.q / f"{jid}.job.json"
             f.write_text(json.dumps(dict(json.loads(f.read_text(encoding="utf-8")), id=hostile)), encoding="utf-8")
-        out = self.run_bridge(ms=2500)
+        out = self.run_bridge(until=self.results("h1", "h2", "h3", "h4"), what="the four jobs answered")
         self.assertEqual(out["evals"], [])
         for jid in ("h1", "h2", "h3", "h4"):
             r = self.result(jid)
@@ -1303,14 +1448,14 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         self.script.unlink()
         self.job("m", "ping", 60)
         self.job("n", "ping", 60, script=str(self.script))
-        self.run_bridge()
+        self.run_bridge(until=self.results("m", "n"), what="both jobs answered")
         for jid in "mn":
             self.assertTrue(self.result(jid)["error"].startswith("script not found"), self.result(jid))
 
     def test_the_panel_never_claims(self):
         """Not even when no daemon beats (the 3.1.1 panel took over then): no claim, no heartbeat, no folder."""
         self.job("d", "ping", 60)
-        out = self.run_bridge(role="panel", ms=2500)
+        out = self.run_bridge(role="panel", ticks=24)     # a panel that started a clock gets ticks to misbehave
         self.assertEqual(out["evals"], [])
         self.assertTrue((self.q / "d.job.json").exists())
         self.assertFalse((self.q / "d.claimed").exists())
@@ -1324,7 +1469,7 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         hb = {"at": time.time() * 1000, "role": "daemon", "busy": True, "current": "j", "version": "3.0.0"}
         (self.home / "ae-queue").mkdir()
         (self.home / "ae-queue" / "bridge.heartbeat").write_text(json.dumps(hb), encoding="utf-8")
-        out = self.run_bridge(role="panel", ms=600, host="AEFT")
+        out = self.run_bridge(role="panel", host="AEFT")
         self.assertEqual((out["panel"]["host"], out["panel"]["bundle"]), ("AEFT", "3.0.0"))
         self.assertEqual(norm(out["panel"]["queue"]), norm(self.home / "ae-queue"))
         self.assertEqual(out["panel"]["beat"], hb)
@@ -1334,14 +1479,14 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         other = self.tmp / "other-home"
         other.mkdir()
         self.write_config(other)
-        self.run_bridge(ms=800)
+        self.run_bridge()
         self.assertTrue((other / "ppro-queue" / "bridge.heartbeat").exists())
         cfg = self.user / ".whynot-cut" / "bridge" / "config.json"
         for bad in ({"schema": 2, "engine_home": str(other)}, {"schema": 1, "engine_home": "relative/home"},
                     {"schema": 1, "engine_home": str(self.tmp / "missing")}):
             shutil.rmtree(self.user / ".whynot-cut" / "ppro-queue", ignore_errors=True)
             cfg.write_text(json.dumps(bad), encoding="utf-8")
-            self.run_bridge(ms=800)
+            self.run_bridge()
             self.assertTrue((self.user / ".whynot-cut" / "ppro-queue" / "bridge.heartbeat").exists(), bad)
 
     def test_a_linked_config_json_is_ignored(self):
@@ -1355,7 +1500,7 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
             cfg.symlink_to(real)
         except OSError as e:
             self.skipTest(f"no symlinks here: {e}")
-        self.run_bridge(ms=800)
+        self.run_bridge()
         self.assertFalse((other / "ppro-queue").exists())
         self.assertTrue((self.user / ".whynot-cut" / "ppro-queue" / "bridge.heartbeat").exists())
 
@@ -1381,7 +1526,7 @@ class TestBridgeJsLegacy311(_SharedBridgeJsTests, _BridgeJs):
         return ppro_bridge.lib_path() if host == "PPRO" else ae_bridge.entry_path()
 
     def test_the_heartbeat_is_the_311_shape(self):
-        self.run_bridge(ms=800)
+        self.run_bridge()
         hb = self.beat()
         self.assertEqual((hb["version"], hb["role"], hb["host"]), ("3.1.1", "daemon", "PPRO"))
         self.assertNotIn("protocol", hb)
@@ -1391,7 +1536,8 @@ class TestBridgeJsLegacy311(_SharedBridgeJsTests, _BridgeJs):
 
     def test_the_panel_works_the_queue_when_no_daemon_beats(self):
         self.job("d", "ping", 60)
-        out = self.run_bridge(role="panel", ms=8000)
+        out = self.run_bridge(role="panel", until=self.results("d"),          # it waits DAEMON_STALE_MS first
+                              what="the 3.1.1 panel taking the job once no daemon beats")
         self.assertEqual([e["action"] for e in out["evals"]], ["ping"])
         self.assertIn("this panel works the queue", out["log"])
         self.assertEqual(self.beat()["role"], "panel")
