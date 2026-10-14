@@ -202,6 +202,16 @@ def stage_stills(paths: Paths, graphics: list) -> Path:
 
 
 LOCK_HOLD_S = 3600          # the expiry written in the lock: honoured for holders on OTHER computers only (a live holder here is never stale)
+BUILD_TIMEOUT_MIN_S, BUILD_TIMEOUT_PER_CLIP_S = 900, 6     # G2 R1: max(900, 6 x the clip's seconds)
+
+
+def build_timeout(duration_s) -> float:
+    """How long the build_project job may run once Premiere claims it: a long clip gets longer than the fixed 900 s."""
+    try:
+        d = float(duration_s or 0)
+    except (TypeError, ValueError):
+        d = 0.0
+    return max(BUILD_TIMEOUT_MIN_S, BUILD_TIMEOUT_PER_CLIP_S * d)
 
 
 def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False, *, lock_wait_s: float | None = None) -> dict:
@@ -224,6 +234,66 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False, *
             return _build_locked(paths, prproj, overwrite, replace_edited)
     except cep_queue.BuildLockBusy as e:
         return dict(cep_queue.lock_busy_result(e, "Premiere"), ok=False, status="BRIDGE_BUSY")
+    except OSError as e:                # G2 R1: a full disk in plain words (_build_locked already put the old project back)
+        from .build_safety import disk_full_message, is_disk_full
+        if not is_disk_full(e):
+            raise
+        return {"status": "DISK_FULL", "ok": False, "error": disk_full_message(prproj), "project": str(prproj),
+                "how": ("The previous project is in place; nothing of it was lost." if prproj.exists() else
+                        "If a *_prev_* project is next to the expected one, rename it back to keep working in it.")}
+
+
+def approval_refusal(paths: Paths) -> dict | None:
+    """The CLI's Gate 1 check (cli.require_plan_approval) for callers that are not the CLI (reel serve): the CURRENT
+    plan must be approved; a re-plan after approval, a stale record or no compiled plan refuses."""
+    from .plan import plan_fingerprint
+    appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
+    try:
+        now = plan_fingerprint(paths)
+    except (OSError, ValueError):
+        now = None
+    if appr.get("approved") and not appr.get("stale") and now and appr.get("plan_fingerprint") == now:
+        return None
+    return {"status": "REFUSED", "ok": False, "blocked": "edit plan not approved (or changed since approval)",
+            "error": "The edit plan is not approved, or it changed after the approval: nothing was built.",
+            "how": "Show the editor 01_analysis/edit-plan.md; after they approve it (`reel approve-plan --by editor`), "
+                   "build again."}
+
+
+def build_for_serve(data: dict, *, lock_wait_s: float | None = None) -> dict:
+    """`reel serve`'s build_project (Addendum G2 R1): the CLI's `reel ppro-build`, never the raw bridge action. The reel
+    is the one whose .prproj the request's project_path names; then the CLI's gates in its order (the episode window,
+    Gate 1 approval of the current plan) and build() itself: the build lock, the editor-changes and unsaved-changes
+    checks, `_prev_` parking and restore, the free-space check. overwrite_existing is --force; --replace-edited is
+    never available from serve. The job is made from the approved plan: the request's other data is not used."""
+    from .build_safety import reel_for_target, serve_context
+    from .common import use_context
+    from .reels import window_stale
+    target = (data or {}).get("project_path")
+    paths, why = reel_for_target(target, "07_premiere/project")
+    ctx = serve_context(paths.root) if paths else None
+    if paths and ctx is None:
+        why = "The project file is in another client folder than the request: nothing was built."
+    if why:
+        return {"status": "REFUSED", "ok": False, "refused": why}
+    with use_context(ctx):
+        want = paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")
+        if Path(target).resolve() != want.resolve():
+            return {"status": "REFUSED", "ok": False,
+                    "refused": f"{Path(target).name} is not this reel's project file ({want.name}): nothing was built."}
+        stale = window_stale(paths)
+        if stale:
+            return {"status": "REFUSED", "ok": False, "blocked": stale}
+        refused = approval_refusal(paths)
+        if refused:
+            return refused
+        r = build(paths, overwrite=(data or {}).get("overwrite_existing") is True, replace_edited=False,
+                  lock_wait_s=lock_wait_s)
+        if r.get("status") == "PRPROJ_BUILT":           # as cmd_ppro_build records it
+            from .common import set_status
+            set_status(paths, "PROJECT_ASSEMBLED", "native .prproj built in Premiere via WhyNot Cut Bridge",
+                       "premiere_native", [r["project"]])
+        return r
 
 
 def parked_previous(paths: Paths) -> dict | None:
@@ -280,6 +350,11 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
                 "fix": "The editor saved changes in Premiere after the last build. A rebuild starts from the plan, so their manual "
                        "edits would NOT carry over (the old file is kept as *_prev_*.prproj). Ask the editor; only with their OK "
                        "re-run with --force --replace-edited."}
+    from .build_safety import files_size, free_space_refusal
+    # G2 R1: before anything is written (the close below saves the open project): the project and its staged stills
+    short = free_space_refusal(prproj.parent, files_size([prproj, *paths.p("03_broll").rglob("*.png")]))
+    if short:
+        return short
     backup = None
     closed = None
     if prproj.exists():
@@ -344,7 +419,8 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
             backup = prev_name(prproj)
             prproj.rename(backup)
         submitting = True       # from here an exception without cep_queue's verdict may come after the job was queued
-        r = submit("build_project", {k: v for k, v in data.items() if not k.startswith("_")}, timeout=900)
+        r = submit("build_project", {k: v for k, v in data.items() if not k.startswith("_")},
+                   timeout=build_timeout(data.get("duration_s")))
         claimed = bool(r.get("claimed"))
         submitting = False
         saved_now = prproj.exists() and prproj.stat().st_mtime >= t0 - 1      # before any restore below

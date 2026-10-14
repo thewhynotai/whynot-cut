@@ -13,6 +13,7 @@ Run:  bash tools/test.sh -p test_gate2_safety.py
 import sys as _sys
 _sys.dont_write_bytecode = True
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import errno  # noqa: E402
 import gzip  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
@@ -20,6 +21,7 @@ import shutil  # noqa: E402
 import subprocess  # noqa: E402
 import tempfile  # noqa: E402
 import time  # noqa: E402
+import types  # noqa: E402
 import unittest  # noqa: E402
 from pathlib import Path  # noqa: E402
 from unittest import mock  # noqa: E402
@@ -820,6 +822,66 @@ class TestMinors(unittest.TestCase):
             parked = p.project / "07_premiere/project" / a.name
             a.rename(parked)
             self.assertEqual(ppro_build.parked_previous(p)["file"], str(parked))
+
+
+def low_disk(free: int):
+    """shutil.disk_usage as a nearly full disk: `free` bytes left."""
+    return mock.patch("lib.build_safety.shutil.disk_usage",
+                      return_value=types.SimpleNamespace(total=10 ** 12, used=10 ** 12 - free, free=free))
+
+
+class TestG2R1BuildSafety(_Client):
+    """Addendum G2 R1 (H5 items 1 and 4): free space is checked before a rebuild touches anything, a full disk (ENOSPC)
+    is said plainly with the previous project put back, and the build timeout grows with the clip."""
+
+    def test_a_free_space_shortfall_is_refused_with_nothing_written(self):
+        self.pipeline_built("OLD")
+        before = (self.prj.read_bytes(), self.rec_p.read_bytes())
+        with low_disk(100 * 2 ** 20):
+            r, sent = self.build(failed, overwrite=True)
+        self.assertEqual(r["status"], "NO_DISK_SPACE", r)
+        self.assertIs(r["ok"], False)
+        self.assertIn("not enough free space", r["error"])
+        self.assertIn("Free up space", r["how"])
+        self.assertEqual(sent, [])                                       # not even the close (it saves the project)
+        self.assertEqual((self.prj.read_bytes(), self.rec_p.read_bytes()), before)
+        self.assertEqual(list(self.prj.parent.glob("*_prev_*")), [])
+
+    def test_enough_free_space_builds(self):
+        self.pipeline_built("OLD")
+        with low_disk(10 * 2 ** 30):
+            r, sent = self.build(failed, overwrite=True)
+        self.assertIn("build_project", sent)
+        self.assertEqual(r["status"], "FAILED", r)
+
+    def test_enospc_during_the_build_puts_the_old_project_back_and_says_so_plainly(self):
+        self.pipeline_built("OLD")
+
+        def disk_full(prj):
+            e = OSError(errno.ENOSPC, "No space left on device")
+            e.wnc_claimed = False                                        # cep_queue: the job file was never written
+            raise e
+        r, sent = self.build(disk_full, overwrite=True)
+        self.assertEqual(r["status"], "DISK_FULL", r)
+        self.assertIs(r["ok"], False)
+        self.assertRegex(r["error"], r"^The disk is full: free up space on \S.* and try again$")
+        self.assertIn("OLD", ungz(self.prj))                             # the previous project is back in place
+        self.assertEqual(list(self.prj.parent.glob("*_prev_*")), [])
+
+    def test_the_build_timeout_scales_with_the_clip_length(self):
+        from lib import ppro_build
+        seen = []
+
+        def submit(action, data=None, timeout=0, **k):
+            seen.append((action, timeout))
+            return failed(None)
+        for dur, want in ((30.0, 900), (150.0, 900), (600.0, 3600)):
+            seen.clear()
+            with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), \
+                    mock.patch("lib.ppro_bridge.submit", side_effect=submit), \
+                    mock.patch.object(ppro_build, "job_data", return_value=dict(DATA, duration_s=dur)):
+                ppro_build.build(self.p)
+            self.assertEqual([t for a, t in seen if a == "build_project"], [want], dur)
 
 
 if __name__ == "__main__":

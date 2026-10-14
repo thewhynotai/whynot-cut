@@ -1614,6 +1614,56 @@ class TestMotionBuild(CompiledMotion):
         self.assertEqual(list(self.reel.p("04_after_effects/project/backups").glob("*.aep")), [])
         self.assertEqual(self.mb.aep_path(self.reel).read_bytes(), b"EDITED IN AE")
 
+    # ---- Addendum G2 R1 (H5 items 1 and 3): every rebuild keeps the .aep it replaces; free space; a full disk
+    def backups(self) -> list[bytes]:
+        return [b.read_bytes() for b in sorted(self.reel.p("04_after_effects/project/backups").glob("*.aep"))]
+
+    def test_a_clean_existing_aep_is_backed_up_before_a_rebuild(self):
+        """Not only when the editor changed it: the pipeline's own .aep is copied to backups/ before it is replaced."""
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+        first = self.mb.aep_path(self.reel).read_bytes()
+        self.assertFalse(self.mb.editor_changed(self.reel))
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+        self.assertEqual(self.backups(), [first])
+        self.assertNotEqual(self.mb.aep_path(self.reel).read_bytes(), first)
+
+    def test_a_free_space_shortfall_is_refused_with_nothing_written(self):
+        import types
+        from unittest import mock
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+        aep, n = self.mb.aep_path(self.reel), len(self.ae.jobs)
+        first = aep.read_bytes()
+        job = self.reel.p("04_after_effects/data/motion-job.json")
+        job_before = job.read_bytes()
+        low = types.SimpleNamespace(total=10 ** 12, used=10 ** 12 - 2 ** 20, free=2 ** 20)
+        with mock.patch("lib.build_safety.shutil.disk_usage", return_value=low):
+            r = self.mb.build(self.reel)
+        self.assertEqual(r["status"], "REFUSED", r)
+        self.assertIs(r["ok"], False)
+        self.assertTrue(any("not enough free space" in x for x in r["reasons"]), r["reasons"])
+        self.assertEqual(len(self.ae.jobs), n)
+        self.assertEqual((aep.read_bytes(), job.read_bytes(), self.backups()), (first, job_before, []))
+
+    def test_enospc_during_the_build_restores_the_aep_and_says_so_plainly(self):
+        import errno
+        from lib import ae_bridge
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+        aep = self.mb.aep_path(self.reel)
+        first = aep.read_bytes()
+
+        def disk_full(action, data=None, timeout=900):
+            if action == "build_motion":
+                aep.write_bytes(b"HALF WRITT")                           # the disk filled up mid-write
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return self.ae.submit(action, data, timeout)
+        ae_bridge.submit = disk_full
+        r = self.mb.build(self.reel)
+        self.assertEqual(r["status"], "FAILED", r)
+        self.assertIs(r["ok"], False)
+        self.assertRegex(r["error"], r"^The disk is full: free up space on \S.* and try again$")
+        self.assertEqual(aep.read_bytes(), first)                        # the backup was put back
+        self.assertEqual(self.backups(), [first])
+
     def cli(self, **kw) -> tuple[int, dict]:
         """`reel motion-build` through motion_cli (exit code, printed document) with this reel."""
         import argparse

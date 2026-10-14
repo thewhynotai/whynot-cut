@@ -212,15 +212,66 @@ def build(paths, replace_edited: bool = False, allow_fallback_font: bool = False
     waits up to `lock_wait_s` (default cep_queue.LOCK_WAIT_S), then gets REFUSED with `blocked`."""
     from . import ae_bridge, cep_queue
     wait = cep_queue.LOCK_WAIT_S if lock_wait_s is None else lock_wait_s
+    made = {}                           # the backup _build_locked made, for a full disk below
     try:
         with ae_bridge.build_lock(f"motion-build {paths.video_id}", hold_s=LOCK_HOLD_S, wait_s=wait):
-            return _build_locked(paths, replace_edited, allow_fallback_font, timeout)
+            return _build_locked(paths, replace_edited, allow_fallback_font, timeout, made)
     except cep_queue.BuildLockBusy as e:
         r = cep_queue.lock_busy_result(e, "After Effects")
         return dict(r, status="REFUSED", reasons=[r["blocked"]], aep=str(aep_path(paths)), fallback_font=None)
+    except OSError as e:                # G2 R1: a full disk in plain words, with the .aep it replaced put back
+        import shutil
+        from .build_safety import disk_full_message, is_disk_full
+        if not is_disk_full(e):
+            raise
+        aep, bak, restored = aep_path(paths), made.get("backup"), False
+        if bak and bak.exists() and (not aep.exists() or _sha1(aep) != _sha1(bak)):
+            try:
+                shutil.copy2(bak, aep)
+                restored = True
+            except OSError:
+                pass
+        msg = disk_full_message(aep)
+        how = ("The previous .aep was put back." if restored else
+               f"The previous .aep is kept as backups/{bak.name}." if bak else "Nothing of the old project was changed.")
+        return {"status": "FAILED", "ok": False, "error": msg, "reasons": [msg], "how": how, "aep": str(aep),
+                "fallback_font": None, "previous_restored": restored}
 
 
-def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeout: int) -> dict:
+def build_for_serve(data: dict, *, lock_wait_s: float | None = None) -> dict:
+    """`reel serve`'s ae_build_motion (Addendum G2 R1): the CLI's `reel motion-build`, never the raw bridge action. The
+    reel is the one whose .aep the request's job.aep_path names; build() then runs the CLI's gates (Gate 1 approval of
+    the current motion plan, the editor-changed check, After Effects' unsaved work, fonts, free space) under the build
+    lock and backs the .aep up first. --replace-edited and --allow-fallback-font are never available from serve; the
+    job is made from the approved plan, the request's job is not used."""
+    from .build_safety import reel_for_target, serve_context
+    from .common import use_context
+    job = (data or {}).get("job")
+    target = job.get("aep_path") if isinstance(job, dict) else None
+    paths, why = reel_for_target(target, "04_after_effects/project")
+    ctx = serve_context(paths.root) if paths else None
+    if paths and ctx is None:
+        why = "The .aep is in another client folder than the request: nothing was built."
+    if not why:
+        with use_context(ctx):
+            if Path(target).resolve() != aep_path(paths).resolve():
+                why = f"{Path(target).name} is not this reel's .aep ({aep_path(paths).name}): nothing was built."
+            else:
+                return build(paths, lock_wait_s=lock_wait_s)
+    return {"status": "REFUSED", "ok": False, "reasons": [why], "refused": why}
+
+
+def _backup_name(aep: Path, tag: str) -> Path:
+    import time
+    d = aep.parent / "backups"
+    while True:
+        t = time.time()
+        p = d / f"{aep.stem}.{tag}-{time.strftime('%Y%m%d-%H%M%S', time.localtime(t))}-{int(t % 1 * 1e6):06d}{aep.suffix}"
+        if not p.exists():
+            return p
+
+
+def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeout: int, made: dict | None = None) -> dict:
     import platform as _pf
     import shutil
     import time
@@ -240,10 +291,21 @@ def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeou
     probs, ctx = preconditions(paths, allow_fallback_font)
     if probs:
         return dict(base, reasons=probs, **(ctx.get("refusal") or {}))
-    if edited:                  # only once the build will run: a refused build leaves no backup behind
-        bdir = aep.parent / "backups"
-        bdir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(aep, bdir / f"{aep.stem}.edited-{time.strftime('%Y%m%d-%H%M%S')}{aep.suffix}")
+    from .build_safety import free_space_refusal
+    short = free_space_refusal(aep.parent, aep.stat().st_size if aep.exists() else 0)     # G2 R1: before any write
+    if short:
+        return dict(base, reasons=[short["error"]], **{k: short[k] for k in ("ok", "error", "how", "blocked")})
+    if aep.exists():            # only once the build will run: a refused build leaves no backup behind. G2 R1: every
+        # rebuild keeps the .aep it replaces (the editor's work, or the pipeline's own), not only an edited one
+        bak = _backup_name(aep, "edited" if edited else "prev")
+        bak.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(aep, bak)
+        except OSError:
+            bak.unlink(missing_ok=True)         # a half copy is no backup
+            raise
+        if made is not None:
+            made["backup"] = bak
     fb, fb_plan, brand = None, None, []
     if ctx.get("missing_fonts") and allow_fallback_font:
         from .motion_layout import find_font_face
