@@ -101,6 +101,24 @@ export interface ItemContext {
   review_mp4: string | null;
 }
 
+/** A journaled command's state (reel serve's job journal, serve/jobs.py; Addendum G2 H1). */
+export type JobState = "received" | "queued" | "claimed" | "done" | "failed" | "interrupted";
+export const JOB_STATES: readonly JobState[] = ["received", "queued", "claimed", "done", "failed", "interrupted"];
+
+/** One command in the daemon's job journal (docs/adobe/eng-data-contract.md 2.6). After a reconnect the panel finds its
+ *  request id here and re-sends the same command: still running = it attaches, settled = the stored result is replayed. */
+export interface JobSummary {
+  request_id: string;
+  action: ActionName;
+  state: JobState;
+  submitted_at: string;
+  updated_at: string;
+  /** the item the job was for, when the engine knows it */
+  item?: string;
+  /** the stored result's outcome (settled jobs only); never the host's text */
+  result?: { ok: boolean; code?: string; n?: number; of?: number };
+}
+
 export interface PanelState {
   connection: ConnectionState;
   client: string;
@@ -113,6 +131,8 @@ export interface PanelState {
   approval: Approval | null;
   qc: QcFrame[];
   log: LogLine[];
+  /** the daemon's newest journaled commands, newest first (absent from an older daemon and from the mock) */
+  jobs?: JobSummary[];
 }
 
 /** An action result. Contract hosts answer with the v4 result envelope; approvals answer with this too. */

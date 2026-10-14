@@ -338,6 +338,90 @@
       ],
       "additionalProperties": false
     },
+    "job_summary": {
+      "type": "object",
+      "description": "JobSummary (docs/adobe/eng-data-contract.md 2.6): one command in the daemon's job journal (serve/jobs.py, Addendum G2 H1). A reconnected panel finds its request id here and re-sends the same command: received / queued / claimed = still running (it attaches), done / failed / interrupted = settled (the stored result is replayed; the host never runs it twice). Try again sends a NEW request id only after failed or interrupted. session_kind and job_id stay in the journal file; no data, no host text, no path, no token reach the panel.",
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/id"
+        },
+        "action": {
+          "$ref": "request.schema.json#/properties/action"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "received",
+            "queued",
+            "claimed",
+            "done",
+            "failed",
+            "interrupted"
+          ]
+        },
+        "submitted_at": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64
+        },
+        "item": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "the item the job was for, when the engine knows it"
+        },
+        "result": {
+          "type": "object",
+          "description": "the stored result's outcome (done / failed / interrupted only); never the host's text",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "auth",
+                "origin",
+                "host",
+                "too_large",
+                "rate",
+                "schema",
+                "unknown_type",
+                "no_route",
+                "timeout",
+                "internal",
+                "interrupted",
+                "host_lost"
+              ]
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "of": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "ok"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "request_id",
+        "action",
+        "state",
+        "submitted_at",
+        "updated_at"
+      ],
+      "additionalProperties": false
+    },
     "panel_state": {
       "type": "object",
       "description": "PanelState: everything the panel shows (adobe/panel-ui/src/source.ts)",
@@ -397,6 +481,14 @@
           "maxItems": 1000,
           "items": {
             "$ref": "#/$defs/log_line"
+          }
+        },
+        "jobs": {
+          "type": "array",
+          "maxItems": 50,
+          "description": "the daemon's newest journaled commands (the last 20), newest first; absent from an older daemon",
+          "items": {
+            "$ref": "#/$defs/job_summary"
           }
         }
       },

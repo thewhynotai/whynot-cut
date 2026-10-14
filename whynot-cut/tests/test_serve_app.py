@@ -1113,18 +1113,21 @@ class Routing(AppCase):
                                                     "readback": PING_READBACK}})
         self.assertTrue((await c.recv())["result"]["ok"])
 
-    async def test_duplicate_running_id_is_refused(self):
+    async def test_duplicate_running_id_attaches_instead_of_running_twice(self):
+        """G2 H1: a repeated request id joins the running command (the panel is not asked twice); both get its result."""
         p = await self.panel(caps=("ping",))
         c = await self.cli()
         msg = command("ping", id="same-id")
         await c.send(msg)
         await p.recv()
         await c.send(command("ping", id="same-id"))
-        err = await c.recv()
-        self.assertEqual((err["type"], err["code"], err["id"]), ("error", "schema", "same-id"))
+        with self.assertRaises(asyncio.TimeoutError):
+            await asyncio.wait_for(p.recv(), 0.3)
         await p.send({"type": "result", "result": {"ok": True, "action": "ping", "id": "same-id",
                                                    "readback": PING_READBACK}})
-        self.assertTrue((await c.recv())["result"]["ok"])
+        for _ in range(2):
+            res = await c.recv()
+            self.assertEqual((res["type"], res["result"]["id"], res["result"]["ok"]), ("result", "same-id", True))
 
 
 RESERVED_TOOL = {"audio": "WNC_AUDIO shared audio export", "hush": "Hush", "tidy": "Tidy", "kalam": "Kalam"}

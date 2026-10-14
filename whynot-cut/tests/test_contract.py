@@ -2263,6 +2263,11 @@ PANEL_STATE = {
     "qc": [{"t_s": 1.5, "tc": "00:00:01:15", "file": "D:/f.png", "label": "hook", "verdict": "pass", "w": 1080, "h": 1920,
             "thumb": None}],
     "log": [{"ts": "2026-10-12T10:00:00Z", "level": "info", "text": "hi"}],
+    "jobs": [{"request_id": "r-1", "action": "build_project", "state": "claimed", "submitted_at": "2026-10-14T11:40:02Z",
+              "updated_at": "2026-10-14T11:40:03.250+00:00"},
+             {"request_id": "r-0", "action": "export_frames", "state": "interrupted", "item": "C0239",
+              "submitted_at": "2026-10-14T11:30:00Z", "updated_at": "2026-10-14T11:31:30Z",
+              "result": {"ok": False, "code": "interrupted"}}],
 }
 MINIMAL_STATE = {"connection": {"engine": "offline", "claude": "unknown", "host": {"state": "offline"}}, "client": "", "item": "",
                  "language": "en", "editor_name": "",
@@ -2505,6 +2510,27 @@ class SessionContractTests(unittest.TestCase):
         self.assertTrue(session_errors({"type": "state"}, "state"))
         self.assertTrue(session_errors({"type": "state", "state": {}}, "state"))
 
+    def test_jobs_are_optional_closed_summaries_of_the_job_journal(self):
+        """G2 H1 (eng-data-contract.md 2.6): panel_state.jobs, additive to protocol 4."""
+        defs = V.load(SESSION)["$defs"]
+        self.assertNotIn("jobs", defs["panel_state"]["required"])
+        self.assertEqual(defs["panel_state"]["properties"]["jobs"]["items"], {"$ref": "#/$defs/job_summary"})
+        self.assertEqual(defs["job_summary"]["properties"]["state"]["enum"],
+                         ["received", "queued", "claimed", "done", "failed", "interrupted"])
+        self.assertEqual(defs["job_summary"]["properties"]["result"]["properties"]["code"]["enum"],
+                         defs["error"]["properties"]["code"]["enum"] + ["interrupted", "host_lost"])
+        self.assertEqual(session_errors(dict(MINIMAL_STATE, jobs=[]), "panel_state"), [])
+        job = PANEL_STATE["jobs"][1]
+        self.assertEqual(session_errors(job, "job_summary"), [])
+        for key, value in (("state", "lost"), ("action", "run_script"), ("request_id", "a b"), ("submitted_at", "now"),
+                           ("updated_at", "2026-10-14 11:31"), ("result", {"ok": False, "error": "host text"}),
+                           ("result", {"code": "interrupted"}), ("result", {"ok": True, "code": "gone"}),
+                           ("item", "x" * 257), ("token", "ab" * 32), ("job_id", "j1"), ("session_kind", "panel")):
+            self.assertTrue(session_errors(dict(job, **{key: value}), "job_summary"), f"{key}={value!r}")
+        for key in defs["job_summary"]["required"]:
+            self.assertTrue(session_errors({k: v for k, v in job.items() if k != key}, "job_summary"), key)
+        self.assertTrue(session_errors(dict(MINIMAL_STATE, jobs=[job] * 51), "panel_state"))
+
     def test_intents(self):
         for name in ("approve", "request_changes", "rebuild"):
             self.assertTrue(session_errors(dict(SESSION_SAMPLES[name], id="has space"), name), name)
@@ -2556,7 +2582,7 @@ class SessionContractTests(unittest.TestCase):
         defs = V.load(SESSION)["$defs"]
         pairs = {"PanelState": defs["panel_state"], "ConnectionState": defs["connection"], "PipelineStep": defs["pipeline_step"],
                  "Approval": defs["approval"], "FlaggedItem": defs["flagged_item"], "QcFrame": defs["qc_frame"],
-                 "LogLine": defs["log_line"], "ItemContext": defs["item_context"]}
+                 "LogLine": defs["log_line"], "ItemContext": defs["item_context"], "JobSummary": defs["job_summary"]}
         for ts_name, schema in pairs.items():
             ts = ts_interface(ts_name)
             self.assertEqual(set(schema["properties"]), set(ts), ts_name)
@@ -2579,6 +2605,7 @@ class SessionContractTests(unittest.TestCase):
         self.assertEqual(defs["connection"]["properties"]["engine"]["enum"], ts_union("EngineState"))
         self.assertEqual(defs["connection"]["properties"]["host"]["properties"]["state"]["enum"], ts_union("HostState"))
         self.assertEqual(defs["qc_frame"]["properties"]["verdict"]["enum"], ts_union("QcVerdict"))
+        self.assertEqual(defs["job_summary"]["properties"]["state"]["enum"], ts_union("JobState"))
         self.assertEqual(defs["flagged_item"]["properties"]["kind"]["enum"], ["medical", "religious"])
         self.assertEqual(defs["log_line"]["properties"]["level"]["enum"], ["info", "warn", "error"])
         steps = re.search(r"STEP_IDS = \[([^\]]+)\]", ts_text()).group(1)

@@ -22,6 +22,7 @@ MESSAGE_MAX = 2000                                                          # er
 PANEL_UPDATES = ("ok", "stale", "newer", "unknown")                         # welcome.update.panel
 BUILD_ID_RE = re.compile(r"[0-9]{8}T[0-9]{6}Z")                             # the build id: 20261013T142530Z (UTC)
 BUILD_MAX = 64                                                              # hello client.build maxLength
+JOBS_MAX = 50                                                               # panel_state.jobs maxItems
 
 
 def validate_message(msg) -> tuple[str, list[str]] | None:
@@ -99,10 +100,12 @@ def welcome(session_id: str, daemon_version: str, update: str = "unknown") -> di
             "update": {"panel": update if update in PANEL_UPDATES else "unknown"}}
 
 
-def state(host_state: str, host_detail: str | None = None, id: str | None = None, item: dict | None = None) -> dict:
+def state(host_state: str, host_detail: str | None = None, id: str | None = None, item: dict | None = None,
+          jobs: list | None = None) -> dict:
     """The daemon's `state`: the connection (engine connected, which host path is live; the Claude pill stays "unknown"
     until the T6.2b probe exists) and, from engine_state.panel_fields, the item's client, item, pipeline, approval and
-    QC tiles. Language, editor name, context and log are the panel's own."""
+    QC tiles. Language, editor name, context and log are the panel's own. `jobs`: the job journal's newest summaries
+    (serve/jobs.py summaries(); G2 H1), by which a reconnected panel reattaches to its commands."""
     host: dict = {"state": host_state}
     if host_detail:
         host["detail"] = clip(host_detail, 256)
@@ -114,6 +117,8 @@ def state(host_state: str, host_detail: str | None = None, id: str | None = None
     for key in ("client", "item", "pipeline", "approval", "qc"):
         if item and key in item:
             out["state"][key] = item[key]
+    if jobs is not None:
+        out["state"]["jobs"] = list(jobs)[:JOBS_MAX]
     if isinstance(id, str) and ID_RE.fullmatch(id):
         out["id"] = id
     return out

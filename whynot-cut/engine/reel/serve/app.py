@@ -41,7 +41,12 @@ FIELDS_ABANDONED_MAX (4) stuck at once (then no new worker, logged once), so a d
 never one per poll, and a snapshot never queues behind a stuck read;
 `cancel` is
 forwarded to the panel running the command. When a session ends, the commands waiting on it fail with a clear error
-and its own running commands are cancelled; a reconnect is a new hello.
+and the UXP-routed commands it sent are cancelled (the panel is told to stop); its CEP file-queue commands keep
+running in the Router's own tasks and their results land in the job journal (serve/jobs.py, G2 H1). A reconnect is a
+new hello: it sees every job in the state's `jobs` (the newest jobs.SNAPSHOT_JOBS summaries: id, action, state, times,
+result {ok, code?}; no host text, no data, no token) and re-sends a command with the same request id to attach to it (still running) or
+get its stored result replayed (done, failed or interrupted): the host runs it once. start() reconciles the journal
+with the CEP queue files before it listens (Router.recover).
 The token is never logged, never echoed and never read from a URL. Messages are encoded with allow_nan=False (NaN /
 Infinity are not JSON); a message that cannot be encoded is logged and answered with error{internal}, never ending the
 session.
@@ -213,7 +218,9 @@ class App:
     # ------------------------------------------------------------------------------------------------ lifecycle
     async def start(self, port: int = 0, *, strict_context: bool = True) -> int:
         """Listen on `port` (0 = free) on 127.0.0.1 and ::1 (ws.start_server). strict_context: from now on an unbound
-        current_context() raises."""
+        current_context() raises. The job journal is reconciled first (Router.recover), so a repeated request id
+        already meets its settled state."""
+        await self.router.recover()
         self._server, self.port = await ws.start_server(self.handler, port=port)
         self._t0 = time.monotonic()
         if strict_context:
@@ -244,6 +251,7 @@ class App:
 
         if self._server is not None:
             self._server.close()
+        await self.router.close(timeout=left(CLOSE_ROUND_S))   # job tasks; a CEP job stays journaled as active
         self._state_worker.cancel_pending()
         for shared in [self._fields_shared, *(a for _, a in self._fields_abandoned)]:
             if shared is not None:
@@ -532,7 +540,7 @@ class App:
 
     async def _command(self, s: Session, msg: dict) -> None:
         try:
-            out = await self.router.handle(msg, send=s.send, peer=s.peer, session_id=s.id)
+            out = await self.router.handle(msg, send=s.send, peer=s.peer, session_id=s.id, session_kind=s.kind)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -625,10 +633,14 @@ class App:
         capabilities (spike 0.1.3, a probe) cannot run a command, so it is not the Premiere host the pill means. Nor
         does a session whose socket has closed while its removal (_end, async) is still pending."""
         item = await self._item_fields()
+        try:
+            job_rows = self.router.journal.summaries()          # the in-memory index: no file is read
+        except (OSError, ValueError):
+            job_rows = []
         for s in reversed(list(self.sessions.values())):
             if s.kind == "uxp" and s.host == "premiere" and s.capabilities and not s.sock.closed and not s.link.closed:
                 return messages.state("uxp", f"Premiere Pro {s.host_version}".strip() if s.host_version else None, id,
-                                      item)
+                                      item, jobs=job_rows)
         ctx = common.Context(home=self.home)
 
         def cep_alive() -> bool:
@@ -639,13 +651,14 @@ class App:
             alive = await asyncio.to_thread(cep_alive)
         except Exception:
             alive = False
-        return messages.state("cep" if alive else "offline", None, id, item)
+        return messages.state("cep" if alive else "offline", None, id, item, jobs=job_rows)
 
     async def _end(self, s: Session) -> None:
         self.sessions.pop(s.id, None)
         s.link.fail_all()
-        for t in list(s.tasks):
+        uxp_jobs = self.router.session_ended(s.id)          # its UXP-routed jobs only: CEP jobs keep running
+        for t in list(s.tasks):                             # its waiters (a job outlives them)
             t.cancel()
-        if s.tasks:
-            await asyncio.gather(*s.tasks, return_exceptions=True)
+        if s.tasks or uxp_jobs:
+            await asyncio.gather(*s.tasks, *uxp_jobs, return_exceptions=True)
         self._audit("session", s.peer, session=s.id, outcome="closed", reason=f"close code {s.sock.close_code}")

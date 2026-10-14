@@ -9,6 +9,14 @@
 // the poll is also the keepalive: the daemon pings after 30 s of silence and closes after 60 s). The daemon's state
 // is a stub: only its `connection` is merged; everything else stays local. Reconnects back off 1-2-4-8-15 s.
 //
+// Jobs (Addendum G2 H1): a command outlives a lost connection. When the link drops, a pending command is kept (its own
+// expiry timer still runs) and its pipeline step keeps running; the daemon keeps running CEP jobs and journals their
+// results. After the reconnect the first `state` carries `jobs[]` (the daemon's job journal): a pending command whose
+// request id is listed is sent again with the SAME id, so the daemon attaches it to the running job or replays its
+// stored result (the host runs it once) and the real outcome shows; one that is not listed (an older daemon, or the
+// daemon never got it) settles as `lost`. Try again (run() with the same action and data after a lost / timeout
+// answer) reuses that request id too, unless jobs[] says the job failed or was interrupted: only then is it a new run.
+//
 // The token goes only into `hello` and the /status probe's Authorization header: never into a URL, a log line,
 // PanelState, a diagnosis or an error text (every text the transport hands back is scrubbed of it).
 import { ACTION_NAMES, PROTOCOL } from "./contract.ts";
@@ -19,8 +27,8 @@ import type {
   ApproveMessage, CancelMessage, CommandMessage, HelloMessage, PanelUpdate, RebuildMessage, ReplyIntent,
   RequestChangesMessage, SessionErrorCode, SnapshotMessage,
 } from "./session.ts";
-import { CLAUDE_STATES, STEP_IDS } from "./source.ts";
-import type { ClaudeState, ConnectionState, HostState, Language, LogLine, PanelDataSource, PanelState, PipelineStep, Result, StepId } from "./source.ts";
+import { CLAUDE_STATES, JOB_STATES, STEP_IDS } from "./source.ts";
+import type { ClaudeState, ConnectionState, HostState, JobState, JobSummary, Language, LogLine, PanelDataSource, PanelState, PipelineStep, Result, StepId } from "./source.ts";
 
 // ------------------------------------------------------------------------------------------------ injected transport
 
@@ -87,6 +95,10 @@ export const COMMAND_TIMEOUT_S: Partial<Record<ActionName, number>> & { default:
 };
 const RESULT_GRACE_MS = 5000;
 const LOG_MAX = 200;
+/** commands whose outcome the panel never learned (lost / timeout), remembered so Try again can reuse their id */
+const UNSETTLED_MAX = 32;
+/** a job in one of these states is a new run when tried again (H1); any other state is attached or replayed */
+const RERUN_STATES: readonly JobState[] = ["failed", "interrupted"];
 const ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 /** The command's owning pipeline step: its progress events update it. Other actions are quick and own no step. */
@@ -153,7 +165,7 @@ const BLOCKED: Omit<LinkDiagnosis, "retry_in_s"> = {
 
 type Incoming =
   | { type: "welcome"; daemon_version: string; update: PanelUpdate }
-  | { type: "state"; connection: ConnectionState; id?: string }
+  | { type: "state"; connection: ConnectionState; id?: string; jobs?: JobSummary[] }
   | { type: "reply"; id: string; intent: ReplyIntent; ok: boolean; readback?: object; error?: string; how?: string }
   | { type: "result"; id: string | undefined; action: ActionName; ok: boolean; readback?: object; error?: string; how?: string }
   | { type: "progress"; id: string; step: string; n?: number; of?: number; elapsed_s?: number }
@@ -182,6 +194,22 @@ function parseConnection(c: unknown): ConnectionState | null {
   return out;
 }
 
+/** state.jobs (H1): the well-formed entries only (a malformed one is skipped, never the whole state); undefined when
+ *  the daemon sends none (an older daemon). */
+function parseJobs(v: unknown): JobSummary[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: JobSummary[] = [];
+  for (const j of v.slice(0, 50)) {
+    if (!isObj(j) || !isId(j["request_id"]) || !isAction(j["action"]) || !JOB_STATES.includes(j["state"] as JobState)) continue;
+    if (!isStr(j["submitted_at"]) || !isStr(j["updated_at"])) continue;
+    const row: JobSummary = { request_id: j["request_id"], action: j["action"], state: j["state"] as JobState, submitted_at: j["submitted_at"], updated_at: j["updated_at"] };
+    const res = j["result"];
+    if (isObj(res) && typeof res["ok"] === "boolean") row.result = { ok: res["ok"], ...(isStr(res["code"]) ? { code: res["code"] } : {}) };
+    out.push(row);
+  }
+  return out;
+}
+
 /** A daemon -> panel message, checked by hand (no ajv in the panel bundle); null = malformed or not for a panel. */
 export function parseIncoming(text: string): Incoming | null {
   let m: unknown;
@@ -203,7 +231,8 @@ export function parseIncoming(text: string): Incoming | null {
       if (!isObj(m["state"]) || !(m["id"] === undefined || isId(m["id"]))) return null;
       const connection = parseConnection(m["state"]["connection"]);
       if (!connection) return null;
-      return isStr(m["id"]) ? { type: "state", connection, id: m["id"] } : { type: "state", connection };
+      const jobs = parseJobs(m["state"]["jobs"]);
+      return { type: "state", connection, ...(isStr(m["id"]) ? { id: m["id"] } : {}), ...(jobs ? { jobs } : {}) };
     }
     case "reply": {
       const { id, intent, ok, readback, error, how } = m;
@@ -293,6 +322,12 @@ interface PendingCommand {
   step: StepId | null;
   stop: () => void;
   resolve: (r: Result) => void;
+  /** the command message as sent: a reattach sends it again, same request id */
+  text: string;
+  /** action + data: Try again with the same key may reuse this id (H1) */
+  key: string;
+  /** the link dropped while it ran: it waits for the next state's jobs[] */
+  detached: boolean;
 }
 interface PendingIntent {
   intent: ReplyIntent;
@@ -363,6 +398,12 @@ export class DaemonSource implements PanelDataSource {
   private stopPoll: (() => void) | null = null;
   private stopRetry: (() => void) | null = null;
   private commands = new Map<string, PendingCommand>();
+  /** the daemon's job journal as the last state showed it (request id -> summary) */
+  private jobs = new Map<string, JobSummary>();
+  /** set by welcome: the next state's jobs[] settles the detached commands */
+  private reattachDue = false;
+  /** action + data -> the request id of a command whose outcome the panel never learned (lost / timeout) */
+  private unsettled = new Map<string, string>();
   private intents = new Map<string, PendingIntent>();
   private cancels = new Map<string, PendingCancel>();
   private readonly idBase: string;
@@ -463,7 +504,13 @@ export class DaemonSource implements PanelDataSource {
   run(action: ActionName, data: object): Promise<Result> {
     const sock = this.sock;
     if (!sock || !this.welcomed) return Promise.resolve(this.notConnected(action));
-    const id = this.newId("cmd");
+    // Try again after an answer the panel never got (lost / timeout): the same request id, so the daemon attaches to the
+    // job or replays its result; a new id (a new run) only when the job failed or was interrupted (H1)
+    const key = commandKey(action, data);
+    const prev = this.unsettled.get(key);
+    this.unsettled.delete(key);
+    const prevState = prev ? this.jobs.get(prev)?.state : undefined;
+    const id = prev && !this.commands.has(prev) && !(prevState && RERUN_STATES.includes(prevState)) ? prev : this.newId("cmd");
     const seconds = this.timeouts[action] ?? this.timeouts.default;
     const request: RequestEnvelope = { protocol: PROTOCOL, id, action, data, expires_at: new Date(this.t.now() + seconds * 1000).toISOString() };
     const msg: CommandMessage = { type: "command", request };
@@ -482,7 +529,7 @@ export class DaemonSource implements PanelDataSource {
       const stop = this.t.setTimer(() => {
         this.settleCommand(id, { ok: false, action, error: "The engine did not answer this request in time.", how: "Check that Premiere and the WhyNot Cut panel are open, then press Try again.", code: "timeout" });
       }, seconds * 1000 + RESULT_GRACE_MS);
-      this.commands.set(id, { action, step, stop, resolve });
+      this.commands.set(id, { action, step, stop, resolve, text, key, detached: false });
       if (step) this.setStep(step, { state: "running", request_id: id, progress: null, elapsed_s: null });
       this.sendText(sock, text);
     });
@@ -580,8 +627,10 @@ export class DaemonSource implements PanelDataSource {
     this.sock = null;
     const wasOpened = this.opened;
     this.welcomed = false;
+    this.reattachDue = false;
     this.clearTimers();
-    this.failAll("The engine connection was lost before it answered.");
+    // commands keep waiting (the daemon keeps running the job): the next state's jobs[] reattaches them (H1)
+    this.failAll("The engine connection was lost before it answered.", true);
     this.update({ connection: offlineConnection(this.localHost) });
     const err = this.lastError;
     if (code === 1008 && err?.code === "schema" && /protocol/i.test(err.message)) {
@@ -662,7 +711,13 @@ export class DaemonSource implements PanelDataSource {
     }
     switch (m.type) {
       case "state":
-        return this.onState(m.connection);
+        if (m.jobs) this.jobs = new Map(m.jobs.map((j) => [j.request_id, j] as const));
+        this.onState(m.connection);
+        if (this.reattachDue) {
+          this.reattachDue = false;
+          this.reattach(sock, m.jobs);
+        }
+        return;
       case "reply":
         return this.onReply(m);
       case "result":
@@ -683,7 +738,24 @@ export class DaemonSource implements PanelDataSource {
     this.stopHello = null;
     this.setDiag({ code: "connected", text: `Connected to the WhyNot Cut engine ${this.scrub(daemonVersion).slice(0, 64)}.` }, true);
     this.update({ connection: { ...this.state.connection, engine: "connected" } });
+    this.reattachDue = true;
     this.poll(sock);
+  }
+
+  /** The first state after a (re)connect: a detached command the daemon's journal knows is sent again with the same
+   *  request id (it attaches to the running job, or the stored result is replayed); one it does not know is lost. */
+  private reattach(sock: DaemonSocket, jobs: JobSummary[] | undefined): void {
+    const known = new Map((jobs ?? []).map((j) => [j.request_id, j] as const));
+    for (const [id, p] of [...this.commands]) {
+      if (!p.detached) continue;
+      if (!known.has(id)) {
+        this.settleCommand(id, { ok: false, action: p.action, error: "The engine connection was lost before it answered.", how: "The panel reconnects by itself; once the engine pill says connected, do it again.", code: "lost" });
+        continue;
+      }
+      p.detached = false;
+      this.sendText(sock, p.text);
+      if (this.sock !== sock) return;
+    }
   }
 
   private poll(sock: DaemonSocket): void {
@@ -717,7 +789,8 @@ export class DaemonSource implements PanelDataSource {
     if (!m.id) return;
     const p = this.commands.get(m.id);
     if (!p || p.action !== m.action) return;
-    this.settleCommand(m.id, { ok: m.ok, action: m.action, ...(m.readback ? { readback: m.readback } : {}), ...(m.error ? { error: m.error } : {}), ...(m.how ? { how: m.how } : {}) });
+    const interrupted = !m.ok && this.jobs.get(m.id)?.state === "interrupted";
+    this.settleCommand(m.id, { ok: m.ok, action: m.action, ...(m.readback ? { readback: m.readback } : {}), ...(m.error ? { error: m.error } : {}), ...(m.how ? { how: m.how } : {}), ...(interrupted ? { code: "interrupted" } : {}) });
   }
 
   private onProgress(m: Extract<Incoming, { type: "progress" }>): void {
@@ -789,6 +862,12 @@ export class DaemonSource implements PanelDataSource {
     if (!p) return;
     this.commands.delete(id);
     p.stop();
+    if (r.code === "lost" || r.code === "timeout") {
+      // the outcome is unknown (the job may still run): Try again reuses this id (H1)
+      this.unsettled.delete(p.key);
+      this.unsettled.set(p.key, id);
+      while (this.unsettled.size > UNSETTLED_MAX) this.unsettled.delete(this.unsettled.keys().next().value!);
+    }
     if (p.step) {
       const step = this.state.pipeline.find((s) => s.id === p.step);
       if (step && step.request_id === id) this.setStep(p.step, { state: r.ok ? "done" : "failed", request_id: null });
@@ -796,9 +875,15 @@ export class DaemonSource implements PanelDataSource {
     p.resolve(r);
   }
 
-  private failAll(error: string): void {
+  /** Answers every pending call. keepCommands (a lost link, H1): commands are detached instead and wait for jobs[]. */
+  private failAll(error: string, keepCommands = false): void {
     for (const id of [...this.commands.keys()]) {
-      const action = this.commands.get(id)!.action;
+      const cmd = this.commands.get(id)!;
+      if (keepCommands) {
+        cmd.detached = true;
+        continue;
+      }
+      const action = cmd.action;
       this.settleCommand(id, { ok: false, action, error, how: "The panel reconnects by itself; once the engine pill says connected, do it again.", code: "lost" });
     }
     for (const id of [...this.intents.keys()]) {
@@ -876,6 +961,15 @@ export class DaemonSource implements PanelDataSource {
         // a subscriber's failure is the subscriber's (mount turns render errors into an error view)
       }
     }
+  }
+}
+
+/** The Try again identity of a command: its action and data (JSON of plain data). */
+function commandKey(action: ActionName, data: object): string {
+  try {
+    return `${action}\n${JSON.stringify(data)}`;
+  } catch {
+    return `${action}\n?${Math.random()}`;
   }
 }
 

@@ -130,6 +130,8 @@ class FakeDaemon {
   hostDetail: string | undefined = "Premiere Pro 26.5.2";
   sockets: FakeSocket[] = [];
   invalid: string[] = [];
+  /** state.jobs (H1: the daemon's job journal); undefined = an older daemon that sends none */
+  jobs: unknown[] | undefined = undefined;
   /** the error text of an intent reply (an older serve core said "not implemented"; serve/app.py NOT_YET now) */
   notYet = NOT_YET;
   /** welcome.update (C2.3); undefined = an older daemon that sends none */
@@ -168,9 +170,13 @@ class FakeDaemon {
       return;
     }
     switch (m.type) {
-      case "snapshot":
-        s.deliver(stubState(this.host, this.hostDetail, m["id"] as string | undefined));
+      case "snapshot": {
+        const st = stubState(this.host, this.hostDetail, m["id"] as string | undefined);
+        if (this.jobs) (st["state"] as Record<string, unknown>)["jobs"] = this.jobs;
+        if (!validMessage(st)) this.invalid.push(`daemon state: ${JSON.stringify(validMessage.errors)}`);
+        s.deliver(st);
         return;
+      }
       case "approve":
       case "request_changes":
       case "rebuild":
@@ -549,23 +555,27 @@ test("diagnosis: wrong token -> auth + 1008; the next attempt re-reads engine.js
   assert.equal(r.src.diagnosis.code, "connected");
 });
 
-test("diagnosis: close 1009 -> too_large; a lost connection fails pending commands and reconnects (hello, then snapshot)", async () => {
+test("diagnosis: close 1009 -> too_large; a lost connection reconnects (hello, then snapshot) and a command the daemon does not know is lost", async () => {
   const r = await connected();
   r.daemon.onCommand = () => {};
-  const p = r.src.run("build_project", {});
+  let settled = false;
+  const p = r.src.run("build_project", {}).then((x) => ((settled = true), x));
   await flush();
   r.daemon.last.serverClose(1009, "message too big");
   await flush();
   assert.equal(r.src.diagnosis.code, "too_large");
-  const res = await p;
-  assert.equal(res.ok, false);
-  assert.match(res.error!, /connection/i);
-  assert.equal((await r.src.snapshot()).pipeline.find((x) => x.id === "build")!.state, "failed");
+  assert.equal(settled, false, "H1: a pending command waits for the reconnect's jobs[]");
+  assert.equal((await r.src.snapshot()).pipeline.find((x) => x.id === "build")!.state, "running");
   assert.equal((await r.src.snapshot()).connection.engine, "offline");
   await r.clock.advance(1000);
   assert.equal(r.daemon.sockets.length, 2);
   assert.deepEqual(r.daemon.last.sent.map((m) => m.type).slice(0, 2), ["hello", "snapshot"]);
   assert.equal(r.src.diagnosis.code, "connected");
+  const res = await p; // an older daemon: no jobs[], so the command is lost
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "lost");
+  assert.match(res.error!, /connection/i);
+  assert.equal((await r.src.snapshot()).pipeline.find((x) => x.id === "build")!.state, "failed");
   // after a good session the backoff starts again at 1 s
   r.daemon.last.serverClose(1001, "reel serve is stopping");
   await flush();
@@ -924,4 +934,121 @@ test("C2.2 r2: a failed answer carries a code the panel can localize: the sessio
   r.src.stop();
   const off = await r.src.run("open_project", { path: "D:/x.prproj" });
   assert.equal(off.code, "stopped");
+});
+
+// ---------------------------------------------------------------------------------------------------- G2 H1 jobs
+const job = (request_id: string, action: string, state: string, result?: object) => ({
+  request_id, action, state, submitted_at: "2026-10-14T11:40:02Z", updated_at: "2026-10-14T11:41:30Z", ...(result ? { result } : {}),
+});
+const reqId = (m: Msg | undefined) => (m!["request"] as { id: string }).id;
+const answerOk = (seen?: string[]) => (s: FakeSocket, m: Msg) => {
+  const req = m["request"] as { id: string; action: string };
+  seen?.push(req.id);
+  s.deliver({ type: "result", result: { ok: true, action: req.action, readback: {}, id: req.id } });
+};
+
+test("H1 reattach: a command outlives a lost link; after the reconnect jobs[] reattaches it by request id and the real outcome shows, not lost", async () => {
+  const r = await connected();
+  r.daemon.onCommand = () => {}; // Premiere is still working on it
+  const p = r.src.run("build_project", {});
+  await flush();
+  const id = reqId(sentOf(r.daemon.last, "command")[0]);
+  r.daemon.last.serverClose(1006, ""); // the panel's session drops mid-job
+  await flush();
+  const running = (await r.src.snapshot()).pipeline.find((x) => x.id === "build")!;
+  assert.deepEqual([running.state, running.request_id], ["running", id]);
+  // meanwhile the daemon finished it and journaled the result
+  r.daemon.jobs = [job(id, "build_project", "done", { ok: true }), job("other-1", "ping", "interrupted", { ok: false, code: "interrupted" })];
+  const resent: string[] = [];
+  r.daemon.onCommand = (s, m) => {
+    const req = m["request"] as { id: string; action: string };
+    resent.push(req.id);
+    s.deliver({ type: "result", result: { ok: true, action: req.action, readback: { project_path: "D:/p.prproj" }, id: req.id } });
+  };
+  await r.clock.advance(1000);
+  assert.equal(r.src.diagnosis.code, "connected");
+  const res = await p;
+  assert.deepEqual(resent, [id], "the same request id is sent again: the daemon replays it, the host runs it once");
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.readback, { project_path: "D:/p.prproj" });
+  assert.equal((await r.src.snapshot()).pipeline.find((x) => x.id === "build")!.state, "done");
+  for (const st of r.states) assert.ok(validPanelState(st), JSON.stringify(validPanelState.errors));
+  assert.deepEqual(r.daemon.invalid, []);
+});
+
+test("H1 reattach: an interrupted job answers with its stored failure and code interrupted; Try again is then a new request id", async () => {
+  const r = await connected();
+  r.daemon.onCommand = () => {};
+  const p = r.src.run("status", {});
+  await flush();
+  const id = reqId(sentOf(r.daemon.last, "command")[0]);
+  r.daemon.last.serverClose(1006, "");
+  await flush();
+  r.daemon.jobs = [job(id, "status", "interrupted", { ok: false, code: "interrupted" })];
+  r.daemon.onCommand = (s, m) => {
+    const req = m["request"] as { id: string; action: string };
+    s.deliver({ type: "result", result: { ok: false, action: req.action, error: "The job stopped before it finished.", how: "Press Try again.", id: req.id } });
+  };
+  await r.clock.advance(1000);
+  const res = await p;
+  assert.deepEqual([res.ok, res.code, res.error], [false, "interrupted", "The job stopped before it finished."]);
+  const seen: string[] = [];
+  r.daemon.onCommand = answerOk(seen);
+  assert.equal((await r.src.run("status", {})).ok, true);
+  assert.equal(seen.length, 1);
+  assert.notEqual(seen[0], id);
+});
+
+test("H1 Try again: after a lost answer the same request id is reused (attach / replay), unless jobs[] says failed or interrupted", async () => {
+  const r = await connected();
+  r.daemon.onCommand = () => {};
+  const p = r.src.run("status", {});
+  await flush();
+  const id1 = reqId(sentOf(r.daemon.last, "command")[0]);
+  r.daemon.last.serverClose(1006, "");
+  await flush();
+  r.daemon.jobs = []; // the daemon never got it
+  await r.clock.advance(1000);
+  assert.equal((await p).code, "lost");
+  const seen: string[] = [];
+  r.daemon.onCommand = answerOk(seen);
+  assert.equal((await r.src.run("status", {})).ok, true); // Try again
+  assert.deepEqual(seen, [id1], "Try again reuses the unsettled request id");
+  assert.equal((await r.src.run("status", {})).ok, true); // after a settled answer the next run is a new id
+  assert.notEqual(seen[1], id1);
+  // a lost answer whose job the journal later shows as interrupted: Try again is a new run
+  r.daemon.onCommand = () => {};
+  const p3 = r.src.run("status", { again: 1 });
+  await flush();
+  const id3 = reqId(sentOf(r.daemon.last, "command").at(-1));
+  r.daemon.last.serverClose(1006, "");
+  await flush();
+  r.daemon.jobs = [];
+  await r.clock.advance(1000);
+  assert.equal((await p3).code, "lost");
+  r.daemon.jobs = [job(id3, "status", "interrupted", { ok: false, code: "interrupted" })];
+  await r.clock.advance(2000); // the next poll's state carries it
+  r.daemon.onCommand = answerOk(seen);
+  assert.equal((await r.src.run("status", { again: 1 })).ok, true);
+  assert.notEqual(seen.at(-1), id3);
+  assert.deepEqual(r.daemon.invalid, []);
+});
+
+test("H1: a jobs[] entry that is malformed is skipped, never the whole state", async () => {
+  const r = await connected();
+  r.daemon.onCommand = () => {};
+  const p = r.src.run("status", {});
+  await flush();
+  const id = reqId(sentOf(r.daemon.last, "command")[0]);
+  r.daemon.last.serverClose(1006, "");
+  await flush();
+  const st = stubState("uxp") as { state: Record<string, unknown> };
+  st.state["jobs"] = [{ request_id: "a b", action: "status", state: "done" }, job("x-1", "nope", "done"), job("x-2", "status", "weird"), job(id, "status", "done", { ok: true })];
+  r.daemon.onCommand = answerOk();
+  const realReceive = r.daemon.receive.bind(r.daemon);
+  r.daemon.receive = (s, m) => (m.type === "snapshot" && s.sent.length === 2 ? s.deliver(st) : realReceive(s, m));
+  await r.clock.advance(1000);
+  assert.equal(r.src.diagnosis.code, "connected");
+  assert.equal((await r.src.snapshot()).connection.engine, "connected");
+  assert.equal((await p).ok, true); // the good entry still reattached it
 });
