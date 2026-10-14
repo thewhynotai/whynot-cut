@@ -231,6 +231,7 @@ class TestLayout(SharedRun):
         self.assertIn("https://claude.ai/install.sh", guide)
         what = (self.out / "WHAT-WORKS-NOW-AR.md").read_text(encoding="utf-8")
         self.assertIn("v9.9.9-p1", what)                          # passed phases come from PROGRESS.md
+        self.assertIn("(Next)", what)                             # the phase in progress is named
         self.assertNotIn("{{", what + guide + readme)
 
     def test_zip_holds_the_plugin_and_pins_the_artefacts(self):
@@ -485,6 +486,27 @@ class TestSampleClientMaker(HandoffCase):
         calls = (dest / "calls.txt").read_text(encoding="utf-8").split("\n")
         self.assertEqual(calls[0], f"ff={ff.as_posix()} prof=profile")
         self.assertEqual(calls[1:4], ["refs", "project C0239", "plan"])
+
+
+class TestPassedPhases(unittest.TestCase):
+    TABLE = ("| Phase | State | Tag | Verified |\n|---|---|---|---|\n"
+             "| 0 Baseline | **passed** | v9.9.9-p0 | x |\n"
+             "| 1 Ship-blockers | | | |\n"
+             "| 2 Engine | **in progress** | | |\n"
+             "| 3 Plugin layer | | | |\n")
+
+    def test_progress_rows(self):
+        passed, active = rel.passed_phases(self.TABLE)
+        self.assertEqual(passed, [("0", "Baseline", "v9.9.9-p0")])
+        self.assertEqual(active, [("2", "Engine")])
+
+    def test_a_gate_tag_counts_as_passed_when_progress_lags(self):
+        """The committed PROGRESS.md can lag; the gate tag `v<version>-p<N>` is the record of a passed gate."""
+        passed, active = rel.passed_phases(self.TABLE, tags=["v9.9.9-p0", "v9.9.9-p1", "v9.9.9-p2", "v2.2.1",
+                                                             "v9.9.8-p3"], version="9.9.9")
+        self.assertEqual(passed, [("0", "Baseline", "v9.9.9-p0"), ("1", "Ship-blockers", "v9.9.9-p1"),
+                                  ("2", "Engine", "v9.9.9-p2")])
+        self.assertEqual(active, [])
 
 
 def make_dir_link(link: Path, target: Path) -> bool:

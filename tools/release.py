@@ -397,8 +397,10 @@ def parse_mac_inbox(text: str) -> list:
     return out
 
 
-def passed_phases(progress: str) -> tuple:
-    """([(number, name, tag)] passed, [(number, name)] in progress) from PROGRESS.md's phase table."""
+def passed_phases(progress: str, tags=(), version: str = "") -> tuple:
+    """([(number, name, tag)] passed, [(number, name)] in progress) from PROGRESS.md's phase table. A gate tag
+    `v<version>-p<N>` also counts as passed: the committed PROGRESS.md can lag behind the tag of a passed gate."""
+    gate = {m.group(1): t for t in tags if version and (m := re.fullmatch(rf"v{re.escape(version)}-p(\d+)", t))}
     passed, active = [], []
     for ln in progress.splitlines():
         cells = [c.strip() for c in ln.strip().strip("|").split("|")]
@@ -407,7 +409,9 @@ def passed_phases(progress: str) -> tuple:
         num, name = cells[0].split(None, 1)
         state = cells[1].lower()
         if "**passed**" in state:
-            passed.append((num, name, cells[2]))
+            passed.append((num, name, cells[2] or gate.get(num, "")))
+        elif num in gate:
+            passed.append((num, name, gate[num]))
         elif "in progress" in state:
             active.append((num, name))
     return passed, active
@@ -602,7 +606,7 @@ def _items(data: dict, key: str, lang: str) -> list:
 
 
 def what_works_ar(data: dict, ctx: dict) -> str:
-    passed, active = passed_phases(ctx["progress"])
+    passed, active = passed_phases(ctx["progress"], ctx.get("tags", ()), ctx["version"])
     L = ["# WhyNot Cut: إيه اللي شغّال دلوقتي؟", ""]
     if ctx["preview"]:
         L += [f"> **نسخة تجريبية (PREVIEW) من المرحلة {ctx['phase'] or 'الحالية'}**: مش النسخة النهائية.", ""]
@@ -760,6 +764,7 @@ def _build(repo, new, ctx, ship, locked, zip_name, sample_maker, summary, log):
     if bad:
         raise HandoffError("the clone's working tree holds secrets, caches, renders or venvs (remove them from git "
                            "first): " + ", ".join(bad))
+    ctx["tags"] = _git(clone, "tag", "--merged", "HEAD").split()      # gate tags v<version>-p<N> (WHAT-WORKS page)
     log(f"  cloned {ctx['branch']} @ {ctx['sha_short']}")
 
     # ---- the plugin zip: a HEAD snapshot + the shipped Adobe artefacts, their pins filled in components.json
