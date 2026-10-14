@@ -15,19 +15,26 @@
    - Headings: Alexandria (static 600/700/800/900) for Arabic and Latin letters;
      digits 0-9 and "·" in headings come from Inter ("WNC Head Num").
    - Chapter titles: «N · العنوان» with a Western digit, e.g. «1 · مقدمة».
+     build.py wraps the «N · » in <span class="ch-num">N<span class="ch-sep"> · </span></span>
+     (the number prints as a large numeral above the title; the « · » is in the
+     text, so the bookmark and the TOC check still read «N · العنوان»).
    - Commands / paths / file names: IBM Plex Mono inside <bdi dir="ltr"><code>.
    - Western digits everywhere (counters are decimal; never type ٠–٩ in <bdi>).
 
+   DESIGN SYSTEM (round 3, Addendum G2 premium bar)
+   - Body 11.5 pt on a 20 pt line. Every vertical space is a multiple of 5 pt.
+   - Fixed pt line heights (never unitless), so Arabic marks never clip.
+
    COMPONENTS (use exactly this markup in chapters/*.html)
-     <aside class="tip"><p>…</p></aside>            نصيحة  (violet rule, right)
-     <aside class="warn"><p>…</p></aside>           تنبيه  (orchid rule, right)
+     <aside class="tip"><p>…</p></aside>            نصيحة  (violet tint, hairline border)
+     <aside class="warn"><p>…</p></aside>           تنبيه  (orchid tint, hairline border)
      <aside class="todo" data-phase="11"><p>…</p>
-       <!-- فريق: … --></aside>                       a 3.0 box (ruling R2-9).
-                                                     The visible label is
-                                                     «في الإصدار 3.0 — لم يُتحقَّق
-                                                     منه بعد» (CSS ::before, NO
-                                                     phase number). data-phase
-                                                     names the phase that
+       <!-- فريق: … --></aside>                       a 3.0 box (ruling R2-9): a quiet
+                                                     line under a hairline, led by a
+                                                     pill with the label «في الإصدار
+                                                     3.0 — لم يُتحقَّق منه بعد» (CSS
+                                                     ::before, NO phase number).
+                                                     data-phase names the phase that
                                                      finalises it (required: the
                                                      lint fails without it;
                                                      --release fails on any).
@@ -45,7 +52,7 @@
          The frame text is plain inline text (with <bdi>/<code> as needed);
          no wrapper is required (a <span> around it is harmless).
      FILLED screenshot slot (replace the frame text with the image; keep the
-     caption):
+     caption; it prints on a light violet "stage"):
        <figure class="shot"><div class="shot-frame"><img src="img/chNN-slug.png"
            alt="…"></div><figcaption>…</figcaption></figure>
        Capture guide: PNG, at least 1600 px wide, cropped to the part the
@@ -71,7 +78,20 @@
                                                      Boxes the editor types (/…),
                                                      paths and templates get no
                                                      data-who.
-     <table>…</table>                                plain tables
+     <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>
+                                                     a menu path: build.py adds
+                                                     class="path" to every LTR
+                                                     <bdi> holding «›» (a chip)
+     <table>…</table>                                plain tables: light header,
+                                                     hairline rows; the first
+                                                     column is the row's key
+                                                     (semibold). A table of pure
+                                                     data: <table class="plain">
+     <div class="fix"><p class="fix-what">…</p><p class="fix-why">…</p>
+       <p class="fix-do">…</p></div>                 a troubleshooting entry
+                                                     (ch17). A visible label
+                                                     inside each part goes in
+                                                     <span class="fix-label">…</span>
      <p class="lead-in">اكتب الأمر ده:</p>          a line ending in «:» that
                                                      introduces the next list /
                                                      .cmd / table / shot: never
@@ -80,6 +100,8 @@
                                                      list/.cmd/table/shot gets
                                                      the same rule via :has())
      h2/h3/h4 are kept with the next block too (break-after: avoid).
+     build.py adds <ol class="ch-map"> (the chapter's sections with page
+     numbers) after the first paragraph of every chapter with 2+ sections.
    ========================================================================== */
 
 /* ---------- fonts (OFL, official static TTFs, unmodified, in fonts/<family>/) ----------
@@ -133,6 +155,7 @@
   --ink: #1A1A1A;
   --muted: #5C5C66;
   --paper: #FFFFFF;
+  --paper-2: #FAFAFC;
   --heading: #1C0E47;
   --accent: #5400FB;
   --important: #B23A78;
@@ -141,6 +164,9 @@
   --tip-bg: #F1EAFF;
   --warn-bg: #FCEAF3;
   --line: #E4DDF3;
+  --stage: #F6F2FF;           /* derived: #5400FB at 5% on white */
+  --tip-line: #DDCCFE;        /* derived: #5400FB at 20% on white */
+  --warn-line: #F2C6DC;       /* derived: #D95C9B at 35% on white */
   --gradient: linear-gradient(90deg, #D95C9B 0%, #5400FB 100%);
   --f-body: "WNC Latin", "IBM Plex Sans Arabic", sans-serif;
   --f-head: "WNC Head Num", "Alexandria", "IBM Plex Sans Arabic", sans-serif;
@@ -152,18 +178,24 @@
 @page {
   size: A4;
   margin: 24mm 20mm 22mm 20mm;
-  @top-center {
+  /* running header on the start (right) side with a hairline: the page's top edge */
+  @top-right {
     content: "\2067WhyNot Cut — دليل الاستخدام\2069";
     font-family: "WNC Brand", "IBM Plex Sans Arabic", sans-serif;
-    font-size: 8.5pt;
-    font-weight: 600;
+    font-size: 8pt;
+    font-weight: 700;
     color: #5C5C66;
     vertical-align: bottom;
-    padding-bottom: 5mm;
+    padding-bottom: 8mm;
+    /* the hairline is a 0.5 pt background stripe 4 mm above the text area (Chrome
+       ignores margins on margin boxes, and a border would sit on the first line) */
+    background: linear-gradient(#E4DDF3, #E4DDF3) no-repeat;
+    background-size: 100% 0.5pt;
+    background-position: 0 calc(100% - 4mm);
   }
   @bottom-right {
-    content: "thewhynot.ai";
-    font-family: "WNC Latin", sans-serif;
+    content: "Powered by thewhynot.ai";
+    font-family: "WNC Latin", "IBM Plex Sans Arabic", sans-serif;
     font-size: 8pt;
     color: #5C5C66;
     vertical-align: top;
@@ -181,7 +213,7 @@
 }
 @page cover {
   margin: 0;
-  @top-center { content: none; }
+  @top-right { content: none; background: none; }
   @bottom-right { content: none; }
   @bottom-left { content: none; }
 }
@@ -207,13 +239,13 @@ body {
   color: var(--ink);
   font-family: var(--f-body);
   font-size: 11.5pt;
-  line-height: 1.7;
+  line-height: 20pt;
   font-weight: 400;
   text-align: start;
   orphans: 3;
   widows: 3;
 }
-p { margin: 0 0 0.7em; }
+p { margin: 0 0 10pt; }
 a { color: var(--accent); text-decoration: none; }
 strong, b { font-weight: 600; }
 .important { color: var(--important); font-weight: 600; }
@@ -223,7 +255,6 @@ strong, b { font-weight: 600; }
 h1, h2, h3, h4 {
   font-family: var(--f-head);
   color: var(--heading);
-  line-height: 1.35;
   break-after: avoid;
   page-break-after: avoid;
 }
@@ -232,23 +263,35 @@ h1, h2, h3, h4 {
    sliver at the bottom of the previous page, writes the bookmark title twice and
    points the bookmark at the previous page (margins are dropped at a page break,
    padding is not). Margins are reduced by the same amount. */
-h2 { font-size: 16pt; font-weight: 700; margin: 1.1em 0 0.5em; padding-top: 0.3em; }
-h3 { font-size: 13pt; font-weight: 600; margin: 0.9em 0 0.4em; padding-top: 0.3em; }
-h4 { font-size: 11.5pt; font-weight: 600; margin: 0.7em 0 0.3em; padding-top: 0.3em; }
+h2 { font-size: 17pt; line-height: 25pt; font-weight: 600; margin: 25pt 0 10pt; padding-top: 5pt; }
+h3 { font-size: 13pt; line-height: 20pt; font-weight: 600; margin: 15pt 0 5pt; padding-top: 5pt; }
+h4 { font-size: 11.5pt; line-height: 20pt; font-weight: 600; margin: 10pt 0 0; padding-top: 5pt; }
 
 /* keep a heading or a «… :» lead-in line with the block that follows it.
    .lead-in is the explicit class; the :has() rule does the same automatically
-   for any paragraph placed directly before a list, command block, table or shot. */
+   for any paragraph placed directly before a list, command block, table or shot
+   (and pulls it 5 pt closer to that block). */
 h2, h3, h4, .lead-in { break-after: avoid; page-break-after: avoid; }
-p:has(+ .cmd, + ol, + ul, + table, + figure.shot) { break-after: avoid; page-break-after: avoid; }
+p:has(+ .cmd, + ol, + ul, + table, + figure.shot, + .keep) { break-after: avoid; page-break-after: avoid; margin-bottom: 5pt; }
 .lead-in + * { break-before: avoid; page-break-before: avoid; }
 /* a 3.0 box closes the section it belongs to: never let it open a page alone.
    Only splittable blocks (text, lists) are kept with it, so the last lines or the
    last list item move along; a figure or table before a box may still break. */
 p:has(+ .todo), ul:has(+ .todo), ol:has(+ .todo) { break-after: avoid; page-break-after: avoid; }
+/* the 3.0 box is now one quiet line: a screenshot directly before it takes it along,
+   so the line never sits alone at the top of a page */
+figure.shot:has(+ .todo) { break-after: avoid; page-break-after: avoid; }
+figure.shot + .todo { break-before: avoid; page-break-before: avoid; }
+/* Chrome ignores break-after on the table-display figure, so build.py also wraps a
+   screenshot and the 3.0 line right after it in <div class="keep"> */
+.keep { break-inside: avoid; page-break-inside: avoid; }
 /* …and a short paragraph before a box may split 2+2, so its last lines go along
    instead of the whole paragraph leaving a hole at the bottom of the page */
 p:has(+ .todo) { orphans: 2; widows: 2; }
+
+/* ---------- lists ---------- */
+ul, ol:not(.steps) { margin: 10pt 0 15pt; padding-right: 15pt; }
+li { margin-bottom: 5pt; }
 
 /* inline commands, paths, file names: <bdi dir="ltr"><code>…</code></bdi> */
 bdi { unicode-bidi: isolate; }
@@ -258,11 +301,25 @@ code {
   color: var(--heading);
   background: var(--tip-bg);
   border-radius: 3px;
-  padding: 0.05em 0.2em;     /* narrow sides: a chip before «،» or «.» must not read as a space */
+  padding: 0.05em 0.15em;    /* narrow sides: a chip before «،» or «.» must not read as a space */
   white-space: nowrap;
 }
 /* on the violet tip background the default chip colour disappears */
 .tip code { background: #FFFFFF; }
+
+/* a menu path (build.py adds the class to every LTR <bdi> with «›») */
+.path {
+  font-family: var(--f-body);
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--heading);
+  background: var(--stage);
+  border: 0.5pt solid var(--line);
+  border-radius: 3pt;
+  padding: 0 0.3em;
+  white-space: nowrap;
+}
+.tip .path { background: #FFFFFF; }
 
 /* ---------- chapters ---------- */
 section.chapter {
@@ -270,12 +327,16 @@ section.chapter {
   page-break-before: always;
 }
 h1.ch-title {
-  font-size: 26pt;
-  font-weight: 800;
-  margin: 0 0 0.9em;
-  padding-bottom: 0.35em;
+  font-size: 28pt;
+  line-height: 40pt;
+  font-weight: 700;
+  margin: 0 0 20pt;
+  padding-bottom: 15pt;
   position: relative;
+  text-wrap: balance;      /* a long title breaks into even lines, never one word alone */
 }
+/* the opener sinks: the title block starts about 10 mm below the header */
+section.chapter > h1.ch-title { padding-top: 30pt; }
 h1.ch-title::after {
   content: "";
   position: absolute;
@@ -286,36 +347,114 @@ h1.ch-title::after {
   border-radius: 2pt;
   background: var(--gradient);
 }
+/* the chapter number as its own numeral above the title (solid accent, not
+   gradient-clipped text: the safer print choice on body pages) */
+h1.ch-title .ch-num {
+  display: block;
+  font-family: "WNC Head Num", var(--f-head);
+  font-weight: 700;
+  font-size: 54pt;
+  line-height: 60pt;
+  color: var(--accent);
+  margin-bottom: 5pt;
+}
+/* « · » stays in the text (bookmark titles read «N · العنوان») but is not printed
+   once the number is a block of its own */
+.ch-sep { display: none; }
+/* chapter lead: the first paragraph */
+section.chapter > h1.ch-title + p {
+  font-size: 13pt;
+  line-height: 25pt;
+  font-weight: 400;        /* not 300: Latin words fall back to Inter Regular and read darker */
+  color: var(--ink);
+  margin-bottom: 20pt;
+}
+/* chapter map: this chapter's sections and their pages (built by build.py) */
+ol.ch-map {
+  list-style: none;
+  margin: 0 0 30pt;
+  padding: 10pt 0;
+  border-top: 0.75pt solid var(--line);
+  border-bottom: 0.75pt solid var(--line);
+  columns: 2;
+  column-gap: 14mm;
+  column-rule: 0.5pt solid var(--line);
+  font-size: 9.5pt;
+  line-height: 17.5pt;
+  break-inside: avoid;
+}
+ol.ch-map li { margin: 0; break-inside: avoid; }
+ol.ch-map a { display: flex; align-items: baseline; gap: 6pt; color: var(--ink); }
+/* both parts isolated: a title ending in Latin («… WhyNot Cut») must not pull the
+   page number into its run */
+ol.ch-map a > span:first-child { unicode-bidi: isolate; }
+ol.ch-map .map-pg {
+  display: inline-block;
+  unicode-bidi: isolate;
+  font-family: "WNC Latin", sans-serif;
+  font-weight: 600;
+  color: var(--accent);
+  margin-right: auto;      /* the numbers form a column at the left edge, like the TOC */
+  min-width: 1.6em;
+  text-align: left;
+}
 
-/* ---------- callouts: rule on the RIGHT edge (RTL start) ---------- */
-.tip, .warn, .todo {
-  margin: 1em 0;
-  padding: 0.75em 1em 0.75em 1em;
-  border-right: 4pt solid;
-  border-radius: 4pt 0 0 4pt;
+/* ---------- callouts: tinted fill, full hairline border, even radius ---------- */
+.tip, .warn {
+  margin: 15pt 0 20pt;
+  padding: 10pt 14pt 12pt;
+  border: 0.75pt solid;
+  border-radius: 6pt;
+  font-size: 10.5pt;
+  line-height: 18pt;
   break-inside: avoid;
   page-break-inside: avoid;
 }
-.tip  { background: var(--tip-bg);  border-right-color: var(--accent); }
-.warn { background: var(--warn-bg); border-right-color: var(--important); }
-.todo {
-  background: #FAFAFC;
-  border-right-color: var(--muted);
-  border-top: 1pt dashed #C9C2D9;
-  border-bottom: 1pt dashed #C9C2D9;
-  border-left: 1pt dashed #C9C2D9;
-}
-.tip::before, .warn::before, .todo::before {
+.tip  { background: var(--tip-bg);  border-color: var(--tip-line); }
+.warn { background: var(--warn-bg); border-color: var(--warn-line); }
+.tip::before, .warn::before {
   display: block;
   font-family: var(--f-head);
-  font-weight: 700;
-  font-size: 10pt;
-  margin-bottom: 0.25em;
+  font-weight: 600;
+  font-size: 9pt;
+  line-height: 15pt;
+  margin-bottom: 2.5pt;
 }
 .tip::before  { content: "نصيحة";  color: var(--accent); }
 .warn::before { content: "تنبيه";  color: var(--important); }
-.todo::before { content: "في الإصدار 3.0 — لم يُتحقَّق منه بعد"; color: var(--muted); }
 .tip > :last-child, .warn > :last-child, .todo > :last-child { margin-bottom: 0; }
+.tip ul, .tip ol:not(.steps), .warn ul, .warn ol:not(.steps) { margin: 5pt 0; }
+
+/* ---------- 3.0 box: one quiet line under a hairline, led by a pill ---------- */
+.todo {
+  background: transparent;
+  border: 0;
+  border-top: 0.75pt solid var(--line);
+  border-radius: 0;
+  padding: 5pt 0 0;
+  margin: 10pt 0 15pt;
+  font-size: 9.5pt;
+  line-height: 15pt;
+  color: var(--muted);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.todo::before {
+  display: inline-block;
+  content: "في الإصدار 3.0 — لم يُتحقَّق منه بعد";
+  font-family: var(--f-head);
+  font-weight: 600;
+  font-size: 8pt;
+  line-height: 13pt;
+  color: var(--deep);
+  background: var(--tip-bg);
+  border-radius: 999pt;
+  padding: 0 7pt;
+  margin: 0 0 0 6pt;
+  vertical-align: 1pt;
+}
+.todo > p:first-of-type { display: inline; }
+h2 + .todo, h3 + .todo { border-top: 0; padding-top: 0; margin-top: 0; }
 
 /* ---------- screenshot placeholder ---------- */
 /* a table, not flex: the frame is ONE table cell, so its description stays one
@@ -328,7 +467,7 @@ figure.shot {
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
-  margin: 1.1em 0;
+  margin: 15pt 0 20pt;
   break-inside: avoid;
   page-break-inside: avoid;
 }
@@ -336,14 +475,15 @@ figure.shot {
   display: table-cell;
   vertical-align: middle;
   position: relative;
-  height: 52mm;            /* a table cell's height is a minimum */
-  border: 1.2pt dashed #A99BCB;
-  border-radius: 6pt;
-  background: #FAF8FF;
+  height: 40mm;            /* a table cell's height is a minimum */
+  border: 0.75pt solid var(--line);
+  border-radius: 8pt;
+  background: var(--paper-2);
   color: var(--muted);
-  font-size: 10pt;
+  font-size: 9pt;
+  line-height: 15pt;
   text-align: center;
-  padding: 10mm 8mm;
+  padding: 8mm;
 }
 .shot-frame::before {
   content: "example-clinic";
@@ -354,33 +494,38 @@ figure.shot {
   left: 3mm;
   font-family: var(--f-mono);
   font-size: 7.5pt;
+  line-height: 12pt;
   color: var(--accent);
   background: var(--tip-bg);
   border-radius: 3pt;
-  padding: 0.1em 0.5em;
+  padding: 0 0.5em;
 }
-/* a FILLED slot (real screenshot): the frame shrinks to the image, solid thin
-   border, no dashed placeholder look and no "example-clinic" label */
+/* a FILLED slot (real screenshot): the frame shrinks to the image on a light
+   violet stage, no border and no "example-clinic" label */
 .shot-frame:has(img) {
   height: auto;
-  padding: 0;
-  border: 0.75pt solid var(--line);
-  background: #FFFFFF;
+  padding: 6mm;
+  border: 0;
+  border-radius: 8pt;
+  background: var(--stage);
 }
 .shot-frame:has(img)::before { content: none; }
 .shot-frame img {
   display: block;
   max-width: 100%;
-  max-height: 150mm;
+  max-height: 140mm;
   width: auto;
   height: auto;
   margin: 0 auto;
+  border-radius: 4pt;
+  border: 0.5pt solid rgba(28, 14, 71, 0.14);
 }
 figure.shot figcaption {
   display: table-caption;
   caption-side: bottom;
-  margin-top: 0.4em;
-  font-size: 9.5pt;
+  margin-top: 5pt;
+  font-size: 9pt;
+  line-height: 15pt;
   color: var(--muted);
   text-align: center;
 }
@@ -389,51 +534,53 @@ figure.shot figcaption {
 ol.steps {
   list-style: none;
   counter-reset: step;
-  margin: 1em 0;
+  margin: 15pt 0 20pt;
   padding: 0;
 }
 ol.steps > li {
   counter-increment: step;
   position: relative;
-  padding-right: 2.5em;
-  margin-bottom: 0.65em;
-  min-height: 1.9em;
+  padding-right: 26pt;
+  margin-bottom: 10pt;
+  min-height: 20pt;
   break-inside: avoid;
 }
 ol.steps > li::before {
   content: counter(step, decimal);
   position: absolute;
   right: 0;
-  top: 0.1em;
-  width: 1.75em;
-  height: 1.75em;
-  line-height: 1.75em;
+  top: 1.5pt;
+  width: 17pt;
+  height: 17pt;
+  line-height: 17pt;
   border-radius: 50%;
   background: var(--accent);
   color: #FFFFFF;
   text-align: center;
   font-family: "WNC Latin", sans-serif;
   font-weight: 700;
-  font-size: 9.5pt;
+  font-size: 9pt;
 }
 
 /* ---------- command block (LTR, mono, real selectable text) ---------- */
 .cmd {
   direction: ltr;
   text-align: left;
-  margin: 0.9em 0;
-  padding: 0.65em 1em;
+  margin: 10pt 0 15pt;
+  padding: 10pt 14pt;
   background: var(--heading);
   color: #FFFFFF;
-  border-radius: 5pt;
-  border-top: 2.5pt solid var(--accent);
+  border: 0.75pt solid var(--deep);
+  border-radius: 6pt;
   break-inside: avoid;
   page-break-inside: avoid;
 }
+ol.steps > li > .cmd { margin-right: 0; }
 .cmd code {
   background: transparent;
   color: #FFFFFF;
-  font-size: 10pt;
+  font-size: 9.5pt;
+  line-height: 15pt;
   padding: 0;
   white-space: pre-wrap;    /* keeps the line breaks of multi-line blocks */
   overflow-wrap: normal;
@@ -455,22 +602,23 @@ ol.steps > li::before {
   direction: rtl;
   unicode-bidi: isolate;
   text-align: right;
-  margin-bottom: 0.35em;
+  margin-bottom: 5pt;
   font-family: "WNC Latin", "IBM Plex Sans Arabic", sans-serif;
-  font-size: 8.5pt;
+  font-size: 8pt;
+  line-height: 13pt;
   font-weight: 400;
   color: #C9B8FF;
   user-select: none;
   -webkit-user-select: none;
 }
 
-/* ---------- tables ---------- */
+/* ---------- tables: light header, hairline rows, no zebra ---------- */
 table {
   width: 100%;
   border-collapse: collapse;
-  margin: 1em 0;
-  font-size: 10.5pt;
-  line-height: 1.55;
+  margin: 15pt 0 20pt;
+  font-size: 10pt;
+  line-height: 16pt;
   break-inside: auto;
 }
 thead { display: table-header-group; }
@@ -478,21 +626,60 @@ tr { break-inside: avoid; page-break-inside: avoid; }
 /* the last row never moves to a new page alone (under a repeated header) */
 tbody tr:last-child:not(:first-child) { break-before: avoid; page-break-before: avoid; }
 th {
-  background: var(--heading);
-  color: #FFFFFF;
+  background: transparent;
+  color: var(--heading);
   font-family: var(--f-head);
   font-weight: 600;
+  font-size: 9.5pt;
+  line-height: 15pt;
   text-align: right;
-  padding: 0.45em 0.7em;
+  vertical-align: bottom;
+  padding: 5pt 8pt 6pt;
+  border-bottom: 1.5pt solid var(--heading);
 }
 td {
-  padding: 0.45em 0.7em;
-  border-bottom: 0.75pt solid var(--line);
+  padding: 7pt 8pt;
+  border-bottom: 0.5pt solid var(--line);
   vertical-align: top;
 }
-tbody tr:nth-child(even) td { background: #FAF8FF; }
+/* the row's key */
+td:first-child { font-weight: 600; color: var(--heading); }
+table.plain td:first-child { font-weight: 400; color: var(--ink); }
+/* troubleshooting table: give the fix column the room */
+#ch17 table td:nth-child(1) { width: 30%; }
+#ch17 table td:nth-child(2) { width: 26%; }
+#ch17 table td:nth-child(3) { width: 44%; }
 
-/* ---------- table of contents ---------- */
+/* ---------- troubleshooting entry (ch17): what happened / why / one action ---------- */
+.fix {
+  border: 0.75pt solid var(--line);
+  border-radius: 6pt;
+  padding: 10pt 14pt;
+  margin: 0 0 10pt;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.fix-what {
+  font-family: var(--f-head);
+  font-weight: 600;
+  font-size: 11.5pt;
+  line-height: 20pt;
+  color: var(--heading);
+  margin: 0 0 5pt;
+}
+.fix-why, .fix-do { font-size: 10.5pt; line-height: 18pt; margin: 0 0 5pt; }
+.fix-do { color: var(--ink); font-weight: 600; }
+.fix > :last-child { margin-bottom: 0; }
+.fix .fix-label {
+  font-family: var(--f-head);
+  font-weight: 600;
+  font-size: 8.5pt;
+  color: var(--muted);
+  margin-left: 6pt;
+}
+.fix-do .fix-label { color: var(--accent); }
+
+/* ---------- table of contents: one page of chapters ---------- */
 nav#toc {
   break-before: page;
   page-break-before: always;
@@ -500,14 +687,17 @@ nav#toc {
 nav#toc .toc-wordmark {
   font-family: var(--f-brand);
   font-weight: 700;
-  font-size: 11pt;
+  font-size: 9pt;
+  line-height: 15pt;
   color: var(--accent);
-  margin: 0 0 0.2em;
+  text-align: right;
+  margin: 0 0 5pt;
 }
 nav#toc h1.toc-title {
-  font-size: 26pt;
+  font-size: 28pt;
+  line-height: 40pt;
   font-weight: 800;
-  margin: 0 0 0.8em;
+  margin: 0 0 25pt;
 }
 nav#toc ol { list-style: none; margin: 0; padding: 0; }
 nav#toc li { margin: 0; }
@@ -520,7 +710,6 @@ nav#toc a::after {
   content: "";
   order: 2;
   flex: 1 1 auto;
-  border-bottom: 1pt dotted #B9B0CF;
   margin: 0 0.6em;
   min-width: 8mm;
 }
@@ -535,15 +724,19 @@ nav#toc .pg {
 }
 nav#toc li.toc-h1 {
   font-family: var(--f-head);
-  font-weight: 700;
-  font-size: 12pt;
-  margin-top: 0.75em;
+  font-weight: 600;
+  font-size: 13pt;
+  line-height: 20pt;
+  padding: 5pt 0;
+  border-bottom: 0.5pt solid var(--line);
 }
 nav#toc li.toc-h1 > a { color: var(--heading); }
-nav#toc li.toc-h2 {
-  font-size: 10.5pt;
-  padding-right: 1.6em;
-  margin-top: 0.2em;
+nav#toc li.toc-h1 .num {
+  display: inline-block;
+  width: 12mm;
+  font-family: "WNC Head Num", var(--f-head);
+  font-weight: 700;
+  color: var(--accent);
 }
 
 /* ---------- cover and back cover (named page, no header/footer) ---------- */
@@ -571,18 +764,19 @@ nav#toc li.toc-h2 {
   justify-content: center;
   text-align: center;
 }
+/* the arc frames the lower field instead of crossing the text */
 .cover .arc {
   position: absolute;
   left: -40mm;
   right: -40mm;
-  top: 150mm;
+  top: 196mm;
   height: 260mm;
   border-radius: 50%;
   border-top: 1.2pt solid rgba(157, 107, 255, 0.55);
   box-shadow: 0 -18mm 40mm rgba(84, 0, 251, 0.35);
 }
 .cover-logo { width: 62mm; display: block; }
-.cover-body { position: absolute; right: 22mm; left: 22mm; top: 92mm; }
+.cover-body { position: absolute; right: 22mm; left: 22mm; top: 84mm; }
 .cover-product {
   font-family: var(--f-brand);
   font-weight: 700;
@@ -606,16 +800,22 @@ nav#toc li.toc-h2 {
 .cover-bar { width: 48mm; height: 4pt; border-radius: 2pt; background: var(--gradient); margin: 0 0 7mm; }
 .cover-subtitle {
   font-weight: 300;
-  font-size: 15pt;
-  line-height: 1.6;
+  font-size: 14pt;
+  line-height: 25pt;
   color: rgba(255, 255, 255, 0.86);
   margin: 0 0 6mm;
-  max-width: 166mm;
+  max-width: 166mm;        /* 150 mm (critique) broke «Premiere | Pro.» over two lines */
 }
+/* the three verbs live in the lower field, under the arc */
 .cover-verbs {
+  position: absolute;
+  right: 22mm;
+  left: 22mm;
+  top: 222mm;
   font-family: var(--f-head);
-  font-weight: 500;
-  font-size: 12pt;
+  font-weight: 600;
+  font-size: 14pt;
+  line-height: 25pt;
   color: #FFFFFF;
   margin: 0;
 }
@@ -635,15 +835,23 @@ nav#toc li.toc-h2 {
 }
 .cover-foot .brand { font-size: 11pt; color: #FFFFFF; }
 .cover-foot .version { font-family: var(--f-head); font-weight: 600; color: #FFFFFF; }
+.back-cover .cover-bar { margin: 0 auto 12mm; }
 .back-cover .cover-logo { width: 70mm; margin: 0 auto 12mm; }
 .back-cover .slogan {
   font-family: var(--f-brand);
   font-weight: 700;
   font-size: 16pt;
-  margin: 0 0 10mm;
+  margin: 0 0 4mm;
   color: #FFFFFF;
+}
+.back-cover .bc-product {
+  font-family: var(--f-body);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-size: 10pt;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0 0 10mm;
 }
 .back-cover .contact-label { font-family: var(--f-head); font-weight: 600; font-size: 12pt; margin: 0 0 3mm; }
 .back-cover .contact { font-size: 13pt; line-height: 1.9; margin: 0; }
 .back-cover .contact a { color: #FFFFFF; }
-.back-cover .cover-bar { margin: 10mm auto 0; }

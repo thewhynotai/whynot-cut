@@ -36,7 +36,10 @@ CH1 = """<section class="chapter" id="ch01"><h1 class="ch-title" id="ch01-title"
 <p>نص</p><h2 id="ch01-what">إيه الجديد</h2><h2>عنوان من غير id</h2></section>"""
 
 CH2 = """<section class="chapter" id="ch02"><h1 class="ch-title" id="ch02-title">2 · التثبيت</h1>
-<h2 id="ch02-run">تشغيل <bdi dir="ltr"><code>reel setup</code></bdi></h2></section>"""
+<p>مقدمة الفصل</p>
+<h2 id="ch02-run">تشغيل <bdi dir="ltr"><code>reel setup</code></bdi></h2>
+<p>افتح <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi> ثم كمّل.</p>
+<h2 id="ch02-check">التأكد</h2></section>"""
 
 
 def _wrap(body):
@@ -68,15 +71,38 @@ class AssembleTests(unittest.TestCase):
         self.assertNotIn("<!--@toc-->", html)
         self.assertLess(html.index('id="ch01"'), html.index('id="ch02"'))
 
+        # the TOC page lists the chapters only (one page); the number is its own span,
+        # the « · » stays in the text so the plain text is still «N · العنوان»
         toc = html[html.index('<nav id="toc">'):html.index("</nav>")]
         ids = re.findall(r'<a href="#([^"]+)">', toc)
-        self.assertEqual(ids, ["ch01-title", "ch01-what", "ch02-title", "ch02-run"])
+        self.assertEqual(ids, ["ch01-title", "ch02-title"])
         self.assertIn('<span class="pg" data-for="ch01-title"></span>', toc)
-        self.assertIn("<span>1 · مقدمة</span>", toc)
-        # an h2 without an id is not a TOC entry
+        self.assertIn('<span><span class="num">1</span><span class="ch-sep"> · </span>مقدمة</span>', toc)
+        self.assertEqual(build.plain_text(re.search(r"<li[^>]*>(.*?)</li>", toc).group(1)), "1 · مقدمة")
+
+        # each chapter with 2+ sections gets a map after its first paragraph; ch01 has one
+        # h2 with an id (an h2 without an id is never listed), so no map
+        ch1 = html[html.index('id="ch01"'):html.index('id="ch02"')]
+        self.assertNotIn("ch-map", ch1)
         self.assertNotIn("عنوان من غير id", toc)
-        # inline isolation is kept inside the TOC entry
-        self.assertIn('<bdi dir="ltr"><code>reel setup</code></bdi>', toc)
+        ch2 = html[html.index('id="ch02"'):]
+        self.assertLess(ch2.index("مقدمة الفصل"), ch2.index('<ol class="ch-map">'))
+        self.assertLess(ch2.index('<ol class="ch-map">'), ch2.index('<h2 id="ch02-run"'))
+        cmap = ch2[ch2.index('<ol class="ch-map">'):ch2.index("</ol>")]
+        self.assertEqual(re.findall(r'<a href="#([^"]+)">', cmap), ["ch02-run", "ch02-check"])
+        self.assertIn('<span class="map-pg" data-for="ch02-run"></span>', cmap)
+        # inline isolation is kept inside the map entry
+        self.assertIn('<bdi dir="ltr"><code>reel setup</code></bdi>', cmap)
+
+        # the h1 number is wrapped for print, its plain text (bookmark title) is unchanged
+        self.assertIn('<h1 class="ch-title" id="ch02-title"><span class="ch-num">2'
+                      '<span class="ch-sep"> · </span></span>التثبيت</h1>', html)
+        self.assertEqual([build.plain_text(i) for lv, _, i in build.toc_headings(html) if lv == "h1"],
+                         ["1 · مقدمة", "2 · التثبيت"])
+        # a menu path becomes a chip
+        self.assertIn('<bdi dir="ltr" class="path">Window&nbsp;›&nbsp;Extensions</bdi>', html)
+        # the chapter sources are not touched
+        self.assertNotIn("ch-num", CH2)
         # the assembled document itself lints clean
         self.assertEqual(build.lint(html), [])
 
@@ -97,6 +123,40 @@ class AssembleTests(unittest.TestCase):
         out2 = build.fill_toc(html, {})
         self.assertIn('<span class="pg" data-for="a2"></span>', out2)
         self.assertEqual(build.toc_numbers(out), {"a1": 3, "a2": 4})
+
+    def test_fill_toc_also_fills_chapter_maps(self):
+        html = _wrap(
+            '<nav id="toc"><ol><li><a href="#a1"><span>1 · مقدمة</span><span class="pg" data-for="a1"></span></a></li>'
+            "</ol></nav>"
+            '<h1 class="ch-title" id="a1">1 · مقدمة</h1><p>نص</p>'
+            '<ol class="ch-map"><li><a href="#a2"><span>تشغيل</span><span class="map-pg" data-for="a2"></span></a></li>'
+            "</ol><h2 id=\"a2\">تشغيل</h2>"
+        )
+        out = build.fill_toc(html, {"1 · مقدمة": 3, "تشغيل": 5})
+        self.assertIn('<span class="map-pg" data-for="a2">5</span>', out)
+        # the TOC page numbers and the chapter-map numbers are tracked apart
+        self.assertEqual(build.toc_numbers(out), {"a1": 3})
+        self.assertEqual(build.map_numbers(out), {"a2": 5})
+        self.assertEqual(build.expected_numbers(out, {"تشغيل": 6}, build.map_numbers(out)), {"a2": 6})
+
+    def test_shot_followed_by_todo_is_kept_together(self):
+        shot = '<figure class="shot"><div class="shot-frame">لقطة</div><figcaption>تعليق</figcaption></figure>'
+        todo = '<aside class="todo" data-phase="6"><p>جملة.</p><!-- فريق: x --></aside>'
+        src = f"<p>نص</p>{shot}\n\n{todo}<p>بعد</p>{shot}<p>بلا مربع</p>"
+        out = build.keep_shot_with_todo(src)
+        self.assertEqual(out.count('<div class="keep">'), 1)
+        self.assertIn(f'<div class="keep">{shot}\n\n{todo}</div>', out)
+        self.assertEqual(build.keep_shot_with_todo(out), out, "idempotent")
+        self.assertEqual(build.lint(_wrap(out)), [])
+
+    def test_chapter_number_markup_is_idempotent_and_keeps_text(self):
+        h1 = '<h1 class="ch-title" id="ch12-title">12 · حذف السكتات: <bdi dir="ltr">WhyNot Hush</bdi></h1>'
+        once = build.mark_chapter_numbers(h1)
+        self.assertIn('<span class="ch-num">12<span class="ch-sep"> · </span></span>حذف', once)
+        self.assertEqual(build.mark_chapter_numbers(once), once)
+        self.assertEqual(build.plain_text(once), "12 · حذف السكتات: WhyNot Hush")
+        # other headings are untouched
+        self.assertEqual(build.mark_chapter_numbers("<h2>3 · خطوات</h2>"), "<h2>3 · خطوات</h2>")
 
 
 class LintTests(unittest.TestCase):
@@ -321,7 +381,8 @@ class HeadingTests(unittest.TestCase):
         self.assertEqual(build.plain_text(got[1][2]), "أول reel doctor")
         toc = build.build_toc(html)
         self.assertNotIn("old", toc)
-        self.assertIn("<code>reel doctor</code>", toc)
+        # section labels (chapter maps) keep their inline code
+        self.assertIn("<code>reel doctor</code>", build._toc_label(got[1][2]))
         self.assertEqual(len(build.all_headings(html)), 3)
 
 
@@ -445,14 +506,39 @@ class CmdAndShotTests(unittest.TestCase):
         self.assertRegex(self._rule(".cmd .nw"), r"white-space:\s*nowrap")
 
     def test_css_filled_shot_and_tip_code(self):
+        # a filled slot shrinks to its image on a light violet stage (round 3 design pass)
         filled = self._rule(".shot-frame:has(img)")
         self.assertRegex(filled, r"height:\s*auto")
-        self.assertRegex(filled, r"padding:\s*0")
+        self.assertRegex(filled, r"padding:\s*6mm")
+        self.assertRegex(filled, r"background:\s*var\(--stage\)")
         self.assertRegex(self._rule(".shot-frame:has(img)::before"), r"content:\s*none")
         img = self._rule(".shot-frame img")
         self.assertRegex(img, r"max-width:\s*100%")
-        self.assertRegex(img, r"max-height:\s*150mm")
+        self.assertRegex(img, r"max-height:\s*140mm")
         self.assertRegex(self._rule(".tip code"), r"background:\s*#FFFFFF")
+
+    def test_css_footer_and_running_header(self):
+        """Owner rule: the body footer reads «Powered by thewhynot.ai» (plus the page number); the covers have no
+        header or footer."""
+        css = re.sub(r"/\*.*?\*/", "", (GUIDE / "styles.css").read_text(encoding="utf-8"), flags=re.S)
+        page = re.search(r"@page\s*\{(.*?)\n\}", css, flags=re.S).group(1)
+        self.assertRegex(page, r'@bottom-right\s*\{[^}]*content:\s*"Powered by thewhynot\.ai"')
+        self.assertRegex(page, r"@bottom-left\s*\{[^}]*content:\s*counter\(page\)")
+        self.assertRegex(page, r'@top-right\s*\{[^}]*content:\s*"\\2067WhyNot Cut — دليل الاستخدام\\2069"')
+        cover = re.search(r"@page cover\s*\{(.*?)\n\}", css, flags=re.S).group(1)
+        for box in ("@top-right", "@bottom-right", "@bottom-left"):
+            self.assertRegex(cover, re.escape(box) + r"\s*\{[^}]*content:\s*none")
+
+    def test_css_todo_is_a_quiet_line_with_a_pill(self):
+        """Round 3 design pass: the 3.0 box is no longer a box — a hairline, muted small text and an inline pill."""
+        todo = self._rule(".todo")
+        self.assertRegex(todo, r"border:\s*0")
+        self.assertRegex(todo, r"border-top:\s*0\.75pt solid")
+        self.assertRegex(todo, r"background:\s*transparent")
+        pill = self._rule(".todo::before")
+        self.assertRegex(pill, r"display:\s*inline-block")
+        self.assertRegex(pill, r"border-radius:\s*999pt")
+        self.assertRegex(self._rule(".todo > p:first-of-type"), r"display:\s*inline")
 
     def test_css_claude_run_command_caption(self):
         """Ruling R2-4: a .cmd box Claude runs (data-who="claude") shows «يشغّله Claude — لا تكتبه أنت» on its own

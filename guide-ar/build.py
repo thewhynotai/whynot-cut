@@ -3,11 +3,12 @@
 
     ~/.whynot-cut/venv/Scripts/python.exe guide-ar/build.py [--out PATH] [--release]
 
-Pipeline: assemble (index.html + chapters/*.html, TOC from h1.ch-title / h2[id])
--> lint (bidi isolation, digits, anchors, ids, images, forbidden words) -> print
-with headless Edge/Chrome -> rebuild the outline + write the PDF metadata (title,
-author, open with bookmarks, source hash) -> read the outline -> fill the TOC page
-numbers -> print again -> check TOC numbers == outline pages -> copy.
+Pipeline: assemble (index.html + chapters/*.html; one-page TOC from h1.ch-title, a
+chapter map per chapter from its h2[id]) -> lint (bidi isolation, digits, anchors,
+ids, images, forbidden words) -> print with headless Edge/Chrome -> rebuild the
+outline + write the PDF metadata (title, author, open with bookmarks, source hash)
+-> read the outline -> fill the TOC and chapter-map page numbers -> print again ->
+check those numbers == outline pages -> copy.
 
 The default build is a DRAFT (placeholders allowed; the PDF subject says «مسودة»).
 --release (or WNC_RELEASE=1) also fails on any .todo / data-phase, any .shot-frame
@@ -184,14 +185,85 @@ def _toc_label(inner: str) -> str:
     return re.sub(r"\s+", " ", inner).strip()
 
 
+_NUM_LABEL = re.compile(r"\s*(\d+)\s*·\s*(.*)", re.S)
+
+
+def _split_ch_num(label: str) -> str:
+    """«N · العنوان» -> <span class="num">N</span><span class="ch-sep"> · </span>العنوان.
+
+    The « · » stays in the text (hidden by CSS), so the plain text is unchanged.
+    """
+    m = _NUM_LABEL.fullmatch(label)
+    if not m:
+        return label
+    return f'<span class="num">{m.group(1)}</span><span class="ch-sep"> · </span>{m.group(2)}'
+
+
 def build_toc(chapters_html: str) -> str:
+    """The TOC page: one row per chapter (h1.ch-title). Sections are listed in each chapter's map."""
     items = []
     for level, hid, inner in toc_headings(chapters_html):
+        if level != "h1":
+            continue
         items.append(
-            f'<li class="toc-{level}"><a href="#{hid}"><span>{_toc_label(inner)}</span>'
+            f'<li class="toc-h1"><a href="#{hid}"><span>{_split_ch_num(_toc_label(inner))}</span>'
             f'<span class="pg" data-for="{hid}"></span></a></li>'
         )
     return '<ol class="toc-list">\n' + "\n".join(items) + "\n</ol>"
+
+
+CH_MAP_MIN = 2  # a chapter with fewer sections gets no map
+_CH_OPENING = re.compile(r"""<h1\b[^>]*\bclass\s*=\s*["'][^"']*\bch-title\b[^"']*["'][^>]*>.*?</h1>"""
+                         r"""(?:\s*<p\b[^>]*>.*?</p>)?""", re.S | re.I)
+
+
+def build_chapter_map(chapter_html: str) -> str:
+    """Insert <ol class="ch-map"> (the chapter's h2[id] with page numbers) after the chapter's
+    first paragraph (or right after its h1 when no paragraph follows it)."""
+    h2s = [(hid, inner) for level, hid, inner in toc_headings(chapter_html) if level == "h2"]
+    if len(h2s) < CH_MAP_MIN:
+        return chapter_html
+    items = "\n".join(
+        f'<li><a href="#{hid}"><span>{_toc_label(inner)}</span>'
+        f'<span class="map-pg" data-for="{hid}"></span></a></li>' for hid, inner in h2s)
+    block = f'\n\n<ol class="ch-map">\n{items}\n</ol>'
+    m = _CH_OPENING.search(chapter_html)
+    if not m:
+        return chapter_html
+    return chapter_html[:m.end()] + block + chapter_html[m.end():]
+
+
+_CH_H1_NUM = re.compile(r"""(<h1\b[^>]*\bclass\s*=\s*["'][^"']*\bch-title\b[^"']*["'][^>]*>)\s*(\d+)\s*·\s*""", re.I)
+
+
+def mark_chapter_numbers(html: str) -> str:
+    """Wrap the leading «N · » of every h1.ch-title as <span class="ch-num">N<span class="ch-sep"> · </span></span>.
+
+    The heading's plain text (bookmark title, TOC check) stays «N · العنوان». Idempotent.
+    """
+    return _CH_H1_NUM.sub(lambda m: f'{m.group(1)}<span class="ch-num">{m.group(2)}'
+                                    f'<span class="ch-sep"> · </span></span>', html)
+
+
+_SHOT_THEN_TODO = re.compile(r"""(<figure\b[^>]*\bclass="shot"[^>]*>(?:(?!</figure>).)*</figure>)(\s*)"""
+                             r"""(<aside\b[^>]*\bclass="todo"[^>]*>.*?</aside>)""", re.S)
+
+
+def keep_shot_with_todo(html: str) -> str:
+    """Wrap a screenshot slot and the 3.0 line right after it in <div class="keep"> (CSS: break-inside
+    avoid), so the one-line box never opens a page alone. Chrome ignores break-after on the
+    table-display figure. Idempotent."""
+    return _SHOT_THEN_TODO.sub(
+        lambda m: m.group(0) if m.string[max(0, m.start() - 20):m.start()].endswith('<div class="keep">')
+        else f'<div class="keep">{m.group(1)}{m.group(2)}{m.group(3)}</div>', html)
+
+
+_MENU_PATH = re.compile(r'<bdi dir="ltr">([^<]*›[^<]*)</bdi>')
+
+
+def mark_menu_paths(html: str) -> str:
+    """Give every plain LTR <bdi> holding a menu path («Window › Extensions») the .path chip class."""
+    return _MENU_PATH.sub(r'<bdi dir="ltr" class="path">\1</bdi>', html)
 
 
 _CMD_BLOCK = re.compile(r"""(<div\b[^>]*\bclass\s*=\s*["'][^"']*\bcmd\b[^"']*["'][^>]*>)(.*?)(</div\s*>)""",
@@ -222,14 +294,21 @@ def nowrap_cmd_tokens(html: str) -> str:
 
 
 def assemble(root: Path) -> str:
-    """index.html with chapters/*.html (sorted by name) at <!--@chapters--> and the TOC at <!--@toc-->."""
+    """index.html with chapters/*.html (sorted by name) at <!--@chapters--> and the TOC at <!--@toc-->.
+
+    Print-only markup is added here, never in the chapter sources: the chapter map after each
+    chapter's first paragraph, the .ch-num wrapper of chapter numbers, .path chips and the
+    no-wrap spans of command blocks.
+    """
     root = Path(root)
     shell = (root / "index.html").read_text(encoding="utf-8")
     if "<!--@chapters-->" not in shell:
         raise ValueError("index.html has no <!--@chapters--> marker")
     parts = [p.read_text(encoding="utf-8").strip() for p in sorted((root / "chapters").glob("*.html"))]
     chapters = "\n\n".join(parts)
-    html = shell.replace("<!--@chapters-->", nowrap_cmd_tokens(chapters), 1)
+    printed = "\n\n".join(build_chapter_map(p) for p in parts)
+    printed = mark_chapter_numbers(mark_menu_paths(keep_shot_with_todo(nowrap_cmd_tokens(printed))))
+    html = shell.replace("<!--@chapters-->", printed, 1)
     toc = build_toc(chapters)
     if "<!--@toc-->" in html:
         html = html.replace("<!--@toc-->", toc, 1)
@@ -443,11 +522,12 @@ def lint(html: str, release: bool = False, root: Path | None = None) -> list[str
 
 
 # ---------------------------------------------------------------- TOC numbers
-_PG = re.compile(r'(<span class="pg" data-for="([^"]+)">)([^<]*)(</span>)')
+_PG = re.compile(r'(<span class="pg" data-for="([^"]+)">)([^<]*)(</span>)')          # TOC page
+_MAP_PG = re.compile(r'(<span class="map-pg" data-for="([^"]+)">)([^<]*)(</span>)')  # chapter maps
 
 
 def fill_toc(html: str, pages: dict[str, int]) -> str:
-    """Write the page of each TOC target into its <span class="pg" data-for=id>.
+    """Write the page of each TOC and chapter-map target into its <span class="pg|map-pg" data-for=id>.
 
     `pages` maps heading text (as in the PDF outline) to a 1-based page; targets
     whose heading is not in `pages` get an empty number.
@@ -458,17 +538,29 @@ def fill_toc(html: str, pages: dict[str, int]) -> str:
         page = pages.get(titles.get(m.group(2), ""))
         return f"{m.group(1)}{'' if page is None else page}{m.group(4)}"
 
-    return _PG.sub(repl, html)
+    return _MAP_PG.sub(repl, _PG.sub(repl, html))
+
+
+def _numbers(html: str, pattern: re.Pattern) -> dict[str, int | None]:
+    return {m.group(2): (int(m.group(3)) if m.group(3).strip().isdigit() else None)
+            for m in pattern.finditer(html)}
 
 
 def toc_numbers(html: str) -> dict[str, int | None]:
-    """id -> number currently written in the TOC (None when empty)."""
-    return {m.group(2): (int(m.group(3)) if m.group(3).strip().isdigit() else None) for m in _PG.finditer(html)}
+    """id -> number currently written in the TOC page (None when empty)."""
+    return _numbers(html, _PG)
 
 
-def expected_numbers(html: str, pages: dict[str, int]) -> dict[str, int | None]:
+def map_numbers(html: str) -> dict[str, int | None]:
+    """id -> number currently written in the chapter maps (None when empty)."""
+    return _numbers(html, _MAP_PG)
+
+
+def expected_numbers(html: str, pages: dict[str, int], current: dict[str, int | None] | None = None
+                     ) -> dict[str, int | None]:
+    """id -> outline page, for the ids of `current` (default: the TOC page entries)."""
     titles = {hid: plain_text(inner) for _, hid, inner in toc_headings(html)}
-    return {hid: pages.get(titles.get(hid, "")) for hid in toc_numbers(html)}
+    return {hid: pages.get(titles.get(hid, "")) for hid in (toc_numbers(html) if current is None else current)}
 
 
 # ---------------------------------------------------------------- browser / PDF
@@ -792,20 +884,24 @@ def main(argv: list[str] | None = None) -> int:
         fix_outline(pass_pdf, current, meta)
         final_pages = outline_pages(pass_pdf)
         want = expected_numbers(current, final_pages)
-        missing = [hid for hid, n in want.items() if n is None]
+        map_have = map_numbers(current)
+        map_want = expected_numbers(current, final_pages, map_have)
+        missing = [hid for hid, n in {**want, **map_want}.items() if n is None]
         if missing:
-            print("ERROR: TOC headings not found in the PDF outline:", ", ".join(missing))
+            print("ERROR: TOC / chapter-map headings not found in the PDF outline:", ", ".join(missing))
             return 1
         have = toc_numbers(current)
-        print(f"pass {attempt}: {page_count(pass_pdf)} pages, TOC {'matches' if have == want else 'updated'}")
-        if have == want:
+        done = have == want and map_have == map_want
+        print(f"pass {attempt}: {page_count(pass_pdf)} pages, TOC and chapter maps {'match' if done else 'updated'}")
+        if done:
             break
         current = fill_toc(html, final_pages)
     else:
-        print(f"ERROR: TOC numbers still differ from the outline after {MAX_PASSES} passes:")
-        for hid, n in expected_numbers(current, final_pages).items():
-            if toc_numbers(current).get(hid) != n:
-                print(f"  - #{hid}: TOC {toc_numbers(current).get(hid)} vs outline {n}")
+        print(f"ERROR: TOC / chapter-map numbers still differ from the outline after {MAX_PASSES} passes:")
+        for have_now in (toc_numbers(current), map_numbers(current)):
+            for hid, n in expected_numbers(current, final_pages, have_now).items():
+                if have_now.get(hid) != n:
+                    print(f"  - #{hid}: printed {have_now.get(hid)} vs outline {n}")
         return 1
 
     titles = {hid: plain_text(inner) for _, hid, inner in toc_headings(current)}
