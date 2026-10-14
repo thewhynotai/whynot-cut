@@ -1,0 +1,46 @@
+{
+  "_note": "Data for WHAT-WORKS-NOW-AR.md and the PREVIEW banner of Mac/START-HERE.md (tools/release.py handoff). Update it at every phase gate from PROGRESS.md (verified items only, no marketing claims), then run the handoff again. The passed phases and their tags are read from PROGRESS.md automatically; list here only what a tester can rely on and what is still missing.",
+  "as_of": "2026-10-14",
+  "works": [
+    {"ar": "تحويل فيديو كلام (talking-head) لمشروع Premiere Pro جاهز للتعديل، على ويندوز: اتجرّب على عميل تجربة عربي واتشافت الفريمات من Premiere نفسه (المرحلة 2).",
+     "en": "Talking-head clip to an editable Premiere Pro project on Windows: verified live on an Arabic test client, frames viewed from Premiere itself (Phase 2)."},
+    {"ar": "التفريغ النصي بـ Whisper large-v3 (عربي)، وبقى أسرع بحوالي ٢ مرة على حلقة طويلة (المرحلة 2).",
+     "en": "Whisper large-v3 transcription (Arabic), about 2x faster on a long episode (Phase 2)."},
+    {"ar": "خطة ريلز من حلقة بودكاست (لحظات بتايم كود ونوع المحتوى)، اتجرّبت على حلقة تجربة (المرحلة 1).",
+     "en": "Podcast reels plan (moments with timecodes and content type), smoke-tested on a test episode (Phase 1)."},
+    {"ar": "موشن After Effects: بناء المشروع والريندر اتجرّبوا على ويندوز واتشافت الفريمات (المرحلة 2).",
+     "en": "After Effects motion: project build and render verified live on Windows, frames viewed (Phase 2)."},
+    {"ar": "حماية فولدرات العملاء: البرنامج مبيمسحش ولا يغيّر ملفات العميل الأصلية، وفيه قفل يمنع جلستين يكتبوا في نفس العميل (المرحلة 1).",
+     "en": "Client-folder protection (no destructive change to client sources) and a per-client session lock (Phase 1)."},
+    {"ar": "اختبارات الكود الآلية بتعدّي على ويندوز (آلاف الاختبارات).",
+     "en": "The automated unit suite passes on Windows (thousands of tests)."}
+  ],
+  "partial": [
+    {"ar": "المُثبّت (install.ps1 / install.sh) موجود وبيتجرّب، بس مرحلة المُثبّت (7) لسه ما اتقفلتش: جرّبه على جهاز تجربة الأول.",
+     "en": "The installer scripts (install.ps1 / install.sh) exist and are being tested, but the installer phase (7) has not passed: try it on a test machine first."},
+    {"ar": "لوحة Premiere (.ccx) ولوحة الجسر (.zxp) متبنيين، بس شغل اللوحة الكامل لسه في المرحلة 6. الـ .zxp متوقّع بشهادة تجربة (self-signed) مش شهادة تجارية.",
+     "en": "The Premiere panel (.ccx) and the bridge (.zxp) are built, but the full panel work is Phase 6. The .zxp is signed with a self-signed test certificate, not a commercial one."},
+    {"ar": "دليل الاستخدام العربي (PDF) مسودة: لسه من غير صور شاشة.",
+     "en": "The Arabic PDF guide is a draft: no screenshots yet."}
+  ],
+  "coming": [
+    {"ar": "طبقة الإضافة (المرحلة 3) لسه شغّالة.",
+     "en": "The plugin layer (Phase 3) is still in progress."},
+    {"ar": "نقل أدوات Kalam وHush وTidy (المرحلة 6B).",
+     "en": "The Kalam / Hush / Tidy port (Phase 6B)."},
+    {"ar": "الموافقة على الخطة وتشغيل الشغل من جوّه لوحة Premiere (المرحلة 6).",
+     "en": "Approve-and-run from inside the Premiere panel (Phase 6)."},
+    {"ar": "برنامج تثبيت بضغطة (Setup.exe / تطبيق للماك): لسه ما اتعملش، دلوقتي التثبيت بأمر واحد في الترمينال.",
+     "en": "A click-to-install Setup app (Setup.exe / Mac app): not built; today the install is one Terminal command."},
+    {"ar": "رابط التثبيت dl.thewhynot.ai بيشتغل يوم الإطلاق بس.",
+     "en": "The dl.thewhynot.ai install address goes live on release day only."},
+    {"ar": "الماك: البرنامج لسه ما اشتغلش على ماك خالص. ده شغل المرحلة 12 على ماك الإيجنسي.",
+     "en": "macOS: never run yet. That is Phase 12 on the agency Mac."},
+    {"ar": "اختبارات الأعطال (من غير نت، قفل Premiere في النص، الهارد مليان...) والتشغيل الطويل (المرحلة 9).",
+     "en": "Fault injection (offline, Premiere closed mid-job, disk full, ...) and the soak run (Phase 9)."},
+    {"ar": "Magnific: لسه شغّال بنسخة تجريبية (mocks) من غير اتصال حقيقي (المرحلة 5).",
+     "en": "Magnific: mocks only, no live connection yet (Phase 5)."},
+    {"ar": "فيديوهات عيّنة حقيقية بحقوق استخدام (H13): العميل التجريبي دلوقتي مقاطع اصطناعية (ألوان ونغمة) بس.",
+     "en": "Real sample footage with usage rights (H13): the sample client has synthetic clips (test pattern + tone) only."}
+  ]
+}
