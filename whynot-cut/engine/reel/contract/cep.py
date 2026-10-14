@@ -130,8 +130,14 @@ def from_cep(action_v4: str, cep_response, *, id: str | None = None) -> dict:
     if isinstance(result, dict) and not (ok and not named):
         rest = {k: copy.deepcopy(v) for k, v in result.items() if k not in ("ok", "error")}
         if named:                                            # ok:true (or false) with an error: the legacy build_project shape
-            how = ("Set overwrite_existing to true to replace it (the old file is kept as a backup), or choose another "
-                   "project_path." if "overwrite_existing" in named else None)
+            how = None
+            if "overwrite_existing" in named:        # G2 R1: a backup is claimed only when the answer names one
+                bak = result.get("backup") or result.get("previous_version_backup")
+                how = (f"Set overwrite_existing to true to replace it (the old file is kept as a backup: "
+                       f"{str(bak).replace(chr(92), '/').rsplit('/', 1)[-1]}), or choose another project_path."
+                       if isinstance(bak, str) and bak.strip() else
+                       "The project file already exists; nothing was changed. To rebuild it, set overwrite_existing "
+                       "to true, or choose another project_path.")
             return _fail(action_v4, id, result["error"], how, _failure_readback(action_v4, rest))
         error, how = _refusal(result)                        # the action itself answered ok:false: keep its evidence
         return _fail(action_v4, id, error, how, _failure_readback(action_v4, rest))

@@ -13,7 +13,10 @@
                        After Effects' queues still run side by side, each on its own daemon QueueWorker (never the
                        event loop's default executor; a stuck submit never blocks process exit). The time left is
                        computed once the call holds its bridge's lock: a request that expired while it waited is
-                       answered ok:false without reaching the queue.
+                       answered ok:false without reaching the queue. build_project and ae_build_motion (SAFE_BUILDS,
+                       Addendum G2 R1) never go to the queue as sent: they run the CLI's build (ppro_build /
+                       motion_build.build_for_serve: Gate 1, the build lock, the editor and unsaved-changes checks, the
+                       backup, free space) for the reel the request's output file names.
     HostLink           the commands in flight to ONE connected host session: sends `command`, matches the `result`
                        by id, hands `progress` to the requester through a bounded per-command queue and its own relay
                        task (a requester that stops reading never stalls the host's receive loop; excess progress is
@@ -33,6 +36,7 @@ import copy
 import queue
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 from contract import RESERVED, load
@@ -53,6 +57,10 @@ CANCEL_SEND_S = 1.0                                 # how long a best-effort can
 PROGRESS_QUEUE = 32                                 # progress events waiting for one requester (more are dropped)
 PROGRESS_FLUSH_S = 1.0                              # how long a finished command waits for its queued progress
 SUBMIT_LOCKS = {"premiere": threading.Lock(), "aftereffects": threading.Lock()}   # one queue call per bridge
+# G2 R1: builds run the CLI's build (lock, editor/unsaved checks, backup, Gate 1), not the raw bridge action
+SAFE_BUILDS = {"build_project": ("lib.ppro_build", "PRPROJ_BUILT", "result"),
+               "ae_build_motion": ("lib.motion_build", "PROJECT_ASSEMBLED", "report")}
+LINK_POLL_S = 0.5                                   # how often a safe build's own queue job is looked for
 WORKER_IDLE_S = 2.0                                 # an idle queue worker thread ends after this
 _EXPIRED = object()
 
@@ -156,6 +164,7 @@ class FileQueueAdapter:
         lane = "aftereffects" if host == "aftereffects" else "premiere"    # "any" (ping): Premiere is the primary
 
         ctx = current_context()                      # the request's (raises in reel serve when none is bound)
+        began: dict = {}                             # when a safe build began (it holds the bridge's lock from then)
 
         def call():                                  # the worker binds it: contextvars do not follow a thread
             with use_context(ctx):
@@ -167,13 +176,28 @@ class FileQueueAdapter:
                     left = seconds_left(request)     # now, after waiting for the worker and the lock
                     if left <= 0:
                         return _EXPIRED
+                    if action in SAFE_BUILDS:
+                        began["t"] = time.time()
+                        return _safe_build(action, data)
                     return bridge.submit(name, data, timeout=max(1.0, min(left, cap)))
 
-        r = await asyncio.wrap_future(QUEUE_WORKERS[lane].submit(call))
+        link = asyncio.create_task(_link_job(rid, name, bridge_queue(lane, ctx), ctx, began)) \
+            if action in SAFE_BUILDS else None
+        try:
+            r = await asyncio.wrap_future(QUEUE_WORKERS[lane].submit(call))
+        finally:
+            if link is not None:
+                link.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await link
         if r is _EXPIRED:
             return failure(action, rid, "The request expired while it waited for the bridge queue (another command "
                                         "was running).",
                            "Run the command again once the running one has finished.")
+        if action in SAFE_BUILDS:
+            if r.get("ok"):
+                return {"ok": True, "action": action, "id": rid, "readback": r["readback"]}
+            return failure(action, rid, r["error"], r.get("how"))
         response = r.get("response") if isinstance(r, dict) else None
         if response is not None:
             res = from_cep(action, response, id=rid)
@@ -184,6 +208,82 @@ class FileQueueAdapter:
             res["how"] = (f"Check that WhyNot Cut runs in {app} (it starts by itself with {app}; restart {app} if "
                           "it does not answer), then run the command again.")
         return res
+
+
+def _safe_build(action: str, data: dict) -> dict:
+    """Addendum G2 R1: a build from serve is the CLI's build with all its gates (lib.*.build_for_serve), never the raw
+    bridge action. {ok, readback} or {ok: false, error, how?} (lib.build_safety.serve_answer)."""
+    from importlib import import_module
+    from lib.build_safety import serve_answer
+    mod, ok_status, readback = SAFE_BUILDS[action]
+    try:
+        r = import_module(mod).build_for_serve(data)
+    except SystemExit as e:                          # an engine step that exits with a sentence (a missing plan)
+        return {"ok": False, "error": str(e.code) if isinstance(e.code, str) else "The build stopped."}
+    return serve_answer(r, ok_status, readback)
+
+
+def bridge_queue(lane: str, ctx):
+    """The lane's CEP queue folder under the request's engine home."""
+    with use_context(ctx):
+        if lane == "aftereffects":
+            from lib import ae_bridge
+            return ae_bridge.queue_dir()
+        from lib import ppro_bridge
+        return ppro_bridge.queue_dir()
+
+
+def _first_job(queue, cep_name: str, since: float):
+    """The first `cep_name` job written to `queue` at or after `since` (read only), else None."""
+    import json
+    from pathlib import Path
+    best = None
+    try:
+        files = list(Path(queue).glob("*.data.json"))
+    except OSError:
+        return None
+    for f in files:
+        try:
+            st = f.stat()
+            if st.st_mtime < since - 1.0 or st.st_size > 8 * 1024 * 1024:
+                continue
+            doc = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(doc, dict) and doc.get("action") == cep_name and (best is None or st.st_mtime < best[0]):
+            best = (st.st_mtime, f.name[:-len(".data.json")])
+    return best[1] if best else None
+
+
+async def _link_job(rid: str, cep_name: str, queue, ctx, began: dict) -> None:
+    """G2 R1 with H1's journal: a safe build's queue job carries the approved plan's data, not the request's, so the
+    router's watcher (jobs.find_job by a hash of the request data) cannot match it. This links it instead: the first
+    `cep_name` job written to the lane's queue once the build began (it holds the bridge's lock and the build lock, so
+    no other build writes one) is journaled with its job id and queued / claimed state; a daemon restart then
+    reconciles and follows it like any CEP job. Read only on the queue; journal writes through jobs.Journal.update
+    (the entry the router started; none: nothing is written). Cancelled when the build answers."""
+    from . import jobs
+    journal = jobs.Journal(ctx.engine_home)
+    jid = state = None
+    while True:
+        await asyncio.sleep(LINK_POLL_S)
+        if "t" not in began:
+            continue
+        try:
+            if jid is None:
+                jid = await asyncio.to_thread(_first_job, queue, cep_name, began["t"])
+                if jid is None:
+                    continue
+                if await asyncio.to_thread(journal.update, rid, job_id=jid) is None:
+                    return                           # no journal entry for this request: nothing to link
+            now = await asyncio.to_thread(jobs.job_state, queue, jid)
+            if now in ("queued", "claimed") and now != state and not (state == "claimed" and now == "queued"):
+                state = now
+                await asyncio.to_thread(journal.update, rid, state=now)
+            if now == "done":
+                return
+        except (OSError, ValueError):
+            return                                   # a journal that cannot be written never fails the build
 
 
 def _queue_failure(r):

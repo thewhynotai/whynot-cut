@@ -1664,6 +1664,38 @@ class TestMotionBuild(CompiledMotion):
         self.assertEqual(aep.read_bytes(), first)                        # the backup was put back
         self.assertEqual(self.backups(), [first])
 
+    def serve(self, job: dict) -> dict:
+        """ae_build_motion through reel serve's FileQueueAdapter (the fake After Effects of this class)."""
+        import asyncio
+        from datetime import datetime, timedelta, timezone
+        from serve import adapters
+        req = {"protocol": 4, "id": "m1", "action": "ae_build_motion", "data": {"job": job},
+               "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()}
+        res = asyncio.run(adapters.FileQueueAdapter().run(req))
+        self.assertEqual((res["action"], res["id"]), ("ae_build_motion", "m1"))
+        return res
+
+    def test_serve_build_of_a_clean_existing_aep_backs_it_up(self):
+        """G2 R1 (P0): ae_build_motion from reel serve runs motion-build (motion_build.build_for_serve), never the raw
+        bridge action: the clean .aep it replaces goes to backups/, and the job is the approved plan's."""
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+        aep = self.mb.aep_path(self.reel)
+        first = aep.read_bytes()
+        res = self.serve({"aep_path": str(aep), "plan": {"scenes": []}})
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(self.backups(), [first])
+        self.assertEqual(len(self.ae.jobs[-1]["plan"]["scenes"]), len(self.plan["scenes"]))
+
+    def test_serve_build_refuses_an_unapproved_motion_plan(self):
+        self.assertEqual(self.mb.build(self.reel)["status"], "PROJECT_ASSEMBLED")
+        aep, n = self.mb.aep_path(self.reel), len(self.ae.jobs)
+        first = aep.read_bytes()
+        self.reel.p("01_analysis/plan-approval.json").unlink()
+        res = self.serve({"aep_path": str(aep), "plan": {"scenes": []}})
+        self.assertIs(res["ok"], False)
+        self.assertIn("not approved", res["error"])
+        self.assertEqual((len(self.ae.jobs), aep.read_bytes(), self.backups()), (n, first, []))
+
     def cli(self, **kw) -> tuple[int, dict]:
         """`reel motion-build` through motion_cli (exit code, printed document) with this reel."""
         import argparse

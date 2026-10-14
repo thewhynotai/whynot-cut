@@ -884,5 +884,144 @@ class TestG2R1BuildSafety(_Client):
             self.assertEqual([t for a, t in seen if a == "build_project"], [want], dur)
 
 
+def built_with_new(prj):
+    gz(prj, "NEW")
+    return {"ok": True, "response": {"ok": True, "action": "build_project", "result": {"placed": []}}}
+
+
+class TestG2R1ServeBuildIsTheCliBuild(_Client):
+    """Addendum G2 R1 (P0): build_project from `reel serve` runs the CLI's ppro-build (ppro_build.build_for_serve):
+    Gate 1 approval, the build lock, the editor-changes and unsaved-changes checks and `_prev_` parking. The raw bridge
+    action with the client's data is never sent, and overwrite_existing:true is --force, never --replace-edited."""
+
+    def approve(self, fingerprint=None):
+        from lib.plan import plan_fingerprint
+        write_json(self.p.p("01_analysis/plan-approval.json"),
+                   {"approved": True, "by": "editor", "plan_fingerprint": fingerprint or plan_fingerprint(self.p)})
+
+    def serve(self, answer, data=None, close_result=None):
+        """build_project through serve's FileQueueAdapter, with this class's fake bridge (job_data faked as DATA)."""
+        import asyncio
+        from datetime import datetime, timedelta, timezone
+        from lib import ppro_build
+        from serve import adapters
+        sent = []
+        self.sent_data = []
+
+        def submit(action, data=None, timeout=0, **k):
+            sent.append(action)
+            self.sent_data.append((action, data))
+            if action == "close_project_path":
+                res = close_result(data) if close_result else {"closed": True}
+                return {"ok": True, "response": {"ok": True, "action": action, "result": res}}
+            return answer(self.prj)
+        req = {"protocol": 4, "id": "s1", "action": "build_project",
+               "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat(),
+               "data": dict({"project_path": str(self.prj), "overwrite_existing": True,
+                             "xml_path": "C:\\elsewhere\\client.xml", "sequence_name": "S", "graphics": []}, **(data or {}))}
+        with mock.patch("lib.ppro_bridge.status", return_value={"alive": True}), \
+                mock.patch("lib.ppro_bridge.submit", side_effect=submit), \
+                mock.patch.object(ppro_build, "job_data", return_value=dict(DATA)):
+            res = asyncio.run(adapters.FileQueueAdapter().run(req))
+        self.assertEqual((res["action"], res["id"]), ("build_project", "s1"))
+        return res, sent
+
+    def never(self, prj):
+        raise AssertionError("build_project reached the bridge")
+
+    def test_a_rebuild_parks_the_old_project_as_prev_while_holding_the_build_lock(self):
+        self.pipeline_built("OLD")
+        self.approve()
+        lock = self.home / "ppro-queue" / cep_queue.LOCK_NAME
+        seen = {}
+
+        def answer(prj):
+            seen.update(lock=lock.exists(), moved=not prj.exists(),
+                        parked=["OLD" in ungz(f) for f in prj.parent.glob("*_prev_*.prproj")])
+            return built_with_new(prj)
+        res, sent = self.serve(answer)
+        self.assertEqual(seen, {"lock": True, "moved": True, "parked": [True]})
+        self.assertFalse(lock.exists())                                  # released after the build
+        self.assertEqual(sent, ["close_project_path", "build_project"])
+        self.assertNotIn("client.xml", json.dumps(self.sent_data[-1][1]))   # the job comes from the plan, not the request
+        self.assertIn("NEW", ungz(self.prj))
+        self.assertEqual(["OLD" in ungz(f) for f in self.prj.parent.glob("*_prev_*.prproj")], [True])
+        self.assertIs(res["ok"], False)                                  # the fake readback fails the build checks
+        self.assertIn("checks failed", res["error"])
+
+    def test_unsaved_changes_in_premiere_are_refused_as_in_the_cli(self):
+        self.pipeline_built("OLD")
+        self.approve()
+        res, sent = self.serve(self.never, close_result=lambda d: {"closed": False, "dirty": True})
+        self.assertIs(res["ok"], False)
+        self.assertIn("unsaved changes", res["error"])
+        self.assertEqual(sent, ["close_project_path"])
+        self.assertIn("OLD", ungz(self.prj))
+        self.assertEqual(list(self.prj.parent.glob("*_prev_*")), [])
+
+    def test_an_unapproved_or_stale_plan_is_refused(self):
+        self.pipeline_built("OLD")
+        for approve in (None, "an-older-plan"):
+            if approve:
+                self.approve(approve)
+            res, sent = self.serve(self.never)
+            self.assertIs(res["ok"], False, approve)
+            self.assertIn("not approved", res["error"])
+            self.assertEqual(sent, [])
+            self.assertIn("OLD", ungz(self.prj))
+
+    def test_overwrite_existing_takes_no_shortcut_past_the_editor_check(self):
+        bt = self.pipeline_built("OLD")
+        self.approve()
+        gz(self.prj, "EDITED BY THE EDITOR", bt + 1800)
+        res, sent = self.serve(self.never, data={"overwrite_existing": True})
+        self.assertIs(res["ok"], False)
+        self.assertIn("editor saved changes", res["error"])
+        self.assertEqual(sent, [])
+        self.assertIn("EDITED BY THE EDITOR", ungz(self.prj))
+
+    def test_without_overwrite_an_existing_project_is_refused(self):
+        self.pipeline_built("OLD")
+        self.approve()
+        res, sent = self.serve(lambda prj: {"ok": True, "response": {"ok": True, "action": "build_project", "result": {
+            "error": "project exists (set overwrite_existing)"}}}, data={"overwrite_existing": False})
+        self.assertIs(res["ok"], False)
+        self.assertIn("already exists", res["error"])
+        self.assertIn("overwrite_existing", res["how"])
+        self.assertEqual(sent, [])
+
+    def test_the_serve_journal_follows_the_builds_own_queue_job(self):
+        """With H1's job journal: the build's queue job carries the plan's data, not the request's, so the router's
+        watcher (a hash of the request data) cannot match it. The safe route links it: the first build_project job
+        written to the queue once the build began is journaled with its job id and state (queued / claimed)."""
+        from serve import jobs
+        self.pipeline_built("OLD")
+        self.approve()
+        journal = jobs.Journal(self.home)
+        journal.start("s1", action="build_project", session_kind="cli", route="cep", lane="premiere",
+                      data={"project_path": "as the client sent it"})
+        q = self.home / "ppro-queue"
+
+        def answer(prj):                                                 # what cep_queue + the bridge leave behind
+            (q / "J1.data.json").write_text(json.dumps({"action": "build_project", "job_id": "J1", "graphics": []}),
+                                            encoding="utf-8")
+            (q / "J1.running").write_text("", encoding="utf-8")
+            deadline = time.time() + 10
+            while time.time() < deadline and (journal.get("s1") or {}).get("state") != "claimed":
+                time.sleep(0.1)
+            return built_with_new(prj)
+        self.serve(answer)
+        entry = journal.get("s1")
+        self.assertEqual((entry.get("job_id"), entry["state"]), ("J1", "claimed"))
+
+    def test_a_project_path_that_is_not_this_reels_project_is_refused(self):
+        self.approve()
+        for path in (self.tmp / "elsewhere" / "V1_EDIT.prproj", self.prj.with_name("OTHER_EDIT.prproj"), "relative.prproj"):
+            res, sent = self.serve(self.never, data={"project_path": str(path)})
+            self.assertIs(res["ok"], False, path)
+            self.assertIn("nothing was built", res["error"])
+            self.assertEqual(sent, [])
+
+
 if __name__ == "__main__":
     unittest.main()

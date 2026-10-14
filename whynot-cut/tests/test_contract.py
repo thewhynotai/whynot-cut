@@ -1730,6 +1730,20 @@ class CepAdapterTests(unittest.TestCase):
         self.assertEqual((other["ok"], other["error"]), (False, "something new"))
         self.assertEqual(V.validate_result(other), [])
 
+    def test_the_exists_answer_claims_a_backup_only_when_there_is_one(self):
+        """Addendum G2 R1: the host refused because the project exists, so nothing was changed and no backup was made;
+        "kept as a backup" is said only when the answer names a backup file."""
+        inner = {"ok": True, "action": "build_project", "result": {"error": "project exists (set overwrite_existing)"}}
+        res = cep.from_cep("build_project", inner, id="b-3")
+        self.assertTrue(res["how"].startswith("The project file already exists; nothing was changed."), res)
+        self.assertNotIn("backup", res["how"])
+        self.assertEqual(fixture_json("build_project", "exists.result.json")["how"], res["how"])
+        bak = dict(inner, result=dict(inner["result"], backup="D:\\p\\X_EDIT_prev_1.prproj"))
+        res = cep.from_cep("build_project", bak, id="b-4")
+        self.assertIn("kept as a backup", res["how"])
+        self.assertIn("X_EDIT_prev_1.prproj", res["how"])
+        self.assertEqual(V.validate_result(res), [])
+
     def test_the_second_build_project_failure_return_is_a_failure_too(self):
         """wnc_ppro_lib.jsx build_project returns {error, log} when the XML import made no sequence (ok:true on the wire)."""
         inner = {"ok": True, "action": "build_project", "result": {"error": "sequence not found after XML import", "log": ["a"]}}

@@ -3,5 +3,5 @@
   "action": "build_project",
   "id": "20261011-160738-0f07a3",
   "error": "project exists (set overwrite_existing)",
-  "how": "Set overwrite_existing to true to replace it (the old file is kept as a backup), or choose another project_path."
+  "how": "The project file already exists; nothing was changed. To rebuild it, set overwrite_existing to true, or choose another project_path."
 }
