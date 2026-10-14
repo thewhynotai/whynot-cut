@@ -382,7 +382,7 @@ qe.project.getActiveSequence = function () {
 };
 fs.writeFileSync(TMP + '/png.png', 'x');
 fs.writeFileSync(TMP + '/crop.json', JSON.stringify({action: 'test_crop', project_path: TMP + '/C.prproj',
-                                                     png: TMP + '/png.png', out_dir: TMP}));
+                                                     png: TMP + '/png.png', out_dir: TMP, dev: true}));
 console.log(JSON.stringify(JSON.parse(WNCPP.run(TMP + '/crop.json')).result));
 """
 
@@ -397,6 +397,51 @@ class TestCropProbe(unittest.TestCase):
         r = node(self, CROP_JS, effects={k: v for k, v in P26_EFFECTS.items() if k != "Crop"})
         self.assertIs(r["added"], False)
         self.assertEqual(r["effect"]["error"], "not found")
+
+
+# each job runs on a fresh project; prints what WNCPP.run answered and what touched the project
+DEV_JS = r"""
+var out = [], jobs = %(jobs)s;
+for (var i = 0; i < jobs.length; i++) {
+    var touched = [];
+    app.newProject('D:\\p\\Open_EDIT.prproj');
+    app.project.closeDocument = function (s) { touched.push('closeDocument ' + s); return true; };
+    var newProject = app.newProject;
+    app.newProject = function (p) { touched.push('newProject'); return newProject(p); };
+    fs.writeFileSync(TMP + '/j.json', JSON.stringify(jobs[i]));
+    var r = JSON.parse(WNCPP.run(TMP + '/j.json'));
+    app.newProject = newProject;
+    out.push({ok: r.ok, error: r.error || null, touched: touched});
+}
+console.log(JSON.stringify(out));
+"""
+
+
+@unittest.skipUnless(NODE, "needs node to run the ExtendScript library with a fake Premiere")
+class TestDevOnlyActions(unittest.TestCase):
+    """Addendum G2 R1 (H4): close_project without save (discards the open project), test_crop and new_project_import
+    (a new project over the path, no backup) are development leftovers. The library refuses them unless the job
+    carries dev:true, which reel serve and the engine never set; nothing is touched when it refuses."""
+
+    def run_jobs(self, jobs):
+        return node(self, DEV_JS % {"jobs": json.dumps(jobs)})
+
+    def test_they_are_refused_without_dev_true(self):
+        jobs = [{"action": "close_project"}, {"action": "close_project", "save": False},
+                {"action": "test_crop", "project_path": "D:\\p\\C.prproj", "png": "x.png"},
+                {"action": "new_project_import", "project_path": "D:\\p\\Open_EDIT.prproj"},
+                {"action": "close_project", "save": False, "dev": "true"}]          # only the boolean counts
+        for job, r in zip(jobs, self.run_jobs(jobs)):
+            self.assertIs(r["ok"], False, job)
+            self.assertIn("development action", r["error"], job)
+            self.assertIn("nothing was changed", r["error"], job)
+            self.assertEqual(r["touched"], [], job)
+
+    def test_close_with_save_and_dev_jobs_still_run(self):
+        out = self.run_jobs([{"action": "close_project", "save": True},
+                             {"action": "close_project", "save": False, "dev": True}])
+        self.assertEqual([(r["ok"], r["touched"]) for r in out],
+                         [(True, ["closeDocument 1"]), (True, ["closeDocument 0"])])
 
 
 CLOSE_JS = r"""

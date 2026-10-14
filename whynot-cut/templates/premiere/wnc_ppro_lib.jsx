@@ -589,11 +589,26 @@ WNCPP.actions.close_project = function (d) {
     return {closed: ok, path: p};
 };
 
+/* Addendum G2 R1 (H4): development leftovers that discard the open project (close_project without save) or make a new
+   project over a path with no backup (test_crop, new_project_import). They run only for a job with dev:true, which
+   reel serve and the engine never set (WHYNOT_BRIDGE_DEV tooling only). */
+WNCPP.DEV_ONLY = {test_crop: true, new_project_import: true};
+WNCPP.devRefusal = function (d) {
+    if (d.dev === true) { return null; }
+    if (WNCPP.DEV_ONLY[d.action] === true || (d.action === 'close_project' && !d.save)) {
+        return d.action + (d.action === 'close_project' ? ' without save' : '') +
+            ' is a development action and is refused without dev:true (it can discard work): nothing was changed';
+    }
+    return null;
+};
+
 WNCPP.run = function (dataPath) {
     var d;
     try { d = WNCPP.read(dataPath); } catch (e) { return WNCPP.str({ok: false, error: 'bad data file: ' + e}); }
     var fn = WNCPP.actions[d.action];
     if (!fn) { return WNCPP.str({ok: false, error: 'unknown action ' + d.action}); }
+    var refused = WNCPP.devRefusal(d);
+    if (refused) { return WNCPP.str({ok: false, action: d.action, error: refused}); }
     try {
         var res = fn(d);
         return WNCPP.str({ok: true, action: d.action, result: res});
