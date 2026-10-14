@@ -396,3 +396,57 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 .m-ctxrow .m-ctx { flex: 0 1 auto; }
 .m-ctx-sep { display: block; flex: 0 0 auto; margin: 0 4px; }
 .m-ctx-item { display: block; flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ==== Addendum G round (G2-r1): additive pattern rules ===================================================== */
+/* shortcut keycap: 20 px tall, 4 px padding, 1 px #383838 border, radius 4, mono 11/16, muted, LTR, 8 px start margin */
+.m-kbd { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; height: 20px; padding: 0 3px; margin-left: 8px; border: 1px solid var(--mk-control-pressed); border-radius: 4px; color: var(--twn-text-muted); white-space: nowrap; direction: ltr; font: 400 11px/16px var(--twn-font-mono); }
+.m-rtl .m-kbd { margin-left: 0; margin-right: 8px; font: 400 11px/16px var(--twn-font-mono); }
+.m-btn-primary .m-kbd, .m-verb-primary .m-kbd { border-color: var(--mk-on-primary-muted); color: var(--mk-on-primary-muted); }
+.m-btn-disabled .m-kbd { border-color: var(--mk-control); color: var(--mk-text-disabled); }
+
+/* a row of buttons that wraps instead of overflowing (notice fix + Contact support) */
+.m-wrap { flex-wrap: wrap; }
+
+/* poster frame (9:16, 36x64) in a #0D0D0D well */
+.m-poster { display: flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; height: 64px; border-radius: 4px; background: var(--twn-frame-bg); }
+
+/* seeking timecode: a 32 px ghost control, 12 px play icon (never mirrors) */
+.m-seek { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; height: 32px; padding: 0 6px; margin: -4px -8px -4px 0; border: 2px solid transparent; border-radius: 8px; cursor: pointer; direction: ltr; }
+.m-rtl .m-seek { margin: -4px 0 -4px -8px; }
+
+/* a link that is a control: wraps, violet text on page or card, 2 px rest border, radius 8 */
+.m-linkbtn { display: flex; flex-direction: row; align-items: flex-start; padding: 2px 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; color: var(--twn-primary-text); cursor: pointer; font: 600 var(--mk-type-meta) var(--twn-font-ui); }
+.m-rtl .m-linkbtn { font: 600 var(--mk-type-ar-meta) var(--twn-font-ar); }
+.m-linkbtn .m-ico { margin-top: 0; }
+.m-rtl .m-linkbtn .m-ico { margin-top: 2px; }
+
+/* solid tappable row (Settings on Home): solid #141414, radius 8, 2 px matching border (padding 10 + 2 = 12) */
+.m-rowbtn { display: flex; flex-direction: row; align-items: center; min-height: 40px; padding: 0 10px; border: 2px solid var(--mk-card-solid); border-radius: 8px; background: var(--mk-card-solid); cursor: pointer; }
+
+/* edit map: 24 px #0D0D0D strip, radius 4, three lanes laid out by flex widths */
+.m-map { display: flex; flex-direction: column; }
+.m-map-strip { display: flex; flex-direction: column; justify-content: center; height: 24px; padding: 2px 0; border-radius: 4px; background: var(--twn-frame-bg); direction: ltr; }
+.m-map-lane { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; }
+.m-map-cut-lane { height: 8px; }
+.m-map-stmt-lane, .m-map-broll-lane { height: 4px; margin-top: 2px; }
+.m-map-gapx { display: block; flex: 0 0 auto; height: 4px; }
+.m-map-cut { display: block; flex: 0 0 1px; width: 1px; height: 8px; background: var(--twn-text-muted); }
+.m-map-stmt { display: block; flex: 0 0 auto; height: 4px; border-radius: 2px; background: var(--twn-text); }
+.m-map-stmt.m-map-flag { background: var(--twn-warn); }
+.m-map-broll { display: block; flex: 0 0 auto; height: 4px; border-radius: 2px; background: var(--mk-border-input); }
+.m-map-ends { display: flex; flex-direction: row; align-items: center; margin-top: 4px; direction: ltr; }
+.m-map-legend { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
+.m-map-key { display: flex; flex-direction: row; align-items: center; margin: 4px 12px 0 0; }
+.m-rtl .m-map-key { margin: 4px 0 0 12px; }
+.m-map-sw { display: block; flex: 0 0 12px; width: 12px; height: 4px; border-radius: 2px; }
+.m-map-sw-cut { flex: 0 0 1px; width: 1px; height: 8px; border-radius: 0; background: var(--twn-text-muted); margin: 0 5px; }
+.m-map-sw-stmt { background: var(--twn-text); }
+.m-map-sw-broll { background: var(--mk-border-input); }
+.m-map-sw-flag { background: var(--twn-warn); }
+
+/* time saved line */
+.m-saved { display: flex; flex-direction: row; align-items: flex-start; }
+.m-saved > .m-ico { margin-top: 2px; }
+.m-rtl .m-saved > .m-ico { margin-top: 4px; }
+/* the seek control is LTR inside an Arabic panel: keep the play icon's gap on its right */
+.m-rtl .m-seek .ms-1 { margin-left: 4px; margin-right: 0; }

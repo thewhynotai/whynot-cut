@@ -45,6 +45,12 @@ NAMES = [
     "chevron-right", "chevron-left", "chevron-down", "chevron-up", "check", "x", "settings", "package", "play", "message-square",
     "copy", "folder-open", "refresh-cw", "external-link", "power", "stethoscope", "book-open",
 ]
+# fan-out: each screen group adds its own names in _build/icons-<group>.txt (one per line, # comments)
+for _extra in sorted(HERE.glob("icons-*.txt")):
+    for _line in _extra.read_text(encoding="utf-8").splitlines():
+        _name = _line.split("#", 1)[0].strip()
+        if _name and _name not in NAMES:
+            NAMES.append(_name)
 STROKE = {12: 2.5, 16: 2.25, 20: 1.8}
 PPU = 40  # pixels per Lucide unit
 CELL = 24 * PPU
@@ -85,7 +91,14 @@ def raster(name: str, size: int, work: pathlib.Path, exe: str) -> np.ndarray:
            f"--user-data-dir={prof}", f"--window-size={CELL},{CELL}", "--force-device-scale-factor=1",
            "--virtual-time-budget=500", "--blink-settings=preferredColorScheme=1",
            f"--screenshot={png}", page.as_uri()]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+    for attempt in range(3):  # a headless Chrome can hang when the machine is busy: retry with a fresh profile
+        try:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+            if png.exists():
+                break
+        except subprocess.TimeoutExpired:
+            pass
+        shutil.rmtree(prof, ignore_errors=True)
     img = cv2.imdecode(np.fromfile(str(png), np.uint8), cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise RuntimeError(f"raster failed: {name} {size}")

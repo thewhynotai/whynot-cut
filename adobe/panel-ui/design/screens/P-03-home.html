@@ -3,7 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,focus,error,offline,stale,success,long">
+<meta name="mock-states" content="empty,loading,normal,focus,error,offline,no-claude-signed-out,no-claude-missing,stale,success,long">
+<meta name="mock-keys" content="Mod+Enter = the next verb (the one primary) or, when the verbs are off, the notice's fix; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = Home / Edit / Tools. No single-key shortcuts (Premiere owns them). UXP keydown capture: lab item.">
+<meta name="mock-motion" content="trigger | property | token | final static state
+next verb changes (edit to approve) | background-color, border-color of the verb rows | --mk-dur-base, --mk-ease | violet fill on the new next verb, the old one #242424 with its done result;
+verb or tool hover / press / focus | background-color, border-color | --mk-dur-fast, --mk-ease | rest fill, 2 px border;
+loading | skeleton shimmer background-position (loop) | --mk-dur-shimmer linear | static #242424 bars when animations do not run;
+notice in (error, offline, ready to approve) | background-color, border-color | --mk-dur-base | notice in its reserved slot, no layout shift;
+tab switch | colour, underline border-color | --mk-dur-base | white label + pink 2 px underline">
 <title>P-03 Home</title>
 <link rel="stylesheet" href="../mockup.css">
 <script src="../icons.js"></script>
@@ -12,31 +19,46 @@
 </head>
 <body>
 <script>
-/* P-03 Home (screen-inventory.md §3 P-03, direction §13; E-D3 round 1 fixes).
-   - Hero is neutral in every state: "Current video" + the item code + the client (nothing says "Ready").
-   - Three verb rows in fixed order (Add footage, Make my edit, Approve); only the fill moves to the next verb.
-   - Tools: plain-language label first, the brand name (Tidy, Hush, Kalam) as the small line. Models moved to Settings.
-   - Offline and error: everything that needs the WhyNot Cut app is disabled (verbs, tool cards, chevrons); last results
-     stay; the status pills agree with the notice; the notice's fix takes the violet fill (the verbs are disabled).
-   - focus: keyboard focus on the primary verb. long: long client name and item code, 99+ badge. */
+/* P-03 Home (screen-inventory.md §3 P-03, direction §13; E-D3 r1 and Addendum G r1 fixes).
+   - Hero: the poster frame (9:16), "Current video", the item code (shown once: header row 2 shows the client only),
+     the raw duration and the step status.
+   - Verbs in fixed order; a done verb shows a check and its result; Approve appears only once a plan exists.
+   - The week's time saved under the verbs (engine data request).
+   - Tools: plain label first, the brand name as the small line. Settings is a solid row, radius 8.
+   - Offline / error / no-Claude: what needs the service (or Claude) is disabled; last results stay; the notice's fix
+     is the one primary; the header status agrees with the notice. */
 (function () {
   var t = M.t, D = M.D;
   function item() { return M.html(M.ltr(D.item, "lat code")); }
 
-  function hero() {
-    return '<div class="t-meta tx-muted">' + t("home.current") + '</div>' +
-      '<div class="t-display">' + M.ltr(D.item, "lat code") + '</div>' +
-      '<div class="t-meta tx-muted mt-1">' + M.txt(D.client) + '</div>';
-  }
-  /* next: "drop" | "edit" | "approve" */
-  function verbs(next, o) {
+  function hero(o) {
     o = o || {};
-    var v = function (k, icon) {
-      var primary = !o.disabled && next === k;
-      return M.verb({ icon: icon, title: t("home." + k), sub: t("home." + k + ".sub"), primary: primary, disabled: o.disabled, focus: primary && o.focus });
-    };
-    return '<div class="m-col mt-4">' + v("drop", "folder-input") + '<div class="mt-2"></div>' + v("edit", "clapperboard") +
-      '<div class="mt-2"></div>' + v("approve", "circle-check-big") + '</div>';
+    var step = o.step || "new";
+    var line = step === "wait" ? [M.status("warn", 12), t("home.step_wait")]
+      : step === "off" ? [M.status("pending", 12), t("home.step_off")]
+      : [M.status("info", 12), t("home.step_new")];
+    return '<div class="m-row-top">' + M.poster({ disabled: o.disabled }) +
+      '<div class="m-col m-grow ms-3">' +
+        '<div class="t-meta tx-muted">' + t("home.current") + '</div>' +
+        '<div class="t-display">' + M.ltr(D.item, "lat code") + '</div>' +
+        '<div class="t-meta tx-muted">' + t("home.raw", { dur: M.html(M.mono(D.raw)) }) + '</div>' +
+        '<div class="m-row-top mt-1"><div class="m-last-ico">' + line[0] + '</div><div class="t-meta tx-muted ms-1 m-grow">' + line[1] + '</div></div>' +
+      '</div></div>';
+  }
+  /* o: {next: "edit"|"approve", disabled, focus, editBlocked} */
+  function verbs(o) {
+    var out = M.verb({ icon: "folder-input", title: t("home.drop"), done: t("home.drop.done"), disabled: o.disabled });
+    var editDone = o.next === "approve";
+    out += '<div class="mt-2"></div>' + M.verb({ icon: "clapperboard", title: t("home.edit"),
+      sub: o.editBlocked ? t("home.edit.needs_claude") : t("home.edit.sub"),
+      done: editDone ? t("home.edit.done") : null,
+      primary: o.next === "edit" && !o.disabled && !o.editBlocked, disabled: o.disabled || o.editBlocked,
+      focus: o.focus && o.next === "edit" });
+    /* Approve shows only once a plan exists */
+    if (o.next === "approve") out += '<div class="mt-2"></div>' + M.verb({ icon: "circle-check-big", title: t("home.approve"), sub: t("home.approve.sub"),
+      primary: !o.disabled, disabled: o.disabled, focus: o.focus });
+    return '<div class="m-col mt-4">' + out + '</div>' +
+      '<div class="m-saved mt-3">' + M.ico("timer", 16, o.disabled ? "ink-muted" : "ink-ok") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("home.week") + '</div></div>';
   }
   function last(textKey, agoKey) { return t("home.last", { text: M.raw(textKey), ago: M.raw(agoKey) }); }
   function tools(disabled) {
@@ -50,16 +72,24 @@
       one("captions", "kalam", "Kalam", t("home.last.none"), "pending") +
       '</div>';
   }
-  function settings() { return M.card(M.li("settings", t("home.settings")), "m-card-flush mt-5"); }
+  function settings() { return '<div class="m-col mt-5">' + M.rowbtn("settings", t("home.settings")) + '</div>'; }
   function slot(n) { return n + '<div class="mt-4"></div>'; }
+  function noClaude(missing) {
+    return {
+      needs: 0, pills: { claude: missing ? "missing" : "signed_out" },
+      body: slot(M.notice(missing ? "error" : "warn", t(missing ? "home.no_claude.missing" : "home.no_claude"),
+          { sub: t(missing ? "claude.missing.hint" : "claude.signed_out.hint"),
+            btn: { label: t(missing ? "action.install_guide" : "action.sign_in"), icon: missing ? "external-link" : "log-in", primary: true }, dismiss: false })) +
+        hero() + verbs({ next: "edit", editBlocked: true }) + tools() + settings()
+    };
+  }
 
   var STATES = {
     empty: function () {
-      var text = t("empty.noclient.text", { assets: M.html(M.mono("assets")), data: M.html(M.mono("data")) });
       return {
         noclient: true, needs: 0,
-        body: M.empty({ icon: "folder-open", title: t("empty.noclient.title"), text: text,
-          btn: M.btn(t("empty.noclient.action"), { kind: "primary", icon: "folder-open" }) }) + settings()
+        body: M.empty({ icon: "folder-open", title: t("empty.noclient.title"), text: t("empty.noclient.plain"),
+          btn: M.btn(t("empty.noclient.action"), { kind: "primary", icon: "folder-open", kbd: true }) }) + settings()
       };
     },
     loading: function () {
@@ -73,52 +103,57 @@
       };
       return {
         needs: 0,
-        body: M.skel(25, 16) + M.skel(40, 28) + '<div class="mt-1"></div>' + M.skel(30, 16) +
-          '<div class="m-col mt-4">' + box() + '<div class="mt-2"></div>' + box() + '<div class="mt-2"></div>' + box() + '</div>' +
+        body: '<div class="m-row-top"><span class="m-skel-block" style="width:36px;height:64px;border-radius:4px"></span><div class="m-col m-grow ms-3">' +
+            M.skel(30, 16) + M.skel(45, 28) + M.skel(20, 16) + M.skel(55, 16) + '</div></div>' +
+          '<div class="m-col mt-4">' + box() + '<div class="mt-2"></div>' + box() + '</div>' +
           M.eyebrow(t("home.tools"), "mt-5") + '<div class="m-col mt-2">' + tcard() + '<div class="mt-2"></div>' + tcard() + '<div class="mt-2"></div>' + tcard() + '</div>' +
           settings()
       };
     },
-    normal: function () { return { needs: 0, body: hero() + verbs("edit") + tools() + settings() }; },
-    focus: function () { return { needs: 0, body: hero() + verbs("edit", { focus: true }) + tools() + settings() }; },
+    normal: function () { return { needs: 0, body: hero() + verbs({ next: "edit" }) + tools() + settings() }; },
+    focus: function () { return { needs: 0, body: hero() + verbs({ next: "edit", focus: true }) + tools() + settings() }; },
     error: function () {
       return {
         needs: 0, pills: { engine: "noanswer" },
-        body: slot(M.notice("error", t("engine.noanswer"), { sub: t("retry.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
-          hero() + verbs("edit", { disabled: true }) + tools(true) + settings()
+        body: slot(M.notice("error", t("engine.noanswer"), { sub: t("retry.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true }, support: true })) +
+          hero({ step: "off", disabled: true }) + verbs({ next: "edit", disabled: true }) + tools(true) + settings()
       };
     },
     offline: function () {
       return {
         needs: 0, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: slot(M.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
-          hero() + verbs("edit", { disabled: true }) + tools(true) + settings()
+        body: slot(M.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false, support: true })) +
+          hero({ step: "off", disabled: true }) + verbs({ next: "edit", disabled: true }) + tools(true) + settings()
       };
     },
+    "no-claude-signed-out": function () { return noClaude(false); },
+    "no-claude-missing": function () { return noClaude(true); },
     stale: function () {
       return {
         needs: 0,
         body: slot(M.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw" } })) +
-          hero() + verbs("edit") + tools() + settings()
+          hero() + verbs({ next: "edit" }) + tools() + settings()
       };
     },
     success: function () {
       return {
         needs: 1,
-        body: slot(M.notice("ok", t("home.waiting_approval", { item: item() }))) + hero() + verbs("approve") + tools() + settings()
+        body: slot(M.notice("ok", t("home.waiting_approval", { item: item() }))) + hero({ step: "wait" }) + verbs({ next: "approve" }) + tools() + settings()
       };
     },
     long: function () {
-      return { body: slot(M.notice("ok", t("home.waiting_approval", { item: item() }))) + hero() + verbs("approve") + tools() + settings() };
+      return { body: slot(M.notice("ok", t("home.waiting_approval", { item: item() }))) + hero({ step: "wait" }) + verbs({ next: "approve" }) + tools() + settings() };
     }
   };
 
   M.mount({
     id: "P-03", name: "Home",
-    states: ["empty", "loading", "normal", "focus", "error", "offline", "stale", "success", "long"], defaultState: "normal",
+    states: ["empty", "loading", "normal", "focus", "error", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success", "long"],
+    defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.tab = "home";
+      v.ctxClientOnly = true; /* the item code shows once, in the hero */
       return v;
     }
   });

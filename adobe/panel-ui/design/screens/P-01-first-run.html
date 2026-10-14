@@ -3,7 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,focus,error,offline,stale,success,long">
+<meta name="mock-states" content="loading,normal,focus,error,offline,no-claude-signed-out,no-claude-missing,stale,success,long">
+<meta name="mock-keys" content="Mod+Enter = the screen's one primary (Set up my first client, or the red row's fix); Esc = close the top notice; no single-key shortcuts (Premiere owns them). Tabs are hidden during setup, so Alt+1/2/3 does nothing here. UXP keydown capture: lab item.">
+<meta name="mock-motion" content="trigger | property | token | final static state
+row turns green | icon fill, detail colour | --mk-dur-base, --mk-ease | ok icon + white detail;
+setup bar segment fills | background-color | --mk-dur-slow, --mk-ease | done segment #9D6BFF;
+checking spinner | transform rotate (loop) | 900 ms linear | static circle-dashed icon when animations do not run;
+button hover / press / focus | background-color, border-color | --mk-dur-fast, --mk-ease | rest fill, 2 px border (focus: white on violet);
+notice in (stale, ready) | background-color, border-color | --mk-dur-base | notice in its reserved slot, no layout shift">
 <title>P-01 First-run checklist</title>
 <link rel="stylesheet" href="../mockup.css">
 <script src="../icons.js"></script>
@@ -12,12 +19,14 @@
 </head>
 <body>
 <script>
-/* P-01 First-run checklist (screen-inventory.md §3 P-01; E-D3 round 1 fixes).
-   - The engine is "the WhyNot Cut app" and is explained once, on its row; Claude is introduced once, on its row.
-   - A row's fix button sits under its sentence (start-aligned), with a one-line hint for when the fix fails again.
-   - Primary: the first red row's fix; when the app, the link and Claude are green, "Set up my first client".
-   - Tabs are hidden while the checklist shows (G4). Empty is not applicable (the checklist is the empty state).
-   - focus: keyboard focus on the primary. long: a long client name and a 99+ badge (header test at 300 px). */
+/* P-01 First-run checklist (screen-inventory.md §3 P-01; E-D3 r1 and Addendum G r1 fixes).
+   - "3 of 4 ready" with a 4-segment bar under the intro.
+   - The background program is "the WhyNot Cut service", explained once on its row; Claude is introduced once on its row,
+     with whose account it is, the cost and where the footage goes (facts to verify, see strings.js).
+   - A row's fix sits under its sentence with a one-line hint; the first red row's fix is the one primary.
+   - no-claude-signed-out / no-claude-missing: the Claude row turns red and its fix is the primary.
+   - When the service, the link and Claude are green: "Set up my first client" (primary) + "Try the sample clip".
+   - The Needs-you badge is hidden during setup; the header status collapses to "All set" when everything is ok. */
 (function () {
   var t = M.t, D = M.D;
 
@@ -26,56 +35,78 @@
     return '<div class="m-check">' + M.status(kind) +
       '<div class="m-check-text"><div class="t-label">' + label + '</div>' +
       (o.explain ? '<div class="t-meta tx-muted">' + o.explain + '</div>' : '') +
+      (o.account ? '<div class="t-meta tx-muted mt-1">' + o.account + '</div>' : '') +
+      (o.privacy ? '<div class="m-saved mt-1">' + M.ico("lock", 16, "ink-muted") + '<div class="m-col ms-2 m-grow"><div class="t-meta tx-muted">' + o.privacy + '</div>' +
+        '<div class="t-meta tx-muted mt-1">' + t("privacy.extra") + '</div></div></div>' : '') +
       '<div class="t-meta ' + (kind === "error" ? "tx-text" : "tx-muted") + (o.explain ? " mt-1" : "") + '">' + o.detail + '</div>' +
       (o.act ? '<div class="m-row mt-2">' + o.act + '</div>' : '') +
       (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + '</div>' : '') +
       (o.under || '') + '</div></div>';
   }
-  function engineRow(kind, detail, o) {
+  function serviceRow(kind, detail, o) {
     o = o || {}; o.explain = t("checklist.engine.explain"); o.detail = detail;
     return row(kind, t("checklist.engine"), o);
   }
-  function claudeRow(kind, detail) {
-    return row(kind, t("checklist.claude"), { explain: t("checklist.claude.explain"), detail: detail });
+  function claudeRow(kind, detail, o) {
+    o = o || {}; o.explain = t("checklist.claude.explain"); o.account = t("checklist.claude.account");
+    o.privacy = t("privacy.claude_sees"); o.detail = detail;
+    return row(kind, t("checklist.claude"), o);
   }
+  function primaryBtn(label, icon, focus) { return M.btn(label, { kind: "primary", icon: icon, focus: focus, kbd: true }); }
   function clientPrimary(focus) {
-    return '<div class="m-col mt-3">' + M.btn(t("firstrun.client"), { kind: "primary", block: true, icon: "folder-input", focus: focus }) +
-      '<div class="t-meta tx-muted mt-2">' + t("firstrun.client_hint") + '</div></div>';
+    return '<div class="m-col mt-3">' + M.btn(t("firstrun.client"), { kind: "primary", block: true, icon: "folder-input", focus: focus, kbd: true }) +
+      '<div class="t-meta tx-muted mt-2">' + t("firstrun.client_hint") + '</div>' +
+      '<div class="m-col mt-3">' + M.btn(t("firstrun.sample"), { kind: "secondary", block: true, icon: "play" }) + '</div>' +
+      '<div class="t-meta tx-muted mt-2">' + t("firstrun.sample_hint") + '</div></div>';
   }
-  function intro(extra) {
+  function intro(done, kind, extra) {
     return '<div class="t-title">' + t("firstrun.title") + '</div>' +
-      '<div class="t-body tx-muted mt-1">' + t("firstrun.sub") + '</div>' + (extra || '');
+      '<div class="t-body tx-muted mt-1">' + t("firstrun.sub") + '</div>' + (extra || '') +
+      '<div class="mt-4">' + M.segbar(4, done, t("firstrun.progress", { n: done, of: 4 }), kind) + '</div>';
   }
   function report() {
-    return '<div class="m-row mt-3">' + M.btn(t("action.report"), { kind: "ghost", icon: "copy", flush: true }) + '</div>';
+    return '<div class="m-row m-wrap mt-3"><div class="m-row me-2">' + M.btn(t("action.report"), { kind: "ghost", icon: "copy", flush: true }) + '</div>' +
+      M.btn(t("action.support"), { kind: "ghost", icon: "headset" }) + '</div>';
   }
-  function allGreen(focus) {
-    return engineRow("ok", t("checklist.engine.ok")) +
+  function threeGreenRows(focus) {
+    return serviceRow("ok", t("checklist.engine.ok")) +
       row("ok", t("checklist.premiere"), { detail: t("checklist.premiere.ok") }) +
       claudeRow("ok", t("checklist.claude.ok")) +
       row("pending", t("checklist.clients"), { detail: t("checklist.clients.none"), under: clientPrimary(focus) });
+  }
+  function noClaude(missing) {
+    return {
+      pills: { claude: missing ? "missing" : "signed_out" },
+      body: intro(2, "warn") + M.card(
+        serviceRow("ok", t("checklist.engine.ok")) +
+        row("ok", t("checklist.premiere"), { detail: t("checklist.premiere.ok") }) +
+        claudeRow("error", t(missing ? "claude.missing" : "claude.signed_out"), {
+          act: primaryBtn(t(missing ? "action.install_guide" : "action.sign_in"), missing ? "external-link" : "log-in"),
+          hint: t(missing ? "claude.missing.hint" : "claude.signed_out.hint") }) +
+        row("pending", t("checklist.clients"), { detail: t("firstrun.waiting_claude") }), "m-card-flush mt-4") +
+        '<div class="m-row mt-3">' + M.btn(t("action.check_again"), { kind: "ghost", icon: "refresh-cw", flush: true }) + '</div>'
+    };
   }
 
   var STATES = {
     loading: function () {
       return {
         pills: { engine: "starting", claude: "unchecked", host: "checking" },
-        body: intro('<div class="m-row mt-4">' + M.status("busy") + '<div class="t-body ms-2">' + t("firstrun.starting") + '</div></div>') +
-          M.card(engineRow("pending", t("status.pending")) +
+        body: intro(0, "busy", '<div class="m-row mt-4">' + M.status("busy") + '<div class="t-body ms-2">' + t("firstrun.starting") + '</div></div>') +
+          M.card(serviceRow("pending", t("status.pending")) +
             row("pending", t("checklist.premiere"), { detail: t("status.pending") }) +
             claudeRow("pending", t("status.pending")) +
             row("pending", t("checklist.clients"), { detail: t("status.pending") }), "m-card-flush mt-3")
       };
     },
-    normal: function () { return { body: intro() + M.card(allGreen(false), "m-card-flush mt-4") }; },
-    focus: function () { return { body: intro() + M.card(allGreen(true), "m-card-flush mt-4") }; },
+    normal: function () { return { body: intro(3) + M.card(threeGreenRows(false), "m-card-flush mt-4") }; },
+    focus: function () { return { body: intro(3) + M.card(threeGreenRows(true), "m-card-flush mt-4") }; },
     error: function () {
       return {
         pills: { host: "unlinked" },
-        body: intro() + M.card(
-          engineRow("ok", t("checklist.engine.ok")) +
-          row("error", t("checklist.premiere"), { detail: t("link.off"),
-            act: M.btn(t("action.retry"), { kind: "primary", icon: "refresh-cw" }), hint: t("retry.hint") }) +
+        body: intro(2, "error") + M.card(
+          serviceRow("ok", t("checklist.engine.ok")) +
+          row("error", t("checklist.premiere"), { detail: t("link.off"), act: primaryBtn(t("action.retry"), "refresh-cw"), hint: t("retry.hint") }) +
           claudeRow("ok", t("checklist.claude.ok")) +
           row("pending", t("checklist.clients"), { detail: t("firstrun.waiting_link") }), "m-card-flush mt-4") + report()
       };
@@ -83,37 +114,42 @@
     offline: function () {
       return {
         pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: intro() + M.card(
-          engineRow("error", t("engine.off"), { act: M.btn(t("action.start_app"), { kind: "primary", icon: "power" }), hint: t("engine.off.hint") }) +
+        body: intro(0, "error") + M.card(
+          serviceRow("error", t("engine.off"), { act: primaryBtn(t("action.start_app"), "power"), hint: t("engine.off.hint") }) +
           row("pending", t("checklist.premiere"), { detail: t("firstrun.waiting_engine") }) +
           claudeRow("pending", t("firstrun.waiting_engine")) +
           row("pending", t("checklist.clients"), { detail: t("firstrun.waiting_engine") }), "m-card-flush mt-4") + report()
       };
     },
+    "no-claude-signed-out": function () { return noClaude(false); },
+    "no-claude-missing": function () { return noClaude(true); },
     stale: function () {
       return {
         body: M.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw" } }) +
-          '<div class="mt-4"></div>' + intro() + M.card(allGreen(false), "m-card-flush mt-4")
+          '<div class="mt-4"></div>' + intro(3) + M.card(threeGreenRows(false), "m-card-flush mt-4")
       };
     },
     success: function () {
       return {
-        body: M.notice("ok", t("firstrun.ready")) + '<div class="mt-4"></div>' + intro() + M.card(
-          engineRow("ok", t("checklist.engine.ok")) +
+        body: M.notice("ok", t("firstrun.ready")) + '<div class="mt-4"></div>' + intro(4, "ok") + M.card(
+          serviceRow("ok", t("checklist.engine.ok")) +
           row("ok", t("checklist.premiere"), { detail: t("checklist.premiere.ok") }) +
           claudeRow("ok", t("checklist.claude.ok")) +
-          row("ok", t("checklist.clients"), { detail: t("checklist.clients.ok", { client: D.client }) }), "m-card-flush mt-4")
+          row("ok", t("checklist.clients"), { detail: t("checklist.clients.ok", { client: D.client }) }), "m-card-flush mt-4") +
+          '<div class="m-col mt-4">' + M.btn(t("firstrun.sample"), { kind: "secondary", block: true, icon: "play" }) + '</div>' +
+          '<div class="t-meta tx-muted mt-2">' + t("firstrun.sample_hint") + '</div>'
       };
     },
-    long: function () { var v = STATES.success(); return v; }
+    long: function () { return STATES.success(); }
   };
 
   M.mount({
     id: "P-01", name: "First-run checklist",
-    states: ["loading", "normal", "focus", "error", "offline", "stale", "success", "long"], defaultState: "normal",
+    states: ["loading", "normal", "focus", "error", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success", "long"],
+    defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
-      v.noclient = true; v.needs = 0; v.tab = null;
+      v.noclient = true; v.setup = true; v.tab = null;
       return v;
     }
   });
