@@ -25,7 +25,7 @@ from .common import engine_home, load_config, log, models_dir, now_iso, read_jso
 BACKENDS = ("auto", "ct2", "mlx")
 ALIASES = {"faster-whisper": "ct2", "ctranslate2": "ct2", "mlx-whisper": "mlx"}
 LABEL = {"ct2": "faster-whisper", "mlx": "mlx-whisper"}
-CT2_REPOS = {"large-v3": "Systran/faster-whisper-large-v3", "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+CT2_REPOS = {"large-v3": "Systran/faster-whisper-large-v3", "large-v3-turbo": "dropbox-dash/faster-whisper-large-v3-turbo",  # moved from mobiuslabsgmbh (HF redirect)
              "medium": "Systran/faster-whisper-medium", "small": "Systran/faster-whisper-small"}
 MLX_REPOS = {"large-v3": "mlx-community/whisper-large-v3-mlx", "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
              "medium": "mlx-community/whisper-medium-mlx", "small": "mlx-community/whisper-small-mlx"}

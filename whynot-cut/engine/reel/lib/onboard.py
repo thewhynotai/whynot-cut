@@ -39,12 +39,41 @@ def bridge_info() -> dict:
 
 
 def _extension_fix(app: str) -> dict:
-    """How the WhyNot Cut extension gets installed: from this plugin's source (a dev checkout), else the installer."""
-    if cep_bundle.has_source():
+    """How the WhyNot Cut extension gets installed: `reel setup` only when it can install something (the signed ZXP
+    this plugin carries, or the dev source with WHYNOT_BRIDGE_DEV=1: ppro_bridge.install), else the installer."""
+    if cep_bundle.zxp_path().is_file() or (cep_bundle.dev_build_allowed() and cep_bundle.has_source()):
         return {"item": f"WhyNot Cut extension ({app})", "who": "claude",
                 "fix": "reel setup   (installs the WhyNot Cut extension; Premiere and After Effects share it)"}
     return {"item": f"WhyNot Cut extension ({app})", "who": "editor",
             "fix": "install WhyNot Cut with its installer (the signed extension comes with it)"}
+
+
+# The daemon's heartbeat engine_start {outcome, reason} (adobe/cep-bridge/js/bridge.js): `refused` and `gave_up` as one
+# plain sentence for the editor. The reason codes never reach the editor.
+ENGINE_START_FIXES = {
+    "outside_profile": "the WhyNot Cut engine is installed outside your user folder, so Premiere Pro won't start it: "
+                       "reinstall WhyNot Cut with its installer (it installs into your user folder), then restart "
+                       "Premiere Pro",
+    "metachar_in_path": "the WhyNot Cut folder's path holds a character Premiere Pro can't start safely (one of "
+                        "\" % ^ & | < > !): reinstall WhyNot Cut with its installer into a folder without them",
+    "not_found": "the file that starts the WhyNot Cut engine is missing: reinstall WhyNot Cut with its installer, then "
+                 "restart Premiere Pro",
+    "gave_up": "Premiere Pro tried to start the WhyNot Cut engine 5 times and stopped trying: quit and reopen Premiere "
+               "Pro. If it stops again, reinstall WhyNot Cut with its installer",
+}
+ENGINE_START_FIX_OTHER = ("the file that starts the WhyNot Cut engine failed a safety check: reinstall WhyNot Cut "
+                          "with its installer, then restart Premiere Pro")
+
+
+def engine_start_fix(engine_start) -> dict | None:
+    """The fix for a heartbeat engine_start of `refused` or `gave_up`, else None."""
+    es = engine_start if isinstance(engine_start, dict) else {}
+    outcome = es.get("outcome")
+    if outcome not in ("refused", "gave_up"):
+        return None
+    key = "gave_up" if outcome == "gave_up" else es.get("reason")
+    return {"item": "WhyNot Cut could not start its engine from Premiere Pro", "who": "editor",
+            "fix": ENGINE_START_FIXES.get(key, ENGINE_START_FIX_OTHER)}
 
 
 def whisper_model_state() -> dict:
@@ -53,7 +82,7 @@ def whisper_model_state() -> dict:
     out = {}
     root = models_dir()
     for d in sorted(root.glob("models--*")) if root.exists() else []:
-        name = d.name.replace("models--Systran--faster-whisper-", "").replace("models--mobiuslabsgmbh--faster-whisper-", "")             .replace("models--", "")
+        name = d.name.replace("models--Systran--faster-whisper-", "").replace("models--mobiuslabsgmbh--faster-whisper-", "").replace("models--dropbox-dash--faster-whisper-", "")             .replace("models--", "")
         bins = [b for b in d.glob("snapshots/*/model.bin") if b.stat().st_size > 50 * 1024 * 1024]
         out[name] = "complete" if bins else "partial"
     return out
@@ -297,6 +326,9 @@ def doctor() -> dict:
             fixes.append({"item": "WhyNot Cut is not running in Premiere", "who": "editor",
                           "fix": "open Premiere Pro (quit and reopen it once after installing); WhyNot Cut starts by "
                                  "itself"})
+        es_fix = engine_start_fix(br.get("engine_start")) if br["alive"] else None   # a stale beat says nothing now
+        if es_fix:
+            fixes.append(es_fix)
     if br["family"] == "legacy" and br["product"] != cep_bundle.LEGACY_VERSION:   # T6.3 Task 6: older than 3.1.1
         fixes.append(dict(_extension_fix("Premiere"),
                           item=f"WhyNot Cut extension {br['product'] or '?'} is older than this engine runs: update it "
