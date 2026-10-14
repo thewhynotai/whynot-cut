@@ -160,15 +160,23 @@ class BoardFixture(unittest.TestCase):
         self.assertTrue(any(ARABIC in ln and "متفحصش" in ln for ln in text.splitlines()), text)
 
     def test_budget_running_out_inside_a_client(self):
-        import time as _time
+        from unittest import mock
+
+        class Clock:                     # a fake clock: only the slow next-step read moves time, so a loaded
+            t = 0.0                      # machine (a slow prefix scan) can never use up the budget first
+
+            def monotonic(self):
+                return self.t
+        clock = Clock()
 
         def slow(p):
-            _time.sleep(0.3)
+            clock.t += 0.3
             return {"next": "transcribe", "stale": []}
         for i in (1, 2):
             common.write_json(self.b / f"output/projects/C010{i}/08_quality_control/project-status.json",
                               {"video_id": f"C010{i}", "status": "TRANSCRIBED"})
-        card, over = B.client_card(self.b, slow, _time.monotonic() + 0.15)
+        with mock.patch("time.monotonic", clock.monotonic):     # the board and the prefix scan read the same clock
+            card, over = B.client_card(self.b, slow, 0.15)
         self.assertTrue(over and card["truncated"])
         items = {it["id"]: it for it in card["items"]}
         self.assertFalse(items["C0100"]["partial"])                 # read before the deadline

@@ -1302,7 +1302,7 @@ def cmd_client_init(a):
         from lib.errors import Guidance
         raise Guidance(f"--prefix {a.prefix!r} cannot be used in file names",
                        "Use up to 24 letters (Arabic too), digits, '.', '-' or '_', starting with a letter, digit or "
-                       "'_' and not ending with '.' (no spaces, no '..', no / \\ : * ? \" < > |), e.g. --prefix NH.")
+                       "'_' and not ending with '.' (no spaces, no '..', no / \\ : * ? \" < > |), e.g. --prefix EC.")
     if dst.exists() and any(dst.iterdir()) and not a.force:
         raise SystemExit(f"{dst} already exists (use --force to refresh from the template; existing files are kept as "
                          "*.bak, or *.bak.1, *.bak.2, ... when a backup is already there)")
