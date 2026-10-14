@@ -331,6 +331,49 @@ stage, and the Mac there finishes its part, tries everything and does the testin
 
 **Gate:** the beta ships only after `mac-test-report.md` shows zero failures in core jobs and the Windows suite still passes after the Mac fixes are merged.
 
+## G13. Lean footprint: light on disk, light on the machine, GPU-first (update 2026-10-14)
+Yunus: «لازم تبقي متطوره علي اعلي ليفل عشان تكون خفيفه مش تقيله وتخلي الجهاز تقيل … وتبقي البلاجن لما تشتغل تشتغل علي ال gpu»
+("it must be at the highest level so it's light, not heavy, and doesn't make the machine heavy… and when the plugin runs
+it should run on the GPU").
+
+The strongest models stay (G8). Lightness comes from engineering, never from weaker results.
+
+**Disk**
+
+The measured 2026-10-14 engine home is 4.7 GB:
+
+| Part | Size |
+|---|---|
+| whisper large-v3 | 2.9 GB |
+| CUDA DLLs | 0.7 GB |
+| runtime | 0.5 GB |
+| cache | 0.5 GB |
+
+Targets:
+- **Essentials** (plugin + engine + panels + FFmpeg, no models): ≤ 1.5 GB.
+- **Full strongest** (with the Kalam pack): ≤ 13 GB.
+
+The installer shows both sizes before installing.
+
+How to stay lean:
+- **One shared CUDA library set.** torch and CTranslate2 must not each ship their own cuBLAS/cuDNN (the `nvidia-*` wheels are shared once), and nothing is duplicated.
+- **One model store.** Use Hugging Face blobs plus snapshot links, never two copies of a model. Keep one precision per model: fp16 or int8_float16 where the eval set shows equal quality, never fp32 and fp16 side by side.
+- **Install location.** The engine home goes on the drive with the most free space. A non-system drive is preferred when the system drive has less than 30 GB free (F2-T3). Show it under Customise.
+- **Housekeeping.** Caches are auto-pruned (size cap), logs are rotated, and a "Free up space" button sits in settings (AR/EN). Uninstall can remove the models.
+
+**Machine load on the customer's PC** (editors run Premiere at the same time; this differs from our dev-PC policy)
+- **Idle engine:** about 0% CPU and under 100 MB RAM (measured today: 27 MB). Models load on demand and are released after the job; an optional "keep warm" setting is off by default.
+- **GPU first** for every heavy step, with automatic CPU fallback:
+  - transcription (CT2 CUDA fp16 / MLX on Mac);
+  - Kalam alignment and Parakeet (torch CUDA / MPS);
+  - Hush VAD where it helps;
+  - FFmpeg decode/encode for intermediates (NVDEC/NVENC, VideoToolbox);
+  - GPU rasterization for previews.
+- **Premiere stays smooth.** Background engine jobs run at BelowNormal priority on customer machines. When Premiere or AE is exporting or rendering, GPU jobs wait or yield. VRAM-aware batch sizes; out-of-memory falls back to the CPU with a clear message.
+- **Speed budgets (G2)** are measured on both GPU and CPU-only machines (G-T6 matrix). The doctor and the panel show which accelerator is in use.
+
+**Gate:** Phase 9 reports install sizes (Essentials and Full), idle CPU and RAM, peak RAM and VRAM per job, GPU use per job, and Premiere playback smoothness while a job runs. Any regression blocks the gate.
+
 ## G7. Human items (new)
 - **H16:** the billing provider and the business entity that receives money. Stripe isn't available to Egyptian businesses. The candidates are Paddle or Lemon Squeezy (merchant of record, they handle VAT, with fees taken from revenue and no upfront cost). Yunus picks once he knows his company/payout setup.
 - **H17:** approve the EULA/Terms/Privacy/Refund drafts (a lawyer is recommended).
