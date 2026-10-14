@@ -46,7 +46,8 @@ the client's project stays untouched, and "Claude" reads as a second account and
   - P-07 states that a NEW sequence/version is created and the originals are untouched;
   - every destructive tool screen shows undo or the backup name.
 
-  Facts to be verified by the executor before shipping the copy: the footage stays on the computer; Claude reads text (transcript and plan), not the video files; the customer uses their own Claude account with no extra WhyNot Cut charge.
+  Approved by the executor (2026-10-14), use verbatim: EN "Video and audio files are never uploaded. Claude reads text (the transcript and the plan) and a few still images: some timeline frames for checking, and brand photos." / AR «ملفات الفيديو والصوت لا تُرفع أبدًا؛ يقرأ Claude النصوص (التفريغ والخطة) وبعض الصور الثابتة: لقطات قليلة من التايملاين للتحقق وصور البراند». Also: no telemetry; WhyNot Cut trains on nothing.
+  Still to verify before shipping: the customer uses their own Claude account with no extra WhyNot Cut charge.
 - **Approval record:** full date and time, plus an optional "confirmed with" field for medical/religious lines. A team list and presence are deferred (G10 simplicity; 3.0 has no accounts).
 - **Time saved:** shown on P-07 and Home, from mock data. This is an engine data request (raw duration, an estimated manual time).
 - **Support:**
