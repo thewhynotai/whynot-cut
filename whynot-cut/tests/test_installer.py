@@ -3781,7 +3781,17 @@ class TestPowerShellFrontEnd(_ShellCase):
         self.assert_installed(r, "win-x64")
         self.assertEqual((self.paths.bin_dir / "uv.exe").read_bytes(), b"MZ fake uv")
         self.assertEqual(live_snapshot(), before)
-        self.assertLessEqual(set(os.listdir(self.tmp)), {ARABIC_HOME, "zip root", "claude.jsonl", "engine.jsonl"})
+        outside = set(os.listdir(self.tmp))
+        if "Microsoft" in outside:
+            # Windows PowerShell's OWN per-user cache (Microsoft\Windows\PowerShell\ModuleAnalysisCache,
+            # StartupProfileData-*), written by the outer powershell.exe this test starts when the runner's profile
+            # folders are redirected; the installer never starts PowerShell. Anything else in there is ours: fail.
+            ms = self.tmp / "Microsoft"
+            extra = [p.relative_to(ms).as_posix() for p in ms.rglob("*")
+                     if p.is_file() and p.relative_to(ms).parts[:3] != ("Windows", "PowerShell", p.name)]
+            self.assertEqual(extra, [], "files outside the sandbox home that are not PowerShell's own cache")
+            outside.discard("Microsoft")
+        self.assertLessEqual(outside, {ARABIC_HOME, "zip root", "claude.jsonl", "engine.jsonl"})
 
     def test_paths_ending_in_a_backslash_reach_the_core_intact(self):
         # Windows PowerShell 5.1 passes 'C:\x y\' to a native program as "C:\x y\": the program reads \" as a quote,
