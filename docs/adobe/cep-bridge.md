@@ -325,6 +325,10 @@ There are no arguments, and nothing comes from the queue, the network or the job
 - **`verify`** repeats step 4 on the built ZXP.
 - **ZXPSignCmd's output** goes to temp files, never pipes: a timeout kill on Windows cannot block on a pipe a child of
   the tool inherited. The files are read back and scrubbed of the password.
+- **Every path handed to ZXPSignCmd is resolved first** (the tool, the certificate, the staged folder, the output and
+  the verified ZXP; `sign_zxp.real`). ZXPSignCmd cannot open a `.p12` through a Windows junction: with `~/.whynot-cut`
+  a junction to D:, it answered "Arguments are invalid" (exit 3), while the same file by its real path parsed. The pin
+  is checked on the resolved tool.
 - **The password is never printed, logged or put in an error.** Every command shown has it as `***`, and the tool's
   output is scrubbed of it. ZXPSignCmd itself takes it as an argument, so it is visible to the user's own processes
   while signing runs.

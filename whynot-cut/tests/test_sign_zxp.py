@@ -588,6 +588,66 @@ class TestBuild(_Base):
         self.assertEqual(sign_zxp.staging_problems(root), ["__MACOSX", "jsx/.DS_Store"])
 
 
+class TestResolvedPaths(_Base):
+    """ZXPSignCmd cannot open a .p12 through a Windows junction ("Arguments are invalid", exit 3; measured after
+    ~/.whynot-cut became a junction to D:): every path handed to it (tool, certificate, staged folder, output and
+    verified ZXP) is resolved first, for -selfSignedCert, -sign and -verify. The home here is a junction (Windows,
+    mklink /J) or a symlink, inside this test's own temp folder; it is removed as a link."""
+
+    def linked_home(self) -> tuple:
+        real = self.tmp / "real home"
+        real.mkdir()
+        link = self.tmp / "linked home"
+        if os.name == "nt":
+            r = subprocess.run(["cmd", "/d", "/c", "mklink", "/J", str(link), str(real)], capture_output=True,
+                               text=True, timeout=60)
+            if r.returncode != 0:
+                self.skipTest(f"mklink /J failed: {r.stdout} {r.stderr}")
+        else:
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except OSError as e:
+                self.skipTest(f"no symlinks here: {e}")
+        self.addCleanup(lambda: (os.rmdir(link) if os.name == "nt" else os.unlink(link))
+                        if os.path.lexists(link) else None)
+        return real, link
+
+    def test_every_path_given_to_zxpsigncmd_is_resolved(self):
+        real, link = self.linked_home()
+        sdir, out = link / "signing", link / "out"
+        store, runner = FakeStore(), FakeZXPSignCmd()
+        sign_zxp.setup(src=self.src, home=sdir, runner=runner, store=store, key="test-x64", log=self.log)
+        r = sign_zxp.build(home=sdir, out_dir=out, runner=runner, store=store, key="test-x64", log=self.log)
+        sign_zxp.verify(Path(r["zxp"]), home=sdir, runner=runner, key="test-x64", log=self.log)
+        self.assertEqual(runner.ops(), ["-selfSignedCert", "-sign", "-verify", "-verify"])
+        rsdir = Path(os.path.realpath(real)) / "signing"
+        mk, sign, ver, ver2 = runner.calls
+        self.assertEqual(mk[0], str(rsdir / "ZXPSignCmd.exe"))
+        self.assertEqual(mk[7], str(rsdir / "whynot-cut.p12"))
+        self.assertEqual(sign[0], str(rsdir / "ZXPSignCmd.exe"))
+        self.assertEqual(sign[4], str(rsdir / "whynot-cut.p12"))
+        self.assertEqual(Path(sign[3]).parent.parent, Path(os.path.realpath(real)) / "out")
+        for call in runner.calls:
+            for a in call:
+                if os.path.isabs(a):
+                    with self.subTest(arg=a):
+                        self.assertNotIn("linked home", a)
+                        self.assertEqual(os.path.normcase(a), os.path.normcase(os.path.realpath(a)))
+        self.assertEqual(ver[0], str(rsdir / "ZXPSignCmd.exe"))
+        self.assertEqual(ver2[2], str(Path(os.path.realpath(real)) / "out" / sign_zxp.ZXP_NAME))
+
+    def test_the_pin_is_checked_on_the_resolved_tool(self):
+        real, link = self.linked_home()
+        sdir = link / "signing"
+        store, runner = FakeStore(), FakeZXPSignCmd()
+        sign_zxp.setup(src=self.src, home=sdir, runner=runner, store=store, key="test-x64", log=self.log)
+        (real / "signing" / "ZXPSignCmd.exe").write_bytes(TOOL_BYTES[:-1] + b"!")      # changed behind the link
+        with self.assertRaises(sign_zxp.SignError) as cm:
+            sign_zxp.build(home=sdir, out_dir=self.out, runner=runner, store=store, key="test-x64", log=self.log)
+        self.assertIn("not set up", cm.exception.error)
+        self.assertNotIn("-sign", runner.ops())
+
+
 class TestThePasswordNeverAppears(_Base):
     def test_not_in_logs_output_errors_or_any_shown_command(self):
         store = FakeStore()

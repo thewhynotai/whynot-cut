@@ -35,7 +35,8 @@ verify  the -verify -certinfo and archive checks on the built ZXP (no password n
 The password is never printed, logged or put in an error: every command shown is redacted (`shown`), every output of
 ZXPSignCmd is scrubbed of it (`scrub`), and failures are raised as SignError built from the redacted command only.
 (ZXPSignCmd itself takes the password as an argument; that cannot be avoided.) ZXPSignCmd's stdout and stderr go to
-temp files, never pipes (a timeout kill on Windows cannot block on a pipe a child inherited).
+temp files, never pipes (a timeout kill on Windows cannot block on a pipe a child inherited). Every path handed to
+ZXPSignCmd is resolved first (`real`): it cannot open a .p12 through a Windows junction.
 Exit codes: 0 ok, 2 refused / failed (one line on stderr says why and what to do).
 """
 from __future__ import annotations
@@ -268,6 +269,14 @@ def pin_problem(p: Path, pin: dict) -> str | None:
     return None
 
 
+def real(p: Path, *, out: bool = False) -> Path:
+    """The resolved path handed to ZXPSignCmd: it cannot open a path that crosses a Windows junction (a .p12 under a
+    junctioned ~/.whynot-cut gives "Arguments are invalid", exit 3). `out`: a file ZXPSignCmd will write (its folder
+    is resolved, the name kept). FileNotFoundError when it (or, for `out`, its folder) does not exist."""
+    p = Path(p)
+    return p.parent.resolve(strict=True) / p.name if out else p.resolve(strict=True)
+
+
 def _refuse_live(what: str, *targets) -> None:
     """Inside the unit-test sandbox: never the real ~/.whynot-cut, never the repo's own whynot-cut/adobe."""
     r = plat.sandbox_refusal(what, *targets)
@@ -385,8 +394,12 @@ def setup(*, src: Path | None = None, home: Path | None = None, runner=None, sto
         if secret is None:
             secret = new_password()
             store.write(CRED_TARGET, secret)
-        _call(runner, [tool, "-selfSignedCert", *CERT_SUBJECT, secret, cert, "-validityDays", str(CERT_DAYS)],
-              secret, "making the certificate", log)
+        rtool = real(tool)                              # the pin is checked again on the resolved file
+        bad = pin_problem(rtool, pin)
+        if bad:
+            raise SignError(f"ZXPSignCmd is not set up: {bad}", "run `python tools/sign_zxp.py setup` again")
+        _call(runner, [rtool, "-selfSignedCert", *CERT_SUBJECT, secret, real(cert, out=True), "-validityDays",
+                       str(CERT_DAYS)], secret, "making the certificate", log)
         if not cert.is_file():
             raise SignError(f"ZXPSignCmd reported success but wrote no {cert.name}")
         cert_state = "made"
@@ -459,6 +472,10 @@ def _verify(runner, tool: Path, zxp: Path, log, staged: Path | None = None, secr
 def _tool(home: Path | None, key: str | None) -> Path:
     pin = pin_for(key or platform_key())
     tool = signing_dir(home) / pin["file"]
+    try:
+        tool = real(tool)                               # resolved first: the pin is checked on the file itself
+    except OSError:
+        pass                                            # pin_problem says it is missing
     bad = pin_problem(tool, pin)
     if bad:
         raise SignError(f"ZXPSignCmd is not set up: {bad}", "run `python tools/sign_zxp.py setup` first")
@@ -476,6 +493,7 @@ def build(*, tsa: str = DEFAULT_TSA, home: Path | None = None, out_dir: Path | N
     cert = sdir / CERT_NAME
     if not cert.is_file():
         raise SignError(f"no signing certificate ({cert})", "run `python tools/sign_zxp.py setup` first")
+    cert = real(cert)
     store = store or default_store()
     secret = store.read(CRED_TARGET)
     if not secret:
@@ -499,8 +517,8 @@ def build(*, tsa: str = DEFAULT_TSA, home: Path | None = None, out_dir: Path | N
         cep_bundle._remove(work)
         work.mkdir()
         try:
-            tmp = work / ZXP_NAME
-            _call(runner, [tool, "-sign", staged, tmp, cert, secret, "-tsa", tsa], secret,
+            tmp = real(work / ZXP_NAME, out=True)
+            _call(runner, [tool, "-sign", real(staged), tmp, cert, secret, "-tsa", tsa], secret,
                   "signing (with the timestamp server " + tsa + ")", log)
             if not tmp.is_file():
                 raise SignError("ZXPSignCmd reported success but wrote no ZXP")
@@ -521,7 +539,7 @@ def verify(zxp: Path | None = None, *, home: Path | None = None, runner=None, ke
     zxp = Path(zxp) if zxp is not None else OUT_DIR / ZXP_NAME
     if not zxp.is_file():
         raise SignError(f"no ZXP at {zxp}", "run `python tools/sign_zxp.py build` first")
-    out = _verify(runner or run_tool, _tool(home, key), zxp, log)
+    out = _verify(runner or run_tool, _tool(home, key), real(zxp), log)
     return {"ok": True, "zxp": str(zxp), "sha256": _sha256(zxp), "certinfo": _tail(out, 2000)}
 
 
