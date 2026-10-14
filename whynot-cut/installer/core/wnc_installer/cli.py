@@ -120,11 +120,7 @@ def test_answers(args, env=None) -> "list | None":
 
 def _client_roots(paths: base.Paths) -> list:
     """The saved clients folders: clients_root of the preferences file and of the pointer."""
-    from .system import read_preferences
-    roots = [read_preferences(paths).get("clients_root")]
-    ptr = base.read_pointer(paths.options_file)
-    roots.append(ptr.get("clients_root") if ptr is not None else None)
-    return [base.saved_path(r, paths.home) for r in roots if isinstance(r, str) and r.strip()]
+    return base.saved_client_roots(paths)
 
 
 def _engine_home_check(paths: base.Paths, plugin_root: Path, chosen) -> tuple:
@@ -174,9 +170,10 @@ def main(argv=None) -> int:
     if chosen and not base.same_path(final, paths.whynot):  # the editor's own files are there: its own subfolder
         paths = base.Paths.from_env(args.home, engine_home=str(final))
         print(note, file=sys.stderr)  # (plan prints JSON on stdout)
-    if not chosen and args.command in ("install", "plan"):
-        # task 9: a RESOLVED engine home other than ~/.whynot-cut in a place it must never be (uninstall is not
-        # stopped: it deletes only WhyNot Cut's own entries)
+    linked = base.linked_default_home(paths.whynot, paths.home)
+    if not chosen and (args.command in ("install", "plan") or linked):
+        # task 9: a RESOLVED engine home in a place it must never be (an uninstall is stopped only for a linked
+        # ~/.whynot-cut pointing there, fix round 3: otherwise it deletes only WhyNot Cut's own entries anyway)
         why = base.resolved_home_problem(paths.whynot, home=paths.home, clients_roots=_client_roots(paths),
                                          known=base.shell_folders(paths.home, paths.sandbox))
         if why:

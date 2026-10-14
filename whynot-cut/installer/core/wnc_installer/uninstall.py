@@ -365,7 +365,14 @@ def engine_home_problem(paths: base.Paths) -> Optional[str]:
     if base._is_drive_root(str(paths.whynot)):
         return f"{paths.whynot} is a drive root or a mounted volume"
     if base.is_link(paths.whynot) and not base.linked_default_home(paths.whynot, paths.home):
-        return f"{paths.whynot} is a link"  # (the default ~/.whynot-cut linked to a folder is fine: Addendum F)
+        return f"{paths.whynot} is a link"
+    if base.linked_default_home(paths.whynot, paths.home):
+        # Addendum F: ~/.whynot-cut linked to a folder is fine - unless it points somewhere it must never be (fix round
+        # 3: Documents, the user folder, a drive root, client data, a folder too big to check)
+        why = base.resolved_home_problem(paths.whynot, home=paths.home, clients_roots=base.saved_client_roots(paths),
+                                         known=base.shell_folders(paths.home, paths.sandbox))
+        if why:
+            return f"{paths.whynot} is {why}"
     if not base.is_engine_home(paths.whynot):
         return (f"{paths.whynot} does not look like a WhyNot Cut engine home (no state.json written by WhyNot Cut, no "
                 "`current` with its runtime stamp)")

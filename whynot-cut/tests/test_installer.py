@@ -5269,6 +5269,42 @@ def comparable_state(path: Path, home: Path) -> dict:
     return walk(json.loads(path.read_text(encoding="utf-8")))
 
 
+# the reviewer's repro (fix round 3): a Documents folder holding the editor's own files under WhyNot Cut's layout names,
+# plus the genuine state.json an install through a link would have written
+REPRO_DOCUMENTS = ("cache/c.bin", "logs/my.log", "tmp/t.txt", "fonts/MyFont.ttf", "bench/b.txt", "downloads/d.zip",
+                   "current", "bin/tool.exe", "python/p.txt", "thesis.docx")
+
+
+def make_repro_documents(docs: Path) -> dict:
+    for rel in REPRO_DOCUMENTS:
+        touch(docs.joinpath(*rel.split("/")), b"mine " + rel.encode())
+    touch(docs / "state.json", GENUINE_STATE)
+    return snapshot_tree(docs)
+
+
+def snapshot_tree(root: Path) -> dict:
+    """{relative path: bytes or None for a folder} of everything below `root` (links not entered)."""
+    out = {}
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [x for x in dirs if not base.is_link(os.path.join(dirpath, x))]
+        for x in dirs:
+            out[os.path.relpath(os.path.join(dirpath, x), root)] = None
+        for x in files:
+            f = os.path.join(dirpath, x)
+            with open(f, "rb") as fh:
+                out[os.path.relpath(f, root)] = fh.read()
+    return out
+
+
+def drop_dir_link(link: Path) -> None:
+    """Remove a directory link made by make_dir_link (the link only, never its target)."""
+    if os.path.lexists(link):
+        try:
+            os.rmdir(link)  # a junction / a Windows directory symlink
+        except OSError:
+            os.unlink(link)
+
+
 class TestNoQuestionsByDefault(unittest.TestCase):
     """D-T1: the core asks nothing unless --customise; answers.mode records which; the install size estimate."""
 
@@ -5512,6 +5548,62 @@ class TestResolvedHomeGuard(unittest.TestCase):
         self.assertIsNone(un.engine_home_problem(base.Paths.from_env(str(self.home), env={})))
         other = base.Paths.from_env(str(self.home), env={}, engine_home=str(self.home / "Other"))
         self.assertIn("is a link", un.engine_home_problem(other) or "")
+
+    def test_a_linked_default_home_is_checked_by_where_it_points(self):
+        # fix round 3 (CRITICAL): ~/.whynot-cut that is a link is checked by its real target: install and uninstall
+        h = self.home
+        link = h / ".whynot-cut"
+        docs = h / "Documents"
+        docs.mkdir()
+        marked = h / "Shoots"
+        touch(marked / "Dr X" / ".whynot-client", b"{}")
+        safe = h.parent / "data drive" / "WhyNotCut"
+        safe.mkdir(parents=True)
+        stand_in = h.parent / "drive stand-in"
+        stand_in.mkdir()
+        un = uninstall_module()
+        cases = [(docs, "Documents"), (h, "your user folder"), (marked, "client folder"), (stand_in, "drive root")]
+        for target, needle in cases:
+            with self.subTest(str(target)):
+                if not make_dir_link(link, target):
+                    self.skipTest("cannot make a directory link here")
+                self.addCleanup(drop_dir_link, link)
+                try:
+                    real_root = base._real(stand_in)
+                    with mock.patch.object(base, "_is_drive_root",
+                                           side_effect=lambda q, _o=base._is_drive_root: _o(q) or q == real_root):
+                        why = self.problem(link)
+                        self.assertIn(needle, why or "")
+                        self.assertIn("a link to", why)
+                        self.assertIn("remove the link", why)
+                        touch(target / "state.json", GENUINE_STATE) if target != h else None
+                        problem = un.engine_home_problem(base.Paths.from_env(str(h), env={}))
+                        self.assertIn(needle, problem or "")
+                finally:
+                    drop_dir_link(link)
+        # a link to a plain folder of its own (Addendum F) keeps working
+        self.assertTrue(make_dir_link(link, safe))
+        self.assertIsNone(self.problem(link))
+        touch(safe / "state.json", GENUINE_STATE)
+        self.assertIsNone(un.engine_home_problem(base.Paths.from_env(str(h), env={})))
+
+    def test_the_reviewers_repro_uninstall_deletes_nothing(self):
+        # fix round 3: ~/.whynot-cut -> Documents holding layout-named folders of the editor and a genuine state.json
+        docs = self.home / "Documents"
+        before = make_repro_documents(docs)
+        if not make_dir_link(self.home / ".whynot-cut", docs):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, self.home / ".whynot-cut")
+        rc, out = self.run_core("uninstall", "--home", str(self.home), "--remove-engine", "--remove-models", "--yes",
+                                "--quiet")
+        self.assertEqual(rc, 2, out)  # refused before any step: not even state.json is written through the link
+        self.assertIn("remove the link", out)
+        self.assertEqual(snapshot_tree(docs), before, out)  # nothing deleted, no .delete-after-exit
+        self.assertFalse((docs / ".delete-after-exit").exists())
+        rc, out = self.run_core("install", "--home", str(self.home), "--yes", "--quiet")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("Documents", out)
+        self.assertEqual(snapshot_tree(docs), before, out)
 
     def test_the_core_says_what_the_bootstrap_left(self):
         # fix round 2: the exit-2 message is true - "No install step ran", and names bin/ / python/ when they are there
@@ -5761,6 +5853,64 @@ class _CountdownCases:
         self.assertTrue(base.is_link(link), out)  # the link and its target folder stay
         self.assertTrue(target.is_dir())
 
+    def test_a_linked_default_home_pointing_somewhere_unsafe_is_refused(self):
+        # fix round 3 (CRITICAL): install AND uninstall refuse before any download or delete
+        h = self.home
+        link = h / ".whynot-cut"
+        docs = h / "Documents"
+        before_docs = make_repro_documents(docs)
+        marked = h / "Shoots"
+        touch(marked / "Dr X" / ".whynot-client", b"{}")
+        before_marked = snapshot_tree(marked)
+        cases = [(docs, "Documents", before_docs), (h, "your user folder", None), (marked, "client folder", before_marked)]
+        for target, needle, before in cases:
+            with self.subTest(str(target)):
+                if not make_dir_link(link, target):
+                    self.skipTest("cannot make a directory link here")
+                self.addCleanup(drop_dir_link, link)
+                try:
+                    for flags in (("yes", "skip"), ("uninstall", "remove-engine", "yes")):
+                        r = self.inst(h, *flags)
+                        out = r.stdout + r.stderr
+                        self.assertEqual(r.returncode, 2, (flags, out))
+                        self.assertIn(needle, out)
+                        self.assertIn("remove the link", out)
+                        self.assertIn(SELF_FIX, out)
+                        self.assertIn(SELF_FIX_AR, out)
+                        if before is not None:
+                            self.assertEqual(snapshot_tree(target), before, out)
+                finally:
+                    drop_dir_link(link)
+        self.assertEqual(self.srv.srv.hits, [])
+        self.assertEqual(snapshot_tree(docs), before_docs)
+        self.assertEqual(sorted(os.listdir(h)), ["Documents", "Shoots"])
+        # a link to the drive root itself: refused (dry run, so that nothing could ever be written there)
+        drive = Path(self.tmp.anchor)
+        if make_dir_link(link, drive):
+            self.addCleanup(drop_dir_link, link)
+            try:
+                r = self.inst(h, "yes", "dry")
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn("drive root", r.stdout + r.stderr)
+            finally:
+                drop_dir_link(link)
+
+    def test_the_deferred_delete_checks_a_linked_default_home_again(self):
+        # fix round 3: even when the list is there, python/ and bin/ of a link to Documents are never deleted
+        h = self.home
+        docs = h / "Documents"
+        before = make_repro_documents(docs)
+        if not make_dir_link(h / ".whynot-cut", docs):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, h / ".whynot-cut")
+        listed = self.native(h / ".whynot-cut")
+        (docs / DEFER_LIST).write_text(listed + self.SEP + "python\n" + listed + self.SEP + "bin\n", encoding="utf-8")
+        before[DEFER_LIST] = (docs / DEFER_LIST).read_bytes()
+        r = self.run_deferred(h)
+        out = r.stdout + r.stderr
+        self.assertIn("left alone", out)
+        self.assertEqual(snapshot_tree(docs), before, out)
+
     def test_a_bad_countdown_hook_value_is_ignored(self):
         r = self.inst(self.home, "dry", env=self.env(WNC_TEST_KEYS="x", WNC_TEST_COUNTDOWN_S="soon"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -5788,6 +5938,20 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
         return str(p)
 
     ENGINE_FLAG = "-EngineHome"
+
+    def run_deferred(self, h: Path):
+        names = ["Test-WncReparse", "Invoke-WncDeleteTree", "Invoke-WncDeferredDelete", "Get-WncResolvedHomeProblem",
+                 "Get-WncPlaceProblem", "Get-WncNormPath", "Get-WncRealPath", "Get-WncLinkTarget",
+                 "Get-WncKnownFolderList", "Test-WncWithin", "Find-WncMarkerScan", "Get-WncClientRootList",
+                 "Read-WncJsonObject", "Get-WncMember", "ConvertTo-WncHomePath"]
+        boot = INSTALLER / "core" / "bootstrap.ps1"
+        body = ("$S = @{ Utf8 = (New-Object System.Text.UTF8Encoding $false) }\n"
+                + "".join(shell_function(boot, n, True) for n in names)
+                + "Invoke-WncDeferredDelete -Engine $env:WNC_T_ENGINE -UserHome $env:WNC_T_HOME "
+                  "-Pointer (Join-Path $env:WNC_T_HOME '.whynot-cut\\plugin-options.json') -Sandbox $true\n")
+        script = self.tmp / "deferred.ps1"
+        script.write_text(body, encoding="utf-8-sig")
+        return self.ps(script, env=self.env(WNC_T_ENGINE=str(h / ".whynot-cut"), WNC_T_HOME=str(h)))
 
     def device_paths(self) -> list:
         return [("\\\\?\\" + str(self.home / "Documents"), "Documents"),
@@ -5827,6 +5991,20 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
 
     ENGINE_FLAG = "--engine-home"
 
+    def run_deferred(self, h: Path):
+        boot = INSTALLER / "core" / "bootstrap.sh"
+        names = ["norm_path", "within", "is_mount", "guard_norm", "real_path", "place_keys", "place_problem",
+                 "resolved_home_problem", "client_roots", "home_path", "abs_path", "json_get", "exact_child",
+                 "delete_deferred"]
+        script = self.tmp / "deferred.sh"
+        script.write_text("".join(shell_function(boot, n, False) for n in names)
+                          + 'OS_NAME="$(uname -s)"; JSON_PY=""; HOME="$1"; ENGINE="$1/.whynot-cut"\n'
+                          'POINTER="$1/.whynot-cut/plugin-options.json"\ndelete_deferred\n',
+                          encoding="utf-8", newline="\n")
+        r = subprocess.run([find_bash(), str(script), h.as_posix()], capture_output=True, env=self.env(), timeout=120)
+        return subprocess.CompletedProcess(r.args, r.returncode, r.stdout.decode("utf-8", "replace"),
+                                           r.stderr.decode("utf-8", "replace"))
+
     def device_paths(self) -> list:
         return [("//server/share/x", "network share")]
 
@@ -5864,7 +6042,8 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
         # fix round 1: APFS / HFS+ ignore case; the bash guard folds it on Darwin (run alone, OS_NAME=Darwin)
         boot = INSTALLER / "core" / "bootstrap.sh"
         funcs = "".join(shell_function(boot, n, ps=False) for n in (
-            "norm_path", "within", "is_mount", "guard_norm", "real_path", "place_keys", "resolved_home_problem"))
+            "norm_path", "within", "is_mount", "guard_norm", "real_path", "place_keys", "place_problem",
+            "resolved_home_problem"))
         (self.home / "Documents").mkdir(parents=True)
         script = self.tmp / "guard.sh"
         script.write_text(funcs + 'OS_NAME="$2"; HOME="$(cygpath -u "$1" 2>/dev/null || printf %s "$1")"\n'

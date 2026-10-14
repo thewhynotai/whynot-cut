@@ -246,7 +246,9 @@ that same saved folder is checked the same way (it is that folder, used as it is
 `~/.whynot-cut` itself is never refused by these rules, and it may be a link (a junction or symlink) to a folder on
 another drive, for example `D:\ClaudeData\whynot-cut-home` (Addendum F): the installer uses it through the link, and
 `-Uninstall -RemoveEngine` deletes only WhyNot Cut's own entries inside it; the link and the folder it points to
-always stay, with anything else in them.
+always stay, with anything else in them. Where such a link points is checked with all the rules above (a link to
+Documents, your user folder, a drive root or a client folder is refused at install and at uninstall, before anything
+is downloaded or deleted): remove the link, or point it at a folder of its own.
 
 Then the install stops with exit code 2 before anything is downloaded, both bootstraps and the core alike, and says
 how to fix it (in English and Arabic): **run the installer again with -EngineHome <folder> / --engine-home <folder>**,

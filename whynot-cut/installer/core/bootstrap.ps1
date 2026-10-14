@@ -64,9 +64,10 @@
 # check for that (more than 5000 entries within 3 levels), or a network share / device path (\\server\share,
 # \\localhost\C$, \\.\...; \\?\C:\x counts as C:\x) - compared as written and with links resolved - is refused with
 # exit 2 before the countdown and any download (fix round 1), also when -EngineHome names that same folder (fix round
-# 2), with the self-fix
-# "run the installer again with -EngineHome <folder> / --engine-home <folder>" (English + Arabic); the core applies the
-# same rule (base.resolved_home_problem). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another key, or
+# 2), with the self-fix "run the installer again with -EngineHome <folder> / --engine-home <folder>" (English +
+# Arabic); the core applies the same rule (base.resolved_home_problem). ~\.whynot-cut itself may be a link (Addendum
+# F); then the same rules apply to where it points, at install, at uninstall and before the deferred delete (fix
+# round 3). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another key, or
 # "none" = nobody presses), WNC_TEST_COUNTDOWN_S (the seconds the countdown waits with the hook; 0 = none), and the
 # core reads the WNC_TEST_ANSWERS lines after the ones used here (WNC_TEST_ANSWERS_AT).
 # ASCII only: Windows PowerShell 5.1 reads a file without a BOM as ANSI.
@@ -354,7 +355,7 @@ param(
         }
     }
 
-    function Invoke-WncDeferredDelete([string]$Engine, [string]$UserHome) {
+    function Invoke-WncDeferredDelete([string]$Engine, [string]$UserHome, [string]$Pointer, [bool]$Sandbox) {
         # after `uninstall --remove-engine`: the paths the core listed in <engine>\.delete-after-exit (see the header)
         $list = Join-Path $Engine '.delete-after-exit'
         if (-not [IO.File]::Exists($list)) { return }
@@ -366,6 +367,15 @@ param(
         if ((Test-WncReparse $root) -and (-not $linked)) {
             Write-Host "WARNING: $root is a link; the paths in $list were left alone"
             return
+        }
+        if ($linked) {
+            # fix round 3: where the link points is checked again (Documents, the user folder, client data ...)
+            $clients = Get-WncClientRootList -UserHome $UserHome -Pointer $Pointer
+            $why = Get-WncResolvedHomeProblem -Path $root -UserHome $UserHome -Clients $clients -Sandbox $Sandbox
+            if ($why) {
+                Write-Host "WARNING: $root is $why; the paths in $list were left alone"
+                return
+            }
         }
         # the ONLY paths it may name: <engine>\python, <engine>\bin and <engine> itself (that one only once empty);
         # every line is normalised first (GetFullPath: \ and / alike, repeated separators, . and ..; case ignored)
@@ -974,8 +984,27 @@ param(
     }
 
     function Get-WncResolvedHomeProblem([string]$Path, [string]$UserHome, [string[]]$Clients, [bool]$Sandbox) {
-        # task 9 (the core's base.resolved_home_problem): why a RESOLVED engine home other than ~\.whynot-cut may not
-        # be used - a link / reparse point itself (junction, symlink, a volume mounted into a folder), a drive root,
+        # the core's base.resolved_home_problem: ~\.whynot-cut itself is fine - unless it is a link (Addendum F): then
+        # where it points is checked like any resolved home (fix round 3); any other resolved home: Get-WncPlaceProblem
+        if ($Path -notmatch '^[\\/]{2}') {
+            $n = Get-WncNormPath $Path
+            if ($n -ieq (Get-WncNormPath (Join-Path $UserHome '.whynot-cut'))) {
+                if (-not (Test-WncReparse $n)) { return $null }
+                $why = Get-WncPlaceProblem -Path $n -UserHome $UserHome -Clients $Clients -Sandbox $Sandbox `
+                    -LinkOk $true
+                if (-not $why) { return $null }
+                $real = Get-WncRealPath $n
+                if (-not $real) { $real = '(a target that cannot be read)' }
+                return ("a link to $real, which is $($why -replace '^a link to ', '') - remove the link (or point it " +
+                    'at a folder of its own)')
+            }
+        }
+        return (Get-WncPlaceProblem -Path $Path -UserHome $UserHome -Clients $Clients -Sandbox $Sandbox -LinkOk $false)
+    }
+
+    function Get-WncPlaceProblem([string]$Path, [string]$UserHome, [string[]]$Clients, [bool]$Sandbox, [bool]$LinkOk) {
+        # task 9: why a RESOLVED engine home may not be used - a link / reparse point itself (junction, symlink, a
+        # volume mounted into a folder; not with -LinkOk: the linked ~\.whynot-cut), a drive root,
         # the user folder or Desktop / Documents / Downloads themselves (also where Windows' shell folders put them),
         # the saved clients folder or a folder holding it, a folder with .whynot-client in it or up to 3 levels
         # below, or one too big to check for that (more than 5000 entries); compared as written and with links
@@ -986,10 +1015,9 @@ param(
             return 'a network share or device path; name a folder on a local drive'
         }
         $n = Get-WncNormPath $Path
-        if ($n -ieq (Get-WncNormPath (Join-Path $UserHome '.whynot-cut'))) { return $null }
         $rootLike = '^([A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)$'
         if ($n -match $rootLike) { return 'a drive root or a mount point' }
-        if (Test-WncReparse $n) {
+        if ((Test-WncReparse $n) -and (-not $LinkOk)) {
             return 'a link or mount point (a junction, symlink or mounted folder); name the real folder instead'
         }
         $real = Get-WncRealPath $n
@@ -1246,7 +1274,14 @@ param(
                 $isResolved = $false  # (the chosen-folder rules refuse it)
             }
         }
-        if ((-not $Uninstall) -and $isResolved) {
+        $linkedDefault = $false
+        try {
+            $linkedDefault = (Test-WncReparse $default) -and
+                ((Get-WncNormPath $default) -ieq (Get-WncNormPath (Join-Path $h '.whynot-cut')))
+        } catch {
+            $linkedDefault = $false
+        }
+        if (((-not $Uninstall) -and $isResolved) -or ($Uninstall -and (-not $EngineHome) -and $linkedDefault)) {
             # task 9: a home saved somewhere in a place it must never be: stop and say the fix, before the countdown
             # and any download (fix round 1), also when -EngineHome names that same folder (fix round 2)
             $clients = Get-WncClientRootList -UserHome $h -Pointer $pointer
@@ -1257,7 +1292,8 @@ param(
             }
             if ($why) {
                 Write-Host ("ERROR: WhyNot Cut will not use $default as its engine home (from $($resolved.Source)): it " +
-                    "is $why. Nothing was downloaded. To fix it, run the installer again with -EngineHome <folder> / " +
+                    "is $why. Nothing was downloaded or deleted. To fix it, run the installer again with " +
+                    '-EngineHome <folder> / ' +
                     '--engine-home <folder> (a folder of its own, for example C:\WhyNotCut).')
                 Write-Host (Get-WncArabic 'Guard')
                 return @{ Code = 2 }
@@ -1406,7 +1442,8 @@ param(
         if ($Uninstall -and $RemoveEngine) { $a += '--remove-engine' }
         if ($Uninstall -and $RemoveModels) { $a += '--remove-models' }
         Write-WncLog 'INFO' ("bootstrap: running the installer core: $py " + ($a -join ' '))
-        return @{ Code = 0; Run = $true; Py = $py; CoreArgs = $a; Engine = $engine; UserHome = $h }
+        return @{ Code = 0; Run = $true; Py = $py; CoreArgs = $a; Engine = $engine; UserHome = $h; Pointer = $pointer;
+            Sandbox = $sandbox }
     }
 
     $saved = @{}
@@ -1429,7 +1466,8 @@ param(
             $S.Code = $LASTEXITCODE
             if ($Uninstall -and $RemoveEngine -and (-not $DryRun)) {
                 $S.Log = $null  # it went with logs\
-                Invoke-WncDeferredDelete -Engine $prep.Engine -UserHome $prep.UserHome
+                Invoke-WncDeferredDelete -Engine $prep.Engine -UserHome $prep.UserHome -Pointer $prep.Pointer `
+                    -Sandbox $prep.Sandbox
             }
         } else {
             $S.Code = $prep.Code

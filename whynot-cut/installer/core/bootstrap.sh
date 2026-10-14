@@ -52,23 +52,25 @@
 # No questions by default (Addendum D, D-T1, task 9): an install prints "Installing everything WhyNot Cut needs (about N
 # GB)" (English + Arabic; N from components.json `bytes` where present, the core's system.install_size_gb rule) and,
 # with a person at the terminal, a 10-second line "Press C to customise (10)... / <Arabic>" that counts down in place
-# (`read -t 1 -n 1` from the terminal: stdin when it is one, else /dev/tty when it can be opened and stdout or stderr
-# is a terminal too - never the piped script - and only in the terminal's foreground process group; keys typed before
-# the line appeared are drained first). C opens the Customise path; any other key or the end of the countdown installs with the strongest defaults,
-# exactly like --yes (the core gets --yes: the same state.json, answers.mode "default"). --customise (or C) asks the
-# location question here and passes --customise, so the core asks the model, the language and the clients folder,
-# every answer preselected. --yes: no countdown, no question. No terminal (curl | bash without /dev/tty, CI, Door 2):
-# like --yes, never waiting. --yes with --customise: exit 2.
+# (`read -t 1 -n 1` from the terminal: stdin when it is one, else /dev/tty when it can be opened and stdout or stderr is
+# a terminal too - never the piped script - and only in the terminal's foreground process group; keys typed before the
+# line appeared are drained first). C opens the Customise path; any other key or the end of the countdown installs with
+# the strongest defaults, exactly like --yes (the core gets --yes: the same state.json, answers.mode "default").
+# --customise (or C) asks the location question here and passes --customise, so the core asks the model, the language
+# and the clients folder, every answer preselected. --yes: no countdown, no question. No terminal (curl | bash without
+# /dev/tty, CI, Door 2): like --yes, never waiting. --yes with --customise: exit 2.
 # A RESOLVED engine home other than ~/.whynot-cut (a variable, the pointer or settings.json named it) that is itself a
 # link, a drive root or mount point, the home folder itself, Desktop / Documents / Downloads themselves, holds client
 # data (the saved clients folder, or .whynot-client up to 3 levels below) or is too big to check for that (more than
-# 5000 entries within 3 levels), or a network share / device path (//server/share) - compared as written and with
-# links resolved (cd -P), case folded on macOS - is refused with exit 2 before the countdown and any download (fix
-# round 1), also when --engine-home names that same folder (fix round 2), with the
-# self-fix "run the installer again with -EngineHome <folder> / --engine-home <folder>" (English + Arabic); the core
-# applies the same rule (base.resolved_home_problem). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another
-# key, or "none" = nobody presses), WNC_TEST_COUNTDOWN_S (the seconds the countdown waits with the hook; 0 = none); the
-# core reads the WNC_TEST_ANSWERS lines after the ones used here (WNC_TEST_ANSWERS_AT).
+# 5000 entries within 3 levels), or a network share / device path (//server/share) - compared as written and with links
+# resolved (cd -P), case folded on macOS - is refused with exit 2 before the countdown and any download (fix round 1),
+# also when --engine-home names that same folder (fix round 2), with the self-fix "run the installer again with
+# -EngineHome <folder> / --engine-home <folder>" (English + Arabic); the core applies the same rule
+# (base.resolved_home_problem). Sandbox-only test hooks for this: WNC_TEST_KEYS ("C", another key, or "none" = nobody
+# presses), WNC_TEST_COUNTDOWN_S (the seconds the countdown waits with the hook; 0 = none); the core reads the
+# WNC_TEST_ANSWERS lines after the ones used here (WNC_TEST_ANSWERS_AT). ~/.whynot-cut itself may be a link (Addendum
+# F); then the same rules apply to where it points, at install, at uninstall and before the deferred delete (fix round
+# 3).
 # bash 3.2 (the macOS default): no associative arrays, no ${var,,}, no mapfile. No `set -e`: every failure is handled.
 
 STEP_NAMES="preflight questions runtime ffmpeg gitbash gpu claude adobe fonts settings model state doctor launch"
@@ -301,6 +303,14 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
   if [ -L "$root" ] && [ -z "$linked" ]; then
     printf 'WARNING: %s is a link; the paths in %s were left alone\n' "$root" "$list"
     return 0
+  fi
+  if [ -n "$linked" ]; then  # fix round 3: where the link points is checked again (Documents, client data ...)
+    client_roots
+    resolved_home_problem "$root"
+    if [ -n "$WHY" ]; then
+      printf 'WARNING: %s is %s; the paths in %s were left alone\n' "$root" "$WHY" "$list"
+      return 0
+    fi
   fi
   norm_path "$root"; nroot="$NORM"
   home_too="" failed=""
@@ -908,26 +918,45 @@ place_keys() { # path -> KEY1 (as written), KEY2 (links resolved), both from gua
   if [ -n "$REAL" ]; then guard_norm "$REAL"; KEY2="$NORM"; else KEY2="$KEY1"; fi
 }
 
-resolved_home_problem() { # path -> WHY (empty: fine), the core's base.resolved_home_problem: a RESOLVED engine home
-  # other than ~/.whynot-cut must not be a link itself, a drive root or mount point, the home folder or Desktop /
+resolved_home_problem() { # path -> WHY (empty: fine), the core's base.resolved_home_problem: ~/.whynot-cut itself
+  # is fine - unless it is a link (Addendum F): then where it points is checked like any resolved home (fix round 3)
+  local p="$1" a
+  WHY=""
+  case "$p" in \\\\*|//*) place_problem "$p" ""; return 0 ;; esac
+  while [ "${p%/}" != "$p" ] && [ "${p%/}" != "" ] && [ "${p%/}" != "${p%%:*}:" ]; do p="${p%/}"; done
+  guard_norm "$p"; a="$NORM"
+  guard_norm "$HOME/.whynot-cut"
+  if [ "$a" = "$NORM" ]; then
+    [ -L "$p" ] || return 0
+    place_problem "$p" 1
+    if [ -n "$WHY" ]; then
+      real_path "$p"
+      WHY="a link to ${REAL:-a target that cannot be read}, which is ${WHY#a link to } - remove the link (or point it"
+      WHY="$WHY at a folder of its own)"
+    fi
+    return 0
+  fi
+  place_problem "$p" ""
+}
+
+place_problem() { # path link-ok -> WHY: a RESOLVED engine home must not be a link itself (unless link-ok: the
+  # linked ~/.whynot-cut), a drive root or mount point, the home folder or Desktop /
   # Documents / Downloads themselves, the saved clients folder or a folder holding it, a folder with .whynot-client in
   # it or up to 3 levels below, or one too big to check for that (more than 5000 entries within 3 levels); every
   # comparison as written and with links resolved, case folded on macOS
-  local p="$1" a b d c lp cnt
+  local p="$1" a b d c lp cnt rp
   WHY=""
   case "$p" in
     \\\\*|//*) WHY="a network share or device path; name a folder on a local drive"; return 0 ;;  # (fix round 2)
   esac
   while [ "${p%/}" != "$p" ] && [ "${p%/}" != "" ] && [ "${p%/}" != "${p%%:*}:" ]; do p="${p%/}"; done
   guard_norm "$p"; a="$NORM"
-  guard_norm "$HOME/.whynot-cut"
-  [ "$a" = "$NORM" ] && return 0
   case "$a" in /|[A-Za-z]:|[A-Za-z]:/) WHY="a drive root or a mount point"; return 0 ;; esac
-  if [ -L "$p" ]; then
+  if [ -L "$p" ] && [ -z "${2:-}" ]; then
     WHY="a link or mount point (a junction, symlink or mounted folder); name the real folder instead"; return 0
   fi
   if is_mount "$p"; then WHY="a drive root or a mount point"; return 0; fi
-  place_keys "$p"; a="$KEY1" b="$KEY2"
+  place_keys "$p"; a="$KEY1" b="$KEY2" rp="$REAL"
   case "$b" in /|[A-Za-z]:|[A-Za-z]:/) WHY="a drive root or a mount point"; return 0 ;; esac
   place_keys "$HOME"
   if [ "$a" = "$KEY1" ] || [ "$a" = "$KEY2" ] || [ "$b" = "$KEY1" ] || [ "$b" = "$KEY2" ]; then
@@ -949,9 +978,10 @@ resolved_home_problem() { # path -> WHY (empty: fine), the core's base.resolved_
 $CLIENT_ROOTS
 EOF
   if [ -d "$p" ]; then
-    lp="$(find "$p" -maxdepth 4 -name .whynot-client 2>/dev/null </dev/null | head -n 1)"
+    [ -n "$rp" ] || rp="$p"  # (the real folder: find does not enter a link named on its command line)
+    lp="$(find "$rp" -maxdepth 4 -name .whynot-client 2>/dev/null </dev/null | head -n 1)"
     if [ -n "$lp" ]; then WHY="holding a client folder (${lp%/*} holds .whynot-client)"; return 0; fi
-    cnt="$(find "$p" -mindepth 1 -maxdepth 4 2>/dev/null </dev/null | head -n 5001 | wc -l | tr -d ' ')"
+    cnt="$(find "$rp" -mindepth 1 -maxdepth 4 2>/dev/null </dev/null | head -n 5001 | wc -l | tr -d ' ')"
     if [ "${cnt:-0}" -gt 5000 ]; then
       WHY="too big to check for client folders (more than 5000 entries within 3 levels); choose an engine folder"
       WHY="$WHY of its own with -EngineHome / --engine-home"
@@ -1117,17 +1147,24 @@ COMP="$ROOT/setup/components.json"
 IS_RESOLVED=1
 if [ -n "$ENGINE_OPT" ]; then  # --engine-home naming the saved home itself is that home, used as it is (fix round 2)
   IS_RESOLVED=""
-  typed_path "$ENGINE_OPT"; norm_path "$TYPED"; n_opt="$NORM"
-  norm_path "$DEFAULT_ENGINE"
+  typed_path "$ENGINE_OPT"; guard_norm "$TYPED"; n_opt="$NORM"
+  guard_norm "$DEFAULT_ENGINE"
   case "$TYPED" in /*|[A-Za-z]:*) [ "$n_opt" = "$NORM" ] && IS_RESOLVED=1 ;; esac
 fi
-if [ -z "$UNINSTALL" ] && [ -n "$IS_RESOLVED" ]; then
+LINKED_DEFAULT=""  # ~/.whynot-cut that is a link: also checked before an uninstall (fix round 3)
+if [ -L "$DEFAULT_ENGINE" ]; then
+  guard_norm "$DEFAULT_ENGINE"; n_def="$NORM"
+  guard_norm "$HOME/.whynot-cut"
+  [ "$n_def" = "$NORM" ] && LINKED_DEFAULT=1
+fi
+if { [ -z "$UNINSTALL" ] && [ -n "$IS_RESOLVED" ]; } ||
+   { [ -n "$UNINSTALL" ] && [ -z "$ENGINE_OPT" ] && [ -n "$LINKED_DEFAULT" ]; }; then
   # task 9: a home saved somewhere in a place it must never be: stop and say the fix, before the countdown and any
   # download (fix round 1), also when --engine-home names that same folder (fix round 2)
   client_roots
   resolved_home_problem "$DEFAULT_ENGINE"
   if [ -n "$WHY" ]; then
-    printf 'ERROR: WhyNot Cut will not use %s as its engine home (from %s): it is %s. Nothing was downloaded. To fix it, run the installer again with -EngineHome <folder> / --engine-home <folder> (a folder of its own, for example ~/WhyNotCut).\n' \
+    printf 'ERROR: WhyNot Cut will not use %s as its engine home (from %s): it is %s. Nothing was downloaded or deleted. To fix it, run the installer again with -EngineHome <folder> / --engine-home <folder> (a folder of its own, for example ~/WhyNotCut).\n' \
       "$DEFAULT_ENGINE" "$ENGINE_SRC" "$WHY"
     printf '%s\n' "لن يستخدم WhyNot Cut هذا المجلد لملفات التشغيل. لإصلاح ذلك شغّل المثبّت مرة أخرى مع -EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به."
     exit 2

@@ -196,6 +196,15 @@ def same_path(a, b) -> bool:
     return _norm(a) == _norm(b)
 
 
+def saved_client_roots(paths) -> list:
+    """The saved clients folders: clients_root of the preferences file and of the pointer (absolute)."""
+    from .system import read_preferences  # (at call time: system imports this module)
+    roots = [read_preferences(paths).get("clients_root")]
+    ptr = read_pointer(paths.options_file)
+    roots.append(ptr.get("clients_root") if ptr is not None else None)
+    return [saved_path(r, paths.home) for r in roots if isinstance(r, str) and r.strip()]
+
+
 def linked_default_home(whynot, home) -> bool:
     """Addendum F (owner 2026-10-13): the DEFAULT engine home <home>/.whynot-cut may be a directory link (a junction or
     symlink, e.g. to D:\\ClaudeData\\whynot-cut-home). It is used through the link at install and uninstall; the
@@ -466,15 +475,27 @@ def resolved_home_problem(path, *, home, clients_roots: Iterable = (), known: It
     clients folder (it is or holds it) or a `.whynot-client` marker in it or up to 3 levels below - and a folder too
     big to check for that (more than MARKER_SCAN_LIMIT entries within 3 levels). Every comparison is made both as
     written and with links resolved (realpath), and case-insensitively on macOS too. A genuine 2.x / 3.0 home anywhere
-    else is used as it is. The bootstraps apply the same rule (Get-WncResolvedHomeProblem / resolved_home_problem)
-    before anything is downloaded."""
+    else is used as it is. ~/.whynot-cut that is a LINK (Addendum F) is checked by where it points (fix round 3): the
+    same rules on its real target, so a link to Documents, the user folder, a drive root or a client folder is refused
+    at install and uninstall alike. The bootstraps apply the same rule (Get-WncResolvedHomeProblem /
+    resolved_home_problem) before anything is downloaded, and again before their deferred delete."""
     p, h = strip_long_prefix(str(path)), Path(home)
     if re.match(r"^[\\/]{2}", p):  # \\.\..., \\?\UNC\..., \\server\share, \\localhost\C$ (fix round 2)
         return "a network share or device path; name a folder on a local drive"
-    if _fold(_norm(p)) == _fold(_norm(h / ".whynot-cut")):
+    default = _fold(_norm(p)) == _fold(_norm(h / ".whynot-cut"))
+    if default and not is_link(p):
         return None
-    if is_link(p):
+    if not default and is_link(p):
         return "a link or mount point (a junction, symlink or mounted folder); name the real folder instead"
+    why = _place_problem(p, h, clients_roots, known)
+    if why and default:
+        return (f"a link to {os.path.realpath(p)}, which is {why.removeprefix('a link to ')} - remove the link "
+                "(or point it at a folder of its own)")
+    return why
+
+
+def _place_problem(p: str, h: Path, clients_roots: Iterable, known: Iterable) -> Optional[str]:
+    """resolved_home_problem's checks of where `p` really is (as written and with links resolved)."""
     keys = _place_keys(p)
     if _is_drive_root(p) or any(_is_drive_root(k) for k in keys):
         return "a drive root or a mount point"
