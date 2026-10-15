@@ -1333,6 +1333,18 @@ class TestPlanCommand(unittest.TestCase):
 # --------------------------------------------------------------------------------------------- T7.1 step helpers
 FIXTURES = SK / "tests" / "fixtures" / "installer"
 FAKE_UV = FIXTURES / "fake_uv.py"
+
+
+def copy_stand_in(test: unittest.TestCase, dest: Path, name: str) -> dict:
+    """A copy of tests/fixtures/installer/<name>.sh and .py in `dest` with every exec bit cleared (what a checkout of the
+    git 100644 fixtures looks like on macOS/Linux); {"sh": ..., "py": ...}. Windows has no exec bit to clear."""
+    dest.mkdir(parents=True, exist_ok=True)
+    out = {}
+    for ext in ("sh", "py"):
+        out[ext] = dest / f"{name}.{ext}"
+        shutil.copyfile(FIXTURES / f"{name}.{ext}", out[ext])
+        os.chmod(out[ext], 0o644)
+    return out
 LOCK_A = b"# fixture lock A\nanyio==4.15.1 \\\n    --hash=sha256:" + b"a" * 64 + b"\n"
 LOCK_B = b"# fixture lock B\nanyio==4.15.2 \\\n    --hash=sha256:" + b"b" * 64 + b"\n"
 
@@ -1670,6 +1682,51 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual(self.rt.uv_command(ctx), [ctx.args.uv])
         ctx.paths.sandbox = True
         self.assertEqual(self.rt.uv_command(ctx), [sys.executable, "-B", str(FAKE_UV)])
+
+    def test_a_sh_uv_stand_in_runs_with_bash_and_needs_no_exec_bit(self):
+        # macOS CI round 1 (M1): the fixtures are 100644 in git, so exec'ing fake_uv.sh failed with EACCES there (Windows
+        # never checks the bit). A sandbox-only .sh stand-in is run by bash, like bootstrap.sh does; a .py on this python.
+        stand = copy_stand_in(self, Path(self._td.name) / "uv no exec", "fake_uv")
+        with mock.patch.dict(os.environ, {"WNC_TEST_UV": str(stand["sh"])}):
+            self.assertEqual(self.rt.uv_command(self.ctx()), ["bash", str(stand["sh"])])
+        with mock.patch.dict(os.environ, {"WNC_TEST_UV": str(stand["py"])}):
+            self.assertEqual(self.rt.uv_command(self.ctx()), [sys.executable, "-B", str(stand["py"])])
+        with mock.patch.dict(os.environ, {"WNC_TEST_UV": str(FIXTURES / "fake_uv.cmd")}):
+            self.assertEqual(self.rt.uv_command(self.ctx()), [str(FIXTURES / "fake_uv.cmd")])
+        ctx = self.ctx()
+        ctx.paths.sandbox = False  # outside a sandbox the hook is ignored altogether
+        ctx.args.uv = "/x/uv"
+        with mock.patch.dict(os.environ, {"WNC_TEST_UV": str(stand["sh"])}):
+            self.assertEqual(self.rt.uv_command(ctx), ["/x/uv"])
+
+    def test_a_sh_uv_stand_in_without_the_exec_bit_really_runs(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash is not available")
+        stand = copy_stand_in(self, Path(self._td.name) / "uv no exec", "fake_uv")
+        if not IS_WIN:
+            self.assertFalse(os.access(stand["sh"], os.X_OK))
+        env = {"WNC_TEST_UV": str(stand["sh"]), "FAKE_UV_PYTHON": sys.executable, "FAKE_UV_VERSION": "9.9.9",
+               "PATH": str(Path(bash).parent) + os.pathsep + os.environ.get("PATH", "")}
+        with mock.patch.dict(os.environ, env):
+            ctx = self.ctx()
+            rc, out = base.run_cmd(ctx, self.rt.uv_command(ctx) + ["--version"], 60)
+        self.assertEqual((rc, out.strip()), (0, "uv 9.9.9"))
+
+    def test_the_recorded_uv_version_comes_from_a_sh_stand_in_too(self):
+        # state.json records `uv --version`; system._uv_version used to look only at argv[0], which for a bash stand-in
+        # is "bash", not a file
+        from wnc_installer import system
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash is not available")
+        stand = copy_stand_in(self, Path(self._td.name) / "uv no exec", "fake_uv")
+        env = {"WNC_TEST_UV": str(stand["sh"]), "FAKE_UV_PYTHON": sys.executable, "FAKE_UV_VERSION": "9.9.9",
+               "PATH": str(Path(bash).parent) + os.pathsep + os.environ.get("PATH", "")}
+        with mock.patch.dict(os.environ, env):
+            self.assertEqual(system._uv_version(self.ctx()), "9.9.9")
+        with mock.patch.dict(os.environ, {"WNC_TEST_UV": str(stand["sh"].with_name("gone.sh"))}):
+            self.assertIsNone(system._uv_version(self.ctx()))
 
     @unittest.skipUnless(IS_WIN, "the .cmd wrapper is for Windows")
     def test_cmd_wrapper_runs_fake_uv(self):
@@ -2378,6 +2435,31 @@ class TestStepClaude(unittest.TestCase):
         self.assertFalse(ctx.paths.claude_dir.exists())
         self.assertFalse(ctx.paths.marketplace_dir.exists())
         self.assertFalse(ctx.paths.state_file.exists())
+
+    def test_a_sh_cli_stand_in_runs_with_bash_and_needs_no_exec_bit(self):
+        # macOS CI round 1 (M1): same as the uv stand-in; the 100644 fake_claude.sh gave EACCES on the Mac
+        stand = copy_stand_in(self, self.tmp / "claude no exec", "fake_claude")
+        self.assertEqual(self.cl.claude_command(stand["sh"]), ["bash", str(stand["sh"])])
+        self.assertEqual(self.cl.claude_command(str(stand["sh"]).upper().replace(".SH", ".sh")),
+                         ["bash", str(stand["sh"]).upper().replace(".SH", ".sh")])
+        self.assertEqual(self.cl.claude_command(stand["py"]), [sys.executable, "-B", str(stand["py"])])
+        self.assertEqual(self.cl.claude_command("/usr/local/bin/claude"), ["/usr/local/bin/claude"])
+        self.assertEqual(self.cl.claude_command(FIXTURES / "fake_claude.cmd"), [str(FIXTURES / "fake_claude.cmd")])
+
+    def test_a_sh_cli_stand_in_without_the_exec_bit_really_runs(self):
+        bash = find_bash()
+        if not bash:
+            self.skipTest("bash is not available")
+        stand = copy_stand_in(self, self.tmp / "claude no exec", "fake_claude")
+        if not IS_WIN:
+            self.assertFalse(os.access(stand["sh"], os.X_OK))
+        env = {"WNC_CLAUDE_CLI": str(stand["sh"]), "FAKE_CLAUDE_PYTHON": sys.executable,
+               "FAKE_CLAUDE_VERSION": "2.1.999", "PATH": str(Path(bash).parent) + os.pathsep + os.environ.get("PATH", "")}
+        with mock.patch.dict(os.environ, env):
+            ctx = self.ctx()
+            [cli_path] = self.cl.claude_candidates(os.environ, ctx.paths.home, "mac-arm64", True)
+            rc, out = base.run_cmd(ctx, self.cl.claude_command(cli_path) + ["--version"], 60)
+        self.assertEqual((rc, out.strip()), (0, "2.1.999 (Claude Code)"))
 
     @unittest.skipUnless(IS_WIN, "the .cmd wrapper is for Windows")
     def test_cmd_wrapper_runs_fake_claude(self):
@@ -6424,6 +6506,30 @@ class TestStaticChecks(unittest.TestCase):
             self.assertNotIn("https://thewhynot.ai/install", text, f)
         for f in (INSTALLER / "install.ps1", INSTALLER / "install.sh", INSTALLER / "README.md"):
             self.assertIn("https://dl.thewhynot.ai/install.", f.read_text(encoding="utf-8"), f)
+
+    def test_the_jxa_readers_read_bytes_and_judge_the_bom_themselves(self):
+        # macOS CI round 1 (M1): NSString stringWithContentsOfFile:encoding: STRIPS a UTF-8 BOM, so a JS check on
+        # charCodeAt(0) === 0xFEFF never fired and a BOM pointer file was accepted (the engine and the Python twin say
+        # a BOM is not JSON). JXA cannot run here, so this pins the source: every JXA block reads NSData; the one that
+        # must reject a BOM (saved_engine_home) looks at the first three bytes (EF BB BF = "77u/" in base64) before it
+        # decodes, and treats invalid UTF-8 (initWithData: gives nil) as invalid too.
+        text = (INSTALLER / "core" / "bootstrap.sh").read_text(encoding="utf-8")
+        blocks = re.findall(r"'(function run\(argv\) \{.*?\n *\})'", text, re.S)
+        self.assertGreaterEqual(len(blocks), 4, "JXA blocks found in bootstrap.sh")
+        self.assertNotIn("stringWithContentsOfFile", text)
+        for b in blocks:
+            self.assertIn("$.NSData.dataWithContentsOfFile(", b)
+            self.assertIn("initWithDataEncoding(", b)
+        strict = [b for b in blocks if "engine_home" in b]
+        self.assertEqual(len(strict), 1)
+        self.assertIn('base64EncodedStringWithOptions(0)', strict[0])
+        self.assertIn('"77u/"', strict[0])
+        self.assertNotIn("0xFEFF", strict[0])  # the old text-level check, which Foundation made unreachable
+        self.assertLess(strict[0].index('"77u/"'), strict[0].index("initWithDataEncoding("))
+        # the three that follow the Python twins' utf-8-sig (a BOM is allowed there) say so
+        for b in blocks:
+            if b is not strict[0]:
+                self.assertIn("replace(/^" + chr(92) + "uFEFF/", b)
 
     def test_the_file_lists(self):
         self.assertEqual([p.name for p in PS1_FILES], ["bootstrap.ps1", "install.ps1"])

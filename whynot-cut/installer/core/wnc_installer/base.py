@@ -1332,6 +1332,20 @@ def log_output(log: Log, text: str) -> None:
             f.write("".join(f"    | {line}\n" for line in text.rstrip().splitlines()))
 
 
+def stand_in_command(path) -> list:
+    """A command list for a program given by path, test stand-ins included: a `.py` runs on this interpreter, a `.sh`
+    runs with `bash` (the way bootstrap.sh runs a .sh WNC_TEST_UV), anything else is started as itself. A stand-in is
+    never exec'd as a script: git keeps the fixtures 100644, so exec'ing one fails with EACCES on macOS/Linux
+    (Windows never checks the bit)."""
+    p = str(path)
+    low = p.lower()
+    if low.endswith(".py"):
+        return [sys.executable, "-B", p]
+    if low.endswith(".sh"):
+        return ["bash", p]
+    return [p]
+
+
 def run_cmd(ctx: "Ctx", cmd: list, timeout: int, cwd: Optional[Path] = None, *, split: bool = False) -> tuple:
     """Run a child with the engine environment, no stdin, output captured into the log. (exit code, output);
     124 = timed out, 127 = could not start. split=True returns stdout alone (stderr still goes to the log)."""

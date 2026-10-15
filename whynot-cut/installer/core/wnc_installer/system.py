@@ -515,7 +515,7 @@ def plugin_version(plugin_root: Path) -> Optional[str]:
 
 def _uv_version(ctx: base.Ctx) -> Optional[str]:
     uv = runtime.uv_command(ctx)
-    if not (uv[0] == sys.executable or Path(uv[0]).is_file()):
+    if not Path(uv[-1]).is_file():  # the program itself: [uv], [python, -B, stand-in.py] or [bash, stand-in.sh]
         return None
     rc, out = base.run_cmd(ctx, uv + ["--version"], 60, split=True)
     m = re.search(r"uv (\S+)", out) if rc == 0 else None

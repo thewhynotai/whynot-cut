@@ -103,9 +103,9 @@ def claude_candidates(env: Mapping, home, platform: str, sandbox: bool) -> list:
 
 
 def claude_command(cli) -> list:
-    """The CLI as a command list; a `.py` (the test stand-in) runs on this interpreter, like WNC_TEST_UV."""
-    cli = str(cli)
-    return [sys.executable, "-B", cli] if cli.lower().endswith(".py") else [cli]
+    """The CLI as a command list; a `.py` / `.sh` (the test stand-ins) run on this interpreter / with bash, like
+    WNC_TEST_UV (base.stand_in_command)."""
+    return base.stand_in_command(cli)
 
 
 def _version(text) -> Optional[tuple]:

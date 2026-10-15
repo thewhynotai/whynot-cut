@@ -106,13 +106,18 @@ pick_py() { # a python that can read JSON (non-macOS only: Git Bash in tests)
 
 # macOS: JavaScript for Automation (built in). Not plutil: it turns JSON into a plist, which has no null, and
 # components.json holds nulls. The file and the key path arrive as run() arguments, never inside the script text.
-# Prints the value; null, a missing key or an unreadable file print nothing.
+# Prints the value; null, a missing key or an unreadable file print nothing. Every JXA reader below reads the file as
+# NSData and decodes it itself (never an NSString file reader: those strip a UTF-8 BOM before JS can see it,
+# which is how the macOS CI found a BOM file accepted where the Python twin rejects it); this one and the state and
+# size readers follow their twins' utf-8-sig and drop a leading BOM, saved_engine_home's reader refuses one.
 JXA_JSON_GET='function run(argv) {
   ObjC.import("Foundation");
-  var text = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
+  var data = $.NSData.dataWithContentsOfFile(argv[0]);
+  if (data.isNil()) { return ""; }
+  var text = $.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding);
   if (text.isNil()) { return ""; }
   var v;
-  try { v = JSON.parse(ObjC.unwrap(text).replace(/^﻿/, "")); } catch (e) { return ""; }
+  try { v = JSON.parse(ObjC.unwrap(text).replace(/^\uFEFF/, "")); } catch (e) { return ""; }
   var keys = argv[1].split(".");
   for (var i = 0; i < keys.length; i++) {
     if (v === null || typeof v !== "object" || !Object.prototype.hasOwnProperty.call(v, keys[i])) { return ""; }
@@ -406,19 +411,21 @@ saved_engine_home() { # pointer-file settings-file -> "pointer<TAB>value", "sett
   # the plugin option engine_home as the engine reads it (engine/reel/lib/plat.py saved_options): the pointer file
   # when it is a JSON object with an "engine_home" string ("" = not set), else settings.json pluginConfigs
   # ["whynot-cut@thewhynot-ai"].options, else the first other whynot-cut@* entry (file order) with options. Both
-  # files are UTF-8 without a BOM (a BOM is not JSON, as for the engine). macOS: JXA; elsewhere (Git Bash in tests)
-  # the same rules in Python.
+  # files are UTF-8 without a BOM (a BOM is not JSON, as for the engine). macOS: JXA, which reads the BYTES: the first
+  # three (EF BB BF = "77u/" in base64) are checked before decoding, and bytes that are not UTF-8 make the file
+  # invalid too; elsewhere (Git Bash in tests) the same rules in Python.
   local js py
   js='function run(argv) {
     ObjC.import("Foundation");
     function isObj(v) { return v !== null && typeof v === "object" && !Array.isArray(v); }
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
     function load(p) {
-      var t = $.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, null);
+      var d = $.NSData.dataWithContentsOfFile(p);
+      if (d.isNil()) { return null; }
+      if (ObjC.unwrap(d.base64EncodedStringWithOptions(0)).indexOf("77u/") === 0) { return null; }
+      var t = $.NSString.alloc.initWithDataEncoding(d, $.NSUTF8StringEncoding);
       if (t.isNil()) { return null; }
-      var s = ObjC.unwrap(t);
-      if (s.charCodeAt(0) === 0xFEFF) { return null; }
-      try { var v = JSON.parse(s); return isObj(v) ? v : null; } catch (e) { return null; }
+      try { var v = JSON.parse(ObjC.unwrap(t)); return isObj(v) ? v : null; } catch (e) { return null; }
     }
     var p = load(argv[0]);
     if (p !== null && own(p, "engine_home") && typeof p.engine_home === "string") {
@@ -539,10 +546,12 @@ typed_path() { # text -> TYPED: quotes trimmed, ~ is the home folder, no trailin
 # is a JSON object with that same id. The file arrives as a run() argument, never inside the script text.
 JXA_STATE_OK='function run(argv) {
   ObjC.import("Foundation");
-  var t = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
+  var d = $.NSData.dataWithContentsOfFile(argv[0]);
+  if (d.isNil()) { return "no"; }
+  var t = $.NSString.alloc.initWithDataEncoding(d, $.NSUTF8StringEncoding);
   if (t.isNil()) { return "no"; }
   var v;
-  try { v = JSON.parse(ObjC.unwrap(t).replace(/^﻿/, "")); } catch (e) { return "no"; }
+  try { v = JSON.parse(ObjC.unwrap(t).replace(/^\uFEFF/, "")); } catch (e) { return "no"; }
   var ok = v !== null && typeof v === "object" && !Array.isArray(v) && Number.isInteger(v.schema) && v.schema === 1 &&
            Object.prototype.hasOwnProperty.call(v, "plugin");
   return ok ? "yes" : "no";
@@ -742,8 +751,9 @@ can_ask() { # the location question: only on the Customise path (D-T1), never wi
 JXA_SIZE='function run(argv) {
   ObjC.import("Foundation");
   var c = null;
-  var t = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
-  if (!t.isNil()) { try { c = JSON.parse(ObjC.unwrap(t).replace(/^\uFEFF/, "")); } catch (e) { c = null; } }
+  var d = $.NSData.dataWithContentsOfFile(argv[0]);
+  var t = d.isNil() ? null : $.NSString.alloc.initWithDataEncoding(d, $.NSUTF8StringEncoding);
+  if (t !== null && !t.isNil()) { try { c = JSON.parse(ObjC.unwrap(t).replace(/^\uFEFF/, "")); } catch (e) { c = null; } }
   function get(o, keys) {
     for (var i = 0; i < keys.length; i++) {
       if (o === null || typeof o !== "object" || Array.isArray(o) ||

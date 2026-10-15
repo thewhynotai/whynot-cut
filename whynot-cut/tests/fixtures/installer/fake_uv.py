@@ -2,7 +2,8 @@
 
 How the installer core runs it: env WNC_TEST_UV (honoured only when the core runs in a sandbox, --home) names this
 file or one of its wrappers. A value ending in `.py` is run as `<the core's own sys.executable> -B fake_uv.py ...`;
-any other value (fake_uv.cmd on Windows, fake_uv.sh elsewhere) is run directly. The wrappers start this file with
+a value ending in `.sh` is run as `bash fake_uv.sh ...` (git keeps this file 100644, so it is never exec'd: EACCES on
+macOS CI round 1); any other value (fake_uv.cmd on Windows) is run directly. The wrappers start this file with
 $FAKE_UV_PYTHON (default `python` / `python3`).
 
 Behaviour:

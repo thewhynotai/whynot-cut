@@ -78,10 +78,11 @@ def current_runtime(paths: base.Paths) -> Optional[str]:
 
 
 def uv_command(ctx: base.Ctx) -> list:
-    """uv as a command list: WNC_TEST_UV (sandbox only; a .py runs on this interpreter), --uv, else bin/uv(.exe)."""
+    """uv as a command list: WNC_TEST_UV (sandbox only; a .py runs on this interpreter, a .sh with bash, see
+    base.stand_in_command), --uv, else bin/uv(.exe)."""
     test = os.environ.get("WNC_TEST_UV") if ctx.paths.sandbox else None
     if test:
-        return [sys.executable, "-B", test] if test.lower().endswith(".py") else [test]
+        return base.stand_in_command(test)
     if getattr(ctx.args, "uv", None):
         return [ctx.args.uv]
     return [str(ctx.paths.bin_dir / ("uv.exe" if ctx.platform.startswith("win") else "uv"))]

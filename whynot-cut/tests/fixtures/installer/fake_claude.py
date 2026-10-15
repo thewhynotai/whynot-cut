@@ -2,8 +2,8 @@
 
 How the installer core runs it: env WNC_CLAUDE_CLI (or CLAUDE_CLI; only these and the bundles under the fake home are
 searched in a sandbox, --home) names this file or one of its wrappers. A value ending in `.py` is run as
-`<the core's own sys.executable> -B fake_claude.py ...`; any other value (fake_claude.cmd on Windows, fake_claude.sh
-elsewhere) is run directly. The wrappers start this file with $FAKE_CLAUDE_PYTHON (default `python` / `python3`).
+`<the core's own sys.executable> -B fake_claude.py ...`; a value ending in `.sh` is run as `bash fake_claude.sh ...` (git keeps
+it 100644, so it is never exec'd); any other value (fake_claude.cmd on Windows) is run directly. The wrappers start this file with $FAKE_CLAUDE_PYTHON (default `python` / `python3`).
 
 Behaviour (it imitates the files the real CLI keeps, but only under $CLAUDE_CONFIG_DIR, which the sandboxed core
 always sets; without it every call that would write fails, so the real ~/.claude is never touched):
