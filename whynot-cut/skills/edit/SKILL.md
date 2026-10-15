@@ -25,6 +25,9 @@ reel profile --root "<CLIENT_FOLDER>"                   # which profile applies 
 reel settings --root "<CLIENT_FOLDER>"                  # preferences in effect for THIS client (_file = which file)
 ```
 - `reel` is on PATH while the plugin is enabled (bash and PowerShell). If it says the engine is missing, run `/whynot-cut:start`.
+- Read what is already in the client folder yourself (the reel-profile `output/client_database/reel-profile/profile.json`,
+  `output/projects/<ID>/`) before you describe it or ask the editor anything it answers (people, brand, references);
+  never ask for what the profile already says, and never call a folder missing without having looked.
 - Once per session, `reel doctor`: **`guard_active: false` is a stop.** Tell the editor "WhyNot Cut protection is OFF"
   (the hook that keeps `assets/` and `data/` read-only and the approvals the editor's own is not running) and give
   `guard_heartbeat.fix`. Edit nothing until `reel doctor` shows `guard_active: true` after the fix. `null` means an

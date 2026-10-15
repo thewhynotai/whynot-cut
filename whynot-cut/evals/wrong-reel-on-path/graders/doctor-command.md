@@ -4,4 +4,4 @@ target: last_message
 match: contains
 ---
 
-reel(?:\.cmd)?\s+doctor
+reel(?:\.cmd)?[\"']?\s+doctor

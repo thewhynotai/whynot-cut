@@ -50,7 +50,9 @@ Premiere steps.
 
 ## Motion videos (`<EP>_<ID>_MO`)
 A motion video is built in After Effects from the motion plan, never with `ppro-build`. Route its comments like this
-(the full playbook is `/whynot-cut:motion`):
+(the full playbook is `/whynot-cut:motion`). First read `01_analysis/motion-script.json` yourself and map each comment
+to the scene it means (e.g. "the second scene" = `S02`, with its current timing and style), so every routed change names
+a scene id.
 
 | Comment is about | Who | Commands |
 |---|---|---|

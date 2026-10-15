@@ -1,0 +1,166 @@
+{
+ "label": "v3.0.0-p3",
+ "cli": "2.1.295",
+ "date": "2026-10-14",
+ "judge": "sonnet",
+ "ablation": "none",
+ "bar": "a case passes when >= 2/3 of its runs pass",
+ "counted": 29,
+ "pass": 25,
+ "pass_every_run": 19,
+ "pending": [
+  "magnific-broll-pending"
+ ],
+ "cases": {
+  "after-effects-on-request": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "autopilot-new-clips": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "edit-arabic-only": {
+   "passed": 1,
+   "runs": 3,
+   "mean_score": 0.867
+  },
+  "first-run-onboarding": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "fix-audio-only": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "gate0-delegation": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "handoff-for-editor": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "help-cheat-sheet": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "magnific-broll-pending": {
+   "passed": 0,
+   "runs": 3,
+   "mean_score": 0.667
+  },
+  "medical-religious-approvals": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "motion-from-audio": {
+   "passed": 2,
+   "runs": 3,
+   "mean_score": 0.917
+  },
+  "motion-qc-evidence": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "motion-revision": {
+   "passed": 1,
+   "runs": 3,
+   "mean_score": 0.733
+  },
+  "negative-hugo-assets": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "new-client-reference-style": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "onboard-new-client": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "panel-approval-sessionstart": {
+   "passed": 2,
+   "runs": 3,
+   "mean_score": 0.917
+  },
+  "podcast-reels-plan": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "preferences-stop-asking": {
+   "passed": 1,
+   "runs": 3,
+   "mean_score": 0.833
+  },
+  "premiere-first-default": {
+   "passed": 2,
+   "runs": 3,
+   "mean_score": 0.889
+  },
+  "preview-before-premiere": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "protect-client-sources": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "publish-package": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "revise-arabic-only": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "revise-editor-comments": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "status-arabic-only": {
+   "passed": 2,
+   "runs": 3,
+   "mean_score": 0.933
+  },
+  "status-before-sending": {
+   "passed": 2,
+   "runs": 3,
+   "mean_score": 0.917
+  },
+  "transcript-words-to-confirm": {
+   "passed": 2,
+   "runs": 3,
+   "mean_score": 0.867
+  },
+  "windows-bridge-not-responding": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "wrong-reel-on-path": {
+   "passed": 1,
+   "runs": 3,
+   "mean_score": 0.867
+  }
+ }
+}

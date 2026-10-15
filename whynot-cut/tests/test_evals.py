@@ -39,7 +39,8 @@ FIXTURE_FUNCS = {"make_clinic", "add_references", "add_project", "add_episode_pl
                  "add_motion_project", "make_hugo_site"}
 SOURCE_LINE = '. "${here%/*}/../_fixtures/example-clinic.sh"'
 # a reel command written in a regex grader: reel, reel.cmd or reel(?:\.cmd)?, whitespace, then a word or (?:a|b)
-REEL_IN_REGEX = re.compile(r"reel(?:\(\?:\\\.cmd\)\?|\.cmd)?(?:\\s\+|\\s\*| )(?:\(\?:([a-z|-]+)\)|([a-z][a-z0-9-]*))")
+REEL_IN_REGEX = re.compile(r"reel(?:\(\?:\\\.cmd\)\?|\.cmd)?(?:\[\\\"'\]\?|\[\"'\]\?)?(?:\\s\+|\\s\*| )"
+                           r"(?:\(\?:([a-z|-]+)\)|([a-z][a-z0-9-]*))")
 FLAG_IN_REGEX = re.compile(r"--([a-z][a-z0-9-]*)(?:(?:\[ =\]|=| )([a-z][a-z0-9-]*))?")
 SKILL_ALT = re.compile(r'\(\?:whynot-cut:\)\?\(\?:([a-z|-]+)\)')
 
