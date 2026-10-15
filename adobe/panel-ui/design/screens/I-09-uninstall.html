@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="normal,focus,models,confirm,loading,error,success,empty,long,win">
+<meta name="mock-widths" content="760,640">
+<meta name="mock-keys" content="Return: Uninstall (opens the confirm; never removes on one key) · Esc: Cancel · Confirm dialog: Return or Esc = Keep it (the safe choice); Remove WhyNot Cut needs a click or Tab then Space · Space: tick the models box">
+<meta name="mock-motion" content="removal rows go spinner to check by fill colour (200 ms) in fixed row boxes; the confirm dialog enters a reserved slot at the top by colour, the list does not move; static fallback: final state">
+<title>I-09 Uninstall</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/installer.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/installer.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/installer.js"></script>
+</head>
+<body>
+<script>
+/* I-09 Uninstall (screen-inventory §5 I-09; E2.1#5; G2-r1 d). Remove everything WhyNot Cut added, and nothing else.
+   Data: the core's uninstall steps (plugin: Claude plugin + marketplace entry, with a settings.json backup first;
+   adobe: panel folders; fonts: only the recorded files; marketplace; engine: only WhyNot Cut's own entries, models
+   only with --remove-models, library/ always stays). NOT in the core yet: removing the login item and the link (no
+   uninstall step does today), the size of the models, a per-item progress stream, "not installed" detection.
+   E2.1 / G made visible: #5 the exact list with where, models only if ticked, "Your client folders are not touched:
+   <path>", the settings backup file; the destructive confirm is a second step and never the Return default.
+   States: normal, focus (keyboard on Uninstall), models (the box ticked), confirm, loading (progress rows), error
+   (Premiere is using one item: what, why, one fix, support), success, empty (nothing installed), long (Arabic/space/
+   external clients path), win (Windows chrome and paths). */
+(function () {
+  var t = I.T, D = I.D, win = I.os === "win";
+  var ITEMS = [["app-window", "add.service"], ["puzzle", "add.claude"], ["layers", "add.panels"], ["type", "add.fonts"], ["power", "add.login"], ["link", "i09.r.link"]];
+  function untouched() {
+    return '<div class="mt-4">' + I.act("ok", t("i09.clients", { path: I.path(D.clients) }), "", { icon: "shield-check", sub: t("i09.backup", { file: I.path(D.backup) }) }) + "</div>";
+  }
+  function choose(o) {
+    o = o || {};
+    return I.title(t("i09.title"), t("i09.sub")) + I.adds("mt-3", { uninstall: true }) +
+      '<div class="mt-4" id="models">' + M.checkbox(t("i09.models", { gb: I.gb(2.9) }), !!o.models, o.boxFocus) + I.sub(t("i09.models.sub")) + "</div>" + untouched();
+  }
+  function progressRows(o) {
+    o = o || {};
+    return I.list(ITEMS.map(function (it, i) {
+      if (o.err && i === 2) return I.step("error", t(it[1]), { detail: t("i09.error"), under: '<div class="m-row mt-1">' + I.monoBox(D.cep) + "</div>" });
+      if (o.done || i < (o.at || 0) || o.err) return I.step("ok", t(it[1]), { end: t("i09.end.removed") });
+      if (i === o.at) return I.step("busy", t(it[1]), { end: t("i03.checking") });
+      return I.step("pending", t(it[1]));
+    }).concat([I.step("info", t("add.model"), { end: t("i09.end.kept") })]), "mt-3");
+  }
+  var cancel = function (dis) { return I.btn(t("i00.cancel"), { key: "esc", disabled: dis }); };
+  var go = function (o) { o = o || {}; return I.btn(t("i09.go"), { kind: "primary", icon: "trash-2", focus: o.focus, disabled: o.disabled, key: "enter" }); };
+  var STATES = {
+    normal: function () { return { body: choose(), bar: { end: cancel() + go() } }; },
+    focus: function () { return { body: choose(), bar: { end: cancel() + go({ focus: true }) } }; },
+    models: function () { return { body: choose({ models: true, boxFocus: true }), bar: { end: cancel() + go() }, scroll: "#models" }; },
+    confirm: function () {
+      return {
+        body: I.act("warn", t("i09.confirm.title"), t("i09.confirm.text"), {
+          btns: M.btn(t("i09.confirm.go"), { kind: "danger", icon: "trash-2" }) + '<div class="ms-2">' + I.btn(t("i09.confirm.keep"), { key: "enter", focus: true }) + "</div>"
+        }) + '<div class="mt-4"></div>' + choose(),
+        bar: { end: cancel(true) + go({ disabled: true }) }
+      };
+    },
+    loading: function () { return { body: I.title(t("i09.removing")) + progressRows({ at: 2 }) + untouched(), bar: { end: cancel(true) }, at: "remove", mark: "busy" }; },
+    error: function () {
+      return {
+        body: I.title(t("i09.removing")) + '<div class="mt-3">' + I.fail(t("i09.error"), { mono: D.cep, sub: t("i09.error.sub"), btn: I.btn(t("i00.retry"), { kind: "primary", icon: "refresh-cw", key: "enter" }) }) + "</div>" + progressRows({ err: true }) + untouched(),
+        bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, at: "remove", mark: "error"
+      };
+    },
+    success: function () {
+      return {
+        body: '<div class="i-display">' + t("i09.done") + '</div><div class="i-lead tx-muted mt-2">' + t("i09.done.sub", { gb: I.gb(2.4), path: I.path(D.home + (win ? "\\models" : "/models")) }) + "</div>" + progressRows({ done: true }),
+        bar: { end: I.btn(t("i00.close"), { kind: "primary", key: "enter" }) }, at: "done", all: true
+      };
+    },
+    empty: function () {
+      return {
+        body: M.empty({ icon: "shield-check", title: t("i09.empty.title"), text: t("i09.empty.text") }),
+        bar: { end: I.btn(t("i00.close"), { kind: "primary", key: "enter" }) }, at: "done", all: true
+      };
+    },
+    long: function () { return { body: choose({ models: true }), bar: { end: cancel() + go() }, scroll: "end" }; },
+    win: function () { return { body: choose(), bar: { end: cancel() + go() } }; }
+  };
+  I.mount({
+    id: "I-09", name: "Uninstall",
+    states: ["normal", "focus", "models", "confirm", "loading", "error", "success", "empty", "long", "win"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.rail = { flow: "uninstall", at: v.at || "choose", mark: v.mark, all: v.all };
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

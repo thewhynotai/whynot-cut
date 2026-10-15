@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="loading,normal,focus,error,offline,nosignin,success,long,win">
+<meta name="mock-widths" content="760,640">
+<meta name="mock-keys" content="Return: Continue (or Check again while a red line blocks) · Esc: Back · ⌘R / Ctrl+R: Check again · Tab order: Back, Check again, Continue">
+<meta name="mock-motion" content="rows turn from Checking to their result one by one: icon fill and text colour 200 ms in a fixed-height row box (no shift); rows are then re-ordered problems-first only once, when the whole check is done; summary chips fade in by colour; static fallback: final state">
+<title>I-03 Preflight</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/installer.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/installer.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/installer.js"></script>
+</head>
+<body>
+<script>
+/* I-03 Check this computer (screen-inventory §5 I-03). Tell the truth about this computer before anything is
+   downloaded. Data: the core's preflight step, ctx.facts = {os, arch, os_version, free_gb, home_ascii, home_space,
+   onedrive_documents, icloud_documents, claude_found, sac, adobe_hosts[{app, version, running}], nvidia, existing}.
+   Thresholds as the core: red under 6 GB, amber under 9 GB. NOT in the core yet: an internet check, the offline-bundle
+   flag, Claude signed-in, the macOS privacy-prompt rows (they are fixed copy).
+   Rows are ordered problems first (red, amber, info, ready) so what needs the editor is in view; chips count them.
+   E2.1 / G made visible: #2 "This check changes nothing"; G11: the two macOS privacy prompts (Files and folders,
+   Automation) are explained BEFORE they appear; Gatekeeper stays on (never asked to turn it off); Arabic/space paths
+   are fine (info). Windows: Smart App Control "We never turn it off".
+   States: loading (rows checking one by one), normal (macOS: Premiere open, the two prompts, Claude missing),
+   focus, error (red disk row: Continue off, Check again is the one fix), offline (no internet and no offline
+   download), nosignin (Claude installed, not signed in), success, long (iCloud Documents, Arabic user folder, an
+   earlier install, test build), win (Windows chrome: Smart App Control, OneDrive, NVIDIA). */
+(function () {
+  var t = I.T, D = I.D, st = I.state, win = I.os === "win";
+  var R = {
+    disk: function (k) {
+      var detail = k === "error" ? t("i03.disk.red", { free: I.gb(4.2), need: I.gb(6.0), gb: I.gb(1.8) }) : k === "warn" ? t("i03.disk.amber")
+        : t("i03.disk.ok", { free: I.gb(D.free), drive: I.ltr(D.drive), gb: I.gb(D.total) });
+      return I.step(k, t("i03.disk"), { detail: detail });
+    },
+    system: function () { return I.step("ok", t("i03.system"), { detail: M.ltr(D.os) }); },
+    adobe: function (running) {
+      return running ? I.step("warn", t("i03.adobe"), { detail: t("i03.adobe.running") })
+        : I.step("info", t("i03.adobe"), { detail: t("i03.adobe.info", { apps: I.ltr(D.apps) }) });
+    },
+    claude: function (k) {
+      return k === "ok" ? I.step("ok", t("i03.claude"), { detail: t("i03.claude.ok") })
+        : k === "signedout" ? I.step("info", t("i03.claude"), { detail: t("i03.claude.signedout") })
+        : I.step("info", t("i03.claude"), { detail: t("i03.claude.missing") });
+    },
+    gpu: function () { return I.step("ok", t("i03.gpu"), { detail: t("i03.gpu.ok", { gpu: I.ltr(D.gpu) }) }); },
+    path: function () { return I.step("info", t("i03.path"), { detail: t("i03.path.ok") }); },
+    cloud: function () { return I.step("warn", t("i03.cloud"), { detail: t(win ? "i03.cloud.onedrive" : "i03.cloud.icloud") }); },
+    existing: function () { return I.step("info", t("i03.existing"), { detail: t("i03.existing.info", { app: I.app(D.old) }) }); },
+    access: function () { return I.step("info", t("i03.access"), { detail: t("i03.access.info") }); },
+    auto: function () { return I.step("info", t("i03.auto"), { detail: t("i03.auto.info") }); },
+    gk: function () { return I.step("ok", t("i03.gk"), { detail: t("i03.gk.ok") }); },
+    sac: function () { return I.step("warn", t("i03.sac"), { detail: t("i03.sac.amber") }); },
+    net: function (on) { return on ? I.step("ok", t("i03.net"), { detail: t("i03.net.ok") }) : I.step("warn", t("i03.net"), { detail: t("i03.net.off") }); },
+    pend: function (key) { return I.step("pending", t(key), { end: t("i03.checking") }); },
+    busy: function (key) { return I.step("busy", t(key), { end: t("i03.checking") }); }
+  };
+  function summary(ok, note, block) {
+    return '<div class="i-chips">' + (block ? M.chip("error", t("i03.sum.block", { n: block }), "circle-x") : "") +
+      (note ? M.chip("warn", t("i03.sum.note", { n: note }), "triangle-alert") : "") +
+      (ok ? M.chip("ok", t("i03.sum.ok", { n: ok }), "circle-check") : "") + "</div>";
+  }
+  function head(chips) { return I.title(t("i03.title"), t("i03.sub")) + (chips || ""); }
+  var back = function (dis) { return I.btn(t("i00.back"), { kind: "ghost", flush: true, key: "esc", disabled: dis }); };
+  function bar(o) {
+    o = o || {};
+    return { start: back(), end: M.btn(t("i03.again"), { icon: "refresh-cw" }) + I.btn(t("i00.continue"), { kind: "primary", focus: o.focus, key: "enter" }) };
+  }
+  function blockedBar() {
+    return { start: back(), end: I.btn(t("i03.again"), { kind: "primary", icon: "refresh-cw", key: "enter" }) + M.btn(t("i00.continue"), { disabled: true }) };
+  }
+  var macRows = function (claudeKind) { return [R.adobe(true), R.access(), R.auto(), R.claude(claudeKind), R.disk("ok"), R.system(), R.gk(), R.gpu(), R.net(true)]; };
+
+  var STATES = {
+    loading: function () {
+      return {
+        body: head() + I.list([R.disk("ok"), R.system(), R.busy("i03.adobe"), R.pend("i03.claude"), R.pend("i03.gpu"), R.pend("i03.cloud"), R.pend("i03.net")], "mt-4"),
+        bar: { start: back(true), end: M.btn(t("i03.again"), { disabled: true, icon: "refresh-cw" }) + M.btn(t("i00.continue"), { disabled: true }) }
+      };
+    },
+    normal: function () { return { body: head(summary(5, 1)) + I.list(macRows("missing"), "mt-3"), bar: bar() }; },
+    focus: function () { return { body: head(summary(5, 1)) + I.list(macRows("missing"), "mt-3"), bar: bar({ focus: true }) }; },
+    error: function () {
+      return {
+        body: head(summary(5, 0, 1)) + I.list([R.disk("error"), R.access(), R.auto(), R.claude("missing"), R.system(), R.gk(), R.adobe(false), R.net(true)], "mt-3") +
+          '<div class="m-row-top mt-3">' + M.status("info", 16) + '<div class="t-meta tx-muted ms-2 m-grow">' + t("i03.blocked") + "</div></div>",
+        bar: blockedBar()
+      };
+    },
+    offline: function () {
+      return { body: head(summary(4, 1)) + I.list([R.net(false), R.access(), R.claude("missing"), R.disk("ok"), R.system(), R.gk(), R.adobe(false)], "mt-3"), bar: blockedBar() };
+    },
+    nosignin: function () {
+      return { body: head(summary(6)) + I.list([R.access(), R.auto(), R.claude("signedout"), R.disk("ok"), R.system(), R.gk(), R.adobe(false), R.net(true)], "mt-3"), bar: bar() };
+    },
+    success: function () {
+      return { body: head(summary(7)) + I.list([R.access(), R.auto(), R.disk("ok"), R.system(), R.gk(), R.adobe(false), R.claude("ok"), R.gpu(), R.net(true)], "mt-3"), bar: bar() };
+    },
+    long: function () {
+      return {
+        internal: true,
+        body: head(summary(4, 3)) + I.list([R.disk("warn"), R.adobe(true), R.cloud(), R.path(), R.access(), R.auto(), R.existing(), R.claude("missing"), R.system(), R.gk(), R.gpu(), R.net(true)], "mt-3"),
+        bar: bar(), scroll: "end"
+      };
+    },
+    win: function () {
+      return {
+        internal: true,
+        body: head(summary(4, 3)) + I.list([R.sac(), R.adobe(true), R.cloud(), R.claude("missing"), R.disk("ok"), R.system(), R.gpu(), R.net(true)], "mt-3"),
+        bar: bar()
+      };
+    }
+  };
+  I.mount({
+    id: "I-03", name: "Check this computer",
+    states: ["loading", "normal", "focus", "error", "offline", "nosignin", "success", "long", "win"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.rail = { flow: "install", at: "check", mark: state === "loading" ? "busy" : state === "error" ? "error" : undefined };
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

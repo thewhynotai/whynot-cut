@@ -1,0 +1,203 @@
+/* WhyNot Cut 3.0 E-D2: the installer window ("WhyNot Cut Setup", one Tauri 2 app for Windows and macOS), I-01 to I-09.
+   Loaded after ../mockup.css; the screens reuse its components (buttons, chips, notices, cards, checkboxes, progress)
+   and add only the window shell and a few installer rows. Same limits as the panel, on purpose, so the installer
+   looks like the plugin (direction §14 #17): flexbox only, explicit display, div role=button controls with a 2 px rest
+   border equal to the fill, radius 8 on controls, 16 on cards, 999 on <span> only, physical margins swapped under
+   .m-rtl, no shadows, no effects, no opacity, no flex spacing property. Window: 760 x 540, minimum 640 x 480
+   (screen-inventory §5). Layout: direction §3 "Installer": a 232 px black rail (stages) and the content column with
+   24 px padding (192 px rail and 16 px padding at the minimum width). */
+
+/* ==== PROPOSED TOKENS (installer only; --mk-<name> is proposed as --twn-<name>) =========================== */
+:root {
+  --mk-i-win-w:760px; --mk-i-win-h:540px; --mk-i-win-min-w:640px; --mk-i-win-min-h:480px;
+  --mk-i-rail-w:232px; --mk-i-rail-w-min:192px; --mk-i-hdr-h:48px;
+  /* direction §4 "installer only" type roles */
+  --mk-type-i-display:32px/40px; --mk-type-i-title:22px/28px; --mk-type-i-body:15px/24px;
+  --mk-type-ar-i-display:32px/48px; --mk-type-ar-i-title:22px/36px; --mk-type-ar-i-body:16px/28px;
+  /* the scroll indicator thumb (the WebView's own scrollbar is hidden; this one matches the panel controls) */
+  --mk-i-scroll-thumb:#383838;
+}
+/* ==== end of proposed tokens ======================================================================= */
+
+/* ---- window ---- */
+.m-panel.i-win { display: flex; flex-direction: column; width: 760px; height: 540px; min-height: 0; overflow: hidden; }
+.m-panel.i-w640 { width: 640px; height: 480px; }
+.i-app { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+
+/* ---- OS chrome (drawn only where the copy differs per OS; these colours are the OS's, not tokens) ---- */
+.i-os { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; direction: ltr; overflow: hidden; }
+.i-os-win { height: 32px; background: #202020; padding-left: 12px; }
+.i-os-mac { height: 28px; background: #2B2B2B; padding: 0 8px; border-bottom: 1px solid #111111; }
+.i-os-title { display: block; white-space: nowrap; font: 400 12px/16px "Segoe UI", -apple-system, sans-serif; color: #FFFFFF; }
+.i-os-mac .i-os-title { font: 600 13px/16px -apple-system, "Helvetica Neue", "Segoe UI", sans-serif; color: #DDDDDD; }
+.i-os-ar { font-family: "Segoe UI", Tahoma, "Geeza Pro", sans-serif; }
+.i-os-btn { display: flex; align-items: center; justify-content: center; flex: 0 0 46px; width: 46px; height: 32px; }
+.i-os-btn .m-ico { fill: #FFFFFF; }
+.i-os-light { display: block; flex: 0 0 12px; width: 12px; height: 12px; border-radius: 999px; margin-right: 8px; }
+.i-os-red { background: #FF5F57; } .i-os-yellow { background: #FEBC2E; } .i-os-green { background: #28C840; }
+.i-os-mid { display: flex; flex: 1 1 auto; justify-content: center; min-width: 0; margin-right: 60px; }
+
+/* ---- header: monogram, wordmark, "Setup", Internal build chip, language switch ---- */
+.i-hdr { display: flex; flex-direction: row; align-items: center; flex: 0 0 48px; height: 48px; padding: 0 16px; }
+.i-hdr .m-chip { margin-right: 8px; }
+.m-rtl .i-hdr .m-chip { margin-right: 0; margin-left: 8px; }
+.i-setup { display: block; white-space: nowrap; color: var(--twn-text-muted); font: 400 15px/20px var(--twn-font-ui); }
+.m-rtl .i-setup { font: 400 16px/24px var(--twn-font-ar); }
+
+/* ---- body: rail + content column ---- */
+.i-body { display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; }
+.i-rail { display: flex; flex-direction: column; flex: 0 0 232px; width: 232px; padding: 16px 8px 0 8px; border-right: 1px solid var(--mk-divider); background: var(--twn-bg); }
+.m-rtl .i-rail { border-right: 0; border-left: 1px solid var(--mk-divider); }
+.i-w640 .i-rail { flex-basis: 192px; width: 192px; }
+.i-rstep { display: flex; flex-direction: row; align-items: center; min-height: 32px; padding: 4px 8px 4px 6px; border-left: 2px solid transparent; color: var(--twn-text-muted); }
+.m-rtl .i-rstep { border-left: 0; border-right: 2px solid transparent; padding: 4px 6px 4px 8px; }
+.i-rstep + .i-rstep { margin-top: 4px; }
+.i-rstep-on { border-left-color: var(--twn-accent); color: var(--twn-text); } /* like the active tab: pink indicator, same weight */
+.m-rtl .i-rstep-on { border-right-color: var(--twn-accent); }
+.i-rstep-sub { margin-left: 24px; }
+.m-rtl .i-rstep-sub { margin-left: 0; margin-right: 24px; }
+.i-rail-end { display: flex; flex-direction: column; flex: 0 0 auto; padding: 0 8px; }
+.i-rail-trust { display: flex; flex-direction: row; align-items: flex-start; }
+.i-rail-trust .m-ico { margin-top: 2px; }
+.m-rtl .i-rail-trust .m-ico { margin-top: 4px; }
+.i-rail .m-footer { margin: 8px -8px 0 -8px; }
+
+.i-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.i-scrollrow { display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; }
+/* the product scrolls this column (overflow-y auto); the mockup clips it and draws the indicator itself */
+.i-scroll { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; overflow: hidden; padding: 24px; }
+.i-w640 .i-scroll { padding: 16px; }
+.i-scroll-in { display: flex; flex-direction: column; flex: 0 0 auto; }
+.i-sbar { display: flex; flex-direction: column; flex: 0 0 4px; width: 4px; margin: 8px 4px 8px 0; }
+.m-rtl .i-sbar { margin: 8px 0 8px 4px; }
+.i-sbar-gap { display: block; flex: 0 0 auto; }
+.i-sbar-thumb { display: block; flex: 0 0 auto; border-radius: 2px; background: var(--mk-i-scroll-thumb); }
+
+/* pinned action bar: the screen's buttons; the primary sits at the end (right in EN, left in AR) */
+.i-bar { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; padding: 12px 24px; border-top: 1px solid var(--mk-divider); background: var(--twn-bg); }
+.i-w640 .i-bar { padding: 12px 16px; }
+.i-bar .m-btn + .m-btn { margin-left: 8px; }
+.m-rtl .i-bar .m-btn + .m-btn { margin-left: 0; margin-right: 8px; }
+.i-bar .m-btn { height: 40px; padding: 0 14px; }
+.i-bar-meta { display: flex; flex-direction: row; align-items: center; flex: 1 1 auto; min-width: 0; margin-right: 12px; }
+.m-rtl .i-bar-meta { margin-right: 0; margin-left: 12px; }
+
+/* ---- installer type roles (direction §4 "installer only") ---- */
+.i-display, .i-title, .i-lead { display: block; }
+.i-display { font: 700 var(--mk-type-i-display) var(--twn-font-display); }
+.i-title { font: 600 var(--mk-type-i-title) var(--twn-font-display); }
+.i-lead { font: 400 var(--mk-type-i-body) var(--twn-font-ui); }
+.m-rtl .i-display { font: 600 var(--mk-type-ar-i-display) var(--twn-font-ar); }
+.m-rtl .i-title { font: 600 var(--mk-type-ar-i-title) var(--twn-font-ar); }
+.m-rtl .i-lead { font: 400 var(--mk-type-ar-i-body) var(--twn-font-ar); }
+/* digits in a Syne role (version numbers): Syne's round zero reads as "o", so they keep the UI face */
+.i-ver { font-family: var(--twn-font-ui); font-weight: 600; letter-spacing: 0; }
+.m-rtl .i-display .lat, .m-rtl .i-title .lat { font-family: var(--twn-font-ui); font-weight: 600; }
+
+/* ---- fact rows (Welcome, Claude "what happens"): icon + one line ---- */
+.i-fact { display: flex; flex-direction: row; align-items: flex-start; padding: 4px 0; }
+.i-fact > .m-ico { margin-top: 2px; }
+.m-rtl .i-fact > .m-ico { margin-top: 4px; }
+.i-fact-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 12px; }
+.m-rtl .i-fact-text { margin-left: 0; margin-right: 12px; }
+
+/* ---- checklist rows (I-03, I-04, I-06, I-09): status icon, name, one line, end status ---- */
+.i-step { display: flex; flex-direction: row; align-items: flex-start; padding: 6px 0; }
+.i-step + .i-step { border-top: 1px solid var(--mk-divider); }
+.i-step > .m-ico { margin-top: 2px; }
+.m-rtl .i-step > .m-ico { margin-top: 4px; }
+.i-step-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 8px; }
+.m-rtl .i-step-text { margin-left: 0; margin-right: 8px; }
+.i-step-head { display: flex; flex-direction: row; align-items: flex-start; }
+.i-step-end { display: block; flex: 0 0 auto; margin-left: 12px; white-space: nowrap; color: var(--twn-text-muted); }
+.m-rtl .i-step-end { margin-left: 0; margin-right: 12px; }
+.i-step-pend .i-step-name { color: var(--twn-text-muted); }
+.i-step-run { padding-bottom: 8px; }
+.i-step-prog { display: flex; flex-direction: column; margin-top: 8px; }
+
+/* ---- path field (I-02): a recessed mono value + a Change button; the path is cut in the middle by the product,
+   at the end by this mockup (never a path the editor approves) ---- */
+.i-pathrow { display: flex; flex-direction: row; align-items: center; }
+.i-path { display: flex; flex-direction: row; align-items: center; flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 12px; border: 1px solid var(--mk-border-input); border-radius: 8px; background: var(--twn-frame-bg); overflow: hidden; }
+.i-path-warn { border-color: var(--twn-warn); }
+.i-path-error { border-color: var(--twn-error); }
+.i-path .mono { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.i-pathrow .m-btn { margin-left: 8px; }
+.m-rtl .i-pathrow .m-btn { margin-left: 0; margin-right: 8px; }
+.i-field-msg { display: flex; flex-direction: row; align-items: flex-start; margin-top: 8px; }
+.i-field-msg .m-ico { margin-top: 2px; }
+.m-rtl .i-field-msg .m-ico { margin-top: 4px; }
+
+/* ---- radio rows (I-02 speech model): a control row, 2 px rest border, a 20 px ring ---- */
+.i-radiorow { display: flex; flex-direction: row; align-items: center; min-height: 40px; padding: 0 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.i-radiorow + .i-radiorow { margin-top: 0; }
+.i-radio { display: flex; align-items: center; justify-content: center; flex: 0 0 20px; width: 20px; height: 20px; border: 2px solid var(--mk-border-input); border-radius: 999px; }
+.i-radio-on { border-color: var(--twn-text); }
+.i-radio-dot { display: block; width: 8px; height: 8px; border-radius: 999px; background: var(--twn-text); }
+.i-radio-disabled .i-radio { border-color: var(--mk-text-disabled); }
+.i-radio-disabled .t-label { color: var(--mk-text-disabled); }
+.i-radiorow .m-chip { margin-left: 8px; }
+.m-rtl .i-radiorow .m-chip { margin-left: 0; margin-right: 8px; }
+.i-size { display: block; flex: 0 0 auto; margin-left: 12px; white-space: nowrap; color: var(--twn-text-muted); }
+.m-rtl .i-size { margin-left: 0; margin-right: 12px; }
+.i-checksub { display: block; margin: -4px 0 4px 28px; }
+.m-rtl .i-checksub { margin: -4px 28px 4px 0; }
+
+/* ---- interstitial "action needed" card (I-04) and confirm dialog: a notice with a title ---- */
+.i-act-title { display: block; }
+.i-act .m-notice-body .m-chip-mono { align-self: flex-start; }
+
+/* ---- log drawer (I-04 details) ---- */
+.i-log { display: flex; flex-direction: column; padding: 8px 12px; border-radius: 8px; background: var(--twn-frame-bg); direction: ltr; text-align: left; overflow: hidden; }
+.i-logline { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 400 var(--mk-type-mono) var(--twn-font-mono); color: var(--twn-text-muted); }
+.i-logline-now { color: var(--twn-text); }
+.i-wrap { white-space: normal; overflow-wrap: anywhere; word-break: break-all; }
+
+/* ---- summary chips row (I-03) ---- */
+.i-chips { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
+.i-chips .m-chip { margin: 8px 8px 0 0; }
+.m-rtl .i-chips .m-chip { margin: 8px 0 0 8px; }
+
+/* ---- small layout helpers ---- */
+.i-sec { display: flex; flex-direction: column; margin-top: 24px; }
+.i-sec-first { margin-top: 0; }
+.i-inset { display: flex; flex-direction: column; padding: 12px; border-radius: 8px; background: var(--twn-frame-bg); }
+.i-clip { overflow: hidden; }
+.i-mt-6 { margin-top: 24px; }
+
+/* a file name / link chip that wraps (long .ccx names, the official install link): mono on the recessed well */
+.i-monobox { display: block; flex: 0 1 auto; min-width: 0; padding: 4px 8px; border-radius: 4px; background: var(--twn-frame-bg); color: var(--twn-text); direction: ltr; text-align: left; }
+.i-monobox .mono { display: block; overflow-wrap: anywhere; word-break: break-all; }
+
+/* ---- keyboard hints (Addendum G2): a keycap inside the button; Return on the primary, Esc on cancel/back/close ---- */
+.i-kbd { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; height: 20px; min-width: 20px; padding: 0 4px; margin-left: 8px; border-radius: 4px; background: var(--mk-control-pressed); color: var(--twn-text-muted); font: 600 11px/16px var(--twn-font-ui); }
+.m-rtl .i-kbd { margin-left: 0; margin-right: 8px; }
+.i-kbd-on { background: var(--mk-primary-pressed); color: var(--mk-on-primary-muted); }
+.m-btn-ghost .i-kbd { background: var(--mk-control); }
+
+/* ---- motion (direction §10; mock-motion meta per screen): colour and border-colour only, 150-250 ms; every state
+   is drawn finished, so no motion is needed to read it (static fallback) ---- */
+.i-rstep { transition: color var(--mk-dur-base) var(--mk-ease), border-color var(--mk-dur-base) var(--mk-ease); }
+.i-step .t-label, .i-step .t-meta { transition: color var(--mk-dur-base) var(--mk-ease); }
+.i-radiorow, .i-path { transition: border-color var(--mk-dur-fast) var(--mk-ease); }
+.i-radio { transition: border-color var(--mk-dur-fast) var(--mk-ease); }
+
+/* ---- a picture of the macOS privacy prompt, shown BEFORE it appears (G11); OS colours, not tokens; not a control ---- */
+.i-osprompt { display: flex; flex-direction: column; align-items: center; width: 240px; padding: 16px; border-radius: 16px; background: #2B2B2B; border: 1px solid #3D3D3D; direction: ltr; text-align: center; }
+.m-rtl .i-osprompt { direction: rtl; }
+.i-osprompt img { display: block; width: 32px; height: 32px; }
+.i-osprompt-text { display: block; margin-top: 8px; color: #FFFFFF; font: 600 12px/16px -apple-system, "Helvetica Neue", "Segoe UI", sans-serif; }
+.m-rtl .i-osprompt-text { font: 600 13px/20px "Geeza Pro", "Segoe UI", Tahoma, sans-serif; }
+.i-osprompt-btns { display: flex; flex-direction: row; align-self: stretch; margin-top: 12px; }
+.i-osprompt-btn { display: flex; flex: 1 1 0; align-items: center; justify-content: center; height: 24px; border-radius: 8px; background: #4A4A4A; color: #FFFFFF; border: 2px solid #4A4A4A; font: 400 12px/16px -apple-system, "Helvetica Neue", "Segoe UI", sans-serif; }
+.m-rtl .i-osprompt-btn { font: 400 13px/16px "Geeza Pro", "Segoe UI", Tahoma, sans-serif; }
+.i-osprompt-btn + .i-osprompt-btn { margin-left: 8px; }
+.m-rtl .i-osprompt-btn + .i-osprompt-btn { margin-left: 0; margin-right: 8px; }
+.i-osprompt-allow { background: #0A84FF; border-color: #FFFFFF; }
+.i-osprompt-cap { display: flex; flex-direction: row; align-items: center; margin-top: 8px; }
+
+/* ---- what-you-get chips (I-01) ---- */
+.i-gets { display: flex; flex-direction: row; flex-wrap: wrap; }
+.i-gets .m-chip { margin: 8px 8px 0 0; }
+.m-rtl .i-gets .m-chip { margin: 8px 0 0 8px; }
+.i-support .m-btn { height: 32px; }

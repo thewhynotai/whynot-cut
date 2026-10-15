@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="normal,focus,scrolled,tight,arabic,external,badfolder,long,win">
+<meta name="mock-widths" content="760,640">
+<meta name="mock-keys" content="Return: Install · Esc: Back · ↑/↓: choose the speech model (one tab stop for the group) · Space: tick a box · Tab order: models, the two Change buttons, the options, Back, Install">
+<meta name="mock-motion" content="radio ring and dot: border-colour 150 ms; field message appears in a reserved line under its field (no shift of the fields above); total in the bar updates by colour 200 ms; static fallback: final state">
+<title>I-02 Customise</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/installer.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/installer.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/installer.js"></script>
+</head>
+<body>
+<script>
+/* I-02 Your choices / Customise (screen-inventory §5 I-02; owner: ask the model size, default to the strongest; the
+   editor picks the save location). Every answer is preselected.
+   Data (installer core, questions step + the bootstrap location question): the Whisper model (large-v3 2.9 GB default,
+   large-v3-turbo 1.6, medium 1.5, small 0.5), the service folder (default ~/.whynot-cut; Addendum F2-T3 on Windows:
+   another drive when the system drive has < 30 GB free), the clients folder (not in iCloud/OneDrive), the NVIDIA
+   libraries on Windows. NOT in the core yet: the login item, the "don't ask each time" permission, a per-model
+   "fits the disk" flag, an external-drive flag.
+   E2.1 / G made visible: #1 everything under the user's folder, listed with where (I.adds); #4 the login item says
+   where to turn it off; G11: Arabic letters, spaces and external drives work (info, not a warning).
+   States: normal, focus (keyboard on the first model), scrolled (bottom: options and what Setup adds), tight (the
+   strongest model does not fit: "Skipped, add later", the next is chosen), arabic (an Arabic + spaces path: fine),
+   external (clients on an external drive: keep it connected), badfolder (a system-protected folder: Install off, the
+   field's button is the one fix), long (long Arabic/space/external paths), win (Windows chrome + copy, a second
+   drive chosen by F2-T3, the NVIDIA option). Empty, loading, offline: not applicable (nothing is fetched here). */
+(function () {
+  var t = I.T, D = I.D, st = I.state, win = I.os === "win";
+
+  function models(o) {
+    o = o || {};
+    var rec = M.chip("info", t("i02.recommended"));
+    var rows = o.tight
+      ? I.radio(t("i02.model.large"), { disabled: true, chip: M.chip("warn", t("i02.skipped"), "triangle-alert"), size: I.gb(2.9) }) +
+        I.radio(t("i02.model.turbo"), { on: true, size: I.gb(1.6) })
+      : I.radio(t("i02.model.large"), { on: true, chip: rec, size: I.gb(2.9), focus: o.focus }) +
+        I.radio(t("i02.model.turbo"), { size: I.gb(1.6) });
+    rows += I.radio(t("i02.model.medium"), { size: I.gb(1.5) }) + I.radio(t("i02.model.small"), { size: I.gb(0.5) });
+    var msg = o.tight ? '<div class="i-field-msg">' + M.status("warn") + '<div class="t-meta tx-text ms-2 m-grow">' + t("i02.tight") + "</div></div>" : "";
+    return '<div class="i-sec">' + M.eyebrow(t("i02.model")) + '<div class="t-meta tx-muted mt-1">' + t("i02.model.sub") + '</div><div class="m-col mt-2" role="radiogroup">' + rows + "</div>" + msg + "</div>";
+  }
+  function folders(o) {
+    o = o || {};
+    var home = o.arabic ? "/Users/محمد عبد الرحمن/.whynot-cut" : D.home;
+    var locSub = t("i02.location.sub", { gb: I.gb(D.total), free: I.gb(win ? 640 : D.free), drive: I.ltr(win ? "D:" : D.drive) });
+    var loc = win
+      ? I.pathField(t("i02.location"), "D:\\WhyNot Cut", { msgKind: "info", msg: t("i02.location.other", { drive: I.ltr("D:"), sys: I.ltr("C:") }), sub: locSub })
+      : I.pathField(t("i02.location"), home, { msgKind: "info", msg: o.arabic ? t("i02.arabic") : "", sub: locSub });
+    var clients = o.external ? "/Volumes/Samsung T7 Shield/WhyNot Clients" : D.clients;
+    var cl = o.bad
+      ? I.pathField(t("i02.clients"), "/System/Library/WhyNot Clients", { kind: "error", msgKind: "error", msg: t("i02.bad"), btn: t("i02.bad.btn"), btnKind: "primary" })
+      : I.pathField(t("i02.clients"), clients, { sub: t("i02.clients.sub"), msgKind: "info", msg: o.external || D.external ? t("i02.external") : "" });
+    return '<div class="i-sec" id="sec-folders">' + M.eyebrow(t("i02.folders")) + '<div class="m-col mt-3">' + loc + '</div><div class="m-col mt-4">' + cl + "</div></div>";
+  }
+  function options() {
+    return '<div class="i-sec" id="sec-options">' + M.eyebrow(t("i02.options")) + '<div class="m-col mt-2">' +
+      M.checkbox(t("i02.login"), true) + I.sub(t(win ? "i02.login.win" : "i02.login.mac")) +
+      M.checkbox(t("i02.permission"), true) + I.sub(t("i02.permission.sub")) +
+      (win ? M.checkbox(t("i02.gpu", { gb: I.gb(D.gpuGb) }), true) + I.sub(t("i02.gpu.sub", { gpu: I.ltr(D.gpu) })) : "") +
+      "</div></div>";
+  }
+  function addsSec() { return '<div class="i-sec" id="sec-adds">' + M.eyebrow(t("i02.adds")) + I.adds("mt-2") + "</div>"; }
+  function body(o) {
+    return I.title(t("i02.title"), t("i02.sub")) + '<div class="t-meta tx-muted mt-1">' + t("i02.lang") + "</div>" + models(o) + folders(o) + options() + addsSec();
+  }
+  function bar(o) {
+    o = o || {};
+    return {
+      meta: '<div class="t-meta tx-muted">' + t("i02.total", { gb: I.gb(o.total || D.total) }) + "</div>",
+      end: I.btn(t("i00.back"), { key: "esc" }) + I.btn(t("i02.install"), { kind: "primary", icon: "download", disabled: o.disabled, key: "enter" })
+    };
+  }
+  var STATES = {
+    normal: function () { return { body: body(), bar: bar() }; },
+    focus: function () { return { body: body({ focus: true }), bar: bar() }; },
+    scrolled: function () { return { body: body(), bar: bar(), scroll: "end" }; },
+    tight: function () { return { body: body({ tight: true }), bar: bar({ total: 2.3 }) }; },
+    arabic: function () { return { body: body({ arabic: true }), bar: bar(), scroll: "#sec-folders" }; },
+    external: function () { return { body: body({ external: true }), bar: bar(), scroll: "#sec-folders" }; },
+    badfolder: function () { return { body: body({ bad: true }), bar: bar({ disabled: true }), scroll: "#sec-folders" }; },
+    long: function () { return { body: body(), bar: bar(), scroll: "#sec-folders" }; },
+    win: function () { return { body: body(), bar: bar(), scroll: "#sec-folders" }; }
+  };
+  I.mount({
+    id: "I-02", name: "Your choices",
+    states: ["normal", "focus", "scrolled", "tight", "arabic", "external", "badfolder", "long", "win"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.rail = { flow: "install", at: "custom", custom: true };
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

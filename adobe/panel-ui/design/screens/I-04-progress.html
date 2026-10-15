@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="loading,normal,focus,action,macprompt,signin,panelfile,amber,offline,error,details,confirm,cancelled,resume,success,long,win">
+<meta name="mock-widths" content="760,640">
+<meta name="mock-keys" content="While running: Esc = Cancel (asks first), D = Show details, no Return action · Action card: Return = its button · Stop dialog: Return or Esc = Keep installing (the safe choice); Stop installing needs a click or Tab then Space · Done: Return = Next">
+<meta name="mock-motion" content="a finished row: icon fill + text colour 200 ms; the running row's progress block has its height reserved from the start, so rows below never jump; bar fill width 250 ms (linear stream from the percent field); the list auto-scrolls the running row into view (smooth, 250 ms); action cards slide into a reserved slot above the list by colour only; spinner rotation with a static ring fallback">
+<title>I-04 Progress checklist</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/installer.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/installer.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/installer.js"></script>
+</head>
+<body>
+<script>
+/* I-04 Progress checklist + action needed (screen-inventory §5 I-04; eco §3.6.4: one row definition shared with the
+   panel checklist and the start skill). Rows = the user-facing steps, mapped from the core's STEP_ORDER:
+     preflight (+questions) -> Check this computer · runtime, video tools, gpu -> WhyNot Cut service · claude, settings ->
+     WhyNot Cut inside Claude · gitbash (Windows only) -> Safety tools for Claude · adobe -> panels · fonts -> Brand
+     fonts · (no core step yet) -> Keep WhyNot Cut ready (launcher, login item, link) · model -> Speech model ·
+     questions.clients (no core step yet) -> Your first client folder · state + doctor -> Final check · launch -> Open
+     Claude. macOS: 10 rows; Windows: 11.
+   Each row reads the progress stream {step, index, total, status, percent, message_en, message_ar, done, exit_code}:
+   status -> icon, message_* -> the one line, percent -> the bar. The core does NOT emit this stream yet (today:
+   StepResult {name, status, detail, needs_you} per step and the checklist file); bytes, elapsed time and "about N min
+   left" also need the core. The macOS privacy-prompt card needs a "prompt next" event before the clients step.
+   E2.1 / G made visible: #3 "only genuine files are used" under the list; #4 every action is a row, Show details opens
+   the log with its path; the login item is its own row; G11 the macOS prompt is pictured before it appears.
+   No primary while running. An action-needed card carries the screen's one violet button.
+   States: loading, normal, focus (keyboard on Cancel), action (close Premiere Pro, save first), macprompt (the Files
+   and folders prompt explained, with a picture), signin (Creative Cloud), panelfile (Adobe's installer fallback),
+   amber (fonts in use: one sentence, one fix; the rest continue), offline (the model waits, everything else
+   installs), error (disk full: what, why, one fix, support), details (log open), confirm (Cancel pressed), cancelled,
+   resume, success, long (Arabic/space/external paths, a long file name), win (Windows chrome, 11 rows). */
+(function () {
+  var t = I.T, D = I.D, st = I.state, win = I.os === "win";
+  var KEYS = ["preflight", "engine", "claude"].concat(win ? ["gitbash"] : []).concat(["adobe", "fonts", "always_on", "models", "client", "doctor", "launch"]);
+  var N = KEYS.length;
+
+  function rows(upto, m) {
+    var at = KEYS.indexOf(upto);
+    return KEYS.map(function (key, i) {
+      var o = m[key] || (i < at ? { k: "ok", end: t("i04.end.done") } : { k: "pending" });
+      return I.step(o.k, t("i04.step." + key), { end: o.end, detail: o.detail, prog: o.prog, act: o.act, cls: "row-" + key });
+    });
+  }
+  function list(r) {
+    return I.list(r, "mt-3") +
+      '<div class="m-row-top mt-3">' + I.ico("shield-check", 16, "ink-ok") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("i04.trust") + "</div></div>";
+  }
+  function head(o) {
+    o = o || {};
+    var meta = o.meta !== undefined ? o.meta : t("i04.position", { n: o.n || 2, of: N, min: t("i00.min", { n: o.min || 6 }) });
+    return '<div class="i-title">' + (o.title || t("i04.title")) + "</div>" +
+      '<div class="m-row mt-1"><div class="t-meta tx-muted m-grow">' + meta + "</div>" +
+      M.btn(t(o.open ? "i04.details.hide" : "i04.details"), { kind: "ghost", icon: "scroll-text" }) + "</div>";
+  }
+  function runBar(o) {
+    o = o || {};
+    return { end: M.btn(t("i04.hide"), { disabled: o.off }) + I.btn(t("i00.cancel"), { icon: "circle-stop", focus: o.focus, disabled: o.off, key: "esc" }) };
+  }
+  var always = { k: "ok", end: t("i04.end.done"), detail: I.Tos("i04.msg.always_on") };
+  var engineRun = { k: "busy", detail: t("i04.run.engine", { done: I.mb(38), total: I.mb(92) }), prog: { pct: 41, meta: "41%", time: "0:42" } };
+  var modelsBg = function (pct, done) {
+    return { k: "busy", end: t("i04.end.bg"), detail: t("i04.run.models", { done: I.gb(done), total: I.gb(2.9) }), prog: { pct: pct, meta: pct + "%", time: "3:10" } };
+  };
+  function drawer() {
+    var lines = [
+      "10:32:00  Check this computer: done (" + (win ? "Windows 11" : "macOS 15") + ", 212 GB free)",
+      "10:32:01  Download checked: genuine file from WhyNot Cut",
+      "10:32:09  WhyNot Cut service: part 1 of 3 installed",
+      "10:32:41  Video tools: downloading from github.com/thewhynotai",
+      "10:32:42  Video tools: 38 of 92 MB"
+    ];
+    return '<div class="i-sec" id="drawer">' + M.eyebrow(t("i04.log.title")) +
+      '<div class="i-log mt-2">' + lines.map(function (l, i) { return '<span class="i-logline' + (i === lines.length - 1 ? " i-logline-now" : "") + '">' + M.esc(l) + "</span>"; }).join("") + "</div>" +
+      '<div class="t-meta tx-muted mt-2 i-wrap">' + t("i04.log.saved", { path: I.path(D.log) }) + "</div>" +
+      '<div class="m-row mt-2">' + M.btn(t("i04.log.open"), { icon: "folder-open" }) + '<div class="ms-2">' + M.btn(t("i00.save_report"), { kind: "ghost", icon: "download" }) + "</div></div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("i00.report_note") + "</div></div>";
+  }
+  function osPrompt() {
+    return '<div class="i-osprompt mt-3" aria-hidden="true"><img src="../../../premiere-uxp/icons/dark/icon-48.png" alt="">' +
+      '<span class="i-osprompt-text">' + M.esc(M.raw("i04.prompt.dialog")) + "</span>" +
+      '<div class="i-osprompt-btns"><span class="i-osprompt-btn">' + M.esc(M.raw("i04.prompt.deny")) + '</span><span class="i-osprompt-btn i-osprompt-allow">' + M.esc(M.raw("i04.prompt.allow")) + "</span></div></div>";
+  }
+  var card = function (h) { return '<div class="mt-3">' + h + "</div>"; };
+  var adobeWait = { k: "warn", end: t("i04.end.you") };
+
+  var STATES = {
+    loading: function () { return { body: head({ n: 1, min: 8 }) + list(rows("preflight", { preflight: { k: "busy", end: t("i03.checking") } })), bar: runBar() }; },
+    normal: function () { return { body: head() + list(rows("engine", { engine: engineRun })), bar: runBar() }; },
+    focus: function () { return { body: head() + list(rows("engine", { engine: engineRun })), bar: runBar({ focus: true }) }; },
+    action: function () {
+      return {
+        body: head({ n: KEYS.indexOf("adobe") + 1, min: 4 }) + card(I.act("warn", t("i04.act.host.title"), t("i04.act.host"), { btns: I.btn(t("i00.continue"), { kind: "primary", key: "enter" }) })) +
+          list(rows("adobe", { adobe: adobeWait })), bar: runBar()
+      };
+    },
+    macprompt: function () {
+      return {
+        body: head({ n: KEYS.indexOf("client") + 1, min: 1 }) + card(I.act("info", t("i04.prompt.title"), t("i04.prompt.text"), { icon: "folder-open", extra: osPrompt(),
+          btns: I.btn(t("i00.continue"), { kind: "primary", key: "enter" }) })) +
+          list(rows("client", { always_on: always, models: modelsBg(28, 0.8), client: { k: "warn", end: t("i04.end.you") } })), bar: runBar()
+      };
+    },
+    signin: function () {
+      return {
+        body: head({ n: KEYS.indexOf("adobe") + 1, min: 4 }) + card(I.act("warn", t("i04.act.cc.title"), t("i04.act.cc"), { icon: "log-in", btns: I.btn(t("i04.act.cc.btn"), { kind: "primary", key: "enter" }) })) +
+          list(rows("adobe", { adobe: adobeWait })), bar: runBar()
+      };
+    },
+    panelfile: function () {
+      return {
+        body: head({ n: KEYS.indexOf("adobe") + 1, min: 4 }) + card(I.act("warn", t("i04.act.ccx.title"), t("i04.act.ccx"), { mono: D.ccx, btns: I.btn(t("i04.act.ccx.btn"), { kind: "primary", icon: "file-search", key: "enter" }), hint: t("i04.act.ccx.hint") })) +
+          list(rows("adobe", { adobe: adobeWait })), bar: runBar()
+      };
+    },
+    amber: function () {
+      return {
+        body: head({ n: KEYS.indexOf("client") + 1, min: 1 }) + list(rows("client", {
+          fonts: { k: "warn", detail: t("i04.amber.fonts"), act: M.btn(t("i00.retry"), { icon: "refresh-cw" }) },
+          always_on: always, models: modelsBg(28, 0.8), client: { k: "busy", detail: M.mono(D.clients) }
+        })), bar: runBar(), scroll: ".row-fonts"
+      };
+    },
+    offline: function () {
+      return {
+        body: head({ n: KEYS.indexOf("doctor") + 1, min: 1 }) + list(rows("doctor", {
+          always_on: always, models: { k: "warn", end: t("i04.end.offline"), detail: t("i04.offline") }, doctor: { k: "busy", end: t("i03.checking") }
+        })), bar: runBar(), scroll: ".row-always_on"
+      };
+    },
+    error: function () {
+      return {
+        body: head({ title: t("i04.title.stopped"), meta: t("i04.count", { n: KEYS.indexOf("models"), of: N }) }) +
+          card(I.fail(t("i07.diskfull", { gb: I.gb(2.5) }), { sub: t("i07.diskfull.sub", { free: I.gb(0.4), drive: I.ltr(D.drive) }), btn: I.btn(t("i00.check_again"), { kind: "primary", icon: "refresh-cw", key: "enter" }) })) +
+          list(rows("models", { always_on: always, models: { k: "error", detail: t("i04.red", { gb: I.gb(2.5) }) } })),
+        rail: "error", bar: { end: I.btn(t("i00.close"), { key: "esc" }) }
+      };
+    },
+    details: function () { return { body: head({ open: true }) + list(rows("engine", { engine: engineRun })) + drawer(), bar: runBar(), scroll: "#drawer" }; },
+    confirm: function () {
+      return {
+        body: head() + card(I.act("warn", t("i04.cancel.title"), t("i04.cancel.text"), {
+          btns: M.btn(t("i04.cancel.stop"), { kind: "danger", icon: "circle-stop" }) + '<div class="ms-2">' + I.btn(t("i04.cancel.keep"), { key: "enter", focus: true }) + "</div>"
+        })) + list(rows("engine", { engine: engineRun })),
+        bar: runBar({ off: true })
+      };
+    },
+    cancelled: function () {
+      return {
+        body: head({ title: t("i04.title.stopped"), meta: t("i04.count", { n: 1, of: N }) }) + card(M.notice("warn", t("i04.cancelled"), { dismiss: false })) +
+          list(rows("engine", { engine: { k: "pending" } })),
+        rail: "warn", bar: { end: I.btn(t("i00.close"), { key: "esc" }) + I.btn(t("i04.continue"), { kind: "primary", key: "enter" }) }
+      };
+    },
+    resume: function () {
+      var m = {}, at = KEYS.indexOf("fonts");
+      KEYS.slice(0, at).forEach(function (k) { m[k] = { k: "ok", end: t("i04.end.already") }; });
+      m.fonts = { k: "busy", end: t("i03.checking") };
+      return { body: head({ n: at + 1, min: 3 }) + card(M.notice("info", t("i04.resume"), { dismiss: false })) + list(rows("fonts", m)), bar: runBar() };
+    },
+    success: function () {
+      return {
+        body: head({ title: t("i04.title.done"), meta: t("i04.count", { n: N, of: N }) }) + card(M.notice("ok", t("i04.success"), { dismiss: false })) +
+          list(rows("launch", { always_on: always, models: modelsBg(66, 1.9), launch: { k: "ok", end: t("i04.end.done") } })),
+        rail: "done", bar: { end: I.btn(t("i00.next"), { kind: "primary", key: "enter" }) }, scroll: ".row-always_on"
+      };
+    },
+    long: function () {
+      return {
+        body: head({ n: KEYS.indexOf("client") + 1, min: 12 }) + card(I.act("warn", t("i04.act.ccx.title"), t("i04.act.ccx"), { mono: D.ccx, btns: I.btn(t("i04.act.ccx.btn"), { kind: "primary", icon: "file-search", key: "enter" }), hint: t("i04.act.ccx.hint") })) +
+          list(rows("client", { adobe: adobeWait, always_on: always, models: modelsBg(12, 0.4), client: { k: "busy", detail: M.mono(D.clients) } })),
+        bar: runBar(), scroll: ".row-models"
+      };
+    },
+    win: function () { return { internal: true, body: head() + list(rows("engine", { engine: engineRun })), bar: runBar() }; }
+  };
+  I.mount({
+    id: "I-04", name: "Progress checklist",
+    states: ["loading", "normal", "focus", "action", "macprompt", "signin", "panelfile", "amber", "offline", "error", "details", "confirm", "cancelled", "resume", "success", "long", "win"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      var mark = v.rail === "error" ? "error" : v.rail === "warn" ? "warn" : "busy";
+      v.rail = v.rail === "done" ? { flow: "install", at: "finish" } : { flow: "install", at: "install", mark: mark };
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

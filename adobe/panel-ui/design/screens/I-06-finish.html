@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="loading,normal,focus,amber,fallback,nosignin,error,long,win">
+<meta name="mock-widths" content="760,640">
+<meta name="mock-keys" content="Return: Open Claude (fallback: Copy) · Esc: Close · ⌘O / Ctrl+O: Show my clients folder (its button sits on the Clients folder row) · Tab order: card button, row buttons, Close, Open Claude">
+<meta name="mock-motion" content="final-check rows resolve from skeleton to result by colour (200 ms) in boxes of the same height; the title appears once all rows are done (no shift: the title line is reserved); the model row's bar keeps moving (250 ms width steps); Copy turns to 'Copied' by colour for 2 s with the same width; static fallback: final state">
+<title>I-06 Finish</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/installer.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/installer.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/installer.js"></script>
+</head>
+<body>
+<script>
+/* I-06 Finish (screen-inventory §5 I-06; eco §3.6.1, D2.8/D2.9, F14, ID-15, D4). Say what is ready, what is left, and
+   open Claude on the first run (a new session on the start skill picks up the new plugin).
+   Data: the core's final doctor rows (ctx.facts.doctor {verdict, ready, fixes[]}) and the checklist file; the first
+   clients folder; the launch step's deep-link result (opened or not registered). NOT in the core yet: the login-item
+   row, the background model bytes, Claude signed-in.
+   E2.1 / G made visible: #4 the login item with where to turn it off; the service folder named; G11 the macOS
+   folder-access prompt explained before it appears; the no-Claude path (nosignin) with one fix.
+   States: loading (the final check, about 2 s), normal, focus, amber (one row with its fix), fallback (the deep link
+   failed: the copy box with the start command, LTR; Copy is the one primary), nosignin (Claude installed, not signed
+   in: Open Claude is the fix), error (the panel is missing: what, why, one fix, support), long, win. */
+(function () {
+  var t = I.T, D = I.D, st = I.state, win = I.os === "win";
+  function rows(o) {
+    o = o || {};
+    var panels = o.red ? I.step("error", t("i06.r.panels"), { detail: t("i06.red") })
+      : o.amber ? I.step("warn", t("i06.r.panels"), { detail: t("i06.r.panels.amber"), act: M.btn(t("i00.check_again"), { icon: "refresh-cw" }) })
+      : I.step("ok", t("i06.r.panels"), { detail: t("i06.r.panels.ok") });
+    return I.list([
+      I.step("ok", t("i06.r.app"), { detail: t("i06.r.app.ok", { path: I.path(D.home) }) }),
+      panels,
+      I.step(o.nosignin ? "warn" : "ok", t("i06.r.claude"), { detail: o.nosignin ? t("i06.nosignin") : t("i06.r.claude.ok") }),
+      I.step("busy", t("i06.r.model"), { detail: t("i06.r.model.bg", { done: I.gb(1.9), total: I.gb(2.9) }), prog: { pct: 66, meta: "66%" } }),
+      I.step("ok", t("i06.r.login"), { detail: t(win ? "i06.r.login.win" : "i06.r.login.mac") }),
+      I.step("ok", t("i06.r.clients"), { detail: M.mono(D.clients), act: M.btn(t("i06.clients"), { icon: "folder-open" }) })
+    ], "mt-4");
+  }
+  function skel() {
+    var r = function (w) { return '<div class="i-step">' + M.status("pending") + '<div class="i-step-text">' + M.skel(w) + M.skel(w + 20, 16) + "</div></div>"; };
+    return I.list([r(30), r(44), r(36), r(28), r(40), r(32)], "mt-4");
+  }
+  function next() {
+    return '<div class="m-row-top mt-4">' + I.ico("info", 16, "ink-info") + '<div class="t-body ms-2 m-grow">' + t("i06.next") + "</div></div>" +
+      (win ? "" : '<div class="m-row-top mt-2">' + I.ico("folder-open", 16, "ink-info") + '<div class="t-body ms-2 m-grow">' + t("i06.mac_access") + "</div></div>");
+  }
+  function head(o) {
+    o = o || {};
+    return '<div class="i-display">' + t("i06.title") + "</div>" + (o.sub === false ? "" : '<div class="i-lead tx-muted mt-1">' + t("i06.open.sub") + "</div>");
+  }
+  function bar(o) {
+    o = o || {};
+    return {
+      start: I.btn(t("i00.close"), { kind: "ghost", flush: true, key: "esc" }),
+      end: I.btn(t("i06.open"), { kind: o.secondary ? "secondary" : "primary", icon: "external-link", focus: o.focus, key: o.secondary ? "" : "enter" })
+    };
+  }
+  var STATES = {
+    loading: function () {
+      return { body: '<div class="i-title">' + t("i06.checking") + "</div>" + skel(), mark: "busy",
+        bar: { start: M.btn(t("i00.close"), { kind: "ghost", flush: true, disabled: true }), end: M.btn(t("i06.open"), { disabled: true, icon: "external-link" }) } };
+    },
+    normal: function () { return { body: head() + next() + rows(), bar: bar() }; },
+    focus: function () { return { body: head() + next() + rows(), bar: bar({ focus: true }) }; },
+    amber: function () { return { body: head() + next() + rows({ amber: true }), bar: bar(), scroll: ".m-card" }; },
+    fallback: function () {
+      return {
+        body: head({ sub: false }) + '<div class="mt-4">' + I.act("info", t("i06.nolink"), t("i06.paste"), { mono: "/whynot-cut:start", btns: I.btn(t("i06.copy"), { kind: "primary", icon: "copy", key: "enter" }) }) + "</div>" + next() + rows(),
+        bar: bar({ secondary: true })
+      };
+    },
+    nosignin: function () {
+      return {
+        body: head({ sub: false }) + '<div class="mt-4">' + I.act("warn", t("i06.nosignin"), t("i06.nosignin.sub"), { icon: "log-in" }) + "</div>" + rows({ nosignin: true }),
+        bar: bar()
+      };
+    },
+    error: function () {
+      return {
+        body: head({ sub: false }) + '<div class="mt-4">' + I.fail(t("i07.panel"), { mono: D.ccx, btn: I.btn(t("i07.panel.btn"), { kind: "primary", icon: "file-search", key: "enter" }) }) + "</div>" + rows({ red: true }),
+        bar: bar({ secondary: true }), mark: "error"
+      };
+    },
+    long: function () { return { body: head() + next() + rows({ amber: true }), bar: bar(), scroll: "end" }; },
+    win: function () { return { body: head() + next() + rows(), bar: bar() }; }
+  };
+  I.mount({
+    id: "I-06", name: "Finish",
+    states: ["loading", "normal", "focus", "amber", "fallback", "nosignin", "error", "long", "win"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.rail = { flow: "install", at: "finish", mark: v.mark, all: !v.mark };
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

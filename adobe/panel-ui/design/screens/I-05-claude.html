@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="normal,focus,loading,checking,waiting,timeout,error,offline,success,long,win">
+<meta name="mock-widths" content="760,640">
+<meta name="mock-keys" content="Return: Install Claude (waiting: I've signed in; timeout: Wait more; done: Continue) · Esc: Skip for now · Tab order: I already have Claude (checks again), Skip for now, Install Claude">
+<meta name="mock-motion" content="the three 'What happens' rows ARE the progress: each turns from its icon to a spinner to a green check (fill 200 ms) in a fixed row box; the download bar grows inside a reserved block (250 ms width); the sign-in card enters a reserved slot by colour; static fallback: final state">
+<title>I-05 Install Claude for me</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/installer.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/installer.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/installer.js"></script>
+</head>
+<body>
+<script>
+/* I-05 Install Claude for me (screen-inventory §5 I-05; E-T4; the no-Claude path of Addendum G2). Shown after the
+   check when facts.claude_found is false (and the sign-in part when Claude is there but signed out).
+   Flow: download from claude.ai over HTTPS -> check the publisher (macOS: the app's Apple Team ID; Windows: the
+   Authenticode publisher) -> open -> wait for the editor's own sign-in (timeout). The three "What happens" rows are
+   the progress rows, so the editor sees each safety step happen.
+   G2-r1 (c) answered on screen: it is the customer's own Claude account and WhyNot Cut charges nothing extra
+   (MOCK-VERIFY); video and audio are never uploaded, Claude reads text and a few still images, no telemetry, WhyNot
+   Cut trains on nothing (APPROVED exact lines from the executor).
+   NOT in the core yet: the whole step (E-T4).
+   E2.1 / G made visible: #3 HTTPS from claude.ai only, the publisher checked, a file that fails is never opened;
+   D0.1 the sign-in stays the editor's.
+   States: normal, focus, loading (downloading), checking (publisher), waiting (sign in), timeout (no sign-in seen:
+   wait more or continue), error (not the genuine app: never opened; what, why, one fix, support), offline (what
+   still works + Check again), success, long, win (Windows chrome). */
+(function () {
+  var t = I.T, D = I.D, st = I.state;
+  var url = I.ltr("claude.ai/download");
+  function how(o) {
+    o = o || {};
+    var row = function (kind, icon, text, extra) {
+      var ic = kind === "pending" ? I.ico(icon, 16, "ink-muted") : M.status(kind);
+      return '<div class="i-step">' + ic + '<div class="i-step-text"><div class="t-body">' + text + "</div>" + (extra || "") + "</div></div>";
+    };
+    var dlx = o.dlProg ? '<div class="i-step-prog">' + M.progress(o.dlProg) + '<div class="t-meta tx-muted mt-1">' + t("i05.downloading", { done: I.mb(Math.round(1.42 * o.dlProg)), total: I.mb(142) }) + "</div></div>" : "";
+    var ckx = o.pub ? '<div class="t-meta tx-muted">' + t("i05.publisher", { name: I.ltr("Anthropic") }) + "</div>" : o.ck === "busy" ? '<div class="t-meta tx-muted">' + t("i05.checking") + "</div>" : "";
+    return '<div class="i-sec">' + M.eyebrow(t("i05.how")) + I.list([row(o.dl || "pending", "download", t("i05.how.download"), dlx), row(o.ck || "pending", "shield-check", t("i05.how.check"), ckx), row(o.si || "pending", "log-in", t("i05.how.signin"))], "mt-2") + "</div>";
+  }
+  function know() {
+    return '<div class="i-sec" id="know">' + M.eyebrow(t("i05.know")) + '<div class="m-col mt-2">' +
+      I.fact("user-round", t("i05.know.account")) + I.fact("circle-check-big", t("i05.know.cost")) + I.fact("lock", t("i05.know.footage")) + I.fact("eye-off", t("i05.know.private")) + "</div></div>";
+  }
+  function head(noHave) {
+    return I.title(t("i05.title")) + '<div class="i-lead tx-muted mt-2">' + t("i05.text") + "</div>" +
+      (noHave ? "" : '<div class="m-row mt-1">' + M.btn(t("i05.have"), { kind: "ghost", icon: "refresh-cw", flush: true }) + "</div>");
+  }
+  var skip = function (dis) { return I.btn(t("i05.skip"), { kind: "ghost", flush: true, disabled: dis, key: "esc" }); };
+  function bar(o) {
+    o = o || {};
+    return { start: skip(o.busy), end: I.btn(t("i05.install"), { kind: "primary", icon: o.busy ? "busy" : "download", focus: o.focus, key: o.busy ? "" : "enter" }) };
+  }
+  var card = function (h) { return '<div class="mt-4">' + h + "</div>"; };
+  var refused = function () {
+    return card(I.fail(t("i05.refused"), { safety: true, sub: t("i05.refused.sub", { url: url }), btn: I.btn(t("i03.again"), { kind: "primary", icon: "refresh-cw", key: "enter" }) }));
+  };
+  var STATES = {
+    normal: function () { return { body: head() + how() + know(), bar: bar() }; },
+    focus: function () { return { body: head() + how() + know(), bar: bar({ focus: true }) }; },
+    loading: function () { return { body: head() + how({ dl: "busy", dlProg: 44 }) + know(), bar: bar({ busy: true }) }; },
+    checking: function () { return { body: head() + how({ dl: "ok", ck: "busy" }) + know(), bar: bar({ busy: true }) }; },
+    waiting: function () {
+      return {
+        body: head() + card(I.act("info", t("i05.signin"), "", { icon: "log-in", btns: I.btn(t("i05.signed"), { kind: "primary", key: "enter" }) })) +
+          how({ dl: "ok", ck: "ok", pub: true, si: "busy" }) + know(),
+        bar: { start: skip() }
+      };
+    },
+    timeout: function () {
+      return {
+        body: head() + card(I.act("warn", t("i05.timeout"), t("i05.timeout.sub"), { btns: I.btn(t("i05.wait"), { kind: "primary", icon: "refresh-cw", key: "enter" }) + '<div class="ms-2">' + M.btn(t("i05.without"), {}) + "</div>" })) +
+          how({ dl: "ok", ck: "ok", pub: true, si: "warn" }) + know(),
+        bar: { start: skip() }
+      };
+    },
+    error: function () { return { body: head() + refused() + how({ dl: "ok", ck: "error" }), rail: "error", bar: { start: skip() } }; },
+    offline: function () {
+      return {
+        body: head() + card(M.notice("warn", t("i05.offline", { url: url }), { dismiss: false, btn: { label: t("i03.again"), primary: true, icon: "refresh-cw" } })) + how() + know(),
+        bar: { start: skip(), end: M.btn(t("i05.install"), { disabled: true, icon: "download" }) }
+      };
+    },
+    success: function () {
+      return {
+        body: head(true) + card(M.notice("ok", t("i05.ready"), { dismiss: false })) + how({ dl: "ok", ck: "ok", pub: true, si: "ok" }) + know(),
+        rail: "ok", bar: { end: I.btn(t("i00.continue"), { kind: "primary", key: "enter" }) }
+      };
+    },
+    long: function () { return { body: head() + refused() + how({ dl: "ok", ck: "error" }) + know(), rail: "error", bar: { start: skip() }, scroll: "end" }; },
+    win: function () { return { body: head() + how() + know(), bar: bar() }; }
+  };
+  I.mount({
+    id: "I-05", name: "Install Claude for me",
+    states: ["normal", "focus", "loading", "checking", "waiting", "timeout", "error", "offline", "success", "long", "win"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      var mark = v.rail === "error" ? "error" : (state === "loading" || state === "checking" || state === "waiting") ? "busy" : undefined;
+      v.rail = { flow: "install", at: v.rail === "ok" ? "install" : "claude", claude: true, mark: mark };
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

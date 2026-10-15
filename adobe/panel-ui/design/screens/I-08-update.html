@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="normal,focus,loading,checking,success,error,offline,repair,long,win">
+<meta name="mock-widths" content="760,640">
+<meta name="mock-keys" content="Return: Update (up to date: Close; offline: Check again) · Esc: Later · R: Repair · Tab order: Repair, Later, Update">
+<meta name="mock-motion" content="the progress card replaces the release note in the same reserved block; bar width 250 ms; the genuine-check line turns from spinner to green check by fill colour 200 ms; static fallback: final state">
+<title>I-08 Update and repair</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/installer.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/installer.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/installer.js"></script>
+</head>
+<body>
+<script>
+/* I-08 Update and repair (screen-inventory §5 I-08; E2 Tauri's updater with our own key, C1.10, D1 "running either
+   door again repairs or updates").
+   Data: installed and available version, a one-line release note, the genuine-update check. NOT in the core yet: the
+   update check and its verification (E-T3 / Tauri updater); repair = the same install steps re-run (the core already
+   skips what state.json records as done).
+   E2.1 / G made visible: "Checked: this update is the genuine one", checked again before anything is installed; a
+   failed check installs nothing and says the current version keeps working.
+   States: normal (update ready), focus, loading (downloading), checking (genuine check), success (up to date: the
+   empty state of this screen), error (not confirmed genuine: what, why, one fix, support), offline (what still
+   works + Check again), repair (progress as I-04, finished rows green at once), long, win. */
+(function () {
+  var t = I.T, D = I.D, win = I.os === "win";
+  var KEYS = ["preflight", "engine", "claude"].concat(win ? ["gitbash"] : []).concat(["adobe", "fonts", "always_on", "models", "client", "doctor", "launch"]);
+  function head() {
+    return M.eyebrow(t("i08.eyebrow")) + '<div class="i-display mt-2">' + t("i08.title", { app: I.app(D.next) }) + "</div>" +
+      '<div class="i-lead tx-muted mt-2">' + t("i08.have", { version: I.ltr(D.version) }) + " " + t("i08.notes") + "</div>";
+  }
+  function genuine(kind) {
+    return '<div class="m-row-top mt-4">' + (kind === "busy" ? M.status("busy") : I.ico("shield-check", 16, "ink-ok")) + '<div class="t-body ms-2 m-grow">' + t(kind === "busy" ? "i08.checking" : "i08.signed") + "</div></div>";
+  }
+  function repairCard() {
+    return '<div class="i-sec">' + M.card('<div class="m-row-top">' + I.ico("wrench", 16, "ink-muted") + '<div class="m-col m-grow ms-2"><div class="t-label">' + t("i08.repair.title") + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("i08.repair.text") + '</div><div class="m-row mt-3">' + M.btn(t("i08.repair"), { icon: "wrench" }) + "</div></div></div>") + "</div>";
+  }
+  var later = function (dis) { return I.btn(t("i08.later"), { kind: "ghost", flush: true, disabled: dis, key: "esc" }); };
+  function bar(o) {
+    o = o || {};
+    return { start: later(o.busy), end: I.btn(t("i08.now"), { kind: "primary", icon: o.busy ? "busy" : "rotate-ccw", focus: o.focus, key: o.busy ? "" : "enter" }) };
+  }
+  function progress(pct) {
+    return '<div class="mt-4">' + M.card('<div class="m-row">' + M.status("busy") + '<div class="t-body ms-2 m-grow">' + t("i08.loading", { done: I.mb(64), total: I.mb(180) }) + "</div></div>" +
+      '<div class="mt-3">' + M.progress(pct) + '</div><div class="t-meta tx-muted mt-1">' + pct + "%</div>") + "</div>";
+  }
+  var badCard = function () {
+    return '<div class="mt-4">' + I.fail(t("i08.bad_sig"), { safety: true, sub: t("i08.bad_sig.sub"), btn: I.btn(t("i00.retry"), { kind: "primary", icon: "refresh-cw", key: "enter" }) }) + "</div>";
+  };
+  var STATES = {
+    normal: function () { return { body: head() + genuine() + repairCard(), bar: bar() }; },
+    focus: function () { return { body: head() + genuine() + repairCard(), bar: bar({ focus: true }) }; },
+    loading: function () { return { body: head() + progress(36) + genuine(), bar: bar({ busy: true }), mark: "busy" }; },
+    checking: function () { return { body: head() + progress(100) + genuine("busy"), bar: bar({ busy: true }), mark: "busy" }; },
+    success: function () {
+      return {
+        body: '<div class="i-display">' + t("i08.current") + '</div><div class="i-lead tx-muted mt-2">' + t("i08.current.sub", { version: I.ltr(D.next), time: M.html(M.mono("10:32")) }) + "</div>" + repairCard(),
+        bar: { end: I.btn(t("i00.close"), { kind: "primary", key: "enter" }) }, at: "finish"
+      };
+    },
+    error: function () { return { body: head() + badCard(), bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, mark: "error" }; },
+    offline: function () {
+      return {
+        body: '<div class="i-title">' + t("i00.stage.update") + '</div><div class="mt-4">' + M.notice("warn", t("i08.offline"), { dismiss: false, btn: { label: t("i03.again"), primary: true, icon: "refresh-cw" } }) + "</div>" + repairCard(),
+        bar: { end: I.btn(t("i00.close"), { key: "esc" }) }
+      };
+    },
+    repair: function () {
+      var at = KEYS.indexOf("fonts");
+      var rows = KEYS.map(function (k, i) {
+        return i < at ? I.step("ok", t("i04.step." + k), { end: t("i04.end.already") })
+          : i === at ? I.step("busy", t("i04.step." + k), { end: t("i03.checking") }) : I.step("pending", t("i04.step." + k));
+      });
+      return {
+        body: '<div class="i-title">' + t("i08.repair.run") + '</div><div class="t-meta tx-muted mt-1">' + t("i04.position", { n: at + 1, of: KEYS.length, min: t("i00.min", { n: 2 }) }) + "</div>" +
+          '<div class="mt-3">' + M.notice("info", t("i04.resume"), { dismiss: false }) + "</div>" + I.list(rows, "mt-3"),
+        bar: { end: M.btn(t("i04.hide"), {}) + I.btn(t("i00.cancel"), { icon: "circle-stop", key: "esc" }) }, at: "install", mark: "busy"
+      };
+    },
+    long: function () { return { body: head() + badCard() + repairCard(), bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, mark: "error", scroll: "end" }; },
+    win: function () { return { body: head() + genuine() + repairCard(), bar: bar() }; }
+  };
+  I.mount({
+    id: "I-08", name: "Update and repair",
+    states: ["normal", "focus", "loading", "checking", "success", "error", "offline", "repair", "long", "win"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.rail = { flow: "update", at: v.at || "update", mark: v.mark, all: state === "success" };
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="loading,normal,focus,adds,upgrade,offline,noclaude,internal,error,long,win">
+<meta name="mock-widths" content="760,640">
+<meta name="mock-keys" content="Return: Install everything · Tab order: language switch, See what goes where, Customise, Install everything · ⌘Q / Alt+F4 quits Setup (nothing has changed yet)">
+<meta name="mock-motion" content="size line: skeleton shimmer 1200 ms, then the text fades in by colour (200 ms) in the same 24 px line box; 'See what goes where' opens the list below in a reserved slot, the bar never moves; primary hover/press colour 150 ms; static fallback: every state is drawn finished">
+<title>I-01 Welcome</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/installer.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/installer.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/installer.js"></script>
+</head>
+<body>
+<script>
+/* I-01 Welcome (screen-inventory §5 I-01). One screen, one decision: install everything (D1: no questions by default).
+   Data: size for this machine (installer core: runtime + video tools + fonts + large-v3, + PortableGit and NVIDIA
+   libraries on Windows), free disk (preflight facts.free_gb), version, genuine or test build (E2.1#8), an existing
+   install (facts.existing), Claude found (facts.claude_found), the offline bundle (NOT emitted by the core yet).
+   E2.1 / G made visible: #1 for you only, no admin password, no Homebrew, no Xcode (G11); #4 nothing is sent, every
+   step logged; G2-r1 (d) what Setup adds and where, and that uninstall removes it and never touches client folders;
+   #8 the Internal build chip.
+   States: loading (skeleton for the size line), normal, focus (keyboard on the primary), adds (the list open), upgrade
+   (2.2.1 found), offline (offline bundle: no internet needed), noclaude (Claude not installed: the I-05 path is
+   announced), internal (test build), error (the checks did not start: what, why, one fix, support), long (every
+   notice, a large size), win (Windows chrome and copy). Empty, offline-without-bundle: handled on I-03 / I-07. */
+(function () {
+  var t = I.T, D = I.D, st = I.state;
+
+  function facts(loading) {
+    var disk = loading
+      ? '<div class="i-fact">' + I.ico("hard-drive", 16, "ink-muted") + '<div class="i-fact-text"><div class="m-skel-line" style="height:24px"><span class="m-skel-bar" style="width:46%"></span></div></div></div>'
+      : I.fact("hard-drive", t("i01.fact.disk", { free: I.gb(D.free), drive: I.ltr(D.drive) }));
+    return '<div class="m-col mt-4">' + disk +
+      I.fact("user-round", I.Tos("i01.fact.user")) +
+      I.fact("eye-off", t("i01.fact.private")) +
+      I.fact("list-checks", t("i01.fact.visible")) + "</div>";
+  }
+  function adds(open) {
+    return '<div class="m-col mt-4" id="adds">' + I.fact("shield-check", t("i01.adds"), { ink: "ink-ok", muted: true,
+      under: '<div class="m-row mt-1">' + M.btn(t(open ? "i01.adds.hide" : "i01.adds.show"), { kind: "ghost", icon: open ? "chevron-up" : "chevron-down", flush: true }) + "</div>" }) +
+      (open ? I.adds("mt-2") : "") + "</div>";
+  }
+  function intro(loading) {
+    var text = loading
+      ? '<div class="m-skel-line mt-2" style="height:24px"><span class="m-skel-bar" style="width:72%"></span></div>'
+      : '<div class="i-lead tx-muted mt-2">' + t("i01.text", { gb: I.gb(D.total) }) + "</div>";
+    return M.eyebrow(t("i01.eyebrow", { version: I.ver(D.version) })) + '<div class="i-display mt-2">' + t("i01.title") + "</div>" + text;
+  }
+  function bar(o) {
+    o = o || {};
+    return {
+      end: M.btn(t("i01.customise"), { disabled: o.disabled }) +
+        I.btn(t("i01.install"), { kind: "primary", icon: o.busy ? "busy" : "download", focus: o.focus, disabled: o.disabled, key: "enter" })
+    };
+  }
+  var notice = function (kind, key, vars) { return '<div class="mt-4">' + M.notice(kind, t(key, vars), { dismiss: false }) + "</div>"; };
+
+  var STATES = {
+    loading: function () { return { body: intro(true) + facts(true), bar: bar({ disabled: true }) }; },
+    normal: function () { return { body: intro() + facts() + adds(), bar: bar() }; },
+    focus: function () { return { body: intro() + facts() + adds(), bar: bar({ focus: true }) }; },
+    adds: function () { return { body: intro() + facts() + adds(true), bar: bar(), scroll: "#adds" }; },
+    upgrade: function () { return { body: intro() + notice("info", "i01.upgrade", { app: I.app(D.old) }) + facts() + adds(), bar: bar() }; },
+    offline: function () { return { body: intro() + notice("ok", "i01.offline") + facts() + adds(), bar: bar() }; },
+    noclaude: function () { return { body: intro() + notice("info", "i01.noclaude") + facts() + adds(), bar: bar() }; },
+    internal: function () { return { internal: true, body: intro() + notice("warn", "i01.internal") + facts() + adds(), bar: bar() }; },
+    error: function () {
+      return {
+        body: intro() + '<div class="mt-4">' + I.fail(t("i01.error"), { sub: t("i01.error.why"), btn: I.btn(t("i00.retry"), { kind: "primary", icon: "refresh-cw", key: "enter" }) }) + "</div>",
+        bar: { end: M.btn(t("i01.install"), { disabled: true, icon: "download" }) }
+      };
+    },
+    long: function () {
+      return {
+        internal: true,
+        body: intro() + notice("info", "i01.upgrade", { app: I.app(D.old) }) + notice("ok", "i01.offline") + notice("info", "i01.noclaude") + notice("warn", "i01.internal") + facts() + adds(true),
+        bar: bar(), scroll: "#adds"
+      };
+    },
+    win: function () { return { body: intro() + facts() + adds(), bar: bar() }; }
+  };
+
+  I.mount({
+    id: "I-01", name: "Welcome",
+    states: ["loading", "normal", "focus", "adds", "upgrade", "offline", "noclaude", "internal", "error", "long", "win"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.rail = { flow: "install", at: "welcome", mark: state === "error" ? "error" : undefined };
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

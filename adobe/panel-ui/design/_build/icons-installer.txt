@@ -1,0 +1,36 @@
+# Installer group (I-01..I-09): extra Lucide names (must exist in whynot-cut/templates/motion/icons/lucide/)
+circle-dot      # current stage in the rail
+shield-check    # signed build, signed list, clients untouched
+shield-x        # safety check refused
+shield-alert    # manifest not trusted
+flask-conical   # internal build chip
+hard-drive      # disk space
+download        # downloads
+user-round      # per-user install, no admin
+eye-off         # nothing is sent (no telemetry)
+list-checks     # every step shown and logged
+lock            # signed list / secure connection
+log-in          # sign in (Claude, Creative Cloud)
+app-window      # WhyNot Cut app row
+puzzle          # WhyNot Cut inside Claude
+type            # fonts
+power           # startup entry (login item)
+link            # link scheme
+audio-lines     # speech model
+folder          # clients folder
+monitor         # this computer
+cpu             # graphics card
+wifi-off        # offline
+scroll-text     # log drawer
+file-search     # show the file (UPIA fallback)
+minus           # Windows caption: minimise
+square          # Windows caption: maximise
+trash-2         # uninstall
+wrench          # repair
+rotate-ccw      # update
+package-check   # offline bundle
+clock           # elapsed
+arrow-left
+arrow-right
+life-buoy       # Contact support
+layers          # Adobe panels (what Setup adds)
