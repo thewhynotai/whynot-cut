@@ -10,6 +10,8 @@ Reader: a video editor in Egypt (also KSA/UAE), comfortable with Premiere, not a
   Exception: the exact phrases the editor SAYS to Claude are quoted as the editor would type them, in «…», e.g.
   «عدّل الفيديوهات الجديدة»، «طلّع ريلز من الحلقة»، «اختار انت»، «ثبّت WhyNot Cut»، «رتّب البروجكت»، «شيل السكتات
   والآآ». The three verbs tagline is kept exactly: «حط الملفات · قول عايز إيه · وافق على الخطة».
+- The troubleshooting `.fix` labels «اللي حصل / ليه / اعمل كده» are deliberate editor-speech (Egyptian), set by the
+  round-3 plan (Task 3); they are labels, not prose, so they are not «corrected» to MSA.
 - Address the reader with the generic masculine imperative (افتح، اكتب، ضع) — the standard convention of Arabic
   software documentation. Never refer to a specific person's gender; people in examples are «د.» + name or a role.
 - English UI terms in parentheses after the Arabic the first time in a chapter: «لوحة WhyNot Cut (panel)»،

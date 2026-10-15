@@ -13,12 +13,16 @@
 <ol class="steps">
 <li>أغلق تطبيق Claude تمامًا (<a href="#ch02-claude-first">الفصل&nbsp;2</a>).</li>
 <li>احذف الفولدر القديم <bdi dir="ltr"><code>whynot-cut-marketplace</code></bdi> من Documents، وضع الجديد مكانه بالاسم نفسه. لا تحتفظ بالنسختين.</li>
-<li>افتح Claude، وفي محادثة جديدة اكتب السطر التالي ثم اضغط Enter، فيقرأ Claude النسخة الجديدة من الفولدر:
-<div class="cmd"><bdi dir="ltr"><code>/plugin marketplace update thewhynot-ai</code></bdi></div></li>
+<li><p class="lead-in">افتح Claude، وفي محادثة جديدة اكتب السطر الأول من السطرين التاليين ثم اضغط Enter، وبعد أن يرد اكتب السطر الثاني ثم اضغط Enter. الأول يقرأ النسخة الجديدة من الفولدر، والثاني يحدّث WhyNot Cut إليها:</p>
+<aside class="todo" data-phase="9">
+<p>خطوات التحديث هذه تُراجَع على جهاز حقيقي، وقد يتغيّر شكل السطرين قليلًا.</p>
+<div class="cmd"><bdi dir="ltr"><code>/plugin marketplace update thewhynot-ai</code></bdi></div>
+<div class="cmd"><bdi dir="ltr"><code>/plugin update whynot-cut@thewhynot-ai</code></bdi></div>
+<!-- فريق: موجة C (مراجعة الموجتين I2). المسار الذي تحقّق منه الفريق أمران لا أمر واحد: الخطة الرئيسية T0.2 (docs/superpowers/specs/2026-10-11-whynot-cut-3.0-master-plan.md السطران 414–415) ومراجعة التثبيت docs/review/2026-10-11/installer.md البند 4: claude plugin marketplace update thewhynot-ai ثم claude plugin update whynot-cut@thewhynot-ai، بأداة claude من مسارها الكامل في Terminal (ليست على PATH مع تطبيق Claude). بدون الأمر الثاني قد تبقى النسخة المثبَّتة قديمة، ولا يصلحها إعادة تشغيل Claude (الفصل 17). على هذا الجهاز (claude 2.1.295) يذكر claude plugin --help الأمر update «restart required to apply»، ويذكر claude plugin marketplace --help الأمر update [name]. أما الشكل المكتوب في محادثة Claude (/plugin …) فلا يسنده إلا سطر للمطوّرين (whynot-cut/README.md السطر 272، للأمر الأول فقط)، ولم يُجرَّب الشكل /plugin update داخل التطبيق: يُجرَّب السطران حيًّا في محادثة جديدة على تطبيق Claude (Mac أولًا ثم Windows)، ثم يخرجان من هذا الصندوق إلى الخطوة، أو يُكتب بدلهما الأمران الكاملان مع طريقة فتح Terminal. الخطوة 4 (إغلاق Claude وفتحه) تغطي «restart required». --></aside></li>
 <li>أغلق Claude تمامًا وافتحه، وفي محادثة جديدة اكتب الأمر التالي، فيحدّث المحرك ولوحة Premiere:
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:setup</code></bdi></div></li>
 </ol>
-<!-- فريق: 7c #39 (كان يناقض «لا تنقله ولا تحذفه» في الفصل 2). استبدال الفولدر في مكانه ثم /plugin marketplace update thewhynot-ai: whynot-cut/README.md السطر 272 (تحديث المتجر بعد تغيير الإصدار؛ اسم المتجر thewhynot-ai من سطر التثبيت whynot-cut@thewhynot-ai)؛ ثم reel setup (README «Upgrading from 2.x»). القسم التالي «بعد كل تحديث» يتحقق من رقم الإصدار، فإذا بقي قديمًا يدلّه على الفصل 17. يُراجَع على جهاز حقيقي مع صور المرحلة 9. -->
+<!-- فريق: 7c #39 (كان يناقض «لا تنقله ولا تحذفه» في الفصل 2). استبدال الفولدر في مكانه، ثم تحديث المتجر وتحديث الإضافة (الخطة الرئيسية T0.2؛ اسم المتجر thewhynot-ai من سطر التثبيت whynot-cut@thewhynot-ai؛ الشكل داخل المحادثة في صندوق الخطوة 3)، ثم reel setup (README «Upgrading from 2.x»). القسم التالي «بعد كل تحديث» يتحقق من رقم الإصدار، فإذا بقي قديمًا يدلّه على الفصل 17. يُراجَع على جهاز حقيقي مع صور المرحلة 9. -->
 <ul>
 <li><strong>الخطط التي وافقت عليها قبل التحديث إلى الإصدار <bdi dir="ltr">3.0</bdi></strong>: يطلب منك Claude الموافقة عليها مرة أخرى قبل البناء التالي. الخطة نفسها لا تتغيّر.</li>
 <li><strong>للإزالة</strong>: اطلب من فريقنا خطواتها، فهي تختلف حسب طريقة تثبيت النسخة التي معك.</li>
@@ -91,14 +95,14 @@
 <p class="lead-in">ما يبقى دائمًا:</p>
 <ul>
 <li>مواد الموشن والرسوم المرخَّصة التي أضفتها أنت، في الفولدر <bdi dir="ltr"><code>library</code></bdi> داخل فولدر المحرك، إن وُجدت.
-<!-- فريق: 7c مالك #6: الفولدر حقيقي: installer/core/wnc_installer/uninstall.py السطر 48 (KEPT = "library": <engine home>/library، حزم الموشن والرسوم المرخَّصة، engine motion_library.py) وinstaller/README.md («library/ always stays»). كلمة «مكتبة» محجوزة لمكتبة NVIDIA (STYLE). --></li>
+<!-- فريق: 7c مالك #6: الفولدر حقيقي: whynot-cut/installer/core/wnc_installer/uninstall.py السطر 48 في c9fc7b0 (KEPT = "library": <engine home>/library، حزم الموشن والرسوم المرخَّصة، engine motion_library.py) وinstaller/README.md («library/ always stays»). كلمة «مكتبة» محجوزة لمكتبة NVIDIA (STYLE). --></li>
 <li>ملف إعداداتك (preferences)، فيستخدمه أي تثبيت لاحق كما هو.</li>
 <li>فولدر العملاء وكل فولدرات العملاء (القسم التالي).</li>
 </ul>
 
 <aside class="todo" data-phase="7">
 <p>سطرا الإزالة يعملان من يوم صدور الإصدار <bdi dir="ltr">3.0</bdi>، ولم يُجرَّبا بعد على جهاز حقيقي.</p>
-<!-- فريق: ما يُزال وما يبقى من النواة المرفوعة (installer/core/wnc_installer/uninstall.py وinstaller/README.md «Uninstall»): plugin وadobe (لا شيء إذا كان Premiere/AE مفتوحًا) وfonts المسجَّلة فقط وmarketplace؛ engine فقط مع -RemoveEngine؛ models/ فقط مع -RemoveModels؛ library/ دائمًا يبقى؛ ملف الإعدادات ~/.claude/whynot-cut.local.md يبقى ويُذكر في الملخص؛ فولدرات العملاء لا تُمس. إجابة المنفّذ (10): سطرا الإزالة العامّان هما المكتوبان في الخطوة 2 (Windows: scriptblock مع -Uninstall؛ macOS: bash -s مع الخيار uninstall)، وبعد T7.8 يفعل الأمر reel uninstall الشيء نفسه (لا يُكتب كأمر هنا قبل أن يظهر في reel help). فولدر المحرك يبقى إلا مع -RemoveEngine أو الخيار remove-engine على macOS: الكود يغلب الإضافة E (E2.1.5)، فـ W18 مغلق. يبقى هذا الصندوق حتى فحص المرحلة 7 الحي. برنامج WhyNot Cut Setup داخلي فقط (الإضافة F)؛ Windows: مُزيل NSIS في Settings › Apps (E-T5)؛ macOS: من التطبيق WhyNot Cut Setup (الإضافة E، factcheck2 W14) — اسم الزر يُنقل حرفيًا بعد بنائه. خطوات الإزالة يُتحقَّق منها مع التثبيت على جهاز حقيقي في المرحلة 7، وتُلتقط الصور في المرحلة 9. -->
+<!-- فريق: ما يُزال وما يبقى من النواة المرفوعة (whynot-cut/installer/core/wnc_installer/uninstall.py وwhynot-cut/installer/README.md «Uninstall»): plugin وadobe (لا شيء إذا كان Premiere/AE مفتوحًا) وfonts المسجَّلة فقط وmarketplace؛ engine فقط مع -RemoveEngine؛ models/ فقط مع -RemoveModels؛ library/ دائمًا يبقى؛ ملف الإعدادات ~/.claude/whynot-cut.local.md يبقى ويُذكر في الملخص؛ فولدرات العملاء لا تُمس. إجابة المنفّذ (10): سطرا الإزالة العامّان هما المكتوبان في الخطوة 2 (Windows: scriptblock مع -Uninstall؛ macOS: bash -s مع الخيار uninstall)، وبعد T7.8 يفعل الأمر reel uninstall الشيء نفسه (لا يُكتب كأمر هنا قبل أن يظهر في reel help). فولدر المحرك يبقى إلا مع -RemoveEngine أو الخيار remove-engine على macOS: الكود يغلب الإضافة E (E2.1.5)، فـ W18 مغلق. يبقى هذا الصندوق حتى فحص المرحلة 7 الحي. برنامج WhyNot Cut Setup داخلي فقط (الإضافة F)؛ Windows: مُزيل NSIS في Settings › Apps (E-T5)؛ macOS: من التطبيق WhyNot Cut Setup (الإضافة E، factcheck2 W14) — اسم الزر يُنقل حرفيًا بعد بنائه. خطوات الإزالة يُتحقَّق منها مع التثبيت على جهاز حقيقي في المرحلة 7، وتُلتقط الصور في المرحلة 9. -->
 </aside>
 
 <h2 id="ch18-client-files">ملفات عملائك عند التحديث والإلغاء</h2>

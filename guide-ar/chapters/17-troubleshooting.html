@@ -47,13 +47,6 @@
 <p class="fix-do"><span class="fix-label">اعمل كده</span> اكتب <bdi dir="ltr"><code>/whynot-cut:setup</code></bdi>، ووافق عندما يسألك Claude عن تثبيت المحرك (نحو <bdi dir="ltr">400&nbsp;MB</bdi>).</p>
 </div>
 
-<div class="fix">
-<p class="fix-what"><span class="fix-label">اللي حصل</span> رسالة تقول إنه لا يوجد Python مناسب على الجهاز.</p>
-<p class="fix-why"><span class="fix-label">ليه</span> جهاز جديد ليس عليه Python، وهو برنامج يحتاجه المحرك. لا تثبّته أنت أبدًا: برنامج التثبيت الذي يأتي مع WhyNot Cut يحضر نسخة Python خاصة به، دون صلاحيات مسؤول الجهاز (admin)، ولا يفتح على Mac نافذة Apple لتثبيت أدوات إضافية. ويطلب منك Claude أن تغلق Premiere قبل التثبيت، وأن تفتحه مرة واحدة بعده.</p>
-<p class="fix-do"><span class="fix-label">اعمل كده</span> اكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>، واختر «ثبّت دلوقتي (موصى به)» عندما يسألك Claude عن تثبيت WhyNot Cut على الجهاز (نحو <bdi dir="ltr">4&nbsp;GB</bdi>، من 5 إلى 20 دقيقة).</p>
-<!-- فريق: حكم المنفّذ على 7b C1 (aaf6a4e، مراجعة G3 I2) يغلب صياغة المراجع (/whynot-cut:setup): المونتير لا يثبّت Python أبدًا (لا أدوات Xcode ولا Homebrew ولا winget ولا python.org)؛ reel setup يرفض ويشير إلى /whynot-cut:start (whynot-cut/bin/reel، NO_PY_HOW)؛ start يسأل مرة واحدة (نحو 4 GB، من 5 إلى 20 دقيقة، بلا صلاحيات admin) ثم يشغّل برنامج التثبيت المرفق بالإضافة ومعه Python 3.12 خاص به (skills/start/references/install-from-claude.md القسمان 1 و3؛ start SKILL «No Python 3.9+»؛ setup SKILL الخطوة 3). على Mac بلا أدوات المطوّرين لا يُشغَّل /usr/bin/python3 أبدًا (bin/reel: يفتح نافذة Apple فقط). يُطلب إغلاق Premiere قبل التثبيت (ملفات اللوحة تُستبدل)، ويُعاد فتحه مرة بعده لتحميل اللوحة. نص الاختيار «ثبّت دلوقتي (موصى به)» حرفيًا من install-from-claude.md. حُذفت نصيحة python.org وصف PATH في STYLE.md. -->
-</div>
-
 <h2 id="ch17-premiere" data-today>في Premiere وفي After Effects</h2>
 
 <div class="fix">
@@ -197,9 +190,23 @@
 </div>
 
 <div class="fix">
-<p class="fix-what"><span class="fix-label">اللي حصل</span> على Windows، التثبيت يحذّر من حروف غير إنجليزية في مكان المحرك.</p>
+<p class="fix-what"><span class="fix-label">اللي حصل</span> رسالة تقول إنه لا يوجد Python مناسب على الجهاز.</p>
+<p class="fix-why"><span class="fix-label">ليه</span> جهاز جديد ليس عليه Python، وهو برنامج يحتاجه المحرك. لا تثبّته أنت أبدًا: برنامج التثبيت الذي يأتي مع WhyNot Cut يُنزِّل نسخة Python خاصة به، دون صلاحيات مسؤول الجهاز (admin)، ولا يفتح على Mac نافذة Apple لتثبيت أدوات إضافية. ويطلب منك Claude قبل التثبيت أن تغلق Premiere Pro، وكذلك After Effects إن كان مفتوحًا، وأن تفتح Premiere مرة واحدة بعده.</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> اكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>، واختر «ثبّت دلوقتي (موصى به)» عندما يسألك Claude عن تثبيت WhyNot Cut على الجهاز (نحو <bdi dir="ltr">4&nbsp;GB</bdi>، من 5 إلى 20 دقيقة).</p>
+<!-- فريق: حكم المنفّذ على 7b C1 (aaf6a4e، مراجعة G3 I2) يغلب صياغة المراجع (/whynot-cut:setup): المونتير لا يثبّت Python أبدًا (لا أدوات Xcode ولا Homebrew ولا winget ولا python.org)؛ reel setup يرفض ويشير إلى /whynot-cut:start (whynot-cut/bin/reel، NO_PY_HOW)؛ start يسأل مرة واحدة (نحو 4 GB، من 5 إلى 20 دقيقة، بلا صلاحيات admin) ثم يشغّل برنامج التثبيت المرفق بالإضافة ومعه Python 3.12 خاص به (skills/start/references/install-from-claude.md القسمان 1 و3؛ start SKILL «No Python 3.9+»؛ setup SKILL الخطوة 3). على Mac بلا أدوات المطوّرين لا يُشغَّل /usr/bin/python3 أبدًا (bin/reel: يفتح نافذة Apple فقط). يُطلب إغلاق Premiere Pro وAfter Effects قبل التثبيت (install-from-claude.md السطر 20: ملفات اللوحة تُستبدل)، ويُعاد فتح Premiere مرة بعده لتحميل اللوحة. نص الاختيار «ثبّت دلوقتي (موصى به)» حرفيًا من install-from-claude.md. حُذفت نصيحة python.org وصف PATH في STYLE.md. موجة C (مراجعة الموجتين I1): نُقل البند من «التثبيت وتشغيل WhyNot Cut» (قسم اليوم) إلى هنا، لأن الإصدار الحالي 2.2.1 ما زال يعطي xcode-select / winget (start SKILL)، والمثبّت المرفق موجود في release/3.0 فقط (aaf6a4e)، ونص install-from-claude.md مؤقت («interim … D-T2») ونص الزر فيه يختلف عن بطاقة الفصل 2؛ فيغطيه صندوق المرحلة 7 في آخر القسم. -->
+</div>
+
+<div class="fix">
+<p class="fix-what"><span class="fix-label">اللي حصل</span> على Windows، التثبيت يحذّر من حروف غير إنجليزية في مكان المحرك، ثم يسألك عن المكان.</p>
 <p class="fix-why"><span class="fix-label">ليه</span> بعض الأدوات قد تفشل في مكان فيه حروف غير إنجليزية، مثل فولدر مستخدم اسمه بالعربية.</p>
-<p class="fix-do"><span class="fix-label">اعمل كده</span> إذا سألك التثبيت بعد التحذير عن المكان فاضغط Enter لتقبل <bdi dir="ltr"><code>C:\WhyNotCut</code></bdi>؛ وإذا أكمل دون سؤال، فالصق السطر مرة أخرى بعد أن ينتهي، واضغط C أثناء العد التنازلي، واكتب <bdi dir="ltr"><code>C:\WhyNotCut</code></bdi> عند سؤال المكان.</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> اضغط Enter لتقبل المكان المقترح <bdi dir="ltr"><code>C:\WhyNotCut</code></bdi>.</p>
+</div>
+
+<div class="fix">
+<p class="fix-what"><span class="fix-label">اللي حصل</span> على Windows، ظهر التحذير نفسه وأكمل التثبيت دون أن يسألك عن المكان.</p>
+<p class="fix-why"><span class="fix-label">ليه</span> في التثبيت العادي لا يسألك التثبيت عن المكان، فيبقى المحرك في المكان الذي فيه حروف غير إنجليزية.</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> أعد تشغيل سطر التثبيت في وضع التخصيص، بالضغط على المفتاح C أثناء العد التنازلي، واكتب <bdi dir="ltr"><code>C:\WhyNotCut</code></bdi> عندما يسألك عن المكان.</p>
+<!-- فريق: موجة C (مراجعة الموجتين I3): قُسم البند إلى بندين، لكل فرع فعل واحد. whynot-cut/installer/core/bootstrap.ps1 في c9fc7b0: Read-WncCountdown (C أثناء العد = Customise)، Test-WncCanAsk (سؤال المكان في التخصيص فقط)، Select-WncEngineHome (التحذير ثم Read-WncAnswer مع الاقتراح C:\WhyNotCut إذا سُمح بالسؤال، وإلا «kept: no question was asked»). عند إعادة التشغيل يبقى التثبيت الأول في الفولدر القديم (التحذير «stays there and is no longer used» في Select-WncEngineHome): يُذكر هذا للقارئ عند التحقق من الخطوة حيًّا في المرحلة 7. -->
 </div>
 
 <div class="fix">

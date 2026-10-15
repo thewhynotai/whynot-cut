@@ -306,12 +306,32 @@ def nowrap_cmd_tokens(html: str) -> str:
     return _CMD_BLOCK.sub(block, html)
 
 
+_PRODUCT_NAME = "WhyNot Cut"
+_PRODUCT_SKIP = re.compile(r"""(<!--.*?-->|<(h[1-6])\b.*?</\2\s*>|<div\b[^>]*\bclass\s*=\s*["'][^"']*\bcmd\b[^"']*["'][^>]*>.*?</div\s*>"""
+                           r"""|<[^>]+>)""", re.S | re.I)
+
+
+def keep_product_name(html: str) -> str:
+    """Join the product name with a no-break space («WhyNot&nbsp;Cut») in printed body text, so «WhyNot / Cut» never
+    splits at a line end. Comments, tags, headings (their text is the bookmark and TOC title) and command blocks are
+    left as they are. Idempotent."""
+    parts = _PRODUCT_SKIP.split(html)
+    # split() with two groups yields: text, whole match, h-tag name (or None), text, ...
+    out = []
+    for i, part in enumerate(parts):
+        if i % 3 == 0:
+            out.append(part.replace(_PRODUCT_NAME, "WhyNot&nbsp;Cut"))
+        elif i % 3 == 1:
+            out.append(part)
+    return "".join(out)
+
+
 def assemble(root: Path) -> str:
     """index.html with chapters/*.html (sorted by name) at <!--@chapters--> and the TOC at <!--@toc-->.
 
     Print-only markup is added here, never in the chapter sources: the chapter map after each
-    chapter's first paragraph, the .ch-num wrapper of chapter numbers, .path chips and the
-    no-wrap spans of command blocks.
+    chapter's first paragraph, the .ch-num wrapper of chapter numbers, .path chips, the
+    no-wrap spans of command blocks and the no-break space inside «WhyNot Cut» in body text.
     """
     root = Path(root)
     shell = (root / "index.html").read_text(encoding="utf-8")
@@ -320,6 +340,7 @@ def assemble(root: Path) -> str:
     parts = [p.read_text(encoding="utf-8").strip() for p in sorted((root / "chapters").glob("*.html"))]
     chapters = "\n\n".join(parts)
     printed = "\n\n".join(build_chapter_map(p) for p in parts)
+    printed = keep_product_name(printed)
     printed = mark_chapter_numbers(mark_menu_paths(keep_fix_with_todo(keep_shot_with_todo(nowrap_cmd_tokens(printed)))))
     html = shell.replace("<!--@chapters-->", printed, 1)
     toc = build_toc(chapters)

@@ -684,6 +684,30 @@ class CmdAndShotTests(unittest.TestCase):
         # multi-line blocks keep their line breaks
         self.assertIn("\n", build.nowrap_cmd_tokens('<div class="cmd"><code>a: 1\nb: 2</code></div>'))
 
+    def test_product_name_never_splits(self):
+        """«WhyNot / Cut» must not split at a line end (7a item 20): body text gets a no-break space; headings
+        (bookmark and TOC titles), comments, attributes and command blocks keep the plain space."""
+        src = ('<h2 id="a">ما الذي يقدّمه WhyNot Cut</h2>\n<p>يعمل WhyNot Cut <bdi dir="ltr"><code>WhyNot Cut 3.0.0</code>'
+               '</bdi> و WhyNot&nbsp;Cut</p><!-- فريق: WhyNot Cut --><img alt="WhyNot Cut">'
+               '<div class="cmd"><bdi dir="ltr"><code>echo WhyNot Cut</code></bdi></div><li>WhyNot Cut</li>')
+        out = build.keep_product_name(src)
+        self.assertIn('<h2 id="a">ما الذي يقدّمه WhyNot Cut</h2>', out)
+        self.assertIn("<p>يعمل WhyNot&nbsp;Cut <bdi", out)
+        self.assertIn("<code>WhyNot&nbsp;Cut 3.0.0</code>", out)
+        self.assertIn("<!-- فريق: WhyNot Cut -->", out)
+        self.assertIn('alt="WhyNot Cut"', out)
+        self.assertIn("<code>echo WhyNot Cut</code>", out)
+        self.assertIn("<li>WhyNot&nbsp;Cut</li>", out)
+        self.assertEqual(build.keep_product_name(out), out, "idempotent")
+        self.assertEqual(out.replace("&nbsp;", " "), src.replace("&nbsp;", " "), "only the space changes")
+        # the real guide: no plain space left inside the name in printed body text
+        html = build.assemble(GUIDE)
+        start, end = html.index('<section class="chapter" id="ch00"'), html.index('<section class="back-cover"')
+        body = re.sub(r"<!--.*?-->|<(h[1-6])\b.*?</\1\s*>|<div\b[^>]*\bclass=\"cmd[^\"]*\"[^>]*>.*?</div>|<[^>]+>",
+                      "", html[start:end], flags=re.S)
+        self.assertGreater(len(body), 10000)
+        self.assertNotIn("WhyNot Cut", body)
+
     def test_lint_flags_cmd_token_too_long_to_wrap(self):
         long = "output/" + "x" * 80 + ".prproj"
         html = _wrap(f'<div class="cmd"><bdi dir="ltr"><code>{long}</code></bdi></div>')
@@ -732,12 +756,14 @@ class CmdAndShotTests(unittest.TestCase):
         css = re.sub(r"/\*.*?\*/", "", (GUIDE / "styles.css").read_text(encoding="utf-8"), flags=re.S)
         self.assertRegex(self._rule("ol.steps > li"), r"break-inside:\s*auto")
         self.assertRegex(css, r"ol\.steps > li > figure\.shot \{[^}]*break-before:\s*avoid")
+        self.assertRegex(css, r"ol\.steps > li > \.todo \{[^}]*break-before:\s*avoid")
         self.assertRegex(self._rule(".owner"), r"break-inside:\s*auto")
         self.assertRegex(self._rule(".owner"), r"box-decoration-break:\s*clone")
         self.assertRegex(self._rule(".owner > ul > li"), r"break-inside:\s*avoid")
         self.assertRegex(self._rule("thead"), r"break-after:\s*avoid")
         self.assertRegex(css, r"tbody tr:first-child:not\(:last-child\) \{[^}]*break-after:\s*avoid")
         self.assertRegex(self._rule("bdi > code"), r"margin-inline:\s*0\.18em")
+        self.assertRegex(self._rule(".cmd code"), r"margin-inline:\s*0;", "the pill's air must not shrink a command block")
         self.assertRegex(self._rule('figure.shot[data-scope="app"] .shot-frame::before'), r"content:\s*none")
         self.assertRegex(self._rule(".shot-frame::before"), r'content:\s*"example-clinic"',
                          "the chip stays the default: only data-scope=app shots drop it")
@@ -745,7 +771,8 @@ class CmdAndShotTests(unittest.TestCase):
     def test_chapters_have_no_plain_numbered_list(self):
         """A plain <ol> prints «.1» markers; every numbered list uses the violet ol.steps badges."""
         for path in sorted((GUIDE / "chapters").glob("*.html")):
-            self.assertNotRegex(path.read_text(encoding="utf-8"), r"<ol>", f"{path.name}: use <ol class=\"steps\">")
+            self.assertNotRegex(path.read_text(encoding="utf-8"), r"<ol\b(?![^>]*\bclass=\"[^\"]*\bsteps\b)",
+                                f"{path.name}: use <ol class=\"steps\"> (also with start= or another class)")
 
     def test_css_footer_and_running_header(self):
         """Owner rule: the body footer reads «Powered by thewhynot.ai» (plus the page number); the covers have no

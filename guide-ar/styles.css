@@ -272,6 +272,7 @@ h4 { font-size: 11.5pt; line-height: 20pt; font-weight: 600; margin: 10pt 0 0; p
    for any paragraph placed directly before a list, command block, table or shot
    (and pulls it 5 pt closer to that block). */
 h2, h3, h4, .lead-in { break-after: avoid; page-break-after: avoid; }
+.lead-in { margin-bottom: 5pt; }
 p:has(+ .cmd, + ol, + ul, + table, + figure.shot, + .keep) { break-after: avoid; page-break-after: avoid; margin-bottom: 5pt; }
 .lead-in + * { break-before: avoid; page-break-before: avoid; }
 /* a 3.0 box closes the section it belongs to: never let it open a page alone.
@@ -426,7 +427,6 @@ ol.ch-map .map-pg {
 .warn::before { content: "تنبيه";  color: var(--important); }
 .tip > :last-child, .warn > :last-child, .todo > :last-child { margin-bottom: 0; }
 /* «لصاحب الوكالة» (ch01, round 3 Task 5): the tip's fill and hairline, no label, and it may run over a page */
-.lead-in { margin-bottom: 5pt; }
 .owner {
   margin: 5pt 0 20pt;
   padding: 10pt 14pt 12pt;
@@ -576,6 +576,9 @@ ol.steps > li {
    last lines of the sentence along: a shot may open a page with its step on the page before.
    Making it bite (a block wrapper) was tried: +2 pages and five 25–32 % gaps in ch07 (wave B report). */
 ol.steps > li > figure.shot { break-before: avoid; page-break-before: avoid; }
+/* a 3.0 line that holds the step's command lines (ch18 update) stays with the step sentence ending in «:» */
+ol.steps > li > .todo { break-before: avoid; page-break-before: avoid; }
+ol.steps > li > p:has(+ .todo) { break-inside: avoid; page-break-inside: avoid; }  /* never only «إليها:» */
 ol.steps > li::before {
   content: counter(step, decimal);
   position: absolute;
@@ -613,6 +616,7 @@ ol.steps > li > .cmd { margin-right: 0; }
   font-size: 9.5pt;
   line-height: 15pt;
   padding: 0;
+  margin-inline: 0;         /* the inline pill's air (bdi > code) is not for a command block */
   white-space: pre-wrap;    /* keeps the line breaks of multi-line blocks */
   overflow-wrap: normal;
   word-break: normal;
