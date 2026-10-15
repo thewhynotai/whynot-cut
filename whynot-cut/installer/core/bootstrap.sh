@@ -306,7 +306,7 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
   fi
   if [ -n "$linked" ]; then  # fix round 3: where the link points is checked again (Documents, client data ...)
     client_roots
-    resolved_home_problem "$root"
+    resolved_home_problem "$root" deferred
     if [ -n "$WHY" ]; then
       printf 'WARNING: %s is %s; the paths in %s were left alone\n' "$root" "$WHY" "$list"
       return 0
@@ -602,8 +602,17 @@ has_occupied() { # dir [pointer-ok]: status 0 when it holds any entry except the
 }
 
 is_mount() { # path: /Volumes/<name>, or an existing folder that df reports as its own mount point
-  local n m low
+  local n m low rest item
   norm_path "$1"; n="$NORM"
+  if [ -n "${TEST_MOUNTS:-}" ]; then  # sandbox-only test hook WNC_TEST_MOUNTS: folders that count as mount points
+    rest="$TEST_MOUNTS;"
+    while [ -n "$rest" ]; do
+      item="${rest%%;*}"; rest="${rest#*;}"
+      [ -n "$item" ] || continue
+      norm_path "$item"
+      [ "$NORM" = "$n" ] && return 0
+    done
+  fi
   low="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')"
   case "$low" in /volumes/*/*) ;; /volumes/?*) return 0 ;; esac
   [ -d "$1" ] || return 1
@@ -918,25 +927,79 @@ place_keys() { # path -> KEY1 (as written), KEY2 (links resolved), both from gua
   if [ -n "$REAL" ]; then guard_norm "$REAL"; KEY2="$NORM"; else KEY2="$KEY1"; fi
 }
 
-resolved_home_problem() { # path -> WHY (empty: fine), the core's base.resolved_home_problem: ~/.whynot-cut itself
-  # is fine - unless it is a link (Addendum F): then where it points is checked like any resolved home (fix round 3)
-  local p="$1" a
+resolved_home_problem() { # path [mode] -> WHY (empty: fine), the core's base.resolved_home_problem: ~/.whynot-cut
+  # itself is fine - unless it is a link (Addendum F): then where it points is checked like any resolved home (fix
+  # round 3) and placed like a chosen folder (fix round 4: linked_target_problem). mode: install (every rule),
+  # uninstall (a genuine engine home is not refused for client folders inside it), deferred (no "occupied" rule)
+  local p="$1" mode="${2:-install}" a genuine="" skip=""
   WHY=""
   case "$p" in \\\\*|//*) place_problem "$p" ""; return 0 ;; esac
-  while [ "${p%/}" != "$p" ] && [ "${p%/}" != "" ] && [ "${p%/}" != "${p%%:*}:" ]; do p="${p%/}"; done
+  trim_dir "$p"; p="$TRIMMED"
   guard_norm "$p"; a="$NORM"
   guard_norm "$HOME/.whynot-cut"
   if [ "$a" = "$NORM" ]; then
     [ -L "$p" ] || return 0
-    place_problem "$p" 1
+    if [ ! -d "$p" ]; then
+      WHY="a link to a folder that does not exist - reconnect the drive or remove the link"; return 0
+    fi
+    is_engine_home "$p" && genuine=1
+    place_problem "$p" 1 ""  # (every client rule, at uninstall too: the target may be anyone's folder)
+    if [ -z "$WHY" ]; then real_path "$p"; linked_target_problem "$REAL" "$genuine" "$mode"; fi
     if [ -n "$WHY" ]; then
       real_path "$p"
-      WHY="a link to ${REAL:-a target that cannot be read}, which is ${WHY#a link to } - remove the link (or point it"
-      WHY="$WHY at a folder of its own)"
+      WHY="a link to ${REAL:-a target that cannot be read}, which is ${WHY#a link to } - remove the link, or point"
+      WHY="$WHY ~/.whynot-cut at an empty folder or at your old WhyNot Cut folder, or run again with -EngineHome"
+      WHY="$WHY <folder> / --engine-home <folder>"
     fi
     return 0
   fi
-  place_problem "$p" ""
+  if [ "$mode" = uninstall ] && [ -d "$p" ] && is_engine_home "$p"; then skip="skip-clients"; fi
+  place_problem "$p" "" "$skip"
+}
+
+trim_dir() { # path -> TRIMMED: without a trailing "/" or "/." (fix round 4: ~/.whynot-cut/ is ~/.whynot-cut)
+  local t="$1"
+  while :; do
+    case "$t" in
+      ?*/.) t="${t%/.}" ;;
+      ?*/) t="${t%/}" ;;
+      *) break ;;
+    esac
+  done
+  TRIMMED="$t"
+}
+
+linked_target_problem() { # real-target genuine mode -> WHY: the core's base._linked_target_problem - the target of a
+  # linked ~/.whynot-cut must not hold the home folder, lie inside a client folder or the saved clients folder, nor
+  # (install / uninstall) hold anything while not being a genuine engine home (no WhyNotCut subfolder can be made there)
+  local r d up c
+  WHY=""
+  [ -n "$1" ] || return 0
+  guard_norm "$1"; r="$NORM"
+  place_keys "$HOME"
+  if { [ "$KEY1" != "$r" ] && within "$KEY1" "$r"; } || { [ "$KEY2" != "$r" ] && within "$KEY2" "$r"; }; then
+    WHY="a folder that holds your user folder"; return 0
+  fi
+  d="${1%/*}"
+  while [ -n "$d" ]; do
+    if [ -e "$d/.whynot-client" ]; then WHY="inside a client folder ($d holds .whynot-client)"; return 0; fi
+    up="${d%/*}"
+    [ "$up" = "$d" ] && break
+    d="$up"
+  done
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    place_keys "$c"
+    if { [ "$r" != "$KEY1" ] && within "$r" "$KEY1"; } || { [ "$r" != "$KEY2" ] && within "$r" "$KEY2"; }; then
+      WHY="inside your clients folder $c"; return 0
+    fi
+  done <<EOF
+$CLIENT_ROOTS
+EOF
+  if [ "$3" != deferred ] && [ -z "$2" ] && has_occupied "$1" 1; then
+    WHY="a folder that already holds other files and is not a WhyNot Cut engine folder"
+  fi
+  return 0
 }
 
 place_problem() { # path link-ok -> WHY: a RESOLVED engine home must not be a link itself (unless link-ok: the
@@ -958,6 +1021,7 @@ place_problem() { # path link-ok -> WHY: a RESOLVED engine home must not be a li
   if is_mount "$p"; then WHY="a drive root or a mount point"; return 0; fi
   place_keys "$p"; a="$KEY1" b="$KEY2" rp="$REAL"
   case "$b" in /|[A-Za-z]:|[A-Za-z]:/) WHY="a drive root or a mount point"; return 0 ;; esac
+  if [ -n "$rp" ] && is_mount "$rp"; then WHY="a drive root or a mount point"; return 0; fi  # (the real target too)
   place_keys "$HOME"
   if [ "$a" = "$KEY1" ] || [ "$a" = "$KEY2" ] || [ "$b" = "$KEY1" ] || [ "$b" = "$KEY2" ]; then
     WHY="your user folder itself"; return 0
@@ -968,6 +1032,7 @@ place_problem() { # path link-ok -> WHY: a RESOLVED engine home must not be a li
       WHY="your $d folder itself"; return 0
     fi
   done
+  [ "${3:-}" = skip-clients ] && return 0  # (an uninstall of a genuine engine home: client folders inside stay)
   while IFS= read -r c; do
     [ -n "$c" ] || continue
     place_keys "$c"
@@ -1121,7 +1186,9 @@ case "$OS_NAME" in  # Git Bash: `pwd` may say /tmp/... for %TEMP%; the location 
   MINGW*|MSYS*|CYGWIN*) if command -v cygpath >/dev/null 2>&1; then ROOT="$(cygpath -m "$ROOT")"; fi ;;
 esac
 TEST_UV="" ANSWERS="" TEST_FREE="" TEST_KEYS="" TEST_KEYS_SET="" TEST_COUNTDOWN=10 ANSWER_AT=0 RUN_MODE="yes"
+TEST_MOUNTS=""
 if [ -n "$HOME_OVR" ]; then
+  TEST_MOUNTS="${WNC_TEST_MOUNTS:-}"
   TEST_UV="${WNC_TEST_UV:-}" ANSWERS="${WNC_TEST_ANSWERS:-}" TEST_FREE="${WNC_TEST_FREE_GB:-}"
   if [ -n "${WNC_TEST_KEYS+x}" ]; then TEST_KEYS_SET=1 TEST_KEYS="$WNC_TEST_KEYS"; fi
   TEST_COUNTDOWN="${WNC_TEST_COUNTDOWN_S:-10}"
@@ -1141,6 +1208,7 @@ else
   POINTER="$HOME/.whynot-cut/plugin-options.json"
   if [ -n "${WHYNOT_OPTIONS_FILE:-}" ]; then POINTER="$(home_path "$WHYNOT_OPTIONS_FILE")"; fi
 fi
+trim_dir "$ENGINE"; ENGINE="$TRIMMED"  # (fix round 4) a saved ~/.whynot-cut/ or ~/.whynot-cut/. is that folder
 DEFAULT_ENGINE="$ENGINE"
 COMP="$ROOT/setup/components.json"
 [ -n "$COMPONENTS" ] && COMP="$(abs_path "$COMPONENTS")"
@@ -1157,16 +1225,22 @@ if [ -L "$DEFAULT_ENGINE" ]; then
   guard_norm "$HOME/.whynot-cut"
   [ "$n_def" = "$NORM" ] && LINKED_DEFAULT=1
 fi
-if { [ -z "$UNINSTALL" ] && [ -n "$IS_RESOLVED" ]; } ||
-   { [ -n "$UNINSTALL" ] && [ -z "$ENGINE_OPT" ] && [ -n "$LINKED_DEFAULT" ]; }; then
+if [ -n "$IS_RESOLVED" ]; then
+  # (fix round 4) an uninstall too, for any resolved home - also with --engine-home naming it - so that nothing (log,
+  # uv, Python) is written into a folder the core will refuse
+  GUARD_MODE=install
+  [ -n "$UNINSTALL" ] && GUARD_MODE=uninstall
   # task 9: a home saved somewhere in a place it must never be: stop and say the fix, before the countdown and any
   # download (fix round 1), also when --engine-home names that same folder (fix round 2)
   client_roots
-  resolved_home_problem "$DEFAULT_ENGINE"
+  resolved_home_problem "$DEFAULT_ENGINE" "$GUARD_MODE"
   if [ -n "$WHY" ]; then
     printf 'ERROR: WhyNot Cut will not use %s as its engine home (from %s): it is %s. Nothing was downloaded or deleted. To fix it, run the installer again with -EngineHome <folder> / --engine-home <folder> (a folder of its own, for example ~/WhyNotCut).\n' \
       "$DEFAULT_ENGINE" "$ENGINE_SRC" "$WHY"
     printf '%s\n' "لن يستخدم WhyNot Cut هذا المجلد لملفات التشغيل. لإصلاح ذلك شغّل المثبّت مرة أخرى مع -EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به."
+    if [ -n "$LINKED_DEFAULT" ]; then
+      printf '%s\n' "الرابط ~/.whynot-cut يشير إلى مجلد لا يصلح أو غير موجود: أعد توصيل القرص، أو احذف الرابط، أو وجّهه إلى مجلد فارغ أو إلى مجلد WhyNot Cut القديم، أو شغّل المثبّت مرة أخرى مع -EngineHome <folder>."
+    fi
     exit 2
   fi
 fi

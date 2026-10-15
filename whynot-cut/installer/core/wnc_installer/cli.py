@@ -123,6 +123,20 @@ def _client_roots(paths: base.Paths) -> list:
     return base.saved_client_roots(paths)
 
 
+def _what_ran(paths: base.Paths) -> str:
+    """What a refusal can truthfully say about the folder (fix rounds 2 and 4): no step ran; uv / Python / downloads
+    are named as the bootstrap's only when its own claim (state.json) shows it wrote there - never for a linked
+    ~/.whynot-cut, whose folders are the editor's own."""
+    w = paths.whynot
+    if base.default_link(w, paths.home) or not base.bootstrap_claim(w):
+        return "No install step ran."
+    left = [n for n in ("bin", "python", "downloads", "logs") if (w / n).exists()]
+    if not left:
+        return "No install step ran."
+    return (f"No install step ran, but {', '.join(n + '/' for n in left)} in that folder came from the bootstrap: "
+            "delete them if you do not use that folder.")
+
+
 def _engine_home_check(paths: base.Paths, plugin_root: Path, chosen) -> tuple:
     """(problem, final folder, note). A chosen engine home is placed and checked like the bootstraps do it
     (base.choose_engine_home: the clients folder from the preferences and the pointer counts; a folder holding the
@@ -157,37 +171,34 @@ def main(argv=None) -> int:
     paths = base.Paths.from_env(args.home, engine_home=chosen)
     if args.engine_home and not chosen and base._norm(args.engine_home) != base._norm(paths.whynot):
         print(f"ERROR: the bootstrap placed uv and Python in {args.engine_home}, but the engine home is "
-              f"{paths.whynot} ({base.describe_engine_home_source(paths.engine_home_source)}). Nothing was changed. "
+              f"{paths.whynot} ({base.describe_engine_home_source(paths.engine_home_source)}). No install step ran. "
               f"To fix it yourself, run the installer again with -EngineHome \"{paths.whynot}\" (macOS: --engine-home "
               f"\"{paths.whynot}\"), or name the other folder the same way; if it happens again, tell WhyNot Cut "
               "support (the two resolvers disagree).", file=sys.stderr)
         return 2
     problem, final, note = _engine_home_check(paths, plugin_root, chosen)
     if problem:
-        print(f"ERROR: WhyNot Cut cannot use {paths.whynot} as its engine home: {problem}. Nothing was changed; run "
+        print(f"ERROR: WhyNot Cut cannot use {paths.whynot} as its engine home: {problem}. {_what_ran(paths)} Run "
               "the installer again with -EngineHome <folder> (macOS: --engine-home <folder>).", file=sys.stderr)
         return 2
     if chosen and not base.same_path(final, paths.whynot):  # the editor's own files are there: its own subfolder
         paths = base.Paths.from_env(args.home, engine_home=str(final))
         print(note, file=sys.stderr)  # (plan prints JSON on stdout)
-    linked = base.linked_default_home(paths.whynot, paths.home)
-    if not chosen and (args.command in ("install", "plan") or linked):
-        # task 9: a RESOLVED engine home in a place it must never be (an uninstall is stopped only for a linked
-        # ~/.whynot-cut pointing there, fix round 3: otherwise it deletes only WhyNot Cut's own entries anyway)
+    linked = base.default_link(paths.whynot, paths.home)
+    if not chosen and args.command in ("install", "plan", "uninstall"):
+        # task 9: a RESOLVED engine home in a place it must never be. Uninstall (fix round 4): the same guard, with a
+        # genuine engine home not refused for client folders inside it (uninstall deletes only its own entries)
         why = base.resolved_home_problem(paths.whynot, home=paths.home, clients_roots=_client_roots(paths),
-                                         known=base.shell_folders(paths.home, paths.sandbox))
+                                         known=base.shell_folders(paths.home, paths.sandbox),
+                                         mode="uninstall" if args.command == "uninstall" else "install")
         if why:
-            # (the bootstraps refuse it before any download; only a bootstrap run around them can have put uv and
-            # Python there already: say so instead of "nothing was changed", fix round 2)
-            left = [n for n in ("bin", "python", "downloads") if (paths.whynot / n).exists()]
-            done = ("No install step ran." if not left else
-                    f"No install step ran, but {', '.join(n + '/' for n in left)} already in that folder came from the "
-                    "bootstrap: delete them if you do not use that folder.")
             print(f"ERROR: WhyNot Cut will not use {paths.whynot} as its engine home "
-                  f"({base.describe_engine_home_source(paths.engine_home_source)}): it is {why}. {done} "
+                  f"({base.describe_engine_home_source(paths.engine_home_source)}): it is {why}. {_what_ran(paths)} "
                   f"To fix it, {base.SELF_FIX} (a folder of its own, for example C:\\WhyNotCut or ~/WhyNotCut).",
                   file=sys.stderr)
             print(base.SELF_FIX_AR, file=sys.stderr)
+            if linked:
+                print(base.LINK_FIX_AR, file=sys.stderr)
             return 2
 
     if args.command == "plan":

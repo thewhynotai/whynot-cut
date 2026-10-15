@@ -205,6 +205,17 @@ def saved_client_roots(paths) -> list:
     return [saved_path(r, paths.home) for r in roots if isinstance(r, str) and r.strip()]
 
 
+def default_link(whynot, home) -> bool:
+    """<home>/.whynot-cut is a link (a junction or symlink), whether or not its target exists."""
+    return same_path(whynot, Path(home) / ".whynot-cut") and is_link(whynot)
+
+
+def bootstrap_claim(whynot) -> bool:
+    """The folder's state.json is exactly the claim the bootstraps write before their downloads (schema 1, plugin
+    null, no steps): only then did uv / Python / downloads in it come from the bootstrap."""
+    return _json_file(Path(whynot) / "state.json") == {"schema": 1, "plugin": None, "updated_at": None, "steps": {}}
+
+
 def linked_default_home(whynot, home) -> bool:
     """Addendum F (owner 2026-10-13): the DEFAULT engine home <home>/.whynot-cut may be a directory link (a junction or
     symlink, e.g. to D:\\ClaudeData\\whynot-cut-home). It is used through the link at install and uninstall; the
@@ -414,6 +425,11 @@ def engine_home_choice_problem(path, **kw) -> Optional[str]:
 
 # the way out of a refused RESOLVED engine home, in the editor's words (both front ends' flags; task 9)
 SELF_FIX = "run the installer again with -EngineHome <folder> / --engine-home <folder>"
+# a link ~/.whynot-cut that cannot be used (fix round 4): the extra way out, in Arabic
+LINK_FIX_AR = ("الرابط ~/.whynot-cut يشير إلى مجلد لا يصلح أو غير موجود: أعد توصيل القرص، أو احذف الرابط، أو وجّهه "
+               "إلى مجلد فارغ أو إلى مجلد WhyNot Cut القديم، أو شغّل المثبّت مرة أخرى مع -EngineHome <folder>.")
+LINK_FIX = ("remove the link, or point ~/.whynot-cut at an empty folder or at your old WhyNot Cut folder, or run again "
+            "with -EngineHome <folder> / --engine-home <folder>")
 SELF_FIX_AR = ("لن يستخدم WhyNot Cut هذا المجلد لملفات التشغيل. لإصلاح ذلك شغّل المثبّت مرة أخرى مع "
                "-EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به.")
 
@@ -466,7 +482,8 @@ def _place_keys(p) -> set:
     return keys
 
 
-def resolved_home_problem(path, *, home, clients_roots: Iterable = (), known: Iterable = ()) -> Optional[str]:
+def resolved_home_problem(path, *, home, clients_roots: Iterable = (), known: Iterable = (),
+                          mode: str = "install") -> Optional[str]:
     """Why a RESOLVED engine home (named by a variable, the pointer or settings.json pluginConfigs; never chosen in
     this run) may not be used, else None (task 9, carried from the Task 8 review: controller rulings). ~/.whynot-cut
     itself is never refused here. Refused: a link or reparse point itself (a junction, symlink or folder mount point);
@@ -478,7 +495,14 @@ def resolved_home_problem(path, *, home, clients_roots: Iterable = (), known: It
     else is used as it is. ~/.whynot-cut that is a LINK (Addendum F) is checked by where it points (fix round 3): the
     same rules on its real target, so a link to Documents, the user folder, a drive root or a client folder is refused
     at install and uninstall alike. The bootstraps apply the same rule (Get-WncResolvedHomeProblem /
-    resolved_home_problem) before anything is downloaded, and again before their deferred delete."""
+    resolved_home_problem) before anything is downloaded, and again before their deferred delete.
+
+    Fix round 4 (controller rulings): a linked ~/.whynot-cut is also placed like a CHOSEN folder - its target must not
+    hold the user folder, lie inside a client folder (below a `.whynot-client` marker or under the saved clients
+    folder), nor hold anything while not being a genuine engine home (`occupied_entries` / `is_engine_home`); a dangling
+    link is refused. `mode`: "install" (every rule), "uninstall" (a genuine engine home is not refused for client data
+    inside it: uninstall deletes only WhyNot Cut's own entries by exact name), "deferred" (the bootstraps' re-check
+    before deleting python/ and bin/: no "occupied" rule, what is left there after the uninstall is ours)."""
     p, h = strip_long_prefix(str(path)), Path(home)
     if re.match(r"^[\\/]{2}", p):  # \\.\..., \\?\UNC\..., \\server\share, \\localhost\C$ (fix round 2)
         return "a network share or device path; name a folder on a local drive"
@@ -487,14 +511,46 @@ def resolved_home_problem(path, *, home, clients_roots: Iterable = (), known: It
         return None
     if not default and is_link(p):
         return "a link or mount point (a junction, symlink or mounted folder); name the real folder instead"
-    why = _place_problem(p, h, clients_roots, known)
+    clients_roots = [c for c in clients_roots if c]
+    if default and not os.path.isdir(p):
+        return (f"a link to a folder that does not exist ({os.path.realpath(p)}) - reconnect the drive or remove the "
+                "link")
+    genuine = os.path.isdir(p) and is_engine_home(p)
+    # (a linked ~/.whynot-cut keeps every client rule at uninstall too: its target may be anyone's folder)
+    why = _place_problem(p, h, clients_roots, known,
+                         client_checks=not (mode == "uninstall" and genuine and not default))
+    if not why and default:
+        why = _linked_target_problem(os.path.realpath(p), h, clients_roots, genuine, mode)
     if why and default:
-        return (f"a link to {os.path.realpath(p)}, which is {why.removeprefix('a link to ')} - remove the link "
-                "(or point it at a folder of its own)")
+        return f"a link to {os.path.realpath(p)}, which is {why.removeprefix('a link to ')} - {LINK_FIX}"
     return why
 
 
-def _place_problem(p: str, h: Path, clients_roots: Iterable, known: Iterable) -> Optional[str]:
+def _linked_target_problem(real: str, h: Path, clients_roots: list, genuine: bool, mode: str) -> Optional[str]:
+    """The chosen-folder placement rules for the target of a linked ~/.whynot-cut (fix round 4): it may not hold the
+    user folder, lie inside a client folder or the saved clients folder, nor (install / uninstall) hold anything while
+    not being a genuine engine home - a WhyNotCut subfolder cannot be made there, the link name is ours."""
+    r = _fold(_norm(real))
+    if any(_within(k, r) for k in _place_keys(h)):
+        return "a folder that holds your user folder"
+    cur = Path(real)
+    while cur.parent != cur:
+        cur = cur.parent
+        if (cur / CLIENT_MARKER).exists():
+            return f"inside a client folder ({cur} holds {CLIENT_MARKER})"
+    for c in clients_roots:
+        if any(_within(r, ck) for ck in _place_keys(c)):
+            return f"inside your clients folder {c}"
+    if mode != "deferred" and not genuine:
+        occupied = occupied_entries(real, pointer_ok=True)
+        if occupied:
+            return (f"a folder that already holds other files ({', '.join(occupied[:3])}"
+                    + (", ..." if len(occupied) > 3 else "") + ") and is not a WhyNot Cut engine folder")
+    return None
+
+
+def _place_problem(p: str, h: Path, clients_roots: Iterable, known: Iterable,
+                   client_checks: bool = True) -> Optional[str]:
     """resolved_home_problem's checks of where `p` really is (as written and with links resolved)."""
     keys = _place_keys(p)
     if _is_drive_root(p) or any(_is_drive_root(k) for k in keys):
@@ -504,6 +560,8 @@ def _place_problem(p: str, h: Path, clients_roots: Iterable, known: Iterable) ->
     for name, folder in list(shell_folders(h, True)) + list(known):
         if keys & _place_keys(folder):
             return f"your {name} folder itself"
+    if not client_checks:  # (uninstall of a genuine engine home: client folders inside it are never deleted)
+        return None
     for c in clients_roots:
         if c and any(_within(ck, k, strict=False) for ck in _place_keys(c) for k in keys):
             return f"your clients folder {c}, or it holds it"

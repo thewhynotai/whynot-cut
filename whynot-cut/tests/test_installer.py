@@ -3687,7 +3687,7 @@ class TestShellScripts(unittest.TestCase):
                      "--skip", "--uninstall", "--remove-engine", "--remove-models", "--source", "--source-sha256",
                      "WNC_TEST_UV", "WNC_TEST_PLATFORM", "logs", "-Model", "--model", "-EngineHome",
                      "WNC_TEST_ANSWERS", "WNC_TEST_FREE_GB", "-Customise", "--customise", "WNC_TEST_KEYS",
-                     "WNC_TEST_COUNTDOWN_S", "WNC_TEST_ANSWERS_AT"):
+                     "WNC_TEST_COUNTDOWN_S", "WNC_TEST_ANSWERS_AT", "WNC_TEST_MOUNTS"):
             self.assertIn(flag, text)
         # task 9 (D-T1): no questions by default, the countdown, and the resolved-home guard with its self-fix
         for needle in ("Installing everything WhyNot Cut needs (about N GB)", "Press C to customise", "answers.mode",
@@ -5617,7 +5617,100 @@ class TestResolvedHomeGuard(unittest.TestCase):
         rc, out = self.run_core("install", "--home", str(self.home), "--yes", "--quiet")
         self.assertEqual(rc, 2, out)
         self.assertIn("Documents", out)
+        self.assertNotIn("came from the bootstrap", out)  # (fix round 4, I3) the editor's own bin/ python/ downloads/
         self.assertEqual(snapshot_tree(docs), before, out)
+
+    def test_a_linked_default_target_is_placed_like_a_chosen_folder(self):
+        # fix round 4, ruling (a): the target may not hold the user folder, lie inside a client folder or the saved
+        # clients folder, nor hold anything while not being a genuine engine home; empty or genuine = fine; dangling
+        h = self.home
+        link = h / ".whynot-cut"
+        un = uninstall_module()
+        projects = h / "Documents" / "Projects"
+        for rel in ("logs/my.log", "cache/c.bin", "fonts/MyFont.ttf"):
+            touch(projects.joinpath(*rel.split("/")), b"mine")
+        inside_client = h / "Shoots" / "Dr X" / "engine"
+        inside_client.mkdir(parents=True)
+        touch(h / "Shoots" / "Dr X" / ".whynot-client", b"{}")
+        under_clients = h / "Media" / "Clients" / "engine"
+        under_clients.mkdir(parents=True)
+        # (the clients folder in the preferences: a pointer would make ~/.whynot-cut a real folder, no link then)
+        clients_line = f'clients_root: "{h / "Media" / "Clients"}"'
+        touch(h / ".claude" / "whynot-cut.local.md", ("---\n" + clients_line + "\n---\n").encode("utf-8"))
+        clients = base.saved_client_roots(base.Paths.from_env(str(h), env={}))
+        genuine = h.parent / "data drive" / "whynot-cut-home"  # the owner's shape: a genuine home behind a junction
+        touch(genuine / "state.json", GENUINE_STATE)
+        touch(genuine / "models" / "large-v3" / "model.bin", b"weights")
+        touch(genuine / "my notes.txt", b"mine")
+        empty = h.parent / "data drive" / "empty"
+        empty.mkdir()
+        cases = [(projects, "already holds other files"), (inside_client, "inside a client folder"),
+                 (under_clients, "inside your clients folder"),
+                 (h.parent, "holds your user folder|your clients folder"),  # (it holds both: either reason)
+                 (genuine, None), (empty, None)]
+        for target, needle in cases:
+            with self.subTest(str(target)):
+                if not make_dir_link(link, target):
+                    self.skipTest("cannot make a directory link here")
+                self.addCleanup(drop_dir_link, link)
+                try:
+                    for mode in ("install", "uninstall"):
+                        why = base.resolved_home_problem(link, home=h, clients_roots=clients, mode=mode)
+                        if needle is None:
+                            self.assertIsNone(why, mode)
+                        else:
+                            self.assertRegex(why or "", needle, mode)
+                            self.assertIn("point ~/.whynot-cut at an empty folder", why)
+                    problem = un.engine_home_problem(base.Paths.from_env(str(h), env={}))
+                    if needle is None:
+                        self.assertTrue(problem is None or "does not look like" in problem, problem)
+                    else:
+                        self.assertRegex(problem or "", needle)
+                finally:
+                    drop_dir_link(link)
+        # the deferred re-check has no "occupied" rule: python/ and bin/ left after the uninstall are WhyNot Cut's
+        self.assertTrue(make_dir_link(link, projects))
+        self.addCleanup(drop_dir_link, link)
+        self.assertIsNone(base.resolved_home_problem(link, home=h, clients_roots=clients, mode="deferred"))
+        drop_dir_link(link)
+        # a dangling link: refused cleanly (install and uninstall through the core: exit 2, no traceback)
+        gone = h.parent / "unplugged drive" / "whynot-cut-home"
+        gone.mkdir(parents=True)
+        self.assertTrue(make_dir_link(link, gone))
+        gone.rmdir()
+        why = base.resolved_home_problem(link, home=h, clients_roots=clients)
+        self.assertIn("a link to a folder that does not exist", why or "")
+        self.assertIn("reconnect the drive or remove the link", why)
+        for cmd in (("install",), ("uninstall", "--remove-engine")):
+            rc, out = self.run_core(*cmd, "--home", str(h), "--yes", "--quiet")
+            self.assertEqual(rc, 2, out)
+            self.assertIn("a link to a folder that does not exist", out)
+            self.assertIn(base.LINK_FIX_AR, out)
+            self.assertNotIn("Traceback", out)
+
+    def test_a_mount_point_target_is_refused(self):
+        # fix round 4 (I2): the REAL target of a linked ~/.whynot-cut that is a mount point (a USB drive)
+        h = self.home
+        usb = h.parent / "USB"
+        usb.mkdir()
+        if not make_dir_link(h / ".whynot-cut", usb):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, h / ".whynot-cut")
+        real = os.path.realpath(usb)
+        with mock.patch("os.path.ismount", side_effect=lambda q: os.path.normcase(str(q)) == os.path.normcase(real)):
+            self.assertIn("mount point", self.problem(h / ".whynot-cut") or "")
+
+    def test_uninstall_keeps_client_folders_inside_a_genuine_home_allowed(self):
+        # fix round 4: uninstall guards every resolved home, but a genuine engine home is not refused for client
+        # folders inside it (uninstall deletes only its own entries); install still refuses it
+        engine = self.home / "WhyNot Engine"
+        touch(engine / "state.json", GENUINE_STATE)
+        touch(engine / "WhyNot Clients" / "Dr X" / ".whynot-client", b"{}")
+        self.assertIn("client folder", self.problem(engine) or "")
+        self.assertIsNone(base.resolved_home_problem(engine, home=self.home, mode="uninstall"))
+        plain = self.home / "Plain"  # not an engine home: the client rules stay at uninstall too
+        touch(plain / "Dr Y" / ".whynot-client", b"{}")
+        self.assertIn("client folder", base.resolved_home_problem(plain, home=self.home, mode="uninstall") or "")
 
     def test_the_core_says_what_the_bootstrap_left(self):
         # fix round 2: the exit-2 message is true - "No install step ran", and names bin/ / python/ when they are there
@@ -5630,7 +5723,11 @@ class TestResolvedHomeGuard(unittest.TestCase):
         touch(docs / "bin" / "uv.exe", b"MZ")
         rc, out = self.run_core("install", "--home", str(self.home), "--yes", "--quiet")
         self.assertEqual(rc, 2, out)
-        self.assertIn("bin/ already in that folder came from the bootstrap", out)
+        self.assertNotIn("came from the bootstrap", out)  # (fix round 4, I3) no claim of ours: the editor's bin/
+        touch(docs / "state.json", b'{"schema": 1, "plugin": null, "updated_at": null, "steps": {}}\n')
+        rc, out = self.run_core("install", "--home", str(self.home), "--yes", "--quiet")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("bin/ in that folder came from the bootstrap", out)  # the bootstrap's own claim is there
 
     def test_windows_shell_folders_count(self):
         # fix round 1: Known Folder Move (OneDrive) puts Documents elsewhere; the core and the bootstrap both read it
@@ -5925,6 +6022,91 @@ class _CountdownCases:
         self.assertIn("left alone", out)
         self.assertEqual(snapshot_tree(docs), before, out)
 
+    def test_round4_uninstall_and_install_never_write_into_a_refused_home(self):
+        # fix round 4: I1 (-EngineHome / --engine-home naming the link, with and without a trailing separator), M1
+        # (a saved ~/.whynot-cut/ or ~/.whynot-cut/.), ruling (b) (a saved non-default Documents), ruling (a) (an
+        # occupied target), M2 (a dangling link), I2 (a mount point target, WNC_TEST_MOUNTS): exit 2, nothing written
+        h = self.home
+        link = h / ".whynot-cut"
+        docs = h / "Documents"
+        before_docs = make_repro_documents(docs)
+        projects = self.tmp / "Projects"
+        for rel in ("logs/my.log", "cache/c.bin", "fonts/MyFont.ttf"):
+            touch(projects.joinpath(*rel.split("/")), b"mine")
+        before_projects = snapshot_tree(projects)
+        usb = self.tmp / "USB"
+        usb.mkdir()
+        gone = self.tmp / "unplugged"
+        native_link = self.native(link)
+        runs = [  # (link target or None, pointer engine_home, flags, extra, env, needle)
+            (docs, "", ("uninstall", "remove-engine", "yes"), (self.ENGINE_FLAG, native_link), None, "Documents"),
+            (docs, "", ("uninstall", "remove-engine", "yes"), (self.ENGINE_FLAG, native_link + self.SEP), None,
+             "Documents"),
+            (docs, native_link + self.SEP, ("uninstall", "remove-engine", "yes"), (), None, "Documents"),
+            (docs, native_link + self.SEP + "." , ("uninstall", "remove-engine", "yes"), (), None, "Documents"),
+            (docs, "~" + self.SEP + ".whynot-cut" + self.SEP, ("uninstall", "remove-engine", "yes"), (), None,
+             "Documents"),
+            (None, self.native(docs), ("uninstall", "remove-engine", "yes"), (), None, "Documents"),
+            (projects, "", ("yes", "skip"), (), None, "already holds other files"),
+            (projects, "", ("uninstall", "remove-engine", "yes"), (), None, "already holds other files"),
+            (usb, "", ("yes", "skip"), (), {"WNC_TEST_MOUNTS": self.native(usb)}, "mount point"),
+            (gone, "", ("yes", "skip"), (), None, "a link to a folder that does not exist"),
+            (gone, "", ("uninstall", "remove-engine", "yes"), (), None, "a link to a folder that does not exist"),
+        ]
+        for target, saved, flags, extra, env, needle in runs:
+            with self.subTest(target=str(target), saved=saved, flags=flags, extra=extra):
+                if target is not None:
+                    if target == gone:
+                        gone.mkdir(exist_ok=True)
+                    if not make_dir_link(link, target):
+                        self.skipTest("cannot make a directory link here")
+                    self.addCleanup(drop_dir_link, link)
+                    if target == gone:
+                        gone.rmdir()
+                if saved:  # (in settings.json: the pointer would live inside the target, through the link)
+                    EngineHomeCases.settings(h, {PID: {"options": {"engine_home": saved}}})
+                try:
+                    r = self.inst(h, *flags, env=self.env(**(env or {})), extra=extra)
+                    out = r.stdout + r.stderr
+                    self.assertEqual(r.returncode, 2, out)
+                    self.assertIn(needle, out)
+                    self.assertIn(SELF_FIX, out)
+                    self.assertNotIn("Traceback", out)
+                finally:
+                    drop_dir_link(link)
+                    if (h / ".claude" / "settings.json").is_file():
+                        (h / ".claude" / "settings.json").unlink()
+        self.assertEqual(self.srv.srv.hits, [])
+        self.assertEqual(snapshot_tree(docs), before_docs)
+        self.assertEqual(snapshot_tree(projects), before_projects)
+        self.assertEqual(os.listdir(usb), [])
+
+    def test_a_genuine_home_behind_a_link_installs_and_uninstalls(self):
+        # ruling (a): the owner's PC shape - ~/.whynot-cut is a junction to a GENUINE engine home on another drive
+        target = self.tmp / "data drive" / "whynot-cut-home"
+        touch(target / "state.json", GENUINE_STATE)
+        model = touch(target / "models" / "large-v3" / "model.bin", b"weights")
+        self.home.mkdir()
+        link = self.home / ".whynot-cut"
+        if not make_dir_link(link, target):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, link)
+        r = self.inst(self.home, "yes", "skip")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((target / "current").is_file())
+        mine = touch(target / "my notes.txt", b"mine")
+        r = self.inst(self.home, "uninstall", "remove-engine", "yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        for _ in range(50):
+            if not (target / "bin").exists():
+                break
+            time.sleep(0.1)
+        self.assertEqual(sorted(os.listdir(target)), ["models", "my notes.txt"], out)
+        self.assertEqual(model.read_bytes(), b"weights")
+        self.assertEqual(mine.read_bytes(), b"mine")
+        self.assertTrue(base.is_link(link))
+
     def test_a_bad_countdown_hook_value_is_ignored(self):
         r = self.inst(self.home, "dry", env=self.env(WNC_TEST_KEYS="x", WNC_TEST_COUNTDOWN_S="soon"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -5957,7 +6139,8 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
         names = ["Test-WncReparse", "Invoke-WncDeleteTree", "Invoke-WncDeferredDelete", "Get-WncResolvedHomeProblem",
                  "Get-WncPlaceProblem", "Get-WncNormPath", "Get-WncRealPath", "Get-WncLinkTarget",
                  "Get-WncKnownFolderList", "Test-WncWithin", "Find-WncMarkerScan", "Get-WncClientRootList",
-                 "Read-WncJsonObject", "Get-WncMember", "ConvertTo-WncHomePath"]
+                 "Read-WncJsonObject", "Get-WncMember", "ConvertTo-WncHomePath", "Get-WncLinkedTargetProblem",
+                 "Test-WncEngineHomeMark", "Read-WncJsonFile", "Get-WncOccupiedEntry"]
         boot = INSTALLER / "core" / "bootstrap.ps1"
         body = ("$S = @{ Utf8 = (New-Object System.Text.UTF8Encoding $false) }\n"
                 + "".join(shell_function(boot, n, True) for n in names)
@@ -6009,7 +6192,8 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
         boot = INSTALLER / "core" / "bootstrap.sh"
         names = ["norm_path", "within", "is_mount", "guard_norm", "real_path", "place_keys", "place_problem",
                  "resolved_home_problem", "client_roots", "home_path", "abs_path", "json_get", "exact_child",
-                 "delete_deferred"]
+                 "delete_deferred", "trim_dir", "linked_target_problem", "is_engine_home", "state_is_ours",
+                 "has_occupied"]
         script = self.tmp / "deferred.sh"
         script.write_text("".join(shell_function(boot, n, False) for n in names)
                           + 'OS_NAME="$(uname -s)"; JSON_PY=""; HOME="$1"; ENGINE="$1/.whynot-cut"\n'
@@ -6057,7 +6241,7 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
         boot = INSTALLER / "core" / "bootstrap.sh"
         funcs = "".join(shell_function(boot, n, ps=False) for n in (
             "norm_path", "within", "is_mount", "guard_norm", "real_path", "place_keys", "place_problem",
-            "resolved_home_problem"))
+            "resolved_home_problem", "trim_dir"))
         (self.home / "Documents").mkdir(parents=True)
         script = self.tmp / "guard.sh"
         script.write_text(funcs + 'OS_NAME="$2"; HOME="$(cygpath -u "$1" 2>/dev/null || printf %s "$1")"\n'

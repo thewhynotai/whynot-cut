@@ -248,7 +248,16 @@ another drive, for example `D:\ClaudeData\whynot-cut-home` (Addendum F): the ins
 `-Uninstall -RemoveEngine` deletes only WhyNot Cut's own entries inside it; the link and the folder it points to
 always stay, with anything else in them. Where such a link points is checked with all the rules above (a link to
 Documents, your user folder, a drive root or a client folder is refused at install and at uninstall, before anything
-is downloaded or deleted): remove the link, or point it at a folder of its own.
+is downloaded or deleted): remove the link, or point it at a folder of its own. Because the link's name is
+WhyNot Cut's, its target is also placed like a folder you choose: it must not hold your user folder, lie inside a
+client folder or your clients folder, or already hold other files unless it is a WhyNot Cut engine folder (an empty
+folder, or your old WhyNot Cut folder, is fine). A link whose folder is missing (an unplugged drive) is refused with
+"reconnect the drive or remove the link".
+
+Uninstall checks the engine home the same way before it writes anything (its log, uv, Python), also when
+`-EngineHome` / `--engine-home` names that same folder; a WhyNot Cut engine folder is not refused for client folders
+inside it, because uninstall deletes only WhyNot Cut's own entries. A saved `~/.whynot-cut/` (with a trailing `/` or
+`/.`) is `~/.whynot-cut`.
 
 Then the install stops with exit code 2 before anything is downloaded, both bootstraps and the core alike, and says
 how to fix it (in English and Arabic): **run the installer again with -EngineHome <folder> / --engine-home <folder>**,
@@ -390,6 +399,7 @@ Test hooks, honoured only together with `--home`:
 | `WNC_TEST_ANSWERS` | A text file with one answer per line, read instead of the keyboard: first the bootstrap's location question, then (from the line after the bootstrap's last one, which the bootstrap passes on as `WNC_TEST_ANSWERS_AT`) the core's Customise questions. |
 | `WNC_TEST_KEYS` | Stands in for the keyboard during the countdown, as if a person were at the console: `C` (Customise), another key (go on at once), or `none` (nobody presses). |
 | `WNC_TEST_COUNTDOWN_S` | With `WNC_TEST_KEYS`: the seconds the countdown waits in all (`0` = none). |
+| `WNC_TEST_MOUNTS` | Folders (separated by `;`) that the bootstraps' engine-home check treats as mount points, like a USB drive. |
 | `WNC_TEST_FREE_GB` | The free space (GB) the bootstrap's location check sees. |
 
 The installer's own tests are in `tests/test_installer.py` (run with `bash tools/test.sh -p test_installer.py`). They

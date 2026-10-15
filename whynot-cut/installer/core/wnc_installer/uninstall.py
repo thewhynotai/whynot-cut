@@ -370,7 +370,7 @@ def engine_home_problem(paths: base.Paths) -> Optional[str]:
         # Addendum F: ~/.whynot-cut linked to a folder is fine - unless it points somewhere it must never be (fix round
         # 3: Documents, the user folder, a drive root, client data, a folder too big to check)
         why = base.resolved_home_problem(paths.whynot, home=paths.home, clients_roots=base.saved_client_roots(paths),
-                                         known=base.shell_folders(paths.home, paths.sandbox))
+                                         known=base.shell_folders(paths.home, paths.sandbox), mode="uninstall")
         if why:
             return f"{paths.whynot} is {why}"
     if not base.is_engine_home(paths.whynot):

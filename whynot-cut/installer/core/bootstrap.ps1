@@ -105,7 +105,8 @@ param(
     # and its uninstall steps (wnc_installer/uninstall.py STEP_NAMES)
     $WncUninstallStepNames = @('plugin', 'adobe', 'fonts', 'marketplace', 'engine')
     $S = @{ Log = $null; Step = 'start'; Code = 0; Utf8 = (New-Object System.Text.UTF8Encoding $false);
-        Answers = $null; AnswerAt = 0; FreeGb = $null; Mode = 'yes'; TestKeys = $null; CountdownS = 10 }
+        Answers = $null; AnswerAt = 0; FreeGb = $null; Mode = 'yes'; TestKeys = $null; CountdownS = 10;
+        TestMounts = $null }
     $WncModels = @('large-v3', 'large-v3-turbo', 'medium', 'small')  # wnc_installer/system.py MODELS
     $WncNeedGb = 6  # free space for the engine; + $WncModelGb with the Whisper model (system.py RED_GB / AMBER_GB)
     $WncModelGb = 3
@@ -135,6 +136,10 @@ param(
         Guard = ('2YTZhiDZitiz2KrYrtiv2YUgV2h5Tm90IEN1dCDZh9iw2Kcg2KfZhNmF2KzZhNivINmE2YXZhNmB2KfYqiDYp9mE2KrYtNi62YrZhC4g' +
             '2YTYpdi12YTYp9itINiw2YTZgyDYtNi62ZHZhCDYp9mE2YXYq9io2ZHYqiDZhdix2Kkg2KPYrtix2Ykg2YXYuSAtRW5naW5lSG9tZSA8Zm9s' +
             'ZGVyPiAo2LnZhNmJIG1hY09TOiAtLWVuZ2luZS1ob21lIDxmb2xkZXI+KSDZiNin2K7YqtixINmF2KzZhNiv2YvYpyDYrtin2LXZi9inINio2Ycu')
+        LinkFix = ('2KfZhNix2KfYqNi3IH4vLndoeW5vdC1jdXQg2YrYtNmK2LEg2KXZhNmJINmF2KzZhNivINmE2Kcg2YrYtdmE2K0g2KPZiCDYutmK2LEg' +
+            '2YXZiNis2YjYrzog2KPYudivINiq2YjYtdmK2YQg2KfZhNmC2LHYtdiMINij2Ygg2KfYrdiw2YEg2KfZhNix2KfYqNi32Iwg2KPZiCDZ' +
+            'iNis2ZHZh9mHINil2YTZiSDZhdis2YTYryDZgdin2LHYuiDYo9mIINil2YTZiSDZhdis2YTYryBXaHlOb3QgQ3V0INin2YTZgtiv2YrZ' +
+            'hdiMINij2Ygg2LTYutmR2YQg2KfZhNmF2KvYqNmR2Kog2YXYsdipINij2K7YsdmJINmF2LkgLUVuZ2luZUhvbWUgPGZvbGRlcj4u')
         LeftBehind = ('2KrZhtio2YrZhzog2KfZhNiq2KvYqNmK2Kog2KfZhNmC2K/ZitmFINiz2YrYqNmC2Ykg2YHZiiDZhdmD2KfZhtmHINmI2YTZhiDZitmP2LPY' +
             'qtiu2K/ZhSDYqNi52K8g2KfZhNii2YbYmyDYp9it2LDZgdmHINio2YbZgdiz2YMg2KXZhiDZhNmFINiq2LnYryDYqtit2KrYp9is2Yc6')
     }
@@ -371,7 +376,8 @@ param(
         if ($linked) {
             # fix round 3: where the link points is checked again (Documents, the user folder, client data ...)
             $clients = Get-WncClientRootList -UserHome $UserHome -Pointer $Pointer
-            $why = Get-WncResolvedHomeProblem -Path $root -UserHome $UserHome -Clients $clients -Sandbox $Sandbox
+            $why = Get-WncResolvedHomeProblem -Path $root -UserHome $UserHome -Clients $clients -Sandbox $Sandbox `
+                -Mode 'deferred'
             if ($why) {
                 Write-Host "WARNING: $root is $why; the paths in $list were left alone"
                 return
@@ -983,26 +989,71 @@ param(
         return ,$out
     }
 
-    function Get-WncResolvedHomeProblem([string]$Path, [string]$UserHome, [string[]]$Clients, [bool]$Sandbox) {
+    function Get-WncResolvedHomeProblem([string]$Path, [string]$UserHome, [string[]]$Clients, [bool]$Sandbox,
+        [string]$Mode = 'install') {
+        # -Mode (fix round 4, the core's `mode`): install = every rule; uninstall = a genuine engine home is not refused
+        # for client folders inside it; deferred = the re-check before python\ and bin\ go (no "occupied" rule)
         # the core's base.resolved_home_problem: ~\.whynot-cut itself is fine - unless it is a link (Addendum F): then
         # where it points is checked like any resolved home (fix round 3); any other resolved home: Get-WncPlaceProblem
         if ($Path -notmatch '^[\\/]{2}') {
             $n = Get-WncNormPath $Path
             if ($n -ieq (Get-WncNormPath (Join-Path $UserHome '.whynot-cut'))) {
                 if (-not (Test-WncReparse $n)) { return $null }
-                $why = Get-WncPlaceProblem -Path $n -UserHome $UserHome -Clients $Clients -Sandbox $Sandbox `
-                    -LinkOk $true
-                if (-not $why) { return $null }
                 $real = Get-WncRealPath $n
-                if (-not $real) { $real = '(a target that cannot be read)' }
-                return ("a link to $real, which is $($why -replace '^a link to ', '') - remove the link (or point it " +
-                    'at a folder of its own)')
+                if ((-not $real) -or (-not [IO.Directory]::Exists($real))) {
+                    return "a link to a folder that does not exist ($real) - reconnect the drive or remove the link"
+                }
+                $genuine = Test-WncEngineHomeMark $n
+                $why = Get-WncPlaceProblem -Path $n -UserHome $UserHome -Clients $Clients -Sandbox $Sandbox `
+                    -LinkOk $true -ClientChecks $true  # (every client rule, at uninstall too)
+                if (-not $why) {
+                    # (fix round 4) the target is placed like a chosen folder
+                    $why = Get-WncLinkedTargetProblem -Real $real -UserHome $UserHome -Clients $Clients `
+                        -Genuine $genuine -Mode $Mode
+                }
+                if (-not $why) { return $null }
+                return ("a link to $real, which is $($why -replace '^a link to ', '') - remove the link, or point ~/.whynot-cut at an empty folder or at your old WhyNot Cut folder, or run again with -EngineHome <folder> / --engine-home <folder>")
             }
         }
-        return (Get-WncPlaceProblem -Path $Path -UserHome $UserHome -Clients $Clients -Sandbox $Sandbox -LinkOk $false)
+        $genuine = ($Path -notmatch '^[\\/]{2}') -and [IO.Directory]::Exists($Path) -and (Test-WncEngineHomeMark $Path)
+        return (Get-WncPlaceProblem -Path $Path -UserHome $UserHome -Clients $Clients -Sandbox $Sandbox -LinkOk $false `
+                -ClientChecks (-not (($Mode -eq 'uninstall') -and $genuine)))
     }
 
-    function Get-WncPlaceProblem([string]$Path, [string]$UserHome, [string[]]$Clients, [bool]$Sandbox, [bool]$LinkOk) {
+    function Get-WncLinkedTargetProblem([string]$Real, [string]$UserHome, [string[]]$Clients, [bool]$Genuine,
+        [string]$Mode) {
+        # the core's base._linked_target_problem: the target of a linked ~\.whynot-cut must not hold the user folder,
+        # lie inside a client folder or the saved clients folder, nor (install / uninstall) hold anything while not
+        # being a genuine engine home - no WhyNotCut subfolder can be made there, the link name is ours
+        foreach ($k in @((Get-WncNormPath $UserHome), (Get-WncRealPath $UserHome)) | Where-Object { $_ }) {
+            if (Test-WncWithin $k $Real -Strict) { return 'a folder that holds your user folder' }
+        }
+        $d = [IO.Path]::GetDirectoryName($Real)
+        while ($d) {
+            if (Test-Path -LiteralPath (Join-Path $d '.whynot-client')) {
+                return "inside a client folder ($d holds .whynot-client)"
+            }
+            $up = [IO.Path]::GetDirectoryName($d)
+            if ((-not $up) -or ($up -eq $d)) { break }
+            $d = $up
+        }
+        foreach ($c in @($Clients | Where-Object { $_ })) {
+            try { $cs = @((Get-WncNormPath $c), (Get-WncRealPath $c)) | Where-Object { $_ } } catch { continue }
+            foreach ($ck in $cs) { if (Test-WncWithin $Real $ck -Strict) { return "inside your clients folder $c" } }
+        }
+        if (($Mode -ne 'deferred') -and (-not $Genuine)) {
+            $occupied = Get-WncOccupiedEntry -Path $Real -PointerOk $true  # (an array already: no @() around it)
+            if ($occupied.Count -gt 0) {
+                $shown = (@($occupied | Select-Object -First 3) -join ', ')
+                if ($occupied.Count -gt 3) { $shown += ', ...' }
+                return "a folder that already holds other files ($shown) and is not a WhyNot Cut engine folder"
+            }
+        }
+        return $null
+    }
+
+    function Get-WncPlaceProblem([string]$Path, [string]$UserHome, [string[]]$Clients, [bool]$Sandbox, [bool]$LinkOk,
+        [bool]$ClientChecks = $true) {
         # task 9: why a RESOLVED engine home may not be used - a link / reparse point itself (junction, symlink, a
         # volume mounted into a folder; not with -LinkOk: the linked ~\.whynot-cut), a drive root,
         # the user folder or Desktop / Documents / Downloads themselves (also where Windows' shell folders put them),
@@ -1024,12 +1075,19 @@ param(
         if (-not $real) { return 'reached through a link or mount point that cannot be followed; name the real folder' }
         $keys = @($n, $real)
         if ($real -match $rootLike) { return 'a drive root or a mount point' }
+        foreach ($m in @($S.TestMounts | Where-Object { $_ })) {
+            # (sandbox-only test hook WNC_TEST_MOUNTS: folders that count as mount points, like a USB drive)
+            if (@($keys | Where-Object { $_ -ieq (Get-WncNormPath $m) }).Count -gt 0) {
+                return 'a drive root or a mount point'
+            }
+        }
         $homes = @((Get-WncNormPath $UserHome), (Get-WncRealPath $UserHome)) | Where-Object { $_ }
         if (@($keys | Where-Object { $homes -contains $_ }).Count -gt 0) { return 'your user folder itself' }
         foreach ($pair in (Get-WncKnownFolderList -UserHome $UserHome -Sandbox $Sandbox)) {
             try { $f = @((Get-WncNormPath $pair[1]), (Get-WncRealPath $pair[1])) | Where-Object { $_ } } catch { continue }
             if (@($keys | Where-Object { $f -contains $_ }).Count -gt 0) { return "your $($pair[0]) folder itself" }
         }
+        if (-not $ClientChecks) { return $null }  # (an uninstall of a genuine engine home: client folders stay)
         foreach ($c in @($Clients | Where-Object { $_ })) {
             try { $cs = @((Get-WncNormPath $c), (Get-WncRealPath $c)) | Where-Object { $_ } } catch { continue }
             foreach ($ck in $cs) {
@@ -1242,6 +1300,7 @@ param(
             if ($env:WNC_TEST_ANSWERS) { $S.Answers = @([IO.File]::ReadAllLines($env:WNC_TEST_ANSWERS, $S.Utf8)) }
             if ($env:WNC_TEST_FREE_GB) { $S.FreeGb = $env:WNC_TEST_FREE_GB }
             if ($null -ne $env:WNC_TEST_KEYS) { $S.TestKeys = $env:WNC_TEST_KEYS }
+            if ($env:WNC_TEST_MOUNTS) { $S.TestMounts = @($env:WNC_TEST_MOUNTS -split ';' | Where-Object { $_ }) }
             $cd = 0
             if ([int]::TryParse([string]$env:WNC_TEST_COUNTDOWN_S, [ref]$cd) -and ($cd -ge 0)) { $S.CountdownS = $cd }
         } else {
@@ -1281,12 +1340,17 @@ param(
         } catch {
             $linkedDefault = $false
         }
-        if (((-not $Uninstall) -and $isResolved) -or ($Uninstall -and (-not $EngineHome) -and $linkedDefault)) {
+        if ($isResolved) {
+            # (fix round 4) an uninstall too, for any resolved home - also with -EngineHome naming it - so that nothing
+            # (log, uv, Python) is written into a folder the core will refuse
             # task 9: a home saved somewhere in a place it must never be: stop and say the fix, before the countdown
             # and any download (fix round 1), also when -EngineHome names that same folder (fix round 2)
             $clients = Get-WncClientRootList -UserHome $h -Pointer $pointer
             try {
-                $why = Get-WncResolvedHomeProblem -Path $default -UserHome $h -Clients $clients -Sandbox $sandbox
+                $guardMode = 'install'
+                if ($Uninstall) { $guardMode = 'uninstall' }
+                $why = Get-WncResolvedHomeProblem -Path $default -UserHome $h -Clients $clients -Sandbox $sandbox `
+                    -Mode $guardMode
             } catch {
                 $why = "a path that cannot be checked ($($_.Exception.Message))"
             }
@@ -1296,6 +1360,7 @@ param(
                     '-EngineHome <folder> / ' +
                     '--engine-home <folder> (a folder of its own, for example C:\WhyNotCut).')
                 Write-Host (Get-WncArabic 'Guard')
+                if ($linkedDefault) { Write-Host (Get-WncArabic 'LinkFix') }
                 return @{ Code = 2 }
             }
         }
