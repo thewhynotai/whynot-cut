@@ -9,6 +9,8 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 
 Answer in the editor's language. The editor only ever does three things: **drop files**, **say what you want** and
 **approve the plan**; say which of them (if any) each video waits for. Never name internal engine steps or "Gate 0/1/2" to them.
+A one-clip answer always uses the three headings **Verified** · **Not verified** · **Needs you** (in Arabic «اتأكدت منه» ·
+«ما اتأكدتش منه» · «محتاج منك», as in the output style), even when the engine could not run: the editor reads every status the same way.
 
 ## No clip named: every client at once
 With no clip id (no arguments, or "what's waiting?" / «إيه اللي مستنيني؟»): run `reel board` in this message and
