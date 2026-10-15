@@ -94,3 +94,15 @@ and a 30-day paid pilot that measures real raw-to-approved times (backlog B-03).
 - An AI native-register pass (professional Egyptian) checks the full Arabic UI after the group fixes.
 - Yunus reads the screens in the private Artifact when he reviews them; his comments win.
 - An outside native writer is used later, for the sales material only.
+
+## Rule: never link to a page that isn't live (executor H24)
+
+thewhynot.ai/support and thewhynot.ai/data are public pages, and Yunus publishes or OKs them. Until a page is live, the
+panel and the installer never link to it:
+- **Support.** The panel shows the link only when the engine provides `support.url` (G-ENG-DATA contract). Without
+  it, "Copy details for support" stays: it copies the details, and the panel opens nothing. Next to it, a plain-text
+  line says «صفحة الدعم قريب» / "Support page coming soon".
+- **Data sheet.** "Cost and data" appears only when the engine provides a `data.url`. This is a new contract key, an
+  executor request. Without it, the D-02 line stands on its own, with the "See plans" link to support.claude.com,
+  which is live.
+- **Mockups.** Both states are shown: live (link) and not yet live (text).
