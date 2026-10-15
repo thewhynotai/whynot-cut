@@ -33,10 +33,10 @@
   var t = M.t, D = M.D, X = D.ta;
   var NB = " ";
 
-  function head() { return TA.back(t("p13.back")) + TA.title("captions", t("home.tool.kalam"), M.ltr("Kalam")); }
+  function head() { return M.back(t("p13.back")) + TA.title("captions", t("home.tool.kalam"), M.ltr("Kalam")); }
   function langCard(dis) {
     return M.card('<div class="t-label">' + t("p18.lang") + '</div>' +
-      '<div class="mt-2">' + TA.seg([t("p18.lang.ar"), t("p18.lang.en"), t("p18.lang.other")], 0, { disabled: dis }) + '</div>' +
+      '<div class="mt-2">' + M.segmented([t("p18.lang.ar"), t("p18.lang.en"), t("p18.lang.other")], 0, { disabled: dis }) + '</div>' +
       '<div class="t-meta tx-muted mt-2">' + t("p18.model.ar") + '</div>', "mt-4");
   }
   function rangeCard(o) {
@@ -46,10 +46,10 @@
     return M.card('<div class="t-label">' + t("p18.range") + '</div>' +
       '<div class="t-meta tx-muted">' + t("p13.sequence", { name: M.html(M.mono(o.seq || X.seq)) }) + '</div>' +
       '<div class="m-col mt-2">' +
-      TA.radio(t("p18.range.inout"), on === 0, { sub: o.inoutErr ? "" : inoutSub, focus: o.focus, disabled: dis }) +
-      TA.radio(t("p18.range.sequence"), on === 1, { disabled: dis }) +
-      TA.radio(t("p18.range.playhead"), on === 2, { disabled: dis }) +
-      TA.radio(t("p18.range.selection"), on === 3, { disabled: dis }) + '</div>' +
+      M.radio(t("p18.range.inout"), on === 0, { sub: o.inoutErr ? "" : inoutSub, focus: o.focus, disabled: dis }) +
+      M.radio(t("p18.range.sequence"), on === 1, { disabled: dis }) +
+      M.radio(t("p18.range.playhead"), on === 2, { disabled: dis }) +
+      M.radio(t("p18.range.selection"), on === 3, { disabled: dis }) + '</div>' +
       '<div class="t-meta tx-muted mt-3">' + t("p18.audio") + '</div>' +
       TA.tracks([["A1", "on"], ["A2", "on"], ["A3", "off"]], { disabled: dis }) +
       '<div class="t-meta tx-muted mt-2">' + t("p18.audio.hint") + '</div>', "mt-4");
@@ -61,18 +61,18 @@
       ? '<div class="m-inset mt-2"><div class="m-row"><span class="ta-th ta-th-mid" style="width:72px;height:40px;padding:4px"><span class="ta-th-cap ta-th-box ta-th-ar">كابشن</span></span>' +
         '<div class="m-col m-grow ms-2"><div class="t-label">' + M.ltr("Sahha Bold Box") + '</div><div class="t-meta tx-muted">' + M.ltr("Sahha Clinic") + '</div></div>' +
         M.btn(t("p18.change"), { kind: "ghost" }) + '</div></div>' +
-        TA.field(t("p18.vtrack"), TA.select(M.ltr("V3"))) + TA.field(t("p18.textfield"), TA.select(M.ltr("Caption Text")))
+        TA.field(t("p18.vtrack"), M.select(M.ltr("V3"))) + TA.field(t("p18.textfield"), M.select(M.ltr("Caption Text")))
       : '';
     return M.card('<div class="t-label">' + t("p18.output") + '</div><div class="m-col mt-2">' +
-      TA.radio(t("p18.output.track"), on === 0, { disabled: dis }) +
-      TA.radio(t("p18.output.mogrt"), on === 1, { disabled: dis, sub: t("p18.output.mogrt.sub") }) + tpl +
-      TA.radio(t("p18.output.srt"), false, { disabled: dis }) + '</div>' +
-      '<div class="ta-bullet mt-2">' + M.status("info", 16) + '<div class="t-meta tx-muted ms-2 m-grow">' + t("p18.srt_always") + '</div></div>', "mt-4");
+      M.radio(t("p18.output.track"), on === 0, { disabled: dis }) +
+      M.radio(t("p18.output.mogrt"), on === 1, { disabled: dis, sub: t("p18.output.mogrt.sub") }) + tpl +
+      M.radio(t("p18.output.srt"), false, { disabled: dis }) + '</div>' +
+      TA.row(M.status("info", 16), t("p18.srt_always"), "mt-2"), "mt-4");
   }
   function settingsCard(o) {
     o = o || {};
     var client = o.client || D.client;
-    var from = '<div class="ta-bullet mt-1">' + M.ico("folder", 12, "ink-muted") + '<div class="t-meta tx-muted ms-1 m-grow">' + t("p18.from_client", { client: client }) + '</div></div>';
+    var from = '<div class="ta-srow mt-1">' + M.ico("folder", 12, "ink-muted") + '<div class="t-meta tx-muted ms-1 m-grow">' + t("p18.from_client", { client: client }) + '</div></div>';
     return M.card('<div class="t-label">' + t("p18.settings") + '</div>' + from +
       TA.field(t("p18.max_chars"), TA.value("32", { w: 72, disabled: o.disabled })) +
       TA.field(t("p18.max_lines"), TA.value("1", { w: 72, disabled: o.disabled })) +
@@ -92,7 +92,7 @@
     var range = o.rangeLabel ? M.html(M.txt(o.rangeLabel)) : M.html(M.txt(M.raw("p18.range.inout")) + " · " + M.mono("00:00:12–00:01:04"));
     return '<div class="t-meta tx-muted">' + t("p18.bar", { range: range }) + '</div><div class="m-col mt-2">' +
       M.btn(t("p18.start"), { kind: "primary", block: true, icon: "captions", disabled: o.off }) + '</div>' +
-      (o.hint ? '' : TA.trust(t("p18.trust") + " " + t("p18.undo_hint"))) +
+      (o.hint ? '' : '<div class="mt-2">' + M.trust(t("p18.trust") + " " + t("p18.undo_hint")) + '</div>') +
       (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + '</div>' : '');
   }
 
@@ -100,7 +100,7 @@
     empty: function () {
       return {
         body: head() + M.empty({ icon: "film", title: t("p18.empty.title"), text: t("p18.empty"),
-          btn: M.btn(t("p13.check_again"), { kind: "primary", icon: "refresh-cw" }), cls: "mt-4" })
+          btn: M.btn(t("action.check_again"), { kind: "primary", icon: "refresh-cw" }), cls: "mt-4" })
       };
     },
     loading: function () {
@@ -112,24 +112,24 @@
     mogrt: function () { return { body: form({ mogrt: true }), bar: bar() }; },
     "error-inout": function () {
       return {
-        body: TA.slot(M.notice("error", t("p18.err.no_inout", { seq: TA.mono(X.seq) }), { sub: t("p18.err.no_inout.hint"), btn: { label: t("p18.use_whole"), icon: "film", primary: true } })) +
+        body: M.slot(M.notice("error", t("p18.err.no_inout", { seq: TA.mono(X.seq) }), { sub: t("p18.err.no_inout.hint"), btn: { label: t("p18.use_whole"), icon: "film", primary: true } })) +
           form({ inoutErr: true }),
         bar: bar({ off: true, hint: t("p18.err.no_inout.hint") })
       };
     },
     "error-selection": function () {
       return {
-        body: TA.slot(M.notice("error", t("p18.err.no_selection"), { sub: t("p18.err.no_selection.hint"), btn: { label: t("p18.use_whole"), icon: "film", primary: true } })) +
+        body: M.slot(M.notice("error", t("p18.err.no_selection"), { sub: t("p18.err.no_selection.hint"), btn: { label: t("p18.use_whole"), icon: "film", primary: true } })) +
           form({ range: 3 }),
         bar: bar({ off: true, rangeLabel: M.raw("p18.range.selection"), hint: t("p18.err.no_selection.hint") })
       };
     },
     offline: function () {
-      return { pills: TA.pillsOff, body: TA.slot(TA.offline()) + form({ disabled: true }), bar: bar({ off: true }) };
+      return { pills: TA.pillsOff, body: M.slot(M.offline()) + form({ disabled: true }), bar: bar({ off: true }) };
     },
     "model-busy": function () {
       return {
-        body: TA.slot(M.card('<div class="m-row-top">' + M.status("busy") + '<div class="m-col ms-2 m-grow"><div class="t-label">' + t("p18.model_busy", { pct: 42 }) + '</div>' +
+        body: M.slot(M.card('<div class="m-row-top">' + M.status("busy") + '<div class="m-col ms-2 m-grow"><div class="t-label">' + t("p18.model_busy", { pct: 42 }) + '</div>' +
             '<div class="t-meta tx-muted">' + t("p18.model_busy.sub") + '</div></div></div>' +
             '<div class="mt-3">' + M.progress(42) + '</div>' +
             '<div class="m-row mt-3">' + M.btn(t("p13.use_small"), { kind: "primary", icon: "cpu" }) + '</div>')) + form(),
@@ -139,7 +139,7 @@
     "no-claude": function () {
       return {
         pills: TA.pillsNoClaude,
-        body: TA.slot(TA.noClaude("p18.no_claude")) + form({ noClaude: true }),
+        body: TA.noClaude("p18.no_claude") + form({ noClaude: true }),
         bar: bar()
       };
     },

@@ -31,11 +31,10 @@
 (function () {
   var t = M.t, D = M.D, X = D.ta;
 
-  function head() { return TA.back(t("p13.back")) + TA.title("captions", t("home.tool.kalam"), M.ltr("Kalam")); }
-  function device(key) { return '<span class="t-meta tx-muted">' + t(key) + '</span>'; }
+  function head() { return M.back(t("p13.back")) + TA.title("captions", t("home.tool.kalam"), M.ltr("Kalam")); }
   function stages(failAt) {
     var el = function (s) { return M.mono(s); };
-    var list = [
+    return M.stages([
       ["ok", t("p20.stage.export"), el("00:03")],
       ["ok", t("p20.stage.loading"), el("00:06")],
       ["ok", t("p20.stage.listening"), el("00:21")],
@@ -43,8 +42,7 @@
       ["pending", t("p20.stage.correcting"), ""],
       ["pending", t("p20.stage.captions"), ""],
       ["pending", t("p20.stage.placing"), ""]
-    ];
-    return TA.stages(list);
+    ]);
   }
   function running() {
     return M.card('<div class="t-label">' + t("p20.title") + '</div><div class="mt-3">' +
@@ -53,12 +51,12 @@
   }
   function doneCard(o) {
     o = o || {};
-    return M.card(TA.saved(t("p20.value")).replace("ta-bullet mt-2", "ta-bullet") + '<div class="t-meta tx-muted mt-3">' + t("p20.srt") + '</div>' +
-      '<div class="m-row mt-1"><bdi dir="ltr" class="mono ta-monowrap">' + M.esc(o.srt || X.srt) + '</bdi></div>' +
+    return M.card(M.saved(t("p20.value")) + '<div class="t-meta tx-muted mt-3">' + t("p20.srt") + '</div>' +
+      '<div class="mt-1">' + TA.name(o.srt || X.srt) + '</div>' +
       '<div class="ta-btnrow mt-3">' + M.btn(t("p20.reveal"), { icon: "folder-open", focus: o.focus }) + '</div>' +
       (o.mogrt
         ? '<div class="t-meta tx-muted mt-3">' + t("p20.undo.hint", { n: 64 }) + '</div><div class="m-row mt-2">' + M.btn(t("p20.undo"), { icon: "undo-2" }) + '</div>'
-        : '<div class="ta-bullet mt-3">' + M.status("info") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("p20.track_note") + '</div></div>') +
+        : TA.row(M.status("info"), t("p20.track_note"), "mt-3")) +
       '<div class="m-row mt-2">' + M.btn(t("p20.fix"), { kind: "ghost", icon: "pen-line", flush: true, disabled: o.noClaude }) + '</div>', "mt-4");
   }
   function list(o) {
@@ -72,7 +70,7 @@
       '<div class="m-row mt-1">' + M.btn(t("p20.show_all", { n: 64 }), { kind: "ghost", icon: "chevron-down", flush: true }) + '</div>', "mt-4");
   }
   function ok(o) {
-    return TA.slot(M.notice("ok", t("p20.done", { n: 64, seq: TA.mono((o && o.seq) || X.seq) }), { sub: t("p20.corrected", { client: D.client }) }));
+    return M.slot(M.notice("ok", t("p20.done", { n: 64, seq: TA.mono((o && o.seq) || X.seq) }), { sub: t("p20.corrected", { client: D.client }) }));
   }
 
   var STATES = {
@@ -80,21 +78,24 @@
     normal: function () { return { body: ok() + head() + doneCard() + list() }; },
     focus: function () { return { body: ok() + head() + doneCard({ focus: true }) + list() }; },
     mogrt: function () { return { body: ok() + head() + doneCard({ mogrt: true }) + list() }; },
-    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p20.no_claude")) + head() + doneCard({ noClaude: true }) + list() }; },
+    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.noClaude("p20.no_claude") + head() + doneCard({ noClaude: true }) + list() }; },
     error: function () {
       return {
-        body: TA.slot(M.notice("error", t("p20.error"), { sub: t("p20.error.hint"), btn: { label: t("p13.retry"), icon: "refresh-cw", primary: true } })) +
+        body: M.slot(M.notice("error", t("p20.error"), { sub: t("p20.error.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
           head() + M.card('<div class="t-label">' + t("p20.title") + '</div><div class="mt-2">' + stages(true) + '</div>', "mt-4")
       };
     },
+    /* the service dropped while listening: Start comes first (the violet); Try again is off until the service runs and says so */
     offline: function () {
       return {
         pills: TA.pillsOff,
-        body: TA.slot(M.notice("error", t("p20.lost"), { sub: t("p20.lost.hint"), btn: { label: t("p13.start_service"), icon: "power", primary: true }, dismiss: false })) +
-          head() + M.card('<div class="t-label">' + t("p20.title") + '</div><div class="mt-2">' + TA.stages([
+        body: M.slot(M.notice("error", t("p20.lost"), { sub: t("p20.lost.hint"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
+          head() + M.card('<div class="t-label">' + t("p20.title") + '</div><div class="mt-2">' + M.stages([
             ["ok", t("p20.stage.export"), M.mono("00:03")], ["ok", t("p20.stage.loading"), M.mono("00:06")],
             ["error", t("p20.stage.listening"), "", t("p20.lost")], ["pending", t("p20.stage.aligning"), ""],
-            ["pending", t("p20.stage.correcting"), ""], ["pending", t("p20.stage.captions"), ""], ["pending", t("p20.stage.placing"), ""]]) + '</div>', "mt-4")
+            ["pending", t("p20.stage.correcting"), ""], ["pending", t("p20.stage.captions"), ""], ["pending", t("p20.stage.placing"), ""]]) + '</div>' +
+            '<div class="m-row mt-3">' + M.btn(t("action.retry"), { icon: "refresh-cw", disabled: true }) + '</div>' +
+            '<div class="t-meta tx-muted mt-2">' + t("p20.retry_wait") + '</div>', "mt-4")
       };
     },
     long: function () { return { body: ok({ seq: X.long.seq }) + head() + doneCard({ srt: X.long.srt }) + list({ long: true }) }; }

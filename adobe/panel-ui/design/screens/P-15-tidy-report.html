@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mock-states" content="loading,normal,focus,podcast,sync-running,sync-done,error,offline,no-claude,long">
-<meta name="mock-keys" content="Mod+Enter = the one primary (Put them back; Sync the podcast by sound in Podcast mode; Open the synced sequence after a sync); Esc = Stop while syncing, else close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs; Tab / Shift+Tab reading order. No single-key shortcuts.">
+<meta name="mock-keys" content="Mod+Enter = the one primary (Done; Sync the podcast by sound in Podcast mode; Open the synced sequence after a sync). Undo is a secondary with no keycap, so a habitual Mod+Enter never reverses the work; Esc = Stop while syncing, else close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs; Tab / Shift+Tab reading order. No single-key shortcuts.">
 <meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Report counts appear at once (no count-up animation).">
 <title>P-15 Tidy report, undo and podcast sync</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -19,8 +19,8 @@
 <script>
 /* P-15 Tidy: report, undo and podcast sync (screen-inventory.md §3 P-15; FR-15 undo = open the backup; FR-19..23 and
    A3.7 sync: one "<project> - Synced" sequence, a clip with no clear sound match is left out and named). Tools tab.
-   - normal (Reels): the report, then the pre-clean copy with "Open the pre-clean copy" as the primary (the undo).
-   - podcast: the report, then the sync card; "Sync the podcast by sound" is the primary and the undo is secondary.
+   - normal (Reels): the report, then the pre-clean copy with Undo as a secondary (no keycap); Done is the violet (R2).
+   - podcast: the report, then the sync card; "Sync the podcast by sound" is the primary, Done and Undo are secondary.
    - sync-running: per-clip progress with Stop. sync-done: the synced sequence + the left-out clip and why.
    - error: one clip could not be exported; it is left out and named, the rest continues.
    - offline: the undo still works (it opens a file in Premiere); sync is disabled. Loading = applying.
@@ -28,24 +28,27 @@
 (function () {
   var t = M.t, D = M.D, X = D.ta;
 
-  function head() { return TA.back(t("p13.back")) + TA.title("folder-tree", t("home.tool.tidy"), M.ltr("Tidy")); }
+  function head() { return M.back(t("p13.back")) + TA.title("folder-tree", t("home.tool.tidy"), M.ltr("Tidy")); }
+  /* one set of numbers (R2-fix-list 1.2): 112 were planned, 4 turned out to be in use and stay, so 108 were removed;
+     214 moved into 4 bins that add up to 214; 2 nests renamed; 7 empty bins removed */
   function counts() {
     return M.card('<div class="t-label">' + t("p15.counts") + '</div>' +
-      TA.saved(t("p15.value")) + '<div class="mt-2">' + TA.stats([[M.ltr("214"), t("p15.moved")], [M.ltr("112"), t("p15.removed")], [M.ltr("2"), t("p15.renamed")], [M.ltr("7"), t("p15.bins")]]) + '</div>' +
-      '<div class="ta-bullet mt-3">' + M.status("info") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("p15.skipped", { s: 4 }) + '</div></div>', "mt-4");
+      '<div class="mt-2">' + M.saved(t("p15.value")) + '</div><div class="mt-2">' + TA.stats([[M.ltr("214"), t("p15.moved")], [M.ltr("108"), t("p15.removed")], [M.ltr("2"), t("p15.renamed")], [M.ltr("7"), t("p15.bins")]]) + '</div>' +
+      TA.row(M.status("info"), t("p15.skipped", { s: 4, r: 112 }), "mt-3"), "mt-4");
   }
   function where() {
-    return M.card('<div class="t-label">' + t("p15.where") + '</div><div class="m-col mt-1">' + X.bins.map(function (b, i) {
-      return (i ? M.divider() : '') + '<div class="m-row" style="min-height:32px">' + M.ico("folder", 16, "ink-muted") +
-        '<div class="t-mono ms-2 m-grow">' + M.esc(b[0]) + '</div>' + M.chip("neutral", M.ltr(String(b[1]))) + '</div>';
-    }).join("") + '</div><div class="m-row">' + M.btn(t("p15.where.more"), { kind: "ghost", icon: "chevron-down", flush: true }) + '</div>', "mt-4");
+    return M.card('<div class="t-label">' + t("p15.where") + '</div><div class="m-col mt-1">' + X.bins.map(function (b) {
+      return '<div class="m-row" style="min-height:32px">' + M.ico("folder", 16, "ink-muted") +
+        '<div class="t-mono ms-2 m-grow">' + M.path(b[0]) + '</div>' + M.chip("neutral", M.ltr(String(b[1]))) + '</div>';
+    }).join(M.divider()) + '</div>', "mt-4");
   }
+  /* Undo is a secondary with no keycap: right after success the violet is Done, so a habitual Mod+Enter never reverses the work */
   function undoCard(o) {
     o = o || {};
     return M.card('<div class="m-row">' + M.ico("undo-2", 16, "ink-muted") + '<div class="t-label ms-2 m-grow">' + t("p15.backup.title") + '</div></div>' +
-      '<div class="m-row mt-2"><bdi dir="ltr" class="mono ta-monowrap">' + M.esc(o.backup || X.tidyBackup) + '</bdi></div>' +
+      '<div class="mt-2">' + TA.name(o.backup || X.tidyBackup) + '</div>' +
       '<div class="t-meta tx-muted mt-2">' + t("p15.undo.hint") + '</div>' +
-      '<div class="m-col mt-3">' + M.btn(t("p15.undo"), { kind: o.secondary ? "secondary" : "primary", block: true, icon: "undo-2", focus: o.focus }) + '</div>' +
+      '<div class="m-col mt-3">' + M.btn(t("action.undo"), { kind: "secondary", block: true, icon: "undo-2", focus: o.focus }) + '</div>' +
       '<div class="m-row mt-2">' + M.btn(t("p15.reveal"), { kind: "ghost", icon: "folder-open", flush: true }) + '</div>', "mt-4");
   }
   function syncCard(o) {
@@ -55,21 +58,27 @@
       inner = TA.progress(t("p15.sync.progress", { n: 3, of: 8, name: TA.mono("Cam 2 – A003.mov") }), 38, t("p13.elapsed", { t: M.html(M.mono("00:41")) }), t("p13.stop"));
     } else {
       inner = '<div class="t-meta tx-muted">' + t("p15.sync.sub") + '</div>' +
-        '<div class="ta-bullet mt-2">' + M.status("ok") + '<div class="t-meta ms-2 m-grow">' + t("p15.sync.found", { c: 3, m: 5 }) + '</div></div>' +
+        TA.row(M.status("ok"), t("p15.sync.found", { c: 3, m: 5 })) +
         '<div class="m-col mt-3">' + M.btn(t("p15.sync"), { kind: "primary", block: true, icon: "audio-lines", disabled: o.disabled }) + '</div>';
     }
     return M.card('<div class="m-row">' + M.ico("audio-lines", 16, "ink-muted") + '<div class="t-label ms-2 m-grow">' + t("p15.sync.title") + '</div></div><div class="mt-2">' + inner + '</div>', "mt-4");
   }
-  function syncDone() {
+  /* 8 clips: 7 placed with Mic 3 left out (no clear match); in the error state Cam 3 is also left out, so 6 placed */
+  function syncDone(o) {
+    o = o || {};
     var name = X.projectName + " - Synced";
     return M.card('<div class="m-row-top">' + M.status("ok") + '<div class="t-label ms-2 m-grow">' + t("p15.sync.done", { name: TA.mono(name) }) + '</div></div>' +
-      '<div class="t-meta tx-muted mt-1">' + t("p15.sync.placed", { n: 7, of: 8 }) + '</div>' +
-      '<div class="ta-bullet mt-3">' + M.status("warn") + '<div class="m-col ms-2 m-grow"><div class="t-meta tx-text">' + t("p15.sync.skipped", { name: TA.mono("Mic 3 – ZOOM0004.wav") }) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("p15.sync.placed", { n: o.placed || 7, of: 8 }) + '</div>' +
+      '<div class="ta-srow mt-3">' + M.status("warn") + '<div class="m-col ms-2 m-grow"><div class="t-meta tx-text">' + t("p15.sync.skipped", { name: TA.mono("Mic 3 – ZOOM0004.wav") }) + '</div>' +
       '<div class="t-meta tx-muted">' + t("p15.sync.skip_hint") + '</div></div></div>' +
       '<div class="m-col mt-3">' + M.btn(t("p15.open_seq"), { kind: "primary", block: true, icon: "film" }) + '</div>', "mt-4");
   }
-  function done() { return '<div class="ta-btnrow mt-4">' + M.btn(t("p13.done"), {}) + M.btn(t("p13.support"), { kind: "ghost", icon: "life-buoy" }) + '</div>'; }
-  function okNotice() { return TA.slot(M.notice("ok", t("p15.done"))); }
+  /* Done is the screen's violet unless a card above already carries the next step */
+  function done(o) {
+    o = o || {};
+    return '<div class="ta-btnrow mt-4">' + M.btn(t("p13.done"), { kind: o.primary === false ? "secondary" : "primary" }) + M.btn(t("action.support"), { kind: "ghost", icon: "life-buoy" }) + '</div>';
+  }
+  function okNotice() { return M.slot(M.notice("ok", t("p15.done"))); }
 
   var STATES = {
     loading: function () {
@@ -79,22 +88,21 @@
       };
     },
     normal: function () { return { body: okNotice() + head() + counts() + where() + undoCard() + done() }; },
-    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p13.no_claude.solo")) + head() + counts() + where() + undoCard() + done() }; },
+    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.noClaude("p13.no_claude.solo", { solo: true }) + head() + counts() + where() + undoCard() + done() }; },
     focus: function () { return { body: okNotice() + head() + counts() + where() + undoCard({ focus: true }) + done() }; },
-    podcast: function () { return { body: okNotice() + head() + counts() + syncCard() + undoCard({ secondary: true }) + done() }; },
-    "sync-running": function () { return { body: head() + syncCard({ running: true }) + counts() + undoCard({ secondary: true }) }; },
-    "sync-done": function () { return { body: head() + syncDone() + counts() + undoCard({ secondary: true }) + done() }; },
+    podcast: function () { return { body: okNotice() + head() + counts() + syncCard() + undoCard() + done({ primary: false }) }; },
+    "sync-running": function () { return { body: head() + syncCard({ running: true }) + counts() + undoCard() }; },
+    "sync-done": function () { return { body: head() + syncDone() + counts() + undoCard() + done({ primary: false }) }; },
     error: function () {
       return {
-        body: TA.slot(M.notice("warn", t("p15.error", { name: TA.mono("Cam 3 – C0007.mp4") }), { sub: t("p15.error.hint"), btn: { label: t("p15.retry_clip"), icon: "refresh-cw" } })) +
-          head() + syncDone() + counts() + undoCard({ secondary: true }) + done()
+        body: M.slot(M.notice("warn", t("p15.error", { name: TA.mono("Cam 3 – C0007.mp4") }), { sub: t("p15.error.hint"), btn: { label: t("p15.retry_clip"), icon: "refresh-cw" } })) +
+          head() + syncDone({ placed: 6 }) + counts() + undoCard() + done({ primary: false })
       };
     },
     offline: function () {
       return {
         pills: TA.pillsAppOff,
-        body: TA.slot(M.notice("error", t("p15.offline"), { btn: { label: t("p13.start_service"), icon: "power" }, dismiss: false })) +
-          head() + counts() + undoCard() + syncCard({ disabled: true }) + done()
+        body: TA.partialOffline("p15.offline.hint") + head() + counts() + undoCard() + syncCard({ disabled: true }) + done()
       };
     },
     long: function () { return { body: okNotice() + head() + counts() + undoCard({ backup: X.long.tidyBackup }) + done() }; }

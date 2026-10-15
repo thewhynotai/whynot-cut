@@ -31,25 +31,26 @@
   var t = M.t, D = M.D, X = D.ta;
 
   function intro() {
-    return M.steps(["done", "done", "done", "wait", "pend", "pend", "pend"], 3, "warn") +
+    return M.steps(["done", "done", "done", "wait", "pend", "pend", "pend"], 3, "waiting") +
       '<div class="t-title mt-4">' + t("a03.title") + '</div><div class="t-meta tx-muted mt-1">' + t("a03.sub") + '</div>';
   }
-  /* a gate card: notice-shaped, with a title line */
+  /* a gate card: notice-shaped, with a title line. The Arabic check (probe) is Claude's work: it spins while it runs and
+     shows the paused icon, never a spinner, when Claude cannot run it (R2 designer P1-2) */
   function gate(kind, key, o) {
     o = o || {};
     var title = '<div class="t-label">' + t("a03." + key + ".t") + '</div>';
     var body = '<div class="t-body tx-text mt-1">' + t("a03." + key, { version: X.aeVersion }) + '</div>' + (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + '</div>' : '') +
       (o.btn ? '<div class="m-row mt-3">' + M.btn(o.btn, { kind: o.primary ? "primary" : "secondary", icon: o.icon, focus: o.focus }) + '</div>' : '');
     return '<div class="m-notice m-notice-' + kind + ' mt-3" role="' + (kind === "error" ? "alert" : "status") + '">' +
-      (key === "probe" ? M.status("busy") : M.status(kind)) + '<div class="m-notice-body">' + title + body + '</div></div>';
+      (key === "probe" ? M.status(o.paused ? "paused" : "busy") : M.status(kind)) + '<div class="m-notice-body">' + title + body + '</div></div>';
   }
   var G = {
-    probe: function () { return gate("info", "probe", { sub: t("a03.probe.meta") }); },
+    probe: function (paused) { return gate("info", "probe", { sub: t("a03.probe.meta"), paused: paused }); },
     fonts: function (p, f) { return gate("error", "fonts", { sub: t("a03.fonts.list", { fonts: M.html(M.ltr("Cairo Bold, Tajawal Medium")) }), btn: t("a03.fonts.btn"), icon: "folder-open", primary: p, focus: f }); },
-    unsaved: function (p, f) { return gate("warn", "unsaved", { btn: t("p13.retry"), icon: "refresh-cw", primary: p, focus: f }); },
+    unsaved: function (p, f) { return gate("warn", "unsaved", { btn: t("action.check_again"), icon: "refresh-cw", primary: p, focus: f }); },
     edited: function (p, f) { return gate("warn", "edited", { btn: t("a03.rebuild"), icon: "rotate-ccw", primary: p, focus: f }); },
-    no_bridge: function (p, f) { return gate("error", "no_bridge", { btn: t("p13.check_again"), icon: "refresh-cw", primary: p, focus: f }); },
-    script_only: function (p, f) { return gate("warn", "script_only", { sub: t("a03.script_only.hint"), btn: t("p13.open_claude"), icon: "external-link", primary: p, focus: f }); }
+    no_bridge: function (p, f) { return gate("error", "no_bridge", { btn: t("action.check_again"), icon: "refresh-cw", primary: p, focus: f }); },
+    script_only: function (p, f) { return gate("warn", "script_only", { sub: t("a03.script_only.hint"), btn: t("action.open_claude"), icon: "external-link", primary: p, focus: f }); }
   };
   function startOff() {
     return '<div class="m-col mt-4">' + M.btn(t("a01.start"), { kind: "primary", block: true, icon: "layers", disabled: true }) + '</div>' +
@@ -62,14 +63,16 @@
       var c = function () { return '<div class="m-skel-box mt-3"><span class="m-skel-block" style="width:16px;height:16px"></span><div class="m-col m-grow ms-3">' + M.skel(40) + M.skel(90, 16) + M.skel(60, 16) + '</div></div>'; };
       return { needs: 0, body: intro() + c() + c() + c() };
     },
+    /* the check that needs Claude is paused, and signing in is an open item for the editor */
     "no-claude": function () {
-      return { needs: 0, pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("a03.no_claude", { primary: true })) + intro() + G.probe() + startOff() };
+      return { needs: 1, pills: TA.pillsNoClaude, body: TA.noClaude("a03.no_claude", { primary: true }) + intro() + G.probe(true) + startOff() };
     },
+    /* three cards need the editor (fonts, unsaved work, an edited project); the Arabic check is Claude's and is not counted */
     normal: function () {
-      return { needs: 4, body: intro() + G.fonts(true) + G.unsaved(false) + G.edited(false) + G.probe() + startOff() };
+      return { needs: 3, body: intro() + G.fonts(true) + G.unsaved(false) + G.edited(false) + G.probe() + startOff() };
     },
     focus: function () {
-      return { needs: 4, body: intro() + G.fonts(true, true) + G.unsaved(false) + G.edited(false) + G.probe() + startOff() };
+      return { needs: 3, body: intro() + G.fonts(true, true) + G.unsaved(false) + G.edited(false) + G.probe() + startOff() };
     },
     probe: function () { return one("probe"); },
     fonts: function () { return one("fonts"); },
@@ -78,10 +81,10 @@
     "edited-confirm": function () {
       return {
         needs: 1, body: intro() + G.edited(false),
-        bar: TA.dialog({
+        bar: M.dialog({
           title: t("a03.dialog.title", { item: TA.mono(X.motion) }), changesLabel: t("p13.dialog.changes"),
           changes: [t("a03.dialog.c1"), t("a03.dialog.c2")], backupLabel: t("a03.dialog.backup"), backup: X.aeBackup,
-          confirm: t("a03.rebuild"), confirmIcon: "rotate-ccw", keep: t("p13.dialog.keep")
+          confirm: { label: t("a03.rebuild"), icon: "rotate-ccw" }, keep: t("p13.dialog.keep")
         })
       };
     },
@@ -89,7 +92,7 @@
     "script-only": function () {
       return {
         needs: 1,
-        body: M.steps(["done", "done", "done", "wait", "pend", "pend", "pend"], 3, "warn") + '<div class="mt-4"></div>' +
+        body: M.steps(["done", "done", "done", "wait", "pend", "pend", "pend"], 3, "waiting") + '<div class="mt-4"></div>' +
           G.script_only(true) +
           M.card('<div class="m-row"><div class="t-label m-grow">' + M.mono(X.aep) + '</div>' + M.chip("warn", t("a01.status.unverified"), "triangle-alert") + '</div>', "mt-4")
       };
@@ -108,12 +111,12 @@
     success: function () {
       return {
         needs: 0,
-        body: TA.slot(M.notice("ok", t("a03.ok", { version: X.aeVersion }))) + M.steps(["done", "done", "done", "run", "pend", "pend", "pend"], 3, "info") +
+        body: M.slot(M.notice("ok", t("a03.ok", { version: X.aeVersion }))) + M.steps(["done", "done", "done", "wait", "pend", "pend", "pend"], 3, "waiting") +
           '<div class="m-col mt-4">' + M.btn(t("a01.start"), { kind: "primary", block: true, icon: "layers" }) + '</div>'
       };
     },
     offline: function () {
-      return { needs: 0, pills: TA.pillsOff, body: TA.slot(TA.offline()) + intro() + startOff() };
+      return { needs: 0, pills: TA.pillsOff, body: M.slot(M.offline()) + intro() + startOff() };
     },
     long: function () {
       return { body: intro() + G.fonts(true).replace("Cairo Bold, Tajawal Medium", "Cairo Bold, Tajawal Medium, IBM Plex Sans Arabic SemiBold, Al-Mustaqbal Brand Display") + G.edited(false) + startOff() };

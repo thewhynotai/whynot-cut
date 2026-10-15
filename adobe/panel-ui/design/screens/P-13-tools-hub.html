@@ -58,7 +58,7 @@
       '</div>';
   }
   function settings() { return M.card(M.li("settings", t("home.settings")), "m-card-flush mt-5"); }
-  function intro(seq) { return '<div class="t-title">' + t("p13.title") + '</div><div class="mt-1">' + seqLine(seq || X.seq) + '</div>' + TA.saved(t("p13.week")); }
+  function intro(seq) { return '<div class="t-title">' + t("p13.title") + '</div><div class="mt-1">' + seqLine(seq || X.seq) + '</div><div class="mt-2">' + M.saved(t("p13.week")) + '</div>'; }
 
   var STATES = {
     empty: function () {
@@ -87,23 +87,23 @@
     error: function () {
       return {
         pills: { engine: "noanswer" },
-        body: TA.slot(M.notice("error", t("p13.error"), { sub: t("p13.error.hint"), btn: { label: t("p13.retry"), icon: "refresh-cw", primary: true } })) +
+        body: M.slot(M.notice("error", t("p13.error"), { sub: t("p13.error.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
           intro() + flow({ disabled: true }) + cards({ disabled: true }) + settings()
       };
     },
     offline: function () {
       return {
         pills: TA.pillsOff,
-        body: TA.slot(TA.offline()) + intro() + flow({ disabled: true }) + cards({ disabled: true }) + settings()
+        body: M.slot(M.offline()) + intro() + flow({ disabled: true }) + cards({ disabled: true }) + settings()
       };
     },
     "no-claude": function () {
-      return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p13.no_claude")) + intro() + flow() + cards() + settings() };
+      return { pills: TA.pillsNoClaude, body: TA.noClaude("p13.no_claude") + intro() + flow() + cards() + settings() };
     },
-    stale: function () { return { body: TA.slot(TA.stale()) + intro() + flow() + cards() + settings() }; },
+    stale: function () { return { body: M.slot(M.stale()) + intro() + flow() + cards() + settings() }; },
     success: function () {
       return {
-        body: TA.slot(M.notice("ok", t("p13.success", { n: 64, seq: TA.mono(X.seq) }))) + intro() + flow() + cards({ kalamNow: true }) + settings()
+        body: M.slot(M.notice("ok", t("p13.success", { n: 64, seq: TA.mono(X.seq) }))) + intro() + flow() + cards({ kalamNow: true }) + settings()
       };
     },
     "models-busy": function () {

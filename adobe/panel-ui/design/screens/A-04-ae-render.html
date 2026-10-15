@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mock-states" content="empty,loading,normal,focus,error,offline,no-claude,stale,success,long">
-<meta name="mock-keys" content="Mod+Enter = Open project (Render when nothing is rendered, Render again when stale, Try again on error); Esc = Cancel while rendering, else close the top notice; Alt+1 / Alt+2 = Home / Edit; Tab / Shift+Tab frame to frame, Enter opens the focused frame large. No single-key shortcuts.">
+<meta name="mock-keys" content="Mod+Enter = Open project once the quality check has passed (while it is open the primary is Wait for QC, off, and Open anyway is a secondary; Render when nothing is rendered, Render again when stale, Try again on error); Esc = Cancel while rendering, else close the top notice; Alt+1 / Alt+2 = Home / Edit; Tab / Shift+Tab frame to frame, Enter opens the focused frame large. No single-key shortcuts.">
 <meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Frames load into fixed boxes (no layout shift); a frame's verdict chip swaps at once.">
 <title>A-04 Motion render, frames and handoff</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -24,16 +24,22 @@
      is the primary.
    - loading: render progress per piece with Cancel. error: why the render failed + Try again (primary).
    - stale: the project changed after the render; "Render again" takes the fill.
-   - success: QC passed; the done card (as in P-06) with the handoff line; Open project stays the primary.
+   - success: QC passed; the done card (as in P-06) with the handoff line; Open project is the primary. While QC is open (normal) the primary is "Wait for QC" (off) and "Open anyway" is a secondary.
    - offline: everything that needs the app is disabled; the notice's fix takes the fill.
    - focus: keyboard focus on Open project. long: long id and path. */
 (function () {
   var t = M.t, D = M.D, X = D.ta;
+  /* six 9:16 frames of the 34 s render, each drawn with the scene's own content (no empty box). Frame 5 is the one where
+     the title touches the safe edge: Claude is fixing it (a04.v.not.fail). */
   var FRAMES = [
-    ["01", "قياس السكر الصبح", "pass", "00:02"], ["02", "«بيقولك أكتر من أي قراية»", "pass", "00:07"],
-    ["03", "126", "pass", "00:14"], ["04", "قبل الفطار · مية بس", "pending", "00:22"],
-    ["05", "اسأل دكتورك", "fix", "00:30"], ["06", "", "pending", "00:33"]
+    ["01", '<span class="ta-fr-txt">قياس السكر الصبح</span><span class="ta-fr-bar"></span>', "pass", "00:02"],
+    ["02", '<span class="ta-fr-line"></span><span class="ta-fr-line ta-fr-line-s"></span><span class="ta-fr-line"></span>', "pass", "00:07"],
+    ["03", '<span class="ta-fr-num">126</span><span class="ta-fr-bar"></span>', "pass", "00:14"],
+    ["04", '<span class="ta-fr-line ta-fr-line-s"></span><span class="ta-fr-line"></span><span class="ta-fr-line ta-fr-line-s"></span>', "pending", "00:22"],
+    ["05", '<span class="ta-fr-txt">اسأل دكتورك</span><span class="m-media-bad"></span>', "fix", "00:30"],
+    ["06", '<span class="ta-fr-txt">قبل ما تغيّر علاجك</span><span class="ta-fr-bar"></span>', "pending", "00:33"]
   ];
+  var COVER = '<span class="ta-fr-txt">قياس السكر</span><span class="ta-fr-bar"></span>';
 
   function heading(id) {
     return '<div class="t-title">' + t("a04.title") + '</div><div class="t-meta tx-muted mt-1">' + M.mono(id || X.motion) + '</div>';
@@ -43,41 +49,62 @@
   function fileCard(o) {
     o = o || {};
     return M.card('<div class="t-meta tx-muted">' + t("a04.mp4") + '</div>' +
-      '<div class="m-row mt-1"><bdi dir="ltr" class="mono ta-monowrap">' + M.esc(o.mp4 || X.mp4) + '</bdi></div>' +
-      '<div class="m-row mt-3"><div class="ta-frame" style="width:64px;height:112px"><span class="ta-frame-txt">قياس السكر</span><span class="ta-frame-bar"></span></div>' +
+      '<div class="mt-1">' + TA.name(o.mp4 || X.mp4) + '</div>' +
+      '<div class="m-row mt-3">' + M.media({ kind: "poster", w: 64, h: 112, inner: COVER, disabled: o.off }) +
       '<div class="m-col m-grow ms-3"><div class="t-label">' + t("a04.cover") + '</div><div class="t-meta tx-muted">' + M.mono("1080 × 1920 · 00:34") + '</div></div></div>', "");
   }
-  function frameTile(f) {
-    var chip = f[2] === "pass" ? M.chip("ok", t("a04.f.pass"), "circle-check") : f[2] === "fix" ? M.chip("error", t("a04.f.fix"), "circle-x") : M.chip("neutral", t("a04.f.pending"), "circle-dashed");
-    var inner = /^\d+$/.test(f[1]) ? '<span class="ta-frame-num">' + M.esc(f[1]) + '</span>' : f[1] ? '<span class="ta-frame-txt">' + M.esc(f[1]) + '</span>' : '';
-    return '<div class="ta-cell"><div class="ta-tile ta-tile-static"><div class="ta-frame">' + inner + '<span class="ta-frame-bar"></span></div>' +
-      '<div class="m-row mt-2"><span class="t-mono tx-muted">' + M.mono(f[3]) + '</span><span class="m-spacer"></span></div><div class="m-row mt-1">' + chip + '</div></div></div>';
+  /* who acts is on the status row (owner F-18): "Claude is checking", "Claude is fixing", "Needs your editor"; a stale render
+     has no live verdicts at all (nothing spins, no old Fix chip): "Out of date" */
+  /* a short status row (icon + wrapping meta text), not a chip: the words are long and a tile is narrow at 280 px */
+  function chipFor(kind, mode) {
+    var row = function (icon, key) { return '<div class="ta-srow">' + icon + '<div class="t-meta tx-text ms-1 m-grow">' + t(key) + '</div></div>'; };
+    if (mode === "stale") return row(M.status("paused", 12), "a04.f.stale");
+    if (kind === "pass") return row(M.status("ok", 12), "a04.f.pass");
+    if (mode === "editor") return row(M.status("waiting", 12), "a04.f.editor");
+    if (kind === "fix") return row(M.status("error", 12), "a04.f.fix");
+    return row(M.status("busy", 12), "a04.f.pending");
   }
-  function frames(all) {
-    var list = FRAMES.map(function (f) { return all ? [f[0], f[1], "pass", f[3]] : f; });
+  function frameTile(f, mode) {
+    var kind = f[2];
+    var stale = mode === "stale";
+    var media = M.media({ kind: "poster", w: 54, h: 96, inner: f[1], safe: kind === "fix" && !stale, disabled: stale });
+    return '<div class="ta-cell">' + M.tile({
+      media: '<div class="ta-mediarow">' + media + '</div>',
+      meta: '<div class="m-row mt-2">' + M.mono(f[3]) + '</div><div class="m-row mt-1">' + chipFor(kind, mode) + '</div>',
+      fail: kind === "fix" && !stale, disabled: stale
+    }) + '</div>';
+  }
+  function frames(o) {
+    o = o || {};
+    var list = FRAMES.map(function (f) { return o.all ? [f[0], f[1], "pass", f[3]] : f; });
     return M.card('<div class="t-label">' + t("a04.frames") + '</div><div class="t-meta tx-muted">' + t("a04.frames.sub", { n: 6 }) + '</div>' +
-      '<div class="ta-tiles mt-2">' + list.map(frameTile).join("") + '</div>', "mt-4");
+      '<div class="ta-tiles mt-2">' + list.map(function (f) { return frameTile(f, o.mode); }).join("") + '</div>', "mt-4");
   }
-  function report(passed) {
-    var row = function (kind, word, text) {
-      return '<div class="ta-verdict">' + M.status(kind) + '<div class="m-col ms-2 m-grow"><div class="t-label">' + word + '</div><div class="t-meta tx-muted">' + text + '</div></div></div>';
-    };
-    return M.card('<div class="t-label">' + t("a04.verdict") + '</div>' +
-      row("ok", t("a04.v.verified"), t("a04.v.verified.t")) + M.divider() +
-      (passed ? '' : row("pending", t("a04.v.not"), t("a04.v.not.t") + '<br>' + t("a04.v.not.fail")) + M.divider()) +
-      row("warn", t("a04.v.needs"), t("a04.v.needs.t")), "mt-4");
+  function report(passed, mode) {
+    var rows = [["ok", t("a04.v.verified"), "", t("a04.v.verified.t")]];
+    if (!passed) rows.push([mode === "editor" ? "waiting" : "pending", t("a04.v.not"), "", t("a04.v.not.t") + '<br>' + t("a04.v.not.fail")]);
+    rows.push(["waiting", t("a04.v.needs"), "", t("a04.v.needs.t")]);
+    return M.card('<div class="t-label">' + t("a04.verdict") + '</div>' + M.stages(rows), "mt-4");
   }
+  /* mode: "qc" (the quality check is still open: the primary is "Wait for QC", off, and "Open anyway" is a secondary,
+     owner F-13) | "open" (QC passed: Open project is the violet) | "secondary" (a notice above carries the violet) | "off" */
   function actions(o) {
     o = o || {};
-    return '<div class="m-col mt-4">' + M.btn(t("a01.open_aep"), { kind: o.secondary ? "secondary" : "primary", block: true, icon: "external-link", focus: o.focus, disabled: o.off }) + '</div>' +
-      '<div class="ta-btnrow mt-2">' + M.btn(t("a04.rerender"), { icon: "rotate-ccw", disabled: o.off }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open" }) + '</div>';
+    var mode = o.mode || "qc";
+    var main = mode === "qc"
+      ? M.btn(t("a04.wait_qc"), { kind: "primary", block: true, icon: "busy", disabled: true }) +
+        '<div class="t-meta tx-muted mt-2">' + t("a04.wait_qc.hint") + '</div><div class="m-col mt-2">' +
+        M.btn(t("a04.open_anyway"), { block: true, icon: "external-link", focus: o.focus, disabled: o.off }) + '</div>'
+      : M.btn(t("a01.open_aep"), { kind: mode === "open" ? "primary" : "secondary", block: true, icon: "external-link", focus: o.focus, disabled: mode === "off" });
+    return '<div class="m-col mt-4">' + main + '</div>' +
+      '<div class="ta-btnrow mt-2">' + M.btn(t("a04.rerender"), { icon: "rotate-ccw", disabled: o.off || mode === "off" }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open" }) + '</div>';
   }
 
   var STATES = {
     empty: function () {
       return {
         needs: 0,
-        body: steps(["done", "done", "done", "done", "run", "pend", "pend"], 4, "info") + heading() +
+        body: steps(["done", "done", "done", "done", "wait", "pend", "pend"], 4, "waiting") + heading() +
           M.empty({ icon: "monitor-play", title: t("a04.empty.title"), text: t("a04.empty"), btn: M.btn(t("a04.render"), { kind: "primary", icon: "monitor-play" }), cls: "mt-4" })
       };
     },
@@ -86,47 +113,50 @@
         needs: 0,
         body: steps(["done", "done", "done", "done", "run", "pend", "pend"], 4, "busy") + heading() +
           M.card(TA.progress(t("a04.progress", { n: 3, of: 8 }), 37, t("p13.elapsed", { t: M.html(M.mono("00:52")) }), t("a01.cancel")), "mt-4") +
-          M.card(M.skel(25) + '<div class="ta-tiles mt-2"><div class="ta-cell"><span class="m-skel-block" style="height:88px"></span></div><div class="ta-cell"><span class="m-skel-block" style="height:88px"></span></div></div>', "mt-4")
+          M.card(M.skel(25) + '<div class="ta-tiles mt-2"><div class="ta-cell"><span class="m-skel-block" style="height:96px"></span></div><div class="ta-cell"><span class="m-skel-block" style="height:96px"></span></div></div>', "mt-4")
       };
     },
     normal: function () {
       return {
-        body: TA.slot(M.notice("info", t("a04.rendered"), { sub: t("a04.not_done") })) + steps(AT_QC, 5, "busy") + heading() +
+        body: M.slot(M.notice("info", t("a04.rendered"), { sub: t("a04.not_done") })) + steps(AT_QC, 5, "busy") + heading() +
           '<div class="mt-4"></div>' + fileCard() + frames() + report() + actions()
       };
     },
     focus: function () {
       return {
-        body: TA.slot(M.notice("info", t("a04.rendered"), { sub: t("a04.not_done") })) + steps(AT_QC, 5, "busy") + heading() +
+        body: M.slot(M.notice("info", t("a04.rendered"), { sub: t("a04.not_done") })) + steps(AT_QC, 5, "busy") + heading() +
           '<div class="mt-4"></div>' + fileCard() + frames() + report() + actions({ focus: true })
       };
     },
     error: function () {
       return {
         needs: 0,
-        body: TA.slot(M.notice("error", t("a04.error"), { sub: t("a04.error.hint"), btn: { label: t("p13.retry"), icon: "refresh-cw", primary: true } })) +
-          steps(["done", "done", "done", "done", "fail", "pend", "pend"], 4, "error") + heading() + actions({ secondary: true })
+        body: M.slot(M.notice("error", t("a04.error"), { sub: t("a04.error.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
+          steps(["done", "done", "done", "done", "fail", "pend", "pend"], 4, "error") + heading() + actions({ mode: "secondary" })
       };
     },
     offline: function () {
       return {
         pills: TA.pillsOff,
-        body: TA.slot(TA.offline()) + steps(AT_QC, 5, "pending") + heading() + '<div class="mt-4"></div>' + fileCard() + frames() + actions({ off: true })
+        body: M.slot(M.offline()) + steps(["done", "done", "done", "done", "done", "wait", "pend"], 5, "paused") + heading() + '<div class="mt-4"></div>' + fileCard({ off: true }) + frames({ mode: "stale" }) + actions({ mode: "off", off: true })
       };
     },
     "no-claude": function () {
-      return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("a04.no_claude")) + steps(AT_QC, 5, "warn") + heading() + '<div class="mt-4"></div>' + fileCard() + frames() + actions() };
+      return {
+        pills: TA.pillsNoClaude,
+        body: TA.noClaude("a04.no_claude", { primary: true }) + steps(["done", "done", "done", "done", "done", "wait", "pend"], 5, "waiting") + heading() + '<div class="mt-4"></div>' + fileCard() + frames({ mode: "editor" }) + report(false, "editor") + actions()
+      };
     },
     stale: function () {
       return {
-        body: TA.slot(M.notice("warn", t("a04.stale"), { btn: { label: t("a04.render_again"), icon: "monitor-play", primary: true } })) +
-          steps(["done", "done", "done", "done", "wait", "pend", "pend"], 4, "warn") + heading() + '<div class="mt-4"></div>' + fileCard() + frames() + actions({ secondary: true })
+        body: M.slot(M.notice("warn", t("a04.stale"), { btn: { label: t("a04.render_again"), icon: "monitor-play", primary: true } })) +
+          steps(["done", "done", "done", "done", "wait", "pend", "pend"], 4, "waiting") + heading() + '<div class="mt-4"></div>' + fileCard() + frames({ mode: "stale" }) + actions({ mode: "secondary" })
       };
     },
     success: function () {
       return {
-        body: TA.slot(M.notice("ok", t("a04.done", { item: TA.code(X.motion) }), { sub: t("a04.handoff") })) +
-          steps(["done", "done", "done", "done", "done", "done", "done"], 6, "ok") + heading() + TA.saved(t("a04.value")) + '<div class="mt-4"></div>' + fileCard() + frames(true) + report(true) + actions()
+        body: M.slot(M.notice("ok", t("a04.done", { item: TA.code(X.motion) }), { sub: t("a04.handoff") })) +
+          steps(["done", "done", "done", "done", "done", "done", "done"], 6, "ok") + heading() + '<div class="mt-2">' + M.saved(t("a04.value")) + '</div><div class="mt-4"></div>' + fileCard() + frames({ all: true }) + report(true) + actions({ mode: "open" })
       };
     },
     long: function () {

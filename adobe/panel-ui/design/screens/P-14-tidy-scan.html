@@ -31,25 +31,28 @@
 (function () {
   var t = M.t, D = M.D, X = D.ta;
   var NB = "\u00A0";
+  /* one set of numbers (R2-fix-list 1.2): 112 to remove = 98 unused + 9 duplicates + 5 old backups (the 2 caption files
+     are not ticked); 214 move into 4 bins that add up (96 + 24 + 61 + 33); 2 nests renamed of 3 */
+  var REMOVE = 112, MOVE = 214, NESTS = 2;
 
   function head() {
-    return TA.back(t("p13.back")) + TA.title("folder-tree", t("home.tool.tidy"), M.ltr("Tidy"));
+    return M.back(t("p13.back")) + TA.title("folder-tree", t("home.tool.tidy"), M.ltr("Tidy"));
   }
   function projectCard(o) {
     o = o || {};
     var mode = o.podcast ? 1 : 0;
     return M.card('<div class="t-meta tx-muted">' + t("p14.project") + '</div>' +
-      '<div class="t-mono ta-wrapname mt-1">' + M.esc(o.name || X.project) + '</div>' +
-      '<div class="mt-3">' + TA.seg([t("p14.mode.reels"), t("p14.mode.podcast")], mode, { disabled: o.disabled }) + '</div>' +
+      '<div class="t-mono ta-wrapname mt-1">' + M.path(o.name || X.project) + '</div>' +
+      '<div class="mt-3">' + M.segmented([t("p14.mode.reels"), t("p14.mode.podcast")], mode, { disabled: o.disabled }) + '</div>' +
       '<div class="t-meta tx-muted mt-2">' + t(o.podcast ? "p14.mode.hint.podcast" : "p14.mode.hint.reels") + '</div>' +
       (o.scanBtn ? '<div class="m-row mt-3">' + o.scanBtn + '</div>' : ''), "mt-4");
   }
   function size(s) { return '<span class="t-meta tx-muted nowrap">' + M.ltr(s) + '</span>'; }
-  function stats(o) {
+  function stats() {
     return '<div class="mt-4">' + TA.stats([
       [M.ltr("386"), t("p14.stat.items")],
       [M.ltr("41.2" + NB + "GB"), t("p14.stat.size")],
-      [M.ltr(o && o.podcast ? "121" : "112"), t("p14.stat.remove", { size: M.html(M.ltr("6.8" + NB + "GB")) })],
+      [M.ltr(String(REMOVE)), t("p14.stat.remove", { size: M.html(M.ltr("6.8" + NB + "GB")) })],
       [M.ltr("17%"), t("p14.stat.unused")]
     ]) + '</div>';
   }
@@ -69,7 +72,7 @@
     var dis = o.disabled;
     var longName = o.long ? "Al-Mustaqbal_interview_C0239_cam-A_take-03_backup-copy_from_old_drive_2026-09-30.mov" : "C0231_take2.mov";
     var body =
-      group(t("p14.r.unused"), 96,
+      group(t("p14.r.unused"), 98,
         file(longName, "1.9" + NB + "GB", true, { focus: o.focus, disabled: dis }) +
         (o.podcast ? "" : file("C0233.mov", "1.4" + NB + "GB", true, { disabled: dis }) +
         file("music_alt_v1.wav", "48" + NB + "MB", true, { disabled: dis })), { more: true }) +
@@ -84,37 +87,36 @@
         group(t("p14.r.long"), 2, file("Room tone – ZOOM0001.wav", "96" + NB + "MB", false));
     }
     return M.card('<div class="m-row">' + M.ico("trash-2", 16, "ink-muted") + '<div class="t-label ms-2 m-grow">' + t("p14.sec.remove") + '</div>' +
-      M.chip("neutral", M.ltr(o.podcast ? "121" : "112")) + '</div>' +
+      M.chip("neutral", M.ltr(String(REMOVE))) + '</div>' +
       '<div class="t-meta tx-muted mt-1">' + t("p14.sec.remove_note") + '</div>' + body, "mt-4");
   }
   function moveCard() {
-    var bins = [["01 Footage", 38], ["03 Audio/Music", 12], ["04 Images/PNG", 61], ["06 Sequences", 9]];
-    var rows = bins.map(function (b, i) {
-      return (i ? M.divider() : '') + '<div class="m-row" style="min-height:32px">' + M.ico("folder", 16, "ink-muted") +
-        '<div class="t-mono ms-2 m-grow">' + M.esc(b[0]) + '</div>' + M.chip("neutral", M.ltr(String(b[1]))) + '</div>';
-    }).join("");
-    return M.card(TA.sechead(t("p14.sec.move"), M.chip("neutral", M.ltr("214")), true) +
+    var rows = X.bins.map(function (b) {
+      return '<div class="m-row" style="min-height:32px">' + M.ico("folder", 16, "ink-muted") +
+        '<div class="t-mono ms-2 m-grow">' + M.path(b[0]) + '</div>' + M.chip("neutral", M.ltr(String(b[1]))) + '</div>';
+    }).join(M.divider());
+    return M.card(M.sechead(t("p14.sec.move"), M.chip("neutral", M.ltr(String(MOVE))), true) +
       '<div class="m-col" style="padding-bottom:8px">' + rows + '</div>', "m-card-flush mt-3");
   }
   function nestsCard(o) {
     o = o || {};
-    return M.card(TA.sechead(t("p14.sec.nests"), M.chip("neutral", M.ltr("3")), true) +
+    return M.card(M.sechead(t("p14.sec.nests"), M.chip("neutral", M.ltr("3")), true) +
       '<div class="t-meta tx-muted">' + t("p14.nests.note") + '</div>' +
       '<div class="m-col mt-1" style="padding-bottom:8px">' +
       TA.checkrow({ checked: true, name: "Nested Sequence 01 → Intro + B-roll", mono: true, disabled: o.disabled }) +
       TA.checkrow({ checked: true, name: "Nested Sequence 02 → Lower thirds", mono: true, disabled: o.disabled }) +
       TA.checkrow({ checked: false, name: "Nested Sequence 03 → Outro card", mono: true, disabled: o.disabled }) + '</div>', "m-card-flush mt-3");
   }
-  function closed(label, count, icon) { return M.card(TA.sechead(label, M.chip(icon || "neutral", M.ltr(String(count)), icon ? "triangle-alert" : ""), false), "m-card-flush mt-3"); }
+  function closed(label, count, icon) { return M.card(M.sechead(label, M.chip(icon || "neutral", M.ltr(String(count)), icon ? "triangle-alert" : ""), false), "m-card-flush mt-3"); }
   function problems() {
     return M.card('<div class="m-row">' + M.status("warn") + '<div class="t-label ms-2 m-grow">' + t("p14.sec.problems") + '</div>' + M.chip("warn", M.ltr("2")) + '</div>' +
       '<div class="t-meta tx-text mt-2">' + t("p14.problem.1") + '</div><div class="t-meta tx-text mt-2">' + t("p14.problem.2") + '</div>', "mt-3");
   }
   function offlineCard() {
-    return M.card(TA.sechead(t("p14.sec.offline"), M.chip("warn", M.ltr("3"), "triangle-alert"), true) +
+    return M.card(M.sechead(t("p14.sec.offline"), M.chip("warn", M.ltr("3"), "triangle-alert"), true) +
       '<div class="t-meta tx-muted">' + t("p14.offline.note") + '</div>' +
-      '<div class="m-col mt-2" style="padding-bottom:8px"><div class="ta-bullet">' + M.status("warn") + '<div class="t-mono ta-wrapname ms-2 m-grow">D:\\Old drive\\Sahha\\C0198.mov</div></div>' +
-      '<div class="ta-bullet mt-2">' + M.status("warn") + '<div class="t-mono ta-wrapname ms-2 m-grow">D:\\Old drive\\Sahha\\logo_2024.ai</div></div></div>', "m-card-flush mt-3");
+      '<div class="m-col mt-2" style="padding-bottom:8px"><div class="ta-srow">' + M.status("warn") + '<div class="t-mono ta-wrapname ms-2 m-grow">' + M.path("D:\\Old drive\\Sahha\\C0198.mov") + '</div></div>' +
+      '<div class="ta-srow mt-2">' + M.status("warn") + '<div class="t-mono ta-wrapname ms-2 m-grow">' + M.path("D:\\Old drive\\Sahha\\logo_2024.ai") + '</div></div></div>', "m-card-flush mt-3");
   }
   function options(dis) {
     return M.card('<div class="t-label">' + t("p14.sec.options") + '</div><div class="m-col mt-2">' +
@@ -122,25 +124,27 @@
       TA.checkrow({ checked: true, name: t("p14.opt.organise"), disabled: dis }) +
       TA.checkrow({ checked: true, name: t("p14.opt.colours"), disabled: dis }) + '</div>', "mt-4");
   }
+  /* o.noScan: the notice above carries the one "Scan again" (stale, error): no second one in the project card */
   function plan(o) {
     o = o || {};
-    return projectCard({ podcast: o.podcast, name: o.name, disabled: o.disabled, scanBtn: M.btn(t("p14.rescan"), { icon: "refresh-cw", disabled: o.disabled }) }) +
-      stats(o) + removeCard(o) +
-      (o.podcast || o.compact ? closed(t("p14.sec.move"), 214) + closed(t("p14.sec.nests"), 3) : moveCard() + nestsCard(o)) +
+    var scan = o.noScan ? "" : M.btn(t("p14.rescan"), { icon: "refresh-cw", disabled: o.disabled });
+    return projectCard({ podcast: o.podcast, name: o.name, disabled: o.disabled, scanBtn: scan }) +
+      stats() + removeCard(o) +
+      (o.podcast || o.compact ? closed(t("p14.sec.move"), MOVE) + closed(t("p14.sec.nests"), 3) : moveCard() + nestsCard(o)) +
       closed(t("p14.sec.bins"), 7) + closed(t("p14.sec.dup"), 2) + (o.compact ? closed(t("p14.sec.offline"), 3, "warn") : offlineCard()) + options(o.disabled);
   }
   function bar(o) {
     o = o || {};
-    return '<div class="t-meta tx-muted">' + t("p14.bar.summary", { r: o.podcast ? 121 : 112, m: 214, n: 2 }) + '</div>' +
+    return '<div class="t-meta tx-muted">' + t("p14.bar.summary", { r: REMOVE, m: MOVE, n: NESTS }) + '</div>' +
       '<div class="m-col mt-2">' + M.btn(t("p14.apply"), { kind: "primary", block: true, icon: "folder-tree", disabled: o.off, focus: o.focus }) + '</div>' +
       '<div class="t-meta tx-muted mt-2">' + (o.hint || t("p14.bar.hint")) + '</div>';
   }
   function dialog(name, backup) {
-    return TA.dialog({
+    return M.dialog({
       title: t("p14.dialog.title", { name: TA.mono(name) }), changesLabel: t("p13.dialog.changes"),
-      changes: [t("p14.dialog.c1", { r: 112 }), t("p14.dialog.c2", { m: 214, b: 9 }), t("p14.dialog.c3", { e: 7, n: 2 }), t("p14.dialog.c4")],
+      changes: [t("p14.dialog.c1", { r: REMOVE }), t("p14.dialog.c2", { m: MOVE, b: 4 }), t("p14.dialog.c3", { e: 7, n: NESTS }), t("p14.dialog.c4")],
       backupLabel: t("p14.dialog.backup"), backup: backup,
-      confirm: t("p14.apply"), confirmIcon: "folder-tree", keep: t("p13.dialog.keep")
+      confirm: { label: t("p14.apply"), icon: "folder-tree" }, keep: t("p13.dialog.keep")
     });
   }
 
@@ -161,34 +165,34 @@
     },
     normal: function () { return { body: head() + plan(), bar: bar() }; },
     focus: function () { return { body: head() + plan({ focus: true }), bar: bar() }; },
-    podcast: function () { return { body: head() + plan({ podcast: true }), bar: bar({ podcast: true }) }; },
+    podcast: function () { return { body: head() + plan({ podcast: true }), bar: bar() }; },
     confirm: function () { return { body: head() + plan({ compact: true }), bar: dialog(X.projectName, X.tidyBackup) }; },
     unsaved: function () {
       return {
-        body: TA.slot(M.notice("warn", t("p14.unsaved"), { sub: t("p14.unsaved.hint"), btn: { label: t("p13.check_again"), icon: "refresh-cw", primary: true } })) + head() + plan({ compact: true }),
+        body: M.slot(M.notice("warn", t("p14.unsaved"), { sub: t("p14.unsaved.hint"), btn: { label: t("action.check_again"), icon: "refresh-cw", primary: true } })) + head() + plan({ compact: true }),
         bar: bar({ off: true, hint: t("p14.unsaved.hint") })
       };
     },
     error: function () {
       return {
-        body: TA.slot(M.notice("warn", t("p14.error"), { sub: t("p14.error.hint"), btn: { label: t("p14.rescan"), icon: "refresh-cw" } })) + head() +
-          projectCard({ scanBtn: M.btn(t("p14.rescan"), { icon: "refresh-cw" }) }) + stats() + problems() + removeCard() + closed(t("p14.sec.move"), 214) + nestsCard() + options(),
+        body: M.slot(M.notice("warn", t("p14.error"), { sub: t("p14.error.hint"), btn: { label: t("p14.rescan"), icon: "refresh-cw" } })) + head() +
+          projectCard() + stats() + problems() + removeCard() + closed(t("p14.sec.move"), MOVE) + nestsCard() + options(),
         bar: bar()
       };
     },
     offline: function () {
       return {
         pills: TA.pillsOff,
-        body: TA.slot(TA.offline()) + head() + projectCard({ disabled: true }) +
+        body: M.slot(M.offline()) + head() + projectCard({ disabled: true }) +
           M.empty({ icon: "search", title: t("p14.empty.title"), text: t("p14.empty"), btn: M.btn(t("p14.scan"), { icon: "search", disabled: true }), cls: "mt-4" })
       };
     },
     "no-claude": function () {
-      return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p13.no_claude.solo")) + head() + plan({ compact: true }), bar: bar() };
+      return { pills: TA.pillsNoClaude, body: TA.noClaude("p13.no_claude.solo", { solo: true }) + head() + plan({ compact: true }), bar: bar() };
     },
     stale: function () {
       return {
-        body: TA.slot(M.notice("warn", t("p14.stale"), { btn: { label: t("p14.rescan"), icon: "refresh-cw", primary: true } })) + head() + plan({ compact: true }),
+        body: M.slot(M.notice("warn", t("p14.stale"), { btn: { label: t("p14.rescan"), icon: "refresh-cw", primary: true } })) + head() + plan({ compact: true, noScan: true }),
         bar: bar({ off: true, hint: t("p14.stale") })
       };
     },

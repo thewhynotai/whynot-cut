@@ -33,14 +33,17 @@
 
   function hero(id) {
     return '<div class="t-meta tx-muted">' + t("a01.current") + '</div>' +
-      '<div class="m-row-top mt-1"><div class="m-grow">' + TA.select(M.mono(id || X.motion), { grow: true, cls: "ta-select-wrap" }) + '</div></div>' +
+      '<div class="m-row-top mt-1"><div class="m-grow">' + M.select(M.mono(id || X.motion), { grow: true, cls: "ta-select-wrap" }) + '</div></div>' +
       '<div class="t-meta tx-muted mt-1">' + M.txt(D.client) + ' · ' + t("a01.other", { n: 2 }) + '</div>';
   }
   function steps(states, cur, kind) { return '<div class="mt-4">' + M.steps(states, cur, kind) + '</div>'; }
-  var AT_BUILD = ["done", "done", "done", "run", "pend", "pend", "pend"];
+  /* the build is next and it is the editor's move: the segment is the wait colour and the icon is the pink waiting dot
+     (R2 designer P2-4: info is for information, waiting is for the person) */
+  var AT_BUILD = ["done", "done", "done", "wait", "pend", "pend", "pend"];
+  var RUNNING = ["done", "done", "done", "run", "pend", "pend", "pend"];
   function checks(o) {
     o = o || {};
-    var row = function (kind, text) { return '<div class="ta-bullet mt-2">' + M.status(kind) + '<div class="t-meta ms-2 m-grow">' + text + '</div></div>'; };
+    var row = function (kind, text) { return TA.row(M.status(kind), text); };
     return '<div class="t-meta tx-muted mt-3">' + t("a01.checks") + '</div>' +
       row(o.off ? "pending" : "ok", t("a01.chk.approved", { name: D.editor })) +
       row(o.off ? "pending" : "ok", t("a01.chk.probe", { v: X.aeVersion })) +
@@ -50,7 +53,7 @@
   function nextCard(o) {
     o = o || {};
     return M.card('<div class="m-row"><div class="t-label m-grow">' + t("a01.next.title") + '</div>' + (o.off ? '' : M.chip("ok", t("a01.status.approved"), "circle-check")) + '</div>' +
-      '<div class="t-meta tx-muted mt-1">' + t("a01.next.sub") + '</div>' + checks(o) + TA.trust(t("a01.undo")) +
+      '<div class="t-meta tx-muted mt-1">' + t("a01.next.sub") + '</div>' + checks(o) + '<div class="mt-2">' + M.trust(t("a01.undo")) + '</div>' +
       '<div class="m-col mt-4">' + M.btn(t("a01.start"), { kind: "primary", block: true, icon: "layers", disabled: o.disabled, focus: o.focus }) + '</div>', "mt-4");
   }
   function secondary(dis) {
@@ -65,7 +68,7 @@
       return {
         tab: "home", noclient: true,
         body: M.empty({ icon: "clapperboard", title: t("a01.empty.title"), text: t("a01.empty"),
-          btn: M.btn(t("p13.open_claude"), { kind: "primary", icon: "external-link" }) }) +
+          btn: M.btn(t("action.open_claude"), { kind: "primary", icon: "external-link" }) }) +
           '<div class="t-meta tx-muted tx-center mt-2">' + t("a01.empty.hint") + '</div>'
       };
     },
@@ -77,53 +80,54 @@
           M.card(M.skel(60) + M.skel(95, 16) + M.skel(80, 16) + '<div class="mt-3"></div><span class="m-skel-block" style="height:40px"></span>', "mt-4")
       };
     },
-    normal: function () { return { tab: "home", body: hero() + steps(AT_BUILD, 3, "info") + nextCard() + secondary() }; },
-    focus: function () { return { tab: "home", body: hero() + steps(AT_BUILD, 3, "info") + nextCard({ focus: true }) + secondary() }; },
+    normal: function () { return { tab: "home", body: hero() + steps(AT_BUILD, 3, "waiting") + nextCard() + secondary() }; },
+    focus: function () { return { tab: "home", body: hero() + steps(AT_BUILD, 3, "waiting") + nextCard({ focus: true }) + secondary() }; },
     blocked: function () {
       return {
         tab: "home", needs: 1,
-        body: hero() + steps(["done", "done", "done", "wait", "pend", "pend", "pend"], 3, "warn") +
+        body: hero() + steps(AT_BUILD, 3, "waiting") +
           '<div class="mt-4">' + gateFonts() + '</div>' + nextCard({ disabled: true, fonts: true }) + secondary()
       };
     },
     building: function () {
       return {
         tab: "home",
-        body: hero() + steps(AT_BUILD, 3, "busy") +
+        body: hero() + steps(RUNNING, 3, "busy") +
           M.card(TA.progress(t("a01.building", { n: 4, of: 7 }), 57, t("p13.elapsed", { t: M.html(M.mono("01:18")) }), t("a01.cancel")) +
-            '<div class="mt-3">' + TA.stages([["ok", M.raw("a03.probe.t")], ["busy", t("a01.step.build")], ["pending", M.raw("a01.status.assembled")]]) + '</div>', "mt-4") +
+            '<div class="mt-3">' + M.stages([["ok", M.raw("a03.probe.t")], ["busy", t("a01.step.build")], ["pending", M.raw("a01.status.assembled")]]) + '</div>', "mt-4") +
           secondary()
       };
     },
     error: function () {
       return {
         tab: "home",
-        body: TA.slot(M.notice("error", t("a01.error"), { sub: t("a01.error.hint"), btn: { label: t("p13.retry"), icon: "refresh-cw", primary: true } })) +
+        body: M.slot(M.notice("error", t("a01.error"), { sub: t("a01.error.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
           hero() + steps(["done", "done", "done", "fail", "pend", "pend", "pend"], 3, "error") + nextCard({ disabled: true }) +
-          '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link" }) + M.btn(t("p13.support"), { kind: "ghost", icon: "life-buoy" }) + '</div>'
+          '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link" }) + M.btn(t("action.support"), { kind: "ghost", icon: "life-buoy" }) + '</div>'
       };
     },
+    /* the service is off: ONE notice with ONE button. "After Effects isn't linked" is a result of that, not a second card
+       (R2 designer P1-6): the header pill says it, Start is the fix, and the build is off until it runs */
     offline: function () {
       return {
         tab: "home", pills: TA.pillsOff,
-        body: TA.slot(TA.offline()) + TA.slot(M.notice("warn", t("a01.unlinked"), { sub: M.raw("a03.no_bridge"), dismiss: false })) +
-          hero() + steps(AT_BUILD, 3, "pending") + nextCard({ disabled: true, off: true }) + secondary(true)
+        body: M.slot(M.offline()) + hero() + steps(AT_BUILD, 3, "pending") + nextCard({ disabled: true, off: true }) + secondary(true)
       };
     },
     "no-claude": function () {
-      return { tab: "home", pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("a01.no_claude", { primary: true })) + hero() + steps(AT_BUILD, 3, "warn") + nextCard({ disabled: true }) + secondary() };
+      return { tab: "home", pills: TA.pillsNoClaude, body: TA.noClaude("a01.no_claude", { primary: true }) + hero() + steps(AT_BUILD, 3, "waiting") + nextCard({ disabled: true }) + secondary() };
     },
-    stale: function () { return { tab: "home", body: TA.slot(TA.stale()) + hero() + steps(AT_BUILD, 3, "info") + nextCard() + secondary() }; },
+    stale: function () { return { tab: "home", body: M.slot(M.stale()) + hero() + steps(AT_BUILD, 3, "waiting") + nextCard() + secondary() }; },
     success: function () {
       return {
         tab: "home",
-        body: TA.slot(M.notice("ok", t("a01.done"))) + hero() + steps(["done", "done", "done", "done", "run", "pend", "pend"], 4, "info") +
+        body: M.slot(M.notice("ok", t("a01.done"))) + hero() + steps(["done", "done", "done", "done", "wait", "pend", "pend"], 4, "waiting") +
           M.card('<div class="m-row"><div class="t-label m-grow">' + M.mono(X.aep) + '</div>' + M.chip("ok", t("a01.status.assembled"), "circle-check") + '</div>' +
             '<div class="m-col mt-3">' + M.btn(t("a01.go_render"), { kind: "primary", block: true, icon: "monitor-play" }) + '</div>' +
             '<div class="ta-btnrow mt-2">' + M.btn(t("a01.open_aep"), { icon: "external-link" }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open" }) + '</div>', "mt-4")
       };
     },
-    long: function () { return { tab: "home", body: hero(X.long.motion) + steps(AT_BUILD, 3, "info") + nextCard() + secondary() }; }
+    long: function () { return { tab: "home", body: hero(X.long.motion) + steps(AT_BUILD, 3, "waiting") + nextCard() + secondary() }; }
   };
 
   TA.mount({

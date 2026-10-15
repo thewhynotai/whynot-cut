@@ -38,31 +38,32 @@
   ];
   var LONG = { name: "Al-Mustaqbal Family Medicine – Ramadan 2026 Caption Pack v3 (Arabic, two lines)", folder: "Al-Mustaqbal Family Medicine and Diabetes Care Center / Captions", cls: "ta-th-brand", ar: true };
 
-  function head() { return TA.back(t("home.tool.kalam")) + '<div class="t-title mt-2">' + t("p19.title") + '</div>'; }
+  function head() { return M.back(t("home.tool.kalam")) + '<div class="t-title mt-2">' + t("p19.title") + '</div>'; }
   function tools(o) {
     o = o || {};
     return '<div class="mt-3">' + M.input(t("p19.search"), {}) + '</div>' +
-      '<div class="m-row mt-2">' + TA.select(t("p19.all"), { grow: true }) + '<div class="ms-2">' + M.btn(t("p19.file"), { icon: "file-up" }) + '</div></div>' +
+      '<div class="m-row mt-2">' + M.select(t("p19.all"), { grow: true }) + '<div class="ms-2">' + M.btn(t("p19.file"), { icon: "file-up" }) + '</div></div>' +
       (o.count === false ? '' : '<div class="t-meta tx-muted mt-3">' + t("p19.count", { n: o.count || 12 }) + '</div>');
   }
+  /* the template's own preview is media: it is drawn left-to-right in both UIs (designer P2-13); the tile is M.tile.
+     o.on = selected (deep fill, a check and the word), o.fail = the template cannot hold captions (error border + reason) */
   function tile(x, o) {
     o = o || {};
     var cap = x.ar ? '<span class="ta-th-cap ta-th-ar ' + x.cls + '">قياس السكر الصبح</span>' : '<span class="ta-th-cap ' + x.cls + '">' + M.esc(x.low ? "Dr. Hany Saleh" : x.mid ? "Morning" : "Every morning") + '</span>';
-    var cls = "ta-tile" + (o.on ? " ta-tile-on" : "") + (o.focus ? " ta-tile-focus" : "");
-    return '<div class="ta-cell"><div class="' + cls + '" role="radio" tabindex="0" aria-checked="' + !!o.on + '">' +
-      '<div class="ta-th' + (x.mid ? " ta-th-mid" : "") + '">' + cap + '</div>' +
-      '<div class="t-label mt-2 ta-wrapname">' + M.ltr(x.name) + '</div>' +
-      '<div class="t-meta ta-wrapname">' + M.ltr(x.folder) + '</div>' +
-      (o.on ? '<div class="ta-tile-check mt-1">' + M.ico("circle-check", 12, "ink-text") + '<span class="t-meta ms-1">' + t("p19.selected") + '</span></div>' : '') +
-      '</div></div>';
+    var meta = M.ltr(x.folder) +
+      (o.on ? '<div class="ta-tile-check mt-1">' + M.ico("circle-check", 12, "ink-text") + '<span class="t-meta ms-1">' + t("p19.selected") + '</span></div>' : '');
+    return '<div class="ta-cell">' + M.tile({
+      media: '<div class="ta-th' + (x.mid ? " ta-th-mid" : "") + '">' + cap + '</div>',
+      label: M.ltr(x.name), meta: meta, on: o.on, fail: o.fail, focus: o.focus, reason: o.fail ? t("p19.no_text.reason") : ""
+    }) + '</div>';
   }
-  function tiles(on, focus, list) {
+  function tiles(on, focus, list, fail) {
     list = list || TPL;
-    return '<div class="ta-tiles mt-2">' + list.map(function (x, i) { return tile(x, { on: i === on, focus: i === focus }); }).join("") + '</div>';
+    return '<div class="ta-tiles mt-2">' + list.map(function (x, i) { return tile(x, { on: i === on && i !== fail, focus: i === focus, fail: i === fail }); }).join("") + '</div>';
   }
   function bar(o) {
     o = o || {};
-    return (o.field ? '<div class="m-row"><div class="t-label m-grow">' + t("p18.textfield") + '</div>' + TA.select(M.ltr("Caption Text")) + '</div><div class="mt-2"></div>' : '') +
+    return (o.field ? '<div class="m-row"><div class="t-label m-grow">' + t("p18.textfield") + '</div>' + M.select(M.ltr("Caption Text")) + '</div><div class="mt-2"></div>' : '') +
       '<div class="m-col">' + M.btn(t("p19.use"), { kind: "primary", block: true, icon: "check", disabled: !o.on }) + '</div>' +
       (o.on ? '' : '<div class="t-meta tx-muted mt-2">' + (o.hint || t("p19.pick_first")) + '</div>');
   }
@@ -75,7 +76,7 @@
       };
     },
     loading: function () {
-      var sk = function () { return '<div class="ta-cell"><div class="ta-tile ta-tile-static"><span class="m-skel-block" style="height:72px"></span>' + M.skel(70) + M.skel(45, 16) + '</div></div>'; };
+      var sk = function () { return '<div class="ta-cell"><div class="m-tile m-tile-plain"><span class="m-skel-block" style="height:72px"></span>' + M.skel(70) + M.skel(45, 16) + '</div></div>'; };
       return { body: head() + tools({ count: false }) + '<div class="mt-3">' + M.skel(30, 16) + '</div><div class="ta-tiles mt-2">' + sk() + sk() + sk() + sk() + '</div>', bar: bar() };
     },
     normal: function () { return { body: head() + tools() + tiles(-1), bar: bar() }; },
@@ -83,14 +84,14 @@
     focus: function () { return { body: head() + tools() + tiles(-1, 1), bar: bar() }; },
     "no-text": function () {
       return {
-        body: TA.slot(M.notice("error", t("p19.no_text", { name: M.html(M.ltr("Pop Word")) }), { sub: t("p19.no_text.hint"), btn: { label: t("p19.file"), icon: "file-up" } })) +
-          head() + tools() + tiles(3),
+        body: M.slot(M.notice("error", t("p19.no_text", { name: M.html(M.ltr("Pop Word")) }), { sub: t("p19.no_text.hint"), btn: { label: t("p19.file"), icon: "file-up" } })) +
+          head() + tools() + tiles(3, -1, null, 3),
         bar: bar({ hint: t("p19.no_text.hint") })
       };
     },
-    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p13.no_claude.solo")) + head() + tools() + tiles(-1), bar: bar() }; },
+    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.noClaude("p13.no_claude.solo", { solo: true }) + head() + tools() + tiles(-1), bar: bar() }; },
     stale: function () {
-      return { body: TA.slot(M.notice("warn", t("p19.stale"), { btn: { label: t("p19.refresh"), icon: "refresh-cw" } })) + head() + tools() + tiles(-1), bar: bar() };
+      return { body: M.slot(M.notice("warn", t("p19.stale"), { btn: { label: t("p19.refresh"), icon: "refresh-cw" } })) + head() + tools() + tiles(-1), bar: bar() };
     },
     long: function () { return { body: head() + tools() + tiles(0, -1, [LONG].concat(TPL.slice(0, 3))), bar: bar({ on: true, field: true }) }; }
   };

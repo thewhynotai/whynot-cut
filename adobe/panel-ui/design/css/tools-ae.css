@@ -3,7 +3,8 @@
    proposed --mk-* tokens of mockup.css. Same UXP limits as mockup.css: flexbox only, physical margins (swapped under
    .m-rtl), no shadows, no effects, no opacity, no flex spacing property, every control a 2 px rest border equal to its
    fill and radius 8, <span> chips only at radius 999. Paddings count the border: 2 px border + 2/6/10/14 = 4/8/12/16.
-   Components that look shared (candidates to promote into mockup.css) are marked PROMOTE. */
+   R2: the segmented control, radio, toggle, select, slider, section header, confirm dialog, stage list, tile, media
+   well and bullet now live in mockup.css (M.segmented, M.radio ...). Only what is specific to this group stays here. */
 
 /* ---- 280 px check (CEP minimum width): render_280.py loads w=300 (300 px logic) and adds .m-w280 ---- */
 .m-panel.m-w280 { width: 280px; }
@@ -13,67 +14,16 @@
 .ta-wrap > .ta-wi { margin: 8px 8px 0 0; }
 .m-rtl .ta-wrap > .ta-wi { margin: 8px 0 0 8px; }
 .ta-end { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; }
-.ta-self-c { align-self: center; }
-.ta-ltr { direction: ltr; }
 .ta-wrapname { white-space: normal; overflow-wrap: anywhere; }
-.ta-num { display: block; font: 600 15px/20px var(--twn-font-ui); font-variant-numeric: tabular-nums; }
-.m-rtl .ta-num { font: 600 16px/24px var(--twn-font-ui); }
-.ta-bullet { display: flex; flex-direction: row; align-items: flex-start; }
-.ta-bullet > .m-ico { margin-top: 2px; }
-.m-rtl .ta-bullet > .m-ico { margin-top: 4px; }
+/* a status row: an icon (ok, warn, info, folder) and one meta line; not a list bullet (M.bullet is the 4 px dot) */
+.ta-srow { display: flex; flex-direction: row; align-items: flex-start; }
+.ta-srow > .m-ico { margin-top: 2px; }
+.m-rtl .ta-srow > .m-ico { margin-top: 4px; }
+.ta-btnrow { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
+.ta-btnrow > .m-btn + .m-btn { margin-left: 8px; }
+.m-rtl .ta-btnrow > .m-btn + .m-btn { margin-left: 0; margin-right: 8px; }
 
-/* ---- PROMOTE: segmented control (Reels / Podcast, Simple / Advanced, Cut / Markers, language). Selected = #383838,
-   like the language switch, so the screen keeps its one violet fill ---- */
-.ta-seg { display: flex; flex-direction: row; align-items: center; height: 32px; border-radius: 8px; background: var(--mk-control); }
-.ta-seg-opt {
-  display: flex; flex-direction: row; align-items: center; justify-content: center; flex: 1 1 0; min-width: 0; height: 32px;
-  padding: 0 6px; border: 2px solid var(--mk-control); border-radius: 8px; background: var(--mk-control);
-  color: var(--twn-text-muted); white-space: nowrap; cursor: pointer; font: 600 var(--mk-type-label) var(--twn-font-ui);
-  transition: background-color var(--mk-dur-fast) var(--mk-ease), border-color var(--mk-dur-fast) var(--mk-ease);
-}
-.m-rtl .ta-seg-opt { font: 600 var(--mk-type-ar-label) var(--twn-font-ar); }
-.ta-seg-on { background: var(--mk-control-pressed); border-color: var(--mk-control-pressed); color: var(--twn-text); }
-.ta-seg-focus { border-color: var(--mk-focus-border); }
-.ta-seg-dis, .ta-seg-dis .ta-seg-opt { background: var(--mk-control-disabled); border-color: var(--mk-control-disabled); color: var(--mk-text-disabled); cursor: default; }
-
-/* ---- PROMOTE: radio row (a 32 px control row with a 20 px ring; the dot is a <span>) ---- */
-.ta-radio { display: flex; flex-direction: row; align-items: center; min-height: 32px; padding: 0 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
-.ta-radio-focus { border-color: var(--mk-focus-border); }
-.ta-dot { display: flex; align-items: center; justify-content: center; flex: 0 0 20px; width: 20px; height: 20px; border: 2px solid var(--mk-border-input); border-radius: 999px; }
-.ta-dot-on { border-color: var(--twn-text); }
-.ta-dot-in { display: block; width: 8px; height: 8px; border-radius: 999px; background: var(--twn-text); }
-.ta-radio-dis .ta-dot { border-color: var(--mk-text-disabled); }
-.ta-radio-dis .t-label, .ta-radio-dis .t-meta { color: var(--mk-text-disabled); }
-
-/* ---- PROMOTE: toggle button (track V1 / A1 ...): on = #383838 + check icon, off = #242424 + empty square, locked = lock ---- */
-.ta-tog {
-  display: flex; flex-direction: row; align-items: center; height: 32px; padding: 0 10px; border: 2px solid var(--mk-control);
-  border-radius: 8px; background: var(--mk-control); color: var(--twn-text-muted); white-space: nowrap; cursor: pointer;
-  font: 600 var(--mk-type-label) var(--twn-font-ui);
-}
-.ta-tog .m-ico { margin-right: 4px; }
-.m-rtl .ta-tog .m-ico { margin-right: 0; margin-left: 4px; }
-.ta-tog-on { background: var(--mk-control-pressed); border-color: var(--mk-control-pressed); color: var(--twn-text); }
-.ta-tog-focus { border-color: var(--mk-focus-border); }
-.ta-tog-dis { background: var(--mk-control-disabled); border-color: var(--mk-control-disabled); color: var(--mk-text-disabled); cursor: default; }
-
-/* ---- PROMOTE: select (a secondary control with a trailing chevron-down) ---- */
-.ta-select { justify-content: space-between; }
-.ta-select > .m-block { margin-right: 8px; overflow: hidden; text-overflow: ellipsis; }
-.m-rtl .ta-select > .m-block { margin-right: 0; margin-left: 8px; }
-.m-btn.ta-select .m-ico { margin: 0; }
-.ta-select-grow { flex: 1 1 auto; min-width: 0; }
-
-/* ---- PROMOTE: slider (track, violet-text fill, a 20 px thumb control); fills from the reading start ---- */
-.ta-slider { display: flex; flex-direction: row; align-items: center; height: 32px; }
-.ta-slider-fill { display: block; flex: 0 0 auto; height: 4px; border-radius: 2px; background: var(--twn-primary-text); }
-.ta-slider-rest { display: block; flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--twn-track); }
-.ta-thumb { display: block; flex: 0 0 20px; width: 20px; height: 20px; border: 2px solid var(--twn-text); border-radius: 8px; background: var(--twn-text); cursor: pointer; }
-.ta-thumb-focus { border-color: var(--mk-focus-border); }
-.ta-slider-dis .ta-slider-fill { background: var(--mk-text-disabled); }
-.ta-slider-dis .ta-thumb { background: var(--mk-text-disabled); border-color: var(--mk-text-disabled); cursor: default; }
-
-/* ---- stats strip (Tidy scan, Hush summary): 2 per row at 300 and 360, 4 per row at 480 ---- */
+/* ---- stats strip (Tidy scan, Hush summary): 2 per row at 300 and 360, 4 per row at 480; the number is .t-stat ---- */
 .ta-stats { display: flex; flex-direction: row; flex-wrap: wrap; margin: 0 -4px; }
 .ta-stat { display: flex; flex-direction: column; flex: 0 0 50%; width: 50%; padding: 4px; }
 .m-w480 .ta-stat { flex-basis: 25%; width: 25%; }
@@ -81,10 +31,9 @@
 .m-w480 .ta-stats-3 .ta-stat { flex-basis: 33.333%; width: 33.333%; }
 .ta-stat-in { display: flex; flex-direction: column; flex: 1 1 auto; padding: 8px; border-radius: 8px; background: var(--twn-frame-bg); }
 
-/* ---- PROMOTE: list row with a checkbox, a name that wraps (never cut: the editor decides on it) and a size ---- */
+/* ---- list row with a checkbox, a name that wraps (never cut: the editor decides on it) and a size ---- */
 .ta-checkrow { display: flex; flex-direction: row; align-items: flex-start; min-height: 32px; padding: 2px 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
 .ta-checkrow > .m-box { margin-top: 4px; }
-.m-rtl .ta-checkrow > .m-box { margin-top: 4px; }
 .ta-checkrow-focus { border-color: var(--mk-focus-border); }
 .ta-checkrow-dis { cursor: default; }
 .ta-checkrow-dis .m-box { border-color: var(--mk-text-disabled); }
@@ -95,20 +44,6 @@
 .m-rtl .ta-rowend { margin-left: 0; margin-right: 8px; }
 .ta-playbtn { margin-top: -4px; }
 .ta-rowend .m-btn { height: 32px; }
-
-/* ---- PROMOTE: section header (a control that opens or closes a section) ---- */
-.ta-sechead { display: flex; flex-direction: row; align-items: center; min-height: 40px; padding: 0 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
-
-/* ---- PROMOTE: confirm dialog (G6): an in-panel sheet in the pinned bar, warn tint; danger when there is no backup ---- */
-.ta-dialog { display: flex; flex-direction: column; padding: 11px; border: 1px solid var(--mk-warn-line); border-radius: 16px; background: var(--mk-warn-tint); }
-.ta-dialog-danger { border-color: var(--mk-error-line); background: var(--mk-error-tint); }
-.ta-dialog .m-chip-mono { height: auto; min-height: 24px; padding: 4px 8px; }
-.ta-dialog .ta-btnrow > .m-btn { flex: 1 1 0; min-width: 0; }
-.ta-btnrow { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
-.ta-btnrow > .m-btn + .m-btn { margin-left: 8px; }
-.m-rtl .ta-btnrow > .m-btn + .m-btn { margin-left: 0; margin-right: 8px; }
-/* a mono chip that may wrap: backup names and paths are read in full */
-.ta-monowrap { display: flex; flex-direction: row; align-items: center; min-height: 24px; padding: 4px 8px; border-radius: 4px; background: var(--twn-frame-bg); color: var(--twn-text); white-space: normal; overflow-wrap: anywhere; }
 
 /* ---- waveform (Hush): never mirrors; silences on an amber tint, filler words on a violet tint; legend carries words ---- */
 .ta-wave { display: flex; flex-direction: row; align-items: center; height: 72px; padding: 8px; border-radius: 8px; background: var(--twn-frame-bg); direction: ltr; }
@@ -123,24 +58,18 @@
 .ta-wave-dis .ta-bar { background: var(--mk-text-disabled); }
 .ta-ruler { display: flex; flex-direction: row; align-items: center; direction: ltr; }
 
-/* ---- PROMOTE: stage list (Kalam progress, After Effects build and render) ---- */
-.ta-stage { display: flex; flex-direction: row; align-items: flex-start; padding: 8px 0; }
-.ta-stage > .m-ico { margin-top: 2px; }
-.m-rtl .ta-stage > .m-ico { margin-top: 4px; }
-
-/* ---- tiles: MOGRT gallery and After Effects frames; 2 per row at 300 and 360, 3 at 480 ---- */
+/* ---- tiles: caption templates and After Effects frames, M.tile in 2-per-row cells at 300 and 360, 3 at 480 ---- */
 .ta-tiles { display: flex; flex-direction: row; flex-wrap: wrap; margin: 0 -4px; }
 .ta-cell { display: flex; flex-direction: column; flex: 0 0 50%; width: 50%; padding: 4px; }
 .m-w480 .ta-cell { flex-basis: 33.333%; width: 33.333%; }
-.ta-tile { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; padding: 6px; border: 2px solid var(--mk-card-solid); border-radius: 8px; background: var(--mk-card-solid); cursor: pointer; }
-.ta-tile-on { background: var(--twn-deep); border-color: var(--twn-deep); }
-.ta-tile-focus { border-color: var(--mk-focus-border); }
-.ta-tile-static { cursor: default; }
-.ta-tile .t-meta { color: var(--twn-text-muted); }
-.ta-tile-on .t-meta { color: var(--twn-text); }
+.ta-cell > .m-tile { flex: 1 1 auto; }
+.ta-tile-check { display: flex; flex-direction: row; align-items: center; height: 20px; }
+/* a 9:16 media well centred in its tile */
+.ta-mediarow { display: flex; flex-direction: row; justify-content: center; }
 
-/* thumbnail stand-ins: these hex values stand for the template's own thumbnail image (content, not UI colour) */
-.ta-th { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 72px; padding: 8px 4px; border-radius: 4px; background: #1C1C1C; overflow: hidden; }
+/* thumbnail stand-ins: these hex values stand for the template's own thumbnail image (content, not UI colour).
+   R2 (designer P2-13): a media preview never mirrors, so the lower third stays on the left in Arabic too (direction ltr) */
+.ta-th { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 72px; padding: 8px 4px; border-radius: 4px; background: #1C1C1C; overflow: hidden; direction: ltr; }
 .ta-th-cap { display: block; padding: 0 4px; border-radius: 4px; white-space: nowrap; font: 600 11px/16px var(--twn-font-ui); color: #FFFFFF; }
 .ta-th-ar { font: 600 12px/20px var(--twn-font-ar); direction: rtl; }
 .ta-th-box { background: #000000; }
@@ -150,19 +79,20 @@
 .ta-th-low { align-self: flex-start; background: #FFFFFF; color: #111111; }
 .ta-th-mid { justify-content: center; }
 .ta-th-dim { color: #9A9A9A; }
-.ta-tile-check { display: flex; flex-direction: row; align-items: center; height: 20px; }
 
-/* After Effects frame tiles (the same tile, a frame-bg well with the scene's stand-in) */
-.ta-frame { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 88px; border-radius: 4px; background: var(--twn-frame-bg); overflow: hidden; }
-.m-w300 .ta-frame { height: 72px; }
-.ta-frame-txt { display: block; padding: 0 8px; text-align: center; font: 600 12px/20px var(--twn-font-ar); color: #FFFFFF; direction: rtl; }
-.ta-frame-num { display: block; font: 600 20px/28px var(--twn-font-ui); color: #FFFFFF; }
-.ta-frame-bar { display: block; width: 48px; height: 4px; border-radius: 2px; background: #D95C9B; margin-top: 4px; }
+/* After Effects frame stand-ins (the content drawn inside an M.media well; hex values are the scene's own pixels) */
+.ta-fr-txt { display: block; padding: 0 2px; text-align: center; font: 600 10px/14px var(--twn-font-ar); color: #FFFFFF; direction: rtl; }
+.ta-fr-num { display: block; font: 600 20px/28px var(--twn-font-ui); color: #FFFFFF; }
+.ta-fr-bar { display: block; width: 24px; height: 3px; border-radius: 2px; background: #D95C9B; margin-top: 4px; }
+.ta-fr-line { display: block; width: 28px; height: 3px; border-radius: 2px; background: #8A8A8A; margin-top: 3px; }
+.ta-fr-line-s { width: 20px; }
+.ta-fr-wide .ta-fr-txt { font-size: 12px; line-height: 20px; }
+.ta-fr-wide .ta-fr-bar { width: 36px; }
+/* the safe-area well of a frame is smaller than a tile: tighter margins in the 36 x 64 board frames */
+.ta-board-f .m-media-safe { margin: 4px; padding: 2px; }
 
-/* storyboard strip (A-02): four small frames in a row */
-.ta-board { display: flex; flex-direction: row; direction: ltr; }
-.ta-board-f { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1 1 0; min-width: 0; height: 48px; border-radius: 4px; background: var(--twn-frame-bg); }
-.ta-board-f + .ta-board-f { margin-left: 4px; }
+/* storyboard strip (A-02): five small 9:16 frames in a row, never mirrored */
+.ta-board { display: flex; flex-direction: row; justify-content: space-between; direction: ltr; }
 
 /* ---- caption list (Kalam results) and scene list (motion plan) ---- */
 .ta-cap { display: flex; flex-direction: row; align-items: flex-start; padding: 8px 0; }
@@ -181,11 +111,6 @@
 .ta-flowstep { display: flex; flex-direction: row; align-items: center; min-height: 24px; }
 .ta-stepnum { display: flex; align-items: center; justify-content: center; flex: 0 0 20px; width: 20px; height: 20px; border-radius: 999px; background: var(--mk-control); color: var(--twn-text); font: 600 11px/16px var(--twn-font-ui); }
 
-/* After Effects: verdict rows (Verified / Not verified / Needs you) */
-.ta-verdict { display: flex; flex-direction: row; align-items: flex-start; padding: 8px 0; }
-.ta-verdict > .m-ico { margin-top: 2px; }
-.m-rtl .ta-verdict > .m-ico { margin-top: 4px; }
-
 /* long names inside sentences (sequence, project) break only when they cannot fit, never run out of the panel */
 .m-panel .t-meta .mono, .m-panel .t-body .mono, .m-panel .t-label .mono, .m-panel .t-title .mono { overflow-wrap: anywhere; }
 .m-panel .t-meta, .m-panel .t-body, .m-panel .t-label { overflow-wrap: anywhere; }
@@ -195,10 +120,12 @@
 .m-btn.ta-iconbtn .m-ico { margin: 0; }
 .m-btn.ta-iconbtn .m-block { display: none; }
 
-/* a select whose value is an id the editor reads (motion project): wraps instead of cutting */
+/* a select whose value is a name the editor reads (motion project, a saved preset): it wraps instead of being cut
+   (R2 designer P2-16: the Arabic preset label was truncated at 300) */
 .m-btn.ta-select-wrap { height: auto; min-height: 32px; padding: 2px 10px; white-space: normal; }
-.ta-select-wrap > .m-block { overflow: visible; overflow-wrap: anywhere; }
-
-
-/* PROMOTE: the shared keycap on the danger fill (mockup.css styles it on primary and disabled only) */
-.m-btn-danger .m-kbd { border-color: var(--twn-on-error); color: var(--twn-on-error); }
+.ta-select-wrap > .m-block { overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.ta-board-f .ta-fr-num { font: 600 14px/20px var(--twn-font-ui); }
+.ta-board-f .ta-fr-txt { font-size: 9px; line-height: 12px; }
+.ta-board-f .ta-fr-bar { width: 16px; }
+.ta-board-f .ta-fr-line { width: 20px; }
+.ta-board-f .ta-fr-line-s { width: 14px; }

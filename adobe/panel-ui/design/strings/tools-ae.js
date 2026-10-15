@@ -42,27 +42,27 @@
     "p13.last.now": "Last: {text} · just now",
     "p13.none": "Nothing yet.",
     "p13.last.tidy": "214 files sorted", "p13.ago.tidy": "1" + NB + "d ago",
-    "p13.last.hush": "18 pauses cut", "p13.ago.hush": "2" + NB + "h ago",
+    "p13.last.hush": "24 pieces cut", "p13.ago.hush": "2" + NB + "h ago",
     "p13.kalam.last": "64 captions placed",
-    "p13.week": "This week the tools saved you about 2" + NB + "h 10" + NB + "min.",
+    "p13.week": "This week the tools saved about 1 h 10 min · estimate.",
     "p13.back": "Tools",
     "p13.elapsed": "Elapsed {t}",
     "p13.stop": "Stop",
     "p13.done": "Done",
-    "p13.retry": "Try again",
-    "p13.check_again": "Check again",
-    "p13.open_claude": "Open Claude",
-    "p13.support": "Contact support",
-    "p13.stale": "WhyNot Cut was updated. Close Premiere and open it again, then press Check again.",
+
+
+
+
+
     "p13.dialog.changes": "What will change",
     "p13.dialog.keep": "Keep my project",
     "p16.show_words": "Show the {n} words",
-    "p13.service.off": "The WhyNot Cut service isn't running.",
-    "p13.service.off.hint": "Start it, then carry on. Nothing was lost.",
-    "p13.start_service": "Start the service",
-    "p13.claude_window": "Claude opens in its own window.",
-    "p13.no_claude": "Claude isn't open. The tools still work; captions are made without correction until you open it.",
-    "p13.no_claude.solo": "Claude isn't open. You don't need it here: this tool works on its own.",
+
+
+
+
+    "p13.no_claude": "Claude isn't signed in. The tools still work; captions are made without correction until you sign in.",
+    "p13.no_claude.solo": "Claude isn't signed in. You don't need it here: this tool works on its own.",
 
     /* P-14 Tidy scan and plan */
     "p14.mode.reels": "Reels", "p14.mode.podcast": "Podcast",                       /* NEW */
@@ -114,19 +114,19 @@
 
     /* P-15 Tidy report, put back, podcast sync */
     "p15.done": "Project organised. The old copy is kept.",                         /* NEW */
-    "p15.undo": "Put them back",
+
     "p15.sync": "Sync the podcast by sound",                                       /* NEW */
     "p15.sync.progress": "Matching clip {n} of {of} · {name}",                     /* NEW */
     "p15.sync.skipped": "Left out: {name} (no clear sound match)",                 /* NEW */
     "p15.sync.done": "Synced sequence ready: {name}",                              /* NEW */
     "p15.applying": "Cleaning the project · {n} of {of}",
-    "p15.value": "About 25" + NB + "min of sorting saved.",
+    "p15.value": "About 25 min of sorting saved · estimate.",
     "p15.counts": "What Tidy did",
     "p15.moved": "Moved into bins", "p15.removed": "Removed from the project", "p15.renamed": "Nests renamed",
     "p15.bins": "Empty bins removed",
-    "p15.skipped": "{s} kept because they turned out to be in use.",
+    "p15.skipped": "{s} of the {r} planned items were kept because they turned out to be in use.",
     "p15.where": "Where things went",
-    "p15.where.more": "Show all 9 bins",
+
     "p13.sec": "{n}" + NB + "s",
     "p15.backup.title": "Put everything back",
     "p15.undo.hint": "Opens the copy saved before cleaning, as it was. The organised project stays too.",
@@ -138,9 +138,9 @@
     "p15.sync.skip_hint": "Place it by hand, or record a clap at the start next time.",
     "p15.open_seq": "Open the synced sequence",
     "p15.error": "1 clip couldn't be exported, so it was left out: {name}",
-    "p15.error.hint": "The other 7 were synced. The file may be open in another app: close it, then try again.",
+    "p15.error.hint": "The other 6 were synced. The file may be open in another app: close it, then try again.",
     "p15.retry_clip": "Try this clip again",
-    "p15.offline": "The WhyNot Cut service isn't running, so podcast sync is off. Put them back still works.",
+
 
     /* P-16 Hush scan and preview */
     "p16.target": "Target: {label}",                                               /* NEW */
@@ -179,11 +179,11 @@
     "p16.options": "How to cut",
     "p16.ripple": "Close the gaps after cutting",
     "p16.link": "Keep audio linked to video",
-    "p16.backup": "Keep a backup copy of the sequence",
+
     "p16.presets": "Preset: Sahha talking head",
     "p16.save_preset": "Save preset",
     "p16.bar": "Cuts {n} pieces · {t} shorter",
-    "p16.bar.trust": "Your original sequence is kept untouched as a copy first.",
+    "p16.bar.trust": "A backup copy of your sequence is always saved first.",
     "p16.bar.markers": "Adds {n} markers. Nothing is cut.",
     "p16.dialog.title": "Cut {n} pieces from {seq}?",
     "p16.dialog.c1": "{s} pauses and {f} filler words are removed.",
@@ -191,7 +191,7 @@
     "p16.dialog.c3": "Tracks that move: {tracks}",
     "p16.dialog.backup": "Your sequence is copied first, as:",
     "p16.dialog.keep": "Keep my sequence",
-    "p16.dialog.nobackup": "No backup copy is kept. Only Edit > Undo in Premiere can bring it back.",
+    "p16.dialog.nobackup": "The backup copy couldn't be made this time. Without it, only Edit > Undo in Premiere can bring the sequence back.",
     "p16.stage.export": "Exporting audio from Premiere",
     "p16.stage.silence": "Finding pauses",
     "p16.stage.fillers": "Finding filler words",
@@ -202,9 +202,9 @@
 
     /* P-17 Hush result and undo */
     "p17.result": "Cut {n} pieces. The sequence is {time} shorter.",               /* NEW */
-    "p17.value": "{n} pauses cut · saved you about 12" + NB + "min of editing",
+    "p17.value": "{n} pieces cut · about {m} min of editing saved · estimate",
     "p17.backup": "Your original is kept, untouched, as:",                         /* NEW */
-    "p17.undo": "Undo",                                                             /* NEW */
+
     "p17.markers": "Added {n} markers. Nothing was cut.",                          /* NEW */
     "p17.undo.hint": "Brings the original back under its own name. The cut version is kept as:",
     "p17.reveal": "Show in project",
@@ -214,7 +214,7 @@
     "p17.partial.hint": "They sit on V2, where a clip is locked. Unlock it in Premiere, then cut the rest.",
     "p17.cut_rest": "Cut the skipped pieces",
     "p17.undone": "Restored {name}. The cut version is kept as:",
-    "p17.offline": "The WhyNot Cut service isn't running. Undo still works: it only needs Premiere.",
+
 
     /* P-18 Kalam setup */
     "p18.lang": "Language", "p18.lang.ar": "Arabic", "p18.lang.en": "English", "p18.lang.other": "Other", /* NEW */
@@ -253,7 +253,7 @@
     "p18.model_busy": "The captions pack is downloading · {pct}%",
     "p18.model_busy.sub": "Start waits for it. The smaller model works now: it's faster but less exact.",
     "p18.wait_pack": "Start turns on when the pack has downloaded.",
-    "p18.no_claude": "Claude isn't open, so captions will be made without correction.",
+    "p18.no_claude": "Claude isn't signed in, so captions will be made without correction.",
 
     /* P-19 Kalam caption template gallery */
     "p19.search": "Search templates", "p19.all": "All folders", "p19.file": "From a file…", /* NEW */
@@ -281,7 +281,7 @@
     "p20.device.gpu": "On the graphics card",
     "p20.running": "Timing each word · stage {n} of {of}",
     "p20.done": "{n} captions placed in {seq}.",
-    "p20.value": "Saved you about 40" + NB + "min of typing.",
+    "p20.value": "About 40 min of typing saved · estimate.",
     "p20.corrected": "Corrected with {client}'s rules and glossary.",
     "p20.reveal": "Show SRT file",
     "p20.fix": "Fix captions with Claude",
@@ -293,7 +293,7 @@
     "p20.error.hint": "Try again runs it on the processor. It's slower, about 2" + NB + "min.",
     "p20.lost": "The connection to the WhyNot Cut service was lost while listening.",
     "p20.lost.hint": "Start it, then press Try again. Nothing was placed in your sequence.",
-    "p20.no_claude": "Claude isn't open, so Fix captions is off. Your captions are placed and saved.",
+    "p20.no_claude": "Claude isn't signed in, so Fix captions is off. Your captions are placed and saved.",
 
     /* A-01 After Effects home and motion pipeline */
     "a01.pill.host": "After Effects",                                               /* NEW */
@@ -320,11 +320,11 @@
     "a01.cancel": "Cancel",
     "a01.error": "After the build, the project didn't match the plan: scene 5 has no title.",
     "a01.error.hint": "Try again builds it once more. If it fails again, contact support.",
-    "a01.unlinked": "After Effects isn't linked to the WhyNot Cut service.",
+
     "a01.done": "Built and checked. Render the video next.",
     "a01.go_render": "Go to render",
     "a01.blocked": "The build can't start yet: 1 check needs you.",
-    "a01.no_claude": "Claude isn't open, so the build can't start: Claude runs the checks and the build.",
+    "a01.no_claude": "Claude isn't signed in, so the build can't start: Claude runs the checks and the build.",
     "a01.stale": "WhyNot Cut was updated. Close After Effects and open it again, then press Check again.",
 
     /* A-02 Motion plan approval */
@@ -341,8 +341,8 @@
     "a02.review.note": "Scene 4 softened to “may help” instead of “treats”.",
     "a02.numbers.hint": "Numbers appear only as the speaker said them.",
     "a02.assets": "Icons, music and style",
-    "a02.icons": "6 icons · free licence (ISC)",
-    "a02.music": "Music: Calm Pulse · CC-BY, credited in the post",
+    "a02.icons": "6 free icons, we may use them",
+    "a02.music": "Music: Calm Pulse. Credit the artist in the post (it's in the publish pack).",
     "a02.recipe": "1 change from the usual style: no ending card.",
     "a02.pending": "Waiting",
     "a02.as": "Approving as {name}",
@@ -361,7 +361,7 @@
     "a02.done": "Approved. Start the build from Home.",
     "a02.done_by": "Approved by {name} · {time}",
     "a02.go_home": "Go to Home",
-    "a02.no_claude": "Claude isn't open, so the claims review can't run and Approve stays off.",
+    "a02.no_claude": "Claude isn't signed in, so the claims review can't run and Approve stays off.",
 
     /* A-03 After Effects gates and Needs-you cards */
     "a03.probe": "Checking Arabic text in After Effects {version}. This happens once per version.", /* NEW */
@@ -390,7 +390,7 @@
     "a03.need.numbers": "Confirm 2 numbers in the plan.",
     "a03.need.look": "The final look and the export are yours: colour, loudness and export settings.",
     "a03.need.music.btn": "Hear the tracks", "a03.need.numbers.btn": "Open the plan", "a03.need.look.btn": "Open project",
-    "a03.no_claude": "Claude isn't open, so the Arabic text check can't run.",
+    "a03.no_claude": "Claude isn't signed in, so the Arabic text check can't run.",
 
     /* A-04 Motion render, frames and handoff */
     "a04.empty.title": "Nothing rendered yet",                                     /* NEW */
@@ -411,14 +411,25 @@
     "a04.v.needs.t": "Final look and export, music choice.",
     "a04.v.not.fail": "Scene 5: the title touches the safe edge. Claude is fixing it.",
     "a04.rerender": "Re-render scenes",
-    "a04.f.pass": "Pass", "a04.f.fix": "Fix", "a04.f.pending": "Checking",
+    "a04.f.pass": "Pass", "a04.f.fix": "Claude is fixing", "a04.f.pending": "Claude is checking",
     "a04.error": "The render failed at piece 3: the D: drive is full.",
     "a04.error.hint": "Free up about 4" + NB + "GB on D:, then try again.",
     "a04.done": "Quality check passed. {item} is done.",
-    "a04.value": "About 3" + NB + "h of motion work saved.",
+    "a04.value": "About 3 h of motion work saved · estimate.",
     "a04.handoff": "Handoff written: the editor notes and the publish package.",
     "a04.verdict": "Report",
-    "a04.no_claude": "Claude isn't open, so the quality check can't look at the frames."
+    "a04.no_claude": "Claude isn't signed in, so the quality check can't look at the frames.",
+    "p15.offline.hint": "Podcast sync is off. Undo still works.",
+    "p17.offline.hint": "Undo still works: it only needs Premiere.",
+    "p20.retry_wait": "Try again turns on once the service is running.",
+    "a02.num.twice": "(twice in a row)",
+    "a02.retry_first": "Try again first.",
+    "a04.f.editor": "Needs your editor",
+    "a04.f.stale": "Out of date",
+    "a04.open_anyway": "Open anyway",
+    "a04.wait_qc": "Wait for QC",
+    "a04.wait_qc.hint": "Open project turns on when the quality check passes.",
+    "p19.no_text.reason": "No editable text"
   });
 
   Object.assign(window.MOCK_STRINGS.ar, {
@@ -436,8 +447,8 @@
     "p13.need_project.title": "مفيش مشروع مفتوح",
     "p13.open_project": "افتح مشروع",
     "p13.chip.downloading": "بتنزل",
-    "p13.model_offer": "حزمة الكابشن لسه بتنزل. تقدر تبدأ دلوقتي بالموديل الأصغر: أسرع بس أقل دقة.",
-    "p13.use_small": "استخدم الموديل الأصغر",
+    "p13.model_offer": "حزمة الكابشن لسه بتنزل. تقدر تبدأ دلوقتي بالنموذج الأصغر: أسرع بس أقل دقة.",
+    "p13.use_small": "استخدم النموذج الأصغر",
     "p13.error": "مقدرناش نقرا المشروع المفتوح من Premiere.",
     "p13.error.hint": "جرّب تاني. لو فشلت تاني، احفظ المشروع واقفل Premiere وافتحه من جديد.",
     "p13.success": "الكابشن خلص: اتحط {n} كابشن في {seq}.",
@@ -445,27 +456,27 @@
     "p13.last.now": "آخر نتيجة: {text} · دلوقتي",
     "p13.none": "لسه مفيش.",
     "p13.last.tidy": "اترتّب 214 ملف", "p13.ago.tidy": "يوم",
-    "p13.last.hush": "اتشال 18 سكتة", "p13.ago.hush": "ساعتين",
+    "p13.last.hush": "اتقطّع 24 قطعة", "p13.ago.hush": "ساعتين",
     "p13.kalam.last": "اتحط 64 كابشن",
-    "p13.week": "الأسبوع ده الأدوات وفّرت لك حوالي 2" + NB + "ساعة و10" + NB + "دقايق.",
+    "p13.week": "الأسبوع ده الأدوات وفّرت حوالي ساعة و10 دقايق · تقدير.",
     "p13.back": "الأدوات",
     "p13.elapsed": "عدّى {t}",
     "p13.stop": "وقّف",
     "p13.done": "تمام",
-    "p13.retry": "جرّب تاني",
-    "p13.check_again": "اتأكد تاني",
-    "p13.open_claude": "افتح Claude",
-    "p13.support": "كلّم الدعم",
-    "p13.stale": "WhyNot Cut اتحدّث. اقفل Premiere وافتحه تاني، وبعدين دوس «اتأكد تاني».",
+
+
+
+
+
     "p13.dialog.changes": "اللي هيتغيّر",
-    "p13.dialog.keep": "سيب مشروعي زي ما هو",
+    "p13.dialog.keep": "خلّي مشروعي زي ما هو",
     "p16.show_words": "اعرض الكلمات ({n})",
-    "p13.service.off": "خدمة WhyNot Cut مش شغالة.",
-    "p13.service.off.hint": "شغّلها وكمّل. مفيش حاجة ضاعت.",
-    "p13.start_service": "شغّل الخدمة",
-    "p13.claude_window": "Claude بيفتح في نافذة لوحده.",
-    "p13.no_claude": "Claude مش مفتوح. الأدوات شغالة، بس الكابشن هيتعمل من غير تصحيح لحد ما تفتحه.",
-    "p13.no_claude.solo": "Claude مش مفتوح. مش محتاجه هنا: الأداة دي شغالة لوحدها.",
+
+
+
+
+    "p13.no_claude": "Claude مش مسجّل دخول. الأدوات شغالة، بس الكابشن هيتعمل من غير تصحيح لحد ما تسجّل دخول.",
+    "p13.no_claude.solo": "Claude مش مسجّل دخول. مش محتاجه هنا: الأداة دي شغالة لوحدها.",
 
     /* P-14 */
     "p14.mode.reels": "ريلز", "p14.mode.podcast": "بودكاست",
@@ -483,23 +494,23 @@
     "p14.mode.hint.podcast": "بودكاست: فولدر لكل كاميرا (Cam 1، Cam 2 …) والمايكات لوحدها.",
     "p14.rescan": "افحص تاني",
     "p14.empty.title": "لسه متفحصش",
-    "p14.empty": "افحص المشروع عشان تشوف Tidy هينضّف إيه. مفيش حاجة هتتغيّر قبل ما توافق.",
+    "p14.empty": "افحص المشروع عشان تشوف إيه اللي هيتنضّف. مفيش حاجة هتتغيّر قبل ما توافق.",
     "p14.scanning": "بنقرا المشروع · {n} من {of} عنصر",
     "p14.stat.items": "عنصر في المشروع", "p14.stat.size": "حجم الميديا",
     "p14.stat.remove": "هيتشال ({size})", "p14.stat.unused": "من حجم المشروع مش مستخدم",
     "p14.r.unused": "مش مستخدم في أي سيكوينس", "p14.r.duplicate": "نسخة مكررة مش مستخدمة",
-    "p14.r.backup": "باك أب قديم من Hush أو Kalam", "p14.r.captions": "ملفات كابشن",
+    "p14.r.backup": "نسخة احتياطية قديمة من شيل السكتات أو الكابشن", "p14.r.captions": "ملفات كابشن",
     "p14.r.captions_note": "مش متعلّم عليها: Premiere مبيقولش أنهي واحد مستخدم.",
     "p14.r.cameras": "لقطات الكاميرات", "p14.r.mics": "تسجيلات المايكات", "p14.r.long": "تسجيلات 3" + NB + "دقايق أو أكتر",
     "p14.show_all": "اعرض الكل ({n})",
     "p14.nests.note": "الاسم من اللي جوه كل نست. شيل العلامة عشان يفضل الاسم القديم.",
     "p14.sec.bins": "فولدرات قديمة هتتشال",
     "p14.sec.dup": "ملفات مكررة ومستخدمة (للعلم بس)",
-    "p14.offline.note": "مش موجودة في الفولدر بتاعها على الهارد. Tidy مش هيلمسها.",
+    "p14.offline.note": "مش موجودة في الفولدر بتاعها على الهارد. الترتيب مش هيلمسها.",
     "p14.sec.problems": "مشاكل",
     "p14.problem.1": "Interview_B-cam.mxf: الملف بايظ ومش بيفتح.",
     "p14.problem.2": "Nested Sequence 04: Premiere مقالش جواه إيه.",
-    "p14.sec.options": "Tidy هيعمل إيه",
+    "p14.sec.options": "اللي هيحصل في المشروع",
     "p14.opt.remove": "شيل الحاجات المتعلّم عليها", "p14.opt.organise": "رتّب في فولدرات مع أسامي النستات",
     "p14.opt.colours": "لوّن كل نوع بلون ثابت",
     "p14.bar.summary": "{r} هيتشال · {m} هيتنقل · {n} اسم جديد",
@@ -510,26 +521,26 @@
     "p14.dialog.c3": "{e} فولدرات فاضية هتتشال، و{n} نست هياخدوا أسامي جديدة.",
     "p14.dialog.c4": "كل نوع هياخد لونه الثابت.",
     "p14.unsaved": "المشروع ده عمره ما اتحفظ، فمش هنقدر نعمل له نسخة احتياطية.",
-    "p14.unsaved.hint": "احفظه مرة في Premiere ‏(⁦File > Save⁩)، وبعدين دوس «اتأكد تاني».",
-    "p14.error": "Tidy مقدرش يقرا عنصرين، فاتشالوا من الخطة.",
+    "p14.unsaved.hint": "احفظه مرة في Premiere ‏(⁦File > Save⁩)، وبعدين دوس «افحص تاني».",
+    "p14.error": "الترتيب ماقدرش يقرا عنصرين، فاتشالوا من الخطة.",
     "p14.error.hint": "هتلاقيهم تحت «مشاكل». باقي الخطة كامل.",
     "p14.stale": "المشروع اتغيّر من بعد الفحص. افحصه تاني قبل التنضيف.",
 
     /* P-15 */
     "p15.done": "المشروع اترتّب. النسخة القديمة محفوظة.",
-    "p15.undo": "رجّعهم زي ما كانوا",
+
     "p15.sync": "زامن البودكاست بالصوت",
     "p15.sync.progress": "بنطابق الكليب {n} من {of} · {name}",
     "p15.sync.skipped": "اتساب برّه: {name} (مفيش تطابق واضح في الصوت)",
     "p15.sync.done": "السيكوينس المتزامن جاهز: {name}",
     "p15.applying": "بننضّف المشروع · {n} من {of}",
-    "p15.value": "وفّرت حوالي 25" + NB + "دقيقة ترتيب.",
-    "p15.counts": "Tidy عمل إيه",
+    "p15.value": "وفّرت حوالي 25 دقيقة ترتيب · تقدير.",
+    "p15.counts": "اللي حصل في المشروع",
     "p15.moved": "اتنقل للفولدرات", "p15.removed": "اتشال من المشروع", "p15.renamed": "نستات اتغيّر اسمها",
     "p15.bins": "فولدرات فاضية اتشالت",
-    "p15.skipped": "{s} فضلوا لأنهم طلعوا مستخدمين.",
+    "p15.skipped": "{s} من {r} عنصر فضلوا لأنهم طلعوا مستخدمين.",
     "p15.where": "الحاجات راحت فين",
-    "p15.where.more": "اعرض كل الفولدرات (9)",
+
     "p13.sec": "{n}" + NB + "ثانية",
     "p15.backup.title": "رجّع كل حاجة",
     "p15.undo.hint": "بيفتح النسخة اللي اتحفظت قبل التنضيف، زي ما كانت بالظبط. والمشروع المترتّب بيفضل موجود.",
@@ -541,9 +552,9 @@
     "p15.sync.skip_hint": "حطّه بإيدك، أو سجّل تصفيقة في الأول المرة الجاية.",
     "p15.open_seq": "افتح السيكوينس المتزامن",
     "p15.error": "كليب واحد مقدرناش نصدّره، فاتساب برّه: {name}",
-    "p15.error.hint": "السبعة التانيين اتزامنوا. ممكن الملف يكون مفتوح في برنامج تاني: اقفله وجرّب تاني.",
+    "p15.error.hint": "الستة التانيين اتزامنوا. ممكن الملف يكون مفتوح في برنامج تاني: اقفله وجرّب تاني.",
     "p15.retry_clip": "جرّب الكليب ده تاني",
-    "p15.offline": "خدمة WhyNot Cut مش شغالة، فمزامنة البودكاست واقفة. «رجّعهم زي ما كانوا» لسه شغال.",
+
 
     /* P-16 */
     "p16.target": "الهدف: {label}",
@@ -582,19 +593,19 @@
     "p16.options": "طريقة القطع",
     "p16.ripple": "اقفل الفراغات بعد القطع",
     "p16.link": "خلّي الصوت مربوط بالصورة",
-    "p16.backup": "احتفظ بنسخة احتياطية من السيكوينس",
+
     "p16.presets": "الإعداد المحفوظ: Sahha talking head",
     "p16.save_preset": "احفظ الإعداد",
     "p16.bar": "هيقطّع {n} قطعة · أقصر {t}",
-    "p16.bar.trust": "السيكوينس الأصلي بيتحفظ الأول كنسخة ومش بيتلمس.",
+    "p16.bar.trust": "بنحفظ نسخة احتياطية من السيكوينس الأول دايمًا.",
     "p16.bar.markers": "هيحط {n} ماركر. مفيش حاجة هتتقطّع.",
     "p16.dialog.title": "تقطّع {n} قطعة من {seq}؟",
     "p16.dialog.c1": "هيتشال {s} سكتة و{f} كلمة تردد.",
     "p16.dialog.c2": "الفراغات هتتقفل، فكل اللي بعد القطع هيقدّم.",
     "p16.dialog.c3": "التراكات اللي هتتحرك: {tracks}",
     "p16.dialog.backup": "السيكوينس هيتنسخ الأول باسم:",
-    "p16.dialog.keep": "سيب السيكوينس زي ما هو",
-    "p16.dialog.nobackup": "مفيش نسخة احتياطية هتتحفظ. مفيش رجوع غير عن طريق ⁦Edit > Undo⁩ في Premiere.",
+    "p16.dialog.keep": "خلّي السيكوينس زي ما هو",
+    "p16.dialog.nobackup": "النسخة الاحتياطية ماتعملتش المرة دي. من غيرها، الرجوع الوحيد هو ⁦Edit > Undo⁩ في Premiere.",
     "p16.stage.export": "بنصدّر الصوت من Premiere",
     "p16.stage.silence": "بندوّر على السكتات",
     "p16.stage.fillers": "بندوّر على كلمات التردد",
@@ -605,24 +616,24 @@
 
     /* P-17 */
     "p17.result": "اتقطّع {n} قطعة. السيكوينس بقى أقصر {time}.",
-    "p17.value": "اتشال {n} سكتة · وفّرت لك حوالي 12" + NB + "دقيقة مونتاج",
+    "p17.value": "اتقطّع {n} قطعة · وفّرت حوالي {m} دقايق مونتاج · تقدير",
     "p17.backup": "نسختك الأصلية محفوظة زي ما هي باسم:",
-    "p17.undo": "تراجع",
+
     "p17.markers": "اتحط {n} ماركر. متقطّعش حاجة.",
     "p17.undo.hint": "بيرجّع الأصل باسمه، والنسخة المتقطّعة بتتحفظ باسم:",
     "p17.reveal": "اعرضه في المشروع",
-    "p17.clear": "امسح كل ماركرز Hush",
+    "p17.clear": "امسح ماركرز شيل السكتات",
     "p17.markers.hint": "كل ماركر على سكتة أو كلمة تردد، عشان تقطّع بإيدك.",
     "p17.partial": "اتقطّع {n} من {of} قطعة. {k} اتسابوا.",
     "p17.partial.hint": "موجودين على V2 وفيه كليب مقفول. افتح القفل في Premiere وقطّع الباقي.",
     "p17.cut_rest": "قطّع اللي اتساب",
     "p17.undone": "رجع {name}. النسخة المتقطّعة محفوظة باسم:",
-    "p17.offline": "خدمة WhyNot Cut مش شغالة. الرجوع لسه شغال: محتاج Premiere بس.",
+
 
     /* P-18 */
     "p18.lang": "اللغة", "p18.lang.ar": "عربي", "p18.lang.en": "إنجليزي", "p18.lang.other": "لغة تانية",
     "p18.range": "النطاق", "p18.range.sequence": "السيكوينس كله", "p18.range.playhead": "من البلاي هيد",
-    "p18.range.selection": "الكليبات المتحددة", "p18.audio": "تراكات الصوت",
+    "p18.range.selection": "الكليبات المحدّدة", "p18.audio": "تراكات الصوت",
     "p18.output.srt": "ملف SRT بس",
     "p18.correct": "صحّح الكلام مع Claude",
     "p18.start": "ابدأ",
@@ -648,15 +659,15 @@
     "p18.undo_hint": "تقدر ترجع بخطوة واحدة: ⁦Edit > Undo⁩ في Premiere.",
     "p18.err.no_inout": "مفيش In وOut على {seq}.",
     "p18.err.no_inout.hint": "حط In وOut في Premiere، أو اعمل كابشن للسيكوينس كله.",
-    "p18.err.no_selection": "مفيش كليب متحدد في التايم لاين.",
+    "p18.err.no_selection": "مفيش كليب محدّد في التايم لاين.",
     "p18.err.no_selection.hint": "حدّد كليب في Premiere، أو اعمل كابشن للسيكوينس كله.",
     "p18.use_whole": "استخدم السيكوينس كله",
     "p18.empty.title": "مفيش سيكوينس مفتوح",
-    "p18.empty": "افتح سيكوينس في Premiere، وبعدين اتأكد تاني.",
+    "p18.empty": "افتح سيكوينس في Premiere، وبعدين افحص تاني.",
     "p18.model_busy": "حزمة الكابشن بتنزل · {pct}%",
-    "p18.model_busy.sub": "«ابدأ» مستني الحزمة. الموديل الأصغر شغال دلوقتي: أسرع بس أقل دقة.",
+    "p18.model_busy.sub": "«ابدأ» مستني الحزمة. النموذج الأصغر شغال دلوقتي: أسرع بس أقل دقة.",
     "p18.wait_pack": "«ابدأ» هيشتغل أول ما الحزمة تخلص.",
-    "p18.no_claude": "Claude مش مفتوح، فالكابشن هيتعمل من غير تصحيح.",
+    "p18.no_claude": "Claude مش مسجّل دخول، فالكابشن هيتعمل من غير تصحيح.",
 
     /* P-19 */
     "p19.search": "دوّر في القوالب", "p19.all": "كل الفولدرات", "p19.file": "من ملف…",
@@ -673,7 +684,7 @@
     "p19.refresh": "حدّث القايمة",
 
     /* P-20 */
-    "p20.stage.loading": "تحميل الموديل", "p20.stage.listening": "بنسمع",
+    "p20.stage.loading": "تحميل النموذج", "p20.stage.listening": "بنسمع",
     "p20.stage.aligning": "توقيت كل كلمة", "p20.stage.correcting": "تصحيح الكلام",
     "p20.stage.captions": "تقسيم الكابشن",
     "p20.srt": "ملف كابشن SRT، محفوظ جنب المشروع:",
@@ -684,7 +695,7 @@
     "p20.device.gpu": "على كارت الشاشة",
     "p20.running": "توقيت كل كلمة · مرحلة {n} من {of}",
     "p20.done": "اتحط {n} كابشن في {seq}.",
-    "p20.value": "وفّرت لك حوالي 40" + NB + "دقيقة كتابة.",
+    "p20.value": "وفّرت حوالي 40 دقيقة كتابة · تقدير.",
     "p20.corrected": "اتصحّح بقواعد {client} وقاموسه.",
     "p20.reveal": "اعرض ملف SRT",
     "p20.fix": "صلّح الكابشن مع Claude",
@@ -696,7 +707,7 @@
     "p20.error.hint": "«جرّب تاني» هيشغّله على البروسيسور. أبطأ، حوالي 2" + NB + "دقيقة.",
     "p20.lost": "الاتصال بخدمة WhyNot Cut اتقطع وإحنا بنسمع.",
     "p20.lost.hint": "شغّلها ودوس «جرّب تاني». مفيش حاجة اتحطت في السيكوينس.",
-    "p20.no_claude": "Claude مش مفتوح، عشان كده «صلّح الكابشن» واقف. الكابشن اتحط واتحفظ.",
+    "p20.no_claude": "Claude مش مسجّل دخول، عشان كده «صلّح الكابشن» واقف. الكابشن اتحط واتحفظ.",
 
     /* A-01 */
     "a01.pill.host": "After Effects",
@@ -718,34 +729,34 @@
     "a01.chk.fonts": "خطوط العميل متسطّبة",
     "a01.chk.saved": "مفيش شغل مش محفوظ في After Effects",
     "a01.open_aep": "افتح المشروع", "a01.reveal": "افتح الفولدر",
-    "a01.empty.hint": "Claude بيفتح في نافذة لوحده برّه After Effects.",
+    "a01.empty.hint": "Claude بيفتح في شباك لوحده برّه After Effects.",
     "a01.building": "بنبني في After Effects · مشهد {n} من {of}",
     "a01.cancel": "إلغاء",
     "a01.error": "بعد البناء، المشروع مطابقش الخطة: مشهد 5 من غير عنوان.",
     "a01.error.hint": "«جرّب تاني» هيبنيه مرة كمان. لو فشل تاني، كلّم الدعم.",
-    "a01.unlinked": "After Effects مش متوصّل بخدمة WhyNot Cut.",
+
     "a01.done": "اتبنى واتراجع. اللي جاي: الريندر.",
     "a01.go_render": "روح للريندر",
     "a01.blocked": "البناء مش هيبدأ لسه: فيه فحص واحد محتاجك.",
-    "a01.no_claude": "Claude مش مفتوح، فالبناء مش هيبدأ: Claude هو اللي بيعمل الفحوصات والبناء.",
-    "a01.stale": "WhyNot Cut اتحدّث. اقفل After Effects وافتحه تاني، وبعدين دوس «اتأكد تاني».",
+    "a01.no_claude": "Claude مش مسجّل دخول، فالبناء مش هيبدأ: Claude هو اللي بيعمل الفحوصات والبناء.",
+    "a01.stale": "WhyNot Cut اتحدّث. اقفل After Effects وافتحه تاني، وبعدين دوس «افحص تاني».",
 
     /* A-02 */
     "a02.scenes": "المشاهد",
     "a02.claude_line": "كلام Claude مش كلام المتكلم",
     "a02.numbers": "أكّد الأرقام دي",
     "a02.animatic": "اتفرّج على النسخة التجريبية",
-    "a02.blocked": "مستنيين مراجعة الادعاءات للخطة دي. Claude بيعملها، وبعدها «وافق» هيشتغل.",
+    "a02.blocked": "مستنيين مراجعة الجمل الطبية للخطة دي. Claude بيعملها، وبعدها «وافق» هيشتغل.",
     "a02.title": "راجع خطة الموشن",
     "a02.animatic.sub": "ستوري بورد ونسخة متحركة أولية، {d}.",
     "a02.type.title": "عنوان", "a02.type.number": "رقم", "a02.type.quote": "اقتباس", "a02.type.list": "لستة بأيقونات", "a02.type.end": "خاتمة",
-    "a02.review": "مراجعة الادعاءات",
+    "a02.review": "مراجعة الجمل الطبية",
     "a02.review.ok": "اتراجعت للخطة دي: {n} سطور متوافق عليها.",
     "a02.review.note": "مشهد 4 اتخفّف وبقى «ممكن يساعد» بدل «بيعالج».",
     "a02.numbers.hint": "الأرقام بتظهر زي ما المتكلم قالها بالظبط.",
     "a02.assets": "الأيقونات والموسيقى والستايل",
-    "a02.icons": "6 أيقونات · رخصة مجانية (ISC)",
-    "a02.music": "الموسيقى: Calm Pulse · رخصة CC-BY، والمصدر مذكور في البوست",
+    "a02.icons": "6 أيقونات مجانية، مسموح نستخدمها",
+    "a02.music": "الموسيقى: Calm Pulse. لازم تكتب اسم الفنان في البوست (مكتوب في حزمة النشر).",
     "a02.recipe": "تغيير واحد عن الستايل المعتاد: من غير كارت ختام.",
     "a02.pending": "مستني",
     "a02.as": "هتوافق باسم {name}",
@@ -764,14 +775,14 @@
     "a02.done": "اتوافق. ابدأ البناء من الرئيسية.",
     "a02.done_by": "وافق {name} · {time}",
     "a02.go_home": "روح للرئيسية",
-    "a02.no_claude": "Claude مش مفتوح، فمراجعة الادعاءات مش هتتعمل و«وافق» هيفضل واقف.",
+    "a02.no_claude": "Claude مش مسجّل دخول، فمراجعة الجمل الطبية مش هتتعمل و«وافق» هيفضل واقف.",
 
     /* A-03 */
     "a03.probe": "بنراجع الكلام العربي في After Effects {version}. ده بيحصل مرة واحدة لكل نسخة.",
     "a03.fonts": "سطّب خطوط العميل، وبعدين اقفل After Effects وافتحه تاني.",
     "a03.unsaved": "في After Effects تعديلات مش محفوظة. احفظ المشروع أو اقفله الأول.",
-    "a03.edited": "انت عدّلت المشروع ده من آخر بناء. إعادة البناء بتحتفظ بنسخة احتياطية.",
-    "a03.no_bridge": "WhyNot Cut مش قادر يكلّم After Effects. اقفله وافتحه مرة، وبعدين دوس «اتأكد تاني».",
+    "a03.edited": "إنت عدّلت المشروع ده من آخر بناء. إعادة البناء بتحتفظ بنسخة احتياطية.",
+    "a03.no_bridge": "WhyNot Cut مش قادر يكلّم After Effects. اقفله وافتحه مرة، وبعدين دوس «افحص تاني».",
     "a03.script_only": "اتبنى من غير مراجعة، فمش هيعدّي فحص الجودة.",
     "a03.title": "قبل البناء",
     "a03.blocked": "البناء هيبدأ أول ما الكروت اللي فوق تتحل.",
@@ -779,7 +790,7 @@
     "a03.probe.t": "مراجعة الكلام العربي", "a03.probe.meta": "Claude بيعمل ده. مفيش حاجة مطلوبة منك.",
     "a03.fonts.t": "خطوط ناقصة", "a03.fonts.list": "الناقص: {fonts}", "a03.fonts.btn": "افتح فولدر الخطوط",
     "a03.unsaved.t": "شغل مش محفوظ",
-    "a03.edited.t": "انت عدّلت المشروع ده", "a03.rebuild": "ابنيه تاني",
+    "a03.edited.t": "إنت عدّلت المشروع ده", "a03.rebuild": "ابنيه تاني",
     "a03.no_bridge.t": "After Effects مش متوصّل",
     "a03.script_only.t": "اتبنى من غير مراجعة",
     "a03.script_only.hint": "في Claude، اطلب بناء بمراجعة بعد ما After Effects يتوصّل.",
@@ -793,7 +804,7 @@
     "a03.need.numbers": "أكّد رقمين في الخطة.",
     "a03.need.look": "الشكل النهائي والتصدير عليك: الألوان وعلو الصوت وإعدادات التصدير.",
     "a03.need.music.btn": "اسمع التراكات", "a03.need.numbers.btn": "افتح الخطة", "a03.need.look.btn": "افتح المشروع",
-    "a03.no_claude": "Claude مش مفتوح، فمراجعة الكلام العربي مش هتتعمل.",
+    "a03.no_claude": "Claude مش مسجّل دخول، فمراجعة الكلام العربي مش هتتعمل.",
 
     /* A-04 */
     "a04.empty.title": "لسه متعملش ريندر",
@@ -814,14 +825,25 @@
     "a04.v.needs.t": "الشكل النهائي والتصدير، واختيار الموسيقى.",
     "a04.v.not.fail": "مشهد 5: العنوان لامس حافة الأمان. Claude بيصلّحه.",
     "a04.rerender": "ريندر لمشاهد",
-    "a04.f.pass": "سليم", "a04.f.fix": "محتاج تصليح", "a04.f.pending": "بيتراجع",
+    "a04.f.pass": "سليمة", "a04.f.fix": "Claude بيصلّحها", "a04.f.pending": "Claude بيراجعها",
     "a04.error": "الريندر فشل عند الجزء 3: هارد D: مليان.",
     "a04.error.hint": "فضّي حوالي 4" + NB + "GB على D:، وجرّب تاني.",
     "a04.done": "فحص الجودة عدّى. {item} خلص.",
-    "a04.value": "وفّرت حوالي 3" + NB + "ساعات شغل موشن.",
+    "a04.value": "وفّرت حوالي 3 ساعات شغل موشن · تقدير.",
     "a04.handoff": "التسليم اتكتب: ملاحظات المونتير وحزمة النشر.",
     "a04.verdict": "التقرير",
-    "a04.no_claude": "Claude مش مفتوح، ففحص الجودة مش هيقدر يراجع الصور."
+    "a04.no_claude": "Claude مش مسجّل دخول، ففحص الجودة مش هيقدر يراجع الصور.",
+    "p15.offline.hint": "مزامنة البودكاست واقفة. «تراجع» لسه شغال.",
+    "p17.offline.hint": "الرجوع لسه شغال: محتاج Premiere بس.",
+    "p20.retry_wait": "«جرّب تاني» هيشتغل أول ما الخدمة تشتغل.",
+    "a02.num.twice": "(مرتين ورا بعض)",
+    "a02.retry_first": "جرّب تاني الأول.",
+    "a04.f.editor": "محتاجة المونتير",
+    "a04.f.stale": "قديمة",
+    "a04.open_anyway": "افتح المشروع برضه",
+    "a04.wait_qc": "استنى فحص الجودة",
+    "a04.wait_qc.hint": "«افتح المشروع» هيشتغل أول ما فحص الجودة يعدّي.",
+    "p19.no_text.reason": "مفيهوش كلام يتعدّل"
   });
 
   /* Data shown in this group's screens (not UI copy). Arabic lines are as said (Arabic in both UIs). File names only:
@@ -847,7 +869,7 @@
       aeBackup: "EP127_014_Al-Mustaqbal_MO (WhyNot backup 2026-10-13 1542).aep",
       mp4: "EP127_014_Al-Mustaqbal_MO.mp4"
     },
-    bins: [["01 Footage", 38], ["03 Audio/Music", 12], ["04 Images/PNG", 61], ["06 Sequences", 9]],
+    bins: [["01 Footage", 96], ["03 Audio/Music", 24], ["04 Images/PNG", 61], ["06 Sequences", 33]],
     captions: [
       ["00:12.40", "قياس السكر الصايم الصبح"],
       ["00:14.10", "بيقولك أكتر من أي قراية تانية في اليوم"],
@@ -864,6 +886,6 @@
       { tc: "00:19–00:28", type: "list", text: "قبل الفطار · مية بس · نفس الميعاد كل يوم", claude: true },
       { tc: "00:28–00:34", type: "end", text: "اسأل دكتورك قبل ما تغيّر علاجك" }
     ],
-    numbers: [["126", "mg/dL · 00:11"], ["2", "00:14"]]
+    numbers: [["126", "mg/dL", "00:11", ""], ["2", "", "00:14", "a02.num.twice"]]
   };
 })();

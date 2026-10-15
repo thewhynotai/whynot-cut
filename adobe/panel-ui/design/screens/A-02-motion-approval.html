@@ -34,12 +34,19 @@
   var TYPE_ICON = { title: "type", quote: "message-square", number: "hash", list: "list-checks", end: "film" };
 
   function heading(id) {
-    return M.steps(["done", "done", "wait", "pend", "pend", "pend", "pend"], 2, "warn") +
-      '<div class="t-title mt-4">' + t("a02.title") + '</div><div class="t-mono tx-muted ta-wrapname mt-1">' + M.esc(id || X.motion) + '</div>';
+    return M.steps(["done", "done", "wait", "pend", "pend", "pend", "pend"], 2, "waiting") +
+      '<div class="t-title mt-4">' + t("a02.title") + '</div><div class="t-mono tx-muted ta-wrapname mt-1">' + M.path(id || X.motion) + '</div>';
   }
+  /* storyboard: one 9:16 frame per scene (title, quote, number, icon list, ending), drawn with the scene's own content */
+  var BOARD = [
+    '<span class="ta-fr-txt">قياس السكر</span><span class="ta-fr-bar"></span>',
+    '<span class="ta-fr-line"></span><span class="ta-fr-line ta-fr-line-s"></span><span class="ta-fr-line"></span>',
+    '<span class="ta-fr-num">126</span><span class="ta-fr-bar"></span>',
+    '<span class="ta-fr-line ta-fr-line-s"></span><span class="ta-fr-line"></span><span class="ta-fr-line ta-fr-line-s"></span>',
+    '<span class="ta-fr-txt">اسأل دكتورك</span><span class="ta-fr-bar"></span>'
+  ];
   function animatic(dis) {
-    var f = function (n) { return '<div class="ta-board-f"><span class="t-caption tx-muted">' + M.ltr(String(n)) + '</span></div>'; };
-    return M.card('<div class="ta-board">' + f(1) + f(2) + f(3) + f(4) + f(5) + '</div>' +
+    return M.card('<div class="ta-board">' + BOARD.map(function (inner) { return M.media({ kind: "poster", inner: inner, disabled: dis, cls: "ta-board-f" }); }).join("") + '</div>' +
       '<div class="t-meta tx-muted mt-2">' + t("a02.animatic.sub", { d: M.html(M.mono("00:34")) }) + '</div>' +
       '<div class="m-row mt-3">' + M.btn(t("a02.animatic"), { icon: "play", disabled: dis }) + '</div>', "mt-3");
   }
@@ -61,13 +68,16 @@
       '<div class="t-meta mt-1">' + t("a02.review.ok", { n: 5 }) + '</div>' +
       '<div class="t-meta tx-muted mt-1">' + t("a02.review.note") + '</div>', "mt-4");
   }
+  /* each number says what it is: "126 mg/dL" and "2 (twice in a row)", with the time it is said */
   function numbers(checked, dis) {
-    return M.card('<div class="m-row">' + M.status("warn") + '<div class="t-label ms-2 m-grow">' + t("a02.numbers") + '</div>' + M.chip("warn", M.ltr(String(X.numbers.length))) + '</div>' +
+    return M.card('<div class="m-row">' + M.status("waiting") + '<div class="t-label ms-2 m-grow">' + t("a02.numbers") + '</div>' + M.chip("neutral", M.ltr(String(X.numbers.length))) + '</div>' +
       '<div class="t-meta tx-muted mt-1">' + t("a02.numbers.hint") + '</div><div class="m-col mt-2">' +
-      X.numbers.map(function (n) { return TA.checkrow({ checked: checked, disabled: dis, name: M.ltr(n[0]), sub: M.mono(n[1]) }); }).join("") + '</div>', "mt-4");
+      X.numbers.map(function (n) {
+        return TA.checkrow({ checked: checked, disabled: dis, name: M.ltr(n[0]) + (n[3] ? " " + t(n[3]) : ""), sub: (n[1] ? M.ltr(n[1]) + " · " : "") + M.mono(n[2]) });
+      }).join("") + '</div>', "mt-4");
   }
   function assets() {
-    var row = function (icon, key) { return '<div class="ta-bullet mt-2">' + M.ico(icon, 16, "ink-muted") + '<div class="t-meta ms-2 m-grow">' + t(key) + '</div></div>'; };
+    var row = function (icon, key) { return TA.row(M.ico(icon, 16, "ink-muted"), t(key)); };
     return M.card('<div class="t-label">' + t("a02.assets") + '</div>' + row("image", "a02.icons") + row("music", "a02.music") + row("sliders-horizontal", "a02.recipe"), "mt-4");
   }
   function changes(dis) {
@@ -79,10 +89,10 @@
     o = o || {};
     return heading(o.id) + animatic(o.off) + scenes() + review(o.blocked) + numbers(o.checked, o.off) + assets() + changes(o.off);
   }
-  /* why: ok | numbers | blocked | off */
+  /* why: ok | numbers | blocked | off | retry (the notice above carries the one fix: Approve waits for it) */
   function bar(why, focus) {
-    var hint = why === "numbers" ? t("a02.tick") : why === "blocked" ? t("a02.blocked") : "";
-    return '<div class="m-row">' + M.status("info", 12) + '<div class="t-meta tx-muted ms-1 m-grow">' + t("a02.as", { name: D.editor }) + '</div></div>' + TA.trust(t("a02.trust")) +
+    var hint = why === "numbers" ? t("a02.tick") : why === "blocked" ? t("a02.blocked") : why === "retry" ? t("a02.retry_first") : "";
+    return '<div class="m-row">' + M.status("info", 12) + '<div class="t-meta tx-muted ms-1 m-grow">' + t("a02.as", { name: D.editor }) + '</div></div><div class="mt-2">' + M.trust(t("a02.trust")) + '</div>' +
       '<div class="m-col mt-2">' + M.btn(t("a02.approve"), { kind: "primary", block: true, icon: "circle-check-big", disabled: why !== "ok", focus: focus }) + '</div>' +
       (hint ? '<div class="t-meta tx-muted mt-2">' + hint + '</div>' : '');
   }
@@ -90,13 +100,15 @@
   var STATES = {
     empty: function () {
       return {
+        needs: 0,
         body: M.steps(["done", "run", "pend", "pend", "pend", "pend", "pend"], 1, "busy") + '<div class="mt-4"></div>' +
           M.empty({ icon: "circle-check-big", title: t("a02.empty"), text: t("a02.empty.text") })
       };
     },
     loading: function () {
       return {
-        body: heading() + M.card('<span class="m-skel-block" style="height:48px"></span>' + M.skel(60, 16) + '<div class="mt-3"></div><span class="m-skel-block" style="width:160px;height:32px"></span>', "mt-3") +
+        needs: 0,
+        body: heading() + M.card('<span class="m-skel-block" style="height:64px"></span>' + M.skel(60, 16) + '<div class="mt-3"></div><span class="m-skel-block" style="width:160px;height:32px"></span>', "mt-3") +
           M.card(M.skel(30) + '<div class="mt-3"></div>' + M.skel(40) + M.skel(95) + M.skel(70) + '<div class="mt-3"></div>' + M.skel(40) + M.skel(90), "mt-4"),
         bar: '<div class="m-col">' + M.skel(45, 16) + '<div class="mt-2"></div><span class="m-skel-block" style="height:40px"></span></div>'
       };
@@ -104,31 +116,32 @@
     normal: function () { return { needs: 1, body: page(), bar: bar("numbers") }; },
     checked: function () { return { needs: 1, body: page({ checked: true }), bar: bar("ok") }; },
     focus: function () { return { needs: 1, body: page({ checked: true }), bar: bar("ok", true) }; },
-    blocked: function () { return { needs: 0, body: page({ blocked: true, checked: true }), bar: bar("blocked") }; },
+    /* a blocked approval still counts: the plan is waiting for the review, and the editor has an approval to give */
+    blocked: function () { return { needs: 1, body: page({ blocked: true, checked: true }), bar: bar("blocked") }; },
     error: function () {
       return {
         needs: 1,
-        body: TA.slot(M.notice("error", t("a02.failed"), { sub: t("a02.failed.hint"), btn: { label: t("p13.retry"), icon: "refresh-cw" } })) + page({ checked: true }),
-        bar: bar("ok")
+        body: M.slot(M.notice("error", t("a02.failed"), { sub: t("a02.failed.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) + page({ checked: true }),
+        bar: bar("retry")
       };
     },
     offline: function () {
-      return { needs: 1, pills: TA.pillsOff, body: TA.slot(TA.offline()) + page({ checked: true, off: true }), bar: bar("off") };
+      return { needs: 1, pills: TA.pillsOff, body: M.slot(M.offline()) + page({ checked: true, off: true }), bar: bar("off") };
     },
     "no-claude": function () {
-      return { needs: 0, pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("a02.no_claude", { primary: true })) + page({ blocked: true, checked: true }), bar: bar("blocked") };
+      return { needs: 1, pills: TA.pillsNoClaude, body: TA.noClaude("a02.no_claude", { primary: true }) + page({ blocked: true, checked: true }), bar: bar("blocked") };
     },
     stale: function () {
       return {
         needs: 1,
-        body: TA.slot(M.notice("info", t("a02.plan_changed"), { sub: t("a02.diff") })) + page(),
+        body: M.slot(M.notice("info", t("a02.plan_changed"), { sub: t("a02.diff") })) + page(),
         bar: bar("numbers")
       };
     },
     success: function () {
       return {
         needs: 0,
-        body: TA.slot(M.notice("ok", t("a02.done"))) + M.steps(["done", "done", "done", "pend", "pend", "pend", "pend"], 3, "pending") +
+        body: M.slot(M.notice("ok", t("a02.done"))) + M.steps(["done", "done", "done", "pend", "pend", "pend", "pend"], 3, "pending") +
           M.card('<div class="m-row">' + M.status("ok") + '<div class="t-label ms-2 m-grow">' + t("a02.done_by", { name: D.editor, time: M.html(M.mono(X.approvedAt)) }) + '</div></div>', "mt-4") +
           '<div class="m-col mt-4">' + M.btn(t("a02.go_home"), { kind: "primary", block: true, icon: "layers" }) + '</div>'
       };

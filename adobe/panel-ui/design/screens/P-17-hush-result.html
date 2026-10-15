@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mock-states" content="loading,normal,focus,markers,error,offline,no-claude,undone,long">
-<meta name="mock-keys" content="Mod+Enter = Undo (Done in Markers mode and after Undo); Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs; Tab / Shift+Tab reading order. Premiere's own Edit &gt; Undo also takes the cut back in one step. No single-key shortcuts.">
+<meta name="mock-keys" content="Mod+Enter = Done (never Undo: Undo is a secondary with no keycap); Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs; Tab / Shift+Tab reading order. Premiere's own Edit &gt; Undo also takes the cut back in one step. No single-key shortcuts.">
 <meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. The result notice appears in its reserved slot; numbers do not count up.">
 <title>P-17 Hush result and undo</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -19,49 +19,53 @@
 <script>
 /* P-17 Hush: result and undo (screen-inventory.md §3 P-17; FR-19..23: Undo makes the backup sequence the open one under
    the original name and keeps the cut version as «(WhyNot Hush cut HH:MM:SS)»). Tools tab.
-   - normal: what was cut, before / after / saved, the original's name in a mono chip, Undo as the primary.
+   - normal: what was cut, before / after / saved, the original's name in a mono chip, Done as the primary, Undo a secondary (R2).
    - markers: Markers mode added markers and cut nothing; Done is the primary, "Remove all Hush markers" secondary.
-   - error: a partial cut, the skipped pieces named with why; Undo stays the primary.
+   - error: a partial cut, the skipped pieces named with why; Done stays the primary.
    - offline: Undo still works (a Premiere operation, not the WhyNot Cut app); the notice's Start is secondary.
    - undone: after Undo, the original is back and the cut version's name is shown.
    - Empty, loading, stale: not applicable. focus: keyboard focus on Undo. long: long sequence and backup names. */
 (function () {
   var t = M.t, D = M.D, X = D.ta;
-  var NB = " ";
+  var REGIONS = [[6, 9, "sil"], [17, 18, "fil"], [26, 31, "sil"], [40, 42, "sil"], [49, 50, "fil"], [58, 63, "sil"]];
 
-  function head() { return TA.back(t("p13.back")) + TA.title("audio-waveform", t("home.tool.hush"), M.ltr("Hush")); }
-  function nameChip(s) { return '<div class="m-row mt-1"><bdi dir="ltr" class="mono ta-monowrap">' + M.esc(s) + '</bdi></div>'; }
+  function head() { return M.back(t("p13.back")) + TA.title("audio-waveform", t("home.tool.hush"), M.ltr("Hush")); }
   function stats(after, saved) {
     return '<div class="mt-3">' + TA.stats([[M.ltr("01:12"), t("p16.before")], [M.ltr(after || "00:58"), t("p16.after")], [M.ltr(saved || "00:14"), t("p16.saved")]], "ta-stats-3") + '</div>';
   }
+  /* one set of numbers (R2-fix-list 1.2): 24 pieces = 18 pauses + 6 filler words, 14 s shorter in a 1:12 sequence, about
+     4 min by hand; a partial cut is 20 of 24 pieces with 4 skipped, 11 s shorter, about 3 min */
   function resultCard(o) {
     o = o || {};
-    return M.card(TA.saved(t("p17.value", { n: 18 })).replace("ta-bullet mt-2", "ta-bullet") + '<div class="t-body mt-2">' + t("p16.counts", { s: 18, f: 6 }) + '</div>' + stats(o.after, o.saved) +
-      '<div class="t-meta tx-muted mt-3">' + t("p17.backup") + '</div>' + nameChip(o.backup || X.hushBackup), "mt-4");
+    var n = o.n || 24, m = o.min || 4;
+    return M.card(M.saved(t("p17.value", { n: n, m: m })) + '<div class="t-body mt-2">' + t("p16.counts", { s: o.s || 18, f: o.f === undefined ? 6 : o.f }) + '</div>' + stats(o.after, o.saved) +
+      '<div class="t-meta tx-muted mt-3">' + t("p17.backup") + '</div><div class="mt-1">' + TA.name(o.backup || X.hushBackup) + '</div>', "mt-4");
   }
+  /* Undo is a secondary with no keycap: right after the cut the violet is Done */
   function undoCard(o) {
     o = o || {};
-    return M.card('<div class="m-row">' + M.ico("undo-2", 16, "ink-muted") + '<div class="t-label ms-2 m-grow">' + t("p17.undo") + '</div></div>' +
-      '<div class="t-meta tx-muted mt-2">' + t("p17.undo.hint") + '</div>' + nameChip(o.cut || X.hushCut) +
-      '<div class="m-col mt-3">' + M.btn(t("p17.undo"), { kind: "primary", block: true, icon: "undo-2", focus: o.focus }) + '</div>', "mt-4");
+    return M.card('<div class="m-row">' + M.ico("undo-2", 16, "ink-muted") + '<div class="t-label ms-2 m-grow">' + t("action.undo") + '</div></div>' +
+      '<div class="t-meta tx-muted mt-2">' + t("p17.undo.hint") + '</div><div class="mt-1">' + TA.name(o.cut || X.hushCut) + '</div>' +
+      '<div class="m-col mt-3">' + M.btn(t("action.undo"), { kind: "secondary", block: true, icon: "undo-2", focus: o.focus }) + '</div>', "mt-4");
   }
   function after() {
-    return '<div class="ta-btnrow mt-4">' + M.btn(t("p13.done"), {}) + M.btn(t("p17.reveal"), { kind: "ghost", icon: "eye" }) + '</div>';
+    return '<div class="ta-btnrow mt-4">' + M.btn(t("p13.done"), { kind: "primary" }) + M.btn(t("p17.reveal"), { kind: "ghost", icon: "eye" }) + '</div>';
   }
+  function ok(n) { return M.slot(M.notice("ok", t("p17.result", { n: n || 24, time: M.raw("p13.sec").replace("{n}", n === 20 ? "11" : "14") }))); }
 
   var STATES = {
     loading: function () {
       return { body: head() + M.card(M.skel(70) + M.skel(50, 16) + '<div class="mt-3"></div><span class="m-skel-block" style="height:56px"></span>' + M.skel(40, 16) + M.skel(90, 16), "mt-4") +
         M.card(M.skel(30) + M.skel(85, 16) + '<div class="mt-3"></div><span class="m-skel-block" style="height:40px"></span>', "mt-4") };
     },
-    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p13.no_claude.solo")) + head() + resultCard() + undoCard() + after() }; },
-    normal: function () { return { body: TA.slot(M.notice("ok", t("p17.result", { n: 24, time: M.raw("p13.sec").replace("{n}", "14") }))) + head() + resultCard() + undoCard() + after() }; },
-    focus: function () { return { body: TA.slot(M.notice("ok", t("p17.result", { n: 24, time: M.raw("p13.sec").replace("{n}", "14") }))) + head() + resultCard() + undoCard({ focus: true }) + after() }; },
+    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.noClaude("p13.no_claude.solo", { solo: true }) + head() + resultCard() + undoCard() + after() }; },
+    normal: function () { return { body: ok() + head() + resultCard() + undoCard() + after() }; },
+    focus: function () { return { body: ok() + head() + resultCard() + undoCard({ focus: true }) + after() }; },
     markers: function () {
       return {
-        body: TA.slot(M.notice("ok", t("p17.markers", { n: 24 }))) + head() +
+        body: M.slot(M.notice("ok", t("p17.markers", { n: 24 }))) + head() +
           M.card('<div class="t-body">' + t("p16.counts", { s: 18, f: 6 }) + '</div><div class="t-meta tx-muted mt-1">' + t("p17.markers.hint") + '</div>' +
-            '<div class="mt-3">' + TA.wave({ regions: [[6, 9, "sil"], [17, 18, "fil"], [26, 31, "sil"], [40, 42, "sil"], [49, 50, "fil"], [58, 63, "sil"]], head: 22 }) + '</div>' +
+            '<div class="mt-3">' + TA.wave({ regions: REGIONS, head: 22 }) + '</div>' +
             TA.ruler("00:00", "00:36", "01:12"), "mt-4") +
           '<div class="m-col mt-4">' + M.btn(t("p13.done"), { kind: "primary", block: true, icon: "check" }) + '</div>' +
           '<div class="m-row mt-2">' + M.btn(t("p17.clear"), { kind: "ghost", icon: "bookmark-x", flush: true }) + '</div>'
@@ -69,24 +73,23 @@
     },
     error: function () {
       return {
-        body: TA.slot(M.notice("warn", t("p17.partial", { n: 20, of: 24, k: 4 }), { sub: t("p17.partial.hint"), btn: { label: t("p17.cut_rest"), icon: "scissors" } })) +
-          head() + resultCard({ after: "01:01", saved: "00:11" }) + undoCard() + after()
+        body: M.slot(M.notice("warn", t("p17.partial", { n: 20, of: 24, k: 4 }), { sub: t("p17.partial.hint"), btn: { label: t("p17.cut_rest"), icon: "scissors" } })) +
+          head() + resultCard({ n: 20, min: 3, s: 15, f: 5, after: "01:01", saved: "00:11" }) + undoCard() + after()
       };
     },
     offline: function () {
       return {
         pills: TA.pillsAppOff,
-        body: TA.slot(M.notice("error", t("p17.offline"), { btn: { label: t("p13.start_service"), icon: "power" }, dismiss: false })) +
-          head() + resultCard() + undoCard() + after()
+        body: TA.partialOffline("p17.offline.hint") + head() + resultCard() + undoCard() + after()
       };
     },
     undone: function () {
       return {
-        body: TA.slot(M.notice("ok", t("p17.undone", { name: TA.mono(X.seq) }), { sub: M.mono(X.hushCut) })) + head() +
+        body: M.slot(M.notice("ok", t("p17.undone", { name: TA.mono(X.seq) }), { sub: M.mono(X.hushCut) })) + head() +
           '<div class="m-col mt-4">' + M.btn(t("p13.done"), { kind: "primary", block: true, icon: "check" }) + '</div>'
       };
     },
-    long: function () { return { body: TA.slot(M.notice("ok", t("p17.result", { n: 24, time: M.raw("p13.sec").replace("{n}", "14") }))) + head() + resultCard({ backup: X.long.hushBackup }) + undoCard({ cut: X.long.hushCut }) + after() }; }
+    long: function () { return { body: ok() + head() + resultCard({ backup: X.long.hushBackup }) + undoCard({ cut: X.long.hushCut }) + after() }; }
   };
 
   TA.mount({
