@@ -164,6 +164,17 @@ add_episode_plan() {
 | R04 | 71 | comedy | 00:15:30 → 00:16:02 | "My mother still calls it the light machine" | — |
 | R05 | 66 | advice | 00:19:12 → 00:19:50 | "Prices differ, safety should not" | avoid: prices |
 EOF
+  # the topic map the episode analysis writes next to the reels plan (episode-craft): also the YouTube chapters
+  cat > "$p/topics.json" <<'EOF'
+{"topics": [
+  {"id": "T01", "start": "00:00:00.000", "end": "00:02:40.000", "title": "Welcome and the guest", "summary": "Fictional: the host introduces the guest and the episode."},
+  {"id": "T02", "start": "00:02:40.000", "end": "00:06:30.000", "title": "Where laser myths start", "summary": "Fictional: why salon talk spreads myths."},
+  {"id": "T03", "start": "00:06:30.000", "end": "00:11:20.000", "title": "Questions before a session", "summary": "Fictional: three questions to ask first."},
+  {"id": "T04", "start": "00:11:20.000", "end": "00:15:00.000", "title": "A patient ten years later", "summary": "Fictional: a patient comes back with the same question."},
+  {"id": "T05", "start": "00:15:00.000", "end": "00:18:40.000", "title": "The light machine at home", "summary": "Fictional: family names for the device."},
+  {"id": "T06", "start": "00:18:40.000", "end": "00:22:30.000", "title": "Safety before anything else", "summary": "Fictional: closing advice on safety."}
+]}
+EOF
 }
 
 # add_approved_reels <client dir>: EP12's picked reels R01 and R02 with plans the editor approved in the chat
