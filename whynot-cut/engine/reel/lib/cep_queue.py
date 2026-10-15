@@ -37,6 +37,7 @@ import datetime as _dt
 import json
 import os
 import socket
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -439,7 +440,8 @@ def build_lock(queue: Path, what: str, *, hold_s: float = 1800.0, wait_s: float 
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError:
             held = read_lock(queue)
-            if lock_stale(queue, held):
+            released = _released(queue, held)
+            if released or lock_stale(queue, held):
                 stale = lock.with_name(f"{LOCK_NAME}.stale-{uuid.uuid4().hex[:6]}")
                 try:
                     lock.rename(stale)          # only one waiter wins the takeover
@@ -454,6 +456,8 @@ def build_lock(queue: Path, what: str, *, hold_s: float = 1800.0, wait_s: float 
                 if isinstance(took, dict) and took and took != held:
                     with contextlib.suppress(OSError):
                         stale.rename(lock)
+                elif released:
+                    _unlink(queue / RELEASED_NAME)
                 _unlink(stale)
                 continue
             if time.time() - t0 >= wait_s:
@@ -467,7 +471,58 @@ def build_lock(queue: Path, what: str, *, hold_s: float = 1800.0, wait_s: float 
         yield rec
     finally:
         if read_lock(queue) == rec:
-            _unlink(lock)
+            _release_lock(queue, rec)
+
+
+# Windows refuses to delete (or rename) a file that is open this instant: a waiter inside read_lock makes the release's
+# delete fail with PermissionError (13). A lock left behind by a live holder on this computer is never stale, so every
+# later build in this process (a long-running `reel serve`) would wait it out. The release retries like `_cancel`; then
+# moves the lock aside (a tombstone); then, if even that fails, leaves a RELEASED_NAME marker holding the released
+# record, which the acquire honours (`_released`): that exact lock counts as free.
+RELEASED_NAME = LOCK_NAME + ".released"
+
+
+def _release_lock(queue: Path, rec: dict) -> None:
+    lock = queue / LOCK_NAME
+    for i in range(CANCEL_TRIES):
+        try:
+            lock.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:                  # EACCES / a sharing violation: a reader has it open this instant
+            if i < CANCEL_TRIES - 1:
+                time.sleep(CANCEL_RETRY_S)
+        except OSError:
+            break
+    tomb = lock.with_name(f"{LOCK_NAME}.released-{os.getpid()}-{int(time.time() * 1000)}")
+    try:
+        lock.rename(tomb)
+    except FileNotFoundError:
+        return
+    except OSError:
+        pass
+    else:
+        _unlink(tomb)
+        if tomb.exists():
+            print(f"cep_queue: build lock released; could not delete it, left as {tomb.name}", file=sys.stderr)
+        return
+    try:
+        (queue / RELEASED_NAME).write_text(json.dumps(rec), encoding="utf-8")
+        print(f"cep_queue: build lock released; could not delete or move it, marked free in {RELEASED_NAME}",
+              file=sys.stderr)
+    except OSError as e:
+        print(f"cep_queue: build lock released but could not be deleted, moved or marked free: {e}", file=sys.stderr)
+
+
+def _released(queue: Path, held: dict | None) -> bool:
+    """The lock on disk is one its holder released (RELEASED_NAME names exactly this record)."""
+    if not held:
+        return False
+    try:
+        return json.loads((Path(queue) / RELEASED_NAME).read_text(encoding="utf-8")) == held
+    except (OSError, ValueError):
+        return False
 
 
 def lock_busy_result(e: BuildLockBusy, app: str) -> dict:

@@ -12,6 +12,7 @@ import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/
 import contextlib
 import contextvars
 import datetime as dt
+import io
 import json
 import os
 import shutil
@@ -699,21 +700,8 @@ class TestBuildLock(_Home):
             with ppro_bridge.build_lock(f"ppro-build {name}", wait_s=WAIT_S, poll_s=0.05):
                 out[name] = ppro_bridge.submit("build_project", {"echo": name}, timeout=WAIT_S)
 
-        # Windows refuses to delete a file that is open this instant (PermissionError 13, measured), and the release
-        # (cep_queue.build_lock: read_lock, then _unlink, which swallows the error) can meet the other waiter's
-        # read_lock: the lock then stays, held by this live process, never stale, and B waits it out. That is the
-        # engine's (reported, not this test's subject): here a reader and the release never overlap.
-        gate, real_read, real_unlink = threading.Lock(), cep_queue.read_lock, cep_queue._unlink
-
-        def read_lock(q):
-            with gate:
-                return real_read(q)
-
-        def unlink(*paths):
-            with gate:
-                return real_unlink(*paths)
-        with mock.patch.object(cep_queue, "read_lock", read_lock), mock.patch.object(cep_queue, "_unlink", unlink), \
-                FakeBridge(self.q, delays={"build_project": 0.8}) as fb:
+        with FakeBridge(self.q, delays={"build_project": 0.8}) as fb:     # (B reads the lock while A releases it:
+            # the release copes with that, test_the_release_retries_while_a_reader_has_the_lock_open)
             # each session's thread runs in a copy of this test's context (the bound engine home)
             ts = [threading.Thread(target=contextvars.copy_context().run, args=(build, n)) for n in ("A", "B")]
             for t in ts:
@@ -725,6 +713,96 @@ class TestBuildLock(_Home):
         (j1, _, s1, e1), (j2, _, s2, e2) = fb.ran
         self.assertGreaterEqual(fb.first_seen[j2], e1 - 0.05)       # queued only after the first build ended
         self.assertFalse((self.q / cep_queue.LOCK_NAME).exists())
+
+    # The release meets a reader (a waiter inside read_lock): Windows refuses to delete an open file (PermissionError
+    # 13, measured). A lock left by this live process is never stale, so the next build here must not wait it out.
+    def lock_files(self):
+        return sorted(p.name for p in self.q.iterdir() if p.name.startswith(cep_queue.LOCK_NAME))
+
+    def assert_next_build_goes_ahead(self):
+        with ppro_bridge.build_lock("ppro-build next", wait_s=0) as rec:      # wait_s=0: busy would raise at once
+            self.assertEqual(cep_queue.read_lock(self.q), rec)
+        self.assertNotIn(cep_queue.LOCK_NAME, self.lock_files())
+
+    def open_reader(self):
+        f = open(self.q / cep_queue.LOCK_NAME, encoding="utf-8")          # what read_lock holds for a moment
+        self.addCleanup(f.close)
+        return f
+
+    @unittest.skipUnless(os.name == "nt", "Windows refuses to delete an open file; POSIX deletes it")
+    def test_the_release_retries_while_a_reader_has_the_lock_open(self):
+        readers = []
+        with mock.patch.object(cep_queue.time, "sleep", side_effect=lambda s: readers[0].close()) as nap, \
+                contextlib.redirect_stderr(io.StringIO()):
+            with ppro_bridge.build_lock("ppro-build A"):
+                readers.append(self.open_reader())                         # the reader finishes during the backoff
+        self.assertEqual(nap.call_count, 1)
+        self.assertEqual(self.lock_files(), [])
+        self.assert_next_build_goes_ahead()
+
+    @unittest.skipUnless(os.name == "nt", "Windows refuses to delete or move an open file")
+    def test_a_reader_holding_the_lock_through_every_retry_leaves_it_marked_released(self):
+        err = io.StringIO()
+        with mock.patch.object(cep_queue.time, "sleep") as nap, contextlib.redirect_stderr(err):
+            with ppro_bridge.build_lock("ppro-build A") as rec:
+                reader = self.open_reader()
+        self.assertEqual(nap.call_count, cep_queue.CANCEL_TRIES - 1)
+        self.assertEqual(json.loads((self.q / cep_queue.RELEASED_NAME).read_text(encoding="utf-8")), rec)
+        self.assertIn("marked free", err.getvalue())
+        reader.close()
+        self.assert_next_build_goes_ahead()
+        self.assertEqual(self.lock_files(), [])                            # the marker went with the takeover
+
+    def failing(self, *names):
+        """Path.unlink / Path.rename raising PermissionError(13) for the lock and its tombstones."""
+        def ours(p):
+            return p.name == cep_queue.LOCK_NAME or p.name.startswith(cep_queue.LOCK_NAME + ".released-")
+        real = {n: getattr(Path, n) for n in names}
+
+        def make(n):
+            def f(p, *a, **k):
+                if ours(p):
+                    raise PermissionError(13, "The process cannot access the file because it is being used")
+                return real[n](p, *a, **k)
+            return f
+        return [mock.patch.object(Path, n, make(n)) for n in names]
+
+    def test_a_lock_that_cannot_be_deleted_is_moved_aside(self):
+        err = io.StringIO()
+        with contextlib.ExitStack() as st:
+            for p in self.failing("unlink"):
+                st.enter_context(p)
+            nap = st.enter_context(mock.patch.object(cep_queue.time, "sleep"))
+            st.enter_context(contextlib.redirect_stderr(err))
+            with ppro_bridge.build_lock("ppro-build A"):
+                pass
+        self.assertEqual(nap.call_count, cep_queue.CANCEL_TRIES - 1)      # retried first, with the backoff
+        (tomb,) = self.lock_files()
+        self.assertRegex(tomb, rf"^\.build\.lock\.released-{os.getpid()}-\d+$")
+        self.assertIn(tomb, err.getvalue())
+        self.assert_next_build_goes_ahead()
+
+    def test_a_lock_that_can_be_neither_deleted_nor_moved_is_marked_released(self):
+        err = io.StringIO()
+        with contextlib.ExitStack() as st:
+            for p in self.failing("unlink", "rename"):
+                st.enter_context(p)
+            st.enter_context(mock.patch.object(cep_queue.time, "sleep"))
+            st.enter_context(contextlib.redirect_stderr(err))
+            with ppro_bridge.build_lock("ppro-build A") as rec:
+                pass
+        self.assertEqual(self.lock_files(), [cep_queue.LOCK_NAME, cep_queue.RELEASED_NAME])
+        self.assertEqual(cep_queue.read_lock(self.q), rec)               # still on disk, held by this live process
+        self.assertIn("marked free", err.getvalue())
+        marker = (self.q / cep_queue.RELEASED_NAME).read_text(encoding="utf-8")
+        self.assert_next_build_goes_ahead()
+        self.assertEqual(self.lock_files(), [])
+        # the marker frees only the lock it names: a live holder's newer lock is still waited for
+        (self.q / cep_queue.RELEASED_NAME).write_text(marker, encoding="utf-8")
+        with ppro_bridge.build_lock("ppro-build live"):
+            with self.assertRaises(cep_queue.BuildLockBusy):
+                with ppro_bridge.build_lock("ppro-build B", wait_s=0):
+                    pass
 
     def test_a_held_lock_refuses_after_the_wait(self):
         with ppro_bridge.build_lock("ppro-build A"):
