@@ -1721,10 +1721,19 @@ class TestMotionBuild(CompiledMotion):
         self.assertEqual((code, doc["status"]), (2, "REFUSED"), doc)
         self.assertIn("not approved", doc["blocked"])         # T3.10: no "Gate 1" to the editor
         write_json(self.reel.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor",
-                                                                   "plan_fingerprint": "an-older-plan"})
+                                                                   "plan_fingerprint": "an-older-plan", "format": 3})
         code, doc = self.cli()
         self.assertEqual(code, 2, doc)
         self.assertIn("stale", doc["blocked"])
+        self.assertNotIn("editor_message", doc)
+        # 3.0 F2: a record from before 3.0 (no "format") says so plainly, in English and Arabic
+        write_json(self.reel.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor",
+                                                                   "plan_fingerprint": "an-older-plan"})
+        code, doc = self.cli()
+        self.assertEqual(code, 2, doc)
+        self.assertEqual(doc["blocked"], "This plan was approved with an older WhyNot Cut. Have one more look and "
+                                         "approve it again.")
+        self.assertEqual(set(doc["editor_message"]), {"en", "ar"})
         self.approve()
         code, doc = self.cli()
         self.assertEqual((code, doc["status"]), (0, "PROJECT_ASSEMBLED"), doc)

@@ -217,7 +217,9 @@ def motion_next(paths) -> dict:
     if newer("anim", "plan"):
         stale.append("motion-animatic (older than the plan)")
     if appr and fp and appr.get("plan_fingerprint") != fp:
-        stale.append("approve-plan (the plan changed after approval: show the editor again)")
+        from .plan import OLDER_APPROVAL, approved_before_3
+        stale.append(f"approve-plan ({OLDER_APPROVAL['en']})" if approved_before_3(appr) else      # 3.0 F2
+                     "approve-plan (the plan changed after approval: show the editor again)")
     if newer("build", "plan", "approval"):
         stale.append("motion-build (older than the plan or its approval)")
     if newer("render", "build"):

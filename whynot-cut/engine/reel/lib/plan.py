@@ -940,12 +940,25 @@ def _volatile(key: str) -> bool:
 
 
 APPROVAL_FORMAT = 3                        # plan-approval.json records written by 3.0+ carry "format": 3
+# 3.0 F2: the plan fingerprint changed in 3.0, so a plan approved under 2.x needs one more approval. What the editor
+# reads then, in their language (the refusal's `editor_message`; `blocked` / `error` carry the English).
+OLDER_APPROVAL = {"en": "This plan was approved with an older WhyNot Cut. Have one more look and approve it again.",
+                  "ar": "الخطة دي اتوافق عليها بنسخة أقدم من WhyNot Cut. بص عليها بصّة كمان ووافق عليها تاني."}
+
+
+def approved_before_3(appr) -> bool:
+    """An approval record written before 3.0: approved, without the 3.0 "format" (or an older one)."""
+    if not isinstance(appr, dict) or not appr.get("approved"):
+        return False
+    fmt = appr.get("format")
+    return not isinstance(fmt, int) or isinstance(fmt, bool) or fmt < APPROVAL_FORMAT
 
 
 def approval_state(paths: Paths) -> dict:
     """{"state": "none" | "current" | "stale", "by", "message"} of 01_analysis/plan-approval.json against the plan
-    as it is now (3.0 T11): a stale approval says "plan changed since approval — re-approve", and a record from before
-    3.0 (no "format") adds that the approval format changed, so the editor knows why their approval no longer holds."""
+    as it is now (3.0 T11): a stale approval says "plan changed since approval — re-approve"; a record from before
+    3.0 (no "format") says instead that it was approved with an older WhyNot Cut (OLDER_APPROVAL, 3.0 F2, with
+    `editor_message` in English and Arabic), so the editor knows why their approval no longer holds."""
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     by = appr.get("by") or "?"
     if not appr.get("approved"):
@@ -960,10 +973,9 @@ def approval_state(paths: Paths) -> dict:
         now = None                                         # no compiled plan: nothing the approval still matches
     if not appr.get("stale") and now and appr.get("plan_fingerprint") == now:
         return {"state": "current", "by": by, "message": f"approved by {by}"}
-    msg = "plan changed since approval — re-approve"
-    if appr.get("format") != APPROVAL_FORMAT:
-        msg += " (approval format changed in 3.0)"
-    return {"state": "stale", "by": by, "message": msg}
+    if approved_before_3(appr):
+        return {"state": "stale", "by": by, "message": OLDER_APPROVAL["en"], "editor_message": dict(OLDER_APPROVAL)}
+    return {"state": "stale", "by": by, "message": "plan changed since approval — re-approve"}
 
 
 def speaker_covered_frames(spec: dict) -> int:

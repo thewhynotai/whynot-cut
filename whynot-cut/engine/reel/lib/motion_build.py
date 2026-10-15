@@ -148,15 +148,20 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
     elif val.get("fingerprint") != fp:
         probs.append("the motion plan is stale (script, words, audio or brand changed): run `reel motion-plan` again")
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
+    from .plan import OLDER_APPROVAL, approved_before_3
+    older = approved_before_3(appr) and appr.get("plan_fingerprint") != fp          # 3.0 F2: approved under 2.x
     gate = None
     if not appr.get("approved"):
         gate = "the plan is not approved yet: the editor approves motion-plan.md and the animatic (`reel approve-plan`)"
     elif appr.get("plan_fingerprint") != fp:
-        gate = "the plan approval is stale (the plan changed after approval): show the editor again"
+        gate = (OLDER_APPROVAL["en"] if older else
+                "the plan approval is stale (the plan changed after approval): show the editor again")
     if gate:                    # an approval gate is a refusal (exit 2), like ppro-build's (Gate 2 A2)
         probs.append(gate)
         ctx["refusal"] = {"blocked": gate, "how": "Show the editor motion-plan.md and the animatic; only with their "
                                                   "words run `reel approve-plan --by editor`, then motion-build again"}
+        if older:
+            ctx["refusal"]["editor_message"] = dict(OLDER_APPROVAL)
     st = ae_bridge.status()
     if not st.get("alive"):
         probs.append(f"the WhyNot Cut Bridge is not running in After Effects: {st.get('detail')} (`reel ae-status`)")

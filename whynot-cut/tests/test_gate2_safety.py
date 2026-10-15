@@ -895,9 +895,10 @@ class TestG2R1ServeBuildIsTheCliBuild(_Client):
     action with the client's data is never sent, and overwrite_existing:true is --force, never --replace-edited."""
 
     def approve(self, fingerprint=None):
-        from lib.plan import plan_fingerprint
-        write_json(self.p.p("01_analysis/plan-approval.json"),
-                   {"approved": True, "by": "editor", "plan_fingerprint": fingerprint or plan_fingerprint(self.p)})
+        from lib.plan import APPROVAL_FORMAT, plan_fingerprint
+        write_json(self.p.p("01_analysis/plan-approval.json"),          # what a 3.0 approve-plan writes
+                   {"approved": True, "by": "editor", "plan_fingerprint": fingerprint or plan_fingerprint(self.p),
+                    "format": APPROVAL_FORMAT})
 
     def serve(self, answer, data=None, close_result=None):
         """build_project through serve's FileQueueAdapter, with this class's fake bridge (job_data faked as DATA)."""

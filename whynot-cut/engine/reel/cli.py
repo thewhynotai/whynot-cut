@@ -461,14 +461,18 @@ def cmd_sfx(a):
 
 def require_plan_approval(p: Paths):
     """Hard gate before slow Adobe builds: the CURRENT plan must be approved (by the editor, or
-    explicitly delegated by them). A re-plan after approval invalidates it."""
-    from lib.plan import plan_fingerprint
+    explicitly delegated by them). A re-plan after approval invalidates it; an approval from before 3.0 says so
+    plainly (3.0 F2)."""
+    from lib.plan import OLDER_APPROVAL, approved_before_3, plan_fingerprint
     appr = read_json(p.p("01_analysis/plan-approval.json"))
     if not appr or appr.get("stale") or appr.get("plan_fingerprint") != plan_fingerprint(p):
-        out({"blocked": "edit plan not approved (or changed since approval)",
-             "how": "Show the editor 01_analysis/edit-plan.md (playback in chat); after they approve run "
-                    "`reel approve-plan --by editor`. If they told you to proceed without review: "
-                    "`reel approve-plan --by delegated --note \"<their words>\"`."})
+        how = ("Show the editor 01_analysis/edit-plan.md (playback in chat); after they approve run "
+               "`reel approve-plan --by editor`. If they told you to proceed without review: "
+               "`reel approve-plan --by delegated --note \"<their words>\"`.")
+        if approved_before_3(appr):
+            out({"blocked": OLDER_APPROVAL["en"], "editor_message": dict(OLDER_APPROVAL), "how": how})
+        else:
+            out({"blocked": "edit plan not approved (or changed since approval)", "how": how})
         raise SystemExit(2)
 
 

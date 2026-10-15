@@ -21,6 +21,8 @@ from lib.common import Paths, read_json, write_json  # noqa: E402
 from lib.plan import plan_fingerprint  # noqa: E402
 
 CLI = SK / "engine/reel/cli.py"
+OLDER_EN = "This plan was approved with an older WhyNot Cut. Have one more look and approve it again."
+OLDER_AR = "الخطة دي اتوافق عليها بنسخة أقدم من WhyNot Cut. بص عليها بصّة كمان ووافق عليها تاني."
 
 
 def base_spec() -> dict:
@@ -167,13 +169,80 @@ class TestApprovalStaleness(ApprovalFixture):
         self.assertNotIn("approved by editor", readme)
         self.assertIn("plan changed since approval — re-approve", readme)
 
-    def test_e2_pre_3_0_approval_names_the_format_change(self):
+    def test_e2_pre_3_0_approval_says_it_was_approved_with_an_older_whynot_cut(self):
         write_json(self.p.p("01_analysis/plan-approval.json"),          # 2.x record: old fingerprint, no format
                    {"approved": True, "by": "editor", "note": "", "at": "2026-09-01T10:00:00",
                     "plan_fingerprint": "0123456789abcdef"})
         stale = " ".join(self.next_out()["stale"])
-        self.assertIn("plan changed since approval — re-approve (approval format changed in 3.0)", stale)
-        self.assertNotIn("approved by editor", self.handoff_readme())
+        self.assertIn(OLDER_EN, stale)
+        self.assertNotIn("plan changed since approval", stale)
+        readme = self.handoff_readme()
+        self.assertNotIn("approved by editor", readme)
+        self.assertIn(OLDER_EN, readme)
+
+
+class TestPre30Approval(ApprovalFixture):
+    """3.0 F2: the plan fingerprint changed in 3.0, so a plan approved under 2.x needs one more approval. The refusal
+    says so plainly (English and Arabic); a real re-plan after a 3.0 approval keeps the generic message."""
+
+    def old_record(self, fingerprint="0123456789abcdef"):
+        write_json(self.p.p("01_analysis/plan-approval.json"),          # what 2.x wrote: no "format"
+                   {"approved": True, "by": "editor", "note": "", "at": "2026-09-01T10:00:00",
+                    "plan_fingerprint": fingerprint})
+
+    def test_ppro_build_says_the_plan_was_approved_with_an_older_whynot_cut(self):
+        self.old_record()
+        r = cli(self.root, "ppro-build")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        doc = json.loads(r.stdout)
+        self.assertEqual(doc["blocked"], OLDER_EN)
+        self.assertEqual(doc["editor_message"], {"en": OLDER_EN, "ar": OLDER_AR})
+        self.assertIn("approve-plan", doc["how"])
+
+    def test_a_real_replan_after_a_3_0_approval_keeps_the_generic_message(self):
+        self.approve()
+        self.assertEqual(read_json(self.p.p("01_analysis/plan-approval.json"))["format"], 3)
+        self.save(self.mutated(lambda s: s["events"][0]["params"].update(text="y")))
+        r = cli(self.root, "ppro-build")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("not approved", r.stdout)
+        self.assertNotIn("older WhyNot Cut", r.stdout)
+        self.assertNotIn("editor_message", json.loads(r.stdout))
+        from lib.ppro_build import approval_refusal
+        ref = approval_refusal(self.p)
+        self.assertNotIn("older WhyNot Cut", ref["error"])
+        self.assertNotIn("editor_message", ref)
+        from lib.plan import approval_state
+        self.assertEqual(approval_state(self.p)["message"], "plan changed since approval — re-approve")
+
+    def test_the_serve_build_refusal_says_it_too(self):
+        from lib.ppro_build import approval_refusal
+        self.old_record()
+        ref = approval_refusal(self.p)
+        self.assertEqual((ref["status"], ref["ok"]), ("REFUSED", False))
+        self.assertTrue(ref["error"].startswith(OLDER_EN), ref["error"])
+        self.assertEqual(ref["editor_message"], {"en": OLDER_EN, "ar": OLDER_AR})
+        from lib.build_safety import serve_answer
+        self.assertTrue(serve_answer(ref, "PRPROJ_BUILT", "result")["error"].startswith(OLDER_EN))
+
+    def test_approval_state_names_it_in_both_languages(self):
+        from lib.plan import approval_state
+        self.old_record()
+        st = approval_state(self.p)
+        self.assertEqual((st["state"], st["message"]), ("stale", OLDER_EN))
+        self.assertEqual(st["editor_message"], {"en": OLDER_EN, "ar": OLDER_AR})
+
+    def test_a_2x_record_that_still_matches_the_plan_stays_approved(self):
+        from lib.ppro_build import approval_refusal
+        self.old_record(plan_fingerprint(self.p))
+        self.assertIsNone(approval_refusal(self.p))
+        self.assertNotIn("not approved", cli(self.root, "ppro-build").stdout)
+
+    def test_approving_again_clears_it(self):
+        self.old_record()
+        self.approve()
+        from lib.ppro_build import approval_refusal
+        self.assertIsNone(approval_refusal(self.p))
 
 
 class TestApproveReadsTheStamp(ApprovalFixture):

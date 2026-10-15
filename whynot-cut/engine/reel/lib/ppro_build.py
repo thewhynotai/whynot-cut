@@ -253,8 +253,9 @@ def build(paths: Paths, overwrite: bool = False, replace_edited: bool = False, *
 
 def approval_refusal(paths: Paths) -> dict | None:
     """The CLI's Gate 1 check (cli.require_plan_approval) for callers that are not the CLI (reel serve): the CURRENT
-    plan must be approved; a re-plan after approval, a stale record or no compiled plan refuses."""
-    from .plan import plan_fingerprint
+    plan must be approved; a re-plan after approval, a stale record or no compiled plan refuses. A record from before
+    3.0 says so plainly (plan.OLDER_APPROVAL, 3.0 F2)."""
+    from .plan import OLDER_APPROVAL, approved_before_3, plan_fingerprint
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     try:
         now = plan_fingerprint(paths)
@@ -262,6 +263,11 @@ def approval_refusal(paths: Paths) -> dict | None:
         now = None
     if appr.get("approved") and not appr.get("stale") and now and appr.get("plan_fingerprint") == now:
         return None
+    if now and approved_before_3(appr):
+        return {"status": "REFUSED", "ok": False, "blocked": OLDER_APPROVAL["en"],
+                "error": OLDER_APPROVAL["en"] + " Nothing was built.", "editor_message": dict(OLDER_APPROVAL),
+                "how": "Show the editor 01_analysis/edit-plan.md; after they approve it (`reel approve-plan --by "
+                       "editor`), build again."}
     return {"status": "REFUSED", "ok": False, "blocked": "edit plan not approved (or changed since approval)",
             "error": "The edit plan is not approved, or it changed after the approval: nothing was built.",
             "how": "Show the editor 01_analysis/edit-plan.md; after they approve it (`reel approve-plan --by editor`), "
