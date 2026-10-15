@@ -1,6 +1,6 @@
 # Recipes → beats → scenes
 
-The window's content type (from Gate 0) sets `recipe.motion` in `00_inputs/source.json`. Follow it; explain any
+The window's content type (from the editor's pick) sets `recipe.motion` in `00_inputs/source.json`. Follow it; explain any
 deviation in the scene's `recipe_note`.
 
 | type | beats (in order) | scene s (min/target/max) | prefer | reveal · ease · transition | theme | SFX |

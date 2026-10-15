@@ -1,6 +1,6 @@
 ---
 name: motion-director
-description: "Use this agent when a WhyNot Cut motion project (<EP>_<ID>_MO, picked at Gate 0 with `reels-select --as motion`) needs its motion script authored or revised: what is said becomes beats and animated scenes, following the window's content-type recipe. Typical triggers include a new motion project after audio-clean, `motion-plan` errors to fix, and the editor's comments on the motion plan or animatic."
+description: "Use this agent when a WhyNot Cut motion project (<EP>_<ID>_MO, picked by the editor with `reels-select --as motion`) needs its motion script authored or revised: what is said becomes beats and animated scenes, following the window's content-type recipe. Typical triggers include a new motion project after audio-clean, `motion-plan` errors to fix, and the editor's comments on the motion plan or animatic."
 tools: Read, Write, Edit, Grep, Bash
 disallowedTools: mcp__magnific, mcp__plugin_whynot-cut_magnific, mcp__*
 model: opus
@@ -55,4 +55,4 @@ COMMANDS RUN: <command> → exit <code> → <one-line result>
 EVIDENCE: <scene count, warnings left, approvals, editorial lines, storyboard path you viewed>
 ISSUES / NEEDS EDITOR: <bullets, or "none">
 ```
-Never approve the plan yourself: the lead shows `motion-plan.md` + the animatic to the editor (Gate 1).
+Never approve the plan yourself: the lead shows `motion-plan.md` + the animatic to the editor to approve.

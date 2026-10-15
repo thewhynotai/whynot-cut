@@ -65,4 +65,4 @@ Types and their signals: `${CLAUDE_SKILL_DIR}/references/content-types.md`. Scor
 - Host vs guest attribution comes from the turns; a reel whose key line is the host's is labelled so in `speakers`.
 - Sensitive claims (medical, financial, legal, religious) → `risks: ["claim needs approval: …"]`.
 - Topics in the sheet's `avoid` list → still allowed in the plan only with a `risks` note; the editor decides.
-- You never pick the reels. Gate 0 is the editor's.
+- You never pick the reels. Picking them is the editor's.

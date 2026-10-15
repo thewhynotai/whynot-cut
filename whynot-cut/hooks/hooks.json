@@ -1,5 +1,5 @@
 {
-  "description": "WhyNot Cut guardrails (read-only client sources, Premiere-first, role limits) for Bash, PowerShell and file tools (file tools only for paths in client sources, the marker/lock and After Effects prefs: no process for any other write); session context for client folders and the clients workspace, also after a cd; optional evidence gate at turn end (off unless evidence_gate: on). See hooks/README.md",
+  "description": "WhyNot Cut guardrails (read-only client sources, Premiere-first, role limits) for Bash, PowerShell and file tools (file tools only for paths in client sources, the marker/lock and After Effects prefs: no process for any other write); session context for client folders and the clients workspace, also after a cd; optional evidence gate at turn end (off unless evidence_gate: true). See hooks/README.md",
   "hooks": {
     "PreToolUse": [
       {

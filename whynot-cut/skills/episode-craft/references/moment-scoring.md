@@ -24,5 +24,5 @@ order to choose, and a flat 8 on everything helps nobody.
 - Overlap with another candidate by more than half — keep the better-bounded one.
 
 ## Risks field
-Short strings the editor reads at Gate 0: `"claim needs approval: …"`, `"mentions <avoid topic>"`, `"names a third
+Short strings the editor reads when picking the reels: `"claim needs approval: …"`, `"mentions <avoid topic>"`, `"names a third
 person"`, `"host speaks the last line"`, `"music under speech in the episode (cleanup limited)"`.

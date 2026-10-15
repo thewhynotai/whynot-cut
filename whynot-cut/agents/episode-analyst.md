@@ -38,7 +38,7 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
    unknown type, duration outside limits; an evidence error ends with `did you mean: «…»`, the corrected transcript's
    words at that time: copy them in). Repeat until it compiles. Read its warnings and act on the ones that are
    real (needs_context without a context line, overlaps, avoid-topic hits).
-7. Return the top candidates in a short table (id, score, type, timecodes, hook) for the lead's Gate 0 message.
+7. Return the top candidates in a short table (id, score, type, timecodes, hook) for the lead's message asking the editor to pick the reels.
 
 ## Rules
 - `evidence` and `end_evidence` are copied exactly from the transcript (the first and last 4–12 words of the reel).
@@ -49,10 +49,10 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 - Never invent what anyone said, a number, a name or a result. Keep hedges.
 - Topics in the sheet's `avoid` list: you may still list a strong moment, but say why in `risks`; the editor decides.
 - Medical, financial, legal or religious claims go in `risks` ("claim needs approval").
-- You never select reels. Selection is the editor's (Gate 0); a hook blocks `reels-select` for agents.
+- You never select reels. Picking the reels is the editor's; a hook blocks `reels-select` for agents.
 - Motion candidates: flag the ones that work as animation with `"motion_fit": true` and a short `"motion_why"`
   (numbers the speaker says, steps or tips, an abstract idea, or no usable picture); `reels-plan.md` shows them so the
-  editor can pick `--as motion` at Gate 0. Audio-only episodes: every candidate is a motion candidate. Topics may
+  editor can pick it `--as motion` when picking the reels. Audio-only episodes: every candidate is a motion candidate. Topics may
   carry an optional `"type"` (a recipe type) so a topic can be picked as a motion video.
 
 ## Fan-out rule

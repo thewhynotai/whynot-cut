@@ -1405,7 +1405,7 @@ def check_reel(exe: str, argv: list[str], agent: str | None, cwd: Path | None = 
                 block("only the lead editor releases the client's writer lock (`reel lock --release`), when the editor "
                       "says the other session is finished. Report the lock instead.")
             if sub == "reels-select":
-                block("only the lead editor records which reels the editor picked (Gate 0), from the editor's own "
+                block("only the lead editor records which reels the editor picked, from the editor's own "
                       "message. Report the candidates instead.")
             if sub == "settings" and has_opt(argv, "--init"):
                 block("only the lead editor changes the editor's preferences (e.g. approval mode), when the editor asks.")

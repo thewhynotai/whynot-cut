@@ -17,7 +17,7 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 
 ## When to invoke
 - **Episode package** (after the reels plan exists): `publish/publish.json` for the episode.
-- **Reel captions** (after a reel's plan is approved at Gate 1): `publish/reels/<REEL>.json`.
+- **Reel captions** (after the editor approves a reel's plan): `publish/reels/<REEL>.json`.
 - **Rewrite requests.** "Shorter titles", "more Egyptian", "no emojis", "different hook".
 
 ## How you work

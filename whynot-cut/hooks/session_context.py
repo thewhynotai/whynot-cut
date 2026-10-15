@@ -633,6 +633,13 @@ def writer_line(root: Path, session) -> str:
             f"editor says that session is finished or stuck, the lead runs `reel lock --release`. ")
 
 
+# Every WhyNot Cut context (client folder, clients folder, set up here) says it (G3 review M1): editors are told to
+# start Claude in the clients folder, and the output style is opt-in.
+READ_ONLY_RULE = ("Every client folder's assets/ and data/ are read-only: never offer to rename, move, convert, "
+                  "overwrite or delete anything inside them (e.g. the footage in data/Raw), not even once the editor "
+                  "confirms; offer a copy under output/ or the reel command that leaves the sources untouched.")
+
+
 # G3 review I1 (approval consent): a standing `approval: auto` is the editor's own choice, so "stop asking" / "just go"
 # is answered with a question and a stop, in every session context (the preferences skill may not be loaded yet).
 CONSENT_RULE = (" \"Stop asking\" / \"just go\" never switches approval by itself: ask \"this clip only, or from now "
@@ -786,9 +793,7 @@ def speak(cwd: Path, st: dict, home: Path, env_ok: bool, data: dict):
              + updates_line(home)
              + f"{prefs_line(st)} "
              f"Use /whynot-cut:autopilot (edit every new clip), /whynot-cut:edit <clip>, /whynot-cut:revise, "
-             f"/whynot-cut:status. assets/ and data/ are read-only: never offer to rename, move, convert, overwrite "
-             f"or delete anything inside them (e.g. the footage in data/Raw), not even once the editor confirms; "
-             f"offer a copy under output/ or the reel command that leaves the sources untouched.")
+             f"/whynot-cut:status. " + READ_ONLY_RULE)
         return
     legacy = cwd if client_marker.has_layout(cwd) and (cwd / "output").is_dir() and any(
         (cwd / x).exists() for x in ("START_HERE.md", "output/projects", "output/discovery")) else None
@@ -810,12 +815,13 @@ def speak(cwd: Path, st: dict, home: Path, env_ok: bool, data: dict):
              f"Pass one to reel as --root \"<name>\", or say 'edit the new videos' (/whynot-cut:autopilot). "
              f"New client: /whynot-cut:new-client. Engine: {'ok' if env_ok else 'not installed (/whynot-cut:start)'}. "
              + clients_lists(cwd, names) + updates_line(home)
-             + f"{prefs_line(st)}")
+             + f"{prefs_line(st)} " + READ_ONLY_RULE)
     elif st.get("_file") and Path(st["_file"]).parent.parent == cwd.resolve():
         SCOPE[:] = [str(cwd), "set up here, no client folder open"]
         emit(f"WhyNot Cut is set up here ({prefs_line(st)}) but no client folder is open. "
              + updates_line(home)
-             + f"Run /whynot-cut:start to continue onboarding or /whynot-cut:new-client to add a client.")
+             + "Run /whynot-cut:start to continue onboarding or /whynot-cut:new-client to add a client. "
+             + READ_ONLY_RULE)
 
 
 if __name__ == "__main__":

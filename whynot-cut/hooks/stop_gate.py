@@ -212,7 +212,7 @@ def main():
     print(json.dumps({"decision": "block", "reason": (
         "WhyNot Cut evidence gate: this turn says the edit is ready/done but ran no `reel qc` (or `reel verify`). "
         "Run `reel qc` for the item and look at its frames, then report what it shows; if it is not ready, say so "
-        "instead. (The editor turned this check on with `evidence_gate: on`.)")}))
+        "instead. (The editor turned this check on with `evidence_gate: true`.)")}))
 
 
 if __name__ == "__main__":

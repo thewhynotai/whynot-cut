@@ -33,7 +33,7 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 ## Podcast reels (video id `<EP>_<RID>`)
 - Read `00_inputs/source.json`: `content_type`, `recipe` (pacing, camera, captions, graphics, sfx, music, copy) and
   `context_line`. Follow the recipe; when you deviate (more graphics, a bigger zoom, an avoided template), add
-  `recipe_note` to that decision with the reason: `reel plan` lists deviations and notes for Gate 1.
+  `recipe_note` to that decision with the reason: `reel plan` lists deviations and notes for the editor's plan approval.
 - A reel that needs context starts with a `context_card` (`text` = the context line) over the first 2-3 s.
 - A number or result the speaker says -> `stat_card` (`value` as said, `label` = a few of their words).
 - Music: `reel music --root "<CLIENT>" --list`; if a track's moods fit the recipe, set `music.file` (data/Music only);

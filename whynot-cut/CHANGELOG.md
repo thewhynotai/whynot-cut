@@ -12,7 +12,7 @@
   installer would bring (`setup/components.json` vs `<engine home>/state.json`) and, in the clients folder, the
   clients another session is writing in; it nudges once per install to /whynot-cut:start on a machine not set up yet,
   writes `~/.whynot-cut/plugin-root.json` `{root, version, at}` and also runs for `fork`. An optional Stop evidence
-  gate (preference `evidence_gate: on`, off by default and with `approval: auto`) sends back a turn that ran `reel`
+  gate (preference `evidence_gate: true`, off by default and with `approval: auto`) sends back a turn that ran `reel`
   commands and says ready/done without `reel qc`. After /clear the same Claude Code process keeps its client lease
   under the new session id (a SessionEnd cut short by its 1.5 s budget no longer locks the session out). The
   engine-less fallback of "new clips" reads words in any script (an Arabic name glued to `ref` is a clip).

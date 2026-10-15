@@ -407,8 +407,11 @@ class TestPendingLists(HookFixture):
             time.sleep(0.02)
             return ""
         payload = {"hook_event_name": "SessionStart", "source": "clear", "session_id": "B", "cwd": str(base)}
-        with mock.patch.object(SC, "panel_line", slow),                 mock.patch.dict(SC.DATA, payload), mock.patch.dict(os.environ, {"CLAUDE_PID": str(me)}):
+        with (mock.patch.object(SC, "panel_line", slow), mock.patch.dict(SC.DATA, payload),
+              mock.patch.dict(os.environ, {"CLAUDE_PID": str(me)}),
+              contextlib.redirect_stderr(io.StringIO()) as said):          # M10: the re-key's log line, not the console
             line = SC.clients_lists(base, names, budget=0.1)
+        self.assertIn("writer lock: session B continues the lease of session A", said.getvalue())
         self.assertEqual(writer_lock.read(base / names[-1])["session_id"], "B")      # re-keyed after the cut-off
         self.assertIn(f"{names[-2]} (", line)                                          # busy list covers every client
         self.assertNotIn(f"{names[-1]} (", line)
@@ -632,7 +635,14 @@ class TestEvidenceGate(HookFixture):
         sys.path.insert(0, str(SK / "engine" / "reel" / "lib"))
         import settings as S
         self.assertIs(S.DEFAULTS["evidence_gate"], False)
-        self.assertIn("| `evidence_gate` |", (SK / "skills/preferences/SKILL.md").read_text(encoding="utf-8"))
+        self.assertIn("| `evidence_gate` | `true` · `false` (`on` · `off` mean the same) |",
+                      (SK / "skills/preferences/SKILL.md").read_text(encoding="utf-8"))
+        # G3 review M9: every document names the same value (`on` still parses: settings._parse_scalar)
+        for rel in ("hooks/README.md", "hooks/stop_gate.py", "hooks/stop_gate.sh", "hooks/hooks.json", "CHANGELOG.md"):
+            s = (SK / rel).read_text(encoding="utf-8")
+            self.assertIn("evidence_gate: true", s, rel)
+            self.assertNotIn("evidence_gate: on", s, rel)
+        self.assertIs(S.parse("---\nevidence_gate: on\n---\n")[0]["evidence_gate"], True)
 
 
 # ------------------------------------------------------------------------------------------------------ /clear lease
@@ -747,6 +757,23 @@ class TestSourcesNeverOfferedForChange(HookFixture):
                       "anything inside them", ctx)
         self.assertIn("not even once the editor confirms", ctx)
         self.assertIn("offer a copy under output/", ctx)
+
+    def test_clients_folder_and_set_up_here_contexts_say_it_too(self):
+        """G3 review M1: editors start Claude in the clients folder (README, start Step 4) and the output style is
+        opt-in, so the clients-folder and set-up-here contexts carry the same rule."""
+        base = Path(self.tmp.name)
+        ctx = self.start(base, WHYNOT_CLIENTS_ROOT=str(base))
+        self.assertIn("this is the clients folder", ctx)
+        setup = base / "set up here"
+        (setup / ".claude").mkdir(parents=True)
+        (setup / ".claude" / "whynot-cut.local.md").write_text("---\nlanguage: en\n---\nnotes\n", encoding="utf-8")
+        ctx2 = self.start(setup, sid="s2")
+        self.assertIn("is set up here", ctx2)
+        for c in (ctx, ctx2):
+            self.assertIn("assets/ and data/ are read-only: never offer to rename, move, convert, overwrite or "
+                          "delete anything inside them", c)
+            self.assertIn("not even once the editor confirms", c)
+            self.assertIn("offer a copy under output/", c)
 
     def test_editor_output_style_says_the_same(self):
         style = (SK / "output-styles/whynot-cut-editor.md").read_text(encoding="utf-8")

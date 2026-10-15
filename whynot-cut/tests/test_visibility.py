@@ -170,6 +170,11 @@ class TestStatusScript(unittest.TestCase):
             self.assertTrue(word.isascii(), word)
             self.assertNotRegex(word, r"(?i)gate|stage\s*\d|^\d")
 
+    def test_ascii_labels_are_a_recorded_decision(self):     # G3 review M4: also with language: ar
+        readme = " ".join((SK / "hooks" / "README.md").read_text(encoding="utf-8").split())
+        self.assertIn("Labels stay plain ASCII English with `language: ar` too (decision, G3 review M4)", readme)
+        self.assertIn("right-to-left", readme)
+
     def test_other_agents_are_left_to_claude_code(self):
         tasks = [_task(id="a", agentType="general-purpose"), _task(id="b", agentType=None), _task(id="c", agentType="Explore")]
         self.assertEqual(_run_script({"tasks": tasks})[1], "")
