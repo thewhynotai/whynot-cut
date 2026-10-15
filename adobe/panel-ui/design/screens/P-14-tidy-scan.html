@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,focus,podcast,confirm,unsaved,error,offline,no-claude,stale,long">
+<meta name="mock-keys" content="Mod+Enter = Clean &amp; organise (opens the confirm sheet), or the notice's fix when it is off; in the sheet Mod+Enter confirms and Esc = Keep my project; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs; Tab / Shift+Tab move through sections and rows, Space ticks the focused box (native checkbox), Enter on a section title opens or closes it. No single-key shortcuts.">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Section open/close: the chevron swaps and the content appears in place (no height animation). Tick: box fill 150 ms. Confirm sheet: appears in the pinned bar (the bar content swaps, background colour 200 ms, no slide, no overlay).">
+<title>P-14 Tidy scan and plan</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/tools-ae.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/tools-ae.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/tools-ae.js"></script>
+</head>
+<body>
+<script>
+/* P-14 Tidy: scan and plan (screen-inventory.md §3 P-14; upstream tidy/_upstream: scan -> preview with ticks and
+   sizes -> confirm -> save + backup -> apply). Tools tab.
+   - Title: plain label «رتّب المشروع» / "Organise project" first, Tidy as the small line.
+   - Every item that will leave the project is listed by name (names wrap, never cut), grouped by reason, with a tick
+     and a size. Opt-ins (caption files; in Podcast mode cameras, mics, recordings of 3 min or more) are listed unticked.
+   - The form-ending primary "Clean & organise" sits in the pinned action bar; pressing it opens the confirm dialog in
+     the same bar (state confirm): what will change + the backup name in a mono chip on its own row.
+   - unsaved: the project was never saved, so no backup can be made; Clean is off until it is saved.
+   - offline: Scan and Clean are disabled (the scan reads file sizes through the WhyNot Cut app); the notice's fix
+     takes the violet fill. stale: the project changed since the scan; Clean is off, Scan again takes the fill.
+   - focus: keyboard focus on a file row's tick. long: long project and file names wrap. */
+(function () {
+  var t = M.t, D = M.D, X = D.ta;
+  var NB = "\u00A0";
+
+  function head() {
+    return TA.back(t("p13.back")) + TA.title("folder-tree", t("home.tool.tidy"), M.ltr("Tidy"));
+  }
+  function projectCard(o) {
+    o = o || {};
+    var mode = o.podcast ? 1 : 0;
+    return M.card('<div class="t-meta tx-muted">' + t("p14.project") + '</div>' +
+      '<div class="t-mono ta-wrapname mt-1">' + M.esc(o.name || X.project) + '</div>' +
+      '<div class="mt-3">' + TA.seg([t("p14.mode.reels"), t("p14.mode.podcast")], mode, { disabled: o.disabled }) + '</div>' +
+      '<div class="t-meta tx-muted mt-2">' + t(o.podcast ? "p14.mode.hint.podcast" : "p14.mode.hint.reels") + '</div>' +
+      (o.scanBtn ? '<div class="m-row mt-3">' + o.scanBtn + '</div>' : ''), "mt-4");
+  }
+  function size(s) { return '<span class="t-meta tx-muted nowrap">' + M.ltr(s) + '</span>'; }
+  function stats(o) {
+    return '<div class="mt-4">' + TA.stats([
+      [M.ltr("386"), t("p14.stat.items")],
+      [M.ltr("41.2" + NB + "GB"), t("p14.stat.size")],
+      [M.ltr(o && o.podcast ? "121" : "112"), t("p14.stat.remove", { size: M.html(M.ltr("6.8" + NB + "GB")) })],
+      [M.ltr("17%"), t("p14.stat.unused")]
+    ]) + '</div>';
+  }
+  function group(label, count, rows, o) {
+    o = o || {};
+    return '<div class="m-row mt-3"><div class="t-label m-grow">' + label + '</div>' + M.chip("neutral", M.ltr(String(count))) + '</div>' +
+      (o.note ? '<div class="t-meta tx-muted">' + o.note + '</div>' : '') +
+      '<div class="m-col mt-1">' + rows + '</div>' +
+      (o.more ? '<div class="m-row">' + M.btn(t("p14.show_all", { n: count }), { kind: "ghost", icon: "chevron-down", flush: true }) + '</div>' : '');
+  }
+  function file(name, sz, checked, o) {
+    o = o || {};
+    return TA.checkrow({ checked: checked, name: name, mono: true, end: size(sz), focus: o.focus, disabled: o.disabled });
+  }
+  function removeCard(o) {
+    o = o || {};
+    var dis = o.disabled;
+    var longName = o.long ? "Al-Mustaqbal_interview_C0239_cam-A_take-03_backup-copy_from_old_drive_2026-09-30.mov" : "C0231_take2.mov";
+    var body =
+      group(t("p14.r.unused"), 96,
+        file(longName, "1.9" + NB + "GB", true, { focus: o.focus, disabled: dis }) +
+        (o.podcast ? "" : file("C0233.mov", "1.4" + NB + "GB", true, { disabled: dis }) +
+        file("music_alt_v1.wav", "48" + NB + "MB", true, { disabled: dis })), { more: true }) +
+      group(t("p14.r.duplicate"), 9, file("C0239 (1).mov", "2.1" + NB + "GB", true, { disabled: dis }) + (o.podcast ? "" : file("logo_white copy.png", "1" + NB + "MB", true, { disabled: dis })), { more: true }) +
+      group(t("p14.r.backup"), 5, file("C0239_main (WhyNot Hush backup 11:05:44)", "–", true, { disabled: dis }), { more: true }) +
+      group(t("p14.r.captions"), 2, file("C0239_main.srt", "8" + NB + "KB", false, { disabled: dis }) + file("C0231_main.srt", "6" + NB + "KB", false, { disabled: dis }),
+        { note: t("p14.r.captions_note") });
+    if (o.podcast) {
+      body += '<div class="m-row mt-4">' + M.chip("neutral", t("p14.optin"), "circle-dashed") + '</div>' +
+        group(t("p14.r.cameras"), 4, file("Cam 3 – C0007.mp4", "3.2" + NB + "GB", false), { more: true }) +
+        group(t("p14.r.mics"), 3, file("Mic 3 – ZOOM0004.wav", "410" + NB + "MB", false), { more: true }) +
+        group(t("p14.r.long"), 2, file("Room tone – ZOOM0001.wav", "96" + NB + "MB", false));
+    }
+    return M.card('<div class="m-row">' + M.ico("trash-2", 16, "ink-muted") + '<div class="t-label ms-2 m-grow">' + t("p14.sec.remove") + '</div>' +
+      M.chip("neutral", M.ltr(o.podcast ? "121" : "112")) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("p14.sec.remove_note") + '</div>' + body, "mt-4");
+  }
+  function moveCard() {
+    var bins = [["01 Footage", 38], ["03 Audio/Music", 12], ["04 Images/PNG", 61], ["06 Sequences", 9]];
+    var rows = bins.map(function (b, i) {
+      return (i ? M.divider() : '') + '<div class="m-row" style="min-height:32px">' + M.ico("folder", 16, "ink-muted") +
+        '<div class="t-mono ms-2 m-grow">' + M.esc(b[0]) + '</div>' + M.chip("neutral", M.ltr(String(b[1]))) + '</div>';
+    }).join("");
+    return M.card(TA.sechead(t("p14.sec.move"), M.chip("neutral", M.ltr("214")), true) +
+      '<div class="m-col" style="padding-bottom:8px">' + rows + '</div>', "m-card-flush mt-3");
+  }
+  function nestsCard(o) {
+    o = o || {};
+    return M.card(TA.sechead(t("p14.sec.nests"), M.chip("neutral", M.ltr("3")), true) +
+      '<div class="t-meta tx-muted">' + t("p14.nests.note") + '</div>' +
+      '<div class="m-col mt-1" style="padding-bottom:8px">' +
+      TA.checkrow({ checked: true, name: "Nested Sequence 01 → Intro + B-roll", mono: true, disabled: o.disabled }) +
+      TA.checkrow({ checked: true, name: "Nested Sequence 02 → Lower thirds", mono: true, disabled: o.disabled }) +
+      TA.checkrow({ checked: false, name: "Nested Sequence 03 → Outro card", mono: true, disabled: o.disabled }) + '</div>', "m-card-flush mt-3");
+  }
+  function closed(label, count, icon) { return M.card(TA.sechead(label, M.chip(icon || "neutral", M.ltr(String(count)), icon ? "triangle-alert" : ""), false), "m-card-flush mt-3"); }
+  function problems() {
+    return M.card('<div class="m-row">' + M.status("warn") + '<div class="t-label ms-2 m-grow">' + t("p14.sec.problems") + '</div>' + M.chip("warn", M.ltr("2")) + '</div>' +
+      '<div class="t-meta tx-text mt-2">' + t("p14.problem.1") + '</div><div class="t-meta tx-text mt-2">' + t("p14.problem.2") + '</div>', "mt-3");
+  }
+  function offlineCard() {
+    return M.card(TA.sechead(t("p14.sec.offline"), M.chip("warn", M.ltr("3"), "triangle-alert"), true) +
+      '<div class="t-meta tx-muted">' + t("p14.offline.note") + '</div>' +
+      '<div class="m-col mt-2" style="padding-bottom:8px"><div class="ta-bullet">' + M.status("warn") + '<div class="t-mono ta-wrapname ms-2 m-grow">D:\\Old drive\\Sahha\\C0198.mov</div></div>' +
+      '<div class="ta-bullet mt-2">' + M.status("warn") + '<div class="t-mono ta-wrapname ms-2 m-grow">D:\\Old drive\\Sahha\\logo_2024.ai</div></div></div>', "m-card-flush mt-3");
+  }
+  function options(dis) {
+    return M.card('<div class="t-label">' + t("p14.sec.options") + '</div><div class="m-col mt-2">' +
+      TA.checkrow({ checked: true, name: t("p14.opt.remove"), disabled: dis }) +
+      TA.checkrow({ checked: true, name: t("p14.opt.organise"), disabled: dis }) +
+      TA.checkrow({ checked: true, name: t("p14.opt.colours"), disabled: dis }) + '</div>', "mt-4");
+  }
+  function plan(o) {
+    o = o || {};
+    return projectCard({ podcast: o.podcast, name: o.name, disabled: o.disabled, scanBtn: M.btn(t("p14.rescan"), { icon: "refresh-cw", disabled: o.disabled }) }) +
+      stats(o) + removeCard(o) +
+      (o.podcast || o.compact ? closed(t("p14.sec.move"), 214) + closed(t("p14.sec.nests"), 3) : moveCard() + nestsCard(o)) +
+      closed(t("p14.sec.bins"), 7) + closed(t("p14.sec.dup"), 2) + (o.compact ? closed(t("p14.sec.offline"), 3, "warn") : offlineCard()) + options(o.disabled);
+  }
+  function bar(o) {
+    o = o || {};
+    return '<div class="t-meta tx-muted">' + t("p14.bar.summary", { r: o.podcast ? 121 : 112, m: 214, n: 2 }) + '</div>' +
+      '<div class="m-col mt-2">' + M.btn(t("p14.apply"), { kind: "primary", block: true, icon: "folder-tree", disabled: o.off, focus: o.focus }) + '</div>' +
+      '<div class="t-meta tx-muted mt-2">' + (o.hint || t("p14.bar.hint")) + '</div>';
+  }
+  function dialog(name, backup) {
+    return TA.dialog({
+      title: t("p14.dialog.title", { name: TA.mono(name) }), changesLabel: t("p13.dialog.changes"),
+      changes: [t("p14.dialog.c1", { r: 112 }), t("p14.dialog.c2", { m: 214, b: 9 }), t("p14.dialog.c3", { e: 7, n: 2 }), t("p14.dialog.c4")],
+      backupLabel: t("p14.dialog.backup"), backup: backup,
+      confirm: t("p14.apply"), confirmIcon: "folder-tree", keep: t("p13.dialog.keep")
+    });
+  }
+
+  var STATES = {
+    empty: function () {
+      return {
+        body: head() + projectCard() +
+          M.empty({ icon: "search", title: t("p14.empty.title"), text: t("p14.empty"),
+            btn: M.btn(t("p14.scan"), { kind: "primary", icon: "search" }), cls: "mt-4" })
+      };
+    },
+    loading: function () {
+      return {
+        body: head() + projectCard({ disabled: true }) +
+          M.card(TA.progress(t("p14.scanning", { n: 214, of: 386 }), 55, t("p13.elapsed", { t: M.html(M.mono("00:07")) }), t("p13.stop")), "mt-4") +
+          M.card(M.skel(60) + M.skel(85, 16) + '<div class="mt-3"></div>' + M.skel(90) + M.skel(70) + M.skel(80), "mt-4")
+      };
+    },
+    normal: function () { return { body: head() + plan(), bar: bar() }; },
+    focus: function () { return { body: head() + plan({ focus: true }), bar: bar() }; },
+    podcast: function () { return { body: head() + plan({ podcast: true }), bar: bar({ podcast: true }) }; },
+    confirm: function () { return { body: head() + plan({ compact: true }), bar: dialog(X.projectName, X.tidyBackup) }; },
+    unsaved: function () {
+      return {
+        body: TA.slot(M.notice("warn", t("p14.unsaved"), { sub: t("p14.unsaved.hint"), btn: { label: t("p13.check_again"), icon: "refresh-cw", primary: true } })) + head() + plan({ compact: true }),
+        bar: bar({ off: true, hint: t("p14.unsaved.hint") })
+      };
+    },
+    error: function () {
+      return {
+        body: TA.slot(M.notice("warn", t("p14.error"), { sub: t("p14.error.hint"), btn: { label: t("p14.rescan"), icon: "refresh-cw" } })) + head() +
+          projectCard({ scanBtn: M.btn(t("p14.rescan"), { icon: "refresh-cw" }) }) + stats() + problems() + removeCard() + closed(t("p14.sec.move"), 214) + nestsCard() + options(),
+        bar: bar()
+      };
+    },
+    offline: function () {
+      return {
+        pills: TA.pillsOff,
+        body: TA.slot(TA.offline()) + head() + projectCard({ disabled: true }) +
+          M.empty({ icon: "search", title: t("p14.empty.title"), text: t("p14.empty"), btn: M.btn(t("p14.scan"), { icon: "search", disabled: true }), cls: "mt-4" })
+      };
+    },
+    "no-claude": function () {
+      return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p13.no_claude.solo")) + head() + plan({ compact: true }), bar: bar() };
+    },
+    stale: function () {
+      return {
+        body: TA.slot(M.notice("warn", t("p14.stale"), { btn: { label: t("p14.rescan"), icon: "refresh-cw", primary: true } })) + head() + plan({ compact: true }),
+        bar: bar({ off: true, hint: t("p14.stale") })
+      };
+    },
+    long: function () { return { body: head() + plan({ long: true, compact: true, name: X.long.project }), bar: dialog(X.long.projectName, X.long.tidyBackup) }; }
+  };
+
+  TA.mount({
+    id: "P-14", name: "Tidy scan and plan",
+    states: ["empty", "loading", "normal", "focus", "podcast", "confirm", "unsaved", "error", "offline", "no-claude", "stale", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "tools";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

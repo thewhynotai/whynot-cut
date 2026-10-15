@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,focus,advanced,markers,confirm,confirm-nobackup,locked,offline,no-claude,stale,long">
+<meta name="mock-keys" content="Mod+Enter = Cut, or Add markers in Markers mode (Cut opens the confirm sheet: Mod+Enter confirms, Esc = Keep my sequence); Esc = Stop while scanning, else close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs; Tab / Shift+Tab move through controls; Enter on a word's play button plays it; the strength slider takes the arrow keys only while it has focus. No single-key shortcuts.">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Slider thumb follows the pointer with no easing; the number updates at once. Waveform: the playhead line moves with no animation. Confirm sheet: appears in the pinned bar (the bar content swaps, background colour 200 ms, no slide, no overlay).">
+<title>P-16 Hush scan and preview</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/tools-ae.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/tools-ae.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/tools-ae.js"></script>
+</head>
+<body>
+<script>
+/* P-16 Hush: scan and preview (screen-inventory.md §3 P-16; upstream hush/_upstream: target, tracks, Simple /
+   Advanced, fillers with Strong (ticked) and Soft (unticked) lists, waveform, summary, Cut / Markers, ripple, link,
+   backup, presets). Tools tab.
+   - Title: «شيل السكتات» / "Cut silences" first, Hush as the small line.
+   - Track buttons are controls (toggle buttons with a check or an empty square, a lock when locked), never chips.
+   - The waveform never mirrors; silences sit on an amber tint, filler words on a violet tint, the legend says it in
+     words; the white line is the playhead.
+   - The destructive primary "Cut" sits in the pinned action bar and opens the confirm dialog there (confirm): what will
+     change + the backup sequence name. With Backup off the dialog is the danger kind and says only Premiere's
+     Edit > Undo can bring it back (confirm-nobackup). In Markers mode the primary is "Add markers" and nothing is cut.
+   - locked: a ticked track is locked; nothing was cut; the fix "Untick A2" takes the violet fill.
+   - offline: filler words need the WhyNot Cut app (Whisper), so that section is disabled; silences can still be cut,
+     so Cut stays the primary and the notice's Start button is secondary.
+   - stale: the sequence changed since the scan; Cut is off and Scan again takes the fill.
+   - focus: keyboard focus on the strength slider. long: a long sequence name in the target and the dialog. */
+(function () {
+  var t = M.t, D = M.D, X = D.ta;
+  var NB = " ";
+  var REGIONS = [[6, 9, "sil"], [17, 18, "fil"], [26, 31, "sil"], [40, 42, "sil"], [49, 50, "fil"], [58, 63, "sil"]];
+
+  function head() { return TA.back(t("p13.back")) + TA.title("audio-waveform", t("home.tool.hush"), M.ltr("Hush")); }
+  function target(o) {
+    o = o || {};
+    var tracks = [["V1", "on"], ["V2", "off"], ["A1", "on"], ["A2", o.locked ? "locked" : "on"]];
+    return M.card('<div class="t-label">' + t("p16.target", { label: M.raw("p16.target.whole") }) + '</div>' +
+      '<div class="t-meta tx-muted">' + t("p13.sequence", { name: M.html(M.mono(o.seq || X.seq)) }) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("p16.target.hint") + '</div>' +
+      '<div class="t-meta tx-muted mt-3">' + t("p16.tracks") + '</div>' + TA.tracks(tracks, { disabled: o.disabled }) +
+      '<div class="ta-bullet mt-2">' + M.status("warn", 16) + '<div class="t-meta tx-text ms-2 m-grow">' + t("p16.not_moving", { tracks: M.html(M.ltr("V2")) }) + '</div></div>' +
+      '<div class="m-row mt-3">' + (o.scanBtn || M.btn(t("p16.rescan"), { icon: "refresh-cw", disabled: o.disabled })) + '</div>', "mt-4");
+  }
+  function strength(o) {
+    o = o || {};
+    var body;
+    if (o.advanced) {
+      body = TA.field(t("p16.threshold"), TA.value("−42" + NB + "dB")) +
+        TA.field(t("p16.min"), TA.value("0.40" + NB + "s")) +
+        TA.field(t("p16.pad_before"), TA.value("0.10" + NB + "s")) +
+        TA.field(t("p16.pad_after"), TA.value("0.15" + NB + "s", { focus: o.focus })) +
+        '<div class="m-col mt-2">' + TA.checkrow({ checked: true, name: t("p16.link_pads") }) + '</div>';
+    } else {
+      body = '<div class="mt-3">' + TA.seg([t("p16.soft"), t("p16.medium"), t("p16.strong")], 1) + '</div>' +
+        '<div class="m-row mt-3"><div class="t-label m-grow">' + t("p16.strength") + '</div><span class="t-mono">' + M.mono("50") + '</span></div>' +
+        TA.slider(50, { focus: o.focus }) +
+        '<div class="m-col mt-1">' + TA.checkrow({ checked: false, name: t("p16.tight") }) + '</div>';
+    }
+    return M.card('<div class="t-label">' + t("p16.strength.title") + '</div>' +
+      '<div class="mt-2">' + TA.seg([t("p16.simple"), t("p16.advanced")], o.advanced ? 1 : 0) + '</div>' + body, "mt-4");
+  }
+  function fillerRow(word, n, checked, dis) {
+    return TA.checkrow({ checked: checked, disabled: dis,
+      name: (/[A-Za-z]/.test(word) ? M.ltr(word) : TA.ar(word)),
+      end: '<span class="t-meta tx-muted nowrap">' + M.ltr("×" + n) + '</span>' +
+        '<div class="ms-1 ta-playbtn">' + M.btn("", { kind: "ghost", icon: "play", disabled: dis, cls: "ta-iconbtn" }) + '</div>' });
+  }
+  function fillers(o) {
+    o = o || {};
+    var dis = !!(o.disabled || o.fillersOff);
+    if (o.compact && !dis) {
+      return M.card('<div class="m-row"><div class="t-label m-grow">' + t("p16.fillers") + '</div>' + M.chip("info", M.ltr("6")) + '</div>' +
+        '<div class="m-col mt-2">' + TA.checkrow({ checked: true, name: t("p16.fillers.on") }) + '</div>' +
+        '<div class="m-row">' + M.btn(t("p16.show_words", { n: 5 }), { kind: "ghost", icon: "chevron-down", flush: true }) + '</div>', "mt-4");
+    }
+    return M.card('<div class="m-row"><div class="t-label m-grow">' + t("p16.fillers") + '</div>' + (dis ? M.chip("neutral", t("p16.off"), "circle-x") : M.chip("info", M.ltr("6"))) + '</div>' +
+      (dis ? '<div class="ta-bullet mt-2">' + M.status("info") + '<div class="t-meta tx-text ms-2 m-grow">' + t("p16.fillers.off") + '</div></div>' : '') +
+      '<div class="m-col mt-2">' + TA.checkrow({ checked: !dis, name: t("p16.fillers.on"), disabled: dis }) + '</div>' +
+      '<div class="t-meta tx-muted mt-2">' + t("p16.lang") + '</div>' +
+      '<div class="mt-1">' + TA.seg([t("p16.lang.auto"), t("p16.lang.ar"), t("p16.lang.en")], 0, { disabled: dis }) + '</div>' +
+      '<div class="t-meta tx-muted mt-3">' + t("p16.list.strong") + '</div>' +
+      '<div class="m-col">' + fillerRow("اممم", 3, true, dis) + fillerRow("آه", 2, true, dis) + fillerRow("um", 1, true, dis) + '</div>' +
+      '<div class="t-meta tx-muted mt-2">' + t("p16.list.soft") + '</div>' +
+      '<div class="m-col">' + fillerRow("يعني", 9, false, dis) + fillerRow("طيب", 4, false, dis) + '</div>' +
+      '<div class="m-col mt-2">' + TA.checkrow({ checked: false, name: t("p16.sounds"), disabled: dis }) + '</div>', "mt-4");
+  }
+  function waveCard(o) {
+    o = o || {};
+    var regions = [];
+    REGIONS.forEach(function (r) { if (!o.noFillers || r[2] === "sil") regions.push(r); });
+    return M.card('<div class="t-label">' + t("p16.wave") + '</div>' +
+      '<div class="mt-2">' + TA.wave({ regions: regions, head: 22 }) + '</div>' + TA.ruler("00:00", "00:36", "01:12") +
+      '<div class="ta-wrap" style="margin-top:0">' + '<span class="ta-wi">' + M.chip("warn", t("p16.legend.sil", { n: 18 }), "circle-pause") + '</span>' +
+      (o.noFillers ? '' : '<span class="ta-wi">' + M.chip("info", t("p16.legend.fil", { n: 6 }), "message-square") + '</span>') + '</div>' +
+      '<div class="t-meta tx-muted mt-2">' + t("p16.wave.hint") + '</div>', "mt-4");
+  }
+  function summary(o) {
+    o = o || {};
+    return M.card('<div class="t-label">' + t("p16.summary.title") + '</div>' +
+      '<div class="mt-2">' + TA.stats([[M.ltr("01:12"), t("p16.before")], [M.ltr(o.noFillers ? "01:01" : "00:58"), t("p16.after")], [M.ltr(o.noFillers ? "00:11" : "00:14"), t("p16.saved")]], "ta-stats-3") + '</div>' +
+      '<div class="t-body mt-2">' + t("p16.counts", { s: 18, f: o.noFillers ? 0 : 6 }) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("p16.in_force", { v: M.html(M.mono("−42 dB · 0.40 s · 0.10 / 0.15 s")) }) + '</div>', "mt-4");
+  }
+  function options(o) {
+    o = o || {};
+    return M.card('<div class="t-label">' + t("p16.options") + '</div>' +
+      '<div class="mt-2">' + TA.seg([t("p16.mode.cut"), t("p16.mode.markers")], o.markers ? 1 : 0) + '</div>' +
+      '<div class="m-col mt-2">' + TA.checkrow({ checked: true, name: t("p16.ripple"), disabled: o.markers }) +
+      TA.checkrow({ checked: true, name: t("p16.link"), disabled: o.markers }) +
+      TA.checkrow({ checked: !o.nobackup, name: t("p16.backup"), disabled: o.markers }) + '</div>' +
+      '<div class="m-row mt-3">' + TA.select(t("p16.presets"), { grow: true }) + '</div>' +
+      '<div class="m-row mt-1">' + M.btn(t("p16.save_preset"), { kind: "ghost", icon: "bookmark", flush: true }) + '</div>', "mt-4");
+  }
+  function full(o) { return head() + target(o) + strength(o) + fillers(o) + waveCard(o) + summary(o) + options(o); }
+  function bar(o) {
+    o = o || {};
+    var markers = !!o.markers;
+    var line = markers ? t("p16.bar.markers", { n: 24 }) : t("p16.bar", { n: o.noFillers ? 18 : 24, t: M.raw("p13.sec").replace("{n}", o.noFillers ? "11" : "14") });
+    return '<div class="t-meta tx-muted">' + (o.hint || line) + '</div>' + (markers || o.off ? '' : TA.trust(t("p16.bar.trust"))) + '<div class="m-col mt-2">' +
+      M.btn(t(markers ? "p16.markers.go" : "p16.go"), { kind: "primary", block: true, icon: markers ? "bookmark" : "scissors", disabled: o.off }) + '</div>';
+  }
+  function dialog(o) {
+    o = o || {};
+    return TA.dialog({
+      title: t("p16.dialog.title", { n: 24, seq: TA.mono(o.seq || X.seq) }), changesLabel: t("p13.dialog.changes"),
+      changes: [t("p16.dialog.c1", { s: 18, f: 6 }), t("p16.dialog.c2"), t("p16.dialog.c3", { tracks: M.html(M.ltr("V1, A1, A2")) })],
+      backupLabel: t("p16.dialog.backup"), backup: o.nobackup ? null : (o.backup || X.hushBackup), nobackup: t("p16.dialog.nobackup"),
+      danger: !!o.nobackup, confirm: t("p16.go"), confirmIcon: "scissors", keep: t("p16.dialog.keep")
+    });
+  }
+
+  var STATES = {
+    empty: function () {
+      return {
+        body: head() + target({ scanBtn: M.btn(t("p16.scan"), { kind: "primary", icon: "search" }) }) +
+          M.card('<div class="t-label">' + t("p16.wave") + '</div><div class="mt-2">' + TA.wavePlaceholder(t("p16.empty")) + '</div>', "mt-4")
+      };
+    },
+    loading: function () {
+      var stage = M.raw("p16.stage.fillers");
+      return {
+        body: head() + target({ disabled: true }) +
+          M.card(TA.progress(t("p16.scanning", { stage: stage, n: 3, of: 3 }), 70, t("p13.elapsed", { t: M.html(M.mono("00:19")) }), t("p13.stop")) +
+            '<div class="mt-3">' + TA.stages([["ok", t("p16.stage.export")], ["ok", t("p16.stage.silence")], ["busy", t("p16.stage.fillers")]]) + '</div>', "mt-4") +
+          M.card('<div class="t-label">' + t("p16.wave") + '</div><div class="mt-2"><span class="m-skel-block" style="height:72px"></span></div>', "mt-4")
+      };
+    },
+    normal: function () { return { body: full(), bar: bar() }; },
+    focus: function () { return { body: full({ focus: true }), bar: bar() }; },
+    advanced: function () { return { body: full({ advanced: true }), bar: bar() }; },
+    markers: function () { return { body: full({ markers: true }), bar: bar({ markers: true }) }; },
+    confirm: function () { return { body: full({ compact: true }), bar: dialog() }; },
+    "confirm-nobackup": function () { return { body: full({ nobackup: true, compact: true }), bar: dialog({ nobackup: true }) }; },
+    locked: function () {
+      return {
+        body: TA.slot(M.notice("error", t("p16.track_locked", { track: M.html(M.ltr("A2")) }), { sub: t("p16.locked.hint"), btn: { label: t("p16.untick", { track: "A2" }), icon: "square", primary: true } })) +
+          full({ locked: true, compact: true }),
+        bar: bar({ off: true })
+      };
+    },
+    offline: function () {
+      return {
+        pills: TA.pillsAppOff,
+        body: TA.slot(M.notice("error", t("p13.service.off"), { sub: t("p16.fillers.off"), btn: { label: t("p13.start_service"), icon: "power" }, dismiss: false })) +
+          full({ noFillers: true, fillersOff: true }),
+        bar: bar({ noFillers: true })
+      };
+    },
+    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p13.no_claude.solo")) + full({ compact: true }), bar: bar() }; },
+    stale: function () {
+      return {
+        body: TA.slot(M.notice("warn", t("p16.stale"), { btn: { label: t("p16.rescan"), icon: "refresh-cw", primary: true } })) + full(),
+        bar: bar({ off: true, hint: t("p16.stale") })
+      };
+    },
+    long: function () { return { body: full({ seq: X.long.seq, compact: true }), bar: dialog({ seq: X.long.seq, backup: X.long.hushBackup }) }; }
+  };
+
+  TA.mount({
+    id: "P-16", name: "Hush scan and preview",
+    states: ["empty", "loading", "normal", "focus", "advanced", "markers", "confirm", "confirm-nobackup", "locked", "offline", "no-claude", "stale", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "tools";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="loading,normal,focus,mogrt,error,offline,no-claude,long">
+<meta name="mock-keys" content="Esc = Stop while running, else close the top notice; Mod+Enter = Try again on the error state, or the notice's fix; Alt+1 / Alt+2 / Alt+3 = tabs; Tab / Shift+Tab move through the captions. Premiere's own Edit &gt; Undo takes the captions back. No single-key shortcuts.">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Stage list: the running stage's icon spins (static fallback: the loader icon without rotation); a finished stage swaps to the ok icon at once.">
+<title>P-20 Kalam progress and results</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/tools-ae.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/tools-ae.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/tools-ae.js"></script>
+</head>
+<body>
+<script>
+/* P-20 Kalam: progress and results (screen-inventory.md §3 P-20; FR-17, FR-18, FR-21..23, A3.10). Tools tab.
+   - loading: the stage list (export, model, listening, timing each word on a named device, correcting, building,
+     placing), elapsed time and Stop. Stop is a secondary button, not violet: nothing on this screen asks for a
+     decision while it runs, and direction §12 makes the progress action a quiet one (inventory P-20 names Stop the
+     primary; changed here, see the report).
+   - normal (captions track): "{n} captions placed", the SRT path in full, how to remove a captions track (Premiere has
+     no API for it), then every caption with its time and full text. No primary: the list is the result.
+   - mogrt: the template output adds "Remove the placed captions" (the MOGRT undo).
+   - error: the stage that failed, why, and Try again (on the processor) as the primary.
+   - offline: the connection was lost mid-run; Start WhyNot Cut takes the fill; nothing was placed.
+   - Timecodes are plain text in this release. focus: keyboard focus on Reveal SRT. long: a long path and caption. */
+(function () {
+  var t = M.t, D = M.D, X = D.ta;
+
+  function head() { return TA.back(t("p13.back")) + TA.title("captions", t("home.tool.kalam"), M.ltr("Kalam")); }
+  function device(key) { return '<span class="t-meta tx-muted">' + t(key) + '</span>'; }
+  function stages(failAt) {
+    var el = function (s) { return M.mono(s); };
+    var list = [
+      ["ok", t("p20.stage.export"), el("00:03")],
+      ["ok", t("p20.stage.loading"), el("00:06")],
+      ["ok", t("p20.stage.listening"), el("00:21")],
+      [failAt ? "error" : "busy", t("p20.stage.aligning"), "", failAt ? t("p20.error") : t("p20.device.gpu")],
+      ["pending", t("p20.stage.correcting"), ""],
+      ["pending", t("p20.stage.captions"), ""],
+      ["pending", t("p20.stage.placing"), ""]
+    ];
+    return TA.stages(list);
+  }
+  function running() {
+    return M.card('<div class="t-label">' + t("p20.title") + '</div><div class="mt-3">' +
+      TA.progress(t("p20.running", { n: 4, of: 7 }), 52, t("p13.elapsed", { t: M.html(M.mono("00:42")) }), t("p13.stop"), { stopKind: "secondary" }) +
+      '</div><div class="mt-3">' + stages() + '</div>', "mt-4");
+  }
+  function doneCard(o) {
+    o = o || {};
+    return M.card(TA.saved(t("p20.value")).replace("ta-bullet mt-2", "ta-bullet") + '<div class="t-meta tx-muted mt-3">' + t("p20.srt") + '</div>' +
+      '<div class="m-row mt-1"><bdi dir="ltr" class="mono ta-monowrap">' + M.esc(o.srt || X.srt) + '</bdi></div>' +
+      '<div class="ta-btnrow mt-3">' + M.btn(t("p20.reveal"), { icon: "folder-open", focus: o.focus }) + '</div>' +
+      (o.mogrt
+        ? '<div class="t-meta tx-muted mt-3">' + t("p20.undo.hint", { n: 64 }) + '</div><div class="m-row mt-2">' + M.btn(t("p20.undo"), { icon: "undo-2" }) + '</div>'
+        : '<div class="ta-bullet mt-3">' + M.status("info") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("p20.track_note") + '</div></div>') +
+      '<div class="m-row mt-2">' + M.btn(t("p20.fix"), { kind: "ghost", icon: "pen-line", flush: true, disabled: o.noClaude }) + '</div>', "mt-4");
+  }
+  function list(o) {
+    o = o || {};
+    var rows = X.captions.slice();
+    if (o.long) rows.splice(2, 0, ["00:16.48", X.longCaption]);
+    return M.card('<div class="m-row"><div class="t-label m-grow">' + t("p20.list") + '</div>' + M.chip("neutral", M.ltr("64")) + '</div>' +
+      '<div class="m-col mt-1">' + rows.map(function (r, i) {
+        return (i ? M.divider() : '') + '<div class="ta-cap"><span class="ta-cap-tc t-mono tx-muted">' + M.mono(r[0]) + '</span><div class="ta-cap-text">' + TA.ar(r[1]) + '</div></div>';
+      }).join("") + '</div>' +
+      '<div class="m-row mt-1">' + M.btn(t("p20.show_all", { n: 64 }), { kind: "ghost", icon: "chevron-down", flush: true }) + '</div>', "mt-4");
+  }
+  function ok(o) {
+    return TA.slot(M.notice("ok", t("p20.done", { n: 64, seq: TA.mono((o && o.seq) || X.seq) }), { sub: t("p20.corrected", { client: D.client }) }));
+  }
+
+  var STATES = {
+    loading: function () { return { body: head() + running() }; },
+    normal: function () { return { body: ok() + head() + doneCard() + list() }; },
+    focus: function () { return { body: ok() + head() + doneCard({ focus: true }) + list() }; },
+    mogrt: function () { return { body: ok() + head() + doneCard({ mogrt: true }) + list() }; },
+    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p20.no_claude")) + head() + doneCard({ noClaude: true }) + list() }; },
+    error: function () {
+      return {
+        body: TA.slot(M.notice("error", t("p20.error"), { sub: t("p20.error.hint"), btn: { label: t("p13.retry"), icon: "refresh-cw", primary: true } })) +
+          head() + M.card('<div class="t-label">' + t("p20.title") + '</div><div class="mt-2">' + stages(true) + '</div>', "mt-4")
+      };
+    },
+    offline: function () {
+      return {
+        pills: TA.pillsOff,
+        body: TA.slot(M.notice("error", t("p20.lost"), { sub: t("p20.lost.hint"), btn: { label: t("p13.start_service"), icon: "power", primary: true }, dismiss: false })) +
+          head() + M.card('<div class="t-label">' + t("p20.title") + '</div><div class="mt-2">' + TA.stages([
+            ["ok", t("p20.stage.export"), M.mono("00:03")], ["ok", t("p20.stage.loading"), M.mono("00:06")],
+            ["error", t("p20.stage.listening"), "", t("p20.lost")], ["pending", t("p20.stage.aligning"), ""],
+            ["pending", t("p20.stage.correcting"), ""], ["pending", t("p20.stage.captions"), ""], ["pending", t("p20.stage.placing"), ""]]) + '</div>', "mt-4")
+      };
+    },
+    long: function () { return { body: ok({ seq: X.long.seq }) + head() + doneCard({ srt: X.long.srt }) + list({ long: true }) }; }
+  };
+
+  TA.mount({
+    id: "P-20", name: "Kalam progress and results",
+    states: ["loading", "normal", "focus", "mogrt", "error", "offline", "no-claude", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "tools";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

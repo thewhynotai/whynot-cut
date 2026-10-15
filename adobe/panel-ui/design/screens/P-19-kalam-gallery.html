@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,selected,focus,no-text,stale,no-claude,long">
+<meta name="mock-keys" content="Mod+Enter = Use this template (when a tile is chosen); Esc = back to Captions setup, or close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs; Tab / Shift+Tab tile to tile, Enter selects the focused tile. No single-key shortcuts.">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Selecting a tile: fill and border colour 150 ms; the check and the word Selected appear at once. Thumbnails load into fixed 72 px boxes (no layout shift).">
+<title>P-19 Kalam MOGRT gallery</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/tools-ae.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/tools-ae.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/tools-ae.js"></script>
+</head>
+<body>
+<script>
+/* P-19 Kalam: MOGRT gallery (screen-inventory.md §3 P-19; FR-18, FR-19: every .mogrt in Premiere's Local Templates
+   folder with its thumbnail, name and folder; search by name; a folder select; From a file…). Tools tab.
+   - Tiles: 2 per row at 300 and 360, 3 at 480. A tile is a control (radius 8, 2 px rest border = its #141414 fill);
+     the selected tile is the deep violet with a check and the word "Selected" (never colour alone).
+   - The form-ending primary "Use this template" sits in the pinned action bar; it is off until a tile is chosen, and
+     the text-field select appears there once one is (selected).
+   - no-text: the chosen template has no editable text (all-or-nothing, FR-18); Use stays off.
+   - stale: the templates folder changed since it was read; Refresh. Offline: not applicable (a local read).
+   - focus: keyboard focus on a tile. long: long template and folder names wrap. */
+(function () {
+  var t = M.t, D = M.D;
+  var TPL = [
+    { name: "Sahha Bold Box", folder: "Sahha Clinic", cls: "ta-th-box", ar: true },
+    { name: "Karaoke Yellow", folder: "WhyNot", cls: "ta-th-box ta-th-yel", ar: true },
+    { name: "Lower Third Clean", folder: "WhyNot", cls: "ta-th-low", ar: false, low: true },
+    { name: "Pop Word", folder: "Downloads", cls: "ta-th-pop", ar: false, mid: true },
+    { name: "Brand Green Bar", folder: "Sahha Clinic", cls: "ta-th-brand", ar: true },
+    { name: "Subtle Bottom", folder: "WhyNot", cls: "ta-th-dim", ar: false }
+  ];
+  var LONG = { name: "Al-Mustaqbal Family Medicine – Ramadan 2026 Caption Pack v3 (Arabic, two lines)", folder: "Al-Mustaqbal Family Medicine and Diabetes Care Center / Captions", cls: "ta-th-brand", ar: true };
+
+  function head() { return TA.back(t("home.tool.kalam")) + '<div class="t-title mt-2">' + t("p19.title") + '</div>'; }
+  function tools(o) {
+    o = o || {};
+    return '<div class="mt-3">' + M.input(t("p19.search"), {}) + '</div>' +
+      '<div class="m-row mt-2">' + TA.select(t("p19.all"), { grow: true }) + '<div class="ms-2">' + M.btn(t("p19.file"), { icon: "file-up" }) + '</div></div>' +
+      (o.count === false ? '' : '<div class="t-meta tx-muted mt-3">' + t("p19.count", { n: o.count || 12 }) + '</div>');
+  }
+  function tile(x, o) {
+    o = o || {};
+    var cap = x.ar ? '<span class="ta-th-cap ta-th-ar ' + x.cls + '">قياس السكر الصبح</span>' : '<span class="ta-th-cap ' + x.cls + '">' + M.esc(x.low ? "Dr. Hany Saleh" : x.mid ? "Morning" : "Every morning") + '</span>';
+    var cls = "ta-tile" + (o.on ? " ta-tile-on" : "") + (o.focus ? " ta-tile-focus" : "");
+    return '<div class="ta-cell"><div class="' + cls + '" role="radio" tabindex="0" aria-checked="' + !!o.on + '">' +
+      '<div class="ta-th' + (x.mid ? " ta-th-mid" : "") + '">' + cap + '</div>' +
+      '<div class="t-label mt-2 ta-wrapname">' + M.ltr(x.name) + '</div>' +
+      '<div class="t-meta ta-wrapname">' + M.ltr(x.folder) + '</div>' +
+      (o.on ? '<div class="ta-tile-check mt-1">' + M.ico("circle-check", 12, "ink-text") + '<span class="t-meta ms-1">' + t("p19.selected") + '</span></div>' : '') +
+      '</div></div>';
+  }
+  function tiles(on, focus, list) {
+    list = list || TPL;
+    return '<div class="ta-tiles mt-2">' + list.map(function (x, i) { return tile(x, { on: i === on, focus: i === focus }); }).join("") + '</div>';
+  }
+  function bar(o) {
+    o = o || {};
+    return (o.field ? '<div class="m-row"><div class="t-label m-grow">' + t("p18.textfield") + '</div>' + TA.select(M.ltr("Caption Text")) + '</div><div class="mt-2"></div>' : '') +
+      '<div class="m-col">' + M.btn(t("p19.use"), { kind: "primary", block: true, icon: "check", disabled: !o.on }) + '</div>' +
+      (o.on ? '' : '<div class="t-meta tx-muted mt-2">' + (o.hint || t("p19.pick_first")) + '</div>');
+  }
+
+  var STATES = {
+    empty: function () {
+      return {
+        body: head() + tools({ count: false }) +
+          M.empty({ icon: "layers", title: t("p19.empty.title"), text: t("p19.empty"), btn: M.btn(t("p19.file"), { kind: "primary", icon: "file-up" }), cls: "mt-4" })
+      };
+    },
+    loading: function () {
+      var sk = function () { return '<div class="ta-cell"><div class="ta-tile ta-tile-static"><span class="m-skel-block" style="height:72px"></span>' + M.skel(70) + M.skel(45, 16) + '</div></div>'; };
+      return { body: head() + tools({ count: false }) + '<div class="mt-3">' + M.skel(30, 16) + '</div><div class="ta-tiles mt-2">' + sk() + sk() + sk() + sk() + '</div>', bar: bar() };
+    },
+    normal: function () { return { body: head() + tools() + tiles(-1), bar: bar() }; },
+    selected: function () { return { body: head() + tools() + tiles(0), bar: bar({ on: true, field: true }) }; },
+    focus: function () { return { body: head() + tools() + tiles(-1, 1), bar: bar() }; },
+    "no-text": function () {
+      return {
+        body: TA.slot(M.notice("error", t("p19.no_text", { name: M.html(M.ltr("Pop Word")) }), { sub: t("p19.no_text.hint"), btn: { label: t("p19.file"), icon: "file-up" } })) +
+          head() + tools() + tiles(3),
+        bar: bar({ hint: t("p19.no_text.hint") })
+      };
+    },
+    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p13.no_claude.solo")) + head() + tools() + tiles(-1), bar: bar() }; },
+    stale: function () {
+      return { body: TA.slot(M.notice("warn", t("p19.stale"), { btn: { label: t("p19.refresh"), icon: "refresh-cw" } })) + head() + tools() + tiles(-1), bar: bar() };
+    },
+    long: function () { return { body: head() + tools() + tiles(0, -1, [LONG].concat(TPL.slice(0, 3))), bar: bar({ on: true, field: true }) }; }
+  };
+
+  TA.mount({
+    id: "P-19", name: "Kalam MOGRT gallery",
+    states: ["empty", "loading", "normal", "selected", "focus", "no-text", "stale", "no-claude", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "tools";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

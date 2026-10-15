@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,focus,blocked,building,error,offline,no-claude,stale,success,long">
+<meta name="mock-keys" content="Mod+Enter = Start the build, or the blocking card's fix; Esc = Cancel while building, else close the top notice; Alt+1 / Alt+2 = Home / Edit (the After Effects panel has no Tools tab); Tab / Shift+Tab reading order. No single-key shortcuts (After Effects owns them).">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Step bar: a segment's colour changes in 200 ms; the running segment is the gradient, static.">
+<title>A-01 After Effects home and motion pipeline</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/tools-ae.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/tools-ae.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/tools-ae.js"></script>
+</head>
+<body>
+<script>
+/* A-01 After Effects home and motion pipeline (screen-inventory.md §4 A-01; motion SKILL §2). The CEP panel in After
+   Effects: the same header, hairline, log row and footer as the Premiere panel; the host pill says After Effects; two
+   tabs (Home, Edit): Tidy, Hush and Kalam are Premiere tools, so there is no Tools tab here.
+   - The seven pipeline ids keep their places; their labels are the motion stages: Audio, Script and plan, Approve,
+     Build in After Effects, Render and frames, QC, Handoff.
+   - normal: the plan is approved and every check before the build passed; "Start the build" is the primary.
+   - blocked: one check needs the editor (fonts missing); the build is off and the gate card's button takes the fill.
+   - building: progress per scene with Cancel. error: the read-back did not match; Try again takes the fill.
+   - offline: the WhyNot Cut app card + "After Effects isn't linked"; everything that needs the app is disabled.
+   - stale: the panel update card. success: built and checked; "Go to render" (A-04) is the primary.
+   - Rendered at 280 px too (render_280.py). focus: keyboard focus on Start the build. long: long id and client. */
+(function () {
+  var t = M.t, D = M.D, X = D.ta;
+
+  function hero(id) {
+    return '<div class="t-meta tx-muted">' + t("a01.current") + '</div>' +
+      '<div class="m-row-top mt-1"><div class="m-grow">' + TA.select(M.mono(id || X.motion), { grow: true, cls: "ta-select-wrap" }) + '</div></div>' +
+      '<div class="t-meta tx-muted mt-1">' + M.txt(D.client) + ' · ' + t("a01.other", { n: 2 }) + '</div>';
+  }
+  function steps(states, cur, kind) { return '<div class="mt-4">' + M.steps(states, cur, kind) + '</div>'; }
+  var AT_BUILD = ["done", "done", "done", "run", "pend", "pend", "pend"];
+  function checks(o) {
+    o = o || {};
+    var row = function (kind, text) { return '<div class="ta-bullet mt-2">' + M.status(kind) + '<div class="t-meta ms-2 m-grow">' + text + '</div></div>'; };
+    return '<div class="t-meta tx-muted mt-3">' + t("a01.checks") + '</div>' +
+      row(o.off ? "pending" : "ok", t("a01.chk.approved", { name: D.editor })) +
+      row(o.off ? "pending" : "ok", t("a01.chk.probe", { v: X.aeVersion })) +
+      row(o.off ? "pending" : o.fonts ? "error" : "ok", o.fonts ? M.raw("a03.fonts.t") : t("a01.chk.fonts")) +
+      row(o.off ? "pending" : "ok", t("a01.chk.saved"));
+  }
+  function nextCard(o) {
+    o = o || {};
+    return M.card('<div class="m-row"><div class="t-label m-grow">' + t("a01.next.title") + '</div>' + (o.off ? '' : M.chip("ok", t("a01.status.approved"), "circle-check")) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("a01.next.sub") + '</div>' + checks(o) + TA.trust(t("a01.undo")) +
+      '<div class="m-col mt-4">' + M.btn(t("a01.start"), { kind: "primary", block: true, icon: "layers", disabled: o.disabled, focus: o.focus }) + '</div>', "mt-4");
+  }
+  function secondary(dis) {
+    return '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link", disabled: true }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open", disabled: dis }) + '</div>';
+  }
+  function gateFonts() {
+    return M.notice("error", t("a03.fonts"), { sub: t("a03.fonts.list", { fonts: M.html(M.ltr("Cairo Bold, Tajawal Medium")) }), btn: { label: t("a03.fonts.btn"), icon: "folder-open", primary: true }, dismiss: false });
+  }
+
+  var STATES = {
+    empty: function () {
+      return {
+        tab: "home", noclient: true,
+        body: M.empty({ icon: "clapperboard", title: t("a01.empty.title"), text: t("a01.empty"),
+          btn: M.btn(t("p13.open_claude"), { kind: "primary", icon: "external-link" }) }) +
+          '<div class="t-meta tx-muted tx-center mt-2">' + t("a01.empty.hint") + '</div>'
+      };
+    },
+    loading: function () {
+      return {
+        tab: "home",
+        body: M.skel(30, 16) + '<div class="mt-1"></div><span class="m-skel-block" style="height:32px"></span>' + M.skel(50, 16) +
+          '<div class="mt-4"></div>' + '<span class="m-skel-block" style="height:4px"></span>' + '<div class="mt-2"></div>' + M.skel(40, 16) +
+          M.card(M.skel(60) + M.skel(95, 16) + M.skel(80, 16) + '<div class="mt-3"></div><span class="m-skel-block" style="height:40px"></span>', "mt-4")
+      };
+    },
+    normal: function () { return { tab: "home", body: hero() + steps(AT_BUILD, 3, "info") + nextCard() + secondary() }; },
+    focus: function () { return { tab: "home", body: hero() + steps(AT_BUILD, 3, "info") + nextCard({ focus: true }) + secondary() }; },
+    blocked: function () {
+      return {
+        tab: "home", needs: 1,
+        body: hero() + steps(["done", "done", "done", "wait", "pend", "pend", "pend"], 3, "warn") +
+          '<div class="mt-4">' + gateFonts() + '</div>' + nextCard({ disabled: true, fonts: true }) + secondary()
+      };
+    },
+    building: function () {
+      return {
+        tab: "home",
+        body: hero() + steps(AT_BUILD, 3, "busy") +
+          M.card(TA.progress(t("a01.building", { n: 4, of: 7 }), 57, t("p13.elapsed", { t: M.html(M.mono("01:18")) }), t("a01.cancel")) +
+            '<div class="mt-3">' + TA.stages([["ok", M.raw("a03.probe.t")], ["busy", t("a01.step.build")], ["pending", M.raw("a01.status.assembled")]]) + '</div>', "mt-4") +
+          secondary()
+      };
+    },
+    error: function () {
+      return {
+        tab: "home",
+        body: TA.slot(M.notice("error", t("a01.error"), { sub: t("a01.error.hint"), btn: { label: t("p13.retry"), icon: "refresh-cw", primary: true } })) +
+          hero() + steps(["done", "done", "done", "fail", "pend", "pend", "pend"], 3, "error") + nextCard({ disabled: true }) +
+          '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link" }) + M.btn(t("p13.support"), { kind: "ghost", icon: "life-buoy" }) + '</div>'
+      };
+    },
+    offline: function () {
+      return {
+        tab: "home", pills: TA.pillsOff,
+        body: TA.slot(TA.offline()) + TA.slot(M.notice("warn", t("a01.unlinked"), { sub: M.raw("a03.no_bridge"), dismiss: false })) +
+          hero() + steps(AT_BUILD, 3, "pending") + nextCard({ disabled: true, off: true }) + secondary(true)
+      };
+    },
+    "no-claude": function () {
+      return { tab: "home", pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("a01.no_claude", { primary: true })) + hero() + steps(AT_BUILD, 3, "warn") + nextCard({ disabled: true }) + secondary() };
+    },
+    stale: function () { return { tab: "home", body: TA.slot(TA.stale()) + hero() + steps(AT_BUILD, 3, "info") + nextCard() + secondary() }; },
+    success: function () {
+      return {
+        tab: "home",
+        body: TA.slot(M.notice("ok", t("a01.done"))) + hero() + steps(["done", "done", "done", "done", "run", "pend", "pend"], 4, "info") +
+          M.card('<div class="m-row"><div class="t-label m-grow">' + M.mono(X.aep) + '</div>' + M.chip("ok", t("a01.status.assembled"), "circle-check") + '</div>' +
+            '<div class="m-col mt-3">' + M.btn(t("a01.go_render"), { kind: "primary", block: true, icon: "monitor-play" }) + '</div>' +
+            '<div class="ta-btnrow mt-2">' + M.btn(t("a01.open_aep"), { icon: "external-link" }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open" }) + '</div>', "mt-4")
+      };
+    },
+    long: function () { return { tab: "home", body: hero(X.long.motion) + steps(AT_BUILD, 3, "info") + nextCard() + secondary() }; }
+  };
+
+  TA.mount({
+    id: "A-01", name: "After Effects home and motion pipeline",
+    states: ["empty", "loading", "normal", "focus", "blocked", "building", "error", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  }, { ae: true });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,focus,mogrt,error-inout,error-selection,offline,model-busy,no-claude,long">
+<meta name="mock-keys" content="Mod+Enter = Start, or the notice's fix when Start is off; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs; Tab / Shift+Tab group to group, the arrow keys move inside a radio group only while it has focus (native), Space ticks a track. No single-key shortcuts.">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Choosing Caption template reveals the template card in place (no height animation).">
+<title>P-18 Kalam setup</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/tools-ae.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/tools-ae.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/tools-ae.js"></script>
+</head>
+<body>
+<script>
+/* P-18 Kalam: setup (screen-inventory.md §3 P-18; upstream kalam/_upstream: language mode, range In/Out | sequence |
+   playhead | selection, audio tracks, output track | MOGRT | SRT only, caption settings, correction with Claude,
+   rules, glossary; A3.5 client-aware defaults). Tools tab.
+   - Title: «كابشن» / "Captions" first, Kalam as the small line («الترجمة النصية» is not used anywhere).
+   - Cards in the PRD order; the client's values start filled and say where they came from.
+   - The form-ending primary "Start" sits in the pinned action bar with the range it works on.
+   - error-inout / error-selection (FR-2): Start is off; the notice's fix "Use the whole sequence" takes the fill.
+   - model-busy: the captions pack is downloading; Start waits; "Use the smaller model" takes the fill.
+   - no-correction (FR-6): Claude is not available, captions are made without correction; Start stays the primary.
+   - offline: Start is disabled; the notice's Start WhyNot Cut takes the fill.
+   - mogrt: the MOGRT output with the chosen template, its video track and text field.
+   - focus: keyboard focus on a range radio. long: long sequence and client names. */
+(function () {
+  var t = M.t, D = M.D, X = D.ta;
+  var NB = " ";
+
+  function head() { return TA.back(t("p13.back")) + TA.title("captions", t("home.tool.kalam"), M.ltr("Kalam")); }
+  function langCard(dis) {
+    return M.card('<div class="t-label">' + t("p18.lang") + '</div>' +
+      '<div class="mt-2">' + TA.seg([t("p18.lang.ar"), t("p18.lang.en"), t("p18.lang.other")], 0, { disabled: dis }) + '</div>' +
+      '<div class="t-meta tx-muted mt-2">' + t("p18.model.ar") + '</div>', "mt-4");
+  }
+  function rangeCard(o) {
+    o = o || {};
+    var on = o.range === undefined ? 0 : o.range, dis = o.disabled;
+    var inoutSub = t("p18.range.inout.sub", { a: M.html(M.mono("00:00:12")), b: M.html(M.mono("00:01:04")) });
+    return M.card('<div class="t-label">' + t("p18.range") + '</div>' +
+      '<div class="t-meta tx-muted">' + t("p13.sequence", { name: M.html(M.mono(o.seq || X.seq)) }) + '</div>' +
+      '<div class="m-col mt-2">' +
+      TA.radio(t("p18.range.inout"), on === 0, { sub: o.inoutErr ? "" : inoutSub, focus: o.focus, disabled: dis }) +
+      TA.radio(t("p18.range.sequence"), on === 1, { disabled: dis }) +
+      TA.radio(t("p18.range.playhead"), on === 2, { disabled: dis }) +
+      TA.radio(t("p18.range.selection"), on === 3, { disabled: dis }) + '</div>' +
+      '<div class="t-meta tx-muted mt-3">' + t("p18.audio") + '</div>' +
+      TA.tracks([["A1", "on"], ["A2", "on"], ["A3", "off"]], { disabled: dis }) +
+      '<div class="t-meta tx-muted mt-2">' + t("p18.audio.hint") + '</div>', "mt-4");
+  }
+  function outputCard(o) {
+    o = o || {};
+    var on = o.mogrt ? 1 : 0, dis = o.disabled;
+    var tpl = o.mogrt
+      ? '<div class="m-inset mt-2"><div class="m-row"><span class="ta-th ta-th-mid" style="width:72px;height:40px;padding:4px"><span class="ta-th-cap ta-th-box ta-th-ar">كابشن</span></span>' +
+        '<div class="m-col m-grow ms-2"><div class="t-label">' + M.ltr("Sahha Bold Box") + '</div><div class="t-meta tx-muted">' + M.ltr("Sahha Clinic") + '</div></div>' +
+        M.btn(t("p18.change"), { kind: "ghost" }) + '</div></div>' +
+        TA.field(t("p18.vtrack"), TA.select(M.ltr("V3"))) + TA.field(t("p18.textfield"), TA.select(M.ltr("Caption Text")))
+      : '';
+    return M.card('<div class="t-label">' + t("p18.output") + '</div><div class="m-col mt-2">' +
+      TA.radio(t("p18.output.track"), on === 0, { disabled: dis }) +
+      TA.radio(t("p18.output.mogrt"), on === 1, { disabled: dis, sub: t("p18.output.mogrt.sub") }) + tpl +
+      TA.radio(t("p18.output.srt"), false, { disabled: dis }) + '</div>' +
+      '<div class="ta-bullet mt-2">' + M.status("info", 16) + '<div class="t-meta tx-muted ms-2 m-grow">' + t("p18.srt_always") + '</div></div>', "mt-4");
+  }
+  function settingsCard(o) {
+    o = o || {};
+    var client = o.client || D.client;
+    var from = '<div class="ta-bullet mt-1">' + M.ico("folder", 12, "ink-muted") + '<div class="t-meta tx-muted ms-1 m-grow">' + t("p18.from_client", { client: client }) + '</div></div>';
+    return M.card('<div class="t-label">' + t("p18.settings") + '</div>' + from +
+      TA.field(t("p18.max_chars"), TA.value("32", { w: 72, disabled: o.disabled })) +
+      TA.field(t("p18.max_lines"), TA.value("1", { w: 72, disabled: o.disabled })) +
+      TA.field(t("p18.max_secs"), TA.value("4.5" + NB + "s", { w: 72, disabled: o.disabled })) +
+      TA.field(t("p18.min_pause"), TA.value("0.22" + NB + "s", { w: 72, disabled: o.disabled })), "mt-4");
+  }
+  function correctCard(o) {
+    o = o || {};
+    var off = !!o.noClaude;
+    return M.card('<div class="m-col">' + TA.checkrow({ checked: !off, name: t("p18.correct"), disabled: off || o.disabled,
+        sub: off ? t("p18.no_claude") : t("p18.correct.sub", { client: o.client || D.client, n: 38 }) }) + '</div>' +
+      M.divider() + '<div class="m-col mt-1">' + M.li("list-checks", t("p18.rules")) + M.li("languages", t("p18.glossary"), M.chip("neutral", M.ltr("38"))) + '</div>', "mt-4");
+  }
+  function form(o) { return head() + langCard(o && o.disabled) + rangeCard(o) + outputCard(o) + settingsCard(o) + correctCard(o); }
+  function bar(o) {
+    o = o || {};
+    var range = o.rangeLabel ? M.html(M.txt(o.rangeLabel)) : M.html(M.txt(M.raw("p18.range.inout")) + " · " + M.mono("00:00:12–00:01:04"));
+    return '<div class="t-meta tx-muted">' + t("p18.bar", { range: range }) + '</div><div class="m-col mt-2">' +
+      M.btn(t("p18.start"), { kind: "primary", block: true, icon: "captions", disabled: o.off }) + '</div>' +
+      (o.hint ? '' : TA.trust(t("p18.trust") + " " + t("p18.undo_hint"))) +
+      (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + '</div>' : '');
+  }
+
+  var STATES = {
+    empty: function () {
+      return {
+        body: head() + M.empty({ icon: "film", title: t("p18.empty.title"), text: t("p18.empty"),
+          btn: M.btn(t("p13.check_again"), { kind: "primary", icon: "refresh-cw" }), cls: "mt-4" })
+      };
+    },
+    loading: function () {
+      var card = function () { return M.card(M.skel(35) + '<div class="mt-2"></div>' + M.skel(90, 28) + M.skel(70, 16), "mt-4"); };
+      return { body: head() + card() + card() + card(), bar: '<div class="m-col">' + M.skel(50, 16) + '<div class="mt-2"></div><span class="m-skel-block" style="height:40px"></span></div>' };
+    },
+    normal: function () { return { body: form(), bar: bar() }; },
+    focus: function () { return { body: form({ focus: true }), bar: bar() }; },
+    mogrt: function () { return { body: form({ mogrt: true }), bar: bar() }; },
+    "error-inout": function () {
+      return {
+        body: TA.slot(M.notice("error", t("p18.err.no_inout", { seq: TA.mono(X.seq) }), { sub: t("p18.err.no_inout.hint"), btn: { label: t("p18.use_whole"), icon: "film", primary: true } })) +
+          form({ inoutErr: true }),
+        bar: bar({ off: true, hint: t("p18.err.no_inout.hint") })
+      };
+    },
+    "error-selection": function () {
+      return {
+        body: TA.slot(M.notice("error", t("p18.err.no_selection"), { sub: t("p18.err.no_selection.hint"), btn: { label: t("p18.use_whole"), icon: "film", primary: true } })) +
+          form({ range: 3 }),
+        bar: bar({ off: true, rangeLabel: M.raw("p18.range.selection"), hint: t("p18.err.no_selection.hint") })
+      };
+    },
+    offline: function () {
+      return { pills: TA.pillsOff, body: TA.slot(TA.offline()) + form({ disabled: true }), bar: bar({ off: true }) };
+    },
+    "model-busy": function () {
+      return {
+        body: TA.slot(M.card('<div class="m-row-top">' + M.status("busy") + '<div class="m-col ms-2 m-grow"><div class="t-label">' + t("p18.model_busy", { pct: 42 }) + '</div>' +
+            '<div class="t-meta tx-muted">' + t("p18.model_busy.sub") + '</div></div></div>' +
+            '<div class="mt-3">' + M.progress(42) + '</div>' +
+            '<div class="m-row mt-3">' + M.btn(t("p13.use_small"), { kind: "primary", icon: "cpu" }) + '</div>')) + form(),
+        bar: bar({ off: true, hint: t("p18.wait_pack") })
+      };
+    },
+    "no-claude": function () {
+      return {
+        pills: TA.pillsNoClaude,
+        body: TA.slot(TA.noClaude("p18.no_claude")) + form({ noClaude: true }),
+        bar: bar()
+      };
+    },
+    long: function () { return { body: form({ seq: X.long.seq, client: D.client }), bar: bar() }; }
+  };
+
+  TA.mount({
+    id: "P-18", name: "Kalam setup",
+    states: ["empty", "loading", "normal", "focus", "mogrt", "error-inout", "error-selection", "offline", "model-busy", "no-claude", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "tools";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

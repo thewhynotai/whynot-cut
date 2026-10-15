@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,focus,error,offline,no-claude,stale,success,models-busy,long">
+<meta name="mock-keys" content="Mod+Enter = Organise → Cut → Caption (the one primary) or, when it is off, the notice's fix; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = Home / Edit / Tools; Tab / Shift+Tab move through the flow button, the three tool cards and Settings (mirrored in Arabic); Enter opens the focused card. No single-key shortcuts (Premiere owns them).">
+<meta name="mock-motion" content="Tool card hover/press: background and border colour 150 ms ease (--mk-ease). Focus: border colour only, 150 ms. Notice in: background colour 200 ms in a reserved slot (no layout shift). Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Download progress fill width 250 ms; the % text carries the value. Static: every state is complete with no motion.">
+<title>P-13 Tools hub</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/tools-ae.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/tools-ae.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/tools-ae.js"></script>
+</head>
+<body>
+<script>
+/* P-13 Tools hub (screen-inventory.md §3 P-13). Tools tab.
+   - The flow card "Organise → Cut → Caption" is the primary (A3.4: Tidy, then Hush, then Kalam; each step keeps its own
+     preview, confirm, backup and undo). Under it, the three tool cards: plain-language label first, the brand name as
+     the small line with the purpose, the last result kept in every state.
+   - Offline and error: the flow and the cards are disabled (they need the WhyNot Cut app), last results stay, the
+     notice's fix takes the violet fill. Nothing says "Ready" anywhere.
+   - models-busy: the captions pack is downloading; the Kalam card says so and the smaller model is offered.
+   - focus: keyboard focus on the flow button. long: long client, item and sequence names, 99+ badge. */
+(function () {
+  var t = M.t, D = M.D, X = D.ta;
+
+  function seqLine(name) {
+    return '<div class="m-row">' + M.ico("film", 16, "ink-muted") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("p13.sequence", { name: M.html(M.mono(name)) }) + '</div></div>';
+  }
+  function flow(o) {
+    o = o || {};
+    var step = function (n, key, brand) {
+      return '<div class="ta-flowstep mt-1"><span class="ta-stepnum">' + M.ltr(String(n)) + '</span><div class="t-meta ms-2 m-grow">' +
+        t("home.tool." + key) + ' <span class="tx-muted">· ' + M.ltr(brand) + '</span></div></div>';
+    };
+    return M.card(M.eyebrow(t("p13.flow.eyebrow")) +
+      '<div class="t-body tx-muted mt-1">' + t("p13.flow.sub") + '</div>' +
+      '<div class="m-col mt-2">' + step(1, "tidy", "Tidy") + step(2, "hush", "Hush") + step(3, "kalam", "Kalam") + '</div>' +
+      '<div class="m-col mt-3">' + M.btn(t("p13.flow"), { kind: "primary", block: true, icon: "list-checks", disabled: o.disabled, focus: o.focus }) + '</div>', "mt-3");
+  }
+  function last(textKey, agoKey) { return t("p13.last", { text: M.raw(textKey), ago: M.raw(agoKey) }); }
+  function cards(o) {
+    o = o || {};
+    var dis = !!o.disabled;
+    var one = function (icon, key, brand, lastHtml, kind, chip) {
+      return M.tool({ icon: icon, name: t("home.tool." + key), brand: M.ltr(brand) + " · " + t("p13." + key + ".sub"), last: lastHtml, lastKind: kind, disabled: dis, chip: chip });
+    };
+    var kalamLast = o.kalamNow ? t("p13.last.now", { text: M.raw("p13.kalam.last") }) : o.busy ? t("p13.model_busy", { pct: 42 }) : t("p13.none");
+    var kalamKind = o.kalamNow ? "ok" : o.busy ? "busy" : "pending";
+    return M.eyebrow(t("home.tools"), "mt-5") + '<div class="m-col mt-2">' +
+      one("folder-tree", "tidy", "Tidy", last("p13.last.tidy", "p13.ago.tidy"), "ok") + '<div class="mt-2"></div>' +
+      one("audio-waveform", "hush", "Hush", last("p13.last.hush", "p13.ago.hush"), "ok") + '<div class="mt-2"></div>' +
+      one("captions", "kalam", "Kalam", kalamLast, kalamKind, o.busy ? M.chip("info", t("p13.chip.downloading"), "download") : "") +
+      '</div>';
+  }
+  function settings() { return M.card(M.li("settings", t("home.settings")), "m-card-flush mt-5"); }
+  function intro(seq) { return '<div class="t-title">' + t("p13.title") + '</div><div class="mt-1">' + seqLine(seq || X.seq) + '</div>' + TA.saved(t("p13.week")); }
+
+  var STATES = {
+    empty: function () {
+      return {
+        body: '<div class="t-title">' + t("p13.title") + '</div>' +
+          M.empty({ icon: "folder-open", title: t("p13.need_project.title"), text: t("p13.need_project"),
+            btn: M.btn(t("p13.open_project"), { kind: "primary", icon: "folder-open" }), cls: "mt-3" }) +
+          cards({ disabled: true }) + settings()
+      };
+    },
+    loading: function () {
+      var tcard = function () {
+        return '<div class="m-tool m-tool-disabled"><span class="m-skel-block" style="width:20px;height:20px"></span><div class="m-col m-grow ms-3">' +
+          M.skel(40) + M.skel(80, 16) + '<div class="mt-2"></div>' + M.skel(55, 16) + '</div></div>';
+      };
+      return {
+        body: '<div class="t-title">' + t("p13.title") + '</div>' + M.skel(50, 16) +
+          M.card(M.skel(30, 16) + M.skel(90) + M.skel(60) + '<div class="mt-2"></div>' + M.skel(45) + M.skel(45) + M.skel(45) +
+            '<div class="mt-3"></div><span class="m-skel-block" style="height:40px"></span>', "mt-3") +
+          M.eyebrow(t("home.tools"), "mt-5") + '<div class="m-col mt-2">' + tcard() + '<div class="mt-2"></div>' + tcard() + '<div class="mt-2"></div>' + tcard() + '</div>' +
+          settings()
+      };
+    },
+    normal: function () { return { body: intro() + flow() + cards() + settings() }; },
+    focus: function () { return { body: intro() + flow({ focus: true }) + cards() + settings() }; },
+    error: function () {
+      return {
+        pills: { engine: "noanswer" },
+        body: TA.slot(M.notice("error", t("p13.error"), { sub: t("p13.error.hint"), btn: { label: t("p13.retry"), icon: "refresh-cw", primary: true } })) +
+          intro() + flow({ disabled: true }) + cards({ disabled: true }) + settings()
+      };
+    },
+    offline: function () {
+      return {
+        pills: TA.pillsOff,
+        body: TA.slot(TA.offline()) + intro() + flow({ disabled: true }) + cards({ disabled: true }) + settings()
+      };
+    },
+    "no-claude": function () {
+      return { pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("p13.no_claude")) + intro() + flow() + cards() + settings() };
+    },
+    stale: function () { return { body: TA.slot(TA.stale()) + intro() + flow() + cards() + settings() }; },
+    success: function () {
+      return {
+        body: TA.slot(M.notice("ok", t("p13.success", { n: 64, seq: TA.mono(X.seq) }))) + intro() + flow() + cards({ kalamNow: true }) + settings()
+      };
+    },
+    "models-busy": function () {
+      return {
+        body: intro() + flow() + cards({ busy: true }) +
+          M.card('<div class="m-row-top">' + M.status("info") + '<div class="t-body ms-2 m-grow">' + t("p13.model_offer") + '</div></div>' +
+            '<div class="mt-3">' + M.progress(42) + '</div>' +
+            '<div class="m-row mt-3">' + M.btn(t("p13.use_small"), { icon: "cpu" }) + '</div>', "mt-4") + settings()
+      };
+    },
+    long: function () { return { body: intro(X.long.seq) + flow() + cards() + settings() }; }
+  };
+
+  TA.mount({
+    id: "P-13", name: "Tools hub",
+    states: ["empty", "loading", "normal", "focus", "error", "offline", "no-claude", "stale", "success", "models-busy", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "tools";
+      if (v.needs === undefined) v.needs = 0;
+      if (state === "empty") v.noclient = false;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

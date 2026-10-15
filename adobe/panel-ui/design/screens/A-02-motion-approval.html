@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,checked,focus,blocked,error,offline,no-claude,stale,success,long">
+<meta name="mock-keys" content="Mod+Enter = Approve (only when it is on) or the notice's fix; Esc = close the top notice; Alt+1 / Alt+2 = Home / Edit; Tab / Shift+Tab move through scenes and numbers, Space ticks the focused number (native checkbox). No single-key shortcuts.">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Approve turning on: fill colour 150 ms, nothing moves.">
+<title>A-02 Motion plan approval</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/tools-ae.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/tools-ae.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/tools-ae.js"></script>
+</head>
+<body>
+<script>
+/* A-02 Motion plan approval (screen-inventory.md §4 A-02; motion SKILL §3: approval only from the editor, never before
+   the claims review of the current plan; editorial lines marked as Claude's words; numbers only as said; licensed
+   assets only). Edit tab of the After Effects panel. Built like P-07.
+   - Every scene: time (plain text), type chip, the on-screen words in full (never cut). Claude's own lines carry a
+     labelled chip "Claude's words, not the speaker's".
+   - The claims review result for this plan, the numbers to confirm (each a tick), icons, music and the recipe change.
+   - Approve sits in the pinned action bar ("Approving as …" + 40 px Approve). normal: the two numbers are not
+     confirmed yet, so Approve is off and says why; checked: both ticked, Approve on.
+   - blocked: no claims review for this plan yet; Approve off with the reason; Claude runs the review (no button).
+   - error: the approval wasn't saved; Try again. offline: everything that needs the app is disabled.
+   - stale: the plan changed (what changed in one line); the numbers must be confirmed again.
+   - focus: keyboard focus on Approve. long: long id, editor name, 99+ badge. */
+(function () {
+  var t = M.t, D = M.D, X = D.ta;
+  var TYPE_ICON = { title: "type", quote: "message-square", number: "hash", list: "list-checks", end: "film" };
+
+  function heading(id) {
+    return M.steps(["done", "done", "wait", "pend", "pend", "pend", "pend"], 2, "warn") +
+      '<div class="t-title mt-4">' + t("a02.title") + '</div><div class="t-mono tx-muted ta-wrapname mt-1">' + M.esc(id || X.motion) + '</div>';
+  }
+  function animatic(dis) {
+    var f = function (n) { return '<div class="ta-board-f"><span class="t-caption tx-muted">' + M.ltr(String(n)) + '</span></div>'; };
+    return M.card('<div class="ta-board">' + f(1) + f(2) + f(3) + f(4) + f(5) + '</div>' +
+      '<div class="t-meta tx-muted mt-2">' + t("a02.animatic.sub", { d: M.html(M.mono("00:34")) }) + '</div>' +
+      '<div class="m-row mt-3">' + M.btn(t("a02.animatic"), { icon: "play", disabled: dis }) + '</div>', "mt-3");
+  }
+  function scenes() {
+    return M.card('<div class="m-row"><div class="t-label m-grow">' + t("a02.scenes") + '</div>' + M.chip("neutral", M.ltr(String(X.scenes.length))) + '</div>' +
+      X.scenes.map(function (s, i) {
+        return (i ? M.divider() : '') + '<div class="ta-scene"><div class="m-row">' + M.chip("neutral", t("a02.type." + s.type), TYPE_ICON[s.type]) +
+          '<span class="m-spacer"></span><span class="t-mono tx-muted">' + M.mono(s.tc) + '</span></div>' +
+          '<div class="m-quote m-quote-ar mt-2" dir="rtl" lang="ar"><span class="ar-run">' + M.esc(s.text) + '</span></div>' +
+          (s.claude ? '<div class="m-row mt-2">' + M.chip("info", t("a02.claude_line"), "pen-line") + '</div>' : '') + '</div>';
+      }).join(""), "mt-4");
+  }
+  function review(blocked) {
+    if (blocked) {
+      return M.card('<div class="m-row">' + M.status("busy") + '<div class="t-label ms-2 m-grow">' + t("a02.review") + '</div>' + M.chip("neutral", t("a02.pending"), "circle-dashed") + '</div>' +
+        '<div class="t-meta tx-muted mt-1">' + t("a02.blocked") + '</div>', "mt-4");
+    }
+    return M.card('<div class="m-row">' + M.status("ok") + '<div class="t-label ms-2 m-grow">' + t("a02.review") + '</div></div>' +
+      '<div class="t-meta mt-1">' + t("a02.review.ok", { n: 5 }) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("a02.review.note") + '</div>', "mt-4");
+  }
+  function numbers(checked, dis) {
+    return M.card('<div class="m-row">' + M.status("warn") + '<div class="t-label ms-2 m-grow">' + t("a02.numbers") + '</div>' + M.chip("warn", M.ltr(String(X.numbers.length))) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("a02.numbers.hint") + '</div><div class="m-col mt-2">' +
+      X.numbers.map(function (n) { return TA.checkrow({ checked: checked, disabled: dis, name: M.ltr(n[0]), sub: M.mono(n[1]) }); }).join("") + '</div>', "mt-4");
+  }
+  function assets() {
+    var row = function (icon, key) { return '<div class="ta-bullet mt-2">' + M.ico(icon, 16, "ink-muted") + '<div class="t-meta ms-2 m-grow">' + t(key) + '</div></div>'; };
+    return M.card('<div class="t-label">' + t("a02.assets") + '</div>' + row("image", "a02.icons") + row("music", "a02.music") + row("sliders-horizontal", "a02.recipe"), "mt-4");
+  }
+  function changes(dis) {
+    return M.card('<div class="t-label">' + t("a02.changes.label") + '</div>' +
+      '<div class="mt-2">' + M.input(t("a02.changes.placeholder"), { textarea: true }) + '</div>' +
+      '<div class="m-row mt-3">' + M.btn(t("a02.changes"), { icon: "message-square", disabled: dis }) + '</div>', "mt-4");
+  }
+  function page(o) {
+    o = o || {};
+    return heading(o.id) + animatic(o.off) + scenes() + review(o.blocked) + numbers(o.checked, o.off) + assets() + changes(o.off);
+  }
+  /* why: ok | numbers | blocked | off */
+  function bar(why, focus) {
+    var hint = why === "numbers" ? t("a02.tick") : why === "blocked" ? t("a02.blocked") : "";
+    return '<div class="m-row">' + M.status("info", 12) + '<div class="t-meta tx-muted ms-1 m-grow">' + t("a02.as", { name: D.editor }) + '</div></div>' + TA.trust(t("a02.trust")) +
+      '<div class="m-col mt-2">' + M.btn(t("a02.approve"), { kind: "primary", block: true, icon: "circle-check-big", disabled: why !== "ok", focus: focus }) + '</div>' +
+      (hint ? '<div class="t-meta tx-muted mt-2">' + hint + '</div>' : '');
+  }
+
+  var STATES = {
+    empty: function () {
+      return {
+        body: M.steps(["done", "run", "pend", "pend", "pend", "pend", "pend"], 1, "busy") + '<div class="mt-4"></div>' +
+          M.empty({ icon: "circle-check-big", title: t("a02.empty"), text: t("a02.empty.text") })
+      };
+    },
+    loading: function () {
+      return {
+        body: heading() + M.card('<span class="m-skel-block" style="height:48px"></span>' + M.skel(60, 16) + '<div class="mt-3"></div><span class="m-skel-block" style="width:160px;height:32px"></span>', "mt-3") +
+          M.card(M.skel(30) + '<div class="mt-3"></div>' + M.skel(40) + M.skel(95) + M.skel(70) + '<div class="mt-3"></div>' + M.skel(40) + M.skel(90), "mt-4"),
+        bar: '<div class="m-col">' + M.skel(45, 16) + '<div class="mt-2"></div><span class="m-skel-block" style="height:40px"></span></div>'
+      };
+    },
+    normal: function () { return { needs: 1, body: page(), bar: bar("numbers") }; },
+    checked: function () { return { needs: 1, body: page({ checked: true }), bar: bar("ok") }; },
+    focus: function () { return { needs: 1, body: page({ checked: true }), bar: bar("ok", true) }; },
+    blocked: function () { return { needs: 0, body: page({ blocked: true, checked: true }), bar: bar("blocked") }; },
+    error: function () {
+      return {
+        needs: 1,
+        body: TA.slot(M.notice("error", t("a02.failed"), { sub: t("a02.failed.hint"), btn: { label: t("p13.retry"), icon: "refresh-cw" } })) + page({ checked: true }),
+        bar: bar("ok")
+      };
+    },
+    offline: function () {
+      return { needs: 1, pills: TA.pillsOff, body: TA.slot(TA.offline()) + page({ checked: true, off: true }), bar: bar("off") };
+    },
+    "no-claude": function () {
+      return { needs: 0, pills: TA.pillsNoClaude, body: TA.slot(TA.noClaude("a02.no_claude", { primary: true })) + page({ blocked: true, checked: true }), bar: bar("blocked") };
+    },
+    stale: function () {
+      return {
+        needs: 1,
+        body: TA.slot(M.notice("info", t("a02.plan_changed"), { sub: t("a02.diff") })) + page(),
+        bar: bar("numbers")
+      };
+    },
+    success: function () {
+      return {
+        needs: 0,
+        body: TA.slot(M.notice("ok", t("a02.done"))) + M.steps(["done", "done", "done", "pend", "pend", "pend", "pend"], 3, "pending") +
+          M.card('<div class="m-row">' + M.status("ok") + '<div class="t-label ms-2 m-grow">' + t("a02.done_by", { name: D.editor, time: M.html(M.mono(X.approvedAt)) }) + '</div></div>', "mt-4") +
+          '<div class="m-col mt-4">' + M.btn(t("a02.go_home"), { kind: "primary", block: true, icon: "layers" }) + '</div>'
+      };
+    },
+    long: function () { return { body: page({ id: X.long.motion, checked: true }), bar: bar("ok") }; }
+  };
+
+  TA.mount({
+    id: "A-02", name: "Motion plan approval",
+    states: ["empty", "loading", "normal", "checked", "focus", "blocked", "error", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "edit";
+      if (v.needs === undefined) v.needs = 1;
+      return v;
+    }
+  }, { ae: true });
+})();
+</script>
+</body>
+</html>
