@@ -53,8 +53,10 @@ def git_bash():
 
 
 def clean_env(user_home: Path, **extra) -> dict:
-    """No plugin option or engine home from the real machine; the user's home is a temp folder."""
-    env = {k: v for k, v in os.environ.items() if k not in OPTION_KEYS}
+    """No plugin option or engine home from the real machine; the user's home is a temp folder. Inherited WNC_*
+    (e.g. WNC_QUEUE_JOB from the wnc-queue runner) is the caller's, not a wrapper's: dropped, so the "no WNC_ scratch
+    variable reaches the engine" checks see only names the wrappers set themselves."""
+    env = {k: v for k, v in os.environ.items() if k not in OPTION_KEYS and not k.upper().startswith("WNC_")}
     env.update(HOME=str(user_home), USERPROFILE=str(user_home), WHYNOT_TEST_ECHO_ARGV="1", PYTHONUTF8="1",
                CLAUDE_CONFIG_DIR=str(user_home / ".claude"))
     env.update({k: str(v) for k, v in extra.items()})
