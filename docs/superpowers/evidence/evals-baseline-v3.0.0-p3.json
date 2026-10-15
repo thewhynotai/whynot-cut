@@ -1,15 +1,16 @@
 {
  "label": "v3.0.0-p3",
  "cli": "2.1.295",
- "date": "2026-10-14",
+ "date": "2026-10-15",
  "judge": "sonnet",
  "ablation": "none",
  "bar": "a case passes when >= 2/3 of its runs pass",
  "counted": 29,
- "pass": 25,
- "pass_every_run": 19,
+ "pass": 29,
+ "pass_every_run": 23,
  "pending": [
-  "magnific-broll-pending"
+  "magnific-broll-pending",
+  "panel-approval-sessionstart"
  ],
  "cases": {
   "after-effects-on-request": {
@@ -23,9 +24,9 @@
    "mean_score": 1.0
   },
   "edit-arabic-only": {
-   "passed": 1,
+   "passed": 3,
    "runs": 3,
-   "mean_score": 0.867
+   "mean_score": 1.0
   },
   "first-run-onboarding": {
    "passed": 3,
@@ -33,9 +34,9 @@
    "mean_score": 1.0
   },
   "fix-audio-only": {
-   "passed": 3,
+   "passed": 2,
    "runs": 3,
-   "mean_score": 1.0
+   "mean_score": 0.952
   },
   "gate0-delegation": {
    "passed": 3,
@@ -43,11 +44,16 @@
    "mean_score": 1.0
   },
   "handoff-for-editor": {
-   "passed": 3,
+   "passed": 2,
    "runs": 3,
-   "mean_score": 1.0
+   "mean_score": 0.933
   },
   "help-cheat-sheet": {
+   "passed": 2,
+   "runs": 3,
+   "mean_score": 0.944
+  },
+  "macos-bridge-files-access": {
    "passed": 3,
    "runs": 3,
    "mean_score": 1.0
@@ -65,7 +71,7 @@
   "motion-from-audio": {
    "passed": 2,
    "runs": 3,
-   "mean_score": 0.917
+   "mean_score": 0.944
   },
   "motion-qc-evidence": {
    "passed": 3,
@@ -73,9 +79,9 @@
    "mean_score": 1.0
   },
   "motion-revision": {
-   "passed": 1,
+   "passed": 3,
    "runs": 3,
-   "mean_score": 0.733
+   "mean_score": 1.0
   },
   "negative-hugo-assets": {
    "passed": 3,
@@ -93,9 +99,9 @@
    "mean_score": 1.0
   },
   "panel-approval-sessionstart": {
-   "passed": 2,
+   "passed": 1,
    "runs": 3,
-   "mean_score": 0.917
+   "mean_score": 0.833
   },
   "podcast-reels-plan": {
    "passed": 3,
@@ -103,14 +109,14 @@
    "mean_score": 1.0
   },
   "preferences-stop-asking": {
-   "passed": 1,
+   "passed": 3,
    "runs": 3,
-   "mean_score": 0.833
+   "mean_score": 1.0
   },
   "premiere-first-default": {
-   "passed": 2,
+   "passed": 3,
    "runs": 3,
-   "mean_score": 0.889
+   "mean_score": 1.0
   },
   "preview-before-premiere": {
    "passed": 3,
@@ -128,29 +134,29 @@
    "mean_score": 1.0
   },
   "revise-arabic-only": {
-   "passed": 3,
+   "passed": 2,
    "runs": 3,
-   "mean_score": 1.0
+   "mean_score": 0.944
   },
   "revise-editor-comments": {
-   "passed": 3,
-   "runs": 3,
-   "mean_score": 1.0
-  },
-  "status-arabic-only": {
-   "passed": 2,
-   "runs": 3,
-   "mean_score": 0.933
-  },
-  "status-before-sending": {
-   "passed": 2,
-   "runs": 3,
-   "mean_score": 0.917
-  },
-  "transcript-words-to-confirm": {
    "passed": 2,
    "runs": 3,
    "mean_score": 0.867
+  },
+  "status-arabic-only": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "status-before-sending": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
+  },
+  "transcript-words-to-confirm": {
+   "passed": 3,
+   "runs": 3,
+   "mean_score": 1.0
   },
   "windows-bridge-not-responding": {
    "passed": 3,
@@ -158,9 +164,9 @@
    "mean_score": 1.0
   },
   "wrong-reel-on-path": {
-   "passed": 1,
+   "passed": 3,
    "runs": 3,
-   "mean_score": 0.867
+   "mean_score": 1.0
   }
  }
 }
