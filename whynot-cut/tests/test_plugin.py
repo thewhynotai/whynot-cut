@@ -1418,12 +1418,14 @@ def _git_index_modes(root: Path) -> dict[str, str]:
 
 
 def _expected_exec_paths() -> set[str]:
-    """Repo-relative paths that must be 100755 in git: the plugin's executables, every hooks/*.py, and tools/test.sh."""
+    """Repo-relative paths that must be 100755 in git: the plugin's executables, every hooks/*.py, tools/test.sh and
+    the macOS CI scripts (tools/ci/*.sh|*.py, run directly on the Mac dev machine)."""
     plugin = {"whynot-cut/bin/reel", "whynot-cut/hooks/run_python.sh", "whynot-cut/hooks/stop_gate.sh",
               "whynot-cut/setup/setup_env.sh",
               "whynot-cut/setup/setup_env.py", "whynot-cut/examples/make_demo.py"}
     hooks = {f"whynot-cut/hooks/{p.name}" for p in (SK / "hooks").glob("*.py")}
-    return plugin | hooks | {"tools/test.sh"}
+    ci = {f"tools/ci/{p.name}" for p in (SK.parent / "tools/ci").glob("*") if p.suffix in (".sh", ".py")}
+    return plugin | hooks | ci | {"tools/test.sh"}
 
 
 class TestExecutableBits(unittest.TestCase):
