@@ -32,7 +32,7 @@
 <h2 id="ch18-update">التحديث في الإصدار <bdi dir="ltr">3.0</bdi></h2>
 
 <ul>
-<li><strong>لتحديث WhyNot Cut كله</strong> (الإضافة في تطبيق Claude، والمحرك، واللوحات، والنماذج)، ثبّته مرة أخرى بالطريقة نفسها: الصق سطر التثبيت في PowerShell أو Terminal، أو اكتب في Claude «ثبّت WhyNot&nbsp;Cut». تشغيل التثبيت مرة ثانية يحدّث ما تغيّر ويُصلح ما تعطّل، ويحتفظ بمكان المحرك ونماذجك وإعداداتك، ولا يلمس ملفات عملائك (<a href="#ch02-one-line">الفصل&nbsp;2</a>).</li>
+<li><strong>لتحديث WhyNot Cut كله</strong> (الإضافة في تطبيق Claude، والمحرك، واللوحات، والنماذج)، ثبّته مرة أخرى بالطريقة نفسها: الصق سطر التثبيت نفسه في Terminal على Mac أو في PowerShell على Windows، أو اكتب في Claude «ثبّت WhyNot&nbsp;Cut». تشغيل التثبيت مرة ثانية يحدّث ما تغيّر ويُصلح ما تعطّل، ويحتفظ بمكان المحرك ونماذجك وإعداداتك، ولا يلمس ملفات عملائك (<a href="#ch02-one-line">الفصل&nbsp;2</a>).</li>
 <li><strong>على أجهزة فريقنا</strong>: افتح أحدث نسخة من برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> (<a href="#ch02-setup-app">الفصل&nbsp;2</a>).</li>
 <li><strong>قبل أن تلصق السطر</strong>، احفظ عملك وأغلق Premiere Pro وAfter Effects، كما في <a href="#ch02-one-line">الفصل&nbsp;2</a>. <strong>وإذا كان أحدهما مفتوحًا</strong>، تنتظر اللوحة الجديدة حتى يُغلق البرنامج، ثم تُثبَّت وحدها. وتعرض اللوحة القديمة في الأثناء بطاقة تطلب إعادة تشغيل Premiere (<a href="#ch17-v3">الفصل&nbsp;17</a>).</li>
 <li><strong>إذا كانت إضافة WhyNot Cut في Claude أقدم من باقي WhyNot Cut</strong>، تعرض شارة Claude (المؤشر الصغير في اللوحة الذي يعرض حالة Claude) زر تحديث (<bdi dir="ltr">Update</bdi>). اضغطه، ثم افتح محادثة جديدة.</li>
@@ -47,12 +47,12 @@
 
 <ol class="steps">
 <li>أغلق Premiere Pro وAfter Effects. إذا كان أحدهما مفتوحًا، لا تُزال لوحاته، لأن البرنامج المفتوح يمنع حذف ملفات لوحاته ما دام يعمل؛ فأغلقه وأعد إلغاء التثبيت.</li>
-<li><strong>إذا ثبّت بالسطر الواحد أو من داخل Claude</strong>: افتح PowerShell أو Terminal كما في <a href="#ch02-run-command">«تشغيل أمر أعطاك إياه Claude»</a>، والصق سطر الإزالة الخاص بجهازك، ثم اضغط Enter.
-<p class="lead-in">على Windows، في PowerShell:</p>
-<div class="cmd one-line"><bdi dir="ltr"><code>&amp; ([scriptblock]::Create((irm https://dl.thewhynot.ai/install.ps1))) -Uninstall</code></bdi></div>
+<li><strong>إذا ثبّت بالسطر الواحد أو من داخل Claude</strong>: افتح Terminal على Mac أو PowerShell على Windows كما في <a href="#ch02-run-command">«تشغيل أمر أعطاك إياه Claude»</a>، والصق سطر الإزالة الخاص بجهازك، ثم اضغط Enter.
 <p class="lead-in">على Mac، في Terminal:</p>
-<div class="cmd"><bdi dir="ltr"><code>curl -fsSL https://dl.thewhynot.ai/install.sh | bash -s -- --uninstall</code></bdi></div></li>
-<li><strong>على أجهزة فريقنا</strong> (برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi>): على Windows افتح <bdi dir="ltr">Settings&nbsp;›&nbsp;Apps</bdi>، وابحث عن WhyNot Cut في قائمة التطبيقات، ثم اضغط «إلغاء التثبيت» (<bdi dir="ltr">Uninstall</bdi>). وعلى Mac افتح التطبيق <bdi dir="ltr">WhyNot Cut Setup</bdi> وألغِ التثبيت منه.</li>
+<div class="cmd"><bdi dir="ltr"><code>curl -fsSL https://dl.thewhynot.ai/install.sh | bash -s -- --uninstall</code></bdi></div>
+<p class="lead-in">على Windows، في PowerShell:</p>
+<div class="cmd one-line"><bdi dir="ltr"><code>&amp; ([scriptblock]::Create((irm https://dl.thewhynot.ai/install.ps1))) -Uninstall</code></bdi></div></li>
+<li><strong>على أجهزة فريقنا</strong> (برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi>): على Mac افتح التطبيق <bdi dir="ltr">WhyNot Cut Setup</bdi> وألغِ التثبيت منه. وعلى Windows افتح <bdi dir="ltr">Settings&nbsp;›&nbsp;Apps</bdi>، وابحث عن WhyNot Cut في قائمة التطبيقات، ثم اضغط «إلغاء التثبيت» (<bdi dir="ltr">Uninstall</bdi>).</li>
 <li>في آخر الإزالة يعرض لك ملخصًا بما أُزيل وما بقي.</li>
 </ol>
 
@@ -74,7 +74,11 @@
 <li>النماذج المنزّلة، وتبقى حتى إذا حذفت فولدر المحرك، إلا إذا طلبت حذفها هي أيضًا.</li>
 </ul>
 
-<p>لتحذفهما مع الإزالة، أضف في آخر سطر الإزالة على Windows <bdi dir="ltr"><code>-RemoveEngine</code></bdi> لفولدر المحرك و<bdi dir="ltr"><code>-RemoveModels</code></bdi> للنماذج، وعلى Mac <bdi dir="ltr"><code>--remove-engine</code></bdi> و<bdi dir="ltr"><code>--remove-models</code></bdi>، بعد مسافة.</p>
+<p class="lead-in">لتحذفهما مع الإزالة، استخدم سطر الإزالة كاملًا بهذا الشكل. على Mac، في Terminal:</p>
+<div class="cmd"><bdi dir="ltr"><code>curl -fsSL https://dl.thewhynot.ai/install.sh | bash -s -- --uninstall --remove-engine --remove-models</code></bdi></div>
+<p class="lead-in">وعلى Windows، في PowerShell:</p>
+<div class="cmd"><bdi dir="ltr"><code>&amp; ([scriptblock]::Create((irm https://dl.thewhynot.ai/install.ps1))) -Uninstall -RemoveEngine -RemoveModels</code></bdi></div>
+<p>في آخر السطر كلمتان: الأولى (<bdi dir="ltr"><code>--remove-engine</code></bdi> على Mac، و<bdi dir="ltr"><code>-RemoveEngine</code></bdi> على Windows) تحذف فولدر المحرك، والثانية تحذف النماذج. احذف منهما، مع المسافة التي قبلها، ما تريد أن يبقى.</p>
 
 <p class="lead-in">ما يبقى دائمًا:</p>
 <ul>

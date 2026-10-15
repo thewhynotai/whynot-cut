@@ -673,6 +673,130 @@ def dev_word_problems(html: str, terms: dict[str, tuple[str, ...]] | None = None
     return problems
 
 
+# ---------------------------------------------------------------- macOS first (Addendum G11)
+# "macOS is treated as the primary platform": every two-platform passage names macOS first. The guide writes its
+# pairs in body prose, lead-ins, list items, table cells, captions and headings (round-3 audit Part C), so the lint
+# reads every block element, not only dedicated platform blocks. App names count as their system. The text is the
+# visible prose (no <code>, .cmd boxes, comments), but menu-path labels are kept: «Open with › Notepad» is a pair.
+MAC_MARKS = re.compile(r"(?<![A-Za-z])(?:(?:macOS|Mac|Terminal|TextEdit|Finder|Apple Silicon)(?![A-Za-z])|Cmd\+)")
+WIN_MARKS = re.compile(r"(?<![A-Za-z])(?:(?:Windows|PowerShell|Notepad|File Explorer)(?![A-Za-z])|Ctrl\+)")
+_ORDER_BLOCKS = {"p", "li", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "figcaption", "figure", "dt", "dd",
+                 "caption", "summary"}
+_HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+_SIBLING_BLOCKS = {"p", "li", "div", "figure", "ul", "ol", "table", "tbody", "tr", "aside", "dl", "dt", "dd",
+                   "blockquote", "section", "pre"}
+
+
+class _OrderNode:
+    __slots__ = ("tag", "children")
+
+    def __init__(self, tag: str) -> None:
+        self.tag = tag
+        self.children: list = []  # _OrderNode or str
+
+    def text(self) -> str:
+        return "".join(c if isinstance(c, str) else c.text() for c in self.children)
+
+
+class _OrderParser(HTMLParser):
+    """An element tree of the visible text: <code>, .cmd boxes, <style>/<script> and comments are left out."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = _OrderNode("#root")
+        self.stack: list[tuple[_OrderNode, bool]] = [(self.root, False)]
+
+    def handle_starttag(self, tag, attrs):
+        a = {k.lower(): (v or "") for k, v in attrs}
+        parent, skip = self.stack[-1]
+        if tag in ("code", "style", "script") or "cmd" in a.get("class", "").split():
+            skip = True
+        if tag in _VOID:
+            return
+        node = _OrderNode(tag)
+        if not skip:
+            parent.children.append(node)
+        self.stack.append((node, skip))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, 0, -1):
+            if self.stack[i][0].tag == tag:
+                del self.stack[i:]
+                break
+
+    def handle_data(self, data):
+        node, skip = self.stack[-1]
+        if not skip:
+            node.children.append(_ARABIC_MARKS.sub("", data.replace("\xa0", " ")))
+
+
+def _platforms(text: str) -> tuple[int | None, int | None]:
+    """(position of the first macOS mention, position of the first Windows mention), None when absent."""
+    m, w = MAC_MARKS.search(text), WIN_MARKS.search(text)
+    return (m.start() if m else None), (w.start() if w else None)
+
+
+def platform_order_problems(html: str) -> list[str]:
+    """Places that name Windows before macOS (G11). Empty list = clean.
+
+    1. A block element (paragraph, list item, cell, caption, figure, heading) that names both systems names macOS
+       first.
+    2. A pair split over sibling elements: a Windows-only sibling followed by a macOS-only sibling in the same part
+       (a heading starts a new part), e.g. two lead-ins with their command boxes, or two list items.
+    3. Two sibling headings of the same level: a Windows-only one followed by a macOS-only one.
+    """
+    p = _OrderParser()
+    p.feed(html)
+    p.close()
+    problems: list[str] = []
+
+    def short(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip()[:90]
+
+    def only(node) -> str | None:
+        mac, win = _platforms(node.text())
+        if mac is not None and win is None:
+            return "mac"
+        if win is not None and mac is None:
+            return "win"
+        return None
+
+    def walk(node: _OrderNode) -> None:
+        if node.tag in _ORDER_BLOCKS:
+            text = node.text()
+            mac, win = _platforms(text)
+            if mac is not None and win is not None and win < mac:
+                problems.append(f"<{node.tag}> names Windows before macOS (G11: macOS first): «{short(text)}»")
+        elements = [c for c in node.children if isinstance(c, _OrderNode)]
+        win_only = None
+        last_heading: dict[str, _OrderNode] = {}
+        for child in elements:
+            kind = only(child)
+            if child.tag in _HEADINGS:
+                win_only = None
+                prev = last_heading.get(child.tag)
+                if child.tag in ("h3", "h4", "h5", "h6") and prev is not None and only(prev) == "win" \
+                        and kind == "mac":
+                    problems.append(f"<{child.tag}> «{short(child.text())}» comes after the Windows heading "
+                                    f"«{short(prev.text())}» (G11: the macOS heading first)")
+                last_heading[child.tag] = child
+                walk(child)
+                continue
+            if child.tag not in _SIBLING_BLOCKS:  # inline parts of one sentence are rule 1's business
+                walk(child)
+                continue
+            if kind == "win" and win_only is None:
+                win_only = child
+            elif kind == "mac" and win_only is not None:
+                problems.append(f"Windows part «{short(win_only.text())}» comes before the macOS part "
+                                f"«{short(child.text())}» (G11: macOS first)")
+                win_only = None
+            walk(child)
+
+    walk(p.root)
+    return problems
+
+
 # ---------------------------------------------------------------- troubleshooting shape (Addendum G2)
 # "Every error says what happened, why, and the one button that fixes it." Each ch17 entry is
 # <div class="fix"> with exactly one .fix-what, .fix-why and .fix-do <p>, in that order, each opening with its
@@ -1086,7 +1210,8 @@ def main(argv: list[str] | None = None) -> int:
         (build_dir / stale).unlink(missing_ok=True)
 
     html = assemble(ROOT)
-    problems = lint(html, release=release) + dev_word_problems(chapter_sources(ROOT))
+    sources = chapter_sources(ROOT)
+    problems = lint(html, release=release) + dev_word_problems(sources) + platform_order_problems(sources)
     troubleshooting = ROOT / "chapters" / TROUBLESHOOTING_CHAPTER
     if troubleshooting.is_file():
         problems += fix_problems(troubleshooting.read_text(encoding="utf-8"))

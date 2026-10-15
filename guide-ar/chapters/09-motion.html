@@ -83,7 +83,7 @@
 <!-- فريق: طريقة تثبيت اللوحة في After Effects وشكل لوحة WhyNot Cut داخله تتغير في مرحلة لاحقة من الإصدار 3.0، وتُشرح هنا بعد اكتمالها. حتى ذلك الحين يثبّت Claude لوحة WhyNot Cut Bridge ويخبرك بالخطوة الباقية عليك (نُقل إلى النص الظاهر فوق المربع؛ المصدر: setup SKILL الخطوة 6). -->
 </aside>
 
-<p>أول مرة على كل إصدار من After Effects يُجرى اختبار قصير للكتابة العربية، ويشاهد Claude نتيجته بنفسه قبل أن يسجّلها. وأي إعداد داخل After Effects، أو إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> (إعداد في الجهاز يسمح لبرامج Adobe بفتح لوحة WhyNot Cut Bridge غير الموقَّعة، <a href="#ch02-first-run">الفصل&nbsp;2</a>)، تغيّره أنت بنفسك، ويعطيك Claude الخطوة. وإذا كانت الخطوة أمرًا تشغّله، فطريقة تشغيله في <a href="#ch02-run-command">الفصل&nbsp;2</a>.</p>
+<p>أول مرة على كل إصدار من After Effects يُجرى اختبار قصير للكتابة العربية، ويشاهد Claude نتيجته بنفسه قبل أن يسجّلها. وأي إعداد داخل After Effects، أو إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> (إعداد في الجهاز يسمح لبرامج Adobe بفتح لوحة WhyNot Cut Bridge غير الموقَّعة، <a href="#ch02-first-run">الفصل&nbsp;2</a>)، تغيّره أنت بنفسك. لا تبحث عنه بنفسك: يعطيك Claude سطرًا تلصقه في Terminal على Mac، أو في PowerShell على Windows، ثم تعيد فتح After Effects (طريقة تشغيله في <a href="#ch02-run-command">الفصل&nbsp;2</a>).</p>
 
 <aside class="warn">
 <p>إذا عدّلت مشروع After Effects بيدك، لا يكتب WhyNot Cut فوقه إلا بموافقتك، وبعد أن يحتفظ بنسخة احتياطية منه.</p>
@@ -93,7 +93,8 @@
 
 <ol class="steps">
 <li>احفظ أي مشروع مفتوح في After Effects أو أغلقه. السكريبت يرفض أن يعمل ما دام هناك عمل غير محفوظ، وتظهر لك رسالة بذلك.</li>
-<li>من After Effects اختر <bdi dir="ltr">File&nbsp;›&nbsp;Scripts&nbsp;›&nbsp;Run&nbsp;Script&nbsp;File…</bdi> ثم اختر ملف السكريبت.</li>
+<li>من After Effects اختر <bdi dir="ltr">File&nbsp;›&nbsp;Scripts&nbsp;›&nbsp;Run&nbsp;Script&nbsp;File…</bdi> ثم اختر ملف السكريبت. لا تحتاج إلى تغيير أي إعداد في After Effects قبل ذلك، على Mac أو على Windows: السكريبت لا يكتب ملفات، فلا يحتاج إلى الإعداد <bdi dir="ltr">Allow&nbsp;Scripts&nbsp;to&nbsp;Write&nbsp;Files&nbsp;and&nbsp;Access&nbsp;Network</bdi>.
+<!-- فريق: skills/adobe-extras/references/adobe-automation.md («The script does not need "Allow Scripts to Write Files and Access Network"») وmotion-craft/references/ae-motion.md وCHANGELOG («WhyNot Cut never changes it»). persona E43 اقترح خطوات تفعيل الإعداد: مرفوضة لأن الكود لا يحتاجه. --></li>
 <li>انتظر حتى يُبنى المشروع، ثم أخبر Claude.</li>
 </ol>
 

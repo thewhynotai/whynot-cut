@@ -16,22 +16,22 @@
 
 <h2 id="ch04-create">إنشاء فولدر لعميل</h2>
 
-<p class="lead-in">أول فولدر عميل يُنشأ لك أثناء الإعداد الأول بالأمر <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>. ولأي عميل بعد ذلك يُنشئ Claude الفولدر لك داخل فولدر العملاء (clients folder)، وهو الفولدر الذي اخترته في الإعداد الأول لتُحفظ فيه كل فولدرات العملاء، مثل <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> على Windows أو <bdi dir="ltr"><code>~/Documents/WhyNot Clients</code></bdi> على Mac:</p>
+<p class="lead-in">أول فولدر عميل يُنشأ لك أثناء الإعداد الأول بالأمر <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>. ولأي عميل بعد ذلك يُنشئ Claude الفولدر لك داخل فولدر العملاء (clients folder)، وهو الفولدر الذي اخترته في الإعداد الأول لتُحفظ فيه كل فولدرات العملاء، مثل <bdi dir="ltr"><code>~/Documents/WhyNot Clients</code></bdi> على Mac أو <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> على Windows:</p>
 
 <ol class="steps">
 <li>اكتب لـ Claude طلبًا فيه اسم العميل، مثل «اعمل فولدر عميل جديد اسمه Example Clinic».</li>
 <li>يُنشئ Claude الفولدر بكل الفولدرات الفرعية، ويعرض لك ما يوضع في كل فولدر.</li>
-<li>تجد الجدول نفسه في الملف <bdi dir="ltr"><code>START_HERE.md</code></bdi> داخل الفولدر الجديد، ومعه ملخص بالعربية. افتحه بالزر الأيمن ثم <bdi dir="ltr">Open&nbsp;with&nbsp;›&nbsp;Notepad</bdi> (على Mac: <bdi dir="ltr">Open&nbsp;With&nbsp;›&nbsp;TextEdit</bdi>).</li>
+<li>تجد الجدول نفسه في الملف <bdi dir="ltr"><code>START_HERE.md</code></bdi> داخل الفولدر الجديد، ومعه ملخص بالعربية. افتحه بالزر الأيمن ثم <bdi dir="ltr">Open&nbsp;With&nbsp;›&nbsp;TextEdit</bdi> على Mac، أو <bdi dir="ltr">Open&nbsp;with&nbsp;›&nbsp;Notepad</bdi> على Windows.</li>
 <li>ضع ملفات العميل في أماكنها كما في الجدول التالي، ثم أخبر Claude، فيفحصها ويكمل إعداد العميل (<a href="#ch05-title">الفصل&nbsp;5</a>).</li>
 </ol>
 
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: فولدر <bdi dir="ltr"><code>Example Clinic</code></bdi> مفتوحًا في مستكشف الملفات، وفيه <bdi dir="ltr">assets</bdi> و<bdi dir="ltr">data</bdi> والملف <bdi dir="ltr">START_HERE.md</bdi></span></div>
+<div class="shot-frame"><span>لقطة شاشة: فولدر <bdi dir="ltr"><code>Example Clinic</code></bdi> مفتوحًا في Finder على Mac، وفيه <bdi dir="ltr">assets</bdi> و<bdi dir="ltr">data</bdi> والملف <bdi dir="ltr">START_HERE.md</bdi></span></div>
 <figcaption>شكل فولدر العميل بعد إنشائه مباشرة.</figcaption>
 </figure>
 
 <aside class="tip">
-<p>عند تسمية الفولدر تجنّب الرموز التي يرفضها Windows: <bdi dir="ltr"><code>\ / : * ? " &lt; &gt; |</code></bdi>، ولا تنهِ الاسم بنقطة أو مسافة.</p>
+<p>عند تسمية الفولدر تجنّب هذه الرموز على Mac وعلى Windows معًا، لأن Windows يرفضها وقد يُفتح الفولدر على الجهازين: <bdi dir="ltr"><code>\ / : * ? " &lt; &gt; |</code></bdi>، ولا تنهِ الاسم بنقطة أو مسافة.</p>
 </aside>
 
 <h2 id="ch04-folders">ما الذي تضعه في كل فولدر</h2>
@@ -68,8 +68,8 @@
 <li>أكمل ما ينقص، أو ابدأ المونتاج إذا كان الموجود كافيًا.</li>
 </ol>
 
-<p class="lead-in">ستجد في رسائل Claude الأمر الذي يشغّله بنفسه لهذا الفحص، ولا تحتاج إلى كتابته:</p>
-<div class="cmd" data-who="claude"><bdi dir="ltr"><code>reel inbox --root "D:/WhyNot Clients/Example Clinic"</code></bdi></div>
+<p class="lead-in">ستجد في رسائل Claude الأمر الذي يشغّله بنفسه لهذا الفحص، ولا تحتاج إلى كتابته. المثال من Mac، وعلى Windows يبدأ المكان بحرف القرص، مثل <bdi dir="ltr"><code>D:/</code></bdi>:</p>
+<div class="cmd" data-who="claude"><bdi dir="ltr"><code>reel inbox --root "/Users/sample/Documents/WhyNot Clients/Example Clinic"</code></bdi></div>
 
 <figure class="shot">
 <div class="shot-frame"><span>لقطة شاشة: رد Claude بعد فحص فولدر <bdi dir="ltr"><code>Example Clinic</code></bdi>: كليب جديد واحد <bdi dir="ltr">C0001</bdi>، وتنبيه بأن ملف الألوان غير موجود</span></div>
@@ -86,15 +86,15 @@
 </ul>
 
 <ol class="steps">
-<li>افتح Notepad: من قائمة Start اكتب Notepad وافتحه. على Mac افتح TextEdit، ثم اختر <bdi dir="ltr">Format&nbsp;›&nbsp;Make&nbsp;Plain&nbsp;Text</bdi> ليصبح الملف نصًّا عاديًا.</li>
+<li>افتح محرّر نصوص عادي. على Mac افتح TextEdit، ثم اختر <bdi dir="ltr">Format&nbsp;›&nbsp;Make&nbsp;Plain&nbsp;Text</bdi> ليصبح الملف نصًّا عاديًا. وعلى Windows افتح Notepad: من قائمة Start اكتب Notepad وافتحه.</li>
 <li>الصق النص الذي كتبه Claude، أو انسخ القالب التالي وضع بدل كل «…» القيمة الصحيحة. اترك السطرين <bdi dir="ltr"><code>---</code></bdi> في أول الورقة وآخرها كما هما: ما بينهما بيانات الحلقة، وكل قيمة تُكتب بعد النقطتين.</li>
-<li>احفظ الملف: <bdi dir="ltr">File&nbsp;›&nbsp;Save&nbsp;As</bdi>. في Notepad اختر من «Save as type» القيمة <bdi dir="ltr">All files</bdi>، حتى لا يُحفظ الملف بامتداد <bdi dir="ltr"><code>.txt</code></bdi>. واكتب الاسم <bdi dir="ltr"><code>EP01.md</code></bdi>، واحفظه في <bdi dir="ltr"><code>data/Episodes</code></bdi> بجانب الحلقة. على Mac، إذا سألك TextEdit عن الامتداد اختر <bdi dir="ltr">Use&nbsp;.md</bdi>.</li>
+<li>احفظ الملف باسم <bdi dir="ltr"><code>EP01.md</code></bdi> في <bdi dir="ltr"><code>data/Episodes</code></bdi> بجانب الحلقة. على Mac: اختر <bdi dir="ltr">File&nbsp;›&nbsp;Save</bdi>، واكتب الاسم، واختر الفولدر <bdi dir="ltr"><code>data/Episodes</code></bdi>، ثم Save، وإذا سألك TextEdit عن الامتداد اختر <bdi dir="ltr">Use&nbsp;.md</bdi>. وعلى Windows: اختر <bdi dir="ltr">File&nbsp;›&nbsp;Save&nbsp;As</bdi>، ومن «Save as type» القيمة <bdi dir="ltr">All files</bdi> حتى لا يُحفظ الملف بامتداد <bdi dir="ltr"><code>.txt</code></bdi>، ثم اكتب الاسم واحفظه في الفولدر نفسه.</li>
 <li>اكتب لـ Claude أنك أضفت الورقة.</li>
 </ol>
 
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: نافذة <bdi dir="ltr">Save As</bdi> في Notepad داخل <bdi dir="ltr"><code>Example Clinic/data/Episodes</code></bdi>، وفيها <bdi dir="ltr">Save as type: All files</bdi> واسم الملف <bdi dir="ltr">EP01.md</bdi></span></div>
-<figcaption>احفظ الورقة بامتداد <bdi dir="ltr"><code>.md</code></bdi>، لا بامتداد <bdi dir="ltr"><code>.txt</code></bdi> الذي يختاره Notepad تلقائيًا.</figcaption>
+<div class="shot-frame"><span>لقطة شاشة: نافذة الحفظ في TextEdit على Mac داخل <bdi dir="ltr"><code>Example Clinic/data/Episodes</code></bdi> واسم الملف <bdi dir="ltr">EP01.md</bdi>، ثم سؤال الامتداد وزر <bdi dir="ltr">Use&nbsp;.md</bdi> (ومعها نافذة <bdi dir="ltr">Save As</bdi> في Notepad على Windows وفيها <bdi dir="ltr">Save as type: All files</bdi>)</span></div>
+<figcaption>احفظ الورقة بامتداد <bdi dir="ltr"><code>.md</code></bdi>، لا بامتداد <bdi dir="ltr"><code>.txt</code></bdi>.</figcaption>
 </figure>
 
 <p class="lead-in">قالب الورقة:</p>
@@ -158,7 +158,7 @@ avoid: [topics not to cut]
 </thead>
 <tbody>
 <tr><td>وضع حلقة بودكاست كاملة في <bdi dir="ltr"><code>data/Raw</code></bdi></td><td><bdi dir="ltr"><code>data/Raw</code></bdi> للفيديوهات الخام، وكل ملف فيه يصبح فيديو واحدًا. أما الحلقة الكاملة فلها وضع البودكاست، الذي يقترح منها ريلز بالتوقيتات.</td><td>ضع الحلقة في <bdi dir="ltr"><code>data/Episodes</code></bdi> واطلب «طلّع ريلز من الحلقة».</td></tr>
-<tr><td>فولدر العملاء داخل OneDrive أو iCloud أو Dropbox</td><td>الملفات المحفوظة «على الإنترنت فقط» لا تكون موجودة فعليًا على الجهاز، فيفشل التفريغ النصي.</td><td>اختر فولدرًا عاديًا على القرص لا يُزامَن.</td></tr>
+<tr><td>فولدر العملاء داخل iCloud أو OneDrive أو Dropbox</td><td>الملفات المحفوظة «على الإنترنت فقط» لا تكون موجودة فعليًا على الجهاز، فيفشل التفريغ النصي.</td><td>اختر فولدرًا عاديًا على القرص لا يُزامَن.</td></tr>
 <tr><td>البدء قبل انتهاء النسخ أو التحميل</td><td>يُفحص ملف ناقص أو غير موجود بعد.</td><td>انتظر حتى يكتمل النسخ، ثم اطلب الفحص.</td></tr>
 <tr><td>وضع ملفات الخطوط دون تثبيتها على الجهاز</td><td>Premiere Pro وAfter Effects يحتاجان إلى الخطوط مثبّتة. الخط غير المثبّت عائق يُبلَّغ عنه، ولا يُستبدل بخط آخر في صمت.</td><td>ثبّت كل خطوط <bdi dir="ltr"><code>assets/Fonts</code></bdi> على الجهاز.</td></tr>
 <tr><td>ملفات في الفولدر الخطأ، مثل صور في <bdi dir="ltr"><code>data/Raw</code></bdi></td><td>لا تُستخدم في مكانها الصحيح.</td><td>انقلها بنفسك؛ وفحص الملفات ينبّهك إلى ما وُضع في غير مكانه.</td></tr>

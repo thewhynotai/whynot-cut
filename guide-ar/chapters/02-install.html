@@ -4,7 +4,7 @@
 <p>يشرح هذا الفصل كيف تثبّت WhyNot Cut على جهازك. نبدأ بما تفعله اليوم، ثم نشرح التثبيت في الإصدار <bdi dir="ltr">3.0</bdi>: سطر واحد تلصقه في <span data-term-first="Terminal">Terminal على Mac أو في PowerShell على Windows، وكلاهما نافذة نصية تأتي مع نظام التشغيل: تلصق فيها أمرًا وتضغط Enter فيُنفَّذ، ولا تكتب فيها إلا السطر الذي نعطيك إياه</span>، أو من داخل تطبيق Claude: تضيف WhyNot Cut إليه، ثم تكتب طلبًا واحدًا. بعد التثبيت ينقلك <a href="#ch03-title">الفصل&nbsp;3</a> إلى أول مشروع.</p>
 
 <aside class="tip">
-<p>اليوم (قبل الإصدار <bdi dir="ltr">3.0</bdi>): اتبع القسمين <a href="#ch02-claude-first">«أول مرة في تطبيق Claude»</a> و<a href="#ch02-first-run">«اليوم: التثبيت مع معالج البداية»</a> فقط، ثم انتقل إلى <a href="#ch03-title">الفصل&nbsp;3</a>. باقي هذا الفصل يصف التثبيت في الإصدار <bdi dir="ltr">3.0</bdi>.</p>
+<p>اليوم (قبل الإصدار <bdi dir="ltr">3.0</bdi>): اتبع القسمين <a href="#ch02-claude-first">«أول مرة في تطبيق Claude»</a> و<a href="#ch02-first-run">«اليوم: التثبيت مع معالج البداية»</a> فقط، ثم انتقل إلى <a href="#ch03-title">الفصل&nbsp;3</a>. وعلى Mac اقرأ قبلهما <a href="#ch02-mac-permissions">«موافقات macOS قبل أن تظهر»</a>. باقي هذا الفصل يصف التثبيت في الإصدار <bdi dir="ltr">3.0</bdi>.</p>
 </aside>
 
 <h2 id="ch02-claude-first" data-today>أول مرة في تطبيق Claude</h2>
@@ -15,7 +15,7 @@
 <li><strong>المحادثة الجديدة</strong>: زر في أعلى القائمة الجانبية. افتح محادثة جديدة بعد كل تثبيت أو تحديث.</li>
 <li><strong>الفولدر</strong>: مع كل محادثة جديدة تختار الفولدر الذي يعمل فيه Claude: فولدر العملاء، أو فولدر العميل.</li>
 <li><strong>زر +</strong> بجانب مربع الرسالة: منه تضيف WhyNot Cut إلى التطبيق، كما في القسم التالي.</li>
-<li><strong>إغلاق التطبيق تمامًا</strong>: إغلاق النافذة وحده قد يترك Claude يعمل في الخلفية. على Windows اضغط بالزر الأيمن على أيقونة Claude بجوار الساعة (وقد تكون مخفية تحت السهم ^) واختر Quit، وعلى Mac اضغط <bdi dir="ltr">Cmd+Q</bdi>.</li>
+<li><strong>إغلاق التطبيق تمامًا</strong>: إغلاق النافذة وحده قد يترك Claude يعمل في الخلفية. على Mac اضغط <bdi dir="ltr">Cmd+Q</bdi> وتطبيق Claude في المقدمة. وعلى Windows اضغط بالزر الأيمن على أيقونة Claude بجوار الساعة (وقد تكون مخفية تحت السهم ^) واختر Quit.</li>
 </ul>
 
 <figure class="shot">
@@ -34,14 +34,16 @@
 
 <h2 id="ch02-first-run" data-today>اليوم: التثبيت مع معالج البداية</h2>
 
-<p>اليوم يرسل لك فريقنا فولدر <bdi dir="ltr"><code>whynot-cut-marketplace</code></bdi>. ضعه في مكان ثابت على جهازك، لأن تطبيق Claude يقرأ WhyNot Cut من مكانه هذا.</p>
+<p>اليوم يرسل لك فريقنا فولدر <bdi dir="ltr"><code>whynot-cut-marketplace</code></bdi>. انقله إلى فولدر Documents على جهازك واتركه هناك: لا تنقله ولا تحذفه بعد ذلك، لأن تطبيق Claude يقرأ WhyNot Cut من مكانه هذا، فإذا نقلته لا يجده.</p>
 
 <ol class="steps">
-<li><strong>انسخ مسار الفولدر.</strong> على Windows: اضغط Shift مع زر الماوس الأيمن على الفولدر، واختر «نسخ كمسار» (<bdi dir="ltr">Copy as path</bdi>). على Mac: اضغط Option مع زر الماوس الأيمن على الفولدر، واختر «نسخ … كاسم مسار» (<bdi dir="ltr">Copy … as Pathname</bdi>).</li>
+<li><strong>انسخ مسار الفولدر.</strong> على Mac: اضغط Option مع زر الماوس الأيمن على الفولدر، واختر «نسخ … كاسم مسار» (<bdi dir="ltr">Copy … as Pathname</bdi>). على Windows: اضغط Shift مع زر الماوس الأيمن على الفولدر، واختر «نسخ كمسار» (<bdi dir="ltr">Copy as path</bdi>).</li>
 <li><strong>أضف WhyNot Cut إلى تطبيق Claude.</strong> <span data-term-first="إضافة">ما تضيفه اسمه «إضافة WhyNot Cut» (plugin): الجزء الذي يعرّف Claude بأوامر WhyNot Cut وطريقة عمله</span>. افتح محادثة جديدة، واكتب السطر الأول في مربع الرسالة ثم Enter، ثم السطر الثاني ثم Enter. في السطر الأول امسح <bdi dir="ltr"><code>"&lt;path&gt;"</code></bdi> كله مع علامتي التنصيص، والصق مكانه المسار الذي نسخته: على Mac اكتب علامتي التنصيص حوله بنفسك، وعلى Windows يأتي المسار المنسوخ بينهما، فيبقى في السطر علامتا تنصيص اثنتان فقط.
 <div class="cmd"><bdi dir="ltr"><code>/plugin marketplace add "&lt;path&gt;"
 /plugin install whynot-cut@thewhynot-ai</code></bdi></div>
-أو اضغط <bdi dir="ltr">+&nbsp;›&nbsp;Plugins&nbsp;›&nbsp;Add&nbsp;plugin</bdi> (بالترتيب: + أولًا، ثم Plugins، ثم Add plugin)، واختر الفولدر نفسه.</li>
+<p class="lead-in">على Mac، إذا كان الفولدر في Documents، يصبح السطر الأول بعد التعديل مثل هذا، مع اسم المستخدم في جهازك بدل <bdi dir="ltr"><code>sample</code></bdi>:</p>
+<div class="cmd"><bdi dir="ltr"><code>/plugin marketplace add "/Users/sample/Documents/whynot-cut-marketplace"</code></bdi></div>
+وإذا ظهرت رسالة خطأ بعد السطر الأول، فتأكّد من المسار الذي نسخته في الخطوة 1، ثم أعد السطر. أو اضغط <bdi dir="ltr">+&nbsp;›&nbsp;Plugins&nbsp;›&nbsp;Add&nbsp;plugin</bdi> (بالترتيب: + أولًا، ثم Plugins، ثم Add plugin)، واختر الفولدر نفسه.</li>
 <li><strong>أغلق تطبيق Claude تمامًا</strong> (<a href="#ch02-claude-first">أول مرة في تطبيق Claude</a>)، ثم افتحه من جديد.</li>
 <li><strong>ابدأ معالج البداية.</strong> افتح محادثة جديدة، واكتب «أول مرة أستخدمه» أو الأمر التالي، ثم اضغط Enter:
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:start</code></bdi></div></li>
@@ -63,11 +65,11 @@
 
 <p class="lead-in">ما يثبّته المعالج بموافقتك، ويحتاج في المجموع إلى نحو <bdi dir="ltr">4&nbsp;GB</bdi> فارغة:</p>
 <ul>
-<li><strong>المحرك</strong> (engine)، وهو البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية: نحو <bdi dir="ltr">400&nbsp;MB</bdi>، في بضع دقائق، داخل الفولدر <bdi dir="ltr"><code>~/.whynot-cut</code></bdi>. العلامة <bdi dir="ltr"><code>~</code></bdi> تعني فولدر المستخدم على جهازك، مثل <bdi dir="ltr"><code>C:\Users\Sample</code></bdi>.</li>
+<li><strong>المحرك</strong> (engine)، وهو البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية: نحو <bdi dir="ltr">400&nbsp;MB</bdi>، في بضع دقائق، داخل الفولدر <bdi dir="ltr"><code>~/.whynot-cut</code></bdi>. العلامة <bdi dir="ltr"><code>~</code></bdi> تعني فولدر المستخدم على جهازك، مثل <bdi dir="ltr"><code>/Users/sample</code></bdi> على Mac، أو <bdi dir="ltr"><code>C:\Users\Sample</code></bdi> على Windows. وعلى Mac لا يظهر هذا الفولدر في Finder لأن اسمه يبدأ بنقطة، ولا تحتاج إلى فتحه.</li>
 <li><strong>نموذج التفريغ</strong> <bdi dir="ltr"><code>large-v3</code></bdi>: نحو <bdi dir="ltr">3&nbsp;GB</bdi>، مرة واحدة، ويكمل من حيث توقف إذا انقطع.</li>
 <li><strong>لوحة WhyNot Cut Bridge</strong> (<a href="#ch01-panels">الفصل&nbsp;1</a>): أغلق Premiere قبل تثبيتها ثم افتحه.</li>
 <li><strong>مع كارت NVIDIA</strong>: مكتبة تسريع اختيارية (نحو <bdi dir="ltr">520&nbsp;MB</bdi>) تجعل التفريغ أسرع بنحو 8 مرات.</li>
-<li><strong>فولدر العملاء</strong>: لا تضعه داخل فولدر يُزامَن مع OneDrive أو iCloud أو Dropbox، لأن الملفات المحفوظة على السحابة فقط تُفشل التفريغ النصي.</li>
+<li><strong>فولدر العملاء</strong>: لا تضعه داخل فولدر يُزامَن مع iCloud أو OneDrive أو Dropbox، لأن الملفات المحفوظة على السحابة فقط تُفشل التفريغ النصي.</li>
 </ul>
 
 <aside class="warn">
@@ -79,16 +81,69 @@
 <p>أحيانًا يكون الإصلاح شيئًا لا يفعله Claude بنفسه، مثل تثبيت برنامج أو تغيير إعداد في Adobe، فيعطيك أمرًا جاهزًا لتشغّله أنت. لا تكتبه في مربع رسائل Claude، بل شغّله هكذا:</p>
 
 <ol class="steps">
-<li>على Windows: افتح قائمة Start، واكتب PowerShell، ثم اضغط عليه لفتحه كالمعتاد، ولا تختر «تشغيل كمسؤول» (<bdi dir="ltr">Run as administrator</bdi>). على macOS: اضغط <bdi dir="ltr">Cmd+Space</bdi>، واكتب Terminal، ثم Enter.</li>
-<li>انسخ الأمر من رسالة Claude، والصقه في النافذة. للّصق اضغط <bdi dir="ltr">Ctrl+V</bdi> (أو زر الماوس الأيمن)، وعلى macOS <bdi dir="ltr">Cmd+V</bdi>.</li>
-<li>اضغط Enter، وانتظر حتى ينتهي الأمر: ينتهي عندما يظهر في آخر النافذة سطر جديد ينتظر أن تكتب فيه. وإذا ظهرت كلمة error، فانسخ ما في النافذة وأرسله إلى Claude.</li>
+<li>افتح النافذة. على Mac: اضغط <bdi dir="ltr">Cmd+Space</bdi>، واكتب Terminal، ثم Enter. على Windows: افتح قائمة Start، واكتب PowerShell، ثم اضغط عليه لفتحه كالمعتاد، ولا تختر «تشغيل كمسؤول» (<bdi dir="ltr">Run as administrator</bdi>).</li>
+<li>انسخ الأمر من رسالة Claude: اضغط زر النسخ بجانب الأمر إن ظهر، أو حدّده بالماوس واضغط <bdi dir="ltr">Cmd+C</bdi> على Mac أو <bdi dir="ltr">Ctrl+C</bdi> على Windows. ثم اضغط داخل النافذة والصقه: <bdi dir="ltr">Cmd+V</bdi> على Mac، وعلى Windows <bdi dir="ltr">Ctrl+V</bdi> أو زر الماوس الأيمن.</li>
+<li>اضغط Enter، وانتظر حتى ينتهي الأمر: ينتهي عندما يظهر في آخر النافذة سطر جديد ينتظر أن تكتب فيه، وهو على Mac سطر ينتهي بالعلامة <bdi dir="ltr"><code>%</code></bdi>، وعلى Windows سطر يبدأ بـ <bdi dir="ltr"><code>PS</code></bdi>. وإذا ظهرت كلمة error، فانسخ ما في النافذة كله وأرسله إلى Claude.</li>
 <li>إذا كان الأمر خاصًا بـ Premiere، أغلق Premiere وافتحه من جديد. ثم ارجع إلى Claude واكتب أنك انتهيت، ليتحقق من النتيجة.</li>
 </ol>
 
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: نافذة PowerShell على Windows بعد لصق أمر من رسالة Claude</span></div>
-<figcaption>الأمر يُلصق في PowerShell (أو Terminal على macOS)، لا في محادثة Claude.</figcaption>
+<div class="shot-frame"><span>لقطة شاشة: نافذة Terminal على Mac بعد لصق أمر من رسالة Claude، وفي آخرها السطر الذي ينتهي بـ <bdi dir="ltr"><code>%</code></bdi> (ومعها اللقطة نفسها في PowerShell على Windows)</span></div>
+<figcaption>الأمر يُلصق في Terminal على Mac (أو PowerShell على Windows)، لا في محادثة Claude.</figcaption>
 </figure>
+
+<h2 id="ch02-mac-permissions">موافقات macOS قبل أن تظهر</h2>
+
+<p>على Mac يسألك macOS أول مرة يقوم فيها برنامج بشيء يحميه النظام. هذه الرسائل طبيعية، وكل منها تحتاج إلى ضغطة واحدة منك. هذا ما ستراه، ولماذا، وماذا تضغط.</p>
+
+<h3 id="ch02-mac-files">الوصول إلى الملفات (<bdi dir="ltr">Files &amp; Folders</bdi>)</h3>
+<ul>
+<li><strong>ما تراه:</strong> رسالة من macOS تقول إن Claude يريد الوصول إلى الملفات في فولدر Documents أو على قرص خارجي (<bdi dir="ltr">would&nbsp;like&nbsp;to&nbsp;access&nbsp;files</bdi>).</li>
+<li><strong>لماذا:</strong> فولدر العملاء وملفات عملائك في Documents أو على قرص خارجي، ويقرؤها Claude من هناك، ومعه WhyNot Cut.</li>
+<li><strong>ماذا تضغط:</strong> Allow. وإذا رفضت بالخطأ، افتح <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Files&nbsp;and&nbsp;Folders</bdi>، وابحث عن Claude في القائمة، وشغّل المفتاح بجانب <bdi dir="ltr">Documents&nbsp;Folder</bdi>، وبجانب <bdi dir="ltr">Removable&nbsp;Volumes</bdi> إذا كانت ملفاتك على قرص خارجي.</li>
+</ul>
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: رسالة macOS التي تطلب وصول Claude إلى فولدر Documents، وزر Allow</span></div>
+<figcaption>الوصول إلى الملفات: اضغط Allow.</figcaption>
+</figure>
+
+<h3 id="ch02-mac-automation">التحكم في برامج Adobe (<bdi dir="ltr">Automation</bdi>)</h3>
+<ul>
+<li><strong>ما تراه:</strong> رسالة تقول إن Claude يريد التحكم في برنامج من Adobe، مثل After Effects (<bdi dir="ltr">wants&nbsp;access&nbsp;to&nbsp;control</bdi>).</li>
+<li><strong>لماذا:</strong> WhyNot Cut يطلب من برنامج Adobe أن يبني المشروع، مثل مشروع الموشن في After Effects، والنظام في Mac يسأل قبل أن يتحكم برنامج في برنامج آخر.</li>
+<li><strong>ماذا تضغط:</strong> OK أو Allow. وإذا رفضت بالخطأ، افتح <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Automation</bdi>، وتحت Claude شغّل المفتاح بجانب برنامج Adobe.</li>
+</ul>
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: رسالة macOS التي تطلب أن يتحكم Claude في After Effects، وزر OK</span></div>
+<figcaption>التحكم في برامج Adobe: اضغط OK.</figcaption>
+</figure>
+
+<h3 id="ch02-mac-terminal">لصق سطر في Terminal</h3>
+<ul>
+<li><strong>ما تراه:</strong> نافذة Terminal، وفي آخرها سطر ينتهي بالعلامة <bdi dir="ltr"><code>%</code></bdi> ينتظر أن تكتب فيه.</li>
+<li><strong>لماذا:</strong> بعض الخطوات سطر جاهز تلصقه أنت، مثل سطر التثبيت أو أمر يعطيك إياه Claude لا يقوم به بنفسه.</li>
+<li><strong>ماذا تضغط:</strong> الصق السطر بـ <bdi dir="ltr">Cmd+V</bdi> ثم اضغط Enter، وانتظر حتى يعود في آخر النافذة سطر جديد ينتهي بـ <bdi dir="ltr"><code>%</code></bdi>، فهذا يعني أن السطر انتهى (<a href="#ch02-run-command">تشغيل أمر أعطاك إياه Claude</a>).</li>
+</ul>
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: Terminal على Mac بعد انتهاء سطر ملصوق، والسطر الجديد في آخرها ينتهي بـ <bdi dir="ltr"><code>%</code></bdi></span></div>
+<figcaption>انتهى السطر عندما يعود السطر الذي ينتهي بـ <bdi dir="ltr"><code>%</code></bdi>.</figcaption>
+</figure>
+
+<h3 id="ch02-mac-password">طلب كلمة السر في Terminal</h3>
+<ul>
+<li><strong>ما تراه:</strong> كلمة <bdi dir="ltr">Password:</bdi> في آخر سطر في Terminal.</li>
+<li><strong>لماذا:</strong> بعض الأوامر تحتاج إلى إذن صاحب الجهاز قبل أن تعمل. أما سطر تثبيت WhyNot Cut فلا يطلب كلمة السر أبدًا.</li>
+<li><strong>ماذا تضغط:</strong> اكتب كلمة السر التي تفتح بها جهاز Mac، ثم اضغط Enter. لن تظهر الحروف ولا النقاط وأنت تكتب، وهذا طبيعي. وإذا ظهر هذا الطلب مع سطر لم يعطك إياه Claude ولا هذا الدليل، فلا تكتب كلمة السر.</li>
+</ul>
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: Terminal على Mac وفي آخره <bdi dir="ltr">Password:</bdi> والمؤشر بعدها بلا حروف ظاهرة</span></div>
+<figcaption>كلمة السر لا تظهر وأنت تكتبها.</figcaption>
+</figure>
+
+<aside class="todo" data-phase="9">
+<p>نصوص هذه الرسائل وأماكن أزرارها تُطابَق مع macOS عند اختبار الإصدار <bdi dir="ltr">3.0</bdi> على جهاز Mac.</p>
+<!-- فريق: الإضافة G11 (macOS أولًا؛ موافقات الخصوصية تُشرح قبل ظهورها) وG-T12. المصادر: رسالة Files and Folders من installer/core/wnc_installer/system.py MAC_ALLOW_MESSAGE_AR وstart SKILL السطر 135 (Allow، ثم System Settings › Privacy & Security › Files and Folders)؛ Automation: بناء After Effects على macOS يمر بـ osascript … DoScriptFile (skills/adobe-extras/references/adobe-automation.md)، فيسأل macOS عن التحكم في After Effects (وPhotoshop عند طلبه)؛ لصق Terminal: الفصل 2 «تشغيل أمر»؛ كلمة السر: التثبيت لا يطلب صلاحيات مسؤول (installer/README.md)، والطلب يظهر فقط مع أوامر أخرى. نصوص الرسائل الإنجليزية وأسماء الأزرار (Allow / OK، Done) تختلف بين إصدارات macOS 14 و15؛ تُنقل حرفيًا من جهاز Mac حقيقي وتُلتقط الصور في المرحلة 9 (persona E4، E9). -->
+</aside>
 
 <h2 id="ch02-before">ما تحتاجه قبل التثبيت في الإصدار <bdi dir="ltr">3.0</bdi></h2>
 
@@ -96,7 +151,7 @@
 <li><strong>تطبيق Claude</strong> مثبَّتًا وحسابك مسجَّل الدخول فيه. نزّله من <bdi dir="ltr">claude.ai/download</bdi> وسجّل الدخول بنفسك قبل أن تبدأ.</li>
 <li><strong>Premiere Pro</strong>، و<strong>After Effects</strong> إذا كنت تستخدمه، مثبَّتين برخصتك أنت، و<strong>تطبيق Creative Cloud</strong> مسجَّل الدخول بحسابك في Adobe.</li>
 <li><strong>مساحة فارغة</strong>: نحو <bdi dir="ltr">9&nbsp;GB</bdi> على الأقل للمحرك ونموذج التفريغ النصي، وأكثر مع باقي النماذج، ثم عدة <bdi dir="ltr">GB</bdi> لكل عميل. أول سطر يكتبه التثبيت هو الحجم الكلي الذي سينزّله.</li>
-<li><strong>الجهاز</strong>: <bdi dir="ltr">Windows 10/11</bdi>، أو Mac بمعالج Apple Silicon أو Intel (أداة الكابشن «كلام» وحدها تحتاج إلى Apple Silicon، <a href="#ch13-pack">الفصل&nbsp;13</a>). لا تحتاج إلى صلاحيات مسؤول الجهاز (admin)، ولا إلى تثبيت أي برنامج آخر بنفسك.</li>
+<li><strong>الجهاز</strong>: Mac بمعالج Apple Silicon أو Intel ونظام <bdi dir="ltr">macOS 14</bdi> أو أحدث، أو <bdi dir="ltr">Windows 10/11</bdi>. وأداة الكابشن «كلام» تعمل على Mac بمعالج Intel أيضًا، لكنها أبطأ (<a href="#ch13-pack">الفصل&nbsp;13</a>). المتطلبات كاملة، ومنها الذاكرة وحساب Claude، في <a href="#ch01-requirements">جدول الفصل&nbsp;1</a>. لا تحتاج إلى صلاحيات مسؤول الجهاز (admin)، ولا إلى تثبيت أي برنامج آخر بنفسك.</li>
 <li><strong>اتصال بالإنترنت</strong> حتى تكتمل التنزيلات.</li>
 </ul>
 
@@ -107,17 +162,17 @@
 
 <h2 id="ch02-one-line">التثبيت بسطر واحد</h2>
 
-<p>في الإصدار <bdi dir="ltr">3.0</bdi> تثبّت WhyNot Cut بسطر واحد: سطر لـ Windows وسطر لـ Mac. لا تنزّل أي ملف ولا تفتحه بنفسك، ولا يظهر تحذير من Windows أو macOS.</p>
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> تثبّت WhyNot Cut بسطر واحد: سطر لـ Mac وسطر لـ Windows. لا تنزّل أي ملف ولا تفتحه بنفسك، ولا يظهر تحذير من macOS أو Windows.</p>
 
 <ol class="steps">
-<li><strong>افتح PowerShell أو Terminal.</strong> على Windows: افتح قائمة Start، واكتب PowerShell، ثم اضغط عليه لفتحه كالمعتاد، ولا تختر «تشغيل كمسؤول» (<bdi dir="ltr">Run as administrator</bdi>). على Mac: اضغط <bdi dir="ltr">Cmd+Space</bdi>، واكتب Terminal، ثم Enter. وقبل أن تلصق السطر، احفظ عملك وأغلق Premiere Pro وAfter Effects إذا كانا مفتوحين.</li>
-<li><strong>انسخ السطر الخاص بجهازك والصقه، ثم اضغط Enter.</strong> تجد السطرين أيضًا في صفحة التنزيل على موقع <bdi dir="ltr">thewhynot.ai</bdi>. للّصق اضغط <bdi dir="ltr">Ctrl+V</bdi> على Windows (أو زر الماوس الأيمن)، و<bdi dir="ltr">Cmd+V</bdi> على Mac.
-<p class="lead-in">على Windows، في PowerShell:</p>
-<div class="cmd"><bdi dir="ltr"><code>irm https://dl.thewhynot.ai/install.ps1 | iex</code></bdi></div>
+<li><strong>افتح Terminal أو PowerShell.</strong> على Mac: اضغط <bdi dir="ltr">Cmd+Space</bdi>، واكتب Terminal، ثم Enter. على Windows: افتح قائمة Start، واكتب PowerShell، ثم اضغط عليه لفتحه كالمعتاد، ولا تختر «تشغيل كمسؤول» (<bdi dir="ltr">Run as administrator</bdi>). وقبل أن تلصق السطر، احفظ عملك وأغلق Premiere Pro، ثم After Effects، إذا كانا مفتوحين.</li>
+<li><strong>انسخ السطر الخاص بجهازك والصقه، ثم اضغط Enter.</strong> تجد السطرين أيضًا في صفحة التنزيل على موقع <bdi dir="ltr">thewhynot.ai</bdi>. للّصق اضغط <bdi dir="ltr">Cmd+V</bdi> على Mac، وعلى Windows <bdi dir="ltr">Ctrl+V</bdi> أو زر الماوس الأيمن.
 <p class="lead-in">على Mac، في Terminal:</p>
 <div class="cmd"><bdi dir="ltr"><code>curl -fsSL https://dl.thewhynot.ai/install.sh | bash</code></bdi></div>
+<p class="lead-in">على Windows، في PowerShell:</p>
+<div class="cmd"><bdi dir="ltr"><code>irm https://dl.thewhynot.ai/install.ps1 | iex</code></bdi></div>
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: PowerShell بعد لصق سطر التثبيت والضغط على Enter، وفيها «جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي … جيجابايت)» و«اضغط C للتخصيص»</span></div>
+<div class="shot-frame"><span>لقطة شاشة: Terminal على Mac بعد لصق سطر التثبيت والضغط على Enter، وفيه «جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي … جيجابايت)» و«اضغط C للتخصيص» (ومعها اللقطة نفسها في PowerShell على Windows)</span></div>
 <figcaption>أول ما يظهر: الحجم الكلي، ثم عدّ تنازلي من 10 ثوانٍ.</figcaption>
 </figure>
 </li>
@@ -132,11 +187,6 @@
 <li><strong>إذا ظهر خطأ</strong>، مثل سطر يبدأ بـ <bdi dir="ltr"><code>[XX]</code></bdi> أو رسالة تبدأ بـ <bdi dir="ltr"><code>ERROR</code></bdi>، فهذه خطوة لم تكتمل، غالبًا لأن تنزيلًا انقطع أو وصل ناقصًا فرفضه التثبيت. الصق السطر نفسه مرة أخرى واضغط Enter: تشغيل التثبيت مرة ثانية آمن، ويكمل ما لم يكتمل. وإذا تكرر الخطأ، انظر <a href="#ch17-v3">الفصل&nbsp;17</a>.</li>
 </ol>
 
-<figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: Terminal على Mac بعد لصق سطر التثبيت، وفيه السطر الأول والعد التنازلي</span></div>
-<figcaption>على Mac: الخطوات نفسها في Terminal.</figcaption>
-</figure>
-
 <aside class="todo" data-phase="7">
 <p>السطران يعملان من يوم صدور الإصدار <bdi dir="ltr">3.0</bdi>، ولم يُجرَّبا بعد على جهاز نظيف ولا على جهاز Mac حقيقي.</p>
 <!-- فريق: الإضافة F (F1): التثبيت العام = السطر الواحد؛ لا SmartScreen ولا Gatekeeper. إجابة المنفّذ (8): السطران نهائيان، على dl.thewhynot.ai، والنطاق الرئيسي thewhynot.ai هو الموقع ولا يُستخدم للتثبيت أبدًا؛ عنوان dl يعمل يوم الصدور (H3)، ويبقى هذا الصندوق حتى الصدور. (installer/README.md وinstall.ps1 ما زالا يكتبان thewhynot.ai/install.* «future: needs hosting, H3» وقت كتابة هذا؛ اختبار حارس أوامر اللوحة d28553e يستخدم dl.thewhynot.ai.) تُراجَع في صور المرحلة 9 طريقة ظهور السطر العربي في PowerShell 5.1 وWindows Terminal. step_launch يعمل قبل طباعة قائمة الفحص، ويفتح claude://code/new?q=… : يُتحقَّق هل يُرسل الأمر أم يُكتب فقط، وهل يسأل عن الفولدر. ما يطبعه السطر منقول من core/bootstrap.sh وbootstrap.ps1 (السطر الأول بالإنجليزية والعربية، العد التنازلي 10 ثوانٍ، C للتخصيص وأسئلته الأربعة) ومن core/wnc_installer/system.py وcli.py ([OK] / [!!] / [XX]، «you:»، START_MESSAGE_AR، فتح Claude على /whynot-cut:start إذا كان التطبيق مثبَّتًا، رموز الخروج 0/1/2/3). صفحة التنزيل D-T14. يُتحقَّق على جهاز Windows نظيف بحساب عادي (المرحلة 7، H10) وعلى Mac عند توفره (H6)، وتُلتقط الصور في المرحلة 9. -->
@@ -144,7 +194,7 @@
 
 <h2 id="ch02-from-claude">من داخل Claude: «ثبّت WhyNot Cut»</h2>
 
-<p>إذا كنت تبدأ من تطبيق Claude، فلا تحتاج إلى PowerShell أو Terminal:</p>
+<p>إذا كنت تبدأ من تطبيق Claude، فلا تحتاج إلى Terminal أو PowerShell:</p>
 
 <ol class="steps">
 <li>افتح تطبيق Claude وتأكد أنك مسجَّل الدخول.</li>
@@ -175,7 +225,7 @@
 <li><strong>على Windows</strong>: أداة صغيرة (<bdi dir="ltr">Git for Windows</bdi>) يحتاجها Claude ليشغّل أوامر WhyNot Cut على Windows؛ لا تتعامل معها أنت.</li>
 <li><strong>لوحة WhyNot Cut</strong> في Premiere Pro (من <bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>) وفي After Effects (من <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>): لوحة واحدة في كل برنامج، وتُزال اللوحات القديمة، مثل WhyNot Cut Bridge، واللوحات التجريبية.</li>
 <li><strong>النماذج</strong> (القسم التالي) في الخلفية. وإذا كان في جهازك كارت NVIDIA، تُثبَّت معها مكتبات التسريع، فيصبح التفريغ النصي أسرع بنحو 8 مرات.</li>
-<li><strong>مكان فولدر العملاء</strong>: على Windows <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> إذا كان في جهازك قرص D، وإلا <bdi dir="ltr"><code>WhyNot Clients</code></bdi> داخل Documents، وكذلك على Mac. وإذا كان Documents يُزامَن مع OneDrive أو iCloud، يوضع فولدر العملاء في فولدر المستخدم خارجه، لأن الملفات المحفوظة على السحابة فقط تُفشل التفريغ النصي.</li>
+<li><strong>مكان فولدر العملاء</strong>: على Mac <bdi dir="ltr"><code>WhyNot Clients</code></bdi> داخل Documents. وعلى Windows <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> إذا كان في جهازك قرص D، وإلا داخل Documents أيضًا. وإذا كان Documents يُزامَن مع iCloud أو OneDrive، يوضع فولدر العملاء في فولدر المستخدم خارجه، لأن الملفات المحفوظة على السحابة فقط تُفشل التفريغ النصي.</li>
 <li><strong>تطبيق Claude يُفتح على معالج البداية</strong>، والمعالج يسألك عن إعداداتك وينشئ أول فولدر عميل، ثم يعرض لك أين تضع كل ملف.</li>
 <li><strong>فحص أخير</strong>: قائمة الفحص، وكل سطر فيها <bdi dir="ltr"><code>[OK]</code></bdi>، أو <bdi dir="ltr"><code>[!!]</code></bdi> ومعه سببه وطريقة إصلاحه (القسم «التأكد من النتيجة»). وفي اللوحة تظهر القائمة نفسها بالأخضر والأصفر.</li>
 </ol>
@@ -224,7 +274,7 @@
 <li><strong>تثبيت تطبيق Claude وتسجيل الدخول.</strong> نزّله من <bdi dir="ltr">claude.ai/download</bdi>، ثم سجّل الدخول بحسابك. WhyNot Cut لا يعرض عليك أبدًا صفحة تسجيل دخول خاصة به.</li>
 <li><strong>برامج Adobe برخصتك.</strong> ثبّت Premiere Pro وAfter Effects من تطبيق Creative Cloud، وسجّل الدخول فيه.</li>
 <li><strong>التنزيلات الكبيرة.</strong> اترك الجهاز يعمل ومتصلًا بالإنترنت حتى تكتمل النماذج. يمكنك أن تعمل في الأثناء.</li>
-<li><strong>إذن الفولدرات على Mac.</strong> أول مرة يفتح فيها Claude ملفات في Documents أو على قرص خارجي، يطلب macOS إذنك: اضغط Allow. وإذا رفضت بالخطأ، فعّله من <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Files&nbsp;and&nbsp;Folders</bdi>.</li>
+<li><strong>إذن الفولدرات على Mac.</strong> أول مرة يفتح فيها Claude ملفات في Documents أو على قرص خارجي، يطلب macOS إذنك: اضغط Allow. وإذا رفضت بالخطأ، فعّله من <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Files&nbsp;and&nbsp;Folders</bdi>: ابحث عن Claude، وشغّل المفتاح بجانب <bdi dir="ltr">Documents&nbsp;Folder</bdi> (<a href="#ch02-mac-permissions">موافقات macOS</a>).</li>
 <li><strong>إعادة تشغيل Premiere وAfter Effects مرة واحدة</strong> بعد تثبيت اللوحات. يفعلها Claude أو التثبيت بنفسه إذا لم يكن فيهما عمل غير محفوظ. وإذا كان فيهما عمل غير محفوظ، لا يُغلق أي شيء: يُطلب منك أن تحفظ عملك، ثم تضغط زر إعادة التشغيل.</li>
 </ol>
 
@@ -258,12 +308,24 @@ reel doctor</code></bdi></div>
 <p>برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> يفعل ما يفعله السطر الواحد، لكنه تطبيق تفتحه بنقرتين ويعرض قائمة الفحص في نافذة. وهو نسخة داخلية: يستخدمها فريقنا على أجهزة الوكالة، ولا تُنشر للتنزيل العام لأنها غير موقَّعة. إذا لم تصلك منا مباشرة، فثبّت بالسطر الواحد.</p>
 
 <ol class="steps">
-<li><strong>افتح الملف بنقرتين.</strong> على Windows <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi>. وعلى Mac افتح <bdi dir="ltr"><code>WhyNotCut.dmg</code></bdi>، ثم التطبيق <bdi dir="ltr">WhyNot Cut Setup</bdi> الذي بداخله.</li>
+<li><strong>افتح الملف بنقرتين.</strong> على Mac افتح <bdi dir="ltr"><code>WhyNotCut.dmg</code></bdi>، ثم التطبيق <bdi dir="ltr">WhyNot Cut Setup</bdi> الذي بداخله. وعلى Windows افتح <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi>.</li>
 <li><strong>إذا لم يكن تطبيق Claude على جهازك</strong>، اضغط «ثبّت Claude لي» (<bdi dir="ltr">Install Claude for me</bdi>). ينزّل البرنامج ملف التثبيت الرسمي من Anthropic ويتحقق من توقيعه ويفتحه. سجّل الدخول بحسابك، ثم يكمل البرنامج وحده.</li>
 <li><strong>اضغط «تثبيت كل شيء (موصى به)»</strong> (<bdi dir="ltr">Install everything</bdi>)، وتابع قائمة الفحص حتى تصبح كل بنودها خضراء. زر «تخصيص» (<bdi dir="ltr">Customise</bdi>) اختياري، ويفتح الأسئلة نفسها بإجاباتها الجاهزة.</li>
 </ol>
 
-<p class="lead-in">لأن النسخة غير موقَّعة، يعرض Windows عند فتحها نافذة زرقاء تقول إن Windows حمى جهازك (<bdi dir="ltr">Windows&nbsp;protected&nbsp;your&nbsp;PC</bdi>):</p>
+<p class="lead-in">على Mac، لأن النسخة الداخلية غير موثَّقة من Apple، يمنع macOS فتحها أول مرة، وتظهر رسالة تقول إنه لا يستطيع التحقق من التطبيق:</p>
+<ol class="steps">
+<li>اضغط Done أو OK لتغلق الرسالة، ولا تضغط <bdi dir="ltr">Move&nbsp;to&nbsp;Trash</bdi>.</li>
+<li>افتح <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security</bdi>، وانزل إلى قسم <bdi dir="ltr">Security</bdi> حتى تجد سطرًا عن <bdi dir="ltr">WhyNot Cut Setup</bdi>، ثم اضغط <bdi dir="ltr">Open&nbsp;Anyway</bdi>.</li>
+<li>اكتب كلمة سر جهاز Mac إذا طُلبت، ثم اضغط Open. بعدها يفتح التطبيق، ولا تظهر الرسالة مرة أخرى مع هذه النسخة.</li>
+</ol>
+
+<figure class="shot">
+<div class="shot-frame"><span>لقطة شاشة: <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security</bdi> على Mac، وفيها سطر <bdi dir="ltr">WhyNot Cut Setup</bdi> وزر <bdi dir="ltr">Open&nbsp;Anyway</bdi></span></div>
+<figcaption>النسخة الداخلية على Mac: <bdi dir="ltr">Open&nbsp;Anyway</bdi> من إعدادات الأمان.</figcaption>
+</figure>
+
+<p class="lead-in">وعلى Windows، لأن النسخة غير موقَّعة، يعرض Windows عند فتحها نافذة زرقاء تقول إن Windows حمى جهازك (<bdi dir="ltr">Windows&nbsp;protected&nbsp;your&nbsp;PC</bdi>):</p>
 <ol class="steps">
 <li>اضغط «مزيد من المعلومات» (<bdi dir="ltr">More info</bdi>) تحت النص.</li>
 <li>تأكد أن اسم الملف هو <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi>، ثم اضغط «تشغيل على أي حال» (<bdi dir="ltr">Run anyway</bdi>).</li>
@@ -275,12 +337,12 @@ reel doctor</code></bdi></div>
 </figure>
 
 <aside class="warn">
-<p>افعل هذا فقط مع ملف وصلك من فريقنا مباشرة. إذا ظهر التحذير مع ملف نزّلته من مكان آخر، فلا تشغّله وراسلنا. وعلى Mac، النسخة الداخلية لاختبار فريقنا فقط، لأنها غير موثَّقة من Apple فيمنع macOS فتحها؛ إذا لم تكن من فريقنا، فثبّت بالسطر الواحد.</p>
+<p>افعل هذا على Mac وعلى Windows فقط مع ملف وصلك من فريقنا مباشرة. إذا ظهر التحذير مع ملف نزّلته من مكان آخر، فلا تفتحه وراسلنا، وثبّت بالسطر الواحد.</p>
 </aside>
 
 <aside class="todo" data-phase="7">
 <p>شكل هذا البرنامج وأسماء أزراره قد تتغيّر، فهو للاختبار داخل فريقنا.</p>
-<!-- فريق: الإضافة E (E2): برنامج واحد بـ Tauri 2 اسمه «WhyNot Cut Setup» لـ Windows (NSIS، لكل مستخدم) وmacOS (.app داخل .dmg)، بدل Inno Setup وSwiftUI في D7 (factcheck2 E2). الإضافة F (F1): exe/dmg غير الموقَّعين داخليان فقط (أجهزة الوكالة، معلَّمان «internal»)؛ النشر العام = السطر الواحد + zip الإضافة + الدليل؛ H4 أُلغي. اسم ملف Windows WhyNotCut-Setup.exe من D7 (الإضافة E لم تغيّره)؛ يُطابَق مع E-T5. متجر Microsoft (MSIX) تحقيق P1 في الإضافة F: هل يناسب قواعد المتجر لتثبيت بيئات التشغيل والخطوط ولوحات Adobe لكل مستخدم؛ إذا لم يناسب يُلغى — لا يُذكر للقارئ قبل حسمه. Smart App Control: إذا كان مفعّلًا لا يظهر زر «تشغيل على أي حال»؛ يُشرح بعد اختبار المرحلة 7. خطوة فتح النسخة الداخلية على Mac (Gatekeeper) لا تُشرح للقارئ: الإضافة F تجعلها لاختبار المطوّرين فقط. «ثبّت Claude لي» E-T4. أسماء الأزرار العربية تُطابَق مع نصوص البرنامج في المرحلة 9. -->
+<!-- فريق: الإضافة E (E2): برنامج واحد بـ Tauri 2 اسمه «WhyNot Cut Setup» لـ Windows (NSIS، لكل مستخدم) وmacOS (.app داخل .dmg)، بدل Inno Setup وSwiftUI في D7 (factcheck2 E2). الإضافة F (F1): exe/dmg غير الموقَّعين داخليان فقط (أجهزة الوكالة، معلَّمان «internal»)؛ النشر العام = السطر الواحد + zip الإضافة + الدليل؛ H4 أُلغي. اسم ملف Windows WhyNotCut-Setup.exe من D7 (الإضافة E لم تغيّره)؛ يُطابَق مع E-T5. متجر Microsoft (MSIX) تحقيق P1 في الإضافة F: هل يناسب قواعد المتجر لتثبيت بيئات التشغيل والخطوط ولوحات Adobe لكل مستخدم؛ إذا لم يناسب يُلغى — لا يُذكر للقارئ قبل حسمه. Smart App Control: إذا كان مفعّلًا لا يظهر زر «تشغيل على أي حال»؛ يُشرح بعد اختبار المرحلة 7. خطوة فتح النسخة الداخلية على Mac (Gatekeeper: Done ثم System Settings › Privacy & Security › Open Anyway) مشروحة للنسخ الداخلية فقط (الجولة 3، persona E8؛ الإضافة F: النشر العام = السطر الواحد)؛ تُطابَق نصوص الرسالة والأزرار مع macOS 14 و15 في المرحلة 9. «ثبّت Claude لي» E-T4. أسماء الأزرار العربية تُطابَق مع نصوص البرنامج في المرحلة 9. -->
 </aside>
 
 <h2 id="ch02-magnific">تفعيل Magnific (اختياري)</h2>

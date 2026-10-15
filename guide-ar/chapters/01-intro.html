@@ -10,7 +10,7 @@
 <p class="lead-in">لكل فيديو خام تطلب مونتاجه، تحصل على:</p>
 <ul>
 <li><strong>مشروع Premiere Pro كامل</strong> بإعدادات التسلسل (sequence settings) الصحيحة، فيه الجرافيك المتحرك والكلام المكتوب على الشاشة بخطوط العميل وألوانه، مع تشكيل عربي سليم واتجاه صحيح من اليمين إلى اليسار.</li>
-<li><strong>تفريغ نصي (transcript)</strong> بتوقيت كل كلمة، <span data-term-first="نموذج">يُنتَج بنموذج <bdi dir="ltr">Whisper <code>large-v3</code></bdi> على جهازك. والنموذج (model) ملف كبير فيه خبرة جاهزة في فهم الكلام، يستخدمه WhyNot Cut ليحوّل الصوت إلى نص</span>. وإذا كان في جهازك كارت شاشة NVIDIA، يصبح التفريغ أسرع بنحو 8&nbsp;مرات بعد تثبيت <span data-term-first="مكتبة">مكتبة NVIDIA بموافقتك، وهي ملف إضافي من NVIDIA يجعل كارت الشاشة يسرّع التفريغ</span> (<a href="#ch02-first-run">الفصل&nbsp;2</a>).</li>
+<li><strong>تفريغ نصي (transcript)</strong> بتوقيت كل كلمة، <span data-term-first="نموذج">يُنتَج بنموذج <bdi dir="ltr">Whisper <code>large-v3</code></bdi> على جهازك. والنموذج (model) ملف كبير فيه خبرة جاهزة في فهم الكلام، يستخدمه WhyNot Cut ليحوّل الصوت إلى نص</span>. وإذا كان في جهازك كارت شاشة NVIDIA، يصبح التفريغ أسرع بنحو 8&nbsp;مرات بعد تثبيت <span data-term-first="مكتبة">مكتبة NVIDIA بموافقتك، وهي ملف إضافي من NVIDIA يجعل كارت الشاشة يسرّع التفريغ</span> (<a href="#ch02-first-run">الفصل&nbsp;2</a>). أما على Mac فيعمل التفريغ اليوم على المعالج (CPU).</li>
 <li><strong>صوت حوار منظَّف</strong> مع حذف السكتات، ومعه إثبات أنه لم تُحذف أي كلمة.</li>
 <li><strong>قرارات مونتاج مبنية على القصة</strong>: البداية الجاذبة (hook)، والعبارات المهمة على الشاشة، والقوائم، وبطاقات اللقطات المساعدة (B-roll)، والتقريب (<bdi dir="ltr">punch-in</bdi>)، والمؤثرات الصوتية (SFX).</li>
 <li><strong>فيديو معاينة (preview)</strong> بصيغة MP4 تشاهد فيه المونتاج المخطَّط قبل بناء أي شيء.</li>
@@ -66,18 +66,22 @@
 <tr><th>البند</th><th>المطلوب</th></tr>
 </thead>
 <tbody>
-<tr><td>نظام التشغيل</td><td><bdi dir="ltr">Windows 10/11</bdi>، أو <bdi dir="ltr">macOS 14</bdi> أو أحدث</td></tr>
+<tr><td>نظام التشغيل</td><td><bdi dir="ltr">macOS 14 (Sonoma)</bdi> أو أحدث، أو <bdi dir="ltr">Windows 10/11</bdi></td></tr>
+<tr><td>المعالج في Mac</td><td>Apple Silicon أو Intel، وكل شيء يعمل على الاثنين. على Mac بمعالج Intel تعمل أداة الكابشن «كلام» بالنماذج نفسها على المعالج (CPU)، فتكون أبطأ</td></tr>
+<tr><td>الذاكرة (RAM)</td><td><bdi dir="ltr">16&nbsp;GB</bdi> موصى بها، أما <bdi dir="ltr">8&nbsp;GB</bdi> فتعمل لكن أبطأ</td></tr>
 <tr><td>Premiere Pro</td><td><bdi dir="ltr">26.5</bdi> أو أحدث للوحة WhyNot Cut الجديدة وأدواتها</td></tr>
 <tr><td>After Effects</td><td>الإصدار <bdi dir="ltr">25</bdi> أو أحدث، لوضع الموشن ولمخرجات After Effects عند طلبها فقط</td></tr>
-<tr><td>Claude</td><td>تطبيق Claude على الجهاز، واشتراك Claude</td></tr>
+<tr><td>Claude</td><td>تطبيق Claude على الجهاز، وحساب Claude خاص بكل مونتير يسجّل الدخول به بنفسه. خطة Pro تكفي، وننصح بخطة Max للعمل اليومي في الوكالة. ولا يضيف WhyNot Cut أي رسوم على استخدام الذكاء الاصطناعي</td></tr>
 <tr><td>المساحة على القرص</td><td>نحو <bdi dir="ltr">9&nbsp;GB</bdi> على الأقل للمحرك ولنموذج التفريغ، وأكثر مع باقي النماذج؛ ثم بضعة <bdi dir="ltr">GB</bdi> لكل عميل</td></tr>
-<tr><td>كارت الشاشة</td><td>اختياري: كارت NVIDIA، مع مكتبة NVIDIA التي تُثبَّت بموافقتك، يجعل التفريغ النصي أسرع بنحو 8&nbsp;مرات</td></tr>
+<tr><td>كارت الشاشة</td><td>اختياري على Windows: كارت NVIDIA، مع مكتبة NVIDIA التي تُثبَّت بموافقتك، يجعل التفريغ النصي أسرع بنحو 8&nbsp;مرات</td></tr>
 </tbody>
 </table>
 
+<p>لتعرف ما في جهازك على Mac: افتح قائمة Apple (التفاحة أعلى الشاشة) ثم <bdi dir="ltr">About&nbsp;This&nbsp;Mac</bdi>. تجد فيها رقم macOS، وتجد بجانب <bdi dir="ltr">Chip</bdi> اسم معالج من Apple، مثل <bdi dir="ltr">Apple M1</bdi> أو <bdi dir="ltr">Apple M2</bdi>، إذا كان جهازك Apple Silicon، أو بجانب <bdi dir="ltr">Processor</bdi> كلمة Intel إذا كان جهازك Intel. ولتعرف رقم Premiere Pro: على Mac من <bdi dir="ltr">Premiere&nbsp;Pro&nbsp;›&nbsp;About&nbsp;Premiere&nbsp;Pro</bdi>، وعلى Windows من <bdi dir="ltr">Help&nbsp;›&nbsp;About&nbsp;Premiere&nbsp;Pro</bdi>.</p>
+
 <aside class="todo" data-phase="7">
-<p>لم يُحسم بعد هل يعمل الإصدار <bdi dir="ltr">3.0</bdi> مع إصدارات Premiere Pro الأقدم من <bdi dir="ltr">26.5</bdi>.</p>
-<!-- فريق: القائمة النهائية تُعتمد مع برنامج التثبيت (installer). حتى ذلك الحين، تعمل النسخة الحالية مع Premiere Pro 2022 أو أحدث من خلال لوحة WhyNot Cut Bridge (السطر الظاهر فوق الجدول، المصدر: start SKILL). دعم Premiere الأقدم من 26.5 في 3.0 لم يُحسم: الخطة الرئيسية D4 تقول CEP لـ Premiere < 26.5، والإضافة C1.3 تقول Premiere = لوحة UXP فقط (factcheck2 W4). المساحة 9 GB من الخطة الرئيسية T7.1 الخطوة 1 (≥ 6 GB + 3 GB للنموذج). -->
+<p>الحدود الدنيا النهائية، ومنها الذاكرة، تُنشر بعد اختبار الأجهزة، ولم يُحسم بعد هل يعمل الإصدار <bdi dir="ltr">3.0</bdi> مع إصدارات Premiere Pro الأقدم من <bdi dir="ltr">26.5</bdi>.</p>
+<!-- فريق: القائمة النهائية تُعتمد مع برنامج التثبيت (installer) ونتائج اختبار الأجهزة (G-T6). حتى ذلك الحين، تعمل النسخة الحالية مع Premiere Pro 2022 أو أحدث من خلال لوحة WhyNot Cut Bridge (السطر الظاهر فوق الجدول، المصدر: start SKILL). دعم Premiere الأقدم من 26.5 في 3.0 لم يُحسم: الخطة الرئيسية D4 تقول CEP لـ Premiere < 26.5، والإضافة C1.3 تقول Premiere = لوحة UXP فقط (factcheck2 W4). المساحة 9 GB من الخطة الرئيسية T7.1 الخطوة 1 (≥ 6 GB + 3 GB للنموذج). إجابات المنفّذ (progress.md الجولة 3): 12 حساب Claude لكل مونتير، Pro يكفي، Max موصى به، لا رسوم ذكاء اصطناعي إضافية من WhyNot Cut؛ 15 الذاكرة 16 GB موصى بها و8 GB أبطأ (G-T6)؛ 19 macOS 14 أو أحدث. Q11 (938da30): Mac بمعالج Intel يشغّل «كلام» على المعالج بالنماذج نفسها وأبطأ، وميزانيات السرعة تخص Apple Silicon فقط. -->
 </aside>
 
 <h2 id="ch01-panels">لوحة WhyNot Cut داخل برامج Adobe</h2>
@@ -107,7 +111,7 @@
 
 <p>وبعض المربعات تعرض مسار ملف لتعرف مكانه، أو نصًّا جاهزًا لتنسخه، ويقول لك النص قبلها ما الذي تفعله به.</p>
 
-<p>الملفات التي ينتهي اسمها بـ <bdi dir="ltr"><code>.md</code></bdi>، مثل <bdi dir="ltr"><code>HANDOFF.md</code></bdi>، ملفات نصية عادية. افتحها بالزر الأيمن ثم <bdi dir="ltr">Open&nbsp;with&nbsp;›&nbsp;Notepad</bdi> على Windows، أو <bdi dir="ltr">Open&nbsp;With&nbsp;›&nbsp;TextEdit</bdi> على Mac. أو اطلب من Claude أن يعرض لك محتواها في المحادثة، مثل «اعرضلي ملف التسليم».</p>
+<p>الملفات التي ينتهي اسمها بـ <bdi dir="ltr"><code>.md</code></bdi>، مثل <bdi dir="ltr"><code>HANDOFF.md</code></bdi>، ملفات نصية عادية. افتحها بالزر الأيمن ثم <bdi dir="ltr">Open&nbsp;With&nbsp;›&nbsp;TextEdit</bdi> على Mac، أو <bdi dir="ltr">Open&nbsp;with&nbsp;›&nbsp;Notepad</bdi> على Windows. أو اطلب من Claude أن يعرض لك محتواها في المحادثة، مثل «اعرضلي ملف التسليم».</p>
 
 <p>وستجد في الفصول ثلاثة أنواع من المربعات: <strong>نصيحة</strong> تختصر عليك الطريق، و<strong>تنبيه</strong> يحميك من خطأ شائع، وإطار رمادي عنوانه <strong>«في الإصدار <bdi dir="ltr">3.0</bdi> — لم يُتحقَّق منه بعد»</strong> لجزء من الإصدار <bdi dir="ltr">3.0</bdi> لم يصدر أو لم يُختبر بعد، فلا تعتمد عليه اليوم. كل الأمثلة ولقطات الشاشة مأخوذة من عميل وهمي اسمه «عيادة مثال»، والطبيب فيه «د. سامبل إكزامبل».</p>
 

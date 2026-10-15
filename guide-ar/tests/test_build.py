@@ -321,6 +321,55 @@ class TroubleshootingTests(unittest.TestCase):
         self.assertEqual(build.fix_problems(ch17), [])
 
 
+class MacFirstTests(unittest.TestCase):
+    """Addendum G11: macOS is the primary platform. Any element that names both systems names macOS first (body
+    text, lead-in paragraphs, list items, table cells, captions and section headings), and a two-platform pair split
+    over sibling elements (two list items, two lead-ins, two h3/h4 headings) puts the macOS one first."""
+
+    def test_macos_listed_first(self):
+        problems = build.platform_order_problems
+        # one element naming both systems, Windows first, fails; macOS first passes
+        self.assertEqual(len(problems(_wrap("<p>للّصق اضغط Ctrl+V على Windows، وCmd+V على Mac.</p>"))), 1)
+        self.assertEqual(problems(_wrap("<p>للّصق اضغط Cmd+V على Mac، وCtrl+V على Windows.</p>")), [])
+        # section headings and table cells are scanned too
+        self.assertEqual(len(problems(_wrap("<h2>حدود «تايدي» على Windows وmacOS</h2>"))), 1)
+        self.assertEqual(problems(_wrap("<h2>حدود «تايدي» على macOS وWindows</h2>")), [])
+        self.assertEqual(len(problems(_wrap(
+            '<table><tr><td>نظام التشغيل</td><td><bdi dir="ltr">Windows 10/11</bdi> أو <bdi dir="ltr">macOS 14</bdi>'
+            "</td></tr></table>"))), 1)
+        # app names count as their system (PowerShell / Notepad / File Explorer vs Terminal / TextEdit / Finder),
+        # and a menu-path label is read too: «Open with › Notepad» before «Open With › TextEdit» fails
+        self.assertEqual(len(problems(_wrap("<p>الصق السطر في PowerShell أو Terminal.</p>"))), 1)
+        self.assertEqual(len(problems(_wrap(
+            '<li>افتحه بـ <bdi dir="ltr">Open&nbsp;with&nbsp;›&nbsp;Notepad</bdi> '
+            '(على Mac: <bdi dir="ltr">Open&nbsp;With&nbsp;›&nbsp;TextEdit</bdi>)</li>'))), 1)
+        # a pair split over siblings: two lead-ins inside one step, two list items, two h3 headings
+        self.assertGreaterEqual(len(problems(_wrap(
+            '<ol><li>الصق السطر.<p class="lead-in">على Windows، في PowerShell:</p>'
+            '<div class="cmd"><bdi dir="ltr"><code>irm https://x | iex</code></bdi></div>'
+            '<p class="lead-in">على Mac، في Terminal:</p>'
+            '<div class="cmd"><bdi dir="ltr"><code>curl -fsSL https://x | bash</code></bdi></div></li></ol>'))), 1)
+        self.assertEqual(len(problems(_wrap(
+            '<ul><li>Windows: <bdi dir="ltr"><code>%APPDATA%\\Adobe</code></bdi></li>'
+            '<li>macOS: <bdi dir="ltr"><code>~/Library/Adobe</code></bdi></li></ul>'))), 1)
+        self.assertEqual(problems(_wrap(
+            '<ul><li>macOS: <bdi dir="ltr"><code>~/Library/Adobe</code></bdi></li>'
+            '<li>Windows: <bdi dir="ltr"><code>%APPDATA%\\Adobe</code></bdi></li></ul>')), [])
+        self.assertEqual(len(problems(_wrap("<h3>على Windows</h3><p>خطوات.</p><h3>على macOS</h3><p>خطوات.</p>"))), 1)
+        # single-platform text passes, also a Windows-only item next to an item that names both (macOS first)
+        self.assertEqual(problems(_wrap("<p>على Windows تُثبَّت أداة Git for Windows.</p>")), [])
+        self.assertEqual(problems(_wrap("<ol><li>على Windows: أداة صغيرة.</li>"
+                                        "<li>على Mac داخل Documents، وعلى Windows في D.</li></ol>")), [])
+        # a heading starts a new part: a Windows-only note and a later Mac-only section are not a pair
+        self.assertEqual(problems(_wrap("<p>لم تُجرَّب بعد على Windows.</p><h2>موافقات macOS</h2>"
+                                        "<p>على Mac اضغط Allow.</p>")), [])
+        # code, command boxes and team comments are not read
+        self.assertEqual(problems(_wrap('<p>شغّل <bdi dir="ltr"><code>PowerShell -c x</code></bdi> على Mac.</p>'
+                                        "<!-- فريق: Windows ثم macOS -->")), [])
+        # the real guide: macOS first everywhere
+        self.assertEqual(problems(build.chapter_sources(GUIDE)), [])
+
+
 SHOT_IMG = ('<figure class="shot"><div class="shot-frame"><img src="{src}" alt="لقطة"></div>'
             "<figcaption>تعليق</figcaption></figure>")
 
