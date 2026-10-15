@@ -85,10 +85,14 @@ You can point a one-liner at a specific release zip, either a file or an https U
 curl -fsSL https://dl.thewhynot.ai/install.sh | bash -s -- --source https://.../WhyNotCut-3.0.0.zip --source-sha256 <64 hex>
 ```
 
-The installer copies or downloads the zip into `downloads/release-<first 8 of the sha256>/` of the engine home (normally
-`~/.whynot-cut`; see [Where the engine home is](#where-the-engine-home-is)) and checks it
-against the sha256. A mismatch deletes the file and exits with code 3. It then extracts the zip into `x/` next to it,
-and `x/whynot-cut-marketplace/whynot-cut` becomes the plugin folder.
+The installer copies or downloads the zip into a new folder of its own under the system's temporary folder (`%TEMP%`
+on Windows, `$TMPDIR` on macOS) and checks it against the sha256. A mismatch deletes the file and exits with code 3.
+It then extracts the zip into `x/` next to it, and `x/whynot-cut-marketplace/whynot-cut` becomes the plugin folder.
+Nothing is written into the engine home before the installer has checked that folder: only an install that passed
+every check keeps the zip and `x/` in `downloads/release-<first 8 of the sha256>/` of the engine home (normally
+`~/.whynot-cut`; see [Where the engine home is](#where-the-engine-home-is)), and a later run with the same zip reads it
+from there instead of downloading it again. An uninstall never writes it. The temporary folder is deleted when the
+run ends (if that fails, the installer says so and you can delete it yourself).
 
 ## Options
 
@@ -107,7 +111,7 @@ and `x/whynot-cut-marketplace/whynot-cut` becomes the plugin folder.
 | `-Skip a,b` | `--skip a,b` | Skip core steps by name: `preflight questions runtime ffmpeg gitbash gpu claude adobe fonts settings model state doctor launch`. |
 | `-Uninstall` | `--uninstall` | Remove WhyNot Cut for this user. |
 | `-RemoveEngine` | `--remove-engine` | With uninstall: also delete the engine home (runtimes, ffmpeg, ...). `models/` stays unless you add `-RemoveModels`; `library/` (your licensed motion and illustration packs) always stays. |
-| `-RemoveModels` | `--remove-models` | With uninstall: also delete the Whisper models (0.5 to 2.9 GB each). |
+| `-RemoveModels` | `--remove-models` | With uninstall: also delete WhyNot Cut's own Whisper models (0.5 to 2.9 GB each); any model of your own in `models/` stays. |
 | `-Source <zip\|url>` | `--source <zip\|url>` | One-line mode: the release zip to install from. |
 | `-SourceSha256 <hex>` | `--source-sha256 <hex>` | The sha256 of that zip. It is required with `-Source`. |
 
@@ -255,10 +259,15 @@ folder, or your old WhyNot Cut folder, is fine). A link whose folder is missing 
 "reconnect the drive or remove the link". If the refused folder is your old WhyNot Cut folder with files of your own
 in it, move those files out and run the installer again.
 
-What `-Uninstall -RemoveEngine` keeps by default - a folder holding only `models/` with the Whisper model in WhyNot
-Cut's own store (`models/models--<repo>`, one per `models.*.repo` in `components.json`) - still counts as a WhyNot Cut
-engine folder, so installing into it again works (through the link too) and reuses the model. A `models` folder
-of your own (anything else inside it) does not count: the name alone is never trusted.
+What `-Uninstall -RemoveEngine` keeps by default still counts as a WhyNot Cut engine folder, so installing into it
+again works (through the link too) and reuses the model: a folder holding only `models/` and/or `library/`, where
+`models/` holds only WhyNot Cut's own Whisper model stores (`models/models--<repo>`, one per `models.*.repo` in
+`components.json`: every model the installer offers, on both systems) and what Hugging Face itself writes beside them
+(`.locks`, `CACHEDIR.TAG`, a `blobs/` store with its marker, and the system's `.DS_Store` / `Thumbs.db` /
+`desktop.ini`), and `library/` holds only your motion packs (`library/motion/<pack>/pack.json`; an empty `library/`
+counts only next to such a `models/`). A `models` folder with anything of your own in it (your own Hugging Face
+model next to ours, a note, a link) does not count, and neither does any other file or folder: the names alone are
+never trusted.
 
 Uninstall checks the engine home the same way before it writes anything (its log, uv, Python), also when
 `-EngineHome` / `--engine-home` names that same folder (the linked `~/.whynot-cut` is then that home, used through
@@ -366,7 +375,7 @@ Python only when that Python is gone. It runs these steps in order:
 | `adobe` | The CEP panel folder the install recorded, and the UXP panel through Adobe's plugin installer (`/remove <id>`). If Premiere Pro or After Effects is running, nothing is removed; close them and run uninstall again. |
 | `fonts` | Only the font files the install recorded, and only their own registry values. A font you had before stays. |
 | `marketplace` | `~/.whynot-cut/marketplace` (and its `.new` / `.prev` copies). |
-| `engine` | Only with `-RemoveEngine` / `--remove-engine`, in every engine home (`~/.whynot-cut` too): **only what WhyNot Cut puts there** - `bin`, `python`, `runtimes`, `current`, `ffmpeg`, `cuda`, `bridge`, `state.json`, `logs`, `cache`, `downloads`, `fonts`, `marketplace` (and `.new` / `.prev`), `.delete-after-exit`, the engine's `venv`, `ppro-queue`, `ppro-scripts`, `ae-queue`, `ae-scripts`, `ae-probe`, `ae-capabilities.json`, `bench`, `tmp`, and their set-aside leftovers. Anything else in the folder is yours: it is kept and listed in the summary, and the folder itself is removed only when it is then empty. `models/` stays unless you add `-RemoveModels`; `library/` (your licensed motion and illustration packs) always stays; `plugin-options.json` follows the pointer rules below. Plus `%LOCALAPPDATA%\WhyNotCut\git` and then its Git Bash entry in `settings.json`. It refuses a folder that is not a WhyNot Cut engine home by content (see the location rules above). Names are compared exactly: your `Bin` or `Models` is not `bin/` or `models/` and stays, also on Windows and macOS disks that ignore case; the install script's final delete of `python/` and `bin/` refuses an entry whose name differs in case. If the `adobe` or `fonts` step could not remove something (a running Premiere Pro, a font in use), a small `state.json` keeps that record, so running uninstall again finishes it. With `-RemoveModels` / `--remove-models` the models go too. `-RemoveModels` on its own deletes only `models/`. If files are locked while the background Whisper model download is still running, the step says so and names its log. |
+| `engine` | Only with `-RemoveEngine` / `--remove-engine`, in every engine home (`~/.whynot-cut` too): **only what WhyNot Cut puts there** - `bin`, `python`, `runtimes`, `current`, `ffmpeg`, `cuda`, `bridge`, `state.json`, `logs`, `cache`, `downloads`, `fonts`, `marketplace` (and `.new` / `.prev`), `.delete-after-exit`, the engine's `venv`, `ppro-queue`, `ppro-scripts`, `ae-queue`, `ae-scripts`, `ae-probe`, `ae-capabilities.json`, `bench`, `tmp`, and their set-aside leftovers. Anything else in the folder is yours: it is kept and listed in the summary, and the folder itself is removed only when it is then empty. `models/` stays unless you add `-RemoveModels`; `library/` (your licensed motion and illustration packs) always stays; `plugin-options.json` follows the pointer rules below. `serve` (the Premiere panel's job journal) and `state` (the item the panel shows) are WhyNot Cut's too and go. Plus `%LOCALAPPDATA%\WhyNotCut\git` and then its Git Bash entry in `settings.json`. It refuses a folder that is not a WhyNot Cut engine home by content (see the location rules above). Names are compared exactly: your `Bin` or `Models` is not `bin/` or `models/` and stays, also on Windows and macOS disks that ignore case; the install script's final delete of `python/` and `bin/` refuses an entry whose name differs in case. If the `adobe` or `fonts` step could not remove something (a running Premiere Pro, a font in use), a small `state.json` keeps that record, so running uninstall again finishes it. With `-RemoveModels` / `--remove-models` the models go too - only WhyNot Cut's own: its model stores and Hugging Face's own files listed above, never through a link; `models/` itself goes only when nothing else is left in it. Anything else in `models/` (your own model, say) stays where it is, and the summary names it in English and Arabic. `-RemoveModels` on its own touches only `models/`. If files are locked while the background Whisper model download is still running, the step says so and names its log. |
 
 **An engine home in another folder.** Uninstall asks nothing: it finds the engine home exactly as the install does
 (the variables, then `plugin-options.json`, then `settings.json` `pluginConfigs`), or takes `-EngineHome <dir>` /

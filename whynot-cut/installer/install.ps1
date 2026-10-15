@@ -9,9 +9,12 @@
 #
 # Where the plugin comes from: this script's folder's parent when it holds setup\components.json (the zip layout
 # whynot-cut\installer\install.ps1). Otherwise (irm | iex, or this file copied alone) the release zip given by -Source
-# (a path or an https URL) and -SourceSha256 is copied or downloaded into ~\.whynot-cut\downloads\release-<sha8>\,
-# verified, and extracted; its whynot-cut-marketplace\whynot-cut folder is the plugin. Without -Source the release
-# index is used - until it is hosted (H3) the script says so and stops with exit code 2.
+# (a path or an https URL) and -SourceSha256 is copied or downloaded into a fresh folder of this run under the OS temp
+# dir (an earlier run's cached copy of the same zip is read instead of fetched), verified, and extracted; its
+# whynot-cut-marketplace\whynot-cut folder is the plugin. Nothing is written into the engine home before the bootstrap
+# has checked it (fix round 6, R5-5): an install keeps the release in <engine home>\downloads\release-<sha8>\ once every
+# check passed (-ReleaseStage); the temporary folder is deleted when the run ends (a failure there is only a warning).
+# Without -Source the release index is used - until it is hosted (H3) the script says so and stops with exit code 2.
 # Then installer\core\bootstrap.ps1 (uv + Python) runs and hands over to the Python installer core. Every option is
 # described in installer\README.md. Exit code: the installer's (0 done, 1 a step failed, 2 cannot start, 3 a download
 # or bootstrap step failed).
@@ -54,6 +57,7 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
     $ProgressPreference = 'SilentlyContinue'
     $tls12 = [Net.SecurityProtocolType]::Tls12
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor $tls12
+    $W = @{ Temp = $null }  # this run's release stage under the OS temp dir (-Source), deleted at the end
 
     function Get-WncFullPath([string]$Path) {
         return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
@@ -64,11 +68,12 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
     }
 
     function Get-WncEngineHome {
-        # where the release zip is cached (-Source mode, before any plugin file exists): the engine home as the
-        # bootstrap will find it - -EngineHome (its WhyNotCut subfolder when it holds other files or is the user
-        # folder / Desktop / Documents / Downloads, as bootstrap.ps1 Get-WncEnginePlace does), else the engine-home
-        # variables (not in a sandbox), the pointer's engine_home, our settings.json pluginConfigs option, else
-        # ~\.whynot-cut. A rare disagreement with the bootstrap only means the zip is cached elsewhere.
+        # where an earlier run cached the release zip (-Source mode, before any plugin file exists; only READ here -
+        # fix round 6, R5-5): the engine home as the bootstrap will find it - -EngineHome (its WhyNotCut subfolder
+        # when it holds other files or is the user folder / Desktop / Documents / Downloads, as bootstrap.ps1
+        # Get-WncEnginePlace does), else the engine-home variables (not in a sandbox), the pointer's engine_home, our
+        # settings.json pluginConfigs option, else ~\.whynot-cut. A rare disagreement with the bootstrap only means
+        # the zip is fetched again.
         $h = $env:USERPROFILE
         if (-not $h) { $h = $env:HOME }
         if ($SandboxHome) { $h = Get-WncFullPath $SandboxHome }
@@ -153,46 +158,73 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
             $name = Split-Path $src -Leaf
         }
         if (-not $name) { $name = 'WhyNotCut.zip' }
-        $dir = Join-Path (Get-WncEngineHome) ('downloads\release-' + $sha.Substring(0, 8))
+        $rel = 'release-' + $sha.Substring(0, 8)
         if ($DryRun) {
-            Write-Host "dry run: would fetch $src, check its sha256 $sha, extract it into $dir and run its installer"
+            Write-Host "dry run: would fetch $src, check its sha256 $sha, extract it into a temporary folder and run its installer"
             return @{ Code = 0 }
         }
+        # fix round 6 (R5-5): nothing is written into the engine home before the bootstrap has checked it - the zip is
+        # fetched, verified and extracted in a fresh folder of this run under the OS temp dir (deleted when the run
+        # ends); the bootstrap keeps it in <engine home>\downloads\release-<sha8> only once every check has passed
+        $W.Temp = Join-Path ([IO.Path]::GetTempPath()) ('WhyNotCut-release-' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
+        $dir = Join-Path $W.Temp $rel
+        $null = New-Item -ItemType Directory -Force -Path $dir
         $zip = Join-Path $dir $name
         $x = Join-Path $dir 'x'
         $plugin = Join-Path $x 'whynot-cut-marketplace\whynot-cut'
-        $ready = (Test-Path -LiteralPath $zip -PathType Leaf) -and ((Get-WncSha $zip) -eq $sha)
-        if (-not $ready) {
-            $null = New-Item -ItemType Directory -Force -Path $dir
-            $part = "$zip.part"
-            if (Test-Path -LiteralPath $part) { Remove-Item -LiteralPath $part -Force }
+        $part = "$zip.part"
+        # an earlier run's cache of the same zip is read (never written here), else the zip is fetched
+        $cached = Join-Path (Get-WncEngineHome) "downloads\$rel\$name"
+        if ((Test-Path -LiteralPath $cached -PathType Leaf) -and ((Get-WncSha $cached) -eq $sha)) {
+            Copy-Item -LiteralPath $cached -Destination $part -Force
+        } else {
             Write-Host "fetching $src"
             if ($isUrl) {
                 Invoke-WebRequest -UseBasicParsing -Uri $src -OutFile $part
             } else {
                 Copy-Item -LiteralPath $src -Destination $part -Force
             }
-            $got = Get-WncSha $part
-            if ($got -ne $sha) {
-                Remove-Item -LiteralPath $part -Force
-                throw "sha256 mismatch for $name (expected $sha, got $got); the file was deleted"
-            }
-            Move-Item -LiteralPath $part -Destination $zip -Force
-            if (Test-Path -LiteralPath $x) { Remove-Item -LiteralPath $x -Recurse -Force }
         }
+        $got = Get-WncSha $part
+        if ($got -ne $sha) {
+            Remove-Item -LiteralPath $part -Force
+            throw "sha256 mismatch for $name (expected $sha, got $got); the file was deleted"
+        }
+        Move-Item -LiteralPath $part -Destination $zip -Force
         Write-Host "verified $name (sha256 ok)"
-        if (-not (Test-Path -LiteralPath (Join-Path $plugin 'setup\components.json') -PathType Leaf)) {
-            $tmp = "$x.tmp"
-            if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
-            if (Test-Path -LiteralPath $x) { Remove-Item -LiteralPath $x -Recurse -Force }
-            Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
-            Rename-Item -LiteralPath $tmp -NewName 'x'
-        }
+        Expand-Archive -LiteralPath $zip -DestinationPath $x -Force
         if (-not (Test-Path -LiteralPath (Join-Path $plugin 'installer\core\bootstrap.ps1') -PathType Leaf)) {
             throw "$name is not a WhyNot Cut release zip (no whynot-cut-marketplace\whynot-cut\installer)"
         }
         Write-Host "WhyNot Cut files: $plugin"
-        return @{ Code = 0; Root = $plugin }
+        return @{ Code = 0; Root = $plugin; Stage = $dir }
+    }
+
+    function Remove-WncTree([string]$Path) {
+        # never Remove-Item -Recurse (Windows PowerShell 5.1 follows junctions): a link is removed as a link, its
+        # target never entered; read-only files are cleared first (bootstrap.ps1 Invoke-WncDeleteTree)
+        $attr = [IO.File]::GetAttributes($Path)
+        if (($attr -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            if ([IO.Directory]::Exists($Path)) { [IO.Directory]::Delete($Path, $false) } else { [IO.File]::Delete($Path) }
+            return
+        }
+        if ([IO.Directory]::Exists($Path)) {
+            foreach ($child in [IO.Directory]::GetFileSystemEntries($Path)) { Remove-WncTree $child }
+            [IO.Directory]::Delete($Path, $false)
+        } else {
+            [IO.File]::SetAttributes($Path, [IO.FileAttributes]::Normal)
+            [IO.File]::Delete($Path)
+        }
+    }
+
+    function Remove-WncStage {
+        # the per-run release stage (fix round 6, R5-5): deleted when the run ends; a failure is only a warning
+        if ((-not $W.Temp) -or (-not (Test-Path -LiteralPath $W.Temp))) { return }
+        try {
+            Remove-WncTree $W.Temp
+        } catch {
+            Write-Host "WARNING: could not delete the temporary folder $($W.Temp) ($($_.Exception.Message)); delete it yourself"
+        }
     }
 
     # UTF-8 on the console from the first line on (uv, the core and the Arabic lines); put back at the end
@@ -207,6 +239,7 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
     try {
         $code = 0
         $root = $null
+        $stage = $null
         if ($WncScriptPath) {
             $candidate = Split-Path (Split-Path $WncScriptPath -Parent) -Parent
             if (Test-Path -LiteralPath (Join-Path $candidate 'setup\components.json') -PathType Leaf) { $root = $candidate }
@@ -216,6 +249,7 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
                 $release = Get-WncRelease
                 $code = $release.Code
                 if ($release.ContainsKey('Root')) { $root = $release.Root }
+                if ($release.ContainsKey('Stage')) { $stage = $release.Stage }
             } catch {
                 Write-Host "ERROR: WhyNot Cut could not get its files: $($_.Exception.Message)"
                 $code = 3
@@ -241,10 +275,12 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
             if ($EngineHome) { $bootArgs.EngineHome = $EngineHome }
             if ($Model) { $bootArgs.Model = $Model }
             if ($Customise) { $bootArgs.Customise = $true }
+            if ($stage) { $bootArgs.ReleaseStage = $stage }
             & $block @bootArgs
             $code = $LASTEXITCODE
         }
     } finally {
+        Remove-WncStage
         if ($null -ne $oldEncoding) {
             try { [Console]::OutputEncoding = $oldEncoding } catch { Write-Verbose 'console encoding not restored' }
         }

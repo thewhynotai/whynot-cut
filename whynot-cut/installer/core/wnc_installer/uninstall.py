@@ -11,12 +11,17 @@ adobe        a running Premiere Pro / After Effects: amber, nothing removed. Els
              UPIA `/remove <id>` (`--remove` on macOS; the id recorded at install); a sandbox only records it.
 fonts        only the files listed in state.fonts.installed that sit in the user font folder, and only the registry
              values listed in state.fonts.registry that still point at one of those files.
-marketplace  ~/.whynot-cut/marketplace (+ .new / .prev); a link (a development checkout) is left alone.
+marketplace  ~/.whynot-cut/marketplace (+ .new / .prev); a link (a development checkout) is left alone. A linked
+             ~/.whynot-cut is emptied by the real folder the guard pinned, and not at all once the link points elsewhere
+             (fix round 6, R5-4: the same rule as the engine step).
 engine       only with --remove-engine: ONLY the children of the engine home that WhyNot Cut puts there
              (base.ENGINE_LAYOUT: bin, python, runtimes, current, ffmpeg, cuda, bridge, state.json, logs, cache,
              downloads, fonts, marketplace(.new/.prev), the deferred list, the engine's venv / queues / scripts /
-             probe / bench / tmp, and their set-aside leftovers; fix round 1), in every engine home including
-             ~/.whynot-cut. Anything else is the editor's: kept and listed. models/ is kept unless --remove-models,
+             probe / bench / tmp / serve (the panel's job journal) / state (the active item), and their set-aside
+             leftovers; fix rounds 1 and 6), in every engine home including ~/.whynot-cut. Anything else is the
+             editor's: kept and listed. models/ is kept unless --remove-models, which deletes only WhyNot Cut's own
+             model stores and Hugging Face's bookkeeping in it (never through a link), and models/ itself only when
+             nothing of the editor's is left in it (fix round 6, R5-2),
              library/ (the editor's licensed motion packs, engine motion_library.py) always, plugin-options.json
              follows the pointer rules (forget_engine_home). Plus
              %LOCALAPPDATA%\\WhyNotCut\\git, then the settings env CLAUDE_CODE_GIT_BASH_PATH that points into it.
@@ -24,7 +29,8 @@ engine       only with --remove-engine: ONLY the children of the engine home tha
              ~/.whynot-cut/.delete-after-exit, which the bootstrap deletes after this process exits (and the engine
              home itself only when it is then empty). When adobe / fonts left something recorded (a running host, a
              font in use), a minimal state.json keeps those records for the next uninstall. Refused unless the folder
-             is a genuine engine home (base.is_engine_home: by content, not by file names). --remove-models alone deletes models/ only. Once nothing is
+             is a genuine engine home (base.is_engine_home: by content, not by file names) or the leftover of one
+             (base.is_kept_leftover). --remove-models alone touches models/ only. Once nothing is
              left to retry, the saved engine home is forgotten (claude.forget_engine_home: the pointer's engine_home,
              our pluginConfigs option, then an empty ~/.whynot-cut), only while they name this folder.
 Never touched: a clients folder (preferences `clients_root`, any folder holding `.whynot-client`), the preferences file
@@ -329,9 +335,24 @@ def step_fonts(ctx: base.Ctx) -> base.StepResult:
 
 
 # --------------------------------------------------------------------------------------------- marketplace
+def _pinned_root(ctx: base.Ctx) -> tuple:
+    """(the folder to delete in, the pinned target or None, why nothing may be deleted or None). A linked ~/.whynot-cut
+    is emptied by the REAL folder it pointed to when the core's guard checked it (fix round 5, N6; round 6, R5-4: every
+    step that deletes in the engine home), and not at all once the link points elsewhere."""
+    paths = ctx.paths
+    if not base.linked_default_home(paths.whynot, paths.home):
+        return paths.whynot, None, None
+    pinned = ctx.facts.get("link_target") or os.path.realpath(paths.whynot)
+    moved = _link_moved(ctx, pinned)
+    return (None, pinned, moved) if moved else (Path(pinned), pinned, None)
+
+
 def step_marketplace(ctx: base.Ctx) -> base.StepResult:
     paths = ctx.paths
-    d = paths.marketplace_dir
+    root, _pinned, moved = _pinned_root(ctx)
+    if moved:
+        return _done("marketplace", "red", [f"nothing was deleted: {moved}"])
+    d = root / paths.marketplace_dir.name
     present = [p for p in (d, d.with_name(d.name + ".new"), d.with_name(d.name + ".prev")) if os.path.lexists(p)]
     if not present:
         return _done("marketplace", "skipped", [f"no marketplace folder in {paths.whynot}"])
@@ -343,7 +364,7 @@ def step_marketplace(ctx: base.Ctx) -> base.StepResult:
             notes.append(f"{p} is a link (a development checkout); it was left alone")
             continue
         try:
-            if base.safe_rmtree(p, [paths.whynot], protected):
+            if base.safe_rmtree(p, [root], protected):
                 notes.append(f"deleted {p}")
             else:
                 status = "amber"
@@ -412,6 +433,45 @@ def _delete_child(ctx: base.Ctx, p: Path, protected: list, removed: list, kept: 
         failed.append(f"{p.name} ({e})")
 
 
+def _delete_models(ctx: base.Ctx, models: Path, protected: list, removed: list, kept: list, failed: list, notes: list,
+                   root: Path) -> None:
+    """--remove-models (fix round 6, R5-2): only WhyNot Cut's own entries of models/ go - its model stores and Hugging
+    Face's own bookkeeping (base.model_entry_kind: exact names, real folders / files, never a link, never entered) -
+    and models/ itself only once it is then empty. Anything else in it is the editor's (their own model beside ours):
+    kept in place and named, in English and Arabic. A models/ that is itself a link is removed as a link only."""
+    if base.is_link(models):
+        _delete_child(ctx, models, protected, removed, kept, failed, root)
+        return
+    if not models.is_dir():
+        kept.append("models (not a folder; not WhyNot Cut's)")
+        return
+    theirs, before = [], len(kept) + len(failed)
+    for name in sorted(os.listdir(models)):
+        p = models / name
+        if base.model_entry_kind(models, name) is None:
+            theirs.append(name)
+            continue
+        try:
+            if not base.safe_rmtree(p, [models], protected):
+                kept.append(f"models/{name} (client data: never deleted)")
+        except OSError as e:
+            failed.append(f"models/{name} ({e})")
+    if theirs:
+        notes.append(f"kept {models}: it also holds files that are not WhyNot Cut's ("
+                     + ", ".join(theirs[:5]) + (", ..." if len(theirs) > 5 else "")
+                     + "); only WhyNot Cut's own Whisper models were deleted")
+        notes.append(base.MODELS_KEPT_AR)
+        return
+    if len(kept) + len(failed) > before:
+        return
+    try:
+        os.rmdir(models)
+        removed.append("models")
+        notes.append(f"deleted {models}")
+    except OSError as e:
+        failed.append(f"models ({e})")
+
+
 def step_engine(ctx: base.Ctx) -> base.StepResult:
     paths = ctx.paths
     engine, models = bool(getattr(ctx.args, "remove_engine", False)), bool(getattr(ctx.args, "remove_models", False))
@@ -427,24 +487,19 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
     busy = _running_download(ctx)  # read now: state.json may be reduced below
     # fix round 5 (N6): a linked ~/.whynot-cut is emptied by the REAL folder it pointed to when it was checked (the
     # core's guard pinned it), and nothing more is deleted once the link points elsewhere
-    pinned = None
-    root = paths.whynot
-    if base.linked_default_home(paths.whynot, paths.home):
-        pinned = ctx.facts.get("link_target") or os.path.realpath(paths.whynot)
-        moved = _link_moved(ctx, pinned)
-        if moved:
-            return _done("engine", "red", [f"nothing was deleted: {moved}"])
-        root = Path(pinned)
+    root, pinned, moved = _pinned_root(ctx)
+    if moved:
+        return _done("engine", "red", [f"nothing was deleted: {moved}"])
     if not engine:  # --remove-models alone
         if "models" not in os.listdir(root):  # exact name (`Models` on NTFS / APFS is the editor's)
             return _done("engine", "skipped", ["no Whisper models to delete"])
         if _dry(ctx):
-            return _done("engine", "skipped", [f"dry run: would delete {paths.models_dir}"])
-        removed, kept, failed = [], [], []
-        _delete_child(ctx, root / "models", protected, removed, kept, failed, root)
-        status = "amber" if kept or failed else "ok"
-        notes = [f"deleted {paths.models_dir}" if removed else ""] + [f"kept {k}" for k in kept] + [
-            f"could not delete {f}" for f in failed]
+            return _done("engine", "skipped", [f"dry run: would delete WhyNot Cut's own Whisper models in "
+                                               f"{paths.models_dir}"])
+        removed, kept, failed, notes = [], [], [], []
+        _delete_models(ctx, root / "models", protected, removed, kept, failed, notes, root)
+        status = "amber" if failed else "ok"
+        notes = notes + [f"kept {k}" for k in kept] + [f"could not delete {f}" for f in failed]
         if failed and busy:
             notes.append(busy)
         return _done("engine", status, notes, _locked_hint(busy, "--remove-models") if failed and busy else None)
@@ -462,7 +517,7 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
                                "answers": _section(ctx, "answers")}, **retry)
     else:
         ctx.state.dry_run = True  # state.json goes too: nothing may write it again in this run
-    removed, kept, failed, foreign = [], [], [], []
+    removed, kept, failed, foreign, model_notes = [], [], [], [], []
     with os.scandir(root) as it:
         children = sorted((e.name for e in it), key=lambda n: (n == "logs", n))  # logs last: the log goes with it
     moved = None
@@ -489,6 +544,9 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         if name == "logs":
             ctx.log.info("the uninstall log goes with the engine home; this summary stays on the screen only")
             ctx.log.path = None
+        if name == "models":  # (fix round 6, R5-2) only WhyNot Cut's own models; the editor's stay in place
+            _delete_models(ctx, p, protected, removed, kept, failed, model_notes, root)
+            continue
         _delete_child(ctx, p, protected, removed, kept, failed, root)
     if moved:
         return _done("engine", "red", [f"deleted {len(removed)} items of {paths.whynot}", moved])
@@ -531,7 +589,7 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
                      + (", then the engine home itself" if not rest and not linked else ""))
     if linked:
         notes.append(f"kept {paths.whynot} (a link to {os.path.realpath(paths.whynot)}): the link and that folder stay")
-    notes += [f"kept {k}" for k in kept] + [f"could not delete {f}" for f in failed]
+    notes += model_notes + [f"kept {k}" for k in kept] + [f"could not delete {f}" for f in failed]
     if foreign:
         notes.append(f"kept (not WhyNot Cut's, left alone): {', '.join(foreign)}")
     if failed:

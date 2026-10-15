@@ -10,9 +10,13 @@
 #
 # Where the plugin comes from: this script's folder's parent when it holds setup/components.json (the zip layout
 # whynot-cut/installer/install.sh). Otherwise (curl | bash: the script arrives on stdin and $0 is "bash") the release
-# zip given by --source (a path or an https URL) and --source-sha256 is copied or downloaded into
-# ~/.whynot-cut/downloads/release-<sha8>/, verified, and extracted; its whynot-cut-marketplace/whynot-cut folder is the
-# plugin. Without --source the release index is used - until it is hosted (H3) the script says so and exits 2.
+# zip given by --source (a path or an https URL) and --source-sha256 is copied or downloaded into a fresh folder of this
+# run under the OS temp dir (an earlier run's cached copy of the same zip is read instead of fetched), verified, and
+# extracted; its whynot-cut-marketplace/whynot-cut folder is the plugin. Nothing is written into the engine home before
+# the bootstrap has checked it (fix round 6, R5-5): an install keeps the release in <engine home>/downloads/release-
+# <sha8>/ once every check passed (--release-stage); the temporary folder is deleted when the run ends (a failure there
+# is only a warning). Without --source the release index is used - until it is hosted (H3) the script says so and
+# exits 2.
 # Then installer/core/bootstrap.sh (uv + Python) runs and hands over to the Python installer core. Every option is
 # described in installer/README.md. Exit code: the installer's (0 done, 1 a step failed, 2 cannot start, 3 a download
 # or bootstrap step failed). On Windows use install.ps1 (Git Bash is refused unless the WNC_TEST_PLATFORM test hook is
@@ -60,9 +64,12 @@ main() {
     if [ -n "$here" ] && [ -f "$here/setup/components.json" ]; then root="$here"; fi
   fi
   if [ -z "$root" ]; then
-    wnc_release "$home" "$dry" "$channel" "$source" "$source_sha" "$engine_home" || return $?
+    wnc_release "$home" "$dry" "$channel" "$source" "$source_sha" "$engine_home"
+    code=$?
+    if [ $code -ne 0 ]; then wnc_drop_stage; return $code; fi
     root="$RELEASE_ROOT"
     [ -n "$root" ] || return 0  # dry run: nothing fetched
+    pass+=(--release-stage "$RELEASE_STAGE")
   fi
   if [ -t 0 ]; then
     bash "$root/installer/core/bootstrap.sh" --plugin-root "$root" "${pass[@]}"
@@ -70,7 +77,20 @@ main() {
     bash "$root/installer/core/bootstrap.sh" --plugin-root "$root" "${pass[@]}" </dev/null
   fi
   code=$?
+  wnc_drop_stage
   return $code
+}
+
+WNC_TEMP=""  # this run's release stage under the OS temp dir (--source), deleted when the run ends
+
+wnc_drop_stage() { # the per-run release stage (fix round 6, R5-5); rm -r removes a link inside as a link, never its
+  # target; a failure is only a warning
+  [ -n "$WNC_TEMP" ] && [ -d "$WNC_TEMP" ] || return 0
+  rm -rf "$WNC_TEMP" 2>/dev/null
+  if [ -e "$WNC_TEMP" ]; then
+    echo "WARNING: could not delete the temporary folder $WNC_TEMP; delete it yourself" >&2
+  fi
+  return 0
 }
 
 wnc_sha() {
@@ -125,11 +145,11 @@ for k in sys.argv[1].split("."):
 print("" if v is None else v)' "$2" 2>/dev/null | tr -d '\r'
 }
 
-wnc_engine_home() { # sandbox-home engine-home -> WNC_ENGINE: where the -Source release zip is cached
-  # the engine home as bootstrap.sh will find it: --engine-home (its WhyNotCut subfolder when it holds other files or
-  # is the home folder / Desktop / Documents / Downloads, as engine_place does), else the engine-home variables (not
-  # in a sandbox), the pointer's engine_home, our settings.json pluginConfigs option, else ~/.whynot-cut. A rare
-  # disagreement with the bootstrap only means the zip is cached elsewhere.
+wnc_engine_home() { # sandbox-home engine-home -> WNC_ENGINE: where an earlier run cached the --source release zip
+  # (only READ here - fix round 6, R5-5): the engine home as bootstrap.sh will find it - --engine-home (its WhyNotCut
+  # subfolder when it holds other files or is the home folder / Desktop / Documents / Downloads, as engine_place does),
+  # else the engine-home variables (not in a sandbox), the pointer's engine_home, our settings.json pluginConfigs
+  # option, else ~/.whynot-cut. A rare disagreement with the bootstrap only means the zip is fetched again.
   local h="${1:-$HOME}" e="$2" n v cfg d
   if [ -n "$e" ]; then
     case "$e" in /*|[A-Za-z]:*) ;; *) e="$PWD/$e" ;; esac
@@ -162,9 +182,11 @@ wnc_engine_home() { # sandbox-home engine-home -> WNC_ENGINE: where the -Source 
   WNC_ENGINE="${v:-$h/.whynot-cut}"
 }
 
-wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty after a dry run); status 2 / 3
+wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty after a dry run), RELEASE_STAGE;
+  # status 2 / 3
   local home="$1" dry="$2" channel="$3" src="$4" sha="$5" engine="$6" name="" dir="" zip="" x="" plugin="" got="" idx=""
-  RELEASE_ROOT=""
+  local rel="" cached="" tmp=""
+  RELEASE_ROOT="" RELEASE_STAGE=""
   if [ -z "$src" ]; then
     case "$WNC_RELEASE_INDEX_URL" in
       "<release"*)
@@ -194,19 +216,29 @@ wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty
   if [ -n "$home" ]; then
     case "$home" in /*|[A-Za-z]:*) ;; *) home="$PWD/$home" ;; esac
   fi
-  wnc_engine_home "$home" "$engine"
-  engine="$WNC_ENGINE"
   name="${src##*/}"; name="${name%%\?*}"
   [ -n "$name" ] || name="WhyNotCut.zip"
-  dir="$engine/downloads/release-$(printf '%s' "$sha" | cut -c1-8)"
+  rel="release-$(printf '%s' "$sha" | cut -c1-8)"
   if [ -n "$dry" ]; then
-    echo "dry run: would fetch $src, check its sha256 $sha, extract it into $dir and run its installer"
+    echo "dry run: would fetch $src, check its sha256 $sha, extract it into a temporary folder and run its installer"
     return 0
   fi
+  # fix round 6 (R5-5): nothing is written into the engine home before the bootstrap has checked it - the zip is
+  # fetched, verified and extracted in a fresh folder of this run under the OS temp dir (deleted when the run ends);
+  # the bootstrap keeps it in <engine home>/downloads/release-<sha8> only once every check has passed
+  tmp="${TMPDIR:-/tmp}"
+  WNC_TEMP="$(mktemp -d "${tmp%/}/WhyNotCut-release.XXXXXX" 2>/dev/null </dev/null)"
+  if [ -z "$WNC_TEMP" ] || [ ! -d "$WNC_TEMP" ]; then
+    WNC_TEMP=""; echo "ERROR: cannot create a temporary folder in $tmp" >&2; return 3
+  fi
+  dir="$WNC_TEMP/$rel"
+  mkdir -p "$dir" || { echo "ERROR: cannot create $dir" >&2; return 3; }
   zip="$dir/$name"; x="$dir/x"; plugin="$x/whynot-cut-marketplace/whynot-cut"
-  if [ ! -f "$zip" ] || [ "$(wnc_sha "$zip")" != "$sha" ]; then
-    mkdir -p "$dir" || { echo "ERROR: cannot create $dir" >&2; return 3; }
-    rm -f "$zip.part"
+  wnc_engine_home "$home" "$engine"  # an earlier run's cache of the same zip is read (never written here)
+  cached="$WNC_ENGINE/downloads/$rel/$name"
+  if [ -f "$cached" ] && [ "$(wnc_sha "$cached")" = "$sha" ]; then
+    cp "$cached" "$zip.part" || { echo "ERROR: cannot read $cached" >&2; return 3; }
+  else
     echo "fetching $src"
     case "$src" in
       http://*|https://*)
@@ -216,28 +248,25 @@ wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty
         fi ;;
       *) cp "$src" "$zip.part" || { echo "ERROR: cannot read $src" >&2; return 3; } ;;
     esac
-    got="$(wnc_sha "$zip.part")"
-    if [ "$got" != "$sha" ]; then
-      rm -f "$zip.part"
-      echo "ERROR: sha256 mismatch for $name (expected $sha, got $got); the file was deleted" >&2
-      return 3
-    fi
-    mv -f "$zip.part" "$zip" && rm -rf "$x"
   fi
+  got="$(wnc_sha "$zip.part")"
+  if [ "$got" != "$sha" ]; then
+    rm -f "$zip.part"
+    echo "ERROR: sha256 mismatch for $name (expected $sha, got $got); the file was deleted" >&2
+    return 3
+  fi
+  mv -f "$zip.part" "$zip" || { echo "ERROR: cannot write $zip" >&2; return 3; }
   echo "verified $name (sha256 ok)"
-  if [ ! -f "$plugin/setup/components.json" ]; then
-    rm -rf "$x.tmp" "$x"
-    if ! { mkdir -p "$x.tmp" && wnc_unzip "$zip" "$x.tmp" && mv "$x.tmp" "$x"; }; then
-      echo "ERROR: cannot extract $name" >&2
-      return 3
-    fi
+  if ! { mkdir -p "$x" && wnc_unzip "$zip" "$x"; }; then
+    echo "ERROR: cannot extract $name" >&2
+    return 3
   fi
   if [ ! -f "$plugin/installer/core/bootstrap.sh" ]; then
     echo "ERROR: $name is not a WhyNot Cut release zip (no whynot-cut-marketplace/whynot-cut/installer)" >&2
     return 3
   fi
   echo "WhyNot Cut files: $plugin"
-  RELEASE_ROOT="$plugin"
+  RELEASE_ROOT="$plugin" RELEASE_STAGE="$dir"
 }
 
 main "$@"; exit $?

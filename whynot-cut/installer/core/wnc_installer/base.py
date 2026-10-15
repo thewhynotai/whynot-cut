@@ -231,13 +231,16 @@ def linked_default_home(whynot, home) -> bool:
 
 # What WhyNot Cut itself puts in an engine home (installer.md R.1 + the engine's own folders, engine/reel/lib plat.py,
 # common.py, cep_queue / ae_* and serve/: 2.x venv, the Premiere / After Effects queues and scripts, the AE probe, the
-# Whisper bench, ae_render's tmp). Uninstall --remove-engine deletes ONLY these (plus models/ when asked); anything
+# Whisper bench, ae_render's tmp; fix round 6, R5-1: `reel serve`'s job journal serve/jobs/<id>.json (serve/jobs.py)
+# and the active item state/active.json (serve/engine_state.py), engine bookkeeping only - the editor's work lives in
+# the client folders). Uninstall --remove-engine deletes ONLY these (plus WhyNot Cut's own models when asked); anything
 # else is the editor's and is kept and listed. Names compare exactly (`Bin` is the editor's). The location check does
 # NOT use this list (fix round 2: names can be anyone's): see occupied_entries and is_engine_home.
+# tests/test_installer.py scans engine/reel for every top-level name it writes under its home against this list.
 ENGINE_LAYOUT = ("bin", "python", "runtimes", "current", "ffmpeg", "cuda", "bridge", "state.json", "logs", "cache",
                  "downloads", "fonts", "marketplace", "marketplace.new", "marketplace.prev", ".delete-after-exit",
                  "venv", "ppro-queue", "ppro-scripts", "ae-queue", "ae-scripts", "ae-probe", "ae-capabilities.json",
-                 "bench", "tmp")
+                 "bench", "tmp", "serve", "state")
 ENGINE_LAYOUT_PREFIXES = ("state.json.corrupt-", ".state.json.", ".current.", ".plugin-options.json.",
                           "..delete-after-exit.", ".wnc-write-test")  # set-aside / atomic-write leftovers, the probe
 ENGINE_KEPT = ("models", "library")  # models/ unless --remove-models; library/ (licensed packs) always
@@ -282,12 +285,26 @@ def is_engine_home(path) -> bool:
     return isinstance(stamp, dict) and stamp.get("id") == rid
 
 
-# Fix round 5 (N1): what `uninstall --remove-engine` keeps of an engine home by default (models/) is still WhyNot Cut's.
-# The model step writes the engine's Hugging Face store there (engine/reel/lib/whisper_backends.py _repo_dir): one
-# folder "models--<repo with / as -->" per components.json `models.<m>.repo`. The bootstraps read the same names from
-# the same components.json (Get-WncModelStoreList / model_stores).
+# Fix round 5 (N1) / round 6 (R5-2, R5-3): what `uninstall --remove-engine` keeps of an engine home by default (models/)
+# is still WhyNot Cut's - recognised by content, never by the name `models` alone. The model step writes the engine's
+# Hugging Face store there (engine/reel/lib/whisper_backends.py _repo_dir): one folder "models--<repo with / as -->"
+# per repo. The names come from ONE source, components.json `models.<m>.repo`: every model the installer can offer
+# (large-v3, large-v3-turbo, medium, small), their MLX twins and the engine's own fallback repo (tests/test_installer.py
+# pins it against whisper_backends.py CT2_REPOS / MLX_REPOS and faster-whisper's table). The bootstraps read the same
+# names from the same file (Get-WncModelStoreList / model_stores); they keep no list of their own.
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
 _MODEL_STORES: Optional[frozenset] = None
+# What huggingface_hub itself writes at the top of its cache folder beside the stores (huggingface_hub 1.33, pinned in
+# setup/locks: file_download.py .locks, _local_folder.py CACHEDIR.TAG, utils/_shared_blobs.py the Xet shared store
+# blobs/ - only with its marker file), and the OS's folder-view files its own cache scan ignores
+# (utils/_cache_manager.py FILES_TO_IGNORE). Names compare exactly; a link is never ours. The bootstraps use the same.
+HF_DIRS = (".locks",)
+HF_FILES = ("CACHEDIR.TAG", ".DS_Store", "Thumbs.db", "desktop.ini")
+VIEW_FILES = HF_FILES[1:]
+HF_BLOBS, HF_BLOBS_MARKER = "blobs", ".huggingface-shared-blobs"
+# library/ (engine/reel/lib/motion_library.py): licensed packs the editor adds, library/motion/<pack>/pack.json - the
+# pack manifest is its marker. Kept by every uninstall, never deleted by WhyNot Cut.
+LIBRARY, MOTION, PACK_MARK = "library", "motion", "pack.json"
 
 
 def model_store_names(components) -> frozenset:
@@ -317,29 +334,94 @@ def model_stores() -> frozenset:
     return _MODEL_STORES
 
 
-def is_model_leftover(path, *, pointer_ok: bool = False) -> bool:
-    """Fix round 5 (N1): the folder holds exactly models/ (occupied_entries: the write probe, the -Source cache and,
-    with `pointer_ok`, the pointer do not count) - a real folder, not a link - and models/ holds at least one store
-    folder of WhyNot Cut's model step (model_stores(), names compared exactly, a real folder). Recognised by content,
-    never by the name `models` alone: an editor's own models/ folder is not ours (a later --remove-models would delete
-    it)."""
-    if occupied_entries(path, pointer_ok=pointer_ok) != ["models"]:
+def _real_dir(p) -> bool:
+    return not is_link(p) and os.path.isdir(p)
+
+
+def _real_file(p) -> bool:
+    return not is_link(p) and os.path.isfile(p)
+
+
+def model_entry_kind(models_dir, name: str) -> Optional[str]:
+    """What one entry of <engine home>/models is (fix round 6, R5-2): "store" (a model store of WhyNot Cut's: a real
+    folder named exactly as in model_stores()), "bookkeeping" (Hugging Face's own .locks / CACHEDIR.TAG / marked blobs/
+    store, or an OS folder-view file), or None - the editor's, or a link: never ours, never entered, never deleted."""
+    p = Path(models_dir) / name
+    if name in model_stores():
+        return "store" if _real_dir(p) else None
+    if name in HF_DIRS:
+        return "bookkeeping" if _real_dir(p) else None
+    if name in HF_FILES:
+        return "bookkeeping" if _real_file(p) else None
+    if name == HF_BLOBS:
+        return "bookkeeping" if _real_dir(p) and _real_file(p / HF_BLOBS_MARKER) else None
+    return None
+
+
+def is_our_models(models_dir) -> bool:
+    """<engine home>/models is WhyNot Cut's (fix round 6, R5-2): a real folder, EVERY entry of it is one of our stores
+    or Hugging Face's own bookkeeping (model_entry_kind), and at least one is a store. One entry of the editor's (their
+    own Hugging Face model beside ours, a note) or any link inside makes the whole folder the editor's."""
+    if not _real_dir(models_dir):
         return False
-    m = Path(path) / "models"
-    if is_link(m) or not m.is_dir():
-        return False
-    stores = model_stores()
     try:
-        with os.scandir(m) as it:
-            return any(e.name in stores and not is_link(e.path) and e.is_dir(follow_symlinks=False) for e in it)
+        names = os.listdir(models_dir)
     except OSError:
         return False
+    kinds = [model_entry_kind(models_dir, n) for n in names]
+    return None not in kinds and "store" in kinds
+
+
+def _view_file(p: Path) -> bool:
+    return p.name in VIEW_FILES and _real_file(p)
+
+
+def library_state(lib) -> Optional[str]:
+    """<engine home>/library (fix round 6): "packs" when it holds only motion/, which holds only pack folders that each
+    carry their pack.json (the engine's pack manifest: recognised by content), at least one; "empty" when it holds
+    nothing, or only an empty motion/; None otherwise (anything else, any link: the editor's). OS folder-view files
+    are ignored at both levels."""
+    lib = Path(lib)
+    if not _real_dir(lib):
+        return None
+    try:
+        top = [n for n in os.listdir(lib) if not _view_file(lib / n)]
+        if not top:
+            return "empty"
+        if top != [MOTION] or not _real_dir(lib / MOTION):
+            return None
+        packs = [n for n in os.listdir(lib / MOTION) if not _view_file(lib / MOTION / n)]
+    except OSError:
+        return None
+    if not packs:
+        return "empty"
+    ok = all(_real_dir(lib / MOTION / n) and _real_file(lib / MOTION / n / PACK_MARK) for n in packs)
+    return "packs" if ok else None
+
+
+def is_kept_leftover(path, *, pointer_ok: bool = False) -> bool:
+    """What `uninstall --remove-engine` keeps of an engine home, still WhyNot Cut's own folder for placement at install
+    and uninstall (fix round 5, N1; round 6, R5-2 and library/): its only entries (occupied_entries: the write probe,
+    the -Source cache and, with `pointer_ok`, the pointer do not count) are the kept names - models/ that is ours
+    (is_our_models) and/or library/. library/ counts by its own content (pack manifests: library_state "packs"); an
+    empty one only beside our models/, never alone. Never by the names alone, and a link is never ours."""
+    occupied = occupied_entries(path, pointer_ok=pointer_ok)
+    if not occupied or not set(occupied) <= set(ENGINE_KEPT):
+        return False
+    p = Path(path)
+    models = "models" in occupied and is_our_models(p / "models")
+    if "models" in occupied and not models:
+        return False
+    if LIBRARY not in occupied:
+        return models
+    lib = library_state(p / LIBRARY)
+    return lib == "packs" or (lib == "empty" and models)
 
 
 def is_our_home(path, *, pointer_ok: bool = False) -> bool:
-    """A genuine engine home (is_engine_home) or the recognised leftover of one (is_model_leftover): WhyNot Cut's own
-    folder for placement, at install and at uninstall (fix round 5, N1)."""
-    return is_engine_home(path) or is_model_leftover(path, pointer_ok=pointer_ok)
+    """A genuine engine home (is_engine_home) or the recognised leftover of one (is_kept_leftover): WhyNot Cut's own
+    folder for placement, at install and at uninstall (fix round 5, N1; round 6)."""
+    return is_engine_home(path) or is_kept_leftover(path, pointer_ok=pointer_ok)
 
 
 def occupied_entries(path, *, pointer_ok: bool = False) -> list:
@@ -560,6 +642,9 @@ UNINSTALL_FIX_AR = ("لا يمكن إلغاء التثبيت من هذا الم�
                     "<folder>) المجلد الذي ثُبّت فيه WhyNot Cut، أو احذف هذا الخيار ليُستخدم المجلد المحفوظ.")
 UNINSTALL_SUBFOLDER_AR = ("هذا المجلد ليس مجلد WhyNot Cut، لكن المجلد WhyNotCut داخله هو مجلده (ثبّته هناك تثبيت "
                           "سابق)، لذلك سيُلغى التثبيت منه.")
+# fix round 6 (R5-2): --remove-models deleted only WhyNot Cut's own models; models/ stays for the editor's own files
+MODELS_KEPT_AR = ("حُذفت نماذج WhyNot Cut وحدها. بقي المجلد models لأن فيه ملفات ليست من WhyNot Cut (نماذجك أنت "
+                  "مثلًا)، ولم يُلمس منها شيء.")
 # fix round 5 (N6): ~/.whynot-cut was pointed elsewhere while the uninstall ran
 LINK_MOVED_AR = ("تغيّر المجلد الذي يشير إليه الرابط ~/.whynot-cut أثناء الإلغاء، لذلك لم يُحذف شيء آخر. تحقّق من "
                  "الرابط ثم شغّل الإلغاء مرة أخرى.")

@@ -79,6 +79,12 @@
 # anything is written (Get-WncUninstallPlace, the core's base.uninstall_engine_home); else exit 2, "Nothing was
 # changed". The deferred delete re-resolves a linked ~\.whynot-cut and deletes nothing when it points elsewhere than
 # at the start (LinkReal).
+# Fix round 6: what an uninstall keeps is recognised by content, never by name (Test-WncKeptLeftover): models\ counts
+# only when EVERY entry is a store of ours (components.json models.*.repo, every model the installer offers) or
+# Hugging Face's own bookkeeping (.locks, CACHEDIR.TAG, a marked blobs\ store, OS folder-view files), never with a link
+# inside; library\ counts by its pack manifests (motion\<pack>\pack.json), or empty beside our models\. -ReleaseStage
+# (install.ps1 -Source): the release staged under the OS temp dir; an install keeps it in <engine>\downloads\release-
+# <sha8> only after every check above has passed (Copy-WncReleaseCache), an uninstall never writes it.
 # ASCII only: Windows PowerShell 5.1 reads a file without a BOM as ANSI.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '',
     Justification = 'The parameters are read inside the & { } block below, which the analyzer does not follow.')]
@@ -100,7 +106,8 @@ param(
     [switch]$RemoveModels,
     [string]$EngineHome,
     [string]$Model,
-    [Alias('Customize')][switch]$Customise
+    [Alias('Customize')][switch]$Customise,
+    [string]$ReleaseStage
 )
 
 & {
@@ -115,7 +122,7 @@ param(
     $WncUninstallStepNames = @('plugin', 'adobe', 'fonts', 'marketplace', 'engine')
     $S = @{ Log = $null; Step = 'start'; Code = 0; Utf8 = (New-Object System.Text.UTF8Encoding $false);
         Answers = $null; AnswerAt = 0; FreeGb = $null; Mode = 'yes'; TestKeys = $null; CountdownS = 10;
-        TestMounts = $null; CompPath = $null; ModelStores = $null }
+        TestMounts = $null; CompPath = $null; ModelStores = $null; Stage = $null }
     $WncModels = @('large-v3', 'large-v3-turbo', 'medium', 'small')  # wnc_installer/system.py MODELS
     $WncNeedGb = 6  # free space for the engine; + $WncModelGb with the Whisper model (system.py RED_GB / AMBER_GB)
     $WncModelGb = 3
@@ -718,28 +725,109 @@ param(
         return ,@($out)
     }
 
-    function Test-WncModelLeftover([string]$Path, [bool]$PointerOk) {
-        # the core's base.is_model_leftover (fix round 5, N1): what an uninstall keeps of an engine home - its ONLY
-        # entry (Get-WncOccupiedEntry) is a real models\ folder holding a model store folder of WhyNot Cut's (names
-        # compared exactly); never by the name `models` alone (an editor's own models\ is not ours)
-        $occupied = Get-WncOccupiedEntry -Path $Path -PointerOk $PointerOk  # (an array already: no @() around it)
-        if (($occupied.Count -ne 1) -or ($occupied[0] -cne 'models')) { return $false }
-        $m = Join-Path $Path 'models'
-        if ((-not [IO.Directory]::Exists($m)) -or (Test-WncReparse $m)) { return $false }
+    function Test-WncViewFile([string]$Path) {
+        # an OS folder-view file (.DS_Store, Thumbs.db, desktop.ini), a real file: the core's base._view_file
+        $n = [IO.Path]::GetFileName($Path)
+        return ((@('.DS_Store', 'Thumbs.db', 'desktop.ini') -ccontains $n) -and [IO.File]::Exists($Path) -and
+            (-not (Test-WncReparse $Path)))
+    }
+
+    function Get-WncModelEntryKind([string]$Dir, [string]$Name) {
+        # what one entry of <engine home>\models is (fix round 6, R5-2; the core's base.model_entry_kind): 'store' (a
+        # real folder named exactly as a model store of WhyNot Cut's), 'bookkeeping' (Hugging Face's own .locks folder,
+        # CACHEDIR.TAG, a blobs\ store holding its .huggingface-shared-blobs marker, or an OS folder-view file) or $null
+        # (the editor's, or a link: never ours, never entered)
+        $p = Join-Path $Dir $Name
+        $realDir = [IO.Directory]::Exists($p) -and (-not (Test-WncReparse $p))
+        $realFile = [IO.File]::Exists($p) -and (-not (Test-WncReparse $p))
         $stores = Get-WncModelStoreList
+        if ($stores -ccontains $Name) {
+            if ($realDir) { return 'store' }
+            return $null
+        }
+        if ($Name -ceq '.locks') {
+            if ($realDir) { return 'bookkeeping' }
+            return $null
+        }
+        if (@('CACHEDIR.TAG', '.DS_Store', 'Thumbs.db', 'desktop.ini') -ccontains $Name) {
+            if ($realFile) { return 'bookkeeping' }
+            return $null
+        }
+        if ($Name -ceq 'blobs') {
+            $mark = Join-Path $p '.huggingface-shared-blobs'
+            if ($realDir -and [IO.File]::Exists($mark) -and (-not (Test-WncReparse $mark))) { return 'bookkeeping' }
+        }
+        return $null
+    }
+
+    function Test-WncOurModels([string]$Dir) {
+        # <engine home>\models is WhyNot Cut's (fix round 6, R5-2; the core's base.is_our_models): a real folder whose
+        # EVERY entry is a store of ours or Hugging Face's bookkeeping, at least one a store. One entry of the editor's
+        # (their own model beside ours) or any link inside makes the whole folder the editor's.
+        if ((-not [IO.Directory]::Exists($Dir)) -or (Test-WncReparse $Dir)) { return $false }
+        $store = $false
         try {
-            foreach ($e in [IO.Directory]::GetDirectories($m)) {
-                if ((-not (Test-WncReparse $e)) -and ($stores -ccontains [IO.Path]::GetFileName($e))) { return $true }
+            foreach ($e in [IO.Directory]::GetFileSystemEntries($Dir)) {
+                $kind = Get-WncModelEntryKind -Dir $Dir -Name ([IO.Path]::GetFileName($e))
+                if (-not $kind) { return $false }
+                if ($kind -ceq 'store') { $store = $true }
             }
         } catch {
             return $false
         }
-        return $false
+        return $store
+    }
+
+    function Get-WncLibraryState([string]$Lib) {
+        # <engine home>\library (fix round 6; the core's base.library_state): 'packs' when it holds only motion\, which
+        # holds only pack folders that each carry their pack.json (the engine's pack manifest), at least one; 'empty'
+        # when it holds nothing or only an empty motion\; $null otherwise (anything else, any link). OS folder-view
+        # files are ignored at both levels.
+        if ((-not [IO.Directory]::Exists($Lib)) -or (Test-WncReparse $Lib)) { return $null }
+        $motion = Join-Path $Lib 'motion'
+        try {
+            $top = @([IO.Directory]::GetFileSystemEntries($Lib) | Where-Object { -not (Test-WncViewFile $_) })
+            if ($top.Count -eq 0) { return 'empty' }
+            if (($top.Count -ne 1) -or ([IO.Path]::GetFileName($top[0]) -cne 'motion') -or
+                (-not [IO.Directory]::Exists($motion)) -or (Test-WncReparse $motion)) {
+                return $null
+            }
+            $packs = @([IO.Directory]::GetFileSystemEntries($motion) | Where-Object { -not (Test-WncViewFile $_) })
+        } catch {
+            return $null
+        }
+        if ($packs.Count -eq 0) { return 'empty' }
+        foreach ($k in $packs) {
+            $mark = Join-Path $k 'pack.json'
+            if ((-not [IO.Directory]::Exists($k)) -or (Test-WncReparse $k) -or (-not [IO.File]::Exists($mark)) -or
+                (Test-WncReparse $mark)) {
+                return $null
+            }
+        }
+        return 'packs'
+    }
+
+    function Test-WncKeptLeftover([string]$Path, [bool]$PointerOk) {
+        # what -Uninstall -RemoveEngine keeps of an engine home, still WhyNot Cut's own folder (fix round 5, N1; round
+        # 6: the core's base.is_kept_leftover): its only entries (Get-WncOccupiedEntry) are models\ that is ours
+        # (Test-WncOurModels) and/or library\ - recognised by its pack manifests, or empty beside our models\ (never
+        # alone). Never by the names alone; a link is never ours.
+        $occupied = Get-WncOccupiedEntry -Path $Path -PointerOk $PointerOk  # (an array already: no @() around it)
+        if ($occupied.Count -eq 0) { return $false }
+        foreach ($n in $occupied) {
+            if (@('models', 'library') -cnotcontains $n) { return $false }
+        }
+        $hasModels = $occupied -ccontains 'models'
+        $models = $hasModels -and (Test-WncOurModels (Join-Path $Path 'models'))
+        if ($hasModels -and (-not $models)) { return $false }
+        if ($occupied -cnotcontains 'library') { return $models }
+        $lib = Get-WncLibraryState (Join-Path $Path 'library')
+        return (($lib -ceq 'packs') -or (($lib -ceq 'empty') -and $models))
     }
 
     function Test-WncOurHome([string]$Path, [bool]$PointerOk) {
-        # WhyNot Cut's own folder: a genuine engine home or the leftover of one (fix round 5, N1)
-        return ((Test-WncEngineHomeMark $Path) -or (Test-WncModelLeftover -Path $Path -PointerOk $PointerOk))
+        # WhyNot Cut's own folder: a genuine engine home or the leftover of one (fix rounds 5 and 6)
+        return ((Test-WncEngineHomeMark $Path) -or (Test-WncKeptLeftover -Path $Path -PointerOk $PointerOk))
     }
 
     function Find-WncMarkerScan([string]$Path) {
@@ -797,7 +885,10 @@ param(
         $pointerOk = (Get-WncNormPath (Join-Path $UserHome '.whynot-cut')) -ieq $n  # the hook's pointer lives there
         $existing = Test-WncOurHome $n $pointerOk  # (fix round 5, N1: also the leftover of an uninstall)
         if (-not $existing) {
-            if ((Test-WncWithin $r $n -Strict) -and (-not (Test-WncWithin $r (Join-Path $n 'downloads'))) -and
+            # (fix round 6, R5-5: a -Source stage in the OS temp dir is no plugin folder of its own - it is deleted
+            # when the run ends, and kept in <final>\downloads only after these checks)
+            if ((-not $S.Stage) -and (Test-WncWithin $r $n -Strict) -and
+                (-not (Test-WncWithin $r (Join-Path $n 'downloads'))) -and
                 (-not (Test-WncWithin $r (Join-Path $n 'WhyNotCut\downloads')))) {
                 return @{ Problem = "$Path holds the plugin folder $r; choose a folder of its own" }
             }
@@ -904,6 +995,42 @@ param(
             -Mode 'uninstall'
         if ($why) { return @{ Problem = "$final is $why" } }
         return @{ Path = $final; Note = $note; Problem = $null }
+    }
+
+    function Copy-WncReleaseCache([string]$Stage, [string]$Engine) {
+        # -Source (fix round 6, R5-5): install.ps1 fetched and verified the release zip in a per-run folder under the
+        # OS temp dir and deletes it when this run ends. Only now - the engine home passed every check - is it kept in
+        # <engine>\downloads\release-<sha8> (zip + x\), the plugin root of this run: the core and its background model
+        # download read the plugin files after install.ps1 has deleted the stage. A complete cache of the same zip is
+        # reused. Returns the plugin folder in the cache, or $null (a warning: this run then uses the stage).
+        $name = Split-Path $Stage -Leaf
+        $downloads = Join-Path $Engine 'downloads'
+        $dest = Join-Path $downloads $name
+        $plugin = Join-Path $dest 'x\whynot-cut-marketplace\whynot-cut'
+        try {
+            $zips = @([IO.Directory]::GetFiles($Stage))
+            $same = ($zips.Count -gt 0) -and [IO.Directory]::Exists($dest) -and (-not (Test-WncReparse $dest)) -and
+                [IO.File]::Exists((Join-Path $plugin 'installer\core\wnc_install.py'))
+            foreach ($z in $zips) {
+                $d = Join-Path $dest ([IO.Path]::GetFileName($z))
+                if ($same -and ((-not [IO.File]::Exists($d)) -or ((Get-WncFileSha $d) -ne (Get-WncFileSha $z)))) {
+                    $same = $false
+                }
+            }
+            if (-not $same) {
+                $null = New-Item -ItemType Directory -Force -Path $downloads
+                $tmp = "$dest.tmp"
+                if (Test-Path -LiteralPath $tmp) { Invoke-WncDeleteTree $tmp }
+                Copy-Item -LiteralPath $Stage -Destination $tmp -Recurse -Force
+                if (Test-Path -LiteralPath $dest) { Invoke-WncDeleteTree $dest }
+                [IO.Directory]::Move($tmp, $dest)
+            }
+            Write-WncLine "the release is kept in $dest"
+            return $plugin
+        } catch {
+            Write-WncLine "WARNING: could not keep the release in $dest ($($_.Exception.Message)); this run uses $Stage"
+            return $null
+        }
     }
 
     function Get-WncFreeGb([string]$Path) {
@@ -1431,6 +1558,23 @@ param(
             return @{ Code = 2 }
         }
         $root = Get-WncFullPath $PluginRoot
+        if ($ReleaseStage) {
+            # install.ps1 -Source (fix round 6, R5-5): the release staged in the OS temp dir; kept in the engine home's
+            # downloads\ only after every check below has passed (Copy-WncReleaseCache)
+            $ok = $false
+            try {
+                $st = Get-WncFullPath $ReleaseStage
+                $ok = ((Split-Path $st -Leaf) -cmatch '^release-[0-9a-f]{8}$') -and
+                    ((Get-WncNormPath (Join-Path $st 'x\whynot-cut-marketplace\whynot-cut')) -ieq (Get-WncNormPath $root))
+            } catch {
+                $ok = $false
+            }
+            if ($ok) {
+                $S.Stage = $st
+            } else {
+                Write-Host "WARNING: -ReleaseStage $ReleaseStage is not the folder of this run's release; it is not kept"
+            }
+        }
         if ($Model -and ($WncModels -notcontains $Model)) {
             Write-Host "ERROR: -Model $Model is not one of $($WncModels -join ', ')"
             return @{ Code = 2 }
@@ -1595,6 +1739,15 @@ param(
             $null = New-Item -ItemType Directory -Force -Path $logs
             $S.Log = Join-Path $logs ("{0}-{1}.log" -f $command, (Get-Date -Format 'yyyyMMdd-HHmmss'))
             [IO.File]::WriteAllText($S.Log, '', $S.Utf8)
+            if ($S.Stage -and (-not $Uninstall)) {
+                # -Source: every check passed, so the release is kept in this engine home now (fix round 6, R5-5); an
+                # uninstall needs it only while it runs, so it is never written into the folder it empties
+                $cached = Copy-WncReleaseCache -Stage $S.Stage -Engine $engine
+                if ($cached) {
+                    $root = $cached
+                    $core = Join-Path $root 'installer\core\wnc_install.py'
+                }
+            }
         }
         if ($chosen) {
             $mode = ' (chosen)'

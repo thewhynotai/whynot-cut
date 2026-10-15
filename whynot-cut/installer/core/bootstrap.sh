@@ -80,6 +80,13 @@
 # anything is written (uninstall_place, the core's base.uninstall_engine_home); else exit 2, "Nothing was changed".
 # Every engine home path is normalised lexically (lex_path: ., .., repeated and trailing /) before any test. The deferred
 # delete re-resolves a linked ~/.whynot-cut and deletes nothing when it points elsewhere than at the start (LINK_REAL).
+# Fix round 6: what an uninstall keeps is recognised by content, never by name (is_kept_leftover): models/ counts only
+# when EVERY entry is a store of ours (components.json models.*.repo, every model the installer offers) or Hugging
+# Face's own bookkeeping (.locks, CACHEDIR.TAG, a marked blobs/ store, OS folder-view files), never with a link inside;
+# library/ counts by its pack manifests (motion/<pack>/pack.json), or empty beside our models/. `..` never climbs above
+# /, a drive (C:/) or //server/share (lex_path, norm_path). --release-stage (install.sh --source): the release staged
+# under the OS temp dir; an install keeps it in <engine>/downloads/release-<sha8> only after every check above has
+# passed (keep_release), an uninstall never writes it.
 # bash 3.2 (the macOS default): no associative arrays, no ${var,,}, no mapfile. No `set -e`: every failure is handled.
 
 STEP_NAMES="preflight questions runtime ffmpeg gitbash gpu claude adobe fonts settings model state doctor launch"
@@ -268,19 +275,29 @@ engine_python() { # uninstall: the python-build-standalone already in the engine
 }
 
 lex_path() { # path -> LEX: its lexical normal form, the core's abspath (fix round 5, N4): \ as / and /c/x as C:/x (Git
-  # Bash), repeated /, . and .. resolved, no trailing / - case kept. A network / device path (//server/x) stays as it
-  # is (the guards refuse it by its spelling)
-  local p="$1" out="" part lead=""
-  case "$p" in \\\\*|//*) LEX="$p"; return 0 ;; esac
+  # Bash), repeated /, . and .. resolved, no trailing / - case kept. `..` never climbs above the root - /, a drive (C:/)
+  # or //server/share (fix round 6, R5-6: C:/../x is C:/x, as in Python). A \\server path, or a // one without a share,
+  # stays as it is (the guards refuse it by its spelling)
+  local p="$1" out="" part root="" rest srv shr
+  case "$p" in \\\\*) LEX="$p"; return 0 ;; esac
   case "$OS_NAME" in
     MINGW*|MSYS*|CYGWIN*)
       p="${p//\\//}"
       case "$p" in /[a-zA-Z]|/[a-zA-Z]/*) p="${p:1:1}:${p:2}" ;; esac ;;
   esac
-  case "$p" in /*) lead="/" ;; esac
+  rest="$p"
+  case "$p" in
+    //*)
+      rest="${p#//}"; srv="${rest%%/*}"; rest="${rest#"$srv"}"; rest="${rest#/}"; shr="${rest%%/*}"
+      rest="${rest#"$shr"}"
+      if [ -z "$srv" ] || [ -z "$shr" ]; then LEX="$p"; return 0; fi
+      root="//$srv/$shr" ;;
+    /*) root="/"; rest="${p#/}" ;;
+    [A-Za-z]:*) root="${p:0:2}/"; rest="${p:2}" ;;
+  esac
   local IFS=/
   set -f
-  for part in $p; do
+  for part in $rest; do
     case "$part" in
       ''|.) ;;
       ..) out="${out%/*}" ;;
@@ -288,24 +305,30 @@ lex_path() { # path -> LEX: its lexical normal form, the core's abspath (fix rou
     esac
   done
   set +f
-  if [ -n "$lead" ]; then LEX="${out:-/}"; else LEX="${out#/}"; fi
-  case "$LEX" in
-    "") LEX="$1" ;;
-    [A-Za-z]:) LEX="$LEX/" ;;
+  case "$root" in
+    "") LEX="${out#/}"; [ -n "$LEX" ] || LEX="$1" ;;
+    /) LEX="${out:-/}" ;;
+    //*) LEX="$root$out" ;;
+    *) LEX="${root%/}${out:-/}" ;;
   esac
 }
 
-norm_path() { # lexical: \ (Git Bash), repeated /, . and .. resolved, no trailing / -> NORM; lower case on Windows
-  local p="$1" out="" part lead=""
+norm_path() { # lexical: \ (Git Bash), repeated /, . and .. resolved, no trailing / -> NORM; lower case on Windows. `..`
+  # never climbs above / or a drive (fix round 6, R5-6); a drive root is X: (as before); a leading // run is one /
+  local p="$1" out="" part root="" rest
   case "$OS_NAME" in
     MINGW*|MSYS*|CYGWIN*)
       p="${p//\\//}"
       case "$p" in /[a-zA-Z]|/[a-zA-Z]/*) p="${p:1:1}:${p:2}" ;; esac ;;  # Git Bash /c/x is C:/x
   esac
-  case "$p" in /*) lead="/" ;; esac
+  rest="$p"
+  case "$p" in
+    /*) root="/"; rest="${p#/}" ;;
+    [A-Za-z]:*) root="${p:0:2}"; rest="${p:2}" ;;
+  esac
   local IFS=/
   set -f
-  for part in $p; do
+  for part in $rest; do
     case "$part" in
       ''|.) ;;
       ..) out="${out%/*}" ;;
@@ -313,7 +336,11 @@ norm_path() { # lexical: \ (Git Bash), repeated /, . and .. resolved, no trailin
     esac
   done
   set +f
-  if [ -n "$lead" ]; then NORM="${out:-/}"; else NORM="${out#/}"; fi
+  case "$root" in
+    "") NORM="${out#/}" ;;
+    /) NORM="${out:-/}" ;;
+    *) NORM="$root$out" ;;
+  esac
   case "$OS_NAME" in MINGW*|MSYS*|CYGWIN*) NORM="$(printf '%s' "$NORM" | tr '[:upper:]' '[:lower:]')" ;; esac
 }
 
@@ -410,7 +437,7 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
 
 # ------------------------------------------------------------------------------------------- arguments
 PLUGIN_ROOT="" HOME_OVR="" DRY="" YES="" CLIENTS="" LANG_OPT="" CHANNEL="" COMPONENTS="" SKIP=""
-UNINSTALL="" REMOVE_ENGINE="" REMOVE_MODELS="" ENGINE_OPT="" MODEL_OPT="" CUSTOMISE=""
+UNINSTALL="" REMOVE_ENGINE="" REMOVE_MODELS="" ENGINE_OPT="" MODEL_OPT="" CUSTOMISE="" RELEASE_STAGE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --plugin-root) PLUGIN_ROOT="$2"; shift ;;
@@ -428,6 +455,7 @@ while [ $# -gt 0 ]; do
     --uninstall) UNINSTALL=1 ;;
     --remove-engine) REMOVE_ENGINE=1 ;;
     --remove-models) REMOVE_MODELS=1 ;;
+    --release-stage) RELEASE_STAGE="$2"; shift ;;
     *) stop2 "bootstrap: unknown option $1" ;;
   esac
   shift
@@ -709,25 +737,99 @@ model_stores() { # -> MODEL_STORES (one per line), read once from the components
   return 0
 }
 
-is_model_leftover() { # dir [pointer-ok]: status 0 for what an uninstall keeps of an engine home (the core's
-  # base.is_model_leftover): its ONLY entry is a real models/ folder holding a model store folder of WhyNot Cut's
-  # (model_stores, names compared exactly) - never by the name `models` alone (an editor's own models/ is not ours)
-  local e n nl=$'\n'
-  occupied_list "$1" "${2:-}"
-  [ "$OCCUPIED" = "models" ] || return 1
-  { [ -d "$1/models" ] && [ ! -L "$1/models" ]; } || return 1
+model_entry_kind() { # models-dir name -> KIND: what one entry of <engine home>/models is (fix round 6, R5-2; the core's
+  # base.model_entry_kind): store (a real folder named exactly as a model store of WhyNot Cut's), bookkeeping (Hugging
+  # Face's own .locks folder, CACHEDIR.TAG, a blobs/ store holding its .huggingface-shared-blobs marker, or an OS
+  # folder-view file) or "" (the editor's, or a link: never ours, never entered)
+  local p="$1/$2" nl=$'\n'
+  KIND=""
   model_stores
-  [ -n "$MODEL_STORES" ] || return 1
-  for e in "$1/models"/* "$1/models"/.[!.]* "$1/models"/..?*; do
-    { [ -d "$e" ] && [ ! -L "$e" ]; } || continue
-    n="${e##*/}"
-    case "$nl$MODEL_STORES$nl" in *"$nl$n$nl"*) return 0 ;; esac
-  done
-  return 1
+  case "$nl$MODEL_STORES$nl" in
+    *"$nl$2$nl"*)
+      if [ -d "$p" ] && [ ! -L "$p" ]; then KIND=store; fi
+      return 0 ;;
+  esac
+  case "$2" in
+    .locks) if [ -d "$p" ] && [ ! -L "$p" ]; then KIND=bookkeeping; fi ;;
+    CACHEDIR.TAG|.DS_Store|Thumbs.db|desktop.ini) if [ -f "$p" ] && [ ! -L "$p" ]; then KIND=bookkeeping; fi ;;
+    blobs)
+      if [ -d "$p" ] && [ ! -L "$p" ] && [ -f "$p/.huggingface-shared-blobs" ] && [ ! -L "$p/.huggingface-shared-blobs" ]
+      then KIND=bookkeeping; fi ;;
+  esac
+  return 0
 }
 
-our_home() { # dir [pointer-ok]: WhyNot Cut's own folder - a genuine engine home or the leftover of one (fix round 5)
-  is_engine_home "$1" || is_model_leftover "$1" "${2:-}"
+our_models() { # dir: status 0 when <engine home>/models is WhyNot Cut's (fix round 6, R5-2; the core's base.is_our_models):
+  # a real folder whose EVERY entry is a store of ours or Hugging Face's bookkeeping, at least one a store. One entry of
+  # the editor's (their own model beside ours) or any link inside makes the whole folder the editor's
+  local e store=""
+  { [ -d "$1" ] && [ ! -L "$1" ]; } || return 1
+  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    model_entry_kind "$1" "${e##*/}"
+    [ -n "$KIND" ] || return 1
+    [ "$KIND" = store ] && store=1
+  done
+  [ -n "$store" ]
+}
+
+view_file() { # path: status 0 for an OS folder-view file (.DS_Store, Thumbs.db, desktop.ini) that is a real file
+  case "${1##*/}" in
+    .DS_Store|Thumbs.db|desktop.ini) [ -f "$1" ] && [ ! -L "$1" ] ;;
+    *) return 1 ;;
+  esac
+}
+
+library_state() { # dir -> LIB: <engine home>/library (fix round 6; the core's base.library_state) - packs (only motion/,
+  # holding only pack folders that each carry their pack.json, the engine's pack manifest; at least one), empty (nothing,
+  # or only an empty motion/) or "" (anything else, any link). OS folder-view files are ignored at both levels
+  local e top="" packs=""
+  LIB=""
+  { [ -d "$1" ] && [ ! -L "$1" ]; } || return 0
+  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    view_file "$e" && continue
+    if [ "${e##*/}" != "motion" ] || [ ! -d "$e" ] || [ -L "$e" ]; then return 0; fi
+    top=1
+  done
+  if [ -z "$top" ]; then LIB=empty; return 0; fi
+  for e in "$1/motion"/* "$1/motion"/.[!.]* "$1/motion"/..?*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    view_file "$e" && continue
+    if [ ! -d "$e" ] || [ -L "$e" ] || [ ! -f "$e/pack.json" ] || [ -L "$e/pack.json" ]; then return 0; fi
+    packs=1
+  done
+  if [ -n "$packs" ]; then LIB=packs; else LIB=empty; fi
+  return 0
+}
+
+is_kept_leftover() { # dir [pointer-ok]: status 0 for what an uninstall keeps of an engine home, still WhyNot Cut's own
+  # folder (fix round 5, N1; round 6: the core's base.is_kept_leftover): its only entries (occupied_list) are models/
+  # that is ours (our_models) and/or library/ - recognised by its pack manifests, or empty beside our models/ (never
+  # alone). Never by the names alone; a link is never ours
+  local n has_models="" models="" has_lib=""
+  occupied_list "$1" "${2:-}"
+  [ -n "$OCCUPIED" ] || return 1
+  while IFS= read -r n; do
+    case "$n" in
+      models) has_models=1 ;;
+      library) has_lib=1 ;;
+      *) return 1 ;;
+    esac
+  done <<EOF
+$OCCUPIED
+EOF
+  if [ -n "$has_models" ]; then
+    our_models "$1/models" || return 1
+    models=1
+  fi
+  if [ -z "$has_lib" ]; then [ -n "$models" ]; return $?; fi
+  library_state "$1/library"
+  [ "$LIB" = packs ] || { [ "$LIB" = empty ] && [ -n "$models" ]; }
+}
+
+our_home() { # dir [pointer-ok]: WhyNot Cut's own folder - a genuine engine home or the leftover of one (fix rounds 5, 6)
+  is_engine_home "$1" || is_kept_leftover "$1" "${2:-}"
 }
 
 is_mount() { # path: /Volumes/<name>, or an existing folder that df reports as its own mount point
@@ -782,7 +884,9 @@ engine_place() { # path -> PLACED, PLACE_NOTE, PROBLEM (empty: fine); the core's
   [ "$NORM" = "$n" ] && pointer_ok=1  # the SessionStart hook's pointer lives there
   our_home "$p" "$pointer_ok" && existing=1  # (fix round 5, N1: also the leftover of an uninstall)
   if [ -z "$existing" ]; then
-    if [ "$r" != "$n" ] && within "$r" "$n"; then  # it holds the plugin (fine only in its downloads/: -Source cache)
+    # it holds the plugin (fine only in its downloads/: the -Source cache; fix round 6, R5-5: a --source stage in the
+    # OS temp dir is no plugin folder of its own - deleted when the run ends, kept in <final>/downloads after the checks)
+    if [ -z "$STAGE" ] && [ "$r" != "$n" ] && within "$r" "$n"; then
       norm_path "$p/downloads"; d1="$NORM"
       norm_path "$p/WhyNotCut/downloads"; d2="$NORM"
       if ! within "$r" "$d1" && ! within "$r" "$d2"; then
@@ -836,6 +940,34 @@ EOF
   fi
   PLACED="$f"
   return 0
+}
+
+keep_release() { # stage engine -> ROOT: --source (fix round 6, R5-5) - install.sh fetched and verified the release zip in
+  # a folder of this run under the OS temp dir and deletes it when the run ends. Only now (the engine home passed every
+  # check) is it kept in <engine>/downloads/release-<sha8> (zip + x/), the plugin root of this run: the core and its
+  # background model download read the plugin files after install.sh has deleted the stage. A complete cache of the same
+  # zip is reused. On a failure ROOT stays the stage (a warning)
+  local stage="$1" dl="$2/downloads" dest plugin z same=1 zips=""
+  dest="$dl/${stage##*/}"
+  plugin="$dest/x/whynot-cut-marketplace/whynot-cut"
+  { [ -d "$dest" ] && [ ! -L "$dest" ] && [ -f "$plugin/installer/core/wnc_install.py" ]; } || same=""
+  for z in "$stage"/*; do
+    [ -f "$z" ] || continue
+    zips=1
+    if [ -n "$same" ] && { [ ! -f "$dest/${z##*/}" ] || [ "$(file_sha "$dest/${z##*/}")" != "$(file_sha "$z")" ]; }
+    then same=""; fi
+  done
+  [ -n "$zips" ] || same=""
+  if [ -z "$same" ]; then
+    if ! { mkdir -p "$dl" && rm -rf "$dest.tmp" && cp -R "$stage" "$dest.tmp" && rm -rf "$dest" \
+           && mv "$dest.tmp" "$dest"; }; then
+      rm -rf "$dest.tmp"
+      say "WARNING: could not keep the release in $dest; this run uses $stage"
+      return 0
+    fi
+  fi
+  say "the release is kept in $dest"
+  ROOT="$plugin"
 }
 
 free_gb() { # path -> FREE: whole GB free on its drive (empty when unknown)
@@ -1377,6 +1509,20 @@ ROOT="$(abs_path "$PLUGIN_ROOT")"
 case "$OS_NAME" in  # Git Bash: `pwd` may say /tmp/... for %TEMP%; the location checks compare Windows paths
   MINGW*|MSYS*|CYGWIN*) if command -v cygpath >/dev/null 2>&1; then ROOT="$(cygpath -m "$ROOT")"; fi ;;
 esac
+STAGE=""  # install.sh --source (fix round 6, R5-5): this run's release, staged under the OS temp dir
+if [ -n "$RELEASE_STAGE" ]; then
+  st="$(abs_path "$RELEASE_STAGE")"
+  case "$OS_NAME" in
+    MINGW*|MSYS*|CYGWIN*) if command -v cygpath >/dev/null 2>&1; then st="$(cygpath -m "$st")"; fi ;;
+  esac
+  norm_path "$st/x/whynot-cut-marketplace/whynot-cut"; n_st="$NORM"
+  norm_path "$ROOT"
+  case "${st##*/}" in
+    release-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) [ "$n_st" = "$NORM" ] && STAGE="$st" ;;
+  esac
+  [ -n "$STAGE" ] || printf 'WARNING: --release-stage %s is not the folder of this run'"'"'s release; it is not kept\n' \
+    "$RELEASE_STAGE"
+fi
 TEST_UV="" ANSWERS="" TEST_FREE="" TEST_KEYS="" TEST_KEYS_SET="" TEST_COUNTDOWN=10 ANSWER_AT=0 RUN_MODE="yes"
 TEST_MOUNTS=""
 if [ -n "$HOME_OVR" ]; then
@@ -1488,6 +1634,12 @@ if [ -z "$DRY" ]; then
   mkdir -p "$ENGINE/logs" || fail "cannot create $ENGINE/logs"
   LOG="$ENGINE/logs/$CMD-$(date '+%Y%m%d-%H%M%S').log"
   : > "$LOG" || fail "cannot write $LOG"
+  if [ -n "$STAGE" ] && [ -z "$UNINSTALL" ]; then
+    # --source: every check passed, so the release is kept in this engine home now (fix round 6, R5-5); an uninstall
+    # needs it only while it runs, so it is never written into the folder it empties
+    keep_release "$STAGE" "$ENGINE"
+    CORE="$ROOT/installer/core/wnc_install.py"
+  fi
 fi
 if [ -n "$CHOSEN" ]; then
   MODE=" (chosen)"

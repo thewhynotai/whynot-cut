@@ -119,6 +119,9 @@ ALLOWED_PLACEHOLDERS = {
     "bridge.cep.bundle", "bridge.cep.zxp", "bridge.cep.sha256",
     "bridge.uxp.version", "bridge.uxp.ccx", "bridge.uxp.sha256", "bridge.uxp.id",
     "models.large-v3.revision", "models.large-v3-turbo.revision", "models.large-v3-mlx.revision",
+    # fix round 6 (R5-3): every model the installer can offer and the engine's fallback repo (their store names)
+    "models.medium.revision", "models.small.revision", "models.large-v3-turbo-mlx.revision",
+    "models.medium-mlx.revision", "models.small-mlx.revision", "models.large-v3-turbo-engine.revision",
 }
 
 
@@ -4021,6 +4024,46 @@ class TestPowerShellOneLiner(TestPowerShellFrontEnd):
         self.assertFalse((self.home / ".whynot-cut" / "downloads").exists())
         self.assertEqual(thesis.read_bytes(), b"my thesis")
 
+    def os_temp_env(self):
+        """The OS temp folder the -Source stage goes to (round 6, R5-5), inside this test's folder."""
+        ostmp = self.tmp / "os temp"
+        ostmp.mkdir(exist_ok=True)
+        return ostmp, self.env(TEMP=str(ostmp), TMP=str(ostmp))
+
+    def test_round6_the_source_stage_is_temporary_and_cached_only_after_the_guard(self):
+        ostmp, env = self.os_temp_env()
+        r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Skip", "model,launch", "-Source", self.zip,
+                    "-SourceSha256", self.zip_sha, env=env)
+        self.assert_installed(r, "win-x64")
+        self.assertEqual(os.listdir(ostmp), [], r.stdout + r.stderr)  # the per-run stage is gone
+        rel = self.paths.downloads_dir / f"release-{self.zip_sha[:8]}"  # the cache, copied after the guard passed
+        self.assertEqual(sha((rel / self.zip.name).read_bytes()), self.zip_sha)
+        self.assertTrue((rel / "x" / "whynot-cut-marketplace" / "whynot-cut" / "engine" / "reel" / "cli.py").is_file())
+
+    def test_round6_a_refused_source_uninstall_changes_nothing(self):
+        # R5-5: -Source used to write <engine home>\downloads\release-* before the bootstrap's check; now a refused
+        # folder stays byte-identical, so "Nothing was changed" is true
+        ostmp, env = self.os_temp_env()
+        docs = self.home / "Documents"
+        touch(docs / "thesis.docx", b"mine")
+        touch(docs / "notes" / "a.txt", b"mine")
+        cases = [("-Uninstall", "-RemoveEngine", "-EngineHome", str(docs)), ("-EngineHome", str(self.home / "nope"),
+                                                                            "-Uninstall")]
+        if make_dir_link(self.home / ".whynot-cut", docs):  # the linked ~\.whynot-cut -> Documents: guard refusal
+            self.addCleanup(drop_dir_link, self.home / ".whynot-cut")
+            cases += [("-Uninstall", "-RemoveEngine"), ("-Skip", "model,launch")]
+        for flags in cases:
+            with self.subTest(flags):
+                before = snapshot_tree(self.home)
+                r = self.ps(self.lone, "-Home", self.home, "-Yes", *flags, "-Source", self.zip, "-SourceSha256",
+                            self.zip_sha, env=env)
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 2, out)
+                self.assertIn("Nothing was changed", out)
+                self.assertEqual(snapshot_tree(self.home), before, out)
+                self.assertFalse((self.home / "nope").exists(), out)
+                self.assertEqual(os.listdir(ostmp), [], out)
+
     def test_a_wrong_source_sha256_installs_nothing(self):
         r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Source", self.zip, "-SourceSha256", "1" * 64)
         out = r.stdout + r.stderr
@@ -4388,7 +4431,8 @@ class TestUninstall(_InstalledHome):
 
     def test_remove_models_too(self):
         self.install()
-        touch(self.paths.models_dir / "large-v3" / "model.bin", b"weights")
+        # (fix round 6, R5-2: --remove-models deletes WhyNot Cut's own model store, recognised by its exact name)
+        touch(self.paths.models_dir / HF_STORE / "snapshots" / "abc" / "model.bin", b"weights")
         self.bootstrap_leftovers()
         r = self.core("uninstall", "--remove-engine", "--remove-models")
         out = r.stdout + r.stderr
@@ -4596,7 +4640,7 @@ class TestUninstallSteps(unittest.TestCase):
     def test_remove_models_alone_keeps_the_rest_of_the_engine(self):
         ctx = self.ctx(remove_models=True)
         touch(ctx.paths.state_file, GENUINE_STATE)
-        touch(ctx.paths.models_dir / "large-v3" / "model.bin", b"w")
+        touch(ctx.paths.models_dir / HF_STORE / "snapshots" / "abc" / "model.bin", b"w")  # (round 6: our own store)
         rt = touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
         r = self.un.step_engine(ctx)
         self.assertEqual(r.status, "ok", r.detail)
@@ -4607,7 +4651,7 @@ class TestUninstallSteps(unittest.TestCase):
         ctx = self.ctx(remove_engine=True, remove_models=True)
         touch(ctx.paths.state_file, GENUINE_STATE)
         pack = touch(ctx.paths.whynot / "library" / "motion" / "licensed-pack" / "hand.png", b"paid illustration")
-        touch(ctx.paths.models_dir / "large-v3" / "model.bin", b"w")
+        touch(ctx.paths.models_dir / HF_STORE / "snapshots" / "abc" / "model.bin", b"w")  # (round 6: our own store)
         touch(ctx.paths.runtimes_dir / "r-1" / "pyvenv.cfg", b"x")
         r = self.un.step_engine(ctx)
         self.assertEqual(r.status, "ok", r.detail)
@@ -5316,6 +5360,49 @@ class TestBashEngineHome(TestBashFrontEnd):
         self.assertTrue((engine / "current").is_file())
         self.assertFalse((self.home / ".whynot-cut" / "downloads").exists())
 
+    def os_temp_env(self):
+        """The OS temp folder the --source stage goes to (round 6, R5-5), inside this test's folder."""
+        ostmp = self.tmp / "os temp"
+        ostmp.mkdir(exist_ok=True)
+        return ostmp, self.env(TMPDIR=ostmp.as_posix(), TEMP=str(ostmp), TMP=str(ostmp))
+
+    def test_round6_the_piped_source_stage_is_temporary_and_cached_only_after_the_guard(self):
+        zf = self.tmp / "WhyNotCut-3.0.0.zip"
+        zsha = release_zip(self.fx, zf)
+        ostmp, env = self.os_temp_env()
+        r = self.sh("-s", "--", "--home", self.home_arg(), "--yes", "--skip", "model,launch", "--source", zf.as_posix(),
+                    "--source-sha256", zsha, script=(INSTALLER / "install.sh").read_bytes(), env=env)
+        self.assert_installed(r, "mac-arm64")
+        self.assertEqual(os.listdir(ostmp), [], r.stdout + r.stderr)
+        rel = self.paths.downloads_dir / f"release-{zsha[:8]}"
+        self.assertEqual(sha((rel / zf.name).read_bytes()), zsha)
+        self.assertTrue((rel / "x" / "whynot-cut-marketplace" / "whynot-cut" / "engine" / "reel" / "cli.py").is_file())
+
+    def test_round6_a_refused_piped_source_uninstall_changes_nothing(self):
+        # R5-5: --source used to write <engine home>/downloads/release-* before the bootstrap's check
+        zf = self.tmp / "WhyNotCut-3.0.0.zip"
+        zsha = release_zip(self.fx, zf)
+        ostmp, env = self.os_temp_env()
+        docs = self.home / "Documents"
+        touch(docs / "thesis.docx", b"mine")
+        touch(docs / "notes" / "a.txt", b"mine")
+        cases = [("--uninstall", "--remove-engine", "--engine-home", docs.as_posix()),
+                 ("--engine-home", (self.home / "nope").as_posix(), "--uninstall")]
+        if make_dir_link(self.home / ".whynot-cut", docs):
+            self.addCleanup(drop_dir_link, self.home / ".whynot-cut")
+            cases += [("--uninstall", "--remove-engine"), ("--skip", "model,launch")]
+        for flags in cases:
+            with self.subTest(flags):
+                before = snapshot_tree(self.home)
+                r = self.sh("-s", "--", "--home", self.home_arg(), "--yes", *flags, "--source", zf.as_posix(),
+                            "--source-sha256", zsha, script=(INSTALLER / "install.sh").read_bytes(), env=env)
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 2, out)
+                self.assertIn("Nothing was changed", out)
+                self.assertEqual(snapshot_tree(self.home), before, out)
+                self.assertFalse((self.home / "nope").exists(), out)
+                self.assertEqual(os.listdir(ostmp), [], out)
+
     def test_another_folder_says_the_old_install_stays_behind(self):
         touch(self.home / ".whynot-cut" / "state.json", GENUINE_STATE)
         r = self.sh(self.front(), "--home", self.home_arg(), "--engine-home", (self.home / "Other").as_posix(),
@@ -5918,24 +6005,24 @@ class TestRound5(unittest.TestCase):
         empty_models = h / "empty models"
         (empty_models / "models").mkdir(parents=True)
         (h / "empty").mkdir()
-        self.assertTrue(base.is_model_leftover(ours))
-        self.assertTrue(base.is_model_leftover(probe))
+        self.assertTrue(base.is_kept_leftover(ours))
+        self.assertTrue(base.is_kept_leftover(probe))
         self.assertTrue(base.is_our_home(ours))
         self.assertFalse(base.is_engine_home(ours))
         for p in (mine, extra, other, empty_models, h / "empty", h / "missing"):
             with self.subTest(p.name):
-                self.assertFalse(base.is_model_leftover(p))
+                self.assertFalse(base.is_kept_leftover(p))
                 self.assertFalse(base.is_our_home(p))
         linked = h / "linked"
         linked.mkdir()
         if make_dir_link(linked / "models", ours / "models"):  # models/ that is a link is never ours
             self.addCleanup(drop_dir_link, linked / "models")
-            self.assertFalse(base.is_model_leftover(linked))
+            self.assertFalse(base.is_kept_leftover(linked))
         ptr = h / "ptr"  # the pointer counts only where it lives (~/.whynot-cut, or a link's target)
         make_model_leftover(ptr)
         touch(ptr / "plugin-options.json", b"{}")
-        self.assertFalse(base.is_model_leftover(ptr))
-        self.assertTrue(base.is_model_leftover(ptr, pointer_ok=True))
+        self.assertFalse(base.is_kept_leftover(ptr))
+        self.assertTrue(base.is_kept_leftover(ptr, pointer_ok=True))
 
     def test_n1_a_linked_target_holding_only_our_models_is_genuine(self):
         # the owner's PC after `uninstall --remove-engine`: the junction's target holds exactly models/
@@ -6106,6 +6193,316 @@ class TestRound5(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(b)), [], r.detail)
         self.assertTrue(base.is_link(link))
         self.assertEqual(snapshot_tree(a), before_a)
+
+
+# --------------------------------------------------------------------------------------------- fix round 6
+LLAMA = "models--meta-llama--Llama-3-8B"  # an editor's own Hugging Face model, next to ours in the same cache folder
+
+
+def make_engine_extras(root: Path) -> None:
+    """What the engine itself writes into its home beside the installer's layout (round 6, R5-1): the Premiere panel's
+    job journal (engine/reel/serve/jobs.py) and the active item (engine/reel/serve/engine_state.py)."""
+    touch(root / "serve" / "jobs" / "r1.json", b"{}")
+    touch(root / "state" / "active.json", b"{}")
+
+
+def make_pack(root: Path, name: str = "pack1") -> Path:
+    """A licensed motion pack the editor added (engine/reel/lib/motion_library.py: library/motion/<pack>/pack.json)."""
+    touch(root / "library" / "motion" / name / "icon.svg", b"<svg/>")
+    return touch(root / "library" / "motion" / name / "pack.json", ('{"id": "%s"}' % name).encode())
+
+
+def make_owner_genuine(root: Path) -> None:
+    """Genuine through `current` and its runtime stamp only (no state.json), as the owner's own engine home is."""
+    touch(root / "current", b"r-owner\n")
+    touch(root / "runtimes" / "r-owner" / "WHYNOT_RUNTIME", b'{"id": "r-owner"}')
+
+
+class TestRound6(unittest.TestCase):
+    """Task 9 fix round 6 (controller rulings on review round 5): R5-1 ... R5-4 and library/ in the core."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.home.mkdir()
+
+    run_core = TestResolvedHomeGuard.run_core
+    link = TestRound5.link
+
+    def test_r5_1_every_folder_the_engine_writes_in_its_home_is_known(self):
+        self.assertTrue(base.is_engine_entry("serve"))
+        self.assertTrue(base.is_engine_entry("state"))
+        # static: every top-level name the engine's own code writes under its home is in the layout (deleted by
+        # --remove-engine) or kept on purpose, so the next engine folder cannot drift again
+        rx = re.compile(r'(?:engine_home(?:\(\))?|Path\(home\)|\bhome|ENV_DIR)\s*/\s*"([A-Za-z0-9._-]+)"')
+        found = {}
+        for f in sorted((SK / "engine" / "reel").rglob("*.py")):
+            for m in rx.finditer(f.read_text(encoding="utf-8")):
+                found.setdefault(m.group(1), f.name)
+        found.pop(".fonts", None)  # lib/plat.py: the Linux USER home's own font folder, not the engine home
+        self.assertTrue({"serve", "state", "logs", "bridge", "library"} <= set(found), found)  # the scan sees them
+        for name, where in sorted(found.items()):
+            with self.subTest(name):
+                self.assertTrue(base.is_engine_entry(name) or name in base.ENGINE_KEPT, f"{name} ({where})")
+
+    def test_r5_1_an_uninstall_leaves_only_models_of_a_home_the_panel_used(self):
+        h = self.home
+        target = h.parent / "data drive" / "whynot-cut-home"
+        make_owner_genuine(target)
+        make_model_leftover(target)
+        make_engine_extras(target)
+        link = self.link(target)
+        ctx = make_ctx(h, {"schema": 1}, SK, remove_engine=True, remove_models=False)
+        ctx.facts["link_target"] = os.path.realpath(target)
+        r = uninstall_module().step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(sorted(os.listdir(target)), ["models"], r.detail)
+        for mode in ("install", "uninstall"):
+            self.assertIsNone(base.resolved_home_problem(link, home=h, mode=mode), mode)
+
+    def test_r5_2_models_is_ours_only_when_every_entry_is(self):
+        h = self.home
+
+        def leftover(name: str, *extra) -> Path:
+            root = h / name
+            make_model_leftover(root)
+            for rel, data in extra:
+                if data is None:
+                    (root / "models" / rel).mkdir(parents=True)
+                else:
+                    touch(root / "models" / rel, data)
+            return root
+
+        tag = b"Signature: 8a477f597d28d172789f06886806bc55\n"
+        ours = [leftover("plain"),
+                leftover("hf bookkeeping", (".locks/" + HF_STORE + "/a.lock", b""), ("CACHEDIR.TAG", tag)),
+                leftover("shared blobs", ("blobs/.huggingface-shared-blobs", b"1\n"), ("blobs/ab/" + "a" * 64, b"x")),
+                leftover("finder", (".DS_Store", b"x"))]
+        theirs = [leftover("llama", (LLAMA + "/snapshots/a/w.bin", b"mine")),
+                  leftover("notes", ("notes.txt", b"mine")),
+                  leftover("locks file", (".locks", b"x")),
+                  leftover("tag folder", ("CACHEDIR.TAG", None)),
+                  leftover("blobs unmarked", ("blobs/ab/x", b"mine"))]
+        only_bookkeeping = h / "bookkeeping only"
+        touch(only_bookkeeping / "models" / "CACHEDIR.TAG", tag)
+        (only_bookkeeping / "models" / ".locks").mkdir()
+        theirs.append(only_bookkeeping)
+        linked = leftover("store link")
+        if make_dir_link(linked / "models" / "models--Systran--faster-whisper-small", h / "plain" / "models" / HF_STORE):
+            self.addCleanup(drop_dir_link, linked / "models" / "models--Systran--faster-whisper-small")
+            theirs.append(linked)  # a link inside models/ is never ours
+        for p in ours:
+            with self.subTest(p.name):
+                self.assertTrue(base.is_kept_leftover(p))
+                self.assertTrue(base.is_our_home(p))
+        for p in theirs:
+            with self.subTest(p.name):
+                self.assertFalse(base.is_kept_leftover(p))
+                self.assertFalse(base.is_our_home(p))
+        # the reviewer's probe: the editor's Llama next to our store is the editor's folder: its own WhyNotCut folder
+        ai = h / "llama"
+        final, _note, problem = base.choose_engine_home(str(ai), home=h, plugin_root=SK, sandbox_home=h)
+        self.assertIsNone(problem)
+        self.assertEqual(norm(final), norm(ai / "WhyNotCut"))
+        final, _note, problem = base.uninstall_engine_home(str(ai), home=h, plugin_root=SK, sandbox_home=h)
+        self.assertIsNone(final)
+        self.assertIn("not a WhyNot Cut engine folder", problem or "")
+
+    def test_r5_2_remove_models_deletes_only_ours_and_never_through_a_link(self):
+        h = self.home
+        eng = h / "Engine"
+        touch(eng / "state.json", GENUINE_STATE)
+        make_model_leftover(eng)
+        touch(eng / "models" / ".locks" / HF_STORE / "x.lock", b"")
+        touch(eng / "models" / "CACHEDIR.TAG", b"Signature: 8a477f597d28d172789f06886806bc55\n")
+        mine = touch(eng / "models" / LLAMA / "snapshots" / "a" / "w.bin", b"mine")
+        outside = h.parent / "outside store"
+        theirs = touch(outside / "snapshots" / "b" / "model.bin", b"theirs")
+        small = eng / "models" / "models--Systran--faster-whisper-small"
+        linked = make_dir_link(small, outside)
+        if linked:
+            self.addCleanup(drop_dir_link, small)
+        ctx = make_ctx(h, {"schema": 1}, SK, engine_home=eng, remove_engine=False, remove_models=True)
+        r = uninstall_module().step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(sorted(os.listdir(eng / "models")), sorted([LLAMA] + ([small.name] if linked else [])),
+                         r.detail)
+        self.assertEqual(mine.read_bytes(), b"mine")
+        self.assertEqual(theirs.read_bytes(), b"theirs")  # never entered through the link
+        self.assertIn(LLAMA, r.detail)
+        self.assertIn(base.MODELS_KEPT_AR, r.detail)
+        # with --remove-engine too, and nothing of the editor's in models/: models/ goes as well
+        eng2 = h / "Engine2"
+        touch(eng2 / "state.json", GENUINE_STATE)
+        make_model_leftover(eng2)
+        touch(eng2 / "models" / "CACHEDIR.TAG", b"x")
+        (eng2 / "models" / ".locks").mkdir()
+        mine2 = touch(eng2 / "my notes.txt", b"mine")
+        ctx = make_ctx(h, {"schema": 1}, SK, engine_home=eng2, remove_engine=True, remove_models=True)
+        r = uninstall_module().step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(os.listdir(eng2), ["my notes.txt"], r.detail)
+        self.assertEqual(mine2.read_bytes(), b"mine")
+        self.assertNotIn(base.MODELS_KEPT_AR, r.detail)
+
+    def test_r5_3_every_model_the_installer_offers_has_its_store_name(self):
+        import ast
+        comp = json.loads((SK / "setup" / "components.json").read_text(encoding="utf-8"))
+        names = base.model_store_names(comp)
+        tables = {}
+        tree = ast.parse((SK / "engine" / "reel" / "lib" / "whisper_backends.py").read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
+                    and node.targets[0].id in ("CT2_REPOS", "MLX_REPOS"):
+                tables[node.targets[0].id] = ast.literal_eval(node.value)
+        self.assertEqual(set(tables), {"CT2_REPOS", "MLX_REPOS"})
+        offered = system_module().MODELS
+        want = {tables[t][m] for t in tables for m in offered}
+        try:  # what `reel model-download` really fetches (faster-whisper's own table wins in the engine: _ct2_repo)
+            from faster_whisper.utils import _MODELS
+            want |= {_MODELS[m] for m in offered if m in _MODELS}
+        except ImportError:
+            pass
+        for repo in sorted(want):
+            with self.subTest(repo):
+                self.assertIn("models--" + repo.replace("/", "--"), names)
+        for m in comp["models"]["by_hardware"].values():
+            self.assertIn(m, comp["models"])
+        # one source: the bootstraps read components.json, they keep no list of their own
+        for f in ("bootstrap.ps1", "bootstrap.sh"):
+            text = (CORE / f).read_text(encoding="utf-8")
+            for needle in ("faster-whisper", "mlx-community", "Systran"):
+                self.assertNotIn(needle, text, f)
+
+    def test_r5_4_the_marketplace_step_deletes_by_the_pinned_target(self):
+        h = self.home
+        a = h.parent / "drive A" / "home"
+        b = h.parent / "drive B" / "home"
+        for root in (a, b):
+            touch(root / "state.json", GENUINE_STATE)
+            touch(root / "marketplace" / "m.txt", root.parent.name.encode())
+            touch(root / "marketplace.prev" / "p.txt", b"x")
+        link = self.link(a)
+        ctx = make_ctx(h, {"schema": 1}, SK)
+        ctx.facts["link_target"] = os.path.realpath(a)  # what the guard checked at the start
+        drop_dir_link(link)  # retargeted by someone else before the step
+        self.assertTrue(make_dir_link(link, b))
+        before_a, before_b = snapshot_tree(a), snapshot_tree(b)
+        r = uninstall_module().step_marketplace(ctx)
+        self.assertEqual(r.status, "red", r.detail)
+        self.assertIn("now points", r.detail)
+        self.assertEqual(snapshot_tree(a), before_a)
+        self.assertEqual(snapshot_tree(b), before_b)
+        ctx = make_ctx(h, {"schema": 1}, SK)
+        ctx.facts["link_target"] = os.path.realpath(b)
+        r = uninstall_module().step_marketplace(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        # (logs/: this test's own log, written through the link)
+        self.assertEqual(sorted(n for n in os.listdir(b) if n != "logs"), ["state.json"], r.detail)
+        self.assertEqual(snapshot_tree(a), before_a)
+        self.assertTrue(base.is_link(link))
+
+    def test_library_kept_beside_models_makes_a_previous_home(self):
+        h = self.home
+        both = h / "both"
+        make_model_leftover(both)
+        pack = make_pack(both)
+        only_packs = h / "packs only"
+        make_pack(only_packs)
+        make_pack(only_packs, "pack2")
+        empty_lib = h / "empty library"
+        make_model_leftover(empty_lib)
+        (empty_lib / "library" / "motion").mkdir(parents=True)
+        ours = [both, only_packs, empty_lib]
+        empty_alone = h / "empty library alone"
+        (empty_alone / "library" / "motion").mkdir(parents=True)
+        no_marker = h / "no pack.json"
+        make_model_leftover(no_marker)
+        touch(no_marker / "library" / "motion" / "p" / "icon.svg", b"<svg/>")
+        junk = h / "junk"
+        make_model_leftover(junk)
+        make_pack(junk)
+        touch(junk / "library" / "notes.txt", b"mine")
+        mixed = h / "mixed models"
+        make_model_leftover(mixed)
+        make_pack(mixed)
+        touch(mixed / "models" / LLAMA / "w.bin", b"mine")
+        extra = h / "extra"
+        make_model_leftover(extra)
+        make_pack(extra)
+        touch(extra / "thesis.docx", b"mine")
+        theirs = [empty_alone, no_marker, junk, mixed, extra]
+        lib_link = h / "library link"
+        make_model_leftover(lib_link)
+        if make_dir_link(lib_link / "library", both / "library"):
+            self.addCleanup(drop_dir_link, lib_link / "library")
+            theirs.append(lib_link)
+        for p in ours:
+            with self.subTest(p.name):
+                self.assertTrue(base.is_kept_leftover(p))
+                self.assertEqual(base.choose_engine_home(str(p), home=h, plugin_root=SK), (p, "", None))
+        for p in theirs:
+            with self.subTest(p.name):
+                self.assertFalse(base.is_kept_leftover(p))
+        # the owner's linked home after `uninstall --remove-engine` with a pack in it: not refused
+        target = h.parent / "data drive" / "whynot-cut-home"
+        make_owner_genuine(target)
+        make_model_leftover(target)
+        make_engine_extras(target)
+        tpack = make_pack(target)
+        link = self.link(target)
+        ctx = make_ctx(h, {"schema": 1}, SK, remove_engine=True, remove_models=False)
+        ctx.facts["link_target"] = os.path.realpath(target)
+        r = uninstall_module().step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(sorted(os.listdir(target)), ["library", "models"], r.detail)
+        for mode in ("install", "uninstall"):
+            self.assertIsNone(base.resolved_home_problem(link, home=h, mode=mode), mode)
+        # even --remove-models never takes library/
+        ctx = make_ctx(h, {"schema": 1}, SK, remove_engine=True, remove_models=True)
+        ctx.log.path = None  # (this test's own log would make logs/ there again)
+        shutil.rmtree(target / "logs", ignore_errors=True)
+        ctx.facts["link_target"] = os.path.realpath(target)
+        r = uninstall_module().step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(sorted(os.listdir(target)), ["library"], r.detail)
+        self.assertEqual(tpack.read_bytes(), b'{"id": "pack1"}')
+        self.assertEqual(pack.read_bytes(), b'{"id": "pack1"}')
+
+
+@unittest.skipUnless(find_bash(), "bash is not available")
+class TestRound6LexPath(unittest.TestCase):
+    """R5-6: the bash lexical normaliser keeps a drive (C:), / and //server/share as roots that `..` never climbs."""
+
+    def run_lex(self, os_name: str, func: str, paths: list) -> list:
+        boot = INSTALLER / "core" / "bootstrap.sh"
+        with TempDir() as td:
+            script, data = Path(td) / "lex.sh", Path(td) / "paths.txt"
+            data.write_text("".join(p + "\n" for p in paths), encoding="utf-8", newline="\n")  # (no argv conversion)
+            script.write_text(shell_function(boot, func, False)
+                              + 'OS_NAME="$1"\nwhile IFS= read -r p; do ' + func + ' "$p"; printf "[%s]\\n" "$'
+                              + ("LEX" if func == "lex_path" else "NORM") + '"; done < "$2"\n', encoding="utf-8",
+                              newline="\n")
+            r = subprocess.run([find_bash(), str(script), os_name, data.as_posix()], capture_output=True, timeout=60)
+        out = r.stdout.decode("utf-8", "replace")
+        return [line[1:-1] for line in out.splitlines() if line.startswith("[")]
+
+    def test_lex_path(self):
+        cases = {"MINGW64_NT-10.0": [("C:/..", "C:/"), ("C:/../Users/x", "C:/Users/x"), ("C:/Users/x/../../..", "C:/"),
+                                     ("/c/../x", "c:/x"), ("C:\\a\\.\\b\\\\..\\c\\", "C:/a/c"), ("D:/", "D:/"),
+                                     ("//server/share/../x", "//server/share/x"),
+                                     ("//server/share/a/../../..", "//server/share"), ("/..", "/"), ("/../x", "/x")],
+                 "Darwin": [("/..", "/"), ("/../x", "/x"), ("/a/../../b", "/b"), ("/Users/me/x/./../y/", "/Users/me/y"),
+                            ("//server/share/../x", "//server/share/x"), ("/Users/me/محمد علي/x y/../z", "/Users/me/محمد علي/z")]}
+        for os_name, pairs in cases.items():
+            got = self.run_lex(os_name, "lex_path", [p for p, _w in pairs])
+            self.assertEqual(got, [w for _p, w in pairs], os_name)
+
+    def test_norm_path(self):
+        pairs = [("C:/..", "c:"), ("C:/../Users/X", "c:/users/x"), ("C:/Users/x/../../..", "c:"), ("/c/../x", "c:/x"),
+                 ("C:/a/b", "c:/a/b"), ("/..", "/")]
+        self.assertEqual(self.run_lex("MINGW64_NT-10.0", "norm_path", [p for p, _w in pairs]), [w for _p, w in pairs])
 
 
 def _install_size_text(fx, plat: str, skip=("model", "launch"), git_missing=None) -> str:
@@ -6455,11 +6852,12 @@ class _CountdownCases:
 
     def owner_target(self) -> Path:
         """The owner's PC shape (round 5, M4): a home that is genuine through `current` and its runtime stamp only (no
-        state.json), with the Whisper model in the engine's own store, behind ~/.whynot-cut (a junction / symlink)."""
+        state.json), with the Whisper model in the engine's own store, behind ~/.whynot-cut (a junction / symlink). Round 6
+        (R5-1): with the folders the engine itself writes there too (the panel's serve/jobs, state/active.json)."""
         target = self.tmp / "data drive" / "whynot-cut-home"
-        touch(target / "current", b"r-owner\n")
-        touch(target / "runtimes" / "r-owner" / "WHYNOT_RUNTIME", b'{"id": "r-owner"}')
+        make_owner_genuine(target)
         make_model_leftover(target)
+        make_engine_extras(target)
         self.home.mkdir()
         if not make_dir_link(self.home / ".whynot-cut", target):
             self.skipTest("cannot make a directory link here")
@@ -6600,6 +6998,56 @@ class _CountdownCases:
         self.assertTrue(base.is_link(h / ".whynot-cut"))
         self.assertEqual(snapshot_tree(a), before_a, out)
 
+    def test_round6_a_linked_home_with_a_motion_pack_reinstalls_and_keeps_the_pack(self):
+        # library/ (licensed packs, kept by every uninstall) beside our models/ is still WhyNot Cut's old folder
+        target = self.owner_target()
+        pack = make_pack(target)
+        r = self.inst(self.home, "yes", "skip")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = self.inst(self.home, "uninstall", "remove-engine", "yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.wait_gone(target / "bin")
+        self.assertEqual(sorted(os.listdir(target)), ["library", "models"], out)
+        before = snapshot_tree(target / "library")
+        r = self.inst(self.home, "yes", "skip")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertTrue((target / "current").is_file(), out)
+        self.assertEqual(snapshot_tree(target / "library"), before, out)
+        self.assertEqual(pack.read_bytes(), b'{"id": "pack1"}')
+        self.assertTrue(base.is_link(self.home / ".whynot-cut"))
+
+    def test_round6_an_editors_own_model_beside_ours_is_never_taken(self):
+        # R5-2, the reviewer's probe: AI/models holds our store AND the editor's Llama: not a leftover of ours, so the
+        # install goes into AI/WhyNotCut; there, -RemoveModels deletes only WhyNot Cut's own models
+        h = self.home
+        ai = h / "AI"
+        make_model_leftover(ai)
+        llama = touch(ai / "models" / LLAMA / "snapshots" / "a" / "w.bin", b"mine")
+        r = self.inst(h, "yes", "skip", extra=(self.ENGINE_FLAG, self.native(ai)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        eng = ai / "WhyNotCut"
+        self.assertTrue((eng / "current").is_file(), out)
+        self.assertEqual(sorted(os.listdir(ai)), ["WhyNotCut", "models"], out)
+        before_ai_models = snapshot_tree(ai / "models")
+        make_model_leftover(eng)  # the model step's store, then the editor's own model in the same folder
+        touch(eng / "models" / "CACHEDIR.TAG", b"Signature: 8a477f597d28d172789f06886806bc55\n")
+        touch(eng / "models" / ".locks" / HF_STORE / "x.lock", b"")
+        mine = touch(eng / "models" / LLAMA / "snapshots" / "a" / "w.bin", b"mine too")
+        r = self.inst(h, "uninstall", "remove-engine", "remove-models", "yes",
+                      extra=(self.ENGINE_FLAG, self.native(ai)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.wait_gone(eng / "bin")
+        self.assertEqual(os.listdir(eng), ["models"], out)
+        self.assertEqual(os.listdir(eng / "models"), [LLAMA], out)
+        self.assertEqual(mine.read_bytes(), b"mine too")
+        self.assertIn(base.MODELS_KEPT_AR, out)
+        self.assertEqual(snapshot_tree(ai / "models"), before_ai_models, out)
+        self.assertEqual(llama.read_bytes(), b"mine")
+
     def test_a_bad_countdown_hook_value_is_ignored(self):
         r = self.inst(self.home, "dry", env=self.env(WNC_TEST_KEYS="x", WNC_TEST_COUNTDOWN_S="soon"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -6636,7 +7084,8 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
                  "Get-WncKnownFolderList", "Test-WncWithin", "Find-WncMarkerScan", "Get-WncClientRootList",
                  "Read-WncJsonObject", "Get-WncMember", "ConvertTo-WncHomePath", "Get-WncLinkedTargetProblem",
                  "Test-WncEngineHomeMark", "Read-WncJsonFile", "Get-WncOccupiedEntry", "Test-WncOurHome",
-                 "Test-WncModelLeftover", "Get-WncModelStoreList", "Get-WncArabic"]
+                 "Test-WncKeptLeftover", "Test-WncOurModels", "Get-WncModelEntryKind", "Get-WncLibraryState",
+                 "Test-WncViewFile", "Get-WncModelStoreList", "Get-WncArabic"]
         boot = INSTALLER / "core" / "bootstrap.ps1"
         arabic = re.search(r"(?ms)^    \$WncAr = @\{.*?^    \}\n", boot.read_text(encoding="utf-8")).group(0)
         body = ("$S = @{ Utf8 = (New-Object System.Text.UTF8Encoding $false); CompPath = $null; ModelStores = $null }\n"
@@ -6662,7 +7111,8 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
     def inst(self, home: Path, *flags, env=None, extra=()):
         args = ["-Home", home]
         names = {"yes": ["-Yes"], "customise": ["-Customise"], "dry": ["-DryRun"], "skip": ["-Skip", "model,launch"],
-                 "uninstall": ["-Uninstall"], "remove-engine": ["-RemoveEngine"]}
+                 "uninstall": ["-Uninstall"], "remove-engine": ["-RemoveEngine"],
+                 "remove-models": ["-RemoveModels"]}
         for f in flags:
             args += names[f]
         return self.ps(self.front(), *args, *extra, env=env)
@@ -6724,7 +7174,8 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
         names = ["norm_path", "lex_path", "within", "is_mount", "guard_norm", "real_path", "place_keys",
                  "place_problem", "resolved_home_problem", "client_roots", "home_path", "abs_path", "json_get",
                  "exact_child", "delete_deferred", "linked_target_problem", "is_engine_home",
-                 "state_is_ours", "has_occupied", "occupied_list", "is_model_leftover", "our_home", "model_stores"]
+                 "state_is_ours", "has_occupied", "occupied_list", "is_kept_leftover", "our_home", "model_stores",
+                 "our_models", "model_entry_kind", "library_state", "view_file"]
         script = self.tmp / "deferred.sh"
         script.write_text("".join(shell_function(boot, n, False) for n in names)
                           + 'OS_NAME="$(uname -s)"; JSON_PY=""; HOME="$1"; ENGINE="$1/.whynot-cut"; LINK_REAL="$2"\n'
@@ -6749,7 +7200,8 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
     def inst(self, home: Path, *flags, env=None, extra=()):
         args = ["--home", home.as_posix()]
         names = {"yes": ["--yes"], "customise": ["--customise"], "dry": ["--dry-run"],
-                 "skip": ["--skip", "model,launch"], "uninstall": ["--uninstall"], "remove-engine": ["--remove-engine"]}
+                 "skip": ["--skip", "model,launch"], "uninstall": ["--uninstall"], "remove-engine": ["--remove-engine"],
+                 "remove-models": ["--remove-models"]}
         for f in flags:
             args += names[f]
         return self.sh(self.front(), *args, *extra, env=env)

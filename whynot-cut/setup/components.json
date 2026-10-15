@@ -138,6 +138,12 @@
     "large-v3": {"backend": "ct2", "repo": "Systran/faster-whisper-large-v3", "revision": "<release>"},
     "large-v3-turbo": {"backend": "ct2", "repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo", "revision": "<release>"},
     "large-v3-mlx": {"backend": "mlx", "repo": "mlx-community/whisper-large-v3-mlx", "revision": "<release>"},
+    "medium": {"backend": "ct2", "repo": "Systran/faster-whisper-medium", "revision": "<release>"},
+    "small": {"backend": "ct2", "repo": "Systran/faster-whisper-small", "revision": "<release>"},
+    "large-v3-turbo-mlx": {"backend": "mlx", "repo": "mlx-community/whisper-large-v3-turbo", "revision": "<release>"},
+    "medium-mlx": {"backend": "mlx", "repo": "mlx-community/whisper-medium-mlx", "revision": "<release>"},
+    "small-mlx": {"backend": "mlx", "repo": "mlx-community/whisper-small-mlx", "revision": "<release>"},
+    "large-v3-turbo-engine": {"backend": "ct2", "repo": "dropbox-dash/faster-whisper-large-v3-turbo", "revision": "<release>"},
     "by_hardware": {"nvidia": "large-v3", "apple_silicon": "large-v3", "cpu": "large-v3-turbo"}
   },
   "fonts": {
