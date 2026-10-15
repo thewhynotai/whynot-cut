@@ -467,7 +467,10 @@ def panel_line(root: Path) -> str:
                 requests.append(f"{f.parent.name} ({len(todo)}{', latest: “' + last + '”' if last else ''})")
     out = ""
     if approvals:
-        out += "Panel approvals not built yet: " + "; ".join(approvals[:6]) + ". "
+        # "Panel approvals not built yet" read as "the panel's approval feature is not built yet" (3.0 G3 evals): say
+        # what happened, that it counts, and what comes next
+        out += ("Plans approved in the Premiere panel, waiting for their build: " + "; ".join(approvals[:6])
+                + ". The approval is recorded: don't ask for it again; next is the build (`reel next` shows it). ")
     if requests:
         out += ("Change requests from the Premiere panel waiting: " + "; ".join(requests[:6])
                 + " (/whynot-cut:revise; `reel next` shows them). ")

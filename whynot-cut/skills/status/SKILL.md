@@ -39,7 +39,9 @@ video.
    project's status record itself (status, history, blockers). Both name a `parked_previous` Premiere project (a
    build stopped between parking the old `.prproj` and saving the new one; its `how` says how to rename it back) and
    `version_warnings` (a plan compiled by another engine version: re-run `reel plan`).
-2. Read these and compare their timestamps (a verdict older than the latest build is stale):
+2. Read these and compare their timestamps (a verdict older than the latest build is stale). They are all under
+   `<CLIENT_FOLDER>/output/projects/<ID>/`: list that folder (most file names don't contain the clip id, so a search
+   by name finds only the raw clip). If the engine can't run, these files are your only evidence; say so.
    - `08_quality_control/qc-results.json` and `validation-report.md`
    - `08_quality_control/visual-verification.json` (verdict and date)
    - `07_premiere/ppro-build-result.json` (read-back checks)

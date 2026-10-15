@@ -300,6 +300,11 @@ class TestPendingLists(HookFixture):
             encoding="utf-8")
         ctx = self.start(self.root)
         self.assertIn(f"Yunus approved C0001 in Premiere at {now.strftime('%H:%M')}", ctx)
+        # the heading says the approval happened and counts (the old "Panel approvals not built yet" read as "the
+        # panel's approval feature is not built yet", and the editor got asked to approve again)
+        self.assertIn("Plans approved in the Premiere panel, waiting for their build: Yunus approved C0001", ctx)
+        self.assertIn("The approval is recorded: don't ask for it again; next is the build", ctx)
+        self.assertNotIn("not built yet", ctx)
         (d / "07_premiere").mkdir()
         (d / "07_premiere/ppro-build-result.json").write_text("{}", encoding="utf-8")
         self.assertNotIn("approved C0001", self.start(self.root, sid="s2"))

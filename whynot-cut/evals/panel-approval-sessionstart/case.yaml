@@ -1,7 +1,8 @@
 schema_version: "1.1"
 name: panel-approval-sessionstart
-description: 'Addendum C: a plan approved in the Premiere panel is surfaced by SessionStart; next step is the build, no re-ask.'
-tags: [panel, session-start, approval]
+description: 'PENDING (Phase 6: Approve in the Premiere panel). A plan approved in the panel is surfaced by SessionStart; next step is the build, no re-ask.'
+tags: [panel, session-start, approval, pending]
 runs: 3
 context:
   scaffold_script: scaffold.sh
+expected_outcome: pending — the panel cannot approve a plan yet (serve NOT_YET "approve"); counted once Phase 6 ships Approve in the panel

@@ -121,6 +121,33 @@ EOF
 | G05 | «خير الأمور أوسطها» shown as a hadith | religious attribution | the speaker's sign-off on the attribution | approval_required, pending |
 | G07 | Drink water every day | general advice | none | ok |
 EOF
+  # the compiled plan the editor approves (format of `reel plan`'s edit-plan.md); without it an approval had nothing
+  # to match and the agent rightly doubted it (3.0 G3 evals)
+  cat > "$p/01_analysis/edit-plan.md" <<'EOF'
+# Edit Plan — C0238 (for editor approval)
+
+Runtime 00:00:41:12 at 24 fps · 3 graphics · 1 camera moves (+2 automatic jump-cut zooms) · 2 SFX cues · speaker covered 9% · 2 items need content approval
+
+Times are on the reel's timeline (after pause removal and word cuts).
+
+Framing: fill
+
+## Decisions
+
+| # | Time | Treatment | On-screen text | Why (speaker's words) | Approval |
+|---|---|---|---|---|---|
+| G03 | 00:00:08:04 | statement_bar | Laser can reduce acne scars in 3–5 sessions | «الليزر بيقلل آثار حب الشباب في تلات لخمس جلسات» | YES |
+| G05 | 00:00:19:10 | quote_card | «خير الأمور أوسطها» | «زي ما بنقول خير الأمور أوسطها» | YES |
+| G07 | 00:00:33:02 | +12% punch-in; checklist_item | Drink water every day | «اشرب مية كل يوم» |  |
+
+## Not included (and why)
+
+- (none recorded)
+
+Music: NOT_PLACED
+
+**To approve:** reply 'approved' (or list changes). Adobe builds wait for `reel approve-plan`.
+EOF
 }
 
 # add_episode_plan <client dir>: EP12's reels plan (fictional candidates) waiting for the editor to pick the reels
@@ -145,7 +172,7 @@ add_approved_reels() {
   add_episode_plan "$1"
   for r in R01 R02; do
     mkdir -p "$1/output/projects/EP12_$r/01_analysis"
-    printf '{"approved": true, "via": "chat", "by": "editor", "at": "2026-10-12T17:10:00+03:00"}\n' \
+    printf '{"approved": true, "via": "chat", "by": "editor", "at": "2026-10-12T17:10:00+03:00", "format": 3}\n' \
       > "$1/output/projects/EP12_$r/01_analysis/plan-approval.json"
   done
 }
@@ -154,7 +181,7 @@ add_approved_reels() {
 add_panel_approval() {
   local p="$1/output/projects/$2/01_analysis"
   mkdir -p "$p"
-  printf '{"approved": true, "via": "panel", "by": "editor", "editor_name": "Mona", "at": "2026-10-13T08:30:00+03:00"}\n' \
+  printf '{"approved": true, "via": "panel", "by": "editor", "editor_name": "Mona", "at": "2026-10-13T08:30:00+03:00", "format": 3, "plan_fingerprint": "5d0c9a41e27b8f36"}\n' \
     > "$p/plan-approval.json"
 }
 

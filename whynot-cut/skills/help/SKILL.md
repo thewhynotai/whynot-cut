@@ -47,7 +47,7 @@ Then answer in this order, short:
 
 Where things go: brand files in `assets/`, raw clips in `data/Raw/`, reference edits in `data/References/`; results in
 `output/projects/<clip>/` (Premiere project in `07_premiere/project/`, preview in `08_quality_control/preview/`, handoff
-in `09_handoff/`). WhyNot Cut never changes `assets/` or `data/`. Clip edits are built in Premiere; motion videos in
-After Effects.
+in `09_handoff/`). WhyNot Cut never changes `assets/` or `data/`. Clip edits are built in Premiere (graphics and
+captions animated with Premiere keyframes; After Effects / Photoshop only on request); motion videos in After Effects.
 
 Made by The Why Not AI · info@thewhynot.ai

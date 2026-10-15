@@ -61,9 +61,12 @@ option (e.g. everyone's `approval`), change the plugin option in `/plugin` inste
   delegated approval for the plan that is waiting, no file change) or from now on (`approval=auto`). Then **end your
   turn**: change nothing until the editor's next message answers it. Ask even when no clip is in progress. Never write
   `approval=auto` (a file or the plugin option) in the same turn as the request, and never ask and assume "from now
-  on" in the same message: a standing delegation is theirs to choose.
-- `approval: auto` is a standing delegation. Say so when switching it on, and that medical approvals are never
-  automatic: graphics needing the doctor's sign-off always stay under "Needs you".
+  on" in the same message: a standing delegation is theirs to choose. In the question itself say that "from now on"
+  is a standing delegation and that medical and religious approvals are never automatic. Keep the message short: the
+  question is its last line; the commands come after the answer (for "from now on", starting with `reel settings`).
+- `approval: auto` is a standing delegation. Say so when switching it on, and that medical and religious approvals are
+  never automatic: graphics needing the doctor's (or, for religious content, the speaker's) sign-off always stay
+  under "Needs you".
 - Engine commands see changes immediately; the session hook reads them at the next session start.
 - The file is personal (`.local.md`). In a git repo, suggest adding `.claude/*.local.md` to `.gitignore`.
 - Only the lead conversation changes preferences (a hook blocks subagents from `reel settings --init`).
