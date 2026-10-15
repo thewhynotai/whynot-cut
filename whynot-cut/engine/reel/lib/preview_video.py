@@ -295,7 +295,12 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     if not spec:
         return {"ok": False, "error": "timeline-spec.json missing - run `reel plan` first"}
-    data = job_data(paths)
+    try:
+        data = job_data(paths, fresh_stills=True)       # 3.0 F1: the editor never watches outdated wording
+    except Exception as e:
+        if not getattr(e, "stills_out_of_date", False):
+            raise
+        return {"ok": False, "error": e.error, "how": e.how}
     if data["_missing"]:
         return {"ok": False, "error": "graphics stills missing - run `reel previews` first", "missing": data["_missing"][:10]}
     from .common import spec_footage
@@ -572,6 +577,8 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
            "note": "Proxy preview for review only. The deliverable is the Premiere project; the editor renders the final."}
     if err:
         res["error"] = err
+    if data.get("_stills_redrawn"):     # 3.0 F1: graphics drawn from an older plan were redrawn first
+        res["stills_redrawn"] = data["_stills_redrawn"]
     write_json(out_dir / "preview-result.json", res)
     log(paths, f"preview video: {mp4} ({res['seconds']} s, {res['elapsed_s']} s to render)")
     return res

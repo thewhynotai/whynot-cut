@@ -510,7 +510,191 @@ def grab_frame(video: Path, ms: int, size: tuple | None = None) -> Image.Image |
     return _grab(video, ms / 1000, W, H, fit="crop", mode="RGBA")
 
 
-def render_all(paths: Paths, composite_preview: bool = True) -> dict:
+# --------------------------------------------------------------------------- what each still was drawn from (3.0 F1)
+# `reel previews` records, per event, a hash of everything its stills are drawn from (the event as compiled, its
+# template, the brand, the frame, the footage the readability check looks at, the drawing code) and the hash of each file
+# it wrote, plus the plan fingerprint (lib/plan.py). Every build that places stills compares that record with the plan as
+# it is now (ensure_fresh_stills): a still drawn from an older plan is redrawn through render_all, never placed with
+# outdated wording.
+STILLS_MANIFEST = "03_broll/.stills-manifest.json"
+MANIFEST_FORMAT = 1
+_RENDERER_SOURCES = ("previews.py", "font_roles.py", "fonts.py", "hb_text.py", "ct_text.py", "legibility.py")
+
+
+def _sha256(data: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def _file_sha(path) -> str | None:
+    try:
+        return _sha256(Path(path).read_bytes())
+    except (OSError, TypeError):
+        return None
+
+
+def _canon(obj) -> str:
+    import json
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def renderer_version() -> str:
+    """The engine version plus a hash of the drawing code: a still drawn by other code is redrawn."""
+    import hashlib
+    from .stamps import engine_version
+    h = hashlib.sha256()
+    for name in _RENDERER_SOURCES:
+        f = Path(__file__).with_name(name)
+        h.update(name.encode())
+        h.update(f.read_bytes().replace(b"\r\n", b"\n") if f.exists() else b"-")
+    return f"{engine_version()}+{h.hexdigest()[:12]}"
+
+
+def still_files(ev: dict) -> list[str]:
+    """Every still render_all writes for one event, relative to the reel folder."""
+    eid, cat = ev["event_id"], still_category(ev["template"])
+    out = [f"03_broll/{cat}/{eid}.png"]
+    if ev["template"] in BAR_TEMPLATES:
+        out += [f"03_broll/{cat}/{eid}_fg.png", f"03_broll/{cat}/{eid}_bar.png"]
+    if ev["template"] == "checklist":
+        out.append(f"03_broll/{cat}/{eid}_title.png")
+        out += [f"03_broll/{cat}/{eid}_i{k + 1}.png" for k in range(len(ev["params"].get("items", [])))]
+    return out
+
+
+def _no_timestamps(doc):
+    """A brand file without its `generated` / `*_at` stamps: a client-db rebuild that changes nothing redraws nothing."""
+    return {k: v for k, v in doc.items() if k != "generated" and not str(k).endswith("_at")} \
+        if isinstance(doc, dict) else doc
+
+
+def _shared_inputs(paths: Paths, spec: dict, asset_manifest: dict) -> dict:
+    """What every still of the reel is drawn from: the drawing code, the frame, the brand (colours, fonts, logo) and the
+    footage the readability check looks at."""
+    db = paths.client_db
+    typ = read_json(db / "branding/typography.json", {}) or {}
+    fonts = sorted({str(w.get("file")) for fam in (typ.get("families") or {}).values() if isinstance(fam, dict)
+                    for w in fam.get("weights", []) if isinstance(w, dict) and w.get("file")})
+    logo = next((a.get("display_derivative") for a in asset_manifest.get("assets", [])
+                 if isinstance(a, dict) and a.get("category") == "logo"), None)
+    brand_cfg = load_config("brand.json") or {}
+    main = spec.get("main_footage")
+    foot = (Path(main) if Path(main).is_absolute() else paths.root / main) if main else None
+    return {"renderer": renderer_version(), "frame": list(frame_size(paths)),
+            "brand_tokens": _no_timestamps(read_json(db / "branding/brand-tokens.json", {}) or {}),
+            "typography": _no_timestamps(typ), "fonts": {f: _file_sha(f) for f in fonts},
+            "brand_fallbacks": [brand_cfg.get("fallback_colors"), brand_cfg.get("font_roles_fallback")],
+            "logo": [logo, _file_sha(logo) if logo else None],
+            "footage": [main, foot.stat().st_size if foot and foot.exists() else None, spec.get("source_in_ms")]}
+
+
+def _event_inputs(paths: Paths, ev: dict, tpls: dict, shared: dict, assets: dict) -> str:
+    """Hash of everything one event's stills are drawn from (the event as compiled, before render_all adds paths)."""
+    img = (ev.get("params") or {}).get("image")
+    img_sha = None
+    if img:
+        a = assets.get(img)
+        img_sha = _file_sha(a["display_derivative"] if a else paths.root / img)
+    body = {"shared": shared, "event": ev, "template": tpls.get(ev["template"]), "image": img_sha}
+    return _sha256(_canon(body).encode("utf-8"))
+
+
+def _drawing_context(paths: Paths, spec: dict) -> tuple[dict, dict, dict, dict]:
+    """(templates, assets by rel, the asset manifest, shared inputs): read once per render or check."""
+    tpls = load_config("graphics-templates.json")["templates"]
+    man = read_json(paths.client_db / "asset-manifest.json", {"assets": []}) or {"assets": []}
+    assets = {a["rel"]: a for a in man.get("assets", []) if isinstance(a, dict) and "rel" in a}
+    return tpls, assets, man, _shared_inputs(paths, spec, man)
+
+
+def stale_stills(paths: Paths, spec: dict | None = None) -> dict:
+    """{"stale": [event_id, ...] in plan order, "why": {event_id: reason}}: the events whose stills were not drawn from
+    the plan as it is now (no record of them, the plan or brand changed, a still missing or changed on disk)."""
+    import copy
+    from .stamps import read_compiled
+    if spec is None:
+        spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
+    if not spec:
+        return {"stale": [], "why": {}}
+    rec = read_json(paths.p(STILLS_MANIFEST), None)
+    have_all = (rec.get("events") or {}) if isinstance(rec, dict) and rec.get("format") == MANIFEST_FORMAT else {}
+    tpls, assets, _man, shared = _drawing_context(paths, spec)
+    stale, why = [], {}
+    for ev in spec["events"]:
+        eid = ev["event_id"]
+        have = have_all.get(eid)
+        reason = None
+        if not isinstance(have, dict):
+            reason = "no record of how it was drawn (drawn by an older WhyNot Cut, or never drawn)"
+        elif have.get("inputs") != _event_inputs(paths, copy.deepcopy(ev), tpls, shared, assets):
+            reason = "the plan, the brand or the drawing code changed since it was drawn"
+        else:
+            files = have.get("files") or {}
+            for rel in still_files(ev):
+                if rel not in files or not paths.p(rel).exists():
+                    reason = f"{Path(rel).name} is missing"
+                    break
+                if _file_sha(paths.p(rel)) != files[rel]:
+                    reason = f"{Path(rel).name} was changed after it was drawn"
+                    break
+        if reason:
+            stale.append(eid)
+            why[eid] = reason
+    return {"stale": stale, "why": why}
+
+
+def ensure_fresh_stills(paths: Paths) -> dict:
+    """Before stills are placed (ppro-build, the serve build, the preview video, the XML fallback): redraw, through
+    render_all (the `reel previews` code), the stills that were not drawn from the plan as it is now. Stills that match
+    are not touched (no work, no write). {"redrawn": [event_id, ...], "why": {...}, "warnings": [...]}. A redraw that
+    fails, or leaves a still that still does not match, raises Guidance (with `stills_out_of_date`) and the one fix."""
+    from .errors import Guidance
+    st = stale_stills(paths)
+    if not st["stale"]:
+        return {"redrawn": [], "why": {}, "warnings": []}
+    error = f"The graphics {', '.join(st['stale'])} were drawn from an older version of the plan, and redrawing them stopped"
+    how = "Run `reel previews` to redraw the graphics, fix what it reports, then build again."
+    try:
+        r = render_all(paths, composite_preview=True, only=set(st["stale"]))
+    except Guidance as e:
+        raise _stills_guidance(f"{error}: {e.error}", e.how or how) from e
+    except Exception as e:  # noqa: BLE001 — a locked file, a font that cannot be read, ...: one plain fix
+        raise _stills_guidance(f"{error}: {e}", how) from e
+    left = stale_stills(paths)["stale"]
+    if left:
+        raise _stills_guidance(f"The graphics {', '.join(left)} still do not match the plan after redrawing them", how)
+    return {"redrawn": st["stale"], "why": st["why"], "warnings": r.get("warnings") or []}
+
+
+def _stills_guidance(error: str, how: str):
+    from .errors import Guidance
+    g = Guidance(error, how)
+    g.stills_out_of_date = True
+    return g
+
+
+def _write_manifest(paths: Paths, spec: dict, records: dict, only: set | None) -> None:
+    """The record of a full render replaces the old one; a partial one (`only`) keeps the other events' entries."""
+    from .plan import plan_fingerprint
+    old = read_json(paths.p(STILLS_MANIFEST), None) if only is not None else None
+    keep = (old.get("events") or {}) if isinstance(old, dict) and old.get("format") == MANIFEST_FORMAT else {}
+    events = {}
+    for ev in spec["events"]:
+        eid = ev["event_id"]
+        if eid in records or eid in keep:
+            events[eid] = records.get(eid) or keep[eid]
+    try:
+        fp = plan_fingerprint(paths)
+    except (OSError, ValueError):
+        fp = None
+    write_json(paths.p(STILLS_MANIFEST), {"format": MANIFEST_FORMAT, "generated": now_iso(), "plan_fingerprint": fp,
+                                          "renderer": renderer_version(), "events": events})
+
+
+def render_all(paths: Paths, composite_preview: bool = True, only: set | None = None) -> dict:
+    """`reel previews`: every event's stills (and QC composites), recorded in STILLS_MANIFEST. `only` (a set of event
+    ids) redraws just those events and keeps the record of the others (ensure_fresh_stills)."""
+    import copy
     from .common import spec_footage
     from .stamps import read_compiled
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
@@ -520,13 +704,14 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
     main = spec_footage(paths, spec)
     size = frame_size(paths)
     W, H = size
-    tpls = load_config("graphics-templates.json")["templates"]
+    tpls, assets, man, shared = _drawing_context(paths, spec)
     b = Brand(paths.client_db)
-    man = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
-    assets = {a["rel"]: a for a in man["assets"]}
     logo = next((a["display_derivative"] for a in man["assets"] if a["category"] == "logo"), None)
-    outs, comps, warns = [], [], []
+    outs, comps, warns, records = [], [], [], {}
     for ev in spec["events"]:
+        if only is not None and ev["event_id"] not in only:
+            continue
+        inputs = _event_inputs(paths, copy.deepcopy(ev), tpls, shared, assets)     # before the paths are added below
         p = ev["params"]
         if p.get("image"):
             a = assets.get(p["image"])
@@ -566,6 +751,8 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
                 ip = paths.p(f"03_broll/{cat}/{ev['event_id']}_i{k + 1}.png")
                 render_event(one, tpls["checklist"], b, assets, logo, ip, size=size)
                 outs.append(str(ip))
+        records[ev["event_id"]] = {"template": ev["template"], "inputs": inputs,
+                                   "files": {rel: _file_sha(paths.p(rel)) for rel in still_files(ev)}}
         bg = probe() if composite_preview else None
         if bg is not None:  # QC composite only: graphic over the actual frame (frosted look simulated)
             import tempfile
@@ -581,10 +768,15 @@ def render_all(paths: Paths, composite_preview: bool = True) -> dict:
             cp.parent.mkdir(parents=True, exist_ok=True)
             comp.convert("RGB").resize((540, round(540 * H / W))).save(cp, quality=85)
             comps.append(str(cp))
+    _write_manifest(paths, spec, records, only)
+    sheet = comps
+    if only is not None and comps:      # a partial redraw: the sheet still shows every graphic of the plan
+        sheet = [str(c) for c in (paths.p(f"08_quality_control/previews/{e['event_id']}_{e['template']}.jpg")
+                                  for e in spec["events"]) if c.exists()]
     # contact sheet of composites: exactly one tile per composite (G73: it was half empty, 6 columns for 3 tiles)
-    if comps:
+    if sheet:
         from .media_util import contact_sheet
-        contact_sheet([(c, "") for c in comps], paths.p("08_quality_control/previews/_contact_sheet.jpg"),
+        contact_sheet([(c, "") for c in sheet], paths.p("08_quality_control/previews/_contact_sheet.jpg"),
                       cols=6, tile_w=270, tile_h=round(270 * H / W))
     warns += [w for w in b.font_warnings() if w not in warns]
     return {"previews": outs, "composites": comps, "warnings": warns}

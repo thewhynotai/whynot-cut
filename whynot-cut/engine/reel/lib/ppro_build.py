@@ -73,11 +73,18 @@ def cutaway_bands(paths: Paths, spec: dict) -> list:
     return out
 
 
-def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -> dict:
+def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False, fresh_stills: bool = False) -> dict:
+    """The build_project job. fresh_stills (every build, and the preview video): first redraw the graphic stills that
+    were not drawn from the plan as it is now (previews.ensure_fresh_stills, 3.0 F1); `_stills_redrawn` names them.
+    A redraw that fails raises its Guidance (`stills_out_of_date`)."""
     from .premiere_xml import build_xml
     from .previews import render_captions
     from .timemap import TimeMap
     from .stamps import read_compiled
+    fresh = {"redrawn": [], "warnings": []}
+    if fresh_stills:
+        from .previews import ensure_fresh_stills
+        fresh = ensure_fresh_stills(paths)
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     tpl = load_config("graphics-templates.json")["templates"]
@@ -137,7 +144,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
                 if bb:
                     avoid.append((e["start_ms"], e["end_ms"], bb[1], bb[3]))
     avoid += cutaway_bands(paths, spec)
-    font_warns = []                     # G72: Arabic captions without an Arabic brand font
+    font_warns = list(fresh["warnings"])     # the redraw's readability notes; G72: Arabic captions without an Arabic font
     caps = render_captions(paths, hidden, avoid=avoid, warnings=font_warns)
     for c in caps:
         s, en = c["start_ms"] / 1000, c["end_ms"] / 1000
@@ -166,7 +173,8 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False) -
             "markers": markers, "track_names": {"video": vnames, "audio": anames}, "_missing": missing,
             "blur_v1_clips": (base.get("cutaways") or {}).get("blur_v1_clip_indices") or [],
             "sharpen_v1": sharpen_settings(spec),
-            "_lanes": lanes, "_warnings": font_warns, "duration_s": spec["duration_frames"] * F}
+            "_lanes": lanes, "_warnings": font_warns, "_stills_redrawn": fresh["redrawn"],
+            "duration_s": spec["duration_frames"] * F}
 
 
 def sharpen_settings(spec: dict) -> dict | None:
@@ -403,7 +411,12 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
             rec["closed_by_pipeline_at"] = now_iso()
             rec["content_signature"] = after_sig
             write_json(rec_p, rec)
-    data = job_data(paths, overwrite, stage_media=True)
+    try:
+        data = job_data(paths, overwrite, stage_media=True, fresh_stills=True)
+    except Exception as e:              # 3.0 F1: stills from an older plan that could not be redrawn: nothing is built
+        if not getattr(e, "stills_out_of_date", False):
+            raise
+        return {"status": "STILLS_OUT_OF_DATE", "ok": False, "error": e.error + ": nothing was built", "how": e.how}
     if data["_missing"]:
         return {"status": "MISSING_GRAPHICS", "ok": False, "missing": data["_missing"],      # T2.16: exit 1
                 "error": f"{len(data['_missing'])} graphic still(s) missing: nothing was built",
@@ -467,6 +480,8 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
         out["how"] = r["how"]
     if data.get("_warnings"):           # G72: captions drawn with a system Arabic fallback, or no Arabic font at all
         out["warnings"] = data["_warnings"]
+    if data.get("_stills_redrawn"):     # 3.0 F1: graphics drawn from an older plan, redrawn before they were placed
+        out["stills_redrawn"] = data["_stills_redrawn"]
     if parked:                          # --force over a parked project: it stays a backup; say where
         out["parked_previous"] = parked
     from .verify import prproj_signature

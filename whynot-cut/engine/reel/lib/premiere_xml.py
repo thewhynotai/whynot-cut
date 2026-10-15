@@ -182,6 +182,10 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
         from .errors import Guidance
         raise Guidance("no compiled plan yet (01_analysis/timeline-spec.json)", "Run `reel plan` first",
                        where=str(paths.p("01_analysis/timeline-spec.json")))
+    redrawn = []
+    if not native_graphics:     # 3.0 F1: this XML places the stills itself: never one drawn from an older plan
+        from .previews import ensure_fresh_stills
+        redrawn = ensure_fresh_stills(paths)["redrawn"]
     seq_cfg = load_config("sequence-settings.json")
     tpl = load_config("graphics-templates.json")
     pre = read_json(paths.p("00_inputs/preflight.json"))
@@ -460,4 +464,6 @@ def build_xml(paths: Paths, prefer_ae_renders: bool = True, native_graphics: boo
           "note": "Premiere ignores track names from XML; use this map (xml_index -> role)."}
     write_json(paths.p("07_premiere/" + ("base-manifest.json" if native_graphics else "timeline-manifest.json")), tm)
     write_json(paths.p("07_premiere/sequence-settings.json"), seq_cfg)
+    if redrawn:
+        tm["stills_redrawn"] = redrawn
     return tm
