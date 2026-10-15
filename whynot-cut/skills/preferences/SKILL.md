@@ -57,9 +57,11 @@ option (e.g. everyone's `approval`), change the plugin option in `/plugin` inste
 `--set` are written, so nothing else is pinned.
 
 - Confirm by running `reel settings --root "<CLIENT>"` again and quoting the new values; `_problems` must be empty.
-- When the user says "stop asking" / "just go", ask once whether they mean this clip only (delegated approval for this
-  plan, no file change) or from now on (`approval=auto`). Ask even when no clip is in progress, and change nothing
-  until they answer: a standing delegation is theirs to choose.
+- **"Stop asking" / "just go" is a question, never a switch: stop and ask.** Ask one question: this clip only (a
+  delegated approval for the plan that is waiting, no file change) or from now on (`approval=auto`). Then **end your
+  turn**: change nothing until the editor's next message answers it. Ask even when no clip is in progress. Never write
+  `approval=auto` (a file or the plugin option) in the same turn as the request, and never ask and assume "from now
+  on" in the same message: a standing delegation is theirs to choose.
 - `approval: auto` is a standing delegation. Say so when switching it on, and that medical approvals are never
   automatic: graphics needing the doctor's sign-off always stay under "Needs you".
 - Engine commands see changes immediately; the session hook reads them at the next session start.

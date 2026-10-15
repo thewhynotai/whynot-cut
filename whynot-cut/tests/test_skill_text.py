@@ -272,5 +272,39 @@ class TestGuardAndStages(unittest.TestCase):
             self.assertIn(word, agent, f"agents/audio-engineer.md no longer reports {word!r}")
 
 
+class TestApprovalConsent(unittest.TestCase):
+    """G3 review I1: "stop asking" / "just go" never turns on a standing `approval: auto` in the same turn. The
+    preferences skill makes the "this clip or from now on?" question a stop; the edit skill's "just go" line approves
+    only a plan that is waiting and otherwise defers to that rule; every session context repeats it."""
+
+    def test_preferences_question_is_a_stop(self):
+        s = " ".join(text("preferences").split())
+        self.assertIn("is a question, never a switch: stop and ask", s)
+        self.assertIn("end your turn", s)
+        self.assertRegex(s, r"Never write `approval=auto` \([^)]*\) in the same turn as the request")
+        self.assertIn("never ask and assume \"from now on\" in the same message", s)
+        self.assertIn("Ask even when no clip is in progress", s)
+
+    def test_edit_just_go_approves_only_a_waiting_plan(self):
+        s = " ".join(text("edit").split())
+        m = re.search(r"\(\"just go\", \"don't ask\"\)(.{0,700})", s)
+        self.assertIsNotNone(m, "the edit skill's just-go line is gone")
+        rule = m.group(1)
+        self.assertIn("while this plan is waiting for approval", rule)
+        self.assertIn("approves this plan only", rule)
+        self.assertIn("never changes `approval`", rule)
+        self.assertIn("/whynot-cut:preferences", rule)
+        self.assertIn("never write `approval=auto` in the same turn as the request", rule)
+
+    def test_every_session_context_carries_the_rule(self):
+        src = (SK / "hooks" / "session_context.py").read_text(encoding="utf-8")
+        rule = re.search(r"CONSENT_RULE = \((.*?)\)\n", src, re.S)
+        self.assertIsNotNone(rule)
+        self.assertIn("end your turn", rule.group(1))
+        self.assertIn("only after the editor answers", rule.group(1))
+        body = src[src.index("def prefs_line"):src.index("def export_options")]
+        self.assertEqual(body.count("CONSENT_RULE"), 2, "both prefs_line branches (none yet / values) carry it")
+
+
 if __name__ == "__main__":
     unittest.main()

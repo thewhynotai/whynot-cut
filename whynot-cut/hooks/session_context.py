@@ -633,19 +633,25 @@ def writer_line(root: Path, session) -> str:
             f"editor says that session is finished or stuck, the lead runs `reel lock --release`. ")
 
 
+# G3 review I1 (approval consent): a standing `approval: auto` is the editor's own choice, so "stop asking" / "just go"
+# is answered with a question and a stop, in every session context (the preferences skill may not be loaded yet).
+CONSENT_RULE = (" \"Stop asking\" / \"just go\" never switches approval by itself: ask \"this clip only, or from now "
+                "on?\", end your turn, and write approval=auto only after the editor answers \"from now on\".")
+
+
 def prefs_line(st: dict) -> str:
     """The values in effect: from the preferences files, or (no file) from the plugin options (3.0 T3.5)."""
     opts = "userConfig" in set((st.get("_sources") or {}).values())
     if not st.get("_file") and not opts:
-        return "Preferences: none yet (/whynot-cut:preferences)."
+        return "Preferences: none yet (/whynot-cut:preferences)." + CONSENT_RULE
     who = f" Editor: {st['editor_name']}." if st.get("editor_name") else ""
     lang = " Talk to the editor in Arabic." if st.get("language") == "ar" else ""
     src = (st.get("_where") or {}).get("approval")
     src = src if src and src != "default" else (st.get("_file") or "plugin option")
     appr = (" Approval: auto (show the plan and preview, then record `approve-plan --by delegated --note "
             "\"standing preference in " + src + "\"` without waiting)." if st.get("approval") == "auto"
-            else " Approval: ask (stop at Gate 1).")
-    return (f"Preferences: {st['_file'] or 'the WhyNot Cut plugin options'}.{who}{lang}{appr} "
+            else " Approval: ask (stop for the editor's OK on every plan).")
+    return (f"Preferences: {st['_file'] or 'the WhyNot Cut plugin options'}.{who}{lang}{appr}{CONSENT_RULE} "
             f"Whisper: {st.get('whisper_model')}.")
 
 

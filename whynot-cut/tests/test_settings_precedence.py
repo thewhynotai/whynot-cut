@@ -425,6 +425,18 @@ class TestPrefsLine(Base):
         self.assertIn("Arabic", line)
         self.assertIn("Whisper: small", line)
 
+    def test_consent_rule_in_every_prefs_line(self):
+        """G3 review I1: with or without preferences, the session context says "stop asking" is a question + stop."""
+        m = self.ctx()
+        for st in (self.load(), None):
+            if st is None:
+                self.opt(approval="ask")
+                st = self.load()
+            line = m.prefs_line(st)
+            self.assertIn("never switches approval by itself", line)
+            self.assertIn("end your turn", line)
+            self.assertNotRegex(line, r"\bGate\s*[012]\b")
+
     def test_a_file_that_sets_approval_is_named(self):
         self.opt(approval="ask")
         f = prefs(self.client, approval="auto")

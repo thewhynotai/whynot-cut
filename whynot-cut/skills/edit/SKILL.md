@@ -112,8 +112,11 @@ When `preview_video` is on, point them to `<CLIENT_FOLDER>/output/projects/<ID>/
 (offer to open it: `open` on macOS, `explorer.exe "<path with backslashes>"` on Windows), `01_analysis/edit-plan.md`
 and the preview contact sheet.
 - Preferences `approval: ask` (default): **stop and ask.** If the editor approves: `reel approve-plan --by editor`.
-- If the editor said in this conversation to run without review ("just go", "don't ask"):
-  `reel approve-plan --by delegated --note "<their words>"`.
+- If the editor said in this conversation to run without review ("just go", "don't ask") **while this plan is waiting
+  for approval**, that approves this plan only: `reel approve-plan --by delegated --note "<their words>"`. It never
+  changes `approval`. With no plan waiting, or when they may mean every plan from now on, the preferences rule applies
+  (`/whynot-cut:preferences`): ask "this clip only, or from now on?" and stop until they answer; never write
+  `approval=auto` in the same turn as the request.
 - Preferences `approval: auto`: show the summary anyway, then
   `reel approve-plan --by delegated --note "standing preference approval: auto from <_where.approval>"` and continue.
   Name `_where.approval` (a file, or "plugin option") in the summary so the editor sees where the standing approval comes from. Medical approvals are never
