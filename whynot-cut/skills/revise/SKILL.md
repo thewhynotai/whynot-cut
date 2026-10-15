@@ -12,6 +12,10 @@ scenes. A single request that is only about the dialogue audio ("clean the audio
 `/whynot-cut:fix-audio`. A project whose id ends in `_MO` is a motion video: follow **Motion videos** below, not
 **Clip videos (Premiere)**.
 
+Every `reel` command for a project takes `--root "<CLIENT_FOLDER>" --video-id <ID>` (never a bare clip id), e.g.
+`reel plan --root "<CLIENT_FOLDER>" --video-id C0238`. Other options come from `reel <command> --help` or the owning
+agent: never guess an option name.
+
 ## Clip videos (Premiere)
 1. **Restate each comment** as a concrete, checkable change. "Remove all pauses" becomes `global.remove_pauses` (min 250 ms, pad 80 ms) plus re-verification that no words are lost.
    If a comment is a question ("did you make the text like the ref?"), answer it honestly first, with evidence, before changing anything.
@@ -45,7 +49,8 @@ scenes. A single request that is only about the dialogue audio ("clean the audio
    - or rebuild and they redo their tweaks
 
    Also ask them to save before any rebuild, because `--force` closes the open project.
-6. `whynot-cut:premiere-builder` runs `reel ppro-build --force`, then `whynot-cut:qc-reviewer` checks the frames, then you view the frame
+6. `whynot-cut:premiere-builder` runs `reel ppro-build --force` (the previous project is kept as
+   `*_prev_<time>.prproj`; tell the editor), then `whynot-cut:qc-reviewer` checks the frames, then you view the frame
    sheet, record the verdict, run `reel qc` and update the handoff.
 7. Report **per comment**: what changed, the evidence (numbers, frames), and caveats. Use the report format from `/whynot-cut:edit`.
 
