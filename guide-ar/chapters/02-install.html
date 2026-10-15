@@ -13,7 +13,7 @@
 <ul>
 <li><strong>مربع الرسالة</strong> في أسفل النافذة: اكتب فيه طلبك أو الأمر، ثم اضغط Enter.</li>
 <li><strong>المحادثة الجديدة</strong>: زر في أعلى القائمة الجانبية. افتح محادثة جديدة بعد كل تثبيت أو تحديث.</li>
-<li><strong>الفولدر</strong>: مع كل محادثة جديدة تختار الفولدر الذي يعمل فيه Claude: فولدر العملاء، أو فولدر العميل.</li>
+<li><strong>الفولدر</strong>: مع كل محادثة جديدة تختار الفولدر الذي يعمل فيه Claude: فولدر العملاء (مثل <bdi dir="ltr"><code>WhyNot Clients</code></bdi>)، أو فولدر العميل الذي ستعمل عليه.</li>
 <li><strong>زر +</strong> بجانب مربع الرسالة: منه تضيف WhyNot Cut إلى التطبيق، كما في القسم التالي.</li>
 <li><strong>إغلاق التطبيق تمامًا</strong>: إغلاق النافذة وحده قد يترك Claude يعمل في الخلفية. على Mac اضغط <bdi dir="ltr">Cmd+Q</bdi> وتطبيق Claude في المقدمة. وعلى Windows اضغط بالزر الأيمن على أيقونة Claude بجوار الساعة (وقد تكون مخفية تحت السهم ^) واختر Quit.</li>
 </ul>
@@ -220,7 +220,8 @@
 
 <p class="lead-in">في الطريقين ينهي التثبيت هذه القائمة وحده، بالإجابات الجاهزة، دون أسئلة:</p>
 <ol>
-<li><strong>المحرك (engine)</strong>: البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية، ومعه <span data-term-first="Python">نسخة Python خاصة به (لغة برمجة يحتاجها المحرك، ولا تتعامل معها أنت)</span>، وأداة ffmpeg لمعالجة الفيديو والصوت، وخطوط الواجهة. وهو يعمل دائمًا: يبدأ مع تشغيل الجهاز، ومع فتح Premiere، ومع فتح Claude.</li>
+<li><strong>المحرك (engine)</strong>: البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية، ومعه <span data-term-first="Python">نسخة Python خاصة به (لغة برمجة يحتاجها المحرك، ولا تتعامل معها أنت)</span>، وأداة ffmpeg لمعالجة الفيديو والصوت، وخطوط الواجهة. وهو يعمل دائمًا: يبدأ مع تشغيل الجهاز، ومع فتح Premiere، ومع فتح Claude. تجده في قائمة <bdi dir="ltr">Login&nbsp;Items</bdi> على Mac، وفي <bdi dir="ltr">Startup&nbsp;apps</bdi> على Windows، ويمكنك إيقافه من هناك.
+<!-- فريق: الإضافة E البند 4 (login item ظاهر في Startup apps / Login Items ويمكن إيقافه)، persona O12. --></li>
 <li><strong>إضافة WhyNot Cut في تطبيق Claude</strong>، مفعّلة، ومعها إذن يسمح لـ Claude بتشغيل محرك WhyNot Cut دون أن يستأذنك كل مرة (الإجابة الجاهزة: نعم).</li>
 <li><strong>على Windows</strong>: أداة صغيرة (<bdi dir="ltr">Git for Windows</bdi>) يحتاجها Claude ليشغّل أوامر WhyNot Cut على Windows؛ لا تتعامل معها أنت.</li>
 <li><strong>لوحة WhyNot Cut</strong> في Premiere Pro (من <bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>) وفي After Effects (من <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>): لوحة واحدة في كل برنامج، وتُزال اللوحات القديمة، مثل WhyNot Cut Bridge، واللوحات التجريبية.</li>
@@ -303,9 +304,9 @@ reel doctor</code></bdi></div>
 <!-- فريق: قائمة الفحص في نهاية التثبيت ([OK] / [!!] / [XX]، system.py render_checklist) وفي لوحة Premiere من مواصفات الإصدار 3.0 (أسماء البنود الأربعة منقولة من نصوص اللوحة: checklist.*). يُتحقَّق منها في المرحلة 7، وتُلتقط صورها في المرحلة 9. -->
 </aside>
 
-<h2 id="ch02-setup-app">برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> لأجهزة فريقنا</h2>
+<h2 id="ch02-setup-app">برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> الداخلي</h2>
 
-<p>برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> يفعل ما يفعله السطر الواحد، لكنه تطبيق تفتحه بنقرتين ويعرض قائمة الفحص في نافذة. وهو نسخة داخلية: يستخدمها فريقنا على أجهزة الوكالة، ولا تُنشر للتنزيل العام لأنها غير موقَّعة. إذا لم تصلك منا مباشرة، فثبّت بالسطر الواحد.</p>
+<p>برنامج <bdi dir="ltr">WhyNot Cut Setup</bdi> يفعل ما يفعله السطر الواحد، لكنه تطبيق تفتحه بنقرتين ويعرض قائمة الفحص في نافذة. وهو نسخة داخلية لأجهزة فريق The Why Not AI الداخلية فقط، وليست لأجهزة وكالتك، ولا تُنشر للتنزيل العام لأنها غير موقَّعة. إذا لم تصلك منا مباشرة، فثبّت بالسطر الواحد.</p>
 
 <ol class="steps">
 <li><strong>افتح الملف بنقرتين.</strong> على Mac افتح <bdi dir="ltr"><code>WhyNotCut.dmg</code></bdi>، ثم التطبيق <bdi dir="ltr">WhyNot Cut Setup</bdi> الذي بداخله. وعلى Windows افتح <bdi dir="ltr"><code>WhyNotCut-Setup.exe</code></bdi>.</li>

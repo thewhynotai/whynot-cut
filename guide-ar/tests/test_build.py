@@ -788,8 +788,26 @@ class ChapterTests(unittest.TestCase):
             for other in re.findall(r'\bid="ch(\d\d)(?:-[^"]*)?"', text):
                 if other != nn:
                     problems.append(f"{path.name}: id for chapter {other} inside chapter {nn}")
-        self.assertEqual(seen, list(range(1, len(seen) + 1)), "chapter file numbers must be consecutive from 01")
+        # chapter 0 is the tester welcome page (round 3, G-T10); it is optional, chapter 1 always exists
+        first = 0 if seen and seen[0] == 0 else 1
+        self.assertEqual(seen, list(range(first, first + len(seen))),
+                         "chapter file numbers must be consecutive from 00 (welcome page) or 01")
         self.assertEqual(problems, [])
+
+    def test_welcome_page_is_chapter_zero(self):
+        """The tester welcome page (G-T10) is chapter 0, first in the PDF: id ch00, h1 «0 · أهلًا بك في تجربة …», and it
+        links the feedback route of chapter 17."""
+        path = GUIDE / "chapters" / "00-welcome-testers.html"
+        self.assertTrue(path.exists(), "guide-ar/chapters/00-welcome-testers.html is missing")
+        text = path.read_text(encoding="utf-8")
+        h1 = [inner for lv, hid, inner in build.toc_headings(text) if lv == "h1" and hid == "ch00-title"]
+        self.assertEqual(len(h1), 1)
+        self.assertTrue(build.plain_text(h1[0]).startswith("0 · أهلًا بك في تجربة WhyNot Cut"))
+        self.assertIn('href="#ch17-feedback"', text)
+        html = build.assemble(GUIDE)
+        self.assertLess(html.index('id="ch00"'), html.index('id="ch01"'))
+        toc = re.findall(r'data-for="([^"]+)"', build.build_toc(build.chapter_sources(GUIDE)))
+        self.assertEqual(toc[:2], ["ch00-title", "ch01-title"])
 
     def test_chapter_link_text_matches_target(self):
         """A link that names a chapter number points at that chapter: <a href="#chNN-…">الفصل N</a> (also with

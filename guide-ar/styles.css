@@ -423,6 +423,21 @@ ol.ch-map .map-pg {
 .tip::before  { content: "نصيحة";  color: var(--accent); }
 .warn::before { content: "تنبيه";  color: var(--important); }
 .tip > :last-child, .warn > :last-child, .todo > :last-child { margin-bottom: 0; }
+/* «لصاحب الوكالة» (ch01, round 3 Task 5): the tip's fill and hairline, no label, and it may run over a page */
+.owner {
+  margin: 10pt 0 20pt;
+  padding: 10pt 14pt 12pt;
+  border: 0.75pt solid var(--tip-line);
+  border-radius: 6pt;
+  background: var(--tip-bg);
+  font-size: 10.5pt;
+  line-height: 18pt;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.owner > ul { margin: 0; }
+.owner > ul > li { margin-bottom: 5pt; }
+.owner > :last-child, .owner > ul > li:last-child { margin-bottom: 0; }
 .tip ul, .tip ol:not(.steps), .warn ul, .warn ol:not(.steps) { margin: 5pt 0; }
 
 /* ---------- 3.0 box: one quiet line under a hairline, led by a pill ---------- */
@@ -697,7 +712,7 @@ nav#toc h1.toc-title {
   font-size: 28pt;
   line-height: 40pt;
   font-weight: 800;
-  margin: 0 0 25pt;
+  margin: 0 0 20pt;
 }
 nav#toc ol { list-style: none; margin: 0; padding: 0; }
 nav#toc li { margin: 0; }
@@ -727,7 +742,7 @@ nav#toc li.toc-h1 {
   font-weight: 600;
   font-size: 13pt;
   line-height: 20pt;
-  padding: 5pt 0;
+  padding: 4pt 0;  /* 20 rows (chapter 0 + 19) fit one page */
   border-bottom: 0.5pt solid var(--line);
 }
 nav#toc li.toc-h1 > a { color: var(--heading); }

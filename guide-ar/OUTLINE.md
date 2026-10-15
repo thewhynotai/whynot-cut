@@ -1,4 +1,4 @@
-# Arabic guide — outline (19 chapters)
+# Arabic guide — outline (chapter 0 + 19 chapters)
 
 Order of the PDF. File names are in `guide-ar/chapters/`; the section id is `chNN`, the h1 id is `chNN-title`, and the h1 text starts with `N · ` (checked by `test_chapter_numbers_match_files`).
 
@@ -8,6 +8,7 @@ State: **written** = describes today's verified behaviour (may still carry a few
 
 | # | File | Arabic title | Main sources | State | Finalising phase |
 |---|---|---|---|---|---|
+| 0 | `00-welcome-testers.html` | أهلًا بك في تجربة WhyNot Cut 3.0 | Addendum G9 (G-T10); `skills/start`, `edit`; executor answers 12–19 | 3.0-spec (tester welcome page, round 3 task 5; in the release build too, removable as one file) | 9 (sample client name and timing) |
 | 1 | `01-intro.html` | مقدمة | `whynot-cut/skills/help`, `start` | written | 6, 7 (round 2, task 7A) |
 | 2 | `02-install.html` | التثبيت خطوة بخطوة | `whynot-cut/skills/setup`, `start`; `whynot-cut/README.md` (Install); Addenda D, E (E2: «WhyNot Cut Setup»), F (F1: public install = one-liner); `installer/` (README, bootstrap, core) | written (today first) + 3.0-spec | 5, 7, 9 (round 2, task 7B: banner, today sections first, one-line install, Setup app internal only) |
 | 3 | `03-quick-tour.html` | الجولة السريعة | `skills/start`, `help`, `edit`; Addenda C, D, F | 3.0-spec | 9 (round 2, task 7B: banner, one-line install) |

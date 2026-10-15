@@ -48,7 +48,7 @@
 <tr><td><bdi dir="ltr"><code>data/Raw</code></bdi></td><td>الفيديوهات الخام المطلوب مونتاجها (MP4 أو MOV أو MXF)، ملف واحد لكل فيديو.</td></tr>
 <tr><td><bdi dir="ltr"><code>data/Episodes</code></bdi></td><td>حلقات البودكاست الكاملة بمقاس <bdi dir="ltr">16:9</bdi> لتقطيعها إلى ريلز، ومع كل حلقة ورقة اختيارية باسمها (انظر «ورقة الحلقة» بعد قليل).</td></tr>
 <tr><td><bdi dir="ltr"><code>data/References</code></bdi></td><td>فيديوهات مونتاج مرجعية تريد أن يشبهها المونتاج، وأي ملاحظات مكتوبة عن الأسلوب. اختياري.</td></tr>
-<tr><td><bdi dir="ltr"><code>data/Broll</code></bdi></td><td>فيديوهات Stock أو B-roll مرخّصة يُسمح باستخدامها، ومعها ملف <bdi dir="ltr"><code>SOURCES.md</code></bdi> أو ملف الترخيص. اختياري.</td></tr>
+<tr><td><bdi dir="ltr"><code>data/Broll</code></bdi></td><td>فيديوهات Stock أو B-roll مرخّصة يُسمح باستخدامها، ومعها ملف <bdi dir="ltr"><code>SOURCES.md</code></bdi> أو ملف الرخصة. اختياري.</td></tr>
 <tr><td><bdi dir="ltr"><code>data/Music</code></bdi></td><td>موسيقى مرخّصة فقط. اختياري.</td></tr>
 <tr><td><bdi dir="ltr"><code>data/SFX</code></bdi></td><td>مكتبة المؤثرات الصوتية الخاصة بك. اختياري؛ إذا لم توجد تُصنع مؤثرات أصلية.</td></tr>
 </tbody>
@@ -87,7 +87,7 @@
 
 <ol class="steps">
 <li>افتح محرّر نصوص عادي. على Mac افتح TextEdit، ثم اختر <bdi dir="ltr">Format&nbsp;›&nbsp;Make&nbsp;Plain&nbsp;Text</bdi> ليصبح الملف نصًّا عاديًا. وعلى Windows افتح Notepad: من قائمة Start اكتب Notepad وافتحه.</li>
-<li>الصق النص الذي كتبه Claude، أو انسخ القالب التالي وضع بدل كل «…» القيمة الصحيحة. اترك السطرين <bdi dir="ltr"><code>---</code></bdi> في أول الورقة وآخرها كما هما: ما بينهما بيانات الحلقة، وكل قيمة تُكتب بعد النقطتين.</li>
+<li>الصق النص الذي كتبه Claude، أو انسخ القالب التالي وضع بدل كل «…» القيمة الصحيحة. اترك السطرين <bdi dir="ltr"><code>---</code></bdi> في أول الورقة وآخرها كما هما: ما بينهما بيانات الحلقة، وكل قيمة تُكتب بعد النقطتين. غيّر الكلام فقط، واترك العلامات كما هي: النقطتين، وعلامتي التنصيص، والقوسين المربعين، والمسافتين قبل الشرطة. والأسهل أن تطلب نص الورقة من Claude.</li>
 <li>احفظ الملف باسم <bdi dir="ltr"><code>EP01.md</code></bdi> في <bdi dir="ltr"><code>data/Episodes</code></bdi> بجانب الحلقة. على Mac: اختر <bdi dir="ltr">File&nbsp;›&nbsp;Save</bdi>، واكتب الاسم، واختر الفولدر <bdi dir="ltr"><code>data/Episodes</code></bdi>، ثم Save، وإذا سألك TextEdit عن الامتداد اختر <bdi dir="ltr">Use&nbsp;.md</bdi>. وعلى Windows: اختر <bdi dir="ltr">File&nbsp;›&nbsp;Save&nbsp;As</bdi>، ومن «Save as type» القيمة <bdi dir="ltr">All files</bdi> حتى لا يُحفظ الملف بامتداد <bdi dir="ltr"><code>.txt</code></bdi>، ثم اكتب الاسم واحفظه في الفولدر نفسه.</li>
 <li>اكتب لـ Claude أنك أضفت الورقة.</li>
 </ol>
