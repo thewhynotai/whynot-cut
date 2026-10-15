@@ -252,18 +252,33 @@ is downloaded or deleted): remove the link, or point it at a folder of its own. 
 WhyNot Cut's, its target is also placed like a folder you choose: it must not hold your user folder, lie inside a
 client folder or your clients folder, or already hold other files unless it is a WhyNot Cut engine folder (an empty
 folder, or your old WhyNot Cut folder, is fine). A link whose folder is missing (an unplugged drive) is refused with
-"reconnect the drive or remove the link".
+"reconnect the drive or remove the link". If the refused folder is your old WhyNot Cut folder with files of your own
+in it, move those files out and run the installer again.
+
+What `-Uninstall -RemoveEngine` keeps by default - a folder holding only `models/` with the Whisper model in WhyNot
+Cut's own store (`models/models--<repo>`, one per `models.*.repo` in `components.json`) - still counts as a WhyNot Cut
+engine folder, so installing into it again works (through the link too) and reuses the model. A `models` folder
+of your own (anything else inside it) does not count: the name alone is never trusted.
 
 Uninstall checks the engine home the same way before it writes anything (its log, uv, Python), also when
-`-EngineHome` / `--engine-home` names that same folder; a WhyNot Cut engine folder is not refused for client folders
-inside it, because uninstall deletes only WhyNot Cut's own entries. A saved `~/.whynot-cut/` (with a trailing `/` or
-`/.`) is `~/.whynot-cut`.
+`-EngineHome` / `--engine-home` names that same folder (the linked `~/.whynot-cut` is then that home, used through
+the link as above); a WhyNot Cut engine folder is not refused for client folders inside it, because uninstall deletes
+only WhyNot Cut's own entries. `-Uninstall -EngineHome <folder>` naming any other folder needs that folder to exist,
+not be a link, pass the same placement rules, and be a WhyNot Cut engine folder (or what an uninstall left of one).
+When it is not, but its `WhyNotCut` subfolder is - the folder an install with `-EngineHome <folder>` made inside your
+user folder, Desktop, Documents, Downloads or a folder holding your files - the uninstall uses that subfolder and
+says so (English and Arabic). Anything else stops with exit code 2 and "Nothing was changed", before any log,
+download or delete. Every path is read in its plain form first: a saved `~/.whynot-cut/`, `~/.whynot-cut/.` or
+`<home>/x/../.whynot-cut` is `~/.whynot-cut`. Right before python/ and bin/ are deleted after the uninstall, a linked
+`~/.whynot-cut` is resolved again; if it points somewhere else than when the uninstall started, nothing is deleted
+and the uninstall says so. (A program that changes the link in the instant between that check and the delete is
+not covered; nothing on a normal PC does that.)
 
 Then the install stops with exit code 2 before anything is downloaded, both bootstraps and the core alike, and says
 how to fix it (in English and Arabic): **run the installer again with -EngineHome <folder> / --engine-home <folder>**,
 naming a folder of its own (for example `C:\WhyNotCut` or `~/WhyNotCut`); that folder is then saved in place of the
-old one. A genuine 2.x or 3.0 engine home anywhere else is upgraded in place, with its models. Uninstall is not
-stopped by this rule (it deletes only WhyNot Cut's own entries).
+old one. A genuine 2.x or 3.0 engine home anywhere else is upgraded in place, with its models. Uninstall stops the
+same way, with nothing changed, except for client folders inside a WhyNot Cut engine folder (see above).
 
 ## What happens
 

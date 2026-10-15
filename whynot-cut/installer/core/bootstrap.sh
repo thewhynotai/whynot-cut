@@ -71,6 +71,15 @@
 # WNC_TEST_ANSWERS lines after the ones used here (WNC_TEST_ANSWERS_AT). ~/.whynot-cut itself may be a link (Addendum
 # F); then the same rules apply to where it points, at install, at uninstall and before the deferred delete (fix round
 # 3).
+# Fix round 5: a folder holding only models/ with WhyNot Cut's own model store (the "models--<repo>" folders of
+# components.json models.*.repo: what `--uninstall --remove-engine` keeps) is WhyNot Cut's, at install and uninstall
+# (our_home; never by the name `models` alone). --uninstall --engine-home naming the resolved home (the linked
+# ~/.whynot-cut too) is that home, not a chosen folder; naming any other folder, it must exist, not be a link, pass the
+# placement refusals and be WhyNot Cut's own - or hold WhyNot Cut's own WhyNotCut folder where an install would have
+# made one (the user folder, Desktop, Documents, Downloads, a folder holding the editor's files) - checked before
+# anything is written (uninstall_place, the core's base.uninstall_engine_home); else exit 2, "Nothing was changed".
+# Every engine home path is normalised lexically (lex_path: ., .., repeated and trailing /) before any test. The deferred
+# delete re-resolves a linked ~/.whynot-cut and deletes nothing when it points elsewhere than at the start (LINK_REAL).
 # bash 3.2 (the macOS default): no associative arrays, no ${var,,}, no mapfile. No `set -e`: every failure is handled.
 
 STEP_NAMES="preflight questions runtime ffmpeg gitbash gpu claude adobe fonts settings model state doctor launch"
@@ -258,6 +267,34 @@ engine_python() { # uninstall: the python-build-standalone already in the engine
   [ -n "$PY" ]
 }
 
+lex_path() { # path -> LEX: its lexical normal form, the core's abspath (fix round 5, N4): \ as / and /c/x as C:/x (Git
+  # Bash), repeated /, . and .. resolved, no trailing / - case kept. A network / device path (//server/x) stays as it
+  # is (the guards refuse it by its spelling)
+  local p="$1" out="" part lead=""
+  case "$p" in \\\\*|//*) LEX="$p"; return 0 ;; esac
+  case "$OS_NAME" in
+    MINGW*|MSYS*|CYGWIN*)
+      p="${p//\\//}"
+      case "$p" in /[a-zA-Z]|/[a-zA-Z]/*) p="${p:1:1}:${p:2}" ;; esac ;;
+  esac
+  case "$p" in /*) lead="/" ;; esac
+  local IFS=/
+  set -f
+  for part in $p; do
+    case "$part" in
+      ''|.) ;;
+      ..) out="${out%/*}" ;;
+      *) out="$out/$part" ;;
+    esac
+  done
+  set +f
+  if [ -n "$lead" ]; then LEX="${out:-/}"; else LEX="${out#/}"; fi
+  case "$LEX" in
+    "") LEX="$1" ;;
+    [A-Za-z]:) LEX="$LEX/" ;;
+  esac
+}
+
 norm_path() { # lexical: \ (Git Bash), repeated /, . and .. resolved, no trailing / -> NORM; lower case on Windows
   local p="$1" out="" part lead=""
   case "$OS_NAME" in
@@ -301,13 +338,25 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
   while [ "${root%/}" != "$root" ] && [ "$root" != "/" ]; do root="${root%/}"; done
   linked=""  # Addendum F: the DEFAULT ~/.whynot-cut may be a link to a folder: emptied through it, never removed
   if [ -L "$root" ] && [ -d "$root" ]; then
-    norm_path "$root"; nroot="$NORM"
-    norm_path "$HOME/.whynot-cut"
+    guard_norm "$root"; nroot="$NORM"  # (fix round 5, N5: case folded on macOS too)
+    guard_norm "$HOME/.whynot-cut"
     [ "$nroot" = "$NORM" ] && linked=1
   fi
   if [ -L "$root" ] && [ -z "$linked" ]; then
     printf 'WARNING: %s is a link; the paths in %s were left alone\n' "$root" "$list"
     return 0
+  fi
+  if [ -n "$linked" ]; then  # fix round 5 (N6): still pointing where it pointed when the run checked it (LINK_REAL)?
+    real_path "$root"; now_real="$REAL"
+    guard_norm "${now_real:-?}"; n_now="$NORM"
+    n_then=""
+    if [ -n "${LINK_REAL:-}" ]; then guard_norm "$LINK_REAL"; n_then="$NORM"; fi
+    if [ -z "$now_real" ] || [ -z "$n_then" ] || [ "$n_now" != "$n_then" ]; then
+      printf 'WARNING: %s now points to %s, not to %s as when this uninstall started; the paths in %s were left alone (nothing was deleted). Check the link, then run the uninstall again.\n' \
+        "$root" "${now_real:-a folder that cannot be read}" "${LINK_REAL:-(unknown)}" "$list"
+      printf '%s\n' "تغيّر المجلد الذي يشير إليه الرابط ~/.whynot-cut أثناء الإلغاء، لذلك لم يُحذف شيء آخر. تحقّق من الرابط ثم شغّل الإلغاء مرة أخرى."
+      return 0
+    fi
   fi
   if [ -n "$linked" ]; then  # fix round 3: where the link points is checked again (Documents, client data ...)
     client_roots
@@ -538,6 +587,7 @@ typed_path() { # text -> TYPED: quotes trimmed, ~ is the home folder, no trailin
   t="${t#\"}"; t="${t%\"}"; t="${t#\'}"; t="${t%\'}"
   case "$t" in \~) t="$HOME" ;; \~/*) t="$HOME/${t#\~/}" ;; esac
   while [ "${t%/}" != "$t" ] && [ "${t%/}" != "" ] && [ "${t%/}" != "${t%%:*}:" ]; do t="${t%/}"; done
+  case "$t" in /*|[A-Za-z]:/*|[A-Za-z]:\\*) lex_path "$t"; t="$LEX" ;; esac  # (fix round 5, N4) x/nope/.. is x
   TYPED="$t"
 }
 
@@ -587,11 +637,12 @@ is_engine_home() { # dir: status 0 when it is a GENUINE WhyNot Cut engine home (
   [ "$(json_get "$1/runtimes/$rid/WHYNOT_RUNTIME" id)" = "$rid" ]
 }
 
-has_occupied() { # dir [pointer-ok]: status 0 when it holds any entry except the write probe, the -Source cache (a
+occupied_list() { # dir [pointer-ok] -> OCCUPIED (one per line): every entry except the write probe, the -Source cache (a
   # downloads folder holding only release-* folders) and, with pointer-ok (~/.whynot-cut), the pointer; names compare
   # exactly (the core's base.occupied_entries)
   local e n k only
-  [ -d "$1" ] || return 1
+  OCCUPIED=""
+  [ -d "$1" ] || return 0
   for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
     [ -e "$e" ] || [ -L "$e" ] || continue
     n="${e##*/}"
@@ -605,9 +656,78 @@ has_occupied() { # dir [pointer-ok]: status 0 when it holds any entry except the
       done
       [ -n "$only" ] && continue
     fi
-    return 0
+    if [ -n "$OCCUPIED" ]; then OCCUPIED="$OCCUPIED"$'\n'"$n"; else OCCUPIED="$n"; fi
+  done
+  return 0
+}
+
+has_occupied() { # dir [pointer-ok]: status 0 when it holds anything that makes it the editor's (occupied_list)
+  occupied_list "$1" "${2:-}"
+  [ -n "$OCCUPIED" ]
+}
+
+# Fix round 5 (N1): the model store folders WhyNot Cut's model step writes into <engine home>/models ("models--" + every
+# components.json models.<m>.repo with / as --; the core's base.model_store_names). The file arrives as a run() argument.
+JXA_MODEL_STORES='function run(argv) {
+  ObjC.import("Foundation");
+  var d = $.NSData.dataWithContentsOfFile(argv[0]);
+  if (d.isNil()) { return ""; }
+  var t = $.NSString.alloc.initWithDataEncoding(d, $.NSUTF8StringEncoding);
+  if (t.isNil()) { return ""; }
+  var c;
+  try { c = JSON.parse(ObjC.unwrap(t).replace(/^\uFEFF/, "")); } catch (e) { return ""; }
+  var m = (c !== null && typeof c === "object" && !Array.isArray(c)) ? c.models : null;
+  if (m === null || typeof m !== "object" || Array.isArray(m)) { return ""; }
+  var re = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/, out = [];
+  Object.keys(m).forEach(function (k) {
+    var v = m[k], r = (v !== null && typeof v === "object" && !Array.isArray(v)) ? v.repo : null;
+    if (typeof r === "string" && re.test(r) && r.indexOf("..") < 0) { out.push("models--" + r.split("/").join("--")); }
+  });
+  return out.join("\n");
+}'
+PY_MODEL_STORES='import json, re, sys
+try:
+    c = json.loads(open(sys.argv[1], "rb").read().decode("utf-8-sig"))
+except (OSError, ValueError):
+    c = None
+m = c.get("models") if isinstance(c, dict) else None
+rx = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
+for v in (m.values() if isinstance(m, dict) else ()):
+    r = v.get("repo") if isinstance(v, dict) else None
+    if isinstance(r, str) and rx.match(r) and ".." not in r:
+        print("models--" + r.replace("/", "--"))'
+
+model_stores() { # -> MODEL_STORES (one per line), read once from the components.json in use ($COMP); none when unreadable
+  [ -n "${MODEL_STORES_READ:-}" ] && return 0
+  MODEL_STORES_READ=1 MODEL_STORES=""
+  { [ -n "${COMP:-}" ] && [ -f "$COMP" ]; } || return 0
+  if [ "$OS_NAME" = "Darwin" ]; then
+    MODEL_STORES="$(osascript -l JavaScript -e "$JXA_MODEL_STORES" "$COMP" 2>/dev/null </dev/null)"
+  elif [ -n "${JSON_PY:-}" ]; then
+    MODEL_STORES="$("$JSON_PY" -I -c "$PY_MODEL_STORES" "$COMP" 2>/dev/null </dev/null | tr -d '\r')"
+  fi
+  return 0
+}
+
+is_model_leftover() { # dir [pointer-ok]: status 0 for what an uninstall keeps of an engine home (the core's
+  # base.is_model_leftover): its ONLY entry is a real models/ folder holding a model store folder of WhyNot Cut's
+  # (model_stores, names compared exactly) - never by the name `models` alone (an editor's own models/ is not ours)
+  local e n nl=$'\n'
+  occupied_list "$1" "${2:-}"
+  [ "$OCCUPIED" = "models" ] || return 1
+  { [ -d "$1/models" ] && [ ! -L "$1/models" ]; } || return 1
+  model_stores
+  [ -n "$MODEL_STORES" ] || return 1
+  for e in "$1/models"/* "$1/models"/.[!.]* "$1/models"/..?*; do
+    { [ -d "$e" ] && [ ! -L "$e" ]; } || continue
+    n="${e##*/}"
+    case "$nl$MODEL_STORES$nl" in *"$nl$n$nl"*) return 0 ;; esac
   done
   return 1
+}
+
+our_home() { # dir [pointer-ok]: WhyNot Cut's own folder - a genuine engine home or the leftover of one (fix round 5)
+  is_engine_home "$1" || is_model_leftover "$1" "${2:-}"
 }
 
 is_mount() { # path: /Volumes/<name>, or an existing folder that df reports as its own mount point
@@ -647,6 +767,7 @@ engine_place() { # path -> PLACED, PLACE_NOTE, PROBLEM (empty: fine); the core's
     /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
     *) PROBLEM="$p is not a full path (for example $HOME/WhyNotCut)"; return 0 ;;
   esac
+  lex_path "$p"; p="$LEX"  # (fix round 5, N4) before any test: x/nope/../y is x/y
   norm_path "$p"; n="$NORM"
   case "$n" in
     /|[A-Za-z]:|[A-Za-z]:/) PROBLEM="$p is a drive root or a mounted volume; choose a folder on it"; return 0 ;;
@@ -657,7 +778,9 @@ engine_place() { # path -> PLACED, PLACE_NOTE, PROBLEM (empty: fine); the core's
   if within "$n" "$r"; then
     PROBLEM="$p is inside the plugin folder $ROOT, which is replaced on every update"; return 0
   fi
-  is_engine_home "$p" && existing=1
+  norm_path "$HOME/.whynot-cut"
+  [ "$NORM" = "$n" ] && pointer_ok=1  # the SessionStart hook's pointer lives there
+  our_home "$p" "$pointer_ok" && existing=1  # (fix round 5, N1: also the leftover of an uninstall)
   if [ -z "$existing" ]; then
     if [ "$r" != "$n" ] && within "$r" "$n"; then  # it holds the plugin (fine only in its downloads/: -Source cache)
       norm_path "$p/downloads"; d1="$NORM"
@@ -693,8 +816,6 @@ EOF
     [ "$NORM" = "$n" ] && root_like=1
   done
   f="$p"
-  norm_path "$HOME/.whynot-cut"
-  [ "$NORM" = "$n" ] && pointer_ok=1  # the SessionStart hook's pointer lives there
   if [ -z "$existing" ] && { [ -n "$root_like" ] || has_occupied "$p" "$pointer_ok"; }; then
     f="${p%/}/WhyNotCut"
     PLACE_NOTE="$p already holds other files, so WhyNot Cut goes into its own folder $f (uninstall then never touches the rest)"
@@ -704,7 +825,7 @@ EOF
   if within "$NORM" "$nf"; then PROBLEM="$f is your user folder or holds it; choose a folder of its own"; return 0; fi
   norm_path "$HOME/.claude"
   if within "$nf" "$NORM"; then PROBLEM="$f is inside Claude's folder $HOME/.claude"; return 0; fi
-  if [ "$f" != "$p" ] && ! is_engine_home "$f" && has_occupied "$f"; then
+  if [ "$f" != "$p" ] && ! our_home "$f" && has_occupied "$f"; then
     PROBLEM="$f already holds other files; choose an empty folder or one of its own"; return 0
   fi
   if [ -n "$HOME_OVR" ]; then
@@ -953,7 +1074,7 @@ resolved_home_problem() { # path [mode] -> WHY (empty: fine), the core's base.re
   local p="$1" mode="${2:-install}" a genuine="" skip=""
   WHY=""
   case "$p" in \\\\*|//*) place_problem "$p" ""; return 0 ;; esac
-  trim_dir "$p"; p="$TRIMMED"
+  lex_path "$p"; p="$LEX"  # (fix round 5, N4: x/nope/../.whynot-cut is ~/.whynot-cut; a trailing / or /. too)
   guard_norm "$p"; a="$NORM"
   guard_norm "$HOME/.whynot-cut"
   if [ "$a" = "$NORM" ]; then
@@ -961,37 +1082,25 @@ resolved_home_problem() { # path [mode] -> WHY (empty: fine), the core's base.re
     if [ ! -d "$p" ]; then
       WHY="a link to a folder that does not exist - reconnect the drive or remove the link"; return 0
     fi
-    is_engine_home "$p" && genuine=1
+    our_home "$p" 1 && genuine=1  # (fix round 5, N1: the leftover of an uninstall too)
     place_problem "$p" 1 ""  # (every client rule, at uninstall too: the target may be anyone's folder)
     if [ -z "$WHY" ]; then real_path "$p"; linked_target_problem "$REAL" "$genuine" "$mode"; fi
     if [ -n "$WHY" ]; then
       real_path "$p"
       WHY="a link to ${REAL:-a target that cannot be read}, which is ${WHY#a link to } - remove the link, or point"
-      WHY="$WHY ~/.whynot-cut at an empty folder or at your old WhyNot Cut folder, or run again with -EngineHome"
-      WHY="$WHY <folder> / --engine-home <folder>"
+      WHY="$WHY ~/.whynot-cut at an empty folder of its own, or run again with -EngineHome <folder> / --engine-home"
+      WHY="$WHY <folder>"
     fi
     return 0
   fi
-  if [ "$mode" = uninstall ] && [ -d "$p" ] && is_engine_home "$p"; then skip="skip-clients"; fi
+  if [ "$mode" = uninstall ] && [ -d "$p" ] && our_home "$p"; then skip="skip-clients"; fi
   place_problem "$p" "" "$skip"
-}
-
-trim_dir() { # path -> TRIMMED: without a trailing "/" or "/." (fix round 4: ~/.whynot-cut/ is ~/.whynot-cut)
-  local t="$1"
-  while :; do
-    case "$t" in
-      ?*/.) t="${t%/.}" ;;
-      ?*/) t="${t%/}" ;;
-      *) break ;;
-    esac
-  done
-  TRIMMED="$t"
 }
 
 linked_target_problem() { # real-target genuine mode -> WHY: the core's base._linked_target_problem - the target of a
   # linked ~/.whynot-cut must not hold the home folder, lie inside a client folder or the saved clients folder, nor
   # (install / uninstall) hold anything while not being a genuine engine home (no WhyNotCut subfolder can be made there)
-  local r d up c
+  local r d up c shown
   WHY=""
   [ -n "$1" ] || return 0
   guard_norm "$1"; r="$NORM"
@@ -1016,7 +1125,10 @@ linked_target_problem() { # real-target genuine mode -> WHY: the core's base._li
 $CLIENT_ROOTS
 EOF
   if [ "$3" != deferred ] && [ -z "$2" ] && has_occupied "$1" 1; then
-    WHY="a folder that already holds other files and is not a WhyNot Cut engine folder"
+    shown="$(printf '%s\n' "$OCCUPIED" | head -n 3 | tr '\n' '|' | sed 's/|$//; s/|/, /g')"
+    [ "$(printf '%s\n' "$OCCUPIED" | wc -l | tr -d ' ')" -gt 3 ] && shown="$shown, ..."
+    WHY="a folder that already holds other files ($shown) and is not a WhyNot Cut engine folder (if it is your old"
+    WHY="$WHY WhyNot Cut folder, move your own files out of it and run again)"
   fi
   return 0
 }
@@ -1071,6 +1183,67 @@ EOF
       WHY="$WHY of its own with -EngineHome / --engine-home"
     fi
   fi
+  return 0
+}
+
+uninstall_place() { # path -> PLACED, PLACE_NOTE, PROBLEM: the folder --uninstall --engine-home names (fix round 5, N3),
+  # the core's base.uninstall_engine_home, same rules and order: a full path that exists, not a network path, drive root,
+  # mount point, link or inside the plugin folder; WhyNot Cut's own (our_home), or else its WhyNotCut subfolder when that
+  # is WhyNot Cut's own and an install would have made it (the home folder, Desktop, Documents, Downloads, a folder
+  # holding the editor's files); then not the home folder or holding it, not inside Claude's folder, in a sandbox inside
+  # it, and the resolved-home guard in uninstall mode. Nothing is written here.
+  local p="$1" n r d sub nf moved_in="" pointer_ok=""
+  PLACED="" PLACE_NOTE="" PROBLEM=""
+  case "$p" in
+    \\\\*|//*) PROBLEM="$p is a network share or device path; name a folder on a local drive"; return 0 ;;
+    /*|[A-Za-z]:/*|[A-Za-z]:\\*) ;;
+    *) PROBLEM="$p is not a full path (for example $HOME/WhyNotCut)"; return 0 ;;
+  esac
+  lex_path "$p"; p="$LEX"
+  norm_path "$p"; n="$NORM"
+  case "$n" in
+    /|[A-Za-z]:|[A-Za-z]:/) PROBLEM="$p is a drive root or a mounted volume, never a WhyNot Cut engine folder"; return 0 ;;
+  esac
+  if is_mount "$p"; then PROBLEM="$p is a drive root or a mounted volume, never a WhyNot Cut engine folder"; return 0; fi
+  if [ -L "$p" ]; then
+    PROBLEM="$p is a link or mount point; name the real folder (leave --engine-home out when it is your ~/.whynot-cut)"
+    return 0
+  fi
+  if [ ! -d "$p" ]; then PROBLEM="$p does not exist; name the folder WhyNot Cut was installed in"; return 0; fi
+  norm_path "$ROOT"; r="$NORM"
+  if within "$n" "$r"; then PROBLEM="$p is inside the plugin folder $ROOT, never a WhyNot Cut engine folder"; return 0; fi
+  norm_path "$HOME/.whynot-cut"
+  [ "$NORM" = "$n" ] && pointer_ok=1
+  PLACED="$p"
+  if ! our_home "$p" "$pointer_ok"; then
+    for d in "$HOME" "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads"; do
+      norm_path "$d"
+      [ "$NORM" = "$n" ] && moved_in=1
+    done
+    if [ -z "$moved_in" ] && has_occupied "$p" "$pointer_ok"; then moved_in=1; fi
+    sub="${p%/}/WhyNotCut"
+    if [ -z "$moved_in" ] || [ -L "$sub" ] || [ ! -d "$sub" ] || ! our_home "$sub"; then
+      PROBLEM="$p is not a WhyNot Cut engine folder (no state.json or current of WhyNot Cut's, no Whisper models of its"
+      PROBLEM="$PROBLEM own) and has no WhyNotCut folder of WhyNot Cut's in it; name the folder WhyNot Cut was installed in"
+      PLACED=""
+      return 0
+    fi
+    PLACED="$sub"
+    PLACE_NOTE="$p is not a WhyNot Cut engine folder, but $sub is (an install named $p put WhyNot Cut there): uninstalling from $sub"
+  fi
+  norm_path "$PLACED"; nf="$NORM"
+  norm_path "$HOME"
+  if within "$NORM" "$nf"; then PROBLEM="$PLACED is your user folder or holds it"; PLACED=""; return 0; fi
+  norm_path "$HOME/.claude"
+  if within "$nf" "$NORM"; then PROBLEM="$PLACED is inside Claude's folder $HOME/.claude"; PLACED=""; return 0; fi
+  if [ -n "$HOME_OVR" ]; then
+    norm_path "$H"
+    if [ "$nf" = "$NORM" ] || ! within "$nf" "$NORM"; then
+      PROBLEM="$PLACED is outside the sandbox home $H (--home: nothing outside it is used)"; PLACED=""; return 0
+    fi
+  fi
+  resolved_home_problem "$PLACED" uninstall
+  if [ -n "$WHY" ]; then PROBLEM="$PLACED is $WHY"; PLACED=""; fi
   return 0
 }
 
@@ -1227,7 +1400,9 @@ else
   POINTER="$HOME/.whynot-cut/plugin-options.json"
   if [ -n "${WHYNOT_OPTIONS_FILE:-}" ]; then POINTER="$(home_path "$WHYNOT_OPTIONS_FILE")"; fi
 fi
-trim_dir "$ENGINE"; ENGINE="$TRIMMED"  # (fix round 4) a saved ~/.whynot-cut/ or ~/.whynot-cut/. is that folder
+# (fix rounds 4 and 5, N4) its lexical form before any test: a saved ~/.whynot-cut/, ~/.whynot-cut/. or
+# <home>/nope/../.whynot-cut (nope missing: `[ -L ]` would not see through it) is ~/.whynot-cut
+lex_path "$ENGINE"; ENGINE="$LEX"
 DEFAULT_ENGINE="$ENGINE"
 COMP="$ROOT/setup/components.json"
 [ -n "$COMPONENTS" ] && COMP="$(abs_path "$COMPONENTS")"
@@ -1254,18 +1429,38 @@ if [ -n "$IS_RESOLVED" ]; then
   client_roots
   resolved_home_problem "$DEFAULT_ENGINE" "$GUARD_MODE"
   if [ -n "$WHY" ]; then
-    printf 'ERROR: WhyNot Cut will not use %s as its engine home (from %s): it is %s. Nothing was downloaded or deleted. To fix it, run the installer again with -EngineHome <folder> / --engine-home <folder> (a folder of its own, for example ~/WhyNotCut).\n' \
+    printf 'ERROR: WhyNot Cut will not use %s as its engine home (from %s): it is %s. Nothing was changed. To fix it, run the installer again with -EngineHome <folder> / --engine-home <folder> (a folder of its own, for example ~/WhyNotCut).\n' \
       "$DEFAULT_ENGINE" "$ENGINE_SRC" "$WHY"
     printf '%s\n' "لن يستخدم WhyNot Cut هذا المجلد لملفات التشغيل. لإصلاح ذلك شغّل المثبّت مرة أخرى مع -EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به."
     if [ -n "$LINKED_DEFAULT" ]; then
-      printf '%s\n' "الرابط ~/.whynot-cut يشير إلى مجلد لا يصلح أو غير موجود: أعد توصيل القرص، أو احذف الرابط، أو وجّهه إلى مجلد فارغ أو إلى مجلد WhyNot Cut القديم، أو شغّل المثبّت مرة أخرى مع -EngineHome <folder>."
+      printf '%s\n' "الرابط ~/.whynot-cut يشير إلى مجلد لا يصلح أو غير موجود: أعد توصيل القرص، أو احذف الرابط، أو وجّهه إلى مجلد فارغ خاص به، أو شغّل المثبّت مرة أخرى مع -EngineHome <folder>. وإن كان هو مجلد WhyNot Cut القديم نفسه وفيه ملفات أخرى لك، فانقلها خارجه ثم شغّل المثبّت مرة أخرى."
     fi
     exit 2
   fi
 fi
+LINK_REAL=""  # (fix round 5, N6) where a linked ~/.whynot-cut points now; the deferred delete checks it again
+if [ -n "$LINKED_DEFAULT" ]; then real_path "$DEFAULT_ENGINE"; LINK_REAL="$REAL"; fi
 select_mode  # D-T1: no question unless the editor customises (--customise, or C during the countdown)
-if [ -n "$UNINSTALL" ]; then  # no question: the folder the engine uses (or --engine-home; the core checks it)
-  if [ -n "$ENGINE_OPT" ]; then typed_path "$ENGINE_OPT"; ENGINE="$TYPED"; CHOSEN=1; fi
+if [ -n "$UNINSTALL" ]; then
+  # no question: the folder the engine uses - also when --engine-home names it (fix round 5, N2: the linked
+  # ~/.whynot-cut included, the core then applies the Addendum F rules) - or the folder --engine-home names, placed and
+  # checked before anything is written (N3)
+  if [ -n "$ENGINE_OPT" ] && [ -z "$IS_RESOLVED" ]; then
+    typed_path "$ENGINE_OPT"
+    client_roots
+    uninstall_place "$TYPED"
+    if [ -n "$PROBLEM" ]; then
+      printf 'ERROR: WhyNot Cut cannot uninstall from %s: %s. Nothing was changed. To fix it, name the folder WhyNot Cut was installed in with -EngineHome <folder> / --engine-home <folder>, or leave it out to use the saved one.\n' \
+        "$TYPED" "$PROBLEM"
+      printf '%s\n' "لا يمكن إلغاء التثبيت من هذا المجلد. اكتب بعد -EngineHome <folder> (على macOS: --engine-home <folder>) المجلد الذي ثُبّت فيه WhyNot Cut، أو احذف هذا الخيار ليُستخدم المجلد المحفوظ."
+      exit 2
+    fi
+    if [ -n "$PLACE_NOTE" ]; then
+      printf '%s\n' "$PLACE_NOTE"
+      printf '%s\n' "هذا المجلد ليس مجلد WhyNot Cut، لكن المجلد WhyNotCut داخله هو مجلده (ثبّته هناك تثبيت سابق)، لذلك سيُلغى التثبيت منه."
+    fi
+    ENGINE="$PLACED"; CHOSEN=1
+  fi
 else
   [ -n "$ANSWERS" ] && exec 3<"$ANSWERS"
   case ",$SKIP," in *,model,*) WITH_MODEL="" ;; *) WITH_MODEL=1 ;; esac

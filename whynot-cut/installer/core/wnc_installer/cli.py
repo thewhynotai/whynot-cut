@@ -123,24 +123,26 @@ def _client_roots(paths: base.Paths) -> list:
     return base.saved_client_roots(paths)
 
 
-def _what_ran(paths: base.Paths) -> str:
-    """What a refusal can truthfully say about the folder (fix rounds 2 and 4): no step ran; uv / Python / downloads
-    are named as the bootstrap's only when its own claim (state.json) shows it wrote there - never for a linked
-    ~/.whynot-cut, whose folders are the editor's own."""
+def _what_ran(paths: base.Paths, command: str = "install") -> str:
+    """What a refusal can truthfully say about the folder (fix rounds 2, 4 and 5): no step ran (of an uninstall: so
+    nothing was removed); uv / Python / downloads are named as the bootstrap's only when its own claim (state.json)
+    shows it wrote there - never for a linked ~/.whynot-cut, whose folders are the editor's own."""
     w = paths.whynot
+    ran = "No uninstall step ran; nothing was removed." if command == "uninstall" else "No install step ran."
     if base.default_link(w, paths.home) or not base.bootstrap_claim(w):
-        return "No install step ran."
+        return ran
     left = [n for n in ("bin", "python", "downloads", "logs") if (w / n).exists()]
     if not left:
-        return "No install step ran."
-    return (f"No install step ran, but {', '.join(n + '/' for n in left)} in that folder came from the bootstrap: "
+        return ran
+    return (f"{ran[:-1]}, but {', '.join(n + '/' for n in left)} in that folder came from the bootstrap: "
             "delete them if you do not use that folder.")
 
 
-def _engine_home_check(paths: base.Paths, plugin_root: Path, chosen) -> tuple:
+def _engine_home_check(paths: base.Paths, plugin_root: Path, chosen, command: str = "install") -> tuple:
     """(problem, final folder, note). A chosen engine home is placed and checked like the bootstraps do it
     (base.choose_engine_home: the clients folder from the preferences and the pointer counts; a folder holding the
-    editor's own files becomes <it>/WhyNotCut); a sandbox's resolved engine home must stay inside the sandbox."""
+    editor's own files becomes <it>/WhyNotCut; an uninstall's: base.uninstall_engine_home, fix round 5); a sandbox's
+    resolved engine home must stay inside the sandbox."""
     if not chosen and not paths.sandbox:
         return "", paths.whynot, ""
     roots = _client_roots(paths)
@@ -148,9 +150,15 @@ def _engine_home_check(paths: base.Paths, plugin_root: Path, chosen) -> tuple:
         inside = base._within(base._norm(paths.whynot), base._norm(paths.home), strict=True)
         return ("" if inside else f"it is outside the sandbox home {paths.home} (--home: nothing outside it is "
                                   "used)"), paths.whynot, ""
+    sandbox_home = paths.home if paths.sandbox else None
+    if command == "uninstall":  # (fix round 5, N3) WhyNot Cut's own folder, or its WhyNotCut subfolder; else refused
+        final, note, problem = base.uninstall_engine_home(str(chosen), home=paths.home, plugin_root=plugin_root,
+                                                          clients_roots=roots,
+                                                          known=base.shell_folders(paths.home, paths.sandbox),
+                                                          sandbox_home=sandbox_home)
+        return problem or "", final, note
     final, note, problem = base.choose_engine_home(str(chosen), home=paths.home, plugin_root=plugin_root,
-                                                   clients_roots=roots,
-                                                   sandbox_home=paths.home if paths.sandbox else None)
+                                                   clients_roots=roots, sandbox_home=sandbox_home)
     return problem or "", final, note
 
 
@@ -167,24 +175,34 @@ def main(argv=None) -> int:
                      "questions)")
     base.set_test_answers(test_answers(args))
     plugin_root = Path(args.plugin_root).resolve() if args.plugin_root else default_plugin_root()
+    comp_path = Path(args.components) if args.components else plugin_root / "setup" / "components.json"
+    base.use_model_stores(comp_path)  # (fix round 5, N1: the model store names the guards recognise)
     chosen = args.engine_home if args.engine_home and args.engine_home_chosen else None
     paths = base.Paths.from_env(args.home, engine_home=chosen)
     if args.engine_home and not chosen and base._norm(args.engine_home) != base._norm(paths.whynot):
         print(f"ERROR: the bootstrap placed uv and Python in {args.engine_home}, but the engine home is "
-              f"{paths.whynot} ({base.describe_engine_home_source(paths.engine_home_source)}). No install step ran. "
+              f"{paths.whynot} ({base.describe_engine_home_source(paths.engine_home_source)}). "
+              f"{_what_ran(paths, args.command)} "
               f"To fix it yourself, run the installer again with -EngineHome \"{paths.whynot}\" (macOS: --engine-home "
               f"\"{paths.whynot}\"), or name the other folder the same way; if it happens again, tell WhyNot Cut "
               "support (the two resolvers disagree).", file=sys.stderr)
         return 2
-    problem, final, note = _engine_home_check(paths, plugin_root, chosen)
+    problem, final, note = _engine_home_check(paths, plugin_root, chosen, args.command)
+    if problem and args.command == "uninstall" and chosen:
+        print(f"ERROR: WhyNot Cut cannot uninstall from {chosen}: {problem}. {_what_ran(paths, 'uninstall')} To fix "
+              f"it, {base.UNINSTALL_FIX}.", file=sys.stderr)
+        print(base.UNINSTALL_FIX_AR, file=sys.stderr)
+        return 2
     if problem:
-        print(f"ERROR: WhyNot Cut cannot use {paths.whynot} as its engine home: {problem}. {_what_ran(paths)} Run "
-              "the installer again with -EngineHome <folder> (macOS: --engine-home <folder>).", file=sys.stderr)
+        print(f"ERROR: WhyNot Cut cannot use {paths.whynot} as its engine home: {problem}. "
+              f"{_what_ran(paths, args.command)} Run the installer again with -EngineHome <folder> (macOS: "
+              "--engine-home <folder>).", file=sys.stderr)
         return 2
     if chosen and not base.same_path(final, paths.whynot):  # the editor's own files are there: its own subfolder
         paths = base.Paths.from_env(args.home, engine_home=str(final))
         print(note, file=sys.stderr)  # (plan prints JSON on stdout)
     linked = base.default_link(paths.whynot, paths.home)
+    pinned = None  # (fix round 5, N6) where a linked ~/.whynot-cut pointed when it was checked: the uninstall's deletes
     if not chosen and args.command in ("install", "plan", "uninstall"):
         # task 9: a RESOLVED engine home in a place it must never be. Uninstall (fix round 4): the same guard, with a
         # genuine engine home not refused for client folders inside it (uninstall deletes only its own entries)
@@ -193,13 +211,16 @@ def main(argv=None) -> int:
                                          mode="uninstall" if args.command == "uninstall" else "install")
         if why:
             print(f"ERROR: WhyNot Cut will not use {paths.whynot} as its engine home "
-                  f"({base.describe_engine_home_source(paths.engine_home_source)}): it is {why}. {_what_ran(paths)} "
+                  f"({base.describe_engine_home_source(paths.engine_home_source)}): it is {why}. "
+                  f"{_what_ran(paths, args.command)} "
                   f"To fix it, {base.SELF_FIX} (a folder of its own, for example C:\\WhyNotCut or ~/WhyNotCut).",
                   file=sys.stderr)
             print(base.SELF_FIX_AR, file=sys.stderr)
             if linked:
                 print(base.LINK_FIX_AR, file=sys.stderr)
             return 2
+        if linked:
+            pinned = os.path.realpath(paths.whynot)
 
     if args.command == "plan":
         try:
@@ -217,7 +238,6 @@ def main(argv=None) -> int:
     except base.Unsupported as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 2
-    comp_path = Path(args.components) if args.components else plugin_root / "setup" / "components.json"
     try:
         components = base.load_components(comp_path)
     except (OSError, ValueError) as e:
@@ -239,6 +259,8 @@ def main(argv=None) -> int:
         log.warn(f"state.json was unreadable; kept it as {state.set_aside.name} and started fresh")
     ctx = base.Ctx(paths=paths, log=log, components=components, state=state, plugin_root=plugin_root,
                    platform=plat, args=args)
+    if pinned:
+        ctx.facts["link_target"] = pinned
     log.info(f"WhyNot Cut {components.get('plugin')} {args.command} on {plat}; engine home {paths.whynot} "
              f"({base.describe_engine_home_source(paths.engine_home_source)})"
              + (" (dry run: nothing is written)" if args.dry_run else ""))

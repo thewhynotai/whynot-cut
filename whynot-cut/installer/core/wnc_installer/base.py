@@ -205,9 +205,14 @@ def saved_client_roots(paths) -> list:
     return [saved_path(r, paths.home) for r in roots if isinstance(r, str) and r.strip()]
 
 
+def _same_place(a, b) -> bool:
+    """same_path, case-insensitively on macOS too (fix round 5, N5: APFS / HFS+ ignore case, normcase does not)."""
+    return _fold(_norm(a)) == _fold(_norm(b))
+
+
 def default_link(whynot, home) -> bool:
     """<home>/.whynot-cut is a link (a junction or symlink), whether or not its target exists."""
-    return same_path(whynot, Path(home) / ".whynot-cut") and is_link(whynot)
+    return _same_place(whynot, Path(home) / ".whynot-cut") and is_link(whynot)
 
 
 def bootstrap_claim(whynot) -> bool:
@@ -221,7 +226,7 @@ def linked_default_home(whynot, home) -> bool:
     symlink, e.g. to D:\\ClaudeData\\whynot-cut-home). It is used through the link at install and uninstall; the
     link and its target folder are never removed, only WhyNot Cut's own entries inside. Any other home that is a link
     stays refused."""
-    return same_path(whynot, Path(home) / ".whynot-cut") and is_link(whynot) and os.path.isdir(whynot)
+    return _same_place(whynot, Path(home) / ".whynot-cut") and is_link(whynot) and os.path.isdir(whynot)
 
 
 # What WhyNot Cut itself puts in an engine home (installer.md R.1 + the engine's own folders, engine/reel/lib plat.py,
@@ -275,6 +280,66 @@ def is_engine_home(path) -> bool:
         return False
     stamp = _json_file(p / "runtimes" / rid / "WHYNOT_RUNTIME")
     return isinstance(stamp, dict) and stamp.get("id") == rid
+
+
+# Fix round 5 (N1): what `uninstall --remove-engine` keeps of an engine home by default (models/) is still WhyNot Cut's.
+# The model step writes the engine's Hugging Face store there (engine/reel/lib/whisper_backends.py _repo_dir): one
+# folder "models--<repo with / as -->" per components.json `models.<m>.repo`. The bootstraps read the same names from
+# the same components.json (Get-WncModelStoreList / model_stores).
+_REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
+_MODEL_STORES: Optional[frozenset] = None
+
+
+def model_store_names(components) -> frozenset:
+    """The store folder names of every `models.<m>.repo` in components.json; a placeholder or a malformed repo
+    (anything but owner/name) is left out."""
+    models = components.get("models") if isinstance(components, dict) else None
+    out = set()
+    for v in (models.values() if isinstance(models, dict) else ()):
+        repo = v.get("repo") if isinstance(v, dict) else None
+        if isinstance(repo, str) and not is_placeholder(repo) and _REPO.match(repo) and ".." not in repo:
+            out.add("models--" + repo.replace("/", "--"))
+    return frozenset(out)
+
+
+def use_model_stores(components_path) -> None:
+    """The core names its components.json (cli.main, before any guard): the store names come from that file (one that
+    cannot be read names none, so nothing is recognised as a leftover)."""
+    global _MODEL_STORES
+    _MODEL_STORES = model_store_names(_json_file(Path(components_path)))
+
+
+def model_stores() -> frozenset:
+    """The store names in use: the core's components.json, else the plugin's own (<plugin>/setup/components.json)."""
+    global _MODEL_STORES
+    if _MODEL_STORES is None:
+        _MODEL_STORES = model_store_names(_json_file(Path(__file__).resolve().parents[3] / "setup" / "components.json"))
+    return _MODEL_STORES
+
+
+def is_model_leftover(path, *, pointer_ok: bool = False) -> bool:
+    """Fix round 5 (N1): the folder holds exactly models/ (occupied_entries: the write probe, the -Source cache and,
+    with `pointer_ok`, the pointer do not count) - a real folder, not a link - and models/ holds at least one store
+    folder of WhyNot Cut's model step (model_stores(), names compared exactly, a real folder). Recognised by content,
+    never by the name `models` alone: an editor's own models/ folder is not ours (a later --remove-models would delete
+    it)."""
+    if occupied_entries(path, pointer_ok=pointer_ok) != ["models"]:
+        return False
+    m = Path(path) / "models"
+    if is_link(m) or not m.is_dir():
+        return False
+    stores = model_stores()
+    try:
+        with os.scandir(m) as it:
+            return any(e.name in stores and not is_link(e.path) and e.is_dir(follow_symlinks=False) for e in it)
+    except OSError:
+        return False
+
+
+def is_our_home(path, *, pointer_ok: bool = False) -> bool:
+    """A genuine engine home (is_engine_home) or the recognised leftover of one (is_model_leftover): WhyNot Cut's own
+    folder for placement, at install and at uninstall (fix round 5, N1)."""
+    return is_engine_home(path) or is_model_leftover(path, pointer_ok=pointer_ok)
 
 
 def occupied_entries(path, *, pointer_ok: bool = False) -> list:
@@ -379,7 +444,8 @@ def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (),
     plug = _norm(plugin_root)
     if _within(n, plug, strict=False):
         return None, "", f"{p} is inside the plugin folder {plugin_root}, which is replaced on every update"
-    existing = is_engine_home(p)
+    pointer_ok = _norm(Path(home) / ".whynot-cut") == n  # the SessionStart hook's pointer lives there
+    existing = is_our_home(p, pointer_ok=pointer_ok)  # (fix round 5, N1: also the leftover of an uninstall)
     if not existing:
         if _within(plug, n) and not _within(plug, _norm(Path(p) / "downloads")) \
                 and not _within(plug, _norm(Path(p) / SUBFOLDER / "downloads")):
@@ -401,7 +467,6 @@ def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (),
                 return None, "", f"{p} holds a client folder ({below} holds {CLIENT_MARKER})"
     final, note = Path(p), ""
     roots = [Path(home)] + [Path(home) / r for r in HOME_ROOTS]
-    pointer_ok = _norm(Path(home) / ".whynot-cut") == n  # the SessionStart hook's pointer lives there
     if not existing and (any(_norm(r) == n for r in roots) or occupied_entries(p, pointer_ok=pointer_ok)):
         final = Path(p) / SUBFOLDER
         note = (f"{p} already holds other files, so WhyNot Cut goes into its own folder {final} (uninstall then "
@@ -411,7 +476,7 @@ def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (),
         return None, "", f"{final} is your user folder or holds it; choose a folder of its own"
     if _within(f, _norm(Path(home) / ".claude"), strict=False):
         return None, "", f"{final} is inside Claude's folder {Path(home) / '.claude'}"
-    if final != Path(p) and not is_engine_home(final) and occupied_entries(final):
+    if final != Path(p) and not is_our_home(final) and occupied_entries(final):
         return None, "", f"{final} already holds other files; choose an empty folder or one of its own"
     if sandbox_home is not None and not _within(f, _norm(sandbox_home), strict=True):
         return None, "", f"{final} is outside the sandbox home {sandbox_home} (--home: nothing outside it is used)"
@@ -423,13 +488,81 @@ def engine_home_choice_problem(path, **kw) -> Optional[str]:
     return choose_engine_home(path, **kw)[2]
 
 
+def uninstall_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (), known: Iterable = (),
+                          sandbox_home=None) -> tuple:
+    """Fix round 5 (N3): the folder an uninstall was given (-EngineHome / --engine-home): (final folder or None, note
+    or "", problem or None). The bootstraps apply the same rule (Get-WncUninstallPlace / uninstall_place) before they
+    write anything (log, uv, Python), so the log, the deferred list and the core all use the one final folder.
+
+    The folder must be a full path, exist, not be a link (the linked ~/.whynot-cut that is the resolved home is passed
+    as the resolved home, not as a chosen folder: N2), not be a drive root / mount point or inside the plugin folder.
+    It must be WhyNot Cut's own (is_our_home: a genuine engine home or the leftover of an uninstall). When it is not,
+    but install would have put WhyNot Cut into its WhyNotCut subfolder (the user folder, Desktop, Documents, Downloads,
+    or a folder holding the editor's files) and <it>/WhyNotCut is WhyNot Cut's own, that subfolder is used (the note
+    says so). The final folder must not be or hold the user folder, lie inside Claude's folder or (sandbox) outside the
+    sandbox home, and must pass the resolved-home guard in uninstall mode (resolved_home_problem: drive root, the user
+    folder, Desktop / Documents / Downloads themselves, a link)."""
+    p = str(path or "").strip()
+    if not p or not os.path.isabs(p) or (os.name == "nt" and not re.match(r"^([A-Za-z]:[\\/]|[\\/]{2})", p)):
+        return None, "", f"{p or '(empty)'} is not a full path (for example C:\\WhyNotCut or /Users/you/WhyNotCut)"
+    p = strip_long_prefix(p)
+    if re.match(r"^[\\/]{2}", p):
+        return None, "", f"{p} is a network share or device path; name a folder on a local drive"
+    if _is_drive_root(p):
+        return None, "", f"{p} is a drive root or a mounted volume, never a WhyNot Cut engine folder"
+    if is_link(p):
+        return None, "", (f"{p} is a link or mount point; name the real folder (leave -EngineHome / --engine-home out "
+                          "when it is your ~/.whynot-cut)")
+    if not os.path.isdir(p):
+        return None, "", f"{p} does not exist; name the folder WhyNot Cut was installed in"
+    n, h = _norm(p), Path(home)
+    if _within(n, _norm(plugin_root), strict=False):
+        return None, "", f"{p} is inside the plugin folder {plugin_root}, never a WhyNot Cut engine folder"
+    pointer_ok = n == _norm(h / ".whynot-cut")
+    final, note = Path(p), ""
+    if not is_our_home(p, pointer_ok=pointer_ok):
+        sub = Path(p) / SUBFOLDER
+        roots = [h] + [h / r for r in HOME_ROOTS] + [f for _name, f in known]
+        moved_in = any(_norm(r) == n for r in roots) or bool(occupied_entries(p, pointer_ok=pointer_ok))
+        if not (moved_in and not is_link(sub) and os.path.isdir(sub) and is_our_home(sub)):
+            return None, "", (f"{p} is not a WhyNot Cut engine folder (no state.json or `current` of WhyNot Cut's, no "
+                              f"Whisper models of its own) and has no {SUBFOLDER} folder of WhyNot Cut's in it; name "
+                              "the folder WhyNot Cut was installed in")
+        final = sub
+        note = (f"{p} is not a WhyNot Cut engine folder, but {sub} is (an install named {p} put WhyNot Cut there): "
+                f"uninstalling from {sub}")
+    f = _norm(final)
+    if _within(_norm(h), f, strict=False):
+        return None, "", f"{final} is your user folder or holds it"
+    if _within(f, _norm(h / ".claude"), strict=False):
+        return None, "", f"{final} is inside Claude's folder {h / '.claude'}"
+    if sandbox_home is not None and not _within(f, _norm(sandbox_home), strict=True):
+        return None, "", f"{final} is outside the sandbox home {sandbox_home} (--home: nothing outside it is used)"
+    why = resolved_home_problem(final, home=h, clients_roots=clients_roots, known=known, mode="uninstall")
+    if why:
+        return None, "", f"{final} is {why}"
+    return final, note, None
+
+
 # the way out of a refused RESOLVED engine home, in the editor's words (both front ends' flags; task 9)
 SELF_FIX = "run the installer again with -EngineHome <folder> / --engine-home <folder>"
 # a link ~/.whynot-cut that cannot be used (fix round 4): the extra way out, in Arabic
+# (fix round 5, N1: never "point it at your old WhyNot Cut folder" - the link may already name that one)
 LINK_FIX_AR = ("الرابط ~/.whynot-cut يشير إلى مجلد لا يصلح أو غير موجود: أعد توصيل القرص، أو احذف الرابط، أو وجّهه "
-               "إلى مجلد فارغ أو إلى مجلد WhyNot Cut القديم، أو شغّل المثبّت مرة أخرى مع -EngineHome <folder>.")
-LINK_FIX = ("remove the link, or point ~/.whynot-cut at an empty folder or at your old WhyNot Cut folder, or run again "
-            "with -EngineHome <folder> / --engine-home <folder>")
+               "إلى مجلد فارغ خاص به، أو شغّل المثبّت مرة أخرى مع -EngineHome <folder>. وإن كان هو مجلد WhyNot Cut "
+               "القديم نفسه وفيه ملفات أخرى لك، فانقلها خارجه ثم شغّل المثبّت مرة أخرى.")
+LINK_FIX = ("remove the link, or point ~/.whynot-cut at an empty folder of its own, or run again with -EngineHome "
+            "<folder> / --engine-home <folder>")
+# fix round 5 (N3): an uninstall given a folder that is not WhyNot Cut's
+UNINSTALL_FIX = ("name the folder WhyNot Cut was installed in with -EngineHome <folder> / --engine-home <folder>, or "
+                 "leave it out to use the saved one")
+UNINSTALL_FIX_AR = ("لا يمكن إلغاء التثبيت من هذا المجلد. اكتب بعد -EngineHome <folder> (على macOS: --engine-home "
+                    "<folder>) المجلد الذي ثُبّت فيه WhyNot Cut، أو احذف هذا الخيار ليُستخدم المجلد المحفوظ.")
+UNINSTALL_SUBFOLDER_AR = ("هذا المجلد ليس مجلد WhyNot Cut، لكن المجلد WhyNotCut داخله هو مجلده (ثبّته هناك تثبيت "
+                          "سابق)، لذلك سيُلغى التثبيت منه.")
+# fix round 5 (N6): ~/.whynot-cut was pointed elsewhere while the uninstall ran
+LINK_MOVED_AR = ("تغيّر المجلد الذي يشير إليه الرابط ~/.whynot-cut أثناء الإلغاء، لذلك لم يُحذف شيء آخر. تحقّق من "
+                 "الرابط ثم شغّل الإلغاء مرة أخرى.")
 SELF_FIX_AR = ("لن يستخدم WhyNot Cut هذا المجلد لملفات التشغيل. لإصلاح ذلك شغّل المثبّت مرة أخرى مع "
                "-EngineHome <folder> (على macOS: --engine-home <folder>) واختر مجلدًا خاصًا به.")
 
@@ -515,7 +648,7 @@ def resolved_home_problem(path, *, home, clients_roots: Iterable = (), known: It
     if default and not os.path.isdir(p):
         return (f"a link to a folder that does not exist ({os.path.realpath(p)}) - reconnect the drive or remove the "
                 "link")
-    genuine = os.path.isdir(p) and is_engine_home(p)
+    genuine = os.path.isdir(p) and is_our_home(p, pointer_ok=default)  # (fix round 5, N1: the leftover too)
     # (a linked ~/.whynot-cut keeps every client rule at uninstall too: its target may be anyone's folder)
     why = _place_problem(p, h, clients_roots, known,
                          client_checks=not (mode == "uninstall" and genuine and not default))
@@ -545,7 +678,8 @@ def _linked_target_problem(real: str, h: Path, clients_roots: list, genuine: boo
         occupied = occupied_entries(real, pointer_ok=True)
         if occupied:
             return (f"a folder that already holds other files ({', '.join(occupied[:3])}"
-                    + (", ..." if len(occupied) > 3 else "") + ") and is not a WhyNot Cut engine folder")
+                    + (", ..." if len(occupied) > 3 else "") + ") and is not a WhyNot Cut engine folder (if it is "
+                    "your old WhyNot Cut folder, move your own files out of it and run again)")
     return None
 
 

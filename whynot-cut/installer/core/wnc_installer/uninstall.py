@@ -373,13 +373,26 @@ def engine_home_problem(paths: base.Paths) -> Optional[str]:
                                          known=base.shell_folders(paths.home, paths.sandbox), mode="uninstall")
         if why:
             return f"{paths.whynot} is {why}"
-    if not base.is_engine_home(paths.whynot):
+    if not base.is_our_home(paths.whynot, pointer_ok=base.same_path(paths.whynot, paths.default_whynot)):
         return (f"{paths.whynot} does not look like a WhyNot Cut engine home (no state.json written by WhyNot Cut, no "
-                "`current` with its runtime stamp)")
+                "`current` with its runtime stamp, no Whisper models of its own)")
     return None
 
 
-def _delete_child(ctx: base.Ctx, p: Path, protected: list, removed: list, kept: list, failed: list) -> None:
+def _link_moved(ctx: base.Ctx, pinned: Optional[str]) -> Optional[str]:
+    """Fix round 5 (N6): a linked ~/.whynot-cut that no longer points where it pointed when it was checked (`pinned`):
+    why nothing more may be deleted, else None."""
+    if pinned is None:
+        return None
+    now = os.path.realpath(ctx.paths.whynot)
+    if base._fold(os.path.normcase(now)) == base._fold(os.path.normcase(pinned)):
+        return None
+    return (f"{ctx.paths.whynot} now points to {now}, not to {pinned} as when this uninstall checked it; nothing more "
+            "was deleted. Check the link, then run the uninstall again")
+
+
+def _delete_child(ctx: base.Ctx, p: Path, protected: list, removed: list, kept: list, failed: list,
+                  root: Optional[Path] = None) -> None:
     if base.is_link(p):
         if _touches(p, protected):
             kept.append(f"{p.name} (a link to your client data)")
@@ -391,7 +404,7 @@ def _delete_child(ctx: base.Ctx, p: Path, protected: list, removed: list, kept: 
             failed.append(f"{p.name} ({e})")
         return
     try:
-        if base.safe_rmtree(p, [ctx.paths.whynot], protected):
+        if base.safe_rmtree(p, [root or ctx.paths.whynot], protected):
             removed.append(p.name)
         else:
             kept.append(f"{p.name} (client data: never deleted)")
@@ -412,13 +425,23 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         return _done("engine", "red", [f"nothing was deleted: {problem}"])
     protected = _protected(ctx)
     busy = _running_download(ctx)  # read now: state.json may be reduced below
+    # fix round 5 (N6): a linked ~/.whynot-cut is emptied by the REAL folder it pointed to when it was checked (the
+    # core's guard pinned it), and nothing more is deleted once the link points elsewhere
+    pinned = None
+    root = paths.whynot
+    if base.linked_default_home(paths.whynot, paths.home):
+        pinned = ctx.facts.get("link_target") or os.path.realpath(paths.whynot)
+        moved = _link_moved(ctx, pinned)
+        if moved:
+            return _done("engine", "red", [f"nothing was deleted: {moved}"])
+        root = Path(pinned)
     if not engine:  # --remove-models alone
-        if "models" not in os.listdir(paths.whynot):  # exact name (`Models` on NTFS / APFS is the editor's)
+        if "models" not in os.listdir(root):  # exact name (`Models` on NTFS / APFS is the editor's)
             return _done("engine", "skipped", ["no Whisper models to delete"])
         if _dry(ctx):
             return _done("engine", "skipped", [f"dry run: would delete {paths.models_dir}"])
         removed, kept, failed = [], [], []
-        _delete_child(ctx, paths.models_dir, protected, removed, kept, failed)
+        _delete_child(ctx, root / "models", protected, removed, kept, failed, root)
         status = "amber" if kept or failed else "ok"
         notes = [f"deleted {paths.models_dir}" if removed else ""] + [f"kept {k}" for k in kept] + [
             f"could not delete {f}" for f in failed]
@@ -440,10 +463,11 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
     else:
         ctx.state.dry_run = True  # state.json goes too: nothing may write it again in this run
     removed, kept, failed, foreign = [], [], [], []
-    with os.scandir(paths.whynot) as it:
+    with os.scandir(root) as it:
         children = sorted((e.name for e in it), key=lambda n: (n == "logs", n))  # logs last: the log goes with it
+    moved = None
     for name in children:
-        p = paths.whynot / name
+        p = root / name
         if name == DEFER_LIST or name in DEFERRED:
             continue
         if name == "models" and keep_models:
@@ -459,10 +483,15 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         if not (base.is_engine_entry(name) or name == "models"):  # not WhyNot Cut's: never deleted (fix round 1)
             foreign.append(name)
             continue
+        moved = _link_moved(ctx, pinned)
+        if moved:
+            break
         if name == "logs":
             ctx.log.info("the uninstall log goes with the engine home; this summary stays on the screen only")
             ctx.log.path = None
-        _delete_child(ctx, p, protected, removed, kept, failed)
+        _delete_child(ctx, p, protected, removed, kept, failed, root)
+    if moved:
+        return _done("engine", "red", [f"deleted {len(removed)} items of {paths.whynot}", moved])
     git = claude.managed_git_dir(paths)
     for g in (git, git.with_name(git.name + ".staging")):
         if os.path.lexists(g):
