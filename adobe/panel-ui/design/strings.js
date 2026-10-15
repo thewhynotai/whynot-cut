@@ -21,8 +21,9 @@
      "Cost and data" is hidden. mockup.js (M.live, M.supportRow, M.dataLink) is the only place that decides;
    - ONE ARABIC WORD LIST (R2 editor P2-02, designer P1-9), used by every group: «جرّب تاني» (Try again), «افحص تاني»
      (Check again), «تراجع» (Undo), «دوس» (press), «شباك» (window), «نموذج» (model), «المتكلم» (speaker), «إنت»,
-     «ريندر» (render), «مراجعة الصور»; Latin names stay in <bdi>. The group strings still use the old words until each
-     group worker moves over (R2-fix-list.md sections 2 to 4).
+     «ريندر» (render), «مراجعة الصور»; Latin names stay in <bdi>. The D-08 register pass applied it to every group and
+     added «البانل» (panel), «البلاي هيد», «سينك», «اللزمات» (filler words), «المزيكا», «كليب», negation as «ما … ش»
+     and «و» + space before a Latin word: the full glossary is docs/design/reviews/R2-ar-register-pass.md.
    Latin runs inside Arabic are wrapped in <bdi dir="ltr"> by mockup.js at render time. */
 (function () {
   var NB = " ";
@@ -221,7 +222,7 @@
       "pill.engine": "خدمة WhyNot Cut", "pill.claude": "Claude", "pill.host": "Premiere",
       "pill.engine.running": "شغّالة", "pill.engine.off": "مش شغّالة", "pill.engine.starting": "بتبدأ",
       "pill.engine.noanswer": "مش بترد",
-      "pill.claude.ready": "جاهز", "pill.claude.unchecked": "لسه ماتفحصش", "pill.claude.signed_out": "مش مسجّل دخول",
+      "pill.claude.ready": "جاهز", "pill.claude.unchecked": "لسه ما اتفحصش", "pill.claude.signed_out": "مش مسجّل دخول",
       "pill.claude.missing": "مش متسطّب", "pill.claude.offline": "مفيش نت",
       "pill.host.linked": "متوصّل", "pill.host.unlinked": "مش متوصّل", "pill.host.checking": "بنفحص",
       "pill.all_set": "كله تمام",
@@ -242,7 +243,7 @@
       "data.link": "التكلفة والبيانات",
       "privacy.claude_sees": "ملفات الفيديو والصوت عمرها ما بتترفع. Claude بيقرا نصوص بس (التفريغ والخطة) وشوية صور ثابتة: لقطات قليلة من التايملاين عشان المراجعة، وصور البراند.", /* D-03, the approved Egyptian line, verbatim */
       "privacy.link": "Claude بيشوف إيه",
-      "privacy.extra": "مفيش أي تتبّع، وWhyNot Cut مابيدرّبش أي حاجة على شغلك.",
+      "privacy.extra": "مفيش أي تتبّع، و WhyNot Cut مش بيدرّب أي حاجة على شغلك.",
       "support.copy_open": "انسخ التفاصيل وافتح الدعم",
       "support.copy": "انسخ التفاصيل للدعم",
       "support.soon": "صفحة الدعم قريب",
@@ -263,11 +264,11 @@
       "action.sign_in": "سجّل دخول Claude",
       "action.install_guide": "سطّب Claude",
       "engine.off": "خدمة WhyNot Cut مش شغّالة.",
-      "engine.off.hint": "لو ماشتغلتش، انسخ تقرير المشكلة وكلّم الدعم.",
+      "engine.off.hint": "لو ما اشتغلتش، انسخ تقرير المشكلة وكلّم الدعم.",
       "engine.off.hint_short": "شغّلها وكمّل. مفيش حاجة ضاعت.",
-      "engine.noanswer": "خدمة WhyNot Cut ماردّتش في الوقت.",
+      "engine.noanswer": "خدمة WhyNot Cut ما ردّتش في الوقت.",
       "link.off": "Premiere مش متوصّل بخدمة WhyNot Cut.",
-      "retry.hint": "لو «جرّب تاني» مانفعتش، اقفل Premiere وافتحه تاني.",
+      "retry.hint": "لو «جرّب تاني» ما نفعتش، اقفل Premiere وافتحه تاني.",
       "action.start_app": "شغّل WhyNot Cut",
       "update.stale": "WhyNot Cut اتحدّث. اقفل Premiere وافتحه تاني، وبعدين دوس «افحص تاني».",
       /* MOCK: home */
@@ -280,19 +281,19 @@
       "home.last": "آخر مرة: {text} · من" + NB + "{ago}",
       "home.waiting_approval": "{item} مستني موافقتك.",
       "home.raw": "{dur} خام",
-      "home.step_new": "فيديو جديد · لسه ماتعملوش مونتاج",
+      "home.step_new": "فيديو جديد · لسه ما اتعملوش مونتاج",
       "home.step_wait": "الخطوة 3 من 7 · مستنيك",
       "home.step_off": "واقف لحد ما الخدمة ترجع",
       "home.drop.done": "اتضاف كليب واحد · 6:40",
       "home.edit.done": "الخطة جاهزة · ريل 52" + NB + "ثانية",
       "home.week.scope": "الأسبوع ده ·",
-      "home.week": "وفّرت حوالي 4" + NB + "ساعات و30" + NB + "دقيقة (تقدير) · 7 ريلز",
+      "home.week": "وفّرت حوالي 4" + NB + "ساعات ونص (تقدير) · 7 ريلز",
       "home.edit.needs_claude": "سجّل دخول Claude الأول.", "home.edit.needs_claude_missing": "سطّب Claude الأول.",
       "home.change_video": "غيّر الفيديو",
-      "home.week.how": "الحساب بيتم إزاي؟",
+      "home.week.how": "بنحسبه إزاي؟",
       "home.turnaround": "متوسط وقت التسليم: 6" + NB + "ساعات من الخام للموافقة",
-      "home.no_claude": "Claude مش مسجّل دخول، علشان كده «ابدأ المونتاج» مش هتشتغل.",
-      "home.no_claude.missing": "Claude مش متسطّب، علشان كده «ابدأ المونتاج» مش هتشتغل.",
+      "home.no_claude": "Claude مش مسجّل دخول، عشان كده «ابدأ المونتاج» مش هيشتغل.",
+      "home.no_claude.missing": "Claude مش متسطّب، عشان كده «ابدأ المونتاج» مش هيشتغل.",
       "empty.noclient.text": "لكل عميل فولدر واحد جوّاه فولدرين: {assets} للّوجو والخطوط والصور، و{data} لملفات WhyNot Cut. اختاره عشان تبدأ.",
       "empty.noclient.plain": "لكل عميل فولدر واحد. جوّاه WhyNot Cut بيحط اللوجو والخطوط والصور في فولدر اسمه assets، وملاحظاته في فولدر اسمه data. اختار فولدر العميل عشان تبدأ.",
       /* MOCK: approval */
@@ -301,7 +302,7 @@
       "approval.as": "هتوافق باسم {name}",
       "approval.done_by": "وافق {name} · {time}",
       "approval.done_full": "وافق {name} · {date}",
-      "approval.with": "اتأكد مع {who}",
+      "approval.with": "أكّدها {who}",
       "approval.show_all": "اعرض الكل ({n})", "approval.show_less": "اعرض أقل",
       "approval.show_hint": "اعرض كل الجمل ({n}) عشان تراجعها.",
       "approval.flagged.hint": "زرار «وافق» هيفضل مقفول لحد ما تعلّم على كل جملة.",
@@ -312,16 +313,16 @@
       "approval.who.required": "مطلوب مع العميل ده: مين اللي أكّد الجمل؟",
       "approval.export": "صدّر سجل الموافقة",
       "approval.who.placeholder": "مثلًا: د. هناء مصطفى",
-      "approval.tick_first": "علّم على كل جملة فوق عشان يتفعّل «وافق».",
-      "approval.need_who": "اكتب اتأكدت مع مين عشان يتفعّل «وافق».",
+      "approval.tick_first": "علّم على كل جملة فوق عشان «وافق» يشتغل.",
+      "approval.need_who": "اكتب مين اللي أكّد الجمل عشان «وافق» يشتغل.",
       "approval.fix_first": "جرّب تاني الأول. «وافق» مقفول لحد ما الموافقة تتسجّل.",
-      "approval.open_lines": "راجع الجمل اللي محتاجة مراجعة ({n}) عشان يتفعّل «وافق»",
-      "approval.need_name": "اكتب اسمك عشان يتفعّل «وافق».",
+      "approval.open_lines": "راجع الجمل المعلّمة ({n}) عشان «وافق» يشتغل",
+      "approval.need_name": "اكتب اسمك عشان «وافق» يشتغل.",
       "approval.trust": "هيتعمل سيكوينس جديد {seq}، والسيكوينس الأصلي وملفاتك مش هيتلمسوا.",
       "approval.saved_time": "{raw} خام ← ريل {reel} · هيوفّر حوالي {min} (تقدير)",
       "approval.empty.text": "لما Claude يخلّص خطة، هتظهر هنا.",
       "approval.sent": "اتبعتت",
-      "approval.failed": "الموافقة ماتسجّلتش.",
+      "approval.failed": "الموافقة ما اتسجّلتش.",
       "approval.failed.hint": "جرّب تاني. لو فشلت تاني، انسخ تقرير المشكلة وكلّم الدعم.",
       "approval.done_live": "اتوافق. Claude بيبني السيكوينس دلوقتي.",
       "approval.done": "اتوافق.",
