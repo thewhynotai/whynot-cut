@@ -19,7 +19,11 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
 </head>
 <body>
 <script>
-/* P-01 First-run checklist (screen-inventory.md §3 P-01; E-D3 r1 and Addendum G r1 fixes).
+/* P-01 First-run checklist (screen-inventory.md §3 P-01; E-D3 r1, Addendum G r1 and R2 fixes).
+   R2: one status model (a signed-out Claude is AMBER in the row, the step bar and the pill; only "not installed" is red,
+   designer P1-3); the no-Claude card is one sentence + one button + a "What Claude sees" link, the account, cost and
+   privacy lines show only on the healthy row (designer P1-12); under a restart notice the main action is off (shell
+   stalePass, P1-1); success says "You're ready" and offers "Go to Home" (P1-8).
    - "3 of 4 ready" with a 4-segment bar under the intro.
    - The background program is "the WhyNot Cut service", explained once on its row; Claude is introduced once on its row,
      with whose account it is, the cost and where the footage goes (facts to verify, see strings.js).
@@ -48,8 +52,13 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
     return row(kind, t("checklist.engine"), o);
   }
   function claudeRow(kind, detail, o) {
-    o = o || {}; o.explain = t("checklist.claude.explain"); o.account = t("checklist.claude.account");
-    o.privacy = t("privacy.claude_sees"); o.detail = detail;
+    o = o || {}; o.detail = detail;
+    if (kind === "error" || kind === "warn") {
+      /* needs the person: one sentence, one button, one link; the facts live behind the link */
+      o.under = '<div class="m-row mt-1">' + M.linkbtn(t("privacy.link"), "info") + '</div>';
+    } else {
+      o.explain = t("checklist.claude.explain"); o.account = t("checklist.claude.account"); o.privacy = t("privacy.claude_sees");
+    }
     return row(kind, t("checklist.claude"), o);
   }
   function primaryBtn(label, icon, focus) { return M.btn(label, { kind: "primary", icon: icon, focus: focus, kbd: true }); }
@@ -59,9 +68,9 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
       '<div class="m-col mt-3">' + M.btn(t("firstrun.sample"), { kind: "secondary", block: true, icon: "play" }) + '</div>' +
       '<div class="t-meta tx-muted mt-2">' + t("firstrun.sample_hint") + '</div></div>';
   }
-  function intro(done, kind, extra) {
-    return '<div class="t-title">' + t("firstrun.title") + '</div>' +
-      '<div class="t-body tx-muted mt-1">' + t("firstrun.sub") + '</div>' + (extra || '') +
+  function intro(done, kind, extra, finished) {
+    return '<div class="t-title">' + t(finished ? "firstrun.done.title" : "firstrun.title") + '</div>' +
+      '<div class="t-body tx-muted mt-1">' + t(finished ? "firstrun.done.sub" : "firstrun.sub") + '</div>' + (extra || '') +
       '<div class="mt-4">' + M.segbar(4, done, t("firstrun.progress", { n: done, of: 4 }), kind) + '</div>';
   }
   function report() {
@@ -77,10 +86,10 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
   function noClaude(missing) {
     return {
       pills: { claude: missing ? "missing" : "signed_out" },
-      body: intro(2, "warn") + M.card(
+      body: intro(2, missing ? "error" : "warn") + M.card(
         serviceRow("ok", t("checklist.engine.ok")) +
         row("ok", t("checklist.premiere"), { detail: t("checklist.premiere.ok") }) +
-        claudeRow("error", t(missing ? "claude.missing" : "claude.signed_out"), {
+        claudeRow(missing ? "error" : "warn", t(missing ? "claude.missing" : "claude.signed_out"), {
           act: primaryBtn(t(missing ? "action.install_guide" : "action.sign_in"), missing ? "external-link" : "log-in"),
           hint: t(missing ? "claude.missing.hint" : "claude.signed_out.hint") }) +
         row("pending", t("checklist.clients"), { detail: t("firstrun.waiting_claude") }), "m-card-flush mt-4") +
@@ -125,18 +134,18 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
     "no-claude-missing": function () { return noClaude(true); },
     stale: function () {
       return {
-        body: M.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw" } }) +
-          '<div class="mt-4"></div>' + intro(3) + M.card(threeGreenRows(false), "m-card-flush mt-4")
+        body: M.slot(M.stale()) + intro(3) + M.card(threeGreenRows(false), "m-card-flush mt-4")
       };
     },
     success: function () {
       return {
-        body: M.notice("ok", t("firstrun.ready")) + '<div class="mt-4"></div>' + intro(4, "ok") + M.card(
+        body: intro(4, "ok", "", true) + M.card(
           serviceRow("ok", t("checklist.engine.ok")) +
           row("ok", t("checklist.premiere"), { detail: t("checklist.premiere.ok") }) +
           claudeRow("ok", t("checklist.claude.ok")) +
           row("ok", t("checklist.clients"), { detail: t("checklist.clients.ok", { client: D.client }) }), "m-card-flush mt-4") +
-          '<div class="m-col mt-4">' + M.btn(t("firstrun.sample"), { kind: "secondary", block: true, icon: "play" }) + '</div>' +
+          '<div class="m-col mt-4">' + M.btn(t("firstrun.go_home"), { kind: "primary", block: true, icon: "circle-check-big", kbd: true }) +
+          '<div class="mt-2"></div>' + M.btn(t("firstrun.sample"), { kind: "secondary", block: true, icon: "play" }) + '</div>' +
           '<div class="t-meta tx-muted mt-2">' + t("firstrun.sample_hint") + '</div>'
       };
     },

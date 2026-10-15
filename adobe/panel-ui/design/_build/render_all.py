@@ -150,6 +150,14 @@ def job(exe: str, work: pathlib.Path, screen: str, page: pathlib.Path, state: st
         row["problems"].append("brand fonts not loaded")
     if chk.get("missing"):
         row["problems"].append(f"missing: {chk.get('missing')}")
+    # R2 page self-checks: the header status never says "All set" over an open card or a Needs-you badge; a danger or
+    # destructive action never carries a keycap; one live violet fill per screen
+    if chk.get("statuslie", "0") != "0":
+        row["problems"].append("header says All set over an open card or a Needs-you badge")
+    if chk.get("dangerkbd", "0") != "0":
+        row["problems"].append(f"{chk.get('dangerkbd')} keycap(s) on a danger or destructive button")
+    if chk.get("violet", "0").isdigit() and int(chk.get("violet", "0")) > 1:
+        row["problems"].append(f"{chk.get('violet')} live violet fills (one per screen)")
     if row["px_w"] != w * SCALE:
         row["problems"].append(f"png width {row['px_w']}")
     return row

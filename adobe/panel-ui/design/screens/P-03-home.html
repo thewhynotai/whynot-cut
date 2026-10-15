@@ -19,7 +19,11 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
 </head>
 <body>
 <script>
-/* P-03 Home (screen-inventory.md §3 P-03, direction §13; E-D3 r1 and Addendum G r1 fixes).
+/* P-03 Home (screen-inventory.md §3 P-03, direction §13; E-D3 r1, Addendum G r1 and R2 fixes).
+   R2: the header says what is open (shell, never "All set" over a card); the poster is the shared 9:16 media well with a
+   clapperboard glyph (48 x 84 at 480); "Change video" under the hero and the header row 2 are controls (editor P1-01);
+   no-Claude / offline / stale use the shared M.noClaude / M.offline / M.stale (stale switches the verbs off with the
+   reason); the week line states its scope and links to the formula (owner F-03), with the average turnaround (F-17).
    - Hero: the poster frame (9:16), "Current video", the item code (shown once: header row 2 shows the client only),
      the raw duration and the step status.
    - Verbs in fixed order; a done verb shows a check and its result; Approve appears only once a plan exists.
@@ -34,7 +38,7 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
   function hero(o) {
     o = o || {};
     var step = o.step || "new";
-    var line = step === "wait" ? [M.status("warn", 12), t("home.step_wait")]
+    var line = step === "wait" ? [M.status("waiting", 12), t("home.step_wait")]
       : step === "off" ? [M.status("pending", 12), t("home.step_off")]
       : [M.status("info", 12), t("home.step_new")];
     return '<div class="m-row-top">' + M.poster({ disabled: o.disabled }) +
@@ -43,6 +47,7 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
         '<div class="t-display">' + M.ltr(D.item, "lat code") + '</div>' +
         '<div class="t-meta tx-muted">' + t("home.raw", { dur: M.html(M.mono(D.raw)) }) + '</div>' +
         '<div class="m-row-top mt-1"><div class="m-last-ico">' + line[0] + '</div><div class="t-meta tx-muted ms-1 m-grow">' + line[1] + '</div></div>' +
+        '<div class="m-row mt-1">' + M.btn(t("home.change_video"), { kind: "ghost", icon: "film", flush: true, disabled: o.disabled }) + '</div>' +
       '</div></div>';
   }
   /* o: {next: "edit"|"approve", disabled, focus, editBlocked} */
@@ -50,7 +55,7 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
     var out = M.verb({ icon: "folder-input", title: t("home.drop"), done: t("home.drop.done"), disabled: o.disabled });
     var editDone = o.next === "approve";
     out += '<div class="mt-2"></div>' + M.verb({ icon: "clapperboard", title: t("home.edit"),
-      sub: o.editBlocked ? t("home.edit.needs_claude") : t("home.edit.sub"),
+      sub: o.editBlocked ? t(o.missing ? "home.edit.needs_claude_missing" : "home.edit.needs_claude") : t("home.edit.sub"),
       done: editDone ? t("home.edit.done") : null,
       primary: o.next === "edit" && !o.disabled && !o.editBlocked, disabled: o.disabled || o.editBlocked,
       focus: o.focus && o.next === "edit" });
@@ -58,7 +63,10 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
     if (o.next === "approve") out += '<div class="mt-2"></div>' + M.verb({ icon: "circle-check-big", title: t("home.approve"), sub: t("home.approve.sub"),
       primary: !o.disabled, disabled: o.disabled, focus: o.focus });
     return '<div class="m-col mt-4">' + out + '</div>' +
-      '<div class="m-saved mt-3">' + M.ico("timer", 16, o.disabled ? "ink-muted" : "ink-ok") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("home.week") + '</div></div>';
+      '<div class="m-saved mt-3">' + M.ico("timer", 16, o.disabled ? "ink-muted" : "ink-ok") + '<div class="m-col ms-2 m-grow"><div class="m-row t-meta tx-muted"><span class="nowrap">' + t("home.week.scope") + '</span><span class="m-ctx-name ms-1">' + M.ltr(D.client) + '</span></div>' +
+        '<div class="t-meta tx-muted">' + t("home.week") + '</div>' +
+        '<div class="t-meta tx-muted mt-1">' + t("home.turnaround") + '</div>' +
+        '<div class="m-row mt-1">' + M.linkbtn(t("home.week.how")) + '</div></div></div>';
   }
   function last(textKey, agoKey) { return t("home.last", { text: M.raw(textKey), ago: M.raw(agoKey) }); }
   function tools(disabled) {
@@ -73,14 +81,12 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
       '</div>';
   }
   function settings() { return '<div class="m-col mt-5">' + M.rowbtn("settings", t("home.settings")) + '</div>'; }
-  function slot(n) { return n + '<div class="mt-4"></div>'; }
+  var slot = M.slot;
   function noClaude(missing) {
     return {
       needs: 0, pills: { claude: missing ? "missing" : "signed_out" },
-      body: slot(M.notice(missing ? "error" : "warn", t(missing ? "home.no_claude.missing" : "home.no_claude"),
-          { sub: t(missing ? "claude.missing.hint" : "claude.signed_out.hint"),
-            btn: { label: t(missing ? "action.install_guide" : "action.sign_in"), icon: missing ? "external-link" : "log-in", primary: true }, dismiss: false })) +
-        hero() + verbs({ next: "edit", editBlocked: true }) + tools() + settings()
+      body: slot(M.noClaude(missing ? "missing" : "signed_out", { text: t(missing ? "home.no_claude.missing" : "home.no_claude") })) +
+        hero() + verbs({ next: "edit", editBlocked: true, missing: missing }) + tools() + settings()
     };
   }
 
@@ -103,7 +109,7 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
       };
       return {
         needs: 0,
-        body: '<div class="m-row-top"><span class="m-skel-block" style="width:36px;height:64px;border-radius:4px"></span><div class="m-col m-grow ms-3">' +
+        body: '<div class="m-row-top"><span class="m-skel-block m-media-poster" style="border-radius:4px"></span><div class="m-col m-grow ms-3">' +
             M.skel(30, 16) + M.skel(45, 28) + M.skel(20, 16) + M.skel(55, 16) + '</div></div>' +
           '<div class="m-col mt-4">' + box() + '<div class="mt-2"></div>' + box() + '</div>' +
           M.eyebrow(t("home.tools"), "mt-5") + '<div class="m-col mt-2">' + tcard() + '<div class="mt-2"></div>' + tcard() + '<div class="mt-2"></div>' + tcard() + '</div>' +
@@ -122,7 +128,7 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
     offline: function () {
       return {
         needs: 0, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: slot(M.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false, support: true })) +
+        body: slot(M.offline()) +
           hero({ step: "off", disabled: true }) + verbs({ next: "edit", disabled: true }) + tools(true) + settings()
       };
     },
@@ -131,8 +137,7 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
     stale: function () {
       return {
         needs: 0,
-        body: slot(M.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw" } })) +
-          hero() + verbs({ next: "edit" }) + tools() + settings()
+        body: slot(M.stale()) + hero() + verbs({ next: "edit" }) + tools() + settings()
       };
     },
     success: function () {

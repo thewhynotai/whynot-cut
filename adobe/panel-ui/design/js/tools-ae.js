@@ -36,7 +36,8 @@
     /* Addendum G (pattern 2e68bcf): the screen's one primary (violet, or danger in a confirm sheet) carries the shared
        Mod+Enter keycap M.kbd(M.KEY_PRIMARY); a button that mockup.js already gave one keeps it. Dialog "keep" buttons
        carry Esc (TA.dialog). The other keys are listed in each screen's <meta name="mock-keys">. */
-    var prim = panel.querySelectorAll(".m-btn-primary, .m-btn-danger");
+    /* R2 (designer P0-3): never on a danger or destructive action; the primary alone carries it */
+    var prim = panel.querySelectorAll(".m-btn-primary:not(.m-btn-destructive):not(.m-btn-disabled)");
     for (var i = 0; i < prim.length; i++) if (!prim[i].querySelector(".m-kbd")) prim[i].insertAdjacentHTML("beforeend", M.kbd(M.KEY_PRIMARY));
     /* height probe for the group's own checks (render_all captures 2600 CSS px at most) */
     var probe = function () {

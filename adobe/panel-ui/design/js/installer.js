@@ -64,7 +64,8 @@
   };
   I.btn = function (label, o) {
     o = o || {};
-    var hint = o.key && !o.disabled ? I.kbd(o.key, o.kind) : "";
+    /* R2 (designer P0-3): a danger or destructive action never carries the Return keycap */
+    var hint = o.key && !o.disabled && o.kind !== "danger" && !o.destructive ? I.kbd(o.key, o.kind) : "";
     return M.btn('<span class="m-row">' + label + hint + "</span>", o);
   };
 
@@ -223,8 +224,8 @@
     var bar = v.bar ? '<div class="i-bar">' + (v.bar.meta ? '<div class="i-bar-meta">' + v.bar.meta + "</div>" : "") +
       (v.bar.start || "") + '<span class="m-spacer"></span>' + (v.bar.end || "") + "</div>" : "";
     win.innerHTML = osChrome(chrome) +
-      '<div class="i-app"><header class="i-hdr"><img class="m-mono" src="../../../premiere-uxp/icons/dark/icon-48.png" alt="" width="20" height="20">' +
-      '<span class="m-wordmark ms-2">' + M.ltr(S["product.name"], "wm") + '</span><span class="i-setup ms-2">' + T("i00.setup") + "</span>" +
+      '<div class="i-app"><header class="i-hdr"><span class="m-lockup" dir="ltr"><img class="m-mono" src="../../../premiere-uxp/icons/dark/icon-48.png" alt="" width="20" height="20">' +
+      '<span class="m-wordmark m-lockup-wm">' + M.ltr(S["product.name"], "wm") + '</span></span><span class="i-setup ms-2">' + T("i00.setup") + "</span>" +
       '<span class="m-spacer"></span>' + (internal ? M.chip("warn", T("i00.internal"), "flask-conical") : "") + langSwitch() + "</header>" +
       '<div class="m-hairline" aria-hidden="true"></div>' +
       '<div class="i-body"><nav class="i-rail" aria-label="Steps">' + rail(v.rail) + '<span class="m-spacer"></span>' +
@@ -308,7 +309,7 @@
       meta.content = ["state=" + (valid ? state : "invalid"), "lang=" + M.lang, "w=" + Math.round(wr.width), "dir=" + getComputedStyle(win).direction,
         "mono=" + side(win.querySelector(".m-mono")), "tab1=none",
         "overflow=" + over, "worst=" + worst.replace(/[;=]/g, " "), "fonts=" + (fontsOk ? "ok" : "fallback"),
-        "missing=" + missing.join(",")].join(";");
+        "missing=" + missing.join(",")].concat(M.selfCheckExtras(win).slice(1)).join(";");
       document.head.appendChild(meta);
     };
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { setTimeout(done, 50); });

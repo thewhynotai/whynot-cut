@@ -1,34 +1,94 @@
-"""Fail on CSS or markup the UXP kit cannot paint, in the mockup sources.
+"""Fail on CSS or markup the UXP kit cannot paint, and on copy that breaks the rules, in the mockup sources.
 
     python adobe/panel-ui/design/_build/check_css.py
 
-Scans design/*.css, design/*.js (except the generated icons.js) and design/screens/*.html for the forbidden tokens
-of the E-D2 brief: shadows, effects, the flex spacing property, the two-dimensional layout module, the native button
-element, an SVG fill attribute, the inherited-colour keyword and logical inline margins. Prints one line per hit and a
-summary line; exit 1 on any hit.
+Scans design/*.css, design/*.js (except the generated icons.js), design/css/*.css, design/js/*.js, design/strings/*.js
+and design/screens/*.html (R2 designer P2-15: the group files were never scanned). Forbidden: shadows, effects, the flex
+spacing property, the two-dimensional layout module, the native button element, an SVG fill attribute, the
+inherited-colour keyword, logical inline margins, and @font-face anywhere except mockup.css (mockup-only). In the
+strings files it also checks the VALUES: no "engine" / "المحرك" (it is "WhyNot Cut service"), never "Claude Code" in
+panel copy, and every link on the allowlist (https thewhynot.ai, dl.thewhynot.ai, claude.ai, support.claude.com,
+code.claude.com). Prints one line per hit and a summary line; exit 1 on any hit.
 """
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
 
 DESIGN = pathlib.Path(__file__).resolve().parent.parent
+# code files: substring match, as before. strings files hold copy, so only the copy rules apply to them.
 FORBIDDEN = ["box-shadow", "filter", "gap:", "grid", "<button", 'fill="', "currentColor", "margin-inline"]
+JS_PATTERNS = {  # the JS group files use words like Array.filter(); match the CSS-ish forms only
+    "box-shadow": r"box-shadow", "filter:": r"filter\s*:", "gap:": r"(?<![\w-])(row-|column-)?gap\s*:",
+    "grid": r"display\s*:\s*grid|grid-template|grid-area", "<button": r"<button", 'fill="': r'fill="',
+    "currentColor": r"currentColor", "margin-inline": r"margin-inline",
+}
+ALLOWED_HOSTS = {"thewhynot.ai", "www.thewhynot.ai", "dl.thewhynot.ai", "claude.ai", "support.claude.com", "code.claude.com"}
+VALUE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
 
 def main() -> int:
-    files = sorted(DESIGN.glob("*.css")) + sorted(p for p in DESIGN.glob("*.js") if p.name != "icons.js") + sorted((DESIGN / "screens").glob("*.html"))
+    code = (sorted(DESIGN.glob("*.css")) + sorted(DESIGN.glob("css/*.css")) +
+            sorted(p for p in DESIGN.glob("*.js") if p.name not in ("icons.js", "strings.js")) + sorted(DESIGN.glob("js/*.js")) +
+            sorted((DESIGN / "screens").glob("*.html")))
+    copy = [DESIGN / "strings.js"] + sorted(DESIGN.glob("strings/*.js"))
     hits = 0
-    for f in files:
+    for f in code:
+        rel = f.relative_to(DESIGN).as_posix()
+        is_js = f.suffix == ".js"
         for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             low = line.lower()
-            for tok in FORBIDDEN:
-                if tok.lower() in low:
+            if is_js:
+                for tok, rx in JS_PATTERNS.items():
+                    if re.search(rx, line, re.I):
+                        hits += 1
+                        print(f"{rel}:{n}: forbidden '{tok}': {line.strip()[:100]}")
+            else:
+                for tok in FORBIDDEN:
+                    if tok.lower() in low:
+                        hits += 1
+                        print(f"{rel}:{n}: forbidden '{tok}': {line.strip()[:100]}")
+            if "@font-face" in line and rel != "mockup.css":
+                hits += 1
+                print(f"{rel}:{n}: forbidden '@font-face' outside mockup.css: {line.strip()[:100]}")
+    for f in copy:
+        rel = f.relative_to(DESIGN).as_posix()
+        in_block = False
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            code_part = ""
+            rest = line
+            while rest:  # keep only the code outside /* ... */ comments (comments may span lines)
+                if in_block:
+                    end = rest.find("*/")
+                    if end < 0:
+                        rest = ""
+                    else:
+                        in_block, rest = False, rest[end + 2:]
+                else:
+                    start = rest.find("/*")
+                    if start < 0:
+                        code_part += rest
+                        rest = ""
+                    else:
+                        code_part += rest[:start]
+                        in_block, rest = True, rest[start + 2:]
+            code_part = re.sub(r'"[\w.\-]+"\s*:', " ", code_part)  # drop the keys, check the values only
+            for m in VALUE.finditer(code_part):
+                v = m.group(1)
+                if re.search(r"\bengine\b", v, re.I) or "المحرك" in v or "المحرّك" in v:
                     hits += 1
-                    print(f"{f.relative_to(DESIGN).as_posix()}:{n}: forbidden '{tok}': {line.strip()[:100]}")
-    print(f"check_css: {len(files)} files, {hits} forbidden hits")
+                    print(f"{rel}:{n}: copy says engine (use 'WhyNot Cut service'): {v[:90]}")
+                if "claude code" in v.lower():
+                    hits += 1
+                    print(f"{rel}:{n}: copy says Claude Code: {v[:90]}")
+                for u in re.findall(r"https?://([^/\s\"'«»)]+)", v):
+                    if u.lower() not in ALLOWED_HOSTS:
+                        hits += 1
+                        print(f"{rel}:{n}: link host not on the allowlist: {u}")
+    print(f"check_css: {len(code)} code files, {len(copy)} copy files, {hits} forbidden hits")
     return 1 if hits else 0
 
 

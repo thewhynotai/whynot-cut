@@ -21,7 +21,12 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
 </head>
 <body>
 <script>
-/* P-07 Approval, flagged lines, request changes (screen-inventory.md §3 P-07; E-D3 r1 and Addendum G r1 fixes). Edit tab.
+/* P-07 Approval, flagged lines, request changes (screen-inventory.md §3 P-07; E-D3 r1, Addendum G r1 and R2 fixes). Edit tab.
+   R2: one tick PER flagged line (editor P2-13); "Confirmed with" is required for a medical or religious client (owner
+   F-05); the approved card offers "Export sign-off" (a product backlog item, owner F-05); in `stale` every number (map
+   end, summary, saved line, diff) comes from the NEW plan (editor P1-04); in `error` the notice's Try again is the one
+   fix and Approve is off (designer P2-7); the Needs-you badge counts a blocked approval (designer P1-11); the saved
+   time is future tense before anything is built (editor P2-06).
    - The plan shows the media: an edit map (cuts, on-screen lines, B-roll, flagged lines) and the time saved.
    - Flagged lines in full; each timecode seeks the Premiere playhead (ships only if the UXP lab proves the API, else
      plain meta); each line says who confirms it; the "I've checked these lines" box is always visible, with an optional
@@ -40,23 +45,23 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
       M.eyebrow(t("approval.summary"), "mt-5") +
       '<div class="t-title mt-1">' + t("approval.title", { item: item() }) + '</div>';
   }
-  function saved() {
-    return '<div class="m-saved mt-3">' + M.ico("timer", 16, "ink-ok") + '<div class="t-meta tx-muted ms-2 m-grow">' +
-      t("approval.saved_time", { raw: M.html(M.mono(D.raw)), reel: M.raw("demo.reel"), min: M.raw("demo.min") }) + '</div></div>';
+  function saved(reelKey) {
+    return M.saved(t("approval.saved_time", { raw: M.html(M.mono(D.raw)), reel: M.raw(reelKey || "demo.reel"), min: M.raw("demo.min") }), "mt-3");
   }
   function summary(o) {
     o = o || {};
     return M.card('<div class="t-body">' + t(o.text || "demo.summary") + '</div>' +
-      '<div class="mt-3">' + M.editMap(D.plan.edit_map) + '</div>' + saved() +
+      '<div class="mt-3">' + M.editMap((o.plan || D.plan).edit_map) + '</div>' + saved(o.reel) +
       '<div class="m-row mt-3">' + M.btn(t("approval.preview"), { icon: "play", disabled: o.disabled }) + '</div>', "mt-3");
   }
-  function flagRow(f) {
+  function flagRow(f, checked) {
     var kind = f.kind === "medical"
       ? M.chip("neutral", t("approval.flagged.medical"), "stethoscope")
       : M.chip("neutral", t("approval.flagged.religious"), "book-open");
     return '<div class="m-flag"><div class="m-row">' + kind + '<span class="m-spacer"></span>' + M.seek(f.tc) + '</div>' +
       '<div class="m-quote m-quote-ar mt-2" dir="rtl" lang="ar"><span class="ar-run">«' + M.esc(f.text) + '»</span></div>' +
-      '<div class="t-meta tx-muted mt-1">' + t("approval.confirm." + f.kind) + '</div></div>';
+      '<div class="t-meta tx-muted mt-1">' + t("approval.confirm." + f.kind) + '</div>' +
+      '<div class="m-col mt-1">' + M.checkbox(t("approval.checked"), checked) + '</div></div>';
   }
   /* o: {all: bool, checked: bool} */
   function flagged(o) {
@@ -68,12 +73,12 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
       '<div class="m-row">' + M.status("warn") + '<div class="t-label ms-2 m-grow">' + t("approval.flagged") + '</div>' +
         M.chip("warn", M.ltr(String(D.flagged.length))) + '</div>' +
       '<div class="t-meta tx-muted mt-1">' + t("approval.flagged.hint") + '</div>' +
-      '<div class="m-col mt-1">' + list.map(flagRow).join('<span class="m-divider"></span>') + '</div>' +
+      '<div class="m-col mt-1">' + list.map(function (f) { return flagRow(f, o.checked); }).join('<span class="m-divider"></span>') + '</div>' +
       '<div class="m-row">' + toggle + '</div>' +
       '<span class="m-divider"></span>' +
-      '<div class="m-col mt-3">' + M.checkbox(t("approval.checked"), o.checked) + '</div>' +
-      '<div class="t-meta tx-muted mt-3">' + t("approval.who") + '</div>' +
-      '<div class="mt-1">' + M.input(t("approval.who.placeholder"), { value: o.checked ? M.txt(who) : "" }) + '</div>', "mt-4");
+      '<div class="t-label mt-3">' + t("approval.who") + '</div>' +
+      '<div class="t-meta tx-muted">' + t("approval.who.required") + '</div>' +
+      '<div class="mt-2">' + M.input(t("approval.who.placeholder"), { value: o.checked ? M.txt(who) : "" }) + '</div>', "mt-4");
   }
   function changesCard(o) {
     o = o || {};
@@ -81,7 +86,7 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
       '<div class="mt-2">' + M.input(t("approval.changes.placeholder"), { textarea: true }) + '</div>' +
       '<div class="m-row mt-3">' + M.btn(t("approval.changes"), { icon: "message-square", disabled: o.disabled }) + '</div>', "mt-4");
   }
-  /* the pinned action bar. why: "ok" | "collapsed" | "unticked" | "noname" | "off" */
+  /* the pinned action bar. why: "ok" | "collapsed" | "unticked" | "noname" | "off" | "fix" (a failed save: Try again is up in the notice) */
   function bar(why, focus) {
     var on = why === "ok";
     var top = why === "noname"
@@ -89,25 +94,25 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
       : '<div class="m-row">' + M.status("info", 12) + '<div class="t-meta tx-muted ms-1 m-grow">' + t("approval.as", { name: D.editor }) + '</div></div>';
     var hint = why === "collapsed" ? '<div class="m-col mt-2">' + M.linkbtn(t("approval.open_lines", { n: D.flagged.length }), "chevron-down") + '</div>'
       : why === "unticked" ? '<div class="t-meta tx-muted mt-2">' + t("approval.tick_first") + '</div>'
-      : why === "noname" ? '<div class="t-meta tx-muted mt-2">' + t("approval.need_name") + '</div>' : "";
+      : why === "noname" ? '<div class="t-meta tx-muted mt-2">' + t("approval.need_name") + '</div>'
+      : why === "fix" ? '<div class="t-meta tx-muted mt-2">' + t("approval.fix_first") + '</div>' : "";
     return top + '<div class="m-col mt-2">' +
       M.btn(t("approval.approve"), { kind: "primary", block: true, icon: "circle-check-big", disabled: !on, focus: focus, kbd: true }) + '</div>' + hint +
-      '<div class="m-saved mt-2">' + M.ico("shield-check", 16, "ink-ok") + '<div class="t-meta tx-muted ms-2 m-grow">' +
-        t("approval.trust", { seq: M.html(M.mono(D.seq)) }) + '</div></div>' +
+      M.trust(t("approval.trust", { seq: M.html(M.mono(D.seq)) }), "mt-2") +
       '<div class="m-saved mt-1">' + M.ico("lock", 16, "ink-muted") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("privacy.claude_sees") + '</div></div>';
   }
-  function slot(n) { return n + '<div class="mt-4"></div>'; }
+  var slot = M.slot;
   function doneRecord() {
     return M.card('<div class="m-row-top">' + M.status("ok") + '<div class="m-col ms-2 m-grow"><div class="t-label">' +
       t("approval.done_full", { name: D.approval_record.by === "Yunus" ? D.editor : D.approval_record.by, date: M.raw("demo.date") }) + '</div>' +
-      '<div class="t-meta tx-muted">' + t("approval.with", { who: who }) + '</div></div></div>', "mt-4");
+      '<div class="t-meta tx-muted">' + t("approval.with", { who: who }) + '</div>' +
+      '<div class="m-row mt-1">' + M.linkbtn(t("approval.export"), "download") + '</div></div></div>', "mt-4");
   }
   function noClaude(missing) {
     return {
-      needs: 0, pills: { claude: missing ? "missing" : "signed_out" },
-      body: slot(M.notice("warn", t(missing ? "approval.no_claude_missing" : "approval.no_claude"),
-          { sub: t(missing ? "approval.no_claude_missing.hint" : "approval.no_claude.hint"),
-            btn: { label: t(missing ? "action.install_guide" : "action.open_claude"), icon: "external-link", primary: true }, dismiss: false })) +
+      needs: 1, pills: { claude: missing ? "missing" : "signed_out" },
+      body: slot(M.noClaude(missing ? "missing" : "signed_out", { text: t(missing ? "approval.no_claude_missing" : "approval.no_claude"),
+          sub: t(missing ? "approval.no_claude_missing.hint" : "approval.no_claude.hint") })) +
         M.steps(["done", "done", "done", "wait", "pend", "pend", "pend"], 3, "warn") + doneRecord() + summary()
     };
   }
@@ -124,6 +129,7 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
     },
     loading: function () {
       return {
+        needs: 0,
         body: heading() +
           M.card(M.skel(95) + M.skel(90) + M.skel(55) + '<div class="mt-3"></div><span class="m-skel-block" style="height:24px;border-radius:4px"></span>' +
             '<div class="m-row mt-3"><span class="m-skel-block" style="width:132px;height:32px"></span></div>', "mt-3") +
@@ -138,15 +144,15 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
     focus: function () { return { body: heading() + summary() + flagged({ all: true, checked: true }) + changesCard(), bar: bar("ok", true) }; },
     error: function () {
       return {
-        body: slot(M.notice("error", t("approval.failed"), { sub: t("approval.failed.hint"), btn: { label: t("action.retry"), icon: "refresh-cw" }, support: true })) +
+        body: slot(M.notice("error", t("approval.failed"), { sub: t("approval.failed.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true }, support: true })) +
           heading() + summary() + flagged({ all: true, checked: true }) + changesCard(),
-        bar: bar("ok")
+        bar: bar("fix")
       };
     },
     offline: function () {
       return {
         pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: slot(M.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false, support: true })) +
+        body: slot(M.offline()) +
           heading() + summary({ disabled: true }) + flagged({ all: true, checked: true }) + changesCard({ disabled: true }),
         bar: bar("off")
       };
@@ -156,7 +162,7 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
     stale: function () {
       return {
         body: slot(M.notice("info", t("notice.plan_changed"), { sub: t("demo.diff") })) +
-          heading() + summary({ text: "demo.summary2" }) + flagged({ all: true }) + changesCard(),
+          heading() + summary({ text: "demo.summary2", plan: D.plan2, reel: "demo.reel2" }) + flagged({ all: true }) + changesCard(),
         bar: bar("unticked")
       };
     },
@@ -169,7 +175,7 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
     },
     "success-later": function () {
       return {
-        needs: 0,
+        needs: 1,
         body: M.notice("ok", t("approval.done"), { sub: t("approval.claude_later") }) +
           '<div class="m-col mt-3">' + M.btn(t("action.open_claude"), { kind: "primary", block: true, icon: "external-link", kbd: true }) + '</div>' +
           '<div class="mt-4"></div>' +
