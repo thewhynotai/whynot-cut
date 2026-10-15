@@ -58,8 +58,9 @@ ENGINE_START_FIXES = {
                         "\" % ^ & | < > !): reinstall WhyNot Cut with its installer into a folder without them",
     "not_found": "the file that starts the WhyNot Cut engine is missing: reinstall WhyNot Cut with its installer, then "
                  "restart Premiere Pro",
-    "gave_up": "Premiere Pro tried to start the WhyNot Cut engine 5 times and stopped trying: quit and reopen Premiere "
-               "Pro. If it stops again, reinstall WhyNot Cut with its installer",
+    "gave_up": "Premiere Pro tried to start the WhyNot Cut engine 5 times and now tries only every 5 minutes: quit and "
+               "reopen Premiere Pro to try again at once. If it keeps failing, reinstall WhyNot Cut with its "
+               "installer",
 }
 ENGINE_START_FIX_OTHER = ("the file that starts the WhyNot Cut engine failed a safety check: reinstall WhyNot Cut "
                           "with its installer, then restart Premiere Pro")

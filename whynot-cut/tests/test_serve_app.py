@@ -1007,7 +1007,7 @@ class Routing(AppCase):
         with mock.patch("lib.ppro_bridge.submit", return_value=cep_ok("ping", PING_READBACK)) as sub:
             msg = command("ping")
             await c.send(msg)
-            res = await c.recv()
+            res = await c.recv_type("result")
         sub.assert_called_once()
         self.assertEqual(sub.call_args.args[0], "ping")
         self.assertEqual(res["result"], {"ok": True, "action": "ping", "id": msg["request"]["id"],
@@ -1021,7 +1021,7 @@ class Routing(AppCase):
         with mock.patch("lib.ae_bridge.submit", return_value=cep_ok("fonts", fonts)) as ae, \
                 mock.patch("lib.ppro_bridge.submit", side_effect=AssertionError("wrong bridge")):
             await c.send(command("ae_fonts", {"postscript_names": []}))
-            res = await c.recv()
+            res = await c.recv_type("result")
         ae.assert_called_once()
         self.assertEqual(ae.call_args.args[0], "fonts")
         self.assertEqual(res["type"], "result")
@@ -1065,7 +1065,7 @@ class Routing(AppCase):
         c = await self.cli()
         with mock.patch("lib.ppro_bridge.submit", return_value=cep_ok("ping", {"version": 26})):
             await c.send(command("ping"))
-            res = await c.recv()
+            res = await c.recv_type("result")
         self.assertEqual(res["result"]["error"], "host answered outside the contract")
 
     async def test_progress_relay(self):
@@ -1201,7 +1201,7 @@ class ReservedRouting(AppCase):
         with mock.patch("lib.ppro_bridge.submit", return_value=cep_ok("ping", PING_READBACK)) as sub:
             msg = command("ping")
             await c.send(msg)
-            res = await c.recv()
+            res = await c.recv_type("result")
         sub.assert_called_once()
         self.assertEqual(res["result"], {"ok": True, "action": "ping", "id": msg["request"]["id"], "readback": PING_READBACK})
         await c.send(command("open_project", {"path": "C:/x.prproj"}))
@@ -1272,7 +1272,7 @@ class RequestContext(AppCase):
         with mock.patch("lib.ppro_bridge.submit", fake_submit), mock.patch("lib.ae_bridge.submit", fake_submit):
             await c.send(command("ping", root=roots[0], profile="p0"))
             await c.send(command("ae_fonts", {"postscript_names": []}, root=roots[1], profile="p1"))
-            res = [await c.recv(), await c.recv()]
+            res = [await c.recv_type("result"), await c.recv_type("result")]
         self.assertTrue(all(r["result"]["ok"] for r in res), res)
         self.assertEqual(sorted(seen), sorted([(roots[0].resolve(), "p0", self.home), (roots[1].resolve(), "p1", self.home)]))
 
@@ -1296,7 +1296,7 @@ class RequestContext(AppCase):
         with mock.patch("lib.ppro_bridge.submit", fake_submit):
             for _ in range(3):
                 await c.send(command("ping"))
-            res = [await c.recv() for _ in range(3)]
+            res = [await c.recv_type("result") for _ in range(3)]
         self.assertTrue(all(r["result"]["ok"] for r in res), res)
         self.assertEqual(peak[0], 1)
 

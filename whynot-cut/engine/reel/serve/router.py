@@ -24,7 +24,8 @@ The job journal (serve/jobs.py, Addendum G2 hardening H1): before expiry and rou
 A routed command runs in a task the Router owns (_Job), never in the requester's: the requester only waits for it.
 Ending a session cancels only the UXP-routed jobs it sent (session_ended; the panel is told to stop, the entry becomes
 interrupted). CEP file-queue jobs keep running and their result lands in the journal, where a reconnect finds it.
-While a CEP job runs, its queue files are watched (read only) for its job id and its queued / claimed state. At daemon
+While a CEP job runs, the FileQueueAdapter watches its queue files (read only, adapters.QueueTracker) for its job id
+and its queued / claimed state, journals them, and sends the requester progress with a `phase` (H2). At daemon
 start recover() reconciles the journal with the queue files (jobs.reconcile) and follows the jobs still in a live
 bridge's queue to their result.
 """
@@ -39,7 +40,7 @@ from contract.cep import CEP_NAME
 from lib.common import Context, use_context
 
 from . import jobs, messages
-from .adapters import ACTION_HOSTS, FileQueueAdapter, UxpAdapter, failure, seconds_left
+from .adapters import ACTION_HOSTS, TRACK_POLL_S, FileQueueAdapter, UxpAdapter, failure, seconds_left
 
 __all__ = ["Router", "OUTSIDE_CONTRACT", "reserved_result"]
 
@@ -51,7 +52,7 @@ OUTSIDE_HOW = ("The panel or bridge sent an answer this engine cannot check: upd
 
 BAD_ID = ("The request id cannot be kept in the job journal: it must start with a letter or digit, use only letters, "
           "digits, '.', '_' and '-' (no '..'), and not be a device name such as CON or NUL.")
-WATCH_S = 0.5                   # how often a running CEP job's queue files are looked at
+WATCH_S = TRACK_POLL_S          # how often a running CEP job's queue files are looked at (adapters.QueueTracker)
 FOLLOW_MAX_S = 1260.0           # a job adopted at start is given up after this (the bridge's own 20-minute limit + 1)
 HOST_CHECK_S = 2.0              # how often an adopted job's bridge heartbeat is read
 HOST_DEAD_CHECKS = 3            # this many dead heartbeats in a row: the adopted job is interrupted
@@ -118,6 +119,8 @@ class Router:
         self.file_queue = file_queue if file_queue is not None else FileQueueAdapter()
         self.audit = audit
         self.journal = journal if journal is not None else jobs.Journal(home)
+        if isinstance(self.file_queue, FileQueueAdapter) and self.file_queue.journal is None:
+            self.file_queue.journal = self.journal        # the adapter journals the queue job's state into THIS index
         self._running: dict[str, object] = {}          # request id -> the adapter running it
         self._jobs: dict[str, _Job] = {}               # request id -> the job running it in this daemon
         self._closing = False
@@ -254,7 +257,6 @@ class Router:
 
     async def _run(self, job: _Job, adapter, req: dict, ctx, label: str, peer: str, session_id) -> dict:
         rid, action = job.rid, job.action
-        watcher = asyncio.create_task(self._watch(job, ctx, req)) if job.route == "cep" else None
 
         async def relay(progress: dict) -> None:
             await self._relay(job, progress)
@@ -275,42 +277,11 @@ class Router:
             res = failure(action, rid, f"The engine failed while running {action} ({type(e).__name__}).",
                           "Run the command again; if it repeats, restart reel serve and send its log.")
         finally:
-            if watcher is not None:
-                watcher.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await watcher
             self._running.pop(rid, None)
             self._jobs.pop(rid, None)
         res = self.checked(res, action, rid, peer=peer, session_id=session_id, label=label)
         self._journal(self.journal.finish, rid, res)
         return res
-
-    async def _watch(self, job: _Job, ctx, req: dict) -> None:
-        """While a CEP job runs: find its queue job (read only) and journal its job id and queued / claimed state."""
-        cep_name = CEP_NAME.get(job.action)
-        if not cep_name:
-            return
-        with use_context(ctx):
-            try:
-                queue = queue_dir(lane_of(job.action))
-            except Exception:                               # noqa: BLE001 — no queue folder: nothing to watch
-                return
-        sha = jobs.data_sha(req.get("data"))
-        since = float((self._journal_get(job.rid) or {}).get("_t") or 0.0)
-        jid, state = None, "received"
-        while True:
-            await asyncio.sleep(WATCH_S)
-            if jid is None:
-                jid = await asyncio.to_thread(jobs.find_job, queue, cep_name, sha, since)
-                if jid is None:
-                    continue
-                self._journal(self.journal.update, job.rid, job_id=jid)
-            now = await asyncio.to_thread(jobs.job_state, queue, jid)
-            if now in ("queued", "claimed") and now != state and not (state == "claimed" and now == "queued"):
-                state = now
-                self._journal(self.journal.update, job.rid, state=now)
-            if now == "done":                               # _run cancels this watcher when the adapter answers
-                return
 
     def session_ended(self, session_id) -> list:
         """A session went away: cancel the UXP-routed jobs it sent (CEP jobs keep running). Returns their tasks."""
@@ -373,7 +344,7 @@ class Router:
         try:
             while True:
                 now = await asyncio.to_thread(jobs.job_state, queue, jid)
-                if now == "done":
+                if now in ("done", "failed"):           # a result, or the bridge's error marker (no result)
                     res = await asyncio.to_thread(jobs.read_result, queue, jid, action, rid, app)
                     if res is not None:
                         res = self.checked(res, action, rid, label="cep (followed)")

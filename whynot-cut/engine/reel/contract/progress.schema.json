@@ -70,6 +70,16 @@
       "minimum": 1,
       "description": "steps in all"
     },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "claimed",
+        "running",
+        "elapsed"
+      ],
+      "description": "H2: where a command is, when the sender knows: queued (submitted, waiting for the host), claimed (the host took it), running (the host sends n/of), elapsed (a tick every 2 s with elapsed_s while no n/of is known). `step` is then the phase name."
+    },
     "elapsed_s": {
       "type": "number",
       "minimum": 0

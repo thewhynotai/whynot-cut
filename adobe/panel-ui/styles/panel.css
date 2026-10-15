@@ -187,6 +187,7 @@ p { margin: 0 0 8px 0; }
 .now-name { font-weight: 600; }
 .now-state { margin: 0 8px; color: var(--twn-text-muted); flex: 1 1 auto; }
 .now-step { margin-top: 2px; color: var(--twn-text-muted); }
+.now-phase { margin-top: 2px; color: var(--twn-text-muted); }
 .now-meta { display: flex; flex-direction: row; flex-wrap: wrap; align-items: baseline; margin-top: 6px; color: var(--twn-text-muted); font-size: 11px; }
 .progress { height: 6px; margin-top: 8px; border-radius: 3px; background: var(--twn-track); overflow: hidden; }
 .progress-fill { height: 100%; background: var(--twn-gradient); border-radius: 3px; }

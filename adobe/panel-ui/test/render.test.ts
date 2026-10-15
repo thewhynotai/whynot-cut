@@ -182,6 +182,55 @@ test("the build step shows progress, elapsed and Cancel; idle has no Cancel", ()
   assert.ok(!idle.includes('data-action="cancel"'));
 });
 
+function runningBuild(phase: string | null | undefined, elapsed: number | null, detail = "Premiere Pro 26.5.2"): PanelState {
+  const s = sampleState("en", "idle");
+  s.connection.host.detail = detail;
+  s.pipeline = s.pipeline.map((p) =>
+    p.id === "build" ? { ...p, state: "running", progress: null, phase: phase as never, elapsed_s: elapsed, request_id: "req-1" } : { ...p, state: "done" },
+  );
+  return s;
+}
+
+test("H2: a running step with a phase shows the phase and the elapsed time, never a bare 'running'", () => {
+  for (const [lang, t] of [["en", EN], ["ar", AR]] as const) {
+    const bare = render({ ...runningBuild(null, null), language: lang }, t, initialUi());
+    assert.ok(!bare.includes('class="now-phase"'), `${lang}: no phase yet, no phase line`);
+    const queued = render({ ...runningBuild("queued", 0), language: lang }, t, initialUi());
+    assert.ok(queued.includes(`<div class="now-phase">${t["pipeline.phase.queued"].replace("{app}", '<bdi dir="ltr">Premiere Pro</bdi>')}</div>`), `${lang}: queued`);
+    assert.ok(queued.includes(`${esc(t["pipeline.elapsed"])} <bdi dir="ltr">0:00</bdi>`), `${lang}: elapsed from the first event`);
+    const claimed = render({ ...runningBuild("claimed", 14), language: lang }, t, initialUi());
+    assert.ok(claimed.includes(`<div class="now-phase">${t["pipeline.phase.claimed"].replace("{app}", '<bdi dir="ltr">Premiere Pro</bdi>')}</div>`), `${lang}: claimed`);
+    assert.ok(claimed.includes('<bdi dir="ltr">0:14</bdi>'), `${lang}: elapsed 14 s`);
+    assert.ok(claimed.includes('data-action="cancel"'), `${lang}: Cancel stays`);
+    const working = render({ ...runningBuild("elapsed", 65), language: lang }, t, initialUi());
+    assert.ok(working.includes(t["pipeline.phase.elapsed"].replace("{app}", '<bdi dir="ltr">Premiere Pro</bdi>')) && working.includes("1:05"), `${lang}: elapsed`);
+    assert.ok(!working.includes("{app}"), `${lang}: no placeholder is left`);
+  }
+});
+
+test("H2: the phase line names the app from the host detail (After Effects, else Premiere Pro, else a plain word) and a real n/of keeps the bar and drops the phase line", () => {
+  const ae = render(runningBuild("queued", 0, "After Effects 26.5"), EN, initialUi());
+  assert.ok(ae.includes('<bdi dir="ltr">After Effects</bdi>'));
+  const other = render(runningBuild("queued", 0, "<img src=x onerror=1>"), EN, initialUi());
+  assert.ok(other.includes(esc(EN["pipeline.app.generic"])) && !other.includes("<img src=x"));
+  const none = runningBuild("queued", 0);
+  delete none.connection.host.detail;
+  assert.ok(render(none, EN, initialUi()).includes(esc(EN["pipeline.app.generic"])));
+  const counted = runningBuild("running", 5);
+  counted.pipeline = counted.pipeline.map((p) => (p.id === "build" ? { ...p, progress: { n: 3, of: 10, step: "graphics placed" } } : p));
+  const h = render(counted, EN, initialUi());
+  assert.match(h, /class="progress-fill" style="width:30%"/);
+  assert.ok(!h.includes('class="now-phase"'), "a counted step shows its bar, not a phase");
+});
+
+test("H2: a phase outside the contract renders no phase line (the value never reaches a key or the markup)", () => {
+  for (const bad of ["busy", `queued" onmouseover="x`, "__proto__", "constructor", EVIL]) {
+    const h = render(runningBuild(bad, 3), EN, initialUi());
+    assert.ok(!h.includes('class="now-phase"'), bad);
+    assert.ok(!h.includes("onmouseover") && !h.includes("<script>"), bad);
+  }
+});
+
 test("pills: Engine / Claude / Host, with state classes", () => {
   const html = render(sampleState("en", "showcase"), EN, initialUi());
   for (const k of ["engine", "claude", "host"]) assert.ok(html.includes(`data-pill="${k}"`));

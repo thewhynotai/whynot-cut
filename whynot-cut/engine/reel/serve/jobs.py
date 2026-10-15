@@ -23,7 +23,8 @@ Rules:
     settled, result {ok, code?} (docs/adobe/eng-data-contract.md 2.6). No host text, no path, no data, no token.
 The CEP queue files are only READ here (lib/cep_queue.py owns them): find_job() matches a request to its queue job by
 the CEP name and a hash of its data (the queue's <jid>.data.json is {...data, action, job_id, submitted}); job_state()
-and read_result() follow it. reconcile() runs once at daemon start: an active entry whose result file exists becomes
+and read_result() follow it (a job the bridge could not write a result for leaves `<jid>.error`: state failed, an
+ok:false result with a fixed sentence). reconcile() runs once at daemon start: an active entry whose result file exists becomes
 done / failed, one still in a live bridge's queue is returned for the router to follow, everything else becomes
 interrupted.
 """
@@ -47,7 +48,8 @@ from contract.cep import from_cep
 from . import security
 
 __all__ = ["Journal", "STATES", "ACTIVE", "FINAL", "ENTRY_MAX", "KEEP", "KEEP_S", "SNAPSHOT_JOBS", "valid_id",
-           "data_sha", "find_job", "job_state", "read_result", "reconcile", "interrupted_result", "summary"]
+           "data_sha", "find_job", "job_state", "read_result", "reconcile", "interrupted_result", "summary",
+           "error_marker_result", "vanished_result", "bridge_restart_result"]
 
 log = logging.getLogger(__name__)
 
@@ -345,10 +347,13 @@ def find_job(queue, cep_name: str, sha: str, since: float = 0.0) -> str | None:
 
 
 def job_state(queue, jid: str) -> str | None:
-    """done (a result file), claimed (.running / .claimed), queued (.job.json) or None (no file of it is left)."""
+    """done (a result file), failed (no result, but the bridge's `<id>.error` marker: it could not write the result,
+    H2), claimed (.running / .claimed), queued (.job.json) or None (no file of it is left)."""
     q = Path(queue)
     if (q / f"{jid}.result.json").exists():
         return "done"
+    if (q / f"{jid}.error").exists():
+        return "failed"
     if (q / f"{jid}.running").exists() or (q / f"{jid}.claimed").exists():
         return "claimed"
     if (q / f"{jid}.job.json").exists():
@@ -356,16 +361,43 @@ def job_state(queue, jid: str) -> str | None:
     return None
 
 
+def error_marker_result(action: str, rid: str, app: str = "Premiere") -> dict:
+    """The ok:false v4 result of a job whose bridge left its `<id>.error` marker (it could not write the result): fixed
+    sentences, never the marker's own text."""
+    return {"ok": False, "action": action, "id": rid, "error": MARKER_WHY.format(app=app),
+            "how": MARKER_HOW.format(app=app)}
+
+
+def bridge_restart_result(action: str, rid: str, app: str = "Premiere") -> dict:
+    """The ok:false v4 result of a job a restarted bridge answered {error: "interrupted", reason: "bridge restarted"}
+    (bridge.js, H2): plain words, never the bare code."""
+    return {"ok": False, "action": action, "id": rid, "error": BRIDGE_RESTART_WHY.format(app=app),
+            "how": GONE_HOW.format(app=app)}
+
+
+def vanished_result(action: str, rid: str, app: str = "Premiere") -> dict:
+    """The ok:false v4 result of a job that left the queue after it was seen, with no result and no marker."""
+    return {"ok": False, "action": action, "id": rid, "error": VANISHED_WHY.format(app=app),
+            "how": VANISHED_HOW.format(app=app)}
+
+
 def read_result(queue, jid: str, action: str, rid: str, app: str = "Premiere") -> dict | None:
     """The v4 result of a finished queue job (what cep_queue._wait + the FileQueueAdapter make of <jid>.result.json),
-    or None while the file is missing or still being written. The router validates it before anyone sees it."""
+    or None while the file is missing or still being written. The bridge's `<jid>.error` marker (no result file) is
+    an ok:false result. The router validates it before anyone sees it."""
     try:
         raw = json.loads((Path(queue) / f"{jid}.result.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if (Path(queue) / f"{jid}.error").exists():
+            return error_marker_result(action, rid, app)
+        return None
     except (OSError, ValueError):
         return None
     if not isinstance(raw, dict):
         return None
-    if raw.get("error") == "expired":
+    if raw.get("error") == "interrupted" and not isinstance(raw.get("result"), (dict, str)):
+        res = bridge_restart_result(action, rid, app)
+    elif raw.get("error") == "expired":
         res = from_cep(action, {"ok": False, "error": f"timeout: the job expired before {app} could start it",
                                 "how": f"{app} was busy (another job or a dialog). Dismiss any dialog, then run the "
                                        "command again."}, id=rid)
@@ -393,6 +425,11 @@ def read_result(queue, jid: str, action: str, rid: str, app: str = "Premiere") -
 APP_NAMES = {"aftereffects": "After Effects", "premiere": "Premiere"}
 GONE_WHY = "The job stopped before it finished: {app} or the WhyNot Cut engine was closed while it ran."
 GONE_HOW = "Open {app} with the WhyNot Cut panel, check the project, then press Try again."
+MARKER_WHY = "{app} could not save the result of this job (the disk may be full)."
+MARKER_HOW = "Free some disk space, check the project in {app}, then press Try again."
+VANISHED_WHY = "The job left the bridge queue without a result: {app} or the WhyNot Cut bridge stopped while it ran."
+VANISHED_HOW = "Open {app} with the WhyNot Cut panel, check the project, then press Try again."
+BRIDGE_RESTART_WHY = "The job stopped before it finished: the WhyNot Cut bridge in {app} was restarted while it ran."
 UXP_WHY = "The command stopped when the WhyNot Cut engine restarted."
 UXP_HOW = "Press Try again."
 
@@ -421,7 +458,7 @@ def reconcile(journal: Journal, queue_for, alive_for, cep_name_for) -> list[dict
         if queue is not None and not jid and entry.get("data_sha"):
             jid = find_job(queue, cep_name_for(action), entry["data_sha"], float(entry.get("_t") or 0.0))
         state = job_state(queue, jid) if queue is not None and jid else None
-        if state == "done":
+        if state in ("done", "failed"):
             res = read_result(queue, jid, action, rid, app)
             if res is not None:
                 journal.update(rid, job_id=jid)

@@ -1,6 +1,6 @@
 // The data the panel shows and the commands it can send. A local engine daemon will implement
 // PanelDataSource later; until then MockSource (mock.ts) does. Nothing here talks to a host app.
-import type { ActionName } from "./contract.ts";
+import type { ActionName, ProgressPhase } from "./contract.ts";
 
 export type Language = "en" | "ar";
 
@@ -14,6 +14,8 @@ export interface PipelineStep {
   id: StepId;
   state: StepStatus;
   progress?: { n: number; of: number; step?: string } | null;
+  /** the running command's last known phase (an `elapsed` tick keeps the phase before it); null/absent: none yet */
+  phase?: ProgressPhase | null;
   elapsed_s?: number | null;
   /** id of the running request; the Cancel button sends it back through PanelDataSource.cancel */
   request_id?: string | null;

@@ -457,6 +457,74 @@ test("run: a command with a v4 request (protocol, id, expires_at) resolves on it
   assert.deepEqual(r.daemon.invalid, []);
 });
 
+test("H2 run: the synthetic CEP progress (queued, claimed, elapsed ticks) gives the running step its phase and elapsed time from the first event", async () => {
+  const r = await connected();
+  const s = r.daemon.last;
+  let cmd: Msg | null = null;
+  r.daemon.onCommand = (_s, m) => {
+    cmd = m;
+  };
+  const p = r.src.run("export_frames", { sequence_name: "C0239_main", times: [1.5], out_dir: "D:/out", project_path: null });
+  await flush();
+  assert.ok(cmd);
+  const id = ((cmd as Msg)["request"] as { id: string }).id;
+  const frames = async () => (await r.src.snapshot()).pipeline.find((x) => x.id === "frames")!;
+  const send = (phase: string, elapsed_s: number) => s.deliver({ type: "progress", progress: { event: "progress", id, action: "export_frames", step: phase, phase, elapsed_s } });
+  assert.equal((await frames()).phase ?? null, null, "no phase before the first event");
+  send("queued", 0);
+  await flush();
+  assert.equal((await frames()).phase, "queued");
+  assert.equal((await frames()).elapsed_s, 0);
+  send("claimed", 1.5);
+  await flush();
+  assert.equal((await frames()).phase, "claimed");
+  send("elapsed", 2);
+  send("elapsed", 4);
+  await flush();
+  const f = await frames();
+  assert.equal(f.phase, "claimed", "an elapsed tick keeps the phase before it");
+  assert.equal(f.elapsed_s, 4);
+  assert.equal(f.progress ?? null, null, "no n/of is made up");
+  assert.ok(validPanelState(await r.src.snapshot()), JSON.stringify(validPanelState.errors));
+  s.deliver({ type: "progress", progress: { event: "progress", id, action: "export_frames", step: "frame 1", n: 1, of: 2, phase: "running", elapsed_s: 5 } });
+  await flush();
+  assert.equal((await frames()).phase, "running");
+  assert.deepEqual((await frames()).progress, { n: 1, of: 2, step: "frame 1" });
+  s.deliver({ type: "result", result: { ok: true, action: "export_frames", readback: { frames: [] }, id } });
+  await p;
+  const done = await frames();
+  assert.equal(done.state, "done");
+  assert.equal(done.phase ?? null, null, "a settled step carries no phase");
+  assert.ok(validPanelState(await r.src.snapshot()), JSON.stringify(validPanelState.errors));
+});
+
+test("H2 run: a first event that is an elapsed tick (queued was dropped) still shows a phase; an unknown phase is ignored as a malformed message", async () => {
+  const r = await connected();
+  const s = r.daemon.last;
+  let cmd: Msg | null = null;
+  r.daemon.onCommand = (_s, m) => {
+    cmd = m;
+  };
+  const p = r.src.run("export_frames", { sequence_name: "C0239_main", times: [1.5], out_dir: "D:/out", project_path: null });
+  await flush();
+  assert.ok(cmd);
+  const id = ((cmd as Msg)["request"] as { id: string }).id;
+  const bad = { type: "progress", progress: { event: "progress", id, action: "export_frames", step: "busy", phase: "busy", elapsed_s: 3 } };
+  assert.equal(validMessage(bad), false);
+  s.deliver(bad);
+  await flush();
+  let step = (await r.src.snapshot()).pipeline.find((x) => x.id === "frames")!;
+  assert.equal(step.phase ?? null, null);
+  assert.equal(step.elapsed_s ?? null, null);
+  s.deliver({ type: "progress", progress: { event: "progress", id, action: "export_frames", step: "elapsed", phase: "elapsed", elapsed_s: 6 } });
+  await flush();
+  step = (await r.src.snapshot()).pipeline.find((x) => x.id === "frames")!;
+  assert.equal(step.phase, "elapsed");
+  assert.equal(step.elapsed_s, 6);
+  s.deliver({ type: "result", result: { ok: false, action: "export_frames", error: "x", id } });
+  await p;
+});
+
 test("run: a failed result keeps error + how and fails the step; error{no_route,id} answers a command; ids are unique", async () => {
   const r = await connected();
   r.daemon.onCommand = (s, m) => {

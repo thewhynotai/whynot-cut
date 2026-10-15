@@ -19,8 +19,8 @@
 //
 // The token goes only into `hello` and the /status probe's Authorization header: never into a URL, a log line,
 // PanelState, a diagnosis or an error text (every text the transport hands back is scrubbed of it).
-import { ACTION_NAMES, PROTOCOL } from "./contract.ts";
-import type { ActionName, RequestEnvelope } from "./contract.ts";
+import { ACTION_NAMES, PROGRESS_PHASES, PROTOCOL } from "./contract.ts";
+import type { ActionName, ProgressPhase, RequestEnvelope } from "./contract.ts";
 import { linkFixCommand, NOT_YET_CODE, scrubToken } from "./diagnostics.ts";
 import { PANEL_UPDATE_STATES, SESSION_ERROR_CODES, SESSION_PROTOCOL } from "./session.ts";
 import type {
@@ -168,7 +168,7 @@ type Incoming =
   | { type: "state"; connection: ConnectionState; id?: string; jobs?: JobSummary[] }
   | { type: "reply"; id: string; intent: ReplyIntent; ok: boolean; readback?: object; error?: string; how?: string }
   | { type: "result"; id: string | undefined; action: ActionName; ok: boolean; readback?: object; error?: string; how?: string }
-  | { type: "progress"; id: string; step: string; n?: number; of?: number; elapsed_s?: number }
+  | { type: "progress"; id: string; step: string; n?: number; of?: number; phase?: ProgressPhase; elapsed_s?: number }
   | { type: "error"; code: SessionErrorCode; message: string; id?: string };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -253,7 +253,9 @@ export function parseIncoming(text: string): Incoming | null {
       const p = m["progress"];
       if (!isObj(p) || p["event"] !== "progress" || !isId(p["id"]) || !isAction(p["action"]) || !isStr(p["step"])) return null;
       if (!optNum(p["n"]) || !optNum(p["of"]) || !optNum(p["elapsed_s"])) return null;
+      if (p["phase"] !== undefined && !(PROGRESS_PHASES as readonly unknown[]).includes(p["phase"])) return null;
       const out: Extract<Incoming, { type: "progress" }> = { type: "progress", id: p["id"], step: p["step"] };
+      if (p["phase"] !== undefined) out.phase = p["phase"] as ProgressPhase;
       if (isNum(p["n"])) out.n = p["n"];
       if (isNum(p["of"])) out.of = p["of"];
       if (isNum(p["elapsed_s"])) out.elapsed_s = p["elapsed_s"];
@@ -530,7 +532,7 @@ export class DaemonSource implements PanelDataSource {
         this.settleCommand(id, { ok: false, action, error: "The engine did not answer this request in time.", how: "Check that Premiere and the WhyNot Cut panel are open, then press Try again.", code: "timeout" });
       }, seconds * 1000 + RESULT_GRACE_MS);
       this.commands.set(id, { action, step, stop, resolve, text, key, detached: false });
-      if (step) this.setStep(step, { state: "running", request_id: id, progress: null, elapsed_s: null });
+      if (step) this.setStep(step, { state: "running", request_id: id, progress: null, phase: null, elapsed_s: null });
       this.sendText(sock, text);
     });
   }
@@ -799,6 +801,9 @@ export class DaemonSource implements PanelDataSource {
     const patch: Partial<PipelineStep> = { state: "running" };
     if (m.n !== undefined && m.of !== undefined) {
       patch.progress = { n: Math.max(0, Math.floor(m.n)), of: Math.max(1, Math.floor(m.of)), step: m.step.slice(0, 256) };
+      patch.phase = "running";
+    } else if (m.phase !== undefined && (m.phase !== "elapsed" || !step.phase)) {
+      patch.phase = m.phase;                                   // an elapsed tick keeps the phase before it (H2)
     }
     if (m.elapsed_s !== undefined && m.elapsed_s >= 0) patch.elapsed_s = m.elapsed_s;
     this.setStep(step.id, patch);
@@ -870,7 +875,7 @@ export class DaemonSource implements PanelDataSource {
     }
     if (p.step) {
       const step = this.state.pipeline.find((s) => s.id === p.step);
-      if (step && step.request_id === id) this.setStep(p.step, { state: r.ok ? "done" : "failed", request_id: null });
+      if (step && step.request_id === id) this.setStep(p.step, { state: r.ok ? "done" : "failed", request_id: null, phase: null });
     }
     p.resolve(r);
   }

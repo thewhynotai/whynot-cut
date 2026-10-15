@@ -209,7 +209,10 @@ The last 20 jobs, newest first. `session_kind` and `job_id` stay in the journal 
 ### 2.7 Progress `phase` and `elapsed_s` (H2; P-06, A-04)
 
 The progress event (`progress.schema.json`) gains `phase`, an optional enum: `queued | claimed | running | elapsed`.
-`elapsed_s` already exists. `pipeline_step.progress` gains the same optional `phase`.
+`elapsed_s` already exists. `pipeline_step` gains the same optional `phase` (null/absent: no event yet) as a sibling of
+`progress`, because `queued` / `claimed` carry no `n/of` and `progress` requires them. An `elapsed` tick keeps the
+step's phase from the events before it; a settled step carries none. Landed in H2: `FileQueueAdapter` sends them for CEP
+commands (`serve/adapters.py` QueueTracker), the daemon source stores them, the running card renders them.
 
 | Phase | Sent when | Panel shows |
 |---|---|---|
@@ -343,7 +346,7 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
 5. **Size.** New fields add at most 64 KB to a `state` message, plus at most 48 KB for `poster.data_url`. Lists are
    capped as stated (spans 2000, jobs 20, changes 12, by_client 200). The engine truncates; it never fails the state.
 6. **Schema.** `session.schema.json` adds each object as an optional `panel_state` property. `progress.schema.json`
-   and `pipeline_step.progress` add `phase`, and `approve` adds `confirmed_with` / `flagged_checked`. `source.ts`,
+   and `pipeline_step` add `phase`, and `approve` adds `confirmed_with` / `flagged_checked`. `source.ts`,
    `contract.ts` and `test/session.test.ts` mirror these, and the engine's SessionContractTests keep the key parity.
    One fixture carries every example above.
 

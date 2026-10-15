@@ -1447,7 +1447,8 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         self.run_bridge()
         hb = self.beat()
         self.assertEqual(sorted(hb), sorted(["at", "busy", "role", "host", "hostVersion", "bundle", "version", "protocol",
-                                             "build", "libs", "current", "action", "engine_start"]))
+                                             "build", "libs", "current", "action", "engine_start", "engine_retry"]))
+        self.assertIsNone(hb["engine_retry"])                                # H2: "slow" only after 5 failed engine starts
         self.assertEqual(hb["engine_start"]["outcome"], "no_launcher")       # config.json launcher null (Task 5)
         build = json.loads((self.ext / "build.json").read_text(encoding="utf-8"))
         self.assertEqual((hb["bundle"], hb["version"], hb["protocol"], hb["build"], hb["hostVersion"], hb["role"]),

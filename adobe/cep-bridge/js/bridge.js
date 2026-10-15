@@ -25,10 +25,16 @@
    realpath(engine_home)/bin/wnc-engine.cmd (Windows) or wnc-engine (macOS), with none of " % ^ & | < > ! in it, on
    Windows inside %USERPROFILE%, and on macOS owned by this user and not group- or world-writable. What is spawned is
    that checked realpath, never the configured string. No arguments, no shell string built from anything else.
-   At most one attempt per 30 s; after 5 failed attempts it stops until the app restarts. Of engine.json only the pid
+   At most one attempt per 30 s; after 5 failed attempts it keeps trying, one attempt every 5 minutes (outcome gave_up
+   between attempts, heartbeat `engine_retry: 'slow'`). Of engine.json only the pid
    is parsed: the token in it is never kept or logged. The heartbeat's `engine_start` {at, outcome, reason} says what
    happened: running | no_launcher | refused | spawned | spawn_error | failed | gave_up; `reason` is a fixed code
-   (refused: which check; gave_up: 'gave_up'; else null), never a path. */
+   (refused: which check; gave_up: 'gave_up'; else null), never a path.
+
+   Queue durability (hardening H2): at start every `<id>.running` a previous run left gets the result {ok: false,
+   error: 'interrupted', reason: 'bridge restarted'} and is never run again; a result that cannot be written is retried
+   3 times (1 s, 2 s, 4 s apart) and then a minimal `<id>.error` marker {ok: false, error: 'result write failed', at}
+   is written, so the engine and `reel serve` see a failed job at once. */
 (function () {
   var req = (window.cep_node && window.cep_node.require) || window.require;
   var fs = req('fs'), path = req('path'), os = req('os'), crypto = req('crypto');
@@ -162,14 +168,65 @@
       writeAtomic(HEARTBEAT, JSON.stringify({ at: Date.now(), busy: busy, role: ROLE, host: HOST,
                                               hostVersion: HOST_VERSION, bundle: BUNDLE, version: VERSION,
                                               protocol: PROTOCOL, build: BUILD, libs: LIB_SHA, current: current,
-                                              action: currentAction || null, engine_start: engineStart }));
+                                              action: currentAction || null, engine_start: engineStart,
+                                              engine_retry: engineSlow ? 'slow' : null }));
     } catch (e) {}
   }
+  // Result delivery (hardening H2). A result that cannot be written (disk full, a locked folder) is tried 3 more times,
+  // 1 s, 2 s and 4 s apart (on later ticks, never blocking one), the job staying claimed (`<id>.running`) meanwhile and
+  // the queue free for the next job. After the last failed try a minimal `<id>.error` marker {ok, error, at} is
+  // written (no path, no text from the file system) and the job file is removed: the engine and `reel serve` read a
+  // marker, or a job that vanished with no result, as a failed job instead of waiting for their timeout.
+  var RESULT_RETRY_MS = [1000, 2000, 4000];
+  var pendingResults = [];                   // [{id, file, payload, tries (made so far), due (ms epoch)}]
+  function writeResult(id, payload) {
+    try { writeAtomic(path.join(QUEUE, id + '.result.json'), JSON.stringify(payload)); return true; }
+    catch (e) { log('could not write result for ' + id + ': ' + e); return false; }
+  }
+  function giveUpResult(p) {
+    try { writeAtomic(path.join(QUEUE, p.id + '.error'), JSON.stringify({ ok: false, error: 'result write failed', at: Date.now() })); }
+    catch (e) { log('could not write the error marker for ' + p.id + ': ' + e); }
+    try { fs.unlinkSync(p.file); } catch (e) {}
+  }
+  function retryResults() {
+    var now = Date.now(), keep = [];
+    for (var i = 0; i < pendingResults.length; i++) {
+      var p = pendingResults[i];
+      if (now < p.due) { keep.push(p); continue; }
+      if (writeResult(p.id, p.payload)) {
+        log('result for ' + p.id + ' written after ' + (p.tries + 1) + ' tries');
+        try { fs.unlinkSync(p.file); } catch (e) {}
+        continue;
+      }
+      p.tries += 1;
+      if (p.tries > RESULT_RETRY_MS.length) { log('GAVE UP writing the result for ' + p.id + '; error marker'); giveUpResult(p); continue; }
+      p.due = now + RESULT_RETRY_MS[p.tries - 1];
+      keep.push(p);
+    }
+    pendingResults = keep;
+  }
   function finish(job, file, payload) {
-    try { writeAtomic(path.join(QUEUE, job.id + '.result.json'), JSON.stringify(payload)); }
-    catch (e) { log('could not write result for ' + job.id + ': ' + e); }
-    try { fs.unlinkSync(file); } catch (e) {}
+    if (writeResult(job.id, payload)) {
+      try { fs.unlinkSync(file); } catch (e) {}
+    } else {
+      pendingResults.push({ id: job.id, file: file, payload: payload, tries: 1, due: Date.now() + RESULT_RETRY_MS[0] });
+    }
     if (current === job.id) { busy = false; current = null; currentFile = null; currentAction = ''; }
+  }
+  // A bridge that restarted: every `<id>.running` in the queue was claimed by a previous run that never finished it
+  // (this daemon is the only worker of its queue and holds no job yet). Each gets {ok:false, error:'interrupted',
+  // reason:'bridge restarted'} and is never run again; a job that already has its result only loses the stale file.
+  function recoverOrphans() {
+    var names;
+    try { names = fs.readdirSync(QUEUE); } catch (e) { return; }
+    names.sort().forEach(function (name) {
+      var m = /^([\w.-]+)\.running$/.exec(name);
+      if (!m) { return; }
+      var file = path.join(QUEUE, name);
+      if (fs.existsSync(path.join(QUEUE, m[1] + '.result.json'))) { try { fs.unlinkSync(file); } catch (e) {} return; }
+      log('interrupted ' + m[1] + ' (bridge restarted)');
+      finish({ id: m[1] }, file, { ok: false, error: 'interrupted', reason: 'bridge restarted', at: Date.now() });
+    });
   }
   function expired(job) {
     var t = job && job.expires_at ? Date.parse(job.expires_at) : NaN;
@@ -181,11 +238,11 @@
   }
 
   // ---- engine start: the fixed launcher only (see the header) ----
-  var ENGINE_CHECK_MS = 30000, ENGINE_MAX_FAILURES = 5;
+  var ENGINE_CHECK_MS = 30000, ENGINE_MAX_FAILURES = 5, ENGINE_SLOW_MS = 5 * 60 * 1000;
   var LAUNCHER_NAME = IS_WIN ? 'wnc-engine.cmd' : 'wnc-engine';
   var LAUNCHER_META = /["%^&|<>!]/;            // cmd.exe acts on these even inside quotes (% and ! expand)
   var ENGINE_JSON = path.join(HOME, '.whynot-cut', 'bridge', 'engine.json');
-  var engineStart = null, engineCheckedAt = null, engineFailures = 0, enginePending = false, engineGaveUp = false;
+  var engineStart = null, engineCheckedAt = null, engineFailures = 0, enginePending = false, engineSlow = false;
   // engine.json holds the engine's token: the reviver keeps only `pid`, so nothing else of the file is held, and no
   // error text (a parse error can quote the file) is ever logged
   function enginePid() {
@@ -266,23 +323,24 @@
     if (!engineStart || engineStart.outcome !== outcome) { log('engine start: ' + outcome + (why ? ' (' + why + ')' : '')); }
     engineStart = { at: Date.now(), outcome: outcome, reason: reason || null };
   }
+  // After ENGINE_MAX_FAILURES failed attempts the daemon does not stop: it keeps trying, one attempt every
+  // ENGINE_SLOW_MS (the outcome stays gave_up between attempts and the heartbeat says engine_retry 'slow'); an engine
+  // that comes up ends the slow retry
   function engineFailed(outcome) {
     engineFailures += 1;
     if (engineFailures >= ENGINE_MAX_FAILURES) {
-      engineGaveUp = true;
-      return setEngineStart('gave_up', engineFailures + ' failed attempts; it tries again when the app restarts',
-                            'gave_up');
+      engineSlow = true;
+      return setEngineStart('gave_up', engineFailures + ' failed attempts; it tries again every 5 minutes', 'gave_up');
     }
     setEngineStart(outcome);
   }
   function engineCheck() {
-    if (engineGaveUp) { return; }
     var alive = engineAlive();
     if (enginePending) {                       // the attempt 30 s ago: did the engine come up?
       enginePending = false;
-      if (!alive) { engineFailed('failed'); if (engineGaveUp) { return; } }
+      if (!alive) { engineFailed('failed'); if (engineSlow) { return; } }
     }
-    if (alive) { engineFailures = 0; return setEngineStart('running'); }
+    if (alive) { engineFailures = 0; engineSlow = false; return setEngineStart('running'); }
     var l = launcherFrom(readConfig());
     if (!l.file) { return setEngineStart(l.outcome, l.why, l.reason); }
     var child;
@@ -300,7 +358,8 @@
     } catch (e) {}
   }
   function engineTick() {
-    if (engineGaveUp || (engineCheckedAt !== null && Date.now() - engineCheckedAt < ENGINE_CHECK_MS)) { return; }
+    var every = engineSlow && !enginePending ? ENGINE_SLOW_MS : ENGINE_CHECK_MS;
+    if (engineCheckedAt !== null && Date.now() - engineCheckedAt < every) { return; }
     engineCheckedAt = Date.now();
     try { engineCheck(); } catch (e) { log('engine start check failed'); }
   }
@@ -373,6 +432,7 @@
   function tick() {
     engineTick();
     heartbeat();
+    retryResults();
     if (busy && Date.now() - startedAt > JOB_TIMEOUT_MS) {
       log('TIMEOUT ' + current + ' - no reply from ' + HOST + '; queue released');
       show('idle - watching the queue');
@@ -385,6 +445,7 @@
   }
   try {
     ensureQueue();
+    recoverOrphans();
     engineTick();
     heartbeat();
     show('idle - watching the queue');

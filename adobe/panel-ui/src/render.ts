@@ -11,6 +11,7 @@ import type { BuildInfo } from "./diagnostics.ts";
 import { fmt } from "./i18n.ts";
 import type { StringKey, Strings } from "./i18n.ts";
 import { aspectPct, isSafeImg } from "./media.ts";
+import { PROGRESS_PHASES } from "./contract.ts";
 import { MONOGRAM_DATA_URI } from "./monogram.ts";
 import { STEP_IDS } from "./source.ts";
 import type { ConnectionState, PanelState, PipelineStep, QcFrame, StepId } from "./source.ts";
@@ -215,6 +216,25 @@ function currentStep(steps: PipelineStep[]): PipelineStep | null {
   return steps.find((p) => p.state === "running") ?? steps.find((p) => p.state === "waiting") ?? steps.find((p) => p.state === "failed") ?? null;
 }
 
+/** The Adobe app the running command is in, from the host pill's detail ("Premiere Pro 26.5.2"): only two fixed names or
+ *  a plain word ever reach the screen, never the engine's own text. */
+function hostApp(c: ConnectionState, t: Strings): string {
+  const detail = typeof c.host.detail === "string" ? c.host.detail : "";
+  if (/after\s*effects/i.test(detail)) return t["pipeline.app.aftereffects"];
+  if (/premiere/i.test(detail)) return t["pipeline.app.premiere"];
+  return t["pipeline.app.generic"];
+}
+
+/** H2: what the running step is waiting on, from its first progress event: "Waiting for Premiere Pro…", "Premiere Pro
+ *  started it", "Working in Premiere Pro…". A step that counts (n of) shows its bar instead; an unknown phase says nothing. */
+function phaseLine(cur: PipelineStep, s: PanelState, t: Strings): string {
+  const phase = cur.phase;
+  if (cur.state !== "running" || cur.progress || !phase || !(PROGRESS_PHASES as readonly string[]).includes(phase)) return "";
+  const app = hostApp(s.connection, t);
+  const name = app === t["pipeline.app.generic"] ? auto(app) : ltr(app);
+  return `<div class="now-phase">${fmt(t[`pipeline.phase.${phase}` as StringKey], { app: name })}</div>`;
+}
+
 function pipelineSection(s: PanelState, t: Strings): string {
   const byId = new Map<StepId, PipelineStep>(s.pipeline.map((p) => [p.id, p]));
   // The state goes into a class name: only known values get through, whatever the source sends.
@@ -248,6 +268,7 @@ function pipelineSection(s: PanelState, t: Strings): string {
       `<div class="now now-${cur.state}"><div class="now-row"><span class="now-name">${esc(t[`step.${cur.id}` as StringKey])}</span>` +
       `<span class="now-state">${esc(t[`step.state.${cur.state}` as StringKey])}</span>${cancel}</div>` +
       (pr && pr.step && runtimeText(pr.step) ? `<div class="now-step">${auto(runtimeText(pr.step))}</div>` : "") +
+      phaseLine(cur, s, t) +
       (pct !== null ? `<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="progress-fill" style="width:${pct}%"></div></div>` : "") +
       (meta.length ? `<div class="now-meta">${meta.join('<span class="sep">·</span>')}</div>` : "") +
       `</div>`;

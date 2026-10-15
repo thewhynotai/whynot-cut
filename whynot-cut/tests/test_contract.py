@@ -1011,6 +1011,21 @@ class EnvelopeTests(unittest.TestCase):
             del q[k]
             self.assertTrue(any(f"required property '{k}'" in e for e in V.validate(q, "progress")), k)
 
+    def test_progress_phase_and_elapsed(self):
+        """G2 H2 (eng-data-contract.md 2.7): a progress event may carry a `phase` (queued / claimed / running / elapsed)
+        and `elapsed_s`; the synthetic CEP events send the phase name as `step`. Optional: every older event stays valid."""
+        base = {"event": "progress", "id": "r-7f3a", "action": "export_frames"}
+        for phase in ("queued", "claimed", "running", "elapsed"):
+            self.assertEqual(V.validate(dict(base, step=phase, phase=phase, elapsed_s=0.0), "progress"), [], phase)
+        self.assertEqual(V.validate(dict(base, step="elapsed", phase="elapsed", elapsed_s=14.0), "progress"), [])
+        self.assertEqual(V.validate(dict(base, step="frame 1", n=1, of=2, phase="running"), "progress"), [])
+        self.assertEqual(V.validate(dict(base, step="x"), "progress"), [])                  # no phase: today's event
+        for bad in ("waiting", "", None, 1, ["queued"]):
+            errs = V.validate(dict(base, step="x", phase=bad), "progress")
+            self.assertTrue(any(e.startswith("/phase:") for e in errs), (bad, errs))
+        self.assertTrue(V.validate(dict(base, step="queued", phase="queued", elapsed_s=-1), "progress"))
+        self.assertEqual(V.load("progress")["properties"]["phase"]["enum"], ["queued", "claimed", "running", "elapsed"])
+
 
 # ------------------------------------------------------------------------------------------------ per-action shapes
 class ActionShapeTests(unittest.TestCase):
@@ -2269,8 +2284,8 @@ PANEL_STATE = {
     "client": "Dr Nour", "item": "C0239", "language": "ar", "editor_name": "Yunus",
     "context": {"project_path": "D:/p/C0239.prproj", "sequence_name": "C0239", "folder": "D:/c", "out_dir": None, "review_mp4": None},
     "pipeline": [{"id": "transcript", "state": "done"},
-                 {"id": "build", "state": "running", "progress": {"n": 1, "of": 4, "step": "tracks"}, "elapsed_s": 3.5,
-                  "request_id": "r-1"},
+                 {"id": "build", "state": "running", "progress": {"n": 1, "of": 4, "step": "tracks"}, "phase": "running",
+                  "elapsed_s": 3.5, "request_id": "r-1"},
                  {"id": "qc", "state": "pending", "progress": None, "elapsed_s": None, "request_id": None}],
     "approval": {"summary": "plan", "preview_mp4": None, "flagged": [{"kind": "medical", "text": "x", "tc": "00:00:01:00"}],
                  "fingerprint": "abc123"},
@@ -2481,6 +2496,25 @@ class SessionContractTests(unittest.TestCase):
             self.assertTrue(session_errors(dict(r, result=bad)), repr(bad))
         self.assertTrue(session_errors({"type": "result"}, "result"))
 
+    def test_progress_message_carries_the_synthetic_phase(self):
+        """G2 H2: the queued / claimed / elapsed events the FileQueueAdapter sends travel in the session `progress`
+        message; a pipeline step carries the last phase so the running card never says a bare 'running'."""
+        for phase, elapsed in (("queued", 0.0), ("claimed", 1.5), ("elapsed", 14.0)):
+            msg = {"type": "progress", "progress": {"event": "progress", "id": "r-7f3a", "action": "export_frames",
+                                                    "step": phase, "phase": phase, "elapsed_s": elapsed}}
+            self.assertEqual(session_errors(msg, "progress"), [], phase)
+            self.assertEqual(session_errors(msg), [], phase)
+        bad = {"type": "progress", "progress": dict(SESSION_PROGRESS, phase="busy")}
+        self.assertTrue(session_errors(bad, "progress"))
+        step = {"id": "build", "state": "running", "progress": None, "phase": "claimed", "elapsed_s": 2.0,
+                "request_id": "r-1"}
+        self.assertEqual(session_errors(dict(MINIMAL_STATE, pipeline=[step]), "panel_state"), [])
+        self.assertEqual(session_errors(dict(MINIMAL_STATE, pipeline=[dict(step, phase=None)]), "panel_state"), [])
+        self.assertEqual(session_errors(dict(MINIMAL_STATE, pipeline=[{k: v for k, v in step.items() if k != "phase"}]),
+                                        "panel_state"), [])
+        for phase in ("busy", 3, ""):
+            self.assertTrue(session_errors(dict(MINIMAL_STATE, pipeline=[dict(step, phase=phase)]), "panel_state"), phase)
+
     def test_progress_wraps_a_v4_progress_event(self):
         p = SESSION_SAMPLES["progress"]
         for bad in (dict(SESSION_PROGRESS, event="done"), {k: v for k, v in SESSION_PROGRESS.items() if k != "step"},
@@ -2624,6 +2658,18 @@ class SessionContractTests(unittest.TestCase):
         self.assertEqual(defs["log_line"]["properties"]["level"]["enum"], ["info", "warn", "error"])
         steps = re.search(r"STEP_IDS = \[([^\]]+)\]", ts_text()).group(1)
         self.assertEqual(defs["pipeline_step"]["properties"]["id"]["enum"], re.findall(r'"([^"]+)"', steps))
+
+    def test_progress_phase_equals_the_panel_types(self):
+        """G2 H2: progress.schema.json `phase`, pipeline_step.phase and the panel's ProgressPhase (contract.ts) agree."""
+        phases = V.load("progress")["properties"]["phase"]["enum"]
+        step = V.load(SESSION)["$defs"]["pipeline_step"]["properties"]["phase"]["enum"]
+        self.assertEqual(step, phases + [None])
+        ts = (SK.parent / "adobe" / "panel-ui" / "src" / "contract.ts").read_text(encoding="utf-8")
+        m = re.search(r"export type ProgressPhase\s*=\s*([^;]+);", ts)
+        self.assertTrue(m)
+        self.assertEqual(re.findall(r'"([^"]+)"', m.group(1)), phases)
+        m = re.search(r"PROGRESS_PHASES: readonly ProgressPhase\[\] = \[([^\]]+)\]", ts)
+        self.assertEqual(re.findall(r'"([^"]+)"', m.group(1)), phases)
 
     def test_intent_inputs_equal_the_panel_data_source_methods(self):
         text = ts_text()

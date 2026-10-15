@@ -909,14 +909,31 @@ class FakeDate extends Date {
   constructor(...a) { if (a.length) { super(...a); } else { super(now); } }
   static now() { return now; }
 }
-const alive = new Set(sc.alive || []), timers = [], spawns = [], pending = [];
+const alive = new Set(sc.alive || []), timers = [], spawns = [], pending = [], evals = [];
+const queueDir = path.dirname(sc.heartbeat);
+const listQueue = () => { try { return fs.readdirSync(queueDir).sort(); } catch (e) { return []; } };
+if (sc.preFiles) {
+  fs.mkdirSync(queueDir, { recursive: true });
+  for (const k of Object.keys(sc.preFiles)) { fs.writeFileSync(path.join(queueDir, k), sc.preFiles[k]); }
+}
+const snaps = {};
 const norm = (p) => { const r = path.resolve(p); return process.platform === 'win32' ? r.toLowerCase() : r; };
 const statOv = {};
 for (const k of Object.keys(sc.stat || {})) { statOv[norm(k)] = sc.stat[k]; }
+let resultAttempts = 0;       // result-file write attempts (one per temp-file write: the in-place fallback is the same attempt)
 const fakeFs = Object.assign({}, fs, {
   statSync(p, o) {
     const s = fs.statSync(p, o), ov = statOv[norm(p)];
     return ov ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, ov) : s;
+  },
+  writeFileSync(p, data, o) {
+    const name = String(p);
+    if (/\.result\.json(\.daemon\.tmp)?$/.test(name) && sc.failResult !== undefined) {
+      if (/\.tmp$/.test(name)) { resultAttempts += 1; }
+      if (resultAttempts <= sc.failResult) { const e = new Error('ENOSPC: no space left on device'); e.code = 'ENOSPC'; throw e; }
+    }
+    if (/\.error(\.daemon\.tmp)?$/.test(name) && sc.failMarker) { const e = new Error('ENOSPC'); e.code = 'ENOSPC'; throw e; }
+    return fs.writeFileSync(p, data, o);
   }
 });
 const fakeOs = Object.assign({}, os, { platform: () => sc.platform || os.platform() });
@@ -953,7 +970,7 @@ const cep = {
   getExtensionId: () => 'ai.thewhynot.cut.bridge.' + sc.role,
   getHostEnvironment: () => JSON.stringify({ appName: sc.host || 'PPRO', appVersion: '26.5.2' }),
   getSystemPath: () => 'file:///' + sc.ext.replace(/\\/g, '/'),
-  evalScript: (code, cb) => cb('{}')
+  evalScript: (code, cb) => { evals.push(code); cb('{}'); }
 };
 const ctx = { window: { __adobe_cep__: cep, cep_node: { require: fakeRequire } },
               document: { getElementById: (id) => id === 'state' ? state : logEl },
@@ -961,7 +978,7 @@ const ctx = { window: { __adobe_cep__: cep, cep_node: { require: fakeRequire } }
 vm.runInNewContext(fs.readFileSync(sc.bridge, 'utf8'), ctx);
 const flush = () => { while (pending.length) { pending.shift()(); } };
 const beat = () => { try { return JSON.parse(fs.readFileSync(sc.heartbeat, 'utf8')); } catch (e) { return null; } };
-const outcomes = [];
+const outcomes = [], retries = [];
 flush();
 for (let s = 0; s < (sc.seconds || 0); s++) {
   now += 1000;
@@ -970,6 +987,8 @@ for (let s = 0; s < (sc.seconds || 0); s++) {
   flush();
   const b = beat();
   outcomes.push(b && b.engine_start ? b.engine_start.outcome : null);
+  retries.push(b && b.engine_retry !== undefined ? b.engine_retry : null);
+  if ((sc.snapAt || []).includes(s + 1)) { snaps[s + 1] = listQueue(); }
 }
 const queueFiles = {};
 try {
@@ -978,15 +997,15 @@ try {
   }
 } catch (e) {}
 fs.writeFileSync(sc.out, JSON.stringify({ spawns, beat: beat(), outcomes, log: logEl.textContent, state: state.textContent,
-  panel: ctx.window.WNC_BRIDGE ? { role: ctx.window.WNC_BRIDGE.role } : null, start: 1000000000000, queueFiles }));
+  panel: ctx.window.WNC_BRIDGE ? { role: ctx.window.WNC_BRIDGE.role } : null, start: 1000000000000, queueFiles,
+  evals, resultAttempts, snaps, retries }));
 """
 TOKEN = "7f" * 32          # what engine.json's token looks like (64 hex): must never leave the file
 
 
-@unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
-class TestEngineStart(unittest.TestCase):
-    """The hidden daemon starts the engine only through config.json `launcher`, only when it is the fixed
-    <engine home>/bin/wnc-engine(.cmd), never from the panel, at most once per 30 s and never after 5 failures."""
+class _NodeBridge(unittest.TestCase):
+    """Runs the real js/bridge.js in node with the stubbed CEP of SPAWN_HARNESS (a fake clock, fake timers, a fake
+    child_process); the helpers the engine-start and the queue-durability tests share."""
 
     def setUp(self):
         self._t = tempfile.TemporaryDirectory()
@@ -1048,6 +1067,11 @@ class TestEngineStart(unittest.TestCase):
 
     def platform(self):
         return "win32" if os.name == "nt" else "darwin"
+
+@unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
+class TestEngineStart(_NodeBridge):
+    """The hidden daemon starts the engine only through config.json `launcher`, only when it is the fixed
+    <engine home>/bin/wnc-engine(.cmd), never from the panel, at most once per 30 s and never after 5 failures."""
 
     def expected_spawn(self, launcher: Path, platform: str, home: Path = None):
         home = home or self.home
@@ -1256,17 +1280,45 @@ class TestEngineStart(unittest.TestCase):
                 self.assertEqual(len(out["spawns"]), 0 if want == "refused" else 1)
 
     # ---------------------------------------------------------------- limits
-    def test_one_attempt_per_30_s_and_it_stops_after_5_failures(self):
+    def test_one_attempt_per_30_s_then_every_5_minutes_after_5_failures(self):
+        """G2 H2: five failed attempts 30 s apart, then it does NOT stop: one attempt every 5 minutes, and the heartbeat
+        says so (engine_retry "slow", the outcome stays gave_up between attempts)."""
         self.config(self.launcher())
+        want = {"ok": [0, 30, 60, 90, 120, 450, 780],            # a launcher that ran but no engine: failed 30 s later
+                "error": [0, 30, 60, 90, 120, 420, 720],         # failed at once
+                "exit1": [0, 30, 60, 90, 120, 420, 720],
+                "throw": [0, 30, 60, 90, 120, 420, 720]}
         for mode in ("ok", "error", "exit1", "throw"):             # ok = the launcher ran but no engine came up
             with self.subTest(mode):
-                out = self.run_bridge(seconds=400, spawn=mode)
-                at = [s["at"] - out["start"] for s in out["spawns"]]
-                self.assertEqual(at, [0, 30000, 60000, 90000, 120000])
+                out = self.run_bridge(seconds=1000, spawn=mode)
+                at = [(s["at"] - out["start"]) // 1000 for s in out["spawns"]]
+                self.assertEqual(at, want[mode])
                 self.assertEqual(out["beat"]["engine_start"]["outcome"], "gave_up")
                 self.assertEqual(out["beat"]["engine_start"]["reason"], "gave_up")
+                self.assertEqual(out["beat"]["engine_retry"], "slow")
                 self.assertEqual(out["outcomes"][-1], "gave_up")
                 self.assertIn("gave_up", out["log"])
+                self.assertIn("every 5 minutes", out["log"])
+                first_slow = out["retries"].index("slow") + 1       # virtual second of the 5th failure
+                self.assertEqual(set(out["retries"][:first_slow - 1]), {None})
+                self.assertEqual(set(out["retries"][first_slow - 1:]), {"slow"})
+                self.assertGreaterEqual(first_slow, 120)
+
+    def test_before_the_fifth_failure_the_heartbeat_says_nothing_about_a_slow_retry(self):
+        self.config(self.launcher())
+        out = self.run_bridge(seconds=100, spawn="error")
+        self.assertEqual(len(out["spawns"]), 4)
+        self.assertIsNone(out["beat"]["engine_retry"])
+        self.assertNotEqual(out["beat"]["engine_start"]["outcome"], "gave_up")
+
+    def test_a_slow_attempt_that_works_ends_the_slow_retry(self):
+        self.config(self.launcher())
+        out = self.run_bridge(seconds=600, startEngine=5150, startOnSpawn=6)       # the 6th attempt (450 s) starts it
+        at = [(s["at"] - out["start"]) // 1000 for s in out["spawns"]]
+        self.assertEqual(at, [0, 30, 60, 90, 120, 450])
+        self.assertEqual(out["beat"]["engine_start"]["outcome"], "running")
+        self.assertIsNone(out["beat"]["engine_retry"])
+        self.assertIn("slow", out["retries"])                                         # it was slow in between
 
     def test_a_success_resets_the_failures(self):
         """Two failures, the third attempt starts the engine, it dies at 100 s: five fresh attempts follow."""
@@ -1305,6 +1357,127 @@ class TestEngineStart(unittest.TestCase):
             time.sleep(0.1)
         self.assertTrue(marker.exists(), "the launcher did not run")
         self.assertEqual(marker.read_text(encoding="utf-8").strip(), "started")
+
+
+JOB_DOC = {"action": "ping", "lib": "wnc_ppro_lib.jsx", "data_file": "x.data.json", "submitted": "s",
+           "expires_at": "2100-01-01T00:00:00Z"}
+
+
+@unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
+class TestQueueDurability(_NodeBridge):
+    """G2 H2: a bridge that restarted answers the jobs it left running (`interrupted`, never run again); a result that
+    cannot be written is retried 3 times with backoff and then leaves a minimal `<id>.error` marker, so the engine and
+    serve see a failed job instead of waiting for the timeout. The fake clock steps one virtual second per tick."""
+
+    def setUp(self):
+        super().setUp()
+        self.config(None)
+
+    def job(self, jid):
+        return json.dumps(dict(JOB_DOC, id=jid))
+
+    def result(self, out, jid):
+        return json.loads(out["queueFiles"][f"{jid}.result.json"])
+
+    # ---------------------------------------------------------------- orphans
+    def test_every_orphaned_running_job_gets_an_interrupted_result_at_start_and_never_runs_again(self):
+        pre = {"o1.running": self.job("o1"), "o2.running": "{not json", "o3.running": "{}",
+               "o3.result.json": json.dumps({"ok": True, "result": "{}", "at": 1}), "o4.job.json": self.job("o4")}
+        out = self.run_bridge(seconds=3, preFiles=pre)
+        for jid in ("o1", "o2"):
+            r = self.result(out, jid)
+            self.assertEqual({k: v for k, v in r.items() if k != "at"},
+                             {"ok": False, "error": "interrupted", "reason": "bridge restarted"}, jid)
+            self.assertIsInstance(r["at"], int)
+            self.assertNotIn(f"{jid}.running", out["queueFiles"], jid)
+        self.assertTrue(self.result(out, "o3")["ok"])                      # a job that has its result keeps it
+        self.assertNotIn("o3.running", out["queueFiles"])
+        self.assertEqual(len(out["evals"]), 1)                              # only the queued o4 ran: no orphan did
+        self.assertTrue(self.result(out, "o4")["ok"])
+        self.assertFalse(any(k.endswith(".error") for k in out["queueFiles"]))
+        again = self.run_bridge(seconds=3)                                  # a second start: nothing runs again
+        self.assertEqual(again["evals"], [])
+        self.assertEqual(self.result(again, "o1")["error"], "interrupted")
+
+    def test_the_orphan_result_is_the_one_the_engine_reads_as_failed(self):
+        """cep_queue._wait: ok:false, no inner result, `error` kept."""
+        import time
+        from lib import cep_queue
+        self.run_bridge(seconds=2, preFiles={"o1.running": self.job("o1")})
+        q = self.home / "ppro-queue"
+        self.assertEqual(sorted(p.name for p in q.glob("o1.*")), ["o1.result.json"])
+        r = cep_queue._wait(q, "o1", time.time(), 5, 5, 0.01, "Premiere")
+        self.assertEqual((r["ok"], r["error"]), (False, "interrupted"))
+
+    def test_the_visible_panel_never_answers_an_orphan(self):
+        out = self.run_bridge(role="panel", seconds=5, preFiles={"o1.running": self.job("o1")})
+        self.assertEqual(sorted(k for k in out["queueFiles"] if k.startswith("o1")), ["o1.running"])
+
+    def test_a_job_that_is_not_an_orphan_is_left_alone(self):
+        pre = {"q1.job.json": self.job("q1"), "x.data.json": "{}", "y.claimed": "{}", "notes.running.txt": "x"}
+        out = self.run_bridge(seconds=3, preFiles=pre)
+        self.assertEqual(len(out["evals"]), 1)
+        self.assertEqual(sorted(k for k in out["queueFiles"] if k.startswith(("x.", "y.", "notes"))),
+                         ["notes.running.txt", "x.data.json", "y.claimed"])
+
+    # ---------------------------------------------------------------- the result cannot be written
+    def test_a_failed_result_write_is_retried_with_backoff_and_then_lands(self):
+        out = self.run_bridge(seconds=10, preFiles={"j1.job.json": self.job("j1")}, failResult=2, snapAt=[1, 2, 3, 4])
+        for sec in (1, 2, 3):                                              # attempts at 1 s and 2 s fail; the next waits 2 s
+            self.assertIn("j1.running", out["snaps"][str(sec)], sec)       # (the job stays claimed meanwhile)
+            self.assertNotIn("j1.result.json", out["snaps"][str(sec)], sec)
+        self.assertIn("j1.result.json", out["snaps"]["4"])
+        self.assertNotIn("j1.running", out["snaps"]["4"])
+        self.assertEqual(out["resultAttempts"], 3)
+        self.assertTrue(self.result(out, "j1")["ok"])
+        self.assertFalse(any(k.endswith(".error") for k in out["queueFiles"]))
+        self.assertEqual(len(out["evals"]), 1)                              # it ran once: a retry is not a re-run
+
+    def test_a_result_write_that_keeps_failing_ends_in_a_minimal_error_marker(self):
+        out = self.run_bridge(seconds=12, preFiles={"j1.job.json": self.job("j1")}, failResult=999, snapAt=[7, 8])
+        self.assertIn("j1.running", out["snaps"]["7"])
+        self.assertNotIn("j1.error", out["snaps"]["7"])
+        self.assertIn("j1.error", out["snaps"]["8"])                        # 1 try + 3 retries (1 s, 2 s, 4 s later)
+        self.assertNotIn("j1.running", out["snaps"]["8"])
+        self.assertEqual(out["resultAttempts"], 4)
+        self.assertNotIn("j1.result.json", out["queueFiles"])
+        marker = json.loads(out["queueFiles"]["j1.error"])
+        self.assertEqual(sorted(marker), ["at", "error", "ok"])             # minimal
+        self.assertEqual((marker["ok"], marker["error"]), (False, "result write failed"))
+        self.assertEqual(sorted(k for k in out["queueFiles"] if k.startswith("j1")), ["j1.claimed", "j1.error"])   # no temp file
+        self.assertIn("could not write result for j1", out["log"])
+
+    def test_the_queue_keeps_moving_while_a_result_is_retried(self):
+        pre = {"j1.job.json": self.job("j1"), "j2.job.json": self.job("j2")}
+        out = self.run_bridge(seconds=14, preFiles=pre, failResult=999)
+        self.assertEqual(len(out["evals"]), 2)                              # j2 ran at the next tick, not after j1's retries
+        for jid in ("j1", "j2"):
+            self.assertIn(f"{jid}.error", out["queueFiles"], jid)
+            self.assertNotIn(f"{jid}.running", out["queueFiles"], jid)
+        self.assertFalse(out["beat"]["busy"])
+
+    def test_a_marker_that_cannot_be_written_either_still_frees_the_job(self):
+        out = self.run_bridge(seconds=12, preFiles={"j1.job.json": self.job("j1")}, failResult=999, failMarker=True)
+        self.assertEqual(sorted(k for k in out["queueFiles"] if k.startswith("j1")), ["j1.claimed"])   # no job, no result: failed
+        self.assertFalse(out["beat"]["busy"])
+
+    def test_the_marker_is_what_serve_reads_as_failed(self):
+        """serve's reader (jobs.job_state / read_result) turns the bridge's marker into an ok:false v4 result."""
+        sys_path = str(SK / "engine" / "reel")
+        if sys_path not in _sys.path:
+            _sys.path.insert(0, sys_path)
+        from serve import jobs
+        self.run_bridge(seconds=12, preFiles={"j1.job.json": self.job("j1")}, failResult=999)
+        q = self.home / "ppro-queue"
+        self.assertEqual(jobs.job_state(q, "j1"), "failed")
+        res = jobs.read_result(q, "j1", "ping", "r-1")
+        self.assertEqual((res["ok"], res["id"]), (False, "r-1"))
+
+    def test_the_config_guard_and_the_timing_constants_are_in_the_source(self):
+        js = (SRC / "js" / "bridge.js").read_text(encoding="utf-8")
+        self.assertIn("typeof readConfig === 'function'", js)               # engineHome stays liftable on its own
+        for needle in ("RESULT_RETRY_MS = [1000, 2000, 4000]", "ENGINE_SLOW_MS = 5 * 60 * 1000", "engine_retry"):
+            self.assertIn(needle, js)
 
 
 def _ui_strings() -> list:

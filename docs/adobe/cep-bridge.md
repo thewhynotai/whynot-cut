@@ -88,7 +88,8 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 {"at": 1760000000000, "busy": false, "role": "daemon", "host": "PPRO" | "AEFT", "hostVersion": "26.5.2",
  "bundle": "3.0.0", "version": "3.0.0", "protocol": 4, "build": "<16 hex>", "libs": {"<name>": "<sha256>"},
  "current": "<job id>" | null, "action": "<action>" | null,
- "engine_start": {"at": 1760000000000, "outcome": "<outcome>", "reason": "<reason>" | null} | null}
+ "engine_start": {"at": 1760000000000, "outcome": "<outcome>", "reason": "<reason>" | null} | null,
+ "engine_retry": "slow" | null}
 ```
 - `version` equals `bundle`. It is what engines before protocol 4 read.
 - `libs` is hashed from `<extension>/jsx/` when the daemon starts.
@@ -102,7 +103,7 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 | `spawned` | An attempt was made. The next check, 30 s later, decides whether it worked. |
 | `spawn_error` | The spawn threw or emitted `error`. |
 | `failed` | The launcher exited non-zero, or the engine was still down at the next check. |
-| `gave_up` | 5 failures in a row. There are no more attempts until the app restarts. `reason` is `gave_up`. |
+| `gave_up` | 5 failures in a row. The daemon keeps trying, one attempt every 5 minutes (H2); `engine_retry` is `"slow"`. `reason` is `gave_up`. |
 
 - **`reason`** is a fixed code, never a path or any text read from disk (`null` for the other outcomes):
 
@@ -119,6 +120,7 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 | `writable_by_others` | POSIX: it is group- or world-writable. |
 | `gave_up` | Outcome `gave_up` (5 failed attempts). |
 
+- `engine_retry` is `"slow"` once 5 attempts in a row have failed and `null` otherwise (an engine that comes up ends it).
 - **Doctor:** with the daemon alive, `refused` and `gave_up` become one plain fix sentence for the editor
   (`onboard.ENGINE_START_FIXES`): no code, no path.
 
@@ -138,6 +140,14 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 - **`<id>.running`:** the atomic claim (a rename).
 - **`<id>.claimed`:** `{at, by}`. The caller's result timeout starts here.
 - **`<id>.result.json`:** `{ok, result | error, at}`, written atomically.
+- **Orphans (H2):** when the daemon starts, every `<id>.running` a previous run left is answered
+  `{ok: false, error: "interrupted", reason: "bridge restarted", at}` and removed. It is never run again. A `.running` whose
+  result already exists only loses the stale file. The visible panel never does this.
+- **A result that cannot be written (H2):** the daemon keeps the job claimed (`<id>.running`) and tries again 1 s, 2 s and 4 s
+  later (3 retries, on later ticks, so the queue keeps moving). After the last failure it writes the minimal marker
+  `<id>.error` = `{ok: false, error: "result write failed", at}` and removes the job file. `reel serve` reads a marker, or a
+  job seen in the queue that vanished with no result, as a failed job at once (`serve/jobs.py`, `serve/adapters.py`
+  QueueTracker). `cep_queue._wait` does not read the marker yet (executor hunk, H5): it times out as before.
 - **Expired jobs:** a job past `expires_at` is answered `{ok: false, error: "expired"}` and never run.
 
 ## 4. Install rule (`cep_bundle.installed` + `decide_install`)
@@ -214,7 +224,8 @@ There are no arguments, and nothing comes from the queue, the network or the job
 
 ### 5.4 Limits
 - At most one attempt per 30 s.
-- After 5 failed attempts in a row it stops (`gave_up`). A successful start resets the count.
+- After 5 failed attempts in a row it does not stop: the outcome is `gave_up`, the heartbeat says `engine_retry: "slow"`, and
+  it makes one attempt every 5 minutes (H2). A successful start resets the count and ends the slow retry.
 - The panel role never spawns, never claims a job and never writes a heartbeat.
 
 ## 6. The After Effects panel (minimal until the designed panel of Addendum E)

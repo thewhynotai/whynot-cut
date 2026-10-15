@@ -74,6 +74,12 @@ export type ResultEnvelope<R = object> =
   | { ok: true; action: ActionName; readback: R; error?: never; how?: string; id?: string }
   | { ok: false; action: ActionName; readback?: object; error: string; how?: string; id?: string };
 
+/** Where a command is, when the sender knows (progress.schema.json `phase`, eng-data-contract.md 2.7): queued (submitted,
+ *  waiting for the host), claimed (the host took it), running (the host sends n/of), elapsed (a tick every 2 s with
+ *  elapsed_s while no n/of is known). The engine sends queued / claimed / elapsed for CEP commands. */
+export type ProgressPhase = "queued" | "claimed" | "running" | "elapsed";
+export const PROGRESS_PHASES: readonly ProgressPhase[] = ["queued", "claimed", "running", "elapsed"];
+
 export interface ProgressEvent {
   event: "progress";
   id: string;
@@ -81,6 +87,7 @@ export interface ProgressEvent {
   step: string;
   n?: number;
   of?: number;
+  phase?: ProgressPhase;
   elapsed_s?: number;
 }
 
