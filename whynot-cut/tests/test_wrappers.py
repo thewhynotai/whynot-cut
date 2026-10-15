@@ -543,8 +543,61 @@ class TestCmdSetupPython(WrapperCase):
         blocked = json.loads(out.strip().splitlines()[-1])
         self.assertIn("WhyNot Cut", blocked["blocked"])
         self.assertIn("no Python 3.9+ found to build the engine", blocked["blocked"])
-        self.assertIn("winget install Python.Python.3.12", blocked["how"])
-        self.assertIn("reel setup", blocked["how"])
+        # G3 review I2: the installer inside the plugin brings its own Python; never winget / Xcode tools
+        self.assertIn("/whynot-cut:start", blocked["how"])
+        self.assertIn("brings its own Python 3.12", blocked["how"])
+        for never in ("winget install", "xcode-select --install", "python.org"):
+            self.assertNotIn(never, blocked["how"])
+
+
+class TestBashSetupNoPython(WrapperCase):
+    """G3 review I2: `reel setup` from bash (macOS, or Git Bash on Windows) on a machine without a usable Python sends
+    the editor to /whynot-cut:start (the installer in the plugin brings its own Python), never to Xcode tools: the
+    fake `xcode-select` records every call, and a fake `uname` makes the wrapper take its macOS path."""
+
+    def setUp(self):
+        super().setUp()
+        self.bash = git_bash()
+        if not self.bash:
+            self.skipTest("no bash")
+        self.plug = self.t / "plug"
+        (self.plug / "bin").mkdir(parents=True)
+        shutil.copy2(BASH_WRAPPER, self.plug / "bin" / "reel")
+        (self.plug / ".claude-plugin").mkdir()
+        shutil.copy2(SK / ".claude-plugin/plugin.json", self.plug / ".claude-plugin/plugin.json")
+        self.calls = self.t / "xcode-select-calls.txt"
+        self.fakes = self.t / "fakes"
+        self.fakes.mkdir()
+        (self.fakes / "xcode-select").write_text(f'#!/bin/sh\necho "$@" >> "{self.calls.as_posix()}"\nexit 2\n',
+                                                 encoding="utf-8", newline="\n")
+        self.coreutils = Path(self.bash).resolve().parents[1] / "usr" / "bin"   # Git's own tools; no Python there
+
+    def run_setup(self, darwin: bool):
+        for f in self.fakes.glob("uname"):
+            f.unlink()
+        if darwin:
+            (self.fakes / "uname").write_text('#!/bin/sh\necho Darwin\n', encoding="utf-8", newline="\n")
+        env = clean_env(self.user, WHYNOT_HOME=self.t / "new home",
+                        PATH=os.pathsep.join(str(d) for d in (self.fakes, self.coreutils)))
+        r = subprocess.run([self.bash, str(self.plug / "bin" / "reel"), "setup"], capture_output=True, env=env,
+                           timeout=120)
+        return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+
+    def test_no_python_points_at_the_bundled_installer(self):
+        if not self.coreutils.is_dir():
+            self.skipTest("Git's usr/bin not found")
+        for darwin in (True, False):
+            with self.subTest(darwin=darwin):
+                rc, out, err = self.run_setup(darwin)
+                self.assertEqual(rc, 2, (out, err))
+                blocked = json.loads(out.strip().splitlines()[-1])
+                self.assertIn("no Python 3.9+ found to build the engine", blocked["blocked"])
+                self.assertIn("/whynot-cut:start", blocked["how"])
+                self.assertIn("brings its own Python 3.12", blocked["how"])
+                for never in ("xcode-select --install", "winget install", "python.org"):
+                    self.assertNotIn(never, out + err)
+        calls = self.calls.read_text(encoding="utf-8") if self.calls.exists() else ""
+        self.assertNotIn("--install", calls)
 
 
 class TestSetupRunsInUtf8Mode(WrapperCase):

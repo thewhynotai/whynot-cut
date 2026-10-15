@@ -230,8 +230,6 @@ class TestPathsAndShells(unittest.TestCase):
     def test_skill_dir_references_exist(self):
         for p in sorted(SKILLS.glob("*/SKILL.md")):
             for m in re.finditer(r"\$\{CLAUDE_SKILL_DIR\}/([\w./-]+\.md)", p.read_text(encoding="utf-8")):
-                if p.parent.name == "start" and m.group(1) == "references/install-from-claude.md":
-                    continue                                  # installer-owned, linked "when present"
                 self.assertTrue((p.parent / m.group(1)).is_file(), f"{p.parent.name}: {m.group(1)}")
 
     def test_language_option_in_motion_and_podcast(self):
@@ -270,6 +268,56 @@ class TestGuardAndStages(unittest.TestCase):
         for word in ("decisions", "speech-to-noise", "loudness", "cut-verification.json", "missing words"):
             self.assertIn(word, s)
             self.assertIn(word, agent, f"agents/audio-engineer.md no longer reports {word!r}")
+
+
+class TestNoPythonInstallPath(unittest.TestCase):
+    """G3 review I2: a machine without Python (a new Mac without Xcode tools) is handed to the installer that ships in
+    the plugin (installer/core/bootstrap.sh | .ps1: pinned uv + Python 3.12), never to xcode-select / winget. The
+    interim install-from-claude.md uses exactly the installer track's call contract (2026-10-15)."""
+    REF = SKILLS / "start" / "references" / "install-from-claude.md"
+    BOOT = SK / "installer" / "core"
+
+    def blocks(self, lang: str) -> list[str]:
+        return re.findall(rf"```{lang}\n(.*?)```", self.REF.read_text(encoding="utf-8"), re.S)
+
+    def test_reference_ships_with_the_interim_marker(self):
+        s = self.REF.read_text(encoding="utf-8")
+        self.assertTrue(s.startswith("<!-- interim (G3 review I2); the installer track replaces this with its D-T2 "
+                                     "text -->"))
+        self.assertRegex(s, r"[؀-ۿ]")                       # Arabic for the editor
+        self.assertIn("AskUserQuestion", s)
+        self.assertIn("run_in_background", s)
+        for code in ("**0,", "**1,", "**2,", "**3,"):                 # what to say for every exit code
+            self.assertIn(code, s)
+
+    def test_commands_follow_the_installer_contract(self):
+        sh, ps = self.blocks("bash"), self.blocks("powershell")
+        self.assertEqual(len(sh), 1)
+        self.assertEqual(len(ps), 1)
+        self.assertEqual(sh[0].strip(), 'bash "<ROOT>/installer/core/bootstrap.sh" --plugin-root "<ROOT>" --yes '
+                                        '--skip claude </dev/null')
+        self.assertEqual(ps[0].strip(), 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+                                        '"<ROOT>\\installer\\core\\bootstrap.ps1" -PluginRoot "<ROOT>" -Yes -Skip claude')
+        boot_sh = (self.BOOT / "bootstrap.sh").read_text(encoding="utf-8")
+        for flag in ("--plugin-root", "--yes", "--skip"):
+            self.assertRegex(boot_sh, rf"(?m)^\s*{re.escape(flag)}(\|[^)]*)?\)", flag)
+        boot_ps = (self.BOOT / "bootstrap.ps1").read_text(encoding="utf-8")
+        params = boot_ps[boot_ps.index("param("):boot_ps.index("\n)", boot_ps.index("param("))]
+        for name in ("PluginRoot", "Yes", "Skip"):
+            self.assertRegex(params, rf"\${name}\b", name)
+        for never in ("--customise", "--home", "--uninstall", "WNC_TEST_", "-Customise", "-Home", "-Uninstall"):
+            self.assertNotIn(never, sh[0] + ps[0])
+
+    def test_no_xcode_or_winget_advice_anywhere(self):
+        files = [SK / "README.md", SK / "bin" / "reel", SK / "bin" / "reel.cmd", SK / "setup" / "setup_env.sh",
+                 SK / "setup" / "setup_env.py", SK / "engine" / "reel" / "lib" / "onboard.py", self.REF,
+                 *SKILLS.glob("*/SKILL.md"), *SKILLS.glob("*/references/*.md")]
+        bad = [f"{f.relative_to(SK).as_posix()}:{n}" for f in files
+               for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+               if re.search(r"xcode-select --install|winget install", line)]
+        self.assertEqual(bad, [])
+        for n in ("start", "setup"):
+            self.assertIn("install-from-claude.md", text(n), n)
 
 
 class TestApprovalConsent(unittest.TestCase):

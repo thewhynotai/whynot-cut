@@ -373,7 +373,9 @@ def main(argv=None):
     rep = {"os": plat.describe(), "engine_home": str(home), "setup_python": sys.executable, "platform": key}
     if sys.version_info < (3, 9):
         rep.update(ok=False, error=f"Python {sys.version.split()[0]} is too old to run the setup",
-                   how=("winget install Python.Python.3.12" if plat.IS_WIN else "xcode-select --install"))
+                   how="run /whynot-cut:start in Claude Code: it installs the engine with the WhyNot Cut installer that "
+                       "ships with the plugin, which brings its own Python 3.12 (no Xcode tools, Homebrew, winget or "
+                       "admin rights needed)")
         print(json.dumps(rep, indent=2))
         return 1
     warns = setup_warnings(home)

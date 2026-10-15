@@ -124,6 +124,10 @@ probe_setup() {   # `reel setup` only: a runtime interpreter that does not start
   [ -n "$PY" ]
 }
 SETUP_FLAGS='' SETUP_CHECK=''
+# No usable Python (G3 review I2): never Xcode tools, Homebrew or winget. The installer that ships inside the plugin
+# (installer/core/bootstrap.sh | bootstrap.ps1: pinned uv + Python 3.12, sha256-checked, per user, no admin) builds the
+# engine; /whynot-cut:start runs it (skills/start/references/install-from-claude.md).
+NO_PY_HOW="run /whynot-cut:start: it installs the engine with the WhyNot Cut installer that ships with the plugin, which brings its own Python 3.12 (no Xcode tools, Homebrew, winget or admin rights needed)"
 if [ "${1:-}" = "setup" ]; then   # what setup_env.py understands of `reel setup`'s own flags (--no-bridge is not one)
   for a in "${@:2}"; do
     case "$a" in
@@ -143,6 +147,11 @@ if ! probe_setup "$@"; then
       echo "WhyNot Cut: no engine yet — creating it in $HOME_DIR (a few minutes, ~400 MB)…" >&2
     fi
     for sys_py in python3 python py; do
+      # macOS without the Command Line Tools: /usr/bin/python3 is only a stub that opens Apple's install dialog, so it is
+      # never started (the hook runner's rule); the WhyNot Cut installer brings its own Python instead (G3 review I2)
+      case "$(command -v "$sys_py" 2>/dev/null || true)" in
+        /usr/bin/*) [ "$(uname -s 2>/dev/null)" = Darwin ] && ! xcode-select -p >/dev/null 2>&1 && continue ;;
+      esac
       if command -v "$sys_py" >/dev/null 2>&1 && "$sys_py" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' </dev/null >/dev/null 2>&1; then
         # shellcheck disable=SC2086  # flags are single words
         "$sys_py" "$HERE/setup/setup_env.py" --home "$HOME_DIR" $SETUP_FLAGS >&2 || true
@@ -162,7 +171,7 @@ if ! probe_setup "$@"; then
         echo "{\"blocked\": \"$(tag): building the engine runtime failed (its report is above)\", \"how\": \"check the internet connection, then run: reel setup\"}"
         exit 2
       fi
-      echo "{\"blocked\": \"$(tag): no Python 3.9+ found to build the engine\", \"how\": \"macOS: xcode-select --install (or python.org). Windows: winget install Python.Python.3.12  — then run: reel setup\"}"
+      echo "{\"blocked\": \"$(tag): no Python 3.9+ found to build the engine\", \"how\": \"$NO_PY_HOW\"}"
       exit 2
     fi
   elif [ -n "$RT_BROKEN" ]; then

@@ -89,7 +89,7 @@ fi
 if [ -z "$py" ]; then
   case "$1" in
     *session_context.py)
-      printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "WhyNot Cut protection is OFF: no Python found — run reel doctor"}}' ;;
+      printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "WhyNot Cut protection is OFF: no Python found — run reel doctor; when the engine is not installed, /whynot-cut:start installs it with its own Python (no Xcode tools or Homebrew)"}}' ;;
   esac
   echo "WhyNot Cut: no Python found (engine runtime or python3/python/py on PATH); hook skipped, protection is OFF — run reel doctor" >&2
   exit 0

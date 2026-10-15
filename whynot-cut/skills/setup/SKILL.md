@@ -40,9 +40,12 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 
    If the engine is missing, say it's about 400 MB and a few minutes and confirm first, unless the person just asked to
    install. Ask them to quit Premiere before running it (the panel folder is replaced; Windows locks it while Premiere
-   runs). With no engine yet, the `reel` wrapper builds it via `setup/setup_env.py` on
-   Python 3.12 (installed by WhyNot Cut). An existing `~/.reel-editor` install from reel-editor 1.x is reused automatically, models included.
-   No Python: the person installs it (Windows `winget install Python.Python.3.12`; macOS `xcode-select --install`).
+   runs). With no engine yet and a usable Python 3.9+ on the machine, the `reel` wrapper starts `setup/setup_env.py`,
+   which builds the runtime on Python 3.12 (installed by WhyNot Cut). An existing `~/.reel-editor` install from
+   reel-editor 1.x is reused automatically, models included.
+   No Python (`no Python 3.9+ found`, e.g. a new Mac without Xcode tools): run the installer that ships with the plugin
+   as `${CLAUDE_PLUGIN_ROOT}/skills/start/references/install-from-claude.md` says; it brings its own Python. Never send
+   the person to Xcode tools, Homebrew, winget or python.org.
 4. **Whisper large-v3 (about 3 GB)** downloads on the first `transcribe`, or deliberately (ask first) with
    `reel model-download --model large-v3` in the background. `reel doctor` → `whisper_partial_downloads` lists an
    interrupted download; the same command resumes it. With an NVIDIA

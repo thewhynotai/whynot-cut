@@ -247,7 +247,9 @@ exit /b 0
 
 :no_python
 call :tag
-echo {"blocked": "%WNC_TAG%: no Python 3.9+ found to build the engine", "how": "Windows: winget install Python.Python.3.12 - then run: reel setup"}
+rem G3 review I2: never winget or a system Python; the installer inside the plugin (installer\core\bootstrap.ps1:
+rem pinned uv + Python 3.12, sha256-checked, per user, no admin) builds the engine, run by /whynot-cut:start
+echo {"blocked": "%WNC_TAG%: no Python 3.9+ found to build the engine", "how": "run /whynot-cut:start: it installs the engine with the WhyNot Cut installer that ships with the plugin, which brings its own Python 3.12 (no winget, Xcode tools, Homebrew or admin rights needed)"}
 exit /b 2
 
 :setup_checked

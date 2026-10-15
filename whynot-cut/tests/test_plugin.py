@@ -503,7 +503,7 @@ class TestHookRunner(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         ctx = json.loads(r.stdout)["hookSpecificOutput"]
         self.assertEqual(ctx["hookEventName"], "SessionStart")
-        self.assertEqual(ctx["additionalContext"], "WhyNot Cut protection is OFF: no Python found — run reel doctor")
+        self.assertEqual(ctx["additionalContext"], "WhyNot Cut protection is OFF: no Python found — run reel doctor; when the engine is not installed, /whynot-cut:start installs it with its own Python (no Xcode tools or Homebrew)")
 
 
 class TestHeartbeat(ClientFixture):

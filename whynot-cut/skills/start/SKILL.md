@@ -25,9 +25,10 @@ Show progress as a checklist (✅ done · ⚠️ needs them · ⏳ running). If 
 folder and skip that question in Step 3. **Skip what is already green:** the installer may have done Steps 1–4; when
 `reel doctor` (and `reel settings`) show a step is done, tick it ✅ and move on without asking.
 
-Installing from inside Claude (the plugin, the engine and the Adobe parts in one go): when
-`${CLAUDE_SKILL_DIR}/references/install-from-claude.md` is present, read it and follow it for Steps 1–2; when it is
-not there, the steps below cover the install.
+Installing from inside Claude (the engine, ffmpeg, the Whisper model and the Adobe parts in one go): when the engine
+is not installed yet, read `${CLAUDE_SKILL_DIR}/references/install-from-claude.md` and follow it with `<ROOT>` =
+`${CLAUDE_PLUGIN_ROOT}`, then come back to Step 1. It runs the installer that ships with the plugin, which brings its
+own Python: no Xcode tools, Homebrew, winget or admin rights, on macOS or Windows.
 
 ## Step 1: Check the machine
 ```bash
@@ -56,14 +57,12 @@ reel doctor
   the report (Windows: install Git for Windows, then restart Claude Code; then `/hooks` should list WhyNot Cut).
   Don't go on to editing until `reel doctor` shows `guard_active: true`. `null` means an older guard that writes no
   heartbeat: ask them to check `/hooks`.
-- **Engine missing** (`blocked: engine not installed`): explain it is a private Python environment in `~/.whynot-cut`
-  (about 400 MB, a few minutes, nothing else on the computer changes) and ask once. On yes, run `reel setup` in the
-  background and ask the Step 3 questions while it runs; write preferences and re-run `reel doctor` after it finishes.
-- **No Python 3.9+** (`reel setup` says so): installing software is the person's job. Give the command for their OS,
-  then ask them to quit and reopen Claude Code:
-  - Windows (PowerShell): `winget install Python.Python.3.12` (no winget: the python.org installer, tick
-    "Add python.exe to PATH")
-  - macOS: `xcode-select --install` (an Apple dialog opens; click Install and wait)
+- **Engine missing** (`blocked: engine not installed`) on a fresh machine: follow
+  `${CLAUDE_SKILL_DIR}/references/install-from-claude.md` (one question, then the installer runs in the background).
+  Repairing an engine that was installed before (`the engine runtime is broken`, `reel doctor` says run `reel setup`):
+  ask once, run `reel setup` in the background, re-run `reel doctor` after it finishes.
+- **No Python 3.9+** (`reel setup` says so): never send the person to Xcode tools, Homebrew, winget or python.org.
+  Follow `${CLAUDE_SKILL_DIR}/references/install-from-claude.md`: the WhyNot Cut installer brings its own Python 3.12.
 - Anything else failing: spawn `whynot-cut:setup-doctor` with the exact output and relay its fix list. Never guess.
 - Report `verdict`, the GPU line (an NVIDIA GPU makes transcription several times faster) and the Adobe apps found.
 
@@ -165,7 +164,8 @@ panel in Premiere shows the same.
 ## Rules
 - One step at a time; verify each step with a command before calling it done.
 - Never change Adobe preferences, the registry or system settings; give the person the command.
-- Installers (Python, Xcode tools, fonts) are run by the person, never by Claude. `reel setup` covers the engine.
+- Claude never installs system software (Xcode tools, Homebrew, a system Python, fonts for the client). The engine,
+  its own Python and ffmpeg come from `reel setup` or the WhyNot Cut installer in the plugin (install-from-claude.md).
 - Ask before large downloads (engine, Whisper model).
 - `assets/` and `data/` belong to the client: scaffold only creates them for a new client, never edits them.
 - In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile

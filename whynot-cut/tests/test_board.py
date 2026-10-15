@@ -490,10 +490,14 @@ class SkillTexts(unittest.TestCase):
         self.assertIn(".claude/settings.json.lock", s)
         self.assertIn("guard_active: false", s)
 
-    def test_start_links_the_installer_reference_when_present(self):
+    def test_start_links_the_installer_reference(self):
+        """G3 review I2: the reference ships (no "when present" fallback) and is followed when the engine is missing."""
         s = skill("start")
         self.assertIn("${CLAUDE_SKILL_DIR}/references/install-from-claude.md", s)
-        self.assertRegex(s, r"(?i)when [^.]*install-from-claude\.md[^.]*(present|exists)")
+        self.assertTrue((SKILLS / "start" / "references" / "install-from-claude.md").is_file())
+        self.assertRegex(" ".join(s.split()), r"(?i)when the engine is not installed yet, read "
+                                              r"`\$\{CLAUDE_SKILL_DIR\}/references/install-from-claude\.md`")
+        self.assertNotRegex(s, r"(?i)install-from-claude\.md[^.]*(present|exists)")
 
     def test_no_re_default_left_in_user_text(self):
         for p in [SK / "README.md"] + sorted(SKILLS.glob("*/SKILL.md")):

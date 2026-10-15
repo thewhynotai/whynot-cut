@@ -57,7 +57,9 @@ WhyNot Cut يشتغل من غير ما يستأذن في كل أمر.
    ```
    In the desktop app: **+ › Plugins › Add plugin** with the same folder.
 3. Start a new session and run **`/whynot-cut:start`**. It walks you through everything, one checked step at a time:
-   - installs the engine in `~/.whynot-cut` (a private Python environment, ~400 MB, on Python 3.12 (installed by WhyNot Cut))
+   - installs the engine in `~/.whynot-cut` (a private Python environment on Python 3.12 (installed by WhyNot Cut),
+     with ffmpeg and the Whisper model) by running the installer that ships with the plugin: no Python, Xcode
+     tools, Homebrew, winget or admin rights needed on macOS or Windows
    - connects Premiere Pro (installs the WhyNot Cut Bridge panel; gives you the one command for Adobe's PlayerDebugMode)
    - asks three preferences (where clients live, approval mode, transcription speed)
    - lets WhyNot Cut run without a prompt per command (`reel settings --allow-reel`: the clients folder and every client

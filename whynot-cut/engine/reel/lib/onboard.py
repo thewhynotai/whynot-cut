@@ -164,8 +164,9 @@ def guard_heartbeat(now: float | None = None) -> dict:
         fix = ("install Git for Windows (https://git-scm.com/download/win), then restart Claude Code: WhyNot Cut's "
                "guard hooks run through Git Bash. Then run /hooks to check they are listed, and `reel doctor` again."
                if plat.IS_WIN else
-               "restart Claude Code and run /hooks to check WhyNot Cut's hooks are listed; make sure `python3 --version` "
-               "works (macOS: xcode-select --install), then `reel doctor` again.")
+               "restart Claude Code and run /hooks to check WhyNot Cut's hooks are listed. The hooks run on the engine's "
+               "own Python: if `reel doctor` says the engine is not installed, run /whynot-cut:start first (its "
+               "installer brings that Python; no Xcode tools or Homebrew needed), then `reel doctor` again.")
     return {"active": active, "file": f, "age_h": round(age / 3600, 1) if age is not None else None,
             "runner_file": rf, "runner_age_h": round(rage / 3600, 1) if rage is not None else None, "fix": fix,
             "silent_guards": silent}
