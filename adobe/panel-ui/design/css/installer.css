@@ -74,8 +74,8 @@
 .i-sbar-thumb { display: block; flex: 0 0 auto; border-radius: 2px; background: var(--mk-i-scroll-thumb); }
 
 /* pinned action bar: the screen's buttons; the primary sits at the end (right in EN, left in AR) */
-.i-bar { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; padding: 12px 24px; border-top: 1px solid var(--mk-divider); background: var(--twn-bg); }
-.i-w640 .i-bar { padding: 12px 16px; }
+.i-bar { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; padding: 11px 24px 12px 24px; border-top: 1px solid var(--mk-divider); background: var(--twn-bg); } /* 11 + the 1 px divider = 12 (R2 D-P2-1) */
+.i-w640 .i-bar { padding: 11px 16px 12px 16px; }
 .i-bar .m-btn + .m-btn { margin-left: 8px; }
 .m-rtl .i-bar .m-btn + .m-btn { margin-left: 0; margin-right: 8px; }
 .i-bar .m-btn { height: 40px; padding: 0 14px; }
@@ -91,7 +91,9 @@
 .m-rtl .i-title { font: 600 var(--mk-type-ar-i-title) var(--twn-font-ar); }
 .m-rtl .i-lead { font: 400 var(--mk-type-ar-i-body) var(--twn-font-ar); }
 /* digits in a Syne role (version numbers): Syne's round zero reads as "o", so they keep the UI face */
-.i-ver { font-family: var(--twn-font-ui); font-weight: 600; letter-spacing: 0; }
+.i-ver { font-family: var(--twn-font-ui); letter-spacing: 0; }
+.i-display .i-ver { font-weight: 700; }
+.i-title .i-ver { font-weight: 600; }
 .m-rtl .i-display .lat, .m-rtl .i-title .lat { font-family: var(--twn-font-ui); font-weight: 600; }
 
 /* ---- fact rows (Welcome, Claude "what happens"): icon + one line ---- */
@@ -103,7 +105,7 @@
 
 /* ---- checklist rows (I-03, I-04, I-06, I-09): status icon, name, one line, end status ---- */
 .i-step { display: flex; flex-direction: row; align-items: flex-start; padding: 6px 0; }
-.i-step + .i-step { border-top: 1px solid var(--mk-divider); }
+.i-step + .i-step { border-top: 1px solid var(--mk-divider); padding-top: 5px; } /* 5 + the 1 px divider = 6 (R2 D-P2-1) */
 .i-step > .m-ico { margin-top: 2px; }
 .m-rtl .i-step > .m-ico { margin-top: 4px; }
 .i-step-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 8px; }
@@ -169,11 +171,7 @@
 .i-monobox { display: block; flex: 0 1 auto; min-width: 0; padding: 4px 8px; border-radius: 4px; background: var(--twn-frame-bg); color: var(--twn-text); direction: ltr; text-align: left; }
 .i-monobox .mono { display: block; overflow-wrap: anywhere; word-break: break-all; }
 
-/* ---- keyboard hints (Addendum G2): a keycap inside the button; Return on the primary, Esc on cancel/back/close ---- */
-.i-kbd { display: flex; align-items: center; justify-content: center; flex: 0 0 auto; height: 20px; min-width: 20px; padding: 0 4px; margin-left: 8px; border-radius: 4px; background: var(--mk-control-pressed); color: var(--twn-text-muted); font: 600 11px/16px var(--twn-font-ui); }
-.m-rtl .i-kbd { margin-left: 0; margin-right: 8px; }
-.i-kbd-on { background: var(--mk-primary-pressed); color: var(--mk-on-primary-muted); }
-.m-btn-ghost .i-kbd { background: var(--mk-control); }
+/* ---- keyboard hints: the shared .m-kbd keycap (Return on the primary, Esc on cancel/back/close) is drawn by I.btn via M.btn ---- */
 
 /* ---- motion (direction §10; mock-motion meta per screen): colour and border-colour only, 150-250 ms; every state
    is drawn finished, so no motion is needed to read it (static fallback) ---- */
@@ -201,3 +199,10 @@
 .i-gets .m-chip { margin: 8px 8px 0 0; }
 .m-rtl .i-gets .m-chip { margin: 8px 0 0 8px; }
 .i-support .m-btn { height: 32px; }
+
+/* ---- numbered next steps (I-06 finish): a 20 px ring with the number, then the sentence ---- */
+.i-nextrow { display: flex; flex-direction: row; align-items: flex-start; }
+.i-nextrow + .i-nextrow { margin-top: 12px; }
+.i-num { display: flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; border: 2px solid var(--mk-border-input); border-radius: 999px; color: var(--twn-text); font: 600 12px/16px var(--twn-font-ui); direction: ltr; }
+.i-nextrow-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 12px; }
+.m-rtl .i-nextrow-text { margin-left: 0; margin-right: 12px; }

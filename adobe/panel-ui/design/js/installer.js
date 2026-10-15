@@ -48,25 +48,25 @@
   /* "2.9 GB" / «2.9 جيجا» with a no-break space; Western digits in both */
   I.gb = function (n) { return window.I_GB(typeof n === "number" ? (n >= 100 ? String(Math.round(n * 10) / 10) : n.toFixed(1)) : n, M.lang === "ar"); };
   I.mb = function (n) { return window.I_MB(n, M.lang === "ar"); };
-  I.path = function (p) { return M.html('<bdi dir="ltr" class="mono">' + M.esc(p) + "</bdi>"); };
+  I.path = function (p) { return M.html(M.path(p)); }; /* thin wrapper: the isolate and the wrap points are M.path (R2 §1.3) */
   I.ltr = function (s) { return M.html(M.ltr(s)); };
-  /* "WhyNot Cut 2.2.1" as ONE isolated Latin run, so the number stays after the name in Arabic too */
-  I.app = function (ver) { return M.html(M.ltr("WhyNot Cut " + ver)); };
+  /* "WhyNot Cut 2.2.1" as ONE isolated Latin run, so the number stays after the name in Arabic too; the digits are set in
+     Inter (.i-ver) because Syne's old-style digits read "3.o.ı" in a display line (R2 designer P2-10) */
+  I.app = function (ver) { return M.html('<bdi dir="ltr" class="lat">WhyNot Cut <span class="i-ver">' + M.esc(ver) + "</span></bdi>"); };
   I.ver = function (ver) { return M.html('<bdi dir="ltr" class="lat i-ver">' + M.esc(ver) + "</bdi>"); };
   /* a file name or link the editor must read whole: mono, LTR, wraps anywhere instead of running out */
-  I.monoBox = function (s) { return '<span class="i-monobox"><bdi dir="ltr" class="mono">' + M.esc(s) + "</bdi></span>"; };
+  I.monoBox = function (s) { return '<span class="i-monobox">' + M.path(s) + "</span>"; };
   I.useLong = function () { var L = base[OS].long || {}; for (var x in L) D[x] = L[x]; };
 
-  /* SHARED: keycap hint inside a button */
-  I.kbd = function (key, kind) {
-    var label = key === "enter" ? "↵" : "esc";
-    return '<span class="i-kbd' + (kind === "primary" ? " i-kbd-on" : "") + '" aria-hidden="true">' + label + "</span>";
-  };
+  /* The keycap is the panel's own (.m-kbd, Inter): Return and Esc here, not the panel's Cmd+Return. M.btn refuses a keycap on a
+     danger or destructive button (R2 designer P0-3), and a disabled button shows none. The label stays a plain inline run
+     inside M.btn's own span, so the space before a Latin name is kept («سطّب Claude», not «Claudeسطّب»: a flex row dropped it). */
   I.btn = function (label, o) {
     o = o || {};
-    /* R2 (designer P0-3): a danger or destructive action never carries the Return keycap */
-    var hint = o.key && !o.disabled && o.kind !== "danger" && !o.destructive ? I.kbd(o.key, o.kind) : "";
-    return M.btn('<span class="m-row">' + label + hint + "</span>", o);
+    var b = {}, k;
+    for (k in o) b[k] = o[k];
+    b.kbd = o.key && !o.disabled ? (o.key === "enter" ? "↵" : "Esc") : null;
+    return M.btn(label, b);
   };
 
   /* ---- content helpers ---- */
@@ -94,7 +94,8 @@
   };
   I.list = function (rows, cls) { return M.card(rows.join(""), "m-card-flush " + (cls || "")); };
 
-  /* SHARED: action-needed card / dialog; o = {mono, btns (html), hint, icon, sub, cls, extra} */
+  /* SHARED: action-needed card / dialog; kind ok|warn|error|info|waiting (waiting = for the person: pink dot on the info tint);
+     o = {mono, btns (html), hint, icon, sub, cls, extra} */
   I.act = function (kind, title, text, o) {
     o = o || {};
     var body = '<div class="t-label i-act-title">' + title + "</div>" + (text ? '<div class="t-body tx-text mt-1">' + text + "</div>" : "") +
@@ -103,23 +104,22 @@
       (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + "</div>" : "") +
       (o.btns ? '<div class="m-row mt-3">' + o.btns + "</div>" : "") +
       (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + "</div>" : "");
-    return '<div class="m-notice m-notice-' + kind + ' i-act ' + (o.cls || "") + '" role="' + (kind === "error" ? "alert" : "status") + '">' +
-      (o.icon ? I.ico(o.icon, 16, { ok: "ink-ok", warn: "ink-warn", error: "ink-error", info: "ink-info" }[kind]) : M.status(kind)) +
+    return '<div class="m-notice m-notice-' + (kind === "waiting" ? "info" : kind) + ' i-act ' + (o.cls || "") + '" role="' + (kind === "error" ? "alert" : "status") + '">' +
+      (o.icon ? I.ico(o.icon, 16, { ok: "ink-ok", warn: "ink-warn", error: "ink-error", info: "ink-info", waiting: "ink-accent" }[kind]) : M.status(kind)) +
       '<div class="m-notice-body">' + body + "</div></div>";
   };
   /* SHARED: failure card (I-07 pattern): what happened (white sentence), why (meta), ONE fix (primary), then
-     Contact support + Save a report for support (ghost, G2-r1 e), the privacy note and the log path */
+     one-click support + Save a report for support (ghost, G2-r1 e) and the privacy note (no log path: R2 D-P1-10) */
   I.fail = function (text, o) {
     o = o || {};
     var chip = o.safety ? '<div class="m-row">' + M.chip("error", T("i07.safety"), "shield-x") + "</div>" : "";
-    var support = '<div class="m-row mt-2 i-support">' + M.btn(T("i00.support"), { kind: "ghost", icon: "life-buoy", cls: "m-btn-flush" }) +
-      '<div class="ms-2">' + M.btn(T("i00.save_report"), { kind: "ghost", icon: "download" }) + "</div></div>";
+    var support = '<div class="m-row m-wrap mt-2 i-support">' + M.btn(T("i00.support"), { kind: "ghost", icon: "life-buoy", flush: true }) +
+      M.btn(T("i00.save_report"), { kind: "ghost", icon: "download", flush: true }) + "</div>"; /* both flush: a wrapped second line stays aligned */
     var body = chip + '<div class="t-body tx-text' + (o.safety ? " mt-2" : "") + '">' + text + "</div>" +
       (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + "</div>" : "") +
       (o.mono ? '<div class="m-row mt-2">' + I.monoBox(o.mono) + "</div>" : "") +
       (o.btn ? '<div class="m-row mt-3">' + o.btn + "</div>" : "") + support +
-      '<div class="t-meta tx-muted mt-1">' + T("i00.report_note") + "</div>" +
-      '<div class="t-meta tx-muted mt-1 i-wrap">' + T("i00.log", { path: I.path(D.log) }) + "</div>";
+      '<div class="t-meta tx-muted mt-1">' + T("i00.report_note") + "</div>"; /* R2 D-P1-10: no log path in a card; "Save a report" covers it */
     return '<div class="m-notice m-notice-' + (o.kind || "error") + '" role="alert">' + M.status(o.kind || "error") + '<div class="m-notice-body">' + body + "</div></div>";
   };
 
@@ -143,20 +143,21 @@
   };
   I.sub = function (text) { return '<div class="t-meta tx-muted i-checksub">' + text + "</div>"; };
 
-  /* SHARED: what Setup adds, and where (trust; E2.1#1 and #5) */
+  /* SHARED: what Setup adds, and where (trust; E2.1#1 and #5). R2 D-P1-10: plain locations only ("In Login Items"); the raw
+     folder, plist and log paths are not primary text (they stay behind Show details / Save a report). */
   I.adds = function (cls, o) {
     o = o || {};
     var rows = [
-      ["app-window", "add.service", "add.service.sub", D.home],
-      ["puzzle", "add.claude", "add.claude.sub", null],
-      ["layers", "add.panels", "add.panels.sub", null],
-      ["type", "add.fonts", "add.fonts.sub", D.fonts],
-      ["power", "add.login", "add.login.sub", OS === "mac" ? D.login : null],
-      o.uninstall ? ["link", "i09.r.link", null, null] : ["audio-lines", "add.model", "add.model.sub", null]
+      ["app-window", "add.service", "add.service.sub"],
+      ["puzzle", "add.claude", "add.claude.sub"],
+      ["layers", "add.panels", "add.panels.sub"],
+      ["type", "add.fonts", "add.fonts.sub"],
+      ["power", "add.login", "add.login.sub"],
+      o.uninstall ? ["link", "i09.r.link", null] : ["audio-lines", "add.model", "add.model.sub"]
     ];
     return I.list(rows.map(function (r) {
       return '<div class="i-step">' + I.ico(r[0], 16, "ink-muted") + '<div class="i-step-text"><div class="t-label">' + T(r[1]) + "</div>" +
-        (r[2] ? '<div class="t-meta tx-muted">' + I.Tos(r[2]) + "</div>" : "") + (r[3] ? '<div class="t-meta tx-muted i-wrap">' + M.mono(r[3]) + "</div>" : "") + "</div></div>";
+        (r[2] ? '<div class="t-meta tx-muted">' + I.Tos(r[2]) + "</div>" : "") + "</div></div>";
     }), cls || "mt-3");
   };
 

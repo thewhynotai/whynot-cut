@@ -29,6 +29,9 @@
    NOT in the core yet: the whole step (E-T4).
    E2.1 / G made visible: #3 HTTPS from claude.ai only, the publisher checked, a file that fails is never opened;
    D0.1 the sign-in stays the editor's.
+   R2: the title follows the state (Claude isn't installed -> Installing Claude... -> Sign in to Claude -> Claude is ready) and the rail
+   step stays on Claude until Continue; the sign-in wait is the pink waiting dot; on a refused file the first button opens
+   claude.ai/download, Check again comes after it. The cost and data lines stay as approved (MOCK-VERIFY, owner decisions D-01 to D-03).
    States: normal, focus, loading (downloading), checking (publisher), waiting (sign in), timeout (no sign-in seen:
    wait more or continue), error (not the genuine app: never opened; what, why, one fix, support), offline (what
    still works + Check again), success, long, win (Windows chrome). */
@@ -49,9 +52,13 @@
     return '<div class="i-sec" id="know">' + M.eyebrow(t("i05.know")) + '<div class="m-col mt-2">' +
       I.fact("user-round", t("i05.know.account")) + I.fact("circle-check-big", t("i05.know.cost")) + I.fact("lock", t("i05.know.footage")) + I.fact("eye-off", t("i05.know.private")) + "</div></div>";
   }
-  function head(noHave) {
-    return I.title(t("i05.title")) + '<div class="i-lead tx-muted mt-2">' + t("i05.text") + "</div>" +
-      (noHave ? "" : '<div class="m-row mt-1">' + M.btn(t("i05.have"), { kind: "ghost", icon: "refresh-cw", flush: true }) + "</div>");
+  /* R2 D-P0-2: the title follows the state: Claude isn't installed -> Installing Claude... -> Sign in to Claude -> Claude is ready.
+     The lead and "I already have Claude" only show before the install has started or after it failed. */
+  function head(mode) {
+    var title = { run: "i05.title.installing", signin: "i05.title.signin", ready: "i05.title.ready" }[mode] || "i05.title";
+    var intro = !mode;
+    return I.title(t(title)) + (intro ? '<div class="i-lead tx-muted mt-2">' + t("i05.text") + "</div>" +
+      '<div class="m-row mt-1">' + M.btn(t("i05.have"), { kind: "ghost", icon: "refresh-cw", flush: true }) + "</div>" : "");
   }
   var skip = function (dis) { return I.btn(t("i05.skip"), { kind: "ghost", flush: true, disabled: dis, key: "esc" }); };
   function bar(o) {
@@ -60,23 +67,25 @@
   }
   var card = function (h) { return '<div class="mt-4">' + h + "</div>"; };
   var refused = function () {
-    return card(I.fail(t("i05.refused"), { safety: true, sub: t("i05.refused.sub", { url: url }), btn: I.btn(t("i03.again"), { kind: "primary", icon: "refresh-cw", key: "enter" }) }));
+    /* R2 D-P1-6: the install path comes first (open the official page), Check again is the step after it */
+    return card(I.fail(t("i05.refused"), { safety: true, sub: t("i05.refused.sub", { url: url }),
+      btn: I.btn(t("i05.open"), { kind: "primary", icon: "external-link", key: "enter" }) + '<div class="ms-2">' + M.btn(t("i03.again"), { icon: "refresh-cw" }) + "</div>" }));
   };
   var STATES = {
     normal: function () { return { body: head() + how() + know(), bar: bar() }; },
     focus: function () { return { body: head() + how() + know(), bar: bar({ focus: true }) }; },
-    loading: function () { return { body: head() + how({ dl: "busy", dlProg: 44 }) + know(), bar: bar({ busy: true }) }; },
-    checking: function () { return { body: head() + how({ dl: "ok", ck: "busy" }) + know(), bar: bar({ busy: true }) }; },
+    loading: function () { return { body: head("run") + how({ dl: "busy", dlProg: 44 }) + know(), bar: bar({ busy: true }) }; },
+    checking: function () { return { body: head("run") + how({ dl: "ok", ck: "busy" }) + know(), bar: bar({ busy: true }) }; },
     waiting: function () {
       return {
-        body: head() + card(I.act("info", t("i05.signin"), "", { icon: "log-in", btns: I.btn(t("i05.signed"), { kind: "primary", key: "enter" }) })) +
-          how({ dl: "ok", ck: "ok", pub: true, si: "busy" }) + know(),
+        body: head("signin") + card(I.act("waiting", t("i05.signin"), "", { icon: "log-in", btns: I.btn(t("i05.signed"), { kind: "primary", key: "enter" }) })) +
+          how({ dl: "ok", ck: "ok", pub: true, si: "waiting" }) + know(),
         bar: { start: skip() }
       };
     },
     timeout: function () {
       return {
-        body: head() + card(I.act("warn", t("i05.timeout"), t("i05.timeout.sub"), { btns: I.btn(t("i05.wait"), { kind: "primary", icon: "refresh-cw", key: "enter" }) + '<div class="ms-2">' + M.btn(t("i05.without"), {}) + "</div>" })) +
+        body: head("signin") + card(I.act("warn", t("i05.timeout"), t("i05.timeout.sub"), { btns: I.btn(t("i05.wait"), { kind: "primary", icon: "refresh-cw", key: "enter" }) + '<div class="ms-2">' + M.btn(t("i05.without"), {}) + "</div>" })) +
           how({ dl: "ok", ck: "ok", pub: true, si: "warn" }) + know(),
         bar: { start: skip() }
       };
@@ -90,7 +99,7 @@
     },
     success: function () {
       return {
-        body: head(true) + card(M.notice("ok", t("i05.ready"), { dismiss: false })) + how({ dl: "ok", ck: "ok", pub: true, si: "ok" }) + know(),
+        body: head("ready") + card(M.notice("ok", t("i03.claude.ok"), { dismiss: false })) + how({ dl: "ok", ck: "ok", pub: true, si: "ok" }) + know(),
         rail: "ok", bar: { end: I.btn(t("i00.continue"), { kind: "primary", key: "enter" }) }
       };
     },
@@ -102,8 +111,9 @@
     states: ["normal", "focus", "loading", "checking", "waiting", "timeout", "error", "offline", "success", "long", "win"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
-      var mark = v.rail === "error" ? "error" : (state === "loading" || state === "checking" || state === "waiting") ? "busy" : undefined;
-      v.rail = { flow: "install", at: v.rail === "ok" ? "install" : "claude", claude: true, mark: mark };
+      var mark = v.rail === "error" ? "error" : (state === "loading" || state === "checking") ? "busy" : state === "waiting" ? "waiting" : state === "timeout" ? "warn" : undefined;
+      /* R2 D-P0-2: the Claude step in the rail stays active until Continue, also when Claude is ready */
+      v.rail = { flow: "install", at: "claude", claude: true, mark: mark };
       return v;
     }
   });

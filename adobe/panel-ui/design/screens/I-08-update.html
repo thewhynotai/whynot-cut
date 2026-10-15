@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mock-states" content="normal,focus,loading,checking,success,error,offline,repair,long,win">
 <meta name="mock-widths" content="760,640">
-<meta name="mock-keys" content="Return: Update (up to date: Close; offline: Check again) · Esc: Later · R: Repair · Tab order: Repair, Later, Update">
+<meta name="mock-keys" content="Return: Update · Esc: Later (up to date, error, offline: Esc closes) · R: Repair · Tab order: Repair, Go back to the previous version, Later, Update">
 <meta name="mock-motion" content="the progress card replaces the release note in the same reserved block; bar width 250 ms; the genuine-check line turns from spinner to green check by fill colour 200 ms; static fallback: final state">
 <title>I-08 Update and repair</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -25,22 +25,27 @@
    skips what state.json records as done).
    E2.1 / G made visible: "Checked: this update is the genuine one", checked again before anything is installed; a
    failed check installs nothing and says the current version keeps working.
+   R2: the headline follows the state ("Update not installed" on a failed check); the success footer says 3.0.1; the repair card also
+   offers "Go back to the previous version" (backlog B-04, owner G-F-16); Close is one grey look with Esc.
    States: normal (update ready), focus, loading (downloading), checking (genuine check), success (up to date: the
    empty state of this screen), error (not confirmed genuine: what, why, one fix, support), offline (what still
    works + Check again), repair (progress as I-04, finished rows green at once), long, win. */
 (function () {
   var t = I.T, D = I.D, win = I.os === "win";
   var KEYS = ["preflight", "engine", "claude"].concat(win ? ["gitbash"] : []).concat(["adobe", "fonts", "always_on", "models", "client", "doctor", "launch"]);
-  function head() {
-    return M.eyebrow(t("i08.eyebrow")) + '<div class="i-display mt-2">' + t("i08.title", { app: I.app(D.next) }) + "</div>" +
-      '<div class="i-lead tx-muted mt-2">' + t("i08.have", { version: I.ltr(D.version) }) + " " + t("i08.notes") + "</div>";
+  /* R2 D-P0-2: the headline follows the state; on a failed check it says so and the release note is dropped */
+  function head(failed) {
+    return M.eyebrow(t("i08.eyebrow")) + '<div class="i-display mt-2">' + (failed ? t("i08.title.error") : t("i08.title", { app: I.app(D.next) })) + "</div>" +
+      '<div class="i-lead tx-muted mt-2">' + t("i08.have", { version: I.ltr(D.version) }) + (failed ? "" : " " + t("i08.notes")) + "</div>";
   }
   function genuine(kind) {
     return '<div class="m-row-top mt-4">' + (kind === "busy" ? M.status("busy") : I.ico("shield-check", 16, "ink-ok")) + '<div class="t-body ms-2 m-grow">' + t(kind === "busy" ? "i08.checking" : "i08.signed") + "</div></div>";
   }
-  function repairCard() {
+  /* Repair, and (backlog B-04, owner G-F-16) going back to the last good version, which Setup keeps on disk */
+  function repairCard(prev) {
     return '<div class="i-sec">' + M.card('<div class="m-row-top">' + I.ico("wrench", 16, "ink-muted") + '<div class="m-col m-grow ms-2"><div class="t-label">' + t("i08.repair.title") + "</div>" +
-      '<div class="t-meta tx-muted mt-1">' + t("i08.repair.text") + '</div><div class="m-row mt-3">' + M.btn(t("i08.repair"), { icon: "wrench" }) + "</div></div></div>") + "</div>";
+      '<div class="t-meta tx-muted mt-1">' + t("i08.repair.text") + '</div><div class="m-row mt-3">' + M.btn(t("i08.repair"), { icon: "wrench" }) + "</div>" +
+      '<div class="t-meta tx-muted mt-4">' + t("i08.prev.text") + '</div><div class="m-row mt-3">' + M.btn(t("i08.prev", { version: I.ltr(prev || D.old) }), { icon: "rotate-ccw" }) + "</div></div></div>") + "</div>";
   }
   var later = function (dis) { return I.btn(t("i08.later"), { kind: "ghost", flush: true, disabled: dis, key: "esc" }); };
   function bar(o) {
@@ -60,12 +65,14 @@
     loading: function () { return { body: head() + progress(36) + genuine(), bar: bar({ busy: true }), mark: "busy" }; },
     checking: function () { return { body: head() + progress(100) + genuine("busy"), bar: bar({ busy: true }), mark: "busy" }; },
     success: function () {
+      var was = D.version;
+      D.version = D.next; /* R2 D-P2-8: after the update the rail footer says 3.0.1, not 3.0.0 */
       return {
-        body: '<div class="i-display">' + t("i08.current") + '</div><div class="i-lead tx-muted mt-2">' + t("i08.current.sub", { version: I.ltr(D.next), time: M.html(M.mono("10:32")) }) + "</div>" + repairCard(),
-        bar: { end: I.btn(t("i00.close"), { kind: "primary", key: "enter" }) }, at: "finish"
+        body: '<div class="i-display">' + t("i08.current") + '</div><div class="i-lead tx-muted mt-2">' + t("i08.current.sub", { version: I.ltr(D.next), time: M.html(M.mono("10:32")) }) + "</div>" + repairCard(was),
+        bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, at: "finish"
       };
     },
-    error: function () { return { body: head() + badCard(), bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, mark: "error" }; },
+    error: function () { return { body: head(true) + badCard(), bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, mark: "error" }; },
     offline: function () {
       return {
         body: '<div class="i-title">' + t("i00.stage.update") + '</div><div class="mt-4">' + M.notice("warn", t("i08.offline"), { dismiss: false, btn: { label: t("i03.again"), primary: true, icon: "refresh-cw" } }) + "</div>" + repairCard(),
@@ -84,7 +91,7 @@
         bar: { end: M.btn(t("i04.hide"), {}) + I.btn(t("i00.cancel"), { icon: "circle-stop", key: "esc" }) }, at: "install", mark: "busy"
       };
     },
-    long: function () { return { body: head() + badCard() + repairCard(), bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, mark: "error", scroll: "end" }; },
+    long: function () { return { body: head(true) + badCard() + repairCard(), bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, mark: "error", scroll: "end" }; },
     win: function () { return { body: head() + genuine() + repairCard(), bar: bar() }; }
   };
   I.mount({

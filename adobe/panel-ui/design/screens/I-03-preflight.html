@@ -21,7 +21,7 @@
 /* I-03 Check this computer (screen-inventory §5 I-03). Tell the truth about this computer before anything is
    downloaded. Data: the core's preflight step, ctx.facts = {os, arch, os_version, free_gb, home_ascii, home_space,
    onedrive_documents, icloud_documents, claude_found, sac, adobe_hosts[{app, version, running}], nvidia, existing}.
-   Thresholds as the core: red under 6 GB, amber under 9 GB. NOT in the core yet: an internet check, the offline-bundle
+   Thresholds as the core (red under 6 GB, amber under 9 GB) are the real product's safety margins; the mock keeps one size (3.6 GB, as I-01). NOT in the core yet: an internet check, the offline-bundle
    flag, Claude signed-in, the macOS privacy-prompt rows (they are fixed copy).
    Rows are ordered problems first (red, amber, info, ready) so what needs the editor is in view; chips count them.
    E2.1 / G made visible: #2 "This check changes nothing"; G11: the two macOS privacy prompts (Files and folders,
@@ -35,7 +35,7 @@
   var t = I.T, D = I.D, st = I.state, win = I.os === "win";
   var R = {
     disk: function (k) {
-      var detail = k === "error" ? t("i03.disk.red", { free: I.gb(4.2), need: I.gb(6.0), gb: I.gb(1.8) }) : k === "warn" ? t("i03.disk.amber")
+      var detail = k === "error" ? t("i03.disk.red", { free: I.gb(2.4), need: I.gb(D.total), gb: I.gb(Math.round((D.total - 2.4) * 10) / 10) }) /* R2 D-P2-8: the same 3.6 GB as the Welcome size */ : k === "warn" ? t("i03.disk.amber")
         : t("i03.disk.ok", { free: I.gb(D.free), drive: I.ltr(D.drive), gb: I.gb(D.total) });
       return I.step(k, t("i03.disk"), { detail: detail });
     },
@@ -57,7 +57,7 @@
     auto: function () { return I.step("info", t("i03.auto"), { detail: t("i03.auto.info") }); },
     gk: function () { return I.step("ok", t("i03.gk"), { detail: t("i03.gk.ok") }); },
     sac: function () { return I.step("warn", t("i03.sac"), { detail: t("i03.sac.amber") }); },
-    net: function (on) { return on ? I.step("ok", t("i03.net"), { detail: t("i03.net.ok") }) : I.step("warn", t("i03.net"), { detail: t("i03.net.off") }); },
+    net: function (on) { return on ? I.step("ok", t("i03.net"), { detail: t("i03.net.ok") }) : I.step("warn", t("i03.net"), { detail: t("i03.net.off"), act: M.btn(t("i00.offline_get"), { icon: "external-link" }) }); },
     pend: function (key) { return I.step("pending", t(key), { end: t("i03.checking") }); },
     busy: function (key) { return I.step("busy", t(key), { end: t("i03.checking") }); }
   };

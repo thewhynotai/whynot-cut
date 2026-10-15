@@ -36,37 +36,45 @@
       : o.amber ? I.step("warn", t("i06.r.panels"), { detail: t("i06.r.panels.amber"), act: M.btn(t("i00.check_again"), { icon: "refresh-cw" }) })
       : I.step("ok", t("i06.r.panels"), { detail: t("i06.r.panels.ok") });
     return I.list([
-      I.step("ok", t("i06.r.app"), { detail: t("i06.r.app.ok", { path: I.path(D.home) }) }),
+      I.step("ok", t("i06.r.app"), { detail: t("i06.r.app.ok") }),
       panels,
       I.step(o.nosignin ? "warn" : "ok", t("i06.r.claude"), { detail: o.nosignin ? t("i06.nosignin") : t("i06.r.claude.ok") }),
       I.step("busy", t("i06.r.model"), { detail: t("i06.r.model.bg", { done: I.gb(1.9), total: I.gb(2.9) }), prog: { pct: 66, meta: "66%" } }),
       I.step("ok", t("i06.r.login"), { detail: t(win ? "i06.r.login.win" : "i06.r.login.mac") }),
-      I.step("ok", t("i06.r.clients"), { detail: M.mono(D.clients), act: M.btn(t("i06.clients"), { icon: "folder-open" }) })
+      I.step("ok", t("i06.r.clients"), { detail: M.path(D.clients), act: M.btn(t("i06.clients"), { icon: "folder-open" }) })
     ], "mt-4");
   }
   function skel() {
     var r = function (w) { return '<div class="i-step">' + M.status("pending") + '<div class="i-step-text">' + M.skel(w) + M.skel(w + 20, 16) + "</div></div>"; };
     return I.list([r(30), r(44), r(36), r(28), r(40), r(32)], "mt-4");
   }
+  /* R2 E-P2-18: ONE numbered path. 1 = open Premiere and the panel (the menu path is one LTR chip, M.menuPath); 2 = the first-client button
+     of the panel (firstrun.client). Open Claude is the secondary action, not a second "next". */
   function next() {
-    return '<div class="m-row-top mt-4">' + I.ico("info", 16, "ink-info") + '<div class="t-body ms-2 m-grow">' + t("i06.next") + "</div></div>" +
-      (win ? "" : '<div class="m-row-top mt-2">' + I.ico("folder-open", 16, "ink-info") + '<div class="t-body ms-2 m-grow">' + t("i06.mac_access") + "</div></div>");
+    var one = '<div class="i-nextrow"><span class="i-num">1</span><div class="i-nextrow-text"><div class="t-body">' +
+      t("i06.step1", { path: M.html('<div class="m-row mt-1">' + M.menuPath(["Window", "UXP Plugins", "WhyNot Cut"]) + "</div>") }) + "</div></div></div>";
+    var two = '<div class="i-nextrow"><span class="i-num">2</span><div class="i-nextrow-text"><div class="t-body">' +
+      t("i06.step2", { btn: M.raw("firstrun.client") }) + "</div></div></div>";
+    return '<div class="mt-4">' + one + two + "</div>" +
+      (win ? "" : '<div class="m-row-top mt-4">' + I.ico("folder-open", 16, "ink-info") + '<div class="t-body ms-2 m-grow">' + t("i06.mac_access") + "</div></div>");
   }
+  /* R2 D-P0-2: the headline follows the state: ready / Almost ready (Claude not signed in) / One step needs you (a failed check) */
   function head(o) {
     o = o || {};
-    return '<div class="i-display">' + t("i06.title") + "</div>" + (o.sub === false ? "" : '<div class="i-lead tx-muted mt-1">' + t("i06.open.sub") + "</div>");
+    var key = o.title || "i06.title";
+    return '<div class="i-display">' + t(key) + "</div>" + (o.sub === false ? "" : '<div class="i-lead tx-muted mt-1">' + t("i06.sub") + "</div>");
   }
   function bar(o) {
     o = o || {};
     return {
-      start: I.btn(t("i00.close"), { kind: "ghost", flush: true, key: "esc" }),
-      end: I.btn(t("i06.open"), { kind: o.secondary ? "secondary" : "primary", icon: "external-link", focus: o.focus, key: o.secondary ? "" : "enter" })
+      start: I.btn(t("i00.close"), { key: "esc" }), /* R2 D-P2-12: Close is one look everywhere, the grey control with Esc */
+      end: I.btn(t("i06.open"), { icon: "external-link", focus: o.focus })
     };
   }
   var STATES = {
     loading: function () {
       return { body: '<div class="i-title">' + t("i06.checking") + "</div>" + skel(), mark: "busy",
-        bar: { start: M.btn(t("i00.close"), { kind: "ghost", flush: true, disabled: true }), end: M.btn(t("i06.open"), { disabled: true, icon: "external-link" }) } };
+        bar: { start: M.btn(t("i00.close"), { disabled: true }), end: M.btn(t("i06.open"), { disabled: true, icon: "external-link" }) } };
     },
     normal: function () { return { body: head() + next() + rows(), bar: bar() }; },
     focus: function () { return { body: head() + next() + rows(), bar: bar({ focus: true }) }; },
@@ -74,19 +82,19 @@
     fallback: function () {
       return {
         body: head({ sub: false }) + '<div class="mt-4">' + I.act("info", t("i06.nolink"), t("i06.paste"), { mono: "/whynot-cut:start", btns: I.btn(t("i06.copy"), { kind: "primary", icon: "copy", key: "enter" }) }) + "</div>" + next() + rows(),
-        bar: bar({ secondary: true })
+        bar: bar()
       };
     },
     nosignin: function () {
       return {
-        body: head({ sub: false }) + '<div class="mt-4">' + I.act("warn", t("i06.nosignin"), t("i06.nosignin.sub"), { icon: "log-in" }) + "</div>" + rows({ nosignin: true }),
+        body: head({ title: "i06.title.almost", sub: false }) + '<div class="mt-4">' + I.act("waiting", t("i06.nosignin"), t("i06.nosignin.sub"), { icon: "log-in" }) + "</div>" + rows({ nosignin: true }),
         bar: bar()
       };
     },
     error: function () {
       return {
-        body: head({ sub: false }) + '<div class="mt-4">' + I.fail(t("i07.panel"), { mono: D.ccx, btn: I.btn(t("i07.panel.btn"), { kind: "primary", icon: "file-search", key: "enter" }) }) + "</div>" + rows({ red: true }),
-        bar: bar({ secondary: true }), mark: "error"
+        body: head({ title: "i06.title.error", sub: false }) + '<div class="mt-4">' + I.fail(t("i07.panel"), { mono: D.ccx, btn: I.btn(t("i07.panel.btn"), { kind: "primary", icon: "file-search", key: "enter" }) }) + "</div>" + rows({ red: true }),
+        bar: bar(), mark: "error"
       };
     },
     long: function () { return { body: head() + next() + rows({ amber: true }), bar: bar(), scroll: "end" }; },

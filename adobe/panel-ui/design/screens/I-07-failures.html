@@ -29,8 +29,9 @@
    (D.support).
    States: one per card (checksum = not the genuine file, manifest = list not genuine, address = not on our list,
    dlfail = download stopped halfway, nointernet, diskfull, panel = Adobe did not install the panel, hostopen =
-   Premiere still open: save first), focus (keyboard on the fix), long (long file name, Arabic/space log path),
-   win (Windows chrome, Windows link). */
+   Premiere still open: save first), focus (keyboard on the fix), long (the panel card with a long file name),
+   win (Windows chrome, the download page). R2: no file names, no log path and no script address in a card; nointernet offers
+   "Get the offline installer"; support is one click (MOCK-VERIFY, owner decision D-05). */
 (function () {
   var t = I.T, D = I.D, st = I.state, win = I.os === "win";
   var KEYS = ["preflight", "engine", "claude"].concat(win ? ["gitbash"] : []).concat(["adobe", "fonts", "always_on", "models", "client", "doctor", "launch"]);
@@ -45,11 +46,11 @@
   }
   var fix = function (label, icon, f) { return I.btn(label, { kind: "primary", icon: icon, focus: f, key: "enter" }); };
   var C = {
-    checksum: { stop: "engine", card: function (f) { return I.fail(t("i07.checksum"), { safety: true, sub: t("i07.checksum.sub", { file: I.path(D.tools) }), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
-    manifest: { stop: "preflight", card: function (f) { return I.fail(t("i07.manifest"), { safety: true, sub: t("i07.manifest.sub"), mono: D.installLink, btn: fix(t("i06.copy"), "copy", f) }); } },
+    checksum: { stop: "engine", card: function (f) { return I.fail(t("i07.checksum"), { safety: true, sub: t("i07.checksum.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
+    manifest: { stop: "preflight", card: function (f) { return I.fail(t("i07.manifest"), { safety: true, sub: t("i07.manifest.sub"), mono: D.downloadPage, btn: fix(t("i07.manifest.btn"), "external-link", f) }); /* R2 D-P1-6: open the page, never copy a script address */ } },
     address: { stop: "engine", card: function (f) { return I.fail(t("i07.address"), { safety: true, sub: t("i07.address.sub", { host: I.path(D.badHost) }), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
     dlfail: { stop: "engine", card: function (f) { return I.fail(t("i07.dlfail"), { sub: t("i07.dlfail.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
-    nointernet: { stop: "engine", card: function (f) { return I.fail(t("i07.nointernet"), { kind: "warn", sub: t("i07.nointernet.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
+    nointernet: { stop: "engine", card: function (f) { return I.fail(t("i07.nointernet"), { kind: "warn", sub: t("i07.nointernet.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) + '<div class="ms-2">' + M.btn(t("i00.offline_get"), { icon: "external-link" }) + "</div>" }); } },
     diskfull: { stop: "models", card: function (f) { return I.fail(t("i07.diskfull", { gb: I.gb(2.5) }), { sub: t("i07.diskfull.sub", { free: I.gb(0.4), drive: I.ltr(D.drive) }), btn: fix(t("i00.check_again"), "refresh-cw", f) }); } },
     panel: { stop: "adobe", kind: "warn", card: function (f) { return I.fail(t("i07.panel"), { kind: "warn", mono: D.ccx, btn: fix(t("i07.panel.btn"), "file-search", f) }); } },
     hostopen: { stop: "adobe", kind: "warn", card: function (f) { return I.fail(t("i07.hostopen"), { kind: "warn", sub: t("i07.hostopen.sub"), btn: fix(t("i00.check_again"), "refresh-cw", f) }); } }
@@ -69,7 +70,7 @@
     build: function (state) {
       var v;
       if (state === "focus") v = view("checksum", true);
-      else if (state === "long") { D.tools = "ffmpeg-7.1-macos-arm64-full-build-with-every-codec-WhyNot-Cut-3.0.0.zip"; v = view("checksum"); v.scroll = "end"; }
+      else if (state === "long") { v = view("panel"); v.scroll = "end"; } /* the long Arabic / space file name (I.useLong) */
       else if (state === "win") v = view("manifest");
       else v = view(state);
       v.rail = { flow: "install", at: "install", mark: v.mark };
