@@ -483,6 +483,13 @@ class TestStableHostId(_Tmp):
 
 # ------------------------------------------------------------------------------------------- gpu-enable via uv
 class TestGpuEnableUv(_Tmp):
+    """gpu-enable's wheel fallback is the Windows path (cuBLAS pinned and hash-checked); macOS CI runs it as Windows."""
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(plat, "IS_WIN", True)
+        p.start()
+        self.addCleanup(p.stop)
+
     def run_gpu_enable(self, home: Path, pip_ok: bool, index_url=None):
         from lib import runtime
         cli = cli_module()

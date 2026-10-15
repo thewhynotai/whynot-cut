@@ -307,9 +307,10 @@ class TestPlatReadsSavedOptions(unittest.TestCase):
 
     def test_env_wins(self):
         write_pointer(self.user, engine_home="D:/p", clients_root="D:/c")
-        with mock.patch.dict(os.environ, {"WHYNOT_HOME": "D:/e", "WHYNOT_CLIENTS_ROOT": "D:/r"}):
-            self.assertEqual(plat.engine_home(), Path("D:/e"))
-            self.assertEqual(plat.clients_root_setting(), Path("D:/r"))
+        e, r = self.user / "e", self.user / "r"                       # absolute on every OS ("D:/e" is relative on macOS)
+        with mock.patch.dict(os.environ, {"WHYNOT_HOME": str(e), "WHYNOT_CLIENTS_ROOT": str(r)}):
+            self.assertEqual(plat.engine_home(), e)
+            self.assertEqual(plat.clients_root_setting(), r)
 
     def test_empty_pointer_means_unset(self):
         write_pointer(self.user)
