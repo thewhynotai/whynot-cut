@@ -284,7 +284,7 @@ class Worker(threading.Thread):
         unlink(p.started(jid))
         temp = Path(cfg["temp_root"]) / jid
         temp.mkdir(parents=True, exist_ok=True)
-        jenv = {"TEMP": str(temp), "TMP": str(temp), "TMPDIR": str(temp), "WNC_QUEUE_JOB": jid,
+        jenv = {"TEMP": str(temp), "TMP": str(temp), "TMPDIR": str(temp), "JOB_QUEUE_ID": jid,
                 "PYTHONIOENCODING": "utf-8"}          # logs are UTF-8; a job's env may override any of these
         jenv.update(job.get("env") or {})
         write_json(p.spec(jid), {"argv": argv, "cwd": job["cwd"], "env": jenv, "started_file": str(p.started(jid))})
@@ -304,7 +304,10 @@ class Worker(threading.Thread):
             cmd = inner
         # heavy.sh's bash gets the runner's own environment: the job env (PATH, BASH_ENV …) is applied by the
         # trampoline only, so a job can never change how heavy.sh measures RAM or takes its slot.
-        env = dict(os.environ, WNC_QUEUE_JOB=jid)
+        # No WNC_* name ever reaches a job: the product reserves that prefix (its tests assert no WNC_ variable
+        # reaches the engine), so the runner's marker is JOB_QUEUE_ID, and an inherited WNC_* is the runner's own.
+        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("WNC_")}
+        env["JOB_QUEUE_ID"] = jid
         pass_re = re.compile(job["pass_regex"]) if job.get("pass_regex") else None
         fail_re = re.compile(job["fail_regex"]) if job.get("fail_regex") else None
         match_re = re.compile(job["stop"]["regex"]) if job["stop"]["mode"] == "until_match" else None

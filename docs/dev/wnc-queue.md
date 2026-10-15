@@ -122,7 +122,9 @@ The keys are in reading order, so the first lines of the file are enough:
 - **cwd:** must be inside the repo, `D:\ClaudeData` or `D:\Claude`. TEMP and TMP point to
   `D:\ClaudeData\Temp\wnc-queue\<id>`.
 - **Env:** `--env` reaches only your command. heavy.sh always runs with the runner's own environment, so a job's PATH
-  can't change how heavy.sh measures RAM or takes its slot.
+  can't change how heavy.sh measures RAM or takes its slot. A job sees `JOB_QUEUE_ID=<id>`. No `WNC_*` variable
+  reaches a job unless you pass it with `--env`: the product reserves that prefix, and its wrapper tests fail on any
+  `WNC_*` name that reaches the engine.
 - **Long heavy runs:** heavy.sh takes over any slot older than 3 hours. While a job runs, the runner refreshes its slot
   every 10 minutes, so runs longer than 3 hours keep their slot.
 - **Kills:** a timeout, cancel or STOP kills only the job's own process tree (its Job Object), never another process.

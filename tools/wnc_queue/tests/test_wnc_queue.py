@@ -454,6 +454,18 @@ time.sleep(120)
         self.assertIn(f"T={Path(self.cfg['temp_root']) / j['id']}", log)
         self.assertIn("V=x y", log)
 
+    def test_no_wnc_variable_reaches_a_job(self):
+        """The product reserves WNC_* (its wrapper tests assert none reaches the engine): the runner's marker is
+        JOB_QUEUE_ID, and a WNC_* the runner itself inherited is dropped."""
+        from unittest import mock
+        j = self.job(["python", "-c", "import os; print('K=' + ','.join(sorted(k for k in os.environ "
+                      "if k.upper().startswith('WNC_')))); print('Q=' + os.environ['JOB_QUEUE_ID'])"])
+        with mock.patch.dict(os.environ, {"WNC_RUNNER_SIDE": "1"}):
+            self.run_runner()
+        log = Path(self.done(j["id"])["log"]).read_text(encoding="utf-8")
+        self.assertRegex(log, r"(?m)^K=\r?$")
+        self.assertIn(f"Q={j['id']}", log)
+
     def test_log_rotation_and_prune(self):
         self.cfg["max_log_mb"] = 0.05                                 # ~52 KB cap
         j = self.job(["python", "-c", "print(('x' * 99 + '\\n') * 3000)"])
