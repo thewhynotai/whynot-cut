@@ -3,7 +3,7 @@ the session that asked for it and the daemon that ran it.
 
     <home>/serve/jobs/<request_id>.json   one entry per request id (user-only folder, security.private_dir):
         {request_id, action, session_kind, route: cep|uxp, lane?, state, submitted_at, updated_at, job_id?, result?,
-         data_sha?, expires_at?}
+         data_sha?, expires_at?, seq, _t}
         state: received (routed) -> queued (its <jid>.job.json is in the CEP queue) -> claimed (the bridge took it) ->
                done | failed (the v4 result is stored) | interrupted (it can no longer finish: a stored ok:false result
                says why). A UXP-routed entry goes received -> done | failed | interrupted.
@@ -14,7 +14,11 @@ Rules:
   * every write is atomic (a private temp file in the same folder, then os.replace) and size-capped (ENTRY_MAX): an
     over-size result is replaced by its summary (ok, error, how; an ok:true readback becomes {} and the entry says
     result_truncated). The engine token never reaches an entry: nothing here is given it;
-  * retention (prune): entries older than KEEP_S (7 days) go, then all but the newest KEEP (200);
+  * one total order, newest first, for the snapshot, entries() and retention (_order): `seq`, the journal's own write
+    sequence (each new entry gets the next one; a restarted daemon resumes after the max on disk), so two entries
+    with the same clock reading never tie; an entry without `seq` (written before it existed) sorts after all that
+    have one, by `_t` then request id;
+  * retention (prune): entries older than KEEP_S (7 days) go, and of the rest only the newest KEEP (200) stay;
   * the snapshot shows summaries() (the newest SNAPSHOT_JOBS): request_id, action, state, the two instants and, once
     settled, result {ok, code?} (docs/adobe/eng-data-contract.md 2.6). No host text, no path, no data, no token.
 The CEP queue files are only READ here (lib/cep_queue.py owns them): find_job() matches a request to its queue job by
@@ -106,6 +110,25 @@ def summary(entry: dict) -> dict:
     return out
 
 
+def _seq_of(entry: dict) -> int | None:
+    """The entry's write sequence, or None for an entry written before `seq` existed (or a broken value)."""
+    seq = entry.get("seq")
+    return seq if isinstance(seq, int) and not isinstance(seq, bool) and seq >= 0 else None
+
+
+def _t_of(entry: dict) -> float:
+    t = entry.get("_t")
+    return float(t) if isinstance(t, (int, float)) and not isinstance(t, bool) else 0.0
+
+
+def _order(seq: int | None, t: float, rid: str) -> tuple:
+    """THE journal order, a total one (sorted with reverse=True = newest first). An entry's `seq` is the journal's own
+    write sequence (start() gives each new entry the next one; load() resumes after the max), so equal clock readings
+    never tie. An entry without one (written before `seq` existed) sorts after every entry that has one, by `_t` then
+    request id (unique: the file name)."""
+    return (1, seq, t, rid) if seq is not None else (0, 0, t, rid)
+
+
 def _shrunk(result: dict) -> dict:
     """An over-size result's summary: still a valid v4 result shape (ok:true keeps an empty readback)."""
     out = {k: result[k] for k in ("ok", "action", "id") if k in result}
@@ -125,8 +148,9 @@ class Journal:
     def __init__(self, home):
         self.dir = Path(home) / "serve" / "jobs"
         self._lock = threading.RLock()
-        self._index: dict[str, dict] = {}            # request id -> summary + "_t" (submitted, epoch)
+        self._index: dict[str, dict] = {}            # request id -> summary + "_t" (submitted, epoch) + "_seq"
         self._loaded = False
+        self._next_seq = 1                           # the next entry's write sequence (load() resumes after the max)
 
     # ------------------------------------------------------------------------------------------------ files
     def path(self, rid: str) -> Path:
@@ -182,14 +206,22 @@ class Journal:
             with contextlib.suppress(OSError):
                 tmp.unlink()
             raise
-        self._index[entry["request_id"]] = dict(summary(entry), _t=entry.get("_t", 0.0))
+        self._remember(entry)
         return entry
+
+    def _remember(self, entry: dict) -> None:
+        """Index one entry (its summary plus its order fields) and keep the next sequence past its own."""
+        seq = _seq_of(entry)
+        if seq is not None:
+            self._next_seq = max(self._next_seq, seq + 1)
+        self._index[entry["request_id"]] = dict(summary(entry), _t=_t_of(entry), _seq=seq)
 
     # ------------------------------------------------------------------------------------------------ entries
     def load(self) -> None:
         """Index every entry on disk (once; the daemon calls it at start through reconcile)."""
         with self._lock:
             self._index.clear()
+            self._next_seq = 1
             try:
                 files = list(self.dir.glob("*.json"))
             except OSError:
@@ -199,7 +231,7 @@ class Journal:
                     continue
                 doc = self._read(p)
                 if doc is not None:
-                    self._index[doc["request_id"]] = dict(summary(doc), _t=float(doc.get("_t") or 0.0))
+                    self._remember(doc)
             self._loaded = True
 
     def get(self, rid: str) -> dict | None:
@@ -214,7 +246,7 @@ class Journal:
             if not self._loaded:
                 self.load()
             out = [e for e in (self.get(rid) for rid in list(self._index)) if e is not None]
-        return sorted(out, key=lambda e: float(e.get("_t") or 0.0), reverse=True)
+        return sorted(out, key=lambda e: _order(_seq_of(e), _t_of(e), e["request_id"]), reverse=True)
 
     def start(self, rid: str, *, action: str, session_kind: str | None, route: str, lane: str | None = None,
               data=None, expires_at: str | None = None) -> dict:
@@ -229,6 +261,9 @@ class Journal:
         if expires_at:
             entry["expires_at"] = str(expires_at)[:64]
         with self._lock:
+            if not self._loaded:
+                self.load()                          # the sequence resumes after the entries already on disk
+            entry["seq"] = self._next_seq
             out = self._write(entry)
             self.prune()
             return out
@@ -254,8 +289,12 @@ class Journal:
         with self._lock:
             if not self._loaded:
                 self.load()
-            rows = sorted(self._index.values(), key=lambda s: s["_t"], reverse=True)[:max(0, n)]
-            return [{k: v for k, v in s.items() if k != "_t"} for s in rows]
+            rows = self._newest_first()[:max(0, n)]
+            return [{k: v for k, v in s.items() if k not in ("_t", "_seq")} for _, s in rows]
+
+    def _newest_first(self) -> list[tuple[str, dict]]:
+        """The index in THE journal order (snapshot and retention alike): _order, newest first."""
+        return sorted(self._index.items(), key=lambda kv: _order(kv[1]["_seq"], kv[1]["_t"], kv[0]), reverse=True)
 
     def prune(self, now: float | None = None) -> list[str]:
         """Retention: entries older than KEEP_S go, then all but the newest KEEP; stale temp files too."""
@@ -264,13 +303,15 @@ class Journal:
         with self._lock:
             if not self._loaded:
                 self.load()
-            rows = sorted(self._index.items(), key=lambda kv: kv[1]["_t"], reverse=True)
-            for i, (rid, s) in enumerate(rows):
-                if i >= KEEP or now - s["_t"] > KEEP_S:
+            kept = 0
+            for rid, s in self._newest_first():
+                if kept >= KEEP or now - s["_t"] > KEEP_S:
                     with contextlib.suppress(OSError, ValueError):
                         self.path(rid).unlink()
                     self._index.pop(rid, None)
                     gone.append(rid)
+                else:
+                    kept += 1
             with contextlib.suppress(OSError):
                 for tmp in self.dir.glob(".*.tmp"):
                     with contextlib.suppress(OSError):

@@ -143,6 +143,41 @@ class JournalFiles(unittest.TestCase):
         fresh = jobs.Journal(self.home)                             # a new daemon indexes what is left
         self.assertEqual(len(fresh.summaries(10_000)), jobs.KEEP)
 
+    def test_newest_first_is_a_total_order_even_when_timestamps_are_equal(self):
+        """Gate 3: a loaded machine gives two entries the same clock reading. The order is the journal's own write
+        sequence (seq), the same for the snapshot, entries() and retention, and it survives a daemon restart."""
+        frozen = ("2026-10-15T08:00:00.000+00:00", 1_791_964_800.0)
+        with mock.patch.object(jobs, "_now", return_value=frozen):
+            for rid in ("r-a", "r-b", "r-c", "r-d"):
+                self.j.start(rid, action="ping", session_kind="cli", route="uxp")
+            self.j.finish("r-a", {"ok": True, "action": "ping", "id": "r-a", "readback": {}})   # no reordering
+        order = ["r-d", "r-c", "r-b", "r-a"]
+        self.assertEqual([s["request_id"] for s in self.j.summaries()], order)
+        self.assertEqual([e["request_id"] for e in self.j.entries()], order)
+        fresh = jobs.Journal(self.home)                                 # a restarted daemon: same order
+        self.assertEqual([s["request_id"] for s in fresh.summaries()], order)
+        with mock.patch.object(jobs, "_now", return_value=frozen):
+            fresh.start("r-e", action="ping", session_kind="cli", route="uxp")   # continues after the max seq
+        self.assertEqual([s["request_id"] for s in fresh.summaries()][:2], ["r-e", "r-d"])
+        with mock.patch.object(jobs, "KEEP", 3):                        # retention drops the oldest by that order
+            gone = fresh.prune(frozen[1])
+        self.assertEqual(sorted(gone), ["r-a", "r-b"])
+        self.assertEqual([s["request_id"] for s in fresh.summaries()], ["r-e", "r-d", "r-c"])
+
+    def test_entries_without_a_sequence_sort_after_the_others_deterministically(self):
+        """Backward compatible: an entry written before `seq` existed sorts after every entry that has one, newest
+        `_t` first, then by request id."""
+        self.j.start("r-new", action="ping", session_kind="cli", route="uxp")
+        for rid, t in (("r-old-b", 100.0), ("r-old-a", 100.0), ("r-old-c", 50.0)):
+            doc = {"request_id": rid, "action": "ping", "session_kind": "cli", "route": "uxp", "state": "received",
+                   "submitted_at": "2026-10-01T00:00:00+00:00", "updated_at": "2026-10-01T00:00:00+00:00", "_t": t}
+            self.j.path(rid).write_text(json.dumps(doc), encoding="utf-8")
+        for j in (jobs.Journal(self.home), jobs.Journal(self.home)):
+            self.assertEqual([s["request_id"] for s in j.summaries()], ["r-new", "r-old-b", "r-old-a", "r-old-c"])
+        j = jobs.Journal(self.home)
+        j.start("r-next", action="ping", session_kind="cli", route="uxp")
+        self.assertEqual([s["request_id"] for s in j.summaries()][:2], ["r-next", "r-new"])
+
     def test_summaries_follow_the_session_schema_and_carry_no_host_text(self):
         self.j.start("r-a", action="build_project", session_kind="panel", route="cep", lane="premiere",
                      data={"project_path": "D:/secret/C0239.prproj"})
