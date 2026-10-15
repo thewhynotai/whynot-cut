@@ -25,6 +25,7 @@
    another drive when the system drive has < 30 GB free), the clients folder (not in iCloud/OneDrive), the NVIDIA
    libraries on Windows. NOT in the core yet: the login item, the "don't ask each time" permission, a per-model
    "fits the disk" flag, an external-drive flag.
+   R2: "Don't ask me each time Claude uses WhyNot Cut" is UNTICKED by default (D-P1-12); its line says what it skips (E-P2-17).
    E2.1 / G made visible: #1 everything under the user's folder, listed with where (I.adds); #4 the login item says
    where to turn it off; G11: Arabic letters, spaces and external drives work (info, not a warning).
    States: normal, focus (keyboard on the first model), scrolled (bottom: options and what Setup adds), tight (the
@@ -63,7 +64,7 @@
   function options() {
     return '<div class="i-sec" id="sec-options">' + M.eyebrow(t("i02.options")) + '<div class="m-col mt-2">' +
       M.checkbox(t("i02.login"), true) + I.sub(t(win ? "i02.login.win" : "i02.login.mac")) +
-      M.checkbox(t("i02.permission"), true) + I.sub(t("i02.permission.sub")) +
+      M.checkbox(t("i02.permission"), false) + I.sub(t("i02.permission.sub")) +
       (win ? M.checkbox(t("i02.gpu", { gb: I.gb(D.gpuGb) }), true) + I.sub(t("i02.gpu.sub", { gpu: I.ltr(D.gpu) })) : "") +
       "</div></div>";
   }
@@ -73,9 +74,11 @@
   }
   function bar(o) {
     o = o || {};
+    /* R2 D-P2-12: Back is the same ghost at the start as on I-03 and I-05; the total sits with the primary */
     return {
-      meta: '<div class="t-meta tx-muted">' + t("i02.total", { gb: I.gb(o.total || D.total) }) + "</div>",
-      end: I.btn(t("i00.back"), { key: "esc" }) + I.btn(t("i02.install"), { kind: "primary", icon: "download", disabled: o.disabled, key: "enter" })
+      start: I.btn(t("i00.back"), { kind: "ghost", flush: true, key: "esc" }),
+      end: '<div class="t-meta tx-muted me-3">' + t("i02.total", { gb: I.gb(o.total || D.total) }) + "</div>" +
+        I.btn(t("i02.install"), { kind: "primary", icon: "download", disabled: o.disabled, key: "enter" })
     };
   }
   var STATES = {
