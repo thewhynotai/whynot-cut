@@ -1129,6 +1129,164 @@ class TestPreviousProjectKept(_Home):
         self.assertFalse(r["previous_restored"])
 
 
+# ===================================================================================================== G2 H5
+class TestH5ErrorMarkerAndRestart(_Home):
+    """bridge.js (H2): a result it cannot write leaves `<id>.error` (the job file removed, no result); a restarted
+    bridge answers each leftover `<id>.running` {ok:false, error:"interrupted", reason:"bridge restarted"} (soon also
+    `claimed: true`). The engine's wait ends at once on the marker, and both count as claimed: the host ran the job and
+    may still be saving, so ppro_build keeps the previous project parked."""
+
+    TIMEOUT = 30.0          # the wait's own timeout; every answer below must come far sooner
+
+    def setUp(self):
+        super().setUp()
+        self.q.mkdir(parents=True, exist_ok=True)
+
+    def claimed_job(self, jid, error=None, result=None):
+        """A job the bridge claimed (its `.claimed`, the data file), then the files it leaves behind."""
+        (self.q / f"{jid}.data.json").write_text("{}", encoding="ascii")
+        (self.q / f"{jid}.claimed").write_text(json.dumps({"at": time.time() * 1000, "by": "daemon"}), encoding="utf-8")
+        if error is not None:
+            (self.q / f"{jid}.error").write_bytes(error)
+        if result is not None:
+            (self.q / f"{jid}.result.json").write_text(json.dumps(result), encoding="utf-8")
+
+    def wait(self, jid):
+        t = time.monotonic()
+        r = cep_queue._wait(self.q, jid, time.time(), self.TIMEOUT, self.TIMEOUT, 0.01, "Premiere")
+        return r, time.monotonic() - t
+
+    def test_the_error_marker_alone_fails_at_once_and_counts_as_claimed(self):
+        marker = json.dumps({"ok": False, "error": "result write failed", "at": 1}).encode()
+        self.claimed_job("J1", error=marker)
+        r, took = self.wait("J1")
+        self.assertLess(took, 5.0, r)
+        self.assertIs(r["ok"], False)
+        self.assertEqual(r["error"], "result write failed")
+        self.assertIs(r["claimed"], True)
+        self.assertEqual(r["job"], "J1")
+        self.assertIn("check the project", r["how"].lower())
+        self.assertEqual(self.leftovers(), [])                          # the marker goes with the other files
+
+    def test_an_empty_or_garbage_marker_still_fails(self):
+        for i, raw in enumerate([b"", b"{not json", b"\xff\xfe\x00", b"[1, 2]", b'"text"', b'{"ok": true}']):
+            with self.subTest(raw=raw):
+                jid = f"G{i}"
+                self.claimed_job(jid, error=raw)
+                r, took = self.wait(jid)
+                self.assertLess(took, 5.0, r)
+                self.assertIs(r["ok"], False)
+                self.assertEqual(r["error"], "result write failed")
+                self.assertIs(r["claimed"], True)
+                self.assertTrue(r["how"])
+                self.assertFalse((self.q / f"{jid}.error").exists())
+
+    def test_a_marker_that_appears_during_the_wait_ends_it(self):
+        self.claimed_job("J2")
+        (self.q / "J2.running").write_text("{}", encoding="utf-8")
+
+        def give_up():               # bridge.js giveUpResult: the marker first, then the job file goes
+            time.sleep(0.3)
+            (self.q / "J2.error").write_text(json.dumps({"ok": False, "error": "result write failed", "at": 1}),
+                                             encoding="utf-8")
+            (self.q / "J2.running").unlink()
+        th = threading.Thread(target=give_up)
+        th.start()
+        r, took = self.wait("J2")
+        th.join()
+        self.assertLess(took, 5.0, r)
+        self.assertIs(r["ok"], False)
+        self.assertIs(r["claimed"], True)
+
+    def test_a_real_result_wins_over_the_marker(self):
+        ok = {"ok": True, "result": json.dumps({"ok": True, "result": {"saved": True}}), "at": 1}
+        self.claimed_job("J3", error=b'{"ok": false, "error": "result write failed"}', result=ok)
+        r, _ = self.wait("J3")
+        self.assertIs(r["ok"], True, r)
+        self.assertNotIn("claimed", r)
+        self.assertEqual(r["response"], {"ok": True, "result": {"saved": True}})
+
+    def test_an_interrupted_result_counts_as_claimed_with_or_without_the_flag(self):
+        shapes = {"today": {"ok": False, "error": "interrupted", "reason": "bridge restarted", "at": 1},
+                  "follow-up": {"ok": False, "error": "interrupted", "reason": "bridge restarted", "claimed": True,
+                                "at": 1}}
+        for name, doc in shapes.items():
+            with self.subTest(shape=name):
+                jid = f"I-{name}"
+                self.claimed_job(jid, result=doc)
+                r, took = self.wait(jid)
+                self.assertLess(took, 5.0, r)
+                self.assertIs(r["ok"], False)
+                self.assertIs(r["claimed"], True, r)
+                self.assertIn("restarted", r["how"])
+                self.assertEqual(self.leftovers(), [])
+
+    def test_any_result_flagged_claimed_counts_as_claimed(self):
+        self.claimed_job("C1", result={"ok": False, "error": "something else", "claimed": True, "at": 1})
+        self.assertIs(self.wait("C1")[0]["claimed"], True)
+
+    def test_other_failures_are_still_not_claimed(self):
+        for i, doc in enumerate([{"ok": False, "error": "interrupted", "at": 1},          # not the restart reason
+                                 {"ok": False, "error": "script not whitelisted", "at": 1},
+                                 {"ok": False, "error": "x", "claimed": "yes", "at": 1}]):   # only a real True
+            with self.subTest(doc=doc):
+                self.claimed_job(f"N{i}", result=doc)
+                self.assertNotIn("claimed", self.wait(f"N{i}")[0])
+
+    def test_a_ctrl_c_cleanup_sees_both_as_claimed(self):
+        """submit's Ctrl-C path (`_bridge_has_job`) agrees: the host may still act on either job."""
+        self.claimed_job("K1", result={"ok": False, "error": "interrupted", "reason": "bridge restarted", "at": 1})
+        self.assertIs(cep_queue._bridge_has_job(self.q, "K1"), True)
+        (self.q / "K2.error").write_text("", encoding="utf-8")         # only the marker is left
+        self.assertIs(cep_queue._bridge_has_job(self.q, "K2"), True)
+
+    def test_the_sweeper_takes_a_day_old_marker(self):
+        old = time.time() - 2 * 86400
+        for n in ("a.error", "fresh.error"):
+            (self.q / n).write_text("{}", encoding="utf-8")
+        os.utime(self.q / "a.error", (old, old))
+        self.assertEqual(cep_queue.sweep(self.q), ["a.error"])
+        self.assertTrue((self.q / "fresh.error").exists())
+
+
+class TestH5PreviousProjectStaysParked(_Home):
+    """ppro_build through the real `_wait`: an error marker or a bridge-restart result leaves the previous project as
+    `_prev_` (Premiere may still save the new one at that path), never restored over it."""
+
+    DATA = TestPreviousProjectKept.DATA
+    run_build = TestPreviousProjectKept.run_build
+
+    def through_wait(self, files: dict):
+        def answer(prj):
+            q = self.q
+            q.mkdir(parents=True, exist_ok=True)
+            (q / "B1.claimed").write_text("{}", encoding="utf-8")
+            for name, body in files.items():
+                (q / name).write_text(body, encoding="utf-8")
+            return cep_queue._wait(q, "B1", time.time(), 30, 30, 0.01, "Premiere")
+        return answer
+
+    def assert_parked(self, r, prj):
+        self.assertEqual(r["status"], "FAILED", r)
+        self.assertFalse(prj.exists())
+        prev = list(prj.parent.glob("*_prev_*"))
+        self.assertEqual([x.read_text(encoding="utf-8") for x in prev], ["OLD"])
+        self.assertFalse(r["previous_restored"])
+        self.assertEqual(r["previous_version_backup"], str(prev[0]))
+        self.assertTrue(r.get("how"), r)
+
+    def test_an_error_marker_keeps_the_backup_parked(self):
+        self.assert_parked(*self.run_build(self.through_wait(
+            {"B1.error": json.dumps({"ok": False, "error": "result write failed", "at": 1})})))
+
+    def test_a_bridge_restart_keeps_the_backup_parked(self):
+        for doc in ({"ok": False, "error": "interrupted", "reason": "bridge restarted", "at": 1},
+                    {"ok": False, "error": "interrupted", "reason": "bridge restarted", "claimed": True, "at": 1}):
+            with self.subTest(doc=doc):
+                self.assert_parked(*self.run_build(self.through_wait({"B1.result.json": json.dumps(doc)})))
+                shutil.rmtree(self.tmp / "C")
+
+
 # ===================================================================================================== IM-6
 class SlateBridge:
     """export_frames stand-in: the first `pending_exports` exports come out as the Media pending slate."""

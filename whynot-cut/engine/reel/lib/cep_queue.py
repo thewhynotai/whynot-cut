@@ -25,7 +25,10 @@ Queue files (protocol 4; the contract v4 adapter, engine/reel/contract/, mirrors
                          so time spent waiting behind another job never counts against it.
     <id>.job.cancelled   the caller timed out before any claim and renamed the job: it never runs (then removed).
     <id>.result.json     {ok, result | error, at}, written atomically by the bridge; the caller deletes it, the data
-                         file and the claim marker once read.
+                         file and the claim marker once read. A restarted bridge answers each `<id>.running` it finds
+                         {ok: false, error: "interrupted", reason: "bridge restarted"} (maybe `claimed: true`): claimed.
+    <id>.error           {ok: false, error, at}: the bridge ran the job but could not write its result (3 retries).
+                         With no result file it means FAILED and claimed, whatever its content; a result file wins.
     .build.lock          {pid, pid_created, host, what, started_at, expires_at}: one build at a time per host app,
                          machine-wide (ppro-build, ppro-frames, motion-build); see `build_lock`.
 Anything else older than a day (a crashed run's leftovers) is removed by `sweep`, which every submit runs first.
@@ -53,7 +56,7 @@ LOCK_NAME = ".build.lock"
 # may take claim 900 s + result 900 s in the worst case (submit's two clocks), so a long wait can still end busy
 LOCK_WAIT_S = 1200.0
 _SWEEP_SUFFIXES = (".data.json", ".result.json", ".job.json", ".running", ".claimed", ".job.cancelled", ".tmp",
-                   ".result.tmp")
+                   ".result.tmp", ".error")
 
 
 def _iso_utc(t: float) -> str:
@@ -284,8 +287,8 @@ def _bridge_has_job(queue: Path, jid: str) -> bool:
         return False
     res_p = queue / f"{jid}.result.json"
     if res_p.exists():            # the bridge finished it (T2.15): nothing more will happen, the old project goes back,
-        return not _host_finished(res_p)    # unless that result is the bridge's own "no reply" timeout
-    if any((queue / f"{jid}.{s}").exists() for s in ("job.json", "claimed", "running")):
+        return not _host_finished(res_p)    # unless the bridge answered for the host ("no reply", "interrupted")
+    if any((queue / f"{jid}.{s}").exists() for s in ("job.json", "claimed", "running", "error")):
         return True
     _unlink(queue / f"{jid}.tmp", queue / f"{jid}.data.json")      # interrupted before the job file was renamed in
     return False
@@ -303,9 +306,27 @@ def _host_finished(res_p: Path) -> bool:
 
 
 def _host_finished_doc(r) -> bool:
-    """False for the bridge's own "no reply" timeout result (or anything that is not a result document)."""
-    err = r.get("error") if isinstance(r, dict) else None
-    return isinstance(r, dict) and not (isinstance(err, str) and err.startswith("no reply"))
+    """False for the bridge's own "no reply" timeout result, a result the bridge marks `claimed: true`, a restarted
+    bridge's "interrupted" (G2 H5: the host may still be saving), or anything that is not a result document."""
+    if not isinstance(r, dict):
+        return False
+    err = r.get("error")
+    return not ((isinstance(err, str) and err.startswith("no reply")) or r.get("claimed") is True
+                or (err == "interrupted" and r.get("reason") == "bridge restarted"))
+
+
+ERROR_MARKER_DEFAULT = "result write failed"
+
+
+def _error_marker(err_p: Path) -> str:
+    """The error text of a bridge `<id>.error` marker; its existence alone is a failure, so any unreadable, empty or
+    odd content gives the default."""
+    try:
+        doc = json.loads(err_p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ERROR_MARKER_DEFAULT
+    err = doc.get("error") if isinstance(doc, dict) else None
+    return err.strip()[:200] if isinstance(err, str) and err.strip() else ERROR_MARKER_DEFAULT
 
 
 CANCEL_TRIES, CANCEL_RETRY_S = 5, 0.1      # a Windows sharing lock on job.json passes within moments
@@ -330,7 +351,7 @@ def _cancel(queue: Path, jid: str) -> bool:
 
 def _wait(queue: Path, jid: str, t0: float, claim_s: float, timeout: float, poll_s: float, app: str) -> dict:
     res_p, job_p = queue / f"{jid}.result.json", queue / f"{jid}.job.json"
-    claim_p, run_p = queue / f"{jid}.claimed", queue / f"{jid}.running"
+    claim_p, run_p, err_p = queue / f"{jid}.claimed", queue / f"{jid}.running", queue / f"{jid}.error"
     claimed_at, checked = None, t0
     while True:
         now = time.time()
@@ -356,9 +377,26 @@ def _wait(queue: Path, jid: str, t0: float, claim_s: float, timeout: float, poll
                 out["error"] = r["error"]           # the bridge's own refusal (script not allowed, no reply)
             if not _host_finished_doc(r):
                 # Gate 2 B3: the bridge's own "no reply from <host>" timeout freed the queue while ExtendScript may
-                # still run and save: claimed, so ppro_build keeps the old project parked instead of restoring over it
+                # still run and save: claimed, so ppro_build keeps the old project parked instead of restoring over it.
+                # G2 H5: the same for a result flagged `claimed: true` and a restarted bridge's "interrupted"
                 out["claimed"] = True
+            if r.get("error") == "interrupted" and r.get("reason") == "bridge restarted":
+                out["how"] = (f"The bridge restarted while {app} was working on this job, so its answer was lost. "
+                              f"{app} may still be finishing or saving it: check the project in {app} before you "
+                              "run the command again.")
+            _unlink(err_p)              # a leftover marker next to a real result: the result wins
             return out
+        if err_p.exists():
+            # G2 H5: the bridge ran the job but could not write its result (bridge.js giveUpResult): failed now, not at
+            # the timeout; claimed, since the host did the work and may have saved, so nothing is restored over it
+            err = _error_marker(err_p)
+            if res_p.exists():          # the result landed after all (it wins): read it on the next pass
+                continue
+            _unlink(err_p, claim_p, queue / f"{jid}.data.json")
+            return {"ok": False, "error": err,
+                    "how": f"{app} may have finished the work, but the bridge could not write its answer. Check the "
+                           f"project in {app} before you run the command again.",
+                    "claimed": True, "error_marker": True, "elapsed_s": round(time.time() - t0, 1), "job": jid}
         if claimed_at is None:
             if claim_p.exists() or run_p.exists() or not job_p.exists():
                 claimed_at = now                    # (no job file and no result yet: claimed this instant)
