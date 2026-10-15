@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,aspect-4x5,focus,error,offline,no-claude,stale,success,long">
-<meta name="mock-keys" content="Arrow keys: move between frames (reading order, mirrored in Arabic); Enter or Space: move the playhead to the focused frame; R: Re-export the focused not-checked frame; Cmd/Ctrl+Enter: the violet button of a card on top (Try again / Start the service / Open Claude / Export frames); Esc: dismiss a card; Tab order: count chips are not focusable, frames in reading order, Request changes, Export frames">
+<meta name="mock-states" content="empty,loading,normal,aspect-4x5,focus,fixing,error,offline,no-claude,stale,success,long">
+<meta name="mock-keys" content="Arrow keys: move between frames (reading order, mirrored in Arabic); Enter or Space: move the playhead to the focused frame; R: Re-export the focused not-checked frame; Cmd/Ctrl+Enter: the violet button (the failed frame's Fix this, or the card on top: Try again / Start the service / Sign in to Claude / Export frames, or Open project when all pass); Esc: dismiss a card; Tab order: count chips are not focusable, frames in reading order (failed first), Export frames">
 <meta name="mock-motion" content="Frame hover/focus: border colour 150 ms ease; a verdict arriving: the verdict icon and word cross-fade 200 ms and the still fades in 200 ms over its dark well (static fallback: instant); the media-pending loader rotates 900 ms linear (static fallback: still); skeleton tiles shimmer 1200 ms linear (static fallback: flat #242424 boxes of the exact still size). Tiles never change size when a verdict lands.">
 <title>P-08 QC frames</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -15,26 +15,29 @@
 <script src="../mockup.js"></script>
 <script src="../js/premiere-core.js"></script>
 </head>
+>
 <body>
 <script>
-/* P-08 QC frames (screen-inventory.md §3 P-08). Edit tab.
-   - Tiles in rows of 2 (300, 360) or 3 (480), built with flex rows (no two-dimensional layout module in UXP). A tile is
-     a control (tap = move the playhead): solid #141414, 2 px rest border, radius 8. The still follows the frame's
-     aspect (9:16 default, 4:5 in aspect-4x5); its height is set in px per width.
-   - Each tile: the still, the timecode (LTR), the verdict as icon + word, and the label in full (never cut).
-   - All four verdicts: Pass, Fail (error border), Pending (Re-export, the one primary), Media pending (no button).
-   - A failed tile is fixed through Request changes (inventory §7 #23).
-   - offline: tiles stay, tapping and Re-export disabled. stale: a tile whose file is gone. success: all passed. */
+/* P-08 QC frames (screen-inventory.md §3 P-08; R2 fix list). Edit tab.
+   - Tiles in rows of 2 (300, 360) or 3 (480), built with flex rows. A tile is the shell's M.tile (a control: tap = move
+     the playhead) and its still is M.media (9:16, or 4:5 in aspect-4x5). The still is a drawn mock frame (colour scene,
+     head and shoulders, caption bars); a missing frame uses the clapperboard / image-off glyph, never a person.
+   - R2: failed frames are listed FIRST. A failed frame shows the safe-area outline and the offending caption box, and has
+     its own "Fix this" (it asks Claude for a new version); that button takes the violet. Re-export is secondary.
+   - R2 G-F-18: the chips say who acts: "Needs your editor" (fail) and "Claude is fixing" (after Fix this).
+   - R2 D-P1-2: a frame whose file is gone counts as "missing", not "fail".
+   - success: all passed; the strip advances to step 7 "Ready for you" and Open project is the violet.
+   - offline: tiles stay, tapping and the buttons are off. no-claude: the shell's Claude card; Fix this is off with the reason. */
 (function () {
   var t = M.t, D = M.D;
+  var WARN = { kind: "warn", text: t("pill.check") };
   function code(s) { return PC.code(s); }
   var COLS = M.w >= 480 ? 3 : 2;
   var CONTENT = M.w - (M.w === 300 ? 24 : 32);
   var TILE = Math.floor((CONTENT - 8 * (COLS - 1)) / COLS);
   var THUMB_W = TILE - 16;
-  var TONES = ["", " pc-thumb-b", " pc-thumb-c", " pc-thumb-d"];
-  var VERDICT = { pass: ["ok", "p08.pass", "tx-ok"], fail: ["error", "p08.fail", "tx-error"], pending: ["pending", "p08.pending", "tx-muted"],
-    media: ["warn", "p08.media_pending", "tx-warn"], gone: ["error", "p08.gone", "tx-error"] };
+  var VERDICT = { pass: ["ok", "p08.pass", "tx-ok"], fail: ["error", "p08.fail", "tx-error"], fixing: ["busy", "p08.fixing", "tx-text"], pending: ["pending", "p08.pending", "tx-muted"],
+    media: ["pending", "p08.media_pending", "tx-muted"], gone: ["warn", "p08.gone", "tx-warn"] };
 
   var FRAMES = [
     { tc: "00:00:01:00", v: "pass", l: "p08.l.hook" },
@@ -44,53 +47,57 @@
     { tc: "00:00:31:20", v: "media", l: "p08.l.check" },
     { tc: "00:00:51:04", v: "pass", l: "p08.l.end" }
   ];
-
-  function thumb(i, f, h) {
-    if (f.v === "gone") return '<div class="pc-thumb pc-thumb-gone" style="height:' + h + 'px">' + M.ico("image-off", 20, "ink-muted") + "</div>";
-    if (f.v === "media") return '<div class="pc-thumb pc-thumb-wait" style="height:' + h + 'px">' + M.status("busy", 20) + "</div>";
-    var w1 = Math.round(THUMB_W * 0.8), w2 = Math.round(THUMB_W * 0.55);
-    return '<div class="pc-thumb' + TONES[i % 4] + '" style="height:' + h + 'px">' +
-      '<span class="pc-cap" style="width:' + w1 + 'px"></span><span class="pc-cap pc-cap-2" style="width:' + w2 + 'px"></span></div>';
+  /* failed frames first, the rest in time order */
+  function sorted(frames) {
+    var rank = function (f) { return f.v === "fail" || f.v === "fixing" ? 0 : 1; };
+    return frames.map(function (f, i) { return { f: f, i: i }; }).sort(function (a, b) { return rank(a.f) - rank(b.f) || a.i - b.i; }).map(function (x) { return x.f; });
+  }
+  function still(i, f, h) {
+    var o = { kind: "frame", h: h };
+    if (f.v === "gone") o.gone = true;
+    else if (f.v === "media") o.wait = true;
+    else o.inner = PC.scene(i, THUMB_W, { safe: f.v === "fail" || f.v === "fixing", bad: f.v === "fail" });
+    return M.media(o);
   }
   function tile(i, f, o) {
     var v = VERDICT[f.v], dis = o.disabled;
     var h = Math.round(THUMB_W * (o.aspect === "4x5" ? 5 / 4 : 16 / 9));
-    var cls = "pc-tile" + (f.v === "fail" ? " pc-tile-fail" : "") + (dis ? " pc-tile-disabled" : "") + (o.focus === i ? " pc-tile-focus" : "");
-    var aria = M.esc(M.raw("frame.seek") || "");
+    var head = still(i, f, h) + '<div class="t-mono tx-muted mt-2">' + M.mono(f.tc) + "</div>" +
+      '<div class="m-row mt-1">' + M.status(v[0], 12) + '<span class="t-caption ' + v[2] + ' ms-1">' + t(v[1]) + "</span></div>";
+    var html = M.tile({ media: head, label: t(f.l), reason: f.v === "media" ? t("p08.media.sub") : "", fail: f.v === "fail" || f.v === "fixing", focus: o.focus === i, disabled: dis });
     var btn = "";
-    if (f.v === "pending") btn = '<div class="m-col mt-2">' + PC.kbtn(t("p08.reexport"), "R", { kind: o.noPrimary ? "secondary" : "primary", icon: "refresh-cw", disabled: dis }) + "</div>";
-    return '<div class="' + cls + '" role="button"' + (dis ? ' aria-disabled="true" tabindex="-1"' : ' tabindex="0"') + ">" + thumb(i, f, h) +
-      '<div class="t-mono tx-muted mt-2">' + M.mono(f.tc) + "</div>" +
-      '<div class="m-row mt-1">' + M.status(v[0], 12) + '<span class="t-caption ' + v[2] + ' ms-1">' + t(v[1]) + "</span></div>" +
-      '<div class="t-meta mt-1">' + t(f.l) + "</div>" +
-      (f.v === "media" ? '<div class="t-meta tx-muted">' + t("p08.media.sub") + "</div>" : "") + btn + "</div>";
+    if (f.v === "fail") btn = '<div class="m-col mt-2">' + M.btn(t("p08.fix"), { kind: o.fixPrimary && !dis && !o.noClaude ? "primary" : "secondary", icon: "message-square", disabled: dis || o.noClaude, kbd: o.fixPrimary && !dis && !o.noClaude }) + "</div>";
+    if (f.v === "pending") btn = '<div class="m-col mt-2">' + PC.kbtn(t("p08.reexport"), "R", { icon: "refresh-cw", disabled: dis }) + "</div>";
+    return btn ? html.replace(/<\/div>$/, btn + "</div>") : html;
   }
   function tiles(frames, o) {
     o = o || {};
-    var out = "";
-    for (var i = 0; i < frames.length; i += COLS) {
+    var fr = sorted(frames), out = "";
+    for (var i = 0; i < fr.length; i += COLS) {
       var row = "";
-      for (var j = 0; j < COLS; j++) row += frames[i + j] ? tile(i + j, frames[i + j], o) : '<span class="pc-tile-fill"></span>';
+      for (var j = 0; j < COLS; j++) row += fr[i + j] ? tile(i + j, fr[i + j], o) : '<span class="pc-tile-fill"></span>';
       out += '<div class="pc-tilerow">' + row + "</div>";
     }
     return '<div class="pc-tiles mt-4">' + out + "</div>";
   }
-  function head(frames) {
-    var n = { pass: 0, fail: 0, pending: 0 };
-    frames.forEach(function (f) { if (f.v === "pass") n.pass++; else if (f.v === "fail" || f.v === "gone") n.fail++; else n.pending++; });
+  function head(frames, strip) {
+    var n = { pass: 0, fail: 0, fixing: 0, pending: 0, gone: 0 };
+    frames.forEach(function (f) { if (f.v === "pass") n.pass++; else if (f.v === "fail") n.fail++; else if (f.v === "fixing") n.fixing++; else if (f.v === "gone") n.gone++; else n.pending++; });
     var chips = [M.chip("ok", t("p08.counts.pass", { n: n.pass }), "circle-check")];
     if (n.fail) chips.push(M.chip("error", t("p08.counts.fail", { n: n.fail }), "circle-x"));
+    if (n.fixing) chips.push(M.chip("info", t("p08.counts.fixing", { n: n.fixing }), "loader-circle"));
+    if (n.gone) chips.push(M.chip("warn", t("p08.counts.missing", { n: n.gone }), "image-off"));
     if (n.pending) chips.push(M.chip("neutral", t("p08.counts.pending", { n: n.pending }), "circle-dashed"));
-    return M.steps(["done", "done", "done", "done", "done", "run", "pend"], 5, "busy") +
+    return (strip || M.steps(["done", "done", "done", "done", "done", "run", "pend"], 5, "busy")) +
       M.eyebrow(t("p08.section"), "mt-5") + '<div class="t-title mt-1">' + t("p08.title", { item: code(D.item) }) + "</div>" +
       '<div class="t-meta tx-muted mt-1">' + t("p08.hint") + "</div>" +
-      (n.pending ? '<div class="mt-1">' + PC.trust(t("p08.reexport.trust")) + "</div>" : "") +
+      (n.pending ? '<div class="mt-1">' + M.trust(t("p08.reexport.trust")) + "</div>" : "") +
       '<div class="pc-model-acts">' + chips.map(function (c) { return '<div class="m-row me-2 mt-2">' + c + "</div>"; }).join("") + "</div>";
   }
   function failCard(o) {
     o = o || {};
     return M.card('<div class="m-row-top">' + M.status("error") + '<div class="t-body ms-2 m-grow">' + t("p08.fail_hint") + "</div></div>" +
-      PC.acts([M.btn(t("p08.request"), { icon: "message-square", disabled: o.disabled || o.noClaude }), M.btn(t("p08.export"), { kind: "ghost", icon: "film", disabled: o.disabled })]) +
+      PC.acts([M.btn(t("p08.export"), { kind: "ghost", icon: "film", flush: true, disabled: o.disabled })]) +
       (o.noClaude ? '<div class="t-meta tx-muted mt-1">' + t("p08.no_claude") + "</div>" : ""), "mt-4");
   }
   function slot(n) { return n + '<div class="mt-4"></div>'; }
@@ -101,52 +108,57 @@
         M.empty({ icon: "image-off", title: t("p08.empty"), text: t("p08.empty.text") }) };
     },
     loading: function () {
-      var h = Math.round(THUMB_W * 16 / 9), sk = [];
-      for (var i = 0; i < COLS * 2; i++) sk.push(1);
+      var h = Math.round(THUMB_W * 16 / 9);
       var out = "";
       for (var r = 0; r < 2; r++) {
         var row = "";
-        for (var j = 0; j < COLS; j++) row += '<div class="pc-tile pc-tile-disabled"><span class="pc-skel-thumb" style="height:' + h + 'px"></span><div class="mt-2">' + M.skel(70, 16) + M.skel(40, 16) + M.skel(85, 16) + "</div></div>";
+        for (var j = 0; j < COLS; j++) row += M.tile({ disabled: true, media: '<span class="m-skel-block" style="height:' + h + 'px"></span><div class="mt-2">' + M.skel(70, 16) + M.skel(40, 16) + M.skel(85, 16) + "</div>" });
         out += '<div class="pc-tilerow">' + row + "</div>";
       }
       return { body: M.steps(["done", "done", "done", "done", "run", "pend", "pend"], 4, "busy") + M.eyebrow(t("p08.section"), "mt-5") +
         '<div class="mt-1">' + M.skel(60, 28) + "</div>" + M.skel(70, 16) + '<div class="pc-tiles mt-4">' + out + "</div>" };
     },
-    normal: function () { return { body: head(FRAMES) + tiles(FRAMES) + failCard() }; },
-    "aspect-4x5": function () { return { body: head(FRAMES) + tiles(FRAMES, { aspect: "4x5" }) + failCard() }; },
-    focus: function () { return { body: head(FRAMES) + tiles(FRAMES, { focus: 1 }) + failCard() }; },
+    normal: function () { return { status: WARN, body: head(FRAMES) + tiles(FRAMES, { fixPrimary: true }) + failCard() }; },
+    "aspect-4x5": function () { return { status: WARN, body: head(FRAMES) + tiles(FRAMES, { aspect: "4x5", fixPrimary: true }) + failCard() }; },
+    focus: function () { return { status: WARN, body: head(FRAMES) + tiles(FRAMES, { focus: 0, fixPrimary: true }) + failCard() }; },
+    fixing: function () {
+      var fr = FRAMES.map(function (f) { return f.v === "fail" ? { tc: f.tc, v: "fixing", l: f.l } : f; });
+      return { status: { kind: "busy", text: t("p08.fixing") }, body: head(fr) + tiles(fr) + failCard() };
+    },
     error: function () {
-      return { body: slot(PC.notice("error", t("p08.failed", { item: code(D.item) }), { sub: t("p08.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
-        head(FRAMES) + tiles(FRAMES, { noPrimary: true }) + failCard() };
+      return { body: slot(M.notice("error", t("p08.failed", { item: code(D.item) }), { sub: t("p08.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
+        head(FRAMES) + tiles(FRAMES) + failCard() };
     },
     offline: function () {
       return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: slot(PC.notice("error", t("engine.off"), { sub: t("p08.offline_hint"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
-          head(FRAMES) + tiles(FRAMES, { disabled: true }) + failCard({ disabled: true }) };
+        body: slot(M.offline({ hintKey: "p08.offline_hint" })) + head(FRAMES) + tiles(FRAMES, { disabled: true }) + failCard({ disabled: true }) };
     },
     "no-claude": function () {
-      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
-        body: slot(PC.noClaude()) + head(FRAMES) + tiles(FRAMES, { noPrimary: true }) + failCard({ noClaude: true }) };
+      return { pills: { claude: "signed_out" },
+        body: slot(M.noClaude("signed_out")) + head(FRAMES) + tiles(FRAMES, { noClaude: true, fixPrimary: true }) + failCard({ noClaude: true }) };
     },
     stale: function () {
-      var fr = FRAMES.slice(); fr[1] = { tc: "00:00:09:12", v: "gone", l: "p08.l.bar" };
-      return { body: slot(PC.notice("info", t("p08.bad_frame", { tc: M.html(M.mono("00:00:09:12")) }), { sub: t("p08.bad_frame.sub"), btn: { label: t("p08.export"), icon: "film", primary: true } })) +
-        head(fr) + tiles(fr, { noPrimary: true }) + failCard() };
+      var fr = FRAMES.map(function (f) { return f.v === "fail" ? { tc: f.tc, v: "pass", l: f.l } : f; });
+      fr[1] = { tc: "00:00:09:12", v: "gone", l: "p08.l.bar" };
+      return { body: slot(M.notice("info", t("p08.bad_frame", { tc: M.html(M.mono("00:00:09:12")) }), { sub: t("p08.bad_frame.sub"), btn: { label: t("p08.export"), icon: "film", primary: true } })) +
+        head(fr) + tiles(fr) };
     },
     success: function () {
       var fr = FRAMES.map(function (f) { return { tc: f.tc, v: "pass", l: f.l }; });
-      return { body: slot(PC.notice("ok", t("p08.all_pass"))) + head(fr) + tiles(fr) +
+      return { body: slot(M.notice("ok", t("p08.all_pass"))) + head(fr, M.steps(["done", "done", "done", "done", "done", "done", "done"], 6, "ok")) + tiles(fr) +
+        '<div class="m-col mt-4">' + PC.kbtn(t("p06.open"), "enter", { kind: "primary", block: true, icon: "external-link" }) + "</div>" +
+        '<div class="t-meta tx-muted mt-2">' + t("p06.open_note") + "</div>" +
         PC.acts([M.btn(t("p08.export"), { kind: "ghost", icon: "film", flush: true })], "mt-2") };
     },
     long: function () {
       var fr = FRAMES.slice(); fr[1] = { tc: "00:00:09:12", v: "pass", l: "p08.l.long" };
-      return { body: head(fr) + tiles(fr) + failCard() };
+      return { status: WARN, body: head(fr) + tiles(fr, { fixPrimary: true }) + failCard() };
     }
   };
 
   PC.mount({
     id: "P-08", name: "QC frames",
-    states: ["empty", "loading", "normal", "aspect-4x5", "focus", "error", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
+    states: ["empty", "loading", "normal", "aspect-4x5", "focus", "fixing", "error", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.tab = "edit";

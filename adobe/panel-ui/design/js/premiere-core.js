@@ -1,15 +1,15 @@
-/* WhyNot Cut 3.0 E-D2: helpers for the Premiere core group (P-02, P-04 to P-12, P-21, P-22). Loaded after
+/* WhyNot Cut 3.0 E-D2, round 2: helpers for the Premiere core group (P-02, P-04 to P-12, P-21, P-22). Loaded after
    ../mockup.js and ../strings/premiere-core.js. Emits only markup the UXP kit can paint (div role=button controls,
-   <span> chips, inline SVG coloured by .ink-* classes, physical margins). Components marked SHARED are proposed for
-   promotion into mockup.js:
-   - PC.notice: M.notice plus a disabled / busy fix button (P-11 "working") and a primary/secondary choice;
-   - PC.dialog: the confirm dialog (G6) with or without backup;
-   - PC.logBody: the open log drawer (G7), shown only in Settings > Details for support (G2-r1 owner decision e);
-   - PC.mount after-mount patch: pill values the shell's map lacks;
-   - PC.key / PC.kbtn: keycaps through the shell's M.kbd; PC.trust / PC.saved: trust and time-saved lines; PC.noClaude;
-   - PC.pill: header pill values the shell's PILL map does not carry yet (Claude not installed / update / working /
-     waiting), patched after M.mount;
-   - PC.back, PC.row, PC.pick, PC.radio, PC.monobox, PC.acts, PC.indet. */
+   <span> chips, inline SVG coloured by .ink-* classes, physical margins).
+   R2: everything the shell now owns is used from M (notice, slot, offline / noClaude / stale / noNet, dialog, radio,
+   tile / media, listrow, stages, bullet, back, trust / saved, logline, path / mid). What is left here is group-only:
+   - PC.code / PC.title / PC.acts: an item code in a sentence, title + sub, a wrapping row of buttons (280 px safe);
+   - PC.pick: the selectable list row of the client and clip pickers (a control, not a plain row);
+   - PC.key / PC.kbtn / PC.k: keycaps through the shell's M.kbd (never on a danger button: M.btn refuses it);
+   - PC.info / PC.iconrow: an info line and an icon + sentence row built on the shell's .m-saved row;
+   - PC.checkbox: a checkbox row that can be disabled; PC.scene: the mock video frame drawn inside M.media;
+   - PC.indet: the indeterminate progress bar (G9);
+   - PC.mount: the pill values the shell's map lacks (view.pillx). */
 (function () {
   "use strict";
   var M = window.M, t = M.t;
@@ -17,35 +17,21 @@
   var PC = (window.PC = { state: q.get("state"), D: window.PC_DATA });
   if (PC.state === "long") for (var k in PC.D.long) PC.D[k] = PC.D.long[k];
 
-  /* back link: a ghost button with the arrow that points to the start of the reading direction */
-  PC.back = function (label) {
-    return '<div class="pc-back">' + M.btn(label, { kind: "ghost", icon: M.rtl ? "arrow-right" : "arrow-left", flush: true }) + "</div>";
-  };
-  /* an item code inside a sentence: the UI face (Syne's zero reads as "o"); short codes never break */
-  /* long names get soft breaks after _ - . so they wrap at a separator, not mid-word */
-  function soft(s) { return M.esc(s).replace(/([_.\-])/g, "$1<wbr>"); }
+  /* a long file name breaks only at "_" (R2 designer P2-9); a short code never breaks. In a sentence only. */
+  function soft(s) { return M.esc(s).replace(/(_)/g, "$1<wbr>"); }
   PC.code = function (s) {
     return String(s).length <= 12 ? M.html(M.ltr(s, "lat code pc-nb")) : M.html('<bdi dir="ltr" class="lat code pc-cw">' + soft(s) + "</bdi>");
   };
-  /* a mono name inside a sentence that may be long (sequence, file): wraps at a separator, mid-word only when one part is wider than the line */
-  PC.monoWrap = function (s) { return M.html('<bdi dir="ltr" class="mono pc-wrap">' + soft(s) + "</bdi>"); };
+  /* a name in a row that must stay on one line: middle ellipsis keeps the start and the end */
+  PC.name = function (s, max) { return M.html(M.ltr(M.mid(String(s), max || 22), "lat code pc-nb")); };
   PC.title = function (title, sub) {
     return '<div class="t-title">' + title + "</div>" + (sub ? '<div class="t-body tx-muted mt-1">' + sub + "</div>" : "");
-  };
-  /* a path or file name the editor reads: mono, LTR, wraps anywhere, never cut */
-  PC.monobox = function (s, cls) {
-    return '<div class="m-inset ' + (cls || "") + '"><bdi dir="ltr" class="mono pc-wrap">' + soft(s) + "</bdi></div>";
   };
   /* buttons that wrap to a second line instead of overflowing (280 px safe) */
   PC.acts = function (btns, cls) {
     return '<div class="pc-model-acts ' + (cls || "") + '">' + btns.map(function (b) { return '<div class="m-row me-2 mt-2">' + b + "</div>"; }).join("") + "</div>";
   };
-  /* static info row: icon html, title, sub, end html */
-  PC.row = function (ico, title, sub, end, cls) {
-    return '<div class="pc-row ' + (cls || "") + '">' + ico + '<div class="pc-row-text"><div class="t-label">' + title + "</div>" +
-      (sub ? '<div class="t-meta tx-muted">' + sub + "</div>" : "") + "</div>" + (end ? '<div class="pc-row-end">' + end + "</div>" : "") + "</div>";
-  };
-  /* selectable row (control): o = {icon, title, sub, sub2, on, disabled, focus, end, chev} */
+  /* selectable row (control): o = {icon, title, sub, sub2, on, disabled, focus, end} */
   PC.pick = function (o) {
     var cls = "pc-pick" + (o.disabled ? " pc-pick-disabled" : o.on ? " pc-pick-on" : "") + (o.focus ? " pc-pick-focus" : "");
     var ink = o.disabled ? "ink-disabled" : o.on ? "ink-text" : "ink-muted";
@@ -56,74 +42,25 @@
       (o.sub ? '<div class="t-meta tx-muted">' + o.sub + "</div>" : "") + (o.sub2 ? '<div class="t-meta tx-muted">' + o.sub2 + "</div>" : "") + "</div>" +
       (end ? '<div class="pc-pick-chev">' + end + "</div>" : "") + "</div>";
   };
-  PC.radio = function (label, sub, on, o) {
-    o = o || {};
-    var cls = "pc-radio" + (o.disabled ? " pc-radio-disabled" : "") + (o.focus ? " pc-radio-focus" : "");
-    return '<div class="' + cls + '" role="radio" aria-checked="' + !!on + '"' + (o.disabled ? ' aria-disabled="true" tabindex="-1"' : ' tabindex="0"') + ">" +
-      '<span class="pc-dot' + (on ? " pc-dot-on" : "") + '">' + (on ? '<span class="pc-dot-in"></span>' : "") + "</span>" +
-      '<div class="pc-row-text"><div class="t-label">' + label + "</div>" + (sub ? '<div class="t-meta tx-muted">' + sub + "</div>" : "") + "</div></div>";
+  /* an info line (12 px info icon + meta), and an icon + sentence row (the shell's .m-saved row) */
+  PC.info = function (html, cls) {
+    return '<div class="m-saved ' + (cls || "") + '">' + M.status("info") + '<div class="t-meta tx-muted ms-2 m-grow">' + html + "</div></div>";
   };
-  /* a trust line ("what this creates or changes; what stays untouched") or a time-saved line: 12 px icon + meta */
-  PC.trust = function (html, icon, ink, cls) {
-    return '<div class="pc-trust ' + (cls || "") + '"><div class="m-last-ico">' + M.ico(icon || "circle-check", 12, ink || "ink-ok") + '</div>' +
-      '<div class="t-meta tx-muted ms-1 m-grow">' + html + "</div></div>";
+  PC.iconrow = function (iconHtml, html, cls) {
+    return '<div class="m-saved ' + (cls || "") + '">' + iconHtml + '<div class="t-body ms-2 m-grow">' + html + "</div></div>";
   };
-  PC.saved = function (html, cls) { return PC.trust(html, "clock", "ink-info", cls); };
-  /* the no-Claude card (Addendum G2 state): one plain sentence, whose account / what it costs / what it reads, one
-     button. o = {signedOut, primary, sub} */
-  PC.noClaude = function (o) {
+  /* checkbox row; the shell's M.checkbox has no disabled form */
+  PC.checkbox = function (label, checked, o) {
     o = o || {};
-    return PC.notice("warn", t(o.signedOut ? "p02.claude.signed_out" : "p02.claude.closed"), {
-      sub: o.sub || t("p02.claude.why"),
-      btn: { label: t("action.open_claude"), icon: o.signedOut ? "log-in" : "external-link", primary: o.primary !== false }, dismiss: false });
+    return '<div class="m-checkrow' + (o.focus ? " m-btn-focus" : "") + (o.disabled ? " pc-chk-dis" : "") + '" role="checkbox"' +
+      (o.disabled ? ' aria-disabled="true" tabindex="-1"' : ' tabindex="0"') + ' aria-checked="' + !!checked + '">' +
+      '<span class="m-box' + (checked ? " m-box-on" : "") + '">' + (checked ? M.ico("check", 16, o.disabled ? "ink-disabled" : "ink-on-light") : "") + "</span>" +
+      '<div class="t-label ms-2 m-grow' + (o.disabled ? " tx-disabled" : "") + '">' + label + "</div></div>";
   };
   /* indeterminate progress (G9) */
   PC.indet = function () { return '<span class="pc-indet"></span>'; };
 
-  /* notice / error card (G5) with a disabled or busy button. o = {sub, btn: {label, icon, primary, disabled, busy, focus}, dismiss} */
-  PC.notice = function (kind, text, o) {
-    o = o || {};
-    var body = '<div class="t-body tx-text">' + text + "</div>";
-    if (o.sub) body += '<div class="t-meta tx-muted mt-1">' + o.sub + "</div>";
-    if (o.extra) body += o.extra;
-    if (o.btn) {
-      var b = o.btn;
-      var kk = b.key === undefined ? (b.primary ? "enter" : "") : b.key;
-      var bo = { kind: b.primary ? "primary" : "secondary", icon: b.busy ? "busy" : b.icon, disabled: b.disabled || b.busy, focus: b.focus };
-      body += '<div class="m-row mt-3">' + (kk ? PC.kbtn(b.label, kk, bo) : M.btn(b.label, bo)) + "</div>";
-    }
-    var x = o.dismiss === false ? "" :
-      '<div class="m-x" role="button" tabindex="0" aria-label="' + M.esc(M.raw("notice.dismiss")) + '">' + M.ico("x", 16, "ink-muted") + "</div>";
-    return '<div class="m-notice m-notice-' + kind + " " + (o.cls || "") + '" role="' + (kind === "error" ? "alert" : "status") + '">' +
-      M.status(kind) + '<div class="m-notice-body">' + body + "</div>" + x + "</div>";
-  };
-
-  /* confirm dialog (G6). o = {title, text, changes: [html], backup: name | null, nobackup: html, confirm: {label, icon,
-     danger, disabled, busy, focus}, keep, hint} */
-  PC.dialog = function (o) {
-    var c = o.confirm;
-    var list = (o.changes || []).map(function (h) {
-      return '<div class="pc-bullet">' + M.ico("check", 16, "ink-muted") + '<div class="t-body ms-2 m-grow">' + h + "</div></div>";
-    }).join("");
-    /* o.reversible: the action can be undone another way (e.g. download a model again): warn tone, no red */
-    var safe = !!(o.backup || o.reversible);
-    var backup = o.reversible && !o.backup
-      ? '<div class="mt-4">' + PC.trust(o.reversible, "download", "ink-info") + "</div>"
-      : o.backup
-      ? '<div class="t-label mt-4">' + t("p09.dlg.backup") + '</div><div class="t-meta tx-muted mt-1">' + t("p09.dlg.backup_text") + "</div>" +
-        '<div class="mt-2">' + PC.monobox(o.backup) + "</div>"
-      : '<div class="m-row-top mt-4">' + M.status("error") + '<div class="t-body ms-2 m-grow">' + o.nobackup + "</div></div>";
-    if (o.untouched) backup += '<div class="mt-3">' + PC.trust(o.untouched, "circle-check", "ink-ok") + "</div>";
-    var confirm = PC.kbtn(c.label, "enter", { kind: c.danger ? "danger" : "primary", block: true, icon: c.busy ? "busy" : c.icon, disabled: c.disabled || c.busy, focus: c.focus });
-    return '<div class="pc-dialog' + (safe ? "" : " pc-dialog-danger") + '" role="alertdialog">' +
-      '<div class="m-row-top">' + M.status(safe ? "warn" : "error") + '<div class="t-label ms-2 m-grow">' + o.title + "</div></div>" +
-      (o.text ? '<div class="t-body mt-2">' + o.text + "</div>" : "") +
-      '<div class="t-label mt-4">' + t("p09.dlg.changes") + "</div>" + list + backup +
-      '<div class="pc-stack mt-4">' + confirm + '<div class="mt-2"></div>' + PC.kbtn(o.keep, "Esc", { kind: "secondary", block: true }) + "</div>" +
-      (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + "</div>" : "") + "</div>";
-  };
-
-  /* ---- keyboard hints (Addendum G2) use the shell's keycap (M.kbd, .m-kbd) and its OS switch (?os=win shows Ctrl).
+  /* ---- keyboard hints (Addendum G2) use the shell's keycap (M.kbd) and its OS switch (?os=win shows Ctrl).
      PC.k maps a short spec to the OS form: "enter" = the primary (M.KEY_PRIMARY), "mod+X" = Cmd/Ctrl + X, else as is. */
   PC.k = function (spec) {
     if (spec === "enter") return M.KEY_PRIMARY;
@@ -131,27 +68,27 @@
     return spec;
   };
   PC.key = function (spec) { return M.kbd(PC.k(spec)); };
-  /* a button with a keycap; never on a disabled or busy button */
+  /* a button with a keycap; never on a disabled or busy button (M.btn itself refuses a keycap on a danger button) */
   PC.kbtn = function (label, spec, o) {
     o = o || {};
     if (!o.disabled && !o.busy) o.kbd = PC.k(spec);
     return M.btn(label, o);
   };
 
-  /* the log, shown only in Settings > Details for support (G2-r1 owner decision e) */
-  PC.logBody = function (lines) {
-    var n = lines ? lines.length : 0;
-    var body = n
-      ? lines.map(function (l) {
-          return '<div class="pc-logline t-mono"><span class="pc-logtime">' + M.esc(l[0]) + '</span><span class="pc-logtext' +
-            (l[2] ? " pc-logtext-" + l[2] : "") + '">' + M.esc(l[1]) + "</span></div>";
-        }).join("")
-      : '<div class="t-meta tx-muted">' + t("p11.log.empty") + "</div>";
-    return '<div class="pc-logbody" role="log">' + body + "</div>";
+  /* P-08: a mock video frame (9:16) drawn inside M.media. tone 0..3 picks the scene colours; the person is a plain
+     head and shoulders shape; caption bars sit in the lower third. o.safe draws the safe-area outline round the
+     captions; o.bad draws the offending caption box running past that outline. */
+  PC.scene = function (tone, w, o) {
+    o = o || {};
+    var cap1 = Math.round(w * 0.62), cap2 = Math.round(w * 0.42), hd = Math.round(w * 0.3), bw = Math.round(w * 0.6), bh = Math.round(w * 0.24);
+    var caps = o.bad
+      ? '<span class="m-media-bad pc-bad-wide"></span><span class="pc-cap pc-cap-2" style="width:' + cap2 + 'px"></span>'
+      : '<span class="pc-cap" style="width:' + cap1 + 'px"></span><span class="pc-cap pc-cap-2" style="width:' + cap2 + 'px"></span>';
+    var safe = o.safe ? '<div class="m-media-safe">' + caps + "</div>" : '<div class="pc-scene-caps">' + caps + "</div>";
+    return '<div class="pc-scene pc-scene-' + (tone % 4) + '"><div class="pc-scene-fig"><span class="pc-head" style="width:'+hd+'px;height:'+hd+'px"></span><span class="pc-body" style="width:'+bw+'px;height:'+bh+'px"></span></div>' + safe + "</div>";
   };
 
-  /* ---- after-mount patch: pill values the shell's map lacks (view.pillx; the shell then keeps the three pills).
-     The shell itself now drops the log row and collapses a healthy status to "All set" (Addendum G). ---- */
+  /* ---- after-mount patch: pill values the shell's map lacks (view.pillx; the shell then keeps the three pills). ---- */
   function pills(panel, p) {
     var els = panel.querySelectorAll(".m-pill"), order = ["engine", "claude", "host"];
     order.forEach(function (k, i) {

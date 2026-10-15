@@ -17,25 +17,22 @@
 </head>
 <body>
 <script>
-/* P-11 Error cards, catalogue (screen-inventory.md §3 P-11; G5 notice, G7 log drawer). Home tab.
+/* P-11 Error cards, catalogue (screen-inventory.md §3 P-11; G5 notice, G7 log drawer; R2 fix list). Home tab.
    One state per group; each card appears alone in real use. Every card: icon, one sentence that names what failed,
-   a "what next" line (except the validation notes), one button (or none for info notes), dismiss.
-   In this catalogue every fix is secondary (no violet): in a real screen the fix is violet only when the screen's own
-   primary is disabled (P-03 offline pattern).
-   Mapping (trigger -> card), raw codes stay in the log:
-   normal (link absent, fix Start WhyNot Cut): no_engine, down, unreachable, bad_engine_json, auth, no_welcome,
-     lost (+ "tries again by itself"), stopped.
-   link-refused (fix Contact support; protocol -> Update WhyNot Cut): refused_host, refused_busy, refused, protocol,
-     too_large, blocked.
-   command (notice.code.*, named after the action): rate, timeout, no_route -> Try again; auth/origin/host,
-     too_large, internal -> Contact support; schema/unknown_type -> Update WhyNot Cut; not_yet -> Open Claude.
-   validation (info, no button): need_name, need_changes, plan_changed, bad_frame, missing.
-   panel: error.render, error.snapshot -> Contact support. held: notice.failed; the raw text is kept for support.
-   claude / update: the P-02 cards. tools: Hush, Tidy, Kalam examples.
-   working: the fix running (busy, disabled). dismissed: the copied-report confirmation after a card is closed.
-   Addendum G2 / owner (e): support = Contact support (opens the configured support link); the log drawer (G7, open
-   and empty) lives only in Settings > Details for support (P-22 states support / support-empty), never on a card.
-   no-claude: Claude not open / signed out, one sentence + whose account, what it costs, what it reads + Open Claude. */
+   a "what next" line (except the validation notes), ONE button that fixes THAT cause (or none for info notes), and a
+   dismiss only on warn / info cards (an error card has none: the close button would hide the only fix).
+   In this catalogue every fix is secondary (no violet) except the restart notice, which the shell turns violet: in a
+   real screen the fix is violet only when the screen's own primary is disabled (P-03 offline pattern).
+   R2 D-P1-6 / G-F-10: one cause, one button, never a script URL:
+     service not running, not answering (merged: down, unreachable, no welcome), connection lost -> Start WhyNot Cut;
+     damaged settings file -> Repair settings (keeps your clients); panel not accepted, panel and service different
+     versions -> Update the panel / Update WhyNot Cut; connection closed unexpectedly, the panel stopped, the panel could
+     not draw a screen -> Reload panel; security software blocked it -> Show what to allow; too many panels -> Contact
+     support. Faults whose fix is the same share one card.
+   R2 D-P1-10: no developer words ("a message was too large" is "the connection closed unexpectedly").
+   R2 D-P0-1: each state sets the header to match its cards (pills for one cause, else the shell derives the pill).
+   R2 E-P2-01: one pack name «حزمة الكابشن» (Caption pack); the brand is only the grey sublabel.
+   no-Claude cards are the shell's M.noClaude (one sentence, one button, "What Claude sees"). */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
   function code(s) { return PC.code(s); }
@@ -43,12 +40,16 @@
   var REPORT = { label: t("action.support"), icon: "headset" };
   var RETRY = { label: t("action.retry"), icon: "refresh-cw" };
   var UPDATE = { label: t("p02.btn.update"), icon: "download" };
+  var REPAIR = { label: t("p11.btn.repair"), icon: "wrench" };
+  var UPDATEP = { label: t("p11.btn.update_panel"), icon: "download" };
+  var RELOAD = { label: t("p11.btn.reload"), icon: "refresh-cw" };
+  var ALLOW = { label: t("p11.btn.allow"), icon: "shield-check" };
 
   function group(titleKey, cards) {
-    return M.eyebrow(t(titleKey), "mt-5") + cards.map(function (c, i) { return '<div class="mt-' + (i ? 2 : 2) + '">' + c + "</div>"; }).join("");
+    return M.eyebrow(t(titleKey), "mt-5") + cards.map(function (c) { return '<div class="mt-2">' + c + "</div>"; }).join("");
   }
   function top() { return PC.title(t("p11.title"), t("p11.sub")); }
-  function e(text, sub, btn, kind) { return PC.notice(kind || "error", text, { sub: sub, btn: btn }); }
+  function e(text, sub, btn, kind) { return M.notice(kind || "error", text, { sub: sub, btn: btn }); }
 
   var G = {
     absent: function (o) {
@@ -56,22 +57,18 @@
       return group("p11.g.absent", [
         e(t("engine.off"), t("p11.how.start"), { label: START.label, icon: START.icon, focus: o.focus }),
         e(t("p11.down"), t("p11.how.start"), START),
-        e(t("p11.unreachable"), t("p11.how.start"), START),
-        e(t("p11.bad_file"), t("p11.how.start"), START),
-        e(t("p11.auth"), t("p11.how.start"), START),
-        e(t("p11.no_welcome"), t("p11.how.start"), START),
         e(t("p11.lost"), t("p11.how.retrying"), START, "warn"),
-        e(t("p11.stopped"), t("p11.how.start"), START)
+        e(t("p11.bad_file"), t("p11.how.repair"), REPAIR),
+        e(t("p11.stopped"), t("p11.how.reload"), RELOAD)
       ]);
     },
     refused: function () {
       return group("p11.g.refused", [
-        e(t("p11.refused_host"), t("p11.how.report"), REPORT),
+        e(t("p11.refused_host"), t("p11.how.update"), UPDATEP),
         e(t("p11.refused_busy"), t("p11.refused_busy.sub"), REPORT),
-        e(t("p11.refused"), t("p11.how.report"), REPORT),
         e(t("p11.protocol"), t("p11.protocol.sub"), UPDATE, "warn"),
-        e(t("p11.too_large"), t("p11.how.report"), REPORT),
-        e(t("p11.blocked"), t("p11.blocked.sub"), REPORT)
+        e(t("p11.too_large"), t("p11.how.reload"), RELOAD),
+        e(t("p11.blocked"), t("p11.blocked.sub"), ALLOW)
       ]);
     },
     command: function () {
@@ -88,34 +85,34 @@
     },
     validation: function () {
       return group("p11.g.validation", [
-        PC.notice("info", t("p11.v.need_name")),
-        PC.notice("info", t("p11.v.need_changes")),
-        PC.notice("info", t("notice.plan_changed"), { sub: t("demo.diff") }),
-        PC.notice("info", t("p11.v.bad_frame")),
-        PC.notice("info", t("p11.v.missing", { item: code(P.newItem) }))
+        M.notice("info", t("p11.v.need_name")),
+        M.notice("info", t("p11.v.need_changes")),
+        M.notice("info", t("notice.plan_changed"), { sub: t("demo.diff") }),
+        M.notice("info", t("p11.v.bad_frame")),
+        M.notice("info", t("p11.v.missing", { item: code(P.newItem) }))
       ]);
     },
     panel: function () {
       return group("p11.g.panel", [
-        e(t("p11.p.render"), t("p11.p.render.sub"), REPORT),
-        e(t("p11.p.snapshot"), t("p11.p.snapshot.sub"), REPORT, "warn")
+        e(t("p11.p.render"), t("p11.p.render.sub"), RELOAD),
+        e(t("p11.p.snapshot"), t("p11.p.snapshot.sub"), RETRY, "warn")
       ]);
     },
     held: function () { return group("p11.g.held", [e(t("p11.held"), t("p11.held.sub"), REPORT)]); },
     claude: function () {
       return group("p11.g.claude", [
-        e(t("p02.claude.missing"), t("p02.claude.missing.sub"), { label: t("p02.btn.guide"), icon: "life-buoy" }),
-        e(t("p02.claude.signed_out"), t("p02.claude.signed_out.sub"), { label: t("action.open_claude"), icon: "log-in" }, "warn"),
+        M.noClaude("missing", { primary: false, sub: t("p02.claude.missing.sub") }),
+        M.noClaude("signed_out", { primary: false, sub: t("p02.claude.signed_out.sub") }),
         e(t("p02.claude.old", { version: "2.2.1" }), t("p02.claude.old.sub"), { label: t("p02.btn.update_plugin"), icon: "download" }, "warn"),
-        e(t("p02.claude.waiting", { item: code(D.item) }), null, { label: t("p02.btn.needs"), icon: "list-checks" }, "warn")
+        M.notice("info", t("p02.claude.waiting", { item: code(D.item) }), { btn: { label: t("p02.btn.needs"), icon: "list-checks" } })
       ]);
     },
     update: function () {
       return group("p11.g.update", [
-        e(t("update.stale"), null, { label: t("action.check_again"), icon: "refresh-cw" }, "warn"),
-        e(t("p02.restart_once"), t("p02.restart_once.sub"), { label: t("action.check_again"), icon: "refresh-cw" }, "warn"),
+        M.stale(),
+        e(t("p02.restart_once"), t("p02.restart_once.sub"), { label: t("action.check_again"), icon: "refresh-cw" }, M.COND.premiere_unlinked),
         e(t("p02.older"), t("p02.older.sub"), UPDATE, "warn"),
-        PC.notice("info", t("p02.staged"))
+        M.notice("info", t("p02.staged"))
       ]);
     },
     tools: function () {
@@ -128,26 +125,26 @@
   };
 
   var STATES = {
-    normal: function () { return { body: top() + G.absent() }; },
-    "link-refused": function () { return { body: top() + G.refused() }; },
+    normal: function () { return { pills: { engine: "off" }, body: top() + G.absent() }; },
+    "link-refused": function () { return { pills: { host: "unlinked" }, body: top() + G.refused() }; },
     command: function () { return { body: top() + G.command() }; },
     validation: function () { return { body: top() + G.validation() }; },
     panel: function () { return { body: top() + G.panel() }; },
     held: function () { return { body: top() + G.held() }; },
-    claude: function () { return { pillx: { claude: ["warn", t("p02.pill.waiting")] }, needs: 2, body: top() + G.claude() }; },
+    claude: function () { return { needs: 2, body: top() + G.claude() }; },
     "no-claude": function () {
-      return { pillx: { claude: ["warn", t("p02.pill.not_open")] }, body: top() + group("p11.g.claude", [PC.noClaude({ primary: false }), PC.noClaude({ signedOut: true, primary: false, sub: t("p02.claude.signed_out.sub") })]) };
+      return { body: top() + group("p11.g.claude", [M.noClaude("signed_out", { primary: false }), M.noClaude("missing", { primary: false })]) };
     },
     update: function () { return { body: top() + G.update() }; },
     tools: function () { return { body: top() + G.tools() }; },
     working: function () {
       return { pills: { engine: "starting" }, body: top() + group("p11.g.working", [
-        PC.notice("error", t("engine.off"), { sub: t("p11.how.start"), btn: { label: t("p11.starting_btn"), busy: true }, dismiss: false }),
-        PC.notice("error", t("p11.c.timeout"), { sub: t("p11.c.timeout.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", disabled: true } })
+        M.notice("error", t("engine.off"), { sub: t("p11.how.start"), btn: { label: t("p11.starting_btn"), busy: true }, dismiss: false }),
+        M.notice("error", t("p11.c.timeout"), { sub: t("p11.c.timeout.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", disabled: true } })
       ]) };
     },
-    dismissed: function () { return { body: top() + group("p11.g.dismissed", [PC.notice("ok", t("p11.copied"))]) }; },
-    focus: function () { return { body: top() + G.absent({ focus: true }) }; },
+    dismissed: function () { return { body: top() + group("p11.g.dismissed", [M.notice("ok", t("p11.copied"))]) }; },
+    focus: function () { return { pills: { engine: "off" }, body: top() + G.absent({ focus: true }) }; },
     long: function () { return { body: top() + G.claude() + G.validation() }; }
   };
 

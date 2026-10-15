@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mock-states" content="empty,loading,normal,downloading,focus,error,offline,skipped,remove-confirm,success,long">
-<meta name="mock-keys" content="Cmd/Ctrl+Enter: Download all (or the card's violet fix); Up/Down: move between models; Enter: the focused model's button; Cmd/Ctrl+.: cancel a running download (it keeps what it has and resumes later); In the remove dialog: Cmd/Ctrl+Enter: Remove, Esc: Keep it (focus starts on Keep it); Esc otherwise: back to Settings">
+<meta name="mock-keys" content="Cmd/Ctrl+Enter: Download all (or the card's violet fix); Up/Down: move between models; Enter: the focused model's button; Cmd/Ctrl+.: cancel a running download (it keeps what it has and resumes later); In the remove dialog: Return and Esc land on Keep it (focus starts there), Remove is the red button with no shortcut; Esc otherwise: back to Settings">
 <meta name="mock-motion" content="Download bar width 250 ms ease per update (static fallback: width jumps), the percent and minutes left carry the progress; state chip colour 200 ms when a model turns Installed; the remove dialog cross-fades in 200 ms at the top of the list, in its own slot (static fallback: instant); skeleton shimmer 1200 ms linear (static fallback: flat bars).">
 <title>P-21 Models</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -17,25 +17,29 @@
 </head>
 <body>
 <script>
-/* P-21 Models (screen-inventory.md §3 P-21). Reached from Settings (decided: Models lives under Settings), so the
+/* P-21 Models (screen-inventory.md §3 P-21; R2 fix list). Reached from Settings (decided: Models lives under Settings), so the
    Home tab stays selected and the back link says Settings.
    - Summary card: "2 of 5 installed", what is left to download and the free space; Download all is the one primary
      when anything is missing; none when all are installed.
    - Model rows: plain name, what it is used for, the model's own name and size (LTR), a state chip, one button.
+     R2 E-P2-01: one pack name, «حزمة الكابشن» / "Caption pack"; "Kalam" is only the grey sublabel.
    - downloading: the row's bar with "46% · 4 min left" (numbers carry progress, not the bar) and "Use the smaller
-     model now". error: the download stopped, resumes. skipped: not enough space.
-   - remove-confirm: the confirm dialog (G6) without a backup (it can be downloaded again), danger Remove.
+     model now". error: the download stopped, resumes; the notice's Try again is the violet, so Download all and the
+     stopped row's button are OFF while it is up (R2 D-P2-7).
+   - skipped (R2 D-P1-6): not enough space: Download all and the row's Download are OFF, with "Choose another drive".
+   - remove-confirm (R2 D-P0-3 / D-P2-6): the shell's M.dialog, red Remove with NO keycap and no violet; "Keep it" is
+     first and focused (Esc); neutral dots; the header says "Confirm to remove", not a failure.
    - offline: the last known list, buttons disabled. empty: the service is off and nothing is known yet.
    - no-claude: not applicable (models run on this computer, without Claude). Removing says the projects and captions
      are not affected (trust line). */
 (function () {
   var t = M.t, P = PC.D;
-  var NB = " ";
+  var NB = " ";
   var MODELS = [
     { k: "core", name: "Whisper large-v3", size: "2.9" + NB + "GB", st: "installed" },
     { k: "fast", name: "large-v3-turbo", size: "1.6" + NB + "GB", st: "installed" },
     { k: "small", name: "medium · small", size: "1.9" + NB + "GB", st: "available" },
-    { k: "kalam", name: "Egyptian turbo · Parakeet · MMS", size: "1.2" + NB + "GB", st: "available" },
+    { k: "kalam", name: "Kalam: Egyptian turbo · Parakeet · MMS", size: "1.2" + NB + "GB", st: "available" },
     { k: "fonts", name: "Syne · Inter · IBM Plex", size: "18" + NB + "MB", st: "installed" }
   ];
   var CHIP = { installed: ["ok", "p21.st.installed", "circle-check"], available: ["neutral", "p21.st.available", "download"],
@@ -47,7 +51,7 @@
     var title = t(m.k === "fonts" ? "p21.fonts" : "p21." + m.k);
     var btn = m.st === "installed" ? M.btn(t("p21.remove"), { kind: "ghost", icon: "trash-2", flush: true, disabled: dis || m.k === "fonts" })
       : m.st === "downloading" ? PC.kbtn(t("p06.cancel"), "mod+.", { kind: "ghost", icon: "circle-stop", flush: true, disabled: dis })
-      : M.btn(t("p21.install"), { icon: "download", disabled: dis });
+      : M.btn(t("p21.install"), { icon: "download", disabled: dis || m.st === "skipped" || (o.stopOff && m.st === "stopped") });
     var extra = "";
     if (m.st === "downloading") {
       extra = '<div class="mt-2">' + M.progress(m.pct) + '</div><div class="t-meta tx-muted mt-1">' +
@@ -65,24 +69,27 @@
       (btn ? '<div class="m-row mt-2">' + btn + "</div>" : "") + "</div>";
   }
   function list(models, o) { return M.card(models.map(function (m) { return model(m, o); }).join(""), "m-card-flush mt-4"); }
+  /* o = {n, need, low, disabled, secondary, focus, noButton, hold (reason text under a switched-off button)} */
   function summary(o) {
     o = o || {};
     var n = o.n === undefined ? 3 : o.n;
     var dl = n < 5 && !o.noButton
-      ? '<div class="m-col mt-3">' + PC.kbtn(t("p21.download_all"), "enter", { kind: o.secondary ? "secondary" : "primary", block: true, icon: "download", disabled: o.disabled, focus: o.focus }) + "</div>" : "";
+      ? '<div class="m-col mt-3">' + PC.kbtn(t("p21.download_all"), "enter", { kind: "primary", block: true, icon: "download", disabled: o.disabled, focus: o.focus }) + "</div>" +
+        (o.hold ? '<div class="t-meta tx-muted mt-2">' + o.hold + "</div>" : "") : "";
+    var drive = o.low ? PC.acts([M.btn(t("p21.drive"), { icon: "hard-drive" })]) : "";
     return M.card('<div class="m-row"><div class="t-label m-grow">' + t("p21.count", { n: n, of: 5 }) + "</div>" +
         (n < 5 ? '<span class="t-meta tx-muted">' + t("p21.need", { size: M.html(M.mono(o.need || "3.1" + NB + "GB")) }) + "</span>" : "") + "</div>" +
       '<div class="m-row-top mt-1"><div class="m-last-ico">' + M.ico("hard-drive", 12, o.low ? "ink-warn" : "ink-muted") + '</div><div class="t-meta tx-muted ms-1 m-grow">' +
-        (o.low ? t("p21.disk.low", { free: M.html(M.mono("1.2" + NB + "GB")), need: M.html(M.mono("1.9" + NB + "GB")) }) : t("p21.disk", { free: M.html(M.mono("41" + NB + "GB")) })) + "</div></div>" + dl, "mt-4");
+        (o.low ? t("p21.disk.low", { free: M.html(M.mono("1.2" + NB + "GB")), need: M.html(M.mono("3.1" + NB + "GB")) }) : t("p21.disk", { free: M.html(M.mono("41" + NB + "GB")) })) + "</div></div>" + drive + dl, "mt-4");
   }
-  function top() { return PC.back(t("p21.back")) + PC.title(t("p21.title"), t("p21.sub")); }
+  function top() { return M.back(t("p21.back")) + PC.title(t("p21.title"), t("p21.sub")); }
   function slot(n) { return n + '<div class="mt-4"></div>'; }
   function set(changes) { return MODELS.map(function (m) { var c = changes[m.k]; if (!c) return m; var o = {}; for (var k in m) o[k] = m[k]; for (k in c) o[k] = c[k]; return o; }); }
 
   var STATES = {
     empty: function () {
       return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: PC.back(t("p21.back")) + M.empty({ icon: "cpu", title: t("p21.empty"), text: t("p21.empty.text"), btn: PC.kbtn(t("action.start_app"), "enter", { kind: "primary", icon: "power" }) }) };
+        body: M.back(t("p21.back")) + M.empty({ icon: "cpu", title: t("p21.empty"), text: t("p21.empty.text"), btn: PC.kbtn(t("action.start_app"), "enter", { kind: "primary", icon: "power" }) }) };
     },
     loading: function () {
       var r = function () { return '<div class="pc-model"><div class="m-row"><div class="m-grow">' + M.skel(55) + '</div><span class="m-skel-block" style="width:72px;height:24px"></span></div>' + M.skel(45, 16) + M.skel(60, 16) + "</div>"; };
@@ -90,28 +97,36 @@
     },
     normal: function () { return { body: top() + summary() + list(MODELS) }; },
     downloading: function () {
-      return { body: top() + summary({ noButton: true, n: 2, need: "4.7" + NB + "GB" }) +
+      return { status: { kind: "busy", text: t("p21.pill.downloading") },
+        body: top() + summary({ noButton: true, n: 2, need: "4.7" + NB + "GB" }) +
         list(set({ core: { st: "downloading", pct: 46, eta: 4, smaller: true } })) };
     },
     focus: function () { return { body: top() + summary({ focus: true }) + list(MODELS) }; },
     error: function () {
-      return { body: slot(PC.notice("error", t("p21.failed"), { sub: t("p21.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
-        top() + summary({ secondary: true, need: "2.6" + NB + "GB" }) + list(set({ kalam: { st: "stopped", pct: 46 } })) };
+      return { body: slot(M.notice("error", t("p21.failed"), { sub: t("p21.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
+        top() + summary({ disabled: true, need: "2.6" + NB + "GB", hold: t("p21.fix_first") }) + list(set({ kalam: { st: "stopped", pct: 46 } }), { stopOff: true }) };
     },
     offline: function () {
       return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: slot(PC.notice("error", t("engine.off"), { sub: t("p21.offline_hint"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
+        body: slot(M.offline({ hintKey: "p21.offline_hint" })) +
           top() + summary({ disabled: true }) + list(MODELS, { disabled: true }) };
     },
-    skipped: function () { return { body: top() + summary({ low: true }) + list(set({ small: { st: "skipped" } })) }; },
+    skipped: function () {
+      return { status: { kind: "warn", text: t("p21.pill.space") },
+        body: top() + summary({ low: true, disabled: true }) + list(set({ small: { st: "skipped" } })) };
+    },
     "remove-confirm": function () {
-      return { body: top() + '<div class="mt-4">' + PC.dialog({ title: t("p21.rm.title"), changes: [t("p21.rm.c1"), t("p21.rm.c2")], backup: null, untouched: t("p21.rm.c3"),
-          reversible: t("p21.rm.nobackup"), confirm: { label: t("p21.remove"), icon: "trash-2" }, keep: t("p21.keep") }) + "</div>" + list(MODELS) };
+      return { status: { kind: "waiting", text: t("p21.pill.confirm") },
+        body: top() + '<div class="mt-4">' + M.dialog({ title: t("p21.rm.title"), changesLabel: t("p09.dlg.changes"), changes: [t("p21.rm.c1"), t("p21.rm.c2")], untouched: t("p21.rm.c3"),
+          reversible: t("p21.rm.nobackup"), danger: true, confirm: { label: t("p21.remove"), icon: "trash-2" }, keep: t("p21.keep") }) + "</div>" + list(MODELS) };
     },
     success: function () {
-      return { body: slot(PC.notice("ok", t("p21.all_ready"))) + top() + summary({ n: 5 }) + list(set({ small: { st: "installed" }, kalam: { st: "installed" } })) };
+      return { body: slot(M.notice("ok", t("p21.all_ready"))) + top() + summary({ n: 5 }) + list(set({ small: { st: "installed" }, kalam: { st: "installed" } })) };
     },
-    long: function () { return { body: top() + summary({ noButton: true, n: 2, need: "4.7" + NB + "GB" }) + list(set({ core: { st: "downloading", pct: 46, eta: 4, smaller: true } })) }; }
+    long: function () {
+      return { status: { kind: "busy", text: t("p21.pill.downloading") },
+        body: top() + summary({ noButton: true, n: 2, need: "4.7" + NB + "GB" }) + list(set({ core: { st: "downloading", pct: 46, eta: 4, smaller: true } })) };
+    }
   };
 
   PC.mount({

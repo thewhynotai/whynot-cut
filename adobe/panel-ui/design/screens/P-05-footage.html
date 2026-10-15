@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,several,focus,error,offline,no-claude,stale,success-live,success-later,long">
-<meta name="mock-keys" content="Cmd/Ctrl+Enter: Make my edit (or Edit the N new videos; when it is off, the violet fix of the card on top); Cmd/Ctrl+O: Open folder; Esc: dismiss the top card (not the service or Claude card); Tab order: Open folder, warning fixes top to bottom, Make my edit">
+<meta name="mock-states" content="empty,loading,normal,several,focus,error,offline,no-claude,stale,locked,success-live,success-later,long">
+<meta name="mock-keys" content="Cmd/Ctrl+Enter: Make my edit (when it is off, the violet fix of the card on top); Up/Down: choose which new clip to edit; Cmd/Ctrl+O: Open folder; Esc: dismiss the top card (not the service or Claude card); Tab order: Open folder, warning fixes top to bottom, Make my edit">
 <meta name="mock-motion" content="A new clip row fades in 200 ms ease into a reserved row (rows below move only when a file arrives, never while reading); chip colour change New to In progress 200 ms; Make my edit press: fill colour 150 ms, then the label keeps its width while the icon becomes the busy loader (static fallback: loader still); skeleton shimmer 1200 ms linear (static fallback: flat bars). The pinned action bar never moves.">
 <title>P-05 New footage and Make my edit</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -15,48 +15,63 @@
 <script src="../mockup.js"></script>
 <script src="../js/premiere-core.js"></script>
 </head>
+>
 <body>
 <script>
-/* P-05 New footage and Make my edit (screen-inventory.md §3 P-05; Addendum G2). Edit tab.
+/* P-05 New footage and Make my edit (screen-inventory.md §3 P-05; Addendum G2; R2 fix list). Edit tab.
    - Where footage goes, by folder NAME ("the raw folder inside Sahha Clinic's folder") + Open folder; the panel
      watches the folder (UXP takes no OS drop).
-   - Clip rows with New / In progress / Edited chips. Early checks (logo, fonts) as warn cards with one fix each.
+   - R2 E-P2-09: every "New" clip is a radio row; the bar says which clip will be edited, and "You'll edit C0241 (not
+     C0239)" when it differs from the clip in the header. "In progress" is a neutral chip (amber is for problems).
+   - Early checks (logo, fonts) as warn cards with one fix each.
    - Make my edit in the pinned bar, with what Claude does and the trust line (a new project file; footage and other
-     projects untouched) and the ⌘⏎ hint.
-   - offline: Make my edit off, the service card's fix is violet. no-claude: the Claude card's Open Claude is violet. */
+     projects untouched) and the keycap hint.
+   - R2: offline / no-Claude / stale are the shell's M.offline / M.noClaude / M.stale. error: the request did not reach
+     Claude (the internet dropped); the notice's Try again is the violet and Make my edit is OFF with the reason.
+   - locked (backlog B-02): another editor works on the clip: who and since when, Open read-only (violet) / Take over.
+   - File names break only at "_" and keep their start and end (M.mid) in a row. */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
   var NEWI = P.newItem;
 
   function chip(state) {
-    return { "new": M.chip("info", t("p05.state.new"), "circle-dashed"), in_progress: M.chip("warn", t("p05.state.in_progress"), "loader-circle"),
+    return { "new": M.chip("info", t("p05.state.new"), "circle-dashed"), in_progress: M.chip("neutral", t("p05.state.in_progress"), "loader-circle"),
       edited: M.chip("ok", t("p05.state.edited"), "circle-check") }[state];
   }
+  function idOf(c) { return c.id === "C0241" ? NEWI : c.id === "C0239" ? D.item : c.id; }
   function where() {
     return PC.title(t("p05.title"), t("p05.where", { raw: M.html(M.mono(P.rawName)), client: D.client })) +
       PC.acts([PC.kbtn(t("p04.open_folder"), "mod+O", { icon: "folder-open" })], "");
   }
-  function clipList(set) {
-    var rows = set.map(function (c) {
-      var id = c.id === "C0241" ? NEWI : c.id === "C0239" ? D.item : c.id;
-      return PC.row(M.ico("film", 16, "ink-muted"), M.ltr(id, "lat code"), t("p04.clip.meta", { dur: M.html(M.mono(c.dur)), when: M.raw(c.when) }), chip(c.state));
-    }).join("");
-    return M.eyebrow(t("p05.clips"), "mt-5") + M.card(rows, "m-card-flush mt-2");
+  /* New clips are radio rows (the first is chosen); the others are plain rows */
+  function clipList(set, o) {
+    o = o || {};
+    var radios = "", plain = "", seen = 0;
+    set.forEach(function (c) {
+      var sub = t("p04.clip.meta", { dur: M.html(M.mono(c.dur)), when: M.raw(c.when) });
+      if (c.state === "new") {
+        radios += (seen ? '<div class="mt-1"></div>' : "") + M.radio(PC.name(idOf(c)).html, seen === 0 && !o.none, { sub: sub, end: '<span class="ms-2">' + chip(c.state) + "</span>", disabled: !!o.none });
+        seen++;
+      } else {
+        plain += M.listrow("film", PC.name(idOf(c)).html, sub, chip(c.state));
+      }
+    });
+    return M.eyebrow(t("p05.clips"), "mt-5") + M.card(radios + (radios && plain ? '<span class="m-divider mt-2"></span>' : "") + plain, "mt-2");
   }
   var ONE = [P.clips[0], P.clips[2], P.clips[3]];
   var TWO = [P.clips[0], P.clips[1], P.clips[2], P.clips[3]];
   function warnings(o) {
     o = o || {};
-    return '<div class="mt-4">' + PC.notice("warn", t("p05.warn.logo"), { sub: t("p05.warn.sub"), btn: { label: t("p05.btn.logo"), icon: "folder-open" } }) + "</div>" +
-      (o.both ? '<div class="mt-2">' + PC.notice("warn", t("p05.warn.fonts"), { sub: t("p05.warn.sub"), btn: { label: t("p05.btn.fonts"), icon: "folder-open" } }) + "</div>" : "");
+    return '<div class="mt-4">' + M.notice("warn", t("p05.warn.logo"), { sub: t("p05.warn.sub"), btn: { label: t("p05.btn.logo"), icon: "folder-open" } }) + "</div>" +
+      (o.both ? '<div class="mt-2">' + M.notice("warn", t("p05.warn.fonts"), { sub: t("p05.warn.sub"), btn: { label: t("p05.btn.fonts"), icon: "folder-open" } }) + "</div>" : "");
   }
   function bar(o) {
     o = o || {};
-    var text = o.all ? t("p05.bar.all", { list: M.html(PC.code(NEWI).html + " · " + PC.code("C0242").html) }) : t("p05.bar.one", { item: PC.code(NEWI) });
-    var label = o.all ? t("p05.make_all", { n: 2 }) : t("p05.make");
-    return '<div class="t-meta tx-muted">' + text + "</div>" +
-      '<div class="mt-1">' + PC.trust(t("p05.trust"), "circle-check", o.disabled ? "ink-disabled" : "ink-ok") + "</div>" +
-      '<div class="m-col mt-2">' + PC.kbtn(label, "enter", { kind: "primary", block: true, icon: "clapperboard", disabled: o.disabled, focus: o.focus }) + "</div>" +
+    var differs = NEWI !== D.item ? '<div class="t-label">' + t("p05.bar.differs", { item: PC.code(NEWI), cur: PC.code(D.item) }) + "</div>" : "";
+    return differs + '<div class="t-meta tx-muted mt-1">' + t("p05.bar.one", { item: PC.code(NEWI) }) + "</div>" +
+      '<div class="mt-1">' + M.trust(t("p05.trust")) + "</div>" +
+      '<div class="m-col mt-2">' + PC.kbtn(t("p05.make"), "enter", { kind: "primary", block: true, icon: "clapperboard", disabled: o.disabled, focus: o.focus }) +
+      (o.all ? '<div class="mt-2"></div>' + M.btn(t("p05.make_all", { n: 2 }), { block: true, icon: "clapperboard", disabled: o.disabled }) : "") + "</div>" +
       (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + "</div>" : "");
   }
   function slot(n) { return n + '<div class="mt-4"></div>'; }
@@ -68,7 +83,7 @@
           clipList([P.clips[2], P.clips[3]]) };
     },
     loading: function () {
-      var r = function () { return PC.row('<span class="m-skel-block" style="width:16px;height:16px"></span>', '<span class="m-skel-bar" style="width:64px;display:block;margin-top:6px"></span>', M.skel(40, 16), '<span class="m-skel-block" style="width:56px;height:24px"></span>'); };
+      var r = function () { return '<div class="m-lrow m-lrow-dense"><span class="m-skel-block" style="width:16px;height:16px"></span><div class="m-lrow-text"><span class="m-skel-bar" style="width:64px;display:block;margin-top:6px"></span>' + M.skel(40, 16) + '</div><div class="m-lrow-end"><span class="m-skel-block" style="width:56px;height:24px"></span></div></div>'; };
       return { body: '<div class="m-col">' + M.skel(40, 28) + M.skel(95, 20) + M.skel(60, 20) + '</div><span class="m-skel-block mt-2" style="width:132px;height:32px"></span>' +
           M.eyebrow(t("p05.clips"), "mt-5") + M.card(r() + r() + r(), "m-card-flush mt-2"),
         bar: '<div class="m-col">' + M.skel(85, 16) + M.skel(50, 16) + '<div class="mt-2"></div><span class="m-skel-block" style="height:40px"></span></div>' };
@@ -77,31 +92,34 @@
     several: function () { return { body: where() + warnings({ both: true }) + clipList(TWO), bar: bar({ all: true }) }; },
     focus: function () { return { body: where() + warnings() + clipList(ONE), bar: bar({ focus: true }) }; },
     error: function () {
-      /* the service could not reach Claude: the header says so instead of collapsing to "All set" */
-      return { pillx: { claude: ["warn", t("p02.pill.no_answer")] }, body: slot(PC.notice("error", t("p05.failed", { item: PC.code(NEWI) }), { sub: t("p05.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw" } })) +
-        where() + clipList(ONE), bar: bar() };
+      /* the request never reached Claude: the notice's fix is the violet, Make my edit waits (R2 D-P2-7) */
+      return { body: slot(M.notice("error", t("p05.failed", { item: PC.code(NEWI) }), { sub: t("p05.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
+        where() + clipList(ONE), bar: bar({ disabled: true, hint: t("p05.fix_first") }) };
     },
     offline: function () {
       return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: slot(PC.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
-          where() + clipList(ONE), bar: bar({ disabled: true, hint: t("p05.need_app") }) };
+        body: slot(M.offline({ hintKey: "engine.off.hint_short" })) + where() + clipList(ONE), bar: bar({ disabled: true, hint: t("p05.need_app") }) };
     },
     "no-claude": function () {
-      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
-        body: slot(PC.noClaude()) + where() + clipList(ONE), bar: bar({ disabled: true, hint: t("p05.need_claude") }) };
+      return { pills: { claude: "signed_out" },
+        body: slot(M.noClaude("signed_out")) + where() + clipList(ONE), bar: bar({ disabled: true, hint: t("p05.need_claude") }) };
     },
-    stale: function () {
-      return { pillx: { host: ["warn", t("p02.pill.restart")] }, body: slot(PC.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw" } })) + where() + clipList(ONE), bar: bar() };
+    stale: function () { return { body: slot(M.stale()) + where() + clipList(ONE), bar: bar() }; },
+    locked: function () {
+      var set = [{ id: "C0241", state: "in_progress", dur: "1:42", when: "p04.demo.today" }, P.clips[2], P.clips[3]];
+      return { body: slot(M.notice("info", t("p05.locked", { who: "Mona", item: PC.code(NEWI), since: M.html(M.mono("14:10")) }), { sub: t("p05.locked.sub", { who: "Mona" }), dismiss: false,
+          extra: PC.acts([M.btn(t("p05.lock.readonly"), { kind: "primary", icon: "eye", kbd: true }), M.btn(t("p05.lock.takeover"), { icon: "log-in" })], "mt-1") })) +
+        where() + clipList(set, { none: true }), bar: bar({ disabled: true, hint: t("p05.lock.first") }) };
     },
     "success-live": function () {
       var set = [{ id: "C0241", state: "in_progress", dur: "1:42", when: "p04.demo.today" }, P.clips[2], P.clips[3]];
-      return { body: slot(PC.notice("ok", t("p05.sent_live", { item: PC.code(NEWI) }), { sub: t("p05.sent_live.sub") })) +
+      return { body: slot(M.notice("ok", t("p05.sent_live", { item: PC.code(NEWI) }), { sub: t("p05.sent_live.sub") })) +
         M.steps(["run", "pend", "pend", "pend", "pend", "pend", "pend"], 0, "busy") +
-        PC.acts([M.btn(t("p05.see_progress"), { icon: "list-checks" })], "mt-1") + clipList(set) };
+        PC.acts([M.btn(t("p05.see_progress"), { icon: "list-checks" })], "mt-1") + clipList(set, { none: true }) };
     },
     "success-later": function () {
-      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
-        body: PC.notice("ok", t("p05.sent_later"), { sub: t("p05.sent_later.sub") }) +
+      return { status: { kind: "waiting", text: t("p05.pill.later") },
+        body: M.notice("ok", t("p05.sent_later"), { sub: t("p05.sent_later.sub") }) +
         '<div class="m-col mt-3">' + PC.kbtn(t("action.open_claude"), "enter", { kind: "primary", block: true, icon: "external-link" }) + "</div>" +
         '<div class="mt-4"></div>' + where() + clipList(ONE) };
     },
@@ -110,7 +128,7 @@
 
   PC.mount({
     id: "P-05", name: "New footage and Make my edit",
-    states: ["empty", "loading", "normal", "several", "focus", "error", "offline", "no-claude", "stale", "success-live", "success-later", "long"],
+    states: ["empty", "loading", "normal", "several", "focus", "error", "offline", "no-claude", "stale", "locked", "success-live", "success-later", "long"],
     defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();

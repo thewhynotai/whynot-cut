@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mock-states" content="empty,loading,normal,confirm,confirm-nobackup,confirm-running,focus,error,offline,success,long">
-<meta name="mock-keys" content="Up/Down: move between the action rows; Enter: run the focused action; Cmd/Ctrl+O: Open project; In the rebuild dialog: Cmd/Ctrl+Enter: Rebuild, Esc: Keep my project (closes the dialog, focus returns to the Rebuild row); Tab order: rows top to bottom; in the dialog Rebuild, then Keep my project (focus starts on Keep my project, the safe choice)">
+<meta name="mock-keys" content="Up/Down: move between the action rows; Enter: run the focused action; Cmd/Ctrl+O: Open project; In the rebuild dialog: Cmd/Ctrl+Enter: Rebuild, Esc: Keep my project (closes the dialog, focus returns to the Rebuild row); in the no-backup dialog Return and Esc both land on Keep my project and the red Build without a backup has no shortcut; Tab order: rows top to bottom; in the dialog Keep my project (focus starts there, the safe choice), then the confirm">
 <meta name="mock-motion" content="Row hover/focus: border colour 150 ms ease; the dialog replaces the action list with a 200 ms cross-fade in the same slot (no overlay, no slide; static fallback: instant swap); a running action: its icon becomes the loader (900 ms rotation, static fallback still) and its label keeps its width; result card fades in 200 ms into a reserved slot.">
 <title>P-09 Actions and rebuild confirm</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -17,15 +17,17 @@
 </head>
 <body>
 <script>
-/* P-09 Actions and rebuild confirm (screen-inventory.md §3 P-09; G6 confirm dialog). Edit tab.
+/* P-09 Actions and rebuild confirm (screen-inventory.md §3 P-09; G6 confirm dialog; R2 fix list). Edit tab.
    - The project file path (LTR, wraps, never cut) and the sequence name, then the six actions as rows in one card
      (icon + label; Rebuild has a chevron because it opens the dialog). No violet in the list.
-   - confirm: the dialog (warn tint) takes the place of the list: title, the rebuild warning, "What will change",
-     the backup name on its own row, Rebuild (the one primary) + Keep my project, stacked full width.
-   - confirm-nobackup: no backup can be made; the dialog turns red and the confirm is the danger fill
-     ("Rebuild without backup"). confirm-running: a render runs, the confirm is disabled and says why.
+   - confirm: the shell's M.dialog (warn tint) takes the place of the list: title, the rebuild warning, "What will change"
+     (neutral 4 px dots), the backup name on its own row (M.path), Rebuild (the one primary) + Keep my project, stacked.
+   - confirm-nobackup (R2 P0-3): no backup can be made; the dialog is red, the safe "Keep my project" is first and focused
+     (Esc), and "Build without a backup" is the red button BELOW it with NO keycap, so Return can never trigger it. The text
+     says how much space to free ("Free about 2 GB so a backup copy can be saved").
+   - confirm-running: a render runs, the confirm is disabled and says why.
    - loading: one action running (busy icon + percent), the rest disabled. offline: all but Reveal folder and Copy
-     report disabled. empty: no project yet.
+     report disabled (the shell's M.offline). empty: no project yet.
    - Addendum G2: no drive paths (the file name and "in C0239's output folder"); every action says what it creates or
      changes (render makes a separate MP4; rebuild keeps a backup and never touches the raw footage); Contact support
      replaces Copy diagnostics. no-claude: not applicable (every action here runs in the WhyNot Cut service). */
@@ -50,20 +52,21 @@
   function project(o) {
     o = o || {};
     return M.eyebrow(t("p09.section")) + '<div class="t-title mt-1">' + t("p09.title", { item: code(D.item) }) + "</div>" +
-      '<div class="t-body mt-2">' + t("p09.project", { file: PC.monoWrap(P.projectFile), item: PC.code(D.item) }) + "</div>" +
-      '<div class="t-meta tx-muted mt-1">' + t("p09.sequence", { name: PC.monoWrap(P.sequence) }) + "</div>";
+      '<div class="t-body mt-2">' + t("p09.project", { file: M.html(M.path(P.projectFile)), item: PC.code(D.item) }) + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p09.sequence", { name: M.html(M.path(P.sequence)) }) + "</div>";
   }
   function actions(o) {
     return M.card(ACTS.map(function (a) { return row(a[0], a[1], o); }).join(""), "m-card-flush mt-4") +
-      '<div class="mt-2">' + PC.trust(t("p09.render.trust")) + "</div>";
+      '<div class="mt-2">' + M.trust(t("p09.render.trust")) + "</div>";
   }
   function dialog(o) {
     o = o || {};
-    var changes = [t("p09.dlg.c1", { seq: PC.monoWrap(P.sequence) }), t("p09.dlg.c2", { time: M.html(M.mono(D.time)) }), t("p09.dlg.c3")];
-    return '<div class="mt-4">' + PC.dialog({
-      title: t("p09.rebuild.title"), text: t("p09.rebuild.warning"), changes: changes,
-      backup: o.nobackup ? null : P.backup, nobackup: t("p09.dlg.nobackup"),
-      confirm: { label: o.nobackup ? t("p09.rebuild_anyway") : t("p09.rebuild"), icon: "refresh-cw", danger: o.nobackup, disabled: o.disabled, focus: o.focus },
+    var changes = [t("p09.dlg.c1", { seq: M.html(M.path(P.sequence)) }), t("p09.dlg.c2", { time: M.html(M.mono(D.time)) }), t("p09.dlg.c3")];
+    return '<div class="mt-4">' + M.dialog({
+      title: t("p09.rebuild.title"), text: t("p09.rebuild.warning"), changesLabel: t("p09.dlg.changes"), changes: changes,
+      backupLabel: t("p09.dlg.backup"), backupText: t("p09.dlg.backup_text"),
+      backup: o.nobackup ? null : P.backup, nobackup: t("p09.dlg.nobackup", { gb: "2" + " " + "GB" }),
+      confirm: { label: o.nobackup ? t("p09.rebuild_anyway") : t("p09.rebuild"), icon: "refresh-cw", disabled: o.disabled, focus: o.focus },
       keep: t("p09.keep"), hint: o.disabled ? t("p09.dlg.wait") : "", untouched: t("p09.dlg.untouched")
     }) + "</div>";
   }
@@ -72,7 +75,7 @@
   var STATES = {
     empty: function () {
       D.item = P.newItem;
-      return { body: slot(PC.notice("info", t("p09.missing", { item: code(D.item) }), { sub: t("p09.missing.sub"), dismiss: false })) +
+      return { body: slot(M.notice("info", t("p09.missing", { item: code(D.item) }), { sub: t("p09.missing.sub"), dismiss: false })) +
         M.eyebrow(t("p09.section")) + '<div class="t-title mt-1">' + t("p09.title", { item: code(D.item) }) + "</div>" + actions({ all: true }) };
     },
     loading: function () { return { body: project() + actions({ busy: "render" }) }; },
@@ -82,15 +85,14 @@
     "confirm-running": function () { return { body: project() + dialog({ disabled: true }) }; },
     focus: function () { return { body: project() + dialog({ focus: true }) }; },
     error: function () {
-      return { body: slot(PC.notice("error", t("p09.failed", { item: code(D.item) }), { sub: t("p09.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
+      return { body: slot(M.notice("error", t("p09.failed", { item: code(D.item) }), { sub: t("p09.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
         project() + actions() };
     },
     offline: function () {
       return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: slot(PC.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
-          project() + actions({ offline: true }) };
+        body: slot(M.offline({ hintKey: "engine.off.hint_short" })) + project() + actions({ offline: true }) };
     },
-    success: function () { return { body: slot(PC.notice("ok", t("p09.opened", { file: PC.monoWrap(P.projectFile) }))) + project() + actions() }; },
+    success: function () { return { body: slot(M.notice("ok", t("p09.opened", { file: M.html(M.path(P.projectFile)) }))) + project() + actions() }; },
     long: function () { return { body: project() + dialog() }; }
   };
 

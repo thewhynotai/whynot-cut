@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,focus,saved,apikey,error,offline,no-claude,support,support-empty,long">
-<meta name="mock-keys" content="Cmd/Ctrl+,: open Settings from anywhere in the panel; Tab order follows the page top to bottom (name, language, Change, start-up, AI choice, Models, tool rows, Details for support, Contact support, Open guide); Space: tick a box or pick a choice; Enter in the name field saves it; Cmd/Ctrl+Enter: the violet fix of a card on top; Esc: back to Home (or closes Details for support when it is open)">
+<meta name="mock-states" content="loading,normal,advanced,formula,focus,saved,apikey,apikey-saved,error,offline,no-claude,support,support-empty,long">
+<meta name="mock-keys" content="Cmd/Ctrl+,: open Settings from anywhere in the panel; Tab order follows the page top to bottom (language, Change, start-up, AI choice, Advanced settings, Models, tool rows, Export my week, Details for support, Copy details and open support, Open guide); Space: tick a box or pick a choice; the name is locked (read-only); Cmd/Ctrl+Enter: the violet fix of a card on top; Esc: back to Home (or closes Details for support when it is open)">
 <meta name="mock-motion" content="Saved: the green check and word fade in 150 ms next to the control, stay 2 s, fade out 200 ms (the space is reserved, nothing moves); radio dot and check box fill 150 ms ease; Details for support opens with a 200 ms fade below its row (the one height change on this page, at the bottom; static fallback: instant); skeleton shimmer 1200 ms linear (static fallback: flat bars). No primary fill on this page.">
 <title>P-22 Settings</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -15,51 +15,72 @@
 <script src="../mockup.js"></script>
 <script src="../js/premiere-core.js"></script>
 </head>
+>
 <body>
 <script>
-/* P-22 Settings (screen-inventory.md §3 P-22; Addendum G2; G2-r1 owner decision e). Opens from the Settings row on
+/* P-22 Settings (screen-inventory.md §3 P-22; Addendum G2; G2-r1 owner decision e; R2 fix list). Opens from the Settings row on
    Home (Home tab stays selected).
    - No primary: each control saves at once and says "Saved." beside it.
-   - Sections: your name · language · clients folder (folder NAME, no drive path) · start-up (the service at sign-in)
-     · Claude and AI buttons · Models (moved here from Home) · tool defaults · time saved estimate (the editable
-     time_saved_rate, eng-data-contract §7.3) · privacy (the approved Claude fact, no telemetry, trains on nothing)
-     · about · Details for support (Contact support opens https://thewhynot.ai/support; details are never attached).
-   - Details for support is the only place the log appears (G7 open = support, open and empty = support-empty),
-     with Contact support (opens the configured support link) and Copy details.
-   - apikey: the key field; a saved key is never shown again. no-claude: the AI section's Claude card.
-   - offline: everything that needs the service is disabled; name and language still work.
+   - Sections: your name (R2 G-F-05: locked after first setup, with a "Changed by" log line) · language · clients folder ·
+     sign-off (R2: "Confirmed with" is required for medical and religious clients, set by the agency) · start-up · Claude
+     and AI buttons (R2 E-P1-05: editors see ONE default; the other two modes live under the collapsed "Advanced settings
+     (for the owner)") · Models · tool defaults · Export my week (G-F-07 / G-F-17) · time saved estimate (R2 G-F-15: read-only
+     "Set by your agency"; the editable rate is only in the owner's Advanced section; "How is this worked out?" lists one
+     formula per job type) · privacy (the approved Claude fact, no telemetry, trains on nothing) · about · Details for support.
+   - Advanced (owner): the two other Claude modes, the editable rate, the sign-off requirement (on by default), and under
+     "Advanced, not recommended" the backup switch (R2 G-F-12: client projects always keep a backup).
+   - Details for support is the only place the log appears (G7), in plain words (R2 D-P1-10: no heartbeat, request ids or
+     FAILED lines); ONE button "Copy details and open support" (R2 G-F-09) and a MOCK-VERIFY slot for the channel, hours and
+     reply time (owner decision D-05).
+   - MOCK-VERIFY (owner decision D-01): every sentence about cost and who bills (no extra charge; billed by Anthropic) keeps
+     the approved wording until the owner has checked the plan names and prices.
+   - apikey / apikey-saved: the key field; a saved key is never shown again. no-claude: the AI section's Claude card.
+   - offline: everything that needs the service is disabled; language still works.
    - error: one control failed; its card sits under it with Try again. Empty and stale: not applicable. */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
 
-  function saved() { return '<div class="pc-saved">' + M.status("ok", 12) + '<span class="t-meta tx-ok ms-1">' + t("p22.saved") + "</span></div>"; }
+  function saved(text) { return '<div class="pc-saved">' + M.status("ok", 12) + '<span class="t-meta tx-ok ms-1">' + (text || t("p22.saved")) + "</span></div>"; }
   function sec(eyebrow, inner) { return M.eyebrow(eyebrow, "mt-5") + M.card(inner, "mt-2"); }
-  function name(o) {
-    o = o || {};
-    return sec(t("p22.name"), '<div>' + M.input(t("approval.editor.placeholder"), { value: M.txt(D.editor), focus: o.focus }) + "</div>" +
-      '<div class="t-meta tx-muted mt-2">' + t("p22.name_hint") + "</div>" + (o.saved ? saved() : ""));
+  /* a read-only value: a locked inset */
+  function locked(valueHtml) {
+    return '<div class="m-inset"><div class="m-row">' + M.ico("lock", 16, "ink-muted") + '<span class="t-body ms-2 m-grow">' + valueHtml + "</span></div></div>";
+  }
+  function name() {
+    return sec(t("p22.name"), locked(M.txt(D.editor)) +
+      '<div class="t-meta tx-muted mt-2">' + t("p22.name_hint") + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p22.name_log", { who: D.editor, when: M.raw("p22.demo.when") }) + "</div>" +
+      '<div class="mt-3">' + M.trust(t("p22.signoff.line")) + "</div>");
   }
   function lang(o) {
     o = o || {};
     var ar = '<span class="ar-run">العربية</span>', en = M.ltr("English", "lat");
-    return sec(t("p22.lang"), PC.radio(ar, null, M.lang === "ar") + '<div class="mt-1"></div>' + PC.radio(en, null, M.lang === "en") +
-      '<div class="t-meta tx-muted mt-2">' + t("p22.lang_hint") + "</div>" + (o.saved ? saved() : ""));
+    return sec(t("p22.lang"), M.segmented([ar, en], M.lang === "ar" ? 0 : 1) +
+      (o.saved ? saved() : ""));
   }
   function clients(o) {
     o = o || {};
     return sec(t("p22.clients"), '<div class="m-row-top">' + M.ico("folder", 16, "ink-muted") + '<div class="t-body ms-2 m-grow">' +
       t("p22.clients.sub", { name: M.html(M.ltr(P.rootName, "lat tx-text")) }) + "</div></div>" +
-      PC.acts([M.btn(t("p22.change"), { icon: "folder-open", disabled: o.disabled })]));
+      PC.acts([M.btn(t("p22.change"), { icon: "folder-open", disabled: o.disabled, focus: o.focus })]));
   }
   function start(o) {
     o = o || {};
-    var box = M.checkbox(t("p22.engine"), true, false);
-    if (o.disabled) box = box.replace('class="m-checkrow"', 'class="m-checkrow pc-radio-disabled" aria-disabled="true"').replace('t-label ms-2 m-grow', 't-label ms-2 m-grow tx-disabled');
-    return sec(t("p22.start"), box + '<div class="t-meta tx-muted mt-1">' + t("p22.engine_hint") + "</div>" +
-      (o.error ? '<div class="mt-3">' + PC.notice("error", t("p22.failed"), { sub: t("p22.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw" } }) + "</div>" : ""));
+    return sec(t("p22.start"), PC.checkbox(t("p22.engine"), true, { disabled: o.disabled }) + '<div class="t-meta tx-muted mt-1">' + t("p22.engine_hint") + "</div>" +
+      (o.error ? '<div class="mt-3">' + M.notice("error", t("p22.failed"), { sub: t("p22.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } }) + "</div>" : ""));
   }
+  /* editors see ONE default mode. MOCK-VERIFY (D-01): "no extra cost" stays the approved wording */
   function ai(o) {
     o = o || {};
+    var sel = o.sel || "session", dis = o.disabled;
+    return sec(t("p22.ai"),
+      (o.noClaude ? M.noClaude("signed_out", { primary: true }) + '<div class="mt-3"></div>' : "") +
+      M.radio(t("p22.ai.session"), sel === "session", { sub: t("p22.ai.session.sub"), disabled: dis }));
+  }
+  /* the owner's section: collapsed for editors. o = {open, sel, keySaved, disabled} */
+  function advanced(o) {
+    o = o || {};
+    if (!o.open) return M.card(M.sechead(t("p22.adv"), "", false), "m-card-flush mt-4");
     var sel = o.sel || "session", dis = o.disabled;
     var key = "";
     if (sel === "key") {
@@ -68,11 +89,19 @@
         : M.input(t("p22.key.placeholder"), { focus: true }) + '<div class="t-meta tx-muted mt-2">' + t("p22.key.hint") + "</div>" +
           PC.acts([PC.kbtn(t("p22.key.save"), "↵", { icon: "key-round" })])) + "</div>";
     }
-    return sec(t("p22.ai"),
-      (o.noClaude ? PC.noClaude({ primary: false }) + '<div class="mt-3"></div>' : "") +
-      PC.radio(t("p22.ai.session"), t("p22.ai.session.sub"), sel === "session", { disabled: dis }) + '<div class="mt-1"></div>' +
-      PC.radio(t("p22.ai.key"), t("p22.ai.key.sub"), sel === "key", { disabled: dis }) + key + '<div class="mt-1"></div>' +
-      PC.radio(t("p22.ai.cli"), t("p22.ai.cli.sub"), false, { disabled: dis }));
+    return M.card(M.sechead(t("p22.adv"), "", true) + '<div class="t-meta tx-muted mt-1">' + t("p22.adv.hint") + "</div>" +
+      '<div class="mt-3"></div>' +
+      M.radio(t("p22.ai.cli"), false, { sub: t("p22.ai.cli.sub"), disabled: dis }) + '<div class="mt-1"></div>' +
+      M.radio(t("p22.ai.key"), sel === "key", { sub: t("p22.ai.key.sub"), disabled: dis }) + key +
+      '<span class="m-divider mt-3"></span>' +
+      '<div class="t-label mt-3">' + t("p22.rate.owner") + "</div>" +
+      '<div class="m-row mt-2"><div style="width:96px">' + M.input("", { value: M.ltr(String(P.rate), "lat") }) + "</div></div>" +
+      '<div class="mt-3">' + PC.checkbox(t("p22.signoff.req"), true, { disabled: dis }) + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p22.signoff.req.hint") + "</div>" +
+      '<span class="m-divider mt-3"></span>' +
+      '<div class="t-label mt-3">' + t("p22.adv.risky") + "</div>" +
+      '<div class="mt-1">' + PC.checkbox(t("p22.backup"), true, { disabled: dis }) + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p22.backup.hint") + "</div>", "mt-4");
   }
   function li(icon, label, sub, dis) {
     var ink = dis ? "ink-disabled" : "ink-muted";
@@ -80,61 +109,65 @@
       '<div class="m-col ms-2 m-grow"><div class="t-label' + (dis ? " tx-disabled" : "") + '">' + label + "</div>" + (sub ? '<div class="t-meta tx-muted">' + sub + "</div>" : "") + "</div>" +
       '<div class="ms-2">' + M.chev(ink) + "</div></div>";
   }
-  /* the time-saved rate (eng-data-contract §7.3: preference time_saved_rate, default 9, labelled "estimate") */
+  /* the time-saved rate is read-only here (R2 G-F-15) and every formula is shown (R2 G-F-03) */
   function rate(o) {
     o = o || {};
+    var f = function (k) { return '<div class="t-meta tx-muted mt-1">' + t(k) + "</div>"; };
     return sec(t("p22.rate"), '<div class="t-label">' + t("p22.rate.label") + "</div>" +
-      '<div class="m-row mt-2"><div style="width:96px">' + M.input("", { value: M.ltr(String(P.rate), "lat"), focus: o.focusRate }) + "</div>" +
-        '<span class="ms-2"></span>' + M.btn(t("p22.rate.reset"), { kind: "ghost", disabled: true }) + "</div>" +
-      '<div class="t-meta tx-muted mt-2">' + t("p22.rate.hint") + "</div>" + (o.saved ? saved() : ""));
+      '<div class="m-row mt-2"><div class="m-inset m-row">' + M.ico("lock", 16, "ink-muted") + '<span class="t-body ms-2">' + M.ltr(String(P.rate), "lat") + "</span></div>" +
+        '<span class="ms-2"></span>' + M.chip("neutral", t("p22.rate.agency"), "lock") + "</div>" +
+      '<div class="t-meta tx-muted mt-2">' + t("p22.rate.hint") + "</div>" +
+      '<div class="mt-2">' + M.sechead(t("p22.how"), "", !!o.formula) + "</div>" +
+      (o.formula ? f("p22.f.reel") + f("p22.f.hush") + f("p22.f.tidy") + f("p22.f.captions") + f("p22.f.cap") : ""));
   }
   function privacy() {
-    var line = function (h, icon) { return '<div class="pc-bullet">' + M.ico(icon, 16, "ink-ok") + '<div class="t-body ms-2 m-grow">' + h + "</div></div>"; };
-    return sec(t("p22.privacy"), '<div class="m-col">' + line(t("p22.privacy.fact"), "circle-check").replace("pc-bullet", "pc-bullet pc-first") +
-      line(t("p22.privacy.telemetry"), "circle-check") + line(t("p22.privacy.training"), "circle-check") + "</div>");
+    var line = function (h, i) { return PC.iconrow(M.ico("circle-check", 16, "ink-ok"), h, i ? "mt-2" : ""); };
+    return sec(t("p22.privacy"), '<div class="m-col">' + line(t("p22.privacy.fact"), 0) + line(t("p22.privacy.telemetry"), 1) + line(t("p22.privacy.training"), 2) + "</div>");
   }
   function supportCard(open, lines) {
-    var n = lines ? lines.length : 0;
     var toggle = '<div class="m-li" role="button" tabindex="0" aria-expanded="' + !!open + '">' + M.ico("scroll-text", 16, "ink-muted") +
       '<div class="t-label ms-2 m-grow">' + (open ? t("p22.support.hide") : t("p22.support.show", { n: P.log.length })) + "</div>" +
       /* keycap and chevron side by side (the keycap first, as on buttons) */
       '<div class="m-row ms-2">' + (open ? PC.key("Esc") : "") + '<span class="ms-2">' + M.ico(open ? "chevron-up" : "chevron-down", 16, "ink-muted") + "</span></div></div>";
     return sec(t("p22.support"), '<div class="t-meta tx-muted">' + t("p22.support.sub") + "</div>" +
       '<div class="t-meta tx-muted mt-1">' + t("p22.support.opens", { url: M.html(M.ltr(P.links.support.replace("https://", ""), "lat")) }) + "</div>" +
+      '<div class="mt-2">' + PC.info(t("p22.support.slot")) + "</div>" +
       '<div class="m-col mt-2">' + toggle + "</div>" +
-      (open ? '<div class="mt-2">' + PC.logBody(lines) + "</div>" : "") +
-      PC.acts([M.btn(t("action.support"), { icon: "headset" })].concat(open && n ? [M.btn(t("p22.support.copy"), { kind: "ghost", icon: "copy" })] : [])));
+      (open ? '<div class="mt-2">' + M.logline(lines) + "</div>" : "") +
+      PC.acts([M.btn(t("p22.support.go"), { icon: "headset" }), M.btn(t("p22.guide"), { kind: "ghost", icon: "life-buoy", flush: true })]) +
+      '<div class="t-meta tx-muted mt-3">' + M.ltr("WhyNot Cut " + P.version, "lat") + "</div>");
   }
   function more(o) {
     o = o || {};
     var dis = o.disabled;
-    return M.card(li("cpu", t("p22.models"), t("p22.models.sub", { n: 3, of: 5 }), dis), "m-card-flush mt-5") +
+    return M.card(li("cpu", t("p22.models"), t("p22.models.sub", { n: 3, of: 5 }), dis) + li("file-text", t("p22.export"), t("p22.export.sub"), dis) +
+        (o.saved ? '<div class="mt-1">' + saved(t("p22.export.done")) + "</div>" : ""), "m-card-flush mt-5") +
       M.eyebrow(t("p22.tools"), "mt-5") +
       M.card(li("folder-tree", t("home.tool.tidy"), M.ltr("Tidy"), dis) + li("audio-waveform", t("home.tool.hush"), M.ltr("Hush"), dis) +
         li("captions", t("home.tool.kalam"), M.ltr("Kalam"), dis), "m-card-flush mt-2") +
       rate(o) + privacy() +
-      sec(t("p22.about"), '<div class="t-body">' + M.ltr("WhyNot Cut " + P.version, "lat") + "</div>" +
-        PC.acts([M.btn(t("p22.guide"), { kind: "ghost", icon: "life-buoy", flush: true })])) +
       supportCard(o.support, o.lines);
   }
-  function top() { return PC.back(t("p22.back")) + PC.title(t("p22.title")); }
-  function page(o) { o = o || {}; return top() + name(o) + lang(o) + clients(o) + start(o) + ai(o) + more(o); }
+  function top() { return M.back(t("p22.back")) + PC.title(t("p22.title")); }
+  function page(o) { o = o || {}; return top() + name() + lang(o) + clients(o) + start(o) + ai(o) + advanced(o) + more(o); }
   function skelSec() { return '<div class="mt-5">' + M.skel(25, 16) + "</div>" + M.card(M.skel(40) + '<div class="mt-2"><span class="m-skel-block" style="height:32px;display:block"></span></div>' + M.skel(55, 16), "mt-2"); }
 
   var STATES = {
     loading: function () { return { body: top() + skelSec() + skelSec() + skelSec() }; },
     normal: function () { return { body: page() }; },
+    advanced: function () { return { body: top() + ai() + advanced({ open: true }) }; },
+    formula: function () { return { body: top() + rate({ formula: true }) }; },
     focus: function () { return { body: page({ focus: true }) }; },
     saved: function () { return { body: page({ saved: true }) }; },
-    apikey: function () { return { body: top() + ai({ sel: "key" }) + ai({ sel: "key", keySaved: true }) + start() }; },
-    error: function () { return { body: top() + start({ error: true }) + name() + lang() + clients() + ai() + more() }; },
+    apikey: function () { return { body: top() + ai({ sel: "key" }) + advanced({ open: true, sel: "key" }) + start() }; },
+    "apikey-saved": function () { return { body: top() + ai({ sel: "key" }) + advanced({ open: true, sel: "key", keySaved: true }) + start() }; },
+    error: function () { return { body: top() + start({ error: true }) + name() + lang() + clients() + ai() + advanced() + more() }; },
     offline: function () {
       return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: PC.notice("error", t("engine.off"), { sub: t("p22.offline_hint"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false }) +
-          '<div class="mt-4"></div>' + page({ disabled: true }) };
+        body: M.offline({ hintKey: "p22.offline_hint", support: false }) + '<div class="mt-4"></div>' + page({ disabled: true }) };
     },
     "no-claude": function () {
-      return { pillx: { claude: ["warn", t("p02.pill.not_open")] }, body: top() + ai({ noClaude: true }) + privacy() + name() + lang() };
+      return { pills: { claude: "signed_out" }, body: top() + ai({ noClaude: true }) + privacy() + name() + lang() };
     },
     support: function () { return { body: top() + supportCard(true, P.log) + name() + lang() }; },
     "support-empty": function () { return { body: top() + supportCard(true, []) + name() + lang() }; },
@@ -143,7 +176,7 @@
 
   PC.mount({
     id: "P-22", name: "Settings",
-    states: ["loading", "normal", "focus", "saved", "apikey", "error", "offline", "no-claude", "support", "support-empty", "long"], defaultState: "normal",
+    states: ["loading", "normal", "advanced", "formula", "focus", "saved", "apikey", "apikey-saved", "error", "offline", "no-claude", "support", "support-empty", "long"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.tab = "home";

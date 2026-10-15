@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,starting,offline,link-off,restart-once,stale,staged,engine-older,no-claude,claude-missing,claude-signed-out,claude-old,claude-working,claude-waiting,stacked,success,focus,long">
+<meta name="mock-states" content="loading,normal,starting,offline,link-off,restart-once,stale,staged,engine-older,no-claude,claude-missing,no-internet,claude-old,claude-working,claude-waiting,stacked,success,focus,long">
 <meta name="mock-keys" content="Cmd/Ctrl+Enter: the card's fix button (the violet one); Esc: back to the screen the pill was tapped on; Tab order: Back, card fix, card dismiss, then the four rows are not focusable (plain text)">
 <meta name="mock-motion" content="Card in: background and border colour fade 200 ms ease, its slot is reserved (no layout shift); a card that is fixed turns into the ok card for 3 s then fades out 200 ms; row status icon colour 200 ms; busy icon rotates 900 ms linear (static fallback: the loader icon still); button hover/press colour 150 ms. Nothing moves position.">
 <title>P-02 Status cards</title>
@@ -15,14 +15,18 @@
 <script src="../mockup.js"></script>
 <script src="../js/premiere-core.js"></script>
 </head>
+>
 <body>
 <script>
-/* P-02 Status cards (screen-inventory.md §3 P-02; Addendum G2; G2-r1 owner decisions). Opens when the editor taps a
-   header pill; the same cards sit on top of any screen (P-03 offline, P-05 no-claude, ...).
-   - One card per problem: what happened, why, one button (none for starting / staged / working).
-   - Below: the four links (WhyNot Cut service, Premiere, Claude, this panel) as plain rows agreeing with the pills.
-   - no-claude: Claude installed but not open; says whose account, what it costs, what it reads. claude-signed-out
-     is the same card for a signed-out account.
+/* P-02 Status cards (screen-inventory.md §3 P-02; Addendum G2; G2-r1 owner decisions; R2 fix list). Opens when the editor
+   taps a header pill; the same cards sit on top of any screen (P-03 offline, P-05 no-claude, ...).
+   - One card per problem: what happened, why, one button (none for starting / staged / working / no internet).
+   - R2: the cards are the shell's M.notice / M.offline / M.noClaude / M.stale / M.noNet; one condition has one kind, one
+     icon and one name (M.COND): host unlinked = error (also the "restart once" card), Claude signed out = amber,
+     Claude not installed = red, no internet = amber with no button. An error notice has no close button.
+   - Back + title first, then the notice slot (the same order as P-04).
+   - Below: the four links (WhyNot Cut service, Premiere, Claude, this panel) as plain rows (M.stages) that agree with the pills.
+   - no-internet (new): "No internet. Claude needs it to make the plan." + what keeps working; there is nothing to press.
    - stacked: two problems; only the first card's fix is violet. offline: the service card hides the rest. */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
@@ -33,16 +37,16 @@
   function rows(r) {
     r = r || {};
     var g = function (k) { return r[k] || OK[k]; };
-    var one = function (k, label) { var s = g(k); return PC.row(M.status(s[0]), label, s[1]); };
-    return M.card(one("engine", t("checklist.engine")) + one("host", t("checklist.premiere")) +
-      one("claude", t("checklist.claude")) + one("panel", t("p02.row.panel")), "m-card-flush mt-4");
+    var one = function (k, label) { var s = g(k); return [s[0], label, "", s[1]]; };
+    return M.card(M.stages([one("engine", t("checklist.engine")), one("host", t("checklist.premiere")),
+      one("claude", t("checklist.claude")), one("panel", t("p02.row.panel"))]), "m-card-flush mt-4");
   }
-  function top(card) { return PC.back(t("p02.back")) + PC.title(t("p02.title"), t("p02.sub")) + (card ? '<div class="mt-4">' + card + "</div>" : ""); }
+  function top(card) { return M.back(t("p02.back")) + PC.title(t("p02.title"), t("p02.sub")) + (card ? '<div class="mt-4">' + card + "</div>" : ""); }
   var WAIT = ["pending", t("firstrun.waiting_engine")];
   function skelRow(w) {
-    return PC.row('<span class="m-skel-block" style="width:16px;height:16px"></span>', '<span class="m-skel-bar" style="width:' + w + 'px;display:block;margin-top:6px"></span>', M.skel(60, 16));
+    return '<div class="m-lrow m-lrow-dense"><span class="m-skel-block" style="width:16px;height:16px"></span><div class="m-lrow-text"><span class="m-skel-bar" style="width:' + w + 'px;display:block;margin-top:6px"></span>' + M.skel(60, 16) + "</div></div>";
   }
-  function support() { return PC.acts([M.btn(t("action.support"), { kind: "ghost", icon: "headset", flush: true })], "mt-2"); }
+  var RETRY = { label: t("action.retry"), icon: "refresh-cw", primary: true };
 
   var STATES = {
     loading: function () {
@@ -53,89 +57,85 @@
     normal: function () { return { body: top() + rows() }; },
     starting: function () {
       return { pills: { engine: "starting", claude: "unchecked", host: "checking" },
-        body: top(PC.notice("info", t("p02.starting"), { sub: t("p02.starting.sub"), dismiss: false })) +
+        body: top(M.notice("info", t("p02.starting"), { sub: t("p02.starting.sub"), dismiss: false })) +
           rows({ engine: ["busy", t("p02.engine.starting")], host: WAIT, claude: WAIT }) };
     },
     offline: function () {
       return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: top(PC.notice("error", t("engine.off"), { sub: t("engine.off.hint"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
-          rows({ engine: ["error", t("engine.off")], host: WAIT, claude: WAIT }) + support() };
+        body: top(M.offline({ hintKey: "engine.off.hint" })) + rows({ engine: ["error", t("engine.off")], host: WAIT, claude: WAIT }) };
     },
     "link-off": function () {
       return { pills: { host: "unlinked" },
-        body: top(PC.notice("error", t("link.off"), { sub: t("retry.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
-          rows({ host: ["error", t("link.off")] }) + support() };
+        body: top(M.notice("error", t("link.off"), { sub: t("retry.hint"), btn: RETRY, support: true })) + rows({ host: ["error", t("link.off")] }) };
     },
     "restart-once": function () {
+      /* the host is unlinked until Premiere is reopened: error, like every other unlinked host (M.COND) */
       return { pills: { host: "unlinked" },
-        body: top(PC.notice("warn", t("p02.restart_once"), { sub: t("p02.restart_once.sub"), btn: { label: t("action.check_again"), icon: "refresh-cw", primary: true } })) +
-          rows({ host: ["warn", t("p02.restart_once")] }) };
+        body: top(M.notice(M.COND.premiere_unlinked, t("p02.restart_once"), { sub: t("p02.restart_once.sub"), btn: { label: t("action.check_again"), icon: "refresh-cw", primary: true } })) +
+          rows({ host: ["error", t("p02.restart_once")] }) };
     },
     stale: function () {
-      /* the links are up but Premiere still runs the old panel: the header must not collapse to "All set" */
-      return { pillx: { host: ["warn", t("p02.pill.restart")] },
-        body: top(PC.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw", primary: true } })) +
-        rows({ panel: ["warn", t("p02.panel.stale", { version: "3.0.1" })] }) };
+      /* the links are up but Premiere still runs the old panel: the shell derives "Premiere needs a restart" */
+      return { body: top(M.stale()) + rows({ panel: ["warn", t("p02.panel.stale", { version: "3.0.1" })] }) };
     },
     staged: function () {
-      return { body: top(PC.notice("info", t("p02.staged"))) + rows({ panel: ["info", t("p02.panel.staged", { version: "3.0.1" })] }) };
+      return { body: top(M.notice("info", t("p02.staged"))) + rows({ panel: ["info", t("p02.panel.staged", { version: "3.0.1" })] }) };
     },
     "engine-older": function () {
       return { pillx: { engine: ["warn", t("p02.pill.update")] },
-        body: top(PC.notice("warn", t("p02.older"), { sub: t("p02.older.sub"), btn: { label: t("p02.btn.update"), icon: "download", primary: true } })) +
+        body: top(M.notice("warn", t("p02.older"), { sub: t("p02.older.sub"), btn: { label: t("p02.btn.update"), icon: "download", primary: true } })) +
           rows({ engine: ["warn", t("p02.older")], panel: ["warn", t("p02.panel.older", { version: P.version, old: "2.2.1" })] }) };
     },
     "no-claude": function () {
-      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
-        body: top(PC.noClaude()) + rows({ claude: ["warn", t("p02.claude.closed.row")] }) };
+      return { pills: { claude: "signed_out" },
+        body: top(M.noClaude("signed_out", { sub: t("p02.claude.signed_out.sub") })) + rows({ claude: ["warn", t("p02.claude.signed_out.row")] }) };
     },
     "claude-missing": function () {
-      return { pillx: { claude: ["error", t("p02.pill.not_installed")] },
-        body: top(PC.notice("error", t("p02.claude.missing"), { sub: t("p02.claude.missing.sub"), btn: { label: t("p02.btn.guide"), icon: "life-buoy", primary: true } })) +
-          rows({ claude: ["error", t("p02.claude.missing.row")] }) };
+      return { pills: { claude: "missing" },
+        body: top(M.noClaude("missing", { sub: t("p02.claude.missing.sub") })) + rows({ claude: ["error", t("p02.claude.missing.row")] }) };
     },
-    "claude-signed-out": function () {
-      return { pills: { claude: "signed_out" },
-        body: top(PC.noClaude({ signedOut: true, sub: t("p02.claude.signed_out.sub") })) + rows({ claude: ["warn", t("p02.claude.signed_out.row")] }) };
+    "no-internet": function () {
+      return { pills: { claude: "offline" }, body: top(M.noNet()) + rows({ claude: ["warn", t("p02.claude.offline.row")] }) };
     },
     "claude-old": function () {
       return { pillx: { claude: ["warn", t("p02.pill.update")] },
-        body: top(PC.notice("warn", t("p02.claude.old", { version: "2.2.1" }), { sub: t("p02.claude.old.sub"), btn: { label: t("p02.btn.update_plugin"), icon: "download", primary: true } })) +
+        body: top(M.notice("warn", t("p02.claude.old", { version: "2.2.1" }), { sub: t("p02.claude.old.sub"), btn: { label: t("p02.btn.update_plugin"), icon: "download", primary: true } })) +
           rows({ claude: ["warn", t("p02.claude.old.row", { version: "2.2.1", need: P.version })] }) };
     },
     "claude-working": function () {
       return { pillx: { claude: ["ok", t("p02.pill.working", { item: item() })] },
-        body: top(PC.notice("info", t("p02.claude.working", { item: item(), ago: M.raw("p02.demo.ago") }), { sub: t("p02.claude.working.sub") })) +
+        body: top(M.notice("info", t("p02.claude.working", { item: item(), ago: M.raw("p02.demo.ago") }), { sub: t("p02.claude.working.sub") })) +
           rows({ claude: ["busy", t("p02.claude.working.row", { item: item(), ago: M.raw("p02.demo.ago") })] }) };
     },
     "claude-waiting": function () {
-      return { needs: 2, pillx: { claude: ["warn", t("p02.pill.waiting")] },
-        body: top(PC.notice("warn", t("p02.claude.waiting", { item: item() }), { btn: { label: t("p02.btn.needs"), icon: "list-checks", primary: true } })) +
-          rows({ claude: ["warn", t("p02.claude.waiting.row", { item: item() })] }) };
+      /* waiting FOR THE PERSON is the pink Needs-you dot, not a problem */
+      return { needs: 2, pillx: { claude: ["waiting", t("p02.pill.waiting")] },
+        body: top(M.notice("info", t("p02.claude.waiting", { item: item() }), { btn: { label: t("p02.btn.needs"), icon: "list-checks", primary: true }, dismiss: false })) +
+          rows({ claude: ["waiting", t("p02.claude.waiting.row", { item: item() })] }) };
     },
     stacked: function () {
       return { pills: { host: "unlinked", claude: "signed_out" },
-        body: top(PC.notice("error", t("link.off"), { sub: t("retry.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } }) +
-            '<div class="mt-2"></div>' + PC.noClaude({ signedOut: true, primary: false, sub: t("p02.claude.signed_out.sub") })) +
+        body: top(M.notice("error", t("link.off"), { sub: t("retry.hint"), btn: RETRY }) +
+            '<div class="mt-2"></div>' + M.noClaude("signed_out", { primary: false, sub: t("p02.claude.signed_out.sub") })) +
           rows({ host: ["error", t("link.off")], claude: ["warn", t("p02.claude.signed_out.row")] }) };
     },
-    success: function () { return { body: top(PC.notice("ok", t("p02.all_ok"))) + rows() }; },
+    success: function () { return { body: top(M.notice("ok", t("p02.all_ok"))) + rows() }; },
     focus: function () {
       return { pills: { host: "unlinked" },
-        body: top(PC.notice("error", t("link.off"), { sub: t("retry.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true, focus: true } })) +
+        body: top(M.notice("error", t("link.off"), { sub: t("retry.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true, focus: true } })) +
           rows({ host: ["error", t("link.off")] }) };
     },
     long: function () {
-      return { pillx: { claude: ["warn", t("p02.pill.waiting")] },
-        body: top(PC.notice("warn", t("p02.claude.waiting", { item: item() }), { btn: { label: t("p02.btn.needs"), icon: "list-checks", primary: true } })) +
-          rows({ claude: ["warn", t("p02.claude.waiting.row", { item: item() })] }) };
+      return { needs: 2, pillx: { claude: ["waiting", t("p02.pill.waiting")] },
+        body: top(M.notice("info", t("p02.claude.waiting", { item: item() }), { btn: { label: t("p02.btn.needs"), icon: "list-checks", primary: true }, dismiss: false })) +
+          rows({ claude: ["waiting", t("p02.claude.waiting.row", { item: item() })] }) };
     }
   };
 
   PC.mount({
     id: "P-02", name: "Status cards",
     states: ["loading", "normal", "starting", "offline", "link-off", "restart-once", "stale", "staged", "engine-older", "no-claude", "claude-missing",
-      "claude-signed-out", "claude-old", "claude-working", "claude-waiting", "stacked", "success", "focus", "long"],
+      "no-internet", "claude-old", "claude-working", "claude-waiting", "stacked", "success", "focus", "long"],
     defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();

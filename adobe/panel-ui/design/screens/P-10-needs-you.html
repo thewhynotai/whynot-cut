@@ -17,10 +17,13 @@
 </head>
 <body>
 <script>
-/* P-10 Needs you (screen-inventory.md §3 P-10). Opens from the header badge (G3), so no tab is selected.
-   - The badge, the Edit tab count and the list agree: one count (6 here).
-   - Grouped by clip (current client), then "This computer" for app-wide items. Each row: kind icon, one sentence, a
-     detail line, one button. The first item's button is the one primary; the rest are secondary.
+/* P-10 Needs you (screen-inventory.md §3 P-10; R2 fix list). Opens from the header badge (G3), so no tab is selected.
+   - The badge, the Edit tab count and the list agree: ONE count (6 here; 7 in long, header and list alike: R2 D-P1-11).
+   - Grouped by clip (current client), then "This computer" for app-wide items. Each row: kind icon (the pink Needs-you
+     colour: these wait for the person, they are not problems), one sentence, a detail line, one button. The first
+     item's button is the one primary; the rest are secondary.
+   - R2 D-P0-1: when Needs-you is the only reason, the header has no status pill (the badge says it): no "running ready".
+     The offline / error / no-Claude states derive their pill from the card.
    - Detail lines quote the words or lines as said (Arabic in both UIs) and the timecode as plain text (not a control).
    - empty is also the success state ("Nothing needs you right now."). Stale: not applicable. */
 (function () {
@@ -53,51 +56,53 @@
       var head = g.general
         ? '<div class="t-label">' + t("p10.general") + "</div>"
         : '<div class="t-label">' + M.ltr(g.item(), "lat code") + "</div>";
-      var body = rows.map(function (r) {
+      var body = rows.map(function (r, ri) {
         var primary = first && !o.disabled; first = false;
         var dis = o.disabled || (o.noClaude && r[1] === "p10.k.music");
         var btn = M.btn(t(r[3]), { kind: primary ? "primary" : "secondary", icon: r[4], disabled: dis, focus: primary && o.focus, kbd: primary && !dis ? PC.k("enter") : false });
         var label = r[1] === "p10.k.restart" ? t(r[1], { app: "Premiere" }) : t(r[1]);
-        return '<div class="pc-row">' + M.ico(r[0], 16, o.disabled ? "ink-disabled" : "ink-warn") +
-          '<div class="pc-row-text"><div class="t-body">' + label + '</div><div class="t-meta tx-muted">' + r[2]() + "</div>" +
+        /* the first row of a card sits under the card's heading; the 12 px row padding counts the 1 px divider */
+        return '<div class="m-lrow">' + M.ico(r[0], 16, o.disabled ? "ink-disabled" : "ink-accent") +
+          '<div class="m-lrow-text"><div class="t-body">' + label + '</div><div class="t-meta tx-muted">' + r[2]() + "</div>" +
           '<div class="m-row mt-2">' + btn + "</div></div></div>";
       }).join("");
       out += M.card(head + '<div class="m-col mt-1">' + body + "</div>", "mt-" + (gi ? 2 : 4));
     });
     return out;
   }
-  function count(n) { return M.chip("warn", M.ltr(String(n))); }
+  function count(n) { return M.chip("neutral", M.ltr(String(n))); }
   function top(n) {
-    return PC.back(t("p02.back")) + '<div class="m-row"><div class="t-title m-grow">' + t("p10.title") + "</div>" + (n ? count(n) : "") + "</div>" +
+    return M.back(t("p02.back")) + '<div class="m-row"><div class="t-title m-grow">' + t("p10.title") + "</div>" + (n ? count(n) : "") + "</div>" +
       '<div class="t-body tx-muted mt-1">' + t("p10.sub") + "</div>";
   }
   function reveal() { return PC.acts([M.btn(t("p10.reveal"), { kind: "ghost", icon: "folder-open", flush: true })], "mt-2"); }
   function skelCard() {
-    return M.card(M.skel(30) + '<div class="pc-row"><span class="m-skel-block" style="width:16px;height:16px"></span><div class="pc-row-text">' + M.skel(85) + M.skel(60, 16) +
+    return M.card(M.skel(30) + '<div class="m-lrow"><span class="m-skel-block" style="width:16px;height:16px"></span><div class="m-lrow-text">' + M.skel(85) + M.skel(60, 16) +
       '<div class="mt-2"><span class="m-skel-block" style="width:112px;height:32px;display:block"></span></div></div></div>', "mt-4");
   }
 
   var STATES = {
     empty: function () {
-      return { needs: 0, body: PC.back(t("p02.back")) + M.empty({ icon: "circle-check", title: t("p10.empty"), text: t("p10.empty.text") }) };
+      return { needs: 0, body: M.back(t("p02.back")) + M.empty({ icon: "circle-check", title: t("p10.empty"), text: t("p10.empty.text") }) };
     },
     loading: function () { return { needs: 6, body: top() + skelCard() + skelCard() }; },
-    normal: function () { return { needs: 6, pillx: { host: ["warn", t("p02.pill.restart")] }, body: top(6) + list() + reveal() }; },
-    focus: function () { return { needs: 6, pillx: { host: ["warn", t("p02.pill.restart")] }, body: top(6) + list({ focus: true }) + reveal() }; },
+    normal: function () { return { needs: 6, body: top(6) + list() + reveal() }; },
+    focus: function () { return { needs: 6, body: top(6) + list({ focus: true }) + reveal() }; },
     error: function () {
-      return { needs: 6, body: top() + '<div class="mt-4">' + PC.notice("error", t("p10.failed"), { sub: t("p10.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } }) + "</div>" + reveal() };
+      return { needs: 6, body: top() + '<div class="mt-4">' + M.notice("error", t("p10.failed"), { sub: t("p10.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } }) + "</div>" + reveal() };
     },
     offline: function () {
       return { needs: 6, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: PC.notice("error", t("engine.off"), { sub: t("p10.offline_hint"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false }) +
+        body: M.offline({ hintKey: "p10.offline_hint" }) +
           '<div class="mt-4"></div>' + top(6) + list({ disabled: true }) + reveal() };
     },
     "no-claude": function () {
-      return { needs: 6, pillx: { claude: ["warn", t("p02.pill.not_open")], host: ["warn", t("p02.pill.restart")] },
-        body: top(6) + '<div class="mt-4">' + PC.noClaude({ primary: false, sub: t("p10.no_claude") }) + "</div>" + list({ noClaude: true }) + reveal() };
+      return { needs: 6, pills: { claude: "signed_out" },
+        body: top(6) + '<div class="mt-4">' + M.noClaude("signed_out", { primary: false, sub: t("p10.no_claude") }) + "</div>" + list({ noClaude: true }) + reveal() };
     },
-    /* the list holds 7 items, so the badge and the Edit tab say 7 too (one count everywhere) */
-    long: function () { return { needs: 7, pillx: { host: ["warn", t("p02.pill.restart")] }, body: top(7) + list({ long: true }) + reveal() }; }
+    /* the list holds 7 items, so the badge and the Edit tab say 7 too (one count everywhere): the shell's long-text
+       count of 99+ is replaced for this screen */
+    long: function () { M.D.needs = 7; return { needs: 7, body: top(7) + list({ long: true }) + reveal() }; }
   };
 
   PC.mount({
