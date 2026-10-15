@@ -2,7 +2,10 @@
 
     python adobe/panel-ui/design/_build/render_all.py [--only P-03] [--jobs 8] [--no-sheets]
 
-- Screens: adobe/panel-ui/design/screens/*.html; the states come from each file's <meta name="mock-states">.
+- Screens: adobe/panel-ui/design/screens/*.html; the states come from each file's <meta name="mock-states">. A page may
+  declare its own widths with <meta name="mock-widths" content="760,640"> (default 300,360,480): the browser window
+  follows the widths, the width check uses them, and its sheets use the page's first width as the reference width
+  (default 360).
 - Output: design/renders/<screen>/<state>-<lang>-<w>.png at 2x device scale, full height (the page is captured on a
   sentinel background with capture=1 and cropped to the panel's own box), dark colour scheme, throw-away profile.
 - Checks per render: not blank (pixel variance), and the page's own self-check read with --dump-dom
@@ -68,10 +71,20 @@ def states_of(page: pathlib.Path) -> list[str]:
     return [s.strip() for s in m.group(1).split(",") if s.strip()]
 
 
-def chrome(exe: str, work: pathlib.Path, tag: str, extra: list[str], url: str, out_dom: bool = False) -> str:
+def widths_of(page: pathlib.Path) -> tuple[list[int], int]:
+    """(widths, sheet reference width): the page's <meta name="mock-widths">, else (WIDTHS, 360)."""
+    m = re.search(r'<meta name="mock-widths" content="([^"]+)"', page.read_text(encoding="utf-8"))
+    if not m:
+        return WIDTHS, 360
+    ws = [int(x) for x in m.group(1).split(",") if x.strip()]
+    return ws, ws[0]
+
+
+def chrome(exe: str, work: pathlib.Path, tag: str, extra: list[str], url: str, out_dom: bool = False,
+           win_w: int = WINDOW_W) -> str:
     prof = work / f"p-{tag}"
     cmd = [exe, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
-           "--allow-file-access-from-files", f"--user-data-dir={prof}", f"--window-size={WINDOW_W},{WINDOW_H}",
+           "--allow-file-access-from-files", f"--user-data-dir={prof}", f"--window-size={win_w},{WINDOW_H}",
            "--virtual-time-budget=4000", "--blink-settings=preferredColorScheme=0", *extra, url]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=180)
@@ -88,8 +101,9 @@ def job(exe: str, work: pathlib.Path, screen: str, page: pathlib.Path, state: st
     out = RENDERS / screen / f"{state}-{lang}-{w}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = work / f"{tag}.png"
-    chrome(exe, work, tag + "-s", [f"--force-device-scale-factor={SCALE}", f"--screenshot={tmp}"], url)
-    dom = chrome(exe, work, tag + "-d", ["--dump-dom"], url, out_dom=True)
+    win_w = max(WINDOW_W, w + 40)  # wider pages (mock-widths) get a wider window; panels keep 520
+    chrome(exe, work, tag + "-s", [f"--force-device-scale-factor={SCALE}", f"--screenshot={tmp}"], url, win_w=win_w)
+    dom = chrome(exe, work, tag + "-d", ["--dump-dom"], url, out_dom=True, win_w=win_w)
     row = {"path": out.relative_to(DESIGN).as_posix(), "screen": screen, "state": state, "lang": lang, "width": w,
            "sha1": "", "px_w": 0, "px_h": 0, "std": 0.0, "check": "", "problems": []}
     img = cv2.imdecode(np.fromfile(str(tmp), np.uint8), cv2.IMREAD_COLOR) if tmp.exists() else None
@@ -141,7 +155,7 @@ def job(exe: str, work: pathlib.Path, screen: str, page: pathlib.Path, state: st
     return row
 
 
-def sheets(rows: list[dict]) -> list[pathlib.Path]:
+def sheets(rows: list[dict], widths: dict) -> list[pathlib.Path]:
     script = SKILL / "contact_sheet.py"
     if not script.exists():
         print(f"skip sheets: {script} not found")
@@ -161,10 +175,11 @@ def sheets(rows: list[dict]) -> list[pathlib.Path]:
     # plus one sheet per screen with the normal state at all three widths in both languages
     for screen in sorted({r["screen"] for r in rows}):
         mine = [r for r in rows if r["screen"] == screen and r["sha1"]]
+        ws, ref = widths.get(screen, (WIDTHS, 360))
         for lang in LANGS:
-            imgs = [str(DESIGN / r["path"]) for r in mine if r["lang"] == lang and r["width"] == 360]
-            sheet(SHEETS / f"{screen}-states-{lang}-360.png", imgs, min(6, len(imgs)))
-        imgs = [str(DESIGN / r["path"]) for lang in LANGS for w in WIDTHS for r in mine
+            imgs = [str(DESIGN / r["path"]) for r in mine if r["lang"] == lang and r["width"] == ref]
+            sheet(SHEETS / f"{screen}-states-{lang}-{ref}.png", imgs, min(6, len(imgs)))
+        imgs = [str(DESIGN / r["path"]) for lang in LANGS for w in ws for r in mine
                 if r["state"] == "normal" and r["lang"] == lang and r["width"] == w]
         sheet(SHEETS / f"{screen}-widths-normal.png", imgs, 6)
     return made
@@ -182,11 +197,12 @@ def main() -> int:
         pages = [p for p in pages if p.stem.startswith(a.only)]
     work = pathlib.Path(tempfile.mkdtemp(prefix="mock_render_"))
     tasks = []
+    widths = {page.stem: widths_of(page) for page in pages}
     for page in pages:
         screen = page.stem
         for state in states_of(page):
             for lang in LANGS:
-                for w in WIDTHS:
+                for w in widths[screen][0]:
                     tasks.append((screen, page, state, lang, w))
     rows: list[dict] = []
     try:
@@ -210,7 +226,7 @@ def main() -> int:
             for r in rows:
                 wr.writerow([r["path"], r["screen"], r["state"], r["lang"], r["width"], r["sha1"], r["px_w"], r["px_h"],
                              f"{r['std']:.1f}", "yes" if not r["problems"] else "no", " | ".join(r["problems"])])
-    made = [] if a.no_sheets else sheets(rows)
+    made = [] if a.no_sheets else sheets(rows, widths)
     bad = [r for r in rows if r["problems"]]
     for r in bad:
         print(f"FAIL {r['path']}: {'; '.join(r['problems'])}")
