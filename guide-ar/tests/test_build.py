@@ -280,6 +280,47 @@ class DevWordTests(unittest.TestCase):
             self.assertIn(word, build.DEV_WORDS)
 
 
+def _fix(what="Premiere لا يستجيب.", why="اللوحة مغلقة.", do="افتح اللوحة.", labels=("اللي حصل", "ليه", "اعمل كده")):
+    parts = []
+    for cls, label, text in zip(("fix-what", "fix-why", "fix-do"), labels, (what, why, do)):
+        if text is not None:
+            parts.append(f'<p class="{cls}"><span class="fix-label">{label}</span>{text}</p>')
+    return '<div class="fix">' + "".join(parts) + "</div>"
+
+
+class TroubleshootingTests(unittest.TestCase):
+    """Addendum G2: every ch17 entry says what happened, why, and the ONE thing to do."""
+
+    def test_troubleshooting_entries_have_three_parts(self):
+        self.assertEqual(build.fix_problems(_fix()), [])
+        # a cause but no action fails
+        self.assertEqual(len(build.fix_problems(_fix(do=None))), 1)
+        # an empty part fails
+        self.assertEqual(len(build.fix_problems(_fix(why=""))), 1)
+        # the visible labels are required
+        self.assertEqual(len(build.fix_problems(_fix(labels=("العرَض", "ليه", "اعمل كده")))), 1)
+        # the action is ONE sentence
+        self.assertEqual(len(build.fix_problems(_fix(do="أغلق Premiere. ثم افتح الفحص."))), 1)
+        self.assertEqual(build.fix_problems(_fix(do='اكتب <bdi dir="ltr"><code>reel.doctor --x</code></bdi> ثم انتظر.')), [])
+        # two systems: macOS first (G11)
+        self.assertEqual(len(build.fix_problems(_fix(do="على Windows اضغط Install، وعلى Mac اضغط Install Font."))), 1)
+        self.assertEqual(build.fix_problems(_fix(do="على Mac اضغط Install Font، وعلى Windows اضغط Install.")), [])
+        # no row of the old table layout is left
+        self.assertEqual(len(build.fix_problems("<table><tr><td>العرَض</td></tr></table>")), 1)
+        self.assertEqual(build.fix_problems("<!-- <table><tr><td>قديم</td></tr></table> -->"), [])
+        # print-only: an entry and the 3.0 line after it are kept on one page (idempotent, shape unchanged)
+        todo = '<aside class="todo" data-phase="9"><p>جملة.</p><!-- فريق: x --></aside>'
+        src = _fix() + _fix() + "\n" + todo
+        kept = build.keep_fix_with_todo(src)
+        self.assertEqual(kept.count('<div class="keep">'), 1)
+        self.assertIn('<div class="keep">' + _fix() + "\n" + todo + "</div>", kept)
+        self.assertEqual(build.keep_fix_with_todo(kept), kept)
+        # the real chapter: only .fix entries, every one in shape
+        ch17 = (GUIDE / "chapters" / "17-troubleshooting.html").read_text(encoding="utf-8")
+        self.assertGreaterEqual(ch17.count('class="fix"'), 30)
+        self.assertEqual(build.fix_problems(ch17), [])
+
+
 SHOT_IMG = ('<figure class="shot"><div class="shot-frame"><img src="{src}" alt="لقطة"></div>'
             "<figcaption>تعليق</figcaption></figure>")
 

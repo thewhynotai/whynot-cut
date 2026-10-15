@@ -259,6 +259,18 @@ def keep_shot_with_todo(html: str) -> str:
         else f'<div class="keep">{m.group(1)}{m.group(2)}{m.group(3)}</div>', html)
 
 
+_FIX_THEN_TODO = re.compile(r"""(<div\b[^>]*\bclass="fix"[^>]*>(?:(?!</div>).)*</div>)(\s*)"""
+                            r"""(<aside\b[^>]*\bclass="todo"[^>]*>.*?</aside>)""", re.S)
+
+
+def keep_fix_with_todo(html: str) -> str:
+    """Wrap a troubleshooting entry and the 3.0 line right after it in <div class="keep">, so that line never
+    opens a page alone (same reason as keep_shot_with_todo). Idempotent."""
+    return _FIX_THEN_TODO.sub(
+        lambda m: m.group(0) if m.string[max(0, m.start() - 20):m.start()].endswith('<div class="keep">')
+        else f'<div class="keep">{m.group(1)}{m.group(2)}{m.group(3)}</div>', html)
+
+
 _MENU_PATH = re.compile(r'<bdi dir="ltr">([^<]*›[^<]*)</bdi>')
 
 
@@ -308,7 +320,7 @@ def assemble(root: Path) -> str:
     parts = [p.read_text(encoding="utf-8").strip() for p in sorted((root / "chapters").glob("*.html"))]
     chapters = "\n\n".join(parts)
     printed = "\n\n".join(build_chapter_map(p) for p in parts)
-    printed = mark_chapter_numbers(mark_menu_paths(keep_shot_with_todo(nowrap_cmd_tokens(printed))))
+    printed = mark_chapter_numbers(mark_menu_paths(keep_fix_with_todo(keep_shot_with_todo(nowrap_cmd_tokens(printed)))))
     html = shell.replace("<!--@chapters-->", printed, 1)
     toc = build_toc(chapters)
     if "<!--@toc-->" in html:
@@ -658,6 +670,53 @@ def dev_word_problems(html: str, terms: dict[str, tuple[str, ...]] | None = None
             if not any(s <= m.start("w") < e for s, e in covered):
                 problems.append(f"developer word «{word}» in visible text (replace it, or add it to STYLE.md's "
                                 f"explained-once table): «{around(m.start(), m.end())}»")
+    return problems
+
+
+# ---------------------------------------------------------------- troubleshooting shape (Addendum G2)
+# "Every error says what happened, why, and the one button that fixes it." Each ch17 entry is
+# <div class="fix"> with exactly one .fix-what, .fix-why and .fix-do <p>, in that order, each opening with its
+# visible label; .fix-do is ONE action (one sentence); when it names both systems, macOS comes first (G11).
+TROUBLESHOOTING_CHAPTER = "17-troubleshooting.html"
+FIX_PARTS = (("fix-what", "اللي حصل"), ("fix-why", "ليه"), ("fix-do", "اعمل كده"))
+_FIX_BLOCK = re.compile(r'<div\b[^>]*\bclass="fix"[^>]*>(.*?)</div>', re.S)
+_FIX_PART = re.compile(r'<p\b[^>]*\bclass="(fix-[a-z]+)"[^>]*>(.*?)</p>', re.S)
+_FIX_LABEL = re.compile(r'^\s*<span class="fix-label">(.*?)</span>', re.S)
+_SENTENCE_END = re.compile(r"[.!؟](?=\s+\S)")
+
+
+def fix_problems(html: str) -> list[str]:
+    """Shape problems of the troubleshooting entries in `html` (a chapter source). Empty list = clean."""
+    html = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+    problems = []
+    if re.search(r"<t(?:able|r)\b", html):
+        problems.append('troubleshooting: a table is left; write every entry as <div class="fix"> '
+                        "(what happened / why / one action)")
+    for block in _FIX_BLOCK.finditer(html):
+        inner = block.group(1)
+        parts = _FIX_PART.findall(inner)
+        what = visible_prose(inner)[:60]
+        if [c for c, _ in parts] != [c for c, _ in FIX_PARTS]:
+            problems.append(f"troubleshooting entry needs exactly .fix-what, .fix-why, .fix-do in that order "
+                            f"(has {[c for c, _ in parts]}): «{what}»")
+            continue
+        if _FIX_PART.sub("", inner).strip():
+            problems.append(f"troubleshooting entry has content outside its three parts: «{what}»")
+        for (cls, body), (_, label) in zip(parts, FIX_PARTS):
+            m = _FIX_LABEL.match(body)
+            if not m or plain_text(m.group(1)) != label:
+                problems.append(f'«.{cls}» must open with <span class="fix-label">{label}</span>: «{what}»')
+                continue
+            text = visible_prose(body[m.end():])
+            if not text:
+                problems.append(f"«.{cls}» is empty: «{what}»")
+            elif cls == "fix-do":
+                if _SENTENCE_END.search(text) or re.search(r"<(?:br|ul|ol|li|div)\b", body):
+                    problems.append(f"«اعمل كده» must be ONE action (one sentence): «{text[:80]}»")
+                mac = re.search(r"(?<![A-Za-z])(?:Mac|macOS)(?![A-Za-z])", text)
+                win = re.search(r"(?<![A-Za-z])Windows(?![A-Za-z])", text)
+                if mac and win and win.start() < mac.start():
+                    problems.append(f"«اعمل كده» names Windows before macOS (G11): «{text[:80]}»")
     return problems
 
 
@@ -1028,6 +1087,9 @@ def main(argv: list[str] | None = None) -> int:
 
     html = assemble(ROOT)
     problems = lint(html, release=release) + dev_word_problems(chapter_sources(ROOT))
+    troubleshooting = ROOT / "chapters" / TROUBLESHOOTING_CHAPTER
+    if troubleshooting.is_file():
+        problems += fix_problems(troubleshooting.read_text(encoding="utf-8"))
     if problems:
         print(f"LINT{' (release)' if release else ''}: {len(problems)} problem(s):")
         for p in problems:

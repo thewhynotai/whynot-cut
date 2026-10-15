@@ -46,7 +46,7 @@
 <h2 id="ch18-uninstall">إلغاء التثبيت في الإصدار <bdi dir="ltr">3.0</bdi></h2>
 
 <ol class="steps">
-<li>أغلق Premiere Pro وAfter Effects. إذا كان أحدهما مفتوحًا، لا تُزال لوحاته، فأغلقه وأعد إلغاء التثبيت.</li>
+<li>أغلق Premiere Pro وAfter Effects. إذا كان أحدهما مفتوحًا، لا تُزال لوحاته، لأن البرنامج المفتوح يمنع حذف ملفات لوحاته ما دام يعمل؛ فأغلقه وأعد إلغاء التثبيت.</li>
 <li><strong>إذا ثبّت بالسطر الواحد أو من داخل Claude</strong>: افتح PowerShell أو Terminal كما في <a href="#ch02-run-command">«تشغيل أمر أعطاك إياه Claude»</a>، والصق سطر الإزالة الخاص بجهازك، ثم اضغط Enter.
 <p class="lead-in">على Windows، في PowerShell:</p>
 <div class="cmd one-line"><bdi dir="ltr"><code>&amp; ([scriptblock]::Create((irm https://dl.thewhynot.ai/install.ps1))) -Uninstall</code></bdi></div>
