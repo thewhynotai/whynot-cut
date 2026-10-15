@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,focus,error,offline,no-claude,long">
+<meta name="mock-keys" content="Cmd/Ctrl+Enter: the first item's button (the violet one); Up/Down: move between items; Enter: the focused item's button; Esc: close the list and go back to where the badge was tapped; Tab order: Back, then each item's button top to bottom, then Open the list in the client folder">
+<meta name="mock-motion" content="Opening from the badge: the list cross-fades in 200 ms ease (static fallback: instant); an item that is done fades out 200 ms and its space closes only after the fade (250 ms, the one allowed height change, at the bottom of the list so nothing above moves); the badge and Edit-tab count change number with a 150 ms colour pulse; skeleton shimmer 1200 ms linear (static fallback: flat bars).">
+<title>P-10 Needs you</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+</head>
+<body>
+<script>
+/* P-10 Needs you (screen-inventory.md §3 P-10). Opens from the header badge (G3), so no tab is selected.
+   - The badge, the Edit tab count and the list agree: one count (6 here).
+   - Grouped by clip (current client), then "This computer" for app-wide items. Each row: kind icon, one sentence, a
+     detail line, one button. The first item's button is the one primary; the rest are secondary.
+   - Detail lines quote the words or lines as said (Arabic in both UIs) and the timecode as plain text (not a control).
+   - empty is also the success state ("Nothing needs you right now."). Stale: not applicable. */
+(function () {
+  var t = M.t, D = M.D, P = PC.D;
+  function tc(s) { return M.html(M.mono(s)); }
+  var GROUPS = [
+    { item: function () { return D.item; }, rows: [
+      ["ear", "p10.k.words", function () { return t("p10.d.words", { tc: tc("00:00:31:20") }); }, "p10.b.listen", "play"],
+      ["stethoscope", "p10.k.claim", function () { return t("p10.d.claim"); }, "p10.b.review", "circle-check-big"]
+    ] },
+    { item: function () { return P.newItem; }, rows: [
+      ["type", "p10.k.fonts", function () { return t("p10.d.fonts"); }, "p10.b.fonts", "folder-open"],
+      ["music", "p10.k.music", function () { return t("p10.d.music"); }, "p10.b.music", "external-link"]
+    ] },
+    { item: function () { return "C0236"; }, rows: [
+      ["monitor-play", "p10.k.render", function () { return t("p10.d.render"); }, "p10.b.open", "external-link"]
+    ] },
+    { general: true, rows: [
+      ["refresh-cw", "p10.k.restart", function () { return t("p10.d.restart"); }, "p10.b.check", "refresh-cw"]
+    ] }
+  ];
+  var NUMBERS = ["hash", "p10.k.numbers", function () { return t("p10.d.numbers", { tc: tc("00:00:31:20") }); }, "p10.b.numbers", "circle-check-big"];
+
+  function list(o) {
+    o = o || {};
+    var first = true, out = "";
+    GROUPS.forEach(function (g, gi) {
+      var rows = g.rows.slice();
+      if (o.long && gi === 0) rows.push(NUMBERS);
+      var head = g.general
+        ? '<div class="t-label">' + t("p10.general") + "</div>"
+        : '<div class="t-label">' + M.ltr(g.item(), "lat code") + "</div>";
+      var body = rows.map(function (r) {
+        var primary = first && !o.disabled; first = false;
+        var dis = o.disabled || (o.noClaude && r[1] === "p10.k.music");
+        var btn = M.btn(t(r[3]), { kind: primary ? "primary" : "secondary", icon: r[4], disabled: dis, focus: primary && o.focus, kbd: primary && !dis ? PC.k("enter") : false });
+        var label = r[1] === "p10.k.restart" ? t(r[1], { app: "Premiere" }) : t(r[1]);
+        return '<div class="pc-row">' + M.ico(r[0], 16, o.disabled ? "ink-disabled" : "ink-warn") +
+          '<div class="pc-row-text"><div class="t-body">' + label + '</div><div class="t-meta tx-muted">' + r[2]() + "</div>" +
+          '<div class="m-row mt-2">' + btn + "</div></div></div>";
+      }).join("");
+      out += M.card(head + '<div class="m-col mt-1">' + body + "</div>", "mt-" + (gi ? 2 : 4));
+    });
+    return out;
+  }
+  function count(n) { return M.chip("warn", M.ltr(String(n))); }
+  function top(n) {
+    return PC.back(t("p02.back")) + '<div class="m-row"><div class="t-title m-grow">' + t("p10.title") + "</div>" + (n ? count(n) : "") + "</div>" +
+      '<div class="t-body tx-muted mt-1">' + t("p10.sub") + "</div>";
+  }
+  function reveal() { return PC.acts([M.btn(t("p10.reveal"), { kind: "ghost", icon: "folder-open", flush: true })], "mt-2"); }
+  function skelCard() {
+    return M.card(M.skel(30) + '<div class="pc-row"><span class="m-skel-block" style="width:16px;height:16px"></span><div class="pc-row-text">' + M.skel(85) + M.skel(60, 16) +
+      '<div class="mt-2"><span class="m-skel-block" style="width:112px;height:32px;display:block"></span></div></div></div>', "mt-4");
+  }
+
+  var STATES = {
+    empty: function () {
+      return { needs: 0, body: PC.back(t("p02.back")) + M.empty({ icon: "circle-check", title: t("p10.empty"), text: t("p10.empty.text") }) };
+    },
+    loading: function () { return { needs: 6, body: top() + skelCard() + skelCard() }; },
+    normal: function () { return { needs: 6, pillx: { host: ["warn", t("p02.pill.restart")] }, body: top(6) + list() + reveal() }; },
+    focus: function () { return { needs: 6, pillx: { host: ["warn", t("p02.pill.restart")] }, body: top(6) + list({ focus: true }) + reveal() }; },
+    error: function () {
+      return { needs: 6, body: top() + '<div class="mt-4">' + PC.notice("error", t("p10.failed"), { sub: t("p10.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } }) + "</div>" + reveal() };
+    },
+    offline: function () {
+      return { needs: 6, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: PC.notice("error", t("engine.off"), { sub: t("p10.offline_hint"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false }) +
+          '<div class="mt-4"></div>' + top(6) + list({ disabled: true }) + reveal() };
+    },
+    "no-claude": function () {
+      return { needs: 6, pillx: { claude: ["warn", t("p02.pill.not_open")], host: ["warn", t("p02.pill.restart")] },
+        body: top(6) + '<div class="mt-4">' + PC.noClaude({ primary: false, sub: t("p10.no_claude") }) + "</div>" + list({ noClaude: true }) + reveal() };
+    },
+    /* the list holds 7 items, so the badge and the Edit tab say 7 too (one count everywhere) */
+    long: function () { return { needs: 7, pillx: { host: ["warn", t("p02.pill.restart")] }, body: top(7) + list({ long: true }) + reveal() }; }
+  };
+
+  PC.mount({
+    id: "P-10", name: "Needs you",
+    states: ["empty", "loading", "normal", "focus", "error", "offline", "no-claude", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "needs"; /* no tab is selected: the list opens from the badge */
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

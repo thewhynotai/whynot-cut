@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,several,focus,error,offline,no-claude,stale,success-live,success-later,long">
+<meta name="mock-keys" content="Cmd/Ctrl+Enter: Make my edit (or Edit the N new videos; when it is off, the violet fix of the card on top); Cmd/Ctrl+O: Open folder; Esc: dismiss the top card (not the service or Claude card); Tab order: Open folder, warning fixes top to bottom, Make my edit">
+<meta name="mock-motion" content="A new clip row fades in 200 ms ease into a reserved row (rows below move only when a file arrives, never while reading); chip colour change New to In progress 200 ms; Make my edit press: fill colour 150 ms, then the label keeps its width while the icon becomes the busy loader (static fallback: loader still); skeleton shimmer 1200 ms linear (static fallback: flat bars). The pinned action bar never moves.">
+<title>P-05 New footage and Make my edit</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+</head>
+<body>
+<script>
+/* P-05 New footage and Make my edit (screen-inventory.md §3 P-05; Addendum G2). Edit tab.
+   - Where footage goes, by folder NAME ("the raw folder inside Sahha Clinic's folder") + Open folder; the panel
+     watches the folder (UXP takes no OS drop).
+   - Clip rows with New / In progress / Edited chips. Early checks (logo, fonts) as warn cards with one fix each.
+   - Make my edit in the pinned bar, with what Claude does and the trust line (a new project file; footage and other
+     projects untouched) and the ⌘⏎ hint.
+   - offline: Make my edit off, the service card's fix is violet. no-claude: the Claude card's Open Claude is violet. */
+(function () {
+  var t = M.t, D = M.D, P = PC.D;
+  var NEWI = P.newItem;
+
+  function chip(state) {
+    return { "new": M.chip("info", t("p05.state.new"), "circle-dashed"), in_progress: M.chip("warn", t("p05.state.in_progress"), "loader-circle"),
+      edited: M.chip("ok", t("p05.state.edited"), "circle-check") }[state];
+  }
+  function where() {
+    return PC.title(t("p05.title"), t("p05.where", { raw: M.html(M.mono(P.rawName)), client: D.client })) +
+      PC.acts([PC.kbtn(t("p04.open_folder"), "mod+O", { icon: "folder-open" })], "");
+  }
+  function clipList(set) {
+    var rows = set.map(function (c) {
+      var id = c.id === "C0241" ? NEWI : c.id === "C0239" ? D.item : c.id;
+      return PC.row(M.ico("film", 16, "ink-muted"), M.ltr(id, "lat code"), t("p04.clip.meta", { dur: M.html(M.mono(c.dur)), when: M.raw(c.when) }), chip(c.state));
+    }).join("");
+    return M.eyebrow(t("p05.clips"), "mt-5") + M.card(rows, "m-card-flush mt-2");
+  }
+  var ONE = [P.clips[0], P.clips[2], P.clips[3]];
+  var TWO = [P.clips[0], P.clips[1], P.clips[2], P.clips[3]];
+  function warnings(o) {
+    o = o || {};
+    return '<div class="mt-4">' + PC.notice("warn", t("p05.warn.logo"), { sub: t("p05.warn.sub"), btn: { label: t("p05.btn.logo"), icon: "folder-open" } }) + "</div>" +
+      (o.both ? '<div class="mt-2">' + PC.notice("warn", t("p05.warn.fonts"), { sub: t("p05.warn.sub"), btn: { label: t("p05.btn.fonts"), icon: "folder-open" } }) + "</div>" : "");
+  }
+  function bar(o) {
+    o = o || {};
+    var text = o.all ? t("p05.bar.all", { list: M.html(PC.code(NEWI).html + " · " + PC.code("C0242").html) }) : t("p05.bar.one", { item: PC.code(NEWI) });
+    var label = o.all ? t("p05.make_all", { n: 2 }) : t("p05.make");
+    return '<div class="t-meta tx-muted">' + text + "</div>" +
+      '<div class="mt-1">' + PC.trust(t("p05.trust"), "circle-check", o.disabled ? "ink-disabled" : "ink-ok") + "</div>" +
+      '<div class="m-col mt-2">' + PC.kbtn(label, "enter", { kind: "primary", block: true, icon: "clapperboard", disabled: o.disabled, focus: o.focus }) + "</div>" +
+      (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + "</div>" : "");
+  }
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+
+  var STATES = {
+    empty: function () {
+      return { body: M.empty({ icon: "folder-input", title: t("p05.empty"), text: t("p05.empty.text", { raw: M.html(M.mono(P.rawName)), client: D.client }),
+          btn: PC.kbtn(t("p04.open_folder"), "mod+O", { kind: "primary", icon: "folder-open" }) }) +
+          clipList([P.clips[2], P.clips[3]]) };
+    },
+    loading: function () {
+      var r = function () { return PC.row('<span class="m-skel-block" style="width:16px;height:16px"></span>', '<span class="m-skel-bar" style="width:64px;display:block;margin-top:6px"></span>', M.skel(40, 16), '<span class="m-skel-block" style="width:56px;height:24px"></span>'); };
+      return { body: '<div class="m-col">' + M.skel(40, 28) + M.skel(95, 20) + M.skel(60, 20) + '</div><span class="m-skel-block mt-2" style="width:132px;height:32px"></span>' +
+          M.eyebrow(t("p05.clips"), "mt-5") + M.card(r() + r() + r(), "m-card-flush mt-2"),
+        bar: '<div class="m-col">' + M.skel(85, 16) + M.skel(50, 16) + '<div class="mt-2"></div><span class="m-skel-block" style="height:40px"></span></div>' };
+    },
+    normal: function () { return { body: where() + warnings() + clipList(ONE), bar: bar() }; },
+    several: function () { return { body: where() + warnings({ both: true }) + clipList(TWO), bar: bar({ all: true }) }; },
+    focus: function () { return { body: where() + warnings() + clipList(ONE), bar: bar({ focus: true }) }; },
+    error: function () {
+      /* the service could not reach Claude: the header says so instead of collapsing to "All set" */
+      return { pillx: { claude: ["warn", t("p02.pill.no_answer")] }, body: slot(PC.notice("error", t("p05.failed", { item: PC.code(NEWI) }), { sub: t("p05.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw" } })) +
+        where() + clipList(ONE), bar: bar() };
+    },
+    offline: function () {
+      return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(PC.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
+          where() + clipList(ONE), bar: bar({ disabled: true, hint: t("p05.need_app") }) };
+    },
+    "no-claude": function () {
+      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
+        body: slot(PC.noClaude()) + where() + clipList(ONE), bar: bar({ disabled: true, hint: t("p05.need_claude") }) };
+    },
+    stale: function () {
+      return { pillx: { host: ["warn", t("p02.pill.restart")] }, body: slot(PC.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw" } })) + where() + clipList(ONE), bar: bar() };
+    },
+    "success-live": function () {
+      var set = [{ id: "C0241", state: "in_progress", dur: "1:42", when: "p04.demo.today" }, P.clips[2], P.clips[3]];
+      return { body: slot(PC.notice("ok", t("p05.sent_live", { item: PC.code(NEWI) }), { sub: t("p05.sent_live.sub") })) +
+        M.steps(["run", "pend", "pend", "pend", "pend", "pend", "pend"], 0, "busy") +
+        PC.acts([M.btn(t("p05.see_progress"), { icon: "list-checks" })], "mt-1") + clipList(set) };
+    },
+    "success-later": function () {
+      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
+        body: PC.notice("ok", t("p05.sent_later"), { sub: t("p05.sent_later.sub") }) +
+        '<div class="m-col mt-3">' + PC.kbtn(t("action.open_claude"), "enter", { kind: "primary", block: true, icon: "external-link" }) + "</div>" +
+        '<div class="mt-4"></div>' + where() + clipList(ONE) };
+    },
+    long: function () { return { body: where() + warnings({ both: true }) + clipList(TWO), bar: bar({ all: true }) }; }
+  };
+
+  PC.mount({
+    id: "P-05", name: "New footage and Make my edit",
+    states: ["empty", "loading", "normal", "several", "focus", "error", "offline", "no-claude", "stale", "success-live", "success-later", "long"],
+    defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "edit";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

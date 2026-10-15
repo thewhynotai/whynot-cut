@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,running-early,focus,waiting,failed,offline,no-claude,stale,done,long">
+<meta name="mock-keys" content="Cmd/Ctrl+Enter: the violet button (Review and approve / Try again / Open project / Open Claude / Make my edit); Cmd/Ctrl+.: Cancel the running step (asks nothing: the steps before it are kept); Esc: dismiss a card; Tab order: card fix, Cancel, then the done card's buttons. The step list is plain text (not focusable).">
+<meta name="mock-motion" content="Progress fill width 250 ms ease per update (static fallback: width jumps); the running segment and the running step icon: loader rotates 900 ms linear (static fallback: still loader); indeterminate bar: shimmer band moves 1200 ms linear (static fallback: the band sits in the middle); a step turning done: icon colour 200 ms; the done card fades in 200 ms into the slot of the progress card (same top edge, no jump). Never animates height.">
+<title>P-06 Pipeline progress</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+</head>
+<body>
+<script>
+/* P-06 Pipeline progress (+ done) (screen-inventory.md §3 P-06; direction §12; Addendum G2). Edit tab.
+   - Strip, then the current step's card: sentence with "23 of 47" at the end, the 4 px bar, elapsed + Cancel (⌘.).
+   - running-early: no count yet, so the indeterminate shimmer bar (G9).
+   - Steps card: the seven steps as plain text with state and time.
+   - waiting: Review and approve (primary). failed: what + why + Try again (one button); the technical details go to
+     Settings > Details for support, not on this screen. no-claude: the edit pauses at Plan, the Claude card.
+   - done: the handoff card with the time saved, the trust line (a new sequence; raw footage untouched), Verified /
+     Not verified / Needs you, Open project (primary). A sequence that did not pass QC never shows done. */
+(function () {
+  var t = M.t, D = M.D, P = PC.D;
+  function code(s) { return PC.code(s); }
+  var KEYS = ["transcript", "plan", "approve", "build", "frames", "qc", "handoff"];
+  var ICON = { done: "ok", run: "busy", wait: "warn", fail: "error", pend: "pending", pause: "warn" };
+  var ST = { done: "p06.st.done", run: "p06.st.running", wait: "p06.st.waiting", fail: "p06.st.failed", pend: "p06.st.pending", pause: "p06.st.paused" };
+  var TIMES = ["0:41", "1:05", "0:20", "", "", "", ""];
+
+  function head(states, cur, kind) {
+    return M.steps(states.map(function (s) { return s === "pause" ? "wait" : s; }), cur, kind) + '<div class="t-title mt-4">' + t("p06.title", { item: code(D.item) }) + "</div>";
+  }
+  function stepList(states) {
+    var rows = states.map(function (s, i) {
+      var time = s === "done" && TIMES[i] ? " · " + M.mono(TIMES[i]) : "";
+      return '<div class="pc-step">' + M.status(ICON[s]) + '<div class="pc-row-text"><div class="t-label' + (s === "pend" ? " tx-muted" : "") + '">' +
+        t("step." + KEYS[i]) + '</div><div class="t-meta ' + (s === "fail" ? "tx-error" : s === "wait" || s === "pause" ? "tx-warn" : "tx-muted") + '">' + t(ST[s]) + time + "</div></div></div>";
+    }).join("");
+    return M.eyebrow(t("p06.steps"), "mt-5") + M.card(rows, "m-card-flush mt-2");
+  }
+  function current(o) {
+    o = o || {};
+    var bar = o.indet ? PC.indet() : M.progress(o.pct || 49);
+    var cancel = PC.kbtn(t("p06.cancel"), "mod+.", { kind: "ghost", icon: "circle-stop", disabled: o.cancelOff, focus: o.focus });
+    return M.card(
+      '<div class="t-body">' + o.text + "</div>" + (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + "</div>" : "") +
+      '<div class="mt-3">' + bar + "</div>" +
+      '<div class="pc-meta-row mt-2">' + M.ico("clock", 12, "ink-muted") + '<span class="t-meta tx-muted ms-1 m-grow">' + t("p06.elapsed", { t: M.html(M.mono(o.time || "3:12")) }) + "</span>" + cancel + "</div>" +
+      (o.cancelOff ? '<div class="t-meta tx-muted mt-1">' + t("p06.cancel_off") + "</div>" : "") +
+      '<div class="mt-3">' + PC.trust(t("p06.claude_on"), "info", "ink-info") + "</div>", "mt-4");
+  }
+  var RUN = ["done", "done", "done", "run", "pend", "pend", "pend"];
+  function building(o) { o = o || {}; o.text = t("p06.building", { n: 23, of: 47 }); return current(o); }
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+  function list(icon, ink, items) {
+    return items.map(function (h) { return '<div class="pc-bullet">' + M.ico(icon, 16, ink) + '<div class="t-body ms-2 m-grow">' + h + "</div></div>"; }).join("");
+  }
+
+  var STATES = {
+    empty: function () {
+      return { body: M.steps(["pend", "pend", "pend", "pend", "pend", "pend", "pend"], 0, "pending") + '<div class="mt-4"></div>' +
+        M.empty({ icon: "clapperboard", title: t("p06.idle"), text: t("p06.idle.text"), btn: PC.kbtn(t("p05.make"), "enter", { kind: "primary", icon: "clapperboard" }) }) };
+    },
+    loading: function () {
+      return { body: '<div class="m-steps"><div class="m-stepbar"><span class="m-stepseg"></span><span class="m-stepseg"></span><span class="m-stepseg"></span><span class="m-stepseg"></span><span class="m-stepseg"></span><span class="m-stepseg"></span><span class="m-stepseg"></span></div><div class="mt-2">' + M.skel(40, 16) + "</div></div>" +
+        '<div class="mt-4">' + M.skel(55, 28) + "</div>" +
+        M.card(M.skel(90) + '<div class="mt-3"><span class="m-skel-block" style="height:4px"></span></div><div class="mt-2">' + M.skel(30, 16) + "</div>", "mt-4") +
+        M.eyebrow(t("p06.steps"), "mt-5") + M.card(M.skel(40) + M.skel(25, 16) + '<div class="mt-3"></div>' + M.skel(35) + M.skel(25, 16) + '<div class="mt-3"></div>' + M.skel(30) + M.skel(25, 16), "mt-2") };
+    },
+    normal: function () { return { body: head(RUN, 3, "busy") + building() + stepList(RUN) }; },
+    "running-early": function () {
+      var s = ["run", "pend", "pend", "pend", "pend", "pend", "pend"];
+      D.item = P.newItem;
+      return { body: head(s, 0, "busy") + current({ indet: true, text: t("p06.transcribing"), sub: t("p06.transcribing.sub"), time: "0:41" }) + stepList(s) };
+    },
+    focus: function () { return { body: head(RUN, 3, "busy") + building({ focus: true }) + stepList(RUN) }; },
+    waiting: function () {
+      var s = ["done", "done", "wait", "pend", "pend", "pend", "pend"];
+      return { needs: 1, body: head(s, 2, "warn") +
+        M.card('<div class="m-row-top">' + M.status("warn") + '<div class="t-body ms-2 m-grow">' + t("p06.waiting", { item: code(D.item) }) + "</div></div>" +
+          '<div class="m-col mt-3">' + PC.kbtn(t("p06.waiting_link"), "enter", { kind: "primary", block: true, icon: "circle-check-big" }) + "</div>", "mt-4") + stepList(s) };
+    },
+    failed: function () {
+      var s = ["done", "done", "done", "done", "fail", "pend", "pend"];
+      return { body: head(s, 4, "error") + '<div class="mt-4"></div>' +
+        PC.notice("error", t("p06.failed", { item: code(D.item) }), { sub: t("p06.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true }, dismiss: false }) +
+        stepList(s) };
+    },
+    offline: function () {
+      return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(PC.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
+          head(RUN, 3, "pending") + building({ cancelOff: true }) + stepList(RUN) };
+    },
+    "no-claude": function () {
+      var s = ["done", "pause", "pend", "pend", "pend", "pend", "pend"];
+      D.item = P.newItem;
+      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
+        body: head(s, 1, "warn") + '<div class="mt-4"></div>' +
+          PC.notice("warn", t("p06.paused", { item: code(D.item) }), { sub: t("p02.claude.why"), btn: { label: t("action.open_claude"), icon: "external-link", primary: true }, dismiss: false }) +
+          stepList(s) };
+    },
+    stale: function () {
+      return { pillx: { host: ["warn", t("p02.pill.restart")] }, body: slot(PC.notice("warn", t("update.stale"), { btn: { label: t("action.check_again"), icon: "refresh-cw" } })) + head(RUN, 3, "busy") + building() + stepList(RUN) };
+    },
+    done: function () {
+      var s = ["done", "done", "done", "done", "done", "done", "done"];
+      return { needs: 1, body: M.steps(s, 6, "ok") +
+        M.card('<div class="m-row-top">' + M.status("ok") + '<div class="t-title ms-2 m-grow">' + t("p06.done.title", { item: code(D.item) }) + "</div></div>" +
+          '<div class="t-body tx-muted mt-1">' + t("p06.done.sub") + "</div>" +
+          '<div class="mt-3">' + PC.saved('<span class="tx-text">' + t("p06.done.saved", { raw: M.html(M.mono(P.rawDur)), reel: M.html(M.mono(P.reelDur)), t: P.savedT[M.lang] }) + "</span>") + "</div>" +
+          '<div class="mt-1">' + PC.trust(t("p06.done.trust")) + "</div>" +
+          '<div class="t-label mt-4">' + t("p06.done.verified") + "</div>" + list("circle-check", "ink-ok", [t("p06.v1"), t("p06.v2"), t("p06.v3")]) +
+          '<div class="t-label mt-4">' + t("p06.done.not_verified") + "</div>" + list("circle-dashed", "ink-muted", [t("p06.n1")]) +
+          '<div class="t-label mt-4">' + t("p06.done.needs_you") + "</div>" + list("triangle-alert", "ink-warn", [t("p06.y1", { tc: M.html(M.mono("00:00:31:20")) })]) +
+          '<div class="m-col mt-4">' + PC.kbtn(t("p06.open"), "enter", { kind: "primary", block: true, icon: "external-link" }) + "</div>" +
+          PC.acts([M.btn(t("p06.reveal"), { icon: "folder-open" })]), "mt-4") };
+    },
+    long: function () { return { body: head(RUN, 3, "busy") + building() + stepList(RUN) }; }
+  };
+
+  PC.mount({
+    id: "P-06", name: "Pipeline progress",
+    states: ["empty", "loading", "normal", "running-early", "focus", "waiting", "failed", "offline", "no-claude", "stale", "done", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "edit";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

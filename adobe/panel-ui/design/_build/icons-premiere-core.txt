@@ -1,0 +1,30 @@
+# Premiere core group (P-02, P-04..P-12, P-21, P-22): extra Lucide names
+arrow-left      # back (mirrored per language in the renderer)
+arrow-right
+undo-2          # undo applied AI result
+download        # models
+trash-2         # remove model
+hard-drive      # disk space
+key-round       # API key
+user            # your name
+languages       # language setting
+folder          # client folder rows
+ear             # Needs you: confirm words by ear
+music           # Needs you: music
+type            # Needs you: fonts; AI: suggest titles
+film            # clip rows
+circle-stop     # Stop / Cancel running
+clock           # elapsed
+unplug          # Premiere not linked
+log-in          # Claude signed out
+scroll-text     # log drawer, summarise
+list-checks     # done / handoff card
+file-video      # review MP4
+plus            # new client
+image-off       # frame gone
+life-buoy       # open guide
+hash            # numbers to confirm
+text-quote      # AI summarise
+monitor-play    # final mix and render
+cpu             # models page row
+link-2-off      # link lost

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,aspect-4x5,focus,error,offline,no-claude,stale,success,long">
+<meta name="mock-keys" content="Arrow keys: move between frames (reading order, mirrored in Arabic); Enter or Space: move the playhead to the focused frame; R: Re-export the focused not-checked frame; Cmd/Ctrl+Enter: the violet button of a card on top (Try again / Start the service / Open Claude / Export frames); Esc: dismiss a card; Tab order: count chips are not focusable, frames in reading order, Request changes, Export frames">
+<meta name="mock-motion" content="Frame hover/focus: border colour 150 ms ease; a verdict arriving: the verdict icon and word cross-fade 200 ms and the still fades in 200 ms over its dark well (static fallback: instant); the media-pending loader rotates 900 ms linear (static fallback: still); skeleton tiles shimmer 1200 ms linear (static fallback: flat #242424 boxes of the exact still size). Tiles never change size when a verdict lands.">
+<title>P-08 QC frames</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+</head>
+<body>
+<script>
+/* P-08 QC frames (screen-inventory.md §3 P-08). Edit tab.
+   - Tiles in rows of 2 (300, 360) or 3 (480), built with flex rows (no two-dimensional layout module in UXP). A tile is
+     a control (tap = move the playhead): solid #141414, 2 px rest border, radius 8. The still follows the frame's
+     aspect (9:16 default, 4:5 in aspect-4x5); its height is set in px per width.
+   - Each tile: the still, the timecode (LTR), the verdict as icon + word, and the label in full (never cut).
+   - All four verdicts: Pass, Fail (error border), Pending (Re-export, the one primary), Media pending (no button).
+   - A failed tile is fixed through Request changes (inventory §7 #23).
+   - offline: tiles stay, tapping and Re-export disabled. stale: a tile whose file is gone. success: all passed. */
+(function () {
+  var t = M.t, D = M.D;
+  function code(s) { return PC.code(s); }
+  var COLS = M.w >= 480 ? 3 : 2;
+  var CONTENT = M.w - (M.w === 300 ? 24 : 32);
+  var TILE = Math.floor((CONTENT - 8 * (COLS - 1)) / COLS);
+  var THUMB_W = TILE - 16;
+  var TONES = ["", " pc-thumb-b", " pc-thumb-c", " pc-thumb-d"];
+  var VERDICT = { pass: ["ok", "p08.pass", "tx-ok"], fail: ["error", "p08.fail", "tx-error"], pending: ["pending", "p08.pending", "tx-muted"],
+    media: ["warn", "p08.media_pending", "tx-warn"], gone: ["error", "p08.gone", "tx-error"] };
+
+  var FRAMES = [
+    { tc: "00:00:01:00", v: "pass", l: "p08.l.hook" },
+    { tc: "00:00:09:12", v: "pass", l: "p08.l.bar" },
+    { tc: "00:00:14:08", v: "fail", l: "p08.l.cap" },
+    { tc: "00:00:22:16", v: "pending", l: "p08.l.broll" },
+    { tc: "00:00:31:20", v: "media", l: "p08.l.check" },
+    { tc: "00:00:51:04", v: "pass", l: "p08.l.end" }
+  ];
+
+  function thumb(i, f, h) {
+    if (f.v === "gone") return '<div class="pc-thumb pc-thumb-gone" style="height:' + h + 'px">' + M.ico("image-off", 20, "ink-muted") + "</div>";
+    if (f.v === "media") return '<div class="pc-thumb pc-thumb-wait" style="height:' + h + 'px">' + M.status("busy", 20) + "</div>";
+    var w1 = Math.round(THUMB_W * 0.8), w2 = Math.round(THUMB_W * 0.55);
+    return '<div class="pc-thumb' + TONES[i % 4] + '" style="height:' + h + 'px">' +
+      '<span class="pc-cap" style="width:' + w1 + 'px"></span><span class="pc-cap pc-cap-2" style="width:' + w2 + 'px"></span></div>';
+  }
+  function tile(i, f, o) {
+    var v = VERDICT[f.v], dis = o.disabled;
+    var h = Math.round(THUMB_W * (o.aspect === "4x5" ? 5 / 4 : 16 / 9));
+    var cls = "pc-tile" + (f.v === "fail" ? " pc-tile-fail" : "") + (dis ? " pc-tile-disabled" : "") + (o.focus === i ? " pc-tile-focus" : "");
+    var aria = M.esc(M.raw("frame.seek") || "");
+    var btn = "";
+    if (f.v === "pending") btn = '<div class="m-col mt-2">' + PC.kbtn(t("p08.reexport"), "R", { kind: o.noPrimary ? "secondary" : "primary", icon: "refresh-cw", disabled: dis }) + "</div>";
+    return '<div class="' + cls + '" role="button"' + (dis ? ' aria-disabled="true" tabindex="-1"' : ' tabindex="0"') + ">" + thumb(i, f, h) +
+      '<div class="t-mono tx-muted mt-2">' + M.mono(f.tc) + "</div>" +
+      '<div class="m-row mt-1">' + M.status(v[0], 12) + '<span class="t-caption ' + v[2] + ' ms-1">' + t(v[1]) + "</span></div>" +
+      '<div class="t-meta mt-1">' + t(f.l) + "</div>" +
+      (f.v === "media" ? '<div class="t-meta tx-muted">' + t("p08.media.sub") + "</div>" : "") + btn + "</div>";
+  }
+  function tiles(frames, o) {
+    o = o || {};
+    var out = "";
+    for (var i = 0; i < frames.length; i += COLS) {
+      var row = "";
+      for (var j = 0; j < COLS; j++) row += frames[i + j] ? tile(i + j, frames[i + j], o) : '<span class="pc-tile-fill"></span>';
+      out += '<div class="pc-tilerow">' + row + "</div>";
+    }
+    return '<div class="pc-tiles mt-4">' + out + "</div>";
+  }
+  function head(frames) {
+    var n = { pass: 0, fail: 0, pending: 0 };
+    frames.forEach(function (f) { if (f.v === "pass") n.pass++; else if (f.v === "fail" || f.v === "gone") n.fail++; else n.pending++; });
+    var chips = [M.chip("ok", t("p08.counts.pass", { n: n.pass }), "circle-check")];
+    if (n.fail) chips.push(M.chip("error", t("p08.counts.fail", { n: n.fail }), "circle-x"));
+    if (n.pending) chips.push(M.chip("neutral", t("p08.counts.pending", { n: n.pending }), "circle-dashed"));
+    return M.steps(["done", "done", "done", "done", "done", "run", "pend"], 5, "busy") +
+      M.eyebrow(t("p08.section"), "mt-5") + '<div class="t-title mt-1">' + t("p08.title", { item: code(D.item) }) + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p08.hint") + "</div>" +
+      (n.pending ? '<div class="mt-1">' + PC.trust(t("p08.reexport.trust")) + "</div>" : "") +
+      '<div class="pc-model-acts">' + chips.map(function (c) { return '<div class="m-row me-2 mt-2">' + c + "</div>"; }).join("") + "</div>";
+  }
+  function failCard(o) {
+    o = o || {};
+    return M.card('<div class="m-row-top">' + M.status("error") + '<div class="t-body ms-2 m-grow">' + t("p08.fail_hint") + "</div></div>" +
+      PC.acts([M.btn(t("p08.request"), { icon: "message-square", disabled: o.disabled || o.noClaude }), M.btn(t("p08.export"), { kind: "ghost", icon: "film", disabled: o.disabled })]) +
+      (o.noClaude ? '<div class="t-meta tx-muted mt-1">' + t("p08.no_claude") + "</div>" : ""), "mt-4");
+  }
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+
+  var STATES = {
+    empty: function () {
+      return { body: M.steps(["done", "done", "wait", "pend", "pend", "pend", "pend"], 2, "warn") + '<div class="mt-4"></div>' +
+        M.empty({ icon: "image-off", title: t("p08.empty"), text: t("p08.empty.text") }) };
+    },
+    loading: function () {
+      var h = Math.round(THUMB_W * 16 / 9), sk = [];
+      for (var i = 0; i < COLS * 2; i++) sk.push(1);
+      var out = "";
+      for (var r = 0; r < 2; r++) {
+        var row = "";
+        for (var j = 0; j < COLS; j++) row += '<div class="pc-tile pc-tile-disabled"><span class="pc-skel-thumb" style="height:' + h + 'px"></span><div class="mt-2">' + M.skel(70, 16) + M.skel(40, 16) + M.skel(85, 16) + "</div></div>";
+        out += '<div class="pc-tilerow">' + row + "</div>";
+      }
+      return { body: M.steps(["done", "done", "done", "done", "run", "pend", "pend"], 4, "busy") + M.eyebrow(t("p08.section"), "mt-5") +
+        '<div class="mt-1">' + M.skel(60, 28) + "</div>" + M.skel(70, 16) + '<div class="pc-tiles mt-4">' + out + "</div>" };
+    },
+    normal: function () { return { body: head(FRAMES) + tiles(FRAMES) + failCard() }; },
+    "aspect-4x5": function () { return { body: head(FRAMES) + tiles(FRAMES, { aspect: "4x5" }) + failCard() }; },
+    focus: function () { return { body: head(FRAMES) + tiles(FRAMES, { focus: 1 }) + failCard() }; },
+    error: function () {
+      return { body: slot(PC.notice("error", t("p08.failed", { item: code(D.item) }), { sub: t("p08.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
+        head(FRAMES) + tiles(FRAMES, { noPrimary: true }) + failCard() };
+    },
+    offline: function () {
+      return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(PC.notice("error", t("engine.off"), { sub: t("p08.offline_hint"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
+          head(FRAMES) + tiles(FRAMES, { disabled: true }) + failCard({ disabled: true }) };
+    },
+    "no-claude": function () {
+      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
+        body: slot(PC.noClaude()) + head(FRAMES) + tiles(FRAMES, { noPrimary: true }) + failCard({ noClaude: true }) };
+    },
+    stale: function () {
+      var fr = FRAMES.slice(); fr[1] = { tc: "00:00:09:12", v: "gone", l: "p08.l.bar" };
+      return { body: slot(PC.notice("info", t("p08.bad_frame", { tc: M.html(M.mono("00:00:09:12")) }), { sub: t("p08.bad_frame.sub"), btn: { label: t("p08.export"), icon: "film", primary: true } })) +
+        head(fr) + tiles(fr, { noPrimary: true }) + failCard() };
+    },
+    success: function () {
+      var fr = FRAMES.map(function (f) { return { tc: f.tc, v: "pass", l: f.l }; });
+      return { body: slot(PC.notice("ok", t("p08.all_pass"))) + head(fr) + tiles(fr) +
+        PC.acts([M.btn(t("p08.export"), { kind: "ghost", icon: "film", flush: true })], "mt-2") };
+    },
+    long: function () {
+      var fr = FRAMES.slice(); fr[1] = { tc: "00:00:09:12", v: "pass", l: "p08.l.long" };
+      return { body: head(fr) + tiles(fr) + failCard() };
+    }
+  };
+
+  PC.mount({
+    id: "P-08", name: "QC frames",
+    states: ["empty", "loading", "normal", "aspect-4x5", "focus", "error", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "edit";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

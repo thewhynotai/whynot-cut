@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,normal,loading,ready,rejected,focus,error,no-claude,offline,success,stale,long">
+<meta name="mock-keys" content="1 / 2 / 3: choose Fix captions / Suggest titles / Summarise; Up/Down: move between the jobs; Cmd/Ctrl+Enter: Run, or Apply when a result is shown; Esc: Discard the result (nothing changes); Cmd/Ctrl+.: Stop while Claude works; Cmd/Ctrl+Z: Undo right after Apply; Tab order: Back, jobs, Run (or Apply, Discard)">
+<meta name="mock-motion" content="Choosing a job: the radio dot scales in 150 ms ease (static fallback: instant); working: the shimmer band moves 1200 ms linear (static fallback: band in the middle); the result list fades in 200 ms into the slot of the working card; Apply: the applied lines tint green for 600 ms then settle; Undo restores them with the same fade. The pinned bar never moves.">
+<title>P-12 AI action sheet</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+</head>
+<body>
+<script>
+/* P-12 AI action sheet (screen-inventory.md §3 P-12). Tools tab. The panel never runs Claude itself: the WhyNot Cut
+   app sends only text to the editor's own Claude, the panel shows the result, the editor presses Apply.
+   - empty / normal: the three jobs (C1.7) as radio rows with a one-line purpose; Run is the form-ending primary in
+     the pinned bar. empty = nothing chosen yet (Run off), normal = Fix captions chosen.
+   - loading: "Claude is working…" with the indeterminate bar (G9) and Stop.
+   - ready: before / after per line (Arabic as said, timecode LTR), Apply (primary) + Discard in the bar.
+   - rejected: a line the faithfulness check refused keeps the source and says so.
+   - no-claude: Claude not open; the Claude card (whose account, no extra charge, what Claude sees, in the approved wording) takes the violet.
+     offline: the service card, everything off. Apply carries the trust line (these lines only; Undo puts them back).
+   - success: "Applied to 3 lines." + Undo. stale: the text changed under the result. */
+(function () {
+  var t = M.t, D = M.D, P = PC.D;
+  function code(s) { return PC.code(s); }
+  var JOBS = [["fix_captions", "captions"], ["suggest_titles", "type"], ["summarise", "text-quote"]];
+
+  function top() {
+    return PC.back(t("p12.back")) + PC.title(t("p12.title")) +
+      '<div class="m-row-top mt-2"><div class="m-last-ico">' + M.status("info", 12) + '</div><div class="t-meta tx-muted ms-1 m-grow">' + t("p12.privacy") + "</div></div>";
+  }
+  function jobs(sel, o) {
+    o = o || {};
+    var rows = JOBS.map(function (j, i) {
+      var sub = j[0] === "fix_captions" ? t("p12.fix_captions.sub", { item: code(D.item) }) : t("p12." + j[0] + ".sub");
+      return (i ? '<div class="mt-1"></div>' : "") + PC.radio(t("p12." + j[0]), sub, sel === j[0], { disabled: o.disabled });
+    }).join("");
+    return M.card(rows + '<span class="m-divider mt-2"></span><div class="t-meta tx-muted mt-2">' + t("p12.backend") + "</div>", "mt-4");
+  }
+  function runBar(o) {
+    o = o || {};
+    return PC.kbtn(t("p12.run"), "enter", { kind: "primary", block: true, icon: "play", disabled: o.disabled, focus: o.focus });
+  }
+  function diffCard(o) {
+    o = o || {};
+    var list = [], n = 0;
+    P.diff.forEach(function (d) { if (o.rejected || !d.kept) list.push(d); if (!d.kept) n++; });
+    var rows = list.map(function (d) {
+      var line = function (tag, txt, muted) {
+        return '<div class="pc-diff-line"><span class="pc-diff-tag t-meta">' + t(tag) + '</span><span class="pc-diff-txt ar-run' + (muted ? " tx-muted" : "") + '" dir="rtl" lang="ar">' + M.esc(txt) + "</span></div>";
+      };
+      return '<div class="pc-diff"><div class="m-row"><span class="t-mono tx-muted">' + M.mono(d.tc) + "</span></div>" +
+        (d.kept ? '<div class="m-row mt-1">' + M.chip("warn", t("p12.kept_source"), "triangle-alert") + "</div>" : "") +
+        line("p12.before", d.before, !d.kept) + line("p12.after", d.after, !!d.kept) +
+        (d.kept ? '<div class="t-meta tx-muted mt-1">' + t("p12.kept.why") + "</div>" : "") + "</div>";
+    }).join("");
+    return M.card('<div class="t-label">' + t("p12.result", { n: n, of: 42 }) + '</div><div class="t-meta tx-muted">' + t("p12.result.sub") + "</div>" +
+      '<div class="m-col mt-1">' + rows + "</div>", "mt-4");
+  }
+  function applyBar(o) {
+    o = o || {};
+    return PC.trust(t("p12.trust", { n: 3 })) +
+      '<div class="pc-stack mt-2">' + PC.kbtn(t("p12.apply"), "enter", { kind: "primary", block: true, icon: "check", focus: o.focus }) + '<div class="mt-2"></div>' +
+      PC.kbtn(t("p12.discard"), "Esc", { block: true, icon: "x" }) + "</div>";
+  }
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+
+  var STATES = {
+    empty: function () { return { body: top() + jobs(null), bar: runBar({ disabled: true }) }; },
+    normal: function () { return { body: top() + jobs("fix_captions"), bar: runBar() }; },
+    loading: function () {
+      return { body: top() + M.card('<div class="m-row">' + M.status("busy") + '<div class="t-body ms-2 m-grow">' + t("p12.working") + "</div></div>" +
+        '<div class="t-meta tx-muted mt-1">' + t("p12.working.sub", { item: code(D.item) }) + '</div><div class="mt-3">' + PC.indet() + "</div>" +
+        '<div class="pc-meta-row mt-2"><span class="t-meta tx-muted m-grow">' + t("p06.elapsed", { t: M.html(M.mono("0:18")) }) + "</span>" +
+        PC.kbtn(t("p12.stop"), "mod+.", { kind: "ghost", icon: "circle-stop" }) + "</div>", "mt-4") };
+    },
+    ready: function () { return { body: top() + diffCard(), bar: applyBar() }; },
+    rejected: function () { return { body: top() + diffCard({ rejected: true }), bar: applyBar() }; },
+    focus: function () { return { body: top() + diffCard(), bar: applyBar({ focus: true }) }; },
+    error: function () {
+      return { body: slot(PC.notice("error", t("p12.failed"), { sub: t("p12.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
+        top() + jobs("fix_captions") };
+    },
+    "no-claude": function () {
+      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
+        body: slot(PC.noClaude()) + top() + jobs("fix_captions", { disabled: true }), bar: runBar({ disabled: true }) };
+    },
+    offline: function () {
+      return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(PC.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
+          top() + jobs("fix_captions", { disabled: true }), bar: runBar({ disabled: true }) };
+    },
+    success: function () {
+      return { body: slot(PC.notice("ok", t("p12.applied", { n: 3 }), { extra: '<div class="mt-1">' + PC.saved(t("p12.applied.saved")) + "</div>",
+          btn: { label: t("p12.undo"), icon: "undo-2", key: "mod+Z" } })) + top() + jobs("fix_captions"), bar: runBar() };
+    },
+    stale: function () { return { body: slot(PC.notice("info", t("p12.stale"))) + top() + jobs("fix_captions"), bar: runBar() }; },
+    long: function () { return { body: top() + diffCard({ rejected: true }), bar: applyBar() }; }
+  };
+
+  PC.mount({
+    id: "P-12", name: "AI action sheet",
+    states: ["empty", "normal", "loading", "ready", "rejected", "focus", "error", "no-claude", "offline", "success", "stale", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "tools";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

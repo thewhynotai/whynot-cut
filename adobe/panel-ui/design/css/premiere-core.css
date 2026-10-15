@@ -1,0 +1,134 @@
+/* WhyNot Cut 3.0 E-D2: Premiere core group (P-02, P-04 to P-12, P-21, P-22). Loaded after ../mockup.css.
+   Same UXP limits as mockup.css: flexbox only, explicit display on every element, physical margins swapped under
+   .m-rtl, no shadows / effects / opacity / flex spacing, state as classes, radius 8 on controls, 16 on cards and
+   notices, 999 on <span> only. Paddings count the border and land on 4 / 8 / 12 / 16 / 24.
+   Classes marked SHARED are general components proposed for promotion into mockup.css. */
+
+/* ---- SHARED: back link row (a ghost button with a mirrored arrow) ---- */
+.pc-back { display: flex; flex-direction: row; margin-bottom: 8px; }
+
+/* ---- SHARED: static info rows inside a card (not controls) ---- */
+.pc-row { display: flex; flex-direction: row; align-items: flex-start; padding: 12px 0; }
+.pc-row + .pc-row { border-top: 1px solid var(--mk-divider); }
+.pc-row > .m-ico { margin-top: 2px; }
+.m-rtl .pc-row > .m-ico { margin-top: 4px; }
+.pc-row-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 8px; }
+.m-rtl .pc-row-text { margin-left: 0; margin-right: 8px; }
+.pc-row-end { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; margin-left: 8px; }
+.m-rtl .pc-row-end { margin-left: 0; margin-right: 8px; }
+.pc-row-disabled .t-label, .pc-row-disabled .t-body { color: var(--mk-text-disabled); }
+
+/* ---- SHARED: a selectable list row (control). Selected = #383838 (control-pressed) + a check mark, the same
+   decision as the language segment: the deep violet read as a second violet fill next to the primary ---- */
+.pc-pick { display: flex; flex-direction: row; align-items: flex-start; min-height: 40px; padding: 6px 10px; border: 2px solid var(--mk-card-solid); border-radius: 8px; background: var(--mk-card-solid); cursor: pointer; }
+.pc-pick > .m-ico { margin-top: 2px; }
+.m-rtl .pc-pick > .m-ico { margin-top: 4px; }
+.pc-pick-on { background: var(--mk-control-pressed); border-color: var(--mk-control-pressed); }
+.pc-pick-disabled { background: var(--mk-control-disabled); border-color: var(--mk-control-disabled); cursor: default; }
+.pc-pick-disabled .t-label, .pc-pick-disabled .t-meta, .pc-pick-disabled .mono, .pc-pick-disabled .tx-text { color: var(--mk-text-disabled); }
+.pc-pick-focus { border-color: var(--mk-focus-border); }
+.pc-pick-chev { display: flex; flex-direction: row; align-self: center; flex: 0 0 auto; margin-left: 8px; }
+.m-rtl .pc-pick-chev { margin-left: 0; margin-right: 8px; }
+/* a path or long name that the editor reads to decide: wraps, never cut */
+.pc-wrap { white-space: normal; overflow-wrap: anywhere; word-break: normal; }
+
+/* ---- SHARED: radio row (a 32 px control row with a 20 px <span> dot) ---- */
+.pc-radio { display: flex; flex-direction: row; align-items: flex-start; min-height: 32px; padding: 2px 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.pc-dot { display: flex; align-items: center; justify-content: center; flex: 0 0 20px; width: 20px; height: 20px; margin-top: 0; border: 2px solid var(--mk-border-input); border-radius: 999px; }
+.m-rtl .pc-dot { margin-top: 2px; }
+.pc-dot-on { border-color: var(--twn-text); }
+.pc-dot-in { display: block; width: 8px; height: 8px; border-radius: 999px; background: var(--twn-text); }
+.pc-radio-disabled { cursor: default; }
+.pc-radio-disabled .pc-dot { border-color: var(--mk-text-disabled); }
+.pc-radio-disabled .t-label, .pc-radio-disabled .t-meta { color: var(--mk-text-disabled); }
+.pc-radio-focus { border-color: var(--mk-focus-border); }
+
+/* ---- SHARED: confirm dialog (G6): an in-panel sheet card with the warn tint, no overlay ---- */
+.pc-dialog { display: flex; flex-direction: column; padding: 15px; border: 1px solid var(--mk-warn-line); border-radius: 16px; background: var(--mk-warn-tint); }
+.m-w300 .pc-dialog { padding: 11px; }
+.pc-dialog-danger { border-color: var(--mk-error-line); background: var(--mk-error-tint); }
+.pc-bullet { display: flex; flex-direction: row; align-items: flex-start; margin-top: 8px; }
+.pc-bullet > .m-ico { margin-top: 2px; }
+.m-rtl .pc-bullet > .m-ico { margin-top: 4px; }
+/* the dialog's two buttons stack full width: no row of controls to break at 280 px */
+.pc-stack { display: flex; flex-direction: column; }
+
+/* ---- SHARED: log drawer open (G7) ---- */
+.pc-logbody { display: flex; flex-direction: column; margin-bottom: 8px; padding: 8px 12px; border-radius: 8px; background: var(--twn-frame-bg); }
+.pc-logline { display: flex; flex-direction: row; align-items: flex-start; direction: ltr; text-align: left; }
+.pc-logline + .pc-logline { margin-top: 4px; }
+.pc-logtime { display: block; flex: 0 0 auto; margin-right: 8px; color: var(--mk-text-disabled); }
+.pc-logtext { display: block; flex: 1 1 auto; min-width: 0; color: var(--twn-text-muted); overflow-wrap: anywhere; word-break: normal; }
+.pc-logtext-err { color: var(--twn-error); }
+.pc-logtext-warn { color: var(--twn-warn); }
+.pc-logfoot { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 8px; }
+
+/* ---- SHARED: indeterminate progress (G9): the shimmer band moves along the track; a still frame shows the band ---- */
+.pc-indet {
+  display: block; height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg, rgba(255,255,255,.12) 0%, rgba(255,255,255,.12) 30%, #D95C9B 45%, #5400FB 55%, rgba(255,255,255,.12) 70%, rgba(255,255,255,.12) 100%);
+  background-size: 300% 100%; background-position: 50% 0;
+  animation: m-shimmer var(--mk-dur-shimmer) linear infinite;
+}
+.pc-meta-row { display: flex; flex-direction: row; align-items: center; min-height: 32px; }
+
+/* ---- P-06 step list (plain text, not controls) ---- */
+.pc-step { display: flex; flex-direction: row; align-items: flex-start; padding: 8px 0; }
+.pc-step + .pc-step { border-top: 1px solid var(--mk-divider); }
+.pc-step > .m-ico { margin-top: 2px; }
+.m-rtl .pc-step > .m-ico { margin-top: 4px; }
+
+/* ---- P-08 QC frame tiles: rows of 2 (3 at 480); a tile is a control (tap to move the playhead) ---- */
+.pc-tiles { display: flex; flex-direction: column; }
+.pc-tilerow { display: flex; flex-direction: row; align-items: stretch; }
+.pc-tilerow + .pc-tilerow { margin-top: 8px; }
+.pc-tile { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; padding: 6px; border: 2px solid var(--mk-card-solid); border-radius: 8px; background: var(--mk-card-solid); cursor: pointer; }
+.pc-tile + .pc-tile, .pc-tile + .pc-tile-fill { margin-left: 8px; }
+.m-rtl .pc-tile + .pc-tile, .m-rtl .pc-tile + .pc-tile-fill { margin-left: 0; margin-right: 8px; }
+.pc-tile-fill { display: block; flex: 1 1 0; min-width: 0; }
+.pc-tile-focus { border-color: var(--mk-focus-border); }
+.pc-tile-fail { border-color: var(--mk-error-line); }
+.pc-tile-disabled { cursor: default; }
+.pc-thumb { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-radius: 4px; padding: 8px; background: linear-gradient(180deg, #2A2236 0%, #17121F 55%, #0D0D0D 100%); }
+.pc-thumb-b { background: linear-gradient(180deg, #1F2B2E 0%, #121A1C 55%, #0D0D0D 100%); }
+.pc-thumb-c { background: linear-gradient(180deg, #33261C 0%, #1C1510 55%, #0D0D0D 100%); }
+.pc-thumb-d { background: linear-gradient(180deg, #24262E 0%, #15161B 55%, #0D0D0D 100%); }
+.pc-thumb-gone { justify-content: center; background: var(--twn-frame-bg); }
+.pc-thumb-wait { justify-content: center; background: var(--twn-frame-bg); }
+/* a drawn caption bar inside the frame (stands in for the rendered still) */
+.pc-cap { display: block; height: 6px; border-radius: 2px; background: #FFFFFF; }
+.pc-cap-2 { margin-top: 4px; background: #B3B3B3; }
+.pc-skel-thumb { display: block; border-radius: 4px; background: var(--mk-skeleton); }
+
+/* ---- P-12 before / after ---- */
+.pc-diff { display: flex; flex-direction: column; padding: 12px 0; }
+.pc-diff + .pc-diff { border-top: 1px solid var(--mk-divider); }
+.pc-diff-line { display: flex; flex-direction: row; align-items: flex-start; margin-top: 4px; }
+.pc-diff-tag { display: block; flex: 0 0 48px; width: 48px; color: var(--twn-text-muted); }
+.pc-diff-txt { display: block; flex: 1 1 auto; min-width: 0; }
+
+/* ---- P-21 model rows ---- */
+.pc-model { display: flex; flex-direction: column; padding: 12px 0; }
+.pc-model + .pc-model { border-top: 1px solid var(--mk-divider); }
+.pc-model-acts { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+
+/* ---- P-22 settings ---- */
+.pc-set { display: flex; flex-direction: column; padding: 12px 0; }
+.pc-set + .pc-set { border-top: 1px solid var(--mk-divider); }
+.pc-saved { display: flex; flex-direction: row; align-items: center; margin-top: 8px; }
+
+/* a short item code (12 characters or fewer) inside a sentence never breaks ("C024 / 1"); a long one still may */
+.m-panel .pc-nb { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+/* a long name moves to the next line whole when it fits there; it breaks inside only when it is wider than a line */
+.m-panel .pc-cw { word-break: normal; overflow-wrap: anywhere; }
+/* a size ("1.2 GB") never breaks between the number and the unit */
+.pc-model .mono, .pc-saved .mono { white-space: nowrap; }
+
+/* a trust line (what an action creates or changes, what stays untouched) and a time-saved line */
+.pc-trust { display: flex; flex-direction: row; align-items: flex-start; }
+.pc-trust .m-last-ico { margin-top: 2px; }
+.m-rtl .pc-trust .m-last-ico { margin-top: 4px; }
+/* the first bullet of a list sits flush with the card's top padding */
+.pc-bullet.pc-first { margin-top: 0; }
+/* keycap on a danger fill: the shared rule only covers primary; same rule as tools-ae.css (candidate for mockup.css) */
+.m-btn-danger .m-kbd { border-color: var(--twn-on-error); color: var(--twn-on-error); }

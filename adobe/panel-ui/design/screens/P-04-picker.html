@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,clips,focus,error,offline,no-claude,success,long">
+<meta name="mock-keys" content="Up/Down: move between client (or clip) rows; Enter: open the focused row; Cmd/Ctrl+N: New client; Cmd/Ctrl+Enter: the violet button (Choose client folder / Choose another folder / Start the service / Open Claude); Esc: back (clips to clients, clients to Home); Tab order: Back, rows top to bottom, New client, Open folder">
+<meta name="mock-motion" content="Row hover and focus: border colour 150 ms ease; selecting a row: fill colour 200 ms to #383838 and the check fades in 150 ms; clients to clips: content cross-fades 200 ms with no slide (static fallback: instant swap); skeleton shimmer 1200 ms linear (static fallback: flat #242424 bars of the same size). No layout shift: rows keep their height when selected.">
+<title>P-04 Client and clip picker</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+</head>
+<body>
+<script>
+/* P-04 Client and clip picker (screen-inventory.md §3 P-04; Addendum G2). Opens from the header's client · item line.
+   - Client rows: name, clip count + last edit, time saved this week (value line). Folder NAMES only, no drive paths.
+   - The current client is selected (#383838 fill + check; the deep violet read as a second violet fill).
+   - Tapping a row is the action, so the list has no violet button. New client is secondary and needs Claude.
+   - empty: one primary. error: the chosen folder is not a client folder; its fix takes the violet.
+   - offline: last known list, rows disabled. no-claude: picking still works; New client is off with the Claude card. */
+(function () {
+  var t = M.t, D = M.D, P = PC.D;
+  var DONE = M.ico("check", 16, "ink-ok");
+
+  function clientRows(o) {
+    o = o || {};
+    return P.clients.map(function (c, i) {
+      var name = c.name || D.client;
+      return (i ? '<div class="mt-2"></div>' : "") + PC.pick({
+        icon: "folder", title: M.txt(name), on: i === 0 && !o.disabled, disabled: o.disabled, focus: o.focus && i === 1,
+        sub: t("p04.meta", { n: c.n, ago: M.raw(c.ago) }),
+        sub2: '<span class="tx-text">' + t("p04.saved", { t: M.raw(c.saved) }) + "</span>",
+        end: i === 0 && !o.disabled ? DONE : undefined
+      });
+    }).join("");
+  }
+  function clients(o) {
+    o = o || {};
+    return PC.back(t("p04.back_home")) + PC.title(t("p04.title")) +
+      '<div class="t-meta tx-muted mt-1">' + t("p04.root", { name: M.html(M.ltr(P.rootName)) }) + " · " + t("p04.root.sub") + "</div>" +
+      (o.note ? '<div class="mt-3">' + PC.trust(o.note, "info", "ink-info") + "</div>" : "") +
+      '<div class="m-col mt-4">' + clientRows(o) + "</div>" +
+      PC.acts([PC.kbtn(t("p04.new"), "mod+N", { icon: "plus", disabled: o.disabled || o.noClaude }),
+        M.btn(t("p04.open_folder"), { kind: "ghost", icon: "folder-open" })], "mt-2") +
+      '<div class="t-meta tx-muted mt-1">' + (o.noClaude ? t("p04.new_off") : t("p04.new_hint")) + "</div>";
+  }
+  function clips() {
+    var rows = P.clips.map(function (c, i) {
+      var chip = { "new": M.chip("info", t("p05.state.new"), "circle-dashed"), in_progress: M.chip("warn", t("p05.state.in_progress"), "loader-circle"),
+        edited: M.chip("ok", t("p05.state.edited"), "circle-check") }[c.state];
+      var on = c.id === "C0239";
+      return (i ? '<div class="mt-2"></div>' : "") + PC.pick({
+        icon: "film", on: on, title: M.ltr(on ? D.item : c.id, "lat code"),
+        sub: t("p04.clip.meta", { dur: M.html(M.mono(c.dur)), when: M.raw(c.when) }),
+        end: chip + (on ? '<span class="ms-2">' + DONE + "</span>" : "")
+      });
+    }).join("");
+    return PC.back(t("p04.back_clients")) + PC.title(t("p04.item_title")) +
+      '<div class="t-meta tx-muted mt-1">' + M.txt(D.client) + "</div>" +
+      '<div class="m-col mt-4">' + rows + "</div>" +
+      PC.acts([M.btn(t("p04.open_folder"), { kind: "ghost", icon: "folder-open", flush: true })], "mt-2");
+  }
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+  function skelRow() {
+    return '<div class="pc-pick pc-pick-disabled"><span class="m-skel-block" style="width:16px;height:16px;margin-top:2px"></span><div class="pc-row-text">' +
+      M.skel(45) + M.skel(65, 16) + M.skel(40, 16) + "</div></div>";
+  }
+
+  var STATES = {
+    empty: function () {
+      var text = t("p04.noclient.text", { assets: M.html(M.mono("assets")), data: M.html(M.mono("data")) });
+      return { noclient: true,
+        body: PC.back(t("p04.back_home")) + M.empty({ icon: "folder-open", title: t("empty.noclient.title"), text: text,
+          btn: PC.kbtn(t("empty.noclient.action"), "enter", { kind: "primary", icon: "folder-open" }) }) };
+    },
+    loading: function () {
+      return { body: PC.back(t("p04.back_home")) + PC.title(t("p04.title")) + '<div class="mt-1">' + M.skel(70, 16) + "</div>" +
+        '<div class="m-col mt-4">' + skelRow() + '<div class="mt-2"></div>' + skelRow() + '<div class="mt-2"></div>' + skelRow() + "</div>" };
+    },
+    normal: function () { return { body: clients() }; },
+    clips: function () { return { body: clips() }; },
+    focus: function () { return { body: clients({ focus: true }) }; },
+    error: function () {
+      return { body: slot(PC.notice("error", t("p04.bad", { name: P.badFolder }), {
+          sub: t("p04.bad.sub", { assets: M.html(M.mono("assets")), data: M.html(M.mono("data")) }),
+          btn: { label: t("p04.pick_other"), icon: "folder-open", primary: true } })) + clients() };
+    },
+    offline: function () {
+      return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(PC.notice("error", t("engine.off"), { sub: t("engine.off.hint_short"), btn: { label: t("action.start_app"), icon: "power", primary: true }, dismiss: false })) +
+          clients({ disabled: true, note: t("p04.offline_list") }) };
+    },
+    "no-claude": function () {
+      return { pillx: { claude: ["warn", t("p02.pill.not_open")] },
+        body: slot(PC.noClaude()) + clients({ noClaude: true }) };
+    },
+    success: function () {
+      D.item = P.newItem;
+      return { body: slot(PC.notice("ok", t("p04.picked", { item: PC.code(D.item), client: D.client }))) + clients() };
+    },
+    long: function () { return { body: clients() }; }
+  };
+
+  PC.mount({
+    id: "P-04", name: "Client and clip picker",
+    states: ["empty", "loading", "normal", "clips", "focus", "error", "offline", "no-claude", "success", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "home";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>
