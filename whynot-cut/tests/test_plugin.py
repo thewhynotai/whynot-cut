@@ -1356,6 +1356,19 @@ def _load_package_module():
     return mod
 
 
+class TestInstallerShipsInThePlugin(unittest.TestCase):
+    """G3 review I2: a machine without Python is handed to the installer core INSIDE the plugin
+    (skills/start/references/install-from-claude.md), so the zip must carry it."""
+    def test_installer_core_is_in_the_zip(self):
+        pk = _load_package_module()
+        if pk is None:
+            self.skipTest("package.py is not part of this layout")
+        for rel in ("installer/core/bootstrap.sh", "installer/core/bootstrap.ps1",
+                    "installer/core/wnc_installer/cli.py", "setup/components.json"):
+            self.assertTrue((SK / rel).is_file(), rel)
+            self.assertTrue(pk.wanted(SK / rel), f"{rel} is left out of the plugin zip")
+
+
 class TestPackageProfileRule(unittest.TestCase):
     """package.py refuses to build a zip that contains any profile except `_template` and `example-*`."""
     def setUp(self):
