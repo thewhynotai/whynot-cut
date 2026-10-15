@@ -21,7 +21,10 @@ not cover Claude Code.
 **Wording.** State the cost plainly. Never say "no extra charge" alone.
 - **EN:** "Each editor needs their own Claude Pro or Max plan, paid to Anthropic (Pro from $20 a month; prices vary by
   country). WhyNot Cut adds nothing on top."
-- **AR:** «كل مونتير محتاج اشتراك Claude Pro أو Max باسمه، بيدفعه لـ Anthropic (Pro بيبدأ من 20 دولار في الشهر، والسعر بيختلف من بلد للتاني). WhyNot Cut مش بيزوّد عليه حاجة.»
+- **AR:** «كل مونتير محتاج اشتراك Claude Pro أو Max باسمه، بيدفعه لـ Anthropic (اشتراك Pro بيبدأ من 20 دولار في الشهر، والسعر بيختلف من بلد للتاني). WhyNot Cut مش بيزوّد عليه حاجة.»
+
+*Round 3 (2026-10-16):* the AR bracket now opens on an Arabic word («(اشتراك Pro …»), because a bracket that opens on
+a Latin run renders as "Pro)" to a bilingual reader (R3 designer). Meaning unchanged.
 
 **Where:** I-05, P-01 (Claude row), P-12, P-22. Link: "See plans", to support.claude.com, Pro plan article.
 
