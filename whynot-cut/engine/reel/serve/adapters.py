@@ -67,11 +67,14 @@ APP_NAMES = {"aftereffects": "After Effects"}       # everything else runs in Pr
 CANCEL_SEND_S = 1.0                                 # how long a best-effort cancel may take to send
 PROGRESS_QUEUE = 32                                 # progress events waiting for one requester (more are dropped)
 PROGRESS_FLUSH_S = 1.0                              # how long a finished command waits for its queued progress
+_TAKEN: set[str] = set()                            # queue job ids a live tracker follows (process-wide)
+_TAKEN_LOCK = threading.Lock()
 SUBMIT_LOCKS = {"premiere": threading.Lock(), "aftereffects": threading.Lock()}   # one queue call per bridge
 # G2 R1: builds run the CLI's build (lock, editor/unsaved checks, backup, Gate 1), not the raw bridge action
 SAFE_BUILDS = {"build_project": ("lib.ppro_build", "PRPROJ_BUILT", "result"),
                "ae_build_motion": ("lib.motion_build", "PROJECT_ASSEMBLED", "report")}
-TRACK_POLL_S = 0.5                                  # how often a running CEP job's queue files are looked at
+TRACK_POLL_S = 0.5                                  # how often a CEP job's queue files are looked at until it is claimed
+TRACK_POLL_CLAIMED_S = 2.0                          # ... and once claimed (the progress tick is 2 s; G13)
 PROGRESS_TICK_S = 2.0                               # the `elapsed` progress cadence (S3: first progress within 2 s)
 VANISHED_POLLS = 3                                  # polls in a row with no file of a seen job and no result: gone
 WORKER_IDLE_S = 2.0                                 # an idle queue worker thread ends after this
@@ -183,7 +186,7 @@ class FileQueueAdapter:
         app = APP_NAMES.get(host, "Premiere")
 
         ctx = current_context()                      # the request's (raises in reel serve when none is bound)
-        began: dict = {}                             # when a safe build began (it holds the bridge's lock from then)
+        began: dict = {}                             # when this call began (it holds its bridge's lock from then)
 
         def call():                                  # the worker binds it: contextvars do not follow a thread
             with use_context(ctx):
@@ -195,22 +198,24 @@ class FileQueueAdapter:
                     left = seconds_left(request)     # now, after waiting for the worker and the lock
                     if left <= 0:
                         return _EXPIRED
-                    if action in SAFE_BUILDS:
-                        began["t"] = time.time()
+                    began["t"] = time.time()         # only now can its own job be written: identical requests queue
+                    if action in SAFE_BUILDS:        # behind the lock, so a tracker never adopts the running one's job
                         return _safe_build(action, data)
                     return bridge.submit(name, data, timeout=max(1.0, min(left, cap)))
 
         queue = bridge_queue(lane, ctx)
         if action in SAFE_BUILDS:                    # its queue job carries the approved plan's data, not the request's
-            def locate():
-                return _first_job(queue, name, began["t"]) if "t" in began else None
+            def locate(exclude=()):
+                return _first_job(queue, name, began["t"], exclude) if "t" in began else None
         else:
-            sha, since = jobs.data_sha(data), time.time()
+            sha = jobs.data_sha(data)
 
-            def locate():
-                return jobs.find_job(queue, name, sha, since)
+            def locate(exclude=()):
+                return jobs.find_job(queue, name, sha, began["t"], exclude) if "t" in began else None
+        # a safe build runs several queue jobs in a row (build, then readback): only its first is followed, and the
+        # gap between them is not a vanished job
         tracker = QueueTracker(rid, action, queue, locate, journal=self.journal or jobs.Journal(ctx.engine_home),
-                               app=app)
+                               app=app, vanish=action not in SAFE_BUILDS)
         fut = asyncio.wrap_future(QUEUE_WORKERS[lane].submit(call))
         watch = asyncio.create_task(_track(tracker, on_progress))
         lost = None
@@ -224,7 +229,11 @@ class FileQueueAdapter:
             watch.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await watch
-            if not fut.done():                       # no answer needed: drop a call that has not started
+            if not fut.done():
+                # Only a call that has not started is dropped. A running queue call (cep_queue._wait in the worker
+                # thread) cannot be cancelled from here: serve never relies on this cancel to free the lane. After a
+                # lost result the lane stays busy until that wait ends (the executor's cep_queue fix, H5, makes it
+                # end at the error marker / interrupted result).
                 fut.cancel()
         if lost is not None:
             return lost
@@ -237,6 +246,8 @@ class FileQueueAdapter:
                 return {"ok": True, "action": action, "id": rid, "readback": r["readback"]}
             return failure(action, rid, r["error"], r.get("how"))
         response = r.get("response") if isinstance(r, dict) else None
+        if isinstance(r, dict) and r.get("error_marker"):             # the queue saw the bridge's `.error` marker
+            return jobs.error_marker_result(action, rid, app)
         if response is None and isinstance(r, dict) and r.get("error") == "interrupted":
             return jobs.bridge_restart_result(action, rid, app)        # a restarted bridge's own answer (H2)
         if response is not None:
@@ -272,8 +283,9 @@ def bridge_queue(lane: str, ctx):
         return ppro_bridge.queue_dir()
 
 
-def _first_job(queue, cep_name: str, since: float):
-    """The first `cep_name` job written to `queue` at or after `since` (read only), else None."""
+def _first_job(queue, cep_name: str, since: float, exclude=()):
+    """The first `cep_name` job written to `queue` at or after `since` (read only), else None. Ids in `exclude` (jobs
+    another running command follows) are skipped."""
     import json
     from pathlib import Path
     best = None
@@ -288,6 +300,8 @@ def _first_job(queue, cep_name: str, since: float):
                 continue
             doc = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            continue
+        if f.name[:-len(".data.json")] in exclude:
             continue
         if isinstance(doc, dict) and doc.get("action") == cep_name and (best is None or st.st_mtime < best[0]):
             best = (st.st_mtime, f.name[:-len(".data.json")])
@@ -305,14 +319,16 @@ class QueueTracker:
                  was starved) until the result;
         failed   None, or an ok:false v4 result when the job can no longer answer: the bridge left its `<id>.error`
                  marker with no result (it could not write one: jobs.error_marker_result), or a job seen in the queue
-                 has had no file at all and no result for VANISHED_POLLS polls in a row (jobs.vanished_result; a
-                 result that is read and removed by the caller looks the same for an instant, hence the grace).
+                 has had no file at all, no result and no heartbeat `current` for VANISHED_POLLS polls in a row
+                 (jobs.vanished_result; a result that is read and removed by the caller looks the same for an
+                 instant, hence the grace; never after the result was seen, never for a safe build, whose several queue
+                 jobs leave gaps between them).
     A result file always wins. `clock` is injectable (the tests' fake one)."""
 
     def __init__(self, rid: str, action: str, queue, locate, journal=None, clock=time.monotonic, tick_s=None,
-                 app: str = "Premiere"):
+                 app: str = "Premiere", vanish: bool = True):
         self.rid, self.action, self.queue, self.locate, self.journal = rid, action, queue, locate, journal
-        self.clock, self.app = clock, app
+        self.clock, self.app, self.vanish = clock, app, vanish
         self.tick_s = PROGRESS_TICK_S if tick_s is None else tick_s
         self.t0 = clock()
         self.next_tick = self.t0 + self.tick_s
@@ -320,7 +336,21 @@ class QueueTracker:
         self.jid: str | None = None
         self.state = "received"                      # what the journal holds (the router started it as received)
         self.seen = False                            # a file of the job was seen in the queue
+        self.done_seen = False                       # its result file was seen: it is never called vanished after that
         self.missing = 0
+        self.taken: str | None = None                # the job id this tracker holds in _TAKEN
+
+    @property
+    def poll_s(self) -> float:
+        """How long to wait before the next poll: fast until the job is claimed, then 2 s."""
+        return TRACK_POLL_S if self.phase == "queued" else TRACK_POLL_CLAIMED_S
+
+    def close(self) -> None:
+        """Give the job id back (another identical request may follow it now)."""
+        with _TAKEN_LOCK:
+            if self.taken is not None:
+                _TAKEN.discard(self.taken)
+                self.taken = None
 
     def _event(self, phase: str) -> dict:
         return {"event": "progress", "id": self.rid, "action": self.action, "step": phase, "phase": phase,
@@ -341,7 +371,11 @@ class QueueTracker:
         events: list[dict] = []
         if self.jid is None:
             try:
-                self.jid = self.locate()
+                with _TAKEN_LOCK:                    # find and take in one step: two identical requests never share
+                    self.jid = self.locate(frozenset(_TAKEN))
+                    if self.jid is not None:
+                        _TAKEN.add(self.jid)
+                        self.taken = self.jid
             except Exception:                        # noqa: BLE001 — an unreadable queue is just "not found yet"
                 self.jid = None
             if self.jid is not None:
@@ -350,6 +384,8 @@ class QueueTracker:
             now = jobs.job_state(self.queue, self.jid)
             if now in ("queued", "claimed", "done"):
                 self.seen, self.missing = True, 0
+            if now == "done":
+                self.done_seen = True
             if now in ("claimed", "done") and self.phase == "queued":
                 self.phase = "claimed"
                 events.append(self._event("claimed"))
@@ -358,8 +394,10 @@ class QueueTracker:
                 self._journal(state=now)
             if now == "failed":
                 return events, jobs.error_marker_result(self.action, self.rid, self.app)
-            if now is None and self.seen:
-                self.missing += 1
+            if now is None and self.seen and self.vanish and not self.done_seen:
+                # no file of the job is left (job.json, .running, .claimed, result), and the bridge's heartbeat does
+                # not hold it either: only then is it missing
+                self.missing = 0 if jobs.heartbeat_current(self.queue) == self.jid else self.missing + 1
                 if self.missing >= VANISHED_POLLS:
                     return events, jobs.vanished_result(self.action, self.rid, self.app)
         t = self.clock()
@@ -392,12 +430,13 @@ async def _track(tracker: QueueTracker, on_progress) -> dict:
     try:
         emit(tracker.begin())
         while True:
-            await asyncio.sleep(TRACK_POLL_S)
+            await asyncio.sleep(tracker.poll_s)
             events, failed = await asyncio.to_thread(tracker.poll)
             emit(events)
             if failed is not None:
                 return failed
     finally:
+        tracker.close()
         if pending is not None:
             await HostLink._stop_relay(pending, True)
 

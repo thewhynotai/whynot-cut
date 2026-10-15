@@ -72,8 +72,9 @@ class TrackerCase(unittest.TestCase):
         self.journal.start("r-1", action="ping", session_kind="cli", route="cep", lane="premiere", data={})
         sha = jobs.data_sha({})
         self.tracker = adapters.QueueTracker(
-            "r-1", "ping", self.queue, lambda: jobs.find_job(self.queue, PING, sha, 0.0), journal=self.journal,
+            "r-1", "ping", self.queue, lambda exclude=(): jobs.find_job(self.queue, PING, sha, 0.0, exclude), journal=self.journal,
             clock=self.clock)
+        self.addCleanup(self.tracker.close)
 
     def tick(self, s=0.5):
         """One poll after `s` seconds of the fake clock; the events and the verdict."""
@@ -171,7 +172,8 @@ class ClaimDetection(TrackerCase):
         self.assertEqual(self.journal.get("r-1")["state"], "received")
 
     def test_a_request_with_no_journal_entry_still_reports_progress(self):
-        t = adapters.QueueTracker("none-1", "ping", self.queue, lambda: "j9", journal=self.journal, clock=self.clock)
+        t = adapters.QueueTracker("none-1", "ping", self.queue, lambda exclude=(): "j9", journal=self.journal, clock=self.clock)
+        self.addCleanup(t.close)
         t.begin()
         queue_job(self.queue, "j9")
         claim(self.queue, "j9")
@@ -238,6 +240,149 @@ class ErrorMarker(TrackerCase):
             self.assertIsNone(self.tick()[1])
 
 
+def beat(queue: Path, current):
+    queue.mkdir(parents=True, exist_ok=True)
+    (queue / "bridge.heartbeat").write_text(json.dumps({"at": 1, "current": current}), encoding="utf-8")
+
+
+class VanishRules(TrackerCase):
+    """Review 1: a job is missing only when none of its files is left AND the bridge's heartbeat no longer holds it,
+    never after its result was seen, and a safe build (several queue jobs in a row) is never called vanished."""
+
+    def seen_claimed(self, jid="jv"):
+        self.tracker.begin()
+        queue_job(self.queue, jid)
+        claim(self.queue, jid)
+        self.tick()
+
+    def test_a_job_the_heartbeat_still_holds_is_not_vanished(self):
+        self.seen_claimed()
+        (self.queue / "jv.running").unlink()
+        beat(self.queue, "jv")
+        for _ in range(10):
+            self.assertIsNone(self.tick()[1])
+        beat(self.queue, None)
+        self.assertIsNone(self.tick()[1])
+        self.assertIsNone(self.tick()[1])
+        self.assertEqual(self.tick()[1]["ok"], False)
+
+    def test_a_job_whose_result_was_seen_is_never_called_vanished(self):
+        self.seen_claimed()
+        (self.queue / "jv.result.json").write_text("{}", encoding="utf-8")
+        self.assertIsNone(self.tick()[1])                                  # done is seen
+        for f in list(self.queue.glob("jv.*")):
+            f.unlink()                                                     # the caller read it and cleaned up
+        for _ in range(10):
+            self.assertIsNone(self.tick()[1])
+
+    def test_a_safe_build_never_vanishes(self):
+        t = adapters.QueueTracker("r-1", "ping", self.queue, lambda exclude=(): "jv", journal=self.journal,
+                                  clock=self.clock, vanish=False)
+        self.addCleanup(t.close)
+        t.begin()
+        queue_job(self.queue, "jv")
+        claim(self.queue, "jv")
+        self.clock.advance(0.5)
+        t.poll()
+        for f in list(self.queue.glob("jv.*")):
+            f.unlink()
+        for _ in range(10):
+            self.clock.advance(0.5)
+            self.assertIsNone(t.poll()[1])
+
+    def test_the_poll_slows_to_2_seconds_once_the_job_is_claimed(self):
+        self.assertEqual(self.tracker.poll_s, adapters.TRACK_POLL_S)
+        self.assertEqual(adapters.TRACK_POLL_S, 0.5)
+        self.assertEqual(adapters.TRACK_POLL_CLAIMED_S, 2.0)
+        self.tracker.begin()
+        queue_job(self.queue, "jp")
+        self.tick()
+        self.assertEqual(self.tracker.poll_s, adapters.TRACK_POLL_S)        # queued: still fast (the claim is the news)
+        claim(self.queue, "jp")
+        self.tick()
+        self.assertEqual(self.tracker.poll_s, adapters.TRACK_POLL_CLAIMED_S)
+
+
+class TakenJobs(unittest.TestCase):
+    """Review 2: two identical requests never share a queue job: a tracker takes its job id in a process-wide set, the
+    other's locate skips it, and the id is released when the tracker closes."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="wnc-prog-"))
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.queue = self.home / "ppro-queue"
+        self.sha = jobs.data_sha({})
+        self.clock = FakeClock()
+        self.addCleanup(lambda: self.assertEqual(adapters._TAKEN, set()))
+
+    def tracker(self, rid):
+        t = adapters.QueueTracker(rid, "ping", self.queue,
+                                  lambda exclude=(): jobs.find_job(self.queue, PING, self.sha, 0.0, exclude),
+                                  journal=None, clock=self.clock)
+        self.addCleanup(t.close)
+        return t
+
+    def test_the_second_tracker_gets_its_own_job(self):
+        queue_job(self.queue, "ja")
+        time.sleep(0.02)
+        queue_job(self.queue, "jb")                                         # identical data, written later
+        import os
+        os.utime(self.queue / "ja.data.json", (1000, 1000))                 # ja is the older one
+        a, b = self.tracker("r-a"), self.tracker("r-b")
+        a.poll()
+        b.poll()
+        self.assertEqual((a.jid, b.jid), ("ja", "jb"))
+
+    def test_a_taken_job_is_released_when_its_tracker_closes(self):
+        queue_job(self.queue, "ja")
+        a, b = self.tracker("r-a"), self.tracker("r-b")
+        a.poll()
+        b.poll()
+        self.assertEqual((a.jid, b.jid), ("ja", None))
+        a.close()
+        b.poll()
+        self.assertEqual(b.jid, "ja")
+
+    def test_find_job_skips_the_excluded_ids(self):
+        queue_job(self.queue, "ja")
+        self.assertEqual(jobs.find_job(self.queue, PING, self.sha, 0.0), "ja")
+        self.assertIsNone(jobs.find_job(self.queue, PING, self.sha, 0.0, exclude={"ja"}))
+
+
+class FinalEntriesStayFinal(unittest.TestCase):
+    """Review 3: a poll thread that outlives the result must not move a finished entry back to claimed."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="wnc-prog-"))
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.journal = jobs.Journal(self.home)
+        self.journal.start("r-1", action="ping", session_kind="cli", route="cep", lane="premiere", data={})
+
+    def test_update_ignores_a_state_on_a_final_entry(self):
+        res = {"ok": True, "action": "ping", "id": "r-1", "readback": PING_READBACK}
+        self.journal.finish("r-1", res)
+        out = self.journal.update("r-1", state="claimed", job_id="j1")
+        e = self.journal.get("r-1")
+        self.assertEqual((e["state"], e["job_id"], e["result"]["ok"]), ("done", "j1", True))
+        self.assertEqual(out["state"], "done")
+        self.assertEqual(self.journal.summaries()[0]["state"], "done")
+
+    def test_a_poll_that_lands_after_the_result_leaves_the_entry_done(self):
+        q = self.home / "ppro-queue"
+        t = adapters.QueueTracker("r-1", "ping", q, lambda exclude=(): "j1", journal=self.journal)
+        self.addCleanup(t.close)
+        t.begin()
+        queue_job(q, "j1")
+        claim(q, "j1")
+        self.journal.finish("r-1", {"ok": True, "action": "ping", "id": "r-1", "readback": PING_READBACK})
+        t.poll()                                                            # the thread that outlived watch.cancel()
+        self.assertEqual(self.journal.get("r-1")["state"], "done")
+
+    def test_finish_can_still_settle_an_active_entry_in_any_final_state(self):
+        self.journal.finish("r-1", {"ok": False, "action": "ping", "id": "r-1", "error": "x"}, "interrupted")
+        self.assertEqual(self.journal.get("r-1")["state"], "interrupted")
+
+
 class JournalAlongTheWay(unittest.TestCase):
     def test_reconcile_finishes_a_marked_job_as_failed(self):
         home = Path(tempfile.mkdtemp(prefix="wnc-prog-"))
@@ -295,7 +440,7 @@ class AdapterRun(unittest.IsolatedAsyncioTestCase):
         self.ctx = common.Context(home=self.home)
         self.queue = self.home / "ppro-queue"
         self.journal = jobs.Journal(self.home)
-        for name, val in (("PROGRESS_TICK_S", 0.2), ("TRACK_POLL_S", 0.04)):
+        for name, val in (("PROGRESS_TICK_S", 0.2), ("TRACK_POLL_S", 0.04), ("TRACK_POLL_CLAIMED_S", 0.04)):
             p = mock.patch.object(adapters, name, val)
             p.start()
             self.addCleanup(p.stop)
@@ -392,6 +537,75 @@ class AdapterRun(unittest.IsolatedAsyncioTestCase):
         res, _ = await self.run_adapter(request("ping", id="d-1"), submit)
         self.assertTrue(res["ok"])
 
+    async def test_a_safe_build_with_several_queue_jobs_is_not_called_vanished(self):
+        """Review 1: motion_build runs a build job, cleans it up, then a readback job (up to 300 s): the gap between
+        them has no queue file of the first job, and the build is still running."""
+        name = CEP_NAME["build_project"]
+
+        def fake_build(action, data):
+            queue_job(self.queue, "jb-1", {"x": 1}, name=name)
+            time.sleep(0.1)
+            claim(self.queue, "jb-1")
+            time.sleep(0.1)
+            for f in list(self.queue.glob("jb-1.*")):
+                f.unlink()                                                  # the build job is read and cleaned up
+            time.sleep(0.6)                                                 # (> VANISHED_POLLS polls)
+            queue_job(self.queue, "jb-2", {"y": 2}, name="readback")        # the readback job
+            claim(self.queue, "jb-2")
+            time.sleep(0.2)
+            for f in list(self.queue.glob("jb-2.*")):
+                f.unlink()
+            return {"ok": True, "readback": {"project": "p"}}
+
+        req = request("build_project", {"x": 1}, id="sb-1")
+        self.journal.start("sb-1", action="build_project", session_kind="cli", route="cep", lane="premiere", data={})
+        with common.use_context(self.ctx), mock.patch.object(adapters, "_safe_build", fake_build):
+            res = await adapters.FileQueueAdapter(journal=self.journal).run(req)
+        self.assertEqual((res["ok"], res["id"]), (True, "sb-1"), res)
+
+    async def test_two_identical_requests_each_follow_their_own_queue_job(self):
+        """Review 2: the second waits for the lane, so its tracker must not adopt the first's job (and its journal
+        must not get the first's job id)."""
+        order, seen = [], {}
+
+        def submit(action, data=None, timeout=600):
+            jid = f"jx{len(order) + 1}"
+            order.append(jid)
+            queue_job(self.queue, jid, data)
+            time.sleep(0.15)
+            claim(self.queue, jid)
+            time.sleep(0.45)
+            if jid == "jx1":
+                seen["b_while_a_runs"] = self.journal.get("b-1")
+            for f in list(self.queue.glob(f"{jid}.*")):
+                f.unlink()
+            return cep_ok("ping", PING_READBACK)
+
+        reqs = [request("ping", id="a-1"), request("ping", id="b-1")]
+        for r in reqs:
+            self.journal.start(r["id"], action="ping", session_kind="cli", route="cep", lane="premiere", data={})
+        with common.use_context(self.ctx), mock.patch("lib.ppro_bridge.submit", submit):
+            adapter = adapters.FileQueueAdapter(journal=self.journal)
+            ra, rb = await asyncio.gather(adapter.run(reqs[0]), adapter.run(reqs[1]))
+        self.assertTrue(ra["ok"] and rb["ok"], (ra, rb))
+        self.assertNotIn("job_id", seen["b_while_a_runs"])                    # B did not take A's job
+        self.assertEqual(self.journal.get("a-1")["job_id"], "jx1")
+        self.assertEqual(self.journal.get("b-1")["job_id"], "jx2")
+        self.assertEqual(adapters._TAKEN, set())                              # all released
+
+    async def test_the_bridges_error_marker_flag_from_the_queue_is_the_marker_result(self):
+        out = {"ok": False, "error_marker": True, "job": "jm"}                # what cep_queue._wait will return
+        res, _ = await self.run_adapter(request("ping", id="m-1"), lambda action, data=None, timeout=600: out)
+        self.assertEqual(res, jobs.error_marker_result("ping", "m-1", "Premiere"))
+
+    async def test_an_interrupted_job_tells_the_editor_to_check_the_project(self):
+        """The host may still have run it (the bridge's result says claimed): the how says to check the project."""
+        out = {"ok": False, "error": "interrupted", "claimed": True, "job": "ji"}
+        res, _ = await self.run_adapter(request("ping", id="i-1"),
+                                        lambda action, data=None, timeout=600: out)
+        self.assertEqual(res, jobs.bridge_restart_result("ping", "i-1", "Premiere"))
+        self.assertIn("check the project", res["how"])
+
     async def test_no_requester_listening_still_tracks_the_journal(self):
         def submit(action, data=None, timeout=600):
             queue_job(self.queue, "je1", data)
@@ -411,7 +625,7 @@ class AdapterRun(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------------------- through the daemon
 class ThroughTheDaemon(AppCase):
     async def asyncSetUp(self):
-        for name, val in (("PROGRESS_TICK_S", 0.2), ("TRACK_POLL_S", 0.04)):
+        for name, val in (("PROGRESS_TICK_S", 0.2), ("TRACK_POLL_S", 0.04), ("TRACK_POLL_CLAIMED_S", 0.04)):
             p = mock.patch.object(adapters, name, val)
             p.start()
             self.addCleanup(p.stop)

@@ -49,7 +49,7 @@ from . import security
 
 __all__ = ["Journal", "STATES", "ACTIVE", "FINAL", "ENTRY_MAX", "KEEP", "KEEP_S", "SNAPSHOT_JOBS", "valid_id",
            "data_sha", "find_job", "job_state", "read_result", "reconcile", "interrupted_result", "summary",
-           "error_marker_result", "vanished_result", "bridge_restart_result"]
+           "error_marker_result", "vanished_result", "bridge_restart_result", "heartbeat_current"]
 
 log = logging.getLogger(__name__)
 
@@ -271,10 +271,18 @@ class Journal:
             return out
 
     def update(self, rid: str, **fields) -> dict | None:
+        """Merge fields into an entry. A `state` sent for an entry that is already final (done / failed /
+        interrupted) is ignored: a poll thread that outlives the result must not move a finished job back to claimed.
+        finish() is the one way to settle an entry."""
+        return self._update(rid, fields)
+
+    def _update(self, rid: str, fields: dict, settle: bool = False) -> dict | None:
         with self._lock:
             entry = self.get(rid)
             if entry is None:
                 return None
+            if entry["state"] in FINAL and not settle:
+                fields = {k: v for k, v in fields.items() if k != "state"}
             entry.update(fields)
             entry["updated_at"] = _now()[0]
             return self._write(entry)
@@ -284,7 +292,7 @@ class Journal:
         st = state or ("done" if result.get("ok") else "failed")
         if st not in FINAL:
             raise ValueError(f"{st} is not a final state")
-        return self.update(rid, state=st, result=result)
+        return self._update(rid, {"state": st, "result": result}, settle=True)
 
     def summaries(self, n: int = SNAPSHOT_JOBS) -> list[dict]:
         """The newest n entries' summaries (from the index: no file is read)."""
@@ -323,9 +331,10 @@ class Journal:
 
 
 # ------------------------------------------------------------------------------------------------ the CEP queue (read)
-def find_job(queue, cep_name: str, sha: str, since: float = 0.0) -> str | None:
+def find_job(queue, cep_name: str, sha: str, since: float = 0.0, exclude=()) -> str | None:
     """The queue job id whose data file is this request's (same CEP action, same data hash), written no earlier than
-    `since` (epoch, 2 s of slack); the oldest such when there are several."""
+    `since` (epoch, 2 s of slack); the oldest such when there are several. Ids in `exclude` (jobs another running
+    command already follows) are skipped."""
     best = None
     try:
         files = list(Path(queue).glob("*.data.json"))
@@ -341,9 +350,20 @@ def find_job(queue, cep_name: str, sha: str, since: float = 0.0) -> str | None:
             continue
         if not isinstance(doc, dict) or doc.get("action") != cep_name or data_sha(doc) != sha:
             continue
+        if f.name[:-len(".data.json")] in exclude:
+            continue
         if best is None or st.st_mtime < best[0]:
             best = (st.st_mtime, f.name[:-len(".data.json")])
     return best[1] if best else None
+
+
+def heartbeat_current(queue) -> str | None:
+    """The job id the bridge's heartbeat says it is running now (read only), else None."""
+    try:
+        cur = json.loads((Path(queue) / "bridge.heartbeat").read_text(encoding="utf-8")).get("current")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return cur if isinstance(cur, str) else None
 
 
 def job_state(queue, jid: str) -> str | None:

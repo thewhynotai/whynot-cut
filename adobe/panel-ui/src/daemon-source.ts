@@ -532,7 +532,7 @@ export class DaemonSource implements PanelDataSource {
         this.settleCommand(id, { ok: false, action, error: "The engine did not answer this request in time.", how: "Check that Premiere and the WhyNot Cut panel are open, then press Try again.", code: "timeout" });
       }, seconds * 1000 + RESULT_GRACE_MS);
       this.commands.set(id, { action, step, stop, resolve, text, key, detached: false });
-      if (step) this.setStep(step, { state: "running", request_id: id, progress: null, phase: null, elapsed_s: null });
+      if (step) this.setStep(step, { state: "running", request_id: id, progress: null, phase: null, host: action.startsWith("ae_") ? "aftereffects" : "premiere", elapsed_s: null });
       this.sendText(sock, text);
     });
   }
@@ -875,7 +875,7 @@ export class DaemonSource implements PanelDataSource {
     }
     if (p.step) {
       const step = this.state.pipeline.find((s) => s.id === p.step);
-      if (step && step.request_id === id) this.setStep(p.step, { state: r.ok ? "done" : "failed", request_id: null, phase: null });
+      if (step && step.request_id === id) this.setStep(p.step, { state: r.ok ? "done" : "failed", request_id: null, phase: null, host: null });
     }
     p.resolve(r);
   }

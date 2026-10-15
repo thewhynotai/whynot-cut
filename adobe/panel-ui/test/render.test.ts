@@ -223,6 +223,19 @@ test("H2: the phase line names the app from the host detail (After Effects, else
   assert.ok(!h.includes('class="now-phase"'), "a counted step shows its bar, not a phase");
 });
 
+test("H2 review: the phase line names the host of the running command (the step's host), not the panel's app", () => {
+  const s = runningBuild("queued", 0, "Premiere Pro 26.5.2");
+  s.pipeline = s.pipeline.map((p) => (p.id === "build" ? { ...p, host: "aftereffects" } : p));
+  const ae = render(s, EN, initialUi());
+  assert.ok(ae.includes('<bdi dir="ltr">After Effects</bdi>') && !ae.includes("Premiere Pro</bdi>"), "an After Effects job in a Premiere panel");
+  s.pipeline = s.pipeline.map((p) => (p.id === "build" ? { ...p, host: "premiere" } : p));
+  s.connection.host.detail = "After Effects 26.5";
+  const pr = render(s, EN, initialUi());
+  assert.ok(pr.includes('<bdi dir="ltr">Premiere Pro</bdi>') && !pr.includes("After Effects</bdi>"), "a Premiere job in an AE panel");
+  s.pipeline = s.pipeline.map((p) => (p.id === "build" ? { ...p, host: "photoshop" as never } : p));
+  assert.ok(render(s, EN, initialUi()).includes('<bdi dir="ltr">After Effects</bdi>'), "an unknown host falls back to the panel's app");
+});
+
 test("H2: a phase outside the contract renders no phase line (the value never reaches a key or the markup)", () => {
   for (const bad of ["busy", `queued" onmouseover="x`, "__proto__", "constructor", EVIL]) {
     const h = render(runningBuild(bad, 3), EN, initialUi());

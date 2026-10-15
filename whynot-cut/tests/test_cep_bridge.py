@@ -1071,7 +1071,8 @@ class _NodeBridge(unittest.TestCase):
 @unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
 class TestEngineStart(_NodeBridge):
     """The hidden daemon starts the engine only through config.json `launcher`, only when it is the fixed
-    <engine home>/bin/wnc-engine(.cmd), never from the panel, at most once per 30 s and never after 5 failures."""
+    <engine home>/bin/wnc-engine(.cmd), never from the panel, at most once per 30 s, and after 5 failures only once per 5 minutes (the slow
+    retry)."""
 
     def expected_spawn(self, launcher: Path, platform: str, home: Path = None):
         home = home or self.home
@@ -1387,7 +1388,7 @@ class TestQueueDurability(_NodeBridge):
         for jid in ("o1", "o2"):
             r = self.result(out, jid)
             self.assertEqual({k: v for k, v in r.items() if k != "at"},
-                             {"ok": False, "error": "interrupted", "reason": "bridge restarted"}, jid)
+                             {"ok": False, "error": "interrupted", "reason": "bridge restarted", "claimed": True}, jid)
             self.assertIsInstance(r["at"], int)
             self.assertNotIn(f"{jid}.running", out["queueFiles"], jid)
         self.assertTrue(self.result(out, "o3")["ok"])                      # a job that has its result keeps it
@@ -1458,7 +1459,7 @@ class TestQueueDurability(_NodeBridge):
 
     def test_a_marker_that_cannot_be_written_either_still_frees_the_job(self):
         out = self.run_bridge(seconds=12, preFiles={"j1.job.json": self.job("j1")}, failResult=999, failMarker=True)
-        self.assertEqual(sorted(k for k in out["queueFiles"] if k.startswith("j1")), ["j1.claimed"])   # no job, no result: failed
+        self.assertEqual(sorted(k for k in out["queueFiles"] if k.startswith("j1")), [])   # no job, no result, no claim marker: failed
         self.assertFalse(out["beat"]["busy"])
 
     def test_the_marker_is_what_serve_reads_as_failed(self):

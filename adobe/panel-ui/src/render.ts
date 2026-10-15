@@ -216,9 +216,11 @@ function currentStep(steps: PipelineStep[]): PipelineStep | null {
   return steps.find((p) => p.state === "running") ?? steps.find((p) => p.state === "waiting") ?? steps.find((p) => p.state === "failed") ?? null;
 }
 
-/** The Adobe app the running command is in, from the host pill's detail ("Premiere Pro 26.5.2"): only two fixed names or
- *  a plain word ever reach the screen, never the engine's own text. */
-function hostApp(c: ConnectionState, t: Strings): string {
+/** The Adobe app the running command is in: the step's own host (the action's), else the host pill's detail ("Premiere
+ *  Pro 26.5.2"). Only two fixed names or a plain word ever reach the screen, never the engine's own text. */
+function hostApp(c: ConnectionState, t: Strings, host?: PipelineStep["host"]): string {
+  if (host === "aftereffects") return t["pipeline.app.aftereffects"];
+  if (host === "premiere") return t["pipeline.app.premiere"];
   const detail = typeof c.host.detail === "string" ? c.host.detail : "";
   if (/after\s*effects/i.test(detail)) return t["pipeline.app.aftereffects"];
   if (/premiere/i.test(detail)) return t["pipeline.app.premiere"];
@@ -230,7 +232,7 @@ function hostApp(c: ConnectionState, t: Strings): string {
 function phaseLine(cur: PipelineStep, s: PanelState, t: Strings): string {
   const phase = cur.phase;
   if (cur.state !== "running" || cur.progress || !phase || !(PROGRESS_PHASES as readonly string[]).includes(phase)) return "";
-  const app = hostApp(s.connection, t);
+  const app = hostApp(s.connection, t, cur.host);
   const name = app === t["pipeline.app.generic"] ? auto(app) : ltr(app);
   return `<div class="now-phase">${fmt(t[`pipeline.phase.${phase}` as StringKey], { app: name })}</div>`;
 }

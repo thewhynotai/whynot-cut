@@ -32,7 +32,7 @@
    (refused: which check; gave_up: 'gave_up'; else null), never a path.
 
    Queue durability (hardening H2): at start every `<id>.running` a previous run left gets the result {ok: false,
-   error: 'interrupted', reason: 'bridge restarted'} and is never run again; a result that cannot be written is retried
+   error: 'interrupted', reason: 'bridge restarted', claimed: true} and is never run again; a result that cannot be written is retried
    3 times (1 s, 2 s, 4 s apart) and then a minimal `<id>.error` marker {ok: false, error: 'result write failed', at}
    is written, so the engine and `reel serve` see a failed job at once. */
 (function () {
@@ -185,7 +185,11 @@
   }
   function giveUpResult(p) {
     try { writeAtomic(path.join(QUEUE, p.id + '.error'), JSON.stringify({ ok: false, error: 'result write failed', at: Date.now() })); }
-    catch (e) { log('could not write the error marker for ' + p.id + ': ' + e); }
+    catch (e) {
+      // no marker either: the job is simply gone (a failed job to the engine), and its claim marker goes with it
+      log('could not write the error marker for ' + p.id + ': ' + e);
+      try { fs.unlinkSync(path.join(QUEUE, p.id + '.claimed')); } catch (e2) {}
+    }
     try { fs.unlinkSync(p.file); } catch (e) {}
   }
   function retryResults() {
@@ -215,7 +219,7 @@
   }
   // A bridge that restarted: every `<id>.running` in the queue was claimed by a previous run that never finished it
   // (this daemon is the only worker of its queue and holds no job yet). Each gets {ok:false, error:'interrupted',
-  // reason:'bridge restarted'} and is never run again; a job that already has its result only loses the stale file.
+  // reason:'bridge restarted', claimed:true} (the host may still have run it) and is never run again; a job that already has its result only loses the stale file.
   function recoverOrphans() {
     var names;
     try { names = fs.readdirSync(QUEUE); } catch (e) { return; }
@@ -225,7 +229,7 @@
       var file = path.join(QUEUE, name);
       if (fs.existsSync(path.join(QUEUE, m[1] + '.result.json'))) { try { fs.unlinkSync(file); } catch (e) {} return; }
       log('interrupted ' + m[1] + ' (bridge restarted)');
-      finish({ id: m[1] }, file, { ok: false, error: 'interrupted', reason: 'bridge restarted', at: Date.now() });
+      finish({ id: m[1] }, file, { ok: false, error: 'interrupted', reason: 'bridge restarted', claimed: true, at: Date.now() });
     });
   }
   function expired(job) {

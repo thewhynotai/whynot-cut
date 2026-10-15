@@ -16,6 +16,9 @@ export interface PipelineStep {
   progress?: { n: number; of: number; step?: string } | null;
   /** the running command's last known phase (an `elapsed` tick keeps the phase before it); null/absent: none yet */
   phase?: ProgressPhase | null;
+  /** the host the running command runs in ("aftereffects" for the ae_* actions, else "premiere"), so the phase line
+   *  names it; null/absent: the panel's own app */
+  host?: "premiere" | "aftereffects" | null;
   elapsed_s?: number | null;
   /** id of the running request; the Cancel button sends it back through PanelDataSource.cancel */
   request_id?: string | null;

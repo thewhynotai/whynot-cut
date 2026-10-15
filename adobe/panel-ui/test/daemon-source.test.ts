@@ -471,6 +471,7 @@ test("H2 run: the synthetic CEP progress (queued, claimed, elapsed ticks) gives 
   const frames = async () => (await r.src.snapshot()).pipeline.find((x) => x.id === "frames")!;
   const send = (phase: string, elapsed_s: number) => s.deliver({ type: "progress", progress: { event: "progress", id, action: "export_frames", step: phase, phase, elapsed_s } });
   assert.equal((await frames()).phase ?? null, null, "no phase before the first event");
+  assert.equal((await frames()).host, "premiere", "the step knows which host its command runs in (export_frames: Premiere)");
   send("queued", 0);
   await flush();
   assert.equal((await frames()).phase, "queued");

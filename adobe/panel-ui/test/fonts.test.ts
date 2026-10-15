@@ -65,8 +65,10 @@ test("bundled font files are byte copies of guide-ar/fonts, each family folder c
     .sort();
   assert.deepEqual(bundled, want);
   for (const rel of bundled) {
-    const a = readFileSync(join(PANEL_UI, "fonts", rel));
-    const b = readFileSync(join(VENDORED, rel));
+    // a Windows checkout may turn the text licence files into CRLF: compare those line-ending-insensitively
+    const lf = (buf: Buffer) => (rel.endsWith(".txt") ? Buffer.from(buf.toString("utf8").replace(/\r\n/g, "\n"), "utf8") : buf);
+    const a = lf(readFileSync(join(PANEL_UI, "fonts", rel)));
+    const b = lf(readFileSync(join(VENDORED, rel)));
     assert.ok(a.equals(b), `${rel} differs from guide-ar/fonts/${rel}`);
   }
   for (const e of Object.values(EXPECTED)) {

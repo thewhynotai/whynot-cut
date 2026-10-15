@@ -2514,6 +2514,11 @@ class SessionContractTests(unittest.TestCase):
                                         "panel_state"), [])
         for phase in ("busy", 3, ""):
             self.assertTrue(session_errors(dict(MINIMAL_STATE, pipeline=[dict(step, phase=phase)]), "panel_state"), phase)
+        # review: the step names the host its command runs in, so the card says "After Effects" for an AE job
+        for host in ("premiere", "aftereffects", None):
+            self.assertEqual(session_errors(dict(MINIMAL_STATE, pipeline=[dict(step, host=host)]), "panel_state"), [], host)
+        for host in ("photoshop", 3, ""):
+            self.assertTrue(session_errors(dict(MINIMAL_STATE, pipeline=[dict(step, host=host)]), "panel_state"), host)
 
     def test_progress_wraps_a_v4_progress_event(self):
         p = SESSION_SAMPLES["progress"]

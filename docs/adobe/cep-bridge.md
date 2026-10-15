@@ -141,7 +141,7 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 - **`<id>.claimed`:** `{at, by}`. The caller's result timeout starts here.
 - **`<id>.result.json`:** `{ok, result | error, at}`, written atomically.
 - **Orphans (H2):** when the daemon starts, every `<id>.running` a previous run left is answered
-  `{ok: false, error: "interrupted", reason: "bridge restarted", at}` and removed. It is never run again. A `.running` whose
+  `{ok: false, error: "interrupted", reason: "bridge restarted", claimed: true, at}` (the host may still have run it) and removed. It is never run again. A `.running` whose
   result already exists only loses the stale file. The visible panel never does this.
 - **A result that cannot be written (H2):** the daemon keeps the job claimed (`<id>.running`) and tries again 1 s, 2 s and 4 s
   later (3 retries, on later ticks, so the queue keeps moving). After the last failure it writes the minimal marker

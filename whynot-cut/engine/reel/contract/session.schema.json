@@ -135,6 +135,18 @@
           ],
           "description": "H2: the running command's last known phase (progress.schema.json phase; `elapsed` ticks keep the phase before them), so the card never says a bare 'running'"
         },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "premiere",
+            "aftereffects",
+            null
+          ],
+          "description": "H2 review: the host the running command runs in (ae_* actions: aftereffects), so the phase line names it"
+        },
         "elapsed_s": {
           "type": [
             "number",
