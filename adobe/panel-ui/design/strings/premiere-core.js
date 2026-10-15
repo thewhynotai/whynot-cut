@@ -860,7 +860,8 @@ window.PC_DATA = {
   /* links: https only, on the allowlist of eng-data-contract §7.10 (thewhynot.ai, dl.thewhynot.ai, claude.ai,
      support.claude.com, code.claude.com). The support and "Cost and data" addresses are MOCK_DATA.support in
      ../strings.js, read only in the live state (H24). */
-  links: { guide: "https://thewhynot.ai/help", claudeHowTo: "https://thewhynot.ai/help/claude",
+  links: { guide: "https://thewhynot.ai/help" /* H24: not published; the screens read it only when live, else "Guide coming soon" */,
+    claudeHowTo: "https://support.claude.com" /* "Install Claude" opens Claude's own live page (= MOCK_DATA.claude.how_to_url), not a thewhynot.ai/help page */,
     claudeSignIn: "https://claude.ai", claudeHelp: "https://support.claude.com" },
   rate: 9, reviewMin: 15,
   rawDur: "6:40", reelDur: "0:52", savedT: { en: "45 min", ar: "45 دقيقة" },

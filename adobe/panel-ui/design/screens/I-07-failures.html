@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="checksum,checksum-live,manifest,address,dlfail,nointernet,diskfull,panel,hostopen,focus,long,win">
+<meta name="mock-states" content="checksum,checksum-live,manifest,manifest-live,address,dlfail,nointernet,diskfull,panel,hostopen,focus,long,win">
 <meta name="mock-widths" content="760,640">
 <meta name="mock-keys" content="Return: the card's one fix (Try again / Check again / Show me) · Esc: Close · S: Save a report for support · Tab order: fix, Copy details for support (live: Copy details and open support), Save a report for support, Show details, Close">
 <meta name="mock-motion" content="the card enters a reserved slot above the list by colour (200 ms); the stopped row turns red by fill colour in place; on Try again the fix button shows a spinner with its width locked; static fallback: final state">
@@ -30,10 +30,12 @@
    thewhynot.ai/support is published. NOT LIVE (the default): "Copy details for support" copies only and "Support page
    coming soon" sits beside it. LIVE (checksum-live): "Copy details and open support" is one click and the card adds
    "We reply within one working day (Sun–Thu, Cairo time)." The same two states apply to every failure card (M.supportParts).
-   States: one per card (checksum = not the genuine file, manifest = list not genuine, address = not on our list,
+   The download page (manifest card, thewhynot.ai/download) is gated the same way (H24): NOT LIVE (manifest, win) = the plain
+   line "Download page coming soon", no address and no button; LIVE (manifest-live) = the address and "Open download page".
+   States: one per card (checksum = not the genuine file, manifest / manifest-live = list not genuine, address = not on our list,
    dlfail = download stopped halfway, nointernet, diskfull, panel = Adobe did not install the panel, hostopen =
    Premiere still open: save first), focus (keyboard on the fix), long (the panel card with a long file name),
-   win (Windows chrome, the download page). R2: no file names, no log path and no script address in a card; nointernet offers
+   win (Windows chrome, the manifest card, not live). R2: no file names, no log path and no script address in a card; nointernet offers
    "Get the offline installer". */
 (function () {
   var t = I.T, D = I.D, st = I.state, win = I.os === "win";
@@ -50,7 +52,13 @@
   var fix = function (label, icon, f) { return I.btn(label, { kind: "primary", icon: icon, focus: f, key: "enter" }); };
   var C = {
     checksum: { stop: "engine", card: function (f) { return I.fail(t("i07.checksum"), { safety: true, sub: t("i07.checksum.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
-    manifest: { stop: "preflight", card: function (f) { return I.fail(t("i07.manifest"), { safety: true, sub: t("i07.manifest.sub"), mono: D.downloadPage, btn: fix(t("i07.manifest.btn"), "external-link", f) }); /* R2 D-P1-6: open the page, never copy a script address */ } },
+    /* R2 D-P1-6: open the page, never copy a script address. H24: the page is thewhynot.ai/download, not published yet, so
+       NOT LIVE (the default) = the plain line "Download page coming soon" and no address, no button; LIVE (manifest-live) = the
+       sentence, the address and "Open download page". */
+    manifest: { stop: "preflight", card: function (f) {
+      return M.live ? I.fail(t("i07.manifest"), { safety: true, sub: t("i07.manifest.sub"), mono: D.downloadPage, btn: fix(t("i07.manifest.btn"), "external-link", f) })
+        : I.fail(t("i07.manifest"), { safety: true, sub: t("download.soon") });
+    } },
     address: { stop: "engine", card: function (f) { return I.fail(t("i07.address"), { safety: true, sub: t("i07.address.sub", { host: I.path(D.badHost) }), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
     dlfail: { stop: "engine", card: function (f) { return I.fail(t("i07.dlfail"), { sub: t("i07.dlfail.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
     nointernet: { stop: "engine", card: function (f) { return I.fail(t("i07.nointernet"), { kind: "warn", sub: t("i07.nointernet.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) + '<div class="ms-2">' + M.btn(t("i00.offline_get"), { icon: "external-link" }) + "</div>" }); } },
@@ -69,7 +77,7 @@
   }
   I.mount({
     id: "I-07", name: "Failure cards",
-    states: ["checksum", "checksum-live", "manifest", "address", "dlfail", "nointernet", "diskfull", "panel", "hostopen", "focus", "long", "win"], defaultState: "checksum",
+    states: ["checksum", "checksum-live", "manifest", "manifest-live", "address", "dlfail", "nointernet", "diskfull", "panel", "hostopen", "focus", "long", "win"], defaultState: "checksum",
     build: function (state) {
       var v;
       if (state === "focus") v = view("checksum", true);

@@ -15,10 +15,12 @@
      (claude.cost, with a "See plans" link to support.claude.com, which is live), the data line D-02 (claude.data), the
      Egyptian privacy line D-03 (privacy.claude_sees, ending in a full stop) and the support promise D-05
      (support.promise). Re-check the Anthropic facts on release day (the list at the top of that file);
-   - H24 (executor rule): never link to a page that isn't live. thewhynot.ai/support and thewhynot.ai/data are shown only
-     in the LIVE state (the engine sends support.url / support.data_url; add ?support=live or a "-live" state). The
-     default is NOT-LIVE: "Copy details for support" copies only and a plain-text line says "Support page coming soon";
-     "Cost and data" is hidden. mockup.js (M.live, M.supportRow, M.dataLink) is the only place that decides;
+   - H24 (executor rule): never link to a page that isn't live. thewhynot.ai/support, /data, /download and /help are shown only
+     in the LIVE state (the engine sends support.url / data_url / download_url / guide_url; add ?support=live or a
+     "-live" state). The default is NOT-LIVE: "Copy details for support" copies only and a plain-text line says "Support
+     page coming soon"; "Cost and data" is hidden; the download page and the guide show "Download page coming soon" /
+     "Guide coming soon" instead of a button. mockup.js (M.live, M.supportRow, M.dataLink, M.soonLine) is the only place
+     that decides;
    - ONE ARABIC WORD LIST (R2 editor P2-02, designer P1-9), used by every group: «جرّب تاني» (Try again), «افحص تاني»
      (Check again), «تراجع» (Undo), «دوس» (press), «شباك» (window), «نموذج» (model), «المتكلم» (speaker), «إنت»,
      «ريندر» (render), «مراجعة الصور»; Latin names stay in <bdi>. The D-08 register pass applied it to every group and
@@ -90,6 +92,8 @@
       "support.copy_open": "Copy details and open support",
       "support.copy": "Copy details for support",
       "support.soon": "Support page coming soon",
+      "download.soon": "Download page coming soon", /* H24: thewhynot.ai/download, until it is published */
+      "guide.soon": "Guide coming soon", /* H24: thewhynot.ai/help, until it is published */
       "support.promise": "We reply within one working day (Sun–Thu, Cairo time).",
       "approval.older": "This plan was approved with an older WhyNot Cut. Have one more look and approve it again.", /* the engine's OLDER_APPROVAL text (whynot-cut/engine/reel/lib/plan.py), verbatim */
       "checklist.premiere.ok": "Linked to Premiere", "checklist.claude.ok": "Signed in",
@@ -247,6 +251,8 @@
       "support.copy_open": "انسخ التفاصيل وافتح الدعم",
       "support.copy": "انسخ التفاصيل للدعم",
       "support.soon": "صفحة الدعم قريب",
+      "download.soon": "صفحة التحميل قريب",
+      "guide.soon": "الدليل قريب",
       "support.promise": "بنرد خلال يوم عمل واحد (من الأحد للخميس، بتوقيت القاهرة).",
       "approval.older": "الخطة دي اتوافق عليها بنسخة أقدم من WhyNot Cut. بص عليها بصّة كمان ووافق عليها تاني.",
       "checklist.premiere.ok": "متوصّل مع Premiere", "checklist.claude.ok": "مسجّل دخول",
@@ -382,8 +388,8 @@ window.MOCK_DATA = {
     { id: "edit", state: "todo" },
     { id: "approve", state: "blocked", reason: "no_plan" } ],
   approval_record: { by: "Yunus", at: "2026-10-14T11:32:00Z", confirmed_with: "د. هناء مصطفى", flagged_checked: true, flagged_count: 3, current: true, version: 1 },
-  /* H24: these two are read ONLY in the live state (M.live); until Yunus publishes the pages the engine sends neither */
-  support: { url: "https://thewhynot.ai/support", data_url: "https://thewhynot.ai/data" },
+  /* H24: these four are read ONLY in the live state (M.live); until Yunus publishes the pages the engine sends none of them */
+  support: { url: "https://thewhynot.ai/support", data_url: "https://thewhynot.ai/data", download_url: "https://thewhynot.ai/download", guide_url: "https://thewhynot.ai/help" },
   claude: { how_to_url: "https://support.claude.com", plans_url: "https://support.claude.com" },
   who: { en: "Dr. Hana Mostafa", ar: "د. هناء مصطفى" },
   long: { client: "Al-Mustaqbal Family Medicine and Diabetes Care Center", item: "C0239_interview_final_v2", editor: "Mohamed Abdel-Rahman El-Sayed", needs: 120, seq: "C0239_interview_final_v2_v1" },

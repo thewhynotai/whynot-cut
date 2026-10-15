@@ -21,9 +21,11 @@
 
   var M = (window.M = { lang: LANG, w: W, rtl: LANG === "ar", D: window.MOCK_DATA, capture: CAPTURE });
   /* H24 (executor rule, owner decisions D-02 / D-05): the panel never links to a page that isn't live. Two mock states:
-     LIVE = the engine sends support.url / support.data_url (state name ends in "-live", or ?support=live on any screen);
+     LIVE = the engine sends support.url / support.data_url / download_url / guide_url (state name ends in "-live", or
+     ?support=live on any screen);
      NOT LIVE (the default, nothing is published yet) = no link: "Copy details for support" copies only and a plain-text
-     line says "Support page coming soon"; "Cost and data" is hidden and the data line stands alone. */
+     line says "Support page coming soon"; "Cost and data" is hidden and the data line stands alone; the download page
+     and the guide show "Download page coming soon" / "Guide coming soon" in place of their button (M.soonLine). */
   M.live = q.get("support") === "live";
   /* "<state>-live" is a twin of "<state>" when both are in the screen's list ("success-live" of P-07 is its own state) */
   M.resolve = function (screen, raw) {
@@ -44,16 +46,30 @@
      R2: a path (C:\Users\..., ~/x, /Users/x) is one isolated run too, so drive letters and separators never reverse. */
   var LATIN = /(?:[A-Za-z]:[\\\/]|~\/|\/(?=[A-Za-z]))[^\s«»؟،]*|[A-Za-z][A-Za-z0-9.'_\-]*(?:[ \u00A0][A-Za-z0-9][A-Za-z0-9.'_\-]*)*/g;
   var PATHSTART = /^(?:[A-Za-z]:[\\\/]|~\/|\/)/;
+  /* Round 3 bidi (the locked D-01 / D-02 lines; the strings themselves are never changed). Three render-time rules:
+     1. a quote or bracket PAIR that encloses exactly one Latin run ("Help improve our AI models", (Cam 1)) goes INSIDE
+        that run's LTR isolate, so the pair never splits across two lines and never lands on the wrong side of the words;
+     2. a Latin run of 32 characters or fewer (pair included) never breaks across lines (class nb); a longer one may wrap;
+     3. an Arabic prefix joined with a tatweel («لـ» before «Anthropic») is bound to the Latin word after it with a
+        no-break space, so «لـ» never ends a line alone.
+     A lone bracket (D-01 "(Pro ... )": the closing one sits in Arabic text) stays outside the run: the Unicode bidi
+     algorithm then draws the pair mirrored and matched, "(" at the left end and ")" at the right, which is how Arabic
+     is set; moving only one of the two into the LTR run would draw two openers. */
+  var PAIRS = { '"': '"', "“": "”", "(": ")", "[": "]" };
   function txt(s) {
     s = String(s);
     if (LANG !== "ar") return esc(s);
+    s = s.replace(/(ـ) (?=[A-Za-z])/g, "$1 ");
     var out = "", last = 0, m;
     LATIN.lastIndex = 0;
     while ((m = LATIN.exec(s))) {
-      var run = m[0].replace(/[.\-_']+$/, "");
-      var cls = PATHSTART.test(run) ? " m-path" : run.length <= 24 ? " nb" : "";
-      out += esc(s.slice(last, m.index)) + '<bdi dir="ltr" class="lat' + cls + '">' + esc(run) + "</bdi>";
-      last = m.index + run.length;
+      var run = m[0].replace(/[.\-_']+$/, ""), from = m.index, to = from + run.length;
+      var isPath = PATHSTART.test(run), o = from - 1 >= last ? s.charAt(from - 1) : "", c = s.charAt(to);
+      var paired = !!o && !isPath && PAIRS[o] === c, shown = paired ? o + run + c : run;
+      var cls = isPath ? " m-path" : shown.length <= 32 ? " nb" : "";
+      if (paired) { from--; to++; }
+      out += esc(s.slice(last, from)) + '<bdi dir="ltr" class="lat' + cls + '">' + esc(shown) + "</bdi>";
+      last = to;
       LATIN.lastIndex = last;
     }
     return out + esc(s.slice(last));
@@ -219,6 +235,9 @@
   M.plansLink = function () { return '<div class="m-row mt-1">' + M.linkbtn(t("plans.link"), "external-link") + "</div>"; };
   /* D-02: "Cost and data" opens thewhynot.ai/data. Not live: nothing is drawn and the D-02 line stands alone. */
   M.dataLink = function () { return M.live ? '<div class="m-row mt-1">' + M.linkbtn(t("data.link"), "external-link") + "</div>" : ""; };
+  /* H24 for every other thewhynot.ai page (the download page, the guide): live = the link the caller draws; not live =
+     this one plain-text line ("Download page coming soon", "Guide coming soon"), never a button. key = a "<page>.soon" string. */
+  M.soonLine = function (key, cls) { return '<div class="t-meta tx-muted ' + (cls || "mt-1") + '">' + t(key) + "</div>"; };
   /* the three recurring blocking notices, one wording and one button each (R2 designer §4) */
   M.offline = function (o) {
     o = o || {};

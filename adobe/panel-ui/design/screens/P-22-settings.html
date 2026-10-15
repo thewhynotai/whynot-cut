@@ -37,6 +37,7 @@
      plans" (support.claude.com, live); the API-key mode (Advanced, owner) says "Paid per use to Anthropic. Not needed if
      you have Pro or Max" and is never the default. D-02 + D-03: the privacy section carries the approved privacy line, the
      data line, and "Cost and data" (thewhynot.ai/data) ONLY when live; not live, the data line stands alone.
+   - H24: "Open guide" (thewhynot.ai/help) is the same: live states only; not live, the plain line "Guide coming soon".
    - apikey / apikey-saved: the key field; a saved key is never shown again. no-claude: the AI section's Claude card.
    - offline: everything that needs the service is disabled; language still works.
    - error: one control failed; its card sits under it with Try again. Empty and stale: not applicable. */
@@ -144,7 +145,8 @@
       '<div class="m-col mt-2">' + toggle + "</div>" +
       (open ? '<div class="mt-2">' + M.logline(lines) + "</div>" : "") +
       '<div class="mt-2">' + M.supportRow({ kind: "secondary", promise: true }) + "</div>" +
-      PC.acts([M.btn(t("p22.guide"), { kind: "ghost", icon: "life-buoy", flush: true })]) +
+      /* H24: "Open guide" opens thewhynot.ai/help (MOCK_DATA.support.guide_url), not published yet: not live = the plain line */
+      (M.live ? PC.acts([M.btn(t("p22.guide"), { kind: "ghost", icon: "life-buoy", flush: true })]) : M.soonLine("guide.soon", "mt-3")) +
       '<div class="t-meta tx-muted mt-3">' + M.ltr("WhyNot Cut " + P.version, "lat") + "</div>");
   }
   function more(o) {

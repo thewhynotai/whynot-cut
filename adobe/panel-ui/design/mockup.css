@@ -71,8 +71,10 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
   font: 400 var(--mk-type-body) var(--twn-font-ui);
   text-align: left;
 }
-.m-panel.m-rtl { direction: rtl; text-align: right; font: 400 var(--mk-type-ar-body) var(--twn-font-ar); }
-.m-panel bdi { display: inline; }
+.m-panel.m-rtl { direction: rtl; unicode-bidi: isolate; text-align: right; font: 400 var(--mk-type-ar-body) var(--twn-font-ar); }
+/* Latin runs inside Arabic are LTR isolates (mockup.js txt()): stated here too, so a renderer that does not give <bdi>
+   the isolate by default still keeps the run, its quotes and its brackets out of the Arabic line's ordering */
+.m-panel bdi { display: inline; unicode-bidi: isolate; }
 .m-col { display: flex; flex-direction: column; }
 .m-row { display: flex; flex-direction: row; align-items: center; }
 .m-row-top { display: flex; flex-direction: row; align-items: flex-start; }
@@ -400,8 +402,8 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 
 /* item codes (C0239) in the Syne roles: Syne's round zero reads as "o", so a code keeps the UI face at the role's size */
 .m-panel .t-display .code, .m-panel .t-title .code, .m-panel .t-verb .code { font-family: var(--twn-font-ui); font-weight: 600; }
-/* a short Latin run inside Arabic (24 characters or fewer, class nb) never breaks across lines ("WhyNot Cut");
-   a longer one (a long client name) may wrap */
+/* a short Latin run inside Arabic (32 characters or fewer, quotes or brackets of its own included, class nb) never breaks
+   across lines ("WhyNot Cut", "Help improve our AI models"); a longer one (a long client name) may wrap */
 .m-rtl .nb { white-space: nowrap; }
 
 /* ---- E-D3 round 1 additions ---- */
