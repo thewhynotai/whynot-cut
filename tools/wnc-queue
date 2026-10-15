@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# wnc-queue CLI (docs/dev/wnc-queue.md): queue long NON-AI jobs that keep running after the Claude session ends.
+# Uses the system Python 3 (stdlib only), never the engine runtime. $WNC_QUEUE_PYTHON overrides it.
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PY="${WNC_QUEUE_PYTHON:-}"
+if [ -z "$PY" ]; then
+  for c in python python3; do       # `python` first: on Windows `python3` may be the Microsoft Store stub
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
+      PY="$c"; break
+    fi
+  done
+fi
+[ -n "$PY" ] || { echo "wnc-queue: Python 3.9+ not found" >&2; exit 2; }
+exec "$PY" -B "$DIR/wnc-queue.py" "$@"
