@@ -20,6 +20,20 @@
   var missing = [];
 
   var M = (window.M = { lang: LANG, w: W, rtl: LANG === "ar", D: window.MOCK_DATA, capture: CAPTURE });
+  /* H24 (executor rule, owner decisions D-02 / D-05): the panel never links to a page that isn't live. Two mock states:
+     LIVE = the engine sends support.url / support.data_url (state name ends in "-live", or ?support=live on any screen);
+     NOT LIVE (the default, nothing is published yet) = no link: "Copy details for support" copies only and a plain-text
+     line says "Support page coming soon"; "Cost and data" is hidden and the data line stands alone. */
+  M.live = q.get("support") === "live";
+  /* "<state>-live" is a twin of "<state>" when both are in the screen's list ("success-live" of P-07 is its own state) */
+  M.resolve = function (screen, raw) {
+    var valid = screen.states.indexOf(raw) >= 0;
+    var full = valid ? raw : (screen.defaultState || screen.states[0]);
+    var m = /^(.*)-live$/.exec(full);
+    var twin = !!(m && screen.states.indexOf(m[1]) >= 0);
+    if (twin) M.live = true;
+    return { full: full, valid: valid, state: twin ? m[1] : full };
+  };
 
   function esc(s) {
     return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; });
@@ -165,9 +179,12 @@
       var b = o.btn;
       var bo = b ? { kind: b.primary ? "primary" : "secondary", icon: b.busy ? "busy" : b.icon, focus: b.focus, disabled: b.disabled || b.busy,
         kbd: b.primary && b.kbd !== false && !b.busy ? true : false } : null;
+      /* the support action (H24): when it is the card's only action it is the secondary button, else a ghost beside the fix */
+      var sp = o.support ? M.supportParts({ kind: b ? "ghost" : "secondary", promise: o.promise }) : null;
       body += '<div class="m-row m-wrap">' +
         (b ? '<div class="m-row me-2 mt-3">' + M.btn(b.label, bo) + "</div>" : "") +
-        (o.support ? '<div class="m-row mt-3">' + M.btn(S["action.support"] || "Contact support", { kind: "ghost", icon: "headset" }) + "</div>" : "") + "</div>";
+        (sp ? '<div class="m-row me-2 mt-3">' + sp.btn + "</div>" + (sp.soon ? '<div class="mt-3 m-soon">' + sp.soon + "</div>" : "") : "") + "</div>" +
+        (sp && sp.promise ? '<div class="t-meta tx-muted mt-2">' + sp.promise + "</div>" : "");
     }
     var dismissible = o.dismiss === undefined ? kind !== "error" : !!o.dismiss;
     var x = !dismissible ? "" :
@@ -178,6 +195,30 @@
   };
   /* a notice followed by the standard 16 px space: the reserved slot every screen gives its notice */
   M.slot = function (html) { return html + '<div class="mt-4"></div>'; };
+
+  /* ---- support and data links (D-01, D-02, D-05; H24). One place decides what is shown in which state. ----
+     supportParts(o): {btn, soon, promise}. LIVE: "Copy details and open support" is ONE action and the reply promise
+     follows when o.promise; NOT LIVE: "Copy details for support" only copies, and `soon` is the plain-text line next to it. */
+  M.supportParts = function (o) {
+    o = o || {};
+    var kind = o.kind || "ghost";
+    var btn = M.btn(t(M.live ? "support.copy_open" : "support.copy"), { kind: kind, icon: M.live ? "headset" : "copy", cls: "m-btn-wrap" + (o.cls ? " " + o.cls : ""), flush: !!o.flush });
+    return {
+      btn: btn,
+      soon: M.live ? "" : '<span class="t-meta tx-muted">' + t("support.soon") + "</span>",
+      promise: M.live && o.promise ? t("support.promise") : ""
+    };
+  };
+  /* the same as one standalone row (button, the "coming soon" line beside it, the promise under it) */
+  M.supportRow = function (o) {
+    var sp = M.supportParts(o);
+    return '<div class="m-row m-wrap"><div class="m-row me-2">' + sp.btn + "</div>" + (sp.soon ? '<div class="m-soon">' + sp.soon + "</div>" : "") + "</div>" +
+      (sp.promise ? '<div class="t-meta tx-muted mt-1">' + sp.promise + "</div>" : "");
+  };
+  /* D-01: "See plans" opens support.claude.com (a live page, so it is always shown) */
+  M.plansLink = function () { return '<div class="m-row mt-1">' + M.linkbtn(t("plans.link"), "external-link") + "</div>"; };
+  /* D-02: "Cost and data" opens thewhynot.ai/data. Not live: nothing is drawn and the D-02 line stands alone. */
+  M.dataLink = function () { return M.live ? '<div class="m-row mt-1">' + M.linkbtn(t("data.link"), "external-link") + "</div>" : ""; };
   /* the three recurring blocking notices, one wording and one button each (R2 designer §4) */
   M.offline = function (o) {
     o = o || {};
@@ -642,9 +683,8 @@
 
   /* ---- mount: one screen, one state ---- */
   M.mount = function (screen) {
-    var state = q.get("state");
-    var valid = screen.states.indexOf(state) >= 0;
-    if (!valid) state = screen.defaultState || screen.states[0];
+    var r = M.resolve(screen, q.get("state")); /* "<state>-live" = the same screen with the support and data pages live (H24) */
+    var full = r.full, valid = r.valid, state = r.state;
     if (state === "long") for (var k in M.D.long) M.D[k] = M.D.long[k];
     var view = screen.build(state);
     if (state === "long") view.needs = M.D.needs;
@@ -656,7 +696,7 @@
     root.lang = LANG;
     root.dir = M.rtl ? "rtl" : "ltr";
     if (CAPTURE) root.className += " m-capture";
-    document.title = screen.id + " " + state + " · " + LANG + " · " + W;
+    document.title = screen.id + " " + full + " · " + LANG + " · " + W;
 
     var panel = document.createElement("div");
     panel.className = "m-panel m-w" + W + (M.rtl ? " m-rtl" : "");
@@ -672,9 +712,9 @@
     document.body.innerHTML = "";
     document.body.appendChild(panel);
     stalePass(panel);
-    if (!CAPTURE) document.body.appendChild(nav(screen, state));
+    if (!CAPTURE) document.body.appendChild(nav(screen, full));
     keys(panel);
-    check(panel, state, valid);
+    check(panel, full, valid);
   };
 
   /* Addendum G shortcuts (demo in the browser; UXP keydown capture is a lab item): Cmd/Ctrl+Enter runs the primary,

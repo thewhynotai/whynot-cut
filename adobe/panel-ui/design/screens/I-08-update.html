@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="normal,focus,loading,checking,success,error,offline,repair,long,win">
+<meta name="mock-states" content="normal,focus,loading,checking,success,error,error-live,offline,repair,long,win">
 <meta name="mock-widths" content="760,640">
 <meta name="mock-keys" content="Return: Update · Esc: Later (up to date, error, offline: Esc closes) · R: Repair · Tab order: Repair, Go back to the previous version, Later, Update">
 <meta name="mock-motion" content="the progress card replaces the release note in the same reserved block; bar width 250 ms; the genuine-check line turns from spinner to green check by fill colour 200 ms; static fallback: final state">
@@ -96,7 +96,7 @@
   };
   I.mount({
     id: "I-08", name: "Update and repair",
-    states: ["normal", "focus", "loading", "checking", "success", "error", "offline", "repair", "long", "win"], defaultState: "normal",
+    states: ["normal", "focus", "loading", "checking", "success", "error", "error-live", "offline", "repair", "long", "win"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.rail = { flow: "update", at: v.at || "update", mark: v.mark, all: state === "success" };

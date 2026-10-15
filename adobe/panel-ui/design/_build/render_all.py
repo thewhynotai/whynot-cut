@@ -45,7 +45,7 @@ SKILL = pathlib.Path(os.path.expanduser("~")) / ".claude" / "skills" / "brand-id
 LANGS = ["en", "ar"]
 WIDTHS = [300, 360, 480]
 SCALE = 2
-WINDOW_W, WINDOW_H = 520, 2600  # CSS px; the panel is drawn at its own width (JS), so the window only needs to be wider
+WINDOW_W, WINDOW_H = 520, 3600  # CSS px (P-22 grew past 2600 with the D-01/D-02 lines); the panel is drawn at its own width (JS), so the window only needs to be wider
 SENTINEL = np.array([255, 0, 255])  # BGR of #FF00FF
 
 BROWSERS = [

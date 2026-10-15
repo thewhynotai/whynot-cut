@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,focus,error,offline,no-claude,long">
+<meta name="mock-states" content="empty,loading,normal,older,focus,error,offline,no-claude,long">
 <meta name="mock-keys" content="Cmd/Ctrl+Enter: the first item's button (the violet one); Up/Down: move between items; Enter: the focused item's button; Esc: close the list and go back to where the badge was tapped; Tab order: Back, then each item's button top to bottom, then Open the list in the client folder">
 <meta name="mock-motion" content="Opening from the badge: the list cross-fades in 200 ms ease (static fallback: instant); an item that is done fades out 200 ms and its space closes only after the fade (250 ms, the one allowed height change, at the bottom of the list so nothing above moves); the badge and Edit-tab count change number with a 150 ms colour pulse; skeleton shimmer 1200 ms linear (static fallback: flat bars).">
 <title>P-10 Needs you</title>
@@ -25,6 +25,9 @@
    - R2 D-P0-1: when Needs-you is the only reason, the header has no status pill (the badge says it): no "running ready".
      The offline / error / no-Claude states derive their pill from the card.
    - Detail lines quote the words or lines as said (Arabic in both UIs) and the timecode as plain text (not a control).
+   - older: a plan that was approved with an older WhyNot Cut is back in the list as the first item (the engine's
+     OLDER_APPROVAL text, verbatim). It is information, not a fault: an amber line (never red) and the normal flow, "Review
+     and approve" (the one primary) opens the approval screen (P-07 older), where the editor approves it again.
    - empty is also the success state ("Nothing needs you right now."). Stale: not applicable. */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
@@ -45,6 +48,10 @@
       ["refresh-cw", "p10.k.restart", function () { return t("p10.d.restart"); }, "p10.b.check", "refresh-cw"]
     ] }
   ];
+  /* a plan approved with an older WhyNot Cut: the detail line is the engine's text, in amber (information, not an error) */
+  var PLAN = ["circle-check-big", "p10.k.plan", function () {
+    return '<div class="m-row-top">' + M.status("warn", 12) + '<div class="ms-1 m-grow tx-text">' + t("approval.older") + "</div></div>";
+  }, "p10.b.plan", "circle-check-big"];
   var NUMBERS = ["hash", "p10.k.numbers", function () { return t("p10.d.numbers", { tc: tc("00:00:31:20") }); }, "p10.b.numbers", "circle-check-big"];
 
   function list(o) {
@@ -53,6 +60,7 @@
     GROUPS.forEach(function (g, gi) {
       var rows = g.rows.slice();
       if (o.long && gi === 0) rows.push(NUMBERS);
+      if (o.older && gi === 0) rows.unshift(PLAN);
       var head = g.general
         ? '<div class="t-label">' + t("p10.general") + "</div>"
         : '<div class="t-label">' + M.ltr(g.item(), "lat code") + "</div>";
@@ -87,6 +95,7 @@
     },
     loading: function () { return { needs: 6, body: top() + skelCard() + skelCard() }; },
     normal: function () { return { needs: 6, body: top(6) + list() + reveal() }; },
+    older: function () { return { needs: 7, body: top(7) + list({ older: true }) + reveal() }; },
     focus: function () { return { needs: 6, body: top(6) + list({ focus: true }) + reveal() }; },
     error: function () {
       return { needs: 6, body: top() + '<div class="mt-4">' + M.notice("error", t("p10.failed"), { sub: t("p10.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } }) + "</div>" + reveal() };
@@ -107,7 +116,7 @@
 
   PC.mount({
     id: "P-10", name: "Needs you",
-    states: ["empty", "loading", "normal", "focus", "error", "offline", "no-claude", "long"], defaultState: "normal",
+    states: ["empty", "loading", "normal", "older", "focus", "error", "offline", "no-claude", "long"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.tab = "needs"; /* no tab is selected: the list opens from the badge */

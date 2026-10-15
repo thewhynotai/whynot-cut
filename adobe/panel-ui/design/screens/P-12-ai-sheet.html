@@ -36,7 +36,8 @@
   var JOBS = [["fix_captions", "captions"], ["suggest_titles", "type"], ["summarise", "text-quote"]];
 
   function top() {
-    return M.back(t("p12.back")) + PC.title(t("p12.title")) + PC.info(t("p12.privacy"), "mt-2");
+    /* D-03 privacy line, then the D-02 data line under it (no "Cost and data" link here: it is linked from I-05, P-01 and P-22) */
+    return M.back(t("p12.back")) + PC.title(t("p12.title")) + PC.info(t("p12.privacy") + '<div class="mt-1">' + t("claude.data") + "</div>", "mt-2");
   }
   function jobs(sel, o) {
     o = o || {};
@@ -44,8 +45,9 @@
       var sub = j[0] === "fix_captions" ? t("p12.fix_captions.sub", { item: code(D.item) }) : t("p12." + j[0] + ".sub");
       return (i ? '<div class="mt-1"></div>' : "") + M.radio(t("p12." + j[0]), sel === j[0], { sub: sub, disabled: o.disabled });
     }).join("");
-    /* MOCK-VERIFY (D-01): the "no extra charge" line stays the approved wording until the owner confirms the plan facts */
-    return M.card(rows + '<span class="m-divider mt-2"></span><div class="t-meta tx-muted mt-2">' + t("p12.backend") + "</div>", "mt-4");
+    /* D-01: the cost line, plainly (the editor's own Claude plan, paid to Anthropic), with "See plans" (support.claude.com, live) */
+    return M.card(rows + '<span class="m-divider mt-2"></span><div class="t-meta tx-muted mt-2">' + t("p12.backend") + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("claude.cost") + "</div>" + M.plansLink(), "mt-4");
   }
   function runBar(o) {
     o = o || {};

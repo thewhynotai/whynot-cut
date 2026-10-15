@@ -76,7 +76,7 @@
   /* Done is the screen's violet unless a card above already carries the next step */
   function done(o) {
     o = o || {};
-    return '<div class="ta-btnrow mt-4">' + M.btn(t("p13.done"), { kind: o.primary === false ? "secondary" : "primary" }) + M.btn(t("action.support"), { kind: "ghost", icon: "life-buoy" }) + '</div>';
+    return '<div class="ta-btnrow mt-4">' + M.btn(t("p13.done"), { kind: o.primary === false ? "secondary" : "primary" }) + '</div><div class="mt-2">' + M.supportRow({ flush: true }) + '</div>';
   }
   function okNotice() { return M.slot(M.notice("ok", t("p15.done"))); }
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,noname,flagged-unchecked,flagged-checked,focus,error,offline,no-claude-signed-out,no-claude-missing,stale,success-live,success-later,success-changes,long">
+<meta name="mock-states" content="empty,loading,normal,older,noname,flagged-unchecked,flagged-checked,focus,error,error-live,offline,no-claude-signed-out,no-claude-missing,stale,success-live,success-later,success-changes,long">
 <meta name="mock-keys" content="Mod+Enter = Approve (only when it is on) or the notice's fix; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = Home / Edit / Tools; Tab / Shift+Tab move through the flagged lines, their seek buttons, the checkbox and the bar in reading order (mirrored in Arabic). No single-key shortcuts. UXP keydown capture: lab item.">
 <meta name="mock-motion" content="trigger | property | token | final static state
 checkbox ticked | background-color, border-color of the box | --mk-dur-fast, --mk-ease | white box with a black check;
@@ -33,7 +33,9 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
      "confirmed with" field. Approve stays off until the box is ticked; the bar's hint expands the lines.
    - The pinned bar carries Approve, its keycap and the trust line (a NEW sequence; originals untouched).
    - The approval record shows the full date and time and who confirmed the lines.
-   - no-claude-*: "Approved and saved; the build waits" + the Claude fix as the one primary. */
+   - no-claude-*: "Approved and saved; the build waits" + the Claude fix as the one primary.
+   - older: the plan was approved with an older WhyNot Cut (the engine's OLDER_APPROVAL, verbatim). It is information, not a
+     fault: an amber notice (never red) above the normal approval flow; the lines are unticked, Approve turns on as usual. */
 (function () {
   var t = M.t, D = M.D;
   function item() { return M.html(M.ltr(D.item, "lat code")); }
@@ -140,6 +142,9 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
     normal: function () { return { body: heading() + summary() + flagged({}) + changesCard(), bar: bar("collapsed") }; },
     "flagged-unchecked": function () { return { body: heading() + summary() + flagged({ all: true }) + changesCard(), bar: bar("unticked") }; },
     "flagged-checked": function () { return { body: heading() + summary() + flagged({ all: true, checked: true }) + changesCard(), bar: bar("ok") }; },
+    older: function () {
+      return { body: slot(M.notice("warn", t("approval.older"), { dismiss: false })) + heading() + summary() + flagged({}) + changesCard(), bar: bar("collapsed") };
+    },
     noname: function () { return { body: heading() + summary() + flagged({ all: true, checked: true }) + changesCard(), bar: bar("noname") }; },
     focus: function () { return { body: heading() + summary() + flagged({ all: true, checked: true }) + changesCard(), bar: bar("ok", true) }; },
     error: function () {
@@ -197,8 +202,7 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
 
   M.mount({
     id: "P-07", name: "Approval",
-    states: ["empty", "loading", "normal", "noname", "flagged-unchecked", "flagged-checked", "focus", "error", "offline",
-      "no-claude-signed-out", "no-claude-missing", "stale", "success-live", "success-later", "success-changes", "long"],
+    states: ["empty", "loading", "normal", "older", "noname", "flagged-unchecked", "flagged-checked", "focus", "error", "error-live", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success-live", "success-later", "success-changes", "long"],
     defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();

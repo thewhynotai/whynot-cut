@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,advanced,formula,focus,saved,apikey,apikey-saved,error,offline,no-claude,support,support-empty,long">
+<meta name="mock-states" content="loading,normal,normal-live,advanced,formula,focus,saved,apikey,apikey-saved,error,offline,no-claude,support,support-live,support-empty,long">
 <meta name="mock-keys" content="Cmd/Ctrl+,: open Settings from anywhere in the panel; Tab order follows the page top to bottom (language, Change, start-up, AI choice, Advanced settings, Models, tool rows, Export my week, Details for support, Copy details and open support, Open guide); Space: tick a box or pick a choice; the name is locked (read-only); Cmd/Ctrl+Enter: the violet fix of a card on top; Esc: back to Home (or closes Details for support when it is open)">
 <meta name="mock-motion" content="Saved: the green check and word fade in 150 ms next to the control, stay 2 s, fade out 200 ms (the space is reserved, nothing moves); radio dot and check box fill 150 ms ease; Details for support opens with a 200 ms fade below its row (the one height change on this page, at the bottom; static fallback: instant); skeleton shimmer 1200 ms linear (static fallback: flat bars). No primary fill on this page.">
 <title>P-22 Settings</title>
@@ -30,10 +30,13 @@
    - Advanced (owner): the two other Claude modes, the editable rate, the sign-off requirement (on by default), and under
      "Advanced, not recommended" the backup switch (R2 G-F-12: client projects always keep a backup).
    - Details for support is the only place the log appears (G7), in plain words (R2 D-P1-10: no heartbeat, request ids or
-     FAILED lines); ONE button "Copy details and open support" (R2 G-F-09) and a MOCK-VERIFY slot for the channel, hours and
-     reply time (owner decision D-05).
-   - MOCK-VERIFY (owner decision D-01): every sentence about cost and who bills (no extra charge; billed by Anthropic) keeps
-     the approved wording until the owner has checked the plan names and prices.
+     FAILED lines); ONE support action (R2 G-F-09, D-05): live = "Copy details and open support" (one click) + "We reply
+     within one working day (Sun–Thu, Cairo time)."; not live (the default, H24) = "Copy details for support", which only
+     copies, with the plain-text "Support page coming soon" beside it. Live states: normal-live, support-live.
+   - D-01 (cost): under the AI choice, "Each editor needs their own Claude Pro or Max plan, paid to Anthropic ..." and "See
+     plans" (support.claude.com, live); the API-key mode (Advanced, owner) says "Paid per use to Anthropic. Not needed if
+     you have Pro or Max" and is never the default. D-02 + D-03: the privacy section carries the approved privacy line, the
+     data line, and "Cost and data" (thewhynot.ai/data) ONLY when live; not live, the data line stands alone.
    - apikey / apikey-saved: the key field; a saved key is never shown again. no-claude: the AI section's Claude card.
    - offline: everything that needs the service is disabled; language still works.
    - error: one control failed; its card sits under it with Try again. Empty and stale: not applicable. */
@@ -69,13 +72,14 @@
     return sec(t("p22.start"), PC.checkbox(t("p22.engine"), true, { disabled: o.disabled }) + '<div class="t-meta tx-muted mt-1">' + t("p22.engine_hint") + "</div>" +
       (o.error ? '<div class="mt-3">' + M.notice("error", t("p22.failed"), { sub: t("p22.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } }) + "</div>" : ""));
   }
-  /* editors see ONE default mode. MOCK-VERIFY (D-01): "no extra cost" stays the approved wording */
+  /* editors see ONE default mode (the open Claude session); the cost line is D-01, verbatim, with "See plans" */
   function ai(o) {
     o = o || {};
     var sel = o.sel || "session", dis = o.disabled;
     return sec(t("p22.ai"),
       (o.noClaude ? M.noClaude("signed_out", { primary: true }) + '<div class="mt-3"></div>' : "") +
-      M.radio(t("p22.ai.session"), sel === "session", { sub: t("p22.ai.session.sub"), disabled: dis }));
+      M.radio(t("p22.ai.session"), sel === "session", { sub: t("p22.ai.session.sub"), disabled: dis }) +
+      '<span class="m-divider mt-2"></span><div class="t-meta tx-muted mt-2">' + t("claude.cost") + "</div>" + M.plansLink());
   }
   /* the owner's section: collapsed for editors. o = {open, sel, keySaved, disabled} */
   function advanced(o) {
@@ -122,19 +126,25 @@
   }
   function privacy() {
     var line = function (h, i) { return PC.iconrow(M.ico("circle-check", 16, "ink-ok"), h, i ? "mt-2" : ""); };
-    return sec(t("p22.privacy"), '<div class="m-col">' + line(t("p22.privacy.fact"), 0) + line(t("p22.privacy.telemetry"), 1) + line(t("p22.privacy.training"), 2) + "</div>");
+    /* D-03 line, no telemetry, trains on nothing, then the D-02 data line; "Cost and data" only when live (H24) */
+    return sec(t("p22.privacy"), '<div class="m-col">' + line(t("p22.privacy.fact"), 0) + line(t("p22.privacy.telemetry"), 1) + line(t("p22.privacy.training"), 2) +
+      PC.iconrow(M.ico("info", 16, "ink-muted"), t("claude.data"), "mt-2") + "</div>" + M.dataLink());
   }
   function supportCard(open, lines) {
     var toggle = '<div class="m-li" role="button" tabindex="0" aria-expanded="' + !!open + '">' + M.ico("scroll-text", 16, "ink-muted") +
       '<div class="t-label ms-2 m-grow">' + (open ? t("p22.support.hide") : t("p22.support.show", { n: P.log.length })) + "</div>" +
       /* keycap and chevron side by side (the keycap first, as on buttons) */
       '<div class="m-row ms-2">' + (open ? PC.key("Esc") : "") + '<span class="ms-2">' + M.ico(open ? "chevron-up" : "chevron-down", 16, "ink-muted") + "</span></div></div>";
+    /* H24: the support address is read only when the engine provides it (M.live); not live, the button only copies */
+    var where = M.live
+      ? t("p22.support.opens", { url: M.html(M.ltr(D.support.url.replace("https://", ""), "lat")) })
+      : t("p22.support.copyonly");
     return sec(t("p22.support"), '<div class="t-meta tx-muted">' + t("p22.support.sub") + "</div>" +
-      '<div class="t-meta tx-muted mt-1">' + t("p22.support.opens", { url: M.html(M.ltr(P.links.support.replace("https://", ""), "lat")) }) + "</div>" +
-      '<div class="mt-2">' + PC.info(t("p22.support.slot")) + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + where + "</div>" +
       '<div class="m-col mt-2">' + toggle + "</div>" +
       (open ? '<div class="mt-2">' + M.logline(lines) + "</div>" : "") +
-      PC.acts([M.btn(t("p22.support.go"), { icon: "headset" }), M.btn(t("p22.guide"), { kind: "ghost", icon: "life-buoy", flush: true })]) +
+      '<div class="mt-2">' + M.supportRow({ kind: "secondary", promise: true }) + "</div>" +
+      PC.acts([M.btn(t("p22.guide"), { kind: "ghost", icon: "life-buoy", flush: true })]) +
       '<div class="t-meta tx-muted mt-3">' + M.ltr("WhyNot Cut " + P.version, "lat") + "</div>");
   }
   function more(o) {
@@ -170,13 +180,14 @@
       return { pills: { claude: "signed_out" }, body: top() + ai({ noClaude: true }) + privacy() + name() + lang() };
     },
     support: function () { return { body: top() + supportCard(true, P.log) + name() + lang() }; },
+    /* "-live" states reach these builders under their base name; M.live decides what the support card and the privacy card show */
     "support-empty": function () { return { body: top() + supportCard(true, []) + name() + lang() }; },
     long: function () { return { body: page({ saved: true }) }; }
   };
 
   PC.mount({
     id: "P-22", name: "Settings",
-    states: ["loading", "normal", "advanced", "formula", "focus", "saved", "apikey", "apikey-saved", "error", "offline", "no-claude", "support", "support-empty", "long"], defaultState: "normal",
+    states: ["loading", "normal", "normal-live", "advanced", "formula", "focus", "saved", "apikey", "apikey-saved", "error", "offline", "no-claude", "support", "support-live", "support-empty", "long"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.tab = "home";

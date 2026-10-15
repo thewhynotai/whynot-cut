@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,starting,offline,link-off,restart-once,stale,staged,engine-older,no-claude,claude-missing,no-internet,claude-old,claude-working,claude-waiting,stacked,success,focus,long">
+<meta name="mock-states" content="loading,normal,starting,offline,link-off,link-off-live,restart-once,stale,staged,engine-older,no-claude,claude-missing,no-internet,claude-old,claude-working,claude-waiting,stacked,success,focus,long">
 <meta name="mock-keys" content="Cmd/Ctrl+Enter: the card's fix button (the violet one); Esc: back to the screen the pill was tapped on; Tab order: Back, card fix, card dismiss, then the four rows are not focusable (plain text)">
 <meta name="mock-motion" content="Card in: background and border colour fade 200 ms ease, its slot is reserved (no layout shift); a card that is fixed turns into the ok card for 3 s then fades out 200 ms; row status icon colour 200 ms; busy icon rotates 900 ms linear (static fallback: the loader icon still); button hover/press colour 150 ms. Nothing moves position.">
 <title>P-02 Status cards</title>
@@ -134,8 +134,7 @@
 
   PC.mount({
     id: "P-02", name: "Status cards",
-    states: ["loading", "normal", "starting", "offline", "link-off", "restart-once", "stale", "staged", "engine-older", "no-claude", "claude-missing",
-      "no-internet", "claude-old", "claude-working", "claude-waiting", "stacked", "success", "focus", "long"],
+    states: ["loading", "normal", "starting", "offline", "link-off", "link-off-live", "restart-once", "stale", "staged", "engine-older", "no-claude", "claude-missing", "no-internet", "claude-old", "claude-working", "claude-waiting", "stacked", "success", "focus", "long"],
     defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();

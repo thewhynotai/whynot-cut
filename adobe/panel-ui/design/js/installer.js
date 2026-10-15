@@ -28,7 +28,7 @@
   var H = W === 760 ? 540 : 480;
   var S = window.MOCK_STRINGS[M.lang];
   var missing = [];
-  var state0 = q.get("state") || "";
+  var state0 = q.get("state") || ""; /* may end in "-live" (the support and data pages live, H24): mockup.js strips it for the build */
   var OS = /^win/.test(state0) ? "win" : "mac";
   var D = {}, base = window.I_DATA, k;
   for (k in base) if (k !== "mac" && k !== "win") D[k] = base[k];
@@ -113,8 +113,12 @@
   I.fail = function (text, o) {
     o = o || {};
     var chip = o.safety ? '<div class="m-row">' + M.chip("error", T("i07.safety"), "shield-x") + "</div>" : "";
-    var support = '<div class="m-row m-wrap mt-2 i-support">' + M.btn(T("i00.support"), { kind: "ghost", icon: "life-buoy", flush: true }) +
-      M.btn(T("i00.save_report"), { kind: "ghost", icon: "download", flush: true }) + "</div>"; /* both flush: a wrapped second line stays aligned */
+    /* H24: live = "Copy details and open support" (one action) and the reply promise; not live = "Copy details for support"
+       (copies only) with the plain-text "Support page coming soon" beside it. Save a report is its own button either way. */
+    var sp = M.supportParts({ kind: "ghost", flush: true, promise: true });
+    var support = '<div class="m-row m-wrap mt-2 i-support"><div class="m-row me-2">' + sp.btn + "</div>" + (sp.soon ? '<div class="m-soon">' + sp.soon + "</div>" : "") + "</div>" +
+      (sp.promise ? '<div class="t-meta tx-muted mt-1">' + sp.promise + "</div>" : "") +
+      '<div class="m-row m-wrap i-support">' + M.btn(T("i00.save_report"), { kind: "ghost", icon: "download", flush: true }) + "</div>"; /* both flush: a wrapped second line stays aligned */
     var body = chip + '<div class="t-body tx-text' + (o.safety ? " mt-2" : "") + '">' + text + "</div>" +
       (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + "</div>" : "") +
       (o.mono ? '<div class="m-row mt-2">' + I.monoBox(o.mono) + "</div>" : "") +
@@ -201,9 +205,7 @@
   }
 
   I.mount = function (screen) {
-    var state = state0;
-    var valid = screen.states.indexOf(state) >= 0;
-    if (!valid) state = screen.defaultState || screen.states[0];
+    var r = M.resolve(screen, state0), full = r.full, valid = r.valid, state = r.state;
     I.state = state;
     if (state === "long") I.useLong();
     var v = screen.build(state);
@@ -211,7 +213,7 @@
     root.lang = M.lang;
     root.dir = M.rtl ? "rtl" : "ltr";
     if (M.capture) root.className += " m-capture";
-    document.title = screen.id + " " + state + " · " + M.lang + " · " + W;
+    document.title = screen.id + " " + full + " · " + M.lang + " · " + W;
 
     var internal = !!v.internal;
     var chrome = v.chrome || OS;
@@ -236,8 +238,8 @@
         '<div class="i-sbar" aria-hidden="true"><span class="i-sbar-gap"></span><span class="i-sbar-thumb"></span></div></div>' + bar + "</div></div></div>";
     document.body.innerHTML = "";
     document.body.appendChild(win);
-    if (!M.capture) document.body.appendChild(nav(screen, state));
-    check(win, state, valid, v.scroll);
+    if (!M.capture) document.body.appendChild(nav(screen, full));
+    check(win, full, valid, v.scroll);
   };
 
   function nav(screen, state) {

@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="checksum,manifest,address,dlfail,nointernet,diskfull,panel,hostopen,focus,long,win">
+<meta name="mock-states" content="checksum,checksum-live,manifest,address,dlfail,nointernet,diskfull,panel,hostopen,focus,long,win">
 <meta name="mock-widths" content="760,640">
-<meta name="mock-keys" content="Return: the card's one fix (Try again / Check again / Show me) · Esc: Close · S: Save a report for support · Tab order: fix, Contact support, Save a report for support, Show details, Close">
+<meta name="mock-keys" content="Return: the card's one fix (Try again / Check again / Show me) · Esc: Close · S: Save a report for support · Tab order: fix, Copy details for support (live: Copy details and open support), Save a report for support, Show details, Close">
 <meta name="mock-motion" content="the card enters a reserved slot above the list by colour (200 ms); the stopped row turns red by fill colour in place; on Try again the fix button shows a spinner with its width locked; static fallback: final state">
 <title>I-07 Failure cards</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -19,19 +19,22 @@
 <body>
 <script>
 /* I-07 Security and failure cards (screen-inventory §5 I-07; E2.1#3, #4, E-T7, F7, B4.4; Addendum G10 fault list).
-   Every installer failure as: what happened (one white sentence), why (one meta line), ONE fix button, then Contact
-   support + Save a report for support (G2-r1 e), the privacy note and the log path; never a stack trace, never a
+   Every installer failure as: what happened (one white sentence), why (one meta line), ONE fix button, then the support
+   action + Save a report for support (G2-r1 e) and the privacy note; never a stack trace, never a
    developer word. Shown over the I-04 checklist: the stopped row is red; what is done stays.
    Data: the core's red/amber StepResult {name, status, detail, needs_you} and the log path; the safety cards need
    E-T3 (a signed list of files with an allowlist of addresses). Today the core refuses a mismatched or unpinned
    download (it names the file and the log) but has no address allowlist and no list signature. "Download failed"
-   and resume-from-where-it-stopped need the core's partial-download support. The support link comes from config
-   (D.support).
+   and resume-from-where-it-stopped need the core's partial-download support.
+   Support (D-05, H24: never link to a page that isn't live): the installer core sends the support address only when
+   thewhynot.ai/support is published. NOT LIVE (the default): "Copy details for support" copies only and "Support page
+   coming soon" sits beside it. LIVE (checksum-live): "Copy details and open support" is one click and the card adds
+   "We reply within one working day (Sun–Thu, Cairo time)." The same two states apply to every failure card (M.supportParts).
    States: one per card (checksum = not the genuine file, manifest = list not genuine, address = not on our list,
    dlfail = download stopped halfway, nointernet, diskfull, panel = Adobe did not install the panel, hostopen =
    Premiere still open: save first), focus (keyboard on the fix), long (the panel card with a long file name),
    win (Windows chrome, the download page). R2: no file names, no log path and no script address in a card; nointernet offers
-   "Get the offline installer"; support is one click (MOCK-VERIFY, owner decision D-05). */
+   "Get the offline installer". */
 (function () {
   var t = I.T, D = I.D, st = I.state, win = I.os === "win";
   var KEYS = ["preflight", "engine", "claude"].concat(win ? ["gitbash"] : []).concat(["adobe", "fonts", "always_on", "models", "client", "doctor", "launch"]);
@@ -66,7 +69,7 @@
   }
   I.mount({
     id: "I-07", name: "Failure cards",
-    states: ["checksum", "manifest", "address", "dlfail", "nointernet", "diskfull", "panel", "hostopen", "focus", "long", "win"], defaultState: "checksum",
+    states: ["checksum", "checksum-live", "manifest", "address", "dlfail", "nointernet", "diskfull", "panel", "hostopen", "focus", "long", "win"], defaultState: "checksum",
     build: function (state) {
       var v;
       if (state === "focus") v = view("checksum", true);

@@ -11,9 +11,14 @@
    - EN uses contractions; U+00A0 inside time and unit phrases and after a joined «و» before a number («و4 جمل»);
    - what Claude sees: privacy.claude_sees is the executor-APPROVED wording, used verbatim (never "text only");
    - time saved is always labelled "estimate" / «تقدير» (eng-data-contract §7.3);
-   - TO VERIFY before shipping (owner fact): the customer's own Claude account, no extra WhyNot Cut charge. Lines that state
-     a fact about Anthropic, a Claude plan or a price carry MOCK-VERIFY and keep the approved wording until Yunus decides
-     (R2-fix-list.md section 5);
+   - Round 2 owner decisions (docs/design/reviews/R2-owner-decisions.md) are applied verbatim: the Claude cost line D-01
+     (claude.cost, with a "See plans" link to support.claude.com, which is live), the data line D-02 (claude.data), the
+     Egyptian privacy line D-03 (privacy.claude_sees, ending in a full stop) and the support promise D-05
+     (support.promise). Re-check the Anthropic facts on release day (the list at the top of that file);
+   - H24 (executor rule): never link to a page that isn't live. thewhynot.ai/support and thewhynot.ai/data are shown only
+     in the LIVE state (the engine sends support.url / support.data_url; add ?support=live or a "-live" state). The
+     default is NOT-LIVE: "Copy details for support" copies only and a plain-text line says "Support page coming soon";
+     "Cost and data" is hidden. mockup.js (M.live, M.supportRow, M.dataLink) is the only place that decides;
    - ONE ARABIC WORD LIST (R2 editor P2-02, designer P1-9), used by every group: «جرّب تاني» (Try again), «افحص تاني»
      (Check again), «تراجع» (Undo), «دوس» (press), «شباك» (window), «نموذج» (model), «المتكلم» (speaker), «إنت»,
      «ريندر» (render), «مراجعة الصور»; Latin names stay in <bdi>. The group strings still use the old words until each
@@ -42,7 +47,7 @@
       "notice.plan_changed": "The plan changed. Review it and approve again.",
       "empty.noclient.title": "No client folder yet", "empty.noclient.action": "Choose client folder",
       "step.transcript": "Transcript", "step.plan": "Plan", "step.approve": "Approve", "step.build": "Build",
-      "step.frames": "Frames", "step.qc": "QC", "step.handoff": "Handoff",
+      "step.frames": "Export frames", "step.qc": "Quality check", "step.handoff": "Ready for you",
       /* NEW */
       "firstrun.title": "Let's get WhyNot Cut ready",
       "firstrun.sub": "Four quick checks. A button appears next to any check that needs you.",
@@ -68,16 +73,24 @@
       "net.off.sub": "Transcription and the tools keep working on this computer. Editing continues by itself when the internet is back.",
       "hdr.ctx.aria": "Change client or video",
       "needs.open": "Needs you: {n}. Open the list.",
-      "action.support": "Contact support",
       "seek.aria": "Play from {tc} in Premiere",
       /* MOCK: first run */
       "checklist.engine": "WhyNot Cut service",
       "checklist.engine.explain": "Runs on this computer and does the heavy work.",
       "checklist.claude.explain": "Claude — the AI assistant that does the editing. It opens in its own window.",
-      "checklist.claude.account": "It uses your own Claude account, with no extra charge from WhyNot Cut.", /* MOCK-VERIFY: Claude plan and cost, owner decision D-01 */
-      "privacy.claude_sees": "Video and audio files are never uploaded. Claude reads text (the transcript and the plan) and a few still images: some timeline frames for checking, and brand photos.", /* approved wording; MOCK-VERIFY the Anthropic data handling around it (D-02) */
+      "claude.cost": "Each editor needs their own Claude Pro or Max plan, paid to Anthropic (Pro from $20 a month; prices vary by country). WhyNot Cut adds nothing on top.", /* D-01, verbatim */
+      "plans.link": "See plans", /* D-01: opens support.claude.com, the Pro plan article (live) */
+      "claude.data": "What Claude reads is handled under your Claude plan's terms. For client work, turn off 'Help improve our AI models' in Claude's privacy settings. Medical clients: use a Team or Enterprise plan, where data isn't used for training.", /* D-02, verbatim */
+      "data.link": "Cost and data", /* D-02: thewhynot.ai/data, shown only when the engine sends support.data_url (H24) */
+      "privacy.claude_sees": "Video and audio files are never uploaded. Claude reads text (the transcript and the plan) and a few still images: some timeline frames for checking, and brand photos.", /* approved wording (D-03: EN unchanged) */
       "privacy.link": "What Claude sees",
       "privacy.extra": "No telemetry, and WhyNot Cut trains on nothing.",
+      /* D-05 + H24: the support action in its two states (live = the engine sends support.url; not live = copy only) */
+      "support.copy_open": "Copy details and open support",
+      "support.copy": "Copy details for support",
+      "support.soon": "Support page coming soon",
+      "support.promise": "We reply within one working day (Sun–Thu, Cairo time).",
+      "approval.older": "This plan was approved with an older WhyNot Cut. Have one more look and approve it again.", /* the engine's OLDER_APPROVAL text (whynot-cut/engine/reel/lib/plan.py), verbatim */
       "checklist.premiere.ok": "Linked to Premiere", "checklist.claude.ok": "Signed in",
       "checklist.clients.ok": "1 client · {client}",
       "firstrun.progress": "{n} of {of} ready",
@@ -99,7 +112,6 @@
       "link.off": "Premiere isn't linked to the WhyNot Cut service.",
       "retry.hint": "If Try again fails, close Premiere and open it again.",
       "action.start_app": "Start WhyNot Cut",
-      "action.report": "Copy report for support",
       "update.stale": "WhyNot Cut was updated. Close Premiere and open it again, then press Check again.",
       /* MOCK: home */
       "home.current": "Current video",
@@ -203,7 +215,7 @@
       "approval.approve": "وافق", "home.approve": "وافق", "step.approve": "الموافقة",
       "approval.changes": "اطلب تعديلات",
       "step.transcript": "التفريغ", "step.plan": "الخطة", "step.build": "البناء",
-      "step.frames": "مراجعة الصور", "step.qc": "الفحص", "step.handoff": "التسليم",
+      "step.frames": "تصدير الصور", "step.qc": "فحص الجودة", "step.handoff": "جاهز ليك",
       /* MOCK: header and pills */
       "status.novideo": "مفيش فيديو مختار",
       "pill.engine": "خدمة WhyNot Cut", "pill.claude": "Claude", "pill.host": "Premiere",
@@ -219,16 +231,23 @@
       "net.off.sub": "التفريغ والأدوات شغّالين على جهازك عادي، والمونتاج هيكمّل لوحده لما النت يرجع.",
       "hdr.ctx.aria": "غيّر العميل أو الفيديو",
       "needs.open": "مطلوب منك: {n}. افتح القائمة.",
-      "action.support": "كلّم الدعم",
       "seek.aria": "شغّل من {tc} في Premiere",
       /* MOCK: first run */
       "checklist.engine": "خدمة WhyNot Cut",
       "checklist.engine.explain": "شغّالة على جهازك وبتعمل الشغل التقيل.",
       "checklist.claude.explain": "Claude — المساعد الذكي اللي بيخطّط المونتاج. بيفتح في شباك لوحده.",
-      "checklist.claude.account": "بيشتغل بحسابك إنت على Claude، من غير أي تكلفة زيادة من WhyNot Cut.", /* MOCK-VERIFY: Claude plan and cost, owner decision D-01 */
-      "privacy.claude_sees": "ملفات الفيديو والصوت لا تُرفع أبدًا؛ يقرأ Claude النصوص (التفريغ والخطة) وبعض الصور الثابتة: لقطات قليلة من التايملاين للتحقق وصور البراند", /* approved wording kept; Egyptian rewrite = owner decision D-03 */
+      "claude.cost": "كل مونتير محتاج اشتراك Claude Pro أو Max باسمه، بيدفعه لـ Anthropic (Pro بيبدأ من 20 دولار في الشهر، والسعر بيختلف من بلد للتاني). WhyNot Cut مش بيزوّد عليه حاجة.", /* D-01, verbatim */
+      "plans.link": "شوف الاشتراكات",
+      "claude.data": "اللي Claude بيقراه بيتعامل معاه حسب شروط اشتراكك في Claude. لشغل العملاء، اقفل \"Help improve our AI models\" من إعدادات الخصوصية في Claude. للعملاء الطبيين: استخدم اشتراك Team أو Enterprise، لأن بياناته ما بتتستخدمش في التدريب.", /* D-02, verbatim */
+      "data.link": "التكلفة والبيانات",
+      "privacy.claude_sees": "ملفات الفيديو والصوت عمرها ما بتترفع. Claude بيقرا نصوص بس (التفريغ والخطة) وشوية صور ثابتة: لقطات قليلة من التايملاين عشان المراجعة، وصور البراند.", /* D-03, the approved Egyptian line, verbatim */
       "privacy.link": "Claude بيشوف إيه",
       "privacy.extra": "مفيش أي تتبّع، وWhyNot Cut مابيدرّبش أي حاجة على شغلك.",
+      "support.copy_open": "انسخ التفاصيل وافتح الدعم",
+      "support.copy": "انسخ التفاصيل للدعم",
+      "support.soon": "صفحة الدعم قريب",
+      "support.promise": "بنرد خلال يوم عمل واحد (من الأحد للخميس، بتوقيت القاهرة).",
+      "approval.older": "الخطة دي اتوافق عليها بنسخة أقدم من WhyNot Cut. بص عليها بصّة كمان ووافق عليها تاني.",
       "checklist.premiere.ok": "متوصّل مع Premiere", "checklist.claude.ok": "مسجّل دخول",
       "checklist.clients.ok": "عميل واحد · {client}",
       "firstrun.progress": "{n} من {of} جاهزين",
@@ -250,7 +269,6 @@
       "link.off": "Premiere مش متوصّل بخدمة WhyNot Cut.",
       "retry.hint": "لو «جرّب تاني» مانفعتش، اقفل Premiere وافتحه تاني.",
       "action.start_app": "شغّل WhyNot Cut",
-      "action.report": "انسخ تقرير المشكلة",
       "update.stale": "WhyNot Cut اتحدّث. اقفل Premiere وافتحه تاني، وبعدين دوس «افحص تاني».",
       /* MOCK: home */
       "home.current": "الفيديو الحالي",
@@ -363,8 +381,9 @@ window.MOCK_DATA = {
     { id: "edit", state: "todo" },
     { id: "approve", state: "blocked", reason: "no_plan" } ],
   approval_record: { by: "Yunus", at: "2026-10-14T11:32:00Z", confirmed_with: "د. هناء مصطفى", flagged_checked: true, flagged_count: 3, current: true, version: 1 },
-  support: { url: "https://thewhynot.ai/support" },
-  claude: { how_to_url: "https://support.claude.com" },
+  /* H24: these two are read ONLY in the live state (M.live); until Yunus publishes the pages the engine sends neither */
+  support: { url: "https://thewhynot.ai/support", data_url: "https://thewhynot.ai/data" },
+  claude: { how_to_url: "https://support.claude.com", plans_url: "https://support.claude.com" },
   who: { en: "Dr. Hana Mostafa", ar: "د. هناء مصطفى" },
   long: { client: "Al-Mustaqbal Family Medicine and Diabetes Care Center", item: "C0239_interview_final_v2", editor: "Mohamed Abdel-Rahman El-Sayed", needs: 120, seq: "C0239_interview_final_v2_v1" },
   flagged: [

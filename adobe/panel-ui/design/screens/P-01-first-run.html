@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,focus,error,offline,no-claude-signed-out,no-claude-missing,stale,success,long">
+<meta name="mock-states" content="loading,normal,normal-live,focus,error,error-live,offline,no-claude-signed-out,no-claude-missing,stale,success,long">
 <meta name="mock-keys" content="Mod+Enter = the screen's one primary (Set up my first client, or the red row's fix); Esc = close the top notice; no single-key shortcuts (Premiere owns them). Tabs are hidden during setup, so Alt+1/2/3 does nothing here. UXP keydown capture: lab item.">
 <meta name="mock-motion" content="trigger | property | token | final static state
 row turns green | icon fill, detail colour | --mk-dur-base, --mk-ease | ok icon + white detail;
@@ -26,7 +26,11 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
    stalePass, P1-1); success says "You're ready" and offers "Go to Home" (P1-8).
    - "3 of 4 ready" with a 4-segment bar under the intro.
    - The background program is "the WhyNot Cut service", explained once on its row; Claude is introduced once on its row,
-     with whose account it is, the cost and where the footage goes (facts to verify, see strings.js).
+     with the cost (D-01: each editor's own Claude Pro or Max plan, paid to Anthropic, "See plans" to support.claude.com),
+     where the footage goes (D-03), what happens to the data at Anthropic (D-02) and, only when live, "Cost and data".
+   - H24 (two states, not live is the default): the support action is "Copy details for support" (copies only) with the
+     plain-text "Support page coming soon"; in normal-live / error-live the engine has support.url / support.data_url, so
+     it is "Copy details and open support" (one action) with the D-05 reply promise, and "Cost and data" shows.
    - A row's fix sits under its sentence with a one-line hint; the first red row's fix is the one primary.
    - no-claude-signed-out / no-claude-missing: the Claude row turns red and its fix is the primary.
    - When the service, the link and Claude are green: "Set up my first client" (primary) + "Try the sample clip".
@@ -39,9 +43,10 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
     return '<div class="m-check">' + M.status(kind) +
       '<div class="m-check-text"><div class="t-label">' + label + '</div>' +
       (o.explain ? '<div class="t-meta tx-muted">' + o.explain + '</div>' : '') +
-      (o.account ? '<div class="t-meta tx-muted mt-1">' + o.account + '</div>' : '') +
+      (o.account ? '<div class="t-meta tx-muted mt-1">' + o.account + '</div>' + M.plansLink() : '') +
       (o.privacy ? '<div class="m-saved mt-1">' + M.ico("lock", 16, "ink-muted") + '<div class="m-col ms-2 m-grow"><div class="t-meta tx-muted">' + o.privacy + '</div>' +
-        '<div class="t-meta tx-muted mt-1">' + t("privacy.extra") + '</div></div></div>' : '') +
+        '<div class="t-meta tx-muted mt-1">' + t("privacy.extra") + '</div>' +
+        '<div class="t-meta tx-muted mt-1">' + t("claude.data") + '</div>' + M.dataLink() + '</div></div>' : '') +
       '<div class="t-meta ' + (kind === "error" ? "tx-text" : "tx-muted") + (o.explain ? " mt-1" : "") + '">' + o.detail + '</div>' +
       (o.act ? '<div class="m-row mt-2">' + o.act + '</div>' : '') +
       (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + '</div>' : '') +
@@ -57,7 +62,7 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
       /* needs the person: one sentence, one button, one link; the facts live behind the link */
       o.under = '<div class="m-row mt-1">' + M.linkbtn(t("privacy.link"), "info") + '</div>';
     } else {
-      o.explain = t("checklist.claude.explain"); o.account = t("checklist.claude.account"); o.privacy = t("privacy.claude_sees");
+      o.explain = t("checklist.claude.explain"); o.account = t("claude.cost"); o.privacy = t("privacy.claude_sees");
     }
     return row(kind, t("checklist.claude"), o);
   }
@@ -74,8 +79,8 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
       '<div class="mt-4">' + M.segbar(4, done, t("firstrun.progress", { n: done, of: 4 }), kind) + '</div>';
   }
   function report() {
-    return '<div class="m-row m-wrap mt-3"><div class="m-row me-2">' + M.btn(t("action.report"), { kind: "ghost", icon: "copy", flush: true }) + '</div>' +
-      M.btn(t("action.support"), { kind: "ghost", icon: "headset" }) + '</div>';
+    /* one support action (H24): copy only while the page is not live, copy and open when it is; the reply promise shows when live */
+    return '<div class="mt-3">' + M.supportRow({ flush: true, promise: true }) + '</div>';
   }
   function threeGreenRows(focus) {
     return serviceRow("ok", t("checklist.engine.ok")) +
@@ -154,7 +159,7 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
 
   M.mount({
     id: "P-01", name: "First-run checklist",
-    states: ["loading", "normal", "focus", "error", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success", "long"],
+    states: ["loading", "normal", "normal-live", "focus", "error", "error-live", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success", "long"],
     defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();

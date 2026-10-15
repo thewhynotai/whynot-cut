@@ -51,7 +51,7 @@
   /* the current step's card. o = {text, sub, pct, indet, noBar, paused, time, cancelOff, cancelNote, focus, info} */
   function current(o) {
     o = o || {};
-    var bar = o.noBar ? "" : o.indet ? '<div class="mt-3">' + PC.indet() + "</div>" : '<div class="mt-3">' + M.progress(o.pct || 49, { paused: o.paused }).replace('m-fill-paused" style="', 'm-fill-paused" style="background:var(--twn-warn);') + "</div>";
+    var bar = o.noBar ? "" : o.indet ? '<div class="mt-3">' + PC.indet() + "</div>" : '<div class="mt-3">' + M.progress(o.pct || 49, { paused: o.paused }) + "</div>";
     var cancel = PC.kbtn(t("p06.cancel"), "mod+.", { kind: "ghost", icon: "circle-stop", disabled: o.cancelOff, focus: o.focus });
     var text = o.paused ? '<div class="m-row-top">' + M.status("paused") + '<div class="t-body ms-2 m-grow">' + o.text + "</div></div>" : '<div class="t-body">' + o.text + "</div>";
     return M.card(

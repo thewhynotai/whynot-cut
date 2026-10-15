@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="normal,focus,models,confirm,loading,error,success,empty,long,win">
+<meta name="mock-states" content="normal,focus,models,confirm,loading,error,error-live,success,empty,long,win">
 <meta name="mock-widths" content="760,640">
 <meta name="mock-keys" content="Return: Continue (opens the confirm; nothing is removed on one key) · Esc: Cancel (Close when done) · Confirm dialog: Return or Esc = Keep it (the safe choice); the red Remove WhyNot Cut has no keycap and needs a click or Tab then Space · Space: tick the models box">
 <meta name="mock-motion" content="removal rows go spinner to check by fill colour (200 ms) in fixed row boxes; the confirm dialog enters a reserved slot at the top by colour, the list does not move; static fallback: final state">
@@ -90,7 +90,7 @@
   };
   I.mount({
     id: "I-09", name: "Uninstall",
-    states: ["normal", "focus", "models", "confirm", "loading", "error", "success", "empty", "long", "win"], defaultState: "normal",
+    states: ["normal", "focus", "models", "confirm", "loading", "error", "error-live", "success", "empty", "long", "win"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.rail = { flow: "uninstall", at: v.at || "choose", mark: v.mark, all: v.all };

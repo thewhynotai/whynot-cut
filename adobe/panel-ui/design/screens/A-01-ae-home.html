@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,focus,blocked,building,error,offline,no-claude,stale,success,long">
+<meta name="mock-states" content="empty,loading,normal,focus,blocked,building,error,error-live,offline,no-claude,stale,success,long">
 <meta name="mock-keys" content="Mod+Enter = Start the build, or the blocking card's fix; Esc = Cancel while building, else close the top notice; Alt+1 / Alt+2 = Home / Edit (the After Effects panel has no Tools tab); Tab / Shift+Tab reading order. No single-key shortcuts (After Effects owns them).">
 <meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Step bar: a segment's colour changes in 200 ms; the running segment is the gradient, static.">
 <title>A-01 After Effects home and motion pipeline</title>
@@ -103,7 +103,7 @@
         tab: "home",
         body: M.slot(M.notice("error", t("a01.error"), { sub: t("a01.error.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
           hero() + steps(["done", "done", "done", "fail", "pend", "pend", "pend"], 3, "error") + nextCard({ disabled: true }) +
-          '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link" }) + M.btn(t("action.support"), { kind: "ghost", icon: "life-buoy" }) + '</div>'
+          '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link" }) + '</div><div class="mt-2">' + M.supportRow({ flush: true }) + '</div>'
       };
     },
     /* the service is off: ONE notice with ONE button. "After Effects isn't linked" is a result of that, not a second card
@@ -132,7 +132,7 @@
 
   TA.mount({
     id: "A-01", name: "After Effects home and motion pipeline",
-    states: ["empty", "loading", "normal", "focus", "blocked", "building", "error", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
+    states: ["empty", "loading", "normal", "focus", "blocked", "building", "error", "error-live", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       if (v.needs === undefined) v.needs = 0;

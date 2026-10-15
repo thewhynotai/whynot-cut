@@ -6,13 +6,16 @@
    - Arabic is professional EGYPTIAN everywhere (السيكوينس، قطعات، لسه مفيش، عايز، اختار، دوس، فولدر);
    - the background program is "the WhyNot Cut service" / «خدمة WhyNot Cut»; the panel is just "WhyNot Cut";
      never engine / المحرّك / daemon / CLI / JSON / token, no drive paths in body copy (folder names, explained);
-   - every failure says what happened, why, and the one button; support = "Contact support" (opens the configured
-     support link); the log lives only in Settings > Details for support;
+   - every failure says what happened, why, and the one button; support is the shared action of ../strings.js
+     (support.copy / support.copy_open / support.soon / support.promise, owner decision D-05): "Copy details and open
+     support" only when the engine provides support.url, else "Copy details for support" (copies only) with the plain-text
+     "Support page coming soon" (H24: never link to a page that isn't live); the log lives only in Settings > Details for support;
    - every action that changes the project says what it creates or changes and that the originals stay untouched;
    - results show the time saved (mock numbers; needs engine data);
    - «وافق» for approve, no tatweel, U+00A0 inside number + unit and time phrases, no English glosses in brackets.
-   Claude facts used in copy (own account, no extra WhyNot Cut charge, reads text not video) are owner decisions that
-   the executor must verify before shipping. Every MOCK line needs the string owner; Arabic needs a native writer. */
+   Claude facts in copy (the editor's own Claude Pro or Max plan, paid to Anthropic; what Claude reads; what happens to the
+   data) are the round-2 owner decisions D-01 to D-03, used verbatim through the shared keys claude.cost, claude.data and
+   privacy.claude_sees. Every MOCK line needs the string owner; Arabic needs a native writer. */
 (function () {
   var NB = " ";
   var EN = window.MOCK_STRINGS.en, AR = window.MOCK_STRINGS.ar;
@@ -219,6 +222,7 @@
     "p10.failed.sub": "The file is open in another program. Try again; the list itself is safe in the client folder.",
     "p10.offline_hint": "This is the last known list. The buttons need the service.",
     "p10.no_claude": "Choosing the music needs you signed in to Claude. The other items don't.",
+    "p10.k.plan": "Look at the plan and approve it.", "p10.b.plan": "Review and approve",
 
     /* ---- P-11 messages ---- */
     "p11.log.empty": "Nothing recorded yet.",
@@ -266,7 +270,7 @@
     "p11.t.tidy": "Organise project didn't start: the project is open in another Premiere window.", "p11.t.tidy.sub": "Close the other window, then try again.",
     "p11.t.kalam": "Captions need the caption pack.", "p11.t.kalam.sub": "It isn't downloaded yet. Get it in Settings, Models (about 1.2" + NB + "GB).",
     "p11.btn.models": "Open Models",
-    "p11.copied": "The support page opened in your browser.",
+    "p11.copied": "The details are copied.", "p11.copied.live": "The details are copied and the support page opened in your browser.",
     "p11.starting_btn": "Starting…",
 
     /* ---- P-12 AI action sheet ---- */
@@ -281,7 +285,7 @@
     "p12.fix_captions.sub": "Corrects spelling and split words in the captions of {item}.",
     "p12.suggest_titles.sub": "Five title ideas from what was said.",
     "p12.summarise.sub": "A short summary for the post description.",
-    "p12.backend": "Uses your open Claude session. No extra WhyNot Cut charge.",
+    "p12.backend": "Uses your open Claude session.",
     "p12.run": "Run",
     "p12.working.sub": "Fixing the captions of {item}. Usually under a minute.",
     "p12.stop": "Stop",
@@ -331,7 +335,7 @@
     "p22.clients": "Clients folder", "p22.change": "Change",
     "p22.clients.sub": "{name} · one folder per client inside it.",
     "p22.engine_hint": "Keeps the panel connected. You can turn it off any time.",
-    "p22.ai": "Claude and AI buttons", "p22.ai.session": "Use the Claude that's open on my computer (no extra cost)", "p22.ai.key": "API key (paid, from Anthropic)",
+    "p22.ai": "Claude and AI buttons", "p22.ai.session": "Use the Claude that's open on my computer", "p22.ai.key": "API key",
     "p22.saved": "Saved.",
     "p22.back": "Home",
     "p22.lang": "Language",
@@ -341,7 +345,7 @@
     "p22.ai.cli": "Work with Claude closed, on my subscription",
     "p22.ai.cli.sub": "Off by default. Uses your Claude plan for the AI buttons.",
     "p22.ai.session.sub": "Claude has to be open.",
-    "p22.ai.key.sub": "Works when Claude is closed. Billed by Anthropic to your account.",
+    "p22.ai.key.sub": "Paid per use to Anthropic. Not needed if you have Pro or Max. Works when Claude is closed. Billed by Anthropic to your account.", /* D-01: never the default */
     "p22.key.placeholder": "Paste your API key",
     "p22.key.hint": "Stored only on this computer and never shown again.",
     "p22.key.save": "Save key",
@@ -370,10 +374,8 @@
     "p22.privacy.fact": "Video and audio files are never uploaded. Claude reads text (the transcript and the plan) and a few still images: some timeline frames for checking, and brand photos.",
     "p22.privacy.telemetry": "No telemetry: WhyNot Cut sends no usage data anywhere.",
     "p22.privacy.training": "WhyNot Cut trains on nothing: your footage and edits never train any model.",
-    "p22.support.opens": "Opens {url} with your details copied.",
-    "step.frames": "Export frames",
-    "step.qc": "Quality check",
-    "step.handoff": "Ready for you",
+    "p22.support.opens": "Opens {url} with your details copied.", /* live state only (H24) */
+    "p22.support.copyonly": "Copies your details to the clipboard. Nothing is opened or sent.", /* not live (H24) */
     "p02.claude.offline.row": "No internet. Claude can't be reached",
     "p04.demo.total": "10 h 20 min",
     "p04.total": "All clients, this week: {t} saved · estimate",
@@ -428,8 +430,6 @@
     "p22.export": "Export my week",
     "p22.export.sub": "Reels, turnaround and time saved (estimate), in the client folder.",
     "p22.export.done": "Saved to the client folder.",
-    "p22.support.go": "Copy details and open support",
-    "p22.support.slot": "Channel, hours and reply time: MOCK-VERIFY (owner decision D-05).",
     "p05.lock.first": "Open it read-only or take it over first.",
     "p22.demo.when": "9 Oct 2026, 11:20",
   });
@@ -634,6 +634,7 @@
     "p10.failed.sub": "الملف مفتوح في برنامج تاني. جرّب تاني، والقائمة نفسها محفوظة في فولدر العميل.",
     "p10.offline_hint": "دي آخر قائمة نعرفها. الأزرار محتاجة الخدمة.",
     "p10.no_claude": "اختيار المزيكا محتاج تسجّل دخول Claude. الباقي لأ.",
+    "p10.k.plan": "بص على الخطة ووافق عليها.", "p10.b.plan": "راجع ووافق",
 
     /* ---- P-11 ---- */
     "p11.log.empty": "لسه مفيش حاجة متسجّلة.",
@@ -681,12 +682,12 @@
     "p11.t.tidy": "«رتّب المشروع» مابدأش: المشروع مفتوح في شباك Premiere تاني.", "p11.t.tidy.sub": "اقفل الشباك التاني وجرّب تاني.",
     "p11.t.kalam": "الكابشن محتاج حزمة الكابشن.", "p11.t.kalam.sub": "لسه مانزلتش. نزّلها من الإعدادات ← النماذج (حوالي 1.2 GB).",
     "p11.btn.models": "افتح النماذج",
-    "p11.copied": "صفحة الدعم اتفتحت في المتصفح.",
+    "p11.copied": "التفاصيل اتنسخت.", "p11.copied.live": "التفاصيل اتنسخت وصفحة الدعم اتفتحت في المتصفح.",
     "p11.starting_btn": "بتشتغل…",
 
     /* ---- P-12 ---- */
     "p12.title": "اسأل Claude", "p12.suggest_titles": "اقترح عناوين", "p12.summarise": "لخّص",
-    "p12.privacy": "ملفات الفيديو والصوت لا تُرفع أبدًا؛ يقرأ Claude النصوص (التفريغ والخطة) وبعض الصور الثابتة: لقطات قليلة من التايملاين للتحقق وصور البراند",
+    "p12.privacy": "ملفات الفيديو والصوت عمرها ما بتترفع. Claude بيقرا نصوص بس (التفريغ والخطة) وشوية صور ثابتة: لقطات قليلة من التايملاين عشان المراجعة، وصور البراند.",
     "p12.apply": "طبّق اللي علّمت عليه ({n})", "p12.discard": "ماتطبّقش", "p12.working": "Claude شغّال…",
     "p12.kept_source": "سبنا السطر بتاعك زي ما هو", "p12.needs_claude": "أزرار الذكاء الاصطناعي محتاجة Claude.",
     "p12.applied": "اتطبّق على {n} سطور.",
@@ -696,7 +697,7 @@
     "p12.fix_captions.sub": "بيصحّح الإملا والكلمات المقسومة في كابشن {item}.",
     "p12.suggest_titles.sub": "5 أفكار عناوين من الكلام اللي اتقال.",
     "p12.summarise.sub": "ملخص قصير لوصف البوست.",
-    "p12.backend": "بيستخدم جلسة Claude المفتوحة. من غير تكلفة زيادة من WhyNot Cut.",
+    "p12.backend": "بيستخدم جلسة Claude المفتوحة.",
     "p12.run": "شغّل",
     "p12.working.sub": "بيصحّح كابشن {item}. عادةً أقل من دقيقة.",
     "p12.stop": "وقّف",
@@ -746,7 +747,7 @@
     "p22.clients": "فولدر العملاء", "p22.change": "غيّر",
     "p22.clients.sub": "{name} · جواه فولدر لكل عميل.",
     "p22.engine_hint": "بتخلّي اللوحة متوصّلة. تقدر تقفلها في أي وقت.",
-    "p22.ai": "Claude وأزرار الذكاء الاصطناعي", "p22.ai.session": "استخدم Claude المفتوح على جهازي (من غير تكلفة زيادة)", "p22.ai.key": "مفتاح API (مدفوع، من Anthropic)",
+    "p22.ai": "Claude وأزرار الذكاء الاصطناعي", "p22.ai.session": "استخدم Claude المفتوح على جهازي", "p22.ai.key": "مفتاح API",
     "p22.saved": "اتحفظ.",
     "p22.back": "الرئيسية",
     "p22.lang": "اللغة",
@@ -756,7 +757,7 @@
     "p22.ai.cli": "اشتغل وClaude مقفول، على اشتراكي",
     "p22.ai.cli.sub": "مقفول من الأول. بيستخدم اشتراك Claude بتاعك لأزرار الذكاء الاصطناعي.",
     "p22.ai.session.sub": "لازم Claude يكون مفتوح.",
-    "p22.ai.key.sub": "بيشتغل وClaude مقفول. Anthropic بتحاسبك على حسابك.",
+    "p22.ai.key.sub": "مدفوع لـ Anthropic على حسب الاستخدام. مش محتاجه لو عندك Pro أو Max. بيشتغل وClaude مقفول. Anthropic بتحاسبك على حسابك.",
     "p22.key.placeholder": "الصق مفتاح API",
     "p22.key.hint": "بيتحفظ على جهازك بس، ومش هيظهر تاني.",
     "p22.key.save": "احفظ المفتاح",
@@ -782,13 +783,11 @@
     "p22.rate.hint": "تقدير: دقايق الخام × الرقم ده، ناقص 15 دقيقة لمراجعتك. عمره ما يقل عن 0.",
 
     "p22.privacy": "الخصوصية",
-    "p22.privacy.fact": "ملفات الفيديو والصوت لا تُرفع أبدًا؛ يقرأ Claude النصوص (التفريغ والخطة) وبعض الصور الثابتة: لقطات قليلة من التايملاين للتحقق وصور البراند",
+    "p22.privacy.fact": "ملفات الفيديو والصوت عمرها ما بتترفع. Claude بيقرا نصوص بس (التفريغ والخطة) وشوية صور ثابتة: لقطات قليلة من التايملاين عشان المراجعة، وصور البراند.",
     "p22.privacy.telemetry": "مفيش تتبّع: WhyNot Cut مش بيبعت أي بيانات استخدام لأي مكان.",
     "p22.privacy.training": "WhyNot Cut مش بيدرّب أي نموذج: الفيديو والمونتاج بتوعك عمرهم ما بيدرّبوا حاجة.",
     "p22.support.opens": "بيفتح {url} والتفاصيل منسوخة.",
-    "step.frames": "تصدير الصور",
-    "step.qc": "فحص الجودة",
-    "step.handoff": "جاهز ليك",
+    "p22.support.copyonly": "بينسخ التفاصيل للحافظة بس. مفيش حاجة بتتفتح ولا بتتبعت.",
     "p02.claude.offline.row": "مفيش نت. مش قادرين نوصل لـ Claude",
     "p04.demo.total": "10 ساعات و20 دقيقة",
     "p04.total": "كل العملاء، الأسبوع ده: وفّرت {t} · تقدير",
@@ -843,8 +842,6 @@
     "p22.export": "صدّر أسبوعي",
     "p22.export.sub": "الريلز ووقت التسليم والوقت المتوفّر (تقدير)، في فولدر العميل.",
     "p22.export.done": "اتحفظ في فولدر العميل.",
-    "p22.support.go": "انسخ التفاصيل وافتح الدعم",
-    "p22.support.slot": "القناة والمواعيد ووقت الرد: MOCK-VERIFY (قرار صاحب الشغل D-05).",
     "p05.lock.first": "افتحه للقراية بس أو خده منه الأول.",
     "p22.demo.when": "9 أكتوبر 2026، 11:20",
   });
@@ -861,8 +858,9 @@ window.PC_DATA = {
   badFolder: "Reel footage",
   newItem: "C0241",
   /* links: https only, on the allowlist of eng-data-contract §7.10 (thewhynot.ai, dl.thewhynot.ai, claude.ai,
-     support.claude.com, code.claude.com) */
-  links: { support: "https://thewhynot.ai/support", guide: "https://thewhynot.ai/help", claudeHowTo: "https://thewhynot.ai/help/claude",
+     support.claude.com, code.claude.com). The support and "Cost and data" addresses are MOCK_DATA.support in
+     ../strings.js, read only in the live state (H24). */
+  links: { guide: "https://thewhynot.ai/help", claudeHowTo: "https://thewhynot.ai/help/claude",
     claudeSignIn: "https://claude.ai", claudeHelp: "https://support.claude.com" },
   rate: 9, reviewMin: 15,
   rawDur: "6:40", reelDur: "0:52", savedT: { en: "45 min", ar: "45 دقيقة" },

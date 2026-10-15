@@ -260,6 +260,11 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 .m-btn-flush { margin-left: -12px; }
 .m-rtl .m-btn-flush { margin-left: 0; margin-right: -12px; }
 .m-btn-start { align-self: flex-start; }
+/* a button whose label may wrap on a narrow panel (the support action: "Copy details and open support") */
+.m-btn-wrap { height: auto; min-height: 32px; padding-top: 3px; padding-bottom: 3px; flex: 0 1 auto; min-width: 0; white-space: normal; text-align: left; }
+.m-rtl .m-btn-wrap { text-align: right; }
+/* the plain-text "Support page coming soon" line beside the copy button (H24) */
+.m-soon { display: block; flex: 1 1 112px; min-width: 0; }
 .m-btn-primary { background: var(--twn-primary); border-color: var(--twn-primary); color: var(--twn-on-primary); }
 .m-btn-primary .m-ico { fill: var(--twn-on-primary); }
 .m-btn-secondary { background: var(--mk-control); border-color: var(--mk-control); }
@@ -362,10 +367,12 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 .m-stepseg-fail { background: var(--twn-error); }
 .m-stepseg-wait { background: var(--twn-accent); } /* R2 P2-4: waiting FOR THE PERSON is the Needs-you pink */
 .m-track { display: flex; flex-direction: row; height: 4px; border-radius: 2px; background: var(--twn-track); }
-.m-fill-paused, .m-rtl .m-fill-paused { background: var(--twn-warn); } /* paused by a problem: solid amber, never the running gradient */
 .m-fill { display: block; height: 4px; border-radius: 2px; background: var(--twn-gradient); transition: width var(--mk-dur-slow) var(--mk-ease); }
 .m-rtl .m-track { direction: ltr; justify-content: flex-end; }
 .m-rtl .m-fill { background: var(--mk-gradient-rtl); margin-left: auto; }
+/* paused by a problem: solid amber, never the running gradient. Three classes in RTL, two in LTR: it must out-rank .m-fill and .m-rtl .m-fill above */
+.m-track .m-fill-paused { background: var(--twn-warn); }
+.m-rtl .m-track .m-fill-paused { background: var(--twn-warn); }
 
 /* ---- inputs ---- */
 .m-input {

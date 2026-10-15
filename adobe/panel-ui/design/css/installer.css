@@ -199,6 +199,7 @@
 .i-gets .m-chip { margin: 8px 8px 0 0; }
 .m-rtl .i-gets .m-chip { margin: 8px 0 0 8px; }
 .i-support .m-btn { height: 32px; }
+.i-support .m-btn.m-btn-wrap { height: auto; }
 
 /* ---- numbered next steps (I-06 finish): a 20 px ring with the number, then the sentence ---- */
 .i-nextrow { display: flex; flex-direction: row; align-items: flex-start; }

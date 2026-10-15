@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,focus,error,offline,no-claude-signed-out,no-claude-missing,stale,success,long">
+<meta name="mock-states" content="empty,loading,normal,focus,error,error-live,offline,no-claude-signed-out,no-claude-missing,stale,success,long">
 <meta name="mock-keys" content="Mod+Enter = the next verb (the one primary) or, when the verbs are off, the notice's fix; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = Home / Edit / Tools. No single-key shortcuts (Premiere owns them). UXP keydown capture: lab item.">
 <meta name="mock-motion" content="trigger | property | token | final static state
 next verb changes (edit to approve) | background-color, border-color of the verb rows | --mk-dur-base, --mk-ease | violet fill on the new next verb, the old one #242424 with its done result;
@@ -153,7 +153,7 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
 
   M.mount({
     id: "P-03", name: "Home",
-    states: ["empty", "loading", "normal", "focus", "error", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success", "long"],
+    states: ["empty", "loading", "normal", "focus", "error", "error-live", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success", "long"],
     defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();

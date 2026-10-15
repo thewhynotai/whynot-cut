@@ -4,7 +4,8 @@
    NEW  = a NEW key of docs/design/screen-inventory.md §5 kept in meaning (its inventory key in the comment); the
           inventory's MSA Arabic is replaced by the Egyptian register below;
    MOCK = written for these mockups;
-   MOCK-VERIFY = a product fact the executor must confirm before shipping (agency-owner review, G2-r1 (c)).
+   MOCK-VERIFY = a product fact the executor must confirm before shipping (agency-owner review, G2-r1 (c)); none is left for
+          the owner decisions D-01 to D-05, which are applied verbatim (see below).
    Rules applied:
    - E-D3 r1: one Arabic verb per action, no tatweel, no English gloss, U+00A0 inside unit and time phrases, every
      failure names what failed and the next step, never "Claude Code";
@@ -15,8 +16,11 @@
      are said plainly ("Checked: the genuine file from WhyNot Cut"); every fault says what happened, why, and one fix;
      macOS is the primary platform (its copy is the default; Windows-only copy is marked win).
    - R2 pass (installer group): titles follow the state, no raw paths or file names in primary text, one Close look, no
-     developer words (Homebrew, Xcode, Gatekeeper); the owner-decision slots (Claude plan and cost D-01, data handling D-02,
-     privacy line D-03, signing D-04 = BETA ONLY, support channel D-05) keep the approved wording and are marked MOCK-VERIFY.
+     developer words (Homebrew, Xcode, Gatekeeper); the owner decisions are applied verbatim: Claude plan and cost D-01
+     (shared key claude.cost in ../strings.js, with a "See plans" link), data handling D-02 (claude.data), privacy line D-03,
+     signing D-04 = BETA ONLY, support D-05 (support.copy / support.copy_open / support.soon / support.promise).
+   - H24: the support and "Cost and data" pages are linked only when live (mockup.js M.live): not live = "Copy details for
+     support" copies only and a plain-text "Support page coming soon" sits beside it.
    Every MOCK line needs the string-table owner; every Arabic line needs a native writer (direction §11 draft). */
 (function () {
   var NB = "\u00A0";
@@ -40,7 +44,6 @@
     "i00.next": "Next",
     "i00.retry": "Try again",
     "i00.check_again": "Check again",
-    "i00.support": "Copy details and open support", /* MOCK-VERIFY (owner decision D-05): support channel, hours (Cairo GMT+2 / Dubai GMT+4) and the reply-time promise */
     "i00.offline_get": "Get the offline installer",
     "i00.save_report": "Save a report for support",
     "i00.report_note": "The report is saved on this computer without personal details. Nothing is sent unless you send it.",
@@ -210,9 +213,7 @@
     "i05.how.check": "Checked that it's really from Anthropic",
     "i05.how.signin": "You sign in yourself. We never see your password.",
     "i05.know": "Good to know",
-    "i05.know.account": "It's your own Claude account.", /* MOCK-VERIFY (G2-r1 c) */
-    "i05.know.cost": "WhyNot Cut charges nothing extra for Claude.", /* MOCK-VERIFY (G2-r1 c) */
-    "i05.know.footage": "Video and audio files are never uploaded. Claude reads text (the transcript and the plan) and a few still images: some timeline frames for checking, and brand photos.", /* APPROVED (executor, exact line) */
+    "i05.know.footage": "Video and audio files are never uploaded. Claude reads text (the transcript and the plan) and a few still images: some timeline frames for checking, and brand photos.", /* APPROVED (executor, exact line); the cost line D-01 and the data line D-02 are the shared keys claude.cost / claude.data */
     "i05.know.private": "No telemetry, and WhyNot Cut trains on nothing.", /* APPROVED (executor) */
     "i05.install": "Install Claude", /* NEW inst.claude.install */
     "i05.have": "I already have Claude",
@@ -335,7 +336,6 @@
     "i00.next": "التالي",
     "i00.retry": "جرّب تاني",
     "i00.check_again": "افحص تاني",
-    "i00.support": "انسخ التفاصيل وافتح الدعم",
     "i00.offline_get": "حمّل نسخة التسطيب اللي من غير نت",
     "i00.save_report": "احفظ تقرير للدعم",
     "i00.report_note": "التقرير بيتحفظ على جهازك من غير بيانات شخصية، ومش بيتبعت لحد إلا لو إنت بعته.",
@@ -505,9 +505,7 @@
     "i05.how.check": "بنتأكد إنه من Anthropic فعلًا",
     "i05.how.signin": "إنت اللي بتسجّل دخول. إحنا عمرنا ما بنشوف الباسورد.",
     "i05.know": "خلي بالك",
-    "i05.know.account": "ده حساب Claude بتاعك إنت.",
-    "i05.know.cost": "WhyNot Cut مش بياخد أي فلوس زيادة على Claude.",
-    "i05.know.footage": "ملفات الفيديو والصوت لا تُرفع أبدًا؛ يقرأ Claude النصوص (التفريغ والخطة) وبعض الصور الثابتة: لقطات قليلة من التايملاين للتحقق وصور البراند", /* APPROVED (executor, exact line) */
+    "i05.know.footage": "ملفات الفيديو والصوت عمرها ما بتترفع. Claude بيقرا نصوص بس (التفريغ والخطة) وشوية صور ثابتة: لقطات قليلة من التايملاين عشان المراجعة، وصور البراند.", /* D-03, the approved Egyptian line, verbatim */
     "i05.know.private": "مفيش أي بيانات استخدام بتتبعت، وWhyNot Cut مش بيدرّب أي حاجة على شغلك.",
     "i05.install": "سطّب Claude",
     "i05.have": "Claude عندي",
@@ -621,7 +619,8 @@
    drive, iCloud (G11). */
 window.I_DATA = {
   version: "3.0.0", old: "2.2.1", next: "3.0.1", badHost: "files.example-mirror.net", apps: "Premiere Pro 25.5 · After Effects 25.5",
-  support: "thewhynot.ai/support", downloadPage: "thewhynot.ai/download", /* MOCK-VERIFY: the page address */
+  downloadPage: "thewhynot.ai/download", /* MOCK-VERIFY: the page address */
+  /* the support and "Cost and data" addresses are in ../strings.js (MOCK_DATA.support) and are shown only when live (H24) */
   mac: {
     total: 3.6, free: 212, drive: "Macintosh HD", gpu: "Apple M2 Pro", os: "macOS 15 · Apple silicon",
     home: "/Users/sara/.whynot-cut", clients: "/Users/sara/WhyNot Clients",
