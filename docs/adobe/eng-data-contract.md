@@ -272,11 +272,11 @@ connection.
 
 | Field | Type | Req | Meaning | Example |
 |---|---|---|---|---|
-| `url` | https URL ≤ 512 | no | what "Contact support" opens; absent = the link is hidden: "Copy details" stays and a plain-text "Support page coming soon" shows (H24) | `"https://thewhynot.ai/support"` |
+| `url` | https URL ≤ 512 | no | what "Contact support" opens. For 3.0 it is the WhyNot Cut support WhatsApp chat (Yunus, 2026-10-16): a `https://wa.me/<number>?text=…` link whose fixed text says it is a support request; the panel copies the details first, the editor pastes them into the chat. Absent = the link is hidden: "Copy details" stays and a plain-text "Support page coming soon" shows (H24) | `"https://wa.me/20XXXXXXXXXX?text=WhyNot%20Cut%20support"` |
 | `data_url` | https URL ≤ 512 | no | the "Cost and data" sheet (what is sent, where, retention per Claude plan; owner decision D-02); absent = the link is hidden and the D-02 line stands alone | `"https://thewhynot.ai/data"` |
 
 ```json
-"support": { "url": "https://thewhynot.ai/support", "data_url": "https://thewhynot.ai/data" }
+"support": { "url": "https://wa.me/20XXXXXXXXXX?text=WhyNot%20Cut%20support", "data_url": "https://thewhynot.ai/data" }
 ```
 
 The panel opens either URL with the host's external-open call and never adds query parameters. Both stay absent until
@@ -405,6 +405,7 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
     - `claude.ai`
     - `support.claude.com`
     - `code.claude.com`
+    - `wa.me`, for `support.url` only (added 2026-10-16: Yunus chose WhatsApp as the support channel)
 11. **`tools_last[]`:** the shape in §2.4 is FROZEN now. Phase 6B writes it.
 
 The panel mocks against this contract until the G-ENG-DATA engine subtasks land (tracked in PROGRESS by the executor).

@@ -77,6 +77,20 @@ personal plan.
   - A faster target (4 working hours, or a WhatsApp line) belongs to the paid phase 2 and needs Yunus to name the
     channel and the person.
 
+### D-05 update (2026-10-16): the support channel is WhatsApp (Yunus)
+
+- Yunus named the channel: the TWN WhatsApp line (he shared https://wa.link/eywgzn).
+- That short link opens WhatsApp with a sales message pre-filled ("book a strategy call"), which is wrong for a support
+  request. The panel therefore uses the same number as `https://wa.me/<number>?text=WhyNot%20Cut%20support`, so the chat
+  opens marked as support. Yunus can swap in a support-specific wa.link at any time; it is one config value
+  (`support_url` in `config/defaults/links.json`).
+- WhatsApp is live, so the support link is shown by default (H24 is met). Wording: "Copy details and open WhatsApp" /
+  «انسخ التفاصيل وافتح واتساب»: one action that copies the details, then opens the chat; the editor pastes them. The
+  details are never put in the link.
+- The reply promise (D-05) is shown with it: "We reply within one working day (Sun–Thu, Cairo time)."
+- The "Cost and data" page (thewhynot.ai/data) and the guide (thewhynot.ai/help) are still not live: they stay gated.
+- Allowlist: `wa.me` added for `support.url` only (eng-data-contract §7.10).
+
 ## D-06: the build runs without opening a window (decided: b, once proven)
 
 - The default mode is the one that needs no open Claude window, after the engine proves it works on Pro and Max
