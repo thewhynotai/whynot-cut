@@ -83,7 +83,9 @@ class TestParallelMap(unittest.TestCase):
                 parallel_map(slow, range(12), workers=2)
         finally:
             timer.cancel()
-        self.assertLess(time.monotonic() - t0, 0.5)                      # not after the 12 items (2.4 s)
+        # not after the 12 items (12 x 0.4 s / 2 workers = 2.4 s); the bound leaves room for a busy machine (a full
+        # suite next to GPU jobs measured 1.5 s for the raise), the real proof is the line after the sleep below
+        self.assertLess(time.monotonic() - t0, 2.0)
         time.sleep(0.8)                                                   # the running two end; nothing new starts
         self.assertEqual(sorted(started), [0, 1])
 
@@ -99,7 +101,18 @@ class TestParallelMap(unittest.TestCase):
                 return p.wait()
             finally:
                 untrack(p)
-        timer = self.interrupt_at(1.0)                                   # the children are running by then
+        import _thread
+        import threading
+
+        def when_both_run():                                            # Ctrl+C once both children are registered
+            end = time.monotonic() + 60                                  # (a fixed 1 s was too early on a busy machine)
+            while len(procs) < 2 and time.monotonic() < end:
+                time.sleep(0.02)
+            time.sleep(0.1)
+            _thread.interrupt_main()
+        timer = threading.Thread(target=when_both_run, daemon=True)
+        timer.cancel = lambda: None
+        timer.start()
         try:
             with self.assertRaises(KeyboardInterrupt):
                 parallel_map(child, range(2), workers=2)
@@ -686,6 +699,7 @@ class TestPreviewVideoParallel(unittest.TestCase):
                     rec["src"] += 1
                     n = rec["src"]
                 if interrupt_on(n):
+                    rec["interrupted_at"] = __import__("time").monotonic()
                     _thread.interrupt_main()
                 cmd = [sys.executable, "-c", "import time; time.sleep(60)"]
             p = real(cmd, *a, **kw)
@@ -760,7 +774,9 @@ class TestPreviewVideoParallel(unittest.TestCase):
         try:
             with patch, self.assertRaises(KeyboardInterrupt):
                 self.render(workers=2, min_chunk_frames=8)
-            self.assertLess(time.monotonic() - t0, 10)
+            # from the Ctrl+C, not from the render's start (its setup took 18 s on a busy machine)
+            self.assertLess(time.monotonic() - rec["interrupted_at"], 10)
+            self.assertLess(time.monotonic() - t0, 120)
             self.assertEqual(len(rec["procs"]), 4)                        # 2 encoders, 2 (stalled) decoders
             t1 = time.monotonic()
             for p in rec["procs"]:
