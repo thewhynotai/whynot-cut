@@ -6250,6 +6250,31 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
         r = self.inst(self.home, "dry", "skip", env=self.keys_env("x"))
         self.assertIn(_install_size_text(self.fx, self.PLAT, git_missing=False), r.stdout + r.stderr)
 
+    def test_m1b_test_mounts_match_a_resolved_target(self):
+        # Mac CI run 2 (M1b): a WNC_TEST_MOUNTS item is compared as written AND resolved, like the folder itself
+        usb = self.tmp / "USB"
+        usb.mkdir()
+        alias = self.tmp / "alias"
+        if not make_dir_link(alias, usb):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, alias)
+        names = ["Get-WncPlaceProblem", "Get-WncNormPath", "Test-WncReparse", "Get-WncRealPath", "Get-WncLinkTarget",
+                 "Get-WncKnownFolderList", "Test-WncWithin", "Find-WncMarkerScan"]
+        boot = INSTALLER / "core" / "bootstrap.ps1"
+        script = self.tmp / "mount.ps1"
+        script.write_text("$S = @{ TestMounts = @($env:WNC_T_MOUNTS) }\n"
+                          + "".join(shell_function(boot, n, True) for n in names)
+                          + "$w = Get-WncPlaceProblem -Path $env:WNC_T_PATH -UserHome $env:WNC_T_HOME -Clients @() "
+                            "-Sandbox $true -LinkOk $true\nWrite-Host \"WHY=$w\"\n", encoding="utf-8-sig")
+
+        def why(mounts: Path, path: Path) -> str:
+            r = self.ps(script, env=self.env(WNC_T_MOUNTS=str(mounts), WNC_T_PATH=str(path), WNC_T_HOME=str(self.home)))
+            return r.stdout + r.stderr
+
+        self.assertIn("WHY=a drive root or a mount point", why(alias, usb))  # the item is a link to the folder
+        self.assertIn("WHY=a drive root or a mount point", why(usb, alias))
+        self.assertNotIn("mount point", why(self.tmp / "other", usb))
+
 
 @unittest.skipUnless(find_bash(), "bash is not available")
 class TestBashCountdown(_CountdownCases, _ShellCase):
@@ -6333,6 +6358,34 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
                            env=self.env(), timeout=60)
         out = r.stdout.decode("utf-8", "replace") + r.stderr.decode("utf-8", "replace")
         self.assertIn("WHY=your Documents folder itself", out)
+
+    def test_m1b_test_mounts_match_a_resolved_target(self):
+        # Mac CI run 2 (M1b): the sandbox tmp is /var/... and /var is a link to /private/var, so the real target
+        # (cd -P) never matched a WNC_TEST_MOUNTS item compared only as written. Both sides are compared as written
+        # AND resolved now; here a directory link stands in for /var
+        usb = self.tmp / "USB"
+        usb.mkdir()
+        alias = self.tmp / "alias"
+        if not make_dir_link(alias, usb):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, alias)
+        boot = INSTALLER / "core" / "bootstrap.sh"
+        script = self.tmp / "mount.sh"
+        script.write_text("".join(shell_function(boot, n, ps=False) for n in ("norm_path", "real_path", "is_mount"))
+                          + 'OS_NAME="$(uname -s)"; TEST_MOUNTS="$1"; REAL="kept"\n'
+                          'if is_mount "$2"; then printf "MOUNT=yes\\n"; else printf "MOUNT=no\\n"; fi\n'
+                          'printf "REAL=%s\\n" "$REAL"\n', encoding="utf-8", newline="\n")
+
+        def mount(mounts: Path, path: Path) -> str:
+            r = subprocess.run([find_bash(), str(script), mounts.as_posix(), path.as_posix()], capture_output=True,
+                               env=self.env(), timeout=60)
+            return r.stdout.decode("utf-8", "replace") + r.stderr.decode("utf-8", "replace")
+
+        out = mount(alias, usb)  # the item is a link to the folder (the CI shape: the item /var/..., the path real)
+        self.assertIn("MOUNT=yes", out)
+        self.assertIn("REAL=kept", out)  # (the caller's REAL is left as it was)
+        self.assertIn("MOUNT=yes", mount(usb, alias))
+        self.assertIn("MOUNT=no", mount(self.tmp / "other", usb))
 
 
 # --------------------------------------------------------------------------------------------- task 7: release stub

@@ -1077,7 +1077,9 @@ param(
         if ($real -match $rootLike) { return 'a drive root or a mount point' }
         foreach ($m in @($S.TestMounts | Where-Object { $_ })) {
             # (sandbox-only test hook WNC_TEST_MOUNTS: folders that count as mount points, like a USB drive)
-            if (@($keys | Where-Object { $_ -ieq (Get-WncNormPath $m) }).Count -gt 0) {
+            # (each item as written AND resolved, like the folder itself: a link on the way, e.g. macOS' /var)
+            $mk = @((Get-WncNormPath $m), (Get-WncRealPath $m)) | Where-Object { $_ }
+            if (@($keys | Where-Object { $mk -contains $_ }).Count -gt 0) {
                 return 'a drive root or a mount point'
             }
         }

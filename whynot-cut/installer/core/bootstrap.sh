@@ -611,16 +611,25 @@ has_occupied() { # dir [pointer-ok]: status 0 when it holds any entry except the
 }
 
 is_mount() { # path: /Volumes/<name>, or an existing folder that df reports as its own mount point
-  local n m low rest item
+  local n m low rest item r="" keep="${REAL:-}"
   norm_path "$1"; n="$NORM"
   if [ -n "${TEST_MOUNTS:-}" ]; then  # sandbox-only test hook WNC_TEST_MOUNTS: folders that count as mount points
+    # each item and the path, as written AND resolved (cd -P): macOS' /var is a link to /private/var (Mac CI run 2)
+    real_path "$1"
+    if [ -n "$REAL" ]; then norm_path "$REAL"; r="$NORM"; fi
     rest="$TEST_MOUNTS;"
     while [ -n "$rest" ]; do
       item="${rest%%;*}"; rest="${rest#*;}"
       [ -n "$item" ] || continue
       norm_path "$item"
-      [ "$NORM" = "$n" ] && return 0
+      if [ "$NORM" = "$n" ] || [ "$NORM" = "$r" ]; then REAL="$keep"; return 0; fi
+      real_path "$item"
+      if [ -n "$REAL" ]; then
+        norm_path "$REAL"
+        if [ "$NORM" = "$n" ] || [ "$NORM" = "$r" ]; then REAL="$keep"; return 0; fi
+      fi
     done
+    REAL="$keep"
   fi
   low="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')"
   case "$low" in /volumes/*/*) ;; /volumes/?*) return 0 ;; esac
