@@ -570,13 +570,15 @@ class TestBashSetupNoPython(WrapperCase):
         self.fakes.mkdir()
         (self.fakes / "xcode-select").write_text(f'#!/bin/sh\necho "$@" >> "{self.calls.as_posix()}"\nexit 2\n',
                                                  encoding="utf-8", newline="\n")
-        self.coreutils = Path(self.bash).resolve().parents[1] / "usr" / "bin"   # Git's own tools; no Python there
+        (self.fakes / "xcode-select").chmod(0o755)    # macOS: a PATH lookup skips a file without the exec bit
+        self.coreutils =Path(self.bash).resolve().parents[1] / "usr" / "bin"   # Git's own tools; no Python there
 
     def run_setup(self, darwin: bool):
         for f in self.fakes.glob("uname"):
             f.unlink()
         if darwin:
             (self.fakes / "uname").write_text('#!/bin/sh\necho Darwin\n', encoding="utf-8", newline="\n")
+            (self.fakes / "uname").chmod(0o755)
         env = clean_env(self.user, WHYNOT_HOME=self.t / "new home",
                         PATH=os.pathsep.join(str(d) for d in (self.fakes, self.coreutils)))
         r = subprocess.run([self.bash, str(self.plug / "bin" / "reel"), "setup"], capture_output=True, env=env,
