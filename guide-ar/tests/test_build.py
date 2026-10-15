@@ -258,6 +258,20 @@ class DevWordTests(unittest.TestCase):
         self.assertEqual(len(build.dev_word_problems(_wrap("<p>والمسارات كلها</p>"), terms={})), 1)
         self.assertEqual(len(build.dev_word_problems(_wrap("<p>تقرير للمطوّر</p>"), terms={})), 1)
         self.assertEqual(build.dev_word_problems(_wrap("<p>البداية الجاذبة (hook) بالتايم كود</p>"), terms={}), [])
+        # round-3 review I2: a word that starts a block right after another block still counts (blocks are separated
+        # by a space, not glued to the previous letter; a glued fix-label is fix_problems' business, I1)
+        for glued in ("<p>x</p><p>JSON</p>", "<p>نص</p><p>مسار</p>",
+                      "<table><tr><td>الملف</td><td>جذر</td></tr></table>"):
+            self.assertEqual(len(build.dev_word_problems(_wrap(glued), terms={})), 1, glued)
+        self.assertEqual(build.visible_prose("<p>نص</p><p>آخر</p><h2>عنوان</h2>x<br>y"), "نص آخر عنوان x y")
+        self.assertEqual(build.visible_prose("<p>كلمة<b>ملتصقة</b> و<bdi>Gate</bdi></p>"), "كلمةملتصقة وGate")
+        # round-3 review M4: acronyms in any case, and the common extra words
+        for word in ("json", "Json", "api", "xml", "cli", "script", "server", "config", "debug", "sha256",
+                     "Script", "ترمينال", "التيرمينال", "السيرفر", "جيسون", "الاسكريبت"):
+            self.assertEqual(len(build.dev_word_problems(_wrap(f"<p>ملف {word} هنا</p>"), terms={})), 1, word)
+        # PATH stays case-sensitive («Copy as path» is a Windows menu label); «لوجو» is not «لوج»
+        self.assertEqual(build.dev_word_problems(_wrap("<p>اختر Copy as path ثم لوجو</p>"), terms={}), [])
+        self.assertEqual(len(build.dev_word_problems(_wrap("<p>متغير PATH</p>"), terms={})), 1)
         # an «explained once» term passes when its FIRST use carries data-term-first, later uses are free
         ok = ('<p><span data-term-first="Python">Python (لغة برمجة يحتاجها المحرك)</span></p>'
               "<p>رسالة عن Python.</p>")
@@ -272,7 +286,19 @@ class DevWordTests(unittest.TestCase):
         terms = build.explained_once_terms()
         for key in ("Python", "مسار", "XML", "محرك", "نموذج"):
             self.assertIn(key, terms)
-        self.assertEqual(build.dev_word_problems(build.chapter_sources(GUIDE)), [])
+        self.assertEqual(build.dev_word_problems(build.prose_sources(GUIDE)), [])
+
+    def test_shell_index_is_linted_too(self):
+        """Round-3 review M7: the cover, back cover and any page placed in index.html are read like a chapter."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "chapters").mkdir()
+            (root / "chapters" / "01.html").write_text("<p>نص عادي</p>", encoding="utf-8")
+            (root / "index.html").write_text(SHELL.replace("<!--@toc-->", "<p>ملف JSON</p>"), encoding="utf-8")
+            sources = build.prose_sources(root)
+            self.assertIn("نص عادي", sources)
+            self.assertEqual(len(build.dev_word_problems(sources, terms={})), 1)
+            self.assertEqual(build.dev_word_problems(build.chapter_sources(root), terms={}), [])
 
     def test_hook_is_not_a_dev_word(self):
         self.assertNotIn("hook", build.DEV_WORDS)
@@ -280,11 +306,40 @@ class DevWordTests(unittest.TestCase):
             self.assertIn(word, build.DEV_WORDS)
 
 
+class WawLatinTests(unittest.TestCase):
+    """Round-3 review M2: the font draws a «و» that touches Latin text like a Latin "g" («Premiere Pro وAfter Effects»
+    reads "After Effectsg Premiere Pro"). Repeat the preposition or reword: «في Premiere وفي After Effects»."""
+
+    def test_waw_before_latin_is_flagged(self):
+        for bad in ("<p>Premiere وAfter Effects</p>",
+                    "<p><strong>Premiere Pro</strong>، و<strong>After Effects</strong></p>",
+                    '<p>مثل <bdi dir="ltr">Gate 0</bdi> و<bdi dir="ltr">Gate 1</bdi></p>',
+                    "<h2>مسار وPremiere</h2>",
+                    "<p>على macOS وWindows</p>",
+                    "<p>ثم وClaude يرد</p>"):
+            self.assertEqual(len(build.waw_latin_problems(_wrap(bad))), 1, bad)
+
+    def test_waw_before_latin_allowed_cases(self):
+        for fine in ("<p>في Premiere وفي After Effects</p>",
+                     "<p>على macOS وعلى Windows</p>",
+                     "<p>هو Premiere</p>",                      # «و» inside an Arabic word
+                     "<p>Premiere و After</p>",                  # a spaced «و» is the reader's problem, not a glued one
+                     '<p><bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi></p>',
+                     '<div class="cmd"><code>reel doctor وabc</code></div>',
+                     "<p>نص</p><!-- فريق: وClaude -->",
+                     '<p title="وabc">نص</p>',
+                     "<style>p::after{content:'وabc'}</style>"):
+            self.assertEqual(build.waw_latin_problems(_wrap(fine)), [], fine)
+
+    def test_real_guide_has_no_waw_before_latin(self):
+        self.assertEqual(build.waw_latin_problems(build.prose_sources(GUIDE)), [])
+
+
 def _fix(what="Premiere لا يستجيب.", why="اللوحة مغلقة.", do="افتح اللوحة.", labels=("اللي حصل", "ليه", "اعمل كده")):
     parts = []
     for cls, label, text in zip(("fix-what", "fix-why", "fix-do"), labels, (what, why, do)):
         if text is not None:
-            parts.append(f'<p class="{cls}"><span class="fix-label">{label}</span>{text}</p>')
+            parts.append(f'<p class="{cls}"><span class="fix-label">{label}</span> {text}</p>')
     return '<div class="fix">' + "".join(parts) + "</div>"
 
 
@@ -299,6 +354,11 @@ class TroubleshootingTests(unittest.TestCase):
         self.assertEqual(len(build.fix_problems(_fix(why=""))), 1)
         # the visible labels are required
         self.assertEqual(len(build.fix_problems(_fix(labels=("العرَض", "ليه", "اعمل كده")))), 1)
+        # round-3 review I1: a space after every label, or Chrome shapes the label's last letter into the next word
+        glued = _fix().replace("</span> ", "</span>")
+        self.assertEqual(len(build.fix_problems(glued)), 3, build.fix_problems(glued))
+        self.assertIn("space", build.fix_problems(glued)[0])
+        self.assertEqual(len(build.fix_problems(_fix().replace("</span> ", "</span>", 1))), 1)
         # the action is ONE sentence
         self.assertEqual(len(build.fix_problems(_fix(do="أغلق Premiere. ثم افتح الفحص."))), 1)
         self.assertEqual(build.fix_problems(_fix(do='اكتب <bdi dir="ltr"><code>reel.doctor --x</code></bdi> ثم انتظر.')), [])
@@ -715,9 +775,72 @@ class PrintTests(unittest.TestCase):
         import threading
         with tempfile.TemporaryDirectory() as tmp:
             pdf = Path(tmp) / "late.pdf"
-            threading.Timer(0.6, lambda: pdf.write_bytes(b"%PDF-1.7 x")).start()
+            threading.Timer(0.6, lambda: pdf.write_bytes(b"%PDF-1.7 x\n%%EOF\n")).start()
             self.assertTrue(build.wait_for_file(pdf, timeout=10, settle=0.3, poll=0.1))
             self.assertFalse(build.wait_for_file(Path(tmp) / "never.pdf", timeout=0.5, settle=0.1, poll=0.1))
+
+    def test_wait_for_file_needs_the_pdf_end_marker_and_the_final_size(self):
+        """Round-3 review M3: a size that stays put is not enough, the file must end with %%EOF."""
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            # a partial file that never grows and never ends: timeout, not "done"
+            partial = Path(tmp) / "partial.pdf"
+            partial.write_bytes(b"%PDF-1.7 half a file")
+            self.assertFalse(build.wait_for_file(partial, timeout=1.0, settle=0.2, poll=0.1))
+            # written in two chunks with a pause shorter than `settle`: wait for the last chunk
+            two = Path(tmp) / "two.pdf"
+            two.write_bytes(b"%PDF-1.7 first chunk")
+
+            def second():
+                with open(two, "ab") as fh:
+                    fh.write(b" second chunk\n%%EOF\n")
+
+            threading.Timer(0.3, second).start()
+            self.assertTrue(build.wait_for_file(two, timeout=10, settle=0.6, poll=0.1))
+            self.assertTrue(two.read_bytes().endswith(b"%%EOF\n"))
+
+    def _fake_browser(self, tmp, content):
+        """A stand-in browser that exits 0 at once; it writes `content` to the --print-to-pdf path (none: nothing)."""
+        script = tmp / "fake_browser.py"
+        script.write_text(
+            "import sys\n"
+            f"content = {content!r}\n"
+            "target = [a.split('=', 1)[1] for a in sys.argv if a.startswith('--print-to-pdf=')][0]\n"
+            "if content is not None:\n"
+            "    open(target, 'wb').write(content)\n", encoding="utf-8")
+        if sys.platform == "win32":
+            fake = tmp / "fake.cmd"
+            fake.write_text(f'@"{sys.executable}" "{script}" %*\r\n', encoding="ascii")
+        else:
+            fake = tmp / "fake.sh"
+            fake.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="ascii")
+            fake.chmod(0o755)
+        return fake
+
+    def test_print_pdf_fails_on_a_file_the_browser_did_not_finish(self):
+        """Round-3 review M3: after the wait times out the build raises, it does not carry on with a partial file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "x.html").write_text("<p>x</p>", encoding="utf-8")
+            profiles = tmp / "profiles"
+            profiles.mkdir()
+            old_timeout, old_settle = build.PRINT_TIMEOUT, build.PDF_SETTLE
+            old_env = os.environ.get("WNC_BROWSER_TMP")
+            build.PRINT_TIMEOUT, build.PDF_SETTLE, os.environ["WNC_BROWSER_TMP"] = 3, 0.3, str(profiles)
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    build.print_pdf(tmp / "x.html", tmp / "x.pdf", self._fake_browser(tmp, b"%PDF-1.7 half a file"))
+                self.assertIn("did not finish writing", str(cm.exception))
+                # a finished file passes (generous timeout: starting the stand-in browser is slow on a busy machine)
+                build.PRINT_TIMEOUT = 30
+                build.print_pdf(tmp / "x.html", tmp / "ok.pdf", self._fake_browser(tmp, b"%PDF-1.7 x\n%%EOF\n"))
+                self.assertTrue((tmp / "ok.pdf").read_bytes().endswith(b"%%EOF\n"))
+            finally:
+                build.PRINT_TIMEOUT, build.PDF_SETTLE = old_timeout, old_settle
+                if old_env is None:
+                    os.environ.pop("WNC_BROWSER_TMP", None)
+                else:
+                    os.environ["WNC_BROWSER_TMP"] = old_env
 
     def test_print_timeout_stops_browser_and_cleans_profile(self):
         with tempfile.TemporaryDirectory() as tmp:

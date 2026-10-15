@@ -89,7 +89,7 @@ the WhyNot Cut plugin in Claude, Adobe's add-ons are «لوحات»; «مسار�
 | `Python` | «لغة برمجة يحتاجها المحرك، ولا تتعامل معها أنت» | ch02, «ما الذي يُثبَّت تلقائيًا» |
 | `امتداد` (file extension) | «ما بعد النقطة في اسم الملف، مثل .mp4 أو .md» | ch04, short clip names |
 | `API` (Anthropic API key) | «رمز سري من حساب مطوّر في Anthropic؛ لا تحتاج إليه» | ch07, AI buttons |
-| `سكريبت` (AE script) | «ملف يبني المشروع داخل After Effects عندما تشغّله» | ch09, script fallback |
+| `سكريبت` (AE script; also the English `Script` in the glossary and in Adobe's own labels) | «ملف يبني المشروع داخل After Effects عندما تشغّله» | ch09, script fallback |
 | `تعريف الكارت` (driver) | «برنامج تشغيل الكارت من NVIDIA» | ch13, Kalam on Windows |
 | `PATH` (installer checkbox) | «يجعل الجهاز يجد Python عندما يطلبه المحرك» | ch17 (only while the Python row exists) |
 | admin, ffmpeg, Git for Windows, CPU, zip, السجل | explained in place, Arabic first, English in parentheses (not linted) | ch02, ch07, ch08, ch17 |

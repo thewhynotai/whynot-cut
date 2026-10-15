@@ -690,7 +690,7 @@ table.plain td:first-child { font-weight: 400; color: var(--ink); }
   font-weight: 600;
   font-size: 8.5pt;
   color: var(--muted);
-  margin-left: 6pt;
+  margin-left: 3pt; /* plus the real space after the label in the source (round-3 review I1) */
 }
 .fix-do .fix-label { color: var(--accent); }
 

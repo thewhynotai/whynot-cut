@@ -537,14 +537,18 @@ def lint(html: str, release: bool = False, root: Path | None = None) -> list[str
 # ---------------------------------------------------------------- developer words (Addendum G2)
 # "No developer words anywhere a user sees." A word here fails the build in visible prose unless STYLE.md's
 # «explained once» table lists it and its first use carries data-term-first. «hook» is NOT here: the guide uses it
-# only as the editing term «البداية الجاذبة (hook)» (round 3 ruling). Matched as whole words; all-caps words
-# case-sensitively, the others in any case; Arabic forms with any prefix (و ف ب ل ك ال) and suffix, diacritics ignored.
+# only as the editing term «البداية الجاذبة (hook)» (round 3 ruling). Matched as whole words, in any
+# case (acronyms too: «json», «Api»; only PATH is case-sensitive); Arabic forms with any prefix (و ف ب ل ك ال) and
+# suffix, diacritics ignored.
 DEV_WORDS: tuple[str, ...] = (
     "token", "daemon", "JSON", "CLI", "API", "venv", "Python", "MCP", "PATH", "XML", "CEP",
     "repo", "commit", "cache", "flag", "session", "localhost", "stdout", "traceback",
     "توكن", "بايثون", "سكريبت", "سكربت", "سطر أوامر", "سطر الأوامر", "خطاف", "جلسة", "كاش",
     "جذر", "برمجيًا", "برمجي", "للمطوّر", "المطوّر", "مكتبات", "مسار", "امتداد", "كود", "أكواد",
+    "script", "server", "config", "debug", "sha256", "ترمينال", "تيرمينال", "سيرفر", "جيسون",
 )
+# «لوج» is not listed: it matches «لوجو». PATH stays case-sensitive: «Copy as path» is a Windows menu label.
+CASE_SENSITIVE_WORDS = ("PATH",)
 # visible phrases that contain a listed word but are plain editor vocabulary
 DEV_ALLOWED = ("التايم كود", "تايم كود", "بأكواد HEX", "أكواد ألوان HEX")  # timecode; designers' colour codes
 STYLE_MD = ROOT / "STYLE.md"
@@ -556,12 +560,15 @@ def _word_regex(word: str) -> re.Pattern:
     word = _ARABIC_MARKS.sub("", word)
     if re.search(f"[{_ARABIC_LETTER}]", word):
         return re.compile(rf"(?<![{_ARABIC_LETTER}])[وفبلكا]{{0,4}}(?P<w>{re.escape(word)})")
-    flags = 0 if word.isupper() else re.I
+    flags = 0 if word in CASE_SENSITIVE_WORDS else re.I
     return re.compile(rf"(?<![A-Za-z])(?P<w>{re.escape(word)})(?:e?s)?(?![A-Za-z])", flags)
 
 
 _DEV_RES = [(w, _word_regex(w)) for w in DEV_WORDS]
 _MENU_PATH_BDI = re.compile(r"<bdi\b[^>]*>[^<]*›[^<]*</bdi>")
+# text markup inside a sentence: no word break at its edges (everything else, <code> included, is a boundary)
+_INLINE_TAGS = {"a", "abbr", "b", "bdi", "bdo", "em", "i", "kbd", "mark", "s", "small", "span", "strong", "sub",
+                "sup", "u"}
 
 
 class _ProseParser(HTMLParser):
@@ -569,7 +576,11 @@ class _ProseParser(HTMLParser):
 
     Dropped: <code>, .cmd blocks, <style>/<script>, comments (team notes), and an LTR <bdi> holding only a menu
     path («Window › UXP Plugins»), which is a UI label the reader must match. Kept: headings, table cells,
-    captions, plain <bdi> text («engine not installed») and the one-line .todo sentence."""
+    captions, plain <bdi> text («engine not installed») and the one-line .todo sentence.
+
+    Every element that is not inline text markup (<p>, <td>, <li>, <h2>, <br>, a dropped <code> …) is a boundary:
+    the text on either side is separated by a space, so «<p>x</p><p>JSON</p>» is «x JSON», not «xJSON» (round-3
+    review I2: a glued word would slip past the whole-word match)."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -583,13 +594,18 @@ class _ProseParser(HTMLParser):
             skip = True
         if a.get("data-term-first", "").strip():
             keys = keys | {a["data-term-first"].strip()}
+        if tag not in _INLINE_TAGS or skip != self.stack[-1][1]:
+            self.runs.append((" ", self.stack[-1][2]))
         if tag not in _VOID:
             self.stack.append((tag, skip, keys))
 
     def handle_endtag(self, tag):
         for i in range(len(self.stack) - 1, 0, -1):
             if self.stack[i][0] == tag:
+                closed_skip = self.stack[i][1]
                 del self.stack[i:]
+                if tag not in _INLINE_TAGS or closed_skip != self.stack[-1][1]:
+                    self.runs.append((" ", self.stack[-1][2]))
                 break
 
     def handle_data(self, data):
@@ -598,9 +614,11 @@ class _ProseParser(HTMLParser):
             self.runs.append((data, keys))
 
 
-def _prose_runs(html: str) -> list[tuple[str, frozenset]]:
+def _prose_runs(html: str, menu_paths: bool = False) -> list[tuple[str, frozenset]]:
+    """Visible text runs. Menu-path labels are dropped unless `menu_paths` (they are visible, but UI labels the
+    reader must match, so the developer-word lint ignores them)."""
     p = _ProseParser()
-    p.feed(_MENU_PATH_BDI.sub("", html))
+    p.feed(html if menu_paths else _MENU_PATH_BDI.sub("", html))
     p.close()
     return [(_ARABIC_MARKS.sub("", text.replace("\xa0", " ")), keys) for text, keys in p.runs]
 
@@ -608,6 +626,22 @@ def _prose_runs(html: str) -> list[tuple[str, frozenset]]:
 def visible_prose(html: str) -> str:
     """The text a reader sees, without code, command boxes, comments and menu-path labels (whitespace collapsed)."""
     return re.sub(r"\s+", " ", "".join(text for text, _ in _prose_runs(html))).strip()
+
+
+_WAW_LATIN = re.compile(r"(?<![ء-ي])و(?=[A-Za-z])")
+
+
+def waw_latin_problems(html: str) -> list[str]:
+    """A «و» glued to Latin text in the visible prose («Premiere Pro وAfter Effects»). The font draws it like a Latin
+    "g" there («After Effectsg Premiere Pro»), so repeat the preposition or reword: «في Premiere وفي After Effects».
+    Code, command boxes, comments and attributes are not prose; a «و» before a <code> chip is fine (the chip is boxed)."""
+    text = "".join(t for t, _ in _prose_runs(html, menu_paths=True))
+    problems = []
+    for m in _WAW_LATIN.finditer(text):
+        around = re.sub(r"\s+", " ", text[max(0, m.start() - 25):m.end() + 25]).strip()
+        problems.append(f"«و» glued to Latin text (it prints like a Latin g): repeat the preposition or reword: "
+                        f"«{around}»")
+    return problems
 
 
 def explained_once_terms(style: Path = STYLE_MD) -> dict[str, tuple[str, ...]]:
@@ -626,6 +660,12 @@ def explained_once_terms(style: Path = STYLE_MD) -> dict[str, tuple[str, ...]]:
 def chapter_sources(root: Path = ROOT) -> str:
     """Every chapter source in reading order (the TOC and chapter maps would repeat headings ahead of their text)."""
     return "\n\n".join(p.read_text(encoding="utf-8") for p in sorted((Path(root) / "chapters").glob("*.html")))
+
+
+def prose_sources(root: Path = ROOT) -> str:
+    """What the prose lints read: the shell index.html (cover, back cover, any page placed there) and then every
+    chapter in reading order."""
+    return (Path(root) / "index.html").read_text(encoding="utf-8") + "\n\n" + chapter_sources(root)
 
 
 def dev_word_problems(html: str, terms: dict[str, tuple[str, ...]] | None = None) -> list[str]:
@@ -806,6 +846,8 @@ FIX_PARTS = (("fix-what", "اللي حصل"), ("fix-why", "ليه"), ("fix-do", 
 _FIX_BLOCK = re.compile(r'<div\b[^>]*\bclass="fix"[^>]*>(.*?)</div>', re.S)
 _FIX_PART = re.compile(r'<p\b[^>]*\bclass="(fix-[a-z]+)"[^>]*>(.*?)</p>', re.S)
 _FIX_LABEL = re.compile(r'^\s*<span class="fix-label">(.*?)</span>', re.S)
+# the label is an inline span: with no space after it the browser shapes its last letter into the next word
+# («اللي حصل» + «رسالة» prints «حصا» + a joined «ـر», and the PDF text layer reads «حصلرسالة»)
 _SENTENCE_END = re.compile(r"[.!؟](?=\s+\S)")
 
 
@@ -831,6 +873,9 @@ def fix_problems(html: str) -> list[str]:
             if not m or plain_text(m.group(1)) != label:
                 problems.append(f'«.{cls}» must open with <span class="fix-label">{label}</span>: «{what}»')
                 continue
+            if not body[m.end():m.end() + 1].isspace():
+                problems.append(f'«.{cls}» needs a space right after its label (…</span> text), or the label and the '
+                                f'first word are shaped as one Arabic word: «{what}»')
             text = visible_prose(body[m.end():])
             if not text:
                 problems.append(f"«.{cls}» is empty: «{what}»")
@@ -959,24 +1004,43 @@ def print_pdf(html_path: Path, pdf_path: Path, browser: Path) -> None:
                 f"({browser}). Close other Edge/Chrome windows started for printing and run the build "
                 "again, or point WNC_BROWSER to another Edge/Chrome.") from None
         # Edge 155+ (new headless): the launcher exits 0 at once and a detached browser writes the PDF later
-        if proc.returncode == 0:
-            wait_for_file(pdf_path, max(1.0, PRINT_TIMEOUT - (time.monotonic() - started)))
+        if proc.returncode == 0 and not wait_for_file(
+                pdf_path, max(1.0, PRINT_TIMEOUT - (time.monotonic() - started)), settle=PDF_SETTLE):
+            raise SystemExit(f"the browser did not finish writing {pdf_path} within {PRINT_TIMEOUT} s ({browser}). "
+                             "Close other Edge/Chrome windows started for printing and run the build again.")
     finally:
         _remove_profile(profile)
     if not pdf_path.exists() or pdf_path.stat().st_size == 0:
         raise SystemExit(f"browser did not write {pdf_path} (exit {proc.returncode}):\n{(stderr or '')[-2000:]}")
 
 
-def wait_for_file(path: Path, timeout: float, settle: float = 2.0, poll: float = 0.5) -> bool:
-    """True once `path` exists, is not empty and its size has not changed for `settle` seconds; False after
-    `timeout` seconds. A detached browser writes the PDF after its launcher has exited."""
+PDF_SETTLE = 2.0  # seconds a printed PDF must keep its size before it counts as written
+
+
+def _ends_with_eof(path: Path) -> bool:
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - 1024))
+            return b"%%EOF" in fh.read()
+    except OSError:
+        return False
+
+
+def wait_for_file(path: Path, timeout: float, settle: float = PDF_SETTLE, poll: float = 0.5) -> bool:
+    """True once `path` exists, is not empty, ends with the PDF end marker (%%EOF) and its size has not changed for
+    `settle` seconds; False after `timeout` seconds. A detached browser writes the PDF after its launcher has exited,
+    so a file that is still growing, or stopped half-written, never counts as done."""
     path, deadline = Path(path), time.monotonic() + timeout
     last, since = -1, None
     while time.monotonic() < deadline:
-        size = path.stat().st_size if path.exists() else -1
+        try:
+            size = path.stat().st_size if path.exists() else -1
+        except OSError:  # the browser is replacing the file right now
+            size = -1
         if size > 0 and size == last:
             since = since or time.monotonic()
-            if time.monotonic() - since >= settle:
+            if time.monotonic() - since >= settle and _ends_with_eof(path):
                 return True
         else:
             last, since = size, None
@@ -1211,7 +1275,9 @@ def main(argv: list[str] | None = None) -> int:
 
     html = assemble(ROOT)
     sources = chapter_sources(ROOT)
-    problems = lint(html, release=release) + dev_word_problems(sources) + platform_order_problems(sources)
+    prose = prose_sources(ROOT)  # the shell index.html as well (cover, back cover)
+    problems = (lint(html, release=release) + dev_word_problems(prose) + waw_latin_problems(prose)
+                + platform_order_problems(sources))
     troubleshooting = ROOT / "chapters" / TROUBLESHOOTING_CHAPTER
     if troubleshooting.is_file():
         problems += fix_problems(troubleshooting.read_text(encoding="utf-8"))
