@@ -518,7 +518,8 @@ def grab_frame(video: Path, ms: int, size: tuple | None = None) -> Image.Image |
 # outdated wording.
 STILLS_MANIFEST = "03_broll/.stills-manifest.json"
 MANIFEST_FORMAT = 1
-_RENDERER_SOURCES = ("previews.py", "font_roles.py", "fonts.py", "hb_text.py", "ct_text.py", "legibility.py")
+_RENDERER_SOURCES = ("previews.py", "font_roles.py", "fonts.py", "hb_text.py", "ct_text.py", "legibility.py",
+                     "motion_layout.py", "ae_builder.py")      # contrast() and wrap_lines() shape the stills too
 
 
 def _sha256(data: bytes) -> str:
@@ -580,7 +581,10 @@ def _shared_inputs(paths: Paths, spec: dict, asset_manifest: dict) -> dict:
     brand_cfg = load_config("brand.json") or {}
     main = spec.get("main_footage")
     foot = (Path(main) if Path(main).is_absolute() else paths.root / main) if main else None
+    from .motion_config import motion_cfg
+    mc = motion_cfg()                       # readability thresholds (legibility.needed; a client profile can override them)
     return {"renderer": renderer_version(), "frame": list(frame_size(paths)),
+            "legibility": [mc.get("min_contrast"), mc.get("min_contrast_large"), mc.get("large_px")],
             "brand_tokens": _no_timestamps(read_json(db / "branding/brand-tokens.json", {}) or {}),
             "typography": _no_timestamps(typ), "fonts": {f: _file_sha(f) for f in fonts},
             "brand_fallbacks": [brand_cfg.get("fallback_colors"), brand_cfg.get("font_roles_fallback")],
@@ -653,7 +657,8 @@ def ensure_fresh_stills(paths: Paths) -> dict:
     if not st["stale"]:
         return {"redrawn": [], "why": {}, "warnings": []}
     error = f"The graphics {', '.join(st['stale'])} were drawn from an older version of the plan, and redrawing them stopped"
-    how = "Run `reel previews` to redraw the graphics, fix what it reports, then build again."
+    how = ("Close the project in Premiere if it is open (it may hold a graphic file), run `reel previews` to redraw the "
+           "graphics, fix what it reports, then build again.")
     try:
         r = render_all(paths, composite_preview=True, only=set(st["stale"]))
     except Guidance as e:

@@ -184,6 +184,14 @@ class TestStillsManifest(_Reel):
         write_json(tok_p, tok)
         self.assertEqual(sorted(self.stale()), sorted(self.events()))
 
+    def test_a_readability_threshold_change_redraws_every_still(self):     # F1 review minor 1
+        # a client's motion.json may raise min_contrast: the brand colour may now fall back to white in the still
+        from lib import motion_config
+        cfg = dict(motion_config.motion_cfg(), min_contrast=7.0)
+        with mock.patch.object(motion_config, "motion_cfg", return_value=cfg):
+            self.assertEqual(sorted(self.stale()), sorted(self.events()))
+        self.assertEqual(self.stale(), [])                        # back to the recorded thresholds: nothing stale
+
     def test_a_redraw_that_fails_says_the_one_fix_in_plain_words(self):
         from lib import previews
         from lib.errors import Guidance
