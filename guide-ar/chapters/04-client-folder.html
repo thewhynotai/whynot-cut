@@ -7,11 +7,11 @@
 <ul>
 <li><bdi dir="ltr"><code>assets/</code></bdi>: هوية العميل (الشعار، الخطوط، الصور، ملف التعريف والألوان).</li>
 <li><bdi dir="ltr"><code>data/</code></bdi>: المادة التي يُعمل عليها (الفيديوهات الخام، الحلقات، المراجع، الموسيقى، المؤثرات).</li>
-<li><bdi dir="ltr"><code>output/</code></bdi>: نتائج المونتاج. يُنشأ تلقائيًا، وفيه يكتب WhyNot Cut كل نتائج المونتاج، أما ملف التسليم <bdi dir="ltr"><code>HANDOFF.md</code></bdi> فيُكتب داخل فولدر العميل مباشرة، بجانب <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi>.</li>
+<li><bdi dir="ltr"><code>output/</code></bdi>: نتائج المونتاج. يُنشأ تلقائيًا، وفيه يكتب WhyNot Cut كل نتائج المونتاج، أما ملف التسليم <bdi dir="ltr"><code>HANDOFF.md</code></bdi> فيُكتب داخل فولدر العميل مباشرة، بجانب الفولدر <bdi dir="ltr"><code>assets/</code></bdi> والفولدر <bdi dir="ltr"><code>data/</code></bdi>.</li>
 </ul>
 
 <aside class="warn">
-<p>الفولدران <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> ملك للعميل. WhyNot Cut لا يكتب فيهما ولا ينقل منهما ولا يحذف منهما أي ملف، وهذه الحماية ثابتة داخل البرنامج نفسه، لا مجرد تعليمات. أنت من يضيف الملفات إليهما.</p>
+<p>الفولدر <bdi dir="ltr"><code>assets/</code></bdi> والفولدر <bdi dir="ltr"><code>data/</code></bdi> ملك للعميل. WhyNot Cut لا يكتب فيهما ولا ينقل منهما ولا يحذف منهما أي ملف، وهذه الحماية ثابتة داخل البرنامج نفسه، لا مجرد تعليمات. أنت من يضيف الملفات إليهما.</p>
 </aside>
 
 <h2 id="ch04-create">إنشاء فولدر لعميل</h2>
@@ -19,7 +19,7 @@
 <p class="lead-in">أول فولدر عميل يُنشأ لك أثناء الإعداد الأول بالأمر <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>. ولأي عميل بعد ذلك يُنشئ Claude الفولدر لك داخل فولدر العملاء (clients folder)، وهو الفولدر الذي اخترته في الإعداد الأول لتُحفظ فيه كل فولدرات العملاء، مثل <bdi dir="ltr"><code>~/Documents/WhyNot Clients</code></bdi> على Mac أو <bdi dir="ltr"><code>D:\WhyNot Clients</code></bdi> على Windows:</p>
 
 <ol class="steps">
-<li>اكتب لـ Claude طلبًا فيه اسم العميل، مثل «اعمل فولدر عميل جديد اسمه Example Clinic».</li>
+<li>اكتب إلى Claude طلبًا فيه اسم العميل، مثل «اعمل فولدر عميل جديد اسمه Example Clinic».</li>
 <li>يُنشئ Claude الفولدر بكل الفولدرات الفرعية، ويعرض لك ما يوضع في كل فولدر.</li>
 <li>تجد الجدول نفسه في الملف <bdi dir="ltr"><code>START_HERE.md</code></bdi> داخل الفولدر الجديد، ومعه ملخص بالعربية. افتحه بالزر الأيمن ثم <bdi dir="ltr">Open&nbsp;With&nbsp;›&nbsp;TextEdit</bdi> على Mac، أو <bdi dir="ltr">Open&nbsp;with&nbsp;›&nbsp;Notepad</bdi> على Windows.</li>
 <li>ضع ملفات العميل في أماكنها كما في الجدول التالي، ثم أخبر Claude، فيفحصها ويكمل إعداد العميل (<a href="#ch05-title">الفصل&nbsp;5</a>).</li>
@@ -63,7 +63,7 @@
 <p>بعد أن تنتهي من نسخ الملفات، وبعد أن يكتمل أي تحميل من التخزين السحابي:</p>
 
 <ol class="steps">
-<li>اكتب لـ Claude أنك أضفت ملفات، مثل «حطيت الملفات، افحصها».</li>
+<li>اكتب إلى Claude أنك أضفت ملفات، مثل «حطيت الملفات، افحصها».</li>
 <li>يعرض لك Claude الكليبات التي وجدها والمواد الناقصة. ويمكنه أن يفحص بعمق أكبر: الصيغ، واتجاه الفيديو، والصوت، والملفات الموضوعة في غير مكانها، دون أن يغيّر أي شيء.</li>
 <li>أكمل ما ينقص، أو ابدأ المونتاج إذا كان الموجود كافيًا.</li>
 </ol>
@@ -82,14 +82,14 @@
 
 <ul>
 <li><strong>الأسهل: اطلب نصها من Claude.</strong> اكتب مثلًا «اكتبلي ورقة الحلقة <bdi dir="ltr">EP01</bdi>» ومعها اسم البرنامج والمقدّم والضيف والروابط. يكتب لك Claude النص كاملًا في المحادثة، فتنسخه وتحفظه بالخطوات التالية.</li>
-<li><strong>أو اكتبها بنفسك</strong> من القالب الذي بعد الخطوات.</li>
+<li><strong>أو اكتبها بنفسك</strong> من المثال الذي بعد الخطوات.</li>
 </ul>
 
 <ol class="steps">
 <li>افتح محرّر نصوص عادي. على Mac افتح TextEdit، ثم اختر <bdi dir="ltr">Format&nbsp;›&nbsp;Make&nbsp;Plain&nbsp;Text</bdi> ليصبح الملف نصًّا عاديًا. وعلى Windows افتح Notepad: من قائمة Start اكتب Notepad وافتحه.</li>
-<li>الصق النص الذي كتبه Claude، أو انسخ القالب التالي وضع بدل كل «…» القيمة الصحيحة. اترك السطرين <bdi dir="ltr"><code>---</code></bdi> في أول الورقة وآخرها كما هما: ما بينهما بيانات الحلقة، وكل قيمة تُكتب بعد النقطتين. غيّر الكلام فقط، واترك العلامات كما هي: النقطتين، وعلامتي التنصيص، والقوسين المربعين، والمسافتين قبل الشرطة. والأسهل أن تطلب نص الورقة من Claude.</li>
+<li>الصق النص الذي كتبه Claude، أو انسخ المثال الذي بعد الخطوات وغيّر الكلام الذي بعد النقطتين فقط. اترك كل ما عداه كما هو: السطرين <bdi dir="ltr"><code>---</code></bdi> في أول الورقة وآخرها، والنقطتين، وعلامتي التنصيص، والقوسين المربعين، والمسافتين قبل الشرطة. وإذا لم يوجد راعٍ فاترك السطر <bdi dir="ltr"><code>sponsor: ""</code></bdi> كما هو. والأسهل أن تطلب نص الورقة من Claude.</li>
 <li>احفظ الملف باسم <bdi dir="ltr"><code>EP01.md</code></bdi> في <bdi dir="ltr"><code>data/Episodes</code></bdi> بجانب الحلقة. على Mac: اختر <bdi dir="ltr">File&nbsp;›&nbsp;Save</bdi>، واكتب الاسم، واختر الفولدر <bdi dir="ltr"><code>data/Episodes</code></bdi>، ثم Save، وإذا سألك TextEdit عن الامتداد اختر <bdi dir="ltr">Use&nbsp;.md</bdi>. وعلى Windows: اختر <bdi dir="ltr">File&nbsp;›&nbsp;Save&nbsp;As</bdi>، ومن «Save as type» القيمة <bdi dir="ltr">All files</bdi> حتى لا يُحفظ الملف بامتداد <bdi dir="ltr"><code>.txt</code></bdi>، ثم اكتب الاسم واحفظه في الفولدر نفسه.</li>
-<li>اكتب لـ Claude أنك أضفت الورقة.</li>
+<li>اكتب إلى Claude أنك أضفت الورقة.</li>
 </ol>
 
 <figure class="shot">
@@ -97,18 +97,20 @@
 <figcaption>احفظ الورقة بامتداد <bdi dir="ltr"><code>.md</code></bdi>، لا بامتداد <bdi dir="ltr"><code>.txt</code></bdi>.</figcaption>
 </figure>
 
-<p class="lead-in">قالب الورقة:</p>
+<p class="lead-in">مثال لورقة حلقة كاملة:</p>
 
 <div class="cmd"><bdi dir="ltr"><code>---
-show: …
+show: "Example Clinic"
 episode: 1
-host: …
-guest: "Name — role"
+host: "Dr. Sample Example"
+guest: "Sample Guest — fitness coach"
 links:
-  - https://…
+  - https://example.com
 sponsor: ""
-avoid: [topics not to cut]
+avoid: [prices, politics]
 ---</code></bdi></div>
+<p>ويمكنك أن تكتب القيم بالعربية أيضًا، مثل اسم البرنامج «عيادة مثال».</p>
+<!-- فريق: 7c #19: القالب صار مثالًا مملوءًا بالأسماء الوهمية (Example Clinic، Dr. Sample Example) بحروف لاتينية: القيم العربية داخل مربع الأوامر (اتجاه من اليسار) تنقلب فيها النقطة وترتيب القائمة بصريًا، فاختير المثال اللاتيني مع جملة تقول إن العربية مسموحة؛ الحقول نفسها من podcast SKILL السطر 26 (ورقة الحلقة: show, episode, host, guest, links, sponsor, avoid). يُراجَع شكل العربي داخل مربع الأوامر في الصور. -->
 
 <table>
 <thead>
@@ -119,9 +121,9 @@ avoid: [topics not to cut]
 <tr><td><bdi dir="ltr"><code>episode</code></bdi></td><td>رقم الحلقة.</td></tr>
 <tr><td><bdi dir="ltr"><code>host</code></bdi></td><td>مقدّم البرنامج.</td></tr>
 <tr><td><bdi dir="ltr"><code>guest</code></bdi></td><td>الضيف ودوره، بالصيغة: الاسم — الدور.</td></tr>
-<tr><td><bdi dir="ltr"><code>links</code></bdi></td><td>الروابط التي تُذكر في نصوص النشر، كل رابط في سطر يبدأ بمسافتين ثم شرطة، كما في القالب.</td></tr>
+<tr><td><bdi dir="ltr"><code>links</code></bdi></td><td>الروابط التي تُذكر في نصوص النشر، كل رابط في سطر يبدأ بمسافتين ثم شرطة، كما في المثال.</td></tr>
 <tr><td><bdi dir="ltr"><code>sponsor</code></bdi></td><td>الراعي إن وُجد، أو يُترك فارغًا.</td></tr>
-<tr><td><bdi dir="ltr"><code>avoid</code></bdi></td><td>موضوعات لا يُقطع منها أي ريل.</td></tr>
+<tr><td><bdi dir="ltr"><code>avoid</code></bdi></td><td>موضوعات تريد تجنّبها. إذا اقترح Claude ريلًا عن واحد منها، يكتب بجانبه تنبيهًا، والقرار لك.</td></tr>
 </tbody>
 </table>
 
@@ -140,7 +142,7 @@ avoid: [topics not to cut]
 <tr><td><bdi dir="ltr"><code>output/projects/C0001/07_premiere/project/</code></bdi></td><td>مشروع Premiere Pro، مثل <bdi dir="ltr"><code>C0001_EC_EDIT.prproj</code></bdi>.</td></tr>
 <tr><td><bdi dir="ltr"><code>output/projects/C0001/08_quality_control/preview/</code></bdi></td><td>فيديو المعاينة <bdi dir="ltr"><code>C0001_preview.mp4</code></bdi>.</td></tr>
 <tr><td><bdi dir="ltr"><code>output/projects/C0001/08_quality_control/</code></bdi></td><td>نتائج فحص الجودة (QC).</td></tr>
-<tr><td><bdi dir="ltr"><code>output/projects/C0001/09_handoff/</code></bdi></td><td>ملفات التسليم <bdi dir="ltr"><code>README.md</code></bdi> و<bdi dir="ltr"><code>final-editor-checklist.md</code></bdi>.</td></tr>
+<tr><td><bdi dir="ltr"><code>output/projects/C0001/09_handoff/</code></bdi></td><td>ملفا التسليم: الملف <bdi dir="ltr"><code>README.md</code></bdi> والملف <bdi dir="ltr"><code>final-editor-checklist.md</code></bdi>.</td></tr>
 </tbody>
 </table>
 

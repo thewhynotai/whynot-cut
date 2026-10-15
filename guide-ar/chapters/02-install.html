@@ -9,11 +9,11 @@
 
 <h2 id="ch02-claude-first" data-today>أول مرة في تطبيق Claude</h2>
 
-<p class="lead-in">كل ما تطلبه من WhyNot Cut تكتبه لـ Claude في تطبيق Claude على جهازك. إذا لم تستخدمه من قبل، فهذا كل ما تحتاج إلى معرفته:</p>
+<p class="lead-in">كل ما تطلبه من WhyNot Cut تكتبه إلى Claude في تطبيق Claude على جهازك. إذا لم تستخدمه من قبل، فهذا كل ما تحتاج إلى معرفته:</p>
 <ul>
 <li><strong>مربع الرسالة</strong> في أسفل النافذة: اكتب فيه طلبك أو الأمر، ثم اضغط Enter.</li>
 <li><strong>المحادثة الجديدة</strong>: زر في أعلى القائمة الجانبية. افتح محادثة جديدة بعد كل تثبيت أو تحديث.</li>
-<li><strong>الفولدر</strong>: مع كل محادثة جديدة تختار الفولدر الذي يعمل فيه Claude: فولدر العملاء (مثل <bdi dir="ltr"><code>WhyNot Clients</code></bdi>)، أو فولدر العميل الذي ستعمل عليه.</li>
+<li><strong>الفولدر</strong>: قبل أول رسالة في كل محادثة جديدة، اختر الفولدر الذي يعمل فيه Claude من زر اختيار الفولدر في نافذة المحادثة: فولدر العملاء (مثل <bdi dir="ltr"><code>WhyNot Clients</code></bdi>)، أو فولدر العميل الذي ستعمل عليه.</li>
 <li><strong>زر +</strong> بجانب مربع الرسالة: منه تضيف WhyNot Cut إلى التطبيق، كما في القسم التالي.</li>
 <li><strong>إغلاق التطبيق تمامًا</strong>: إغلاق النافذة وحده قد يترك Claude يعمل في الخلفية. على Mac اضغط <bdi dir="ltr">Cmd+Q</bdi> وتطبيق Claude في المقدمة. وعلى Windows اضغط بالزر الأيمن على أيقونة Claude بجوار الساعة (وقد تكون مخفية تحت السهم ^) واختر Quit.</li>
 </ul>
@@ -29,7 +29,7 @@
 
 <aside class="todo" data-phase="9">
 <p>أسماء الأزرار وأماكنها في تطبيق Claude قد تختلف قليلًا حسب نسخة التطبيق.</p>
-<!-- فريق: قسم جديد (reader2 #3، #4). تُطابَق أسماء الأزرار وأماكنها (المحادثة الجديدة، اختيار الفولدر، زر +، Quit من أيقونة شريط المهام) مع تطبيق Claude كما يظهر وقت التقاط الصور في المرحلة 9. سؤال الثقة في الفولدر (workspace trust) من whynot-cut/README.md. -->
+<!-- فريق: قسم جديد (reader2 #3، #4). تُطابَق أسماء الأزرار وأماكنها (المحادثة الجديدة، اختيار الفولدر، زر +، Quit من أيقونة شريط المهام) مع تطبيق Claude كما يظهر وقت التقاط الصور في المرحلة 9. سؤال الثقة في الفولدر (workspace trust) من whynot-cut/README.md. 7c #14/N2: اسم زر اختيار الفولدر ومكانه بالضبط (بجانب مربع الرسالة؟) لا مصدر له في الكود؛ يُنقل حرفيًا من الصور في المرحلة 9. اقتراح «اختر Documents في أول تثبيت» حُذف (بلا مصدر). -->
 </aside>
 
 <h2 id="ch02-first-run" data-today>اليوم: التثبيت مع معالج البداية</h2>
@@ -37,13 +37,13 @@
 <p>اليوم يرسل لك فريقنا فولدر <bdi dir="ltr"><code>whynot-cut-marketplace</code></bdi>. انقله إلى فولدر Documents على جهازك واتركه هناك: لا تنقله ولا تحذفه بعد ذلك، لأن تطبيق Claude يقرأ WhyNot Cut من مكانه هذا، فإذا نقلته لا يجده.</p>
 
 <ol class="steps">
-<li><strong>انسخ مسار الفولدر.</strong> على Mac: اضغط Option مع زر الماوس الأيمن على الفولدر، واختر «نسخ … كاسم مسار» (<bdi dir="ltr">Copy … as Pathname</bdi>). على Windows: اضغط Shift مع زر الماوس الأيمن على الفولدر، واختر «نسخ كمسار» (<bdi dir="ltr">Copy as path</bdi>).</li>
+<li><strong>انسخ مسار الفولدر.</strong> على Mac: افتح قائمة الفولدر بالزر الأيمن (على لوحة اللمس اضغط بإصبعين، أو اضغط Control مع الضغط)، ثم اضغط مفتاح Option باستمرار والقائمة مفتوحة، فيظهر الأمر «نسخ … كاسم مسار» (<bdi dir="ltr">Copy … as Pathname</bdi>)؛ اختره. على Windows: اضغط Shift مع زر الماوس الأيمن على الفولدر، واختر «نسخ كمسار» (<bdi dir="ltr">Copy as path</bdi>).</li>
 <li><strong>أضف WhyNot Cut إلى تطبيق Claude.</strong> <span data-term-first="إضافة">ما تضيفه اسمه «إضافة WhyNot Cut» (plugin): الجزء الذي يعرّف Claude بأوامر WhyNot Cut وطريقة عمله</span>. افتح محادثة جديدة، واكتب السطر الأول في مربع الرسالة ثم Enter، ثم السطر الثاني ثم Enter. في السطر الأول امسح <bdi dir="ltr"><code>"&lt;path&gt;"</code></bdi> كله مع علامتي التنصيص، والصق مكانه المسار الذي نسخته: على Mac اكتب علامتي التنصيص حوله بنفسك، وعلى Windows يأتي المسار المنسوخ بينهما، فيبقى في السطر علامتا تنصيص اثنتان فقط.
 <div class="cmd"><bdi dir="ltr"><code>/plugin marketplace add "&lt;path&gt;"
 /plugin install whynot-cut@thewhynot-ai</code></bdi></div>
 <p class="lead-in">على Mac، إذا كان الفولدر في Documents، يصبح السطر الأول بعد التعديل مثل هذا، مع اسم المستخدم في جهازك بدل <bdi dir="ltr"><code>sample</code></bdi>:</p>
 <div class="cmd"><bdi dir="ltr"><code>/plugin marketplace add "/Users/sample/Documents/whynot-cut-marketplace"</code></bdi></div>
-وإذا ظهرت رسالة خطأ بعد السطر الأول، فتأكّد من المسار الذي نسخته في الخطوة 1، ثم أعد السطر. أو اضغط <bdi dir="ltr">+&nbsp;›&nbsp;Plugins&nbsp;›&nbsp;Add&nbsp;plugin</bdi> (بالترتيب: + أولًا، ثم Plugins، ثم Add plugin)، واختر الفولدر نفسه.</li>
+إذا رد Claude بعد السطر برسالة ليس فيها كلمة error أو failed، فالسطر نجح، فانتقل إلى السطر التالي. وإذا ظهرت رسالة خطأ بعد السطر الأول، فتأكّد من المسار الذي نسخته في الخطوة 1، ثم أعد السطر. أو اضغط <bdi dir="ltr">+&nbsp;›&nbsp;Plugins&nbsp;›&nbsp;Add&nbsp;plugin</bdi> (بالترتيب: + أولًا، ثم Plugins، ثم Add plugin)، واختر الفولدر نفسه.</li>
 <li><strong>أغلق تطبيق Claude تمامًا</strong> (<a href="#ch02-claude-first">أول مرة في تطبيق Claude</a>)، ثم افتحه من جديد.</li>
 <li><strong>ابدأ معالج البداية.</strong> افتح محادثة جديدة، واكتب «أول مرة أستخدمه» أو الأمر التالي، ثم اضغط Enter:
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:start</code></bdi></div></li>
@@ -73,7 +73,7 @@
 </ul>
 
 <aside class="warn">
-<p>اللوحة WhyNot Cut Bridge غير موقَّعة من Adobe. <span data-term-first="توقيع">والتوقيع ختم رقمي من الشركة يثبت أن الملف أصلي ولم يُعدَّل</span>. لذلك لا يفتحها Premiere إلا إذا كان إعداد Adobe المسمّى <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> مفعّلًا، وهو إعداد يسمح بتحميل لوحات غير موقَّعة. تغيّره أنت بنفسك بالأمر الذي يعطيك إياه Claude (انظر <a href="#ch02-run-command">تشغيل أمر أعطاك إياه Claude</a>)، ولا يغيّره Claude أبدًا. ويمكنك أن تتخطاه وتستورد ملف XML في Premiere يدويًا من <bdi dir="ltr">File&nbsp;›&nbsp;Import</bdi>.</p>
+<p>اللوحة WhyNot Cut Bridge غير موقَّعة من Adobe. <span data-term-first="توقيع">والتوقيع ختم رقمي من الشركة يثبت أن الملف أصلي ولم يُعدَّل</span>. لذلك لا يفتحها Premiere إلا إذا كان إعداد Adobe المسمّى <bdi dir="ltr"><code>PlayerDebugMode</code></bdi> مفعّلًا، وهو إعداد يسمح بتحميل لوحات غير موقَّعة. تغيّره أنت بنفسك بالأمر الذي يعطيك إياه Claude (انظر <a href="#ch02-run-command">تشغيل أمر أعطاك إياه Claude</a>)، ولا يغيّره Claude أبدًا. ولا تحتاج إلى تفعيله أصلًا: بدونه تستورد ملف XML في Premiere يدويًا من <bdi dir="ltr">File&nbsp;›&nbsp;Import</bdi>، ويعمل كل شيء آخر كما هو، والإصدار <bdi dir="ltr">3.0</bdi> يزيل هذه اللوحة.</p>
 </aside>
 
 <h2 id="ch02-run-command" data-today>تشغيل أمر أعطاك إياه Claude</h2>
@@ -83,12 +83,12 @@
 <ol class="steps">
 <li>افتح النافذة. على Mac: اضغط <bdi dir="ltr">Cmd+Space</bdi>، واكتب Terminal، ثم Enter. على Windows: افتح قائمة Start، واكتب PowerShell، ثم اضغط عليه لفتحه كالمعتاد، ولا تختر «تشغيل كمسؤول» (<bdi dir="ltr">Run as administrator</bdi>).</li>
 <li>انسخ الأمر من رسالة Claude: اضغط زر النسخ بجانب الأمر إن ظهر، أو حدّده بالماوس واضغط <bdi dir="ltr">Cmd+C</bdi> على Mac أو <bdi dir="ltr">Ctrl+C</bdi> على Windows. ثم اضغط داخل النافذة والصقه: <bdi dir="ltr">Cmd+V</bdi> على Mac، وعلى Windows <bdi dir="ltr">Ctrl+V</bdi> أو زر الماوس الأيمن.</li>
-<li>اضغط Enter، وانتظر حتى ينتهي الأمر: ينتهي عندما يظهر في آخر النافذة سطر جديد ينتظر أن تكتب فيه، وهو على Mac سطر ينتهي بالعلامة <bdi dir="ltr"><code>%</code></bdi>، وعلى Windows سطر يبدأ بـ <bdi dir="ltr"><code>PS</code></bdi>. وإذا ظهرت كلمة error، فانسخ ما في النافذة كله وأرسله إلى Claude.</li>
-<li>إذا كان الأمر خاصًا بـ Premiere، أغلق Premiere وافتحه من جديد. ثم ارجع إلى Claude واكتب أنك انتهيت، ليتحقق من النتيجة.</li>
+<li>اضغط Enter، وانتظر حتى ينتهي الأمر: ينتهي عندما يظهر في آخر النافذة سطر جديد ينتظر أن تكتب فيه، وهو على Mac سطر ينتهي بالعلامة <bdi dir="ltr"><code>%</code></bdi>، وعلى Windows سطر يبدأ بالحرفين <bdi dir="ltr"><code>PS</code></bdi>. وإذا ظهرت كلمة error، فانسخ ما في النافذة كله وأرسله إلى Claude.</li>
+<li>إذا كان الأمر خاصًا ببرنامج Premiere، أغلق Premiere وافتحه من جديد. ثم ارجع إلى Claude واكتب أنك انتهيت، ليتحقق من النتيجة.</li>
 </ol>
 
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: نافذة Terminal على Mac بعد لصق أمر من رسالة Claude، وفي آخرها السطر الذي ينتهي بـ <bdi dir="ltr"><code>%</code></bdi> (ومعها اللقطة نفسها في PowerShell على Windows)</span></div>
+<div class="shot-frame"><span>لقطة شاشة: نافذة Terminal على Mac بعد لصق أمر من رسالة Claude، وفي آخرها السطر الذي ينتهي بالعلامة <bdi dir="ltr"><code>%</code></bdi> (ومعها اللقطة نفسها في PowerShell على Windows)</span></div>
 <figcaption>الأمر يُلصق في Terminal على Mac (أو PowerShell على Windows)، لا في محادثة Claude.</figcaption>
 </figure>
 
@@ -98,12 +98,12 @@
 
 <h3 id="ch02-mac-files">الوصول إلى الملفات (<bdi dir="ltr">Files &amp; Folders</bdi>)</h3>
 <ul>
-<li><strong>ما تراه:</strong> رسالة من macOS تقول إن Claude يريد الوصول إلى الملفات في فولدر Documents أو على قرص خارجي (<bdi dir="ltr">would&nbsp;like&nbsp;to&nbsp;access&nbsp;files</bdi>).</li>
-<li><strong>لماذا:</strong> فولدر العملاء وملفات عملائك في Documents أو على قرص خارجي، ويقرؤها Claude من هناك، ومعه WhyNot Cut.</li>
-<li><strong>ماذا تضغط:</strong> Allow. وإذا رفضت بالخطأ، افتح <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Files&nbsp;and&nbsp;Folders</bdi>، وابحث عن Claude في القائمة، وشغّل المفتاح بجانب <bdi dir="ltr">Documents&nbsp;Folder</bdi>، وبجانب <bdi dir="ltr">Removable&nbsp;Volumes</bdi> إذا كانت ملفاتك على قرص خارجي.</li>
+<li><strong>ما تراه:</strong> رسالة من macOS تقول إن Claude، أو Premiere Pro، يريد الوصول إلى الملفات في فولدر Documents أو على قرص خارجي (<bdi dir="ltr">would&nbsp;like&nbsp;to&nbsp;access&nbsp;files</bdi>).</li>
+<li><strong>لماذا:</strong> فولدر العملاء وملفات عملائك في Documents أو على قرص خارجي: يقرؤها Claude ومعه WhyNot&nbsp;Cut، ويقرؤها Premiere Pro عندما يُبنى المشروع داخله.</li>
+<li><strong>ماذا تضغط:</strong> Allow. وإذا رفضت بالخطأ، افتح <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Files&nbsp;and&nbsp;Folders</bdi>، وابحث عن البرنامج الذي رفضته، Claude أو Premiere Pro، وشغّل المفتاح بجانب <bdi dir="ltr">Documents&nbsp;Folder</bdi>، وبجانب <bdi dir="ltr">Removable&nbsp;Volumes</bdi> إذا كانت ملفاتك على قرص خارجي، ثم أغلق البرنامج وافتحه.</li>
 </ul>
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: رسالة macOS التي تطلب وصول Claude إلى فولدر Documents، وزر Allow</span></div>
+<div class="shot-frame"><span>لقطة شاشة: رسالة macOS التي تطلب وصول Claude (أو Premiere Pro) إلى فولدر Documents، وزر Allow</span></div>
 <figcaption>الوصول إلى الملفات: اضغط Allow.</figcaption>
 </figure>
 
@@ -122,11 +122,11 @@
 <ul>
 <li><strong>ما تراه:</strong> نافذة Terminal، وفي آخرها سطر ينتهي بالعلامة <bdi dir="ltr"><code>%</code></bdi> ينتظر أن تكتب فيه.</li>
 <li><strong>لماذا:</strong> بعض الخطوات سطر جاهز تلصقه أنت، مثل سطر التثبيت أو أمر يعطيك إياه Claude لا يقوم به بنفسه.</li>
-<li><strong>ماذا تضغط:</strong> الصق السطر بـ <bdi dir="ltr">Cmd+V</bdi> ثم اضغط Enter، وانتظر حتى يعود في آخر النافذة سطر جديد ينتهي بـ <bdi dir="ltr"><code>%</code></bdi>، فهذا يعني أن السطر انتهى (<a href="#ch02-run-command">تشغيل أمر أعطاك إياه Claude</a>).</li>
+<li><strong>ماذا تضغط:</strong> الصق السطر بالضغط على <bdi dir="ltr">Cmd+V</bdi> ثم اضغط Enter، وانتظر حتى يعود في آخر النافذة سطر جديد ينتهي بالعلامة <bdi dir="ltr"><code>%</code></bdi>، فهذا يعني أن السطر انتهى (<a href="#ch02-run-command">تشغيل أمر أعطاك إياه Claude</a>).</li>
 </ul>
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: Terminal على Mac بعد انتهاء سطر ملصوق، والسطر الجديد في آخرها ينتهي بـ <bdi dir="ltr"><code>%</code></bdi></span></div>
-<figcaption>انتهى السطر عندما يعود السطر الذي ينتهي بـ <bdi dir="ltr"><code>%</code></bdi>.</figcaption>
+<div class="shot-frame"><span>لقطة شاشة: Terminal على Mac بعد انتهاء سطر ملصوق، والسطر الجديد في آخرها ينتهي بالعلامة <bdi dir="ltr"><code>%</code></bdi></span></div>
+<figcaption>انتهى السطر عندما يعود السطر الذي ينتهي بالعلامة <bdi dir="ltr"><code>%</code></bdi>.</figcaption>
 </figure>
 
 <h3 id="ch02-mac-password">طلب كلمة السر في Terminal</h3>
@@ -142,7 +142,7 @@
 
 <aside class="todo" data-phase="9">
 <p>نصوص هذه الرسائل وأماكن أزرارها تُطابَق مع macOS عند اختبار الإصدار <bdi dir="ltr">3.0</bdi> على جهاز Mac.</p>
-<!-- فريق: الإضافة G11 (macOS أولًا؛ موافقات الخصوصية تُشرح قبل ظهورها) وG-T12. المصادر: رسالة Files and Folders من installer/core/wnc_installer/system.py MAC_ALLOW_MESSAGE_AR وstart SKILL السطر 135 (Allow، ثم System Settings › Privacy & Security › Files and Folders)؛ Automation: بناء After Effects على macOS يمر بـ osascript … DoScriptFile (skills/adobe-extras/references/adobe-automation.md)، فيسأل macOS عن التحكم في After Effects (وPhotoshop عند طلبه)؛ لصق Terminal: الفصل 2 «تشغيل أمر»؛ كلمة السر: التثبيت لا يطلب صلاحيات مسؤول (installer/README.md)، والطلب يظهر فقط مع أوامر أخرى. نصوص الرسائل الإنجليزية وأسماء الأزرار (Allow / OK، Done) تختلف بين إصدارات macOS 14 و15؛ تُنقل حرفيًا من جهاز Mac حقيقي وتُلتقط الصور في المرحلة 9 (persona E4، E9). -->
+<!-- فريق: الإضافة G11 (macOS أولًا؛ موافقات الخصوصية تُشرح قبل ظهورها) وG-T12. المصادر: رسالة Files and Folders من installer/core/wnc_installer/system.py MAC_ALLOW_MESSAGE_AR وstart SKILL السطر 135 (Allow، ثم System Settings › Privacy & Security › Files and Folders)؛ Premiere Pro أيضًا: platform-setup.md (Files and Folders refused for Premiere Pro or the app Claude runs in → شغّل الفولدر لذلك البرنامج ثم أغلقه وافتحه) و3bd2086 M13 (مراجعة 7b I2)؛ Automation: بناء After Effects على macOS يمر بـ osascript … DoScriptFile (skills/adobe-extras/references/adobe-automation.md)، فيسأل macOS عن التحكم في After Effects (وPhotoshop عند طلبه)؛ لصق Terminal: الفصل 2 «تشغيل أمر»؛ كلمة السر: التثبيت لا يطلب صلاحيات مسؤول (installer/README.md)، والطلب يظهر فقط مع أوامر أخرى. نصوص الرسائل الإنجليزية وأسماء الأزرار (Allow / OK، Done) تختلف بين إصدارات macOS 14 و15؛ تُنقل حرفيًا من جهاز Mac حقيقي وتُلتقط الصور في المرحلة 9 (persona E4، E9). -->
 </aside>
 
 <h2 id="ch02-before">ما تحتاجه قبل التثبيت في الإصدار <bdi dir="ltr">3.0</bdi></h2>
@@ -162,7 +162,7 @@
 
 <h2 id="ch02-one-line">التثبيت بسطر واحد</h2>
 
-<p>في الإصدار <bdi dir="ltr">3.0</bdi> تثبّت WhyNot Cut بسطر واحد: سطر لـ Mac وسطر لـ Windows. لا تنزّل أي ملف ولا تفتحه بنفسك، ولا يظهر تحذير من macOS أو Windows.</p>
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> تثبّت WhyNot Cut بسطر واحد: سطر على Mac وسطر على Windows. لا تنزّل أي ملف ولا تفتحه بنفسك، ولا يظهر تحذير من macOS أو Windows.</p>
 
 <ol class="steps">
 <li><strong>افتح Terminal أو PowerShell.</strong> على Mac: اضغط <bdi dir="ltr">Cmd+Space</bdi>، واكتب Terminal، ثم Enter. على Windows: افتح قائمة Start، واكتب PowerShell، ثم اضغط عليه لفتحه كالمعتاد، ولا تختر «تشغيل كمسؤول» (<bdi dir="ltr">Run as administrator</bdi>). وقبل أن تلصق السطر، احفظ عملك وأغلق Premiere Pro، ثم After Effects، إذا كانا مفتوحين.</li>
@@ -178,13 +178,13 @@
 </li>
 <li><strong>لا تضغط شيئًا، واترك النافذة مفتوحة.</strong> أول ما يظهر سطران يذكران الحجم الكلي، بالإنجليزية <bdi dir="ltr">Installing&nbsp;everything&nbsp;WhyNot&nbsp;Cut&nbsp;needs</bdi> ثم بالعربية «جارٍ تثبيت كل ما يحتاجه WhyNot Cut (حوالي … جيجابايت)». بعدهما يظهر سطر <bdi dir="ltr">Press&nbsp;C&nbsp;to&nbsp;customise</bdi> («اضغط C للتخصيص») مع عدّ تنازلي من 10 ثوانٍ. إذا لم تضغط شيئًا، يُثبَّت كل شيء بالإجابات الجاهزة، وهي الأقوى التي يتحملها جهازك. وإذا ضغطت C، يسألك عن مكان المحرك، ونموذج التفريغ، واللغة، وفولدر العملاء، ولكل سؤال إجابة جاهزة، واضغط Enter لتقبلها.</li>
 <li><strong>انتظر حتى تنتهي السطور.</strong> تظهر الخطوات سطرًا بعد سطر. تعتمد المدة على سرعة الإنترنت، لأن أغلب الحجم تنزيلات. ونموذج التفريغ يكمل التنزيل في الخلفية بعد أن تنتهي النافذة، ويمكنك أن تبدأ العمل في الأثناء.</li>
-<li><strong>علامة النجاح.</strong> في النهاية تظهر قائمة الفحص: سطر لكل خطوة، يبدأ بـ <bdi dir="ltr"><code>[OK]</code></bdi> إذا اكتملت، أو <bdi dir="ltr"><code>[!!]</code></bdi> إذا كانت تحتاج إلى انتباه ومعها سببها، وتحتها سطر يبدأ بـ <bdi dir="ltr"><code>you:</code></bdi> إذا كان المطلوب منك شيئًا. ثم سطر يطلب منك أن تفتح Claude وتكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>. وقد يكون تطبيق Claude قد فُتح وحده قبل ذلك على معالج البداية والأمر مكتوب في مربع الرسالة: اضغط Enter. إذا لم يُفتح، افتحه أنت، وافتح محادثة جديدة، واكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>.
+<li><strong>علامة النجاح.</strong> في النهاية تظهر قائمة الفحص: سطر لكل خطوة، يبدأ بالعلامة <bdi dir="ltr"><code>[OK]</code></bdi> إذا اكتملت، أو <bdi dir="ltr"><code>[!!]</code></bdi> إذا كانت تحتاج إلى انتباه ومعها سببها، وتحتها سطر يبدأ بكلمة <bdi dir="ltr"><code>you:</code></bdi> إذا كان المطلوب منك شيئًا. ثم سطر يطلب منك أن تفتح Claude وتكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>. وقد يكون تطبيق Claude قد فُتح وحده قبل ذلك على معالج البداية والأمر مكتوب في مربع الرسالة: اضغط Enter. إذا لم يُفتح، افتحه أنت، وافتح محادثة جديدة، واكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>.
 <figure class="shot">
-<div class="shot-frame"><span>لقطة شاشة: قائمة الفحص في آخر نافذة التثبيت، وكل سطورها تبدأ بـ <bdi dir="ltr"><code>[OK]</code></bdi>، وتحتها السطر الذي يطلب فتح Claude وكتابة <bdi dir="ltr"><code>/whynot-cut:start</code></bdi></span></div>
+<div class="shot-frame"><span>لقطة شاشة: قائمة الفحص في آخر نافذة التثبيت، وكل سطورها تبدأ بالعلامة <bdi dir="ltr"><code>[OK]</code></bdi>، وتحتها السطر الذي يطلب فتح Claude وكتابة <bdi dir="ltr"><code>/whynot-cut:start</code></bdi></span></div>
 <figcaption>انتهى التثبيت: كل السطور <bdi dir="ltr"><code>[OK]</code></bdi>.</figcaption>
 </figure>
 </li>
-<li><strong>إذا ظهر خطأ</strong>، مثل سطر يبدأ بـ <bdi dir="ltr"><code>[XX]</code></bdi> أو رسالة تبدأ بـ <bdi dir="ltr"><code>ERROR</code></bdi>، فهذه خطوة لم تكتمل، غالبًا لأن تنزيلًا انقطع أو وصل ناقصًا فرفضه التثبيت. الصق السطر نفسه مرة أخرى واضغط Enter: تشغيل التثبيت مرة ثانية آمن، ويكمل ما لم يكتمل. وإذا تكرر الخطأ، انظر <a href="#ch17-v3">الفصل&nbsp;17</a>.</li>
+<li><strong>إذا ظهر خطأ</strong>، مثل سطر يبدأ بالعلامة <bdi dir="ltr"><code>[XX]</code></bdi> أو رسالة تبدأ بكلمة <bdi dir="ltr"><code>ERROR</code></bdi>، فهذه خطوة لم تكتمل، غالبًا لأن تنزيلًا انقطع أو وصل ناقصًا فرفضه التثبيت. الصق السطر نفسه مرة أخرى واضغط Enter: تشغيل التثبيت مرة ثانية آمن، ويكمل ما لم يكتمل. وإذا تكرر الخطأ، انظر <a href="#ch17-v3">الفصل&nbsp;17</a>.</li>
 </ol>
 
 <aside class="todo" data-phase="7">
@@ -213,7 +213,7 @@
 
 <aside class="todo" data-phase="7">
 <p>رابط WhyNot Cut الذي تلصقه في الخطوة 2 يظهر في صفحة التنزيل عند صدور الإصدار <bdi dir="ltr">3.0</bdi>.</p>
-<!-- فريق: التثبيت من داخل Claude من مواصفات الإصدار 3.0 (الإضافة D، D1 الباب 2، D-T2)، ويُتحقَّق منه في المرحلة 7 وتُلتقط صوره في المرحلة 9. يُضاف عند النشر عنوان WhyNot Cut الذي يُلصق في الخطوة 2 (يتوقف على استضافة الملفات، H3)، ويُطابَق مسار القائمة مع تطبيق Claude كما يظهر وقتها. skills/start/references/install-from-claude.md لم يُكتب بعد في HEAD. -->
+<!-- فريق: التثبيت من داخل Claude من مواصفات الإصدار 3.0 (الإضافة D، D1 الباب 2، D-T2)، ويُتحقَّق منه في المرحلة 7 وتُلتقط صوره في المرحلة 9. يُضاف عند النشر عنوان WhyNot Cut الذي يُلصق في الخطوة 2 (يتوقف على استضافة الملفات، H3)، ويُطابَق مسار القائمة مع تطبيق Claude كما يظهر وقتها. skills/start/references/install-from-claude.md موجود مؤقتًا (aaf6a4e) لطريق «ثبّت WhyNot Cut» من داخل Claude؛ يحل محله نص D-T2 (مراجعة 7b M5). -->
 </aside>
 
 <h2 id="ch02-what-happens">ما الذي يُثبَّت تلقائيًا</h2>
@@ -222,7 +222,7 @@
 <ol>
 <li><strong>المحرك (engine)</strong>: البرنامج الذي ينفّذ عمل WhyNot Cut على جهازك في الخلفية، ومعه <span data-term-first="Python">نسخة Python خاصة به (لغة برمجة يحتاجها المحرك، ولا تتعامل معها أنت)</span>، وأداة ffmpeg لمعالجة الفيديو والصوت، وخطوط الواجهة. وهو يعمل دائمًا: يبدأ مع تشغيل الجهاز، ومع فتح Premiere، ومع فتح Claude. تجده في قائمة <bdi dir="ltr">Login&nbsp;Items</bdi> على Mac، وفي <bdi dir="ltr">Startup&nbsp;apps</bdi> على Windows، ويمكنك إيقافه من هناك.
 <!-- فريق: الإضافة E البند 4 (login item ظاهر في Startup apps / Login Items ويمكن إيقافه)، persona O12. --></li>
-<li><strong>إضافة WhyNot Cut في تطبيق Claude</strong>، مفعّلة، ومعها إذن يسمح لـ Claude بتشغيل محرك WhyNot Cut دون أن يستأذنك كل مرة (الإجابة الجاهزة: نعم).</li>
+<li><strong>إضافة WhyNot Cut في تطبيق Claude</strong>، مفعّلة، ومعها إذن يسمح لتطبيق Claude بتشغيل محرك WhyNot Cut دون أن يستأذنك كل مرة (الإجابة الجاهزة: نعم).</li>
 <li><strong>على Windows</strong>: أداة صغيرة (<bdi dir="ltr">Git for Windows</bdi>) يحتاجها Claude ليشغّل أوامر WhyNot Cut على Windows؛ لا تتعامل معها أنت.</li>
 <li><strong>لوحة WhyNot Cut</strong> في Premiere Pro (من <bdi dir="ltr">Window&nbsp;›&nbsp;UXP&nbsp;Plugins</bdi>) وفي After Effects (من <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions</bdi>): لوحة واحدة في كل برنامج، وتُزال اللوحات القديمة، مثل WhyNot Cut Bridge، واللوحات التجريبية.</li>
 <li><strong>النماذج</strong> (القسم التالي) في الخلفية. وإذا كان في جهازك كارت NVIDIA، تُثبَّت معها مكتبات التسريع، فيصبح التفريغ النصي أسرع بنحو 8 مرات.</li>
@@ -249,7 +249,7 @@
 <tbody>
 <tr><td>التفريغ الأساسي: <bdi dir="ltr"><code>large-v3</code></bdi></td><td>أدق تفريغ نصي (نحو <bdi dir="ltr">2.9&nbsp;GB</bdi>).</td><td>مثبَّتة</td></tr>
 <tr><td>التفريغ السريع: <bdi dir="ltr"><code>large-v3-turbo</code></bdi></td><td>تفريغ أسرع للحلقات الطويلة.</td><td>مثبَّتة</td></tr>
-<tr><td>النماذج الصغيرة: <bdi dir="ltr"><code>medium</code></bdi> و<bdi dir="ltr"><code>small</code></bdi></td><td>نماذج أصغر، تُستخدم فقط إذا لم تكفِ المساحة أو الذاكرة للنماذج الكبيرة.</td><td>تُنزَّل عند الحاجة</td></tr>
+<tr><td>النماذج الصغيرة: <bdi dir="ltr"><code>medium</code></bdi>، <bdi dir="ltr"><code>small</code></bdi></td><td>نماذج أصغر، تُستخدم فقط إذا لم تكفِ المساحة أو الذاكرة للنماذج الكبيرة.</td><td>تُنزَّل عند الحاجة</td></tr>
 <tr><td>حزمة «كلام» (WhyNot&nbsp;Kalam)</td><td>أداة الكابشن: نموذج للهجة المصرية، ونموذج للإنجليزية، وأداة لضبط توقيت كل كلمة (<a href="#ch13-title">الفصل&nbsp;13</a>).</td><td>مثبَّتة</td></tr>
 <tr><td>«هَش» (WhyNot&nbsp;Hush)</td><td>أداة حذف السكتات، وتستخدم نماذج «كلام» أو التفريغ الأساسي (<a href="#ch12-title">الفصل&nbsp;12</a>).</td><td>لا شيء إضافي</td></tr>
 <tr><td>الخطوط</td><td>خطوط الواجهة والدليل الأربعة.</td><td>مثبَّتة</td></tr>
@@ -275,7 +275,7 @@
 <li><strong>تثبيت تطبيق Claude وتسجيل الدخول.</strong> نزّله من <bdi dir="ltr">claude.ai/download</bdi>، ثم سجّل الدخول بحسابك. WhyNot Cut لا يعرض عليك أبدًا صفحة تسجيل دخول خاصة به.</li>
 <li><strong>برامج Adobe برخصتك.</strong> ثبّت Premiere Pro وبرنامج After Effects من تطبيق Creative Cloud، وسجّل الدخول فيه.</li>
 <li><strong>التنزيلات الكبيرة.</strong> اترك الجهاز يعمل ومتصلًا بالإنترنت حتى تكتمل النماذج. يمكنك أن تعمل في الأثناء.</li>
-<li><strong>إذن الفولدرات على Mac.</strong> أول مرة يفتح فيها Claude ملفات في Documents أو على قرص خارجي، يطلب macOS إذنك: اضغط Allow. وإذا رفضت بالخطأ، فعّله من <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Files&nbsp;and&nbsp;Folders</bdi>: ابحث عن Claude، وشغّل المفتاح بجانب <bdi dir="ltr">Documents&nbsp;Folder</bdi> (<a href="#ch02-mac-permissions">موافقات macOS</a>).</li>
+<li><strong>إذن الفولدرات على Mac.</strong> أول مرة يفتح فيها Claude، أو Premiere Pro، ملفات في Documents أو على قرص خارجي، يطلب macOS إذنك: اضغط Allow. وإذا رفضت بالخطأ، فعّله من <bdi dir="ltr">System&nbsp;Settings&nbsp;›&nbsp;Privacy&nbsp;&amp;&nbsp;Security&nbsp;›&nbsp;Files&nbsp;and&nbsp;Folders</bdi>: ابحث عن البرنامج الذي رفضته، وشغّل المفتاح بجانب <bdi dir="ltr">Documents&nbsp;Folder</bdi> (<a href="#ch02-mac-permissions">موافقات macOS</a>).</li>
 <li><strong>إعادة تشغيل Premiere وبرنامج After Effects مرة واحدة</strong> بعد تثبيت اللوحات. يفعلها Claude أو التثبيت بنفسه إذا لم يكن فيهما عمل غير محفوظ. وإذا كان فيهما عمل غير محفوظ، لا يُغلق أي شيء: يُطلب منك أن تحفظ عملك، ثم تضغط زر إعادة التشغيل.</li>
 </ol>
 
@@ -286,14 +286,14 @@
 
 <h2 id="ch02-check">التأكد من النتيجة</h2>
 
-<p>علامة النجاح ألا يكون في قائمة الفحص في نهاية التثبيت أي سطر يبدأ بـ <bdi dir="ltr"><code>[XX]</code></bdi>. أفضل نتيجة أن تكون كل السطور <bdi dir="ltr"><code>[OK]</code></bdi>، ومع كل سطر <bdi dir="ltr"><code>[!!]</code></bdi> سببه وما تفعله (<a href="#ch17-v3">الفصل&nbsp;17</a>). وتجد القائمة نفسها في لوحة WhyNot Cut داخل Premiere باسم «قائمة الإعداد»، وفيها أربعة بنود: «المحرّك»، و«الربط مع Premiere»، و«Claude»، و«مجلد العملاء». البند الأصفر معه زر يصلحه بضغطة واحدة.</p>
+<p>علامة النجاح ألا يكون في قائمة الفحص في نهاية التثبيت أي سطر يبدأ بالعلامة <bdi dir="ltr"><code>[XX]</code></bdi>. أفضل نتيجة أن تكون كل السطور <bdi dir="ltr"><code>[OK]</code></bdi>، ومع كل سطر <bdi dir="ltr"><code>[!!]</code></bdi> سببه وما تفعله (<a href="#ch17-v3">الفصل&nbsp;17</a>). وتجد القائمة نفسها في لوحة WhyNot Cut داخل Premiere باسم «قائمة الإعداد»، وفيها أربعة بنود: «المحرّك»، و«الربط مع Premiere»، و«Claude»، و«مجلد العملاء». البند الأصفر معه زر يصلحه بضغطة واحدة.</p>
 
 <figure class="shot">
 <div class="shot-frame"><span>لقطة شاشة: «قائمة الإعداد» في لوحة WhyNot Cut داخل Premiere، وكل بنودها خضراء</span></div>
 <figcaption>كل البنود خضراء: الجهاز جاهز لأول عميل.</figcaption>
 </figure>
 
-<p>الفحص التفصيلي اختياري، وتحتاج إليه غالبًا مع الدعم فقط. اكتب لـ Claude «افحص الجهاز»، فيشغّل هذين الأمرين بنفسه، ولا يغيّر الفحص شيئًا في الجهاز:</p>
+<p>الفحص التفصيلي اختياري، وتحتاج إليه غالبًا مع الدعم فقط. اكتب إلى Claude «افحص الجهاز»، فيشغّل هذين الأمرين بنفسه، ولا يغيّر الفحص شيئًا في الجهاز:</p>
 <div class="cmd" data-who="claude"><bdi dir="ltr"><code>reel --version
 reel doctor</code></bdi></div>
 

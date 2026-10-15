@@ -3,7 +3,7 @@
 
 <p>وضع الموشن (motion mode) يصنع فيديو موشن جرافيك متحركًا من <strong>صوت</strong> جزء من الحلقة فقط، بدون صورة الكاميرا. يعتمد على ما قيل، ومن قاله، وورقة الحلقة، وهوية العميل. والنتيجة مشروع After Effects حقيقي (native) وفيديو MP4 مصدَّر منه.</p>
 
-<p>يناسب الموشن الأجزاء التي فيها أرقام أو خطوات أو أفكار مجرّدة، أو التي ليس لها صورة صالحة. والحلقة التي هي صوت فقط (ملفات مثل <bdi dir="ltr"><code>.mp3</code></bdi> و<bdi dir="ltr"><code>.wav</code></bdi> و<bdi dir="ltr"><code>.m4a</code></bdi> و<bdi dir="ltr"><code>.aac</code></bdi> و<bdi dir="ltr"><code>.flac</code></bdi> في <bdi dir="ltr"><code>data/Episodes/</code></bdi>) لا يمكن أن يُصنع منها إلا فيديوهات موشن.</p>
+<p>يناسب الموشن الأجزاء التي فيها أرقام أو خطوات أو أفكار مجرّدة، أو التي ليس لها صورة صالحة. والحلقة التي هي صوت فقط (ملفات مثل <bdi dir="ltr"><code>.mp3</code></bdi>، <bdi dir="ltr"><code>.wav</code></bdi>، <bdi dir="ltr"><code>.m4a</code></bdi>، <bdi dir="ltr"><code>.aac</code></bdi> أو <bdi dir="ltr"><code>.flac</code></bdi> في <bdi dir="ltr"><code>data/Episodes/</code></bdi>) لا يمكن أن يُصنع منها إلا فيديوهات موشن.</p>
 
 <h2 id="ch09-pick">اختر جزءًا للموشن</h2>
 
@@ -89,11 +89,11 @@
 <p>إذا عدّلت مشروع After Effects بيدك، لا يكتب WhyNot Cut فوقه إلا بموافقتك، وبعد أن يحتفظ بنسخة احتياطية منه.</p>
 </aside>
 
-<p>إذا لم يكن على الجهاز After Effects، أو كانت لوحة WhyNot Cut Bridge لا تعمل، يُسلَّم المشروع <span data-term-first="سكريبت">على شكل سكريبت فقط، والسكريبت ملف يبني المشروع داخل After Effects عندما تشغّله</span>. تجده في فولدر العميل، في <bdi dir="ltr"><code>output/projects/EP01_R03_MO/04_after_effects/scripts/</code></bdi>، واسمه ينتهي بـ <bdi dir="ltr"><code>_motion.jsx</code></bdi>. قد يشغّله Claude لك، أو تشغّله أنت في After Effects على هذا الجهاز نفسه:</p>
+<p>إذا لم يكن على الجهاز After Effects، أو كانت لوحة WhyNot Cut Bridge لا تعمل، يُسلَّم المشروع <span data-term-first="سكريبت">على شكل سكريبت فقط، والسكريبت ملف يبني المشروع داخل After Effects عندما تشغّله</span>. تجده في فولدر العميل، في <bdi dir="ltr"><code>output/projects/EP01_R03_MO/04_after_effects/scripts/</code></bdi>، واسمه ينتهي بالحروف <bdi dir="ltr"><code>_motion.jsx</code></bdi>. قد يشغّله Claude لك، أو تشغّله أنت في After Effects على هذا الجهاز نفسه:</p>
 
 <ol class="steps">
 <li>احفظ أي مشروع مفتوح في After Effects أو أغلقه. السكريبت يرفض أن يعمل ما دام هناك عمل غير محفوظ، وتظهر لك رسالة بذلك.</li>
-<li>من After Effects اختر <bdi dir="ltr">File&nbsp;›&nbsp;Scripts&nbsp;›&nbsp;Run&nbsp;Script&nbsp;File…</bdi> ثم اختر ملف السكريبت. لا تحتاج إلى تغيير أي إعداد في After Effects قبل ذلك، على Mac أو على Windows: السكريبت لا يكتب ملفات، فلا يحتاج إلى الإعداد <bdi dir="ltr">Allow&nbsp;Scripts&nbsp;to&nbsp;Write&nbsp;Files&nbsp;and&nbsp;Access&nbsp;Network</bdi>.
+<li>من After Effects اختر <bdi dir="ltr">File&nbsp;›&nbsp;Scripts&nbsp;›&nbsp;Run&nbsp;Script&nbsp;File…</bdi> ثم اختر ملف السكريبت. لا تحتاج إلى تغيير أي إعداد في After Effects قبل ذلك، على Mac أو على Windows، فالسكريبت لا يحتاج إلى الإعداد <bdi dir="ltr">Allow&nbsp;Scripts&nbsp;to&nbsp;Write&nbsp;Files&nbsp;and&nbsp;Access&nbsp;Network</bdi>.
 <!-- فريق: skills/adobe-extras/references/adobe-automation.md («The script does not need "Allow Scripts to Write Files and Access Network"») وmotion-craft/references/ae-motion.md وCHANGELOG («WhyNot Cut never changes it»). persona E43 اقترح خطوات تفعيل الإعداد: مرفوضة لأن الكود لا يحتاجه. --></li>
 <li>انتظر حتى يُبنى المشروع، ثم أخبر Claude.</li>
 </ol>
@@ -115,7 +115,7 @@
 </thead>
 <tbody>
 <tr><td><bdi dir="ltr"><code>04_after_effects/project/</code></bdi></td><td>مشروع After Effects (ملف <bdi dir="ltr"><code>.aep</code></bdi>).</td></tr>
-<tr><td><bdi dir="ltr"><code>04_after_effects/render/</code></bdi></td><td>الفيديو المصدَّر، واسمه ينتهي بـ <bdi dir="ltr"><code>_motion.mp4</code></bdi>.</td></tr>
+<tr><td><bdi dir="ltr"><code>04_after_effects/render/</code></bdi></td><td>الفيديو المصدَّر، واسمه ينتهي بالحروف <bdi dir="ltr"><code>_motion.mp4</code></bdi>.</td></tr>
 <tr><td><bdi dir="ltr"><code>08_quality_control/ae_frames/</code></bdi></td><td>فريمات فحص الجودة من After Effects.</td></tr>
 <tr><td><bdi dir="ltr"><code>09_handoff/README.md</code></bdi></td><td>ملف التسليم.</td></tr>
 </tbody>

@@ -9,9 +9,17 @@
 
 <h2 id="ch18-today" data-today>اليوم: التحديث والإزالة</h2>
 
-<ul>
-<li><strong>للتحديث</strong>: يرسل لك فريقنا فولدر WhyNot Cut الجديد. أضفه إلى تطبيق Claude كما أضفت الأول (<a href="#ch02-first-run">الفصل&nbsp;2</a>)، ثم أغلق Claude تمامًا وافتحه، وافتح محادثة جديدة، واكتب الأمر التالي، فيحدّث المحرك ولوحة Premiere:
+<p class="lead-in"><strong>للتحديث</strong>: يرسل لك فريقنا فولدر <bdi dir="ltr"><code>whynot-cut-marketplace</code></bdi> الجديد.</p>
+<ol class="steps">
+<li>أغلق تطبيق Claude تمامًا (<a href="#ch02-claude-first">الفصل&nbsp;2</a>).</li>
+<li>احذف الفولدر القديم <bdi dir="ltr"><code>whynot-cut-marketplace</code></bdi> من Documents، وضع الجديد مكانه بالاسم نفسه. لا تحتفظ بالنسختين.</li>
+<li>افتح Claude، وفي محادثة جديدة اكتب السطر التالي ثم اضغط Enter، فيقرأ Claude النسخة الجديدة من الفولدر:
+<div class="cmd"><bdi dir="ltr"><code>/plugin marketplace update thewhynot-ai</code></bdi></div></li>
+<li>أغلق Claude تمامًا وافتحه، وفي محادثة جديدة اكتب الأمر التالي، فيحدّث المحرك ولوحة Premiere:
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:setup</code></bdi></div></li>
+</ol>
+<!-- فريق: 7c #39 (كان يناقض «لا تنقله ولا تحذفه» في الفصل 2). استبدال الفولدر في مكانه ثم /plugin marketplace update thewhynot-ai: whynot-cut/README.md السطر 272 (تحديث المتجر بعد تغيير الإصدار؛ اسم المتجر thewhynot-ai من سطر التثبيت whynot-cut@thewhynot-ai)؛ ثم reel setup (README «Upgrading from 2.x»). القسم التالي «بعد كل تحديث» يتحقق من رقم الإصدار، فإذا بقي قديمًا يدلّه على الفصل 17. يُراجَع على جهاز حقيقي مع صور المرحلة 9. -->
+<ul>
 <li><strong>الخطط التي وافقت عليها قبل التحديث إلى الإصدار <bdi dir="ltr">3.0</bdi></strong>: يطلب منك Claude الموافقة عليها مرة أخرى قبل البناء التالي. الخطة نفسها لا تتغيّر.</li>
 <li><strong>للإزالة</strong>: اطلب من فريقنا خطواتها، فهي تختلف حسب طريقة تثبيت النسخة التي معك.</li>
 </ul>
@@ -20,7 +28,7 @@
 
 <ol class="steps">
 <li>أغلق تطبيق Claude تمامًا (<a href="#ch02-claude-first">الفصل&nbsp;2</a>) وافتحه من جديد. المحادثة التي بدأت قبل التحديث قد تظل تستخدم الإصدار القديم.</li>
-<li>اكتب لـ Claude «إيه رقم نسخة WhyNot Cut؟»، فيشغّل الفحص ويخبرك بالرقم. تأكد أنه رقم الإصدار الجديد الذي أخبرك به فريقنا. إذا ذكر رقمًا قديمًا، انظر <a href="#ch17-title">الفصل&nbsp;17</a>.</li>
+<li>اكتب إلى Claude «إيه رقم نسخة WhyNot Cut؟»، فيشغّل الفحص ويخبرك بالرقم. تأكد أنه رقم الإصدار الجديد الذي أخبرك به فريقنا. إذا ذكر رقمًا قديمًا، انظر <a href="#ch17-title">الفصل&nbsp;17</a>.</li>
 <li>إذا تغيّرت لوحة Premiere، أغلق Premiere Pro وافتحه من جديد، لأنه يبحث عن اللوحات عند فتحه فقط.</li>
 </ol>
 
@@ -78,11 +86,12 @@
 <div class="cmd"><bdi dir="ltr"><code>curl -fsSL https://dl.thewhynot.ai/install.sh | bash -s -- --uninstall --remove-engine --remove-models</code></bdi></div>
 <p class="lead-in">وعلى Windows، في PowerShell:</p>
 <div class="cmd"><bdi dir="ltr"><code>&amp; ([scriptblock]::Create((irm https://dl.thewhynot.ai/install.ps1))) -Uninstall -RemoveEngine -RemoveModels</code></bdi></div>
-<p>في آخر السطر كلمتان: الأولى (<bdi dir="ltr"><code>--remove-engine</code></bdi> على Mac، و<bdi dir="ltr"><code>-RemoveEngine</code></bdi> على Windows) تحذف فولدر المحرك، والثانية تحذف النماذج. احذف منهما، مع المسافة التي قبلها، ما تريد أن يبقى.</p>
+<p>في آخر السطر كلمتان: الأولى (على Mac <bdi dir="ltr"><code>--remove-engine</code></bdi>، وعلى Windows <bdi dir="ltr"><code>-RemoveEngine</code></bdi>) تحذف فولدر المحرك، والثانية تحذف النماذج. احذف منهما، مع المسافة التي قبلها، ما تريد أن يبقى.</p>
 
 <p class="lead-in">ما يبقى دائمًا:</p>
 <ul>
-<li>مكتبة مواد الموشن والرسوم التي أضفتها أنت إلى WhyNot Cut.</li>
+<li>مواد الموشن والرسوم المرخَّصة التي أضفتها أنت، في الفولدر <bdi dir="ltr"><code>library</code></bdi> داخل فولدر المحرك، إن وُجدت.
+<!-- فريق: 7c مالك #6: الفولدر حقيقي: installer/core/wnc_installer/uninstall.py السطر 48 (KEPT = "library": <engine home>/library، حزم الموشن والرسوم المرخَّصة، engine motion_library.py) وinstaller/README.md («library/ always stays»). كلمة «مكتبة» محجوزة لمكتبة NVIDIA (STYLE). --></li>
 <li>ملف إعداداتك (preferences)، فيستخدمه أي تثبيت لاحق كما هو.</li>
 <li>فولدر العملاء وكل فولدرات العملاء (القسم التالي).</li>
 </ul>
@@ -94,9 +103,9 @@
 
 <h2 id="ch18-client-files">ملفات عملائك عند التحديث والإلغاء</h2>
 
-<p>أثناء العمل، لا يغيّر WhyNot Cut أبدًا ما في الفولدرين <bdi dir="ltr"><code>assets/</code></bdi> و<bdi dir="ltr"><code>data/</code></bdi> لأي عميل: لا يكتب فيهما، ولا ينقل منهما، ولا يحذف شيئًا.</p>
+<p>أثناء العمل، لا يغيّر WhyNot Cut أبدًا ما في الفولدر <bdi dir="ltr"><code>assets/</code></bdi> والفولدر <bdi dir="ltr"><code>data/</code></bdi> لأي عميل: لا يكتب فيهما، ولا ينقل منهما، ولا يحذف شيئًا.</p>
 
-<p>والتحديث وإلغاء التثبيت لا ينقلان ولا يحذفان أي فولدر عميل ولا أي ملف فيه، بما فيه فولدر النتائج <bdi dir="ltr"><code>output/</code></bdi>. الشيء الوحيد الذي قد يضيفه التثبيت أو معالج البداية هو ملف إعدادات صغير داخل فولدر العملاء وفي كل فولدر عميل، يسمح لـ Claude بالعمل فيه دون استئذان؛ لا يمس ملفاتك.</p>
+<p>والتحديث وإلغاء التثبيت لا ينقلان ولا يحذفان أي فولدر عميل ولا أي ملف فيه، بما فيه فولدر النتائج <bdi dir="ltr"><code>output/</code></bdi>. الشيء الوحيد الذي قد يضيفه التثبيت أو معالج البداية هو ملف إعدادات صغير داخل فولدر العملاء وفي كل فولدر عميل، يسمح لتطبيق Claude بالعمل فيه دون استئذان؛ لا يمس ملفاتك.</p>
 
 <aside class="todo" data-phase="7">
 <p>حماية فولدرات العملاء عند التحديث والإزالة تُجرَّب على جهاز حقيقي قبل صدور الإصدار <bdi dir="ltr">3.0</bdi>.</p>

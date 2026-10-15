@@ -91,7 +91,6 @@ the WhyNot Cut plugin in Claude, Adobe's add-ons are «لوحات»; «مسار�
 | `API` (Anthropic API key) | «رمز سري من حساب مطوّر في Anthropic؛ لا تحتاج إليه» | ch07, AI buttons |
 | `سكريبت` (AE script; also the English `Script` in the glossary and in Adobe's own labels) | «ملف يبني المشروع داخل After Effects عندما تشغّله» | ch09, script fallback |
 | `تعريف الكارت` (driver) | «برنامج تشغيل الكارت من NVIDIA» | ch13, Kalam on Windows |
-| `PATH` (installer checkbox) | «يجعل الجهاز يجد Python عندما يطلبه المحرك» | ch17 (only while the Python row exists) |
 | admin, ffmpeg, Git for Windows, CPU, zip, السجل | explained in place, Arabic first, English in parentheses (not linted) | ch02, ch07, ch08, ch17 |
 
 ## 3.0 boxes are written for the reader (ruling R2-9)

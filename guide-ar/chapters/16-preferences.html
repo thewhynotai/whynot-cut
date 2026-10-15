@@ -5,7 +5,7 @@
 
 <h2 id="ch16-list">قائمة الإعدادات</h2>
 
-<p>معاني القيم في الجدول التالي: <bdi dir="ltr"><code>true</code></bdi>&nbsp;=&nbsp;نعم، و<bdi dir="ltr"><code>false</code></bdi>&nbsp;=&nbsp;لا؛ <bdi dir="ltr"><code>ar</code></bdi>&nbsp;=&nbsp;عربي، و<bdi dir="ltr"><code>en</code></bdi>&nbsp;=&nbsp;إنجليزي؛ <bdi dir="ltr"><code>ask</code></bdi>&nbsp;=&nbsp;اسألني، و<bdi dir="ltr"><code>auto</code></bdi>&nbsp;=&nbsp;تلقائي. ولا تحتاج إلى كتابة هذه القيم بنفسك: قل ما تريد بكلامك كما في الجزء التالي.</p>
+<p>معاني القيم في الجدول التالي: <bdi dir="ltr"><code>true</code></bdi>&nbsp;=&nbsp;نعم، <bdi dir="ltr"><code>false</code></bdi>&nbsp;=&nbsp;لا؛ <bdi dir="ltr"><code>ar</code></bdi>&nbsp;=&nbsp;عربي، <bdi dir="ltr"><code>en</code></bdi>&nbsp;=&nbsp;إنجليزي؛ <bdi dir="ltr"><code>ask</code></bdi>&nbsp;=&nbsp;اسألني، <bdi dir="ltr"><code>auto</code></bdi>&nbsp;=&nbsp;تلقائي. ولا تحتاج إلى كتابة هذه القيم بنفسك: قل ما تريد بكلامك كما في الجزء التالي.</p>
 
 <table>
 <thead>
@@ -15,7 +15,7 @@
 <tr><td><bdi dir="ltr"><code>editor_name</code></bdi></td><td>نص</td><td>الاسم الذي يناديك به Claude. إذا تُرك فارغًا (الافتراضي) لا يستخدم اسمًا.</td></tr>
 <tr><td><bdi dir="ltr"><code>language</code></bdi></td><td><bdi dir="ltr"><code>ar</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>en</code></bdi></td><td>لغة الحديث معك. أما الكلام المكتوب على الشاشة فيتبع لغة المتحدث دائمًا.</td></tr>
 <tr><td><bdi dir="ltr"><code>approval</code></bdi></td><td><bdi dir="ltr"><code>ask</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>auto</code></bdi></td><td><bdi dir="ltr"><code>ask</code></bdi>: يتوقف عند كل خطة حتى توافق. <bdi dir="ltr"><code>auto</code></bdi>: يعرض الخطة وفيديو المعاينة ثم يبني، وتُسجَّل الموافقة مفوَّضة مع ذكر ملف الإعدادات.</td></tr>
-<tr><td><bdi dir="ltr"><code>whisper_model</code></bdi></td><td><bdi dir="ltr"><code>large-v3</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>large-v3-turbo</code></bdi> · <bdi dir="ltr"><code>medium</code></bdi> · <bdi dir="ltr"><code>small</code></bdi></td><td>الموازنة بين دقة التفريغ وسرعته. النموذجان <bdi dir="ltr"><code>medium</code></bdi> و<bdi dir="ltr"><code>small</code></bdi> أضعف بوضوح في المصطلحات الطبية العربية.</td></tr>
+<tr><td><bdi dir="ltr"><code>whisper_model</code></bdi></td><td><bdi dir="ltr"><code>large-v3</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>large-v3-turbo</code></bdi> · <bdi dir="ltr"><code>medium</code></bdi> · <bdi dir="ltr"><code>small</code></bdi></td><td>الموازنة بين دقة التفريغ وسرعته. النموذج <bdi dir="ltr"><code>medium</code></bdi> والنموذج <bdi dir="ltr"><code>small</code></bdi> أضعف بوضوح في المصطلحات الطبية العربية.</td></tr>
 <tr><td><bdi dir="ltr"><code>preview_video</code></bdi></td><td><bdi dir="ltr"><code>true</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>false</code></bdi></td><td>تصدير فيديو المعاينة قبل الموافقة.</td></tr>
 <tr><td><bdi dir="ltr"><code>clients_root</code></bdi></td><td>فولدر</td><td>فولدر العملاء. يُستخدم في فحص الجهاز، وفي رسالة بداية المحادثة، وعندما تذكر العميل باسم فولدره فقط.</td></tr>
 <tr><td><bdi dir="ltr"><code>notify_done</code></bdi></td><td><bdi dir="ltr"><code>true</code></bdi> (الافتراضي) · <bdi dir="ltr"><code>false</code></bdi></td><td>يبدأ التقرير النهائي للمهام الطويلة بسطر واضح يقول إنها انتهت (Finished).</td></tr>
@@ -26,7 +26,7 @@
 </table>
 
 <aside class="todo" data-phase="6">
-<p>الإعدادان <bdi dir="ltr"><code>panel_link</code></bdi> و<bdi dir="ltr"><code>magnific_budget_credits</code></bdi> لا أثر لهما حتى تصلك لوحة WhyNot Cut الجديدة ومواد Magnific.</p>
+<p>الإعداد <bdi dir="ltr"><code>panel_link</code></bdi> والإعداد <bdi dir="ltr"><code>magnific_budget_credits</code></bdi> لا أثر لهما حتى تصلك لوحة WhyNot Cut الجديدة ومواد Magnific.</p>
 <!-- فريق: الإعداد panel_link يخص لوحة WhyNot Cut الجديدة في Premiere (الفصل 7)، ويُتحقَّق منه مع اللوحة في المرحلة 6. وحد رصيد Magnific يعمل مع مواد Magnific في المرحلة 5. وزر اللغة في اللوحة («ع» / «EN») يُحفظ لكل مونتير على جهازه، وفي أول تشغيل للوحة تبدأ بقيمة الإعداد language (مذكور للقارئ في الفصل 7، رأس اللوحة). -->
 </aside>
 
@@ -53,11 +53,13 @@
 
 <h2 id="ch16-stop-asking">طلب «متسألنيش»</h2>
 
-<p>إذا قلت «متسألنيش» أو «امشِ على طول»، يسألك Claude سؤالًا واحدًا:</p>
+<p>إذا قلت «متسألنيش» أو «امشِ على طول» ولا توجد خطة تنتظر موافقتك، أو بدا أنك تقصد كل الخطط، يسألك Claude سؤالًا واحدًا، ولا يغيّر شيئًا حتى ترد:</p>
 <ul>
 <li><strong>لهذا الفيديو فقط:</strong> تُحتسب موافقة على هذه الخطة وحدها، ولا يتغيّر ملف الإعدادات.</li>
 <li><strong>من الآن فصاعدًا:</strong> تصبح قيمة <bdi dir="ltr"><code>approval</code></bdi> هي <bdi dir="ltr"><code>auto</code></bdi>. وعندها يذكّرك Claude بأنها موافقة دائمة بالتفويض على كل خطة قادمة.</li>
 </ul>
+<p>أما إذا قلتها والخطة تنتظر موافقتك، فتُحتسب موافقة على هذه الخطة وحدها دون سؤال، ولا يتغيّر ملف الإعدادات (<a href="#ch06-approval-chat">الفصل&nbsp;6</a>).</p>
+<!-- فريق: مراجعة 7b I6: edit SKILL السطور 115–119 (67901a5). -->
 
 <aside class="warn">
 <p>حتى مع <bdi dir="ltr"><code>auto</code></bdi> هناك ما لا يُوافَق عليه تلقائيًا أبدًا: الجرافيك الذي يحتاج إلى موافقة الطبيب، أو موافقة المتحدث أو صاحب المحتوى عند عملاء المحتوى الديني، يبقى في «مطلوب منك (Needs&nbsp;you)»، واختيار الريلز من الحلقة يبقى قرارك أنت دائمًا (<a href="#ch08-pick">اختر الريلز</a>).</p>
@@ -65,7 +67,7 @@
 
 <h2 id="ch16-file">أين يُحفظ ملف الإعدادات</h2>
 
-<p>لا تحتاج إلى فتح ملف الإعدادات ولا إلى كتابته بيدك. قل لـ Claude ما تريد، وهو يكتب في الملف الصحيح ويعرض لك النتيجة. وإذا أردت إعدادًا لعميل واحد فقط، اذكر العميل في طلبك، مثل «خلّي الموافقة auto لعيادة مثال بس»، فيكتب Claude ملف إعدادات خاصًا بفولدر هذا العميل وحده، وتبقى إعدادات باقي العملاء كما هي.</p>
+<p>لا تحتاج إلى فتح ملف الإعدادات ولا إلى كتابته بيدك. أخبر Claude بما تريد، وهو يكتب في الملف الصحيح ويعرض لك النتيجة. وإذا أردت إعدادًا لعميل واحد فقط، اذكر العميل في طلبك، مثل «خلّي الموافقة auto لعيادة مثال بس»، فيكتب Claude ملف إعدادات خاصًا بفولدر هذا العميل وحده، وتبقى إعدادات باقي العملاء كما هي.</p>
 
 <h3 id="ch16-file-details">للمهتمين: الملف وترتيب قراءته</h3>
 

@@ -6,7 +6,7 @@
 <h2 id="ch17-first" data-today>أول خطوة عند أي مشكلة</h2>
 
 <ol class="steps">
-<li>اكتب لـ Claude: «افحص الجهاز». يشغّل الفحص بنفسه، وهو فحص لا يغيّر أي شيء في جهازك، ويعرض قائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت (<a href="#ch02-check">الفصل&nbsp;2</a>).</li>
+<li>اكتب إلى Claude: «افحص الجهاز». يشغّل الفحص بنفسه، وهو فحص لا يغيّر أي شيء في جهازك، ويعرض قائمة الإصلاحات ومن يقوم بكل إصلاح: Claude أم أنت (<a href="#ch02-check">الفصل&nbsp;2</a>).</li>
 <li>لإصلاح المحرك أو لوحة Premiere، أغلق Premiere، ثم اكتب في تطبيق Claude الأمر التالي واضغط Enter. يصلح كل ما يخص WhyNot Cut، ويمكن تكراره بأمان:
 <div class="cmd"><bdi dir="ltr"><code>/whynot-cut:setup</code></bdi></div></li>
 <li>نفّذ أنت الإصلاحات المكتوب أنها لك، مثل تثبيت الخطوط أو أمر يعطيك إياه Claude (طريقة تشغيله في <a href="#ch02-run-command">الفصل&nbsp;2</a>)، ثم اطلب الفحص مرة أخرى.</li>
@@ -36,7 +36,7 @@
 </div>
 
 <div class="fix">
-<p class="fix-what"><span class="fix-label">اللي حصل</span> Claude يذكر رقم إصدار قديمًا لـ WhyNot Cut بعد التحديث، أو يظهر خطأ عن <bdi dir="ltr"><code>reel-editor</code></bdi> (الاسم القديم لمحرك WhyNot&nbsp;Cut).</p>
+<p class="fix-what"><span class="fix-label">اللي حصل</span> Claude يذكر رقم إصدار قديمًا من WhyNot Cut بعد التحديث، أو يظهر خطأ عن <bdi dir="ltr"><code>reel-editor</code></bdi> (الاسم القديم لمحرك WhyNot&nbsp;Cut).</p>
 <p class="fix-why"><span class="fix-label">ليه</span> المحادثة بدأت قبل التثبيت أو التحديث، فما زالت تستخدم النسخة القديمة.</p>
 <p class="fix-do"><span class="fix-label">اعمل كده</span> أغلق تطبيق Claude تمامًا وافتحه، ثم افتح محادثة جديدة.</p>
 </div>
@@ -49,14 +49,10 @@
 
 <div class="fix">
 <p class="fix-what"><span class="fix-label">اللي حصل</span> رسالة تقول إنه لا يوجد Python مناسب على الجهاز.</p>
-<p class="fix-why"><span class="fix-label">ليه</span> جهاز جديد ليس عليه Python، وهو برنامج يحتاجه المحرك اليوم. وتثبيت البرامج على جهازك خطوة تقوم بها أنت، لا Claude؛ وبعد التثبيت يطلب منك Claude أن تغلقه تمامًا وتفتحه ليجد Python.</p>
-<p class="fix-do"><span class="fix-label">اعمل كده</span> على Mac شغّل في Terminal الأمر <bdi dir="ltr"><code>xcode-select --install</code></bdi> واضغط Install في نافذة Apple التي تظهر، وعلى Windows شغّل في PowerShell الأمر <bdi dir="ltr"><code>winget install Python.Python.3.12</code></bdi>.</p>
-<!-- فريق: مشكلة اليوم فقط: برنامج التثبيت في الإصدار 3.0 يحضر نسخة Python الخاصة به (installer/README.md)، فتُحذف هذه المشكلة عند صدوره. الأمران من skills/start/SKILL.md (No Python 3.9+) ومن platform-setup.md (no Python 3.9+ found). -->
+<p class="fix-why"><span class="fix-label">ليه</span> جهاز جديد ليس عليه Python، وهو برنامج يحتاجه المحرك. لا تثبّته أنت أبدًا: برنامج التثبيت الذي يأتي مع WhyNot Cut يحضر نسخة Python خاصة به، دون صلاحيات مسؤول الجهاز (admin)، ولا يفتح على Mac نافذة Apple لتثبيت أدوات إضافية. ويطلب منك Claude أن تغلق Premiere قبل التثبيت، وأن تفتحه مرة واحدة بعده.</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> اكتب <bdi dir="ltr"><code>/whynot-cut:start</code></bdi>، واختر «ثبّت دلوقتي (موصى به)» عندما يسألك Claude عن تثبيت WhyNot Cut على الجهاز (نحو <bdi dir="ltr">4&nbsp;GB</bdi>، من 5 إلى 20 دقيقة).</p>
+<!-- فريق: حكم المنفّذ على 7b C1 (aaf6a4e، مراجعة G3 I2) يغلب صياغة المراجع (/whynot-cut:setup): المونتير لا يثبّت Python أبدًا (لا أدوات Xcode ولا Homebrew ولا winget ولا python.org)؛ reel setup يرفض ويشير إلى /whynot-cut:start (whynot-cut/bin/reel، NO_PY_HOW)؛ start يسأل مرة واحدة (نحو 4 GB، من 5 إلى 20 دقيقة، بلا صلاحيات admin) ثم يشغّل برنامج التثبيت المرفق بالإضافة ومعه Python 3.12 خاص به (skills/start/references/install-from-claude.md القسمان 1 و3؛ start SKILL «No Python 3.9+»؛ setup SKILL الخطوة 3). على Mac بلا أدوات المطوّرين لا يُشغَّل /usr/bin/python3 أبدًا (bin/reel: يفتح نافذة Apple فقط). يُطلب إغلاق Premiere قبل التثبيت (ملفات اللوحة تُستبدل)، ويُعاد فتحه مرة بعده لتحميل اللوحة. نص الاختيار «ثبّت دلوقتي (موصى به)» حرفيًا من install-from-claude.md. حُذفت نصيحة python.org وصف PATH في STYLE.md. -->
 </div>
-
-<aside class="tip">
-<p>على Windows بدون الأمر <bdi dir="ltr"><code>winget</code></bdi>: نزّل Python من <bdi dir="ltr">python.org</bdi>، وفعّل في أول شاشة <span data-term-first="PATH">المربع <bdi dir="ltr">Add&nbsp;python.exe&nbsp;to&nbsp;PATH</bdi>، وهو يجعل الجهاز يجد Python عندما يطلبه المحرك</span>.</p>
-</aside>
 
 <h2 id="ch17-premiere" data-today>في Premiere وفي After Effects</h2>
 
@@ -68,7 +64,7 @@
 
 <div class="fix">
 <p class="fix-what"><span class="fix-label">اللي حصل</span> لوحة WhyNot Cut Bridge ما زالت لا تظهر بعد إعادة فتح Premiere.</p>
-<p class="fix-why"><span class="fix-label">ليه</span> إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi>، الذي يسمح لـ Premiere بفتح لوحات غير موقَّعة من Adobe، غير مفعّل. ولا يغيّره Claude أبدًا، فهو إعداد في جهازك.</p>
+<p class="fix-why"><span class="fix-label">ليه</span> إعداد <bdi dir="ltr"><code>PlayerDebugMode</code></bdi>، الذي يسمح لبرنامج Premiere بفتح لوحات غير موقَّعة من Adobe، غير مفعّل. ولا يغيّره Claude أبدًا، فهو إعداد في جهازك.</p>
 <p class="fix-do"><span class="fix-label">اعمل كده</span> شغّل الأمر الذي يعطيك إياه «افحص الجهاز» في Terminal على Mac أو في PowerShell على Windows (<a href="#ch02-run-command">الفصل&nbsp;2</a>)، ثم أعد فتح Premiere.</p>
 </div>
 
@@ -81,19 +77,19 @@
 <div class="fix">
 <p class="fix-what"><span class="fix-label">اللي حصل</span> Claude يقول إن Premiere لا يستجيب.</p>
 <p class="fix-why"><span class="fix-label">ليه</span> Premiere مغلق، أو لوحة WhyNot Cut Bridge مغلقة، أو في Premiere نافذة حوار مفتوحة، فلا يصل إليه طلب البناء. ولا يفتح Claude برنامج Premiere ولا يغلقه بنفسه.</p>
-<p class="fix-do"><span class="fix-label">اعمل كده</span> افتح Premiere واجعله في المقدمة، وأغلق أي نافذة حوار، ثم افتح <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions&nbsp;›&nbsp;WhyNot&nbsp;Cut&nbsp;Bridge</bdi>.</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> افتح في Premiere القائمة <bdi dir="ltr">Window&nbsp;›&nbsp;Extensions&nbsp;›&nbsp;WhyNot&nbsp;Cut&nbsp;Bridge</bdi> بعد أن تغلق أي نافذة حوار مفتوحة فيه.</p>
 </div>
 
 <div class="fix">
 <p class="fix-what"><span class="fix-label">اللي حصل</span> أُغلق Premiere أثناء بناء المشروع.</p>
 <p class="fix-why"><span class="fix-label">ليه</span> البناء يتم داخل Premiere نفسه، فيتوقف عندما يُغلق، وبعد مدة محددة يقول لك Claude إنه لم يكتمل. وما اكتمل قبله من خطوات المونتاج محفوظ.</p>
-<p class="fix-do"><span class="fix-label">اعمل كده</span> افتح Premiere، ثم اكتب لـ Claude «كمّل المونتاج» فيعيد البناء من الخطة المعتمدة.</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> افتح Premiere، ثم اكتب إلى Claude «كمّل المونتاج» فيعيد البناء من الخطة المعتمدة.</p>
 </div>
 
 <div class="fix">
 <p class="fix-what"><span class="fix-label">اللي حصل</span> Premiere يطلب ربط الملفات (<bdi dir="ltr">Link Media</bdi>) عند فتح المشروع.</p>
 <p class="fix-why"><span class="fix-label">ليه</span> ملف يعتمد عليه المشروع نُقل أو حُذف، مثل صورة جرافيك أو مؤثر صوتي.</p>
-<p class="fix-do"><span class="fix-label">اعمل كده</span> اكتب لـ Claude «Premiere بيطلب Link Media في <bdi dir="ltr">C0001</bdi>»، فيعيد إنشاء الملفات الناقصة ثم يعيد البناء، ويحتفظ بمشروعك السابق نسخة احتياطية (<a href="#ch10-title">الفصل&nbsp;10</a>).</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> اكتب إلى Claude «Premiere بيطلب Link Media في <bdi dir="ltr">C0001</bdi>»، فيعيد إنشاء الملفات الناقصة ثم يعيد البناء، ويحتفظ بمشروعك السابق نسخة احتياطية (<a href="#ch10-title">الفصل&nbsp;10</a>).</p>
 </div>
 
 <h2 id="ch17-files" data-today>الملفات والخطوط</h2>
@@ -119,7 +115,7 @@
 <div class="fix">
 <p class="fix-what"><span class="fix-label">اللي حصل</span> أسماء الفيديوهات أو الفولدرات فيها حروف عربية أو مسافات.</p>
 <p class="fix-why"><span class="fix-label">ليه</span> هذا مسموح: الفيديو الذي اسمه عربي يأخذ اسمًا مختصرًا بحروف لاتينية تستخدمه في طلباتك، والمسافات في الأسماء تعمل كما هي.</p>
-<p class="fix-do"><span class="fix-label">اعمل كده</span> اكتب لـ Claude «حطيت الملفات، افحصها» لترى الاسم المختصر لكل فيديو (<a href="#ch04-check">الفصل&nbsp;4</a>).</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> اكتب إلى Claude «حطيت الملفات، افحصها» لترى الاسم المختصر لكل فيديو (<a href="#ch04-check">الفصل&nbsp;4</a>).</p>
 </div>
 
 <h2 id="ch17-speed" data-today>السرعة والتنزيلات</h2>
@@ -164,7 +160,7 @@
 <div class="fix">
 <p class="fix-what"><span class="fix-label">اللي حصل</span> توقف بناء المشروع برسالة بالإنجليزية تقول إن المساحة الفارغة على القرص لا تكفي (<bdi dir="ltr">not&nbsp;enough&nbsp;free&nbsp;space</bdi>)، أو إن القرص امتلأ (<bdi dir="ltr">The&nbsp;disk&nbsp;is&nbsp;full</bdi>).</p>
 <p class="fix-why"><span class="fix-label">ليه</span> قبل أن يكتب البناء أي شيء، يتأكد أن على القرص مساحة تكفيه، فإن لم تكفِ لا يغيّر شيئًا. وإذا امتلأ القرص أثناء البناء، يبقى مشروعك السابق محفوظًا.</p>
-<p class="fix-do"><span class="fix-label">اعمل كده</span> وفّر مساحة على القرص الذي تذكره الرسالة، ثم اكتب لـ Claude «جرّب تاني».</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> وفّر مساحة على القرص الذي تذكره الرسالة، ثم اكتب إلى Claude «جرّب تاني».</p>
 </div>
 
 <aside class="todo" data-phase="9">
@@ -174,16 +170,16 @@
 
 <h2 id="ch17-v3">رسائل اللوحة والتثبيت في الإصدار <bdi dir="ltr">3.0</bdi></h2>
 
-<p>في الإصدار <bdi dir="ltr">3.0</bdi> تعرض لوحة WhyNot Cut كل مشكلة في جملة واحدة مع زر واحد يصلحها، ولا تحتاج إلى كتابة أي أمر. وفي نافذة التثبيت يبدأ سطر كل خطوة بعلامة تقول حالتها: <bdi dir="ltr"><code>[OK]</code></bdi> اكتملت، و<bdi dir="ltr"><code>[!!]</code></bdi> تحتاج إلى انتباه، و<bdi dir="ltr"><code>[XX]</code></bdi> فشلت (<a href="#ch02-one-line">الفصل&nbsp;2</a>).</p>
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> تعرض لوحة WhyNot Cut كل مشكلة في جملة واحدة مع زر واحد يصلحها، ولا تحتاج إلى كتابة أي أمر. وفي نافذة التثبيت يبدأ سطر كل خطوة بعلامة تقول حالتها: <bdi dir="ltr"><code>[OK]</code></bdi> اكتملت، والعلامة <bdi dir="ltr"><code>[!!]</code></bdi> تحتاج إلى انتباه، والعلامة <bdi dir="ltr"><code>[XX]</code></bdi> فشلت (<a href="#ch02-one-line">الفصل&nbsp;2</a>).</p>
 
 <div class="fix">
-<p class="fix-what"><span class="fix-label">اللي حصل</span> سطر يبدأ بـ <bdi dir="ltr"><code>[XX]</code></bdi> في نافذة التثبيت.</p>
+<p class="fix-what"><span class="fix-label">اللي حصل</span> سطر يبدأ بالعلامة <bdi dir="ltr"><code>[XX]</code></bdi> في نافذة التثبيت.</p>
 <p class="fix-why"><span class="fix-label">ليه</span> خطوة لم تكتمل، وأكثر سبب شائع تنزيل انقطع أو وصل ناقصًا فرفضه التثبيت. والسبب الدقيق مكتوب في السطر نفسه.</p>
 <p class="fix-do"><span class="fix-label">اعمل كده</span> الصق سطر التثبيت مرة أخرى واضغط Enter، فتشغيله مرة ثانية آمن ويكمل ما لم يكتمل.</p>
 </div>
 
 <div class="fix">
-<p class="fix-what"><span class="fix-label">اللي حصل</span> سطر يبدأ بـ <bdi dir="ltr"><code>[!!]</code></bdi>، وقد يكون تحته سطر يبدأ بـ <bdi dir="ltr"><code>you:</code></bdi>.</p>
+<p class="fix-what"><span class="fix-label">اللي حصل</span> سطر يبدأ بالعلامة <bdi dir="ltr"><code>[!!]</code></bdi>، وقد يكون تحته سطر يبدأ بكلمة <bdi dir="ltr"><code>you:</code></bdi>.</p>
 <p class="fix-why"><span class="fix-label">ليه</span> خطوة تحتاج إلى شيء منك، أو تخطّاها التثبيت لسبب مكتوب بجانبها. باقي التثبيت اكتمل، ويمكنك أن تبدأ العمل.</p>
 <p class="fix-do"><span class="fix-label">اعمل كده</span> نفّذ ما يقوله السطر <bdi dir="ltr"><code>you:</code></bdi>، وإذا لم يكن واضحًا لأنه بالإنجليزية فانسخه إلى Claude واسأله ماذا تفعل.</p>
 </div>
@@ -195,7 +191,7 @@
 </div>
 
 <div class="fix">
-<p class="fix-what"><span class="fix-label">اللي حصل</span> رسالة تبدأ بـ <bdi dir="ltr"><code>ERROR</code></bdi> عن تنزيل ملف.</p>
+<p class="fix-what"><span class="fix-label">اللي حصل</span> رسالة تبدأ بكلمة <bdi dir="ltr"><code>ERROR</code></bdi> عن تنزيل ملف.</p>
 <p class="fix-why"><span class="fix-label">ليه</span> انقطع الإنترنت، أو وصل الملف ناقصًا فرفضه التثبيت، ولا يُترك على جهازك شيء مثبَّت نصفه.</p>
 <p class="fix-do"><span class="fix-label">اعمل كده</span> تأكد من الاتصال بالإنترنت، ثم الصق السطر مرة أخرى.</p>
 </div>
@@ -203,7 +199,7 @@
 <div class="fix">
 <p class="fix-what"><span class="fix-label">اللي حصل</span> على Windows، التثبيت يحذّر من حروف غير إنجليزية في مكان المحرك.</p>
 <p class="fix-why"><span class="fix-label">ليه</span> بعض الأدوات قد تفشل في مكان فيه حروف غير إنجليزية، مثل فولدر مستخدم اسمه بالعربية.</p>
-<p class="fix-do"><span class="fix-label">اعمل كده</span> اضغط Enter لتقبل المكان المقترح <bdi dir="ltr"><code>C:\WhyNotCut</code></bdi>.</p>
+<p class="fix-do"><span class="fix-label">اعمل كده</span> إذا سألك التثبيت بعد التحذير عن المكان فاضغط Enter لتقبل <bdi dir="ltr"><code>C:\WhyNotCut</code></bdi>؛ وإذا أكمل دون سؤال، فالصق السطر مرة أخرى بعد أن ينتهي، واضغط C أثناء العد التنازلي، واكتب <bdi dir="ltr"><code>C:\WhyNotCut</code></bdi> عند سؤال المكان.</p>
 </div>
 
 <div class="fix">
@@ -263,12 +259,12 @@
 
 <aside class="todo" data-phase="7">
 <p>رسائل نافذة التثبيت وأسماء بطاقات اللوحة وأزرارها قد تتغيّر قليلًا عند صدور الإصدار <bdi dir="ltr">3.0</bdi>.</p>
-<!-- فريق: هذه الرسائل من مواصفات الإصدار 3.0، ويُتحقَّق منها في المرحلة 7 (التثبيت والمحرك) والمرحلة 6 (اللوحة)، وتُلتقط صورها في المرحلة 9. صفوف نافذة التثبيت من النواة المرفوعة: [OK]/[!!]/[XX] و«you:» (system.py MARK وrender_checklist)، المساحة: فحص مكان المحرك في bootstrap.ps1/.sh يرفض التثبيت الجديد بأقل من 6 + 3 = 9 GB مع النموذج (رمز الخروج 2، قبل أي تنزيل)؛ preflight في system.py: أقل من 6 GB أحمر، وأقل من 9 GB أصفر، رمز الخروج 3 = فشل تنزيل أو sha256 والرسالة تسمّي الملف والسجل، ولا يُترك شيء مثبَّت نصفه (installer/README.md)، فتح Claude يُتخطّى إذا لم يكن تطبيق Claude مثبَّتًا (step_launch). تحذير الحروف غير الإنجليزية في مكان المحرك على Windows واقتراح C:\WhyNotCut: installer/README.md (سؤال المكان؛ Enter يقبل الاقتراح، وكتابة الفولدر نفسه مرة أخرى تبقيه). سبب «المحرّك لا يعمل» مع panel_link: preferences SKILL السطر 43. الرسالة «محرّك WhyNot Cut لا يعمل.» والزر «تشغيل المحرّك» منقولان من نصوص اللوحة؛ أما بطاقة إعادة تشغيل Premiere وحالات شارة Claude الجديدة وصفحة «النماذج» فتُنقل أسماؤها حرفيًا بعد إضافتها إلى نصوص اللوحة. حُذف من صف «Claude غير مثبَّت» زر «ثبّت Claude لي»: هو في برنامج WhyNot Cut Setup الداخلي فقط (الإضافة F). -->
+<!-- فريق: هذه الرسائل من مواصفات الإصدار 3.0، ويُتحقَّق منها في المرحلة 7 (التثبيت والمحرك) والمرحلة 6 (اللوحة)، وتُلتقط صورها في المرحلة 9. صفوف نافذة التثبيت من النواة المرفوعة: [OK]/[!!]/[XX] و«you:» (system.py MARK وrender_checklist)، المساحة: فحص مكان المحرك في bootstrap.ps1/.sh يرفض التثبيت الجديد بأقل من 6 + 3 = 9 GB مع النموذج (رمز الخروج 2، قبل أي تنزيل)؛ preflight في system.py: أقل من 6 GB أحمر، وأقل من 9 GB أصفر، رمز الخروج 3 = فشل تنزيل أو sha256 والرسالة تسمّي الملف والسجل، ولا يُترك شيء مثبَّت نصفه (installer/README.md)، فتح Claude يُتخطّى إذا لم يكن تطبيق Claude مثبَّتًا (step_launch). تحذير الحروف غير الإنجليزية في مكان المحرك على Windows واقتراح C:\WhyNotCut: installer/README.md (سؤال المكان؛ Enter يقبل الاقتراح، وكتابة الفولدر نفسه مرة أخرى تبقيه). bootstrap.ps1 Test-WncCanAsk: سؤال المكان في التخصيص فقط؛ في التثبيت العادي يظهر التحذير ويبقى المكان (مراجعة 7b I1). سبب «المحرّك لا يعمل» مع panel_link: preferences SKILL السطر 43. الرسالة «محرّك WhyNot Cut لا يعمل.» والزر «تشغيل المحرّك» منقولان من نصوص اللوحة؛ أما بطاقة إعادة تشغيل Premiere وحالات شارة Claude الجديدة وصفحة «النماذج» فتُنقل أسماؤها حرفيًا بعد إضافتها إلى نصوص اللوحة. حُذف من صف «Claude غير مثبَّت» زر «ثبّت Claude لي»: هو في برنامج WhyNot Cut Setup الداخلي فقط (الإضافة F). -->
 </aside>
 
 <h2 id="ch17-fix">الإصلاح التلقائي</h2>
 
-<p>في الإصدار <bdi dir="ltr">3.0</bdi> اكتب لـ Claude «اصلح الجهاز»، أو اضغط زر الإصلاح في اللوحة. يصلح WhyNot Cut وحده ما يمكن إصلاحه دون تدخّل منك، مثل إزالة اللوحات التجريبية القديمة وإعادة تشغيل المحرك، ويسجّل كل ما فعله، ويمكن تكراره بأمان. وما يبقى لك يعرضه عليك في قائمة.</p>
+<p>في الإصدار <bdi dir="ltr">3.0</bdi> اكتب إلى Claude «اصلح الجهاز»، أو اضغط زر الإصلاح في اللوحة. يصلح WhyNot Cut وحده ما يمكن إصلاحه دون تدخّل منك، مثل إزالة اللوحات التجريبية القديمة وإعادة تشغيل المحرك، ويسجّل كل ما فعله، ويمكن تكراره بأمان. وما يبقى لك يعرضه عليك في قائمة.</p>
 
 <aside class="todo" data-phase="7">
 <p>قائمة ما يصلحه الإصلاح التلقائي وما يبقى لك تُكتب هنا عند صدوره.</p>
@@ -295,8 +291,8 @@
 </ol>
 
 <aside class="todo" data-phase="9">
-<p>مكان استمارة الملاحظات وعنوان البريد وجهة الدعم ومواعيدها تُكتب هنا عند تحديدها.</p>
-<!-- فريق: مسار الملاحظات من الإضافة G9 (G-T8) كما قصّتها G10: لا مفاتيح ولا خدمة لتقارير الأعطال. الجملة «احفظ ملف التشخيص ثم افتح استمارة الملاحظات أو البريد» من الخطة، مع تبديل «نموذج» بـ«استمارة» لأن STYLE تحجز «نموذج» لنموذج الذكاء الاصطناعي (جولة 3: إصلاح 2+3). جهة الدعم H19 (إجابة المنفّذ 17): مكان محجوز بلا عنوان ولا مواعيد حتى تُحدَّد. -->
+<p>مكان استمارة الملاحظات وجهة الدعم ومواعيدها تُكتب هنا عند تحديدها، وحتى ذلك الحين أرسل إلى البريد في <a href="#ch17-support">«عندما لا تُحل المشكلة»</a>.</p>
+<!-- فريق: مسار الملاحظات من الإضافة G9 (G-T8) كما قصّتها G10: لا مفاتيح ولا خدمة لتقارير الأعطال. الجملة «احفظ ملف التشخيص ثم افتح استمارة الملاحظات أو البريد» من الخطة، مع تبديل «نموذج» بـ«استمارة» لأن STYLE تحجز «نموذج» لنموذج الذكاء الاصطناعي (جولة 3: إصلاح 2+3). جهة الدعم H19 (إجابة المنفّذ 17): مكان محجوز بلا مواعيد حتى تُحدَّد. البريد info@thewhynot.ai يبقى جهة التواصل (حكم موجة الإصلاح A، H24)، فحُذف «عنوان البريد» من الجملة الظاهرة (7b M2). صفحتا thewhynot.ai/support وthewhynot.ai/data لم تُنشرا بعد: إن ذُكرتا فنص عادي داخل bdi بلا رابط. -->
 </aside>
 
 <h2 id="ch17-support" data-today>عندما لا تُحل المشكلة</h2>
