@@ -242,8 +242,8 @@ body {
   line-height: 20pt;
   font-weight: 400;
   text-align: start;
-  orphans: 3;
-  widows: 3;
+  orphans: 2;
+  widows: 2;
 }
 p { margin: 0 0 10pt; }
 a { color: var(--accent); text-decoration: none; }
@@ -263,7 +263,7 @@ h1, h2, h3, h4 {
    sliver at the bottom of the previous page, writes the bookmark title twice and
    points the bookmark at the previous page (margins are dropped at a page break,
    padding is not). Margins are reduced by the same amount. */
-h2 { font-size: 17pt; line-height: 25pt; font-weight: 600; margin: 25pt 0 10pt; padding-top: 5pt; }
+h2 { font-size: 17pt; line-height: 25pt; font-weight: 600; margin: 20pt 0 10pt; padding-top: 5pt; }
 h3 { font-size: 13pt; line-height: 20pt; font-weight: 600; margin: 15pt 0 5pt; padding-top: 5pt; }
 h4 { font-size: 11.5pt; line-height: 20pt; font-weight: 600; margin: 10pt 0 0; padding-top: 5pt; }
 
@@ -295,6 +295,8 @@ li { margin-bottom: 5pt; }
 
 /* inline commands, paths, file names: <bdi dir="ltr"><code>…</code></bdi> */
 bdi { unicode-bidi: isolate; }
+/* a code pill never touches the Arabic letter next to it (a «و» before it, a «،» after it) */
+bdi > code { margin-inline: 0.18em; }
 code {
   font-family: var(--f-mono);
   font-size: 0.86em;
@@ -424,19 +426,23 @@ ol.ch-map .map-pg {
 .warn::before { content: "تنبيه";  color: var(--important); }
 .tip > :last-child, .warn > :last-child, .todo > :last-child { margin-bottom: 0; }
 /* «لصاحب الوكالة» (ch01, round 3 Task 5): the tip's fill and hairline, no label, and it may run over a page */
+.lead-in { margin-bottom: 5pt; }
 .owner {
-  margin: 10pt 0 20pt;
+  margin: 5pt 0 20pt;
   padding: 10pt 14pt 12pt;
   border: 0.75pt solid var(--tip-line);
   border-radius: 6pt;
   background: var(--tip-bg);
   font-size: 10.5pt;
   line-height: 18pt;
+  /* the box may split between bullets: each part keeps the full frame (clone) */
+  break-inside: auto;
+  page-break-inside: auto;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 .owner > ul { margin: 0; }
-.owner > ul > li { margin-bottom: 5pt; }
+.owner > ul > li { margin-bottom: 5pt; break-inside: avoid; page-break-inside: avoid; }
 .owner > :last-child, .owner > ul > li:last-child { margin-bottom: 0; }
 .tip ul, .tip ol:not(.steps), .warn ul, .warn ol:not(.steps) { margin: 5pt 0; }
 
@@ -482,7 +488,7 @@ figure.shot {
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
-  margin: 15pt 0 20pt;
+  margin: 15pt 0 15pt;
   break-inside: avoid;
   page-break-inside: avoid;
 }
@@ -490,7 +496,7 @@ figure.shot {
   display: table-cell;
   vertical-align: middle;
   position: relative;
-  height: 40mm;            /* a table cell's height is a minimum */
+  height: 21mm;            /* a table cell's height is a minimum; with the 8 mm padding the empty slot is 37 mm (about 220 px at 150 dpi), so it fits a page tail instead of jumping to the next page */
   border: 0.75pt solid var(--line);
   border-radius: 8pt;
   background: var(--paper-2);
@@ -515,6 +521,10 @@ figure.shot {
   border-radius: 3pt;
   padding: 0 0.5em;
 }
+/* the «example-clinic» chip belongs only on shots that show the example client's data;
+   a shot of the Claude app, Terminal, a system dialog or the setup list is marked
+   data-scope="app" in the chapter source and has no chip */
+figure.shot[data-scope="app"] .shot-frame::before { content: none; }
 /* a FILLED slot (real screenshot): the frame shrinks to the image on a light
    violet stage, no border and no "example-clinic" label */
 .shot-frame:has(img) {
@@ -558,8 +568,14 @@ ol.steps > li {
   padding-right: 26pt;
   margin-bottom: 10pt;
   min-height: 20pt;
-  break-inside: avoid;
+  /* a step may split from its screenshot (the shot keeps break-before: avoid, so it
+     never sits alone, away from the sentence it shows); cmd blocks and shots stay whole */
+  break-inside: auto;
 }
+/* NOTE: Chrome ignores break-before on a table-display figure, so this rule does not pull the
+   last lines of the sentence along: a shot may open a page with its step on the page before.
+   Making it bite (a block wrapper) was tried: +2 pages and five 25–32 % gaps in ch07 (wave B report). */
+ol.steps > li > figure.shot { break-before: avoid; page-break-before: avoid; }
 ol.steps > li::before {
   content: counter(step, decimal);
   position: absolute;
@@ -631,13 +647,16 @@ ol.steps > li > .cmd { margin-right: 0; }
 table {
   width: 100%;
   border-collapse: collapse;
-  margin: 15pt 0 20pt;
+  margin: 10pt 0 20pt;
   font-size: 10pt;
   line-height: 16pt;
   break-inside: auto;
 }
-thead { display: table-header-group; }
+thead { display: table-header-group; break-after: avoid; page-break-after: avoid; }
 tr { break-inside: avoid; page-break-inside: avoid; }
+/* a table never starts a page with only its header and one row: the first two body
+   rows stay together (and with the header) */
+tbody tr:first-child:not(:last-child) { break-after: avoid; page-break-after: avoid; }
 /* the last row never moves to a new page alone (under a repeated header) */
 tbody tr:last-child:not(:first-child) { break-before: avoid; page-break-before: avoid; }
 th {

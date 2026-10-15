@@ -721,6 +721,32 @@ class CmdAndShotTests(unittest.TestCase):
         self.assertRegex(img, r"max-height:\s*140mm")
         self.assertRegex(self._rule(".tip code"), r"background:\s*#FFFFFF")
 
+    def test_css_pagination_rules_wave_b(self):
+        """Round 3 layout pass: the empty screenshot slot is short (a tall slot jumped to the next page and left a
+        hole), a step may split from its shot, the owner box may split between bullets, a table never starts with
+        only its header and one row, a code pill keeps air next to Arabic, and the example-clinic chip only shows on
+        shots that are about the example client."""
+        height = re.search(r"height:\s*(\d+)mm", self._rule(".shot-frame"))
+        self.assertIsNotNone(height)
+        self.assertLessEqual(int(height.group(1)), 22, "an empty screenshot slot must stay about 220 px tall")
+        css = re.sub(r"/\*.*?\*/", "", (GUIDE / "styles.css").read_text(encoding="utf-8"), flags=re.S)
+        self.assertRegex(self._rule("ol.steps > li"), r"break-inside:\s*auto")
+        self.assertRegex(css, r"ol\.steps > li > figure\.shot \{[^}]*break-before:\s*avoid")
+        self.assertRegex(self._rule(".owner"), r"break-inside:\s*auto")
+        self.assertRegex(self._rule(".owner"), r"box-decoration-break:\s*clone")
+        self.assertRegex(self._rule(".owner > ul > li"), r"break-inside:\s*avoid")
+        self.assertRegex(self._rule("thead"), r"break-after:\s*avoid")
+        self.assertRegex(css, r"tbody tr:first-child:not\(:last-child\) \{[^}]*break-after:\s*avoid")
+        self.assertRegex(self._rule("bdi > code"), r"margin-inline:\s*0\.18em")
+        self.assertRegex(self._rule('figure.shot[data-scope="app"] .shot-frame::before'), r"content:\s*none")
+        self.assertRegex(self._rule(".shot-frame::before"), r'content:\s*"example-clinic"',
+                         "the chip stays the default: only data-scope=app shots drop it")
+
+    def test_chapters_have_no_plain_numbered_list(self):
+        """A plain <ol> prints «.1» markers; every numbered list uses the violet ol.steps badges."""
+        for path in sorted((GUIDE / "chapters").glob("*.html")):
+            self.assertNotRegex(path.read_text(encoding="utf-8"), r"<ol>", f"{path.name}: use <ol class=\"steps\">")
+
     def test_css_footer_and_running_header(self):
         """Owner rule: the body footer reads «Powered by thewhynot.ai» (plus the page number); the covers have no
         header or footer."""
