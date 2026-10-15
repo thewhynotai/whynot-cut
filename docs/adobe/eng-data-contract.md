@@ -272,20 +272,22 @@ connection.
 
 | Field | Type | Req | Meaning | Example |
 |---|---|---|---|---|
-| `url` | https URL ≤ 512 | no | what "Contact support" opens; absent = the button is hidden | `"https://thewhynot.ai/support"` |
+| `url` | https URL ≤ 512 | no | what "Contact support" opens; absent = the link is hidden: "Copy details" stays and a plain-text "Support page coming soon" shows (H24) | `"https://thewhynot.ai/support"` |
+| `data_url` | https URL ≤ 512 | no | the "Cost and data" sheet (what is sent, where, retention per Claude plan; owner decision D-02); absent = the link is hidden and the D-02 line stands alone | `"https://thewhynot.ai/data"` |
 
 ```json
-"support": { "url": "https://thewhynot.ai/support" }
+"support": { "url": "https://thewhynot.ai/support", "data_url": "https://thewhynot.ai/data" }
 ```
 
-The panel opens it with the host's external-open call and never adds query parameters. Diagnostics are copied to the
+The panel opens either URL with the host's external-open call and never adds query parameters. Both stay absent until
+Yunus publishes the page (H24): the panel never links to a page that isn't live. Diagnostics are copied to the
 clipboard by the editor (P-22 "Copy details"), never attached to the URL.
 
 ## 3. Screen → fields
 
 | Screen | Reads (new fields) |
 |---|---|
-| P-01 first run | `setup[]`, `claude`, `support.url` |
+| P-01 first run | `setup[]`, `claude`, `support.url`, `support.data_url` |
 | P-02 status | `claude` (state, plugin_version, how_to_url), `support.url` |
 | P-03 home | `item_meta.poster`, `item_meta.duration_s`, `verbs[]`, `tools_last[]`, `week`, `claude.state`, `approval_record.current` |
 | P-04 picker | `week.by_client[]` (clients and clips lists are outside this contract, §6) |
@@ -296,11 +298,11 @@ clipboard by the editor (P-22 "Copy details"), never attached to the URL.
 | P-10 needs you | `claude.state` |
 | P-11 messages | `jobs[].result.code`, `support.url`, `claude` |
 | P-12 AI sheet | `claude.state` (P-12's "jobs" are its three AI tasks, not `jobs[]`) |
-| P-22 settings | `support.url`, `item_meta.time_saved.basis` (rate source) |
+| P-22 settings | `support.url`, `support.data_url`, `item_meta.time_saved.basis` (rate source) |
 | A-01 AE home | `verbs[]`, `item_meta.poster` |
 | A-02 motion approval | `plan.diff`, `plan.version`, `approval_record`, `claude.state` |
 | A-04 AE render | `jobs[]`, progress `phase` / `elapsed_s` |
-| I-03, I-05 installer | the same `claude.state` enum, through the installer core (not `PanelState`) |
+| I-03, I-05 installer | the same `claude.state` enum, through the installer core (not `PanelState`); I-05 shows the `data_url` link only when the installer core has it |
 
 ## 4. Where each field comes from
 
@@ -323,7 +325,7 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
 | progress `phase` | none (CEP jobs emit no progress, `adapters.py:146`) | H2 FileQueueAdapter |
 | `claude` | pill hard-coded `unknown` (`messages.py:110`); `active.json` `claude_pid` for working/waiting | NEW `serve/claude_probe.py` (read-only, §2.8) |
 | `setup[]` | `connection`, settings clients root | daemon composes |
-| `support.url`, `claude.how_to_url` | nothing | NEW `<plugin>/config/links.json {support_url, claude_howto_url}` (owner fills it); https and allowlisted host only |
+| `support.url`, `support.data_url`, `claude.how_to_url` | nothing | Phase 6 engine task: `config/defaults/links.json {support_url, data_url, claude_howto_url}`, all empty until Yunus publishes (H24); https and allowlisted host only, ≤ 512 chars |
 
 ## 5. Rules
 
