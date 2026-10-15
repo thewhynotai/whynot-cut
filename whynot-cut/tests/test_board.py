@@ -32,7 +32,7 @@ SKILLS = SK / "skills"
 ARABIC = unicodedata.normalize("NFC", "عميل تجربة")
 ITEM_KEYS = {"id", "kind", "state", "status", "next", "next_step", "step", "stale", "updated", "file", "partial",
              "error"}
-CLIENT_KEYS = {"name", "path", "prefix", "profile", "counts", "truncated", "error", "skipped", "items"}
+CLIENT_KEYS = {"name", "path", "prefix", "profile", "counts", "truncated", "error", "skipped", "busy", "items"}
 TOP_KEYS = {"ok", "board", "clients_root", "generated", "elapsed_ms", "truncated", "totals", "clients"}
 
 
@@ -202,6 +202,33 @@ class BoardFixture(unittest.TestCase):
         self.assertIn("episode", {it["kind"] for it in card["items"]})
         text = B.table({"clients": [card], "totals": {}}, lang="en")
         self.assertTrue(any("C0101" in ln and "could not be read" in ln for ln in text.splitlines()), text)
+
+    def test_continue_items_wait_for_the_editor_unless_a_session_works_there(self):
+        """G3 review M3: an item whose next step needs the editor's "continue" is `waiting_for_you` while no session
+        holds the client; `working` only while a live writer lease shows a session working there now."""
+        from lib import writer_lock
+        common.write_json(self.b / "output/projects/C0100/08_quality_control/project-status.json",
+                          {"video_id": "C0100", "status": "PLAN_APPROVED"})
+        nxt = lambda p: {"next": "ppro-build (needs Premiere + bridge)", "stale": []}  # noqa: E731
+        card, _ = B.client_card(self.b, nxt, None)
+        it = {i["id"]: i for i in card["items"]}["C0100"]
+        self.assertFalse(card["busy"])
+        self.assertEqual((it["state"], it["step"]), ("waiting_for_you", "build_premiere"))
+        self.assertIn("continue C0100", it["next_step"])
+        self.assertEqual(card["items"][0]["id"], "C0100")                 # the editor's move comes first
+        en = B.table({"clients": [card], "totals": {}}, lang="en")
+        self.assertTrue(any("C0100" in ln and "waiting for you" in ln for ln in en.splitlines()), en)
+        ar = B.table({"clients": [card], "totals": {}}, lang="ar")
+        self.assertTrue(any("C0100" in ln and "مستنيك" in ln for ln in ar.splitlines()), ar)
+        env = {"WHYNOT_LOCK_SESSION": "board-test", "CLAUDE_PID": str(os.getppid())}   # a live parent: a lease
+        from unittest import mock
+        with mock.patch.dict(os.environ, {}):                              # acquire() sets WHYNOT_LOCK_SESSION
+            writer_lock.acquire(self.b, "reel ppro-build", env).release()  # a live lease: a session works here
+        card, _ = B.client_card(self.b, nxt, None)
+        it = {i["id"]: i for i in card["items"]}["C0100"]
+        self.assertTrue(card["busy"])
+        self.assertEqual(it["state"], "working")
+        self.assertEqual(card["counts"]["working"], 1)
 
     def test_prefix_is_scanned_once_per_card(self):              # fix-1 review m2: next_doc reuses the card's prefix
         from unittest import mock
@@ -476,6 +503,11 @@ class SkillTexts(unittest.TestCase):
         s = skill("status")
         self.assertRegex(s, r"(?i)no (clip|arguments?|video)[^.]*reel board")
         self.assertIn("reel board --json", s)
+
+    def test_status_board_follows_the_editors_language(self):   # G3 review M5
+        s = " ".join(skill("status").split())
+        self.assertIn("reel board --lang <ar|en>", s)
+        self.assertIn("Pass `--lang` for the language the editor is writing in", s)
 
     def test_panel_in_premiere_is_mentioned(self):
         for n in ("start", "help", "status"):

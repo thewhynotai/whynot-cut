@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: macos-bridge-files-access
+description: 'Bridge not responding on a Mac after a refused Files and Folders prompt: diagnose with reel doctor, the editor sets PlayerDebugMode and the macOS permission, verify ppro-status.'
+tags: [setup, macos, troubleshooting]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

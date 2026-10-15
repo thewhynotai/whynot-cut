@@ -56,9 +56,13 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 5. **Premiere bridge:**
    - Premiere must be restarted after the first install, because CEP finds panels only at launch.
    - `PlayerDebugMode` must be 1 (CSXS 11–14). It lets Premiere load extensions not signed by Adobe; say so plainly.
-     It's the editor's setting (a hook blocks Claude from writing it). Give the commands from the doctor's `fixes` in one
-     fenced block for their OS: macOS Terminal `defaults write …`; Windows **PowerShell** `reg add …` (not Git Bash,
-     which mangles the `/v /d /f` switches).
+     It's the editor's setting (a hook blocks Claude from writing it). Give each command from the doctor's `fixes` for
+     their OS in its own fenced block (one command per block): macOS Terminal `defaults write …`; Windows
+     **PowerShell** `reg add …` (not Git Bash, which mangles the `/v /d /f` switches).
+   - macOS: when macOS asks whether Premiere Pro (or the app Claude runs in) may access files in Documents, Desktop or
+     an external drive, the editor clicks Allow. Refused earlier: the editor turns that folder on for the app in
+     System Settings › Privacy & Security › Files and Folders, then restarts the app. It is their setting; Claude never
+     changes privacy settings and never suggests sudo or turning off macOS security.
    - `reel ppro-status` must show `alive: true` and a ping result before claiming the bridge works.
    - If the installed bridge is newer than this plugin's, `ppro-install`/`setup` keep it and report `skipped`; replace
      it only on the editor's word (`reel ppro-install --force`).

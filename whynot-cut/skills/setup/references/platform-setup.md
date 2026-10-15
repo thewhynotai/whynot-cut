@@ -72,6 +72,7 @@ Never hard-code a path to the engine's python.
 | pip fails building `numpy`/`av` | Python too new for the pinned wheels | Use Python 3.12 (installed by WhyNot Cut) and run `reel setup` again |
 | `ModuleNotFoundError: No module named 'PIL'` (or `av`, `numpy`) in your own script while `reel` works | The script ran with another python (system Python, or a 2.x `--system-site-packages` venv under `-I` / `-s`) | Run it with `reel py <script.py>`; `reel setup` moves a 2.x machine to the isolated runtime |
 | Bridge missing in Window › Extensions | Premiere was open during install, or PlayerDebugMode off | Editor sets PlayerDebugMode, quits and reopens Premiere |
+| macOS: the bridge or a step cannot read the client folder after "Don't Allow" on a "would like to access files in your Documents folder" prompt | macOS privacy (Files and Folders) was refused for Premiere Pro or the app Claude runs in | Editor: System Settings › Privacy & Security › Files and Folders → turn the folder on for that app, then quit and reopen it. Claude never changes it |
 | `ppro-status` alive false with a stale heartbeat | Panel closed or Premiere busy with a dialog | Bring Premiere to the front, dismiss dialogs; reopen Window › Extensions › WhyNot Cut Bridge |
 | Transcription very slow on Windows | CPU only | NVIDIA GPU with CUDA 12 runtime makes it automatic; else set preferences `whisper_model: large-v3-turbo` |
 | `GPU transcription failed … retrying on CPU` in the log | cuDNN/cuBLAS DLLs missing | Harmless (CPU used). For GPU speed install NVIDIA's CUDA 12 + cuDNN 9 runtime |

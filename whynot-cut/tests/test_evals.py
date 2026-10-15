@@ -188,6 +188,16 @@ class TestEvalSuite(unittest.TestCase):
                      if split_md((d / "graders/skill-fired.md").read_text(encoding="utf-8"))[0].get("max") == 0]
         self.assertTrue(negatives, "at least one should-not-trigger case")
 
+    def test_platform_parity(self):                            # G3 review M13: macOS is primary (G11)
+        tags = {d.name: set(yaml_load((d / "case.yaml").read_text(encoding="utf-8")).get("tags") or [])
+                for d in cases(SK)}
+        self.assertTrue([n for n, t in tags.items() if "windows" in t])
+        mac = [n for n, t in tags.items() if "macos" in t]
+        self.assertIn("macos-bridge-files-access", mac)
+        g = SK / "evals/macos-bridge-files-access/graders"
+        self.assertIn("defaults write", (g / "player-debug-mode.md").read_text(encoding="utf-8"))
+        self.assertIn("Files (?:and|&) Folders", (g / "files-and-folders.md").read_text(encoding="utf-8"))
+
     def test_fixture_is_fictional_and_generates_clips_with_ffmpeg(self):
         sh = (SK / "evals/_fixtures/example-clinic.sh").read_text(encoding="utf-8")
         self.assertIn("testsrc=", sh)

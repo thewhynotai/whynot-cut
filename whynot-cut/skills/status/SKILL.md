@@ -12,14 +12,16 @@ Answer in the editor's language. The editor only ever does three things: **drop 
 
 ## No clip named: every client at once
 With no clip id (no arguments, or "what's waiting?" / «إيه اللي مستنيني؟»): run `reel board` in this message and
-show its table as it is (one row per video: client, video, state, next step; Arabic client names stay as they are). It
-is already in the editor's language (settings `language`, Arabic unless set; `--lang en|ar` overrides), and finished
-videos are folded into one "+N done" row per client (`reel board --all` lists them one by one).
+show its table as it is (one row per video: client, video, state, next step; Arabic client names stay as they are).
+**Pass `--lang` for the language the editor is writing in** (`ar` when they write Arabic, `en` when they write
+English), so the table and your words agree; without it the table follows settings `language` (Arabic unless set).
+Finished videos are folded into one "+N done" row per client (`reel board --all` lists them one by one).
 ```bash
-reel board
+reel board --lang <ar|en>
 ```
-Lead with the rows in state "waiting for you" (approve the plan, pick the reels), then "blocked", then the new ones
-("say 'edit the new videos'"). For one client only add `--root "<CLIENT_FOLDER>"`. `reel board --json` gives the same
+Lead with the rows in state "waiting for you" (approve the plan, pick the reels, or say "continue <id>": nothing runs
+until they do), then "blocked", then the new ones ("say 'edit the new videos'"). "In progress" means a session is
+working in that client right now. For one client only add `--root "<CLIENT_FOLDER>"`. `reel board --json` gives the same
 data as a document (`board: 1`, fields in the engine's `lib/board.py`), the same data the WhyNot Cut panel in Premiere
 shows; use it when you need a field the table leaves out. Exit 1 with `ok: false` means no clients folder is set (or it
 cannot be reached): say so and offer `/whynot-cut:start` or `/whynot-cut:preferences`. `truncated: true` means the scan

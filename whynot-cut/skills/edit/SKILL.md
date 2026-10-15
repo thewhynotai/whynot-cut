@@ -15,7 +15,8 @@ with nothing faked or overclaimed.
 (Motion videos: `/whynot-cut:motion`; AE/PS extras: `/whynot-cut:adobe-extras`.)
 
 Internal names (in this playbook, the agents and engine messages; never in your messages to the editor): Gate 0 =
-**pick the reels**, Gate 1 = **approve the plan**, Gate 2 = **proof check**. Stage numbers are internal too: tell the
+**pick the reels**, Gate 1 = **approve the plan**, Gate 2 = **proof check**; in Arabic always «اختار الريلز» ·
+«وافق على الخطة» · «فحص الجودة». Stage numbers are internal too: tell the
 editor what is happening ("transcribing", "building in Premiere"), not "stage 5".
 
 ## 0. Orient (every session)

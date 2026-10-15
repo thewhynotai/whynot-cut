@@ -78,8 +78,8 @@ from the doctor report.
   `reel setup` installs the WhyNot Cut Bridge panel.
 - **`debug_mode_ok` false:** Premiere loads the bridge only when Adobe's `PlayerDebugMode` is 1, which lets Premiere
   load extensions that aren't signed by Adobe. Say that plainly; they may skip it and import the XML by hand instead.
-  This setting is theirs to change (a hook blocks Claude from changing it). Show the commands from the doctor's `fixes`
-  in one code block for their OS. On Windows they run them in **PowerShell** (Git Bash mangles the `/v /d /f` switches).
+  This setting is theirs to change (a hook blocks Claude from changing it). Show each command from the doctor's `fixes` for
+  their OS in its own code block (one command per block, so each copies whole). On Windows they run them in **PowerShell** (Git Bash mangles the `/v /d /f` switches).
 - Ask them to open Premiere once, then run `reel ppro-status`. If `alive` is false, ask them to open
   Window › Extensions › WhyNot Cut Bridge and check once more; still false → spawn `whynot-cut:setup-doctor`.
   Don't loop, and don't claim the bridge works without `alive: true` and a `ping` result.

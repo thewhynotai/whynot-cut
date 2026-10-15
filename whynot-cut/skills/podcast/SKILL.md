@@ -34,13 +34,13 @@ reel profile --root "<CLIENT>"                          # client profile (NONE -
 | Stage | Who | Commands | Done when |
 |---|---|---|---|
 | E1 Prep | you | `episode-prep` | `00_inputs/episode.json` + `00_inputs/intake/` sheets (`_intake_sheet.jpg`, `_supers_sheet.jpg`, `_head_sheet.jpg`); tell the editor the time estimate. The prep also scans the whole episode for name supers (about 2 s per minute of 1080p video, capped at 5 min; `overlay_scan.complete` says if it was cut short) |
-| E2 Intake ∥ transcript | `intake-inspector` ∥ `transcript-editor` | (views the three intake sheets) ∥ `episode-transcribe`, `transcript-correct --episode` | intake report ∥ transcript + words to confirm |
+| E2 Intake ∥ transcript | `whynot-cut:intake-inspector` ∥ `whynot-cut:transcript-editor` | (views the three intake sheets) ∥ `episode-transcribe`, `transcript-correct --episode` | intake report ∥ transcript + words to confirm |
 | E3 Record intake | you | write `00_inputs/intake.json` (below) | layout and burned-in elements recorded |
-| E4 Analysis | `episode-analyst` (fans out `moment-scout`) | `reels-plan` until no errors | topics, speakers, validated plan |
+| E4 Analysis | `whynot-cut:episode-analyst` (fans out `whynot-cut:moment-scout`) | `reels-plan` until no errors | topics, speakers, validated plan |
 | E5 Previews | you | `reels-preview`; VIEW `03_candidates/_sheet.jpg` | a preview MP4 per candidate |
 | **Pick the reels** | **you + the editor** | `reels-select --pick <ids> --by editor` | the editor picked |
 | Per reel | the edit pipeline (`/whynot-cut:edit`), video id `<EP>_<RID>` | preflight, audio-clean, plan, previews, preview-video | reel plan + preview |
-| P Publish (∥ from E4) | `publish-writer` | `publish-check`, `publish-thumbnail` | package passes |
+| P Publish (∥ from E4) | `whynot-cut:publish-writer` | `publish-check`, `publish-thumbnail` | package passes |
 | **Approve the plan** (one, combined) | you + the editor | `approve-plan` per reel | approved reels |
 | Build → QC → report | as in `/whynot-cut:edit` | `ppro-build`, `ppro-frames`, `verify --record --verdict pass\|fail --note "…"`, `qc`, `handoff` | qc ok per reel |
 
@@ -104,7 +104,7 @@ It is an ordinary clip project; resume it with `reel next --root "<CLIENT>" --vi
   you show the editor. Motion videos get the same review (`/whynot-cut:motion`).
 
 ## 4. Publish package
-- After E4: `publish-writer` writes the episode package (titles, description, chapters from the topic map, tags,
+- After E4: `whynot-cut:publish-writer` writes the episode package (titles, description, chapters from the topic map, tags,
   thumbnail designs). After each reel's plan is approved: its captions. Then `reel publish-check --episode <EP>` must pass.
 - Thumbnails: `publish-thumbnail --candidates` → designs → `--render`. VIEW every thumbnail before showing it.
 - Show the editor `publish/youtube.md` and `publish/reels/*.md`. Nothing is uploaded: the editor posts.

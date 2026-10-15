@@ -12,10 +12,10 @@ Premiere Pro project**:
 - the client's own brand graphics and animated captions, with correct Arabic shaping and right-to-left order
 - **a watchable preview MP4** of the edit before anything is built
 - the Premiere build with exact sequence settings, then evidence-based QC from Premiere's own frames
-- **podcast mode** (2.1): a finished 16:9 episode → a reels plan with timecodes, content type and score → you pick →
+- **podcast mode**: a finished 16:9 episode → a reels plan with timecodes, content type and score → you pick →
   each reel framed per shot for 9:16 and edited by its content-type recipe → plus the YouTube/Instagram/TikTok copy
   (titles, description, chapters, tags, captions, hashtags, SRT) and thumbnail designs, checked against platform limits
-- **motion mode** (2.2): a window of an episode's audio → an animated motion-graphics video (word-by-word Arabic
+- **motion mode**: a window of an episode's audio → an animated motion-graphics video (word-by-word Arabic
   kinetic type, icons, counters, steps, timelines) built as a **native After Effects project**, read back and QC'd
 
 A human editor finishes, mixes and renders.
@@ -37,7 +37,7 @@ WhyNot Cut يشتغل من غير ما يستأذن في كل أمر.
 والحلقات الكاملة في `data/Episodes/`.
 
 ٣. **قول عايز إيه، ووافق على الخطة:**
-- «عدّل الفيديوهات الجديدة» ← خطة وفيديو معاينة، توافق عليهم، وبعدها مشروع Premiere كامل وتقرير جودة.
+- «عدّل الفيديوهات الجديدة» ← خطة وفيديو معاينة، توافق عليهم، وبعدها مشروع Premiere كامل و«فحص الجودة».
 - «طلّع ريلز من الحلقة» ← خطة ريلز بالتايم كود ونوع المحتوى (حكاية، دراما، قصة نجاح…) ومعاينة لكل ريل؛ تختار
   الريلز، وكل ريل يتعمل مشروع Premiere، ومعاه العناوين والديسكربشن والشابترز والتاجز والكابشن والثمبنيل.
 - «اعمل موشن من الجزء ده» ← فيديو موشن جرافيك من **صوت** الجزء (كلام بيظهر كلمة بكلمة، أرقام، خطوات، أيقونات):

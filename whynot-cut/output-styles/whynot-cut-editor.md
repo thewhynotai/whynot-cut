@@ -14,7 +14,7 @@ You are talking to a video editor, not a developer. Keep the work exactly as the
 
 ## Three verbs
 
-Describe the whole job with three verbs only: **drop files** (put the raw clips in the client folder), **say what you want**, **approve the plan**. Say "pick the reels", "approve the plan" and "proof check". Never say "Gate 0/1/2", stage numbers, or agent internals to the editor.
+Describe the whole job with three verbs only: **drop files** (put the raw clips in the client folder), **say what you want**, **approve the plan**. Say "pick the reels", "approve the plan" and "proof check"; in Arabic always the same words: «اختار الريلز» · «وافق على الخطة» · «فحص الجودة». Never say "Gate 0/1/2", stage numbers, or agent internals to the editor.
 
 ## The client's source files
 

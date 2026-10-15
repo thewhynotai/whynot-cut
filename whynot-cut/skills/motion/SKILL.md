@@ -38,17 +38,17 @@ Windows are 15–180 s; longer topics are refused ("split it"). The project is `
 ## 2. Stages
 | Stage | Who | Commands | Done when |
 |---|---|---|---|
-| Audio | `audio-engineer` | `audio-clean` | pauses removed, cut proof ok |
-| Script | `motion-director` | `motion-icons`, `motion-library`, `music --list`, write `motion-script.json` (check a draft: `reel validate 01_analysis/motion-script.json --root "<CLIENT>" --video-id <EP>_<ID>_MO`), `motion-plan` | plan compiles, no errors |
+| Audio | `whynot-cut:audio-engineer` | `audio-clean` | pauses removed, cut proof ok |
+| Script | `whynot-cut:motion-director` | `motion-icons`, `motion-library`, `music --list`, write `motion-script.json` (check a draft: `reel validate 01_analysis/motion-script.json --root "<CLIENT>" --video-id <EP>_<ID>_MO`), `motion-plan` | plan compiles, no errors |
 | Claims (every motion video) | `whynot-cut:medical-reviewer` (read-only) | reads every on-screen word in `01_analysis/motion-plan.md`: the `On-screen text (full)` section, not the shortened table column (editorial lines too) | approval list for the current plan |
-| Animatic | `motion-director` | `motion-animatic`; VIEW `_storyboard.jpg` | storyboard + MP4 |
+| Animatic | `whynot-cut:motion-director` | `motion-animatic`; VIEW `_storyboard.jpg` | storyboard + MP4 |
 | **Approve the plan** | **you + the editor** | `approve-plan --by editor` | the editor approved |
-| Probe (once per AE version) | `ae-builder` runs, **you** view and record | `ae-probe`, then `ae-probe --record ok\|fail --word-order logical\|visual --notes "…"` | ok verdict for this AE version |
-| Build | `ae-builder` | `motion-build` | PROJECT_ASSEMBLED, read-back comparison passes |
-| Render + frames | `ae-builder` | `motion-render`, `motion-frames` | RENDERED, frames sheet |
-| QC | `qc-reviewer` (frame-inspectors) | `motion-frames` output, `qc` (after your verdict) | qc ok |
+| Probe (once per AE version) | `whynot-cut:ae-builder` runs, **you** view and record | `ae-probe`, then `ae-probe --record ok\|fail --word-order logical\|visual --notes "…"` | ok verdict for this AE version |
+| Build | `whynot-cut:ae-builder` | `motion-build` | PROJECT_ASSEMBLED, read-back comparison passes |
+| Render + frames | `whynot-cut:ae-builder` | `motion-render`, `motion-frames` | RENDERED, frames sheet |
+| QC | `whynot-cut:qc-reviewer` (frame-inspectors) | `motion-frames` output, `qc` (after your verdict) | qc ok |
 | Verdict | **you** | VIEW `_sheet.jpg`, `verify --record --verdict pass\|fail --notes "…"` | recorded |
-| Handoff + publish | you, `publish-writer` | `handoff`; `publish/reels/<EP>_<ID>_MO.json`, `publish-check` | handoff + package pass |
+| Handoff + publish | you, `whynot-cut:publish-writer` | `handoff`; `publish/reels/<EP>_<ID>_MO.json`, `publish-check` | handoff + package pass |
 
 ## 3. Approve the plan (show it in the editor's language)
 Speak the editor's `language` (plugin option: `${user_config.language}`; a client or machine file overrides it,

@@ -320,6 +320,63 @@ class TestNoPythonInstallPath(unittest.TestCase):
             self.assertIn("install-from-claude.md", text(n), n)
 
 
+class TestG3Minors(unittest.TestCase):
+    """G3 review minors that live in the skill and context texts (M2, M6, M7, M8, M12, M14)."""
+    AR_STOPS = ("«اختار الريلز»", "«وافق على الخطة»", "«فحص الجودة»")
+
+    def test_m2_no_gate_words_in_agents_references_and_contexts(self):
+        files = [*sorted((SK / "agents").glob("*.md")), *sorted(SKILLS.glob("*/references/*.md")),
+                 SKILLS / "premiere-craft" / "SKILL.md"]
+        bad = [f"{f.relative_to(SK).as_posix()}:{n}" for f in files
+               for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1) if GATE.search(line)]
+        self.assertEqual(bad, [])
+        ctx = (SK / "hooks" / "session_context.py").read_text(encoding="utf-8")
+        body = ctx[ctx.index("def prefs_line"):ctx.index("def export_options")]
+        self.assertNotRegex(body, GATE)
+
+    def test_m6_skill_tables_name_agents_with_the_plugin_namespace(self):
+        agents = sorted(p.stem for p in (SK / "agents").glob("*.md"))
+        bare = re.compile(r"(?<![\w:/.-])(" + "|".join(map(re.escape, agents)) + r")(?![\w-])")
+        bad = [f"{p.parent.name}:{n}: {m}" for p in sorted(SKILLS.glob("*/SKILL.md"))
+               for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+               if line.lstrip().startswith("|") for m in bare.findall(line)]
+        self.assertEqual(bad, [])
+
+    def test_m7_one_command_per_code_block(self):
+        for n in ("start", "setup"):
+            s = " ".join(text(n).split())
+            self.assertIn("in its own", s.split("PlayerDebugMode", 1)[1], n)
+        for p in sorted(SKILLS.glob("*/SKILL.md")):
+            self.assertNotRegex(" ".join(p.read_text(encoding="utf-8").split()),
+                                r"(?i)commands? [^.]{0,60}in one (fenced|code) block", p.parent.name)
+
+    def test_m8_one_arabic_word_per_stop(self):
+        style = (SK / "output-styles" / "whynot-cut-editor.md").read_text(encoding="utf-8")
+        for t in (style, text("edit")):
+            for w in self.AR_STOPS:
+                self.assertIn(w, t)
+        _sys.path.insert(0, str(SK / "engine" / "reel"))
+        from lib import board
+        self.assertTrue(board.STEP_TEXT["ar"]["proof_check"].startswith("فحص الجودة"))
+        self.assertEqual(board.STEP_TEXT["ar"]["approve_plan"], "وافق على الخطة")
+        self.assertEqual(board.STEP_TEXT["ar"]["pick_reels"], "اختار الريلز")
+        readme = (SK / "README.md").read_text(encoding="utf-8")
+        self.assertIn("«فحص الجودة»", readme)
+        for f in [SK / "README.md", *SKILLS.glob("*/SKILL.md"), SK / "engine" / "reel" / "lib" / "board.py"]:
+            for other in ("مراجعة الإثبات", "تقرير جودة", "تقرير الجودة"):
+                self.assertNotIn(other, f.read_text(encoding="utf-8"), f"{f.name}: {other}")
+
+    def test_m12_no_release_labels_in_the_readme_intro(self):
+        intro = (SK / "README.md").read_text(encoding="utf-8").split("\n## ", 1)[0]
+        self.assertNotRegex(intro, r"\(\d\.\d\)")
+
+    def test_m14_revise_names_the_section_it_points_back_to(self):
+        s = text("revise")
+        self.assertIn("## Clip videos (Premiere)", s)
+        self.assertNotIn("as in step 4 above", s)
+        self.assertIn("as in step 4 of **Clip videos (Premiere)** above", " ".join(s.split()))
+
+
 class TestApprovalConsent(unittest.TestCase):
     """G3 review I1: "stop asking" / "just go" never turns on a standing `approval: auto` in the same turn. The
     preferences skill makes the "this clip or from now on?" question a stop; the edit skill's "just go" line approves

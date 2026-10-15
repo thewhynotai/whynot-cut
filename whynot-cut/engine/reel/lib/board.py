@@ -24,6 +24,7 @@ in the editor's language (settings `language`, ar by default; `--lang`):
         "counts": {"new": 1, "working": 0, "waiting_for_you": 1, "blocked": 0, "done": 0},
         "truncated": false, "error": null,     # error: the client could not be read (the others still are)
         "skipped": null | "time budget",       # reached after the deadline: listed, not read
+        "busy": false,                         # a live writer lease (output/.whynot-lock): a session works here now
         "items": [
           {"id": "C0239", "kind": "clip" | "reel" | "motion" | "episode",
            "state": "new" | "working" | "waiting_for_you" | "blocked" | "done",
@@ -37,6 +38,9 @@ in the editor's language (settings `language`, ar by default; `--lang`):
            "partial": false,                   # the time budget ran out before this item's next step was read
            "error": null}]}]}                  # this item's next step could not be read (state blocked); the card stays
 
+States: `waiting_for_you` = the editor's move: approve the plan, pick the reels, or (no session is working in the
+client, `busy` false) say "continue <id>" for the next step; `working` = a session holds the client's writer lease
+(`busy` true) and the item is mid-pipeline (G3 review M3: an item never shows "in progress" while nothing runs).
 `next_step` never contains a command: the panel shows it as it is. The plain table has one row per item, finished
 items folded into one "+N done" row per client (`--all` lists them).
 """
@@ -73,7 +77,7 @@ STEP_TEXT = {
     "ar": {"new_episode": "قول «طلّع ريلز من الحلقة»", "new_clip": "قول «عدّل الفيديوهات الجديدة»",
            "done": "مفيش: خلص", "blocked": "قول «حالة {id}» عشان تعرف إيه اللي موقفه",
            "approve_plan": "وافق على الخطة", "pick_reels": "اختار الريلز", "status": "قول «حالة {id}»",
-           "proof_check": "مراجعة الإثبات: قول «كمّل {id}»",
+           "proof_check": "فحص الجودة: قول «كمّل {id}»",
            "build_premiere": "البناء في Premiere: قول «كمّل {id}»",
            "build_ae": "البناء في After Effects: قول «كمّل {id}»", "handoff": "التسليم: قول «كمّل {id}»",
            "publish": "نصوص النشر: قول «كمّل {id}»", "continue": "قول «كمّل {id}»"},
@@ -145,6 +149,17 @@ def _state(status: str | None, nxt: str | None) -> str:
     if low.startswith(("playback", "approve-plan", "select reels", "reels-select")):
         return "waiting_for_you"
     return "working"
+
+
+def _held(root: Path) -> bool:
+    """A live writer lease on the client (output/.whynot-lock): a Claude Code session is working there now. Read-only;
+    an unreadable lock counts as held (never claims an item waits for the editor while a session may run it)."""
+    from . import writer_lock
+    try:
+        rec = writer_lock.read(root)
+        return rec is not None and writer_lock.stale_reason(root, rec) is None
+    except Exception:  # noqa: BLE001
+        return True
 
 
 def _over(deadline: float | None) -> bool:
@@ -273,7 +288,8 @@ def client_card(root: Path, next_fn=None, deadline: float | None = None) -> tupl
     reached after the deadline is not read at all (`skipped`)."""
     root = Path(root)
     card = {"name": _nfc(root.name), "path": str(root), "prefix": None, "profile": None,
-            "counts": dict.fromkeys(STATES, 0), "truncated": False, "error": None, "skipped": None, "items": []}
+            "counts": dict.fromkeys(STATES, 0), "truncated": False, "error": None, "skipped": None, "busy": False,
+            "items": []}
     if _over(deadline):
         card["skipped"], card["truncated"] = "time budget", True
         return card, True
@@ -306,6 +322,11 @@ def client_card(root: Path, next_fn=None, deadline: float | None = None) -> tupl
         except Exception as e:  # noqa: BLE001 — one unreadable client never hides the others
             card["error"] = _err(e)
     card["truncated"] = card["truncated"] or over
+    card["busy"] = _held(root)
+    if not card["busy"]:                        # G3 review M3: nothing runs until the editor says "continue <id>"
+        for it in card["items"]:
+            if it["state"] == "working":
+                it["state"] = "waiting_for_you"
     order = {s: i for i, s in enumerate(("waiting_for_you", "blocked", "new", "working", "done"))}
     card["items"].sort(key=lambda it: (order.get(it["state"], 9), it["id"]))
     for it in card["items"]:

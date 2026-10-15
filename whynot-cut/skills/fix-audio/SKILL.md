@@ -23,7 +23,7 @@ notches, denoise or not, loudness, pause detection, the no-lost-words proof) is 
 
 Then:
 - If pauses are to be removed from the edit, `global.remove_pauses` must be set in `edit-decisions.json`
-  (story-editor, or you for this one key). Then run `reel plan`, then previews, then show the changed plan for the
+  (`whynot-cut:story-editor`, or you for this one key). Then run `reel plan`, then previews, then show the changed plan for the
   editor to approve, then the Premiere rebuild (see `/whynot-cut:revise`). Motion videos (`<EP>_<ID>_MO`): after
   `audio-clean`, the motion plan is compiled again (`reel motion-plan`), see the motion route in `/whynot-cut:revise`.
 - Look at both spectrograms yourself before claiming an improvement.
