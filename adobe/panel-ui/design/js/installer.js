@@ -193,6 +193,9 @@
        1. keep the FIRST segment plus its separator: the drive "D:\", or the root "/" with its first folder ("/Volumes/"); on macOS
           under /Users and /Volumes the account or the volume name is the identity, so it is kept too ("/Users/sara/",
           "/Volumes/Samsung T7 Shield/") when head + "…" + separator + the last segment still fits the budget, else only the first folder;
+          a network (UNC) path keeps its server the same way: "\\server\share\" when head + "…" + separator + the last segment
+          fits, else "\\server\" when that fits, else only "\\" (the server says which machine the folder is on; the last
+          segment still wins over it);
        2. keep the LAST segment whole (the folder the person chose); it is never cut by this rule;
        3. fill from the END backwards with whole segments (each with its separator) while head + "…" + separator + the kept tail
           stays within the budget; the first segment that does not fit stops the fill (no gaps: the kept tail is contiguous);
@@ -208,9 +211,12 @@
     if (path.length <= budget) return path;
     var sep = path.indexOf("\\") >= 0 ? "\\" : "/";
     var parts = path.replace(/[\\/]+$/, "").split(sep); /* "/Users/a/b" -> ["", "Users", "a", "b"]; "D:\x\y" -> ["D:", "x", "y"] */
-    var keep = parts[0] === "" ? 2 : 1, last = parts[parts.length - 1];
+    var unc = parts[0] === "" && parts[1] === "" && parts.length > 3; /* "\\server\share\x" -> ["", "", "server", "share", "x"] */
+    var last = parts[parts.length - 1], keep = parts[0] === "" ? 2 : 1;
+    if (unc && parts.slice(0, 3).join(sep).length + 1 + 2 + last.length <= budget) keep = 3;
     if (parts[0] === "" && (parts[1] === "Users" || parts[1] === "Volumes") && parts.length > 4 &&
         parts.slice(0, 3).join(sep).length + 1 + 2 + last.length <= budget) keep = 3;
+    if (unc && parts.length > 5 && parts.slice(0, 4).join(sep).length + 1 + 2 + last.length <= budget) keep = 4;
     if (parts.length - 1 <= keep) return path; /* nothing in the middle to cut */
     var head = parts.slice(0, keep).join(sep) + sep, tail = last, i, cand;
     for (i = parts.length - 2; i >= keep; i--) {
