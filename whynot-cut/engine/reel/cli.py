@@ -555,9 +555,14 @@ def cmd_serve(a):
 def cmd_perf_report(a):
     """The panel speed report (G2 H3): serve/perf_report.py reads <engine home>/logs/perf.jsonl and prints the p95 of
     the budgets S1-S3; its exit code is reel's (0 met or no data, 1 a miss, 2 a usage error, 3 an internal error)."""
-    from serve import perf_report
     argv = (["--since", a.since] if a.since else []) + (["--home", a.home] if a.home else [])
-    sys.exit(perf_report.main(argv))
+    try:
+        from serve import perf_report
+        code = perf_report.main(argv)
+    except Exception as e:  # noqa: BLE001 — an internal error is 3, never read as a budget miss (1)
+        sys.stderr.write(f"reel perf-report: internal error: {type(e).__name__}: {e}\n")
+        code = 3
+    sys.exit(code)
 
 
 def cmd_ppro_status(a):

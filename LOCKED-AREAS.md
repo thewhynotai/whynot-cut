@@ -33,6 +33,10 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     `whynot-cut/engine/reel/lib/align_w2v*.py`
   - packages: `whynot-cut/engine/reel/lib/kalam*/**`, `whynot-cut/engine/reel/lib/hush*/**`,
     `whynot-cut/engine/reel/lib/tidy*/**`, `whynot-cut/engine/reel/lib/align_w2v*/**`
+  - `whynot-cut/skills/kalam/**`, `whynot-cut/skills/hush/**`, `whynot-cut/skills/tidy/**`
+  - `whynot-cut/evals/kalam-*/**`, `whynot-cut/evals/hush-*/**`, `whynot-cut/evals/tidy-*/**`
+  - `whynot-cut/tests/test_kalam*.py`, `whynot-cut/tests/test_hush*.py`, `whynot-cut/tests/test_tidy*.py`,
+    `whynot-cut/tests/test_align_w2v*.py`
 - looks & motion track (Addendum H rebuild: R-T1 specs, R-T6 identity scan, caption looks, AE scenes, cut proposals,
   safe zones, look recommender):
   - `docs/superpowers/specs/addendum-h/source-r-specs/**`
@@ -44,7 +48,3 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
   - `tools/identity_scan.py`, `tools/identity_hashes.json`
   - `whynot-cut/tests/test_looks*.py`, `whynot-cut/tests/test_motion_library*.py`, `whynot-cut/tests/test_cut_proposals*.py`,
     `whynot-cut/tests/test_safe_zones*.py`, `whynot-cut/tests/test_identity_scan*.py`
-  - `whynot-cut/skills/kalam/**`, `whynot-cut/skills/hush/**`, `whynot-cut/skills/tidy/**`
-  - `whynot-cut/evals/kalam-*/**`, `whynot-cut/evals/hush-*/**`, `whynot-cut/evals/tidy-*/**`
-  - `whynot-cut/tests/test_kalam*.py`, `whynot-cut/tests/test_hush*.py`, `whynot-cut/tests/test_tidy*.py`,
-    `whynot-cut/tests/test_align_w2v*.py`

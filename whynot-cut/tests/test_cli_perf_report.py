@@ -71,6 +71,15 @@ class TestPerfReportIsACommand(unittest.TestCase):
             run_main(["perf-report"])
         self.assertEqual(list(m.call_args.args[0]), [])
 
+    def test_an_internal_error_is_3_never_a_budget_miss(self):
+        """Review b2e820b P2: an exception escaped to reel's fail() and exited 1, which means "budget missed"."""
+        from serve import perf_report
+        for boom in (RuntimeError("boom"), OSError("no engine home")):
+            with mock.patch.object(perf_report, "main", side_effect=boom):
+                code, out, err = run_main(["perf-report"])
+            self.assertEqual(code, 3, out + err)
+            self.assertIn(str(boom), out + err)
+
     def test_a_real_run_on_an_empty_home_is_0_and_a_bad_since_is_2(self):
         with tempfile.TemporaryDirectory() as td:
             code, out, _ = run_main(["perf-report", "--home", td])
@@ -88,14 +97,12 @@ class TestPerfReportIsACommand(unittest.TestCase):
         self.assertEqual(code, 0, out)
 
     def test_other_commands_do_not_import_perf_report(self):
-        code = ("import sys, argparse; sys.path.insert(0, %r); import cli\n"
-                "class B(Exception): pass\n"
-                "def cap(self, *a, **k): raise B()\n"
-                "argparse.ArgumentParser.parse_args = cap\n"
-                "for argv in (['next'], ['--help'], ['ppro-status']):\n"
+        """Commands run for real (in this run's sandbox engine home), not stopped at parse_args (review b2e820b)."""
+        code = ("import sys; sys.path.insert(0, %r); import cli\n"
+                "for argv in (['settings'], ['lock', '--status', '--root', %r], ['--help']):\n"
                 "    try: cli.main(argv)\n"
-                "    except B: pass\n"
-                "print('serve.perf_report' in sys.modules)\n") % str(SK / "engine" / "reel")
+                "    except SystemExit: pass\n"
+                "print('serve.perf_report' in sys.modules)\n") % (str(SK / "engine" / "reel"), tempfile.gettempdir())
         r = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True, encoding="utf-8",
                            timeout=120)
         self.assertEqual(r.stdout.strip().splitlines()[-1:], ["False"], r.stderr)

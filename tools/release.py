@@ -351,31 +351,39 @@ def find_real_names(root: Path, skip: tuple = ()) -> list:
 
 
 def parse_locked_areas(text: str) -> list:
-    """[(glob, why)] from the '## Locked now' list of LOCKED-AREAS.md. An empty list is an error."""
+    """[(glob, owner)] from the '## Locked now' list of LOCKED-AREAS.md. A top-level bullet is either
+    "- `g1`[, `g2`…]: owner" or an owner heading ("- tools track (…):"); an indented bullet's paths take the owner of
+    the top-level bullet above it unless they carry their own ": owner". Lines continue on indented non-bullet lines.
+    An empty list, or a path with no owner, is an error (never dropped silently)."""
     m = re.search(r"^## Locked now\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
     if not m:
         raise ValueError("LOCKED-AREAS.md has no '## Locked now' section")
-    # A bullet is either "- `glob`: why" or, inside a track's nested list, "- `g1`, `g2`," (continued on indented lines)
-    # under a parent bullet with no glob ("- tools track (...):"), whose text is then the why.
-    bullets, areas, parent = [], [], ""
+    bullets = []
     for ln in m.group(1).splitlines():
         if re.match(r"^\s*- ", ln):
             bullets.append(ln)
         elif bullets and ln.startswith((" ", "\t")) and ln.strip():
             bullets[-1] += " " + ln.strip()
+    paths_why = re.compile(r"^((?:`[^`]+`\s*,\s*)*`[^`]+`)\s*[:—-]\s*(.+?)\s*$")
+    areas, owner = [], ""
     for b in bullets:
         top = not b.startswith((" ", "\t"))
         body = b.strip()[2:].strip()
-        one = re.match(r"^`([^`]+)`\s*[:\u2014-]\s*(.+?)\s*$", body)
-        if one:
-            areas.append((one.group(1).strip(), one.group(2).strip()))
+        own = paths_why.match(body)
+        if own:
+            why = own.group(2).strip()
+            areas += [(g.strip(), why) for g in re.findall(r"`([^`]+)`", own.group(1))]
             if top:
-                parent = ""
-        elif "`" not in body:
-            if top:
-                parent = body.rstrip(":").strip()
-        elif not top and parent:
-            areas += [(g.strip(), parent) for g in re.findall(r"`([^`]+)`", body)]
+                owner = why
+        elif top:
+            owner = body.rstrip(":").strip()
+            if not owner:
+                raise ValueError("LOCKED-AREAS.md has an empty bullet")
+        else:
+            globs = re.findall(r"`([^`]+)`", body)
+            if globs and not owner:
+                raise ValueError(f"LOCKED-AREAS.md: {', '.join(globs)} has no owner (no top-level bullet above it)")
+            areas += [(g.strip(), owner) for g in globs]
     if not areas:
         raise ValueError("LOCKED-AREAS.md lists no locked path")
     return areas
@@ -417,49 +425,70 @@ def parse_mac_inbox(text: str) -> list:
     return out
 
 
+def _cells(line: str) -> list:
+    """The cells of one markdown table row; `\\|` is a pipe inside a cell, not a column break."""
+    inner = line.strip()
+    inner = inner[1:] if inner.startswith("|") else inner
+    inner = inner[:-1] if inner.endswith("|") and not inner.endswith("\\|") else inner
+    return [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", inner)]
+
+
+def _tag_key(tag: str) -> tuple:
+    m = re.search(r"-p(\d+)(?:\.(\d+))?$", tag)
+    return (int(m.group(1)), int(m.group(2) or 0)) if m else (-1, -1)
+
+
 def passed_phases(progress: str, tags=(), version: str = "") -> tuple:
-    """([(number, name, tag)] passed, [(number, name)] in progress) from PROGRESS.md's phase table. A gate tag
-    `v<version>-p<N>` also counts as passed: the committed PROGRESS.md can lag behind the tag of a passed gate."""
+    """([(number, name, tag)] passed, [(number, name)] in progress) from PROGRESS.md's phase table. A phase passed when
+    its state's FIRST bold run says "passed" (and not "not passed" / "failed"), or a gate tag `v<version>-p<N>` exists
+    (the committed PROGRESS.md can lag behind the tag of a passed gate). Its tag is the newest gate-record tag of that
+    phase, else the first vX-pN(.M) token of the tag cell."""
     gate = {m.group(1): t for t in tags if version and (m := re.fullmatch(rf"v{re.escape(version)}-p(\d+)", t))}
+    newest = {}
+    for r in gate_record(progress):
+        newest[r["gate"]] = r["tag"]                    # gate_record is sorted oldest first: the last one wins
     passed, active = [], []
     for ln in progress.splitlines():
-        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        cells = _cells(ln)
         if len(cells) < 3 or not re.match(r"^\d+\s", cells[0]):
             continue
         num, name = cells[0].split(None, 1)
-        state = cells[1].lower()
-        if re.search(r"\*\*[^*]*\bpassed\b[^*]*\*\*", state):      # "**passed**" or "**Gate 3 passed on Windows, …**"
+        state = cells[1]
+        bold = re.match(r"^\*\*([^*]+)\*\*", state)
+        said = bold.group(1).lower() if bold else ""
+        if re.search(r"\bpassed\b", said) and not re.search(r"\bnot passed\b|\bfail", said):
             tag = re.match(r"v[\w.]+-p\d+(?:\.\d+)?", cells[2])
-            passed.append((num, name, tag.group(0) if tag else (cells[2] or gate.get(num, ""))))
+            passed.append((num, name, newest.get(num) or (tag.group(0) if tag else (cells[2] or gate.get(num, "")))))
         elif num in gate:
-            passed.append((num, name, gate[num]))
-        elif "in progress" in state:
+            passed.append((num, name, newest.get(num) or gate[num]))
+        elif "in progress" in state.lower():
             active.append((num, name))
     return passed, active
 
 
 def gate_record(progress: str) -> list:
-    """Rows of PROGRESS.md's '## Gate record' table (the executor adds one per gate tag, oldest first):
-    [{gate, tag, windows, mac_ci, live_mac}]. No table = []."""
+    """Rows of PROGRESS.md's '## Gate record' table (one per gate tag): [{gate, tag, windows, mac_ci, live_mac}],
+    sorted oldest first by gate number then tag (whatever order they were written in). No table = []."""
     m = re.search(r"^## Gate record\s*$(.*?)(?=^## |\Z)", progress, re.M | re.S)
     rows = []
     for ln in (m.group(1) if m else "").splitlines():
-        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        cells = _cells(ln)
         if len(cells) >= 5 and re.fullmatch(r"\d+", cells[0]):
             rows.append({"gate": cells[0], "tag": cells[1].strip("`"), "windows": cells[2], "mac_ci": cells[3],
                          "live_mac": cells[4]})
-    return rows
+    return sorted(rows, key=lambda r: (int(r["gate"]), _tag_key(r["tag"])))
 
 
 def _mac_ci_kind(cell: str) -> str:
-    c = cell.lower()
-    if not c or c in ("-", "—", "none", "not run"):
+    """'' not run, 'red' any red/failed run named in the cell (red wins), 'full' / 'smoke' green, 'other'."""
+    c = re.sub(r"\b0 (?:failures?|failed|fails?)\b", "", cell.lower())
+    if not c.strip() or c.strip() in ("-", "—", "none", "not run"):
         return ""
-    if c.startswith("red") or "fail" in c:
+    if re.search(r"\bred\b|\bfail", c):
         return "red"
-    if c.startswith("smoke"):
-        return "smoke"
-    return "full" if c.startswith("full") else "other"
+    if re.search(r"\bgreen\b|\bpass(?:ed)?\b", c):
+        return "smoke" if "smoke" in c and "full" not in c else "full"
+    return "other"
 
 
 def gate_state(progress: str, tags=(), version: str = "") -> dict:
@@ -477,19 +506,29 @@ def gate_state(progress: str, tags=(), version: str = "") -> dict:
     return {"passed": [n for n, _name, _tag in passed], "active": active, "latest_tag": latest, "mac": mac}
 
 
+def _live_verified(live: str) -> bool:
+    low = live.lower()
+    return low.startswith("verified") and not re.search(r"\bnot\b|\bpart", low)
+
+
 def gate_lines_en(st: dict) -> list:
-    L = [f"Phases passed: {', '.join(st['passed'])} (latest gate tag `{st['latest_tag']}`)." if st["passed"]
-         else "Phases passed: none yet."]
+    if st["passed"]:
+        L = [f"Phases passed: {', '.join(st['passed'])}"
+             + (f" (latest gate tag `{st['latest_tag']}`)." if st["latest_tag"] else ".")]
+    else:
+        L = ["Phases passed: none yet."]
     L += [f"In progress: phase {n} ({name})." for n, name in st["active"]]
     mac = st["mac"]
     if not mac:
         L.append("macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).")
-    else:
-        L.append({"full": f"macOS: CI full suite green at `{mac['tag']}`.",
-                  "smoke": f"macOS: CI smoke job green at `{mac['tag']}` (not the full suite).",
-                  "red": f"macOS: CI red at `{mac['tag']}`: {mac['detail']}."}.get(
-                      mac["ci"], f"macOS: CI at `{mac['tag']}`: {mac['detail']}."))
-        L.append(f"Live Mac checks: {mac['live']}.")
+        return L
+    line = {"full": f"macOS: CI full suite green at `{mac['tag']}`.",
+            "smoke": f"macOS: CI smoke job green at `{mac['tag']}` (not the full suite).",
+            "red": f"macOS: CI red at `{mac['tag']}`: {mac['detail']}."}.get(
+                mac["ci"], f"macOS: CI at `{mac['tag']}`: {mac['detail']}.")
+    if st["latest_tag"] and mac["tag"] != st["latest_tag"]:
+        line += f" The Mac CI was not run at `{st['latest_tag']}` (the latest gate) yet."
+    L += [line, f"Live Mac checks: {mac['live']}."]
     return L
 
 
@@ -497,14 +536,18 @@ def gate_lines_ar(st: dict) -> list:
     mac = st["mac"]
     if not mac:
         return ["الماك: لسه ما اتجرّبش على ماك خالص (مفيش مرحلة في PROGRESS.md ليها نتيجة ماك)."]
-    L = [{"full": f"الماك: كل الاختبارات الآلية (full suite) عدّت على ماك في CI عند `{mac['tag']}`.",
-          "smoke": f"الماك: الاختبار السريع (smoke) بس هو اللي عدّى على ماك عند `{mac['tag']}`، مش كل الاختبارات.",
-          "red": f"الماك: فيه اختبارات فشلت على ماك عند `{mac['tag']}` ({mac['detail']})."}.get(
-              mac["ci"], f"الماك: نتيجة CI عند `{mac['tag']}`: {mac['detail']}.")]
-    live = mac["live"].lower()
-    L.append("التجربة الحية على ماك حقيقي: اتأكّدت." if live.startswith("verified")
-             else f"التجربة الحية على ماك حقيقي: لسه ({mac['live']}).")
-    return L
+    line = {"full": f"الماك: كل الاختبارات الآلية (full suite) عدّت على ماك في CI عند `{mac['tag']}`.",
+            "smoke": f"الماك: الاختبار السريع (smoke) بس هو اللي عدّى على ماك عند `{mac['tag']}`، مش كل الاختبارات.",
+            "red": f"الماك: فيه اختبارات فشلت على ماك عند `{mac['tag']}`."}.get(
+                mac["ci"], f"الماك: فيه نتيجة CI على ماك عند `{mac['tag']}`، مش واضح إنها عدّت.")
+    if st["latest_tag"] and mac["tag"] != st["latest_tag"]:
+        line += f" ولسه ما اتعملش CI على ماك عند آخر مرحلة `{st['latest_tag']}`."
+    if _live_verified(mac["live"]):
+        live = "التجربة الحية على ماك حقيقي: اتأكّدت."
+    else:
+        ph = re.search(r"\bPhase (\d+)", mac["live"])
+        live = "التجربة الحية على ماك حقيقي: لسه" + (f" (المرحلة {ph.group(1)})." if ph else ".")
+    return [line, live]
 
 
 def render(template: str, values: dict) -> str:
