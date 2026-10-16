@@ -195,7 +195,11 @@ class TestRuntimeId(unittest.TestCase):
     def test_platform_key(self):
         self.assertEqual(R.platform_key("Windows", "AMD64"), "win-x64")
         self.assertEqual(R.platform_key("Darwin", "arm64"), "mac-arm64")
-        self.assertEqual(R.platform_key("Darwin", "x86_64"), "mac-x64")
+        intel, rosetta = (lambda k: None), (lambda k: "1" if k == "sysctl.proc_translated" else None)
+        self.assertEqual(R.platform_key("Darwin", "x86_64", sysctl=intel), "mac-x64")      # a real Intel Mac
+        self.assertEqual(R.platform_key("Darwin", "x86_64", sysctl=rosetta), "mac-arm64")  # x86_64 Python under Rosetta
+        self.assertEqual(R.platform_key("Darwin", "x86_64", sysctl=lambda k: "1" if k == "hw.optional.arm64" else "0"),
+                         "mac-arm64")                                                       # Apple Silicon hardware
         self.assertEqual(R.platform_key("Linux", "aarch64"), "linux-arm64")
         self.assertIsNone(R.platform_key("Windows", "sparc"))
 

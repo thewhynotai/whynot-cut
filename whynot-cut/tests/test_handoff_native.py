@@ -32,7 +32,7 @@ NATIVE_NAMES = {
 
 def normalise(text: str, root: Path) -> str:
     """Strip what differs between runs and machines: the timestamp, the temp root, path separators."""
-    for form in (str(root), root.as_posix(), str(root.resolve()), root.resolve().as_posix()):
+    for form in (str(root.resolve()), root.resolve().as_posix(), str(root), root.as_posix()):   # longest first: /var is in /private/var
         text = text.replace(form, "<ROOT>")
     text = text.replace("\\", "/")
     text = re.sub(r"\d{4}-\d\d-\d\dT[\d:.]+(?:Z|[+-]\d\d:\d\d)?", "<TS>", text)

@@ -2957,7 +2957,7 @@ class TestArabicPaths(unittest.TestCase):
             self.skipTest("no test font / HarfBuzz")
         d = self.tmp / "خطوط"
         d.mkdir()
-        return font, Path(shutil.copy2(font, d / font.name))
+        return font, Path(shutil.copyfile(font, d / font.name))    # not copy2: a macOS system font carries SIP flags (chflags EPERM)
 
     def test_font_in_arabic_folder_measures(self):
         from lib import hb_text

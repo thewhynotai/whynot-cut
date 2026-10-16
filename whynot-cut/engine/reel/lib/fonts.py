@@ -28,8 +28,8 @@ _MEM: dict = {}                                               # stamp key -> fac
 _MEM_MAX = 4
 _ARABIC_FILES: dict = {}                                      # (file, index, size, mtime) -> supports Arabic
 
-# System Arabic fallbacks, best first (PostScript names). Windows: Segoe UI, Arial, Tahoma; macOS: Geeza Pro (a .ttc)
-# and Arial (Supplemental); Linux: Noto Sans Arabic, DejaVu Sans.
+# System Arabic fallbacks, best first (PostScript names). Windows: Segoe UI, Arial, Tahoma; macOS: Geeza Pro (a .ttc),
+# Arial (Supplemental) and Tahoma; Linux: Noto Sans Arabic, DejaVu Sans.
 FALLBACKS = {
     "windows": {"regular": ["SegoeUI", "ArialMT", "Tahoma"], "bold": ["SegoeUI-Bold", "Arial-BoldMT", "Tahoma-Bold"]},
     "darwin": {"regular": ["GeezaPro", "ArialMT", "Tahoma"], "bold": ["GeezaPro-Bold", "Arial-BoldMT", "Tahoma-Bold"]},
@@ -281,7 +281,7 @@ def supports_arabic(file: str, index: int = 0) -> bool:
 
 def arabic_fallback(bold: bool = False, dirs=None, system: str | None = None) -> dict | None:
     """The system font that draws Arabic when the client has none (G72): the platform's list (Windows: Segoe UI, Arial,
-    Tahoma; macOS: Geeza Pro, Arial; Linux: Noto Sans Arabic, DejaVu Sans), the bold faces first when `bold`, else
+    Tahoma; macOS: Geeza Pro, Arial, Tahoma; Linux: Noto Sans Arabic, DejaVu Sans), the bold faces first when `bold`, else
     any installed face that covers Arabic. None when the machine has no Arabic font at all."""
     fs = [f for f in faces(dirs) if f["arabic"]]
     by_ps = {}

@@ -280,7 +280,9 @@ class TestArabicFallback(FontDirs):
         if not hb_text.AVAILABLE:
             self.skipTest("HarfBuzz/FreeType not in this runtime")
         d = self.system_dir()
-        with mock.patch.object(plat, "font_dirs", lambda: [d]):
+        # the Windows fallback list (a Mac picks GeezaPro / Arial / Tahoma)
+        with mock.patch.object(plat, "font_dirs", lambda: [d]), mock.patch.object(plat, "IS_WIN", True), \
+                mock.patch.object(plat, "IS_MAC", False):
             b = self.brand({})
             f = b.font("body", 50)
             self.assertEqual((Path(f.for_text("نص").path).name, f.for_text("نص").size), ("segoeui.ttf", 50.0))

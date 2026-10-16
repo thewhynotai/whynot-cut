@@ -52,7 +52,7 @@ class TestParallelMap(unittest.TestCase):
         try:
             with use_context(Context(root)):
                 seen = parallel_map(lambda _: common.current_context().root, range(4), workers=3)
-            self.assertEqual({v for _, v in seen}, {root})
+            self.assertEqual({v for _, v in seen}, {root.resolve()})        # Context resolves its root (macOS /var -> /private/var)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

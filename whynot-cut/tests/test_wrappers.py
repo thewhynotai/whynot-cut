@@ -71,7 +71,9 @@ def make_engine(home: Path) -> Path:
 
 
 def norm(p: str) -> str:
-    return os.path.normcase(os.path.normpath(plat.native_path(p)))
+    """One spelling per path: links resolved (Python reports sys.prefix from the venv's real location, so on macOS
+    /var/folders/... comes back as /private/var/folders/...), case folded where the OS folds it."""
+    return os.path.normcase(os.path.realpath(plat.native_path(p)))
 
 
 def cmd_line(args, delayed=False, wrapper=CMD) -> str:

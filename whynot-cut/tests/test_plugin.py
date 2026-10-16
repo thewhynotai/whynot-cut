@@ -267,7 +267,8 @@ class TestClientMarker(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         rep = json.loads(r.stdout)
         self.assertTrue((root / MARKER).is_file())
-        self.assertIn(str(root / MARKER), [str(Path(p)) for p in rep["client_markers"]["written"]])
+        self.assertIn(os.path.realpath(root / MARKER),                    # the report names the resolved root (macOS /var -> /private/var)
+                      [os.path.realpath(p) for p in rep["client_markers"]["written"]])
         self.assertFalse((root / "assets" / MARKER).exists() or (root / "data" / MARKER).exists())
 
     def test_g70_doctor_fix_marks_only_the_given_client(self):
