@@ -1,0 +1,5 @@
+{
+  "_note": "Security watch allowlist (tools/ci/security_watch.py, .github/workflows/security-watch.yml). pushers = GitHub logins allowed to push; emails = commit author/committer emails allowed. The workflow reads this file from the commit BEFORE a push (never from the pushed commit), and any push that edits this file or the watch is reported even from the owner.",
+  "pushers": ["thewhynotai"],
+  "emails": ["info@thewhynot.ai"]
+}

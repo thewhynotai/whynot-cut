@@ -1,0 +1,123 @@
+# R-T8 security watch (3.0 Phase 4, Task 20). What it is, what it costs, what it cannot see: docs/ci.md, "Security watch".
+#
+# WATCHES, and opens an issue assigned to thewhynotai (so GitHub emails the owner) for:
+#   - a push by a pusher outside .github/security-allowlist.json, or with a commit author/committer email outside it;
+#   - a force-push (history rewrite) or a deleted branch/tag, even from the owner;
+#   - the repository being made public.
+# A push that changes .github/ or tools/ci/security_watch.py is reported by the twin file security-watch-paths.yml,
+# whose `paths:` filter starts it only for such a push (this file cannot see changed files before it runs).
+# The script and the allowlist that judge a push are checked out from the commit BEFORE the push (the default branch
+# for a new ref or a non-push event), never from the pushed commit, so a push cannot edit its own judge.
+# Decision script: tools/ci/security_watch.py (unit-tested on recorded event payloads).
+#
+# NOT COVERED (checked against GitHub's docs on 2026-10-16):
+#   - A new collaborator: `member` is not a workflow trigger, so Actions cannot see it.
+#   - A deploy key: there is no workflow trigger for it, and GITHUB_TOKEN cannot list a repository's deploy keys.
+#     GitHub's own email on a new deploy key is documented only for ORGANIZATION owners; this repository is under a
+#     personal account. Check Settings -> Deploy keys and Collaborators monthly (steps in docs/ci.md).
+#   - Pushing or deleting more than three tags at once creates no event.
+#   - `public` only runs from the default branch's copy of this file, so it alerts only once this file is there.
+#   - A push that edits this file can switch the watch off from that same push; the pre-push checkout and the twin
+#     file's finding flag it, but only if an edited workflow still runs.
+#   - Deleting a ref is covered only if GitHub starts a push workflow for a deletion; its docs do not say.
+#   - A stolen token that pushes as the owner with the owner's email looks like the owner.
+#
+# MINUTES (Linux bills x1 against the free 2,000 a month the macOS jobs also use, x10): the job-level `if:` skips a
+# normal push by the owner, and a skipped job bills nothing (a GitHub staff answer, not the billing docs; confirm once
+# in Settings -> Billing -> Usage). The job starts for a suspect push, a public event or a manual run: ~1 minute each.
+name: Security watch
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  public:
+  workflow_dispatch:
+
+# The branch trusted for a new branch or tag (no `before` to check out). GitHub's default branch is `main`, which
+# holds no 3.0 files until release day (Addendum I4), so a fallback to it would always break: switch this to the
+# default branch when 3.0 lands on main.
+env:
+  TRUSTED_BASE: release/3.0
+
+permissions:
+  contents: read
+  issues: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  watch:
+    # The pusher login and author email below must match .github/security-allowlist.json: an `if:` cannot read
+    # files, so they are repeated here (tests/test_security_watch.py fails when they differ). GitHub compares
+    # these strings without regard to case.
+    if: >-
+      github.event_name != 'push' ||
+      github.event.deleted ||
+      github.event.forced ||
+      github.event.pusher.name != 'thewhynotai' ||
+      github.event.head_commit.author.email != 'info@thewhynot.ai'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.before != '0000000000000000000000000000000000000000' && github.event.before || env.TRUSTED_BASE }}
+          persist-credentials: false
+          sparse-checkout: |
+            tools/ci
+            .github
+
+      # The compare API, not git: credentials are not kept after checkout, and it works for a rewritten history.
+      # `!unavailable` tells the script the list could not be fetched; it reports that as a finding.
+      - name: List the files this push changed
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          DEFAULT_BRANCH: ${{ env.TRUSTED_BASE }}
+        run: |
+          zero=0000000000000000000000000000000000000000
+          base="$BEFORE"
+          [ "$base" = "$zero" ] && base="$DEFAULT_BRANCH"
+          if [ "$AFTER" = "$zero" ]; then
+            : > "$RUNNER_TEMP/changed.txt"
+          elif gh api "repos/$GITHUB_REPOSITORY/compare/$base...$AFTER" --jq '.files[]?.filename' > "$RUNNER_TEMP/changed.raw"; then
+            sort -u "$RUNNER_TEMP/changed.raw" > "$RUNNER_TEMP/changed.txt"
+          else
+            echo '!unavailable' > "$RUNNER_TEMP/changed.txt"
+          fi
+
+      # Exit 0 with or without findings; non-zero means the watch itself broke (the last step then says so).
+      - name: Check the event
+        id: watch
+        run: |
+          args=()
+          if [ -f "$RUNNER_TEMP/changed.txt" ]; then args+=(--changed-files "$RUNNER_TEMP/changed.txt"); fi
+          python3 tools/ci/security_watch.py "${args[@]}"
+
+      # Untrusted text (branch names, commit emails) reaches the shell only through env: variables, never inline.
+      - name: Open the issue
+        if: steps.watch.outputs.title != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ steps.watch.outputs.title }}
+          BODY: ${{ steps.watch.outputs.body }}
+        run: |
+          printf '%s\n' "$BODY" > "$RUNNER_TEMP/security-watch-body.md"
+          gh label create security --force --color B60205 --description "Security watch" --repo "$GITHUB_REPOSITORY" || true
+          gh issue create --repo "$GITHUB_REPOSITORY" --assignee thewhynotai --label security --title "$TITLE" --body-file "$RUNNER_TEMP/security-watch-body.md" \
+            || gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$RUNNER_TEMP/security-watch-body.md"
+
+      - name: Say the watch itself broke
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s\n' "The security watch could not check an event (it failed to run), so a push or change may have gone unchecked." "" "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" "" "Event: $GITHUB_EVENT_NAME on $GITHUB_REF_TYPE" > "$RUNNER_TEMP/security-watch-broke.md"
+          gh label create security --force --color B60205 --description "Security watch" --repo "$GITHUB_REPOSITORY" || true
+          gh issue create --repo "$GITHUB_REPOSITORY" --assignee thewhynotai --label security --title "Security watch BROKE: it could not check an event" --body-file "$RUNNER_TEMP/security-watch-broke.md" \
+            || gh issue create --repo "$GITHUB_REPOSITORY" --title "Security watch BROKE: it could not check an event" --body-file "$RUNNER_TEMP/security-watch-broke.md"
