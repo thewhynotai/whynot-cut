@@ -16,6 +16,7 @@ import errno
 import io
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -306,6 +307,30 @@ class Run(_Home):
         d.kill()
         self.assertEqual(security.read_engine_json(self.home)["pid"], 999999)
 
+    def test_start_phase_times_are_audited_without_token_or_path(self):
+        """One `startup` audit row: elapsed ms since process entry for each start phase (entry, imports, lock,
+        listening, engine.json), so a slow start can be named from the audit log alone. No path, no token."""
+        t = time.monotonic()
+        with mock.patch.dict(daemon._PHASES, {"entry": t - 0.5, "imports": t - 0.2}, clear=True):
+            d = self.start_daemon()
+        info = security.read_engine_json(self.home)
+        d.kill()
+        rows = [r for r in self.audit() if r["event"] == "startup"]
+        self.assertEqual(len(rows), 1, rows)
+        reason = rows[0]["reason"]
+        m = re.fullmatch(r"entry=0ms imports=(\d+)ms lock=(\d+)ms listening=(\d+)ms engine\.json=(\d+)ms", reason)
+        self.assertIsNotNone(m, reason)
+        ms = [int(x) for x in m.groups()]
+        self.assertEqual(ms, sorted(ms), reason)                  # phases in order
+        self.assertGreaterEqual(ms[0], 250)                      # imports 0.3 s after entry (marked above)
+        self.assertGreaterEqual(ms[1], 500)                      # the lock after the run started (0.5 s after entry)
+        text = json.dumps(rows[0])
+        self.assertNotIn(info["token"], text)
+        self.assertNotIn(str(self.home), text)
+        self.assertNotIn(self.home.name, text)
+        self.assertNotRegex(reason, r"[\\/:]")                   # nothing path-like
+        self.assertEqual([r["outcome"] for r in self.audit() if r["event"] == "daemon"], ["started", "stopped"])
+
     def test_defaults(self):
         self.assertEqual(daemon.PROBE_TIMEOUT, 0.3)
         self.assertEqual(daemon.ENSURE_WAIT, 1.0)
@@ -438,6 +463,92 @@ class Ensure(_Home):
         self.assertFalse(res["ok"], res)
         self.assertEqual(res["state"], "not_answering")
         self.assertTrue(res["how"])
+
+
+class FakeStatusConn:
+    """http.client.HTTPConnection stand-in for a daemon that needs `latency` seconds to answer GET /status: a probe
+    whose timeout is shorter times out (raised at once: no wall clock), a longer one gets the 200 answer. `refuse`
+    models a live pid with nothing listening. Every timeout used is recorded."""
+    latency = 0.0
+    refuse = False
+    body: dict = {}
+    timeouts: list = []
+
+    def __init__(self, host, port, timeout=None):
+        self.timeout = timeout
+        type(self).timeouts.append(timeout)
+
+    def request(self, method, path, body=None, headers=None):
+        if type(self).refuse:
+            raise ConnectionRefusedError(10061, "simulated: nothing listens")
+
+    def getresponse(self):
+        if self.timeout < type(self).latency:
+            raise TimeoutError("simulated: timed out")
+        raw = json.dumps(type(self).body).encode()
+        return types.SimpleNamespace(status=200, read=lambda n=-1: raw)
+
+    def close(self):
+        pass
+
+
+class SlowDaemon(_Home):
+    """A live daemon (alive pid, holds the lock) whose GET /status answers late on a loaded machine is a SLOW daemon,
+    not a dead one: ensure() / status() must not spawn a rival (which exits EXIT_LOCKED) or call it not_answering.
+    One that never answers within the bounded slow probes keeps the honest not_answering result. Deterministic: the
+    HTTP connection, the version and the spawn are replaced; nothing sleeps, nothing is killed."""
+
+    PORT = 45678
+
+    def setUp(self):
+        super().setUp()
+        pid = os.getpid()                               # alive for the whole test
+        security.write_engine_json(self.home, port=self.PORT, token=security.make_token(), pid=pid,
+                                   version="3.0.0-test")
+        FakeStatusConn.latency, FakeStatusConn.refuse, FakeStatusConn.timeouts = 0.0, False, []
+        FakeStatusConn.body = {"protocol": security.PROTOCOL, "daemon_version": "3.0.0-test", "pid": pid,
+                               "port": self.PORT, "sessions": [], "uptime_s": 12.5}
+        self.spawned = []
+
+        def rival(home):                                # a second daemon cannot take the lock: it exits at once
+            self.spawned.append(home)
+            return types.SimpleNamespace(pid=4242, poll=lambda: daemon.EXIT_LOCKED)
+        for p in (mock.patch.object(daemon.http.client, "HTTPConnection", FakeStatusConn),
+                  mock.patch.object(daemon, "_spawn", rival),
+                  mock.patch.object(daemon, "_version", return_value="3.0.0-test")):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_ensure_waits_for_a_slow_daemon_and_never_spawns_a_rival(self):
+        FakeStatusConn.latency = 1.5                    # a healthy daemon on a loaded machine
+        res = daemon.ensure(self.home)
+        self.assertEqual((res["ok"], res["state"], res.get("started")), (True, "running", False), res)
+        self.assertEqual(self.spawned, [], "ensure spawned a rival next to a live, slow daemon")
+        self.assertEqual(res["pid"], os.getpid())
+        self.assertLessEqual(sum(FakeStatusConn.timeouts), daemon.PROBE_TRIES * daemon.PROBE_TIMEOUT
+                             + sum(daemon.SLOW_PROBE_TIMEOUTS))
+
+    def test_status_of_a_slow_daemon_is_running(self):
+        FakeStatusConn.latency = 1.5
+        st = daemon.status(self.home)
+        self.assertEqual((st["ok"], st["running"], st["state"]), (True, True, "running"), st)
+
+    def test_a_daemon_that_never_answers_is_still_not_answering_within_a_bound(self):
+        FakeStatusConn.latency = float("inf")
+        res = daemon.ensure(self.home, wait=1.0)
+        self.assertEqual((res["ok"], res["state"]), (False, "not_answering"), res)
+        self.assertIn("reel serve --stop", res["how"])
+        self.assertEqual(len(self.spawned), 1)          # only after the bounded slow probes ran out
+        bound = daemon.PROBE_TRIES * daemon.PROBE_TIMEOUT + sum(daemon.SLOW_PROBE_TIMEOUTS)
+        self.assertLessEqual(sum(FakeStatusConn.timeouts), 2 * bound)
+        self.assertLessEqual(max(FakeStatusConn.timeouts), max(daemon.SLOW_PROBE_TIMEOUTS))
+
+    def test_a_refused_connection_gets_no_slow_probes(self):
+        """Nothing listens on the recorded port (a hung or closing daemon, not a slow one): only the short probes."""
+        FakeStatusConn.refuse = True
+        res = daemon.ensure(self.home, wait=1.0)
+        self.assertEqual((res["ok"], res["state"]), (False, "not_answering"), res)
+        self.assertEqual(set(FakeStatusConn.timeouts), {daemon.PROBE_TIMEOUT})
 
 
 class DiscoveryCopy(_Home):

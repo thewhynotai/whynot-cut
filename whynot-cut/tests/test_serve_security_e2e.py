@@ -34,7 +34,9 @@ from serve import daemon, security  # noqa: E402
 from test_serve_app import WsClient, command, http  # noqa: E402
 
 WAIT = 30.0                       # the machine may be loaded: a cold daemon start can take seconds
+START_BOUND = 120.0               # a daemon ensure left "starting" must answer --status as running within this
 MAIN = ENGINE / "serve" / "__main__.py"
+PHASES_RE = r"entry=0ms imports=\d+ms lock=\d+ms listening=\d+ms engine\.json=\d+ms"
 
 
 def py_cmd(*args) -> list:
@@ -78,6 +80,44 @@ def audit_rows(home: Path) -> list:
 def audit_text(home: Path) -> str:
     logs = security.audit_log_path(home).parent
     return "".join(f.read_text(encoding="utf-8") for f in sorted(logs.glob("serve-audit.log*")))
+
+
+def diagnostics(home: Path) -> str:
+    """serve.log (the daemon's stderr), the audit log and the start phase times of `home`, for a failure message. Read
+    BEFORE the cleanup deletes the temp home. The token (the audit log never holds it) is masked anyway."""
+    token = (security.read_engine_json(home) or {}).get("token")
+    parts = []
+    for label, read in (("serve.log", lambda: (home / "logs" / "serve.log").read_text("utf-8", "replace")[-4000:]),
+                        ("serve-audit.log", lambda: "\n".join(audit_text(home).splitlines()[-60:])),
+                        ("start phases", lambda: "\n".join(r.get("reason", "") for r in audit_rows(home)
+                                                           if r.get("event") == "startup") or "(none yet)")):
+        try:
+            text = read()
+        except (OSError, ValueError) as e:
+            text = f"({type(e).__name__}: {e})"
+        parts.append(f"--- {label} ---\n{text}")
+    out = "\n".join(parts)
+    return out.replace(token, "<token>") if token else out
+
+
+def status_cli(home: Path) -> dict:
+    """`reel serve --status` through the CLI entry; its JSON whatever the exit code (not_answering exits 1)."""
+    r = subprocess.run(py_cmd(MAIN, "--status", "--home", home), capture_output=True, timeout=60,
+                       stdin=subprocess.DEVNULL)
+    try:
+        return json.loads(r.stdout.decode("utf-8"))
+    except ValueError:
+        return {"state": None, "exit": r.returncode, "stderr": r.stderr.decode("utf-8", "replace")[-2000:]}
+
+
+def until_running(get, bound: float = START_BOUND) -> dict:
+    """Poll `get()` (a status document) until it says running, for at most `bound` seconds; the last document."""
+    deadline = time.monotonic() + bound
+    doc = get()
+    while doc.get("state") != "running" and time.monotonic() < deadline:
+        time.sleep(0.25)
+        doc = get()
+    return doc
 
 
 def port_open(port: int, host: str = "127.0.0.1", family=socket.AF_INET) -> bool:
@@ -132,8 +172,12 @@ class LiveCase(unittest.IsolatedAsyncioTestCase):
         cls.addClassCleanup(shutil.rmtree, cls.home, True)       # runs last (cleanups are LIFO)
         cls.addClassCleanup(kill_daemons, cls.home)
         res = daemon.ensure(cls.home, wait=WAIT)
+        # "starting" when the wait runs out is ensure's contract (daemon.ENSURE_WAIT: "Still starting after that is
+        # {ok: true, state: starting}"), not a failure; the daemon must then answer --status within START_BOUND
+        if res.get("ok") and res.get("state") == "starting":
+            res = until_running(lambda: status_cli(cls.home))
         if not (res.get("ok") and res.get("state") == "running"):
-            raise AssertionError(f"the daemon did not start: {res}")
+            raise AssertionError(f"the daemon did not start: {res}\n{diagnostics(cls.home)}")
         info = security.read_engine_json(cls.home)
         cls.port, cls.token, cls.pid = info["port"], info["token"], info["pid"]
 
@@ -449,8 +493,21 @@ class StopViaCli(unittest.TestCase):
         return json.loads(r.stdout.decode("utf-8"))
 
     def test_ensure_then_stop(self):
+        try:
+            self.ensure_then_stop()
+        except Exception as e:           # serve.log, the audit log and the start phases, before cleanup deletes them
+            raise self.failureException(f"{e}\n{diagnostics(self.home)}") from e
+
+    def ensure_then_stop(self):
         up = self.run_cli("--ensure", "--wait", WAIT)
-        self.assertEqual((up["state"], up["started"]), ("running", True), up)
+        # "starting" when --wait runs out is ensure's contract (daemon.ENSURE_WAIT: "Still starting after that is
+        # {ok: true, state: starting}", which the SessionStart hook relies on), not a failure. The daemon it started
+        # must then show as running through `--status` within START_BOUND.
+        self.assertIn(up["state"], ("running", "starting"), up)
+        self.assertIs(up["started"], True, up)
+        if up["state"] == "starting":     # its pid may be a venv launcher's: the daemon's own pid comes from --status
+            up = until_running(lambda: status_cli(self.home))
+            self.assertEqual((up.get("ok"), up.get("state")), (True, "running"), up)
         info = security.read_engine_json(self.home)
         self.assertEqual(up["pid"], info["pid"])
         self.assertTrue(port_open(info["port"]))
@@ -465,6 +522,11 @@ class StopViaCli(unittest.TestCase):
         self.assertEqual([r["outcome"] for r in rows], ["started", "stopped"])
         self.assertTrue(any(r["event"] == "shutdown" and r["outcome"] == "accepted" for r in audit_rows(self.home)))
         self.assertNotIn(info["token"], audit_text(self.home))
+        # the real detached start (__main__.py marks entry and imports): one startup row with every phase, no path
+        startup = [r for r in audit_rows(self.home) if r["event"] == "startup"]
+        self.assertEqual(len(startup), 1, startup)
+        self.assertRegex(startup[0]["reason"], f"^{PHASES_RE}$")
+        self.assertNotIn(str(self.home), json.dumps(startup[0]))
 
 
 BOOT = r"""
@@ -511,9 +573,14 @@ class StuckQueueDoesNotBlockExit(unittest.IsolatedAsyncioTestCase):
         else:
             self.fail("the queue call never started")
         t0 = time.monotonic()
+        # Reap the daemon WHILE stop() waits for it to exit: it is this test's own child, and on POSIX an exited child
+        # nobody has waited for is a zombie that os.kill(pid, 0) and `ps` still report as alive, so stop() would see
+        # it "alive" for its whole STOP_WAIT (Mac CI: {state: stopping}). proc.pid is the daemon's pid there (a POSIX
+        # venv python is a symlink, not a launcher). Windows has no zombies; the concurrent wait is harmless there.
+        reaped = asyncio.ensure_future(asyncio.to_thread(proc.wait, 10))
         res = await asyncio.to_thread(daemon.stop, home)
         self.assertTrue(res["ok"], res)
-        await asyncio.to_thread(proc.wait, 10)
+        await reaped
         took = time.monotonic() - t0
         self.assertLess(took, 2.5, f"the daemon took {took:.2f}s to exit with a stuck queue call")
         self.assertFalse(security.engine_json_path(home).exists())

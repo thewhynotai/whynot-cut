@@ -375,7 +375,9 @@ class Discovery(_Home):
     def test_a_pointer_nobody_can_remove_is_reported_not_hidden(self):
         d = self.start_daemon()
         pid = security.read_engine_json(self.home)["pid"]
-        res = self._stop_as_another_process(d, stop_fails_too=True, wait=0.5)
+        # STOP_WAIT, not less: the daemon thread must exit inside the wait, and 0.5 s failed on a loaded machine
+        # ({state: stopping}); the pointer can never be removed here, so stop() always uses the whole wait
+        res = self._stop_as_another_process(d, stop_fails_too=True, wait=daemon.STOP_WAIT)
         self.assertEqual((res["ok"], res["state"], res.get("discovery_left")), (True, "stopped", True), res)
         self.assertIn("could not be removed", res["warning"])
         self.assertIn("reel serve --ensure", res["how"])

@@ -13,19 +13,26 @@
                   ~/.whynot-cut (the only home the UXP panel can compute), a discovery record with the same fields plus
                   `home` is written to ~/.whynot-cut/bridge/engine.json (same atomic user-only writer; never over a
                   live daemon's file) and removed, pid-guarded, on exit, BEFORE the home's own engine.json (so "own
-                  record gone" implies "pointer gone"; a pointer that cannot be removed is audited).
+                  record gone" implies "pointer gone"; a pointer that cannot be removed is audited). The start phases
+                  are audited in one `startup` row, in ms since process entry (__main__.py marks entry and imports):
+                  "entry=0ms imports=Nms lock=Nms listening=Nms engine.json=Nms" (names and numbers only: no path, no
+                  token), so a slow start can be named from the audit log alone.
     ensure(home)  idempotent start (the SessionStart hook). A daemon whose engine.json pid is alive (same process start
                   time when recorded) and whose GET /status answers with the token within PROBE_TIMEOUT is returned as
-                  is: no second daemon. Otherwise a stale file (dead pid) is removed and a detached daemon is started
-                  with this interpreter (Windows DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW, with
-                  CREATE_BREAKAWAY_FROM_JOB tried first so a hook's job object cannot take it down; POSIX
-                  start_new_session=True), then it waits up to `wait` (ENSURE_WAIT) for engine.json + /status. Still
+                  is: no second daemon. A live pid whose /status TIMES OUT (it accepted the connection but answers late:
+                  a loaded machine) is a slow daemon, not a dead one: it gets the longer SLOW_PROBE_TIMEOUTS probes
+                  before a rival is ever spawned (a rival could only exit EXIT_LOCKED and turn a healthy daemon into
+                  "not_answering"); one that answers none of them (~8 s in all) is still reported not_answering. A
+                  refused connection gets no slow probes. Otherwise a stale file (dead pid) is removed and a detached
+                  daemon is started with this interpreter (Windows DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
+                  CREATE_NO_WINDOW, with CREATE_BREAKAWAY_FROM_JOB tried first so a hook's job object cannot take it
+                  down; POSIX start_new_session=True), then it waits up to `wait` (ENSURE_WAIT) for engine.json + /status. Still
                   starting after that is {ok: true, state: starting}. Two ensures at once may both spawn; the instance
                   lock lets one daemon live and the other exits at once. A daemon of another plugin version or
                   protocol (left running by a plugin update, from a stale or deleted folder) is stopped through the
                   authenticated /shutdown and replaced: {state: restarted, previous_version, previous_protocol}; one
                   that does not stop is reported (not_answering), never killed.
-    status(home)  reads engine.json and probes it; changes nothing.
+    status(home)  reads engine.json and probes it (a slow daemon gets the slow probes too); changes nothing.
     stop(home)    POST /shutdown with the token, then waits (STOP_WAIT) for engine.json to go, for the discovery
                   record at ~/.whynot-cut to no longer record that daemon (pid + start time), and for the process to
                   exit; a stale file (dead pid) is removed, and so is its pointer. A pointer the exited daemon could
@@ -60,10 +67,11 @@ from . import adapters, security
 from .app import App
 
 __all__ = ["run", "ensure", "status", "stop", "daemon_command", "InstanceLock", "PROBE_TIMEOUT", "ENSURE_WAIT",
-           "STOP_WAIT", "EXIT_OK", "EXIT_FAILED", "EXIT_LOCKED"]
+           "STOP_WAIT", "EXIT_OK", "EXIT_FAILED", "EXIT_LOCKED", "SLOW_PROBE_TIMEOUTS", "mark_phase"]
 
 PROBE_TIMEOUT = 0.3            # GET /status must answer within this
 PROBE_TRIES = 3                # a live pid gets this many probes before a new daemon is tried (busy machine)
+SLOW_PROBE_TIMEOUTS = (1.0, 2.0, 4.0)   # then these, when a probe TIMED OUT (a slow daemon, not a dead one)
 ENSURE_WAIT = 1.0              # how long ensure() waits for a new daemon
 STOP_WAIT = 3.0                # how long stop() waits for the daemon to exit
 POLL_S = 0.05
@@ -72,6 +80,19 @@ EXIT_OK, EXIT_FAILED, EXIT_LOCKED = 0, 1, 3
 MAIN = Path(__file__).resolve().with_name("__main__.py")
 
 _children: list = []           # the daemons this process started (tests reap them; a real `reel` exits right away)
+_PHASES: dict = {}             # start phase -> time.monotonic(): "entry" and "imports" (marked by __main__.py)
+
+
+def mark_phase(name: str, at: float | None = None) -> None:
+    """Record when a start phase was reached (the first mark wins). __main__.py marks "entry" (its first line) and
+    "imports" (serve.daemon and everything it pulls in, loaded); _serve adds lock, listening and engine.json."""
+    _PHASES.setdefault(name, time.monotonic() if at is None else at)
+
+
+def _phase_line(phases: dict) -> str:
+    """'entry=0ms imports=812ms ...': ms since process entry, in the order reached. Names and numbers only."""
+    t0 = phases["entry"]
+    return " ".join(f"{k}={max(0, round((t - t0) * 1000))}ms" for k, t in phases.items())
 
 
 def _home(home) -> Path:
@@ -145,6 +166,8 @@ def run(home=None, *, port: int = 0, version: str | None = None, ready=None, app
 
 
 async def _serve(home: Path, *, port, version, ready, app_options, install_signals) -> int:
+    now = time.monotonic()             # an in-process run (tests) has no __main__ marks: its phases start here
+    phases = {"entry": _PHASES.get("entry", now), "imports": _PHASES.get("imports", now)}
     pid = os.getpid()
     token = security.make_token()
     audit = security.AuditLog(security.audit_log_path(home), token=token)
@@ -153,15 +176,19 @@ async def _serve(home: Path, *, port, version, ready, app_options, install_signa
         locked = lock.acquire()
     except OSError as e:                   # the bridge folder or the lock file cannot be made user-only
         audit.log("daemon", outcome="failed", reason=f"pid {pid}: serve.lock ({type(e).__name__})")
+        audit.log("startup", outcome="phases", reason=_phase_line(phases))
         return EXIT_FAILED
     if not locked:
         audit.log("daemon", outcome="refused", reason=f"pid {pid}: another reel serve already holds this engine home")
+        audit.log("startup", outcome="phases", reason=_phase_line(phases))
         return EXIT_LOCKED
+    phases["lock"] = time.monotonic()
     app = App(home=home, token=token, version=version, audit=audit, **app_options)
     started = False
     discovery = None
     try:
         port = await app.start(port)
+        phases["listening"] = time.monotonic()
         record = {"port": port, "token": token, "pid": pid, "version": version,
                   "pid_created": writer_lock.process_created(pid),
                   "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
@@ -170,9 +197,12 @@ async def _serve(home: Path, *, port, version, ready, app_options, install_signa
             security.write_engine_json(home, **record)
         except (OSError, ValueError) as e:
             audit.log("daemon", outcome="failed", reason=f"engine.json could not be written ({type(e).__name__})")
+            audit.log("startup", outcome="phases", reason=_phase_line(phases))
             return EXIT_FAILED
+        phases["engine.json"] = time.monotonic()
         started = True
         audit.log("daemon", outcome="started", reason=f"{' '.join(app.listening)} pid {pid} version {version}")
+        audit.log("startup", outcome="phases", reason=_phase_line(phases))
         discovery = _write_discovery(home, record, audit)
         loop = asyncio.get_running_loop()
         if install_signals and os.name != "nt":
@@ -279,10 +309,17 @@ def _alive(info: dict) -> bool:
 
 def _http(info: dict, method: str, path: str, timeout: float):
     """(status, parsed JSON body or None) of one authenticated request to the daemon, or (None, None)."""
+    code, body, _ = _request(info, method, path, timeout)
+    return code, body
+
+
+def _request(info: dict, method: str, path: str, timeout: float):
+    """_http plus whether it failed by TIMING OUT (the daemon is there but slow) rather than by a refusal, a broken
+    connection or a bad answer: (status, body, timed_out)."""
     port, token = info.get("port"), info.get("token")
     if (isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536
             or not security.token_shape_ok(token)):
-        return None, None
+        return None, None, False
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     try:
         conn.request(method, path, body=b"" if method == "POST" else None,
@@ -293,20 +330,50 @@ def _http(info: dict, method: str, path: str, timeout: float):
             body = json.loads(raw)
         except ValueError:
             body = None
-        return r.status, body
+        return r.status, body, False
+    except TimeoutError:               # socket.timeout: connected (or queued in the backlog) but no answer in time
+        return None, None, True
     except (OSError, http.client.HTTPException):
-        return None, None
+        return None, None, False
     finally:
         conn.close()
+
+
+def _probe_once(info: dict, timeout: float) -> tuple[dict | None, bool]:
+    """(the /status answer when it is the daemon engine.json names (same pid and port) else None, timed out)."""
+    code, body, timed_out = _request(info, "GET", "/status", timeout)
+    if code == 200 and isinstance(body, dict) and body.get("pid") == info.get("pid") \
+            and body.get("port") == info.get("port"):
+        return body, False
+    return None, timed_out
 
 
 def _probe(info: dict, tries: int = 1) -> dict | None:
     """The daemon's /status answer when it is the daemon engine.json names (same pid and port), else None."""
     for _ in range(max(1, tries)):
-        code, body = _http(info, "GET", "/status", PROBE_TIMEOUT)
-        if code == 200 and isinstance(body, dict) and body.get("pid") == info.get("pid") \
-                and body.get("port") == info.get("port"):
-            return body
+        st, _ = _probe_once(info, PROBE_TIMEOUT)
+        if st is not None:
+            return st
+    return None
+
+
+def _probe_live(info: dict) -> dict | None:
+    """_probe for a pid known to be alive: PROBE_TRIES short probes, then, when one of them TIMED OUT (the daemon took
+    the connection but answers late: a loaded machine), one probe per SLOW_PROBE_TIMEOUTS before it is given up on
+    (bounded: ~8 s in all). A slow daemon is not a dead one; a rival spawned next to it only exits EXIT_LOCKED. A
+    refused connection or a wrong answer ends the slow probes at once (nothing slow is listening there)."""
+    slow = False
+    for _ in range(PROBE_TRIES):
+        st, timed_out = _probe_once(info, PROBE_TIMEOUT)
+        if st is not None:
+            return st
+        slow = slow or timed_out
+    if not slow:
+        return None
+    for t in SLOW_PROBE_TIMEOUTS:
+        st, timed_out = _probe_once(info, t)
+        if st is not None or not timed_out:
+            return st
     return None
 
 
@@ -372,7 +439,7 @@ def ensure(home=None, *, wait: float = ENSURE_WAIT) -> dict:
     previous: dict = {}
     if info is not None:
         if _alive(info):
-            st = _probe(info, PROBE_TRIES)
+            st = _probe_live(info)         # a slow daemon gets its slow probes here, before any rival is spawned
             if st is not None:
                 old_version, old_protocol = st.get("daemon_version", info.get("version")), st.get("protocol")
                 if old_version == _version() and old_protocol == security.PROTOCOL:
@@ -401,8 +468,8 @@ def ensure(home=None, *, wait: float = ENSURE_WAIT) -> dict:
         code = proc.poll()
         if code is not None:
             cur = _own_record(home)
-            if cur is not None and _alive(cur):
-                st = _probe(cur, PROBE_TRIES)
+            if cur is not None and _alive(cur):    # the record probed above already had its slow probes
+                st = _probe(cur, PROBE_TRIES) if cur == info else _probe_live(cur)
                 if st is not None:                 # another ensure's daemon won the instance lock
                     return _doc(cur, st, "running", started=False)
             if code == EXIT_LOCKED:
@@ -430,7 +497,7 @@ def status(home=None) -> dict:
     if not _alive(info):
         return {"ok": True, "running": False, "state": "stale", "pid": info.get("pid"),
                 "how": "reel serve --ensure starts a new daemon (it replaces the stale engine.json)"}
-    st = _probe(info, PROBE_TRIES)
+    st = _probe_live(info)
     if st is None:
         return {"ok": False, "running": False, "state": "not_answering", "pid": info.get("pid"),
                 "port": info.get("port"), "error": f"reel serve (pid {info.get('pid')}) does not answer",
