@@ -507,6 +507,9 @@ def gate_record(progress: str, version: str = "") -> list:
             continue
         cells = _cells(ln)
         if seen < 2:
+            if seen == 0 and cells != ["Gate", "Tag", "Windows", "macOS CI", "Live Mac"]:
+                raise ValueError("PROGRESS.md gate record: the table must start with the header row "
+                                 "| Gate | Tag | Windows | macOS CI | Live Mac |")
             if seen == 1 and not all(re.fullmatch(r":?-+:?", c) for c in cells):
                 raise ValueError("PROGRESS.md gate record: the header row must be followed by a |---| separator row")
             seen += 1
@@ -578,14 +581,21 @@ def gate_lines_ar(st: dict) -> list:
             "smoke green": f"الماك: الاختبار السريع (smoke) بس هو اللي عدّى على ماك عند `{mac['tag']}`، مش كل الاختبارات.",
             "full red": f"الماك: فيه اختبارات فشلت على ماك (full suite) عند `{mac['tag']}`.",
             "smoke red": f"الماك: الاختبار السريع (smoke) فشل على ماك عند `{mac['tag']}`."}[mac["kind"]]
+    def detail(cell: str, form: str) -> str:          # the words after the form, as written (the EN line has them too)
+        rest = cell[len(form):].strip(" ;") if cell.startswith(form) else ""
+        rest = rest[1:-1] if rest.startswith("(") and rest.endswith(")") and rest.count("(") == 1 else rest
+        return f" (التفاصيل: {rest})" if rest else ""
+    line = line[:-1] + detail(mac["detail"], mac["kind"]) + "."
     if st["latest_tag"] and mac["tag"] != st["latest_tag"]:
         line += f" ولسه ما اتعملش CI على ماك عند آخر مرحلة `{st['latest_tag']}`."
     live = _form(mac["live"], LIVE_FORMS, "Live Mac", mac["tag"])
     ph = re.search(r"\bPhase (\d+)", mac["live"])
     when = f" (المرحلة {ph.group(1)})" if ph else ""
-    return [line, {"Verified": "التجربة الحية على ماك حقيقي: اتأكّدت.",
-                   "Partly verified": f"التجربة الحية على ماك حقيقي: اتأكّدت جزئيًا بس{when}.",
-                   "Not verified": f"التجربة الحية على ماك حقيقي: لسه{when}."}[live]]
+    more = "" if (live == "Not verified" and re.fullmatch(r"Not verified(?: \(Phase \d+(?:, H\d+)?\))?", mac["live"])) \
+        else detail(mac["live"], live)
+    return [line, {"Verified": f"التجربة الحية على ماك حقيقي: اتأكّدت{more}.",
+                   "Partly verified": f"التجربة الحية على ماك حقيقي: اتأكّدت جزئيًا بس{when}{more}.",
+                   "Not verified": f"التجربة الحية على ماك حقيقي: لسه{when}{more}."}[live]]
 
 
 def render(template: str, values: dict) -> str:

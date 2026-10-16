@@ -654,9 +654,21 @@ class TestGateState(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         for text in ("| Gate | Tag | Windows | macOS CI | Live Mac |\n| 0 | v1-p0 | full green | not run | Not verified |\n",
                      "| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n"
-                     "0 | v1-p0 | full green | not run | Not verified |\n"):
+                     "0 | v1-p0 | full green | not run | Not verified |\n",
+                     # f2b46e6 re-review: a data row taken as the header was dropped silently
+                     "| 0 | v1-p0 | full green | not run | Not verified |\n",
+                     "| 3 | v1-p3.1 | full green | full red (1 F) | Not verified |\n|---|---|---|---|---|\n"
+                     "| 3 | v1-p3 | full green | full green | Not verified |\n"):
             with self.assertRaises(ValueError, msg=text):
                 rel.gate_record("## Gate record\n\n" + text)
+
+    def test_the_arabic_lines_carry_the_detail_too(self):
+        """f2b46e6 re-review: the Arabic page printed only the form; a contradicting detail vanished there."""
+        ar = "\n".join(rel.gate_lines_ar(self._st("full green; full red (45 F)", "Verified; actually not")))
+        self.assertIn("full red (45 F)", ar)
+        self.assertIn("actually not", ar)
+        plain = "\n".join(rel.gate_lines_ar(self._st("full green", "Not verified")))
+        self.assertNotIn("(التفاصيل", plain)
 
     def test_a_passed_phase_shows_its_newest_gate_tag(self):
         passed, _ = rel.passed_phases(self.PROGRESS)
