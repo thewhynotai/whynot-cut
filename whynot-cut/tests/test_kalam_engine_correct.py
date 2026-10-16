@@ -882,7 +882,11 @@ class TestSubscriptionNeverInheritsApiKeys(unittest.TestCase):
     """Task 10 review M4 (executor ruling): the subscription backend runs `claude -p` with an explicit environment that has
     neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN, so it can never fall into API billing silently (nothing paid)."""
 
-    KEYS = {"ANTHROPIC_API_KEY": "sk-test-parent-key", "ANTHROPIC_AUTH_TOKEN": "tok-test-parent-token"}
+    # the API keys and the provider switches (Bedrock / Vertex / a proxy base URL): any of them can send the call to a paid
+    # provider, so none may reach the subscription child (executor ruling, Task 10 M4 + follow-up)
+    KEYS = {"ANTHROPIC_API_KEY": "sk-test-parent-key", "ANTHROPIC_AUTH_TOKEN": "tok-test-parent-token",
+            "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1",
+            "ANTHROPIC_BASE_URL": "https://proxy.example.invalid/v1"}
 
     def test_the_child_env_handed_to_popen_lacks_both_keys_while_the_parent_has_them(self):
         seen = {}
@@ -910,10 +914,11 @@ class TestSubscriptionNeverInheritsApiKeys(unittest.TestCase):
             self.assertEqual({k: os.environ.get(k) for k in self.KEYS}, self.KEYS)   # the parent is untouched
 
     def test_a_real_child_process_does_not_see_the_keys(self):
-        code = "import os; print(os.environ.get('ANTHROPIC_API_KEY'), os.environ.get('ANTHROPIC_AUTH_TOKEN'), os.environ.get('KEEP_ME'))"
+        names = list(self.KEYS)
+        code = "import os; print(' '.join(str(os.environ.get(k)) for k in %r + ['KEEP_ME']))" % (names,)
         with mock.patch.dict(os.environ, dict(self.KEYS, KEEP_ME="1")):
             rc, out = _run_cli([sys.executable, "-c", code], "", ".")
-            self.assertEqual(out.strip(), "None None 1")
+            self.assertEqual(out.strip(), " ".join(["None"] * len(names) + ["1"]))
             self.assertEqual({k: os.environ.get(k) for k in self.KEYS}, self.KEYS)
         self.assertEqual(rc, 0)
 
@@ -944,10 +949,14 @@ class TestSubscriptionNeverInheritsApiKeys(unittest.TestCase):
         self.assertEqual(env.get("KEEP_ME"), "1")
 
     def test_child_env_matching_is_case_insensitive_on_windows_only(self):
-        base = {"anthropic_api_key": "a", "Anthropic_Auth_Token": "b", "ANTHROPIC_API_KEY": "c", "PATH": "p"}
+        base = {"anthropic_api_key": "a", "Anthropic_Auth_Token": "b", "ANTHROPIC_API_KEY": "c", "PATH": "p",
+                "claude_code_use_bedrock": "1", "Claude_Code_Use_Vertex": "1", "anthropic_base_url": "u"}
         self.assertEqual(_correct_module._child_env(base, windows=True), {"PATH": "p"})
         self.assertEqual(_correct_module._child_env(base, windows=False),
-                         {"anthropic_api_key": "a", "Anthropic_Auth_Token": "b", "PATH": "p"})
+                         {"anthropic_api_key": "a", "Anthropic_Auth_Token": "b", "PATH": "p",
+                          "claude_code_use_bedrock": "1", "Claude_Code_Use_Vertex": "1", "anthropic_base_url": "u"})
+        self.assertEqual(_correct_module._child_env({"CLAUDE_CODE_USE_BEDROCK": "1", "ANTHROPIC_BASE_URL": "u", "X": "1"},
+                                                    windows=False), {"X": "1"})
         self.assertEqual(base["ANTHROPIC_API_KEY"], "c")                     # the input mapping is not modified
 
     def test_the_api_backend_keeps_its_key_and_never_builds_a_child_env(self):

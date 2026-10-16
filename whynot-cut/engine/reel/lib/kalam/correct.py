@@ -19,8 +19,9 @@
 #     notice of the same name, `notice_how` gives the text);
 #   * find_claude_code keeps only absolute paths: a CWD-relative claude.exe is never started (Task 10 review I1);
 #   * RULE (owner: nothing paid): the subscription backend runs `claude -p` with an explicit environment that lacks
-#     ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN (_child_env; matched case-insensitively on Windows), so it can never fall
-#     into API billing silently. os.environ itself is never modified; the API backend (the `anthropic` client) keeps its key.
+#     ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and the provider switches CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX and
+#     ANTHROPIC_BASE_URL (API_BILLING_VARS; _child_env matches case-insensitively on Windows, exactly on POSIX), so it can
+#     never fall into API billing or a paid provider / proxy silently. os.environ itself is never modified; the API backend (the `anthropic` client) keeps its key.
 """Correct caption phrases with Claude by the user's rules. Timecodes never leave this machine: only text is sent,
 and the reply must have exactly one line per phrase or the source text is kept."""
 import importlib
@@ -80,7 +81,10 @@ class _Reply:
         self.content, self.stop_reason = [_Text(text)], "end_turn"
 
 
-API_BILLING_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+# the API keys, and the switches that route the call to Bedrock / Vertex / a proxy: all of them can bill something
+# other than the user's subscription (executor ruling: nothing paid, ever silently)
+API_BILLING_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                    "ANTHROPIC_BASE_URL")
 
 
 def _child_env(environ=None, windows=None) -> dict:
