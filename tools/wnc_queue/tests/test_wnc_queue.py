@@ -4,6 +4,7 @@ logs, and end to end through the CLI with a runner killed mid-job. Run with the 
 The shared suite loads this file too (whynot-cut/tests/test_wnc_queue.py, under the G79 sandbox)."""
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -1511,42 +1512,6 @@ class PressureTests(Base):
         self.assertEqual((d["pressure"], d["pressure_cause"]), (True, "machine"))
         self.assertLess(d["pressure_job_mb"], 100)
 
-    @unittest.skipUnless(core.IS_WIN, "the job's own memory comes from the Windows Job Object")
-    def test_the_sample_after_exit_keeps_what_the_run_held(self):
-        """Re-review P2: the job peaks at 1200 MB, frees half and holds 600 MB while RAM sits at 90%; RAM is highest
-        (99%) only at the sample taken after it exited. The figure is the 600 MB it held at the in-run peak, not
-        unknown (which would fall back to the 1200 MB whole-run peak), and not 0 (a field that never reads). RAM stays
-        flat at 90% for the rest of the run on purpose: a tie never moves the peak, so the job's shutdown (Python
-        tearing down, then the trampoline waiting a moment longer, ~3 MB) can't become "the peak" — it would, and
-        rightly, if RAM really rose then (2026-10-16: an earlier version of this test rose on every sample)."""
-        from unittest import mock
-        held = self.dir / "held"
-        j = self.job(["python", "-c", "import pathlib, sys, time; a = bytearray(1200 * 2**20); time.sleep(0.5); "
-                      "a = None; b = bytearray(600 * 2**20); pathlib.Path(sys.argv[1]).write_text('x'); "
-                      "time.sleep(1.5); raise SystemExit(1)", str(held)])
-        started = self.paths.started(j["id"])
-
-        def after_exit() -> bool:                          # asked from the runner's sample(ended=True)?
-            f = sys._getframe(1)
-            while f is not None and f.f_code.co_name != "sample":
-                f = f.f_back
-            return bool(f is not None and f.f_locals.get("ended"))
-
-        def pct():
-            if after_exit():
-                return 99
-            if not held.exists():
-                return 50 if started.exists() else 30
-            return 90
-        with mock.patch.object(procs, "system_ram_pct", side_effect=pct):
-            self.run_runner()
-        d = self.done(j["id"])
-        run = d["iterations"][0]
-        self.assertGreaterEqual(run["peak_ram_mb"], 1200)
-        self.assertGreaterEqual(run["job_mb_at_ram_peak"], 500)
-        self.assertLess(run["job_mb_at_ram_peak"], 1000)
-        self.assertEqual(d["pressure_job_mb"], run["job_mb_at_ram_peak"])
-
     def test_status_row_says_which(self):
         core.write_json(self.paths.done / "m1.json", dict(self.jrec("failed", [(89, 900, False)]), id="m1"))
         core.write_json(self.paths.done / "j2.json", dict(self.jrec("failed", [(89, 20000, False)]), id="j2"))
@@ -1563,6 +1528,217 @@ class PressureTests(Base):
         self.assertIs(d["pressure"], False)
         self.assertEqual(d["peak"]["sys_ram_pct"], 40)
         self.assertTrue(d["headline"].startswith("FAILED: "), d["headline"])
+
+
+class LedgerP2Tests(Base):
+    """The P2 follow-ups from the review ledger (wnc-queue-ledger.md), 2026-10-16."""
+
+    # -- #1 refusal records are matched by their exact shape, not a glob a crafted id can fake ----------------------
+    def test_a_crafted_id_cannot_fake_a_refusal_record(self):
+        """`a.refused-x-4242-y.refused-...json` (another id's record) once matched the glob for id `a`, pid 4242."""
+        r = runner.Runner(self.paths, self.cfg)
+        fake = self.paths.done / "a.refused-x-4242-y.refused-20261016-010101-1-1.json"
+        core.write_json(fake, {"id": "a.refused-x-4242-y", "status": "error"})
+        dup = self.paths.running / "a.json.dup-4242"
+        core.write_json(dup, {"id": "a", "argv": ["python", "-V"]})
+        r._sweep_one(dup)
+        mine = [f for f in self.paths.done.iterdir() if re.fullmatch(r"a\.refused-\d{8}-\d{6}-\d+-\d+\.json", f.name)]
+        self.assertEqual(len(mine), 1, sorted(f.name for f in self.paths.done.iterdir()))
+        self.assertFalse(dup.exists())
+
+    def test_a_crafted_id_cannot_hide_an_unreadable_file_record(self):
+        r = runner.Runner(self.paths, self.cfg)
+        raw = "{not json"
+        core.write_json(self.paths.done / "a.refused-x-1-y.refused-20261016-010101-1-1.json",
+                        {"id": "a.refused-x-1-y", "raw": raw})
+        bad = self.paths.running / "a.json.refused"
+        bad.write_text(raw, encoding="utf-8")
+        r._sweep_one(bad)
+        self.assertTrue((self.paths.done / "a.json").exists(), sorted(f.name for f in self.paths.done.iterdir()))
+        self.assertEqual(core.read_json(self.paths.done / "a.json")["raw"], raw)
+
+    def test_an_id_shaped_like_a_refusal_record_is_reserved(self):
+        """Re-review: `a.refused-20261016-010101-4242-1` would itself look like the refusal record of id `a`, pid 4242."""
+        with self.assertRaises(JobError) as cm:
+            self.job(["python", "-V"], id="a.refused-20261016-010101-4242-1")
+        self.assertIn("runner's own files", str(cm.exception))
+        self.job(["python", "-V"], id="a.refused-later")                  # other ids with the word stay fine
+
+    def test_a_read_only_file_swapped_for_a_link_is_not_chmodded(self):
+        """Re-review: the retry after a read-only refusal re-checks the path: a link swapped in is left alone."""
+        from unittest import mock
+        f = self.dir / "ro.txt"
+        f.write_text("x", encoding="utf-8")
+        kinds = iter([(False, False), (True, False)])        # a plain file, then (at the retry) a file link
+        with mock.patch.object(core, "_kind", side_effect=lambda p: next(kinds)), \
+                mock.patch.object(core.os, "unlink", side_effect=PermissionError("read-only")), \
+                mock.patch.object(core.os, "chmod") as chmod:
+            core.remove_tree(f)
+        chmod.assert_not_called()
+
+    # -- #2 the command line Windows builds is what is measured -----------------------------------------------------
+    def test_quoting_that_doubles_the_command_line_is_refused(self):
+        """20 000 quotes join to 20 000 characters but quote to 40 000: past Windows' 32 767, refused up front."""
+        with self.assertRaises(JobError) as cm:
+            self.job(["python", "-c", "pass", '"' * 20000])
+        self.assertIn("command line", str(cm.exception))
+        self.job(["python", "-c", "pass", "x" * 20000])                  # long but within the limit: fine
+
+    @unittest.skipUnless(core.IS_WIN, "batch files and cmd.exe's 8191 limit are Windows")
+    def test_batch_programs_get_cmd_exes_8191_limit(self):
+        bindir = self.dir / "bin"
+        bindir.mkdir()
+        (bindir / "npm.cmd").write_text("@echo off\r\n", encoding="utf-8")
+        env = {"PATH": str(bindir)}
+        with self.assertRaises(JobError) as cm:
+            self.job(["npm", "run", "x" * 9000], env=env)
+        self.assertIn("8191", str(cm.exception))
+        self.job(["npm", "run", "x" * 7000], env=env)
+
+    # -- #3 the delete patterns are linear: a crafted 32 KB argv validates fast ---------------------------------------
+    def test_crafted_repetitions_validate_fast(self):
+        for text in ("rm " * 10900, "remove-item " * 2700, "robocopy " * 3600, "rm a " * 6500):
+            with self.subTest(text=text[:12]):
+                t0 = time.perf_counter()
+                self.assertFalse(core.is_destructive(text))
+                self.assertLess(time.perf_counter() - t0, 0.3)
+
+    def test_the_delete_patterns_still_catch_what_they_caught(self):
+        for text in ("rm -rf build", "rm x y -R", "rm --recursive x", "python x.py && rm -r -f out",
+                     "Remove-Item -Recurse x", "remove-item x -r", "robocopy a b /MIR", "robocopy a b /e /PURGE",
+                     "C:\\Windows\\System32\\robocopy.exe a b /MOVE", "rd /s /q x", "x\nrm -rf y"):
+            with self.subTest(text=text):
+                self.assertTrue(core.is_destructive(text))
+        for text in ("rm x", "rmdir x", "robocopy a b /e", "farm -r x", "remove-items", "rm-rf x", "python rm.py -r"):
+            with self.subTest(text=text):
+                self.assertFalse(core.is_destructive(text))
+
+    # -- #5 bash and nvidia-smi are never found in the current folder -------------------------------------------------
+    def empty_path(self) -> str:
+        """A PATH of one existing, empty folder (an empty PATH makes shutil.which give up before the cwd). The tests
+        also drop NoDefaultCurrentDirectoryInExePath: Claude's shell sets it, the scheduled task's runner has not."""
+        e = self.dir / "empty-bin"
+        e.mkdir(exist_ok=True)
+        return str(e)
+
+    def test_bash_is_never_found_in_the_current_folder(self):
+        from unittest import mock
+        planted = self.dir / "plant"
+        planted.mkdir()
+        (planted / ("bash.exe" if core.IS_WIN else "bash")).write_text("x", encoding="utf-8")
+        old = os.getcwd()
+        os.chdir(planted)
+        try:
+            with mock.patch.object(core, "IS_WIN", False), mock.patch.dict(os.environ, {"PATH": self.empty_path()}):
+                os.environ.pop("NoDefaultCurrentDirectoryInExePath", None)
+                self.assertIsNone(core._which_bash())
+        finally:
+            os.chdir(old)
+
+    def test_nvidia_smi_is_never_found_in_the_current_folder(self):
+        from unittest import mock
+        planted = self.dir / "plant"
+        planted.mkdir()
+        marker = self.dir / "ran.txt"
+        name = "nvidia-smi.bat" if core.IS_WIN else "nvidia-smi"
+        (planted / name).write_text(f'@echo 1, 2 > "{marker}"\r\n' if core.IS_WIN else "#!/bin/sh\n",
+                                    encoding="utf-8")
+        old = os.getcwd()
+        os.chdir(planted)
+        try:
+            with mock.patch.dict(os.environ, {"PATH": self.empty_path()}):
+                os.environ.pop("NoDefaultCurrentDirectoryInExePath", None)
+                self.assertIsNone(procs.gpu_sample())
+        finally:
+            os.chdir(old)
+        self.assertFalse(marker.exists())
+
+    # -- #6 a folder being removed can't be swapped for a junction meanwhile ------------------------------------------
+    @unittest.skipUnless(core.IS_WIN, "the directory handle that blocks the swap is a Windows handle")
+    def test_a_folder_being_emptied_cannot_be_renamed_away(self):
+        """Swapping a folder for a junction needs it renamed or removed first: while remove_tree lists and empties
+        it, it holds a handle that refuses both, so the walk never ends up in a junction's target."""
+        from unittest import mock
+        root = self.dir / "victim"
+        (root / "sub").mkdir(parents=True)
+        (root / "sub" / "f.txt").write_text("x", encoding="utf-8")
+        (root / "g.txt").write_text("x", encoding="utf-8")
+        real_scandir = os.scandir
+        tried = {}
+
+        def scandir(p):
+            if Path(p) == root and "err" not in tried:
+                try:
+                    os.rename(root, self.dir / "moved")
+                    tried["err"] = None
+                except OSError as e:
+                    tried["err"] = e
+            return real_scandir(p)
+        with mock.patch.object(core.os, "scandir", side_effect=scandir):
+            core.remove_tree(root)
+        self.assertIsInstance(tried.get("err"), PermissionError)
+        self.assertFalse(root.exists())
+        self.assertFalse((self.dir / "moved").exists())
+
+    # -- #9 #10 #11 the memory-pressure note ---------------------------------------------------------------------------
+    def test_a_run_that_never_got_its_slot_explains_nothing(self):
+        its = [{"n": 1, "rc": None, "passed": False, "outcome": "wait_timeout", "peak_sys_ram_pct": 95}]
+        r = core.done_record({"id": "w1", "iterations": its}, "timeout", "no heavy.sh slot", log=None, peak={})
+        self.assertIs(r["pressure"], False)
+        self.assertNotIn("pressure_ram_peak_pct", r)
+
+    @unittest.skipUnless(core.IS_WIN, "the job's own memory comes from the Windows Job Object")
+    def test_ram_after_the_job_exited_is_not_the_runs_peak(self):
+        """#10: once a run was sampled while it ran, the sample after it exited (another program's RAM by then) no
+        longer counts; it still does for a run too short to be sampled while running."""
+        from unittest import mock
+        held, releasing = self.dir / "held", self.dir / "releasing"
+        j = self.job(["python", "-c", "import pathlib, sys, time; a = bytearray(600 * 2**20); "
+                      "pathlib.Path(sys.argv[1]).write_text('x'); time.sleep(1.5); "
+                      "pathlib.Path(sys.argv[2]).write_text('x'); time.sleep(0.8); raise SystemExit(1)",
+                      str(held), str(releasing)])
+        started = self.paths.started(j["id"])
+
+        def pct():
+            if _asked_after_exit():
+                return 99
+            if releasing.exists():
+                return 80
+            if held.exists():
+                return 90
+            return 50 if started.exists() else 30
+        with mock.patch.object(procs, "system_ram_pct", side_effect=pct):
+            self.run_runner()
+        d = self.done(j["id"])
+        run = d["iterations"][0]
+        self.assertEqual(run["peak_sys_ram_pct"], 90)
+        self.assertGreaterEqual(run["job_mb_at_ram_peak"], 500)
+        self.assertEqual(d["pressure_ram_peak_pct"], 90)
+
+    @unittest.skipUnless(core.IS_WIN, "the job's own memory comes from the Windows Job Object")
+    def test_a_tie_keeps_the_smaller_job_figure(self):
+        """#11: dwMemoryLoad is a whole percent, so ties are common. At the same machine peak the job once held
+        600 MB and later 0: the cautious reading is the smaller (other programs filled RAM: re-check)."""
+        from unittest import mock
+        freed = self.dir / "freed"
+        j = self.job(["python", "-c", "import pathlib, sys, time; a = bytearray(600 * 2**20); time.sleep(1.2); "
+                      "a = None; pathlib.Path(sys.argv[1]).write_text('x'); time.sleep(1.5); raise SystemExit(1)",
+                      str(freed)])
+        started = self.paths.started(j["id"])
+        with mock.patch.object(procs, "system_ram_pct",
+                               side_effect=lambda: 30 if not started.exists() else 85 if _asked_after_exit() else 90):
+            self.run_runner()
+        run = self.done(j["id"])["iterations"][0]
+        self.assertEqual(run["peak_sys_ram_pct"], 90)
+        self.assertLess(run["job_mb_at_ram_peak"], 100)
+
+
+def _asked_after_exit() -> bool:
+    """Is the runner's sample(ended=True) the caller? (The after-exit sample, for the RAM mocks above.)"""
+    f = sys._getframe(1)
+    while f is not None and f.f_code.co_name != "sample":
+        f = f.f_back
+    return bool(f is not None and f.f_locals.get("ended"))
 
 
 class EndToEndTests(Base):

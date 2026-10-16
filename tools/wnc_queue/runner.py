@@ -243,6 +243,7 @@ class Worker(threading.Thread):
         try:
             exe = core.resolve_exe(job["argv"][0], Path(job["cwd"]), self.cfg, (job.get("env") or {}).get("PATH"))
             core.check_batch_args(exe, job["argv"][1:])
+            core.check_command_line(exe, job["argv"][1:])
         except JobError as e:
             log.write(f"[wnc-queue] refused: {e}\n")
             self.finish("error", f"refused: {e}")
@@ -401,12 +402,18 @@ class Worker(threading.Thread):
             bump("ram_mb", s.get("peak_mb"))
             if started_ts is not None:           # machine-wide: only while THIS run runs (not its slot wait)
                 pct = procs.system_ram_pct()
-                if pct is not None and (peak["sys_ram_pct"] is None or pct > peak["sys_ram_pct"]):
-                    # the job's own memory at the machine's peak (not its peak over the whole run): whose RAM it was.
-                    # After the command exited it says nothing (~0): keep what the run held at its last in-run peak,
-                    # or unknown (its whole-run peak stands in) when no sample fell inside the run.
-                    if not ended:
-                        at_peak["mb"] = s.get("mem_mb")
+                if ended and peak["sys_ram_pct"] is not None:
+                    pct = None          # the run was sampled while it ran: RAM after it exited is not the run's
+                if pct is not None and not ended:
+                    # the job's own memory at the machine's peak (not its peak over the whole run): whose RAM it was
+                    mem = s.get("mem_mb")
+                    if peak["sys_ram_pct"] is None or pct > peak["sys_ram_pct"]:
+                        at_peak["mb"] = mem
+                    elif pct == peak["sys_ram_pct"] and mem is not None and (at_peak["mb"] is None
+                                                                               or mem < at_peak["mb"]):
+                        at_peak["mb"] = mem     # a tie (whole percents): the smaller figure, the cautious reading
+                # a run too short for any in-run sample keeps the after-exit one; its job figure stays unknown
+                # (the whole-run peak stands in), since after exit the job holds ~0
                 bump("sys_ram_pct", pct)
                 g = self.runner.gpu
                 if g:
@@ -643,7 +650,7 @@ class Runner:
         jid, kind = m.group("id"), m.group("kind")
         if kind.startswith(".json.dup-"):            # a refused queue file (duplicate or bad id)
             pid = kind[len(".json.dup-"):]
-            if not list(p.done.glob(f"{glob.escape(jid)}.refused-*-{pid}-*.json")):   # its record never got written
+            if not self.refusals(jid, pid):        # its record never got written
                 j = read_json(f)
                 write_json(self.refusal_path(jid, unique=True), core.done_record(
                     j if isinstance(j, dict) else {"id": jid}, "error",
@@ -653,7 +660,7 @@ class Runner:
             return
         if kind == ".json.refused":                  # an unreadable queue file: record it if a crash cut that short
             raw = f.read_bytes()[:2000].decode("utf-8", "replace")
-            known = [p.done / f"{jid}.json", *p.done.glob(f"{glob.escape(jid)}.refused-*.json")]
+            known = [p.done / f"{jid}.json", *self.refusals(jid)]
             if not any((read_json(r) or {}).get("raw") == raw for r in known if r.exists()):
                 write_json(self.refusal_path(jid), core.done_record(
                     {"id": jid}, "error", "refused: the queue file is not a JSON object (fix it and queue it again)",
@@ -719,6 +726,17 @@ class Runner:
         for name in [n for n, until in self._ignored.items() if until <= now]:
             del self._ignored[name]
         return set(self._ignored)
+
+    def refusals(self, jid: str, pid: str | None = None) -> list[Path]:
+        """done/<jid>.refused-<date>-<time>-<pid>-<n>.json records of THIS id (by refusal_path's exact shape; a glob
+        also matched another id's records, like those of a crafted id "a.refused-x-4242-y" for id "a")."""
+        rx = re.compile(re.escape(jid) + r"\.refused-\d{8}-\d{6}-(\d+)-\d+\.json", re.I)
+        out = []
+        for f in self.paths.done.glob(f"{glob.escape(jid)}.refused-*.json"):
+            m = rx.fullmatch(f.name)
+            if m and (pid is None or m.group(1) == pid):
+                out.append(f)
+        return out
 
     def refusal_path(self, stem: str, unique: bool = False) -> Path:
         """done/<stem>.json, unless that id already has a record or is running: never overwrite either. With

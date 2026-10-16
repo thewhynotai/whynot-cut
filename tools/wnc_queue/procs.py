@@ -63,6 +63,10 @@ if IS_WIN:
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
 
 
+# by full path: CreateProcess looks for a bare name in the current folder before System32
+TASKKILL = os.path.join(os.environ.get("SystemRoot") or r"C:\Windows", "System32", "taskkill.exe")
+
+
 def system_ram_pct() -> int | None:
     if IS_WIN:
         m = _MEMSTAT()
@@ -101,7 +105,8 @@ def system_ram_total_mb() -> float | None:
 
 def gpu_sample() -> tuple[int, int] | None:
     """(GPU utilisation %, VRAM used MB) of the first NVIDIA GPU, machine-wide; None without nvidia-smi."""
-    exe = shutil.which("nvidia-smi")
+    from .core import search_path                 # never the current folder (shutil.which looks there first)
+    exe = search_path("nvidia-smi")
     if not exe:
         return None
     try:
@@ -156,7 +161,7 @@ class Tree:
             if self.in_job:
                 _k32.TerminateJobObject(self.job, 1)
             else:
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(self.pid)], capture_output=True,
+                subprocess.run([TASKKILL, "/T", "/F", "/PID", str(self.pid)], capture_output=True,
                                creationflags=CREATE_NO_WINDOW)
         else:
             try:

@@ -8,6 +8,7 @@ import re
 import secrets
 import shutil
 import stat
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -27,8 +28,11 @@ ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 # Ids that would collide with the runner's own files in running/ and logs/ (<id>.spec.json, <id>.json.dup-N …),
 # a trailing dot (Windows drops it, so "t." would be job t's files) and "runner" (logs/runner.log is the runner's).
 RESERVED_ID_RE = re.compile(r"\.(spec|started|cancel|refused|cancelling)$|\.json(\.|$)|\.log(\.\d+)?$|\.dup-\d+$"
+                            r"|\.refused-\d{8}-\d{6}-\d+-\d+$"     # a refusal record's name (would fake one)
                             r"|\.$|^runner$", re.I)
-MAX_ARGV_CHARS = 32767                              # the Windows command-line limit
+MAX_ARGV_CHARS = 32767                              # the Windows command-line limit (a cheap first check)
+CMDLINE_MAX = 32766            # CreateProcess: 32 767 characters including the terminating NUL
+CMDLINE_MAX_BATCH = 8191       # a .cmd/.bat runs inside cmd.exe, whose own limit is lower
 
 # Executables a job may start, by file stem (python/runtime, bash, node, npm, gh, git, ffmpeg, our tools). No cmd,
 # powershell, curl, npx or claude: AI work never goes through this queue, and shell strings are refused below.
@@ -47,12 +51,17 @@ FORBIDDEN_FRAGMENTS = ("/whynot clients", "/appdata/roaming/adobe", "/documents/
 AI_RE = re.compile(r"claude-code|@anthropic-ai/", re.I)
 # Recursive deletes that follow junctions (COORDINATION rule 15): refused anywhere in a job's argv. Any rm with a
 # recursive flag anywhere after it (rm -rf, rm -r -f, rm --recursive, rm x -R), Remove-Item -Recurse (or -r…),
-# rmdir /s and rd /s. Over-cautious on purpose: a refused job is cheap, a followed junction is not.
-DESTRUCTIVE_RE = re.compile(r"\brm\s+(?:\S+\s+)*?(?:-(?=[a-z]*r)[a-z]+|--recursive)(?=[\s\"',)\]]|$)"
-                            r"|\bremove-item\b.*\s-r[a-z]*\b"
-                            # robocopy by name or by its full path (C:\Windows\System32\robocopy.exe)
-                            r"|(?<![\w.-])robocopy(?:\.exe)?[\"']?\s(?:.*?\s)?/(?:mir|mov|move|purge)"
-                            r"(?=[\s/:\"',)\]]|$)", re.I | re.S)     # re.S: also across newlines in -c code
+# robocopy /MIR /MOV /MOVE /PURGE (by name or full path), rmdir /s and rd /s. Over-cautious on purpose: a refused job
+# is cheap, a followed junction is not. Each is (the command, then its switch anywhere after the command's FIRST
+# occurrence): a switch after any occurrence is after the first, so two linear searches give the same answer as one
+# regex with a lazy middle, which was quadratic on a crafted "rm " * 10 900 (~3 s for a 32 KB argv).
+DELETE_PATTERNS = (
+    (re.compile(r"\brm(?=\s)", re.I),
+     re.compile(r"\s(?:-(?=[a-z]*r)[a-z]+|--recursive)(?=[\s\"',)\]]|$)", re.I)),
+    (re.compile(r"\bremove-item\b", re.I), re.compile(r"\s-r[a-z]*\b", re.I)),
+    (re.compile(r"(?<![\w.-])robocopy(?:\.exe)?[\"']?(?=\s)", re.I),
+     re.compile(r"\s/(?:mir|mov|move|purge)(?=[\s/:\"',)\]]|$)", re.I)),
+)
 # cmd's rd/del/erase as a command (not a path segment like D:/x/del/s.py), then a /s switch anywhere after it
 # (rd /s /q x, del /q/s x, rd/s/q x). Two linear searches instead of one regex: a crafted argv can't make it slow.
 CMD_DELETE_RE = re.compile(r"(?<![\w./\\:-])(?:rmdir|rd|del|erase)(?:\.exe)?(?=[\s/\"']|$)", re.I)
@@ -61,8 +70,10 @@ SWITCH_S_RE = re.compile(r"(?:^|\s|(?<![\w./\\:-])(?:rmdir|rd|del|erase)(?:\.exe
 
 
 def is_destructive(text: str) -> bool:
-    if DESTRUCTIVE_RE.search(text):
-        return True
+    for command, switch in DELETE_PATTERNS:
+        m = command.search(text)
+        if m and switch.search(text, m.end()):
+            return True
     m = CMD_DELETE_RE.search(text)
     return bool(m and SWITCH_S_RE.search(text[m.end():]))
 
@@ -125,7 +136,7 @@ def _which_bash() -> str | None:
     for c in (r"C:\Program Files\Git\bin\bash.exe",):
         if IS_WIN and Path(c).is_file():
             return c
-    return shutil.which("bash")
+    return search_path("bash")                     # never the current folder (shutil.which looks there first)
 
 
 def console_python(exe: str) -> str:
@@ -267,6 +278,18 @@ def check_batch_args(exe: str, args: list[str]) -> None:
             if bad:
                 raise JobError(f"{Path(exe).name} runs through cmd.exe: argument {a!r} has {''.join(sorted(bad))} "
                                "(put it in a script and run that with python or node)")
+
+
+def check_command_line(exe: str, args: list[str]) -> None:
+    """Measure the command line Windows will build (quoting doubles a quote or a run of backslashes) against the
+    limit that applies, so a job that could never start is refused now with a reason, not run as an rc-127 failure.
+    The same limit on every platform: a job runs the same on any machine."""
+    batch = Path(exe).suffix.lower() in (".cmd", ".bat")
+    n = len(subprocess.list2cmdline([exe, *args])) + (len('cmd.exe /c ""') if batch else 0)
+    limit = CMDLINE_MAX_BATCH if batch else CMDLINE_MAX
+    if n > limit:
+        raise JobError(f"the command line would be {n} characters, over the {limit} limit for "
+                       f"{Path(exe).name}{' (it runs inside cmd.exe)' if batch else ''}: put the long part in a file")
 
 
 def parse_duration(v) -> float:
@@ -465,10 +488,47 @@ def _kind(path) -> tuple[bool, bool]:
     return is_link, is_dir
 
 
+if IS_WIN:
+    import ctypes
+    from ctypes import wintypes as _wt
+
+    _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _k32.CreateFileW.restype = _wt.HANDLE
+    _k32.CreateFileW.argtypes = [_wt.LPCWSTR, _wt.DWORD, _wt.DWORD, _wt.LPVOID, _wt.DWORD, _wt.DWORD, _wt.HANDLE]
+    _k32.CloseHandle.argtypes = [_wt.HANDLE]
+
+    class _BHFI(ctypes.Structure):                   # BY_HANDLE_FILE_INFORMATION
+        _fields_ = [("dwFileAttributes", _wt.DWORD)] + [(n, _wt.DWORD) for n in (
+            "c1", "c2", "a1", "a2", "w1", "w2", "serial", "size_hi", "size_lo", "links", "index_hi", "index_lo")]
+    _k32.GetFileInformationByHandle.argtypes = [_wt.HANDLE, ctypes.POINTER(_BHFI)]
+    _INVALID_HANDLE = _wt.HANDLE(-1).value
+
+
+def _pin_dir(path):
+    """Windows: open the folder itself (never a link's target) sharing read and write but NOT delete, so nobody can
+    rename or remove it, and so swap it for a junction, while it is listed and emptied. Returns the handle, or None
+    when it can't be opened or is no longer a plain folder (then it is left alone). POSIX: True (nothing to hold)."""
+    if not IS_WIN:
+        return True
+    h = _k32.CreateFileW(str(path), 0x1 | 0x80, 0x1 | 0x2, None, 3, 0x02000000 | 0x00200000, None)
+    # FILE_LIST_DIRECTORY|FILE_READ_ATTRIBUTES (attribute-only handles skip the sharing check, so they would block
+    # nothing), FILE_SHARE_READ|WRITE (no DELETE), OPEN_EXISTING, BACKUP_SEMANTICS (folders)|OPEN_REPARSE_POINT
+    if not h or h == _INVALID_HANDLE:
+        return None
+    info = _BHFI()
+    ok = _k32.GetFileInformationByHandle(h, ctypes.byref(info))
+    attrs = info.dwFileAttributes
+    if not ok or attrs & FILE_ATTRIBUTE_REPARSE_POINT or not attrs & FILE_ATTRIBUTE_DIRECTORY:
+        _k32.CloseHandle(h)
+        return None
+    return h
+
+
 def remove_tree(path) -> None:
     """Delete a folder bottom-up without ever following a junction or symlink, the folder given included: a link is
-    removed as a link only (rmdir for a directory link, unlink for a file link; COORDINATION rule 15). Best effort:
-    files still in use stay."""
+    removed as a link only (rmdir for a directory link, unlink for a file link; COORDINATION rule 15). On Windows each
+    folder is held open (no delete sharing) while it is listed and emptied, so it can't be swapped for a junction
+    between the check and the walk. Best effort: files still in use stay."""
     try:
         is_link, is_dir = _kind(path)
     except OSError:
@@ -481,14 +541,30 @@ def remove_tree(path) -> None:
             except PermissionError:
                 if is_link:
                     raise
-                os.chmod(path, stat.S_IWRITE)     # read-only (e.g. git pack files): make writable, retry once
+                # read-only (e.g. git pack files): make writable, retry once; never through a link swapped in meanwhile
+                if _kind(path)[0]:
+                    return
+                try:
+                    os.chmod(path, stat.S_IWRITE, follow_symlinks=False)
+                except NotImplementedError:          # Windows before Python 3.13: checked just above
+                    os.chmod(path, stat.S_IWRITE)
                 remove(path)
             return
-        entries = [e.path for e in os.scandir(path)]
     except OSError:
         return
-    for e in entries:
-        remove_tree(e)
+    pin = _pin_dir(path)
+    if pin is None:
+        return
+    try:
+        try:
+            entries = [e.path for e in os.scandir(path)]
+        except OSError:
+            return
+        for e in entries:
+            remove_tree(e)
+    finally:
+        if IS_WIN:
+            _k32.CloseHandle(pin)
     try:
         os.rmdir(path)
     except OSError:
@@ -524,6 +600,7 @@ def add_job(paths: Paths, job: dict, cfg: dict | None = None) -> dict:
             raise JobError(f"id {jid} already exists in {d.name}/")
     exe = resolve_exe(j["argv"][0], Path(j["cwd"]), cfg, j["env"].get("PATH"))   # fail now, not hours later
     check_batch_args(exe, j["argv"][1:])
+    check_command_line(exe, j["argv"][1:])
     write_json(paths.queue / f"{jid}.json", j)
     return j
 
@@ -625,6 +702,8 @@ def memory_pressure(status: str, iterations: list, at=PRESSURE_RAM_PCT) -> dict 
     elif status in ("failed", "timeout"):
         runs = [i for i in iterations if not i.get("passed")]
         if not runs or any(_num(i.get("peak_sys_ram_pct")) is None for i in runs):
+            return None
+        if any(i.get("outcome") in ("wait_timeout", "error") for i in runs):   # never ran: RAM explains nothing
             return None
         if min(i["peak_sys_ram_pct"] for i in runs) < at:
             return None

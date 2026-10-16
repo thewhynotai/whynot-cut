@@ -133,12 +133,17 @@ The keys are in reading order, so the first lines of the file are enough:
   No `cmd`, `powershell`, `curl`, `npx` or `claude` (also not as `@anthropic-ai/claude-code`). No `bash -c` shell
   strings (also not after option clusters such as `-eo pipefail`): run a script file. `npm` and `reel` are `.cmd` files on Windows, so cmd.exe re-reads their arguments:
   arguments with `" % ^ & | < > !` are refused for them. No other program may be a batch file, whether named by
-  path or found on PATH. Programs are looked up on PATH only, never in the current folder. The allowlist guards
-  against mistakes; it is not a sandbox against someone trying to get around it.
+  path or found on PATH. Programs are looked up on PATH only, never in the current folder (the runner's own bash,
+  nvidia-smi and taskkill too). The allowlist guards against mistakes; it is not a sandbox against someone trying
+  to get around it.
+- **Command-line length:** the command line Windows builds (quoting doubles quotes and backslash runs) must fit
+  32 766 characters, or 8191 for `npm` and `reel` (they run inside cmd.exe). A longer one is refused when it is
+  queued, with the reason, instead of failing later as rc 127. Put long input in a file.
 - **No recursive deletes** in a job's arguments: `rm` with any recursive flag (`-rf`, `-r -f`, `--recursive`, `-R`),
   `Remove-Item -Recurse`, `rmdir /s`, `rd /s`, `del /s` (also as `rd/s/q`), `robocopy /MIR`, `/MOV`, `/MOVE` or
   `/PURGE`. Words like `del` inside a path (`D:/x/del/s.py`) are fine. They follow junctions (COORDINATION rule 15). A job's own TEMP folder
   is removed afterwards without following links. If the job turned TEMP into a junction, only the link is removed.
+  On Windows each folder is held open while it is emptied, so nothing can swap it for a junction mid-delete.
 - **cwd:** must be inside the repo, `D:\ClaudeData` or `D:\Claude`. TEMP and TMP point to
   `D:\ClaudeData\Temp\wnc-queue\<id>`.
 - **Env:** `--env` reaches only your command. heavy.sh always runs with the runner's own environment, so a job's PATH
@@ -190,5 +195,6 @@ The runner and the scheduled task use the system Python, not the engine runtime:
 every `reel setup`, and FREEZE (COORDINATION rule 14) must be able to stop everything that runs it.
 
 **Later (not built):** a macOS launchd agent (`~/Library/LaunchAgents`, `StartInterval` 600, `RunAtLoad`) running the
-same `wnc-queue.py run`. On POSIX the runner already kills the job's whole process group; peak RAM/CPU are only
-measured on Windows for now.
+same `wnc-queue.py run`. On POSIX the runner already kills the job's whole process group, but a process that left
+the group (setsid) and closed its output can outlive a job; peak RAM/CPU and the memory-pressure job figure are only
+measured on Windows for now. Both need a Mac to build and test.
