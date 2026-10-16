@@ -1741,6 +1741,63 @@ def _asked_after_exit() -> bool:
     return bool(f is not None and f.f_locals.get("ended"))
 
 
+class HeavyV2Tests(Base):
+    """heavy.sh v2 (2026-10-16): the gate kind, HEAVY_INSIDE kept from queued jobs, slots refreshed as a heartbeat."""
+
+    def test_the_gate_class_takes_heavy_gate(self):
+        j = self.job(["python", "-c", "print('gate ran')"], heavy="gate", owner="executor")
+        self.run_runner()
+        d = self.done(j["id"])
+        self.assertEqual(d["status"], "passed", d["summary"])
+        args = (self.dir / "heavy-args.txt").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(args[:2], ["gate", f"wnc-queue:{j['id']}"])
+
+    def test_the_gate_class_is_only_for_the_executor(self):
+        """A gate reserves the whole machine, so another track's suite must not take it by mistake."""
+        for owner in ("adobe", "test", None):
+            with self.assertRaises(JobError) as cm:
+                self.job(["python", "-V"], heavy="gate", owner=owner)
+            self.assertIn("only for the executor", str(cm.exception))
+        self.assertEqual(self.job(["python", "-V"], heavy="suite", owner="adobe")["heavy"], "suite")
+
+    def test_heavy_inside_never_reaches_heavy_sh(self):
+        """A runner started from inside a heavy.sh job inherits HEAVY_INSIDE: heavy.sh would then run the queued job
+        as a nested call of that outer job (no slot of its own) instead of queueing it."""
+        from unittest import mock
+        heavy = self.dir / "env-heavy.sh"
+        heavy.write_text('echo "HI=${HEAVY_INSIDE-unset}" > "$(dirname "$0")/heavy-env.txt"\nshift 3\n"$@"\n',
+                         encoding="utf-8", newline="\n")
+        self.cfg["heavy_sh"] = str(heavy)
+        code = "import os; print('J=' + os.environ.get('HEAVY_INSIDE', 'unset'))"
+        j = self.job(["python", "-c", code], heavy="cpu")
+        light = self.job(["python", "-c", code], heavy="none")
+        with mock.patch.dict(os.environ, {"HEAVY_INSIDE": "4242:suite:an-outer-job"}):
+            self.run_runner()
+        self.assertEqual((self.dir / "heavy-env.txt").read_text(encoding="utf-8").strip(), "HI=unset")
+        for jid in (j["id"], light["id"]):
+            d = self.done(jid)
+            self.assertEqual(d["status"], "passed", d["summary"])
+            self.assertIn("J=unset", Path(d["log"]).read_text(encoding="utf-8"))
+
+    def test_a_job_env_cannot_set_heavy_variables(self):
+        """HEAVY_INSIDE or HEAVY_LOCKS in --env would let the job's own heavy.sh calls skip the slots."""
+        for key in ("HEAVY_INSIDE", "HEAVY_LOCKS", "heavy_test_ram"):
+            with self.assertRaises(JobError) as cm:
+                self.job(["python", "-V"], env={key: "1"})
+            self.assertIn("HEAVY_", str(cm.exception))
+        self.assertEqual(self.job(["python", "-V"], env={"HEAVYISH": "1"})["env"], {"HEAVYISH": "1"})
+
+    def test_slots_are_refreshed_well_inside_heavy_v2s_silence_limit(self):
+        """heavy.sh v2 frees a slot whose owner it can't check after HB_DEAD s without a refresh (600 s)."""
+        refresh = core.load_config(self.paths)["slot_refresh_s"]
+        self.assertLessEqual(refresh, 300)
+        installed = Path(core.DEFAULT_HEAVY_SH)
+        if installed.is_file():
+            m = re.search(r"(?m)^HB_DEAD=(\d+)", installed.read_text(encoding="utf-8", errors="replace"))
+            if m:
+                self.assertLessEqual(refresh * 2, int(m.group(1)), "two refreshes fit in heavy.sh's limit")
+
+
 class EndToEndTests(Base):
     """Through the real CLI, with the runner as its own process (as the scheduled task starts it)."""
 

@@ -307,7 +307,10 @@ class Worker(threading.Thread):
         # trampoline only, so a job can never change how heavy.sh measures RAM or takes its slot.
         # No WNC_* name ever reaches a job: the product reserves that prefix (its tests assert no WNC_ variable
         # reaches the engine), so the runner's marker is JOB_QUEUE_ID, and an inherited WNC_* is the runner's own.
-        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("WNC_")}
+        # Nor HEAVY_INSIDE: a runner started from inside a heavy.sh job would hand it on, and heavy.sh would treat
+        # the queued job as a nested call of that (maybe long dead) outer job instead of taking its own slot.
+        env = {k: v for k, v in os.environ.items()
+               if not k.upper().startswith("WNC_") and k.upper() != "HEAVY_INSIDE"}
         env["JOB_QUEUE_ID"] = jid
         pass_re = re.compile(job["pass_regex"]) if job.get("pass_regex") else None
         fail_re = re.compile(job["fail_regex"]) if job.get("fail_regex") else None
@@ -511,7 +514,8 @@ class Worker(threading.Thread):
         return it
 
     def keep_slot_fresh(self) -> None:
-        """heavy.sh takes over any slot older than 3 h even if its owner lives: touch ours while the job runs."""
+        """heavy.sh frees a slot whose owner can't be checked once it is old (v2: silent for 10 min, v1: 3 h): touch
+        ours while the job runs. heavy.sh v2's own sampler touches it too; this keeps it held if that one dies."""
         label = f"label=wnc-queue:{self.job['id']}"
         try:
             for d in Path(self.cfg["locks_dir"]).glob("*.d"):

@@ -323,7 +323,8 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--id")
     s.add_argument("--title")
     s.add_argument("--cwd", help="default: the current folder (must be inside the repo or D:\\ClaudeData)")
-    s.add_argument("--class", dest="heavy", choices=core.CLASSES, help="heavy.sh slot (default cpu)")
+    s.add_argument("--class", dest="heavy", choices=core.CLASSES,
+                   help="heavy.sh slot (default cpu); gate = the executor's QC-gate suite, runs alone")
     s.add_argument("--timeout", help="per run, after the slot is held (default 1h): 90, 30m, 2h")
     s.add_argument("--max-wait", help="max wait for a heavy.sh slot (default 6h)")
     s.add_argument("--repeat", type=int, metavar="N", help="run N times")

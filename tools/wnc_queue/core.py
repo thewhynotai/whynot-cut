@@ -20,8 +20,9 @@ REPO = TOOLS.parent
 TASK_NAME = "WNC-Queue"
 SCHEMA = 1
 
-CLASSES = ("cpu", "gpu", "suite", "none")          # heavy.sh slot; "none" = light (CI watch, download): no slot
-HEAVY_KIND = {"cpu": "job", "gpu": "gpu", "suite": "suite"}
+CLASSES = ("cpu", "gpu", "suite", "gate", "none")  # heavy.sh slot; "none" = light (CI watch, download): no slot
+HEAVY_KIND = {"cpu": "job", "gpu": "gpu", "suite": "suite", "gate": "gate"}
+GATE_OWNER = "executor"        # a gate reserves the whole machine: only the executor's QC-gate suites use it
 MODES = ("exit", "repeat", "until_fail", "until_streak", "until_match")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
@@ -164,7 +165,7 @@ def load_config(paths: Paths) -> dict:
         "extra_executables": [],
         "extra_hosts": [],
         "locks_dir": "D:/ClaudeData/Temp/wnc-locks",   # heavy.sh slots (kept fresh while a job holds one)
-        "slot_refresh_s": 600,                          # how often; heavy.sh takes over slots older than 3 h
+        "slot_refresh_s": 120,                          # how often (heavy.sh v2 frees a slot silent for 10 min)
         "pressure_ram_pct": PRESSURE_RAM_PCT,           # system RAM peak during a run that makes its verdict suspect
     }
     try:
@@ -368,6 +369,8 @@ def validate(job: dict, cfg: dict) -> dict:
     if not isinstance(env, dict) or not all(isinstance(k, str) and ENV_KEY_RE.match(k) and isinstance(v, str)
                                             for k, v in env.items()):
         raise JobError("env must map NAME to string")
+    if any(k.upper().startswith("HEAVY_") for k in env):     # HEAVY_INSIDE / HEAVY_LOCKS would let nested calls skip
+        raise JobError("env must not set HEAVY_* (heavy.sh's own variables: a job can't change how it takes slots)")
     for v in env.values():
         check_text(v, cfg, "env")
     j["env"] = dict(env)
@@ -421,6 +424,9 @@ def validate(job: dict, cfg: dict) -> dict:
         raise JobError("priority must be an integer -100..100 (higher runs first)")
     j["priority"] = pr
     j["owner"] = str(j.get("owner") or "unknown")[:64]
+    if heavy == "gate" and j["owner"] != GATE_OWNER:
+        raise JobError(f"class gate reserves the whole machine: only for the {GATE_OWNER}'s QC-gate suites "
+                       f"(--owner {GATE_OWNER}); use suite for other full suites")
     ma = j.get("max_attempts", 3)
     if not isinstance(ma, int) or isinstance(ma, bool) or not 1 <= ma <= 10:
         raise JobError("max_attempts must be 1..10")

@@ -14,8 +14,10 @@ limit; it only keeps the machine busy with work that needs no AI.
 - The runner is started by the scheduled task **WNC-Queue** (current user, no admin): at logon and every 10 minutes.
   `add` also starts it at once. The task runs it outside Claude's process tree, so closing or restarting Claude
   does not stop it. It exits when the queue is empty. A lock makes sure only one runner runs at a time.
-- Every job goes through `heavy.sh` (COORDINATION rule 13), in the slot of its class: `suite`, `cpu` (heavy.sh `job`)
-  or `gpu`. `none` is for light jobs (CI watch, a download) that need no slot. The timeout counts from when the slot
+- Every job goes through `heavy.sh` (COORDINATION rule 13), in the slot of its class: `suite`, `cpu` (heavy.sh `job`),
+  `gpu` or `gate`. `gate` is only for the executor's QC-gate suites (`--owner executor`, refused for anyone else):
+  from the moment it asks, heavy.sh starts nothing new and runs it alone once the running jobs end.
+  `none` is for light jobs (CI watch, a download) that need no slot. The timeout counts from when the slot
   is held, not while the job waits for one.
 - If the runner dies in the middle of a job (crash, reboot, someone kills it), the job's whole process tree dies with
   it. On the next start the job goes back to the queue: finished runs are kept and the interrupted run starts again.
@@ -67,7 +69,7 @@ text arrive exactly as written.
 
 | Option | Meaning |
 |---|---|
-| `--class suite\|cpu\|gpu\|none` | heavy.sh slot (default `cpu`) |
+| `--class suite\|cpu\|gpu\|gate\|none` | heavy.sh slot (default `cpu`; `gate` only with `--owner executor`) |
 | `--timeout 30m` | per run, after the slot is held (default 1h; `90`, `90s`, `30m`, `2h`, `1d`) |
 | `--max-wait 6h` | longest wait for a slot before the job gives up as `timeout` |
 | `--repeat N` | run N times; it passes only if all N pass |
@@ -149,9 +151,11 @@ The keys are in reading order, so the first lines of the file are enough:
 - **Env:** `--env` reaches only your command. heavy.sh always runs with the runner's own environment, so a job's PATH
   can't change how heavy.sh measures RAM or takes its slot. A job sees `JOB_QUEUE_ID=<id>`. No `WNC_*` variable
   reaches a job unless you pass it with `--env`: the product reserves that prefix, and its wrapper tests fail on any
-  `WNC_*` name that reaches the engine.
-- **Long heavy runs:** heavy.sh takes over any slot older than 3 hours. While a job runs, the runner refreshes its slot
-  every 10 minutes, so runs longer than 3 hours keep their slot.
+  `WNC_*` name that reaches the engine. `HEAVY_INSIDE` never reaches heavy.sh from the runner (a queued job is never
+  a nested call of another heavy.sh job), and `--env` can't set any `HEAVY_*` variable.
+- **Long heavy runs:** heavy.sh frees a slot whose owner it can't check once the slot goes stale (v2: no refresh for
+  10 minutes; any slot after 24 hours). heavy.sh v2 refreshes its own slots every 30 s, and while a job runs the
+  runner also refreshes them every 2 minutes, so a long run keeps its slot.
 - **Kills:** a timeout, cancel or STOP kills only the job's own process tree (its Job Object), never another process.
 - **Off limits:** any argument, env value or cwd under `WhyNot Clients` or the Adobe preference folders is refused.
 - **Network:** URLs written in a job must point at the dev allowlist (GitHub, npm, PyPI, Hugging Face, the FFmpeg
