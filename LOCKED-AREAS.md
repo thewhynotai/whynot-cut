@@ -38,16 +38,15 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
   - `whynot-cut/tests/test_kalam*.py`, `whynot-cut/tests/test_hush*.py`, `whynot-cut/tests/test_tidy*.py`,
     `whynot-cut/tests/test_align_w2v*.py`
 - looks & motion track (Addendum H rebuild: R-T1 specs, R-T6 identity scan, caption looks, AE scenes, cut proposals,
-  safe zones, look recommender):
+  look recommender; safe zones moved to the API-credit lane 2026-10-17, see below):
   - `docs/superpowers/specs/addendum-h/source-r-specs/**`
   - `whynot-cut/templates/after_effects/wnc_motion_lib.jsx`, `whynot-cut/engine/reel/lib/motion_library.py`
-  - `whynot-cut/engine/reel/lib/looks*.py`, `whynot-cut/engine/reel/lib/cut_proposals*.py`,
-    `whynot-cut/engine/reel/lib/safe_zones*.py`
-  - `whynot-cut/config/defaults/looks/**`, `whynot-cut/config/defaults/safe-zones.json`
+  - `whynot-cut/engine/reel/lib/looks*.py`, `whynot-cut/engine/reel/lib/cut_proposals*.py`
+  - `whynot-cut/config/defaults/looks/**`
   - `whynot-cut/skills/motion-craft/references/motion-scenes.md`
   - `tools/identity_scan.py`, `tools/identity_hashes.json`
   - `whynot-cut/tests/test_looks*.py`, `whynot-cut/tests/test_motion_library*.py`, `whynot-cut/tests/test_cut_proposals*.py`,
-    `whynot-cut/tests/test_safe_zones*.py`, `whynot-cut/tests/test_identity_scan*.py`
+    `whynot-cut/tests/test_identity_scan*.py`
 - Phase 4 fan-out (2026-10-16, executor rules and commits stay with each track):
   - Adobe track, T4.1 smooth zoom/fades + T4.6 motion music:
     - `whynot-cut/engine/reel/lib/ppro_build.py`, `whynot-cut/engine/reel/lib/motion_audio.py`,
@@ -69,3 +68,8 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     the open-fonts index data file, `schemas/brand-candidates*.json`, `whynot-cut/tests/test_j*.py`,
     `whynot-cut/tests/fixtures/brand_web/**`; cli.py `brand-fetch` + `scaffold --fill-missing` hunks only.
     J-T6…J-T8 paths are granted when Tasks 7 + 8 land. `requirements.txt` / locks stay the executor's (Task 12).
+  - API-credit lane (2026-10-17, moved from the looks track; brief + ASSIGNMENT.md in `D:\ClaudeData\claude-api-lane\`),
+    Task 27 R-4.5 safe-zone profiles: `whynot-cut/engine/reel/lib/safe_zones*.py`,
+    `whynot-cut/config/defaults/safe-zones.json`, `whynot-cut/tests/test_safe_zones*.py`,
+    `whynot-cut/tests/fixtures/safe_zones/**`, `docs/superpowers/evidence/2026-10-17-safe-zones-sources.md`.
+    Hooks in qc.py / motion_readback.py / previews.py / cli.py arrive as patches; the executor applies and pushes.
