@@ -4,9 +4,20 @@
 
    Data (paths, folder and file names, host names, versions) is never trusted:
    - it is only ever text (createTextNode), so "<img src=x onerror=…>" as a folder name is shown as those characters;
-   - a bidi control character in it (RLO, LRI … PDI, ALM, LRM, RLM) is SHOWN as its code ("[U+202E]") instead of being
-     applied, so a name can never reorder what is drawn around it ("evil\u202Egpj.exe" would read "evilexe.jpg");
-   - the two private-use characters this file uses as placeholders are shown the same way, so data can never forge one. */
+   - every character that can reorder or split a line is SHOWN as its code ("[U+202E]") instead of being applied, so a
+     name can never reorder what is drawn around it ("evil\u202Egpj.exe" would read "evilexe.jpg"). The set (CTL):
+     . the bidi controls: ALM U+061C, LRM/RLM U+200E/F, LRE..RLO U+202A-E, LRI..PDI U+2066-9;
+     . every C0 control but TAB (U+0000-0008, 000A-001F) and DEL, and every C1 control (U+0080-009F): U+000A/000D/
+       001C-001E/0085 are paragraph separators and U+000B/001F segment separators in the bidi algorithm, and a
+       paragraph separator ends every isolate, so the rest of the data reorders with the line (review F1, measured).
+       LF is coded too: no data helper here shows a line break (one value per line, always). TAB stays: it is
+       collapsed to a space by white-space normal/nowrap, which every data place uses;
+     . U+2028 / U+2029 (line / paragraph separator);
+     . the invisible look-alike makers U+200B (ZWSP), U+2060 (WJ) and U+FEFF (BOM), so two names that look the same
+       on screen do not differ by an invisible character. ZWNJ / ZWJ (U+200C/D) are LEFT ALONE: Arabic and Persian
+       names and emoji need them;
+     . the two private-use characters this file uses as placeholders, so data can never forge one.
+   - a T() string var that holds any of these is inserted as its own data isolate (name()), never into the line. */
 import { C } from "./ctx.js";
 
 export const SVG_NS = "http://www.w3.org/2000/svg";
@@ -21,7 +32,8 @@ function setAttrs(el, attrs) {
     const v = attrs[name];
     if (v === null || v === undefined || v === false) continue;
     if (REFUSED_ATTR.test(name)) throw new Error("refused attribute: " + name);
-    if ((name === "href" || name === "src") && /^\s*javascript\s*:/i.test(String(v))) throw new Error("refused URL");
+    /* the URL parser drops tabs, newlines and leading C0/space (a tab inside the scheme name still makes it), so the check does too */
+    if ((name === "href" || name === "src") && /^javascript(?=:)/i.test(String(v).replace(/[\u0000-\u0020]/g, ""))) throw new Error("refused URL");
     el.setAttribute(name, v === true ? "" : String(v));
   }
   return el;
@@ -41,7 +53,8 @@ export function frag(...kids) { return add(document.createDocumentFragment(), ki
 export function svg(tag, attrs) { return setAttrs(document.createElementNS(SVG_NS, tag), attrs); }
 
 /* ---- untrusted data ---- */
-const CTL = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\uE000\uE001]/g;
+const CTL = /[\u0000-\u0008\u000A-\u001F\u007F-\u009F\u061C\u200B\u200E\u200F\u2028\u2029\u202A-\u202E\u2060\u2066-\u2069\uFEFF\uE000\uE001]/g;
+const hasCtl = (s) => { CTL.lastIndex = 0; const r = CTL.test(s); CTL.lastIndex = 0; return r; };
 const code = (ch) => "[U+" + ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0") + "]";
 /* data as plain text: every control shown as its code */
 export function safe(s) { return String(s).replace(CTL, code); }
@@ -154,9 +167,11 @@ function txt(s, marks) {
   return out;
 }
 
-/* T(key, vars): the string for this language as a fragment, Latin runs isolated in Arabic. A var is plain text (data:
-   substituted BEFORE the Latin runs are isolated, so "After Effects {version}" stays one run) or a Node (inserted as
-   is, through a private-use placeholder). A missing key is recorded and drawn as [key]. */
+/* T(key, vars): the string for this language as a fragment, Latin runs isolated in Arabic. A var is plain text
+   (substituted BEFORE the Latin runs are isolated, so "After Effects {version}" stays one run) or a Node (inserted as
+   is, through a private-use placeholder). A plain-text var that holds a neutralised character becomes its own data
+   isolate (name()): its [U+XXXX] codes would otherwise split the Latin run in an Arabic line. A missing key is recorded
+   and drawn as [key]. */
 export function T(key, vars) {
   const s = C.S[key];
   if (s === undefined) { C.missing.push(key); return frag("[" + key + "]"); }
@@ -164,7 +179,8 @@ export function T(key, vars) {
   let str = "";
   for (let i = 0; i < parts.length; i++) {
     if (i % 2 === 0) { str += parts[i]; continue; }
-    const v = vars ? vars[parts[i]] : undefined;
+    let v = vars ? vars[parts[i]] : undefined;
+    if (v !== undefined && !(v instanceof Node) && hasCtl(String(v))) v = name(v);
     if (v instanceof Node) { str += "\uE000" + marks.length + "\uE001"; marks.push(v); }
     else str += v === undefined ? "{" + parts[i] + "}" : safe(v);
   }

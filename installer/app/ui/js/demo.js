@@ -3,9 +3,9 @@
    (ET1-10..12) replace it, and the host interface (ET1-09) decides what is shown. The values below are mock data, as in
    the mockups (I_DATA); the copy comes from the string table only.
    &fixture=<name> loads <bundle>/fixtures/<name>.js, which exists only in a test staging (tests/fixtures/); its default
-   export gets {demo, I} and returns a view. A name is letters, digits and hyphens only. */
+   export gets {demo, I, mount} and returns a view. A name is letters, digits and hyphens only. */
 import { C } from "./ctx.js";
-import { I, T, frag, h } from "./shell.js";
+import { I, T, frag, h, mount } from "./shell.js";
 
 export const VERSION = "3.0.0";
 const DEFAULTS = { path: "/Users/editor/WhyNot Clients", name: null, mono: "WhyNotCut-Premiere-3.0.0.ccx" };
@@ -30,8 +30,13 @@ export function shellView(d) {
         I.radio(T("i02.model.large"), { on: true, size: I.gb(2.9) }),
         I.radio(T("i02.model.turbo"), { size: I.gb(1.6) }))),
     h("div", { class: "i-sec" }, I.pathField(T("i02.clients"), d.path, { sub: T("i02.clients.sub") })),
+    /* a danger and a destructive button, both ASKED for the Return keycap: btn() must refuse it (the self-check's
+       dangerkbd must stay 0 with something to count) */
     h("div", { class: "i-sec" }, I.act("waiting", T("i04.act.ccx.title"), T("i04.act.ccx"), { mono: d.mono,
-      btns: I.btn(T("i04.act.ccx.btn"), { icon: "file-search" }), hint: T("i04.act.ccx.hint") })),
+      btns: [I.btn(T("i04.act.ccx.btn"), { icon: "file-search" }),
+        h("span", { class: "ms-2" }), I.btn(T("i00.cancel"), { kind: "danger", key: "enter" }),
+        h("span", { class: "ms-2" }), I.btn(T("i00.close"), { destructive: true, key: "enter" })],
+      hint: T("i04.act.ccx.hint") })),
     h("div", { class: "i-sec" }, I.fail(T("i07.checksum"), { sub: T("i07.checksum.sub"), safety: true,
       btn: I.btn(T("i00.retry"), { icon: "refresh-cw" }) })));
   return {
@@ -46,7 +51,7 @@ export function shellView(d) {
 export async function fixtureView(name) {
   if (!/^[a-z0-9-]{1,40}$/.test(name)) throw new Error("bad fixture name");
   const mod = await import("../fixtures/" + name + ".js");
-  const view = mod.default({ demo: { shellView }, I });
+  const view = mod.default({ demo: { shellView }, I, mount });
   view.state = "shell:" + name;
   return view;
 }

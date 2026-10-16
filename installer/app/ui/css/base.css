@@ -55,7 +55,7 @@ body { display: flex; flex-direction: column; direction: ltr; } /* the page stay
 /* a path or file name: an LTR isolate that wraps after a separator and never reverses its drive letter */
 .m-panel .m-path { unicode-bidi: isolate; direction: ltr; overflow-wrap: anywhere; }
 /* a bidi control character found in data (a path, a name) is shown as its code, never applied (js/text.js) */
-.m-panel .m-ctl { display: inline; color: var(--twn-warn); }
+.m-panel .m-ctl { display: inline; color: var(--twn-warn); overflow-wrap: anywhere; }
 .m-rtl .t-display { font: 600 var(--twn-type-ar-display) var(--twn-font-ar); }
 .m-rtl .t-title { font: 600 var(--twn-type-ar-title) var(--twn-font-ar); }
 .m-rtl .t-verb { font: 600 var(--twn-type-ar-verb) var(--twn-font-ar); }

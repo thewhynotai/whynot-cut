@@ -34,11 +34,16 @@ export const I = {};
 I.T = T;
 I.Tos = Tos;
 I.ico = ico;
+/* the string form for a count: the CLDR category of this language (Intl.PluralRules: zero, one, two, few, many,
+   other) picks key.<category> when the table has it, else the base key (review F5). A count from host JSON may be a
+   string ("2"): it is read as a number. */
+I.pluralKey = function (key, n) {
+  let cat = "other";
+  try { cat = new Intl.PluralRules(C.lang).select(Number(n)); } catch (e) { cat = "other"; }
+  return C.S[key + "." + cat] !== undefined ? key + "." + cat : key;
+};
 I.plural = function (key, n, vars) {
-  const v = Object.assign({ n: n }, vars || {});
-  const form = n === 1 && C.S[key + ".one"] !== undefined ? key + ".one"
-    : n === 2 && C.S[key + ".two"] !== undefined ? key + ".two" : key;
-  return T(form, v);
+  return T(I.pluralKey(key, n), Object.assign({ n: n }, vars || {}));
 };
 /* "2.9 GB" / «2.9 جيجا» with a no-break space; Western digits in both (plain text: used as a T() var) */
 I.gb = function (n) {
@@ -50,6 +55,7 @@ I.path = path;
 I.ltr = ltr;
 I.data = data;
 I.name = name;
+I.mono = mono;
 /* "WhyNot Cut 3.0.0" as ONE isolated Latin run, the digits in Inter (.i-ver: Syne's old-style digits read "3.o.ı") */
 I.app = function (ver) { return h("bdi", { dir: "ltr", class: "lat" }, raw("product.name") + " ", h("span", { class: "i-ver" }, data(ver))); };
 I.ver = function (ver) { return h("bdi", { dir: "ltr", class: "lat i-ver" }, data(ver)); };
@@ -268,7 +274,9 @@ export function mount(view) {
           bar))));
   document.body.replaceChildren(win);
   const update = scrollIndicator(win, view.scroll);
-  selfCheck(win, view.state || "idle", update);
+  /* review F3: the keys and icons missing from THIS view (recorded while it was built and drawn), then a fresh list
+     for the next one; the self-check of an earlier mount never writes after a newer mount */
+  selfCheck(win, view.state || "idle", update, C.missing.splice(0));
   return win;
 }
 

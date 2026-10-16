@@ -1,0 +1,22 @@
+{
+  "_comment": "What ships: the production staging list for the app build (ET1-17) and tests/_harness.py stage(production=True). files = the bundle, copied as is; then every vendor.json entry. dev_only = never shipped: the demo body (loaded by main.js only for ?demo=) and, by construction, the test fixtures (tests/fixtures, never in ui/). A new file in ui/ must be listed in one of the two (a test checks it).",
+  "files": [
+    "index.html",
+    "css/base.css",
+    "css/fonts.css",
+    "css/installer.css",
+    "css/tokens-additive.css",
+    "js/components.js",
+    "js/ctx.js",
+    "js/guard.js",
+    "js/icons.gen.js",
+    "js/main.js",
+    "js/selfcheck.js",
+    "js/shell.js",
+    "js/strings.js",
+    "js/text.js"
+  ],
+  "dev_only": [
+    "js/demo.js"
+  ]
+}

@@ -14,6 +14,7 @@ import concurrent.futures as cf
 import pathlib
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 
@@ -22,7 +23,9 @@ import _harness as H
 LANGS = ("en", "ar")
 WIDTHS = (760, 640)
 OSES = ("mac", "win")
-BIDI_CONTROLS = set("؜‎‏‪‫‬‭‮⁦⁧⁨⁩")
+NEUTRALISED = ({chr(c) for c in range(0x00, 0x20)} - {"\t"}) | {chr(c) for c in range(0x7F, 0xA0)} | set(
+    "\u061c\u200b\u200e\u200f\u2028\u2029\u202a\u202b\u202c\u202d\u202e\u2060\u2066\u2067\u2068\u2069\ufeff\ue000\ue001")
+BIDI_CONTROLS = NEUTRALISED
 HOSTILE_HTML = "<img src=x onerror=alert(1)>"
 
 
@@ -36,6 +39,7 @@ class ShellRenders(unittest.TestCase):
         cls.delta = H.viewport_delta(cls.exe, cls.work)
         cls.stage = H.stage(cls.work / "stage")
         cls.stage_nofonts = H.stage(cls.work / "stage-nofonts", skip_fonts=True)
+        cls.stage_prod = H.stage(cls.work / "stage-prod", production=True)
         jobs = {}
         for lang in LANGS:
             for w in WIDTHS:
@@ -49,16 +53,25 @@ class ShellRenders(unittest.TestCase):
         jobs[("csp-probe", "en", 760, "mac")] = (cls.stage, {"demo": "shell", "fixture": "csp-probe", "lang": "en"}, 760, "mac")
         jobs[("missing", "en", 760, "mac")] = (cls.stage, {"demo": "shell", "fixture": "missing", "lang": "en"}, 760, "mac")
         jobs[("nofonts", "ar", 760, "mac")] = (cls.stage_nofonts, {"demo": "shell", "lang": "ar"}, 760, "mac")
+        for lang in LANGS:
+            for fx in ("order", "plural"):
+                jobs[(fx, lang, 760, "mac")] = (cls.stage, {"demo": "shell", "fixture": fx, "lang": lang}, 760, "mac")
+        jobs[("tt-probe", "en", 760, "mac")] = (cls.stage, {"demo": "shell", "fixture": "tt-probe", "lang": "en"}, 760, "mac")
+        jobs[("remount", "en", 760, "mac")] = (cls.stage, {"demo": "shell", "fixture": "remount", "lang": "en"}, 760, "mac")
+        for lang in LANGS:
+            jobs[("prod-idle", lang, 760, "mac")] = (cls.stage_prod, {"lang": lang}, 760, "mac")
         with cf.ThreadPoolExecutor(max_workers=4) as ex:
             futs = {k: ex.submit(H.render, cls.exe, st, cls.work, q, w, os_kind, "-".join(map(str, k)), delta=cls.delta)
                     for k, (st, q, w, os_kind) in jobs.items()}
             cls.R = {k: f.result() for k, f in futs.items()}
+        retried = sorted(str(k) for k, r in cls.R.items() if len(r.attempts) > 1)
+        print(f"[ui-shell] {len(cls.R)} pages, dumped again with a longer budget: {len(retried)} {retried}", file=sys.stderr)
 
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.work, ignore_errors=True)
 
-    def cases(self, kinds=("shell", "hostile", "idle", "nosupport")):
+    def cases(self, kinds=("shell", "hostile", "idle", "nosupport", "order", "plural", "remount", "prod-idle")):
         return [(k, r) for k, r in self.R.items() if k[0] in kinds]
 
     # ---- every normal page ----
@@ -106,6 +119,10 @@ class ShellRenders(unittest.TestCase):
                 self.assertEqual(r.check.get("lang"), lang)
 
     def test_keycap_rules(self):
+        for k, r in self.cases(("shell",)):
+            with self.subTest(k=k):
+                self.assertIn("m-btn-danger", r.dom, "the demo must carry a danger button for this check")
+                self.assertIn("m-btn-destructive", r.dom, "the demo must carry a destructive button for this check")
         for k, r in self.cases():
             with self.subTest(k=k):
                 self.assertEqual(r.check.get("dangerkbd"), "0")
@@ -121,12 +138,19 @@ class ShellRenders(unittest.TestCase):
                 self.assertNotIn("i-os-" + ("win" if k[3] == "mac" else "mac"), classes)
 
     def test_unsigned_build_shows_beta_chip_never_signed_line(self):
-        for k, r in self.cases(("shell",)):
+        # D-04: an unsigned build never claims to be signed: the i00.signed line is absent in both languages, the
+        # honest test-build line and the beta chip are present
+        S = H.strings()
+        flat = lambda t: " ".join(t.replace(" ", " ").split())  # the no-orphan rule binds the last words with NBSP
+        for k, r in self.cases(("shell", "idle", "prod-idle")):
             d = H.scan_dom(r.dom, ("i-hdr", "i-rail-trust"))
+            text = flat("".join(d.body_text))
             with self.subTest(k=k):
-                self.assertTrue("".join(d.text_in["i-hdr"]).strip())
+                for lang in ("en", "ar"):
+                    self.assertNotIn(flat(S[lang]["i00.signed"]), text)
+                self.assertIn(flat(S[k[1]]["i00.unsigned"]), flat("".join(d.text_in["i-rail-trust"])))
+                self.assertIn(flat(S[k[1]]["i00.internal"]), flat("".join(d.text_in["i-hdr"])))
                 self.assertIn("m-chip-warn", r.dom)
-                self.assertTrue("".join(d.text_in["i-rail-trust"]).strip())
 
     def test_support_live_by_default_and_one_soon_line_when_off(self):
         # D-05: WhatsApp support is live: the promise line, no "coming soon"; support.url absent: copy only + ONE line
@@ -167,6 +191,62 @@ class ShellRenders(unittest.TestCase):
                     self.assertEqual(sorted(set(text) & BIDI_CONTROLS), [], f"bidi control left in {cls}")
                     self.assertIn("[U+202E]", text, cls)
 
+    def test_hostile_path_title_is_inert(self):
+        for k, r in self.cases(("hostile",)):
+            titles = [a.get("title", "") for t, a in H.scan_dom(r.dom).tags if "i-path" in (a.get("class") or "").split()]
+            with self.subTest(k=k):
+                self.assertTrue(titles)
+                for t in titles:
+                    self.assertEqual(sorted(set(t) & NEUTRALISED), [])
+                    self.assertIn("[U+202E]", t)
+                    self.assertIn(HOSTILE_HTML, t)
+
+    def test_string_var_cannot_forge_a_placeholder(self):
+        # a data STRING var next to a Node var: "\uE0000\uE001" in the string must not pull the Node in again
+        for k, r in self.cases(("hostile",)):
+            d = H.scan_dom(r.dom, ("probe-var",))
+            text = "".join(d.text_in["probe-var"])
+            with self.subTest(k=k):
+                self.assertIn("[U+E000]0[U+E001]", text)
+                self.assertEqual(text.count("NODEVAR"), 1, text)
+                self.assertEqual(sorted(set(text) & NEUTRALISED), [])
+
+    def test_every_data_helper_neutralises(self):
+        for k, r in self.cases(("hostile",)):
+            d = H.scan_dom(r.dom, ("probe-helper",))
+            text = "".join(d.text_in["probe-helper"])
+            with self.subTest(k=k):
+                self.assertTrue(text)
+                self.assertEqual(sorted(set(text) & NEUTRALISED), [])
+                for code in ("[U+2029]", "[U+0085]", "[U+001C]", "[U+000B]", "[U+200F]", "[U+FEFF]", "[U+200B]"):
+                    self.assertIn(code, text)
+                self.assertIn("\u200d", text, "ZWJ is left alone (Arabic and emoji need it)")
+
+    def test_data_keeps_its_drawn_order_in_arabic_and_english(self):
+        # F1: measured on screen (a Range per character), not only in the DOM text
+        for k, r in self.cases(("order",)):
+            m = re.search(r'<meta name="order" content="([^"]*)"', r.dom)
+            with self.subTest(k=k):
+                self.assertIsNotNone(m, r.log[-1500:])
+                pairs = dict(x.split("=", 1) for x in m.group(1).split())
+                self.assertGreaterEqual(len(pairs), 100)
+                self.assertEqual(sorted(p for p, v in pairs.items() if v != "intact"), [])
+
+    def test_plural_follows_the_cldr_category(self):
+        # F5: Intl.PluralRules picks key.zero|one|two|few|many|other, falling back to the base key when a form is missing
+        want = {"ar": {"0": "", "1": ".one", "2": ".two", "3": "", "10": "", "11": "", "100": "", "s2": ".two"},
+                "en": {"0": "", "1": ".one", "2": "", "3": "", "10": "", "11": "", "100": "", "s2": ""}}
+        S = H.strings()
+        for k, r in self.cases(("plural",)):
+            m = re.search(r'<meta name="plural" content="([^"]*)"', r.dom)
+            with self.subTest(k=k):
+                self.assertIsNotNone(m, r.log[-1500:])
+                got = dict(x.split("=", 1) for x in m.group(1).split())
+                for n, form in want[k[1]].items():
+                    key = "i04.amber.fonts" + form
+                    self.assertIn(key, S[k[1]])
+                    self.assertEqual(got[n], key, n)
+
     def test_path_field_stays_one_line(self):
         # the field is 32 px high and cuts at its end: no break opportunity inside it (Chrome breaks at <wbr> even
         # under white-space: nowrap, which drew a long hostile path as three clipped lines)
@@ -192,6 +272,30 @@ class ShellRenders(unittest.TestCase):
             body = "".join(d.body_text)
             with self.subTest(k=k):
                 self.assertEqual(sorted(set(body) & {"‪", "‫", "‭", "‮"}), [])
+
+    def test_trusted_types_blocks_a_computed_html_sink(self):
+        r = self.R[("tt-probe", "en", 760, "mac")]
+        self.assertIsNotNone(r.raw_check, r.log[-2000:])
+        m = re.search(r'<meta name="tt" content="([^"]*)"', r.dom)
+        self.assertIsNotNone(m, r.log[-2000:])
+        self.assertEqual(m.group(1), "blocked")
+        self.assertNotIn('<img src="x"', r.dom)
+        self.assertNotEqual(r.check.get("csp"), "0")
+        self.assertTrue(any("trusted" in ln.lower() for ln in r.console_csp + r.log.splitlines()))
+
+    def test_remount_leaves_one_fresh_self_check(self):
+        r = self.R[("remount", "en", 760, "mac")]
+        self.assertEqual(r.dom.count('name="mock-check"'), 1, r.dom[:3000])
+        self.assertEqual(r.check.get("state"), "shell:remount")
+        self.assertEqual(r.check.get("missing"), "")
+
+    def test_production_bundle_has_no_demo_or_fixtures(self):
+        self.assertFalse((self.stage_prod / "js" / "demo.js").exists())
+        self.assertFalse((self.stage_prod / "fixtures").exists())
+        for lang in LANGS:
+            r = self.R[("prod-idle", lang, 760, "mac")]
+            with self.subTest(lang=lang):
+                self.assertEqual(r.check.get("state"), "idle")
 
     # ---- the detectors are not vacuous ----
     def test_detector_catches_a_csp_violation(self):

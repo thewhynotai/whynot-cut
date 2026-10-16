@@ -68,6 +68,8 @@ export default {
   "i00.continue": "Continue",
   "i04.amber.fonts": "{n} fonts are in use by another app, so they'll be added after you restart the computer.",
   "i04.amber.fonts.one": "A font is in use by another app, so it'll be added after you restart the computer.",
+  "i00.cancel": "Cancel",
+  "i00.close": "Close",
   "i00.unit.gb": "{n} GB",
   "i00.unit.mb": "{n} MB"
  },
@@ -128,6 +130,8 @@ export default {
   "i04.amber.fonts": "{n} خطوط مستخدمة في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
   "i04.amber.fonts.one": "خط مستخدم في برنامج تاني، فهيتضاف بعد ما تعمل ريستارت للجهاز.",
   "i04.amber.fonts.two": "خطين مستخدمين في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
+  "i00.cancel": "إلغاء",
+  "i00.close": "اقفل",
   "i00.unit.gb": "{n} جيجا",
   "i00.unit.mb": "{n} ميجا"
  }

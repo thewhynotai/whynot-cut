@@ -1,5 +1,5 @@
 {
-  "_comment": "Files the UI needs that have ONE source elsewhere in the repo. They are copied to <dist>/<to> at build time (ET1-17) and test time (tests/_harness.py stage()); ui/vendor/ is never committed. Fonts: the panel's OFL static files (switch the source to whynot-cut/installer/fonts/ when Task 11 adds it). Monogram: the plugin's dark icon.",
+  "_comment": "Files the UI needs that have ONE source elsewhere in the repo. They are copied to <dist>/<to> at build time (ET1-17) and test time (tests/_harness.py stage()); ui/vendor/ is never committed. Fonts: the panel's OFL static files (switch the source to whynot-cut/installer/fonts/ when Task 11 adds it). Monogram: the plugin's dark icon. Licences: the OFL text beside each font family; Lucide's ISC text for js/icons.gen.js.",
   "files": [
     {"to": "vendor/brand/tokens.css", "from": "brand/tokens.css"},
     {"to": "vendor/brand/icon-48.png", "from": "adobe/premiere-uxp/icons/dark/icon-48.png"},
@@ -14,6 +14,7 @@
     {"to": "vendor/fonts/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf", "from": "adobe/panel-ui/fonts/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf"},
     {"to": "vendor/fonts/ibmplexsansarabic/OFL.txt", "from": "adobe/panel-ui/fonts/ibmplexsansarabic/OFL.txt"},
     {"to": "vendor/fonts/ibmplexmono/IBMPlexMono-Regular.ttf", "from": "adobe/panel-ui/fonts/ibmplexmono/IBMPlexMono-Regular.ttf"},
-    {"to": "vendor/fonts/ibmplexmono/OFL.txt", "from": "adobe/panel-ui/fonts/ibmplexmono/OFL.txt"}
+    {"to": "vendor/fonts/ibmplexmono/OFL.txt", "from": "adobe/panel-ui/fonts/ibmplexmono/OFL.txt"},
+    {"to": "vendor/licenses/lucide-LICENSE.txt", "from": "whynot-cut/templates/motion/icons/lucide/LICENSE"}
   ]
 }

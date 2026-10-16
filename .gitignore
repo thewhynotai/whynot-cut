@@ -12,3 +12,6 @@ dist/
 whynot-cut/evals/results/
 evals/results/
 node_modules/
+
+# installer app UI: vendored files are staged at build/test time from ui/vendor.json, never committed (ET1-07)
+installer/app/ui/vendor/

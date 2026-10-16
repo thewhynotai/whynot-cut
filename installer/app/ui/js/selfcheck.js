@@ -34,8 +34,16 @@ function extras(win) {
   return ["dangerkbd=" + dk, "violet=" + violet, "confirmkbd=" + ck];
 }
 
-export function selfCheck(win, state, beforeMeasure) {
+/* one self-check per page: each mount gets a new generation; a check from an earlier mount that settles late writes
+   nothing, and writing removes any older meta, so a reader of the first <meta name="mock-check"> sees this mount */
+let generation = 0;
+
+export function selfCheck(win, state, beforeMeasure, missing) {
+  const gen = ++generation;
+  missing = missing || [];
+  document.querySelectorAll('meta[name="mock-check"]').forEach((m) => m.remove());
   const done = () => {
+    if (gen !== generation) return;
     if (beforeMeasure) beforeMeasure();
     const wr = win.getBoundingClientRect(), mid = wr.left + wr.width / 2;
     const side = (el) => { if (!el) return "none"; const r = el.getBoundingClientRect(); return r.left + r.width / 2 < mid ? "left" : "right"; };
@@ -62,7 +70,8 @@ export function selfCheck(win, state, beforeMeasure) {
     meta.content = ["state=" + state, "lang=" + C.lang, "w=" + Math.round(wr.width), "h=" + Math.round(wr.height), "dir=" + getComputedStyle(win).direction,
       "mono=" + side(win.querySelector(".m-mono")), "tab1=none",
       "overflow=" + over, "worst=" + worst.replace(/[;=]/g, " "), "fonts=" + (fontsOk ? "ok" : "fallback"),
-      "missing=" + C.missing.join(",")].concat(extras(win), ["csp=" + guard.csp.length, "jserr=" + guard.errors.length]).join(";");
+      "missing=" + missing.join(",")].concat(extras(win), ["csp=" + guard.csp.length, "jserr=" + guard.errors.length]).join(";");
+    document.querySelectorAll('meta[name="mock-check"]').forEach((m) => m.remove());
     document.head.appendChild(meta);
   };
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => setTimeout(done, 50));

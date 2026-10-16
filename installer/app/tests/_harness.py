@@ -43,8 +43,12 @@ BROWSERS = [
 CONTENT_H = {760: 540, 640: 480}
 CHROME_H = {"mac": 28, "win": 32}
 
-CSP_TARGET = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; "
-              "connect-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+CSP_TARGET = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; "
+              "connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; "
+              "require-trusted-types-for 'script'; trusted-types 'none'")
+# the one CSP notice a <meta> policy always gets (the spec ignores frame-ancestors there; the app host sends it as a
+# header, ET1-17): matched exactly, so a second problem on another line is never hidden
+META_FRAME_ANCESTORS = "The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element."
 
 
 def tmp_root() -> pathlib.Path:
@@ -70,13 +74,39 @@ def vendor_map() -> list[dict]:
     return json.loads((UI / "vendor.json").read_text(encoding="utf-8"))["files"]
 
 
-def stage(dest: pathlib.Path, *, skip_fonts: bool = False, fixtures: bool = True) -> pathlib.Path:
-    """Copy the UI bundle + its vendored files (+ the test fixtures) into dest; returns dest."""
-    shutil.copytree(UI, dest)
+def strings() -> dict:
+    """The UI string table (ui/js/strings.js: strict JSON in an ES module): {"en": {...}, "ar": {...}}."""
+    src = (UI / "js" / "strings.js").read_text(encoding="utf-8")
+    body = src.split("export default", 1)[1].strip()
+    return json.loads(body[:-1])
+
+
+def check_vendor_target(to: str) -> str:
+    """A vendor.json target must be a relative POSIX path inside vendor/ (no .., no ., no drive, no backslash)."""
+    p = pathlib.PurePosixPath(to)
+    if ("\\" in to or re.match(r"^[A-Za-z]:", to) or p.is_absolute() or not p.parts or p.parts[0] != "vendor"
+            or any(x in ("..", ".") for x in p.parts) or len(p.parts) < 2):
+        raise ValueError(f"bad vendor target: {to!r}")
+    return to
+
+
+def stage(dest: pathlib.Path, *, skip_fonts: bool = False, fixtures: bool = True, production: bool = False) -> pathlib.Path:
+    """Copy the UI bundle + its vendored files (+ the test fixtures) into dest; returns dest.
+    production=True stages exactly what ships: the files listed in ui/stage.json + vendor.json, never the demo or the
+    fixtures (the list ET1-17's build uses)."""
+    if production:
+        dest.mkdir(parents=True)
+        for rel in json.loads((UI / "stage.json").read_text(encoding="utf-8"))["files"]:
+            out = dest / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(UI / rel, out)
+        fixtures = False
+    else:
+        shutil.copytree(UI, dest)
     for f in vendor_map():
         if skip_fonts and f["to"].startswith("vendor/fonts/"):
             continue
-        out = dest / f["to"]
+        out = dest / check_vendor_target(f["to"])
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(REPO / f["from"], out)
     if fixtures and FIXTURES.is_dir():
@@ -100,17 +130,17 @@ class Render:
         # 'frame-ancestors' in a <meta> is ignored by every browser (spec) and says so; the app host must send it
         # as a header (ET1-17), so that one notice is expected here.
         self.console_csp_notes = [ln for ln in lines if ":CONSOLE" in ln and "Content Security Policy" in ln
-                                  and ln not in self.console_csp and "frame-ancestors" not in ln]
+                                  and ln not in self.console_csp and META_FRAME_ANCESTORS not in ln]
         self.console_errors = [ln for ln in log.splitlines() if ":CONSOLE" in ln and "Uncaught" in ln]
 
     def label(self) -> str:
         return urllib.parse.urlencode(self.query) + f" @{self.size[0]}x{self.size[1]}"
 
 
-def _chrome_cmd(exe: str, prof: pathlib.Path, size: tuple[int, int], url: str) -> list[str]:
+def _chrome_cmd(exe: str, prof: pathlib.Path, size: tuple[int, int], url: str, budget: int = 5000) -> list[str]:
     return [exe, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
             "--disable-extensions", "--allow-file-access-from-files", f"--user-data-dir={prof}",
-            f"--window-size={size[0]},{size[1]}", "--virtual-time-budget=5000",
+            f"--window-size={size[0]},{size[1]}", f"--virtual-time-budget={budget}",
             "--blink-settings=preferredColorScheme=0", "--host-resolver-rules=MAP * ~NOTFOUND",
             "--enable-logging=stderr", "--v=0", "--dump-dom", url]
 
@@ -137,21 +167,36 @@ def viewport_delta(exe: str, work: pathlib.Path) -> tuple[int, int]:
     return 800 - int(m.group(1)), 600 - int(m.group(2))
 
 
+# The page writes its self-check once its fonts are in (fonts.ready + 50 ms). --dump-dom fires when the virtual-time
+# budget runs out; on a cold start under load (4 Chromes at once) the first pages have been dumped BEFORE the fonts
+# settled (fix round 1: 2 of 51 pages in one run had no self-check and no error). A dump without the self-check is a harness timing miss, not a
+# page result, so it is retried with a longer budget; every attempt is kept on the Render (attempts) and a page that
+# never writes its check still fails.
+BUDGETS = (10000, 20000, 40000)
+
+
 def render(exe: str, stage_dir: pathlib.Path, work: pathlib.Path, query: dict, width: int, os_kind: str = "mac",
            tag: str = "r", chrome: bool = True, delta: tuple[int, int] = (0, 0)) -> Render:
     height = CONTENT_H[width] + (CHROME_H[os_kind] if chrome else 0)
     url = (stage_dir / "index.html").resolve().as_uri() + "?" + urllib.parse.urlencode(query)
-    prof = work / f"profile-{tag}"
-    cmd = _chrome_cmd(exe, prof, (width + delta[0], height + delta[1]), url)
-    try:
-        r = subprocess.run(cmd, capture_output=True, timeout=120)
-        dom, log = r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
-    except subprocess.TimeoutExpired as e:
-        dom = (e.stdout or b"").decode("utf-8", "replace")
-        log = (e.stderr or b"").decode("utf-8", "replace") + "\n[harness] timeout"
-    finally:
-        shutil.rmtree(prof, ignore_errors=True)
-    return Render(dom, log, query, (width, height))
+    attempts = []
+    for i, budget in enumerate(BUDGETS):
+        prof = work / f"profile-{tag}-{i}"
+        cmd = _chrome_cmd(exe, prof, (width + delta[0], height + delta[1]), url, budget)
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=180)
+            dom, log = r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+        except subprocess.TimeoutExpired as e:
+            dom = (e.stdout or b"").decode("utf-8", "replace")
+            log = (e.stderr or b"").decode("utf-8", "replace") + "\n[harness] timeout"
+        finally:
+            shutil.rmtree(prof, ignore_errors=True)
+        out = Render(dom, log, query, (width, height))
+        attempts.append(budget)
+        out.attempts = attempts
+        if out.raw_check is not None:
+            break
+    return out
 
 
 class DomScan(html.parser.HTMLParser):
