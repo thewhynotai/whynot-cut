@@ -8,7 +8,12 @@
 #   * find_claude_code uses the WhyNot Cut discovery rules (platform.claude_install_candidates): PATHEXT instead of
 #     os.access(X_OK) on Windows, the `.cmd` shim last;
 #   * a `.cmd` CLI is never run through cmd.exe with JSON on argv (platform.claude_command resolves it or refuses);
-#   * cancel / timeout kills the CLI's process tree (lib/parallel.kill_tree).
+#   * cancel / timeout kills the CLI and what it started: the tree on Windows (lib/parallel.kill_tree, taskkill /T), the
+#     CLI's own process group on POSIX (it is started in a new session and the group is killed);
+#   * a cancelled run (lib/parallel) starts no further batch and ends with error "cancelled";
+#   * a refused `.cmd` shim is the error code "cmd_shim_refused" with the help text in stats["how"] (make_client: the
+#     notice of the same name, `notice_how` gives the text);
+#   * find_claude_code keeps only absolute paths: a CWD-relative claude.exe is never started (Task 10 review I1).
 """Correct caption phrases with Claude by the user's rules. Timecodes never leave this machine: only text is sent,
 and the reply must have exactly one line per phrase or the source text is kept."""
 import importlib
@@ -18,7 +23,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ..parallel import kill_tree, track, untrack
+import signal
+from ..parallel import cancelled, kill_tree, track, untrack
 from . import platform as _platform
 from .similar import close as _close, tokens as _tokens
 
@@ -67,16 +73,39 @@ class _Reply:
         self.content, self.stop_reason = [_Text(text)], "end_turn"
 
 
+def _spawn_kwargs(posix=None) -> dict:
+    """POSIX: the CLI leads its own session / process group, so a cancel can kill the group (what it started too)"""
+    posix = os.name == "posix" if posix is None else posix
+    return {"start_new_session": True} if posix else {}
+
+
+def _kill_group(p, posix=None) -> None:
+    posix = os.name == "posix" if posix is None else posix
+    if posix:
+        try:
+            os.killpg(p.pid, getattr(signal, "SIGKILL", 9))
+        except OSError:                          # the group is already gone (ProcessLookupError is an OSError)
+            pass
+
+
+def _kill_cli(p, posix=None) -> None:
+    """kill the CLI and what it started: POSIX the process group, Windows the tree (taskkill /T in kill_tree)"""
+    _kill_group(p, posix)
+    kill_tree(p)
+
+
 def _run_cli(args, stdin, cwd):
     if _platform.is_batch(args[0]):             # never cmd.exe with the caption JSON on argv (BatBadBut)
-        raise RuntimeError(_platform.CMD_REFUSED)
+        raise _platform.CmdShimRefused(_platform.CMD_REFUSED)
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                         encoding="utf-8", errors="replace", cwd=cwd)
+                         encoding="utf-8", errors="replace", cwd=cwd, **_spawn_kwargs())
     track(p)                                    # a cancelled parallel_map kills it too
     try:
         out, _err = p.communicate(stdin, timeout=CLI_TIMEOUT)
+        if cancelled():                         # killed by the cancel (POSIX: kill_tree only reached the CLI itself)
+            _kill_group(p)
     except BaseException:                       # timeout, Ctrl+C, anything: the CLI and what it started die with us
-        kill_tree(p)
+        _kill_cli(p)
         try:
             p.communicate(timeout=5)
         except Exception:                       # noqa: BLE001  (reaping only)
@@ -94,7 +123,9 @@ def find_claude_code(env=None, home=None, windows=None):
     env = dict(os.environ) if env is None else env
     windows = _platform.is_windows() if windows is None else windows
     home = Path.home() if home is None else Path(home)
-    found = [c for c in _platform.claude_install_candidates(env, home, windows, _platform.in_sandbox(env))
+    # absolute_only: shutil.which() also finds a claude.exe planted in the current folder on Windows (review I1)
+    found = [c for c in _platform.absolute_only(_platform.claude_install_candidates(env, home, windows,
+                                                                                    _platform.in_sandbox(env)))
              if _platform.runnable(c, env, windows)]
     found.sort(key=_platform.is_batch)           # stable: exe first, .cmd last
     return str(found[0]) if found else None
@@ -148,12 +179,33 @@ def rules_for(settings: dict, mode: str) -> str:
     return r if r.strip() else default_rules(mode)
 
 
+class _Notice(str):
+    """a notice code that also carries its help text (`.how`)"""
+    how = None
+
+
+def notice_how(notice):
+    """the help text that goes with a make_client notice, or None"""
+    return getattr(notice, "how", None)
+
+
 def make_client(settings: dict, finder=find_claude_code):
-    """correction backend: "subscription" (default, Claude Code CLI) or "api" (key). -> (client or None, notice)"""
+    """correction backend: "subscription" (default, Claude Code CLI) or "api" (key). -> (client or None, notice)
+    notices: "claude_code_missing", "cmd_shim_refused" (an npm .cmd shim that cannot be run safely; notice_how(notice)
+    is the way out)"""
     if settings.get("backend", "subscription") == "api":
         return None, None
     exe = finder()
-    return (ClaudeCodeClient(exe), None) if exe else (None, "claude_code_missing")
+    if not exe:
+        return None, "claude_code_missing"
+    if _platform.is_batch(exe):
+        try:
+            _platform.claude_command(exe)
+        except _platform.CmdShimRefused as e:
+            notice = _Notice(e.code)
+            notice.how = str(e)
+            return None, notice
+    return ClaudeCodeClient(exe), None
 
 
 def _system(rules: str, glossary: dict) -> str:
@@ -219,6 +271,12 @@ def correct(phrases: list, rules: str, glossary: dict, api_key: str, client=None
     system = _system(rules, glossary)
     out = []
     for i in range(0, len(phrases), BATCH):
+        if cancelled():                          # the run was cancelled: no new batch, the rest keeps its source text
+            stats["error"] = "cancelled"
+            stats["kept_source"].extend(range(i, len(phrases)))
+            stats["fallback"] += len(phrases) - i
+            out.extend(phrases[i:])
+            break
         lines = phrases[i:i + BATCH]
         before, after = phrases[max(0, i - CONTEXT):i], phrases[i + BATCH:i + BATCH + CONTEXT]
         reply = None
@@ -228,7 +286,12 @@ def correct(phrases: list, rules: str, glossary: dict, api_key: str, client=None
                 if len(reply) == len(lines):
                     break
         except ((RuntimeError, ValueError, StopIteration, KeyError) + _api_errors()) as e:
-            stats["error"] = str(e) if isinstance(e, RuntimeError) else type(e).__name__
+            if cancelled():                      # a CLI killed by the cancel is not "exit 1"
+                stats["error"] = "cancelled"
+            elif isinstance(e, _platform.CmdShimRefused):
+                stats["error"], stats["how"] = e.code, str(e)
+            else:
+                stats["error"] = str(e) if isinstance(e, RuntimeError) else type(e).__name__
             reply = None
         if reply is None or len(reply) != len(lines):
             stats["kept_source"].extend(range(i, i + len(lines)))

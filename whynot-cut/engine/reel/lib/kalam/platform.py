@@ -6,7 +6,10 @@
 #     "\Users\x\.local\bin\claude" on Windows); the Windows list is unchanged;
 #   * new: claude_install_candidates / runnable / claude_command, the WhyNot Cut Claude Code discovery rules ported with a
 #     parity test against installer/core/wnc_installer/claude.py (the engine never imports the installer: see the note
-#     above claude_install_candidates).
+#     above claude_install_candidates);
+#   * new: absolute_only. shutil.which() also looks in the current folder on Windows (unless the process has
+#     NoDefaultCurrentDirectoryInExePath), so the candidate list keeps the installer's parity but whatever starts a program
+#     (correct.find_claude_code, claude_command's node) keeps only absolute paths (Task 10 review I1).
 """What differs between macOS and Windows: which speech backend runs, and where Claude Code lives."""
 import importlib.util
 import os
@@ -92,6 +95,17 @@ def claude_install_candidates(env, home, windows: bool, sandbox: bool = False) -
     return [p for p in out if p.is_file()] + found
 
 
+def absolute_only(paths) -> list:
+    """the entries that are absolute paths (str or Path), in order: a CWD-relative `claude.exe` / `node.exe` (what
+    shutil.which returns for a program planted in the current folder on Windows) is never started"""
+    out = []
+    for p in paths:
+        s = str(p) if p else ""
+        if s and os.path.isabs(s) and Path(s).is_absolute():
+            out.append(p)
+    return out
+
+
 def is_batch(path) -> bool:
     """a Windows batch file (the npm `claude.cmd` shim): started through cmd.exe, so never with caption text on argv"""
     return str(path).lower().endswith((".cmd", ".bat"))
@@ -111,17 +125,28 @@ def runnable(path, env=None, windows=None) -> bool:
     return os.access(str(p), os.X_OK)
 
 
+class CmdShimRefused(RuntimeError):
+    """a `.cmd` npm shim that cannot be resolved to a program we may start; str(e) is the how (the way out)"""
+    code = "cmd_shim_refused"
+
+
 CMD_REFUSED = ("Claude Code is installed as a .cmd shim (npm). Windows would start it through cmd.exe, which is not safe "
                "with the caption text on the command line, and its cli.js / claude.exe was not found next to it. "
                "Reinstall Claude Code with its native installer (claude.exe) or run `npm install -g "
                "@anthropic-ai/claude-code` again.")
 
 
+NODE_REFUSED = ("Claude Code is installed as an npm shim that runs on Node.js (cli.js), but no usable Node.js was found: "
+                "the only `node` on PATH is a .cmd/.bat file or not an absolute path (a program in the current folder is "
+                "never used). Install Node.js (nodejs.org) so that node.exe is on PATH, or reinstall Claude Code with its "
+                "native installer (claude.exe).")
+
+
 def claude_command(exe, env=None) -> list:
     """The CLI as a command list. A `.py` / `.sh` (the test stand-ins) run on this interpreter / with bash, like
     wnc_installer.base.stand_in_command. A `.cmd` / `.bat` npm shim is resolved to the program it starts, next to it in
     node_modules/@anthropic-ai/claude-code: bin/claude.exe, else `node cli.js`; when neither is found it is refused
-    (RuntimeError with the way out), never run through cmd.exe (BatBadBut: JSON on argv would be re-parsed by cmd)."""
+    (CmdShimRefused, a RuntimeError, with the way out), never run through cmd.exe (BatBadBut: JSON on argv would be re-parsed by cmd)."""
     p = str(exe)
     low = p.lower()
     if low.endswith(".py"):
@@ -138,8 +163,11 @@ def claude_command(exe, env=None) -> list:
         return [str(native)]
     cli_js = pkg / "cli.js"
     if cli_js.is_file():
-        node = shim / "node.exe"
-        node = str(node) if node.is_file() else shutil.which("node", path=env.get("PATH"))
-        if node:
-            return [node, str(cli_js)]
-    raise RuntimeError(CMD_REFUSED)
+        beside = shim / "node.exe"
+        found = [beside] if beside.is_file() else []
+        found.append(shutil.which("node", path=env.get("PATH")))
+        usable = [str(n) for n in absolute_only(found) if not is_batch(n)]      # I1: never a CWD-relative node
+        if usable:
+            return [usable[0], str(cli_js)]
+        raise CmdShimRefused(NODE_REFUSED)
+    raise CmdShimRefused(CMD_REFUSED)
