@@ -42,12 +42,19 @@
   I.T = T;
   /* the macOS copy is the default; a key with a ".win" twin uses it on Windows */
   I.Tos = function (key, vars) { return T(OS === "win" && S[key + ".win"] !== undefined ? key + ".win" : key, vars); };
-  /* a count in a sentence: key.one for 1 and key.two for 2 when the table has them (Arabic has the dual), else the key itself with {n} */
+  /* a count in a sentence (convention: header of ../strings/installer.js). The category is new Intl.PluralRules(lang).select(n):
+     AR zero | one | two | few (3-10) | many (11-99) | other (100+); EN one | other. The line is key + "." + category when the
+     table has it, else the BASE key (EN: covers 0 and every count but 1; AR: the base equals .other). {n} is the count. */
+  var PR = {};
+  I.pluralKey = function (key, n) {
+    var lang = M.lang;
+    var cat = (PR[lang] = PR[lang] || new Intl.PluralRules(lang)).select(n);
+    return S[key + "." + cat] !== undefined ? key + "." + cat : key;
+  };
   I.plural = function (key, n, vars) {
     var v = { n: n }, k;
     for (k in (vars || {})) v[k] = vars[k];
-    var form = n === 1 && S[key + ".one"] !== undefined ? key + ".one" : n === 2 && S[key + ".two"] !== undefined ? key + ".two" : key;
-    return T(form, v);
+    return T(I.pluralKey(key, n), v);
   };
   I.ico = function (name, size, ink) {
     var set = (window.MOCK_ICONS || {})[name];
@@ -181,12 +188,45 @@
       '<div class="t-label ms-3">' + label + "</div>" + (o.chip || "") + '<span class="m-spacer"></span>' +
       '<span class="i-size t-meta">' + (o.size || "") + "</span></div>";
   };
+  /* SHARED: the path shown in a path field, cut in the MIDDLE so it stays on ONE line (E-T1; the field is 32 px tall, never wraps).
+     RULE (production copies this exactly), for a path longer than the budget (characters, "…" counted as 1):
+       1. keep the FIRST segment plus its separator: the drive "D:\", or the root "/" with its first folder ("/Volumes/"); on macOS
+          under /Users and /Volumes the account or the volume name is the identity, so it is kept too ("/Users/sara/",
+          "/Volumes/Samsung T7 Shield/") when head + "…" + separator + the last segment still fits the budget, else only the first folder;
+       2. keep the LAST segment whole (the folder the person chose); it is never cut by this rule;
+       3. fill from the END backwards with whole segments (each with its separator) while head + "…" + separator + the kept tail
+          stays within the budget; the first segment that does not fit stops the fill (no gaps: the kept tail is contiguous);
+       4. put "…" plus the separator between the two parts: head + "…" + sep + tail.
+     A path within the budget is shown whole. The separator is the path's own ("\\" if it has one, else "/"). The full path is
+     the field's title attribute (tooltip). The text is one LTR isolate in Arabic too (<bdi dir="ltr">); no <wbr> here (M.path is for
+     text that wraps; a field clips). The budget is characters per width: 760 px -> 46, 640 px -> 38. Measured: the value is mono 12 px
+     (7.09 px a character); the text box is the column minus the Change button and the field's padding, 339 px at 760 and 275 px at
+     640 in the narrower language (EN), so 46 and 38 characters keep a little spare. Arabic letters are narrower than a mono cell.
+     If the last segment alone is longer than the budget the field's CSS cuts it at its end (text-overflow), the only case it can. */
+  I.PATH_BUDGET = { 760: 46, 640: 38 };
+  I.pathShort = function (path, budget) {
+    if (path.length <= budget) return path;
+    var sep = path.indexOf("\\") >= 0 ? "\\" : "/";
+    var parts = path.replace(/[\\/]+$/, "").split(sep); /* "/Users/a/b" -> ["", "Users", "a", "b"]; "D:\x\y" -> ["D:", "x", "y"] */
+    var keep = parts[0] === "" ? 2 : 1, last = parts[parts.length - 1];
+    if (parts[0] === "" && (parts[1] === "Users" || parts[1] === "Volumes") && parts.length > 4 &&
+        parts.slice(0, 3).join(sep).length + 1 + 2 + last.length <= budget) keep = 3;
+    if (parts.length - 1 <= keep) return path; /* nothing in the middle to cut */
+    var head = parts.slice(0, keep).join(sep) + sep, tail = last, i, cand;
+    for (i = parts.length - 2; i >= keep; i--) {
+      cand = parts[i] + sep + tail;
+      if (head.length + 2 + cand.length > budget) break;
+      tail = cand;
+    }
+    return head + "…" + sep + tail;
+  };
   /* SHARED: path field; o = {btn, btnKind, kind: warn|error, msg, msgKind, focus, sub} */
   I.pathField = function (label, path, o) {
     o = o || {};
     var cls = o.kind ? " i-path-" + o.kind : "";
+    var shown = I.pathShort(path, I.PATH_BUDGET[W]);
     return '<div class="t-label">' + label + "</div>" +
-      '<div class="i-pathrow mt-1"><div class="i-path i-clip' + cls + '">' + M.path(path) + "</div>" + /* R3 S-08: M.path = one LTR isolate, drive colon inside; .i-path is left-aligned in both languages */
+      '<div class="i-pathrow mt-1"><div class="i-path i-clip' + cls + '" title="' + M.esc(path) + '"><bdi dir="ltr" class="mono m-path">' + M.esc(shown) + "</bdi></div>" + /* R3 S-08: one LTR isolate, drive colon inside; .i-path is left-aligned in both languages. E-T1: middle ellipsis (I.pathShort), full path in title */
       M.btn(o.btn || T("i02.change"), { icon: "folder", focus: o.focus, kind: o.btnKind }) + "</div>" +
       (o.msg ? '<div class="i-field-msg">' + M.status(o.msgKind || "info", 16) + '<div class="t-meta ms-2 m-grow ' + (o.msgKind === "warn" || o.msgKind === "error" ? "tx-text" : "tx-muted") + '">' + o.msg + "</div></div>" : "") +
       (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + "</div>" : "");
@@ -278,7 +318,7 @@
       '<span class="m-wordmark m-lockup-wm">' + M.ltr(S["product.name"], "wm") + '</span></span><span class="i-setup ms-2">' + T("i00.setup") + "</span>" +
       '<span class="m-spacer"></span>' + (internal ? M.chip("warn", T("i00.internal"), "flask-conical") : "") + langSwitch() + "</header>" +
       '<div class="m-hairline" aria-hidden="true"></div>' +
-      '<div class="i-body"><nav class="i-rail" aria-label="Steps">' + rail(v.rail) + '<span class="m-spacer"></span>' +
+      '<div class="i-body"><nav class="i-rail" aria-label="' + M.esc(T("i00.rail.aria")) + '">' + rail(v.rail) + '<span class="m-spacer"></span>' +
         '<div class="i-rail-end"><div class="t-meta tx-muted">' + T("i00.version", { app: I.app(D.version) }) + '</div><div class="mt-1">' + trust + "</div></div>" +
         '<footer class="m-footer"><bdi dir="' + (M.rtl ? "rtl" : "ltr") + '" class="m-footer-txt">' + M.t("footer.powered") + "</bdi></footer></nav>" +
       '<div class="i-main"><div class="i-scrollrow"><main class="i-scroll" id="scroll"><div class="i-scroll-in">' + v.body + "</div></main>" +

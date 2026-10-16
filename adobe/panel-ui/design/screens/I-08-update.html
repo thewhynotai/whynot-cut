@@ -99,7 +99,7 @@
           : i === at ? I.step("busy", t("i04.step." + k), { end: t("i03.checking") }) : I.step("pending", t("i04.step." + k));
       });
       return {
-        body: '<div class="i-title">' + t("i08.repair.run") + '</div><div class="t-meta tx-muted mt-1">' + t("i04.position", { n: at + 1, of: KEYS.length, min: t("i00.min", { n: 2 }) }) + "</div>" +
+        body: '<div class="i-title">' + t("i08.repair.run") + '</div><div class="t-meta tx-muted mt-1">' + t("i04.position", { n: at + 1, of: KEYS.length, min: I.plural("i00.min", 2) }) + "</div>" +
           '<div class="mt-3">' + M.notice("info", t("i04.resume"), { dismiss: false }) + "</div>" + I.list(rows, "mt-3"),
         bar: { end: M.btn(t("i04.hide"), {}) + I.btn(t("i00.cancel"), { icon: "circle-stop", key: "esc" }) }, at: "install", mark: "busy"
       };

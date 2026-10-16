@@ -26,6 +26,20 @@
    R3 (installer group, R3-fix-list section 4): titles follow the result (I.TITLES in ../js/installer.js); one name for the
      beta build ("Beta test build" / «نسخة تجربة»); the offline installer and the download page are gated (H24), so the next
      step is WhatsApp support (live); AR editor fixes (Git tools, start with the computer, elapsed time, «سينك»).
+   R3 / E-T1 (plural convention, I.plural in ../js/installer.js): a COUNT key is one whose {n} counts the noun in the sentence.
+     The key without a suffix is the BASE and always exists: it is the fallback AND the wording of the "other" category.
+     I.plural(key, n) asks new Intl.PluralRules(lang).select(n) and uses key + "." + category when the table has it, else the base.
+     - AR (Intl 'ar' categories): EVERY count key has the full set  .zero .one .two .few .many .other
+         zero = 0 · one = 1 · two = 2 · few = 3 to 10 · many = 11 to 99 · other = 100 and up (and every other number).
+       The base AR line is written out equal to its .other line (never different), so a caller that ignores plurals still reads right.
+       one and two name the noun in its own form («خط واحد», «خطين»), few takes the plural («{n} خطوط»), many and other the singular («{n} خط»).
+     - EN ('en' categories: one, other): the base covers 0 and every count but 1; add .one only where the wording changes
+       ("A font ...", "1 thing"); EN needs no .zero .two .few .many .other.
+     - A key with {n} that is NOT a count is exempt and has no suffixes: i04.position ({n} is the step NUMBER, "Step 2 of 7").
+     - Count keys: i00.min, i01.adds, i03.sum.ok, i03.sum.note, i03.sum.block, i04.count, i04.amber.fonts, i07.done.
+       The "{n} of {of}" lines (i04.count, i07.done) agree the noun with {n}: «خلصنا 3 خطوات من 8», not with the total.
+       i03.sum.* are label-and-number chips with no counted noun: the six AR forms are written out and are the same line.
+   i00.rail.aria is the accessible name of the step rail (a <nav> landmark), not a visible string.
    Every MOCK line needs the string-table owner; every Arabic line needs a native writer (direction §11 draft). */
 (function () {
   var NB = "\u00A0";
@@ -39,6 +53,7 @@
     "i00.version": "{app}",
     "i00.signed": "Genuine Setup from The" + NB + "Why" + NB + "Not",
     "i00.unsigned": "Beta test build. For testing only.", /* BETA ONLY (owner decision D-04): the paid edition ships signed; this line is never shown to a customer */
+    "i00.rail.aria": "Setup steps", /* aria-label of the step rail <nav> */
     "i00.stage.welcome": "Welcome", "i00.stage.custom": "Your choices", "i00.stage.check": "Check this computer",
     "i00.stage.claude": "Claude", "i00.stage.install": "Install", "i00.stage.finish": "Finish",
     "i00.stage.update": "Update", "i00.stage.choose": "What goes", "i00.stage.remove": "Remove", "i00.stage.done": "Done",
@@ -66,7 +81,8 @@
     "i01.fact.user.win": "For you only. No administrator rights needed.", /* MOCK from inst.welcome.no_admin */
     "i01.fact.private": "Setup sends nothing from your computer.", /* R2 G-F-14: scoped to Setup; what Claude reads is said on I-05 */
     "i01.fact.visible": "Every step is shown here and written to a log.",
-    "i01.adds": "Setup adds {n} things, all inside your user folder. Uninstall removes all of them and never touches your client folders.",
+    "i01.adds": "Setup adds {n} things, all inside your user folder. Uninstall removes all of them and never touches your client folders.", /* count key: base = EN other (0 and 2+) */
+    "i01.adds.one": "Setup adds {n} thing, inside your user folder. Uninstall removes it and never touches your client folders.",
     "i01.adds.show": "See what goes where",
     "i01.adds.hide": "Hide the list",
     "i01.install": "Install everything", /* NEW inst.welcome.install */
@@ -203,7 +219,7 @@
     "i04.prompt.dialog": "\u201CWhyNot Cut\u201D would like to access files in the \u201C{folder}\u201D folder.", /* R2 D-P2-8: names the clients folder, not Documents */
     "i04.prompt.deny": "Don\u2019t Allow", "i04.prompt.allow": "Allow",
     "i04.amber.fonts": "{n} fonts are in use by another app, so they'll be added after you restart the computer.",
-    "i04.amber.fonts.one": "A font is in use by another app, so it'll be added after you restart the computer.", /* I.plural: n = 1 */
+    "i04.amber.fonts.one": "A font is in use by another app, so it'll be added after you restart the computer.", /* I.plural: n = 1 (count key: base = EN other) */
     "i04.offline": "No internet. The model download continues by itself when you're online; everything else is installed.", /* MOCK from NEW offline */
     "i04.cancel.title": "Stop installing?",
     "i04.cancel.text": "What's done stays. Run Setup again to continue.", /* MOCK from inst.cancel.confirm */
@@ -268,7 +284,8 @@
     "i06.nosignin.sub": "Open Claude and sign in. WhyNot Cut starts as soon as you do.",
     /* I-07 Failure cards */
     "i07.title": "Setup stopped",
-    "i07.done": "{n} of {of} steps are done and stay installed.",
+    "i07.done": "{n} of {of} steps are done and stay installed.", /* count key: base = EN other */
+    "i07.done.one": "{n} of {of} steps is done and stays installed.",
     "i07.safety": "Safety check",
     "i07.checksum": "A download wasn't the genuine file from WhyNot Cut, so we didn't use it.", /* MOCK from I-07 Download changed */
     "i07.checksum.sub": "It was the video tools download. It was deleted before it ran. Nothing on your computer changed.", /* R2 D-P1-10: no file names here */
@@ -349,6 +366,7 @@
     "i00.version": "{app}",
     "i00.signed": "نسخة أصلية من The" + NB + "Why" + NB + "Not",
     "i00.unsigned": "نسخة تجربة بس.",
+    "i00.rail.aria": "خطوات التسطيب", /* aria-label of the step rail <nav> */
     "i00.stage.welcome": "البداية", "i00.stage.custom": "اختياراتك", "i00.stage.check": "فحص الجهاز",
     "i00.stage.claude": "Claude", "i00.stage.install": "التسطيب", "i00.stage.finish": "النهاية",
     "i00.stage.update": "التحديث", "i00.stage.choose": "اللي هيتشال", "i00.stage.remove": "الإزالة", "i00.stage.done": "خلاص",
@@ -363,7 +381,10 @@
     "i00.offline_ask": "صفحة التحميل هتنزل قريب. لحد ما تنزل، اطلب نسخة التسطيب اللي من غير نت مننا على واتساب.",
     "i00.save_report": "احفظ تقرير للدعم",
     "i00.report_note": "التقرير بيتحفظ على جهازك من غير بيانات شخصية، ومش بيتبعت لحد إلا لو إنت بعته.",
+    /* count key (full AR set; base = other) */
     "i00.min": "{n}" + NB + "دقيقة",
+    "i00.min.zero": "أقل من" + NB + "دقيقة", "i00.min.one": "دقيقة" + NB + "واحدة", "i00.min.two": "دقيقتين",
+    "i00.min.few": "{n}" + NB + "دقايق", "i00.min.many": "{n}" + NB + "دقيقة", "i00.min.other": "{n}" + NB + "دقيقة",
     "i00.service": "خدمة WhyNot Cut",
     /* I-01 Welcome */
     "i01.eyebrow": "الإصدار {version}",
@@ -376,7 +397,14 @@
     "i01.fact.user.win": "ليك إنت بس. مش محتاج صلاحيات الأدمن.",
     "i01.fact.private": "التسطيب مش بيبعت أي حاجة من جهازك.",
     "i01.fact.visible": "كل خطوة بتظهر هنا وبتتكتب في سجل.",
-    "i01.adds": "التسطيب بيضيف {n} حاجات، كلها جوه فولدر المستخدم بتاعك. الإزالة بتشيلهم كلهم ومش بتلمس فولدرات العملاء أبدًا.",
+    /* count key (full AR set; base = other) */
+    "i01.adds": "التسطيب بيضيف {n} حاجة، كلها جوه فولدر المستخدم بتاعك. الإزالة بتشيلهم كلهم ومش بتلمس فولدرات العملاء أبدًا.",
+    "i01.adds.zero": "التسطيب مش بيضيف أي حاجة على جهازك. الإزالة مش بتلمس فولدرات العملاء أبدًا.",
+    "i01.adds.one": "التسطيب بيضيف حاجة واحدة بس، جوه فولدر المستخدم بتاعك. الإزالة بتشيلها ومش بتلمس فولدرات العملاء أبدًا.",
+    "i01.adds.two": "التسطيب بيضيف حاجتين، الاتنين جوه فولدر المستخدم بتاعك. الإزالة بتشيلهم ومش بتلمس فولدرات العملاء أبدًا.",
+    "i01.adds.few": "التسطيب بيضيف {n} حاجات، كلها جوه فولدر المستخدم بتاعك. الإزالة بتشيلهم كلهم ومش بتلمس فولدرات العملاء أبدًا.",
+    "i01.adds.many": "التسطيب بيضيف {n} حاجة، كلها جوه فولدر المستخدم بتاعك. الإزالة بتشيلهم كلهم ومش بتلمس فولدرات العملاء أبدًا.",
+    "i01.adds.other": "التسطيب بيضيف {n} حاجة، كلها جوه فولدر المستخدم بتاعك. الإزالة بتشيلهم كلهم ومش بتلمس فولدرات العملاء أبدًا.",
     "i01.adds.show": "شوف إيه بيتحط فين",
     "i01.adds.hide": "خبّي القائمة",
     "i01.install": "سطّب كل حاجة",
@@ -432,7 +460,11 @@
     "i03.title": "بنفحص الجهاز",
     "i03.title.ready": "الجهاز جاهز", "i03.title.notes": "جاهز، وفيه حاجات تعرفها", "i03.title.blocked": "لسه مينفعش نسطّب",
     "i03.sub": "الفحص ده مش بيغيّر أي حاجة في جهازك.",
+    /* count keys, chips with a number and no counted noun: the six AR forms are written out and are the same line */
     "i03.sum.ok": "جاهز: {n}", "i03.sum.note": "حاجات تعرفها: {n}", "i03.sum.block": "واقف عليه التسطيب: {n}",
+    "i03.sum.ok.zero": "جاهز: {n}", "i03.sum.ok.one": "جاهز: {n}", "i03.sum.ok.two": "جاهز: {n}", "i03.sum.ok.few": "جاهز: {n}", "i03.sum.ok.many": "جاهز: {n}", "i03.sum.ok.other": "جاهز: {n}",
+    "i03.sum.note.zero": "حاجات تعرفها: {n}", "i03.sum.note.one": "حاجات تعرفها: {n}", "i03.sum.note.two": "حاجات تعرفها: {n}", "i03.sum.note.few": "حاجات تعرفها: {n}", "i03.sum.note.many": "حاجات تعرفها: {n}", "i03.sum.note.other": "حاجات تعرفها: {n}",
+    "i03.sum.block.zero": "واقف عليه التسطيب: {n}", "i03.sum.block.one": "واقف عليه التسطيب: {n}", "i03.sum.block.two": "واقف عليه التسطيب: {n}", "i03.sum.block.few": "واقف عليه التسطيب: {n}", "i03.sum.block.many": "واقف عليه التسطيب: {n}", "i03.sum.block.other": "واقف عليه التسطيب: {n}",
     "i03.checking": "بنفحص…",
     "i03.disk": "المساحة الفاضية",
     "i03.disk.ok": "فاضي {free} على {drive}. WhyNot Cut محتاج حوالي {gb}.",
@@ -475,7 +507,14 @@
     "i04.title.done": "كل حاجة اتسطّبت",
     "i04.title.stopped": "التسطيب وقف",
     "i04.position": "خطوة {n} من {of} · فاضل حوالي {min}",
-    "i04.count": "خلصنا {n} من {of} خطوات",
+    /* count key (full AR set; base = other); the noun agrees with {n} */
+    "i04.count": "خلصنا {n} خطوة من {of}",
+    "i04.count.zero": "لسه ما خلصناش أي خطوة من {of}",
+    "i04.count.one": "خلصنا خطوة واحدة من {of}",
+    "i04.count.two": "خلصنا خطوتين من {of}",
+    "i04.count.few": "خلصنا {n} خطوات من {of}",
+    "i04.count.many": "خلصنا {n} خطوة من {of}",
+    "i04.count.other": "خلصنا {n} خطوة من {of}",
     "i04.step.preflight": "فحص الجهاز",
     "i04.step.engine": "خدمة WhyNot Cut",
     "i04.step.claude": "WhyNot Cut جوه Claude",
@@ -512,9 +551,14 @@
     "i04.prompt.text": "WhyNot Cut محتاج فولدر العملاء. لما macOS يسألك اختار «سماح». مش هيستخدم غير الفولدرات اللي اخترتها.",
     "i04.prompt.dialog": "يرغب \u201DWhyNot Cut\u201C في الوصول إلى الملفات الموجودة في المجلد \u201D{folder}\u201C.",
     "i04.prompt.deny": "عدم السماح", "i04.prompt.allow": "سماح",
-    "i04.amber.fonts": "{n} خطوط مستخدمة في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
-    "i04.amber.fonts.one": "خط مستخدم في برنامج تاني، فهيتضاف بعد ما تعمل ريستارت للجهاز.",
-    "i04.amber.fonts.two": "خطين مستخدمين في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.", /* Arabic dual: n = 2 */
+    /* count key (full AR set; base = other) */
+    "i04.amber.fonts": "{n} خط مستخدمين في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
+    "i04.amber.fonts.zero": "مفيش خطوط ناقصة، كل الخطوط اتضافت.",
+    "i04.amber.fonts.one": "خط واحد مستخدم في برنامج تاني، فهيتضاف بعد ما تعمل ريستارت للجهاز.",
+    "i04.amber.fonts.two": "خطين مستخدمين في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
+    "i04.amber.fonts.few": "{n} خطوط مستخدمة في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
+    "i04.amber.fonts.many": "{n} خط مستخدمين في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
+    "i04.amber.fonts.other": "{n} خط مستخدمين في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
     "i04.offline": "لسه مفيش نت. تحميل النموذج هيكمّل لوحده لما النت يرجع، وباقي الحاجات اتسطّبت.",
     "i04.cancel.title": "توقّف التسطيب؟",
     "i04.cancel.text": "اللي خلص هيفضل زي ما هو. شغّل التسطيب تاني عشان تكمّل.",
@@ -579,7 +623,14 @@
     "i06.nosignin.sub": "افتح Claude وسجّل دخول. WhyNot Cut هيبدأ أول ما تسجّل.",
     /* I-07 Failure cards */
     "i07.title": "التسطيب وقف",
-    "i07.done": "خلصنا {n} من {of} خطوات، وهيفضلوا متسطّبين.",
+    /* count key (full AR set; base = other); the noun agrees with {n} */
+    "i07.done": "خلصنا {n} خطوة من {of}، وهيفضلوا متسطّبين.",
+    "i07.done.zero": "ما خلصناش أي خطوة من {of}، ومفيش حاجة اتسطّبت.",
+    "i07.done.one": "خلصنا خطوة واحدة من {of}، وهتفضل متسطّبة.",
+    "i07.done.two": "خلصنا خطوتين من {of}، وهيفضلوا متسطّبين.",
+    "i07.done.few": "خلصنا {n} خطوات من {of}، وهيفضلوا متسطّبين.",
+    "i07.done.many": "خلصنا {n} خطوة من {of}، وهيفضلوا متسطّبين.",
+    "i07.done.other": "خلصنا {n} خطوة من {of}، وهيفضلوا متسطّبين.",
     "i07.safety": "فحص الأمان",
     "i07.checksum": "ملف من اللي نزلوا ما كانش الملف الأصلي من WhyNot Cut، فما استخدمناهوش.",
     "i07.checksum.sub": "ده كان تحميل أدوات الفيديو. اتمسح قبل ما يشتغل. ما اتغيّرش حاجة في جهازك.",

@@ -57,7 +57,7 @@
   }
   function head(o) {
     o = o || {};
-    var meta = o.meta !== undefined ? o.meta : t("i04.position", { n: o.n || 2, of: N, min: t("i00.min", { n: o.min || 6 }) });
+    var meta = o.meta !== undefined ? o.meta : t("i04.position", { n: o.n || 2, of: N, min: I.plural("i00.min", o.min || 6) });
     /* R3 I-1: the title comes from the one table (I.TITLES): Installing / Installing stopped / Everything is installed / One step needs you */
     return '<div class="i-title">' + (o.title || t(I.titleKey("I-04", I.state))) + "</div>" +
       '<div class="m-row mt-1"><div class="t-meta tx-muted m-grow">' + meta + "</div>" +
@@ -144,7 +144,7 @@
     },
     error: function () {
       return {
-        body: head({ meta: t("i04.count", { n: KEYS.indexOf("models"), of: N }) }) +
+        body: head({ meta: I.plural("i04.count", KEYS.indexOf("models"), { of: N }) }) +
           card(I.fail(t("i07.diskfull", { gb: I.gb(2.5) }), { sub: t("i07.diskfull.sub", { free: I.gb(0.4), drive: I.ltr(D.drive) }), btn: I.btn(t("i00.check_again"), { kind: "primary", icon: "refresh-cw", key: "enter" }) })) +
           list(rows("models", { always_on: always, models: { k: "error", detail: t("i04.red", { gb: I.gb(2.5) }) } })),
         rail: "error", bar: { end: I.btn(t("i00.close"), { key: "esc" }) }
@@ -161,7 +161,7 @@
     },
     cancelled: function () {
       return {
-        body: head({ meta: t("i04.count", { n: 1, of: N }) }) + card(M.notice("warn", t("i04.cancelled"), { dismiss: false })) +
+        body: head({ meta: I.plural("i04.count", 1, { of: N }) }) + card(M.notice("warn", t("i04.cancelled"), { dismiss: false })) +
           list(rows("engine", { engine: { k: "pending" } })),
         rail: "warn", bar: { end: I.btn(t("i00.close"), { key: "esc" }) + I.btn(t("i04.continue"), { kind: "primary", key: "enter" }) }
       };
@@ -174,7 +174,7 @@
     },
     success: function () {
       return {
-        body: head({ meta: t("i04.count", { n: N, of: N }) }) + card(M.notice("ok", t("i04.success"), { dismiss: false })) +
+        body: head({ meta: I.plural("i04.count", N, { of: N }) }) + card(M.notice("ok", t("i04.success"), { dismiss: false })) +
           list(rows("launch", { always_on: always, models: modelsBg(66, 1.9), launch: { k: "ok", end: t("i04.end.done") } })),
         rail: "done", bar: { end: I.btn(t("i00.next"), { kind: "primary", key: "enter" }) }, scroll: ".row-always_on"
       };

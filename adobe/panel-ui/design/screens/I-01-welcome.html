@@ -45,7 +45,7 @@
       I.fact("list-checks", t("i01.fact.visible")) + "</div>";
   }
   function adds(open) {
-    return '<div class="m-col mt-4" id="adds">' + I.fact("shield-check", t("i01.adds", { n: 6 }), { ink: "ink-ok", muted: true,
+    return '<div class="m-col mt-4" id="adds">' + I.fact("shield-check", I.plural("i01.adds", 6), { ink: "ink-ok", muted: true,
       under: '<div class="m-row mt-1">' + M.btn(t(open ? "i01.adds.hide" : "i01.adds.show"), { kind: "ghost", icon: open ? "chevron-up" : "chevron-down", flush: true }) + "</div>" }) +
       (open ? I.adds("mt-2") : "") + "</div>";
   }

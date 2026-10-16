@@ -78,7 +78,7 @@
   function view(key, focus) {
     var c = C[key], n = KEYS.indexOf(c.stop);
     return {
-      body: '<div class="i-title">' + t("i07.title") + "</div>" + (n ? '<div class="t-meta tx-muted mt-1">' + t("i07.done", { n: n, of: N }) + "</div>" : "") +
+      body: '<div class="i-title">' + t("i07.title") + "</div>" + (n ? '<div class="t-meta tx-muted mt-1">' + I.plural("i07.done", n, { of: N }) + "</div>" : "") +
         '<div class="mt-3">' + c.card(focus) + "</div>" + rows(c.stop, c.kind, c.rowKey ? t(c.rowKey) : ""),
       bar: { start: M.btn(t("i04.details"), { kind: "ghost", icon: "scroll-text", flush: true }), end: I.btn(t("i00.close"), { key: "esc" }) },
       mark: c.kind === "warn" ? "warn" : "error"

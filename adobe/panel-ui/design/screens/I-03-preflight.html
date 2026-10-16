@@ -85,9 +85,9 @@
   }
   /* "Good to know" is amber only when an amber row is in it; info rows alone keep it info (their icons are info) */
   function summary(ok, note, block, noteWarn) {
-    return '<div class="i-chips">' + (block ? M.chip("error", t("i03.sum.block", { n: block }), "circle-x") : "") +
-      (note ? (noteWarn ? M.chip("warn", t("i03.sum.note", { n: note }), "triangle-alert") : M.chip("info", t("i03.sum.note", { n: note }), "info")) : "") +
-      (ok ? M.chip("ok", t("i03.sum.ok", { n: ok }), "circle-check") : "") + "</div>";
+    return '<div class="i-chips">' + (block ? M.chip("error", I.plural("i03.sum.block", block), "circle-x") : "") +
+      (note ? (noteWarn ? M.chip("warn", I.plural("i03.sum.note", note), "triangle-alert") : M.chip("info", I.plural("i03.sum.note", note), "info")) : "") +
+      (ok ? M.chip("ok", I.plural("i03.sum.ok", ok), "circle-check") : "") + "</div>";
   }
   /* R3 I-1: the title follows the result (I.TITLES): "Checking this computer" only while it checks */
   function head(chips) { return I.title(t(I.titleKey("I-03", I.state)), t("i03.sub")) + (chips || ""); }
