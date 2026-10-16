@@ -37,16 +37,18 @@ never redo a task marked done here.
 ## Gate record
 
 Machine-read by `tools/release.py handoff` (PREVIEW banner of Mac/START-HERE.md and WHAT-WORKS-NOW-AR.md). One row per
-gate tag, oldest first; the latest row with a macOS CI result is the Mac line. macOS CI cell starts with
-`full suite green` / `smoke green` / `red …`, empty = not run.
+gate tag; the latest row of a passed phase with a macOS CI result is the Mac line. Strict vocabulary (anything else
+stops the handoff): Windows `full green` | `full red`; macOS CI `full green` | `full red` | `smoke green` |
+`smoke red` | `not run` (empty = not run); Live Mac `Verified` | `Partly verified` | `Not verified`. Detail may follow
+the form, e.g. `full red (45 F + 6 E); smoke green`.
 
 | Gate | Tag | Windows | macOS CI | Live Mac |
 |---|---|---|---|---|
-| 0 | v3.0.0-p0 | full suite green (483 OK / 4 skipped) | | Not verified |
-| 1 | v3.0.0-p1 | full suite green (725 OK / 4 skipped) | | Not verified |
-| 2 | v3.0.0-p2 | full suite green (engine 0 failures at 5e6b943) | | Not verified |
-| 3 | v3.0.0-p3 | full suite green (3322 OK / 21 skipped, 889eca3) | red (full run 38847096252: 45 F + 6 E, triaged; smoke green) | Not verified (Phase 12) |
-| 3 | v3.0.0-p3.1 | full suite green (3374 OK / 22 skipped, 29c1b38) | full suite green (3374 OK / 128 skipped, run 38854040112) | Not verified (Phase 12, H18) |
+| 0 | v3.0.0-p0 | full green (483 OK / 4 skipped) | not run | Not verified |
+| 1 | v3.0.0-p1 | full green (725 OK / 4 skipped) | not run | Not verified |
+| 2 | v3.0.0-p2 | full green (engine 0 failures at 5e6b943) | not run | Not verified |
+| 3 | v3.0.0-p3 | full green (3322 OK / 21 skipped, 889eca3) | full red (run 38847096252: 45 F + 6 E, triaged); smoke green | Not verified (Phase 12) |
+| 3 | v3.0.0-p3.1 | full green (3374 OK / 22 skipped, 29c1b38) | full green (3374 OK / 128 skipped, run 38854040112) | Not verified (Phase 12, H18) |
 
 ## Tasks
 

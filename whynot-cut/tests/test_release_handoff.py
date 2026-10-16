@@ -87,8 +87,8 @@ def _build_template(root: Path) -> Path:
                         "| 1 Ship-blockers | **passed** | v9.9.9-p1 | Verified: y |\n"
                         "| 2 Next | **in progress** | | |\n\n"
                         "## Gate record\n\n| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n"
-                        "| 0 | v9.9.9-p0 | full suite green | | Not verified |\n"
-                        "| 1 | v9.9.9-p1 | full suite green | full suite green (run 42) | Not verified (Phase 12) |\n"),
+                        "| 0 | v9.9.9-p0 | full green | not run | Not verified |\n"
+                        "| 1 | v9.9.9-p1 | full green | full green (run 42) | Not verified (Phase 12) |\n"),
         ".gitignore": "node_modules/\n",
     }
     for rel_path, text in files.items():
@@ -419,6 +419,20 @@ class TestNoRealClientName(HandoffCase):
         self.assertFalse(self.out.exists())
 
 
+class TestBadGateRecord(HandoffCase):
+    def test_a_free_text_gate_cell_stops_the_handoff_before_anything_is_written(self):
+        repo = make_repo(self.tmp / "src")
+        prog = repo / "PROGRESS.md"
+        prog.write_text(prog.read_text(encoding="utf-8").replace("full green (run 42)", "green-ish (run 42)"),
+                        encoding="utf-8")
+        git(repo, "commit", "-q", "-am", "bad gate cell")
+        for dry in (True, False):
+            with self.assertRaises(rel.HandoffError) as cm:
+                self.run_handoff(repo, dry_run=dry)
+            self.assertIn("macOS CI", str(cm.exception))
+            self.assertFalse(self.out.exists())
+
+
 class TestDryRun(HandoffCase):
     def test_dry_run_writes_nothing(self):
         repo = make_repo(self.tmp / "src")
@@ -523,21 +537,28 @@ class TestPassedPhases(unittest.TestCase):
 
 
 class TestGateState(unittest.TestCase):
-    """The PREVIEW banner and WHAT-WORKS page say what PROGRESS.md records (gate record), never fixed text."""
+    """The PREVIEW banner and WHAT-WORKS page say what PROGRESS.md records (gate record), never fixed text.
+    The gate record has a strict vocabulary (the executor is its only writer): a cell that does not start with one of
+    the listed forms is an error, never a guess (reviews of 6ced7db and cd98af8: free-text guessing overclaimed)."""
+    HEAD = "## Gate record\n\n| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n"
     PROGRESS = ("| Phase | State | Tag | Verified |\n|---|---|---|---|\n"
                 "| 0 Baseline | **passed** | v9.9.9-p0 | x |\n"
                 "| 3 Plugin layer | **Gate 3 passed on Windows, Mac Not verified** | v9.9.9-p3 (Windows snapshot; "
                 "v9.9.9-p3.1 = abc: full suite green) | x |\n"
-                "| 4 Editor features | **in progress** | | |\n\n"
-                "## Gate record\n\n| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n"
-                "| 0 | v9.9.9-p0 | full suite green | | Not verified |\n"
-                "| 3 | v9.9.9-p3 | full suite green | red (45 F + 6 E, triaged) | Not verified |\n"
-                "| 3 | v9.9.9-p3.1 | full suite green | full suite green (run 7) | Not verified (Phase 12) |\n")
+                "| 4 Editor features | **in progress** | | |\n\n" + HEAD +
+                "| 0 | v9.9.9-p0 | full green | not run | Not verified |\n"
+                "| 3 | v9.9.9-p3 | full green | full red (45 F + 6 E, triaged); smoke green | Not verified |\n"
+                "| 3 | v9.9.9-p3.1 | full green | full green (run 7) | Not verified (Phase 12) |\n")
+
+    def _st(self, mac_ci, live="Not verified (Phase 12)", tag="v1-p0"):
+        base = "| Phase | State | Tag | V |\n|---|---|---|---|\n| 0 B | **passed** | v1-p0 | x |\n\n" + self.HEAD
+        return rel.gate_state(base + f"| 0 | {tag} | full green | {mac_ci} | {live} |\n", version="1")
 
     def test_gate_record_rows(self):
         rows = rel.gate_record(self.PROGRESS)
         self.assertEqual([r["tag"] for r in rows], ["v9.9.9-p0", "v9.9.9-p3", "v9.9.9-p3.1"])
-        self.assertEqual(rows[2]["mac_ci"], "full suite green (run 7)")
+        self.assertEqual((rows[2]["mac_ci"], rows[2]["mac_kind"]), ("full green (run 7)", "full green"))
+        self.assertEqual(rows[1]["mac_kind"], "full red")
         self.assertEqual(rel.gate_record("no table here"), [])
 
     def test_the_latest_mac_result_wins(self):
@@ -545,7 +566,7 @@ class TestGateState(unittest.TestCase):
         self.assertEqual(st["passed"], ["0", "3"])
         self.assertEqual(st["active"], [("4", "Editor features")])
         self.assertEqual(st["latest_tag"], "v9.9.9-p3.1")
-        self.assertEqual(st["mac"], {"tag": "v9.9.9-p3.1", "ci": "full", "detail": "full suite green (run 7)",
+        self.assertEqual(st["mac"], {"tag": "v9.9.9-p3.1", "kind": "full green", "detail": "full green (run 7)",
                                      "live": "Not verified (Phase 12)"})
         en = rel.gate_lines_en(st)
         self.assertIn("Phases passed: 0, 3 (latest gate tag `v9.9.9-p3.1`).", en)
@@ -553,82 +574,101 @@ class TestGateState(unittest.TestCase):
         self.assertIn("macOS: CI full suite green at `v9.9.9-p3.1`.", en)
         self.assertIn("Live Mac checks: Not verified (Phase 12).", en)
 
-    def test_a_bold_passed_phrase_with_a_long_tag_cell_counts(self):
+    def test_mac_ci_is_the_leading_form_only(self):
+        for cell, kind in (("full green", "full green"), ("full green (3374 OK, 0 failures)", "full green"),
+                           ("full red (45 F)", "full red"), ("full red; smoke green", "full red"),
+                           ("smoke green", "smoke green"), ("smoke green; full not run", "smoke green"),
+                           ("smoke red", "smoke red"), ("not run", "not run"), ("", "not run")):
+            self.assertEqual(rel.gate_record(self.HEAD + f"| 0 | v1-p0 | full green | {cell} | Not verified |\n")[0]
+                             ["mac_kind"], kind, cell)
+
+    def test_free_text_is_an_error_never_a_guess(self):
+        """cd98af8 re-review P1: "smoke green; full suite not run", "not green", "passed 2 of 3", "green except 3
+        errors" all read as a green full suite."""
+        for cell in ("Smoke green", "not green", "passed 2 of 3",
+                     "green except 3 errors", "full suite green", "red", "green", "queued"):
+            with self.assertRaises(ValueError, msg=cell):
+                rel.gate_record(self.HEAD + f"| 0 | v1-p0 | full green | {cell} | Not verified |\n")
+        for live in ("verified on M1, Intel pending", "", "todo"):
+            with self.assertRaises(ValueError, msg=live):
+                rel.gate_record(self.HEAD + f"| 0 | v1-p0 | full green | not run | {live} |\n")
+        for win in ("green", "3374 OK"):
+            with self.assertRaises(ValueError, msg=win):
+                rel.gate_record(self.HEAD + f"| 0 | v1-p0 | {win} | not run | Not verified |\n")
+        for tag in ("", "p4", "(re-gate) v1-p4"):
+            with self.assertRaises(ValueError, msg=tag):
+                rel.gate_record(self.HEAD + f"| 0 | {tag} | full green | not run | Not verified |\n")
+
+    def test_tag_cell_may_carry_a_note(self):
+        rows = rel.gate_record(self.HEAD + "| 4 | `v1-p4.1` (re-gate) | full green | not run | Not verified |\n"
+                                           "| 4 | v1-p4 | full green | not run | Not verified |\n")
+        self.assertEqual([r["tag"] for r in rows], ["v1-p4", "v1-p4.1"])
+
+    def test_lines_per_kind(self):
+        for cell, want_en, want_ar in (
+                ("smoke green", "macOS: CI smoke job green at `v1-p0` (not the full suite).", "سريع"),
+                ("smoke red (2 F)", "macOS: CI smoke job red at `v1-p0`: smoke red (2 F).", "فشل"),
+                ("full red (3 F)", "macOS: CI full suite red at `v1-p0`: full red (3 F).", "فشل"),
+                ("not run", "macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).", "لسه ما اتجرّبش")):
+            st = self._st(cell)
+            self.assertIn(want_en, rel.gate_lines_en(st), cell)
+            self.assertIn(want_ar, "\n".join(rel.gate_lines_ar(st)), cell)
+
+    def test_only_a_passed_first_bold_state_counts(self):
+        """Review 6ced7db P1 + cd98af8 P2: "**not passed**", text between two bold runs, "failed"; but "✅ **passed**",
+        "Gate 4 **passed**" and "**passed (failover fixed)**" do count."""
+        for state in ("**not passed** (review FAIL)", "**in progress** (Gate 3 passed earlier; **executor**)",
+                      "**failed** — passed nothing", "in progress, passed T4.1", "**Gate 4 failed**", "****"):
+            table = f"| P | S | T | V |\n|---|---|---|---|\n| 4 Editor | {state} | | |\n"
+            self.assertEqual(rel.passed_phases(table)[0], [], state)
+        for state in ("**passed**", "**Gate 3 passed on Windows, Mac Not verified** (2026-10-16)", "✅ **passed**",
+                      "Gate 4 **passed**", "**passed (failover fixed)**"):
+            passed, _ = rel.passed_phases(f"| P | S | T | V |\n|---|---|---|---|\n| 3 X | {state} | v1-p3 | |\n")
+            self.assertEqual([n for n, _x, _t in passed], ["3"], state)
+
+    def test_a_passed_phase_shows_its_newest_gate_tag(self):
         passed, _ = rel.passed_phases(self.PROGRESS)
         self.assertEqual(passed, [("0", "Baseline", "v9.9.9-p0"), ("3", "Plugin layer", "v9.9.9-p3.1")])
         table = self.PROGRESS.split("## Gate record")[0]              # no gate record: the first tag of the cell
         self.assertEqual(rel.passed_phases(table)[0][1], ("3", "Plugin layer", "v9.9.9-p3"))
 
-    def test_red_smoke_and_never_run(self):
-        base = ("| Phase | State | Tag | V |\n|---|---|---|---|\n| 0 B | **passed** | v1-p0 | x |\n\n## Gate record\n\n"
-                "| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n")
-        for cell, want_en, want_ar in (
-                ("smoke green", "macOS: CI smoke job green at `v1-p0` (not the full suite).", "سريع"),
-                ("red (3 F)", "macOS: CI red at `v1-p0`: red (3 F).", "فشل"),
-                ("", "macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).", "لسه ما اتجرّبش")):
-            st = rel.gate_state(base + f"| 0 | v1-p0 | full suite green | {cell} | Not verified |\n", version="1")
-            self.assertIn(want_en, rel.gate_lines_en(st), cell)
-            self.assertIn(want_ar, "\n".join(rel.gate_lines_ar(st)), cell)
-
-    def _mac(self, cell, live="Not verified (Phase 12)"):
-        base = ("| Phase | State | Tag | V |\n|---|---|---|---|\n| 0 B | **passed** | v1-p0 | x |\n\n## Gate record\n\n"
-                "| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n")
-        return rel.gate_state(base + f"| 0 | v1-p0 | full suite green | {cell} | {live} |\n", version="1")
-
-    def test_mac_ci_words_decide_not_the_first_word(self):
-        """Review 6ced7db P1: "full suite red" read as green, "0 failures" read as red, "smoke green, full suite red"
-        hid the red full run."""
-        for cell, kind in (("full suite red (45 F + 6 E)", "red"), ("full suite green (3374 OK, 0 failures)", "full"),
-                           ("smoke green, full suite red", "red"), ("FAILED: 3 tests", "red"),
-                           ("full suite green", "full"), ("smoke green", "smoke"), ("green", "full"),
-                           ("queued", "other"), ("", None), ("—", None)):
-            st = self._mac(cell)
-            self.assertEqual(st["mac"] and st["mac"]["ci"], kind, cell)
-
-    def test_only_a_passed_first_bold_state_counts(self):
-        """Review 6ced7db P1: "**not passed**" and text between two bold runs counted as passed."""
-        for state in ("**not passed** (review FAIL)", "**in progress** (Gate 3 passed earlier; **executor**)",
-                      "**failed** — passed nothing", "in progress, passed T4.1", "**Gate 4 failed**"):
-            table = f"| P | S | T | V |\n|---|---|---|---|\n| 4 Editor | {state} | | |\n"
-            passed, _ = rel.passed_phases(table)
-            self.assertEqual(passed, [], state)
-        for state in ("**passed**", "**Gate 3 passed on Windows, Mac Not verified** (2026-10-16)"):
-            passed, _ = rel.passed_phases(f"| P | S | T | V |\n|---|---|---|---|\n| 3 X | {state} | v1-p3 | |\n")
-            self.assertEqual([n for n, _x, _t in passed], ["3"], state)
-
     def test_gate_record_order_and_escaped_pipes(self):
-        """Review 6ced7db P2: newest-first rows gave the wrong latest tag; an escaped pipe shifted the columns."""
-        text = ("## Gate record\n\n| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n"
-                "| 4 | v1-p4 | full suite green | | Not verified |\n"
-                "| 3 | v1-p3.1 | full suite green | full suite green | Not verified |\n"
-                "| 3 | v1-p3 | full suite green | red (45 F \\| 6 E) | Not verified (Phase 12) |\n"
-                "| 10 | v1-p10 | green | | x |\n| 9 | v1-p9 | green | | x |\n")
+        text = (self.HEAD + "| 4 | v1-p4 | full green | not run | Not verified |\n"
+                "| 3 | v1-p3.1 | full green | full green | Not verified |\n"
+                "| 3 | v1-p3 | full green | full red (45 F \\| 6 E) | Not verified (Phase 12) |\n"
+                "| 10 | v1-p10 | full green | not run | Not verified |\n| 9 | v1-p9 | full green | not run | Not verified |\n")
         rows = rel.gate_record(text)
         self.assertEqual([r["tag"] for r in rows], ["v1-p3", "v1-p3.1", "v1-p4", "v1-p9", "v1-p10"])
-        self.assertEqual(rows[0]["mac_ci"], "red (45 F | 6 E)")
+        self.assertEqual(rows[0]["mac_ci"], "full red (45 F | 6 E)")
         self.assertEqual(rows[0]["live_mac"], "Not verified (Phase 12)")
-        self.assertEqual(rel.gate_state(text)["latest_tag"], "v1-p10")
+
+    def test_latest_tag_is_the_newest_passed_gate(self):
+        """cd98af8 re-review P2: a row whose phase did not pass never becomes the latest tag."""
+        table = ("| P | S | T | V |\n|---|---|---|---|\n| 3 X | **passed** | v1-p3 | |\n| 4 Y | **in progress** | | |\n\n"
+                 + self.HEAD + "| 3 | v1-p3 | full green | full green | Not verified |\n"
+                 "| 4 | v1-p4 | full green | full red (1 F) | Not verified |\n")
+        st = rel.gate_state(table)
+        self.assertEqual(st["latest_tag"], "v1-p3")
+        self.assertEqual(st["mac"]["tag"], "v1-p3")
+        self.assertNotIn("v1-p4", " ".join(rel.gate_lines_en(st)))
 
     def test_a_mac_line_older_than_the_latest_gate_says_so(self):
-        text = (self.PROGRESS + "| 4 | v9.9.9-p4 | full suite green | | Not verified |\n")
+        text = (self.PROGRESS.replace("| 4 Editor features | **in progress** | | |",
+                                      "| 4 Editor features | **passed** | v9.9.9-p4 | |")
+                + "| 4 | v9.9.9-p4 | full green | not run | Not verified |\n")
         st = rel.gate_state(text)
         en = " ".join(rel.gate_lines_en(st))
         self.assertIn("macOS: CI full suite green at `v9.9.9-p3.1`", en)
         self.assertIn("not run at `v9.9.9-p4`", en)
         self.assertIn("`v9.9.9-p4`", " ".join(rel.gate_lines_ar(st)))
 
-    def test_a_passed_phase_shows_its_newest_gate_tag(self):
-        """Review 6ced7db P2: phase 3 showed v…-p3 (full Mac red) instead of the verified v…-p3.1."""
-        passed, _ = rel.passed_phases(self.PROGRESS)
-        self.assertEqual(dict((n, t) for n, _x, t in passed)["3"], "v9.9.9-p3.1")
-
-    def test_arabic_live_line_is_arabic_and_never_overclaims(self):
-        ar = "\n".join(rel.gate_lines_ar(self._mac("full suite green", "Not verified (Phase 12, H18)")))
+    def test_live_mac_words(self):
+        ar = "\n".join(rel.gate_lines_ar(self._st("full green", "Not verified (Phase 12, H18)")))
         self.assertIn("لسه", ar)
         self.assertIn("المرحلة 12", ar)
         self.assertNotIn("Not verified", ar)
-        self.assertNotIn("اتأكّدت", "\n".join(rel.gate_lines_ar(self._mac("full suite green", "verified partly (hooks)"))))
-        self.assertIn("اتأكّدت", "\n".join(rel.gate_lines_ar(self._mac("full suite green", "Verified (agency Mac)"))))
+        self.assertIn("جزئي", "\n".join(rel.gate_lines_ar(self._st("full green", "Partly verified (M1; Intel pending)"))))
+        self.assertIn("اتأكّدت", "\n".join(rel.gate_lines_ar(self._st("full green", "Verified (agency Mac)"))))
         st = rel.gate_state("| P | S | T | V |\n|---|---|---|---|\n| 0 B | **passed** | | |\n")
         self.assertNotIn("``", " ".join(rel.gate_lines_en(st)))
 
@@ -644,6 +684,10 @@ class TestGateState(unittest.TestCase):
             for item in data.get(key, []):
                 self.assertNotRegex(item["en"], r"(?i)macos: never run|phase \d+\) is still in progress",
                                     "gate state belongs to the PROGRESS gate record, not what-works.json")
+
+    def test_the_real_progress_gate_record_parses(self):
+        rows = rel.gate_record((REPO / "PROGRESS.md").read_text(encoding="utf-8"))
+        self.assertTrue(rows)
 
 
 def make_dir_link(link: Path, target: Path) -> bool:
@@ -729,6 +773,13 @@ class TestRepoCoordinationFiles(unittest.TestCase):
             ("c/**", "Adobe track"), ("c/x/**", "Adobe track")])
         with self.assertRaises(ValueError):
             rel.parse_locked_areas("## Locked now\n\n  - `orphan/**`\n- `a/**`: x\n")
+        # cd98af8 re-review P1: a top-level path bullet without an owner vanished instead of failing
+        for bad in ("- `b/**`\n", "- `b/**`, `c/**`\n", "- `a/**` (except `b/**`): x\n"):
+            with self.assertRaises(ValueError, msg=bad):
+                rel.parse_locked_areas("## Locked now\n\n- `ok/**`: x\n" + bad)
+        # a child's own note never replaces its track owner
+        self.assertEqual(rel.parse_locked_areas("## Locked now\n\n- tools track:\n  - `a/**` — the port\n"),
+                         [("a/**", "tools track — the port")])
 
     def test_locked_areas_empty_is_an_error(self):
         with self.assertRaises(ValueError):

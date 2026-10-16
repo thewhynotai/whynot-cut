@@ -356,9 +356,9 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
         # T2.16: nothing was built, so not exit 0: a refusal (exit 2) that says how to rebuild
         return {"status": "EXISTS", "project": str(prproj), "refused": f"{prproj.name} already exists (nothing built)",
                 "how": f"re-run with --force to rebuild it; the current file is kept as a backup next to it in "
-                       f"{prproj.parent.name}/ as {prproj.stem}_prev_<date>-<time>.prproj",
+                       f"{prproj.parent.name}/ as {prproj.stem}_prev_<date>-<time>-<n>.prproj",
                 "fix": f"re-run with --force (the current file is kept as {prproj.parent.name}/"
-                       f"{prproj.stem}_prev_<date>-<time>.prproj)"}
+                       f"{prproj.stem}_prev_<date>-<time>-<n>.prproj)"}
     em = editor_modified(paths) if prproj.exists() else None
     if em and not replace_edited:
         return {"status": "EDITOR_CHANGES_PRESENT", "detail": em,

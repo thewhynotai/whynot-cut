@@ -264,9 +264,11 @@ class TestNothingBuiltIsNotExit0(Base):
         self.assertIn("--force", r["how"])
         self.assertEqual(exit_code(r), 2)
         # Phase 4 hygiene: the refusal names the backup the rebuild makes, as previous_version_backup does after it
+        real = ppro_build.prev_name(prproj).name                     # the name the rebuild really writes
+        shape = re.escape(f"{prproj.stem}_prev_") + r"\d{8}-\d{6}-\d{8}\.prproj"
+        self.assertRegex(real, "^" + shape + "$")
         for key in ("how", "fix"):
-            self.assertIn(f"{prproj.stem}_prev_", r[key])
-            self.assertIn(".prproj", r[key])
+            self.assertIn(f"{prproj.stem}_prev_<date>-<time>-<n>.prproj", r[key])   # the same three parts, in words
             self.assertIn(str(prproj.parent.name), r[key])
 
     def test_ppro_build_missing_graphics_fails(self):

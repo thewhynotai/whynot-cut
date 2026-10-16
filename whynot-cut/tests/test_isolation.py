@@ -155,11 +155,21 @@ class TestEveryModuleIsSandboxed(unittest.TestCase):
         self.assertEqual(out.split("|", 1)[0], ascii("مرحبا — ok"),
                          out + r.stderr.decode("utf-8", "replace")[-400:])
 
-    def test_an_explicit_encoding_still_wins(self):
+    def test_an_explicit_encoding_still_wins_and_children_agree(self):
+        """Re-review 34c5a6f P2: checked in a child WITHOUT UTF-8 mode (where the patch is live); an inherited
+        PYTHONUTF8=0 is overridden so parent and children agree; errors= alone still decodes UTF-8."""
         import subprocess
-        r = subprocess.run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\xe9')"], capture_output=True,
-                           text=True, encoding="latin-1")
-        self.assertEqual(r.stdout, "é")
+        code = ("import os, sys, subprocess; sys.path.insert(0, %r); import _isolation\n"
+                "a = subprocess.run([sys.executable, '-c', 'import sys; sys.stdout.buffer.write(bytes([233]))'],"
+                " capture_output=True, text=True, encoding='latin-1').stdout\n"
+                "b = subprocess.run([sys.executable, '-c', 'print(\"\\u0645\")'], capture_output=True, text=True,"
+                " errors='strict').stdout.strip()\n"
+                "print(ascii(a) + '|' + ascii(b) + '|' + os.environ.get('PYTHONUTF8', ''))\n") % str(TESTS)
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONIOENCODING"}
+        env["PYTHONUTF8"] = "0"
+        r = subprocess.run([sys.executable, "-X", "utf8=0", "-c", code], capture_output=True, env=env, timeout=120)
+        out = r.stdout.decode("ascii", "replace").strip()
+        self.assertEqual(out, ascii("\u00e9") + "|" + ascii("\u0645") + "|1", r.stderr.decode("utf-8", "replace")[-400:])
 
 
 class LiveRootCase(unittest.TestCase):

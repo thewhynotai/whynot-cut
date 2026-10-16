@@ -353,7 +353,8 @@ def find_real_names(root: Path, skip: tuple = ()) -> list:
 def parse_locked_areas(text: str) -> list:
     """[(glob, owner)] from the '## Locked now' list of LOCKED-AREAS.md. A top-level bullet is either
     "- `g1`[, `g2`…]: owner" or an owner heading ("- tools track (…):"); an indented bullet's paths take the owner of
-    the top-level bullet above it unless they carry their own ": owner". Lines continue on indented non-bullet lines.
+    the top-level bullet above it (its own words, if any, are added as a note: "tools track — packages"). Lines
+    continue on indented non-bullet lines.
     An empty list, or a path with no owner, is an error (never dropped silently)."""
     m = re.search(r"^## Locked now\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
     if not m:
@@ -370,20 +371,21 @@ def parse_locked_areas(text: str) -> list:
         top = not b.startswith((" ", "\t"))
         body = b.strip()[2:].strip()
         own = paths_why.match(body)
-        if own:
-            why = own.group(2).strip()
-            areas += [(g.strip(), why) for g in re.findall(r"`([^`]+)`", own.group(1))]
-            if top:
-                owner = why
+        if top and own:
+            owner = own.group(2).strip()
+            areas += [(g.strip(), owner) for g in re.findall(r"`([^`]+)`", own.group(1))]
         elif top:
+            if body.startswith("`") or not body.rstrip(":").strip():
+                raise ValueError(f"LOCKED-AREAS.md: {body[:80]!r} has no owner (write \"- `path`: owner\")")
             owner = body.rstrip(":").strip()
-            if not owner:
-                raise ValueError("LOCKED-AREAS.md has an empty bullet")
         else:
             globs = re.findall(r"`([^`]+)`", body)
-            if globs and not owner:
-                raise ValueError(f"LOCKED-AREAS.md: {', '.join(globs)} has no owner (no top-level bullet above it)")
-            areas += [(g.strip(), owner) for g in globs]
+            if not globs:
+                continue                                   # a prose sub-bullet: no path
+            if not owner:
+                raise ValueError(f"LOCKED-AREAS.md: {body[:80]!r} has no owner (no top-level bullet above it)")
+            note = re.sub(r"\s+", " ", re.sub(r"`[^`]+`", " ", body)).strip(" ,:;—-")
+            areas += [(g.strip(), f"{owner} — {note}" if note else owner) for g in globs]
     if not areas:
         raise ValueError("LOCKED-AREAS.md lists no locked path")
     return areas
@@ -433,19 +435,22 @@ def _cells(line: str) -> list:
     return [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", inner)]
 
 
+TAG_RE = re.compile(r"v[\w.]+-p\d+(?:\.\d+)?")
+
+
 def _tag_key(tag: str) -> tuple:
     m = re.search(r"-p(\d+)(?:\.(\d+))?$", tag)
     return (int(m.group(1)), int(m.group(2) or 0)) if m else (-1, -1)
 
 
-def passed_phases(progress: str, tags=(), version: str = "") -> tuple:
+def passed_phases(progress: str, tags=(), version: str = "", *, rows=None) -> tuple:
     """([(number, name, tag)] passed, [(number, name)] in progress) from PROGRESS.md's phase table. A phase passed when
-    its state's FIRST bold run says "passed" (and not "not passed" / "failed"), or a gate tag `v<version>-p<N>` exists
-    (the committed PROGRESS.md can lag behind the tag of a passed gate). Its tag is the newest gate-record tag of that
-    phase, else the first vX-pN(.M) token of the tag cell."""
+    the FIRST bold run of its state says "passed" (and not "not passed" / "failed"), or a gate tag `v<version>-p<N>`
+    exists (the committed PROGRESS.md can lag behind the tag of a passed gate). Its tag is the newest gate-record tag
+    of that phase, else the first vX-pN(.M) token of the tag cell."""
     gate = {m.group(1): t for t in tags if version and (m := re.fullmatch(rf"v{re.escape(version)}-p(\d+)", t))}
     newest = {}
-    for r in gate_record(progress):
+    for r in (gate_record(progress) if rows is None else rows):
         newest[r["gate"]] = r["tag"]                    # gate_record is sorted oldest first: the last one wins
     passed, active = [], []
     for ln in progress.splitlines():
@@ -454,10 +459,10 @@ def passed_phases(progress: str, tags=(), version: str = "") -> tuple:
             continue
         num, name = cells[0].split(None, 1)
         state = cells[1]
-        bold = re.match(r"^\*\*([^*]+)\*\*", state)
+        bold = re.search(r"\*\*([^*]+)\*\*", state)
         said = bold.group(1).lower() if bold else ""
-        if re.search(r"\bpassed\b", said) and not re.search(r"\bnot passed\b|\bfail", said):
-            tag = re.match(r"v[\w.]+-p\d+(?:\.\d+)?", cells[2])
+        if re.search(r"\bpassed\b", said) and not re.search(r"\bnot passed\b|\bfail(?:ed|s|ure)?\b", said):
+            tag = TAG_RE.match(cells[2])
             passed.append((num, name, newest.get(num) or (tag.group(0) if tag else (cells[2] or gate.get(num, "")))))
         elif num in gate:
             passed.append((num, name, newest.get(num) or gate[num]))
@@ -466,49 +471,58 @@ def passed_phases(progress: str, tags=(), version: str = "") -> tuple:
     return passed, active
 
 
+# The gate record's strict vocabulary (the executor is its only writer). A cell starts with one of these forms; the
+# rest of it is free detail. Anything else is an error: the banner never guesses a result from free text.
+WIN_FORMS = ("full green", "full red")
+MAC_FORMS = ("full green", "full red", "smoke green", "smoke red", "not run")
+LIVE_FORMS = ("Verified", "Partly verified", "Not verified")
+
+
+def _form(cell: str, forms, what: str, tag: str) -> str:
+    for f in sorted(forms, key=len, reverse=True):
+        if cell == f or (cell.startswith(f) and not cell[len(f)].isalnum()):
+            return f
+    raise ValueError(f"PROGRESS.md gate record {tag or '(no tag)'}: the {what} cell {cell[:60]!r} must start with one "
+                     f"of: {', '.join(forms)}")
+
+
 def gate_record(progress: str) -> list:
-    """Rows of PROGRESS.md's '## Gate record' table (one per gate tag): [{gate, tag, windows, mac_ci, live_mac}],
-    sorted oldest first by gate number then tag (whatever order they were written in). No table = []."""
+    """Rows of PROGRESS.md's '## Gate record' table (one per gate tag): [{gate, tag, windows, mac_ci, mac_kind,
+    live_mac}], sorted oldest first by gate number then tag (whatever order they were written in). No table = [].
+    A cell outside the strict vocabulary raises ValueError."""
     m = re.search(r"^## Gate record\s*$(.*?)(?=^## |\Z)", progress, re.M | re.S)
     rows = []
     for ln in (m.group(1) if m else "").splitlines():
         cells = _cells(ln)
-        if len(cells) >= 5 and re.fullmatch(r"\d+", cells[0]):
-            rows.append({"gate": cells[0], "tag": cells[1].strip("`"), "windows": cells[2], "mac_ci": cells[3],
-                         "live_mac": cells[4]})
+        if len(cells) < 5 or not re.fullmatch(r"\d+", cells[0]):
+            continue
+        tag = re.match(r"`?(" + TAG_RE.pattern + r")`?(?:\s|$)", cells[1])
+        if not tag:
+            raise ValueError(f"PROGRESS.md gate record, gate {cells[0]}: the tag cell {cells[1][:40]!r} must start "
+                             "with a gate tag (v<version>-p<N>[.<M>])")
+        t = tag.group(1)
+        _form(cells[2], WIN_FORMS, "Windows", t)
+        mac = cells[3] or "not run"
+        rows.append({"gate": cells[0], "tag": t, "windows": cells[2], "mac_ci": cells[3],
+                     "mac_kind": _form(mac, MAC_FORMS, "macOS CI", t), "live_mac": cells[4]})
+        _form(cells[4], LIVE_FORMS, "Live Mac", t)
     return sorted(rows, key=lambda r: (int(r["gate"]), _tag_key(r["tag"])))
 
 
-def _mac_ci_kind(cell: str) -> str:
-    """'' not run, 'red' any red/failed run named in the cell (red wins), 'full' / 'smoke' green, 'other'."""
-    c = re.sub(r"\b0 (?:failures?|failed|fails?)\b", "", cell.lower())
-    if not c.strip() or c.strip() in ("-", "—", "none", "not run"):
-        return ""
-    if re.search(r"\bred\b|\bfail", c):
-        return "red"
-    if re.search(r"\bgreen\b|\bpass(?:ed)?\b", c):
-        return "smoke" if "smoke" in c and "full" not in c else "full"
-    return "other"
-
-
 def gate_state(progress: str, tags=(), version: str = "") -> dict:
-    """What PROGRESS.md records about the gates: passed phase numbers, phases in progress, the latest gate tag and the
-    latest gate row that has a macOS CI result (the Mac line of the PREVIEW banner and WHAT-WORKS page)."""
-    passed, active = passed_phases(progress, tags, version)
+    """What PROGRESS.md records about the gates: passed phase numbers, phases in progress, the latest gate tag of a
+    passed phase, and the latest such gate row with a macOS CI result (the Mac line of the banner and WHAT-WORKS)."""
     rows = gate_record(progress)
+    passed, active = passed_phases(progress, tags, version, rows=rows)
+    done = {n for n, _name, _tag in passed}
+    rows = [r for r in rows if r["gate"] in done]       # a gate row of a phase that did not pass never counts
     mac = None
     for r in reversed(rows):
-        kind = _mac_ci_kind(r["mac_ci"])
-        if kind:
-            mac = {"tag": r["tag"], "ci": kind, "detail": r["mac_ci"], "live": r["live_mac"] or "Not verified"}
+        if r["mac_kind"] != "not run":
+            mac = {"tag": r["tag"], "kind": r["mac_kind"], "detail": r["mac_ci"], "live": r["live_mac"]}
             break
     latest = rows[-1]["tag"] if rows else (passed[-1][2] if passed else "")
     return {"passed": [n for n, _name, _tag in passed], "active": active, "latest_tag": latest, "mac": mac}
-
-
-def _live_verified(live: str) -> bool:
-    low = live.lower()
-    return low.startswith("verified") and not re.search(r"\bnot\b|\bpart", low)
 
 
 def gate_lines_en(st: dict) -> list:
@@ -522,10 +536,10 @@ def gate_lines_en(st: dict) -> list:
     if not mac:
         L.append("macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).")
         return L
-    line = {"full": f"macOS: CI full suite green at `{mac['tag']}`.",
-            "smoke": f"macOS: CI smoke job green at `{mac['tag']}` (not the full suite).",
-            "red": f"macOS: CI red at `{mac['tag']}`: {mac['detail']}."}.get(
-                mac["ci"], f"macOS: CI at `{mac['tag']}`: {mac['detail']}.")
+    line = {"full green": f"macOS: CI full suite green at `{mac['tag']}`.",
+            "smoke green": f"macOS: CI smoke job green at `{mac['tag']}` (not the full suite).",
+            "full red": f"macOS: CI full suite red at `{mac['tag']}`: {mac['detail']}.",
+            "smoke red": f"macOS: CI smoke job red at `{mac['tag']}`: {mac['detail']}."}[mac["kind"]]
     if st["latest_tag"] and mac["tag"] != st["latest_tag"]:
         line += f" The Mac CI was not run at `{st['latest_tag']}` (the latest gate) yet."
     L += [line, f"Live Mac checks: {mac['live']}."]
@@ -536,18 +550,18 @@ def gate_lines_ar(st: dict) -> list:
     mac = st["mac"]
     if not mac:
         return ["الماك: لسه ما اتجرّبش على ماك خالص (مفيش مرحلة في PROGRESS.md ليها نتيجة ماك)."]
-    line = {"full": f"الماك: كل الاختبارات الآلية (full suite) عدّت على ماك في CI عند `{mac['tag']}`.",
-            "smoke": f"الماك: الاختبار السريع (smoke) بس هو اللي عدّى على ماك عند `{mac['tag']}`، مش كل الاختبارات.",
-            "red": f"الماك: فيه اختبارات فشلت على ماك عند `{mac['tag']}`."}.get(
-                mac["ci"], f"الماك: فيه نتيجة CI على ماك عند `{mac['tag']}`، مش واضح إنها عدّت.")
+    line = {"full green": f"الماك: كل الاختبارات الآلية (full suite) عدّت على ماك في CI عند `{mac['tag']}`.",
+            "smoke green": f"الماك: الاختبار السريع (smoke) بس هو اللي عدّى على ماك عند `{mac['tag']}`، مش كل الاختبارات.",
+            "full red": f"الماك: فيه اختبارات فشلت على ماك (full suite) عند `{mac['tag']}`.",
+            "smoke red": f"الماك: الاختبار السريع (smoke) فشل على ماك عند `{mac['tag']}`."}[mac["kind"]]
     if st["latest_tag"] and mac["tag"] != st["latest_tag"]:
         line += f" ولسه ما اتعملش CI على ماك عند آخر مرحلة `{st['latest_tag']}`."
-    if _live_verified(mac["live"]):
-        live = "التجربة الحية على ماك حقيقي: اتأكّدت."
-    else:
-        ph = re.search(r"\bPhase (\d+)", mac["live"])
-        live = "التجربة الحية على ماك حقيقي: لسه" + (f" (المرحلة {ph.group(1)})." if ph else ".")
-    return [line, live]
+    live = _form(mac["live"], LIVE_FORMS, "Live Mac", mac["tag"])
+    ph = re.search(r"\bPhase (\d+)", mac["live"])
+    when = f" (المرحلة {ph.group(1)})" if ph else ""
+    return [line, {"Verified": "التجربة الحية على ماك حقيقي: اتأكّدت.",
+                   "Partly verified": f"التجربة الحية على ماك حقيقي: اتأكّدت جزئيًا بس{when}.",
+                   "Not verified": f"التجربة الحية على ماك حقيقي: لسه{when}."}[live]]
 
 
 def render(template: str, values: dict) -> str:
@@ -814,7 +828,11 @@ def handoff(repo, out, label=None, preview=False, dry_run=False, sample_maker=No
     except (ValueError, KeyError) as e:
         raise HandoffError(f"at {head[:8]}: {e} (plugin.json, LOCKED-AREAS.md and MAC-INBOX.md must be committed)")
     progress = blobs["PROGRESS.md"] or ""
-    dirty = len(_git(repo, "status", "--porcelain", "--untracked-files=no").splitlines())
+    try:
+        gate_record(progress)               # strict vocabulary: a free-text cell stops here, before anything is written
+    except ValueError as e:
+        raise HandoffError(f"at {head[:8]}: {e}")
+    dirty =len(_git(repo, "status", "--porcelain", "--untracked-files=no").splitlines())
     label = label or (f"PREVIEW-{version}" if preview else version)
     preview = bool(preview or label.upper().startswith("PREVIEW"))
     m = re.search(r"-(p\d+)$", label)

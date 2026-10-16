@@ -166,14 +166,15 @@ def _utf8_child_text() -> None:
     encoding/errors decodes UTF-8. An explicit encoding= still wins. No-op in UTF-8 mode (tools/test.sh, macOS CI)."""
     if sys.flags.utf8_mode:
         return
-    os.environ.setdefault("PYTHONUTF8", "1")
+    os.environ["PYTHONUTF8"] = "1"          # also over an inherited PYTHONUTF8=0: parent and children must agree
     import subprocess
     init = subprocess.Popen.__init__
     if getattr(init, "_whynot_utf8", False):
         return
 
     def utf8_init(self, *a, **kw):
-        if (kw.get("text") or kw.get("universal_newlines")) and kw.get("encoding") is None and kw.get("errors") is None:
+        if (kw.get("text") or kw.get("universal_newlines") or kw.get("errors") is not None) \
+                and kw.get("encoding") is None:
             kw["encoding"] = "utf-8"
         init(self, *a, **kw)
     utf8_init._whynot_utf8 = True
