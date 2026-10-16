@@ -30,6 +30,7 @@ import contextlib
 import importlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -114,6 +115,23 @@ def fake_api_modules():
         yield anthropic, httpx2
 
 
+FAKE_IDENTITY = {"email": "ali.example@example.invalid", "orgId": "org-0000-example", "orgName": "Example Org",
+                 "subscriptionType": "max", "apiProvider": "firstParty", "token": "sk-ant-fake-0000-not-a-key"}
+
+
+def auth_json(method="claude.ai", logged_in=True, **extra):
+    """what `claude auth status` prints (real shape, Claude Code 2.1.299), with fictional values"""
+    d = {"loggedIn": logged_in, "authMethod": method, "apiProvider": "firstParty", "analyticsDisabled": True,
+         "projectsDirectory": "/example/projects", "configDirectory": "/example/.claude", "email": FAKE_IDENTITY["email"],
+         "orgId": FAKE_IDENTITY["orgId"], "orgName": FAKE_IDENTITY["orgName"], "subscriptionType": "max"}
+    d.update(extra)
+    return json.dumps(d)
+
+
+def OK_AUTH(args, cwd):
+    return 0, auth_json()
+
+
 def touch(p: Path, text: str = "x") -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text, encoding="utf-8")
@@ -183,7 +201,7 @@ class TestCorrect(unittest.TestCase):
                         system=Path(args[args.index("--system-prompt-file") + 1]).read_text(encoding="utf-8"))
             return 0, json.dumps({"type": "result", "is_error": False, "structured_output": {"lines": FIXED}})
 
-        out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner))
+        out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner, auth_runner=OK_AUTH))
         self.assertTrue(out == FIXED and stats["error"] is None)
         a = seen["args"]
         self.assertTrue(a[0] == "/x/claude" and "-p" in a and "--safe-mode" in a and "--no-session-persistence" in a)
@@ -195,7 +213,7 @@ class TestCorrect(unittest.TestCase):
     def test_claude_code_client_error_keeps_source(self):
         def runner(args, stdin, cwd):
             return 1, json.dumps({"type": "result", "is_error": True, "result": "Not logged in"})
-        out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner))
+        out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner, auth_runner=OK_AUTH))
         self.assertTrue(out == SRC and "Not logged in" in stats["error"])
 
     def test_make_client_defaults_to_subscription(self):
@@ -457,7 +475,7 @@ class TestCmdShim(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             shim = self._shim(Path(d))
             calls = []
-            client = ClaudeCodeClient(str(shim), runner=lambda *a: calls.append(a) or (0, "{}"))
+            client = ClaudeCodeClient(str(shim), runner=lambda *a: calls.append(a) or (0, "{}"), auth_runner=OK_AUTH)
             out, stats = correct(SRC, "rules", {}, "", client=client)
         self.assertEqual(calls, [])
         self.assertEqual(out, SRC)
@@ -473,7 +491,7 @@ class TestCmdShim(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as d:
             shim = self._shim(Path(d), native=True)
-            out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient(str(shim), runner=runner))
+            out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient(str(shim), runner=runner, auth_runner=OK_AUTH))
         self.assertEqual(out, FIXED)
         self.assertFalse(P.is_batch(seen["args"][0]))
         self.assertNotIn("claude.cmd", " ".join(seen["args"]))
@@ -494,7 +512,7 @@ class TestCmdShim(unittest.TestCase):
             seen.append(args)
             return 0, json.dumps({"is_error": False, "structured_output": {"lines": FIXED}})
 
-        correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/t/fake-claude.py", runner=runner))
+        correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/t/fake-claude.py", runner=runner, auth_runner=OK_AUTH))
         self.assertEqual(seen[0][:3], [sys.executable, "-B", "/t/fake-claude.py"])
 
 
@@ -507,7 +525,7 @@ class TestTempFolderAndCancel(unittest.TestCase):
             seen["exists"] = os.path.isdir(cwd)
             return 0, json.dumps({"is_error": False, "structured_output": {"lines": FIXED}})
 
-        correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner))
+        correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner, auth_runner=OK_AUTH))
         self.assertTrue(os.path.basename(seen["cwd"]).startswith("wnc-kalam-cc-"))
         self.assertTrue(seen["exists"])
         self.assertFalse(os.path.exists(seen["cwd"]))
@@ -729,7 +747,7 @@ class TestShimRefusalIsACodeWithAHow(unittest.TestCase):
 
     def test_refused_shim_gives_a_code_and_a_how(self):
         with tempfile.TemporaryDirectory() as d:
-            client = ClaudeCodeClient(str(self._shim(d)), runner=lambda *a: (0, "{}"))
+            client = ClaudeCodeClient(str(self._shim(d)), runner=lambda *a: (0, "{}"), auth_runner=OK_AUTH)
             out, stats = correct(SRC, "rules", {}, "", client=client)
         self.assertEqual(out, SRC)
         self.assertEqual(stats["error"], "cmd_shim_refused")
@@ -758,7 +776,7 @@ class TestShimRefusalIsACodeWithAHow(unittest.TestCase):
             with mock.patch.dict(os.environ, {"PATH": str(node_cmd.parent)}):
                 with self.assertRaises(P.CmdShimRefused) as cm:
                     P.claude_command(shim, {"PATH": str(node_cmd.parent)})
-                client = ClaudeCodeClient(str(shim), runner=lambda *a: (0, "{}"))
+                client = ClaudeCodeClient(str(shim), runner=lambda *a: (0, "{}"), auth_runner=OK_AUTH)
                 out, stats = correct(SRC, "rules", {}, "", client=client)
             how = str(cm.exception)
         self.assertIn("Node.js", how)
@@ -866,7 +884,7 @@ class TestCancelStopsCorrection(unittest.TestCase):
             return 1, ""                                   # what a killed `claude -p` leaves behind
 
         try:
-            out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner))
+            out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner, auth_runner=OK_AUTH))
         finally:
             done()
         self.assertEqual(out, SRC)
@@ -928,10 +946,13 @@ class TestSubscriptionNeverInheritsApiKeys(unittest.TestCase):
 
         class StubPopen:
             def __init__(self, args, **kw):
-                seen.update(args=args, kw=kw)
+                seen.setdefault("calls", []).append((args, kw))
+                self.args = args
                 self.pid, self.returncode = 4242, 0
 
             def communicate(self, *a, **k):
+                if "auth" in self.args:
+                    return auth_json(), ""
                 return json.dumps({"is_error": False, "structured_output": {"lines": FIXED}}), ""
 
             def poll(self):
@@ -943,10 +964,12 @@ class TestSubscriptionNeverInheritsApiKeys(unittest.TestCase):
             out, stats = correct(SRC, "rules", {}, "", client=client)
             self.assertEqual({k: os.environ.get(k) for k in self.KEYS}, self.KEYS)
         self.assertTrue(out == FIXED and stats["error"] is None)
-        env = seen["kw"].get("env")
-        self.assertIsInstance(env, dict)
-        self.assertTrue(all(k not in env for k in self.KEYS))
-        self.assertEqual(env.get("KEEP_ME"), "1")
+        self.assertEqual(len(seen["calls"]), 2)                       # the auth preflight, then the -p call
+        for args, kw in seen["calls"]:
+            env = kw.get("env")
+            self.assertIsInstance(env, dict)
+            self.assertTrue(all(k not in env for k in self.KEYS))
+            self.assertEqual(env.get("KEEP_ME"), "1")
 
     def test_child_env_matching_is_case_insensitive_on_windows_only(self):
         base = {"anthropic_api_key": "a", "Anthropic_Auth_Token": "b", "ANTHROPIC_API_KEY": "c", "PATH": "p",
@@ -1250,7 +1273,7 @@ class TestCancelBetweenRetries(unittest.TestCase):
             return 0, json.dumps({"is_error": False, "structured_output": {"lines": FIXED[:2]}})   # wrong count
 
         try:
-            out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner))
+            out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner, auth_runner=OK_AUTH))
         finally:
             parallel._RUN.reset(token)
         self.assertEqual(len(calls), 1)
@@ -1260,6 +1283,177 @@ class TestCancelBetweenRetries(unittest.TestCase):
         c = FakeClient(FIXED[:2], FIXED)
         out, stats = correct(SRC, "rules", {}, "key", client=c)
         self.assertEqual((out, len(c.requests)), (FIXED, 2))
+
+
+class TestSubscriptionAuthPreflight(unittest.TestCase):
+    """Executor ruling (TOOLS-NOTE-claude-p-auth-sources): `claude -p` can bill an API key from settings env / apiKeyHelper
+    even with a clean child env, and the subscription login comes last in its auth precedence. So once per job,
+    `claude --safe-mode auth status` runs with the same env and a neutral cwd; unless authMethod == "claude.ai" the
+    subscription backend does not start `claude -p` (error "subscription_not_active", or "auth_status_unavailable" when
+    the check itself fails) and the captions keep their source text. Only authMethod / loggedIn are ever used or shown."""
+
+    METHODS = {"api_key": "ANTHROPIC_API_KEY", "api_key_helper": "apiKeyHelper", "oauth_token": "CLAUDE_CODE_OAUTH_TOKEN",
+               "third_party": "cloud provider", "none": "/login"}
+
+    def _pair(self, auth, calls=None, lines=None):
+        def runner(args, stdin, cwd):
+            if calls is not None:
+                calls.append(("p", args))
+            return 0, json.dumps({"is_error": False, "structured_output": {"lines": lines or FIXED}})
+
+        def auth_runner(args, cwd):
+            if calls is not None:
+                calls.append(("auth", args, cwd, os.path.isdir(cwd)))
+            if isinstance(auth, Exception):
+                raise auth
+            return auth
+
+        return ClaudeCodeClient("/x/claude", runner=runner, auth_runner=auth_runner)
+
+    def test_claude_ai_runs_the_correction_and_the_check_ran_once_for_the_whole_job(self):
+        src = ["كلمة %d هنا" % i for i in range(130)]            # 3 batches: 3 `-p` calls, one auth check
+        calls = []
+        client = self._pair((0, auth_json()), calls, lines=None)
+
+        def runner(args, stdin, cwd):
+            calls.append(("p", args))
+            return 0, json.dumps({"is_error": False, "structured_output": {"lines": json.loads(stdin)["lines"]}})
+
+        client.runner = runner
+        out, stats = correct(src, "rules", {}, "", client=client)
+        self.assertEqual(out, src)
+        self.assertIsNone(stats["error"])
+        self.assertEqual([c[0] for c in calls], ["auth", "p", "p", "p"])
+        kind, args, cwd, existed = calls[0]
+        self.assertEqual(args, ["/x/claude", "--safe-mode", "auth", "status"])       # no prompt text, no -p flags
+        self.assertTrue(os.path.basename(cwd).startswith("wnc-kalam-cc-") and existed)
+        self.assertFalse(os.path.exists(cwd))
+
+    def test_every_other_auth_method_refuses_without_starting_claude_p(self):
+        for method, source in self.METHODS.items():
+            calls = []
+            client = self._pair((0 if method != "none" else 1, auth_json(method, logged_in=method != "none")), calls)
+            out, stats = correct(SRC, "rules", {}, "", client=client)
+            self.assertEqual([c[0] for c in calls], ["auth"], method)               # `claude -p` never started
+            self.assertEqual(out, SRC, method)
+            self.assertEqual(stats["error"], "subscription_not_active", method)
+            self.assertEqual(stats["kept_source"], [0, 1, 2], method)
+            how = stats["how"]
+            self.assertIn(source, how, method)
+            self.assertIn("subscription", how.lower(), method)
+            self.assertTrue(re.search("[\u0600-\u06FF]", how), "the how text has Arabic as well: %s" % method)
+            if method != "none":
+                self.assertIn(method, how)                                          # the method found is named
+
+    def test_the_how_text_says_what_to_change(self):
+        client = self._pair((0, auth_json("api_key")))
+        _out, stats = correct(SRC, "rules", {}, "", client=client)
+        self.assertIn("WhyNot Kalam only uses your Claude subscription", stats["how"])
+        self.assertIn("remove", stats["how"])
+        self.assertIn("turn Kalam correction off", stats["how"])
+
+    def test_logged_in_false_even_with_claude_ai_is_a_refusal(self):
+        client = self._pair((1, auth_json("claude.ai", logged_in=False)))
+        _out, stats = correct(SRC, "rules", {}, "", client=client)
+        self.assertEqual(stats["error"], "subscription_not_active")
+        self.assertIn("/login", stats["how"])
+
+    def test_a_check_that_cannot_be_trusted_refuses_as_unavailable(self):
+        cases = {"missing": OSError("no such file"), "timeout": subprocess.TimeoutExpired("claude", 60),
+                 "not json": (1, "error: unknown command"), "empty": (0, ""), "list": (0, "[]"),
+                 "no method": (0, json.dumps({"loggedIn": True})), "method not text": (0, json.dumps({"authMethod": 5}))}
+        for name, auth in cases.items():
+            calls = []
+            out, stats = correct(SRC, "rules", {}, "", client=self._pair(auth, calls))
+            self.assertEqual([c[0] for c in calls], ["auth"], name)
+            self.assertEqual(out, SRC, name)
+            self.assertEqual(stats["error"], "auth_status_unavailable", name)
+            self.assertIn("subscription", stats["how"].lower(), name)
+
+    def test_an_unexpected_auth_method_value_is_not_echoed(self):
+        client = self._pair((0, auth_json("weird method with spaces and ev1l <script>")))
+        _out, stats = correct(SRC, "rules", {}, "", client=client)
+        self.assertEqual(stats["error"], "subscription_not_active")
+        self.assertNotIn("<script>", stats["how"])
+        self.assertIn("unknown", stats["how"])
+
+    def test_the_answer_is_cached_for_the_job_including_a_refusal(self):
+        calls = []
+        client = self._pair((0, auth_json("api_key")), calls)
+        correct(SRC, "rules", {}, "", client=client)
+        correct(SRC, "rules", {}, "", client=client)
+        self.assertEqual([c[0] for c in calls], ["auth"])
+
+    def test_no_identity_value_reaches_stats_the_how_text_or_the_exception(self):
+        secrets = [FAKE_IDENTITY["email"], FAKE_IDENTITY["orgId"], FAKE_IDENTITY["orgName"], FAKE_IDENTITY["token"]]
+        auth = (0, auth_json("api_key", token=FAKE_IDENTITY["token"]))
+        for method_auth in (auth, (0, auth_json("claude.ai", token=FAKE_IDENTITY["token"])),
+                            (1, "Not logged in as %s (%s)" % (FAKE_IDENTITY["email"], FAKE_IDENTITY["orgName"]))):
+            client = self._pair(method_auth)
+            out, stats = correct(SRC, "rules", {}, "", client=client)
+            blob = json.dumps([out, stats], ensure_ascii=False)
+            for secret in secrets:
+                self.assertNotIn(secret, blob)
+        with self.assertRaises(_correct_module.SubscriptionRefused) as cm:
+            _correct_module.check_subscription("/x/claude", auth_runner=lambda args, cwd: auth)
+        for secret in secrets:
+            self.assertNotIn(secret, str(cm.exception))
+            self.assertNotIn(secret, repr(cm.exception))
+
+    def test_check_subscription_returns_the_method_only(self):
+        self.assertEqual(_correct_module.check_subscription("/x/claude", auth_runner=OK_AUTH), "claude.ai")
+
+    def test_correction_line_for_the_doctor(self):
+        ok = _correct_module.correction_line("/x/claude", auth_runner=OK_AUTH)
+        self.assertEqual(ok["ok"], True)
+        self.assertEqual(ok["authMethod"], "claude.ai")
+        self.assertIn("subscription (claude.ai)", ok["line"])
+        bad = _correct_module.correction_line("/x/claude", auth_runner=lambda a, c: (0, auth_json("api_key_helper")))
+        self.assertEqual((bad["ok"], bad["code"]), (False, "subscription_not_active"))
+        self.assertIn("apiKeyHelper", bad["line"])
+        none = _correct_module.correction_line(None)
+        self.assertEqual((none["ok"], none["code"]), (False, "claude_code_missing"))
+        blob = json.dumps([ok, bad, none], ensure_ascii=False)
+        for secret in FAKE_IDENTITY.values():
+            self.assertNotIn(secret, blob)
+
+    def test_a_real_process_end_to_end_with_a_stand_in_cli(self):
+        """the real default runners (Popen, stripped env, neutral cwd) against a stand-in `claude` script"""
+        script = (
+            "import json, os, sys\n"
+            "log = os.environ.get('FAKE_CLAUDE_LOG')\n"
+            "names = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',\n"
+            "         'ANTHROPIC_BASE_URL']\n"
+            "with open(log, 'a', encoding='utf-8') as f:\n"
+            "    f.write(json.dumps({'argv': sys.argv[1:], 'leaked': [n for n in names if n in os.environ],\n"
+            "                        'cwd': os.path.basename(os.getcwd())}) + '\\n')\n"
+            "if 'auth' in sys.argv:\n"
+            "    print(json.dumps({'loggedIn': True, 'authMethod': os.environ.get('FAKE_METHOD', 'claude.ai'),\n"
+            "                      'email': 'ali.example@example.invalid'}))\n"
+            "    sys.exit(0)\n"
+            "lines = json.loads(sys.stdin.read())['lines']\n"
+            "print(json.dumps({'is_error': False, 'structured_output': {'lines': lines}}))\n")
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            fake = touch(d / "fake-claude.py", script)
+            log = d / "calls.jsonl"
+            env = dict(FAKE_CLAUDE_LOG=str(log), ANTHROPIC_API_KEY="sk-test-parent-key", CLAUDE_CODE_USE_BEDROCK="1",
+                       ANTHROPIC_BASE_URL="https://proxy.example.invalid")
+            with mock.patch.dict(os.environ, env):
+                out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient(str(fake)))
+                self.assertEqual((out, stats["error"]), (SRC, None))
+                with mock.patch.dict(os.environ, {"FAKE_METHOD": "api_key"}):
+                    out2, stats2 = correct(SRC, "rules", {}, "", client=ClaudeCodeClient(str(fake)))
+            calls = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(stats2["error"], "subscription_not_active")
+            self.assertEqual(out2, SRC)
+            self.assertEqual(len(calls), 3)                                   # auth + -p, then auth only (refused)
+            self.assertEqual(calls[0]["argv"][-3:], ["--safe-mode", "auth", "status"])
+            self.assertIn("-p", calls[1]["argv"])
+            for c in calls:
+                self.assertEqual(c["leaked"], [])
+                self.assertTrue(c["cwd"].startswith("wnc-kalam-cc-"))
+            self.assertNotIn("example.invalid", json.dumps([stats, stats2]))
 
 
 class TestCorrectProvenance(unittest.TestCase):

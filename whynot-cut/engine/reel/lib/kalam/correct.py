@@ -17,6 +17,12 @@
 #     current folder neither runs nor hides the real CLI (Task 10 re-review);
 #   * a refused `.cmd` shim is the error code "cmd_shim_refused" with the help text in stats["how"] (make_client: the
 #     notice of the same name, `notice_how` gives the text);
+#   * subscription preflight (executor ruling, TOOLS-NOTE-claude-p-auth-sources): `claude -p` can bill an API key from the
+#     user's settings env or apiKeyHelper even when our child env is clean, and the subscription login comes last in its
+#     auth precedence. So once per job `claude --safe-mode auth status` runs (same env, neutral temp cwd, no prompt text) and
+#     unless authMethod == "claude.ai" the backend does not start `claude -p`: error "subscription_not_active" (or
+#     "auth_status_unavailable" when the check itself fails), a `how` in Arabic + English naming the method found, captions
+#     keep their source text. Only authMethod / loggedIn are read; email, org and tokens are never kept, logged or shown;
 #   * find_claude_code keeps only absolute paths: a CWD-relative claude.exe is never started (Task 10 review I1);
 #   * RULE (owner: nothing paid): the subscription backend runs `claude -p` with an explicit environment that lacks
 #     ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN and the provider switches CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX and
@@ -27,6 +33,7 @@ and the reply must have exactly one line per phrase or the source text is kept."
 import importlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -139,14 +146,14 @@ class _CliHandle:
         self.p.kill()
 
 
-def _run_cli(args, stdin, cwd):
+def _run_cli(args, stdin, cwd, timeout=None):
     if _platform.is_batch(args[0]):             # never cmd.exe with the caption JSON on argv (BatBadBut)
         raise _platform.CmdShimRefused(_platform.CMD_REFUSED)
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          encoding="utf-8", errors="replace", cwd=cwd, env=_child_env(), **_spawn_kwargs())
     handle = track(_CliHandle(p))               # a cancelled parallel_map kills it (and, on POSIX, its group) too
     try:
-        out, _err = p.communicate(stdin, timeout=CLI_TIMEOUT)
+        out, _err = p.communicate(stdin, timeout=CLI_TIMEOUT if timeout is None else timeout)
     except BaseException:                       # timeout, Ctrl+C, anything: the CLI and what it started die with us
         _kill_cli(p)
         try:
@@ -188,19 +195,129 @@ API_MISSING = ("The API backend needs the `anthropic` package, which the WhyNot 
                "Use the Claude subscription backend (settings backend = subscription) or install the package.")
 
 
+AUTH_TIMEOUT = 60       # seconds `claude auth status` may take
+
+
+class SubscriptionRefused(RuntimeError):
+    """the subscription backend must not start `claude -p`; `code` is the stats error, str(e) / `how` the help text"""
+
+    def __init__(self, code: str, how: str):
+        super().__init__(how)
+        self.code, self.how = code, how
+
+
+def _run_auth_status(args, cwd):
+    """`claude --safe-mode auth status` in `cwd`: the same stripped env and process handling as the -p child, no stdin"""
+    return _run_cli(args, "", cwd, timeout=AUTH_TIMEOUT)
+
+
+# authMethod (the six values of `claude auth status`) -> what to change, English / Arabic
+_AUTH_SOURCES = {
+    "api_key": ("an API key (billed per use)", "ANTHROPIC_API_KEY or the env block of a Claude settings.json",
+                "مفتاح API (بيتحاسب بالاستخدام)", "ANTHROPIC_API_KEY أو env في settings.json بتاع Claude"),
+    "api_key_helper": ("an API key from apiKeyHelper (billed per use)", "apiKeyHelper in a Claude settings.json",
+                       "مفتاح API من apiKeyHelper (بيتحاسب بالاستخدام)", "apiKeyHelper في settings.json بتاع Claude"),
+    "oauth_token": ("an OAuth token (CLAUDE_CODE_OAUTH_TOKEN)", "CLAUDE_CODE_OAUTH_TOKEN",
+                    "OAuth token (CLAUDE_CODE_OAUTH_TOKEN)", "CLAUDE_CODE_OAUTH_TOKEN"),
+    "third_party": ("a cloud provider or gateway (billed by that provider)",
+                    "the cloud provider or gateway setting (CLAUDE_CODE_USE_BEDROCK / VERTEX / ANTHROPIC_BASE_URL, or settings.json)",
+                    "مزوّد سحابي أو gateway (بيتحاسب من المزوّد)",
+                    "إعداد المزوّد السحابي أو الـ gateway (CLAUDE_CODE_USE_BEDROCK / VERTEX / ANTHROPIC_BASE_URL أو settings.json)"),
+}
+_METHOD_OK = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
+
+
+def _not_active_how(method: str) -> str:
+    if method == "none":
+        return ("Claude is not logged in. WhyNot Kalam only uses your Claude subscription: run /login in Claude Code, "
+                "or turn Kalam correction off.\n"
+                "Claude مش مسجّل دخول. WhyNot Kalam بيستخدم اشتراك Claude بس: اعمل /login في Claude Code، "
+                "أو اقفل تصحيح Kalam.")
+    if method in _AUTH_SOURCES:
+        what, source, what_ar, source_ar = _AUTH_SOURCES[method]
+        label = "%s [%s]" % (what, method)
+        return ("Claude is set to use %s. WhyNot Kalam only uses your Claude subscription: remove %s, "
+                "or turn Kalam correction off.\n"
+                "Claude متظبط على %s [%s]. WhyNot Kalam بيستخدم اشتراك Claude بس: شيل %s، أو اقفل تصحيح Kalam."
+                % (label, source, what_ar, method, source_ar))
+    shown = method if _METHOD_OK.match(method or "") else "unknown"
+    return ("Claude is set to use an unexpected sign-in method (%s). WhyNot Kalam only uses your Claude subscription "
+            "(claude.ai): change Claude Code back to your subscription with /login, or turn Kalam correction off.\n"
+            "طريقة تسجيل الدخول في Claude غير متوقعة (%s). WhyNot Kalam بيستخدم اشتراك Claude (claude.ai) بس: "
+            "ارجع للاشتراك بـ /login، أو اقفل تصحيح Kalam." % (shown, shown))
+
+
+_AUTH_UNAVAILABLE = ("WhyNot Kalam could not check how Claude Code signs in (`claude auth status` is missing, failed or did "
+                     "not answer), so it will not start Claude: it only uses your Claude subscription and never bills "
+                     "anything silently. Update Claude Code, or turn Kalam correction off.\n"
+                     "WhyNot Kalam مقدرش يتأكد Claude Code بيسجّل دخول إزاي (`claude auth status` مش موجود أو فشل)، "
+                     "فمش هيشغّل Claude: بيستخدم اشتراكك بس ومش بيحاسب حاجة من غير ما تعرف. حدّث Claude Code أو اقفل تصحيح Kalam.")
+
+
+def check_subscription(exe, auth_runner=None) -> str:
+    """Run `claude --safe-mode auth status` once (the same env as the -p child, a neutral temp cwd, no prompt text).
+    -> "claude.ai"; raises SubscriptionRefused("subscription_not_active", how) for any other sign-in method and
+    SubscriptionRefused("auth_status_unavailable", how) when the answer cannot be trusted. Only `authMethod` and
+    `loggedIn` are read: nothing else of the answer is kept, so no email / org / token can leak from here."""
+    cmd = _platform.claude_command(exe)         # a .cmd shim is resolved or refused (CmdShimRefused), as for -p
+    runner = auth_runner or _run_auth_status
+    with tempfile.TemporaryDirectory(prefix="wnc-kalam-cc-") as d:
+        try:
+            _code, out = runner(cmd + ["--safe-mode", "auth", "status"], d)
+            data = json.loads(out)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            raise SubscriptionRefused("auth_status_unavailable", _AUTH_UNAVAILABLE) from None
+    method = data.get("authMethod") if isinstance(data, dict) else None
+    if not isinstance(method, str) or not method:
+        raise SubscriptionRefused("auth_status_unavailable", _AUTH_UNAVAILABLE)
+    if method == "claude.ai" and data.get("loggedIn") is False:
+        method = "none"
+    if method != "claude.ai":
+        raise SubscriptionRefused("subscription_not_active", _not_active_how(method))
+    return method
+
+
+def correction_line(exe, auth_runner=None) -> dict:
+    """the doctor's "Kalam correction" line: {ok, line, authMethod | code, how}; nothing else of `auth status`"""
+    if not exe:
+        return {"ok": False, "code": "claude_code_missing",
+                "line": "subscription: Claude Code not found (install it, or turn Kalam correction off)"}
+    try:
+        check_subscription(exe, auth_runner)
+    except SubscriptionRefused as e:
+        return {"ok": False, "code": e.code, "how": e.how, "line": e.how}
+    except _platform.CmdShimRefused as e:
+        return {"ok": False, "code": e.code, "how": str(e), "line": str(e)}
+    return {"ok": True, "authMethod": "claude.ai", "line": "subscription (claude.ai) \u2713"}
+
+
 class ClaudeCodeClient:
     """Same call shape as the API client, but runs `claude -p` on the user's Claude subscription.
     --safe-mode: no plugins, hooks, MCP or CLAUDE.md; --tools "": text only; phrases go in on stdin."""
 
-    def __init__(self, exe: str, runner=None, model: str = "opus"):
+    def __init__(self, exe: str, runner=None, model: str = "opus", auth_runner=None):
         self.exe, self.runner, self.model = exe, runner or _run_cli, model
+        self.auth_runner = auth_runner
+        self._auth = None            # the preflight answer for this job: True, or the SubscriptionRefused to raise again
         self.beta = self
         self.messages = self
+
+    def _ensure_subscription(self):
+        """once per job (this client lives for one job): refuse unless Claude Code signs in with the subscription"""
+        if self._auth is None:
+            try:
+                check_subscription(self.exe, self.auth_runner)
+                self._auth = True
+            except SubscriptionRefused as e:
+                self._auth = e
+        if self._auth is not True:
+            raise self._auth
 
     def create(self, **kw):
         schema = kw["output_config"]["format"]["schema"]
         effort = kw["output_config"].get("effort", "medium")
         cmd = _platform.claude_command(self.exe)    # a .cmd shim is resolved or refused (RuntimeError), never run by cmd.exe
+        self._ensure_subscription()
         with tempfile.TemporaryDirectory(prefix="wnc-kalam-cc-") as d:
             sp = os.path.join(d, "system.txt")
             with open(sp, "w", encoding="utf-8") as f:
@@ -335,7 +452,7 @@ def correct(phrases: list, rules: str, glossary: dict, api_key: str, client=None
         except ((RuntimeError, ValueError, StopIteration, KeyError) + _api_errors()) as e:
             if cancelled():                      # a CLI killed by the cancel is not "exit 1"
                 stats["error"] = "cancelled"
-            elif isinstance(e, _platform.CmdShimRefused):
+            elif isinstance(e, (_platform.CmdShimRefused, SubscriptionRefused)):
                 stats["error"], stats["how"] = e.code, str(e)
             else:
                 stats["error"] = str(e) if isinstance(e, RuntimeError) else type(e).__name__
