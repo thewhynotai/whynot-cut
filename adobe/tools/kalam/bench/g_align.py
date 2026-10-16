@@ -326,7 +326,27 @@ def cmd_run(args):
         agg, _, side = metrics(data[s], inp_preds[s])
         results["aggregates"].setdefault("input (jittered)", {})[s] = agg
         sidecar.update({f"input (jittered)|{s}|{k}": v for k, v in side.items()})
+    # a finished variant is checkpointed (numbers only) so an interrupted run resumes with the same --out
+    part_dir = os.path.join(args.out, "partial")
+    os.makedirs(part_dir, exist_ok=True)
+    results["meta"]["resumed_variants"] = []
     for var in variants:
+        pj = os.path.join(part_dir, var + ".json")
+        if os.path.exists(pj):
+            with open(pj, encoding="utf-8") as f:
+                part = json.load(f)
+            if part.get("sets") == sets and part.get("device") == results["meta"]["device"]:
+                for k in ("aggregates", "rows", "timing"):
+                    results[k][var] = part[k]
+                if part.get("np_parity"):
+                    results["parity"].setdefault("numpy_vs_torchaudio", {})[var] = part["np_parity"]
+                for s in sets:
+                    preds[(var, s)] = [[{"s": a, "e": b, "score": c} for a, b, c in u] for u in part["preds"][s]]
+                with np.load(os.path.join(part_dir, var + ".npz")) as z:
+                    sidecar.update({k: z[k] for k in z.files})
+                results["meta"]["resumed_variants"].append(var)
+                say(f"[{var}] resumed from {pj} (finished in an earlier run)")
+                continue
         if cuda:
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
@@ -352,6 +372,7 @@ def cmd_run(args):
         for s in sets:
             out, errors = [], []
             c0 = checker.check_time if checker else 0.0
+            cpu0 = time.process_time()
             tr = time.perf_counter()
             for k, it in enumerate(data[s]):
                 try:
@@ -366,6 +387,7 @@ def cmd_run(args):
             if cuda:
                 torch.cuda.synchronize()
             wall = time.perf_counter() - tr
+            cpu_s = time.process_time() - cpu0      # all threads of this process (less sensitive to other jobs)
             check = (checker.check_time - c0) if checker else 0.0
             wall_net = wall - check
             audio_s = results["meta"]["sets"][s]["audio_s"]
@@ -376,7 +398,8 @@ def cmd_run(args):
             results["aggregates"].setdefault(var, {})[s] = agg
             results["rows"].setdefault(var, {})[s] = rows
             results["timing"][var][s] = {"wall_s": round(wall_net, 2), "rtf": round(wall_net / audio_s, 5),
-                                         "torchaudio_check_s_excluded": round(check, 2)}
+                                         "torchaudio_check_s_excluded": round(check, 2),
+                                         "process_cpu_s_incl_check": round(cpu_s, 1)}
             say(f"  [{var}/{s}] done {wall_net:.1f}s (+{check:.1f}s torchaudio check) RTF {wall_net / audio_s:.4f} "
                 f"onset med {agg['onset_ms']['median']} p95 {agg['onset_ms']['p95']} lost {agg['lost']} "
                 f"errors {len(errors)}")
@@ -387,6 +410,15 @@ def cmd_run(args):
                 "windows": checker.windows, "label_mismatch": checker.label_mismatch,
                 "max_score_diff": checker.max_score_diff, "numpy_fa_s": round(checker.np_time, 2),
                 "torchaudio_fa_s": round(checker.check_time, 2)}
+        part = {"sets": sets, "device": results["meta"]["device"], "aggregates": results["aggregates"][var],
+                "rows": results["rows"][var], "timing": results["timing"][var],
+                "np_parity": results["parity"].get("numpy_vs_torchaudio", {}).get(var),
+                "preds": {s: [[[w["s"], w["e"], w.get("score")] for w in u] for u in preds[(var, s)]] for s in sets}}
+        np.savez_compressed(os.path.join(part_dir, var + ".npz"),
+                            **{k: v for k, v in sidecar.items() if k.startswith(var + "|")})
+        with open(pj + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(part, f)
+        os.replace(pj + ".tmp", pj)                  # the json is the "finished" marker: written last, atomically
         if var == "mms-kalam-A0":
             up._model = None
         del run
