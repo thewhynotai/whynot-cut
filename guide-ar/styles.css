@@ -251,6 +251,8 @@ strong, b { font-weight: 600; }
 .important { color: var(--important); font-weight: 600; }
 .muted { color: var(--muted); }
 .brand { font-family: var(--f-brand); font-weight: 700; }
+/* the guide's one copyright line (Addendum I2), the last paragraph of ch19 «التواصل والدعم» */
+.copyright { margin-top: 8mm; font-size: 9pt; color: var(--muted); break-inside: avoid; }
 
 h1, h2, h3, h4 {
   font-family: var(--f-head);

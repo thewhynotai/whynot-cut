@@ -3,7 +3,8 @@
 Run:  ~/.whynot-cut/venv/Scripts/python.exe -m unittest guide-ar/tests/test_site_texts.py -v
 
 Files checked: release-notes/TEMPLATE.{ar,en}.md, whats-new/3.0.0.{ar,en}.md and
-site/pages/{support,data}.{ar,en}.md. Standard library only.
+site/pages/{support,data}.{ar,en}.md; the no-WhatsApp-link rule (D-05 update) reads every guide-ar text file.
+Standard library only.
 """
 import ast
 import os
@@ -64,6 +65,12 @@ DIAGNOSTICS_LABEL = {"ar": "«نسخ التشخيص»", "en": "“Copy diagnosti
 FORBIDDEN = ["$", "دولار", "ترخيص", "رخصة", "licen", "eula", "refund", "terms of service"]
 # H24: these pages are not live yet, so nothing links (or even points) to them.
 NOT_LIVE = re.compile(r"thewhynot\.ai/(support|data)\b", re.IGNORECASE)
+# D-05 update (2026-10-16): no WhatsApp number or chat link anywhere in the guide; the guide points at the panel
+# button and the support page's own button. The only exception is the support pages' front-matter instruction to Yunus
+# («whatsapp: Yunus inserts the wa.me support link at publish»), which is not reader text.
+WHATSAPP_LINK = re.compile(r"wa\.(me|link)\b", re.IGNORECASE)
+WHATSAPP_FRONT_MATTER = re.compile(r"^whatsapp: .*$", re.M)
+TEXT_SUFFIXES = {".html", ".md", ".css", ".txt"}
 
 
 def read(path):
@@ -170,6 +177,18 @@ class SitePagesTests(unittest.TestCase):
             for token in tokens:
                 self.assertNotIn(token, low, f"{path.name}: a real client name")
             self.assertIsNone(re.search("[٠-٩۰-۹]", text), f"{path.name}: Western digits only")
+
+        # D-05 update: no wa.me / wa.link in any guide text file (chapters, shell, site pages, hand-written texts).
+        for path in sorted(GUIDE.rglob("*")):
+            if (path.suffix not in TEXT_SUFFIXES or not path.is_file()
+                    or {".build", "__pycache__", "fonts", "img"} & set(path.relative_to(GUIDE).parts)):
+                continue
+            text = read(path)
+            front = re.match(r"---\n.*?\n---\n", text, re.S)
+            if path.parent == GUIDE / "site" / "pages" and front:  # the front-matter instruction only, never the body
+                text = WHATSAPP_FRONT_MATTER.sub("", front.group(0)) + text[front.end():]
+            self.assertIsNone(WHATSAPP_LINK.search(text),
+                              f"{path.relative_to(GUIDE)}: a WhatsApp number or link (D-05 update: point at the button)")
 
 
 if __name__ == "__main__":

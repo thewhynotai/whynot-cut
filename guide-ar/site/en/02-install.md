@@ -233,6 +233,8 @@ A model is a large file holding ready-made know-how for understanding speech; th
 
 > **In 3.0 — not verified yet:** The sizes of some packs and the names of the buttons on the Models page will be added here when they are released.
 
+> **In 3.0 — not verified yet:** If the WhyNot Kalam pack ships with the MMS model for setting the timing of every word, that model's own terms allow non-commercial use only; this line is confirmed after the timing-accuracy test.
+
 ## Five steps you do yourself {#ch02-only-you}
 
 These are limits set by the operating system or by other companies, and each has one step:

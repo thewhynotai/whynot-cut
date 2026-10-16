@@ -115,7 +115,11 @@ You can type each command as it is, or say what you want in your own words, like
 
 WhyNot Cut · Powered by thewhynot.ai, from The Why Not AI. For questions and support:
 
-- Website: [thewhynot.ai](https://thewhynot.ai)
+- Support on WhatsApp: The Why Not AI's support line; how to send is in [“When the problem isn't solved”](17-troubleshooting.md#ch17-support)
 - Email: [info@thewhynot.ai](mailto:info@thewhynot.ai)
+- Website: [thewhynot.ai](https://thewhynot.ai)
 
 > **Tip:** When you write to us about a problem, send Claude's latest report with its three sections, and the clip or episode number, such as `C0001` or `EP01`. It makes the fix much faster.
+
+© 2026 The Why Not AI (thewhynot.ai)\
+WhyNot Cut is open source under the GPL-3.0-or-later licence, and its name and logo are trademarks of The Why Not AI.

@@ -212,8 +212,10 @@ In version 3.0, to send us feedback about the experience or a problem you ran in
 2. Open the feedback form or email, and write what you were doing, what happened, what you expected to happen, and the clip or episode number if there is one, such as `C0001`.
 3. Attach the diagnostics file, then send.
 
-> **In 3.0 — not verified yet:** Where the feedback form is, and who handles support and when, will be written here once they're decided; until then, send to the email in [“When the problem isn't solved”](#ch17-support).
+> **In 3.0 — not verified yet:** Where the feedback form is will be written here once it's decided; until then, send your feedback as in [“When the problem isn't solved”](#ch17-support).
 
 ## When the problem isn't solved {#ch17-support}
 
-If you didn't find your situation in this chapter, or the fix didn't work, or the same error keeps coming back, ask Claude to sum up what it tried and what it found out, then email us at [info@thewhynot.ai](mailto:info@thewhynot.ai) with that summary and the check result.
+If you didn't find your situation in this chapter, or the fix didn't work, or the same error keeps coming back, ask Claude to sum up what it tried and what it found out. If the WhyNot Cut panel is open in front of you, also click “Copy diagnostics” in it. Then send these details, with the check result, to The Why Not AI's support line on WhatsApp, or to [info@thewhynot.ai](mailto:info@thewhynot.ai). Reply times: “We reply within one working day (Sun–Thu, Cairo time).”
+
+> **In 3.0 — not verified yet:** In the panel, sending becomes one button, “Copy details and open WhatsApp”: it copies the details, then opens the support chat on WhatsApp, and you paste them and send; your details are never put into the link.

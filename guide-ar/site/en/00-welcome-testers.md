@@ -46,7 +46,7 @@ WhyNot Cut comes with a ready sample client: brand files and a short raw video, 
 ## How to send us what you found {#ch00-report}
 
 - **Before you send**, try [“The first step for any problem”](17-troubleshooting.md#ch17-first); many problems have a short fix.
-- **For each problem or note**: ask Claude to sum up what happened and what it tried, then send the summary, with a short description of what you were doing and what happened, to info@thewhynot.ai ([“When the problem isn't solved”](17-troubleshooting.md#ch17-support)).
+- **For each problem or note**: ask Claude to sum up what happened and what it tried, then send the summary, with a short description of what you were doing and what happened, to The Why Not AI's support line on WhatsApp, or to info@thewhynot.ai. The full steps, and the panel button that is on its way, are in [“When the problem isn't solved”](17-troubleshooting.md#ch17-support).
 - **Notes on the guide**: write the page number and the sentence you did not understand, and what you expected to find.
 
 > **In 3.0 — not verified yet:** With the test version you will also get a way to save the diagnostics file and attach it to your notes ([“Sending your feedback and problems”](17-troubleshooting.md#ch17-feedback)).

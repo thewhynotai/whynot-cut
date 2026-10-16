@@ -115,7 +115,11 @@ dir: rtl
 
 WhyNot Cut · Powered by thewhynot.ai من The Why Not AI. للأسئلة والدعم:
 
-- الموقع: [thewhynot.ai](https://thewhynot.ai)
+- الدعم على WhatsApp: خط الدعم من The Why Not AI، وطريقة الإرسال في [«عندما لا تُحل المشكلة»](17-troubleshooting.md#ch17-support)
 - البريد: [info@thewhynot.ai](mailto:info@thewhynot.ai)
+- الموقع: [thewhynot.ai](https://thewhynot.ai)
 
 > **نصيحة:** عندما تراسلنا بخصوص مشكلة، أرسل معها آخر تقرير من Claude بأقسامه الثلاثة، ورقم الكليب أو الحلقة، مثل `C0001` أو `EP01`. هذا يختصر وقت الحل كثيرًا.
+
+© 2026 The Why Not AI (thewhynot.ai)\
+WhyNot Cut مفتوح المصدر بترخيص GPL-3.0-or-later، واسمه وشعاره علامتان تجاريتان لشركة The Why Not AI.
