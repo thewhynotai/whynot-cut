@@ -9,8 +9,12 @@ Python only (always run):
 * TidyMediaRules: the rules of test_media.js, JS regex corner cases ($ before a newline, ASCII-only \\b and /i), image headers;
 * TidySniff: head and tail reads, image head only, a file read once per path, unreadable -> names only, RAW originals;
 * TidyWavInfo / TidyWavPower: header table, power against a plain numpy reference, pieces, truncated files;
-* TidyDriftGuard (A3 #7): 44.1 kHz recordings give the same click times as 48 kHz ones within 1 ms over 60 minutes;
-  without the guard the same file drifts by seconds;
+* TidyMediaTokens: every alternative of RENDER_TAGS / CAMERA_TAGS / CAMERA_NAME / RENDER_NAME is read out of the port's
+  media.js, expanded and judged by the twin (and by the JS when node is there): a token the twin forgot fails;
+  the fixtures of test_media.js are read from the owner's file (skipped without adobe/tools);
+* TidyDriftGuard (A3 #7): a lazy (no disk) 60-minute 44.1 kHz recording keeps the click times within 1 ms; 22.05 / 11.025 /
+  44.1 stereo recordings of 5 minutes too; without the guard the same file drifts. The 60-minute files on disk (44.1 vs
+  48 kHz, 0.66 GB) run with WHYNOT_SLOW_TESTS=1 only;
 * TidyBackup, TidyStore, TidyPackage (licence header, no "hoka", no "_upstream" in a file name).
 With node and adobe/tools (skipped with a reason otherwise, e.g. in the plugin zip): the same inputs go through the JS
 (the port's media.js / sync.js, the upstream engine.js function bodies) and must give identical results:
@@ -128,6 +132,175 @@ def onsets(power, thr=0.01):
     return np.flatnonzero(hot[1:] & ~hot[:-1]) + 1
 
 
+class LazyClickWav:
+    """A file-like 16-bit WAV that never exists on disk: seek / tell / read generate a silent recording with clicks, so a
+    60-minute recording costs no disk. `dataOffset` bytes of header are zeros (the resampler is given `info` directly)."""
+
+    def __init__(self, rate, seconds, click_times, channels=1, click_ms=4, amp=12000, offset=44):
+        self.rate, self.ch, self.offset, self.amp = rate, channels, offset, amp
+        self.n = int(round(seconds * rate))
+        self.size = offset + self.n * 2 * channels
+        self.clicks = [(int(np.ceil(t * rate)), int(round(click_ms / 1000 * rate))) for t in click_times]
+        self.pos = 0
+
+    def seek(self, off, whence=0):
+        self.pos = off if whence == 0 else (self.pos + off if whence == 1 else self.size + off)
+        return self.pos
+
+    def tell(self):
+        return self.pos
+
+    def read(self, n=-1):
+        end = self.size if n is None or n < 0 else min(self.size, self.pos + n)
+        if end <= self.pos:
+            return b""
+        out = bytearray(end - self.pos)
+        lo, hi = max(self.pos, self.offset), end
+        if hi > lo:
+            first = (lo - self.offset) // (2 * self.ch)
+            last = (hi - self.offset + 2 * self.ch - 1) // (2 * self.ch)
+            x = np.zeros((last - first, self.ch), dtype="<i2")
+            for c0, ln in self.clicks:
+                a, b = max(c0, first), min(c0 + ln, last)
+                if a < b:
+                    x[a - first:b - first, :] = self.amp
+            raw = x.tobytes()
+            skip = (lo - self.offset) - first * 2 * self.ch
+            out[lo - self.pos:hi - self.pos] = raw[skip:skip + (hi - lo)]
+        self.pos = end
+        return bytes(out)
+
+
+def js_string(lit):
+    """The value of a JS single-quoted string literal (test_media.js uses \\uXXXX, \\\\ and \\' escapes only)."""
+    out, i = [], 0
+    while i < len(lit):
+        c = lit[i]
+        if c == "\\":
+            n = lit[i + 1]
+            if n == "u":
+                out.append(chr(int(lit[i + 2:i + 6], 16)))
+                i += 6
+                continue
+            out.append({"n": "\n", "t": "\t", "r": "\r"}.get(n, n))
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def load_media_fixtures():
+    """The byte strings test_media.js feeds the rules (DJI, IPHONE, AE, COMPOSE, LAVF), read from the owner's file;
+    None when adobe/tools is not there (the plugin zip)."""
+    p = UPSTREAM / "tests" / "test_media.js"
+    if not p.is_file():
+        return None
+    src = p.read_text(encoding="utf-8")
+    out = {}
+    for name in ("DJI", "IPHONE", "AE", "COMPOSE", "LAVF"):
+        m = re.search(r"^var %s = '((?:\\.|[^'\\])*)';" % name, src, re.M)
+        assert m, name
+        out[name] = js_string(m.group(1))
+    return out
+
+
+def js_regex_literal(name):
+    """(source, flags) of `var NAME = /.../flags;` in the port's media.js."""
+    src = (PORT / "js" / "media.js").read_text(encoding="utf-8")
+    m = re.search(r"^\s*var %s = /(.*)/([a-z]*);" % name, src, re.M)
+    assert m, name
+    return m.group(1), m.group(2)
+
+
+def _split_top(pat):
+    parts, depth, cur, i = [], 0, "", 0
+    while i < len(pat):
+        c = pat[i]
+        if c == "\\":
+            cur += pat[i:i + 2]
+            i += 2
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        if c == "|" and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += c
+        i += 1
+    parts.append(cur)
+    return parts
+
+
+def expand_regex(pat):
+    """Every alternative of a small JS regex (groups, |, \\d{n}, \\d+, x?, \\., \\b, ^, $) as one concrete string."""
+    import itertools
+    out = []
+    for alt in _split_top(pat):
+        elems, i = [], 0
+        while i < len(alt):
+            c = alt[i]
+            if c == "\\":
+                n = alt[i + 1]
+                i += 2
+                if n == "d":
+                    k = 1
+                    m = re.match(r"\{(\d+)\}", alt[i:])
+                    if m:
+                        k = int(m.group(1))
+                        i += m.end()
+                    elif alt[i:i + 1] == "+":
+                        k = 2
+                        i += 1
+                    elems.append(["1" * k])
+                else:
+                    elems.append([""] if n == "b" else [n])
+            elif c == "(":
+                depth, j = 1, i + 1
+                while depth:
+                    if alt[j] == "\\":
+                        j += 1
+                    elif alt[j] == "(":
+                        depth += 1
+                    elif alt[j] == ")":
+                        depth -= 1
+                    j += 1
+                inner = alt[i + 1:j - 1]
+                elems.append(expand_regex(inner[2:] if inner.startswith("?:") else inner))
+                i = j
+            elif c in "^$":
+                elems.append([""])
+                i += 1
+            elif c in "[]{}*+.":
+                raise ValueError("unsupported regex syntax %r in %r" % (c, pat))
+            else:
+                elems.append([c])
+                i += 1
+            if alt[i:i + 1] == "?":
+                elems[-1] = [""] + elems[-1]
+                i += 1
+        out.extend("".join(t) for t in itertools.product(*elems))
+    return out
+
+
+FIX = load_media_fixtures()
+
+# Source Text values (textEditValue) the pure parity test sends through both implementations; the last six are the
+# surrogate cases of the Task 8 review: an escaped emoji (two \u escapes = ONE character in JS), a lone high, a lone low,
+# a high then a non-low, a reversed pair, and two pairs in a row
+TEXT_VALUES = (
+    '{"textEditValue":"a\\nb  c"}', '{"textEditValue" : "x\\u0041\\"q\\\\z"}', None, "", 5, '{"textEditValue":"unterminated',
+    '{"textEditValue":"a b"}', '{"textEditValue":"\\ x"}', '{"textEditValue":"\\\nx"}', '{"textEditValue":"    ﻿ x 　 "}',
+    '{"textEditValue":"\\u062d\\u0644\\u0642\\u0629"}',
+    '{"textEditValue":"hi \\ud83d\\ude00"}', '{"textEditValue":"a\\ud83db"}', '{"textEditValue":"a\\ude00b"}',
+    '{"textEditValue":"\\ud83dx\\ude00"}', '{"textEditValue":"\\ude00\\ud83d"}', '{"textEditValue":"\\ud83d\\ude00\\ud83d\\ude01"}',
+    '{"textEditValue":"raw ' + chr(0x1F600) + ' emoji"}',
+)
+
+
 class Tmp(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
@@ -173,34 +346,36 @@ class TidyDisk(Tmp):
 
 
 class TidyMediaRules(unittest.TestCase):
-    DJI = "\u0000\u0000ftypisom....\u00a9too\u0000\u0000DJI OsmoPocket3\u0000..DJI meta..DJI dbgi"
-    IPHONE = "ftypqt  ..com.apple.quicktime.software..iPhone OSV26.3.1..com.apple.quicktime.model..iPhone 16 Pro Max..Core Media Video"
-    AE = 'ftypmp42..Mainconcept Video Media Handler..<x:xmpmeta xmp:CreatorTool="Adobe After Effects 2026 (Windows)"/>..Apple..DJI'
-    COMPOSE = "ftypqt  ..Core Media Video..Core Media Audio..Core Media Data Handler"
-    LAVF = "ftypisom....Lavf61.7.100"
+    def fx(self):
+        """The fixtures of test_media.js, read from the owner's file (skipped without adobe/tools)."""
+        if FIX is None:
+            self.skipTest(NO_TOOLS)
+        return FIX
 
     def test_video_kind_like_test_media_js(self):
+        f = self.fx()
         k = tmedia.video_kind
-        self.assertEqual(k(self.DJI, "Script 1 - 2.mp4"), "camera")
-        self.assertEqual(k(self.IPHONE, "IMG_3886.MOV.mov"), "camera")
-        self.assertEqual(k(self.AE, "Script 4.mp4"), "render")
-        self.assertEqual(k(self.COMPOSE, "dji_export_20261010_234451_0.f_compose_0.mov"), "render")
-        self.assertEqual(k(self.LAVF, "clip.mp4"), "render")
+        self.assertEqual(k(f["DJI"], "Script 1 - 2.mp4"), "camera")
+        self.assertEqual(k(f["IPHONE"], "IMG_3886.MOV.mov"), "camera")
+        self.assertEqual(k(f["AE"], "Script 4.mp4"), "render")
+        self.assertEqual(k(f["COMPOSE"], "dji_export_20261010_234451_0.f_compose_0.mov"), "render")
+        self.assertEqual(k(f["LAVF"], "clip.mp4"), "render")
         self.assertEqual(k("", "C0890.MP4"), "camera")
         self.assertEqual(k("", "A001C002_220101_R1AB.mov"), "camera")
         self.assertEqual(k("", "clip.mp4"), "render")
         self.assertEqual(k("...NonRealTimeMeta...Sony...", "Interview.MP4"), "camera")
-        self.assertEqual((k(self.DJI, "Interview final.mp4"), k(self.DJI, "Ahmed edit.mp4")), ("camera", "camera"))
+        self.assertEqual((k(f["DJI"], "Interview final.mp4"), k(f["DJI"], "Ahmed edit.mp4")), ("camera", "camera"))
         self.assertEqual(k("", "Interview final.mp4"), "render")
         self.assertEqual(k("", "00001.MTS"), "camera")
         self.assertEqual((k(None, None), k("", "")), ("render", "render"))
 
     def test_camera_id_and_model(self):
-        self.assertEqual(tmedia.camera_id(self.DJI, "a.mp4", "/RAW/A"), "DJI OsmoPocket3 | /RAW/A")
-        self.assertEqual(tmedia.camera_model(self.IPHONE), "iPhone 16 Pro Max")
+        f = self.fx()
+        self.assertEqual(tmedia.camera_id(f["DJI"], "a.mp4", "/RAW/A"), "DJI OsmoPocket3 | /RAW/A")
+        self.assertEqual(tmedia.camera_model(f["IPHONE"]), "iPhone 16 Pro Max")
         self.assertEqual(tmedia.camera_id("", "C0001.MP4", "/x/Cam B"), "folder:/x/Cam B")
-        self.assertNotEqual(tmedia.camera_id(self.DJI, "a.mp4", "/P/Cam A"), tmedia.camera_id(self.DJI, "b.mp4", "/P/Cam B"))
-        self.assertEqual(tmedia.camera_id(self.DJI, "a.mp4", "/P/Cam A"), tmedia.camera_id(self.DJI, "c.mp4", "/P/Cam A"))
+        self.assertNotEqual(tmedia.camera_id(f["DJI"], "a.mp4", "/P/Cam A"), tmedia.camera_id(f["DJI"], "b.mp4", "/P/Cam B"))
+        self.assertEqual(tmedia.camera_id(f["DJI"], "a.mp4", "/P/Cam A"), tmedia.camera_id(f["DJI"], "c.mp4", "/P/Cam A"))
         self.assertEqual(tmedia.camera_model("x ILCE-7M4 y"), "ILCE-7M4")
         self.assertEqual(tmedia.camera_model(None), "")
 
@@ -236,6 +411,7 @@ class TidyMediaRules(unittest.TestCase):
         self.assertIsNotNone(tmedia.image_size(vp8l, "webp"))
 
     def test_is_icon_and_needs_bytes_and_describe(self):
+        f = self.fx()
         self.assertTrue(tmedia.is_icon("a.png", "png", {"w": 64, "h": 48}))
         self.assertFalse(tmedia.is_icon("bg.jpg", "jpg", {"w": 1920, "h": 1080}))
         self.assertTrue(tmedia.is_icon("Company Logo.png", "png", {"w": 2000, "h": 2000}))
@@ -245,7 +421,7 @@ class TidyMediaRules(unittest.TestCase):
         self.assertEqual((n({"path": "/a/b.MOV"}), n({"path": "/a/b.jpeg"}), n({"path": "/a/b.wav"}), n({"path": ""}), n({})),
                          ("video", "image", None, None, None))
         v = {"name": "Script 1 - 2.mp4", "path": "/Volumes/X/RAW/Script 1/Script 1 - 2.mp4"}
-        self.assertIs(tmedia.describe(v, self.DJI), v)
+        self.assertIs(tmedia.describe(v, f["DJI"]), v)
         self.assertEqual((v["kind"], v["camId"]), ("camera", "DJI OsmoPocket3 | /Volumes/X/RAW/Script 1"))
         u = {"name": "C0001.MP4", "path": "/x/Cam B/C0001.MP4"}
         tmedia.describe(u, None)
@@ -266,6 +442,73 @@ class TidyMediaRules(unittest.TestCase):
                          "\u0627\u0644\u062a\u0631\u0642\u064a\u0629 Now")
         self.assertEqual((t('xx{"textEditValue":"5"}'), t('{"fontSize":40}'), t(None), t("")), ("5", "", "", ""))
         self.assertEqual(t('{"textEditValue" : "a\\u0041\\"b\\\\c  d"}'), 'aA"b\\c d')
+
+    def test_text_from_value_joins_escaped_surrogate_pairs_like_js(self):
+        t = tmedia.text_from_value
+        self.assertEqual(t('{"textEditValue":"hi \\ud83d\\ude00"}'), "hi " + chr(0x1F600))
+        self.assertEqual(t('{"textEditValue":"\\ud83d\\ude00\\ud83d\\ude01"}'), chr(0x1F600) + chr(0x1F601))
+        self.assertEqual(t('{"textEditValue":"a\\ud83db"}'), "a" + chr(0xD83D) + "b")                 # a lone high stays lone
+        self.assertEqual(t('{"textEditValue":"a\\ude00b"}'), "a" + chr(0xDE00) + "b")                 # a lone low too
+        self.assertEqual(t('{"textEditValue":"\\ude00\\ud83d"}'), chr(0xDE00) + chr(0xD83D))          # reversed: no pair
+        self.assertEqual(t('{"textEditValue":"raw ' + chr(0x1F600) + '"}'), "raw " + chr(0x1F600))
+        # the result is always safe to write as UTF-8 after the log's backslashreplace
+        for v in (t('{"textEditValue":"a\\ud83db"}'), t('{"textEditValue":"\\ude00"}')):
+            v.encode("utf-8", "backslashreplace")
+
+    def test_the_media_regex_alternatives_are_all_known(self):
+        """Mimo (Task 8 review I1): a DJI Mimo file is a camera original (the model regex of media.js does not know Mimo,
+        so it has no model name, as in the JS)."""
+        self.assertEqual(tmedia.video_kind("..DJI Mimo..", "clip.mp4"), "camera")
+        self.assertEqual(tmedia.camera_model("..DJI Mimo 2.."), "")
+
+    def test_video_kind_without_the_fixtures(self):
+        k = tmedia.video_kind
+        self.assertEqual(k("..DJI OsmoPocket3..", "Script 1 - 2.mp4"), "camera")
+        self.assertEqual(k("..Mainconcept..DJI Osmo..", "x.mp4"), "render")
+        self.assertEqual(k("", "C0890.MP4"), "camera")
+        self.assertEqual(k("", "Interview final.mp4"), "render")
+
+
+@unittest.skipUnless(TOOLS_PRESENT, NO_TOOLS)
+class TidyMediaTokens(unittest.TestCase):
+    """Task 8 review I1. Hand-picked texts cannot catch a token the twin forgot, so the alternatives are read OUT OF
+    adobe/tools/tidy/src/js/media.js: every one of RENDER_TAGS, CAMERA_TAGS, CAMERA_NAME and RENDER_NAME is expanded to a
+    concrete string and judged by the twin (here, no node) and by the JS (test below, node): the answers must be the
+    alternative's own kind, and equal. A future token added to media.js that media.py misses fails here."""
+
+    @staticmethod
+    def cases():
+        rt, _ = js_regex_literal("RENDER_TAGS")
+        ct, _ = js_regex_literal("CAMERA_TAGS")
+        cn, _ = js_regex_literal("CAMERA_NAME")
+        rn, _ = js_regex_literal("RENDER_NAME")
+        out = [("..%s.." % a, "clip.mp4", "render", "RENDER_TAGS") for a in expand_regex(rt)]
+        out += [("..%s.." % a, "clip.mp4", "camera", "CAMERA_TAGS") for a in expand_regex(ct)]
+        out += [("", a, "camera", "CAMERA_NAME") for a in expand_regex(cn)]
+        out += [("", "clip %s x" % a, "render", "RENDER_NAME") for a in expand_regex(rn)]
+        return out
+
+    def test_the_expander_reads_the_whole_literal(self):
+        alts = [c[0].strip(".") for c in self.cases() if c[3] == "CAMERA_TAGS"]
+        for want in ("DJI Osmo", "DJI Pocket", "DJI Action", "DJI Mini", "DJI Mavic", "DJI Air", "DJI Avata", "DJI Neo", "DJI Mimo",
+                     "com.apple.quicktime.model", "NonRealTimeMeta", "GoPro", "Insta360", "Canon", "Panasonic", "Blackmagic",
+                     "FUJIFILM", "NIKON", "com.android.manufacturer", "samsung"):
+            self.assertIn(want, alts)
+        names = [c[1] for c in self.cases() if c[3] == "CAMERA_NAME"]
+        for want in ("C1111", "IMG_1", "DSC1", "DSC_1", "GX111111", "A111C111", "11111.MTS"):
+            self.assertTrue(any(n.startswith(want) or n == want for n in names), want)
+        self.assertGreaterEqual(len(self.cases()), 45)
+
+    def test_the_twin_judges_every_alternative_as_its_regex_says(self):
+        for text, name, want, where in self.cases():
+            self.assertEqual(tmedia.video_kind(text, name), want, (where, text, name))
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_js_and_the_twin_agree_on_every_alternative(self):
+        cases = self.cases()
+        js = run_js(self, PORT, ["js/media.js"], [call("TidyMedia.videoKind", t, n) for t, n, _, _ in cases])
+        self.assertEqual(js, [c[2] for c in cases])
+        self.assertEqual(js, [tmedia.video_kind(t, n) for t, n, _, _ in cases])
 
 
 class TidySniff(Tmp):
@@ -456,6 +699,20 @@ class TidyDriftGuard(Tmp):
         finally:
             os.unlink(p)
 
+    def test_a_lazy_60_minute_recording_needs_no_disk_and_does_not_drift(self):
+        """Task 8 review M3: the resampler's positions are exact integers, so the error does not grow with time. A file-like
+        object generates the 60-minute click track on the fly (nothing is written), the clicks run to the last minute."""
+        t = self.times(3600)
+        f = LazyClickWav(44100, 3600, t)
+        info = {"rate": 44100, "channels": 1, "bits": 16, "dataOffset": 44, "dataSize": f.n * 2}
+        power = twav._power_resampled(f, info)
+        self.assertEqual(len(power), 3_600_000)
+        on = onsets(power)
+        self.assertEqual(len(on), len(t))
+        self.assertGreater(t[-1], 3560)
+        self.assertLessEqual(float(np.max(np.abs(on - np.floor(np.array(t) * 1000)))), 1)
+
+    @unittest.skipUnless(os.environ.get("WHYNOT_SLOW_TESTS") == "1", "set WHYNOT_SLOW_TESTS=1 for the 60-minute files (0.66 GB on disk, ~25 s)")
     def test_44100_matches_48000_within_1_ms_over_60_minutes(self):
         t, a, _ = self.click_frames(48000, 3600)
         _, b, _ = self.click_frames(44100, 3600)
@@ -559,6 +816,39 @@ class TidyBackup(Tmp):
                 tbackup.backup(p, self.NOW)
         self.assertEqual(sorted(x.name for x in self.tmp.iterdir()), ["B.prproj"])
 
+    def test_a_destination_that_cannot_be_opened_is_never_deleted(self):
+        """Task 8 review M2: only a file this call created may be removed. An exclusive open that fails for any reason
+        (Windows: PermissionError for a file pending delete or a folder of that name) leaves what is there alone."""
+        p = self.put("C.prproj", b"project")
+        dst = Path(p).with_name(tbackup.backup_name(p, self.NOW))
+        dst.write_bytes(b"somebody else's file")
+        real_open = open
+
+        def deny(path, mode="r", *a, **k):
+            if str(path) == str(dst) and "x" in mode:
+                raise PermissionError(13, "denied")
+            return real_open(path, mode, *a, **k)
+        with mock.patch("builtins.open", deny):
+            with self.assertRaises(PermissionError):
+                tbackup.backup(p, self.NOW)
+        self.assertEqual(dst.read_bytes(), b"somebody else's file")
+
+    def test_a_folder_in_the_way_is_left_alone(self):
+        p = self.put("D.prproj", b"project")
+        dst = Path(p).with_name(tbackup.backup_name(p, self.NOW))
+        dst.mkdir()
+        (dst / "keep.txt").write_bytes(b"k")
+        with self.assertRaises(OSError):
+            tbackup.backup(p, self.NOW)
+        self.assertEqual((dst / "keep.txt").read_bytes(), b"k")
+
+    def test_a_failing_copystat_does_not_fail_a_complete_backup(self):
+        """The copy is whole and exclusive; only the attribute copy failed. The backup exists, so the call succeeds."""
+        p = self.put("E.prproj", b"project bytes")
+        with mock.patch("shutil.copystat", side_effect=OSError("denied")):
+            dst = tbackup.backup(p, self.NOW)
+        self.assertEqual(Path(dst).read_bytes(), b"project bytes")
+
     def test_names_without_the_extension_and_current_time(self):
         self.assertEqual(tbackup.backup_name("x/Name.prproj", self.NOW), "Name (WhyNot Tidy backup 2026-10-12 154233).prproj")
         self.assertEqual(tbackup.backup_name("x/Name.PRPROJ", self.NOW), "Name.PRPROJ (WhyNot Tidy backup 2026-10-12 154233).prproj")
@@ -586,6 +876,20 @@ class TidyStore(Tmp):
         self.assertRegex(lines[0], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z  hello world again$")
         self.assertTrue(lines[1].endswith("  second"))
         self.assertEqual(lines[2], "")
+
+    def test_log_never_raises(self):
+        """Task 8 review M1: a log line must never stop a run: lone surrogates, a missing security module, anything."""
+        s = self.store()
+        self.assertTrue(s.log("lone " + chr(0xD83D) + " high and " + chr(0xDE00) + " low"))
+        text = s.log_file.read_text(encoding="utf-8")
+        self.assertIn("lone \\ud83d high and \\ude00 low", text)                 # backslashreplace: visible, not lost
+        self.assertTrue(s.log(tmedia.text_from_value('{"textEditValue":"a\\ud83db"}')))
+        self.assertTrue(s.log("emoji " + chr(0x1F600)))
+        with mock.patch.object(tstore, "_security", side_effect=ImportError("no serve")):
+            self.assertFalse(s.log("x"))
+        with mock.patch.object(s, "_dir", side_effect=RuntimeError("boom")):
+            self.assertFalse(s.log("x"))
+        self.assertFalse(s.log(object.__new__(type("Bad", (), {"__str__": lambda self: 1 / 0}))))
 
     def test_settings(self):
         s = self.store()
@@ -695,11 +999,11 @@ class TidyMediaParity(unittest.TestCase):
 
     def test_describe_on_400_seeded_items_and_the_test_media_fixtures(self):
         cases = rand_items(400, 11)
-        dji = TidyMediaRules.DJI
+        dji = FIX["DJI"]
         for name, path, text in (("Script 1 - 2.mp4", "/Volumes/X/RAW/Script 1/Script 1 - 2.mp4", dji), ("C0001.MP4", "/x/Cam B/C0001.MP4", None),
                                  ("a.png", "/x/a.png", "".join(chr(c) for c in [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 64, 0, 0, 0, 48])),
                                  ("notes.txt", "/x/notes.txt", "abc"), ("A.R3D", "/r/A.R3D", None), ("clip.braw", "/r/clip.braw", None),
-                                 ("x.mp4", "/x.mp4", TidyMediaRules.IPHONE), ("y.mp4", "/y.mp4", TidyMediaRules.AE), ("z.mp4", "/z.mp4", TidyMediaRules.COMPOSE)):
+                                 ("x.mp4", "/x.mp4", FIX["IPHONE"]), ("y.mp4", "/y.mp4", FIX["AE"]), ("z.mp4", "/z.mp4", FIX["COMPOSE"])):
             cases.append(({"name": name, "path": path}, text))
         calls = [call("TidyMedia.describe", it, text) for it, text in cases]
         js = run_js(self, PORT, self.LOAD, calls)
@@ -710,7 +1014,7 @@ class TidyMediaParity(unittest.TestCase):
         self.assertGreater(sum(1 for r in js if "icon" in r), 20)
 
     def test_pure_functions_and_regex_corner_cases(self):
-        texts = [t for _, t in rand_items(300, 12)] + [TidyMediaRules.DJI, TidyMediaRules.IPHONE, "DJI Osmo", "DJI Osmo\n", "DJI Osmo Action 5 Pro!", "iPhone 16 Pro Max Plus e mini"]
+        texts = [t for _, t in rand_items(300, 12)] + [FIX["DJI"], FIX["IPHONE"], "DJI Osmo", "DJI Osmo\n", "DJI Osmo Action 5 Pro!", "iPhone 16 Pro Max Plus e mini"]
         names = [it.get("name") for it, _ in rand_items(300, 13)] + ["00001.MTS", "00001.MTS\n", "x\u00e9edit.mp4", "xedit.mp4", " edit ", "EDIT", "re_edit"]
         calls = [call("TidyMedia.cameraModel", t) for t in texts]
         calls += [call("TidyMedia.videoKind", t, n) for t, n in zip(texts * 2, names)]
@@ -718,10 +1022,8 @@ class TidyMediaParity(unittest.TestCase):
         calls += [call("TidyMedia.needsBytes", {"path": n}) for n in names]
         calls += [call("TidyMedia.isIcon", n, e, s) for n, e, s in (("a", "svg", None), ("Logo", "png", None), ("big", "png", {"w": 513, "h": 9}),
                                                                    ("small", "png", {"w": 512, "h": 512}), (None, "jpg", None), ("emoji", "", None))]
-        calls += [call("TidyMedia.textFromValue", v) for v in (
-            '{"textEditValue":"a\\nb  c"}', '{"textEditValue" : "x\\u0041\\"q\\\\z"}', None, "", 5, '{"textEditValue":"unterminated',
-            '{"textEditValue":"a\u2028b"}', '{"textEditValue":"\\\u2028x"}', '{"textEditValue":"\\\nx"}', '{"textEditValue":"  \u00a0 \ufeff x \u3000 "}',
-            '{"textEditValue":"\\u062d\\u0644\\u0642\\u0629"}')]
+        tvals = TEXT_VALUES
+        calls += [call("TidyMedia.textFromValue", v) for v in tvals]
         js = run_js(self, PORT, self.LOAD, calls)
         want = [tmedia.camera_model(t) for t in texts]
         want += [tmedia.video_kind(t, n) for t, n in zip(texts * 2, names)]
@@ -729,11 +1031,12 @@ class TidyMediaParity(unittest.TestCase):
         want += [tmedia.needs_bytes({"path": n}) for n in names]
         want += [tmedia.is_icon(n, e, s) for n, e, s in (("a", "svg", None), ("Logo", "png", None), ("big", "png", {"w": 513, "h": 9}),
                                                          ("small", "png", {"w": 512, "h": 512}), (None, "jpg", None), ("emoji", "", None))]
-        want += [tmedia.text_from_value(v) for v in (
-            '{"textEditValue":"a\\nb  c"}', '{"textEditValue" : "x\\u0041\\"q\\\\z"}', None, "", 5, '{"textEditValue":"unterminated',
-            '{"textEditValue":"a\u2028b"}', '{"textEditValue":"\\\u2028x"}', '{"textEditValue":"\\\nx"}', '{"textEditValue":"  \u00a0 \ufeff x \u3000 "}',
-            '{"textEditValue":"\\u062d\\u0644\\u0642\\u0629"}')]
+        want += [tmedia.text_from_value(v) for v in tvals]
         self.assertEqual(js, want)
+        # the escaped emoji really is one character, and a lone surrogate stays lone (JS strings are UTF-16)
+        by_text = dict(zip(tvals, js[-len(tvals):]))
+        self.assertEqual(by_text['{"textEditValue":"hi \\ud83d\\ude00"}'], "hi " + chr(0x1F600))
+        self.assertEqual(by_text['{"textEditValue":"a\\ud83db"}'], "a" + chr(0xD83D) + "b")
 
     def test_image_sizes_on_generated_headers(self):
         r = random.Random(14)

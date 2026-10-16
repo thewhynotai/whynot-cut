@@ -5,7 +5,8 @@
 "<name> (WhyNot Tidy backup 2026-10-12 154233).prproj" next to the project (A6b name; upstream: "(Tidy backup ...)",
 same stamp format YYYY-MM-DD HHMMSS, local time). The copy is exclusive: an existing file is never overwritten
 (FileExistsError, like the JS COPYFILE_EXCL), a failed copy leaves no half file behind, and the modification time of the
-project is kept on the copy.
+project is kept on the copy when the file system lets it (a failing attribute copy never turns a complete backup into
+an error).
 """
 from __future__ import annotations
 
@@ -39,16 +40,18 @@ def backup(project_path, now: datetime | None = None) -> str:
     src = Path(project_path)
     dst = src.with_name(backup_name(src, now))
     with open(src, "rb") as fin:
+        fout = open(dst, "xb")        # exclusive; whatever stops this (exists, folder, denied) is raised with nothing of ours to undo
         try:
-            with open(dst, "xb") as fout:
+            with fout:
                 shutil.copyfileobj(fin, fout, 1024 * 1024)
-        except FileExistsError:
-            raise
         except BaseException:
             try:
-                dst.unlink()                       # we created it a moment ago (exclusive open), so it is ours to remove
+                dst.unlink()           # created by the open above, so it is ours; only now may it be removed
             except OSError:
                 pass
             raise
-    shutil.copystat(str(src), str(dst))
+    try:
+        shutil.copystat(str(src), str(dst))   # the mtime of the project, best effort: the copy itself is complete
+    except OSError:
+        pass
     return str(dst)

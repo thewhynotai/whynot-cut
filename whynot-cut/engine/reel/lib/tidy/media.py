@@ -26,7 +26,7 @@ NOT_EOL = "[^" + "".join(re.escape(chr(c)) for c in (0x0A, 0x0D, 0x2028, 0x2029)
 # render evidence beats camera evidence: exports keep the tags of their sources
 RENDER_TAGS = re.compile(r"(CreatorTool|Mainconcept|MainConcept|Lavf\d|HandBrake|CapCut|Adobe Media Encoder|DaVinci Resolve)", _A)
 RENDER_NAME = re.compile(r"(render|export|final|compose|_edit|\bedit\b)", _A | re.I)
-CAMERA_TAGS = re.compile(r"(DJI (Osmo|Pocket|Action|Mini|Mavic|Air|Avata|Neo)|com\.apple\.quicktime\.model|NonRealTimeMeta|"
+CAMERA_TAGS = re.compile(r"(DJI (Osmo|Pocket|Action|Mini|Mavic|Air|Avata|Neo|Mimo)|com\.apple\.quicktime\.model|NonRealTimeMeta|"
                          r"GoPro|Insta360|Canon|Panasonic|Blackmagic|FUJIFILM|NIKON|com\.android\.manufacturer|samsung)", _A)
 CAMERA_NAME = re.compile(r"^(C\d{4}|IMG_\d+|DJI_\d+|GX\d{6}|GH\d{6}|GOPR\d+|MVI_\d+|DSC_?\d+|A\d{3}C\d{3}|PXL_\d+|VID_\d+|"
                          r"MAH\d+|P\d{7}|\d{5}\.MTS\Z)", _A | re.I)
@@ -185,4 +185,6 @@ def text_from_value(v) -> str:
     t = _U_ESCAPE.sub(lambda a: chr(int(a.group(1), 16)), m.group(1))
     t = _NL_ESCAPE.sub(" ", t)
     t = _ANY_ESCAPE.sub(lambda a: a.group(1), t)
+    # JS strings are UTF-16: two escaped halves of a surrogate pair are ONE character, a lone half stays a lone half
+    t = t.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "surrogatepass")
     return _EDGE_SPACE.sub("", _WS_RUN.sub(" ", t))

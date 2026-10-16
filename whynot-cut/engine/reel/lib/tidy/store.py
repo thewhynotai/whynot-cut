@@ -47,7 +47,8 @@ class Store:
 
     # ----- log
     def log(self, msg) -> bool:
-        """Append "<ISO time>  <msg>" (newlines of msg become spaces). Never raises: a log must not stop a run."""
+        """Append "<ISO time>  <msg>" (newlines of msg become spaces; a character UTF-8 cannot hold, such as a lone
+        surrogate, is written as a backslash escape). Never raises, whatever goes wrong: a log must not stop a run."""
         try:
             sec = _security()
             self._dir(self.logs)
@@ -55,9 +56,9 @@ class Store:
                                  re.sub(r"[\r\n]+", " ", str(msg)))
             fd = sec.open_private(self.log_file, os.O_WRONLY | os.O_APPEND)
             with os.fdopen(fd, "ab") as f:
-                f.write(line.encode("utf-8"))
+                f.write(line.encode("utf-8", "backslashreplace"))
             return True
-        except OSError:
+        except Exception:
             return False
 
     # ----- settings
