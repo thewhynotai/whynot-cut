@@ -124,7 +124,9 @@ class ValidateTests(Base):
         core.validate({"argv": ["bash", "-e", "tools/test.sh", "-c", "x"], "cwd": str(self.dir)}, self.cfg)
 
     def test_cwd_and_forbidden_areas(self):
-        self.bad("outside the repo", cwd="C:\\Windows")
+        # an existing absolute folder outside every allowed root (C:\Windows is not absolute on POSIX: refused earlier)
+        self.bad("outside the repo", cwd="C:\\Windows" if os.name == "nt" else "/usr")
+        # the forbidden areas are matched as text (any slash style), so they are checked on every platform
         self.bad("absolute", cwd="relative/dir")
         self.bad("forbidden area", argv=["python", "x.py", "D:\\WhyNot Clients\\Dr X\\raw.mp4"])
         self.bad("forbidden area", argv=["python", "x.py", "C:/Users/LOQ/AppData/Roaming/Adobe/Premiere Pro/x"])
@@ -1511,22 +1513,31 @@ class PressureTests(Base):
 
     @unittest.skipUnless(core.IS_WIN, "the job's own memory comes from the Windows Job Object")
     def test_the_sample_after_exit_keeps_what_the_run_held(self):
-        """Re-review P2: the job peaks at 1200 MB, frees half and holds 600 MB while RAM climbs; RAM is highest at
-        the sample taken after it exited. The figure is the 600 MB it held at the last in-run peak, not unknown (which
-        would fall back to the 1200 MB whole-run peak), and not 0 (a field that never reads)."""
+        """Re-review P2: the job peaks at 1200 MB, frees half and holds 600 MB while RAM sits at 90%; RAM is highest
+        (99%) only at the sample taken after it exited. The figure is the 600 MB it held at the in-run peak, not
+        unknown (which would fall back to the 1200 MB whole-run peak), and not 0 (a field that never reads). RAM stays
+        flat at 90% for the rest of the run on purpose: a tie never moves the peak, so the job's shutdown (Python
+        tearing down, then the trampoline waiting a moment longer, ~3 MB) can't become "the peak" — it would, and
+        rightly, if RAM really rose then (2026-10-16: an earlier version of this test rose on every sample)."""
         from unittest import mock
         held = self.dir / "held"
         j = self.job(["python", "-c", "import pathlib, sys, time; a = bytearray(1200 * 2**20); time.sleep(0.5); "
                       "a = None; b = bytearray(600 * 2**20); pathlib.Path(sys.argv[1]).write_text('x'); "
                       "time.sleep(1.5); raise SystemExit(1)", str(held)])
         started = self.paths.started(j["id"])
-        calls = []
+
+        def after_exit() -> bool:                          # asked from the runner's sample(ended=True)?
+            f = sys._getframe(1)
+            while f is not None and f.f_code.co_name != "sample":
+                f = f.f_back
+            return bool(f is not None and f.f_locals.get("ended"))
 
         def pct():
+            if after_exit():
+                return 99
             if not held.exists():
                 return 50 if started.exists() else 30
-            calls.append(1)
-            return min(88 + len(calls), 99)                 # every sample is a new peak, the after-exit one too
+            return 90
         with mock.patch.object(procs, "system_ram_pct", side_effect=pct):
             self.run_runner()
         d = self.done(j["id"])
