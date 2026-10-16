@@ -604,6 +604,10 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         _drop_git_bash_key(ctx, git, kept, failed)
     # nothing left to retry: WhyNot Cut no longer points at this folder (ID-10); before `rest` (the pointer may go)
     forgot = claude.forget_engine_home(paths, ctx.log) if not failed and not retry else []
+    # (task F1) a transient copy of one of our names (STATE.JSON.tmp: an antivirus or indexer scanning what was just
+    # deleted) is waited for, at most 2 s, before deciding what is left; it is never deleted
+    left = base.wait_for_transients(paths.whynot)
+    foreign = [n for n in foreign if n in left or not base.transient_copy(n)]
     names = set(os.listdir(paths.whynot))  # exact names: lexists would also match the editor's `Bin` on NTFS
     later = [paths.whynot / n for n in DEFERRED if n in names]
     rest = [n for n in os.listdir(paths.whynot) if n not in DEFERRED and n != DEFER_LIST]
@@ -618,6 +622,7 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
                 base._unlink(str(defer_file))
             if not rest and not linked:
                 os.rmdir(paths.whynot)
+                base.wait_gone(paths.whynot)  # (task F1) a scanner may keep the name listed a moment longer
     except OSError as e:
         failed.append(f"{DEFER_LIST} ({e})")
     notes = [f"deleted {len(removed)} items of {paths.whynot}"]

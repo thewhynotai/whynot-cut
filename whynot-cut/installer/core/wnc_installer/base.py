@@ -250,6 +250,45 @@ HOME_ROOTS = ("Desktop", "Documents", "Downloads")  # with the user folder itsel
 SUBFOLDER = "WhyNotCut"
 
 
+TRANSIENT_WAIT_S = 2.0
+
+
+def transient_copy(name: str) -> bool:
+    """Task F1: `<one of WhyNot Cut's own top-level names>.tmp`, case ignored (STATE.JSON.tmp) - what an antivirus or
+    indexer scanning a file the uninstall has just written or deleted can leave beside it for a moment. Nothing of
+    WhyNot Cut writes such a name. It is only ever waited for (wait_for_transients), never deleted."""
+    low = name.lower()
+    return low.endswith(".tmp") and low[:-4] in {n.lower() for n in ENGINE_LAYOUT + ENGINE_KEPT + (OPTIONS_FILE,)}
+
+
+def wait_for_transients(folder, limit: float = TRANSIENT_WAIT_S) -> list:
+    """The entries of `folder` (task F1: the uninstall's final "what is left" check), listed again every 0.1 s while
+    one of them looks like a transient copy of one of our names (transient_copy), at most `limit` seconds. [] when
+    the folder cannot be read."""
+    deadline = time.monotonic() + limit
+    while True:
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            return []
+        if not any(transient_copy(n) for n in names) or time.monotonic() >= deadline:
+            return names
+        time.sleep(0.1)
+
+
+
+def wait_gone(path, limit: float = TRANSIENT_WAIT_S) -> bool:
+    """Task F1: after a delete that succeeded, Windows keeps listing the name until the last program holding it (an
+    antivirus or indexer scanning what was just deleted) lets go. Wait for that, at most `limit` seconds; True once
+    the name is gone."""
+    deadline = time.monotonic() + limit
+    while os.path.lexists(path):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
+    return True
+
+
 def is_engine_entry(name: str) -> bool:
     """A top-level name WhyNot Cut puts in an engine home (ENGINE_LAYOUT / its prefixes), compared EXACTLY (case
     too: `Bin` is the editor's, not ours); not models/, library/ or the pointer, which have their own rules."""
@@ -1240,11 +1279,23 @@ def atomic_write_bytes(path, data: bytes, mode: Optional[int] = None) -> None:
             os.chmod(tmp, mode)
         _replace(tmp, path)
     finally:
-        if tmp.exists():
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
+        _drop_tmp(tmp)
+
+
+def _drop_tmp(tmp: Path, tries: int = 6) -> None:
+    """Remove a leftover atomic-write tmp, retried briefly like _replace (task F1: an antivirus or indexer can hold a
+    fresh file for a moment); a last failure is ignored (the writer's own error, if any, matters more)."""
+    for i in range(tries):
+        if not os.path.lexists(tmp):
+            return
+        try:
+            os.unlink(tmp)
+            return
+        except PermissionError:
+            if i < tries - 1:
+                time.sleep(0.1 * (i + 1))
+        except OSError:
+            return
 
 
 def atomic_write_json(path, obj) -> None:

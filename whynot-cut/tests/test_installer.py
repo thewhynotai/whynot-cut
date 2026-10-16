@@ -6894,6 +6894,122 @@ class TestRound7(unittest.TestCase):
         self.assertIn(base.MODELS_LINK_AR, r.detail)
 
 
+class TestF1(unittest.TestCase):
+    """Task F1: an uninstall leftover under load (an entry STATE.JSON.tmp in the engine home after --remove-engine)."""
+
+    def test_atomic_write_retries_removing_its_tmp(self):
+        # (4) an antivirus or indexer may hold the fresh tmp file a moment: its removal is retried like _replace
+        with TempDir() as td:
+            target = Path(td) / "state.json"
+            held = {"n": 0}
+            real_unlink = os.unlink
+
+            def flaky(p, *a, **k):
+                if str(p).endswith(".tmp") and held["n"] < 3:
+                    held["n"] += 1
+                    raise PermissionError(13, "held by a scanner", str(p))
+                return real_unlink(p, *a, **k)
+
+            with mock.patch.object(base, "_replace", side_effect=PermissionError(13, "locked")), \
+                    mock.patch("os.unlink", flaky):
+                with self.assertRaises(PermissionError):
+                    base.atomic_write_bytes(target, b"{}")
+            self.assertEqual(held["n"], 3)
+            self.assertEqual(os.listdir(td), [])
+
+    def remove_engine_with(self, home: Path, extra: str, gone_after) -> tuple:
+        eng = home / "Engine"
+        touch(eng / "state.json", GENUINE_STATE)
+        touch(eng / "runtimes" / "r-1" / "pyvenv.cfg", b"")
+        tmpf = touch(eng / extra, b'{"schema": 1}')
+        if gone_after is not None:  # vanishes on its own a moment after the step listed it (a scanner's copy)
+            t = threading.Timer(gone_after, lambda: os.path.lexists(tmpf) and os.unlink(tmpf))
+            self.addCleanup(t.cancel)
+            real = uninstall_module()._delete_child
+
+            def delete_child(*a, **k):
+                if not t.is_alive() and not t.finished.is_set():
+                    t.start()
+                return real(*a, **k)
+
+            patch = mock.patch.object(uninstall_module(), "_delete_child", delete_child)
+        else:
+            patch = contextlib.nullcontext()
+        ctx = make_ctx(home, {"schema": 1}, SK, engine_home=eng, remove_engine=True, remove_models=False)
+        ctx.log.path = None
+        t0 = time.monotonic()
+        with patch:
+            r = uninstall_module().step_engine(ctx)
+        return eng, r, time.monotonic() - t0
+
+    def test_a_transient_copy_of_our_name_is_waited_for_and_never_deleted(self):
+        # (2) STATE.JSON.tmp: the name of one of ours, `.tmp`, case ignored - an antivirus or indexer copy that goes
+        # away on its own: the final "what is left" check waits for it (at most 2 s) instead of keeping the folder
+        with TempDir() as td:
+            h = Path(td)
+            eng, r, _s = self.remove_engine_with(h, "STATE.JSON.tmp", 0.5)
+            self.assertEqual(r.status, "ok", r.detail)
+            self.assertFalse(eng.exists(), r.detail)
+            self.assertNotIn("STATE.JSON.tmp", r.detail)
+        # one that stays is never deleted: kept and listed, after at most about 2 s
+        with TempDir() as td:
+            h = Path(td)
+            eng, r, secs = self.remove_engine_with(h, "Current.TMP", None)
+            self.assertEqual(os.listdir(eng), ["Current.TMP"], r.detail)
+            self.assertIn("Current.TMP", r.detail)
+            self.assertLess(secs, 4)
+        # any other name is not waited for
+        with TempDir() as td:
+            h = Path(td)
+            eng, r, secs = self.remove_engine_with(h, "notes.tmp", None)
+            self.assertEqual(os.listdir(eng), ["notes.tmp"], r.detail)
+            self.assertLess(secs, 1.5)
+        for name in ("STATE.JSON.tmp", "state.json.tmp", "Current.tmp", "models.TMP", "plugin-options.json.tmp"):
+            self.assertTrue(base.transient_copy(name), name)
+        for name in ("notes.tmp", ".state.json.123.tmp", "state.json", "state.json.tmp.bak", "x.state.json.tmp"):
+            self.assertFalse(base.transient_copy(name), name)
+
+    def test_an_engine_home_still_listed_after_its_delete_is_waited_for(self):
+        # the same family, seen in a full run under load: os.rmdir succeeded, but Windows still lists the folder until
+        # the program holding it (an antivirus or indexer) lets go; the step waits for that (at most 2 s)
+        with TempDir() as td:
+            h = Path(td)
+            eng = h / "Engine"
+            touch(eng / "state.json", GENUINE_STATE)
+            touch(eng / "logs" / "install-1.log", b"x")
+            real_rmdir = os.rmdir
+            timers = []
+
+            def pending(p, *a, **k):
+                if os.path.normcase(str(p)) != os.path.normcase(str(eng)):
+                    return real_rmdir(p, *a, **k)
+                t = threading.Timer(0.5, real_rmdir, [p])  # the name goes a moment after the delete succeeded
+                timers.append(t)
+                t.start()
+
+            ctx = make_ctx(h, {"schema": 1}, SK, engine_home=eng, remove_engine=True, remove_models=False)
+            ctx.log.path = None
+            with mock.patch.object(uninstall_module().os, "rmdir", pending):
+                r = uninstall_module().step_engine(ctx)
+            listed = os.listdir(h)
+            for t in timers:
+                t.join(5)
+            self.assertEqual(r.status, "ok", r.detail)
+            self.assertEqual(len(timers), 1)
+            self.assertEqual(listed, [], r.detail)
+
+    def test_the_bootstraps_know_the_same_names(self):
+        want = {n.lower() for n in base.ENGINE_LAYOUT + base.ENGINE_KEPT + (base.OPTIONS_FILE,)}
+        ps = (CORE / "bootstrap.ps1").read_text(encoding="utf-8")
+        m = re.search(r"\$transient = @\(([^)]*)\)", ps)
+        self.assertIsNotNone(m)
+        self.assertEqual({x.strip().strip("'").lower() for x in m.group(1).replace("\n", " ").split(",")}, want)
+        sh = (CORE / "bootstrap.sh").read_text(encoding="utf-8")
+        m = re.search(r'transient_names="([^"]*)"', sh)
+        self.assertIsNotNone(m)
+        self.assertEqual(set(m.group(1).split()), want)
+
+
 def _install_size_text(fx, plat: str, skip=("model", "launch"), git_missing=None) -> str:
     sy = system_module()
     gm = plat.startswith("win") if git_missing is None else git_missing
@@ -7509,6 +7625,41 @@ class _CountdownCases:
         self.assertEqual(r.returncode, 2, out)
         self.assertIn("already holds other files", out)
         self.assertEqual(snapshot_tree(target), before, out)
+
+    def test_f1_the_deferred_delete_waits_for_a_transient_copy(self):
+        # task F1 (2): STATE.JSON.tmp (a scanner's copy of one of our names) still there when python/ and bin/ are
+        # gone: the emptiness check waits for it (at most 2 s); it is never deleted, and nothing else is waited for
+        for extra, gone in (("STATE.JSON.tmp", True), ("STATE.JSON.tmp", False), ("notes.tmp", False)):
+            with self.subTest(extra=extra, gone=gone):
+                h = self.home
+                eng = h / ".whynot-cut"
+                touch(eng / "python" / "p.txt", b"x")
+                touch(eng / "bin" / "uv", b"x")
+                tmpf = touch(eng / extra, b"{}")
+                listed = self.native(eng)
+                (eng / DEFER_LIST).write_text(listed + self.SEP + "python\n" + listed + self.SEP + "bin\n" + listed
+                                              + "\n", encoding="utf-8")
+                stop = threading.Event()
+
+                def vanish():  # a moment after python/ and bin/ went, as a scanner's copy would
+                    while not stop.is_set() and (eng / "bin").exists():
+                        time.sleep(0.02)
+                    time.sleep(0.4)
+                    if not stop.is_set() and gone and os.path.lexists(tmpf):
+                        os.unlink(tmpf)
+
+                th = threading.Thread(target=vanish, daemon=True)
+                th.start()
+                r = self.run_deferred(h)
+                stop.set()
+                th.join(5)
+                out = r.stdout + r.stderr
+                self.assertFalse((eng / "python").exists(), out)
+                if gone:
+                    self.assertFalse(eng.exists(), out)
+                else:
+                    self.assertEqual(os.listdir(eng), [extra], out)  # never deleted
+                    shutil.rmtree(eng)
 
     def test_a_bad_countdown_hook_value_is_ignored(self):
         r = self.inst(self.home, "dry", env=self.env(WNC_TEST_KEYS="x", WNC_TEST_COUNTDOWN_S="soon"))

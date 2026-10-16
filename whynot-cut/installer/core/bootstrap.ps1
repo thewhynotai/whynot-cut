@@ -486,6 +486,24 @@ param(
         }
         try {
             [IO.File]::Delete($list)
+            if ($homeToo -and (-not $failed) -and (-not $linked) -and [IO.Directory]::Exists($root)) {
+                # (task F1) an entry that looks like a transient copy of one of WhyNot Cut's own top-level names
+                # (<name>.tmp, case ignored: STATE.JSON.tmp from an antivirus or indexer) is waited for, at most 2 s;
+                # it is never deleted (the core's base.transient_copy; the same names, tests/test_installer.py)
+                $transient = @('.delete-after-exit', 'ae-capabilities.json', 'ae-probe', 'ae-queue', 'ae-scripts', 'bench',
+                    'bin', 'bridge', 'cache', 'cuda', 'current', 'downloads', 'ffmpeg', 'fonts', 'library', 'logs',
+                    'marketplace', 'marketplace.new', 'marketplace.prev', 'models', 'plugin-options.json',
+                    'ppro-queue', 'ppro-scripts', 'python', 'runtimes', 'serve', 'state', 'state.json', 'tmp',
+                    'venv')
+                for ($i = 0; $i -lt 10; $i++) {
+                    $left = @([IO.Directory]::GetFileSystemEntries($root) | ForEach-Object { [IO.Path]::GetFileName($_) })
+                    $copies = @($left | Where-Object {
+                            $_.ToLowerInvariant().EndsWith('.tmp') -and
+                            ($transient -contains $_.Substring(0, $_.Length - 4).ToLowerInvariant()) })
+                    if ($copies.Count -eq 0) { break }
+                    Start-Sleep -Milliseconds 200
+                }
+            }
             if ($homeToo -and (-not $failed) -and (-not $linked) -and [IO.Directory]::Exists($root) -and
                 (@([IO.Directory]::GetFileSystemEntries($root)).Count -eq 0)) {
                 [IO.Directory]::Delete($root, $false)

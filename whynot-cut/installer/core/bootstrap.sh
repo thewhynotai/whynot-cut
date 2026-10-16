@@ -429,6 +429,26 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
     fi
   done < "$list"
   rm -f "$list"
+  if [ -n "$home_too" ] && [ -z "$failed" ] && [ -z "$linked" ] && [ -d "$root" ]; then
+    # (task F1) an entry that looks like a transient copy of one of WhyNot Cut's own top-level names (<name>.tmp, case
+    # ignored: STATE.JSON.tmp from an antivirus or indexer) is waited for, at most 2 s; it is never deleted (the
+    # core's base.transient_copy; the same names, tests/test_installer.py)
+    transient_names=".delete-after-exit ae-capabilities.json ae-probe ae-queue ae-scripts bench bin bridge cache cuda current downloads ffmpeg fonts library logs marketplace marketplace.new marketplace.prev models plugin-options.json ppro-queue ppro-scripts python runtimes serve state state.json tmp venv"
+    i=0
+    while [ $i -lt 10 ]; do
+      copies=""
+      for e in "$root"/* "$root"/.[!.]* "$root"/..?*; do
+        [ -e "$e" ] || [ -L "$e" ] || continue
+        low="$(printf '%s' "${e##*/}" | tr 'A-Z' 'a-z')"
+        case "$low" in
+          *.tmp) case " $transient_names " in *" ${low%.tmp} "*) copies=1 ;; esac ;;
+        esac
+      done
+      [ -n "$copies" ] || break
+      sleep 0.2
+      i=$((i + 1))
+    done
+  fi
   if [ -n "$home_too" ] && [ -z "$failed" ] && [ -z "$linked" ] && rmdir "$root" 2>/dev/null; then
     printf 'deleted %s\n' "$root"
   fi
