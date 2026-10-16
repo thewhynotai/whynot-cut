@@ -412,6 +412,15 @@ class ReportMainTests(unittest.TestCase):
             fh.write('{"t": %s, "mark": "cmd.first_progress", "ms": 5}\n' % ("9" * 400))
         self.assertEqual(self.run_main()[0], 0)
 
+    def test_an_engine_home_that_cannot_be_found_is_exit_3_not_a_traceback(self):
+        """Executor review P2: with no --home, an OSError while finding the engine home is an internal error (3)."""
+        from lib import plat
+        out = io.StringIO()
+        with mock.patch.object(plat, "engine_home", side_effect=OSError("no home")):
+            code = perf_report.main([], out=out)
+        self.assertEqual(code, 3, out.getvalue())
+        self.assertIn("internal error", out.getvalue())
+
 
 # ------------------------------------------------------------------------------------------------------ contract
 def perf_msg(*marks):

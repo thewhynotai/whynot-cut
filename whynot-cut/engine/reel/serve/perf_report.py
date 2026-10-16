@@ -127,16 +127,16 @@ def main(argv=None, *, out=None) -> int:
         except (ValueError, OverflowError, OSError):
             print(f"--since is not an ISO time: {a.since[:64]!r}", file=out)
             return 2
-    if a.home:
-        home = Path(a.home)
-    else:
-        try:
-            from lib.plat import engine_home
-        except ImportError:                          # run as reel.serve.perf_report from engine/: put engine/reel first
-            sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-            from lib.plat import engine_home
-        home = engine_home()
-    try:
+    try:                                             # finding the home is inside: an OSError there is a crash (3) too
+        if a.home:
+            home = Path(a.home)
+        else:
+            try:
+                from lib import plat
+            except ImportError:                      # run as reel.serve.perf_report from engine/: put engine/reel first
+                sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+                from lib import plat
+            home = plat.engine_home()
         rows = report(perf.read(home, since))
         print(format_table(rows), file=out)
     except Exception as e:                           # noqa: BLE001  a crash is never a budget miss
