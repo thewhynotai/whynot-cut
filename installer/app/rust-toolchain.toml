@@ -1,0 +1,7 @@
+# Pinned by ET1-16 (S0 spike, 2026-10-16). 1.99.1 built a Tauri 2.12.4 shell on this PC
+# (per-user rustup, x86_64-pc-windows-gnullvm host). Tauri 2.12.x needs Rust >= 1.90.
+# No `targets` or `components` here on purpose: CI (windows-latest, MSVC; macos-14) picks its own host target,
+# and the spike was built with the "minimal" profile. Add clippy/rustfmt only when a CI step needs them.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
